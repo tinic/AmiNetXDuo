@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.26.1
+
+- The serial diagnostic log is a build option again, and no shipping build carries it. `bsdsocket.library` stays resident for the whole life of the machine, and 27,948 bytes of it -- 7.2 per cent -- were sentences aimed at a serial port that on almost every machine has nothing on the other end: 389,376 with them and 361,428 without, `usergroup.library` 7,840 and 7,172, `tls.library` 195,708 and 195,568. `anxnet.device` is 38,620 either way, because `src/netdev` has no `AMI_ERROR`, `AMI_WARN` or `AMI_INFO` call in it. What a shipped image carries instead is the event ring, which is a code and a value in BSS at no image cost, and `ShowNetStatus` holds the words for it. A build for a bug report is `-DAMINETXDUO_LOG=ON`, and the new `log` cross arm is what keeps that build compiling; `tools/check-no-diag-strings.sh` now reads the option out of the build cache and fails a shipping library that carries a sentence as readily as a logging one that carries none
+
 ## 0.26.0
 
 - An interface taken down comes back up. `Offline` took 15.5 seconds and left the SANA-II readers running, so `Online` refused and the machine had to be rebooted to get its network back. The reader drain took the IP protection mutex and waited forever for it, while the stop path held that same mutex across the whole driver call and waited five seconds a reader for the readers to exit -- so each waited on the other and only the join's timeout broke it, with the readers still running. The drain now retries for a tick at a time and returns when it is told to stop, which is the one thing it has nothing left to do for

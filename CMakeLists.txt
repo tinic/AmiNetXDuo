@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 # plain vX.Y.Z.
 #
 # 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.26.0 LANGUAGES C ASM)
+project(AmiNetXDuo VERSION 0.26.1 LANGUAGES C ASM)
 
 # -Os, AFTER project(), because nothing earlier can make it stick.
 #
@@ -229,23 +229,28 @@ if(AMINETXDUO_AREXX)
     add_compile_definitions(AMINETXDUO_AREXX)
 endif()
 
-# THE SERIAL DIAGNOSTIC LOG IS NOT AN OPTION.  AMI_ERROR, AMI_WARN and
-# AMI_INFO are compiled into every image, shipping ones included.
+# The serial diagnostic log: AMI_ERROR, AMI_WARN and AMI_INFO.
 #
-# It used to be -DAMINETXDUO_LOG, OFF by default, on the argument that nothing
-# on a normal machine captures the serial port and the sentences are the
-# largest single thing a build can drop.  Both halves were wrong.  Sashimi and
-# a null modem both capture RawPutChar, and a user who has hit a fault has
-# nothing to send and we have nothing to ask for -- the one build that could
-# have answered was the one nobody was running.  The size is a fact and it is
-# reported in the release notes.
+# OFF in every shipping build.  bsdsocket.library and anxnet.device stay
+# RESIDENT for the life of the machine, and the sentences cost the library
+# 27,948 bytes -- 7.2 per cent of it -- for a serial port that on almost every
+# machine has nothing on the other end.  Measured 0.26.0: 389,376 with them,
+# 361,428 without, anxnet.device 38,620 either way because src/netdev has no
+# AMI_ call in it.
 #
-# What is compiled in is not what is printed.  ami_log_level() starts at
-# AMI_LOG_WARN, so a healthy machine writes nothing; ENV:ANXDLOGLEVEL raises it
-# without a rebuild (src/config/config_file.c).  AMI_DEBUG and AMI_TRACE stay
-# behind AMINETXDUO_DEBUG, which a Debug build sets (cmake/toolchain-m68k-
-# amigaos.cmake): those are on per-packet paths and RawPutChar spins on the
-# serial hardware.
+# 0.26.0 shipped them unconditionally on the argument that a user who has hit a
+# fault must have something to send.  That argument holds and it is answered by
+# the event ring below, which an image carries in BSS at no image cost and
+# ShowNetStatus reads.  The serial tier is the second copy, in prose, in RAM.
+#
+# -DAMINETXDUO_LOG=ON is how a build for a bug report is made, and the `log`
+# cross arm keeps it compiling.  AMINETXDUO_LOG_LEVEL is where the runtime
+# level starts either way; ENV:ANXDLOGLEVEL still moves it (src/config/
+# config_file.c).  AMI_DEBUG and AMI_TRACE stay behind AMINETXDUO_DEBUG.
+option(AMINETXDUO_LOG "Build the serial diagnostic log" OFF)
+if(AMINETXDUO_LOG)
+    add_compile_definitions(AMINETXDUO_LOG)
+endif()
 
 # The event ring, which is what a shipped binary has instead of that log.  A
 # code, an interface and a value per event, in BSS, with the sentences in

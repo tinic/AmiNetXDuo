@@ -11,13 +11,11 @@
 # library says.  The first scan below fails on a table sentence found in an
 # image.
 #
-# THE ami_log() TIER must be INSIDE bsdsocket.library.  AMI_ERROR, AMI_WARN and
-# AMI_INFO used to need -DAMINETXDUO_LOG, which defaulted OFF, so a user who
-# hit a fault in the field had nothing to send and we had nothing to ask for.
-# They are unconditional now (include/aminetxduo/compat.h) and what is PRINTED
-# is a runtime level.  The second scan fails when a shipped library holds none
-# of those sentences, which is what a regression to a compile-time gate looks
-# like from outside.
+# THE ami_log() TIER must match AMINETXDUO_LOG as the build was configured.
+# Off -- every shipping build -- bsdsocket.library must hold NONE of those
+# sentences: it stays resident and they are 27,948 bytes of it.  On, it must
+# hold some, or the bug-report build captures nothing.  The second scan reads
+# the answer out of CMakeCache.txt and fails either way round.
 #
 # SPDX-License-Identifier: MIT
 
@@ -154,15 +152,27 @@ if [ "$rc" = 0 ]; then
  scanned=${names#,}${absent:+ absent=${absent#,}}"
 fi
 
-# ------------------------------------------------ and the tier that DOES ship
+# ----------------------------------------- and the tier that ships on request
 #
 # Every AMI_ERROR/AMI_WARN/AMI_INFO format string in the tree, and how many are
-# in bsdsocket.library.  Not all of them, and the count is not the assertion: a
-# sentence belongs to whichever component it is written in, and -Os and LTO
-# drop the ones on paths the linker proved unreachable.  ZERO is the failure,
-# and zero is exactly what a compile-time gate turned back off produces.
+# in bsdsocket.library.  The assertion is against AMINETXDUO_LOG as the build
+# was CONFIGURED, read from the cache rather than assumed, because both answers
+# are a defect in the other build: sentences in a shipping library are 27,948
+# resident bytes nobody asked for, and none in a -DAMINETXDUO_LOG=ON build is
+# the option silently doing nothing.
+#
+# The count is not the assertion either way -- a sentence belongs to whichever
+# component it is written in, and -Os and LTO drop the ones on paths the linker
+# proved unreachable.  Zero against not-zero is.
 
 LIB="$BUILD/src/bsdsocket/bsdsocket.library"
+CACHE="$BUILD/CMakeCache.txt"
+
+WANT=OFF
+if [ -r "$CACHE" ]; then
+    WANT=$(sed -n 's/^AMINETXDUO_LOG:BOOL=//p' "$CACHE" | head -1)
+    WANT=${WANT:-OFF}
+fi
 
 if [ ! -f "$LIB" ]; then
     echo "diag_tier=skipped reason=no_library image=$LIB"
@@ -215,15 +225,31 @@ if [ "$total" = 0 ]; then
     exit "$rc"
 fi
 
-if [ "$found" = 0 ]; then
-    echo "diag_tier=MISSING found=0 of=$total image=bsdsocket.library"
-    echo "  bsdsocket.library holds not one AMI_ERROR/AMI_WARN/AMI_INFO"
-    echo "  sentence, so a user who hits a fault has nothing to capture."
-    echo "  The three are unconditional in include/aminetxduo/compat.h; if"
-    echo "  they have been put back behind a build option, that is the defect."
-    rc=1
-else
-    echo "diag_tier=present found=$found of=$total image=bsdsocket.library"
-fi
+case "$WANT" in
+    ON|on|1|TRUE|true|YES|yes)
+        if [ "$found" = 0 ]; then
+            echo "diag_tier=MISSING found=0 of=$total image=bsdsocket.library"
+            echo "  AMINETXDUO_LOG=ON and the library holds not one sentence,"
+            echo "  so the option compiled nothing in and a bug-report build"
+            echo "  would capture nothing."
+            rc=1
+        else
+            echo "diag_tier=present log=ON found=$found of=$total image=bsdsocket.library"
+        fi
+        ;;
+    *)
+        if [ "$found" != 0 ]; then
+            echo "diag_tier=LEAKED found=$found of=$total image=bsdsocket.library"
+            echo "  AMINETXDUO_LOG is off and the library still carries"
+            echo "  $found sentence(s).  bsdsocket.library stays resident, so"
+            echo "  these are bytes held for the life of the machine.  A call"
+            echo "  reaching ami_log() outside AMI_ERROR/AMI_WARN/AMI_INFO is"
+            echo "  what does it."
+            rc=1
+        else
+            echo "diag_tier=absent log=OFF of=$total image=bsdsocket.library"
+        fi
+        ;;
+esac
 
 exit "$rc"

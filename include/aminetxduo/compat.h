@@ -105,19 +105,24 @@ void ami_rt_cpu_select(int have_68020, int have_mulul);
 #  define AMI_TRACE(...)  ((void)0)
 #endif
 /*
- * These three are in EVERY build, shipped ones included.  A user who hits a
- * fault in the field has to be able to send us something, and a diagnostic
- * that only a rebuild can reach is not one.  What is compiled in costs the
- * image its sentences; what is PRINTED is ami_log_level(), which starts at
- * AMI_LOG_WARN, so a shipped machine writes nothing to the serial port until
- * something goes wrong.
+ * AMINETXDUO_LOG off compiles the three out; AMINETXDUO_LOG_LEVEL does not.
+ * `if (0)` rather than `((void)0)` so arguments stay type-checked and used.
  *
- * AMI_DEBUG and AMI_TRACE above stay behind AMINETXDUO_DEBUG.  Those sit on
- * per-packet paths, and RawPutChar spins on the serial hardware.
+ * bsdsocket.library and anxnet.device stay RESIDENT, and 27,948 bytes of
+ * sentences in the library is 7.2 per cent of a machine's network stack held
+ * for a serial port that is not connected.  The event ring is what a shipped
+ * image carries instead: a code and a value in BSS, no image bytes, and
+ * ShowNetStatus holds the words.
  */
-#define AMI_ERROR(...)  ami_log(AMI_LOG_ERROR, __VA_ARGS__)
-#define AMI_WARN(...)   ami_log(AMI_LOG_WARN,  __VA_ARGS__)
-#define AMI_INFO(...)   ami_log(AMI_LOG_INFO,  __VA_ARGS__)
+#ifdef AMINETXDUO_LOG
+#  define AMI_ERROR(...)  ami_log(AMI_LOG_ERROR, __VA_ARGS__)
+#  define AMI_WARN(...)   ami_log(AMI_LOG_WARN,  __VA_ARGS__)
+#  define AMI_INFO(...)   ami_log(AMI_LOG_INFO,  __VA_ARGS__)
+#else
+#  define AMI_ERROR(...)  do { if (0) ami_log(AMI_LOG_ERROR, __VA_ARGS__); } while (0)
+#  define AMI_WARN(...)   do { if (0) ami_log(AMI_LOG_WARN,  __VA_ARGS__); } while (0)
+#  define AMI_INFO(...)   do { if (0) ami_log(AMI_LOG_INFO,  __VA_ARGS__); } while (0)
+#endif
 
 /* --------------------------------------------------------------- utilities */
 

@@ -72,7 +72,7 @@ jobs:
       fail-fast: false
       matrix:
         config: [nolto, noipv6, nomdns, notls, nomcast, noasm, nonet68kasm,
-                 norxverify, nosack, nots, nowscale, census, minimal, if2,
+                 norxverify, nosack, nots, nowscale, log, census, minimal, if2,
                  instr, tcpextra, pathswap, green]
     steps:
       - uses: actions/checkout@v4

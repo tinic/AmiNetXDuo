@@ -54,6 +54,12 @@ CROSS_CONFIGS=(
     "nosack:-DAMINETXDUO_TCP_SACK=OFF"
     "nots:-DAMINETXDUO_TCP_TIMESTAMP=OFF"
     "nowscale:-DAMINETXDUO_TCP_WINDOW_SCALING=OFF"
+    # The serial diagnostic log, which every shipping build leaves out because
+    # bsdsocket.library stays resident and the sentences are 27,948 bytes of
+    # it.  This is the only arm that compiles them, and the only place
+    # check-no-diag-strings.sh sees its ON answer; without it a bug-report
+    # build could stop working and nothing would say so.
+    "log:-DAMINETXDUO_LOG=ON"
     # The allocation census. Off in every other arm, so this is the only place
     # its side table, its redirect of ami_alloc and the reports it hangs off
     # bsd_lib_expunge are compiled at all. It is the instrument that finds a
@@ -917,6 +923,21 @@ stage_cross() {
             else
                 cat "$BUILD/$name-diag-strings.log"
                 fail "a diagnostic sentence is in a shipped image ($name)"
+            fi
+
+            # And how big the resident images came out.  bsdsocket.library and
+            # anxnet.device are open for the life of the machine, so their
+            # size is RAM; nothing above measures it, which is how 0.26.0
+            # shipped 27,948 bytes of serial-log sentences past a green gate.
+            if tools/check-image-size.sh "$BUILD/$name" \
+                    > "$BUILD/$name-image-size.log" 2>&1; then
+                note "$(sed -n 's/^image_size=PASS /resident images: /p' \
+                      "$BUILD/$name-image-size.log" | head -1)"
+            elif grep -q 'image_size=skipped' "$BUILD/$name-image-size.log"; then
+                : # a build that does not ship, or has no images
+            else
+                cat "$BUILD/$name-image-size.log"
+                fail "a resident image is over its budget ($name)"
             fi
 
             # And that every image the configuration produced would actually
