@@ -348,6 +348,13 @@ jobs:
 
       # Always uploaded, tag or not, so workflow_dispatch exercises packaging
       # without publishing.
+      - name: CHANGELOG.md carries facts, not prose
+        # NOT inside "Publish the release": that step is tag-only, so the gate
+        # would never run on a workflow_dispatch and could not be validated
+        # without cutting a real release.  The published notes are generated
+        # from this file, so it is checked on every run of this workflow.
+        run: tools/check-changelog-prose.sh
+
       - name: Upload the archive as a workflow artefact
         uses: actions/upload-artifact@v4
         with:
@@ -372,10 +379,6 @@ jobs:
             echo "::notice::${GITHUB_REF#refs/tags/} is already published; leaving it alone"
             exit 0
           fi
-
-          tools/check-changelog-prose.sh || {
-            echo "::error::CHANGELOG.md carries prose; the notes are built from it"
-            exit 1; }
 
           notes=$(mktemp)
           {
