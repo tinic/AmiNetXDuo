@@ -58,9 +58,11 @@ if(AMINETXDUO_TCPDEVICE)
     list(APPEND BSDSOCKET_SOURCES tcp_handler.c)
 endif()
 
-# mcast.c is the RFC 1112 membership surface. It is the only thing that calls
-# NetX Duo's IGMP services, so leaving it out is what keeps the nx_igmp_*
-# objects out of the link, see the floor tier in dist/make-dist.sh.
+# mcast.c is the RFC 1112 membership surface. It is the only thing of OURS that
+# calls NetX Duo's IGMP services -- but leaving it out does not by itself keep
+# the nx_igmp_* objects out of the link, because two vendored core files call
+# into IGMP unconditionally. NX_DISABLE_IGMP in the top-level CMakeLists is what
+# finishes the job; see the comment there.
 if(AMINETXDUO_MULTICAST)
     list(APPEND BSDSOCKET_SOURCES mcast.c)
 endif()

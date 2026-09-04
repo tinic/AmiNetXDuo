@@ -350,6 +350,16 @@ endif()
 option(AMINETXDUO_MULTICAST "Build multicast membership (IGMP, IPv6 groups)" ON)
 if(AMINETXDUO_MULTICAST)
     add_compile_definitions(AMINETXDUO_MULTICAST)
+else()
+    # Leaving mcast.c out is NOT enough to keep IGMP out of the link, whatever
+    # src/bsdsocket/CMakeLists.txt used to say: nx_ipv4_packet_receive.c calls
+    # _nx_igmp_multicast_check on every received datagram and
+    # nx_ip_interface_detach.c calls _nx_igmp_multicast_interface_leave_internal,
+    # both unconditionally, and between them they pulled 736 bytes of IGMP into
+    # a build that cannot join a group.  The fork guards those two call sites on
+    # NX_DISABLE_IGMP; with no group ever joined the check answered false and the
+    # leave loop found nothing, so what is compiled out is what could not run.
+    add_compile_definitions(NX_DISABLE_IGMP)
 endif()
 
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
