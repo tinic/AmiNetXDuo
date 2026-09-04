@@ -1562,9 +1562,15 @@
 
       a2065      ariadne     ariadne2    hydra       lanrover
       xsurf      xsurf100    xsurf500    pcmcia      3c589
+      3ccfem556  3cxem556
 
   pcmcia is any NE2000-compatible card in the slot of an A600 or A1200.
   3c589 is the 3Com EtherLink III, and has run on real hardware.
+  3ccfem556 and 3cxem556 are the Megahertz/3Com LAN+modem combo cards,
+  whose LAN half is an EtherLink III. The stack reads their card
+  information structure correctly; whether the card then comes up has
+  not been tried, because neither is here. A report either way is
+  wanted.
   xsurf500 has never been run on the hardware it is written for. A
   report of it working, or not working, is wanted.
 

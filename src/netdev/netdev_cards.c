@@ -123,6 +123,33 @@ const NetdevCard netdev_cards[] =
     { "3c589",   0x0101, 0x0589, 0x0300,     1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
       NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
+
+    /*
+     * The two Megahertz/3Com LAN+modem combo cards the CIS walk reaches.
+     * Function 0 of each is an EtherLink III -- the tuples they state say so,
+     * and tests/../test_netdev_cis.c carries their real per-function chains --
+     * so the core is the one the 3c589 above uses.  Without a row of their own
+     * netdev_card_by_cis() handed them to the NE2000 fallback, which is not
+     * what is in them, and the walk that had already parsed them correctly
+     * ended in a card that would not come up.
+     *
+     * reg_off is the same assumption the 3c589 row makes and matters less
+     * here: netdev_pcmcia.c takes the offset the card's own CISTPL_CFTABLE_ENTRY
+     * states over this number, and both of these state one.
+     *
+     * UNVERIFIED ON HARDWARE.  Neither card is on this network.  The CIS
+     * parse is covered by test_netdev_cis.c against their real tuples, and
+     * that is the whole of what is proven; whether an EtherLink III core
+     * drives function 0 once it is configured is not, and `run-hwcard.sh`
+     * against one of these cards is what would say.  Same standing as the
+     * xsurf500 row above, and the same reason it costs nothing to carry.
+     */
+    { "3ccfem556", 0x0101, 0x0556, 0x0300,   1,      0,
+      NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
+    { "3cxem556",  0x0101, 0x0035, 0x0300,   1,      0,
+      NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
 };
 
 const UWORD netdev_card_count =
