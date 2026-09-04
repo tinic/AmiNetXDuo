@@ -31,6 +31,7 @@ KEEP=0
 TERMINAL=0
 STATIC=0
 DRAWER=0
+INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
@@ -599,7 +600,12 @@ chmod 644 "$HD/S/User-Startup"
 # -D: the scripted drawer layout.  The Installer's radio pages cannot be driven
 # from outside (install/test/installdrive.c records what was tried), so the
 # marker file is how the drawer path is reachable by a test at all.
+# In the drawer layout the installed tree is one level down, so every
+# guest-relative path a check resolves has to start there. S:User-Startup is
+# NOT prefixed: it stays in S: whichever layout was chosen, which is the whole
+# point of the assigns.
 if [ "$DRAWER" = "1" ]; then
+    INST=AmiNetXDuo/
     : > "$HD/S/AmiNetXDuo-drawer"
     chmod 644 "$HD/S/AmiNetXDuo-drawer"
     echo "==> scripted drawer layout: S:AmiNetXDuo-drawer planted"
@@ -1010,8 +1016,8 @@ check_file() {
     fi
 }
 
-check_file Libs/bsdsocket.library
-check_file Libs/usergroup.library
+check_file "${INST}Libs/bsdsocket.library"
+check_file "${INST}Libs/usergroup.library"
 
 # WHICH OF THE TWO STACKS LANDED, by byte count against the archive's own two
 # copies.  Without this a -p "Minimal" run whose click missed the page would
@@ -1020,7 +1026,7 @@ check_file Libs/usergroup.library
 # page at all until installdrive.c learned DRIVE_PICK_LABEL, so `minimal` had
 # never been installed by any run.
 STACK_INSTALLED=unknown
-_stack_real=$(amiga_path Libs/bsdsocket.library || true)
+_stack_real=$(amiga_path "${INST}Libs/bsdsocket.library" || true)
 
 # EITHER COPY MAY BE ABSENT.  Libs/minimal/ is not in the archive this script
 # builds for itself -- it passes AMINETXDUO_DIST_NO_MINIMAL=1 to make-dist.sh
@@ -1061,10 +1067,10 @@ if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     fail=1
 fi
 for cmd in AddNetInterface Online Offline ShowNetStatus ping netstat host fetch; do
-    check_file "C/$cmd"
+    check_file "${INST}C/$cmd"
 done
-check_file Devs/NetInterfaces/eth0
-check_file Devs/Internet/name_resolution
+check_file "${INST}Devs/NetInterfaces/eth0"
+check_file "${INST}Devs/Internet/name_resolution"
 check_file S/User-Startup
 
 # ---------------------------------------- anxnet.device, into DEVS:Networks --
@@ -1075,8 +1081,8 @@ check_file S/User-Startup
 # installed from, because a stale driver of the right name in the right drawer
 # is the exact failure being gated against and it passes every weaker check.
 ANXNET_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxnet.device"
-ANXNET_INSTALLED=$(amiga_path Devs/Networks/anxnet.device 2>/dev/null || true)
-ANXNET_OLD=$(amiga_path Devs/Networks/anxnet.device.old 2>/dev/null || true)
+ANXNET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxnet.device" 2>/dev/null || true)
+ANXNET_OLD=$(amiga_path "${INST}Devs/Networks/anxnet.device.old" 2>/dev/null || true)
 
 if [ ! -f "$ANXNET_ARCHIVE" ]; then
     echo "  MISSING Devs/Networks/anxnet.device IN THE ARCHIVE"
@@ -1242,7 +1248,7 @@ echo
 echo "---- S:User-Startup ----"
 cat "$(amiga_path S/User-Startup 2>/dev/null)" 2>/dev/null || echo "(none)"
 echo "---- DEVS:NetInterfaces/eth0 ----"
-cat "$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null)" 2>/dev/null || echo "(none)"
+cat "$(amiga_path "${INST}Devs/NetInterfaces/eth0" 2>/dev/null)" 2>/dev/null || echo "(none)"
 
 # ---------------------------------------- did the STATIC branch run? ------
 #
@@ -1253,13 +1259,13 @@ cat "$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null)" 2>/dev/null || echo "(no
 # scenario was reported as a permanent SKIP to avoid, and it would come back
 # the first time the question's wording changed.
 if [ "$STATIC" = "1" ]; then
-    _if=$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null || true)
-    _res=$(amiga_path Devs/Internet/name_resolution 2>/dev/null || true)
+    _if=$(amiga_path "${INST}Devs/NetInterfaces/eth0" 2>/dev/null || true)
+    _res=$(amiga_path "${INST}Devs/Internet/name_resolution" 2>/dev/null || true)
     # The router goes in DEVS:Internet/routes as DEFAULT=, not in the
     # interface file as GATEWAY=: Install-AmiNetXDuo:1244-1255 writes it
     # there, and P_ask_ip's third prompt is what fills it.  Asserted where the
     # installer puts it, not where an interface file could also carry it.
-    _rt=$(amiga_path Devs/Internet/routes 2>/dev/null || true)
+    _rt=$(amiga_path "${INST}Devs/Internet/routes" 2>/dev/null || true)
     _get() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -1 | tr -d '\r' |
              sed 's/[[:space:]]*$//'; }
 
@@ -1322,7 +1328,7 @@ fi
 # worth having and is not the same claim.  card_config says which it is and
 # the two are never one line.
 INSTALLER_DEVICE=""
-IFACE_FILE=$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null || true)
+IFACE_FILE=$(amiga_path "${INST}Devs/NetInterfaces/eth0" 2>/dev/null || true)
 if [ -n "$IFACE_FILE" ] && [ -f "$IFACE_FILE" ]; then
     INSTALLER_DEVICE=$(sed -n 's/^DEVICE=//p' "$IFACE_FILE" | head -1 |
                        tr -d '\r' | sed 's/[[:space:]]*$//')
@@ -1709,7 +1715,12 @@ bad=0
 # stopped deciding it: every processor gets tls.library now, the 68000
 # included, and leaving encryption out is a feature choice.
 HAS_TLS=1
-[ -f "$HD/Libs/tls.library" ] || HAS_TLS=0
+# Through amiga_path and the layout prefix, because in the drawer layout
+# tls.library is at AmiNetXDuo/Libs and a literal $HD/Libs is simply not there
+# -- which read as "no tls.library here" against a run that had just made a
+# 31,287-byte https request with it.
+_tls_real=$(amiga_path "${INST}Libs/tls.library" 2>/dev/null || true)
+[ -n "$_tls_real" ] && [ -f "$_tls_real" ] || HAS_TLS=0
 
 report() {
     local label="$1" name="$2" rc
