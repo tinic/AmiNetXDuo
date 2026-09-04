@@ -17,6 +17,7 @@ version at the top when it merges.
 | Builds with multicast on | byte-identical, 361,404 either way |
 | Installer can put the stack in its own drawer (issue #9) | `Assign AmiNetXDuo:` + `LIBS:`/`C:`/`DEVS:` `ADD` in `S:User-Startup`; proven on a real Workbench 3.1 |
 | Scripted install: `S:AmiNetXDuo-drawer` selects the drawer layout with no prompt | any user level |
+| NetX Duo statistics nothing reads are no longer counted | full `bsdsocket.library` -1,328; minimal -1,136 |
 
 ## 0.26.2
 

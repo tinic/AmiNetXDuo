@@ -347,6 +347,28 @@ endif()
 # Duo.  port/netxduo-amiga/inc/nx_user.h says what that does and does not buy.
 #
 # Off is the floor tier's answer (dist/make-dist.sh's 68000-minimal drawer).
+# NetX Duo keeps a statistics counter set per protocol, and NOTHING IN THIS
+# TREE READS ONE.  Checked by name across the whole repository, third_party
+# excluded: nx_ip_total_packets_received, nx_ip_tcp_packets_sent,
+# nx_ip_udp_packets_received, nx_icmp_pings_sent, nx_arp_requests_sent and
+# their families are referenced nowhere.  What `netstat -s` and
+# `ShowNetStatus` print is our own ToolStats accounting, which is untouched.
+#
+# TWO FAMILIES ARE DELIBERATELY NOT HERE.  NX_DISABLE_PACKET_INFO: netstack.c
+# reads nx_packet_pool_invalid_releases into ms_PoolBadRelease.
+# NX_DISABLE_IP_INFO and NX_DISABLE_ICMP_INFO: tests/ipv6 asserts on them --
+# "FAIL the reassembly is counted" (ipv6_frag) and "a report below the minimum
+# link MTU is counted invalid" (ipv6_ptb). Both were caught by ctest and by
+# nothing that could be read: a counter a test reads is a counter in use.
+#
+# 1,904 bytes of the minimal library, on a machine that keeps it resident.
+add_compile_definitions(
+    NX_DISABLE_TCP_INFO
+    NX_DISABLE_UDP_INFO
+    NX_DISABLE_ARP_INFO
+    NX_DISABLE_RARP_INFO
+    NX_DISABLE_IGMP_INFO)
+
 option(AMINETXDUO_MULTICAST "Build multicast membership (IGMP, IPv6 groups)" ON)
 if(AMINETXDUO_MULTICAST)
     add_compile_definitions(AMINETXDUO_MULTICAST)
