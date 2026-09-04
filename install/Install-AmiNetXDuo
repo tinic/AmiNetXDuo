@@ -60,6 +60,21 @@
 (set S_DEVS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Devs")     "Devs"))
 (set S_DOCS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Docs")     "Docs"))
 (set S_EXAM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Examples") "Examples"))
+
+; --- where the installed files GO ----------------------------------------
+;
+; One name per destination instead of the string spelled at each copy, so a
+; layout other than "into the system" is a change to these four lines and not
+; to every copy in the file.  They are the system directories here, which is
+; what every install has done up to now and what this refactor deliberately
+; does not change: issue #9 asks for a drawer of its own with
+; `Assign LIBS: <drawer>/Libs ADD`, and that is the next commit, not this one.
+;
+; D_DEVS is the parent of Networks, NetInterfaces and Internet, so all three
+; move together if it moves.
+(set D_LIBS "LIBS:")
+(set D_C    "C:")
+(set D_DEVS "DEVS:")
 (set S_TERM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Terminal") "Terminal"))
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 
@@ -1134,7 +1149,7 @@
                "processor when it opens."))
   (help   @copylib-help)
   (source (tackon S_LIBS "bsdsocket.library"))
-  (dest   "LIBS:")
+  (dest   D_LIBS)
   (confirm)
   (optional "force"))
 
@@ -1142,7 +1157,7 @@
   (prompt "Installing usergroup.library into LIBS:")
   (help   @copylib-help)
   (source (tackon S_LIBS "usergroup.library"))
-  (dest   "LIBS:")
+  (dest   D_LIBS)
   (confirm)
   (optional "force"))
 
@@ -1237,7 +1252,7 @@
                    "it."))
       (help   H_ANXNET)
       (source S_ANXNET)
-      (dest   "DEVS:Networks")
+      (dest   (tackon D_DEVS "Networks"))
       (optional "force"))
   ))
 
@@ -1275,7 +1290,7 @@
                    "it costs nothing until then."))
       (help   @copylib-help)
       (source (tackon S_LIBS "tls.library"))
-      (dest   "LIBS:")
+      (dest   D_LIBS)
       (confirm)
       (optional "force"))
   ))
@@ -1334,7 +1349,7 @@
           "is worse than a few extra files "
           "in C:.  ssh and scp come with them.")
   (source S_C)
-  (dest   "C:")
+  (dest   D_C)
   ; (all), because a copyfiles from a DRAWER needs one of (all) or (pattern)
   ; and answers "Bad parameters for copying from drawer" without either.  It
   ; used to be (pattern "~(ssh.#?)"), keeping the per-CPU ssh.000/.020/.060 out
@@ -1376,7 +1391,7 @@
       (help   "This file describes one network card.  It gives the driver "
               "to open, and how the card gets its Internet address.  The "
               "name of the file is the name of the interface.")
-      (dest   (tackon "DEVS:NetInterfaces" IFNAME))
+      (dest   (tackon (tackon D_DEVS "NetInterfaces") IFNAME))
       (append "; DEVS:NetInterfaces/" IFNAME " -- written by the AmiNetXDuo "
               "installer.\n")
       (append ";\n")
@@ -1430,7 +1445,7 @@
       (help   "This file holds the default route.  The default route is "
               "the address of the router that receives everything that is "
               "not on the local network.")
-      (dest   "DEVS:Internet/routes")
+      (dest   (tackon D_DEVS "Internet/routes"))
       (append "; DEVS:Internet/routes -- written by the AmiNetXDuo installer.\n")
       (append ";\n")
       (append "; DEFAULT=<address>   the router everything else goes through.\n")
@@ -1450,7 +1465,7 @@
       (prompt "Writing DEVS:Internet/name_resolution")
       (help   "This file gives the name servers to ask when a program "
               "looks up a name such as \"aminet.net\".")
-      (dest   "DEVS:Internet/name_resolution")
+      (dest   (tackon D_DEVS "Internet/name_resolution"))
       (append "; DEVS:Internet/name_resolution -- written by the AmiNetXDuo\n")
       (append "; installer.\n")
       (append ";\n")
@@ -1481,7 +1496,7 @@
       (prompt "Writing DEVS:Internet/hosts")
       (help   "Names that the Amiga knows without asking a name "
               "server.  One address, then the name, then any nicknames.")
-      (dest   "DEVS:Internet/hosts")
+      (dest   (tackon D_DEVS "Internet/hosts"))
       (append "# DEVS:Internet/hosts -- names this machine knows by itself.\n")
       (append "#\n")
       (append "#   <address>  <name>  [nickname ...]\n")
@@ -1498,7 +1513,7 @@
           (prompt ("Installing DEVS:Internet/%s" NDB_F))
           (help   @copyfiles-help)
           (source (tackon (tackon S_DEVS "Internet") NDB_F))
-          (dest   "DEVS:Internet")
+          (dest   (tackon D_DEVS "Internet"))
           (optional "nofail")))
     (set NDB_N (+ NDB_N 1))
   ))
@@ -1520,7 +1535,7 @@
                    "the list.  Nothing else changes."))
       (help   @copyfiles-help)
       (source (tackon (tackon S_DEVS "Internet") "certificates"))
-      (dest   "DEVS:Internet")
+      (dest   (tackon D_DEVS "Internet"))
       (optional "nofail")))
 
 (complete 75)
