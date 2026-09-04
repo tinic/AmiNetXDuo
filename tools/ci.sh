@@ -2376,6 +2376,29 @@ stage_console() {
     return 0
 }
 
+stage_rate() {
+    hr "the throughput gate (tier 2, needs a bridge and a peer)"
+
+    local out rc
+    out=$(AMINETXDUO_BUILD="$BUILD/cm" tools/check-rate.sh 2>&1)
+    rc=$?
+
+    if printf '%s' "$out" | grep -q '^rate=skipped'; then
+        skip "rate: $(printf '%s' "$out" | sed -n 's/^rate=skipped reason=//p')." \
+             "Nothing here measures a byte per second without a bridged rig," \
+             "and a receive regression is invisible to every other stage."
+        return "$NOTHING"
+    fi
+
+    printf '%s\n' "$out"
+    if [ "$rc" != 0 ]; then
+        fail "a direction is below its recorded rate"
+        return 1
+    fi
+    note "$(printf '%s' "$out" | sed -n 's/^rate=PASS /throughput: /p')"
+    return 0
+}
+
 stage_lossgate() {
     hr "the lossy-link gate (tier 2, needs a peer with tc)"
 

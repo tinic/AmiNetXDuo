@@ -1,0 +1,10 @@
+# Receive and transmit rates, bits per second, the MEDIAN of 3 rounds.
+# tools/check-rate.sh --update writes this; raising a number belongs in the
+# commit that earned it, with the rig named.
+#
+# rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net, v0.26.2
+# Rounds measured 2026-09-04: rx 4818824 4875968 4764901, tx 2675383.
+# The value below is the LOWEST of those rounds, not the median, so the
+# baseline is never flattered by the run that recorded it.
+tcp-rx 4764901
+tcp-tx 2651556
