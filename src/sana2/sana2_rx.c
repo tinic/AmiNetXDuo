@@ -985,6 +985,28 @@ static BOOL ami_sana2_rx_queued(const AmiSana2Rx *rx)
 
     return (BOOL)(list->lh_Head->ln_Succ != NULL);
 }
+
+/*
+ * Must the reader block?  THE PORT DECIDES AND NOTHING ELSE.
+ *
+ * `taken` is how many completions this turn has already delivered, and it is
+ * deliberately not consulted: an Exec signal is one bit and not a count, so
+ * the arrival that set it was consumed by the Wait() that woke this thread
+ * and the completions still on the port carry no wake of their own.  A rule
+ * that blocks on a batch bound therefore sleeps on data the reader is
+ * holding, and nothing releases it until the NEXT frame arrives -- which at
+ * the end of a response is the peer's retransmit timer.  0.26.0 and 0.26.1
+ * shipped that rule and read throughput fell to about a quarter.
+ *
+ * It stays in the signature so this is the one place the question is asked,
+ * and so a test can pin the answer against every batch count.
+ */
+BOOL ami_sana2_rx_should_block(const AmiSana2Rx *rx, UWORD taken)
+{
+    (VOID)taken;
+
+    return (BOOL)(!ami_sana2_rx_queued(rx));
+}
 #endif
 
 /* --------------------------------------------------------------- shutdown */
@@ -1120,7 +1142,6 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     AmiSana2Rx *rx    = (AmiSana2Rx *)argument;
     AmiSana2If *iface = rx->iface;
     UWORD       i;
-    UWORD       run;      /* completions taken since the last baton release */
 
     rx->task = FindTask(NULL);
     rx->port = CreateMsgPort();
@@ -1183,8 +1204,6 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rx->running = TRUE;
     tx_semaphore_put(&rx->ready);
 
-    run = 0;
-
     while (!rx->stop)
     {
         /*
@@ -1200,7 +1219,6 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
             tx_thread_sleep(2);
-            run = 0;
             continue;
         }
 
@@ -1210,25 +1228,36 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * running the IP thread.  There is no baton bracket on this path, so
          * the probe's baton leg reads zero here by design.
          */
-        /* The bound belongs to the baton bracket, which this branch does not
-           have; spend none of it here or the budget below underflows. */
-        run = 0;
         (VOID)tx_amiga_green_wait(rx->wake_mask | rx->reap_mask);
 #else
         /*
-         * Block only when there is nothing to take, or when this reader has
-         * had its run.  The bracket is a Forbid(), a ThreadX suspend, a
-         * dispatch and the reverse of all three, and during a burst the device
-         * has usually replied again while the last frame was being delivered,
-         * so the Wait() it wraps would have returned at once.  The bound is
-         * what keeps that from being a monopoly: this thread outranks
-         * everything and now runs TCP itself, so the task that empties the
-         * socket only runs when the reader lets go.
+         * Block ONLY when there is nothing to take.  The bracket is a
+         * Forbid(), a ThreadX suspend, a dispatch and the reverse of all
+         * three, and during a burst the device has usually replied again
+         * while the last frame was being delivered, so the Wait() it wraps
+         * would have returned at once; one pointer read of the port's message
+         * list decides, and a miss costs nothing because the reply that lands
+         * right after it sets the port's signal.
+         *
+         * What may NOT join that condition is a fairness bound.  An Exec
+         * signal is one bit and not a count: the arrival that set it was
+         * consumed by the Wait() that woke this thread, so completions
+         * already sitting on the port carry no wake of their own.  Blocking
+         * with the port non-empty sleeps on data this thread is holding, and
+         * nothing releases it until the NEXT frame arrives -- which at the
+         * end of a response is the peer's retransmit timer.  0.26.0 and
+         * 0.26.1 shipped that bound and read throughput fell from 938 to 257
+         * KB/s on a request/response workload, transmit untouched.
+         *
+         * The bound survives where it is correct and cheap: as the batch size
+         * of one drain, below, so the loop re-reaches ami_sana2_rx_post() and
+         * re-arms every AMI_SANA2_RX_RUN_MAX frames instead of running the
+         * ring dry.  Fairness cannot be bought here with a blocking call --
+         * a ThreadX tick is 20 ms (NX_IP_PERIODIC_RATE 50), which is worse
+         * than the monopoly it would prevent.
          */
-        if (run >= AMI_SANA2_RX_RUN_MAX || !ami_sana2_rx_queued(rx))
+        if (ami_sana2_rx_should_block(rx, AMI_SANA2_RX_RUN_MAX))
         {
-            run = 0;
-
             ami_sana2_block_enter();
             Wait(rx->wake_mask | rx->reap_mask);
 #ifdef AMINETXDUO_RXPROBE
@@ -1252,9 +1281,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         }
 #endif /* AMINETXDUO_GREEN_REALM */
 
-        run = (UWORD)(run +
-                      ami_sana2_rx_drain(rx,
-                                         (UWORD)(AMI_SANA2_RX_RUN_MAX - run)));
+        (VOID)ami_sana2_rx_drain(rx, (UWORD)AMI_SANA2_RX_RUN_MAX);
 
 #ifdef AMINETXDUO_RXPROBE
         /* Keep probe_dev_rx within a few hundred frames of the truth: the

@@ -950,6 +950,127 @@ static void test_plan_shares_one_pool(void)
             "47 packets and two interfaces: each keeps its floors and no more");
 }
 
+
+/* ------------------------------------------------- the reader's block rule */
+
+/*
+ * 0.26.0 and 0.26.1 blocked the reader on `taken >= AMI_SANA2_RX_RUN_MAX ||
+ * port empty`.  One Exec signal covers every completion already on the port --
+ * it is a bit and not a count -- so blocking on the batch bound slept on
+ * frames the reader was holding, and at the end of a response nothing further
+ * arrived to wake it.  Read throughput fell from 938 KB/s to 257 on real
+ * hardware while transmit was untouched.
+ */
+
+static struct MsgPort blk_port;
+static struct Message blk_msg[AMI_SANA2_RX_RUN_MAX * 2 + 4];
+
+static void blk_empty(struct List *l)
+{
+    l->lh_Head     = (struct Node *)&l->lh_Tail;
+    l->lh_Tail     = NULL;
+    l->lh_TailPred = (struct Node *)&l->lh_Head;
+}
+
+static void blk_fill(struct List *l, unsigned n)
+{
+    unsigned i;
+
+    blk_empty(l);
+    for (i = 0; i < n; i++)
+    {
+        struct Node *node = &blk_msg[i].mn_Node;
+        struct Node *pred = l->lh_TailPred;
+
+        node->ln_Succ  = (struct Node *)&l->lh_Tail;
+        node->ln_Pred  = pred;
+        pred->ln_Succ  = node;
+        l->lh_TailPred = node;
+    }
+}
+
+static void test_block_only_on_an_empty_port(void)
+{
+    static const UWORD taken[] = {
+        0, 1,
+        (UWORD)(AMI_SANA2_RX_RUN_MAX - 1),
+        (UWORD)AMI_SANA2_RX_RUN_MAX,
+        (UWORD)(AMI_SANA2_RX_RUN_MAX + 1),
+        (UWORD)(AMI_SANA2_RX_RUN_MAX * 2)
+    };
+    AmiSana2Rx rx;
+    unsigned   t, q;
+
+    memset(&rx, 0, sizeof rx);
+    rx.port = &blk_port;
+
+    for (t = 0; t < sizeof taken / sizeof taken[0]; t++)
+    {
+        blk_empty(&blk_port.mp_MsgList);
+        h_check(ami_sana2_rx_should_block(&rx, taken[t]) != FALSE,
+                "an empty port is the one thing that blocks");
+
+        for (q = 1; q <= 3; q++)
+        {
+            blk_fill(&blk_port.mp_MsgList, q);
+            h_check(ami_sana2_rx_should_block(&rx, taken[t]) == FALSE,
+                    "a queued completion never blocks, whatever the batch count");
+        }
+    }
+}
+
+/*
+ * The end of a response: one burst arrives, its signal is consumed by the
+ * Wait() that woke the reader, and nothing follows.  Drive the real predicate
+ * over that port until it says block, and count what is left behind.
+ */
+static UWORD blk_left_by_real_rule(void)
+{
+    AmiSana2Rx rx;
+    UWORD      queued = (UWORD)(AMI_SANA2_RX_RUN_MAX + 3);
+    UWORD      taken  = 0;
+
+    memset(&rx, 0, sizeof rx);
+    rx.port = &blk_port;
+
+    while (queued > 0)
+    {
+        blk_fill(&blk_port.mp_MsgList, queued);
+        if (ami_sana2_rx_should_block(&rx, taken) != FALSE)
+            break;
+        queued--;
+        taken++;
+    }
+
+    return queued;
+}
+
+/* The rule that shipped, as a model, so the scenario above is known to have
+   teeth: if this did not strand a frame the test would prove nothing. */
+static UWORD blk_left_by_shipped_rule(void)
+{
+    UWORD queued = (UWORD)(AMI_SANA2_RX_RUN_MAX + 3);
+    UWORD taken  = 0;
+
+    while (queued > 0)
+    {
+        if (taken >= AMI_SANA2_RX_RUN_MAX)
+            break;
+        queued--;
+        taken++;
+    }
+
+    return queued;
+}
+
+static void test_a_burst_is_never_left_on_the_port(void)
+{
+    h_check(blk_left_by_shipped_rule() == 3,
+            "the 0.26.0 rule strands the tail of a burst");
+    h_check(blk_left_by_real_rule() == 0,
+            "the shipped rule takes the whole burst before it blocks");
+}
+
 int main(void)
 {
     test_demux();
@@ -957,6 +1078,8 @@ int main(void)
     test_payload_alignment();
     test_runt();
     test_completion_length_consistency();
+    test_block_only_on_an_empty_port();
+    test_a_burst_is_never_left_on_the_port();
 
     test_plan_ladder();
     test_plan_degenerate_bps();

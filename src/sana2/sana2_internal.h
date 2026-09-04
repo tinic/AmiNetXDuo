@@ -554,6 +554,12 @@ VOID ami_sana2_unbind(AmiSana2If *iface);
 LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
+
+#ifndef AMINETXDUO_GREEN_REALM
+/* Must the reader block?  The port decides; the batch count may not.  See the
+   definition in sana2_rx.c, and tests/sana2/host for what holds it there. */
+BOOL ami_sana2_rx_should_block(const AmiSana2Rx *rx, UWORD taken);
+#endif
 /*
  * `slot` is the request the frame arrived on, or NULL when there is none.  It
  * carries the sum the copy hook computed, so the check below does not walk the
