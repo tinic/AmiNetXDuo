@@ -11,44 +11,75 @@ version at the top when it merges.
 
 ## 0.26.2
 
-- Reading is fast again. 0.26.0 and 0.26.1 read at about a quarter of 0.25.5's rate on a request/response workload -- 938 KB/s to 257 on `anxnet.device`, 918 to 252 on `x-surf-100.device` -- while writing was untouched and slightly faster. The SANA-II reader had been given a fairness bound of eight completions a turn, and when it spent that bound with frames still on its reply port it called `Wait()` anyway. An Exec signal is one bit and not a count: the arrival that set it had already been consumed by the `Wait()` that woke the thread, so the completions still queued carried no wake of their own and the reader slept on frames it was holding. Mid-burst the next arrival covered it; at the end of a response nothing more arrives, nothing acknowledges the held segments, and the transfer waited out the peer's retransmit timer -- once per exchange, which on a 512-exchange benchmark is the whole difference. The reader now blocks only when its port is empty, which is the one condition under which `Wait()` is the right call. The bound survives where it is correct, as the size of a single drain, so the ring is still re-armed every eight frames instead of running dry. Measured on an emulated A2065 bridged to a real peer, three interleaved rounds each way: receive 2.02, 3.74 and 2.94 Mbit/s before against 4.82, 4.88 and 4.76 after, every round after beating every round before, and transmit unmoved at 2.65 against 2.68. The spread is the other half of the evidence -- 85 per cent before and 2.3 after, which is what a stall released by a retransmit timer looks like against one that is gone
+| Fix | Measure |
+|---|---|
+| Receive throughput restored (`sana2_rx.c`) | rx 2.02 / 3.74 / 2.94 -> 4.82 / 4.88 / 4.76 Mbit/s; tx 2.65 -> 2.68; spread 85% -> 2.3% |
+| Reported regression, A3000 | `anxnet.device` 938 -> 257 KB/s; `x-surf-100.device` 918 -> 252 KB/s |
+| Reader blocks only on an empty port | `AMI_SANA2_RX_RUN_MAX` retained as drain batch size |
 
 ## 0.26.1
 
-- The serial diagnostic log is a build option again, and no shipping build carries it. `bsdsocket.library` stays resident for the whole life of the machine, and 27,948 bytes of it -- 7.2 per cent -- were sentences aimed at a serial port that on almost every machine has nothing on the other end: 389,376 with them and 361,428 without, `usergroup.library` 7,840 and 7,172, `tls.library` 195,708 and 195,568. `anxnet.device` is 38,620 either way, because `src/netdev` has no `AMI_ERROR`, `AMI_WARN` or `AMI_INFO` call in it. What a shipped image carries instead is the event ring, which is a code and a value in BSS at no image cost, and `ShowNetStatus` holds the words for it. A build for a bug report is `-DAMINETXDUO_LOG=ON`, and the new `log` cross arm is what keeps that build compiling; `tools/check-no-diag-strings.sh` now reads the option out of the build cache and fails a shipping library that carries a sentence as readily as a logging one that carries none
+| Change | Measure |
+|---|---|
+| `AMINETXDUO_LOG` is a build option again, OFF when shipping | `bsdsocket.library` 389,376 -> 361,428 |
+| | `usergroup.library` 7,840 -> 7,172 |
+| | `tls.library` 195,708 -> 195,568 |
+| | `anxnet.device` 38,620, unchanged |
+| Fault reporting | event ring, BSS only, printed by `ShowNetStatus` |
+| Log build | `-DAMINETXDUO_LOG=ON`; `log` cross arm |
 
 ## 0.26.0
 
-- An interface taken down comes back up. `Offline` took 15.5 seconds and left the SANA-II readers running, so `Online` refused and the machine had to be rebooted to get its network back. The reader drain took the IP protection mutex and waited forever for it, while the stop path held that same mutex across the whole driver call and waited five seconds a reader for the readers to exit -- so each waited on the other and only the join's timeout broke it, with the readers still running. The drain now retries for a tick at a time and returns when it is told to stop, which is the one thing it has nothing left to do for
-- Receiving is much faster on the cards that drain through a word or long port. `anxnet.device` filled the packet directly but told the stack nothing about the checksum, so every frame was walked a second time for a sum the move could have produced; `el3.c` had fused its drain since the 3c589 work and `dp8390.c` was passing zero. Measured over a fixed window against a real peer, read: an Ariadne II 778 KB to 1380 KB, +77 per cent, and a PC Card 950 KB to 1262 KB, +33 per cent, with every interleaved repetition beating every one of its neighbours. 93 to 94 per cent of direct fills now carry their sum, with no receive errors
-- A keystroke on a truecolour screen is answered in about 20 ms where it took about 75. The cause was not speed but position: a banded pass emits tile rows in order, so a key drawn into the band the pass had just gone by waited for the pass to come round -- uniformly, which is why the ninetieth percentile sat at twice the mean. The band the last change was in is now produced beside the pass rather than as part of it, bounded so a key that draws nothing expires. Measured on an A3000 with a Picasso96 board at 800x600x16: mean inside the 47 ms requirement in all six rounds and p90 in five of six, against 65-82 ms mean and 106-151 ms p90 before
-- A name server the stack lists can be removed through the call that lists it. `ObtainDomainNameServerList()` reported the IPv6 servers while `AddDomainNameServer()` and `RemoveDomainNameServer()` parsed a dotted quad and nothing else, so an address the interface handed a program back was refused by the call that same interface invites it to be handed to. Both take an IPv6 literal now, every dotted quad behaves exactly as before, and a server two sources name survives one of them leaving
-- `netstat -s` closes the library it opens. Three exits leaked it, two of them on an ordinary build, so a machine that had run `netstat -s` could not be taken off the network cleanly: `NetShutdown` reported a program still holding the stack and returned 5
-- Bulk reads are 2.6 to 6.4 per cent faster. SANA-II transmit completions are collected lazily: the reply port is parked while sends flow, so a completed write no longer preempts the thread emitting an acknowledgement to collect a reply the next send would have collected anyway. Measured on a2065, ariadne2 and a PC Card, every round beating its neighbour on both directions
-- `iperf` reads up to 64 KB. The ceiling was 8192 against a default of 4096, a factor of two, and the read size is worth 25 per cent of throughput end to end over an eightfold span. Nothing resident grows with it: `httpd` sizes its own buffer off what `httpd` plans, and is 4 KB smaller than it was
-- `S2_ONEVENT` works. `netdev_begin_io()` cleared `ios2_WireError` before dispatching, and that field is the request's INPUT for this one command -- it carries the mask of events being waited on -- so every `S2_ONEVENT` ever issued to `anxnet.device` was answered "event not supported" and the seven conditions the driver posts had no waiter that could hear them. Any program watching for the wire going offline, for a receive error or for a hardware fault got nothing, for the whole life of the driver
-- HTTPS works again in every program that uses `tls.library`, `fetch` among them. Nothing created the library's own protection mutex after the transport was rewritten to run on any `bsdsocket.library`, so `TLSOpen()` failed on a mutex the shim had no slot for and reported it as "bsdsocket.library was built without TLS support" -- about our own library. The internal handshake tests call the vendored entry points directly and never went through `TLSOpen()`, which is why they stayed green over it
-- `tls.library` can shake hands as the server. `TLSA_Server` with a certificate and key loads an identity and the handshake completes both ways over loopback. An RSA key pins the session to TLS 1.2, because 1.3's only RSA family is PSS and the vendored crypto has a PSS verify and no PSS sign; an EC key reaches 1.3
-- A PCMCIA card describes its own register file. The configuration table was read one entry deep and the register offset assumed from the card row; every entry is walked now and an offset the card states is taken over the assumption. A multifunction card is reported as unconfigurable instead of appearing to work
-- A CNet16-class PCMCIA card is no longer refused on a warm reboot. The NE2000 reset port is register 31, which is odd, and the probe strobes it by reading it -- which a clone that asserts `-IOIS16` unconditionally never sees, so the chip was not reset and the card was refused on its command register before the 16-bit probe that exists to find exactly that card could run. A cold boot hid it, because the register powers up at the value the test wanted anyway
-- An interface may carry two static IPv6 addresses. `ADDRESS6` may be written twice on one interface, each line with its own prefix length; a third is ignored with a warning
-- `tls.library` runs on any `bsdsocket.library`, not only this one. It reached the socket layer through a hand-coded private LVO, so on Roadshow, AmiTCP or Miami every call answered `TLS_ERR_NOSTACK`. It now uses the published `bsdsocket` vectors and nothing else, and brings its own packet pool, mutexes and transport with it
-- `tls.library` is callable from every AmigaOS compiler. It ships an SFD and the generated `clib`, `inline`, `proto`, `pragmas` and `lvo` headers in the `developer/` drawer (`developer/sfd/tls_lib.sfd`), so a program does not have to be built with the compiler this tree uses
-- TLS connections negotiate ALPN (RFC 7301). HTTP/2 is defined only over a negotiated `h2`, so nothing built on this stack could ask for it. The client offer and the server selection are both implemented, answered in the ServerHello under TLS 1.2 and in EncryptedExtensions under TLS 1.3
-- `tls.library` can present a server identity. `TLSA_Server`, `TLSA_Certificate`, `TLSA_PrivateKey` and `TLSA_KeyType` load a DER certificate and its key as the session's own, which reaches the server handshake nx_secure has always carried and nothing could call
-- Every shipped binary can report a fault over the serial port. `AMI_ERROR`, `AMI_WARN` and `AMI_INFO` needed a build option that defaulted off, so a machine that faulted in the field had nothing to send. They are unconditional now and what prints is a runtime level starting at warnings, so a healthy machine still writes nothing: `SetEnv ANXDLOGLEVEL 2` and restart the network to reach the information tier
-- A console recording exports as an animated PNG. The `.pfs` recording is the capture side's own layout and only the console page reads it, so a recorded fault could not be sent anywhere. The recording format is unchanged; the export is a second file it can be written out as, encoded in the browser with nothing vendored
-- A keystroke on a truecolour screen appears sooner. A chunky pass took the whole card screen -- 600 KB of Zorro at 640x480 -- at its first band, so every band after it encoded a copy up to a pass old and a keystroke that landed after the fetch waited out a second pass. Each band is read back in the slice that encodes it, and the whole frame only when the scroll probe is due
-- A burst of frames no longer leaves the card short of reads. The receive ring was re-armed once the whole drain was done, so a burst of N frames left the device N reads short for the length of N deliveries -- and a SANA-II device has no buffers of its own, so a frame arriving with no `CMD_READ` outstanding is gone. The slot goes back on the wire before the frame goes upstream
-- 64-bit division is faster on a 68000 and a 68060. The fallback, which is the arm a plain 68000 takes and the arm a 68060 takes because it traps the 64-bit `DIVU.L`, ran thirty-two shift-compare-subtract rounds per divide at about 5600 cycles. It is Knuth's algorithm D in base 65536 now: about 690 cycles for a divisor below 65536 and about 1975 for a wider one
-- IPv6 receives cost less. Anything that was not TCP or UDP at offset 40 was declined outright, so neighbour discovery -- most of what an IPv6 host receives -- and every frame carrying an extension header cost the stack a full payload pass. The verifier walks the extension header chain and reports where the transport header starts
-- `netstat` and `ShowNetStatus` print the DHCPv6 lease. Both showed the IPv4 lease only, so the state the DHCPv6 client tracks reached nobody
-- `netstat -h` prints how many timer ticks the tick task had to catch up. It was counted already and reached only a serial dump that a shipping build compiled out
-- `ShowNetStatus` does not report a default route the machine does not have. A running route table with no IPv4 default fell back to printing the gateway written in the configuration file, which is evidence only when the live table cannot be read
-- `scp` is included alongside `ssh`. It transfers files in either direction,
-  recursively copies directories and preserves timestamps, using Dropbear's
-  traditional SCP protocol without requiring `fork()` or a Unix pipe handler
-  on AmigaOS
+**Receive**
+
+| Change | Measure |
+|---|---|
+| Direct-fill frames carry their checksum | Ariadne II 778 -> 1380 KB/s (+77%); PC Card 950 -> 1262 KB/s (+33%) |
+| Receive ring re-armed before delivery | burst of N no longer leaves N reads short |
+| Lazy SANA-II transmit completion | bulk reads +2.6 to +6.4% |
+| IPv6 extension-header walk | ND no longer costs a full payload pass |
+| `iperf` read size | 8192 -> 65536 |
+
+**Fixed**
+
+| Defect | Detail |
+|---|---|
+| `Offline` left readers running, `Online` refused | 15.5 s, reboot required |
+| `S2_ONEVENT` always answered "not supported" | `ios2_WireError` is that command's input, was cleared |
+| HTTPS broken in every `tls.library` program | protection mutex never created |
+| `netstat -s` leaked the library | 3 exits |
+| `ShowNetStatus` reported a non-existent default route | |
+| CNet16 PCMCIA refused on warm reboot | NE2000 reset port is register 31 |
+| PCMCIA register offset assumed, not read | every config-table entry now walked |
+| 64-bit divide, 68000 / 68060 | ~5600 -> ~690 cycles (divisor < 65536), ~1975 (wider) |
+
+**`tls.library`**
+
+| Added |
+|---|
+| Runs on any `bsdsocket.library` (Roadshow, AmiTCP, Miami) |
+| Server handshake: `TLSA_Server`, `TLSA_Certificate`, `TLSA_PrivateKey`, `TLSA_KeyType`. RSA = TLS 1.2, EC = 1.3 |
+| ALPN (RFC 7301) |
+| SFD + `clib`/`inline`/`proto`/`pragmas`/`lvo` headers in `developer/` |
+
+**Added**
+
+| Item | Detail |
+|---|---|
+| `scp` | both directions, recursive, timestamps, no `fork()` |
+| `AddDomainNameServer()` / `RemoveDomainNameServer()` | accept IPv6 literals |
+| Two static `ADDRESS6` per interface | each with its own prefix length |
+| Serial fault reporting in every binary | `ANXDLOGLEVEL`; reverted to a build option in 0.26.1 |
+| DHCPv6 lease in `netstat` and `ShowNetStatus` | |
+| `netstat -h` tick catch-up count | |
+
+**Console**
+
+| Change | Measure |
+|---|---|
+| Truecolour keystroke latency | ~75 -> ~20 ms; A3000 + Picasso96 800x600x16 |
+| Band read back per slice, not whole screen | was 600 KB at first band |
+| `.pfs` recording exports animated PNG | encoded in browser |
 
 ## 0.25.5
 
