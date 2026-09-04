@@ -15,6 +15,7 @@ version at the top when it merges.
 | Net resident RAM, minimal | -2,420 bytes |
 | IGMP no longer linked when `AMINETXDUO_MULTICAST=OFF` | minimal `bsdsocket.library` -612 bytes |
 | Builds with multicast on | byte-identical, 361,404 either way |
+| Installer can put the stack in its own drawer (issue #9) | `Assign AmiNetXDuo:` + `LIBS:`/`C:`/`DEVS:` `ADD` in `S:User-Startup` |
 
 ## 0.26.2
 

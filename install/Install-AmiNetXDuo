@@ -75,6 +75,10 @@
 (set D_LIBS "LIBS:")
 (set D_C    "C:")
 (set D_DEVS "DEVS:")
+
+; D_ROOT empty means the system layout above.  Set, it is a drawer holding
+; Libs, C and Devs, reached through assigns written into S:User-Startup.
+(set D_ROOT "")
 (set S_TERM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Terminal") "Terminal"))
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 
@@ -758,6 +762,53 @@
     (default @default-dest)))
 
 (set DOCDIR (tackon DOCPARENT "AmiNetXDuo"))
+
+; --- system directories, or a drawer of its own --------------------------
+;
+; Issue #9: a machine that keeps Roadshow, AmiTCP and this one side by side
+; cannot have all three owning LIBS:bsdsocket.library.  A drawer plus
+; `Assign LIBS: <drawer>/Libs ADD` is how AmiTCP and Miami did it, and an ADD
+; assign searches the system directory first, so the drawer only answers for
+; what the system does not have.
+;
+; NOT ASKED AT NOVICE, where the Installer draws no questions at all: that
+; level takes the system layout, which is what every install has done so far.
+; The drawer needs its assigns in S:User-Startup to work at all, so choosing it
+; forces the startup block on rather than leaving a drawer nothing can reach.
+(if (>= @user-level 1)
+  (if (= 1 (askchoice
+             (prompt "Where should the stack itself go?")
+             (help (cat "Into the system is the ordinary answer: "
+                        "bsdsocket.library into LIBS:, the commands into C:, "
+                        "the driver and the configuration into DEVS:.\n\n"
+                        "Into a drawer of its own keeps every file together "
+                        "and reaches it with assigns added to S:User-Startup, "
+                        "so this stack can sit beside another one and be "
+                        "switched between.  The assigns are ADD assigns, so "
+                        "anything already in LIBS: or C: still wins.\n\n"
+                        @askchoice-help))
+             ; 22 characters is the ceiling; over it the page silently
+             ; drops gadgets, which tools/check-installer refuses.
+             (choices "Into the system"
+                      "Into its own drawer")
+             (default 0)))
+    (
+      (set D_ROOT
+        (tackon
+          (askdir
+            (prompt "Select where the drawer holding the stack goes.\n\n"
+                    "A drawer named \"AmiNetXDuo\" is made inside it.")
+            (help @askdir-help)
+            (default @default-dest))
+          "AmiNetXDuo"))
+      (set D_LIBS (tackon D_ROOT "Libs"))
+      (set D_C    (tackon D_ROOT "C"))
+      (set D_DEVS (tackon D_ROOT "Devs"))
+      (makedir D_ROOT (infos))
+      (makedir D_LIBS)
+      (makedir D_C)
+      (makedir D_DEVS)
+    )))
 
 ; A novice run makes no decisions of its own, so with nothing detected and no
 ; existing configuration to keep, there is no honest default to fall back on.
@@ -1685,6 +1736,19 @@
 ; BOOT_CMD) would be false however much was in it.
 (set BOOT_CMD "")
 (set DO_BOOT 0)
+
+; FIRST in the block, before anything that opens the library or runs a command
+; out of the drawer.  A drawer install without these lines is a drawer nothing
+; can reach, so it also forces the block to be written.
+(if (> (strlen D_ROOT) 0)
+  (
+    (set BOOT_CMD
+      (cat ("Assign AmiNetXDuo: \"%s\"\n" D_ROOT)
+           "Assign LIBS: AmiNetXDuo:Libs ADD\n"
+           "Assign C:    AmiNetXDuo:C ADD\n"
+           "Assign DEVS: AmiNetXDuo:Devs ADD\n"))
+    (set DO_BOOT 1)
+  ))
 
 (if (NOT HAVE_AMITCP)
   (
