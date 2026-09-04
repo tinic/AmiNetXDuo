@@ -247,6 +247,7 @@ static VOID load_gateway(AmiConfig *cfg)
     }
 }
 
+#ifdef AMINETXDUO_TCPDEVICE
 static VOID load_tcp_handler(AmiConfig *cfg)
 {
     char *buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_TCPHANDLER, NULL);
@@ -263,6 +264,7 @@ static VOID load_tcp_handler(AmiConfig *cfg)
     if (!cfg->tcp_handler)
         AMI_INFO("config: TCP: switched off in " AMI_CFG_FILE_TCPHANDLER);
 }
+#endif /* AMINETXDUO_TCPDEVICE */
 
 #ifdef AMINETXDUO_MDNS
 /* mDNS builds only: a build with no responder must not open this file. */
@@ -389,7 +391,9 @@ LONG ami_config_load(AmiConfig *cfg)
     ami_config_load_interfaces(cfg);
     load_resolver(cfg);
     load_gateway(cfg);
+#ifdef AMINETXDUO_TCPDEVICE
     load_tcp_handler(cfg);
+#endif
 #ifdef AMINETXDUO_MDNS
     load_dnssd(cfg);
 #endif

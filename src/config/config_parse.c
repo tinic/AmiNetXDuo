@@ -1575,6 +1575,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
 
 /* --------------------------------------------------------- tcp_handler */
 
+#ifdef AMINETXDUO_TCPDEVICE
 /* DEVS:Internet/tcp_handler: "OFF" alone on a line means "TCPHANDLER=OFF".
    Anything else warns and leaves the default alone. */
 VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
@@ -1639,6 +1640,7 @@ VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
         }
     }
 }
+#endif /* AMINETXDUO_TCPDEVICE */
 
 /* ---------------------------------------------------- service_discovery */
 
@@ -1651,6 +1653,11 @@ VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
 
 /* One whitespace-delimited word, NUL-terminated in place. No quoting: neither
  * a service type nor a port number can contain a space. */
+/* DEVS:Internet/dnssd describes mDNS service records, and
+   netstack_mdns.c is the only reader of what this produces -- a file the
+   mDNS build does not compile. Parsing it without the responder filled a
+   table nothing would ever walk, in a library that stays resident. */
+#ifdef AMINETXDUO_MDNS
 static char *dnssd_word(char **cursor)
 {
     char *p = *cursor;
@@ -1877,3 +1884,4 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
         (*count)++;
     }
 }
+#endif /* AMINETXDUO_MDNS */
