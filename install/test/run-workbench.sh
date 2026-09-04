@@ -30,10 +30,11 @@ BOOT_TIMEOUT=720
 KEEP=0
 TERMINAL=0
 STATIC=0
+DRAWER=0
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHS" opt; do
+while getopts "b:a:l:p:N:t:T:kHSD" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -45,6 +46,7 @@ while getopts "b:a:l:p:N:t:T:kHS" opt; do
         k) KEEP=1 ;;
         H) TERMINAL=1 ;;
         S) STATIC=1 ;;
+        D) DRAWER=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S]" >&2
@@ -593,6 +595,15 @@ FOREIGN_LINES=(
 mkdir -p "$HD/S"
 printf '%s\n' "${FOREIGN_LINES[@]}" > "$HD/S/User-Startup"
 chmod 644 "$HD/S/User-Startup"
+
+# -D: the scripted drawer layout.  The Installer's radio pages cannot be driven
+# from outside (install/test/installdrive.c records what was tried), so the
+# marker file is how the drawer path is reachable by a test at all.
+if [ "$DRAWER" = "1" ]; then
+    : > "$HD/S/AmiNetXDuo-drawer"
+    chmod 644 "$HD/S/AmiNetXDuo-drawer"
+    echo "==> scripted drawer layout: S:AmiNetXDuo-drawer planted"
+fi
 
 # AmigaDOS does not care about case and this host does, so a file the guest
 # wrote as `s/user-startup` is not `S/User-Startup` to `[ -f ]`.  Every name

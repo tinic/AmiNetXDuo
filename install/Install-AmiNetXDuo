@@ -775,7 +775,32 @@
 ; level takes the system layout, which is what every install has done so far.
 ; The drawer needs its assigns in S:User-Startup to work at all, so choosing it
 ; forces the startup block on rather than leaving a drawer nothing can reach.
-(if (>= @user-level 1)
+; A SCRIPTED INSTALL asks nobody.  S:AmiNetXDuo-drawer existing means the
+; drawer layout, chosen before the installer starts, at every user level --
+; which is also the only way the drawer path can be tested, because the
+; Installer's radio pages cannot be driven from outside (see
+; install/test/installdrive.c).
+(set FORCE_DRAWER (exists "S:AmiNetXDuo-drawer" (noreq)))
+
+(if FORCE_DRAWER
+  (
+    (set D_ROOT (tackon @default-dest "AmiNetXDuo"))
+    (set D_LIBS (tackon D_ROOT "Libs"))
+    (set D_C    (tackon D_ROOT "C"))
+    (set D_DEVS (tackon D_ROOT "Devs"))
+    (makedir D_ROOT (infos))
+    (makedir D_LIBS)
+    (makedir D_C)
+    (makedir D_DEVS)
+    ; textfile does not create an intermediate directory, so these exist
+    ; before anything writes into them: measured as "Can't open file in line
+    ; 1459" writing DEVS:NetInterfaces/eth0 into a drawer that had only Devs.
+    (makedir (tackon D_DEVS "Networks"))
+    (makedir (tackon D_DEVS "NetInterfaces"))
+    (makedir (tackon D_DEVS "Internet"))
+  ))
+
+(if (AND (= FORCE_DRAWER 0) (>= @user-level 1))
   (if (= 1 (askchoice
              (prompt "Where should the stack itself go?")
              (help (cat "Into the system is the ordinary answer: "
@@ -808,6 +833,9 @@
       (makedir D_LIBS)
       (makedir D_C)
       (makedir D_DEVS)
+      (makedir (tackon D_DEVS "Networks"))
+      (makedir (tackon D_DEVS "NetInterfaces"))
+      (makedir (tackon D_DEVS "Internet"))
     )))
 
 ; A novice run makes no decisions of its own, so with nothing detected and no
@@ -1275,7 +1303,7 @@
   (
     (working "Installing the network driver")
 
-    (makedir "DEVS:Networks"
+    (makedir (tackon D_DEVS "Networks")
       (prompt "Creating DEVS:Networks, the drawer that SANA-II network "
               "drivers live in")
       (help   @makedir-help))
@@ -1421,7 +1449,7 @@
 ;  6.  Configuration
 ; ==========================================================================
 
-(makedir "DEVS:NetInterfaces"
+(makedir (tackon D_DEVS "NetInterfaces")
   (prompt "Creating DEVS:NetInterfaces, the drawer that describes the "
           "network cards")
   (help   @makedir-help))
@@ -1752,7 +1780,10 @@
 
 (if (NOT HAVE_AMITCP)
   (
-    (set BOOT_CMD ("Assign >NIL: AmiTCP: SYS:\n"))
+    ; cat, not set: the drawer assigns above are already in BOOT_CMD and a
+    ; plain set threw them away -- measured as a User-Startup block holding
+    ; the AmiTCP assign and no Assign AmiNetXDuo: at all.
+    (set BOOT_CMD (cat BOOT_CMD "Assign >NIL: AmiTCP: SYS:\n"))
     (set DO_BOOT 1)
   ))
 
