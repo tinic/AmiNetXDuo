@@ -131,7 +131,10 @@
   one. A resumed connection to the same site takes under a second. The
   minimal stack, which the Installer offers for a 1 MB machine, leaves
   tls.library out along with IPv6, mDNS, the packet filter, IPv4
-  multicast, the ARexx host and the TCP: handler.
+  multicast, the ARexx host and the TCP: handler. It also carries two
+  interface slots rather than four, which is 2,528 bytes of the stack's
+  single allocation and 428 of BSS given back to a machine that has one
+  card. DHCP is in it: a minimal machine still leases its address.
 
   @{b}A network card and its driver@{ub}
 

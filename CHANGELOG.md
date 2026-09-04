@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+| Change | Measure |
+|---|---|
+| Minimal drawer builds two interface slots, was four | `AmiNetStack` 67,152 -> 64,624; BSS 4,644 -> 4,216; image 233,448 -> 234,040 |
+| Net resident RAM, minimal | -2,420 bytes |
+
 ## 0.26.2
 
 | Fix | Measure |
