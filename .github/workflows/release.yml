@@ -373,6 +373,10 @@ jobs:
             exit 0
           fi
 
+          tools/check-changelog-prose.sh || {
+            echo "::error::CHANGELOG.md carries prose; the notes are built from it"
+            exit 1; }
+
           notes=$(mktemp)
           {
             echo "$(tools/version.sh --long)"

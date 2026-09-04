@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Gate 1 of 3: refuse the commit locally. See tools/check-gates-wired.sh.
+# SPDX-License-Identifier: MIT
+set -eu
+ROOT="$(git rev-parse --show-toplevel)"
+[ -x "$ROOT/tools/check-changelog-prose.sh" ] || exit 0
+if ! "$ROOT/tools/check-changelog-prose.sh"; then
+    echo
+    echo "pre-commit: CHANGELOG.md carries prose. Fix it, or state why in the"
+    echo "commit and use --no-verify -- which CI and the release job will then"
+    echo "both refuse, so it buys nothing."
+    exit 1
+fi

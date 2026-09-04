@@ -499,6 +499,27 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # And that none of the gates above was quietly unwired.
+    if tools/check-gates-wired.sh > "$BUILD/gates-wired.log" 2>&1; then
+        note "gates: $(sed -n 's/^gates_wired=PASS /wired, /p' \
+              "$BUILD/gates-wired.log")"
+    else
+        cat "$BUILD/gates-wired.log"
+        fail "a gate call site is missing (tools/check-gates-wired.sh)"
+        return 1
+    fi
+
+    # The release workflow builds the published notes out of CHANGELOG.md, so a
+    # paragraph written there is a paragraph on the release page.
+    if tools/check-changelog-prose.sh > "$BUILD/changelog-prose.log" 2>&1; then
+        note "changelog: $(sed -n 's/^changelog_prose=PASS /facts only, /p' \
+              "$BUILD/changelog-prose.log")"
+    else
+        cat "$BUILD/changelog-prose.log"
+        fail "CHANGELOG.md is carrying prose (tools/check-changelog-prose.sh)"
+        return 1
+    fi
+
     # No harness may build a guest binary for a newer CPU than the machine it
     # then points that binary at.  It costs a day every time: the program stops
     # in its own C constructor, no serial, no stdout.txt, and it reads as "the
