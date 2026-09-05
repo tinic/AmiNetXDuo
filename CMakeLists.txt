@@ -773,10 +773,23 @@ endif()
 # recv() is called and the buffer's remaining packets are classic by
 # construction: it fires on 0.35% of dequeues and cannot move a bulk figure.
 #
-# WHAT WOULD MAKE IT WORTH REVISITING: a measurement on a request/response
-# workload (tests/perf/run-reqresp.sh), where each recv() genuinely finds the
-# socket empty, and a fork that also covers the `copied > 0` continuations.
-# A default cannot move on that alone while the read figure is 1-5% down.
+# THAT MEASUREMENT HAS NOW BEEN MADE, and it does not revisit anything.
+# tests/perf/run-reqresp.sh against playhouse2, clean link, 30 fetches, five
+# runs a side, both builds made in one sitting:
+#
+#     OFF   380  380  380  340  380   median 380 ms
+#     ON    400  420  380  460  400   median 400 ms
+#
+# ON is about five per cent SLOWER on the very workload it was supposed to
+# suit, and noisier with it -- 380..460 against 340..380.  So the request and
+# response case agrees with the bulk case and the default stays OFF.
+#
+# The first single run said the opposite, 440 against 420, which is why it got
+# five: max_ms is 20 on every run, so one fetch landing in another quantum is
+# the whole of a 20 ms difference.
+#
+# What is still untested is a fork that also covers the `copied > 0`
+# continuations; nothing measured so far argues it would pay.
 option(AMINETXDUO_RX_DIRECT_COMPLETE
        "Complete a waiting stream recv() directly on the IP thread" OFF)
 if(AMINETXDUO_RX_DIRECT_COMPLETE)
