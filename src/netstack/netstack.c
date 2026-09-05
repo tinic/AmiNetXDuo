@@ -830,6 +830,30 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     }
     ns->ns_IpCreated = TRUE;
 
+    /*
+     * NetX Duo creates nx_ip_protection TX_NO_INHERIT (nx_ip_create.c:203),
+     * which on this port is a priority inversion on the receive path. The
+     * SANA-II reader runs at AMI_SANA2_RX_PRIORITY (1) and waits on this
+     * mutex with a one-tick retry (sana2_rx.c), while every recv()/send()
+     * takes it from a caller adopted at AMI_CALLER_PRIORITY (16). Without
+     * inheritance the holder stays at 16, so the IP thread, AutoIP, mDNS and
+     * the DHCPv6 worker all run ahead of the thread the reader is waiting
+     * for, and the reader -- the highest-priority thread in the system --
+     * waits behind all of them.
+     *
+     * tx_mutex_inherit is the only field tx_mutex_create() derives from its
+     * inherit argument (tx_mutex_create.c:82), and it is read at get and put
+     * rather than cached, so setting it here is exactly equivalent to having
+     * asked for TX_INHERIT -- without editing a vendored file. Safe on this
+     * port because ThreadX forbids combining inheritance with preemption-
+     * threshold and nothing here uses one: every tx_thread_create() in the
+     * tree passes threshold == priority.
+     *
+     * Done before any socket exists, so the mutex is unowned and nothing is
+     * suspended on it.
+     */
+    ns->ns_Ip.nx_ip_protection.tx_mutex_inherit = TX_INHERIT;
+
 #ifdef AMINETXDUO_RXPROBE
     ns->ns_Ip.nx_ip_packet_filter = ami_ns_budget_filter;
 #endif
