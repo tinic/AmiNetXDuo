@@ -360,8 +360,14 @@ endif()
 # else.
 #
 # Buckets are a quarter of the entries, which is NetX Duo's own ratio.
-set(AMINETXDUO_TCP_SYNCACHE "512" CACHE STRING
-    "Half-open connections cached with exact options (512 ships)")
+# 128 rather than NetX Duo's 512.  512 slots are 37,376 bytes and its own
+# comment sizes them against four megabytes; this project's smallest measured
+# machine is a 2 MB A1200 with 1.2 MB free, where 512 is three per cent of
+# everything the machine has.  128 is 9,344 bytes and still more half-open
+# connections than an Amiga serving httpd will ever hold at once -- and past
+# them the cookie takes over, so it is not a ceiling on anything.
+set(AMINETXDUO_TCP_SYNCACHE "128" CACHE STRING
+    "Half-open connections cached with exact options (128 ships)")
 if(NOT AMINETXDUO_TCP_SYNCACHE EQUAL 512)
     math(EXPR _anxd_syncache_buckets "${AMINETXDUO_TCP_SYNCACHE} / 4")
     if(_anxd_syncache_buckets LESS 1)
