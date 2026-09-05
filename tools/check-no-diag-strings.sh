@@ -165,6 +165,29 @@ fi
 # component it is written in, and -Os and LTO drop the ones on paths the linker
 # proved unreachable.  Zero against not-zero is.
 
+# ------------------------------------- and that the option reaches every site
+#
+# AMINETXDUO_LOG gates the MACROS. A call written as ami_log(AMI_LOG_WARN, ...)
+# is not a macro and is not gated, so it ships in a build the option was meant
+# to empty. tx_initialize_low_level.c had twenty of those and nothing noticed
+# for a year; 13585f76 converted them and this is what keeps them converted.
+#
+# compat.h defines the macros in terms of ami_log() and ami_diag.c implements
+# it, so those two are the only files allowed to name it.
+direct=$(grep -rn "ami_log[[:space:]]*([[:space:]]*AMI_LOG_" \
+             --include=*.c src port 2>/dev/null |
+         grep -v "^src/common/ami_diag.c:" || true)
+
+if [ -n "$direct" ]; then
+    echo "diag_direct=CALLERS"
+    printf '%s\n' "$direct" | sed 's/^/  /' | head -10
+    echo "  These bypass AMI_ERROR/AMI_WARN/AMI_INFO, so AMINETXDUO_LOG does not"
+    echo "  reach them and their sentences ship in every build. Use the macros."
+    rc=1
+else
+    echo "diag_direct=none"
+fi
+
 LIB="$BUILD/src/bsdsocket/bsdsocket.library"
 CACHE="$BUILD/CMakeCache.txt"
 
