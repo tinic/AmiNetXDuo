@@ -617,14 +617,24 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
     return status;
 }
 
-UINT _nxe_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
-                             ULONG wait_option)
+/* bsd_recv_once() calls the _nx_ entry point directly -- bsdsocket has
+   already validated the socket and bsd_nx_need() has supplied the thread
+   context, so the _nxe_ wrapper only re-checks what it proved.  Both spellings
+   are stubbed: the wrapper is still what the rest of NetX Duo would reach. */
+UINT _nx_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
+                            ULONG wait_option)
 {
     (VOID)socket_ptr;
     (VOID)packet_ptr;
     (VOID)wait_option;
 
     return NX_NO_PACKET;
+}
+
+UINT _nxe_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
+                             ULONG wait_option)
+{
+    return _nx_tcp_socket_receive(socket_ptr, packet_ptr, wait_option);
 }
 
 UINT _nxe_udp_socket_receive(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
