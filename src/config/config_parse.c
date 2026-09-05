@@ -587,8 +587,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 if (*value == '\0')
                 {
                     AMI_WARN("config: %s: empty DEVICE", out->name);
-                    ami_cfg_problem(lineno, AMI_CFG_PROBLEM_ERROR,
-                                    "DEVICE has no value", AMI_CFG_ADVICE_DEVICE_NAMES_THE_DRIVER);
+                    ami_cfg_problem_code(lineno, AMI_CFG_PROBLEM_ERROR, AMI_CFG_SAYS_DEVICE_HAS_NO_VALUE, AMI_CFG_ADVICE_DEVICE_NAMES_THE_DRIVER);
                     break;
                 }
                 ami_cfg_copy_string(out->device, sizeof(out->device), value);
@@ -872,9 +871,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     if (!have_device)
     {
         AMI_WARN("config: %s: no DEVICE keyword, ignoring interface", out->name);
-        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
-                        "there is no DEVICE line, so the file does not say "
-                        "which network card to use", AMI_CFG_ADVICE_ADD_A_LINE_SUCH);
+        ami_cfg_problem_code(0, AMI_CFG_PROBLEM_ERROR, AMI_CFG_SAYS_THERE_IS_NO_DEVICE, AMI_CFG_ADVICE_ADD_A_LINE_SUCH);
         return AMI_CFG_ERR_SYNTAX;
     }
 
@@ -917,10 +914,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         if (!v4_plan && !v6_plan)
         {
             AMI_WARN("config: %s: no address of either family", out->name);
-            ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
-                            "the interface has no address: there is no ADDRESS "
-                            "line, CONFIGURE does not say DHCP, and nothing "
-                            "asks for IPv6 either", AMI_CFG_ADVICE_ADD_CONFIGURE_DHCP_TO);
+            ami_cfg_problem_code(0, AMI_CFG_PROBLEM_ERROR, AMI_CFG_SAYS_THE_INTERFACE_HAS_NO, AMI_CFG_ADVICE_ADD_CONFIGURE_DHCP_TO);
         }
     }
 
@@ -1781,8 +1775,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
         {
             AMI_WARN("config: service_discovery: name too long on line %lu",
                      (unsigned long)lineno);
-            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
-                            "the service name is too long", AMI_CFG_ADVICE_KEEP_IT_UNDER_SIXTY);
+            ami_cfg_problem_code(lineno, AMI_CFG_PROBLEM_WARN, AMI_CFG_SAYS_THE_SERVICE_NAME_IS, AMI_CFG_ADVICE_KEEP_IT_UNDER_SIXTY);
             continue;
         }
 
@@ -1790,8 +1783,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
         {
             AMI_WARN("config: service_discovery: txt too long on line %lu",
                      (unsigned long)lineno);
-            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
-                            "the txt= field is too long", AMI_CFG_ADVICE_A_TXT_RECORD_HOLDS);
+            ami_cfg_problem_code(lineno, AMI_CFG_PROBLEM_WARN, AMI_CFG_SAYS_THE_TXT_FIELD_IS, AMI_CFG_ADVICE_A_TXT_RECORD_HOLDS);
             continue;
         }
 
@@ -1803,9 +1795,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
                 full = TRUE;
                 AMI_WARN("config: more than %ld services, ignoring the rest",
                          (long)max);
-                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
-                                "there are more services here than can be "
-                                "advertised", AMI_CFG_ADVICE_AT_MOST_EIGHT_ARE);
+                ami_cfg_problem_code(lineno, AMI_CFG_PROBLEM_WARN, AMI_CFG_SAYS_THERE_ARE_MORE_SERVICES, AMI_CFG_ADVICE_AT_MOST_EIGHT_ARE);
             }
             continue;
         }

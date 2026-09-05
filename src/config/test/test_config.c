@@ -839,7 +839,7 @@ static VOID collect(const AmiCfgProblem *problem, APTR user)
 
     seen[seen_count].line     = problem->line;
     seen[seen_count].severity = problem->severity;
-    strncpy(seen[seen_count].text, problem->text,
+    strncpy(seen[seen_count].text, ((problem->text != NULL) ? problem->text : ami_cfg_advice(problem->text_code)),
             sizeof(seen[0].text) - 1);
     seen[seen_count].hint[0] = '\0';
     {
@@ -853,7 +853,7 @@ static VOID collect(const AmiCfgProblem *problem, APTR user)
 
     if (stub_verbose)
         printf("    line %lu: %s\n", (unsigned long)problem->line,
-               problem->text);
+               ((problem->text != NULL) ? problem->text : ami_cfg_advice(problem->text_code)));
 
     seen_count++;
 }

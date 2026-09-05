@@ -132,6 +132,7 @@ VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
     problem.line     = line;
     problem.severity = severity;
     problem.text     = text;
+    problem.text_code = 0U;
     problem.hint     = hint;
     problem.hint_text = (const char *)0;
 
@@ -150,6 +151,7 @@ VOID ami_cfg_problem_built(ULONG line, UWORD severity, const char *text,
     problem.line     = line;
     problem.severity = severity;
     problem.text     = text;
+    problem.text_code = 0U;
     problem.hint      = AMI_CFG_ADVICE_NONE;
     problem.hint_text = hint;
 
@@ -672,4 +674,22 @@ VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
     tmp[pos] = '\0';
 
     ami_cfg_copy_string(buf, buflen, tmp);
+}
+
+VOID ami_cfg_problem_code(ULONG line, UWORD severity, UWORD text, UWORD hint)
+{
+    AmiCfgProblem problem;
+
+    if (ami_cfg_reporter == NULL || text == 0U)
+        return;
+
+    problem.file     = ami_cfg_current_file;
+    problem.line     = line;
+    problem.severity = severity;
+    problem.text      = (const char *)0;
+    problem.text_code = text;
+    problem.hint      = hint;
+    problem.hint_text = (const char *)0;
+
+    ami_cfg_reporter(&problem, ami_cfg_reporter_user);
 }

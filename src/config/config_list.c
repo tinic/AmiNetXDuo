@@ -263,9 +263,7 @@ VOID ami_config_load_interfaces(AmiConfig *cfg)
     if (cfg->interface_count == 0)
     {
         ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
-        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
-                        "the DEVS:NetInterfaces drawer holds no usable "
-                        "interface file", AMI_CFG_ADVICE_ONE_FILE_PER_NETWORK);
+        ami_cfg_problem_code(0, AMI_CFG_PROBLEM_ERROR, AMI_CFG_SAYS_THE_DEVS_NETINTERFACES_DRAWER, AMI_CFG_ADVICE_ONE_FILE_PER_NETWORK);
         ami_cfg_problem_file(NULL);
     }
 }

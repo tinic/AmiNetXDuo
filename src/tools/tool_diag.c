@@ -426,6 +426,16 @@ static UWORD diag_problem_total;
  * accepted and inert by design. It is a category, not a list of keywords.
  * CheckNetConfig installs its own reporter and prints the notes in full.
  */
+/* The sentence for a problem: the assembled string when there is one,
+   otherwise the words for its code. */
+static const char *problem_text(const AmiCfgProblem *problem)
+{
+    if (problem->text != (const char *)0)
+        return problem->text;
+
+    return ami_cfg_advice(problem->text_code);
+}
+
 /* The advice for a problem: the assembled string when there is one, otherwise
    the words for its code.  NULL when the problem carries no advice. */
 static const char *problem_advice(const AmiCfgProblem *problem)
@@ -454,7 +464,7 @@ static VOID diag_report(const AmiCfgProblem *problem, APTR user)
     else
         tool_printf("  %s:\n", (LONG)problem->file);
 
-    tool_wrap(6, problem->text);
+    tool_wrap(6, problem_text(problem));
 
     if (problem_advice(problem) != NULL)
         tool_wrap(6, problem_advice(problem));

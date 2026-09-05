@@ -87,6 +87,17 @@ static const char *const ami_cfg_advice_text[] =
     "The keywords an interface file understands are DEVICE, UNIT, C"
     "ONFIGURE, ADDRESS, NETMASK, GATEWAY, MTU, and CONFIGURE6, ADDR"
     "ESS6 and GATEWAY6 for IPv6.  The line was ignored.",
+    "there is no DEVS:NetInterfaces drawer, so nothing describes a "
+    "network card",
+    "the DEVS:NetInterfaces drawer holds no usable interface file",
+    "DEVICE has no value",
+    "there is no DEVICE line, so the file does not say which networ"
+    "k card to use",
+    "the interface has no address: there is no ADDRESS line, CONFIG"
+    "URE does not say DHCP, and nothing asks for IPv6 either",
+    "the service name is too long",
+    "the txt= field is too long",
+    "there are more services here than can be advertised",
 };
 
 const char *ami_cfg_advice(UWORD code)

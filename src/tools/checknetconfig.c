@@ -107,6 +107,16 @@ static struct CncNote
 /* How many arrived, which is not how many were kept -- see show_notes(). */
 static UWORD cnc_notes;
 
+/* The sentence for a problem: the assembled string when there is one,
+   otherwise the words for its code. */
+static const char *problem_text(const AmiCfgProblem *problem)
+{
+    if (problem->text != (const char *)0)
+        return problem->text;
+
+    return ami_cfg_advice(problem->text_code);
+}
+
 /* The advice for a problem: the assembled string when there is one, otherwise
    the words for its code.  NULL when the problem carries no advice. */
 static const char *problem_advice(const AmiCfgProblem *problem)
@@ -130,7 +140,7 @@ static VOID remember_note(const AmiCfgProblem *problem)
 
     tool_copy_string(n->file, sizeof(n->file), problem->file);
     n->line = problem->line;
-    tool_copy_string(n->text, sizeof(n->text), problem->text);
+    tool_copy_string(n->text, sizeof(n->text), problem_text(problem));
     tool_copy_string(n->hint, sizeof(n->hint),
                      (problem_advice(problem) != NULL)
                          ? problem_advice(problem) : "");
@@ -181,7 +191,7 @@ static VOID cnc_report(const AmiCfgProblem *problem, APTR user)
     }
 
     finding(problem->file, problem->line, problem->severity);
-    note(problem->text);
+    note(problem_text(problem));
 
     if (problem_advice(problem) != NULL)
         note(problem_advice(problem));

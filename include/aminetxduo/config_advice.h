@@ -47,4 +47,15 @@
 #define AMI_CFG_ADVICE_A_SERVICE_NAME_IS                 35
 #define AMI_CFG_ADVICE_THE_KEYWORDS_AN_INTERFACE         36
 
+/* "what is wrong" sentences, same table: a code here, the words in the
+   command that prints them. */
+#define AMI_CFG_SAYS_THERE_IS_NO_DEVS                    37
+#define AMI_CFG_SAYS_THE_DEVS_NETINTERFACES_DRAWER       38
+#define AMI_CFG_SAYS_DEVICE_HAS_NO_VALUE                 39
+#define AMI_CFG_SAYS_THERE_IS_NO_DEVICE                  40
+#define AMI_CFG_SAYS_THE_INTERFACE_HAS_NO                41
+#define AMI_CFG_SAYS_THE_SERVICE_NAME_IS                 42
+#define AMI_CFG_SAYS_THE_TXT_FIELD_IS                    43
+#define AMI_CFG_SAYS_THERE_ARE_MORE_SERVICES             44
+
 #endif /* AMINETXDUO_CONFIG_ADVICE_H */

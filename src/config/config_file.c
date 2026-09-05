@@ -122,9 +122,7 @@ BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
         AMI_WARN("config: no " AMI_CFG_DIR_NETINTERFACES " drawer");
 
         ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
-        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
-                        "there is no DEVS:NetInterfaces drawer, so nothing "
-                        "describes a network card", AMI_CFG_ADVICE_RUN_NETSETUP_IT_ASKS);
+        ami_cfg_problem_code(0, AMI_CFG_PROBLEM_ERROR, AMI_CFG_SAYS_THERE_IS_NO_DEVS, AMI_CFG_ADVICE_RUN_NETSETUP_IT_ASKS);
         ami_cfg_problem_file(NULL);
         return FALSE;
     }

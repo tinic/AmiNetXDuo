@@ -125,6 +125,12 @@ VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
 VOID ami_cfg_problem_built(ULONG line, UWORD severity, const char *text,
                            const char *hint);
 
+/*
+ * The same again for a problem whose "what is wrong" sentence is fixed, so it
+ * is a code too. Everything a parser assembles keeps the string form above.
+ */
+VOID ami_cfg_problem_code(ULONG line, UWORD severity, UWORD text, UWORD hint);
+
 /* TRUE when a reporter is installed, so a caller can skip building a message. */
 BOOL ami_cfg_problems_wanted(VOID);
 

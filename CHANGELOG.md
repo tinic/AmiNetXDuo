@@ -22,6 +22,7 @@ version at the top when it merges.
 | Per-object `.ident` strings dropped | no code change |
 | Configuration advice moved out of the resident library | minimal `bsdsocket.library` -1,796; full -1,288 |
 | The tick clock's diagnostics obey `AMINETXDUO_LOG` | minimal -2,228; full -2,224 |
+| Fixed problem sentences are codes too | minimal -188 |
 
 ## 0.26.2
 

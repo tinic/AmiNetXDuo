@@ -561,7 +561,8 @@ typedef struct AmiCfgProblem {
     const char *file;       /* "DEVS:NetInterfaces/eth0", never NULL       */
     ULONG       line;       /* 1-based; 0 when it is about the whole file  */
     UWORD       severity;   /* AMI_CFG_PROBLEM_*                           */
-    const char *text;       /* what is wrong: one sentence, no full stop   */
+    const char *text;       /* what is wrong, or NULL when text_code is set */
+    UWORD       text_code;  /* AMI_CFG_SAYS_*, 0 when `text` carries it     */
     UWORD       hint;       /* AMI_CFG_ADVICE_*, 0 when there is none      */
     const char *hint_text;  /* set instead of `hint` when the advice had to */
                             /* be assembled; NULL otherwise                 */
