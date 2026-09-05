@@ -28,6 +28,7 @@ version at the top when it merges.
 | Minimal drawer gives the resolver 4 packets, was 16 | 7,392 bytes of RAM back |
 | Every build caches 128 half-open connections, was 512 | full drawer 30,336 bytes of RAM back; `bsdsocket.library` -3,512 |
 | mDNS remembers 8 KB of what it hears, was 32 KB | full drawer 24,576 bytes of RAM back |
+| Every build gives the resolver 4 packets, was 16 | full drawer 7,680 bytes of RAM back |
 
 ## 0.26.2
 

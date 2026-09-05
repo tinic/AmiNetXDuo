@@ -334,10 +334,13 @@ endif()
 # synchronous). Four leaves a query and its retries in flight with room to
 # spare; NX_DNS_MAX_RETRIES is 3.
 #
+# Four everywhere, not just in the minimal drawer: the argument is about how
+# this resolver works, not about how much memory the machine has.
+#
 # DHCP has the same shape and is deliberately left alone: its pool is a fifth
 # the size and it is the path that brings the machine up.
-set(AMINETXDUO_DNS_PACKETS "16" CACHE STRING
-    "Packets in the DNS client's private pool (16 ships)")
+set(AMINETXDUO_DNS_PACKETS "4" CACHE STRING
+    "Packets in the DNS client's private pool (4 ships)")
 if(NOT AMINETXDUO_DNS_PACKETS EQUAL 16)
     add_compile_definitions(
         # No spaces: CMake passes this straight to the compiler and a shell
