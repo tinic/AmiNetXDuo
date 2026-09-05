@@ -58,13 +58,14 @@ fi
 
 # ------------------------------------------------------- the other gates ---
 want image-size     tools/ci.sh                      'check-image-size\.sh'
+want ram-size       tools/ci.sh                      'check-ram-size\.sh'
 want rate           tools/ci.sh                      'check-rate\.sh'
 want diag-strings   tools/ci.sh                      'check-no-diag-strings\.sh'
 want backlog        tools/ci.sh                      'check-backlog\.sh'
 want doc-budget     tools/ci.sh                      'check-doc-budget\.sh'
 
 # ------------------------------------------ and the gate scripts still run ---
-for g in check-changelog-prose check-image-size check-rate check-gates-wired; do
+for g in check-changelog-prose check-image-size check-ram-size check-rate check-gates-wired; do
     if [ ! -x "tools/$g.sh" ]; then
         echo "gates_wired=NOT_EXECUTABLE gate=$g"
         rc=1

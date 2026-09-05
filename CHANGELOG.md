@@ -36,6 +36,7 @@ version at the top when it merges.
 | Service-discovery config is not built when mDNS is off | minimal `AmiConfig` 3,608 -> 852; minimal `AmiNetStack` -2,752 |
 | The resolver draws packets from the stack's pool, not a private one | full -2,624, minimal -2,528; `NX_DNS` 2,952 -> 328 |
 | `AMINETXDUO_DNS_PACKETS` removed | it sized a private pool that no longer exists, so it did nothing |
+| `check-ram-size.sh` gates `sizeof(AmiNetStack)` | default 40,292 of 41,000, minimal 14,016 of 15,000; nothing measured it before |
 | DHCPv6 client stack 2 KB was 4 KB, its worker 1.5 KB was 2 KB | 2,560 bytes of RAM back; peaks 976 and 360, worker sized to a documented 604 |
 
 ## 0.26.2

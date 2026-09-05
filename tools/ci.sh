@@ -961,6 +961,21 @@ stage_cross() {
                 fail "a resident image is over its budget ($name)"
             fi
 
+            # And the allocation behind them.  sizeof(AmiNetStack) is what
+            # running the stack costs for as long as the machine is up; the
+            # 2026-09-05 campaign cut the minimal drawer's by 78 per cent with
+            # nothing in front of it the whole way.
+            if tools/check-ram-size.sh "$BUILD/$name" \
+                    > "$BUILD/$name-ram-size.log" 2>&1; then
+                note "$(sed -n 's/^ram_size=PASS /resident allocation: /p' \
+                      "$BUILD/$name-ram-size.log" | head -1)"
+            elif grep -q 'ram_size=skipped' "$BUILD/$name-ram-size.log"; then
+                : # a build that does not ship, or has no compile database
+            else
+                cat "$BUILD/$name-ram-size.log"
+                fail "sizeof(AmiNetStack) is over its budget ($name)"
+            fi
+
             # And that every image the configuration produced would actually
             # be relocated by LoadSeg.  THE WHOLE TREE, not the four the
             # deploy carries: the libraries have linked --gc-sections all

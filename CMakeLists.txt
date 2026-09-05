@@ -9,6 +9,23 @@ cmake_minimum_required(VERSION 3.20)
 # 0.x on purpose: nothing has run on real hardware yet.
 project(AmiNetXDuo VERSION 0.26.2 LANGUAGES C ASM)
 
+# Every build writes compile_commands.json.  tools/check-ram-size.sh has no
+# symbol to read -- sizeof(AmiNetStack) is a compile-time size -- so it
+# compiles a probe with THIS build's own flags and asks the toolchain how big
+# the object came out.  Without the database that gate skips, and a gate that
+# always skips is not a gate.  CACHE without FORCE, so a caller can still say
+# otherwise.
+# A plain set(), NOT set(... CACHE ...): CMake seeds the cache with an EMPTY
+# CMAKE_EXPORT_COMPILE_COMMANDS of its own, and a cache set without FORCE will
+# not overwrite an existing entry even when that entry is empty -- so the
+# cached form is inert and the gate skips forever while CI stays green.  A
+# normal variable takes precedence at generate time.  An explicit -D still
+# wins, because that lands in the cache before this runs and the guard sees it.
+if(NOT DEFINED CMAKE_EXPORT_COMPILE_COMMANDS OR
+   CMAKE_EXPORT_COMPILE_COMMANDS STREQUAL "")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+endif()
+
 # -Os, AFTER project(), because nothing earlier can make it stick.
 #
 # cmake/toolchain-m68k-amigaos.cmake sets CMAKE_C_FLAGS_RELEASE_INIT, and that
