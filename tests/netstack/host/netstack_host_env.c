@@ -378,6 +378,15 @@ UINT _nxe_dhcp_create(NX_DHCP *dhcp_ptr, NX_IP *ip_ptr, CHAR *name_ptr)
     return nsh.dhcp_create_status;
 }
 
+/* NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL: the client has no pool of its own,
+   so netstack.c hands it ours right after create. */
+UINT _nxe_dhcp_packet_pool_set(NX_DHCP *dhcp_ptr, NX_PACKET_POOL *pool_ptr)
+{
+    dhcp_ptr -> nx_dhcp_packet_pool_ptr = pool_ptr;
+
+    return NX_SUCCESS;
+}
+
 /* --------------------------------------------------------------- NetX Duo -- */
 
 UINT _nxe_ip_create(NX_IP *ip_ptr, CHAR *name, ULONG ip_address,

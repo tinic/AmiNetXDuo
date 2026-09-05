@@ -104,6 +104,17 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    so the margin is deliberate and the measurement is the reason for it. */
 #define NX_DHCP_THREAD_STACK_SIZE               2048
 
+/* DHCP draws packets from the stack's own pool instead of carrying a private
+   one.  Without this the client embeds nx_dhcp_pool_area[5 * 592] plus an
+   NX_PACKET_POOL header inside NX_DHCP (nxd_dhcp_client.h:462-465) -- 3,024
+   bytes of the one resident allocation, for five 592-byte packets.  Ours is
+   strictly bigger: AMI_POOL_PAYLOAD is 1568 against the 592 DHCP needs
+   (NX_DHCP_MINIMUM_IP_DATAGRAM 576 + NX_PHYSICAL_HEADER 16), it holds
+   16..512 packets, and its memory is allocated rather than resident.
+   Requires nx_dhcp_packet_pool_set() before start; netstack.c does that at
+   both create sites. */
+#define NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL
+
 /* Changes the NX_TCP_SOCKET layout: an ABI break for anything compiled against
    the old header, so it cannot be a per-file define. */
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT

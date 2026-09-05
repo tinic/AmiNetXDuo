@@ -30,6 +30,7 @@ version at the top when it merges.
 | Every build gives the resolver 4 packets, was 16 | full drawer 7,680 bytes of RAM back |
 | 16 simultaneously listening ports, was 32 | 704 bytes of RAM back; past the last one `listen()` sets `ENOBUFS` |
 | DHCP client thread gets a 2 KB stack, was 4 KB | 2,048 bytes of RAM back; measured high-water 860 across the lease lifecycle |
+| DHCP draws packets from the stack's pool, not a private one | 3,024 bytes of RAM back; `NX_DHCP` 7,340 -> 4,316 |
 
 ## 0.26.2
 

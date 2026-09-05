@@ -1564,6 +1564,13 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         {
             ns->ns_DhcpCreated = TRUE;
 
+            /* The client has no pool of its own: NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL
+               trades its private nx_dhcp_pool_area for ours.  Before any start. */
+            status = nx_dhcp_packet_pool_set(&ns->ns_Dhcp, &ns->ns_Pool);
+            if (status != NX_SUCCESS)
+                AMI_ERROR("netstack: DHCP could not take the shared packet pool "
+                          "(%ld)", (long)status);
+
             /*
              * Before the client starts, so the first BOUND is reported and the
              * first DISCOVER already carries the option 61 and request list.
@@ -2631,6 +2638,13 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
     }
 
     ns->ns_DhcpCreated = TRUE;
+
+    /* The client has no pool of its own: NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL
+       trades its private nx_dhcp_pool_area for ours.  Before any start. */
+    status = nx_dhcp_packet_pool_set(&ns->ns_Dhcp, &ns->ns_Pool);
+    if (status != NX_SUCCESS)
+        AMI_ERROR("netstack: DHCP could not take the shared packet pool "
+                  "(%ld)", (long)status);
 
     ami_ns_dhcp_configure(ns);
 
