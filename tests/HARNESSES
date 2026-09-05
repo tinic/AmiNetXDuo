@@ -241,7 +241,7 @@ tests/tls/run-hangup.sh            : manual : peer. can a rude peer take the mac
 tests/tools/run-nettools.sh        : manual : peer. nc, telnet, tftp and whois against tests/tools/netpeer.py, with a port forwarded back in
 tests/tools/run-family.sh          : manual : peer, bridged. -4 and -6 on a guest that really has both; SLIRP carries no IPv6
 tests/tools/run-multiaddr.sh       : manual : bridged. a dual-stack name whose IPv6 is a blackhole is still fetched, and how long each case takes
-tests/tools/run-mdns.sh            : manual : peer, bridged. the responder watched from another machine
+tests/tools/run-mdns.sh            : manual : peer, bridged. the responder watched from another machine. NEEDS -B <iface>: it takes its own host-side tcpdump there, because nothing else writes $HD/host.pcap since fs-uae went away, and without it the thirteen wire assertions do not run and the verdict is exit 3
 tests/tools/run-dnsguard.sh        : manual : peer, bridged. negative caching and the owner name on an answer, against a name server that lies
 tests/tools/run-sntp.sh            : manual : peer. sntp, and what setting the clock does to certificate checking
 tests/tools/run-toolleak.sh        : manual : peer, bridged. the leak sweep for the whole command set

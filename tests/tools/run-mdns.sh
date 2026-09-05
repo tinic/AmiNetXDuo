@@ -15,12 +15,16 @@ MODEL=A1200
 TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 
-while getopts "m:t:b:" opt; do
+IFACE=""
+
+while getopts "m:t:b:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B iface]" >&2
+           exit 2 ;;
     esac
 done
 
@@ -125,13 +129,85 @@ kill -0 "$WATCH_PID" 2>/dev/null || {
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-mdns}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> booting $MODEL with the A2065 on SLIRP"
-set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/AddNetInterface" "$STAGE/host" "$STAGE/ping"
-RUN_RC=$?
-set -e
+# Declared here and not beside fail()/pass() below: the capture runs BEFORE
+# the assertions and reports its own failures through infra().
+BROKEN=0
+infra() { echo "INFRA: $*" >&2; BROKEN=$((BROKEN + 1)); }
+
+# NOTHING WRITES $HD/host.pcap ON ITS OWN.  It used to come out of fs-uae,
+# which dumped its SLIRP link; tools/amiberry-run.sh does not, so the thirteen
+# assertions below on what actually left the card were dead for every Amiberry
+# run and the harness reported exit 3 however healthy the responder was.
+#
+# With -B we take the capture ourselves, the way tests/tools/run-wirequiet.sh
+# does: a host-side tcpdump on the bridged interface.  Without -B the guest is
+# on SLIRP, there is no host interface carrying its frames, and those
+# assertions still cannot run -- which is reported as an instrument failure and
+# not as a verdict on the responder.
+CAP_PID=""
+capture_stop() {
+    [ -n "$CAP_PID" ] || return 0
+    kill "$CAP_PID" 2>/dev/null || true
+    wait "$CAP_PID" 2>/dev/null || true
+    CAP_PID=""
+}
+
+# NOT under $HD: tools/amiberry-run.sh:362 does `rm -rf "$HD"` when it boots,
+# so anything written there before the run is destroyed.  Capture beside it and
+# copy in afterwards, which is what the assertions below read.
+CAPTMP="$ROOT/build/mdns-host-$AMINETXDUO_RUN_TAG.pcap"
+CAPLOG="$ROOT/build/mdns-host-$AMINETXDUO_RUN_TAG.tcpdump.log"
+mkdir -p "$ROOT/build"
+
+if [ -n "$IFACE" ]; then
+    if ! command -v tcpdump >/dev/null 2>&1; then
+        infra "no tcpdump on this host, so the wire cannot be recorded"
+    elif ! timeout 10 tcpdump -i "$IFACE" -c 1 -n >/dev/null 2>&1; then
+        infra "tcpdump cannot read $IFACE as $(id -un); this needs no sudo on a
+       host where tcpdump carries cap_net_raw"
+    else
+        rm -f "$CAPTMP"
+        # -s 0, the WHOLE frame.  An mDNS announcement packs several records
+        # into one packet, so a snaplen truncates the later ones: at -s 256
+        # only the first SRV survived and the other two read as missing.
+        tcpdump -i "$IFACE" -n -e -s 0 -U -w "$CAPTMP" \
+            'udp port 5353' > "$CAPLOG" 2>&1 &
+        CAP_PID=$!
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            grep -q 'listening on' "$CAPLOG" 2>/dev/null && break
+            sleep 0.5
+        done
+        if ! grep -q 'listening on' "$CAPLOG" 2>/dev/null; then
+            capture_stop
+            infra "tcpdump did not start on $IFACE, so the wire was not recorded"
+        fi
+    fi
+fi
+
+if [ -n "$IFACE" ]; then
+    echo "==> booting $MODEL with the A2065 bridged on $IFACE"
+    set +e
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
+        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+        "$STAGE/AddNetInterface" "$STAGE/host" "$STAGE/ping"
+    RUN_RC=$?
+    set -e
+else
+    echo "==> booting $MODEL with the A2065 on SLIRP"
+    set +e
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+        "$STAGE/AddNetInterface" "$STAGE/host" "$STAGE/ping"
+    RUN_RC=$?
+    set -e
+fi
+
+capture_stop
+
+# The run wiped $HD and recreated it, so the capture goes in now.
+if [ -n "$IFACE" ] && [ -s "$CAPTMP" ]; then
+    cp "$CAPTMP" "$HD/host.pcap"
+fi
 
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
@@ -146,8 +222,6 @@ fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 note() { echo "  --: $*"; }
 
-BROKEN=0
-infra() { echo "INFRA: $*" >&2; BROKEN=$((BROKEN + 1)); }
 
 STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
