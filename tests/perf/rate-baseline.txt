@@ -6,5 +6,28 @@
 # Rounds measured 2026-09-04: rx 4818824 4875968 4764901, tx 2675383.
 # The value below is the LOWEST of those rounds, not the median, so the
 # baseline is never flattered by the run that recorded it.
+#
+# WHY TRANSMIT IS ABOUT HALF OF RECEIVE, AND WHY THAT IS NOT OURS TO FIX HERE.
+# Measured 2026-09-05 with -DAMINETXDUO_RXPROBE=ON, reading netstat -s's step
+# budget from a snapshot taken after the transmit arms and before any server
+# arm, so the counters are transmit-only:
+#
+#     board     tcp-tx      ack (write to reply)   post (BeginIO to return)
+#     a2065     2,036,429   4,503 us               791 us
+#     ariadne   2,064,297   4,547 us               798 us
+#     xsurf     1,756,793   5,070 us             1,774 us
+#
+# ack is the round trip and it is ~4.5 ms on EVERY emulated card, so it is a
+# property of this rig -- Amiberry, the bridge, the peer -- and not of any
+# driver or of anything in src/.  A real 10 Mbit card is well under 1 ms.
+# Our own driver-side cost is stuff+post+reap, about 1.1 ms a frame, which
+# would allow roughly 10 Mbit/s: four times what this rig delivers.
+#
+# So a transmit change cannot be validated here: the number it has to move is
+# dominated by a term the rig sets.  Ruled out by measurement, do not retry on
+# this rig: the TX ring never fills (full=0 spins=0 drops=0 over 1024 sends),
+# the net68k checksum serves both directions, and NX_TCP_MAXIMUM_TX_QUEUE at 8
+# against the vendor's 20 measures 2,664,243 against 2,667,163 over five
+# rounds each in one sitting.
 tcp-rx 4764901
 tcp-tx 2651556
