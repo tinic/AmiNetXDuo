@@ -597,6 +597,21 @@ endif()
 # how tests/trace/ settled it, see the note on BSD_TCP_WINDOW in
 # src/bsdsocket/bsdsocket_internal.h.  Empty means pool-derived, which is what
 # ships; 8192 reproduces the fixed window that shipped before it.
+# The receiver's window-update threshold, as a divisor of RCV.BUFF.  2 is
+# RCV.BUFF/2, which is what ships and what the long note in
+# third_party/netxduo/common/src/nx_tcp_fast_periodic_processing.c measured
+# against RFC 1122's min(MSS, ...) term -- that term cost 25.7% to 32.2% of the
+# read path across three cards.  That settles the "more, smaller announcements"
+# side of the axis.  The other side, fewer and larger than RCV.BUFF/2, was
+# never measured; a divisor of 1 announces only when the whole buffer is free.
+# Exists so that question is answered by building two libraries out of one tree.
+set(AMINETXDUO_WINDOW_UPDATE_DIVISOR "" CACHE STRING
+    "Window-update threshold as a divisor of RCV.BUFF (default 2)")
+if(NOT AMINETXDUO_WINDOW_UPDATE_DIVISOR STREQUAL "")
+    add_compile_definitions(
+        AMINETXDUO_WINDOW_UPDATE_DIVISOR=${AMINETXDUO_WINDOW_UPDATE_DIVISOR})
+endif()
+
 set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "Pin the TCP receive window, bytes")
 if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
     add_compile_definitions(BSD_TCP_WINDOW=${AMINETXDUO_TCP_WINDOW}
