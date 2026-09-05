@@ -48,7 +48,7 @@ BUDGETS=(
     "default:src/netdev/anxnet.device:40000"
     "default:src/usergroup/usergroup.library:9000"
     "default:src/tlslib/tls.library:198000"
-    "minimal:src/bsdsocket/bsdsocket.library:229000"
+    "minimal:src/bsdsocket/bsdsocket.library:226000"
     "minimal:src/netdev/anxnet.device:40000"
     "minimal:src/usergroup/usergroup.library:9000"
 )

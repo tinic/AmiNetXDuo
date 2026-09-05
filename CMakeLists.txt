@@ -326,6 +326,33 @@ endif()
 # see the same number, which is exactly what a global define is for.  Nothing
 # is defined at the default, so the shipped build's compile lines -- and its
 # LTO options record -- are the bytes they were before this option existed.
+# Half-open connections held with their options recorded exactly.
+#
+# NetX Duo's own number is 512, chosen against the four megabytes this project
+# targets, and it is 37,376 of the 37,612 bytes an NX_IP instance occupies --
+# 99 per cent of it.  The minimal drawer is what the Installer offers a ONE
+# megabyte machine, and 37 KB of half-open connection slots on a machine that
+# will never see eight at once is the wrong shape entirely.
+#
+# It is not a limit on connections.  Past the cache the SYN cookie takes over
+# and rebuilds the connection from the sequence number it echoes, carrying the
+# MSS, window scale, SACK and timestamp options with it (nx_api.h says so at
+# length).  A smaller cache costs option fidelity under a flood and nothing
+# else.
+#
+# Buckets are a quarter of the entries, which is NetX Duo's own ratio.
+set(AMINETXDUO_TCP_SYNCACHE "512" CACHE STRING
+    "Half-open connections cached with exact options (512 ships)")
+if(NOT AMINETXDUO_TCP_SYNCACHE EQUAL 512)
+    math(EXPR _anxd_syncache_buckets "${AMINETXDUO_TCP_SYNCACHE} / 4")
+    if(_anxd_syncache_buckets LESS 1)
+        set(_anxd_syncache_buckets 1)
+    endif()
+    add_compile_definitions(
+        NX_TCP_SYNCACHE_SIZE=${AMINETXDUO_TCP_SYNCACHE}
+        NX_TCP_SYNCACHE_BUCKETS=${_anxd_syncache_buckets})
+endif()
+
 set(AMINETXDUO_MAX_INTERFACES "4" CACHE STRING
     "Interfaces that can be online at once (1 or more; 4 ships)")
 if(AMINETXDUO_MAX_INTERFACES LESS 1)

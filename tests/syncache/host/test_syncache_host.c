@@ -5,6 +5,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+/* Half the cache, so two cohorts fill it exactly at any configured size. */
+#define COHORT  (NX_TCP_SYNCACHE_SIZE / 2)
+
 #include "nx_api.h"
 #include "nx_ip.h"
 #include "nx_tcp.h"
@@ -545,23 +548,27 @@ static UINT cache_case(void)
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
 
-    for (i = 0; i < 100; i++)
+    /* Two cohorts that together fill the cache, so the assertion is about
+       age and not about a number: NX_TCP_SYNCACHE_SIZE is a build option now
+       (32 in the minimal drawer, 512 by default) and a hardcoded 200 tested
+       nothing on a build smaller than that. */
+    for (i = 0; i < COHORT; i++)
     {
         (void) rig_syn(2000 + i, 0x4000 + i);
     }
     host_now += 5 * NX_IP_PERIODIC_RATE;
-    for (i = 0; i < 100; i++)
+    for (i = 0; i < COHORT; i++)
     {
         (void) rig_syn(3000 + i, 0x4000 + i);
     }
-    eq("two hundred half-open connections", cache -> nx_tcp_syncache_count, 200);
+    eq("both cohorts are held", cache -> nx_tcp_syncache_count, 2 * COHORT);
 
     host_now += NX_TCP_SYNCACHE_TIMEOUT - (4 * NX_IP_PERIODIC_RATE);
     stub_synacks = 0;
     _nx_tcp_syncache_periodic(&rig_ip);
 
-    eq("the older hundred are given up", cache -> nx_tcp_syncache_count, 100);
-    eq("and counted as expired", cache -> nx_tcp_syncache_expired, 100);
+    eq("the older cohort is given up", cache -> nx_tcp_syncache_count, COHORT);
+    eq("and counted as expired", cache -> nx_tcp_syncache_expired, COHORT);
 
     ok("and the survivors are the younger ones",
        _nx_tcp_syncache_deliver(&rig_ip, &rig_listen, &rig_socket) == NX_FALSE);
@@ -569,7 +576,7 @@ static UINT cache_case(void)
     host_now += NX_TCP_SYNCACHE_TIMEOUT;
     _nx_tcp_syncache_periodic(&rig_ip);
     eq("and eventually all of them", cache -> nx_tcp_syncache_count, 0);
-    eq("the free list is whole again", cache -> nx_tcp_syncache_expired, 200);
+    eq("the free list is whole again", cache -> nx_tcp_syncache_expired, 2 * COHORT);
 
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
