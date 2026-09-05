@@ -435,8 +435,15 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     /* The transmit half of the same segment: socket entry to the driver call
        its ACK arrives in.  xmit + reap + stuff + post is the CPU a receive
-       pays to answer; ack is the wire's own leg after that. */
-    show_budget_leg("xmit,   socket to tx driver ", &b->nrb_Xmit,
+       pays to answer; ack is the wire's own leg after that.
+    
+       xmit is NOT the bulk send path, whatever a three-word label suggests:
+       budget.c:108 stamps it in the DEMUX path, so it only ever times a
+       transmit that a received segment provoked, and its sample count is the
+       ACK count and not the frame count.  reap, stuff and post ARE every
+       transmit -- sana2_tx.c records them unconditionally -- which is why
+       their counts differ from xmit's in the same run. */
+    show_budget_leg("xmit,   recv seg to its ACK ", &b->nrb_Xmit,
                     b->nrb_EClockRate);
     show_budget_leg("ack,    write to reply      ", &b->nrb_Ack,
                     b->nrb_EClockRate);
