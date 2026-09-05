@@ -418,7 +418,13 @@ static VOID show_budget(VOID)
         return;
     }
 
-    show_budget_leg("drain,  reader to IP thread ", &b->nrb_Drain,
+    /* NOT a handoff to the IP thread, whatever the old label said: the reader
+       delivers inline.  sana2_rx.c:786 times ami_sana2_rx_deliver(), which
+       ends in ami_sana2_rx_dispatch() calling _nx_ip_packet_receive() at :381
+       -- the immediate form, not _nx_ip_packet_deferred_receive() -- so IP
+       input and the TCP input under it run ON THE READER and this leg is
+       their whole cost.  It is the largest receive leg there is. */
+    show_budget_leg("drain,  reader runs IP input", &b->nrb_Drain,
                     b->nrb_EClockRate);
     show_budget_leg("baton,  asking to holding   ", &b->nrb_Baton,
                     b->nrb_EClockRate);
