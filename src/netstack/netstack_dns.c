@@ -1304,6 +1304,13 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
 
     ns->ns_DnsCreated = TRUE;
 
+    /* The client has no pool of its own: NX_DNS_CLIENT_USER_CREATE_PACKET_POOL
+       trades nx_dns_pool_area for ours.  Before any query. */
+    status = nx_dns_packet_pool_set(&ns->ns_Dns, &ns->ns_Pool);
+    if (status != NX_SUCCESS)
+        AMI_ERROR("netstack: DNS could not take the shared packet pool (%ld)",
+                  (long)status);
+
 #ifdef NX_DNS_CACHE_ENABLE
     /*
      * NX_DNS_CACHE_ENABLE only compiles the code in: nx_dns_create() leaves

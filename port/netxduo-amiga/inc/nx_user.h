@@ -115,6 +115,15 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    both create sites. */
 #define NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL
 
+/* Same again for the resolver.  Without this NX_DNS embeds nx_dns_pool plus
+   nx_dns_pool_area[NX_DNS_PACKET_POOL_SIZE] (nxd_dns.h:317-320): 2,528 bytes
+   of the one resident allocation in the minimal drawer, 2,624 in the full
+   one, which is 90 per cent of NX_DNS.  Ours is bigger and already there --
+   AMI_POOL_PAYLOAD 1568 against the ~576 NX_DNS_PACKET_PAYLOAD asks for, and
+   _nx_dns_packet_pool_set() rejects a pool that is too small rather than
+   failing later.  netstack_dns.c hands it over right after nx_dns_create(). */
+#define NX_DNS_CLIENT_USER_CREATE_PACKET_POOL
+
 /* Changes the NX_TCP_SOCKET layout: an ABI break for anything compiled against
    the old header, so it cannot be a per-file define. */
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT

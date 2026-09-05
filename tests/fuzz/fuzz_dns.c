@@ -43,6 +43,18 @@ static _Alignas(NX_PACKET) ULONG
                                       32) * FZ_WIRE_PACKETS) / sizeof(ULONG)];
 static NX_PACKET_POOL   fz_wire_pool;
 
+/* The client has no pool of its own any more: NX_DNS_CLIENT_USER_CREATE_PACKET_POOL
+   means nx_dns_create() leaves nx_dns_packet_pool_ptr NULL and the caller sets
+   it.  Kept SEPARATE from fz_wire_pool so the two leak messages below stay
+   distinct -- a query packet that is never released should not read as an
+   unreleased datagram.  NX_DNS_PACKET_PAYLOAD is what
+   _nx_dns_packet_pool_set() checks against. */
+#define FZ_QUERY_PACKETS 8
+static _Alignas(NX_PACKET) ULONG
+                        fz_query_area[((NX_DNS_PACKET_PAYLOAD + sizeof(NX_PACKET) +
+                                      32) * FZ_QUERY_PACKETS) / sizeof(ULONG)];
+static NX_PACKET_POOL   fz_query_pool;
+
 /* Big enough that the cache path runs rather than failing to insert. */
 static ULONG            fz_cache[512];
 
@@ -302,8 +314,8 @@ static void fz_pool_check(void)
         fz_wire_pool.nx_packet_pool_total)
         fz_fail("a received datagram was not released");
 
-    if (fz_dns.nx_dns_pool.nx_packet_pool_available !=
-        fz_dns.nx_dns_pool.nx_packet_pool_total)
+    if (fz_query_pool.nx_packet_pool_available !=
+        fz_query_pool.nx_packet_pool_total)
         fz_fail("a query packet was not released");
 }
 
@@ -327,6 +339,9 @@ static void fz_run_once(const unsigned char *data, size_t len)
 
     if (nx_dns_create(&fz_dns, &fz_ip, (UCHAR *)"example.com") != NX_SUCCESS)
         fz_fail("nx_dns_create failed");
+
+    if (nx_dns_packet_pool_set(&fz_dns, &fz_query_pool) != NX_SUCCESS)
+        fz_fail("the query pool was refused");
 
     (VOID)nx_dns_cache_initialize(&fz_dns, fz_cache, (UINT)sizeof(fz_cache));
 
@@ -391,6 +406,7 @@ static void fz_selftest(void)
     fz_patch_id  = 1;
 
     if (nx_dns_create(&fz_dns, &fz_ip, (UCHAR *)"example.com") != NX_SUCCESS ||
+        nx_dns_packet_pool_set(&fz_dns, &fz_query_pool) != NX_SUCCESS ||
         nx_dns_server_add(&fz_dns, FZ_SERVER) != NX_SUCCESS)
         fz_fail("the DNS client would not start");
 
@@ -525,6 +541,7 @@ static void fz_cache_expiry_test(void)
     memset(fz_cache, 0, sizeof(fz_cache));
 
     if (nx_dns_create(&fz_dns, &fz_ip, (UCHAR *)"example.com") != NX_SUCCESS ||
+        nx_dns_packet_pool_set(&fz_dns, &fz_query_pool) != NX_SUCCESS ||
         nx_dns_cache_initialize(&fz_dns, fz_cache,
                                 (UINT)sizeof(fz_cache)) != NX_SUCCESS ||
         nx_dns_server_add(&fz_dns, FZ_SERVER) != NX_SUCCESS)
@@ -617,6 +634,14 @@ static void fz_setup(void)
                                (ULONG)sizeof(fz_wire_area)) != NX_SUCCESS)
     {
         printf("fuzz_dns: the wire packet pool would not create\n");
+        exit(1);
+    }
+
+    if (_nx_packet_pool_create(&fz_query_pool, "query", NX_DNS_PACKET_PAYLOAD,
+                               (VOID *)fz_query_area,
+                               (ULONG)sizeof(fz_query_area)) != NX_SUCCESS)
+    {
+        printf("fuzz_dns: the query packet pool would not create\n");
         exit(1);
     }
 }
