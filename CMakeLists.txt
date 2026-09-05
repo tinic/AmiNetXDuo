@@ -328,25 +328,13 @@ endif()
 # LTO options record -- are the bytes they were before this option existed.
 # Packets the DNS client keeps to itself.
 #
-# NetX Duo gives its resolver a private pool of 16, which is 9,712 bytes of the
-# stack's one allocation -- for a client that issues ONE query at a time from
-# one task (src/netstack/netstack_dns.c has two call sites and both are
-# synchronous). Four leaves a query and its retries in flight with room to
-# spare; NX_DNS_MAX_RETRIES is 3.
-#
-# Four everywhere, not just in the minimal drawer: the argument is about how
-# this resolver works, not about how much memory the machine has.
-#
-# DHCP has the same shape and is deliberately left alone: its pool is a fifth
-# the size and it is the path that brings the machine up.
-set(AMINETXDUO_DNS_PACKETS "4" CACHE STRING
-    "Packets in the DNS client's private pool (4 ships)")
-if(NOT AMINETXDUO_DNS_PACKETS EQUAL 16)
-    add_compile_definitions(
-        # No spaces: CMake passes this straight to the compiler and a shell
-        # splits it there, which silently truncated it to "(4" the first time.
-        "NX_DNS_PACKET_POOL_SIZE=(${AMINETXDUO_DNS_PACKETS}*(NX_DNS_PACKET_PAYLOAD+sizeof(NX_PACKET)))")
-endif()
+# There is no AMINETXDUO_DNS_PACKETS any more.  It sized the resolver's PRIVATE
+# pool, and there is no longer one: nx_user.h defines
+# NX_DNS_CLIENT_USER_CREATE_PACKET_POOL, so nx_dns_pool_area is not compiled
+# (nxd_dns.h:324) and neither is the create that filled it (nxd_dns.c:236).
+# NX_DNS_PACKET_POOL_SIZE has no reader left, and an option that silently does
+# nothing is worse than no option: somebody would tune it and measure no
+# change.  The resolver draws from ns_Pool now.
 
 # Half-open connections held with their options recorded exactly.
 #

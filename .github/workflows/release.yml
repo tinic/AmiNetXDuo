@@ -260,8 +260,7 @@ jobs:
                 -DAMINETXDUO_MULTICAST=OFF \
                 -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF \
                 -DAMINETXDUO_MAX_INTERFACES=2 \
-                -DAMINETXDUO_TCP_SYNCACHE=32 \
-                -DAMINETXDUO_DNS_PACKETS=4
+                -DAMINETXDUO_TCP_SYNCACHE=32
           cmake --build build/release-minimal --parallel
 
       # ssh and scp come from clients/, not the CMake tree, so a `cmake --build`
