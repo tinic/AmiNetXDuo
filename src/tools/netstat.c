@@ -506,7 +506,17 @@ static VOID show_protocol_stats(const ToolStats *st)
     }
 
     tool_printf("\ntcp:\n");
+    /* NOT st->have_tcp alone.  That flag means "this stack has TCP", and
+       shownetstatus.c:870 uses it to decide whether to list connections at
+       all.  What is missing here is the COUNTERS: NX_DISABLE_TCP_INFO guards
+       only the increments (nx_tcp_socket_retransmit.c:290), while
+       nx_tcp_info_get() still returns NX_SUCCESS, so every figure below would
+       be a zero that can never change.  Say so rather than print it. */
+#ifdef NX_DISABLE_TCP_INFO
+    if (0)
+#else
     if (st->have_tcp)
+#endif
     {
         tool_printf("\t%lu packets sent (%lu bytes)\n",
                     st->tcp_packets_sent, st->tcp_bytes_sent);
@@ -526,7 +536,11 @@ static VOID show_protocol_stats(const ToolStats *st)
     }
 
     tool_printf("\nudp:\n");
+#ifdef NX_DISABLE_UDP_INFO
+    if (0)
+#else
     if (st->have_udp)
+#endif
     {
         tool_printf("\t%lu datagrams sent (%lu bytes)\n",
                     st->udp_packets_sent, st->udp_bytes_sent);

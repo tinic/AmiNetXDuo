@@ -943,17 +943,6 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
                          &out->nsx_IcmpUnhandled) == NX_SUCCESS)
         out->nsx_Have |= NETSTATUS_HAVE_ICMP;
 
-    /*
-     * A family whose counters are compiled out is NOT advertised as present.
-     * Only the INCREMENTS are guarded by NX_DISABLE_<X>_INFO -- see
-     * nx_tcp_socket_retransmit.c:290 -- while nx_<x>_info_get() reads the
-     * fields and returns NX_SUCCESS regardless.  Claiming HAVE_<X> made
-     * `netstat -s` print a whole block of zeros that could never vary, and
-     * tests/perf/run-reqresp.sh report `retransmitted=0` as if it had measured
-     * something.  netstat.c already prints "not enabled" for a family it is
-     * not given; this lets it, and skips the call as well.
-     */
-#ifndef NX_DISABLE_TCP_INFO
     if (nx_tcp_info_get(ip, &out->nsx_TcpPacketsSent, &out->nsx_TcpBytesSent,
                         &out->nsx_TcpPacketsReceived,
                         &out->nsx_TcpBytesReceived, &out->nsx_TcpInvalid,
@@ -963,18 +952,14 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
                         &out->nsx_TcpConnectionsDropped,
                         &out->nsx_TcpRetransmits) == NX_SUCCESS)
         out->nsx_Have |= NETSTATUS_HAVE_TCP;
-#endif
 
-#ifndef NX_DISABLE_UDP_INFO
     if (nx_udp_info_get(ip, &out->nsx_UdpPacketsSent, &out->nsx_UdpBytesSent,
                         &out->nsx_UdpPacketsReceived,
                         &out->nsx_UdpBytesReceived, &out->nsx_UdpInvalid,
                         &out->nsx_UdpReceiveDropped,
                         &out->nsx_UdpChecksumErrors) == NX_SUCCESS)
         out->nsx_Have |= NETSTATUS_HAVE_UDP;
-#endif
 
-#ifndef NX_DISABLE_ARP_INFO
     if (nx_arp_info_get(ip, &out->nsx_ArpRequestsSent,
                         &out->nsx_ArpRequestsReceived,
                         &out->nsx_ArpResponsesSent,
@@ -983,7 +968,6 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
                         &out->nsx_ArpAgedEntries,
                         &out->nsx_ArpInvalidMessages) == NX_SUCCESS)
         out->nsx_Have |= NETSTATUS_HAVE_ARP;
-#endif
 }
 
 /*
