@@ -102,7 +102,14 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     # -fno-ident: the GCC version string per object. Worth 408 bytes on its own
     # and nothing on top of the single partition, which merges them anyway;
     # kept so the saving does not depend on the partitioning staying as it is.
-    string(APPEND CMAKE_C_FLAGS_RELEASE " -flto -flto-partition=one -fno-ident")
+    # -fipa-pta: interprocedural points-to analysis. It removes nothing on its
+    # own; it tells the later passes which stores and calls cannot alias, and
+    # they then drop what is provably dead. 1,984 bytes off the full library
+    # and 672 off the minimal one, with no inlining given up for it -- which
+    # is the difference between this and the --param knobs below it in the
+    # ledger, that buy their bytes by inlining less.
+    string(APPEND CMAKE_C_FLAGS_RELEASE
+           " -flto -flto-partition=one -fno-ident -fipa-pta")
 
     # A 68020+ LTO link partitions one translation unit into several output
     # sections and can therefore create the same cross-section 32-bit sibling
