@@ -537,6 +537,21 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     }
 }
 
+/*
+ * Six bytes as a longword and a word rather than a call into the tuned copy,
+ * whose prologue costs more than the move for a length this short. Both ends
+ * are even: nx_packet_data_start is a multiple of NX_PACKET_ALIGNMENT and
+ * AMI_SANA2_RX_PAD is 2 (see the assertions below), and ios2_SrcAddr and
+ * ios2_DstAddr sit at even offsets in the request. A 68000 takes an address
+ * error on an odd address, not on an unaligned-but-even one. Same shape as
+ * nd_addr6() in netdev_device.c.
+ */
+static VOID ami_sana2_addr6(UCHAR *to, const UCHAR *from)
+{
+    *(ULONG *)(APTR)to       = *(const ULONG *)(const APTR)from;
+    *(UWORD *)(APTR)(to + 4) = *(const UWORD *)(const APTR)(from + 4);
+}
+
 /* ------------------------------------------------------------ slot arming */
 
 /*
@@ -726,21 +741,17 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
         {
             if ((slot->req.ios2_Req.io_Flags & SANA2IOF_BCAST) != 0)
             {
-                UWORD i;
-
                 /* Drivers are inconsistent about what they leave in DstAddr
                    for a broadcast. The flag is the authority. */
-                for (i = 0; i < AMI_ETH_ADDR_SIZE; i++)
-                    eth[i] = 0xFF;
+                *(ULONG *)(APTR)&eth[0] = 0xFFFFFFFFUL;
+                *(UWORD *)(APTR)&eth[4] = 0xFFFFU;
             }
             else
             {
-                ami_sana2_copy_bytes(&eth[0], slot->req.ios2_DstAddr,
-                                     AMI_ETH_ADDR_SIZE);
+                ami_sana2_addr6(&eth[0], slot->req.ios2_DstAddr);
             }
 
-            ami_sana2_copy_bytes(&eth[6], slot->req.ios2_SrcAddr,
-                                 AMI_ETH_ADDR_SIZE);
+            ami_sana2_addr6(&eth[6], slot->req.ios2_SrcAddr);
         }
         else
         {
