@@ -94,7 +94,12 @@
  */
 #define AMI_MDNS_LOCAL_CACHE_BYTES  \
     (1024 + AMI_CFG_MAX_SD_SERVICES * 384)
-#define AMI_MDNS_PEER_CACHE_BYTES   32768
+/* Overridable: 32 KB holds a hundred-odd learnt records, which is a network
+   far larger than an Amiga is on.  The cache evicts the oldest when it is
+   full, so a smaller one forgets sooner and loses nothing else. */
+#ifndef AMI_MDNS_PEER_CACHE_BYTES
+#define AMI_MDNS_PEER_CACHE_BYTES   8192
+#endif
 #endif
 
 /*
