@@ -3,6 +3,18 @@
 # SPDX-License-Identifier: MIT
 set -eu
 ROOT="$(git rev-parse --show-toplevel)"
+# A commit whose whole diff is documentation is bookkeeping, not work.  Put
+# the note in the commit that changes what it describes.
+if [ -x "$ROOT/tools/check-doc-only.sh" ]; then
+    if ! "$ROOT/tools/check-doc-only.sh"; then
+        echo
+        echo "pre-commit: nothing here but documentation.  Fold it into the"
+        echo "commit that changes the code it is about.  A release commit sets"
+        echo "AMINETXDUO_RELEASE_COMMIT=1."
+        exit 1
+    fi
+fi
+
 [ -x "$ROOT/tools/check-changelog-prose.sh" ] || exit 0
 if ! "$ROOT/tools/check-changelog-prose.sh"; then
     echo

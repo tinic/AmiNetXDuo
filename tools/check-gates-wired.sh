@@ -41,6 +41,7 @@ want() {           # want <label> <file> <script-basename>
 
 # --------------------------------------------------- the prose gate, x3 ---
 want prose-hook     .githooks/pre-commit             'check-changelog-prose\.sh'
+want doc-only-hook  .githooks/pre-commit             'check-doc-only\.sh'
 want prose-ci       tools/ci.sh                      'check-changelog-prose\.sh'
 want prose-release  .github/workflows/release.yml    'check-changelog-prose\.sh'
 
