@@ -44,12 +44,12 @@ ARM="${AMINETXDUO_IMAGE_ARM:-$(basename "$BUILD")}"
 # is 361,428 in the full drawer and 233,928 in the minimal one, both with
 # AMINETXDUO_LOG off, which is where they belong.
 BUDGETS=(
-    "default:src/bsdsocket/bsdsocket.library:358000"
-    "default:src/netdev/anxnet.device:39500"
+    "default:src/bsdsocket/bsdsocket.library:362000"
+    "default:src/netdev/anxnet.device:40000"
     "default:src/usergroup/usergroup.library:9000"
     "default:src/tlslib/tls.library:198000"
-    "minimal:src/bsdsocket/bsdsocket.library:231000"
-    "minimal:src/netdev/anxnet.device:39500"
+    "minimal:src/bsdsocket/bsdsocket.library:234000"
+    "minimal:src/netdev/anxnet.device:40000"
     "minimal:src/usergroup/usergroup.library:9000"
 )
 

@@ -102,14 +102,23 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     # -fno-ident: the GCC version string per object. Worth 408 bytes on its own
     # and nothing on top of the single partition, which merges them anyway;
     # kept so the saving does not depend on the partitioning staying as it is.
-    # -fipa-pta: interprocedural points-to analysis. It removes nothing on its
-    # own; it tells the later passes which stores and calls cannot alias, and
-    # they then drop what is provably dead. 1,984 bytes off the full library
-    # and 672 off the minimal one, with no inlining given up for it -- which
-    # is the difference between this and the --param knobs below it in the
-    # ledger, that buy their bytes by inlining less.
-    string(APPEND CMAKE_C_FLAGS_RELEASE
-           " -flto -flto-partition=one -fno-ident -fipa-pta")
+    # -fno-ident drops the GCC version string each object carries. 408 bytes,
+    # and it cannot change code: it removes a string nothing branches on.
+    #
+    # TWO FLAGS WERE HERE AND ARE GONE, both because they bought bytes with
+    # throughput (5-round medians on the rig, all in one sitting):
+    #
+    #                        tcp-rx      tcp-tx      bsdsocket.library
+    #   v0.26.2             4,806,755   2,659,682        358,168
+    #   -fipa-pta           4,805,973   2,628,858        358,320
+    #   + partition=one     4,742,352   2,611,863        356,796
+    #
+    # -flto-partition=one cost 1.3 per cent of RECEIVE for 1,524 bytes, and
+    # receive is what 0.26.0 got wrong. -fipa-pta cost 1.2 per cent of
+    # transmit for 1,372. Neither is a trade this project makes; the note in
+    # the ledger about a size win paid out of speed not being a win was
+    # written before both were taken anyway.
+    string(APPEND CMAKE_C_FLAGS_RELEASE " -flto -fno-ident")
 
     # A 68020+ LTO link partitions one translation unit into several output
     # sections and can therefore create the same cross-section 32-bit sibling

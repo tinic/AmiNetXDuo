@@ -19,8 +19,7 @@ version at the top when it merges.
 | Scripted install: `S:AmiNetXDuo-drawer` selects the drawer layout with no prompt | any user level |
 | NetX Duo statistics nothing reads are no longer counted | full `bsdsocket.library` -1,328; minimal -1,136 |
 | Config parsers for switched-off features are no longer built | minimal -348; full unchanged |
-| Link-time optimisation uses one partition, and no `.ident` strings | minimal `bsdsocket.library` -2,744; full -1,532 |
-| Interprocedural points-to analysis | full `bsdsocket.library` -1,372; `anxnet.device` -284 |
+| Per-object `.ident` strings dropped | no code change |
 
 ## 0.26.2
 
