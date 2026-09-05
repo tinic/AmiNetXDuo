@@ -336,12 +336,26 @@ typedef struct AmiConfig {
     BOOL                tcp_handler;
 
     /*
-     * Present in every build, like the IPv6 interface fields above: one
-     * AmiConfig serves a build with AMINETXDUO_MDNS and one without, and only
-     * the loader and the netstack act on these.
+     * NOT present in every build, unlike the IPv6 interface fields above, and
+     * that exception is measured: eight AmiSdService are 2,752 bytes, 76 per
+     * cent of AmiConfig and 11 per cent of the minimal drawer's whole
+     * AmiNetStack.  The IPv6 fields cost tens of bytes and buy one config
+     * file that works either way; these cost thousands and buy nothing in a
+     * build without mDNS, because nothing writes them -- config_file.c's call
+     * to ami_cfg_parse_dnssd() is already inside #ifdef AMINETXDUO_MDNS, as
+     * is the parser itself (config_parse.c:1603) -- and nothing reads them,
+     * netstack_mdns.c not being compiled at all.  Dead storage, not
+     * portability.
+     *
+     * AmiConfig crosses no published vector (grep bsdsocket_vectors.h), and
+     * aminetxduo_config is a static library linked into both the library and
+     * the C: tools from one option set, so the shape cannot disagree within a
+     * build.
      */
+#ifdef AMINETXDUO_MDNS
     AmiSdService        sd_services[AMI_CFG_MAX_SD_SERVICES];
     UWORD               sd_service_count;
+#endif
 } AmiConfig;
 
 /*

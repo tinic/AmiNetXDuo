@@ -33,6 +33,7 @@ version at the top when it merges.
 | DHCP draws packets from the stack's pool, not a private one | 3,024 bytes of RAM back; `NX_DHCP` 7,340 -> 4,316 |
 | SANA-II reader stacks are 6 KB, were 8 KB | 6,144 bytes of RAM back per interface; measured worst 1,728 of 8,192 |
 | `run-mdns.sh -B` records the wire itself | 27 assertions instead of 10; was exit 3 on every Amiberry run |
+| Service-discovery config is not built when mDNS is off | minimal `AmiConfig` 3,608 -> 852; minimal `AmiNetStack` -2,752 |
 | DHCPv6 client stack 2 KB was 4 KB, its worker 1.5 KB was 2 KB | 2,560 bytes of RAM back; peaks 976 and 360, worker sized to a documented 604 |
 
 ## 0.26.2
