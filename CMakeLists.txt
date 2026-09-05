@@ -326,6 +326,25 @@ endif()
 # see the same number, which is exactly what a global define is for.  Nothing
 # is defined at the default, so the shipped build's compile lines -- and its
 # LTO options record -- are the bytes they were before this option existed.
+# Packets the DNS client keeps to itself.
+#
+# NetX Duo gives its resolver a private pool of 16, which is 9,712 bytes of the
+# stack's one allocation -- for a client that issues ONE query at a time from
+# one task (src/netstack/netstack_dns.c has two call sites and both are
+# synchronous). Four leaves a query and its retries in flight with room to
+# spare; NX_DNS_MAX_RETRIES is 3.
+#
+# DHCP has the same shape and is deliberately left alone: its pool is a fifth
+# the size and it is the path that brings the machine up.
+set(AMINETXDUO_DNS_PACKETS "16" CACHE STRING
+    "Packets in the DNS client's private pool (16 ships)")
+if(NOT AMINETXDUO_DNS_PACKETS EQUAL 16)
+    add_compile_definitions(
+        # No spaces: CMake passes this straight to the compiler and a shell
+        # splits it there, which silently truncated it to "(4" the first time.
+        "NX_DNS_PACKET_POOL_SIZE=(${AMINETXDUO_DNS_PACKETS}*(NX_DNS_PACKET_PAYLOAD+sizeof(NX_PACKET)))")
+endif()
+
 # Half-open connections held with their options recorded exactly.
 #
 # NetX Duo's own number is 512, chosen against the four megabytes this project

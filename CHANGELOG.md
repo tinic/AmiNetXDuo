@@ -25,6 +25,7 @@ version at the top when it merges.
 | Fixed problem sentences are codes too | minimal -188 |
 | Minimal drawer caches 32 half-open connections, was 512 | 32,160 bytes of RAM back; `bsdsocket.library` -3,500 |
 | Past the cache, SYN cookies carry the connection as before | no change to connections in flight |
+| Minimal drawer gives the resolver 4 packets, was 16 | 7,392 bytes of RAM back |
 
 ## 0.26.2
 
