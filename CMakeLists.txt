@@ -363,14 +363,25 @@ endif()
 # else.
 #
 # Buckets are a quarter of the entries, which is NetX Duo's own ratio.
-# 128 rather than NetX Duo's 512.  512 slots are 37,376 bytes and its own
-# comment sizes them against four megabytes; this project's smallest measured
-# machine is a 2 MB A1200 with 1.2 MB free, where 512 is three per cent of
-# everything the machine has.  128 is 9,344 bytes and still more half-open
-# connections than an Amiga serving httpd will ever hold at once -- and past
-# them the cookie takes over, so it is not a ceiling on anything.
-set(AMINETXDUO_TCP_SYNCACHE "128" CACHE STRING
-    "Half-open connections cached with exact options (128 ships)")
+#
+# 32 rather than NetX Duo's 512.  Measured sizeof(NX_IP.nx_ip_tcp_syncache),
+# and what each costs in the one AmiNetStack allocation:
+#
+#     entries   syncache   AmiNetStack
+#         512     37,376        83,460
+#         128     10,192        56,276
+#          64      5,136        51,220
+#          32      2,608        48,692     <- ships
+#          16      1,344        47,428
+#
+# 512 sizes itself against four megabytes in NetX Duo's own comment; the
+# smallest machine measured here is a 2 MB A1200 with 1.2 MB free.  Overflow
+# is not a ceiling -- past the cache the cookie takes over, and a smaller
+# cache costs option fidelity under a flood and nothing else.  Both drawers
+# ship 32.  tests/syncache/ inherits this define, so it always runs against
+# whatever ships; it was checked by hand at 32, 128 and 512.
+set(AMINETXDUO_TCP_SYNCACHE "32" CACHE STRING
+    "Half-open connections cached with exact options (32 ships)")
 if(NOT AMINETXDUO_TCP_SYNCACHE EQUAL 512)
     math(EXPR _anxd_syncache_buckets "${AMINETXDUO_TCP_SYNCACHE} / 4")
     if(_anxd_syncache_buckets LESS 1)

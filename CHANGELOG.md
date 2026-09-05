@@ -23,10 +23,9 @@ version at the top when it merges.
 | Configuration advice moved out of the resident library | minimal `bsdsocket.library` -1,796; full -1,288 |
 | The tick clock's diagnostics obey `AMINETXDUO_LOG` | minimal -2,228; full -2,224 |
 | Fixed problem sentences are codes too | minimal -188 |
-| Minimal drawer caches 32 half-open connections, was 512 | 32,160 bytes of RAM back; `bsdsocket.library` -3,500 |
 | Past the cache, SYN cookies carry the connection as before | no change to connections in flight |
 | Minimal drawer gives the resolver 4 packets, was 16 | 7,392 bytes of RAM back |
-| Every build caches 128 half-open connections, was 512 | full drawer 30,336 bytes of RAM back; `bsdsocket.library` -3,512 |
+| Every build caches 32 half-open connections, was 512 | `AmiNetStack` full 83,460 -> 48,692; `bsdsocket.library` -4,116 |
 | mDNS remembers 8 KB of what it hears, was 32 KB | full drawer 24,576 bytes of RAM back |
 | Every build gives the resolver 4 packets, was 16 | full drawer 7,680 bytes of RAM back |
 
