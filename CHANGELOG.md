@@ -9,35 +9,58 @@ version at the top when it merges.
 
 ## Unreleased
 
-| Change | Measure |
+### Memory a running machine keeps
+
+`bsdsocket.library` and `anxnet.device` are open for the life of the machine.
+
+| | v0.26.2 | now |
+|---|---|---|
+| Resident allocation, full drawer | 118,868 | **40,292** |
+| Resident allocation, minimal drawer | 64,624 | **14,016** |
+| SANA-II reader stacks, per interface | 24,576 | 18,432 |
+| `bsdsocket.library`, full drawer | 361,360 | 351,300 |
+| `bsdsocket.library`, minimal drawer | 233,996 | 224,272 |
+
+Largest reductions, all with the same features built:
+
+| | Saved |
 |---|---|
-| Minimal drawer builds two interface slots, was four | `AmiNetStack` 67,152 -> 64,624; BSS 4,644 -> 4,216; image 233,448 -> 234,040 |
-| Net resident RAM, minimal | -2,420 bytes |
-| IGMP no longer linked when `AMINETXDUO_MULTICAST=OFF` | minimal `bsdsocket.library` -612 bytes |
-| Builds with multicast on | byte-identical, 361,404 either way |
-| Installer can put the stack in its own drawer (issue #9) | `Assign AmiNetXDuo:` + `LIBS:`/`C:`/`DEVS:` `ADD` in `S:User-Startup`; proven on a real Workbench 3.1 |
-| Scripted install: `S:AmiNetXDuo-drawer` selects the drawer layout with no prompt | any user level |
-| NetX Duo statistics nothing reads are no longer counted | full `bsdsocket.library` -1,328; minimal -1,136 |
-| Config parsers for switched-off features are no longer built | minimal -348; full unchanged |
-| Per-object `.ident` strings dropped | no code change |
-| Configuration advice moved out of the resident library | minimal `bsdsocket.library` -1,796; full -1,288 |
-| The tick clock's diagnostics obey `AMINETXDUO_LOG` | minimal -2,228; full -2,224 |
-| Fixed problem sentences are codes too | minimal -188 |
-| Past the cache, SYN cookies carry the connection as before | no change to connections in flight |
-| Minimal drawer gives the resolver 4 packets, was 16 | 7,392 bytes of RAM back |
-| Every build caches 32 half-open connections, was 512 | `AmiNetStack` full 83,460 -> 48,692; `bsdsocket.library` -4,116 |
-| mDNS remembers 8 KB of what it hears, was 32 KB | full drawer 24,576 bytes of RAM back |
-| Every build gives the resolver 4 packets, was 16 | full drawer 7,680 bytes of RAM back |
-| 16 simultaneously listening ports, was 32 | 704 bytes of RAM back; past the last one `listen()` sets `ENOBUFS` |
-| DHCP client thread gets a 2 KB stack, was 4 KB | 2,048 bytes of RAM back; measured high-water 860 across the lease lifecycle |
-| DHCP draws packets from the stack's pool, not a private one | 3,024 bytes of RAM back; `NX_DHCP` 7,340 -> 4,316 |
-| SANA-II reader stacks are 6 KB, were 8 KB | 6,144 bytes of RAM back per interface; measured worst 1,728 of 8,192 |
-| `run-mdns.sh -B` records the wire itself | 27 assertions instead of 10; was exit 3 on every Amiberry run |
-| Service-discovery config is not built when mDNS is off | minimal `AmiConfig` 3,608 -> 852; minimal `AmiNetStack` -2,752 |
-| The resolver draws packets from the stack's pool, not a private one | full -2,624, minimal -2,528; `NX_DNS` 2,952 -> 328 |
-| `AMINETXDUO_DNS_PACKETS` removed | it sized a private pool that no longer exists, so it did nothing |
-| `check-ram-size.sh` gates `sizeof(AmiNetStack)` | default 40,292 of 41,000, minimal 14,016 of 15,000; nothing measured it before |
-| DHCPv6 client stack 2 KB was 4 KB, its worker 1.5 KB was 2 KB | 2,560 bytes of RAM back; peaks 976 and 360, worker sized to a documented 604 |
+| Half-open connection cache, 512 entries to 32 | 34,768 |
+| mDNS peer cache, 32 KB to 8 KB | 24,576 |
+| Resolver packet pool, 16 packets to 4 | 7,680 |
+| SANA-II reader stacks, 8 KB to 6 KB | 6,144 per interface |
+| DHCP and DNS draw packets from the stack's own pool | 5,648 |
+| Thread stacks sized to their measured high-water | 4,608 |
+| Service-discovery config built only with mDNS | 2,752, minimal drawer |
+| Listening-port table, 32 entries to 16 | 704 |
+
+### Install
+
+| | |
+|---|---|
+| The installer can put the stack in its own drawer (issue #9) | `Assign AmiNetXDuo:` plus `LIBS:`, `C:` and `DEVS:` `ADD` in `S:User-Startup` |
+| `S:AmiNetXDuo-drawer` picks that layout with no prompt | any user level |
+
+### Behaviour
+
+| | |
+|---|---|
+| 16 simultaneously listening ports, was 32 | `listen()` past the last one sets `ENOBUFS` |
+| Past the half-open cache, SYN cookies carry the connection | no change to connections in flight |
+| `netstat -s` and `ShowNetStatus` no longer print TCP and UDP counters as zeros | both say `not counted in this build` |
+
+### Build options
+
+| | |
+|---|---|
+| `AMINETXDUO_DNS_PACKETS` removed | the resolver has no private pool left to size |
+
+### Development
+
+| | |
+|---|---|
+| `tools/check-ram-size.sh` gates the resident allocation | full 40,292 of 41,000, minimal 14,016 of 15,000 |
+| `tests/tools/run-mdns.sh -B` records the wire itself | 27 assertions, was 10 |
 
 ## 0.26.2
 
