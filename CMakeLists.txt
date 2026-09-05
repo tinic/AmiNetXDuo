@@ -916,6 +916,20 @@ list(FILTER NETXDUO_SOURCES EXCLUDE REGEX "/nxd_ipv6_interface_find\\.c$")
 # ON: this gates the fused copy-and-sum itself, not just the verify. Built OFF
 # from a0f0c3e until now, which compiled the fusion out of every default build
 # and left the receive path copying and then walking the same bytes again.
+#
+# MEASURED 2026-09-05 on playhouse3, five bridged rounds each way, both builds
+# made in one sitting:
+#
+#     RX_VERIFY   tcp-rx      tcp-tx      bsdsocket.library
+#     ON          5,006,222   2,664,507   351,292
+#     OFF         4,741,319   2,574,317   348,340
+#
+# 5.6 per cent of receive and 3.5 of transmit, for 2,952 bytes.  Transmit
+# moves because a transmit run still takes its ACKs through the receive path,
+# so a cheaper receive feeds the sender.  This is the only knob measured so
+# far that moves the rate at all: RX_RUN_MAX at 8, 16 and 32 lands inside the
+# round-to-round spread, and every transmit-side knob is masked by the rig's
+# 4.5 ms round trip (tests/perf/rate-baseline.txt).
 option(AMINETXDUO_RX_VERIFY
        "Verify receive checksums in the SANA-II glue" ON)
 
