@@ -168,9 +168,16 @@ SEC_OF_TYPE = {"t": ".text", "T": ".text", "w": ".text", "W": ".text",
                "d": ".data", "D": ".data", "g": ".data", "G": ".data",
                "b": ".bss", "B": ".bss"}
 
-MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss))\s+"
+# ".text.foo" as well as ".text": -ffunction-sections is on for parts of this
+# tree, and ld names each contribution after the function.  Matching only the
+# bare section name skipped every one of them, so their addresses resolved to
+# whatever object was parsed last before the run -- crt0.o in an LTO build,
+# libgcc's _umoddi3.o without it.  Both looked like a hot function taking half
+# the profile; neither was running at all.  The suffix is outside the capture
+# so group(1) stays ".text".
+MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss))(?:\.\S+)?\s+"
                      r"0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
-MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss))\s*$")
+MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss))(?:\.\S+)?\s*$")
 MAP_SEC_TAIL = re.compile(r"^\s+0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
 
 

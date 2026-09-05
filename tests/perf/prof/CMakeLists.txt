@@ -2,7 +2,15 @@
 # -DAMINETXDUO_PROFILER=ON asks for it, and nothing in src/ knows it exists.
 #
 #   cmake -S . -B build/p20 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-#         -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU=68020 -DAMINETXDUO_PROFILER=ON
+#         -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_CPU=68020 -DAMINETXDUO_PROFILER=ON \
+#         -DAMINETXDUO_LTO=OFF
+#
+# -DAMINETXDUO_LTO=OFF IS NOT OPTIONAL.  With LTO the whole program lands in one
+# /tmp/cc*.ltrans0.ltrans.o that the linker deletes, tcpprof.c.obj contributes
+# 0 bytes marked "symbol from plugin", and prof-report.py's per-object nm pass
+# -- its only route to the statics -- has nothing left to read.  Every sample
+# then resolves to the nearest object parsed before it, and the report blames
+# crt0.o for half the run.
 #   cmake --build build/p20 --parallel --target profverify tcpprof
 #
 # Establish the sampler before believing it, on more than one CPU, because the
