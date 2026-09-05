@@ -243,6 +243,25 @@ def build_symbol_table(nm, mapfile, objdir):
     if not contributions:
         die("%s: no section placements found, is this a linker map?" % mapfile)
 
+    # REFUSE AN LTO LINK RATHER THAN RANK IT.  With LTO the whole program lands
+    # in one /tmp/cc*.ltrans0.ltrans.o that the linker deletes before this runs,
+    # every real object contributes 0 bytes ("symbol from plugin"), and the
+    # per-object nm pass below -- the only route to the statics -- has nothing
+    # to read.  Every sample then resolves to the nearest object that DID
+    # parse, and the report blames it for half the run: crt0.o at 57.9% in one
+    # measured case, a C++ static destructor that cannot run during a transfer.
+    # That is not a ranking with a caveat, it is a fiction, so it is not
+    # printed at all.
+    ltrans = [obj for _sec, _addr, size, obj in contributions
+              if ".ltrans" in obj and size]
+    if ltrans:
+        die("%s is an LTO link: %d bytes of code are in %s, which the linker\n"
+            "  deleted, so nothing here can be attributed.  Rebuild the "
+            "profiler with\n  -DAMINETXDUO_LTO=OFF and profile that."
+            % (mapfile,
+               sum(sz for _s, _a, sz, o in contributions if ".ltrans" in o),
+               ltrans[0].split("/")[-1]))
+
     cache = {}
     table = defaultdict(list)          # section -> [(addr, name, module)]
 
