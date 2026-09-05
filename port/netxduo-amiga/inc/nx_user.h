@@ -96,6 +96,14 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    it here.  */
 #define NX_MAX_LISTEN_REQUESTS                  16
 
+/* Measured, not guessed.  A fill-and-scan probe on the rig marked the stack
+   from inside the DHCP thread and read the deepest excursion across the whole
+   lease lifecycle -- init, selecting, requesting, bound, renewing, release --
+   at 860 bytes of NetX Duo's generic 4096.  2048 keeps 2.4x that margin.
+   Overflow here is silent corruption, not a fault: this machine has no MMU,
+   so the margin is deliberate and the measurement is the reason for it. */
+#define NX_DHCP_THREAD_STACK_SIZE               2048
+
 /* Changes the NX_TCP_SOCKET layout: an ABI break for anything compiled against
    the old header, so it cannot be a per-file define. */
 #define NX_ENABLE_EXTENDED_NOTIFY_SUPPORT

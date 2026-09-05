@@ -29,6 +29,7 @@ version at the top when it merges.
 | mDNS remembers 8 KB of what it hears, was 32 KB | full drawer 24,576 bytes of RAM back |
 | Every build gives the resolver 4 packets, was 16 | full drawer 7,680 bytes of RAM back |
 | 16 simultaneously listening ports, was 32 | 704 bytes of RAM back; past the last one `listen()` sets `ENOBUFS` |
+| DHCP client thread gets a 2 KB stack, was 4 KB | 2,048 bytes of RAM back; measured high-water 860 across the lease lifecycle |
 
 ## 0.26.2
 
