@@ -32,7 +32,7 @@
 #define TIMER_BASE_NAME     _tx_amiga_timer_base
 #include <proto/timer.h>
 
-#include "aminetxduo/compat.h"      /* ami_log() + AMI_LOG_* only */
+#include "aminetxduo/compat.h"      /* AMI_ERROR/AMI_WARN/AMI_INFO */
 
 /* Freed with FreeMem and the same size, so nothing downstream cares.  */
 static APTR _tx_amiga_alloc(ULONG size, ULONG memf)
@@ -685,8 +685,7 @@ ULONG                       svc_i;
 
         if (_tx_amiga_tick.tx_amiga_tick_clipped <= 3UL)
         {
-            ami_log(AMI_LOG_WARN,
-                    "tick: %ld ms since the last wakeup, wheel skips %ld "
+            AMI_WARN("tick: %ld ms since the last wakeup, wheel skips %ld "
                     "of %ld owed (cap %ld, previous service %ld us)",
                     (LONG) tx_amiga_eclock_ms(svc_delta, r -> tr_eclock_per_ms),
                     (LONG) (r -> tr_backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP),
@@ -862,7 +861,7 @@ UINT                 armed;
     {
 
         /* The preferred unit is not there at all.  */
-        ami_log(AMI_LOG_WARN, "tick: timer.device unit %ld would not open; using UNIT_MICROHZ",
+        AMI_WARN("tick: timer.device unit %ld would not open; using UNIT_MICROHZ",
                 (LONG) unit);
 
         if (guard != (struct timerequest *) 0)
@@ -881,7 +880,7 @@ UINT                 armed;
         else if (OpenDevice((CONST_STRPTR) "timer.device", (ULONG) UNIT_MICROHZ,
                             (struct IORequest *) tr, 0UL) != 0)
         {
-            ami_log(AMI_LOG_ERROR, "tick: no timer.device at all; ThreadX has no clock");
+            AMI_ERROR("tick: no timer.device at all; ThreadX has no clock");
             DeleteIORequest((APTR) tr);
             DeleteMsgPort(port);
             _tx_amiga_timer_park();
@@ -900,7 +899,7 @@ UINT                 armed;
     {
         /* Cannot happen on real hardware; refuse to divide by it if it does. */
         eclock_hz =  709379UL;
-        ami_log(AMI_LOG_WARN, "tick: ReadEClock reported 0 Hz; assuming %ld",
+        AMI_WARN("tick: ReadEClock reported 0 Hz; assuming %ld",
                 (LONG) eclock_hz);
     }
     eclock_per_ms =  eclock_hz / 1000UL;
@@ -935,8 +934,7 @@ UINT                 armed;
             (rate_chz > ((ULONG) TX_AMIGA_TIMER_PROBE_MAX_HZ * 100UL)))
         {
 
-            ami_log(AMI_LOG_WARN,
-                    "tick: timer.device unit %ld woke at %ld.%02ld Hz, outside %ld..%ld Hz, "
+            AMI_WARN("tick: timer.device unit %ld woke at %ld.%02ld Hz, outside %ld..%ld Hz, "
                     "falling back to UNIT_MICROHZ",
                     (LONG) unit, (LONG) (rate_chz / 100UL), (LONG) (rate_chz % 100UL),
                     (LONG) TX_AMIGA_TIMER_PROBE_MIN_HZ, (LONG) TX_AMIGA_TIMER_PROBE_MAX_HZ);
@@ -977,8 +975,7 @@ UINT                 armed;
 
         /* No UNIT_MICROHZ to fall back to, so there is nothing a failed
            validation could do except hang; skip it and hope.  */
-        ami_log(AMI_LOG_WARN,
-                "tick: no UNIT_MICROHZ available to validate against; "
+        AMI_WARN("tick: no UNIT_MICROHZ available to validate against; "
                 "using unit %ld unchecked", (LONG) unit);
     }
 
@@ -998,8 +995,7 @@ UINT                 armed;
     _tx_amiga_tick.tx_amiga_tick_unit       =  unit;
     _tx_amiga_tick.tx_amiga_tick_eclock_hz  =  eclock_hz;
 
-    ami_log(AMI_LOG_INFO,
-            "tick: %ld Hz from timer.device unit %ld (%ld.%02ld Hz wakeups), E-Clock %ld Hz",
+    AMI_INFO("tick: %ld Hz from timer.device unit %ld (%ld.%02ld Hz wakeups), E-Clock %ld Hz",
             (LONG) TX_TIMER_TICKS_PER_SECOND, (LONG) unit,
             (LONG) (_tx_amiga_tick.tx_amiga_tick_source_chz / 100UL),
             (LONG) (_tx_amiga_tick.tx_amiga_tick_source_chz % 100UL),
@@ -1076,8 +1072,7 @@ UINT                 armed;
         /* The one thing here that can fail: with no free signal the server has no
            way to reach the tick task, so the kernel falls back to waiting on the
            timer.device request at the tick period -- correct, and slower.  */
-        ami_log(AMI_LOG_WARN,
-                "tick: no free signal for the VBlank server; falling back to "
+        AMI_WARN("tick: no free signal for the VBlank server; falling back to "
                 "timer.device requests");
     }
 #endif
@@ -1117,21 +1112,19 @@ UINT                 armed;
 
     if (_tx_amiga_tick.tx_amiga_tick_clipped != 0UL)
     {
-        ami_log(AMI_LOG_WARN,
-                "tick: %ld stalls clipped, wheel %ld ticks behind the clock "
+        AMI_WARN("tick: %ld stalls clipped, wheel %ld ticks behind the clock "
                 "(worst %ld)",
                 (LONG) _tx_amiga_tick.tx_amiga_tick_clipped,
                 (LONG) _tx_amiga_tick.tx_amiga_tick_skew,
                 (LONG) _tx_amiga_tick.tx_amiga_tick_skew_peak);
     }
-    ami_log(AMI_LOG_INFO,
-            "tick: %ld wakeups -> %ld ticks in %ld ms (%ld empty, %ld caught up)",
+    AMI_INFO("tick: %ld wakeups -> %ld ticks in %ld ms (%ld empty, %ld caught up)",
             (LONG) _tx_amiga_tick.tx_amiga_tick_wakeups,
             (LONG) _tx_amiga_tick.tx_amiga_tick_delivered,
             (LONG) _tx_amiga_tick.tx_amiga_tick_uptime_ms,
             (LONG) _tx_amiga_tick.tx_amiga_tick_empty,
             (LONG) _tx_amiga_tick.tx_amiga_tick_catchups);
-    ami_log(AMI_LOG_INFO, "tick: %ld us in-task over %ld wakeups",
+    AMI_INFO("tick: %ld us in-task over %ld wakeups",
             (LONG) _tx_amiga_tick.tx_amiga_tick_service_us,
             (LONG) _tx_amiga_tick.tx_amiga_tick_wakeups);
 
@@ -1451,7 +1444,7 @@ UINT         status;
 
         /* A Task the port created: this function reaps every one of them, so it
            would be waiting for itself.  */
-        ami_log(AMI_LOG_ERROR, "kernel stop: called from a Task the port owns");
+        AMI_ERROR("kernel stop: called from a Task the port owns");
         return(TX_CALLER_ERROR);
     }
 
@@ -1474,7 +1467,7 @@ UINT         status;
     sig =  AllocSignal(-1);
     if (sig < 0)
     {
-        ami_log(AMI_LOG_ERROR, "kernel stop: no free Exec signal for the handshake");
+        AMI_ERROR("kernel stop: no free Exec signal for the handshake");
         return(TX_NO_MEMORY);
     }
     sigmask =  1UL << ((ULONG) sig);
@@ -1537,14 +1530,12 @@ UINT         status;
 
         if (status == TX_THREAD_ERROR)
         {
-            ami_log(AMI_LOG_ERROR,
-                    "kernel stop: refused, %ld application thread(s) and %ld live zombie(s)",
+            AMI_ERROR("kernel stop: refused, %ld application thread(s) and %ld live zombie(s)",
                     (LONG) remaining, (LONG) _tx_amiga_zombies_live);
         }
         else
         {
-            ami_log(AMI_LOG_ERROR,
-                    "kernel stop: cannot proceed, a stop is already running, or "
+            AMI_ERROR("kernel stop: cannot proceed, a stop is already running, or "
                     "the scheduler Task cannot be reached");
         }
         return(status);
@@ -1573,7 +1564,7 @@ UINT         status;
         if (_tx_amiga_stop_wait(&_tx_amiga_timer_gone, sigmask,
                                 (ULONG) TX_AMIGA_STOP_TIMEOUT_SECS) == TX_FALSE)
         {
-            ami_log(AMI_LOG_ERROR, "kernel stop: the tick Task did not exit");
+            AMI_ERROR("kernel stop: the tick Task did not exit");
             status =  TX_NOT_DONE;
         }
     }
@@ -1599,8 +1590,7 @@ UINT         status;
 
         if (_tx_amiga_zombies_live != zombies_before)
         {
-            ami_log(AMI_LOG_ERROR,
-                    "kernel stop: the system timer thread became a zombie");
+            AMI_ERROR("kernel stop: the system timer thread became a zombie");
             status =  TX_NOT_DONE;
         }
     }
@@ -1616,7 +1606,7 @@ UINT         status;
         if (_tx_amiga_stop_wait(&_tx_amiga_master_gone, sigmask,
                                 (ULONG) TX_AMIGA_STOP_TIMEOUT_SECS) == TX_FALSE)
         {
-            ami_log(AMI_LOG_ERROR, "kernel stop: the scheduler Task did not exit");
+            AMI_ERROR("kernel stop: the scheduler Task did not exit");
             status =  TX_NOT_DONE;
         }
     }
@@ -1637,8 +1627,7 @@ UINT         status;
         /* Something the port created is still alive and cannot be reached.  Leave
            every allocation where it is, the survivor is standing on some of it, and
            tell the caller that exiting is not safe.  */
-        ami_log(AMI_LOG_ERROR,
-                "kernel stop: FAILED, it is NOT safe to unload this program");
+        AMI_ERROR("kernel stop: FAILED, it is NOT safe to unload this program");
         return(status);
     }
 
@@ -1685,7 +1674,7 @@ UINT         status;
 
     _tx_amiga_kernel_stopping =  TX_FALSE;
 
-    ami_log(AMI_LOG_INFO, "kernel stop: ThreadX is down; nothing of the port is running");
+    AMI_INFO("kernel stop: ThreadX is down; nothing of the port is running");
 
     return(TX_SUCCESS);
 }
