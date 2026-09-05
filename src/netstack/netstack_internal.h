@@ -71,9 +71,12 @@
  * an event flag and calls into the client: 604 bytes measured, and no Exec
  * calls, so it needs none of the headroom the SANA-II paths do.
  */
-/* 1024, measured: same probe read this worker at 360 in every run.  Was
-   2048. */
-#define AMI_DHCPV6_WORK_STACK_SIZE  1024
+/* 1536.  Two measurements disagree and this takes the WORSE one: the comment
+   below records 604 from the commit that added the thread, and an all-stacks
+   fill-and-scan probe read 360 across run-dhcpv6, run-bringup, run-mld and
+   run-socket.  1024 would be 1.7x of 604, under the 2.5x this file settles
+   on elsewhere; 1536 is 2.5x.  No MMU, so the worse number wins. */
+#define AMI_DHCPV6_WORK_STACK_SIZE  1536
 
 /*
  * How long a shutdown waits for the DHCPv6 Release to be answered.  A machine
