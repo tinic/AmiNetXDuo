@@ -255,6 +255,9 @@ ULONG n68k_rx_verify_sum(NX_PACKET *packet, ULONG sum, ULONG length, UINT *drop)
 }
 
 VOID ami_sana2_tx_defer(AmiSana2If *iface) { (VOID)iface; }
+/* The reader reaps finished writes itself rather than waking the IP
+   thread to do it (sana2_rx.c, loop top). */
+VOID ami_sana2_tx_reap(AmiSana2If *iface) { (VOID)iface; }
 VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
 {
     (VOID)iface; (VOID)task; (VOID)sigbit;

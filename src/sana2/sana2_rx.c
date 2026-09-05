@@ -1212,7 +1212,26 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * writes is what returns packets to the pool it is waiting for.
          */
         if (rx->reap_mask != 0)
-            ami_sana2_tx_defer(iface);
+        {
+            /*
+             * Reap here rather than ami_sana2_tx_defer(). Deferring sets the
+             * driver event flag, which wakes the IP thread, which takes
+             * nx_ip_protection, enters the driver at
+             * NX_LINK_DEFERRED_PROCESSING and calls exactly this function
+             * (sana2_driver.c:496) -- a thread wake, a mutex round trip and a
+             * dispatch, per completion signal, to run a walk this thread can
+             * run itself. ami_sana2_tx_reap() is documented callable from any
+             * thread and from several at once (sana2_tx.c:188): GetMsg() is
+             * atomic and nx_packet_transmit_release() does its own TX_DISABLE.
+             * ami_sana2_tx_send() already calls it directly for that reason.
+             *
+             * It also removes a race with the comment above: the pool-empty
+             * path below needs the finished writes released BEFORE it retries
+             * ami_sana2_rx_post(), and a deferred reap had not necessarily run
+             * by then.
+             */
+            ami_sana2_tx_reap(iface);
+        }
 
         if (ami_sana2_rx_post(rx) == 0)
         {
