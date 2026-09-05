@@ -61,14 +61,19 @@
  * AMI_AUTOIP_STACK_SIZE is: 812 bytes measured, plus headroom for the Exec
  * calls its send path reaches on a target with no guard page.
  */
-#define AMI_DHCPV6_STACK_SIZE       4096
+/* 2048, measured: a fill-and-scan probe over every ThreadX stack read this
+   thread's deepest byte at 976 across run-dhcpv6, run-bringup, run-mld and
+   run-socket.  Was 4096.  No MMU, so the 2x margin is deliberate. */
+#define AMI_DHCPV6_STACK_SIZE       2048
 
 /*
  * And the deferred-work thread's, which is small because that thread wakes on
  * an event flag and calls into the client: 604 bytes measured, and no Exec
  * calls, so it needs none of the headroom the SANA-II paths do.
  */
-#define AMI_DHCPV6_WORK_STACK_SIZE  2048
+/* 1024, measured: same probe read this worker at 360 in every run.  Was
+   2048. */
+#define AMI_DHCPV6_WORK_STACK_SIZE  1024
 
 /*
  * How long a shutdown waits for the DHCPv6 Release to be answered.  A machine
