@@ -52,7 +52,10 @@ CROSS_CONFIGS=(
     # here, and with all three on by default these arms are also the only place
     # each of them is compiled without the others.
     "nosack:-DAMINETXDUO_TCP_SACK=OFF"
-    "nots:-DAMINETXDUO_TCP_TIMESTAMP=OFF"
+    # Timestamps default OFF since the read rate measured +5.4% and +6.8%
+    # without them, so this arm is the ON side: the one place the option's
+    # code, and the NX_TCP_SOCKET layout it changes, is compiled at all.
+    "ts:-DAMINETXDUO_TCP_TIMESTAMP=ON"
     "nowscale:-DAMINETXDUO_TCP_WINDOW_SCALING=OFF"
     # The serial diagnostic log, which every shipping build leaves out because
     # bsdsocket.library stays resident and the sentences are 27,948 bytes of

@@ -644,12 +644,30 @@ endif()
 # RFC 1323 section 3 timestamps, on every segment once both SYNs carry the
 # option.  Also a layout change to NX_TCP_SOCKET, so also whole-tree.  It costs
 # twelve bytes of every segment that carries data -- MSS 1460 becomes 1448 on a
-# 1500-byte link -- and about four per cent of the write rate on an A1200.  The
-# read rate, which is the figure tests/perf/run-fitzbench.sh compares on, does
-# not move.
+# 1500-byte link -- and it is parsed on every arriving segment, which the wire
+# profile shows as nx_tcp_timestamp_option_get at 1.8%.
 #
-# Build with -DAMINETXDUO_TCP_TIMESTAMP=OFF to take it out.
-option(AMINETXDUO_TCP_TIMESTAMP "Offer the RFC 1323 timestamps option" ON)
+# OFF BY DEFAULT since the measurement below.  The note that used to sit here
+# said the read rate "does not move", measured with run-fitzbench.sh.  Three
+# sittings of tools/check-rate.sh, five rounds each, medians, comparison point
+# rebuilt in the same sitting, disagree:
+#
+#   sitting   read ON      read OFF     delta
+#   q2        4,998,825    5,336,530    +6.8%
+#   q3        4,982,103    5,251,218    +5.4%
+#
+# Two same-code baselines in different sittings came out 0.29% apart, so a
+# median of five rounds resolves well under one per cent and both deltas are
+# real.  The write rate moves with it, +5.3% and +3.9% on the same two arms.
+#
+# What is given up is PAWS and RFC 1323 round-trip timing.  PAWS guards against
+# a wrapped sequence number, which at five megabits needs about two hours of
+# continuous transfer on one connection to become possible at all, and the
+# retransmit timer falls back to Karn's algorithm on unretransmitted segments.
+# Neither is worth six per cent of the read rate on this machine.
+#
+# Build with -DAMINETXDUO_TCP_TIMESTAMP=ON to put it back.
+option(AMINETXDUO_TCP_TIMESTAMP "Offer the RFC 1323 timestamps option" OFF)
 if(NOT AMINETXDUO_TCP_TIMESTAMP)
     add_compile_definitions(AMINETXDUO_TCP_TIMESTAMP_OFF)
 endif()

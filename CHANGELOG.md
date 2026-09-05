@@ -41,6 +41,29 @@ Largest reductions, all with the same features built:
 | The installer can put the stack in its own drawer (issue #9) | `Assign AmiNetXDuo:` plus `LIBS:`, `C:` and `DEVS:` `ADD` in `S:User-Startup` |
 | `S:AmiNetXDuo-drawer` picks that layout with no prompt | any user level |
 
+### Speed
+
+RFC 1323 timestamps are no longer offered by default. They cost twelve bytes
+of every data segment and are parsed on every segment that arrives.
+
+Transfer rate, bits per second, median of five rounds, comparison point
+rebuilt in the same sitting:
+
+| | read | write |
+|---|---|---|
+| Timestamps on | 4,982,103 | 2,669,824 |
+| Timestamps off | **5,251,218** | 2,457,056 |
+| | **+5.4%** | |
+
+A second sitting measured +6.8% on the read rate. What is given up is PAWS,
+which guards a wrapped sequence number and needs about two hours of continuous
+transfer on one connection to matter at these rates, and RFC 1323 round-trip
+timing, which falls back to Karn's algorithm.
+
+| | |
+|---|---|
+| `-DAMINETXDUO_TCP_TIMESTAMP=ON` | puts timestamps back |
+
 ### Behaviour
 
 | | |
@@ -54,6 +77,7 @@ Largest reductions, all with the same features built:
 | | |
 |---|---|
 | `AMINETXDUO_DNS_PACKETS` removed | the resolver has no private pool left to size |
+| `AMINETXDUO_TCP_TIMESTAMP` now defaults to `OFF` | was `ON`; see Speed above |
 
 ### Development
 
