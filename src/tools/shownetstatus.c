@@ -870,11 +870,23 @@ static VOID show_tcp_stats(const ToolStats *st)
 {
     tool_printf("\nTCP\n");
 
+    /* Two different absences, and they are not the same sentence.  The macro
+       is a build that never counts: NX_DISABLE_TCP_INFO guards the increments
+       (nx_tcp_socket_retransmit.c:290) while nx_tcp_info_get() still returns
+       NX_SUCCESS, so every figure below would be a zero that cannot change.
+       have_tcp is the query itself failing.  Neither means TCP is off -- it is
+       running either way, and the connection list above proves it. */
+#ifdef NX_DISABLE_TCP_INFO
+    tool_printf("  not counted in this build\n");
+    (VOID)st;
+    return;
+#else
     if (!st->have_tcp)
     {
-        tool_printf("  TCP is not enabled on this stack\n");
+        tool_printf("  no counters: the stack is not readable from here\n");
         return;
     }
+#endif
 
     tool_printf("  packets sent      %10lu    bytes sent        %10lu\n",
                 st->tcp_packets_sent, st->tcp_bytes_sent);
@@ -892,6 +904,12 @@ static VOID show_tcp_stats(const ToolStats *st)
 static VOID show_udp_stats(const ToolStats *st)
 {
     tool_printf("\nUDP\n");
+
+#ifdef NX_DISABLE_UDP_INFO
+    tool_printf("  not counted in this build\n");
+    (VOID)st;
+    return;
+#endif
 
     if (!st->have_udp)
     {
