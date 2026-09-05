@@ -85,7 +85,16 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    peer pins the whole pool.  The pool-wide low watermark half stays inert. */
 #define NX_ENABLE_LOW_WATERMARK
 
-#define NX_MAX_LISTEN_REQUESTS                  32
+/* One entry per simultaneously LISTENING port, 44 bytes each, and the array
+   lives inside NX_IP (nx_api.h:3368) -- so this is resident RAM, not a
+   per-caller cost.  A second listen on a port already listening is rejected
+   with NX_DUPLICATE_LISTEN and consumes nothing, and past the last entry
+   nx_tcp_server_socket_listen returns NX_MAX_LISTEN, which errno.c maps to
+   ENOBUFS.  32 was 1,408 bytes; 16 is 704 and still more listening ports at
+   once than an Amiga has daemons.  NOTE: this define is unconditional, so
+   -DNX_MAX_LISTEN_REQUESTS on the command line is silently ignored -- edit
+   it here.  */
+#define NX_MAX_LISTEN_REQUESTS                  16
 
 /* Changes the NX_TCP_SOCKET layout: an ABI break for anything compiled against
    the old header, so it cannot be a per-file define. */

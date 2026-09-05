@@ -28,6 +28,7 @@ version at the top when it merges.
 | Every build caches 32 half-open connections, was 512 | `AmiNetStack` full 83,460 -> 48,692; `bsdsocket.library` -4,116 |
 | mDNS remembers 8 KB of what it hears, was 32 KB | full drawer 24,576 bytes of RAM back |
 | Every build gives the resolver 4 packets, was 16 | full drawer 7,680 bytes of RAM back |
+| 16 simultaneously listening ports, was 32 | 704 bytes of RAM back; past the last one `listen()` sets `ENOBUFS` |
 
 ## 0.26.2
 
