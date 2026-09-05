@@ -7,6 +7,10 @@
 # (see below), and config_list.c -- which owns the growing interface list --
 # is covered by the host test rather than only by compilation.
 
+# config_advice.c is NOT here. It holds the words for the advice codes, and
+# only the C: commands link it: bsdsocket.library installs no reporter, so it
+# can never print advice and has no business carrying 3.8 KB of sentences into
+# a machine's resident memory. src/tools/CMakeLists.txt adds it to each tool.
 add_library(aminetxduo_config STATIC
     config_text.c
     config_text6.c
@@ -61,6 +65,9 @@ target_compile_options(aminetxduo_config PRIVATE -fno-optimize-sibling-calls)
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_config
         test/test_config.c
+        # The host test installs a reporter, so it is one of the things that
+        # CAN print advice and therefore links the words.
+        config_advice.c
         config_text.c
         config_text6.c
         config_parse.c

@@ -115,7 +115,15 @@ VOID ami_cfg_problem_file(const char *path);
  * Neither is copied: both can point at the caller's stack.
  */
 VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
-                     const char *hint);
+                     UWORD hint);
+
+/*
+ * The same, for the two places whose advice has to be built at run time -- a
+ * card list interpolated into a sentence. Those cannot be a code, so they stay
+ * strings and the library carries them; everything else is a code.
+ */
+VOID ami_cfg_problem_built(ULONG line, UWORD severity, const char *text,
+                           const char *hint);
 
 /* TRUE when a reporter is installed, so a caller can skip building a message. */
 BOOL ami_cfg_problems_wanted(VOID);

@@ -20,6 +20,7 @@ version at the top when it merges.
 | NetX Duo statistics nothing reads are no longer counted | full `bsdsocket.library` -1,328; minimal -1,136 |
 | Config parsers for switched-off features are no longer built | minimal -348; full unchanged |
 | Per-object `.ident` strings dropped | no code change |
+| Configuration advice moved out of the resident library | minimal `bsdsocket.library` -1,796; full -1,288 |
 
 ## 0.26.2
 

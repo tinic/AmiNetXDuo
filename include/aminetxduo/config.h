@@ -562,12 +562,22 @@ typedef struct AmiCfgProblem {
     ULONG       line;       /* 1-based; 0 when it is about the whole file  */
     UWORD       severity;   /* AMI_CFG_PROBLEM_*                           */
     const char *text;       /* what is wrong: one sentence, no full stop   */
-    const char *hint;       /* what to do about it, or NULL                */
+    UWORD       hint;       /* AMI_CFG_ADVICE_*, 0 when there is none      */
+    const char *hint_text;  /* set instead of `hint` when the advice had to */
+                            /* be assembled; NULL otherwise                 */
 } AmiCfgProblem;
 
 typedef VOID (*AmiCfgReporter)(const AmiCfgProblem *problem, APTR user);
 
 VOID ami_config_set_reporter(AmiCfgReporter reporter, APTR user);
+
+/*
+ * The words for a problem's advice code.  Defined in src/config/config_advice.c,
+ * which only the C: commands link: bsdsocket.library installs no reporter and so
+ * can never print advice.  NULL for AMI_CFG_ADVICE_NONE and for a code it does
+ * not know.
+ */
+const char *ami_cfg_advice(UWORD code);
 
 /* Dotted-quad <-> ULONG (host byte order). Returns FALSE on malformed input. */
 BOOL  ami_config_parse_ip(const char *text, ULONG *out);

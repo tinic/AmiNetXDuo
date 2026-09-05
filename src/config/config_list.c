@@ -20,6 +20,8 @@
  */
 
 #include "config_internal.h"
+
+#include "aminetxduo/config_advice.h"
 #include "aminetxduo/compat.h"
 
 /* -------------------------------------------------------------- utilities */
@@ -191,9 +193,7 @@ static VOID insert_interface(AmiConfig *cfg, const AmiIfConfig *iface)
         ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
         ami_cfg_join3(text, sizeof(text), "there was not enough memory to "
                       "read '", iface->name, "', so that interface is missing");
-        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR, text,
-                        "This is memory, not a limit on how many interfaces "
-                        "may be described.  Close a program and try again.");
+        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR, text, AMI_CFG_ADVICE_THIS_IS_MEMORY_NOT);
         ami_cfg_problem_file(NULL);
         return;
     }
@@ -233,9 +233,7 @@ VOID ami_cfg_take_interface(AmiConfig *cfg, const char *name)
         ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
         ami_cfg_join3(text, sizeof(text), "the file '", name,
                       "' cannot be used, so that interface does not exist");
-        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR, text,
-                        "The problems listed above it say why.  "
-                        "NetSetup can rewrite the file from scratch.");
+        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR, text, AMI_CFG_ADVICE_THE_PROBLEMS_LISTED_ABOVE);
         ami_cfg_problem_file(NULL);
         return;
     }
@@ -267,10 +265,7 @@ VOID ami_config_load_interfaces(AmiConfig *cfg)
         ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
         ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
                         "the DEVS:NetInterfaces drawer holds no usable "
-                        "interface file",
-                        "One file per network card goes in there.  The name "
-                        "of the file is the name of the card, and eth0 is "
-                        "the usual choice.  NetSetup writes one.");
+                        "interface file", AMI_CFG_ADVICE_ONE_FILE_PER_NETWORK);
         ami_cfg_problem_file(NULL);
     }
 }

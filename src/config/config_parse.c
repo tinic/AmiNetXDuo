@@ -9,6 +9,8 @@
  */
 
 #include "config_internal.h"
+
+#include "aminetxduo/config_advice.h"
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/compat.h"
 
@@ -232,7 +234,7 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
         ami_cfg_join3(hint, sizeof(hint), known, NULL, NULL);
     }
 
-    ami_cfg_problem(line, AMI_CFG_PROBLEM_WARN, text, hint);
+    ami_cfg_problem_built(line, AMI_CFG_PROBLEM_WARN, text, hint);
 }
 
 /*
@@ -282,9 +284,7 @@ static VOID report_inert_keyword(ULONG line, const char *key)
             ami_cfg_join3(text, sizeof(text), key,
                           " is read and does nothing: ",
                           cfg_inert_keys[i].why);
-            ami_cfg_problem(line, AMI_CFG_PROBLEM_NOTE, text,
-                            "Roadshow acts on it.  This stack does not.  "
-                            "The line is harmless and can stay.");
+            ami_cfg_problem(line, AMI_CFG_PROBLEM_NOTE, text, AMI_CFG_ADVICE_ROADSHOW_ACTS_ON_IT);
             return;
         }
     }
@@ -296,7 +296,7 @@ static VOID report_inert_keyword(ULONG line, const char *key)
 /* "bad ADDRESS '10.0.0.300'" + whatever the keyword's own advice is. */
 
 static VOID report_bad_value(ULONG line, UWORD severity, const char *keyword,
-                             const char *value, const char *hint)
+                             const char *value, UWORD hint)
 {
     char text[128];
     char quoted[96];
@@ -308,6 +308,23 @@ static VOID report_bad_value(ULONG line, UWORD severity, const char *keyword,
     ami_cfg_join3(text, sizeof(text), keyword, quoted, NULL);
 
     ami_cfg_problem(line, severity, text, hint);
+}
+
+
+static VOID report_bad_value_built(ULONG line, UWORD severity,
+                                   const char *keyword, const char *value,
+                                   const char *hint)
+{
+    char text[128];
+    char quoted[96];
+
+    if (!ami_cfg_problems_wanted())
+        return;
+
+    ami_cfg_join3(quoted, sizeof(quoted), " cannot be '", value, "'");
+    ami_cfg_join3(text, sizeof(text), keyword, quoted, NULL);
+
+    ami_cfg_problem_built(line, severity, text, hint);
 }
 
 /* CARD names one board by name where UNIT only says "Nth in probe order".
@@ -379,7 +396,7 @@ static VOID report_bad_card(ULONG line, const char *value)
     ami_cfg_join3(hint, sizeof(hint),
                   "CARD says which board the driver binds to, one of ", list,
                   ".  Leave CARD out and UNIT decides.");
-    report_bad_value(line, AMI_CFG_PROBLEM_ERROR, "CARD", value, hint);
+    report_bad_value_built(line, AMI_CFG_PROBLEM_ERROR, "CARD", value, hint);
 }
 
 #define CFG_HINT_KEYWORDS \
@@ -537,10 +554,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
             AMI_WARN("config: interface name '%s' truncated to '%s'", name, short_name);
             ami_cfg_join3(text, sizeof(text), "the interface name is longer "
                           "than 15 characters, so it becomes '", short_name, "'");
-            ami_cfg_problem(0, AMI_CFG_PROBLEM_WARN, text,
-                            "Rename the file in DEVS:NetInterfaces to something "
-                            "15 characters or shorter and use that name from "
-                            "now on.");
+            ami_cfg_problem(0, AMI_CFG_PROBLEM_WARN, text, AMI_CFG_ADVICE_RENAME_THE_FILE_IN);
         }
         ami_cfg_copy_string(out->name, sizeof(out->name), short_name);
     }
@@ -574,11 +588,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: empty DEVICE", out->name);
                     ami_cfg_problem(lineno, AMI_CFG_PROBLEM_ERROR,
-                                    "DEVICE has no value",
-                                    "DEVICE names the driver for the network "
-                                    "card, for example DEVICE=a2065.device.  "
-                                    "The driver itself belongs in "
-                                    "DEVS:Networks/.");
+                                    "DEVICE has no value", AMI_CFG_ADVICE_DEVICE_NAMES_THE_DRIVER);
                     break;
                 }
                 ami_cfg_copy_string(out->device, sizeof(out->device), value);
@@ -611,9 +621,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad UNIT '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "UNIT",
-                                     value,
-                                     "UNIT is a plain number and is 0 on almost "
-                                     "every card.  Unit 0 was assumed.");
+                                     value, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN);
                 }
                 break;
 
@@ -627,10 +635,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad ADDRESS '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "ADDRESS",
-                                     value,
-                                     CFG_HINT_IPV4 "  Write ADDRESS=DHCP to "
-                                     "have the address handed out "
-                                     "automatically.");
+                                     value, AMI_CFG_ADVICE_AN_ADDRESS_IS_FOUR);
                 }
                 break;
 
@@ -643,10 +648,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad NETMASK '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "NETMASK",
-                                     value,
-                                     "A netmask looks like an address.  On a "
-                                     "home network it is almost always "
-                                     "255.255.255.0.");
+                                     value, AMI_CFG_ADVICE_A_NETMASK_LOOKS_LIKE);
                 }
                 break;
 
@@ -655,9 +657,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad GATEWAY '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "GATEWAY",
-                                     value,
-                                     "The gateway is the address of the router. "
-                                     CFG_HINT_IPV4);
+                                     value, AMI_CFG_ADVICE_THE_GATEWAY_IS_THE);
                 }
                 break;
 
@@ -669,9 +669,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 else
                 {
                     AMI_WARN("config: %s: bad MTU '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MTU", value,
-                                     "MTU is a plain number of bytes, normally "
-                                     "1500.  Leave it out and the driver decides.");
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MTU", value, AMI_CFG_ADVICE_MTU_IS_A_PLAIN);
                 }
                 break;
 
@@ -684,12 +682,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad CONFIGURE '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "CONFIGURE",
-                                     value,
-                                     "CONFIGURE is DHCP (let the network hand "
-                                     "out an address), STATIC (use the ADDRESS "
-                                     "below), AUTO (pick one without a server) "
-                                     "or NONE (no IPv4 on this interface).  "
-                                     "STATIC was assumed.");
+                                     value, AMI_CFG_ADVICE_CONFIGURE_IS_DHCP_LET);
                 }
                 break;
 
@@ -707,10 +700,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad IPTYPE '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "IPTYPE",
-                                     value,
-                                     "IPTYPE is either a packet type number "
-                                     "(2048 for Ethernet) or one of DHCP, "
-                                     "STATIC and AUTO.");
+                                     value, AMI_CFG_ADVICE_IPTYPE_IS_EITHER_A);
                 }
                 break;
 
@@ -719,8 +709,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad MDNS '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MDNS",
-                                     value,
-                                     "MDNS is YES or NO.  NO was assumed.");
+                                     value, AMI_CFG_ADVICE_MDNS_IS_YES_OR);
                     out->mdns = FALSE;
                 }
                 break;
@@ -731,9 +720,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad DOWNGOESOFFLINE '%s'",
                              out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "DOWNGOESOFFLINE", value,
-                                     "DOWNGOESOFFLINE is YES or NO.  NO was "
-                                     "assumed.");
+                                     "DOWNGOESOFFLINE", value, AMI_CFG_ADVICE_DOWNGOESOFFLINE_IS_YES_OR);
                     out->down_goes_offline = FALSE;
                 }
                 break;
@@ -745,9 +732,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad REQUIRESINITDELAY '%s'",
                              out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "REQUIRESINITDELAY", value,
-                                     "REQUIRESINITDELAY is YES or NO.  NO was "
-                                     "assumed.");
+                                     "REQUIRESINITDELAY", value, AMI_CFG_ADVICE_REQUIRESINITDELAY_IS_YES_OR);
                     out->requires_init_delay = FALSE;
                 }
                 break;
@@ -763,10 +748,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad HARDWAREADDRESS '%s'",
                              out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "HARDWAREADDRESS", value,
-                                     "HARDWAREADDRESS is six hexadecimal "
-                                     "bytes, as in 02:00:00:12:34:56.  The "
-                                     "card's own address was kept.");
+                                     "HARDWAREADDRESS", value, AMI_CFG_ADVICE_HARDWAREADDRESS_IS_SIX_HEXADECIMAL);
                     out->have_hw_address = FALSE;
                 }
                 break;
@@ -786,8 +768,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad STATE '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "STATE",
-                                     value,
-                                     "STATE is UP or DOWN.  UP was assumed.");
+                                     value, AMI_CFG_ADVICE_STATE_IS_UP_OR);
                 }
                 break;
 
@@ -823,12 +804,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                              "'%s' ignored", out->name,
                              (long)AMI_CFG_MAX_ADDRESS6, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "ADDRESS6",
-                                     value,
-                                     "An interface carries at most two static "
-                                     "IPv6 addresses, because the third slot "
-                                     "the stack has per interface holds the "
-                                     "link-local address.  This line was "
-                                     "ignored.");
+                                     value, AMI_CFG_ADVICE_AN_INTERFACE_CARRIES_AT);
                 }
                 else
                 {
@@ -866,11 +842,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad CONFIGURE6 '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
-                                     "CONFIGURE6", value,
-                                     "CONFIGURE6 is AUTO (follow the router), "
-                                     "DHCP (ask a DHCPv6 server), STATIC (use "
-                                     "the ADDRESS6 below), LINKLOCAL (fe80:: "
-                                     "only) or OFF.  AUTO was assumed.");
+                                     "CONFIGURE6", value, AMI_CFG_ADVICE_CONFIGURE6_IS_AUTO_FOLLOW);
                 }
                 break;
             }
@@ -902,10 +874,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         AMI_WARN("config: %s: no DEVICE keyword, ignoring interface", out->name);
         ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
                         "there is no DEVICE line, so the file does not say "
-                        "which network card to use",
-                        "Add a line such as  DEVICE = a2065.device  that "
-                        "names the driver for the card, or let NetSetup "
-                        "write the file.");
+                        "which network card to use", AMI_CFG_ADVICE_ADD_A_LINE_SUCH);
         return AMI_CFG_ERR_SYNTAX;
     }
 
@@ -951,11 +920,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
             ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
                             "the interface has no address: there is no ADDRESS "
                             "line, CONFIGURE does not say DHCP, and nothing "
-                            "asks for IPv6 either",
-                            "Add  CONFIGURE = DHCP  to have an address handed "
-                            "out, or  ADDRESS = 192.168.1.10  and  NETMASK = "
-                            "255.255.255.0  to set one by hand, or  CONFIGURE6 "
-                            "= AUTO  for an IPv6-only interface.");
+                            "asks for IPv6 either", AMI_CFG_ADVICE_ADD_CONFIGURE_DHCP_TO);
         }
     }
 
@@ -1036,10 +1001,7 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
             {
                 AMI_WARN("config: name_resolution: bad NAMESERVER '%s'", value);
                 report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "NAMESERVER",
-                                 value,
-                                 "A name server is given by address, not by "
-                                 "name.  On a home network it is usually the "
-                                 "router, for example 192.168.1.1.");
+                                 value, AMI_CFG_ADVICE_A_NAME_SERVER_IS);
             }
             else if (out->nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
             {
@@ -1124,9 +1086,7 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
 
             AMI_WARN("config: name_resolution: unknown keyword '%s'", key);
             ami_cfg_join3(text, sizeof(text), "unknown keyword '", key, "'");
-            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text,
-                            "This file holds NAMESERVER, DOMAIN and SEARCH "
-                            "lines.  The line was ignored.");
+            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text, AMI_CFG_ADVICE_THIS_FILE_HOLDS_NAMESERVER);
         }
     }
 }
@@ -1520,10 +1480,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
                 {
                     AMI_WARN("config: bad gateway address '%s'", value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR, "the gateway",
-                                     value,
-                                     "This is the address of the router, and it "
-                                     "must be on the same network as this "
-                                     "machine. " CFG_HINT_IPV4);
+                                     value, AMI_CFG_ADVICE_THIS_IS_THE_ADDRESS);
                 }
             }
             else if (ami_cfg_stricmp(key, "default") == 0 ||
@@ -1556,10 +1513,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
 
                 AMI_WARN("config: routes: unknown keyword '%s'", key);
                 ami_cfg_join3(text, sizeof(text), "unknown keyword '", key, "'");
-                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text,
-                                "A routes file holds DEFAULT=<router address> "
-                                "for the default route, and DST=/VIA= pairs for "
-                                "anything else.  The line was ignored.");
+                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text, AMI_CFG_ADVICE_A_ROUTES_FILE_HOLDS);
             }
         }
 
@@ -1618,10 +1572,7 @@ VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
 
                 AMI_WARN("config: tcp_handler: unknown keyword '%s'", key);
                 ami_cfg_join3(text, sizeof(text), "unknown keyword '", key, "'");
-                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text,
-                                "This file switches the TCP: device on or off "
-                                "and understands nothing else.  Write "
-                                "TCPHANDLER=OFF, or OFF on its own.");
+                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN, text, AMI_CFG_ADVICE_THIS_FILE_SWITCHES_THE);
                 continue;
             }
 
@@ -1633,9 +1584,7 @@ VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
             {
                 AMI_WARN("config: tcp_handler: bad value '%s'", value);
                 report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "TCPHANDLER",
-                                 value,
-                                 "Write ON or OFF.  The TCP: device was left "
-                                 "switched on.");
+                                 value, AMI_CFG_ADVICE_WRITE_ON_OR_OFF);
             }
         }
     }
@@ -1775,7 +1724,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
         {
             AMI_WARN("config: service_discovery: bad type '%s'", type);
             report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "the service type",
-                             type, CFG_HINT_DNSSD "  The line was ignored.");
+                             type, AMI_CFG_ADVICE_A_LINE_IS_TYPE);
             continue;
         }
 
@@ -1784,10 +1733,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
         {
             AMI_WARN("config: service_discovery: bad port for '%s'", type);
             report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "the port",
-                             (port_text != NULL) ? port_text : "",
-                             "A port is a number from 1 to 65535, and it is "
-                             "the port the server listens on.  "
-                             "The line was ignored.");
+                             (port_text != NULL) ? port_text : "", AMI_CFG_ADVICE_A_PORT_IS_A);
             continue;
         }
 
@@ -1822,10 +1768,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
                 {
                     AMI_WARN("config: service_discovery: '%s' has a dot", rest);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "the service name", rest,
-                                     "A service name is one label, so it "
-                                     "cannot contain a dot.  The line was "
-                                     "ignored.");
+                                     "the service name", rest, AMI_CFG_ADVICE_A_SERVICE_NAME_IS);
                     break;
                 }
             }
@@ -1839,9 +1782,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
             AMI_WARN("config: service_discovery: name too long on line %lu",
                      (unsigned long)lineno);
             ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
-                            "the service name is too long",
-                            "Keep it under sixty characters.  The line was "
-                            "ignored.");
+                            "the service name is too long", AMI_CFG_ADVICE_KEEP_IT_UNDER_SIXTY);
             continue;
         }
 
@@ -1850,9 +1791,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
             AMI_WARN("config: service_discovery: txt too long on line %lu",
                      (unsigned long)lineno);
             ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
-                            "the txt= field is too long",
-                            "A TXT record holds at most 255 characters.  The "
-                            "line was ignored.");
+                            "the txt= field is too long", AMI_CFG_ADVICE_A_TXT_RECORD_HOLDS);
             continue;
         }
 
@@ -1866,9 +1805,7 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
                          (long)max);
                 ami_cfg_problem(lineno, AMI_CFG_PROBLEM_WARN,
                                 "there are more services here than can be "
-                                "advertised",
-                                "At most eight are announced.  The ones after "
-                                "that were ignored.");
+                                "advertised", AMI_CFG_ADVICE_AT_MOST_EIGHT_ARE);
             }
             continue;
         }

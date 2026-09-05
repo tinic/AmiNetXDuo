@@ -165,6 +165,12 @@ function(aminetxduo_add_tool target output)
         target_link_libraries(${target} PRIVATE aminetxduo_config)
     endif()
 
+    # The words for the configuration advice codes. Here rather than in
+    # aminetxduo_config so the library never links them; a command that prints
+    # a problem is the only thing that can use them.
+    target_sources(${target} PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/config_advice.c")
+
     set_target_properties(${target} PROPERTIES OUTPUT_NAME "${output}")
 
     # The one thing --gc-sections can quietly take that no test would notice:

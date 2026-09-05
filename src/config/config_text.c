@@ -9,6 +9,8 @@
  */
 
 #include "config_internal.h"
+
+#include "aminetxduo/config_advice.h"
 #include "aminetxduo/compat.h"
 
 static char ami_cfg_empty[] = "";
@@ -119,7 +121,7 @@ BOOL ami_cfg_problems_wanted(VOID)
 }
 
 VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
-                     const char *hint)
+                     UWORD hint)
 {
     AmiCfgProblem problem;
 
@@ -131,6 +133,25 @@ VOID ami_cfg_problem(ULONG line, UWORD severity, const char *text,
     problem.severity = severity;
     problem.text     = text;
     problem.hint     = hint;
+    problem.hint_text = (const char *)0;
+
+    ami_cfg_reporter(&problem, ami_cfg_reporter_user);
+}
+
+VOID ami_cfg_problem_built(ULONG line, UWORD severity, const char *text,
+                           const char *hint)
+{
+    AmiCfgProblem problem;
+
+    if (ami_cfg_reporter == NULL || text == NULL)
+        return;
+
+    problem.file     = ami_cfg_current_file;
+    problem.line     = line;
+    problem.severity = severity;
+    problem.text     = text;
+    problem.hint      = AMI_CFG_ADVICE_NONE;
+    problem.hint_text = hint;
 
     ami_cfg_reporter(&problem, ami_cfg_reporter_user);
 }

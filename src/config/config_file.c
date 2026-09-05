@@ -9,6 +9,8 @@
  */
 
 #include "config_internal.h"
+
+#include "aminetxduo/config_advice.h"
 #include "aminetxduo/compat.h"
 
 #include <dos/dos.h>
@@ -122,9 +124,7 @@ BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
         ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
         ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
                         "there is no DEVS:NetInterfaces drawer, so nothing "
-                        "describes a network card",
-                        "Run NetSetup: it asks which card this machine has, "
-                        "then writes the drawer and the file.");
+                        "describes a network card", AMI_CFG_ADVICE_RUN_NETSETUP_IT_ASKS);
         ami_cfg_problem_file(NULL);
         return FALSE;
     }

@@ -842,8 +842,14 @@ static VOID collect(const AmiCfgProblem *problem, APTR user)
     strncpy(seen[seen_count].text, problem->text,
             sizeof(seen[0].text) - 1);
     seen[seen_count].hint[0] = '\0';
-    if (problem->hint != NULL)
-        strncpy(seen[seen_count].hint, problem->hint, sizeof(seen[0].hint) - 1);
+    {
+        const char *advice = (problem->hint_text != NULL)
+                                 ? problem->hint_text
+                                 : ami_cfg_advice(problem->hint);
+
+        if (advice != NULL)
+            strncpy(seen[seen_count].hint, advice, sizeof(seen[0].hint) - 1);
+    }
 
     if (stub_verbose)
         printf("    line %lu: %s\n", (unsigned long)problem->line,
