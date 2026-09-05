@@ -409,6 +409,8 @@ static void t_udp_readability(void)
     CHECK(bsd_readable(s) == TRUE, "shutdown(SHUT_RD) is an immediate EOF");
 }
 
+static NX_PACKET h_probe_packet;
+
 static void t_tcp_readability(void)
 {
     AmiSocket *s;
@@ -424,10 +426,24 @@ static void t_tcp_readability(void)
     s->as_Nx.tcp.nx_tcp_socket_receive_queue_count = 1;
     CHECK(bsd_readable(s) == TRUE, "a queued segment is readable");
 
+    /* The old case here set tcp_bytes_available with the queue count at zero
+       and asserted readable. That state is not reachable: the count is bumped
+       for every segment put on the receive queue, in order or not, so a zero
+       count means an empty queue and nx_tcp_socket_bytes_available() would
+       return zero too. It asserted the mock's freedom, not the stack's.
+       What bsd_readable() now tests is the queue head itself, so assert on
+       that -- including the defensive case where head and count disagree,
+       which must still report ready rather than lose the wakeup. */
+    h_reset();
+    s = h_tcp(0, NX_TCP_ESTABLISHED);
+    s->as_Nx.tcp.nx_tcp_socket_receive_queue_head = &h_probe_packet;
+    CHECK(bsd_readable(s) == TRUE, "a packet on the queue is readable");
+
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);
     h.tcp_bytes_available = 42;
-    CHECK(bsd_readable(s) == TRUE, "bytes available are readable");
+    CHECK(bsd_readable(s) == FALSE,
+          "an empty queue is not readable, whatever a byte count claims");
 
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);

@@ -324,8 +324,6 @@ ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags)
 
 BOOL bsd_readable(AmiSocket *sock)
 {
-    ULONG available = 0;
-
     if (sock == NULL)
         return FALSE;
 
@@ -371,11 +369,15 @@ BOOL bsd_readable(AmiSocket *sock)
         if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count > 0)
             return TRUE;
 
-        if (nx_tcp_socket_bytes_available(&sock->as_Nx.tcp, &available)
-                == NX_SUCCESS && available > 0)
-            return TRUE;
-
-        return FALSE;
+        /* Only reached with the count at zero, and the count is bumped for
+           every queued segment, in order or not (nx_tcp_socket_state_data_
+           check.c:589 and :935). nx_tcp_socket_bytes_available() would take
+           nx_ip_protection and the THREADS_ONLY Forbid/FindTask/Permit to
+           walk a queue it has just been told is empty, and return zero. Test
+           the head instead: one aligned load, and it still reports ready if
+           the count and the queue ever disagree. Select may over-report. */
+        return (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_head != NX_NULL)
+                   ? TRUE : FALSE;
     }
 
     if (sock->as_SoError != 0)
@@ -505,9 +507,32 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
         AmiSocket *sock;
         ULONG      word = BSD_FD_WORD(fd);
         ULONG      mask = BSD_FD_MASK(fd);
-        BOOL       want_read   = (in_read   != NULL && (in_read[word]   & mask) != 0);
-        BOOL       want_write  = (in_write  != NULL && (in_write[word]  & mask) != 0);
-        BOOL       want_except = (in_except != NULL && (in_except[word] & mask) != 0);
+        BOOL       want_read, want_write, want_except;
+
+        /* Callers pass nfds near the table size with only a handful of bits
+           set. At each word boundary, step over the whole word when none of
+           the three sets watches anything in it. */
+        if (mask == 1UL)
+        {
+            ULONG any = 0;
+
+            if (in_read != NULL)
+                any |= in_read[word];
+            if (in_write != NULL)
+                any |= in_write[word];
+            if (in_except != NULL)
+                any |= in_except[word];
+
+            if (any == 0)
+            {
+                fd += BSD_FD_BITS - 1;   /* the loop's ++ completes the step */
+                continue;
+            }
+        }
+
+        want_read   = (in_read   != NULL && (in_read[word]   & mask) != 0);
+        want_write  = (in_write  != NULL && (in_write[word]  & mask) != 0);
+        want_except = (in_except != NULL && (in_except[word] & mask) != 0);
 
         if (!want_read && !want_write && !want_except)
             continue;

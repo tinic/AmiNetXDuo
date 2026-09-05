@@ -12,6 +12,7 @@
 #include "udp_queue.h"
 
 #include "nx_ip.h"
+#include "nx_tcp.h"
 #include "nx_ipv4.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
@@ -900,7 +901,12 @@ UINT bsd_recv_once(VOID *arg, ULONG wait)
 {
     BsdRecvArgs *a = (BsdRecvArgs *)arg;
 
-    return nx_tcp_socket_receive(a->tcp, a->packet, wait);
+    /* _nx_ and not nx_: the socket is already validated by the caller,
+       and bsd_nx_need() has supplied the thread context, so the _nxe_
+       wrapper's pointer/id test and its THREADS_ONLY Forbid/FindTask/
+       Permit are re-checking what bsdsocket has proved -- once per
+       received packet. Same shape as socket.c:60 and options.c:968. */
+    return _nx_tcp_socket_receive(a->tcp, a->packet, wait);
 }
 
 typedef struct
@@ -1130,7 +1136,8 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                 BsdRecvArgs args;
                 BOOL        aborted;
 
-                /* nx_tcp_socket_receive() is THREADS_ONLY. */
+                /* _nx_tcp_socket_receive() is THREADS_ONLY: this is what
+                   supplies the thread context it requires. */
                 if (!bsd_nx_need(base, held))
                 {
                     if (copied > 0)
