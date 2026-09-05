@@ -326,6 +326,33 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
               (long)iface->stats.alloc_failures,
               (long)iface->stats.rx_errors);
 
+#ifdef AMINETXDUO_RX_VERIFY
+    /*
+     * Whether the fused checksum is actually being used. The copy hook sums
+     * the frame out of the loads the copy is already doing, but only on its
+     * aligned path; anything else falls to n68k_rx_verify(), which walks the
+     * whole payload a second time -- about 2,900 cycles on a 1460-byte
+     * segment, against a per-frame drain budget of roughly 15,750. So
+     * from_copy well below transport_ok is a re-walk on most frames, and the
+     * counters existed with nothing printing them.
+     */
+    AMI_ERROR("rxprobe verify: transport %ld from_copy %ld ip %ld, "
+              "bad ip %ld transport %ld",
+              (long)n68k_rx_verify_stats.transport_ok,
+              (long)n68k_rx_verify_stats.from_copy,
+              (long)n68k_rx_verify_stats.ip_ok,
+              (long)n68k_rx_verify_stats.bad_ip,
+              (long)n68k_rx_verify_stats.bad_transport);
+    AMI_ERROR("rxprobe verify skips: short %ld version %ld length %ld "
+              "frag %ld proto %ld udp_nosum %ld",
+              (long)n68k_rx_verify_stats.skip_short,
+              (long)n68k_rx_verify_stats.skip_version,
+              (long)n68k_rx_verify_stats.skip_length,
+              (long)n68k_rx_verify_stats.skip_fragment,
+              (long)n68k_rx_verify_stats.skip_protocol,
+              (long)n68k_rx_verify_stats.skip_udp_nosum);
+#endif
+
     if (!sp->armed)
     {
         AMI_ERROR("rxprobe seq: no bulk flow seen");
