@@ -151,9 +151,28 @@
  * header says its figures run about 800 light against what tests/stack
  * measures in a guest, because a call through a function pointer is not a
  * symbol in the assembly.
+ *
+ * 6144 = AMI_IP_STACK_SIZE 4096 + 2048 for the reader's own frames, and it is
+ * MEASURED, not guessed.  A fill-and-scan probe on the rig -- pattern laid in
+ * before tx_thread_create(), scanned where the reader is about to block --
+ * read the deepest byte any reader ever touched.  That figure includes
+ * BeginIO(), which no static pass can see:
+ *
+ *     load                      worst reader
+ *     iperf tcp+udp, a2065          1720
+ *     iperf tcp+udp, ariadne        1720
+ *     iperf tcp+udp, xsurf          1728
+ *     ipv6 bringup / mld / dhcpv6   1100
+ *     ifdhcp                         880
+ *     ipv6 socket                    268
+ *
+ * 1728 worst against a 3072 static budget that the script admits runs ~800
+ * light: 6144 clears even that pessimistic 3872 by 2272 bytes.  There is no
+ * MMU, so a frame that does not fit writes over what lies below and the
+ * machine dies somewhere unrelated -- hence the margin over the measurement.
  */
 #ifndef AMI_SANA2_RX_STACK_SIZE
-#define AMI_SANA2_RX_STACK_SIZE     8192
+#define AMI_SANA2_RX_STACK_SIZE     6144
 #endif
 
 /* Ticks to spin on a full TX ring before dropping the frame. */

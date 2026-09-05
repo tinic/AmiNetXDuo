@@ -91,10 +91,12 @@ RX_EDGES=(
 # StackSwap first, and src/tools/fetch.c asks for 64 KB -- so its budget is
 # about noticing growth, not about survival.
 #
-# Neither is the SANA-II reader: AMI_SANA2_RX_STACK_SIZE is 8192 and its budget
-# is a little over a third of that, which is the room the device driver's own
-# BeginIO() frames need underneath.  They run on whichever stack calls them and
-# none of them is a symbol on this path, so nothing here measures them.
+# Neither is the SANA-II reader: AMI_SANA2_RX_STACK_SIZE is 6144 and its budget
+# is half of that, which is the room the device driver's own BeginIO() frames
+# need underneath.  They run on whichever stack calls them and none of them is
+# a symbol on this path, so nothing here measures them.  A runtime probe does:
+# sana2_internal.h carries the numbers, worst 1728 across three drivers under
+# iperf, which is what sized the 6144.
 BUDGETS=(
     "bsdsocket:ami_sana2_rx_thread:3072"
     "bsdsocket:bsd_getaddrinfo:2432"
