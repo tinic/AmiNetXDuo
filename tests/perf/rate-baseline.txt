@@ -4,6 +4,17 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# RAISED 2026-09-06 to 5,522,706 on receive, for the two wins in d8d4eb0b.
+# That is the LOWEST of main's clean-build observations, not the best:
+#
+#     e314b332 head arm    5,569,952
+#     d8d4eb0b after arm   5,522,706   <- taken
+#
+# Both from CLEAN builds with the library md5 printed before a round ran, six
+# rounds each alternating position.  Transmit is left at 2,945,193: the two
+# changes measured +0.0% and -0.1% on it alone and -0.7% together, all inside
+# what a rig whose ack is ~4.5 ms can say.
+#
 # RAISED 2026-09-06 for the receive campaign.  The numbers below are the
 # LOWEST five-round MEDIAN observed for origin/main across five independent
 # sittings, not the median of one sitting, so the baseline is never flattered
@@ -110,5 +121,5 @@
 # the net68k checksum serves both directions, and NX_TCP_MAXIMUM_TX_QUEUE at 8
 # against the vendor's 20 measures 2,664,243 against 2,667,163 over five
 # rounds each in one sitting.
-tcp-rx 5398483
+tcp-rx 5522706
 tcp-tx 2945193

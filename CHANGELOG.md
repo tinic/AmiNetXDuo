@@ -9,6 +9,24 @@ version at the top when it merges.
 
 ## Unreleased
 
+### Receive
+
+Measured on playhouse3 against a comparison point built clean in the same
+sitting, library md5 printed before a round ran, six rounds alternating which
+arm went first.
+
+| | before | now |
+|---|---|---|
+| iperf tcp-rx, bits/s | 5,347,499 | **5,522,706** |
+| Fitz read, kbytes/s | 3,424 | **3,564** |
+| iperf tcp-tx, bits/s | 2,997,212 | 2,976,433 |
+
+| change | receive |
+|---|---|
+| SANA-II reader drains 32 frames a run, not 8 | +1.5% |
+| a CMD_READ returns to the head of its opener's queue | +1.0% |
+
+
 ## 0.26.3
 
 ### Memory a running machine keeps
