@@ -402,15 +402,24 @@ class Resolver:
         base, hits = top[0]
         runner = top[1][1] if len(top) > 1 else 0
 
-        # SEPARATION, not a fraction of the slots.  A fraction was the first
-        # test here and it was wrong: it refused a base that 33 of 150 slots
-        # agreed on, when a coincidental difference earns one vote or two and
-        # thirty-three recurring is not a coincidence.  Not every slot can
-        # vote -- --gc-sections drops symbols, some slots hold inline code and
-        # some point outside .text -- so what matters is that the winner
-        # stands clear of the field, not that most of the field turned up.
-        if hits < 8 or hits < 3 * max(runner, 1):
-            return ("%s: no base stood out (best %d, next %d, %d slots)"
+        # Either the winner carries most of the slots, or it stands clear of
+        # the runner-up.  Both, because each catches a different way of being
+        # wrong, and one of them caught a mistake of mine: with the OBJDIR
+        # pointed at the CMakeFiles directory instead of the link directory
+        # the map resolved eight libc symbols and nothing else, four distinct
+        # addresses, and every one of 150 targets paired with all four -- a
+        # four-way tie at 33 votes each.  Separation refused it.  A fraction
+        # would have refused it too; what it could not have done is say why.
+        #
+        # With the objdir right, the true base takes every slot: 150 of 150,
+        # next best 46.  A coincidental difference can reach the tens when
+        # there are 25,000 symbols to pair against, so a bare vote count
+        # proves nothing on its own.
+        if hits < 8 or not (hits >= 3 * max(runner, 1)
+                            or hits >= (3 * len(targets)) // 4):
+            return ("%s: no base stood out (best %d, next %d, %d slots) -- "
+                    "check OBJDIR is the link directory, the one the map's "
+                    "object paths are relative to"
                     % (libname, hits, runner, len(targets)))
 
         rows = sorted((base + a, nm, libname) for a, nm, _mod in code)
