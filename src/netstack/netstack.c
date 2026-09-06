@@ -444,13 +444,30 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     ami_event(NETEVENT_SHUTDOWN, NETEVENT_NOINDEX, (ULONG)ns->ns_IfaceCount);
 
 #ifdef AMINETXDUO_RX_VERIFY
-    AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu (v6 %lu), "
+    /*
+     * from_copy IS THE ONE THAT PRICES THE PATH, which is why it is here now.
+     * n68k_rx_verify_sum() reuses the sum the copy hook already carried and
+     * touches only the header; when it cannot -- Ethernet padding, a fragment,
+     * a UDP datagram with no checksum, anything where `copied != total`
+     * (n68k_rx_verify.c:707) -- it falls back to n68k_rx_verify(), which reads
+     * THE WHOLE FRAME a second time.  Only the carried-sum paths set from_copy
+     * (n68k_rx_verify.c:684 and :771) and the fallback sets transport_ok alone
+     * (ibid.:537), so transport_ok - from_copy is the number of frames that
+     * paid a second full pass.  The wire profile puts _n68k_rx_verify_sum at
+     * 2.7%, which is a lot for header arithmetic, and this is the counter that
+     * says whether that is what it is doing.
+     */
+    AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu (v6 %lu, "
+             "from_copy %lu, reread %lu), "
              "bad_ip %lu, bad_transport %lu; skip short %lu / ver %lu / "
              "len %lu / frag %lu / proto %lu / udp0 %lu / ext %lu; "
              "v6_ext %lu",
              (unsigned long)n68k_rx_verify_stats.ip_ok,
              (unsigned long)n68k_rx_verify_stats.transport_ok,
              (unsigned long)n68k_rx_verify_stats.v6_ok,
+             (unsigned long)n68k_rx_verify_stats.from_copy,
+             (unsigned long)(n68k_rx_verify_stats.transport_ok -
+                             n68k_rx_verify_stats.from_copy),
              (unsigned long)n68k_rx_verify_stats.bad_ip,
              (unsigned long)n68k_rx_verify_stats.bad_transport,
              (unsigned long)n68k_rx_verify_stats.skip_short,
