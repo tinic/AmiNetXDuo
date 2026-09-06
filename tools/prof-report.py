@@ -300,8 +300,42 @@ def build_symbol_table(nm, mapfile, objdir):
         # global happens to precede it.
         table[section].append((addr, "[%s]" % module, module))
 
+    # Several symbols can land on ONE address: --gc-sections folds, a static
+    # of the same name exists in more than one object, and every object also
+    # contributes its own "[module]" marker row.  resolve() takes the last row
+    # at or before the PC, so a collision silently hands out whichever name
+    # sorts last -- and it does it with a straight face.
+    #
+    # That is not hypothetical.  _nx_tcp_socket_state_data_check runs on every
+    # received segment and sits at the same address as
+    # _nx_tcp_socket_state_data_trim; the profile named the trim, showed it at
+    # 2.4%, and left data_check out of the top 25 entirely.  Reading that as
+    # "the peer is sending duplicate data" survived until the stack's own
+    # counters said 0 retransmitted, 0 dropped, 0 out of order.
+    #
+    # So: a marker row loses to any real symbol at its address, and real
+    # symbols that still collide are reported joined.  A name with a "|" in it
+    # is the tool saying it cannot tell which of these it is, which is worth
+    # more than a confident wrong one.
     for section in table:
-        table[section] = sorted(set(table[section]))
+        rows = sorted(set(table[section]))
+        merged = []
+        i = 0
+        while i < len(rows):
+            j = i
+            while j + 1 < len(rows) and rows[j + 1][0] == rows[i][0]:
+                j += 1
+            group = rows[i:j + 1]
+            real = [r for r in group if not r[1].startswith("[")]
+            pick = real if real else group
+            if len(pick) == 1:
+                merged.append(pick[0])
+            else:
+                merged.append((pick[0][0],
+                               "|".join(r[1] for r in pick),
+                               pick[0][2]))
+            i = j + 1
+        table[section] = merged
     return table
 
 
