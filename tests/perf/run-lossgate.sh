@@ -17,6 +17,19 @@
 # against a 66.0 baseline and write_kbs 2,524.0 against 2,139.0, both `ok`, and
 # the verdict still FAIL on the two it could not collect.
 #
+# The same tree with -DAMINETXDUO_NX_COUNTERS=ON, nine arms, PASSES:
+#
+#     dropped_rx      19.0     13.0   -31.6%   ok
+#     read_kbs        66.0    314.0  +375.8%   ok
+#     retransmitted    0.0      0.0     0.0%   SKIP
+#     write_kbs     2139.0   2527.0   +18.1%   ok
+#
+# Note read_kbs 314 here against 326 on the shipping build: that gap IS the
+# counters, which are per-packet work.  It is why the rate figures from this
+# gate are not comparable to tools/check-rate.sh's, and why the baseline has to
+# be read on the build it was recorded on.  tools/ci.sh's lossgate stage builds
+# that variant itself now.
+#
 # The other half of the performance gate: throughput on a link that loses
 # packets.
 #
