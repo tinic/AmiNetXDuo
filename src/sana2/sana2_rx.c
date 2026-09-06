@@ -326,6 +326,30 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
               (long)iface->stats.alloc_failures,
               (long)iface->stats.rx_errors);
 
+    {
+        UWORD ri;
+
+        for (ri = 0; ri < AMI_SANA2_RX_READERS; ri++)
+        {
+            const UBYTE *st = (const UBYTE *)iface->rx[ri].stack;
+            ULONG        used = 0;
+
+            if (st == NULL)
+                continue;
+
+            /* The stack grows down, so the deepest byte touched is the first
+               one from the low end that is no longer the pattern. */
+            while (used < (ULONG)AMI_SANA2_RX_STACK_SIZE &&
+                   st[used] == 0xA5)
+                used++;
+
+            AMI_ERROR("rxprobe stack: reader %ld used %ld of %ld, %ld spare",
+                      (long)ri,
+                      (long)((ULONG)AMI_SANA2_RX_STACK_SIZE - used),
+                      (long)AMI_SANA2_RX_STACK_SIZE, (long)used);
+        }
+    }
+
 #ifdef AMINETXDUO_RX_VERIFY
     /*
      * Whether the fused checksum is actually being used. The copy hook sums
@@ -1602,6 +1626,24 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
 
         rx->stack = ami_sana2_alloc_stack((ULONG)AMI_SANA2_RX_STACK_SIZE);
+#ifdef AMINETXDUO_RXPROBE
+        /*
+         * Lay a pattern in before the thread exists, so the report below can
+         * say how deep the reader actually went.  The figure in the header
+         * over AMI_SANA2_RX_STACK_SIZE came from an ad-hoc probe that was
+         * never committed, and it was taken with OUR driver bound -- the
+         * board's own .device runs its BeginIO() on this stack too, and no
+         * static pass can see that call.  There is no MMU, so an overrun is
+         * silent corruption somewhere unrelated.
+         */
+        if (rx->stack != NULL)
+        {
+            ULONG w;
+
+            for (w = 0; w < (ULONG)AMI_SANA2_RX_STACK_SIZE; w++)
+                ((UBYTE *)rx->stack)[w] = 0xA5;
+        }
+#endif
         if (rx->stack == NULL)
         {
             AMI_ERROR("sana2: no memory for reader stack");
