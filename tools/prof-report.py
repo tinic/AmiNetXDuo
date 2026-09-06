@@ -415,7 +415,14 @@ class Resolver:
         # next best 46.  A coincidental difference can reach the tens when
         # there are 25,000 symbols to pair against, so a bare vote count
         # proves nothing on its own.
-        if hits < 8 or not (hits >= 3 * max(runner, 1)
+        # The floor is four, not eight.  Eight is unreachable for a DEVICE by
+        # construction: the standard table is Open, Close, Expunge, ExtFunc,
+        # BeginIO, AbortIO and that is all six of them, so anxnet.device
+        # arrived unanimous at 6 of 6 against a runner-up of 2 and was refused
+        # for not having enough slots to be sure with.  Unanimity over a small
+        # table is evidence; an arbitrary floor written for libraries with
+        # hundreds of entries is not.
+        if hits < 4 or not (hits >= 3 * max(runner, 1)
                             or hits >= (3 * len(targets)) // 4):
             return ("%s: no base stood out (best %d, next %d, %d slots) -- "
                     "check OBJDIR is the link directory, the one the map's "
