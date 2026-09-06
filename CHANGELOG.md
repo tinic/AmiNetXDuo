@@ -54,6 +54,29 @@ in flight already.
 | null control | `md5 7522050095ef` in both trees; transmit 2,966,517 against 2,966,516 |
 | separation | the null's transmit stays in 2.94-3.01M in both directories while this arm sits at 3.10-3.15M |
 
+The LANCE receive buffers start two bytes in, so the Ethernet payload the copy
+hook reads lands on a longword instead of two bytes off it.
+
+| | before | now | |
+|---|---|---|---|
+| iperf tcp-rx | 5,564,476 | **5,736,227** | +3.09% |
+| iperf tcp-rx, position 1 | 5,529,779 | 5,863,958 | +6.04% |
+| iperf tcp-rx, position 2 | 5,599,174 | 5,693,392 | +1.68% |
+| iperf tcp-tx | 3,115,306 | 3,123,097 | +0.25% |
+
+| | |
+|---|---|
+| Fitz read, 6 sittings | 3,500.5 | 3,489.0 | -0.33% |
+| Fitz write, 6 sittings | 2,601 | 2,598 | -0.12% |
+
+| | |
+|---|---|
+| what it removes | the CPU's misaligned-longword penalty on every load of the fused copy+checksum |
+| fused copy+checksum | 15% of the receive profile |
+| transmit | flat; the transmit buffers keep their old phase |
+| Fitz | flat; a request-and-response workload is bound by round trips, not by the cost of a byte |
+| boards | a2065 and ariadne, sharing the LANCE core |
+
 ## 0.26.3
 
 ### Memory a running machine keeps

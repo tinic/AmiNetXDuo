@@ -42,9 +42,112 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define LE_INIT_OFF     0x0000                  /* 24 bytes */
 #define LE_RXD_OFF      0x0020                  /* 8 x 8 */
 #define LE_TXD_OFF      0x0060                  /* 4 x 8 */
-#define LE_RXB_OFF      0x0100
-#define LE_TXB_OFF      (LE_RXB_OFF + LE_RX_RING * LE_BUFSZ)
+
+/*
+ * THE RECEIVE BUFFERS START TWO BYTES IN, AND THAT IS THE POINT.
+ *
+ * What the receive path reads out of this buffer is not the frame, it is the
+ * PAYLOAD: netdev_payload() hands the copy hook `frame + 14`
+ * (netdev_event.c:145).  A buffer at 0 mod 4 therefore delivers a source
+ * pointer at 2 mod 4, and _n68k_copy_sum_longwords -- the fused copy and
+ * checksum, the largest single item on the receive profile at 15% -- reads it
+ * with `movem.l a1@+` (n68k_checksum.S:345).
+ *
+ * That routine has NO aligned/unaligned split.  It issues the same longword
+ * accesses either way, so a source at 2 mod 4 does not take a different code
+ * path, it takes the CPU's misaligned-longword penalty on every load.
+ * bench/sumbench.c timed it at the real phase, 200 x 1460 bytes on an A1200:
+ *
+ *     variant     aligned      src +2       cost
+ *     lm14        148.3 ns/B   203.4 ns/B   +37.2%
+ *     ldmovem     159.9        207.9        +30.0%
+ *
+ * Two earlier attempts to recover that both moved the DESTINATION and both
+ * lost: AMI_SANA2_RX_PAD 0 trades this for a misaligned IP header and a
+ * misaligned packet->app copy, and reading aligned longwords from `from - 2`
+ * and shift-combining them measured 425.5 ns/B against 199.1 (af07fc38).
+ * Neither considered moving the SOURCE, which costs nothing at all: the Am7990
+ * takes a byte-granular buffer address in RMD0/RMD1 and this board's SRAM is
+ * 16 bits wide, so any EVEN start is as good to the chip as any other.  Two
+ * bytes in puts `frame + 14` at 0 mod 4 against a destination already there
+ * (AMI_SANA2_RX_PAD 2 plus the 14-byte header is 16).
+ *
+ * Everything else that reads this buffer stays word-aligned and legal on a
+ * 68000: the type at `frame + 12` is a word at 2 mod 4, the addresses go
+ * through three word moves, and the broadcast test's one longword read at
+ * 2 mod 4 is even, so it is two bus cycles as it always was.
+ *
+ * MEASURED, playhouse3/a2065, clean build per arm with the library and device
+ * md5s printed before a round ran, six rounds alternating which arm went
+ * first, all twelve rc=0:
+ *
+ *     medians      before       after       delta
+ *     tcp-rx       5,564,476    5,736,227   +3.09%
+ *       position 1 5,529,779    5,863,958   +6.04%
+ *       position 2 5,599,174    5,693,392   +1.68%
+ *     tcp-tx       3,115,306    3,123,097   +0.25%
+ *
+ * The flat transmit is the control, not a disappointment: the transmit buffers
+ * keep their old phase, so a receive-only change is exactly what should show
+ * here.  Predicted 4.1% (15.1% of the profile times the 27.1% penalty) against
+ * 3.09% measured -- short frames carry the same per-call overhead over fewer
+ * bytes, and the ACKs a bulk receive sends are all short.
+ *
+ * AND FITZ DOES NOT MOVE AT ALL, which is the more useful half of the result.
+ * Six sittings an arm, alternated: read 3,500.5 -> 3,489.0 (-0.33%), write
+ * 2,601 -> 2,598 (-0.12%), ranges overlapping throughout.
+ *
+ * That is the OPPOSITE of 792a8cdf, which bought +3% on iperf and +9% on Fitz,
+ * and the pair of results says what each workload is actually bound by:
+ *
+ *     saving                     iperf bulk      Fitz        transmit
+ *     per-wake / latency         +3%             +9%         +5.3%
+ *     per-byte (this change)     +3.09%          flat        flat
+ *
+ * Fitz reads 32 KB chunks over a request and a response, so its clock is
+ * dominated by round trips rather than by the cost of a byte; iperf bulk is
+ * the other way round.  So "Fitz gains about three times what iperf does" is
+ * NOT a property of this tree -- it was a property of that one change, and
+ * this one shows the ratio going the other way.  Expect a per-byte win to show
+ * on bulk receive and nowhere else.
+ */
+#define LE_RXB_PHASE    2
+#define LE_RXB_OFF      (0x0100 + LE_RXB_PHASE)
+/*
+ * Past the end of the receive region and back on a longword.
+ *
+ * TRANSMIT HAS THE SAME SKEW AND THIS DOES NOT FIX IT.  The frame is built in
+ * this buffer from byte 0, so the CopyFrom hook's DESTINATION is txbuf + 14,
+ * two bytes out of phase exactly as the receive source was -- the penalty
+ * moves to the store side instead of the load side.  It is left alone here on
+ * purpose: it is a separate measurement on a direction that carries about half
+ * the bytes, and folding it into the same arm would make one A/B answer two
+ * questions.  Do not read this line as "transmit is already aligned".
+ */
+#define LE_TXB_OFF      (0x0100 + LE_RX_RING * LE_BUFSZ + 4)
 #define LE_END          (LE_TXB_OFF + LE_TX_RING * LE_BUFSZ)
+
+/*
+ * The phase is load-bearing, so it is checked rather than trusted.  A buffer
+ * size that is not a multiple of four would give each buffer in the ring a
+ * different phase, and only the first would be aligned.
+ */
+#if ((LE_RXB_OFF + NETDEV_HDR_LEN) & 3u) != 0
+#error "LE_RXB_OFF must put the Ethernet payload (frame + NETDEV_HDR_LEN) on a \
+longword: that alignment is worth 27-37% of the fused copy, which is 15% of \
+receive"
+#endif
+#if (LE_BUFSZ & 3u) != 0
+#error "LE_BUFSZ must be a multiple of 4 or the buffers in the ring do not \
+share the phase LE_RXB_OFF was chosen for"
+#endif
+#if (LE_RXB_OFF & 1u) != 0
+#error "an odd buffer start is an address error on a 68000 and a word the \
+LANCE cannot place"
+#endif
+#if LE_TXB_OFF < (LE_RXB_OFF + LE_RX_RING * LE_BUFSZ)
+#error "the transmit buffers overlap the receive ring"
+#endif
 
 static volatile UBYTE *le_ram(NetdevNic *nic)
 {
