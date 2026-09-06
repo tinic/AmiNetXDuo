@@ -456,6 +456,23 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
      * paid a second full pass.  The wire profile puts _n68k_rx_verify_sum at
      * 2.7%, which is a lot for header arithmetic, and this is the counter that
      * says whether that is what it is doing.
+     *
+     * WHAT THE ARITHMETIC ALREADY SAYS, AND WHERE THIS CAN BE READ.
+     * A bulk TCP segment on Ethernet is a 1514-byte frame: 14 of link header
+     * and 1500 of IP.  The copy hook sums the IP part, so copied is 1500 and
+     * the IP total length is 1500, they are equal, and the fast path is the
+     * one that runs.  The frames that miss it are the small ones -- an ACK is
+     * 40 bytes of IP in a payload Ethernet pads to 46, so copied is 46 against
+     * a total of 40 -- and the second pass they pay re-reads 46 bytes, not
+     * 1460.  So the 2.7% is header arithmetic, call frame and these counters,
+     * not a second pass over the payload, and there is no win hiding here.
+     * The counters are for confirming that on a rig, not for finding it.
+     *
+     * They cannot be read from an iperf run.  This report is in ami_ns_destroy
+     * and tests/tools/run-iperf.sh never takes the stack down, so a run with
+     * -DAMINETXDUO_LOG=ON leaves no rxverify line in the serial log at all --
+     * confirmed, 44 serial lines and none of them this.  The arm that does
+     * reach it is the NetShutdown one (tools/ci.sh bridged).
      */
     AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu (v6 %lu, "
              "from_copy %lu, reread %lu), "
