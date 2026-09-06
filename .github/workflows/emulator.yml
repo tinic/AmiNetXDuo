@@ -102,6 +102,14 @@ jobs:
       # same machine -- a peer without it is not a loss rig.
       AMINETXDUO_FITZ_PEER: ${{ vars.AMINETXDUO_FITZ_PEER }}
       AMINETXDUO_FITZ_PEER_ADDR: ${{ vars.AMINETXDUO_FITZ_PEER_ADDR }}
+      # tools/check-rate.sh: the bridged NIC to put the guest on and the peer
+      # that calls in to it.  Separate variables from the two above for the
+      # same reason those are separate from AMINETXDUO_PEER -- this peer needs
+      # no `tc` and no CAP_NET_ADMIN, it only has to answer -- and separate
+      # from AMINETXDUO_PEER because check-rate.sh wants a bare host, not the
+      # user@host that the run-workbench harnesses ssh to.
+      AMINETXDUO_RATE_IFACE: ${{ vars.AMINETXDUO_RATE_IFACE }}
+      AMINETXDUO_RATE_PEER: ${{ vars.AMINETXDUO_RATE_PEER }}
       # install/test/run-smbmount.sh: smb2-handler and filesysbox, neither ours.
       AMINETXDUO_SMB2FS: ${{ vars.AMINETXDUO_SMB2FS }}
       AMINETXDUO_FILESYSBOX: ${{ vars.AMINETXDUO_FILESYSBOX }}
@@ -578,6 +586,26 @@ jobs:
           -r AMINETXDUO_A2065 -r AMINETXDUO_FITZ_PEER -r AMINETXDUO_FITZ_PEER_ADDR
           -- sh -c
           'tests/endurance/fetch-fitz.sh && tools/ci.sh lossgate'
+
+      # THE ONLY GATE THAT MEASURES A BYTE PER SECOND, AND IT HAD NO CALLER.
+      #
+      # stage_rate was written after 0.26.0 and 0.26.1 shipped a receive path
+      # running at a quarter rate with every gate green, and then no workflow
+      # ever called it -- not this file, not ci.yml, not release.yml.  A 4.3%
+      # receive and 6.4% transmit regression shipped in 0.26.3 as a result
+      # (92bff6b3, a Forbid()/Permit() around a transmit slot handback),
+      # measured interleaved against 242be840.  tools/check-stage-coverage.sh
+      # now refuses a stage that no workflow invokes, so this cannot recur.
+      #
+      # Five-round medians against tests/perf/rate-baseline.txt at a 12%
+      # tolerance.  It needs the bridge and a peer that can call IN, which is
+      # why it lives here and not in ci.yml: SLIRP cannot answer it at all.
+      - name: Throughput against the recorded baseline
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Throughput against the recorded baseline"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_RATE_IFACE -r AMINETXDUO_RATE_PEER
+          -- tools/ci.sh rate
 
       # SMB, WHICH HAD NO COVERAGE AT ALL.
       #

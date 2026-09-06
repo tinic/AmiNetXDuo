@@ -603,6 +603,20 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # And a STAGE nothing runs is the same defect one layer up again:
+    # stage_rate is the only gate that measures a byte per second and no
+    # workflow had ever called it, which is how a 4.3% receive regression
+    # shipped in 0.26.3.
+    if tools/check-stage-coverage.sh > "$BUILD/stage-coverage.log" 2>&1; then
+        note "stage coverage: $(sed -n 's/^stages=/stages /p' \
+              "$BUILD/stage-coverage.log")"
+    else
+        cat "$BUILD/stage-coverage.log"
+        fail "a ci.sh stage is declared and invoked by no workflow\
+ (tools/check-stage-coverage.sh)"
+        return 1
+    fi
+
     local st log
     for st in tests/*/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue
