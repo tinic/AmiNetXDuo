@@ -66,6 +66,21 @@
 # which arm runs first (see the position note above).  Every figure in this
 # tree that survived did that; the ones that did not were wrong.
 #
+# A DELAYED LINK IS A FAR MORE PRECISE INSTRUMENT THAN THIS ONE, AND NOTHING
+# HERE HAD EVER USED ONE.  run-lossgate.sh -d 50 -l 0, nine arms, same tree:
+#
+#     metric      median    iqr     range
+#     read_kbs     538.0    0.6%     1.5%
+#     write_kbs    223.0    2.7%     4.0%
+#
+# Against 24.3% interquartile for read on the 0 ms link and 41.7% for
+# dropped_rx.  Delay paces the arrivals and the per-arm scatter collapses with
+# it.  Anything this campaign could not resolve at 0 ms -- and it repeatedly
+# could not resolve 2% -- is worth re-asking at -d 50 before it is called a
+# floor.  Note the rates there are NOT this rig's rates: write falls to 223
+# from 2,138 and read to 538, so a delayed run compares arms with each other,
+# never against a figure taken at 0 ms.
+#
 # ALTERNATE THE ORDER OF AN A/B ON THIS RIG.  The 2.0% below is NOT a
 # reproducible property and must not be quoted as one: a later run with clean
 # builds put the SECOND position AHEAD in both arms (+0.5% and +1.8%), the

@@ -644,6 +644,22 @@ if(NOT AMINETXDUO_HANDOFF_BOOST STREQUAL "")
     add_compile_definitions(AMINETXDUO_HANDOFF_BOOST=${AMINETXDUO_HANDOFF_BOOST})
 endif()
 
+# AND IT IS NOT THE LIMITER ON A DELAYED LINK EITHER, WHICH IS WHERE A WINDOW
+# CAN ACT AT ALL.  The five-arm sweep above ran at 0 ms, where window over RTT
+# bounds nothing, so it was fair to suspect it of the mistake "SACK (neutral)"
+# made.  Asked at 50 ms with no loss, nine arms an arm, both builds against one
+# recorded baseline so only the window differs:
+#
+#     metric        default    65535
+#     read_kbs        538.0    534.0    -0.7%   (iqr 0.6%)
+#     write_kbs       223.0    223.0    +0.0%
+#     dropped_rx      158.0    133.0   -15.8%
+#
+# A bigger window trims drops and moves no data.  The prediction that motivated
+# the run was half right and worth keeping: 26 KB over 50 ms is about 520 KB/s
+# and read measured 538, so the window is very nearly binding -- but relieving
+# it changed nothing, so something else holds at 538 against the ~690 this rig
+# does at 0 ms.  That is open, and it is not the window.
 set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "Pin the TCP receive window, bytes")
 if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
     add_compile_definitions(BSD_TCP_WINDOW=${AMINETXDUO_TCP_WINDOW}
