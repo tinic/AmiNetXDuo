@@ -19,7 +19,8 @@ arm went first.
 |---|---|---|---|
 | iperf tcp-rx, sitting 1 | 5,347,499 | **5,522,706** | +3.3% |
 | iperf tcp-rx, sitting 2 | 5,366,765 | **5,504,271** | +2.6% |
-| Fitz read, kbytes/s | 3,272 | **3,562** | +8.9% |
+| Fitz read, set 1 | 3,272 | **3,562** | +8.9% |
+| Fitz read, set 2 | 3,296 | **3,592** | +9.0% |
 | iperf tcp-tx, sitting 1 | 2,997,212 | 2,976,433 | -0.7% |
 | iperf tcp-tx, sitting 2 | 2,965,530 | 2,972,969 | +0.3% |
 | Fitz write, kbytes/s | 2,542 | 2,538 | -0.2% |
@@ -28,7 +29,7 @@ arm went first.
 |---|---|
 | receive | about +3%, ahead in both positions in both sittings |
 | transmit | no change; the two sittings straddle zero |
-| Fitz read | +8.9% on medians, nearer +7% without that arm's low sample |
+| Fitz read | +9%, two independent sets of six sittings agreeing to 0.1pp |
 | method | clean build per arm, md5 checked, six rounds or sittings, order alternated |
 
 ## 0.26.3

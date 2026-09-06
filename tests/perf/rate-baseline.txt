@@ -138,9 +138,16 @@
 # run-fitzbench.sh, fc5fabe6 against main, six sittings an arm alternated:
 # read 3,272 -> 3,562 and write 2,542 -> 2,538.  That is +8.9% on the medians
 # against iperf's +3.3%, and it is a range rather than a point: the before
-# arm's samples span 2,656..3,435 and the low one drags its median, so without
-# it the gain is nearer +7%.  A Fitz sitting is far noisier than an iperf
-# round and six of them still cannot pin 2%.
+# arm's samples span 2,656..3,435 and the low one drags its median.
+#
+# A SECOND SET SETTLED IT, and settled it higher than the caveat suggested:
+# before 3,296 (3,102..3,595), after 3,592 (3,387..3,746), +9.0% against the
+# first set's +8.9%.  No outlier in that control arm, and its lowest AFTER
+# sample beats its own before-median.  So Fitz read is +9% and the "nearer
+# +7%" hedge was needed for one set, not for the result.
+#
+# Note Fitz gains about three times what iperf does (+9% against ~+3%).  Do not
+# quote one figure for both workloads.
 #
 # AND THE IPERF FIGURE ITSELF IS A RANGE.  fc5fabe6 against main was measured
 # twice, each six rounds an arm with both arms rebuilt clean and md5-checked:
