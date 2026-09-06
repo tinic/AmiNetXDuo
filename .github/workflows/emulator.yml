@@ -600,6 +600,15 @@ jobs:
       # Five-round medians against tests/perf/rate-baseline.txt at a 12%
       # tolerance.  It needs the bridge and a peer that can call IN, which is
       # why it lives here and not in ci.yml: SLIRP cannot answer it at all.
+      #
+      # AND IT STILL DOES NOT RUN, because THIS WHOLE FILE does not.  The
+      # playhouse3 runner is offline and every run of this workflow since
+      # 2026-08-30 went queued -> cancelled at the 24h timeout, including the
+      # one for the v0.26.3 release.  Wiring the arm here made
+      # tools/check-stage-coverage.sh green and did NOT make the gate run --
+      # the same defect that gate exists to catch, one level up.  Bringing the
+      # runner back is what makes this and the fourteen other stages in this
+      # file real; docs/BACKLOG.md carries it.
       - name: Throughput against the recorded baseline
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-

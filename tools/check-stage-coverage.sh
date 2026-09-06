@@ -38,9 +38,28 @@ invoked=$(cat .github/workflows/*.yml 2>/dev/null \
           | grep -oE 'ci\.sh( +[a-z0-9_]+)+' | sed 's/ci\.sh//' \
           | tr ' ' '\n' | grep -v '^$' | sort -u)
 
+# WHICH FILE invokes a stage, because "a workflow invokes it" is not the same
+# as "it runs".  emulator.yml's runner (playhouse3) has been offline for a
+# week: every run of that tier since 2026-08-30 went queued -> cancelled at the
+# 24h timeout, so every stage wired there -- rate, bridged, lossgate, cards,
+# console, e2e, smb, fetchtls -- is invoked by a workflow that never executes.
+# This gate cannot see that from the tree, so it prints the file and leaves the
+# reader to know which tiers are live.
+where() {
+    local st="$1" f
+    for f in .github/workflows/*.yml; do
+        tr '\n' ' ' < "$f" | tr -s ' ' | grep -qE "ci\.sh( +[a-z0-9_]+)* +$st( |\$)" \
+            && { basename "$f"; return; }
+    done
+    echo "?"
+}
+
 errors=0
 for s in $stages; do
-    printf '%s\n' "$invoked" | grep -qx "$s" && continue
+    if printf '%s\n' "$invoked" | grep -qx "$s"; then
+        echo "stage_invoked=$s by=$(where "$s")"
+        continue
+    fi
 
     reason=$(printf '%s\n' "$ALLOW" | sed -n "s/^$s://p")
     if [ -n "$reason" ]; then
