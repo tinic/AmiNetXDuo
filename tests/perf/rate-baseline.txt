@@ -20,10 +20,27 @@
 # sittings.  THAT NUMBER IS NOT THE CROSS-SITTING SPREAD AND MUST NOT BE READ
 # AS ONE -- it is what five sittings happened to give on one afternoon.
 #
-# Measured 2026-09-06, the same source built twice and run in two sittings a
-# few hours apart: tcp-rx median 5,514,440 and then 5,168,673.  6.3% apart, on
-# a binary whose only difference from the other was a #define this file's own
-# gate does not see.  Sittings across that day ranged 5,168,673..5,617,351.
+# THAT 6.3% "DRIFT" WAS A STALE BUILD, NOT THE RIG.  It is left here because
+# the correction is the useful part.  Two worktrees at the SAME commit, with
+# identical source (diff -rq empty), identical submodules and identical CMake
+# options, measured 5.3% apart on receive -- and their binaries differed:
+#
+#     clean build, either worktree   8ad54ade...  348,652 bytes
+#     incremental build, worktree A  f128afbd...  351,076 bytes   <- stale
+#     incremental build, worktree B  8ad54ade...  348,652 bytes
+#
+# A clean build of that commit is reproducible to the byte in both trees.  An
+# INCREMENTAL build after `git checkout` is not: worktree A's build directory
+# never matched its own commit, and with -flto one stale object relinks the
+# whole library.  Every arm run out of that directory measured a binary that
+# was not the commit it was labelled with.
+#
+# SO: BUILD EACH MEASUREMENT ARM CLEAN.  `cmake --build` on a reused build
+# directory after a checkout is not a measurement, and `git checkout && cmake
+# --build` between arms is how this tree produced two order-balanced,
+# same-sitting results that contradicted each other -- +2.8% and -4.0% for one
+# #define, decided by which directory happened to hold which arm.  Verify with
+# md5sum against a clean build before believing any A/B.
 #
 # SO DO NOT TIGHTEN THE TOLERANCE.  12% looks generous next to 0.46% and is
 # not: it is absorbing rig drift, and a tighter one manufactures red runs on
