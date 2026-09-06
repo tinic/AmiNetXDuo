@@ -398,20 +398,27 @@ class Resolver:
         for t in targets:
             for a in addrs:
                 votes[t - a] += 1
-        base, hits = votes.most_common(1)[0]
+        top = votes.most_common(2)
+        base, hits = top[0]
+        runner = top[1][1] if len(top) > 1 else 0
 
-        # One vote per jump-table entry is what a real base earns.  A handful
-        # is arithmetic noise, and naming a hundred samples off a coincidence
-        # is worse than leaving them unattributed.
-        if hits < 8 or hits < len(targets) // 4:
-            return ("%s: no base agreed with its map (best %d of %d slots)"
-                    % (libname, hits, len(targets)))
+        # SEPARATION, not a fraction of the slots.  A fraction was the first
+        # test here and it was wrong: it refused a base that 33 of 150 slots
+        # agreed on, when a coincidental difference earns one vote or two and
+        # thirty-three recurring is not a coincidence.  Not every slot can
+        # vote -- --gc-sections drops symbols, some slots hold inline code and
+        # some point outside .text -- so what matters is that the winner
+        # stands clear of the field, not that most of the field turned up.
+        if hits < 8 or hits < 3 * max(runner, 1):
+            return ("%s: no base stood out (best %d, next %d, %d slots)"
+                    % (libname, hits, runner, len(targets)))
 
         rows = sorted((base + a, nm, libname) for a, nm, _mod in code)
         self.libcode.append((base, rows[0][0], rows[-1][0], libname,
                              [r[0] for r in rows], rows))
-        return ("%s: base $%08x, %d symbols, %d of %d slots agree"
-                % (libname, base, len(rows), hits, len(targets)))
+        return ("%s: base $%08x, %d symbols, %d of %d slots agree "
+                "(next best %d)"
+                % (libname, base, len(rows), hits, len(targets), runner))
 
     def link_time(self, pc):
         for i, (base, size) in enumerate(self.prof.segs):
