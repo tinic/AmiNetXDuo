@@ -72,13 +72,33 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      * sees.  `dst` is nx_packet_data_start + PAD(2) + ETH(14), 0 mod 4; `from`
      * is the device's payload pointer, 2 mod 4, and we do not own it.
      *
-     * THE FIX IS NOT TO MATCH THE PHASE.  Dropping AMI_SANA2_RX_PAD to 0 would
-     * put both ends at 2 mod 4, which a two-byte lead-in could then align --
-     * but it also drags the IP header off its longword and misaligns the
-     * packet->app copy downstream, which is another 9.9% of receive.  The fix,
-     * if it is worth one, is inside the copy: read longwords from `from & ~3`
-     * and shift-combine them into aligned writes, so the bus never sees a
-     * misaligned access.  Unmeasured -- no such variant exists yet.
+     * AND IT IS STRUCTURAL.  BOTH WAYS OUT WERE TRIED AND BOTH LOSE.
+     *
+     * Matching the phase does not work on paper: dropping AMI_SANA2_RX_PAD to
+     * 0 puts both ends at 2 mod 4, which a two-byte lead-in could align -- and
+     * drags the IP header off its longword and misaligns the packet->app copy,
+     * another 9.9% of receive.  The two ends differ by a fixed two bytes, so
+     * no lead-in can ever align both.
+     *
+     * Avoiding the misaligned read does not work in fact.  bench/sumvar3.S's
+     * v_shift2 reads ALIGNED longwords from `from - 2` and shift-combines each
+     * adjacent pair into the longword a misaligned read would have produced,
+     * so the bus never sees a misaligned access.  It is correct -- the bench
+     * checks its sum and every written longword against the C reference over
+     * the same bytes -- and it is far slower:
+     *
+     *     at src +2      lm14+2  199.1 ns/B      shift2  425.5 ns/B
+     *
+     * The misaligned read costs 49 ns/B over aligned lm14.  Shift-combining
+     * spends more than four times that avoiding it.  v_shift2 is a plain
+     * per-longword loop where lm14 batches seven loads with movem, so some of
+     * that gap is batching rather than shifting -- but a movem-batched shift
+     * variant would still have to fit four extra instructions per longword
+     * inside 49 ns/B, and it cannot.
+     *
+     * So the 30-37% stands.  It is the price of a device that hands us a
+     * payload pointer at 2 mod 4 and an IP header that has to land on a
+     * longword, and it is not recoverable in software on this CPU.
      */
     slot->summed = FALSE;
 

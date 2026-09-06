@@ -35,6 +35,7 @@ extern ULONG v_ldmovem(ULONG *to, const ULONG *from, ULONG count);
 extern ULONG v_addx14(ULONG *to, const ULONG *from, ULONG count);
 extern ULONG v_lm14(ULONG *to, const ULONG *from, ULONG count);
 extern ULONG v_lmsep(ULONG *to, const ULONG *from, ULONG count);
+extern ULONG v_shift2(ULONG *to, const ULONG *from, ULONG count);
 
 /* The contract, from src/net68k/n68k_checksum.c. */
 static ULONG v_reference(ULONG *to, const ULONG *from, ULONG count)
@@ -178,6 +179,59 @@ static ULONG ns_tenths_per_byte(ULONG ticks, ULONG bytes)
                    (unsigned long long)bytes);
 }
 
+/*
+ * v_shift2 is only correct at the phase it exists for, so it cannot go through
+ * check(), which feeds an aligned source.  Same contract: the answer and every
+ * byte written must match the C reference over the SAME bytes.
+ */
+static void check_skewed(const char *name,
+                         ULONG (*fn)(ULONG *, const ULONG *, ULONG))
+{
+    const ULONG *from = (const ULONG *)(const APTR)((const UBYTE *)src + 2);
+    ULONG n = 64UL;
+    ULONG want, got, i;
+    int   bad = 0;
+
+    for (i = 0; i < n + 1UL; i++)
+        ref[i] = 0xDEADBEEFUL;
+    for (i = 0; i < n + 1UL; i++)
+        dst[i] = 0xDEADBEEFUL;
+
+    want = v_reference(ref, from, n);
+    got  = fn(dst, from, n);
+
+    if (got != want)
+    {
+        printf("  FAIL %-12s sum %08lx, reference %08lx\n",
+               name, (unsigned long)got, (unsigned long)want);
+        bad = 1;
+    }
+
+    for (i = 0; i < n; i++)
+    {
+        if (dst[i] != ref[i])
+        {
+            printf("  FAIL %-12s longword %lu is %08lx, reference %08lx\n",
+                   name, (unsigned long)i, (unsigned long)dst[i],
+                   (unsigned long)ref[i]);
+            bad = 1;
+            break;
+        }
+    }
+
+    if (dst[n] != 0xDEADBEEFUL)
+    {
+        printf("  FAIL %-12s wrote past its count\n", name);
+        bad = 1;
+    }
+
+    if (bad)
+        failures++;
+    else
+        printf("  ok   %-12s %lu skewed longwords against the reference\n",
+               name, (unsigned long)n);
+}
+
 static void bench_skewed(const char *name,
                          ULONG (*fn)(ULONG *, const ULONG *, ULONG),
                          ULONG words, ULONG reps)
@@ -256,6 +310,8 @@ int main(void)
     check("lm14", v_lm14);
     check("lmsep", v_lmsep);
 
+    check_skewed("shift2", v_shift2);
+
     printf("\n");
 
     bench("reference", v_reference, words, reps);
@@ -275,6 +331,7 @@ int main(void)
     bench_skewed("lm14+2", v_lm14, words, reps);
     bench_skewed("lmsep+2", v_lmsep, words, reps);
     bench_skewed("reference+2", v_reference, words, reps);
+    bench_skewed("shift2", v_shift2, words, reps);
 
     printf("\n%s\n", failures == 0 ? "PASS" : "FAIL");
 

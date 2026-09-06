@@ -253,3 +253,50 @@ _v_lmsep:
 .Lsep_out:
         movem.l sp@+,d2-d7/a2-a3
         rts
+
+| ULONG v_shift2(ULONG *to, const ULONG *from, ULONG count)
+|
+| The phase the SANA-II copy hook is actually handed: `from` is 2 mod 4 while
+| `to` is 0 mod 4, and no lead-in can align both because the difference between
+| them is fixed at two bytes.  Every other variant here eats a misaligned
+| longword read for that; this one does not read misaligned at all.  It reads
+| ALIGNED longwords from `from - 2` and shift-combines each adjacent pair into
+| the longword that a misaligned read would have produced.
+|
+| Reads one longword past `count` -- the same two bytes beyond the frame the
+| tail path in ami_sana2_copy_to_buff() already reads.
+|
+| The question it answers: a 68020 misaligned longword access costs about three
+| cycles, and this costs four extra instructions per longword to avoid it.  If
+| the instructions are dearer than the penalty, the phase is not worth fixing
+| in software and the 30-37% stands as structural.
+        .globl  _v_shift2
+_v_shift2:
+        movem.l d2-d5,sp@-
+        movea.l sp@(20),a0              | to
+        movea.l sp@(24),a1              | from, 2 mod 4
+        move.l  sp@(28),d1              | count, longwords
+        moveq   #0,d0                   | sum
+        moveq   #0,d5                   | ADDX source: carry only
+        tst.l   d1
+        beq     .Lsh_out
+
+        subq.l  #2,a1                   | down to the aligned longword below
+        move.l  a1@+,d2                 | prev
+        swap    d2                      | d2 = (prev_lo << 16) | prev_hi
+
+.Lsh_loop:
+        move.l  a1@+,d3                 | cur, aligned
+        swap    d3                      | d3 = (cur_lo << 16) | cur_hi
+        move.l  d2,d4
+        move.w  d3,d4                   | d4 = (prev_lo << 16) | cur_hi
+        move.l  d4,a0@+
+        add.l   d4,d0
+        addx.l  d5,d0                   | end-around carry, per add
+        move.l  d3,d2                   | cur becomes prev
+        subq.l  #1,d1
+        bne     .Lsh_loop
+
+.Lsh_out:
+        movem.l sp@+,d2-d5
+        rts
