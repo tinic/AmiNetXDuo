@@ -119,12 +119,33 @@
  *
  * The bound is not a batch target, it is a fairness boundary.  The reader
  * outranks everything (src/thread_priorities.h) and now runs TCP itself, so
- * the thread that empties the socket only runs when the reader lets go.  Eight
- * is a little over half the read depth an interface at 10 Mbit is planned
- * with, which puts the release inside a full ring rather than after it.
+ * the thread that empties the socket only runs when the reader lets go.
+ *
+ * IT WAS EIGHT, ON THE ARGUMENT THAT EIGHT IS A LITTLE OVER HALF THE READ
+ * DEPTH AN INTERFACE AT 10 MBIT IS PLANNED WITH, SO THE RELEASE LANDS INSIDE
+ * A FULL RING RATHER THAN AFTER IT.  That argument is fine and the number it
+ * picked was not: 32 is worth 2.8% of receive.  Six rounds against the same
+ * commit built twice in one sitting, ALTERNATING WHICH TREE RAN FIRST, tcp-rx
+ * medians in bits per second:
+ *
+ *     run_max   first        second       overall
+ *     8         5,349,298    5,369,943    5,364,443
+ *     32        5,474,414    5,535,842    5,514,440
+ *
+ * 32 wins in BOTH positions -- +2.3% first, +3.1% second -- so it is not the
+ * rig's position effect (tests/perf/rate-baseline.txt).  Transmit is -0.1%,
+ * which is nothing.
+ *
+ * THIS ROW WAS IN THE REFUTED LIST AND SHOULD NOT HAVE BEEN.  It was measured
+ * once at 8/16/32 as 5,008,934 / 4,966,612 / 5,101,889, read as
+ * "non-monotonic, inside the round spread, do not retry" -- three arms run in
+ * sequence, so each later one carried the position penalty, and 32 read
+ * highest DESPITE running last.  A fixed-order sweep cannot see a 3% effect.
+ * The fairness worry the eight was protecting does not appear: the reader
+ * still yields, it just yields after draining rather than mid-ring.
  */
 #ifndef AMI_SANA2_RX_RUN_MAX
-#define AMI_SANA2_RX_RUN_MAX        8
+#define AMI_SANA2_RX_RUN_MAX        32
 #endif
 
 #if AMI_SANA2_RX_RUN_MAX < 1
