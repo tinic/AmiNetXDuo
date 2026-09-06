@@ -136,6 +136,18 @@
  * +1.5% overall, ahead in BOTH positions (+1.0% and +1.8%).  Transmit is
  * +0.0%.
  *
+ * THE APPLICATION WORKLOAD AGREES.  run-fitzbench.sh on those same two md5s,
+ * six sittings alternating which arm went first, kbytes/s medians:
+ *
+ *     run_max   read                                 write
+ *     8         3,424  [3143..3580]                  2,538
+ *     32        3,564  [3197..3696]                  2,536
+ *
+ * +4.1% on read and -0.1% on write.  An earlier Fitz run said read was -2.8%
+ * and it was taken the contaminated way; this one was not.  A sitting still
+ * spans about 14% on read, so read the +4.1% as "same direction as iperf, and
+ * certainly not a regression" rather than as a precise figure.
+ *
  * AN EARLIER RUN SAID +2.8% AND THAT NUMBER WAS WRONG.  Its two arms were
  * built in different reused worktrees and one of those build directories did
  * not match its own commit; a null control at one commit measured 5.3%
