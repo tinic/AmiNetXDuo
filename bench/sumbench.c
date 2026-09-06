@@ -154,6 +154,30 @@ static void check(const char *name,
  * Same buffers, source offset by one word.  The count drops by one longword so
  * the read stays inside src[].
  */
+/*
+ * TENTHS OF A NANOSECOND PER BYTE, IN INTEGER ARITHMETIC.
+ *
+ * This used to be double, and that made the bench unrunnable on the rig: the
+ * link pulls mathieeedoubbas.library and the test image does not carry it, so
+ * every run died with "mathieeedoubbas.library failed to load" before printing
+ * a number.  Which is presumably why it was only ever run by hand somewhere
+ * that had one.
+ *
+ * The eclock is 709379 ticks a second, so ns per byte is
+ * ticks * 1e9 / 709379 / bytes, i.e. ticks * 1409.6 / bytes.  In tenths that
+ * is ticks * 14096 / bytes, and ticks * 14096 overflows 32 bits for a run of
+ * any length, so the multiply is done in 64 bits -- integer, which libgcc
+ * supplies without a math library.
+ */
+static ULONG ns_tenths_per_byte(ULONG ticks, ULONG bytes)
+{
+    if (bytes == 0UL)
+        return 0UL;
+
+    return (ULONG)(((unsigned long long)ticks * 14096ULL) /
+                   (unsigned long long)bytes);
+}
+
 static void bench_skewed(const char *name,
                          ULONG (*fn)(ULONG *, const ULONG *, ULONG),
                          ULONG words, ULONG reps)
@@ -170,10 +194,11 @@ static void bench_skewed(const char *name,
     ticks = eclock() - t0;
 
     bytes = words * 4UL * reps;
-    ns = (ULONG)(((double)ticks * 1000000000.0) / 709379.0 / (double)bytes);
+    ns = ns_tenths_per_byte(ticks, bytes);
 
-    printf("  %-12s %6lu ticks  %4lu ns/B  (src +2, %lu x %lu B)\n",
-           name, (unsigned long)ticks, (unsigned long)ns,
+    printf("  %-12s %6lu ticks  %3lu.%lu ns/B  (src +2, %lu x %lu B)\n",
+           name, (unsigned long)ticks,
+           (unsigned long)(ns / 10UL), (unsigned long)(ns % 10UL),
            (unsigned long)reps, (unsigned long)(words * 4UL));
 }
 
@@ -190,12 +215,11 @@ static void bench(const char *name,
     ticks = eclock() - t0;
 
     bytes = words * 4UL * reps;
+    ns = ns_tenths_per_byte(ticks, bytes);
 
-    /* 709379 ticks a second; ns per byte, divided once. */
-    ns = (ULONG)(((double)ticks * 1000000000.0) / 709379.0 / (double)bytes);
-
-    printf("  %-12s %6lu ticks  %4lu ns/B  (%lu x %lu B)\n",
-           name, (unsigned long)ticks, (unsigned long)ns,
+    printf("  %-12s %6lu ticks  %3lu.%lu ns/B  (%lu x %lu B)\n",
+           name, (unsigned long)ticks,
+           (unsigned long)(ns / 10UL), (unsigned long)(ns % 10UL),
            (unsigned long)reps, (unsigned long)(words * 4UL));
 }
 
