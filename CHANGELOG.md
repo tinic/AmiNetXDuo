@@ -11,6 +11,22 @@ version at the top when it merges.
 
 ### Receive
 
+The whole day measured end to end, `3a71a026` against main, six rounds
+alternated.
+
+| | before | now | |
+|---|---|---|---|
+| iperf tcp-rx | 5,553,818 | **5,769,639** | +3.89% |
+| iperf tcp-rx, position 1 | 5,616,804 | 5,806,626 | +3.38% |
+| iperf tcp-rx, position 2 | 5,497,923 | 5,732,652 | +4.27% |
+| iperf tcp-tx | 2,982,376 | **3,130,634** | +4.97% |
+
+| | |
+|---|---|
+| headline | +3.89% receive and +4.97% transmit, measured directly |
+| not | the sum of the parts below, which compounds to about 6.4% |
+| reading | gains do not add; measure the accumulated set |
+
 Measured on playhouse3 against a comparison point built clean in the same
 sitting, library md5 printed before a round ran, six rounds alternating which
 arm went first.

@@ -4,6 +4,31 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# GAINS DO NOT ADD.  MEASURE THE ACCUMULATED SET, NEVER THE SUM OF PARTS.
+# 2026-09-06, 3a71a026 against main, six rounds alternated, the base rebuilt to
+# md5 7522050095ef for the fourth time that day:
+#
+#     tcp-rx   5,553,818 -> 5,769,639   +3.89%   (positions +3.38, +4.27)
+#     tcp-tx   2,982,376 -> 3,130,634   +4.97%
+#
+# The two corroborated changes in that range measured +3.16% and +3.09% ALONE,
+# which compound to about 6.4%.  Together they are +3.89%.  That is outside the
+# noise -- the worst null control that day was +2.75% -- and ahead in both
+# positions, so the TOTAL is real and it is the SUM that is wrong.
+#
+# Two readings, not exclusive.  Freeing CPU moves the binding constraint, so a
+# second win converts less than the first: the calibrated burn showed cycles
+# converting about one for one at the OLD operating point, not at every point.
+# And a single-sitting figure can be flattered, which that day's +2.75% null
+# control makes concrete.
+#
+# Transmit corroborates cleanly: +4.97% end to end against the sweep skip's
+# +5.30% measured alone, and that was the only change of the four that moved
+# transmit at all.
+#
+# So quote the end-to-end number for a day's work and keep the per-change
+# figures for what each change did on its own.
+#
 # WHAT THIS GATE CAN AND CANNOT SETTLE -- THREE NULL CONTROLS, 2026-09-06.
 # Each is two IDENTICAL binaries, six rounds alternating which arm ran first,
 # the arms' md5s checked equal before a round ran:
