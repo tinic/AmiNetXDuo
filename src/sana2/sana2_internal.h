@@ -177,6 +177,21 @@
 #error "AMI_SANA2_RX_RUN_MAX must be at least one"
 #endif
 
+/*
+ * A RUN SHORTER THAN THE RING GIVES BACK THE 1.5%.  ami_sana2_rx_drain() takes
+ * nx_ip_protection once for the whole run, so the budget is what that fixed
+ * cost amortises over, and a run also ends when GetMsg() empties -- so any
+ * budget at or above the deepest ring means "drain whatever is there" and
+ * anything below it stops mid-ring and pays the mutex again.  That is the
+ * whole of why 32 beat 8 and why the original sweep's 16 looked unremarkable.
+ * Measured 8 -> 32 as +1.5% receive on clean builds; the number is in the note
+ * above.  Lowering either constant without the other is the way to lose it by
+ * accident, so it is a build error rather than a comment.
+ */
+#if AMI_SANA2_RX_RUN_MAX < AMI_SANA2_RX_MAX_DEPTH
+#error "AMI_SANA2_RX_RUN_MAX must be >= AMI_SANA2_RX_MAX_DEPTH: a drain that stops short of the ring pays nx_ip_protection again for the rest of it"
+#endif
+
 #ifndef AMI_SANA2_TX_SLOTS
 #define AMI_SANA2_TX_SLOTS          8
 #endif
