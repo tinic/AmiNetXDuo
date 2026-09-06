@@ -412,8 +412,50 @@ static VOID le_rint(NetdevNic *nic)
                 nic->rx(nic->rx_arg, fp, (UWORD)(len - 4));  /* drop the FCS */
         }
 
-        /* Hand the buffer back. */
-        le_put16(nic, d + 4, (UWORD)(0xf000 | ((UWORD)(-LE_BUFSZ) & 0x0fff)));
+        /*
+         * Hand the buffer back.  TWO writes, not three.
+         *
+         * RMD2 (d + 4) is BCNT, the size of the buffer, and it is a HOST
+         * field: the chip reads it to know where the buffer ends and does not
+         * write it, so what le_rings() put there at init is still there.
+         * Linux's own a2065 driver agrees by construction -- it sets the
+         * length once in lance_init_ring() and lance_rx() never touches it.
+         *
+         * WHAT THIS REMOVES IS A BUS CYCLE, NOT A CALL, and that distinction
+         * is the whole reason this one is worth landing alone.  It came out of
+         * a three-item bundle (perf/rx-redundant-work) that the profile priced
+         * at 1.8% and the rig measured at rx -0.98%.  The other two removed
+         * _nxe_ wrapper checks, and the profile is built -DAMINETXDUO_LTO=OFF
+         * while the shipping build has LTO on (CMakeLists.txt:108), so those
+         * wrappers were already inlined and folded away -- their share was
+         * work that was not being done.  A word through the board's window is
+         * not like that: no inliner can remove it, and it is the expensive
+         * kind of access on this path.
+         *
+         * RMD3 (d + 6) is MCNT and the chip writes it, so clearing it looks
+         * redundant too -- it is only read above, after OWN has been seen
+         * clear, which is the chip saying it has just written it.  IT STAYS.
+         * That argument rests on what the chip does rather than on anything
+         * this file can check, the reference driver does clear it, and "the
+         * emulator did not complain" is not evidence about an Am7990.
+         *
+         * RMD1 (d + 2) carries OWN, and that write is what gives the buffer
+         * back, so it goes last and every time.
+         *
+         * MEASURED ALONE, and the contrast is the evidence for the rule above.
+         * Six rounds alternated, clean build per arm, md5s printed:
+         *
+         *     medians       before       after       delta
+         *     tcp-rx        5,736,512    5,824,081   +1.53%
+         *       position 1  5,757,833    5,799,477   +0.72%
+         *       position 2  5,708,409    5,871,054   +2.85%
+         *     tcp-tx        3,124,139    3,133,475   +0.30%
+         *
+         * Ahead in both positions.  The bundle that carried this item together
+         * with the two _nxe_ removals measured rx -0.98%; this item on its own
+         * is +1.53%.  One removes a bus cycle, the others removed checks the
+         * shipping image had already folded away.
+         */
         le_put16(nic, d + 6, 0);
         le_put16(nic, d + 2, (UWORD)(LE_R1_OWN | (md1 & 0x00ff)));
 

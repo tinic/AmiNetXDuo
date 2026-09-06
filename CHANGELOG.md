@@ -77,6 +77,16 @@ hook reads lands on a longword instead of two bytes off it.
 | Fitz | flat; a request-and-response workload is bound by round trips, not by the cost of a byte |
 | boards | a2065 and ariadne, sharing the LANCE core |
 
+`le_rint()` stops rewriting the receive descriptor's buffer-length field, which
+the chip reads and never writes.
+
+| | before | now | |
+|---|---|---|---|
+| iperf tcp-rx | 5,736,512 | **5,824,081** | +1.53% |
+| iperf tcp-rx, position 1 | 5,757,833 | 5,799,477 | +0.72% |
+| iperf tcp-rx, position 2 | 5,708,409 | 5,871,054 | +2.85% |
+| iperf tcp-tx | 3,124,139 | 3,133,475 | +0.30% |
+
 ## 0.26.3
 
 ### Memory a running machine keeps
