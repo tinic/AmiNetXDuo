@@ -166,8 +166,30 @@
  * That also says where the ceiling is.  A run ends at the budget OR when
  * GetMsg() comes back empty, and at most AMI_SANA2_RX_MAX_DEPTH reads can be
  * outstanding, so a budget of 32 already means "drain whatever is there" and
- * a larger one cannot do more.  Raising MAX_DEPTH is what would move this
- * number, and nothing here says that is worth doing.
+ * a larger one cannot do more.
+ *
+ * MEASURED ON THE RIG, so none of that is inference any more.  An
+ * AMINETXDUO_RXPROBE build of origin/main, A1200 under Amiberry:
+ *
+ *     netstack: 9662864 bytes free / 16, pool = 369 x 1568
+ *     rxprobe 0: type 0800 depth 32 posts 2842 drains 603 dry 8
+ *                postzero 0 postpartial 0
+ *     rxprobe 1: type 0806 depth 2
+ *     rxprobe 2: type 86DD depth 8
+ *
+ * The IPv4 ring IS 32, at the MAX_DEPTH cap: `want` is
+ * min(369/AMI_SANA2_RX_POOL_SHARE, 32) = min(46, 32), so the POOL is not what
+ * bounds it and giving the readers a larger share of 369 packets would change
+ * nothing.  postzero and postpartial are both zero -- the pool never once
+ * failed to fill the ring.
+ *
+ * AND THE AVERAGE DRAIN IS 4.7 FRAMES, not 32: 2,842 posts over 603 drains.
+ * So the budget is not what most runs stop on, GetMsg() emptying is, and the
+ * 1.5% cannot be coming from the typical run -- a budget of 8 would not have
+ * bound it either.  It comes from the tail, the occasional burst that 8 cut in
+ * half and 32 does not.  Worth knowing before anyone reads the win as "deeper
+ * drains are better" and goes looking for more of them: there are none, the
+ * ring is already at its cap and mostly empty.
  */
 #ifndef AMI_SANA2_RX_RUN_MAX
 #define AMI_SANA2_RX_RUN_MAX        32
