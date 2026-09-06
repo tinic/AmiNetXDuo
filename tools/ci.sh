@@ -2479,11 +2479,39 @@ stage_lossgate() {
         return "$NOTHING"
     fi
 
+    # THE GATE NEEDS A COUNTERS BUILD AND $BUILD/default IS NOT ONE.  Two of
+    # its four metrics, dropped_rx and retransmitted, are parsed out of
+    # netstat's tcp block, and that block compiles to `if (0)` under
+    # NX_DISABLE_TCP_INFO (src/tools/netstat.c:511) -- which is what ships,
+    # because AMINETXDUO_NX_COUNTERS defaults OFF.  Run against a shipping
+    # build on 2026-09-06 this gate reported read_kbs and write_kbs both `ok`
+    # and still FAILED, on the two it could not collect at all.  The baseline
+    # carries values for both, so it was recorded with them compiled in.
+    #
+    # So build one here.  It costs a second cross build of the libraries in a
+    # tier that already boots an emulator nine times, and it is the difference
+    # between a verdict and a guaranteed red.
+    local lgbuild="$BUILD/lossgate"
+    if [ ! -x "$lgbuild/src/bsdsocket/bsdsocket.library" ]; then
+        note "lossgate: building with AMINETXDUO_NX_COUNTERS=ON, which is what"\
+             "its baseline was recorded on"
+        cmake -S "$ROOT" -B "$lgbuild" \
+              -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchain-m68k-amigaos.cmake" \
+              -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_NX_COUNTERS=ON \
+              > "$BUILD/lossgate-cmake.log" 2>&1 &&
+        cmake --build "$lgbuild" --parallel "$JOBS" \
+              >> "$BUILD/lossgate-cmake.log" 2>&1 || {
+            cat "$BUILD/lossgate-cmake.log"
+            fail "lossgate: the counters build failed"
+            return 1
+        }
+    fi
+
     local rc=0
-    AMINETXDUO_BUILD="$BUILD/default" \
+    AMINETXDUO_BUILD="$lgbuild" \
         "$ROOT/tests/perf/run-lossgate.sh" \
             -H "$AMINETXDUO_FITZ_PEER" -A "$AMINETXDUO_FITZ_PEER_ADDR" \
-            -b "$BUILD/default" || rc=$?
+            -b "$lgbuild" || rc=$?
 
     case "$rc" in
         0) note "PASS  read, write and retransmits are all within tolerance" \
