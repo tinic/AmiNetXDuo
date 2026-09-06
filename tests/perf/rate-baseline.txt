@@ -2,10 +2,31 @@
 # tools/check-rate.sh --update writes this; raising a number belongs in the
 # commit that earned it, with the rig named.
 #
-# rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net, v0.26.2
-# Rounds measured 2026-09-04: rx 4818824 4875968 4764901, tx 2675383.
-# The value below is the LOWEST of those rounds, not the median, so the
-# baseline is never flattered by the run that recorded it.
+# rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
+#
+# RAISED 2026-09-06 for the receive campaign.  The numbers below are the
+# LOWEST five-round MEDIAN observed for origin/main across five independent
+# sittings, not the median of one sitting, so the baseline is never flattered
+# by the run that recorded it:
+#
+#     sitting   tcp-rx     tcp-tx
+#     q5        5,401,214  2,959,056
+#     q7        5,410,138  2,945,193   <- lowest tx
+#     q12       5,421,701  2,962,079
+#     q13       5,423,275  2,960,043
+#     q14       5,398,483  2,955,117   <- lowest rx
+#
+# Those medians span 0.46% on receive and 0.57% on transmit across the five
+# sittings, which is what makes a tight tolerance safe.
+#
+# It was previously rx 4764901 / tx 2651556, taken at v0.26.2 before the
+# receive work landed.  Against a 25% tolerance that floor was 3,573,675, so
+# a regression that gave back the whole campaign would still have passed --
+# and did: the priority-inheritance commit reverted in 8e63732e cost 18% of
+# transmit and this gate would not have noticed.  tools/ci.sh's rate stage now
+# runs five rounds at a 12% tolerance for that reason.  The script's own
+# default stays 3 rounds at 25% so a sweep can still report an arm that is
+# deliberately slower.
 #
 # WHY TRANSMIT IS ABOUT HALF OF RECEIVE, AND WHY THAT IS NOT OURS TO FIX HERE.
 # Measured 2026-09-05 with -DAMINETXDUO_RXPROBE=ON, reading netstat -s's step
@@ -29,5 +50,5 @@
 # the net68k checksum serves both directions, and NX_TCP_MAXIMUM_TX_QUEUE at 8
 # against the vendor's 20 measures 2,664,243 against 2,667,163 over five
 # rounds each in one sitting.
-tcp-rx 4764901
-tcp-tx 2651556
+tcp-rx 5398483
+tcp-tx 2945193

@@ -43,6 +43,24 @@ Largest reductions, all with the same features built:
 
 ### Speed
 
+Transfer rate against v0.26.2, bits per second, median of five rounds, the
+comparison point rebuilt in the same sitting:
+
+| | v0.26.2 | now |
+|---|---|---|
+| Receive | 5,041,231 | **5,401,214** |
+| Transmit | 2,666,277 | **2,959,056** |
+| | **+7.1%** | **+11.0%** |
+
+Where it came from:
+
+| | |
+|---|---|
+| RFC 1323 timestamps no longer offered | the largest single share |
+| A dead byte-count call removed from the readiness sweep | +3.7% receive on its own |
+| The reader releases finished writes itself | instead of waking the IP thread |
+| The Ethernet header built without calling the copy routine | |
+
 RFC 1323 timestamps are no longer offered by default. They cost twelve bytes
 of every data segment and are parsed on every segment that arrives.
 
@@ -84,6 +102,7 @@ timing, which falls back to Karn's algorithm.
 | | |
 |---|---|
 | `tools/check-ram-size.sh` gates the resident allocation | full 40,292 of 41,000, minimal 14,016 of 15,000 |
+| The throughput gate runs five rounds at a 12% tolerance | was three at 25%, which a whole campaign could regress through |
 | `tests/tools/run-mdns.sh -B` records the wire itself | 27 assertions, was 10 |
 
 ## 0.26.2

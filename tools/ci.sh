@@ -2419,7 +2419,15 @@ stage_rate() {
     hr "the throughput gate (tier 2, needs a bridge and a peer)"
 
     local out rc
-    out=$(AMINETXDUO_BUILD="$BUILD/cm" tools/check-rate.sh 2>&1)
+    # Five rounds at 12%, not the script's 3 at 25%.  Three rounds cannot see
+    # a small move against the round-to-round spread, and 25% below a baseline
+    # is so far down that a regression giving back a whole campaign passes --
+    # 8e63732e cost 18% of transmit and the old settings would have called it
+    # green.  Five-round medians for one tree reproduce to about half a per
+    # cent across sittings (tests/perf/rate-baseline.txt), so 12% is many
+    # times the noise and still catches anything worth catching.
+    out=$(AMINETXDUO_BUILD="$BUILD/cm" AMINETXDUO_RATE_ROUNDS=5 \
+          AMINETXDUO_RATE_TOLERANCE=12 tools/check-rate.sh 2>&1)
     rc=$?
 
     if printf '%s' "$out" | grep -q '^rate=skipped'; then
