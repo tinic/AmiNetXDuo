@@ -190,6 +190,25 @@
  * half and 32 does not.  Worth knowing before anyone reads the win as "deeper
  * drains are better" and goes looking for more of them: there are none, the
  * ring is already at its cap and mostly empty.
+ *
+ * AND THAT IS WHY THE APPLICATION WORKLOAD GAINS THREE TIMES WHAT BULK DOES.
+ * The same RXPROBE build under each, IPv4 reader:
+ *
+ *     workload   posts   drains   frames a drain
+ *     iperf      2,842   603      4.7
+ *     Fitz       2,698   305      8.8
+ *
+ * Fitz arrives nearly twice as burstily, and 8.8 is ABOVE the old budget of 8
+ * while iperf's 4.7 is well below it.  So under the old value Fitz's average
+ * drain was cut and paid a second nx_ip_protection round trip for the rest,
+ * while iperf's typical drain never reached the limit and only its tail was
+ * ever truncated.  That is the +9% against +3%, and it is arithmetic rather
+ * than a hypothesis.
+ *
+ * The gap is understated if anything: a Fitz run interleaves write phases
+ * whose sparse ACK arrivals drag its mean down, so the read phase alone is
+ * burstier than 8.8.  Fitz also shows dry 0 against iperf's dry 8 -- it never
+ * once woke to an empty queue.
  */
 #ifndef AMI_SANA2_RX_RUN_MAX
 #define AMI_SANA2_RX_RUN_MAX        32
