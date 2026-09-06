@@ -19,6 +19,25 @@
 # Those medians span 0.46% on receive and 0.57% on transmit across the five
 # sittings, which is what makes a tight tolerance safe.
 #
+# ALTERNATE THE ORDER OF AN A/B ON THIS RIG.  THE SECOND ARM LOSES 2.0% OF
+# RECEIVE WHATEVER IS IN IT.  Six rounds against 242be840 alternating which
+# tree ran first, medians, bits per second:
+#
+#     tcp-rx        first        second
+#     242be840      5,528,920    5,434,554
+#     aa0081fa      5,528,520    5,363,662
+#
+# The two first-position medians differ by 0.007% and both second-position
+# medians sit about 2% below them, so the effect belongs to the position and
+# not to either tree.  Transmit does not show it (+0.3% for second).
+#
+# It is worth 2% of receive, so a fixed-order pair reads a real regression as
+# larger than it is and can manufacture one out of nothing: the same fix
+# measured -2.7% receive against base in fixed order and +0.9% -- at base --
+# when the order was alternated.  Anything in the refuted list whose receive
+# verdict was within about 2% and was measured second deserves re-reading
+# before it is treated as settled.
+#
 # It was previously rx 4764901 / tx 2651556, taken at v0.26.2 before the
 # receive work landed.  Against a 25% tolerance that floor was 3,573,675, so
 # a regression that gave back the whole campaign would still have passed --

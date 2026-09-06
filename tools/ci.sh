@@ -605,8 +605,8 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
 
     # And a STAGE nothing runs is the same defect one layer up again:
     # stage_rate is the only gate that measures a byte per second and no
-    # workflow had ever called it, which is how a 4.3% receive regression
-    # shipped in 0.26.3.
+    # workflow had ever called it, which is how the 5.5% transmit regression
+    # in 0.26.3 shipped.
     if tools/check-stage-coverage.sh > "$BUILD/stage-coverage.log" 2>&1; then
         note "stage coverage: $(sed -n 's/^stages=/stages /p' \
               "$BUILD/stage-coverage.log")"

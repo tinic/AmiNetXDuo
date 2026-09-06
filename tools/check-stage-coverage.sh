@@ -8,9 +8,9 @@
 # and stage_rate is what that cost.  It is the only gate in the tree that
 # measures a byte per second, it was written after 0.26.0 and 0.26.1 shipped a
 # receive path running at a quarter rate, and NO WORKFLOW HAS EVER CALLED IT --
-# not ci.yml, not emulator.yml, not release.yml.  A 4.3% receive and 6.4%
-# transmit regression then shipped in 0.26.3 (92bff6b3, a Forbid()/Permit()
-# around a transmit slot handback), measured interleaved against 242be840 on
+# not ci.yml, not emulator.yml, not release.yml.  A regression then shipped in
+# 0.26.3 (92bff6b3, a Forbid()/Permit() around a transmit slot handback) worth
+# 5.5% of transmit and about 2% of receive, measured against 242be840 on
 # playhouse3.  A gate must be proven to RUN, not to exist.
 #
 # SPDX-License-Identifier: MIT

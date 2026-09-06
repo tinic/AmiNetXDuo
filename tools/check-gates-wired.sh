@@ -65,7 +65,7 @@ want diag-strings   tools/ci.sh                      'check-no-diag-strings\.sh'
 want backlog        tools/ci.sh                      'check-backlog\.sh'
 want doc-budget     tools/ci.sh                      'check-doc-budget\.sh'
 # stage-coverage is the gate that caught stage_rate being declared and invoked
-# by no workflow, which is how a 4.3% receive regression shipped in 0.26.3.
+# by no workflow, which is how the 0.26.3 transmit regression shipped.
 # It protects the other gates' call sites at the stage level, so its own call
 # site is worth protecting here.
 want stage-coverage tools/ci.sh                      'check-stage-coverage\.sh'

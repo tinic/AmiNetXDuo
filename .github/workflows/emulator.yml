@@ -591,8 +591,8 @@ jobs:
       #
       # stage_rate was written after 0.26.0 and 0.26.1 shipped a receive path
       # running at a quarter rate with every gate green, and then no workflow
-      # ever called it -- not this file, not ci.yml, not release.yml.  A 4.3%
-      # receive and 6.4% transmit regression shipped in 0.26.3 as a result
+      # ever called it -- not this file, not ci.yml, not release.yml.  A
+      # regression worth 5.5% of transmit shipped in 0.26.3 as a result
       # (92bff6b3, a Forbid()/Permit() around a transmit slot handback),
       # measured interleaved against 242be840.  tools/check-stage-coverage.sh
       # now refuses a stage that no workflow invokes, so this cannot recur.

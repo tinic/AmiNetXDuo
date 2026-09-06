@@ -279,10 +279,22 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
          * sender, so it could not race the claim.  It can now.
          *
          * A COMPILER BARRIER, NOT Forbid().  This shipped as Forbid()/Permit()
-         * in 92bff6b3 and cost 4.3% of receive and 6.4% of transmit, measured
-         * interleaved against 242be840 in one sitting -- transmit is hit
-         * harder because the pair runs once per completed transmit and a
-         * receive run only pays it on ACKs.  Permit() ends a scheduling
+         * in 92bff6b3 and cost about 2% of receive and 5.5% of transmit,
+         * measured interleaved against 242be840 in one sitting -- transmit is
+         * hit harder because the pair runs once per completed transmit and a
+         * receive run only pays it on ACKs.
+         *
+         * THE RECEIVE FIGURE IS POSITION-CORRECTED AND THE FIRST ONE WAS NOT.
+         * Fixed-order runs put base first and the other arm second and read
+         * -4.3%, but this rig gives the SECOND arm of a pair 2.0% less
+         * receive whatever is in it: six rounds alternating which tree runs
+         * first measure base/first 5,528,920 against fix/first 5,528,520, a
+         * difference of 0.007%, while second-position medians sit 2.0% below
+         * first-position ones in both trees.  Transmit shows no such effect
+         * (+0.3%), so its 5.5% stands as measured.  Alternate the order of any
+         * pair on this rig; a fixed order silently charges the second arm 2%.
+         *
+         * Permit() ends a scheduling
          * region and can switch on the spot, and a context switch is the most
          * expensive thing on this port (the priority-inheritance commit
          * reverted in 8e63732e cost 18% of transmit by the same mechanism).
