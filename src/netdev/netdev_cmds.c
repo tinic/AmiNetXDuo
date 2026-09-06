@@ -278,6 +278,17 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          * clears the bar this tree uses, ahead in both positions on clean
          * builds, and no more than that.
          *
+         * THIS QUEUE IS SHARED BY EVERY BOARD, so it was checked on a second
+         * one.  ne2000_pcmcia (dp8390, not a2065's lance), same two clean
+         * builds, four rounds alternated: tcp-rx 4,018,438 -> 4,068,687,
+         * tcp-tx 2,278,896 -> 2,279,656.  READ THAT AS "NO REGRESSION ON A
+         * SECOND DRIVER", NOT as a second confirmation of the gain: n is 3
+         * and 4, the arms disagree by position there, and the control's
+         * second-position sample is a high outlier against its own first
+         * (4,249,708 against 4,011,217).  What it rules out is the thing worth
+         * ruling out -- that reordering this queue costs a board whose driver
+         * takes a different path into it.
+         *
          * An earlier run called this inconclusive because its arms disagreed
          * by position.  Those arms were built in two reused worktrees, one
          * holding a stale library (d5323947): the disagreement WAS the
