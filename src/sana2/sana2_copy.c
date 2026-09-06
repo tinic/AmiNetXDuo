@@ -55,6 +55,30 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      * never passes in cooked mode.  A 68000 raises an address error on an odd
      * word or longword access but not on a merely 4-misaligned one, so `& 1` is
      * the real requirement.  The answer goes in the slot, not in the packet.
+     *
+     * THAT PHASE COSTS 30-37% OF THIS COPY AND IT IS 15% OF RECEIVE.
+     * bench/sumbench.c timed its variants with src[] and dst[] as ULONG
+     * arrays -- both ends aligned, which is not what this hook is ever handed.
+     * Timed at the real phase (source at 2 mod 4) on an A1200 under Amiberry,
+     * 200 x 1460 bytes:
+     *
+     *     variant     aligned      src +2       cost
+     *     lm14        148.3 ns/B   203.4 ns/B   +37.2%
+     *     ldmovem     159.9        207.9        +30.0%
+     *     addx14      182.2        231.4        +27.0%
+     *     lmsep       187.1        241.2        +28.9%
+     *
+     * So "per-byte is measured-optimal" was measured on input this code never
+     * sees.  `dst` is nx_packet_data_start + PAD(2) + ETH(14), 0 mod 4; `from`
+     * is the device's payload pointer, 2 mod 4, and we do not own it.
+     *
+     * THE FIX IS NOT TO MATCH THE PHASE.  Dropping AMI_SANA2_RX_PAD to 0 would
+     * put both ends at 2 mod 4, which a two-byte lead-in could then align --
+     * but it also drags the IP header off its longword and misaligns the
+     * packet->app copy downstream, which is another 9.9% of receive.  The fix,
+     * if it is worth one, is inside the copy: read longwords from `from & ~3`
+     * and shift-combine them into aligned writes, so the bus never sees a
+     * misaligned access.  Unmeasured -- no such variant exists yet.
      */
     slot->summed = FALSE;
 
