@@ -13,6 +13,13 @@
 # achievable before it landed: the new floor is 385 less 24.3%, or 291, and
 # three independent nine-arm runs on this tree read 314, 366 and 385.
 #
+# THEN ASKED THE GATE, which is not the same question as the arithmetic.  A
+# fourth run against this file: read_kbs 349 (-9.4%, ok), write_kbs 2,491
+# (+16.5%, ok), dropped_rx 11 (+37.5%, ok), PASS.  Read landing 9.4% BELOW the
+# figure that recorded it is the tolerance doing its job -- a flat 15% would
+# have called an unchanged tree a regression, and that is what the file used to
+# carry.
+#
 # WRITE DID NOT MOVE: 2,139.0 before, 2,138.0 now.  Only read changed, by 5.8x,
 # which is what a campaign that has been optimising RECEIVE should produce and
 # is independent corroboration that transmit here is the rig's ~4.5 ms
