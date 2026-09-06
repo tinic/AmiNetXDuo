@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 # Request and response latency, on a link that loses packets.
+#
+# IT CANNOT RESOLVE A FEW PER CENT ON A CLEAN LINK, AND THAT IS WHAT IT IS FOR.
+# The per-fetch clock lands on 20 ms quanta: `-l 0 -n 30` against a change
+# worth about 3% of bulk receive gives median_ms=20 and p90_ms=20 for BOTH arms
+# in every round, because one fetch falling into the next quantum is the whole
+# of a 20 ms difference.  total_ms carries a little more (370 against 390 over
+# thirty fetches) and its arms overlap, so it decides nothing either.
+#
+# The note on AMINETXDUO_RX_DIRECT_COMPLETE in CMakeLists.txt says the same
+# thing about the same harness and predates this by a day.  It was read and
+# forgotten, and a rig run went on rediscovering it -- hence this comment,
+# where the next reader will be standing.
+#
+# What it IS for is what its first line says: loss.  Use it with -l at a real
+# percentage, where a stall is tens of quanta and the instrument has room.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
