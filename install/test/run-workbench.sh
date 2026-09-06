@@ -2004,12 +2004,24 @@ Echo >DH0:.done "$RC"' nouserstartup
     echo "startup_addnetinterface_lines=$AFTER_IFACE"
     echo "startup_foreign_lines_intact=$AFTER_FOREIGN"
 
-    if [ "$AFTER_HTTPD" != "0" ] || [ "$AFTER_ASSIGN" != "0" ]; then
-        printf '  %-34s httpd=%s assign=%s\n' \
-               "answering no removes both lines" "$AFTER_HTTPD" "$AFTER_ASSIGN"
+    # A drawer install keeps ONE Assign AmiNetXDuo:, and answering no to the
+    # terminal question must not take it away.  That assign is structural
+    # there: the LIBS:, C: and DEVS: ADD assigns under it are written against
+    # the name, and without it the drawer is unreachable.  Only httpd's own
+    # assign is conditional, and on a drawer install httpd does not write one
+    # at all (Install-AmiNetXDuo, the DO_HTTPD block).  Outside -D the only
+    # Assign AmiNetXDuo: in the block IS httpd's, so nothing may remain.
+    WANT_ASSIGN=0
+    [ "$DRAWER" = "1" ] && WANT_ASSIGN=1
+
+    if [ "$AFTER_HTTPD" != "0" ] || [ "$AFTER_ASSIGN" != "$WANT_ASSIGN" ]; then
+        printf '  %-34s httpd=%s assign=%s want=%s\n' \
+               "answering no removes httpd's lines" "$AFTER_HTTPD" \
+               "$AFTER_ASSIGN" "$WANT_ASSIGN"
         bad=1
     else
-        printf '  %-34s both gone\n' "answering no removes both lines"
+        printf '  %-34s httpd gone, assign=%s\n' \
+               "answering no removes httpd's lines" "$AFTER_ASSIGN"
     fi
     if [ "$AFTER_IFACE" != "1" ]; then
         printf '  %-34s %s\n' \

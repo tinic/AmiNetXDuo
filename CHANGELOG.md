@@ -43,44 +43,37 @@ Largest reductions, all with the same features built:
 
 ### Speed
 
-Transfer rate against v0.26.2, bits per second, median of five rounds, the
-comparison point rebuilt in the same sitting:
+Bits per second, median of five rounds, the comparison point rebuilt in the
+same sitting.
 
-| | v0.26.2 | now |
-|---|---|---|
-| Receive | 5,041,231 | **5,401,214** |
-| Transmit | 2,666,277 | **2,959,056** |
-| | **+7.1%** | **+11.0%** |
+| iperf, a2065 | v0.26.2 | now | |
+|---|---|---|---|
+| Receive | 5,041,231 | **5,401,214** | **+7.1%** |
+| Transmit | 2,666,277 | **2,959,056** | **+11.0%** |
 
-Where it came from:
+A file copy over the Fitz network filesystem: an application, not a
+benchmark. The RAM-disk control moved 5,950 to 5,903 and 3,022 to 3,000, so
+the delta below is network-side.
 
-| | |
+| Fitz | v0.26.2 | now | |
+|---|---|---|---|
+| Read | 529 | **589** | **+11.3%** |
+| Write | 477 | **515** | **+8.0%** |
+
+| Where it came from | |
 |---|---|
-| RFC 1323 timestamps no longer offered | the largest single share |
+| RFC 1323 timestamps no longer offered | +5.4% and +6.8% read, two sittings |
 | A dead byte-count call removed from the readiness sweep | +3.7% receive on its own |
 | The reader releases finished writes itself | instead of waking the IP thread |
-| The Ethernet header built without calling the copy routine | |
+| The Ethernet header built without calling the copy routine | too small to measure alone |
 
-RFC 1323 timestamps are no longer offered by default. They cost twelve bytes
-of every data segment and are parsed on every segment that arrives.
-
-Transfer rate, bits per second, median of five rounds, comparison point
-rebuilt in the same sitting:
-
-| | read | write |
-|---|---|---|
-| Timestamps on | 4,982,103 | 2,669,824 |
-| Timestamps off | **5,251,218** | 2,457,056 |
-| | **+5.4%** | |
-
-A second sitting measured +6.8% on the read rate. What is given up is PAWS,
-which guards a wrapped sequence number and needs about two hours of continuous
-transfer on one connection to matter at these rates, and RFC 1323 round-trip
-timing, which falls back to Karn's algorithm.
-
-| | |
+| Timestamps: what is given up | |
 |---|---|
-| `-DAMINETXDUO_TCP_TIMESTAMP=ON` | puts timestamps back |
+| Twelve bytes of every data segment, and a parse of every segment that arrives | the gain |
+| PAWS, against a wrapped sequence number | 2^32 bytes on one connection: about 76 minutes at 938 kb/s, under 20 at 34 Mbit/s |
+| RFC 1323 round-trip timing | falls back to Karn's algorithm, which samples once per window and not at all from a retransmit |
+| Both ends lose it: it is negotiated | matters on a lossy or high-latency link, not on a LAN |
+| `-DAMINETXDUO_TCP_TIMESTAMP=ON` | puts it back |
 
 ### Behaviour
 
