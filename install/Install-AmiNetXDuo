@@ -1794,11 +1794,28 @@
       (cat BOOT_CMD
            ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF))))
 
+; The assign is written here ONLY when the drawer install did not already
+; write one.  A drawer install emits `Assign AmiNetXDuo: "<D_ROOT>"` at the top
+; of this block, and that name is load-bearing: the three ADD assigns under it
+; are written against it, and it is how anything else refers to the drawer.  A
+; second `Assign AmiNetXDuo:` here does not add a name, it REPOINTS the one
+; already given, so on a drawer install with httpd the drawer's own name ended
+; up meaning the documentation directory instead.
+;
+; It showed up as two assign lines where one is the only right answer --
+; install/test/run-workbench.sh counts them, and -D is the arm that draws both
+; halves at once.  httpd still finds its page: the drawer assign names the
+; drawer the Terminal directory sits in, and httpd looks in more than one place
+; anyway (src/tools/httpd.c httpd_term_places[]).
 (if (AND DO_STARTUP DO_HTTPD)
-    (set BOOT_CMD
-      (cat BOOT_CMD
-           ("Assign AmiNetXDuo: \"%s\"\n" DOCDIR)
-           ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T\n" HTTPD_ROOT HTTPD_PORT))))
+    (
+      (if (NOT (> (strlen D_ROOT) 0))
+          (set BOOT_CMD
+            (cat BOOT_CMD ("Assign AmiNetXDuo: \"%s\"\n" DOCDIR))))
+      (set BOOT_CMD
+        (cat BOOT_CMD
+             ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T\n" HTTPD_ROOT HTTPD_PORT)))
+    ))
 
 ; Three cases, and (startup) covers all of them because it writes the block
 ; whole: the network lines and the assign, the assign on its own, or no block
