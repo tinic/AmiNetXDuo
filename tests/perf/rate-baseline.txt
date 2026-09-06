@@ -141,5 +141,11 @@
 # arm's samples span 2,656..3,435 and the low one drags its median, so without
 # it the gain is nearer +7%.  A Fitz sitting is far noisier than an iperf
 # round and six of them still cannot pin 2%.
+#
+# AND THE IPERF FIGURE ITSELF IS A RANGE.  fc5fabe6 against main was measured
+# twice, each six rounds an arm with both arms rebuilt clean and md5-checked:
+# +3.3% and +2.6% on receive, ahead in both positions both times.  Quote ABOUT
+# +3%.  Transmit read -0.7% and then +0.3%, which is what no change looks like
+# here -- the first of those two is in no sense a regression.
 tcp-rx 5522706
 tcp-tx 2945193

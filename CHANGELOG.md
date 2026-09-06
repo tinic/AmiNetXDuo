@@ -15,24 +15,21 @@ Measured on playhouse3 against a comparison point built clean in the same
 sitting, library md5 printed before a round ran, six rounds alternating which
 arm went first.
 
-| | before | now |
-|---|---|---|
-| iperf tcp-rx, bits/s | 5,347,499 | **5,522,706** |
-| Fitz read, kbytes/s | 3,272 | **3,562** |
-| iperf tcp-tx, bits/s | 2,997,212 | 2,976,433 |
-| Fitz write, kbytes/s | 2,542 | 2,538 |
+| | before | now | |
+|---|---|---|---|
+| iperf tcp-rx, sitting 1 | 5,347,499 | **5,522,706** | +3.3% |
+| iperf tcp-rx, sitting 2 | 5,366,765 | **5,504,271** | +2.6% |
+| Fitz read, kbytes/s | 3,272 | **3,562** | +8.9% |
+| iperf tcp-tx, sitting 1 | 2,997,212 | 2,976,433 | -0.7% |
+| iperf tcp-tx, sitting 2 | 2,965,530 | 2,972,969 | +0.3% |
+| Fitz write, kbytes/s | 2,542 | 2,538 | -0.2% |
 
-Six sittings an arm on Fitz, six rounds an arm on iperf, alternating which arm
-went first. The Fitz read figure is +8.9% on the medians and should be read as
-a range, not a point: that arm's samples span 2,656 to 3,435 and the low one
-drags its median, so the gain is nearer +7% without it. Five of six samples
-after the change beat the median before it.
-
-| change | receive |
+| | |
 |---|---|
-| SANA-II reader drains 32 frames a run, not 8 | +1.5% |
-| a CMD_READ returns to the head of its opener's queue | +1.0% |
-
+| receive | about +3%, ahead in both positions in both sittings |
+| transmit | no change; the two sittings straddle zero |
+| Fitz read | +8.9% on medians, nearer +7% without that arm's low sample |
+| method | clean build per arm, md5 checked, six rounds or sittings, order alternated |
 
 ## 0.26.3
 
