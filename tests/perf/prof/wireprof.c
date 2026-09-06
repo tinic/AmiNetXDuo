@@ -77,8 +77,12 @@ int main(int argc, char **argv)
     iperf_plan_init(&plan);
     plan.dir      = IPERF_TCP_RX;
     plan.blocking = 1;            /* the shape an application actually uses */
-    plan.port     = (UWORD)((argc > 2) ? atoi(argv[2]) : W_DEFAULT_PORT);
-    plan.seconds  = (ULONG)((argc > 3) ? atoi(argv[3]) : W_DEFAULT_SECS);
+    /* Both arms of a ?: have to agree in signedness: the defaults below are
+       unsigned and atoi() is not, which the cross stage builds as an error. */
+    plan.port     = (UWORD)((argc > 2) ? (UWORD)atoi(argv[2])
+                                       : (UWORD)W_DEFAULT_PORT);
+    plan.seconds  = (ULONG)((argc > 3) ? (ULONG)atoi(argv[3])
+                                       : (ULONG)W_DEFAULT_SECS);
     plan.kbytes   = 0;
     plan.buflen   = W_BUFLEN;
 
