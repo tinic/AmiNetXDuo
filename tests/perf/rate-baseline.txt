@@ -167,8 +167,21 @@
 # measured the identical way, so it stands as what an application sees when it
 # reads a file over Fitz.  What it is not is evidence about the wire, and the
 # absolute KiB/s must never be quoted beside an iperf rate as though they
-# measured the same thing.  Whether the +9% comes from the network half or the
-# handler half is UNKNOWN and worth an hour before anyone leans on it.
+# measured the same thing.
+#
+# IT IS THE STACK'S +9% THOUGH, and an earlier draft of this note wrongly left
+# that open.  Both arms run the SAME fitz handler and the same everything else;
+# the only difference between them is bsdsocket.library and anxnet.device.  So
+# the gain is the stack's by construction, however the harness counts its
+# bytes.
+#
+# THE OPEN QUESTION IS WHY IT IS THREE TIMES THE BULK FIGURE.  Fitz reads in
+# 32 KB chunks over a request-and-response protocol; iperf is one steady
+# stream.  A deeper reader drain and a read queue that finds its type first
+# should both be worth more to a bursty arrival pattern than to a continuous
+# one, which would explain it -- but that is a hypothesis and nothing here has
+# tested it.  If it holds, the request-and-response shape is where the next
+# receive work is, and this rig can see effects there that bulk iperf cannot.
 #
 # AND THE IPERF FIGURE ITSELF IS A RANGE.  fc5fabe6 against main was measured
 # twice, each six rounds an arm with both arms rebuilt clean and md5-checked:
