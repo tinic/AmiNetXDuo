@@ -598,13 +598,19 @@ endif()
 # src/bsdsocket/bsdsocket_internal.h.  Empty means pool-derived, which is what
 # ships; 8192 reproduces the fixed window that shipped before it.
 # The receiver's window-update threshold, as a divisor of RCV.BUFF.  2 is
-# RCV.BUFF/2, which is what ships and what the long note in
-# third_party/netxduo/common/src/nx_tcp_fast_periodic_processing.c measured
-# against RFC 1122's min(MSS, ...) term -- that term cost 25.7% to 32.2% of the
-# read path across three cards.  That settles the "more, smaller announcements"
-# side of the axis.  The other side, fewer and larger than RCV.BUFF/2, was
-# never measured; a divisor of 1 announces only when the whole buffer is free.
-# Exists so that question is answered by building two libraries out of one tree.
+# RCV.BUFF/2, which ships.  BOTH SIDES ARE NOW MEASURED and 2 is an optimum:
+#
+#   divisor 1, announce only on a whole free buffer   4,134,551  -23.4%
+#   divisor 2, RCV.BUFF/2, ships                      5,398,483      --
+#   divisor 3, RCV.BUFF/3                             5,268,734   -2.4%
+#
+# a2065 / A1200, five rounds per arm, medians, the comparison arm rebuilt in
+# the same sitting.  With RFC 1122's min(MSS, ...) term at -25.7% to -32.2%
+# across three cards in the long note in
+# third_party/netxduo/common/src/nx_tcp_fast_periodic_processing.c, the axis is
+# characterised end to end: too many announcements and too few cost about the
+# same quarter of the read path.  Do not sweep it again; the knob is kept so
+# the answer stays reproducible, not because a better value is expected.
 set(AMINETXDUO_WINDOW_UPDATE_DIVISOR "" CACHE STRING
     "Window-update threshold as a divisor of RCV.BUFF (default 2)")
 if(NOT AMINETXDUO_WINDOW_UPDATE_DIVISOR STREQUAL "")
