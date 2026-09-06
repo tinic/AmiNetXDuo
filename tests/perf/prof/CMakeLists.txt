@@ -75,6 +75,38 @@ set_source_files_properties(profverify.S PROPERTIES
     COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
 aminetxduo_prof_target(profverify)
 
+# The same sampler over a REAL transfer: the shipping bsdsocket.library, the
+# SANA-II reader and the card the guest was booted with.  tcpprof below cannot
+# answer anything about that path -- it runs both its phases over
+# _nx_ram_network_driver -- and the step budget measures it only as legs, which
+# say how long and never which function.
+# The iperf core is compiled in, not linked: src/tools builds each command
+# with its own SOURCES list (aminetxduo_add_tool) and publishes no library,
+# and the point of reusing those files is that what this measures is the same
+# code tests/tools/run-iperf.sh measures.
+add_executable(wireprof wireprof.c
+    "${CMAKE_SOURCE_DIR}/src/tools/iperfcore.c"
+    "${CMAKE_SOURCE_DIR}/src/tools/iperfwire.c"
+    "${CMAKE_SOURCE_DIR}/src/tools/toolsock.c"
+    "${CMAKE_SOURCE_DIR}/src/tools/toolbudget.c"
+    "${CMAKE_SOURCE_DIR}/src/tools/tool_util.c"
+    "${CMAKE_SOURCE_DIR}/src/tools/tool_diag.c"
+    "${CMAKE_SOURCE_DIR}/src/tools/netstack_weak.c"
+    # Deliberately outside aminetxduo_config (src/config/CMakeLists.txt:10):
+    # it carries the words for the advice codes, so only a consumer that can
+    # print them links it, and tool_diag.c is one.
+    "${CMAKE_SOURCE_DIR}/src/config/config_advice.c")
+# The same set aminetxduo_add_tool() gives every command: tool_diag.c reaches
+# sana2_device.h, and TOOLS_COMMON_SOURCES is not optional -- toolsock.c calls
+# into it.
+target_include_directories(wireprof PRIVATE
+    ${AMINETXDUO_CORE_INCLUDES}
+    "${CMAKE_SOURCE_DIR}/src/tools"
+    "${CMAKE_SOURCE_DIR}/src/sana2")
+target_link_libraries(wireprof PRIVATE
+    aminetxduo_prof aminetxduo_config aminetxduo_common)
+aminetxduo_prof_target(wireprof)
+
 # The measurement.  Same fabric as perf_test.c's end-to-end cases.
 add_executable(tcpprof tcpprof.c)
 target_link_libraries(tcpprof PRIVATE
