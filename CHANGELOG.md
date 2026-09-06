@@ -87,6 +87,19 @@ the chip reads and never writes.
 | iperf tcp-rx, position 2 | 5,708,409 | 5,871,054 | +2.85% |
 | iperf tcp-tx | 3,124,139 | 3,133,475 | +0.30% |
 
+The day's four receive changes together, on the application workload, six
+sittings an arm.
+
+| | before | now | |
+|---|---|---|---|
+| Fitz write, kbytes/s | 2,541.5 | **2,607.0** | +2.58% |
+| Fitz read, kbytes/s | 3,422.5 | 3,506.5 | +2.45%, not solid |
+
+| | |
+|---|---|
+| write | ranges disjoint, before [2527..2552] against after [2591..2622] |
+| read | before spans [2729..3722]; the arms overlap and the figure is not claimed |
+
 ## 0.26.3
 
 ### Memory a running machine keeps

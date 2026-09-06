@@ -816,6 +816,18 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
      * goes nonzero: run-lossgate.sh, counters build, nine arms, PASS --
      * read_kbs 379.0 against a 385.0 baseline (-1.6%, ok), write_kbs 2,516
      * against 2,138 (+17.7%, ok), retransmitted 0.
+     *
+     * THE TRANSMIT HALF IS CORROBORATED ON A SECOND WORKLOAD.  The +5.30%
+     * above is iperf; the day's four changes measured together on Fitz, six
+     * sittings an arm alternated, give fitz_write 2,541.5 -> 2,607.0, +2.58%,
+     * with the two arms' ranges DISJOINT -- before [2527..2552] against after
+     * [2591..2622].  The payload-alignment change measured fitz_write -0.12%
+     * on its own, so that gain is not its; this sweep skip is the only one of
+     * the four that moved transmit.
+     *
+     * fitz_read came out +2.45% and IS NOT CLAIMED: its before arm spans
+     * [2729..3722], a 36% range with an outlier dragging the median, and the
+     * arms overlap throughout.
      */
     if (rx->unposted == 0)
     {
