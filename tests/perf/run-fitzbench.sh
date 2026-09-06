@@ -67,12 +67,23 @@ done
 
 PEER_DIR="${PEER_DIR:-/tmp/fitzbench-share-$PORT}"
 
+# playhouse2 used to be refused outright here: VMs on one Proxmox host never
+# cross a NIC, so the theory went that its TX checksums are never computed and
+# our stack rejects them as 6 bad packets and no transfer.  MEASURED 2026-09-06
+# and it does not happen -- two full arms, guest as receiver, reported
+#
+#     0 bad packets, 0 checksum errors
+#
+# and read 529 -> 589 kb/s across a comparison.  A refusal that costs us the
+# one application-shaped workload we have is worse than a warning, and the
+# failure it guards against is self-announcing: fitzbench prints the bad-packet
+# and checksum-error counts on every run, so a reader sees it immediately.
 case "$PEER" in
     *playhouse2*)
-        echo "playhouse2 cannot serve this: VMs on one Proxmox host never cross" >&2
-        echo "a NIC, so its TX checksums are never computed and our stack rejects" >&2
-        echo "them, it reads as 6 bad packets and no transfer.  Use another." >&2
-        exit 2 ;;
+        echo "note: $PEER is a VM on the same host as the emulator.  If its TX" >&2
+        echo "checksums come through uncomputed this reads as bad packets and" >&2
+        echo "no transfer; check the 'bad packets' line in the output.  It was" >&2
+        echo "measured clean on 2026-09-06." >&2 ;;
 esac
 [ -n "$PEER" ] || [ -n "$PEER_ADDR" ] || {
     echo "set AMINETXDUO_FITZ_PEER=<user@host> or pass -H, a third machine on" >&2

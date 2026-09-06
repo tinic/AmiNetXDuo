@@ -261,13 +261,30 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
             }
 
             nx_packet_transmit_release(slot->packet);
-            slot->packet = NULL;
         }
 
+        /*
+         * Under Forbid(), because ami_sana2_tx_claim() scans `busy` under
+         * Forbid() and this is the store that hands the slot back.  `busy` is
+         * volatile and `packet` is not, so a compiler is free to sink the
+         * plain store past the volatile one; a claim landing in that window
+         * takes a slot whose `packet` this thread then NULLs, orphaning a
+         * packet that is never released.  The pool drains, ami_sana2_rx_post()
+         * starts returning zero and the reader sleeps -- a read that falls off
+         * a cliff while writes carry on, which is a shape this stack has
+         * shipped once before.
+         *
+         * It was unreachable until the reader began reaping for itself: reap
+         * used to run only on the IP thread or under nx_ip_protection from a
+         * sender, so it could not race the claim.  It can now.
+         */
+        Forbid();
+        slot->packet   = NULL;
         slot->cursor   = NULL;
         slot->consumed = 0;
         slot->total    = 0;
         slot->busy     = FALSE;
+        Permit();
     }
 }
 
