@@ -17,7 +17,26 @@
 #     q14       5,398,483  2,955,117   <- lowest rx
 #
 # Those medians span 0.46% on receive and 0.57% on transmit across the five
-# sittings, which is what makes a tight tolerance safe.
+# sittings.  THAT NUMBER IS NOT THE CROSS-SITTING SPREAD AND MUST NOT BE READ
+# AS ONE -- it is what five sittings happened to give on one afternoon.
+#
+# Measured 2026-09-06, the same source built twice and run in two sittings a
+# few hours apart: tcp-rx median 5,514,440 and then 5,168,673.  6.3% apart, on
+# a binary whose only difference from the other was a #define this file's own
+# gate does not see.  Sittings across that day ranged 5,168,673..5,617,351.
+#
+# SO DO NOT TIGHTEN THE TOLERANCE.  12% looks generous next to 0.46% and is
+# not: it is absorbing rig drift, and a tighter one manufactures red runs on
+# an unchanged tree.  The 4.3% regression that reached 0.26.3 was not let
+# through by the threshold, it was let through because NO WORKFLOW EVER RAN
+# THIS GATE (tools/check-stage-coverage.sh exists for that now).  Wiring a
+# gate up is what catches a regression; narrowing a threshold that is holding
+# back real drift only breaks the gate.
+#
+# It also means an ABSOLUTE number from one sitting proves nothing about a
+# change.  Rebuild the comparison point in the SAME sitting and alternate
+# which arm runs first (see the position note above).  Every figure in this
+# tree that survived did that; the ones that did not were wrong.
 #
 # ALTERNATE THE ORDER OF AN A/B ON THIS RIG.  THE SECOND ARM LOSES 2.0% OF
 # RECEIVE WHATEVER IS IN IT.  Six rounds against 242be840 alternating which
