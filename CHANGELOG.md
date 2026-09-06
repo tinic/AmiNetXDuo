@@ -33,6 +33,27 @@ arm went first.
 | Fitz rates | application-visible file throughput, not a wire rate; do not compare to the iperf figures |
 | method | clean build per arm, md5 checked, six rounds or sittings, order alternated |
 
+The SANA-II reader swept all 32 read slots once per drain to post nothing:
+each slot is re-posted as its frame is taken out, so the sweep found them all
+in flight already.
+
+| | before | now | |
+|---|---|---|---|
+| iperf tcp-rx | 5,496,274 | **5,669,851** | +3.16% |
+| iperf tcp-rx, position 1 | 5,508,966 | 5,625,025 | +2.11% |
+| iperf tcp-rx, position 2 | 5,492,957 | 5,715,119 | +4.04% |
+| iperf tcp-tx | 2,975,931 | **3,133,761** | +5.30% |
+
+| null control | rx | tx |
+|---|---|---|
+| same binary, both worktrees, same six rounds | +0.22% | **-0.00%** |
+
+| | |
+|---|---|
+| transmit | moves, on a receive-path change. The rig's ~4.5 ms ack sets the floor; it does not make our share of the round trip free |
+| null control | `md5 7522050095ef` in both trees; transmit 2,966,517 against 2,966,516 |
+| separation | the null's transmit stays in 2.94-3.01M in both directories while this arm sits at 3.10-3.15M |
+
 ## 0.26.3
 
 ### Memory a running machine keeps

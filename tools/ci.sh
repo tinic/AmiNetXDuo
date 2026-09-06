@@ -617,6 +617,19 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # The SANA-II reader's per-drain sweep is skipped on a counter, and a
+    # counter that stops matching the flag it shadows stops the ring being
+    # refilled with no error anywhere.  One writer, enforced here.
+    if tools/check-rx-posted.sh > "$BUILD/rx-posted.log" 2>&1; then
+        note "rx posted: $(sed -n 's/^rx_posted=/rx_posted /p' \
+              "$BUILD/rx-posted.log")"
+    else
+        cat "$BUILD/rx-posted.log"
+        fail "the SANA-II posted flag is written outside its owner block\
+ (tools/check-rx-posted.sh)"
+        return 1
+    fi
+
     local st log
     for st in tests/*/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue

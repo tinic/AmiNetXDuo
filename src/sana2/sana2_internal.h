@@ -366,6 +366,8 @@ typedef struct AmiRxProbe
     ULONG   dry;                /* drains that found the device holding 0  */
     ULONG   post_zero;          /* nothing could be posted                 */
     ULONG   post_partial;       /* posted fewer than depth                 */
+    ULONG   sweep_run;          /* ami_sana2_rx_post() walked the ring      */
+    ULONG   sweep_skip;         /* ... and the times it did not need to     */
 
     /* E-Clock ticks spent reacquiring the ThreadX baton after the Wait(). */
     ULONG   baton_max;
@@ -483,6 +485,17 @@ typedef struct AmiSana2Rx
     AmiSana2If         *iface;
     ULONG               packet_type;
     UWORD               depth;
+
+    /*
+     * Slots NOT currently handed to the device.  ami_sana2_rx_post() sweeps
+     * every slot in the ring once per drain, and in the steady state finds
+     * them all posted already -- ami_sana2_rx_complete() re-posts each slot as
+     * it takes the frame out, so the sweep is 32 calls that do nothing.  This
+     * count is what lets it be skipped, and it is exact by construction: the
+     * `posted` flag is written in one place only, next to this field.  See the
+     * owner block in sana2_rx.c and tools/check-rx-posted.sh.
+     */
+    UWORD               unposted;
 
     TX_THREAD           thread;
     TX_SEMAPHORE        ready;

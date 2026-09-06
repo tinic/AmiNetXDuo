@@ -284,6 +284,29 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
         AMI_ERROR("rxprobe %ld: baton max %ld sum %ld ticks",
                   (long)i, (long)pr->baton_max, (long)pr->baton_sum);
 
+        /*
+         * sweep_skip/sweep_run is the size of the win; unposted against the
+         * recount is the invariant it rests on.  The recount is a SAMPLE, not
+         * a snapshot -- this runs on NetStat's task while the reader runs --
+         * so read a difference of one as a race and a standing difference as
+         * a bug.
+         */
+        {
+            UWORD k;
+            UWORD held = 0;
+
+            for (k = 0; k < rx->depth; k++)
+            {
+                if (rx->slot[k].posted)
+                    held++;
+            }
+
+            AMI_ERROR("rxprobe %ld: sweeps run %ld skipped %ld, unposted %ld "
+                      "recount %ld",
+                      (long)i, (long)pr->sweep_run, (long)pr->sweep_skip,
+                      (long)rx->unposted, (long)(rx->depth - held));
+        }
+
         for (j = 0; j < AMI_RXPROBE_BUCKETS; j++)
         {
             if (pr->baton_hist[j] != 0)
@@ -639,6 +662,48 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
 #endif
 }
 
+/* ---- BEGIN posted-flag owner (tools/check-rx-posted.sh) ---------------- *
+ *
+ * `slot->posted` and `rx->unposted` are ONE fact, so they are written in one
+ * place.  ami_sana2_rx_post() skips its whole sweep when the count is zero,
+ * and that is sound only while the count is exact: a stale nonzero costs one
+ * wasted sweep, a stale zero silently stops refilling the ring and receive
+ * collapses.  Three lines in this file used to set the flag directly;
+ * check-rx-posted.sh now refuses any assignment to it outside this block, so
+ * a fourth cannot be added without the counter.
+ *
+ * Reader-thread only.  The device writes the packet and replies, but it never
+ * touches these two: the flag is cleared where the reply is dequeued, in the
+ * drain, and in the teardown reap -- both on this thread.
+ */
+static VOID ami_sana2_rx_mark(AmiSana2Rx *rx, AmiRxSlot *slot, BOOL posted)
+{
+    if ((slot->posted != FALSE) == (posted != FALSE))
+        return;
+
+    slot->posted = posted;
+
+    if (posted)
+        rx->unposted--;
+    else
+        rx->unposted++;
+}
+
+/* Every slot idle and the count agreeing with it.  Called once, before the
+   first post: a reader that has been stopped and started again comes back
+   through here, and its slots were cleared by the teardown reap. */
+static VOID ami_sana2_rx_mark_reset(AmiSana2Rx *rx)
+{
+    UWORD i;
+
+    for (i = 0; i < rx->depth; i++)
+        rx->slot[i].posted = FALSE;
+
+    rx->unposted = rx->depth;
+}
+
+/* ---- END posted-flag owner --------------------------------------------- */
+
 /*
  * Give one idle slot a packet and hand it back to the device.
  *
@@ -681,7 +746,7 @@ static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
     slot->req.ios2_PacketType     = rx->packet_type;
     slot->req.ios2_DataLength     = 0;
     slot->req.ios2_Data           = slot;
-    slot->posted                  = TRUE;
+    ami_sana2_rx_mark(rx, slot, TRUE);
 
     /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
        SANA2IOF_RAW just set. Both lines it runs are above. */
@@ -700,6 +765,54 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 {
     UWORD i;
     UWORD live = 0;
+
+    /*
+     * THE SWEEP IS THE STEADY STATE'S DEAD WORK.  This runs once per drain,
+     * and ami_sana2_rx_complete() has already re-posted every slot it took a
+     * frame out of, so with a full ring all AMI_SANA2_RX_MAX_DEPTH calls fall
+     * straight out of ami_sana2_rx_post_slot()'s first line.  At 32 deep and
+     * ~4.7 frames a drain that is ~7 wasted calls for every frame received,
+     * and _ami_sana2_rx_post_slot carries 2.4% of the real-path profile.
+     *
+     * Only a slot whose read completed, or whose re-post failed, is idle, and
+     * both are counted.  Zero means every slot is in the device's hands.
+     *
+     * MEASURED on playhouse3/a2065, clean build per arm with the library md5
+     * printed before a round ran, six rounds alternating which arm went first,
+     * all twelve rc=0:
+     *
+     *     medians      before       after       delta
+     *     tcp-rx       5,496,274    5,669,851   +3.16%
+     *       position 1 5,508,966    5,625,025   +2.11%
+     *       position 2 5,492,957    5,715,119   +4.04%
+     *     tcp-tx       2,975,931    3,133,761   +5.30%
+     *
+     * AND THE TRANSMIT NUMBER IS REAL, WHICH IS THE SURPRISE.  A null control
+     * -- origin/main built clean in BOTH worktrees, md5 7522050095ef on each,
+     * the same six alternating rounds -- reads rx +0.22% and tx -0.00%
+     * (2,966,517 against 2,966,516).  The null's transmit never leaves
+     * 2.94-3.01M in either directory while this arm sits at 3.10-3.15M, six
+     * samples against twelve with no overlap.
+     *
+     * The rig's ~4.5 ms acknowledgement round trip is still there and still
+     * dominates; what it does not do is make our share of that trip free.  The
+     * sweep sat between an arriving ACK and the window reopening, and during a
+     * bulk SEND the drains are shallow -- one or two frames -- so the ring walk
+     * was a larger share of each wake than it is on receive.  Read
+     * "transmit is closed" as "the rig sets the floor", not as "nothing we do
+     * can move it".
+     */
+    if (rx->unposted == 0)
+    {
+#ifdef AMINETXDUO_RXPROBE
+        rx->probe.sweep_skip++;
+#endif
+        return rx->depth;
+    }
+
+#ifdef AMINETXDUO_RXPROBE
+    rx->probe.sweep_run++;
+#endif
 
     for (i = 0; i < rx->depth; i++)
     {
@@ -1003,7 +1116,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
         AmiRxSlot *slot = (AmiRxSlot *)msg;
         LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
 
-        slot->posted = FALSE;
+        ami_sana2_rx_mark(rx, slot, FALSE);
         took++;
 
         if (rx->stop)
@@ -1132,7 +1245,7 @@ static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
 
         while ((msg = GetMsg(rx->port)) != NULL)
         {
-            ((AmiRxSlot *)msg)->posted = FALSE;
+            ami_sana2_rx_mark(rx, (AmiRxSlot *)msg, FALSE);
 #ifdef AMINETXDUO_RXPROBE
             if (rx->probe.live != 0)
                 rx->probe.live--;
@@ -1269,6 +1382,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         rx->slot[i].req.ios2_Req.io_Message.mn_Length =
             (UWORD)sizeof(struct IOSana2Req);
     }
+
+    ami_sana2_rx_mark_reset(rx);
 
 #ifdef AMINETXDUO_RXPROBE
     /* TimerBase is opened lazily. The probe's clock needs it before the first
