@@ -279,10 +279,27 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
          * sender, so it could not race the claim.  It can now.
          *
          * A COMPILER BARRIER, NOT Forbid().  This shipped as Forbid()/Permit()
-         * in 92bff6b3 and cost about 2% of receive and 5.5% of transmit,
-         * measured interleaved against 242be840 in one sitting -- transmit is
-         * hit harder because the pair runs once per completed transmit and a
-         * receive run only pays it on ACKs.
+         * in 92bff6b3.
+         *
+         * THE NUMBERS BELOW ARE NOT TRUSTWORTHY AND ARE KEPT ONLY SO THE NEXT
+         * READER DOES NOT RE-DERIVE THEM.  They were taken with each arm built
+         * in a DIFFERENT reused worktree, and one of those build directories
+         * did not match its own commit: a null control at the same commit
+         * measured 5.3% between two such trees on identical source
+         * (d5323947).  So "2% of receive and 5.5% of transmit" is an artefact
+         * of unknown size and sign, and re-measuring it wants clean builds and
+         * an md5 on each arm.
+         *
+         * THE CHANGE STANDS ON ITS OWN WITHOUT THEM.  92bff6b3 closed a real
+         * race and closed it with a scheduling region; the hazard it names is
+         * a COMPILER one and there is one CPU, so a barrier closes the same
+         * hole and is strictly less work per completion.  That argument needs
+         * no rate number.
+         *
+         * What it was measured as: about 2% of receive and 5.5% of transmit,
+         * interleaved against 242be840 in one sitting -- transmit hit harder
+         * because the pair runs once per completed transmit and a receive run
+         * only pays it on ACKs.
          *
          * THE RECEIVE FIGURE IS POSITION-CORRECTED AND THE FIRST ONE WAS NOT.
          * Fixed-order runs put base first and the other arm second and read
