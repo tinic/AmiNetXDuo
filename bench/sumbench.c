@@ -141,6 +141,42 @@ static void check(const char *name,
     printf("  ok   %-12s 73 counts against the reference\n", name);
 }
 
+/*
+ * THE PHASE PRODUCTION ACTUALLY RUNS AT, which every arm above misses.
+ * src[] and dst[] are ULONG arrays, so bench() times both ends longword
+ * aligned.  The shipping path does not: ami_sana2_copy_to_buff() gates the
+ * fused copy on `& 1` rather than `& 3` and says why -- "the two ends are
+ * permanently two bytes out of phase" -- because dst is
+ * data_start + PAD(2) + ETH(14), 0 mod 4, while `from` is the device's payload
+ * pointer at 2 mod 4.  So the routine that is 15% of receive reads MISALIGNED
+ * longwords on every frame and no bench here has ever timed that.
+ *
+ * Same buffers, source offset by one word.  The count drops by one longword so
+ * the read stays inside src[].
+ */
+static void bench_skewed(const char *name,
+                         ULONG (*fn)(ULONG *, const ULONG *, ULONG),
+                         ULONG words, ULONG reps)
+{
+    const ULONG *from = (const ULONG *)(const APTR)((const UBYTE *)src + 2);
+    ULONG t0, ticks, i, bytes;
+    ULONG ns;
+
+    words = (words > 1UL) ? (words - 1UL) : 1UL;
+
+    t0 = eclock();
+    for (i = 0; i < reps; i++)
+        (void)fn(dst, from, words);
+    ticks = eclock() - t0;
+
+    bytes = words * 4UL * reps;
+    ns = (ULONG)(((double)ticks * 1000000000.0) / 709379.0 / (double)bytes);
+
+    printf("  %-12s %6lu ticks  %4lu ns/B  (src +2, %lu x %lu B)\n",
+           name, (unsigned long)ticks, (unsigned long)ns,
+           (unsigned long)reps, (unsigned long)(words * 4UL));
+}
+
 static void bench(const char *name,
                   ULONG (*fn)(ULONG *, const ULONG *, ULONG),
                   ULONG words, ULONG reps)
@@ -208,6 +244,13 @@ int main(void)
     bench("addx14", v_addx14, words, reps);
     bench("lm14", v_lm14, words, reps);
     bench("lmsep", v_lmsep, words, reps);
+
+    printf("\n  -- source at 2 mod 4, the phase the stack actually feeds --\n");
+    bench_skewed("ldmovem+2", v_ldmovem, words, reps);
+    bench_skewed("addx14+2", v_addx14, words, reps);
+    bench_skewed("lm14+2", v_lm14, words, reps);
+    bench_skewed("lmsep+2", v_lmsep, words, reps);
+    bench_skewed("reference+2", v_reference, words, reps);
 
     printf("\n%s\n", failures == 0 ? "PASS" : "FAIL");
 
