@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 # Fitz bulk throughput, on a link that has latency.
+#
+# -r REPS AVERAGES INSIDE ONE BOOT.  That is not the same as running this
+# again, and must not be read as if it were: kbs_mean over three reps of one
+# sitting reports a tight min/max and still lands wherever that boot happened
+# to sit.  Measured 2026-09-06 -- three sittings of `-r 3` on one tree gave
+# FITZ: read 576, 580, 584, so a single sitting can be 1.5% off the mean of
+# three while its own min/max span 1.
+#
+# 0.26.3's notes were written from one sitting and overstated the read gain as
+# +11.3%; three sittings each side give +9.2%.  For a number that leaves this
+# tree, run the whole harness more than once.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
