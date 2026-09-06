@@ -149,6 +149,27 @@
 # Note Fitz gains about three times what iperf does (+9% against ~+3%).  Do not
 # quote one figure for both workloads.
 #
+# AND DO NOT COMPARE THE TWO ABSOLUTE RATES AT ALL.  fitz_*_kbs is not a wire
+# throughput.  One run's own lines: 524,288 bytes written in 142,149 eclock
+# ticks, 0.200 s, 2,555 KiB/s -- against iperf tcp-tx on the same stack at
+# 2,976,433 bits/s, which is 363 KiB/s.  Seven times apart, and receive is five
+# times apart the same way.
+#
+# The iperf figure is the one that reconciles: 690 KiB/s of receive against
+# 199 ns/B for the fused copy is 13.7% of the CPU for one pass and about 27%
+# for two, which is exactly the per-byte share the wire profile measures.  Fitz
+# at 3,562 KiB/s would want 70% for a single pass, which is not available.  The
+# likely reading is that the timed section closes before the handler's buffered
+# data has reached the wire, so the rate counts bytes handed over rather than
+# bytes delivered.
+#
+# WHAT THAT DOES AND DOES NOT COST US.  The +9% is a comparison of two arms
+# measured the identical way, so it stands as what an application sees when it
+# reads a file over Fitz.  What it is not is evidence about the wire, and the
+# absolute KiB/s must never be quoted beside an iperf rate as though they
+# measured the same thing.  Whether the +9% comes from the network half or the
+# handler half is UNKNOWN and worth an hour before anyone leans on it.
+#
 # AND THE IPERF FIGURE ITSELF IS A RANGE.  fc5fabe6 against main was measured
 # twice, each six rounds an arm with both arms rebuilt clean and md5-checked:
 # +3.3% and +2.6% on receive, ahead in both positions both times.  Quote ABOUT

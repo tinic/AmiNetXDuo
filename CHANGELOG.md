@@ -30,6 +30,7 @@ arm went first.
 | receive | about +3%, ahead in both positions in both sittings |
 | transmit | no change; the two sittings straddle zero |
 | Fitz read | +9%, two independent sets of six sittings agreeing to 0.1pp |
+| Fitz rates | application-visible file throughput, not a wire rate; do not compare to the iperf figures |
 | method | clean build per arm, md5 checked, six rounds or sittings, order alternated |
 
 ## 0.26.3
