@@ -143,6 +143,20 @@
  * highest DESPITE running last.  A fixed-order sweep cannot see a 3% effect.
  * The fairness worry the eight was protecting does not appear: the reader
  * still yields, it just yields after draining rather than mid-ring.
+ *
+ * WHY IT PAYS, from the drain loop's own comment: ami_sana2_rx_drain() takes
+ * nx_ip_protection ONCE FOR THE WHOLE RUN, not once per frame, and claims the
+ * IP thread's seat for the same span (NX_TCP_PACKET_RECEIVE_DIRECT).  The
+ * budget is what bounds that hold, so it is also what the fixed cost is
+ * amortised over: at 8 the reader paid a mutex round trip and a seat swap
+ * every 8 frames, at 32 it pays them every 32.  The wire profile puts the
+ * mutex at 2.2%.
+ *
+ * That also says where the ceiling is.  A run ends at the budget OR when
+ * GetMsg() comes back empty, and at most AMI_SANA2_RX_MAX_DEPTH reads can be
+ * outstanding, so a budget of 32 already means "drain whatever is there" and
+ * a larger one cannot do more.  Raising MAX_DEPTH is what would move this
+ * number, and nothing here says that is worth doing.
  */
 #ifndef AMI_SANA2_RX_RUN_MAX
 #define AMI_SANA2_RX_RUN_MAX        32
