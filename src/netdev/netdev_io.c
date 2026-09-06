@@ -34,6 +34,36 @@ VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
     if (io->ios2_Req.io_Command != S2_ONEVENT)
         io->ios2_WireError = 0;
 
+    /*
+     * CMD_READ straight to its handler.  It is one per received frame, from
+     * ami_sana2_rx_post_slot(), and it is most of what this device is ever
+     * asked to do; netdev_perform() reaches the same three stores and AddHead
+     * through a 40-byte frame, a movem of five registers and a jump table.
+     * Every other command still goes the long way, and netdev_perform() keeps
+     * its own CMD_READ case, so nothing that calls it directly changes
+     * behaviour -- src/netdev/test enters at both.
+     *
+     * THE SIZE OF THIS IS NOT MEASURED, AND THE COMMIT MESSAGE SAYS SO.  The
+     * rate cannot see it: six rounds gave rx -0.23% with the positions split
+     * (+0.45%, -1.07%), which is what an effect of a few tenths looks like
+     * against a ~1% resolution.  The profile could not settle it either --
+     * exec.library/Dispatch was 10.6% in the branch run and absent from main's,
+     * which deflates every other share by about that much, so
+     * _netdev_perform 2.1% against _netdev_queue_read 1.1% is mostly a changed
+     * denominator rather than a changed cost.
+     *
+     * What IS certain is that the frame, the movem of five registers and the
+     * twenty-case jump table no longer execute on this path, because the path
+     * no longer runs that code.  Kept on that basis and on the user's
+     * direction that micro improvements accumulate toward a measurable total
+     * -- not on a number.
+     */
+    if (io->ios2_Req.io_Command == CMD_READ && op != NULL)
+    {
+        netdev_queue_read(op, io, CMD_READ);
+        return;
+    }
+
     netdev_perform(op, io);
 }
 

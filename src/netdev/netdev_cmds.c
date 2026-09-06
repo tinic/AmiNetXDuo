@@ -202,6 +202,116 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
     netdev_reply(io, 0, 0);
 }
 
+/*
+ * Queue a CMD_READ or an S2_READORPHAN.
+ *
+ * Split out so netdev_begin_io() can reach it without the generic dispatch.
+ * CMD_READ is most of what this device is ever asked to do -- one per received
+ * frame, from ami_sana2_rx_post_slot() -- and the generic path pays a 40-byte
+ * frame, a movem of five registers and a jump-table dispatch to reach three
+ * stores and an AddHead.
+ *
+ * _netdev_perform is 2.1% of the real-path profile and that is a share to
+ * TRUST, unlike the thin static helpers this campaign was recently burned by:
+ * it is non-static, sits in its own translation unit and carries twenty cases,
+ * so no inliner folds it away.  The saving also lands inside the reader's
+ * nx_ip_protection hold, where a calibrated burn measured a cycle costing
+ * about 1.53 times what it costs outside (86641b7c).
+ */
+VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
+{
+    NetdevUnit *unit = op->op_Hw;
+    BOOL queued;
+
+    if (op->op_CopyTo == NULL)
+    {
+        netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
+        return;
+    }
+
+    /*
+     * One Disable() over the test and the queueing.  Split, a concurrent
+     * S2_OFFLINE drains the list between them and the read lands on an
+     * offline unit with nothing left to answer it.
+     */
+    io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
+    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+
+    /*
+     * A CMD_READ GOES TO THE HEAD, AN ORPHAN TO THE TAIL.
+     *
+     * netdev_take() walks op_Reads matching ios2_PacketType, and this
+     * shim keeps three readers on one opener -- IPv4, ARP and IPv6
+     * (sana2_rx.c:1400).  During a bulk IPv4 transfer the ARP and IPv6
+     * reads are never satisfied, so with AddTail they settle permanently
+     * at the head and every arriving frame walks past all four of them
+     * before it matches: the steady state is [ARP, ARP, IPv6, IPv6,
+     * IPv4...] once the first few frames have cycled their reads to the
+     * back.  _netdev_take is 1.2% of the wire profile.
+     *
+     * Outstanding reads of one type are interchangeable -- each is an
+     * empty buffer waiting to be filled, and SANA-II promises nothing
+     * about which one a frame lands in -- so handing back the most
+     * recently freed one is as correct as handing back the oldest, and it
+     * puts the type that is actually receiving at the front.  The idle
+     * ARP and IPv6 reads sink behind it and stay there.
+     *
+     * Worth 1.0% of receive.  Clean build per arm, md5 of anxnet.device
+     * printed before a round ran (13542d48 tail, dcdac8e5 head), six
+     * rounds alternating which arm went first, tcp-rx medians:
+     *
+     *     arm       first        second       overall
+     *     AddTail   5,486,559    5,545,202    5,515,880
+     *     AddHead   5,559,536    5,580,368    5,569,952
+     *
+     * Ahead in both positions, +1.3% and +0.6%; transmit -0.1%.  READ THAT
+     * AS SMALL AND POSITIVE, NOT AS 1.0% EXACTLY -- the within-arm spread
+     * between positions is about 1% here, the same size as the effect.  It
+     * clears the bar this tree uses, ahead in both positions on clean
+     * builds, and no more than that.
+     *
+     * THIS QUEUE IS SHARED BY EVERY BOARD, so it was checked on a second
+     * one.  ne2000_pcmcia (dp8390, not a2065's lance), same two clean
+     * builds, SIX rounds alternated, tcp-rx:
+     *
+     *     arm      first        second       median
+     *     before   4,231,006    4,001,262    4,018,809
+     *     after    4,071,943    4,074,700    4,071,943
+     *
+     * READ THAT AS "NO REGRESSION ON A SECOND DRIVER" AND NOT AS A SECOND
+     * CONFIRMATION OF THE GAIN.  The +1.3% in those medians is the control
+     * moving, not this change: the control's own two positions differ by
+     * 5.7% while the after arm sits at 4.07M in both, tight to 0.07%.  Six
+     * rounds cannot call 1% against a control that noisy, and a four-round
+     * run before it put the control's outlier in the OTHER position.
+     *
+     * What it does rule out is the thing worth ruling out -- that
+     * reordering a queue every board shares costs a board whose driver
+     * takes a different path into it.  The after arm is never below the
+     * control's range.  Transmit there is -0.7%, inside the same noise.
+     *
+     * An earlier run called this inconclusive because its arms disagreed
+     * by position.  Those arms were built in two reused worktrees, one
+     * holding a stale library (d5323947): the disagreement WAS the
+     * artefact.  AMI_SANA2_RX_RUN_MAX read +2.8% and then -4.0% the same
+     * bad way and is +1.5% measured clean.
+     */
+    Disable();
+    queued = unit->nu_Online ? TRUE : FALSE;
+    if (queued)
+    {
+        if (cmd == CMD_READ)
+            AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        else
+            AddTail(&op->op_Orphans, &io->ios2_Req.io_Message.mn_Node);
+    }
+    Enable();
+
+    if (!queued)
+        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
+    return;
+}
+
 /* ------------------------------------------------------------- the table -- */
 
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
@@ -228,97 +338,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     {
     case CMD_READ:
     case S2_READORPHAN:
-    {
-        BOOL queued;
-
-        if (op->op_CopyTo == NULL)
-        {
-            netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
-            return;
-        }
-
-        /*
-         * One Disable() over the test and the queueing.  Split, a concurrent
-         * S2_OFFLINE drains the list between them and the read lands on an
-         * offline unit with nothing left to answer it.
-         */
-        io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
-        io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-
-        /*
-         * A CMD_READ GOES TO THE HEAD, AN ORPHAN TO THE TAIL.
-         *
-         * netdev_take() walks op_Reads matching ios2_PacketType, and this
-         * shim keeps three readers on one opener -- IPv4, ARP and IPv6
-         * (sana2_rx.c:1400).  During a bulk IPv4 transfer the ARP and IPv6
-         * reads are never satisfied, so with AddTail they settle permanently
-         * at the head and every arriving frame walks past all four of them
-         * before it matches: the steady state is [ARP, ARP, IPv6, IPv6,
-         * IPv4...] once the first few frames have cycled their reads to the
-         * back.  _netdev_take is 1.2% of the wire profile.
-         *
-         * Outstanding reads of one type are interchangeable -- each is an
-         * empty buffer waiting to be filled, and SANA-II promises nothing
-         * about which one a frame lands in -- so handing back the most
-         * recently freed one is as correct as handing back the oldest, and it
-         * puts the type that is actually receiving at the front.  The idle
-         * ARP and IPv6 reads sink behind it and stay there.
-         *
-         * Worth 1.0% of receive.  Clean build per arm, md5 of anxnet.device
-         * printed before a round ran (13542d48 tail, dcdac8e5 head), six
-         * rounds alternating which arm went first, tcp-rx medians:
-         *
-         *     arm       first        second       overall
-         *     AddTail   5,486,559    5,545,202    5,515,880
-         *     AddHead   5,559,536    5,580,368    5,569,952
-         *
-         * Ahead in both positions, +1.3% and +0.6%; transmit -0.1%.  READ THAT
-         * AS SMALL AND POSITIVE, NOT AS 1.0% EXACTLY -- the within-arm spread
-         * between positions is about 1% here, the same size as the effect.  It
-         * clears the bar this tree uses, ahead in both positions on clean
-         * builds, and no more than that.
-         *
-         * THIS QUEUE IS SHARED BY EVERY BOARD, so it was checked on a second
-         * one.  ne2000_pcmcia (dp8390, not a2065's lance), same two clean
-         * builds, SIX rounds alternated, tcp-rx:
-         *
-         *     arm      first        second       median
-         *     before   4,231,006    4,001,262    4,018,809
-         *     after    4,071,943    4,074,700    4,071,943
-         *
-         * READ THAT AS "NO REGRESSION ON A SECOND DRIVER" AND NOT AS A SECOND
-         * CONFIRMATION OF THE GAIN.  The +1.3% in those medians is the control
-         * moving, not this change: the control's own two positions differ by
-         * 5.7% while the after arm sits at 4.07M in both, tight to 0.07%.  Six
-         * rounds cannot call 1% against a control that noisy, and a four-round
-         * run before it put the control's outlier in the OTHER position.
-         *
-         * What it does rule out is the thing worth ruling out -- that
-         * reordering a queue every board shares costs a board whose driver
-         * takes a different path into it.  The after arm is never below the
-         * control's range.  Transmit there is -0.7%, inside the same noise.
-         *
-         * An earlier run called this inconclusive because its arms disagreed
-         * by position.  Those arms were built in two reused worktrees, one
-         * holding a stale library (d5323947): the disagreement WAS the
-         * artefact.  AMI_SANA2_RX_RUN_MAX read +2.8% and then -4.0% the same
-         * bad way and is +1.5% measured clean.
-         */
-        Disable();
-        queued = unit->nu_Online ? TRUE : FALSE;
-        if (queued)
-        {
-            if (cmd == CMD_READ)
-                AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
-            else
-                AddTail(&op->op_Orphans, &io->ios2_Req.io_Message.mn_Node);
-        }
-        Enable();
-
-        if (!queued)
-            netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
+        netdev_queue_read(op, io, cmd);
         return;
-    }
 
     case CMD_WRITE:
     case S2_MULTICAST:

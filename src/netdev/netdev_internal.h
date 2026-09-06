@@ -266,6 +266,8 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event);
 
 /* netdev_cmds.c */
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
+/* The CMD_READ / S2_READORPHAN half of it, reachable without the dispatch. */
+VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io);
 
 /* netdev_io.c.  Exec calls BeginIO and AbortIO with the device base in a6 and

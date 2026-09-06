@@ -74,6 +74,24 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     seen_io_error   = io->ios2_Req.io_Error;
 }
 
+/*
+ * CMD_READ is dispatched straight to netdev_queue_read() and no longer reaches
+ * netdev_perform(), so the observer has to follow the handoff.  It records the
+ * SAME three things: what this file is checking is that BeginIO cleared the
+ * fields BEFORE dispatching, and that question does not care which function
+ * the request was dispatched to.  Counting into seen_perform keeps every
+ * assertion below reading the same way for every command.
+ */
+VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
+{
+    (VOID)cmd;
+
+    seen_perform++;
+    seen_op         = op;
+    seen_wire_error = io->ios2_WireError;
+    seen_io_error   = io->ios2_Req.io_Error;
+}
+
 BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
 {
     (VOID)io;
