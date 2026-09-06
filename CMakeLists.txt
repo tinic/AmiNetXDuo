@@ -909,6 +909,23 @@ endif()
 # RFC 2018 selective acknowledgment on the receive side.  Also a layout change
 # to NX_TCP_SOCKET, so also whole-tree.  Both arms of a with/without
 # measurement come out of one tree the same way as the option above.
+#
+# IT IS CARRYING THE LOSSY CASE, AND THE LEDGER SAID "NEUTRAL".  That verdict
+# came off a CLEAN link, where SACK cannot do anything by construction, and it
+# reads as an invitation to save the per-segment parse.  Measured on the
+# workload it exists for -- tests/perf/run-lossgate.sh, nine arms, counters
+# build, same baseline both ways:
+#
+#     metric        SACK=ON   SACK=OFF
+#     read_kbs        314.0      96.0    -69%, a third of the rate
+#     write_kbs     2,527.0   1,286.0    -49%, and FAIL against baseline
+#     dropped_rx       13.0      84.0    6.5x the receive drops
+#     verdict          PASS      FAIL
+#
+# Those are three to six times, against a gate whose own spread is 10-28%
+# interquartile, so nothing but SACK accounts for them.  It earns its
+# per-packet cost many times over the moment a packet goes missing.  DO NOT
+# turn it off to buy back parse time on a clean-link profile.
 option(AMINETXDUO_TCP_SACK "Report out-of-order data in RFC 2018 SACK blocks" ON)
 if(NOT AMINETXDUO_TCP_SACK)
     add_compile_definitions(AMINETXDUO_TCP_SACK_OFF)
