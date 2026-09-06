@@ -681,10 +681,20 @@ endif()
 # 1500-byte link -- and it is parsed on every arriving segment, which the wire
 # profile shows as nx_tcp_timestamp_option_get at 1.8%.
 #
-# OFF BY DEFAULT since the measurement below.  The note that used to sit here
-# said the read rate "does not move", measured with run-fitzbench.sh.  Three
-# sittings of tools/check-rate.sh, five rounds each, medians, comparison point
-# rebuilt in the same sitting, disagree:
+# OFF BY DEFAULT since the measurement below.  READ THE WORKLOAD CAVEAT FIRST.
+#
+# The note that used to sit here said the read rate "does not move", and it
+# named its instrument: run-fitzbench.sh, a file copy over a link with
+# latency.  The measurement below is tools/check-rate.sh, which is bulk iperf.
+# THOSE ARE DIFFERENT WORKLOADS AND BOTH CLAIMS CAN BE TRUE.  This option was
+# flipped on the iperf figure alone; run-fitzbench.sh cannot run on the lab rig
+# (tests/HARNESSES:265 -- the fitz-serve peer is absent from both machines), so
+# the file-copy read rate is UNMEASURED for this change.  That is the workload
+# the one external report of a read regression was taken on.  Do not read the
+# table below as covering it.
+#
+# Three sittings of tools/check-rate.sh, five rounds each, medians, comparison
+# point rebuilt in the same sitting:
 #
 #   sitting   read ON      read OFF     delta
 #   q2        4,998,825    5,336,530    +6.8%
