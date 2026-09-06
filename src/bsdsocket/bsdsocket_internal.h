@@ -449,14 +449,26 @@ typedef struct AmiSocket
      * dequeued from the socket would be stranded.  Releasing them is stream
      * data loss, so they have to be held on the socket.
      *
-     * AND THE HAZARD IS NOT THE DEQUEUE, IT IS select().  socket.c:546 decides
-     * readability from `as_RxPending != NULL || receive_queue_count != 0`.  A
-     * prefetch chain that predicate does not know about makes a socket holding
-     * data report as NOT readable, and select() then blocks forever on bytes we
-     * are sitting on.  That is a hang, not a slowdown -- the same shape as the
-     * poll-forbid attempt that broke accept.  Every reader of as_RxPending has
-     * to learn about the chain in the same commit: socket.c:546, the close
-     * release at socket.c:605, and rxdirect.c.
+     * AND THE HAZARD IS NOT THE DEQUEUE, IT IS EVERY OTHER READER OF THIS
+     * FIELD.  Four sites, three distinct failure modes, and they must all learn
+     * about the chain in the same commit:
+     *
+     *   select.c:334   bsd_readable().  Miss it and a socket holding prefetched
+     *                  data reports NOT readable, so select() blocks forever on
+     *                  bytes we are sitting on.  A HANG, not a slowdown -- the
+     *                  shape the poll-forbid attempt had when it broke accept.
+     *   socket.c:546   the RFC 1122 close-abort test, "unread data turns a
+     *                  close into an abort".  Prefetched packets ARE unread
+     *                  data; miss it and a close that owes the peer a reset
+     *                  sends a orderly FIN instead.
+     *   socket.c:605   the close release.  Miss it and the chain leaks packets
+     *                  out of the pool on every close.
+     *   rxdirect.c:34  the direct-complete pump, compiled out by default.
+     *
+     * An earlier version of this note put bsd_readable() at socket.c:546.  That
+     * line is the close-abort test; the readable predicate is select.c:325.
+     * Both matter, for different reasons, which is why the list is enumerated
+     * rather than described.
      */
     ULONG                   as_RxOffset;
 
