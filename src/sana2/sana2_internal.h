@@ -122,27 +122,26 @@
  * the thread that empties the socket only runs when the reader lets go.
  *
  * IT WAS EIGHT, ON THE ARGUMENT THAT EIGHT IS A LITTLE OVER HALF THE READ
- * DEPTH AN INTERFACE AT 10 MBIT IS PLANNED WITH, SO THE RELEASE LANDS INSIDE
- * A FULL RING RATHER THAN AFTER IT.  That argument is fine and the number it
- * picked was not: 32 is worth 2.8% of receive.  Six rounds against the same
- * commit built twice in one sitting, ALTERNATING WHICH TREE RAN FIRST, tcp-rx
- * medians in bits per second:
+ * DEPTH A 10 MBIT INTERFACE IS PLANNED WITH, SO THE RELEASE LANDS INSIDE A
+ * FULL RING RATHER THAN AFTER IT.  The argument is fine; the number was not.
+ * 32 is worth 1.5% of receive.
  *
- *     run_max   first        second       overall
- *     8         5,349,298    5,369,943    5,364,443
- *     32        5,474,414    5,535,842    5,514,440
+ * CLEAN BUILD PER ARM, md5 PRINTED BEFORE A ROUND RAN, six rounds against the
+ * same commit alternating which arm went first.  tcp-rx medians, bits/s:
  *
- * 32 wins in BOTH positions -- +2.3% first, +3.1% second -- so it is not the
- * rig's position effect (tests/perf/rate-baseline.txt).  Transmit is -0.1%,
- * which is nothing.
+ *     run_max   md5         first        second       overall
+ *     8         dc9859ba    5,385,613    5,411,954    5,398,784
+ *     32        85f614c1    5,438,220    5,508,966    5,482,009
  *
- * THIS ROW WAS IN THE REFUTED LIST AND SHOULD NOT HAVE BEEN.  It was measured
- * once at 8/16/32 as 5,008,934 / 4,966,612 / 5,101,889, read as
- * "non-monotonic, inside the round spread, do not retry" -- three arms run in
- * sequence, so each later one carried the position penalty, and 32 read
- * highest DESPITE running last.  A fixed-order sweep cannot see a 3% effect.
- * The fairness worry the eight was protecting does not appear: the reader
- * still yields, it just yields after draining rather than mid-ring.
+ * +1.5% overall, ahead in BOTH positions (+1.0% and +1.8%).  Transmit is
+ * +0.0%.
+ *
+ * AN EARLIER RUN SAID +2.8% AND THAT NUMBER WAS WRONG.  Its two arms were
+ * built in different reused worktrees and one of those build directories did
+ * not match its own commit; a null control at one commit measured 5.3%
+ * between two such trees on identical source (d5323947).  A third run, done
+ * the same bad way, said -4.0% for the same option.  Only the clean-build
+ * figure above means anything.
  *
  * WHY IT PAYS, from the drain loop's own comment: ami_sana2_rx_drain() takes
  * nx_ip_protection ONCE FOR THE WHOLE RUN, not once per frame, and claims the

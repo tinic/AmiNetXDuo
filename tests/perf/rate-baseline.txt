@@ -55,8 +55,13 @@
 # which arm runs first (see the position note above).  Every figure in this
 # tree that survived did that; the ones that did not were wrong.
 #
-# ALTERNATE THE ORDER OF AN A/B ON THIS RIG.  THE SECOND ARM LOSES 2.0% OF
-# RECEIVE WHATEVER IS IN IT.  Six rounds against 242be840 alternating which
+# ALTERNATE THE ORDER OF AN A/B ON THIS RIG.  The 2.0% below is NOT a
+# reproducible property and must not be quoted as one: a later run with clean
+# builds put the SECOND position AHEAD in both arms (+0.5% and +1.8%), the
+# opposite sign, and the figure below rests on three samples a cell.  Keep
+# alternating anyway -- it costs nothing and it is the only thing that makes a
+# position bias visible if one is there.  What follows is one sitting, not a
+# law:  Six rounds against 242be840 alternating which
 # tree ran first, medians, bits per second:
 #
 #     tcp-rx        first        second
