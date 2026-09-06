@@ -4,6 +4,19 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# RAISED 2026-09-06 again, for the third and fourth receive wins of the day:
+# dd818cc7 (the LANCE payload two bytes into the buffer, +3.09%) and 6e0893a2
+# (le_rint stops rewriting a descriptor field the chip never touches, +1.53%).
+#
+#     direction   was          now          sittings on this tree
+#     tcp-rx      5,594,537    5,770,903    5,824,081 (6 rounds), 5,770,903 (5)
+#     tcp-tx      3,127,508    3,133,475    3,133,475 (6 rounds), 3,147,209 (5)
+#
+# The LOWER median of the two, per the rule below.  They agree to 0.9% on
+# receive and 0.4% on transmit, and the lowest single sample seen anywhere on
+# this tree is 5,732,891 receive and 3,092,759 transmit, both far clear of the
+# 12% floors (5,078,395 and 2,757,458).
+#
 # RAISED 2026-09-06 for 792a8cdf, the reader's dead post sweep.  BOTH numbers
 # move, and the transmit one is the first time this campaign has raised it:
 #
@@ -239,5 +252,5 @@
 # +3.3% and +2.6% on receive, ahead in both positions both times.  Quote ABOUT
 # +3%.  Transmit read -0.7% and then +0.3%, which is what no change looks like
 # here -- the first of those two is in no sense a regression.
-tcp-rx 5594537
-tcp-tx 3127508
+tcp-rx 5770903
+tcp-tx 3133475
