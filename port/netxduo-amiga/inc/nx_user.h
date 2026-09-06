@@ -78,6 +78,29 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
 
 /* ------------------------------------------------------------------ TCP --- */
 
+/* 8, against the vendor's 20.  The refutation of 20 was taken on a clean link
+   and its own note says the ring never filled there -- full=0 spins=0 drops=0
+   over 1024 sends -- so it measured a queue depth on a workload where the
+   queue has no depth to use.  That is the mistake "SACK (neutral)" made, and
+   SACK turned out to be carrying the lossy case entirely.
+
+   Re-asked on the workload where retransmits do occupy the queue,
+   tests/perf/run-lossgate.sh, nine arms, counters build, same baseline:
+
+       metric        depth 8   depth 20
+       read_kbs        314.0      366.0    +16.6%, gate iqr 28.7%
+       write_kbs     2,527.0    2,342.0     -7.3%, gate iqr  9.7%
+       dropped_rx       13.0       11.0
+       verdict          PASS       PASS
+
+   INCONCLUSIVE, and 8 stays.  Both moves sit inside the gate's own spread, the
+   arms are from different sittings, and write -- the metric a transmit queue
+   depth ought to move -- went the wrong way.  Unlike SACK, which moved three
+   to six times and left nothing to argue about.
+
+   So the row is no longer refuted on a workload where it was inert; it is
+   unresolved on the right one.  Settling it wants both arms in a single
+   sitting, which is nine emulator boots each. */
 #define NX_TCP_MAXIMUM_TX_QUEUE                 8
 
 /* Compiles the per-socket receive-queue cap; src/bsdsocket/socket.c must size
