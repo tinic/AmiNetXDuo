@@ -245,11 +245,34 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
         io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
 
+        /*
+         * A CMD_READ GOES TO THE HEAD, AN ORPHAN TO THE TAIL.
+         *
+         * netdev_take() walks op_Reads matching ios2_PacketType, and this
+         * shim keeps three readers on one opener -- IPv4, ARP and IPv6
+         * (sana2_rx.c:1400).  During a bulk IPv4 transfer the ARP and IPv6
+         * reads are never satisfied, so with AddTail they settle permanently
+         * at the head and every arriving frame walks past all four of them
+         * before it matches: the steady state is [ARP, ARP, IPv6, IPv6,
+         * IPv4...] once the first few frames have cycled their reads to the
+         * back.  _netdev_take is 1.2% of the wire profile.
+         *
+         * Outstanding reads of one type are interchangeable -- each is an
+         * empty buffer waiting to be filled, and SANA-II promises nothing
+         * about which one a frame lands in -- so handing back the most
+         * recently freed one is as correct as handing back the oldest, and it
+         * puts the type that is actually receiving at the front.  The idle
+         * ARP and IPv6 reads sink behind it and stay there.
+         */
         Disable();
         queued = unit->nu_Online ? TRUE : FALSE;
         if (queued)
-            AddTail(cmd == CMD_READ ? &op->op_Reads : &op->op_Orphans,
-                    &io->ios2_Req.io_Message.mn_Node);
+        {
+            if (cmd == CMD_READ)
+                AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            else
+                AddTail(&op->op_Orphans, &io->ios2_Req.io_Message.mn_Node);
+        }
         Enable();
 
         if (!queued)
