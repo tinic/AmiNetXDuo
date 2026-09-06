@@ -118,6 +118,16 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
  * both call positions legal.
  */
 
+/*
+ * Self-assignment, and GCC REMOVES IT ENTIRELY -- checked, not assumed.
+ * _nx_ipv4_packet_receive() applies these to header fields through a pointer
+ * several times per received frame, and this build uses -fno-strict-aliasing,
+ * so it was worth confirming that they are not load/store pairs on the hot
+ * path.  Compiled to assembly at the shipping flags, the function contains
+ * ZERO redundant load-then-store-back pairs and ZERO stores through the IP
+ * header pointer, in 251 instructions total.  Costs nothing; do not "optimise"
+ * these to ((void)0) expecting a win.
+ */
 #define NX_CHANGE_ULONG_ENDIAN(a)   ((a) = (a))
 #define NX_CHANGE_USHORT_ENDIAN(a)  ((a) = (a))
 
