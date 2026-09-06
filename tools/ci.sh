@@ -56,6 +56,10 @@ CROSS_CONFIGS=(
     # without them, so this arm is the ON side: the one place the option's
     # code, and the NX_TCP_SOCKET layout it changes, is compiled at all.
     "ts:-DAMINETXDUO_TCP_TIMESTAMP=ON"
+    # The NetX Duo counter families, which ship off.  This arm is the only
+    # place their code compiles at all, and they are how a retransmit or a
+    # duplicate segment gets counted when a diagnosis needs the number.
+    "nxcounters:-DAMINETXDUO_NX_COUNTERS=ON"
     "nowscale:-DAMINETXDUO_TCP_WINDOW_SCALING=OFF"
     # The serial diagnostic log, which every shipping build leaves out because
     # bsdsocket.library stays resident and the sentences are 27,948 bytes of

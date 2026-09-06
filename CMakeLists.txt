@@ -460,12 +460,25 @@ endif()
 # nothing that could be read: a counter a test reads is a counter in use.
 #
 # 1,904 bytes of the minimal library, on a machine that keeps it resident.
-add_compile_definitions(
-    NX_DISABLE_TCP_INFO
-    NX_DISABLE_UDP_INFO
-    NX_DISABLE_ARP_INFO
-    NX_DISABLE_RARP_INFO
-    NX_DISABLE_IGMP_INFO)
+#
+# -DAMINETXDUO_NX_COUNTERS=ON puts them back, for a diagnostic build only.
+# They are the only way to count a retransmit or a duplicate segment from
+# inside the stack, and that question is open: the real-path profile spends
+# 2.4-2.5% in _nx_tcp_socket_state_data_trim_front, which
+# nx_tcp_socket_state_data_check.c:383 reaches only for data already
+# acknowledged arriving a second time.  Without these there is no number for
+# how much, only the cost of trimming it.  OFF is what ships and this changes
+# nothing about it.
+option(AMINETXDUO_NX_COUNTERS
+       "Compile NetX Duo's TCP/UDP/ARP/RARP/IGMP counters, for diagnosis" OFF)
+if(NOT AMINETXDUO_NX_COUNTERS)
+    add_compile_definitions(
+        NX_DISABLE_TCP_INFO
+        NX_DISABLE_UDP_INFO
+        NX_DISABLE_ARP_INFO
+        NX_DISABLE_RARP_INFO
+        NX_DISABLE_IGMP_INFO)
+endif()
 
 option(AMINETXDUO_MULTICAST "Build multicast membership (IGMP, IPv6 groups)" ON)
 if(AMINETXDUO_MULTICAST)
