@@ -4,6 +4,33 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# RAISED 2026-09-06 for 792a8cdf, the reader's dead post sweep.  BOTH numbers
+# move, and the transmit one is the first time this campaign has raised it:
+#
+#     direction   was          now          sittings on the new tree
+#     tcp-rx      5,522,706    5,594,537    5,669,851 (6 rounds), 5,594,537 (5)
+#     tcp-tx      2,945,193    3,127,508    3,133,761 (6 rounds), 3,127,508 (5)
+#
+# The LOWER median of the two sittings is what is recorded, per the rule below,
+# and the two agree to 1.3% on receive and 0.2% on transmit.  The lowest single
+# sample seen on this tree is 5,464,507 receive and 3,099,971 transmit, both
+# well clear of the 12% floor (4,923,193 and 2,752,207).
+#
+# A RECEIVE-PATH CHANGE MOVED TRANSMIT 5.3%, WHICH THE NOTE FURTHER DOWN SAYS
+# CANNOT HAPPEN HERE.  That note is not wrong about the ~4.5 ms acknowledgement
+# round trip; it is wrong to conclude from it that our own share of the trip is
+# free.  The evidence is a null control, not an argument: origin/main built
+# clean in BOTH worktrees, md5 7522050095ef on each, six rounds alternating,
+# gives rx +0.22% and tx -0.00% -- 2,966,517 against 2,966,516.  The null's
+# transmit stays inside 2.94-3.01M in both directories while the changed arm
+# sits at 3.10-3.15M, six samples against twelve, no overlap.
+#
+# So read "a transmit change cannot be validated here" as "a change that only
+# moves transmit THROUGHPUT cannot".  A change that shortens the CPU path
+# between an arriving ACK and the window reopening does show, and shows MORE
+# than on receive: during a bulk send the reader's drains are one or two frames
+# a wake, so per-wake fixed cost is a larger fraction of each wake.
+#
 # RAISED 2026-09-06 to 5,522,706 on receive, for the two wins in d8d4eb0b.
 # That is the LOWEST of main's clean-build observations, not the best:
 #
@@ -212,5 +239,5 @@
 # +3.3% and +2.6% on receive, ahead in both positions both times.  Quote ABOUT
 # +3%.  Transmit read -0.7% and then +0.3%, which is what no change looks like
 # here -- the first of those two is in no sense a regression.
-tcp-rx 5522706
-tcp-tx 2945193
+tcp-rx 5594537
+tcp-tx 3127508

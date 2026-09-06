@@ -801,6 +801,21 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
      * was a larger share of each wake than it is on receive.  Read
      * "transmit is closed" as "the rig sets the floor", not as "nothing we do
      * can move it".
+     *
+     * CONFIRMED ON THE RIG, not just by arithmetic.  An RXPROBE build of this
+     * commit, one bulk receive, IPv4 reader:
+     *
+     *     rxprobe 0: sweeps run 1 skipped 927, unposted 0 recount 0
+     *
+     * The sweep runs ONCE, at startup, when every slot really is idle, and is
+     * skipped every time after -- 927 x 32 = 29,664 calls that no longer
+     * happen in one eight second transfer.  `unposted` matched a recount of
+     * the posted flags on every sample of every reader, with no mismatch.
+     *
+     * And under loss, which is the only place a re-post FAILS and the count
+     * goes nonzero: run-lossgate.sh, counters build, nine arms, PASS --
+     * read_kbs 379.0 against a 385.0 baseline (-1.6%, ok), write_kbs 2,516
+     * against 2,138 (+17.7%, ok), retransmitted 0.
      */
     if (rx->unposted == 0)
     {

@@ -30,6 +30,14 @@
 # 25% ceiling, which is how the mismatch surfaced.  Nine reps brings it to
 # 24.3% and that is what a read regression now has to exceed.  dropped_rx is
 # noisier still at 41.7%; treat it as a smoke alarm, not a gauge.
+# dropped_rx 8.0 IS AT THE BOTTOM OF ITS OWN RANGE and the tolerance is
+# narrower than the metric's spread.  Runs of an unchanged main at these
+# parameters have read 8, 11, 12 and 13, and one nine-arm run reported its own
+# interquartile spread as 100.0% with a range of 166.7%.  8.0 x 1.417 is 11.3,
+# so a perfectly healthy tree lands "high" here about half the time.  READ A
+# HIGH dropped_rx AS NOISE UNLESS read_kbs MOVED WITH IT -- it is a smoke
+# alarm, and this line was recorded from a single run rather than from the
+# spread, which is the same mistake the old 66.0 read floor was.
 dropped_rx     lower          8.0   41.7
 read_kbs       higher       385.0   24.3
 retransmitted  lower          0.0   15.0
