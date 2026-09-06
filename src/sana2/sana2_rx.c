@@ -825,6 +825,19 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     /*
      * Frame arrival time is the only thing this machine knows that is not in
      * its own boot image; see the arrival section of src/common/ami_random.c.
+     *
+     * THE WIRE PROFILE'S `_sha256_k 0.7%` IS NOT THIS CALL, and the arithmetic
+     * says so without a rig.  ami_random.c batches 16 arrivals and credits 8
+     * bits (ARRIVAL_BATCH, ARRIVAL_BITS_KEPT), and arrival_done latches at 64
+     * bits (AMI_RANDOM_ARRIVAL_MAX_BITS) -- so the pool is mixed EIGHT times,
+     * inside the first 128 frames, and every arrival after that returns on the
+     * first line.  A ten second transfer is about 4,300 frames, so this path
+     * hashes for under 3% of them and eight SHA-256 mixes cannot be 0.7% of a
+     * profile.  Those samples are a symbol that did not resolve, landing on
+     * the nearest one below it -- a constant table.  Do not spend an
+     * AMINETXDUO_LOG build chasing it; the counter that would confirm the
+     * latch is an AMI_INFO and none of the 514 measurement logs on the rig
+     * carry it.
      */
     ami_random_arrival();
 
