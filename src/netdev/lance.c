@@ -30,6 +30,29 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 /* ------------------------------------------------------- shared RAM ------ */
 
 /*
+ * WHY RECEIVE COSTS TWO COPIES ON THIS BOARD, AND WHY THAT IS THE FLOOR.
+ *
+ * The descriptors below hold `LE_RXB_OFF + i * LE_BUFSZ` -- OFFSETS INTO THE
+ * CARD'S OWN SRAM, not Amiga bus addresses.  The Am7990's address space is the
+ * 32 KB behind mem_off; it cannot be pointed at host memory.  So a received
+ * frame is always DMAed into board SRAM first, and getting it into an NX_PACKET
+ * is a copy the hardware requires.  The second copy is the POSIX boundary:
+ * recv() puts bytes in the caller's buffer.
+ *
+ * Both are therefore structural, and both are at their measured floor -- the
+ * fused copy+checksum and the packet-to-application copy are hand-written asm,
+ * benchmarked seven ways per CPU in bench/sumbench.c, and since dd818cc7 both
+ * ends of the first one are longword aligned.
+ *
+ * DO NOT CITE RX_DIRECT_COMPLETE AS "the one-copy design, refuted".  It is
+ * nothing of the kind: CMakeLists.txt:919 describes it as completing a waiting
+ * stream recv() on the IP thread, and its own note says what it buys applies to
+ * 0.35% of dequeues against arm-and-disarm bookkeeping on every blocking recv.
+ * It is a LATENCY option.  Removing a copy was never tried because on this
+ * board there is no copy available to remove.
+ */
+
+/*
  * The rings and buffers, as offsets into the board's SRAM.  Eight receive
  * buffers is a frame every 1.2 ms at 10 Mbit before the ring can overrun.
  */
