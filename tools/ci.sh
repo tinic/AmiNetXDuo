@@ -105,6 +105,10 @@ CROSS_CONFIGS=(
     # BPF=OFF appears nowhere else at all, and the interactions between five
     # of them appear nowhere else at all.  It must stay byte-for-byte the
     # options .github/workflows/release.yml gives build/release-minimal.
+    # docs/BACKLOG.md's micro-profile row cites this line by number, and
+    # tools/check-backlog.sh checks the anchor still reads here.  Inserting an
+    # arm above it moves it; that is how it was found, by CI going red for a
+    # row that had been right when it was written.
     "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
     # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
     # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled
