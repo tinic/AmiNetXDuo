@@ -825,9 +825,14 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
      * on its own, so that gain is not its; this sweep skip is the only one of
      * the four that moved transmit.
      *
-     * fitz_read came out +2.45% and IS NOT CLAIMED: its before arm spans
-     * [2729..3722], a 36% range with an outlier dragging the median, and the
-     * arms overlap throughout.
+     * CONFIRMED BY A SECOND INDEPENDENT SET: fitz_write 2,546.5 -> 2,603.5,
+     * +2.24%, ranges disjoint again (before max 2,558 against after min
+     * 2,597).  Two sets agreeing to 0.34pp with no overlap either time.
+     *
+     * fitz_read IS NOT USABLE AT THIS SIZE AND THE TWO SETS PROVE IT: +2.45%
+     * and then -3.38%, opposite signs on the same pair of commits.  Its before
+     * arm spanned [2729..3722] in the first set, a 36% range.  Use fitz_write
+     * for an effect of a few per cent and do not quote fitz_read for one.
      */
     if (rx->unposted == 0)
     {

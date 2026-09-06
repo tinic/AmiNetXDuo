@@ -98,7 +98,11 @@ sittings an arm.
 | | |
 |---|---|
 | write | ranges disjoint, before [2527..2552] against after [2591..2622] |
-| read | before spans [2729..3722]; the arms overlap and the figure is not claimed |
+| read | two sets disagree in sign, +2.45% then -3.38%; the metric cannot resolve this size and the figure is not claimed |
+
+| Fitz write, second set | before | now | |
+|---|---|---|---|
+| kbytes/s | 2,546.5 | **2,603.5** | +2.24% |
 
 ## 0.26.3
 
