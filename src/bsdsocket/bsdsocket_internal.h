@@ -469,6 +469,24 @@ typedef struct AmiSocket
      * line is the close-abort test; the readable predicate is select.c:325.
      * Both matter, for different reasons, which is why the list is enumerated
      * rather than described.
+     *
+     * IT WAS BUILT AND IT LOST.  perf/recv-batch-dequeue implemented exactly
+     * this -- a four-packet burst under one acquisition, all four sites wired,
+     * host 120/120 and host32 7/7 -- and measured rx 5,791,100 -> 5,686,571,
+     * -1.80%, behind in BOTH positions, against a predicted +2.2%.  Not merged.
+     *
+     * WHY THE PREDICTION FAILED, AND IT IS THE SAME MISTAKE TWICE IN ONE DAY.
+     * The +2.2% came from a burn that ADDED five acquisitions per packet and
+     * cost 16.44%.  A burn prices what it ADDS; it does not price what removing
+     * the analogous thing BUYS.  The batch cuts acquisitions but holds the
+     * mutex across up to four dequeues, and an earlier burn the same day had
+     * already shown that work held INSIDE this mutex costs about 1.53 times
+     * what the same work costs beside it.  I traded a cheap dimension for an
+     * expensive one and predicted a gain from the half I had measured.
+     *
+     * That is five attempts on the reader/application locking relationship --
+     * priority inheritance, poll-forbid, handoff boost, shortening the hold,
+     * batching the dequeue.  All lost.  TREAT IT AS CLOSED.
      */
     ULONG                   as_RxOffset;
 
