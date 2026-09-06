@@ -4,6 +4,34 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# WHAT THIS GATE CAN AND CANNOT SETTLE -- THREE NULL CONTROLS, 2026-09-06.
+# Each is two IDENTICAL binaries, six rounds alternating which arm ran first,
+# the arms' md5s checked equal before a round ran:
+#
+#     morning, two worktrees            rx +0.22%
+#     evening, accidental               rx +2.75%   <- ahead in BOTH positions
+#     evening, deliberate               rx -0.29%
+#
+# TYPICAL IS +-0.3%.  THE +2.75% WAS AN EXCURSION, NOT THE FLOOR, and it was
+# ahead in both positions, so position agreement does NOT exclude one.  One in
+# three observed.
+#
+# So a six-round A/B is usually tight and occasionally throws a ~3% false
+# signal, and A SINGLE A/B CANNOT BE TRUSTED between about 1 and 3 per cent.
+# What settles a result in that band is two sittings, or one sitting with a
+# same-sitting null control beside it, or a second instrument entirely -- a
+# profile share, an RXPROBE counter, a mechanism count.  Every figure this tree
+# kept from that day had one: the sweep skip had a null control at +0.22% and
+# `sweeps run 1 skipped 927`; the payload alignment had copy_sum_longwords
+# falling 15.1 -> 11.7%.  The one that had only a rate A/B, le_rint's +1.53%,
+# is recorded as UNPROVEN rather than as a win.
+#
+# THE ACCIDENT IS WORTH KNOWING TOO: that +2.75% came from an A/B whose two
+# arms were the SAME BINARY -- a -D was passed for an option the branch did not
+# declare, so it set an unused CMake variable and the code compiled out.  The
+# arm md5s are printed before any round for exactly this reason and were read
+# only after twelve emulator boots.  READ THEM FIRST.
+#
 # RAISED 2026-09-06 again, for the third and fourth receive wins of the day:
 # dd818cc7 (the LANCE payload two bytes into the buffer, +3.09%) and 6e0893a2
 # (le_rint stops rewriting a descriptor field the chip never touches, +1.53%).
