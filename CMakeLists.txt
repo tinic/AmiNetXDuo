@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 # plain vX.Y.Z.
 #
 # 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.26.2 LANGUAGES C ASM)
+project(AmiNetXDuo VERSION 0.26.3 LANGUAGES C ASM)
 
 # Every build writes compile_commands.json.  tools/check-ram-size.sh has no
 # symbol to read -- sizeof(AmiNetStack) is a compile-time size -- so it

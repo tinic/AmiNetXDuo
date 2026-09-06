@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.26.3
+
 ### Memory a running machine keeps
 
 `bsdsocket.library` and `anxnet.device` are open for the life of the machine.
