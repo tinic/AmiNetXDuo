@@ -427,6 +427,37 @@ typedef struct AmiSocket
 
     /* Partially consumed receive packet (a stream read need not drain one). */
     NX_PACKET              *as_RxPending;
+    /*
+     * A BATCHED DEQUEUE WOULD LIVE BESIDE THIS, AND HERE IS WHAT IT COSTS.
+     *
+     * _nx_tcp_socket_receive() takes nx_ip_protection once per packet
+     * (nx_tcp_socket_receive.c:98) and bsd_recv_iov() calls it once per packet,
+     * so the application acquires about 466 times a second against the reader's
+     * ~98 whole-drain holds.  ONE acquire-and-release is worth about 3.3% of
+     * receive -- measured, not estimated: AMINETXDUO_RX_BURN=3 added five extra
+     * pairs per packet and cost 16.44% over six alternated rounds with the arms
+     * verified distinct and their ranges disjoint.  Pulling several packets
+     * under one acquisition is worth roughly 2.2%.
+     *
+     * It needs no fork change: tx_mutex_get.c:170-175 makes a re-acquisition by
+     * the owning thread a counter bump, so one outer acquisition collapses the
+     * inner ones.
+     *
+     * WHAT IT DOES NEED IS A HOME FOR THE PACKETS IT PREFETCHES.  A stack array
+     * does not work: bsd_recv_tcp() can leave its loop early -- the iovecs
+     * filling, bsd_nx_need() failing, an extract error -- and packets already
+     * dequeued from the socket would be stranded.  Releasing them is stream
+     * data loss, so they have to be held on the socket.
+     *
+     * AND THE HAZARD IS NOT THE DEQUEUE, IT IS select().  socket.c:546 decides
+     * readability from `as_RxPending != NULL || receive_queue_count != 0`.  A
+     * prefetch chain that predicate does not know about makes a socket holding
+     * data report as NOT readable, and select() then blocks forever on bytes we
+     * are sitting on.  That is a hang, not a slowdown -- the same shape as the
+     * poll-forbid attempt that broke accept.  Every reader of as_RxPending has
+     * to learn about the chain in the same commit: socket.c:546, the close
+     * release at socket.c:605, and rxdirect.c.
+     */
     ULONG                   as_RxOffset;
 
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
