@@ -121,5 +121,16 @@
 # the net68k checksum serves both directions, and NX_TCP_MAXIMUM_TX_QUEUE at 8
 # against the vendor's 20 measures 2,664,243 against 2,667,163 over five
 # rounds each in one sitting.
+#
+# CONFIRMED IN A SITTING OF ITS OWN, which is the check a raise needs and the
+# previous ones did not get: a baseline set above what the tree reproduces is a
+# gate that reds on an unchanged main.  Clean build of af07fc38, md5
+# deef24a478bb, five rounds at the 12% CI tolerance:
+#
+#     tcp-rx  median 5,547,183  against 5,522,706   pct 100
+#     tcp-tx  median 2,978,909  against 2,945,193   pct 101
+#
+# rate=PASS.  Receive clears by 0.4%, which is thin -- if a later sitting reds
+# on an unchanged tree, this raise is the first thing to suspect, not the code.
 tcp-rx 5522706
 tcp-tx 2945193
