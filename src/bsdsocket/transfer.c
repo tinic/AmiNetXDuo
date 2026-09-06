@@ -1327,7 +1327,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         if (want > (ULONG)len - taken)
             want = (ULONG)len - taken;
 
-        if (nx_packet_data_extract_offset(packet, taken, dst, want, &moved)
+        if (bsd_packet_extract(packet, taken, dst, want, &moved)
                 != NX_SUCCESS || moved == 0)
             break;
 
@@ -1422,7 +1422,7 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
         if (want > (ULONG)len - taken)
             want = (ULONG)len - taken;
 
-        if (nx_packet_data_extract_offset(packet, taken, dst, want, &moved)
+        if (bsd_packet_extract(packet, taken, dst, want, &moved)
                 != NX_SUCCESS || moved == 0)
             break;
 

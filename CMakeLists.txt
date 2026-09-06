@@ -863,8 +863,25 @@ endif()
 # five: max_ms is 20 on every run, so one fetch landing in another quantum is
 # the whole of a 20 ms difference.
 #
-# What is still untested is a fork that also covers the `copied > 0`
-# continuations; nothing measured so far argues it would pay.
+# The `copied > 0` continuations were once written down here as the untested
+# remainder.  They are not: the code answers it without a rig.  This fork does
+# NOT remove a copy: bsd_rxdirect_pump() extracts into the user buffer
+# (rxdirect.c:59) exactly as the classic path does (transfer.c:1215), so both
+# shapes copy the payload once.  If anything the fork is on the SLOWER
+# extractor -- the classic path goes through bsd_packet_extract(), the inline
+# single-fragment fast path that bottoms out in the tuned m68k memcpy, while
+# the fork still calls the generic chain-walking
+# nx_packet_data_extract_offset().  All it can
+# ever save is the wakeup: the IP thread copies and signals, instead of
+# queueing and signalling a caller that then copies.  A continuation iteration
+# passes NX_NO_WAIT -- `now` is `wait` only while `first` or under MSG_WAITALL
+# (transfer.c:1112, `first` cleared at :1235), and the fork's own gate excludes
+# MSG_WAITALL -- so a continuation never parks and has no wakeup to elide.
+# Completing one on the IP thread would also run the copy inside the receive
+# notify with the protection mutex held, delaying the next segment.  So the fork is a latency change, not a bandwidth one, which is
+# also why measuring it 5 per cent slower on a bandwidth-bound path is not the
+# contradiction it reads as: what it buys applies to 0.35 per cent of dequeues,
+# what it costs is arm-and-disarm bookkeeping on every blocking recv.
 option(AMINETXDUO_RX_DIRECT_COMPLETE
        "Complete a waiting stream recv() directly on the IP thread" OFF)
 if(AMINETXDUO_RX_DIRECT_COMPLETE)

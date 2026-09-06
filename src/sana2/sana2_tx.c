@@ -277,14 +277,29 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
          * It was unreachable until the reader began reaping for itself: reap
          * used to run only on the IP thread or under nx_ip_protection from a
          * sender, so it could not race the claim.  It can now.
+         *
+         * A COMPILER BARRIER, NOT Forbid().  This shipped as Forbid()/Permit()
+         * in 92bff6b3 and cost 4.3% of receive and 6.4% of transmit, measured
+         * interleaved against 242be840 in one sitting -- transmit is hit
+         * harder because the pair runs once per completed transmit and a
+         * receive run only pays it on ACKs.  Permit() ends a scheduling
+         * region and can switch on the spot, and a context switch is the most
+         * expensive thing on this port (the priority-inheritance commit
+         * reverted in 8e63732e cost 18% of transmit by the same mechanism).
+         *
+         * The barrier is sufficient because the hazard named above is a
+         * COMPILER one, and there is one CPU: a claim that lands between
+         * these stores reads busy == TRUE and skips the slot, and one that
+         * lands after the last store finds every field already cleared.  The
+         * barrier is what stops the plain stores sinking past the volatile
+         * one; ordering them is the whole requirement.
          */
-        Forbid();
         slot->packet   = NULL;
         slot->cursor   = NULL;
         slot->consumed = 0;
         slot->total    = 0;
+        __asm__ __volatile__("" ::: "memory");
         slot->busy     = FALSE;
-        Permit();
     }
 }
 
