@@ -474,10 +474,26 @@ static VOID le_rint(NetdevNic *nic)
          *       position 2  5,708,409    5,871,054   +2.85%
          *     tcp-tx        3,124,139    3,133,475   +0.30%
          *
-         * Ahead in both positions.  The bundle that carried this item together
-         * with the two _nxe_ removals measured rx -0.98%; this item on its own
-         * is +1.53%.  One removes a bus cycle, the others removed checks the
-         * shipping image had already folded away.
+         * Ahead in both positions -- AND IT DID NOT REPRODUCE.  A second
+         * sitting of the same two commits, rebuilt to the same md5s, gave
+         * 5,817,806 -> 5,817,696 = -0.00% with the positions split (+1.53%,
+         * -2.10%).  Two sittings, +1.53% and nothing.
+         *
+         * SO THIS IS NOT A MEASURED WIN.  It removes one Zorro word write per
+         * received frame, which is real work no inliner can take away, and it
+         * costs nothing -- that is why it stays.  But the rate does not show
+         * it, and the +1.53% is withdrawn.
+         *
+         * IT ALSO WITHDRAWS AN ARGUMENT I BUILT ON IT.  The bundle carrying
+         * this item plus two _nxe_ wrapper removals measured -0.98%, and I read
+         * the contrast with +1.53% as proof that the wrappers' profile share
+         * was work the LTO build had already folded away.  With the +1.53% gone
+         * the contrast is gone: the bundle and this item alone are both nothing
+         * within this rig's resolution.  The LTO caveat still stands on its own
+         * terms -- the profile is built -DAMINETXDUO_LTO=OFF and the shipping
+         * build is not, so a thin static wrapper is a symbol in one and inlined
+         * in the other -- but it is a fact about the build, not something these
+         * two measurements proved.
          */
         le_put16(nic, d + 6, 0);
         le_put16(nic, d + 2, (UWORD)(LE_R1_OWN | (md1 & 0x00ff)));

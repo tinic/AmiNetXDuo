@@ -82,10 +82,14 @@ the chip reads and never writes.
 
 | | before | now | |
 |---|---|---|---|
-| iperf tcp-rx | 5,736,512 | **5,824,081** | +1.53% |
-| iperf tcp-rx, position 1 | 5,757,833 | 5,799,477 | +0.72% |
-| iperf tcp-rx, position 2 | 5,708,409 | 5,871,054 | +2.85% |
-| iperf tcp-tx | 3,124,139 | 3,133,475 | +0.30% |
+| iperf tcp-rx, sitting 1 | 5,736,512 | 5,824,081 | +1.53% |
+| iperf tcp-rx, sitting 2 | 5,817,806 | 5,817,696 | **-0.00%** |
+| iperf tcp-tx, sitting 1 | 3,124,139 | 3,133,475 | +0.30% |
+
+| | |
+|---|---|
+| verdict | no measurable effect; two sittings disagree |
+| kept | one Zorro bus write per frame removed, at no cost |
 
 The day's four receive changes together, on the application workload, six
 sittings an arm.
