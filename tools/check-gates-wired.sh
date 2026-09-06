@@ -64,9 +64,15 @@ want rate           tools/ci.sh                      'check-rate\.sh'
 want diag-strings   tools/ci.sh                      'check-no-diag-strings\.sh'
 want backlog        tools/ci.sh                      'check-backlog\.sh'
 want doc-budget     tools/ci.sh                      'check-doc-budget\.sh'
+# stage-coverage is the gate that caught stage_rate being declared and invoked
+# by no workflow, which is how a 4.3% receive regression shipped in 0.26.3.
+# It protects the other gates' call sites at the stage level, so its own call
+# site is worth protecting here.
+want stage-coverage tools/ci.sh                      'check-stage-coverage\.sh'
 
 # ------------------------------------------ and the gate scripts still run ---
-for g in check-changelog-prose check-image-size check-ram-size check-rate check-gates-wired; do
+for g in check-changelog-prose check-image-size check-ram-size check-rate \
+         check-stage-coverage check-gates-wired; do
     if [ ! -x "tools/$g.sh" ]; then
         echo "gates_wired=NOT_EXECUTABLE gate=$g"
         rc=1
