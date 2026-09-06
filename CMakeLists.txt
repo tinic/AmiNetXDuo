@@ -736,6 +736,24 @@ endif()
 # why a segment count was retired.  Empty means that policy; a number brings
 # the vendored counter arm back with that N, which is how one tree measures
 # the two against each other on a machine the X-Surf sweep never ran on.
+#
+# BOTH DIRECTIONS ARE CLOSED, AND N=1 IS NOT THE WHOLE OF IT.  The refuted note
+# says only "N=1 is -23% rx", which reads as though some larger N were still
+# open.  It is not, and neither half needs a rig to see:
+#
+#   MORE ACKs than ships.  The byte threshold sends one when half the receive
+#   buffer is outstanding -- about 26 KB of window against a 1460-byte segment,
+#   so roughly every ninth segment.  Every N below that is MORE acknowledgment
+#   traffic, in the same direction as the N=1 arm that cost 23% of receive.
+#   N=2, 3, 4 are all on that side of the default.
+#
+#   FEWER ACKs than ships.  An N above nine is fewer, and that direction is
+#   already measured next door: the window-update divisor sweep put 3 at -2.4%
+#   against the 2 that ships, and a window update IS the acknowledgment that
+#   reopens the sender.  Withholding them starves the far end faster than it
+#   saves us the send.
+#
+# So the knob stays empty and this is why, rather than "N=1 was bad".
 set(AMINETXDUO_TCP_ACK_EVERY_N ""
     CACHE STRING "ACK every Nth data segment instead of the byte threshold")
 if(NOT AMINETXDUO_TCP_ACK_EVERY_N STREQUAL "")
