@@ -280,14 +280,23 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          *
          * THIS QUEUE IS SHARED BY EVERY BOARD, so it was checked on a second
          * one.  ne2000_pcmcia (dp8390, not a2065's lance), same two clean
-         * builds, four rounds alternated: tcp-rx 4,018,438 -> 4,068,687,
-         * tcp-tx 2,278,896 -> 2,279,656.  READ THAT AS "NO REGRESSION ON A
-         * SECOND DRIVER", NOT as a second confirmation of the gain: n is 3
-         * and 4, the arms disagree by position there, and the control's
-         * second-position sample is a high outlier against its own first
-         * (4,249,708 against 4,011,217).  What it rules out is the thing worth
-         * ruling out -- that reordering this queue costs a board whose driver
-         * takes a different path into it.
+         * builds, SIX rounds alternated, tcp-rx:
+         *
+         *     arm      first        second       median
+         *     before   4,231,006    4,001,262    4,018,809
+         *     after    4,071,943    4,074,700    4,071,943
+         *
+         * READ THAT AS "NO REGRESSION ON A SECOND DRIVER" AND NOT AS A SECOND
+         * CONFIRMATION OF THE GAIN.  The +1.3% in those medians is the control
+         * moving, not this change: the control's own two positions differ by
+         * 5.7% while the after arm sits at 4.07M in both, tight to 0.07%.  Six
+         * rounds cannot call 1% against a control that noisy, and a four-round
+         * run before it put the control's outlier in the OTHER position.
+         *
+         * What it does rule out is the thing worth ruling out -- that
+         * reordering a queue every board shares costs a board whose driver
+         * takes a different path into it.  The after arm is never below the
+         * control's range.  Transmit there is -0.7%, inside the same noise.
          *
          * An earlier run called this inconclusive because its arms disagreed
          * by position.  Those arms were built in two reused worktrees, one
