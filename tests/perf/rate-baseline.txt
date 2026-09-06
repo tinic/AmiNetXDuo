@@ -74,12 +74,21 @@
 #     write_kbs    223.0    2.7%     4.0%
 #
 # Against 24.3% interquartile for read on the 0 ms link and 41.7% for
-# dropped_rx.  Delay paces the arrivals and the per-arm scatter collapses with
-# it.  Anything this campaign could not resolve at 0 ms -- and it repeatedly
-# could not resolve 2% -- is worth re-asking at -d 50 before it is called a
-# floor.  Note the rates there are NOT this rig's rates: write falls to 223
-# from 2,138 and read to 538, so a delayed run compares arms with each other,
-# never against a figure taken at 0 ms.
+# dropped_rx.  Delay paces the arrivals and the per-arm scatter collapses.
+#
+# BUT IT IS PRECISE ABOUT A DIFFERENT BOTTLENECK, SO DO NOT REACH FOR IT TO
+# SETTLE A CPU QUESTION.  Read is 538 KB/s at 50 ms against about 690 at 0 ms.
+# Delay costs no CPU, so if the processor bound both they would agree; it is
+# lower, which means something other than the processor binds at 50 ms.  A two
+# per cent saving in the copy path would move the 0 ms figure and leave 538
+# exactly where it is, and the 0.6% spread would report that as a confident
+# nothing.
+#
+# What it IS for: anything whose effect is on the wire rather than in the CPU
+# -- window sizing, acknowledgement cadence, retransmit behaviour, loss
+# recovery.  Those live in the regime it resolves.  Rates there are not this
+# rig's rates either (write falls to 223 from 2,138), so a delayed run compares
+# arms with each other and never against a figure taken at 0 ms.
 #
 # ALTERNATE THE ORDER OF AN A/B ON THIS RIG.  The 2.0% below is NOT a
 # reproducible property and must not be quoted as one: a later run with clean
