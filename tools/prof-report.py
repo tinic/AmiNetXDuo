@@ -39,6 +39,7 @@ SPDX-License-Identifier: MIT
 
 import argparse
 import bisect
+import collections
 import os
 import re
 import struct
@@ -359,6 +360,59 @@ class Resolver:
                           if neg)
         self.neg_lo = [r[0] for r in self.neg]
 
+        # LoadSeg'd libraries whose own map was supplied, filled by
+        # add_library() below.
+        self.libcode = []
+
+    def add_library(self, libname, symtab, note):
+        """Locate a LoadSeg'd library in memory and name inside it.
+
+        The load base is not recorded anywhere: LoadSeg() puts the hunks where
+        it likes and only the system keeps the seglist.  It is recoverable,
+        though, because the Amiga side already resolved every jump-table slot
+        to the absolute address it jumps to.  Each of those targets is a
+        function this library's own map also places, so the difference between
+        an absolute target and the right link-time address IS the base -- and
+        the right pairing does not have to be known in advance, because the
+        true base is the only difference that recurs.  Every other pairing is
+        a coincidence and votes once.
+        """
+        idx = None
+        for i, (_b, _n, _t, name) in enumerate(self.prof.libs):
+            if name == libname:
+                idx = i
+                break
+        if idx is None:
+            return "%s: not open in the profiled run" % libname
+
+        targets = [t for t, li, _lvo in self.prof.lvos if li == idx]
+        if not targets:
+            return "%s: no resolved jump-table targets" % libname
+
+        code = symtab.get(".text", [])
+        if not code:
+            return "%s: its map yielded no .text symbols" % libname
+
+        addrs = set(a for a, _nm, _mod in code)
+        votes = collections.Counter()
+        for t in targets:
+            for a in addrs:
+                votes[t - a] += 1
+        base, hits = votes.most_common(1)[0]
+
+        # One vote per jump-table entry is what a real base earns.  A handful
+        # is arithmetic noise, and naming a hundred samples off a coincidence
+        # is worse than leaving them unattributed.
+        if hits < 8 or hits < len(targets) // 4:
+            return ("%s: no base agreed with its map (best %d of %d slots)"
+                    % (libname, hits, len(targets)))
+
+        rows = sorted((base + a, nm, libname) for a, nm, _mod in code)
+        self.libcode.append((base, rows[0][0], rows[-1][0], libname,
+                             [r[0] for r in rows], rows))
+        return ("%s: base $%08x, %d symbols, %d of %d slots agree"
+                % (libname, base, len(rows), hits, len(targets)))
+
     def link_time(self, pc):
         for i, (base, size) in enumerate(self.prof.segs):
             if base <= pc < base + size:
@@ -388,6 +442,16 @@ class Resolver:
                 lvo = 6 * ((delta + 5) // 6)
                 libname = self.prof.libs[libidx][3]
                 return (lvo_name(libname, lvo), libname)
+
+        # Inside a LoadSeg'd library we have the map for.  Before the
+        # nearest-jump-table-target guess below, which would otherwise name
+        # library-internal code after whatever entry point precedes it -- an
+        # Expunge slot sitting at 5.7% of a transfer, for instance.
+        for base, lo, hi, libname, laddrs, lrows in self.libcode:
+            if lo <= pc <= hi:
+                i = bisect.bisect_right(laddrs, pc) - 1
+                if i >= 0:
+                    return (lrows[i][1], libname)
 
         if self.lvo_addrs:
             i = bisect.bisect_right(self.lvo_addrs, pc) - 1
@@ -457,6 +521,12 @@ def main():
     ap.add_argument("--objdir", default=".",
                     help="what the map's relative object paths are relative to")
     ap.add_argument("--nm", default="m68k-amigaos-nm")
+    ap.add_argument("--libmap", action="append", default=[],
+                    metavar="NAME=MAP:OBJDIR",
+                    help="resolve inside a LoadSeg'd library or device, e.g. "
+                         "bsdsocket.library=build/cm/src/bsdsocket/"
+                         "bsdsocket.library.map:build/cm/src/bsdsocket/"
+                         "CMakeFiles/bsdsocket_library.dir . Repeatable.")
     ap.add_argument("--ndk", help="NDK include dir, for lvo/*.i")
     ap.add_argument("--phase", help="only samples between this mark and the next")
     ap.add_argument("--top", type=int, default=25)
@@ -469,6 +539,24 @@ def main():
     symtab = (build_symbol_table(args.nm, args.mapfile, args.objdir)
               if args.mapfile else {})
     res = Resolver(prof, args.exe, symtab)
+
+    lib_notes = []
+    for spec in args.libmap:
+        if "=" not in spec:
+            sys.exit("--libmap wants NAME=MAP[:OBJDIR], got %r" % spec)
+        libname, rest = spec.split("=", 1)
+        if ":" in rest:
+            lmap, lobjdir = rest.split(":", 1)
+        else:
+            lmap, lobjdir = rest, os.path.dirname(rest) or "."
+        try:
+            lsym = build_symbol_table(args.nm, lmap, lobjdir)
+        except SystemExit:
+            raise
+        except Exception as exc:                       # noqa: BLE001
+            lib_notes.append("%s: %s" % (libname, exc))
+            continue
+        lib_notes.append(res.add_library(libname, lsym, lmap))
 
     samples = prof.phase(args.phase)
 
@@ -501,6 +589,8 @@ def main():
     print("symbols      %d from %s" % (nsym, args.mapfile or "(none)"))
     print("libraries    %d, %d resolved jump-table entries"
           % (prof.nlibs, prof.nlvos))
+    for note in lib_notes:
+        print("             %s" % note)
     print()
 
     if not samples:
