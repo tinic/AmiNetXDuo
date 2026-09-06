@@ -263,6 +263,26 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          * recently freed one is as correct as handing back the oldest, and it
          * puts the type that is actually receiving at the front.  The idle
          * ARP and IPv6 reads sink behind it and stay there.
+         *
+         * Worth 1.0% of receive.  Clean build per arm, md5 of anxnet.device
+         * printed before a round ran (13542d48 tail, dcdac8e5 head), six
+         * rounds alternating which arm went first, tcp-rx medians:
+         *
+         *     arm       first        second       overall
+         *     AddTail   5,486,559    5,545,202    5,515,880
+         *     AddHead   5,559,536    5,580,368    5,569,952
+         *
+         * Ahead in both positions, +1.3% and +0.6%; transmit -0.1%.  READ THAT
+         * AS SMALL AND POSITIVE, NOT AS 1.0% EXACTLY -- the within-arm spread
+         * between positions is about 1% here, the same size as the effect.  It
+         * clears the bar this tree uses, ahead in both positions on clean
+         * builds, and no more than that.
+         *
+         * An earlier run called this inconclusive because its arms disagreed
+         * by position.  Those arms were built in two reused worktrees, one
+         * holding a stale library (d5323947): the disagreement WAS the
+         * artefact.  AMI_SANA2_RX_RUN_MAX read +2.8% and then -4.0% the same
+         * bad way and is +1.5% measured clean.
          */
         Disable();
         queued = unit->nu_Online ? TRUE : FALSE;
