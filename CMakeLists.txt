@@ -618,6 +618,19 @@ if(NOT AMINETXDUO_WINDOW_UPDATE_DIVISOR STREQUAL "")
         AMINETXDUO_WINDOW_UPDATE_DIVISOR=${AMINETXDUO_WINDOW_UPDATE_DIVISOR})
 endif()
 
+# The Exec priority boost a parked Task takes in _tx_amiga_thread_park().
+# Empty or 1 keeps it, which is what ships.  0 equates the handoff priority
+# with the band, which makes tx_thread_system_return.c:143 skip both of its
+# SetTaskPri() calls -- that pair is 1.8% of the wire profile -- and gives up
+# the strict-priority preempt in exchange, so the switch lands at the
+# signaller's own Wait() instead of at its Signal().  A knob rather than an
+# opinion: two libraries out of one tree, measured on the rig.
+set(AMINETXDUO_HANDOFF_BOOST "" CACHE STRING
+    "Exec priority boost while parked (1 keeps it, 0 removes it)")
+if(NOT AMINETXDUO_HANDOFF_BOOST STREQUAL "")
+    add_compile_definitions(AMINETXDUO_HANDOFF_BOOST=${AMINETXDUO_HANDOFF_BOOST})
+endif()
+
 set(AMINETXDUO_TCP_WINDOW "" CACHE STRING "Pin the TCP receive window, bytes")
 if(NOT AMINETXDUO_TCP_WINDOW STREQUAL "")
     add_compile_definitions(BSD_TCP_WINDOW=${AMINETXDUO_TCP_WINDOW}

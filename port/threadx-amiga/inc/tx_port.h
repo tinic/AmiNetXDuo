@@ -388,10 +388,23 @@ void    _tx_amiga_start_interrupts(void);
 
 /* Exec priority of a Task parked in _tx_amiga_thread_park(), and only while it is
    parked.  One above the band, because Exec reschedules on a Signal() only for a
-   STRICTLY higher priority; still far below TX_AMIGA_TIMER_PRIORITY.  */
+   STRICTLY higher priority; still far below TX_AMIGA_TIMER_PRIORITY.
+
+   The boost is not free: _tx_thread_system_return() pays SetTaskPri() twice per
+   park, once to raise and once to restore, and SetTaskPri is 1.8% of the wire
+   profile.  tx_thread_system_return.c:143 already skips both when the Task is
+   already at or above the handoff priority, so equating the two removes them
+   entirely -- at the cost of the strict-priority preempt, which makes the
+   switch happen when the signaller reaches its own Wait() rather than at the
+   Signal().  AMINETXDUO_HANDOFF_BOOST=0 builds that arm so the trade can be
+   measured instead of argued.  */
 
 #ifndef TX_AMIGA_HANDOFF_PRIORITY
+#if defined(AMINETXDUO_HANDOFF_BOOST) && (AMINETXDUO_HANDOFF_BOOST == 0)
+#define TX_AMIGA_HANDOFF_PRIORITY               (TX_AMIGA_TASK_PRIORITY)
+#else
 #define TX_AMIGA_HANDOFF_PRIORITY               (TX_AMIGA_TASK_PRIORITY + 1)
+#endif
 #endif
 
 /* Exec priority of the periodic tick Task.  It must out-prioritise every
