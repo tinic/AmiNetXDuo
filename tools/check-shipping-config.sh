@@ -157,6 +157,32 @@ def main():
             say("stale_known_entry", drawer)
             bad += 1
 
+    # dist/make-dist.sh keeps a THIRD copy of the minimal option set, for a
+    # hand-run that lets it configure build/release-minimal itself.  It is not
+    # reachable from release.yml or ci.sh, so the two-way comparison above
+    # cannot see it drift -- and it had drifted: seven options here against
+    # nine in the other two, missing MAX_INTERFACES and TCP_SYNCACHE, so a
+    # hand-built minimal drawer was not the drawer that ships.
+    dist = read("dist/make-dist.sh")
+    m = re.search(r'MINIMAL_OPTIONS="(.*?)"', dist, re.S)
+    if not m:
+        say("drawer_minimal_dist", "no_MINIMAL_OPTIONS_in_dist/make-dist.sh")
+        bad += 1
+    else:
+        dist_opts = dict(OPT.findall(m.group(1).replace("\\\n", " ")))
+        want_min = dict(ci.get("minimal", {}))
+        if dist_opts == want_min:
+            say("drawer_minimal_dist", "matches_ci_arm_minimal")
+        else:
+            only_dist = sorted(k for k in dist_opts
+                               if dist_opts[k] != want_min.get(k))
+            only_ci = sorted(k for k in want_min
+                             if want_min[k] != dist_opts.get(k))
+            say("drawer_minimal_dist",
+                "DIVERGES dist_only=%s ci_only=%s"
+                % (",".join(only_dist) or "-", ",".join(only_ci) or "-"))
+            bad += 1
+
     say("shipping_config_errors", bad)
     say("shipping_config", "PASS" if bad == 0 else "FAIL")
     return 0 if bad == 0 else 1

@@ -99,13 +99,21 @@ case "$MINIMAL_BUILD" in /*) ;; *) MINIMAL_BUILD="$ROOT/$MINIMAL_BUILD" ;; esac
 WANT_MINIMAL=1
 [ -z "${AMINETXDUO_DIST_NO_MINIMAL:-}" ] || WANT_MINIMAL=0
 
-# The seven the release workflow turns off for the floor drawer.  Kept here so
-# a hand-run of this script produces the same minimal library CI does; the
-# workflow's own copy at .github/workflows/release.yml is the other one, and
-# they have to agree.
+# The nine the release workflow turns off or pins for the floor drawer.  Kept
+# here so a hand-run of this script produces the same minimal library CI does;
+# the workflow's own copy at .github/workflows/release.yml:258 is the other
+# one, and tools/ci.sh:104 is the third, and they have to agree.
+#
+# They did not.  This list carried seven while release.yml and ci.sh both
+# carried nine -- MAX_INTERFACES and TCP_SYNCACHE were missing here -- so a
+# hand-run that let this script configure build/release-minimal itself built a
+# DIFFERENT library from the one that ships.  check-shipping-config.sh compares
+# release.yml against ci.sh and cannot see this file, which is why it went
+# unnoticed; it reads this list too now.
 MINIMAL_OPTIONS="-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
 -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF \
--DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
+-DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF \
+-DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
 
 BUILDS=("$BUILD")
 [ "$WANT_MINIMAL" = "0" ] || BUILDS+=("$MINIMAL_BUILD")
