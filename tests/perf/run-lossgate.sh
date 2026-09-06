@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 #
+# TWO OF ITS FOUR METRICS NEED A COUNTERS BUILD, AND A SHIPPING ONE HAS NONE.
+# dropped_rx and retransmitted are read out of netstat's tcp block, and that
+# block is compiled to `if (0)` when NX_DISABLE_TCP_INFO is defined
+# (src/tools/netstat.c:511) -- which is what ships, because
+# AMINETXDUO_NX_COUNTERS is OFF by default.  So on a shipping build the line
+# this parses is never printed, both metrics come out MISSING, and the gate
+# fails without a single rate having moved.
+#
+# The baseline carries values for both (dropped_rx 19.0, retransmitted 0.0), so
+# it was recorded on a build that had them.  Reproduce that:
+#
+#     cmake ... -DAMINETXDUO_NX_COUNTERS=ON
+#
+# Measured 2026-09-06 on origin/main built the shipping way: read_kbs 326.0
+# against a 66.0 baseline and write_kbs 2,524.0 against 2,139.0, both `ok`, and
+# the verdict still FAIL on the two it could not collect.
+#
 # The other half of the performance gate: throughput on a link that loses
 # packets.
 #
@@ -303,6 +320,15 @@ for rep in $(seq 1 "$REPS"); do
             print rep, "retransmitted", $1
             print rep, "dropped_rx",    $3 }
     ' "$OUT/arm-$rep.txt" > "$OUT/arm-$rep.samples"
+
+    # Name the cause rather than leaving the reader with MISSING: a shipping
+    # build cannot print the line the counters come from.
+    if ! grep -q "retransmitted" "$OUT/arm-$rep.samples" 2>/dev/null; then
+        grep -q "not enabled" "$OUT/arm-$rep.txt" 2>/dev/null &&
+            echo "note: this build has NX_DISABLE_TCP_INFO, so netstat prints" \
+                 "no retransmit or drop counts and two metrics will be" \
+                 "MISSING.  Rebuild with -DAMINETXDUO_NX_COUNTERS=ON." >&2
+    fi
 
     ARM_RATES=$(awk '$2 == "read_kbs" || $2 == "write_kbs" { n++ }
                      END { print n + 0 }' "$OUT/arm-$rep.samples")
