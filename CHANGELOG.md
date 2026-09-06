@@ -18,8 +18,15 @@ arm went first.
 | | before | now |
 |---|---|---|
 | iperf tcp-rx, bits/s | 5,347,499 | **5,522,706** |
-| Fitz read, kbytes/s | 3,424 | **3,564** |
+| Fitz read, kbytes/s | 3,272 | **3,562** |
 | iperf tcp-tx, bits/s | 2,997,212 | 2,976,433 |
+| Fitz write, kbytes/s | 2,542 | 2,538 |
+
+Six sittings an arm on Fitz, six rounds an arm on iperf, alternating which arm
+went first. The Fitz read figure is +8.9% on the medians and should be read as
+a range, not a point: that arm's samples span 2,656 to 3,435 and the low one
+drags its median, so the gain is nearer +7% without it. Five of six samples
+after the change beat the median before it.
 
 | change | receive |
 |---|---|

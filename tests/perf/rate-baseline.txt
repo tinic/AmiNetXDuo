@@ -132,5 +132,14 @@
 #
 # rate=PASS.  Receive clears by 0.4%, which is thin -- if a later sitting reds
 # on an unchanged tree, this raise is the first thing to suspect, not the code.
+#
+# The application workload agrees with the direction and disagrees with the
+# size, which is worth knowing before anyone quotes one number for both.
+# run-fitzbench.sh, fc5fabe6 against main, six sittings an arm alternated:
+# read 3,272 -> 3,562 and write 2,542 -> 2,538.  That is +8.9% on the medians
+# against iperf's +3.3%, and it is a range rather than a point: the before
+# arm's samples span 2,656..3,435 and the low one drags its median, so without
+# it the gain is nearer +7%.  A Fitz sitting is far noisier than an iperf
+# round and six of them still cannot pin 2%.
 tcp-rx 5522706
 tcp-tx 2945193
