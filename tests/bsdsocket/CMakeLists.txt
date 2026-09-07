@@ -23,6 +23,28 @@
 # links against would have a different shape than the one that ships, and the
 # shim's own exec/types.h collides with it outright.  A test that cannot agree
 # with the target about the width of a LONG is not measuring the target.
+# NOT under the x86_64 guard below.  ami_syslog_level() is integer
+# arithmetic over one pure file: no structure crosses the boundary, so the
+# host's eight-byte LONG cannot change the answer.  It was written inside
+# that guard by copying the block next to it, which took ten tests away from
+# every non-x86_64 runner while HOST_TESTS_EXPECTED subtracted nine, and the
+# macOS job went red for a test that had simply moved.
+if(NOT CMAKE_CROSSCOMPILING)
+    # ami_syslog_level(), the vsyslog severity arithmetic.  BSD syslog.h packs
+    # facility and severity into one value and only the low three bits are the
+    # severity; a daemon logging LOG_LOCAL0|LOG_ERR sends 131, which read whole
+    # is not a severity at all.  The mapping lives in a pure file of its own
+    # because errno.c reaches <aminetxduo/bpf.h>, whose struct if_nameindex
+    # collides with the host's <net/if.h>.
+    add_executable(test_vsyslog host/test_vsyslog_host.c
+                                "${CMAKE_SOURCE_DIR}/src/common/ami_syslog_level.c")
+
+    target_include_directories(test_vsyslog PRIVATE
+        "${CMAKE_SOURCE_DIR}/include")
+
+    add_test(NAME vsyslog_severity COMMAND test_vsyslog)
+endif()
+
 if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     add_executable(test_inet host/test_inet_host.c
                              "${CMAKE_SOURCE_DIR}/src/bsdsocket/inet.c")
@@ -41,20 +63,6 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
 
     add_test(NAME inet_conversions COMMAND test_inet)
-
-    # ami_syslog_level(), the vsyslog severity arithmetic.  BSD syslog.h packs
-    # facility and severity into one value and only the low three bits are the
-    # severity; a daemon logging LOG_LOCAL0|LOG_ERR sends 131, which read whole
-    # is not a severity at all.  The mapping lives in a pure file of its own
-    # because errno.c reaches <aminetxduo/bpf.h>, whose struct if_nameindex
-    # collides with the host's <net/if.h>.
-    add_executable(test_vsyslog host/test_vsyslog_host.c
-                                "${CMAKE_SOURCE_DIR}/src/common/ami_syslog_level.c")
-
-    target_include_directories(test_vsyslog PRIVATE
-        "${CMAKE_SOURCE_DIR}/include")
-
-    add_test(NAME vsyslog_severity COMMAND test_vsyslog)
 
     # routing.c, for ChangeRouteTagList's grammar and its refusals.  The four
     # NetX Duo entry points it uses are stubbed in the test rather than linked;
