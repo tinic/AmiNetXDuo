@@ -257,10 +257,24 @@ static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
         return;
     }
 
-    tool_printf("\t%s: %lu samples, mean %lu us, max %lu us\n", (LONG)name,
+    /*
+     * THE TOTAL, BECAUSE n x mean IS WHAT A READER ACTUALLY WANTS AND THIS
+     * MADE THEM DO IT BY HAND.
+     *
+     * A leg's share of the run is its total, not its mean: `defer` at 74 us
+     * looks negligible beside `ack` at 4,562 until you notice defer ran 1,311
+     * times and ack 1,726.  The first reading of this report needed a
+     * calculator for all twelve rows before any of them could be ranked.
+     *
+     * Milliseconds, because a leg that matters is tens to thousands of them
+     * and microseconds would just be noise on the end.
+     */
+    tool_printf("\t%s: %lu samples, mean %lu us, max %lu us, total %lu ms\n",
+                (LONG)name,
                 leg->nbl_Count,
                 (leg->nbl_Sum / leg->nbl_Count) * 1000UL / khz,
-                leg->nbl_Max * 1000UL / khz);
+                leg->nbl_Max * 1000UL / khz,
+                leg->nbl_Sum / khz);
 
     for (i = 0; i < NETSTATUS_BUDGET_BUCKETS; i++)
     {
@@ -401,7 +415,16 @@ static VOID show_budget(VOID)
 
     b = (NetStatusRxBudget *)(buf + sizeof(NetStatusHeader));
 
-    tool_printf("\nreceive budget:\n");
+    /*
+     * CUMULATIVE ACROSS EVERY ARM OF THE BOOT, WHICH IS A TRAP.  run-iperf.sh
+     * runs tcp-tx, udp-tx, tcp-rx and udp-rx in one machine and prints this
+     * after several of them, so a transmit leg's count is every arm's sends
+     * and not the receive arm's.  The first reading of it saw 1,726 transmits
+     * against 1,285 received frames and nearly called it an acknowledgement
+     * storm; `xmit` is the only leg that counts receive-provoked transmits,
+     * and it read 396.
+     */
+    tool_printf("\nreceive budget (counts are cumulative over the boot):\n");
 
     /* BEFORE the not-instrumented return below, not after it.  The twelve
        timed legs belong to a probe build; the green census the library fills
