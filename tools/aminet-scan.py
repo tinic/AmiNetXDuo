@@ -195,6 +195,61 @@ class Hunks:
             self.packed = True
 
 
+def _branch_targets(code):
+    """
+    Every offset something can branch to.
+
+    a6 is tracked forward through straight-line code, so tracking must STOP at
+    any label: a branch arriving there may carry a different a6, and assuming
+    otherwise is how a scan invents calls.  Bcc/BRA/BSR with 8- and 16-bit
+    displacements plus DBcc cover what these compilers emit.
+    """
+    t = set()
+    i = 0
+    n = len(code)
+    while i + 2 <= n:
+        op = struct.unpack_from(">H", code, i)[0]
+        hi = op >> 12
+        if hi == 0x6:                              # Bcc / BRA / BSR
+            d8 = op & 0xFF
+            if d8 == 0 and i + 4 <= n:
+                t.add(i + 2 + _s16(code, i + 2))
+                i += 4
+                continue
+            if d8 == 0xFF and i + 6 <= n:          # 32-bit displacement
+                t.add(i + 2 + struct.unpack_from(">i", code, i + 2)[0])
+                i += 6
+                continue
+            t.add(i + 2 + (d8 - 256 if d8 > 127 else d8))
+            i += 2
+            continue
+        if (op & 0xF0F8) == 0x50C8 and i + 4 <= n:  # DBcc
+            t.add(i + 2 + _s16(code, i + 2))
+            i += 4
+            continue
+        i += 2
+    return t
+
+
+# movea.l <ea>,a6 is 0x2C40..0x2C7F over the whole addressing-mode field.  Only
+# the four forms _a6_loads() decodes are followed; EVERY other one has to clear
+# the tracked base, and `movea.l 4.w,a6` (0x2C78) is the one that matters:
+# fetching SysBase from absolute 4 is how every Amiga program reaches exec, and
+# leaving it out let exec calls inherit the socket base.  That put
+# AddRouteTagList -- displacement -414, which is exec CloseLibrary -- into an
+# email client's vector list, four times.
+A6_LOAD_FOLLOWED = (0x2C79, 0x2C6C, 0x2C6D, 0x2C7A)
+
+
+def _clobbers_a6(op):
+    """True when this word writes a6 with something this scanner cannot follow."""
+    if 0x2C40 <= op <= 0x2C7F:
+        return op not in A6_LOAD_FOLLOWED
+    if op in (0x4CDF, 0x4CD7, 0x4CEE, 0x4CE7):   # movem.l restore forms
+        return True
+    return False
+
+
 def _a6_loads(code):
     """offset -> a6 source key, for the forms these binaries actually use."""
     out = {}
@@ -237,6 +292,34 @@ def _d0_stores(code):
             continue
         i += 2
     return out
+
+
+def _live_a6(code, loads):
+    """
+    Carry a6 forward from where it was loaded to where it is used.
+
+    A compiler loads the base once and makes several calls on it; requiring the
+    load to sit immediately before each call found 16 of AmiFTP's 18 vectors
+    and missed connect and WaitSelect for that reason alone.  Propagation stops
+    at a branch target or an instruction that writes a6 some other way, so a
+    stale value cannot follow control flow into another context.
+    """
+    labels = _branch_targets(code)
+    live = dict(loads)
+    cur = None
+    i = 0
+    n = len(code)
+    while i + 2 <= n:
+        if i in labels:
+            cur = None
+        if i in loads:
+            cur = loads[i]
+        elif i + 2 <= n and _clobbers_a6(struct.unpack_from(">H", code, i)[0]):
+            cur = None
+        if cur is not None and i not in live:
+            live[i] = cur
+        i += 2
+    return live
 
 
 def _calls(code):
@@ -384,7 +467,7 @@ def scan(path, lvomap):
         if base is None:
             continue
         proven = True
-        loads = _a6_loads(code)
+        loads = _live_a6(code, _a6_loads(code))
         for off, disp in calls.items():
             if loads.get(off) != base:
                 continue

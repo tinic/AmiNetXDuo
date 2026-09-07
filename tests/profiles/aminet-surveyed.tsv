@@ -46,8 +46,8 @@
 /comm/www/httpget.lha	rejected	ixemul-hosted; same
 # Screening pass, 2026-09-07.  method=screened is NOT exhaustive: a hit counts,
 # an absence does not, and a CLEAN row may not cite these.
-/comm/mail/smail_amitcp.lha	screened	9 vectors incl ObtainSocket; another inetd-family member
-/comm/mail/AEMAIL.lha	screened	1 vector reported, which is under-reporting rather than a finding
+/comm/mail/AmigaSmail3-29.lha	screened	binary smail_amitcp, 13 vectors incl ObtainSocket, Dup2Socket and vsyslog -- the inetd daemon signature; survived the a6-clobber fix
+/comm/mail/AEMail230.lha	screened	binary AEMAIL, 7 vectors after the a6-clobber fix; its AddRouteTagList was a phantom, see the METHOD row
 /comm/mail/AirMailPro.lha	screened	1 vector reported, same
 /comm/mail/SuperMailBox.lha	screened	2 vectors reported, same
 /comm/mail/AmiGmail.lha	screened	2 vectors reported
