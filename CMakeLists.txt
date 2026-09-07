@@ -519,6 +519,26 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# Handing a socket from one task to another: ReleaseSocket, ReleaseCopyOfSocket
+# and ObtainSocket, the inetd-style pattern where one process accepts and
+# another serves.  ObtainServerSocket and ProcessIsServer are vectors of the
+# same family and already answer ENOENT and FALSE in the built version, so they
+# do not change.
+#
+# Off, ObtainSocket answers AMI_ENOENT -- the same code the built version gives
+# for an id nobody released, which is exactly the situation, and which
+# tcp_handler.c:400 already maps to ERROR_OBJECT_NOT_FOUND.  The two Release
+# calls answer AMI_ENOSYS: they are handed a live socket, so "there is no such
+# id" would be the wrong thing to say.
+#
+# bsd_handoff_init() still clears the list.  Nothing reads sb_Handoffs with the
+# feature off, but library.c:566 already zeroes a child's copy and leaving the
+# master's undefined would be a trap for whoever adds the next reader.
+option(AMINETXDUO_HANDOFF "Build ObtainSocket/ReleaseSocket" ON)
+if(AMINETXDUO_HANDOFF)
+    add_compile_definitions(AMINETXDUO_HANDOFF)
+endif()
+
 # The address-allocation message: CreateAddrAllocMessageA, its Delete, and the
 # BeginInterfaceConfig/AbortInterfaceConfig pair a configuration program drives
 # it with.  Four vectors and one internal helper.

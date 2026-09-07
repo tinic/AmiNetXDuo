@@ -7,6 +7,8 @@
 
 #include <proto/exec.h>
 
+#ifdef AMINETXDUO_HANDOFF
+
 typedef struct BsdHandoff
 {
     struct MinNode  bh_Node;
@@ -348,3 +350,62 @@ BOOL bsd_ProcessIsServer(register struct Process *pr __asm("a0"),
 
     return FALSE;
 }
+
+#else /* !AMINETXDUO_HANDOFF */
+
+/* Nothing reads this with the feature off, but library.c:566 zeroes a child's
+   copy and an undefined master list is a trap for the next reader. */
+VOID bsd_handoff_init(struct AmiSocketBase *master)
+{
+    bsd_bzero(&master->sb_Handoffs, sizeof(master->sb_Handoffs));
+}
+
+VOID bsd_handoff_flush(struct AmiSocketBase *base)
+{
+    /* Nothing can have been released, so the list is empty by construction. */
+    (VOID)base;
+}
+
+LONG bsd_ReleaseSocket(register LONG sock_fd __asm("d0"),
+                       register LONG id      __asm("d1"),
+                       register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)sock_fd; (VOID)id;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_ReleaseCopyOfSocket(register LONG sock_fd __asm("d0"),
+                             register LONG id      __asm("d1"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)sock_fd; (VOID)id;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+/* ENOENT, not ENOSYS: it is what the built version answers for an id nobody
+   released, which is the situation here, and tcp_handler.c:400 maps it. */
+LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
+                      register LONG domain   __asm("d1"),
+                      register LONG type     __asm("d2"),
+                      register LONG protocol __asm("d3"),
+                      register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)id; (VOID)domain; (VOID)type; (VOID)protocol;
+    return bsd_fail(SocketBase, AMI_ENOENT);
+}
+
+LONG bsd_ObtainServerSocket(register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    return bsd_fail(SocketBase, AMI_ENOENT);
+}
+
+BOOL bsd_ProcessIsServer(register struct Process *pr __asm("a0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)pr;
+    (VOID)SocketBase;
+
+    return FALSE;
+}
+
+#endif /* AMINETXDUO_HANDOFF */
