@@ -4,6 +4,39 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# RAISED 2026-09-07 on transmit only, for the NetX/ThreadX argument checking
+# default flipping OFF.  Six sittings, three arms, position-balanced A B C C B A,
+# five rounds each, three DISTINCT library md5s printed before any round ran
+# (010c55093e94 / 68ac21ebabd1 / 4a29d89dd1db -- the previous attempt at this
+# arm printed the SAME md5 twice because the option did not exist on the tree
+# it ran against, and was a null control by accident):
+#
+#     arm                        tcp-rx      tcp-tx
+#     A  base                    5,957,717   3,183,053
+#     B  A + the capture change  5,920,716   3,201,533
+#     C  B + checking OFF        5,988,292   3,306,244
+#
+# C against B is +3.27% transmit and +1.14% receive; C against A is +3.87%
+# transmit.  The two arms' transmit samples do not overlap -- C measured
+# 3,324,764 and 3,287,723 against A's 3,181,994 and 3,184,112.
+#
+# AND THE NULL CONTROL FOR IT WAS MEASURED THE SAME DAY, which is what the note
+# below demands of anything in the 1-3% band: FOUR sittings of five rounds
+# against a BYTE-IDENTICAL library (md5 630a843a3f7f) gave
+# 5,905,187 / 5,940,630 / 5,924,700 / 5,887,844 receive and
+# 3,189,709 / 3,187,294 / 3,163,356 / 3,183,053 transmit.
+#
+#     floor: 0.90% receive, 0.83% transmit
+#
+# So transmit is four times the noise and receive is AT it.  Transmit is
+# raised; RECEIVE IS NOT, because +1.14% against a 0.90% floor is not a result.
+# The recorded transmit figure is the LOWER of C's two medians, per the rule
+# below, not the median of medians.
+#
+#     direction   was          now          sittings on the new tree
+#     tcp-tx      3,133,475    3,287,723    3,324,764 (5 rounds), 3,287,723 (5)
+#
+#
 # GAINS DO NOT ADD.  MEASURE THE ACCUMULATED SET, NEVER THE SUM OF PARTS.
 # 2026-09-06, 3a71a026 against main, six rounds alternated, the base rebuilt to
 # md5 7522050095ef for the fourth time that day:
@@ -318,4 +351,4 @@
 # +3%.  Transmit read -0.7% and then +0.3%, which is what no change looks like
 # here -- the first of those two is in no sense a regression.
 tcp-rx 5770903
-tcp-tx 3133475
+tcp-tx 3287723

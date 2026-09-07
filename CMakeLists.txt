@@ -666,8 +666,39 @@ if(AMINETXDUO_NETSTATUS)
     add_compile_definitions(AMINETXDUO_NETSTATUS)
 endif()
 
+# OFF, AND THE DEFAULT MOVED ON A MEASUREMENT.  The `_nxe_*` and `_txe_*`
+# wrappers validate pointers, IDs and caller context in front of every NetX Duo
+# and ThreadX API entry, and the only caller of those APIs in this tree is this
+# tree.  Six sittings on playhouse3, three arms position-balanced A B C C B A,
+# five rounds each, three distinct library md5s printed before any round ran:
+#
+#     arm                          tcp-rx      tcp-tx
+#     A  base                      5,957,717   3,183,053
+#     B  A + the capture change     5,920,716   3,201,533
+#     C  B + this option OFF        5,988,292   3,306,244
+#
+# C against B isolates it: +3.27% transmit, +1.14% receive.  C against A is
+# +3.87% transmit.  The two arms' transmit samples do not overlap.  A NULL
+# CONTROL THE SAME DAY -- four sittings against a byte-identical library --
+# put the floor at 0.90% receive and 0.83% transmit, so the transmit figure is
+# four times the noise and the receive one is at it.  Claim transmit; do not
+# claim receive.
+#
+# WHY TRANSMIT AND NOT RECEIVE: the send path crosses more API entries per
+# packet than the receive path does, and the profile agrees -- on a pure
+# RECEIVE run the three visible shims are only 1.1% together
+# (`_nxe_packet_allocate` 0.5, `_nxe_packet_release` 0.5,
+# `_nxe_packet_transmit_release` 0.1).  Per rate-baseline.txt, a change that
+# shortens the CPU path between an arriving ACK and the window reopening shows
+# MORE on transmit than on receive, because a bulk send drains one or two
+# frames a wake and per-wake fixed cost is a larger share of it.
+#
+# WHAT IS GIVEN UP: a NULL or a bad ID that would have come back NX_PTR_ERROR
+# is undefined behaviour instead.  The `instr` arm builds it ON so both sides
+# stay compiled, and micro/microcompat have shipped without it since the micro
+# profile landed.
 option(AMINETXDUO_NX_ERROR_CHECKING
-       "Compile NetX Duo and ThreadX argument checking" ON)
+       "Compile NetX Duo and ThreadX argument checking" OFF)
 if(NOT AMINETXDUO_NX_ERROR_CHECKING)
     add_compile_definitions(
         NX_DISABLE_ERROR_CHECKING
