@@ -256,6 +256,36 @@ if(AMINETXDUO_MDNS)
     add_compile_definitions(AMINETXDUO_MDNS)
 endif()
 
+# DNS.  Off, the resolver is DEVS:Internet/hosts and nothing else: the twelve
+# entry points in netstack_dns.c are answered by netstack_dns_off.c, which
+# keeps the hosts-file half of every one of them and returns AMI_NET_ERR_NONAME
+# where the query would have gone out.  That half already runs first and with
+# the network down (netstack_dns.c:1529), so a static machine with a hosts file
+# resolves exactly the names it resolved before.
+#
+# gethostbyname() on a dotted quad still works -- src/config/netdb.c parses one
+# with ami_config_parse_ip() and never asks the network.
+#
+# Global for the reason AMINETXDUO_MDNS is: two objects that disagreed about
+# whether the resolver exists would disagree about netstack_resolve().
+option(AMINETXDUO_DNS "Build the DNS resolver" ON)
+if(AMINETXDUO_DNS)
+    add_compile_definitions(AMINETXDUO_DNS)
+endif()
+
+# DHCP.  Off, the machine must be given a static address -- there is no
+# fallback, and AutoIP is not one: RFC 3927 gives out a 169.254 address that
+# routes nowhere.  ConfigureNetInterface's DHCP half and the Installer's
+# DHCP-vs-static page both assume the client is there, so this is the option
+# that costs a configuration story rather than just bytes.
+#
+# AMINETXDUO_IPV6 already gates the DHCPv6 client separately; this is the v4
+# one, and with both off nothing in addons/dhcp is compiled.
+option(AMINETXDUO_DHCP "Build the DHCP client" ON)
+if(AMINETXDUO_DHCP)
+    add_compile_definitions(AMINETXDUO_DHCP)
+endif()
+
 # The ARexx host on the AMITCP port: the QUERY/SET variable space and the
 # process that services it.  Off, netstack.c creates the port as a bare public
 # MsgPort instead, so `WaitForPort AMITCP` in S:User-Startup still returns and
@@ -1166,15 +1196,23 @@ target_link_libraries(netxduo PUBLIC threadx)
 
 # NetX Duo add-ons we actually use.
 set(NETXDUO_ADDON_SOURCES
-    "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c"
-    "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c"
     "${AMINETXDUO_NETXDUO}/addons/auto_ip/nx_auto_ip.c")
+
+if(AMINETXDUO_DHCP)
+    list(APPEND NETXDUO_ADDON_SOURCES
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c")
+endif()
+
+if(AMINETXDUO_DNS)
+    list(APPEND NETXDUO_ADDON_SOURCES
+        "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c")
+endif()
 
 # The DHCPv6 client, in the IPv6 build only.  It is the largest single addon
 # here and every byte of it is unreachable without IPv6, so the floor build
 # does not compile it -- the same arrangement src/netstack/CMakeLists.txt uses
 # for netstack_ipv6.c.
-if(AMINETXDUO_IPV6)
+if(AMINETXDUO_IPV6 AND AMINETXDUO_DHCP)
     list(APPEND NETXDUO_ADDON_SOURCES
         "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcpv6_client.c")
 endif()

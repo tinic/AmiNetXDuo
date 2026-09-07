@@ -25,6 +25,10 @@ endif()
 # it has to read the live NX_DHCP record and shorten its timers, because
 # SLIRP's lease is 24 hours and never expires, so it gets src/netstack/ on
 # its include path.  See tests/netstack/run-dhcp3927.sh.
+#
+# It reads the NX_DHCP record directly, so there is nothing to point it at in a
+# build with no client.
+if(AMINETXDUO_DHCP)
 add_executable(dhcp3927_test dhcp3927_test.c)
 
 target_link_libraries(dhcp3927_test PRIVATE
@@ -43,6 +47,7 @@ if(AMIGA_SIZE)
     add_custom_command(TARGET dhcp3927_test POST_BUILD
         COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:dhcp3927_test>"
         COMMENT "dhcp3927_test size")
+endif()
 endif()
 
 # ---------------------------------------------------------------- host tier --

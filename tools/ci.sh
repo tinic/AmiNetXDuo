@@ -110,6 +110,18 @@ CROSS_CONFIGS=(
     # arm above it moves it; that is how it was found, by CI going red for a
     # row that had been right when it was written.
     "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
+    # Below `minimal` on purpose: the row above is cited by line number.
+    #
+    # The floor under the floor.  It is the minimal drawer plus the two things
+    # that drawer still carries -- the DHCP client and the DNS resolver -- and
+    # the seven options minimal leaves on.  A machine built this way is given a
+    # static address and resolves names out of DEVS:Internet/hosts.
+    #
+    # This is the only arm that compiles AMINETXDUO_DHCP=OFF or
+    # AMINETXDUO_DNS=OFF, so it is what netstack_dns_off.c and
+    # netstack_dhcpv6_off.c are built by at all.  It does not ship a drawer
+    # yet, so tools/check-shipping-config.sh does not look at it.
+    "micro:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32 -DAMINETXDUO_DNS=OFF -DAMINETXDUO_DHCP=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF -DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF -DAMINETXDUO_HOT_O2=OFF"
     # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
     # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled
     # for as long as it took someone to type it by hand.  Grouped rather than

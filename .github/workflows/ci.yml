@@ -73,7 +73,7 @@ jobs:
       matrix:
         config: [nolto, noipv6, nomdns, notls, nomcast, noasm, nonet68kasm,
                  norxverify, nosack, ts, nxcounters, nowscale, log, census, minimal, if2,
-                 instr, tcpextra, pathswap, green]
+                 instr, tcpextra, pathswap, green, micro]
     steps:
       - uses: actions/checkout@v4
         with:

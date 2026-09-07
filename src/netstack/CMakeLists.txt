@@ -7,15 +7,26 @@
 set(NETSTACK_SOURCES
     netstack.c
     netstack_baton.c
-    netstack_dhcp_hostname.c
-    netstack_dns.c
-    netstack_dns_domain.c
-    netstack_dns_handoff.c
-    netstack_dns_lease.c
-    netstack_dns_status.c
     netstack_gateway.c
     netstack_pool.c
     netstack_retry.c)
+
+# The resolver.  Off, netstack_dns_off.c answers the same twelve entry points
+# out of DEVS:Internet/hosts alone -- see the option in the top-level file.
+# netstack_dns_status.c and the lease/domain/handoff helpers have no caller
+# but netstack_dns.c, so they go with it.
+if(AMINETXDUO_DNS)
+    list(APPEND NETSTACK_SOURCES
+        netstack_dns.c
+        netstack_dns_domain.c
+        netstack_dns_handoff.c
+        netstack_dns_lease.c
+        netstack_dns_status.c)
+else()
+    list(APPEND NETSTACK_SOURCES netstack_dns_off.c)
+endif()
+
+list(APPEND NETSTACK_SOURCES netstack_dhcp_hostname.c)
 
 # The ARexx host.  Without it netstack.c opens the AMITCP port itself, so the
 # floor build pays for neither the variable table nor the process behind it.
@@ -26,8 +37,15 @@ endif()
 # The floor build never compiles this file, so IPv6 costs it nothing at all --
 # not even a branch on a "is IPv6 on" flag.
 if(AMINETXDUO_IPV6)
-    list(APPEND NETSTACK_SOURCES netstack_ipv6.c netstack_dhcpv6.c
-                                 dhcpv6_wire.c netstack_ra.c)
+    list(APPEND NETSTACK_SOURCES netstack_ipv6.c netstack_ra.c)
+    # netstack_ipv6.c passes NetX Duo's one address-change slot on whether or
+    # not a client is there, and bsdsocket exports the DHCP6 calls regardless,
+    # so the off build gets the same twin arrangement the resolver gets.
+    if(AMINETXDUO_DHCP)
+        list(APPEND NETSTACK_SOURCES netstack_dhcpv6.c dhcpv6_wire.c)
+    else()
+        list(APPEND NETSTACK_SOURCES netstack_dhcpv6_off.c)
+    endif()
 endif()
 
 # Capture: registers the SANA-II interfaces with src/bpf/ and installs the

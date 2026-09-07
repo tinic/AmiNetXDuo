@@ -538,6 +538,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         ns->ns_AutoIpRunning = FALSE;
     }
 
+#ifdef AMINETXDUO_DHCP
     if (ns->ns_DhcpCreated)
     {
         if (ns->ns_DhcpStarted)
@@ -548,11 +549,12 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         (VOID)nx_dhcp_delete(&ns->ns_Dhcp);
         ns->ns_DhcpCreated = FALSE;
     }
+#endif
 
     /* Delete the callback source before the DNS client it updates. */
     ami_netstack_dns_stop(ns);
 
-#ifdef AMINETXDUO_IPV6
+#if defined(AMINETXDUO_IPV6) && defined(AMINETXDUO_DHCP)
     /*
      * The DHCPv6 Release goes on the wire, so it must precede the teardown
      * below: nx_ip_delete() takes the interfaces down with it.
@@ -1336,6 +1338,7 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
         ami_address_change_notify();
 }
 
+#ifdef AMINETXDUO_DHCP
 static const char *ami_ns_dhcp_state_name(UCHAR state)
 {
     static const char *const names[] = {
@@ -1409,6 +1412,8 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
     }
 }
 
+#endif /* AMINETXDUO_DHCP */
+
 /*
  * Wait for any configured interface to have an address.  nx_ip_status_check()
  * only ever looks at interface 0, so every interface is walked here.
@@ -1464,6 +1469,7 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
     }
 }
 
+#ifdef AMINETXDUO_DHCP
 /*
  * Send the first DISCOVER now rather than a second from now: RFC 2131 4.4.1's
  * random 1-10 s desynchronisation delay costs a flat second on every boot.
@@ -1533,10 +1539,13 @@ static VOID ami_ns_dhcp_configure(AmiNetStack *ns)
     (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_SEARCH);
     (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_STATIC_ROUTE);
 }
+#endif /* AMINETXDUO_DHCP */
 
 static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 {
-    UINT  status;
+#ifdef AMINETXDUO_DHCP
+    UINT  status;                       /* only the client create/start reads it */
+#endif
     UWORD i;
     BOOL  resolved = FALSE;
 
@@ -1576,6 +1585,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         resolved = TRUE;
     }
 
+#ifdef AMINETXDUO_DHCP
     if (ami_ns_wants(ns, AMI_IPTYPE_DHCP))
     {
         /*
@@ -1637,6 +1647,16 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             }
         }
     }
+#else
+    /*
+     * No client to ask.  An interface configured for DHCP gets no address at
+     * all; ami_ns_wants_ipv4() still counts it, so the wait below runs its
+     * course and the warning names the right cause.
+     */
+    if (ami_ns_wants(ns, AMI_IPTYPE_DHCP))
+        AMI_WARN("netstack: an interface asks for DHCP and this build has no "
+                 "client, give it a static address");
+#endif /* AMINETXDUO_DHCP */
 
     if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL) &&
         ami_ns_start_autoip(ns, -1L) != AMI_NET_OK)
@@ -1651,7 +1671,9 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
      */
     ami_netstack_ipv6_configure(ns);
 
+#ifdef AMINETXDUO_DHCP
     ami_netstack_dhcpv6_configure(ns);
+#endif
 #endif
 
     /*
@@ -1670,7 +1692,11 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
     {
         resolved = ami_ns_wait_for_address(ns, AMI_DHCP_TIMEOUT_TICKS);
 
+#ifdef AMINETXDUO_DHCP
         if (!resolved && ns->ns_DhcpStarted)
+#else
+        if (!resolved && ami_ns_wants(ns, AMI_IPTYPE_DHCP))
+#endif
         {
             AMI_WARN("netstack: no DHCP server answered in %lu seconds",
                      (unsigned long)(AMI_DHCP_TIMEOUT_TICKS /
@@ -2208,11 +2234,13 @@ LONG netstack_hostname_offer(UWORD source, const char *name)
     taken = ami_config_hostname_offer(&ns->ns_Config, source, name);
     if (taken)
     {
+#ifdef AMINETXDUO_DHCP
         ami_ns_dhcp_hostname_displace(&ns->ns_DhcpHostname);
 
         if (ns->ns_DhcpCreated)
             ami_ns_copy_name(ns->ns_DhcpName, ns->ns_Config.hostname,
                              sizeof(ns->ns_DhcpName));
+#endif
     }
 
     ami_netstack_leave_free(caller);
@@ -2253,7 +2281,9 @@ LONG netstack_interface_up(UWORD index)
     if (status == NX_SUCCESS)
     {
         ami_netstack_ipv6_interface_up(ns, index);
+#ifdef AMINETXDUO_DHCP
         ami_netstack_dhcpv6_resume(ns, index);
+#endif
     }
 #endif
 
@@ -2297,7 +2327,7 @@ static LONG ami_ns_interface_disable(UWORD index, UINT command)
  */
 static VOID ami_ns_release_dhcpv6(UWORD index)
 {
-#ifdef AMINETXDUO_IPV6
+#if defined(AMINETXDUO_IPV6) && defined(AMINETXDUO_DHCP)
     AmiNetStack  *ns = ami_ns;
     AmiNetCaller *caller;
 
@@ -2394,6 +2424,7 @@ static ULONG ami_ns_gateway_of(AmiNetStack *ns, UWORD index)
     ULONG              router = 0UL;
     UINT               size = (UINT)sizeof(router);
 
+#ifdef AMINETXDUO_DHCP
     if (cfg->iptype == AMI_IPTYPE_DHCP && ns->ns_DhcpCreated &&
         ns->ns_DhcpState[index] >= (UBYTE)NX_DHCP_STATE_BOUND &&
         nx_dhcp_interface_user_option_retrieve(
@@ -2401,6 +2432,10 @@ static ULONG ami_ns_gateway_of(AmiNetStack *ns, UWORD index)
             (UCHAR *)&router, &size) == NX_SUCCESS &&
         size >= (UINT)sizeof(ULONG) && router != 0UL)
         return router;
+#else
+    (VOID)router;
+    (VOID)size;
+#endif
 
     if (cfg->gateway != 0UL)
         return cfg->gateway;
@@ -2517,8 +2552,10 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
      * knows nothing about DHCP, and ns_DhcpState[] would keep saying BOUND.  The
      * lease is released rather than abandoned.
      */
+#ifdef AMINETXDUO_DHCP
     if (ns->ns_DhcpCreated)
         (VOID)netstack_interface_dhcp_stop(index, TRUE);
+#endif
 
 #ifdef AMINETXDUO_BPF
     /*
@@ -2634,6 +2671,7 @@ out:
     return rc;
 }
 
+#ifdef AMINETXDUO_DHCP
 static VOID ami_ns_zero(APTR p, ULONG size)
 {
     UBYTE *b = (UBYTE *)p;
@@ -2641,12 +2679,14 @@ static VOID ami_ns_zero(APTR p, ULONG size)
     while (size-- > 0)
         *b++ = 0;
 }
+#endif
 
 
 /*
  * The DHCP client, created on demand.  There can be only one, because there is
  * only one UDP port 68.  Must be called inside a ThreadX bracket.
  */
+#ifdef AMINETXDUO_DHCP
 static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
 {
     UINT status;
@@ -3017,6 +3057,55 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
 
     return AMI_NET_OK;
 }
+#else /* AMINETXDUO_DHCP */
+
+/*
+ * The Roadshow DHCP control calls, with no client under them.  bsdsocket.library
+ * exports every one of these whatever the build, so they answer rather than
+ * vanish: AMI_NET_ERR_STATE is what a caller already gets on a machine whose
+ * interfaces are all static, and netstack_interface_dhcp_state() reports
+ * NOT_STARTED for the same reason.
+ */
+LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
+{
+    (VOID)index;
+    (VOID)requested_address;
+    return AMI_NET_ERR_STATE;
+}
+
+LONG netstack_interface_dhcp_state(UWORD index)
+{
+    (VOID)index;
+    return AMI_NET_ERR_STATE;
+}
+
+LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
+{
+    (VOID)index;
+    (VOID)out;
+    return AMI_NET_ERR_STATE;
+}
+
+UWORD netstack_interface_dhcp_raw_state(UWORD index)
+{
+    (VOID)index;
+    return 0U;                          /* NX_DHCP_STATE_NOT_STARTED */
+}
+
+LONG netstack_interface_dhcp_renew(UWORD index)
+{
+    (VOID)index;
+    return AMI_NET_ERR_STATE;
+}
+
+LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
+{
+    (VOID)index;
+    (VOID)release;
+    return AMI_NET_ERR_STATE;
+}
+
+#endif /* AMINETXDUO_DHCP */
 
 /*
  * Interface names come from file names in DEVS:NetInterfaces and AmigaDOS
@@ -3524,9 +3613,14 @@ static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
 
     if (cfg->iptype == AMI_IPTYPE_DHCP)
     {
+#ifdef AMINETXDUO_DHCP
         rc = netstack_interface_dhcp_start(index, 0UL);
         if (rc != AMI_NET_OK)
             goto rollback;
+#else
+        rc = AMI_NET_ERR_CONFIG;
+        goto rollback;
+#endif
     }
     else if (cfg->iptype == AMI_IPTYPE_LINKLOCAL)
     {
