@@ -96,9 +96,19 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      * variant would still have to fit four extra instructions per longword
      * inside 49 ns/B, and it cannot.
      *
-     * So the 30-37% stands.  It is the price of a device that hands us a
-     * payload pointer at 2 mod 4 and an IP header that has to land on a
-     * longword, and it is not recoverable in software on this CPU.
+     * SO IT IS NOT RECOVERABLE IN SOFTWARE -- AND IT WAS RECOVERED ANYWAY, IN
+     * THE DEVICE.  Everything above is still true of the copy; what stopped
+     * being true is the premise that `from` arrives at 2 mod 4.  Neither
+     * attempt above considered moving the SOURCE, and the Am7990 takes a
+     * byte-granular buffer address: starting the a2065's receive buffers TWO
+     * BYTES IN puts `frame + 14`, which is what this hook is handed, at 0 mod
+     * 4 against a destination already there (lance.c:70).  Measured +3.09% rx,
+     * six alternating rounds.
+     *
+     * So on the a2065 path this copy now runs at the ALIGNED row of the table
+     * above, and the 30-37% is a cost other drivers may still pay rather than
+     * a standing property of the receive path.  Read the table as what a
+     * misaligned source costs, not as what this hook costs today.
      */
     slot->summed = FALSE;
 

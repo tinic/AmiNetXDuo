@@ -585,6 +585,147 @@ char        label[64];
     ck(label, (walk_flags == 0UL) || (walk_flags == want));
 }
 
+/*
+ * The IPv4 fuzz.  THE FAST PATH HAD ONE TEST.
+ *
+ * `v4 clean` was the only fixture in this file that reached the fused IPv4
+ * path at all -- v4_fused counted 1 against 5,250 fused answers, the rest
+ * IPv6 -- and everything the receive path actually runs in production goes
+ * through it.  The three properties are the ones fuzz_one() asserts for IPv6,
+ * for the same reason: this function knows the truth about the frame because
+ * it built it, and never re-derives the accept rule.
+ *
+ * What it varies is exactly what the fused path branches on: header length
+ * with and without options (the 20-byte case is summed in line, anything else
+ * calls out), TCP against UDP, a UDP checksum of zero, a payload length that
+ * is and is not a multiple of four, and whether the frame is corrupt.
+ */
+static void fuzz_v4_one(unsigned long round)
+{
+NX_PACKET   packet;
+UCHAR      *ip = buf4;
+UCHAR      *tp;
+UCHAR       addr[8];
+ULONG       ihl     = ((fz_next() & 1UL) != 0UL) ? 24UL : 20UL;
+ULONG       payload = 20UL + (fz_next() % 61UL);
+UCHAR       proto   = ((fz_next() & 1UL) != 0UL) ? (UCHAR)NX_PROTOCOL_TCP
+                                                 : (UCHAR)NX_PROTOCOL_UDP;
+ULONG       total   = ihl + payload;
+int         corrupt = ((fz_next() % 4UL) == 0UL);
+int         nosum   = (proto == (UCHAR)NX_PROTOCOL_UDP) &&
+                      ((fz_next() % 5UL) == 0UL);
+ULONG       hs = 0;
+ULONG       i;
+ULONG       walk_flags;
+ULONG       fused_flags;
+ULONG       want;
+UINT        walk_drop  = 99;
+UINT        fused_drop = 99;
+USHORT      sum;
+char        label[72];
+
+    memset(buf4, 0, sizeof buf4_store);
+
+    ip[0] = (UCHAR)(0x40U | (UINT)(ihl >> 2));
+    ip[2] = (UCHAR)(total >> 8);
+    ip[3] = (UCHAR)(total & 0xFF);
+    ip[8] = 64;
+    ip[9] = proto;
+    ip[12] = 192; ip[13] = 168; ip[14] = 1; ip[15] = 1;
+    ip[16] = 192; ip[17] = 168; ip[18] = 1; ip[19] = 2;
+
+    /* Options, when there are any: three NOPs and end-of-list, which every
+       reader skips and which changes ihl without changing meaning. */
+    if (ihl > 20UL)
+    {
+        ip[20] = 0x01; ip[21] = 0x01; ip[22] = 0x01; ip[23] = 0x00;
+    }
+
+    for (i = 0; i + 1 < ihl; i += 2)
+        hs += ((ULONG)ip[i] << 8) | ip[i + 1];
+    while ((hs >> 16) != 0UL)
+        hs = (hs & 0xFFFFUL) + (hs >> 16);
+    sum = (USHORT)(~hs & 0xFFFFUL);
+    ip[10] = (UCHAR)(sum >> 8);
+    ip[11] = (UCHAR)(sum & 0xFF);
+
+    tp = buf4 + ihl;
+    fill_tcp(tp, payload);
+
+    if (proto == (UCHAR)NX_PROTOCOL_UDP)
+    {
+        /* A UDP header is source, dest, length, checksum. */
+        tp[4] = (UCHAR)(payload >> 8);
+        tp[5] = (UCHAR)(payload & 0xFF);
+        tp[6] = 0; tp[7] = 0;
+    }
+
+    memcpy(addr, &ip[12], 8);
+    sum = ref_sum(tp, payload, addr, 8, proto);
+
+    if (proto == (UCHAR)NX_PROTOCOL_UDP)
+    {
+        if (nosum)
+        {
+            tp[6] = 0; tp[7] = 0;       /* declining to carry one */
+        }
+        else
+        {
+            tp[6] = (UCHAR)(sum >> 8);
+            tp[7] = (UCHAR)(sum & 0xFF);
+        }
+    }
+    else
+    {
+        tp[16] = (UCHAR)(sum >> 8);
+        tp[17] = (UCHAR)(sum & 0xFF);
+    }
+
+    if (corrupt)
+        tp[payload - 1] = (UCHAR)(tp[payload - 1] ^ 0xFF);
+
+    memset(&packet, 0, sizeof packet);
+    packet.nx_packet_prepend_ptr = buf4;
+    packet.nx_packet_append_ptr  = buf4 + total;
+    packet.nx_packet_length      = total;
+    packet.nx_packet_data_start  = buf4;
+    packet.nx_packet_data_end    = buf4 + 2048;
+    walk_flags = n68k_rx_verify(&packet, &walk_drop);
+
+    memset(&packet, 0, sizeof packet);
+    packet.nx_packet_prepend_ptr = buf4;
+    packet.nx_packet_append_ptr  = buf4 + total;
+    packet.nx_packet_length      = total;
+    packet.nx_packet_data_start  = buf4;
+    packet.nx_packet_data_end    = buf4 + 2048;
+    fused_flags = n68k_rx_verify_sum(&packet, carried_sum(buf4, total), total,
+                                     &fused_drop);
+
+    snprintf(label, sizeof label, "v4 fuzz %lu: entries agree", round);
+    ck(label, walk_flags == fused_flags && walk_drop == fused_drop);
+
+    /* A frame nobody corrupted must not be dropped.  A UDP datagram that
+       declined to carry a checksum is not corrupt whatever was flipped in
+       it: there is nothing to check. */
+    snprintf(label, sizeof label, "v4 fuzz %lu: dropped a good frame", round);
+    ck(label, (walk_drop == NX_FALSE) || (corrupt != 0));
+
+    snprintf(label, sizeof label, "v4 fuzz %lu: cleared a bad frame", round);
+    ck(label, (walk_flags == 0UL) || (corrupt == 0) || nosum);
+
+    want = NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
+           ((proto == (UCHAR)NX_PROTOCOL_TCP)
+                ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
+                : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM);
+
+    /* The header is always sound, so the IPv4 bit is always claimed; the
+       transport bit only when the transport was checked. */
+    snprintf(label, sizeof label, "v4 fuzz %lu: named the protocol", round);
+    ck(label, (walk_flags == want) ||
+              (walk_flags == NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM) ||
+              (walk_flags == 0UL));
+}
+
 int main(void)
 {
 ULONG   frame;
@@ -613,6 +754,16 @@ ULONG   v6_bits = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
     both("v4 length overclaims", buf4, v4_ihl + v4_payload,
          v4_ihl + v4_payload, NX_FALSE,
          NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM);
+
+    {
+        unsigned long r;
+
+        for (r = 0; r < 8000UL; r++)
+            fuzz_v4_one(r);
+
+        printf("%-34s %lu rounds\n", "v4 fuzz", 8000UL);
+    }
+
 
 #ifdef FEATURE_NX_IPV6
 
@@ -873,6 +1024,30 @@ ULONG   v6_bits = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
         printf("v6 chain fuzz                      %lu rounds\n", r);
     }
 #endif
+
+    /*
+     * PROVE THE FAST PATH RAN.  Every comparison above checks the fused answer
+     * against the walking one, and a fused path that silently DECLINED every
+     * frame -- an alignment guard that never passes, a bounds test inverted --
+     * would answer by calling the walk and every one of those comparisons
+     * would pass with nothing tested.  from_copy counts only the frames the
+     * fused path answered itself.
+     */
+    ck("fused path answered frames itself",
+       n68k_rx_verify_stats.from_copy >= 8UL);
+
+    /* v4_fused, and nothing else, moves only on the IPv4 fast path.  ip_ok is
+       no good here -- the ordinary WALK bumps it too, so an assertion on it
+       passes with the fast path switched off entirely, which is exactly what
+       happened the first time this was written.  from_copy is no good either:
+       it counts both families, and v6_ok is not its IPv6 share (the v6 walk
+       bumps v6_ok without from_copy), so the difference underflows. */
+    ck("v4 fused path answered frames itself",
+       n68k_rx_verify_stats.v4_fused >= 4UL);
+
+    printf("fused answers: %lu total, %lu of them IPv4\n",
+           (unsigned long)n68k_rx_verify_stats.from_copy,
+           (unsigned long)n68k_rx_verify_stats.v4_fused);
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
     return failures ? 1 : 0;

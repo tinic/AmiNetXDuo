@@ -136,6 +136,7 @@ typedef struct N68kRxVerifyStats
     ULONG   skip_udp_nosum;     /* UDP declining to carry one               */
     ULONG   from_copy;          /* checked from the copy's own sum          */
     ULONG   v6_ok;              /* of transport_ok, the IPv6 share          */
+    ULONG   v4_fused;           /* IPv4 answered from the carried sum       */
     ULONG   skip_ext;           /* IPv6: the chain could not be walked      */
     ULONG   v6_ext;             /* of v6_ok, those behind an extension hdr  */
 } N68kRxVerifyStats;

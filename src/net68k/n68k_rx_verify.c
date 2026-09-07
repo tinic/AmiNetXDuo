@@ -21,10 +21,47 @@
 
 /* Big-endian reads: the header has not been byte swapped yet.  This runs
    before nx_ipv4_packet_receive(), so a frame is cleared or declined before
-   the stack looks at it. */
+   the stack looks at it.
+
+   Byte at a time, so they are legal at ANY address and on any endianness --
+   the host tier compiles this file.  Where the offset is provably even, use
+   N68K_RDW16/N68K_RDW32 below instead. */
 #define N68K_RD16(p)    ((ULONG)(((ULONG)(p)[0] << 8) | (ULONG)(p)[1]))
 #define N68K_RD32(p)    ((ULONG)(((ULONG)(p)[0] << 24) | ((ULONG)(p)[1] << 16) | \
                                  ((ULONG)(p)[2] << 8)  |  (ULONG)(p)[3]))
+
+/*
+ * THE SAME READS, ONE INSTRUCTION EACH, WHERE THE ADDRESS ALLOWS IT.
+ *
+ * A big-endian machine that can load a word from an even address needs no
+ * assembly at all: the byte macros above cost four loads, three shifts and
+ * three ORs for a longword where a 68000 does it in one or two moves, and
+ * _n68k_rx_verify_sum carries 2.5% of the real-path receive profile for what
+ * is otherwise twenty bytes of arithmetic.
+ *
+ * THE EVENNESS IS NOT AN ASSUMPTION THIS FILE INTRODUCES.  The IPv4 fast path
+ * below already hands `ip` to N68K_SUM_LONGWORDS() as a `const ULONG *`, which
+ * a 68000 answers with an address error unless it is a multiple of four -- so
+ * the path is longword-aligned or it was already broken.  It is: the receive
+ * packet's prepend_ptr is the pool payload plus AMI_SANA2_RX_PAD (2) plus the
+ * 14-byte Ethernet header, which is 16 (lance.c:70).  n68k_rxv_even() states
+ * it anyway and sends anything else to the ordinary byte-at-a-time path,
+ * because a loopback or raw frame does not come from that arithmetic.
+ */
+#if defined(__mc68000__) || defined(__m68k__)
+#define N68K_RDW16(p)   ((ULONG)*(const USHORT *)(const void *)(p))
+#define N68K_RDW32(p)   ((ULONG)*(const ULONG *)(const void *)(p))
+#else
+#define N68K_RDW16(p)   N68K_RD16(p)
+#define N68K_RDW32(p)   N68K_RD32(p)
+#endif
+
+/* Longword-aligned, which is what both of the above need on a 68000: the word
+   form is only ever used at an even offset from this same pointer. */
+static UINT n68k_rxv_even(const UCHAR *p)
+{
+    return ((((ALIGN_TYPE)p) & 3UL) == 0UL) ? NX_TRUE : NX_FALSE;
+}
 
 N68kRxVerifyStats  n68k_rx_verify_stats;
 
@@ -573,11 +610,20 @@ ULONG   acc =  0UL;
 
 #endif /* FEATURE_NX_IPV6 */
 
-/* Fold a 32-bit accumulator to 16 bits, carries wrapped around. */
-static ULONG n68k_rxv_fold(ULONG sum)
+/*
+ * Fold a 32-bit accumulator to 16 bits, carries wrapped around.
+ *
+ * TWO STEPS ARE EXACTLY ENOUGH, so this is branch-free and small enough to
+ * inline -- it was a loop, it did not inline, and it is called FOUR times per
+ * frame on the fast path.  The bound: both halves are at most 0xFFFF, so the
+ * first step is at most 0x1FFFE; the second therefore adds a carry of at most
+ * 1 to a low half of at most 0xFFFE, giving at most 0xFFFF.  A third step
+ * could never change anything, which is why the loop always ran twice.
+ */
+static inline ULONG n68k_rxv_fold(ULONG sum)
 {
-    while ((sum >> 16) != 0UL)
-        sum =  (sum & 0xFFFFUL) + (sum >> 16);
+    sum =  (sum & 0xFFFFUL) + (sum >> 16);
+    sum =  (sum & 0xFFFFUL) + (sum >> 16);
 
     return (sum);
 }
@@ -697,8 +743,16 @@ UINT    offset;
         return (0UL);
     }
 
+    /* Everything below reads words and longwords out of this header, and the
+       sum below hands it over as a `const ULONG *`.  Anything else takes the
+       ordinary path, which reads a byte at a time. */
+    if (n68k_rxv_even(ip) != NX_TRUE)
+    {
+        return (n68k_rx_verify(packet, drop));
+    }
+
     ihl   =  (UINT)((ip[0] & 0x0FU) << 2);
-    total =  N68K_RD16(&ip[2]);
+    total =  N68K_RDW16(&ip[2]);
 
     /* Anything the carried sum cannot describe exactly goes to the ordinary
        path, which re-derives everything from the frame. */
@@ -711,7 +765,7 @@ UINT    offset;
 
     protocol =  (UINT)ip[9];
     payload  =  (UINT)(total - (ULONG)ihl);
-    frag     =  N68K_RD16(&ip[6]);
+    frag     =  N68K_RDW16(&ip[6]);
 
     /* Only TCP and UDP: the others carry no pseudo header, and they are rare
        and short enough that the ordinary path is the right answer. */
@@ -722,13 +776,41 @@ UINT    offset;
     }
 
     if ((protocol == NX_PROTOCOL_UDP) && (payload >= 8U) &&
-        (N68K_RD16(&ip[ihl + 6]) == 0UL))
+        (N68K_RDW16(&ip[ihl + 6]) == 0UL))
     {
         return (n68k_rx_verify(packet, drop));
     }
 
     /* ---- the IPv4 header ------------------------------------------------ */
-    head =  N68K_SUM_LONGWORDS((const ULONG *)ip, (ULONG)ihl >> 2);
+    if (ihl == 20U)
+    {
+        /*
+         * FIVE LONGWORDS, IN LINE.  N68K_SUM_LONGWORDS is an INDIRECT call
+         * through the CPU-dispatch vector (net68k.h:93) into a routine that
+         * saves d2-d7/a2 before it adds anything -- for the twenty bytes that
+         * is every IPv4 header without options, the prologue costs more than
+         * the sum.  Options are rare and keep the call.
+         *
+         * Byte for byte the same arithmetic as n68k_sum_longwords()
+         * (n68k_checksum.c:80): accumulate, and add the carry back around.
+         */
+        const ULONG    *w =  (const ULONG *)(const void *)ip;
+        ULONG           acc =  0UL;
+        UINT            k;
+
+        for (k = 0U; k < 5U; k++)
+        {
+            acc +=  w[k];
+            if (acc < w[k])
+                acc++;                  /* end-around carry */
+        }
+
+        head =  acc;
+    }
+    else
+    {
+        head =  N68K_SUM_LONGWORDS((const ULONG *)ip, (ULONG)ihl >> 2);
+    }
 
     if (n68k_rxv_fold(head) != 0xFFFFUL)
     {
@@ -745,8 +827,8 @@ UINT    offset;
     if (sum < carried)
         sum++;                              /* end-around carry */
 
-    src =  N68K_RD32(&ip[12]);
-    dst =  N68K_RD32(&ip[16]);
+    src =  N68K_RDW32(&ip[12]);
+    dst =  N68K_RDW32(&ip[16]);
 
     sum =  n68k_rxv_fold(sum);
     sum +=  (src >> 16) & 0xFFFFUL;
@@ -769,6 +851,12 @@ UINT    offset;
 
     n68k_rx_verify_stats.transport_ok++;
     n68k_rx_verify_stats.from_copy++;
+
+    /* ONLY here.  Nothing else moves this, which is what makes it usable as
+       proof that the IPv4 fast path ran at all: from_copy counts both
+       families and ip_ok is bumped by the ordinary walk as well, so an
+       assertion on either passes with this path switched off. */
+    n68k_rx_verify_stats.v4_fused++;
 
     return (flags);
 }
