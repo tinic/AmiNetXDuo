@@ -219,9 +219,10 @@ host_test_targets() { # builddir
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
 # 116, plus netdev_ne2000, pool_window, netdev_beginio and perf_stallgaps.
+# 123 with perf_prof_report.
 # Two branches raised this against the same base on the same day; the merge
 # is the SUM of what each added, not the larger of the two numbers.
-HOST_TESTS_EXPECTED=122
+HOST_TESTS_EXPECTED=123
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

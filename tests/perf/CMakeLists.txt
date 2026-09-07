@@ -32,6 +32,16 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME perf_stallgaps
                  COMMAND "${Python3_EXECUTABLE}"
                          "${CMAKE_CURRENT_SOURCE_DIR}/test_stallgaps.py")
+
+        # prof-report.py had no coverage at all, which is how it shipped a
+        # symbol table that put every symbol of an object at every address the
+        # object contributed to.  The profile named a rare trim path at 2.4%
+        # and left the per-segment function out; the campaign chased duplicate
+        # data on the strength of it.  Hermetic -- a synthetic map and a
+        # stubbed nm, no toolchain and no build.
+        add_test(NAME perf_prof_report
+                 COMMAND "${Python3_EXECUTABLE}"
+                         "${CMAKE_CURRENT_SOURCE_DIR}/test_prof_report.py")
     endif()
 endif()
 
