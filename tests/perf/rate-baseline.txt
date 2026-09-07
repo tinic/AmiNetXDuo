@@ -4,6 +4,31 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# THE FITZ WRITE BASELINE, 2026-09-07.  Four sittings at 50570c3e, `-r 3`
+# each, one build: 2809, 2817, 2817, 2819 -- a spread of 0.36 per cent.  The
+# lowest fitz_write this tree has produced across every sitting today, fourteen
+# of them, is 2797.
+#
+#     fitz-write 2797
+#
+# THE LOWEST OBSERVED, not the median, for the same reason the receive and
+# transmit numbers above take the lower of two: a floor set above what the tree
+# reproduces is a gate that reds on an unchanged main, and this file's history
+# is a list of raises that had to be defended afterwards.
+#
+# run-fitzbench.sh -W auto reads it and applies the rate gate's 12 per cent,
+# giving a floor of 2461.  That is far below the 0.36 per cent this figure
+# actually moves, which is deliberate: the gate exists to catch a regression
+# that gives back a campaign, not to police noise.  The +6.0 per cent the
+# argument-checking flip earned here is twenty times the sitting spread and
+# would be caught at a much tighter tolerance -- but tightening it is how a
+# gate starts crying wolf, and this file already says so about the rate one.
+#
+# THERE IS NO fitz-read LINE AND THERE SHOULD NOT BE: twelve sittings put its
+# per-arm spread at 9.5 and 12.7 per cent, with -0.3, -5.6 and +13.5 per cent
+# measured on the SAME two builds in three consecutive passes.
+#
+#
 # THE DAY ON THE APPLICATION WORKLOAD, 2026-09-07: fitz_write +5.9 per cent,
 # fitz_read NOT MEASURABLE.  d8f77786 against 5622fbde, TWELVE sittings -- six
 # an arm, three orders (A B B A, B A A B, A B A B), md5s 010c55093e94 and
@@ -521,3 +546,4 @@
 # here -- the first of those two is in no sense a regression.
 tcp-rx 6126568
 tcp-tx 3287723
+fitz-write 2797

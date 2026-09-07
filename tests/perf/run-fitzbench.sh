@@ -69,7 +69,9 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:W:" opt; do
         w) LOSSCAP=1 ;;
         l) LOSSCAP=1; MAXLOSS="$OPTARG" ;;
         L) LOSSCAP=1; MAXEFF="$OPTARG" ;;
-        # -W <kbs>: fail if fitz_write comes back below it.
+        # -W <kbs>|auto: fail if fitz_write comes back below it.
+        # `auto` takes the floor from tests/perf/rate-baseline.txt at the
+        # rate gate's 12 per cent.
         #
         # THE ONE FIGURE THIS HARNESS PRODUCES THAT A GATE CAN USE.  Twelve
         # sittings on 2026-09-07 put fitz_write's per-arm spread at 0.68 and
@@ -464,6 +466,27 @@ printf '%s\n' "$FIGURES"
 echo "    NOTE fitz_write resolves ~1%; fitz_read swings ~10% between sittings"
 echo "         (12 sittings, 2026-09-07).  Do not read a fitz_read delta of"
 echo "         less than about 15% as a result, in either direction."
+
+if [ "$MINWRITE" = auto ]; then
+    # THE FLOOR LIVES IN ONE PLACE OR IT ROTS.  A number typed into whatever
+    # shell invocation happens to run this is a number nobody updates when the
+    # tree moves, and tests/perf/rate-baseline.txt is already where this tree
+    # keeps the rates a gate compares against.
+    #
+    # The rate gate's 12 per cent, for the reason stage_rate gives: a floor is
+    # there to catch a regression that gives back a campaign, not to police
+    # noise.  fitz_write moves 0.36 per cent between sittings, so 12 is thirty
+    # times the spread -- and the +6.0 the argument-checking flip earned would
+    # still be caught many times over if it were given back.
+    base=$(sed -n 's/^fitz-write  *//p' "$ROOT/tests/perf/rate-baseline.txt" \
+           | head -1)
+    if [ -z "$base" ]; then
+        echo "fitz_write=FAIL reason=no_baseline file=tests/perf/rate-baseline.txt" >&2
+        exit 1
+    fi
+    MINWRITE=$(( base * 88 / 100 ))
+    echo "    floor from rate-baseline.txt: fitz-write $base, 12% -> $MINWRITE"
+fi
 
 if [ -n "$MINWRITE" ]; then
     got=$(printf '%s\n' "$FIGURES" | sed -n 's/^fitz_write_kbs=//p' | head -1)
