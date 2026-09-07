@@ -355,6 +355,28 @@ echo "==> peers up on $PORT_TCP $PORT_UDP $PORT_SIZE, nothing on $PORT_DEAD"
 
 # --------------------------------------------------------------------- run ---
 
+#
+# THE PREVIOUS RUN'S TRANSCRIPT IS NOT THIS RUN'S RESULT.
+#
+# $REPORT is build/amiberry-testhd-$TAG/tools.txt, written by the guest into a
+# hard-drive directory that PERSISTS between runs.  When the boot fails the
+# check below is `if [ ! -f "$REPORT" ]` -- and the file is still there from
+# the last boot that worked, so the script sails past it and asserts against a
+# transcript from another build, another hour, another commit.
+#
+# THAT IS NOT A HYPOTHETICAL.  An A/B of 36 rounds returned bit-identical rates
+# in every round of every pass -- 5,886,527 nine times, then nine more --
+# because amiberry answered "No boot ROM" in three and a half seconds each
+# time and all thirty-six rounds re-read one stale tools.txt.  Same byte count,
+# same millisecond count, same EPHEMERAL PORT (53352) in every "round", which
+# is the tell: a fresh connection cannot reuse one.
+#
+# It is the stale-emulator rule in RIG HYGIENE, one artefact along: a leftover
+# read as a measurement.  Delete it, and a failed boot then reports "the guest
+# wrote no $REPORT" the way it was always meant to.
+#
+rm -f "$REPORT"
+
 set +e
 if [ -n "$IFACE" ]; then
     echo "==> booting $MODEL under Amiberry, $BOARD bridged on $IFACE"

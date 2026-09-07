@@ -38,6 +38,21 @@ set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
+#
+# THE RIG'S ENVIRONMENT, BECAUSE WITHOUT IT AMIBERRY HAS NO ROM.
+#
+# Every hand-rolled version of this script began `. ~/amiga-assets/env.sh` and
+# this one did not, so amiberry answered "No boot ROM" in three and a half
+# seconds a round -- and run-iperf.sh then re-read a tools.txt from hours
+# earlier and reported ITS rate as the round's.  Thirty-six rounds returned
+# bit-identical numbers before the ephemeral port gave it away.  Both halves
+# are fixed: run-iperf.sh deletes the transcript before booting, and this
+# sources the environment the rig keeps for it.
+#
+AB_ENV="${AMINETXDUO_AB_ENV:-$HOME/amiga-assets/env.sh}"
+# shellcheck disable=SC1090
+[ ! -r "$AB_ENV" ] || . "$AB_ENV"
+
 BASE_REF=""
 HEAD_REF=""
 ROUNDS="${AMINETXDUO_RATE_ROUNDS:-5}"
@@ -177,6 +192,19 @@ run_arm() {                             # $1 dir  $2 label  $3 pass  $4 position
          "rx=$(median_of < "$base.rx") tx=$(median_of < "$base.tx")"
     [ "$got" = "$ROUNDS" ] ||
         echo "  $((ROUNDS - got)) round(s) produced no rate line at all"
+
+    #
+    # IDENTICAL ROUNDS ARE A DEFECT REPORT, NOT A CLEAN MEASUREMENT.  A boot
+    # that fails and a transcript that survives it give the same number every
+    # time; that is how 36 rounds of this came back bit-identical.  A rig where
+    # every round really does agree to the bit would rather be told twice than
+    # have the next reader take a stale answer for a quiet one.
+    #
+    if [ "$got" -gt 2 ] && [ "$(sort -u "$base.rx" | grep -c .)" = 1 ]; then
+        echo "  WARNING: all $got rounds returned the SAME rate to the bit."
+        echo "  Check that each round actually booted -- a failed boot used to"
+        echo "  re-read the previous run's transcript."
+    fi
 }
 
 p=1
