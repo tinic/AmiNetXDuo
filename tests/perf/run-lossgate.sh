@@ -57,6 +57,7 @@ REPS=3
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 TAG="${AMINETXDUO_RUN_TAG:-lossgate}"
 RECORD=0
+MEASURE=0
 REPS_GIVEN=0
 BASELINE="$ROOT/tests/perf/lossgate-baseline.txt"
 KB=4096
@@ -69,8 +70,8 @@ TXRAND="${AMINETXDUO_LOSSGATE_TXRAND:-determ}"
 usage() {
     cat <<'EOF'
 usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
-                                  [-b BUILDDIR] [-k KB] [-T TAG] [-B] [-f FILE]
-                                  [-D rx|tx|both]
+                                  [-b BUILDDIR] [-k KB] [-T TAG] [-B] [-M]
+                                  [-f FILE] [-D rx|tx|both]
 
   -H  the peer, over ssh.  A THIRD machine: not this one and not the host the
       emulator runs on.
@@ -84,11 +85,13 @@ usage: tests/perf/run-lossgate.sh -H user@host -A addr [-l PERCENT] [-r REPS]
   -r  repetitions; the median is compared (default 3)
   -k  transfer size in KB (default 4096)
   -B  record the current run as the new baseline
+  -M  measure only: print the medians, read no baseline and write none.  This
+      is the A/B mode; -d 50 -l 0 is the link that resolves half a per cent
   -f  baseline file (default tests/perf/lossgate-baseline.txt)
 EOF
 }
 
-while getopts "H:A:l:d:j:o:r:b:k:T:Bf:D:h" opt; do
+while getopts "H:A:l:d:j:o:r:b:k:T:Bf:D:hM" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -102,6 +105,7 @@ while getopts "H:A:l:d:j:o:r:b:k:T:Bf:D:h" opt; do
         k) KB="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
         B) RECORD=1 ;;
+        M) MEASURE=1 ;;
         f) BASELINE="$OPTARG" ;;
         h) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
@@ -127,7 +131,27 @@ if [ "$DIR" = "tx" ] && [ "$IMPAIR" != "delay 0ms jitter 0ms reorder 0%" ]; then
     exit 2
 fi
 
-if [ "$RECORD" = 0 ]; then
+#
+# -M IS FOR AN A/B, AND IT EXISTS BECAUSE THE REFUSAL BELOW COSTS A RIG HOUR.
+#
+# The comparison arm of a change is not a gate: it wants the medians for two
+# builds on the SAME link, whatever link that is.  `-d 50 -l 0` is the link
+# that resolves an effect of half a per cent -- read_kbs comes out with an
+# interquartile spread of 0.2-1.1% against iperf's 5% -- and the baseline was
+# recorded at 5% loss with no delay, so every one of those runs was refused
+# with "those are different links" before it measured anything.  The way round
+# it was -B against a scratch file, which writes a baseline nobody wants and
+# still refuses when the spread is wide.
+#
+# -M runs the arms, prints the medians, and gates nothing.  It does not read
+# the baseline and it does not write one.
+#
+if [ "$MEASURE" = 1 ] && [ "$RECORD" = 1 ]; then
+    echo "-M and -B are different jobs: one measures, one records." >&2
+    exit 2
+fi
+
+if [ "$RECORD" = 0 ] && [ "$MEASURE" = 0 ]; then
     [ -f "$BASELINE" ] ||
         { echo "no baseline at $BASELINE -- record one with -B" >&2; exit 2; }
     WANT=$(sed -n 's/^# Recorded with \([0-9.]*\)% peer-to-guest loss, \([0-9]*\) KB, \([0-9]*\) reps.*/\1 \2 \3/p' \
@@ -381,6 +405,15 @@ awk '{ v[$2] = v[$2] " " $3 }
             printf "%s %.1f %.1f %d %.1f\n", k, med, spread, n, range
         }
      }' "$OUT/samples.txt" | sort > "$OUT/median.txt"
+
+if [ "$MEASURE" = "1" ]; then
+    echo "==> measure only: no baseline read, no baseline written"
+    printf '%-14s %10s %7s %4s %7s\n' name median iqr% n range%
+    while read -r name med spread n range; do
+        printf '%-14s %10s %6s%% %4s %6s%%\n' "$name" "$med" "$spread" "$n" "$range"
+    done < "$OUT/median.txt"
+    exit 0
+fi
 
 if [ "$RECORD" = "1" ]; then
     [ "$ARMS_FAILED" = "0" ] || {
