@@ -1445,6 +1445,9 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_Repost.nbl_Count = ami_budget.repost.count;
             out->nrb_Repost.nbl_Sum   = ami_budget.repost.sum;
             out->nrb_Repost.nbl_Max   = ami_budget.repost.max;
+            out->nrb_Verify.nbl_Count = ami_budget.verify.count;
+            out->nrb_Verify.nbl_Sum   = ami_budget.verify.sum;
+            out->nrb_Verify.nbl_Max   = ami_budget.verify.max;
             out->nrb_RxDirect         = ami_budget.rx_direct;
             out->nrb_RxFallback       = ami_budget.rx_fallback;
             out->nrb_HoldTotal        = ami_budget.hold_total;
@@ -1489,6 +1492,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                     out->nrb_Stuff.nbl_Hist[i]  = ami_budget.stuff.hist[i];
                     out->nrb_Post.nbl_Hist[i]   = ami_budget.post.hist[i];
                     out->nrb_Repost.nbl_Hist[i] = ami_budget.repost.hist[i];
+                    out->nrb_Verify.nbl_Hist[i] = ami_budget.verify.hist[i];
                 }
             }
 #endif

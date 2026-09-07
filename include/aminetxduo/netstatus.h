@@ -737,6 +737,7 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Reap;       /* TX completion reap walk           */
     NetStatusBudgetLeg  nrb_Stuff;      /* slot claim + framing, to BeginIO  */
     NetStatusBudgetLeg  nrb_Repost;     /* rx re-arm: allocate, arm, BeginIO */
+    NetStatusBudgetLeg  nrb_Verify;     /* n68k_rx_verify_sum(), ours        */
     NetStatusBudgetLeg  nrb_Post;       /* BeginIO enter -> return (the copy
                                            hook and FIFO stuffing run inside) */
     /* The direct-completion fork (AMINETXDUO_RX_DIRECT_COMPLETE): recv()

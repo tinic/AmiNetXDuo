@@ -544,11 +544,30 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
              * was doing.  A slot that did not sum (misaligned, or no slot at
              * all) passes zero and the verifier walks.
              */
+#ifdef AMINETXDUO_RXPROBE
+            {
+                /*
+                 * Both entries, because which one runs is the question the
+                 * from_copy counter answers and this leg must not depend on
+                 * the answer.  See the note beside AmiBudgetLeg verify.
+                 */
+                ULONG vt0 = ami_budget_clock();
+
+                if ((sum != NULL) && (sum->summed != FALSE))
+                    caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
+                                              &drop);
+                else
+                    caps = n68k_rx_verify(packet, &drop);
+
+                ami_budget_verify(ami_budget_clock() - vt0);
+            }
+#else
             if ((sum != NULL) && (sum->summed != FALSE))
                 caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
                                           &drop);
             else
                 caps = n68k_rx_verify(packet, &drop);
+#endif
 
             if (drop != NX_FALSE)
             {

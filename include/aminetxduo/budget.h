@@ -93,6 +93,23 @@ typedef struct AmiBudget
      * hundred the way `hand` split the device's quarter-millisecond.
      */
     AmiBudgetLeg    repost;         /* rx re-arm: allocate, arm, BeginIO   */
+    /*
+     * THE ONLY OURS-BLOCK ON RECEIVE STILL OPEN, AND IT HAS NEVER BEEN TIMED.
+     *
+     * `deliver` is 815 us and `settle` -- everything from the IP dispatch to
+     * the receive notify, which is NetX -- is 465.  The 350 us between them is
+     * ours: n68k_rx_verify_sum(), the ethertype read, and what
+     * _nx_ip_packet_receive() does before it reaches TCP.  The wire profile
+     * puts _n68k_rx_verify_sum at 3.1%, which at this rig's frame rate is
+     * about 91 us a frame -- an order more than its forty-odd operations and
+     * one twenty-byte sum can account for, and nothing has ever measured it
+     * directly to say which of us is wrong.
+     *
+     * The leg brackets the verify call alone.  deliver - settle - verify is
+     * then the dispatch and IP validation, and the 350 splits in two the way
+     * `hand` split the device's quarter-millisecond.
+     */
+    AmiBudgetLeg    verify;         /* n68k_rx_verify_sum() / _verify()    */
 
     /* Which side of the direct-completion fork a receive took.  Plain
        counters, not legs: they answer coverage, not duration. */
@@ -133,6 +150,7 @@ ULONG ami_budget_clock(VOID);
 
 VOID ami_budget_drain(ULONG dt);
 VOID ami_budget_repost(ULONG dt);
+VOID ami_budget_verify(ULONG dt);
 VOID ami_budget_baton(ULONG dt);
 VOID ami_budget_deliver(ULONG now);
 VOID ami_budget_pickup(ULONG now);

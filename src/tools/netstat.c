@@ -500,6 +500,8 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("repost, rx re-arm to return ", &b->nrb_Repost,
                     b->nrb_EClockRate);
+    show_budget_leg("verify, rx_verify_sum alone ", &b->nrb_Verify,
+                    b->nrb_EClockRate);
 
     /* Coverage of the direct-completion fork, not a duration: recv() requests
        completed in place against packets the blocking dequeue fetched. */

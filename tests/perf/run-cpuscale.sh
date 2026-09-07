@@ -44,8 +44,15 @@
 # Mbit/s over emulated 10 Mbit Ethernet, so the bridge does not enforce wire
 # speed and nothing is being clipped at 10.
 #
-# The fast arm is the quieter instrument, which is worth knowing on its own:
-# 0.05% spread across three rounds against the base arm's 4.30%.
+# The fast arm is quieter, and the size of that has to be quoted carefully.
+# WITHIN ONE INVOCATION OF ONE ARM -- same build, same tag, three rounds -- it
+# spread 0.05% against the base arm's 4.30%.  ACROSS AN A/B it does not: two
+# builds in two worktrees, alternated, three rounds each at multiplier 16,
+# spread 0.62% and 1.31%.  Build, tag and worktree carry variance of their own
+# and the multiplier does not remove it.
+#
+# So: 4.30% -> about 1%, a factor of four, not eighty.  Good enough to resolve
+# an effect of two or three per cent and not one of a few tenths.
 #
 # cpu_multiplier goes in through AMINETXDUO_AMIBERRY_EXTRA (amiberry-run.sh:552)
 # rather than -k, because run-iperf.sh owns the amiberry-run.sh invocation.

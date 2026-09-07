@@ -55,6 +55,11 @@ VOID ami_budget_repost(ULONG dt)
     ami_budget_leg(&ami_budget.repost, dt);
 }
 
+VOID ami_budget_verify(ULONG dt)
+{
+    ami_budget_leg(&ami_budget.verify, dt);
+}
+
 VOID ami_budget_deliver(ULONG now)
 {
     ami_budget.deliver_at = now;
