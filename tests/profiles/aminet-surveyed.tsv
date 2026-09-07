@@ -125,3 +125,42 @@
 /comm/dlg/food118.lha	packed	cruncher
 /comm/dlg/keirsey.lha	packed	cruncher
 /comm/dlg/upload1.lha	packed	cruncher
+#
+# 400-archive pass, 2026-09-07, archives 1561-1960 -- the rest of comm/fido and
+# all of comm/irc.  THE YIELD ROW NEEDED CORRECTING AFTER THIS ONE: 328 of 400
+# barren, 82 per cent against 91-93.5 on the four passes before it, and 16
+# attributed binaries against 1.  The barren fraction is a property of the
+# DRAWER, not of comm/ -- comm/irc is dense and comm/dlg is empty.
+#
+# AND THE IXEMUL SHARE IS THE OTHER HALF OF THE STORY: 34 of 400 archives here
+# are ixemul-hosted -- every IRC DAEMON in the corpus (UnrealIRCd, epic4,
+# eggdrop, bitlbee x4, BitchX, IRCServices, AmIRCD) -- and a vector scan sees
+# nothing in any of them.  The server side of comm/irc is invisible to this
+# method, not absent from it.
+#
+# 25 distinct vectors across the 16 attributed binaries and NOT ONE BREAKS
+# MICRO: no ObtainSocket, no ReleaseSocket, no SOCK_RAW anywhere.  Only
+# gethostbyname, gethostbyaddr and gethostname degrade to hosts-only.  The
+# first slice where micro itself is clean apart from names -- IRC clients are
+# pure client-side socket users.
+# BULK	328	no bsdsocket binary in the archive
+# BULK	30	lost to download or extract failure, not examined
+# BULK	22	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	6	packed by a cruncher
+# BULK	34	ixemul-hosted, invisible to a vector scan -- the IRC daemons
+/comm/irc/ChatBox1_164.lha	attributed	ChatBox, 13 vectors including the whole Inet_ address quartet, from 1253 raw jsr d16(a6)
+/comm/irc/DwarfxNW.lha	attributed	MiniDrop, 14 vectors -- accept, bind, listen AND connect, so it is client and server at once
+/comm/irc/BlackIRC.lha	attributed	BlackIRCDCCRcv 3, BlackIRCDCCSrv 8, AmVideoConfD 13; re-confirmed against the earlier hand-verified pass
+/comm/irc/BlackIRC-FW.lha	attributed	the same three binaries in the firewall build, identical vector sets
+/comm/irc/CCTCPv66.lha	attributed	FTPGet, 11 vectors, getservbyname
+/comm/irc/KuangEleven25.lha	attributed	Kuang Eleven 2.5
+/comm/irc/KuangEleven29.lha	attributed	Kuang Eleven 2.9
+/comm/irc/amirc_362_68000.lha	attributed	AmIRC 3.62, 68000 build
+/comm/irc/apartee-0.8.1.lha	attributed	apartee
+/comm/irc/FloodHunter.lha	attributed	FloodHunter
+/comm/irc/Henry.lha	attributed	Henry
+/comm/irc/Ilona.lha	attributed	Ilona
+/comm/irc/RexxServ.lha	attributed	RexxServ
+/comm/irc/dns.lha	attributed	dns
+/comm/fido/crashedit_aos.lha	attributed	crashedit, 7 vectors, a FidoNet node-list editor that fetches over TCP
+/comm/fido/fidoblitz.lha	attributed	fidoblitz
