@@ -147,6 +147,62 @@ extern VOID cal_movem (APTR dst, APTR src, ULONG longs, ULONG reps);
 #define K_WRITE     7
 #define K_M2M       8
 #define K_MOVEM     9
+#define K_CHIPREAD  10
+#define K_INTENA    11
+#define K_FORBID    12
+
+/*
+ * WHAT THE EMULATOR CHARGES FOR TOUCHING SOMETHING THAT IS NOT MEMORY.
+ *
+ * This campaign has been misled twice by assuming an access is cheap because
+ * it is one instruction.  NETDEV_TIME's own self-calibration put a VHPOSR read
+ * at 4.9 US -- against an ADD.L at a few nanoseconds -- which made every span
+ * it measured useless and was only noticed because the report prints its own
+ * probe cost.  The receive path takes one Disable()/Enable() pair per frame in
+ * netdev_queue_read() (netdev_cmds.c:299), and nothing here knew what that
+ * costs.
+ *
+ * These are C rather than kernels in cpucal.S because the per-rep cost is
+ * microseconds: the loop is noise beside the body, and Disable() needs a6 the
+ * compiler is already managing.
+ */
+static volatile UWORD c_chip_sink;
+
+static VOID cal_chipread(ULONG reps)
+{
+volatile const UWORD   *vh = (volatile const UWORD *)0xdff006UL;   /* VHPOSR */
+ULONG                   i;
+UWORD                   acc = 0U;
+
+    for (i = 0UL; i < reps; i++)
+        acc = (UWORD)(acc + *vh);
+
+    c_chip_sink = acc;
+}
+
+static VOID cal_intena(ULONG reps)
+{
+ULONG   i;
+
+    /* Each pair re-enables, so interrupts are serviced between iterations and
+       a long loop starves nothing. */
+    for (i = 0UL; i < reps; i++)
+    {
+        Disable();
+        Enable();
+    }
+}
+
+static VOID cal_forbid(ULONG reps)
+{
+ULONG   i;
+
+    for (i = 0UL; i < reps; i++)
+    {
+        Forbid();
+        Permit();
+    }
+}
 
 static APTR     c_buf_a;
 static APTR     c_buf_b;
@@ -166,6 +222,9 @@ static VOID c_run(ULONG kind, ULONG reps)
     case K_WRITE:  cal_write(c_buf_a, c_window, reps);               break;
     case K_M2M:    cal_m2m(c_buf_a, c_buf_b, c_window, reps);        break;
     case K_MOVEM:  cal_movem(c_buf_a, c_buf_b, c_window, reps);      break;
+    case K_CHIPREAD: cal_chipread(reps);                             break;
+    case K_INTENA:   cal_intena(reps);                               break;
+    case K_FORBID:   cal_forbid(reps);                               break;
     default:                                                         break;
     }
 }
@@ -259,6 +318,25 @@ ULONG   ratio_x100;
           (LONG)((ratio_x100 * 2UL) / 100UL),
           (LONG)((ratio_x100 * 2UL) % 100UL),
           (LONG)real_020, (LONG)real_030);
+}
+
+/*
+ * The I/O kernels, in nanoseconds and in ADD.L units.  No "real 68020 cycles"
+ * column: what these cost on silicon is a bus property and what they cost here
+ * is an emulator property, and the whole point is that the second is not the
+ * first.
+ */
+static VOID c_print_io(const char *what, ULONG kind)
+{
+ULONG   reps = 0UL;
+ULONG   raw  = c_measure_ps(kind, 16UL, &reps);
+ULONG   ps   = (raw > c_empty_ps) ? (raw - c_empty_ps) : 0UL;
+ULONG   adds = (c_add_ps != 0UL) ? (ps / c_add_ps) : 0UL;
+
+    c_log("  %-22s %6ld.%03ld us  = %6ld ADD.L",
+          (LONG)what,
+          (LONG)(ps / 1000000UL), (LONG)((ps / 1000UL) % 1000UL),
+          (LONG)adds);
 }
 
 /* Sweeps c_window longwords per rep, rounded down to the 16-longword inner
@@ -380,6 +458,12 @@ ULONG   reps;
     c_print_reg("ADDX.L Dn,Dm",   K_ADDX,    2UL,  2UL);
     c_print_reg("MULU.L Dn,Dm",   K_MULU,   43UL, 44UL);
     c_print_reg("MULU.L Dn,Dh:Dl",K_MULU64, 45UL, 44UL);
+
+    c_log("");
+    c_log("what the emulator charges for a NON-MEMORY access:");
+    c_print_io("VHPOSR read",          K_CHIPREAD);
+    c_print_io("Disable()/Enable()",   K_INTENA);
+    c_print_io("Forbid()/Permit()",    K_FORBID);
 
     if (c_add_ps != 0UL)
     {
