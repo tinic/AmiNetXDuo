@@ -4,6 +4,30 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# NO EFFECT, 2026-09-07: 1bbb3803, the device writing the link header.  Four
+# sittings, P Q Q P, five rounds each, distinct md5s (7d83079fd4d9 /
+# d4c48e5993c7):
+#
+#     arm                  sitting 1   sitting 2   median
+#     P  da7899fb before   6,083,342   6,285,200   6,184,271
+#     Q  1bbb3803 after    6,171,162   6,184,355   6,177,759
+#
+#     -0.11 per cent.  The rig cannot see it.
+#
+# The change is kept anyway, on the same footing as the capture filter: it
+# provably removes four six-byte moves and a word per received frame, the
+# netdev test asserts both halves of the contract, and a change that removes
+# work does not become wrong because an instrument cannot resolve it.  What it
+# does not get is a number.
+#
+# AND THIS SITTING WAS NOISIER THAN THE NULL CONTROL SAYS THE RIG IS.  P's two
+# sittings span 3.3 per cent -- 6,083,342 against 6,285,200, the highest
+# receive median this tree has ever produced -- while Q's agree to 0.21.  The
+# 0.90 per cent floor was measured in a quiet hour and is a FLOOR, not a
+# ceiling: an arm whose two sittings disagree by more than that has not
+# measured anything, whichever way the difference points.
+#
+#
 # END TO END, 2026-09-07: the day's three wins measured TOGETHER, which is the
 # only honest way to quote them as one number.  d8f77786 (the day's first
 # commit) against 4b1747ba, four sittings A B B A, five rounds each, distinct
