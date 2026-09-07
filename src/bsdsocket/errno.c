@@ -10,6 +10,8 @@
 
 #include "bsdsocket_vectors.h"
 
+#include "aminetxduo/syslog_level.h"
+
 #include "aminetxduo/version.h"
 
 #ifdef AMINETXDUO_BPF
@@ -285,6 +287,11 @@ LONG bsd_Errno(register struct AmiSocketBase *SocketBase __asm("a6"))
     return SocketBase->sb_Errno;
 }
 
+_Static_assert(AMI_SYSLOG_LEVEL_ERROR == AMI_LOG_ERROR &&
+               AMI_SYSLOG_LEVEL_WARN  == AMI_LOG_WARN  &&
+               AMI_SYSLOG_LEVEL_INFO  == AMI_LOG_INFO,
+               "syslog_level.h repeats compat.h's levels and must match");
+
 /*
  * vsyslog(), LVO -0x102.  It was bsd_enosys until now, and the survey of Aminet
  * daemons is what found it: telnetd calls it 4 times, lpd 8, AmiFTPd 28 and
@@ -308,25 +315,10 @@ VOID bsd_vsyslog(register ULONG priority     __asm("d0"),
                  register APTR args           __asm("a1"),
                  register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    int level = AMI_LOG_INFO;
-
     if (SocketBase == NULL || format == NULL)
         return;
 
-    switch (priority & 7UL)
-    {
-    case 0: case 1: case 2: case 3:     /* EMERG..ERR   */
-        level = AMI_LOG_ERROR;
-        break;
-    case 4:                             /* WARNING      */
-        level = AMI_LOG_WARN;
-        break;
-    default:                            /* NOTICE..DEBUG*/
-        level = AMI_LOG_INFO;
-        break;
-    }
-
-    ami_log_raw(level, (const char *)SocketBase->sb_LogTag,
+    ami_log_raw(ami_syslog_level(priority), (const char *)SocketBase->sb_LogTag,
                 (const char *)format, args);
 }
 

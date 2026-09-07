@@ -1,4 +1,4 @@
-add_library(aminetxduo_common STATIC compat.c ami_diag.c crashguard.c
+add_library(aminetxduo_common STATIC compat.c ami_diag.c ami_syslog_level.c crashguard.c
                                      ami_random.c alloccensus.c events.c budget.c)
 target_include_directories(aminetxduo_common PUBLIC ${AMINETXDUO_CORE_INCLUDES})
 target_link_libraries(aminetxduo_common PUBLIC threadx)

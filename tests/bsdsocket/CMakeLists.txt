@@ -42,6 +42,20 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME inet_conversions COMMAND test_inet)
 
+    # ami_syslog_level(), the vsyslog severity arithmetic.  BSD syslog.h packs
+    # facility and severity into one value and only the low three bits are the
+    # severity; a daemon logging LOG_LOCAL0|LOG_ERR sends 131, which read whole
+    # is not a severity at all.  The mapping lives in a pure file of its own
+    # because errno.c reaches <aminetxduo/bpf.h>, whose struct if_nameindex
+    # collides with the host's <net/if.h>.
+    add_executable(test_vsyslog host/test_vsyslog_host.c
+                                "${CMAKE_SOURCE_DIR}/src/common/ami_syslog_level.c")
+
+    target_include_directories(test_vsyslog PRIVATE
+        "${CMAKE_SOURCE_DIR}/include")
+
+    add_test(NAME vsyslog_severity COMMAND test_vsyslog)
+
     # routing.c, for ChangeRouteTagList's grammar and its refusals.  The four
     # NetX Duo entry points it uses are stubbed in the test rather than linked;
     # the header of test_route_host.c says what each stub reproduces and from

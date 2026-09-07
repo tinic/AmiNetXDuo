@@ -39,3 +39,8 @@
 /comm/tcp/FTP4ALL226a.lha	rejected	ixemul.library v47 port; all socket work via ixemul LVOs
 /comm/www/GetURL-1.06.lha	rejected	ARexx script, no binary
 /comm/mail/MailDemon4_11.lha	rejected	no bsdsocket string in any binary
+/comm/www/HTTPResume.lha	attributed	10 LVOs, SocketBase a4+20560 via a SAS/C 4EF9 veneer table that must be FOLLOWED (opposite of AWeb's, which must not be); hands SocketBase to AmiSSL by tag, so that surface is invisible here
+/comm/irc/WookieChat2.11_OS3.lha	attributed	18 LVOs, newest 68k IRC client in the corpus; micro degraded on gethostbyname only
+/comm/irc/BlackIRC.lha	attributed	6 network binaries: main 10 LVOs, DCCSrv 10, DCCRcv 5, IdentD 9, AmVideoConf 9, AmVideoConfD 14; the four helpers are fully ok on every profile
+/comm/www/wget-1.11.4-amigaos.lha	rejected	ixemul-hosted; zero occurrences of the byte string bsdsocket
+/comm/www/httpget.lha	rejected	ixemul-hosted; same
