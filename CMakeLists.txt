@@ -519,6 +519,21 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# getaddrinfo(), getnameinfo(), freeaddrinfo() and gai_strerror(): POSIX's
+# protocol-independent name lookup.  Four vectors and no caller inside the
+# library, which is what makes it separable at all.
+#
+# Off, all four answer through the vector table as usual -- getaddrinfo() and
+# getnameinfo() with EAI_NONAME, the same answer netstack_dns_off.c gives for
+# the same reason, and a value every caller already handles because a name that
+# does not resolve is the ordinary outcome they are written for.
+# A program that predates the API uses gethostbyname(), which is in
+# resolver.c and is not touched by this.
+option(AMINETXDUO_ADDRINFO "Build getaddrinfo/getnameinfo" ON)
+if(AMINETXDUO_ADDRINFO)
+    add_compile_definitions(AMINETXDUO_ADDRINFO)
+endif()
+
 # GetNetworkStatistics() rides the same option: 4.4BSD's ipstat/tcpstat/
 # udpstat/icmpstat is a report too, and an option each would be two names for
 # one decision.
