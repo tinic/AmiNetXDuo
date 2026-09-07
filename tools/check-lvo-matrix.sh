@@ -180,14 +180,18 @@ if not __import__('os').path.exists(ev):
 led='tests/profiles/aminet-surveyed.tsv'
 if not __import__('os').path.exists(led):
     print("lvo_matrix=FAIL reason=no_surveyed_ledger"); sys.exit(1)
-corpus=None; seen=[]
+corpus=None; seen=[]; exhaustive={}
 for l in open(led):
     if l.startswith('# CORPUS'):
         try: corpus=int(l.split('\t')[1])
         except Exception: pass
         continue
     if l.startswith('#') or not l.strip(): continue
-    seen.append(l.split('\t')[0])
+    f=l.rstrip('\n').split('\t')
+    seen.append(f[0])
+    if len(f)>1 and f[1]=='attributed':
+        exhaustive[f[0].split('/')[-1].replace('.lha','')]=True
+        exhaustive[f[0]]=True
 if corpus is None:
     print("lvo_matrix=FAIL reason=ledger_has_no_corpus_line"); bad+=1; corpus=0
 n=len(set(seen))
@@ -209,6 +213,16 @@ for l in open(ev):
     # not use those vectors on the strength of twelve archives out of 5,372.
     if st=='CLEAN' and p[4].strip() in ('','-'):
         print(f"lvo_matrix=FAIL reason=clean_without_sample key={key}"); bad+=1
+    # A CLEAN row needs an EXHAUSTIVE pass behind it, not a screening one.
+    # tools/aminet-scan.py has zero false positives but misses calls whose a6
+    # was loaded earlier -- it reported one vector for a mail client that
+    # plainly opens a socket -- so a hit from it is evidence and an absence is
+    # not.  CLEAN must cite at least one archive the ledger marks `attributed`.
+    if st=='CLEAN':
+        cited=[a.strip() for a in p[4].split(',') if a.strip()]
+        if cited and not any(exhaustive.get(a) for a in cited):
+            print(f"lvo_matrix=FAIL reason=clean_from_screening_only key={key}")
+            bad+=1
     if kind=='lvo':
         r=status.get(key)
         if r is None:
