@@ -210,15 +210,75 @@ VOID netdev_trace_val(const char *tag, ULONG v)
  * other, which is all this instrument is for; an absolute figure has to be
  * multiplied by 227/256 first, and the report says so.
  */
-#define ND_TICKS_WRAP   (256UL * 256UL)
+/* The eight-bit wrap this clock used to rely on.  nd_now() now returns the
+   full nine-bit vpos and nd_since() learns the field height, so nothing tests
+   against a fixed range any more; kept out of the build rather than kept
+   around to be believed. */
 #define ND_UNIT_NUM     227UL           /* a unit is 227/256 colour clocks */
 #define ND_UNIT_DEN     256UL
 
+/*
+ * NINE BITS OF VPOS, NOT EIGHT, AND A FIELD SIZE THIS LEARNS FOR ITSELF.
+ *
+ * The eight-bit form fell back to zero TWICE -- once when vpos carried past
+ * 255 and once at the end of the field -- and nd_since() told them apart BY
+ * SIZE, on the stated assumption that "a span this instrument measures is
+ * under a millisecond".  THAT ASSUMPTION IS FALSE FOR `isr`, and the counter
+ * added in ddfb73b7 measured how false:
+ *
+ *     t maxisr 52,924 units   against a half-range of 32,768
+ *
+ * A span of 13.1 ms straddling the vpos carry has t0 - t1 UNDER the half-range
+ * and was classified as an end-of-field and dropped.  The drops are therefore
+ * the LONGEST samples, and the bias is not small:
+ *
+ *     dropisr 13 of 160 interrupts (8.1%)   dropup 12 of 513 frames (2.3%)
+ *     isr 346,793 against up 890,887 -- SHORT BY 544,094 over 13 drops,
+ *     which is 41,853 units each, the same order as maxisr.
+ *
+ * That is the whole of the isr < up contradiction, and it closes to the unit.
+ *
+ * VPOSR bit 0 is vpos bit 8, so the full line number is available for three
+ * chip reads instead of one -- 28 ns each, measured, against the 4.9 us the
+ * MULU this replaced used to cost.  VPOSR is read twice around VHPOSR because
+ * the pair is not atomic: a line boundary between them would pair a new high
+ * bit with an old low byte.  Disagreement is rare and costs one retry.
+ *
+ * With the full vpos there is only ONE discontinuity left, the end of the
+ * field, so nd_since() no longer has to guess which one it saw.  The field
+ * height in units is not a constant this file may assume -- PAL and NTSC
+ * differ and an interlaced mode alternates -- so it is LEARNED: the largest
+ * value ever returned, plus one, is the wrap, and it is correct from the first
+ * field onwards.  Before that, a span is only dropped if the pre-calibration
+ * guess is short, which the initial ND_FIELD_MIN prevents.
+ */
+#define ND_FIELD_MIN    (262UL * 256UL)     /* NTSC, the smaller of the two */
+
+static ULONG nd_field_top;                  /* largest value seen, self-taught */
+
 static ULONG nd_now(VOID)
 {
-    UWORD vh = *(volatile UWORD *)0xdff006;
+    volatile UWORD *vposr  = (volatile UWORD *)0xdff004;
+    volatile UWORD *vhposr = (volatile UWORD *)0xdff006;
+    UWORD           hi0;
+    UWORD           vh;
+    UWORD           hi1;
+    ULONG           v;
 
-    return ((ULONG)(vh >> 8) << 8) | (ULONG)(vh & 0xff);
+    do
+    {
+        hi0 = (UWORD)(*vposr & 1u);
+        vh  = *vhposr;
+        hi1 = (UWORD)(*vposr & 1u);
+    }
+    while (hi0 != hi1);
+
+    v = (((ULONG)hi0 << 8) | (ULONG)(vh >> 8)) << 8 | (ULONG)(vh & 0xff);
+
+    if (v > nd_field_top)
+        nd_field_top = v;
+
+    return v;
 }
 
 /*
@@ -229,7 +289,7 @@ static ULONG nd_now(VOID)
  * modular wrap the old line assumed:
  *
  *   vpos 255 -> 256   the low byte carries, t0 ~ 65,300 and t1 ~ 100.  A real
- *                     wrap of ND_TICKS_WRAP, and adding it is right.
+ *                     wrap of the eight-bit range, and adding it was right.
  *   vpos 312 -> 0     the END OF THE PAL FIELD, every 20 ms.  The low byte
  *                     goes 56 -> 0, a drop of about 14,336 -- and the old line
  *                     added 65,536 to it and returned about 51,200 units,
@@ -280,10 +340,13 @@ static ULONG nd_n_wrap;
  *
  * So the counters are split.  `t dropisr` and `t dropup` say how many samples
  * each of those two brackets actually lost, and `t maxisr` is the longest span
- * the isr bracket measured -- if that is near ND_TICKS_WRAP the spans are
- * wrapping rather than dropping, which is the one mechanism left that makes a
- * containing span read SHORT.  Until this reads, `isr` is not a number to
- * quote and `up` with its parts is what the device knows.
+ * the isr bracket measured.  IT READ 52,924 AGAINST A HALF-RANGE OF 32,768,
+ * which is the answer: an isr span is 13 ms, the size test could not tell a
+ * carry from a field, and the samples it threw away were the longest ones.
+ * nd_now() now returns nine bits of vpos and nd_since() learns the field
+ * height, so there is one discontinuity and no guess.  These counters stay --
+ * they now count spans REPAIRED across a field rather than lost, and
+ * `t fldtop` says what height was learned.
  */
 static ULONG nd_n_wrap_isr;
 static ULONG nd_n_wrap_up;
@@ -292,17 +355,26 @@ static ULONG nd_t_isr_max;
 static ULONG nd_since_at(ULONG t0, ULONG *drops)
 {
     ULONG t1 = nd_now();
+    ULONG wrap;
 
     if (t1 >= t0)
         return t1 - t0;
 
-    if ((t0 - t1) > (ND_TICKS_WRAP / 2UL))
-        return ND_TICKS_WRAP + t1 - t0;     /* vpos bit 8 carried */
+    /*
+     * ONE DISCONTINUITY, SO NO GUESSING.  A backwards step is the end of the
+     * field and nothing else, and the field's height is the largest value this
+     * clock has returned -- learned within the first field, floored at NTSC's
+     * so a span taken before that is not credited with a short one.
+     */
+    wrap = nd_field_top + 1UL;
+    if (wrap < ND_FIELD_MIN)
+        wrap = ND_FIELD_MIN;
 
-    nd_n_wrap++;                            /* end of field: unmeasurable */
+    nd_n_wrap++;                            /* counted: it is a repaired span */
     if (drops != NULL)
         (*drops)++;
-    return 0;
+
+    return wrap + t1 - t0;
 }
 
 static ULONG nd_since(ULONG t0)
@@ -414,6 +486,7 @@ static VOID nd_time_report(VOID)
     nd_tracex("t dropisr", nd_n_wrap_isr);
     nd_tracex("t dropup ", nd_n_wrap_up);
     nd_tracex("t maxisr ", nd_t_isr_max);
+    nd_tracex("t fldtop ", nd_field_top);
     /* The scale, so a reader does not take a beam unit for a colour clock. */
     nd_tracex("t unitnum", ND_UNIT_NUM);
     nd_tracex("t unitden", ND_UNIT_DEN);
