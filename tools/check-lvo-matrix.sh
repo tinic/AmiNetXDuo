@@ -61,7 +61,8 @@ def arm(name):
     m=re.search(r'"'+name+r':([^"]*)"',ci)
     if not m: raise SystemExit(f"lvo_matrix=FAIL reason=no_{name}_arm_in_ci.sh")
     return set(re.findall(r'-DAMINETXDUO_([A-Z_0-9]+)=OFF',m.group(1)))
-PROF=[('default',set()),('minimal',arm('minimal')),('micro',arm('micro'))]
+PROF=[('default',set()),('minimal',arm('minimal')),
+      ('micro',arm('micro')),('microcompat',arm('microcompat'))]
 
 # where each symbol is defined, and whether that line sits inside a guard
 srcs={}
@@ -185,6 +186,9 @@ for l in open(ev):
         if st in ('BREAKS','CLEAN') and got!='STUB':
             print(f"lvo_matrix=FAIL reason=evidence_disagrees api={key} "
                   f"profile={pr} evidence={st} matrix={got}"); bad+=1
+        if st=='OK' and got=='STUB':
+            print(f"lvo_matrix=FAIL reason=evidence_disagrees api={key} "
+                  f"profile={pr} evidence=OK matrix=STUB"); bad+=1
         if st=='DEGRADED' and got!='hosts-only':
             print(f"lvo_matrix=FAIL reason=evidence_disagrees api={key} "
                   f"profile={pr} evidence=DEGRADED matrix={got}"); bad+=1

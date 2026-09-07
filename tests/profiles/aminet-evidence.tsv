@@ -25,3 +25,8 @@ lvo	ProcessIsServer	micro	CLEAN	-	-690 is exec FreeVec
 lvo	ObtainServerSocket	micro	CLEAN	-	-696 is exec CreatePool
 lvo	bsd_NetStackControl	micro	CLEAN	-	-876 is dos FGets
 lvo	getaddrinfo	micro	CLEAN	-	the API postdates this corpus; a hit on it proves the scan is wrong
+# microcompat is micro with the two things the survey proved real software needs.
+lvo	ObtainSocket	microcompat	OK	ftpd2,inetd,ftpd,in.fingerd,rsh	restored: 1,120 bytes buys the whole inetd server family back
+lvo	ReleaseSocket	microcompat	OK	inetd	restored with the handoff group
+lvo	ReleaseCopyOfSocket	microcompat	OK	inetd,rsh	restored with the handoff group
+feature	RAWSOCKET	microcompat	OK	AvePING,ping,traceroute	restored: 3,404 bytes; no vector exists for this, so only a build test can confirm it
