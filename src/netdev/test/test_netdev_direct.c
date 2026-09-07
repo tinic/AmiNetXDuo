@@ -136,18 +136,6 @@ VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire)
         ReplyMsg(&io->ios2_Req.io_Message);
 }
 
-/* netdev_rx_claimed() completes through the batched form, whose queue and
-   Signal live in netdev_device.c.  The check this file makes is that the
-   request came off op_Reads and was replied, which is the same either way. */
-VOID netdev_reply_batched(struct IOSana2Req *io)
-{
-    netdev_reply(io, 0, 0);
-}
-
-VOID netdev_sig_flush(VOID)
-{
-}
-
 /* --------------------------------------------------------------- fixture */
 
 static NetdevUnit unit;

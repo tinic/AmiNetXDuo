@@ -78,13 +78,15 @@ static inline BOOL netdev_io_is_raw(const NetdevOpener *op,
 }
 
 /*
- * EXEC'S LIST PRIMITIVES ARE ROM CALLS, AND THREE OF THEM RUN PER FRAME.
+ * EXEC'S LIST PRIMITIVES ARE ROM CALLS, AND TWO OF THEM RUN PER FRAME.
  *
  * <inline/exec.h> expands Remove() to `jsr a6@(-252:W)` -- a register setup,
  * a jump into Kickstart and an rts around three pointer stores.  On the
- * receive path that is paid three times for every frame: netdev_take()
- * unlinks the CMD_READ it matched, netdev_queue_read() links the re-post back
- * at the head, and the batched reply puts the request on its port.
+ * receive path that is paid twice for every frame: netdev_take() unlinks the
+ * CMD_READ it matched, and netdev_queue_read() links the re-post back at the
+ * head.  It was three until the batched reply was reverted for costing 0.55%
+ * of receive and 1.11% of transmit; nd_list_addtail() stays because
+ * netdev_queue_read()'s S2_READORPHAN arm uses it.
  *
  * These are the same three stores, written out.  The layout is Exec's and is
  * not being reinterpreted: nd_newlist() in netdev_device.c already builds
@@ -252,10 +254,6 @@ typedef enum
 
 /* netdev_device.c */
 VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);
-/* Interrupt-level receive completion: enqueue now, Signal once at the end
-   of netdev_interrupt().  Callers must run inside ops->intr(). */
-VOID netdev_reply_batched(struct IOSana2Req *io);
-VOID netdev_sig_flush(VOID);
 BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 /* A standard utility.library Hook: a0 = hook, a2 = object, a1 = message. */
 BOOL netdev_hook_call(APTR hook, APTR object, APTR message);
