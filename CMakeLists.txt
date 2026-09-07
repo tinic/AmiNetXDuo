@@ -519,6 +519,22 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# The Roadshow routing API: AddRoute/ChangeRoute/DeleteRouteTagList and the
+# GetRouteInfo/FreeRouteInfo pair.  Five vectors, no caller inside the library.
+#
+# THIS IS NOT THE STACK'S ROUTING.  A machine's own addresses and its default
+# gateway come from DEVS:NetInterfaces through netstack.c and
+# netstack_gateway.c, which are untouched by this; what goes is the interface
+# a PROGRAM uses to add or delete a route at runtime.  A floor machine has one
+# interface and one gateway and nothing to say about either.
+#
+# Off, the three TagList calls answer AMI_ENOSYS, GetRouteInfo() answers NULL
+# (its documented failure) and FreeRouteInfo() accepts the NULL back.
+option(AMINETXDUO_ROUTING "Build the Roadshow AddRoute/DeleteRoute API" ON)
+if(AMINETXDUO_ROUTING)
+    add_compile_definitions(AMINETXDUO_ROUTING)
+endif()
+
 # getaddrinfo(), getnameinfo(), freeaddrinfo() and gai_strerror(): POSIX's
 # protocol-independent name lookup.  Four vectors and no caller inside the
 # library, which is what makes it separable at all.
