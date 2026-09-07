@@ -167,9 +167,14 @@ prof={n:i for i,n in enumerate(hdr)}
 status={}
 for r in rows: status[r[2]]=r          # api -> row
 
-bad=0; breaks=[]
+bad=0; breaks=[]; cov=None
 if not __import__('os').path.exists(ev):
     print("lvo_matrix=FAIL reason=no_evidence_file"); sys.exit(1)
+for l in open(ev):
+    if l.startswith('# COVERAGE'):
+        cov=l.strip().lstrip('# ').replace('\t',' ')
+if cov is None:
+    print("lvo_matrix=FAIL reason=no_coverage_line"); bad+=1
 for l in open(ev):
     if l.startswith('#') or not l.strip(): continue
     p=l.rstrip('\n').split('\t')
@@ -177,13 +182,20 @@ for l in open(ev):
     kind,key,pr,st=p[0],p[1],p[2],p[3]
     if pr not in prof:
         print(f"lvo_matrix=FAIL reason=unknown_profile row={key} profile={pr}"); bad+=1; continue
+    # "no proven caller" over an unstated sample is not a finding.  Four rows
+    # said CLEAN with an empty archives field, which claimed the corpus does
+    # not use those vectors on the strength of twelve archives out of 5,372.
+    if st=='CLEAN' and p[4].strip() in ('','-'):
+        print(f"lvo_matrix=FAIL reason=clean_without_sample key={key}"); bad+=1
     if kind=='lvo':
         r=status.get(key)
         if r is None:
             print(f"lvo_matrix=FAIL reason=evidence_names_unknown_vector api={key}"); bad+=1; continue
         got=r[prof[pr]]
         # evidence claiming a break must agree that the profile stubs it
-        if st in ('BREAKS','CLEAN') and got!='STUB':
+        if st=='DECODED':
+            pass                      # a claim about the method, not about use
+        elif st in ('BREAKS','CLEAN') and got!='STUB':
             print(f"lvo_matrix=FAIL reason=evidence_disagrees api={key} "
                   f"profile={pr} evidence={st} matrix={got}"); bad+=1
         if st=='OK' and got=='STUB':
@@ -196,6 +208,7 @@ for l in open(ev):
         breaks.append(f"{pr}:{key}={st}")
 
 print(f"lvo_matrix_rows={len(rows)}")
+print(f"lvo_matrix_coverage={cov}")
 print(f"lvo_matrix_known_impact={len(breaks)} {' '.join(sorted(breaks))}")
 print("lvo_matrix=" + ("PASS" if bad==0 else "FAIL"))
 sys.exit(1 if bad else 0)
