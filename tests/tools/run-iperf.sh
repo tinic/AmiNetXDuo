@@ -28,6 +28,23 @@ NETMASK=255.255.255.0
 SECS="${AMINETXDUO_IPERF_SECS:-3}"
 SIZE_KB=64
 
+# HOW MANY RECEIVE TRANSFERS TO RUN INSIDE ONE BOOT.
+#
+# MEASURED 2026-09-07: the per-run spread of this harness is ~2% and raising
+# the transfer from 3 s to 12 s cut it only to 1.65% -- four times the transfer
+# for 1.25x the precision, where within-run sampling noise alone would have
+# given 2x.  MOST OF THE VARIANCE IS BETWEEN-RUN: the boot, the host's
+# scheduling of the emulator, the bridge.  Averaging several transfers inside
+# ONE boot is the only lever left on it, and it is also much cheaper -- the
+# boot is most of the wall clock, not the transfer.
+#
+# Default 1, so every existing caller and CI see exactly what they saw before.
+RX_REPEAT="${AMINETXDUO_IPERF_RX_REPEAT:-1}"
+case "$RX_REPEAT" in
+    ''|*[!0-9]*|0) echo "AMINETXDUO_IPERF_RX_REPEAT must be a positive integer,"\
+                        "got '$RX_REPEAT'" >&2; exit 2 ;;
+esac
+
 SRV_WINDOW=$((SECS + 17))
 
 VENDOR="${AMINETXDUO_SANA2_VENDOR:-}"
@@ -240,8 +257,15 @@ cp "$TOOLS/netstat"         "$STAGE/netstat"
     echo "SYS:iperf"
     echo "SYS:iperf -s $PEERADDR"
     if [ "$SERVER_ARMS" = yes ]; then
-        echo "SYS:iperf -s -p $PORT_SRV_TCP -t $SRV_WINDOW"
-        echo "SYS:netstat -s"
+        # RX_REPEAT identical blocks.  block() already indexes repeats of one
+        # banner by occurrence, so the transcript needs nothing else and
+        # EXPECTED_BLOCKS counts lines.
+        r=1
+        while [ "$r" -le "$RX_REPEAT" ]; do
+            echo "SYS:iperf -s -p $PORT_SRV_TCP -t $SRV_WINDOW"
+            echo "SYS:netstat -s"
+            r=$((r + 1))
+        done
         echo "SYS:iperf -s -u -p $PORT_SRV_UDP -t $SRV_WINDOW"
         echo "SYS:netstat -s"
     fi
@@ -305,6 +329,13 @@ stop_peers() {
 
 trap stop_peers EXIT INT TERM HUP
 
+# Each extra receive transfer is another SRV_WINDOW the guest spends listening,
+# so the run's own deadline has to grow with it or the emulator is killed
+# mid-measurement and every repeat after the first is lost.
+if [ "$RX_REPEAT" -gt 1 ] && [ "$SERVER_ARMS" = yes ]; then
+    TIMEOUT=$((TIMEOUT + (RX_REPEAT - 1) * SRV_WINDOW))
+fi
+
 PEER_LIFE=$((TIMEOUT + 120))
 
 start_peer() { # logname args...
@@ -313,23 +344,34 @@ start_peer() { # logname args...
     PEER_PIDS+=("$!")
 }
 
-start_sender() { # logname proto port
+start_sender() { # logname proto port [wanted]
     local name="$1" proto="$2" port="$3" kbit=2000
+    local wanted="${4:-1}"
     [ "$proto" != udp ] || kbit="${AMINETXDUO_IPERF_PEER_UDP_KBIT:-2000}"
     (
+        # ONE LINE PER SUCCESSFUL SEND, and it keeps going until it has
+        # `wanted` of them.  A retry that fails costs a second and is not
+        # counted: the guest may still be booting, or between listens.  Each
+        # line pairs with the guest block of the same index, which is what
+        # peer_val_n() reads.
+        got=0
         deadline=$(( $(date +%s) + PEER_LIFE ))
-        while [ "$(date +%s)" -lt "$deadline" ]; do
+        while [ "$got" -lt "$wanted" ] && [ "$(date +%s)" -lt "$deadline" ]; do
             if out=$(peer_cmd send "$proto" "$ADDRESS" --port "$port" \
                         --seconds "$SECS" --kbit "$kbit" \
                         2>>"$PEERLOG/$name.err"); then
                 case "$proto" in
-                    udp) case "$out" in *peer_report=1*) echo "$out"; exit 0 ;; esac ;;
-                    *)   echo "$out"; exit 0 ;;
+                    udp) case "$out" in
+                             *peer_report=1*) echo "$out"; got=$((got + 1)) ;;
+                         esac ;;
+                    *)   echo "$out"; got=$((got + 1)) ;;
                 esac
+                continue        # straight into the guest's next listen
             fi
             sleep 1
         done
-        exit 1
+        [ "$got" -ge "$wanted" ] || exit 1
+        exit 0
     ) > "$PEERLOG/$name.out" 2>>"$PEERLOG/$name.err" &
     PEER_PIDS+=("$!")
 }
@@ -339,7 +381,7 @@ start_peer udp  serve udp --port "$PORT_UDP"  --seconds "$PEER_LIFE" --idle 8
 start_peer size serve tcp --port "$PORT_SIZE" --seconds "$PEER_LIFE" --idle 8
 
 if [ "$SERVER_ARMS" = yes ]; then
-    start_sender srvtcp tcp "$PORT_SRV_TCP"
+    start_sender srvtcp tcp "$PORT_SRV_TCP" "$RX_REPEAT"
     start_sender srvudp udp "$PORT_SRV_UDP"
 fi
 
@@ -483,6 +525,15 @@ guest_val() { # banner nth key
 peer_val() { # logname key
     [ -f "$PEERLOG/$1.out" ] || return 0
     grep -o "$2=[^[:space:]]*" "$PEERLOG/$1.out" | tail -1 | cut -d= -f2 || true
+}
+
+# The same, from the Nth of several sends.  peer_val() takes the LAST line,
+# which is right for one send and wrong for RX_REPEAT of them: it would compare
+# the guest's first transfer against the peer's last.
+peer_val_n() { # logname key nth
+    [ -f "$PEERLOG/$1.out" ] || return 0
+    sed -n "$3p" "$PEERLOG/$1.out" |
+        grep -o "$2=[^[:space:]]*" | cut -d= -f2 || true
 }
 
 # ---- the run finished, and finished once --------------------------------
@@ -677,19 +728,30 @@ says "SYS:iperf -s $PEERADDR" 1 "takes no host" "and says why"
 
 if [ "$SERVER_ARMS" = yes ]; then
     SRVTCP="SYS:iperf -s -p $PORT_SRV_TCP -t $SRV_WINDOW"
-    want_rc "$SRVTCP" 1 0 "the guest served a TCP receive"
-    says "$SRVTCP" 1 "dir=tcp-rx" "and reports the direction it ran"
 
-    R_BYTES=$(guest_val "$SRVTCP" 1 bytes)
-    RP_BYTES=$(peer_val srvtcp peer_bytes)
-    if [ -z "${R_BYTES:-}" ] || [ -z "${RP_BYTES:-}" ]; then
-        fail "no TCP receive count to compare: guest '${R_BYTES:-}'" \
-             "peer '${RP_BYTES:-}'"
-    elif [ "$R_BYTES" = "$RP_BYTES" ]; then
-        pass "the guest received every byte the peer sent: $R_BYTES"
-    else
-        fail "the peer sent $RP_BYTES bytes and the guest counted $R_BYTES"
-    fi
+    # EVERY REPEAT IS CHECKED, not just the first.  A run that measured four
+    # transfers and verified one would report three unexamined numbers as
+    # results, which is worse than measuring once.
+    n=1
+    while [ "$n" -le "$RX_REPEAT" ]; do
+        want_rc "$SRVTCP" "$n" 0 "the guest served a TCP receive ($n/$RX_REPEAT)"
+        says "$SRVTCP" "$n" "dir=tcp-rx" \
+             "and reports the direction it ran ($n/$RX_REPEAT)"
+
+        R_BYTES=$(guest_val "$SRVTCP" "$n" bytes)
+        RP_BYTES=$(peer_val_n srvtcp peer_bytes "$n")
+        if [ -z "${R_BYTES:-}" ] || [ -z "${RP_BYTES:-}" ]; then
+            fail "no TCP receive count to compare ($n/$RX_REPEAT):" \
+                 "guest '${R_BYTES:-}' peer '${RP_BYTES:-}'"
+        elif [ "$R_BYTES" = "$RP_BYTES" ]; then
+            pass "the guest received every byte the peer sent ($n/$RX_REPEAT):" \
+                 "$R_BYTES"
+        else
+            fail "($n/$RX_REPEAT) the peer sent $RP_BYTES bytes and the guest" \
+                 "counted $R_BYTES"
+        fi
+        n=$((n + 1))
+    done
 
     SRVUDP="SYS:iperf -s -u -p $PORT_SRV_UDP -t $SRV_WINDOW"
     want_rc "$SRVUDP" 1 0 "the guest served a UDP receive"
