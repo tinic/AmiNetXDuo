@@ -20,10 +20,37 @@
 #     A/B measures position.
 #   * a median of N rounds, never one run.  A single run has lied twice.
 #
+# HOW MANY ROUNDS.  MEASURED, on 2026-09-07: 30 runs of two builds gave a
+# per-run sd of 2.06-2.54%, and 12 more at AMINETXDUO_IPERF_SECS=12 gave
+# 1.65%.  Resampling 5-round median A/Bs out of data with NO effect in it
+# spans -0.97% to +2.32%.  So:
+#
+#     effect   rounds/arm at SECS=3   at SECS=12
+#       3%              4                  2
+#       2%              8                  5
+#       1%             33                 21
+#      <1%          not measurable on this rig
+#
+# THE DEFAULT FIVE IS A TOLERANCE GATE, NOT AN INSTRUMENT.  It resolves 3% and
+# nothing smaller, and below that it will report "+2%" for nothing at all --
+# it did exactly that three times in one day, on a pair that 30 runs scored at
+# +0.29%, p=0.74.  Pass -n 15 or more for anything under 3%, and take the
+# longer transfer while doing it.
+#
+# THE LONGER TRANSFER IS NEARLY FREE AND IS ON BY DEFAULT HERE.  Raising the
+# transfer from run-iperf.sh's 3 s default to 12 s cut the sd 1.25x for a few
+# seconds a round.  Note what that ratio says: four times the transfer cut the
+# spread by 1.25, where pure within-run sampling noise would have cut it by 2.
+# MOST OF THE VARIANCE IS BETWEEN-RUN -- boot-to-boot state, host scheduling,
+# the bridge -- not the transfer.  Duration is therefore nearly exhausted as a
+# lever; the next real one is several transfers inside ONE boot, which
+# run-iperf.sh can already report (guest_val takes an nth-occurrence index,
+# run-iperf.sh:477) and which needs the peer taught to send more than once.
+#
 # WHICH INSTRUMENT THIS IS.  iperf with no induced delay, which is the
 # CPU-BOUND one: the guest reads about 6.1 of the wire's 10 Mbit/s, so the
 # guest is the limit and a CPU saving has nowhere to hide.  Its weakness is
-# spread, ~5% within an arm, and the answer to that is ROUNDS, not delay.
+# spread, and the answer to that is ROUNDS, not delay.
 # tests/perf/run-lossgate.sh -M -d 50 -l 0 is the other one: a 50 ms round trip
 # collapses the scatter to well under a per cent, but it also leaves the guest
 # about a third idle, so it resolves a LATENCY change and hides a CPU one.
@@ -56,6 +83,9 @@ AB_ENV="${AMINETXDUO_AB_ENV:-$HOME/amiga-assets/env.sh}"
 BASE_REF=""
 HEAD_REF=""
 ROUNDS="${AMINETXDUO_RATE_ROUNDS:-5}"
+# 12 s, not run-iperf.sh's 3 s default: measured to cut the per-run sd from
+# 2.06% to 1.65%.  Exported below so every round of both arms gets it.
+SECS="${AMINETXDUO_IPERF_SECS:-12}"
 PASSES=2
 IFACE="${AMINETXDUO_RATE_IFACE:-}"
 PEER="${AMINETXDUO_RATE_PEER:-}"
@@ -175,6 +205,7 @@ run_arm() {                             # $1 dir  $2 label  $3 pass  $4 position
     r=1
     while [ "$r" -le "$ROUNDS" ]; do
         out="$base-r$r.log"
+        AMINETXDUO_IPERF_SECS="$SECS" \
         tests/tools/run-iperf.sh -b build/ab -B "$IFACE" -P "$PEER" \
             < /dev/null > "$out" 2>&1
         rc=$?
@@ -219,4 +250,9 @@ while [ "$p" -le "$PASSES" ]; do
     p=$((p + 1))
 done
 
-echo "rate_ab=done passes=$PASSES rounds=$ROUNDS base=$BASE_REF head=$HEAD_REF"
+echo "rate_ab=done passes=$PASSES rounds=$ROUNDS secs=$SECS base=$BASE_REF head=$HEAD_REF"
+# What this run could actually have resolved, from the sd measured on
+# 2026-09-07 -- so a small number in the output is read as "under the
+# floor" rather than as a result.
+echo "rate_ab=resolves >=$(awk -v n="$((ROUNDS * PASSES))" \
+    'BEGIN { printf "%.1f", 1.96 * 1.65 * sqrt(2.0 / n) }')% at p<0.05"
