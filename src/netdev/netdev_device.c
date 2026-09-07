@@ -124,7 +124,7 @@ static VOID netdev_prof_segtag(NetdevDevice *base, BPTR seglist)
                            t->np_LibBase + t->np_SegList);
 }
 
-#ifdef NETDEV_TRACE
+#if defined(NETDEV_TRACE) || defined(NETDEV_TIME)
 /*
  * Raw serial, straight at the custom chips: a device's romtag init runs before
  * anything of ours is open, and this is the only channel needing no library.
@@ -161,11 +161,20 @@ static VOID nd_tracex(const char *tag, ULONG v)
 
 /* nd_trace is static, so netdev_cmds.c reports the command number of every
    request through here.  Without it -DAMINETXDUO_NETDEV_TRACE=ON does not
-   link. */
+   link.
+ *
+ * NOT UNDER NETDEV_TIME.  A line per COMMAND is a line per received frame, and
+ * raw serial under this emulator is slow enough that the trace, not the
+ * timing, is what made a NETDEV_TIME build run at 987 Kbit/s against 5.9
+ * Mbit/s -- the guest took 76 frames a second instead of 480, and every span
+ * the instrument reported was measured on a machine the instrument had
+ * throttled.  The report itself prints once per 512 frames and is fine. */
+#ifdef NETDEV_TRACE
 VOID netdev_trace_cmd(UWORD c)
 {
     nd_tracex("anx: cmd ", (ULONG)c);
 }
+#endif
 
 /* For the chip cores, which cannot see nd_tracex. */
 VOID netdev_trace_val(const char *tag, ULONG v)
