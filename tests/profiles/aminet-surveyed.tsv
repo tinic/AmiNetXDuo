@@ -113,3 +113,15 @@
 /comm/cnet/cnmp_10b.lha	packed	cruncher
 /comm/cnet/scripts242e.lha	packed	cruncher
 /comm/cnet/xscripts.lha	ixemul	ixemul-hosted
+#
+# 400-archive pass, 2026-09-07, archives 1161-1560 -- the rest of comm/cnet,
+# all of comm/dlg, the start of comm/fido.  368 barren, and ONE attributed
+# binary in four hundred archives: the thinnest slice yet, and the reason the
+# yield row says the corpus will not keep producing.
+# BULK	368	no bsdsocket binary in the archive
+# BULK	27	lost to download or extract failure, not examined
+/comm/fido/AmiBinkd10_18.lha	attributed	AmiBinkD, 3 vectors -- Inet_NtoA, SocketBaseTagList, WaitSelect -- from 226 raw jsr d16(a6). A FidoNet mailer whose socket surface the scan cannot see past; the floor rule applies
+/comm/dlg/DLG_Disk1.lha	packed	cruncher
+/comm/dlg/food118.lha	packed	cruncher
+/comm/dlg/keirsey.lha	packed	cruncher
+/comm/dlg/upload1.lha	packed	cruncher
