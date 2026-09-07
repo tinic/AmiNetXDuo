@@ -13,6 +13,17 @@
 #          rejected    examined and found to carry no bsdsocket call at all
 #          packed      a cruncher hides the code; not statically observable
 #
+# HOW THE COUNT ADDS UP, after it did not.  Every `# BULK n` row counts
+# archives that are NOT listed individually below it; listing an archive AND
+# counting it in a bulk row is what put the reported coverage at 103.1 per
+# cent of a corpus, which is impossible and was the tell.  The bulk numbers
+# were recomputed from the batch outputs with the individually-listed archives
+# removed: 5,155 bulk + 161 distinct listed = 5,316 of 5,372.
+#
+# Eleven archives appear on two lines -- screened once and attributed later,
+# after the a6-clobber fix -- so a line count reads 5,317.  Both rows are worth
+# keeping: the pair is the evidence for what that fix was worth.
+#
 # archive	method	result
 /comm/tcp/AmiTCP-demo-40.lha	attributed	28 of 62 binaries use bsdsocket; ObtainSocket in serv/ftpd, serv/in.fingerd, serv/netfs-server, l/netfs-handler, bin/inetd; gethostby* across ~14 clients
 /comm/tcp/AmiFTP.lha	attributed	AmiFTP 1.843, exactly 18 LVOs, SocketBase=a4+11100 hand-verified; minimal ok, micro degraded on gethostbyname
@@ -145,9 +156,9 @@
 # pure client-side socket users.
 # BULK	328	no bsdsocket binary in the archive
 # BULK	30	lost to download or extract failure, not examined
-# BULK	22	unresolved: SocketBase not provable from the OpenLibrary store
-# BULK	6	packed by a cruncher
-# BULK	34	ixemul-hosted, invisible to a vector scan -- the IRC daemons
+# BULK	4	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	14	ixemul-hosted, invisible to a vector scan
+# BULK	5	packed by a cruncher
 /comm/irc/ChatBox1_164.lha	attributed	ChatBox, 13 vectors including the whole Inet_ address quartet, from 1253 raw jsr d16(a6)
 /comm/irc/DwarfxNW.lha	attributed	MiniDrop, 14 vectors -- accept, bind, listen AND connect, so it is client and server at once
 /comm/irc/BlackIRC.lha	attributed	BlackIRCDCCRcv 3, BlackIRCDCCSrv 8, AmVideoConfD 13; re-confirmed against the earlier hand-verified pass
@@ -177,9 +188,9 @@
 # claim.  AEMail matching exactly is the control.
 # BULK	342	no bsdsocket binary in the archive
 # BULK	12	lost to download or extract failure, not examined
-# BULK	11	unresolved: SocketBase not provable from the OpenLibrary store
-# BULK	6	packed by a cruncher
-# BULK	39	ixemul-hosted, invisible to a vector scan
+# BULK	7	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	18	ixemul-hosted, invisible to a vector scan
+# BULK	4	packed by a cruncher
 /comm/mail/Relay.lha	attributed	Relay and Relay.68000, 9 vectors each including ObtainSocket + vsyslog -- an SMTP relay in the inetd family, and the first mail DAEMON found that is not ixemul-hosted
 /comm/mail/AmigaSmail3-29.lha	attributed	smail_amitcp, 13 vectors, ObtainSocket + Dup2Socket + vsyslog; re-confirmed against the screening pass
 /comm/mail/SpamFryer.lha	attributed	inet-handler, 8 vectors with Dup2Socket and accept but NO ObtainSocket -- a handler that is given its socket some other way
@@ -203,9 +214,9 @@
 # apart from names.
 # BULK	360	no bsdsocket binary in the archive
 # BULK	16	lost to download or extract failure, not examined
-# BULK	11	packed by a cruncher
-# BULK	8	ixemul-hosted, invisible to a vector scan
-# BULK	4	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	3	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	6	ixemul-hosted, invisible to a vector scan
+# BULK	8	packed by a cruncher
 /comm/misc/AmigaTText-m68k-amigaos.lha	attributed	AmigaTText_OS3, 24 vectors -- the richest CLIENT in the corpus, and the FIRST binary anywhere to call the Roadshow interface-enumeration API: QueryInterfaceTagList and ReleaseInterfaceList. accept+bind+listen alongside connect, and recvfrom/sendto as well as recv/send
 /comm/misc/AmigaTText-ppc-warpup.lha	attributed	the WarpUP build, 24 vectors, and it adds ObtainInterfaceList -- so all three of that group are proven called
 /comm/misc/FENStarter.lha	attributed	an entire AmiTCP utility suite: arp 12 (getnetbyname, the only citation for it), ch_nfsc 15 (sendmsg, getdtablesize), finger 8, askhost 4, ch_setowner 4, GetMail.prg and PutMail.prg 6 each. vsyslog in four of the seven
@@ -225,9 +236,10 @@
 # piece of evidence about what software needs, not six.
 # BULK	339	no bsdsocket binary in the archive
 # BULK	21	lost to download or extract failure, not examined
-# BULK	18	packed by a cruncher
-# BULK	17	unresolved: SocketBase not provable from the OpenLibrary store
-# BULK	10	ixemul-hosted, invisible to a vector scan
+# BULK	10	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	5	ixemul-hosted, invisible to a vector scan
+# BULK	12	packed by a cruncher
+# BULK	2	examined, no attributed call
 /comm/misc/SonosController_OS3.lha	attributed	SonosController, 24 vectors, the AmigaTText signature including QueryInterfaceTagList and ReleaseInterfaceList
 /comm/misc/SonosController_OS3fpu.lha	attributed	the FPU build, and it adds ObtainInterfaceList
 /comm/misc/SonosController_WOS.lha	attributed	the WarpOS build, same 24 with ObtainInterfaceList
@@ -248,11 +260,13 @@
 # FIRST SLICE SINCE comm/mail TO BREAK MICRO: ObtainSocket, ReleaseSocket AND
 # ReleaseCopyOfSocket all appear -- AmiTCP's own inetd, letnet, and the whole
 # NetFS suite -- plus the first SOCK_RAW outside the ping family.
-# BULK	294	no bsdsocket binary in the archive
+# BULK	293	no bsdsocket binary in the archive
 # BULK	29	lost to download or extract failure, not examined
-# BULK	38	unresolved: SocketBase not provable from the OpenLibrary store
-# BULK	37	ixemul-hosted, invisible to a vector scan
-# BULK	6	packed by a cruncher
+# BULK	19	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	17	ixemul-hosted, invisible to a vector scan
+# BULK	3	packed by a cruncher
+# BULK	23	attributed, not listed individually
+# BULK	4	examined, no attributed call
 /comm/net/AmiTCP-bin-30b2.lha	attributed	AmiTCP 3.0b2's own binaries: inetd 17 vectors, letnet 5, ch_nfsc 15. The reference implementation of the handoff contract micro stubs out
 /comm/net/NetFS-revised.lha	attributed	FIVE binaries at 21-22 vectors each -- netfs-server, netfs-handler, NetFSPort, NetFSInfo, NetFS-Explorer -- all in the ObtainSocket family. A whole distributed filesystem on the inetd handoff
 /comm/net/NetFS.lha	attributed	the older build, netfs-handler 7 and netfs-server 10
@@ -278,11 +292,13 @@
 # family the METHOD row named a hundred archives ago, still firing because
 # nothing checked.  tools/aminet-scan.py refuses them now: `dual-stack-suspect`.
 # Their vector lists below are NOT evidence and are not counted.
-# BULK	252	no bsdsocket binary in the archive
+# BULK	251	no bsdsocket binary in the archive
 # BULK	10	lost to download or extract failure, not examined
-# BULK	103	unresolved: SocketBase not provable from the OpenLibrary store
-# BULK	52	ixemul-hosted, invisible to a vector scan
-# BULK	4	packed by a cruncher
+# BULK	40	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	18	ixemul-hosted, invisible to a vector scan
+# BULK	3	packed by a cruncher
+# BULK	53	attributed, not listed individually
+# BULK	5	examined, no attributed call
 /comm/tcp/AvePING.lha	dual-stack-suspect	the `reserved` tripwire fires: 11 vectors including GetRouteInfo and ProcessIsServer, which are exec FreeVec and CreatePool read through the wrong base. Re-scanned after the guard landed and refused
 /comm/tcp/AveHTTPD.lha	dual-stack-suspect	same family, same tripwire -- and the archive the AS225 METHOD row was written from
 /comm/tcp/AveHOST.lha	dual-stack-suspect	same
@@ -303,9 +319,11 @@
 # ReleaseCopyOfSocket all appear, so micro breaks here as it does in comm/net.
 # BULK	211	no bsdsocket binary in the archive
 # BULK	10	lost to download or extract failure, not examined
-# BULK	86	ixemul-hosted, invisible to a vector scan
-# BULK	81	unresolved: SocketBase not provable from the OpenLibrary store
-# BULK	20	packed by a cruncher
+# BULK	47	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	37	ixemul-hosted, invisible to a vector scan
+# BULK	11	packed by a cruncher
+# BULK	64	attributed, not listed individually
+# BULK	12	examined, no attributed call
 /comm/tcp/TcpSpeed.lha	attributed	TcpSpeed, 5 vectors and sock_raw=1 -- a GENUINE raw-socket user outside the ping/traceroute family, so RAWSOCKET=OFF breaks more than the three programs that row cites
 /comm/tcp/Patch2AmiTCP43.lha	attributed	socket.library, FORTY-ONE vectors, the highest count in the corpus. A wrapper library: surface, not demand -- see the wrapper-libraries METHOD row
 /comm/tcp/getit.lha	attributed	rxsocket.library again, 33 vectors and sock_raw=1, same reading
@@ -323,11 +341,13 @@
 # not network at all.  A statically linked binary carries its library's whole
 # call surface whether it reaches it or not, so those 25 are one library's
 # surface counted eight times, not eight programs needing them.
-# BULK	284	no bsdsocket binary in the archive
+# BULK	283	no bsdsocket binary in the archive
 # BULK	30	lost to download or extract failure, not examined
-# BULK	38	unresolved: SocketBase not provable from the OpenLibrary store
-# BULK	35	ixemul-hosted, invisible to a vector scan
+# BULK	15	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	19	ixemul-hosted, invisible to a vector scan
 # BULK	2	packed by a cruncher
+# BULK	42	attributed, not listed individually
+# BULK	3	examined, no attributed call
 /comm/tcp/samba207_w1251.lha	attributed	EIGHT binaries at 25 vectors each, three of which are codepage build tools with no network function. Static linking, not demand -- see the static-link METHOD row
 /comm/tcp/rxsocket.lha	attributed	rxsocket.library 2.x, 27 vectors -- the ARexx wrapper again, surface not demand
 #
@@ -344,12 +364,39 @@
 # widely used Amiga browser there is.
 # BULK	331	no bsdsocket binary in the archive
 # BULK	22	lost to download or extract failure, not examined
-# BULK	45	ixemul-hosted, invisible to a vector scan
-# BULK	21	packed by a cruncher
-# BULK	16	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	5	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	14	ixemul-hosted, invisible to a vector scan
+# BULK	8	packed by a cruncher
+# BULK	11	attributed, not listed individually
+# BULK	2	examined, no attributed call
 /comm/www/IBrowse1.x-1.22-68000.lha	attributed	http, https, ftp and gopher.library at 13 vectors each, ReleaseSocket among them; two more binaries beside
 /comm/www/IBrowse1.x-1.22-68020.lha	attributed	the 68020 build, identical sets
 /comm/www/IBrowse112a-00.lha	attributed	1.12a, the same shape five binaries deep
 /comm/www/IBrowse112a-20.lha	attributed	the 68020 build of 1.12a
 /comm/www/IBrowse1.1-1.11-68000.lha	attributed	1.11, still ReleaseSocket
 /comm/www/IBrowse1.02-1.1-68000.lha	attributed	1.02, the oldest release scanned, and it is already there
+#
+# THE LAST 212 ARCHIVES, 2026-09-07: 5161-5372, the rest of comm/www.  159
+# barren, 43 ixemul, 10 attributed, 10 unresolved.  THE CORPUS IS COMPLETE.
+#
+# NETSURF REPORTS ProcessIsServer AND THAT MAKES ITS WHOLE LIST SUSPECT.  The
+# DECODED rows say -690 is exec FreeVec in every binary examined, so at least
+# one of NetSurf's 23 vectors is an alias read through a base that is not
+# bsdsocket's -- and the `reserved` tripwire does not catch it, because
+# ProcessIsServer is a REAL api and a hit on it is not provably wrong the way a
+# bsd_enosys placeholder is.  Recorded, not counted.  The os3 build reports 16
+# vectors with no phantom among them and is the one to read.
+# BULK	175	no bsdsocket binary in the archive
+# BULK	7	lost to download or extract failure, not examined
+# BULK	5	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	12	ixemul-hosted, invisible to a vector scan
+# BULK	2	packed by a cruncher
+# BULK	1	examined, no attributed call
+/comm/www/netsurf_os3.lha	attributed	NetSurf OS3, 16 vectors and NO phantom -- inet_aton, and accept+bind+listen beside connect. The build to quote
+/comm/www/netsurf-m68k.lha	screened	NetSurf and NetSurf-AGA report 23 vectors each INCLUDING ProcessIsServer, which the DECODED rows put at exec FreeVec. Suspect, not attributed
+/comm/www/hserv.lha	attributed	rxsocket.library, 27 vectors -- ObtainSocket, ReleaseSocket AND ReleaseCopyOfSocket together, the only binary in the corpus with all three. A wrapper: surface, not demand
+/comm/www/lynx.lha	attributed	inet-handler, 8 vectors with Dup2Socket and accept -- the SpamFryer shape again, a handler given its socket some other way
+/comm/www/lynx-mos.lha	attributed	the MorphOS build ships the identical handler
+/comm/www/graburl-2.lha	attributed	graburl, 14 vectors, the whole Inet_ address quartet and vsyslog
+/comm/www/gng_upd101.lha	attributed	http and http_DEBUG, 10 and 11 vectors
+/comm/www/http_post.lha	attributed	http_post, 5 vectors with vsyslog
