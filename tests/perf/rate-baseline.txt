@@ -4,6 +4,30 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# RAISED 2026-09-07 on RECEIVE, for 237ea45e -- the IPv4 receive-verify fast
+# path.  Four sittings, two arms, position-balanced P Q Q P, five rounds each,
+# distinct md5s (68ac21ebabd1 / 2836e73cc13d):
+#
+#     arm                     sitting 1   sitting 2   median
+#     P  6c7bc0a6 before      5,941,505   5,906,307   5,923,906
+#     Q  237ea45e after       6,013,939   6,193,833   6,103,886
+#
+# +3.04 per cent, AHEAD IN BOTH POSITIONS, against a same-day null floor of
+# 0.90 per cent.  Transmit does not move: P 3,208,057 against Q 3,207,517,
+# -0.02 per cent, which is what a receive-only change should read.
+#
+# PREDICTED 1.2 PER CENT, MEASURED 3.0.  The note further down about the
+# "430 frames/s so 100 cycles = 0.3%" arithmetic running 4x low holds again,
+# and in the same direction: do not prune a candidate with it.
+#
+# Q's two sittings spread 3.0 per cent between themselves, which is wider than
+# the null floor and is the reason the position balance matters -- both Q
+# sittings beat both P sittings, and P's own spread is 0.6 per cent.
+#
+#     direction   was          now          sittings on the new tree
+#     tcp-rx      5,770,903    6,013,939    6,193,833 (5 rounds), 6,013,939 (5)
+#
+#
 # RAISED 2026-09-07 on transmit only, for the NetX/ThreadX argument checking
 # default flipping OFF.  Six sittings, three arms, position-balanced A B C C B A,
 # five rounds each, three DISTINCT library md5s printed before any round ran
@@ -350,5 +374,5 @@
 # +3.3% and +2.6% on receive, ahead in both positions both times.  Quote ABOUT
 # +3%.  Transmit read -0.7% and then +0.3%, which is what no change looks like
 # here -- the first of those two is in no sense a regression.
-tcp-rx 5770903
+tcp-rx 6013939
 tcp-tx 3287723

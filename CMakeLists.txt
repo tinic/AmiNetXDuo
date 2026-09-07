@@ -697,9 +697,26 @@ endif()
 # is undefined behaviour instead.  The `instr` arm builds it ON so both sides
 # stay compiled, and micro/microcompat have shipped without it since the micro
 # profile landed.
+#
+# CROSS ONLY, AND CI IS WHAT SAID SO.  The macro does not just remove a check,
+# it changes WHICH SYMBOL the shipping source calls: `nx_arp_entry_delete()`
+# expands to `_nxe_arp_entry_delete` with checking on and `_nx_arp_entry_delete`
+# without it.  The host tier links a curated subset of NetX and stubs the rest
+# BY ENTRY-POINT NAME -- fourteen `_nxe_*` stubs in test_dhcp6_host.c alone,
+# and ten more host files do the same -- so flipping this under them broke the
+# link in test_dhcp6 and fuzz_mdns with undefined references to
+# `_nx_arp_entry_delete`, `_nxd_nd_cache_entry_set` and `_tx_timer_change`.
+#
+# The option is a property of the SHIPPED library; which name a stub must carry
+# is a property of the harness.  So the definitions go to the cross build only,
+# and the host tier keeps linking what it has always linked.
+#
+# MY LOCAL `tools/ci.sh host` PASSED BEFORE THE PUSH AND WAS WRONG: it reused a
+# build directory configured before the flip, so the option never reached it.
+# A clean configure is the only run that tests an option change.
 option(AMINETXDUO_NX_ERROR_CHECKING
        "Compile NetX Duo and ThreadX argument checking" OFF)
-if(NOT AMINETXDUO_NX_ERROR_CHECKING)
+if(NOT AMINETXDUO_NX_ERROR_CHECKING AND CMAKE_CROSSCOMPILING)
     add_compile_definitions(
         NX_DISABLE_ERROR_CHECKING
         TX_DISABLE_ERROR_CHECKING)

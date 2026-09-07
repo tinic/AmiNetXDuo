@@ -213,3 +213,29 @@
 /comm/misc/AmiWeather-0.1.0.lha	attributed	AmiWeather, 10 vectors
 /comm/misc/AmiAIMv008.lha	attributed	AmiAIM 0.08, 9 vectors
 /comm/misc/AmiAIMv11.lha	attributed	AmiAIM 1.1, 6 vectors
+#
+# 400-archive pass, 2026-09-07, archives 2761-3160 -- comm/misc continues.  339
+# barren (85%), 11 attributed, 18 packed, 17 unresolved.  26 distinct vectors
+# and only the three name resolvers are anything but `ok` in every profile.
+#
+# FIVE MORE BINARIES CARRY THE SAME 24-VECTOR SIGNATURE AS AmigaTText, down to
+# the interface-list group: Nuntius, Serial Door and SonosController in three
+# builds.  Identical sets across unrelated programs mean a shared framework
+# rather than five authors making the same choices, so those 24 count as ONE
+# piece of evidence about what software needs, not six.
+# BULK	339	no bsdsocket binary in the archive
+# BULK	21	lost to download or extract failure, not examined
+# BULK	18	packed by a cruncher
+# BULK	17	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	10	ixemul-hosted, invisible to a vector scan
+/comm/misc/SonosController_OS3.lha	attributed	SonosController, 24 vectors, the AmigaTText signature including QueryInterfaceTagList and ReleaseInterfaceList
+/comm/misc/SonosController_OS3fpu.lha	attributed	the FPU build, and it adds ObtainInterfaceList
+/comm/misc/SonosController_WOS.lha	attributed	the WarpOS build, same 24 with ObtainInterfaceList
+/comm/misc/Nuntius_68k.lha	attributed	Nuntius, the same 24-vector set
+/comm/misc/Serial_Door_68k.lha	attributed	Serial Door, the same 24-vector set
+/comm/misc/gegAIM.lha	attributed	gegAIM, 9 vectors, and the ONLY GetSocketEvents call in the corpus so far
+/comm/misc/cddb-lib.lha	attributed	cddb.library, 7 vectors -- a shared LIBRARY that opens bsdsocket itself
+/comm/misc/amigg.lha	attributed	AmiGG_m68k, 9 vectors, accept+bind+listen
+/comm/misc/Twiny.lha	attributed	Twiny, 7 vectors, a pure server: accept, bind, listen, recv, no connect
+/comm/misc/StreAmi.lha	attributed	StreAmi, 8 vectors
+/comm/misc/SendSMS.lha	attributed	SendSMS, 8 vectors
