@@ -260,7 +260,36 @@ static ULONG nd_now(VOID)
  */
 static ULONG nd_n_wrap;
 
-static ULONG nd_since(ULONG t0)
+/*
+ * AND ONE UNEXPLAINED THING IS LEFT, WHICH THIS IS HERE TO NAME.
+ *
+ * `isr` brackets ops->intr(), and lance_intr() -> le_rint() -> nic->rx() is
+ * netdev_rx(), which is what `up` brackets.  isr therefore CONTAINS up and
+ * cannot be smaller than it.  The first report taken with the repaired clock
+ * says otherwise:
+ *
+ *     frames 532   nint 187   2.845 frames an interrupt
+ *     up       901,366 units  1,694 a frame  ->  4,819 an interrupt
+ *     isr      467,680 units  2,501 an interrupt
+ *
+ * A factor of 1.9 the wrong way.  Both callers of netdev_interrupt() are
+ * bracketed (netdev_device.c:1298 the server, :1348 the vertical-blank poll),
+ * the report itself runs outside the bracket, and the drop rule cannot explain
+ * it: an isr span is ~6% of a PAL field, so ~11 of 187 samples should straddle,
+ * not half of them.
+ *
+ * So the counters are split.  `t dropisr` and `t dropup` say how many samples
+ * each of those two brackets actually lost, and `t maxisr` is the longest span
+ * the isr bracket measured -- if that is near ND_TICKS_WRAP the spans are
+ * wrapping rather than dropping, which is the one mechanism left that makes a
+ * containing span read SHORT.  Until this reads, `isr` is not a number to
+ * quote and `up` with its parts is what the device knows.
+ */
+static ULONG nd_n_wrap_isr;
+static ULONG nd_n_wrap_up;
+static ULONG nd_t_isr_max;
+
+static ULONG nd_since_at(ULONG t0, ULONG *drops)
 {
     ULONG t1 = nd_now();
 
@@ -271,7 +300,14 @@ static ULONG nd_since(ULONG t0)
         return ND_TICKS_WRAP + t1 - t0;     /* vpos bit 8 carried */
 
     nd_n_wrap++;                            /* end of field: unmeasurable */
+    if (drops != NULL)
+        (*drops)++;
     return 0;
+}
+
+static ULONG nd_since(ULONG t0)
+{
+    return nd_since_at(t0, NULL);
 }
 
 static ULONG nd_t_isr;      /* ops->intr(), the whole chip service */
@@ -375,6 +411,9 @@ static VOID nd_time_report(VOID)
     nd_tracex("t nhook  ", nd_n_hook);
     nd_tracex("t probe16", nd_t_probe);
     nd_tracex("t dropped", nd_n_wrap);
+    nd_tracex("t dropisr", nd_n_wrap_isr);
+    nd_tracex("t dropup ", nd_n_wrap_up);
+    nd_tracex("t maxisr ", nd_t_isr_max);
     /* The scale, so a reader does not take a beam unit for a colour clock. */
     nd_tracex("t unitnum", ND_UNIT_NUM);
     nd_tracex("t unitden", ND_UNIT_DEN);
@@ -384,6 +423,7 @@ static VOID nd_time_report(VOID)
     nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
     nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
     nd_n_int = nd_n_frame = nd_n_hook = nd_n_wrap = 0;
+    nd_n_wrap_isr = nd_n_wrap_up = nd_t_isr_max = 0;
 }
 #endif
 
@@ -667,7 +707,7 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
     ULONG t0 = nd_now();
 
     netdev_rx_body(arg, frame, len);
-    nd_t_up += nd_since(t0);
+    nd_t_up += nd_since_at(t0, &nd_n_wrap_up);
     nd_n_frame++;
 }
 
@@ -1248,7 +1288,13 @@ ULONG netdev_interrupt(NetdevUnit *unit)
         BOOL  mine;
 
         mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
-        nd_t_isr += nd_since(t0);
+        {
+            ULONG span = nd_since_at(t0, &nd_n_wrap_isr);
+
+            nd_t_isr += span;
+            if (span > nd_t_isr_max)
+                nd_t_isr_max = span;
+        }
         nd_regs_isr += netdev_time_regs - r0;
         nd_n_int++;
         if (!mine)
