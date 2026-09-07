@@ -287,4 +287,8 @@ jobs:
             tools/emu-board.sh \
             tools/sana2-stage.sh \
             install/test/run-workbench.sh \
+            tools/aminet-batch.sh \
+            tools/check-generated.sh \
+            tools/check-lvo-matrix.sh \
+            tools/check-option-stubs.sh \
             install/test/run-workbench-cards.sh
