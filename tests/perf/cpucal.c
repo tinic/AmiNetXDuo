@@ -494,14 +494,33 @@ ULONG   big_read, small_read;
         if ((bsize / 8UL) < win)
             win = bsize / 8UL;
 
+        ULONG   board_read;
+
         c_log(" , Zorro board (not memory) at 0x%08lx, %ld KB --", (LONG)board,
               (LONG)(bsize / 1024UL));
-        fast_read = big_read;
-        c_buf_a   = board;
-        c_window  = win;
-        (VOID)c_print_mem("read  window (bus)", K_READ);
-        c_window  = C_BIG_LONGS;
-        c_buf_a   = save;
+        fast_read  = big_read;
+        c_buf_a    = board;
+        c_window   = win;
+        board_read = c_print_mem("read  window (bus)", K_READ);
+        c_window   = C_BIG_LONGS;
+        c_buf_a    = save;
+
+        /*
+         * THE RATIO IS THE ANSWER, NOT THE TWO NUMBERS.  The question this
+         * sweep exists for is whether the receive path's biggest copy is bus
+         * bound: it reads the frame out of THIS space, in place, and every
+         * claim this tree has made about that copy being instruction bound was
+         * reasoned from Fast RAM figures.  Say the ratio so nobody has to
+         * eyeball two lines twenty apart -- twice now I read the wrong pair.
+         */
+        if (fast_read != 0UL && board_read != 0UL)
+        {
+            c_log("    board/fast read %ld.%02ldx -- "
+                  "at ~1x the card is not the bottleneck and a copy out of it "
+                  "is instruction bound",
+                  (LONG)((board_read * 100UL / fast_read) / 100UL),
+                  (LONG)((board_read * 100UL / fast_read) % 100UL));
+        }
         (VOID)fast_read;
     }
     else
