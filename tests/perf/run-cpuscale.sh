@@ -7,20 +7,38 @@
 #   tests/perf/run-cpuscale.sh [-b BUILDDIR] [-B IFACE] [-P PEER]
 #                              [-m MULTIPLIER] [-r ROUNDS]
 #
+# SWEEP AT LEAST TWO MULTIPLIERS.  The baseline is not at 1 and one ratio
+# cannot tell you where it is.
+#
 # WHY IT EXISTS.  "Receive is at its floor on this rig" was the campaign's
 # standing conclusion, argued from a profile with no idle rows.  It had never
 # been tested directly, and the direct test takes one sitting:
 #
-#     rx  base 5,917,563    cpu_multiplier=16  20,038,603   3.39x
-#     tx  base 3,279,734    cpu_multiplier=16  10,504,104   3.20x
+#     multiplier   base rx      fast rx       ratio
+#      4           5,950,800    5,919,794     0.99
+#      8           5,965,073   10,809,784     1.81
+#     16           5,917,563   20,038,603     3.39
 #
-# SIXTEEN TIMES THE PROCESSOR BUYS 3.4 TIMES THE RATE, and Amdahl on the frame
-# gives the split: T_new/T_old = f/M + (1-f), so f = 75%.  THREE QUARTERS OF A
-# RECEIVED FRAME IS CPU AND SCALES; the other quarter is the a2065's window and
-# does not, which is the same quarter the profile calls per-byte -- the copies
-# read out of board SRAM.  So CPU work on this path DOES pay, and the per-frame
-# commits that measured +0.04% removed too little to see, which is a different
-# thing from a floor.
+# THE FOUR ARM IS THE ANSWER TO A QUESTION NOBODY ASKED AND THE KEY TO THE REST:
+# it changes NOTHING, because the A1200 quickstart already runs at
+# cpu_multiplier=4.  So the real speedup factors are 2x and 4x, not 8x and 16x,
+# and Amdahl -- T_new/T_old = f/M + (1-f) -- reads:
+#
+#     M = 2, ratio 1.81  ->  f = 90%
+#     M = 4, ratio 3.39  ->  f = 94%
+#
+# NINE TENTHS OF A RECEIVED FRAME IS CPU AND SCALES.  Only about a tenth is the
+# a2065's window, which the multiplier deliberately does not touch.  Two points
+# agreeing to four points of f is what makes it a measurement rather than one
+# ratio and an assumption.
+#
+# A single point WOULD have got this wrong: taken alone, the 16 arm divided by
+# a nominal 16 gives f = 75%, and the whole error is not knowing where the
+# baseline sits on the same axis.  Sweep at least two multipliers.
+#
+# So CPU work on this path pays almost in full, and the per-frame commits that
+# measured +0.04% removed too little to see -- which is a different thing from
+# a floor.
 #
 # It also says the base rate was never a wire limit: the fast arm reads 20
 # Mbit/s over emulated 10 Mbit Ethernet, so the bridge does not enforce wire
