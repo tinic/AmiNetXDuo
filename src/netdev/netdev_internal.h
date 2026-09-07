@@ -229,10 +229,54 @@ VOID netdev_queue_head(struct List *list, struct IOSana2Req *io);
 VOID netdev_event(NetdevUnit *unit, ULONG mask);
 VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_event_rescan(NetdevUnit *unit);
-BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
-                      const UBYTE *data);
-const UBYTE *netdev_payload(const NetdevOpener *op, const struct IOSana2Req *io,
-                            const UBYTE *frame, UWORD len, ULONG *plen);
+
+/*
+ * BOTH OF THESE RUN ONCE A FRAME AND EACH HAS EXACTLY ONE CALL SITE, and both
+ * lived in netdev_event.c while that site is in netdev_device.c -- so whether
+ * the shipped image pays a jsr for them was a decision LTO made, not one this
+ * source stated.  netdev_io_is_raw() directly above has always been inline for
+ * the same reason.
+ *
+ * tools/check-hot-calls.sh exists because that distinction cost a rig run
+ * once: a helper the profiler names may already be inlined, and the only way
+ * to tell is to disassemble a shipping-shaped build.  IT CANNOT ANSWER FOR
+ * THIS FILE -- anxnet.device links with -flto and its symbol table collapses
+ * to 136 entries with every local name gone, so there is nothing to count.
+ * Where a gate cannot assert the property, the source states it.
+ *
+ * The test tier still calls both by name (test_netdev_event.c): a static
+ * inline in the header is callable from there exactly as the extern was.
+ */
+
+/* The frame from byte 0 for a RAW request, the payload past the 14-byte
+   Ethernet header otherwise.  The filter sees the same data CopyToBuff would
+   (copybuff.spec autodoc). */
+static inline const UBYTE *netdev_payload(const NetdevOpener *op,
+                                          const struct IOSana2Req *io,
+                                          const UBYTE *frame, UWORD len,
+                                          ULONG *plen)
+{
+    if (netdev_io_is_raw(op, io))
+    {
+        *plen = len;
+        return frame;
+    }
+
+    *plen = (ULONG)(len - NETDEV_HDR_LEN);
+    return frame + NETDEV_HDR_LEN;
+}
+
+/* TRUE when the packet can be handed over.  The hook itself runs at interrupt
+   level, in the middle of the card's own service, and the autodoc requires it:
+   "This function must be callable from interupts." */
+static inline BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
+                                    const UBYTE *data)
+{
+    if (op->op_Filter == NULL)
+        return TRUE;
+
+    return netdev_hook_call(op->op_Filter, io, (APTR)data);
+}
 
 /* netdev_pcmcia.c: the slot has no autoconfig record, so it is claimed
    rather than found.  NULL when there is no slot, nothing in it, or what is
