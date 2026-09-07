@@ -243,6 +243,13 @@ static VOID show_health(const ToolStats *st)
  * three fullest power-of-two buckets. Ticks convert at ~709/ms, so
  * `ticks * 1000 / (rate / 1000)` stays inside 32 bits for every legal delta.
  */
+/*
+ * The floor, in E-Clock ticks, so every leg can print what is left after it.
+ * Set from nrb_Probe before the legs are shown; zero until then, which is what
+ * an older library or a build with no probe leg gives.
+ */
+static ULONG budget_floor;
+
 static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
                             ULONG rate)
 {
@@ -269,12 +276,32 @@ static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
      * Milliseconds, because a leg that matters is tens to thousands of them
      * and microseconds would just be noise on the end.
      */
-    tool_printf("\t%s: %lu samples, mean %lu us, max %lu us, total %lu ms\n",
-                (LONG)name,
-                leg->nbl_Count,
-                (leg->nbl_Sum / leg->nbl_Count) * 1000UL / khz,
-                leg->nbl_Max * 1000UL / khz,
-                leg->nbl_Sum / khz);
+    {
+        /*
+         * NET, BECAUSE THE BRACKET IS NOT FREE AND THREE LEGS SIT ON IT.
+         *
+         * Each leg is two ami_budget_clock() calls and each is ReadEClock, a
+         * timer.device call.  `probe` brackets nothing and measured 43 us, and
+         * subtracting it is what made `verify` agree with the wire profile:
+         * 124 raw becomes 81, which is 2.7% of a frame against the profile's
+         * 3.1% for _n68k_rx_verify_sum.  Two instruments, one answer.
+         *
+         * Printed beside the raw mean rather than instead of it: a reader
+         * checking one number against another run needs the mean that run
+         * printed, and a floor that changes with the clock rate would silently
+         * move a "net" column under them.
+         */
+        ULONG mean = (leg->nbl_Sum / leg->nbl_Count) * 1000UL / khz;
+        ULONG fl   = budget_floor * 1000UL / khz;
+
+        tool_printf("\t%s: %lu samples, mean %lu us (net %lu), max %lu us, "
+                    "total %lu ms\n",
+                    (LONG)name,
+                    leg->nbl_Count, mean,
+                    (mean > fl) ? (mean - fl) : 0UL,
+                    leg->nbl_Max * 1000UL / khz,
+                    leg->nbl_Sum / khz);
+    }
 
     for (i = 0; i < NETSTATUS_BUDGET_BUCKETS; i++)
     {
@@ -463,6 +490,10 @@ static VOID show_budget(VOID)
      *       the other 346 -- ours: rx_verify_sum, the ethertype, IP validation
      *     repost   97 us  -- the CMD_READ handed back, 12% of deliver
      */
+    /* Before any leg is shown, so every one of them can net it out. */
+    budget_floor = (b->nrb_Probe.nbl_Count != 0)
+                 ? (b->nrb_Probe.nbl_Sum / b->nrb_Probe.nbl_Count) : 0UL;
+
     show_budget_leg("deliver, one rx_deliver call", &b->nrb_Drain,
                     b->nrb_EClockRate);
     show_budget_leg("baton,  asking to holding   ", &b->nrb_Baton,
