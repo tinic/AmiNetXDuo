@@ -285,6 +285,51 @@ LONG bsd_Errno(register struct AmiSocketBase *SocketBase __asm("a6"))
     return SocketBase->sb_Errno;
 }
 
+/*
+ * vsyslog(), LVO -0x102.  It was bsd_enosys until now, and the survey of Aminet
+ * daemons is what found it: telnetd calls it 4 times, lpd 8, AmiFTPd 28 and
+ * more, POPd once, and every one of those lines went nowhere on every profile
+ * INCLUDING the default build.  The library was already accepting the whole
+ * syslog configuration -- SBTC_LOGTAGPTR, SBTC_LOGSTAT, SBTC_LOGFACILITY, all
+ * three stored above -- and then discarding the calls that used it.
+ *
+ * `args` is a RawDoFmt argument stream, which is what an Amiga caller has, so
+ * this cannot forward to ami_log()'s varargs and goes to ami_log_raw().
+ *
+ * NO SIZE ARGUMENT AGAINST IT: what AMINETXDUO_LOG removes is our own log
+ * sentences, and the format string here belongs to the caller.
+ *
+ * The priority's severity is the low three bits (BSD syslog.h); LOG_ERR and
+ * worse are errors, LOG_WARNING is a warning, the rest are informational.  The
+ * facility half is stored for SBTC_LOGFACILITY readers and not used to route.
+ */
+VOID bsd_vsyslog(register ULONG priority     __asm("d0"),
+                 register CONST_STRPTR format __asm("a0"),
+                 register APTR args           __asm("a1"),
+                 register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    int level = AMI_LOG_INFO;
+
+    if (SocketBase == NULL || format == NULL)
+        return;
+
+    switch (priority & 7UL)
+    {
+    case 0: case 1: case 2: case 3:     /* EMERG..ERR   */
+        level = AMI_LOG_ERROR;
+        break;
+    case 4:                             /* WARNING      */
+        level = AMI_LOG_WARN;
+        break;
+    default:                            /* NOTICE..DEBUG*/
+        level = AMI_LOG_INFO;
+        break;
+    }
+
+    ami_log_raw(level, (const char *)SocketBase->sb_LogTag,
+                (const char *)format, args);
+}
+
 VOID bsd_SetErrnoPtr(register APTR errno_ptr __asm("a0"),
                      register LONG size      __asm("d0"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))

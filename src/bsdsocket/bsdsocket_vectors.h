@@ -259,6 +259,11 @@ struct protoent *bsd_getprotobynumber(register LONG proto __asm("d0"),
                                       register struct AmiSocketBase *SocketBase __asm("a6"));
 
 /* LVO -0x108 */
+VOID bsd_vsyslog(register ULONG priority      __asm("d0"),
+                 register CONST_STRPTR format  __asm("a0"),
+                 register APTR args            __asm("a1"),
+                 register struct AmiSocketBase *SocketBase __asm("a6"));
+
 LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
                     register LONG new_socket __asm("d1"),
                     register struct AmiSocketBase *SocketBase __asm("a6"));

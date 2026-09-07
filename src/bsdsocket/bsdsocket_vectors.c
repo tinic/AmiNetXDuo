@@ -68,7 +68,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_getservbyport,      /* -0x0f0 [ 39] getservbyport */
     (APTR)bsd_getprotobyname,     /* -0x0f6 [ 40] getprotobyname */
     (APTR)bsd_getprotobynumber,   /* -0x0fc [ 41] getprotobynumber */
-    (APTR)bsd_enosys,             /* -0x102 [ 42] vsyslog */
+    (APTR)bsd_vsyslog,            /* -0x102 [ 42] vsyslog */
     (APTR)bsd_Dup2Socket,         /* -0x108 [ 43] Dup2Socket */
     (APTR)bsd_sendmsg,            /* -0x10e [ 44] sendmsg */
     (APTR)bsd_recvmsg,            /* -0x114 [ 45] recvmsg */

@@ -37,7 +37,7 @@ offset	idx	api	symbol	file	gate	default	minimal	micro	microcompat
 -0x0f0	39	getservbyport	bsd_getservbyport	netdb.c	-	ok	ok	ok	ok
 -0x0f6	40	getprotobyname	bsd_getprotobyname	netdb.c	-	ok	ok	ok	ok
 -0x0fc	41	getprotobynumber	bsd_getprotobynumber	netdb.c	-	ok	ok	ok	ok
--0x102	42	vsyslog	bsd_enosys	errno.c	-	enosys	enosys	enosys	enosys
+-0x102	42	vsyslog	bsd_vsyslog	errno.c	-	ok	ok	ok	ok
 -0x108	43	Dup2Socket	bsd_Dup2Socket	options.c	-	ok	ok	ok	ok
 -0x10e	44	sendmsg	bsd_sendmsg	transfer.c	-	ok	ok	ok	ok
 -0x114	45	recvmsg	bsd_recvmsg	transfer.c	-	ok	ok	ok	ok

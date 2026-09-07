@@ -80,6 +80,10 @@ VOID ami_mem_open_delta(LONG delta);
  */
 VOID ami_log(int level, const char *fmt, ...);
 
+/* ami_log() for a caller that already holds a RawDoFmt argument stream; `tag`
+   may be NULL.  bsdsocket.library's vsyslog() is the reason this exists. */
+VOID ami_log_raw(int level, const char *tag, const char *fmt, APTR args);
+
 /*
  * How much of it comes out, AMI_LOG_ERROR..AMI_LOG_TRACE.  A RUNTIME dial and
  * not a build option: the fault tier is in every shipped image, and a machine
