@@ -15,7 +15,7 @@
 #
 # kind	key	profile	status	archives	evidence
 lvo	ObtainSocket	micro	BREAKS	ftpd2,AvePING,telnetd2_0,lpd,identd,AveHTTPD,AmiFTPd19,POPd,inetd,ftpd,in.fingerd,netfs-server,netfs-handler,rsh	ftpd2 0x41bc ObtainSocket(dm_ID,dm_Family,dm_Type,0) then Dup2Socket(fd,0/1/2); AmiTCP NETLIB:autoinitd.o inetd startup; AvePING 0x35ea
-lvo	ReleaseSocket	micro	BREAKS	inetd,TnServ,AmiFTPd19,/comm/cnet/cnet4demo.lha	NOT inetd-only: TnServ.c:89 accept -> ReleaseSocket(SubSock,UNIQUE_ID) -> CreateNewProcTags. Amiga has no fork(), so process-per-connection STANDALONE servers need it too; AmiFTPd19 pairs it with ObtainSocket on the per-connection path at 0xa3c4
+lvo	ReleaseSocket	micro	BREAKS	inetd,TnServ,AmiFTPd19,/comm/cnet/cnet4demo.lha,/comm/www/IBrowse1.x-1.22-68000.lha	NOT inetd-only: TnServ.c:89 accept -> ReleaseSocket(SubSock,UNIQUE_ID) -> CreateNewProcTags. Amiga has no fork(), so process-per-connection STANDALONE servers need it too; AmiFTPd19 pairs it with ObtainSocket on the per-connection path at 0xa3c4. AND IT IS NOT ONLY SERVERS: IBrowse's http, https, ftp and gopher libraries each carry it, in every release from 1.02 to 1.22 and both CPU builds. A browser hands a socket to a process it spawned per transfer -- the same contract for the opposite reason -- so micro breaks the most widely used Amiga browser there is
 lvo	ReleaseCopyOfSocket	micro	BREAKS	inetd,rsh,letnet	same handoff contract
 lvo	gethostbyname	micro	DEGRADED	AmiFTP,AmFTP,AWeb,ftpd,ping,route,rsh,traceroute,ncftp	answers from DEVS:Internet/hosts only; AmFTP can then reach numeric IPs alone
 lvo	gethostbyaddr	micro	DEGRADED	AmiFTP,AmFTP,AWeb,AmiSSL	as above

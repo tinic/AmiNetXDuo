@@ -330,3 +330,26 @@
 # BULK	2	packed by a cruncher
 /comm/tcp/samba207_w1251.lha	attributed	EIGHT binaries at 25 vectors each, three of which are codepage build tools with no network function. Static linking, not demand -- see the static-link METHOD row
 /comm/tcp/rxsocket.lha	attributed	rxsocket.library 2.x, 27 vectors -- the ARexx wrapper again, surface not demand
+#
+# 400-archive pass, 2026-09-07, archives 4761-5160 -- all of comm/www.  331
+# barren, 42 attributed, 45 ixemul, 25 distinct vectors.
+#
+# AND THE ReleaseSocket ROW GAINS A CONTEXT IT DID NOT HAVE: IBrowse.  Its four
+# protocol libraries -- http, https, ftp, gopher -- each carry the same 13
+# vectors INCLUDING ReleaseSocket, across every release from 1.02 to 1.22 in
+# both 68000 and 68020 builds.  Every previous citation for that vector was a
+# SERVER: AmiTCP's inetd, TnServ, AmiFTPd19, cnet4demo's cnsmtpd.  A browser
+# needs it because it hands a socket to a process it spawned per transfer,
+# which is the same contract for the opposite reason.  Micro breaks the most
+# widely used Amiga browser there is.
+# BULK	331	no bsdsocket binary in the archive
+# BULK	22	lost to download or extract failure, not examined
+# BULK	45	ixemul-hosted, invisible to a vector scan
+# BULK	21	packed by a cruncher
+# BULK	16	unresolved: SocketBase not provable from the OpenLibrary store
+/comm/www/IBrowse1.x-1.22-68000.lha	attributed	http, https, ftp and gopher.library at 13 vectors each, ReleaseSocket among them; two more binaries beside
+/comm/www/IBrowse1.x-1.22-68020.lha	attributed	the 68020 build, identical sets
+/comm/www/IBrowse112a-00.lha	attributed	1.12a, the same shape five binaries deep
+/comm/www/IBrowse112a-20.lha	attributed	the 68020 build of 1.12a
+/comm/www/IBrowse1.1-1.11-68000.lha	attributed	1.11, still ReleaseSocket
+/comm/www/IBrowse1.02-1.1-68000.lha	attributed	1.02, the oldest release scanned, and it is already there
