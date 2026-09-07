@@ -519,6 +519,29 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# RFC 3542 ancillary data: IP_PKTINFO, IP_RECVDSTADDR and the IPv6 half, the
+# control messages sendmsg() and recvmsg() carry beside the payload.
+#
+# The most entangled of these options -- five entry points reaching options.c,
+# in6.c, socket.c, transfer.c and raw.c -- so each stub matches a convention the
+# built version already has rather than inventing one:
+#
+#   bsd_cmsg_option()       1, "not ours" (cmsg.c:734), so options.c falls
+#                           through to its own switch and IP_PKTINFO lands on
+#                           the default that answers ENOPROTOOPT.
+#   bsd_cmsg_parse()        0 with no control data, EINVAL with some -- exactly
+#                           what the built version does with a cmsg it cannot
+#                           recognise (cmsg.c:390-392 and :398).
+#   bsd_cmsg_source_index() -1, its documented failure; unreachable anyway,
+#                           because transfer.c:673 gates it on cs_Have and
+#                           nothing can set that now.
+#   bsd_cmsg_reset()        STILL ZEROES as_CmsgSticky.  transfer.c:1717 and
+#                           :1781 read that struct whatever this option says.
+option(AMINETXDUO_CMSG "Build RFC 3542 ancillary data" ON)
+if(AMINETXDUO_CMSG)
+    add_compile_definitions(AMINETXDUO_CMSG)
+endif()
+
 # TCP urgent data: MSG_OOB, SIOCATMARK and SIGURG.  No vector of its own -- it
 # is a flag on send() and recv() and an ioctl -- so this gates oob.c and the
 # three entry points transfer.c and socket.c reach it through.

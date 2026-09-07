@@ -10,6 +10,8 @@
 #include "nx_ipv6.h"
 #endif
 
+#ifdef AMINETXDUO_CMSG
+
 /* Fixed header sizes, as much as is read of each. */
 #define BSD_CMSG_IPV4_HDR       20
 #define BSD_CMSG_IPV6_HDR       40
@@ -765,3 +767,63 @@ LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
 
     return 1;
 }
+
+#else /* !AMINETXDUO_CMSG */
+
+/*
+ * Every answer below is one the built version already gives; see the option's
+ * comment in CMakeLists.txt for why each is the right one.
+ */
+VOID bsd_cmsg_reset(AmiSocket *sock)
+{
+    /* NOT a no-op: transfer.c:1717 and :1781 read this struct whatever this
+       option says, and cs_Have FALSE is what keeps them off the source path. */
+    if (sock != NULL)
+        bsd_bzero(&sock->as_CmsgSticky, sizeof(sock->as_CmsgSticky));
+}
+
+/* 1 is "not ours" (cmsg.c:734): options.c falls through to its own switch. */
+LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
+                     LONG optname, APTR optval, socklen_t *optlen, BOOL set)
+{
+    (VOID)base; (VOID)sock; (VOID)level; (VOID)optname;
+    (VOID)optval; (VOID)optlen; (VOID)set;
+    return 1;
+}
+
+VOID bsd_cmsg_build(AmiSocket *sock, NX_PACKET *packet, struct msghdr *msg)
+{
+    (VOID)sock;
+    (VOID)packet;
+
+    /* msg_controllen is value-result (transfer.c:1946): nothing was written. */
+    if (msg != NULL)
+        msg->msg_controllen = 0;
+}
+
+LONG bsd_cmsg_parse(struct AmiSocketBase *base, AmiSocket *sock,
+                    const struct msghdr *msg, BsdCmsgSource *out)
+{
+    (VOID)sock;
+
+    if (out != NULL)
+        bsd_bzero(out, sizeof(*out));
+
+    if (msg == NULL || msg->msg_control == NULL ||
+        msg->msg_controllen < (socklen_t)sizeof(struct cmsghdr))
+        return 0;
+
+    /* Control data this build cannot honour is refused rather than dropped,
+       which is what the built version does with one it cannot recognise. */
+    return bsd_fail(base, AMI_EINVAL);
+}
+
+LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
+{
+    (VOID)ip;
+    (VOID)src;
+    (VOID)v6;
+    return -1;
+}
+
+#endif /* AMINETXDUO_CMSG */
