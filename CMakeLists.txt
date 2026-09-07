@@ -519,6 +519,23 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# The address-allocation message: CreateAddrAllocMessageA, its Delete, and the
+# BeginInterfaceConfig/AbortInterfaceConfig pair a configuration program drives
+# it with.  Four vectors and one internal helper.
+#
+# This is the interface Roadshow's own DHCP-style configurators use to ask the
+# stack to bring an interface up asynchronously.  A floor machine is given a
+# static address in DEVS:NetInterfaces and never runs one -- and with
+# AMINETXDUO_DHCP off there is no client to drive it either.
+#
+# bsd_aam_busy() stays and answers FALSE.  library.c's expunge asks it whether
+# a configuration is outstanding (library.c:1215); with nothing able to start
+# one the answer is no, and the expunge proceeds as it should.
+option(AMINETXDUO_ADDRALLOC "Build the AddressAllocationMessage interface" ON)
+if(AMINETXDUO_ADDRALLOC)
+    add_compile_definitions(AMINETXDUO_ADDRALLOC)
+endif()
+
 # The Roadshow routing API: AddRoute/ChangeRoute/DeleteRouteTagList and the
 # GetRouteInfo/FreeRouteInfo pair.  Five vectors, no caller inside the library.
 #
