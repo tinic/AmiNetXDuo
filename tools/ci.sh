@@ -147,7 +147,7 @@ CROSS_CONFIGS=(
     # sampling profiler.  None changes a struct a shipped image lays out, so
     # one build compiles them all and a break in any is a break in this arm.
     # The serial log is not among them any more: it is in every build.
-    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON"
+    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_PROFILER_NOINLINE=ON"
     # One RTO estimator in three options: early retransmit and the tail loss
     # probe both read what TCP_RTT measures, so RTT=OFF with either of the
     # other two ON is not a configuration to defend.  All three off together

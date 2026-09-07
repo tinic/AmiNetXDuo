@@ -762,6 +762,39 @@ endif()
 # not something the library ships.  It adds nothing to src/.
 option(AMINETXDUO_PROFILER "Build the PC sampling profiler in tests/perf/prof" OFF)
 
+# EIGHT PER CENT OF THE RECEIVE PROFILE SITS IN THREE SYMBOLS WHOSE CONTENTS
+# THE TOOL CANNOT SEE.  `_bsd_recv_iov` 2.7 is bsd_recv_tcp() inlined into it
+# -- static, one call site, transfer.c:1522 -- `_ami_sana2_rx_thread` 3.1 has
+# the whole drain and ami_sana2_rx_complete() inside it, and
+# `_ami_sana2_rx_post_slot` 2.4 swallows ami_sana2_rx_arm() and _mark().  A
+# sample lands on the outermost surviving symbol, so reading those shares
+# against the code they name gives cycle counts three to ten times what the
+# visible statements can account for, and several ticks of this campaign were
+# spent on exactly that arithmetic.
+#
+# -fno-inline-functions-called-once is the one that matters: at -Os GCC folds
+# every static helper with a single caller, which is most of the receive path.
+# The others keep the small leaf helpers separate too.
+#
+# THIS CHANGES WHAT IS BEING PROFILED.  Calls that the shipped image does not
+# make are made here, so the SHARES move and the total rate falls.  It answers
+# "which statement inside this blob" and nothing else -- never quote a share
+# from a build with this on, and never compare one against a build without it.
+option(AMINETXDUO_PROFILER_NOINLINE
+       "Keep static helpers as their own symbols, so the profile can name them"
+       OFF)
+if(AMINETXDUO_PROFILER_NOINLINE)
+    if(NOT AMINETXDUO_PROFILER)
+        message(FATAL_ERROR
+            "AMINETXDUO_PROFILER_NOINLINE needs AMINETXDUO_PROFILER=ON: it is "
+            "an attribution aid for the sampler, not a build mode.")
+    endif()
+    add_compile_options(
+        -fno-inline-functions-called-once
+        -fno-inline-small-functions
+        -fno-optimize-sibling-calls)
+endif()
+
 option(AMINETXDUO_NXCENSUS "Count and time the ThreadX bracket" OFF)
 if(AMINETXDUO_NXCENSUS)
     add_compile_definitions(AMINETXDUO_NXCENSUS)
