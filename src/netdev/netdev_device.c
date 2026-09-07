@@ -499,7 +499,7 @@ VOID netdev_reply_batched(struct IOSana2Req *io)
     io->ios2_Req.io_Message.mn_Node.ln_Type = NT_REPLYMSG;
 
     Disable();
-    AddTail(&port->mp_MsgList, &io->ios2_Req.io_Message.mn_Node);
+    nd_list_addtail(&port->mp_MsgList, &io->ios2_Req.io_Message.mn_Node);
     Enable();
 
     for (i = 0; i < nd_sig_n; i++)

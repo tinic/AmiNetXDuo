@@ -300,10 +300,12 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
     queued = unit->nu_Online ? TRUE : FALSE;
     if (queued)
     {
+        /* Once a frame, inside a Disable(): see netdev_internal.h. */
         if (cmd == CMD_READ)
-            AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            nd_list_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
         else
-            AddTail(&op->op_Orphans, &io->ios2_Req.io_Message.mn_Node);
+            nd_list_addtail(&op->op_Orphans,
+                            &io->ios2_Req.io_Message.mn_Node);
     }
     Enable();
 

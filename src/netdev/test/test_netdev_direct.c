@@ -79,13 +79,48 @@ VOID Remove(struct Node *n)
     n->ln_Pred = NULL;
 }
 
+/*
+ * IS THIS NODE STILL ON A LIST -- ASKED OF THE LISTS, NOT OF THE NODE.
+ *
+ * The stub above NULLs both links, which Exec's Remove() does NOT, and the
+ * reply check below used to read `ln_Succ != NULL` as "still linked".  That
+ * asserted a property of the stub: netdev_take() now unlinks through
+ * nd_list_remove() (netdev_internal.h), three stores with no NULLing, exactly
+ * as Exec does, and a check written that way calls a correct removal a
+ * failure.
+ *
+ * What the test means is that the request is off the queue it was taken from,
+ * so that is what is asked.
+ */
+static const struct List *watch_lists[4];
+static unsigned          watch_n;
+
+static int node_on_a_watched_list(const struct Node *n)
+{
+    unsigned i;
+
+    for (i = 0; i < watch_n; i++)
+    {
+        const struct Node *p;
+
+        for (p = watch_lists[i]->lh_Head; p != NULL && p->ln_Succ != NULL;
+             p = p->ln_Succ)
+        {
+            if (p == n)
+                return 1;
+        }
+    }
+
+    return 0;
+}
+
 VOID Disable(VOID) {}
 VOID Enable(VOID) {}
 
 VOID ReplyMsg(struct Message *msg)
 {
     replies++;
-    if (msg->mn_Node.ln_Succ != NULL)
+    if (node_on_a_watched_list(&msg->mn_Node))
     {
         printf("FAIL replied CMD_READ is still linked\n");
         failures++;
@@ -174,6 +209,12 @@ static void reset_fixture(void)
     memset(direct_area, 0, sizeof(direct_area));
     NewList(&unit.nu_OpenerList);
     NewList(&unit.nu_Writes);
+
+    watch_n = 0;
+    watch_lists[watch_n++] = &opener_a.op_Reads;
+    watch_lists[watch_n++] = &opener_a.op_Orphans;
+    watch_lists[watch_n++] = &opener_b.op_Reads;
+    watch_lists[watch_n++] = &opener_b.op_Orphans;
     init_opener(&opener_a);
     init_opener(&opener_b);
     AddTail(&unit.nu_OpenerList, (struct Node *)&opener_a.op_Node);

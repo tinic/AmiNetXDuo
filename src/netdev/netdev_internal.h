@@ -77,6 +77,53 @@ static inline BOOL netdev_io_is_raw(const NetdevOpener *op,
                   (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
 }
 
+/*
+ * EXEC'S LIST PRIMITIVES ARE ROM CALLS, AND THREE OF THEM RUN PER FRAME.
+ *
+ * <inline/exec.h> expands Remove() to `jsr a6@(-252:W)` -- a register setup,
+ * a jump into Kickstart and an rts around three pointer stores.  On the
+ * receive path that is paid three times for every frame: netdev_take()
+ * unlinks the CMD_READ it matched, netdev_queue_read() links the re-post back
+ * at the head, and the batched reply puts the request on its port.
+ *
+ * These are the same three stores, written out.  The layout is Exec's and is
+ * not being reinterpreted: nd_newlist() in netdev_device.c already builds
+ * lh_Head/lh_Tail/lh_TailPred by hand for the same reason -- NewList() lives
+ * in amiga.lib, which a -nostartfiles image does not link.
+ *
+ * COLD SITES KEEP THE ROM CALL.  Opening a unit, closing it, expunging the
+ * device: those run once and are better left reading as the ordinary Exec
+ * idiom.  Only what runs once a frame is written out here.
+ */
+static inline VOID nd_list_addhead(struct List *l, struct Node *n)
+{
+    struct Node *head = l->lh_Head;
+
+    n->ln_Succ    = head;
+    n->ln_Pred    = (struct Node *)(APTR)&l->lh_Head;
+    head->ln_Pred = n;
+    l->lh_Head    = n;
+}
+
+static inline VOID nd_list_addtail(struct List *l, struct Node *n)
+{
+    struct Node *pred = l->lh_TailPred;
+
+    n->ln_Succ     = (struct Node *)(APTR)&l->lh_Tail;
+    n->ln_Pred     = pred;
+    pred->ln_Succ  = n;
+    l->lh_TailPred = n;
+}
+
+static inline VOID nd_list_remove(struct Node *n)
+{
+    struct Node *succ = n->ln_Succ;
+    struct Node *pred = n->ln_Pred;
+
+    pred->ln_Succ = succ;
+    succ->ln_Pred = pred;
+}
+
 typedef struct NetdevUnit
 {
     NetdevNic                   nu_Nic;

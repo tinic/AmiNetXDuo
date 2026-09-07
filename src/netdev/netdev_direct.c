@@ -61,7 +61,7 @@ struct IOSana2Req *netdev_take(struct List *list, ULONG type)
            unsigned long is wider than ULONG and ~0UL could never match. */
         if (type == (ULONG)-1 || io->ios2_PacketType == type)
         {
-            Remove(n);
+            nd_list_remove(n);      /* once a frame; see netdev_internal.h */
             return io;
         }
     }
