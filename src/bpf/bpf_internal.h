@@ -106,6 +106,7 @@ VOID ami_bpf_chan_unbind_locked(AmiBpfIf *ifp);
 VOID ami_bpf_chan_rebind_locked(AmiBpfIf *ifp);
 
 /* bpf_tap.c */
+VOID ami_bpf_capture_notify(UWORD capturing);
 AmiBpfIf *ami_bpf_iface_by_cookie(APTR cookie);
 AmiBpfIf *ami_bpf_iface_by_name(const char *name);
 ULONG     ami_bpf_cookie_address(APTR cookie);

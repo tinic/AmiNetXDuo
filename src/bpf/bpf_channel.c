@@ -25,6 +25,31 @@ static AmiBpfChan ami_bpf_chan[AMI_BPF_MAX_CHANNELS];
 static ULONG ami_bpf_chan_generation[AMI_BPF_MAX_CHANNELS];
 volatile UWORD ami_bpf_bound_channels;
 
+/*
+ * The ZERO CROSSING is the whole point of these two.  Nothing outside src/bpf/
+ * cares how many channels are bound; what it cares about is whether any are,
+ * because that is what turns a per-packet hook from dead work into work.  Both
+ * run under ami_bpf_lock(), which is what makes the test-and-notify atomic.
+ */
+static VOID ami_bpf_bound_inc(VOID)
+{
+    ami_bpf_bound_channels++;
+
+    if (ami_bpf_bound_channels == 1)
+        ami_bpf_capture_notify(1);
+}
+
+static VOID ami_bpf_bound_dec(VOID)
+{
+    if (ami_bpf_bound_channels == 0)
+        return;
+
+    ami_bpf_bound_channels--;
+
+    if (ami_bpf_bound_channels == 0)
+        ami_bpf_capture_notify(0);
+}
+
 /* ---------------------------------------------------------------- helpers */
 
 static VOID ami_bpf_copy_bytes(void *dst, const void *src, ULONG len)
@@ -166,7 +191,11 @@ LONG ami_bpf_init(VOID)
         ami_bpf_zero_bytes(&ami_bpf_chan[i], (ULONG)sizeof(AmiBpfChan));
         ami_bpf_chan_generation[i] = 0;
     }
-    ami_bpf_bound_channels = 0;
+    if (ami_bpf_bound_channels != 0)
+    {
+        ami_bpf_bound_channels = 0;
+        ami_bpf_capture_notify(0);
+    }
 
     /* The interface table too: a surviving row holds a cookie into the
        AmiSana2If of the old stack. */
@@ -201,8 +230,8 @@ static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force,
         return;
     }
 
-    if (ch->iface != NULL && ami_bpf_bound_channels > 0)
-        ami_bpf_bound_channels--;
+    if (ch->iface != NULL)
+        ami_bpf_bound_dec();
 
     if (ch->reading && !force)
     {
@@ -337,8 +366,8 @@ LONG ami_bpf_close(APTR owner, LONG channel)
 
     /* Validate and retire the slot in the SAME critical section, or a stale
        close destroys a replacement channel that reopened the number. */
-    if (ch->iface != NULL && ami_bpf_bound_channels > 0)
-        ami_bpf_bound_channels--;
+    if (ch->iface != NULL)
+        ami_bpf_bound_dec();
 
     bufbase = ch->bufbase;
     filter  = ch->filter;
@@ -367,8 +396,7 @@ VOID ami_bpf_chan_unbind_locked(AmiBpfIf *ifp)
         if (ch->open && ch->iface == ifp)
         {
             ch->iface = NULL;       /* ifname is kept, so a rebind can find it */
-            if (ami_bpf_bound_channels > 0)
-                ami_bpf_bound_channels--;
+            ami_bpf_bound_dec();
         }
     }
 
@@ -398,7 +426,7 @@ VOID ami_bpf_chan_rebind_locked(AmiBpfIf *ifp)
             {
                 ch->iface = ifp;
                 ch->dlt   = ifp->dlt;
-                ami_bpf_bound_channels++;
+                ami_bpf_bound_inc();
                 break;
             }
         }
@@ -949,7 +977,7 @@ static LONG ami_bpf_ioctl_setif(APTR owner, LONG channel, const char *name)
     }
 
     if (ch->iface == NULL)
-        ami_bpf_bound_channels++;
+        ami_bpf_bound_inc();
 
     ch->iface = ifp;
     ch->dlt   = ifp->dlt;

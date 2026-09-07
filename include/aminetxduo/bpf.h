@@ -406,6 +406,23 @@ typedef ULONG (*AmiBpfAddrFn)(APTR cookie);
 
 VOID ami_bpf_set_address_hook(AmiBpfAddrFn fn);
 
+/* Told when capture starts and stops. `capturing` is the number of bound
+   channels, so zero means nobody is listening and every tap is dead work.
+   The stack registers one to keep its own per-packet hook OUT of the receive
+   path entirely while that is true: an early-out inside a hook still costs the
+   indirect call that reached it, and no inliner can remove a call through a
+   struct member.
+
+   Called with the bpf table lock held, and from whatever context bound or
+   unbound the channel. Do not call back into src/bpf/ from it, and do not
+   block. */
+typedef VOID (*AmiBpfCaptureFn)(UWORD capturing);
+
+/* Registering also DELIVERS the current state, so the caller never has to know
+   whether a channel was bound before it asked. NULL unregisters and delivers
+   nothing. */
+VOID ami_bpf_set_capture_hook(AmiBpfCaptureFn fn);
+
 /* Unbinds any channel still pointing at it; the channels stay open. */
 VOID ami_bpf_detach_interface(APTR cookie);
 
