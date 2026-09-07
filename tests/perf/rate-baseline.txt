@@ -4,6 +4,37 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# RAISED 2026-09-07 on receive again, for a27be6a6 -- bsd_recv_tcp() fetching
+# the packet directly on the NX_NO_WAIT drain path instead of through
+# bsd_wait_sliced() and an indirect call.  Four sittings, P Q Q P, five rounds
+# each, distinct md5s (d59168945d3e / 1a99c6e37ced):
+#
+#     arm                     sitting 1   sitting 2   median     own spread
+#     P  a773ef4f before      6,019,230   6,022,066   6,020,648      0.05%
+#     Q  a27be6a6 after       6,132,140   6,126,568   6,129,354      0.09%
+#
+# +1.80 per cent, ahead in both positions, AND THE TIGHTEST MEASUREMENT THIS
+# CAMPAIGN HAS PRODUCED: each arm's two sittings agree to within a tenth of a
+# per cent, against a null control whose four sittings spanned 0.90.  Transmit
+# reads -0.23 per cent, which is what a receive-only change should say.
+#
+# AND BOTH OF THE DAY'S EARLIER RAISES REPRODUCED IN THIS SITTING, which is the
+# check a raise needs and rarely gets: the P arm measures 6,019,230 and
+# 6,022,066 against a receive baseline of 6,013,939 (pct 100), and 3,326,977
+# and 3,330,303 against a transmit baseline of 3,287,723 (pct 101).  Neither
+# raise reds on an unchanged tree.
+#
+#     direction   was          now          sittings on the new tree
+#     tcp-rx      6,013,939    6,126,568    6,132,140 (5 rounds), 6,126,568 (5)
+#
+# GAINS DO NOT ADD, and the day's three wins were measured in three separate
+# sittings rather than end to end, so the honest way to quote them is one at a
+# time: +3.87 per cent transmit for the argument checking, +3.04 per cent
+# receive for the IPv4 verify fast path, +1.80 per cent receive for this.  An
+# end-to-end arm against the day's starting commit would say what they come to
+# together and has not been run.
+#
+#
 # RAISED 2026-09-07 on RECEIVE, for 237ea45e -- the IPv4 receive-verify fast
 # path.  Four sittings, two arms, position-balanced P Q Q P, five rounds each,
 # distinct md5s (68ac21ebabd1 / 2836e73cc13d):
@@ -374,5 +405,5 @@
 # +3.3% and +2.6% on receive, ahead in both positions both times.  Quote ABOUT
 # +3%.  Transmit read -0.7% and then +0.3%, which is what no change looks like
 # here -- the first of those two is in no sense a regression.
-tcp-rx 6013939
+tcp-rx 6126568
 tcp-tx 3287723

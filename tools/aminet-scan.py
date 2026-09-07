@@ -480,6 +480,23 @@ def scan(path, lvomap):
         # a guess here is what produced phantom bpf_* calls in three surveys.
         return {"verdict": "unresolved", "lvos": {}, "raw": raw_total,
                 "sockraw": 0}
+    # A `reserved` SLOT CANNOT BE CALLED, so a hit on one proves the base this
+    # scan followed is not bsdsocket's.  Nineteen of the table's entries are
+    # bsd_enosys placeholders (lvo-matrix.tsv), and the AS225 dual-stack family
+    # lands on them: AveHOST, AveHTTPD, AveNTP, AvePING and AveWHOIS each store
+    # the bsdsocket AND the AS225 socket.library base in the SAME global and
+    # select with a mode flag, so proving the base from its OpenLibrary store
+    # is not sufficient and the scan invents ProcessIsServer, GetRouteInfo and
+    # gethostbyaddr on top.  That failure mode was written down as a METHOD row
+    # and then went on firing for five more binaries, unflagged, because
+    # nothing checked for it.
+    #
+    # This is a TRIPWIRE, not a repair: the vector list is not salvaged, it is
+    # refused, and the caller is told which slot gave it away.
+    if any(a == "reserved" for a in named):
+        return {"verdict": "dual-stack-suspect", "lvos": named,
+                "raw": raw_total, "sockraw": sockraw}
+
     return {
         "verdict": "attributed" if named else "no-attributed-call",
         "lvos": named,

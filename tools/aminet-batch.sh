@@ -49,10 +49,10 @@ while read -r a; do
     i=$((i + 1))
     w=$(mktemp -d "${TMPDIR:-/tmp}/anxb.XXXXXX") || continue
     if ! curl -fsL --max-time 60 -o "$w/a.lha" "http://aminet.net$a" 2>/dev/null; then
-        printf '%s\tDOWNLOAD_FAIL\n' "$a" >> "$OUT"; rm -rf "$w"; continue
+        printf '%s\tDOWNLOAD_FAIL\n' "$a" >> "$OUT"; chmod -R u+w "$w" 2>/dev/null; rm -rf "$w"; continue
     fi
     if ! ( cd "$w" && { lha xq a.lha || lhasa xq a.lha; } >/dev/null 2>&1 ); then
-        printf '%s\tEXTRACT_FAIL\n' "$a" >> "$OUT"; rm -rf "$w"; continue
+        printf '%s\tEXTRACT_FAIL\n' "$a" >> "$OUT"; chmod -R u+w "$w" 2>/dev/null; rm -rf "$w"; continue
     fi
     res=$(cd "$ROOT" && timeout 120 python3 tools/aminet-scan.py "$w" 2>/dev/null \
           | grep -vE '	no-bsdsocket	|	error	' | head -8)
@@ -63,7 +63,7 @@ while read -r a; do
             printf '%s\t%s\n' "$a" "$line" >> "$OUT"
         done
     fi
-    rm -rf "$w"
+    chmod -R u+w "$w" 2>/dev/null; rm -rf "$w"
 done < <(sed -n "${START},\$p" "$LIST")
 
 echo "aminet_batch=done archives=$i rows=$(wc -l < "$OUT") out=$OUT"

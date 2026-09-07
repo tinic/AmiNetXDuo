@@ -264,3 +264,35 @@
 /comm/net/RexxNet.lha	attributed	rexxnetd_amitcp in 000 and 020 builds, 15 vectors each
 /comm/net/AmiSpeedTest.lha	attributed	AmiSpeedTest, 16 vectors
 /comm/net/chnfsc102-30b2.lha	attributed	ch_nfsc, 15 vectors
+#
+# 400-archive pass, 2026-09-07, archives 3561-3960 -- the rest of comm/net and
+# the start of comm/tcp.  252 barren (63%), 120 attributed, 103 UNRESOLVED, 52
+# ixemul.  Denser still than comm/net's first half, and the unresolved share is
+# the highest anywhere: a quarter of the drawer stores SocketBase somewhere the
+# scan cannot follow.
+#
+# AND THE SCAN CAUGHT ITSELF, MECHANICALLY, FOR THE FIRST TIME.  Five binaries
+# reported the `reserved` slot -- AveHOST, AveHTTPD, AveNTP, AvePING, AveWHOIS.
+# A reserved entry is bsd_enosys and CANNOT be called, so a hit on one proves
+# the base the scan followed is not bsdsocket's.  That is the AS225 dual-stack
+# family the METHOD row named a hundred archives ago, still firing because
+# nothing checked.  tools/aminet-scan.py refuses them now: `dual-stack-suspect`.
+# Their vector lists below are NOT evidence and are not counted.
+# BULK	252	no bsdsocket binary in the archive
+# BULK	10	lost to download or extract failure, not examined
+# BULK	103	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	52	ixemul-hosted, invisible to a vector scan
+# BULK	4	packed by a cruncher
+/comm/tcp/AvePING.lha	dual-stack-suspect	the `reserved` tripwire fires: 11 vectors including GetRouteInfo and ProcessIsServer, which are exec FreeVec and CreatePool read through the wrong base. Re-scanned after the guard landed and refused
+/comm/tcp/AveHTTPD.lha	dual-stack-suspect	same family, same tripwire -- and the archive the AS225 METHOD row was written from
+/comm/tcp/AveHOST.lha	dual-stack-suspect	same
+/comm/tcp/AveNTP.lha	dual-stack-suspect	same
+/comm/tcp/AveWHOIS.lha	dual-stack-suspect	same
+/comm/net/ncftp-3.3.0.lha	attributed	SIX binaries at 23-24 vectors -- ncftp, ncftpget, ncftpput, ncftpls, ncftpbatch, ncftpbookmarks -- all carrying ObtainSocket. A full FTP suite, and NOT ixemul-hosted
+/comm/tcp/AmiTCP_tnserv.lha	attributed	tnserv, 13 vectors, ReleaseSocket -- the standalone server shape the ReleaseSocket row was first written from
+/comm/tcp/AmiTCPsmtpd.lha	attributed	in.smtpd, 7 vectors, the inetd family
+/comm/tcp/AmiTCP-popd.lha	attributed	POPd, 8 vectors
+/comm/tcp/AmiTALK155.lha	attributed	amitcp-talk 20 vectors and amitcp-talkd 8
+/comm/tcp/AmiMsgWin.lha	attributed	amimsgd, 3 vectors
+/comm/tcp/AmiTCP_ups10.lha	attributed	upsd, 2 vectors
+/comm/news/IvoRSS_OS3_1.1.1.lha	attributed	IvoRSS, 24 vectors
