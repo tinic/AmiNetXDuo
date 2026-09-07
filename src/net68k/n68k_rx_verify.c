@@ -794,16 +794,44 @@ UINT    offset;
          * Byte for byte the same arithmetic as n68k_sum_longwords()
          * (n68k_checksum.c:80): accumulate, and add the carry back around.
          */
+        /*
+         * UNROLLED, BECAUSE -Os LEFT THE LOOP COSTING MORE THAN THE SUM.
+         *
+         * The `for (k = 0; k < 5; k++)` above it compiled to TEN INSTRUCTIONS
+         * A LONGWORD on m68k:
+         *
+         *     move.l (a2,a0.l*4),d1     indexed load, scaled
+         *     add.l  d1,d0
+         *     cmp.l  d1,d0              the carry test...
+         *     scs    d1                 ...as a byte...
+         *     extb.l d1                 ...sign extended...
+         *     sub.l  d1,d0              ...and subtracted
+         *     addq.l #1,a0
+         *     moveq  #5,d1              the BOUND, reloaded every iteration
+         *     cmp.l  a0,d1
+         *     jne    L32
+         *
+         * Four of those ten are the loop and one is a constant GCC would not
+         * hoist.  The count is FIVE and it is fixed by the ihl == 20 test that
+         * selects this branch, so writing it out removes twenty instructions a
+         * frame and leaves the arithmetic identical -- same adds, same
+         * end-around carry, same order.
+         *
+         * STILL C AND STILL BRANCHLESS.  An `addx.l` chain in inline asm is
+         * two instructions a longword rather than six and was the first
+         * instinct; it would also be invisible to the host tier, which
+         * compiles this file and is what caught the last change here.  A
+         * five-fold saving that no test can see is not better than a two-fold
+         * saving that every test does.
+         */
         const ULONG    *w =  (const ULONG *)(const void *)ip;
-        ULONG           acc =  0UL;
-        UINT            k;
+        ULONG           acc;
 
-        for (k = 0U; k < 5U; k++)
-        {
-            acc +=  w[k];
-            if (acc < w[k])
-                acc++;                  /* end-around carry */
-        }
+        acc  =  w[0];
+        acc +=  w[1];  acc += (acc < w[1]) ? 1UL : 0UL;
+        acc +=  w[2];  acc += (acc < w[2]) ? 1UL : 0UL;
+        acc +=  w[3];  acc += (acc < w[3]) ? 1UL : 0UL;
+        acc +=  w[4];  acc += (acc < w[4]) ? 1UL : 0UL;
 
         head =  acc;
     }
