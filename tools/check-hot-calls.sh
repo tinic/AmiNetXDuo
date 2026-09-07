@@ -40,7 +40,32 @@ _ami_sana2_rx_resolve_length
 _ami_sana2_copy_to_buff
 _ami_sana2_rx_should_block
 _ami_bpf_tap_rx
+_bsd_recv_iov
+_bsd_recv_tcp
+_bsd_packet_length
+_ami_sana2_rx_complete
+_ami_sana2_rx_post_slot
+_n68k_rxv_fold
+_n68k_rxv_even
 "
+
+# The seven below were added on 2026-09-07, each verified against a
+# shipping-shaped image (LTO on, -DAMINETXDUO_KEEP_SYMBOLS=ON) before it was
+# listed: zero jsr sites with the canary reading 1.
+#
+# _n68k_rxv_fold IS WHY THIS MATTERED.  The wire profile lists it at 0.4%, and
+# on 2026-09-06 an always_inline was written for it and then reverted on the
+# strength of "nm reports no symbols" -- which was read off a STRIPPED image
+# and meant nothing.  The revert was right and the reason was wrong: LTO
+# already inlines it, and the 0.4% row exists because the profiler build is
+# LTO=OFF by construction, where it really is a 34-byte function called four
+# times a frame.  A row in that profile is not evidence about the shipped
+# image; this gate is.
+#
+# _ami_sana2_rx_thread is deliberately NOT here.  It is a thread entry point
+# handed to tx_thread_create() as a pointer, so it is never jsr'd and a zero
+# for it would be true no matter what happened to the code.  A name that
+# cannot fail is not a guard.
 
 # Out of line on purpose, and NOT a defect: big bodies, or reached through a
 # pointer the linker cannot see through.  Listed so the next reader does not
@@ -119,6 +144,25 @@ if [ "$canary" -eq 0 ]; then
     echo "  The jsr counter found no call to a function that is called once"
     echo "  per received frame.  Either the disassembly format changed or the"
     echo "  receive path did; a zero from the list below would be meaningless."
+    exit 1
+fi
+
+# A NAME THIS GATE CANNOT FIND IS A NAME THIS GATE CANNOT GUARD.  grep for a
+# symbol that no longer exists returns zero jsr sites and the gate reports
+# PASS, so a rename silently retires whatever it was protecting.  Every name
+# above must still be a function definition in the tree.
+missing=""
+for sym in $MUST_BE_INLINED; do
+    if ! grep -rqE "^[A-Za-z_].*[[:space:]]\**${sym#_}\(" src include 2>/dev/null; then
+        missing="$missing $sym"
+    fi
+done
+if [ -n "$missing" ]; then
+    echo "hot_calls=FAIL reason=guarded_name_not_in_tree syms=$missing"
+    echo "  These are guarded as inlined but no longer exist as functions."
+    echo "  A grep for a vanished symbol finds no jsr and passes, so the"
+    echo "  guard would be retired without anyone deciding to retire it."
+    echo "  Rename them here, or drop them with the reason."
     exit 1
 fi
 
