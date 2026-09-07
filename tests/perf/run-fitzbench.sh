@@ -43,8 +43,9 @@ BOARD=a2065
 LOSSCAP=0
 MAXLOSS=""
 MAXEFF=""
+MINWRITE=""
 
-while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
+while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:W:" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -68,6 +69,21 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
         w) LOSSCAP=1 ;;
         l) LOSSCAP=1; MAXLOSS="$OPTARG" ;;
         L) LOSSCAP=1; MAXEFF="$OPTARG" ;;
+        # -W <kbs>: fail if fitz_write comes back below it.
+        #
+        # THE ONE FIGURE THIS HARNESS PRODUCES THAT A GATE CAN USE.  Twelve
+        # sittings on 2026-09-07 put fitz_write's per-arm spread at 0.68 and
+        # 1.18 per cent while fitz_read's was 9.5 and 12.7 -- read gave -0.3,
+        # -5.6 and +13.5 per cent on the SAME two builds in three consecutive
+        # passes.  So there is no -R twin of this option and there should not
+        # be: a floor on a figure that swings ten per cent is a red run
+        # waiting to happen.
+        #
+        # fitz_write is also what the application feels.  The argument-checking
+        # flip measured +3.87 per cent on iperf transmit and +6.0 here, six
+        # sittings an arm with the two sets disjoint, so a transmit regression
+        # shows up LARGER on this than on the rate gate.
+        W) MINWRITE="$OPTARG" ;;
         *) echo "usage: $0 [-H user@host] [-A addr] [-m model] [-c cpu]" \
                 "[-b build] [-k KB] [-C chunk] [-r reps] [-T tag] [-t secs]" \
                 "[-p port] [-s] [-x] [-R roadshowdir] [-a] [-B iface]" \
@@ -448,6 +464,22 @@ printf '%s\n' "$FIGURES"
 echo "    NOTE fitz_write resolves ~1%; fitz_read swings ~10% between sittings"
 echo "         (12 sittings, 2026-09-07).  Do not read a fitz_read delta of"
 echo "         less than about 15% as a result, in either direction."
+
+if [ -n "$MINWRITE" ]; then
+    got=$(printf '%s\n' "$FIGURES" | sed -n 's/^fitz_write_kbs=//p' | head -1)
+    if [ -z "$got" ]; then
+        echo "fitz_write=FAIL reason=no_figure floor=$MINWRITE" >&2
+        exit 1
+    elif [ "$got" -lt "$MINWRITE" ]; then
+        echo "fitz_write=FAIL kbs=$got floor=$MINWRITE" >&2
+        echo "  The application write path is below the floor.  iperf's rate" >&2
+        echo "  gate can miss this: the same change measured +3.87 per cent" >&2
+        echo "  there and +6.0 here." >&2
+        exit 1
+    else
+        echo "fitz_write=PASS kbs=$got floor=$MINWRITE"
+    fi
+fi
 
 echo
 awk -v kb="$KB" -v reps="$REPS" -v board="$BOARD" '
