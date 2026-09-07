@@ -350,7 +350,6 @@ static ULONG nd_n_wrap;
  */
 static ULONG nd_n_wrap_isr;
 static ULONG nd_n_wrap_up;
-static ULONG nd_n_wrap_reply;
 static ULONG nd_n_wrap_hook;
 static ULONG nd_n_wrap_hand;
 static ULONG nd_t_isr_max;
@@ -390,7 +389,6 @@ static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
 static ULONG nd_t_up;       /* handing frames to the openers */
 static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
 static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
-static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
 /*
  * THE WHOLE HAND-OVER, WHICH IS THE ONE BRACKET THIS CLOCK CAN AFFORD HERE.
  *
@@ -402,12 +400,28 @@ static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
  * note in nd_time_report) and are gone.
  *
  * A bracket costs 50 units, so it has to go around something big enough not to
- * care.  netdev_hand_over() should be hook plus the addresses plus the reply
- * plus netdev_payload() and the filter -- of the order of 1,300 units, where
- * 50 is four per cent.  What `up` has that this does not is the opener walk,
- * netdev_take(), netdev_track_find(), the stats and the orphan tail.  ONE
- * SUBTRACTION SPLITS THE QUARTER-MILLISECOND IN TWO, which is what to know
- * before spending a week on either half.
+ * care.  netdev_hand_over() is of the order of 1,400 units, where 50 is under
+ * four per cent, and IT WORKED -- 512 frames, one report:
+ *
+ *     up    1,655 units a frame   410.9 us
+ *     hand  1,425                 353.9      hand < up, as it must be
+ *     hook    996                 247.4      hook < hand, as it must be
+ *
+ *     up - hand    230 units   57.0 us   opener walk, take, find, stats, tail
+ *     hand - hook  429 units  106.5 us   addresses, payload, filter, ReplyMsg
+ *     hook         996 units  247.4 us   the copy
+ *
+ * SO THE QUARTER-MILLISECOND IS ReplyMsg AND A LIST WALK, AND NEITHER IS
+ * AVAILABLE.  Batching the reply was measured at -0.55% receive and -1.11%
+ * transmit and is in the refuted list; netdev_take() and netdev_track_find()
+ * are already inlined.  The device's non-copy time is Exec's, not ours.
+ *
+ * AND `replISR` WENT WITH THE OTHER FOUR, for the same reason and on this same
+ * report: it read 824 units a frame while `hand`, WHICH CONTAINS IT ALONG WITH
+ * THE COPY, read 1,425 -- and hook alone is 996, so hook + reply is 1,821
+ * inside a 1,425 that contains both.  Arithmetically impossible, so not a
+ * measurement.  Three brackets survive here and they are consistent with each
+ * other; that is the whole of what this instrument can say about a frame.
  */
 static ULONG nd_t_hand;     /* the whole netdev_hand_over(), copy included   */
 static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
@@ -492,7 +506,6 @@ static VOID nd_time_report(VOID)
      * inside the interrupt service too.  Divide by `frames`, not by `int`.
      */
     nd_tracex("t handovr", nd_t_hand);
-    nd_tracex("t replISR", nd_t_reply);
     nd_tracex("t txpump ", nd_t_tx);
     nd_tracex("t nint   ", nd_n_int);
     nd_tracex("t nhook  ", nd_n_hook);
@@ -539,7 +552,6 @@ static VOID nd_time_report(VOID)
     nd_tracex("t dropisr", nd_n_wrap_isr);
     nd_tracex("t dropup ", nd_n_wrap_up);
     nd_tracex("t wraphnd", nd_n_wrap_hand);
-    nd_tracex("t wraprep", nd_n_wrap_reply);
     nd_tracex("t wraphok", nd_n_wrap_hook);
     nd_tracex("t maxisr ", nd_t_isr_max);
     nd_tracex("t fldtop ", nd_field_top);
@@ -549,11 +561,11 @@ static VOID nd_time_report(VOID)
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
-    nd_t_reply = nd_t_hand = 0;
+    nd_t_hand = 0;
     nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
     nd_n_int = nd_n_frame = nd_n_hook = nd_n_wrap = 0;
     nd_n_wrap_isr = nd_n_wrap_up = nd_t_isr_max = 0;
-    nd_n_wrap_reply = nd_n_wrap_hook = nd_n_wrap_hand = 0;
+    nd_n_wrap_hook = nd_n_wrap_hand = 0;
 }
 #endif
 
@@ -712,16 +724,7 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         return NETDEV_RX_FAILED;
     }
 
-#ifdef NETDEV_TIME
-    {
-        ULONG tr = nd_now();
-
-        netdev_reply(io, 0, 0);
-        nd_t_reply += nd_since_at(tr, &nd_n_wrap_reply);
-    }
-#else
     netdev_reply(io, 0, 0);
-#endif
     return NETDEV_RX_TAKEN;
 }
 
