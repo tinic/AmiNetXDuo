@@ -642,6 +642,19 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # An option's OFF side must define every function its ON side does.  The
+    # link only notices on the arm that turns the option off, which is the arm
+    # nobody builds locally; raw.c cost three of them in one sitting.
+    if tools/check-option-stubs.sh > "$BUILD/option-stubs.log" 2>&1; then
+        note "option stubs: $(sed -n 's/^option_stubs_files=/files /p' \
+              "$BUILD/option-stubs.log") checked"
+    else
+        cat "$BUILD/option-stubs.log"
+        fail "an option's off side is missing a stub its on side defines\
+ (tools/check-option-stubs.sh)"
+        return 1
+    fi
+
     local st log
     for st in tests/*/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue
