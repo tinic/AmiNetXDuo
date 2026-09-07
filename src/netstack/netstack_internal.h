@@ -184,9 +184,9 @@ struct AmiNetStack
      */
     BOOL                ns_IfaceWanted[AMI_CFG_MAX_ATTACHED];
 
+#ifdef AMINETXDUO_DHCP
     NX_DHCP             ns_Dhcp;
     BOOL                ns_DhcpCreated;
-    BOOL                ns_DhcpStarted;
 
     /*
      * The name the client announces as option 12.  nx_dhcp_create() keeps the
@@ -194,6 +194,14 @@ struct AmiNetStack
      * NX_DHCP, and storage of its own: ns_Config.hostname is written later.
      */
     char                ns_DhcpName[AMI_CFG_NAME_LEN];
+#endif
+
+    /*
+     * NOT under AMINETXDUO_DHCP, unlike the three above.  netstack_dns.c reads
+     * both on a resolver build whatever gates the client (netstack_dns.c:1022,
+     * :1028), and between them they are a BOOL and one byte per interface.
+     */
+    BOOL                ns_DhcpStarted;
 
     /* Last DHCP state and last address seen per interface.  NetX Duo's
        callbacks report only the new value, so the previous one is kept here to
@@ -224,6 +232,7 @@ struct AmiNetStack
     BOOL                ns_AutoIpCreated;
     BOOL                ns_AutoIpRunning;
 
+#ifdef AMINETXDUO_DNS
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;
 
@@ -234,6 +243,7 @@ struct AmiNetStack
     AmiNsDhcpDnsLease   ns_DhcpDnsLease;
     AmiNsDhcpSearchLease ns_DhcpSearchLease;
     AmiNsDhcpDomainState ns_DhcpDomain;
+#endif
 
 #ifdef AMINETXDUO_IPV6
     /*
