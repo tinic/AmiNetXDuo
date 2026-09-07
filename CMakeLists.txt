@@ -499,6 +499,24 @@ endif()
 # acknowledged arriving a second time.  Without these there is no number for
 # how much, only the cost of trimming it.  OFF is what ships and this changes
 # nothing about it.
+# NetX Duo's and ThreadX's argument validation: every public API has an _nxe_
+# or _txe_ wrapper that checks the caller's pointers and handles before calling
+# the real one.  ON is what ships, because a wrong argument from a program
+# through bsdsocket.library should come back as an error and not as a jump
+# through a null pointer on a machine with no MMU.
+#
+# The floor build turns it off.  Nothing outside this tree calls NetX Duo
+# directly -- bsdsocket.library validates at its own vectors first -- so what
+# the wrappers re-check there is what we already checked.  Worth 8,808 bytes
+# measured on the micro arm, 7,788 of it NetX and 1,020 ThreadX.
+option(AMINETXDUO_NX_ERROR_CHECKING
+       "Compile NetX Duo and ThreadX argument checking" ON)
+if(NOT AMINETXDUO_NX_ERROR_CHECKING)
+    add_compile_definitions(
+        NX_DISABLE_ERROR_CHECKING
+        TX_DISABLE_ERROR_CHECKING)
+endif()
+
 option(AMINETXDUO_NX_COUNTERS
        "Compile NetX Duo's TCP/UDP/ARP/RARP/IGMP counters, for diagnosis" OFF)
 if(NOT AMINETXDUO_NX_COUNTERS)
