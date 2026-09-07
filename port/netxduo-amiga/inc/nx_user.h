@@ -214,8 +214,10 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
 /* ALL_STACK is required, not optional: without it the raw hook runs only in the
    unrecognised-protocol branch, so a raw ICMP socket never sees an echo reply.
    FILTER changes the NX_IP layout and must be seen by every translation unit. */
+#ifdef AMINETXDUO_RAWSOCKET
 #define NX_ENABLE_IP_RAW_PACKET_FILTER
 #define NX_ENABLE_IP_RAW_PACKET_ALL_STACK
+#endif
 
 
 /* ---------------------------------------------------------- capture ------ */

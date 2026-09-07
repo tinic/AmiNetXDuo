@@ -519,6 +519,22 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# SOCK_RAW.  No vector of its own -- a raw socket is reached through socket()
+# with a protocol number -- so what this gates is raw.c and the NetX Duo raw
+# hook underneath it.  ping and traceroute are the callers; a floor drawer does
+# not install them.
+#
+# socket(AF_INET, SOCK_RAW, n) fails with EPROTONOSUPPORT because bsd_raw_open()
+# fails and socket.c:975 already returns -1 on that, so socket.c needs no edit.
+#
+# NX_ENABLE_IP_RAW_PACKET_FILTER goes with it (port/netxduo-amiga/inc/nx_user.h),
+# which is the larger half: the filter changes the NX_IP layout and every
+# translation unit sees it, so it is not something LTO can collect.
+option(AMINETXDUO_RAWSOCKET "Build SOCK_RAW" ON)
+if(AMINETXDUO_RAWSOCKET)
+    add_compile_definitions(AMINETXDUO_RAWSOCKET)
+endif()
+
 # The network monitoring hooks: AddNetMonitorHookTagList and its Remove, and
 # the three internal helpers socket.c and transfer.c call to decide whether a
 # hook wants to see a bind, a connect or a send.
