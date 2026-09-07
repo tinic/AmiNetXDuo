@@ -519,6 +519,21 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# TCP urgent data: MSG_OOB, SIOCATMARK and SIGURG.  No vector of its own -- it
+# is a flag on send() and recv() and an ioctl -- so this gates oob.c and the
+# three entry points transfer.c and socket.c reach it through.
+#
+# telnet is the classic caller and a floor drawer does not install one.
+#
+# bsd_tcp_urgent_notify() stays a real function and is still handed to
+# nx_tcp_socket_create() (socket.c:991, :1337); off, it is a no-op, so the
+# callback registration is unchanged and socket.c is not edited.  MSG_OOB on
+# send() answers ENOSYS and bsd_oob_take() reports no mark.
+option(AMINETXDUO_OOB "Build TCP urgent data (MSG_OOB, SIOCATMARK)" ON)
+if(AMINETXDUO_OOB)
+    add_compile_definitions(AMINETXDUO_OOB)
+endif()
+
 # SOCK_RAW.  No vector of its own -- a raw socket is reached through socket()
 # with a protocol number -- so what this gates is raw.c and the NetX Duo raw
 # hook underneath it.  ping and traceroute are the callers; a floor drawer does
