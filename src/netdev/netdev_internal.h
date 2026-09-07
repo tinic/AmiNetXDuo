@@ -265,8 +265,59 @@ VOID netdev_tx_pump(NetdevUnit *unit);
    from the romtag so it can run as an ordinary host test.  There is no
    unclaim: neither supported port core has a recoverable error once its
    drain has begun, so a claim commits (netdev_nic.h states the contract). */
-NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type);
-struct IOSana2Req *netdev_take(struct List *list, ULONG type);
+/*
+ * THE LAST TWO PER-FRAME HELPERS THAT WERE STILL A CROSS-TU CALL.
+ *
+ * Both run once for every received frame from netdev_rx_body()
+ * (netdev_device.c:724), and both lived in netdev_direct.c, so whether the
+ * shipped image pays a jsr for them was a decision LTO made rather than one
+ * the source stated -- the same gap 05b90c97 closed for netdev_payload() and
+ * netdev_filter_ok(), and unanswerable the same way: anxnet.device links with
+ * -flto and `nm` on a KEEP_SYMBOLS build returns 136 entries with every local
+ * name collapsed, so tools/check-hot-calls.sh cannot count the sites.
+ *
+ * _netdev_take is 1.0% of the real-path profile and _netdev_track_find scans
+ * op_TrackHigh entries, which is three.  Neither body is bigger than its own
+ * call sequence.  The cold callers -- the two drain loops in netdev_close()
+ * (netdev_device.c:1193) -- get a copy each and run once.
+ */
+
+/* Bounded by the highest slot ever taken, not by the array.  The profile put
+   this at 26% of the hand-over when it scanned all sixteen entries for every
+   opener on every frame, and usually nothing is tracked.  An opener that
+   tracks two types now scans two. */
+static inline NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type)
+{
+    UWORD i;
+
+    for (i = 0; i < op->op_TrackHigh; i++)
+    {
+        if (op->op_Track[i].used && op->op_Track[i].type == type)
+            return &op->op_Track[i];
+    }
+
+    return NULL;
+}
+
+static inline struct IOSana2Req *netdev_take(struct List *list, ULONG type)
+{
+    struct Node *n;
+
+    for (n = list->lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    {
+        struct IOSana2Req *io = (struct IOSana2Req *)n;
+
+        /* (ULONG)-1, not ~0UL: this file also builds on the test host, where
+           unsigned long is wider than ULONG and ~0UL could never match. */
+        if (type == (ULONG)-1 || io->ios2_PacketType == type)
+        {
+            nd_list_remove(n);
+            return io;
+        }
+    }
+
+    return NULL;
+}
 UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                        APTR *token);
 VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed);
