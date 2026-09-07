@@ -19,7 +19,7 @@ lvo	ReleaseSocket	micro	BREAKS	inetd,TnServ,AmiFTPd19	NOT inetd-only: TnServ.c:8
 lvo	ReleaseCopyOfSocket	micro	BREAKS	inetd,rsh,letnet	same handoff contract
 lvo	gethostbyname	micro	DEGRADED	AmiFTP,AmFTP,AWeb,ftpd,ping,route,rsh,traceroute,ncftp	answers from DEVS:Internet/hosts only; AmFTP can then reach numeric IPs alone
 lvo	gethostbyaddr	micro	DEGRADED	AmiFTP,AmFTP,AWeb,AmiSSL	as above
-feature	RAWSOCKET	micro	BREAKS	AvePING,ping,traceroute	AvePING 0x1772 pea 1.w/pea 3.w/pea 2.w -> socket(AF_INET,SOCK_RAW,IPPROTO_ICMP); prints "Cannot create raw socket (ICMP)". NOT AN LVO -- an argument to socket(), so no vector scan can find it
+feature	RAWSOCKET	micro	BREAKS	AvePING,ping,traceroute	AvePING 0x1772 pea 1.w/pea 3.w/pea 2.w -> socket(AF_INET,SOCK_RAW,IPPROTO_ICMP); prints "Cannot create raw socket (ICMP)". Not an LVO -- an argument to socket() -- but DETECTABLE after all: the type is a constant immediate at every call site examined, and tools/aminet-scan.py decodes it. My earlier claim that no scan could find it was wrong
 feature	BPF	minimal	CLEAN	34 binaries across 3 passes	every bpf_* offset (-366..-408) resolves to exec PutMsg/GetMsg/ReplyMsg/WaitPort/FindPort/RemLibrary/OldOpenLibrary or dos FreeArgs/AddPart/PathPart
 lvo	AddRouteTagList	micro	DECODED	-	-414 is exec CloseLibrary in every binary examined
 lvo	ProcessIsServer	micro	DECODED	-	-690 is exec FreeVec
