@@ -37,6 +37,31 @@ Usage:
 SPDX-License-Identifier: MIT
 """
 
+#
+# A PROFILE SHARE IS WHERE, NOT HOW MUCH, AND HERE IS THE CALIBRATION.
+#
+# This build is -DAMINETXDUO_LTO=OFF by construction (a profile needs symbols),
+# and the shipping build is not.  A function that is a symbol here can be
+# inlined and folded away there, so its share is partly its own call frame --
+# work the shipped image never does.  That caveat has been in the campaign
+# ledger for weeks in words.  On 2026-09-07 it got a number:
+#
+#   _netdev_perform was 1.8-2.1% of this report, the largest ours-row in
+#   anxnet.device.  Two commits sent CMD_READ and CMD_WRITE straight to their
+#   handlers instead of through its twenty-case jump table, and it is now
+#   ABSENT from the top 25 -- confirmed against this very profile, with
+#   _netdev_queue_read appearing at 1.4% where the traffic went.
+#
+#   THE RATE MOVED BY +0.04%.  Five rounds an arm, positions alternated, all
+#   twenty rounds distinct: rx 5,954,208 -> 5,956,386, positions -0.69% and
+#   +0.76%.  A whole 2.1% row removed, verified gone, and the wire could not
+#   tell.
+#
+# So: use this report to find WHICH function is on a path, and never to predict
+# what removing it is worth.  For that there is tests/perf/run-rate-ab.sh, and
+# it needs the effect to clear about one per cent before it can see it at all.
+#
+
 import argparse
 import bisect
 import collections
