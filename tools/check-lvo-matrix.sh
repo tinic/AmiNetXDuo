@@ -180,10 +180,18 @@ if not __import__('os').path.exists(ev):
 led='tests/profiles/aminet-surveyed.tsv'
 if not __import__('os').path.exists(led):
     print("lvo_matrix=FAIL reason=no_surveyed_ledger"); sys.exit(1)
-corpus=None; seen=[]; exhaustive={}
+corpus=None; seen=[]; exhaustive={}; bulk=0
 for l in open(led):
     if l.startswith('# CORPUS'):
         try: corpus=int(l.split('\t')[1])
+        except Exception: pass
+        continue
+    # A bulk row stands for archives examined and found uninteresting -- 274 of
+    # one 300-archive pass carried no Amiga binary that opens bsdsocket at all.
+    # Listing each would bury the ledger; leaving them out would understate
+    # coverage, which is the number every finding is read against.
+    if l.startswith('# BULK'):
+        try: bulk += int(l.split('\t')[1])
         except Exception: pass
         continue
     if l.startswith('#') or not l.strip(): continue
@@ -194,7 +202,7 @@ for l in open(led):
         exhaustive[f[0]]=True
 if corpus is None:
     print("lvo_matrix=FAIL reason=ledger_has_no_corpus_line"); bad+=1; corpus=0
-n=len(set(seen))
+n=len(set(seen)) + bulk
 cov=f"surveyed={n} corpus={corpus} pct={100.0*n/corpus:.1f}" if corpus else "surveyed=%d"%n
 for l in open(ev):
     if l.startswith('#') or not l.strip(): continue

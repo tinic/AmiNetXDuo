@@ -54,3 +54,21 @@
 /comm/mail/AmiMAIL.lha	screened	2 vectors reported
 /comm/misc/AminetFileRequester.lha	screened	3 vectors reported
 /comm/mail/EmailCheck.lha	screened	1 vector reported
+#
+# 300-archive pass, 2026-09-07, tools/aminet-batch.sh over the fixed scanner.
+# 274 carried no Amiga binary that opens bsdsocket -- comm/ is mostly documents,
+# ARexx and source.  Counted, not listed.
+# BULK	274	no bsdsocket binary in the archive
+# BULK	14	lost to download or extract failure, not examined
+/comm/bbs/ConnectLine.lha	screened	SIX daemons -- CLChatD, CLChatIRCD, clfingerd, cltcpmond and two more -- all calling ObtainSocket; a whole BBS daemon suite in the inetd family
+/comm/bbs/CL51-upd02.lha	unresolved	unresolved from the 300-archive pass
+/comm/bbs/CL51_Demo.lha	unresolved	unresolved from the 300-archive pass
+/comm/bbs/DC-X107i.lha	ixemul	ixemul/unresolved from the 300-archive pass
+/comm/bbs/D_wall.lha	packed	packed from the 300-archive pass
+/comm/bbs/DayDreamBBS.lha	screened	attributed from the 300-archive pass
+/comm/bbs/FCheck251.lha	packed	packed from the 300-archive pass
+/comm/bbs/G5_FTest.lha	ixemul	ixemul/packed from the 300-archive pass
+/comm/bbs/G5_Sys.lha	unresolved	unresolved from the 300-archive pass
+/comm/bbs/GMC-BBS-262.lha	packed	packed from the 300-archive pass
+/comm/bbs/Reccoon-Eval.lha	packed	packed from the 300-archive pass
+/comm/bbs/SKYLINEIIBBS2.lha	packed	packed from the 300-archive pass
