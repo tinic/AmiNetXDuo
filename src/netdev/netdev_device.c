@@ -507,6 +507,21 @@ static VOID nd_time_report(VOID)
      *
      * `bldTASK` has always carried this caveat in words -- "preempted: NOT a
      * cost" -- and this is the same caveat as a number, for every row.
+     *
+     * AND THERE IS A FLOOR UNDER ALL OF IT: THIS CLOCK CANNOT RESOLVE TENS OF
+     * UNITS.  `t probe16` prices sixteen back-to-back nd_now() calls at 400
+     * beam units, which is 25 a call and 50 for the pair that brackets one
+     * span -- the same order as `find` and `take` themselves ever were.  Three
+     * runs of the identical code path measured find at 24,468 then 271,901
+     * then 513,768, a factor of twenty-one, with only three to eight field
+     * corrections between them to explain it.
+     *
+     * SO DO NOT QUOTE preISR, takeISR, findISR OR addrISR.  What this
+     * instrument resolves is spans of hundreds to thousands of units -- `up`
+     * at about two thousand a frame, `hook` at a thousand, `replISR` at a few
+     * hundred, `isr` at several thousand an interrupt -- and those are stable
+     * across runs.  The four short ones are below its own overhead, and the
+     * honest reading of them is "smaller than the instrument", not a number.
      */
     nd_tracex("t dropisr", nd_n_wrap_isr);
     nd_tracex("t dropup ", nd_n_wrap_up);

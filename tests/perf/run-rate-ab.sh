@@ -118,19 +118,65 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
 build_arm "$BASE_DIR" "$BASE_REF" BASE || exit 1
 build_arm "$HEAD_DIR" "$HEAD_REF" HEAD || exit 1
 
+#
+# IT CALLS run-iperf.sh, NOT check-rate.sh, AND THE DIFFERENCE IS THE POINT.
+#
+# check-rate.sh is a GATE: it compares a median against a recorded baseline and
+# it DISCARDS any round whose harness returned non-zero.  On this rig every
+# round returns non-zero, because run-iperf.sh asserts the PEER's side of each
+# arm as well as the guest's and every peer .out file comes back empty:
+#
+#     FAIL: no TCP receive count to compare: guest '2412544' peer ''
+#
+# while the guest's own measurement is complete in the same run -- tcp-rx
+# 5,869,937 bit/s, udp-rx 512 datagrams 0 lost.  So the gate throws away four
+# good rate lines to report a cross-check it could not perform, and the CPU-
+# bound instrument has been unusable for it.
+#
+# AN A/B DOES NOT WANT THAT CROSS-CHECK.  It wants the same guest, measured
+# twice, on two builds; the peer-side agreement is the gate's business and its
+# absence is identical in both arms.  So this reads the rate lines directly and
+# takes its own median, and REPORTS the harness rc per round rather than
+# obeying it -- `bad=` in the sample line says how many rounds had a non-zero
+# harness while still producing a figure, so a reader can see it is the same in
+# both arms rather than a difference between them.
+#
+# A round that produced NO rate line is still dropped: that is a round that
+# measured nothing, not a round whose cross-check failed.
+#
+median_of() {                           # numbers on stdin
+    sort -n | awk '{ v[NR] = $1 }
+                   END { if (NR == 0) { print "none"; exit }
+                         if (NR % 2) print v[(NR + 1) / 2]
+                         else        printf "%d\n", (v[NR/2] + v[NR/2 + 1]) / 2 }'
+}
+
 run_arm() {                             # $1 dir  $2 label  $3 pass  $4 position
     cd "$1" || return 9
-    local out="/tmp/rate-ab-$2-p$3.log"
-    AMINETXDUO_RATE_ROUNDS="$ROUNDS" \
-        tools/check-rate.sh -b build/ab -B "$IFACE" -P "$PEER" \
-        < /dev/null > "$out" 2>&1
-    local rc=$?
-    local rx tx
-    rx=$(sed -n 's/^rate=[a-z]* dir=tcp-rx median=\([0-9]*\) .*/\1/p' "$out" | head -1)
-    tx=$(sed -n 's/^rate=[a-z]* dir=tcp-tx median=\([0-9]*\) .*/\1/p' "$out" | head -1)
-    echo "sample arm=$2 pass=$3 pos=$4 rc=$rc rounds=$ROUNDS" \
-         "rx=${rx:-none} tx=${tx:-none}"
-    [ "$rc" = 0 ] || sed -n 's/^\(rate=fail.*\)/  \1/p' "$out" | head -3
+    local out base r rc bad=0 got=0
+    base="/tmp/rate-ab-$2-p$3"
+    : > "$base.rx"; : > "$base.tx"
+
+    r=1
+    while [ "$r" -le "$ROUNDS" ]; do
+        out="$base-r$r.log"
+        tests/tools/run-iperf.sh -b build/ab -B "$IFACE" -P "$PEER" \
+            < /dev/null > "$out" 2>&1
+        rc=$?
+        [ "$rc" = 0 ] || bad=$((bad + 1))
+
+        sed -n 's/^dir=tcp-rx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
+            head -1 >> "$base.rx"
+        sed -n 's/^dir=tcp-tx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
+            head -1 >> "$base.tx"
+        r=$((r + 1))
+    done
+
+    got=$(grep -c . "$base.rx")
+    echo "sample arm=$2 pass=$3 pos=$4 rounds=$ROUNDS got=$got bad=$bad" \
+         "rx=$(median_of < "$base.rx") tx=$(median_of < "$base.tx")"
+    [ "$got" = "$ROUNDS" ] ||
+        echo "  $((ROUNDS - got)) round(s) produced no rate line at all"
 }
 
 p=1
