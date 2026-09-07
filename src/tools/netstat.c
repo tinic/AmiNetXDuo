@@ -502,6 +502,9 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("verify, rx_verify_sum alone ", &b->nrb_Verify,
                     b->nrb_EClockRate);
+    /* The floor every leg above sits on: two clock reads and no work. */
+    show_budget_leg("probe,  a bracket round nothing", &b->nrb_Probe,
+                    b->nrb_EClockRate);
 
     /* Coverage of the direct-completion fork, not a duration: recv() requests
        completed in place against packets the blocking dequeue fetched. */

@@ -110,6 +110,29 @@ typedef struct AmiBudget
      * `hand` split the device's quarter-millisecond.
      */
     AmiBudgetLeg    verify;         /* n68k_rx_verify_sum() / _verify()    */
+    /*
+     * WHAT A BRACKET COSTS, BECAUSE THREE LEGS ARE SITTING ON THAT FLOOR.
+     *
+     * Every leg here is two ami_budget_clock() calls, and each of those is
+     * ReadEClock -- a timer.device library call, not a chip register read.
+     * Sorted, the legs come out
+     *
+     *     defer 74   repost 94   verify 128   demux 194   state 194
+     *     settle 462   post 763   deliver 935   ack 4511
+     *
+     * and NOTHING lands below 74.  Three of them cluster in 74-128 while the
+     * rest are hundreds or thousands: that is the shape of a floor, not of a
+     * distribution.  `verify` at 128 us for a twenty-byte checksum and forty
+     * operations is the clearest case -- it cannot be that, and the question
+     * is how much of it is this.
+     *
+     * NETDEV_TIME had exactly this problem and `t probe16` settled it: sixteen
+     * back-to-back clock reads priced nd_now() at 25 beam units, and four rows
+     * under that were removed as unmeasurable.  Same test, different clock.
+     * ami_budget_probe() brackets NOTHING, sixteen times, so the floor is a
+     * number in the same report as the legs it limits.
+     */
+    AmiBudgetLeg    probe;          /* two clock reads and no work between  */
 
     /* Which side of the direct-completion fork a receive took.  Plain
        counters, not legs: they answer coverage, not duration. */
@@ -151,6 +174,7 @@ ULONG ami_budget_clock(VOID);
 VOID ami_budget_drain(ULONG dt);
 VOID ami_budget_repost(ULONG dt);
 VOID ami_budget_verify(ULONG dt);
+VOID ami_budget_probe(VOID);
 VOID ami_budget_baton(ULONG dt);
 VOID ami_budget_deliver(ULONG now);
 VOID ami_budget_pickup(ULONG now);
