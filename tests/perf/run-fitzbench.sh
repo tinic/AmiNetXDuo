@@ -431,6 +431,24 @@ echo "==> results ($MODEL${CPU:+/$CPU}, $KB KB, chunk $CHUNK, $REPS reps)"
 grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /'
 printf '%s\n' "$FIGURES"
 
+# THE TWO FITZ FIGURES ARE NOT WORTH THE SAME AND THE OUTPUT USED TO IMPLY
+# THEY WERE.  Twelve sittings on 2026-09-07 -- two builds, six sittings each,
+# three orders -- gave:
+#
+#     fitz_write   arm A spread 0.68%,  arm B 1.18%,  the two sets DISJOINT
+#     fitz_read    arm A spread 9.5%,   arm B 12.7%,  per-pass deltas
+#                  -0.3%, -5.6% and +13.5% on the SAME pair of builds
+#
+# So write resolves a six per cent difference with twelve samples and no
+# overlap, and read cannot resolve anything: its own noise is several times
+# any effect this campaign has produced.  A read pair that looks like a
+# regression is one sitting of a metric that swings nineteen points between
+# sittings -- I chased exactly that for half an hour before the third pass
+# came back the other way.
+echo "    NOTE fitz_write resolves ~1%; fitz_read swings ~10% between sittings"
+echo "         (12 sittings, 2026-09-07).  Do not read a fitz_read delta of"
+echo "         less than about 15% as a result, in either direction."
+
 echo
 awk -v kb="$KB" -v reps="$REPS" -v board="$BOARD" '
     /^===== / { cmd = $0; infitz = (cmd ~ /FitzBench FITZ:/); inip = 0; inif = 0 }

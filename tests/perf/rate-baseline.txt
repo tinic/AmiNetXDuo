@@ -4,6 +4,33 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# THE DAY ON THE APPLICATION WORKLOAD, 2026-09-07: fitz_write +5.9 per cent,
+# fitz_read NOT MEASURABLE.  d8f77786 against 5622fbde, TWELVE sittings -- six
+# an arm, three orders (A B B A, B A A B, A B A B), md5s 010c55093e94 and
+# 8837b02171a0:
+#
+#     fitz_write   A 2647 2659 2665 2652 2654 2653   median 2653
+#                  B 2830 2817 2804 2797 2824 2801   median 2810
+#                  +5.9%, spreads 0.68 and 1.18 per cent, THE TWO SETS DISJOINT
+#
+#     fitz_read    A 3517 3609 3701 3692 3438 3379   spread  9.5%
+#                  B 3578 3526 3486 3494 3929 3670   spread 12.7%
+#                  per-pass deltas -0.3%, -5.6%, +13.5% ON THE SAME TWO BUILDS
+#
+# WRITE IS SETTLED AND READ CANNOT SETTLE ANYTHING.  The one transmit change of
+# the day -- NetX and ThreadX argument checking, +3.87 per cent on iperf tx --
+# owns a direction, and Fitz write is transmit-shaped, so the application sees
+# about 1.5x what iperf reports.  Fitz read did not move; iperf receive did
+# +2.54 per cent, and the two are different regimes, which this file already
+# says.
+#
+# AND I SPENT HALF AN HOUR CHASING A REGRESSION THAT WAS NOISE.  Pass two read
+# -5.6 per cent and I wrote it up as a possible receive regression with a
+# bisect point named.  Pass three read +13.5 per cent on the same two builds.
+# A fitz_read delta under about fifteen per cent is not a result in either
+# direction, and run-fitzbench.sh prints that beside the figure now.
+#
+#
 # NO EFFECT, 2026-09-07: n68k_copy_bytes with a move.l loop instead of movem.
 # Four sittings, P Q Q P, five rounds each, distinct md5s (29727635af1d /
 # f998da5336d2), the arm script refusing to run if the two hashed the same:
