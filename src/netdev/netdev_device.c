@@ -352,6 +352,7 @@ static ULONG nd_n_wrap_isr;
 static ULONG nd_n_wrap_up;
 static ULONG nd_n_wrap_reply;
 static ULONG nd_n_wrap_hook;
+static ULONG nd_n_wrap_hand;
 static ULONG nd_t_isr_max;
 
 static ULONG nd_since_at(ULONG t0, ULONG *drops)
@@ -390,6 +391,25 @@ static ULONG nd_t_up;       /* handing frames to the openers */
 static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
 static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
 static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
+/*
+ * THE WHOLE HAND-OVER, WHICH IS THE ONE BRACKET THIS CLOCK CAN AFFORD HERE.
+ *
+ * `up` reads about 2,000 beam units a frame and `hook` -- the copy -- about
+ * 1,000, so ROUGHLY A QUARTER OF A MILLISECOND A FRAME IS SPENT IN THE DEVICE
+ * OUTSIDE THE COPY.  At ~500 frames a second that is about twelve per cent of
+ * a receive run, all of it ours, and the report has never said where it goes:
+ * the four short brackets that tried were smaller than the instrument (see the
+ * note in nd_time_report) and are gone.
+ *
+ * A bracket costs 50 units, so it has to go around something big enough not to
+ * care.  netdev_hand_over() should be hook plus the addresses plus the reply
+ * plus netdev_payload() and the filter -- of the order of 1,300 units, where
+ * 50 is four per cent.  What `up` has that this does not is the opener walk,
+ * netdev_take(), netdev_track_find(), the stats and the orphan tail.  ONE
+ * SUBTRACTION SPLITS THE QUARTER-MILLISECOND IN TWO, which is what to know
+ * before spending a week on either half.
+ */
+static ULONG nd_t_hand;     /* the whole netdev_hand_over(), copy included   */
 static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
 static ULONG nd_t_bld;      /* the opener's CopyFrom, framing a transmit     */
 static ULONG nd_t_iss;      /* ops->tx: register setup and the port writes   */
@@ -471,6 +491,7 @@ static VOID nd_time_report(VOID)
      * trustworthy the way `iss` is; `pre`, `take`, `find` and `addr` are all
      * inside the interrupt service too.  Divide by `frames`, not by `int`.
      */
+    nd_tracex("t handovr", nd_t_hand);
     nd_tracex("t replISR", nd_t_reply);
     nd_tracex("t txpump ", nd_t_tx);
     nd_tracex("t nint   ", nd_n_int);
@@ -517,6 +538,7 @@ static VOID nd_time_report(VOID)
      */
     nd_tracex("t dropisr", nd_n_wrap_isr);
     nd_tracex("t dropup ", nd_n_wrap_up);
+    nd_tracex("t wraphnd", nd_n_wrap_hand);
     nd_tracex("t wraprep", nd_n_wrap_reply);
     nd_tracex("t wraphok", nd_n_wrap_hook);
     nd_tracex("t maxisr ", nd_t_isr_max);
@@ -527,11 +549,11 @@ static VOID nd_time_report(VOID)
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
-    nd_t_reply = 0;
+    nd_t_reply = nd_t_hand = 0;
     nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
     nd_n_int = nd_n_frame = nd_n_hook = nd_n_wrap = 0;
     nd_n_wrap_isr = nd_n_wrap_up = nd_t_isr_max = 0;
-    nd_n_wrap_reply = nd_n_wrap_hook = 0;
+    nd_n_wrap_reply = nd_n_wrap_hook = nd_n_wrap_hand = 0;
 }
 #endif
 
@@ -762,8 +784,16 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         io = netdev_take(&op->op_Reads, type);
         if (io != NULL)
         {
+#ifdef NETDEV_TIME
+            ULONG          th = nd_now();
+            NetdevRxResult r  = netdev_hand_over(op, io, frame, len, type,
+                                                 flags);
+
+            nd_t_hand += nd_since_at(th, &nd_n_wrap_hand);
+#else
             NetdevRxResult r = netdev_hand_over(op, io, frame, len, type,
                                                 flags);
+#endif
 
             if (r == NETDEV_RX_REJECTED)
             {
