@@ -509,6 +509,22 @@ endif()
 # directly -- bsdsocket.library validates at its own vectors first -- so what
 # the wrappers re-check there is what we already checked.  Worth 8,808 bytes
 # measured on the micro arm, 7,788 of it NetX and 1,020 ThreadX.
+# NetStackQuery() and NetStackControl(), the two PRIVATE vectors netstat,
+# ShowNetStatus and CheckNetConfig read the live stack through.  They are the
+# largest single file in the bsdsocket surface and they report; nothing routes
+# a packet through them.
+#
+# The floor build answers both with ENOSYS, the way AMINETXDUO_BPF answers its
+# five (src/bsdsocket/bpf.c:135).  The vectors stay in the table whatever the
+# build -- an LVO that moved would be an ABI break -- so this removes the
+# bodies and not the slots.  A drawer built this way does not install the tools
+# that call them.
+option(AMINETXDUO_NETSTATUS
+       "Build NetStackQuery/NetStackControl, the live-stack reports" ON)
+if(AMINETXDUO_NETSTATUS)
+    add_compile_definitions(AMINETXDUO_NETSTATUS)
+endif()
+
 option(AMINETXDUO_NX_ERROR_CHECKING
        "Compile NetX Duo and ThreadX argument checking" ON)
 if(NOT AMINETXDUO_NX_ERROR_CHECKING)
