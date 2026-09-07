@@ -350,6 +350,12 @@ static ULONG nd_n_wrap;
  */
 static ULONG nd_n_wrap_isr;
 static ULONG nd_n_wrap_up;
+static ULONG nd_n_wrap_pre;
+static ULONG nd_n_wrap_take;
+static ULONG nd_n_wrap_find;
+static ULONG nd_n_wrap_addr;
+static ULONG nd_n_wrap_reply;
+static ULONG nd_n_wrap_hook;
 static ULONG nd_t_isr_max;
 
 static ULONG nd_since_at(ULONG t0, ULONG *drops)
@@ -483,8 +489,33 @@ static VOID nd_time_report(VOID)
     nd_tracex("t nhook  ", nd_n_hook);
     nd_tracex("t probe16", nd_t_probe);
     nd_tracex("t dropped", nd_n_wrap);
+    /*
+     * EVERY SPAN NOW SAYS HOW MANY OF ITS SAMPLES NEEDED A FIELD CORRECTION,
+     * BECAUSE ONE CORRECTED SAMPLE CAN BE THE WHOLE SUM.
+     *
+     * With the clock repaired, a backwards step is unambiguously the end of a
+     * field and `wrap + t1 - t0` is the TRUE elapsed time -- including any
+     * higher-level interrupt that preempted the span.  That is right and it is
+     * also brutal for a short one: `find` is about fifty units, a field is
+     * 80,098, so a single preempted sample is sixteen hundred of them.  The
+     * first report with the repair read find 271,901 against 24,468 before,
+     * which is four corrections and not a change in the work.
+     *
+     * So the counts are printed beside the sums.  A span with `wrapfind 4` is
+     * four fields of somebody else's time plus the real cost, and the reader
+     * can subtract 4 x `fldtop`.  A span with zero is clean.
+     *
+     * `bldTASK` has always carried this caveat in words -- "preempted: NOT a
+     * cost" -- and this is the same caveat as a number, for every row.
+     */
     nd_tracex("t dropisr", nd_n_wrap_isr);
     nd_tracex("t dropup ", nd_n_wrap_up);
+    nd_tracex("t wrappre", nd_n_wrap_pre);
+    nd_tracex("t wraptak", nd_n_wrap_take);
+    nd_tracex("t wrapfnd", nd_n_wrap_find);
+    nd_tracex("t wrapadr", nd_n_wrap_addr);
+    nd_tracex("t wraprep", nd_n_wrap_reply);
+    nd_tracex("t wraphok", nd_n_wrap_hook);
     nd_tracex("t maxisr ", nd_t_isr_max);
     nd_tracex("t fldtop ", nd_field_top);
     /* The scale, so a reader does not take a beam unit for a colour clock. */
@@ -497,6 +528,8 @@ static VOID nd_time_report(VOID)
     nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
     nd_n_int = nd_n_frame = nd_n_hook = nd_n_wrap = 0;
     nd_n_wrap_isr = nd_n_wrap_up = nd_t_isr_max = 0;
+    nd_n_wrap_pre = nd_n_wrap_take = nd_n_wrap_find = 0;
+    nd_n_wrap_addr = nd_n_wrap_reply = nd_n_wrap_hook = 0;
 }
 #endif
 
@@ -632,7 +665,7 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
                 flags);
 #ifdef NETDEV_TIME
-        nd_t_addr += nd_since(ta);
+        nd_t_addr += nd_since_at(ta, &nd_n_wrap_addr);
     }
 #endif
 
@@ -645,7 +678,7 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         BOOL  ok = netdev_copy_call(op->op_CopyTo, io->ios2_Data,
                                     (APTR)payload, plen);
 
-        nd_t_hook += nd_since(th);
+        nd_t_hook += nd_since_at(th, &nd_n_wrap_hook);
         nd_n_hook++;
         if (!ok)
         {
@@ -668,7 +701,7 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         ULONG tr = nd_now();
 
         netdev_reply(io, 0, 0);
-        nd_t_reply += nd_since(tr);
+        nd_t_reply += nd_since_at(tr, &nd_n_wrap_reply);
     }
 #else
     netdev_reply(io, 0, 0);
@@ -730,7 +763,7 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 
     unit->nu_Stats.PacketsReceived++;
 #ifdef NETDEV_TIME
-        nd_t_pre += nd_since(tp);
+        nd_t_pre += nd_since_at(tp, &nd_n_wrap_pre);
     }
 #endif
 
@@ -743,10 +776,10 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         ULONG tf = nd_now();
 
         tr = netdev_track_find(op, type);
-        nd_t_find += nd_since(tf);
+        nd_t_find += nd_since_at(tf, &nd_n_wrap_find);
         tf = nd_now();
         io = netdev_take(&op->op_Reads, type);
-        nd_t_take += nd_since(tf);
+        nd_t_take += nd_since_at(tf, &nd_n_wrap_take);
 #else
         tr = netdev_track_find(op, type);
         io = netdev_take(&op->op_Reads, type);

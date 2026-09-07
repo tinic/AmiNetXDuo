@@ -272,12 +272,37 @@ else
 fi
 
 PEER_PIDS=()
+#
+# KILLING THE SSH CLIENT DOES NOT KILL THE PEER, and six of them per run were
+# outliving it.  `ps` on the peer 130 seconds after a finished run:
+#
+#     timeout 390 python3 /tmp/iperfpeer-iperf.py serve tcp --port 24541 ...
+#     timeout 390 python3 /tmp/iperfpeer-iperf.py serve udp --port 24542 ...
+#     timeout 390 python3 /tmp/iperfpeer-iperf.py serve tcp --port 24543 ...
+#
+# each with its `timeout` wrapper, still holding the ports this harness will
+# want again.  The startup pkill at the top of this file is what has been
+# papering over it -- a leftover only ever died because the NEXT run killed it,
+# which is the same shape as the stale-emulator rule in RIG HYGIENE, one
+# machine over.
+#
+# So the stop reaches the far end too, with the pattern the startup already
+# uses.  This is not the fix for the empty peer .out files -- that is a
+# separate defect, see below -- it is the leak underneath it.
+#
 stop_peers() {
     local p
     for p in "${PEER_PIDS[@]:-}"; do
         [ -n "$p" ] && kill "$p" 2>/dev/null || true
     done
+
+    [ -z "${PEERHOST:-}" ] ||
+        ssh -o BatchMode=yes "$PEERHOST" \
+            "pkill -f '[i]perfpeer-$AMINETXDUO_RUN_TAG' 2>/dev/null; exit 0" \
+            > /dev/null 2>&1 || true
 }
+
+
 trap stop_peers EXIT INT TERM HUP
 
 PEER_LIFE=$((TIMEOUT + 120))
