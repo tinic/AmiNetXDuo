@@ -1045,9 +1045,26 @@ ULONG   v6_bits = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
     ck("v4 fused path answered frames itself",
        n68k_rx_verify_stats.v4_fused >= 4UL);
 
-    printf("fused answers: %lu total, %lu of them IPv4\n",
+#ifdef FEATURE_NX_IPV6
+    /*
+     * AND THE SAME FOR IPv6, WHICH HAD NO SUCH ASSERTION AND NEEDED ONE.
+     * A code motion that truncated the IPv6 fast path took its answers from
+     * 5,235 to ZERO and every walk-against-fused comparison above still
+     * passed -- because both entry points then took the ordinary walk and
+     * agreed with each other perfectly.  Agreement is not coverage.
+     *
+     * from_copy counts what EITHER family answered from the carried sum;
+     * v4_fused counts the IPv4 share alone, so the difference is IPv6's.
+     */
+    ck("v6 fused path answered frames itself",
+       (n68k_rx_verify_stats.from_copy - n68k_rx_verify_stats.v4_fused) >= 4UL);
+#endif
+
+    printf("fused answers: %lu total, %lu IPv4, %lu IPv6\n",
            (unsigned long)n68k_rx_verify_stats.from_copy,
-           (unsigned long)n68k_rx_verify_stats.v4_fused);
+           (unsigned long)n68k_rx_verify_stats.v4_fused,
+           (unsigned long)(n68k_rx_verify_stats.from_copy -
+                           n68k_rx_verify_stats.v4_fused));
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
     return failures ? 1 : 0;
