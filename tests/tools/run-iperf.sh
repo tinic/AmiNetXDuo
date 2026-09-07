@@ -401,15 +401,41 @@ says() { # banner nth ere description
 }
 
 # One key out of the guest's key=value result line.
+#
+# A MISSING KEY IS AN ANSWER, NOT A REASON TO STOP, AND THIS FILE ALREADY KNEW
+# THAT -- IT JUST COULD NEVER SAY SO.
+#
+# Both helpers are used as `X=$(guest_val ...)`, and this script runs under
+# `set -euo pipefail`.  When grep matches nothing it exits 1, pipefail hands
+# that to the pipeline, the command substitution fails, and set -e kills the
+# run THERE -- before the very next lines, which are written to report exactly
+# this:
+#
+#     if [ -z "${G_BYTES:-}" ] || [ -z "${P_BYTES:-}" ]; then
+#         fail "no byte count to compare: guest '...' peer '...'"
+#
+# So every peer-side failure arrived as a bare `rc=1` with no verdict, no FAIL
+# line and no transcript -- the log simply stopped after the last `ok:`.  Found
+# with all five peer .out files zero bytes and srvudp.err holding two
+# TimeoutError tracebacks: the diagnosis was sitting in the file and unreachable
+# by four lines.
+#
+# tools/check-rate.sh discards a round whose harness returns non-zero, so this
+# also made THE ONLY GATE THAT MEASURES A BYTE PER SECOND unable to report why
+# it measured nothing.
+#
+# `|| true` binds to the whole pipeline, which is what is wanted: no match
+# means an empty string, and the caller decides.
+#
 guest_val() { # banner nth key
     block "$1" "$2" | grep -o "[[:space:]]$3=[^[:space:]]*" | tail -1 |
-        cut -d= -f2
+        cut -d= -f2 || true
 }
 
 # One key out of a peer's line.
 peer_val() { # logname key
     [ -f "$PEERLOG/$1.out" ] || return 0
-    grep -o "$2=[^[:space:]]*" "$PEERLOG/$1.out" | tail -1 | cut -d= -f2
+    grep -o "$2=[^[:space:]]*" "$PEERLOG/$1.out" | tail -1 | cut -d= -f2 || true
 }
 
 # ---- the run finished, and finished once --------------------------------
