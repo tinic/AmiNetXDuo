@@ -435,88 +435,6 @@ VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire)
 }
 
 /*
- * ONE SIGNAL AN INTERRUPT, NOT ONE A FRAME.
- *
- * The LANCE hands up every frame its ring holds before its interrupt returns
- * -- 532 frames across 187 interrupts in one report, 2.85 a service -- and
- * each of them ended in a ReplyMsg(), which on a PA_SIGNAL port is three
- * steps: stamp NT_REPLYMSG, AddTail the node, Signal the waiting task.  The
- * first two belong to the frame.  THE THIRD DOES NOT: the reader is a task and
- * cannot run until this interrupt returns, so the second and third Signal of a
- * service set a bit that is already set.
- *
- * NETDEV_TIME prices `replISR` at 196 beam units a frame, 48.7 us at the
- * 227/256 x 280 ns a unit is, against 78 for the pending-read walk and 52 for
- * both addresses -- the largest thing the device does per frame that is not
- * the copy.  Dropping 1.85 of every 2.85 of them is what this is worth.
- *
- * A FAITHFUL SPLIT OF ReplyMsg, NOT A REPLACEMENT FOR IT.  Exec's does exactly
- * these three things over a PA_SIGNAL port; anything else -- PA_SOFTINT,
- * PA_IGNORE, a full batch, a quick I/O -- takes the ordinary path above.  The
- * enqueue keeps its Disable() because a higher-level interrupt may reach the
- * same port, and the request's error fields are written before the node
- * becomes visible on it.
- *
- * netdev_sig_flush() MUST run before the interrupt returns on every path, or a
- * reader waits on a signal nobody sent.  netdev_interrupt() is the only caller
- * and the only place a batched reply can be raised from: netdev_hand_over()
- * and netdev_rx_claimed() both run inside ops->intr().
- */
-#define NETDEV_SIG_BATCH_MAX    4
-
-static struct Task *nd_sig_task[NETDEV_SIG_BATCH_MAX];
-static ULONG        nd_sig_mask[NETDEV_SIG_BATCH_MAX];
-static UWORD        nd_sig_n;
-
-VOID netdev_reply_batched(struct IOSana2Req *io)
-{
-    struct MsgPort *port = io->ios2_Req.io_Message.mn_ReplyPort;
-    UWORD           i;
-
-    io->ios2_Req.io_Error = 0;
-    io->ios2_WireError    = 0;
-
-    if ((io->ios2_Req.io_Flags & IOF_QUICK) != 0)
-        return;
-
-    if (port == NULL || port->mp_Flags != PA_SIGNAL ||
-        port->mp_SigTask == NULL || nd_sig_n >= NETDEV_SIG_BATCH_MAX)
-    {
-        ReplyMsg(&io->ios2_Req.io_Message);
-        return;
-    }
-
-    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_REPLYMSG;
-
-    Disable();
-    AddTail(&port->mp_MsgList, &io->ios2_Req.io_Message.mn_Node);
-    Enable();
-
-    for (i = 0; i < nd_sig_n; i++)
-    {
-        if (nd_sig_task[i] == (struct Task *)port->mp_SigTask)
-        {
-            nd_sig_mask[i] |= 1UL << port->mp_SigBit;
-            return;
-        }
-    }
-
-    nd_sig_task[nd_sig_n] = (struct Task *)port->mp_SigTask;
-    nd_sig_mask[nd_sig_n] = 1UL << port->mp_SigBit;
-    nd_sig_n++;
-}
-
-VOID netdev_sig_flush(VOID)
-{
-    UWORD i;
-    UWORD n = nd_sig_n;
-
-    nd_sig_n = 0;
-    for (i = 0; i < n; i++)
-        Signal(nd_sig_task[i], nd_sig_mask[i]);
-}
-
-/*
  * The buffer-management hooks are m68k register-convention (a0 = to, a1 = from,
  * d0 = len).  A `register ... __asm()` function-pointer typedef miscompiles
  * here: GCC loads the pointer into a0, destroying the first argument.
@@ -636,11 +554,11 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     {
         ULONG tr = nd_now();
 
-        netdev_reply_batched(io);
+        netdev_reply(io, 0, 0);
         nd_t_reply += nd_since(tr);
     }
 #else
-    netdev_reply_batched(io);
+    netdev_reply(io, 0, 0);
 #endif
     return NETDEV_RX_TAKEN;
 }
@@ -1242,28 +1160,20 @@ ULONG netdev_interrupt(NetdevUnit *unit)
         nd_regs_isr += netdev_time_regs - r0;
         nd_n_int++;
         if (!mine)
-        {
-            netdev_sig_flush();
             return 0;
-        }
 
         t0 = nd_now();
         netdev_tx_pump(unit);
         nd_t_tx += nd_since(t0);
-        netdev_sig_flush();
 
         if (nd_n_frame >= 512)
             nd_time_report();
     }
 #else
     if (!unit->nu_Nic.ops->intr(&unit->nu_Nic))
-    {
-        netdev_sig_flush();
         return 0;
-    }
 
     netdev_tx_pump(unit);
-    netdev_sig_flush();
 #endif
 
     if (watched != 0)
