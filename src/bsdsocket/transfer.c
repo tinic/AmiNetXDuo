@@ -1145,11 +1145,35 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                     return bsd_fail(base, AMI_ENETDOWN);
                 }
 
-                args.tcp    = &sock->as_Nx.tcp;
-                args.packet = &packet;
+                if (now == NX_NO_WAIT)
+                {
+                    /*
+                     * EVERY PACKET AFTER THE FIRST IN A DRAIN COMES THROUGH
+                     * HERE, and the general path costs three calls to fetch
+                     * one: bsd_wait_sliced(), an INDIRECT call through its
+                     * BsdSlicedCall, then _nx_tcp_socket_receive().  Its first
+                     * line is `if (wait == NX_NO_WAIT) return call(arg, wait)`
+                     * (select.c:266), so on this branch the wrapper IS the
+                     * callee and nothing else -- no break mask, no slicing, no
+                     * clock.  bsd_recv_once() is likewise only the same call
+                     * with the arguments unpacked from a struct.
+                     *
+                     * The blocking first iteration keeps the wrapper: that is
+                     * where the break mask and the slicing exist to be used.
+                     */
+                    status  = _nx_tcp_socket_receive(&sock->as_Nx.tcp,
+                                                     &packet, NX_NO_WAIT);
+                    aborted = FALSE;
+                }
+                else
+                {
+                    args.tcp    = &sock->as_Nx.tcp;
+                    args.packet = &packet;
 
-                status = bsd_wait_sliced(base, now, bsd_recv_once, &args,
-                                         &aborted);
+                    status = bsd_wait_sliced(base, now, bsd_recv_once, &args,
+                                             &aborted);
+                }
+
                 if (aborted)
                 {
                     if (copied > 0)

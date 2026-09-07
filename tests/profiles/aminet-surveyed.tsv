@@ -239,3 +239,28 @@
 /comm/misc/Twiny.lha	attributed	Twiny, 7 vectors, a pure server: accept, bind, listen, recv, no connect
 /comm/misc/StreAmi.lha	attributed	StreAmi, 8 vectors
 /comm/misc/SendSMS.lha	attributed	SendSMS, 8 vectors
+#
+# 400-archive pass, 2026-09-07, archives 3161-3560 -- the rest of comm/misc and
+# the start of comm/net.  THE RICHEST SLICE BY FAR: 294 barren (73.5%), 66
+# attributed binaries, 45 distinct vectors.  comm/net is where the networking
+# software actually is, which the four thin drawers before it did not predict.
+#
+# FIRST SLICE SINCE comm/mail TO BREAK MICRO: ObtainSocket, ReleaseSocket AND
+# ReleaseCopyOfSocket all appear -- AmiTCP's own inetd, letnet, and the whole
+# NetFS suite -- plus the first SOCK_RAW outside the ping family.
+# BULK	294	no bsdsocket binary in the archive
+# BULK	29	lost to download or extract failure, not examined
+# BULK	38	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	37	ixemul-hosted, invisible to a vector scan
+# BULK	6	packed by a cruncher
+/comm/net/AmiTCP-bin-30b2.lha	attributed	AmiTCP 3.0b2's own binaries: inetd 17 vectors, letnet 5, ch_nfsc 15. The reference implementation of the handoff contract micro stubs out
+/comm/net/NetFS-revised.lha	attributed	FIVE binaries at 21-22 vectors each -- netfs-server, netfs-handler, NetFSPort, NetFSInfo, NetFS-Explorer -- all in the ObtainSocket family. A whole distributed filesystem on the inetd handoff
+/comm/net/NetFS.lha	attributed	the older build, netfs-handler 7 and netfs-server 10
+/comm/net/Amitory10.lha	attributed	rxsocket.library, 33 vectors AND sock_raw=1 -- an ARexx wrapper that exposes the whole API, so it is evidence about the SURFACE and not about what an application needs
+/comm/net/binkd_1.1a-115.lha	attributed	binkd 1.1a, 19 vectors, and the ONLY getnameinfo call in 3,593 archives. Plausible -- binkd is a portable Unix daemon with IPv6 support -- but it is ONE binary at ONE offset and getaddrinfo, which such code almost always uses beside it, does not appear. Corroborate before quoting it
+/comm/misc/stricq_1371.lha	attributed	STRICQ 1.371, 21 vectors
+/comm/misc/stricq.lha	attributed	stricq, 20 vectors
+/comm/net/ALynx.lha	attributed	ALynx, 18 vectors
+/comm/net/RexxNet.lha	attributed	rexxnetd_amitcp in 000 and 020 builds, 15 vectors each
+/comm/net/AmiSpeedTest.lha	attributed	AmiSpeedTest, 16 vectors
+/comm/net/chnfsc102-30b2.lha	attributed	ch_nfsc, 15 vectors
