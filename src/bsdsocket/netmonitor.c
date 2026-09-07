@@ -9,6 +9,8 @@
 
 #include <proto/exec.h>
 
+#ifdef AMINETXDUO_NETMONITOR
+
 /*
  * One list per type. MHT_ICMP is 0 and MHT_Bind is 6, so the type doubles as
  * the index. The _Static_asserts below check that, because a renumbering
@@ -212,3 +214,55 @@ STRPTR bsd_netmon_caller(struct AmiSocketBase *base)
 {
     return (base != NULL) ? (STRPTR)base->sb_LogTag : NULL;
 }
+
+#else /* !AMINETXDUO_NETMONITOR */
+
+/*
+ * No hook can be installed, so none of the three questions socket.c and
+ * transfer.c ask has an answer other than the constant one below.  have()
+ * returning FALSE is what lets those call sites fold away without either file
+ * knowing about this option.
+ */
+LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
+                                  register struct Hook *hook __asm("a0"),
+                                  register struct TagItem *tags __asm("a1"),
+                                  register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)type; (VOID)hook; (VOID)tags;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+VOID bsd_RemoveNetMonitorHook(register struct Hook *hook __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* Nothing was ever added, so this can only be a hook we never held. */
+    (VOID)hook;
+    (VOID)SocketBase;
+}
+
+BOOL bsd_netmon_busy(VOID)
+{
+    return FALSE;
+}
+
+BOOL bsd_netmon_have(LONG type)
+{
+    (VOID)type;
+    return FALSE;
+}
+
+/* 0 is "not denied": a hook that is not there cannot veto anything. */
+LONG bsd_netmon_dispatch(LONG type, APTR message)
+{
+    (VOID)type;
+    (VOID)message;
+    return 0;
+}
+
+STRPTR bsd_netmon_caller(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    return NULL;
+}
+
+#endif /* AMINETXDUO_NETMONITOR */

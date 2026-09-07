@@ -519,6 +519,22 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# The network monitoring hooks: AddNetMonitorHookTagList and its Remove, and
+# the three internal helpers socket.c and transfer.c call to decide whether a
+# hook wants to see a bind, a connect or a send.
+#
+# Off, bsd_netmon_have() is a function that returns FALSE and nothing else, so
+# the three call sites -- transfer.c:1665, socket.c:1172 and socket.c:2393 --
+# fold away entirely rather than testing a counter that can never be non-zero.
+# That is why this option does not touch either file.
+#
+# bsd_netmon_dispatch() answers 0, which is "not denied": a hook that is not
+# there cannot veto a bind or a connect.
+option(AMINETXDUO_NETMONITOR "Build the network monitoring hooks" ON)
+if(AMINETXDUO_NETMONITOR)
+    add_compile_definitions(AMINETXDUO_NETMONITOR)
+endif()
+
 # Handing a socket from one task to another: ReleaseSocket, ReleaseCopyOfSocket
 # and ObtainSocket, the inetd-style pattern where one process accepts and
 # another serves.  ObtainServerSocket and ProcessIsServer are vectors of the
