@@ -1445,6 +1445,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_RxDirect         = ami_budget.rx_direct;
             out->nrb_RxFallback       = ami_budget.rx_fallback;
             out->nrb_HoldTotal        = ami_budget.hold_total;
+            out->nrb_HoldTicks        = ami_budget.hold_ticks;
             out->nrb_HoldSlow         = ami_budget.hold_slow;
             out->nrb_HoldMax          = ami_budget.hold_max;
             out->nrb_HoldThreshold    = ami_budget.hold_threshold;

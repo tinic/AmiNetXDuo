@@ -747,6 +747,7 @@ typedef struct NetStatusRxBudget
        nrb_HoldThreshold (E-Clock ticks, ~50 ms) are counted, maxed and
        ringed with the holder's identity. */
     ULONG               nrb_HoldTotal;
+    ULONG               nrb_HoldTicks;  /* summed hold duration, E-Clock     */
     ULONG               nrb_HoldSlow;
     ULONG               nrb_HoldMax;    /* E-Clock ticks                     */
     ULONG               nrb_HoldThreshold;

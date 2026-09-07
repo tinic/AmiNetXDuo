@@ -316,9 +316,10 @@ static VOID show_budget_holds(const NetStatusRxBudget *b)
     UWORD i;
     UWORD n;
 
-    tool_printf("\tholds:  %lu measured, %lu over %lu ms, max %lu ms\n",
+    tool_printf("\tholds:  %lu measured, %lu over %lu ms, max %lu ms, held %lu ms total\n",
                 b->nrb_HoldTotal, b->nrb_HoldSlow,
-                b->nrb_HoldThreshold / khz, b->nrb_HoldMax / khz);
+                b->nrb_HoldThreshold / khz, b->nrb_HoldMax / khz,
+                b->nrb_HoldTicks / khz);
 
     for (i = 0; i < NETSTATUS_HOLD_RING; i++)
         done[i] = (b->nrb_Hold[i].nsh_Seq == 0UL);

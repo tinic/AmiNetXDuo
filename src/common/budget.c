@@ -217,6 +217,7 @@ VOID ami_budget_hold_end(APTR thread, const char *name, ULONG state, UWORD site)
         return;
 
     ami_budget.hold_total++;
+    ami_budget.hold_ticks += dt;        /* before the threshold return below */
 
     /* ~50 ms in E-Clock ticks, from the measured rate rather than the PAL
        constant an NTSC machine would be 1% wrong by.  Cached: the rate never

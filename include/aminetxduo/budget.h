@@ -86,6 +86,21 @@ typedef struct AmiBudget
        gate in E-Clock ticks, derived from the measured rate on first use. */
     ULONG           hold_at;
     ULONG           hold_total;
+    /*
+     * HOW LONG THE BATON WAS HELD, WHICH IS WHAT SAYS WHETHER WAITING FOR IT
+     * IS WASTE OR OVERLAP.
+     *
+     * `baton, asking to holding` in the receive budget measured 221 us across
+     * 1,972 acquisitions -- 436 ms of a 3.56 s run, 12.2%, the largest ours
+     * block left after the device closed.  A WAIT is not a cost if the holder
+     * was doing the work the waiter is waiting for, and nothing here could
+     * tell the two apart: hold_total is a COUNT, hold_max is one sample, and
+     * there was no sum.
+     *
+     * With this, baton-total against hold-sum settles it.  If the holds fill
+     * the run, the waits are overlap and the 12.2% is not available.
+     */
+    ULONG           hold_ticks;     /* summed duration of every hold         */
     ULONG           hold_slow;
     ULONG           hold_max;
     ULONG           hold_threshold;
