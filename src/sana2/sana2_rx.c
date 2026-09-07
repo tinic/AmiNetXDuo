@@ -496,8 +496,29 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         return;
     }
 
+    /*
+     * ONE WORD ON THE 68000, TWO BYTES EVERYWHERE ELSE.
+     *
+     * prepend_ptr is nx_packet_data_start + AMI_SANA2_RX_PAD, and the static
+     * assertions below put data_start on a longword and the pad at 2, so byte
+     * 12 of the frame is at an EVEN address on every packet this reader sees
+     * -- which is all a 68000 needs, an address error being an odd-address
+     * fault and not an unaligned one.  netdev_rx() reads the same field the
+     * same way (netdev_device.c) and this side had not caught up.
+     *
+     * THE HOST TIER COMPILES THIS FILE AND THE HOST IS LITTLE-ENDIAN, which is
+     * what the byte form was for: the first version of this read the two bytes
+     * as a native USHORT and turned every ethertype round on x86 -- twelve
+     * demux checks failed at once.  Same shape as N68K_RDW16 in
+     * src/net68k/n68k_rx_verify.c, and for the same two reasons.
+     */
+#if defined(__mc68000__) || defined(__m68k__)
+    type = (UINT)*(const USHORT *)(const APTR)
+                 (packet->nx_packet_prepend_ptr + 12);
+#else
     type = (((UINT)packet->nx_packet_prepend_ptr[12]) << 8) |
            ((UINT)packet->nx_packet_prepend_ptr[13]);
+#endif
 
     packet->nx_packet_address.nx_packet_interface_ptr = iface->interface_ptr;
 
@@ -652,7 +673,17 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
        it. */
     slot->dst = iface->raw_mode ? base : (base + AMI_ETH_HEADER_SIZE);
 
-    slot->capacity    = (ULONG)(packet->nx_packet_data_end - slot->dst);
+    /*
+     * A POOL CONSTANT, ARRIVED AT PER FRAME.  Every packet in a pool has the
+     * same payload size, and dst is data_start plus a fixed 2 + 14 (or 2 in
+     * raw mode), so data_end - dst is the same number for every packet this
+     * interface will ever arm.  Computed on the first arm and reused: what
+     * changes between packets is the ADDRESS, which is recomputed above.
+     */
+    if (iface->rx_capacity == 0UL)
+        iface->rx_capacity = (ULONG)(packet->nx_packet_data_end - slot->dst);
+
+    slot->capacity    = iface->rx_capacity;
     slot->copied      = 0;
     slot->hdr_written = FALSE;
 #ifdef AMINETXDUO_RX_VERIFY

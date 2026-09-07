@@ -993,11 +993,17 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 #endif
     iface->raw_mode = (iface->raw_supported && ami_raw_allowed) ? TRUE : FALSE;
 
+    /* The cached arm capacity is derived from raw_mode (it decides whether dst
+       leaves room for a link header), so it is invalidated wherever raw_mode
+       is decided.  See ami_sana2_rx_arm(). */
+    iface->rx_capacity = 0UL;
+
     if (iface->raw_mode && iface->addr_bytes != AMI_ETH_ADDR_SIZE)
     {
         /* Raw framing only means anything when the link header shape is
            known. */
         iface->raw_mode = FALSE;
+        iface->rx_capacity = 0UL;
     }
 
     ami_sana2_tx_init(iface);

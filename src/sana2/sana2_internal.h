@@ -585,6 +585,7 @@ struct AmiSana2If
     char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[12];
     BOOL                link_hdr_ok;    /* device answered ANXD_S2_RX_LINK_HDR */
+    ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
 
     /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */
     UCHAR               mac[AMI_ETH_ADDR_SIZE];
