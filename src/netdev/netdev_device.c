@@ -277,9 +277,30 @@ static VOID nd_time_report(VOID)
     netdev_time_regs = nd_regs_isr = nd_regs_tx = 0;
     nd_tracex("t isr    ", nd_t_isr);
     nd_tracex("t copy   ", nd_t_copy);
+    /*
+     * ONE OF THESE TWO IS TRUSTWORTHY AND THE OTHER IS NOT, AND A READER
+     * COMPARING THEM AS EQUALS GETS THE WRONG ANSWER -- I nearly did.
+     *
+     * `iss` is ops->tx and runs under Disable(), so nothing preempts it.
+     * Measured across three reports of one transfer it read 352, 348 and 575
+     * beam units a transmit; the first two are the steady state and agree to
+     * one per cent, and the third is the tail, where the guest sends 226 times
+     * against 142 and the work per send is genuinely different.
+     *
+     * `bld` is the opener's CopyFrom and the framing, at TASK level with
+     * interrupts ON, so it absorbs every interrupt that lands inside it.  The
+     * same three reports read 928, 550 and 1071 units a transmit -- a factor
+     * of two, on identical work.  IT IS NOT A COST, IT IS A COST PLUS
+     * WHATEVER ELSE THE MACHINE DID.
+     *
+     * `iss` at 352 units is 87 us, which is 1,149 cycles at the 76 ns a cycle
+     * cpucal measures on this rig.  That is ordinary instruction count for
+     * lance_tx's twenty board writes, netdev_track_find and the stats -- NOT a
+     * slow bus: the a2065 reads at 77.1 ns/B against Fast RAM's 76.96.
+     */
     nd_tracex("t ntx    ", nd_n_tx);
-    nd_tracex("t bld    ", nd_t_bld);
-    nd_tracex("t iss    ", nd_t_iss);
+    nd_tracex("t bldTASK", nd_t_bld);        /* preempted: NOT a cost */
+    nd_tracex("t issDISA", nd_t_iss);        /* under Disable(): a cost */
     nd_tracex("t rep    ", nd_t_rep);
     nd_tracex("t probe16", nd_t_probe);
     /* The scale, so a reader does not take a beam unit for a colour clock. */
