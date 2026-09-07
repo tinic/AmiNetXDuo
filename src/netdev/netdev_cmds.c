@@ -314,6 +314,60 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
 
 /* ------------------------------------------------------------- the table -- */
 
+/*
+ * Send a CMD_WRITE, an S2_MULTICAST or an S2_BROADCAST.
+ *
+ * Split out for the same reason netdev_queue_read() was, and on the same
+ * evidence.  netdev_begin_io() already sends CMD_READ straight here rather
+ * than through netdev_perform()'s twenty-case jump table, 40-byte frame and
+ * movem of five registers; CMD_WRITE is the OTHER command this device is asked
+ * for in bulk, and during a RECEIVE it is the acknowledgement path -- roughly
+ * one send for every two frames taken -- which is what reopens the window the
+ * far end is filling.  _netdev_perform still carries 1.8% of the real-path
+ * profile with CMD_READ already bypassing it, and an inbound-only transfer has
+ * nothing else going through it at that rate.
+ *
+ * netdev_perform() keeps its own case, so src/netdev/test, which enters at
+ * both, sees no behaviour change; the body moved and nothing in it did.
+ */
+VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
+{
+    NetdevUnit *unit = op->op_Hw;
+    UBYTE       bcast[NETDEV_ADDR_LEN];
+    UWORD       i;
+
+    if (!unit->nu_Online)
+    {
+        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
+        return;
+    }
+    if (op->op_CopyFrom == NULL)
+    {
+        netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
+        return;
+    }
+    if (io->ios2_DataLength > NETDEV_MTU &&
+        !(netdev_io_is_raw(op, io) &&
+          io->ios2_DataLength <= NETDEV_FRAME_MAX))
+    {
+        netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
+        return;
+    }
+    if (cmd == S2_BROADCAST)
+    {
+        for (i = 0; i < NETDEV_ADDR_LEN; i++)
+            bcast[i] = 0xff;
+        cmd_bytes(io->ios2_DstAddr, bcast, NETDEV_ADDR_LEN);
+    }
+    else if (cmd == S2_MULTICAST && (io->ios2_DstAddr[0] & 1) == 0)
+    {
+        netdev_reply(io, S2ERR_BAD_ADDRESS, S2WERR_BAD_MULTICAST);
+        return;
+    }
+
+    netdev_tx_direct(unit, io);
+}
+
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 {
     NetdevUnit *unit;
@@ -344,42 +398,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case CMD_WRITE:
     case S2_MULTICAST:
     case S2_BROADCAST:
-    {
-        UBYTE bcast[NETDEV_ADDR_LEN];
-        UWORD i;
-
-        if (!unit->nu_Online)
-        {
-            netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            return;
-        }
-        if (op->op_CopyFrom == NULL)
-        {
-            netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
-            return;
-        }
-        if (io->ios2_DataLength > NETDEV_MTU &&
-            !(netdev_io_is_raw(op, io) &&
-              io->ios2_DataLength <= NETDEV_FRAME_MAX))
-        {
-            netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
-            return;
-        }
-        if (cmd == S2_BROADCAST)
-        {
-            for (i = 0; i < NETDEV_ADDR_LEN; i++)
-                bcast[i] = 0xff;
-            cmd_bytes(io->ios2_DstAddr, bcast, NETDEV_ADDR_LEN);
-        }
-        else if (cmd == S2_MULTICAST && (io->ios2_DstAddr[0] & 1) == 0)
-        {
-            netdev_reply(io, S2ERR_BAD_ADDRESS, S2WERR_BAD_MULTICAST);
-            return;
-        }
-
-        netdev_tx_direct(unit, io);
+        netdev_write_cmd(op, io, cmd);
         return;
-    }
 
     case S2_DEVICEQUERY:
     {

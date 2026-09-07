@@ -58,10 +58,32 @@ VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
      * direction that micro improvements accumulate toward a measurable total
      * -- not on a number.
      */
-    if (io->ios2_Req.io_Command == CMD_READ && op != NULL)
+    if (op != NULL)
     {
-        netdev_queue_read(op, io, CMD_READ);
-        return;
+        UWORD cmd = io->ios2_Req.io_Command;
+
+        if (cmd == CMD_READ)
+        {
+            netdev_queue_read(op, io, CMD_READ);
+            return;
+        }
+
+        /*
+         * AND CMD_WRITE, WHICH ON A RECEIVE IS THE ACKNOWLEDGEMENT PATH.
+         * An inbound bulk transfer sends roughly one frame for every two it
+         * takes, and those sends are what reopen the window the far end is
+         * filling; _netdev_perform still carries 1.8% of the real-path profile
+         * with CMD_READ already bypassing it, and on an inbound-only transfer
+         * there is nothing else going through it at that rate.
+         *
+         * S2_MULTICAST and S2_BROADCAST share the handler and are rare, so
+         * they stay on the generic path and pay the jump table.
+         */
+        if (cmd == CMD_WRITE)
+        {
+            netdev_write_cmd(op, io, CMD_WRITE);
+            return;
+        }
     }
 
     netdev_perform(op, io);

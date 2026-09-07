@@ -92,6 +92,19 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
     seen_io_error   = io->ios2_Req.io_Error;
 }
 
+/* CMD_WRITE is dispatched the same way, and for the same reason: on a receive
+   it is the acknowledgement path.  Counted into seen_perform for the same
+   reason CMD_READ is. */
+VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
+{
+    (VOID)cmd;
+
+    seen_perform++;
+    seen_op         = op;
+    seen_wire_error = io->ios2_WireError;
+    seen_io_error   = io->ios2_Req.io_Error;
+}
+
 BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
 {
     (VOID)io;

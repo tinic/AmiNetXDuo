@@ -315,6 +315,8 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event);
 
 /* netdev_cmds.c */
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
+/* The two bulk commands, reachable without the generic dispatch. */
+VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 /* The CMD_READ / S2_READORPHAN half of it, reachable without the dispatch. */
 VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io);
