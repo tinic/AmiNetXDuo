@@ -12,10 +12,12 @@
 #include <exec/memory.h>
 #include <dos/dos.h>
 #include <devices/timer.h>
+#include <libraries/configvars.h>
 #include <proto/exec.h>
 #include <inline/macros.h>
 #include <proto/dos.h>
 #include <proto/timer.h>
+#include <proto/expansion.h>
 
 #include <stdarg.h>
 #include <string.h>
@@ -321,6 +323,44 @@ ULONG   ratio_x100;
 }
 
 /*
+ * ZORRO BOARD RAM, WHICH IS WHERE THE RECEIVE PATH'S BIGGEST COPY READS FROM.
+ *
+ * `_n68k_copy_sum_longwords` is the largest row in the receive profile and its
+ * SOURCE is the a2065's on-board SRAM, not Fast RAM -- the LANCE writes the
+ * frame there and the copy hook reads it in place (lance.c:426).  Everything
+ * this tree has said about that copy being instruction-bound was reasoned from
+ * Fast RAM figures.  If board RAM is several times slower, the copy is bus
+ * bound and there is nothing in it; if it is not, the arithmetic stands.
+ *
+ * READ ONLY.  A board's address space is its hardware: sweeping it with writes
+ * would be poking registers on whatever card happens to be in the slot.  A
+ * read is what the receive path does anyway, and read bandwidth is the number
+ * the question turns on.
+ *
+ * The first board with at least 64 KB is taken, which on this rig is the
+ * a2065.  No board, no line -- an emulated machine configured without one is
+ * not a failure, it just cannot answer.
+ */
+static APTR c_board_find(ULONG *size_out)
+{
+struct ConfigDev   *cd = NULL;
+
+    if (ExpansionBase == NULL)
+        return NULL;
+
+    while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
+    {
+        if (cd->cd_BoardAddr != NULL && cd->cd_BoardSize >= 65536UL)
+        {
+            *size_out = cd->cd_BoardSize;
+            return cd->cd_BoardAddr;
+        }
+    }
+
+    return NULL;
+}
+
+/*
  * The I/O kernels, in nanoseconds and in ADD.L units.  No "real 68020 cycles"
  * column: what these cost on silicon is a bus property and what they cost here
  * is an emulator property, and the whole point is that the second is not the
@@ -415,6 +455,31 @@ ULONG   big_read, small_read;
               "two sequences here is not a fact about the silicon",
               (LONG)((movem * 100UL / m2m) / 100UL),
               (LONG)((movem * 100UL / m2m) % 100UL));
+    }
+    }
+
+    {
+    ULONG   bsize = 0UL;
+    APTR    board = c_board_find(&bsize);
+
+    if (board != NULL)
+    {
+        APTR    save = c_buf_a;
+        ULONG   fast_read;
+
+        c_log("");
+        c_log(" , Zorro board RAM at 0x%08lx, %ld KB --", (LONG)board,
+              (LONG)(bsize / 1024UL));
+        fast_read = big_read;
+        c_buf_a   = board;
+        (VOID)c_print_mem("read  32 KB window (bus)", K_READ);
+        c_buf_a   = save;
+        (VOID)fast_read;
+    }
+    else
+    {
+        c_log("");
+        c_log(" , no Zorro board with 64 KB or more: nothing to sweep --");
     }
     }
 
