@@ -12,16 +12,10 @@
 #          DEGRADED the program runs but cannot do its job
 #          CLEAN    proven NOT called, so the stub is free
 #
-# COVERAGE	surveyed=12	corpus=5372	pct=0.2
-#
-# THE SAMPLE IS 0.2 PER CENT.  Nothing here may be read as "the corpus does not
-# use this".  A CLEAN row means "not seen in the archives named"; it does not
-# mean absent from Aminet, and the four rows below that once said CLEAN with an
-# empty archives field said something stronger than the evidence supported.
 #
 # kind	key	profile	status	archives	evidence
-lvo	ObtainSocket	micro	BREAKS	ftpd2,AvePING,inetd,ftpd,in.fingerd,netfs-server,netfs-handler,rsh	ftpd2 0x41bc ObtainSocket(dm_ID,dm_Family,dm_Type,0) then Dup2Socket(fd,0/1/2); AmiTCP NETLIB:autoinitd.o inetd startup; AvePING 0x35ea
-lvo	ReleaseSocket	micro	BREAKS	inetd	inetd hands an accepted socket to the launched daemon
+lvo	ObtainSocket	micro	BREAKS	ftpd2,AvePING,telnetd2_0,lpd,identd,AveHTTPD,AmiFTPd19,POPd,inetd,ftpd,in.fingerd,netfs-server,netfs-handler,rsh	ftpd2 0x41bc ObtainSocket(dm_ID,dm_Family,dm_Type,0) then Dup2Socket(fd,0/1/2); AmiTCP NETLIB:autoinitd.o inetd startup; AvePING 0x35ea
+lvo	ReleaseSocket	micro	BREAKS	inetd,TnServ,AmiFTPd19	NOT inetd-only: TnServ.c:89 accept -> ReleaseSocket(SubSock,UNIQUE_ID) -> CreateNewProcTags. Amiga has no fork(), so process-per-connection STANDALONE servers need it too; AmiFTPd19 pairs it with ObtainSocket on the per-connection path at 0xa3c4
 lvo	ReleaseCopyOfSocket	micro	BREAKS	inetd,rsh,letnet	same handoff contract
 lvo	gethostbyname	micro	DEGRADED	AmiFTP,AmFTP,AWeb,ftpd,ping,route,rsh,traceroute,ncftp	answers from DEVS:Internet/hosts only; AmFTP can then reach numeric IPs alone
 lvo	gethostbyaddr	micro	DEGRADED	AmiFTP,AmFTP,AWeb,AmiSSL	as above
@@ -37,3 +31,9 @@ lvo	ObtainSocket	microcompat	OK	ftpd2,inetd,ftpd,in.fingerd,rsh	restored: 1,120 
 lvo	ReleaseSocket	microcompat	OK	inetd	restored with the handoff group
 lvo	ReleaseCopyOfSocket	microcompat	OK	inetd,rsh	restored with the handoff group
 feature	RAWSOCKET	microcompat	OK	AvePING,ping,traceroute	restored: 3,404 bytes; no vector exists for this, so only a build test can confirm it
+# Batch D and F, 2026-09-07.  Servers and mail clients.
+lvo	Dup2Socket	micro	OK	AveHTTPD,ftpd2,POPd	ungated in every profile; NOT universal -- net.lib init_inet_daemon() daemons (lpd, identd) never call it
+feature	SERVERS	microcompat	CLEAN	telnetd2_0,lpd,AveHTTPD,identd,nfsd,AmiFTPd19,POPd	no ROUTING/DNS/ADDRALLOC/NETMONITOR/NETSTATUS/ADDRINFO/BPF vector called by any of the seven; none does reverse DNS either, they log numeric addresses
+feature	AS225-dual-stack	-	METHOD	AveHTTPD,AmFTP191,AvePING	AveHTTPD stores the bsdsocket AND AS225 socket.library base in the SAME global (0xfde0), a mode flag at 0xfddc selects. Proving SocketBase from its OpenLibrary store is NOT sufficient -- partition by the cmp #1/beq branch or the scan invents ProcessIsServer, GetRouteInfo, gethostbyaddr
+feature	ixemul-hosted	-	METHOD	AmPOP3D,FTP4ALL226a	gcc/ixemul daemons expose ZERO bsdsocket vectors; the whole contract lives inside ixemul.library. A vector scan files them CLEAN and is wrong
+feature	vsyslog-enosys	default	BREAKS	telnetd2_0,lpd,AmiFTPd19,POPd	bsdsocket_vectors.c:71 wires vsyslog to bsd_enosys in EVERY profile including default. telnetd calls it 4x, lpd 8x, AmiFTPd 28+. All daemon logging is silently dropped on every build -- a default gap, not a micro one

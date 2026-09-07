@@ -1,0 +1,41 @@
+# Which Aminet archives the survey has actually examined.
+#
+# The ledger behind aminet-evidence.tsv's coverage figure, and the reason a
+# later tick does not re-survey the same archive.  tools/check-lvo-matrix.sh
+# COUNTS these rows rather than trusting a hand-typed percentage, because a
+# hand-typed one is stale the moment a batch reports.
+#
+# CORPUS	5372	comm/{tcp,net,www,irc,mail,news,misc,term,bbs,fido,ums,xeno,maxs,cnet,dlg}
+#
+# method:  attributed  SocketBase resolved from its OpenLibrary store; only
+#                      movea.l/jsr pairs counted.  The only method whose
+#                      verdicts may be quoted.
+#          rejected    examined and found to carry no bsdsocket call at all
+#          packed      a cruncher hides the code; not statically observable
+#
+# archive	method	result
+/comm/tcp/AmiTCP-demo-40.lha	attributed	28 of 62 binaries use bsdsocket; ObtainSocket in serv/ftpd, serv/in.fingerd, serv/netfs-server, l/netfs-handler, bin/inetd; gethostby* across ~14 clients
+/comm/tcp/AmiFTP.lha	attributed	AmiFTP 1.843, exactly 18 LVOs, SocketBase=a4+11100 hand-verified; minimal ok, micro degraded on gethostbyname
+/comm/tcp/ftpd2.lha	attributed	ObtainSocket(dm_ID,dm_Family,dm_Type,0) at 0x41bc then Dup2Socket(fd,0/1/2); AmiTCP NETLIB:autoinitd.o; ships C source
+/comm/tcp/AmFTP191.lha	attributed	dual-stack bsdsocket/AS225; real set 18 LVOs after splitting branches; micro degraded
+/comm/tcp/AvePING.lha	attributed	socket(AF_INET,SOCK_RAW,IPPROTO_ICMP) at 0x1772 and ObtainSocket at 0x35ea; micro BREAKS twice
+/comm/www/AWeb_APL34_full_020.lha	attributed	reaches TCP through its own 18-slot 4EF9 vtable; exactly 12 LVOs; minimal ok, micro degraded
+/util/libs/AmiSSL-v5-OS3.lha	attributed	OpenSSL port, 9 socket stubs incl WaitSelect and SocketBaseTagList; all ok in minimal and micro
+/comm/tcp/amtelnet.lha	packed	AmTelnet-II 2.4 main binary crunched, entropy 7.97, 84-byte decruncher stub; only vapor_* libraries readable
+/comm/irc/amirc.lha	packed	AmIRC 3.5 packed with a custom Vapor scheme, 230 KB payload inside HUNK_DEBUG; vapor_toolkit only probes bsdsocket
+/comm/net/Ping_1.6.lha	rejected	Commodore Envoy ping (envoy/nipc.h, nipc.library), not TCP/IP at all
+/comm/irc/AInfoBOT.lha	rejected	ARexx bot driving AmIRC's port; its two binaries make no bsdsocket call
+/comm/tcp/AIP.lha	rejected	no bsdsocket string in its single binary
+/comm/tcp/telnetd2_0.lha	attributed	9 LVOs; ObtainSocket via net.lib init_inet_daemon(); telnetd.c:234 and :250 show BOTH build variants need it; ships TnServ.c standalone listener
+/comm/tcp/lpd.lha	attributed	6 LVOs, no socket()/bind()/accept() at all; ObtainSocket + vsyslog x8; byte-identical startup to identd
+/comm/tcp/AveHTTPD.lha	attributed	13 LVOs after splitting the AS225 branch; stores both stack bases in one global
+/comm/tcp/IdentD1_2.lha	attributed	5 LVOs; ObtainSocket, no socket()/bind()
+/comm/tcp/nfsd_bin031014.lha	attributed	10 LVOs, validated against nfsd/src/main.c ground truth; no micro-gated call -- clean
+/comm/tcp/tftpserver.lha	rejected	no 68k binary shipped; the .exe is PowerPC ELF
+/comm/mail/iris.lha	attributed	irispop 10 LVOs, IrisSMTP 11; main binary only probes bsdsocket. micro DEGRADED on gethostbyname
+/comm/tcp/amiftpd19.lha	attributed	25 LVOs, the richest set found; ObtainSocket x4 with three on the per-connection path plus ReleaseSocket; micro BREAKS
+/comm/tcp/AmiTCP-popd.lha	attributed	8 LVOs; ObtainSocket then Dup2Socket, inetd mandatory per POPd.guide; micro BREAKS
+/comm/tcp/AmPOP3D.lha	rejected	ixemul-hosted; zero bsdsocket vectors visible though it IS an inetd daemon
+/comm/tcp/FTP4ALL226a.lha	rejected	ixemul.library v47 port; all socket work via ixemul LVOs
+/comm/www/GetURL-1.06.lha	rejected	ARexx script, no binary
+/comm/mail/MailDemon4_11.lha	rejected	no bsdsocket string in any binary

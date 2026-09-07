@@ -131,6 +131,11 @@ for sym,off,idx,api in rows:
     f,g=gate_of(sym)
     res=resolves(sym)
     def status(off):
+        # A vector wired to bsd_enosys is not "ok" in any profile -- it has no
+        # implementation at all.  The survey found telnetd calling vsyslog 4x,
+        # lpd 8x and AmiFTPd 28+ times against a column that read `ok`, which
+        # is the matrix inviting exactly the wrong conclusion.
+        if sym=='bsd_enosys': return 'enosys'
         if g!='-' and g in off: return 'STUB'
         if res and 'DNS' in off:  return 'hosts-only'
         return 'ok'
@@ -170,16 +175,33 @@ for r in rows: status[r[2]]=r          # api -> row
 bad=0; breaks=[]; cov=None
 if not __import__('os').path.exists(ev):
     print("lvo_matrix=FAIL reason=no_evidence_file"); sys.exit(1)
-for l in open(ev):
-    if l.startswith('# COVERAGE'):
-        cov=l.strip().lstrip('# ').replace('\t',' ')
-if cov is None:
-    print("lvo_matrix=FAIL reason=no_coverage_line"); bad+=1
+# Coverage is COUNTED from the ledger, not read from a hand-typed header: a
+# typed percentage is stale the moment a batch reports.
+led='tests/profiles/aminet-surveyed.tsv'
+if not __import__('os').path.exists(led):
+    print("lvo_matrix=FAIL reason=no_surveyed_ledger"); sys.exit(1)
+corpus=None; seen=[]
+for l in open(led):
+    if l.startswith('# CORPUS'):
+        try: corpus=int(l.split('\t')[1])
+        except Exception: pass
+        continue
+    if l.startswith('#') or not l.strip(): continue
+    seen.append(l.split('\t')[0])
+if corpus is None:
+    print("lvo_matrix=FAIL reason=ledger_has_no_corpus_line"); bad+=1; corpus=0
+n=len(set(seen))
+cov=f"surveyed={n} corpus={corpus} pct={100.0*n/corpus:.1f}" if corpus else "surveyed=%d"%n
 for l in open(ev):
     if l.startswith('#') or not l.strip(): continue
     p=l.rstrip('\n').split('\t')
     if len(p)<6: continue
     kind,key,pr,st=p[0],p[1],p[2],p[3]
+    # A METHOD row records how the SURVEY can go wrong -- an AS225 dual stack,
+    # an ixemul-hosted daemon -- and makes no claim about any profile, so it
+    # carries `-` where a profile would go.
+    if st=='METHOD' and pr=='-':
+        continue
     if pr not in prof:
         print(f"lvo_matrix=FAIL reason=unknown_profile row={key} profile={pr}"); bad+=1; continue
     # "no proven caller" over an unstated sample is not a finding.  Four rows
