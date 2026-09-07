@@ -49,17 +49,28 @@ SPDX-License-Identifier: MIT
 #   _netdev_perform was 1.8-2.1% of this report, the largest ours-row in
 #   anxnet.device.  Two commits sent CMD_READ and CMD_WRITE straight to their
 #   handlers instead of through its twenty-case jump table, and it is now
-#   ABSENT from the top 25 -- confirmed against this very profile, with
-#   _netdev_queue_read appearing at 1.4% where the traffic went.
+#   ABSENT from the top 25.  The rate moved by +0.04% -- five rounds an arm,
+#   positions alternated, all twenty rounds distinct, rx 5,954,208 ->
+#   5,956,386, by position -0.69% and +0.76%.
 #
-#   THE RATE MOVED BY +0.04%.  Five rounds an arm, positions alternated, all
-#   twenty rounds distinct: rx 5,954,208 -> 5,956,386, positions -0.69% and
-#   +0.76%.  A whole 2.1% row removed, verified gone, and the wire could not
-#   tell.
+#   AND THE FULL RANKING SAYS WHY, WHICH THE TOP 25 DID NOT.  The work did not
+#   go anywhere; the LABEL did:
 #
-# So: use this report to find WHICH function is on a path, and never to predict
-# what removing it is worth.  For that there is tests/perf/run-rate-ab.sh, and
-# it needs the effect to clear about one per cent before it can see it at all.
+#       _netdev_queue_read   1.4%      neither of these appears in the
+#       _netdev_begin_io     0.6%      profile taken before the change
+#       -------------------------
+#       total                2.0%      against _netdev_perform's 1.8-2.1%
+#
+#   A jump table was removed and its two destinations became symbols of their
+#   own.  What ran per frame -- the Disable, the tests, the AddHead, the frame
+#   BeginIO builds -- runs still.  The wire agreed with the arithmetic to four
+#   hundredths of a per cent.
+#
+# So: a row LEAVING this report is not work leaving the machine.  Look at the
+# FULL ranking, not the top 25, and account for where the samples went before
+# claiming anything.  For what a change is worth there is
+# tests/perf/run-rate-ab.sh, and the effect must clear about one per cent
+# before it can see it at all.
 #
 
 import argparse
