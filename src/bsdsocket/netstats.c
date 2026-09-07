@@ -4,6 +4,12 @@
  */
 
 #include "bsdsocket_vectors.h"
+
+#ifdef AMINETXDUO_NETSTATUS
+
+/* Inside the guard: nx_queue.h is a set of static inlines, and with the report
+   compiled out none of them has a caller, which -Werror=unused-function is
+   right to object to. */
 #include "udp_queue.h"
 
 #include "aminetxduo/nx_queue.h"
@@ -368,3 +374,22 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
 
     return (LONG)copy;
 }
+
+#else /* !AMINETXDUO_NETSTATUS */
+
+/*
+ * 4.4BSD's ipstat/tcpstat/udpstat/icmpstat, which is a report and nothing
+ * else, so it goes with the two vectors in netstatus.c rather than carrying an
+ * option of its own.
+ */
+LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
+                              register LONG version __asm("d1"),
+                              register APTR destination __asm("a0"),
+                              register LONG size __asm("d2"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)type; (VOID)version; (VOID)destination; (VOID)size;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+#endif /* AMINETXDUO_NETSTATUS */

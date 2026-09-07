@@ -519,8 +519,11 @@ endif()
 # build -- an LVO that moved would be an ABI break -- so this removes the
 # bodies and not the slots.  A drawer built this way does not install the tools
 # that call them.
+# GetNetworkStatistics() rides the same option: 4.4BSD's ipstat/tcpstat/
+# udpstat/icmpstat is a report too, and an option each would be two names for
+# one decision.
 option(AMINETXDUO_NETSTATUS
-       "Build NetStackQuery/NetStackControl, the live-stack reports" ON)
+       "Build the live-stack reports: NetStackQuery/Control, GetNetworkStatistics" ON)
 if(AMINETXDUO_NETSTATUS)
     add_compile_definitions(AMINETXDUO_NETSTATUS)
 endif()
