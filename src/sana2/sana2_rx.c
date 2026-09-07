@@ -689,8 +689,9 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
     packet->nx_packet_length      = 0;
 
     /* Cooked: leave room for the synthesised header. Raw: the device supplies
-       it. */
-    slot->dst = iface->raw_mode ? base : (base + AMI_ETH_HEADER_SIZE);
+       it.  The offset is settled by the open (sana2_internal.h rx_dst_off), so
+       this is an add and not a test and a branch. */
+    slot->dst = base + iface->rx_dst_off;
 
     /*
      * A POOL CONSTANT, ARRIVED AT PER FRAME.  Every packet in a pool has the
@@ -788,15 +789,35 @@ static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
 
     ami_sana2_rx_arm(iface, slot);
 
+    /*
+     * FIVE STORES, NOT NINE.  Only what the round trip actually disturbs is
+     * written back here; the rest is established once, where the slot is built
+     * (ami_sana2_rx_start below), and nothing between then and here touches
+     * it.
+     *
+     * ln_Type      Exec's ReplyMsg() leaves NT_REPLYMSG behind.  Our own
+     *              device puts NT_MESSAGE back at queue time
+     *              (netdev_queue.c:15), but a third-party device need not, so
+     *              this side restores it.
+     * io_Flags     BeginIO() and the device both use IOF_QUICK.  The VALUE is
+     *              a constant of the open, so the raw_mode test that used to
+     *              build it is gone -- see sana2_internal.h rx_io_flags.
+     * io_Error,
+     * WireError,
+     * PacketType,  the device's four answers about the frame that just
+     * DataLength   arrived.  PacketType is an OUT parameter of a cooked
+     *              CMD_READ, so it is an input again only once reset.
+     *
+     * Hoisted, because no code path writes any of them after the slot is
+     * built: mn_ReplyPort, io_Command and ios2_Data.  Checked across
+     * src/netdev -- the only request field the device assigns is ln_Type.
+     */
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    slot->req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-    slot->req.ios2_Req.io_Command = CMD_READ;
-    slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
+    slot->req.ios2_Req.io_Flags   = iface->rx_io_flags;
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
     slot->req.ios2_PacketType     = rx->packet_type;
     slot->req.ios2_DataLength     = 0;
-    slot->req.ios2_Data           = slot;
     ami_sana2_rx_mark(rx, slot, TRUE);
 
     /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
@@ -1523,6 +1544,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         rx->slot[i].req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
         rx->slot[i].req.ios2_Req.io_Message.mn_Length =
             (UWORD)sizeof(struct IOSana2Req);
+        /* Invariants of the slot, so that the re-arm on the hot path does not
+           write them once a frame.  ami_sana2_rx_post_slot() names them. */
+        rx->slot[i].req.ios2_Req.io_Command = CMD_READ;
+        rx->slot[i].req.ios2_Data           = &rx->slot[i];
     }
 
     ami_sana2_rx_mark_reset(rx);

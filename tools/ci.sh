@@ -393,6 +393,19 @@ stage_host() {
         return 1
     fi
 
+    # The receive re-arm's hoisted request fields are still hoistable: nothing
+    # in src/netdev writes them during the round trip, and post_slot still
+    # restores the ones Exec and the device do write.  Source only, and the
+    # host tier cannot see it -- its BeginIO() is a no-op stub, so it never
+    # writes anything back for the next re-arm to find.
+    if tools/check-rearm-invariants.sh > "$BUILD/rearm-invariants.log" 2>&1; then
+        note "rearm invariants: ok"
+    else
+        cat "$BUILD/rearm-invariants.log"
+        fail "the receive re-arm hoisted a request field the device now writes"
+        return 1
+    fi
+
     # The mDNS responder still gives the machine back between resource records.
     # A record is up to four walks of the peer cache, and draining a burst in
     # one mutex-held pass stopped every acknowledgment leaving the machine for
