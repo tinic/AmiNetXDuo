@@ -61,7 +61,9 @@ typedef struct AmiBudget
     ULONG           pickup_at;      /* armed by pickup, taken by socket    */
     ULONG           socket_at;      /* armed by socket, taken by notify    */
     ULONG           xmit_at;        /* armed by socket, taken by tx_send   */
-    AmiBudgetLeg    drain;          /* reader: reply dequeued -> delivered */
+    AmiBudgetLeg    drain;          /* ONE ami_sana2_rx_deliver() call, NOT
+                                       the drain loop the name suggests --
+                                       sana2_rx.c:1100 is the only stamp   */
     AmiBudgetLeg    baton;          /* bsd_nx_enter(): asking to having     */
     AmiBudgetLeg    settle;         /* deliver -> receive notify           */
     /* Three chained sub-legs between the same deliver and notify, so their

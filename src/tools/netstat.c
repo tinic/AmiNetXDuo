@@ -448,7 +448,22 @@ static VOID show_budget(VOID)
        -- the immediate form, not _nx_ip_packet_deferred_receive() -- so IP
        input and the TCP input under it run ON THE READER and this leg is
        their whole cost.  It is the largest receive leg there is. */
-    show_budget_leg("drain,  reader runs IP input", &b->nrb_Drain,
+    /*
+     * "drain" NAMES THE LOOP AND BRACKETS ONE CALL IN IT, AND I READ IT WRONG
+     * FOR TWO SITTINGS.  The stamp is round ami_sana2_rx_deliver() alone
+     * (sana2_rx.c:1100), not round ami_sana2_rx_drain(), so its 815 us is one
+     * delivery into NetX Duo and not the reader's whole turn.  Reading it as
+     * the loop put eleven hundred microseconds a frame in the wrong place and
+     * sent the next leg -- `repost` -- looking for them there.
+     *
+     * The label says what it brackets now.  What it measured all along:
+     *
+     *     deliver 815 us  -- one rx_deliver
+     *       settle 469    -- of that, deliver to receive notify: NetX
+     *       the other 346 -- ours: rx_verify_sum, the ethertype, IP validation
+     *     repost   97 us  -- the CMD_READ handed back, 12% of deliver
+     */
+    show_budget_leg("deliver, one rx_deliver call", &b->nrb_Drain,
                     b->nrb_EClockRate);
     show_budget_leg("baton,  asking to holding   ", &b->nrb_Baton,
                     b->nrb_EClockRate);
