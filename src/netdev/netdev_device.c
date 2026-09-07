@@ -350,10 +350,6 @@ static ULONG nd_n_wrap;
  */
 static ULONG nd_n_wrap_isr;
 static ULONG nd_n_wrap_up;
-static ULONG nd_n_wrap_pre;
-static ULONG nd_n_wrap_take;
-static ULONG nd_n_wrap_find;
-static ULONG nd_n_wrap_addr;
 static ULONG nd_n_wrap_reply;
 static ULONG nd_n_wrap_hook;
 static ULONG nd_t_isr_max;
@@ -393,10 +389,6 @@ static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
 static ULONG nd_t_up;       /* handing frames to the openers */
 static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
 static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
-static ULONG nd_t_pre;      /* type, group test, stats, before the walk      */
-static ULONG nd_t_take;     /* netdev_take: the pending-read list walk       */
-static ULONG nd_t_find;     /* netdev_track_find: the 16-entry scan          */
-static ULONG nd_t_addr;     /* the two addresses and the request fields      */
 static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
 static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
 static ULONG nd_t_bld;      /* the opener's CopyFrom, framing a transmit     */
@@ -479,10 +471,6 @@ static VOID nd_time_report(VOID)
      * trustworthy the way `iss` is; `pre`, `take`, `find` and `addr` are all
      * inside the interrupt service too.  Divide by `frames`, not by `int`.
      */
-    nd_tracex("t preISR ", nd_t_pre);
-    nd_tracex("t takeISR", nd_t_take);
-    nd_tracex("t findISR", nd_t_find);
-    nd_tracex("t addrISR", nd_t_addr);
     nd_tracex("t replISR", nd_t_reply);
     nd_tracex("t txpump ", nd_t_tx);
     nd_tracex("t nint   ", nd_n_int);
@@ -508,27 +496,27 @@ static VOID nd_time_report(VOID)
      * `bldTASK` has always carried this caveat in words -- "preempted: NOT a
      * cost" -- and this is the same caveat as a number, for every row.
      *
-     * AND THERE IS A FLOOR UNDER ALL OF IT: THIS CLOCK CANNOT RESOLVE TENS OF
-     * UNITS.  `t probe16` prices sixteen back-to-back nd_now() calls at 400
-     * beam units, which is 25 a call and 50 for the pair that brackets one
-     * span -- the same order as `find` and `take` themselves ever were.  Three
-     * runs of the identical code path measured find at 24,468 then 271,901
-     * then 513,768, a factor of twenty-one, with only three to eight field
-     * corrections between them to explain it.
+     * PRE, TAKE, FIND AND ADDR ARE GONE, AND THE REASON IS THE INSTRUMENT.
+     * `t probe16` prices sixteen back-to-back nd_now() calls at 400 beam
+     * units: 25 a call, 50 for the pair that brackets one span -- the same
+     * order as those four ever were.  Three runs of the identical code path
+     * measured findISR at 24,468 then 271,901 then 513,768, a factor of
+     * twenty-one, with three to eight field corrections between them to
+     * account for it.  They were never measurements.
      *
-     * SO DO NOT QUOTE preISR, takeISR, findISR OR addrISR.  What this
-     * instrument resolves is spans of hundreds to thousands of units -- `up`
-     * at about two thousand a frame, `hook` at a thousand, `replISR` at a few
-     * hundred, `isr` at several thousand an interrupt -- and those are stable
-     * across runs.  The four short ones are below its own overhead, and the
-     * honest reading of them is "smaller than the instrument", not a number.
+     * AND THEY WERE MAKING THE ROWS THAT ARE.  Four bracket pairs inside
+     * netdev_rx_body() is 200 units of nd_now() charged to `up`, which reads
+     * about 2,000 a frame -- a TENTH of the number, spent measuring four
+     * things that could not be measured.  Removing them costs nothing and
+     * makes `up`, `hook` and `replISR` more nearly the work.
+     *
+     * What is left resolves: `up` ~2,000 units a frame, `hook` ~1,000,
+     * `replISR` a few hundred, `isr` several thousand an interrupt, and those
+     * are stable run to run.  Anything smaller than a few hundred units wants
+     * a different instrument, not this one.
      */
     nd_tracex("t dropisr", nd_n_wrap_isr);
     nd_tracex("t dropup ", nd_n_wrap_up);
-    nd_tracex("t wrappre", nd_n_wrap_pre);
-    nd_tracex("t wraptak", nd_n_wrap_take);
-    nd_tracex("t wrapfnd", nd_n_wrap_find);
-    nd_tracex("t wrapadr", nd_n_wrap_addr);
     nd_tracex("t wraprep", nd_n_wrap_reply);
     nd_tracex("t wraphok", nd_n_wrap_hook);
     nd_tracex("t maxisr ", nd_t_isr_max);
@@ -539,12 +527,11 @@ static VOID nd_time_report(VOID)
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
-    nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
+    nd_t_reply = 0;
     nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
     nd_n_int = nd_n_frame = nd_n_hook = nd_n_wrap = 0;
     nd_n_wrap_isr = nd_n_wrap_up = nd_t_isr_max = 0;
-    nd_n_wrap_pre = nd_n_wrap_take = nd_n_wrap_find = 0;
-    nd_n_wrap_addr = nd_n_wrap_reply = nd_n_wrap_hook = 0;
+    nd_n_wrap_reply = nd_n_wrap_hook = 0;
 }
 #endif
 
@@ -668,10 +655,6 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     ULONG        plen;
     const UBYTE *payload = netdev_payload(op, io, frame, len, &plen);
 
-#ifdef NETDEV_TIME
-    {
-        ULONG ta = nd_now();
-#endif
     nd_addr6(io->ios2_DstAddr, frame);
     nd_addr6(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN);
     io->ios2_PacketType = type;
@@ -679,10 +662,6 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     io->ios2_Req.io_Flags =
         (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
                 flags);
-#ifdef NETDEV_TIME
-        nd_t_addr += nd_since_at(ta, &nd_n_wrap_addr);
-    }
-#endif
 
     if (!netdev_filter_ok(op, io, payload))
         return NETDEV_RX_REJECTED;
@@ -761,10 +740,6 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         return;
     }
 
-#ifdef NETDEV_TIME
-    {
-        ULONG tp = nd_now();
-#endif
     /* The frame is even-aligned, so the type is one word and the broadcast
        test is one longword and one word rather than six byte reads. */
     type = *(const UWORD *)(const APTR)(frame + 12);
@@ -777,28 +752,14 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
     }
 
     unit->nu_Stats.PacketsReceived++;
-#ifdef NETDEV_TIME
-        nd_t_pre += nd_since_at(tp, &nd_n_wrap_pre);
-    }
-#endif
 
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
         NetdevOpener      *op = (NetdevOpener *)n;
         struct IOSana2Req *io;
         NetdevTrack       *tr;
-#ifdef NETDEV_TIME
-        ULONG tf = nd_now();
-
-        tr = netdev_track_find(op, type);
-        nd_t_find += nd_since_at(tf, &nd_n_wrap_find);
-        tf = nd_now();
-        io = netdev_take(&op->op_Reads, type);
-        nd_t_take += nd_since_at(tf, &nd_n_wrap_take);
-#else
         tr = netdev_track_find(op, type);
         io = netdev_take(&op->op_Reads, type);
-#endif
         if (io != NULL)
         {
             NetdevRxResult r = netdev_hand_over(op, io, frame, len, type,
