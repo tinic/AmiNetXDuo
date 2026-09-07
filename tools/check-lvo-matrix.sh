@@ -34,7 +34,26 @@ python3 - <<'PY'
 import re,os,subprocess
 
 vec=open('src/bsdsocket/bsdsocket_vectors.c').read()
-rows=re.findall(r'\(APTR\)(bsd_[A-Za-z_0-9]+),\s*/\*\s*(-0x[0-9a-fA-F]+)\s*\[\s*(\d+)\]\s*([A-Za-z_0-9]+)', vec)
+# The comment usually FOLLOWS the entry on the same line, but for
+# NetStackQuery/NetStackControl it PRECEDES it on its own line.  A
+# follows-only regex silently pairs each of those symbols with the NEXT
+# comment, which put api=bsd_NetStackControl against symbol=bsd_NetStackQuery
+# and was caught by the evidence cross-check rather than by reading.
+rows=[]
+_vl=vec.split('\n')
+_pend=None
+for _l in _vl:
+    m=re.search(r'\(APTR\)(bsd_[A-Za-z_0-9]+),\s*/\*\s*(-0x[0-9a-fA-F]+)\s*'
+                r'\[\s*(\d+)\]\s*([A-Za-z_0-9]+)', _l)
+    if m:
+        rows.append((m.group(1),m.group(2),m.group(3),m.group(4))); _pend=None; continue
+    m=re.match(r'\s*/\*\s*(-0x[0-9a-fA-F]+)\s*\[\s*(\d+)\]\s*(bsd_[A-Za-z_0-9]+)',_l)
+    if m:
+        _pend=(m.group(1),m.group(2),m.group(3)); continue
+    m=re.match(r'\s*\(APTR\)(bsd_[A-Za-z_0-9]+),\s*$',_l)
+    if m and _pend:
+        off,idx,api=_pend
+        rows.append((m.group(1),off,idx,api)); _pend=None
 
 # option a profile turns off, straight from the arm lines in tools/ci.sh
 ci=open('tools/ci.sh').read()
@@ -134,6 +153,46 @@ if ! diff -q "$OUT" "$tmp" > /dev/null; then
     echo "regenerate with: tools/check-lvo-matrix.sh --write"
     exit 1
 fi
-awk -F'\t' 'NR>1{for(i=7;i<=NF;i++) c[i"\t"$i]++} END{
-  printf "lvo_matrix_rows=%d\n", NR-1
-  printf "lvo_matrix=PASS\n"}' "$OUT"
+EV=tests/profiles/aminet-evidence.tsv
+python3 - "$OUT" "$EV" <<'PY'
+import sys
+mat,ev=sys.argv[1],sys.argv[2]
+hdr=None; rows=[]
+for l in open(mat):
+    p=l.rstrip('\n').split('\t')
+    if hdr is None: hdr=p; continue
+    rows.append(p)
+prof={n:i for i,n in enumerate(hdr)}
+status={}
+for r in rows: status[r[2]]=r          # api -> row
+
+bad=0; breaks=[]
+if not __import__('os').path.exists(ev):
+    print("lvo_matrix=FAIL reason=no_evidence_file"); sys.exit(1)
+for l in open(ev):
+    if l.startswith('#') or not l.strip(): continue
+    p=l.rstrip('\n').split('\t')
+    if len(p)<6: continue
+    kind,key,pr,st=p[0],p[1],p[2],p[3]
+    if pr not in prof:
+        print(f"lvo_matrix=FAIL reason=unknown_profile row={key} profile={pr}"); bad+=1; continue
+    if kind=='lvo':
+        r=status.get(key)
+        if r is None:
+            print(f"lvo_matrix=FAIL reason=evidence_names_unknown_vector api={key}"); bad+=1; continue
+        got=r[prof[pr]]
+        # evidence claiming a break must agree that the profile stubs it
+        if st in ('BREAKS','CLEAN') and got!='STUB':
+            print(f"lvo_matrix=FAIL reason=evidence_disagrees api={key} "
+                  f"profile={pr} evidence={st} matrix={got}"); bad+=1
+        if st=='DEGRADED' and got!='hosts-only':
+            print(f"lvo_matrix=FAIL reason=evidence_disagrees api={key} "
+                  f"profile={pr} evidence=DEGRADED matrix={got}"); bad+=1
+    if st in ('BREAKS','DEGRADED'):
+        breaks.append(f"{pr}:{key}={st}")
+
+print(f"lvo_matrix_rows={len(rows)}")
+print(f"lvo_matrix_known_impact={len(breaks)} {' '.join(sorted(breaks))}")
+print("lvo_matrix=" + ("PASS" if bad==0 else "FAIL"))
+sys.exit(1 if bad else 0)
+PY
