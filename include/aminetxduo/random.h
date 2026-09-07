@@ -46,6 +46,33 @@ extern "C" {
 #define AMI_RANDOM_ARRIVAL_MAX_BATCHES  128UL
 
 /*
+ * AND A BARREN SOURCE IS RECOGNISED IN SIXTEEN BATCHES, NOT A HUNDRED AND
+ * TWENTY-EIGHT.
+ *
+ * The bound above is an absolute backstop and it is the one this rig actually
+ * hits: a bridged emulator paces arrivals regularly, `varying` comes out zero
+ * batch after batch, and nothing stops the sampling until 128 x 16 = 2,048
+ * FRAMES have gone past.  Every one of them pays ReadEClock -- a timer.device
+ * call -- plus a Forbid/Permit pair measured at 314 ns on this rig, and every
+ * sixteenth pays a SHA-256 compression.  A ten-second iperf receive is about
+ * five thousand frames, so FORTY PER CENT OF THE RUN was sampling a source
+ * that had already said it has nothing, and `_sha256_k 0.7%` in a pure-receive
+ * profile is 128 compressions, not the eight the healthy case predicts.
+ *
+ * Consecutive, not cumulative: one batch that credits nothing is ordinary, and
+ * any credit at all resets the count.  A source that credits a single bit
+ * every sixteenth batch still runs to the 64-bit ceiling.  Sixteen consecutive
+ * zero-credit batches is 256 frames in which the low eight bits of the
+ * inter-arrival delta did not move once.
+ *
+ * IT GIVES UP NO ENTROPY.  A source contributing zero bits contributes zero
+ * whether it is asked 256 times or 2,048.  What the bound removes is the cost
+ * of asking, and the outcome -- ami_random_is_seeded() false, reported once
+ * and not enforced -- is the same either way.
+ */
+#define AMI_RANDOM_ARRIVAL_MAX_BARREN   16UL
+
+/*
  * Has frame-arrival sampling finished?  A header inline rather than a private
  * static so the host tier can assert the bound directly -- the collector
  * itself needs Exec, ReadEClock and a timer base, and none of that is needed
@@ -53,10 +80,12 @@ extern "C" {
  */
 static inline int ami_random_arrival_stop(unsigned long bits,
                                           unsigned long batches,
-                                          unsigned long pool_bits)
+                                          unsigned long pool_bits,
+                                          unsigned long barren)
 {
     return (bits >= AMI_RANDOM_ARRIVAL_MAX_BITS ||
             pool_bits >= AMI_RANDOM_MIN_BITS ||
+            barren >= AMI_RANDOM_ARRIVAL_MAX_BARREN ||
             batches >= AMI_RANDOM_ARRIVAL_MAX_BATCHES) ? 1 : 0;
 }
 
