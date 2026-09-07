@@ -43,10 +43,17 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 #
 # Five harnesses read $HD/tools.txt and none of them cleared it:
 # run-iperf.sh, run-fitzbench.sh, run-stackprof.sh, run-reqresp.sh,
-# run-poolshare.sh.  Removing it HERE, before anything can exit, fixes all of
-# them at once and cannot disturb staging, which wipes the directory anyway.
+# run-poolshare.sh.  run-stackprof.sh also reads $HD/fitz.prof, and a profile
+# is exactly as capable of being last week's as a transcript is.
 #
-rm -f "$ROOT/build/amiberry-testhd-${AMINETXDUO_RUN_TAG:-amiberry}/tools.txt"
+# SO IT IS THE WHOLE DIRECTORY, NOT ONE FILE IN IT.  This is the same `rm -rf`
+# the staging step does further down -- moved to where no check can exit in
+# front of it.  Nothing depends on the drive surviving a run: staging destroys
+# it unconditionally on every path that gets that far, so doing it sooner
+# cannot take anything away, and it covers every artefact a guest writes rather
+# than the one that was noticed.
+#
+rm -rf "$ROOT/build/amiberry-testhd-${AMINETXDUO_RUN_TAG:-amiberry}"
 TIMEOUT=120
 MODEL=A1200
 CPU=""
