@@ -483,6 +483,8 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("post,   BeginIO to return   ", &b->nrb_Post,
                     b->nrb_EClockRate);
+    show_budget_leg("repost, rx re-arm to return ", &b->nrb_Repost,
+                    b->nrb_EClockRate);
 
     /* Coverage of the direct-completion fork, not a duration: recv() requests
        completed in place against packets the blocking dequeue fetched. */

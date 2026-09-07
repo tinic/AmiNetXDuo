@@ -75,6 +75,22 @@ typedef struct AmiBudget
     AmiBudgetLeg    reap;           /* tx_send: the TX completion reap walk */
     AmiBudgetLeg    stuff;          /* tx_send: claim + framing + slot fill */
     AmiBudgetLeg    post;           /* tx_send: BeginIO enter -> return    */
+    /*
+     * THE RE-POST, WHICH IS THE BIGGEST THING IN `drain` NOBODY TIMES.
+     *
+     * `drain` reads 930 us across 2,241 samples against 1,285 frames -- about
+     * 1,620 us a frame -- and `settle`, the whole IP-to-notify chain inside
+     * it, is 462.  ELEVEN HUNDRED MICROSECONDS A FRAME OF THE READER'S LOOP
+     * IS UNACCOUNTED, and the largest candidate in it is the CMD_READ this
+     * function hands straight back to the device: ami_sana2_rx_post_slot()
+     * allocates a packet, arms the slot and calls BeginIO, and the wire
+     * profile puts it at 1.8-2.0%.
+     *
+     * The transmit side already has `post` for exactly this question.  This is
+     * the receive side of it, and one subtraction then splits the eleven
+     * hundred the way `hand` split the device's quarter-millisecond.
+     */
+    AmiBudgetLeg    repost;         /* rx re-arm: allocate, arm, BeginIO   */
 
     /* Which side of the direct-completion fork a receive took.  Plain
        counters, not legs: they answer coverage, not duration. */
@@ -114,6 +130,7 @@ extern AmiBudget ami_budget;
 ULONG ami_budget_clock(VOID);
 
 VOID ami_budget_drain(ULONG dt);
+VOID ami_budget_repost(ULONG dt);
 VOID ami_budget_baton(ULONG dt);
 VOID ami_budget_deliver(ULONG now);
 VOID ami_budget_pickup(ULONG now);

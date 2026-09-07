@@ -782,10 +782,25 @@ static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
 
     /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
        SANA2IOF_RAW just set. Both lines it runs are above. */
-    BeginIO((struct IORequest *)&slot->req);
 #ifdef AMINETXDUO_RXPROBE
+    {
+        /*
+         * The receive side of the transmit path's `post` leg.  `drain` is
+         * about 1,620 us a frame and `settle`, the whole IP-to-notify chain
+         * inside it, is 462 -- so eleven hundred a frame of the reader's loop
+         * has never been timed, and this call is the largest thing in it that
+         * is not NetX.  The stamp goes round the whole re-arm, allocate
+         * included, because a pool round trip is exactly what it might be.
+         */
+        ULONG rp0 = ami_budget_clock();
+
+        BeginIO((struct IORequest *)&slot->req);
+        ami_budget_repost(ami_budget_clock() - rp0);
+    }
     rx->probe.posts++;
     rx->probe.live++;
+#else
+    BeginIO((struct IORequest *)&slot->req);
 #endif
 
     return TRUE;

@@ -736,6 +736,7 @@ typedef struct NetStatusRxBudget
        nrb_Push: src/sana2/sana2_tx.c says exactly what each spans. */
     NetStatusBudgetLeg  nrb_Reap;       /* TX completion reap walk           */
     NetStatusBudgetLeg  nrb_Stuff;      /* slot claim + framing, to BeginIO  */
+    NetStatusBudgetLeg  nrb_Repost;     /* rx re-arm: allocate, arm, BeginIO */
     NetStatusBudgetLeg  nrb_Post;       /* BeginIO enter -> return (the copy
                                            hook and FIFO stuffing run inside) */
     /* The direct-completion fork (AMINETXDUO_RX_DIRECT_COMPLETE): recv()
