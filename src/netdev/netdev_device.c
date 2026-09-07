@@ -183,13 +183,33 @@ VOID netdev_trace_val(const char *tag, ULONG v)
  * needs a base this code cannot hold.  VHPOSR is 227 colour clocks of 280 ns to
  * the line; the low eight bits of vpos wrap every 256 lines, which is 16 ms.
  */
-#define ND_TICKS_WRAP   (256UL * 227UL)
+/*
+ * BEAM UNITS, NOT COLOUR CLOCKS, AND THE MULTIPLY IS WHY.
+ *
+ * This returned `vpos * 227 + hpos`, which is the true colour-clock count and
+ * cost a MULU.L to get.  cpucal measures MULU.L on this rig at 43 cycles
+ * against ADD.L's 2, and the emulator charges 76 ns a cycle -- so the multiply
+ * alone was about 3 us, TWICE per measured span, and NETDEV_TIME's own
+ * `t probe16` self-calibration read 4.9 us per nd_now().  That is what made
+ * the instrument useless against events of tens of microseconds, and it was
+ * blamed on the VHPOSR read: cpucal says the chip access is TWENTY-EIGHT
+ * NANOSECONDS.  The multiply was the whole cost.
+ *
+ * A shift instead.  Each line then contributes 256 units of which 227 are
+ * real, so a unit is 227/256 of a colour clock -- 0.248 us against 0.280 --
+ * and every span is scaled the same way.  Spans stay comparable with each
+ * other, which is all this instrument is for; an absolute figure has to be
+ * multiplied by 227/256 first, and the report says so.
+ */
+#define ND_TICKS_WRAP   (256UL * 256UL)
+#define ND_UNIT_NUM     227UL           /* a unit is 227/256 colour clocks */
+#define ND_UNIT_DEN     256UL
 
 static ULONG nd_now(VOID)
 {
     UWORD vh = *(volatile UWORD *)0xdff006;
 
-    return (ULONG)((vh >> 8) & 0xff) * 227UL + (ULONG)(vh & 0xff);
+    return ((ULONG)(vh >> 8) << 8) | (ULONG)(vh & 0xff);
 }
 
 static ULONG nd_since(ULONG t0)
@@ -253,6 +273,9 @@ static VOID nd_time_report(VOID)
     nd_tracex("t iss    ", nd_t_iss);
     nd_tracex("t rep    ", nd_t_rep);
     nd_tracex("t probe16", nd_t_probe);
+    /* The scale, so a reader does not take a beam unit for a colour clock. */
+    nd_tracex("t unitnum", ND_UNIT_NUM);
+    nd_tracex("t unitden", ND_UNIT_DEN);
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
