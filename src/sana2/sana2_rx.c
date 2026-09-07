@@ -868,6 +868,21 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 /* Reconcile the device's ios2_DataLength answer with the bytes its CopyToBuff
    call actually initialized.  A smaller reported length invalidates the carried
    checksum; a larger one would expose stale packet-pool bytes. */
+/*
+ * How long the packet is once the link header in front of the payload is
+ * counted.  Non-static and separate from the synthesis above it for the same
+ * reason ami_sana2_rx_resolve_length() is: it is the arithmetic that got this
+ * wrong, and the host tier can only pin arithmetic it can call.
+ *
+ * It deliberately does NOT take the slot.  Who wrote the header -- this file
+ * or the device answering ANXD_S2_RX_LINK_HDR -- cannot change how long the
+ * packet is, and making that impossible to express is the fix.
+ */
+ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload)
+{
+    return iface->raw_mode ? payload : (payload + AMI_ETH_HEADER_SIZE);
+}
+
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length)
 {
     if (slot == NULL || length == NULL)
@@ -973,9 +988,26 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 
         eth[12] = (UCHAR)(slot->req.ios2_PacketType >> 8);
         eth[13] = (UCHAR)(slot->req.ios2_PacketType);
-
-        length += AMI_ETH_HEADER_SIZE;
     }
+
+    /*
+     * OUTSIDE THE SYNTHESIS, AND 1bbb3803 LEFT IT INSIDE.  The fourteen bytes
+     * are in front of the payload in cooked mode whether this function wrote
+     * them or the device did; the length is a fact about the PACKET, not about
+     * who filled it in.  Narrowing the guard to `&& !slot->hdr_written` took
+     * the addition with it, so a device that answers ANXD_S2_RX_LINK_HDR
+     * delivered every frame FOURTEEN BYTES SHORT: ami_sana2_rx_deliver() reads
+     * the type at prepend_ptr[12], then advances prepend_ptr by fourteen and
+     * subtracts fourteen from a length that never had them.
+     *
+     * NOT REACHED ON THE RIG, WHICH IS WHY IT SURVIVED THE DAY.  hdr_written
+     * is set only from ami_sana2_rx_filled(), which is the DIRECT path, and
+     * the a2065 does not use it -- lance.c hands up a whole frame out of board
+     * SRAM and never claims (lance.c:296).  dp8390 and el3 do claim
+     * (dp8390.c:366, el3.c:693), so this was every frame on an ne2000, an
+     * X-Surf or an Ariadne II.
+     */
+    length = ami_sana2_rx_frame_length(iface, length);
 
     packet->nx_packet_length     = length;
     packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + length;
