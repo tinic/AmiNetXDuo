@@ -9,6 +9,14 @@
 
 #include <proto/exec.h>
 
+/*
+ * Six of the eight vectors here manage the resolver, so they are gated on the
+ * resolver itself rather than on an option of their own: with no DNS client
+ * there is nothing for AddDomainNameServer() to add to.  In_LocalAddr() and
+ * In_CanForward() below are routing helpers and are always built.
+ */
+#ifdef AMINETXDUO_DNS
+
 BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
                               register LONG buffer_size __asm("d0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -218,6 +226,65 @@ VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
     if (list != NULL)
         ami_free(list);
 }
+
+#else /* !AMINETXDUO_DNS */
+
+/*
+ * netstack_dns_off.c already answers the calls behind these with
+ * AMI_NET_ERR_STATE, so what goes is the marshalling around them, not the
+ * behaviour: a caller saw a failure before and sees one now.
+ */
+BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
+                              register LONG buffer_size __asm("d0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)SocketBase;
+
+    if (buffer != NULL && buffer_size > 0)
+        buffer[0] = '\0';
+
+    return FALSE;
+}
+
+struct List *bsd_ObtainDomainNameServerList(
+    register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* NULL is the documented "no list": the built version returns it when the
+       allocation fails, so callers already have the path. */
+    (VOID)SocketBase;
+    return NULL;
+}
+
+VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
+                                     register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* Only ever the NULL above. */
+    (VOID)list;
+    (VOID)SocketBase;
+}
+
+LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)address;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)address;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+VOID bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)name;
+    (VOID)SocketBase;
+}
+
+#endif /* AMINETXDUO_DNS */
 
 /*
  * 4.4BSD in_localaddr(): non-zero if the address is on a network this host is
