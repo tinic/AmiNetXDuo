@@ -101,3 +101,15 @@
 /comm/bbs/hsdisk1.lha	packed	cruncher
 /comm/bbs/madlertc.lha	packed	cruncher
 /comm/bbs/xlspiceprov16d.lha	packed	cruncher
+#
+# 400-archive pass, 2026-09-07, archives 761-1160 -- the rest of comm/bbs and
+# all of comm/cnet.  374 of 400 barren (93.5%), a third slice agreeing with the
+# first two.  ONE archive carries the whole yield: cnet4demo ships eight
+# attributed binaries including a traceroute and three inetd-family daemons.
+# BULK	374	no bsdsocket binary in the archive
+# BULK	21	lost to download or extract failure, not examined
+/comm/cnet/cnet4demo.lha	attributed	EIGHT binaries: ctelnet 16, traceroute 13, CNetIRC 9, cnsmtpd 8 (ReleaseSocket), cnfingerd 7 (ObtainSocket+Dup2Socket+vsyslog), nntpget 7, mail-task 7, identd 4 (ObtainSocket). First citations for getprotobyname, getservbyname, gethostname, SetErrnoPtr and inet_addr
+/comm/cnet/ZoolDIZII.lha	packed	cruncher
+/comm/cnet/cnmp_10b.lha	packed	cruncher
+/comm/cnet/scripts242e.lha	packed	cruncher
+/comm/cnet/xscripts.lha	ixemul	ixemul-hosted
