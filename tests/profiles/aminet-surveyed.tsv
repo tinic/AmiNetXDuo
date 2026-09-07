@@ -195,3 +195,21 @@
 /comm/mail/AmiMAIL.lha	attributed	AmiMAIL, 7 vectors -- was 2
 /comm/mail/StarGate2_2.lha	attributed	StarGate, 6 vectors
 /comm/mail/mailstat.lha	attributed	mailstat, 8 vectors
+#
+# 400-archive pass, 2026-09-07, archives 2361-2760 -- all of comm/maxs and the
+# start of comm/misc.  360 barren (90%), 14 attributed, 8 ixemul.  32 distinct
+# vectors and lvo-matrix.tsv answers `ok` for every profile on all but the
+# three name resolvers: the third drawer running where MICRO ITSELF is clean
+# apart from names.
+# BULK	360	no bsdsocket binary in the archive
+# BULK	16	lost to download or extract failure, not examined
+# BULK	11	packed by a cruncher
+# BULK	8	ixemul-hosted, invisible to a vector scan
+# BULK	4	unresolved: SocketBase not provable from the OpenLibrary store
+/comm/misc/AmigaTText-m68k-amigaos.lha	attributed	AmigaTText_OS3, 24 vectors -- the richest CLIENT in the corpus, and the FIRST binary anywhere to call the Roadshow interface-enumeration API: QueryInterfaceTagList and ReleaseInterfaceList. accept+bind+listen alongside connect, and recvfrom/sendto as well as recv/send
+/comm/misc/AmigaTText-ppc-warpup.lha	attributed	the WarpUP build, 24 vectors, and it adds ObtainInterfaceList -- so all three of that group are proven called
+/comm/misc/FENStarter.lha	attributed	an entire AmiTCP utility suite: arp 12 (getnetbyname, the only citation for it), ch_nfsc 15 (sendmsg, getdtablesize), finger 8, askhost 4, ch_setowner 4, GetMail.prg and PutMail.prg 6 each. vsyslog in four of the seven
+/comm/misc/AmiWeatherForeCasts16.lha	attributed	AmiWeatherForecasts and AmiWFPrefs, 8 vectors each, getprotobyname and inet_addr
+/comm/misc/AmiWeather-0.1.0.lha	attributed	AmiWeather, 10 vectors
+/comm/misc/AmiAIMv008.lha	attributed	AmiAIM 0.08, 9 vectors
+/comm/misc/AmiAIMv11.lha	attributed	AmiAIM 1.1, 6 vectors
