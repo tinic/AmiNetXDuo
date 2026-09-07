@@ -192,6 +192,11 @@ IMPLEMENTED = {
     "bpf_ioctl", "bpf_data_waiting",
     # errno / tags
     "Errno", "SetErrnoPtr", "SocketBaseTagList",
+    # syslog (errno.c, beside the SBTC_LOG* tags it reads).  The library was
+    # storing SBTC_LOGTAGPTR, SBTC_LOGSTAT and SBTC_LOGFACILITY and throwing
+    # every call that used them away; an Aminet survey found telnetd calling
+    # this 4 times, lpd 8 and AmiFTPd 28 or more, into nothing.
+    "vsyslog",
     # address conversion
     "inet_addr", "inet_aton", "inet_network", "inet_ntop", "inet_pton",
     "Inet_NtoA", "Inet_LnaOf", "Inet_NetOf", "Inet_MakeAddr",

@@ -310,16 +310,19 @@ _Static_assert(AMI_SYSLOG_LEVEL_ERROR == AMI_LOG_ERROR &&
  * worse are errors, LOG_WARNING is a warning, the rest are informational.  The
  * facility half is stored for SBTC_LOGFACILITY readers and not used to route.
  */
-VOID bsd_vsyslog(register ULONG priority     __asm("d0"),
-                 register CONST_STRPTR format __asm("a0"),
-                 register APTR args           __asm("a1"),
+VOID bsd_vsyslog(register LONG pri __asm("d0"),
+                 register STRPTR msg __asm("a0"),
+                 register APTR args __asm("a1"),
                  register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    if (SocketBase == NULL || format == NULL)
+    if (SocketBase == NULL || msg == NULL)
         return;
 
-    ami_log_raw(ami_syslog_level(priority), (const char *)SocketBase->sb_LogTag,
-                (const char *)format, args);
+    /* The names and types are the NDK pragma's, through tools/gen_vectors.py:
+       the prototype is generated and a hand-written one drifted from it. */
+    ami_log_raw(ami_syslog_level((unsigned long)pri),
+                (const char *)SocketBase->sb_LogTag,
+                (const char *)msg, args);
 }
 
 VOID bsd_SetErrnoPtr(register APTR errno_ptr __asm("a0"),

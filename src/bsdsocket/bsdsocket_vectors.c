@@ -11,7 +11,7 @@
  * gethostbyaddr_r) and every vector not yet implemented point at bsd_enosys()
  * rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 99 implemented, 41 stubbed (7 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 100 implemented, 40 stubbed (7 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
