@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gate 1 of 3: refuse the commit locally. See tools/check-gates-wired.sh.
+# Gate 1 of 4: refuse the commit locally. See tools/check-gates-wired.sh.
 # SPDX-License-Identifier: MIT
 set -eu
 ROOT="$(git rev-parse --show-toplevel)"
@@ -11,6 +11,19 @@ if [ -x "$ROOT/tools/check-doc-only.sh" ]; then
         echo "pre-commit: nothing here but documentation.  Fold it into the"
         echo "commit that changes the code it is about.  A release commit sets"
         echo "AMINETXDUO_RELEASE_COMMIT=1."
+        exit 1
+    fi
+fi
+
+# src/bsdsocket/bsdsocket_vectors.[ch] are OUTPUT.  Editing them by hand still
+# compiles, still links and still passes the host tier; the reproduce check
+# lives in the cross stage, so the first thing that notices is a twelve minute
+# CI cycle.  It costs a second here.
+if [ -x "$ROOT/tools/check-generated.sh" ]; then
+    if ! "$ROOT/tools/check-generated.sh"; then
+        echo
+        echo "pre-commit: a generated file was edited by hand.  Change"
+        echo "tools/gen_vectors.py and regenerate; the .c and .h are output."
         exit 1
     fi
 fi
