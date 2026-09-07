@@ -75,8 +75,16 @@ if [ -z "$IFACE" ] || [ -z "$PEER" ]; then
     exit 0
 fi
 
+#
+# A LINKED WORKTREE'S .git IS A FILE, NOT A DIRECTORY, and `[ -d ]` refused the
+# only two directories this script is ever pointed at.  ~/anxd-base/.git on the
+# rig is 53 bytes of "gitdir: /home/turo/anxd-e2e/.git/worktrees/anxd-base" --
+# which is the whole point of using worktrees here, so the test has to be the
+# one git itself answers.
+#
 for d in "$BASE_DIR" "$HEAD_DIR"; do
-    [ -d "$d/.git" ] || { echo "rate_ab=fail reason=no_worktree dir=$d"; exit 2; }
+    git -C "$d" rev-parse --git-dir > /dev/null 2>&1 ||
+        { echo "rate_ab=fail reason=no_worktree dir=$d"; exit 2; }
 done
 [ "$BASE_DIR" != "$HEAD_DIR" ] ||
     { echo "rate_ab=fail reason=one_worktree_two_arms"; exit 2; }
