@@ -164,3 +164,34 @@
 /comm/irc/dns.lha	attributed	dns
 /comm/fido/crashedit_aos.lha	attributed	crashedit, 7 vectors, a FidoNet node-list editor that fetches over TCP
 /comm/fido/fidoblitz.lha	attributed	fidoblitz
+#
+# 400-archive pass, 2026-09-07, archives 1961-2360 -- the rest of comm/irc, all
+# of comm/mail, the start of comm/maxs.  342 barren (85.5%), 20 attributed, 39
+# ixemul.  comm/mail is the second dense drawer, and like comm/irc its daemons
+# are largely ixemul-hosted.
+#
+# THREE ARCHIVES RE-SCANNED HERE WERE ALREADY IN THIS LEDGER FROM THE 60-ARCHIVE
+# SCREENING PASS, AND THE NUMBERS MOVED: AirMailPro 1 -> 7 vectors,
+# AminetFileRequester 3 -> 8, AEMail230 7 -> 7.  The a6-clobber fix is what
+# changed, and it is why a `screened` row is a floor and may not carry a CLEAN
+# claim.  AEMail matching exactly is the control.
+# BULK	342	no bsdsocket binary in the archive
+# BULK	12	lost to download or extract failure, not examined
+# BULK	11	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	6	packed by a cruncher
+# BULK	39	ixemul-hosted, invisible to a vector scan
+/comm/mail/Relay.lha	attributed	Relay and Relay.68000, 9 vectors each including ObtainSocket + vsyslog -- an SMTP relay in the inetd family, and the first mail DAEMON found that is not ixemul-hosted
+/comm/mail/AmigaSmail3-29.lha	attributed	smail_amitcp, 13 vectors, ObtainSocket + Dup2Socket + vsyslog; re-confirmed against the screening pass
+/comm/mail/SpamFryer.lha	attributed	inet-handler, 8 vectors with Dup2Socket and accept but NO ObtainSocket -- a handler that is given its socket some other way
+/comm/mail/bomb20.lha	attributed	smtp.exp 12 vectors incl the whole Inet_ quartet, pop3.imp 7
+/comm/mail/iris.lha	attributed	IrisSMTP 11 and irispop 10, both inet_addr and gethostname
+/comm/mail/AirMailPro32p.lha	attributed	AirMailPro, AirMailProPlugin and SuperMailBox, 7 vectors each -- was 1 before the a6-clobber fix
+/comm/mail/AminetFileReq.lha	attributed	AminetFileRequester, 8 vectors -- was 3 before the a6-clobber fix
+/comm/mail/AEMail230.lha	attributed	AEMAIL, 7 vectors, unchanged from the screening pass: the control for the two rows above
+/comm/mail/POP3send.lha	attributed	POP3send, 6 vectors with vsyslog
+/comm/mail/weazel.lha	attributed	weazel, 6 vectors with vsyslog
+/comm/mail/AntiSpam2.lha	attributed	EmailCheck, 9 vectors -- was 1 before the a6-clobber fix
+/comm/mail/AmiGmail.lha	attributed	AmiGmail, 6 vectors -- was 2
+/comm/mail/AmiMAIL.lha	attributed	AmiMAIL, 7 vectors -- was 2
+/comm/mail/StarGate2_2.lha	attributed	StarGate, 6 vectors
+/comm/mail/mailstat.lha	attributed	mailstat, 8 vectors
