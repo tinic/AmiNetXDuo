@@ -392,8 +392,31 @@ ULONG   big_read, small_read;
     c_window = C_BIG_LONGS;
     big_read = c_print_mem("read  32 KB window (bus)", K_READ);
     (VOID)c_print_mem("write 32 KB window (bus)", K_WRITE);
-    (VOID)c_print_mem("m2m   32 KB window (bus)", K_M2M);
-    (VOID)c_print_mem("movem 32 KB window (bus)", K_MOVEM);
+    {
+    ULONG   m2m   = c_print_mem("m2m   32 KB window (bus)", K_M2M);
+    ULONG   movem = c_print_mem("movem 32 KB window (bus)", K_MOVEM);
+
+    /*
+     * THE RATIO BETWEEN TWO SEQUENCES HERE IS AN EMULATOR PROPERTY, AND IT
+     * DOES NOT TRANSFER TO SILICON.  movem.l moves eight longwords for one
+     * instruction fetch and a fixed setup cost paid once, which is why
+     * n68k_copy.S uses it; an emulator that charges per instruction executed
+     * rather than per bus cycle can make the sequence with FEWER instructions
+     * the SLOWER one, and on this rig it does.
+     *
+     * That is worth knowing and it is not a reason to change the copy: the
+     * library ships to real 68020s, where the published costs say movem wins.
+     * The line below states which way this machine leans so nobody reads the
+     * two numbers above as a verdict on the instruction.
+     */
+    if (m2m != 0UL && movem != 0UL)
+    {
+        c_log("    movem/m2m %ld.%02ldx on THIS emulator -- a ratio between "
+              "two sequences here is not a fact about the silicon",
+              (LONG)((movem * 100UL / m2m) / 100UL),
+              (LONG)((movem * 100UL / m2m) % 100UL));
+    }
+    }
 
     if (small_read != 0UL)
     {

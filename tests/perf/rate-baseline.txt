@@ -4,6 +4,42 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# NO EFFECT, 2026-09-07: n68k_copy_bytes with a move.l loop instead of movem.
+# Four sittings, P Q Q P, five rounds each, distinct md5s (29727635af1d /
+# f998da5336d2), the arm script refusing to run if the two hashed the same:
+#
+#     arm                       sitting 1   sitting 2   median
+#     P  movem (ships)          6,110,919   6,103,353   6,107,136
+#     Q  -DN68K_NO_MOVEM=1      6,108,776   6,149,007   6,128,892
+#
+#     +0.36 per cent receive, +0.13 transmit.  Inside the 0.90 per cent floor.
+#
+# THE EXPERIMENT NEEDED NO NEW CODE: n68k_copy.S already carries N68K_NO_MOVEM
+# for the 68060 arm, and the flag was verified to land before the run -- movem
+# instructions inside _n68k_copy_bytes go 12 to 2.
+#
+# WHY IT WAS RUN, AND WHY THE RESULT IS NOT A CONTRADICTION.  cpucal's memory
+# section on this rig reads m2m 117.7 ns/B against movem 129.8 -- the move.l
+# loop TEN PER CENT faster -- while n68k_copy.S:17 is built on movem being the
+# only way to cut the instruction count further.  _n68k_copy_bytes is 9.5 per
+# cent of the receive profile, so ten per cent of it is 0.9 of the run, which
+# is exactly the floor.  Both instruments point the same way and neither can
+# resolve it end to end.
+#
+# AND THE COPY IS NOT "AT THE MEMORY FLOOR", WHICH THIS TREE HAS CLAIMED FROM
+# CYCLE ARITHMETIC.  cpucal measures the floor directly: 117.7 ns/B for a
+# memory-to-memory sweep.  The receive path's copy runs at about 135 -- 9.5 per
+# cent of 8,034 ms over 5.6 MB -- so it is roughly 13 per cent above the
+# measured floor, and 13 per cent of 9.5 is 1.2 per cent of the run.  That is
+# the whole remaining headroom in the second-largest row, and it is under the
+# resolution of this rig.
+#
+# DO NOT FLIP THE DEFAULT ON THIS EVIDENCE.  The ratio between two instruction
+# sequences on an emulator that charges per instruction is not a fact about
+# 68020 silicon, where the published costs say movem wins.  cpucal now prints
+# that caveat beside the two numbers.
+#
+#
 # NO EFFECT, 2026-09-07: 1bbb3803, the device writing the link header.  Four
 # sittings, P Q Q P, five rounds each, distinct md5s (7d83079fd4d9 /
 # d4c48e5993c7):
