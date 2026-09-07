@@ -310,3 +310,23 @@
 /comm/tcp/Patch2AmiTCP43.lha	attributed	socket.library, FORTY-ONE vectors, the highest count in the corpus. A wrapper library: surface, not demand -- see the wrapper-libraries METHOD row
 /comm/tcp/getit.lha	attributed	rxsocket.library again, 33 vectors and sock_raw=1, same reading
 /comm/tcp/MiamiDx10cmain.lha	attributed	miamisecureshell.library reports ONE vector and that vector is AbortInterfaceConfig (-0x1ec). An SSH library does not abort an interface configuration; a single hit at a single offset is the weakest shape evidence takes, and this is recorded as SUSPECT rather than as the first citation for that API
+#
+# 400-archive pass, 2026-09-07, archives 4361-4760 -- the rest of comm/tcp and
+# the start of comm/www.  284 barren, 89 attributed, 43 distinct vectors, and
+# NOTHING NEW: ObtainSocket, ReleaseSocket, ReleaseCopyOfSocket and the three
+# name resolvers are the whole of what any profile changes, exactly as the last
+# four passes said.
+#
+# AND SAMBA 2.0.7 SHOWS THE STATIC-LINK PATTERN AT ITS CLEAREST.  Eight of its
+# binaries report the IDENTICAL 25 vectors -- including make_printerdef,
+# make_smbcodepage and make_unicodemap, which are codepage BUILD TOOLS that do
+# not network at all.  A statically linked binary carries its library's whole
+# call surface whether it reaches it or not, so those 25 are one library's
+# surface counted eight times, not eight programs needing them.
+# BULK	284	no bsdsocket binary in the archive
+# BULK	30	lost to download or extract failure, not examined
+# BULK	38	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	35	ixemul-hosted, invisible to a vector scan
+# BULK	2	packed by a cruncher
+/comm/tcp/samba207_w1251.lha	attributed	EIGHT binaries at 25 vectors each, three of which are codepage build tools with no network function. Static linking, not demand -- see the static-link METHOD row
+/comm/tcp/rxsocket.lha	attributed	rxsocket.library 2.x, 27 vectors -- the ARexx wrapper again, surface not demand

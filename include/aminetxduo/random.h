@@ -26,6 +26,41 @@ extern "C" {
 #define AMI_RANDOM_ARRIVAL_MAX_BITS   64UL
 
 /*
+ * A SOURCE THAT HAS PRODUCED NOTHING IN THIS MANY BATCHES NEVER WILL, and
+ * credit used to be the ONLY way out.  arrival_bits grows only when the low
+ * bits of the inter-arrival delta MOVE across a batch of sixteen; a perfectly
+ * regular cadence -- which a bridged emulator or a hardware pacer can produce
+ * -- makes that zero, credits nothing, and leaves the gate open for the life
+ * of the machine: one SHA-256 compression every sixteen frames, on the receive
+ * path, forever.
+ *
+ * A healthy source credits up to eight bits a batch and stops in eight.  One
+ * crediting a SINGLE bit a batch stops in sixty-four.  This is twice that
+ * again, so it cannot truncate a source producing anything at all, and it
+ * stops a barren one after about two thousand frames.
+ *
+ * It gives up no entropy: a source contributing zero bits contributes zero
+ * whether it is consulted or not.  What the bound removes is the cost of
+ * asking.
+ */
+#define AMI_RANDOM_ARRIVAL_MAX_BATCHES  128UL
+
+/*
+ * Has frame-arrival sampling finished?  A header inline rather than a private
+ * static so the host tier can assert the bound directly -- the collector
+ * itself needs Exec, ReadEClock and a timer base, and none of that is needed
+ * to answer this.
+ */
+static inline int ami_random_arrival_stop(unsigned long bits,
+                                          unsigned long batches,
+                                          unsigned long pool_bits)
+{
+    return (bits >= AMI_RANDOM_ARRIVAL_MAX_BITS ||
+            pool_bits >= AMI_RANDOM_MIN_BITS ||
+            batches >= AMI_RANDOM_ARRIVAL_MAX_BATCHES) ? 1 : 0;
+}
+
+/*
  * Safe to call repeatedly; each call only ever adds.  Called lazily by the
  * generation functions, so there is no ordering requirement, but it blocks for
  * tens of milliseconds -- call it early, not on the first packet.
