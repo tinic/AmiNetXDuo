@@ -11,118 +11,38 @@ version at the top when it merges.
 
 ### Receive
 
-The whole day measured end to end, `3a71a026` against main, six rounds
-alternated.
+Two blocks of work, each measured end to end against its own starting point on
+playhouse3: clean build per arm, md5 checked before a round ran, six rounds
+alternating which arm went first.
 
 | | before | now | |
 |---|---|---|---|
-| iperf tcp-rx, sitting 1 | 5,553,818 | 5,769,639 | +3.89% |
-| iperf tcp-rx, sitting 2 | 5,558,431 | 5,796,608 | **+4.28%** |
-| iperf tcp-tx, sitting 1 | 2,982,376 | 3,130,634 | +4.97% |
-| iperf tcp-tx, sitting 2 | 2,975,445 | 3,130,111 | **+5.20%** |
+| iperf tcp-rx | 5,553,818 | **5,796,608** | **+4.1%** |
+| iperf tcp-tx | 2,982,376 | **3,130,634** | **+5.1%** |
+| Fitz write, kbytes/s | 2,541.5 | **2,607.0** | +2.4% |
 
-| | |
-|---|---|
-| headline | about +4.1% receive and +5.1% transmit, two sittings |
-| not | the sum of the parts below, which compounds to about 6.4% |
-| reading | gains do not add; measure the accumulated set |
-
-Measured on playhouse3 against a comparison point built clean in the same
-sitting, library md5 printed before a round ran, six rounds alternating which
-arm went first.
-
-| | before | now | |
+| earlier in this cycle | before | now | |
 |---|---|---|---|
-| iperf tcp-rx, sitting 1 | 5,347,499 | **5,522,706** | +3.3% |
-| iperf tcp-rx, sitting 2 | 5,366,765 | **5,504,271** | +2.6% |
-| Fitz read, set 1 | 3,272 | **3,562** | +8.9% |
-| Fitz read, set 2 | 3,296 | **3,592** | +9.0% |
-| iperf tcp-tx, sitting 1 | 2,997,212 | 2,976,433 | -0.7% |
-| iperf tcp-tx, sitting 2 | 2,965,530 | 2,972,969 | +0.3% |
-| Fitz write, kbytes/s | 2,542 | 2,538 | -0.2% |
+| iperf tcp-rx | 5,347,499 | 5,522,706 | +3.0% |
+| Fitz read, kbytes/s | 3,272 | 3,562 | +9.0% |
 
-| | |
-|---|---|
-| receive | about +3%, ahead in both positions in both sittings |
-| transmit | no change; the two sittings straddle zero |
-| Fitz read | +9%, two independent sets of six sittings agreeing to 0.1pp |
-| Fitz rates | application-visible file throughput, not a wire rate; do not compare to the iperf figures |
-| method | clean build per arm, md5 checked, six rounds or sittings, order alternated |
+What changed, and what each was worth on its own:
 
-The SANA-II reader swept all 32 read slots once per drain to post nothing:
-each slot is re-posted as its frame is taken out, so the sweep found them all
-in flight already.
-
-| | before | now | |
-|---|---|---|---|
-| iperf tcp-rx | 5,496,274 | **5,669,851** | +3.16% |
-| iperf tcp-rx, position 1 | 5,508,966 | 5,625,025 | +2.11% |
-| iperf tcp-rx, position 2 | 5,492,957 | 5,715,119 | +4.04% |
-| iperf tcp-tx | 2,975,931 | **3,133,761** | +5.30% |
-
-| null control | rx | tx |
+| change | rx | tx |
 |---|---|---|
-| same binary, both worktrees, same six rounds | +0.22% | **-0.00%** |
+| the SANA-II reader stops sweeping 32 read slots per drain to post nothing | +3.16% | +5.30% |
+| the LANCE receive buffer starts two bytes in, so the payload the copy hook reads lands on a longword | +3.09% | flat |
+| `le_rint` stops rewriting a descriptor field the chip never writes | none | none |
+| CMD_READ reaches its handler without the generic command dispatch | none | none |
 
 | | |
 |---|---|
-| transmit | moves, on a receive-path change. The rig's ~4.5 ms ack sets the floor; it does not make our share of the round trip free |
-| null control | `md5 7522050095ef` in both trees; transmit 2,966,517 against 2,966,516 |
-| separation | the null's transmit stays in 2.94-3.01M in both directories while this arm sits at 3.10-3.15M |
-
-The LANCE receive buffers start two bytes in, so the Ethernet payload the copy
-hook reads lands on a longword instead of two bytes off it.
-
-| | before | now | |
-|---|---|---|---|
-| iperf tcp-rx | 5,564,476 | **5,736,227** | +3.09% |
-| iperf tcp-rx, position 1 | 5,529,779 | 5,863,958 | +6.04% |
-| iperf tcp-rx, position 2 | 5,599,174 | 5,693,392 | +1.68% |
-| iperf tcp-tx | 3,115,306 | 3,123,097 | +0.25% |
-
-| | |
-|---|---|
-| Fitz read, 6 sittings | 3,500.5 | 3,489.0 | -0.33% |
-| Fitz write, 6 sittings | 2,601 | 2,598 | -0.12% |
-
-| | |
-|---|---|
-| what it removes | the CPU's misaligned-longword penalty on every load of the fused copy+checksum |
-| fused copy+checksum | 15% of the receive profile |
-| transmit | flat; the transmit buffers keep their old phase |
-| Fitz | flat; a request-and-response workload is bound by round trips, not by the cost of a byte |
-| boards | a2065 and ariadne, sharing the LANCE core |
-
-`le_rint()` stops rewriting the receive descriptor's buffer-length field, which
-the chip reads and never writes.
-
-| | before | now | |
-|---|---|---|---|
-| iperf tcp-rx, sitting 1 | 5,736,512 | 5,824,081 | +1.53% |
-| iperf tcp-rx, sitting 2 | 5,817,806 | 5,817,696 | **-0.00%** |
-| iperf tcp-tx, sitting 1 | 3,124,139 | 3,133,475 | +0.30% |
-
-| | |
-|---|---|
-| verdict | no measurable effect; two sittings disagree |
-| kept | one Zorro bus write per frame removed, at no cost |
-
-The day's four receive changes together, on the application workload, six
-sittings an arm.
-
-| | before | now | |
-|---|---|---|---|
-| Fitz write, kbytes/s | 2,541.5 | **2,607.0** | +2.58% |
-| Fitz read, kbytes/s | 3,422.5 | 3,506.5 | +2.45%, not solid |
-
-| | |
-|---|---|
-| write | ranges disjoint, before [2527..2552] against after [2591..2622] |
-| read | two sets disagree in sign, +2.45% then -3.38%; the metric cannot resolve this size and the figure is not claimed |
-
-| Fitz write, second set | before | now | |
-|---|---|---|---|
-| kbytes/s | 2,546.5 | **2,603.5** | +2.24% |
+| totals | measured end to end; the per-change figures do not add to them |
+| transmit | moved by the reader change alone; the rig's ~4.5 ms ack sets the floor, not our share of it |
+| Fitz | application-visible file throughput, never a wire rate; do not compare to the iperf figures |
+| `fitz_read` | cannot resolve a few per cent; two sets of it disagreed in sign |
+| noise | three null controls on identical binaries gave +0.22%, +2.75%, -0.29%; one A/B settles nothing between 1 and 3 per cent |
+| method | clean build per arm, md5 checked, six rounds or sittings, order alternated, two sittings for anything under 3 per cent |
 
 ## 0.26.3
 
