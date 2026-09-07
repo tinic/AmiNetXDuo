@@ -652,8 +652,9 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
        it. */
     slot->dst = iface->raw_mode ? base : (base + AMI_ETH_HEADER_SIZE);
 
-    slot->capacity = (ULONG)(packet->nx_packet_data_end - slot->dst);
-    slot->copied   = 0;
+    slot->capacity    = (ULONG)(packet->nx_packet_data_end - slot->dst);
+    slot->copied      = 0;
+    slot->hdr_written = FALSE;
 #ifdef AMINETXDUO_RX_VERIFY
     /* ami_sana2_copy_to_buff() clears this on entry and sets it only on the
        aligned path.  A driver that never calls the copy hook -- it is optional
@@ -929,7 +930,19 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
         return;
     }
 
-    if (!iface->raw_mode)
+    /*
+     * THE FOURTEEN BYTES USED TO TRAVEL A LONG WAY FOR WHAT THEY ARE.  The
+     * device lifted both addresses out of the frame into ios2_SrcAddr and
+     * ios2_DstAddr, and this rebuilt them into the packet and added the type:
+     * four six-byte moves and a word, per frame, for bytes the device was
+     * holding when it started.  ANXD_S2_RX_LINK_HDR asks it to write the
+     * header where the payload's fourteen leading bytes belong instead, and
+     * slot->hdr_written says it did.
+     *
+     * A driver that does not know the tag never sets it, so the synthesis
+     * below is still the answer for every other SANA-II device.
+     */
+    if (!iface->raw_mode && !slot->hdr_written)
     {
         eth = packet->nx_packet_prepend_ptr;
 

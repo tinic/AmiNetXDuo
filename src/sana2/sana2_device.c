@@ -862,6 +862,10 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_FILLED;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_rx_filled;
     tag++;
+    iface->link_hdr_ok              = FALSE;
+    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_LINK_HDR;
+    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->link_hdr_ok;
+    tag++;
 #if AMI_SANA2_OFFER_COPY16
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff16;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;

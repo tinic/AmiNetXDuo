@@ -444,6 +444,14 @@ VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
        is the direct path's version of the hook running. */
     slot->copied = len;
 
+    /* ONLY when the device answered the tag.  Reaching this hook says the
+       direct path ran, not that the driver knows about the header, and a
+       third-party one that implements the published pair without the tag
+       would otherwise be credited with fourteen bytes it never wrote. */
+    if (slot->owner != NULL && slot->owner->iface != NULL &&
+        slot->owner->iface->link_hdr_ok)
+        slot->hdr_written = TRUE;
+
     /* Count completion, not the earlier claim: a core may claim a slot and then
        put it back when its hardware drain fails.  These ABI-stable counter
        names predate the direct pair, so "copy hook" means either fill path. */

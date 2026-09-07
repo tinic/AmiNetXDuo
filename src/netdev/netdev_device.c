@@ -1676,6 +1676,16 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
             op->op_CopyTo = (APTR)tags->ti_Data;
         else if (tag == ANXD_S2_RX_DIRECT)
             op->op_RxDirect = (APTR)tags->ti_Data;
+        else if (tag == ANXD_S2_RX_LINK_HDR)
+        {
+            /* Answering IS the acceptance: the opener reads this back to
+               decide whether it still has to synthesise the header. */
+            if (tags->ti_Data != 0)
+            {
+                op->op_RxLinkHdr        = TRUE;
+                *(BOOL *)tags->ti_Data  = TRUE;
+            }
+        }
         else if (tag == ANXD_S2_RX_FILLED)
             op->op_RxFilled = (APTR)tags->ti_Data;
         else if (tag == S2_CopyFromBuff)

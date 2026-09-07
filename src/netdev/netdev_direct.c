@@ -163,6 +163,24 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                         ? SANA2IOF_BCAST : SANA2IOF_MCAST);
     }
 
+    /*
+     * The link header, written where the opener will read it, instead of
+     * taken apart into the request for the opener to put back together.
+     * `dst` is the payload, so the header is the fourteen bytes in front of
+     * it -- which is only true because the raw case was refused above.
+     *
+     * The request fields are filled either way: SANA-II promises them, and an
+     * opener that asked for the header may still read ios2_SrcAddr.
+     */
+    if (cand->op_RxLinkHdr)
+    {
+        UBYTE *lh = dst - NETDEV_HDR_LEN;
+        UWORD  i;
+
+        for (i = 0; i < NETDEV_HDR_LEN; i++)
+            lh[i] = hdr[i];
+    }
+
     direct_addr6(io->ios2_DstAddr, hdr);
     direct_addr6(io->ios2_SrcAddr, hdr + NETDEV_ADDR_LEN);
     io->ios2_PacketType = type;

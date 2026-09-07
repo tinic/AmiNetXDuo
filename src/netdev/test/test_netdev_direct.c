@@ -108,7 +108,11 @@ static NetdevOpener opener_a;
 static NetdevOpener opener_b;
 static struct IOSana2Req read_a;
 static struct IOSana2Req read_b;
-static UBYTE direct_buffer[NETDEV_MTU];
+/* The link header lands in front of what RX_DIRECT answers, so the fixture
+   has to have something in front of it to land in.  direct_area is the whole
+   allocation; direct_buffer is the payload the hook returns. */
+static UBYTE direct_area[NETDEV_HDR_LEN + NETDEV_MTU];
+#define direct_buffer (direct_area + NETDEV_HDR_LEN)
 static UBYTE data_cookie;
 
 static ULONG direct_len;
@@ -155,7 +159,7 @@ static void reset_fixture(void)
     memset(&unit, 0, sizeof(unit));
     memset(&read_a, 0, sizeof(read_a));
     memset(&read_b, 0, sizeof(read_b));
-    memset(direct_buffer, 0, sizeof(direct_buffer));
+    memset(direct_area, 0, sizeof(direct_area));
     NewList(&unit.nu_OpenerList);
     NewList(&unit.nu_Writes);
     init_opener(&opener_a);
@@ -201,6 +205,53 @@ static void make_header(UBYTE *hdr, ULONG type)
 }
 
 /* --------------------------------------------------------------- cases --- */
+
+/*
+ * THE LINK HEADER, WRITTEN BY THE DEVICE INSTEAD OF REBUILT BY THE OPENER.
+ *
+ * Both halves matter and the second is the one that keeps a third-party
+ * driver honest: with the tag accepted the fourteen bytes in front of the
+ * payload must BE the frame's header, and WITHOUT it they must be untouched,
+ * because the opener is still going to synthesise them there and anything
+ * this wrote would be overwritten -- or worse, trusted.
+ */
+static void test_link_header(void)
+{
+    UBYTE hdr[NETDEV_HDR_LEN];
+    APTR  token = NULL;
+    UBYTE *dst;
+
+    reset_fixture();
+    make_header(hdr, 0x0800);
+    queue_read(&opener_a, &read_a, 0x0800);
+    opener_a.op_RxLinkHdr = TRUE;
+
+    dst = netdev_rx_claim(&unit, hdr, 60, &token);
+    expect_ptr("link header: accepted", dst, direct_buffer);
+    expect_mem("link header written in front of the payload",
+               direct_buffer - NETDEV_HDR_LEN, hdr, NETDEV_HDR_LEN);
+
+    /* And the request fields are still filled: SANA-II promises them whatever
+       the private tag did, and an opener may read either. */
+    expect_mem("destination address still filled", read_a.ios2_DstAddr, hdr, 6);
+    expect_mem("source address still filled", read_a.ios2_SrcAddr, hdr + 6, 6);
+
+    /* A driver that never answered the tag must not write there. */
+    reset_fixture();
+    make_header(hdr, 0x0800);
+    queue_read(&opener_a, &read_a, 0x0800);
+    opener_a.op_RxLinkHdr = FALSE;
+
+    dst = netdev_rx_claim(&unit, hdr, 60, &token);
+    expect_ptr("no tag: accepted", dst, direct_buffer);
+    {
+        UBYTE zero[NETDEV_HDR_LEN];
+        memset(zero, 0, sizeof(zero));
+        expect_mem("no tag: nothing written in front of the payload",
+                   direct_buffer - NETDEV_HDR_LEN, zero, NETDEV_HDR_LEN);
+    }
+}
+
 
 static void test_claim_complete(void)
 {
@@ -346,6 +397,7 @@ static void test_broadcast_metadata(void)
 int main(void)
 {
     test_claim_complete();
+    test_link_header();
     test_raw_request_restored();
     test_declines_unsafe_claims();
     test_other_type_does_not_block();

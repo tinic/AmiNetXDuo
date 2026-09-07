@@ -460,6 +460,11 @@ typedef struct AmiRxSlot
     BOOL                summed;
 #endif
     BOOL                posted;
+    /* The device wrote the fourteen-byte link header in front of the payload
+       because the opener asked for it with ANXD_S2_RX_LINK_HDR.  A driver
+       that does not know the tag never sets this and the reader synthesises
+       the header as it always did. */
+    BOOL        hdr_written;
 } AmiRxSlot;
 
 /*
@@ -579,6 +584,7 @@ struct AmiSana2If
        list is an input to OpenDevice and outlives the open. */
     char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[12];
+    BOOL                link_hdr_ok;    /* device answered ANXD_S2_RX_LINK_HDR */
 
     /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */
     UCHAR               mac[AMI_ETH_ADDR_SIZE];

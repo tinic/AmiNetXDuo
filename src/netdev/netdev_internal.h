@@ -51,6 +51,7 @@ typedef struct NetdevOpener
     APTR                op_CopyFrom;
     APTR                op_Filter;
     APTR                op_RxDirect;    /* aminetxduo/anxs2ext.h, or NULL */
+    BOOL                op_RxLinkHdr;   /* write the link header before dst */
     APTR                op_RxFilled;
 
     UBYTE               op_Raw;
