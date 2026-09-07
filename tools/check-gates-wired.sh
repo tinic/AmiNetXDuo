@@ -71,10 +71,12 @@ want doc-budget     tools/ci.sh                      'check-doc-budget\.sh'
 want stage-coverage tools/ci.sh                      'check-stage-coverage\.sh'
 want rx-posted      tools/ci.sh                      'check-rx-posted\.sh'
 want option-stubs   tools/ci.sh                      'check-option-stubs\.sh'
+want lvo-matrix     tools/ci.sh                      'check-lvo-matrix\.sh'
 
 # ------------------------------------------ and the gate scripts still run ---
 for g in check-changelog-prose check-image-size check-ram-size check-rate \
          check-stage-coverage check-rx-posted check-option-stubs \
+         check-lvo-matrix \
          check-gates-wired; do
     if [ ! -x "tools/$g.sh" ]; then
         echo "gates_wired=NOT_EXECUTABLE gate=$g"

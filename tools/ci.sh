@@ -642,6 +642,19 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # Which vectors each profile answers with a stub.  Generated from the
+    # vector table, the #ifdef in the file that defines each one, and the arm
+    # lines below; a stale table is a diff rather than a surprise.
+    if tools/check-lvo-matrix.sh > "$BUILD/lvo-matrix.log" 2>&1; then
+        note "lvo matrix: $(sed -n 's/^lvo_matrix_rows=/rows /p' \
+              "$BUILD/lvo-matrix.log")"
+    else
+        cat "$BUILD/lvo-matrix.log"
+        fail "tests/profiles/lvo-matrix.tsv is stale\
+ (tools/check-lvo-matrix.sh --write)"
+        return 1
+    fi
+
     # An option's OFF side must define every function its ON side does.  The
     # link only notices on the arm that turns the option off, which is the arm
     # nobody builds locally; raw.c cost three of them in one sitting.
