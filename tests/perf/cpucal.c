@@ -337,9 +337,18 @@ ULONG   ratio_x100;
  * read is what the receive path does anyway, and read bandwidth is the number
  * the question turns on.
  *
- * The first board with at least 64 KB is taken, which on this rig is the
- * a2065.  No board, no line -- an emulated machine configured without one is
- * not a failure, it just cannot answer.
+ * NOT A MEMORY BOARD, WHICH THE FIRST VERSION OF THIS PICKED.  "The first
+ * board with at least 64 KB" found the 8 MB Zorro II RAM card at 0x00200000
+ * and measured it at 77.4 ns/B -- identical to Fast RAM, because that is what
+ * it is.  The a2065 carries 32 KB of SRAM and was excluded by the size floor
+ * it did not meet.
+ *
+ * ERTF_MEMLIST is the bit Expansion sets on a board whose space it added to
+ * the free memory list, so skipping it leaves the cards that are hardware.
+ * The floor drops to 16 KB for the same reason.
+ *
+ * No such board, no line -- a machine configured without one is not a failure,
+ * it just cannot answer.
  */
 static APTR c_board_find(ULONG *size_out)
 {
@@ -350,11 +359,14 @@ struct ConfigDev   *cd = NULL;
 
     while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
     {
-        if (cd->cd_BoardAddr != NULL && cd->cd_BoardSize >= 65536UL)
-        {
-            *size_out = cd->cd_BoardSize;
-            return cd->cd_BoardAddr;
-        }
+        if (cd->cd_BoardAddr == NULL || cd->cd_BoardSize < 16384UL)
+            continue;
+
+        if ((cd->cd_Rom.er_Type & ERTF_MEMLIST) != 0)
+            continue;               /* RAM, and already measured as Fast */
+
+        *size_out = cd->cd_BoardSize;
+        return cd->cd_BoardAddr;
     }
 
     return NULL;
@@ -451,8 +463,15 @@ ULONG   big_read, small_read;
      */
     if (m2m != 0UL && movem != 0UL)
     {
-        c_log("    movem/m2m %ld.%02ldx on THIS emulator -- a ratio between "
-              "two sequences here is not a fact about the silicon",
+        /* AND THE RATIO IS NOT STABLE RUN TO RUN EITHER.  Two runs of this
+           binary an hour apart read m2m 117.7 then 144.6 ns/B -- twenty-three
+           per cent apart -- while movem moved 0.6 per cent.  So the ratio
+           flipped from 1.10 to 0.90 with no change to anything.  Read ONE
+           run's ratio as an observation about that run and nothing more; the
+           rate arm that chased the first one measured +0.36 per cent, inside
+           the noise, which is what "no difference" looks like. */
+        c_log("    movem/m2m %ld.%02ldx on THIS emulator, THIS run -- neither "
+              "a fact about the silicon nor stable between runs",
               (LONG)((movem * 100UL / m2m) / 100UL),
               (LONG)((movem * 100UL / m2m) % 100UL));
     }
@@ -468,11 +487,20 @@ ULONG   big_read, small_read;
         ULONG   fast_read;
 
         c_log("");
-        c_log(" , Zorro board RAM at 0x%08lx, %ld KB --", (LONG)board,
+        ULONG   win = C_BIG_LONGS;
+
+        /* A 32 KB card cannot be swept with a 32 KB window and a guard: take
+           half the board, so the sweep stays inside it whatever it is. */
+        if ((bsize / 8UL) < win)
+            win = bsize / 8UL;
+
+        c_log(" , Zorro board (not memory) at 0x%08lx, %ld KB --", (LONG)board,
               (LONG)(bsize / 1024UL));
         fast_read = big_read;
         c_buf_a   = board;
-        (VOID)c_print_mem("read  32 KB window (bus)", K_READ);
+        c_window  = win;
+        (VOID)c_print_mem("read  window (bus)", K_READ);
+        c_window  = C_BIG_LONGS;
         c_buf_a   = save;
         (VOID)fast_read;
     }
