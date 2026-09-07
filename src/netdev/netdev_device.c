@@ -221,11 +221,57 @@ static ULONG nd_now(VOID)
     return ((ULONG)(vh >> 8) << 8) | (ULONG)(vh & 0xff);
 }
 
+/*
+ * A BACKWARDS STEP IS TWO DIFFERENT EVENTS AND THIS TREATED BOTH AS ONE.
+ *
+ * VHPOSR's high byte is the LOW EIGHT BITS of vpos, so the value this clock
+ * returns falls back to zero twice, not once, and only one of the two is the
+ * modular wrap the old line assumed:
+ *
+ *   vpos 255 -> 256   the low byte carries, t0 ~ 65,300 and t1 ~ 100.  A real
+ *                     wrap of ND_TICKS_WRAP, and adding it is right.
+ *   vpos 312 -> 0     the END OF THE PAL FIELD, every 20 ms.  The low byte
+ *                     goes 56 -> 0, a drop of about 14,336 -- and the old line
+ *                     added 65,536 to it and returned about 51,200 units,
+ *                     which is 12.7 MILLISECONDS of invented time charged to
+ *                     whichever span happened to be open.
+ *
+ * THAT IS WHAT THE FIRST FULL REPORT MEASURED, and the sums say so without a
+ * second run: `up` brackets the whole hand-over and `isr` brackets `up`, so
+ * both must be at least as large as the parts inside them, and neither was.
+ * One report of 523 frames read up 1,667,633 units against inner spans summing
+ * to 2,982,931, and isr 878,956 -- LESS THAN THE CALLBACK IT CONTAINS.  The
+ * excess is 1.3M units; 59 field boundaries in that 1.18 s window at ~51,200
+ * units each is 3.0M spread over every span open at the time.  find at 468,574
+ * units for a loop bounded by op_TrackHigh, which is one, was nine field
+ * boundaries and almost nothing else.
+ *
+ * The two are told apart by size: a span this instrument measures is under a
+ * millisecond, so a step back of more than half the range is the carry and
+ * anything smaller is the field.  A field-straddling sample cannot be repaired
+ * -- the clock does not say how many units the field was -- so it is DROPPED,
+ * and nd_n_wrap counts the drops so a reader can see what the average is an
+ * average of.  Dropping biases a span low by the few per cent of samples that
+ * straddle; the old behaviour biased it high by three hundred.
+ *
+ * `iss` is why this went unnoticed: it runs under Disable() for ~85 us, so it
+ * straddled a boundary about once in a report and its 352/348-unit steady
+ * state was real.  Every longer span in the same report was not.
+ */
+static ULONG nd_n_wrap;
+
 static ULONG nd_since(ULONG t0)
 {
     ULONG t1 = nd_now();
 
-    return (t1 >= t0) ? (t1 - t0) : (ND_TICKS_WRAP + t1 - t0);
+    if (t1 >= t0)
+        return t1 - t0;
+
+    if ((t0 - t1) > (ND_TICKS_WRAP / 2UL))
+        return ND_TICKS_WRAP + t1 - t0;     /* vpos bit 8 carried */
+
+    nd_n_wrap++;                            /* end of field: unmeasurable */
+    return 0;
 }
 
 static ULONG nd_t_isr;      /* ops->intr(), the whole chip service */
@@ -328,6 +374,7 @@ static VOID nd_time_report(VOID)
     nd_tracex("t nint   ", nd_n_int);
     nd_tracex("t nhook  ", nd_n_hook);
     nd_tracex("t probe16", nd_t_probe);
+    nd_tracex("t dropped", nd_n_wrap);
     /* The scale, so a reader does not take a beam unit for a colour clock. */
     nd_tracex("t unitnum", ND_UNIT_NUM);
     nd_tracex("t unitden", ND_UNIT_DEN);
@@ -336,7 +383,7 @@ static VOID nd_time_report(VOID)
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
     nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
     nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
-    nd_n_int = nd_n_frame = nd_n_hook = 0;
+    nd_n_int = nd_n_frame = nd_n_hook = nd_n_wrap = 0;
 }
 #endif
 
