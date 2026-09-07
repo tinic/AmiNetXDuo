@@ -4,6 +4,33 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# END TO END, 2026-09-07: the day's three wins measured TOGETHER, which is the
+# only honest way to quote them as one number.  d8f77786 (the day's first
+# commit) against 4b1747ba, four sittings A B B A, five rounds each, distinct
+# md5s (010c55093e94 / 5fc3af272f37):
+#
+#     arm                  sitting 1   sitting 2   median
+#     A  d8f77786          6,018,025   5,926,434   5,972,230   rx
+#                          3,199,275   3,197,144   3,198,210   tx
+#     B  4b1747ba          6,150,210   6,097,299   6,123,755   rx
+#                          3,319,384   3,328,085   3,323,735   tx
+#
+#     tcp-rx  +2.54 per cent      tcp-tx  +3.92 per cent
+#
+# GAINS DO NOT ADD, AND HERE IS THE ARITHMETIC.  The two receive changes
+# measured +3.04 and +1.80 ALONE, which compound to about 4.9; together they
+# deliver 2.54.  Transmit had exactly one change and reads +3.92 against its
+# own +3.87, which is the control: where one change owns a direction, the
+# end-to-end figure reproduces it.
+#
+# AND THE RIG DRIFTS UPWARD WITHIN A SESSION.  d8f77786 measured 5,981,308 and
+# 5,934,125 receive in the morning's bundle arm, and 6,018,025 and 5,926,434
+# here -- the same binary, medians 5,957,717 against 5,972,230, 0.24 per cent
+# apart, with individual sittings spanning 1.6.  That is inside the 0.90 per
+# cent null floor for medians and is why an arm's comparison point is rebuilt
+# in the SAME sitting.
+#
+#
 # RAISED 2026-09-07 on receive again, for a27be6a6 -- bsd_recv_tcp() fetching
 # the packet directly on the NX_NO_WAIT drain path instead of through
 # bsd_wait_sliced() and an indirect call.  Four sittings, P Q Q P, five rounds

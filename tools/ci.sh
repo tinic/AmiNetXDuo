@@ -147,7 +147,17 @@ CROSS_CONFIGS=(
     # sampling profiler.  None changes a struct a shipped image lays out, so
     # one build compiles them all and a break in any is a break in this arm.
     # The serial log is not among them any more: it is in every build.
-    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_PROFILER_NOINLINE=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON"
+    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON"
+    # The profiler's attribution aid, on its own arm.  It CANNOT ride `instr`:
+    # -fno-inline-functions-called-once is the whole point of it, and `instr`
+    # is the arm check-hot-calls.sh reads to assert that the per-frame receive
+    # helpers are still INLINED.  Putting both on one arm made that gate fail
+    # on _ami_bpf_tap_rx the first time it ran, which is the gate working.
+    "noinline:-DAMINETXDUO_PROFILER=ON -DAMINETXDUO_PROFILER_NOINLINE=ON -DAMINETXDUO_LTO=OFF"
+    # Shipping options plus a symbol table, and nothing else.  This is the arm
+    # check-hot-calls.sh reads: the claim it makes is about the image users
+    # get, so it cannot be answered by an instrumented build.
+    "symbols:-DAMINETXDUO_KEEP_SYMBOLS=ON"
     # One RTO estimator in three options: early retransmit and the tail loss
     # probe both read what TCP_RTT measures, so RTT=OFF with either of the
     # other two ON is not a configuration to defend.  All three off together
@@ -991,6 +1001,19 @@ stage_cross() {
 
             # And that no runtime helper became a call to itself.  It links,
             # exports the right symbol, and eats the stack; see the script.
+            # And that the per-frame receive helpers are still inlined.  Only
+            # the arm that keeps its symbols can answer; every other one skips.
+            if tools/check-hot-calls.sh "$BUILD/$name" \
+                    > "$BUILD/$name-hot-calls.log" 2>&1; then
+                note "$(sed -n 's/^hot_calls=PASS /hot receive calls: /p' \
+                      "$BUILD/$name-hot-calls.log" | head -1)"
+            elif grep -q 'hot_calls=skipped' "$BUILD/$name-hot-calls.log"; then
+                : # stripped or no toolchain: the instr arm is the one that answers
+            else
+                cat "$BUILD/$name-hot-calls.log"
+                fail "a per-frame receive helper is no longer inlined ($name)"
+            fi
+
             if tools/check-rt-recursion.sh "$BUILD/$name" \
                     > "$BUILD/$name-rt-recursion.log" 2>&1; then
                 note "$(sed -n 's/^rt_recursion=/runtime helpers: /p' \

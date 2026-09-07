@@ -296,3 +296,17 @@
 /comm/tcp/AmiMsgWin.lha	attributed	amimsgd, 3 vectors
 /comm/tcp/AmiTCP_ups10.lha	attributed	upsd, 2 vectors
 /comm/news/IvoRSS_OS3_1.1.1.lha	attributed	IvoRSS, 24 vectors
+#
+# 400-archive pass, 2026-09-07, archives 3961-4360 -- comm/tcp, the core
+# drawer.  Only 211 barren (53%), the lowest anywhere: 137 attributed, 86
+# ixemul, 81 unresolved, 48 distinct vectors.  ObtainSocket, ReleaseSocket and
+# ReleaseCopyOfSocket all appear, so micro breaks here as it does in comm/net.
+# BULK	211	no bsdsocket binary in the archive
+# BULK	10	lost to download or extract failure, not examined
+# BULK	86	ixemul-hosted, invisible to a vector scan
+# BULK	81	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	20	packed by a cruncher
+/comm/tcp/TcpSpeed.lha	attributed	TcpSpeed, 5 vectors and sock_raw=1 -- a GENUINE raw-socket user outside the ping/traceroute family, so RAWSOCKET=OFF breaks more than the three programs that row cites
+/comm/tcp/Patch2AmiTCP43.lha	attributed	socket.library, FORTY-ONE vectors, the highest count in the corpus. A wrapper library: surface, not demand -- see the wrapper-libraries METHOD row
+/comm/tcp/getit.lha	attributed	rxsocket.library again, 33 vectors and sock_raw=1, same reading
+/comm/tcp/MiamiDx10cmain.lha	attributed	miamisecureshell.library reports ONE vector and that vector is AbortInterfaceConfig (-0x1ec). An SSH library does not abort an interface configuration; a single hit at a single offset is the weakest shape evidence takes, and this is recorded as SUSPECT rather than as the first citation for that API
