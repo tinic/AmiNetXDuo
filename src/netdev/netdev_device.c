@@ -302,6 +302,31 @@ static VOID nd_time_report(VOID)
     nd_tracex("t bldTASK", nd_t_bld);        /* preempted: NOT a cost */
     nd_tracex("t issDISA", nd_t_iss);        /* under Disable(): a cost */
     nd_tracex("t rep    ", nd_t_rep);
+    /*
+     * THE PER-FRAME IOREQUEST ROUND TRIP, WHICH THIS REPORT COLLECTED AND
+     * NEVER SHOWED.  Five accumulators were summed on every frame and then
+     * cleared unprinted, so the block they measure has only ever been
+     * estimated -- by adding profile rows, which is how it got its current
+     * "about eleven to twelve per cent of a receive run".
+     *
+     * That block is now the largest identified one after the copies, and the
+     * change it points at -- a shared ring between this device and the reader,
+     * SANA-II kept for third-party drivers -- is weeks of work.  Nobody should
+     * start it on a number obtained by adding up shares from a sampling
+     * profiler when the device already times the parts.
+     *
+     * `reply` is ReplyMsg at interrupt level, so it is under Disable() and
+     * trustworthy the way `iss` is; `pre`, `take`, `find` and `addr` are all
+     * inside the interrupt service too.  Divide by `frames`, not by `int`.
+     */
+    nd_tracex("t preISR ", nd_t_pre);
+    nd_tracex("t takeISR", nd_t_take);
+    nd_tracex("t findISR", nd_t_find);
+    nd_tracex("t addrISR", nd_t_addr);
+    nd_tracex("t replISR", nd_t_reply);
+    nd_tracex("t txpump ", nd_t_tx);
+    nd_tracex("t nint   ", nd_n_int);
+    nd_tracex("t nhook  ", nd_n_hook);
     nd_tracex("t probe16", nd_t_probe);
     /* The scale, so a reader does not take a beam unit for a colour clock. */
     nd_tracex("t unitnum", ND_UNIT_NUM);
