@@ -72,3 +72,32 @@
 /comm/bbs/GMC-BBS-262.lha	packed	packed from the 300-archive pass
 /comm/bbs/Reccoon-Eval.lha	packed	packed from the 300-archive pass
 /comm/bbs/SKYLINEIIBBS2.lha	packed	packed from the 300-archive pass
+#
+# 400-archive pass, 2026-09-07, archives 361-760 of the worklist -- all of
+# comm/bbs.  368 of 400 carried no Amiga binary that opens bsdsocket, which is
+# 92% against the previous pass's 91%: the yield estimate holds on a second,
+# disjoint slice.  Every API these eighteen archives call is `ok` on default
+# AND on minimal.  Micro fails only ObtainSocket, and degrades gethostbyname
+# and gethostbyaddr to hosts-only; microcompat covers everything but the names.
+# BULK	368	no bsdsocket binary in the archive
+# BULK	14	lost to download or extract failure, not examined
+/comm/bbs/ddbbs130b4.lha	attributed	ftpd, 23 vectors -- the richest binary in the corpus; ObtainSocket, Dup2Socket, vsyslog, and the whole Inet_LnaOf/MakeAddr/NetOf/NtoA quartet
+/comm/bbs/clchat415.lha	attributed	CLChatD 6 and CLChatIRCD 8, both ObtainSocket+vsyslog; CLChatLink 10 is an ordinary client; SendChatBotFile calls gethostid alone
+/comm/bbs/Zeus_BBS_release_1.7.lha	attributed	ZNewsXfer 10, ZPOP3Xfer 7, ZSMTPXfer 5 -- three mail/news transports, no daemon vector between them
+/comm/bbs/zeus_upd_1_2.lha	attributed	the same two transports at 9 and 5, an older build of the above
+/comm/bbs/novia.lha	attributed	NOVIA, 6 vectors, 2530 raw jsr d16(a6) -- a large program with a small network surface
+/comm/bbs/zlogin.lha	rejected	opens bsdsocket and makes no attributed call; the string is in a message, not a code path
+/comm/bbs/hardchecker1_8.lha	ixemul	ixemul-hosted; the contract is inside ixemul.library
+/comm/bbs/CL51-upd02.lha	unresolved	SocketBase not provable from the OpenLibrary store
+/comm/bbs/rbt-tlnt.lha	unresolved	same
+/comm/bbs/sertrans20.lha	unresolved	same, three binaries
+/comm/bbs/G5_Sys.lha	unresolved	same
+/comm/bbs/TempDemo_v340.lha	packed	cruncher, four binaries
+/comm/bbs/TrinityBBS20.lha	packed	cruncher
+/comm/bbs/VNET-ALTER1_0b.lha	packed	cruncher
+/comm/bbs/bbs_200s.lha	packed	cruncher, four binaries
+/comm/bbs/dtr-d05.lha	packed	cruncher
+/comm/bbs/dtr-sw10.lha	packed	cruncher
+/comm/bbs/hsdisk1.lha	packed	cruncher
+/comm/bbs/madlertc.lha	packed	cruncher
+/comm/bbs/xlspiceprov16d.lha	packed	cruncher
