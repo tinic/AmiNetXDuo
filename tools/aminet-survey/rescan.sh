@@ -27,6 +27,18 @@ WANT=$(python3 -c "
 import sys; sys.path.insert(0, '$DIR'); import scan; print(scan.SCANNER_VERSION)")
 
 [ -f "$LEDGER" ] || { echo "rescan: no ledger at $LEDGER" >&2; exit 2; }
+
+# ONE WRITER AT A TIME.  rescan.sh rewrites the whole ledger -- `awk > tmp &&
+# mv tmp ledger` -- so any row a tick appends between the awk and the mv is
+# silently dropped.  Nothing would report it: the tick prints its findings and
+# exits 0, and the rows are simply gone from a file that still looks healthy.
+# Both writers take the same lock; the second waits rather than corrupting.
+exec 9>"${LEDGER}.lock"
+if ! flock -w 3600 9; then
+    echo "$(basename "$0"): another survey writer holds the ledger lock" >&2
+    exit 2
+fi
+
 echo "rescan: current scanner is v$WANT"
 
 # Archives with at least one row not at the current version.

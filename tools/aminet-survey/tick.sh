@@ -5,6 +5,18 @@ set -u
 OUT=${ANXD_SURVEY_OUT:-/tmp/anxd-survey}
 LEDGER=/home/turo/anxd-aminet/results.tsv
 [ -f "$LEDGER" ] || printf 'archive\tfile\tverdict\tdistinct\tcalls\tlvos\n' > "$LEDGER"
+
+# ONE WRITER AT A TIME.  rescan.sh rewrites the whole ledger -- `awk > tmp &&
+# mv tmp ledger` -- so any row a tick appends between the awk and the mv is
+# silently dropped.  Nothing would report it: the tick prints its findings and
+# exits 0, and the rows are simply gone from a file that still looks healthy.
+# Both writers take the same lock; the second waits rather than corrupting.
+exec 9>"${LEDGER}.lock"
+if ! flock -w 3600 9; then
+    echo "$(basename "$0"): another survey writer holds the ledger lock" >&2
+    exit 2
+fi
+
 # PICKING NOTHING IS NOT SUCCESS.  The caller used to build the list with
 # `grep -vFf done.txt`, and `cut -f1 results.tsv` emits the header and an empty
 # line -- an empty pattern in -f matches EVERY line, so the exclusion list

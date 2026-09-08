@@ -23,7 +23,7 @@ not depend on trusting the summaries:
 | raw input | what it is |
 |---|---|
 | `worklist.txt` | the corpus, 5,923 archive paths |
-| `results.tsv` | one row per scanned binary: archive, path, verdict, distinct, calls, and the LVO NAMES it calls |
+| `results.tsv` | one row per scanned binary: archive, file, verdict, distinct, calls, LVO NAMES, scanner version, the archive's full Aminet path, its SHA-256 |
 | `lvomap.tsv` | the 143 vectors, pinned against the source that defines them |
 
 | derived | rebuild with |
@@ -38,6 +38,43 @@ not depend on trusting the summaries:
 a different threshold, a different grouping, or a per-application question can
 be answered later without rescanning 1,700 archives.
 
+### The ledger is latin-1, not UTF-8
+
+Column 2 is a path out of a real Amiga archive and holds whatever bytes the
+local code page produced -- `Spitfire2.lha` ships a drawer called
+`Spitfire<b2> Install`.  Latin-1 maps 0x00-0xFF one to one, so a path round
+trips byte for byte whatever it meant; a path here is an identifier, carried
+and compared, never interpreted.  `tools/aminet-survey/survey_io.py` is the
+only reader, and `test-survey-io.sh` carries that byte as a fixture.
+
+### Scanner version, archive identity
+
+`scanner=N` records which revision of `scan.py` produced the row.  Five
+changes have altered what a scan returns for the same bytes, so an early row
+is not a weaker result -- it may be a wrong one.  `rescan.sh` re-runs anything
+older, off the local unpack tree, with no network.
+
+The archive's full path and SHA-256 are columns 8 and 9.  A basename does not
+identify an Aminet archive (`samba` appears under both `comm/net` and
+`comm/tcp`), and without a hash there is no telling whether a row describes
+the file on the mirror today.
+
+### What a verdict means
+
+| verdict | meaning |
+|---|---|
+| `OK` / `OK+SOCK_RAW` | SocketBase resolved and calls attributed through it |
+| `DUAL_STACK_AS225` | the LVO set mixes two libraries; excluded from candidates by design |
+| `BASE_BUT_NO_CALLS` | opened and stored, then nothing matched the a6 pattern -- a program calling some way this scanner does not model, NOT a program that makes no calls |
+| `NO_SOCKETBASE_STORE` | the string is present and the store was not found |
+| `NO_BSDSOCKET_BINARY` | no file in the archive references the library |
+| `SCAN_ERROR` | the scanner died.  NOT a fact about the archive, and deliberately not an OK-family verdict |
+| `FETCH_*` / `UNPACK_PARTIAL` | a failure to look, not a result.  `retry.sh` re-attempts these |
+
+The last two exist because a failure to look used to be recorded as a finding:
+a crashed scanner wrote `NO_BSDSOCKET_BINARY`, a positive claim manufactured
+out of not looking, and those rows were never revisited.
+
 ## Method
 
 | step | what |
@@ -48,6 +85,16 @@ be answered later without rescanning 1,700 archives.
 
 `tools/aminet-survey/` holds the harness.  `./pick.sh <seed> > /tmp/n12.txt`
 then `./tick.sh $(cat /tmp/n12.txt)`.
+
+| gate | checks | runs in |
+|---|---|---|
+| `test-survey-io.sh` | the latin-1 ledger and atomic table writes, with the 0xb2 as a fixture | `tools/ci.sh survey` |
+| `test-scan.py` | the scanner against HUNK executables built in the test, where the right answer is known | `tools/ci.sh survey` |
+| `check-derived.sh` | every published table regenerates byte for byte from `results.tsv` | `tools/ci.sh survey` |
+
+`stage_survey` is in ci.sh's DEFAULT set.  `check-derived.sh` previously
+existed and was called by nothing, which is the same shape as a gate that
+skips and exits 0.
 
 ## Why a displacement scan is not enough
 
