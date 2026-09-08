@@ -299,6 +299,24 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_lance COMMAND test_netdev_lance)
 
+    # The accessors the DEVICE runs.  The test above replaces LANCE_CSR_GET
+    # and LANCE_CSR_PUT with a mock, so everything behind lance.c's
+    # `#ifndef LANCE_CSR_GET` -- the RAP/RDP pair and the select cache -- is
+    # compiled out of it and had no coverage anywhere.  This one includes
+    # lance.c without the override.
+    add_executable(test_netdev_lance_csr
+        test/test_netdev_lance_csr.c)
+
+    target_include_directories(test_netdev_lance_csr PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_lance_csr PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_lance_csr COMMAND test_netdev_lance_csr)
+
     # The derived station address.  Determinism, the locally-administered and
     # unicast bits, and "two different machines get two different addresses"
     # are all properties an emulator cannot show: its card has a valid PROM,

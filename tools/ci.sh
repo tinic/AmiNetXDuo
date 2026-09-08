@@ -185,7 +185,8 @@ host_test_targets() { # builddir
 # 116, plus netdev_ne2000, pool_window, netdev_beginio and perf_stallgaps.
 # Two branches raised this against the same base on the same day; the merge
 # is the SUM of what each added, not the larger of the two numbers.
-HOST_TESTS_EXPECTED=121
+# 121, plus netdev_lance_csr.
+HOST_TESTS_EXPECTED=122
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
