@@ -11,6 +11,7 @@ version at the top when it merges.
 
 ### Compatibility
 
+- DHCP on `genet.device` (A1200/PiStorm32): DHCP task stack restored from 2 KiB to 4 KiB for synchronous SANA-II transmit calls
 - `ch_nfsc` obtains credentials for a task that never opened `usergroup.library`. An unknown task inherits the querying opener's credentials; NFS mounts authenticate again
 - `ssh` no longer writes a longword through address zero before `main()`. Both the CLI and Workbench startup paths are repaired
 - Every multilib crt0 is checked at configure, at client build, and by `tests/toolchain/test_crt0_gate.py`. An unsafe or unrecognised startup shape is refused
