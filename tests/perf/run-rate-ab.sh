@@ -142,12 +142,33 @@ if [ "$live" != "0" ]; then
     exit 8
 fi
 
+# THE INSTRUMENT COMES FROM ONE REF, ON BOTH ARMS.
+#
+# Each arm used to run the run-iperf.sh of its OWN checkout, and an A/B whose
+# two refs straddle a harness change then measures the harness.  That is not
+# hypothetical: AMINETXDUO_IPERF_RX_REPEAT landed BETWEEN two refs under
+# comparison on 2026-09-08, so the BASE arm quietly ran ONE transfer a boot
+# where HEAD ran FOUR.  Both arms reported rc=0 and fails=0 -- nothing was
+# wrong with either run, they were just not the same measurement.  Worse, the
+# extra transfers are later-in-boot and both HEAD boots trended UP within the
+# boot (+4.3% and +3.1%), so the confound pointed the SAME WAY as the effect
+# being chased and was the same size.
+#
+# run-iperf.sh is the measuring instrument; the libraries are the thing under
+# test.  So it is taken from HEAD_REF for both arms, and the two copies are
+# compared before a single round runs.  tools/amiberry-run.sh is left alone --
+# it is invoked from the caller's own tree, not the arm's.
+HARNESS_FILES="tests/tools/run-iperf.sh"
+
 build_arm() {                           # $1 dir  $2 ref  $3 label
     cd "$1" || return 9
     git fetch -q origin || return 1
     git reset --hard -q HEAD
     git clean -qfd src bench port tools tests 2>/dev/null
     git checkout -q --detach "$2" || { echo "rate_ab=fail reason=checkout arm=$3"; return 1; }
+    # shellcheck disable=SC2086
+    git checkout -q "$HEAD_REF" -- $HARNESS_FILES ||
+        { echo "rate_ab=fail reason=harness_overlay arm=$3"; return 1; }
     rm -rf build/ab
     cmake -S . -B build/ab \
           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
@@ -162,6 +183,20 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
 
 build_arm "$BASE_DIR" "$BASE_REF" BASE || exit 1
 build_arm "$HEAD_DIR" "$HEAD_REF" HEAD || exit 1
+
+# PROVEN, NOT ASSUMED.  A refused run costs minutes; a run measured with two
+# different instruments costs a wrong answer that looks like a result.
+for f in $HARNESS_FILES; do
+    hb=$(md5sum "$BASE_DIR/$f" | cut -c1-12)
+    hh=$(md5sum "$HEAD_DIR/$f" | cut -c1-12)
+    if [ "$hb" != "$hh" ]; then
+        echo "rate_ab=fail reason=harness_differs file=$f base=$hb head=$hh"
+        echo "  The two arms would be measured by different code.  See the"
+        echo "  note above build_arm()."
+        exit 2
+    fi
+    echo "harness $f md5=$hb (same on both arms)"
+done
 
 #
 # IT CALLS run-iperf.sh, NOT check-rate.sh, AND THE DIFFERENCE IS THE POINT.
