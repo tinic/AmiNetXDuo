@@ -73,61 +73,6 @@ _Static_assert(offsetof(struct ug_credentials, cr_groups)  ==  16, "cr_groups");
 _Static_assert(offsetof(struct ug_credentials, cr_session) == 144, "cr_session");
 _Static_assert(offsetof(struct ug_credentials, cr_login)   == 148, "cr_login");
 
-/* --------------------------------------------------------- tiny string, */
-
-ULONG ug_strlen(const char *s)
-{
-    const char *p = s;
-
-    if (s == NULL)
-        return 0;
-    while (*p != '\0')
-        p++;
-
-    return (ULONG)(p - s);
-}
-
-void ug_strncpy(char *dst, const char *src, ULONG size)
-{
-    ULONG i = 0;
-
-    if (dst == NULL || size == 0)
-        return;
-    if (src != NULL)
-    {
-        while (i + 1 < size && src[i] != '\0')
-        {
-            dst[i] = src[i];
-            i++;
-        }
-    }
-    dst[i] = '\0';
-}
-
-int ug_strcmp(const char *a, const char *b)
-{
-    if (a == NULL || b == NULL)
-        return (a == b) ? 0 : 1;
-
-    while (*a != '\0' && *a == *b)
-    {
-        a++;
-        b++;
-    }
-
-    return (int)((unsigned char)*a) - (int)((unsigned char)*b);
-}
-
-/* NewList() lives in amiga.lib. A shared library open-codes it. */
-void ug_newlist(struct MinList *list)
-{
-    list->mlh_Head     = (struct MinNode *)&list->mlh_Tail;
-    list->mlh_Tail     = NULL;
-    list->mlh_TailPred = (struct MinNode *)&list->mlh_Head;
-}
-
-/* ------------------------------------------------------------- dos base, */
-
 /*
  * Opened on first use and not at init: the database files are optional, and a
  * caller that never touches them never pays for dos.library. Safe to call with

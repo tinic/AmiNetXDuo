@@ -42,8 +42,6 @@ SHIM_DOS_DEFINE_STATE;
 
 void ug_set_err(struct UserGroupBase *base, LONG err) { base->ug_Err = err; }
 
-ULONG ug_strlen(const char *s) { return (ULONG)strlen(s); }
-
 static struct DosLibrary *stub_dosbase;
 
 struct DosLibrary *ug_dos(struct UserGroupBase *base)
@@ -426,6 +424,64 @@ static void test_utmp_is_empty_not_failed(void)
     CHECK(base.ug_Err == 0);
 }
 
+/*
+ * THE THREE HELPERS, WHICH UNTIL NOW EVERY TEST STUBBED.
+ *
+ * They were in ug_library.c, which carries a raw __asm__() block and cannot be
+ * compiled off-target, so test_ug_db, test_ug_ids and this file each supplied
+ * their own using libc strcmp/strlen.  Those are NOT the same functions: the
+ * shipped ones define behaviour where libc has none, and every caller in the
+ * library relies on it -- ug_db.c compares pw_name against a caller string that
+ * may be NULL, and ug_context.c copies into a fixed cr_login.
+ */
+static void test_string_helpers(void)
+{
+    char buf[8];
+
+    /* NULL is a length, not a crash. */
+    CHECK(ug_strlen(NULL) == 0);
+    CHECK(ug_strlen("") == 0);
+    CHECK(ug_strlen("abc") == 3);
+
+    /* NEVER negative for NULL, and equal only when both are.  A caller that
+       sorted on the sign would order NULL first with libc and last here. */
+    CHECK(ug_strcmp(NULL, NULL) == 0);
+    CHECK(ug_strcmp(NULL, "a") == 1);
+    CHECK(ug_strcmp("a", NULL) == 1);
+    CHECK(ug_strcmp("a", "a") == 0);
+    CHECK(ug_strcmp("a", "b") < 0);
+    CHECK(ug_strcmp("b", "a") > 0);
+    /* High bytes compare UNSIGNED: a latin-1 name must not sort before ASCII. */
+    CHECK(ug_strcmp("\xe4", "a") > 0);
+
+    /* Always terminates, never writes size or beyond. */
+    memset(buf, 'Z', sizeof(buf));
+    ug_strncpy(buf, "abcdefghij", 4);
+    CHECK_STR(buf, "abc");
+    CHECK(buf[4] == 'Z');               /* one past the size is untouched */
+
+    memset(buf, 'Z', sizeof(buf));
+    ug_strncpy(buf, "ab", sizeof(buf));
+    CHECK_STR(buf, "ab");
+
+    /* A NULL source still terminates the destination rather than leaving it. */
+    memset(buf, 'Z', sizeof(buf));
+    ug_strncpy(buf, NULL, sizeof(buf));
+    CHECK(buf[0] == '\0');
+
+    /* size 0 and a NULL destination write nothing at all. */
+    memset(buf, 'Z', sizeof(buf));
+    ug_strncpy(buf, "abc", 0);
+    CHECK(buf[0] == 'Z');
+    ug_strncpy(NULL, "abc", sizeof(buf));   /* must not fault */
+
+    /* size 1 is the terminator alone. */
+    memset(buf, 'Z', sizeof(buf));
+    ug_strncpy(buf, "abc", 1);
+    CHECK(buf[0] == '\0');
+    CHECK(buf[1] == 'Z');
+}
+
 int main(void)
 {
     test_getpass_echo_is_off_around_the_read();
@@ -439,6 +495,7 @@ int main(void)
     test_getsalt_defaults();
     test_crypt_is_enosys();
     test_utmp_is_empty_not_failed();
+    test_string_helpers();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

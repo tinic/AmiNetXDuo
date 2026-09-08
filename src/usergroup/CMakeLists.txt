@@ -12,6 +12,7 @@ set(USERGROUP_SOURCES
     ug_context.c
     ug_ids.c
     ug_db.c
+    ug_str.c
     ug_parse.c
     ug_misc.c)
 
@@ -149,7 +150,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_ug_db
         test/test_ug_db.c
         ug_db.c
-        ug_parse.c)
+        ug_parse.c
+        ug_str.c)
 
     target_include_directories(test_ug_db PRIVATE
         "${CMAKE_SOURCE_DIR}/include"
@@ -173,7 +175,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         test/test_ug_ids.c
         ug_ids.c
         ug_db.c
-        ug_parse.c)
+        ug_parse.c
+        ug_str.c)
 
     target_include_directories(test_ug_ids PRIVATE
         "${CMAKE_SOURCE_DIR}/include"
@@ -192,7 +195,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     # keeps a one-character-per-call order log for it.
     add_executable(test_ug_misc
         test/test_ug_misc.c
-        ug_misc.c)
+        ug_misc.c
+        ug_str.c)
 
     target_include_directories(test_ug_misc PRIVATE
         "${CMAKE_SOURCE_DIR}/include"

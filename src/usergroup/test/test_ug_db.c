@@ -84,11 +84,6 @@ void ug_set_err(struct UserGroupBase *base, LONG err)
     base->ug_Err = err;
 }
 
-int ug_strcmp(const char *a, const char *b)
-{
-    return strcmp(a, b);
-}
-
 /* ug_library.c's.  A non-NULL DosLibrary is all ug_db.c wants; the shim's
    Open() does not look at it. */
 static struct DosLibrary *stub_dosbase;

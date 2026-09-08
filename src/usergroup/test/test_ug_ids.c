@@ -72,22 +72,6 @@ VOID ami_free(APTR p)
 
 void ug_set_err(struct UserGroupBase *base, LONG err) { base->ug_Err = err; }
 
-int ug_strcmp(const char *a, const char *b) { return strcmp(a, b); }
-
-ULONG ug_strlen(const char *s) { return (ULONG)strlen(s); }
-
-void ug_strncpy(char *dst, const char *src, ULONG size)
-{
-    ULONG i;
-
-    if (size == 0)
-        return;
-
-    for (i = 0; i + 1 < size && src[i] != '\0'; i++)
-        dst[i] = src[i];
-    dst[i] = '\0';
-}
-
 /* ug_context.c's; this test does not link it. */
 static int stub_resolve_calls;
 
