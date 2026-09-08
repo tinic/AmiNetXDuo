@@ -335,9 +335,19 @@ static void test_initgroups_caps_at_ngroups(void)
 
     world_reset();
 
-    /* 40 groups, more than UG_NGROUPS, every one of them containing jane. */
+    /* 40 groups, more than UG_NGROUPS, every one of them containing jane.
+       snprintf, not sprintf: the macOS SDK marks sprintf __deprecated_msg and
+       the sanitize arm builds with -Werror, so sprintf is a build failure
+       there and only there.  Nothing about the test needs the unbounded one. */
     for (i = 0; i < 40; i++)
-        p += sprintf(p, "g%d:*:%d:jane\n", i, 500 + i);
+    {
+        size_t left = sizeof(file) - (size_t)(p - file);
+        int    n    = snprintf(p, left, "g%d:*:%d:jane\n", i, 500 + i);
+
+        if (n <= 0 || (size_t)n >= left)
+            break;
+        p += n;
+    }
 
     shim_dos_add_file("DEVS:Internet/group", file, (long)(p - file));
 
