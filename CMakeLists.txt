@@ -463,7 +463,8 @@ endif()
 # TREE READS ONE.  Checked by name across the whole repository, third_party
 # excluded: nx_ip_total_packets_received, nx_ip_tcp_packets_sent,
 # nx_ip_udp_packets_received, nx_icmp_pings_sent, nx_arp_requests_sent and
-# their families are referenced nowhere.  What `netstat -s` and
+# their families were believed to be referenced nowhere.  See below: three of
+# them are.  What `netstat -s` and
 # `ShowNetStatus` print is our own ToolStats accounting, which is untouched.
 #
 # TWO FAMILIES ARE DELIBERATELY NOT HERE.  NX_DISABLE_PACKET_INFO: netstack.c
@@ -485,11 +486,29 @@ endif()
 # nothing about it.
 option(AMINETXDUO_NX_COUNTERS
        "Compile NetX Duo's TCP/UDP/ARP/RARP/IGMP counters, for diagnosis" OFF)
+#
+# THREE OF THE FIVE CAME BACK, 2026-09-08, BY THE RULE STATED ABOVE.
+# "referenced nowhere" was wrong: TCP, UDP and ARP info are read by SHIPPED
+# code on six paths, and every one of them was handing out zeros.
+#
+#   src/bsdsocket/netstats.c:71,93     GetNetworkStatistics NETSTATUS_tcp/udp
+#   src/bsdsocket/netstatus.c:946,956,963  the extended ShowNetStatus block
+#   src/bsdsocket/interfaces.c:315     the interface's ARP counters
+#   src/netstack/netstack_rexx_vars.c:366,390  the ARexx host's variables
+#
+# NX_DISABLE_*_INFO guards only the INCREMENTS; nx_udp_info_get() still
+# returns NX_SUCCESS (netstat.c:508-518 says so and prints "not enabled"
+# instead).  So these four callers could not tell a quiet stack from a
+# disabled counter, and neither could anything reading them.  Caught by
+# tests/tools/run-ifquery.sh:502 -- "udpstat came back zeroed or the wrong
+# size" -- against a guest that had just taken a DHCP lease from
+# 192.168.1.1 over UDP.  That is the rule the IP and ICMP families are
+# already exempt under: a counter a test reads is a counter in use.
+#
+# RARP and IGMP stay off.  Nothing reads them: no nx_rarp_info_get() or
+# nx_igmp_info_get() call exists outside third_party/.
 if(NOT AMINETXDUO_NX_COUNTERS)
     add_compile_definitions(
-        NX_DISABLE_TCP_INFO
-        NX_DISABLE_UDP_INFO
-        NX_DISABLE_ARP_INFO
         NX_DISABLE_RARP_INFO
         NX_DISABLE_IGMP_INFO)
 endif()
