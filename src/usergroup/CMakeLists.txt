@@ -111,4 +111,30 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     include(CTest)
     add_test(NAME usergroup_parsers COMMAND test_usergroup)
+
+    # ------------------------------------------------------- credentials --
+    #
+    # ug_context.c reaches exec three times -- FindTask, Forbid, Permit --
+    # which src/config/test/shim/proto/exec.h supplies, so the credentials
+    # walk builds here.  It could not before: usergroup_vectors.h declared
+    # every argument with `register ... __asm("aN")` and had no host branch,
+    # which is the reason ugl_getcredentials() shipped the v0.26.3 NFS crash
+    # with no coverage anywhere in the tree.  UG_REG gives it that branch.
+    #
+    # ug_db.c is not linked -- it is the dos.library half -- so the one call
+    # into it is stubbed in the test.  Under tools/ci.sh host (ASan) the
+    # stale-pointer case also proves the fallback does not dereference the
+    # caller's task pointer.
+    add_executable(test_ug_credentials
+        test/test_ug_credentials.c
+        ug_context.c)
+
+    target_include_directories(test_ug_credentials PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_credentials PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_credentials COMMAND test_ug_credentials)
 endif()

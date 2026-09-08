@@ -11,6 +11,7 @@
 #include <proto/exec.h>
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* ----------------------------------------------------------------- errno, */
 
@@ -58,7 +59,7 @@ void ug_context_init(struct UserGroupBase *base)
     base->ug_Cred.cr_umask    = 0;
     base->ug_Cred.cr_ngroups  = 1;
     base->ug_Cred.cr_groups[0] = 0;
-    base->ug_Cred.cr_session  = (LONG)self;
+    base->ug_Cred.cr_session  = (LONG)(uintptr_t)self;
     base->ug_Cred.cr_login[0] = '\0';
 
     ug_strncpy(base->ug_ProgName, "", sizeof(base->ug_ProgName));
@@ -95,8 +96,8 @@ void ug_resolve_login(struct UserGroupBase *base)
 
 /* ------------------------------------------------------------- vectors --- */
 
-LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
-                             register struct TagItem *tags __asm("a1"))
+LONG ugl_SetupContextTagList(UG_A6, UG_REG(STRPTR name, "a0"),
+                             UG_REG(struct TagItem *tags, "a1"))
 {
     struct TagItem *ti = tags;
 
@@ -115,7 +116,7 @@ LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
 
         if (tag == TAG_MORE)
         {
-            ti = (struct TagItem *)data;
+            ti = (struct TagItem *)(uintptr_t)data;
             continue;
         }
 
@@ -128,22 +129,22 @@ LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
         switch (tag)
         {
             case UGT_ERRNOBPTR:
-                base->ug_ErrnoPtr  = (APTR)data;
+                base->ug_ErrnoPtr  = (APTR)(uintptr_t)data;
                 base->ug_ErrnoSize = 1;
                 break;
 
             case UGT_ERRNOWPTR:
-                base->ug_ErrnoPtr  = (APTR)data;
+                base->ug_ErrnoPtr  = (APTR)(uintptr_t)data;
                 base->ug_ErrnoSize = 2;
                 break;
 
             case UGT_ERRNOLPTR:
-                base->ug_ErrnoPtr  = (APTR)data;
+                base->ug_ErrnoPtr  = (APTR)(uintptr_t)data;
                 base->ug_ErrnoSize = 4;
                 break;
 
             case UGT_OWNER:
-                base->ug_Owner = (struct Task *)data;
+                base->ug_Owner = (struct Task *)(uintptr_t)data;
                 base->ug_Cred.cr_session = (LONG)data;
                 break;
 
@@ -168,7 +169,7 @@ LONG ugl_GetErr(UG_A6)
     return base->ug_Err;
 }
 
-STRPTR ugl_StrError(UG_A6, register LONG err __asm("d1"))
+STRPTR ugl_StrError(UG_A6, UG_REG(LONG err, "d1"))
 {
     (void)base;
 
@@ -204,7 +205,7 @@ STRPTR ugl_StrError(UG_A6, register LONG err __asm("d1"))
  * made the first NFS request after a mount lose its authentication context.
  */
 struct ug_credentials *ugl_getcredentials(UG_A6,
-                                          register struct Task *task __asm("a0"))
+                                          UG_REG(struct Task *task, "a0"))
 {
     struct UgGlobal *g = base->ug_Global;
     struct ug_credentials *result = NULL;
@@ -245,7 +246,7 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
            one must not turn compatibility fallback into an Enforcer hit. */
         ug_resolve_login(base);
         base->ug_CredResult = base->ug_Cred;
-        base->ug_CredResult.cr_session = (LONG)task;
+        base->ug_CredResult.cr_session = (LONG)(uintptr_t)task;
         result = &base->ug_CredResult;
     }
 
