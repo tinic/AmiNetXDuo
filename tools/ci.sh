@@ -186,8 +186,8 @@ host_test_targets() { # builddir
 # Two branches raised this against the same base on the same day; the merge
 # is the SUM of what each added, not the larger of the two numbers.
 # 121, plus netdev_lance_csr.
-# 122, plus usergroup_credentials.
-HOST_TESTS_EXPECTED=123
+# 122, plus usergroup_credentials and usergroup_db (amend in place: BACKLOG cites lines here).
+HOST_TESTS_EXPECTED=124
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

@@ -193,7 +193,7 @@ static struct ug_passwd *ug_pw_return(struct UserGroupBase *base, UWORD index)
     return &base->ug_PwResult;
 }
 
-struct ug_passwd *ugl_getpwnam(UG_A6, register STRPTR login __asm("a1"))
+struct ug_passwd *ugl_getpwnam(UG_A6, UG_REG(STRPTR login, "a1"))
 {
     struct UgDatabase *db;
     UWORD i;
@@ -218,7 +218,7 @@ struct ug_passwd *ugl_getpwnam(UG_A6, register STRPTR login __asm("a1"))
     return NULL;
 }
 
-struct ug_passwd *ugl_getpwuid(UG_A6, register LONG uid __asm("d0"))
+struct ug_passwd *ugl_getpwuid(UG_A6, UG_REG(LONG uid, "d0"))
 {
     struct UgDatabase *db;
     UWORD i;
@@ -267,7 +267,7 @@ static struct ug_group *ug_gr_return(struct UserGroupBase *base, UWORD index)
     return &base->ug_GrResult;
 }
 
-struct ug_group *ugl_getgrnam(UG_A6, register STRPTR name __asm("a1"))
+struct ug_group *ugl_getgrnam(UG_A6, UG_REG(STRPTR name, "a1"))
 {
     struct UgDatabase *db;
     UWORD i;
@@ -292,7 +292,7 @@ struct ug_group *ugl_getgrnam(UG_A6, register STRPTR name __asm("a1"))
     return NULL;
 }
 
-struct ug_group *ugl_getgrgid(UG_A6, register LONG gid __asm("d0"))
+struct ug_group *ugl_getgrgid(UG_A6, UG_REG(LONG gid, "d0"))
 {
     struct UgDatabase *db;
     UWORD i;

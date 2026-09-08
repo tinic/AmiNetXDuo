@@ -23,4 +23,9 @@ struct MinNode {
     struct MinNode *mln_Pred;
 };
 
+/* ln_Type values, at the NDK's numbering.  ug_db.c refuses to Open() from a
+   bare Task, which has no pr_ fields, so it checks for NT_PROCESS. */
+#define NT_TASK     1
+#define NT_PROCESS  13
+
 #endif

@@ -137,4 +137,26 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_ug_credentials PRIVATE -Wall -Wextra)
 
     add_test(NAME usergroup_credentials COMMAND test_ug_credentials)
+
+    # ---------------------------------------------------------- database --
+    #
+    # ug_db.c is the dos.library half: which file is read, what happens when
+    # there is none, and what getpwnam()/getpwuid()/getgr*() hand back.  It
+    # had no test anywhere.  src/config/test/shim/proto/dos.h supplies its
+    # four calls -- Open, Close, Read, Seek -- over an in-memory file table,
+    # reproducing Seek()'s return-the-previous-position contract, which is
+    # what ug_db.c sizes a file with.
+    add_executable(test_ug_db
+        test/test_ug_db.c
+        ug_db.c
+        ug_parse.c)
+
+    target_include_directories(test_ug_db PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_db PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_db COMMAND test_ug_db)
 endif()

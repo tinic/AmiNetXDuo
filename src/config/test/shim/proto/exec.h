@@ -14,12 +14,14 @@
 #ifndef AMINETXDUO_SHIM_PROTO_EXEC_H
 #define AMINETXDUO_SHIM_PROTO_EXEC_H
 
+#include <exec/semaphores.h>
 #include <exec/tasks.h>
 #include <exec/types.h>
 
 /* Defined by the test, so it can choose who is asking. */
 extern struct Task *shim_current_task;
 extern int          shim_forbid_depth;
+extern int          shim_semaphore_depth;
 
 static inline struct Task *FindTask(STRPTR name)
 {
@@ -29,5 +31,13 @@ static inline struct Task *FindTask(STRPTR name)
 
 static inline void Forbid(void) { ++shim_forbid_depth; }
 static inline void Permit(void) { --shim_forbid_depth; }
+
+/* Nothing here contends, but the depth is counted so a test can assert the
+   pairing the database loader relies on. */
+static inline void ObtainSemaphore(struct SignalSemaphore *s)
+{ (void)s; ++shim_semaphore_depth; }
+
+static inline void ReleaseSemaphore(struct SignalSemaphore *s)
+{ (void)s; --shim_semaphore_depth; }
 
 #endif /* AMINETXDUO_SHIM_PROTO_EXEC_H */
