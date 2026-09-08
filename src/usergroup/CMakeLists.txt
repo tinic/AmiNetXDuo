@@ -183,4 +183,23 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_ug_ids PRIVATE -Wall -Wextra)
 
     add_test(NAME usergroup_ids COMMAND test_ug_ids)
+
+    # ------------------------------------------- getpass, salt, utmp ------
+    #
+    # For a console password read the ORDER is the property: echo has to be
+    # off before the first character is read and back on after the last, and
+    # a count of calls cannot say whether that happened.  shim/proto/dos.h
+    # keeps a one-character-per-call order log for it.
+    add_executable(test_ug_misc
+        test/test_ug_misc.c
+        ug_misc.c)
+
+    target_include_directories(test_ug_misc PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_misc PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_misc COMMAND test_ug_misc)
 endif()

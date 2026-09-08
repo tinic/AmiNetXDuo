@@ -36,6 +36,8 @@
 
 #define SHIM_DOS_MAX_FILES  8
 #define SHIM_DOS_MAX_OPEN   4
+#define SHIM_DOS_OPLOG      256
+#define SHIM_DOS_WRITELOG   256
 
 struct ShimDosFile {
     const char *path;
@@ -58,25 +60,59 @@ extern int shim_dos_opens;          /* Open() calls, hits and misses alike */
 extern int shim_dos_closes;         /* every successful Open() must match  */
 extern int shim_dos_open_unwindowed; /* Opens made with pr_WindowPtr == -1 */
 
+/*
+ * An ORDER log, because for a console read the order is the property.  One
+ * character per call: 'o' Open, 'c' Close, 'r' Read, 'w' Write, '1' SetMode
+ * raw, '0' SetMode cooked.  A password prompt that turns echo off after the
+ * first Read has already put a character on the screen, and a count of calls
+ * cannot say so.
+ */
+extern char shim_dos_ops[SHIM_DOS_OPLOG];
+extern int  shim_dos_oplen;
+
+/* What Write() was handed, concatenated. */
+extern char shim_dos_written[SHIM_DOS_WRITELOG];
+extern int  shim_dos_writelen;
+
+/* Set to make SetMode() fail, the case where raw mode is refused. */
+extern int  shim_dos_setmode_fails;
+
 #define SHIM_DOS_DEFINE_STATE                                                \
     struct ShimDosFile   shim_dos_files[SHIM_DOS_MAX_FILES];                 \
     int                  shim_dos_file_count;                                \
     struct ShimDosHandle shim_dos_handles[SHIM_DOS_MAX_OPEN];                \
     int                  shim_dos_opens;                                     \
     int                  shim_dos_closes;                                    \
-    int                  shim_dos_open_unwindowed
+    int                  shim_dos_open_unwindowed;                           \
+    char                 shim_dos_ops[SHIM_DOS_OPLOG];                       \
+    int                  shim_dos_oplen;                                     \
+    char                 shim_dos_written[SHIM_DOS_WRITELOG];                \
+    int                  shim_dos_writelen;                                  \
+    int                  shim_dos_setmode_fails
 
 /* Declared by the exec shim; Open() reads pr_WindowPtr through it. */
 extern struct Task *shim_current_task;
+
+static inline void shim_dos_op(char c)
+{
+    if (shim_dos_oplen < SHIM_DOS_OPLOG - 1)
+        shim_dos_ops[shim_dos_oplen++] = c;
+    shim_dos_ops[shim_dos_oplen] = '\0';
+}
 
 static inline void shim_dos_reset(void)
 {
     memset(shim_dos_files, 0, sizeof(shim_dos_files));
     memset(shim_dos_handles, 0, sizeof(shim_dos_handles));
+    memset(shim_dos_ops, 0, sizeof(shim_dos_ops));
+    memset(shim_dos_written, 0, sizeof(shim_dos_written));
     shim_dos_file_count      = 0;
     shim_dos_opens           = 0;
     shim_dos_closes          = 0;
     shim_dos_open_unwindowed = 0;
+    shim_dos_oplen           = 0;
+    shim_dos_writelen        = 0;
+    shim_dos_setmode_fails   = 0;
 }
 
 static inline void shim_dos_add_file(const char *path, const char *data, long len)
@@ -97,6 +133,7 @@ static inline BPTR Open(STRPTR path, LONG mode)
 
     (void)mode;
     shim_dos_opens++;
+    shim_dos_op('o');
 
     if (self != NULL && self->pr_WindowPtr == (APTR)-1L)
         shim_dos_open_unwindowed++;
@@ -137,6 +174,7 @@ static inline LONG Close(BPTR fh)
 
     shim_dos_handles[h].used = 0;
     shim_dos_closes++;
+    shim_dos_op('c');
 
     return -1;
 }
@@ -191,12 +229,48 @@ static inline LONG Read(BPTR fh, APTR buffer, LONG length)
     if (length < avail)
         avail = length;
 
+    shim_dos_op('r');
     memcpy(buffer, shim_dos_files[shim_dos_handles[h].file].data
                        + shim_dos_handles[h].pos,
            (size_t)avail);
     shim_dos_handles[h].pos += avail;
 
     return (LONG)avail;
+}
+
+static inline LONG Write(BPTR fh, APTR buffer, LONG length)
+{
+    int h = (int)fh - 1;
+    int i;
+
+    if (h < 0 || h >= SHIM_DOS_MAX_OPEN || !shim_dos_handles[h].used)
+        return -1;
+    if (length <= 0)
+        return 0;
+
+    shim_dos_op('w');
+
+    for (i = 0; i < length && shim_dos_writelen < SHIM_DOS_WRITELOG - 1; i++)
+        shim_dos_written[shim_dos_writelen++] = ((const char *)buffer)[i];
+    shim_dos_written[shim_dos_writelen] = '\0';
+
+    return length;
+}
+
+/* mode != 0 is raw: one character at a time, and the console stops echoing. */
+static inline LONG SetMode(BPTR fh, LONG mode)
+{
+    int h = (int)fh - 1;
+
+    if (h < 0 || h >= SHIM_DOS_MAX_OPEN || !shim_dos_handles[h].used)
+        return DOSFALSE;
+
+    if (shim_dos_setmode_fails)
+        return DOSFALSE;
+
+    shim_dos_op(mode != 0 ? '1' : '0');
+
+    return DOSTRUE;
 }
 
 #endif /* AMINETXDUO_SHIM_PROTO_DOS_H */
