@@ -2493,14 +2493,31 @@ stage_lossgate() {
         return "$NOTHING"
     fi
 
-    # THE GATE NEEDS A COUNTERS BUILD AND $BUILD/default IS NOT ONE.  Two of
-    # its four metrics, dropped_rx and retransmitted, are parsed out of
-    # netstat's tcp block, and that block compiles to `if (0)` under
-    # NX_DISABLE_TCP_INFO (src/tools/netstat.c:511) -- which is what ships,
-    # because AMINETXDUO_NX_COUNTERS defaults OFF.  Run against a shipping
-    # build on 2026-09-06 this gate reported read_kbs and write_kbs both `ok`
-    # and still FAILED, on the two it could not collect at all.  The baseline
-    # carries values for both, so it was recorded with them compiled in.
+    # THE GATE NEEDS A COUNTERS BUILD.  Two of its four metrics, dropped_rx
+    # and retransmitted, are parsed out of netstat's tcp block, and that block
+    # compiles to `if (0)` under NX_DISABLE_TCP_INFO (src/tools/netstat.c:511).
+    # Run against a build without it on 2026-09-06 this gate reported read_kbs
+    # and write_kbs both `ok` and still FAILED, on the two it could not collect
+    # at all.  The baseline carries values for both, so it was recorded with
+    # them compiled in.
+    #
+    # "-- WHICH IS WHAT SHIPS" WAS TRUE UNTIL 5cb04a48 AND IS NOT NOW.  That
+    # commit stopped defining NX_DISABLE_TCP_INFO, NX_DISABLE_UDP_INFO and
+    # NX_DISABLE_ARP_INFO by default, because four shipped callers read those
+    # families and were getting zeros (CMakeLists.txt, and the six paths named
+    # there).  A default build now carries the tcp counters: only
+    # NX_DISABLE_IGMP_INFO and NX_DISABLE_RARP_INFO survive in it, checked in
+    # the generated flags for both arms of AMINETXDUO_NX_COUNTERS.
+    #
+    # SO THE SECOND CROSS BUILD BELOW IS PROBABLY REDUNDANT NOW, and it is not
+    # being removed on that argument.  The only remaining difference from
+    # $BUILD/default is the RARP and IGMP counters, which no metric here
+    # reads -- but the baseline was recorded on a counters-ON build, so
+    # changing what this gate measures against changes what its numbers mean.
+    # That wants one run each way to settle, and this lab cannot run the gate
+    # at all: it needs a peer that can shape the link, and playhouse2 has no
+    # `tc` on PATH and no passwordless sudo (2026-09-08).  Left alone
+    # deliberately rather than left alone by accident.
     #
     # So build one here.  It costs a second cross build of the libraries in a
     # tier that already boots an emulator nine times, and it is the difference
