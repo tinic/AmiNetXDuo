@@ -17,9 +17,19 @@ for path in "$@"; do
     if cut -f1 "$LEDGER" | grep -qx "$name"; then
         echo "SKIP already scanned: $name"; continue
     fi
-    if ! /home/turo/anxd-aminet/fetch.sh "$path" "$OUT" > /dev/null 2>&1; then
-        printf '%s\t-\tFETCH_FAIL\t0\t0\t\n' "$name" >> "$LEDGER"
-        echo "FETCH_FAIL $name"; continue
+    # Keep the reason.  A bare FETCH_FAIL cannot be triaged: 404 is permanent
+    # and worth retiring, 000/429 is this survey's own request rate and worth
+    # re-attempting.  18 of 20 rows turned out to be the second kind.
+    if ! fout=$(/home/turo/anxd-aminet/fetch.sh "$path" "$OUT" 2>&1); then
+        # The first word of fetch.sh's message is the reason class --
+        # FETCH_FAIL, FETCH_NOT_ARCHIVE, UNPACK_FAIL -- and they are not the
+        # same event.  Collapsing all three into a bare FETCH_FAIL is how a
+        # glob bug that discarded 24 live archives looked like a dead mirror.
+        why=$(printf '%s' "$fout" | tail -1 | cut -d' ' -f1)
+        det=$(printf '%s' "$fout" | sed -n 's/.*\(http=[0-9]*\).*/\1/p' | tail -1)
+        why="${why#FETCH_}${det:+ $det}"
+        printf '%s\t-\tFETCH_%s\t0\t0\t\n' "$name" "${why:-FAIL http=000}" >> "$LEDGER"
+        echo "FETCH_${why:-FAIL} $name"; continue
     fi
     found=0
     # -print0 / read -r, NOT `for f in $(find ...)`.  Word splitting broke every
@@ -27,9 +37,19 @@ for path in "$@"; do
     # arguments, scan.py printed nothing, and the EMPTY output was written to
     # the ledger as a row.  36 blank rows accumulated that way, and a blank row
     # reads as data.  Files with spaces were also never actually scanned.
+    errs=0
     while IFS= read -r -d '' f; do
-        row=$(python3 scan.py "$f" 2>/dev/null)
-        [ -n "$row" ] || { echo "SCAN_ERROR $f" >&2; continue; }
+        row=$(python3 scan.py "$f" 2>"$OUT/scan.err")
+        # A CRASHED SCANNER IS NOT A FINDING.  This counted the error and fell
+        # through to the found=0 line below, which writes NO_BSDSOCKET_BINARY
+        # -- a positive claim that the archive holds no bsdsocket program,
+        # manufactured out of the scanner failing to look.  Those rows then
+        # count as surveyed and are never revisited.
+        if [ -z "$row" ]; then
+            errs=$((errs+1))
+            echo "SCAN_ERROR $f: $(sed -n '$p' "$OUT/scan.err")" >&2
+            continue
+        fi
         case "$row" in
             *NO_BSDSOCKET_STRING*|*NO_HUNK*) continue ;;
         esac
@@ -44,7 +64,17 @@ for path in "$@"; do
         echo "$name | $row" | cut -c1-150
         found=$((found+1))
     done < <(find "$OUT/$name.d" -type f -size +1k -print0)
-    [ "$found" = 0 ] && printf '%s\t-\tNO_BSDSOCKET_BINARY\t0\t0\t\n' "$name" >> "$LEDGER"
+    if [ "$found" = 0 ]; then
+        if [ "$errs" -gt 0 ]; then
+            # Distinguishable, and deliberately NOT an OK-family verdict: it
+            # is "we did not manage to look", which is a row to come back to
+            # rather than a fact about the archive.
+            printf '%s\t-\tSCAN_ERROR files=%s\t0\t0\t\n' "$name" "$errs" >> "$LEDGER"
+            echo "SCAN_ERROR $name ($errs files) -- NOT recorded as having no binary"
+        else
+            printf '%s\t-\tNO_BSDSOCKET_BINARY\t0\t0\t\n' "$name" >> "$LEDGER"
+        fi
+    fi
 done
 
 # EVERY DERIVED TABLE IS REGENERATED HERE, AND A GENERATOR THAT DIES MUST FAIL
