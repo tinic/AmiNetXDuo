@@ -45,10 +45,17 @@ invoked=$(cat .github/workflows/*.yml 2>/dev/null \
 # console, e2e, smb, fetchtls -- is invoked by a workflow that never executes.
 # This gate cannot see that from the tree, so it prints the file and leaves the
 # reader to know which tiers are live.
+#
+# THE TERMINATOR IS NOT A SPACE.  emulator.yml runs the loss gate as
+# `'"'"'tests/endurance/fetch-fitz.sh && tools/ci.sh lossgate'"'"'` -- a quoted
+# compound -- so the stage name is followed by a quote and `( |$)` did not
+# match it.  lossgate read `by=?` while being invoked on line 588 of the very
+# file this was searching, and the count of stages wired into the dead tier
+# came out one short.
 where() {
     local st="$1" f
     for f in .github/workflows/*.yml; do
-        tr '\n' ' ' < "$f" | tr -s ' ' | grep -qE "ci\.sh( +[a-z0-9_]+)* +$st( |\$)" \
+        tr '\n' ' ' < "$f" | tr -s ' ' | grep -qE "ci\.sh( +[a-z0-9_]+)* +$st([^a-z0-9_]|\$)" \
             && { basename "$f"; return; }
     done
     echo "?"
