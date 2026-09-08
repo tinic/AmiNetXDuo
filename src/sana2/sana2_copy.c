@@ -41,7 +41,13 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register ULONG len  __asm("d0"))
 {
     AmiRxSlot  *slot = (AmiRxSlot *)to;
+#ifdef AMINETXDUO_RX_VERIFY
+    /* Declared under the same guard as its only uses: with RX_VERIFY off the
+       counter block below is compiled out and this is an unused variable,
+       which -Werror rejects.  The `norxverify` cross arm is the one that
+       says so. */
     AmiSana2If *ifc;
+#endif
 
     if (slot == NULL || from == NULL)
         return FALSE;
