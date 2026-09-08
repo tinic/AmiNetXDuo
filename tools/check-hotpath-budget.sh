@@ -38,6 +38,33 @@ if [ ! -r "$CCJSON" ]; then
     exit 0
 fi
 
+# SHIPPING-SHAPED ARMS ONLY, and the numbers below are why.
+#
+# The counts are per ARM, not per tree: _n68k_rx_verify_sum is 220 on the
+# `default` cross arm and 214 on the profiler arm, because the options change
+# what is compiled.  A ceiling read against the wrong arm is comparing two
+# different programs, and it fails or passes for reasons that have nothing to
+# do with the change under review.
+#
+# check-hot-calls.sh already refuses instrumented arms for the same reason and
+# this did not, which is a hole: it accepted build/wp2 and answered 214/230
+# with a straight face.  The budgets were taken on `default`, so that is the
+# only shape they mean anything against.
+CACHE="$BUILD/CMakeCache.txt"
+if [ -r "$CACHE" ]; then
+    for opt in PROFILER PROFILER_NOINLINE RXPROBE NXCENSUS SCHEDCOUNT \
+               SANA2_PROBE_RAW NETDEV_TIME ALLOCCENSUS NX_COUNTERS; do
+        if grep -q "^AMINETXDUO_$opt:BOOL=ON" "$CACHE"; then
+            echo "hotpath_budget=skipped reason=instrumented opt=$opt"
+            exit 0
+        fi
+    done
+    if grep -q "^AMINETXDUO_LTO:BOOL=OFF" "$CACHE"; then
+        echo "hotpath_budget=skipped reason=lto_off"
+        exit 0
+    fi
+fi
+
 python3 - "$CCJSON" <<'PY'
 import json, re, subprocess, sys, tempfile, os
 
