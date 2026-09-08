@@ -147,6 +147,32 @@ if(NOT EXISTS "${AMIGA_TOOLCHAIN_ROOT}/bin/m68k-amigaos-gcc")
         "bin/m68k-amigaos-gcc.")
 endif()
 
+# Validate the startup objects here, before CMake links even its compiler
+# probe.  CI also runs this check explicitly, but a direct local configure or
+# an explicitly selected external toolchain must not be able to bypass it.
+# The checker is semantic and per multilib: it accepts the reviewed upstream
+# backing-storage shape as well as our repaired prebuilt objects, and refuses
+# an instruction shape it cannot prove.
+find_program(_AMIGA_PYTHON3 NAMES python3 REQUIRED)
+execute_process(
+    COMMAND "${_AMIGA_PYTHON3}"
+            "${CMAKE_CURRENT_LIST_DIR}/../tools/fix-toolchain-crt0.py"
+            "${AMIGA_TOOLCHAIN_ROOT}" --check
+    RESULT_VARIABLE _amiga_crt0_result
+    OUTPUT_VARIABLE _amiga_crt0_stdout
+    ERROR_VARIABLE _amiga_crt0_stderr)
+if(NOT _amiga_crt0_result EQUAL 0)
+    message(FATAL_ERROR
+        "The selected m68k-amigaos toolchain has an unsafe or unrecognized "
+        "crt0:\n${_amiga_crt0_stdout}${_amiga_crt0_stderr}\n"
+        "Repair it with tools/fix-toolchain-crt0.py "
+        "${AMIGA_TOOLCHAIN_ROOT}, or fetch the pinned toolchain.")
+endif()
+unset(_amiga_crt0_result)
+unset(_amiga_crt0_stdout)
+unset(_amiga_crt0_stderr)
+unset(_AMIGA_PYTHON3 CACHE)
+
 set(AMIGA_TOOLCHAIN_BIN "${AMIGA_TOOLCHAIN_ROOT}/bin")
 set(AMIGA_TOOLCHAIN_PREFIX "${AMIGA_TOOLCHAIN_BIN}/m68k-amigaos-")
 

@@ -38,6 +38,7 @@ PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
 PINS="
 binutils|https://franke.ms/git/bebbo/binutils-gdb|ab4e5183f56fd83165356a03c890bf0b681d7535|amiga-2.39.0
 gcc|https://franke.ms/git/bebbo/gcc|60f21496319754a0e35b1a8e52df9abbac188065|amiga16.2
+newlib-cygwin|https://franke.ms/git/bebbo/newlib-cygwin|0909ae9abc18b38595425143e7a63d9e2fc31174|amiga
 libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
 sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
 fd2sfd|https://franke.ms/git/bebbo/fd2sfd|7f14d7f15aac2b8426f577f838069e53bf6008ea|master
@@ -427,6 +428,31 @@ for patch in "$BU_PATCHES"/*.diff; do
     fi
 done
 
+# newlib commit 120371e fixed the type mismatch behind amiga-gcc issue #8 by
+# changing __argv from an array into a pointer, but left both startup paths
+# writing __argv[0] before the pointer owns storage.  Every ordinary crt0-linked
+# command then writes a longword through address zero before main().  Give the
+# pointer a two-entry backing vector in SOURCE, so every multilib is compiled
+# from correct C rather than relying on the object-code compatibility repair
+# used for already-published toolchain assets.
+#
+# Reverse-apply means upstream has taken this exact fix and needs no patch.  A
+# different upstream edit matches neither direction and stops here for review;
+# silently building a new, unverified crt0 shape is how this regression shipped.
+NEWLIB_PATCH="$HERE/patches/newlib/argv-storage.diff"
+if git -C "$SRC/projects/newlib-cygwin" apply --reverse --check \
+       "$NEWLIB_PATCH" 2>/dev/null; then
+    echo "==> newlib argv storage already fixed upstream"
+elif git -C "$SRC/projects/newlib-cygwin" apply --check \
+         "$NEWLIB_PATCH" 2>/dev/null; then
+    echo "==> newlib argv storage: $(basename "$NEWLIB_PATCH")"
+    git -C "$SRC/projects/newlib-cygwin" apply "$NEWLIB_PATCH"
+else
+    echo "!! newlib crt0 argv storage is neither the pinned broken source" >&2
+    echo "!! nor the reviewed fixed source; refusing an unverified build." >&2
+    exit 2
+fi
+
 # ----------------------------------------------------------------- build ----
 
 mkdir -p "$PREFIX"
@@ -435,13 +461,17 @@ echo "==> make $MAKE_TARGETS"
 
 # ------------------------------------------------------------- post-build ----
 
-# The same two repairs fetch-toolchain.sh applies to a downloaded tree, applied
+# The same repairs fetch-toolchain.sh applies to a downloaded tree, applied
 # here so a locally built one is equally sound before anything links against
-# it.  Both are idempotent and leave a clean tree alone, so applying them twice
-# (here, then again on install) costs nothing.
+# it. The source-level argv fix above should make the binary repair a no-op;
+# the immediate --check is the gate proving that every compiled multilib has
+# the reviewed shape. Both are idempotent, so an upstream-fixed tree needs no
+# special branch here.
 if [ -f "$HERE/fix-toolchain-crt0.py" ]; then
-    echo "==> crt0 frame skew"
+    echo "==> crt0 repair"
     python3 "$HERE/fix-toolchain-crt0.py" "$PREFIX"
+    echo "==> crt0 verification"
+    python3 "$HERE/fix-toolchain-crt0.py" "$PREFIX" --check
 fi
 if [ -f "$HERE/fix-toolchain-inline-const.py" ]; then
     echo "==> NDK inline register ABI"

@@ -9,6 +9,20 @@ cmake_minimum_required(VERSION 3.20)
 # 0.x on purpose: nothing has run on real hardware yet.
 project(AmiNetXDuo VERSION 0.26.3 LANGUAGES C ASM)
 
+# CMake reloads the compiler recorded by the first configure after processing
+# the toolchain file.  A reused directory could therefore validate the newly
+# selected AMIGA_TOOLCHAIN_ROOT and still compile with an older cached GCC.
+# Check after project(), when CMake's final compiler choice is visible; mixing
+# startup objects, headers and LTO plugins across toolchains is never valid.
+if(CMAKE_CROSSCOMPILING AND DEFINED AMIGA_TOOLCHAIN_PREFIX AND NOT
+   CMAKE_C_COMPILER STREQUAL "${AMIGA_TOOLCHAIN_PREFIX}gcc")
+    message(FATAL_ERROR
+        "This build directory was configured with ${CMAKE_C_COMPILER}, but "
+        "the selected toolchain is ${AMIGA_TOOLCHAIN_PREFIX}gcc. Remove the "
+        "build directory and configure it again; CMake cannot switch a "
+        "compiler in place.")
+endif()
+
 # Every build writes compile_commands.json.  tools/check-ram-size.sh has no
 # symbol to read -- sizeof(AmiNetStack) is a compile-time size -- so it
 # compiles a probe with THIS build's own flags and asks the toolchain how big

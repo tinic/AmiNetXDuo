@@ -1,0 +1,19 @@
+Applied by tools/build-toolchain.sh to bebbo/newlib-cygwin commit
+0909ae9abc18b38595425143e7a63d9e2fc31174.  Commit 120371e changed __argv
+from an array to a pointer to fix amiga-gcc issue #8, but kept two writes
+through __argv before assigning it any storage.  The resulting crt0 writes a
+longword through address zero before main().
+
+Keep __argv as the pointer expected by __nocommandline.c and give its initial
+Shell/Workbench values a real two-entry vector.  __nocommandline.c may replace
+the pointer later with its parsed vector exactly as before.
+
+diff --git a/newlib/libc/sys/amigaos/crt0.c b/newlib/libc/sys/amigaos/crt0.c
+index 81ffc44..1b8116a 100644
+--- a/newlib/libc/sys/amigaos/crt0.c
++++ b/newlib/libc/sys/amigaos/crt0.c
+@@ -34,2 +34,3 @@
+-char ** __argv = {0, 0};
++static char * __argv_storage[2] = {0, 0};
++char ** __argv = __argv_storage;
+ int __argc;

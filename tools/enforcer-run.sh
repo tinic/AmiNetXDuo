@@ -115,9 +115,9 @@ for extra in "$@"; do cp -R "$extra" "$HD/"; done
 
 # waitsecs: the bare boot has no C:Wait, and a resident debugging tool needs a
 # few seconds to install before the program under test starts.  Link it with
-# the project's tiny command startup, not the toolchain crt0: some Amiga ld
-# versions mis-relax crt0's __argv initialisation into a write through address
-# zero.  A test harness must not manufacture the hit it is meant to attribute.
+# the project's tiny command startup, not the toolchain crt0: the affected
+# newlib source makes __argv a null pointer and writes through it before main().
+# A test harness must not manufacture the hit it is meant to attribute.
 WAITSECS="$ROOT/build/waitsecs"
 if [ ! -x "$WAITSECS" ] || [ "$ROOT/tools/enforcer/waitsecs.c" -nt "$WAITSECS" ] || \
    [ "$ROOT/src/tools/tool_startup.S" -nt "$WAITSECS" ] || [ "$0" -nt "$WAITSECS" ]; then

@@ -84,10 +84,11 @@ amiga_client_prepare()
     "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-ar" rcs \
         "$AMIGA_CLIENT_LIBDIR/libatomic.a" "$o" || return 1
 
-    # crt0.o, repaired.  See clients/compat/fix-crt0.py: the stock one hands
-    # main() the ADDRESS of __argv instead of __argv, so every ported client
-    # sees an argv of empty strings and a NULL in the middle of it.  Our own
-    # commands never noticed because they read arguments through ReadArgs().
+    # crt0.o, repaired and verified.  See tools/fix-toolchain-crt0.py: old
+    # startup objects hand main() the address of __argv, while the attempted
+    # upstream fix writes through a zero __argv before main().  The wrapper
+    # below delegates to that one relocation-aware gate and refuses an unknown
+    # shape; ported clients do not keep a second byte-pattern workaround.
     AMIGA_CLIENT_STARTFILE="$AMIGA_CLIENT_LIBDIR/crt0.o"
     local stock="$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/lib/crt0.o"
     echo "  FIX crt0.o"
