@@ -42,6 +42,7 @@ import bisect
 import collections
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -558,6 +559,32 @@ def load_lvo_names(ndk, libname):
 _NDK = [None]
 
 
+def find_ndk(explicit):
+    """NDK include dir: what was asked for, else the toolchain on hand.
+
+    An unresolved NDK is not cosmetic.  Every exec.library call in the report
+    falls back to a bare `LVO-nnn`, and a bare number invites a guess: the
+    perf queue carried `exec.library/LVO-300` and `LVO-78` as hot Exec calls
+    at 5.0% combined, when they decode to SetTaskPri and InitStruct and this
+    stack calls neither, not once, in any source file.  So resolve it without
+    being asked, and say so when it cannot be.
+    """
+    if explicit:
+        return explicit
+    cands = []
+    root = os.environ.get("AMIGA_TOOLCHAIN_ROOT")
+    if root:
+        cands.append(os.path.join(root, "m68k-amigaos", "ndk-include"))
+    gcc = shutil.which("m68k-amigaos-gcc")
+    if gcc:
+        cands.append(os.path.join(os.path.dirname(os.path.dirname(gcc)),
+                                  "m68k-amigaos", "ndk-include"))
+    for c in cands:
+        if os.path.isdir(os.path.join(c, "lvo")):
+            return c
+    return None
+
+
 def lvo_name(libname, lvo):
     names = load_lvo_names(_NDK[0], libname)
     if lvo in names:
@@ -590,7 +617,11 @@ def main():
     ap.add_argument("--by-module", action="store_true")
     args = ap.parse_args()
 
-    _NDK[0] = args.ndk
+    _NDK[0] = find_ndk(args.ndk)
+    if not _NDK[0]:
+        sys.stderr.write(
+            "prof-report: no NDK lvo/ dir found; every library call will read "
+            "LVO-nnn instead of a name.  Pass --ndk.\n")
 
     prof = Profile(args.profile)
     symtab = (build_symbol_table(args.nm, args.mapfile, args.objdir)

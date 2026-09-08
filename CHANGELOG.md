@@ -15,7 +15,9 @@ version at the top when it merges.
 - `ssh` no longer writes a longword through address zero before `main()`. Both the CLI and Workbench startup paths are repaired
 - Every multilib crt0 is checked at configure, at client build, and by `tests/toolchain/test_crt0_gate.py`. An unsafe or unrecognised startup shape is refused
 - Locally built toolchains patch newlib to give `__argv` real backing storage
-- A self-contained install actually coexists with another TCP/IP stack. It no longer renames system libraries or `anxnet.device`, reuses system configuration, creates `DEVS:Internet`, or claims `AmiTCP:`. `ActivateAmiNetXDuo` selects the private drawer at boot by putting its `LIBS:`, `C:` and `DEVS:` entries first while preserving the complete old multi-assigns behind them; a plain `Assign ... ADD` could not do that because AmigaDOS appends it. Documentation and software now share the one selected root. The ixemul fix remains the resident `usergroup.library` hold and the fallback through an already-existing `AmiTCP:`, neither of which mutates the namespace
+- A self-contained install coexists with another TCP/IP stack. It no longer renames system libraries or `anxnet.device`, creates `DEVS:Internet`, or claims `AmiTCP:`
+- `ActivateAmiNetXDuo` selects the private drawer at boot, putting its `LIBS:`, `C:` and `DEVS:` entries ahead of the existing multi-assigns, all of them preserved
+- The ixemul fix stays the resident `usergroup.library` hold plus the fallback through an existing `AmiTCP:`; neither mutates the namespace
 
 ### Receive
 
