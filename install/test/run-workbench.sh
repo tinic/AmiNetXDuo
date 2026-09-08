@@ -31,11 +31,12 @@ KEEP=0
 TERMINAL=0
 STATIC=0
 DRAWER=0
+DRAWER_GUI=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSD" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDg" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -48,6 +49,7 @@ while getopts "b:a:l:p:N:t:T:kHSD" opt; do
         H) TERMINAL=1 ;;
         S) STATIC=1 ;;
         D) DRAWER=1 ;;
+        g) DRAWER_GUI=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S]" >&2
@@ -102,9 +104,17 @@ case "$PICK" in
 # With the two swapped, `-p minimal` picked "Everything" and the run reported
 # "asked for the minimal stack and full was installed" -- which read as the
 # click missing the page, and was the click landing on the wrong option.
-minimal)   PICK_SPEC="2:3" ;;
-full)      PICK_SPEC="2:2" ;;
-*)         echo "-p takes minimal or full, not \"$PICK\"" >&2; exit 2 ;;
+# <options>:<gadget id>[:<which matching page>].  The third field exists
+# because the stack choice and the drawer layout are BOTH two-option pages, so
+# "the first page with two options" can only ever address the earlier one.
+minimal)   PICK_SPEC="2:3:0" ;;
+full)      PICK_SPEC="2:2:0" ;;
+# The SECOND two-option askchoice is the drawer layout at
+# Install-AmiNetXDuo:770, "Into the system" / "Into its own drawer", so it is
+# skip 1 and gadget 3.  Reaching it needs FORCE_DRAWER to be 0, which means NOT
+# planting S:AmiNetXDuo-drawer -- see -g.
+drawer)    PICK_SPEC="2:3:1" ;;
+*)         echo "-p takes minimal, full or drawer, not \"$PICK\"" >&2; exit 2 ;;
 esac
 
 # It needs a level for the same reason -H does: at NOVICE the page is never
@@ -519,14 +529,20 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 # text: it carries none.
 build_driver() {
     local out="$1" runs="$2" label="$3" pick="${4:-}"
-    local opts=0 gid=0
+    local opts=0 gid=0 skip=0
     if [ -n "$pick" ]; then
-        opts=${pick%%:*}
-        gid=${pick##*:}
+        # <options>:<id>[:<skip>].  `${pick##*:}` took the LAST field as the
+        # id, which is the skip once there are three, so the fields are cut
+        # explicitly rather than from either end.
+        opts=$(echo "$pick" | cut -d: -f1)
+        gid=$(echo "$pick" | cut -d: -f2)
+        skip=$(echo "$pick" | cut -d: -f3)
+        [ -n "$skip" ] || skip=0
     fi
     "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
            -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
-           -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" -I"$NDK" \
+           -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" \
+           -DDRIVE_PICK_SKIP="$skip" -I"$NDK" \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -647,11 +663,24 @@ chmod 644 "$HD/S/User-Startup"
 # guest-relative path a check resolves has to start there. S:User-Startup is
 # NOT prefixed: it stays in S: whichever layout was chosen, which is the whole
 # point of the assigns.
+#
+# TWO WAYS INTO THE DRAWER LAYOUT, AND ONLY ONE OF THEM WAS EVER TESTED.
+# Planting S:AmiNetXDuo-drawer sets FORCE_DRAWER, and Install-AmiNetXDuo:769
+# asks the layout question only when FORCE_DRAWER is 0 -- so every -D run has
+# SKIPPED the GUI page it is meant to be covering.  With -g the sentinel is not
+# planted and the answer comes from the askchoice instead, which is the same
+# install by the path a person actually takes.  Everything else about -D is
+# unchanged, so the whole self-contained contract below is reused rather than
+# written twice.
 if [ "$DRAWER" = "1" ]; then
     INST=AmiNetXDuo/
-    : > "$HD/S/AmiNetXDuo-drawer"
-    chmod 644 "$HD/S/AmiNetXDuo-drawer"
-    echo "==> scripted drawer layout: S:AmiNetXDuo-drawer planted"
+    if [ "$DRAWER_GUI" = "1" ]; then
+        echo "==> GUI drawer layout: no sentinel, answering the askchoice"
+    else
+        : > "$HD/S/AmiNetXDuo-drawer"
+        chmod 644 "$HD/S/AmiNetXDuo-drawer"
+        echo "==> scripted drawer layout: S:AmiNetXDuo-drawer planted"
+    fi
 fi
 
 # AmigaDOS does not care about case and this host does, so a file the guest
@@ -1115,8 +1144,11 @@ else
 fi
 
 case "$PICK" in
-""|full) WANT_STACK=full ;;
-minimal) WANT_STACK=minimal ;;
+""|full)      WANT_STACK=full ;;
+minimal)      WANT_STACK=minimal ;;
+# -p drawer answers the LAYOUT page, not the stack page, so the stack page
+# takes its own default and that default is the full stack.
+drawer)       WANT_STACK=full ;;
 esac
 if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"

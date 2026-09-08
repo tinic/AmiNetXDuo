@@ -100,6 +100,21 @@
 #define DRIVE_PICK_ID      0
 #endif
 
+/*
+ * WHICH matching page, counting from 0.
+ *
+ * There is more than one askchoice with the same number of options -- the
+ * stack choice and the drawer layout are both two -- and picking "the first
+ * page with N options" can only ever reach the earlier one.  That is why the
+ * drawer choice at Install-AmiNetXDuo:770 is still untested while the stack
+ * choice is not: not because it is hard to answer, but because nothing could
+ * address it.  Every matching page is logged with its ordinal, so one run
+ * names the index to pass here rather than anyone counting pages by hand.
+ */
+#ifndef DRIVE_PICK_SKIP
+#define DRIVE_PICK_SKIP    0
+#endif
+
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 
 /*
@@ -226,6 +241,26 @@ static BOOL label_matches(struct Gadget *gad, const char *want)
  */
 static BOOL pick_is_target;
 
+/* How many pages with DRIVE_PICK_OPTIONS options have gone by, and whether
+   the one wanted has been answered.  picks_done stays what it was -- a count
+   for the transcript -- rather than doubling as the "stop looking" flag. */
+static LONG matches_seen;
+static BOOL picked_already;
+
+/*
+ * COUNTING SIGHTINGS IS NOT COUNTING PAGES.  The option is clicked on one poll
+ * and Proceed on the NEXT, so a matching page is visible across at least two
+ * polls and a naive counter reported one askchoice as #0 and #1 -- measured,
+ * /tmp/rigwb6.log lines 57 and 70, the same page both times.  Only a rising
+ * edge counts: this poll matches and the previous one did not.
+ *
+ * Two DIFFERENT matching pages back to back would still read as one.  Nothing
+ * in the script does that today; if one ever does, the fix is to key the edge
+ * on something from the page rather than on the match alone.
+ */
+static BOOL prev_was_match;
+static BOOL this_is_match;
+
 static struct Window *find_installer_window(struct Gadget **click_out)
 {
     struct Screen *screen;
@@ -234,6 +269,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
     ULONG          ilock;
 
     pick_is_target = FALSE;
+    this_is_match  = FALSE;
 
     ilock = LockIBase(0);
 
@@ -304,20 +340,41 @@ static struct Window *find_installer_window(struct Gadget **click_out)
              * every one of these until now.  Once per Installer run, and only
              * on the page with the expected number of options.
              */
-            if (proceed != NULL && pick != NULL && picks_done == 0 &&
+            /* NOT gated on picked_already: a page that comes AFTER the one
+               answered still has to be counted, or the enumeration this exists
+               to produce stops at the pick and never names the later ones. */
+            if (proceed != NULL && pick != NULL &&
                 DRIVE_PICK_OPTIONS != 0 && options == DRIVE_PICK_OPTIONS)
             {
-                choice = pick;
-                pick_is_target = TRUE;
-                picks_done++;
-                say("installdrive:   picking option gadget %ld\n",
-                    (LONG)pick->GadgetID);
+                /* Every candidate is announced, picked or not, so a single
+                   run enumerates them and DRIVE_PICK_SKIP can be set from
+                   what it printed instead of from a guess. */
+                if (!prev_was_match)
+                {
+                    say("installdrive:   askchoice with %ld options,",
+                        (LONG)options);
+                    say(" match #%ld\n", (LONG)matches_seen);
+
+                    if (!picked_already && matches_seen == DRIVE_PICK_SKIP)
+                    {
+                        choice = pick;
+                        pick_is_target = TRUE;
+                        picked_already = TRUE;
+                        picks_done++;
+                        say("installdrive:   picking option gadget %ld\n",
+                            (LONG)pick->GadgetID);
+                    }
+                    matches_seen++;
+                }
+                this_is_match = TRUE;
             }
             break;
         }
     }
 
     UnlockIBase(ilock);
+
+    prev_was_match = this_is_match;
 
     *click_out = choice;
     return found;
