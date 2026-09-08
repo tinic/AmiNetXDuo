@@ -56,6 +56,30 @@
 #define N68K_RDW32(p)   N68K_RD32(p)
 #endif
 
+/*
+ * THE COUNTERS COST MORE THAN THEY EARN ON THE TARGET.
+ *
+ * n68k_rx_verify_stats is read in exactly one place --
+ * ami_sana2_rxprobe_report() (sana2_rx.c:386) -- whose only call site is
+ * inside #ifdef AMINETXDUO_RXPROBE (sana2_rx.c:2021).  A shipping build ran
+ * all forty increments and never read one.  Four are on the fused fast path,
+ * once a frame: ip_ok, transport_ok, from_copy, v4_fused.  Each is a
+ * read-modify-write of a global, and the removal prize prices this block at
+ * +3.40% for ~118 instructions, so an instruction here is ~0.029% of receive.
+ *
+ * THE HOST TIER KEEPS THEM, BECAUSE IT ASSERTS ON THEM:
+ * test_rxverify_host.c:1037 and :1046 check from_copy and v4_fused to prove
+ * the FUSED path was the one that ran, which is a property no other test can
+ * see.  So the gate is the TARGET, not the feature -- the host build always
+ * counts, and an m68k RXPROBE build still does.
+ */
+#if defined(AMINETXDUO_RXPROBE) || \
+    !(defined(__mc68000__) || defined(__m68k__))
+#define N68K_RXV_COUNT(f)   (n68k_rx_verify_stats.f++)
+#else
+#define N68K_RXV_COUNT(f)   ((VOID)0)
+#endif
+
 /* Longword-aligned, which is what both of the above need on a 68000: the word
    form is only ever used at an even offset from this same pointer. */
 static UINT n68k_rxv_even(const UCHAR *p)
@@ -193,7 +217,7 @@ UINT    next;
 
     if (length < 40UL)
     {
-        n68k_rx_verify_stats.skip_short++;
+        N68K_RXV_COUNT(skip_short);
         return (NX_FALSE);
     }
 
@@ -203,7 +227,7 @@ UINT    next;
        does not read. */
     if ((plen == 0UL) || ((plen + 40UL) > length))
     {
-        n68k_rx_verify_stats.skip_length++;
+        N68K_RXV_COUNT(skip_length);
         return (NX_FALSE);
     }
 
@@ -216,7 +240,7 @@ UINT    next;
     {
         if (walked >= N68K_V6_MAX_EXT)
         {
-            n68k_rx_verify_stats.skip_ext++;
+            N68K_RXV_COUNT(skip_ext);
             return (NX_FALSE);
         }
 
@@ -224,7 +248,7 @@ UINT    next;
            next-header byte and a length byte. */
         if ((at + 8UL) > end)
         {
-            n68k_rx_verify_stats.skip_length++;
+            N68K_RXV_COUNT(skip_length);
             return (NX_FALSE);
         }
 
@@ -247,17 +271,17 @@ UINT    next;
 
         case N68K_V6_ESP:
         case N68K_V6_NONEXT:
-            n68k_rx_verify_stats.skip_ext++;
+            N68K_RXV_COUNT(skip_ext);
             return (NX_FALSE);
 
         default:
-            n68k_rx_verify_stats.skip_protocol++;
+            N68K_RXV_COUNT(skip_protocol);
             return (NX_FALSE);
         }
 
         if ((hlen < 8UL) || ((at + hlen) > end))
         {
-            n68k_rx_verify_stats.skip_length++;
+            N68K_RXV_COUNT(skip_length);
             return (NX_FALSE);
         }
 
@@ -267,7 +291,7 @@ UINT    next;
                the sender summed the final one. */
             if (ip[at + 3UL] != 0U)
             {
-                n68k_rx_verify_stats.skip_ext++;
+                N68K_RXV_COUNT(skip_ext);
                 return (NX_FALSE);
             }
         }
@@ -277,7 +301,7 @@ UINT    next;
                one; the two reserved bits between them are ignored. */
             if ((N68K_RD16(&ip[at + 2UL]) & 0xFFF9UL) != 0UL)
             {
-                n68k_rx_verify_stats.skip_fragment++;
+                N68K_RXV_COUNT(skip_fragment);
                 return (NX_FALSE);
             }
         }
@@ -285,7 +309,7 @@ UINT    next;
         {
             if (n68k_rxv6_dstopt_plain(&ip[at + 2UL], hlen - 2UL) != NX_TRUE)
             {
-                n68k_rx_verify_stats.skip_ext++;
+                N68K_RXV_COUNT(skip_ext);
                 return (NX_FALSE);
             }
         }
@@ -306,7 +330,7 @@ UINT    next;
        less than that left is truncated, whatever its length field says. */
     if ((at + ((next == NX_PROTOCOL_TCP) ? 20UL : 8UL)) > end)
     {
-        n68k_rx_verify_stats.skip_length++;
+        N68K_RXV_COUNT(skip_length);
         return (NX_FALSE);
     }
 
@@ -315,7 +339,7 @@ UINT    next;
        Over IPv6 that is illegal, but the stack is the one that says so. */
     if ((next == NX_PROTOCOL_UDP) && (N68K_RD16(&ip[at + 6UL]) == 0UL))
     {
-        n68k_rx_verify_stats.skip_udp_nosum++;
+        N68K_RXV_COUNT(skip_udp_nosum);
         return (NX_FALSE);
     }
 
@@ -388,16 +412,16 @@ UINT        ok;
 
     if (ok != NX_TRUE)
     {
-        n68k_rx_verify_stats.bad_transport++;
+        N68K_RXV_COUNT(bad_transport);
         *drop =  NX_TRUE;
         return (0UL);
     }
 
-    n68k_rx_verify_stats.transport_ok++;
-    n68k_rx_verify_stats.v6_ok++;
+    N68K_RXV_COUNT(transport_ok);
+    N68K_RXV_COUNT(v6_ok);
     if (offset > 40U)
     {
-        n68k_rx_verify_stats.v6_ext++;
+        N68K_RXV_COUNT(v6_ext);
     }
 
     return (n68k_rxv6_bit(protocol));
@@ -436,7 +460,7 @@ UINT        ok;
     /* Shorter than an IPv4 header: nothing to check, the stack rejects it. */
     if (packet -> nx_packet_length < 20UL)
     {
-        n68k_rx_verify_stats.skip_short++;
+        N68K_RXV_COUNT(skip_short);
         return (0UL);
     }
 
@@ -449,7 +473,7 @@ UINT        ok;
 
     if ((ip[0] >> 4) != 4U)
     {
-        n68k_rx_verify_stats.skip_version++;
+        N68K_RXV_COUNT(skip_version);
         return (0UL);
     }
 
@@ -457,7 +481,7 @@ UINT        ok;
 
     if ((ihl < 20U) || ((ULONG)ihl > packet -> nx_packet_length))
     {
-        n68k_rx_verify_stats.skip_short++;
+        N68K_RXV_COUNT(skip_short);
         return (0UL);
     }
 
@@ -470,13 +494,13 @@ UINT        ok;
     {
         /* A header that fails here is what the stack drops anyway, and
            dropping it now saves carrying it further. */
-        n68k_rx_verify_stats.bad_ip++;
+        N68K_RXV_COUNT(bad_ip);
         *drop =  NX_TRUE;
         return (0UL);
     }
 
     flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
-    n68k_rx_verify_stats.ip_ok++;
+    N68K_RXV_COUNT(ip_ok);
 
     /* ---- the transport ---------------------------------------------------
      *
@@ -491,7 +515,7 @@ UINT        ok;
 
     if ((total < (ULONG)ihl) || (total > saved_length))
     {
-        n68k_rx_verify_stats.skip_length++;
+        N68K_RXV_COUNT(skip_length);
         return (flags);
     }
 
@@ -500,7 +524,7 @@ UINT        ok;
        after reassembly, which is what declining the bit asks for. */
     if ((frag & 0x3FFFUL) != 0UL)
     {
-        n68k_rx_verify_stats.skip_fragment++;
+        N68K_RXV_COUNT(skip_fragment);
         return (flags);
     }
 
@@ -518,7 +542,7 @@ UINT        ok;
         break;
 
     default:
-        n68k_rx_verify_stats.skip_protocol++;
+        N68K_RXV_COUNT(skip_protocol);
         return (flags);
     }
 
@@ -530,7 +554,7 @@ UINT        ok;
     if ((protocol == NX_PROTOCOL_UDP) && (payload >= 8U) &&
         (N68K_RD16(&ip[ihl + 6]) == 0UL))
     {
-        n68k_rx_verify_stats.skip_udp_nosum++;
+        N68K_RXV_COUNT(skip_udp_nosum);
         return (flags);
     }
 
@@ -550,7 +574,7 @@ UINT        ok;
 
     if (ok != NX_TRUE)
     {
-        n68k_rx_verify_stats.bad_transport++;
+        N68K_RXV_COUNT(bad_transport);
         *drop =  NX_TRUE;
         return (0UL);
     }
@@ -571,7 +595,7 @@ UINT        ok;
         break;
     }
 
-    n68k_rx_verify_stats.transport_ok++;
+    N68K_RXV_COUNT(transport_ok);
 
     return (flags);
 }
@@ -657,6 +681,7 @@ ULONG   sum;
 UINT    ihl;
 UINT    protocol;
 UINT    payload;
+UINT    ver;
 #ifdef FEATURE_NX_IPV6
 UINT    offset;
 #endif
@@ -667,12 +692,17 @@ UINT    offset;
 
     if (packet -> nx_packet_length < 20UL)
     {
-        n68k_rx_verify_stats.skip_short++;
+        N68K_RXV_COUNT(skip_short);
         return (0UL);
     }
 
+    /* ONE LOAD AND ONE SHIFT.  The version nibble was read twice -- against 6
+       here and against 4 below -- and an IPv4 frame, which is every frame of
+       a bulk receive, paid for both. */
+    ver =  (UINT)(ip[0] >> 4);
+
 #ifdef FEATURE_NX_IPV6
-    if ((ip[0] >> 4) == 6U)
+    if (ver == 6U)
     {
         if (n68k_rxv6_shape(ip, packet -> nx_packet_length, &protocol,
                             &offset, &payload) != NX_TRUE)
@@ -720,26 +750,26 @@ UINT    offset;
 
         if (n68k_rxv_fold(sum) != 0xFFFFUL)
         {
-            n68k_rx_verify_stats.bad_transport++;
+            N68K_RXV_COUNT(bad_transport);
             *drop =  NX_TRUE;
             return (0UL);
         }
 
-        n68k_rx_verify_stats.transport_ok++;
-        n68k_rx_verify_stats.v6_ok++;
-        n68k_rx_verify_stats.from_copy++;
+        N68K_RXV_COUNT(transport_ok);
+        N68K_RXV_COUNT(v6_ok);
+        N68K_RXV_COUNT(from_copy);
         if (offset > 40U)
         {
-            n68k_rx_verify_stats.v6_ext++;
+            N68K_RXV_COUNT(v6_ext);
         }
 
         return (n68k_rxv6_bit(protocol));
     }
 #endif
 
-    if ((ip[0] >> 4) != 4U)
+    if (ver != 4U)
     {
-        n68k_rx_verify_stats.skip_version++;
+        N68K_RXV_COUNT(skip_version);
         return (0UL);
     }
 
@@ -844,13 +874,13 @@ UINT    offset;
 
     if (n68k_rxv_fold(head) != 0xFFFFUL)
     {
-        n68k_rx_verify_stats.bad_ip++;
+        N68K_RXV_COUNT(bad_ip);
         *drop =  NX_TRUE;
         return (0UL);
     }
 
     flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
-    n68k_rx_verify_stats.ip_ok++;
+    N68K_RXV_COUNT(ip_ok);
 
     /* ---- transport = carried, plus the pseudo header -------------------- */
     /*
@@ -887,7 +917,7 @@ UINT    offset;
 
     if (n68k_rxv_fold(sum) != 0xFFFFUL)
     {
-        n68k_rx_verify_stats.bad_transport++;
+        N68K_RXV_COUNT(bad_transport);
         *drop =  NX_TRUE;
         return (0UL);
     }
@@ -896,14 +926,14 @@ UINT    offset;
               ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
               : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM;
 
-    n68k_rx_verify_stats.transport_ok++;
-    n68k_rx_verify_stats.from_copy++;
+    N68K_RXV_COUNT(transport_ok);
+    N68K_RXV_COUNT(from_copy);
 
     /* ONLY here.  Nothing else moves this, which is what makes it usable as
        proof that the IPv4 fast path ran at all: from_copy counts both
        families and ip_ok is bumped by the ordinary walk as well, so an
        assertion on either passes with this path switched off. */
-    n68k_rx_verify_stats.v4_fused++;
+    N68K_RXV_COUNT(v4_fused);
 
     return (flags);
 }
