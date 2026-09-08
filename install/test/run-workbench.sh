@@ -93,8 +93,17 @@ fi
 PICK_SPEC=""
 case "$PICK" in
 "")        ;;
-minimal)   PICK_SPEC="2:2" ;;
-full)      PICK_SPEC="2:3" ;;
+# INVERTED UNTIL 2026-09-08, AND THAT IS WHY -p NEVER WORKED.  The options are
+# numbered from 2 up IN THE ORDER THE SCRIPT LISTS THEM and
+# Install-AmiNetXDuo:667 lists (choices "Everything" "Minimal, no IPv6/TLS"),
+# so 2 is the FULL stack and 3 is the minimal one.  Measured on the rig: on the
+# askchoice page gadget 2 carries GFLG_SELECTED (0x80) before anything is
+# clicked, which is the default, and the default is MINPICK 0 = Everything.
+# With the two swapped, `-p minimal` picked "Everything" and the run reported
+# "asked for the minimal stack and full was installed" -- which read as the
+# click missing the page, and was the click landing on the wrong option.
+minimal)   PICK_SPEC="2:3" ;;
+full)      PICK_SPEC="2:2" ;;
 *)         echo "-p takes minimal or full, not \"$PICK\"" >&2; exit 2 ;;
 esac
 
@@ -1067,8 +1076,11 @@ check_file "${INST}Libs/usergroup.library"
 # copies.  Without this a -p "Minimal" run whose click missed the page would
 # install the full stack and pass every check below it, which is the vacuous
 # pass this file exists not to produce -- and the harness could not reach that
-# page at all until installdrive.c learned DRIVE_PICK_LABEL, so `minimal` had
-# never been installed by any run.
+# page at all until the option ids were unswapped (see PICK_SPEC above), so
+# `minimal` had never been installed by any run.  An earlier version of this
+# note credited a DRIVE_PICK_LABEL in installdrive.c; there is no such thing
+# in the tree and never was -- installdrive.c:88 says the options carry no
+# label to match on, which is the whole reason they are named by id.
 STACK_INSTALLED=unknown
 _stack_real=$(amiga_path "${INST}Libs/bsdsocket.library" || true)
 
