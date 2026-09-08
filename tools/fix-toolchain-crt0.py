@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Repair the two newlib crt0.o bugs in a m68k-amigaos toolchain.
+"""Repair three newlib crt0.o bugs in a m68k-amigaos toolchain.
 
     tools/fix-toolchain-crt0.py <toolchain-root> [--check]
 
-    Nothing here is needed against a toolchain built from bebbo/gcc amiga15.2
-    at 168be3619 or later; see FIXED UPSTREAM below. --check reports such a
-    tree as "immune" and succeeds.
+    The frame skew needs nothing against a toolchain built from bebbo/gcc
+    amiga15.2 at 168be3619 or later; see FIXED UPSTREAM below. The two argv
+    repairs are checked independently because the pinned 16.2.0b startup has
+    one corrected call sequence beside a still-broken initialization.
 
-    THIS IS NOT TRANSITIONAL. Both bugs are fixed in bebbo's git and neither
-    fix is in any toolchain anybody installs: the prebuilt m68k-amigaos images
-    lag upstream by years, not months, and the one this project pins is named
-    for GCC 10 and predates both fixes by eight months. Expect to be running
-    this script for the life of the project, and keep it that way, verified
-    in every configuration, and loud when it meets something new. It has
+    THIS IS NOT TRANSITIONAL. Prebuilt m68k-amigaos images lag source fixes,
+    and a nominally newer startup can exchange one argv bug for another.
+    Expect to run this script for the life of the project, keep it verified in
+    every configuration, and make it loud when it meets something new. It has
     already stopped two releases that would otherwise have shipped broken.
 
-    TWO SEPARATE BUGS live in the same crt0.c and are repaired independently:
-    the frame skew (below), and the argv indirection (SECOND BUG, further
-    down). A toolchain can have either, both or neither.
+    THREE SEPARATE BUGS live in the same crt0.c and are repaired independently:
+    the frame skew (below), the argv indirection (SECOND BUG, further down),
+    and the zero-address argv initialization (THIRD BUG). A toolchain can
+    carry any combination of them.
 
 WHAT IS WRONG
 
@@ -332,6 +332,9 @@ def _addend(text):
     m = re.search(r"a[0-7]@\((-?[0-9a-fx]+)\)", text)       # pea a4@(20)
     if m:
         return int(m.group(1), 16)
+    m = re.search(r"\((-?[0-9a-fx]+),%?a[0-7]\)", text)     # pea (20,a4)
+    if m:
+        return int(m.group(1), 16)
     m = re.search(r"\b([0-9a-f]+)\(%?a[0-7]\)", text)        # 20(a4), MIT
     if m:
         return int(m.group(1), 16)
@@ -493,6 +496,95 @@ def repair_argv(objdump, path, check_only):
                        f"move.l __argv,-(sp)")
 
 
+# ---------------------------------------------------------------- THIRD BUG
+# crt0.c has to initialize the storage object __argv before it can pass the
+# pointer stored there to main. Affected compiler builds instead load the
+# ZERO-FILLED CONTENTS of __argv into an address register and write through
+# it:
+#
+#     movea.l __argv,a0       ; a0 = 0 at process startup
+#     move.l  __commandline,(a0)
+#
+# The Workbench path does the same before storing its message. Both are an
+# immediate LONG-WRITE to address zero. The intended operation is `lea`, which
+# has the same length and effective-address extension words as `movea.l`, so
+# changing the opcode word preserves every relocation. This also covers the
+# 16- and 32-bit baserel effective-address forms.
+#
+# Some m060 multilibs optimize the source into a direct memory-to-memory store
+# and never materialize the bad pointer. They have no site and need no patch.
+
+MOVEA_L_MASK, MOVEA_L_OP = 0xF1C0, 0x2040
+
+
+def _writes_through_areg(text):
+    """Address register used as an indirect destination, or None."""
+    m = re.search(r",\(%?a([0-7])\)$", text)       # move.l d0,(a0)
+    if m:
+        return int(m.group(1))
+    m = re.search(r",%?a([0-7])@$", text)          # old binutils spelling
+    return int(m.group(1)) if m else None
+
+
+def argv_init_sites(objdump, path):
+    """Unsafe/already-fixed loads of &__argv before writing its storage."""
+    insns = instructions(objdump, path)
+    if insns is None:
+        return None
+
+    sites = []
+    for i, (off, word, reloc, text) in enumerate(insns[:-1]):
+        is_movea = (word & MOVEA_L_MASK) == MOVEA_L_OP
+        is_lea = (word & LEA_MASK) == LEA_OP
+        if not (is_movea or is_lea):
+            continue
+        if reloc != ".bss" or _addend(text) != 0:
+            continue
+
+        areg = (word >> 9) & 7
+        if _writes_through_areg(insns[i + 1][3]) != areg:
+            continue
+
+        # MOVEA.L and LEA share the destination-register and effective-address
+        # fields. Only their fixed opcode bits differ.
+        new = (word & 0x0E3F) | LEA_OP
+        sites.append((off, word, new))
+    return sites
+
+
+def repair_argv_init(objdump, path, check_only):
+    sites = argv_init_sites(objdump, path)
+    if sites is None:
+        return ("refused", "objdump could not read it")
+    if not sites:
+        return ("skipped", "no indirect __argv initialization")
+
+    wrong = [(off, old, new) for off, old, new in sites if new != old]
+    if not wrong:
+        return ("immune", f"{len(sites)} initialization site(s) already use "
+                          f"the address of __argv")
+    if check_only:
+        return ("buggy", f"{len(wrong)} initialization site(s) load the "
+                         f"zero-filled contents of __argv")
+
+    base = text_file_offset(objdump, path)
+    if base is None:
+        return ("refused", "cannot locate .text in the file")
+
+    data = bytearray(path.read_bytes())
+    for off, old, new in wrong:
+        at = base + off
+        if (data[at] << 8 | data[at + 1]) != old:
+            return ("refused",
+                    f"file offset 0x{at:x} does not hold the instruction "
+                    f"objdump reported at section 0x{off:x}")
+        data[at] = (new >> 8) & 0xFF
+        data[at + 1] = new & 0xFF
+    path.write_bytes(bytes(data))
+    return ("patched", f"{len(wrong)} initialization site(s): "
+                       f"movea.l __argv -> lea __argv")
+
+
 def repair(objdump, path, check_only):
     fns = functions(objdump, path)
     if fns is None:
@@ -590,11 +682,13 @@ def main():
                          "(the tree's own may be built for another host)\n")
         return 1
 
-    # The two bugs are independent, so they are counted and reported
+    # The three bugs are independent, so they are counted and reported
     # independently, a tree can be immune to one and carry the other, which
     # is exactly the state the pinned toolchain was in.
     rc = 0
-    for label, fn in (("frame skew", repair), ("argv indirection", repair_argv)):
+    for label, fn in (("frame skew", repair),
+                      ("argv indirection", repair_argv),
+                      ("argv zero-address initialization", repair_argv_init)):
         counts = {}
         printed_immune = False  # one line is enough for a whole clean tree
         print(f"== {label}")

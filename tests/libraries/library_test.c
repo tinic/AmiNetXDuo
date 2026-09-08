@@ -12,6 +12,8 @@
  * against our code.
  *
  * Stage the libraries into LIBS: first, see tests/libraries/run-libraries.sh.
+ * `library_test USERGROUP` stops after the usergroup ABI checks, for a focused
+ * Enforcer run that needs no SANA-II device or network configuration.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,6 +30,7 @@
 #include <proto/dos.h>
 
 #include <stdarg.h>
+#include <string.h>
 
 
 /* ------------------------------------------------------------- logging --- */
@@ -90,6 +93,35 @@ static BOOL t_check(BOOL ok, const char *what, ULONG detail)
  * which is the ABI detail under test.
  */
 struct Library *SocketBase;
+
+struct TUserGroupCredentials
+{
+    LONG  cr_ruid;
+    LONG  cr_rgid;
+    UWORD cr_umask;
+    LONG  cr_euid;
+    WORD  cr_ngroups;
+    LONG  cr_groups[32];
+    LONG  cr_session;
+    char  cr_login[32];
+};
+
+#define LVO_getcredentials (-258)
+
+static struct TUserGroupCredentials *ug_getcredentials(
+    struct Library *base, struct Task *task)
+{
+    return LP1(0x102, struct TUserGroupCredentials *, ug_getcredentials,
+               struct Task *, task, a0, , base);
+}
+
+static volatile struct Task *t_ug_foreign_task;
+
+static VOID t_ug_foreign_main(VOID)
+{
+    t_ug_foreign_task = FindTask(NULL);
+    Wait(SIGBREAKF_CTRL_E);
+}
 
 /* bsdsocket.library LVOs, from the NDK's bsdsocket_lib.fd and
    <inline/bsdsocket.h>. */
@@ -738,7 +770,7 @@ LONG             sock;
 
 /* ------------------------------------------------------------------ main -- */
 
-int main(void)
+int main(int argc, char **argv)
 {
 
 struct Library  *ugbase;
@@ -746,6 +778,8 @@ struct Process  *child;
 struct TagItem   tags[6];
 ULONG            waited;
 ULONG            closed_after;
+struct Process  *ug_child;
+struct TUserGroupCredentials *ug_creds;
 
 
     t_log("AmiNetXDuo, shared library load test");
@@ -765,7 +799,39 @@ ULONG            closed_after;
                        "usergroup.library version >= 4",
                        (ULONG) ugbase -> lib_Version);
 
+        tags[0].ti_Tag  = NP_Entry;     tags[0].ti_Data = (ULONG)t_ug_foreign_main;
+        tags[1].ti_Tag  = NP_Name;      tags[1].ti_Data = (ULONG)"library_test ug";
+        tags[2].ti_Tag  = NP_StackSize; tags[2].ti_Data = T_CHILD_STACK;
+        tags[3].ti_Tag  = NP_Cli;       tags[3].ti_Data = (ULONG)FALSE;
+        tags[4].ti_Tag  = TAG_DONE;     tags[4].ti_Data = 0;
+
+        ug_child = CreateNewProc(tags);
+        (VOID)t_check((BOOL)(ug_child != NULL),
+                      "CreateNewProc(usergroup credential peer)", 0UL);
+        if (ug_child != NULL)
+        {
+            for (waited = 0; t_ug_foreign_task == NULL && waited < 100; waited++)
+                Delay(1);
+
+            ug_creds = ug_getcredentials(ugbase,
+                                         (struct Task *)t_ug_foreign_task);
+            (VOID)t_check((BOOL)(ug_creds != NULL &&
+                                 ug_creds->cr_session ==
+                                     (LONG)t_ug_foreign_task),
+                          "getcredentials(task without an opener)",
+                          (ULONG)ug_creds);
+            Signal((struct Task *)ug_child, SIGBREAKF_CTRL_E);
+        }
+
         CloseLibrary(ugbase);
+    }
+
+    if (argc > 1 && strcmp(argv[1], "USERGROUP") == 0)
+    {
+        t_log("");
+        t_log("%ld checks, %ld failures, %s",
+              t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
+        return((t_failures == 0UL) ? 0 : 20);
     }
 
     /* ---- bsdsocket.library, on a watched Process ------------------------- */

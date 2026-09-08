@@ -253,7 +253,10 @@
        "at all when they do not find it.  LIBS: is SYS:Libs on a stock "
        "Workbench, so that assign points the path at the library this "
        "installer put there.  It is left out on a machine that already has "
-       "a real AmiTCP installed, which owns the name.\n\n"
+       "a real AmiTCP installed, which owns the name.  It is only a default: "
+       "software such as ch_nfs may use another AmiTCP: drawer for its db/ "
+       "files.  In that case replace this line in S:User-Startup; AmiNetXDuo "
+       "uses the existing assign without changing it.\n\n"
        "The installer changes only its own lines.  Everything else in "
        "S:User-Startup stays as it is, so it is safe to run this installer "
        "again."))

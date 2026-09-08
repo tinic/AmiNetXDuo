@@ -2488,6 +2488,18 @@
   DEVS:Internet/group in the ordinary Unix format (AmiTCP:db/passwd and
   AmiTCP:db/group are also read, for an existing AmiTCP installation).
 
+  The Installer assigns AmiTCP: to SYS: when nothing already owns that
+  name. This is a compatibility default for programs which use the literal
+  path AmiTCP:libs/usergroup.library; it is not a required configuration
+  location. A program such as ch_nfs may instead keep its files in a
+  separate drawer:
+
+      Assign AmiTCP: Work:AmiTCP
+
+  with ch_nfstab at Work:AmiTCP/db/ch_nfstab. Put that assignment before
+  the stack is started and replace the Installer's AmiTCP: line in
+  S:User-Startup. AmiNetXDuo does not replace an existing AmiTCP: assign.
+
   @{b}If a program does not work@{ub}
 
   Check first that the network itself is working. See

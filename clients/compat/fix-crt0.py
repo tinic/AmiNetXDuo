@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Repair this toolchain's crt0.o, which passes the WRONG argv to main().
+Repair this toolchain's crt0.o, whose argv startup has two independent bugs.
 
 THE BUG
 
@@ -45,6 +45,24 @@ THE FIX
     There are two call sites, the Shell one and the Workbench one, and both
     are patched.
 
+THE ZERO-ADDRESS BUG
+
+    Newer crt0.o variants already push the value of __argv, but initialise it
+    through an uninitialised pointer:
+
+        movea.l  __argv,a0
+        move.l   __commandline,(a0)
+
+    __argv is zero-filled BSS at this point, so the second instruction writes
+    through address zero.  The Workbench path has the same load followed by
+    `move.l d0,(a0)`.  This is the hunk-0 offset $30 Enforcer hit in the
+    AmiNetXDuo 0.26.3 ssh binary.
+
+    The first instruction was meant to take the ADDRESS of __argv.  `movea.l
+    (xxx).L,a0` and `lea (xxx).L,a0` are both six bytes and share the same
+    four-byte operand and relocation, so changing 2079 to 41f9 repairs it
+    without moving anything.  Again both Shell and Workbench sites are fixed.
+
 WHY PATCH RATHER THAN WRITE OUR OWN crt0
 
     A replacement would have to reproduce __initlibraries, the INIT/EXIT/CTOR
@@ -66,6 +84,10 @@ import sys
 PEA_ABS = b'\x48\x79'
 MOVE_ABS_PUSH = b'\x2f\x39'
 JSR_ABS = b'\x4e\xb9'
+MOVEA_ABS_A0 = b'\x20\x79'
+LEA_ABS_A0 = b'\x41\xf9'
+MOVE_ABS_A0_IND = b'\x20\xb9'
+MOVE_D0_A0_IND = b'\x20\x80'
 
 
 def main(argv):
@@ -74,6 +96,21 @@ def main(argv):
         return 2
 
     data = bytearray(open(argv[1], 'rb').read())
+
+    # Newer crt0 shape: `movea.l __argv,a0` loads the zero VALUE in __argv,
+    # then the adjacent instruction stores through it.  Turn the load into an
+    # LEA of the same absolute operand.  Both instructions are six bytes, so
+    # the existing __argv relocation stays exactly where it is.
+    init_patched = 0
+    i = 0
+    while i + 8 <= len(data):
+        if (data[i:i + 2] == MOVEA_ABS_A0 and
+                data[i + 6:i + 8] in (MOVE_ABS_A0_IND, MOVE_D0_A0_IND)):
+            data[i:i + 2] = LEA_ABS_A0
+            init_patched += 1
+            i += 8
+            continue
+        i += 1
 
     # The call sequence, matched on opcodes only so that the relocated
     # operands (which are zero in the object file and filled in at link time)
@@ -137,7 +174,7 @@ def main(argv):
         # reason nobody understands.
         sys.stderr.write(
             "fix-crt0: no 'pea/move.l/jsr' main() call found, "
-            "copying crt0.o unchanged.\n"
+            "argv call sites already use the pointer value.\n"
             "          Check that argv works before trusting this build:\n"
             "          clients/dropbear/run-dbclient.sh runs dbclient, which\n"
             "          needs argv to say anything at all.\n")
@@ -145,6 +182,15 @@ def main(argv):
         sys.stderr.write(
             "fix-crt0: patched %d call site(s), expected 2 "
             "(the Shell one and the Workbench one).\n" % patched)
+
+    if init_patched == 2:
+        sys.stderr.write(
+            "fix-crt0: repaired 2 zero-address __argv initialisers.\n")
+    elif init_patched not in (0, 2):
+        sys.stderr.write(
+            "fix-crt0: repaired %d zero-address __argv initialiser(s), "
+            "expected 2 (the Shell one and the Workbench one).\n"
+            % init_patched)
 
     open(argv[2], 'wb').write(bytes(data))
     return 0

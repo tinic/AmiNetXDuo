@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+### Compatibility
+
+- `ch_nfsc` can obtain credentials for the task that sent it a DOS packet. AmiTCP's `getcredentials(task)` contract includes valid tasks that never opened `usergroup.library`; AmiNetXDuo returned NULL for those, so the NFS handler lost its authentication context on its first filesystem request. Such a task now inherits the querying opener's credentials, which is the only meaningful boundary on AmigaOS
+- `ssh` no longer writes a longword through address zero before reaching `main()`. The pinned newlib startup loads the zero-filled contents of `__argv` and then writes through it; both CLI and Workbench paths are repaired to load the address instead. The toolchain repair covers absolute, 16-bit baserel and 32-bit baserel crt0 variants, and its check refuses an unrepaired tree
+- `AmiTCP:` may point at a separate compatibility drawer containing `db/ch_nfstab`; AmiNetXDuo leaves an existing assign alone. The installer's `SYS:` value is only the default that makes literal `AmiTCP:libs/usergroup.library` lookups work on a stock system
+
 ### Receive
 
 Two blocks of work, each measured end to end against its own starting point on
@@ -30,6 +36,7 @@ What changed, and what each was worth on its own:
 
 | change | rx | tx |
 |---|---|---|
+| TX completion handback uses a compiler barrier, not `Forbid()`/`Permit()` | removes the scheduling boundary 0.26.3 put on the receive task for every completed TCP ACK; X-Surf 100 hardware confirmation pending | same completion path; no separate claim |
 | the SANA-II reader stops sweeping 32 read slots per drain to post nothing | +3.16% | +5.30% |
 | the LANCE receive buffer starts two bytes in, so the payload the copy hook reads lands on a longword | +3.09% | flat |
 | `le_rint` stops rewriting a descriptor field the chip never writes | none | none |

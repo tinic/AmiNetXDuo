@@ -194,6 +194,14 @@ STRPTR ugl_StrError(UG_A6, register LONG err __asm("d1"))
  * as Forbid() is released, so a pointer into it would already be stale before
  * the caller could dereference it.  Cross-task results are copied into the
  * querying opener while the child list is frozen.
+ *
+ * A task does not have to open usergroup.library to have credentials.  That is
+ * the point of this vector: filesystem handlers such as ch_nfsc ask for the
+ * credentials of the task that sent a DOS packet, and ordinary applications
+ * behind those packets never open this library.  AmiTCP documents every valid
+ * task as a success.  On an OS with no protection domains, an unknown task
+ * therefore inherits this opener's effective credentials; returning ESRCH
+ * made the first NFS request after a mount lose its authentication context.
  */
 struct ug_credentials *ugl_getcredentials(UG_A6,
                                           register struct Task *task __asm("a0"))
@@ -232,7 +240,14 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
     Permit();
 
     if (result == NULL)
-        ug_set_err(base, UG_ESRCH);
+    {
+        /* Do not dereference `task`: the caller owns that pointer and a stale
+           one must not turn compatibility fallback into an Enforcer hit. */
+        ug_resolve_login(base);
+        base->ug_CredResult = base->ug_Cred;
+        base->ug_CredResult.cr_session = (LONG)task;
+        result = &base->ug_CredResult;
+    }
 
     return result;
 }
