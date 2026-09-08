@@ -737,15 +737,31 @@ static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
 
     ami_sana2_rx_arm(iface, slot);
 
+    /*
+     * Only the fields a completion actually disturbs are rewritten here; this
+     * runs once per received frame and _ami_sana2_rx_post_slot carries 2.4% of
+     * the real-path profile.
+     *
+     * ln_Type must be reset: ReplyMsg() left it NT_REPLYMSG.  io_Flags and
+     * ios2_PacketType are set by the device on the way back
+     * (netdev_device.c:391-396).  io_Error, ios2_WireError and ios2_DataLength
+     * are the reply's outputs, and are zeroed for a THIRD-PARTY device -- ours
+     * would do it again in netdev_begin_io (netdev_io.c:25,35), but the reader
+     * opens whatever device the interface names, so it cannot lean on that.
+     *
+     * mn_ReplyPort, io_Command and ios2_Data are NOT rewritten.  The start
+     * loop below sets all three, no SANA-II device writes any of them -- a
+     * device executes io_Command and reads ios2_Data, and mn_ReplyPort is
+     * Exec's -- and reusing a configured IORequest across BeginIO() is the
+     * ordinary AmigaOS pattern.  The teardown's CMD_FLUSH cannot disturb them
+     * either: ami_sana2_rx_flush() builds a request of its own on the stack.
+     */
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    slot->req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-    slot->req.ios2_Req.io_Command = CMD_READ;
     slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
     slot->req.ios2_PacketType     = rx->packet_type;
     slot->req.ios2_DataLength     = 0;
-    slot->req.ios2_Data           = slot;
     ami_sana2_rx_mark(rx, slot, TRUE);
 
     /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
@@ -1413,6 +1429,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         rx->slot[i].req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
         rx->slot[i].req.ios2_Req.io_Message.mn_Length =
             (UWORD)sizeof(struct IOSana2Req);
+        /* Invariant for the life of the reader; ami_sana2_rx_post_slot() does
+           not rewrite them per frame.  See the note there. */
+        rx->slot[i].req.ios2_Req.io_Command = CMD_READ;
+        rx->slot[i].req.ios2_Data           = &rx->slot[i];
     }
 
     ami_sana2_rx_mark_reset(rx);
