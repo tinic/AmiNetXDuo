@@ -7,10 +7,13 @@ threshold the archive and binary are listed so each one can be judged.
 Threshold is deliberately 10 and not 5 -- the user set it there so the
 borderline cases are visible rather than just the desperate ones.
 """
-import collections, sys
+import collections, os, sys
 
 THRESHOLD = int(sys.argv[1]) if len(sys.argv) > 1 else 10
-BASE = '/home/turo/anxd-aminet'
+# Data directory, not a hardcoded home.  Defaults to the repo's own copy so the
+# tool works from a checkout with no external state.
+BASE = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', '..', 'docs', 'aminet-survey')
 
 callers = collections.defaultdict(list)
 for line in open(f'{BASE}/results.tsv'):

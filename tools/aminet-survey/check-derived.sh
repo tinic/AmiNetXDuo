@@ -53,8 +53,22 @@ if ! diff -q "$T/lvo-usage.tsv" "$D/lvo-usage.tsv" > /dev/null 2>&1; then
     exit 1
 fi
 
+# lvo-rare.tsv, regenerated the same way and compared the same way.  Counting
+# its rows -- which is all this did at first -- is not checking it: a stale
+# lvo-rare.tsv has exactly the row count it always had.  A gate that reports on
+# a file it did not regenerate is worse than one that says nothing about it.
+python3 tools/aminet-survey/rare.py 10 "$D" > "$T/lvo-rare.tsv" 2>/dev/null \
+    || { echo "check_derived=FAIL regenerating lvo-rare"; exit 2; }
+
+if ! diff -q "$T/lvo-rare.tsv" "$D/lvo-rare.tsv" > /dev/null 2>&1; then
+    echo "check_derived=FAIL lvo-rare.tsv does not match results.tsv"
+    diff "$D/lvo-rare.tsv" "$T/lvo-rare.tsv" | head -8
+    exit 1
+fi
+
 rows=$(awk -F'\t' 'NR>1' "$D/lvo-usage.tsv" | wc -l)
 called=$(awk -F'\t' 'NR>1 && $3>0' "$D/lvo-usage.tsv" | wc -l)
 rare=$(awk -F'\t' 'NR>1 && !s[$2]++' "$D/lvo-rare.tsv" | wc -l)
 echo "check_derived vectors=$rows called=$called rare_under_10=$rare"
+echo "check_derived regenerated=lvo-usage.tsv,lvo-rare.tsv"
 echo "check_derived=PASS"

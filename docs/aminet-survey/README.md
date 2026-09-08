@@ -129,3 +129,23 @@ four distributions plus `u9fs`: the NFS and 9P filesystem layer.
 
 Counts move as the survey runs; regenerate with
 `tools/aminet-survey/rare.py 10`.
+
+## Compatibility findings, kept separate from micro decisions
+
+These are gaps in what AmiNetXDuo implements TODAY.  They are not arguments
+about the micro profile and must not be filed as such.
+
+| finding | evidence |
+|---|---|
+| **`vsyslog` is unimplemented** -- `src/bsdsocket/bsdsocket_vectors.c:71` routes offset -258 to `bsd_enosys`, which returns -1/ENOSYS | **142 binaries call it**, rank 14 of 143 by caller count |
+
+## What this survey does NOT establish
+
+| | |
+|---|---|
+| an observed caller | proves the vector is used |
+| NO observed caller | proves very little at ~55% attribution |
+| argument-selected features | invisible entirely -- `SOCK_RAW` has 36 users and no vector |
+| a static reference | is NOT runtime coverage; a harness candidate needs a recipe that actually exercises the calls |
+| a single vector | is often not separable -- `ReleaseCopyOfSocket` belongs to the inetd handoff family with `ObtainSocket`/`Dup2Socket`, and `sendmsg` is the NFS/9P layer.  Judge families, not vectors |
+| the 14,290-byte figure | a preliminary non-LTO ceiling, NOT a realizable saving; a shipping LTO micro build has to be measured |
