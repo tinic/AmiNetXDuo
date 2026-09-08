@@ -10,9 +10,33 @@ micro profile may stub.
 | `unused-vectors.tsv` | the same set as USED / NO_CALLER / RESERVED |
 | `candidates.tsv` | applications ranked by marginal API coverage, for the test harness |
 | `lvomap.tsv` | offset -> vector -> implementing symbol, generated from `src/bsdsocket/bsdsocket_vectors.c` |
+| `worklist.txt` | the corpus: every archive path the survey draws from |
 | `lvo-collisions.tsv` | every vector against the 76 NDK `_lib.i` tables |
 | `lvo-rare.tsv` | every vector with FEWER THAN 10 callers, with the callers named |
 | `results.tsv` | the ledger: one row per scanned binary |
+
+## Raw and derived
+
+Everything here can be rebuilt from three files, so a later reassessment does
+not depend on trusting the summaries:
+
+| raw input | what it is |
+|---|---|
+| `worklist.txt` | the corpus, 5,923 archive paths |
+| `results.tsv` | one row per scanned binary: archive, path, verdict, distinct, calls, and the LVO NAMES it calls |
+| `lvomap.tsv` | the 143 vectors, pinned against the source that defines them |
+
+| derived | rebuild with |
+|---|---|
+| `lvo-usage.tsv` | counted from `results.tsv` column 6 |
+| `unused-vectors.tsv` | `lvo-usage.tsv` against `lvomap.tsv` |
+| `lvo-rare.tsv` | `tools/aminet-survey/rare.py 10` |
+| `candidates.tsv` | `tools/aminet-survey/candidates.py` |
+| `lvo-collisions.tsv` | `lvomap.tsv` against the NDK `_lib.i` tables |
+
+`results.tsv` keeps the LVO names per binary rather than a count, which is why
+a different threshold, a different grouping, or a per-application question can
+be answered later without rescanning 1,700 archives.
 
 ## Method
 
