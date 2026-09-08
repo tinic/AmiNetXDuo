@@ -45,6 +45,7 @@ for path in "$@"; do
             printf '%s\t-\tUNPACK_PARTIAL\t0\t0\t\n' "$name" >> "$LEDGER"
             echo "UNPACK_PARTIAL $name -- rows from it may be short" ;;
     esac
+    sha=$(sha256sum "$OUT/$name" 2>/dev/null | cut -d' ' -f1)
     errs=0
     while IFS= read -r -d '' f; do
         row=$(python3 scan.py "$f" 2>"$OUT/scan.err")
@@ -68,7 +69,12 @@ for path in "$@"; do
         # ampersand in it, which is why the null-delimited find matters.)
         rel=${f#"$OUT/$name.d/"}
         row=${row#*$'\t'}
-        printf '%s\t%s\t%s\n' "$name" "$rel" "$row" >> "$LEDGER"
+        # THE ARCHIVE'S FULL PATH AND ITS HASH, which is codex point 1.  A
+        # basename does not identify an Aminet archive -- samba appears under
+        # comm/net and comm/tcp -- and without a hash there is no way to tell
+        # whether a row describes the file that is on the mirror today.  A
+        # finding nobody can re-derive from the same bytes is an anecdote.
+        printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$rel" "$row" "$path" "$sha" >> "$LEDGER"
         echo "$name | $row" | cut -c1-150
         found=$((found+1))
     done < <(find "$OUT/$name.d" -type f -size +1k -print0)

@@ -40,6 +40,18 @@ LVOMAP = os.environ.get('ANXD_SURVEY_LVOMAP') or next(
 if not LVOMAP:
     sys.exit('scan.py: no lvomap.tsv found; set ANXD_SURVEY_LVOMAP')
 
+# THE LEDGER MIXES SCANNER REVISIONS AND COULD NOT SAY WHICH.  Five changes
+# altered what a scan returns -- 0x2079 corrected to 0x2C4x, gating the store
+# on the OpenLibrary that NAMES bsdsocket.library, the three lea forms, AS225
+# detection, SOCK_RAW -- and rows written before each of them are wrong in a
+# way no column recorded.  codex raised it; this is the column.
+#
+# BUMP THIS whenever a change alters what scan() returns for the same input.
+# rescan.sh re-runs every archive whose row carries an older version, off the
+# local unpack tree, so no re-fetch is needed.  Rows with no scanner= field at
+# all predate this and are the ones to redo first.
+SCANNER_VERSION = 6
+
 OPENLIB = 0xFDD8            # -552 as a 16-bit displacement
 LVO = {}
 for line in survey_io.lines(LVOMAP):
@@ -81,15 +93,31 @@ def _operand(code, i, kind):
         return (('abs', s16(code, i)), 2)
     return ((kind, s16(code, i)), 2)
 
+# HOW MANY BYTES AN OPERAND NEEDS after its opcode word.  The scan bounds used
+# to be hand-written slack -- `len(code) - 10`, `len(code) - 6` -- and slack is
+# not a bound.  A synthetic fixture whose last instruction is `jmp -258(a6)`
+# proved it: the tail call sat 6 bytes from the end of the hunk, the loop
+# stopped 6 bytes early, and the call was never seen.  A hunk's LAST
+# instruction is exactly where a tail call lives.
+_NEED = {'abs.l': 4, 'abs.w': 2, 'a4': 2, 'a5': 2}
+
+
+def _fits(code, i, kind):
+    """The opcode word at i plus its operand are inside the hunk."""
+    return i + 2 + _NEED[kind] <= len(code)
+
+
 def find_socketbase(code):
     """Raw keys stored from d0 right after an OpenLibrary() call."""
     bases = set()
-    for i in range(0, len(code) - 10, 2):
+    for i in range(0, len(code) - 3, 2):
         if u16(code, i) != 0x4EAE or u16(code, i + 2) != OPENLIB:
             continue
-        for j in range(i + 4, min(i + 60, len(code) - 6), 2):
+        for j in range(i + 4, min(i + 60, len(code) - 1), 2):
             w = u16(code, j)
             if w in D0_STORES:
+                if not _fits(code, j, D0_STORES[w]):
+                    break
                 key, _ = _operand(code, j + 2, D0_STORES[w])
                 bases.add(key)
                 break
@@ -101,9 +129,15 @@ def calls_for(code, bases):
     """LVO displacements reached through an a6 loaded from one of `bases`."""
     hits = []
     cur = None
-    for i in range(0, len(code) - 6, 2):
+    # i + 4 <= len(code): opcode word plus a 16-bit displacement.  Anything
+    # tighter drops the last instruction of the hunk, which is where tail calls
+    # are.
+    for i in range(0, len(code) - 3, 2):
         w = u16(code, i)
         if w in A6_LOADS:
+            if not _fits(code, i, A6_LOADS[w]):
+                cur = None
+                continue
             cur, _ = _operand(code, i + 2, A6_LOADS[w])
             continue
         if w in (0x4EAE, 0x4EEE):    # jsr/jmp d16(a6) -- jmp is a tail call
@@ -167,9 +201,12 @@ def raw_socket_sites(code, bases):
     """
     n = 0
     cur = None
-    for i in range(0, len(code) - 6, 2):
+    for i in range(0, len(code) - 3, 2):
         w = u16(code, i)
         if w in A6_LOADS:
+            if not _fits(code, i, A6_LOADS[w]):
+                cur = None
+                continue
             cur, _ = _operand(code, i + 2, A6_LOADS[w])
             continue
         if w in (0x4EAE, 0x4EEE) and s16(code, i + 2) == SOCKET_LVO:
@@ -246,7 +283,12 @@ def scan(path):
                 target_of[o] = tgt
 
         bases = set()
-        for i in range(0, len(code) - 10, 2):
+        # Same bound as calls_for, and for the same reason.  `len(code) - 10`
+        # was slack, not a bound: an OpenLibrary within ten bytes of the end of
+        # a hunk was never seen, and a binary whose only bsdsocket open sits
+        # there is filed NO_SOCKETBASE_STORE -- a wrong verdict, not a missing
+        # one, and there are 369 rows carrying it.
+        for i in range(0, len(code) - 3, 2):
             if u16(code, i) != 0x4EAE or u16(code, i + 2) != OPENLIB:
                 continue
             opens += 1
@@ -264,9 +306,11 @@ def scan(path):
             if not named:
                 continue
 
-            for j in range(i + 4, min(i + 60, len(code) - 6), 2):
+            for j in range(i + 4, min(i + 60, len(code) - 1), 2):
                 w = u16(code, j)
                 if w in D0_STORES:
+                    if not _fits(code, j, D0_STORES[w]):
+                        break
                     key, _ = _operand(code, j + 2, D0_STORES[w])
                     bases.add(key)
                     break
@@ -305,5 +349,6 @@ if __name__ == '__main__':
     for p in sys.argv[1:]:
         verdict, offs, total = scan(p)
         named = [LVO.get(o, '?%d' % o) for o in offs]
-        print("%s\t%s\tdistinct=%d\tcalls=%d\t%s"
-              % (p.split('/')[-1], verdict, len(offs), total, ",".join(named)))
+        print("%s\t%s\tdistinct=%d\tcalls=%d\t%s\tscanner=%d"
+              % (p.split('/')[-1], verdict, len(offs), total, ",".join(named),
+                 SCANNER_VERSION))

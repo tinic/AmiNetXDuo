@@ -2710,6 +2710,12 @@ stage_survey() {
     # It is cheap (no toolchain, no network, about a second) so it belongs in
     # the default set rather than behind a variable.
     tools/aminet-survey/test-survey-io.sh || { fail "survey: ledger I/O"; return 1; }
+    # The scanner, against HUNK executables built here so the right answer is
+    # known exactly.  Real archives cannot check it: a miss is invisible when
+    # nobody knows what the correct result was.  These found a live defect on
+    # their first run -- calls_for stopped 6 bytes short of the end of a code
+    # hunk, which is precisely where a tail call sits.
+    python3 tools/aminet-survey/test-scan.py || { fail "survey: scanner"; return 1; }
     tools/aminet-survey/check-derived.sh  || {
         fail "survey: a published table no longer matches results.tsv --\
  regenerate with tools/aminet-survey/usage.py, rare.py and callers.py"
