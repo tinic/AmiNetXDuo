@@ -80,6 +80,22 @@ TABLE = {
     "netdev_device.c":  [("_netdev_rx",              168),    # 155
                          ("_netdev_tx_direct",       108),    # 98, the ACK path
                          ("_netdev_hand_over",        68)],   # 60
+
+    # THE TCP CORE IS VENDORED, WHICH IS WHY IT IS HERE AND NOT WHY IT IS NOT.
+    # These four run once per received segment and are 9.2% of the profile
+    # between them -- the largest block on the path after the copies, and the
+    # only one nothing was watching.  A NetX version bump is a normal thing to
+    # do here (d1253f11 bumped it for the window-update knob) and it can add
+    # instructions to the hottest per-segment function in the stack with
+    # nobody the wiser, because the rig cannot see 0.6% and these are not our
+    # files to read line by line every release.
+    #
+    # A bump that trips this is NOT a defect -- it is a number to look at and
+    # then raise on purpose.
+    "nx_tcp_socket_state_data_check.c":  [("__nx_tcp_socket_state_data_check",  467)],  # 429
+    "nx_tcp_packet_process.c":           [("__nx_tcp_packet_process",           546)],  # 502
+    "nx_tcp_socket_packet_process.c":    [("__nx_tcp_socket_packet_process",    515)],  # 474
+    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   604)],  # 556
 }
 
 try:
