@@ -40,7 +40,8 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
                             register ULONG len  __asm("d0"))
 {
-    AmiRxSlot *slot = (AmiRxSlot *)to;
+    AmiRxSlot  *slot = (AmiRxSlot *)to;
+    AmiSana2If *ifc;
 
     if (slot == NULL || from == NULL)
         return FALSE;
@@ -112,10 +113,18 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      */
     slot->summed = FALSE;
 
-    /* The slot knows its reader and the reader knows the interface, where a
-       counter a user can read has to live. */
-    if (slot->owner != NULL && slot->owner->iface != NULL)
-        slot->owner->iface->stats.rx_copy_hook++;
+    /*
+     * The slot knows its reader and the reader knows the interface, where a
+     * counter a user can read has to live.  RESOLVED ONCE: the same two-level
+     * chain was walked again a few lines down for rx_copy_summed, so every
+     * frame tested slot->owner and owner->iface twice to reach the same
+     * struct.  Nothing between the two can change either pointer -- the copy
+     * and the sum in between touch the packet, not the slot's ownership.
+     */
+    ifc = (slot->owner != NULL) ? slot->owner->iface : NULL;
+
+    if (ifc != NULL)
+        ifc->stats.rx_copy_hook++;
 
     if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 1) == 0)
     {
@@ -151,8 +160,8 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
         }
 
         slot->summed = TRUE;
-        if (slot->owner != NULL && slot->owner->iface != NULL)
-            slot->owner->iface->stats.rx_copy_summed++;
+        if (ifc != NULL)
+            ifc->stats.rx_copy_summed++;
         slot->copied = len;
 
         return TRUE;
