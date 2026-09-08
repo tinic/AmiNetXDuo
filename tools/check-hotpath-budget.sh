@@ -132,8 +132,22 @@ tmp = tempfile.mkdtemp()
 for tu, wanted in TABLE.items():
     hits = [x for x in cc if x["file"].endswith("/" + tu) or x["file"].endswith(tu)]
     if not hits:
-        print("hotpath_budget=skipped reason=tu_not_in_build tu=%s" % tu)
-        sys.exit(0)
+        # FATAL, NOT SKIPPED.  This exited 0 and abandoned all eleven
+        # functions the moment ONE translation unit went missing -- a rename,
+        # a move, an option that drops it from the build -- and said
+        # "skipped" while doing it.
+        #
+        # That is the shape of the crt0 repair defect found on 2026-09-08:
+        # tools/fix-toolchain-crt0.py reported success over a toolchain where
+        # three of ten crt0.o files were "skipped" because their disassembly
+        # was not understood, and the binaries built from them wrote through
+        # a NULL __argv for three releases.  A gate that cannot see its
+        # subject must say so and fail, not pass quietly.
+        print("hotpath_budget=FAIL reason=tu_not_in_build tu=%s" % tu)
+        print("  This TU is in the budget table but not in the build, so the")
+        print("  functions it holds were about to go unguarded with a green")
+        print("  result.  Fix the path, or drop the entry on purpose.")
+        sys.exit(1)
     e = hits[0]
     out = os.path.join(tmp, tu + ".s")
     cmd = re.sub(r"-o\s+\S+", "-o " + out, e["command"]).replace(" -c ", " -S ")
