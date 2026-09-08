@@ -47,7 +47,27 @@ _ami_sana2_rx_complete
 _ami_sana2_rx_post_slot
 _n68k_rxv_fold
 _n68k_rxv_even
+_ami_random_arrival
+_ami_sana2_rx_frame_length
+_ami_sana2_rx_mark
+_ami_sana2_rx_arm
 "
+
+# THE FOUR ADDED 2026-09-08 ARE ALL PER FRAME, and each was verified against a
+# shipping-shaped image before it was listed: zero jsr sites, canary reading 1.
+#   _ami_random_arrival        sana2_rx.c:1118, once a frame; its whole body
+#                              after the latch is `if (arrival_done) return`,
+#                              so an out-of-line call would be nearly all
+#                              overhead
+#   _ami_sana2_rx_frame_length rx_complete, once a frame
+#   _ami_sana2_rx_mark         the drain loop, once a frame
+#   _ami_sana2_rx_arm          the re-arm, once a frame
+#
+# _netdev_payload AND _nd_addr6 ARE PER FRAME AND ARE DELIBERATELY NOT HERE.
+# They live in anxnet.device and this gate disassembles bsdsocket.library, so
+# a grep for them finds no jsr no matter what happens to them -- the same
+# vacuous pass the name check above exists to stop, arriving by a different
+# road.  Guarding them needs a second image, not another name.
 
 # The seven below were added on 2026-09-07, each verified against a
 # shipping-shaped image (LTO on, -DAMINETXDUO_KEEP_SYMBOLS=ON) before it was
