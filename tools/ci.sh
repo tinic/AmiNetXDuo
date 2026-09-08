@@ -499,6 +499,21 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # The sweep's nine-card table is not the list of supported cards, and it
+    # reads as though it were.  A core added to netdev_cards[] without a board
+    # to boot it or a reason it cannot be booted is coverage that shrank
+    # without saying so, on the only cross-core check there is.
+    if tools/check-card-coverage.sh > "$BUILD/card-coverage.log" 2>&1; then
+        note "card coverage: $(sed -n 's/^card_coverage_supported=/supported /p' \
+                               "$BUILD/card-coverage.log") $(sed -n \
+              's/^card_coverage_swept=/swept /p' "$BUILD/card-coverage.log")"
+    else
+        cat "$BUILD/card-coverage.log"
+        fail "a card in netdev_cards[] is neither swept nor declared" \
+             "(tools/check-card-coverage.sh)"
+        return 1
+    fi
+
     # A rule is a gate, a behaviour is a test, open work is a backlog row.
     # Narrative in docs/*.md is none of those, so it has a ceiling.
     if tools/check-doc-budget.sh > "$BUILD/doc-budget.log" 2>&1; then

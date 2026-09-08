@@ -22,6 +22,25 @@ slip.device    serial line, not an Ethernet board
 rs485.device   serial line, not an Ethernet board
 "
 
+# CARDS src/netdev/netdev_cards.c SUPPORTS AND NO SWEEP HERE CAN BOOT.
+#
+# CARDS above is not "every card this project supports", and reading the
+# sweep's nine-line table as if it were is the mistake this list exists to
+# stop: netdev_cards[] carries twelve, and tools/emu-board.sh can express
+# eight of them.  The four below are covered by tests/tools/run-hwcard.sh
+# against real hardware, which skips when the board is absent, and their
+# rows in netdev_cards.c say as much.
+#
+# tools/check-card-coverage.sh fails if a card is in netdev_cards[] and in
+# neither list, so adding a core cannot quietly shrink what the sweep claims.
+# shellcheck disable=SC2034  # read by the sweeps that source this
+UNTESTABLE_CARDS="
+3c589       no 3Com EtherLink III PCMCIA card in Amiberry; run-hwcard.sh proves it on hardware
+3ccfem556   as 3c589, and its CIS tuple is covered by test_netdev_cis.c
+3cxem556    as 3c589, and its CIS tuple is covered by test_netdev_cis.c
+xsurf500    no ACA500 and no X-Surf 500 is modelled by any emulator (netdev_cards.c)
+"
+
 cards_rows() { # [board[,board...]]
     _cards_only="${1:-}"
     printf '%s\n' "$CARDS" | while read -r board model addr mac; do
