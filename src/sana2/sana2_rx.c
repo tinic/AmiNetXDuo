@@ -526,9 +526,21 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     packet->nx_packet_prepend_ptr += AMI_ETH_HEADER_SIZE;
     packet->nx_packet_length      -= AMI_ETH_HEADER_SIZE;
 
-    switch (type)
+    /*
+     * IPv4 AHEAD OF THE SWITCH, BECAUSE IT IS EVERY FRAME AND WAS THE LAST
+     * COMPARE REACHED.  GCC builds a binary search over the four case
+     * values, and 0x0800 sits on the far side of it: the generated demux ran
+     * `cmp.w #-32715` then `jhi` then `cmp.w #2048` before taking the arm a
+     * bulk receive takes every time.  Testing it first costs the other three
+     * one compare each, which they can afford -- ARP is a handful a minute
+     * and the rest are rarer still.
+     *
+     * A straight hoist, not a restructure: every case here is self-contained
+     * and ends in break, the switch is the last statement in the function,
+     * and this arm already returns early on a dropped frame.
+     */
+    if (type == AMI_ETHERTYPE_IPV4)
     {
-    case AMI_ETHERTYPE_IPV4:
 #ifdef AMINETXDUO_RX_VERIFY
         /*
          * Checked here and reported to the stack so it does not walk the
@@ -601,8 +613,11 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 #endif
         iface->stats.packets_received++;
         ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV4);
-        break;
+        return;
+    }
 
+    switch (type)
+    {
     case AMI_ETHERTYPE_IPV6:
 #if defined(AMINETXDUO_RX_VERIFY) && defined(FEATURE_NX_IPV6)
         /* Same two entries as IPv4 above: no header checksum exists to claim,
