@@ -47,6 +47,14 @@ target_compile_definitions(test_sana2_copy PRIVATE
     NX_INCLUDE_USER_DEFINE_FILE
     AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
+# Without this the copy hook's ENTIRE checksum path -- the fused branch and
+# the odd-address fallback both -- is preprocessed out of the one test that
+# calls it, and S2_CopyToBuff is how every third-party SANA-II device hands
+# us a frame.
+if(AMINETXDUO_RX_VERIFY)
+    target_compile_definitions(test_sana2_copy PRIVATE AMINETXDUO_RX_VERIFY)
+endif()
+
 include(CTest)
 add_test(NAME sana2_copy COMMAND test_sana2_copy)
 

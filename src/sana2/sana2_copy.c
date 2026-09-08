@@ -30,6 +30,11 @@ VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
     N68K_COPY_BYTES(to, from, len);
 }
 
+#ifdef AMINETXDUO_RX_VERIFY
+/* Defined below; the copy hook needs it for the odd-address case. */
+static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len);
+#endif
+
 /*
  * S2_CopyToBuff.  `to` is this CMD_READ's ios2_Data, that is the AmiRxSlot,
  * whose NX_PACKET was allocated and positioned before the read was posted.  In
@@ -148,6 +153,34 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
 
         return TRUE;
     }
+
+    /*
+     * ODD ON ONE SIDE, WHICH ONLY A DEVICE WE DO NOT OWN CAN PRODUCE.
+     *
+     * Our own cores hand this hook an even payload pointer and slot->dst is
+     * nx_packet_data_start + PAD + ETH, so the branch above takes every frame
+     * and nothing here runs.  A THIRD-PARTY SANA-II driver is under no such
+     * obligation, and x-surf-100.device is the one that matters: it is not our
+     * code and this reader is the whole of our contact with it.
+     *
+     * What this used to do was copy and give up on the sum, leaving
+     * slot->summed FALSE -- and n68k_rx_verify_sum() then walks the WHOLE
+     * payload a second time to get what the copy had already read once.  Two
+     * passes over every frame, on the one path we cannot measure here.
+     *
+     * ami_sana2_copy_sum() does the same copy and accumulates as it goes, in
+     * the same convention the branch above uses, so the sum is the sum and the
+     * second pass is gone.  It is safe at any parity: n68k_copy_bytes() guards
+     * the 68000 case, where an odd longword read is an address error rather
+     * than a slow one (n68k_copy.S, docs/RESEARCH.md 45).
+     */
+    slot->sum    = ami_sana2_copy_sum(slot->dst, (const UCHAR *)from, len);
+    slot->summed = TRUE;
+    if (slot->stats != NULL)
+        slot->stats->rx_copy_summed++;
+    slot->copied = len;
+
+    return TRUE;
 #endif
 
     ami_sana2_copy_bytes(slot->dst, (const UCHAR *)from, len);
@@ -168,9 +201,10 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
 
     if ((((ALIGN_TYPE)to | (ALIGN_TYPE)from) & 1) != 0)
     {
-        /* Odd on one side, where a 68000 permits no word access at all.  The
-           pools this driver copies between are longword aligned, so this is
-           unreachable today. */
+        /* Odd on one side, where a 68000 permits no word access at all.  Our
+           own pools are longword aligned, so this is reached only through the
+           copy hook above, and only for a third-party device that hands us an
+           odd payload pointer. */
         ami_sana2_copy_bytes(to, from, len);
 
         sum = 0UL;
