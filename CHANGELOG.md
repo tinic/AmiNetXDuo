@@ -11,45 +11,36 @@ version at the top when it merges.
 
 ### Compatibility
 
-- `ch_nfsc` can obtain credentials for the task that sent it a DOS packet. AmiTCP's `getcredentials(task)` contract includes valid tasks that never opened `usergroup.library`; AmiNetXDuo returned NULL for those, so the NFS handler lost its authentication context on its first filesystem request. Such a task now inherits the querying opener's credentials, which is the only meaningful boundary on AmigaOS
-- `ssh` no longer writes a longword through address zero before reaching `main()`. The pinned newlib startup loads the zero-filled contents of `__argv` and then writes through it; both CLI and Workbench paths are repaired to load the address instead. Locally built toolchains patch the source to give `__argv` real backing storage. Every client build and CMake configure checks every multilib independently and refuses either an unsafe or unrecognized startup shape
-- `AmiTCP:` may point at a separate compatibility drawer containing `db/ch_nfstab`; AmiNetXDuo leaves an existing assign alone. The installer's `SYS:` value is only the default that makes literal `AmiTCP:libs/usergroup.library` lookups work on a stock system
+- `ch_nfsc` obtains credentials for a task that never opened `usergroup.library`. An unknown task inherits the querying opener's credentials; NFS mounts authenticate again
+- `ssh` no longer writes a longword through address zero before `main()`. Both the CLI and Workbench startup paths are repaired
+- Every multilib crt0 is checked at configure, at client build, and by `tests/toolchain/test_crt0_gate.py`. An unsafe or unrecognised startup shape is refused
+- Locally built toolchains patch newlib to give `__argv` real backing storage
+- The installer's `AmiTCP: SYS:` is a default only. An existing assign is left alone, including one pointing at a drawer holding `db/ch_nfstab`
 
 ### Receive
 
-Two blocks of work, each measured end to end against its own starting point on
-playhouse3: clean build per arm, md5 checked before a round ran, six rounds
-alternating which arm went first.
+Clean build per arm, both md5s checked before a round ran, order alternated.
+Totals are end to end; per-change figures do not sum to them.
 
 | | before | now | |
 |---|---|---|---|
 | iperf tcp-rx | 5,553,818 | **5,796,608** | **+4.1%** |
 | iperf tcp-tx | 2,982,376 | **3,130,634** | **+5.1%** |
+| iperf tcp-rx, earlier in the cycle | 5,347,499 | 5,522,706 | +3.0% |
 | Fitz write, kbytes/s | 2,541.5 | **2,607.0** | +2.4% |
-
-| earlier in this cycle | before | now | |
-|---|---|---|---|
-| iperf tcp-rx | 5,347,499 | 5,522,706 | +3.0% |
 | Fitz read, kbytes/s | 3,272 | 3,562 | +9.0% |
-
-What changed, and what each was worth on its own:
 
 | change | rx | tx |
 |---|---|---|
-| TX completion handback uses a compiler barrier, not `Forbid()`/`Permit()` | removes the scheduling boundary 0.26.3 put on the receive task for every completed TCP ACK; X-Surf 100 hardware confirmation pending | same completion path; no separate claim |
+| TX completion handback takes a compiler barrier, not `Forbid()`/`Permit()` | X-Surf 100 confirmation pending | same path |
 | the SANA-II reader stops sweeping 32 read slots per drain to post nothing | +3.16% | +5.30% |
-| the LANCE receive buffer starts two bytes in, so the payload the copy hook reads lands on a longword | +3.09% | flat |
+| the LANCE receive buffer starts two bytes in, landing the payload on a longword | +3.09% | flat |
 | `le_rint` stops rewriting a descriptor field the chip never writes | none | none |
 | CMD_READ reaches its handler without the generic command dispatch | none | none |
 
-| | |
-|---|---|
-| totals | measured end to end; the per-change figures do not add to them |
-| transmit | moved by the reader change alone; the rig's ~4.5 ms ack sets the floor, not our share of it |
-| Fitz | application-visible file throughput, never a wire rate; do not compare to the iperf figures |
-| `fitz_read` | cannot resolve a few per cent; two sets of it disagreed in sign |
-| noise | three null controls on identical binaries gave +0.22%, +2.75%, -0.29%; one A/B settles nothing between 1 and 3 per cent |
-| method | clean build per arm, md5 checked, six rounds or sittings, order alternated, two sittings for anything under 3 per cent |
+- Transmit moved by the reader change alone. The rig's ~4.5 ms acknowledgement sets that floor
+- Fitz is application-visible file throughput, not a wire rate. `fitz_read` cannot resolve a few per cent; two sets disagreed in sign
+- One A/B settles nothing between one and three per cent. Three null controls on identical binaries read +0.22%, +2.75%, -0.29%
 
 ## 0.26.3
 
