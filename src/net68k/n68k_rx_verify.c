@@ -756,9 +756,11 @@ UINT    offset;
 
     /* Anything the carried sum cannot describe exactly goes to the ordinary
        path, which re-derives everything from the frame. */
-    if ((ihl < 20U) || ((ULONG)ihl > packet -> nx_packet_length) ||
-        (total < (ULONG)ihl) || (total > packet -> nx_packet_length) ||
-        (copied != total))
+    /* `ihl > nx_packet_length` WAS HERE AND IS IMPLIED: the next two tests
+       establish ihl <= total <= nx_packet_length, so a header longer than the
+       frame cannot reach past them. */
+    if ((ihl < 20U) || (total < (ULONG)ihl) ||
+        (total > packet -> nx_packet_length) || (copied != total))
     {
         return (n68k_rx_verify(packet, drop));
     }
@@ -850,19 +852,36 @@ UINT    offset;
     flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
     n68k_rx_verify_stats.ip_ok++;
 
-    /* ---- transport = carried - header, plus the pseudo header ----------- */
-    sum =  carried + (~head);
-    if (sum < carried)
-        sum++;                              /* end-around carry */
-
+    /* ---- transport = carried, plus the pseudo header -------------------- */
+    /*
+     * THE HEADER IS NOT SUBTRACTED, BECAUSE IT CONTRIBUTES NOTHING.
+     *
+     * `sum = carried + ~head` with an end-around carry stood here.  Four lines
+     * above, fold(head) was proved to be 0xFFFF -- that IS the IPv4 header
+     * check -- and 0xFFFF is the one's-complement zero.  Formally: end-around
+     * carry is arithmetic modulo 65535, 0xFFFF = 0 there, and 0xFFFFFFFF is
+     * 65535 * 65537, so ~head = 0xFFFFFFFF - head = 0 - 0 = 0 as well.  The
+     * subtraction is the identity.
+     *
+     * The one place that could bite is the 0x0000-against-0xFFFF spelling of
+     * that zero, because the verdict below tests for 0xFFFF exactly.  It
+     * cannot: `acc += w; acc += (acc < w)` returns 0 only from all-zero input,
+     * and w[0] of a valid IPv4 header is 0x45xx xxxx.  The old line could not
+     * reach 0 either -- a + b == 2^32 leaves 0, and its own carry correction
+     * then makes it 1.  Both spellings are 0xFFFF, both before and after.
+     *
+     * AND THE PSEUDO-HEADER ADDRESSES GO IN WHOLE.  Adding a 32-bit word with
+     * an end-around carry equals adding its two halves, since 2^16 = 1 modulo
+     * 65535 -- the same identity the header sum above already relies on.  Four
+     * shifts and four masks leave with it.
+     */
     src =  N68K_RDW32(&ip[12]);
     dst =  N68K_RDW32(&ip[16]);
 
-    sum =  n68k_rxv_fold(sum);
-    sum +=  (src >> 16) & 0xFFFFUL;
-    sum +=  src & 0xFFFFUL;
-    sum +=  (dst >> 16) & 0xFFFFUL;
-    sum +=  dst & 0xFFFFUL;
+    sum =  carried;
+
+    sum +=  src;   sum += (sum < src) ? 1UL : 0UL;
+    sum +=  dst;   sum += (sum < dst) ? 1UL : 0UL;
     sum +=  (ULONG)protocol;
     sum +=  (ULONG)payload;
 
