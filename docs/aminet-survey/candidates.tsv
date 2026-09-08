@@ -1,0 +1,16 @@
+rank	new	cum	flags	lvos	archive	binary
+1	30	30	H-D	30	samba207_w1251.lha	samba-2.0.7/install/bin/testprns
+2	5	35	--D	16	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiNSLookup
+3	4	39	--D	22	GG-Lite-net-m68k.lha	GG-Lite-1.0-net-m68k/GG/bin/rpcinfo
+4	3	42	--D	25	RNOXfer_68k.lha	RNOXfer_68k/RNOXfer
+5	3	45	-R-	13	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamiipnat.library
+6	2	47	H--	17	gendemo104.lha	Genesis/bin/inetd
+7	2	49	--D	8	Miami32b2-main.lha	MiamiNetStat
+8	1	50	--D	19	binkd_1.1a-115.lha	binkd
+9	1	51	H--	18	adig.lha	adig/ahost-68000
+10	1	52	-RD	15	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiIPNatD
+11	1	53	---	13	lanclip.lha	LANClip/lanclip
+12	1	54	--D	10	amimatters.lha	AmiMatters/Files/68060/AmiMatters
+13	1	55	---	1	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
+
+# 430 attributed binaries cover 55 of 143 vectors (38%); 13 of them are non-redundant.
