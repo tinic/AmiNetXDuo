@@ -2696,6 +2696,29 @@ stage_smb() {
     return "$bad"
 }
 
+# ------------------------------------------------------------- the survey ----
+
+stage_survey() {
+    hr "aminet survey: derived tables"
+
+    # A GATE THAT NOTHING RUNS IS NOT A GATE.  check-derived.sh was written to
+    # prove docs/aminet-survey's published tables are derivable from the raw
+    # ledger, and then nothing ever called it -- not ci.sh, not a workflow.  It
+    # was green because it never ran, which is the same shape as the crt0
+    # defect that shipped for three releases.
+    #
+    # It is cheap (no toolchain, no network, about a second) so it belongs in
+    # the default set rather than behind a variable.
+    tools/aminet-survey/test-survey-io.sh || { fail "survey: ledger I/O"; return 1; }
+    tools/aminet-survey/check-derived.sh  || {
+        fail "survey: a published table no longer matches results.tsv --\
+ regenerate with tools/aminet-survey/usage.py, rare.py and callers.py"
+        return 1; }
+    note "$(awk -F'\t' 'NR>1' docs/aminet-survey/results.tsv | wc -l) archives\
+ scanned, $(awk -F'\t' 'NR>1 && $3>0' docs/aminet-survey/lvo-usage.tsv | wc -l)\
+ of 143 vectors with a caller"
+}
+
 # ------------------------------------------------------------------ main ----
 
 mkdir -p "$BUILD"
@@ -2720,7 +2743,7 @@ mkdir -p "$BUILD"
 #
 WANT=("$@")
 if [ ${#WANT[@]} -eq 0 ]; then
-    WANT=(host host32 cross web conformance)
+    WANT=(host host32 cross web conformance survey)
     # THE VARIABLE IS THE ASK.  Setting it and getting a run that prints
     # "analyze NOT RUN" is the mechanism behind every false green report this
     # gate has produced; the variable was necessary and not sufficient, and
@@ -2777,6 +2800,7 @@ for s in "${WANT[@]}"; do
         smb)         stage_smb || srrc=$? ;;
         e2e)         stage_e2e || srrc=$? ;;
         e2ecards)    stage_e2ecards || srrc=$? ;;
+        survey)      stage_survey || srrc=$? ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
     [ "$srrc" = "$NOTHING" ] || STAGES_TESTED=$((STAGES_TESTED + 1))

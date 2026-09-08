@@ -2272,3 +2272,117 @@ IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/http.library	DUAL_STACK_AS225	di
 IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/gopher.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
 IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/ftp.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
 IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/mailto.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+RexxServ.lha	RexxServ/libs/rexxkuang11.library	BASE_BUT_NO_CALLS	distinct=0	calls=0	
+SetTIADCC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Sircle.lha	-	NO_BSDSOCKET_BINARY	0	0	
+wordalert.lha	-	NO_BSDSOCKET_BINARY	0	0	
+OnlyMail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PGPMIP.lha	-	NO_BSDSOCKET_BINARY	0	0	
+POP3send.lha	POP3send	OK	distinct=8	calls=17	socket,connect,send,recv,CloseSocket,gethostbyname,vsyslog,SocketBaseTagList
+yam2_pl.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiNote22.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GMPBillITA.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AWebThorMail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IBrowse112a-20.lha	IBrowse1.11-1.12-68020/mailto.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse112a-20.lha	IBrowse1.11-1.12-68020/https.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse112a-20.lha	IBrowse1.11-1.12-68020/http.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse112a-20.lha	IBrowse1.11-1.12-68020/gopher.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse112a-20.lha	IBrowse1.11-1.12-68020/ftp.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+AmIrXDCC_130.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Sysinfo_Amiplug.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Tabs.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ksmED.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Base64Coders.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PSMail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PeekMail1_0a.lha	-	NO_BSDSOCKET_BINARY	0	0	
+yvutil.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Relax-source.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Run64_v12.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Zebra.lha	-	NO_BSDSOCKET_BINARY	0	0	
+aimi.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRCnewconfig.lha	-	NO_BSDSOCKET_BINARY	0	0	
+FServ.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Tabs-AmIPlug.lha	-	NO_BSDSOCKET_BINARY	0	0	
+xchat2mirc_1.0_mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Artemis11.lha	Artemis11/Artemis	NO_SOCKETBASE_STORE opens=8	distinct=0	calls=0	
+ML_Support_Tur.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PSMail11.lha	-	NO_BSDSOCKET_BINARY	0	0	
+sylpheed.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Amitube_SPA.lha	-	NO_BSDSOCKET_BINARY	0	0	
+RoxBox.lha	-	FETCH_FAIL	0	0	
+AminetAwnpFR.lha	-	NO_BSDSOCKET_BINARY	0	0	
+aamp.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIrc2Html.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GGSearch.lha	-	NO_BSDSOCKET_BINARY	0	0	
+RexxFake_src.lha	-	NO_BSDSOCKET_BINARY	0	0	
+remotecli.lha	-	NO_BSDSOCKET_BINARY	0	0	
+BounceIt.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Magic_noloc.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NoAdvert.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ytnef.lha	-	NO_BSDSOCKET_BINARY	0	0	
+S5-Trans.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Spitfire2.lha	Spitfire² Install/libs/vapor_toolkit.library	NO_SOCKETBASE_STORE opens=14	distinct=0	calls=0	
+alienib.lha	-	NO_BSDSOCKET_BINARY	0	0	
+gwformpost.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmScript.lha	-	NO_BSDSOCKET_BINARY	0	0	
+HVHiP.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Tellme_src.lha	-	NO_BSDSOCKET_BINARY	0	0	
+irssi.lha	-	NO_BSDSOCKET_BINARY	0	0	
+CCN_Chartreuse.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MailDemon4_11.lha	-	NO_BSDSOCKET_BINARY	0	0	
+QWKGate1.lha	-	NO_BSDSOCKET_BINARY	0	0	
+yam2p6fr.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AntiXP_V125R1.lha	-	NO_BSDSOCKET_BINARY	0	0	
+SCSI-Netz.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AminetReo.lha	-	NO_BSDSOCKET_BINARY	0	0	
+amiga_ib.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmSeen.lha	-	NO_BSDSOCKET_BINARY	0	0	
+HenryARexx.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Tellme-AmIPlug.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ircIIkeyw.lha	-	NO_BSDSOCKET_BINARY	0	0	
+CCN_Office.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MailImport.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PrintMail1.3.lha	-	NO_BSDSOCKET_BINARY	0	0	
+somtags.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmigaTText-m68k-amigaos.lha	OS3/AmigaTText/AmigaTText_OS3	OK	distinct=25	calls=68	socket,bind,listen,accept,connect,sendto,send,recvfrom,recv,shutdown,setsockopt,getsockname,getpeername,IoctlSocket,CloseSocket,WaitSelect,Errno,Inet_NtoA,gethostbyname,gethostbyaddr,gethostname,SocketBaseTagList,ReleaseInterfaceList,ObtainInterfaceList,QueryInterfaceTagList
+SMS2D2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiTransWorld.lha	-	NO_BSDSOCKET_BINARY	0	0	
+amiget.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmSound.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IRCNews.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Text.lha	-	NO_BSDSOCKET_BINARY	0	0	
+uptimeamirx.lha	-	NO_BSDSOCKET_BINARY	0	0	
+CLMUIRequest2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MailSender_MOS.lha	-	NO_BSDSOCKET_BINARY	0	0	
+SpYam-o-Matic.lha	-	NO_BSDSOCKET_BINARY	0	0	
+yapy.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AminetRate.lha	-	NO_BSDSOCKET_BINARY	0	0	
+SMSSuiteSP1.lha	SMSSend	BASE_BUT_NO_CALLS	distinct=0	calls=0	
+Aminet.awnp.lha	Aminet.awnp/libs/rxsocket.library	DUAL_STACK_AS225	distinct=32	calls=73	socket,bind,listen,accept,connect,sendto,send,recvfrom,recv,shutdown,getsockopt,getsockname,getpeername,IoctlSocket,CloseSocket,ObtainSocket,ReleaseSocket,ReleaseCopyOfSocket,Errno,Inet_NtoA,inet_addr,Inet_LnaOf,Inet_NetOf,Inet_MakeAddr,gethostbyname,gethostbyaddr,getservbyname,getprotobyname,vsyslog,Dup2Socket,gethostname,SocketBaseTagList
+Aminet.awnp.lha	Aminet.awnp/libs/rxlibnet.library	NO_SOCKETBASE_STORE opens=16	distinct=0	calls=0	
+aminet+v2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Emerod10_demo5.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IRCSounds.lha	-	NO_BSDSOCKET_BINARY	0	0	
+TrackChanged.lha	-	NO_BSDSOCKET_BINARY	0	0	
+irssi2mirc_1.0_mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ML-Support.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MailWatch.lha	-	NO_BSDSOCKET_BINARY	0	0	
+amiydec.lha	-	NO_BSDSOCKET_BINARY	0	0	
+sylpheed-src.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ArtSer37_6.lha	-	NO_BSDSOCKET_BINARY	0	0	
+STFax3032bUpd.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmsterSP.lha	-	NO_BSDSOCKET_BINARY	0	0	
+amrss68K.lha	-	FETCH_FAIL	0	0	
+FunFont2.3.lha	-	NO_BSDSOCKET_BINARY	0	0	
+KuangEleven25.lha	KuangEleven3Gm25/FTPGet1_2/FTPGet	NO_SOCKETBASE_STORE opens=2	distinct=0	calls=0	
+KuangEleven25.lha	KuangEleven3Gm25/libs/rexxkuang11.library	NO_SOCKETBASE_STORE opens=13	distinct=0	calls=0	
+Wallchop_src.lha	-	NO_BSDSOCKET_BINARY	0	0	
+grapevine.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MagicReader.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MakeMail05b.lha	-	NO_BSDSOCKET_BINARY	0	0	
+attall.lha	-	NO_BSDSOCKET_BINARY	0	0	
+smailsr2.lha	-	FETCH_FAIL	0	0	
+AreaCode.lha	-	NO_BSDSOCKET_BINARY	0	0	
+STFax3034Upd.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Aminet_HTML.lha	-	FETCH_FAIL	0	0	
+amrss_src.lha	-	NO_BSDSOCKET_BINARY	0	0	

@@ -20,13 +20,30 @@ loads carry the SAME raw value, so they compare without resolving anything.
 jmp d16(a6) (4EEE) counts too -- tail calls.  The old harness was blind to
 them and missed 6 in AmiFTP alone.
 """
+import os
 import struct, sys, re
 import hunk
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import survey_io
+
+# The vector map: the environment, then a copy sitting beside this script,
+# then the repo's.  Not one developer's home directory, which is what it was.
+# The middle case is the working directory the ticks run out of, where the
+# tools and the data live side by side; the repo-relative path would resolve
+# outside the checkout from there and silently find nothing.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+LVOMAP = os.environ.get('ANXD_SURVEY_LVOMAP') or next(
+    (p for p in (os.path.join(_HERE, 'lvomap.tsv'),
+                 os.path.join(_HERE, '..', '..', 'docs', 'aminet-survey', 'lvomap.tsv'))
+     if os.path.exists(p)), '')
+if not LVOMAP:
+    sys.exit('scan.py: no lvomap.tsv found; set ANXD_SURVEY_LVOMAP')
+
 OPENLIB = 0xFDD8            # -552 as a 16-bit displacement
 LVO = {}
-for line in open('/home/turo/anxd-aminet/lvomap.tsv'):
-    p = line.rstrip('\n').split('\t')
+for line in survey_io.lines(LVOMAP):
+    p = line.split('\t')
     if p[0] != 'offset':
         LVO[int(p[1])] = p[3]
 
