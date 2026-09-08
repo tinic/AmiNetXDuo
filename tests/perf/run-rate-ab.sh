@@ -179,6 +179,22 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
     git reset --hard -q HEAD
     git clean -qfd src bench port tools tests 2>/dev/null
     git checkout -q --detach "$2" || { echo "rate_ab=fail reason=checkout arm=$3"; return 1; }
+
+    # THE SUBMODULES MOVE WITH THE REF, OR THE ARMS SHARE ONE COPY OF NETX.
+    # A detached checkout updates the gitlink and leaves the submodule working
+    # tree wherever the PREVIOUS ref left it, so without this the BASE arm
+    # compiles whatever third_party/netxduo the HEAD arm last checked out --
+    # both arms built from one NetX while the log claims two refs.
+    #
+    # It happens to be harmless across the refs measured up to 2026-09-08,
+    # because the netxduo pin is 11530eb3 at every one of them and threadx is
+    # 8ddf646e at both ends.  That is luck, not a property: the pin moves
+    # whenever the vendored stack is bumped (d1253f11 bumped it for the
+    # window-update knob), and the first A/B that straddles such a bump would
+    # read as a change in OUR code.
+    git submodule update --init --recursive --quiet ||
+        { echo "rate_ab=fail reason=submodule_update arm=$3"; return 1; }
+
     rm -rf build/ab
     cmake -S . -B build/ab \
           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
@@ -197,9 +213,13 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
     git checkout -q "$HEAD_REF" -- $HARNESS_FILES ||
         { echo "rate_ab=fail reason=harness_overlay arm=$3"; return 1; }
 
+    # The submodule OIDs are printed with the images for the same reason the
+    # md5s are: the log has to say what was built, not what was meant.
     echo "arm=$3 tree=$(git log --oneline -1 | cut -c1-9)" \
          "lib=$(md5sum build/ab/src/bsdsocket/bsdsocket.library | cut -c1-12)" \
          "dev=$(md5sum build/ab/src/netdev/anxnet.device | cut -c1-12)" \
+         "netx=$(git rev-parse --short HEAD:third_party/netxduo 2>/dev/null)" \
+         "tx=$(git rev-parse --short HEAD:third_party/threadx 2>/dev/null)" \
          "harness=$(md5sum $HARNESS_FILES | cut -c1-8)"
 }
 
