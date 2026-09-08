@@ -1013,6 +1013,26 @@ stage_cross() {
         if cmake --build "$BUILD/$name" --parallel "$JOBS" > "$BUILD/$name-build.log" 2>&1; then
             note "built clean"
 
+            # The receive checksum verify has not grown.  Removing it whole
+            # measures +3.40%, so an instruction there is ~0.029% of receive
+            # and a twenty-instruction regression is ~0.6% -- BELOW what the
+            # rig resolves at twenty boots an arm.  Counting is the only
+            # instrument with the resolution for it.  One arm answers, so the
+            # number is comparable run to run.
+            if [ "$name" = default ]; then
+                if tools/check-verify-budget.sh "$BUILD/$name" \
+                        > "$BUILD/$name-verify-budget.log" 2>&1; then
+                    note "$(sed -n 's/^verify_budget=PASS /verify budget: /p' \
+                          "$BUILD/$name-verify-budget.log" | head -1)"
+                elif grep -q 'verify_budget=skipped' \
+                        "$BUILD/$name-verify-budget.log"; then
+                    : # no compile_commands.json in this arm
+                else
+                    cat "$BUILD/$name-verify-budget.log"
+                    fail "n68k_rx_verify_sum grew past its instruction ceiling"
+                fi
+            fi
+
             # And that no runtime helper became a call to itself.  It links,
             # exports the right symbol, and eats the stack; see the script.
             # And that the per-frame receive helpers are still inlined.  Only
