@@ -13,6 +13,7 @@ cd "$ROOT"
 
 BUILD="${AMINETXDUO_CI_BUILD:-build/ci}"
 JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo 4 )}"
+. tools/cmake-toolchain-cache.sh
 
 # The configurations that must all build.  AMINETXDUO_IPV6, AMINETXDUO_TLS and
 # AMINETXDUO_CRYPTO68K_ASM each change the tree, and each has broken while the
@@ -383,6 +384,21 @@ stage_host() {
     else
         cat "$BUILD/tcresolve.log"
         fail "the toolchain resolvers accept a cache that is not the pin"
+        return 1
+    fi
+
+    # CMake cannot switch a compiler in place, but every CI-owned build tree
+    # follows the pinned compiler.  The refresh path is normally exercised
+    # only on the first run after a pin update, so prove both its destructive
+    # and no-op decisions explicitly on disposable fixtures every time.
+    if tools/cmake-toolchain-cache-selftest.sh > \
+            "$BUILD/cmake-cache-selftest.log" 2>&1; then
+        note "CMake cache selftest: $(sed -n \
+              's/^cmake_cache_selftest=PASS //p' \
+              "$BUILD/cmake-cache-selftest.log")"
+    else
+        cat "$BUILD/cmake-cache-selftest.log"
+        fail "the pinned-compiler CMake cache refresh is unsafe"
         return 1
     fi
 
@@ -943,6 +959,10 @@ stage_cross() {
 
         hr "cross build: $name ${opts:-(default)}"
 
+        refresh_cmake_compiler_cache \
+            "$BUILD/$name" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" \
+            "cross/$name"
+
         # shellcheck disable=SC2086
         cmake -S . -B "$BUILD/$name" \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
@@ -1325,6 +1345,9 @@ stage_ltoprobe() {
         return "$NOTHING"
     fi
     export AMINETXDUO_KICKSTART
+
+    refresh_cmake_compiler_cache \
+        "$dir" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" ltoprobe
 
     cmake -S . -B "$dir" \
         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
@@ -2569,7 +2592,10 @@ stage_lossgate() {
     # tier that already boots an emulator nine times, and it is the difference
     # between a verdict and a guaranteed red.
     local lgbuild="$BUILD/lossgate"
-    if [ ! -x "$lgbuild/src/bsdsocket/bsdsocket.library" ]; then
+    refresh_cmake_compiler_cache \
+        "$lgbuild" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" lossgate
+    if [ ! -x "$lgbuild/src/bsdsocket/bsdsocket.library" ] ||
+       [ ! -f "$lgbuild/CMakeCache.txt" ]; then
         note "lossgate: building with AMINETXDUO_NX_COUNTERS=ON, which is what"\
              "its baseline was recorded on"
         cmake -S "$ROOT" -B "$lgbuild" \

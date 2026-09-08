@@ -39,6 +39,7 @@ done
 if [ -z "${AMIGA_TOOLCHAIN_ROOT:-}" ]; then
     . tools/amiga-toolchain.sh
 fi
+. tools/cmake-toolchain-cache.sh
 
 # ------------------------------------------------------- the compile lines ---
 #
@@ -51,6 +52,9 @@ fi
 # even reached.  A tool that cannot run in a fresh clone is a tool that only
 # runs where somebody has already built.
 mkdir -p "$(dirname "$BUILD")"
+
+refresh_cmake_compiler_cache \
+    "$BUILD" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" analyze
 
 cmake -S . -B "$BUILD" \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \

@@ -37,9 +37,11 @@ done
 
 command -v cppcheck > /dev/null || { echo "cppcheck not installed" >&2; exit 2; }
 [ -n "${AMIGA_TOOLCHAIN_ROOT:-}" ] || . tools/amiga-toolchain.sh
+. tools/cmake-toolchain-cache.sh
 
 CC="$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc"
-[ -f "$BUILD/compile_commands.json" ] || {
+refresh_cmake_compiler_cache "$BUILD" "$CC" cppcheck
+[ -f "$BUILD/CMakeCache.txt" ] && [ -f "$BUILD/compile_commands.json" ] || {
     cmake -S . -B "$BUILD" \
         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > /dev/null; }

@@ -71,7 +71,16 @@ if [ "$CHECK" = 1 ]; then
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     emit "$tmp"
-    if diff -ru "$DEST" "$tmp"; then
+    # This script owns only the five generated header families.  The staged
+    # Developer drawer also has include/aminetxduo/, and on a case-insensitive
+    # filesystem an unpacked `Developer/` aliases this source `developer/`
+    # directory.  Comparing their common parent made unrelated public headers
+    # (and even Finder's .DS_Store) report that the SFD output was stale.
+    if diff -ru "$DEST/clib"    "$tmp/clib" &&
+       diff -ru "$DEST/inline"  "$tmp/inline" &&
+       diff -ru "$DEST/proto"   "$tmp/proto" &&
+       diff -ru "$DEST/pragmas" "$tmp/pragmas" &&
+       diff -ru "$DEST/lvo"     "$tmp/lvo"; then
         echo "gen-developer: generated headers match $SFD"
     else
         echo "gen-developer: developer/include is stale, run tools/gen-developer.sh" >&2
