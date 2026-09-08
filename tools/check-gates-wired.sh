@@ -79,17 +79,17 @@ want generated      .githooks/pre-commit             'check-generated\.sh'
 # that goes quiet without anyone noticing:
 #   hot-calls        a per-frame helper stopped being inlined
 #   rearm-invariants the device started writing a field the re-arm hoisted out
-#   verify-budget    n68k_rx_verify_sum grew, at ~0.029% of receive an
-#                    instruction -- under what the rig can measure
+#   hotpath-budget   a per-frame receive function grew, at ~0.029% of
+#                    receive an instruction -- under what the rig can measure
 want hot-calls      tools/ci.sh                      'check-hot-calls\.sh'
 want rearm-invar    tools/ci.sh                      'check-rearm-invariants\.sh'
-want verify-budget  tools/ci.sh                      'check-verify-budget\.sh'
+want hotpath-budget tools/ci.sh                      'check-hotpath-budget\.sh'
 
 # ------------------------------------------ and the gate scripts still run ---
 for g in check-changelog-prose check-image-size check-ram-size check-rate \
          check-stage-coverage check-rx-posted check-option-stubs \
          check-lvo-matrix check-generated \
-         check-hot-calls check-rearm-invariants check-verify-budget \
+         check-hot-calls check-rearm-invariants check-hotpath-budget \
          check-gates-wired; do
     if [ ! -x "tools/$g.sh" ]; then
         echo "gates_wired=NOT_EXECUTABLE gate=$g"
