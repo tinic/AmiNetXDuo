@@ -39,9 +39,31 @@ ARM="${AMINETXDUO_RAM_ARM:-$(basename "$BUILD")}"
 # 1 KB.  full is 40,292 and minimal is 14,016; both come from the member table
 # in the campaign ledger, and every reduction behind them is measured on the
 # rig rather than guessed.
+# RAISED 2026-09-08 BY 2 KiB EACH, AND WHAT BOUGHT THEM.
+#
+# 75a00c2e restored NX_DHCP_THREAD_STACK_SIZE from 2048 to NetX Duo's 4096
+# default.  NX_DHCP carries its thread stack as a member
+# (nxd_dhcp_client.h:469) and AmiNetStack embeds NX_DHCP
+# (netstack_internal.h:208), so the restore lands 2048 bytes in the one
+# resident allocation: default 40,292 -> 42,340, minimal 14,016 -> 16,064.
+#
+# What it buys is DHCP that works on a driver we did not measure.  DHCP sends
+# through the SANA-II bridge synchronously, so a third-party device's BeginIO
+# transmit runs on that stack; the 2048 was sized by an 860-byte high-water
+# mark taken on the A2065 alone.  genet.device has a deeper inline transmit
+# path, overflowed it, and the A1200/PiStorm32 setup fell back to AutoIP.
+# There is no MMU, so the overrun that produced it was silent corruption.
+#
+# THE BYTES CAN BE TAKEN BACK OUT, and that is the better fix when there is
+# no release in flight: ns_Dhcp is embedded rather than allocated, so moving
+# it behind a pointer the way netstack_dhcpv6.c:445 already allocates its
+# stacks would return the whole NX_DHCP -- far more than these 2 KiB -- and
+# would cost a static-address machine nothing at all.  Not done here because
+# changing that object's lifetime the day a release is cut is how the last
+# one shipped three defects.
 BUDGETS=(
-    "default:41000"
-    "minimal:15000"
+    "default:43000"
+    "minimal:17000"
 )
 
 budget=""
