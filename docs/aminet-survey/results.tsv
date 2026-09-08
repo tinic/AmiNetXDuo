@@ -1977,3 +1977,298 @@ dshterm1_0.lha	-	NO_BSDSOCKET_BINARY	0	0
 idial11.lha	-	NO_BSDSOCKET_BINARY	0	0	
 webplug_ger.lha	-	NO_BSDSOCKET_BINARY	0	0	
 surfboard-mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GetMODinfo.lha	-	NO_BSDSOCKET_BINARY	0	0	
+dnotify.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MailBX.lha	-	NO_BSDSOCKET_BINARY	0	0	
+maildeliver.lha	-	NO_BSDSOCKET_BINARY	0	0	
+XPRdmodem121.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiComSysMI.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ICQPager0.1.lha	Libs/socket.library	DUAL_STACK_AS225	distinct=36	calls=62	socket,bind,listen,accept,connect,sendto,send,recvfrom,recv,shutdown,setsockopt,getsockopt,getsockname,getpeername,IoctlSocket,CloseSocket,WaitSelect,SetSocketSignals,ObtainSocket,ReleaseSocket,SetErrnoPtr,Inet_NtoA,inet_addr,Inet_LnaOf,Inet_NetOf,Inet_MakeAddr,inet_network,gethostbyname,gethostbyaddr,getnetbyname,getnetbyaddr,getservbyname,getservbyport,getprotobyname,getprotobynumber,vsyslog
+NetHandler.lha	-	NO_BSDSOCKET_BINARY	0	0	
+internetsignup.lha	-	NO_BSDSOCKET_BINARY	0	0	
+magnet2torrent.lha	-	NO_BSDSOCKET_BINARY	0	0	
+tnddev1p0.lha	telnetd.AmiTCP.device	NO_SOCKETBASE_STORE opens=7	distinct=0	calls=0	
+surfboard_1.1.10.lha	-	NO_BSDSOCKET_BINARY	0	0	
+CServer.lha	-	NO_BSDSOCKET_BINARY	0	0	
+egg2mirc_0.06_mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+FaxByEmail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+mailscan.lha	-	NO_BSDSOCKET_BINARY	0	0	
+XprTransmit.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IU-14-as225.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PepperWatch.lha	-	NO_BSDSOCKET_BINARY	0	0	
+goppy.lha	-	NO_BSDSOCKET_BINARY	0	0	
+micq_0.5.2_mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ncftp-3.3.0.lha	ncftp-3.3.0-amigaos-m68k/ncftpput	OK	distinct=25	calls=32	socket,bind,listen,accept,connect,send,recv,shutdown,setsockopt,getsockopt,getsockname,IoctlSocket,CloseSocket,WaitSelect,ObtainSocket,Inet_NtoA,inet_addr,gethostbyname,gethostbyaddr,getservbyname,getservbyport,Dup2Socket,gethostname,SocketBaseTagList,ProcessIsServer
+ncftp-3.3.0.lha	ncftp-3.3.0-amigaos-m68k/ncftpls	OK	distinct=25	calls=32	socket,bind,listen,accept,connect,send,recv,shutdown,setsockopt,getsockopt,getsockname,IoctlSocket,CloseSocket,WaitSelect,ObtainSocket,Inet_NtoA,inet_addr,gethostbyname,gethostbyaddr,getservbyname,getservbyport,Dup2Socket,gethostname,SocketBaseTagList,ProcessIsServer
+ncftp-3.3.0.lha	ncftp-3.3.0-amigaos-m68k/ncftpget	OK	distinct=25	calls=32	socket,bind,listen,accept,connect,send,recv,shutdown,setsockopt,getsockopt,getsockname,IoctlSocket,CloseSocket,WaitSelect,ObtainSocket,Inet_NtoA,inet_addr,gethostbyname,gethostbyaddr,getservbyname,getservbyport,Dup2Socket,gethostname,SocketBaseTagList,ProcessIsServer
+ncftp-3.3.0.lha	ncftp-3.3.0-amigaos-m68k/ncftpbookmarks	OK	distinct=25	calls=32	socket,bind,listen,accept,connect,send,recv,shutdown,setsockopt,getsockopt,getsockname,IoctlSocket,CloseSocket,WaitSelect,ObtainSocket,Inet_NtoA,inet_addr,gethostbyname,gethostbyaddr,getservbyname,getservbyport,Dup2Socket,gethostname,SocketBaseTagList,ProcessIsServer
+ncftp-3.3.0.lha	ncftp-3.3.0-amigaos-m68k/ncftpbatch	OK	distinct=25	calls=32	socket,bind,listen,accept,connect,send,recv,shutdown,setsockopt,getsockopt,getsockname,IoctlSocket,CloseSocket,WaitSelect,ObtainSocket,Inet_NtoA,inet_addr,gethostbyname,gethostbyaddr,getservbyname,getservbyport,Dup2Socket,gethostname,SocketBaseTagList,ProcessIsServer
+ncftp-3.3.0.lha	ncftp-3.3.0-amigaos-m68k/ncftp	OK	distinct=25	calls=32	socket,bind,listen,accept,connect,send,recv,shutdown,setsockopt,getsockopt,getsockname,IoctlSocket,CloseSocket,WaitSelect,ObtainSocket,Inet_NtoA,inet_addr,gethostbyname,gethostbyaddr,getservbyname,getservbyport,Dup2Socket,gethostname,SocketBaseTagList,ProcessIsServer
+sanautil.lha	-	NO_BSDSOCKET_BINARY	0	0	
+tablePlugv12.lha	-	NO_BSDSOCKET_BINARY	0	0	
+CTCPMaster.lha	-	NO_BSDSOCKET_BINARY	0	0	
+eggdrop1.6.21-bin.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Filter.lha	-	NO_BSDSOCKET_BINARY	0	0	
+mailstat.lha	mailstat	NO_SOCKETBASE_STORE opens=4	distinct=0	calls=0	
+EZPager.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Inet_SDK_SASC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+localdev.lha	-	NO_BSDSOCKET_BINARY	0	0	
+mshell_02.lha	-	NO_BSDSOCKET_BINARY	0	0	
+netcat-1.10.lha	-	NO_BSDSOCKET_BINARY	0	0	
+nntpget.lha	-	NO_BSDSOCKET_BINARY	0	0	
+spooler101.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IB_WebImages.lha	-	NO_BSDSOCKET_BINARY	0	0	
+CVert.lha	-	NO_BSDSOCKET_BINARY	0	0	
+epic4.lha	-	NO_BSDSOCKET_BINARY	0	0	
+FoXGate.lha	-	NO_BSDSOCKET_BINARY	0	0	
+md2v.lha	-	NO_BSDSOCKET_BINARY	0	0	
+EZPagerMI.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MiamiDxCAT.lha	-	NO_BSDSOCKET_BINARY	0	0	
+SetVoiceMail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+netmon.lha	NetMon/NetMon.68k	OK	distinct=5	calls=7	Inet_NtoA,SocketBaseTagList,ReleaseInterfaceList,ObtainInterfaceList,QueryInterfaceTagList
+ntimed.aros-i386.lha	-	NO_BSDSOCKET_BINARY	0	0	
+pong11.lha	-	NO_BSDSOCKET_BINARY	0	0	
+tld3310.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IB_pic.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Charset-AmIPlug.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ftpget.lha	-	NO_BSDSOCKET_BINARY	0	0	
+FolderSigV1.2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+mdmaster.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PolyGlot-de.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ListServBeta.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MiamiSPA.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Talk.lha	-	NO_BSDSOCKET_BINARY	0	0	
+parpc04.lha	-	NO_BSDSOCKET_BINARY	0	0	
+privoxy-3.0.8-morphos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+rfc1920.lha	-	NO_BSDSOCKET_BINARY	0	0	
+VoyagerView.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Charset2-AmIPlug.lha	-	NO_BSDSOCKET_BINARY	0	0	
+gruftistats_mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GateX1_0.lha	-	NO_BSDSOCKET_BINARY	0	0	
+metamail-2.3a.lha	-	NO_BSDSOCKET_BINARY	0	0	
+EZPagerNG_CE.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MQTTExplorer.lha	-	NO_BSDSOCKET_BINARY	0	0	
+adt_AS225_1.1.lha	-	NO_BSDSOCKET_BINARY	0	0	
+amipx1_24.lha	-	NO_BSDSOCKET_BINARY	0	0	
+parnet.lha	-	NO_BSDSOCKET_BINARY	0	0	
+rhslip38.9_030.lha	-	NO_BSDSOCKET_BINARY	0	0	
+rup.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IB_transanims.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ICQUpd.lha	-	NO_BSDSOCKET_BINARY	0	0	
+irchat24.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MailList2_1b.lha	-	NO_BSDSOCKET_BINARY	0	0	
+mlrx.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Phone-Price.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiDrop_MUI.lha	AmiDrop_MUI/Setup/AmiDrop_MUI	OK	distinct=15	calls=23	socket,bind,listen,accept,connect,send,recv,setsockopt,getsockname,IoctlSocket,CloseSocket,WaitSelect,Inet_NtoA,gethostbyname,gethostname
+IPInf.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NSPLib1_30.lha	-	NO_BSDSOCKET_BINARY	0	0	
+amitcp2.x_gcc.lha	-	NO_BSDSOCKET_BINARY	0	0	
+baudcheckb30.lha	-	NO_BSDSOCKET_BINARY	0	0	
+epistula_install.lha	-	FETCH_FAIL	0	0	
+Voyager1.0_Por.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ChatBox1_164.lha	ChatBox	DUAL_STACK_AS225	distinct=13	calls=37	socket,connect,send,recv,IoctlSocket,CloseSocket,WaitSelect,Errno,Inet_NtoA,Inet_LnaOf,Inet_NetOf,Inet_MakeAddr,gethostbyname
+irssi-1.1.1.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GetAddress.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ms-qwik_46.lha	-	NO_BSDSOCKET_BINARY	0	0	
+TC_Miami.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Inform2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Netris1.13.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ReStarterV2_1.lha	-	NO_BSDSOCKET_BINARY	0	0	
+cslip.lha	-	NO_BSDSOCKET_BINARY	0	0	
+dl.lha	dl	OK	distinct=10	calls=15	send,recv,CloseSocket,WaitSelect,Inet_NtoA,Inet_LnaOf,Inet_NetOf,Inet_MakeAddr,vsyslog,SocketBaseTagList
+netfs_dissector.lha	-	NO_BSDSOCKET_BINARY	0	0	
+httpget.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Codesets-AmIRC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+irssi2mirc.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GetMailWD.lha	-	NO_BSDSOCKET_BINARY	0	0	
+neatmail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+EZPgerNG_CE.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiGemini.lha	AmiGemini/AmiGemini	OK	distinct=6	calls=10	socket,connect,send,recv,CloseSocket,gethostbyname
+Interkom.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Roadie.lha	Roadie	BASE_BUT_NO_CALLS	distinct=0	calls=0	
+Wifi_list_1.1.lha	-	NO_BSDSOCKET_BINARY	0	0	
+magPLIP38.1.lha	-	NO_BSDSOCKET_BINARY	0	0	
+spar372.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IBcc.lha	-	NO_BSDSOCKET_BINARY	0	0	
+DNetIRC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+jali.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GhostMail07b.lha	-	NO_BSDSOCKET_BINARY	0	0	
+octetpurge.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Easylink1_12.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ACS_HLPlugin.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiPPP122_Ital.lha	-	NO_BSDSOCKET_BINARY	0	0	
+WriteNews2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+amisynergyc.lha	-	NO_BSDSOCKET_BINARY	0	0	
+cftp-mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+raIP.lha	raIP/raIP	NO_SOCKETBASE_STORE opens=12	distinct=0	calls=0	
+IBfindURL1.5.lha	-	NO_BSDSOCKET_BINARY	0	0	
+DalHelper.lha	-	NO_BSDSOCKET_BINARY	0	0	
+log2mirc_0.01_mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+HTMLread.lha	-	FETCH_FAIL	0	0	
+parsegrabs12.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PtpDigCam-V2.2-AOS.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ALynx.lha	ALynx/ALynx	OK	distinct=18	calls=62	socket,bind,listen,accept,connect,send,recv,getsockname,IoctlSocket,CloseSocket,WaitSelect,Inet_NtoA,inet_addr,Inet_LnaOf,Inet_NetOf,Inet_MakeAddr,gethostbyname,gethostname
+AMarquee.lha	AMarquee/AMarqueed	NO_SOCKETBASE_STORE opens=3	distinct=0	calls=0	
+AMarquee.lha	AMarquee/amarquee.library	NO_SOCKETBASE_STORE opens=2	distinct=0	calls=0	
+AmiSpeedTest.lha	AmiSpeedTest/AmiSpeedTest	OK	distinct=16	calls=39	socket,bind,listen,accept,connect,send,recv,setsockopt,IoctlSocket,CloseSocket,WaitSelect,Errno,Inet_NtoA,gethostbyname,gethostbyaddr,gethostname
+conf_svc112.lha	-	NO_BSDSOCKET_BINARY	0	0	
+hnet.lha	-	NO_BSDSOCKET_BINARY	0	0	
+midge.lha	midge/mqtt_sub-static	NO_SOCKETBASE_STORE opens=1	distinct=0	calls=0	
+midge.lha	midge/mqtt_pub-static	NO_SOCKETBASE_STORE opens=1	distinct=0	calls=0	
+midge.lha	midge/libs/mqtt.library	NO_SOCKETBASE_STORE opens=4	distinct=0	calls=0	
+Waker_Turkish.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Ilona.lha	Ilona/Ilona/Ilona	OK	distinct=8	calls=19	socket,connect,send,recv,CloseSocket,WaitSelect,Errno,gethostbyname
+miau-0.5.3-morphos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Mailmarker.lha	-	NO_BSDSOCKET_BINARY	0	0	
+pine3.93_020.lha	-	NO_BSDSOCKET_BINARY	0	0	
+xprd.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiPhoneMiami.lha	-	NO_BSDSOCKET_BINARY	0	0	
+SpeakFreelyUPD.lha	-	NO_BSDSOCKET_BINARY	0	0	
+bebbossh.lha	bebbossh/bebbosshd	NO_SOCKETBASE_STORE opens=1	distinct=0	calls=0	
+bebbossh.lha	bebbossh/bebbossh	OK	distinct=13	calls=28	socket,bind,listen,accept,connect,send,recv,getsockname,IoctlSocket,CloseSocket,WaitSelect,Errno,gethostbyname
+bebbossh.lha	bebbossh/bebboscp	OK	distinct=10	calls=19	socket,bind,accept,connect,send,recv,CloseSocket,WaitSelect,Errno,gethostbyname
+dnet.device.lha	-	NO_BSDSOCKET_BINARY	0	0	
+netmenu11.lha	-	NO_BSDSOCKET_BINARY	0	0	
+rdesktopgui.lha	-	NO_BSDSOCKET_BINARY	0	0	
+WWW-Counter.lha	-	NO_BSDSOCKET_BINARY	0	0	
+DalWatch.lha	-	NO_BSDSOCKET_BINARY	0	0	
+narrate.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Hurl.lha	Hurl!/Hurl	NO_SOCKETBASE_STORE opens=11	distinct=0	calls=0	
+pinebaseupd.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ElCheapoFax.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Amitory10.lha	Files_for_install/rxsocket/c/rxs	NO_SOCKETBASE_STORE opens=4	distinct=0	calls=0	
+Amitory10.lha	Files_for_install/rxsocket/libs/rxsocket.library	DUAL_STACK_AS225	distinct=34	calls=71	socket,bind,listen,accept,connect,sendto,send,recvfrom,recv,shutdown,getsockopt,getsockname,getpeername,IoctlSocket,CloseSocket,ObtainSocket,ReleaseSocket,ReleaseCopyOfSocket,Errno,Inet_NtoA,inet_addr,Inet_LnaOf,Inet_NetOf,Inet_MakeAddr,gethostbyname,gethostbyaddr,getservbyname,getservbyport,getprotobyname,vsyslog,Dup2Socket,gethostname,SocketBaseTagList,CreateAddrAllocMessageA
+ParBENCH31.lha	-	NO_BSDSOCKET_BINARY	0	0	
+jday_1.3.lha	-	NO_BSDSOCKET_BINARY	0	0	
+msInternetStatus.lha	msInternetStatus/msInternetStatus.exe	OK	distinct=2	calls=5	CloseSocket,inet_addr
+paradise.lha	-	NO_BSDSOCKET_BINARY	0	0	
+rfc-index.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IBrowse-Hotl.lha	-	NO_BSDSOCKET_BINARY	0	0	
+DccSend.lha	-	NO_BSDSOCKET_BINARY	0	0	
+notifyplus.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Iris_GTB.lha	-	NO_BSDSOCKET_BINARY	0	0	
+pj_uudecode29.lha	-	NO_BSDSOCKET_BINARY	0	0	
+EnCodeB6410.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ACS-Notify.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AMarquee50.lha	AMarquee/AMarqueed	NO_SOCKETBASE_STORE opens=3	distinct=0	calls=0	
+AMarquee50.lha	AMarquee/amarquee.library	NO_SOCKETBASE_STORE opens=2	distinct=0	calls=0	
+IBrowse-Hotlis.lha	-	NO_BSDSOCKET_BINARY	0	0	
+DwarfxNWsrc.lha	-	NO_BSDSOCKET_BINARY	0	0	
+piglatin.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MIMEhandlerII.lha	-	NO_BSDSOCKET_BINARY	0	0	
+popcheck-mos.lha	-	NO_BSDSOCKET_BINARY	0	0	
+af_mksstv.lha	-	NO_BSDSOCKET_BINARY	0	0	
+ushare-1.1a-bin-m68k.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRC_FIN.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRC_amsg_ame.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmServ.lha	-	NO_BSDSOCKET_BINARY	0	0	
+wookieclassy.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiQWK29.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AminetRct.lha	-	NO_BSDSOCKET_BINARY	0	0	
+CCN_Vercors.lha	-	NO_BSDSOCKET_BINARY	0	0	
+smail2.lha	SMail/Bin/smail_amitcp	NO_SOCKETBASE_STORE opens=8	distinct=0	calls=0	
+smail2.lha	SMail/Bin/mail_amitcp	NO_SOCKETBASE_STORE opens=6	distinct=0	calls=0	
+PtpDigCam-V2.1a-MOS.lha	-	NO_BSDSOCKET_BINARY	0	0	
+agm33demo.lha	-	FETCH_FAIL	0	0	
+WebDesign.lha	-	NO_BSDSOCKET_BINARY	0	0	
+v2cm.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRC_DE.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Even_more_ksm.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Login.lha	-	FETCH_FAIL	0	0	
+popupmagic.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiMAIL.lha	AmiMAIL/Setup/AmiMAIL	OK	distinct=8	calls=10	socket,connect,send,recv,setsockopt,CloseSocket,WaitSelect,gethostbyname
+ML-Support_Src.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MiniMailCatCZ.lha	-	NO_BSDSOCKET_BINARY	0	0	
+spam-maker.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiIPWfra.lha	-	NO_BSDSOCKET_BINARY	0	0	
+EucaGer.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AWebResume.lha	AWebResume/AWebResume	NO_SOCKETBASE_STORE opens=9	distinct=0	calls=0	
+IBrowse1.0-1.1-68000.lha	IBrowse1.0-1.1-68000/mailto.library	DUAL_STACK_AS225	distinct=10	calls=18	socket,listen,accept,connect,sendto,send,recvfrom,recv,setsockopt,getsockopt
+IBrowse1.0-1.1-68000.lha	IBrowse1.0-1.1-68000/http.library	DUAL_STACK_AS225	distinct=11	calls=37	socket,bind,listen,accept,connect,sendto,send,recvfrom,recv,shutdown,inet_addr
+IBrowse1.0-1.1-68000.lha	IBrowse1.0-1.1-68000/gopher.library	DUAL_STACK_AS225	distinct=8	calls=13	socket,listen,accept,connect,sendto,send,recvfrom,recv
+IBrowse1.0-1.1-68000.lha	IBrowse1.0-1.1-68000/ftp.library	DUAL_STACK_AS225	distinct=12	calls=30	socket,listen,accept,connect,sendto,recvfrom,recv,setsockopt,getsockname,getpeername,IoctlSocket,CloseSocket
+AmIRC_GR.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRC_HU.lha	-	NO_BSDSOCKET_BINARY	0	0	
+FloodHunter.lha	dns	OK	distinct=11	calls=14	send,CloseSocket,WaitSelect,Inet_NtoA,inet_addr,Inet_LnaOf,Inet_NetOf,Inet_MakeAddr,gethostbyname,vsyslog,SocketBaseTagList
+translate1.3.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmigaSmail3-29.lha	SMail/Bin/smail_amitcp	OK	distinct=16	calls=27	socket,connect,send,recv,shutdown,getsockopt,IoctlSocket,CloseSocket,ObtainSocket,Errno,gethostbyname,getservbyname,vsyslog,Dup2Socket,gethostname,SocketBaseTagList
+AminetFTPMail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MUIEmail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+temptool.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmigaTText-ppc-warpup.lha	OS3WarpPPC/AmigaTText/AmigaTTextOS3_WARPPPC	OK	distinct=25	calls=44	socket,bind,listen,accept,connect,sendto,send,recvfrom,recv,shutdown,setsockopt,getsockname,getpeername,IoctlSocket,CloseSocket,WaitSelect,Errno,Inet_NtoA,gethostbyname,gethostbyaddr,gethostname,SocketBaseTagList,ReleaseInterfaceList,ObtainInterfaceList,QueryInterfaceTagList
+RD109.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmigaONE_anim.lha	-	NO_BSDSOCKET_BINARY	0	0	
+WebFX.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRC_FR.lha	-	NO_BSDSOCKET_BINARY	0	0	
+GS_Hint.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MORE_ksm.lha	-	NO_BSDSOCKET_BINARY	0	0	
+nickalert.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmigaElm-v10.lha	-	NO_BSDSOCKET_BINARY	0	0	
+MailArchiv38_3.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Monsoon090.lha	Monsoon	NO_SOCKETBASE_STORE opens=10	distinct=0	calls=0	
+yam2html.lha	-	FETCH_FAIL	0	0	
+AmiJames.lha	-	NO_BSDSOCKET_BINARY	0	0	
+FSwatcher.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AWebSave.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IBrowse1.02-1.1-68020.lha	IBrowse1.02-1.1-68020/mailto.library	DUAL_STACK_AS225	distinct=10	calls=18	socket,listen,accept,connect,sendto,send,recvfrom,recv,setsockopt,getsockopt
+IBrowse1.02-1.1-68020.lha	IBrowse1.02-1.1-68020/http.library	DUAL_STACK_AS225	distinct=11	calls=37	socket,bind,listen,accept,connect,sendto,send,recvfrom,recv,shutdown,inet_addr
+IBrowse1.02-1.1-68020.lha	IBrowse1.02-1.1-68020/gopher.library	DUAL_STACK_AS225	distinct=8	calls=13	socket,listen,accept,connect,sendto,send,recvfrom,recv
+IBrowse1.02-1.1-68020.lha	IBrowse1.02-1.1-68020/ftp.library	DUAL_STACK_AS225	distinct=12	calls=30	socket,listen,accept,connect,sendto,recvfrom,recv,setsockopt,getsockname,getpeername,IoctlSocket,CloseSocket
+AmIRC_Spanish.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRCii-2.8.2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NetStat2AmIRC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+topic.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AminetGetFTP.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AminetUpload.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Mutt_000_POP.lha	-	NO_BSDSOCKET_BINARY	0	0	
+yth_NewIcons.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AminetGuide.lha	-	NO_BSDSOCKET_BINARY	0	0	
+RS_C_+Miami.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Amiga_IBrowseA.lha	-	NO_BSDSOCKET_BINARY	0	0	
+WebTVGet.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRC_ITA.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NickServAuth.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Online-O-Meter.lha	-	NO_BSDSOCKET_BINARY	0	0	
+magical.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AminetFileReq.lha	AminetFileRequester/AminetFileRequester	OK	distinct=9	calls=12	socket,connect,send,recv,setsockopt,CloseSocket,Errno,gethostbyname,gethostname
+Mutt_040.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NI4YAM.lha	-	NO_BSDSOCKET_BINARY	0	0	
+thor_main_IT.lha	-	NO_BSDSOCKET_BINARY	0	0	
+Fileswapper.lha	-	NO_BSDSOCKET_BINARY	0	0	
+QuitTC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IBrowse1.x-1.22-68000.lha	IBrowse1.x-1.22-68000/mailto.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68000.lha	IBrowse1.x-1.22-68000/https_miami.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68000.lha	IBrowse1.x-1.22-68000/https.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68000.lha	IBrowse1.x-1.22-68000/http.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68000.lha	IBrowse1.x-1.22-68000/gopher.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68000.lha	IBrowse1.x-1.22-68000/ftp.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+WebDesignNoLib.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRCspanish.lha	-	NO_BSDSOCKET_BINARY	0	0	
+OpusDCC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+RexxFake.lha	-	NO_BSDSOCKET_BINARY	0	0	
+sillytext.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AutoMail-39.2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NesQWK1.06.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NewMail.lha	-	NO_BSDSOCKET_BINARY	0	0	
+yamhtml.lha	-	NO_BSDSOCKET_BINARY	0	0	
+RSM.lha	-	NO_BSDSOCKET_BINARY	0	0	
+RWK56v2.lha	-	NO_BSDSOCKET_BINARY	0	0	
+WebLordDemo.lha	-	NO_BSDSOCKET_BINARY	0	0	
+WebYAM.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmIRCmailcheck.lha	-	NO_BSDSOCKET_BINARY	0	0	
+NapSearch.lha	-	NO_BSDSOCKET_BINARY	0	0	
+SPA-AmIRC.lha	-	NO_BSDSOCKET_BINARY	0	0	
+myip.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AntiSpam2.lha	AntiSpam2/EmailCheck	NO_SOCKETBASE_STORE opens=8	distinct=0	calls=0	
+Mutt-0.89_src.lha	-	NO_BSDSOCKET_BINARY	0	0	
+PEA.lha	-	FETCH_FAIL	0	0	
+zmime1_5.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AmiMessenger.lha	-	NO_BSDSOCKET_BINARY	0	0	
+FoxConvert.lha	-	NO_BSDSOCKET_BINARY	0	0	
+AWebTAPack.lha	-	NO_BSDSOCKET_BINARY	0	0	
+IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/https_miami.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/https.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/http.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/gopher.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/ftp.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList
+IBrowse1.x-1.22-68020.lha	IBrowse1.x-1.22-68020/mailto.library	DUAL_STACK_AS225	distinct=13	calls=24	socket,listen,sendto,recvfrom,getsockname,IoctlSocket,getdtablesize,ReleaseSocket,Inet_NtoA,inet_addr,gethostbyname,gethostname,SocketBaseTagList

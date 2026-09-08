@@ -13,4 +13,4 @@ rank	new	cum	flags	lvos	archive	binary
 12	1	54	--D	10	amimatters.lha	AmiMatters/Files/68060/AmiMatters
 13	1	55	---	1	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
 
-# 430 attributed binaries cover 55 of 143 vectors (38%); 13 of them are non-redundant.
+# 451 attributed binaries cover 55 of 143 vectors (38%); 13 of them are non-redundant.

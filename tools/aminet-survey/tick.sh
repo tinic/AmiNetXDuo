@@ -74,3 +74,10 @@ for line in open('/home/turo/anxd-aminet/lvomap.tsv'):
         print(f"{p[1]}\t{p[3]}\t{cnt.get(p[3], 0)}")
 PY
 echo "lvo-usage: $(awk -F'\t' 'NR>1 && $3>0' /home/turo/anxd-aminet/lvo-usage.tsv | wc -l) of 143 vectors have a caller"
+
+# Vectors with fewer than 10 callers, WITH the callers named -- a count alone
+# cannot decide those, and the distinct-program column separates "three
+# daemons in three distributions" from "nine unrelated programs".
+python3 /home/turo/anxd-aminet/rare.py 10 \
+    > /home/turo/anxd-aminet/lvo-rare.tsv 2>/dev/null
+echo "lvo-rare: $(awk -F'\t' 'NR>1 && !s[$2]++' /home/turo/anxd-aminet/lvo-rare.tsv | wc -l) vectors under 10 callers"

@@ -11,6 +11,7 @@ micro profile may stub.
 | `candidates.tsv` | applications ranked by marginal API coverage, for the test harness |
 | `lvomap.tsv` | offset -> vector -> implementing symbol, generated from `src/bsdsocket/bsdsocket_vectors.c` |
 | `lvo-collisions.tsv` | every vector against the 76 NDK `_lib.i` tables |
+| `lvo-rare.tsv` | every vector with FEWER THAN 10 callers, with the callers named |
 | `results.tsv` | the ledger: one row per scanned binary |
 
 ## Method
@@ -70,3 +71,37 @@ Reproduce:
 
 `tools/ci.sh` does NOT honour `AMINETXDUO_EXTRA_CMAKE`; passing it yields a
 byte-identical LTO library and a validation that silently did nothing.
+
+## Known accepted losses: what stops working if a vector is cut
+
+A vector with a handful of callers may be droppable -- but the cost has to be
+NAMED, not left as a number.  `lvo-rare.tsv` carries everything under 10
+callers with the callers attached; this is the same data as a support
+statement.
+
+| vector | offset | programs that stop working |
+|---|---|---|
+| `AbortInterfaceConfig` | -492 | `miamisecureshell.library` |
+| `bpf_open` | -366 | `miamiipnat.library` |
+| `getnameinfo` | -822 | `binkd` |
+| `GetSocketEvents` | -300 | `GiFTMui`, `lanclip` |
+| `recvmsg` | -276 | `MiamiDx`, `MiamiIPNatD` |
+| `ObtainInterfaceList` | -462 | `AmigaTTextOS3_WARPPPC`, `NetMon.68k`, `RNOXfer`, `SonosController` |
+| `QueryInterfaceTagList` | -468 | `AmigaTTextOS3_WARPPPC`, `NetMon.68k`, `RNOXfer`, `SonosController` |
+| `ReleaseInterfaceList` | -456 | `AmigaTTextOS3_WARPPPC`, `NetMon.68k`, `RNOXfer`, `SonosController` |
+| `getprotobynumber` | -252 | `MiamiHost`, `MiamiIPFW`, `MiamiNSLookup`, `MiamiNetStat` |
+| `bpf_write` | -384 | `AmiHomeassist`, `AmiHomeassistCLI`, `AmiMatters` |
+| `bpf_close` | -372 | `AmiHomeassist`, `AmiHomeassistCLI`, `AmiMatters`, `miamiipnat.library` |
+| `getnetbyaddr` | -228 | `MiamiNetStat`, `MiamiRoute`, `NNTPd`, `route` |
+| `sendmsg` | -270 | `MiamiDx`, `MiamiIPNatD`, `MiamiNSLookup`, `ch_nfsc`, `u9fs` |
+| `ReleaseCopyOfSocket` | -156 | `inetd`, `letnet`, `rsh` |
+
+Read `callers` next to `programs` in `lvo-rare.tsv`: a low count is often ONE
+program shipped in several distributions, which the raw number overstates as
+diversity.  `ReleaseCopyOfSocket` is 9 callers but only 3 programs -- `inetd`,
+`letnet`, `rsh` -- and it is the same handoff contract as `ObtainSocket` (91),
+so it is not the marginal vector its count suggests.  `sendmsg` is `ch_nfsc` in
+four distributions plus `u9fs`: the NFS and 9P filesystem layer.
+
+Counts move as the survey runs; regenerate with
+`tools/aminet-survey/rare.py 10`.
