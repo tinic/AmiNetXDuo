@@ -966,6 +966,17 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
  */
 ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload)
 {
+    /*
+     * NOT `payload + iface->rx_dst_off`, WHICH IS THE SAME TWO ANSWERS AND
+     * WAS TRIED.  rx_dst_off is derived from raw_mode by ami_sana2_open(), so
+     * reading it here would make this function's answer depend on whether
+     * that open has run -- and the whole reason this arithmetic lives in its
+     * own non-static function is that the host tier can call it directly, on
+     * an interface it builds itself.  It does, and three checks in
+     * test_sana2_rx_host.c caught it at once: a cooked frame silently lost
+     * its fourteen bytes.  Two instructions a frame is not worth a function
+     * that is only correct after an initialiser it does not name.
+     */
     return iface->raw_mode ? payload : (payload + AMI_ETH_HEADER_SIZE);
 }
 
@@ -1277,7 +1288,15 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
         /* The reply message is the slot: ios2_Req.io_Message is its first
            member's first member. */
         AmiRxSlot *slot = (AmiRxSlot *)msg;
-        LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
+        /*
+         * THE BYTE IS TESTED, THE SIGN EXTENSION IS NOT ON THIS PATH.  It was
+         * `LONG err = (LONG)(BYTE)...` before the branch, and the drain loop
+         * then ran `move.b d6,d1; extb.l d1` on EVERY frame for a value only
+         * the error arms read -- the branch below tests the byte either way.
+         * The widening still happens where io_Error is compared against the
+         * negative Exec codes, which is what it is for.
+         */
+        UBYTE      raw  = slot->req.ios2_Req.io_Error;
 
         ami_sana2_rx_mark(rx, slot, FALSE);
         took++;
@@ -1285,15 +1304,15 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
         if (rx->stop)
             continue;
 
-        if (err == 0)
+        if (raw == 0)
         {
             ami_sana2_rx_complete(rx, slot);
         }
-        else if (err == (LONG)IOERR_ABORTED)
+        else if ((LONG)(BYTE)raw == (LONG)IOERR_ABORTED)
         {
             /* Asked for here, so nothing to count. */
         }
-        else if (err == (LONG)S2ERR_OUTOFSERVICE)
+        else if ((LONG)(BYTE)raw == (LONG)S2ERR_OUTOFSERVICE)
         {
             /*
              * NetX Duo learns link state only from NX_LINK_ENABLE/DISABLE, so
