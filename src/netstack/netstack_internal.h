@@ -61,10 +61,31 @@
  * AMI_AUTOIP_STACK_SIZE is: 812 bytes measured, plus headroom for the Exec
  * calls its send path reaches on a target with no guard page.
  */
-/* 2048, measured: a fill-and-scan probe over every ThreadX stack read this
-   thread's deepest byte at 976 across run-dhcpv6, run-bringup, run-mld and
-   run-socket.  Was 4096.  No MMU, so the 2x margin is deliberate. */
-#define AMI_DHCPV6_STACK_SIZE       2048
+/* 4096, RESTORED: the 2048 cut had the same scope error 75a00c2e fixed for
+   DHCP, and it is the same mechanism on the same kind of thread.
+ *
+ * This thread SENDS.  nx_ip_packet_send() from here reaches
+ * ami_sana2_driver_entry NX_LINK_PACKET_SEND (sana2_driver.c:364) ->
+ * ami_sana2_tx_send() -> BeginIO(), and "a device is free to complete the
+ * write synchronously" (sana2_tx.c:165).  So a third-party driver's inline
+ * transmit path runs on THIS stack, and none of it is visible to a probe on
+ * the rig.
+ *
+ * The 976-byte fill-and-scan that justified 2048 ran run-dhcpv6,
+ * run-bringup, run-mld and run-socket against the rig's own driver only. It
+ * bounds our transmit path and nothing else -- exactly what the DHCP
+ * measurement did before genet.device overflowed the 2 KiB it produced and
+ * the documented A1200/PiStorm32 setup fell back to AutoIP.
+ *
+ * There is no MMU: an overrun is silent memory corruption that kills the
+ * machine somewhere unrelated.  Do not lower this floor without measuring
+ * the complete supported-device matrix, including the synchronous driver
+ * call. */
+#define AMI_DHCPV6_STACK_SIZE       4096
+
+#if AMI_DHCPV6_STACK_SIZE < 4096
+#error "DHCPv6 sends through the SANA-II bridge; a third-party BeginIO runs on this stack"
+#endif
 
 /*
  * And the deferred-work thread's, which is small because that thread wakes on
