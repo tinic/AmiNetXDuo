@@ -139,7 +139,7 @@ _ami_crt0_rc=$?
 if [ "$_ami_crt0_rc" != 0 ]; then
     printf '%s\n' "$_ami_crt0_check" >&2
     echo "" >&2
-    echo "The selected toolchain cannot prove safe crt0 argv storage." >&2
+    echo "The selected toolchain cannot prove a safe crt0 argc/argv contract." >&2
     echo "Repair it with tools/fix-toolchain-crt0.py, or fetch the pin." >&2
     unset _ami_crt0_check _ami_crt0_rc
     return 2 2>/dev/null || exit 2

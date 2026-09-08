@@ -430,25 +430,25 @@ done
 
 # newlib commit 120371e fixed the type mismatch behind amiga-gcc issue #8 by
 # changing __argv from an array into a pointer, but left both startup paths
-# writing __argv[0] before the pointer owns storage.  Every ordinary crt0-linked
-# command then writes a longword through address zero before main().  Give the
-# pointer a two-entry backing vector in SOURCE, so every multilib is compiled
-# from correct C rather than relying on the object-code compatibility repair
-# used for already-published toolchain assets.
+# writing __argv[0] before the command-line initializer owns it.  Every
+# ordinary crt0-linked command then writes a longword through address zero
+# before main().  Match libnix's actual contract in SOURCE: crt0 captures the
+# OS inputs, __nocommandline alone constructs argc/argv, and a shared header
+# makes another cross-translation-unit array/pointer mismatch a compile error.
 #
 # Reverse-apply means upstream has taken this exact fix and needs no patch.  A
 # different upstream edit matches neither direction and stops here for review;
 # silently building a new, unverified crt0 shape is how this regression shipped.
-NEWLIB_PATCH="$HERE/patches/newlib/argv-storage.diff"
+NEWLIB_PATCH="$HERE/patches/newlib/argv-contract.diff"
 if git -C "$SRC/projects/newlib-cygwin" apply --reverse --check \
        "$NEWLIB_PATCH" 2>/dev/null; then
-    echo "==> newlib argv storage already fixed upstream"
+    echo "==> newlib argc/argv contract already fixed upstream"
 elif git -C "$SRC/projects/newlib-cygwin" apply --check \
          "$NEWLIB_PATCH" 2>/dev/null; then
-    echo "==> newlib argv storage: $(basename "$NEWLIB_PATCH")"
+    echo "==> newlib argc/argv contract: $(basename "$NEWLIB_PATCH")"
     git -C "$SRC/projects/newlib-cygwin" apply "$NEWLIB_PATCH"
 else
-    echo "!! newlib crt0 argv storage is neither the pinned broken source" >&2
+    echo "!! newlib crt0 argc/argv contract is neither the pinned source" >&2
     echo "!! nor the reviewed fixed source; refusing an unverified build." >&2
     exit 2
 fi

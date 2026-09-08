@@ -387,6 +387,14 @@ def _writes_areg(text):
     return int(m.group(1)) if m else None
 
 
+def _displacement(value):
+    """Parse objdump's decimal register displacement or explicit hex value."""
+    unsigned = value.lstrip("-")
+    base = 16 if unsigned.startswith("0x") or \
+        re.search(r"[a-f]", unsigned) else 10
+    return int(value, base)
+
+
 def _addend(text):
     """The leading displacement of this instruction's memory operand, or None.
 
@@ -412,13 +420,13 @@ def _addend(text):
     """
     m = re.search(r"a[0-7]@\((-?[0-9a-fx]+)\)", text)       # pea a4@(20)
     if m:
-        return int(m.group(1), 16)
+        return _displacement(m.group(1))
     m = re.search(r"\((-?[0-9a-fx]+),%?a[0-7]\)", text)     # pea (20,a4)
     if m:
-        return int(m.group(1), 16)
+        return _displacement(m.group(1))
     m = re.search(r"\b([0-9a-f]+)\(%?a[0-7]\)", text)        # 20(a4), MIT
     if m:
-        return int(m.group(1), 16)
+        return _displacement(m.group(1))
     m = re.match(r"^\S+\s+#?([0-9a-f]+)\b", text)            # pea 0 <sym>
     return int(m.group(1), 16) if m else None
 
@@ -591,29 +599,38 @@ def repair_argv(objdump, path, check_only):
 
 
 # ---------------------------------------------------------------- THIRD BUG
-# crt0.c has to initialize the storage object __argv before it can pass the
-# pointer stored there to main. Affected compiler builds instead load the
-# ZERO-FILLED CONTENTS of __argv into an address register and write through
-# it:
+# crt0.c must not write through __argv before the command-line initializer has
+# constructed it. Affected builds load the ZERO-FILLED CONTENTS of __argv into
+# an address register and write through it:
 #
 #     movea.l __argv,a0       ; a0 = 0 at process startup
 #     move.l  __commandline,(a0)
 #
 # The Workbench path does the same before storing its message. Both are an
-# immediate LONG-WRITE to address zero. The intended operation is `lea`, which
-# has the same length and effective-address extension words as `movea.l`, so
-# changing the opcode word preserves every relocation. This also covers the
-# 16- and 32-bit baserel effective-address forms.
+# immediate LONG-WRITE to address zero. For already-published objects the
+# compatible repair is `lea`, which has the same length and effective-address
+# extension words as `movea.l`, so changing the opcode word preserves every
+# relocation. This also covers the 16- and 32-bit baserel effective-address
+# forms. It is deliberately only an object repair: the source fix is to remove
+# both premature writes.
 #
 # Some m060 multilibs optimize the source into a direct store to the __argv
 # pointer object and never materialize the bad pointer.  Those are safe, but
 # they still have to be RECOGNIZED per object; accepting an unrecognized file
 # because eight sibling multilibs matched is not a gate.
 #
-# The reviewed source fix gives __argv backing storage.  In that shape __argv
+# The old source workaround gave __argv backing storage. In that shape __argv
 # lives in a data section whose initializer relocates to the backing vector,
-# and loading the pointer before writing through it is correct.  Recognize the
-# relocation, not a compiler version or one expected opcode sequence.
+# and loading the pointer before writing through it is safe, though it leaves
+# ownership split across two modules.
+#
+# The proper source fix follows libnix: __argv stays a zero-filled pointer and
+# crt0 never writes it. The __nocommandline initializer owns __argc/__argv and
+# its retained undefined reference pulls the parser out of libc; replacing the
+# hook deliberately leaves main(0, NULL). Recognize that complete contract,
+# not merely an absence of the two instructions -- accepting a partial edit or
+# an optimized-away parser anchor would turn this gate into the symptom check
+# that let the regression through.
 
 MOVEA_L_MASK, MOVEA_L_OP = 0xF1C0, 0x2040
 
@@ -637,7 +654,7 @@ def _destination_addend(text):
         matches.extend(re.finditer(pattern, text))
     if matches:
         last = max(matches, key=lambda m: m.start())
-        return int(last.group(1), 16)
+        return _displacement(last.group(1))
     return None
 
 
@@ -670,6 +687,52 @@ def _argv_has_static_backing(objdump, path, location):
         return False
     return any(at == offset and target.startswith(".")
                for at, target in relocs.get(section, []))
+
+
+def _has_undefined_symbol(objdump, path, wanted):
+    """Whether the object retains an undefined reference to `wanted`."""
+    out = subprocess.run([str(objdump), "-t", str(path)],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return False
+    for line in out.stdout.splitlines():
+        fields = line.split()
+        if fields and "*UND*" in fields and \
+                fields[-1].lstrip("_") == wanted:
+            return True
+    return False
+
+
+def _parser_owns_argv(objdump, path):
+    """Prove the no-preinit-write source contract, including its link hook."""
+    location = symbol_location(objdump, path)
+    if location is None or location[0] not in (".bss", "*COM*"):
+        return False
+    if not _has_undefined_symbol(objdump, path, "nocommandline"):
+        return False
+
+    call_result = argv_sites(objdump, path)
+    if call_result is None:
+        return False
+    call_sites, calls = call_result
+    if calls not in (1, 2) or len(call_sites) != calls or any(
+            old != new for _, old, new in call_sites):
+        return False
+
+    section, offset = location
+    details = instruction_details(objdump, path)
+    if details is None:
+        return False
+    refs = 0
+    for _, _, relocs, text, function in details:
+        if function is None or not function.endswith("____start"):
+            continue
+        named = any(r.lstrip("_") == "argv" for r in relocs)
+        section_ref = section in relocs and (
+            _addend(text) == offset or _destination_addend(text) == offset)
+        if named or section_ref:
+            refs += 1
+    return refs == calls
 
 
 def argv_init_sites(objdump, path):
@@ -717,9 +780,13 @@ def repair_argv_init(objdump, path, check_only):
     sites = argv_init_sites(objdump, path)
     if sites is None:
         return ("refused", "objdump could not read it")
+    if not sites and _parser_owns_argv(objdump, path):
+        return ("immune", "command-line initializer exclusively owns "
+                          "__argc/__argv and its libc link hook is retained")
     if len(sites) != 2:
         return ("refused", f"proved {len(sites)} of 2 expected __argv startup "
-                           "writes; crt0 shape requires review")
+                           "writes and did not prove parser ownership; crt0 "
+                           "shape requires review")
 
     wrong = [(off, old, new) for off, old, new in sites if new != old]
     if not wrong:

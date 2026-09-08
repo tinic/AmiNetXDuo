@@ -20,7 +20,7 @@ def insn(offset, word, relocs, text):
     return [offset, word, relocs, text, START]
 
 
-class ArgvStorageGateTest(unittest.TestCase):
+class ArgvContractGateTest(unittest.TestCase):
     def classify(self, instructions, location=(".bss", 0), backed=False):
         with mock.patch.object(CRT0, "instruction_details",
                                return_value=instructions), \
@@ -43,6 +43,11 @@ class ArgvStorageGateTest(unittest.TestCase):
         sites = self.classify(instructions)
         self.assertEqual([(old, new) for _, old, new in sites],
                          [(0x2079, 0x41F9), (0x2079, 0x41F9)])
+
+    def test_baserel_displacements_are_decimal(self):
+        self.assertEqual(CRT0._addend("move.l 16(a4),-(sp)"), 0x10)
+        self.assertEqual(CRT0._addend("move.l (16,a4),-(sp)"), 0x10)
+        self.assertEqual(CRT0._addend("move.l a4@(16),-(sp)"), 0x10)
 
     def test_repaired_address_load_shape_is_safe(self):
         instructions = [
@@ -81,6 +86,44 @@ class ArgvStorageGateTest(unittest.TestCase):
         sites = self.classify(instructions, location=(".data", 0), backed=True)
         self.assertEqual(len(sites), 2)
         self.assertTrue(all(old == new for _, old, new in sites))
+
+    def test_parser_owned_source_fix_is_safe(self):
+        with mock.patch.object(CRT0, "argv_init_sites", return_value=[]), \
+             mock.patch.object(CRT0, "_parser_owns_argv", return_value=True):
+            state, message = CRT0.repair_argv_init(
+                "objdump", pathlib.Path("crt0.o"), True)
+        self.assertEqual(state, "immune")
+        self.assertIn("exclusively owns", message)
+
+    def test_no_writes_without_parser_contract_fails_closed(self):
+        with mock.patch.object(CRT0, "argv_init_sites", return_value=[]), \
+             mock.patch.object(CRT0, "_parser_owns_argv", return_value=False):
+            state, message = CRT0.repair_argv_init(
+                "objdump", pathlib.Path("crt0.o"), True)
+        self.assertEqual(state, "refused")
+        self.assertIn("did not prove parser ownership", message)
+
+    def test_parser_ownership_requires_only_the_main_argv_reference(self):
+        details = [insn(0x58, 0x2F39, [".bss"],
+                        "move.l 10 10 ___argv,-(sp)")]
+        with mock.patch.object(CRT0, "symbol_location",
+                               return_value=(".bss", 0x10)), \
+             mock.patch.object(CRT0, "_has_undefined_symbol",
+                               return_value=True), \
+             mock.patch.object(CRT0, "argv_sites",
+                               return_value=([(0x58, 0x2F39, 0x2F39)], 1)), \
+             mock.patch.object(CRT0, "instruction_details",
+                               return_value=details):
+            self.assertTrue(CRT0._parser_owns_argv(
+                "objdump", pathlib.Path("crt0.o")))
+
+    def test_parser_ownership_rejects_missing_link_anchor(self):
+        with mock.patch.object(CRT0, "symbol_location",
+                               return_value=(".bss", 0x10)), \
+             mock.patch.object(CRT0, "_has_undefined_symbol",
+                               return_value=False):
+            self.assertFalse(CRT0._parser_owns_argv(
+                "objdump", pathlib.Path("crt0.o")))
 
     def test_unrecognized_partial_shape_fails_closed(self):
         with mock.patch.object(CRT0, "argv_init_sites",

@@ -48,8 +48,9 @@ make_root() {
 
     # AND REAL crt0 OBJECTS, because the resolver checks them now.
     #
-    # tools/amiga-toolchain.sh verifies crt0 argv storage before it hands a
-    # root back, and a fixture holding a stub gcc and nothing else answers
+    # tools/amiga-toolchain.sh verifies the crt0 argc/argv contract before it
+    # hands a root back, and a fixture holding a stub gcc and nothing else
+    # answers
     # "no crt0.o under <root>" and is refused -- so every case below saw
     # rc=2 and an empty root, and both of them failed for a reason that has
     # nothing to do with selection.  That is what this file tests.
