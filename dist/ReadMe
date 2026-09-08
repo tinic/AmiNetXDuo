@@ -81,7 +81,8 @@ It puts
 
      bsdsocket.library, usergroup.library,
      tls.library                               into LIBS:
-     NetSetup, AddNetInterface, RemoveNetInterface,
+     ActivateAmiNetXDuo, NetSetup,
+     AddNetInterface, RemoveNetInterface,
      ConfigureNetInterface, Online, Offline,
      ShowNetStatus, ShowNetServices, GetNetStatus,
      CheckNetConfig, CheckNetDevice, NetShutdown,
@@ -94,8 +95,17 @@ It puts
      the routing and name server files         into DEVS:Internet
      this file, the documentation, examples    into a selected drawer
 
-and, when it is allowed to, one line into S:User-Startup so the network
+and, when it is allowed to, a managed block in S:User-Startup so the network
 comes up when the machine boots.
+
+At Intermediate or Expert level the stack can instead be installed entirely
+inside that selected AmiNetXDuo drawer. No existing system library, command,
+driver, configuration file or AmiTCP: assign is changed. At boot,
+ActivateAmiNetXDuo puts the private Libs, C and Devs first while retaining
+every directory already present in those assigns. This is a boot-time choice:
+disable AmiNetXDuo's startup block and enable the other stack's block, then
+reboot, to switch back. A bsdsocket.library already resident in memory cannot
+be exchanged safely.
 
 tls.library is what makes encrypted (https:) connections work.  It is in the
 archive only when the archive was built with encryption in it, and the
@@ -250,7 +260,8 @@ UNINSTALLING
 
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
      Delete LIBS:tls.library
-     Delete C:NetSetup C:AddNetInterface C:RemoveNetInterface
+     Delete C:ActivateAmiNetXDuo C:NetSetup
+     Delete C:AddNetInterface C:RemoveNetInterface
      Delete C:ConfigureNetInterface C:Online C:Offline
      Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
      Delete C:CheckNetConfig C:CheckNetDevice C:NetShutdown

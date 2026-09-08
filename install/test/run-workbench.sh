@@ -593,6 +593,40 @@ FOREIGN_LINES=(
     "C:SetPatch QUIET"
     "; -- end SomeOtherApp --"
 )
+
+# Drawer mode exists for a machine that ALREADY HAS another TCP/IP stack, so
+# that is the only meaningful fixture for it.  The files are deliberately not
+# Amiga libraries: if ActivateAmiNetXDuo leaves system LIBS: first, opening
+# bsdsocket.library fails and the boot half below goes red.  If the installer
+# still performs its old fixed-path backups, the byte snapshot goes red first.
+FOREIGN_STACK_FILES=()
+if [ "$DRAWER" = "1" ]; then
+    mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
+             "$HD/Devs/Networks" "$HD/ForeignAmiTCP/db"
+    printf 'foreign bsdsocket.library -- must not be moved\n' \
+        > "$HD/Libs/bsdsocket.library"
+    printf 'foreign usergroup.library -- must not be moved\n' \
+        > "$HD/Libs/usergroup.library"
+    printf 'foreign tls.library -- must not be moved\n' \
+        > "$HD/Libs/tls.library"
+    printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
+        > "$HD/Devs/NetInterfaces/foreign0"
+    printf 'DEFAULT=10.0.0.1\n' > "$HD/Devs/Internet/routes"
+    printf 'foreign nfs table\n' > "$HD/ForeignAmiTCP/db/ch_nfstab"
+    chmod 644 "$HD/Libs/bsdsocket.library" "$HD/Libs/usergroup.library" \
+        "$HD/Libs/tls.library" "$HD/Devs/NetInterfaces/foreign0" \
+        "$HD/Devs/Internet/routes" "$HD/ForeignAmiTCP/db/ch_nfstab"
+
+    FOREIGN_LINES+=("Assign AmiTCP: DH0:ForeignAmiTCP")
+    FOREIGN_STACK_FILES=(
+        Libs/bsdsocket.library
+        Libs/usergroup.library
+        Libs/tls.library
+        Devs/NetInterfaces/foreign0
+        Devs/Internet/routes
+        ForeignAmiTCP/db/ch_nfstab
+    )
+fi
 mkdir -p "$HD/S"
 printf '%s\n' "${FOREIGN_LINES[@]}" > "$HD/S/User-Startup"
 chmod 644 "$HD/S/User-Startup"
@@ -681,6 +715,16 @@ if [ -d "$HD/Devs/Networks" ]; then
 fi
 echo "==> DEVS:Networks before the install: $DEVS_NETWORKS_BEFORE" \
      "${STALE_DEVICE:+(a stale anxnet.device staged in it)}"
+
+FOREIGN_STACK_BEFORE=""
+if [ "$DRAWER" = "1" ]; then
+    FOREIGN_STACK_FILES+=(Devs/Networks/anxnet.device)
+    FOREIGN_STACK_BEFORE=$(
+        for f in "${FOREIGN_STACK_FILES[@]}"; do
+            shasum "$HD/$f"
+        done
+    )
+fi
 
 # The download, where a download would be: its own drawer, not the one the
 # installer is going to create.
@@ -1066,12 +1110,41 @@ if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
     fail=1
 fi
-for cmd in AddNetInterface Online Offline ShowNetStatus ping netstat host fetch; do
+for cmd in ActivateAmiNetXDuo AddNetInterface Online Offline ShowNetStatus \
+           ping netstat host fetch; do
     check_file "${INST}C/$cmd"
 done
 check_file "${INST}Devs/NetInterfaces/eth0"
 check_file "${INST}Devs/Internet/name_resolution"
 check_file S/User-Startup
+
+# The self-contained contract, in one comparison: none of the system stack's
+# libraries, driver, configuration, or AmiTCP:db data moved by even one byte.
+# The old implementation renamed the first three libraries and the driver,
+# reused foreign0 instead of writing its own eth0, and claimed AmiTCP: itself.
+if [ "$DRAWER" = "1" ]; then
+    FOREIGN_STACK_AFTER=$(
+        for f in "${FOREIGN_STACK_FILES[@]}"; do
+            shasum "$HD/$f" 2>/dev/null || echo "MISSING $f"
+        done
+    )
+    if [ "$FOREIGN_STACK_AFTER" = "$FOREIGN_STACK_BEFORE" ]; then
+        echo "  ok      foreign stack files unchanged"
+    else
+        echo "!! the drawer install changed another stack's files"
+        diff -u <(printf '%s\n' "$FOREIGN_STACK_BEFORE") \
+                <(printf '%s\n' "$FOREIGN_STACK_AFTER") || true
+        fail=1
+    fi
+
+    for old in Libs/bsdsocket.library.old Libs/usergroup.library.old \
+               Libs/tls.library.old Devs/Networks/anxnet.device.old; do
+        if amiga_path "$old" >/dev/null 2>&1; then
+            echo "!! drawer install created system $old"
+            fail=1
+        fi
+    done
+fi
 
 # ---------------------------------------- anxnet.device, into DEVS:Networks --
 #
@@ -1122,7 +1195,22 @@ echo "devs_networks_before=$DEVS_NETWORKS_BEFORE"
 echo "anxnet_installed=$([ -n "$ANXNET_INSTALLED" ] && echo yes || echo no)"
 echo "anxnet_backup=$([ -n "$ANXNET_OLD" ] && echo yes || echo no)"
 
-if [ "$DEVS_NETWORKS_BEFORE" = "absent" ]; then
+if [ "$DRAWER" = "1" ]; then
+    # The stale file was in SYSTEM DEVS:, not in the private destination.  One
+    # install therefore makes no private backup; a second install backs up the
+    # first private copy.  Neither case may touch the system file, asserted by
+    # FOREIGN_STACK_BEFORE above.
+    if [ "$DRIVE_RUNS" = "1" ] && [ -n "$ANXNET_OLD" ]; then
+        echo "!! first drawer install made a private anxnet.device.old from"
+        echo "   a file that existed only in system DEVS:"
+        fail=1
+    elif [ "$DRIVE_RUNS" != "1" ] && [ -z "$ANXNET_OLD" ]; then
+        echo "!! repeated drawer install did not back up its own prior driver"
+        fail=1
+    else
+        echo "  ok      driver backup stayed inside the selected layout"
+    fi
+elif [ "$DEVS_NETWORKS_BEFORE" = "absent" ]; then
     # The stock-Workbench half: there was no drawer, so the installer's own
     # makedir is the only thing that could have made one.
     if [ -n "$ANXNET_INSTALLED" ]; then
@@ -1236,7 +1324,7 @@ done
 # tls.library and the trust store are what https: needs, and their absence is
 # the first thing to know if the https: check fails.
 for f in Libs/tls.library Devs/Internet/certificates; do
-    real=$(amiga_path "$f" || true)
+    real=$(amiga_path "${INST}$f" || true)
     if [ -n "$real" ] && [ -f "$real" ]; then
         printf '  ok      %-32s %s bytes\n' "$f" "$(wc -c < "$real" | tr -d ' ')"
     else
@@ -1424,17 +1512,37 @@ FOREIGN=no
 foreign_intact && FOREIGN=yes
 TERM_LINES=$(startup_count 'httpd')
 TERM_ASSIGNS=$(startup_count 'Assign AmiNetXDuo:')
+SELECT_LINES=$(startup_count 'ActivateAmiNetXDuo')
+AMITCP_LINES=$(startup_count 'Assign AmiTCP:')
 
 echo
 echo "startup_foreign_lines_intact=$FOREIGN"
 echo "startup_httpd_lines=$TERM_LINES"
 echo "startup_assign_lines=$TERM_ASSIGNS"
+echo "startup_selector_lines=$SELECT_LINES"
+echo "startup_amitcp_lines=$AMITCP_LINES"
 echo "startup_installer_runs=$DRIVE_RUNS"
 
 if [ "$FOREIGN" != "yes" ]; then
     echo
     echo "!! S:User-Startup lost lines that were not ours.  The installer's"
     echo "   contract is that it touches only its own marked block."
+    fail=1
+fi
+
+WANT_SELECTOR=0
+WANT_AMITCP=0
+if [ "$DRAWER" = "1" ]; then
+    WANT_SELECTOR=1
+    WANT_AMITCP=1                 # the foreign line, never one of ours
+fi
+if [ "$SELECT_LINES" != "$WANT_SELECTOR" ]; then
+    echo "!! startup has $SELECT_LINES selector line(s), want $WANT_SELECTOR"
+    fail=1
+fi
+if [ "$AMITCP_LINES" != "$WANT_AMITCP" ]; then
+    echo "!! startup has $AMITCP_LINES AmiTCP: line(s), want only the"
+    echo "   $WANT_AMITCP line(s) that existed before installation"
     fail=1
 fi
 

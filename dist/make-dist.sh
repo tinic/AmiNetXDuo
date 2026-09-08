@@ -71,7 +71,7 @@ LIBS=(bsdsocket usergroup)
 # byte for byte against the one packed here, so the two cannot drift apart
 # again in silence.
 DEVICES=(netdev/anxnet)
-CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
+CMDS=(ActivateAmiNetXDuo AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd

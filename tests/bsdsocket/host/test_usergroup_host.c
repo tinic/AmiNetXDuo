@@ -42,7 +42,6 @@ static unsigned long h_failures;
 
 #define H_MAX_OPENS   8
 #define H_MAX_CLOSES  8
-#define H_MAX_LOCKS   8
 
 /* Distinct non-NULL bases, so "which library is held" is answerable. */
 static struct Library h_dos_lib;
@@ -65,18 +64,6 @@ static struct
     struct Library *close_base[H_MAX_CLOSES];
     unsigned        closes;
 
-    /* Lock()/UnLock()/AssignLock() */
-    const char     *lock_name[H_MAX_LOCKS];
-    APTR            lock_window[H_MAX_LOCKS];  /* pr_WindowPtr during Lock() */
-    unsigned        locks;
-    BOOL            have_amitcp_assign;  /* "AmiTCP:" already resolves       */
-    BOOL            have_sys;            /* "SYS:" resolves                  */
-    unsigned        unlocks;
-    unsigned        assigns;
-    const char     *assign_name;
-    BPTR            assign_lock;
-    BOOL            assign_fails;
-
     /* pr_WindowPtr as seen inside the fallback OpenLibrary() */
     APTR            open_window[H_MAX_OPENS];
 
@@ -96,7 +83,6 @@ static void h_reset(void)
 
     h.have_dos        = TRUE;
     h.have_usergroup  = TRUE;
-    h.have_sys        = TRUE;
 }
 
 /* --------------------------------------------------------------- stubs -- */
@@ -140,43 +126,6 @@ struct Task *FindTask(const char *name)
         h_proc.pr_Task.tc_Node.ln_Type = NT_TASK;
 
     return &h_proc.pr_Task;
-}
-
-BPTR Lock(const UBYTE *name, LONG type)
-{
-    const char *s = (const char *)name;
-
-    (VOID)type;
-
-    if (h.locks < H_MAX_LOCKS)
-    {
-        h.lock_name[h.locks]   = s;
-        h.lock_window[h.locks] = h_proc.pr_WindowPtr;
-    }
-    h.locks++;
-
-    if (strcmp(s, "AmiTCP:") == 0)
-        return h.have_amitcp_assign ? (BPTR)0x1111 : (BPTR)0;
-
-    if (strcmp(s, "SYS:") == 0)
-        return h.have_sys ? (BPTR)0x2222 : (BPTR)0;
-
-    return (BPTR)0;
-}
-
-VOID UnLock(BPTR lock)
-{
-    (VOID)lock;
-    h.unlocks++;
-}
-
-LONG AssignLock(const UBYTE *name, BPTR lock)
-{
-    h.assigns++;
-    h.assign_name = (const char *)name;
-    h.assign_lock = lock;
-
-    return h.assign_fails ? DOSFALSE : DOSTRUE;
 }
 
 VOID ami_timer_close(VOID)
@@ -234,19 +183,6 @@ static int h_open_index(const char *name)
     for (i = 0; i < h.opens && i < H_MAX_OPENS; i++)
     {
         if (strcmp(h.open_name[i], name) == 0)
-            return (int)i;
-    }
-
-    return -1;
-}
-
-static int h_lock_index(const char *name)
-{
-    unsigned i;
-
-    for (i = 0; i < h.locks && i < H_MAX_LOCKS; i++)
-    {
-        if (strcmp(h.lock_name[i], name) == 0)
             return (int)i;
     }
 
@@ -315,8 +251,8 @@ static void t_release_on_expunge(void)
 }
 
 /*
- * A reload takes the hold again: bsd_amitcp_tried and the base pointer are
- * both file-scope statics, and a stale TRUE would skip the assign forever.
+ * A reload takes the hold again: the file-scope base pointer must not survive
+ * expunge.
  */
 static void t_reload_retakes(void)
 {
@@ -329,17 +265,12 @@ static void t_reload_retakes(void)
 
     h.opens  = 0;
     h.closes = 0;
-    h.locks  = 0;
     memset(h.open_name, 0, sizeof(h.open_name));
-    memset(h.lock_name, 0, sizeof(h.lock_name));
 
     bsd_usergroup_open();
 
     CHECK(h_open_count("usergroup.library") == 1,
           "the second load opens usergroup.library again");
-    CHECK(h_lock_index("AmiTCP:") >= 0,
-          "and tries the AmiTCP: assign again");
-
     bsd_runtime_close();
 }
 
@@ -429,88 +360,6 @@ static void t_not_a_process(void)
           "LIBS: is still tried");
     CHECK(h_open_count("AmiTCP:libs/usergroup.library") == 0,
           "the fallback is skipped without a Process");
-    CHECK(h.assigns == 0, "and so is the assign");
-
-    bsd_runtime_close();
-}
-
-/*
- * The AmiTCP: assign, which is what makes the fallback path reachable at all.
- */
-static void t_amitcp_assign(void)
-{
-    printf("usergroup: the AmiTCP: assign\n");
-
-    /* Nothing has claimed the name: assign it to SYS:. */
-    h_reset();
-    h.have_amitcp_assign = FALSE;
-
-    bsd_usergroup_open();
-
-    CHECK(h.assigns == 1, "AmiTCP: is assigned when nothing holds the name");
-    CHECK(h.assign_name != NULL && strcmp(h.assign_name, "AmiTCP") == 0,
-          "assigned without the colon, as AssignLock() wants it");
-    CHECK(h.assign_lock == (BPTR)0x2222, "assigned to the SYS: lock");
-    CHECK(h.unlocks == 0,
-          "AssignLock() took the lock, so it is not unlocked as well");
-
-    {
-        int i = h_lock_index("AmiTCP:");
-
-        CHECK(i >= 0 && h.lock_window[i] == (APTR)-1L,
-              "the probe runs with requesters off, so no volume request");
-    }
-    CHECK(h_proc.pr_WindowPtr == (APTR)0x5EA1ED,
-          "and pr_WindowPtr is put back");
-
-    bsd_runtime_close();
-
-    /* Somebody else already has it: leave it alone. */
-    h_reset();
-    h.have_amitcp_assign = TRUE;
-
-    bsd_usergroup_open();
-
-    CHECK(h.assigns == 0, "an existing AmiTCP: is not reassigned");
-    CHECK(h.unlocks == 1, "and the probe lock is released");
-    CHECK(h_lock_index("SYS:") < 0, "SYS: is not locked at all");
-
-    bsd_runtime_close();
-
-    /* AssignLock() refused: the lock is ours again and must be released. */
-    h_reset();
-    h.have_amitcp_assign = FALSE;
-    h.assign_fails       = TRUE;
-
-    bsd_usergroup_open();
-
-    CHECK(h.assigns == 1, "the assign was attempted");
-    CHECK(h.unlocks == 1, "and a refused AssignLock() leaves the lock to us");
-
-    bsd_runtime_close();
-
-    /* No SYS: at all: nothing to assign, and nothing leaks. */
-    h_reset();
-    h.have_amitcp_assign = FALSE;
-    h.have_sys           = FALSE;
-
-    bsd_usergroup_open();
-
-    CHECK(h.assigns == 0, "no SYS: means no assign");
-    CHECK(h.unlocks == 0, "and no lock to release");
-
-    bsd_runtime_close();
-
-    /* Once per load, however many bases open. */
-    h_reset();
-    h.have_amitcp_assign = FALSE;
-
-    bsd_usergroup_open();
-    bsd_usergroup_open();
-    bsd_usergroup_open();
-
-    CHECK(h.assigns == 1, "the assign is attempted once per load");
-
     bsd_runtime_close();
 }
 
@@ -524,7 +373,6 @@ int main(void)
     t_fallback();
     t_absent();
     t_not_a_process();
-    t_amitcp_assign();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

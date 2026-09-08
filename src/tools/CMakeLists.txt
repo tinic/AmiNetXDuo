@@ -213,6 +213,12 @@ endfunction()
 aminetxduo_add_tool(tool_addnetinterface AddNetInterface
     SOURCES addnetinterface.c ${TOOLS_DEVDIAG})
 
+# The boot-time selector for a self-contained install.  Assign ADD appends and
+# therefore cannot put our bsdsocket.library ahead of an existing stack; this
+# command preserves the whole old multi-assign and prepends the private root.
+aminetxduo_add_tool(tool_activateaminetxduo ActivateAmiNetXDuo
+    SOURCES activateaminetxduo.c)
+
 # CheckNetConfig is config-only in the strictest sense there is: it never opens
 # bsdsocket.library at all.  That is not an omission, the machine that needs
 # checking is the one where the stack did not come up, so a checker that needed

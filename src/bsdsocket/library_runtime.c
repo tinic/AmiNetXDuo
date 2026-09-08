@@ -44,51 +44,11 @@ BOOL bsd_runtime_open(VOID)
  *
  */
 static struct Library *bsd_usergroup_base;
-static BOOL            bsd_amitcp_tried;
-
-/*
- * AmiTCP: -> SYS:, if nothing else has claimed the name.
- */
-static VOID bsd_amitcp_assign(VOID)
-{
-    struct Process *me;
-    APTR            saved;
-    BPTR            lock;
-
-    me = (struct Process *)FindTask(NULL);
-    if (me == NULL || me->pr_Task.tc_Node.ln_Type != NT_PROCESS)
-        return;
-
-    saved              = me->pr_WindowPtr;
-    me->pr_WindowPtr   = (APTR)-1L;
-    lock               = Lock((STRPTR)"AmiTCP:", SHARED_LOCK);
-    me->pr_WindowPtr   = saved;
-
-    if (lock != 0)
-    {
-        UnLock(lock);
-        return;
-    }
-
-    lock = Lock((STRPTR)"SYS:", SHARED_LOCK);
-    if (lock == 0)
-        return;
-
-    /* AssignLock() takes the lock on success and leaves it on failure. */
-    if (AssignLock((STRPTR)"AmiTCP", lock) == DOSFALSE)
-        UnLock(lock);
-}
 
 VOID bsd_usergroup_open(VOID)
 {
     struct Process *me;
     APTR            saved;
-
-    if (!bsd_amitcp_tried)
-    {
-        bsd_amitcp_tried = TRUE;
-        bsd_amitcp_assign();
-    }
 
     if (bsd_usergroup_base != NULL)
         return;
@@ -119,8 +79,6 @@ VOID bsd_runtime_close(VOID)
         CloseLibrary(bsd_usergroup_base);
         bsd_usergroup_base = NULL;
     }
-
-    bsd_amitcp_tried = FALSE;
 
     if (DOSBase != NULL)
     {

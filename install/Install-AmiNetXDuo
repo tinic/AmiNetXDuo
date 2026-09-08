@@ -3,7 +3,7 @@
 ;  AmiNetXDuo -- Commodore Installer script
 ;
 ;  Installs the AmiNetXDuo TCP/IP stack: bsdsocket.library and
-;  usergroup.library into LIBS:, the seven Roadshow-compatible commands into
+;  usergroup.library into LIBS:, the Roadshow-compatible commands into
 ;  C:, and a working DEVS:NetInterfaces / DEVS:Internet configuration written
 ;  from the answers the user gives here.
 ;
@@ -64,11 +64,9 @@
 ; --- where the installed files GO ----------------------------------------
 ;
 ; One name per destination instead of the string spelled at each copy, so a
-; layout other than "into the system" is a change to these four lines and not
-; to every copy in the file.  They are the system directories here, which is
-; what every install has done up to now and what this refactor deliberately
-; does not change: issue #9 asks for a drawer of its own with
-; `Assign LIBS: <drawer>/Libs ADD`, and that is the next commit, not this one.
+; layout other than "into the system" is a change to these names and not to
+; every copy in the file.  They begin as the system directories; section 4
+; replaces them together when the self-contained layout is selected.
 ;
 ; D_DEVS is the parent of Networks, NetInterfaces and Internet, so all three
 ; move together if it moves.
@@ -244,19 +242,16 @@
        "that command by hand, or run any network program: "
        "bsdsocket.library starts the stack when a program first opens "
        "it.\n\n"
-       "One more line goes in beside it, and stays there even when the "
-       "answer is no:"
-       "\n\n\tAssign >NIL: AmiTCP: SYS:\n\n"
-       "Programs built with ixemul, which is most of the GeekGadgets "
-       "collection, look for usergroup.library at the literal path "
-       "AmiTCP:libs/usergroup.library and report that there is no network "
-       "at all when they do not find it.  LIBS: is SYS:Libs on a stock "
-       "Workbench, so that assign points the path at the library this "
-       "installer put there.  It is left out on a machine that already has "
-       "a real AmiTCP installed, which owns the name.  It is only a default: "
-       "software such as ch_nfs may use another AmiTCP: drawer for its db/ "
-       "files.  In that case replace this line in S:User-Startup; AmiNetXDuo "
-       "uses the existing assign without changing it.\n\n"
+       "For an installation in its own drawer, the managed block first runs "
+       "ActivateAmiNetXDuo.  That command puts the drawer's LIBS:, C: and "
+       "DEVS: entries first while preserving every directory already in "
+       "those assigns.  This selects AmiNetXDuo at boot without moving or "
+       "renaming another stack's files.  Disable this block and enable the "
+       "other stack's startup block to switch back, then reboot; a loaded "
+       "bsdsocket.library cannot be exchanged in a running system.\n\n"
+       "AmiNetXDuo never creates or changes the AmiTCP: assign.  That name "
+       "belongs to AmiTCP and to software which keeps compatibility data "
+       "under AmiTCP:db.\n\n"
        "The installer changes only its own lines.  Everything else in "
        "S:User-Startup stays as it is, so it is safe to run this installer "
        "again."))
@@ -325,8 +320,9 @@
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
        "whichever TCP/IP stack was installed before -- AmiTCP, Miami, "
        "Roadshow, or an earlier AmiNetXDuo.\n\n"
-       "Two stacks cannot share one machine: there is one LIBS:bsdsocket."
-       "library, and the stack that owns it owns the network.\n\n"
+       "This question appears only for an installation into the system "
+       "directories.  An installation in its own drawer never changes this "
+       "file.\n\n"
        "If the answer is yes, the old file is renamed to bsdsocket.library."
        "old.  It is not deleted, so it can be restored by hand later.  If "
        "the answer is no, the other stack stays in place and only the "
@@ -570,42 +566,6 @@
 ;  2.  What is already here?
 ; ==========================================================================
 
-; --- an existing interface configuration ---------------------------------
-
-(set OLD_IF "")
-
-(if (= (exists "DEVS:NetInterfaces" (noreq)) 2)
-    (foreach "DEVS:NetInterfaces" "~(#?.info)"
-      (if (= (strlen OLD_IF) 0)
-          (if (< @each-type 0)
-              (set OLD_IF @each-name)))))
-
-(set HAVE_OLD (if (> (strlen OLD_IF) 0) 1 0))
-
-; --- an existing bsdsocket.library ---------------------------------------
-
-(set OLD_BSD (if (exists "LIBS:bsdsocket.library" (noreq)) 1 0))
-(set OLD_UG  (if (exists "LIBS:usergroup.library"  (noreq)) 1 0))
-(set OLD_TLS (if (exists "LIBS:tls.library"        (noreq)) 1 0))
-
-; VERSION AND REVISION, NOT VERSION ALONE.  getversion returns
-; (version << 16) | revision, and our $VER: string is "bsdsocket.library
-; 0.21.0", so the version half is 0 and dividing by 65536 printed
-; "already exists (version 0)" -- which a user reported, reasonably, as the
-; installer failing to see the version that was installed.  Roadshow and
-; AmiTCP both carry a non-zero major, so this only ever misread ours.
-;
-; Note this is NOT lib_Version, which is 4 for every AmiTCP-ABI library and
-; would tell the reader nothing about which one is on the machine.
-(set OLD_BSD_VER 0)
-(set OLD_BSD_REV 0)
-(if OLD_BSD
-  (
-    (set OLD_BSD_RAW (getversion "LIBS:bsdsocket.library"))
-    (set OLD_BSD_VER (/ OLD_BSD_RAW 65536))
-    (set OLD_BSD_REV (- OLD_BSD_RAW (* OLD_BSD_VER 65536)))
-  ))
-
 ; --- which driver is on this machine already? ----------------------------
 ;
 ; This is what makes NOVICE mode work: with no questions asked, the card is
@@ -769,10 +729,11 @@
 ; --- system directories, or a drawer of its own --------------------------
 ;
 ; Issue #9: a machine that keeps Roadshow, AmiTCP and this one side by side
-; cannot have all three owning LIBS:bsdsocket.library.  A drawer plus
-; `Assign LIBS: <drawer>/Libs ADD` is how AmiTCP and Miami did it, and an ADD
-; assign searches the system directory first, so the drawer only answers for
-; what the system does not have.
+; cannot have all three owning LIBS:bsdsocket.library.  In drawer mode every
+; file goes below the one documentation drawer chosen above.  At boot,
+; ActivateAmiNetXDuo prepends its Libs, C and Devs while retaining every old
+; member of those multi-assigns.  A plain ADD cannot select the stack: it adds
+; at the end, behind the system bsdsocket.library this feature must preserve.
 ;
 ; NOT ASKED AT NOVICE, where the Installer draws no questions at all: that
 ; level takes the system layout, which is what every install has done so far.
@@ -784,10 +745,12 @@
 ; Installer's radio pages cannot be driven from outside (see
 ; install/test/installdrive.c).
 (set FORCE_DRAWER (exists "S:AmiNetXDuo-drawer" (noreq)))
+(set DRAWER_LAYOUT 0)
 
 (if FORCE_DRAWER
   (
-    (set D_ROOT (tackon @default-dest "AmiNetXDuo"))
+    (set DRAWER_LAYOUT 1)
+    (set D_ROOT DOCDIR)
     (set D_LIBS (tackon D_ROOT "Libs"))
     (set D_C    (tackon D_ROOT "C"))
     (set D_DEVS (tackon D_ROOT "Devs"))
@@ -810,10 +773,12 @@
                         "bsdsocket.library into LIBS:, the commands into C:, "
                         "the driver and the configuration into DEVS:.\n\n"
                         "Into a drawer of its own keeps every file together "
-                        "and reaches it with assigns added to S:User-Startup, "
-                        "so this stack can sit beside another one and be "
-                        "switched between.  The assigns are ADD assigns, so "
-                        "anything already in LIBS: or C: still wins.\n\n"
+                        "and selects it at boot without moving another "
+                        "stack's files.  ActivateAmiNetXDuo puts this "
+                        "drawer's LIBS:, C: and DEVS: entries first and keeps "
+                        "the directories those assigns already contained.  "
+                        "Switch startup blocks and reboot to change stacks."
+                        "\n\n"
                         @askchoice-help))
              ; 22 characters is the ceiling; over it the page silently
              ; drops gadgets, which tools/check-installer refuses.
@@ -821,14 +786,11 @@
                       "Into its own drawer")
              (default 0)))
     (
-      (set D_ROOT
-        (tackon
-          (askdir
-            (prompt "Select where the drawer holding the stack goes.\n\n"
-                    "A drawer named \"AmiNetXDuo\" is made inside it.")
-            (help @askdir-help)
-            (default @default-dest))
-          "AmiNetXDuo"))
+      (set DRAWER_LAYOUT 1)
+      ; The documentation prompt already selected this exact drawer.  Asking
+      ; for a second parent produced two AmiNetXDuo drawers and made the
+      ; startup code guess which one held Terminal and which held the stack.
+      (set D_ROOT DOCDIR)
       (set D_LIBS (tackon D_ROOT "Libs"))
       (set D_C    (tackon D_ROOT "C"))
       (set D_DEVS (tackon D_ROOT "Devs"))
@@ -840,6 +802,46 @@
       (makedir (tackon D_DEVS "NetInterfaces"))
       (makedir (tackon D_DEVS "Internet"))
     )))
+
+; Everything from here on examines THE CHOSEN DESTINATION.  Before drawer
+; mode existed these tests quite reasonably named LIBS: and DEVS: directly;
+; leaving them that way made a private install back up another stack's files
+; and reuse another stack's configuration.
+(set D_BSD (tackon D_LIBS "bsdsocket.library"))
+(set D_UG   (tackon D_LIBS "usergroup.library"))
+(set D_TLS  (tackon D_LIBS "tls.library"))
+(set D_ANX  (tackon (tackon D_DEVS "Networks") "anxnet.device"))
+(set D_BSD_OLD (cat D_BSD ".old"))
+(set D_UG_OLD  (cat D_UG  ".old"))
+(set D_TLS_OLD (cat D_TLS ".old"))
+(set D_ANX_OLD (cat D_ANX ".old"))
+
+(set OLD_BSD (if (exists D_BSD (noreq)) 1 0))
+(set OLD_UG  (if (exists D_UG  (noreq)) 1 0))
+(set OLD_TLS (if (exists D_TLS (noreq)) 1 0))
+
+; VERSION AND REVISION, NOT VERSION ALONE.  getversion returns
+; (version << 16) | revision.  This is asked only for a system install; a
+; private reinstall replaces and backs up only its own copy without asking
+; permission to touch a file outside the drawer, because it never does.
+(set OLD_BSD_VER 0)
+(set OLD_BSD_REV 0)
+(if (AND OLD_BSD (= DRAWER_LAYOUT 0))
+  (
+    (set OLD_BSD_RAW (getversion D_BSD))
+    (set OLD_BSD_VER (/ OLD_BSD_RAW 65536))
+    (set OLD_BSD_REV (- OLD_BSD_RAW (* OLD_BSD_VER 65536)))
+  ))
+
+; Configuration belongs to the same layout as the libraries and commands.
+(set OLD_IF "")
+(set D_IFDIR (tackon D_DEVS "NetInterfaces"))
+(if (= (exists D_IFDIR (noreq)) 2)
+    (foreach D_IFDIR "~(#?.info)"
+      (if (= (strlen OLD_IF) 0)
+          (if (< @each-type 0)
+              (set OLD_IF @each-name)))))
+(set HAVE_OLD (if (> (strlen OLD_IF) 0) 1 0))
 
 ; A novice run makes no decisions of its own, so with nothing detected and no
 ; existing configuration to keep, there is no honest default to fall back on.
@@ -1101,7 +1103,7 @@
 
 (set REPLACE_LIB 1)
 
-(if OLD_BSD
+(if (AND OLD_BSD (= DRAWER_LAYOUT 0))
     (set REPLACE_LIB
       (askbool
         (prompt (F_OLDLIB OLD_BSD_VER OLD_BSD_REV))
@@ -1201,25 +1203,25 @@
 
 (if OLD_BSD
   (
-    (if (exists "LIBS:bsdsocket.library.old" (noreq))
-        (delete "LIBS:bsdsocket.library.old"
-                (prompt "Removing the previous LIBS:bsdsocket.library.old")
+    (if (exists D_BSD_OLD (noreq))
+        (delete D_BSD_OLD
+                (prompt "Removing the previous bsdsocket.library.old")
                 (help @copyfiles-help)
                 (optional "force" "nofail")))
-    (rename "LIBS:bsdsocket.library" "LIBS:bsdsocket.library.old"
-            (prompt "Renaming the old LIBS:bsdsocket.library out of the way")
+    (rename D_BSD D_BSD_OLD
+            (prompt "Renaming the old bsdsocket.library out of the way")
             (help H_REPLACELIB))
   ))
 
 (if OLD_UG
   (
-    (if (exists "LIBS:usergroup.library.old" (noreq))
-        (delete "LIBS:usergroup.library.old"
-                (prompt "Removing the previous LIBS:usergroup.library.old")
+    (if (exists D_UG_OLD (noreq))
+        (delete D_UG_OLD
+                (prompt "Removing the previous usergroup.library.old")
                 (help @copyfiles-help)
                 (optional "force" "nofail")))
-    (rename "LIBS:usergroup.library" "LIBS:usergroup.library.old"
-            (prompt "Renaming the old LIBS:usergroup.library out of the way")
+    (rename D_UG D_UG_OLD
+            (prompt "Renaming the old usergroup.library out of the way")
             (help H_REPLACELIB))
   ))
 
@@ -1242,43 +1244,6 @@
   (dest   D_LIBS)
   (confirm)
   (optional "force"))
-
-; --- AmiTCP: -------------------------------------------------------------
-;
-; LIBS: is where usergroup.library belongs and where every caller that asks
-; for it by name alone finds it.  A few do not ask by name alone.  ixnet.
-; library, which every ixemul program goes through, opens the literal path
-; AmiTCP:libs/usergroup.library, and on failing that lookup it CLOSES the
-; bsdsocket.library it had already opened -- so socket() answers ENOSYS and a
-; GeekGadgets binary reports no network at all.  That is how wget broke.
-;
-; bsdsocket.library holds usergroup.library open for the life of the stack,
-; which satisfies that lookup on its own: exec resolves a path-qualified
-; OpenLibrary by file part against the already-open list.  This assign is the
-; second half, for the caller that Locks or Opens the path rather than
-; OpenLibrary'ing it.
-;
-; SYS: is the target.  LIBS: is SYS:Libs on a stock Workbench, so
-; AmiTCP:libs/usergroup.library resolves to the copy installed above with no
-; second copy on disk.
-;
-; NOT DONE IF SOMETHING ELSE ALREADY OWNS THE NAME.  A machine with a real
-; AmiTCP on it has an AmiTCP: pointing at that installation, holding its db
-; drawer and its own libs, and claiming the name would break it.  Roadshow,
-; for comparison, makes no such assign at all and relies on LIBS: alone.
-;
-; The test is for AmiTCP:db or AmiTCP:bin, and NOT for AmiTCP: itself, which
-; on the second run of this installer is the assign the first run made.  Both
-; of those drawers hold a real AmiTCP's own files, and neither is in a stock
-; SYS:, so their absence is what says the name is free.
-
-(set HAVE_AMITCP
-  (if (exists "AmiTCP:db" (noreq))
-      1
-      (if (exists "AmiTCP:bin" (noreq)) 1 0)))
-
-(if (NOT HAVE_AMITCP)
-    (makeassign "AmiTCP" "SYS:" (safe)))
 
 ; --- anxnet.device -------------------------------------------------------
 ;
@@ -1311,18 +1276,15 @@
               "drivers live in")
       (help   @makedir-help))
 
-    (if (exists "DEVS:Networks/anxnet.device" (noreq))
+    (if (exists D_ANX (noreq))
       (
-        (if (exists "DEVS:Networks/anxnet.device.old" (noreq))
-            (delete "DEVS:Networks/anxnet.device.old"
-                    (prompt "Removing the previous "
-                            "DEVS:Networks/anxnet.device.old")
+        (if (exists D_ANX_OLD (noreq))
+            (delete D_ANX_OLD
+                    (prompt "Removing the previous anxnet.device.old")
                     (help @copyfiles-help)
                     (optional "force" "nofail")))
-        (rename "DEVS:Networks/anxnet.device"
-                "DEVS:Networks/anxnet.device.old"
-                (prompt "Renaming the old DEVS:Networks/anxnet.device out of "
-                        "the way")
+        (rename D_ANX D_ANX_OLD
+                (prompt "Renaming the old anxnet.device out of the way")
                 (help H_ANXNET))
       ))
 
@@ -1356,13 +1318,13 @@
     ; Renaming aside also lets the copy succeed when the library is held open.
     (if OLD_TLS
       (
-        (if (exists "LIBS:tls.library.old" (noreq))
-            (delete "LIBS:tls.library.old"
-                    (prompt "Removing the previous LIBS:tls.library.old")
+        (if (exists D_TLS_OLD (noreq))
+            (delete D_TLS_OLD
+                    (prompt "Removing the previous tls.library.old")
                     (help @copyfiles-help)
                     (optional "force" "nofail")))
-        (rename "LIBS:tls.library" "LIBS:tls.library.old"
-                (prompt "Renaming the old LIBS:tls.library out of the way")
+        (rename D_TLS D_TLS_OLD
+                (prompt "Renaming the old tls.library out of the way")
                 (help H_REPLACELIB))
       ))
     (copylib
@@ -1457,7 +1419,7 @@
           "network cards")
   (help   @makedir-help))
 
-(makedir "DEVS:Internet"
+(makedir (tackon D_DEVS "Internet")
   (prompt "Creating DEVS:Internet, the drawer that holds the name server "
           "and routing configuration")
   (help   @makedir-help))
@@ -1572,7 +1534,7 @@
 ; likely edited.  The stack has sane built-in defaults for all four, so
 ; overwriting somebody's services file to gain nothing would be rude.
 
-(if (exists "DEVS:Internet/hosts" (noreq))
+(if (exists (tackon D_DEVS "Internet/hosts") (noreq))
     ""
     (textfile
       (prompt "Writing DEVS:Internet/hosts")
@@ -1589,7 +1551,7 @@
 (set NDB_N 0)
 (while (set NDB_F (select NDB_N "protocols" "services" "networks" ""))
   (
-    (if (exists (tackon "DEVS:Internet" NDB_F) (noreq))
+    (if (exists (tackon (tackon D_DEVS "Internet") NDB_F) (noreq))
         ""
         (copyfiles
           (prompt ("Installing DEVS:Internet/%s" NDB_F))
@@ -1754,39 +1716,22 @@
 ; installer put the page in is wherever the user said, so the assign is the
 ; only stable name for it.
 
-; The AmiTCP: line goes FIRST, and is there whether or not the network starts
-; by itself: it costs nothing, and the program it is for -- an ixemul binary
-; opening a socket -- is the kind that gets run by hand on a machine that was
-; installed with the automatic start turned off.  A plain assign and not ADD:
-; if a real AmiTCP is installed later, its own installer appends its line to
-; S:User-Startup after this one, so the real one wins.  See the note beside
-; the makeassign above.
-
 ; DO_BOOT counts the lines rather than testing BOOT_CMD itself: (if) wants a
 ; number, and a string that does not begin with a digit is 0 to it, so an (if
 ; BOOT_CMD) would be false however much was in it.
 (set BOOT_CMD "")
 (set DO_BOOT 0)
 
-; FIRST in the block, before anything that opens the library or runs a command
-; out of the drawer.  A drawer install without these lines is a drawer nothing
-; can reach, so it also forces the block to be written.
+; FIRST in the block, before anything opens a library.  ADD alone is not a
+; selector: AssignAdd appends, so an existing system bsdsocket.library still
+; wins.  ActivateAmiNetXDuo prepends the three private directories and retains
+; the complete old assignment lists behind them.  The command is named through
+; AmiNetXDuo: because C: has deliberately not been changed yet.
 (if (> (strlen D_ROOT) 0)
   (
     (set BOOT_CMD
       (cat ("Assign AmiNetXDuo: \"%s\"\n" D_ROOT)
-           "Assign LIBS: AmiNetXDuo:Libs ADD\n"
-           "Assign C:    AmiNetXDuo:C ADD\n"
-           "Assign DEVS: AmiNetXDuo:Devs ADD\n"))
-    (set DO_BOOT 1)
-  ))
-
-(if (NOT HAVE_AMITCP)
-  (
-    ; cat, not set: the drawer assigns above are already in BOOT_CMD and a
-    ; plain set threw them away -- measured as a User-Startup block holding
-    ; the AmiTCP assign and no Assign AmiNetXDuo: at all.
-    (set BOOT_CMD (cat BOOT_CMD "Assign >NIL: AmiTCP: SYS:\n"))
+           "AmiNetXDuo:C/ActivateAmiNetXDuo\n"))
     (set DO_BOOT 1)
   ))
 
@@ -1799,8 +1744,8 @@
 
 ; The assign is written here ONLY when the drawer install did not already
 ; write one.  A drawer install emits `Assign AmiNetXDuo: "<D_ROOT>"` at the top
-; of this block, and that name is load-bearing: the three ADD assigns under it
-; are written against it, and it is how anything else refers to the drawer.  A
+; of this block, and that name is load-bearing: the selector and anything else
+; refer to the private installation through it.  A
 ; second `Assign AmiNetXDuo:` here does not add a name, it REPOINTS the one
 ; already given, so on a drawer install with httpd the drawer's own name ended
 ; up meaning the documentation directory instead.
@@ -1821,13 +1766,11 @@
     ))
 
 ; Three cases, and (startup) covers all of them because it writes the block
-; whole: the network lines and the assign, the assign on its own, or no block
-; at all on the machine that already has an AmiTCP and does not want the
-; automatic start either.
+; whole: selection plus network start, selection on its own for a drawer
+; install, or no block for a system install that must not start at boot.
 (set P_BOOT
-  (cat "Adding one line to S:User-Startup: the AmiTCP: assign that ixemul "
-       "programs need in order to find usergroup.library.  The network does "
-       "not start by itself."))
+  (cat "Adding AmiNetXDuo's drawer selector to S:User-Startup.  Its files "
+       "are selected at boot, but the network does not start by itself."))
 
 (if DO_STARTUP
     (set P_BOOT
