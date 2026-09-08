@@ -445,6 +445,14 @@ typedef struct AmiRxSlot
 {
     struct IOSana2Req   req;
     struct AmiSana2Rx  *owner;
+    /* &owner->iface->stats, resolved once when the reader starts.  The copy
+       hooks below run at interrupt level on EVERY frame and reached it as
+       slot->owner->iface->stats -- two loads and two NULL tests each time,
+       and twice per frame, because the extern copy+sum call between the two
+       counters is a memory clobber the compiler must reload across.  NULL
+       only if a slot is used before ami_sana2_rx_start() filled it in, which
+       the hooks still test for. */
+    AmiSana2Stats      *stats;
     NX_PACKET          *packet;     /* pinned for the life of the request  */
     UCHAR              *dst;        /* where S2_CopyToBuff must write      */
     ULONG               capacity;   /* bytes available at dst              */

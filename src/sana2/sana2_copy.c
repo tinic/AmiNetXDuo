@@ -102,10 +102,11 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      */
     slot->summed = FALSE;
 
-    /* The slot knows its reader and the reader knows the interface, where a
-       counter a user can read has to live. */
-    if (slot->owner != NULL && slot->owner->iface != NULL)
-        slot->owner->iface->stats.rx_copy_hook++;
+    /* The counter a user can read lives on the interface; the slot carries a
+       pointer straight to it (sana2_internal.h), because this runs at
+       interrupt level on every frame. */
+    if (slot->stats != NULL)
+        slot->stats->rx_copy_hook++;
 
     if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 1) == 0)
     {
@@ -141,8 +142,8 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
         }
 
         slot->summed = TRUE;
-        if (slot->owner != NULL && slot->owner->iface != NULL)
-            slot->owner->iface->stats.rx_copy_summed++;
+        if (slot->stats != NULL)
+            slot->stats->rx_copy_summed++;
         slot->copied = len;
 
         return TRUE;
@@ -437,12 +438,12 @@ VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
     /* Count completion, not the earlier claim: a core may claim a slot and then
        put it back when its hardware drain fails.  These ABI-stable counter
        names predate the direct pair, so "copy hook" means either fill path. */
-    if (slot->owner != NULL && slot->owner->iface != NULL)
+    if (slot->stats != NULL)
     {
-        slot->owner->iface->stats.rx_copy_hook++;
-        slot->owner->iface->stats.rx_direct_fill++;
+        slot->stats->rx_copy_hook++;
+        slot->stats->rx_direct_fill++;
         if (summed != 0)
-            slot->owner->iface->stats.rx_copy_summed++;
+            slot->stats->rx_copy_summed++;
     }
 
 #ifdef AMINETXDUO_RX_VERIFY

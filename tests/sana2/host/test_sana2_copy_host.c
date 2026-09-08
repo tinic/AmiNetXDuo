@@ -180,6 +180,9 @@ static void test_rx_direct(void)
     memset(&pkt, 0, sizeof(pkt));
     owner.iface   = &iface;
     slot.owner    = &owner;
+    /* ami_sana2_rx_start() resolves this once per slot; the hooks reach the
+       counters through it rather than chasing owner->iface per frame. */
+    slot.stats    = &iface.stats;
     slot.packet   = &pkt;
     slot.dst      = dst;
     slot.capacity = sizeof(dst);

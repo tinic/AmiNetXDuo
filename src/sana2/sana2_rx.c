@@ -1425,6 +1425,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     {
         rx->slot[i].req   = iface->templ;
         rx->slot[i].owner = rx;
+        rx->slot[i].stats = &iface->stats;
         rx->slot[i].req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
         rx->slot[i].req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
         rx->slot[i].req.ios2_Req.io_Message.mn_Length =
