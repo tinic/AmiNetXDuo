@@ -1568,6 +1568,36 @@ stage_e2e() {
         3) fail "release e2e: no second machine could reach the Amiga" ;;
         *) fail "release e2e: exit $rc" ;;
     esac
+    [ "$rc" = 0 ] || return "$rc"
+
+    #
+    # THE DRAWER CONTRACT HAD NO STAGE AT ALL.  run-workbench.sh -D stages a
+    # machine that already carries another TCP/IP stack and then checks that
+    # not one byte of its libraries, driver, configuration or AmiTCP:db moved
+    # (run-workbench.sh:1146-1303).  That is the strongest thing this tree
+    # asserts about coexisting with Roadshow or AmiTCP, and grepping this file
+    # for run-workbench.sh finds -H and nothing else: it has only ever been run
+    # by hand.  Same class as stage_rate being declared and never invoked.
+    #
+    # -g rather than plain -D, and the difference is the whole point.  -D
+    # plants S:AmiNetXDuo-drawer, Install-AmiNetXDuo:747 reads it into
+    # FORCE_DRAWER, and :769 asks the layout question ONLY when FORCE_DRAWER is
+    # 0 -- so the scripted route SKIPS the page a person actually answers.  -g
+    # omits the sentinel and answers the askchoice, which covers both the
+    # contract and the page.
+    #
+    # It reuses the archive and the ingredients already proven above, so the
+    # cost is one more boot, not another set of requirements.
+    note "drawer layout, answered through its own page"
+    "$ROOT/install/test/run-workbench.sh" -l AVERAGE -D -g -p drawer \
+        -a "$archive" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  a self-contained install, chosen from the GUI page" ;;
+        2) fail "release e2e drawer: an ingredient is missing on this machine" ;;
+        3) fail "release e2e drawer: no second machine could reach the Amiga" ;;
+        *) fail "release e2e drawer: exit $rc" ;;
+    esac
     return "$rc"
 }
 
