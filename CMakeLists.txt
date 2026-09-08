@@ -1107,6 +1107,17 @@ if(AMINETXDUO_RX_VERIFY)
     add_compile_definitions(AMINETXDUO_RX_VERIFY)
 endif()
 
+# The four rxverify counters that fire on every received frame, inside the
+# protection hold.  Off by default; see src/net68k/net68k.h.  The error and
+# skip counters are unconditional and do not need this.
+option(AMINETXDUO_RX_VERIFY_STATS
+       "Count rxverify fast-path hits per frame (diagnostic, costs receive)"
+       OFF)
+
+if(AMINETXDUO_RX_VERIFY_STATS)
+    add_compile_definitions(AMINETXDUO_RX_VERIFY_STATS)
+endif()
+
 add_library(threadx STATIC ${THREADX_SOURCES})
 target_include_directories(threadx PUBLIC
     ${AMINETXDUO_PORT_INCLUDES} "${AMINETXDUO_THREADX}/common/inc")

@@ -474,11 +474,14 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
      * confirmed, 44 serial lines and none of them this.  The arm that does
      * reach it is the NetShutdown one (tools/ci.sh bridged).
      */
-    AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu (v6 %lu, "
+    AMI_ERROR("net68k rxverify: %sip_ok %lu, transport_ok %lu (v6 %lu, "
              "from_copy %lu, reread %lu), "
              "bad_ip %lu, bad_transport %lu; skip short %lu / ver %lu / "
              "len %lu / frag %lu / proto %lu / udp0 %lu / ext %lu; "
              "v6_ext %lu",
+             N68K_RXV_HOT_BUILT ? ""
+                 : "(per-frame counters not built, "
+                   "-DAMINETXDUO_RX_VERIFY_STATS=ON) ",
              (unsigned long)n68k_rx_verify_stats.ip_ok,
              (unsigned long)n68k_rx_verify_stats.transport_ok,
              (unsigned long)n68k_rx_verify_stats.v6_ok,

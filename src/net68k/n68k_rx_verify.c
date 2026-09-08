@@ -356,8 +356,8 @@ UINT        ok;
         return (0UL);
     }
 
-    n68k_rx_verify_stats.transport_ok++;
-    n68k_rx_verify_stats.v6_ok++;
+    N68K_RXV_HOT(transport_ok);
+    N68K_RXV_HOT(v6_ok);
     if (offset > 40U)
     {
         n68k_rx_verify_stats.v6_ext++;
@@ -439,7 +439,7 @@ UINT        ok;
     }
 
     flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
-    n68k_rx_verify_stats.ip_ok++;
+    N68K_RXV_HOT(ip_ok);
 
     /* ---- the transport ---------------------------------------------------
      *
@@ -534,7 +534,7 @@ UINT        ok;
         break;
     }
 
-    n68k_rx_verify_stats.transport_ok++;
+    N68K_RXV_HOT(transport_ok);
 
     return (flags);
 }
@@ -679,9 +679,9 @@ UINT    offset;
             return (0UL);
         }
 
-        n68k_rx_verify_stats.transport_ok++;
-        n68k_rx_verify_stats.v6_ok++;
-        n68k_rx_verify_stats.from_copy++;
+        N68K_RXV_HOT(transport_ok);
+        N68K_RXV_HOT(v6_ok);
+        N68K_RXV_HOT(from_copy);
         if (offset > 40U)
         {
             n68k_rx_verify_stats.v6_ext++;
@@ -738,7 +738,7 @@ UINT    offset;
     }
 
     flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
-    n68k_rx_verify_stats.ip_ok++;
+    N68K_RXV_HOT(ip_ok);
 
     /* ---- transport = carried - header, plus the pseudo header ----------- */
     sum =  carried + (~head);
@@ -767,8 +767,8 @@ UINT    offset;
               ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
               : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM;
 
-    n68k_rx_verify_stats.transport_ok++;
-    n68k_rx_verify_stats.from_copy++;
+    N68K_RXV_HOT(transport_ok);
+    N68K_RXV_HOT(from_copy);
 
     return (flags);
 }
