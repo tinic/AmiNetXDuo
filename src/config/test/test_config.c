@@ -171,12 +171,6 @@ APTR ami_cfg_read_file(const char *path, ULONG *size_out)
 static int failures;
 static int checks;
 
-/* CHECK_STR is handed arrays as often as pointers, and `arr ? arr : ...` is
-   -Waddress. The decay happens at the call, so the test is a real one here. */
-static const char *or_null(const char *s)
-{
-    return s != NULL ? s : "(null)";
-}
 
 #define CHECK(cond)                                                          \
     do {                                                                     \
@@ -187,15 +181,33 @@ static const char *or_null(const char *s)
         }                                                                    \
     } while (0)
 
-#define CHECK_STR(got, want)                                                 \
-    do {                                                                     \
-        checks++;                                                            \
-        if ((got) == NULL || strcmp((got), (want)) != 0) {                    \
-            failures++;                                                      \
-            printf("  FAIL %s:%d: expected \"%s\", got \"%s\"\n",            \
-                   __FILE__, __LINE__, (want), or_null(got));                \
-        }                                                                    \
-    } while (0)
+/*
+ * A FUNCTION, not a macro body.  CHECK_STR is handed arrays as often as
+ * pointers, and the null guard can only ever fire for the pointer ones: an
+ * array is not null and never will be.  That is not fixable and is not what
+ * this is for.  What a function fixes is that the compiler is no longer asked
+ * to prove the same tautology at 132 expansion sites, which is what put a
+ * -Wno-error=address escape on this file in the first place.
+ *
+ * Note the escape was already dead when it was removed.  It was written for
+ * `(got) ? (got) : "(null)"` in the printf argument -- that form still gives
+ * 7 -Werror=address on gcc 14.2 -- and or_null() had since replaced it, which
+ * silenced the warning without anyone taking the escape back out.
+ */
+static void check_str(const char *got, const char *want,
+                      const char *file, int line)
+{
+    checks++;
+
+    if (got == NULL || strcmp(got, want) != 0)
+    {
+        failures++;
+        printf("  FAIL %s:%d: expected \"%s\", got \"%s\"\n",
+               file, line, want, (got != NULL) ? got : "(null)");
+    }
+}
+
+#define CHECK_STR(got, want) check_str((got), (want), __FILE__, __LINE__)
 
 #define CHECK_IP(got, a, b, c, d)                                            \
     CHECK((got) == (((ULONG)(a) << 24) | ((ULONG)(b) << 16) |                \

@@ -37,16 +37,26 @@ set(AMINETXDUO_WARNING_FLAGS "-Wall;-Wextra" CACHE STRING
 # Per-file escapes, as <path fragment> <extra flags> pairs.  Every entry is a
 # bug someone has to fix, so each one says what it is; this list should shrink.
 #
-#   src/config/test/test_config.c
-#       CHECK_STR(text, "...") expands to `(got) ? (got) : "(null)"` with `got`
-#       an ARRAY, so the test is always true.  GCC says so (-Waddress, part of
-#       -Wall); clang does not, which is why it went unnoticed.  Harmless as
-#       written, an array is never null, but it means the macro's null
-#       guard does nothing for its array callers.  The fix is one line in the
-#       macro (take a pointer, or drop the guard); it lives under src/, which
-#       the change that added this file was not allowed to touch.
-set(AMINETXDUO_WARNING_EXEMPT
-    "src/config/test/test_config.c" "-Wno-error=address")
+# IT IS EMPTY, and the last entry to leave is worth recording, because it did
+# not leave for the reason its own note gave.
+#
+# src/config/test/test_config.c held -Wno-error=address for CHECK_STR's
+# `(got) ? (got) : "(null)"` printf argument, which is -Waddress when `got` is
+# an array.  That form was replaced by an or_null() helper at some point after
+# the escape was written, and nobody took the escape back out: measured on gcc
+# 14.2 with this file's own flags, the ternary form gives 7 -Werror=address and
+# the or_null form gives none.  SO THE ESCAPE HAD BEEN DEAD, and an escape that
+# is dead is worse than one that is needed -- it is a hole nothing is watching,
+# ready for the next real warning in that file to fall through silently.
+#
+# CHECK_STR is a function now, so the null guard is expressed once instead of
+# at 132 expansion sites.  That does not make the guard fire for array callers;
+# nothing can, an array is not null.  It means the compiler is not asked to
+# prove the same tautology 132 times, which is the thing that needed an escape.
+#
+# Adding an entry here is fine.  Leaving a dead one is not: check that the
+# warning still fires before assuming an entry is load-bearing.
+set(AMINETXDUO_WARNING_EXEMPT)
 
 function(_aminetxduo_warnings_apply_dir dir)
 
