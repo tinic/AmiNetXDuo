@@ -82,7 +82,7 @@ gen() {   # destination, then the command
 # coverage.  Greedy set cover over the 143 vectors: the question a harness asks
 # is "which handful covers the most API", not "which program is biggest".
 gen /home/turo/anxd-aminet/candidates.tsv \
-    python3 /home/turo/anxd-aminet/candidates.py
+    python3 /home/turo/anxd-aminet/candidates.py /home/turo/anxd-aminet
 echo "candidates: $(tail -1 /home/turo/anxd-aminet/candidates.tsv)"
 
 # Per-LVO usage counts, regenerated every tick alongside the candidates.
