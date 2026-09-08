@@ -82,7 +82,16 @@ if [ ! -s "$OUT/v.s" ]; then
 fi
 
 # Instructions between the label and the next directive that ends the body.
+# STOP AT THE NEXT FUNCTION LABEL, not only at a directive.  This target's
+# assembler output carries NO .size or .type at all, so a directive-only rule
+# runs to end of file for any function that is not followed by a .globl -- it
+# gave the right answer here only because _n68k_rx_verify_stats follows with
+# one.  The same rule applied to a static function in another file counted
+# four functions as one (180 against a real 62).  A label at column one
+# starting with an underscore ends the body on this target; local labels are
+# L1, L2 and do not.
 count=$(awk '/^_n68k_rx_verify_sum:/{f=1;next}
+             f && /^_[A-Za-z]/{exit}
              f && /^[ \t]*\.(size|globl|type)/{exit}
              f && /^[ \t]+[a-z]/{n++}
              END{print n+0}' "$OUT/v.s")
