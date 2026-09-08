@@ -650,6 +650,31 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # ...AND WIRED IS NOT RUN.  check-stage-coverage above asks whether a
+    # workflow NAMES each stage; it is green on emulator.yml, which names
+    # sixteen of them and has 0 successes in its last 20 runs.  This asks the
+    # question none of the wiring gates ask -- did the thing that calls it
+    # finish -- and carries the sixteen as a declared baseline so a
+    # SEVENTEENTH going dark, or one of them coming back, is the failure.
+    #
+    # It needs gh and the network.  When they are absent this is a SKIP through
+    # ci.sh's own mechanism, so it lands in the summary's skipped list rather
+    # than vanishing into an exit 0 nobody reads.
+    if tools/check-stage-freshness.sh > "$BUILD/stage-freshness.log" 2>&1; then
+        if grep -q "^stage_freshness=SKIPPED" "$BUILD/stage-freshness.log"; then
+            skip "stage freshness: no gh cli here, so nothing checked whether\
+ the workflows behind these stages still finish"
+        else
+            note "stage freshness: $(sed -n 's/^stage_freshness_total //p' \
+                  "$BUILD/stage-freshness.log")"
+        fi
+    else
+        cat "$BUILD/stage-freshness.log"
+        fail "a stage's workflow has stopped finishing, or a dead one revived\
+ (tools/check-stage-freshness.sh)"
+        return 1
+    fi
+
     # The SANA-II reader's per-drain sweep is skipped on a counter, and a
     # counter that stops matching the flag it shadows stops the ring being
     # refilled with no error anywhere.  One writer, enforced here.
