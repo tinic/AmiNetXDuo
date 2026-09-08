@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.26.4
+
 ### Compatibility
 
 - DHCP on `genet.device` (A1200/PiStorm32): DHCP task stack restored from 2 KiB to 4 KiB for synchronous SANA-II transmit calls
@@ -37,7 +39,7 @@ Totals are end to end; per-change figures do not sum to them.
 
 | change | rx | tx |
 |---|---|---|
-| TX completion handback takes a compiler barrier, not `Forbid()`/`Permit()` | X-Surf 100 confirmation pending | same path |
+| TX completion handback takes a compiler barrier, not `Forbid()`/`Permit()` | X-Surf 100 carries bytes both ways on the vendor driver | same path |
 | the SANA-II reader stops sweeping 32 read slots per drain to post nothing | +3.16% | +5.30% |
 | the LANCE receive buffer starts two bytes in, landing the payload on a longword | +3.09% | flat |
 | `le_rint` stops rewriting a descriptor field the chip never writes | none | none |
