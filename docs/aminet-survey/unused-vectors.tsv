@@ -92,11 +92,11 @@ offset	name	status
 -570	getprotoent	NO_CALLER
 -576	setservent	NO_CALLER
 -582	endservent	NO_CALLER
--588	getservent	NO_CALLER
+-588	getservent	USED
 -594	inet_aton	NO_CALLER
 -600	inet_ntop	NO_CALLER
--606	inet_pton	NO_CALLER
--612	In_LocalAddr	NO_CALLER
+-606	inet_pton	USED
+-612	In_LocalAddr	USED
 -618	In_CanForward	NO_CALLER
 -624	mbuf_copym	NO_CALLER
 -630	mbuf_copyback	NO_CALLER

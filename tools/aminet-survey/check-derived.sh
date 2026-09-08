@@ -85,6 +85,25 @@ if ! diff -q "$T/candidates.tsv" "$D/candidates.tsv" > /dev/null 2>&1; then
     exit 1
 fi
 
+# EVERY ROW AT THE CURRENT SCANNER VERSION.  A ledger that mixes revisions
+# cannot be reasoned about -- an early row is not a weaker result, it may be a
+# wrong one -- and until scanner=N existed there was no way to even ask.  Now
+# that there is, a stale row must not sit quietly in the published ledger:
+# rescan.sh exists to clear them and this is what says one is there.
+want=$(python3 -c "
+import sys; sys.path.insert(0, 'tools/aminet-survey'); import scan
+print(scan.SCANNER_VERSION)") || { echo "check_derived=FAIL reading SCANNER_VERSION"; exit 2; }
+stale=$(awk -F'\t' -v w="scanner=$want" 'NR>1 && $1!="archive" && $7!=w' \
+        "$D/results.tsv" | wc -l)
+if [ "$stale" -ne 0 ]; then
+    echo "check_derived=FAIL $stale ledger rows are not at scanner=$want --"\
+         "run tools/aminet-survey/rescan.sh"
+    awk -F'\t' -v w="scanner=$want" 'NR>1 && $1!="archive" && $7!=w {print "  "$1" "$7}' \
+        "$D/results.tsv" | head -4
+    exit 1
+fi
+echo "check_derived ledger_rows=$(awk -F'\t' 'NR>1' "$D/results.tsv" | wc -l) all_at=scanner=$want"
+
 rows=$(awk -F'\t' 'NR>1' "$D/lvo-usage.tsv" | wc -l)
 called=$(awk -F'\t' 'NR>1 && $3>0' "$D/lvo-usage.tsv" | wc -l)
 rare=$(awk -F'\t' 'NR>1 && !s[$2]++' "$D/lvo-rare.tsv" | wc -l)
