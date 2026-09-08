@@ -86,6 +86,19 @@ ROUNDS="${AMINETXDUO_RATE_ROUNDS:-5}"
 # 12 s, not run-iperf.sh's 3 s default: measured to cut the per-run sd from
 # 2.06% to 1.65%.  Exported below so every round of both arms gets it.
 SECS="${AMINETXDUO_IPERF_SECS:-12}"
+# FOUR RECEIVE TRANSFERS A BOOT, AVERAGED INTO ONE VALUE FOR THAT BOOT.
+#
+# Measured 2026-09-08: one transfer a boot at SECS=12 gives a per-run sd of
+# 1.65%; four transfers averaged per boot gave per-boot sd of 0.57-1.52% across
+# two 12-and-20-boot runs.  The boot is the expensive part, so the extra three
+# transfers cost seconds and buy most of a percent of precision.
+#
+# THE BOOT IS THE STATISTICAL UNIT, NOT THE TRANSFER.  Four transfers inside
+# one boot are correlated; treating them as independent samples overstates
+# significance badly -- permuting per transfer put a real result at p=0.0001
+# where permuting per boot put it at p=0.0012.  So they are AVERAGED here and
+# one number per boot goes into the median.
+REPEAT="${AMINETXDUO_IPERF_RX_REPEAT:-4}"
 PASSES=2
 IFACE="${AMINETXDUO_RATE_IFACE:-}"
 PEER="${AMINETXDUO_RATE_PEER:-}"
@@ -250,13 +263,31 @@ run_arm() {                             # $1 dir  $2 label  $3 pass  $4 position
     while [ "$r" -le "$ROUNDS" ]; do
         out="$base-r$r.log"
         AMINETXDUO_IPERF_SECS="$SECS" \
+        AMINETXDUO_IPERF_RX_REPEAT="$REPEAT" \
         tests/tools/run-iperf.sh -b build/ab -B "$IFACE" -P "$PEER" \
             < /dev/null > "$out" 2>&1
         rc=$?
         [ "$rc" = 0 ] || bad=$((bad + 1))
 
+        # Every receive transfer this boot ran, averaged into ONE value.  The
+        # count is asserted: a BASE ref that predates AMINETXDUO_IPERF_RX_REPEAT
+        # silently runs one transfer where HEAD runs four, both rc=0, and the
+        # extra ones are later-in-boot -- a confound pointing the same way as
+        # the effect.  That is not hypothetical, it happened on 2026-09-08.
+        seen=$(sed -n 's/^dir=tcp-rx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
+               sort -u | wc -l | tr -d ' ')
+        if [ "$seen" != "$REPEAT" ]; then
+            echo "  rate_ab=RATE_COUNT_MISMATCH arm=$2 round=$r got=$seen" \
+                 "want=$REPEAT -- the arms are not being measured the same way"
+            bad=$((bad + 1))
+        fi
         sed -n 's/^dir=tcp-rx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
-            head -1 >> "$base.rx"
+            sort -u |
+            awk '{ s += $1; c++ } END { if (c) printf "%d\n", s / c }' \
+            >> "$base.rx"
+
+        # Transmit is NOT repeated -- RX_REPEAT only multiplies the receive
+        # arm -- so this stays one line a boot.
         sed -n 's/^dir=tcp-tx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
             head -1 >> "$base.tx"
         r=$((r + 1))
@@ -298,5 +329,7 @@ echo "rate_ab=done passes=$PASSES rounds=$ROUNDS secs=$SECS base=$BASE_REF head=
 # What this run could actually have resolved, from the sd measured on
 # 2026-09-07 -- so a small number in the output is read as "under the
 # floor" rather than as a result.
+# 1.1% is the per-BOOT sd with REPEAT transfers averaged (measured 0.57-1.52%
+# across two runs), not the 1.65% a single transfer a boot gives.
 echo "rate_ab=resolves >=$(awk -v n="$((ROUNDS * PASSES))" \
-    'BEGIN { printf "%.1f", 1.96 * 1.65 * sqrt(2.0 / n) }')% at p<0.05"
+    'BEGIN { printf "%.1f", 1.96 * 1.1 * sqrt(2.0 / n) }')% at p<0.05"

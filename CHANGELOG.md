@@ -44,6 +44,25 @@ What changed, and what each was worth on its own:
 | noise | three null controls on identical binaries gave +0.22%, +2.75%, -0.29%; one A/B settles nothing between 1 and 3 per cent |
 | method | clean build per arm, md5 checked, six rounds or sittings, order alternated, two sittings for anything under 3 per cent |
 
+Later in the same cycle, measured with the harness rebuilt around what the rig
+can actually resolve: twenty boots an arm, four receive transfers a boot
+averaged into one value, the harness itself pinned to one revision so both
+arms are measured by the same code.
+
+| | before | now | |
+|---|---|---|---|
+| iperf tcp-rx | 5,995,824 | **6,076,460** | **+1.34%**, p=0.0012 |
+
+| what it cost to lose | |
+|---|---|
+| the fused copy-and-checksum, forced off | **-8.7%**, p<0.00001 |
+
+| | |
+|---|---|
+| unit | the boot, not the transfer: four transfers inside one boot are correlated, and permuting them as independent put this result at p=0.0001 instead of p=0.0012 |
+| the fused fill | a card whose receive fill produces no sum has every frame walked a second time; `netstat` prints `summed while filling` against `copy/direct fill` |
+| floor | ~1.0% at ten boots an arm; a single five-round A/B settles nothing below three per cent |
+
 ## 0.26.3
 
 ### Memory a running machine keeps
