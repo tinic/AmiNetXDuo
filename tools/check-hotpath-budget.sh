@@ -77,6 +77,12 @@ TABLE = {
                          ("_ami_sana2_rx_deliver",    95),    #  inlined drain
                          ("_ami_sana2_rx_post_slot",  70)],   #  loop and
                                                              #  rx_complete
+    # The SANA-II copy hook: called once a frame BY THE DEVICE, so its entry
+    # guards are load-bearing rather than paranoia -- a third-party driver can
+    # hand it anything, and `len > slot->capacity` is a bounds check on a
+    # buffer, not a nicety.  Guarded because it is per-frame and was the only
+    # one on that path with no ceiling.
+    "sana2_copy.c":     [("_ami_sana2_copy_to_buff",  91)],   # 81
     "netdev_device.c":  [("_netdev_rx",              168),    # 155
                          ("_netdev_tx_direct",       108),    # 98, the ACK path
                          ("_netdev_hand_over",        68)],   # 60
