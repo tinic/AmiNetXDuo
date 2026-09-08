@@ -41,3 +41,32 @@ positives -- AmiFTP scored 89 against a ground truth of 18.
 | argument-selected features are invisible | `SOCK_RAW` has 36 users and would read as 0 if it had a vector; the same hides `setsockopt` options, `IoctlSocket` commands, `SBTM_*` tags, `AF_INET6` |
 | AS225 dual-stack excluded | those binaries mix two LVO tables; flagged, not counted |
 | era | Aminet spans decades; a `getaddrinfo`/`getnameinfo` hit on a MODERN archive is real, not a scan error |
+
+## What the unused vectors cost
+
+Measured two ways, because the first was wrong.
+
+| set | impls | LTO build | non-LTO build |
+|---|---|---|---|
+| zero-caller | 52 | 29,634 | **14,290** |
+| used | 55 | 23,836 | 21,098 |
+
+Sizes come from text-symbol address gaps, and under LTO a symbol absorbs
+inlined neighbours: `FreeRouteInfo` measured 6,710 bytes with LTO and does not
+appear in the non-LTO top 14 at all.  **Quote the aggregate, never a per-vector
+figure** -- individual entries move by hundreds of bytes in both directions
+(`if_freenameindex` 10 -> 970, `In_CanForward` 320 -> 834).
+
+The non-LTO numbers are the ones to plan with: the unused half of the API is
+about two thirds the size of the used half, not larger than it.
+
+Reproduce:
+
+    cmake -S . -B build/noltosym \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+      -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_LTO=OFF \
+      -DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_TESTS=OFF
+    cmake --build build/noltosym --target bsdsocket_library
+
+`tools/ci.sh` does NOT honour `AMINETXDUO_EXTRA_CMAKE`; passing it yields a
+byte-identical LTO library and a validation that silently did nothing.
