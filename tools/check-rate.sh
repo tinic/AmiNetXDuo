@@ -60,6 +60,36 @@ fi
 
 [ -r "$BASELINE" ] || { echo "rate=error reason=no_baseline file=$BASELINE" >&2; exit 1; }
 
+# REFUSE TO MEASURE A TREE THE BUILD DID NOT FINISH.
+#
+# `cmake --build` can return non-zero with the library and device still
+# linked -- one unrelated target failing is enough -- and the binaries left
+# behind are then whatever the PREVIOUS build produced.  An A/B script that
+# does not check the build's exit code measures those and prints a clean
+# rate=PASS for them.  That happened twice on this rig in one sitting, and
+# both times the numbers looked entirely reasonable, which is the danger.
+#
+# The build's exit code is not visible from here, but staleness is: if any
+# source is newer than the artefact that is about to be measured, that
+# artefact does not correspond to this tree.  Cheap, and it catches the case
+# no amount of care in the caller does.
+_stale=""
+for _art in "$BUILD/src/bsdsocket/bsdsocket.library" \
+            "$BUILD/src/netdev/anxnet.device"; do
+    [ -e "$_art" ] || { echo "rate=error reason=missing_artefact file=$_art" >&2; exit 1; }
+    _newer=$(find src port include third_party/netxduo/common/src \
+                  -name '*.[ch]' -newer "$_art" -print -quit 2>/dev/null || true)
+    [ -n "$_newer" ] && _stale="$_stale $_art(newer: $_newer)"
+done
+if [ -n "$_stale" ]; then
+    echo "rate=error reason=stale_build build=$BUILD" >&2
+    printf '  %s\n' $_stale >&2
+    echo "  A source file is newer than the binary about to be measured, so" >&2
+    echo "  that binary is from an earlier build.  Rebuild and check the exit" >&2
+    echo "  code before measuring." >&2
+    exit 1
+fi
+
 # ------------------------------------------------------------------ measure --
 
 TMP=$(mktemp -d)
