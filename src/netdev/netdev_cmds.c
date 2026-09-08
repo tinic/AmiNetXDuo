@@ -301,7 +301,7 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
     if (queued)
     {
         if (cmd == CMD_READ)
-            AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
         else
             AddTail(&op->op_Orphans, &io->ios2_Req.io_Message.mn_Node);
     }
