@@ -166,9 +166,6 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
     git reset --hard -q HEAD
     git clean -qfd src bench port tools tests 2>/dev/null
     git checkout -q --detach "$2" || { echo "rate_ab=fail reason=checkout arm=$3"; return 1; }
-    # shellcheck disable=SC2086
-    git checkout -q "$HEAD_REF" -- $HARNESS_FILES ||
-        { echo "rate_ab=fail reason=harness_overlay arm=$3"; return 1; }
     rm -rf build/ab
     cmake -S . -B build/ab \
           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
@@ -176,9 +173,21 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
         { echo "rate_ab=fail reason=configure arm=$3"; tail -8 "/tmp/rate-ab-$3-cfg.log"; return 1; }
     cmake --build build/ab --parallel 8 > "/tmp/rate-ab-$3-build.log" 2>&1 ||
         { echo "rate_ab=fail reason=build arm=$3"; tail -8 "/tmp/rate-ab-$3-build.log"; return 1; }
+    # THE OVERLAY GOES HERE, AFTER THE BUILD, AND THE ORDER IS THE POINT.
+    # cmake/AmiNetXDuoGitStamp.cmake:89 appends "-dirty" to the version stamp
+    # when `git status --porcelain` sees a modified tracked file, so overlaying
+    # before configure stamps ONE arm dirty and the other clean and the two
+    # libraries then differ by a string that has nothing to do with the change
+    # under test.  Building first leaves both stamps honest; the harness is
+    # only needed when the rounds RUN.
+    # shellcheck disable=SC2086
+    git checkout -q "$HEAD_REF" -- $HARNESS_FILES ||
+        { echo "rate_ab=fail reason=harness_overlay arm=$3"; return 1; }
+
     echo "arm=$3 tree=$(git log --oneline -1 | cut -c1-9)" \
          "lib=$(md5sum build/ab/src/bsdsocket/bsdsocket.library | cut -c1-12)" \
-         "dev=$(md5sum build/ab/src/netdev/anxnet.device | cut -c1-12)"
+         "dev=$(md5sum build/ab/src/netdev/anxnet.device | cut -c1-12)" \
+         "harness=$(md5sum $HARNESS_FILES | cut -c1-8)"
 }
 
 build_arm "$BASE_DIR" "$BASE_REF" BASE || exit 1
