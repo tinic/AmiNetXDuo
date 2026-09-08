@@ -54,6 +54,22 @@ if ! command -v gh > /dev/null 2>&1; then
     exit 0
 fi
 
+# INSTALLED IS NOT AUTHENTICATED, and this gate learned that the hard way by
+# turning CI red on itself.  GitHub's runners ship gh, so `command -v gh`
+# succeeded, but the step had no token: every query came back empty, every
+# stage was reported NEVER -- including `analyze` and `cross`, which had
+# finished minutes earlier in that very run.  A check that cannot ask must not
+# answer, which is the same rule this file applies to everything else.
+#
+# So ask one throwaway question first.  Empty means cannot-query, not
+# no-history; a repository with genuinely zero runs skips too, and that is the
+# honest reading of "nothing to measure".
+probe=$(gh run list --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
+if [ -z "$probe" ] || [ "$probe" = "null" ]; then
+    echo "stage_freshness=SKIPPED reason=gh_cannot_query_this_repo"
+    exit 0
+fi
+
 # A GATE THAT CANNOT SEE MUST FAIL.  Run from the wrong directory this used to
 # find no ci.sh, iterate zero stages and print PASS -- a vacuous green, which
 # is the shape this whole file exists to complain about.  Caught by trying to
