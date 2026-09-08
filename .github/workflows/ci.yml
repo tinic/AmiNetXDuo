@@ -192,7 +192,7 @@ jobs:
       - name: tools/ci.sh
         run: >-
           AMINETXDUO_SANITIZE=1 AMINETXDUO_CI_CROSS="default"
-          tools/ci.sh host host32 sanitize cross web conformance
+          tools/ci.sh host host32 sanitize cross web conformance survey
 
       # The logs are where a failure is diagnosed, and they are the only thing
       # that survives the runner.
@@ -233,8 +233,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      # `survey` here too, and deliberately: its generators are python and
+      # shell, and the one macOS defect they have already had was `wc -l`
+      # padding its output so a `[ "$got" = "2" ]` compared "       2".  A
+      # portability trap in a gate is only found by running the gate on the
+      # other platform.
       - name: tools/ci.sh host
-        run: AMINETXDUO_SANITIZE=1 tools/ci.sh host sanitize
+        run: AMINETXDUO_SANITIZE=1 tools/ci.sh host sanitize survey
 
   # ------------------------------------------------------------------------
   # Cheap hygiene that would otherwise only be caught by a human.
