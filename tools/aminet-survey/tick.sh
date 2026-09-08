@@ -37,6 +37,14 @@ for path in "$@"; do
     # arguments, scan.py printed nothing, and the EMPTY output was written to
     # the ledger as a row.  36 blank rows accumulated that way, and a blank row
     # reads as data.  Files with spaces were also never actually scanned.
+    # An archive that only partly extracted is recorded as such, alongside its
+    # binary rows: those rows are real, but the set of them is not known to be
+    # complete.  Not an OK-family verdict, so it never counts as attribution.
+    case "$fout" in
+        *UNPACK_PARTIAL*)
+            printf '%s\t-\tUNPACK_PARTIAL\t0\t0\t\n' "$name" >> "$LEDGER"
+            echo "UNPACK_PARTIAL $name -- rows from it may be short" ;;
+    esac
     errs=0
     while IFS= read -r -d '' f; do
         row=$(python3 scan.py "$f" 2>"$OUT/scan.err")

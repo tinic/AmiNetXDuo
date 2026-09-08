@@ -7,6 +7,12 @@ set -eu
 path="$1"                       # e.g. comm/tcp/AmiFTP.lha
 out="${2:-/tmp/anxd-survey}"
 name=$(basename "$path")
+# A CLEAN TARGET, every time.  This was `mkdir -p` alone, so a second attempt
+# extracted into whatever the first one left behind and lha refused to
+# overwrite -- rc=1, recorded as UNPACK_FAIL.  Every retry of a partly-fetched
+# archive was guaranteed to fail, and the failure looked like a property of the
+# archive.  Into an empty directory AmiCom.lha gives rc=0 and 32 files.
+rm -rf "$out/$name.d"
 mkdir -p "$out/$name.d"
 # THE HTTP CODE, AND A PAUSE.  Both matter, and neither was here.
 #
@@ -49,6 +55,29 @@ case "$kind" in
     LHa*|LZX*|Zip*|gzip*|bzip2*|XZ*|*"archive data"*|*"compress'd"*) ;;
     *) echo "FETCH_NOT_ARCHIVE $path kind=${kind%%,*}"; exit 1 ;;
 esac
-( cd "$out/$name.d" && lha xq "../$name" >/dev/null 2>&1 ) || {
-    echo "UNPACK_FAIL $path"; exit 1; }
+# JUDGE BY WHAT LANDED, not by the exit code.  lha returns non-zero for a
+# single unreadable member in an archive that otherwise extracted fine, and
+# discarding the whole tree over that throws away every binary in it.
+# `|| true` is load-bearing: set -e is on, and the `|| { ...; exit 1; }` that
+# used to be here was the only thing keeping lha's exit code from killing the
+# script outright.  Removing the handler without replacing the suppression made
+# every archive fail SILENTLY -- no OK line, no UNPACK_FAIL line, rc=1 with 32
+# files sitting extracted on disk.
+( cd "$out/$name.d" && lha xq "../$name" >/dev/null 2>&1 ) || true
+if [ -z "$(find "$out/$name.d" -type f -print -quit)" ]; then
+    echo "UNPACK_FAIL $path"; exit 1
+fi
+
+# SOMETHING LANDED IS NOT EVERYTHING LANDED.  An archive scanned short reads as
+# an archive with fewer callers -- a wrong survey number, not a missing one.
+#
+# lha's EXIT CODE cannot carry this.  AmiCom.lha extracts all 32 of its files
+# and still exits 1, silently, with no diagnostic; using rc as the signal
+# flagged healthy archives as partial.  The member list can: `lha lq` names 34
+# entries, 2 of them directories, and exactly 32 files appear on disk.
+listed=$(lha lq "$out/$name" 2>/dev/null | grep -vc '/$' || true)
+got=$(find "$out/$name.d" -type f | wc -l)
+if [ "$listed" -gt 0 ] && [ "$got" -lt "$listed" ]; then
+    echo "UNPACK_PARTIAL $path extracted=$got listed=$listed"
+fi
 echo "OK $path $out/$name.d"

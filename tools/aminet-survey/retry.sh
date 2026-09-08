@@ -25,10 +25,19 @@ LIMIT=${2:-12}
 DIR=${ANXD_SURVEY_DIR:-/home/turo/anxd-aminet}
 LEDGER="$DIR/results.tsv"
 
+# Every verdict that records a failure to LOOK.  FETCH_UNPACK_FAIL was missing
+# and is the one that mattered: tick.sh writes the reason class into the
+# verdict, so the rows say FETCH_UNPACK_FAIL, and `$3 ~ "^FETCH_FAIL"` does not
+# match that.  A retry pass reported "no FETCH_FAIL rows" with 10 unpack
+# failures sitting in the ledger -- a pass that finds nothing because it asked
+# the wrong question reads exactly like a pass with nothing to do.
 case "$KIND" in
-    FETCH_FAIL|SCAN_ERROR) ;;
-    *) echo "retry.sh: refusing to retry '$KIND' -- only FETCH_FAIL and\
- SCAN_ERROR are non-findings; every other verdict is data" >&2; exit 2 ;;
+    FETCH_FAIL|FETCH_UNPACK_FAIL|FETCH_NOT_ARCHIVE|SCAN_ERROR|UNPACK_PARTIAL) ;;
+    all) KIND='FETCH_|SCAN_ERROR|UNPACK_PARTIAL' ;;
+    *) echo "retry.sh: refusing to retry '$KIND' -- only the verdicts that\
+ record a failure to look are non-findings; every other verdict is data.\
+ Try: FETCH_FAIL FETCH_UNPACK_FAIL FETCH_NOT_ARCHIVE SCAN_ERROR\
+ UNPACK_PARTIAL all" >&2; exit 2 ;;
 esac
 
 [ -f "$LEDGER" ] || { echo "retry.sh: no ledger at $LEDGER" >&2; exit 2; }
