@@ -11,7 +11,7 @@
  * gethostbyaddr_r) and every vector not yet implemented point at bsd_enosys()
  * rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 99 implemented, 41 stubbed (7 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 100 implemented, 40 stubbed (7 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -68,7 +68,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_getservbyport,      /* -0x0f0 [ 39] getservbyport */
     (APTR)bsd_getprotobyname,     /* -0x0f6 [ 40] getprotobyname */
     (APTR)bsd_getprotobynumber,   /* -0x0fc [ 41] getprotobynumber */
-    (APTR)bsd_enosys,             /* -0x102 [ 42] vsyslog */
+    (APTR)bsd_vsyslog,            /* -0x102 [ 42] vsyslog */
     (APTR)bsd_Dup2Socket,         /* -0x108 [ 43] Dup2Socket */
     (APTR)bsd_sendmsg,            /* -0x10e [ 44] sendmsg */
     (APTR)bsd_recvmsg,            /* -0x114 [ 45] recvmsg */

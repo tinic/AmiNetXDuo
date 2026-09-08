@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+### Compatibility
+
+- AmiTCP `syslog()`/`vsyslog()` now honors each opener's log tag, `LOG_PID` and
+  priority mask, expands `%m`, and sends accepted messages to the serial
+  diagnostic sink
+
 ## 0.26.5
 
 ### Compatibility

@@ -280,6 +280,14 @@ static const char *bsd_text_lookup(const BsdErrText *table, ULONG count,
     return fallback;
 }
 
+const char *bsd_errno_string(LONG code)
+{
+    return bsd_text_lookup(
+        bsd_errno_text,
+        sizeof(bsd_errno_text) / sizeof(bsd_errno_text[0]),
+        code, "Unknown error");
+}
+
 LONG bsd_Errno(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     return SocketBase->sb_Errno;
@@ -491,10 +499,8 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
         /* The *STRPTR tags are in/out: the caller passes an error number and
            gets a string pointer back through the same slot. */
         case SBTC_ERRNOSTRPTR:
-            bsd_tag_store(item, by_ref, (ULONG)bsd_text_lookup(
-                bsd_errno_text,
-                sizeof(bsd_errno_text) / sizeof(bsd_errno_text[0]),
-                (LONG)bsd_tag_fetch(item, by_ref), "Unknown error"));
+            bsd_tag_store(item, by_ref, (ULONG)bsd_errno_string(
+                (LONG)bsd_tag_fetch(item, by_ref)));
             return TRUE;
 
         case SBTC_HERRNOSTRPTR:

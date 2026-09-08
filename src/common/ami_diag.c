@@ -74,12 +74,11 @@ int ami_log_level(VOID)
     return ami_log_max;
 }
 
-VOID ami_log(int level, const char *fmt, ...)
+VOID ami_serial_logv(int level, const char *fmt, const void *args)
 {
     static const char *const prefix[] = { "ERR ", "WARN", "INFO", "DBG ", "TRC " };
-    va_list args;
 
-    if (level > ami_log_max)
+    if (fmt == NULL)
         return;
     if (level < AMI_LOG_ERROR || level > AMI_LOG_TRACE)
         level = AMI_LOG_INFO;
@@ -93,10 +92,19 @@ VOID ami_log(int level, const char *fmt, ...)
     RawPutChar(']');
     RawPutChar(' ');
 
-    va_start(args, fmt);
-    RawDoFmt((STRPTR)fmt, args, (void (*)())put_char, NULL);
-    va_end(args);
+    RawDoFmt((STRPTR)fmt, (APTR)args, (void (*)())put_char, NULL);
 
     RawPutChar('\n');
 }
 
+VOID ami_log(int level, const char *fmt, ...)
+{
+    va_list args;
+
+    if (level > ami_log_max)
+        return;
+
+    va_start(args, fmt);
+    ami_serial_logv(level, fmt, (const void *)args);
+    va_end(args);
+}

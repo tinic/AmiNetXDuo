@@ -37,7 +37,7 @@ offset	dec	index	name	impl
 -240	-240	39	getservbyport	bsd_getservbyport
 -246	-246	40	getprotobyname	bsd_getprotobyname
 -252	-252	41	getprotobynumber	bsd_getprotobynumber
--258	-258	42	vsyslog	bsd_enosys
+-258	-258	42	vsyslog	bsd_vsyslog
 -264	-264	43	Dup2Socket	bsd_Dup2Socket
 -270	-270	44	sendmsg	bsd_sendmsg
 -276	-276	45	recvmsg	bsd_recvmsg

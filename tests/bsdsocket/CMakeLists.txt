@@ -304,6 +304,31 @@ endif()
 # larger bsdsocket host tests above, this needs no live Linux ThreadX objects,
 # so the target-width tx_port shim lets it run on arm64 hosts as well.
 if(NOT CMAKE_CROSSCOMPILING)
+    # syslog.c, including the actual LVO rather than a copied formatter.  The
+    # serial sink is replaced by a recorder so the test can assert the format
+    # and the original RawDoFmt argument stream independently.  The target-
+    # width ThreadX shim makes this run on arm64 hosts too.
+    add_executable(test_syslog host/test_syslog_host.c
+                               "${CMAKE_SOURCE_DIR}/src/bsdsocket/syslog.c")
+
+    target_include_directories(test_syslog PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_syslog PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_syslog PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME syslog_policy_format COMMAND test_syslog)
+
     # transfer.c's connected-UDP readiness and FIONREAD paths inspect packets
     # before nx_udp_socket_receive() removes the UDP header.  netstats.c also
     # reads UDP queue payloads and TCP's distinct sent-list accounting.  This

@@ -120,8 +120,8 @@ Measured two ways, because the first was wrong.
 
 | set | impls | LTO build | non-LTO build |
 |---|---|---|---|
-| zero-caller | 52 | 29,634 | **14,290** |
-| used | 55 | 23,836 | 21,098 |
+| zero-caller | 52 | 29,076 | **14,290** |
+| used | 55 | 25,588 | 21,874 |
 
 Sizes come from text-symbol address gaps, and under LTO a symbol absorbs
 inlined neighbours: `FreeRouteInfo` measured 6,710 bytes with LTO and does not
@@ -176,15 +176,6 @@ four distributions plus `u9fs`: the NFS and 9P filesystem layer.
 
 Counts move as the survey runs; regenerate with
 `tools/aminet-survey/rare.py 10`.
-
-## Compatibility findings, kept separate from micro decisions
-
-These are gaps in what AmiNetXDuo implements TODAY.  They are not arguments
-about the micro profile and must not be filed as such.
-
-| finding | evidence |
-|---|---|
-| **`vsyslog` is unimplemented** -- `src/bsdsocket/bsdsocket_vectors.c:71` routes offset -258 to `bsd_enosys`, which returns -1/ENOSYS | **142 binaries call it**, rank 14 of 143 by caller count |
 
 ## What this survey does NOT establish
 

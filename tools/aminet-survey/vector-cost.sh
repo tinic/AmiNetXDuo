@@ -19,7 +19,7 @@
 # AND WHY NON-LTO IS THE ONE TO QUOTE: under LTO a symbol absorbs its inlined
 # neighbours and the gap after it is charged to it.  FreeRouteInfo measured
 # 6,710 bytes with LTO and does not appear in the non-LTO top 14 at all.  The
-# LTO total was 29,634 against a real 14,290 -- inflated 107%, and it reversed
+# LTO total is 29,076 against a real 14,290 -- inflated 103%, and it reverses
 # the conclusion: the unused half is TWO THIRDS of the used half, not larger.
 #
 # Quote the aggregate.  Per-vector figures move by hundreds either way.

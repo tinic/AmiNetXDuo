@@ -191,7 +191,7 @@ IMPLEMENTED = {
     "bpf_set_notify_mask", "bpf_set_interrupt_mask",
     "bpf_ioctl", "bpf_data_waiting",
     # errno / tags
-    "Errno", "SetErrnoPtr", "SocketBaseTagList",
+    "Errno", "SetErrnoPtr", "SocketBaseTagList", "vsyslog",
     # address conversion
     "inet_addr", "inet_aton", "inet_network", "inet_ntop", "inet_pton",
     "Inet_NtoA", "Inet_LnaOf", "Inet_NetOf", "Inet_MakeAddr",

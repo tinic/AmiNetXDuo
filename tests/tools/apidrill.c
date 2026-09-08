@@ -2144,7 +2144,7 @@ static const VecRow vectors[] =
     V_("getservbyport",      240, t_240, VC_IMPL, 2, DEF_ITERS, pr_getservbyport, NULL),
     V_("getprotobyname",     246, t_246, VC_IMPL, 2, DEF_ITERS, pr_getprotobyname, NULL),
     V_("getprotobynumber",   252, t_252, VC_IMPL, 2, DEF_ITERS, pr_getprotobynumber, NULL),
-    E_("vsyslog",            258, t_258, VC_STUB_L),
+    E_("vsyslog",            258, t_258, VC_IMPL),
     V_("Dup2Socket",         264, t_264, VC_IMPL, 2, DEF_ITERS, pr_dup2,        po_dup2),
     V_("sendmsg",            270, t_270, VC_IMPL, 2, DEF_ITERS, pr_sendmsg,     NULL),
     V_("recvmsg",            276, t_276, VC_IMPL, 2, DEF_ITERS, pr_recvmsg,     NULL),
@@ -2345,7 +2345,7 @@ static const VecRow broken[] =
     V_("!broken-sock", 0, t_leak_sock, VC_IMPL, 1, FEW_ITERS, NULL, NULL),
     V_("!broken-port", 0, t_leak_port, VC_IMPL, 1, FEW_ITERS, NULL, NULL),
     V_("!broken-sem",  0, t_leak_sem,  VC_IMPL, 1, FEW_ITERS, NULL, NULL),
-    V_("!broken-rc",   258, t_258, VC_STUB_B, 1, FEW_ITERS, NULL, NULL)
+    V_("!broken-rc",   306, t_306, VC_STUB_B, 1, FEW_ITERS, NULL, NULL)
 };
 
 #define NCONTROLS ((LONG)(sizeof(controls) / sizeof(controls[0])))

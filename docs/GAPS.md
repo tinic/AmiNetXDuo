@@ -15,6 +15,7 @@ goes. Compared against **Roadshow 1.15** (`NDK3.2/SANA+RoadshowTCP-IP/sfd/bsdsoc
 | `usergroup.library` | all 39 vectors (`src/usergroup/`), the same set as AmiTCP's `usergroup_lib.fd` |
 | BPF / packet capture | `bpf_*`, 8 vectors, plus `NetCapture` and `NetTrace` |
 | `TCP:` handler | `src/bsdsocket/tcp_handler.c`, `TCPHANDLER=` in the interface file |
+| `syslog` / `vsyslog` | AmiTCP's `syslog()` inline forwards its packed argument stream to the `vsyslog` LVO. We honor the opener's tag, `LOG_PID` and mask, expand `%m`, accept facility bits, and emit through the serial diagnostic sink |
 | Interface, routing, monitoring, status, DNS, local-database, address-conversion APIs | implemented, and `SBTC_HAVE_*` says so truthfully (`errno.c:488-536`) |
 
 ## Missing vectors
@@ -27,7 +28,6 @@ and nine more) are excluded: they are stub-level, not LVOs.
 | `ObtainRoadshowData` `ReleaseRoadshowData` `ChangeRoadshowData` | sfd 159-161 | `bsd_enosys` | The tunables API, which is what `RoadshowControl` drives. No way to read or set `tcp.sendspace`, `ip.forwarding`, `icmp.processecho` and the rest at runtime. `SBTC_HAVE_ROADSHOWDATA_API` correctly answers FALSE |
 | `ipf_open` `ipf_close` `ipf_ioctl` `ipf_log_read` `ipf_log_data_waiting` `ipf_set_notify_mask` `ipf_set_interrupt_mask` | sfd 172-178 | absent | The IP filter and NAT API. Roadshow ships `ipf`, `ipfstat`, `ipnat`, `ipmon` and `S:IPF` rules on top of it |
 | `mbuf_get` `mbuf_gethdr` `mbuf_free` `mbuf_freem` `mbuf_copym` `mbuf_copydata` `mbuf_copyback` `mbuf_cat` `mbuf_adj` `mbuf_prepend` `mbuf_pullup` | sfd 146-157 | absent | The kernel memory API: a program that walks the stack's own buffers cannot. `SBTC_HAVE_KERNEL_MEMORY_API` correctly answers FALSE. NetX Duo has `NX_PACKET`, not mbufs, so this is a translation layer rather than an omission |
-| `syslog` `vsyslog` | -0x0fc, -0x102 (`bsdsocket_vectors.c:71`) | `bsd_enosys` | `SyslogA` is in AmiTCP's fd and in ours as a stub. A program that logs through the stack logs nothing |
 | `ProcessIsServer` `ObtainServerSocket` | -0x2b2, -0x2b8 (`bsdsocket_vectors.c:143`) | present, but `SBTC_HAVE_SERVER_API` is FALSE | Two vectors that exist beside a flag saying they do not. Worth resolving in one direction or the other |
 
 ## Missing SocketBaseTagList tags

@@ -39,7 +39,8 @@ for _ in open(sys.argv[1]): pass
 fi
 
 # The positive: every generator reads it, and the byte survives round trip.
-got=$(python3 "$ROOT/tools/aminet-survey/callers.py" vsyslog "$T" | wc -l)
+got=$(python3 "$ROOT/tools/aminet-survey/callers.py" vsyslog "$T" |
+      awk 'END { print NR }')
 [ "$got" = "2" ] || { echo "survey_io=FAIL callers.py read $got rows, want 2"; fail=1; }
 
 python3 "$ROOT/tools/aminet-survey/usage.py" "$T" "$T/lvo-usage.tsv" \
