@@ -267,6 +267,17 @@ def build_symbol_table(nm, mapfile, objdir):
     cache = {}
     table = defaultdict(list)          # section -> [(addr, name, module)]
 
+    # A contribution whose object cannot be opened is skipped silently below,
+    # and every sample in it then falls to the nearest object that DID parse.
+    # Point --objdir one directory wrong and the map's relative archive paths
+    # (../../../libnetxduo.a) resolve nowhere: 183 of 778 symbols survive and
+    # the report reads ___umoddi3 49.1%, ___exitcpp 37.2% for a TCP transfer.
+    # That is the same fiction the LTO refusal above exists to prevent, and it
+    # does NOT trip that refusal, so it has to be counted and said out loud.
+    seen_bytes = 0
+    lost_bytes = 0
+    lost_names = []
+
     for section, addr, size, obj in contributions:
         if size == 0:
             continue
@@ -278,7 +289,11 @@ def build_symbol_table(nm, mapfile, objdir):
             spec, member = m.group(1), m.group(2)
 
         path = spec if os.path.isabs(spec) else os.path.join(objdir, spec)
+        seen_bytes += size
         if not os.path.exists(path):
+            lost_bytes += size
+            if len(lost_names) < 3 and spec not in lost_names:
+                lost_names.append(spec)
             continue
 
         key = (path, member)
@@ -300,6 +315,17 @@ def build_symbol_table(nm, mapfile, objdir):
         # its samples are attributed to the object rather than to whatever
         # global happens to precede it.
         table[section].append((addr, "[%s]" % module, module))
+
+    if lost_bytes * 5 > seen_bytes:
+        sys.stderr.write(
+            "prof-report: %d of %d code bytes (%.0f%%) are in objects that "
+            "could not be opened\n  under --objdir %s -- e.g. %s.\n"
+            "  Their samples will be attributed to whatever object DID parse, "
+            "which is a fiction.\n"
+            "  --objdir must be the LINK directory the map's paths are "
+            "relative to.\n"
+            % (lost_bytes, seen_bytes, 100.0 * lost_bytes / max(seen_bytes, 1),
+               objdir, ", ".join(lost_names)))
 
     # Several symbols can land on ONE address: --gc-sections folds, a static
     # of the same name exists in more than one object, and every object also
@@ -559,7 +585,7 @@ def load_lvo_names(ndk, libname):
 _NDK = [None]
 
 
-def find_ndk(explicit):
+def find_ndk(explicit, nm=None):
     """NDK include dir: what was asked for, else the toolchain on hand.
 
     An unresolved NDK is not cosmetic.  Every exec.library call in the report
@@ -579,6 +605,15 @@ def find_ndk(explicit):
     if gcc:
         cands.append(os.path.join(os.path.dirname(os.path.dirname(gcc)),
                                   "m68k-amigaos", "ndk-include"))
+    # The toolchain that BUILT the image is the one already named on the
+    # command line.  The rig keeps its toolchain in ~/.cache and puts nothing
+    # on PATH, so without this the default resolves on a workstation and not
+    # on the machine that runs the profile.
+    if nm:
+        nmdir = os.path.dirname(os.path.abspath(shutil.which(nm) or nm))
+        if nmdir:
+            cands.append(os.path.join(os.path.dirname(nmdir),
+                                      "m68k-amigaos", "ndk-include"))
     for c in cands:
         if os.path.isdir(os.path.join(c, "lvo")):
             return c
@@ -617,7 +652,7 @@ def main():
     ap.add_argument("--by-module", action="store_true")
     args = ap.parse_args()
 
-    _NDK[0] = find_ndk(args.ndk)
+    _NDK[0] = find_ndk(args.ndk, args.nm)
     if not _NDK[0]:
         sys.stderr.write(
             "prof-report: no NDK lvo/ dir found; every library call will read "
