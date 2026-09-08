@@ -792,7 +792,18 @@ jobs:
             echo "| Kickstart 3.1 | self-hosted only | $EXPECTED | $RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          [ "$RESULT" = "skipped" ] || exit 0
+          # WHAT "DID NOT RUN" ACTUALLY LOOKS LIKE, AND IT IS NOT ONLY
+          # `skipped`.  `skipped` is AMINETXDUO_KICKSTART_RUNNER unset, which
+          # this caught.  `cancelled` is the label SET and the runner OFFLINE:
+          # the job queues until GitHub gives up on it hours later, and this
+          # report then ran and exited 0.  Sixteen consecutive runs went green
+          # that way, with nothing on an Amiga tested at all and the card
+          # sweep -- the only cross-core coverage there is -- among what did
+          # not happen.  `failure` is the tier speaking for itself and is
+          # already red; do not report it twice.
+          case "$RESULT" in
+              success|failure) exit 0 ;;
+          esac
 
           {
             echo
@@ -802,13 +813,16 @@ jobs:
             echo ">"
             echo "> \`vars.AMINETXDUO_KICKSTART_RUNNER\` names the self-hosted"
             echo "> runner label this tier runs on. With it unset there is no"
-            echo "> machine with a ROM on it and the job cannot start."
+            echo "> machine with a ROM on it and the job cannot start. With it"
+            echo "> set and the runner OFFLINE the job queues instead, and the"
+            echo "> result here is \`cancelled\` rather than \`skipped\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$EXPECTED" = "true" ]; then
-            echo "::error::The Kickstart 3.1 tier did NOT run, on a run that" \
-                 "expected it. Set the repository variable" \
-                 "AMINETXDUO_KICKSTART_RUNNER to a self-hosted runner label." \
+            echo "::error::The Kickstart 3.1 tier did NOT run ($RESULT), on" \
+                 "a run that expected it. Either the repository variable" \
+                 "AMINETXDUO_KICKSTART_RUNNER is unset, or the runner it names" \
+                 "is offline and the job queued until it was cancelled." \
                  "Nothing on an Amiga was tested by this run."
             exit 1
           fi
