@@ -148,6 +148,10 @@ static void world_free(void)
         ami_free(g.db.pw_text);
     if (g.db.gr_text != NULL)
         ami_free(g.db.gr_text);
+    /* The arena behind every gr_mem vector, allocated separately by
+       ug_db_parse_group().  LeakSanitizer finds it if this is forgotten. */
+    if (g.db.gr_members != NULL)
+        ami_free(g.db.gr_members);
 }
 
 /* ------------------------------------------------------------------ tests */

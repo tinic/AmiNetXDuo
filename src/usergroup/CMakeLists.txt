@@ -159,4 +159,28 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_ug_db PRIVATE -Wall -Wextra)
 
     add_test(NAME usergroup_db COMMAND test_ug_db)
+
+    # ------------------------------------------------------- ids, groups --
+    #
+    # ugl_getgroups/ugl_setgroups move a caller array in and out of a fixed
+    # cr_groups[UG_NGROUPS], and ugl_initgroups fills it from the group file,
+    # where the bound is however many groups name the user.  Three ways to
+    # write past a 32-entry array on a machine with no MMU.  cr_groups is a
+    # struct member, so an overflow lands in cr_session and no sanitizer sees
+    # it; the test uses cr_session as a canary and heap-allocates the
+    # caller-side array at exactly its length so ASan owns that end.
+    add_executable(test_ug_ids
+        test/test_ug_ids.c
+        ug_ids.c
+        ug_db.c
+        ug_parse.c)
+
+    target_include_directories(test_ug_ids PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_ids PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_ids COMMAND test_ug_ids)
 endif()
