@@ -168,11 +168,11 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      * payload a second time to get what the copy had already read once.  Two
      * passes over every frame, on the one path we cannot measure here.
      *
-     * ami_sana2_copy_sum() does the same copy and accumulates as it goes, in
+     * ami_sana2_copy_sum() copies each byte and accumulates it immediately, in
      * the same convention the branch above uses, so the sum is the sum and the
-     * second pass is gone.  It is safe at any parity: n68k_copy_bytes() guards
-     * the 68000 case, where an odd longword read is an address error rather
-     * than a slow one (n68k_copy.S, docs/RESEARCH.md 45).
+     * second pass is gone.  It is safe at any parity because this branch uses
+     * byte accesses; on a 68000 an odd word or longword access is an address
+     * error rather than merely a slow access.
      */
     slot->sum    = ami_sana2_copy_sum(slot->dst, (const UCHAR *)from, len);
     slot->summed = TRUE;
@@ -205,8 +205,6 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
            own pools are longword aligned, so this is reached only through the
            copy hook above, and only for a third-party device that hands us an
            odd payload pointer. */
-        ami_sana2_copy_bytes(to, from, len);
-
         sum = 0UL;
         for (i = 0UL; i < len; i += 4UL)
         {
@@ -216,7 +214,12 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
 
             w.l = 0UL;
             for (k = 0UL; k < n; k++)
-                w.b[k] = from[i + k];
+            {
+                UCHAR byte = from[i + k];
+
+                to[i + k] = byte;
+                w.b[k]    = byte;
+            }
 
             sum += w.l;
             if (sum < w.l)

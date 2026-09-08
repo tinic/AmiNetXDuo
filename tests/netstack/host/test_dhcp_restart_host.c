@@ -267,6 +267,53 @@ static void t_create_fails(void)
     h_down();
 }
 
+/*
+ * DHCP must retain packets that RX/TCP traffic cannot consume.  The compact
+ * NetX object therefore gets a pool allocated on demand, but it must not be
+ * the IP instance's shared pool.
+ */
+static void t_private_packet_pool(void)
+{
+    AmiNetStack *ns;
+
+    printf("dhcp restart: a private on-demand packet pool\n");
+
+    h_up_static();
+
+    CHECK(netstack_interface_dhcp_start(0, 0UL) == AMI_NET_OK,
+          "the interface starts");
+    ns = netstack_get();
+    CHECK(ns->ns_DhcpPool != NULL, "a DHCP pool was allocated on demand");
+    CHECK(ns->ns_Dhcp.nx_dhcp_packet_pool_ptr == &ns->ns_DhcpPool->pool,
+          "the client uses that private pool");
+    CHECK(ns->ns_Dhcp.nx_dhcp_packet_pool_ptr != &ns->ns_Pool,
+          "and not the data-path pool");
+    CHECK(nsh.packet_pool_creates == 2,
+          "only the IP and DHCP pools were created");
+
+    h_down();
+    CHECK(nsh.packet_pool_deletes == 2,
+          "both pools were deleted at shutdown");
+}
+
+static void t_private_packet_pool_allocation_fails(void)
+{
+    printf("dhcp restart: private pool allocation failure\n");
+
+    h_up_static();
+    nsh.alloc_fails = TRUE;
+
+    CHECK(netstack_interface_dhcp_start(0, 0UL) == AMI_NET_ERR_KERNEL,
+          "a missing private pool refuses DHCP");
+    CHECK(netstack_get()->ns_DhcpCreated == FALSE,
+          "the unusable client is deleted");
+    CHECK(nsh.dhcp_enables == 0, "no interface was enabled");
+    CHECK(nsh.dhcp_starts == 0, "and no client was started");
+
+    nsh.alloc_fails = FALSE;
+    h_down();
+}
+
 int main(void)
 {
     printf("netstack DHCP restart host checks\n\n");
@@ -279,6 +326,8 @@ int main(void)
     t_other_failure_is_not_retried();
     t_refusals();
     t_create_fails();
+    t_private_packet_pool();
+    t_private_packet_pool_allocation_fails();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

@@ -12,6 +12,7 @@
 
 static unsigned long h_checks;
 static unsigned long h_failures;
+static unsigned long h_copy_bytes_calls;
 
 static void h_check(int ok, const char *what)
 {
@@ -28,6 +29,7 @@ static void h_check(int ok, const char *what)
    bytes are asked for, not how they are moved. */
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
+    h_copy_bytes_calls++;
     if (len != 0)
         memcpy(to, from, (size_t)len);
 }
@@ -183,6 +185,7 @@ static void test_copy_to_buff_sum(void)
     UCHAR       *dst = (UCHAR *)dstwords;
     UCHAR       *ref = (UCHAR *)refwords;
     ULONG        odd_sum, ref_sum;
+    unsigned long copy_calls_before;
     const ULONG  n = 128;
 
     printf("sana2: S2_CopyToBuff carries a sum at either parity\n");
@@ -204,6 +207,7 @@ static void test_copy_to_buff_sum(void)
     memset(dstwords, 0, sizeof(dstwords));
     slot.summed = FALSE;
     slot.sum    = 0;
+    copy_calls_before = h_copy_bytes_calls;
     h_check(ami_sana2_copy_to_buff(&slot, frame + 1, n) == TRUE,
             "an odd source frame is taken");
     h_check(memcmp(dst, frame + 1, n) == 0,
@@ -211,6 +215,8 @@ static void test_copy_to_buff_sum(void)
     h_check(slot.copied == n, "and `copied` is the length");
     h_check(slot.summed != FALSE,
             "AND IT IS SUMMED, so no second pass is owed");
+    h_check(h_copy_bytes_calls == copy_calls_before,
+            "and it does not run a separate bulk-copy pass first");
     odd_sum = slot.sum;
 
     /* The answer must be the SAME answer.  Same bytes through the aligned

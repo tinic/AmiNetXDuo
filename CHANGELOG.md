@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+### Compatibility
+
+- Every SANA-II reader again retains its 8 KiB stack floor; measurements from one device no longer reduce stacks used by third-party drivers
+- Odd-address SANA-II receive buffers are copied and checksummed in one pass instead of rereading the device buffer
+- DHCP and DNS have on-demand private packet pools, so data traffic cannot consume the packets needed for lease renewal or name resolution
+- The established capacities of 32 listening ports and a 32 KiB mDNS peer cache are restored
+
 ## 0.26.4
 
 ### Compatibility

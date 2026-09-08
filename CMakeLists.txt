@@ -357,15 +357,15 @@ endif()
 # see the same number, which is exactly what a global define is for.  Nothing
 # is defined at the default, so the shipped build's compile lines -- and its
 # LTO options record -- are the bytes they were before this option existed.
-# Packets the DNS client keeps to itself.
-#
-# There is no AMINETXDUO_DNS_PACKETS any more.  It sized the resolver's PRIVATE
-# pool, and there is no longer one: nx_user.h defines
-# NX_DNS_CLIENT_USER_CREATE_PACKET_POOL, so nx_dns_pool_area is not compiled
-# (nxd_dns.h:324) and neither is the create that filled it (nxd_dns.c:236).
-# NX_DNS_PACKET_POOL_SIZE has no reader left, and an option that silently does
-# nothing is worse than no option: somebody would tune it and measure no
-# change.  The resolver draws from ns_Pool now.
+# Packets reserved for DNS queries.  The pool is allocated only when DNS is
+# created, rather than embedded in every AmiNetStack, but remains independent
+# of the main data-path pool.  The resolver issues one synchronous query at a
+# time and retries at most three times, so four packets is its established
+# capacity.
+set(AMINETXDUO_DNS_PACKETS "4" CACHE STRING
+    "Packets in the DNS client's on-demand private pool (4 ships)")
+add_compile_definitions(
+    "NX_DNS_PACKET_POOL_SIZE=(${AMINETXDUO_DNS_PACKETS}*(NX_DNS_PACKET_PAYLOAD+sizeof(NX_PACKET)))")
 
 # Half-open connections held with their options recorded exactly.
 #

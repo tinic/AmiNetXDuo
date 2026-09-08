@@ -51,6 +51,8 @@ typedef struct NetStackHostEnv
     ULONG   dhcp_trace_len;
 
     UINT    dhcp_create_status;
+    ULONG   packet_pool_creates;
+    ULONG   packet_pool_deletes;
 
     /* ---- the interface the configuration describes --------------------- */
 
@@ -68,6 +70,7 @@ typedef struct NetStackHostEnv
 
     ULONG   allocs;
     ULONG   frees;
+    BOOL    alloc_fails;
     ULONG   forbids;                /* Forbid() minus Permit(), must end at 0 */
     LONG    forbid_depth;
     BOOL    attempt_semaphore_fails; /* the contended-lock arm of can_unload  */

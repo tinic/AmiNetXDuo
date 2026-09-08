@@ -254,8 +254,7 @@
  * measures in a guest, because a call through a function pointer is not a
  * symbol in the assembly.
  *
- * 6144 = AMI_IP_STACK_SIZE 4096 + 2048 for the reader's own frames, and it is
- * MEASURED, not guessed.  A fill-and-scan probe on the rig -- pattern laid in
+ * A fill-and-scan probe on the rig -- pattern laid in
  * before tx_thread_create(), scanned where the reader is about to block --
  * read the deepest byte any reader ever touched.  That figure includes
  * BeginIO(), which no static pass can see:
@@ -268,13 +267,17 @@
  *     ifdhcp                         880
  *     ipv6 socket                    268
  *
- * 1728 worst against a 3072 static budget that the script admits runs ~800
- * light: 6144 clears even that pessimistic 3872 by 2272 bytes.  There is no
- * MMU, so a frame that does not fit writes over what lies below and the
- * machine dies somewhere unrelated -- hence the margin over the measurement.
+ * Those measurements do not include genet.device, wifipi.device, or future
+ * third-party devices.  Their BeginIO() frames execute on this stack and a
+ * scan on one driver cannot bound another, so retain the established 8 KiB
+ * floor.  There is no MMU: an overrun silently corrupts adjacent memory.
  */
 #ifndef AMI_SANA2_RX_STACK_SIZE
-#define AMI_SANA2_RX_STACK_SIZE     6144
+#define AMI_SANA2_RX_STACK_SIZE     8192
+#endif
+
+#if AMI_SANA2_RX_STACK_SIZE < 8192
+#error "SANA-II readers need 8 KiB until every supported third-party driver is bounded"
 #endif
 
 /* Ticks to spin on a full TX ring before dropping the frame. */

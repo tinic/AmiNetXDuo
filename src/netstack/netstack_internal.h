@@ -81,7 +81,9 @@
  * machine somewhere unrelated.  Do not lower this floor without measuring
  * the complete supported-device matrix, including the synchronous driver
  * call. */
+#ifndef AMI_DHCPV6_STACK_SIZE
 #define AMI_DHCPV6_STACK_SIZE       4096
+#endif
 
 #if AMI_DHCPV6_STACK_SIZE < 4096
 #error "DHCPv6 sends through the SANA-II bridge; a third-party BeginIO runs on this stack"
@@ -123,11 +125,11 @@
  */
 #define AMI_MDNS_LOCAL_CACHE_BYTES  \
     (1024 + AMI_CFG_MAX_SD_SERVICES * 384)
-/* Overridable: 32 KB holds a hundred-odd learnt records, which is a network
-   far larger than an Amiga is on.  The cache evicts the oldest when it is
-   full, so a smaller one forgets sooner and loses nothing else. */
+/* Overridable, but keep NetX Duo's established 32 KB capacity by default.
+   A smaller cache is a compatibility trade: it evicts learnt peers sooner
+   and can make service discovery intermittent on a busy network. */
 #ifndef AMI_MDNS_PEER_CACHE_BYTES
-#define AMI_MDNS_PEER_CACHE_BYTES   8192
+#define AMI_MDNS_PEER_CACHE_BYTES   32768
 #endif
 #endif
 
@@ -158,6 +160,23 @@
 #define AMI_ADDRESS_POLL_TICKS      ((ULONG)NX_IP_PERIODIC_RATE / 10UL)
 
 /* --------------------------------------------------------------- the state */
+
+/*
+ * DHCP and DNS keep independent packet reservations without putting their
+ * packet arrays back inside every AmiNetStack.  The blocks are allocated only
+ * when the corresponding client is created.  This preserves the small static
+ * configuration while preventing RX/TCP traffic from consuming the packets a
+ * lease renewal or resolver query needs.
+ */
+typedef struct AmiNsClientPoolBlock
+{
+    NX_PACKET_POOL pool;
+    ULONG memory[1];
+} AmiNsClientPoolBlock;
+
+UINT ami_ns_client_pool_create(AmiNsClientPoolBlock **owner,
+                               CHAR *name, ULONG payload, ULONG memory_bytes);
+VOID ami_ns_client_pool_delete(AmiNsClientPoolBlock **owner);
 
 struct AmiNetStack
 {
@@ -206,6 +225,7 @@ struct AmiNetStack
     BOOL                ns_IfaceWanted[AMI_CFG_MAX_ATTACHED];
 
     NX_DHCP             ns_Dhcp;
+    AmiNsClientPoolBlock *ns_DhcpPool;
     BOOL                ns_DhcpCreated;
     BOOL                ns_DhcpStarted;
 
@@ -246,6 +266,7 @@ struct AmiNetStack
     BOOL                ns_AutoIpRunning;
 
     NX_DNS              ns_Dns;
+    AmiNsClientPoolBlock *ns_DnsPool;
     BOOL                ns_DnsCreated;
 
     /* A BOUND notification can run on the DHCP client's own ThreadX task.
