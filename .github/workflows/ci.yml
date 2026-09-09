@@ -179,15 +179,21 @@ jobs:
       # the parser goes untested, which is a silent gap rather than a red build.
       - name: 32-bit host libraries
         run: |
-          # THE RUNNER IMAGE'S THIRD-PARTY APT SOURCES ARE NOT OURS, AND ONE OF
-          # THEM TOOK MAIN RED.  On 2026-09-09 dl.google.com's chrome-stable
-          # index served a Hash Sum mismatch and `apt-get update` exits
-          # non-zero on ANY source it could not read -- so both this job and
-          # `shell scripts` failed before a line of this tree was compiled,
-          # twice, on a commit whose own gates were green.  Nothing here wants
-          # Chrome; drop the sources the image added and update only Ubuntu's,
-          # so a vendor's broken index cannot redden this repo.
-          sudo rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+          # A VENDOR'S BROKEN INDEX MUST NOT REDDEN THIS REPO.  On 2026-09-09
+          # dl.google.com's chrome-stable index served a Hash Sum mismatch,
+          # and `apt-get update` exits non-zero on ANY source it could not
+          # read, so this job and `shell scripts` both failed before a line of
+          # this tree was compiled -- twice, on a commit whose own gates were
+          # green.  Nothing here wants Chrome.
+          #
+          # ONLY GOOGLE'S, and that precision is the whole lesson: the first
+          # attempt removed *.list AND *.sources, which on this image takes
+          # UBUNTU'S OWN repositories with it -- they live in
+          # /etc/apt/sources.list.d/ubuntu.sources in deb822 format, not in
+          # /etc/apt/sources.list -- and the step then failed with
+          # "Package 'gcc-multilib' has no installation candidate".
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-multilib
 
@@ -260,9 +266,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck
         run: |
-          # Same reason as the 32-bit libraries step above: a broken vendor
-          # index in the runner image must not fail this repo's build.
-          sudo rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+          # Same reason as the 32-bit libraries step above, and the same
+          # precision: Google's sources only, because Ubuntu's own live in
+          # that directory too.
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
           # -S warning: style and info notes are not worth a red build.
