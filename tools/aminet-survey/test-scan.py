@@ -20,6 +20,7 @@ SPDX-License-Identifier: MIT
 import os
 import struct
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hunk
@@ -181,6 +182,28 @@ b4 = list(hunk.code_hunks(build(CODE4)))[0][1]
 check("known limitation: immediate misread as a call",
       scan.calls_for(b4, {('abs', 400)}), [-30])
 
+# ---- a base that reaches impossible offsets is not our base ---------------
+#
+# Charon_AmiSSL.library resolved a base and then "called" -2310 through -7014.
+# The table runs -30 to -900; those are AmiSSL's own vectors, and the row sat
+# in the ledger as an ordinary OK from v8 onward.
+CODED = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+         + be16(0x4EAE, 0xFDD8)
+         + be16(0x23C0) + be32(400)
+         + be16(0x2C79) + be32(400)
+         + be16(0x4EAE, 0xFFE2)               # -30, a real vector
+         + be16(0x4EAE, 0xE4AA)               # -7014, impossible
+         + be16(0x4E75))
+with tempfile.NamedTemporaryFile(suffix='.exe', delete=False) as fh:
+    fh.write(build(CODED, relocs=[2]))
+    _p = fh.name
+try:
+    verdict, offs, _t = scan.scan(_p)
+    check("impossible offset rejects the whole row", verdict, 'BASE_NOT_OURS')
+    check("and reports no vectors", offs, [])
+finally:
+    os.unlink(_p)
+
 # ---- scan() END TO END, which the fixtures above never reach --------------
 #
 # Everything above calls calls_for() directly.  scan() also calls
@@ -228,6 +251,6 @@ if fails:
     for f in fails:
         print(f"scan_fixture=FAIL {f}")
     sys.exit(1)
-print("scan_fixture=PASS 12 fixtures: call shapes, tail call, rebound a6, "
+print("scan_fixture=PASS 16 fixtures: call shapes, tail call, rebound a6, "
       "data hunks, a6 via d0 and via a register hop with both clobbers, "
       "scan() end to end incl SOCK_RAW, one pinned limitation")

@@ -15,8 +15,7 @@ rank	new	cum	flags	lvos	archive	binary
 14	1	79	--D	20	EasySocketDev.lha	EasySocket/Libs/EasySocket.library
 15	1	80	--D	19	binkd_1.1a-115.lha	binkd
 16	1	81	--D	10	BenderIRC.lha	BenderIRC/plugins/LogWriter.plugin
-17	1	82	---	2	Charon.lha	Charon/Libs/Charon_AmiSSL.library
-18	1	83	H--	6	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
-19	1	84	---	1	FTPMount_upd.lha	FTPMount_upd/FTPMount-Handler.debug
+17	1	82	H--	6	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
+18	1	83	---	1	FTPMount_upd.lha	FTPMount_upd/FTPMount-Handler.debug
 
-# 732 attributed binaries cover 84 of 143 vectors (58%); 19 of them are non-redundant.
+# 731 attributed binaries cover 83 of 143 vectors (58%); 18 of them are non-redundant.

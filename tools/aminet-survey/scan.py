@@ -50,7 +50,7 @@ if not LVOMAP:
 # rescan.sh re-runs every archive whose row carries an older version, off the
 # local unpack tree, so no re-fetch is needed.  Rows with no scanner= field at
 # all predate this and are the ones to redo first.
-SCANNER_VERSION = 10
+SCANNER_VERSION = 13
 
 OPENLIB = 0xFDD8            # -552 as a 16-bit displacement
 # A NAME THAT IS NOT UNIQUE CANNOT BE A KEY.  18 offsets in lvomap.tsv are all
@@ -109,6 +109,23 @@ D0_STORES = {0x23C0: 'abs.l', 0x21C0: 'abs.w'}
 for _n in range(8):
     A6_LOADS[0x2C68 | _n] = 'a%d' % _n           # movea.l d16(An),a6
     D0_STORES[0x2140 | (_n << 9)] = 'a%d' % _n   # move.l d0,d16(An)
+    # REGISTER INDIRECT `(An)` IS NOT SAFE AND IS DELIBERATELY ABSENT.
+    #
+    # It looks like the same family one mode down -- `move.l d0,(An)` is
+    # 0x2080|(n<<9) against 0x2140|(n<<9) -- and 24 of the unresolved binaries
+    # do store the base that way, so it was added and then REMOVED.  A
+    # displacement is what makes `d16(a2)` specific: it names a field at a
+    # fixed offset from a base pointer.  `(a2)` names whatever a2 happens to
+    # hold, and a2 is a scratch register that changes constantly, so a store
+    # and a load written as `(a2)` in two unrelated places key the same and
+    # pair up.
+    #
+    # MEASURED, which is the only reason this is known: with `(An)` in the
+    # table, samba's `testprns` reported 53 distinct vectors against 30 before
+    # -- including ?-870, ?-906 and ?-996, which are PAST THE END of the
+    # 143-vector table and therefore cannot be ours.  That is the same
+    # signature the first harness produced (AmiFTP scoring 89 against a ground
+    # truth of 18).  An inflated count is worse than a missing one.
 
 # NOT ADDED, AND ON PURPOSE: the base kept in an ADDRESS REGISTER.
 #
@@ -185,11 +202,13 @@ def calls_for(code, bases):
     cur = None
     d0 = None
     areg = [None] * 8
+    just_opened = False
     # i + 4 <= len(code): opcode word plus a 16-bit displacement.  Anything
     # tighter drops the last instruction of the hunk, which is where tail calls
     # are.
     for i in range(0, len(code) - 3, 2):
         w = u16(code, i)
+        opened_prev, just_opened = just_opened, False
         if w == 0x2039 and _fits(code, i, 'abs.l'):      # move.l abs.l,d0
             d0 = ('abs', u32(code, i + 2))
             continue
@@ -211,6 +230,23 @@ def calls_for(code, bases):
         # Tracked per register and cleared by any other write to it, so the
         # window is the same bounded idiom the d0 case uses and no dataflow is
         # being inferred across a call.
+        # A FUNCTION BOUNDARY ENDS EVERY REGISTER'S LIFETIME.  `movem.l (sp)+,regs`
+        # (0x4CDF/0x4CD8) restores the caller's values and `rts` leaves, so a
+        # register tracked across either is a register holding something else.
+        # Without this the base found in one function would be credited with
+        # whatever the NEXT function calls through that register -- which is
+        # how a count gets inflated rather than corrected.
+        if w == 0x4E75 or (w & 0xFFF8) == 0x4CD8 or (w & 0xFFF8) == 0x48E0:
+            # ONLY the register file.  Clearing `cur` here as well cost real
+            # vectors -- perch lost connect and send, rcp and rshd lost accept,
+            # talkd lost recvfrom -- because this walk steps two bytes without
+            # decoding, so an operand word that happens to read as 0x4E75 or a
+            # movem resets state in the middle of a live sequence.  `cur` is
+            # keyed by a memory location and survives that; `areg` is keyed by
+            # a register, which genuinely does not outlive the frame.
+            areg = [None] * 8
+            continue
+
         reg = (w >> 9) & 7
         if (w & 0xF1C0) == 0x2040 and reg not in (6, 7):   # movea.l <ea>,aN
             mode = w & 0x3F
@@ -236,6 +272,7 @@ def calls_for(code, bases):
         if w in (0x4EAE, 0x4EEE):    # jsr/jmp d16(a6) -- jmp is a tail call
             if cur is not None and cur in bases:
                 hits.append(s16(code, i + 2))
+            just_opened = (s16(code, i + 2) == -552)
             continue
         if (w & 0xFFC0) == 0x2C40:   # any other movea.l <ea>,a6 rebinds it
             cur = None
@@ -333,6 +370,7 @@ def raw_socket_sites(code, bases):
     """
     n = 0
     cur = None
+    just_opened = False
     # SAME a6 TRACKING AS calls_for, so the same names must exist here.
     # The idiom handling below is shared text between the two walks, and
     # having it only initialised in one of them raised NameError: areg on
@@ -342,6 +380,7 @@ def raw_socket_sites(code, bases):
     areg = [None] * 8
     for i in range(0, len(code) - 3, 2):
         w = u16(code, i)
+        opened_prev, just_opened = just_opened, False
         if w == 0x2039 and _fits(code, i, 'abs.l'):      # move.l abs.l,d0
             d0 = ('abs', u32(code, i + 2))
             continue
@@ -363,6 +402,23 @@ def raw_socket_sites(code, bases):
         # Tracked per register and cleared by any other write to it, so the
         # window is the same bounded idiom the d0 case uses and no dataflow is
         # being inferred across a call.
+        # A FUNCTION BOUNDARY ENDS EVERY REGISTER'S LIFETIME.  `movem.l (sp)+,regs`
+        # (0x4CDF/0x4CD8) restores the caller's values and `rts` leaves, so a
+        # register tracked across either is a register holding something else.
+        # Without this the base found in one function would be credited with
+        # whatever the NEXT function calls through that register -- which is
+        # how a count gets inflated rather than corrected.
+        if w == 0x4E75 or (w & 0xFFF8) == 0x4CD8 or (w & 0xFFF8) == 0x48E0:
+            # ONLY the register file.  Clearing `cur` here as well cost real
+            # vectors -- perch lost connect and send, rcp and rshd lost accept,
+            # talkd lost recvfrom -- because this walk steps two bytes without
+            # decoding, so an operand word that happens to read as 0x4E75 or a
+            # movem resets state in the middle of a live sequence.  `cur` is
+            # keyed by a memory location and survives that; `areg` is keyed by
+            # a register, which genuinely does not outlive the frame.
+            areg = [None] * 8
+            continue
+
         reg = (w >> 9) & 7
         if (w & 0xF1C0) == 0x2040 and reg not in (6, 7):   # movea.l <ea>,aN
             mode = w & 0x3F
@@ -534,6 +590,23 @@ def scan(path):
     # becomes a finding.  curl and fping both land here.
     if not offs:
         return ('BASE_BUT_NO_CALLS', [], 0)
+
+    # A BASE THAT REACHES OFFSETS WE DO NOT HAVE IS NOT OUR BASE.
+    #
+    # Charon_AmiSSL.library resolved a base and then "called" -2310, -4596,
+    # -5004 ... -7014.  Our table runs from -30 to -900, and no bsdsocket
+    # implementation has a vector at -7014: the scanner had locked onto
+    # AmiSSL's own library base.  It sat in the ledger as an ordinary OK row
+    # from v8 onward, and its `reserved@-846` was quoted as evidence that a
+    # real program calls a reserved vector.  It was not.
+    #
+    # The cut is -1200, not -900, deliberately: -954 shows up in 14 binaries
+    # (Atalk, Atalkd, BenderDCCGet) as a single consistent offset alongside
+    # gai_strerror, which reads as a Roadshow extension this table does not
+    # name yet -- a gap in lvomap.tsv, not a wrong base.  Thousands past the
+    # end is a wrong base.  Exactly one row in the corpus trips this.
+    if any(o < -1200 for o in offs):
+        return ('BASE_NOT_OURS', [], 0)
 
     v = 'DUAL_STACK_AS225' if dual else 'OK'
     if raw:

@@ -1,13 +1,13 @@
 offset	lvo	binaries
 -30	socket	552
--36	bind	246
+-36	bind	245
 -42	listen	185
 -48	accept	188
 -54	connect	451
 -60	sendto	189
 -66	send	623
--72	recvfrom	162
--78	recv	563
+-72	recvfrom	161
+-78	recv	562
 -84	shutdown	184
 -90	setsockopt	290
 -96	getsockopt	111
@@ -15,7 +15,7 @@ offset	lvo	binaries
 -108	getpeername	113
 -114	IoctlSocket	291
 -120	CloseSocket	609
--126	WaitSelect	371
+-126	WaitSelect	370
 -132	SetSocketSignals	31
 -138	getdtablesize	32
 -144	ObtainSocket	174
@@ -135,7 +135,7 @@ offset	lvo	binaries
 -828	reserved	0
 -834	reserved	0
 -840	reserved	1
--846	reserved	1
+-846	reserved	0
 -852	reserved	0
 -858	reserved	12
 -882	if_nametoindex	1
