@@ -415,6 +415,33 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
 
+    # The probe record and the semaphore it is published on -- the ONLY channel
+    # by which a machine nobody here has can report what the probe decided.
+    # Three card rows are marked UNVERIFIED ON HARDWARE in netdev_cards.c, the
+    # X-Surf 500 has no emulator at all, and the ISA PnP sequence records its
+    # vendor id, serial, checksum and settle rounds here and nowhere else.
+    #
+    # The publish path is the half worth a test: a SECOND anxnet.device on one
+    # machine has to find the first one's record and leave it alone, and its
+    # expunge must not RemSemaphore() a semaphore it never added.  The exec
+    # stubs keep a real list and fail an Add or Rem outside Forbid().
+    add_executable(test_netdev_diag
+        test/test_netdev_diag.c
+        netdev_diag.c
+        netdev_cards.c)
+
+    target_include_directories(test_netdev_diag PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_diag PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_diag COMMAND test_netdev_diag)
+
     # The DP8390 core, beneath ne2000.c AND ed.c and therefore beneath six of
     # the nine cards the sweep drives: X-Surf, X-Surf 100, Ariadne II, Hydra,
     # LAN Rover and the PCMCIA slot.  It had NO host test, and the way that

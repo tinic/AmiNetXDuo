@@ -11,6 +11,7 @@
 #include <exec/lists.h>
 #include <exec/nodes.h>
 #include <exec/ports.h>
+#include <exec/semaphores.h>
 
 #ifndef NT_MESSAGE
 #define NT_MESSAGE  5
@@ -22,6 +23,20 @@
 VOID         Disable(VOID);
 VOID         Enable(VOID);
 VOID         ReplyMsg(struct Message *msg);
+
+/*
+ * The scheduler lock and the public semaphore list, for
+ * src/netdev/test/test_netdev_diag.c.  Declared and not defined, like
+ * everything else here: the record's whole publish contract is that a SECOND
+ * driver finds the first one's semaphore and leaves it alone, so the test
+ * needs a list it can inspect rather than a no-op.
+ */
+VOID         Forbid(VOID);
+VOID         Permit(VOID);
+VOID         InitSemaphore(struct SignalSemaphore *sem);
+VOID         AddSemaphore(struct SignalSemaphore *sem);
+VOID         RemSemaphore(struct SignalSemaphore *sem);
+struct SignalSemaphore *FindSemaphore(STRPTR name);
 
 VOID         NewList(struct List *list);
 VOID         AddHead(struct List *list, struct Node *node);
