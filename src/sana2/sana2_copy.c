@@ -177,7 +177,16 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
     slot->sum    = ami_sana2_copy_sum(slot->dst, (const UCHAR *)from, len);
     slot->summed = TRUE;
     if (slot->stats != NULL)
+    {
         slot->stats->rx_copy_summed++;
+        /* AND SEPARATELY, because rx_copy_summed stopped being able to say
+           it.  Making this branch accumulate its own sum was right -- it
+           removed the second walk -- but it also made summed == hook whether
+           the branch runs or not, which is exactly the measurement the
+           0.26.3 field report needed.  Counted here, so `netstat -s` can
+           answer it. */
+        slot->stats->rx_copy_unaligned++;
+    }
     slot->copied = len;
 
     return TRUE;

@@ -598,8 +598,12 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         tool_printf("  vblank RX polls   %10lu    deaf RX resets    %10lu\n",
                     st->tick_polls, st->rx_kicks);
 
-        /* A card whose receive fill produces no sum has its frames walked a
-           second time for a checksum that move could have produced. */
+        /* These two are equal on every driver now, and the line stays because
+           the FILL COUNT is worth reading on its own.  It used to discriminate:
+           a fill that produced no sum meant the frame was walked a second time
+           for a checksum the move had already paid for.  Once the odd branch
+           learned to accumulate, both branches set summed -- see
+           `unaligned copies` below for the measurement this line lost. */
         if (st->packets_received != 0)
             tool_printf("  copy/direct fill  %10lu    summed while filling %7lu\n",
                         st->rx_copy_hook, st->rx_copy_summed);
@@ -609,6 +613,14 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         if (st->rx_copy_hook != 0)
             tool_printf("  direct fills      %10lu    (claimed at the device)\n",
                         st->rx_direct_fill);
+
+        /* Only a device we do not own can produce an odd payload pointer, and
+           only this line says whether one did.  `summed while filling` used to
+           carry it and cannot any more: both branches of the copy hook set
+           summed, so it equals the fill count either way. */
+        if (st->rx_copy_unaligned != 0)
+            tool_printf("  unaligned copies  %10lu    (odd pointer from the driver)\n",
+                        st->rx_copy_unaligned);
 
         /* Only when there are any: the four causes behind receive errors are
            nothing alike, and the total does not say which one fired. */
