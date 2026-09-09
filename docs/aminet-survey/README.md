@@ -207,7 +207,7 @@ Counts move as the survey runs; regenerate with
 | an observed caller | proves the vector is used |
 | NO observed caller | the corpus is complete, so this is no caller in 5,907 archives -- but only 56% of the archives holding a bsdsocket binary are resolved |
 | argument-selected features | invisible entirely -- `SOCK_RAW` has 36 users and no vector |
-| zero Aminet callers | is NOT "removable": `getaddrinfo` has none in 5,907 archives and `nc`, `host`, `censusprobe` and `toolsock` all call it.  `own-tools.tsv` carries the other half of that question, and five vectors sit in exactly this gap |
+| zero Aminet callers | is NOT "removable": `getaddrinfo` has none in 5,907 archives and `nc`, `host`, `censusprobe` and `toolsock` all call it.  `own-tools.tsv` carries the other half of that question, and SEVEN vectors sit in exactly this gap.  It counts calls by NAME and by raw LVO offset, because our tools reach most vectors as `jsr a6@(-120:W)` and a name grep sees none of those |
 | a static reference | is NOT runtime coverage; a harness candidate needs a recipe that actually exercises the calls |
 | a single vector | is often not separable -- `ReleaseCopyOfSocket` belongs to the inetd handoff family with `ObtainSocket`/`Dup2Socket`, and `sendmsg` is the NFS/9P layer.  Judge families, not vectors |
 | the 14,290-byte figure | a preliminary non-LTO ceiling, NOT a realizable saving; a shipping LTO micro build has to be measured |

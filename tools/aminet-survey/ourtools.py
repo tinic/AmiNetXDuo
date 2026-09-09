@@ -39,7 +39,17 @@ rows = [l.split('\t') for l in survey_io.lines(f'{BASE}/lvo-usage.tsv')][1:]
 
 # One grep for every name at once; -o with a name alternation is far cheaper
 # than 143 subprocesses and gives file:name pairs directly.
+# OUR TOOLS CALL BY OFFSET, NOT BY NAME, and a name grep cannot see it:
+#
+#     LONG tool_sock_close(struct Library *base, LONG s)   /* toolsock.c:375 */
+#     { __asm __volatile ("jsr a6@(-120:W)" ...); }
+#
+# -120 is CloseSocket.  The first version of this counted names only and
+# reported `CloseSocket ours=0` while six files in src/tools call vectors that
+# way across 35 distinct offsets.  UNDER-reporting is the direction that
+# breaks a tool, so both forms are counted.
 names = [r[1] for r in rows if r[1] != 'reserved']
+by_offset = {int(r[0]): r[1] for r in rows if r[1] != 'reserved'}
 pat = r'\b(' + '|'.join(re.escape(n) for n in names) + r')\b'
 found = {}
 for d in DIRS:
@@ -57,6 +67,18 @@ for d in DIRS:
         if '/test/' in path or os.path.basename(path).startswith('test_'):
             continue
         found[tok] = found.get(tok, 0) + 1
+
+    # the same files again, this time for `a6@(-NNN` inline call sites
+    asm = subprocess.run(['grep', '-rEo', '--include=*.c', r'a6@\(-[0-9]+', p],
+                         capture_output=True, text=True).stdout
+    for line in asm.splitlines():
+        path, _, tok = line.partition(':')
+        if '/test/' in path or os.path.basename(path).startswith('test_'):
+            continue
+        off = -int(tok.split('-')[-1])
+        name = by_offset.get(off)
+        if name:
+            found[name] = found.get(name, 0) + 1
 
 with survey_io.out(DEST) as fh:
     print("offset\tlvo\taminet_callers\tour_tool_mentions", file=fh)
