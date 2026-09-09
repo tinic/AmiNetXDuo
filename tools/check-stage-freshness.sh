@@ -42,12 +42,25 @@ WINDOW="${AMINETXDUO_STAGE_WINDOW:-20}"
 # checked in BOTH directions -- an unlisted dead stage fails, and a listed
 # stage that has started passing fails too, naming itself for removal.
 #
-# All sixteen are emulator.yml, the tier-2 workflow, whose self-hosted runner
-# (playhouse3) is not connected to Actions.  docs/BACKLOG.md carries the row.
-# They are not "allowed to be broken": they are counted, in the repo, where a
-# release has to look at them.
-BASELINE_DEAD="${AMINETXDUO_STAGE_BASELINE- bridged capture cards cards6 e2e e2ecards emulator fetchtls
-lossgate ltoprobe matrix rate reachability smb tlsloop wirequiet }"
+# THE BASELINE IS EMPTY, AND THAT IS THE POINT.  It held sixteen emulator.yml
+# stages from 2026-08-27, when playhouse3's Actions listener lost its broker
+# connection and every tier-2 run queued against an offline runner.  All
+# sixteen came back on 2026-09-09: run 34331957352 (57259c98) is the first
+# emulator run to conclude success since, and this gate reported
+# revived=16 dead_known=0 against it.
+#
+# What had kept it red once the runner was back was NOT the runner.  The card
+# sweep derives its guest address from cksum(AMINETXDUO_CARDSWEEP_ID) % 6, the
+# id defaults to basename $ROOT, and on the runner that is the literal string
+# "AmiNetXDuo" -- so every CI sweep drew slot 5 forever and a2065 landed on
+# 192.168.1.191, which a real machine holds.  One failing arm fails the single
+# job and fails the run.  The relocation walk in tests/tools/run-cardsweep.sh
+# moved it to .241 and all nine cards passed.
+#
+# LEAVING IT EMPTY IS DELIBERATE.  A stage that stops passing now is DEAD_NEW
+# and fails this gate the day it happens, instead of joining a list that a
+# release only has to look at.
+BASELINE_DEAD="${AMINETXDUO_STAGE_BASELINE-}"
 
 if ! command -v gh > /dev/null 2>&1; then
     echo "stage_freshness=SKIPPED reason=no_gh_cli"
