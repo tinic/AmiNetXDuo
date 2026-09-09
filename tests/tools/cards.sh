@@ -2,6 +2,23 @@
 # The cards this project supports, one table, sourced by every sweep.
 # SPDX-License-Identifier: MIT
 
+# xsurf IS FLAKY AND THE RATE IS MEASURED: 1 arm in 7 fails, 2026-09-09, on
+# playhouse3 against playhouse4, seven back-to-back single-card sweeps.  A
+# single passing sweep therefore proves very little about it.
+#
+# TELL IT BY THE WALL TIME.  A failing arm is ~313 s -- the 300 s emulator
+# timeout -- and every passing arm is 51-58 s, so `wall_s` in the cardsweep
+# row separates them at a glance.  The shape is always the same: the run stops
+# in `SYS:iperf -s -p 74xx`, the peer logs `cannot connect ... timed out`, and
+# the guest never answers in SERVER mode.
+#
+# IT IS NOT THE ADDRESS.  a2065's failure was an occupied address and the
+# relocation walk below fixes that one; xsurf's is not.  The same
+# 192.168.1.247 passed six arms and failed the seventh in that run.  The card
+# transmits either way -- 1,213 frames sourced by its MAC in an earlier
+# capture, against a2065's zero.
+#
+# Repro and next step are in the a2065 backlog row.
 CARDS="
 a2065          A1200  192.168.1.241  0c:01
 ariadne        A1200  192.168.1.242  0c:02
