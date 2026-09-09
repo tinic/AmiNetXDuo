@@ -37,8 +37,20 @@ extern ULONG netdev_time_rx;
 extern ULONG netdev_time_tx;
 #endif
 
+/*
+ * Redirected by src/netdev/test/test_netdev_dp8390.c.  A DP8390's register
+ * file is FOUR banks of sixteen selected by CR bits 7..6 -- PAR0 on page 1
+ * and PSTART on page 0 are one register index -- so a byte array is not a
+ * model of this chip, it is a model of a chip with the pages fused.  The
+ * test supplies the banking; these expand to the plain bus access they
+ * replace, so the target build is byte for byte what it was.
+ */
+#ifndef NIC_GET
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
+#endif
+#ifndef NIC_PUT
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
+#endif
 
 /*
  * The chip needs settling time between a command write and the next access.

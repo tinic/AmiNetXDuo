@@ -191,7 +191,8 @@ host_test_targets() { # builddir
 # 127, plus fuzz_cis_seeds and fuzz_cis_sweep.
 # 129, plus netdev_cmds.
 # 130, plus netdev_isapnp.
-HOST_TESTS_EXPECTED=131
+# 131, plus netdev_dp8390.
+HOST_TESTS_EXPECTED=132
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

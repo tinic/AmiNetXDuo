@@ -415,6 +415,36 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
 
+    # The DP8390 core, beneath ne2000.c AND ed.c and therefore beneath six of
+    # the nine cards the sweep drives: X-Surf, X-Surf 100, Ariadne II, Hydra,
+    # LAN Rover and the PCMCIA slot.  It had NO host test, and the way that
+    # was missed is worth writing down: test_netdev_ne2000.c and
+    # test_netdev_ed.c cover their card glue by #including it whole and STUB
+    # all seven entry points of the core underneath (:133-140 and :33-37), so
+    # the two tests that look like they drive a DP8390 are the two that
+    # guarantee they do not.
+    #
+    # No other source: NIC_GET/NIC_PUT are redirected to a model that BANKS
+    # the register file.  A DP8390 is four pages of sixteen selected by CR
+    # bits 7..6, so PAR0 on page 1 and PSTART on page 0 are one register
+    # index -- an array fuses them and a driver that forgot to select page 1
+    # before writing the station address would still pass.
+    add_executable(test_netdev_dp8390
+        test/test_netdev_dp8390.c)
+
+    target_include_directories(test_netdev_dp8390 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_dp8390 PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_dp8390 COMMAND test_netdev_dp8390)
+
     # The ISA Plug and Play sequence in front of an X-Surf's RTL8019AS, the
     # last file in this directory a host could compile and nothing did.
     #
