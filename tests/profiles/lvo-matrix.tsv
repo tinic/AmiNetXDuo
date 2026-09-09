@@ -69,7 +69,7 @@ offset	idx	api	symbol	file	gate	default	minimal	micro
 -0x1b0	71	FreeRouteInfo	bsd_FreeRouteInfo	routing.c	ROUTING	ok	ok	STUB
 -0x1b6	72	GetRouteInfo	bsd_GetRouteInfo	routing.c	ROUTING	ok	ok	STUB
 -0x1bc	73	AddInterfaceTagList	bsd_AddInterfaceTagList	interfaces.c	-	ok	ok	ok
--0x1c2	74	ConfigureInterfaceTagList	bsd_ConfigureInterfaceTagList	interfaces.c	-	ok	ok	ok
+-0x1c2	74	ConfigureInterfaceTagList	bsd_ConfigureInterfaceTagList	interfaces.c	NETADMIN	ok	ok	STUB
 -0x1c8	75	ReleaseInterfaceList	bsd_ReleaseInterfaceList	interfaces.c	-	ok	ok	ok
 -0x1ce	76	ObtainInterfaceList	bsd_ObtainInterfaceList	interfaces.c	-	ok	ok	ok
 -0x1d4	77	QueryInterfaceTagList	bsd_QueryInterfaceTagList	interfaces.c	-	ok	ok	ok
@@ -80,7 +80,7 @@ offset	idx	api	symbol	file	gate	default	minimal	micro
 -0x1f2	82	AddNetMonitorHookTagList	bsd_AddNetMonitorHookTagList	netmonitor.c	NETMONITOR	ok	ok	STUB
 -0x1f8	83	RemoveNetMonitorHook	bsd_RemoveNetMonitorHook	netmonitor.c	NETMONITOR	ok	ok	STUB
 -0x1fe	84	GetNetworkStatistics	bsd_GetNetworkStatistics	netstats.c	NETSTATUS	ok	ok	STUB
--0x204	85	AddDomainNameServer	bsd_AddDomainNameServer	roadshow.c	-	ok	ok	ok
+-0x204	85	AddDomainNameServer	bsd_AddDomainNameServer	roadshow.c	NETADMIN	ok	ok	STUB
 -0x20a	86	RemoveDomainNameServer	bsd_RemoveDomainNameServer	roadshow.c	-	ok	ok	ok
 -0x210	87	ReleaseDomainNameServerList	bsd_ReleaseDomainNameServerList	roadshow.c	-	ok	ok	ok
 -0x216	88	ObtainDomainNameServerList	bsd_ObtainDomainNameServerList	roadshow.c	-	ok	ok	ok

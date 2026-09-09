@@ -547,6 +547,7 @@ typedef struct BsdIfConfigReq
     LONG    bcr_State;
 } BsdIfConfigReq;
 
+#ifdef AMINETXDUO_NETADMIN
 static BOOL bsd_if_parse_address(const char *text, ULONG *out)
 {
     if (text == NULL || text[0] == '\0')
@@ -558,6 +559,7 @@ static BOOL bsd_if_parse_address(const char *text, ULONG *out)
     return (netstack_resolve(text, out, BSD_IF_RESOLVE_TIMEOUT) == AMI_NET_OK)
                ? TRUE : FALSE;
 }
+#endif /* AMINETXDUO_NETADMIN */
 
 static ULONG bsd_if_classful_mask(ULONG addr)
 {
@@ -607,6 +609,7 @@ LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
  * Pass one. Returns 0, or -1 with errno set. Nothing is applied to the
  * interface either way.
  */
+#ifdef AMINETXDUO_NETADMIN
 static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
                                 struct TagItem *tags, BsdIfConfigReq *req)
 {
@@ -688,7 +691,9 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
 
     return 0;
 }
+#endif /* AMINETXDUO_NETADMIN */
 
+#ifdef AMINETXDUO_NETADMIN
 LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
                                    register struct TagItem *tags __asm("a1"),
                                    register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -799,6 +804,20 @@ out:
     return result;
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
+                                   register struct TagItem *tags __asm("a1"),
+                                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)name;
+    (VOID)tags;
+    return bsd_fail(SocketBase, AMI_EINVAL);
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
+#ifdef AMINETXDUO_NETADMIN
 static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                              struct TagItem *tags, AmiIfConfig *cfg)
 {
@@ -886,7 +905,9 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
 
     return 0;
 }
+#endif /* AMINETXDUO_NETADMIN */
 
+#ifdef AMINETXDUO_NETADMIN
 LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
                              register STRPTR device __asm("a1"),
                              register LONG unit __asm("d0"),
@@ -960,11 +981,29 @@ LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
     return 0;
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
+                             register STRPTR device __asm("a1"),
+                             register LONG unit __asm("d0"),
+                             register struct TagItem *tags __asm("a2"),
+                             register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)name;
+    (VOID)device;
+    (VOID)unit;
+    (VOID)tags;
+    return bsd_fail(SocketBase, AMI_EINVAL);
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
 /*
  * "success, TRUE for success, 0 for failure": the opposite of every other
  * call in this file, which are all 0 for success and -1 for failure. One page
  * apart in the same document.
  */
+#ifdef AMINETXDUO_NETADMIN
 LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
                          register LONG force __asm("d0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -1002,6 +1041,20 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
 
     return 0;
 }
+
+#else /* !AMINETXDUO_NETADMIN */
+
+LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
+                         register LONG force __asm("d0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)name;
+    (VOID)force;
+    (VOID)bsd_fail(SocketBase, AMI_EINVAL);
+    return 0;
+}
+
+#endif /* AMINETXDUO_NETADMIN */
 
 /*
  * Every sockaddr written into a SIOCGIFCONF entry must carry sa_len: libpcap's
@@ -1171,6 +1224,7 @@ ULONG bsd_if_nametoindex(register const char *ifname __asm("a0"),
     return (index < 0) ? 0UL : (ULONG)(index + 1);
 }
 
+#ifdef AMINETXDUO_NETADMIN
 char *bsd_if_indextoname(register ULONG ifindex __asm("d0"),
                          register char *ifname __asm("a0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -1198,12 +1252,27 @@ char *bsd_if_indextoname(register ULONG ifindex __asm("d0"),
     return ifname;
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+char *bsd_if_indextoname(register ULONG ifindex __asm("d0"),
+                         register char *ifname __asm("a0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)ifindex;
+    (VOID)ifname;
+    (VOID)bsd_fail(SocketBase, AMI_ENXIO);
+    return NULL;
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
 typedef struct BsdIfNameIndex
 {
     struct if_nameindex bin_Entry[NX_MAX_IP_INTERFACES + 1];
     char                bin_Name[NX_MAX_IP_INTERFACES][IF_NAMESIZE];
 } BsdIfNameIndex;
 
+#ifdef AMINETXDUO_NETADMIN
 struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
                                           __asm("a6"))
 {
@@ -1251,6 +1320,18 @@ struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
     return out->bin_Entry;
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
+                                          __asm("a6"))
+{
+    (VOID)bsd_fail(SocketBase, AMI_ENXIO);
+    return NULL;
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
+#ifdef AMINETXDUO_NETADMIN
 VOID bsd_if_freenameindex(register struct if_nameindex *ptr __asm("a0"),
                           register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -1260,3 +1341,16 @@ VOID bsd_if_freenameindex(register struct if_nameindex *ptr __asm("a0"),
     if (ptr != NULL)
         ami_free(ptr);
 }
+
+#else /* !AMINETXDUO_NETADMIN */
+
+VOID bsd_if_freenameindex(register struct if_nameindex *ptr __asm("a0"),
+                          register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* Nothing hands one out with the option off, so there is nothing to
+       free; a caller that passes something anyway allocated it elsewhere. */
+    (VOID)ptr;
+    (VOID)SocketBase;
+}
+
+#endif /* AMINETXDUO_NETADMIN */

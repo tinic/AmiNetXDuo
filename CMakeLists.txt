@@ -604,6 +604,25 @@ endif()
 #
 # Off, the three TagList calls answer AMI_ENOSYS, GetRouteInfo() answers NULL
 # (its documented failure) and FreeRouteInfo() accepts the NULL back.
+# The interface-configuration and Roadshow-administration vectors: eleven of
+# them, and no Aminet caller for any one.  The survey attributes 833 binaries
+# and AddInterfaceTagList, ConfigureInterfaceTagList, RemoveInterface,
+# if_nameindex, if_indextoname, if_freenameindex, AddDomainNameServer,
+# RemoveDomainNameServer, SetDefaultDomainName, In_LocalAddr and In_CanForward
+# score zero between them -- see docs/aminet-survey/lvo-usage.tsv.
+#
+# if_nametoindex and GetDefaultDomainName are NOT here: they have no Aminet
+# caller either, but our own tools call them (own-tools.tsv), and a vector our
+# shipped tools need is not dead because the corpus does not use it.
+#
+# Off, each answers the way the built version answers when it cannot do the
+# job -- EINVAL, ENXIO, or 0 for "not one of ours" -- so no caller sees a
+# return value it does not already handle.
+option(AMINETXDUO_NETADMIN "Build the interface and Roadshow admin vectors" ON)
+if(AMINETXDUO_NETADMIN)
+    add_compile_definitions(AMINETXDUO_NETADMIN)
+endif()
+
 option(AMINETXDUO_ROUTING "Build the Roadshow AddRoute/DeleteRoute API" ON)
 if(AMINETXDUO_ROUTING)
     add_compile_definitions(AMINETXDUO_ROUTING)
