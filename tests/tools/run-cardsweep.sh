@@ -163,6 +163,67 @@ while read -r -u 3 board model addr mac; do
         mac="${mac%:*}:$(printf '%02x' $(( 0x${mac##*:} + SWEEP_SLOT * 32 )))"
     fi
 
+    # THE ADDRESS HAS TO BE FREE, AND NOTHING CHECKED.  SWEEP_SLOT hashes the
+    # sweep ID into the last octet, so two runs of the same card differ only in
+    # which address they land on -- and 192.168.1.191 is held by a real machine
+    # on this LAN (98:FD:B4:9A:47:65).  An arm that draws it boots, loses
+    # duplicate-address detection, never brings its TCP server up, and reports
+    #
+    #     THE RUN DID NOT FINISH: it stopped in 'SYS:iperf -s -p 7404 -t 20'
+    #
+    # after burning the full 300 s timeout.  That verdict cost a day of
+    # theorising: build variants, pool exhaustion, serial collisions, cold
+    # rigs, CPU load.  The guest knew all along and said so on the serial log
+    # -- but only on an AMINETXDUO_LOG build, and only to a log nobody reads
+    # when the run merely "times out".
+    #
+    # An ARP probe costs a second and answers it before the emulator starts.
+    # `arping` is not everywhere, so this uses the kernel's own neighbour
+    # table: ping once, then read what ARP learned.  A reply is not required
+    # -- the occupant here does not answer ping, which is exactly how the
+    # address got cleared as "silent" by hand.  A MAC in the table is the
+    # proof, and one of OUR guests is not a conflict.
+    if command -v ip > /dev/null 2>&1; then
+        # FLUSH FIRST, then probe, then wait.  Each step earned itself:
+        #
+        #   flush  -- `ip neigh` keeps STALE entries long after the occupant is
+        #             gone, and .221 showed a stale MAC while an arm on that
+        #             very address passed.  Deleting first means any lladdr
+        #             that comes back was answered just now.
+        #   ping   -- ARP resolution happens at layer 2 whether or not the host
+        #             answers ICMP, and this one does not answer ICMP at all.
+        #             The echo failing is expected and ignored.
+        #   sleep 2 -- with 1 s the table still reads empty and every address
+        #             looks free, which made this check appear useless when it
+        #             was merely too quick.
+        ip neigh del "$addr" dev "$IFACE" > /dev/null 2>&1 || true
+        ping -c2 -W2 "$addr" > /dev/null 2>&1 || true
+        sleep 2
+        # REACHABLE, and nothing weaker.  An lladdr alone is not proof the
+        # address is taken: `ip neigh` keeps STALE entries long after the
+        # occupant has gone, and .221 showed a stale MAC while an arm on that
+        # very address passed.  REACHABLE means packets were exchanged just
+        # now.  One of OUR guests (02:41:4d:49:*) is never a conflict.
+        # ANY lladdr, not only REACHABLE: the entry legitimately cycles
+        # REACHABLE -> DELAY -> STALE while we look at it, and the flush above
+        # is what makes a bare lladdr trustworthy.  One of OUR guests
+        # (02:41:4d:49:*) is never a conflict.
+        # `|| true` IS LOAD-BEARING.  This script runs under `set -e`, and a
+        # pipeline ending in a grep that finds nothing exits 1 -- so on a FREE
+        # address the assignment failed and the sweep died silently right after
+        # its header, having tested no card at all.  The conflicting address
+        # worked, because there grep succeeds.  A check that only survives when
+        # it fires is worse than no check.
+        conflict=$(ip neigh show "$addr" 2>/dev/null \
+                   | grep -vi "02:41:4d:49" \
+                   | grep -oE "lladdr [0-9a-f:]+" | head -1 || true)
+        if [ -n "$conflict" ]; then
+            printf 'card=%s board=%s model=%s status=skip_address_in_use wall_s=0 reason="%s is answering ARP as %s, which is not one of our guests; the arm would lose duplicate-address detection and time out"\n' \
+                   "$board" "$board" "$model" "$addr" "${conflict#lladdr }"
+            continue
+        fi
+    fi
+
     sana2_select "$board" "$BUILDDIR"
     drv=$SANA2_SEL_DRIVER
     drvpath=$SANA2_SEL_PATH
