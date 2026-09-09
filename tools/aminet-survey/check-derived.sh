@@ -24,7 +24,7 @@ T=$(mktemp -d) || exit 2
 trap 'rm -rf "$T"' EXIT
 
 for f in results.tsv lvomap.tsv lvo-usage.tsv lvo-rare.tsv vsyslog-callers.tsv \
-         unused-vectors.tsv candidates.tsv yield.tsv; do
+         unused-vectors.tsv candidates.tsv yield.tsv README.md; do
     [ -r "$D/$f" ] || { echo "check_derived=FAIL missing $D/$f"; exit 2; }
 done
 
@@ -115,6 +115,21 @@ if ! diff -q "$T/yield.tsv" "$D/yield.tsv" > /dev/null 2>&1; then
     exit 1
 fi
 
+# THE README'S HEADLINE FIGURES, which are a published claim like any table.
+# It said "1,700 archives" and "~55% attribution" long after the corpus was
+# finished at 5,907 -- written mid-survey and then left, in the one file a
+# reader goes to for context.  Every TABLE was gated; the prose was not.
+python3 tools/aminet-survey/headline.py "$D" "$T/headline.md" \
+    || { echo "check_derived=FAIL regenerating headline"; exit 2; }
+awk '/^<!-- BEGIN HEADLINE/{f=1;next} /^<!-- END HEADLINE/{f=0} f' \
+    "$D/README.md" > "$T/headline.now"
+if ! diff -q "$T/headline.md" "$T/headline.now" > /dev/null 2>&1; then
+    echo "check_derived=FAIL README headline block is stale --"\
+         "regenerate with tools/aminet-survey/headline.py"
+    diff "$T/headline.now" "$T/headline.md" | head -8
+    exit 1
+fi
+
 rows=$(awk -F'\t' 'NR>1' "$D/lvo-usage.tsv" | wc -l)
 called=$(awk -F'\t' 'NR>1 && $3>0' "$D/lvo-usage.tsv" | wc -l)
 rare=$(awk -F'\t' 'NR>1 && !s[$2]++' "$D/lvo-rare.tsv" | wc -l)
@@ -122,5 +137,5 @@ echo "check_derived vectors=$rows called=$called rare_under_10=$rare"
 vsys=$(wc -l < "$D/vsyslog-callers.tsv")
 echo "check_derived vsyslog_callers=$vsys"
 echo "check_derived regenerated=lvo-usage.tsv,lvo-rare.tsv,vsyslog-callers.tsv,\
-unused-vectors.tsv,candidates.tsv,yield.tsv"
+unused-vectors.tsv,candidates.tsv,yield.tsv,README-headline"
 echo "check_derived=PASS"
