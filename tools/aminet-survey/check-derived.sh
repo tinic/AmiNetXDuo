@@ -24,7 +24,7 @@ T=$(mktemp -d) || exit 2
 trap 'rm -rf "$T"' EXIT
 
 for f in results.tsv lvomap.tsv lvo-usage.tsv lvo-rare.tsv vsyslog-callers.tsv \
-         unused-vectors.tsv candidates.tsv yield.tsv README.md; do
+         unused-vectors.tsv candidates.tsv yield.tsv own-tools.tsv README.md; do
     [ -r "$D/$f" ] || { echo "check_derived=FAIL missing $D/$f"; exit 2; }
 done
 
@@ -130,6 +130,20 @@ if ! diff -q "$T/headline.md" "$T/headline.now" > /dev/null 2>&1; then
     exit 1
 fi
 
+# own-tools.tsv: the half of a removal decision that is not in the ledger.
+# A vector with no Aminet caller can still be load-bearing for the tools WE
+# ship -- getaddrinfo has zero attributed callers in 5,907 archives and four of
+# our own tools call it.
+python3 tools/aminet-survey/ourtools.py "$D" "$T/own-tools.tsv" \
+    || { echo "check_derived=FAIL regenerating own-tools"; exit 2; }
+if ! diff -q "$T/own-tools.tsv" "$D/own-tools.tsv" > /dev/null 2>&1; then
+    echo "check_derived=FAIL own-tools.tsv does not match src/tools and src/config"
+    diff "$D/own-tools.tsv" "$T/own-tools.tsv" | head -6
+    exit 1
+fi
+lb=$(awk -F'\t' 'NR>1 && $3==0 && $4>0' "$D/own-tools.tsv" | wc -l)
+echo "check_derived zero_aminet_but_ours_use_it=$lb"
+
 rows=$(awk -F'\t' 'NR>1' "$D/lvo-usage.tsv" | wc -l)
 called=$(awk -F'\t' 'NR>1 && $3>0' "$D/lvo-usage.tsv" | wc -l)
 rare=$(awk -F'\t' 'NR>1 && !s[$2]++' "$D/lvo-rare.tsv" | wc -l)
@@ -137,5 +151,5 @@ echo "check_derived vectors=$rows called=$called rare_under_10=$rare"
 vsys=$(wc -l < "$D/vsyslog-callers.tsv")
 echo "check_derived vsyslog_callers=$vsys"
 echo "check_derived regenerated=lvo-usage.tsv,lvo-rare.tsv,vsyslog-callers.tsv,\
-unused-vectors.tsv,candidates.tsv,yield.tsv,README-headline"
+unused-vectors.tsv,candidates.tsv,yield.tsv,own-tools.tsv,README-headline"
 echo "check_derived=PASS"
