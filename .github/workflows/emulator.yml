@@ -53,6 +53,14 @@ concurrency:
 jobs:
 
   # ------------------------------------------------------------------------
+  # THE RUNNER HAS TO BE ALIVE, AND NOTHING WATCHED IT.  This job queues
+  # against a self-hosted runner; if that runner's listener dies, the run sits
+  # `queued` and expires, and the tier reports nothing either way.  That is
+  # what happened between 2026-08-27 and 2026-09-09: the listener lost its
+  # broker connection, exited, and the machine's crontab had only an @reboot
+  # guard -- so 25 runs queued against an offline runner and none of them ran.
+  # tools/runner-keepalive.sh is the */10 cron guard that covers a mid-life
+  # death; install it on the runner alongside the @reboot entry.
   kickstart:
     name: Amiberry on Kickstart 3.1 (self-hosted)
     if: >
