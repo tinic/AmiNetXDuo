@@ -50,14 +50,28 @@ if not LVOMAP:
 # rescan.sh re-runs every archive whose row carries an older version, off the
 # local unpack tree, so no re-fetch is needed.  Rows with no scanner= field at
 # all predate this and are the ones to redo first.
-SCANNER_VERSION = 6
+SCANNER_VERSION = 7
 
 OPENLIB = 0xFDD8            # -552 as a 16-bit displacement
+# A NAME THAT IS NOT UNIQUE CANNOT BE A KEY.  18 offsets in lvomap.tsv are all
+# called `reserved`, and the ledger records NAMES -- so one binary calling one
+# reserved offset was counted, downstream, as a caller of all eighteen, and
+# lvo-usage.tsv reported 76 vectors with a caller where 59 have one.  Real
+# binaries do call them: AmiFTP, AveHOST, AveHTTPD, AveNTP.
+#
+# Ambiguous names carry their offset: `reserved@-306`.  Every other name in the
+# table is unique and is emitted unchanged, so this is the only shape that
+# changes and the rest of the ledger reads exactly as before.
 LVO = {}
+_names = {}
 for line in survey_io.lines(LVOMAP):
     p = line.split('\t')
     if p[0] != 'offset':
-        LVO[int(p[1])] = p[3]
+        _names[p[3]] = _names.get(p[3], 0) + 1
+for line in survey_io.lines(LVOMAP):
+    p = line.split('\t')
+    if p[0] != 'offset':
+        LVO[int(p[1])] = p[3] if _names[p[3]] == 1 else f"{p[3]}@{p[1]}"
 
 def u16(b, i): return struct.unpack_from('>H', b, i)[0]
 def u32(b, i): return struct.unpack_from('>I', b, i)[0]

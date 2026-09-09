@@ -13,6 +13,7 @@ rank	new	cum	flags	lvos	archive	binary
 12	1	56	H--	18	adig.lha	adig/ahost-68000
 13	1	57	-RD	15	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiIPNatD
 14	1	58	---	13	lanclip.lha	LANClip/lanclip
-15	1	59	---	1	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
+15	1	59	---	2	Charon.lha	Charon/Libs/Charon_AmiSSL.library
+16	1	60	---	1	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
 
-# 458 attributed binaries cover 59 of 143 vectors (41%); 15 of them are non-redundant.
+# 459 attributed binaries cover 60 of 143 vectors (41%); 16 of them are non-redundant.

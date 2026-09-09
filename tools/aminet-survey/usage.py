@@ -34,9 +34,20 @@ for f in survey_io.rows(f'{BASE}/results.tsv'):
         if n and not n.startswith('?'):
             cnt[n] += 1
 
+# THE NAME IS THE KEY ONLY WHEN IT IS UNIQUE.  18 offsets are named
+# `reserved`, so keying the count by name alone credited one binary's call to
+# all eighteen rows -- lvo-usage.tsv said 76 vectors had a caller where 59 did.
+# scan.py v7 writes `reserved@-306` for those, and the lookup matches.
+names = {}
+for line in survey_io.lines(f'{BASE}/lvomap.tsv'):
+    p = line.split('\t')
+    if p[0] != 'offset':
+        names[p[3]] = names.get(p[3], 0) + 1
+
 with survey_io.out(DEST) as fh:
     print("offset\tlvo\tbinaries", file=fh)
     for line in survey_io.lines(f'{BASE}/lvomap.tsv'):
         p = line.split('\t')
         if p[0] != 'offset':
-            print(f"{p[1]}\t{p[3]}\t{cnt.get(p[3], 0)}", file=fh)
+            key = p[3] if names[p[3]] == 1 else f"{p[3]}@{p[1]}"
+            print(f"{p[1]}\t{p[3]}\t{cnt.get(key, 0)}", file=fh)
