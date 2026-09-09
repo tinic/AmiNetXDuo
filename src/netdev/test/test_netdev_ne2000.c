@@ -304,14 +304,30 @@ static void mock_put(struct NetdevNic *nic, unsigned reg, unsigned char val)
 }
 
 /* The data port through the bus ops, which is how the bulk paths reach it. */
+/*
+ * A wide window that does not mirror the narrow one.  0 is a card whose
+ * 32-bit window works; 1 corrupts what a LONG-mode READ returns; 2 corrupts
+ * what a LONG-mode WRITE stores.  ne2000_probe_wide() sets bus->dmode itself
+ * before each transfer, so the mode the caller intended is readable here --
+ * which is what lets one buffer model both a working window and a broken one.
+ */
+#define WIDE_OK          0
+#define WIDE_READ_BAD    1
+#define WIDE_WRITE_BAD   2
+static int mock_wide_fault;
+
 static VOID mock_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
 {
     UWORD i;
 
-    (VOID)bus;
     for (i = 0; i < len; i++)
     {
-        dst[i] = mock_buf[mock_dma & MOCK_MASK];
+        UBYTE v = mock_buf[mock_dma & MOCK_MASK];
+
+        if (mock_wide_fault == WIDE_READ_BAD &&
+            bus->dmode == NETDEV_DMODE_LONG)
+            v = (UBYTE)~v;          /* the window answers, but not the truth */
+        dst[i] = v;
         mock_dma++;
     }
     if (mock_dma_left <= len)
@@ -329,10 +345,14 @@ static VOID mock_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
 {
     UWORD i;
 
-    (VOID)bus;
     for (i = 0; i < len; i++)
     {
-        mock_buf[mock_dma & MOCK_MASK] = src[i];
+        UBYTE v = src[i];
+
+        if (mock_wide_fault == WIDE_WRITE_BAD &&
+            bus->dmode == NETDEV_DMODE_LONG)
+            v = (UBYTE)~v;          /* stored, but not what was sent */
+        mock_buf[mock_dma & MOCK_MASK] = v;
         mock_dma++;
     }
     if (mock_dma_left <= len)
@@ -538,6 +558,84 @@ static void test_no_odd_window(void)
                (unsigned long)note_count(ANXDIAG_CR_RETRY), 0);
 }
 
+/* ------------------------------------------------- the 32-bit data path -- */
+
+/*
+ * ne2000_probe_wide() picks the data path every ne2000-family card uses --
+ * six of the nine the sweep drives -- and netdev_bus.h:22 states the mode is
+ * "measured, not configured": two legs, different patterns, both directions,
+ * and only a match promotes to NETDEV_DMODE_LONG.
+ *
+ * NOTHING EXERCISED IT.  ne2000_attach() is its only caller and this file
+ * does not call attach -- the comment above netdev_mac_cis_node_id() says so
+ * outright.  The core is #included whole, so the probe can be driven
+ * directly, which is what this does.
+ *
+ * BOTH DIRECTIONS ARE FAILURES AND ONLY ONE IS LOUD.  Refusing a window that
+ * works costs half the throughput and is invisible outside a benchmark -- the
+ * "X-Surf 100 whose 32-bit window failed its readback runs at half speed and
+ * works perfectly" case.  ACCEPTING one that does not work reads garbage into
+ * every frame, and that is the direction these cases guard.
+ */
+static void test_wide_probe(void)
+{
+    NetdevNic  nic;
+    static unsigned char wide_window[64];
+
+    printf("\n-- the 32-bit window probe\n");
+
+    /* A card with no wide window at all is left in the mode it arrived in,
+       and the probe must not touch the bus to decide that. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    nic.bus.wide  = NULL;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("no wide window: the mode is left alone",
+       nic.bus.dmode == NETDEV_DMODE_WORD);
+
+    /* A window that mirrors the narrow one in both directions is promoted. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    nic.bus.wide  = wide_window;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("a window that mirrors both ways is promoted to LONG",
+       nic.bus.dmode == NETDEV_DMODE_LONG);
+
+    /*
+     * Leg 1 is written narrow and read wide.  A window that answers but
+     * answers wrongly must be refused -- this is the case that, granted,
+     * corrupts every received frame.
+     */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_READ_BAD;
+    nic.bus.wide  = wide_window;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("a window that reads back wrong is refused, not promoted",
+       nic.bus.dmode == NETDEV_DMODE_WORD);
+
+    /*
+     * Leg 2 is written wide and read narrow, "the direction that transmits".
+     * It exists because a window can echo one way and not the other, so leg 1
+     * passing is not enough -- and this is the case a one-leg probe misses.
+     */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_WRITE_BAD;
+    nic.bus.wide  = wide_window;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("a window that stores wrong is refused even though leg 1 passed",
+       nic.bus.dmode == NETDEV_DMODE_WORD);
+
+    mock_wide_fault = WIDE_OK;
+}
+
 int main(void)
 {
     test_clone_warm();
@@ -545,6 +643,7 @@ int main(void)
     test_plain_card();
     test_dead_card();
     test_no_odd_window();
+    test_wide_probe();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
 
