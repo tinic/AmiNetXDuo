@@ -247,10 +247,127 @@ try:
 finally:
     os.unlink(_p)
 
+
+# ==========================================================================
+# v14 fixtures.  Each one is a shape measured in the corpus that v13 filed as
+# "no SocketBase store" -- a verdict about the scanner where a fact about the
+# program belongs.  They are here so a later simplification cannot quietly put
+# any of them back.
+# ==========================================================================
+
+def scan_blob(blob):
+    with tempfile.NamedTemporaryFile(suffix='.exe', delete=False) as fh:
+        fh.write(blob)
+        path = fh.name
+    try:
+        return scan.scan(path)
+    finally:
+        os.unlink(path)
+
+
+# ---- OldOpenLibrary -------------------------------------------------------
+# exec -408, the V1.2 entry.  MetalWEB and the AmFTP/Voyager registration tools
+# open every library with it; modelling only -552 files them all as unnamed.
+CODE_OLD = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+            + be16(0x4EAE, 0xFE68)               # jsr -408(a6) OldOpenLibrary
+            + be16(0x23C0) + be32(400)
+            + be16(0x2C79) + be32(400)
+            + be16(0x4EAE, 0xFFE2)               # socket
+            + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_OLD, relocs=[2]))
+check("OldOpenLibrary named", (v, offs), ('OK', [-30]))
+
+
+# ---- the base kept in an address register, never stored -------------------
+# AMarqueed: `movea.l d0,a2 / movea.l a2,a6 / jsr -294(a6)`.  There is no
+# memory location to key on, so a table of store forms can never see it.
+CODE_REG = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+            + be16(0x4EAE, 0xFDD8)
+            + be16(0x2440)                       # movea.l d0,a2
+            + be16(0x2C4A)                       # movea.l a2,a6
+            + be16(0x4EAE, 0xFFE2)               # socket
+            + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_REG, relocs=[2]))
+check("register-held base", (v, offs), ('OK', [-30]))
+
+
+# ---- an opener function: the callee names the library, the caller stores ---
+# AWeb's helper.  The caller never mentions bsdsocket, so nothing at the store
+# site says which library the base belongs to; the callee's code does.
+_opener = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+           + be16(0x4EAE, 0xFDD8)
+           + be16(0x4E75))
+_head = (be16(0x6100, 0) + be16(0x23C0) + be32(400)
+         + be16(0x2C79) + be32(400)
+         + be16(0x4EAE, 0xFFE2) + be16(0x4E75))
+CODE_OPENER = _head + _opener
+# bsr displacement is measured from the word AFTER the opcode
+CODE_OPENER = (be16(0x6100, len(_head) - 2) + CODE_OPENER[4:])
+v, offs, _t = scan_blob(build(CODE_OPENER, relocs=[len(_head) + 2]))
+check("opener function", (v, offs), ('OK', [-30]))
+
+
+# ---- a shared wrapper reached through a linker jump island ----------------
+# AMarqueed again: `pea name / bsr stub`, and the stub is one entry in a table
+# of `jmp` islands.  Testing the island for an OpenLibrary finds a jump.
+_wrap = (be16(0x226F, 0x0004)                    # movea.l 4(a7),a1
+         + be16(0x2C78, 0x0004)
+         + be16(0x4EAE, 0xFDD8)
+         + be16(0x4E75))
+_main = (be16(0x4879) + be32(0)                  # pea (name).L
+         + be16(0x6100, 0)                       # bsr.w stub
+         + be16(0x23C0) + be32(400)
+         + be16(0x2C79) + be32(400)
+         + be16(0x4EAE, 0xFFE2) + be16(0x4E75))
+_stub_at = len(_main)                            # the island sits after main
+_island = be16(0x4EFA, 2)                        # jmp 2(pc) -> the wrapper
+# The bsr occupies bytes 6..9; its displacement is measured from byte 8.
+CODE_WRAP = (_main[:6] + be16(0x6100, _stub_at - 8) + _main[10:]
+             + _island + _wrap)
+v, offs, _t = scan_blob(build(CODE_WRAP, relocs=[2]))
+check("wrapper behind a jump island", (v, offs), ('OK', [-30]))
+
+
+# ---- the small-data bias, derived from a second library -------------------
+# a4 points into the middle of the merged data segment, so a name displacement
+# is the string's offset MINUS a constant.  The bias is only accepted when a
+# SECOND library confirms it, which is what stops it being a fitted constant.
+DATA2 = b'bsdsocket.library\x00' + b'\x00' * 2 + b'dos.library\x00'
+CODE_BIAS = (be16(0x43EC, 0xFF9C)                # lea -100(a4),a1  (0 - -100)
+             + be16(0x2C78, 0x0004) + be16(0x4EAE, 0xFDD8)
+             + be16(0x23C0) + be32(400)
+             + be16(0x43EC, 0xFFB0)              # lea -80(a4),a1   (20 - -80)
+             + be16(0x2C78, 0x0004) + be16(0x4EAE, 0xFDD8)
+             + be16(0x2C79) + be32(400)
+             + be16(0x4EAE, 0xFFE2) + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_BIAS, data=DATA2))
+check("small-data bias", (v, offs), ('OK', [-30]))
+
+
+# ---- THE WRONG-BASE TEST, and it is the -954 retraction ------------------
+# DOSBase sits four bytes from SocketBase in Atalkd's globals block.  v13 put
+# it in the base set, so `jsr -954(a6)` -- dos.library VPrintf -- was published
+# as a bsdsocket vector nine slots past the end of our table, in 14 binaries.
+# Nothing may attribute a call through a base this scanner did not see stored
+# from a NAMED open.
+CODE_DOS = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+            + be16(0x4EAE, 0xFDD8)
+            + be16(0x23C0) + be32(400)           # SocketBase
+            + be16(0x2C79) + be32(400)
+            + be16(0x4EAE, 0xFFE2)               # socket -- ours
+            + be16(0x2C79) + be32(404)           # DOSBase, four bytes away
+            + be16(0x4EAE, 0xFC46)               # jsr -954(a6) == VPrintf
+            + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_DOS, relocs=[2]))
+check("adjacent DOSBase is not ours", (v, offs), ('OK', [-30]))
+
+
 if fails:
     for f in fails:
         print(f"scan_fixture=FAIL {f}")
     sys.exit(1)
-print("scan_fixture=PASS 16 fixtures: call shapes, tail call, rebound a6, "
+print("scan_fixture=PASS 22 fixtures: call shapes, tail call, rebound a6, "
       "data hunks, a6 via d0 and via a register hop with both clobbers, "
-      "scan() end to end incl SOCK_RAW, one pinned limitation")
+      "scan() end to end incl SOCK_RAW, one pinned limitation, and the six "
+      "v14 shapes: OldOpenLibrary, register-held base, opener function, "
+      "wrapper behind a jump island, derived small-data bias, adjacent DOSBase")

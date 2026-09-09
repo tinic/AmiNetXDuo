@@ -23,6 +23,7 @@ them and missed 6 in AmiFTP alone.
 import os
 import struct, sys, re
 import hunk
+import dataflow
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import survey_io
@@ -50,7 +51,7 @@ if not LVOMAP:
 # rescan.sh re-runs every archive whose row carries an older version, off the
 # local unpack tree, so no re-fetch is needed.  Rows with no scanner= field at
 # all predate this and are the ones to redo first.
-SCANNER_VERSION = 13
+SCANNER_VERSION = 14
 
 OPENLIB = 0xFDD8            # -552 as a 16-bit displacement
 # A NAME THAT IS NOT UNIQUE CANNOT BE A KEY.  18 offsets in lvomap.tsv are all
@@ -183,8 +184,15 @@ def find_socketbase(code):
                 break
     return bases
 
-def calls_for(code, bases):
+def calls_for(code, bases, target_of=None):
     """LVO displacements reached through an a6 loaded from one of `bases`."""
+    return [d for _site, d in calls_for_sites(code, bases, target_of)]
+
+
+def calls_for_sites(code, bases, target_of=None):
+    """(site, displacement) for each such call.  The site is what lets v13's
+    hits and the dataflow walk's hits be unioned without counting a call the
+    two of them both found twice."""
     # a6 IS ALSO LOADED VIA d0, AND THAT WAS THE WHOLE OF BASE_BUT_NO_CALLS.
     # 83 binaries opened bsdsocket, named it, stored the base -- and then made
     # no call this scanner could see.  The instruction feeding a6 at those call
@@ -265,13 +273,19 @@ def calls_for(code, bases):
                 cur = None
                 continue
             cur, _ = _operand(code, i + 2, A6_LOADS[w])
+            # Qualify an absolute operand by its relocation, so ExecBase read
+            # from address 4 cannot share a key with a base stored at hunk
+            # offset 4.  See dataflow.key_at.
+            if target_of is not None and A6_LOADS[w] == 'abs.l':
+                tgt = target_of.get(i + 2)
+                cur = ('h%d' % tgt, cur[1]) if tgt is not None else cur
             d0 = None
             continue
         if (w & 0xFF00) == 0x2000 or (w & 0xF000) == 0x7000:
             d0 = None          # any other write to d0 ends the idiom
         if w in (0x4EAE, 0x4EEE):    # jsr/jmp d16(a6) -- jmp is a tail call
             if cur is not None and cur in bases:
-                hits.append(s16(code, i + 2))
+                hits.append((i, s16(code, i + 2)))
             just_opened = (s16(code, i + 2) == -552)
             continue
         if (w & 0xFFC0) == 0x2C40:   # any other movea.l <ea>,a6 rebinds it
@@ -349,7 +363,7 @@ def _name_target(code, j, target_of, name_sites, name_offsets):
 
 SOCKET_LVO = -30
 
-def raw_socket_sites(code, bases):
+def raw_socket_sites(code, bases, target_of=None):
     """socket(AF_INET, SOCK_RAW, ...) calls, which no LVO scan can see.
 
     SOCK_RAW is an ARGUMENT to socket(), not a vector, so a displacement scan
@@ -437,6 +451,12 @@ def raw_socket_sites(code, bases):
                 cur = None
                 continue
             cur, _ = _operand(code, i + 2, A6_LOADS[w])
+            # Qualify an absolute operand by its relocation, so ExecBase read
+            # from address 4 cannot share a key with a base stored at hunk
+            # offset 4.  See dataflow.key_at.
+            if target_of is not None and A6_LOADS[w] == 'abs.l':
+                tgt = target_of.get(i + 2)
+                cur = ('h%d' % tgt, cur[1]) if tgt is not None else cur
             d0 = None
             continue
         if (w & 0xFF00) == 0x2000 or (w & 0xF000) == 0x7000:
@@ -476,7 +496,7 @@ def raw_socket_sites(code, bases):
 # What this DOES mean is that "N binaries call vector X" is a floor, not a
 # census, for anything the GeekGadgets toolchain built.
 
-def scan(path):
+def scan_v13(path):
     blob = open(path, 'rb').read()
     if b'bsdsocket.library' not in blob:
         return ('NO_BSDSOCKET_STRING', [], 0)
@@ -600,11 +620,11 @@ def scan(path):
     # from v8 onward, and its `reserved@-846` was quoted as evidence that a
     # real program calls a reserved vector.  It was not.
     #
-    # The cut is -1200, not -900, deliberately: -954 shows up in 14 binaries
-    # (Atalk, Atalkd, BenderDCCGet) as a single consistent offset alongside
-    # gai_strerror, which reads as a Roadshow extension this table does not
-    # name yet -- a gap in lvomap.tsv, not a wrong base.  Thousands past the
-    # end is a wrong base.  Exactly one row in the corpus trips this.
+    # The cut was -1200 here, not -900, to leave offset -954 visible on the
+    # theory that it was a Roadshow extension this table did not name.  IT WAS
+    # NOT: -954 is dos.library VPrintf reached through DOSBase, which sits four
+    # bytes from SocketBase in Atalkd's globals block and which this scanner
+    # admitted as a base.  v14 cuts at -900, the table's real end.
     if any(o < -1200 for o in offs):
         return ('BASE_NOT_OURS', [], 0)
 
@@ -612,6 +632,124 @@ def scan(path):
     if raw:
         v += '+SOCK_RAW'
     return (v, offs, len(allhits))
+
+def scan(path):
+    """v14: SocketBase resolved by dataflow (see dataflow.py).
+
+    v13 attributed 731 binaries and filed 460 -- 43% of everything holding a
+    bsdsocket binary -- as NO_SOCKETBASE_STORE or BASE_BUT_NO_CALLS, which are
+    verdicts about the scanner printed where a fact about the program belongs.
+    Measured against those 460, the misses were: the base kept in an address
+    register, the name pushed into a shared open-wrapper reached through a
+    linker jump island, an opener function that names the library itself and
+    returns the base to a caller that never mentions it, the small-data model's
+    BIASED displacement, and `jsr -408(a6)` OldOpenLibrary.  Each is handled by
+    following the value, and each was measured before and after.
+
+    v13's peephole runs too and its hits are unioned in, so nothing it found
+    can go missing -- verified over all 731: zero binaries lost a vector.
+    """
+    blob = open(path, 'rb').read()
+    if b'bsdsocket.library' not in blob:
+        return ('NO_BSDSOCKET_STRING', [], 0)
+    hs = list(hunk.hunks(blob))
+    if not hs:
+        return ('NO_HUNK', [], 0)
+
+    name_sites, name_offsets = set(), set()
+    for idx, _t, _o, pay, _r in hs:
+        at = pay.find(b'bsdsocket.library')
+        while at != -1:
+            name_sites.add((idx, at)); name_offsets.add(at)
+            at = pay.find(b'bsdsocket.library', at + 1)
+    if not name_sites:
+        return ('NAME_NOT_IN_A_HUNK', [], 0)
+
+    dual = False
+    for _i, _t, _o, pay, _r in hs:
+        at = pay.find(b'socket.library')
+        while at != -1:
+            if pay[max(0, at - 3):at] != b'bsd':
+                dual = True
+            at = pay.find(b'socket.library', at + 1)
+
+    bias, name_disps = dataflow.derive_bias(
+        hs, [pay for _i, t, _o, pay, _r in hs if t == hunk.HUNK_CODE],
+        {off for _i, off in name_sites})
+
+    code_pay = [pay for _i, t, _o, pay, _r in hs if t == hunk.HUNK_CODE]
+    # a4 is the small-data base; a5 is too in some compilers, but only when it
+    # is not being used as a frame pointer.  Every other address register keys
+    # locals and struct fields, which are not the same variable twice.
+    # a4 is the small-data base in every m68k-amigaos compiler and is never
+    # dropped; a5 keys globals in some and is a frame pointer in others, so it
+    # is admitted only when the link/unlk evidence does not say otherwise.
+    fp = dataflow.frame_pointers(code_pay)
+    # MEASURED BOTH WAYS, 2026-09-09.  Allowing every register except proven
+    # frame pointers attributes 852 binaries and 76 vectors; restricting to the
+    # small-data registers attributes 833 and 56.  The 20 extra vectors are the
+    # collision band -- ProcessIsServer 12 (exec FreeVec -690), ObtainServerSocket
+    # 3 (exec CreatePool -696), bpf_read 6, CreateAddrAllocMessageA 2 -- reached
+    # through struct fields that key the same in unrelated functions.  19 real
+    # binaries is not worth 25 invented callers on the exact vectors the micro
+    # build is deciding about.
+    global_regs = {4} | ({5} if 5 not in fp else set())
+
+    codes, ctxs = {}, {}
+    for idx, t, _o, pay, rel in hs:
+        if t != hunk.HUNK_CODE:
+            continue
+        target_of = {}
+        for tgt, offs in rel.items():
+            for o in offs:
+                target_of[o] = tgt
+        codes[idx] = pay
+        ctxs[idx] = dataflow.Ctx(name_sites, name_offsets, target_of, set(), idx,
+                                 name_disps, global_regs=global_regs)
+
+    wrappers, openers = dataflow.find_wrappers(codes, ctxs)
+    for c in ctxs.values():
+        c.wrappers = wrappers
+        c.openers = openers
+
+    base_keys, opens, named = set(), 0, 0
+    for idx, code in codes.items():
+        found, _h, o, nm = dataflow.walk(code, ctxs[idx], base_keys,
+                                         collect_calls=False)
+        base_keys |= found; opens += o; named += nm
+
+    # THE CALL PASS RUNS EVEN WITH NO STORED BASE: a base that never reaches
+    # memory is still a base (AMarqueed keeps it in a2 and calls
+    # `movea.l a2,a6 / jsr -294(a6)`).
+    sites = {}
+    for idx, code in codes.items():
+        _f, h, _o, _n = dataflow.walk(code, ctxs[idx], base_keys)
+        for site, d in h:
+            sites[(idx, site)] = d
+    if base_keys:
+        for idx, code in codes.items():
+            for site, d in calls_for_sites(code, base_keys, ctxs[idx].target_of):
+                sites[(idx, site)] = d
+
+    hits = list(sites.values())
+    offs = sorted(set(hits), reverse=True)
+    if not base_keys and not offs:
+        return ('NO_SOCKETBASE_STORE opens=%d' % opens, [], 0)
+    if not offs:
+        return ('BASE_BUT_NO_CALLS', [], 0)
+    # Past the end of the table is not our base.  The cut is -900, the table's
+    # real end: v13 kept it at -1200 to leave offset -954 visible, and -954 is
+    # dos.library VPrintf through DOSBase (retracted 2026-09-09).
+    if any(o < -900 for o in offs):
+        return ('BASE_NOT_OURS', [], 0)
+    v = 'DUAL_STACK_AS225' if dual else 'OK'
+    raw = 0
+    for idx, code in codes.items():
+        raw += raw_socket_sites(code, base_keys, ctxs[idx].target_of)
+    if raw:
+        v += '+SOCK_RAW'
+    return (v, offs, len(hits))
+
 
 if __name__ == '__main__':
     for p in sys.argv[1:]:

@@ -18,6 +18,8 @@ CLChatIRCD	clchat415.lha
 DNSTool	DNSTool1_0.lha
 Envy20	Envy20Amiga.lha
 Envy20-030	Envy20Amiga.lha
+Istar	KgServer.lha
+Istar	KnowledgeSvr.lha
 Lister	realms.lha
 Merc22	Envy20Amiga.lha
 MiamiIPNatD	MiamiDx10cmain.lha
@@ -119,6 +121,7 @@ login	gendemo104.lha
 lpd	lpd.lha
 lpr	port-lpr.lha
 mailmap	AmBoS-CGI.lha
+metaserver	opennap.lha
 micq	micq-0.4.0.lha
 micq.000	micq-0.4.0.lha
 micq.020	micq-0.4.0.lha
@@ -139,6 +142,7 @@ netfs-server	gendemo104.lha
 netinput.000	netinput37.3.lha
 netinput.020	netinput37.3.lha
 nmbd	amitcp-samba.lha
+nntpclient	amiconnect.lha
 nntpsend	nntpsend.lha
 nslookup	dnstools.lha
 ping	AmiTCP-demo-40.lha
@@ -172,8 +176,6 @@ smail_amitcp	AmigaSmail3-29.lha
 smbd	amitcp-samba.lha
 socks	socksproxy.lha
 talkd	ytalk1_0a.lha
-telnetd	MuFS_Telnetd.lha
-telnetd	telnetd2_0.lha
 time_chk	usno_time.lha
 time_set	usno_time.lha
 timec	usno_time.lha
