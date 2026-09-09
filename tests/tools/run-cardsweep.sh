@@ -158,6 +158,7 @@ echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card," \
 while read -r -u 3 board model addr mac; do
     [ -n "$board" ] || continue
 
+    base_octet=${addr##*.}
     if [ "$SWEEP_SLOT" -ne 0 ]; then
         addr="${addr%.*}.$(( ${addr##*.} - SWEEP_SLOT * 10 ))"
         mac="${mac%:*}:$(printf '%02x' $(( 0x${mac##*:} + SWEEP_SLOT * 32 )))"
@@ -217,10 +218,41 @@ while read -r -u 3 board model addr mac; do
         conflict=$(ip neigh show "$addr" 2>/dev/null \
                    | grep -vi "02:41:4d:49" \
                    | grep -oE "lladdr [0-9a-f:]+" | head -1 || true)
+        # AND IF IT IS TAKEN, MOVE -- do not skip.  17 of the 61 addresses in
+        # this range belong to real machines, and SWEEP_SLOT (cksum(ID) % 6)
+        # decides which ten the sweep lands on: slots 0, 3 and 4 are clean,
+        # slot 1 loses 3 cards of 9, slot 5 loses 4, slot 2 loses 5.  Half of
+        # all sweep IDs draw a contaminated slot.  Skipping there is honest but
+        # it is still no coverage, and the whole point of this sweep is that it
+        # is the only cross-core coverage there is.
+        #
+        # Walk the other slots for the same card, keeping the low octet's
+        # identity: base - n*10 for the remaining n.  A concurrent sweep cannot
+        # collide with the result because build/cardsweep.lock already permits
+        # only one at a time on this machine.
         if [ -n "$conflict" ]; then
-            printf 'card=%s board=%s model=%s status=skip_address_in_use wall_s=0 reason="%s is answering ARP as %s, which is not one of our guests; the arm would lose duplicate-address detection and time out"\n' \
-                   "$board" "$board" "$model" "$addr" "${conflict#lladdr }"
-            continue
+            taken="$addr is $conflict"
+            found=""
+            for try in 0 1 2 3 4 5; do
+                [ "$try" -ne "$SWEEP_SLOT" ] || continue
+                cand="${addr%.*}.$(( ${base_octet} - try * 10 ))"
+                ip neigh del "$cand" dev "$IFACE" > /dev/null 2>&1 || true
+                ping -c2 -W2 "$cand" > /dev/null 2>&1 || true
+                sleep 2
+                busy=$(ip neigh show "$cand" 2>/dev/null \
+                       | grep -vi "02:41:4d:49" \
+                       | grep -oE "lladdr [0-9a-f:]+" | head -1 || true)
+                [ -n "$busy" ] && continue
+                found=$cand
+                break
+            done
+            if [ -z "$found" ]; then
+                printf 'card=%s board=%s model=%s status=skip_address_in_use wall_s=0 reason="%s, and every other slot for this card is taken too; the arm would lose duplicate-address detection and time out"\n' \
+                       "$board" "$board" "$model" "$taken"
+                continue
+            fi
+            echo "  $addr is taken ($conflict); this arm moves to $found"
+            addr=$found
         fi
     fi
 
