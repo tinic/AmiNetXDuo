@@ -24,7 +24,7 @@ CI="tools/ci.sh"
 
 # stage:reason -- a stage here is deliberately invoked by no workflow.
 ALLOW="
-console:tier 2, needs a real link and a second host, and no runner has a display; docs/BACKLOG.md
+console:tier 2, needs a second host with python3 -- NOT a display, that half was wrong: only the RTG arm wants one and run-console.sh starts its own Xvfb, the other four groups run SDL_VIDEODRIVER=dummy. Still allowlisted because it has never been RUN, not because it cannot be; docs/BACKLOG.md
 submodules:preamble, called unconditionally by ci.sh itself
 toolchain:preamble, called by ci.sh when AMIGA_TOOLCHAIN_ROOT is unset
 "
