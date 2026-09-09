@@ -15,11 +15,29 @@
 
 #include <exec/types.h>
 
+#include <stdint.h>     /* uintptr_t: the probe record below is a
+                           ULONG and the host tier compiles this
+                           file for a 64-bit pointer.  Same idiom
+                           as src/netdev/el3.c:873. */
+
 extern VOID netdev_trace_val(const char *tag, ULONG v);
 #ifdef NETDEV_TRACE
 #define PNP_TRACE(t, v) netdev_trace_val((t), (ULONG)(v))
 #else
 #define PNP_TRACE(t, v) ((VOID)0)
+#endif
+
+/*
+ * Every write this file makes to the board.  Redirected by
+ * src/netdev/test/test_netdev_isapnp.c, and there for a reason peculiar to
+ * this protocol: the ADDRESS and WRITE_DATA ports are ONE board address with
+ * a latch bit between them, so the board's final state cannot show which byte
+ * was a register select and which was the value written to it.  The ORDER is
+ * the protocol.  Expands to the plain store it replaces, so the target build
+ * is byte for byte what it was.
+ */
+#ifndef PNP_W8
+#define PNP_W8(p, v)    (*(p) = (UBYTE)(v))
 #endif
 
 /*
@@ -95,7 +113,8 @@ static volatile UBYTE *pnp_port(const NetdevCard *card, volatile UBYTE *board,
 {
     const NetdevIsaPnp *pnp = card->pnp;
 
-    board[pnp->hi_reg] = (UBYTE)((port & 0x0800u) != 0 ? pnp->hi_bit : 0);
+    PNP_W8(&board[pnp->hi_reg],
+           (UBYTE)((port & 0x0800u) != 0 ? pnp->hi_bit : 0));
 
     return board + pnp->io_win +
            (ULONG)(port & 0x07ffu) * (ULONG)card->stride;
@@ -104,7 +123,7 @@ static volatile UBYTE *pnp_port(const NetdevCard *card, volatile UBYTE *board,
 static VOID pnp_write_address(const NetdevCard *card, volatile UBYTE *board,
                               UBYTE v)
 {
-    *pnp_port(card, board, PNP_ADDRESS) = v;
+    PNP_W8(pnp_port(card, board, PNP_ADDRESS), v);
 }
 
 /* Address then data, which is every configuration write there is. */
@@ -112,7 +131,7 @@ static VOID pnp_write_reg(const NetdevCard *card, volatile UBYTE *board,
                           UBYTE reg, UBYTE v)
 {
     pnp_write_address(card, board, reg);
-    *pnp_port(card, board, PNP_WRITE_DATA) = v;
+    PNP_W8(pnp_port(card, board, PNP_WRITE_DATA), v);
 }
 
 static UBYTE pnp_read_data(const NetdevCard *card, volatile UBYTE *board)
@@ -127,7 +146,7 @@ static UBYTE pnp_read_data(const NetdevCard *card, volatile UBYTE *board)
  */
 static VOID pnp_latch_clear(const NetdevCard *card, volatile UBYTE *board)
 {
-    board[card->pnp->hi_reg] = 0;
+    PNP_W8(&board[card->pnp->hi_reg], 0);
 }
 
 /* ------------------------------------------------------ the isolation --- */
@@ -343,15 +362,15 @@ BOOL netdev_isapnp_configure(const NetdevCard *card, APTR board)
         netdev_diag_note(ANXDIAG_PNP_CR, ci, (ULONG)pnp_last_cr);
         netdev_diag_note(ANXDIAG_PNP_SETTLE, ci, (ULONG)rounds);
         netdev_diag_note(ANXDIAG_PNP_SILENT, ci,
-                         (ULONG)(APTR)(b + card->reg_off));
-        PNP_TRACE("pnp: silent ", (ULONG)(APTR)(b + card->reg_off));
+                         (ULONG)(uintptr_t)(b + card->reg_off));
+        PNP_TRACE("pnp: silent ", (ULONG)(uintptr_t)(b + card->reg_off));
         return FALSE;
     }
 
     netdev_diag_note(ANXDIAG_PNP_CR, ci, (ULONG)pnp_last_cr);
     netdev_diag_note(ANXDIAG_PNP_SETTLE, ci, (ULONG)rounds);
-    netdev_diag_note(ANXDIAG_PNP_OK, ci, (ULONG)(APTR)(b + card->reg_off));
-    PNP_TRACE("pnp: configured ", (ULONG)(APTR)(b + card->reg_off));
+    netdev_diag_note(ANXDIAG_PNP_OK, ci, (ULONG)(uintptr_t)(b + card->reg_off));
+    PNP_TRACE("pnp: configured ", (ULONG)(uintptr_t)(b + card->reg_off));
 
     return TRUE;
 }

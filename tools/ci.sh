@@ -190,7 +190,8 @@ host_test_targets() { # builddir
 # 122, plus usergroup_credentials, usergroup_db, usergroup_ids, usergroup_misc (amend in place: BACKLOG cites lines).
 # 127, plus fuzz_cis_seeds and fuzz_cis_sweep.
 # 129, plus netdev_cmds.
-HOST_TESTS_EXPECTED=130
+# 130, plus netdev_isapnp.
+HOST_TESTS_EXPECTED=131
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

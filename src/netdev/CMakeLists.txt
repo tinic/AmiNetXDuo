@@ -415,6 +415,36 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
 
+    # The ISA Plug and Play sequence in front of an X-Surf's RTL8019AS, the
+    # last file in this directory a host could compile and nothing did.
+    #
+    # The emulated xsurf arm does NOT cover it in the way that sounds: it
+    # proves the card came up, so it proves the sequence works against
+    # Amiberry's model of the board.  It says nothing about which byte went to
+    # which address -- and the ADDRESS and WRITE_DATA ports are ONE board
+    # address with a latch bit between them, so a sequence that sent the whole
+    # initiation key to the wrong one still produces a plausible log.
+    #
+    # netdev_cards.c is linked for real, not stood in for: the row is where a
+    # card is added, and the two numbers its comment states -- both ports at
+    # board+$84f2, and (reg_off - io_win) / stride == ISA port $300 -- are
+    # asserted against it rather than against a fixture.
+    add_executable(test_netdev_isapnp
+        test/test_netdev_isapnp.c
+        netdev_cards.c)
+
+    target_include_directories(test_netdev_isapnp PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_isapnp PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_isapnp COMMAND test_netdev_isapnp)
+
     # The SANA-II command table itself, 818 lines that nothing compiled
     # off-target until now: test_netdev_beginio below REPLACES netdev_cmds.c
     # with a recorder, because that test is about what BeginIO writes before
