@@ -793,6 +793,76 @@ static void m_an_overlong_frame_is_skipped_not_reset_on(void)
            "and the ring still moves past it");
 }
 
+/*
+ * THE PAGE-CROSSING CORRECTION, which every case above steps over.
+ *
+ * dp8390.c recomputes a frame's length from the ring pointers rather than
+ * trusting the count's high byte -- old chips duplicate the low byte into it
+ * -- and then applies one more subtraction:
+ *
+ *     if ((len & ED_PAGE_MASK) + sizeof(NetdevRing) > ED_PAGE_SIZE)
+ *         --nlen;
+ *
+ * That fires only when the four-byte ring header plus the low byte of the
+ * count runs off the end of a page, i.e. a low byte above 252.
+ *
+ * THE BRANCH WAS ALREADY REACHED, and I claimed otherwise before checking:
+ * m_an_overlong_frame_is_skipped_not_reset_on() uses count = $ffff, whose low
+ * byte is 255, so 255 + 4 crosses and the correction applies there too.
+ * Deleting the correction does fail that case.
+ *
+ * What was missing is any assertion of WHAT IT COMPUTES.  The overlong case
+ * only shows a side effect -- without the correction that frame's length
+ * changes enough to slip past the size gate and be delivered -- which tells a
+ * reader nothing about the cause.  This case states it: a VALID page-crossing
+ * frame comes out 506 bytes instead of 250, a whole page too long, and that
+ * length is what the opener's CopyToBuff is handed.
+ */
+static void n_a_frame_that_crosses_a_page(void)
+{
+    UBYTE start;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    start = nic.rec_page_start;
+    tr_n = 0;
+
+    /*
+     * Two pages of ring for one frame, and a count whose low byte is 254: the
+     * header plus 254 is 258, past the page, so the correction applies and
+     * the frame is 254 bytes of buffer -- 250 of payload -- not 510.
+     */
+    hdr_status = ED_RSR_PRX;
+    hdr_next   = (UBYTE)(start + 3);
+    hdr_count  = 254u;
+    chip[1][ED_P1_CURR] = (UBYTE)(start + 3);
+
+    dp8390_rint(&nic);
+
+    expect(frames_up == 1, "the page-crossing frame is handed up");
+    expect_hex("and its length carries the correction, not a page more",
+               frame_len_saw, (unsigned long)(254u - sizeof(NetdevRing)));
+
+    /* The same ring geometry with a low byte that does NOT cross: one page
+       further of payload, which is the arithmetic the correction removes. */
+    reset();
+    (VOID)dp8390_init(&nic);
+    start = nic.rec_page_start;
+    tr_n = 0;
+
+    hdr_status = ED_RSR_PRX;
+    hdr_next   = (UBYTE)(start + 3);
+    hdr_count  = 100u;
+    chip[1][ED_P1_CURR] = (UBYTE)(start + 3);
+
+    dp8390_rint(&nic);
+
+    expect(frames_up == 1, "a frame that does not cross is handed up");
+    expect_hex("and keeps the page the correction would have taken",
+               frame_len_saw,
+               (unsigned long)(100u + ED_PAGE_SIZE - sizeof(NetdevRing)));
+}
+
 int main(void)
 {
     a_init_follows_the_manual();
@@ -808,6 +878,7 @@ int main(void)
     k_the_boundary_wraps_at_the_bottom();
     l_a_corrupt_header_resets_rather_than_spins();
     m_an_overlong_frame_is_skipped_not_reset_on();
+    n_a_frame_that_crosses_a_page();
 
     if (failures != 0)
     {
