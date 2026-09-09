@@ -187,6 +187,10 @@ static void test_copy_to_buff_sum(void)
     ULONG        odd_sum, ref_sum;
     unsigned long copy_calls_before;
     const ULONG  n = 128;
+    /* This case ran with slot.stats NULL, so the hook's counters were never
+       touched here.  The parity counter is the point of the case now, so it
+       needs somewhere to land. */
+    AmiSana2Stats stats;
 
     printf("sana2: S2_CopyToBuff carries a sum at either parity\n");
 
@@ -195,6 +199,8 @@ static void test_copy_to_buff_sum(void)
     slot.packet   = &pkt;
     slot.dst      = dst;
     slot.capacity = sizeof(dstwords);
+    memset(&stats, 0, sizeof(stats));
+    slot.stats    = &stats;
 
     /* Even destination, even source: the shape our own cores produce. */
     h_check(ami_sana2_copy_to_buff(&slot, frame, n) == TRUE,
@@ -208,8 +214,20 @@ static void test_copy_to_buff_sum(void)
     slot.summed = FALSE;
     slot.sum    = 0;
     copy_calls_before = h_copy_bytes_calls;
+    h_check(stats.rx_copy_unaligned == 0,
+            "no unaligned copy is counted before an odd frame arrives");
     h_check(ami_sana2_copy_to_buff(&slot, frame + 1, n) == TRUE,
             "an odd source frame is taken");
+    /* THE COUNTER THAT REPLACED A DEAD DISCRIMINATOR.  rx_copy_summed used to
+       say whether this branch ran; once the branch learned to accumulate its
+       own sum both branches set summed, so it says nothing.  On the rig,
+       x-surf-100.device produced 0 of 21,178 frames here -- a number that
+       could not be read at all until this counter existed. */
+    h_check(stats.rx_copy_unaligned == 1,
+            "an odd source frame is counted as an unaligned copy");
+    h_check(stats.rx_copy_summed == stats.rx_copy_hook,
+            "and summed still equals the fill count, which is why it cannot"
+            " report the odd path on its own");
     h_check(memcmp(dst, frame + 1, n) == 0,
             "and every byte arrives unchanged");
     h_check(slot.copied == n, "and `copied` is the length");

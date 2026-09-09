@@ -15,6 +15,11 @@ version at the top when it merges.
   priority mask, expands `%m`, and sends accepted messages to the serial
   diagnostic sink
 
+### Diagnostics
+
+- `netstat -s` reports `unaligned copies`: receive frames a SANA-II driver
+  handed over at an odd address. Measured 0 of 21,178 on x-surf-100.device
+
 ## 0.26.5
 
 ### Compatibility
