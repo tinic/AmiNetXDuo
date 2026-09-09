@@ -91,6 +91,29 @@ target_compile_definitions(fuzz_bpf PRIVATE AMI_BPF_REPLICA)
 target_compile_options(fuzz_bpf PRIVATE -Wall -Wextra ${_fuzz_san})
 target_link_options(fuzz_bpf PRIVATE ${_fuzz_san})
 
+# The PC Card CIS. Not bytes off the network, bytes off whatever is in the
+# PCMCIA slot -- read before anything has identified it, and an empty or
+# half-seated slot reads as a floating bus rather than as an error. The walk
+# decides from them where the card decodes and what is written to its
+# Configuration Option Register, so one that runs off the end reads the card's
+# I/O space at $A20000 as more CIS.
+#
+# It is also the only coverage the two Megahertz/3Com rows can have.
+# netdev_cards.c marks 3ccfem556 and 3cxem556 UNVERIFIED ON HARDWARE, neither
+# card is on this network, and Amiberry's PCMCIA support is an NE2000 replay --
+# so the multifunction path has never run anywhere but in a test.
+add_executable(fuzz_cis
+    fuzz_cis.c
+    "${CMAKE_SOURCE_DIR}/src/netdev/netdev_cis.c")
+
+target_include_directories(fuzz_cis PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/src/netdev"
+    "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+target_compile_options(fuzz_cis PRIVATE -Wall -Wextra ${_fuzz_san})
+target_link_options(fuzz_cis PRIVATE ${_fuzz_san})
+
 # DEVS:Internet/passwd and .../group. Same shape as the netdb pool above: the
 # group parser sizes an arena in one pass and fills it in another, and the two
 # passes disagreed on what ends a line, a CR-terminated file sized for one
@@ -551,6 +574,15 @@ add_test(NAME fuzz_usergroup_seeds
 add_test(NAME fuzz_usergroup_sweep
          COMMAND fuzz_usergroup -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+# The seed set is four real cards' CIS images -- the two Megahertz/3Com combo
+# cards, the NSC DP83903, and a single-function chain around the CNet CN40BC
+# entry Amiberry replays -- plus an empty slot, a card in reset, and every
+# tuple code claiming a body it does not carry.
+add_test(NAME fuzz_cis_seeds
+         COMMAND fuzz_cis -s)
+add_test(NAME fuzz_cis_sweep
+         COMMAND fuzz_cis -r 1 ${AMINETXDUO_FUZZ_CASES})
+
 add_test(NAME fuzz_dhcp_seeds
          COMMAND fuzz_dhcp -s)
 add_test(NAME fuzz_dhcp_sweep
@@ -605,6 +637,6 @@ endif()
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
 set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_dns_sweep
                      fuzz_bpf_sweep fuzz_dhcp_sweep fuzz_usergroup_sweep
-                     fuzz_httpframe_sweep
+                     fuzz_cis_sweep fuzz_httpframe_sweep
                      fuzz_tls_record_sweep fuzz_tls_x509_sweep
                      PROPERTIES TIMEOUT 1800)
