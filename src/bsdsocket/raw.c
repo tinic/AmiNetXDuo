@@ -6,7 +6,6 @@
 
 #include "bsdsocket_vectors.h"
 
-#ifdef AMINETXDUO_RAWSOCKET
 
 #ifdef AMINETXDUO_IPV6
 #include "nx_ip.h"
@@ -890,61 +889,3 @@ VOID bsd_raw_revalidate_endpoint(AmiSocket *sock)
     sock->as_RawCount = count;
 }
 
-#else /* !AMINETXDUO_RAWSOCKET */
-
-/*
- * No raw socket can be opened, so nothing that operates on one can be reached
- * with a socket this library made.  socket.c:975 turns the open failure into
- * socket()'s -1 on its own.
- */
-LONG bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock)
-{
-    (VOID)sock;
-    return bsd_fail(base, AMI_EPROTONOSUPPORT);
-}
-
-VOID bsd_raw_close(AmiSocket *sock)
-{
-    (VOID)sock;
-}
-
-LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
-                         NX_PACKET *packet, const NXD_ADDRESS *addr,
-                         ULONG scope, const BsdCmsgSource *src)
-{
-    (VOID)sock; (VOID)packet; (VOID)addr; (VOID)scope; (VOID)src;
-    return bsd_fail(base, AMI_EPROTONOSUPPORT);
-}
-
-/* NX_NOT_ENABLED, the same `why` the built version reports when there is no IP
-   instance to receive through -- transfer.c:942 returns it as the status. */
-NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why)
-{
-    (VOID)sock;
-    (VOID)wait;
-
-    if (why != NULL)
-        *why = NX_NOT_ENABLED;
-
-    return NX_NULL;
-}
-
-VOID bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr)
-{
-    (VOID)packet;
-    (VOID)addr;
-}
-
-/* options.c asks this for FIONREAD on a raw socket; there are none. */
-ULONG bsd_raw_available(AmiSocket *sock)
-{
-    (VOID)sock;
-    return 0UL;
-}
-
-VOID bsd_raw_revalidate_endpoint(AmiSocket *sock)
-{
-    (VOID)sock;
-}
-
-#endif /* AMINETXDUO_RAWSOCKET */

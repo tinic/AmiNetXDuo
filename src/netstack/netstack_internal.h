@@ -232,7 +232,6 @@ struct AmiNetStack
     BOOL                ns_AutoIpCreated;
     BOOL                ns_AutoIpRunning;
 
-#ifdef AMINETXDUO_DNS
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;
 
@@ -243,7 +242,6 @@ struct AmiNetStack
     AmiNsDhcpDnsLease   ns_DhcpDnsLease;
     AmiNsDhcpSearchLease ns_DhcpSearchLease;
     AmiNsDhcpDomainState ns_DhcpDomain;
-#endif
 
 #ifdef AMINETXDUO_IPV6
     /*

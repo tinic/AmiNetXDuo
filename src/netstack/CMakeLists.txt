@@ -11,20 +11,14 @@ set(NETSTACK_SOURCES
     netstack_pool.c
     netstack_retry.c)
 
-# The resolver.  Off, netstack_dns_off.c answers the same twelve entry points
-# out of DEVS:Internet/hosts alone -- see the option in the top-level file.
-# netstack_dns_status.c and the lease/domain/handoff helpers have no caller
-# but netstack_dns.c, so they go with it.
-if(AMINETXDUO_DNS)
-    list(APPEND NETSTACK_SOURCES
-        netstack_dns.c
-        netstack_dns_domain.c
-        netstack_dns_handoff.c
-        netstack_dns_lease.c
-        netstack_dns_status.c)
-else()
-    list(APPEND NETSTACK_SOURCES netstack_dns_off.c)
-endif()
+# The resolver.  netstack_dns_status.c and the lease/domain/handoff helpers
+# have no caller but netstack_dns.c, so they come with it.
+list(APPEND NETSTACK_SOURCES
+    netstack_dns.c
+    netstack_dns_domain.c
+    netstack_dns_handoff.c
+    netstack_dns_lease.c
+    netstack_dns_status.c)
 
 list(APPEND NETSTACK_SOURCES netstack_dhcp_hostname.c)
 

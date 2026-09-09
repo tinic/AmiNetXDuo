@@ -256,31 +256,6 @@ if(AMINETXDUO_MDNS)
     add_compile_definitions(AMINETXDUO_MDNS)
 endif()
 
-# DNS.  Off, the resolver is DEVS:Internet/hosts and nothing else: the twelve
-# entry points in netstack_dns.c are answered by netstack_dns_off.c, which
-# keeps the hosts-file half of every one of them and returns AMI_NET_ERR_NONAME
-# where the query would have gone out.  That half already runs first and with
-# the network down (netstack_dns.c:1529), so a static machine with a hosts file
-# resolves exactly the names it resolved before.
-#
-# gethostbyname() on a dotted quad still works -- src/config/netdb.c parses one
-# with ami_config_parse_ip() and never asks the network.
-#
-# Global for the reason AMINETXDUO_MDNS is: two objects that disagreed about
-# whether the resolver exists would disagree about netstack_resolve().
-option(AMINETXDUO_DNS "Build the DNS resolver" ON)
-if(AMINETXDUO_DNS)
-    add_compile_definitions(AMINETXDUO_DNS)
-endif()
-
-# DHCP.  Off, the machine must be given a static address -- there is no
-# fallback, and AutoIP is not one: RFC 3927 gives out a 169.254 address that
-# routes nowhere.  ConfigureNetInterface's DHCP half and the Installer's
-# DHCP-vs-static page both assume the client is there, so this is the option
-# that costs a configuration story rather than just bytes.
-#
-# AMINETXDUO_IPV6 already gates the DHCPv6 client separately; this is the v4
-# one, and with both off nothing in addons/dhcp is compiled.
 option(AMINETXDUO_DHCP "Build the DHCP client" ON)
 if(AMINETXDUO_DHCP)
     add_compile_definitions(AMINETXDUO_DHCP)
@@ -568,10 +543,6 @@ endif()
 # NX_ENABLE_IP_RAW_PACKET_FILTER goes with it (port/netxduo-amiga/inc/nx_user.h),
 # which is the larger half: the filter changes the NX_IP layout and every
 # translation unit sees it, so it is not something LTO can collect.
-option(AMINETXDUO_RAWSOCKET "Build SOCK_RAW" ON)
-if(AMINETXDUO_RAWSOCKET)
-    add_compile_definitions(AMINETXDUO_RAWSOCKET)
-endif()
 
 # The network monitoring hooks: AddNetMonitorHookTagList and its Remove, and
 # the three internal helpers socket.c and transfer.c call to decide whether a
@@ -604,10 +575,6 @@ endif()
 # bsd_handoff_init() still clears the list.  Nothing reads sb_Handoffs with the
 # feature off, but library.c:566 already zeroes a child's copy and leaving the
 # master's undefined would be a trap for whoever adds the next reader.
-option(AMINETXDUO_HANDOFF "Build ObtainSocket/ReleaseSocket" ON)
-if(AMINETXDUO_HANDOFF)
-    add_compile_definitions(AMINETXDUO_HANDOFF)
-endif()
 
 # The address-allocation message: CreateAddrAllocMessageA, its Delete, and the
 # BeginInterfaceConfig/AbortInterfaceConfig pair a configuration program drives
@@ -647,9 +614,8 @@ endif()
 # library, which is what makes it separable at all.
 #
 # Off, all four answer through the vector table as usual -- getaddrinfo() and
-# getnameinfo() with EAI_NONAME, the same answer netstack_dns_off.c gives for
-# the same reason, and a value every caller already handles because a name that
-# does not resolve is the ordinary outcome they are written for.
+# getnameinfo() with EAI_NONAME, a value every caller already handles because a
+# name that does not resolve is the ordinary outcome they are written for.
 # A program that predates the API uses gethostbyname(), which is in
 # resolver.c and is not touched by this.
 option(AMINETXDUO_ADDRINFO "Build getaddrinfo/getnameinfo" ON)
@@ -1459,10 +1425,8 @@ if(AMINETXDUO_DHCP)
         "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c")
 endif()
 
-if(AMINETXDUO_DNS)
-    list(APPEND NETXDUO_ADDON_SOURCES
-        "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c")
-endif()
+list(APPEND NETXDUO_ADDON_SOURCES
+    "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c")
 
 # The DHCPv6 client, in the IPv6 build only.  It is the largest single addon
 # here and every byte of it is unreachable without IPv6, so the floor build

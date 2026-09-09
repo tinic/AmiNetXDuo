@@ -61,8 +61,11 @@ def arm(name):
     m=re.search(r'"'+name+r':([^"]*)"',ci)
     if not m: raise SystemExit(f"lvo_matrix=FAIL reason=no_{name}_arm_in_ci.sh")
     return set(re.findall(r'-DAMINETXDUO_([A-Z_0-9]+)=OFF',m.group(1)))
-PROF=[('default',set()),('minimal',arm('minimal')),
-      ('micro',arm('micro')),('microcompat',arm('microcompat'))]
+# THREE PROFILES, which is all there are: full, minimal, micro.  `microcompat`
+# was a fourth that existed only to put the socket handoff and SOCK_RAW back
+# into micro; the Aminet survey settled that argument -- ObtainSocket has 173
+# callers and SOCK_RAW 48 -- so micro carries them and the arm is gone.
+PROF=[('default',set()),('minimal',arm('minimal')),('micro',arm('micro'))]
 
 # where each symbol is defined, and whether that line sits inside a guard
 srcs={}

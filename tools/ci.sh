@@ -112,30 +112,24 @@ CROSS_CONFIGS=(
     "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
     # Below `minimal` on purpose: the row above is cited by line number.
     #
-    # The floor under the floor.  It is the minimal drawer plus the two things
-    # that drawer still carries -- the DHCP client and the DNS resolver -- and
-    # the seven options minimal leaves on.  A machine built this way is given a
-    # static address and resolves names out of DEVS:Internet/hosts.
+    # The floor under the floor.  It is the minimal drawer plus the DHCP
+    # client and the seven options minimal leaves on.  A machine built this way
+    # is given a static address, and it RESOLVES NAMES.
     #
-    # This is the only arm that compiles AMINETXDUO_DHCP=OFF or
-    # AMINETXDUO_DNS=OFF, so it is what netstack_dns_off.c and
-    # netstack_dhcpv6_off.c are built by at all.  It does not ship a drawer
-    # yet, so tools/check-shipping-config.sh does not look at it.
-    "micro:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=1 -DAMINETXDUO_TCP_SYNCACHE=32 -DAMINETXDUO_NX_ERROR_CHECKING=OFF -DAMINETXDUO_NETSTATUS=OFF -DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF -DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_HANDOFF=OFF -DAMINETXDUO_NETMONITOR=OFF -DAMINETXDUO_RAWSOCKET=OFF -DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF -DAMINETXDUO_DNS=OFF -DAMINETXDUO_DHCP=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF -DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF -DAMINETXDUO_HOT_O2=OFF"
-    # The survey's answer, built rather than argued.  Three passes over Aminet
-    # binaries proved `micro` breaks two classes of real software, and the
-    # arm below is what it costs to stop breaking them:
+    # WHAT IT TURNS OFF IS WHAT THE CORPUS DOES NOT CALL, 2026-09-09.  Every
+    # option here is checked against docs/aminet-survey/lvo-usage.tsv, 833
+    # attributed binaries:
     #
-    #   ObtainSocket   ftpd2 0x41bc, AmiTCP NETLIB:autoinitd.o -- the inetd
-    #                  contract.  ftpd, telnetd, fingerd, rshd and tftpd all
-    #                  fail at STARTUP without it.  1,120 bytes.
-    #   SOCK_RAW       AvePING 0x1772 socket(AF_INET,SOCK_RAW,IPPROTO_ICMP).
-    #                  ping and traceroute, and they fail silently.  3,404.
+    #   off, 0 callers   ROUTING (5 vectors), ADDRALLOC (4), NETMONITOR (2),
+    #                    NETSTATUS, ADDRINFO, BPF, the mbuf and ipf blocks
+    #   ON, measured     DNS         gethostbyname 607, gethostbyaddr 177
+    #                    HANDOFF     ObtainSocket 173, Dup2Socket 83
+    #                    RAWSOCKET   48 binaries, invisible to any LVO count
     #
-    # DNS stays off, which is the one loss this profile is FOR: a floor
-    # machine is given a static address and DEVS:Internet/hosts.  Restoring it
-    # costs 16,524 and is a different profile, not this one.
-    "microcompat:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=1 -DAMINETXDUO_TCP_SYNCACHE=32 -DAMINETXDUO_NX_ERROR_CHECKING=OFF -DAMINETXDUO_NETSTATUS=OFF -DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF -DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_NETMONITOR=OFF -DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF -DAMINETXDUO_DNS=OFF -DAMINETXDUO_DHCP=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF -DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF -DAMINETXDUO_HOT_O2=OFF"
+    # The three ON rows were off until this change; `microcompat` existed to
+    # carry two of them and is now the same arm, so it is gone.  It does not
+    # ship a drawer yet, so tools/check-shipping-config.sh does not look at it.
+    "micro:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=1 -DAMINETXDUO_TCP_SYNCACHE=32 -DAMINETXDUO_NX_ERROR_CHECKING=OFF -DAMINETXDUO_NETSTATUS=OFF -DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF -DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_NETMONITOR=OFF -DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF -DAMINETXDUO_DHCP=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF -DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF -DAMINETXDUO_HOT_O2=OFF"
     # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
     # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled
     # for as long as it took someone to type it by hand.  Grouped rather than
