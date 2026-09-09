@@ -636,6 +636,124 @@ static void test_wide_probe(void)
     mock_wide_fault = WIDE_OK;
 }
 
+/* --------------------------------------------------------- attach ------- */
+
+/*
+ * ne2000_attach() was reached by nothing.  A call-graph walk over src/netdev
+ * seeded with every function these tests mention put it in a cluster of six
+ * unreached functions with ONE root cause: attach installs read_hdr,
+ * ring_copy, ring_copy_sum and write_buf, so none of them is reachable while
+ * attach itself is not called.  The core is #included whole, so it can be
+ * called directly.
+ *
+ * THE GROUP-BIT FIX IS THE PART THAT MATTERS.  Bit 0 of the first octet is
+ * the Ethernet group bit.  A card whose PROM has it set has, on paper, a
+ * multicast address for its own station address -- and a station that filters
+ * on it is deaf to every unicast frame addressed to it.  The driver clears it
+ * and counts the repair where `netstat` can report it ("ROM address group bit
+ * cleared").  An emulator's PROM image is clean, so a sweep never exercises
+ * this: it is precisely a defect the rig cannot see.
+ */
+static void prom_stage(const unsigned char mac[6], int ww_signature)
+{
+    unsigned i;
+
+    /* A classic NE2000 images the address byte-doubled in the first 32 bytes
+       and signs itself with 'W' at 28 and 30. */
+    for (i = 0; i < 6u; i++)
+    {
+        mock_buf[i * 2u]      = mac[i];
+        mock_buf[i * 2u + 1u] = mac[i];
+    }
+    if (ww_signature)
+    {
+        mock_buf[28] = 0x57;
+        mock_buf[30] = 0x57;
+    }
+}
+
+static void test_attach_station_address(void)
+{
+    static const unsigned char clean[6] = { 0x00, 0x40, 0x95, 0x11, 0x22, 0x33 };
+    static const unsigned char grouped[6] = { 0x01, 0x40, 0x95, 0x44, 0x55, 0x66 };
+    NetdevNic nic;
+
+    printf("\n-- attach: the station address\n");
+
+    /* A signed NE2000 PROM: the address is the even bytes of the image. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(clean, 1);
+    ok("a signed PROM attaches", ne2000_attach(&nic) == 0);
+    ok("and the address is the image's even bytes",
+       memcmp(nic.factory, clean, 6) == 0);
+    ok("recorded as having come from the PROM",
+       nic.mac_source == (UBYTE)ANXDIAG_MAC_PROM);
+    ok("with no group-bit repair counted", nic.mac_group_fix == 0);
+
+    /*
+     * THE SAME CARD WITH THE GROUP BIT SET.  Accepting it leaves a station
+     * that cannot be addressed; the driver must clear the bit and say it did.
+     */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(grouped, 1);
+    ok("a PROM with the group bit set still attaches",
+       ne2000_attach(&nic) == 0);
+    ok("the group bit is cleared", (nic.factory[0] & 1u) == 0);
+    /*
+     * "cleared" alone is a weak assertion here and it is worth saying why.
+     * ne2000.c:770 validates the address after the repair and falls back --
+     * CIS node id, then a derived locally-administered address -- so an
+     * implementation that simply DID NOT repair also ends up with the group
+     * bit clear, on a completely different address.  The bytes below are what
+     * separates a repair from a replacement.
+     */
+    ok("the rest of the address is untouched",
+       nic.factory[1] == 0x40 && nic.factory[5] == 0x66);
+    ok("and the repair is counted for netstat", nic.mac_group_fix == 1);
+
+    /* A card the chip probe refuses is refused by attach, whatever is in the
+       buffer. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_no_reset = 1;              /* the chip never answers the reset */
+    prom_stage(clean, 1);
+    ok("a card that does not answer is refused", ne2000_attach(&nic) != 0);
+
+    mock_no_reset = 0;
+    mock_wide_fault = WIDE_OK;
+}
+
+/* Attach installs the hooks the receive and transmit paths run through.  A
+   NULL among them is a crash on the first frame, not a wrong answer. */
+static void test_attach_installs_the_hooks(void)
+{
+    static const unsigned char mac[6] = { 0x00, 0x40, 0x95, 0x77, 0x88, 0x99 };
+    NetdevNic nic;
+
+    printf("\n-- attach: the hooks the frame paths need\n");
+
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(mac, 1);
+    ok("attaches", ne2000_attach(&nic) == 0);
+
+    ok("read_hdr is installed",  nic.read_hdr  != NULL);
+    ok("ring_copy is installed", nic.ring_copy != NULL);
+    ok("write_buf is installed", nic.write_buf != NULL);
+    /* A port has no address to hand out, so this one must stay NULL: a
+       non-NULL frame_at would have the receive path hand up a pointer into a
+       card that cannot be addressed. */
+    ok("frame_at stays NULL for a port-driven core", nic.frame_at == NULL);
+
+    ok("the ring starts above the transmit buffers", nic.mem_start == 16384);
+    ok("and is 16 KB", nic.mem_size == 16384);
+}
+
 int main(void)
 {
     test_clone_warm();
@@ -644,6 +762,8 @@ int main(void)
     test_dead_card();
     test_no_odd_window();
     test_wide_probe();
+    test_attach_station_address();
+    test_attach_installs_the_hooks();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
 
