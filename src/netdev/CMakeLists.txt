@@ -415,6 +415,36 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
 
+    # The SANA-II command table itself, 818 lines that nothing compiled
+    # off-target until now: test_netdev_beginio below REPLACES netdev_cmds.c
+    # with a recorder, because that test is about what BeginIO writes before
+    # dispatch.  So the twenty cases in it had the coverage an emulated a2065
+    # run gives them -- CMD_READ, CMD_WRITE, S2_CONFIGINTERFACE, S2_ONLINE --
+    # and every error path was unasserted.  The error codes ARE the contract:
+    # they are the ones Individual Computers' x-surf.device returns.
+    #
+    # netdev_mcast.c is linked for real rather than stood in for: the group
+    # table and its refcounts are what several of the cases turn on, and the
+    # deliberate divergence from both IC drivers -- accepting a join whose
+    # group bit is set, where they test bit 7 and so refuse every real IPv4
+    # and IPv6 multicast address -- is asserted through it in both directions.
+    add_executable(test_netdev_cmds
+        test/test_netdev_cmds.c
+        netdev_cmds.c
+        netdev_mcast.c)
+
+    target_include_directories(test_netdev_cmds PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_cmds PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_cmds COMMAND test_netdev_cmds)
+
     # What BeginIO does to a request before it dispatches it.  netdev_event.c
     # is driven directly by the test above, which is why it stayed green over
     # a BeginIO that cleared ios2_WireError for every command including

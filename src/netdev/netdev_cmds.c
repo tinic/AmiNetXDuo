@@ -22,6 +22,7 @@
 
 #include <exec/errors.h>
 #include <exec/io.h>
+#include <stddef.h>
 
 #include <proto/exec.h>
 
@@ -748,6 +749,21 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          * and io_Actual lands where ios2_WireError does -- so netdev_reply()
          * would overwrite the answer.  This one replies by hand.
          */
+        /*
+         * MEASURED, not assumed.  On m68k both land at offset 32, and the
+         * host shim that src/netdev/test/test_netdev_cmds.c builds against
+         * puts them at 68 and 72 -- so the host test pins the behaviour this
+         * alias would break and CANNOT reproduce the alias itself.  Asserted
+         * here, where the layout is the target's, because the whole reason
+         * this case replies by hand is that they are the same four bytes.
+         */
+#ifdef __mc68000__
+        _Static_assert(offsetof(struct IOStdReq, io_Actual) ==
+                       offsetof(struct IOSana2Req, ios2_WireError),
+                       "NSCMD_DEVICEQUERY replies by hand because io_Actual "
+                       "and ios2_WireError are the same four bytes");
+#endif
+
         struct IOStdReq      *std = (struct IOStdReq *)io;
         struct NetdevNSQuery *q   = (struct NetdevNSQuery *)std->io_Data;
 
