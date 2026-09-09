@@ -14,6 +14,7 @@ option(AMINETXDUO_NETDEV_LINK
 
 set(NETDEV_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open
+    netdev_unit.c       # unit/opener helpers, host-testable
     netdev_io.c         # BeginIO/AbortIO field handling, host-testable
     netdev_direct.c     # claim/completion half of the single-copy RX path
     netdev_queue.c      # queued IORequest invariants, host-testable
@@ -414,6 +415,36 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_event PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
+
+    # What an opener's filter state and its departure do to a unit.  These
+    # three lived in netdev_device.c, which cannot be compiled off target --
+    # a raw romtag asm at its head and <exec/execbase.h> at :19 -- so none of
+    # them had ever run on a host.  netdev_unit.c is the split that let them,
+    # at a MEASURED 4 bytes of resident RAM (38,832 -> 38,836 with -flto,
+    # budget 40,000), and the same 4 whether one function moves or all three,
+    # because the cost is the extra translation unit and not its contents.
+    #
+    # The hash is why it was worth 4 bytes.  netdev_rebuild_filter() builds
+    # the 64-bit multicast filter every core programs into its chip, and a bit
+    # not set there means the card drops the router's neighbour solicitation
+    # to 33:33:ff:xx:xx:xx -- on-link IPv6 works, off-link never resolves.
+    # emulator.yml:466-470 records exactly that happening to three cards.
+    add_executable(test_netdev_unit
+        test/test_netdev_unit.c
+        netdev_unit.c
+        netdev_mcaf.c)
+
+    target_include_directories(test_netdev_unit PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_unit PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_unit COMMAND test_netdev_unit)
 
     # The probe record and the semaphore it is published on -- the ONLY channel
     # by which a machine nobody here has can report what the probe decided.
