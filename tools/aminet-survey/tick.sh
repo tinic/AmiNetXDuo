@@ -24,15 +24,60 @@ fi
 # zero archives.  Same shape as every other silent pass found today.
 [ "$#" -gt 0 ] || { echo "tick: no archives given, nothing to do" >&2; exit 2; }
 
+# FETCH EVERYTHING FIRST, IN PARALLEL.  fetch.sh slept 2 s between archives,
+# added after aminet throttled a burst of twenty back-to-back requests and
+# then applied serially to every archive after that.  Measured on 8 archives:
+# 19.65 s sequential against 1.52 s at -P6, same 7 of 8 retrieved.
+#
+# THE PAUSE IS NOT GONE, IT IS OVERLAPPED.  Six sockets open at once is not
+# the shape that drew the throttle -- twenty requests in a row is -- and curl
+# still carries --retry.  ANXD_FETCH_JOBS=1 with ANXD_FETCH_PAUSE=2 is the way
+# back if aminet objects.
+#
+# The outcome per archive goes in a status file rather than being inferred: a
+# fetch that failed and a fetch never attempted are different rows, and an
+# earlier half-applied version of this patch left the READ of these files in
+# place with nothing writing them -- so 3,627 archives were recorded
+# FETCH_FAIL without a single request being made.
+# The scanner version belongs on EVERY row, not only the ones that named a
+# vector.  These three writes carried six fields, so 3,583 NO_BSDSOCKET_BINARY
+# rows landed with no scanner= at all and check-derived.sh refused the whole
+# ledger -- correctly: "this archive holds no bsdsocket binary" is a claim, and
+# a claim with no record of which scanner made it cannot be re-judged when the
+# scanner changes.
+SCANNER=$(python3 -c "
+import sys; sys.path.insert(0, '/home/turo/anxd-aminet'); import scan
+print(scan.SCANNER_VERSION)")
+
+JOBS=${ANXD_FETCH_JOBS:-6}
+mkdir -p "$OUT/status"
+todo=""
 for path in "$@"; do
     name=$(basename "$path")
     if cut -f1 "$LEDGER" | grep -qx "$name"; then
         echo "SKIP already scanned: $name"; continue
     fi
+    todo="$todo $path"
+    rm -f "$OUT/status/$name"
+done
+[ -n "$todo" ] || { echo "tick: nothing new to fetch"; }
+# shellcheck disable=SC2086
+[ -n "$todo" ] && printf '%s\n' $todo \
+    | ANXD_FETCH_PAUSE=${ANXD_FETCH_PAUSE:-0} xargs -P "$JOBS" -I{} \
+      sh -c 'n=$(basename "$1")
+             if out=$(/home/turo/anxd-aminet/fetch.sh "$1" "$2" 2>&1); then
+                 printf "OK\n"      > "$2/status/$n"
+             else
+                 printf "%s\n" "$out" > "$2/status/$n"
+             fi' _ {} "$OUT"
+
+for path in $todo; do
+    name=$(basename "$path")
     # Keep the reason.  A bare FETCH_FAIL cannot be triaged: 404 is permanent
     # and worth retiring, 000/429 is this survey's own request rate and worth
     # re-attempting.  18 of 20 rows turned out to be the second kind.
-    if ! fout=$(/home/turo/anxd-aminet/fetch.sh "$path" "$OUT" 2>&1); then
+    fout=$(cat "$OUT/status/$name" 2>/dev/null || echo "FETCH_FAIL no status file")
+    if [ "$fout" != OK ]; then
         # The first word of fetch.sh's message is the reason class --
         # FETCH_FAIL, FETCH_NOT_ARCHIVE, UNPACK_FAIL -- and they are not the
         # same event.  Collapsing all three into a bare FETCH_FAIL is how a
@@ -40,7 +85,8 @@ for path in "$@"; do
         why=$(printf '%s' "$fout" | tail -1 | cut -d' ' -f1)
         det=$(printf '%s' "$fout" | sed -n 's/.*\(http=[0-9]*\).*/\1/p' | tail -1)
         why="${why#FETCH_}${det:+ $det}"
-        printf '%s\t-\tFETCH_%s\t0\t0\t\n' "$name" "${why:-FAIL http=000}" >> "$LEDGER"
+        printf '%s\t-\tFETCH_%s\t0\t0\t\tscanner=%s\t%s\t\n' \\
+            "$name" "${why:-FAIL http=000}" "$SCANNER" "$path" >> "$LEDGER"
         echo "FETCH_${why:-FAIL} $name"; continue
     fi
     found=0
@@ -89,16 +135,19 @@ for path in "$@"; do
         printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$rel" "$row" "$path" "$sha" >> "$LEDGER"
         echo "$name | $row" | cut -c1-150
         found=$((found+1))
-    done < <(find "$OUT/$name.d" -type f -size +1k -print0)
+    done < <(find "$OUT/$name.d" -type f -size +1k -print0 \
+             | xargs -0 -r grep -lZ "bsdsocket.library" 2>/dev/null)
     if [ "$found" = 0 ]; then
         if [ "$errs" -gt 0 ]; then
             # Distinguishable, and deliberately NOT an OK-family verdict: it
             # is "we did not manage to look", which is a row to come back to
             # rather than a fact about the archive.
-            printf '%s\t-\tSCAN_ERROR files=%s\t0\t0\t\n' "$name" "$errs" >> "$LEDGER"
+            printf '%s\t-\tSCAN_ERROR files=%s\t0\t0\t\tscanner=%s\t%s\t%s\n' \\
+                "$name" "$errs" "$SCANNER" "$path" "$sha" >> "$LEDGER"
             echo "SCAN_ERROR $name ($errs files) -- NOT recorded as having no binary"
         else
-            printf '%s\t-\tNO_BSDSOCKET_BINARY\t0\t0\t\n' "$name" >> "$LEDGER"
+            printf '%s\t-\tNO_BSDSOCKET_BINARY\t0\t0\t\tscanner=%s\t%s\t%s\n' \\
+                "$name" "$SCANNER" "$path" "$sha" >> "$LEDGER"
         fi
     fi
 done

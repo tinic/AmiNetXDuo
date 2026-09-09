@@ -122,6 +122,50 @@ b3 = build(be16(0x4E75), data=payload, relocs=None)
 check("data not scanned", [c for _o, c in hunk.code_hunks(b3)],
       [be16(0x4E75) + b'\x00' * 2])
 
+# ---- a6 loaded through d0, the BASE_BUT_NO_CALLS shape -------------------
+#
+#   move.l  (400).L,d0     2039 00000190
+#   movea.l d0,a6          2C40
+#   jsr     -30(a6)        4EAE FFE2
+#
+# 2,078 of the 2,190 `movea.l d0,a6` sites in binaries verdicted
+# BASE_BUT_NO_CALLS are preceded by exactly this load.
+CODE5 = (be16(0x2039) + be32(400) + be16(0x2C40)
+         + be16(0x4EAE, 0xFFE2)
+         + be16(0x4E75))
+b5 = list(hunk.code_hunks(build(CODE5)))[0][1]
+check("a6 via d0", scan.calls_for(b5, {('abs', 400)}), [-30])
+
+# And the idiom must NOT survive an intervening write to d0: `moveq #0,d0`
+# between the load and the transfer means a6 is loaded with something else.
+CODE6 = (be16(0x2039) + be32(400) + be16(0x7000) + be16(0x2C40)
+         + be16(0x4EAE, 0xFFE2)
+         + be16(0x4E75))
+b6 = list(hunk.code_hunks(build(CODE6)))[0][1]
+check("d0 clobbered between load and transfer", scan.calls_for(b6, {('abs', 400)}), [])
+
+# ---- a6 via one hop through an address register --------------------------
+#
+#     movea.l (400).L,a3    2679 00000190
+#     movea.l a3,a6         2C4B
+#     jsr     -30(a6)
+#
+# 352 of the ~460 register-to-a6 transfers in BASE_BUT_NO_CALLS binaries are
+# fed this way, mostly from a stack slot.
+CODE7 = (be16(0x2679) + be32(400) + be16(0x2C4B)
+         + be16(0x4EAE, 0xFFE2)
+         + be16(0x4E75))
+b7 = list(hunk.code_hunks(build(CODE7)))[0][1]
+check("a6 via one register hop", scan.calls_for(b7, {('abs', 400)}), [-30])
+
+# Rewriting the register with something else must break the chain: a3 is
+# reloaded from a DIFFERENT address before the transfer, so a6 is not our base.
+CODE8 = (be16(0x2679) + be32(400) + be16(0x2679) + be32(800) + be16(0x2C4B)
+         + be16(0x4EAE, 0xFFE2)
+         + be16(0x4E75))
+b8 = list(hunk.code_hunks(build(CODE8)))[0][1]
+check("register rewritten before the hop", scan.calls_for(b8, {('abs', 400)}), [])
+
 # ---- KNOWN LIMITATION: an immediate that reads as an instruction ---------
 #
 #   move.l #$4EAEFFE2,d0    203C 4EAE FFE2
@@ -137,9 +181,53 @@ b4 = list(hunk.code_hunks(build(CODE4)))[0][1]
 check("known limitation: immediate misread as a call",
       scan.calls_for(b4, {('abs', 400)}), [-30])
 
+# ---- scan() END TO END, which the fixtures above never reach --------------
+#
+# Everything above calls calls_for() directly.  scan() also calls
+# raw_socket_sites(), and a v10 edit that landed in BOTH walks initialised its
+# state in only one -- so every real binary raised `NameError: areg` while this
+# suite stayed green.  A fixture that exercises the entry point catches that
+# class; one that exercises a helper cannot.
+import tempfile
+with tempfile.NamedTemporaryFile(suffix='.exe', delete=False) as fh:
+    fh.write(build(CODE, relocs=[2]))
+    _p = fh.name
+try:
+    verdict, offs, total = scan.scan(_p)
+    check("scan() verdict", verdict, 'OK')
+    check("scan() offsets", sorted(offs), [-258, -120, -30])
+    check("scan() call count", total, 3)
+finally:
+    os.unlink(_p)
+
+# And the SOCK_RAW argument pattern, which lives only in raw_socket_sites:
+#     moveq #3,d1 ; jsr -30(a6)   -- socket(..., SOCK_RAW, ...)
+CODE9 = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+         + be16(0x4EAE, 0xFDD8)
+         + be16(0x23C0) + be32(400)
+         + be16(0x2C79) + be32(400)
+         + be16(0x2650)                       # movea.l (a0),a3 -- a mode the
+                                              # register tracker does not map,
+                                              # so it must CLEAR a3 rather than
+                                              # raise; this is the line that
+                                              # crashed every real binary while
+                                              # the suite stayed green
+         + be16(0x7203)                       # moveq #3,d1
+         + be16(0x4EAE, 0xFFE2)               # jsr -30(a6) == socket
+         + be16(0x4E75))
+with tempfile.NamedTemporaryFile(suffix='.exe', delete=False) as fh:
+    fh.write(build(CODE9, relocs=[2]))
+    _p = fh.name
+try:
+    verdict, _o, _t = scan.scan(_p)
+    check("scan() detects SOCK_RAW", verdict, 'OK+SOCK_RAW')
+finally:
+    os.unlink(_p)
+
 if fails:
     for f in fails:
         print(f"scan_fixture=FAIL {f}")
     sys.exit(1)
-print("scan_fixture=PASS 5 fixtures: call shapes, tail call, rebound a6, "
-      "data hunks, one pinned limitation")
+print("scan_fixture=PASS 12 fixtures: call shapes, tail call, rebound a6, "
+      "data hunks, a6 via d0 and via a register hop with both clobbers, "
+      "scan() end to end incl SOCK_RAW, one pinned limitation")

@@ -24,7 +24,7 @@ T=$(mktemp -d) || exit 2
 trap 'rm -rf "$T"' EXIT
 
 for f in results.tsv lvomap.tsv lvo-usage.tsv lvo-rare.tsv vsyslog-callers.tsv \
-         unused-vectors.tsv candidates.tsv; do
+         unused-vectors.tsv candidates.tsv yield.tsv; do
     [ -r "$D/$f" ] || { echo "check_derived=FAIL missing $D/$f"; exit 2; }
 done
 
@@ -104,6 +104,17 @@ if [ "$stale" -ne 0 ]; then
 fi
 echo "check_derived ledger_rows=$(awk -F'\t' 'NR>1' "$D/results.tsv" | wc -l) all_at=scanner=$want"
 
+# yield.tsv, published with the picker that reads it.  Gated on arrival rather
+# than later: an ungated derived table is how lvo-rare.tsv and
+# unused-vectors.tsv drifted into being checked by nothing.
+python3 tools/aminet-survey/yield.py "$D" > "$T/yield.tsv" \
+    || { echo "check_derived=FAIL regenerating yield"; exit 2; }
+if ! diff -q "$T/yield.tsv" "$D/yield.tsv" > /dev/null 2>&1; then
+    echo "check_derived=FAIL yield.tsv does not match results.tsv"
+    diff "$D/yield.tsv" "$T/yield.tsv" | head -6
+    exit 1
+fi
+
 rows=$(awk -F'\t' 'NR>1' "$D/lvo-usage.tsv" | wc -l)
 called=$(awk -F'\t' 'NR>1 && $3>0' "$D/lvo-usage.tsv" | wc -l)
 rare=$(awk -F'\t' 'NR>1 && !s[$2]++' "$D/lvo-rare.tsv" | wc -l)
@@ -111,5 +122,5 @@ echo "check_derived vectors=$rows called=$called rare_under_10=$rare"
 vsys=$(wc -l < "$D/vsyslog-callers.tsv")
 echo "check_derived vsyslog_callers=$vsys"
 echo "check_derived regenerated=lvo-usage.tsv,lvo-rare.tsv,vsyslog-callers.tsv,\
-unused-vectors.tsv,candidates.tsv"
+unused-vectors.tsv,candidates.tsv,yield.tsv"
 echo "check_derived=PASS"

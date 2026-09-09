@@ -1,19 +1,22 @@
 rank	new	cum	flags	lvos	archive	binary
 1	30	30	H-D	30	samba207_w1251.lha	samba-2.0.7/install/bin/testprns
-2	6	36	---	16	apartee-0.8.1.lha	Apartee/Apartee
-3	5	41	H-D	23	maildaemons.lha	maildaemons/serv/ipop3d
-4	3	44	--D	25	AmigaTText-m68k-amigaos.lha	OS3/AmigaTText/AmigaTText_OS3
-5	3	47	--D	16	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiNSLookup
-6	2	49	--D	15	napsaterm3.8b.lha	bin/napsaterm
-7	2	51	--D	10	amimatters.lha	AmiMatters/Files/68060/AmiMatters
-8	1	52	H-D	22	wu-ftpd-37.21.lha	wu-ftpd/bin/ftpd
-9	1	53	H--	17	gendemo104.lha	Genesis/bin/inetd
-10	1	54	H-D	13	NNTPd_12.lha	NNTPd_1.2/serv/NNTPd
-11	1	55	--D	19	binkd_1.1a-115.lha	binkd
-12	1	56	H--	18	adig.lha	adig/ahost-68000
-13	1	57	-RD	15	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiIPNatD
-14	1	58	---	13	lanclip.lha	LANClip/lanclip
-15	1	59	---	2	Charon.lha	Charon/Libs/Charon_AmiSSL.library
-16	1	60	---	1	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
+2	13	43	--D	16	tcpautostart.lha	tcpautostart
+3	11	54	--D	24	BenderIRC.lha	BenderIRC/BenderIRC
+4	6	60	--D	23	nntpsend.lha	nntpsend
+5	4	64	HR-	19	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiDx
+6	3	67	--D	26	cim.lha	cim
+7	3	70	--D	25	AmigaTText-m68k-amigaos.lha	OS3/AmigaTText/AmigaTText_OS3
+8	3	73	---	16	apartee-0.8.1.lha	Apartee/Apartee
+9	1	74	--D	15	napsaterm3.8b.lha	bin/napsaterm
+10	1	75	--D	18	AntiSpam2.lha	AntiSpam2/EmailCheck
+11	1	76	--D	17	netsurf_os3.lha	NetSurf/NetSurf
+12	1	77	---	13	atalk_V1.lha	Atalkd
+13	1	78	H-D	13	NNTPd_12.lha	NNTPd_1.2/serv/NNTPd
+14	1	79	--D	20	EasySocketDev.lha	EasySocket/Libs/EasySocket.library
+15	1	80	--D	19	binkd_1.1a-115.lha	binkd
+16	1	81	--D	10	BenderIRC.lha	BenderIRC/plugins/LogWriter.plugin
+17	1	82	---	2	Charon.lha	Charon/Libs/Charon_AmiSSL.library
+18	1	83	H--	6	MiamiDx10cmain.lha	MiamiDx10_Install/main/Libs/miamisecureshell.library
+19	1	84	---	1	FTPMount_upd.lha	FTPMount_upd/FTPMount-Handler.debug
 
-# 459 attributed binaries cover 60 of 143 vectors (41%); 16 of them are non-redundant.
+# 732 attributed binaries cover 84 of 143 vectors (58%); 19 of them are non-redundant.

@@ -69,7 +69,8 @@ for name in $stale; do
         row=${row#*$(printf '\t')}
         printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$rel" "$row" "$path" "$sha" >> "$tmp"
         found=$((found+1))
-    done < <(find "$OUT/$name.d" -type f -size +1k -print0)
+    done < <(find "$OUT/$name.d" -type f -size +1k -print0 \
+                 | xargs -0 -r grep -lZ "bsdsocket.library" 2>/dev/null)
     if [ "$found" = 0 ]; then
         if [ "$errs" -gt 0 ]; then
             printf '%s\t-\tSCAN_ERROR files=%s\t0\t0\t\tscanner=%s\t%s\t%s\n' \

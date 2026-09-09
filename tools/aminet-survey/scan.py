@@ -50,7 +50,7 @@ if not LVOMAP:
 # rescan.sh re-runs every archive whose row carries an older version, off the
 # local unpack tree, so no re-fetch is needed.  Rows with no scanner= field at
 # all predate this and are the ones to redo first.
-SCANNER_VERSION = 7
+SCANNER_VERSION = 10
 
 OPENLIB = 0xFDD8            # -552 as a 16-bit displacement
 # A NAME THAT IS NOT UNIQUE CANNOT BE A KEY.  18 offsets in lvomap.tsv are all
@@ -86,18 +86,44 @@ def s16(b, i): return struct.unpack_from('>h', b, i)[0]
 # 5 absolute loads, and the OpenLibrary result is stored with `move.l
 # d0,d16(a4)`.  A scanner that only knows absolute addressing is blind to the
 # usual case.
-A6_LOADS = {
-    0x2C79: 'abs.l',      # movea.l (xxx).L,a6
-    0x2C78: 'abs.w',      # movea.l (xxx).W,a6
-    0x2C6C: 'a4',         # movea.l d16(a4),a6   -- small data
-    0x2C6D: 'a5',         # movea.l d16(a5),a6
-}
-D0_STORES = {
-    0x23C0: 'abs.l',      # move.l d0,(xxx).L
-    0x21C0: 'abs.w',      # move.l d0,(xxx).W
-    0x2940: 'a4',         # move.l d0,d16(a4)
-    0x2B40: 'a5',         # move.l d0,d16(a5)
-}
+# TWO ROWS OF A FAMILY OF EIGHT, WHICH IS WHY 387 BINARIES WENT UNRESOLVED.
+# `move.l d0,(d16,An)` is 0x2140 | (n << 9) and `movea.l (d16,An),a6` is
+# 0x2C68 | n, for EVERY address register.  The table hardcoded a4 (0x2940 /
+# 0x2C6C) and a5 (0x2B40 / 0x2C6D) -- which the arithmetic reproduces exactly,
+# so generating the family is a strict superset of what was here.
+#
+# Sampling the OpenLibrary sites that DID name bsdsocket.library in binaries
+# verdicted NO_SOCKETBASE_STORE, the instruction right after the call was
+# `2540` (d16(a2)) six times and `2f40` (d16(a7), a stack local) five times.
+# Neither was in the table, so the base was found, named, stored -- and thrown
+# away.
+#
+# a7 IS THE STACK and carries the only real false-positive risk here: a
+# displacement off sp names a frame slot, and a different function's frame
+# reuses the same displacement for something else.  The pairing is what holds
+# it: a hit needs a store AND a load at the SAME key, so an unrelated frame
+# slot would have to both receive a library base and be loaded into a6 to
+# collide -- at which point it is a library base.  Kept, and measured.
+A6_LOADS = {0x2C79: 'abs.l', 0x2C78: 'abs.w'}
+D0_STORES = {0x23C0: 'abs.l', 0x21C0: 'abs.w'}
+for _n in range(8):
+    A6_LOADS[0x2C68 | _n] = 'a%d' % _n           # movea.l d16(An),a6
+    D0_STORES[0x2140 | (_n << 9)] = 'a%d' % _n   # move.l d0,d16(An)
+
+# NOT ADDED, AND ON PURPOSE: the base kept in an ADDRESS REGISTER.
+#
+#   movea.l d0,a3        0x2040 | (n << 9)   -- 2640 in the sample, x2
+#   movea.l a3,a6        0x2C48 | n          -- the matching load
+#
+# It appeared 3 times in 14 named opens, so it is real and it is the next
+# thing worth having.  It is left out because a register is not a location: a3
+# holding SocketBase at one instruction says nothing about a3 forty
+# instructions later, and every intervening call clobbers it.  The memory
+# forms above are safe precisely because a store and a load naming the same
+# address are talking about the same variable.  Adding the register forms
+# without dataflow would attribute whatever a3 happens to hold at each call
+# site, which manufactures callers rather than finding them -- and an inflated
+# count is worse here than a missing one.
 
 def _operand(code, i, kind):
     """(key, bytes_consumed) for the operand after the opcode word."""
@@ -113,7 +139,8 @@ def _operand(code, i, kind):
 # proved it: the tail call sat 6 bytes from the end of the hunk, the loop
 # stopped 6 bytes early, and the call was never seen.  A hunk's LAST
 # instruction is exactly where a tail call lives.
-_NEED = {'abs.l': 4, 'abs.w': 2, 'a4': 2, 'a5': 2}
+_NEED = {'abs.l': 4, 'abs.w': 2}
+_NEED.update({'a%d' % _n: 2 for _n in range(8)})
 
 
 def _fits(code, i, kind):
@@ -141,19 +168,71 @@ def find_socketbase(code):
 
 def calls_for(code, bases):
     """LVO displacements reached through an a6 loaded from one of `bases`."""
+    # a6 IS ALSO LOADED VIA d0, AND THAT WAS THE WHOLE OF BASE_BUT_NO_CALLS.
+    # 83 binaries opened bsdsocket, named it, stored the base -- and then made
+    # no call this scanner could see.  The instruction feeding a6 at those call
+    # sites was `movea.l d0,a6` (0x2C40) 2,190 times, and 2,078 of those were
+    # immediately preceded by `move.l (base).L,d0` (0x2039):
+    #
+    #     move.l  (SocketBase).L,d0     2039 xxxxxxxx
+    #     movea.l d0,a6                 2C40
+    #     jsr     -xxx(a6)
+    #
+    # d0 is tracked only across that one idiom -- the load and the transfer
+    # adjacent -- so no dataflow is being guessed at; any other write to d0
+    # clears it.
     hits = []
     cur = None
+    d0 = None
+    areg = [None] * 8
     # i + 4 <= len(code): opcode word plus a 16-bit displacement.  Anything
     # tighter drops the last instruction of the hunk, which is where tail calls
     # are.
     for i in range(0, len(code) - 3, 2):
         w = u16(code, i)
+        if w == 0x2039 and _fits(code, i, 'abs.l'):      # move.l abs.l,d0
+            d0 = ('abs', u32(code, i + 2))
+            continue
+        if w == 0x2C40:                                  # movea.l d0,a6
+            cur = d0
+            continue
+
+        # ONE HOP THROUGH AN ADDRESS REGISTER, which is where the rest of
+        # BASE_BUT_NO_CALLS went.  The base is loaded into a2/a3/a5 and only
+        # then into a6:
+        #
+        #     movea.l 42(a7),a3     266F 002A     -- 146 sites
+        #     movea.l a3,a6         2C4B
+        #     jsr     -30(a6)
+        #
+        # 352 of the ~460 register-to-a6 transfers in those binaries are fed
+        # from the stack this way, which v8 already accepts when a6 is loaded
+        # from d16(a7) DIRECTLY -- this is the same value taking one more step.
+        # Tracked per register and cleared by any other write to it, so the
+        # window is the same bounded idiom the d0 case uses and no dataflow is
+        # being inferred across a call.
+        reg = (w >> 9) & 7
+        if (w & 0xF1C0) == 0x2040 and reg not in (6, 7):   # movea.l <ea>,aN
+            mode = w & 0x3F
+            kind = {0x39: 'abs.l', 0x38: 'abs.w', 0x2C: 'a4',
+                    0x2D: 'a5', 0x2F: 'a7'}.get(mode)
+            if kind and _fits(code, i, kind):
+                areg[reg], _ = _operand(code, i + 2, kind)
+            else:
+                areg[reg] = None
+            continue
+        if (w & 0xFFF8) == 0x2C48:                       # movea.l aN,a6
+            cur = areg[w & 7]
+            continue
         if w in A6_LOADS:
             if not _fits(code, i, A6_LOADS[w]):
                 cur = None
                 continue
             cur, _ = _operand(code, i + 2, A6_LOADS[w])
+            d0 = None
             continue
+        if (w & 0xFF00) == 0x2000 or (w & 0xF000) == 0x7000:
+            d0 = None          # any other write to d0 ends the idiom
         if w in (0x4EAE, 0x4EEE):    # jsr/jmp d16(a6) -- jmp is a tail call
             if cur is not None and cur in bases:
                 hits.append(s16(code, i + 2))
@@ -176,6 +255,40 @@ NAME_PCREL = 0x43FA
 NAME_ABS   = 0x43F9
 NAME_SMALL = (0x43EC, 0x43ED)
 
+# `lea` IS NOT THE ONLY WAY TO PUT AN ADDRESS IN a1, and only modelling it left
+# 433 binaries at NO_SOCKETBASE_STORE.  Over 100 sampled, the loads before an
+# OpenLibrary this scanner could not name were `movea.l #imm.l,a1` 118 times,
+# `movea.l d16(a4/a5),a1` 34 and `movea.l abs.l,a1` 16.  Each is the same
+# question as a lea form already handled -- an immediate or absolute operand
+# resolved through the relocation table, or a small-data displacement matched
+# against where the string sits -- so they resolve the same way.
+#
+# `movea.l d16(a7),a1` (30 sites) is NOT here: the address was pushed on the
+# stack by code this scanner does not follow, and guessing which value a frame
+# slot holds is how a false attribution gets made.
+MOVEA_ABS   = (0x2279, 0x227C)      # movea.l abs.l,a1 / movea.l #imm.l,a1
+MOVEA_SMALL = (0x226C, 0x226D)      # movea.l d16(a4),a1 / d16(a5),a1
+
+# WHAT IS LEFT IS NOT AN ADDRESSING MODE, AND ADDING MORE WILL NOT REACH IT.
+# Measured over 149 still-unresolved binaries, the instruction putting a name
+# in a1 at an OpenLibrary call was already-modelled `lea` 1,027 times -- those
+# are OTHER libraries, which is why they do not match -- against 126
+# `movea.l d16(a7),a1`.  That last one is a SHARED OPEN WRAPPER:
+#
+#     open_helper:  movea.l 4(a7),a1     ; the name, pushed by the caller
+#                   jsr     -552(a6)
+#                   rts
+#     ...           pea     name(pc)
+#                   jsr     open_helper
+#
+# and 195 of 235 name-leas sit more than 200 bytes from the nearest
+# OpenLibrary, which is what a different function looks like.  Resolving these
+# means finding the wrapper, finding its callers, and reading which one pushes
+# `bsdsocket.library` -- call-graph work, not a table entry.  Guessing that a
+# frame slot holds our name because some caller somewhere pushed it is how a
+# false attribution gets made, and an inflated count is worse than a missing
+# one.
+
 def _name_target(code, j, target_of, name_sites, name_offsets):
     """True when the lea at `j` addresses the bsdsocket.library string."""
     w = u16(code, j)
@@ -185,11 +298,16 @@ def _name_target(code, j, target_of, name_sites, name_offsets):
     if w == NAME_ABS:
         tgt = target_of.get(j + 2)
         return tgt is not None and (tgt, u32(code, j + 2)) in name_sites
-    if w in NAME_SMALL:
+    if w in NAME_SMALL or w in MOVEA_SMALL:
         # The base register is whatever hunk the small-data model points at;
         # matching the displacement against the string's offset in ANY hunk
         # settles it without having to work out which.
         return s16(code, j + 2) in name_offsets
+    if w in MOVEA_ABS:
+        # Same resolution as NAME_ABS: the operand is an offset within some
+        # hunk until the relocation table says which one.
+        tgt = target_of.get(j + 2)
+        return tgt is not None and (tgt, u32(code, j + 2)) in name_sites
     return False
 
 SOCKET_LVO = -30
@@ -215,14 +333,58 @@ def raw_socket_sites(code, bases):
     """
     n = 0
     cur = None
+    # SAME a6 TRACKING AS calls_for, so the same names must exist here.
+    # The idiom handling below is shared text between the two walks, and
+    # having it only initialised in one of them raised NameError: areg on
+    # the first binary scanned -- past the fixtures, because they exercise
+    # calls_for directly and never reach raw_socket_sites.
+    d0 = None
+    areg = [None] * 8
     for i in range(0, len(code) - 3, 2):
         w = u16(code, i)
+        if w == 0x2039 and _fits(code, i, 'abs.l'):      # move.l abs.l,d0
+            d0 = ('abs', u32(code, i + 2))
+            continue
+        if w == 0x2C40:                                  # movea.l d0,a6
+            cur = d0
+            continue
+
+        # ONE HOP THROUGH AN ADDRESS REGISTER, which is where the rest of
+        # BASE_BUT_NO_CALLS went.  The base is loaded into a2/a3/a5 and only
+        # then into a6:
+        #
+        #     movea.l 42(a7),a3     266F 002A     -- 146 sites
+        #     movea.l a3,a6         2C4B
+        #     jsr     -30(a6)
+        #
+        # 352 of the ~460 register-to-a6 transfers in those binaries are fed
+        # from the stack this way, which v8 already accepts when a6 is loaded
+        # from d16(a7) DIRECTLY -- this is the same value taking one more step.
+        # Tracked per register and cleared by any other write to it, so the
+        # window is the same bounded idiom the d0 case uses and no dataflow is
+        # being inferred across a call.
+        reg = (w >> 9) & 7
+        if (w & 0xF1C0) == 0x2040 and reg not in (6, 7):   # movea.l <ea>,aN
+            mode = w & 0x3F
+            kind = {0x39: 'abs.l', 0x38: 'abs.w', 0x2C: 'a4',
+                    0x2D: 'a5', 0x2F: 'a7'}.get(mode)
+            if kind and _fits(code, i, kind):
+                areg[reg], _ = _operand(code, i + 2, kind)
+            else:
+                areg[reg] = None
+            continue
+        if (w & 0xFFF8) == 0x2C48:                       # movea.l aN,a6
+            cur = areg[w & 7]
+            continue
         if w in A6_LOADS:
             if not _fits(code, i, A6_LOADS[w]):
                 cur = None
                 continue
             cur, _ = _operand(code, i + 2, A6_LOADS[w])
+            d0 = None
             continue
+        if (w & 0xFF00) == 0x2000 or (w & 0xF000) == 0x7000:
+            d0 = None          # any other write to d0 ends the idiom
         if w in (0x4EAE, 0x4EEE) and s16(code, i + 2) == SOCKET_LVO:
             if cur is not None and cur in bases:
                 lo = max(0, i - 24)
@@ -238,6 +400,25 @@ def raw_socket_sites(code, bases):
         if (w & 0xFFC0) == 0x2C40:
             cur = None
     return n
+
+# THE ixemul CLASS, WHICH THIS SCANNER STRUCTURALLY CANNOT SEE.
+#
+# GeekGadgets programs -- wget, ircd, pop3d, wserv, AmPOP3D and friends -- call
+# ixemul's C socket()/connect(), and `ixnet.library` opens bsdsocket.library on
+# their behalf.  The application binary never names bsdsocket and never touches
+# an LVO, so it is verdicted NO_BSDSOCKET_BINARY and is invisible here.  They
+# are recognisable by naming `ixemul.library` and carrying the BSD errno table
+# ("Can't send after socket shutdown"); 73 such executables in 16 of 600
+# sampled archives, so roughly 142 archives corpus-wide.
+#
+# IT IS NOT WORTH CHASING, for a reason that matters more than the count: the
+# vectors those programs need are whatever ixnet.library calls, not whatever
+# each program calls -- one binary, not 142.  And ixnet.library scans
+# DUAL_STACK_AS225, so it runs on AS225 socket.library or on ours
+# interchangeably and its LVO set mixes two tables.
+#
+# What this DOES mean is that "N binaries call vector X" is a floor, not a
+# census, for anything the GeekGadgets toolchain built.
 
 def scan(path):
     blob = open(path, 'rb').read()
