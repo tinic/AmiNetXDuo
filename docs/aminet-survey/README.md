@@ -211,3 +211,24 @@ Counts move as the survey runs; regenerate with
 | a static reference | is NOT runtime coverage; a harness candidate needs a recipe that actually exercises the calls |
 | a single vector | is often not separable -- `ReleaseCopyOfSocket` belongs to the inetd handoff family with `ObtainSocket`/`Dup2Socket`, and `sendmsg` is the NFS/9P layer.  Judge families, not vectors |
 | the 14,290-byte figure | a preliminary non-LTO ceiling, NOT a realizable saving; a shipping LTO micro build has to be measured |
+
+## What the unattributed rows actually are
+
+`NO_SOCKETBASE_STORE` was one bucket for four situations and only two of them
+are scanner limits, so it overstated the gap and hid the cases worth working
+on.  Every binary now carries a label saying what was OBSERVED:
+
+| verdict | n | what it means |
+|---|---|---|
+| `OK` / `OK+SOCK_RAW` | 833 | attributed |
+| `DUAL_STACK_AS225` | 76 | attributed, but the binary mixes our table with AS225's |
+| `NAMED_OPEN_BASE_UNKEYED` | 157 | our library IS opened; the base then goes into a heap struct or is passed to another function, so there is no stable location to key on |
+| `BASE_BUT_NO_CALLS` | 80 | base resolved, no call through it -- **and some of these are real**: AmFTP opens bsdsocket, reads `24(a0)` for the version, prints it and closes it |
+| `NAME_NEVER_AT_AN_OPEN` | 44 | the string is referenced, never within reach of an open: it is message text |
+| `NAME_UNREACHED` | 45 | nothing this scan can follow reaches the string.  NOT "unused" -- AmiPhone's copy sits in a string pool between `workbench.library` and `gadtools.library` |
+| `NAME_ONLY_VIA_DATA_POINTER` | 43 | only a relocated data pointer reaches it: consistent with a table-driven open loop |
+
+The two that would pay to work next are `NAMED_OPEN_BASE_UNKEYED` (157) and
+`NAME_ONLY_VIA_DATA_POINTER` (43).  Both need interprocedural analysis: the
+first has to follow a base handed to a callee, the second has to find the init
+loop that walks a `{name, base}` table.  Neither is a missing table row.

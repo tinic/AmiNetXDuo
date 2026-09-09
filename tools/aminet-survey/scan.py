@@ -734,7 +734,44 @@ def scan(path):
     hits = list(sites.values())
     offs = sorted(set(hits), reverse=True)
     if not base_keys and not offs:
-        return ('NO_SOCKETBASE_STORE opens=%d' % opens, [], 0)
+        # NO_SOCKETBASE_STORE was one bucket for four different situations, and
+        # only two of them are scanner limits.  A program that prints "cannot
+        # open bsdsocket.library" contains the string, references it, and has no
+        # base to find -- filing that as a failed scan overstates the gap and
+        # hides the cases worth working on.  These labels say what was OBSERVED.
+        if named:
+            # We watched OUR library get opened and lost the base afterwards:
+            # it goes into a heap struct or is handed to another function.
+            return ('NAMED_OPEN_BASE_UNKEYED opens=%d' % opens, [], 0)
+        ptr = False
+        for _i, _t, _o, pay, rel in hs:
+            for tgt, offs2 in rel.items():
+                for o in offs2:
+                    if o + 4 <= len(pay) and (tgt, struct.unpack_from('>I', pay, o)[0]) in name_sites:
+                        ptr = True
+        ref = False
+        for idx, code in codes.items():
+            ctx = ctxs[idx]
+            for i in range(0, len(code) - 3, 2):
+                w = u16(code, i)
+                if not ((w & 0xF1C0) == 0x41C0 or (w & 0xFFC0) == 0x4840
+                        or (w & 0xF000) == 0x2000):
+                    continue
+                k, v2, _l = dataflow.ea(code, i + 2, (w >> 3) & 7, w & 7)
+                if k and dataflow.is_name(code, ctx, k, v2, i + 2):
+                    ref = True
+                    break
+            if ref:
+                break
+        if ref:
+            return ('NAME_NEVER_AT_AN_OPEN opens=%d' % opens, [], 0)
+        if ptr:
+            return ('NAME_ONLY_VIA_DATA_POINTER opens=%d' % opens, [], 0)
+        # NOT "the program does not use it".  AmiPhone's copy sits in a string
+        # POOL between workbench.library and gadtools.library, reachable only
+        # a4-relative through a bias this binary gave no way to derive.  The
+        # label says what the scan could reach, which is all it knows.
+        return ('NAME_UNREACHED opens=%d' % opens, [], 0)
     if not offs:
         return ('BASE_BUT_NO_CALLS', [], 0)
     # Past the end of the table is not our base.  The cut is -900, the table's
