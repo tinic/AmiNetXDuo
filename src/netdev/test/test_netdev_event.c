@@ -457,6 +457,36 @@ static void test_payload(void)
     expect_ptr("opener opened RAW: the whole frame", p, frame);
     expect_u32("opener RAW: length", plen, 64);
     opener_a.op_Raw = 0;
+
+    /*
+     * THE BOUNDARY, which every case above steps over: a frame of EXACTLY the
+     * header is a legal thing to be handed and leaves no payload at all.
+     * `*plen = len - NETDEV_HDR_LEN` is an unsigned subtraction into a ULONG,
+     * so one byte less than this wraps to about four billion and that length
+     * goes straight to the opener's CopyToBuff.
+     *
+     * netdev_device.c:468 is what stops it -- `if (len < NETDEV_HDR_LEN)`,
+     * BadData++ and S2EVENT_ERROR|S2EVENT_RX, before netdev_hand_over() is
+     * reached -- and that guard lives in a file no host can compile.  So this
+     * pins the two things that ARE reachable from here: the boundary is exact,
+     * and a raw request has no subtraction to underflow whatever its length.
+     */
+    io.ios2_Req.io_Flags = 0;
+    p = netdev_payload(&opener_a, &io, frame, NETDEV_HDR_LEN, &plen);
+    expect_ptr("a header-only frame: payload starts past the header",
+               p, frame + NETDEV_HDR_LEN);
+    expect_u32("and its length is zero, not a wrap", plen, 0);
+
+    p = netdev_payload(&opener_a, &io, frame, NETDEV_HDR_LEN + 1u, &plen);
+    expect_u32("one byte of payload is one byte", plen, 1);
+
+    /* Raw takes the frame whole, so the lengths a cooked read must never be
+       given are harmless here -- and that asymmetry is worth stating. */
+    io.ios2_Req.io_Flags = SANA2IOF_RAW;
+    p = netdev_payload(&opener_a, &io, frame, 1, &plen);
+    expect_ptr("raw, one byte: the frame itself", p, frame);
+    expect_u32("raw, one byte: length 1", plen, 1);
+    io.ios2_Req.io_Flags = 0;
 }
 
 /* Accept, reject, and the free path for an opener that installed no hook. */
