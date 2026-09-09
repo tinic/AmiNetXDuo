@@ -24,7 +24,7 @@ CI="tools/ci.sh"
 
 # stage:reason -- a stage here is deliberately invoked by no workflow.
 ALLOW="
-console:tier 2, needs a second host with python3 -- NOT a display, that half was wrong: only the RTG arm wants one and run-console.sh starts its own Xvfb, the other four groups run SDL_VIDEODRIVER=dummy. Still allowlisted because it has never been RUN, not because it cannot be; docs/BACKLOG.md
+console:tier 2, needs a second host with python3 -- NOT a display, that half was wrong: only the RTG arm wants one and run-console.sh starts its own Xvfb, the other four groups run SDL_VIDEODRIVER=dummy. IT HAS NOW BEEN RUN, 2026-09-09: run-console.sh -c playhouse2 -C ham6 -m A1200 on playhouse3 gave CONSOLE_RC=0 RESULT=PASS arms_run=1 ham6_pixels_mismatched=0, so the reason this sits here is no longer 'unproven' -- it is that no workflow calls it. Wiring it into emulator.yml removes this entry; docs/BACKLOG.md
 submodules:preamble, called unconditionally by ci.sh itself
 toolchain:preamble, called by ci.sh when AMIGA_TOOLCHAIN_ROOT is unset
 "
