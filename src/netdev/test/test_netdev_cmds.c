@@ -643,9 +643,10 @@ static void h_devicequery_honours_sizeavailable(void)
             {
                 char what[80];
 
-                sprintf(what, "S2_DEVICEQUERY wrote at offset %lu of %lu"
-                              " the caller offered",
-                        (unsigned long)i, (unsigned long)want);
+                snprintf(what, sizeof(what),
+                         "S2_DEVICEQUERY wrote at offset %lu of %lu"
+                         " the caller offered",
+                         (unsigned long)i, (unsigned long)want);
                 expect(0, what);
                 break;
             }
@@ -822,8 +823,9 @@ static void j_the_advertised_list_is_the_real_one(void)
 
         netdev_perform(&opener, &io);
 
-        sprintf(what, "advertised command 0x%04x is not refused as unknown",
-                (unsigned)list[n]);
+        snprintf(what, sizeof(what),
+                 "advertised command 0x%04x is not refused as unknown",
+                 (unsigned)list[n]);
         expect(!(last_err == (LONG)IOERR_NOCMD &&
                  last_wire == (ULONG)S2WERR_GENERIC_ERROR), what);
     }
