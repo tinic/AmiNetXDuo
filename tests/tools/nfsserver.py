@@ -102,7 +102,11 @@ class Server:
         self.export = export
         self.h = Handles()
         self.quiet = quiet
-        self.creds_logged = False
+        # ONE CREDENTIAL PER PROGRAM, because they are not the same one.  An
+        # NFS client sends MNT as root and then the FILE calls as the user it
+        # was told to be -- so a single logged credential is always uid 0 and
+        # says nothing about whether usergroup.library looked the USER up.
+        self.creds_logged = set()
         self.counts = {}
 
     def log(self, s):
@@ -113,7 +117,7 @@ class Server:
         self.counts[k] = self.counts.get(k, 0) + 1
 
     # ---------------------------------------------------------- credentials
-    def parse_cred(self, flavour, body):
+    def parse_cred(self, flavour, body, prog):
         if flavour != 1:
             self.bump("auth_null" if flavour == 0 else "auth_other")
             return None
@@ -128,11 +132,12 @@ class Server:
         except Exception:
             self.bump("cred_unparseable")
             return None
-        if not self.creds_logged:
-            self.log("cred_flavour=AUTH_UNIX machine=%s uid=%d gid=%d ngids=%d "
-                     "gids=%s" % (name, uid, gid, len(gids),
-                                  ",".join(str(g) for g in gids) or "-"))
-            self.creds_logged = True
+        which = {MNT_PROG: "MNT", NFS_PROG: "NFS"}.get(prog, str(prog))
+        if which not in self.creds_logged:
+            self.log("cred_flavour=AUTH_UNIX prog=%s machine=%s uid=%d gid=%d "
+                     "ngids=%d gids=%s" % (which, name, uid, gid, len(gids),
+                                          ",".join(str(g) for g in gids) or "-"))
+            self.creds_logged.add(which)
         return uid, gid, gids
 
     # ------------------------------------------------------------ dispatch
@@ -148,7 +153,7 @@ class Server:
         off += 8 + cl + pad4(cl)
         vf, vl = struct.unpack_from(">II", pkt, off)
         off += 8 + vl + pad4(vl)
-        self.parse_cred(cf, cred)
+        self.parse_cred(cf, cred, prog)
 
         ok = struct.pack(">IIIIII", xid, 1, 0, 0, 0, 0)
         args = pkt[off:]

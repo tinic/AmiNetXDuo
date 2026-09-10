@@ -2572,8 +2572,9 @@ stage_bridged() {
             0) note "PASS  ch_nfsc mounted NFS: and the file read back matched" ;;
             2) fail "nfsmount: an ingredient is missing -- the handler in the" \
                     "asset store, a Workbench Assign/List/Type, or the peer" ; bad=1 ;;
-            *) fail "nfsmount: the status line names the step -- assign," \
-                    "iface, mount, list or type" ; bad=1 ;;
+            *) fail "nfsmount: the status line names the step it stopped at" \
+                    "-- boot, assign, addnet, nfstab, mount, list, type or" \
+                    "read -- and whether the peer saw the USER's uid" ; bad=1 ;;
         esac
     fi
 
