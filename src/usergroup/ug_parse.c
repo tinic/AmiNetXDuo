@@ -53,7 +53,7 @@ static char *ug_next_line(char **cursor)
     return line;
 }
 
-/* In-place ':' or ',' split. Returns NULL once the line is exhausted. */
+/* In-place field or member split. Returns NULL once the line is exhausted. */
 static char *ug_next_field(char **cursor, char sep)
 {
     char *s = *cursor;
@@ -84,6 +84,25 @@ static char *ug_field(char **cursor, char sep)
     char *f = ug_next_field(cursor, sep);
 
     return (f != NULL) ? f : ug_def_empty;
+}
+
+/*
+ * DEVS:Internet files traditionally use Unix ':' records.  AmiTCP 4's
+ * shipped db/passwd and db/group examples use '|' instead, because Amiga
+ * paths routinely contain ':'.  Select per record so either database can be
+ * used, including a hand-migrated file under either assign.
+ */
+static char ug_record_separator(const char *line)
+{
+    const char *p;
+
+    for (p = line; *p != '\0'; p++)
+    {
+        if (*p == '|')
+            return '|';
+    }
+
+    return ':';
 }
 
 /*
@@ -154,22 +173,24 @@ void ug_db_parse_passwd(struct UgDatabase *db, char *text)
         struct ug_passwd *pw;
         char *field = line;
         char *name;
+        char sep;
 
         if (*line == '\0' || *line == '#')
             continue;
 
-        name = ug_field(&field, ':');
+        sep = ug_record_separator(line);
+        name = ug_field(&field, sep);
         if (*name == '\0')
             continue;
 
         pw = &db->pw[db->pw_count];
         pw->pw_name   = name;
-        pw->pw_passwd = ug_field(&field, ':');
-        pw->pw_uid    = ug_atol(ug_field(&field, ':'));
-        pw->pw_gid    = ug_atol(ug_field(&field, ':'));
-        pw->pw_gecos  = ug_field(&field, ':');
-        pw->pw_dir    = ug_field(&field, ':');
-        pw->pw_shell  = ug_field(&field, ':');
+        pw->pw_passwd = ug_field(&field, sep);
+        pw->pw_uid    = ug_atol(ug_field(&field, sep));
+        pw->pw_gid    = ug_atol(ug_field(&field, sep));
+        pw->pw_gecos  = ug_field(&field, sep);
+        pw->pw_dir    = ug_field(&field, sep);
+        pw->pw_shell  = ug_field(&field, sep);
 
         if (*pw->pw_dir == '\0')
             pw->pw_dir = ug_def_dir;
@@ -235,18 +256,20 @@ void ug_db_parse_group(struct UgDatabase *db, char *text, ULONG len)
         char *field = line;
         char *name;
         char *members;
+        char sep;
 
         if (*line == '\0' || *line == '#')
             continue;
 
-        name = ug_field(&field, ':');
+        sep = ug_record_separator(line);
+        name = ug_field(&field, sep);
         if (*name == '\0')
             continue;
 
         gr = &db->gr[db->gr_count];
         gr->gr_name   = name;
-        gr->gr_passwd = ug_field(&field, ':');
-        gr->gr_gid    = ug_atol(ug_field(&field, ':'));
+        gr->gr_passwd = ug_field(&field, sep);
+        gr->gr_gid    = ug_atol(ug_field(&field, sep));
         gr->gr_mem    = &db->gr_members[slot];
 
         members = field;    /* the whole remainder is the comma list */

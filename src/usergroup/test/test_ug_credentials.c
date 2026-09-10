@@ -170,7 +170,8 @@ static void test_unknown_task_is_not_null(void)
     CHECK(cred != NULL);                        /* the v0.26.3 defect */
     CHECK(cred == &base.ug_CredResult);         /* a snapshot, not ug_Cred */
     CHECK(cred != &base.ug_Cred);
-    CHECK(cred->cr_session == as_session(&stranger));
+    CHECK(cred->cr_session == as_session(&me));
+    CHECK(cred->cr_umask == 0022);
     CHECK(cred->cr_ruid == base.ug_Cred.cr_ruid);
     CHECK(cred->cr_euid == base.ug_Cred.cr_euid);
     CHECK(base.ug_Err == 0);                    /* not UG_ESRCH any more */
@@ -218,7 +219,7 @@ static void test_stale_task_pointer_is_not_dereferenced(void)
     cred = ugl_getcredentials(&base, unreadable);
 
     CHECK(cred != NULL);
-    CHECK(cred->cr_session == as_session(unreadable));
+    CHECK(cred->cr_session == as_session(&me));
     CHECK(shim_forbid_depth == 0);
 
     munmap(page, (size_t)pagesize);
@@ -288,7 +289,7 @@ static void test_empty_child_list(void)
     cred = ugl_getcredentials(&base, &stranger);
 
     CHECK(cred != NULL);
-    CHECK(cred->cr_session == as_session(&stranger));
+    CHECK(cred->cr_session == as_session(&me));
     CHECK(shim_forbid_depth == 0);
 }
 

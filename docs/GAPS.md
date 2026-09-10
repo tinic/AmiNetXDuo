@@ -88,7 +88,7 @@ answers are defensible for each — implement it, or refuse it in one line.
 
 | File | Note |
 |---|---|
-| `users`, `groups` | **We read `passwd` and `group` instead** (`ug_db.c:31-40`), which are AmiTCP's names. Roadshow's manual §2675 and §3371 call them `users` and `groups`, and says each "uses a different format" from the Unix file — so this is two questions, the name and whether the contents would parse if renamed. Neither has been checked against a real Roadshow install, and `README.md` claims we read the same configuration files Roadshow does |
+| `users`, `groups` | **We read `passwd` and `group` instead** (`ug_db.c:32-41`), which are AmiTCP's names. AmiTCP 4's native pipe-delimited `passwd` and `group` records are supported. Roadshow's manual §2675 and §3371 instead call the files `users` and `groups` and say each uses a different format from the Unix file; their record format and ReadArgs behavior still have not been checked against a real Roadshow install, although `README.md` claims we read the same configuration files Roadshow does |
 | `rpc` | RPC program numbers, `getrpcbyname()`. Niche |
 | `servers` | The inetd-style superserver table. Out of scope while we ship no daemons |
 

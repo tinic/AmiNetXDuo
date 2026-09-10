@@ -6,10 +6,11 @@
  * exactly one user, root, uid 0, gid 0, home SYS:, shell C:Shell, and one
  * group.
  *
- * If DEVS:Internet/passwd (or AmiTCP:db/passwd) does exist, it is parsed in
- * the ordinary /etc format and used instead. The read is deliberately
- * self-contained: src/config/ owns netdb parsing, but this must not depend on
- * it, and it must never pull in newlib stdio.
+ * If DEVS:Internet/passwd (or AmiTCP:db/passwd) does exist, it is used
+ * instead. Unix-style ':' records and AmiTCP 4's native '|' records are both
+ * accepted; the latter preserve Amiga paths such as SYS: inside a field. The
+ * read is deliberately self-contained: src/config/ owns netdb parsing, but
+ * this must not depend on it, and it must never pull in newlib stdio.
  *
  * The parsed tables are shared by every opener and immutable once built. Only
  * the iteration cursor and the returned record live in the per-opener base,

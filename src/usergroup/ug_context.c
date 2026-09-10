@@ -56,7 +56,10 @@ void ug_context_init(struct UserGroupBase *base)
     base->ug_Cred.cr_ruid     = 0;
     base->ug_Cred.cr_rgid     = 0;
     base->ug_Cred.cr_euid     = 0;
-    base->ug_Cred.cr_umask    = 0;
+    /* AmiTCP and Roadshow both start each credentials context at 022.  NFS
+       clients consume this field directly when the mount does not supply an
+       explicit UMASK, so zero is not an interchangeable default. */
+    base->ug_Cred.cr_umask    = 0022;
     base->ug_Cred.cr_ngroups  = 1;
     base->ug_Cred.cr_groups[0] = 0;
     base->ug_Cred.cr_session  = (LONG)(uintptr_t)self;
@@ -249,8 +252,11 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
         /* Do not dereference `task`: the caller owns that pointer and a stale
            one must not turn compatibility fallback into an Enforcer hit. */
         ug_resolve_login(base);
+        /* There is one protection domain on this system.  Roadshow returns
+           the caller's credentials unchanged for a task which has no library
+           opener; it does not manufacture a session id from an arbitrary
+           Task pointer. */
         base->ug_CredResult = base->ug_Cred;
-        base->ug_CredResult.cr_session = (LONG)(uintptr_t)task;
         result = &base->ug_CredResult;
     }
 

@@ -410,7 +410,8 @@ static void test_umask_returns_previous(void)
 {
     world_reset();
 
-    CHECK(ugl_umask(&base, 022) == 0);
+    base.ug_Cred.cr_umask = 0022;
+    CHECK(ugl_umask(&base, 022) == 022);
     CHECK(ugl_getumask(&base) == 022);
     CHECK(ugl_umask(&base, 077) == 022);
     CHECK(ugl_getumask(&base) == 077);

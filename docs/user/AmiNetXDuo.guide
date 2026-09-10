@@ -2500,8 +2500,9 @@
   all software.
 
   For anything else, it reads DEVS:Internet/passwd and
-  DEVS:Internet/group in the ordinary Unix format (AmiTCP:db/passwd and
-  AmiTCP:db/group are also read, for an existing AmiTCP installation).
+  DEVS:Internet/group. Both ordinary Unix colon-delimited records and
+  AmiTCP 4's native pipe-delimited records are accepted. AmiTCP:db/passwd
+  and AmiTCP:db/group are also read, for an existing AmiTCP installation.
 
   AmiNetXDuo never creates or changes AmiTCP:. That name belongs to an
   installed AmiTCP and to programs which keep compatibility data beneath

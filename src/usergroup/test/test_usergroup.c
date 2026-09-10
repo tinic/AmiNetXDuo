@@ -359,8 +359,8 @@ static void test_passwd_line_endings(void)
 {
     /*
      * No "SYS:" in a home directory field here on purpose: ':' is the field
-     * separator, so an AmigaOS path cannot survive one. The Roadshow file has
-     * the same property. An empty field and the fallback is how it is written.
+     * separator, so an AmigaOS path cannot survive one. An empty field and
+     * the fallback is how a Unix-style record expresses the default here.
      */
     static const char body[] =
         "root:*:0:0:AmigaOS user::\n"
@@ -396,6 +396,36 @@ static void test_passwd_line_endings(void)
         free_db(db);
         free(text);
     }
+}
+
+static void test_amitcp_pipe_records(void)
+{
+    struct UgDatabase *pw;
+    struct UgDatabase *gr;
+
+    printf("AmiTCP 4 pipe records\n");
+
+    pw = load_passwd("root|*|0|0|The Judge|SYS:|shell\n");
+    CHECK(pw->pw_count == 1);
+    CHECK_STR(pw->pw[0].pw_name, "root");
+    CHECK(pw->pw[0].pw_uid == 0);
+    CHECK(pw->pw[0].pw_gid == 0);
+    CHECK_STR(pw->pw[0].pw_gecos, "The Judge");
+    CHECK_STR(pw->pw[0].pw_dir, "SYS:");
+    CHECK_STR(pw->pw[0].pw_shell, "shell");
+    free_db(pw);
+
+    gr = load_group("wheel|*|0|root,jane\nusers|*|100|jane\n");
+    CHECK(gr->gr_count == 2);
+    CHECK_STR(gr->gr[0].gr_name, "wheel");
+    CHECK(gr->gr[0].gr_gid == 0);
+    CHECK(member_count(gr->gr[0].gr_mem) == 2);
+    CHECK_STR(gr->gr[0].gr_mem[0], "root");
+    CHECK_STR(gr->gr[0].gr_mem[1], "jane");
+    CHECK_STR(gr->gr[1].gr_name, "users");
+    CHECK(gr->gr[1].gr_gid == 100);
+    CHECK_STR(gr->gr[1].gr_mem[0], "jane");
+    free_db(gr);
 }
 
 static void test_passwd_edges(void)
@@ -449,6 +479,7 @@ int main(int argc, char **argv)
     test_group_cr_only_members();
     test_group_edges();
     test_passwd_line_endings();
+    test_amitcp_pipe_records();
     test_passwd_edges();
 
     CHECK(ami_alloc_count() == 0);

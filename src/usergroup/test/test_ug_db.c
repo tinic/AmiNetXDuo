@@ -247,7 +247,8 @@ static void test_devs_file_wins(void)
    reason two paths are listed. */
 static void test_amitcp_fallback(void)
 {
-    static const char amitcp[] = "root::0:0:FromAmiTCP:SYS:\n";
+    /* AmiTCP 4 deliberately uses '|' so Amiga paths can contain ':'. */
+    static const char amitcp[] = "root|*|0|0|FromAmiTCP|SYS:|shell\n";
     struct ug_passwd *pw;
 
     world_reset();
@@ -259,6 +260,36 @@ static void test_amitcp_fallback(void)
     if (pw != NULL)
         CHECK_STR(pw->pw_gecos, "FromAmiTCP");
     CHECK(shim_dos_opens == 2);             /* DEVS: missed, AmiTCP: hit */
+    CHECK(shim_dos_closes == 1);
+
+    world_free();
+}
+
+static void test_amitcp_group_fallback(void)
+{
+    static const char amitcp[] =
+        "wheel|*|0|root\n"
+        "staff|*|10|jane,root\n";
+    struct ug_group *gr;
+
+    world_reset();
+    shim_dos_add_file("AmiTCP:db/group", amitcp,
+                      (long)sizeof(amitcp) - 1);
+
+    gr = ugl_getgrnam(&base, (STRPTR)"staff");
+    CHECK(gr != NULL);
+    if (gr != NULL)
+    {
+        CHECK(gr->gr_gid == 10);
+        CHECK(gr->gr_mem != NULL);
+        if (gr->gr_mem != NULL)
+        {
+            CHECK_STR(gr->gr_mem[0], "jane");
+            CHECK_STR(gr->gr_mem[1], "root");
+            CHECK(gr->gr_mem[2] == NULL);
+        }
+    }
+    CHECK(shim_dos_opens == 2);
     CHECK(shim_dos_closes == 1);
 
     world_free();
@@ -395,6 +426,7 @@ int main(void)
     test_unknown_uid_and_name();
     test_devs_file_wins();
     test_amitcp_fallback();
+    test_amitcp_group_fallback();
     test_read_once();
     test_result_is_the_openers_copy();
     test_oversize_file_ignored();
