@@ -71,6 +71,9 @@ case "$BUILD" in /*) ;; *) BUILD="$ROOT/${BUILD#./}" ;; esac
 TOOLS="$BUILD/src/tools"
 PROBE="$BUILD/tests/tools/NfsProbe"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
+# The library this harness exists to exercise.  Staging bsdsocket
+# and not this one gets "no usergroup.library" and rc=20.
+UG="$BUILD/src/usergroup/usergroup.library"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-nfsprobe}"
 TAG="$AMINETXDUO_RUN_TAG"
@@ -80,7 +83,7 @@ OUT="$ROOT/build/nfsprobe-$TAG"
 
 # --------------------------------------------------------------- preflight ---
 
-for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$BSD"; do
+for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$PROBE" "$BSD" "$UG"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -151,6 +154,7 @@ fi
 sana2_stage "$BOARD" "$STAGE/devs"
 
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
+cp "$UG"    "$STAGE/libs/usergroup.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$PROBE" "$STAGE/NfsProbe"
 
@@ -212,8 +216,8 @@ MOUNT=none
 LOOKUP=none
 READ=none
 RESULT=none
-UID=none
-GID=none
+CRED_UID=none
+CRED_GID=none
 NGROUPS=none
 
 if [ -f "$REPORT" ]; then
@@ -235,8 +239,8 @@ if [ -f "$REPORT" ]; then
     grep -q '^lookup=ok'        "$REPORT" && LOOKUP=ok
     grep -q '^read=ok'          "$REPORT" && READ=ok
     grep -q '^RESULT=PASS'      "$REPORT" && RESULT=PASS
-    UID=$(sed -n 's/^credentials=ok uid=\([0-9-]*\).*/\1/p' "$REPORT" | head -1)
-    GID=$(sed -n 's/^credentials=ok uid=[0-9-]* gid=\([0-9-]*\).*/\1/p' "$REPORT" | head -1)
+    CRED_UID=$(sed -n 's/^credentials=ok uid=\([0-9-]*\).*/\1/p' "$REPORT" | head -1)
+    CRED_GID=$(sed -n 's/^credentials=ok uid=[0-9-]* gid=\([0-9-]*\).*/\1/p' "$REPORT" | head -1)
     NGROUPS=$(sed -n 's/.*ngroups=\([0-9-]*\).*/\1/p' "$REPORT" | head -1)
 fi
 
@@ -244,19 +248,30 @@ fi
 # the server seeing uid 0 are different facts, and an XDR that encodes the
 # cred body at the wrong offset satisfies the first and not the second.
 PEER_CRED=$(sed -n 's/^cred_flavour=//p' "$OUT/peer.out" 2>/dev/null | head -1)
-PEER_SEEN=$(sed -n 's/^nfspeer_seen=//p' "$OUT/peer.out" 2>/dev/null | head -1)
-PEER_AUTHUNIX=$(printf '%s' "${PEER_SEEN:-}" | sed -n 's/.*authunix:\([0-9]*\).*/\1/p')
-PEER_AUTHUNIX="${PEER_AUTHUNIX:-0}"
-PEER_MISMATCH=$(grep -c '^cred_.*_mismatch=' "$OUT/peer.out" 2>/dev/null || echo 0)
+# FROM THE LINE THE PEER PRINTS WHEN THE CREDENTIALS ARRIVE, not from its
+# end-of-run summary: cleanup() kills the responder, so `nfspeer_seen=` is
+# usually never written and reading the count from it scored a run where the
+# peer had plainly parsed AUTH_UNIX as peer_authunix=0.
+# `|| true`, NOT `|| echo 0`.  grep -c PRINTS 0 and EXITS 1 when it matches
+# nothing, so `|| echo 0` appends a second zero and the variable becomes the
+# two-line string "0\n0" -- which is not -eq 0, and scored a run where every
+# step passed as a failure.
+PEER_AUTHUNIX=$(grep -c '^cred_flavour=AUTH_UNIX' "$OUT/peer.out" 2>/dev/null || true)
+PEER_CALLS=$(grep -cE '^(mnt_path|lookup_name|read_off)=' "$OUT/peer.out" 2>/dev/null || true)
+PEER_MISMATCH=$(grep -c '^cred_.*_mismatch=' "$OUT/peer.out" 2>/dev/null || true)
+PEER_AUTHUNIX=${PEER_AUTHUNIX:-0}
+PEER_CALLS=${PEER_CALLS:-0}
+PEER_MISMATCH=${PEER_MISMATCH:-0}
 
 [ "$RESULT" = PASS ] && [ "$CREDS" = ok ] && [ "$RESV" = ok ] &&
     [ "$MOUNT" = ok ] && [ "$LOOKUP" = ok ] && [ "$READ" = ok ] &&
-    [ "$PEER_AUTHUNIX" -gt 0 ] && [ "$PEER_MISMATCH" -eq 0 ] && STATUS=pass
+    [ "$PEER_AUTHUNIX" -gt 0 ] && [ "$PEER_CALLS" -ge 3 ] &&
+    [ "$PEER_MISMATCH" -eq 0 ] && STATUS=pass
 
-printf 'nfsprobe: status=%s run_rc=%s iface_rc=%s creds=%s uid=%s gid=%s ngroups=%s resv=%s mount=%s lookup=%s read=%s peer_authunix=%s peer_mismatch=%s addr=%s port=%s out=%s\n' \
-       "$STATUS" "$RUN_RC" "$IFACE_RC" "$CREDS" "${UID:-none}" "${GID:-none}" \
+printf 'nfsprobe: status=%s result=%s run_rc=%s iface_rc=%s creds=%s uid=%s gid=%s ngroups=%s resv=%s mount=%s lookup=%s read=%s peer_authunix=%s peer_calls=%s peer_mismatch=%s addr=%s port=%s out=%s\n' \
+       "$STATUS" "$RESULT" "$RUN_RC" "$IFACE_RC" "$CREDS" "${CRED_UID:-none}" "${CRED_GID:-none}" \
        "${NGROUPS:-none}" "$RESV" "$MOUNT" "$LOOKUP" "$READ" \
-       "$PEER_AUTHUNIX" "$PEER_MISMATCH" "$ADDRESS" "$PORT" "$OUT"
+       "$PEER_AUTHUNIX" "$PEER_CALLS" "$PEER_MISMATCH" "$ADDRESS" "$PORT" "$OUT"
 [ -n "${PEER_CRED:-}" ] && printf 'nfsprobe: peer saw %s\n' "$PEER_CRED"
 
 [ "$STATUS" = pass ] || exit 1

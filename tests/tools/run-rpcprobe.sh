@@ -229,8 +229,14 @@ if [ -f "$REPORT" ]; then
               "$REPORT")
 fi
 
-PEER_CALLS=$(grep -c '^peer_call ' "$OUT/peer.out" 2>/dev/null || echo 0)
-PEER_REPLIES=$(grep -c '^peer_reply ' "$OUT/peer.out" 2>/dev/null || echo 0)
+# `|| true`, not `|| echo 0`: grep -c PRINTS 0 and EXITS 1 on no match, so
+# `|| echo 0` makes the variable the two-line string "0\n0" and the printf
+# below breaks across lines.  tools/emurun.sh:85 and
+# install/test/run-workbench.sh:729 already say this.
+PEER_CALLS=$(grep -c '^peer_call ' "$OUT/peer.out" 2>/dev/null || true)
+PEER_REPLIES=$(grep -c '^peer_reply ' "$OUT/peer.out" 2>/dev/null || true)
+PEER_CALLS=${PEER_CALLS:-0}
+PEER_REPLIES=${PEER_REPLIES:-0}
 
 # THE RESPONDER'S OWN COUNT IS WHAT SEPARATES "we never sent" FROM "the reply
 # never came back".  Without it a failing arm cannot tell those apart, and they

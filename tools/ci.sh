@@ -2524,6 +2524,32 @@ stage_bridged() {
         esac
     fi
 
+    # AND THE HALF RpcProbe DOES NOT REACH.  It proves a portmap reply arrives.
+    # This proves the sequence that follows can be built, sent from a reserved
+    # port, understood and its bytes matched -- and, the reason it exists, that
+    # AUTH_UNIX credentials come out of usergroup.library and reach a server
+    # that reads them.  ch_nfsc could not get credentials out of that library
+    # in 0.26.5 and no other harness makes a guest produce any.
+    printf '\n-- an NFS sequence with credentials: GETPORT, MNT, LOOKUP, READ\n'
+    if [ -z "${AMINETXDUO_FITZ_PEER:-}" ]; then
+        skip "nfsprobe: AMINETXDUO_FITZ_PEER is not set, so there is no third" \
+             "machine to serve the mount.  The credential path is unproven on" \
+             "this runner."
+    else
+        rc=0
+        "$ROOT/tests/tools/run-nfsprobe.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_FITZ_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  mounted, looked up and read a file back byte for" \
+                    "byte, with AUTH_UNIX credentials the server parsed" ;;
+            2) fail "nfsprobe: an ingredient is missing, or the guest address" \
+                    "is taken -- the harness names which" ; bad=1 ;;
+            *) fail "nfsprobe: the status line names the step that stopped --" \
+                    "creds, resv, mount, lookup or read" ; bad=1 ;;
+        esac
+    fi
+
     printf '\n-- TCP: is an AmigaDOS device, and stock commands use it\n'
     if [ -z "${AMINETXDUO_PEER:-}" ]; then
         skip "tcphandler: AMINETXDUO_PEER is not set, so there is no third" \
