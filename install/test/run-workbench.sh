@@ -88,14 +88,40 @@ if [ "$STATIC" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
 fi
 
 # -p takes a name, not a gadget number: the number is this file's business.
-# "minimal" is the second option of the two-option stack page, which is the
-# only askchoice in the script with two options -- the card question has nine.
+# The stack page is found by its OPTION COUNT (DRIVE_PICK_OPTIONS in
+# installdrive.c) and then by gadget id, and the option gadgets are numbered
+# from 1 up in the order the (choices ...) list gives them.
+#
+# IT WAS A TWO-OPTION PAGE AND IT IS A THREE-OPTION PAGE NOW.  Adding the micro
+# stack moved it, so the old "2:" specs no longer match any page and a -p run
+# would silently take the default -- the vacuous pass this file exists not to
+# produce.  The count and the ids move together, which is why they are one
+# string and not two settings.
 PICK_SPEC=""
 case "$PICK" in
 "")        ;;
-minimal)   PICK_SPEC="2:2" ;;
-full)      PICK_SPEC="2:3" ;;
-*)         echo "-p takes minimal or full, not \"$PICK\"" >&2; exit 2 ;;
+# options:gadget-id:skip.
+#
+# The ids run FORWARD from 2 in (choices ...) order, which is what
+# installdrive.c's own header says: "the options are numbered from 2 upward in
+# the order the script lists them".  So on the three-option stack page 2 is
+# "Everything", 3 is "Minimal" and 4 is "Micro".
+#
+# AND TWO EARLIER PAGES ALSO CARRY THREE OPTIONS, so every spec skips two.
+# Measured, not guessed: with skip 1 the pick landed on a page whose ids are
+# also 4/3/2 and the stack came out full; with skip 2 it lands on the stack
+# page and gadget 4 installs micro (158,472 bytes on the disk).  A page is
+# recognised by its option COUNT and that does not identify it, which is the
+# whole reason this needs a skip at all.
+#
+# AND ONE EARLIER PAGE ALSO HAS THREE OPTIONS: the Installer's own user-level
+# page.  A page is recognised by its option COUNT, so every spec here skips
+# that one.  Without the skip the driver picks there and the stack page takes
+# its default, which asks for micro and installs full.
+full)      PICK_SPEC="3:2:2" ;;
+minimal)   PICK_SPEC="3:3:2" ;;
+micro)     PICK_SPEC="3:4:2" ;;
+*)         echo "-p takes full, minimal or micro, not \"$PICK\"" >&2; exit 2 ;;
 esac
 
 # It needs a level for the same reason -H does: at NOVICE the page is never
@@ -505,19 +531,28 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 # $1 names the binary, $2 is how many times it runs the Installer, $3 is the
 # label of the yes/no button to press instead of the first one (empty: press
 # the first, which is every question's default), $4 names an askchoice option
-# to select before Proceed as "<options>:<gadget id>" (empty: take that page's
-# default).  See installdrive.c on why an option is named by number and not by
-# text: it carries none.
+# to select before Proceed as "<options>:<gadget id>:<pages to skip>" (empty:
+# take that page's default).  See installdrive.c on why an option is named by
+# number and not by text: it carries none.
+#
+# THE SKIP IS NOT OPTIONAL DECORATION.  A page is recognised by how many
+# options it has, and that does not identify it: the Installer's own user-level
+# page has three options and so does the stack page.  Without a skip the driver
+# picks on the user-level page and the stack page takes its default, which is a
+# -p run that tested nothing.
 build_driver() {
     local out="$1" runs="$2" label="$3" pick="${4:-}"
-    local opts=0 gid=0
+    local opts=0 gid=0 skip=0
     if [ -n "$pick" ]; then
         opts=${pick%%:*}
-        gid=${pick##*:}
+        local _rest=${pick#*:}
+        gid=${_rest%%:*}
+        case "$_rest" in *:*) skip=${_rest##*:} ;; esac
     fi
     "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
            -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
-           -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" -I"$NDK" \
+           -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" \
+           -DDRIVE_PICK_SKIP="$skip" -I"$NDK" \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -1045,15 +1080,30 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     _stack_bytes=$(_bytes_of "$_stack_real")
     _full_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library")
     _min_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library")
-    if [ -n "$_full_bytes" ] && [ "$_stack_bytes" = "$_full_bytes" ]; then
-        STACK_INSTALLED=full
-    fi
-    if [ -n "$_min_bytes" ] && [ "$_stack_bytes" = "$_min_bytes" ]; then
-        STACK_INSTALLED=minimal
-    fi
+    _micro_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/micro/bsdsocket.library")
+
+    # AMBIGUITY IS REPORTED, NOT RESOLVED.  This used to be three assignments
+    # in a row with the last one winning, so an archive whose drawers happened
+    # to hold the SAME library reported whichever was tested last -- and an
+    # archive built with AMINETXDUO_BUILD_MINIMAL pointing at the -b tree does
+    # exactly that.  A run then failed with "asked for the full stack and
+    # minimal was installed" and the archive, not the product, was the defect.
+    # Counting the matches first says which happened.
+    _matches=""
+    [ -n "$_full_bytes" ]  && [ "$_stack_bytes" = "$_full_bytes" ]  && _matches="$_matches full"
+    [ -n "$_min_bytes" ]   && [ "$_stack_bytes" = "$_min_bytes" ]   && _matches="$_matches minimal"
+    [ -n "$_micro_bytes" ] && [ "$_stack_bytes" = "$_micro_bytes" ] && _matches="$_matches micro"
+    set -- $_matches
+    case $# in
+        0) STACK_INSTALLED=unknown ;;
+        1) STACK_INSTALLED="$1" ;;
+        *) STACK_INSTALLED="ambiguous($(echo $_matches | tr ' ' ','))" ;;
+    esac
+
     echo "stack_installed=$STACK_INSTALLED bytes=$_stack_bytes"
     echo "stack_archive_full=${_full_bytes:-absent}"
     echo "stack_archive_minimal=${_min_bytes:-absent}"
+    echo "stack_archive_micro=${_micro_bytes:-absent}"
 else
     echo "stack_installed=none"
 fi
@@ -1061,6 +1111,7 @@ fi
 case "$PICK" in
 ""|full) WANT_STACK=full ;;
 minimal) WANT_STACK=minimal ;;
+micro)   WANT_STACK=micro ;;
 esac
 if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"

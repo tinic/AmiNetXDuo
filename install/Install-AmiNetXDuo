@@ -695,17 +695,28 @@
           "filter, encrypted (https:) connections, IPv4 multicast, the ARexx "
           "host and the TCP: handler. It is 124 KB smaller. On a 1 MB machine "
           "that is worth having. On a larger machine it is not.\n\n"
+          "The micro stack leaves out all of that AND DHCP, so it cannot ask "
+          "a router for an address -- you must give it a static one. It also "
+          "carries a single interface, no route or address-allocation calls, "
+          "and no netstat-style query vectors. It is smaller again by about "
+          "50 KB. Choose it only if you have measured your memory and know "
+          "the address you want.\n\n"
           "With the full stack, encrypted connections work on any processor. "
           "On a 68000 a first handshake takes a minute or two. A repeat "
           "connection to the same server takes less than a second.")
     ; 22 characters is the limit -- install/tools/checkscript.py enforces it,
     ; because a longer gadget is dropped from the page without a word.
     (choices "Everything"
-             "Minimal, no IPv6/TLS")
+             "Minimal, no IPv6/TLS"
+             "Micro, static IP only")
     (default MINPICK)))
 
-; MINPICK 0 is the full stack at the top of Libs:, 1 is the minimal drawer.
+; MINPICK 0 is the full stack at the top of Libs:, 1 is the minimal drawer,
+; 2 is the micro drawer.  THE PAGE HAS THREE OPTIONS NOW, which is not only a
+; user-visible change: install/test/run-workbench.sh identifies this page by
+; its option COUNT (DRIVE_PICK_OPTIONS), so its -p specs move with it.
 (if (= MINPICK 1) (set S_LIBS (tackon S_LIBSBASE "minimal")))
+(if (= MINPICK 2) (set S_LIBS (tackon S_LIBSBASE "micro")))
 
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
     (abort "This archive has no " S_LIBS " with a bsdsocket.library in it.\n\n"

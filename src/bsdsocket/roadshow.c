@@ -97,6 +97,16 @@ struct List *bsd_ObtainDomainNameServerList(
         count++;
     }
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * THE ONLY UNGUARDED IPv6 TEXT CALL IN THE LIBRARY, and it linked the whole
+     * of src/config/config_text6.c into a build with no IPv6 in it.
+     * nameserver6_count is always 0 there, so this loop never ran -- but the
+     * CALL is compiled either way, and a call is a reference, and a reference
+     * pulls the archive member.  Every other use of the ip6 text helpers
+     * (inet.c:406,463 and addrinfo.c:397,719) already sits behind a guard;
+     * this one did not.
+     */
     for (i = 0; i < out->bdl_Resolver.nameserver6_count &&
                 i < (UWORD)AMI_CFG_MAX_NAMESERVERS; i++)
     {
@@ -116,6 +126,7 @@ struct List *bsd_ObtainDomainNameServerList(
         AddTail((struct List *)&out->bdl_List, (struct Node *)&node->dnsn_MinNode);
         count++;
     }
+#endif /* AMINETXDUO_IPV6 */
 
     return &out->bdl_List;
 }
