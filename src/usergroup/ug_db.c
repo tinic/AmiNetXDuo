@@ -195,6 +195,7 @@ static struct ug_passwd *ug_pw_return(struct UserGroupBase *base, UWORD index)
 
 struct ug_passwd *ugl_getpwnam(UG_A6, UG_REG(STRPTR login, "a1"))
 {
+    UG_ENTER("getpwnam");
     struct UgDatabase *db;
     UWORD i;
 
@@ -220,6 +221,7 @@ struct ug_passwd *ugl_getpwnam(UG_A6, UG_REG(STRPTR login, "a1"))
 
 struct ug_passwd *ugl_getpwuid(UG_A6, UG_REG(LONG uid, "d0"))
 {
+    UG_ENTER("getpwuid");
     struct UgDatabase *db;
     UWORD i;
 
@@ -239,11 +241,13 @@ struct ug_passwd *ugl_getpwuid(UG_A6, UG_REG(LONG uid, "d0"))
 
 VOID ugl_setpwent(UG_A6)
 {
+    UG_ENTER("setpwent");
     base->ug_PwCursor = 0;
 }
 
 struct ug_passwd *ugl_getpwent(UG_A6)
 {
+    UG_ENTER("getpwent");
     ug_db_require_passwd(base);
 
     if (base->ug_PwCursor >= base->ug_Global->db.pw_count)
@@ -254,6 +258,7 @@ struct ug_passwd *ugl_getpwent(UG_A6)
 
 VOID ugl_endpwent(UG_A6)
 {
+    UG_ENTER("endpwent");
     base->ug_PwCursor = 0;
 }
 
@@ -269,6 +274,7 @@ static struct ug_group *ug_gr_return(struct UserGroupBase *base, UWORD index)
 
 struct ug_group *ugl_getgrnam(UG_A6, UG_REG(STRPTR name, "a1"))
 {
+    UG_ENTER("getgrnam");
     struct UgDatabase *db;
     UWORD i;
 
@@ -294,6 +300,7 @@ struct ug_group *ugl_getgrnam(UG_A6, UG_REG(STRPTR name, "a1"))
 
 struct ug_group *ugl_getgrgid(UG_A6, UG_REG(LONG gid, "d0"))
 {
+    UG_ENTER("getgrgid");
     struct UgDatabase *db;
     UWORD i;
 
@@ -313,11 +320,13 @@ struct ug_group *ugl_getgrgid(UG_A6, UG_REG(LONG gid, "d0"))
 
 VOID ugl_setgrent(UG_A6)
 {
+    UG_ENTER("setgrent");
     base->ug_GrCursor = 0;
 }
 
 struct ug_group *ugl_getgrent(UG_A6)
 {
+    UG_ENTER("getgrent");
     ug_db_require_group(base);
 
     if (base->ug_GrCursor >= base->ug_Global->db.gr_count)
@@ -328,5 +337,6 @@ struct ug_group *ugl_getgrent(UG_A6)
 
 VOID ugl_endgrent(UG_A6)
 {
+    UG_ENTER("endgrent");
     base->ug_GrCursor = 0;
 }

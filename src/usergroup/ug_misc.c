@@ -27,6 +27,7 @@
 UBYTE *ugl_crypt(UG_A6, UG_REG(UBYTE *key, "a0"),
                         UG_REG(UBYTE *set, "a1"))
 {
+    UG_ENTER("crypt");
     (void)key;
     (void)set;
 
@@ -47,6 +48,7 @@ UBYTE *ugl_GetSalt(UG_A6, UG_REG(struct ug_passwd *user, "a0"),
                           UG_REG(UBYTE *buf, "a1"),
                           UG_REG(ULONG size, "d0"))
 {
+    UG_ENTER("GetSalt");
     char *out = (char *)buf;
     const char *hash;
 
@@ -91,6 +93,7 @@ UBYTE *ugl_GetSalt(UG_A6, UG_REG(struct ug_passwd *user, "a0"),
  */
 STRPTR ugl_getpass(UG_A6, UG_REG(STRPTR prompt, "a1"))
 {
+    UG_ENTER("getpass");
     struct DosLibrary *dos = ug_dos(base);
     struct Process *self;
     BPTR  fh;
@@ -168,11 +171,13 @@ STRPTR ugl_getpass(UG_A6, UG_REG(STRPTR prompt, "a1"))
  */
 VOID ugl_setutent(UG_A6)
 {
+    UG_ENTER("setutent");
     (void)base;
 }
 
 struct ug_utmp *ugl_getutent(UG_A6)
 {
+    UG_ENTER("getutent");
     ug_set_err(base, 0);
 
     return NULL;
@@ -180,11 +185,13 @@ struct ug_utmp *ugl_getutent(UG_A6)
 
 VOID ugl_endutent(UG_A6)
 {
+    UG_ENTER("endutent");
     (void)base;
 }
 
 struct ug_lastlog *ugl_getlastlog(UG_A6, UG_REG(LONG uid, "d0"))
 {
+    UG_ENTER("getlastlog");
     (void)uid;
 
     ug_set_err(base, 0);
@@ -197,6 +204,7 @@ LONG ugl_setlastlog(UG_A6, UG_REG(LONG uid, "d0"),
                            UG_REG(STRPTR name, "a0"),
                            UG_REG(STRPTR host, "a1"))
 {
+    UG_ENTER("setlastlog");
     (void)uid;
     (void)name;
     (void)host;

@@ -99,6 +99,7 @@ void ug_resolve_login(struct UserGroupBase *base)
 LONG ugl_SetupContextTagList(UG_A6, UG_REG(STRPTR name, "a0"),
                              UG_REG(struct TagItem *tags, "a1"))
 {
+    UG_ENTER("SetupContextTagList");
     struct TagItem *ti = tags;
 
     if (name != NULL)
@@ -166,11 +167,13 @@ LONG ugl_SetupContextTagList(UG_A6, UG_REG(STRPTR name, "a0"),
 
 LONG ugl_GetErr(UG_A6)
 {
+    UG_ENTER("GetErr");
     return base->ug_Err;
 }
 
 STRPTR ugl_StrError(UG_A6, UG_REG(LONG err, "d1"))
 {
+    UG_ENTER("StrError");
     (void)base;
 
     switch (err)
@@ -207,6 +210,7 @@ STRPTR ugl_StrError(UG_A6, UG_REG(LONG err, "d1"))
 struct ug_credentials *ugl_getcredentials(UG_A6,
                                           UG_REG(struct Task *task, "a0"))
 {
+    UG_ENTER("getcredentials");
     struct UgGlobal *g = base->ug_Global;
     struct ug_credentials *result = NULL;
     struct MinNode *node;
