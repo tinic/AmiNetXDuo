@@ -823,6 +823,23 @@ static UINT ami_ns_budget_filter(VOID *ip_header_ptr, UINT direction)
 }
 #endif /* AMINETXDUO_RXPROBE */
 
+/*
+ * NetX Duo asks "is this destination on your network?" as
+ * `(mask & destination) == network`, and an interface with no address has both
+ * at zero, so it answers yes to everything and takes the routes
+ * (nx_ip_route_find.c) and the machine's default gateway
+ * (nx_ip_gateway_address_set.c) off the interface holding the lease.  The mask
+ * has to stay 0 -- the DHCP client reads it back when a server sends none --
+ * so the network is where the answer goes; nothing routes to 255.255.255.255.
+ */
+static VOID ami_ns_park_unaddressed(AmiNetStack *ns, UWORD index)
+{
+    NX_INTERFACE *nxif = &ns->ns_Ip.nx_ip_interface[index];
+
+    if (nxif->nx_interface_valid != 0 && nxif->nx_interface_ip_address == 0UL)
+        nxif->nx_interface_ip_network = 0xFFFFFFFFUL;
+}
+
 static LONG ami_ns_create_ip(AmiNetStack *ns)
 {
     const AmiIfConfig *cfg0;
@@ -1017,6 +1034,8 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
 
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
+        ami_ns_park_unaddressed(ns, i);
+
         if (ns->ns_Ip.nx_ip_interface[i].nx_interface_link_up == NX_FALSE)
             ami_event(NETEVENT_LINK_DOWN, i, 0UL);
     }
@@ -1341,8 +1360,12 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             (VOID)tx_semaphore_put(&ns->ns_AddrArrived);
 
         if (addr == 0UL)
+        {
+            /* NetX Duo cleared the network with the address. */
+            ami_ns_park_unaddressed(ns, i);
             AMI_WARN("netstack: interface %ld no longer has an address",
                      (long)i);
+        }
         else if (ami_ns_is_linklocal(addr))
             ami_ns_log_address("has the link-local address", i, addr);
         else
@@ -3583,6 +3606,8 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
     if ((UWORD)slot >= ns->ns_IfaceCount)
         ns->ns_IfaceCount = (UWORD)(slot + 1);
+
+    ami_ns_park_unaddressed(ns, (UWORD)slot);
 
     ns->ns_IfaceCfg[slot]  = (UWORD)slot;
 

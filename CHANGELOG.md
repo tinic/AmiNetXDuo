@@ -34,6 +34,19 @@ version at the top when it merges.
   priority mask, and expands `%m`. Accepted messages reach the serial
   diagnostic sink only in a build with `AMINETXDUO_LOG`, and follow
   `ENV:ANXDLOGLEVEL` there
+### Multiple network interfaces
+
+- An interface with no IPv4 address no longer carries the machine's traffic. It
+  had address 0 and netmask 0, and NetX Duo asks "is this destination on your
+  network?" as `(mask & destination) == network`, so it answered yes to every
+  address and took the routes and the default gateway from the interface
+  holding the lease
+- Reproduced with two cards where the address-less one sorts first in
+  `DEVS:NetInterfaces`: `ping` of the router that issued the other card's lease
+  was 100% loss, and every packet left the wrong card
+- An unbound IPv4 raw socket asks the routing table which interface to use. It
+  was pinned to interface 0. TCP and UDP were never affected
+
 ### NFS
 
 - `getdtablesize()` answers 64 again. It answered 256 from 0.24.0, and an

@@ -6,6 +6,7 @@
 
 #include "bsdsocket_vectors.h"
 
+#include "nx_ipv4.h"
 
 #ifdef AMINETXDUO_IPV6
 #include "nx_ip.h"
@@ -571,6 +572,29 @@ static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
 
 #endif /* AMINETXDUO_IPV6 */
 
+/*
+ * The interface the route names, as an index for the source send.
+ * nxd_ip_raw_packet_send() cannot be used for this: its IPv4 arm passes address
+ * index 0, and _nxd_ip_raw_packet_source_send() makes that the outgoing
+ * interface before the route is looked up, so on a machine with two interfaces
+ * every unbound raw datagram left by the first one whatever the route said.
+ */
+static LONG bsd_raw_route_index(NX_IP *ip, ULONG dest)
+{
+    NX_INTERFACE *nxif     = NX_NULL;
+    ULONG         next_hop = 0UL;
+    UINT          status;
+
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+    status = _nx_ip_route_find(ip, dest, &nxif, &next_hop);
+    tx_mutex_put(&ip->nx_ip_protection);
+
+    if (status != NX_SUCCESS || nxif == NX_NULL)
+        return -1;
+
+    return (LONG)(nxif - &ip->nx_ip_interface[0]);
+}
+
 LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                          NX_PACKET *packet, const NXD_ADDRESS *addr,
                          ULONG scope, const BsdCmsgSource *src)
@@ -672,6 +696,20 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, (source == BSD_SOURCE_UNREACH)
                                   ? AMI_ENETUNREACH
                                   : AMI_EADDRNOTAVAIL);
+    }
+
+    if (source != BSD_SOURCE_INDEX && dest.nxd_ip_version == NX_IP_VERSION_V4)
+    {
+        LONG chosen = bsd_raw_route_index(ip, dest.nxd_ip_address.v4);
+
+        if (chosen < 0)
+        {
+            nx_packet_release(handed);
+            return bsd_fail(base, AMI_ENETUNREACH);
+        }
+
+        source    = BSD_SOURCE_INDEX;
+        src_index = (UINT)chosen;
     }
 
     {
