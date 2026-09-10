@@ -459,32 +459,59 @@ static void c_the_generator(void)
     expect(memcmp(a, b, sizeof(a)) != 0,
            "two fills of the same length differ");
 
-    /* Every length, including the ones that are not a multiple of the hash
-       output: a generator that only works in 32-byte units would leave the
-       tail of an odd request untouched. */
+    /*
+     * Every length, including the ones that are not a multiple of the hash
+     * output: a generator that only works in 32-byte units would leave the
+     * tail of an odd request untouched.
+     *
+     * A SENTINEL COMPARISON IS PROBABILISTIC AND THIS ONE FIRED.  It used to
+     * preset the buffer to 0xa5, fill it ONCE, and fail if no byte differed --
+     * so a correct generator failed whenever a 1-byte request happened to
+     * produce 0xa5.  That is one draw in 256, and it reddened CI on macOS
+     * (run 34427007666, "FAIL a 1-byte fill wrote something").  Measured on
+     * the built binary rather than argued: 11 failures in 3000 runs, 1 in 273
+     * against the 1 in 256 the mechanism predicts.
+     *
+     * The claim worth making does not depend on any single draw.  Repeat until
+     * the tail byte takes a value other than the sentinel and fail only if it
+     * NEVER does: a generator that does not write there fails every time, and
+     * a correct one has a 256^-FILL_DRAWS chance of looking like it.  The
+     * bounds check below stays exact -- writing past the end is not
+     * probabilistic and is checked on every draw.
+     */
+#define FILL_DRAWS 16u
     for (i = 1; i <= 64u; i++)
     {
         UBYTE buf[65];
-        UWORD n;
-        int   touched = 0;
+        UWORD d;
+        int   tail_written = 0;
+        int   overran = 0;
 
-        memset(buf, 0xa5, sizeof(buf));
-        ami_random_bytes(buf, i);
-
-        for (n = 0; n < i; n++)
+        for (d = 0; d < FILL_DRAWS; d++)
         {
-            if (buf[n] != 0xa5)
-                touched = 1;
+            memset(buf, 0xa5, sizeof(buf));
+            ami_random_bytes(buf, i);
+
+            if (buf[i - 1u] != 0xa5)
+                tail_written = 1;
+            if (buf[i] != 0xa5)
+            {
+                overran = 1;
+                break;
+            }
         }
-        if (!touched)
-        {
-            char what[64];
 
-            snprintf(what, sizeof(what), "a %u-byte fill wrote something", i);
+        if (!tail_written)
+        {
+            char what[72];
+
+            snprintf(what, sizeof(what),
+                     "a %u-byte fill wrote its last byte in %u draws", i,
+                     (unsigned)FILL_DRAWS);
             expect(0, what);
             break;
         }
-        if (buf[i] != 0xa5)
+        if (overran)
         {
             char what[64];
 
