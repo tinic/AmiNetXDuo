@@ -29,6 +29,21 @@
 #     bytes, 510 packets, 0 lost -- which is why "the card transmits" was true
 #     and told nobody anything.
 #
+# VERIFIED ON THE FIXED HARNESS, 2026-09-10.  40 arms, 0 failures:
+#
+#     xsurf  20 arms (6 slot-indexed, one per SWEEP_SLOT, plus 14)  wall_s 46-48
+#     a2065  20 arms                                                wall_s 41-42
+#
+# Against the rates these two used to fail at -- 1 in 7 for xsurf, about 30%
+# for a2065's intermittent hand-run failures -- twenty clean arms each would
+# happen 4.6% and 0.08% of the time.  a2065's residue was the SAME flood; its
+# .191 address collision was real, separate, and CI-only.  On the wire, a
+# fixed arm carries ONE burst of ~523 datagrams and 4,382 frames where the
+# failing one carried 54 bursts, 28,128 datagrams and 29,583 frames, and
+# srvudp.err fell from 13,030 bytes to 561 while
+# `ok: the guest served a UDP receive (rc 0)` still passes -- the sequencing
+# cost no coverage.
+#
 # WHAT SEPARATED THE SIX FROM THE ONE, and it is not the guest being slow:
 # AddNetInterface took 9380-9420 ms on all seven arms, the failing one included.
 # It is whether the peer's socket ever raised ECONNREFUSED.  A connected UDP
