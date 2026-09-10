@@ -12,13 +12,9 @@
 # argument for those bytes had been made and measured; what nobody did was
 # decide to spend them.
 #
-# ONLY THE CONFIGURATIONS THAT SHIP ARE BUDGETED, and they are the ones
+# ONLY THE TWO CONFIGURATIONS THAT SHIP ARE BUDGETED, and they are the two
 # tools/check-shipping-config.sh maps a drawer onto: `default` is the full
-# drawer, `minimal` is the minimal one, `micro` is Libs/micro.  Micro was
-# packed into the archive and given its own installer choice while this file
-# still called it coverage, so the one profile that exists FOR its size was
-# the one profile whose size nothing held -- it reported
-# `not_a_shipping_configuration` and ci.sh counted that as fine.  Every other arm is coverage -- nolto
+# drawer, `minimal` is the minimal one.  Every other arm is coverage -- nolto
 # is 44 KB larger because that is what LTO is worth, census carries its side
 # table, log carries the sentences -- and holding coverage to a shipping budget
 # would only teach whoever hits it to raise the number.  The arm is the build
@@ -55,12 +51,6 @@ BUDGETS=(
     "minimal:src/bsdsocket/bsdsocket.library:226000"
     "minimal:src/netdev/anxnet.device:40000"
     "minimal:src/usergroup/usergroup.library:9000"
-    # Micro, set 2026-09-10 at 0.26.5+ with AMINETXDUO_CPU=68000: 156,260 /
-    # 39,064 / 7,284, same headroom convention as the rows above.  No
-    # tls.library row -- micro builds with TLS off.
-    "micro:src/bsdsocket/bsdsocket.library:158000"
-    "micro:src/netdev/anxnet.device:40000"
-    "micro:src/usergroup/usergroup.library:9000"
 )
 
 budgeted=0
