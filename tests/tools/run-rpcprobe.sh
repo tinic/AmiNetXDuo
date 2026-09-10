@@ -16,12 +16,14 @@
 # a portmap reply reaches a bound UDP socket on the guest, and a 90-line
 # responder answers that without touching the peer's configuration.
 #
-# THREE ARMS, AND THE CONTROL IS THE POINT.  `ephem` binds port 0 the way the
+# FOUR ARMS, AND THE CONTROL IS THE POINT.  `ephem` binds port 0 the way the
 # resolver does; `resv` walks down from 1023 the way bindresvport() does for
 # RPC; `conn` does that and then connect()s, which is the other shape an RPC
-# client takes.  Each arm exchanges TWICE on one socket, because an RPC client
-# retries on the socket it already has.  All three passing is a real answer --
-# it says the mount is not failing here.
+# client takes; `sig` repeats that with a SIGNAL MASK handed to WaitSelect(),
+# which is what AmiTCP's net.lib does and what a probe written from the BSD
+# side never passes.  Each arm exchanges TWICE on one socket, because an RPC
+# client retries on the socket it already has.  All four passing is a real
+# answer -- it says the mount is not failing here.
 #
 # SPDX-License-Identifier: MIT
 
@@ -203,6 +205,7 @@ IFACE_RC=none
 EPHEM=none
 RESV=none
 CONN=none
+SIG=none
 VERDICT=none
 
 if [ -f "$REPORT" ]; then
@@ -221,6 +224,7 @@ if [ -f "$REPORT" ]; then
     EPHEM=$(awk -F= '/^ephem_RESULT=/ { print $2; exit }' "$REPORT")
     RESV=$(awk  -F= '/^resv_RESULT=/  { print $2; exit }' "$REPORT")
     CONN=$(awk  -F= '/^conn_RESULT=/  { print $2; exit }' "$REPORT")
+    SIG=$(awk   -F= '/^sig_RESULT=/   { print $2; exit }' "$REPORT")
     VERDICT=$(awk -F= '/^verdict=/ { sub(/^verdict=/, ""); print; exit }' \
               "$REPORT")
 fi
@@ -232,11 +236,12 @@ PEER_REPLIES=$(grep -c '^peer_reply ' "$OUT/peer.out" 2>/dev/null || echo 0)
 # never came back".  Without it a failing arm cannot tell those apart, and they
 # are different defects in different halves of the stack.
 [ "${EPHEM:-none}" = PASS ] && [ "${RESV:-none}" = PASS ] &&
-    [ "${CONN:-none}" = PASS ] && STATUS=pass
+    [ "${CONN:-none}" = PASS ] && [ "${SIG:-none}" = PASS ] && STATUS=pass
 
-printf 'rpcprobe: status=%s run_rc=%s iface_rc=%s ephem=%s resv=%s conn=%s peer_calls=%s peer_replies=%s addr=%s port=%s out=%s\n' \
+printf 'rpcprobe: status=%s run_rc=%s iface_rc=%s ephem=%s resv=%s conn=%s sig=%s peer_calls=%s peer_replies=%s addr=%s port=%s out=%s\n' \
        "$STATUS" "$RUN_RC" "$IFACE_RC" "${EPHEM:-none}" "${RESV:-none}" \
-       "${CONN:-none}" "$PEER_CALLS" "$PEER_REPLIES" "$ADDRESS" "$PORT" "$OUT"
+       "${CONN:-none}" "${SIG:-none}" "$PEER_CALLS" "$PEER_REPLIES" \
+       "$ADDRESS" "$PORT" "$OUT"
 [ -n "$VERDICT" ] && [ "$VERDICT" != none ] && printf 'rpcprobe: %s\n' "$VERDICT"
 
 [ "$STATUS" = pass ] || exit 1

@@ -171,7 +171,7 @@ static LONG p_getsockname(struct Library *base, LONG s, ProbeAddr *sa,
 typedef struct ProbeTime { LONG tv_sec; LONG tv_usec; } ProbeTime;
 
 static LONG p_waitselect(struct Library *base, LONG nfds, ULONG *readfds,
-                         ProbeTime *tv)
+                         ProbeTime *tv, ULONG *sigs)
 {
     register struct Library *a6  __asm("a6") = base;
     register LONG            d0  __asm("d0") = nfds;
@@ -179,7 +179,7 @@ static LONG p_waitselect(struct Library *base, LONG nfds, ULONG *readfds,
     register APTR            a1  __asm("a1") = NULL;
     register APTR            a2  __asm("a2") = NULL;
     register APTR            a3  __asm("a3") = (APTR)tv;
-    register LONG            d1  __asm("d1") = 0;   /* no signal mask */
+    register APTR            d1  __asm("d1") = (APTR)sigs;
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
@@ -333,6 +333,16 @@ static VOID build_call(ULONG xid)
 #define ARM_EPHEM  0    /* bind 0, sendto/recvfrom -- what a resolver does   */
 #define ARM_RESV   1    /* bindresvport, sendto/recvfrom -- what RPC does    */
 #define ARM_CONN   2    /* bindresvport + connect(), send/recv               */
+#define ARM_SIG    3    /* as ARM_CONN, but WaitSelect gets a SIGNAL MASK    */
+
+/*
+ * SIGBREAKF_CTRL_C.  AmiTCP's net.lib hands WaitSelect() a signal mask so a
+ * hung RPC call can be broken with Ctrl-C, and that is the one argument a
+ * probe written from the BSD side never passes.  A WaitSelect() that returned
+ * early because a mask was present would look, to an RPC client, exactly like
+ * a reply that never came: "Unable to receive".
+ */
+#define P_SIGBREAKF_CTRL_C  0x1000UL
 
 /*
  * ONE call and its reply on an already-open socket.  Returns 1 when the reply
@@ -345,12 +355,13 @@ static LONG exchange(struct Library *sb, const char *tag, LONG round, LONG s,
     ProbeAddr from;
     ULONG     readfds[8];
     ProbeTime tv;
+    ULONG     sigs;
     LONG      rc, n, i, fromlen;
 
     call_xid += 1UL;
     build_call(call_xid);
 
-    if (mode == ARM_CONN)
+    if (mode == ARM_CONN || mode == ARM_SIG)
         n = p_send(sb, s, call_buf, (LONG)sizeof(call_buf));
     else
         n = p_sendto(sb, s, call_buf, (LONG)sizeof(call_buf), to);
@@ -370,8 +381,13 @@ static LONG exchange(struct Library *sb, const char *tag, LONG round, LONG s,
     tv.tv_sec  = 5;
     tv.tv_usec = 0;
 
-    rc = p_waitselect(sb, s + 1, readfds, &tv);
+    sigs = (mode == ARM_SIG) ? P_SIGBREAKF_CTRL_C : 0UL;
+    rc = p_waitselect(sb, s + 1, readfds, &tv,
+                      (mode == ARM_SIG) ? &sigs : NULL);
     Printf((CONST_STRPTR)"%s_r%ld_waitselect=%ld\n", (LONG)tag, round, rc);
+    if (mode == ARM_SIG)
+        Printf((CONST_STRPTR)"%s_r%ld_signals_out=%ld\n", (LONG)tag, round,
+               (LONG)sigs);
     if (rc <= 0)
     {
         Printf((CONST_STRPTR)"%s_r%ld_waitselect_errno=%ld\n", (LONG)tag,
@@ -383,7 +399,7 @@ static LONG exchange(struct Library *sb, const char *tag, LONG round, LONG s,
 
     fromlen = (LONG)sizeof(from);
     from.sin_port = 0;
-    if (mode == ARM_CONN)
+    if (mode == ARM_CONN || mode == ARM_SIG)
         n = p_recv(sb, s, reply_buf, (LONG)sizeof(reply_buf));
     else
         n = p_recvfrom(sb, s, reply_buf, (LONG)sizeof(reply_buf), &from,
@@ -397,7 +413,7 @@ static LONG exchange(struct Library *sb, const char *tag, LONG round, LONG s,
         return 0;
     }
 
-    if (mode != ARM_CONN)
+    if (mode != ARM_CONN && mode != ARM_SIG)
         Printf((CONST_STRPTR)"%s_r%ld_from_port=%ld\n", (LONG)tag, round,
                (LONG)from.sin_port);
 
@@ -503,7 +519,7 @@ static LONG arm(struct Library *sb, const char *tag, LONG mode, ULONG dest,
     to.sin_port   = dport;
     to.sin_addr   = dest;
 
-    if (mode == ARM_CONN)
+    if (mode == ARM_CONN || mode == ARM_SIG)
     {
         rc = p_connect(sb, s, &to);
         Printf((CONST_STRPTR)"%s_connect_rc=%ld\n", (LONG)tag, rc);
@@ -532,7 +548,7 @@ int main(int argc, char **argv)
     struct Library *sb;
     ULONG           dest;
     LONG            dport = 111;
-    LONG            resv_ok, ephem_ok, conn_ok;
+    LONG            resv_ok, ephem_ok, conn_ok, sig_ok;
 
     if (argc < 2)
     {
@@ -576,25 +592,32 @@ int main(int argc, char **argv)
     resv_ok  = arm(sb, "resv",  ARM_RESV,  dest, (UWORD)dport);
     Delay(25);
     conn_ok  = arm(sb, "conn",  ARM_CONN,  dest, (UWORD)dport);
+    Delay(25);
+    sig_ok   = arm(sb, "sig",   ARM_SIG,   dest, (UWORD)dport);
 
     /*
      * EACH COMBINATION NAMES A DIFFERENT PLACE TO LOOK, said here so a reader
      * of the log does not have to reconstruct it.
      */
-    if (ephem_ok && resv_ok && conn_ok)
-        Printf((CONST_STRPTR)"verdict=all three arms carried a portmap "
+    if (ephem_ok && resv_ok && conn_ok && sig_ok)
+        Printf((CONST_STRPTR)"verdict=all four arms carried a portmap "
                              "request and its reply, twice each on one "
-                             "socket; this stack is not where the mount "
+                             "socket, with and without a WaitSelect signal "
+                             "mask; this stack is not where the mount "
                              "fails\n");
     else if (ephem_ok && !resv_ok)
         Printf((CONST_STRPTR)"verdict=an ephemeral source port works and a "
                              "RESERVED one does not: bind or demultiplex of "
                              "a low local port\n");
+    else if (conn_ok && !sig_ok)
+        Printf((CONST_STRPTR)"verdict=the same socket works WITHOUT a "
+                             "WaitSelect signal mask and fails with one: "
+                             "the signal path in WaitSelect()\n");
     else if ((ephem_ok || resv_ok) && !conn_ok)
         Printf((CONST_STRPTR)"verdict=an unconnected socket works and a "
                              "connect()ed one does not: the connected-UDP "
                              "receive filter\n");
-    else if (!ephem_ok && !resv_ok && !conn_ok)
+    else if (!ephem_ok && !resv_ok && !conn_ok && !sig_ok)
         Printf((CONST_STRPTR)"verdict=no arm received: the receive path for "
                              "a bound UDP socket\n");
     else
@@ -602,5 +625,6 @@ int main(int argc, char **argv)
                              "keys above, r1 against r2\n");
 
     CloseLibrary(sb);
-    return (resv_ok && ephem_ok && conn_ok) ? RETURN_OK : RETURN_WARN;
+    return (resv_ok && ephem_ok && conn_ok && sig_ok) ? RETURN_OK
+                                                      : RETURN_WARN;
 }
