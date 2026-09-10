@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 #
-# Every cross arm tools/ci.sh declares must be RUN by GitHub CI, or be
-# allowlisted with the reason.  cpu68060 and if2 were in CROSS_CONFIGS and in
-# no workflow matrix, so two arms compiled only where someone typed them.
+# The set of cross arms tools/ci.sh declares and the set the GitHub matrix runs
+# must be the SAME SET, checked in BOTH directions.
+#
+#   declared but not run   cpu68060 and if2 were in CROSS_CONFIGS and in no
+#                          workflow matrix, so two arms compiled only where
+#                          someone typed them.  Allowlistable with a reason.
+#   run but not declared   `microcompat` stayed in the matrix after
+#                          CROSS_CONFIGS dropped it.  `ci.sh cross` was handed
+#                          a name nothing declares, failed at configure in 35
+#                          seconds, and reddened main -- with this gate
+#                          reporting PASS, because it only ever walked the
+#                          arms.  Not allowlistable: a matrix entry that names
+#                          no arm cannot do anything but fail.
 #
 # SPDX-License-Identifier: MIT
 set -uo pipefail
@@ -34,6 +44,13 @@ for a in $arms; do
         continue
     fi
     echo "ci_arm_unrun=$a declared_in_CROSS_CONFIGS no_workflow_matrix_entry"
+    errors=$((errors + 1))
+done
+
+# The other direction.  No allowlist: see the header.
+for m in $matrix; do
+    printf '%s\n' "$arms" | grep -qx "$m" && continue
+    echo "ci_arm_undeclared=$m in_workflow_matrix not_in_CROSS_CONFIGS"
     errors=$((errors + 1))
 done
 
