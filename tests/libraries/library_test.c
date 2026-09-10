@@ -887,6 +887,13 @@ LONG             ug_group_count;
         (VOID)t_check((BOOL)(ug_getegid(ugbase) == 0),
                       "getegid after context setup", 0UL);
 
+        /* POISONED, NOT LEFT TO THE STACK.  -fanalyzer cannot see across the
+           library vector and flagged the read of ug_groups[0]; the sharper
+           point is that a zero left on the stack would have passed
+           `ug_groups[0] == 0` without usergroup.library ever writing it.  An
+           0xFF fill means the check can only pass on a value the library
+           actually put there. */
+        memset(ug_groups, 0xFF, sizeof(ug_groups));
         ug_group_count = ug_getgroups(ugbase, 32, ug_groups);
         (VOID)t_check((BOOL)(ug_group_count == 1 && ug_groups[0] == 0),
                       "getgroups after context setup",
