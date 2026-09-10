@@ -474,11 +474,14 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
      * confirmed, 44 serial lines and none of them this.  The arm that does
      * reach it is the NetShutdown one (tools/ci.sh bridged).
      */
-    AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu (v6 %lu, "
+    AMI_ERROR("net68k rxverify: %sip_ok %lu, transport_ok %lu (v6 %lu, "
              "from_copy %lu, reread %lu), "
              "bad_ip %lu, bad_transport %lu; skip short %lu / ver %lu / "
              "len %lu / frag %lu / proto %lu / udp0 %lu / ext %lu; "
              "v6_ext %lu",
+             N68K_RXV_HOT_BUILT ? ""
+                 : "(per-frame counters not built, "
+                   "-DAMINETXDUO_RX_VERIFY_STATS=ON) ",
              (unsigned long)n68k_rx_verify_stats.ip_ok,
              (unsigned long)n68k_rx_verify_stats.transport_ok,
              (unsigned long)n68k_rx_verify_stats.v6_ok,
@@ -615,6 +618,11 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         ami_free(ns->ns_PoolMemory);
         ns->ns_PoolMemory = NULL;
     }
+
+#ifdef AMINETXDUO_DHCP
+    ami_ns_client_pool_delete(&ns->ns_DhcpPool);
+#endif
+    ami_ns_client_pool_delete(&ns->ns_DnsPool);
 
     if (ns->ns_AutoIpStack != NULL)
     {
@@ -1639,20 +1647,29 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         {
             ns->ns_DhcpCreated = TRUE;
 
-            /* The client has no pool of its own: NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL
-               trades its private nx_dhcp_pool_area for ours.  Before any start. */
-            status = nx_dhcp_packet_pool_set(&ns->ns_Dhcp, &ns->ns_Pool);
+            status = ami_ns_client_pool_create(
+                &ns->ns_DhcpPool, (CHAR *)"AmiNetXDuo DHCP",
+                NX_DHCP_PACKET_PAYLOAD, NX_DHCP_PACKET_POOL_SIZE);
+            if (status == NX_SUCCESS)
+                status = nx_dhcp_packet_pool_set(&ns->ns_Dhcp,
+                                                  &ns->ns_DhcpPool->pool);
             if (status != NX_SUCCESS)
-                AMI_ERROR("netstack: DHCP could not take the shared packet pool "
-                          "(%ld)", (long)status);
+            {
+                AMI_ERROR("netstack: DHCP private packet pool failed (%ld)",
+                          (long)status);
+                (VOID)nx_dhcp_delete(&ns->ns_Dhcp);
+                ns->ns_DhcpCreated = FALSE;
+                ami_ns_client_pool_delete(&ns->ns_DhcpPool);
+            }
 
             /*
              * Before the client starts, so the first BOUND is reported and the
              * first DISCOVER already carries the option 61 and request list.
              */
-            ami_ns_dhcp_configure(ns);
+            if (ns->ns_DhcpCreated)
+                ami_ns_dhcp_configure(ns);
 
-            for (i = 0; i < ns->ns_IfaceCount; i++)
+            for (i = 0; ns->ns_DhcpCreated && i < ns->ns_IfaceCount; i++)
             {
                 if (ns->ns_Config.interfaces[i].iptype != AMI_IPTYPE_DHCP)
                     continue;
@@ -1664,17 +1681,21 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
                              "(%ld)", (long)i, (long)status);
             }
 
-            status = nx_dhcp_start(&ns->ns_Dhcp);
-            if (status != NX_SUCCESS)
+            if (ns->ns_DhcpCreated)
             {
-                AMI_ERROR("netstack: nx_dhcp_start failed (%ld)", (long)status);
-            }
-            else
-            {
-                ns->ns_DhcpStarted = TRUE;
-                ami_ns_dhcp_discover_now(&ns->ns_Dhcp);
-                AMI_INFO("netstack: DHCP started, waiting up to %lu ticks",
-                         (unsigned long)AMI_DHCP_TIMEOUT_TICKS);
+                status = nx_dhcp_start(&ns->ns_Dhcp);
+                if (status != NX_SUCCESS)
+                {
+                    AMI_ERROR("netstack: nx_dhcp_start failed (%ld)",
+                              (long)status);
+                }
+                else
+                {
+                    ns->ns_DhcpStarted = TRUE;
+                    ami_ns_dhcp_discover_now(&ns->ns_Dhcp);
+                    AMI_INFO("netstack: DHCP started, waiting up to %lu ticks",
+                             (unsigned long)AMI_DHCP_TIMEOUT_TICKS);
+                }
             }
         }
     }
@@ -2744,12 +2765,21 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
 
     ns->ns_DhcpCreated = TRUE;
 
-    /* The client has no pool of its own: NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL
-       trades its private nx_dhcp_pool_area for ours.  Before any start. */
-    status = nx_dhcp_packet_pool_set(&ns->ns_Dhcp, &ns->ns_Pool);
+    status = ami_ns_client_pool_create(
+        &ns->ns_DhcpPool, (CHAR *)"AmiNetXDuo DHCP",
+        NX_DHCP_PACKET_PAYLOAD, NX_DHCP_PACKET_POOL_SIZE);
+    if (status == NX_SUCCESS)
+        status = nx_dhcp_packet_pool_set(&ns->ns_Dhcp,
+                                          &ns->ns_DhcpPool->pool);
     if (status != NX_SUCCESS)
-        AMI_ERROR("netstack: DHCP could not take the shared packet pool "
-                  "(%ld)", (long)status);
+    {
+        AMI_ERROR("netstack: DHCP private packet pool failed (%ld)",
+                  (long)status);
+        (VOID)nx_dhcp_delete(&ns->ns_Dhcp);
+        ns->ns_DhcpCreated = FALSE;
+        ami_ns_client_pool_delete(&ns->ns_DhcpPool);
+        return AMI_NET_ERR_KERNEL;
+    }
 
     ami_ns_dhcp_configure(ns);
 

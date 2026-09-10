@@ -181,9 +181,22 @@
 
   The archive's C drawer holds every command listed in
   @{"The commands" link COMMANDS}. The commands are small. Copy the
-  whole drawer. The seven that bring an interface up and check it are
-  AddNetInterface, Online, Offline, ShowNetStatus, netstat, ping and
-  host.
+  whole drawer.
+
+  At Intermediate and Expert level the Installer also offers a
+  self-contained layout. Libraries, commands, configuration,
+  documentation and examples then all go under the one AmiNetXDuo drawer
+  selected on the preceding page. The Installer neither moves nor replaces
+  files belonging to the system stack.
+
+  Its S:User-Startup block assigns AmiNetXDuo: to that drawer and runs
+  ActivateAmiNetXDuo before starting the network. The command puts the
+  drawer's Libs, C and Devs first in their respective multi-assigns while
+  retaining all earlier entries behind them. This is necessary because
+  Assign ADD appends: ADD by itself leaves an existing system
+  LIBS:bsdsocket.library in control. To select another installed stack,
+  change which stack's startup block is enabled and reboot. Do not try to
+  exchange a bsdsocket.library which is already resident.
 
   Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver.
   Copy it to DEVS:Networks, which is what the Installer offers to do.
@@ -905,6 +918,8 @@
 
   @{b}Setting up and controlling the stack@{ub}
 
+    ActivateAmiNetXDuo  select a self-contained install at boot while
+                      preserving the old LIBS:, C: and DEVS: paths
     @{"AddNetInterface " link ADDNETINTERFACE}  start the stack and bring an interface up
     @{"Online          " link ONLINE}  put an interface back on the network
     @{"Offline         " link OFFLINE}  take an interface off the network
@@ -2485,8 +2500,26 @@
   all software.
 
   For anything else, it reads DEVS:Internet/passwd and
-  DEVS:Internet/group in the ordinary Unix format (AmiTCP:db/passwd and
-  AmiTCP:db/group are also read, for an existing AmiTCP installation).
+  DEVS:Internet/group. Both ordinary Unix colon-delimited records and
+  AmiTCP 4's native pipe-delimited records are accepted. AmiTCP:db/passwd
+  and AmiTCP:db/group are also read, for an existing AmiTCP installation.
+
+  AmiNetXDuo never creates or changes AmiTCP:. That name belongs to an
+  installed AmiTCP and to programs which keep compatibility data beneath
+  AmiTCP:db. A program such as ch_nfs may therefore keep its files in a
+  separate drawer without the stack taking the name away:
+
+      Assign AmiTCP: Work:AmiTCP
+
+  with ch_nfstab at Work:AmiTCP/db/ch_nfstab.
+
+  Programs built with ixemul open the literal library path
+  AmiTCP:libs/usergroup.library. AmiNetXDuo supports those without creating
+  the assign: bsdsocket.library opens usergroup.library by its normal LIBS:
+  name and holds it for the life of the stack. Exec then satisfies ixemul's
+  path-qualified OpenLibrary from the library which is already resident. If
+  LIBS:usergroup.library is absent and a real AmiTCP: exists, the existing
+  AmiTCP:libs path is tried as a fallback.
 
   @{b}If a program does not work@{ub}
 

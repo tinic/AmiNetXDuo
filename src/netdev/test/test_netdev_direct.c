@@ -85,7 +85,7 @@ VOID Remove(struct Node *n)
  * The stub above NULLs both links, which Exec's Remove() does NOT, and the
  * reply check below used to read `ln_Succ != NULL` as "still linked".  That
  * asserted a property of the stub: netdev_take() now unlinks through
- * nd_list_remove() (netdev_internal.h), three stores with no NULLing, exactly
+ * nd_remove() (netdev_internal.h), which also clears the removed links,
  * as Exec does, and a check written that way calls a correct removal a
  * failure.
  *

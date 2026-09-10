@@ -12,6 +12,7 @@ set(USERGROUP_SOURCES
     ug_context.c
     ug_ids.c
     ug_db.c
+    ug_str.c
     ug_parse.c
     ug_misc.c)
 
@@ -111,4 +112,98 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     include(CTest)
     add_test(NAME usergroup_parsers COMMAND test_usergroup)
+
+    # ------------------------------------------------------- credentials --
+    #
+    # ug_context.c reaches exec three times -- FindTask, Forbid, Permit --
+    # which src/config/test/shim/proto/exec.h supplies, so the credentials
+    # walk builds here.  It could not before: usergroup_vectors.h declared
+    # every argument with `register ... __asm("aN")` and had no host branch,
+    # which is the reason ugl_getcredentials() shipped the v0.26.3 NFS crash
+    # with no coverage anywhere in the tree.  UG_REG gives it that branch.
+    #
+    # ug_db.c is not linked -- it is the dos.library half -- so the one call
+    # into it is stubbed in the test.  Under tools/ci.sh host (ASan) the
+    # stale-pointer case also proves the fallback does not dereference the
+    # caller's task pointer.
+    add_executable(test_ug_credentials
+        test/test_ug_credentials.c
+        ug_context.c)
+
+    target_include_directories(test_ug_credentials PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_credentials PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_credentials COMMAND test_ug_credentials)
+
+    # ---------------------------------------------------------- database --
+    #
+    # ug_db.c is the dos.library half: which file is read, what happens when
+    # there is none, and what getpwnam()/getpwuid()/getgr*() hand back.  It
+    # had no test anywhere.  src/config/test/shim/proto/dos.h supplies its
+    # four calls -- Open, Close, Read, Seek -- over an in-memory file table,
+    # reproducing Seek()'s return-the-previous-position contract, which is
+    # what ug_db.c sizes a file with.
+    add_executable(test_ug_db
+        test/test_ug_db.c
+        ug_db.c
+        ug_parse.c
+        ug_str.c)
+
+    target_include_directories(test_ug_db PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_db PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_db COMMAND test_ug_db)
+
+    # ------------------------------------------------------- ids, groups --
+    #
+    # ugl_getgroups/ugl_setgroups move a caller array in and out of a fixed
+    # cr_groups[UG_NGROUPS], and ugl_initgroups fills it from the group file,
+    # where the bound is however many groups name the user.  Three ways to
+    # write past a 32-entry array on a machine with no MMU.  cr_groups is a
+    # struct member, so an overflow lands in cr_session and no sanitizer sees
+    # it; the test uses cr_session as a canary and heap-allocates the
+    # caller-side array at exactly its length so ASan owns that end.
+    add_executable(test_ug_ids
+        test/test_ug_ids.c
+        ug_ids.c
+        ug_db.c
+        ug_parse.c
+        ug_str.c)
+
+    target_include_directories(test_ug_ids PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_ids PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_ids COMMAND test_ug_ids)
+
+    # ------------------------------------------- getpass, salt, utmp ------
+    #
+    # For a console password read the ORDER is the property: echo has to be
+    # off before the first character is read and back on after the last, and
+    # a count of calls cannot say whether that happened.  shim/proto/dos.h
+    # keeps a one-character-per-call order log for it.
+    add_executable(test_ug_misc
+        test/test_ug_misc.c
+        ug_misc.c
+        ug_str.c)
+
+    target_include_directories(test_ug_misc PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ug_misc PRIVATE -Wall -Wextra)
+
+    add_test(NAME usergroup_misc COMMAND test_ug_misc)
 endif()

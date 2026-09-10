@@ -53,6 +53,14 @@ concurrency:
 jobs:
 
   # ------------------------------------------------------------------------
+  # THE RUNNER HAS TO BE ALIVE, AND NOTHING WATCHED IT.  This job queues
+  # against a self-hosted runner; if that runner's listener dies, the run sits
+  # `queued` and expires, and the tier reports nothing either way.  That is
+  # what happened between 2026-08-27 and 2026-09-09: the listener lost its
+  # broker connection, exited, and the machine's crontab had only an @reboot
+  # guard -- so 25 runs queued against an offline runner and none of them ran.
+  # tools/runner-keepalive.sh is the */10 cron guard that covers a mid-life
+  # death; install it on the runner alongside the @reboot entry.
   kickstart:
     name: Amiberry on Kickstart 3.1 (self-hosted)
     if: >
@@ -601,14 +609,19 @@ jobs:
       # tolerance.  It needs the bridge and a peer that can call IN, which is
       # why it lives here and not in ci.yml: SLIRP cannot answer it at all.
       #
-      # AND IT STILL DOES NOT RUN, because THIS WHOLE FILE does not.  The
-      # playhouse3 runner is offline and every run of this workflow since
-      # 2026-08-30 went queued -> cancelled at the 24h timeout, including the
-      # one for the v0.26.3 release.  Wiring the arm here made
+      # IT RUNS AGAIN AS OF 2026-09-09.  For twelve days it did not, because
+      # THIS WHOLE FILE did not: the playhouse3 listener lost its broker
+      # connection on 2026-08-27, exited, and every run of this workflow went
+      # queued -> cancelled at the 24h timeout, including the one for the
+      # v0.26.3 release.  Wiring the arm here made
       # tools/check-stage-coverage.sh green and did NOT make the gate run --
-      # the same defect that gate exists to catch, one level up.  Bringing the
-      # runner back is what makes this and the fourteen other stages in this
-      # file real; docs/BACKLOG.md carries it.
+      # the same defect that gate exists to catch, one level up.
+      #
+      # The runner is back and tools/runner-keepalive.sh (cron */10) restarts
+      # a listener that dies mid-life, which the machine's @reboot-only entry
+      # could not.  This arm and the fourteen other stages in this file are
+      # real again; whether they PASS is a separate question and the freshness
+      # gate answers it.
       - name: Throughput against the recorded baseline
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
@@ -792,7 +805,18 @@ jobs:
             echo "| Kickstart 3.1 | self-hosted only | $EXPECTED | $RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          [ "$RESULT" = "skipped" ] || exit 0
+          # WHAT "DID NOT RUN" ACTUALLY LOOKS LIKE, AND IT IS NOT ONLY
+          # `skipped`.  `skipped` is AMINETXDUO_KICKSTART_RUNNER unset, which
+          # this caught.  `cancelled` is the label SET and the runner OFFLINE:
+          # the job queues until GitHub gives up on it hours later, and this
+          # report then ran and exited 0.  Sixteen consecutive runs went green
+          # that way, with nothing on an Amiga tested at all and the card
+          # sweep -- the only cross-core coverage there is -- among what did
+          # not happen.  `failure` is the tier speaking for itself and is
+          # already red; do not report it twice.
+          case "$RESULT" in
+              success|failure) exit 0 ;;
+          esac
 
           {
             echo
@@ -802,13 +826,16 @@ jobs:
             echo ">"
             echo "> \`vars.AMINETXDUO_KICKSTART_RUNNER\` names the self-hosted"
             echo "> runner label this tier runs on. With it unset there is no"
-            echo "> machine with a ROM on it and the job cannot start."
+            echo "> machine with a ROM on it and the job cannot start. With it"
+            echo "> set and the runner OFFLINE the job queues instead, and the"
+            echo "> result here is \`cancelled\` rather than \`skipped\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$EXPECTED" = "true" ]; then
-            echo "::error::The Kickstart 3.1 tier did NOT run, on a run that" \
-                 "expected it. Set the repository variable" \
-                 "AMINETXDUO_KICKSTART_RUNNER to a self-hosted runner label." \
+            echo "::error::The Kickstart 3.1 tier did NOT run ($RESULT), on" \
+                 "a run that expected it. Either the repository variable" \
+                 "AMINETXDUO_KICKSTART_RUNNER is unset, or the runner it names" \
+                 "is offline and the job queued until it was cancelled." \
                  "Nothing on an Amiga was tested by this run."
             exit 1
           fi

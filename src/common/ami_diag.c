@@ -74,42 +74,11 @@ int ami_log_level(VOID)
     return ami_log_max;
 }
 
-/*
- * The same sink, taking RawDoFmt's argument STREAM rather than C varargs.
- *
- * bsdsocket.library's vsyslog() is handed a stream by its caller and cannot
- * rebuild it into varargs, so forwarding to ami_log() is not possible.  `tag`
- * is syslog's ident (SBTC_LOGTAGPTR) and may be NULL.
- *
- * The format string belongs to the CALLER, which is why this costs nothing of
- * what AMINETXDUO_LOG exists to remove: what that option strips is OUR
- * sentences, and there are none here.
- */
-VOID ami_log_raw(int level, const char *tag, const char *fmt, APTR args)
-{
-    if (level > ami_log_max || fmt == NULL)
-        return;
-
-    RawPutChar('[');
-    {
-        const char *p = (tag != NULL && *tag != '\0') ? tag : "syslog";
-        while (*p != '\0')
-            RawPutChar(*p++);
-    }
-    RawPutChar(']');
-    RawPutChar(' ');
-
-    RawDoFmt((STRPTR)fmt, args, (void (*)())put_char, NULL);
-
-    RawPutChar('\n');
-}
-
-VOID ami_log(int level, const char *fmt, ...)
+VOID ami_serial_logv(int level, const char *fmt, const void *args)
 {
     static const char *const prefix[] = { "ERR ", "WARN", "INFO", "DBG ", "TRC " };
-    va_list args;
 
-    if (level > ami_log_max)
+    if (fmt == NULL)
         return;
     if (level < AMI_LOG_ERROR || level > AMI_LOG_TRACE)
         level = AMI_LOG_INFO;
@@ -123,10 +92,19 @@ VOID ami_log(int level, const char *fmt, ...)
     RawPutChar(']');
     RawPutChar(' ');
 
-    va_start(args, fmt);
-    RawDoFmt((STRPTR)fmt, args, (void (*)())put_char, NULL);
-    va_end(args);
+    RawDoFmt((STRPTR)fmt, (APTR)args, (void (*)())put_char, NULL);
 
     RawPutChar('\n');
 }
 
+VOID ami_log(int level, const char *fmt, ...)
+{
+    va_list args;
+
+    if (level > ami_log_max)
+        return;
+
+    va_start(args, fmt);
+    ami_serial_logv(level, fmt, (const void *)args);
+    va_end(args);
+}

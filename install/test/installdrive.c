@@ -96,26 +96,23 @@
 #ifndef DRIVE_PICK_OPTIONS
 #define DRIVE_PICK_OPTIONS 0
 #endif
-#ifndef DRIVE_PICK_SKIP
-/*
- * HOW MANY PAGES WITH THE RIGHT OPTION COUNT TO PASS OVER FIRST.
- *
- * The page is found by counting its option gadgets, and that is ambiguous:
- * the Installer's own user-level page (Novice/Average/Expert) has THREE
- * options, and so does the stack page since micro joined it.  The driver used
- * to pick on the first match, which is the user-level page, and the stack page
- * then took its default -- a -p run that clicked the wrong page entirely and
- * would have passed silently if the default happened to be what was asked for.
- * That is how -p full "worked": full IS the default.
- *
- * A label would be better and is not available -- a page's option gadgets are
- * not struct Buttons, so button_text() cannot read them (see its comment).
- */
-#define DRIVE_PICK_SKIP    0
-#endif
-
 #ifndef DRIVE_PICK_ID
 #define DRIVE_PICK_ID      0
+#endif
+
+/*
+ * WHICH matching page, counting from 0.
+ *
+ * There is more than one askchoice with the same number of options -- the
+ * stack choice and the drawer layout are both two -- and picking "the first
+ * page with N options" can only ever reach the earlier one.  That is why the
+ * drawer choice at Install-AmiNetXDuo:770 is still untested while the stack
+ * choice is not: not because it is hard to answer, but because nothing could
+ * address it.  Every matching page is logged with its ordinal, so one run
+ * names the index to pass here rather than anyone counting pages by hand.
+ */
+#ifndef DRIVE_PICK_SKIP
+#define DRIVE_PICK_SKIP    0
 #endif
 
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
@@ -145,7 +142,6 @@ static LONG clicks;
 static LONG saw_window;
 static LONG yesno_pages;
 static LONG picks_done;
-static LONG picks_skipped;
 
 static VOID say(const char *fmt, LONG a)
 {
@@ -235,12 +231,45 @@ static BOOL label_matches(struct Gadget *gad, const char *want)
  * only stable under LockIBase(), so this copies out the two pointers it
  * needs and gets out again before doing anything else with them.
  */
+/*
+ * Set by find_installer_window() when the gadget it returns is the askchoice
+ * option, cleared otherwise.  MATCHING ON THE ID IS NOT ENOUGH and doing so
+ * was a real defect: DRIVE_PICK_ID is 2 or 3, and every yes/no page has a
+ * gadget 2 as well, so an id test fired select_option() on five pages that
+ * were not askchoices -- "No", "Yes, use DHCP", "Yes, at boot" -- and took
+ * RemoveGList/AddGList to each of them under the Installer.
+ */
+static BOOL pick_is_target;
+
+/* How many pages with DRIVE_PICK_OPTIONS options have gone by, and whether
+   the one wanted has been answered.  picks_done stays what it was -- a count
+   for the transcript -- rather than doubling as the "stop looking" flag. */
+static LONG matches_seen;
+static BOOL picked_already;
+
+/*
+ * COUNTING SIGHTINGS IS NOT COUNTING PAGES.  The option is clicked on one poll
+ * and Proceed on the NEXT, so a matching page is visible across at least two
+ * polls and a naive counter reported one askchoice as #0 and #1 -- measured,
+ * /tmp/rigwb6.log lines 57 and 70, the same page both times.  Only a rising
+ * edge counts: this poll matches and the previous one did not.
+ *
+ * Two DIFFERENT matching pages back to back would still read as one.  Nothing
+ * in the script does that today; if one ever does, the fix is to key the edge
+ * on something from the page rather than on the match alone.
+ */
+static BOOL prev_was_match;
+static BOOL this_is_match;
+
 static struct Window *find_installer_window(struct Gadget **click_out)
 {
     struct Screen *screen;
     struct Window *found  = NULL;
     struct Gadget *choice = NULL;
     ULONG          ilock;
+
+    pick_is_target = FALSE;
+    this_is_match  = FALSE;
 
     ilock = LockIBase(0);
 
@@ -311,39 +340,41 @@ static struct Window *find_installer_window(struct Gadget **click_out)
              * every one of these until now.  Once per Installer run, and only
              * on the page with the expected number of options.
              */
-            if (proceed != NULL && pick != NULL && picks_done == 0 &&
+            /* NOT gated on picked_already: a page that comes AFTER the one
+               answered still has to be counted, or the enumeration this exists
+               to produce stops at the pick and never names the later ones. */
+            if (proceed != NULL && pick != NULL &&
                 DRIVE_PICK_OPTIONS != 0 && options == DRIVE_PICK_OPTIONS)
             {
-                if (picks_skipped < DRIVE_PICK_SKIP)
+                /* Every candidate is announced, picked or not, so a single
+                   run enumerates them and DRIVE_PICK_SKIP can be set from
+                   what it printed instead of from a guess. */
+                if (!prev_was_match)
                 {
-                    picks_skipped++;
-                    say("installdrive:   passing over matching page %ld\n",
-                        (LONG)picks_skipped);
-                }
-                else
-                {
-                    struct Gadget *g;
-
-                    choice = pick;
-                    picks_done++;
-                    say("installdrive:   picking on a page of %ld options\n",
+                    say("installdrive:   askchoice with %ld options,",
                         (LONG)options);
-                    for (g = window->FirstGadget; g != NULL; g = g->NextGadget)
+                    say(" match #%ld\n", (LONG)matches_seen);
+
+                    if (!picked_already && matches_seen == DRIVE_PICK_SKIP)
                     {
-                        if (g->GadgetID > 0 && g->GadgetID < 87 &&
-                            button_text(g) == NULL)
-                            say("installdrive:     option id %ld\n",
-                                (LONG)g->GadgetID);
+                        choice = pick;
+                        pick_is_target = TRUE;
+                        picked_already = TRUE;
+                        picks_done++;
+                        say("installdrive:   picking option gadget %ld\n",
+                            (LONG)pick->GadgetID);
                     }
-                    say("installdrive:   picking option gadget %ld\n",
-                        (LONG)pick->GadgetID);
+                    matches_seen++;
                 }
+                this_is_match = TRUE;
             }
             break;
         }
     }
 
     UnlockIBase(ilock);
+
+    prev_was_match = this_is_match;
 
     *click_out = choice;
     return found;
@@ -381,7 +412,17 @@ static VOID describe(struct Window *window)
         if (text != NULL)
             say(" \"%s\"\n", (LONG)text);
         else
-            say("%s\n", (LONG)"");
+        {
+            /*
+             * An unlabelled gadget is one of the page's own, which is what an
+             * askchoice option is.  WHAT KIND it is decides how it can be
+             * answered, and this said nothing about that: whether the Installer
+             * reads GFLG_SELECTED or something else is not guessable from an id.
+             */
+            say(" type=0x%lx", (LONG)(ULONG)gad->GadgetType);
+            say(" flags=0x%lx", (LONG)(ULONG)gad->Flags);
+            say(" act=0x%lx\n", (LONG)(ULONG)gad->Activation);
+        }
     }
 }
 
@@ -394,50 +435,56 @@ static VOID drain_replies(VOID)
 }
 
 /*
+ * MAKE AN OPTION SELECTED, which posting GADGETUP does not.
+ *
+ * A GADGETUP carries no selected state: the Installer reads it back off the
+ * gadget.  Clicking an askchoice option therefore did nothing and every one of
+ * these pages took its default, which is the reason -p existed and could not
+ * be tested.  This sets GFLG_SELECTED on the wanted option and clears it on
+ * its siblings, which is what mutual exclusion looks like from outside.
+ *
+ * Out of the window's list before the structure is touched and back in after,
+ * which is what Intuition asks for.  RemoveGList unlinks the gadgets FROM THE
+ * WINDOW but leaves them linked to EACH OTHER, so the saved head still walks
+ * the whole chain -- window->FirstGadget does not, it is NULL by then.
+ */
+static BOOL select_option(struct Window *window, struct Gadget *want)
+{
+    struct Gadget *head = window->FirstGadget;
+    struct Gadget *gad;
+    UWORD          removed;
+
+    if (head == NULL)
+        return FALSE;
+
+    removed = RemoveGList(window, head, -1);
+    if (removed == (UWORD)~0)
+        return FALSE;
+
+    for (gad = head; gad != NULL; gad = gad->NextGadget)
+    {
+        if (gad->GadgetID > 0 && gad->GadgetID < 87 &&
+            button_text(gad) == NULL)
+        {
+            if (gad == want)
+                gad->Flags |= GFLG_SELECTED;
+            else
+                gad->Flags &= (UWORD)~GFLG_SELECTED;
+        }
+    }
+
+    AddGList(window, head, -1, -1, NULL);
+    RefreshGList(head, window, NULL, -1);
+
+    return TRUE;
+}
+
+/*
  * Post the message Intuition would have posted had the user let go of the
  * mouse over the gadget.  The Installer replies to it, so the memory comes
  * back here and is freed rather than leaked, and getting it back is also
  * the proof that the Installer really consumed it.
  */
-/*
- * SELECT AN askchoice OPTION, which a GADGETUP alone does not do.
- *
- * The comment at the top of this file recorded the measurement -- posting
- * GADGETUP at an option does not answer it, twice -- and named the untested
- * next step.  This is that step: the selected state lives in the gadget's
- * GFLG_SELECTED flag, not in the message, so the flag is set here and cleared
- * on the page's other options, the way a radio group behaves, before the
- * GADGETUP goes in.
- *
- * Until this existed, -p selected nothing: every run took the page's default.
- * That is invisible when the default is what was asked for, which is why
- * `-p full` looked like it worked and `-p minimal` was known not to.
- *
- * Forbid() rather than RemoveGList/AddGList: those two re-link the gadget at a
- * new position and would reorder the page.  The flag is one bit and Intuition
- * is not looking at the list while this task holds the CPU.
- */
-static VOID select_option(struct Window *window, struct Gadget *pick)
-{
-    struct Gadget *gad;
-
-    Forbid();
-    for (gad = window->FirstGadget; gad != NULL; gad = gad->NextGadget)
-    {
-        if (gad->GadgetID > 0 && gad->GadgetID < 87 &&
-            button_text(gad) == NULL)
-        {
-            if (gad == pick)
-                gad->Flags |= GFLG_SELECTED;
-            else
-                gad->Flags &= ~GFLG_SELECTED;
-        }
-    }
-    Permit();
-
-    RefreshGList(window->FirstGadget, window, NULL, -1);
-}
-
 static BOOL click(struct Window *window, struct Gadget *gadget)
 {
     struct IntuiMessage *msg;
@@ -451,12 +498,6 @@ static BOOL click(struct Window *window, struct Gadget *gadget)
     msg->ExecMessage.mn_Node.ln_Type = NT_MESSAGE;
     msg->ExecMessage.mn_ReplyPort    = reply_port;
     msg->ExecMessage.mn_Length       = sizeof(struct IntuiMessage);
-
-    /* An option carries no label; a page button does.  Only the first needs
-       its selected state set by hand. */
-    if (gadget->GadgetID > 0 && gadget->GadgetID < 87 &&
-        button_text(gadget) == NULL)
-        select_option(window, gadget);
 
     msg->Class       = IDCMP_GADGETUP;
     msg->IAddress    = (APTR)gadget;
@@ -497,7 +538,6 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
        up again, and taking its default the second time would install the
        full stack over the minimal one this run asked for. */
     picks_done = 0;
-    picks_skipped = 0;
 
     say("installdrive: run %ld: starting the Installer\n", run_number);
 
@@ -579,6 +619,22 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
                     say("installdrive:   clicked \"%s\"\n", (LONG)hit);
             }
             describe(window);
+
+            /*
+             * Before the click, not instead of it: the Installer still wants
+             * the GADGETUP to know the page was answered, it just will not
+             * learn WHICH option from it.
+             */
+            if (pick_is_target)
+            {
+                if (select_option(window, target))
+                    say("installdrive:   option %ld selected\n",
+                        (LONG)target->GadgetID);
+                else
+                    say("installdrive:   option %ld could NOT be selected\n",
+                        (LONG)target->GadgetID);
+            }
+
             click(window, target);
         }
         else if (window != NULL)

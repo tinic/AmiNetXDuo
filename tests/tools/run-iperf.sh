@@ -344,9 +344,9 @@ start_peer() { # logname args...
     PEER_PIDS+=("$!")
 }
 
-start_sender() { # logname proto port [wanted]
+start_sender() { # logname proto port [wanted] [after-pid]
     local name="$1" proto="$2" port="$3" kbit=2000
-    local wanted="${4:-1}"
+    local wanted="${4:-1}" after="${5:-}"
     [ "$proto" != udp ] || kbit="${AMINETXDUO_IPERF_PEER_UDP_KBIT:-2000}"
     (
         # ONE LINE PER SUCCESSFUL SEND, and it keeps going until it has
@@ -356,17 +356,45 @@ start_sender() { # logname proto port [wanted]
         # peer_val_n() reads.
         got=0
         deadline=$(( $(date +%s) + PEER_LIFE ))
+        # WAIT FOR THE SENDER THIS ONE FOLLOWS.  The guest listens in the
+        # order its commands.txt lists, TCP server before UDP server, so a
+        # UDP sender started at t=0 spends the whole TCP half of the run
+        # firing at a port the guest has not opened yet.  See the retry
+        # comment below for what that costs.
+        while [ -n "$after" ] && kill -0 "$after" 2>/dev/null &&
+              [ "$(date +%s)" -lt "$deadline" ]; do
+            sleep 1
+        done
         while [ "$got" -lt "$wanted" ] && [ "$(date +%s)" -lt "$deadline" ]; do
             if out=$(peer_cmd send "$proto" "$ADDRESS" --port "$port" \
                         --seconds "$SECS" --kbit "$kbit" \
                         2>>"$PEERLOG/$name.err"); then
+                # THE `continue` BELONGS TO THE SUCCESS ARM, and it used to
+                # sit outside this case where it caught both.  A UDP send
+                # cannot fail -- there is no connection to refuse -- so
+                # peer_cmd always exits 0 and a UDP attempt that the guest
+                # never heard is detected HERE, by the missing peer_report,
+                # after the payload has already gone out.  Falling through to
+                # `continue` skipped the back-off and immediately sent the
+                # next full payload.
+                #
+                # Measured, cardsweep-xs4-xsurf.pcap: 54 bursts of 521
+                # datagrams, 28,128 packets and ~41 MB at 1470 bytes each,
+                # aimed at a guest that was still on stage 1 of 15.  It ran
+                # from 12:15:44 -- before the guest had booted -- to the 300 s
+                # timeout.  The guest has to take and drop every one of them,
+                # and on an emulated A1200 that is the CPU the TCP stages
+                # needed: the peer's SYN-ACKs went out 8 times for 7401 and 7
+                # for 7403 and not one was answered, and the guest replied to
+                # only 7 of the 28 ARP requests aimed at it.
                 case "$proto" in
                     udp) case "$out" in
-                             *peer_report=1*) echo "$out"; got=$((got + 1)) ;;
+                             *peer_report=1*) echo "$out"; got=$((got + 1))
+                                              continue ;;
                          esac ;;
-                    *)   echo "$out"; got=$((got + 1)) ;;
+                    *)   echo "$out"; got=$((got + 1))
+                         continue ;;   # straight into the guest's next listen
                 esac
-                continue        # straight into the guest's next listen
             fi
             sleep 1
         done
@@ -382,7 +410,11 @@ start_peer size serve tcp --port "$PORT_SIZE" --seconds "$PEER_LIFE" --idle 8
 
 if [ "$SERVER_ARMS" = yes ]; then
     start_sender srvtcp tcp "$PORT_SRV_TCP" "$RX_REPEAT"
-    start_sender srvudp udp "$PORT_SRV_UDP"
+    # srvudp follows srvtcp rather than racing it, and line 264 is why that is
+    # safe for any RX_REPEAT: the guest emits every copy of the TCP listen
+    # inside that loop and its ONE UDP listen after it, so the UDP sender can
+    # never be the one the guest is waiting on.
+    start_sender srvudp udp "$PORT_SRV_UDP" 1 "${PEER_PIDS[-1]}"
 fi
 
 sleep 1

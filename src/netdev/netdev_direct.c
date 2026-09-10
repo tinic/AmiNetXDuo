@@ -35,21 +35,31 @@ static VOID direct_addr6(UBYTE *to, const UBYTE *from)
    were in this file while that site is in netdev_device.c.  See the note
    there. */
 
-/* Is there a read for this type without taking it?  netdev_rx_claim() must
-   not steal a frame that a second opener would also have received. */
-static BOOL netdev_would_take(const struct List *list, ULONG type)
+/*
+ * Which read would take this type, without taking it?  netdev_rx_claim() must
+ * not steal a frame that a second opener would also have received, so it has
+ * to scan EVERY opener before it takes anything.
+ *
+ * It returns the node rather than a yes/no because the answer is the same
+ * node netdev_take() would have found -- the first of that type -- and the
+ * list cannot change between the two: this runs in the core's interrupt
+ * context with the frame already in hand.  Answering BOOL here meant walking
+ * the winning opener's list twice per received frame, once to decide and
+ * once to unlink.
+ */
+static struct IOSana2Req *netdev_peek_take(struct List *list, ULONG type)
 {
-    const struct Node *n;
+    struct Node *n;
 
     for (n = list->lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
-        const struct IOSana2Req *io = (const struct IOSana2Req *)n;
+        struct IOSana2Req *io = (struct IOSana2Req *)n;
 
         if (io->ios2_PacketType == type)
-            return TRUE;
+            return io;
     }
 
-    return FALSE;
+    return NULL;
 }
 
 /*
@@ -74,6 +84,7 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     NetdevOpener      *cand = NULL;
     struct IOSana2Req *io;
     struct Node       *n;
+    struct IOSana2Req *cand_io = NULL;
     ULONG              type;
     UBYTE              flags = 0;
     UBYTE             *dst;
@@ -87,13 +98,15 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
 
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
-        NetdevOpener *op = (NetdevOpener *)n;
+        NetdevOpener      *op  = (NetdevOpener *)n;
+        struct IOSana2Req *hit = netdev_peek_take(&op->op_Reads, type);
 
-        if (!netdev_would_take(&op->op_Reads, type))
+        if (hit == NULL)
             continue;
         if (cand != NULL)
             return NULL;        /* two takers: everyone gets the staging copy */
-        cand = op;
+        cand    = op;
+        cand_io = hit;
     }
 
     if (cand == NULL || cand->op_RxDirect == NULL || cand->op_RxFilled == NULL)
@@ -101,9 +114,9 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     if (cand->op_Filter != NULL)
         return NULL;
 
-    io = netdev_take(&cand->op_Reads, type);
-    if (io == NULL)
-        return NULL;
+    /* Already located above; netdev_take() would walk to the same node. */
+    io = cand_io;
+    nd_remove(&io->ios2_Req.io_Message.mn_Node);
 
     /* RAW is also a per-request flag.  The direct destination starts after
        the Ethernet header, so accepting this request would omit fourteen
@@ -111,7 +124,7 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
        frame.  Put it back for the ordinary hand-over immediately below. */
     if (netdev_io_is_raw(cand, io))
     {
-        AddHead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        nd_addhead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
         return NULL;
     }
 

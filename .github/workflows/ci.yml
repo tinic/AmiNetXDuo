@@ -180,6 +180,21 @@ jobs:
       # the parser goes untested, which is a silent gap rather than a red build.
       - name: 32-bit host libraries
         run: |
+          # A VENDOR'S BROKEN INDEX MUST NOT REDDEN THIS REPO.  On 2026-09-09
+          # dl.google.com's chrome-stable index served a Hash Sum mismatch,
+          # and `apt-get update` exits non-zero on ANY source it could not
+          # read, so this job and `shell scripts` both failed before a line of
+          # this tree was compiled -- twice, on a commit whose own gates were
+          # green.  Nothing here wants Chrome.
+          #
+          # ONLY GOOGLE'S, and that precision is the whole lesson: the first
+          # attempt removed *.list AND *.sources, which on this image takes
+          # UBUNTU'S OWN repositories with it -- they live in
+          # /etc/apt/sources.list.d/ubuntu.sources in deb822 format, not in
+          # /etc/apt/sources.list -- and the step then failed with
+          # "Package 'gcc-multilib' has no installation candidate".
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-multilib
 
@@ -193,7 +208,7 @@ jobs:
       - name: tools/ci.sh
         run: >-
           AMINETXDUO_SANITIZE=1 AMINETXDUO_CI_CROSS="default"
-          tools/ci.sh host host32 sanitize cross web conformance
+          tools/ci.sh host host32 sanitize cross web conformance survey
 
       # The logs are where a failure is diagnosed, and they are the only thing
       # that survives the runner.
@@ -234,8 +249,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      # `survey` here too, and deliberately: its generators are python and
+      # shell, and the one macOS defect they have already had was `wc -l`
+      # padding its output so a `[ "$got" = "2" ]` compared "       2".  A
+      # portability trap in a gate is only found by running the gate on the
+      # other platform.
       - name: tools/ci.sh host
-        run: AMINETXDUO_SANITIZE=1 tools/ci.sh host sanitize
+        run: AMINETXDUO_SANITIZE=1 tools/ci.sh host sanitize survey
 
   # ------------------------------------------------------------------------
   # Cheap hygiene that would otherwise only be caught by a human.
@@ -247,6 +267,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck
         run: |
+          # Same reason as the 32-bit libraries step above, and the same
+          # precision: Google's sources only, because Ubuntu's own live in
+          # that directory too.
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
           # -S warning: style and info notes are not worth a red build.
@@ -272,6 +297,7 @@ jobs:
             tests/conformance/run-conformance.sh \
             tests/tools/run-iperf.sh \
             tests/tools/run-arpretry.sh \
+            tests/tools/run-rpcprobe.sh \
             tests/tools/run-cardsweep.sh \
             tests/tools/cards.sh \
             tests/tools/run-cpuspeed.sh \
@@ -283,6 +309,7 @@ jobs:
             tests/tools/bringupfail-verdict.sh \
             tests/tools/bringupfail-verdict-selftest.sh \
             tests/tools/check-no-log-advice.sh \
+            tests/tools/peersender-selftest.sh \
             tests/tools/run-cardsweep6.sh \
             tools/emu-mac.sh \
             tools/emu-board.sh \

@@ -1,4 +1,4 @@
-add_library(aminetxduo_common STATIC compat.c ami_diag.c ami_syslog_level.c crashguard.c
+add_library(aminetxduo_common STATIC compat.c ami_diag.c crashguard.c
                                      ami_random.c alloccensus.c events.c budget.c)
 target_include_directories(aminetxduo_common PUBLIC ${AMINETXDUO_CORE_INCLUDES})
 target_link_libraries(aminetxduo_common PUBLIC threadx)
@@ -42,6 +42,37 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     include(CTest)
     add_test(NAME event_ring COMMAND test_events)
+
+    # The entropy pool and its hash DRBG.  ami_random.c:24 asks for this
+    # outright -- "FIPS 180-4, self-contained: no libc, no nx_crypto.
+    # Re-check against the published vectors in a host harness after ANY edit
+    # here" -- and there was no harness.  The SHA-256 is not decorative:
+    # ami_random_bytes() feeds tls_random.c, tls_conn.c and tls_resume.c, and
+    # ami_random_ulong() is reached from bsdsocket's socket.c, so a round
+    # constant off by one bit still produces plausible-looking bytes.
+    #
+    # The file is #included whole rather than linked: the SHA-256 and the
+    # gatherers are static, and CUSTOM_VHPOSR has to be redirected because a
+    # host reading $DFF006 is a SEGV, which is why this could never run off
+    # target before.
+    #
+    # -Wno-pointer-to-int-cast: gather_exec() and gather_memory() fold task
+    # and stack ADDRESSES into the pool as ULONGs.  That is the entropy, it is
+    # exact on the target, and narrowing it on a 64-bit host loses nothing
+    # that matters to a hash.
+    add_executable(test_ami_random
+        test/test_ami_random.c)
+
+    target_include_directories(test_ami_random PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_ami_random PRIVATE
+        -Wall -Wextra -Wno-pointer-to-int-cast)
+
+    add_test(NAME ami_random COMMAND test_ami_random)
 endif()
 
 # Same reason as src/config: every Shell command in src/tools/ links this and

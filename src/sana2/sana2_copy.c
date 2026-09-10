@@ -30,6 +30,11 @@ VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
     N68K_COPY_BYTES(to, from, len);
 }
 
+#ifdef AMINETXDUO_RX_VERIFY
+/* Defined below; the copy hook needs it for the odd-address case. */
+static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len);
+#endif
+
 /*
  * S2_CopyToBuff.  `to` is this CMD_READ's ios2_Data, that is the AmiRxSlot,
  * whose NX_PACKET was allocated and positioned before the read was posted.  In
@@ -41,14 +46,6 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register ULONG len  __asm("d0"))
 {
     AmiRxSlot  *slot = (AmiRxSlot *)to;
-#ifdef AMINETXDUO_RX_VERIFY
-    /* Declared under the same guard as its only uses: with RX_VERIFY off the
-       counter block below is compiled out and this is an unused variable,
-       which -Werror rejects.  The `norxverify` cross arm is the one that
-       says so. */
-    AmiSana2If *ifc;
-#endif
-
     if (slot == NULL || from == NULL)
         return FALSE;
 
@@ -119,18 +116,11 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      */
     slot->summed = FALSE;
 
-    /*
-     * The slot knows its reader and the reader knows the interface, where a
-     * counter a user can read has to live.  RESOLVED ONCE: the same two-level
-     * chain was walked again a few lines down for rx_copy_summed, so every
-     * frame tested slot->owner and owner->iface twice to reach the same
-     * struct.  Nothing between the two can change either pointer -- the copy
-     * and the sum in between touch the packet, not the slot's ownership.
-     */
-    ifc = (slot->owner != NULL) ? slot->owner->iface : NULL;
-
-    if (ifc != NULL)
-        ifc->stats.rx_copy_hook++;
+    /* The counter a user can read lives on the interface; the slot carries a
+       pointer straight to it (sana2_internal.h), because this runs at
+       interrupt level on every frame. */
+    if (slot->stats != NULL)
+        slot->stats->rx_copy_hook++;
 
     if ((((ALIGN_TYPE)slot->dst | (ALIGN_TYPE)from) & 1) == 0)
     {
@@ -166,12 +156,49 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
         }
 
         slot->summed = TRUE;
-        if (ifc != NULL)
-            ifc->stats.rx_copy_summed++;
+        if (slot->stats != NULL)
+            slot->stats->rx_copy_summed++;
         slot->copied = len;
 
         return TRUE;
     }
+
+    /*
+     * ODD ON ONE SIDE, WHICH ONLY A DEVICE WE DO NOT OWN CAN PRODUCE.
+     *
+     * Our own cores hand this hook an even payload pointer and slot->dst is
+     * nx_packet_data_start + PAD + ETH, so the branch above takes every frame
+     * and nothing here runs.  A THIRD-PARTY SANA-II driver is under no such
+     * obligation, and x-surf-100.device is the one that matters: it is not our
+     * code and this reader is the whole of our contact with it.
+     *
+     * What this used to do was copy and give up on the sum, leaving
+     * slot->summed FALSE -- and n68k_rx_verify_sum() then walks the WHOLE
+     * payload a second time to get what the copy had already read once.  Two
+     * passes over every frame, on the one path we cannot measure here.
+     *
+     * ami_sana2_copy_sum() copies each byte and accumulates it immediately, in
+     * the same convention the branch above uses, so the sum is the sum and the
+     * second pass is gone.  It is safe at any parity because this branch uses
+     * byte accesses; on a 68000 an odd word or longword access is an address
+     * error rather than merely a slow access.
+     */
+    slot->sum    = ami_sana2_copy_sum(slot->dst, (const UCHAR *)from, len);
+    slot->summed = TRUE;
+    if (slot->stats != NULL)
+    {
+        slot->stats->rx_copy_summed++;
+        /* AND SEPARATELY, because rx_copy_summed stopped being able to say
+           it.  Making this branch accumulate its own sum was right -- it
+           removed the second walk -- but it also made summed == hook whether
+           the branch runs or not, which is exactly the measurement the
+           0.26.3 field report needed.  Counted here, so `netstat -s` can
+           answer it. */
+        slot->stats->rx_copy_unaligned++;
+    }
+    slot->copied = len;
+
+    return TRUE;
 #endif
 
     ami_sana2_copy_bytes(slot->dst, (const UCHAR *)from, len);
@@ -192,11 +219,10 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
 
     if ((((ALIGN_TYPE)to | (ALIGN_TYPE)from) & 1) != 0)
     {
-        /* Odd on one side, where a 68000 permits no word access at all.  The
-           pools this driver copies between are longword aligned, so this is
-           unreachable today. */
-        ami_sana2_copy_bytes(to, from, len);
-
+        /* Odd on one side, where a 68000 permits no word access at all.  Our
+           own pools are longword aligned, so this is reached only through the
+           copy hook above, and only for a third-party device that hands us an
+           odd payload pointer. */
         sum = 0UL;
         for (i = 0UL; i < len; i += 4UL)
         {
@@ -206,7 +232,12 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
 
             w.l = 0UL;
             for (k = 0UL; k < n; k++)
-                w.b[k] = from[i + k];
+            {
+                UCHAR byte = from[i + k];
+
+                to[i + k] = byte;
+                w.b[k]    = byte;
+            }
 
             sum += w.l;
             if (sum < w.l)
@@ -470,12 +501,12 @@ VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
     /* Count completion, not the earlier claim: a core may claim a slot and then
        put it back when its hardware drain fails.  These ABI-stable counter
        names predate the direct pair, so "copy hook" means either fill path. */
-    if (slot->owner != NULL && slot->owner->iface != NULL)
+    if (slot->stats != NULL)
     {
-        slot->owner->iface->stats.rx_copy_hook++;
-        slot->owner->iface->stats.rx_direct_fill++;
+        slot->stats->rx_copy_hook++;
+        slot->stats->rx_direct_fill++;
         if (summed != 0)
-            slot->owner->iface->stats.rx_copy_summed++;
+            slot->stats->rx_copy_summed++;
     }
 
 #ifdef AMINETXDUO_RX_VERIFY

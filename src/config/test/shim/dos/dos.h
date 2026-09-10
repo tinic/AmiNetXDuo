@@ -14,4 +14,16 @@ typedef long BPTR;
 
 struct DosLibrary;
 
+/* Open() modes and Seek() origins, at the NDK's values. */
+#define MODE_OLDFILE        1005
+#define MODE_NEWFILE        1006
+#define MODE_READWRITE      1004
+
+#define DOSTRUE             (-1L)
+#define DOSFALSE            (0L)
+
+#define OFFSET_BEGINNING    (-1)
+#define OFFSET_CURRENT      0
+#define OFFSET_END          1
+
 #endif

@@ -24,9 +24,10 @@
  * the usual strcmp(crypt(typed, salt), pw->pw_passwd) get "no match" instead
  * of a NULL dereference, and callers that check ug_GetErr() see ENOSYS.
  */
-UBYTE *ugl_crypt(UG_A6, register UBYTE *key __asm("a0"),
-                        register UBYTE *set __asm("a1"))
+UBYTE *ugl_crypt(UG_A6, UG_REG(UBYTE *key, "a0"),
+                        UG_REG(UBYTE *set, "a1"))
 {
+    UG_ENTER("crypt");
     (void)key;
     (void)set;
 
@@ -43,10 +44,11 @@ UBYTE *ugl_crypt(UG_A6, register UBYTE *key __asm("a0"),
  * "**" stands in when there is no hash to take it from, which keeps the
  * result usable as a crypt() argument either way.
  */
-UBYTE *ugl_GetSalt(UG_A6, register struct ug_passwd *user __asm("a0"),
-                          register UBYTE *buf __asm("a1"),
-                          register ULONG size __asm("d0"))
+UBYTE *ugl_GetSalt(UG_A6, UG_REG(struct ug_passwd *user, "a0"),
+                          UG_REG(UBYTE *buf, "a1"),
+                          UG_REG(ULONG size, "d0"))
 {
+    UG_ENTER("GetSalt");
     char *out = (char *)buf;
     const char *hash;
 
@@ -89,8 +91,9 @@ UBYTE *ugl_GetSalt(UG_A6, register struct ug_passwd *user __asm("a0"),
  * no console (a non-Process caller, or no dos.library) the answer is the empty
  * string, and ug_GetErr() gives the reason.
  */
-STRPTR ugl_getpass(UG_A6, register STRPTR prompt __asm("a1"))
+STRPTR ugl_getpass(UG_A6, UG_REG(STRPTR prompt, "a1"))
 {
+    UG_ENTER("getpass");
     struct DosLibrary *dos = ug_dos(base);
     struct Process *self;
     BPTR  fh;
@@ -168,11 +171,13 @@ STRPTR ugl_getpass(UG_A6, register STRPTR prompt __asm("a1"))
  */
 VOID ugl_setutent(UG_A6)
 {
+    UG_ENTER("setutent");
     (void)base;
 }
 
 struct ug_utmp *ugl_getutent(UG_A6)
 {
+    UG_ENTER("getutent");
     ug_set_err(base, 0);
 
     return NULL;
@@ -180,11 +185,13 @@ struct ug_utmp *ugl_getutent(UG_A6)
 
 VOID ugl_endutent(UG_A6)
 {
+    UG_ENTER("endutent");
     (void)base;
 }
 
-struct ug_lastlog *ugl_getlastlog(UG_A6, register LONG uid __asm("d0"))
+struct ug_lastlog *ugl_getlastlog(UG_A6, UG_REG(LONG uid, "d0"))
 {
+    UG_ENTER("getlastlog");
     (void)uid;
 
     ug_set_err(base, 0);
@@ -193,10 +200,11 @@ struct ug_lastlog *ugl_getlastlog(UG_A6, register LONG uid __asm("d0"))
 }
 
 /* Accepted and discarded: login tools treat a failure here as fatal. */
-LONG ugl_setlastlog(UG_A6, register LONG uid __asm("d0"),
-                           register STRPTR name __asm("a0"),
-                           register STRPTR host __asm("a1"))
+LONG ugl_setlastlog(UG_A6, UG_REG(LONG uid, "d0"),
+                           UG_REG(STRPTR name, "a0"),
+                           UG_REG(STRPTR host, "a1"))
 {
+    UG_ENTER("setlastlog");
     (void)uid;
     (void)name;
     (void)host;

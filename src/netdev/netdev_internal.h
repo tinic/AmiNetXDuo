@@ -19,6 +19,43 @@
 #include <dos/dos.h>          /* BPTR, for the expunge seglist */
 
 #include "aminetxduo/anxnet.h"
+
+/*
+ * Exec's AddHead() and Remove() are a jsr through the library base and back
+ * to do four stores.  Both of these run ONCE PER RECEIVED FRAME -- the
+ * CMD_READ queueing in netdev_cmds.c and the take in netdev_direct.c, the
+ * second at interrupt level -- and this device already hand-rolls NewList()
+ * for the same reason, that a -nostartfiles image does not link amiga.lib.
+ *
+ * Identical semantics: this is what exec.library's own AddHead and Remove
+ * do, and neither of them Disable()s -- serialising the list is the caller's
+ * job here exactly as it is there, so nothing about the locking changes.
+ */
+static inline VOID nd_addhead(struct List *l, struct Node *n)
+{
+    n->ln_Succ           = l->lh_Head;
+    n->ln_Pred           = (struct Node *)&l->lh_Head;
+    l->lh_Head->ln_Pred  = n;
+    l->lh_Head           = n;
+}
+
+/*
+ * DELIBERATELY STRICTER THAN Exec's Remove(), which leaves the unlinked
+ * node's pointers stale.  This device replies requests, and replying one
+ * that is still on a list corrupts that list; clearing the links turns that
+ * into a NULL an Enforcer hit will name.  src/netdev/test's ReplyMsg checks
+ * exactly this ("replied CMD_READ is still linked") and its Remove() stub
+ * clears them for the same reason -- the check caught this function the
+ * first time it did not.  Two stores, still far short of the jsr it
+ * replaces, and no caller here walks a list through a removed node.
+ */
+static inline VOID nd_remove(struct Node *n)
+{
+    n->ln_Pred->ln_Succ = n->ln_Succ;
+    n->ln_Succ->ln_Pred = n->ln_Pred;
+    n->ln_Succ          = NULL;
+    n->ln_Pred          = NULL;
+}
 #include "netdev_nic.h"
 #include "netdev_mcast.h"
 #include "sana2_device.h"
@@ -85,7 +122,7 @@ static inline BOOL netdev_io_is_raw(const NetdevOpener *op,
  * receive path that is paid twice for every frame: netdev_take() unlinks the
  * CMD_READ it matched, and netdev_queue_read() links the re-post back at the
  * head.  It was three until the batched reply was reverted for costing 0.55%
- * of receive and 1.11% of transmit; nd_list_addtail() stays because
+ * of receive and 1.11% of transmit; the tail helper stays because
  * netdev_queue_read()'s S2_READORPHAN arm uses it.
  *
  * These are the same three stores, written out.  The layout is Exec's and is
@@ -97,16 +134,6 @@ static inline BOOL netdev_io_is_raw(const NetdevOpener *op,
  * device: those run once and are better left reading as the ordinary Exec
  * idiom.  Only what runs once a frame is written out here.
  */
-static inline VOID nd_list_addhead(struct List *l, struct Node *n)
-{
-    struct Node *head = l->lh_Head;
-
-    n->ln_Succ    = head;
-    n->ln_Pred    = (struct Node *)(APTR)&l->lh_Head;
-    head->ln_Pred = n;
-    l->lh_Head    = n;
-}
-
 static inline VOID nd_list_addtail(struct List *l, struct Node *n)
 {
     struct Node *pred = l->lh_TailPred;
@@ -115,15 +142,6 @@ static inline VOID nd_list_addtail(struct List *l, struct Node *n)
     n->ln_Pred     = pred;
     pred->ln_Succ  = n;
     l->lh_TailPred = n;
-}
-
-static inline VOID nd_list_remove(struct Node *n)
-{
-    struct Node *succ = n->ln_Succ;
-    struct Node *pred = n->ln_Pred;
-
-    pred->ln_Succ = succ;
-    succ->ln_Pred = pred;
 }
 
 typedef struct NetdevUnit
@@ -309,7 +327,7 @@ static inline struct IOSana2Req *netdev_take(struct List *list, ULONG type)
            unsigned long is wider than ULONG and ~0UL could never match. */
         if (type == (ULONG)-1 || io->ios2_PacketType == type)
         {
-            nd_list_remove(n);
+            nd_remove(n);
             return io;
         }
     }

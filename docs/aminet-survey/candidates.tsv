@@ -1,0 +1,17 @@
+rank	new	cum	flags	lvos	archive	binary
+1	26	26	H-D	26	DayDreamBBS.lha	DayDream/Serv/ftpd
+2	8	34	--D	25	AmigaTText-m68k-amigaos.lha	OS3/AmigaTText/AmigaTText_OS3
+3	4	38	-RD	21	amigg.lha	AmiGG/AmiGG_m68k
+4	4	42	--D	16	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiNSLookup
+5	3	45	-RD	14	Miami32b2-main.lha	Miami32b_Install/main/MiamiRoute
+6	2	47	H-D	18	AmBoS-CGI.lha	AmBoS-CGI/aws/aws
+7	2	49	---	5	AutoTCP.lha	AutoTCP/AutoTCP
+8	1	50	HR-	14	MiamiDx10cmain.lha	MiamiDx10_Install/main/MiamiDx
+9	1	51	--D	12	tcpdl.lha	tcpdl
+10	1	52	H-D	16	cnet5demo.lha	cnet/bbs
+11	1	53	--D	17	netsurf_os3.lha	NetSurf/NetSurf
+12	1	54	--D	21	EasySocketDev.lha	EasySocket/Libs/EasySocket.library
+13	1	55	--D	20	binkd_1.1a-115.lha	binkd
+14	1	56	H--	18	adig.lha	adig/ahost-68000
+
+# 833 attributed binaries cover 56 of 143 vectors (39%); 14 of them are non-redundant.

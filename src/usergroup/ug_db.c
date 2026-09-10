@@ -6,10 +6,11 @@
  * exactly one user, root, uid 0, gid 0, home SYS:, shell C:Shell, and one
  * group.
  *
- * If DEVS:Internet/passwd (or AmiTCP:db/passwd) does exist, it is parsed in
- * the ordinary /etc format and used instead. The read is deliberately
- * self-contained: src/config/ owns netdb parsing, but this must not depend on
- * it, and it must never pull in newlib stdio.
+ * If DEVS:Internet/passwd (or AmiTCP:db/passwd) does exist, it is used
+ * instead. Unix-style ':' records and AmiTCP 4's native '|' records are both
+ * accepted; the latter preserve Amiga paths such as SYS: inside a field. The
+ * read is deliberately self-contained: src/config/ owns netdb parsing, but
+ * this must not depend on it, and it must never pull in newlib stdio.
  *
  * The parsed tables are shared by every opener and immutable once built. Only
  * the iteration cursor and the returned record live in the per-opener base,
@@ -193,8 +194,9 @@ static struct ug_passwd *ug_pw_return(struct UserGroupBase *base, UWORD index)
     return &base->ug_PwResult;
 }
 
-struct ug_passwd *ugl_getpwnam(UG_A6, register STRPTR login __asm("a1"))
+struct ug_passwd *ugl_getpwnam(UG_A6, UG_REG(STRPTR login, "a1"))
 {
+    UG_ENTER("getpwnam");
     struct UgDatabase *db;
     UWORD i;
 
@@ -218,8 +220,9 @@ struct ug_passwd *ugl_getpwnam(UG_A6, register STRPTR login __asm("a1"))
     return NULL;
 }
 
-struct ug_passwd *ugl_getpwuid(UG_A6, register LONG uid __asm("d0"))
+struct ug_passwd *ugl_getpwuid(UG_A6, UG_REG(LONG uid, "d0"))
 {
+    UG_ENTER("getpwuid");
     struct UgDatabase *db;
     UWORD i;
 
@@ -239,11 +242,13 @@ struct ug_passwd *ugl_getpwuid(UG_A6, register LONG uid __asm("d0"))
 
 VOID ugl_setpwent(UG_A6)
 {
+    UG_ENTER("setpwent");
     base->ug_PwCursor = 0;
 }
 
 struct ug_passwd *ugl_getpwent(UG_A6)
 {
+    UG_ENTER("getpwent");
     ug_db_require_passwd(base);
 
     if (base->ug_PwCursor >= base->ug_Global->db.pw_count)
@@ -254,6 +259,7 @@ struct ug_passwd *ugl_getpwent(UG_A6)
 
 VOID ugl_endpwent(UG_A6)
 {
+    UG_ENTER("endpwent");
     base->ug_PwCursor = 0;
 }
 
@@ -267,8 +273,9 @@ static struct ug_group *ug_gr_return(struct UserGroupBase *base, UWORD index)
     return &base->ug_GrResult;
 }
 
-struct ug_group *ugl_getgrnam(UG_A6, register STRPTR name __asm("a1"))
+struct ug_group *ugl_getgrnam(UG_A6, UG_REG(STRPTR name, "a1"))
 {
+    UG_ENTER("getgrnam");
     struct UgDatabase *db;
     UWORD i;
 
@@ -292,8 +299,9 @@ struct ug_group *ugl_getgrnam(UG_A6, register STRPTR name __asm("a1"))
     return NULL;
 }
 
-struct ug_group *ugl_getgrgid(UG_A6, register LONG gid __asm("d0"))
+struct ug_group *ugl_getgrgid(UG_A6, UG_REG(LONG gid, "d0"))
 {
+    UG_ENTER("getgrgid");
     struct UgDatabase *db;
     UWORD i;
 
@@ -313,11 +321,13 @@ struct ug_group *ugl_getgrgid(UG_A6, register LONG gid __asm("d0"))
 
 VOID ugl_setgrent(UG_A6)
 {
+    UG_ENTER("setgrent");
     base->ug_GrCursor = 0;
 }
 
 struct ug_group *ugl_getgrent(UG_A6)
 {
+    UG_ENTER("getgrent");
     ug_db_require_group(base);
 
     if (base->ug_GrCursor >= base->ug_Global->db.gr_count)
@@ -328,5 +338,6 @@ struct ug_group *ugl_getgrent(UG_A6)
 
 VOID ugl_endgrent(UG_A6)
 {
+    UG_ENTER("endgrent");
     base->ug_GrCursor = 0;
 }

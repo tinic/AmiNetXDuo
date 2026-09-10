@@ -10,8 +10,6 @@
 
 #include "bsdsocket_vectors.h"
 
-#include "aminetxduo/syslog_level.h"
-
 #include "aminetxduo/version.h"
 
 #ifdef AMINETXDUO_BPF
@@ -282,47 +280,17 @@ static const char *bsd_text_lookup(const BsdErrText *table, ULONG count,
     return fallback;
 }
 
+const char *bsd_errno_string(LONG code)
+{
+    return bsd_text_lookup(
+        bsd_errno_text,
+        sizeof(bsd_errno_text) / sizeof(bsd_errno_text[0]),
+        code, "Unknown error");
+}
+
 LONG bsd_Errno(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     return SocketBase->sb_Errno;
-}
-
-_Static_assert(AMI_SYSLOG_LEVEL_ERROR == AMI_LOG_ERROR &&
-               AMI_SYSLOG_LEVEL_WARN  == AMI_LOG_WARN  &&
-               AMI_SYSLOG_LEVEL_INFO  == AMI_LOG_INFO,
-               "syslog_level.h repeats compat.h's levels and must match");
-
-/*
- * vsyslog(), LVO -0x102.  It was bsd_enosys until now, and the survey of Aminet
- * daemons is what found it: telnetd calls it 4 times, lpd 8, AmiFTPd 28 and
- * more, POPd once, and every one of those lines went nowhere on every profile
- * INCLUDING the default build.  The library was already accepting the whole
- * syslog configuration -- SBTC_LOGTAGPTR, SBTC_LOGSTAT, SBTC_LOGFACILITY, all
- * three stored above -- and then discarding the calls that used it.
- *
- * `args` is a RawDoFmt argument stream, which is what an Amiga caller has, so
- * this cannot forward to ami_log()'s varargs and goes to ami_log_raw().
- *
- * NO SIZE ARGUMENT AGAINST IT: what AMINETXDUO_LOG removes is our own log
- * sentences, and the format string here belongs to the caller.
- *
- * The priority's severity is the low three bits (BSD syslog.h); LOG_ERR and
- * worse are errors, LOG_WARNING is a warning, the rest are informational.  The
- * facility half is stored for SBTC_LOGFACILITY readers and not used to route.
- */
-VOID bsd_vsyslog(register LONG pri __asm("d0"),
-                 register STRPTR msg __asm("a0"),
-                 register APTR args __asm("a1"),
-                 register struct AmiSocketBase *SocketBase __asm("a6"))
-{
-    if (SocketBase == NULL || msg == NULL)
-        return;
-
-    /* The names and types are the NDK pragma's, through tools/gen_vectors.py:
-       the prototype is generated and a hand-written one drifted from it. */
-    ami_log_raw(ami_syslog_level((unsigned long)pri),
-                (const char *)SocketBase->sb_LogTag,
-                (const char *)msg, args);
 }
 
 VOID bsd_SetErrnoPtr(register APTR errno_ptr __asm("a0"),
@@ -531,10 +499,8 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
         /* The *STRPTR tags are in/out: the caller passes an error number and
            gets a string pointer back through the same slot. */
         case SBTC_ERRNOSTRPTR:
-            bsd_tag_store(item, by_ref, (ULONG)bsd_text_lookup(
-                bsd_errno_text,
-                sizeof(bsd_errno_text) / sizeof(bsd_errno_text[0]),
-                (LONG)bsd_tag_fetch(item, by_ref), "Unknown error"));
+            bsd_tag_store(item, by_ref, (ULONG)bsd_errno_string(
+                (LONG)bsd_tag_fetch(item, by_ref)));
             return TRUE;
 
         case SBTC_HERRNOSTRPTR:

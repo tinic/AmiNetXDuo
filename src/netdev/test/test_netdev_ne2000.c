@@ -304,14 +304,30 @@ static void mock_put(struct NetdevNic *nic, unsigned reg, unsigned char val)
 }
 
 /* The data port through the bus ops, which is how the bulk paths reach it. */
+/*
+ * A wide window that does not mirror the narrow one.  0 is a card whose
+ * 32-bit window works; 1 corrupts what a LONG-mode READ returns; 2 corrupts
+ * what a LONG-mode WRITE stores.  ne2000_probe_wide() sets bus->dmode itself
+ * before each transfer, so the mode the caller intended is readable here --
+ * which is what lets one buffer model both a working window and a broken one.
+ */
+#define WIDE_OK          0
+#define WIDE_READ_BAD    1
+#define WIDE_WRITE_BAD   2
+static int mock_wide_fault;
+
 static VOID mock_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
 {
     UWORD i;
 
-    (VOID)bus;
     for (i = 0; i < len; i++)
     {
-        dst[i] = mock_buf[mock_dma & MOCK_MASK];
+        UBYTE v = mock_buf[mock_dma & MOCK_MASK];
+
+        if (mock_wide_fault == WIDE_READ_BAD &&
+            bus->dmode == NETDEV_DMODE_LONG)
+            v = (UBYTE)~v;          /* the window answers, but not the truth */
+        dst[i] = v;
         mock_dma++;
     }
     if (mock_dma_left <= len)
@@ -329,10 +345,14 @@ static VOID mock_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
 {
     UWORD i;
 
-    (VOID)bus;
     for (i = 0; i < len; i++)
     {
-        mock_buf[mock_dma & MOCK_MASK] = src[i];
+        UBYTE v = src[i];
+
+        if (mock_wide_fault == WIDE_WRITE_BAD &&
+            bus->dmode == NETDEV_DMODE_LONG)
+            v = (UBYTE)~v;          /* stored, but not what was sent */
+        mock_buf[mock_dma & MOCK_MASK] = v;
         mock_dma++;
     }
     if (mock_dma_left <= len)
@@ -538,6 +558,202 @@ static void test_no_odd_window(void)
                (unsigned long)note_count(ANXDIAG_CR_RETRY), 0);
 }
 
+/* ------------------------------------------------- the 32-bit data path -- */
+
+/*
+ * ne2000_probe_wide() picks the data path every ne2000-family card uses --
+ * six of the nine the sweep drives -- and netdev_bus.h:22 states the mode is
+ * "measured, not configured": two legs, different patterns, both directions,
+ * and only a match promotes to NETDEV_DMODE_LONG.
+ *
+ * NOTHING EXERCISED IT.  ne2000_attach() is its only caller and this file
+ * does not call attach -- the comment above netdev_mac_cis_node_id() says so
+ * outright.  The core is #included whole, so the probe can be driven
+ * directly, which is what this does.
+ *
+ * BOTH DIRECTIONS ARE FAILURES AND ONLY ONE IS LOUD.  Refusing a window that
+ * works costs half the throughput and is invisible outside a benchmark -- the
+ * "X-Surf 100 whose 32-bit window failed its readback runs at half speed and
+ * works perfectly" case.  ACCEPTING one that does not work reads garbage into
+ * every frame, and that is the direction these cases guard.
+ */
+static void test_wide_probe(void)
+{
+    NetdevNic  nic;
+    static unsigned char wide_window[64];
+
+    printf("\n-- the 32-bit window probe\n");
+
+    /* A card with no wide window at all is left in the mode it arrived in,
+       and the probe must not touch the bus to decide that. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    nic.bus.wide  = NULL;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("no wide window: the mode is left alone",
+       nic.bus.dmode == NETDEV_DMODE_WORD);
+
+    /* A window that mirrors the narrow one in both directions is promoted. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    nic.bus.wide  = wide_window;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("a window that mirrors both ways is promoted to LONG",
+       nic.bus.dmode == NETDEV_DMODE_LONG);
+
+    /*
+     * Leg 1 is written narrow and read wide.  A window that answers but
+     * answers wrongly must be refused -- this is the case that, granted,
+     * corrupts every received frame.
+     */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_READ_BAD;
+    nic.bus.wide  = wide_window;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("a window that reads back wrong is refused, not promoted",
+       nic.bus.dmode == NETDEV_DMODE_WORD);
+
+    /*
+     * Leg 2 is written wide and read narrow, "the direction that transmits".
+     * It exists because a window can echo one way and not the other, so leg 1
+     * passing is not enough -- and this is the case a one-leg probe misses.
+     */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_WRITE_BAD;
+    nic.bus.wide  = wide_window;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("a window that stores wrong is refused even though leg 1 passed",
+       nic.bus.dmode == NETDEV_DMODE_WORD);
+
+    mock_wide_fault = WIDE_OK;
+}
+
+/* --------------------------------------------------------- attach ------- */
+
+/*
+ * ne2000_attach() was reached by nothing.  A call-graph walk over src/netdev
+ * seeded with every function these tests mention put it in a cluster of six
+ * unreached functions with ONE root cause: attach installs read_hdr,
+ * ring_copy, ring_copy_sum and write_buf, so none of them is reachable while
+ * attach itself is not called.  The core is #included whole, so it can be
+ * called directly.
+ *
+ * THE GROUP-BIT FIX IS THE PART THAT MATTERS.  Bit 0 of the first octet is
+ * the Ethernet group bit.  A card whose PROM has it set has, on paper, a
+ * multicast address for its own station address -- and a station that filters
+ * on it is deaf to every unicast frame addressed to it.  The driver clears it
+ * and counts the repair where `netstat` can report it ("ROM address group bit
+ * cleared").  An emulator's PROM image is clean, so a sweep never exercises
+ * this: it is precisely a defect the rig cannot see.
+ */
+static void prom_stage(const unsigned char mac[6], int ww_signature)
+{
+    unsigned i;
+
+    /* A classic NE2000 images the address byte-doubled in the first 32 bytes
+       and signs itself with 'W' at 28 and 30. */
+    for (i = 0; i < 6u; i++)
+    {
+        mock_buf[i * 2u]      = mac[i];
+        mock_buf[i * 2u + 1u] = mac[i];
+    }
+    if (ww_signature)
+    {
+        mock_buf[28] = 0x57;
+        mock_buf[30] = 0x57;
+    }
+}
+
+static void test_attach_station_address(void)
+{
+    static const unsigned char clean[6] = { 0x00, 0x40, 0x95, 0x11, 0x22, 0x33 };
+    static const unsigned char grouped[6] = { 0x01, 0x40, 0x95, 0x44, 0x55, 0x66 };
+    NetdevNic nic;
+
+    printf("\n-- attach: the station address\n");
+
+    /* A signed NE2000 PROM: the address is the even bytes of the image. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(clean, 1);
+    ok("a signed PROM attaches", ne2000_attach(&nic) == 0);
+    ok("and the address is the image's even bytes",
+       memcmp(nic.factory, clean, 6) == 0);
+    ok("recorded as having come from the PROM",
+       nic.mac_source == (UBYTE)ANXDIAG_MAC_PROM);
+    ok("with no group-bit repair counted", nic.mac_group_fix == 0);
+
+    /*
+     * THE SAME CARD WITH THE GROUP BIT SET.  Accepting it leaves a station
+     * that cannot be addressed; the driver must clear the bit and say it did.
+     */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(grouped, 1);
+    ok("a PROM with the group bit set still attaches",
+       ne2000_attach(&nic) == 0);
+    ok("the group bit is cleared", (nic.factory[0] & 1u) == 0);
+    /*
+     * "cleared" alone is a weak assertion here and it is worth saying why.
+     * ne2000.c:770 validates the address after the repair and falls back --
+     * CIS node id, then a derived locally-administered address -- so an
+     * implementation that simply DID NOT repair also ends up with the group
+     * bit clear, on a completely different address.  The bytes below are what
+     * separates a repair from a replacement.
+     */
+    ok("the rest of the address is untouched",
+       nic.factory[1] == 0x40 && nic.factory[5] == 0x66);
+    ok("and the repair is counted for netstat", nic.mac_group_fix == 1);
+
+    /* A card the chip probe refuses is refused by attach, whatever is in the
+       buffer. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_no_reset = 1;              /* the chip never answers the reset */
+    prom_stage(clean, 1);
+    ok("a card that does not answer is refused", ne2000_attach(&nic) != 0);
+
+    mock_no_reset = 0;
+    mock_wide_fault = WIDE_OK;
+}
+
+/* Attach installs the hooks the receive and transmit paths run through.  A
+   NULL among them is a crash on the first frame, not a wrong answer. */
+static void test_attach_installs_the_hooks(void)
+{
+    static const unsigned char mac[6] = { 0x00, 0x40, 0x95, 0x77, 0x88, 0x99 };
+    NetdevNic nic;
+
+    printf("\n-- attach: the hooks the frame paths need\n");
+
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(mac, 1);
+    ok("attaches", ne2000_attach(&nic) == 0);
+
+    ok("read_hdr is installed",  nic.read_hdr  != NULL);
+    ok("ring_copy is installed", nic.ring_copy != NULL);
+    ok("write_buf is installed", nic.write_buf != NULL);
+    /* A port has no address to hand out, so this one must stay NULL: a
+       non-NULL frame_at would have the receive path hand up a pointer into a
+       card that cannot be addressed. */
+    ok("frame_at stays NULL for a port-driven core", nic.frame_at == NULL);
+
+    ok("the ring starts above the transmit buffers", nic.mem_start == 16384);
+    ok("and is 16 KB", nic.mem_size == 16384);
+}
+
 int main(void)
 {
     test_clone_warm();
@@ -545,6 +761,9 @@ int main(void)
     test_plain_card();
     test_dead_card();
     test_no_odd_window();
+    test_wide_probe();
+    test_attach_station_address();
+    test_attach_installs_the_hooks();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
 

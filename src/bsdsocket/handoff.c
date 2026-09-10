@@ -31,7 +31,6 @@ VOID bsd_handoff_init(struct AmiSocketBase *master)
      */
     master->sb_NextHandoffId = 0x10000;
 }
-
 static struct AmiSocketBase *bsd_master_of(struct AmiSocketBase *base)
 {
     return (base->sb_Master != NULL) ? base->sb_Master : base;
@@ -349,4 +348,3 @@ BOOL bsd_ProcessIsServer(register struct Process *pr __asm("a0"),
 
     return FALSE;
 }
-

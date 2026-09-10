@@ -80,7 +80,12 @@ static struct MsgPort  nsh_port;
 
 APTR AllocMem(ULONG byteSize, ULONG requirements)
 {
-    APTR p = malloc(byteSize ? byteSize : 1);
+    APTR p;
+
+    if (nsh.alloc_fails)
+        return NULL;
+
+    p = malloc(byteSize ? byteSize : 1);
 
     if (p != NULL)
     {
@@ -378,8 +383,8 @@ UINT _nxe_dhcp_create(NX_DHCP *dhcp_ptr, NX_IP *ip_ptr, CHAR *name_ptr)
     return nsh.dhcp_create_status;
 }
 
-/* NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL: the client has no pool of its own,
-   so netstack.c hands it ours right after create. */
+/* NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL: netstack.c installs an on-demand
+   private pool right after create. */
 UINT _nxe_dhcp_packet_pool_set(NX_DHCP *dhcp_ptr, NX_PACKET_POOL *pool_ptr)
 {
     dhcp_ptr -> nx_dhcp_packet_pool_ptr = pool_ptr;
@@ -425,6 +430,7 @@ UINT _nxe_packet_pool_create(NX_PACKET_POOL *pool_ptr, CHAR *name,
     (VOID)pool_control_block_size;
 
     memset(pool_ptr, 0, sizeof(*pool_ptr));
+    nsh.packet_pool_creates++;
 
     return NX_SUCCESS;
 }
@@ -1078,6 +1084,7 @@ UINT _nxe_ip_status_check(NX_IP *ip_ptr, ULONG needed_status, ULONG *actual_stat
 UINT _nxe_packet_pool_delete(NX_PACKET_POOL *pool_ptr)
 {
     (VOID)pool_ptr;
+    nsh.packet_pool_deletes++;
 
     return TX_SUCCESS;
 }

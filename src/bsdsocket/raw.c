@@ -51,7 +51,6 @@ static ULONG bsd_raw_queue_max(VOID)
 
     return queue;
 }
-
 /* Caller holds nx_ip_protection. */
 static VOID bsd_raw_flush(AmiSocket *sock)
 {
@@ -888,4 +887,3 @@ VOID bsd_raw_revalidate_endpoint(AmiSocket *sock)
     sock->as_RawTail  = tail;
     sock->as_RawCount = count;
 }
-

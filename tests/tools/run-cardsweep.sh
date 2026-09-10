@@ -150,6 +150,8 @@ mkdir -p "$KEEPDIR"
 SWEEP_START=$(date +%s)
 NPASS=0; NFAIL=0; NSKIP=0; NCARRIED=0; IDX=0
 
+echo "==> sweep id $SWEEP_ID, slot $SWEEP_SLOT (0 runs the table's own"\
+     "addresses and MACs unmoved; 1-5 shift them by -10 and +32)"
 echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card," \
      "peer ports from $PORTBASE"
 
@@ -158,9 +160,102 @@ echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card," \
 while read -r -u 3 board model addr mac; do
     [ -n "$board" ] || continue
 
+    base_octet=${addr##*.}
     if [ "$SWEEP_SLOT" -ne 0 ]; then
         addr="${addr%.*}.$(( ${addr##*.} - SWEEP_SLOT * 10 ))"
         mac="${mac%:*}:$(printf '%02x' $(( 0x${mac##*:} + SWEEP_SLOT * 32 )))"
+    fi
+
+    # THE ADDRESS HAS TO BE FREE, AND NOTHING CHECKED.  SWEEP_SLOT hashes the
+    # sweep ID into the last octet, so two runs of the same card differ only in
+    # which address they land on -- and 192.168.1.191 is held by a real machine
+    # on this LAN (98:FD:B4:9A:47:65).  An arm that draws it boots, loses
+    # duplicate-address detection, never brings its TCP server up, and reports
+    #
+    #     THE RUN DID NOT FINISH: it stopped in 'SYS:iperf -s -p 7404 -t 20'
+    #
+    # after burning the full 300 s timeout.  That verdict cost a day of
+    # theorising: build variants, pool exhaustion, serial collisions, cold
+    # rigs, CPU load.  The guest knew all along and said so on the serial log
+    # -- but only on an AMINETXDUO_LOG build, and only to a log nobody reads
+    # when the run merely "times out".
+    #
+    # An ARP probe costs a second and answers it before the emulator starts.
+    # `arping` is not everywhere, so this uses the kernel's own neighbour
+    # table: ping once, then read what ARP learned.  A reply is not required
+    # -- the occupant here does not answer ping, which is exactly how the
+    # address got cleared as "silent" by hand.  A MAC in the table is the
+    # proof, and one of OUR guests is not a conflict.
+    if command -v ip > /dev/null 2>&1; then
+        # FLUSH FIRST, then probe, then wait.  Each step earned itself:
+        #
+        #   flush  -- `ip neigh` keeps STALE entries long after the occupant is
+        #             gone, and .221 showed a stale MAC while an arm on that
+        #             very address passed.  Deleting first means any lladdr
+        #             that comes back was answered just now.
+        #   ping   -- ARP resolution happens at layer 2 whether or not the host
+        #             answers ICMP, and this one does not answer ICMP at all.
+        #             The echo failing is expected and ignored.
+        #   sleep 2 -- with 1 s the table still reads empty and every address
+        #             looks free, which made this check appear useless when it
+        #             was merely too quick.
+        ip neigh del "$addr" dev "$IFACE" > /dev/null 2>&1 || true
+        ping -c2 -W2 "$addr" > /dev/null 2>&1 || true
+        sleep 2
+        # REACHABLE, and nothing weaker.  An lladdr alone is not proof the
+        # address is taken: `ip neigh` keeps STALE entries long after the
+        # occupant has gone, and .221 showed a stale MAC while an arm on that
+        # very address passed.  REACHABLE means packets were exchanged just
+        # now.  One of OUR guests (02:41:4d:49:*) is never a conflict.
+        # ANY lladdr, not only REACHABLE: the entry legitimately cycles
+        # REACHABLE -> DELAY -> STALE while we look at it, and the flush above
+        # is what makes a bare lladdr trustworthy.  One of OUR guests
+        # (02:41:4d:49:*) is never a conflict.
+        # `|| true` IS LOAD-BEARING.  This script runs under `set -e`, and a
+        # pipeline ending in a grep that finds nothing exits 1 -- so on a FREE
+        # address the assignment failed and the sweep died silently right after
+        # its header, having tested no card at all.  The conflicting address
+        # worked, because there grep succeeds.  A check that only survives when
+        # it fires is worse than no check.
+        conflict=$(ip neigh show "$addr" 2>/dev/null \
+                   | grep -vi "02:41:4d:49" \
+                   | grep -oE "lladdr [0-9a-f:]+" | head -1 || true)
+        # AND IF IT IS TAKEN, MOVE -- do not skip.  17 of the 61 addresses in
+        # this range belong to real machines, and SWEEP_SLOT (cksum(ID) % 6)
+        # decides which ten the sweep lands on: slots 0, 3 and 4 are clean,
+        # slot 1 loses 3 cards of 9, slot 5 loses 4, slot 2 loses 5.  Half of
+        # all sweep IDs draw a contaminated slot.  Skipping there is honest but
+        # it is still no coverage, and the whole point of this sweep is that it
+        # is the only cross-core coverage there is.
+        #
+        # Walk the other slots for the same card, keeping the low octet's
+        # identity: base - n*10 for the remaining n.  A concurrent sweep cannot
+        # collide with the result because build/cardsweep.lock already permits
+        # only one at a time on this machine.
+        if [ -n "$conflict" ]; then
+            taken="$addr is $conflict"
+            found=""
+            for try in 0 1 2 3 4 5; do
+                [ "$try" -ne "$SWEEP_SLOT" ] || continue
+                cand="${addr%.*}.$(( ${base_octet} - try * 10 ))"
+                ip neigh del "$cand" dev "$IFACE" > /dev/null 2>&1 || true
+                ping -c2 -W2 "$cand" > /dev/null 2>&1 || true
+                sleep 2
+                busy=$(ip neigh show "$cand" 2>/dev/null \
+                       | grep -vi "02:41:4d:49" \
+                       | grep -oE "lladdr [0-9a-f:]+" | head -1 || true)
+                [ -n "$busy" ] && continue
+                found=$cand
+                break
+            done
+            if [ -z "$found" ]; then
+                printf 'card=%s board=%s model=%s addr=%s mac=%s status=skip_address_in_use wall_s=0 reason="%s, and every other slot for this card is taken too; the arm would lose duplicate-address detection and time out"\n' \
+                       "$board" "$board" "$model" "$addr" "$mac" "$taken"
+                continue
+            fi
+            echo "  $addr is taken ($conflict); this arm moves to $found"
+            addr=$found
+        fi
     fi
 
     sana2_select "$board" "$BUILDDIR"
@@ -174,8 +269,8 @@ while read -r -u 3 board model addr mac; do
         else
             reason="no $drv in the driver store; set AMINETXDUO_SANA2_STORE"
         fi
-        printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=skip_no_driver wall_s=0 reason="%s"\n' \
-               "$board" "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
+        printf 'card=%s board=%s model=%s addr=%s mac=%s driver=%s driver_source=%s anxcard=%s status=skip_no_driver wall_s=0 reason="%s"\n' \
+               "$board" "$board" "$model" "$addr" "$mac" "$drv" "$SANA2_SEL_SOURCE" \
                "${anxcard:-none}" "$reason" | tee -a "$RESULTS"
         NSKIP=$((NSKIP + 1))
         continue
@@ -314,8 +409,16 @@ while read -r -u 3 board model addr mac; do
         *)           NFAIL=$((NFAIL + 1)) ;;
     esac
 
-    printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s udp_peerreport=%s wall_s=%s log=%s evidence=%s%s\n' \
-           "$board" "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
+    # addr= AND mac= ARE NOT DECORATION.  SWEEP_SLOT moves both per sweep --
+    # base - slot*10 and base + slot*32 -- and slot 0 alone is left unmoved, so
+    # two arms of the same card routinely run on different addresses and a row
+    # that omits them cannot be told apart afterwards.  Seven rows from seven
+    # arms were read here as seven runs on one address; they were four
+    # addresses, and the conclusion drawn from them ("it is not the address")
+    # had nothing under it.  A row that does not say what it ran on is not
+    # evidence.
+    printf 'card=%s board=%s model=%s addr=%s mac=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s udp_peerreport=%s wall_s=%s log=%s evidence=%s%s\n' \
+           "$board" "$board" "$model" "$addr" "$mac" "$drv" "$SANA2_SEL_SOURCE" \
            "${anxcard:-none}" "$status" "$rc" "${iface_rc:-none}" \
            "$tx" "$peer_rx" "$rx" "$peer_tx" "$utx" "$peer_urx" "$upeer" \
            "$wall" "$LOGDIR/$board.log" "$kept" "$why" | tee -a "$RESULTS"

@@ -417,8 +417,8 @@ UINT        ok;
         return (0UL);
     }
 
-    N68K_RXV_COUNT(transport_ok);
-    N68K_RXV_COUNT(v6_ok);
+    N68K_RXV_HOT(transport_ok);
+    N68K_RXV_HOT(v6_ok);
     if (offset > 40U)
     {
         N68K_RXV_COUNT(v6_ext);
@@ -500,7 +500,7 @@ UINT        ok;
     }
 
     flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
-    N68K_RXV_COUNT(ip_ok);
+    N68K_RXV_HOT(ip_ok);
 
     /* ---- the transport ---------------------------------------------------
      *
@@ -595,7 +595,7 @@ UINT        ok;
         break;
     }
 
-    N68K_RXV_COUNT(transport_ok);
+    N68K_RXV_HOT(transport_ok);
 
     return (flags);
 }
@@ -755,9 +755,9 @@ UINT    offset;
             return (0UL);
         }
 
-        N68K_RXV_COUNT(transport_ok);
-        N68K_RXV_COUNT(v6_ok);
-        N68K_RXV_COUNT(from_copy);
+        N68K_RXV_HOT(transport_ok);
+        N68K_RXV_HOT(v6_ok);
+        N68K_RXV_HOT(from_copy);
         if (offset > 40U)
         {
             N68K_RXV_COUNT(v6_ext);
@@ -880,7 +880,7 @@ UINT    offset;
     }
 
     flags =  NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
-    N68K_RXV_COUNT(ip_ok);
+    N68K_RXV_HOT(ip_ok);
 
     /* ---- transport = carried, plus the pseudo header -------------------- */
     /*
@@ -926,14 +926,14 @@ UINT    offset;
               ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
               : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM;
 
-    N68K_RXV_COUNT(transport_ok);
-    N68K_RXV_COUNT(from_copy);
+    N68K_RXV_HOT(transport_ok);
+    N68K_RXV_HOT(from_copy);
 
     /* ONLY here.  Nothing else moves this, which is what makes it usable as
        proof that the IPv4 fast path ran at all: from_copy counts both
        families and ip_ok is bumped by the ordinary walk as well, so an
        assertion on either passes with this path switched off. */
-    N68K_RXV_COUNT(v4_fused);
+    N68K_RXV_HOT(v4_fused);
 
     return (flags);
 }

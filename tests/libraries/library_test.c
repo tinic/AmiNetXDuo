@@ -12,6 +12,8 @@
  * against our code.
  *
  * Stage the libraries into LIBS: first, see tests/libraries/run-libraries.sh.
+ * `library_test USERGROUP` stops after the usergroup ABI checks, for a focused
+ * Enforcer run that needs no SANA-II device or network configuration.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,6 +30,7 @@
 #include <proto/dos.h>
 
 #include <stdarg.h>
+#include <string.h>
 
 
 /* ------------------------------------------------------------- logging --- */
@@ -90,6 +93,101 @@ static BOOL t_check(BOOL ok, const char *what, ULONG detail)
  * which is the ABI detail under test.
  */
 struct Library *SocketBase;
+
+struct TUserGroupCredentials
+{
+    LONG  cr_ruid;
+    LONG  cr_rgid;
+    UWORD cr_umask;
+    LONG  cr_euid;
+    WORD  cr_ngroups;
+    LONG  cr_groups[32];
+    LONG  cr_session;
+    char  cr_login[32];
+};
+
+struct TUserGroupPasswd
+{
+    char *pw_name;
+    char *pw_passwd;
+    LONG  pw_uid;
+    LONG  pw_gid;
+    char *pw_gecos;
+    char *pw_dir;
+    char *pw_shell;
+};
+
+struct TUserGroupGroup
+{
+    char  *gr_name;
+    char  *gr_passwd;
+    LONG   gr_gid;
+    char **gr_mem;
+};
+
+#define LVO_getcredentials (-258)
+
+#define T_UGT_ERRNOLPTR 0x80000004UL
+#define T_UGT_INTRMASK  0x80000010UL
+
+static LONG ug_setup_context(struct Library *base, STRPTR name,
+                             struct TagItem *tags)
+{
+    return LP2(0x1e, LONG, ug_setup_context,
+               STRPTR, name, a0, struct TagItem *, tags, a1, , base);
+}
+
+static LONG ug_geteuid(struct Library *base)
+{
+    return LP0(0x36, LONG, ug_geteuid, , base);
+}
+
+static LONG ug_getegid(struct Library *base)
+{
+    return LP0(0x4e, LONG, ug_getegid, , base);
+}
+
+static LONG ug_getgroups(struct Library *base, LONG count, LONG *groups)
+{
+    return LP2(0x60, LONG, ug_getgroups,
+               LONG, count, d0, LONG *, groups, a1, , base);
+}
+
+static struct TUserGroupPasswd *ug_getpwnam(struct Library *base, STRPTR name)
+{
+    return LP1(0x72, struct TUserGroupPasswd *, ug_getpwnam,
+               STRPTR, name, a1, , base);
+}
+
+static VOID ug_setgrent(struct Library *base)
+{
+    LP0NR(0x9c, ug_setgrent, , base);
+}
+
+static struct TUserGroupGroup *ug_getgrent(struct Library *base)
+{
+    return LP0(0xa2, struct TUserGroupGroup *, ug_getgrent, , base);
+}
+
+static VOID ug_endgrent(struct Library *base)
+{
+    LP0NR(0xa8, ug_endgrent, , base);
+}
+
+static struct TUserGroupCredentials *ug_getcredentials(
+    struct Library *base, struct Task *task)
+{
+    return LP1(0x102, struct TUserGroupCredentials *, ug_getcredentials,
+               struct Task *, task, a0, , base);
+}
+
+static volatile struct Task *t_ug_foreign_task;
+
+static VOID t_ug_foreign_main(VOID)
+{
+    t_ug_foreign_task = FindTask(NULL);
+    Wait(SIGBREAKF_CTRL_E);
+}
 
 /* bsdsocket.library LVOs, from the NDK's bsdsocket_lib.fd and
    <inline/bsdsocket.h>. */
@@ -738,7 +836,7 @@ LONG             sock;
 
 /* ------------------------------------------------------------------ main -- */
 
-int main(void)
+int main(int argc, char **argv)
 {
 
 struct Library  *ugbase;
@@ -746,6 +844,13 @@ struct Process  *child;
 struct TagItem   tags[6];
 ULONG            waited;
 ULONG            closed_after;
+struct Process  *ug_child;
+struct TUserGroupCredentials *ug_creds;
+struct TUserGroupPasswd *ug_passwd;
+struct TUserGroupGroup *ug_group;
+LONG             ug_errno;
+LONG             ug_groups[32];
+LONG             ug_group_count;
 
 
     t_log("AmiNetXDuo, shared library load test");
@@ -765,7 +870,93 @@ ULONG            closed_after;
                        "usergroup.library version >= 4",
                        (ULONG) ugbase -> lib_Version);
 
+        ug_errno = -1;
+        tags[0].ti_Tag  = T_UGT_INTRMASK;
+        tags[0].ti_Data = SIGBREAKF_CTRL_C;
+        tags[1].ti_Tag  = T_UGT_ERRNOLPTR;
+        tags[1].ti_Data = (ULONG)&ug_errno;
+        tags[2].ti_Tag  = TAG_DONE;
+        tags[2].ti_Data = 0;
+
+        (VOID)t_check((BOOL)(ug_setup_context(
+                                 ugbase, (STRPTR)"library_test", tags) == 0),
+                      "ug_SetupContextTagList(ch_nfsc shape)",
+                      (ULONG)ug_errno);
+        (VOID)t_check((BOOL)(ug_geteuid(ugbase) == 0),
+                      "geteuid after context setup", 0UL);
+        (VOID)t_check((BOOL)(ug_getegid(ugbase) == 0),
+                      "getegid after context setup", 0UL);
+
+        ug_group_count = ug_getgroups(ugbase, 32, ug_groups);
+        (VOID)t_check((BOOL)(ug_group_count == 1 && ug_groups[0] == 0),
+                      "getgroups after context setup",
+                      (ULONG)ug_group_count);
+
+        ug_passwd = ug_getpwnam(ugbase, (STRPTR)"root");
+        (VOID)t_check((BOOL)(ug_passwd != NULL &&
+                             ug_passwd->pw_uid == 0 &&
+                             ug_passwd->pw_gid == 0),
+                      "getpwnam(root) for NFS credentials",
+                      (ULONG)ug_passwd);
+
+        ug_setgrent(ugbase);
+        ug_group = ug_getgrent(ugbase);
+        (VOID)t_check((BOOL)(ug_group != NULL &&
+                             ug_group->gr_gid == 0 &&
+                             ug_group->gr_mem != NULL &&
+                             ug_group->gr_mem[0] != NULL),
+                      "group iteration for NFS credentials",
+                      (ULONG)ug_group);
+        (VOID)t_check((BOOL)(ug_getgrent(ugbase) == NULL),
+                      "group iteration terminates", 0UL);
+        ug_endgrent(ugbase);
+
+        tags[0].ti_Tag  = NP_Entry;     tags[0].ti_Data = (ULONG)t_ug_foreign_main;
+        tags[1].ti_Tag  = NP_Name;      tags[1].ti_Data = (ULONG)"library_test ug";
+        tags[2].ti_Tag  = NP_StackSize; tags[2].ti_Data = T_CHILD_STACK;
+        tags[3].ti_Tag  = NP_Cli;       tags[3].ti_Data = (ULONG)FALSE;
+        tags[4].ti_Tag  = TAG_DONE;     tags[4].ti_Data = 0;
+
+        ug_child = CreateNewProc(tags);
+        (VOID)t_check((BOOL)(ug_child != NULL),
+                      "CreateNewProc(usergroup credential peer)", 0UL);
+        if (ug_child != NULL)
+        {
+            for (waited = 0; t_ug_foreign_task == NULL && waited < 100; waited++)
+                Delay(1);
+
+            t_log("  credential tasks: self=0x%lx foreign=0x%lx",
+                  (ULONG)FindTask(NULL), (ULONG)t_ug_foreign_task);
+
+            ug_creds = ug_getcredentials(ugbase,
+                                         (struct Task *)t_ug_foreign_task);
+            if (ug_creds != NULL)
+            {
+                t_log("  credentials: ruid=%ld rgid=%ld umask=%ld euid=%ld"
+                      " ngroups=%ld group0=%ld session=0x%lx login=%s",
+                      ug_creds->cr_ruid, ug_creds->cr_rgid,
+                      (ULONG)ug_creds->cr_umask, ug_creds->cr_euid,
+                      (LONG)ug_creds->cr_ngroups, ug_creds->cr_groups[0],
+                      (ULONG)ug_creds->cr_session, ug_creds->cr_login);
+            }
+            (VOID)t_check((BOOL)(ug_creds != NULL &&
+                                 ug_creds->cr_umask == 0022 &&
+                                 ug_creds->cr_ngroups >= 0 &&
+                                 ug_creds->cr_ngroups <= 32),
+                          "getcredentials(task without an opener)",
+                          (ULONG)ug_creds);
+            Signal((struct Task *)ug_child, SIGBREAKF_CTRL_E);
+        }
+
         CloseLibrary(ugbase);
+    }
+
+    if (argc > 1 && strcmp(argv[1], "USERGROUP") == 0)
+    {
+        t_log("");
+        t_log("%ld checks, %ld failures, %s",
+              t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
+        return((t_failures == 0UL) ? 0 : 20);
     }
 
     /* ---- bsdsocket.library, on a watched Process ------------------------- */

@@ -124,6 +124,28 @@ EOF
 fi
 unset _ami_tc_rc
 
+# A compiler that runs is not necessarily a compiler whose startup is safe.
+# Keep this at the common resolver seam so shell builds, client builds and
+# hand-selected AMIGA_TOOLCHAIN_ROOT values cannot bypass the CI/release gate.
+# Capture the normal all-green inventory; print it only on failure, where the
+# per-multilib diagnosis is the useful part of the error.
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "No python3 available to verify the m68k-amigaos crt0 objects." >&2
+    return 2 2>/dev/null || exit 2
+fi
+_ami_crt0_check=$(python3 "$_ami_tc_here/fix-toolchain-crt0.py" \
+    "$AMIGA_TOOLCHAIN_ROOT" --check 2>&1)
+_ami_crt0_rc=$?
+if [ "$_ami_crt0_rc" != 0 ]; then
+    printf '%s\n' "$_ami_crt0_check" >&2
+    echo "" >&2
+    echo "The selected toolchain cannot prove a safe crt0 argc/argv contract." >&2
+    echo "Repair it with tools/fix-toolchain-crt0.py, or fetch the pin." >&2
+    unset _ami_crt0_check _ami_crt0_rc
+    return 2 2>/dev/null || exit 2
+fi
+unset _ami_crt0_check _ami_crt0_rc
+
 export AMIGA_TOOLCHAIN_ROOT
 export AMIGA_GCC="${AMIGA_GCC:-$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc}"
 export AMIGA_NDK="${AMIGA_NDK:-$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/ndk-include}"

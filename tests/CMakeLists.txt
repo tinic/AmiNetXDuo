@@ -20,6 +20,7 @@ add_subdirectory(atf)
 # Host-only, and it says so itself: the sanitizer fuzz drivers for the parsers
 # that read bytes we did not write. Nothing to build when cross-compiling.
 add_subdirectory(fuzz)
+add_subdirectory(toolchain)
 add_subdirectory(x509)
 add_subdirectory(leak)
 add_subdirectory(concurrent)

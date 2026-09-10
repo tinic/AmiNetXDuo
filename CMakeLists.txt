@@ -7,7 +7,21 @@ cmake_minimum_required(VERSION 3.20)
 # plain vX.Y.Z.
 #
 # 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.26.3 LANGUAGES C ASM)
+project(AmiNetXDuo VERSION 0.26.5 LANGUAGES C ASM)
+
+# CMake reloads the compiler recorded by the first configure after processing
+# the toolchain file.  A reused directory could therefore validate the newly
+# selected AMIGA_TOOLCHAIN_ROOT and still compile with an older cached GCC.
+# Check after project(), when CMake's final compiler choice is visible; mixing
+# startup objects, headers and LTO plugins across toolchains is never valid.
+if(CMAKE_CROSSCOMPILING AND DEFINED AMIGA_TOOLCHAIN_PREFIX AND NOT
+   CMAKE_C_COMPILER STREQUAL "${AMIGA_TOOLCHAIN_PREFIX}gcc")
+    message(FATAL_ERROR
+        "This build directory was configured with ${CMAKE_C_COMPILER}, but "
+        "the selected toolchain is ${AMIGA_TOOLCHAIN_PREFIX}gcc. Remove the "
+        "build directory and configure it again; CMake cannot switch a "
+        "compiler in place.")
+endif()
 
 # Every build writes compile_commands.json.  tools/check-ram-size.sh has no
 # symbol to read -- sizeof(AmiNetStack) is a compile-time size -- so it
@@ -348,15 +362,15 @@ endif()
 # see the same number, which is exactly what a global define is for.  Nothing
 # is defined at the default, so the shipped build's compile lines -- and its
 # LTO options record -- are the bytes they were before this option existed.
-# Packets the DNS client keeps to itself.
-#
-# There is no AMINETXDUO_DNS_PACKETS any more.  It sized the resolver's PRIVATE
-# pool, and there is no longer one: nx_user.h defines
-# NX_DNS_CLIENT_USER_CREATE_PACKET_POOL, so nx_dns_pool_area is not compiled
-# (nxd_dns.h:324) and neither is the create that filled it (nxd_dns.c:236).
-# NX_DNS_PACKET_POOL_SIZE has no reader left, and an option that silently does
-# nothing is worse than no option: somebody would tune it and measure no
-# change.  The resolver draws from ns_Pool now.
+# Packets reserved for DNS queries.  The pool is allocated only when DNS is
+# created, rather than embedded in every AmiNetStack, but remains independent
+# of the main data-path pool.  The resolver issues one synchronous query at a
+# time and retries at most three times, so four packets is its established
+# capacity.
+set(AMINETXDUO_DNS_PACKETS "4" CACHE STRING
+    "Packets in the DNS client's on-demand private pool (4 ships)")
+add_compile_definitions(
+    "NX_DNS_PACKET_POOL_SIZE=(${AMINETXDUO_DNS_PACKETS}*(NX_DNS_PACKET_PAYLOAD+sizeof(NX_PACKET)))")
 
 # Half-open connections held with their options recorded exactly.
 #
@@ -454,7 +468,8 @@ endif()
 # TREE READS ONE.  Checked by name across the whole repository, third_party
 # excluded: nx_ip_total_packets_received, nx_ip_tcp_packets_sent,
 # nx_ip_udp_packets_received, nx_icmp_pings_sent, nx_arp_requests_sent and
-# their families are referenced nowhere.  What `netstat -s` and
+# their families were believed to be referenced nowhere.  See below: three of
+# them are.  What `netstat -s` and
 # `ShowNetStatus` print is our own ToolStats accounting, which is untouched.
 #
 # TWO FAMILIES ARE DELIBERATELY NOT HERE.  NX_DISABLE_PACKET_INFO: netstack.c
@@ -709,11 +724,29 @@ endif()
 
 option(AMINETXDUO_NX_COUNTERS
        "Compile NetX Duo's TCP/UDP/ARP/RARP/IGMP counters, for diagnosis" OFF)
+#
+# THREE OF THE FIVE CAME BACK, 2026-09-08, BY THE RULE STATED ABOVE.
+# "referenced nowhere" was wrong: TCP, UDP and ARP info are read by SHIPPED
+# code on six paths, and every one of them was handing out zeros.
+#
+#   src/bsdsocket/netstats.c:71,93     GetNetworkStatistics NETSTATUS_tcp/udp
+#   src/bsdsocket/netstatus.c:946,956,963  the extended ShowNetStatus block
+#   src/bsdsocket/interfaces.c:315     the interface's ARP counters
+#   src/netstack/netstack_rexx_vars.c:366,390  the ARexx host's variables
+#
+# NX_DISABLE_*_INFO guards only the INCREMENTS; nx_udp_info_get() still
+# returns NX_SUCCESS (netstat.c:508-518 says so and prints "not enabled"
+# instead).  So these four callers could not tell a quiet stack from a
+# disabled counter, and neither could anything reading them.  Caught by
+# tests/tools/run-ifquery.sh:502 -- "udpstat came back zeroed or the wrong
+# size" -- against a guest that had just taken a DHCP lease from
+# 192.168.1.1 over UDP.  That is the rule the IP and ICMP families are
+# already exempt under: a counter a test reads is a counter in use.
+#
+# RARP and IGMP stay off.  Nothing reads them: no nx_rarp_info_get() or
+# nx_igmp_info_get() call exists outside third_party/.
 if(NOT AMINETXDUO_NX_COUNTERS)
     add_compile_definitions(
-        NX_DISABLE_TCP_INFO
-        NX_DISABLE_UDP_INFO
-        NX_DISABLE_ARP_INFO
         NX_DISABLE_RARP_INFO
         NX_DISABLE_IGMP_INFO)
 endif()
@@ -1362,6 +1395,17 @@ option(AMINETXDUO_RX_VERIFY
 
 if(AMINETXDUO_RX_VERIFY)
     add_compile_definitions(AMINETXDUO_RX_VERIFY)
+endif()
+
+# The four rxverify counters that fire on every received frame, inside the
+# protection hold.  Off by default; see src/net68k/net68k.h.  The error and
+# skip counters are unconditional and do not need this.
+option(AMINETXDUO_RX_VERIFY_STATS
+       "Count rxverify fast-path hits per frame (diagnostic, costs receive)"
+       OFF)
+
+if(AMINETXDUO_RX_VERIFY_STATS)
+    add_compile_definitions(AMINETXDUO_RX_VERIFY_STATS)
 endif()
 
 add_library(threadx STATIC ${THREADX_SOURCES})

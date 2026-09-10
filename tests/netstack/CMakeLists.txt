@@ -574,6 +574,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # already answered.
     set(NETSTACK_HOST_TU
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_client_pool.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
         host/netstack_host_env.c)
 

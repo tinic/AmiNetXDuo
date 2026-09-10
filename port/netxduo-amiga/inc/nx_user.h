@@ -113,38 +113,39 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    per-caller cost.  A second listen on a port already listening is rejected
    with NX_DUPLICATE_LISTEN and consumes nothing, and past the last entry
    nx_tcp_server_socket_listen returns NX_MAX_LISTEN, which errno.c maps to
-   ENOBUFS.  32 was 1,408 bytes; 16 is 704 and still more listening ports at
-   once than an Amiga has daemons.  NOTE: this define is unconditional, so
-   -DNX_MAX_LISTEN_REQUESTS on the command line is silently ignored -- edit
-   it here.  */
-#define NX_MAX_LISTEN_REQUESTS                  16
+   ENOBUFS.  Keep the established 32-entry capacity.  A smaller value is a
+   deliberate compatibility limit and must not silently become the default. */
+#ifndef NX_MAX_LISTEN_REQUESTS
+#define NX_MAX_LISTEN_REQUESTS                  32
+#endif
 
-/* Measured, not guessed.  A fill-and-scan probe on the rig marked the stack
-   from inside the DHCP thread and read the deepest excursion across the whole
-   lease lifecycle -- init, selecting, requesting, bound, renewing, release --
-   at 860 bytes of NetX Duo's generic 4096.  2048 keeps 2.4x that margin.
-   Overflow here is silent corruption, not a fault: this machine has no MMU,
-   so the margin is deliberate and the measurement is the reason for it. */
-#define NX_DHCP_THREAD_STACK_SIZE               2048
+#if NX_MAX_LISTEN_REQUESTS < 32
+#error "AmiNetXDuo supports at least 32 simultaneous listening ports"
+#endif
 
-/* DHCP draws packets from the stack's own pool instead of carrying a private
-   one.  Without this the client embeds nx_dhcp_pool_area[5 * 592] plus an
-   NX_PACKET_POOL header inside NX_DHCP (nxd_dhcp_client.h:462-465) -- 3,024
-   bytes of the one resident allocation, for five 592-byte packets.  Ours is
-   strictly bigger: AMI_POOL_PAYLOAD is 1568 against the 592 DHCP needs
-   (NX_DHCP_MINIMUM_IP_DATAGRAM 576 + NX_PHYSICAL_HEADER 16), it holds
-   16..512 packets, and its memory is allocated rather than resident.
-   Requires nx_dhcp_packet_pool_set() before start; netstack.c does that at
-   both create sites. */
+/* Keep NetX Duo's generic 4 KiB contract.  DHCP sends through the SANA-II
+   bridge synchronously, so a device's BeginIO transmit path runs on this
+   thread's stack too.  The 860-byte fill-and-scan result used for v0.26.3
+   measured the A2065 path only; it did not bound third-party drivers such as
+   genet.device.  On an Amiga an overrun is silent memory corruption, and the
+   2 KiB setting broke DHCP on the documented A1200/PiStorm32 configuration.
+   Do not lower this floor without measuring the complete supported-device
+   matrix, including the synchronous driver call. */
+#define NX_DHCP_THREAD_STACK_SIZE               4096
+
+#if NX_DHCP_THREAD_STACK_SIZE < 4096
+#error "DHCP needs 4 KiB for synchronous third-party SANA-II transmit paths"
+#endif
+
+/* Keep the compact client layout, but do not share the IP pool: netstack.c
+   allocates the ordinary five-packet DHCP pool on demand and installs it
+   before the client starts.  Lease traffic therefore has a reservation even
+   when RX/TCP traffic has exhausted the main pool. */
 #define NX_DHCP_CLIENT_USER_CREATE_PACKET_POOL
 
-/* Same again for the resolver.  Without this NX_DNS embeds nx_dns_pool plus
-   nx_dns_pool_area[NX_DNS_PACKET_POOL_SIZE] (nxd_dns.h:317-320): 2,528 bytes
-   of the one resident allocation in the minimal drawer, 2,624 in the full
-   one, which is 90 per cent of NX_DNS.  Ours is bigger and already there --
-   AMI_POOL_PAYLOAD 1568 against the ~576 NX_DNS_PACKET_PAYLOAD asks for, and
-   _nx_dns_packet_pool_set() rejects a pool that is too small rather than
-   failing later.  netstack_dns.c hands it over right after nx_dns_create(). */
+/* The resolver likewise gets an on-demand private pool.  Keeping the storage
+   out of NX_DNS saves resident memory when DNS is unused without making name
+   resolution compete with the data path for its query packets. */
 #define NX_DNS_CLIENT_USER_CREATE_PACKET_POOL
 
 /* Changes the NX_TCP_SOCKET layout: an ABI break for anything compiled against

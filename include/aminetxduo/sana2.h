@@ -103,6 +103,15 @@ typedef struct AmiSana2Stats {
     /* Of rx_copy_hook, those that came through the private direct-receive
        pair; rx_copy_summed cannot answer this, both paths bump it. */
     ULONG   rx_direct_fill;
+    /* Of rx_copy_hook, those the copy hook had to take BYTEWISE because the
+       device handed over an odd payload pointer.  rx_copy_summed cannot say
+       this: since the odd branch learned to accumulate its own sum, BOTH
+       branches set summed, so summed == hook on every third-party driver and
+       the old "summed near zero proves the second walk" test reads the same
+       whether the branch fires or not.  Our own cores never reach it -- they
+       fill directly, or hand over an even pointer -- so this stays zero for
+       lance, dp8390, ne2000 and el3 and costs them one predictable branch. */
+    ULONG   rx_copy_unaligned;
     /* anxnet.device recovery counters read through S2_GETSPECIALSTATS.  Other
        drivers leave them zero. */
     ULONG   tick_polls;

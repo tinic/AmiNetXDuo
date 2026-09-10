@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Repair the two newlib crt0.o bugs in a m68k-amigaos toolchain.
+"""Repair three newlib crt0.o bugs in a m68k-amigaos toolchain.
 
     tools/fix-toolchain-crt0.py <toolchain-root> [--check]
 
-    Nothing here is needed against a toolchain built from bebbo/gcc amiga15.2
-    at 168be3619 or later; see FIXED UPSTREAM below. --check reports such a
-    tree as "immune" and succeeds.
+    The frame skew needs nothing against a toolchain built from bebbo/gcc
+    amiga15.2 at 168be3619 or later; see FIXED UPSTREAM below. The two argv
+    repairs are checked independently because the pinned 16.2.0b startup has
+    one corrected call sequence beside a still-broken initialization.
 
-    THIS IS NOT TRANSITIONAL. Both bugs are fixed in bebbo's git and neither
-    fix is in any toolchain anybody installs: the prebuilt m68k-amigaos images
-    lag upstream by years, not months, and the one this project pins is named
-    for GCC 10 and predates both fixes by eight months. Expect to be running
-    this script for the life of the project, and keep it that way, verified
-    in every configuration, and loud when it meets something new. It has
+    THIS IS NOT TRANSITIONAL. Prebuilt m68k-amigaos images lag source fixes,
+    and a nominally newer startup can exchange one argv bug for another.
+    Expect to run this script for the life of the project, keep it verified in
+    every configuration, and make it loud when it meets something new. It has
     already stopped two releases that would otherwise have shipped broken.
 
-    TWO SEPARATE BUGS live in the same crt0.c and are repaired independently:
-    the frame skew (below), and the argv indirection (SECOND BUG, further
-    down). A toolchain can have either, both or neither.
+    THREE SEPARATE BUGS live in the same crt0.c and are repaired independently:
+    the frame skew (below), the argv indirection (SECOND BUG, further down),
+    and the zero-address argv initialization (THIRD BUG). A toolchain can
+    carry any combination of them.
 
 WHAT IS WRONG
 
@@ -294,6 +294,87 @@ def instructions(objdump, path):
     return insns
 
 
+def instruction_details(objdump, path):
+    """Instructions with every relocation and their containing function.
+
+    `instructions()` intentionally keeps only the last relocation because the
+    older argv-call matcher needs one value.  A direct memory-to-memory store
+    can carry TWO relocations, however: its source and its destination.  The
+    optimized 68060 crt0 uses exactly that form to initialize __argv.  Keeping
+    the complete list is what lets the storage gate prove those objects rather
+    than accepting them because some other multilib happened to match.
+    """
+    out = subprocess.run([str(objdump), "-dr", str(path)],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+
+    details = []
+    function = None
+    for line in out.stdout.splitlines():
+        m = re.match(r"^\s*[0-9a-f]+\s+[0-9a-f]+\s+(\S+):\s*$", line)
+        if m:
+            function = m.group(1)
+            continue
+        m = re.match(r"^\s*([0-9a-f]+):\s+([0-9a-f]{4})[0-9a-f ]*\t(.*)$",
+                     line)
+        if m:
+            details.append([int(m.group(1), 16), int(m.group(2), 16),
+                            [], m.group(3).strip(), function])
+            continue
+        m = re.match(r"^\s+[0-9a-f]+:\s+\S+\s+(\S+)\s*$", line)
+        if m and details:
+            details[-1][2].append(m.group(1))
+    return details
+
+
+def symbol_location(objdump, path, wanted="argv"):
+    """Return (section, offset) for a symbol after stripping ABI underscores."""
+    out = subprocess.run([str(objdump), "-t", str(path)],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    for line in out.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 6 or fields[-1].lstrip("_") != wanted:
+            continue
+        try:
+            return fields[2], int(fields[0], 16)
+        except (IndexError, ValueError):
+            return None
+    return None
+
+
+def section_relocations(objdump, path):
+    """{section: [(offset, target), ...]} from objdump -r."""
+    out = subprocess.run([str(objdump), "-r", str(path)],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    result = {}
+    section = None
+    for line in out.stdout.splitlines():
+        m = re.match(r"^RELOCATION RECORDS FOR \[(.+)\]:$", line)
+        if m:
+            section = m.group(1)
+            result.setdefault(section, [])
+            continue
+        m = re.match(r"^\s*([0-9a-f]+)\s+\S+\s+(\S+)\s*$", line)
+        if m and section is not None:
+            result[section].append((int(m.group(1), 16), m.group(2)))
+    return result
+
+
+def _refers_to_symbol(reloc, text, location):
+    """Whether one operand is the symbol at `location`."""
+    if reloc is None or location is None:
+        return False
+    section, offset = location
+    if reloc.lstrip("_") == "argv":
+        return True
+    return reloc == section and _addend(text) == offset
+
+
 def _writes_areg(text):
     """The address register this instruction's destination is, or None.
 
@@ -304,6 +385,14 @@ def _writes_areg(text):
     """
     m = re.search(r",%?a([0-7])$", text)
     return int(m.group(1)) if m else None
+
+
+def _displacement(value):
+    """Parse objdump's decimal register displacement or explicit hex value."""
+    unsigned = value.lstrip("-")
+    base = 16 if unsigned.startswith("0x") or \
+        re.search(r"[a-f]", unsigned) else 10
+    return int(value, base)
 
 
 def _addend(text):
@@ -331,10 +420,13 @@ def _addend(text):
     """
     m = re.search(r"a[0-7]@\((-?[0-9a-fx]+)\)", text)       # pea a4@(20)
     if m:
-        return int(m.group(1), 16)
+        return _displacement(m.group(1))
+    m = re.search(r"\((-?[0-9a-fx]+),%?a[0-7]\)", text)     # pea (20,a4)
+    if m:
+        return _displacement(m.group(1))
     m = re.search(r"\b([0-9a-f]+)\(%?a[0-7]\)", text)        # 20(a4), MIT
     if m:
-        return int(m.group(1), 16)
+        return _displacement(m.group(1))
     m = re.match(r"^\S+\s+#?([0-9a-f]+)\b", text)            # pea 0 <sym>
     return int(m.group(1), 16) if m else None
 
@@ -377,11 +469,14 @@ def argv_sites(objdump, path):
     confirmation is therefore structural: two adjacent pushes followed closely
     by a reference to main.
 
-    Returns [(offset, old_word, new_word), ...].
+    Returns ([(offset, old_word, new_word), ...], calls_to_main).
     """
     insns = instructions(objdump, path)
     if insns is None:
         return None
+    argv_location = symbol_location(objdump, path)
+    if argv_location is None:
+        return [], 0
 
     def calls_main(i):
         # Binutils 2.39 renders the call as `jsr 0 0 _main` and emits NO
@@ -400,8 +495,8 @@ def argv_sites(objdump, path):
     holds_argv = {}     # address register -> currently holds &__argv
     for i, (off, word, reloc, text) in enumerate(insns):
         # ---- shape B, first half: lea <__argv>,an
-        if (word & LEA_MASK) == LEA_OP and reloc == ".bss" \
-                and _addend(text) == 0:
+        if (word & LEA_MASK) == LEA_OP \
+                and _refers_to_symbol(reloc, text, argv_location):
             holds_argv[(word >> 9) & 7] = True
             continue
 
@@ -412,8 +507,8 @@ def argv_sites(objdump, path):
         # `moveal a4,an` immediately before is required: an + <.bss offset> is
         # only &__argv if an started at a4, and without that check any
         # register carrying anything could be adopted.
-        if (word & 0xF1FF) == ADDA_IMM and reloc == ".bss" \
-                and _addend(text) == 0:
+        if (word & 0xF1FF) == ADDA_IMM \
+                and _refers_to_symbol(reloc, text, argv_location):
             n = (word >> 9) & 7
             # `moveal a4,a6` here, `movea.l a4,a6` under the pinned binutils.
             if i and re.match(rf"^move[a.l]*\s+%?a4,%?a{n}$", insns[i - 1][3]):
@@ -421,7 +516,7 @@ def argv_sites(objdump, path):
                 continue
 
         # ---- shape A: a push whose own operand is __argv
-        if reloc == ".bss" and _addend(text) == 0 \
+        if _refers_to_symbol(reloc, text, argv_location) \
                 and (word in ARGV_FIX or word in PUSH_OPS):
             if pushes_next(i) and calls_main(i):
                 sites.append((off, word, ARGV_FIX.get(word, word)))
@@ -448,15 +543,25 @@ def argv_sites(objdump, path):
         w = _writes_areg(text)
         if w is not None:
             holds_argv.pop(w, None)
-    return sites
+    details = instruction_details(objdump, path)
+    if details is None:
+        return None
+    calls = sum(1 for _, _, relocs, text, function in details
+                if function is not None and function.endswith("____start") and
+                ((relocs and relocs[-1] in ("_main", "main")) or
+                 re.search(r"\b_?main\b", text)))
+    return sites, calls
 
 
 def repair_argv(objdump, path, check_only):
-    sites = argv_sites(objdump, path)
-    if sites is None:
+    result = argv_sites(objdump, path)
+    if result is None:
         return ("refused", "objdump could not read it")
-    if not sites:
-        return ("skipped", "no argv/argc push pair ahead of a call to main")
+    sites, calls = result
+    if calls not in (1, 2) or len(sites) != calls:
+        return ("refused", f"proved {len(sites)} argv/argc push pair(s) for "
+                           f"{calls} call(s) to main; crt0 shape requires "
+                           "review")
 
     wrong = [(off, old, new) for off, old, new in sites if new != old]
     if not wrong:
@@ -491,6 +596,222 @@ def repair_argv(objdump, path, check_only):
     path.write_bytes(bytes(data))
     return ("patched", f"{len(wrong)} call site(s): push &__argv -> "
                        f"move.l __argv,-(sp)")
+
+
+# ---------------------------------------------------------------- THIRD BUG
+# crt0.c must not write through __argv before the command-line initializer has
+# constructed it. Affected builds load the ZERO-FILLED CONTENTS of __argv into
+# an address register and write through it:
+#
+#     movea.l __argv,a0       ; a0 = 0 at process startup
+#     move.l  __commandline,(a0)
+#
+# The Workbench path does the same before storing its message. Both are an
+# immediate LONG-WRITE to address zero. For already-published objects the
+# compatible repair is `lea`, which has the same length and effective-address
+# extension words as `movea.l`, so changing the opcode word preserves every
+# relocation. This also covers the 16- and 32-bit baserel effective-address
+# forms. It is deliberately only an object repair: the source fix is to remove
+# both premature writes.
+#
+# Some m060 multilibs optimize the source into a direct store to the __argv
+# pointer object and never materialize the bad pointer.  Those are safe, but
+# they still have to be RECOGNIZED per object; accepting an unrecognized file
+# because eight sibling multilibs matched is not a gate.
+#
+# The old source workaround gave __argv backing storage. In that shape __argv
+# lives in a data section whose initializer relocates to the backing vector,
+# and loading the pointer before writing through it is safe, though it leaves
+# ownership split across two modules.
+#
+# The proper source fix follows libnix: __argv stays a zero-filled pointer and
+# crt0 never writes it. The __nocommandline initializer owns __argc/__argv and
+# its retained undefined reference pulls the parser out of libc; replacing the
+# hook deliberately leaves main(0, NULL). Recognize that complete contract,
+# not merely an absence of the two instructions -- accepting a partial edit or
+# an optimized-away parser anchor would turn this gate into the symptom check
+# that let the regression through.
+
+MOVEA_L_MASK, MOVEA_L_OP = 0xF1C0, 0x2040
+
+
+def _writes_through_areg(text):
+    """Address register used as an indirect destination, or None."""
+    m = re.search(r",\(%?a([0-7])\)$", text)       # move.l d0,(a0)
+    if m:
+        return int(m.group(1))
+    m = re.search(r",%?a([0-7])@$", text)          # old binutils spelling
+    return int(m.group(1)) if m else None
+
+
+def _destination_addend(text):
+    """Baserel displacement of the destination operand, or None."""
+    matches = []
+    patterns = (r"a[0-7]@\((-?[0-9a-fx]+)\)$",
+                r"\((-?[0-9a-fx]+),%?a[0-7]\)$",
+                r"\b([0-9a-f]+)\(%?a[0-7]\)$")
+    for pattern in patterns:
+        matches.extend(re.finditer(pattern, text))
+    if matches:
+        last = max(matches, key=lambda m: m.start())
+        return _displacement(last.group(1))
+    return None
+
+
+def _direct_store_to_argv(text, relocs, location):
+    """A move whose destination is the __argv object, not memory through it."""
+    if not text.startswith("move") or not relocs or location is None:
+        return False
+    section, offset = location
+    target = relocs[-1]
+    if target.lstrip("_") == "argv":
+        return True
+    if target != section:
+        return False
+    dest = _destination_addend(text)
+    if dest is not None:
+        return dest == offset
+    # Absolute objdump spellings name the destination after its address.
+    return bool(re.search(r",.*\b_+argv$", text)) and _addend(text) == offset
+
+
+def _argv_has_static_backing(objdump, path, location):
+    """Prove that the __argv pointer has a loader-relocated initial value."""
+    if location is None:
+        return False
+    section, offset = location
+    if section == ".bss":
+        return False
+    relocs = section_relocations(objdump, path)
+    if relocs is None:
+        return False
+    return any(at == offset and target.startswith(".")
+               for at, target in relocs.get(section, []))
+
+
+def _has_undefined_symbol(objdump, path, wanted):
+    """Whether the object retains an undefined reference to `wanted`."""
+    out = subprocess.run([str(objdump), "-t", str(path)],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return False
+    for line in out.stdout.splitlines():
+        fields = line.split()
+        if fields and "*UND*" in fields and \
+                fields[-1].lstrip("_") == wanted:
+            return True
+    return False
+
+
+def _parser_owns_argv(objdump, path):
+    """Prove the no-preinit-write source contract, including its link hook."""
+    location = symbol_location(objdump, path)
+    if location is None or location[0] not in (".bss", "*COM*"):
+        return False
+    if not _has_undefined_symbol(objdump, path, "nocommandline"):
+        return False
+
+    call_result = argv_sites(objdump, path)
+    if call_result is None:
+        return False
+    call_sites, calls = call_result
+    if calls not in (1, 2) or len(call_sites) != calls or any(
+            old != new for _, old, new in call_sites):
+        return False
+
+    section, offset = location
+    details = instruction_details(objdump, path)
+    if details is None:
+        return False
+    refs = 0
+    for _, _, relocs, text, function in details:
+        if function is None or not function.endswith("____start"):
+            continue
+        named = any(r.lstrip("_") == "argv" for r in relocs)
+        section_ref = section in relocs and (
+            _addend(text) == offset or _destination_addend(text) == offset)
+        if named or section_ref:
+            refs += 1
+    return refs == calls
+
+
+def argv_init_sites(objdump, path):
+    """Unsafe and proven-safe startup writes involving __argv."""
+    insns = instruction_details(objdump, path)
+    if insns is None:
+        return None
+    location = symbol_location(objdump, path)
+    if location is None:
+        return []
+    backed = _argv_has_static_backing(objdump, path, location)
+
+    sites = []
+    for i, (off, word, relocs, text, function) in enumerate(insns):
+        if function is None or not function.endswith("____start"):
+            continue
+
+        if _direct_store_to_argv(text, relocs, location):
+            sites.append((off, word, word))
+            continue
+
+        if i + 1 >= len(insns) or insns[i + 1][4] != function:
+            continue
+        is_movea = (word & MOVEA_L_MASK) == MOVEA_L_OP
+        is_lea = (word & LEA_MASK) == LEA_OP
+        if not (is_movea or is_lea):
+            continue
+        reloc = relocs[-1] if relocs else None
+        if not _refers_to_symbol(reloc, text, location):
+            continue
+
+        areg = (word >> 9) & 7
+        if _writes_through_areg(insns[i + 1][3]) != areg:
+            continue
+
+        # MOVEA.L and LEA share the destination-register and effective-address
+        # fields. Only their fixed opcode bits differ.  A MOVEA is safe only
+        # when __argv's own data initializer is proven to point at storage.
+        new = word if is_lea or backed else (word & 0x0E3F) | LEA_OP
+        sites.append((off, word, new))
+    return sites
+
+
+def repair_argv_init(objdump, path, check_only):
+    sites = argv_init_sites(objdump, path)
+    if sites is None:
+        return ("refused", "objdump could not read it")
+    if not sites and _parser_owns_argv(objdump, path):
+        return ("immune", "command-line initializer exclusively owns "
+                          "__argc/__argv and its libc link hook is retained")
+    if len(sites) != 2:
+        return ("refused", f"proved {len(sites)} of 2 expected __argv startup "
+                           "writes and did not prove parser ownership; crt0 "
+                           "shape requires review")
+
+    wrong = [(off, old, new) for off, old, new in sites if new != old]
+    if not wrong:
+        return ("immune", "both Shell and Workbench __argv writes have "
+                          "proven storage")
+    if check_only:
+        return ("buggy", f"{len(wrong)} initialization site(s) load the "
+                         f"zero-filled contents of __argv")
+
+    base = text_file_offset(objdump, path)
+    if base is None:
+        return ("refused", "cannot locate .text in the file")
+
+    data = bytearray(path.read_bytes())
+    for off, old, new in wrong:
+        at = base + off
+        if (data[at] << 8 | data[at + 1]) != old:
+            return ("refused",
+                    f"file offset 0x{at:x} does not hold the instruction "
+                    f"objdump reported at section 0x{off:x}")
+        data[at] = (new >> 8) & 0xFF
+        data[at + 1] = new & 0xFF
+    path.write_bytes(bytes(data))
+    return ("patched", f"{len(wrong)} initialization site(s): "
+                       f"movea.l __argv -> lea __argv")
 
 
 def repair(objdump, path, check_only):
@@ -590,11 +911,13 @@ def main():
                          "(the tree's own may be built for another host)\n")
         return 1
 
-    # The two bugs are independent, so they are counted and reported
+    # The three bugs are independent, so they are counted and reported
     # independently, a tree can be immune to one and carry the other, which
     # is exactly the state the pinned toolchain was in.
     rc = 0
-    for label, fn in (("frame skew", repair), ("argv indirection", repair_argv)):
+    for label, fn in (("frame skew", repair),
+                      ("argv indirection", repair_argv),
+                      ("argv zero-address initialization", repair_argv_init)):
         counts = {}
         printed_immune = False  # one line is enough for a whole clean tree
         print(f"== {label}")
@@ -613,11 +936,18 @@ def main():
             rc = 1
         if check_only and counts.get("buggy"):
             rc = 1
-        # Skipping EVERYTHING is not a pass, that is how an earlier version
-        # returned success over an unrepaired toolchain. "buggy" counts as
-        # understood: under --check a wholly unrepaired tree is every file
-        # buggy and none ok, which is a real verdict, not a parse failure.
-        if not any(counts.get(s) for s in ("ok", "patched", "immune", "buggy")):
+        # A check is a per-object gate.  Letting one recognized multilib hide
+        # a skipped sibling is the same aggregate-success mistake that let the
+        # optimized m060 argv initializer escape review. "buggy" still counts
+        # as understood in repair mode; the following --check must then see it
+        # as repaired or fail.
+        if check_only and counts.get("skipped"):
+            sys.stderr.write(f"fix-toolchain-crt0: {label}: "
+                             f"{counts['skipped']} crt0.o file(s) were not "
+                             f"understood\n")
+            rc = 1
+        elif not any(counts.get(s) for s in
+                     ("ok", "patched", "immune", "buggy")):
             sys.stderr.write(f"fix-toolchain-crt0: {label}: nothing was "
                              f"verified on any crt0.o, the disassembly was "
                              f"not understood\n")

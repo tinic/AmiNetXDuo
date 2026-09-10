@@ -13,6 +13,7 @@ cd "$ROOT"
 
 BUILD="${AMINETXDUO_CI_BUILD:-build/ci}"
 JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo 4 )}"
+. tools/cmake-toolchain-cache.sh
 
 # The configurations that must all build.  AMINETXDUO_IPV6, AMINETXDUO_TLS and
 # AMINETXDUO_CRYPTO68K_ASM each change the tree, and each has broken while the
@@ -137,11 +138,11 @@ CROSS_CONFIGS=(
     # the gate that keeps them here, tools/check-option-coverage.sh, asks only
     # that each option's other side is compiled somewhere.
     #
-    # Six diagnostics that only ADD -- counters, a probe, a symbol table, the
+    # Seven diagnostics that only ADD -- counters, a probe, a symbol table, the
     # sampling profiler.  None changes a struct a shipped image lays out, so
     # one build compiles them all and a break in any is a break in this arm.
     # The serial log is not among them any more: it is in every build.
-    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON"
+    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON"
     # The profiler's attribution aid, on its own arm.  It CANNOT ride `instr`:
     # -fno-inline-functions-called-once is the whole point of it, and `instr`
     # is the arm check-hot-calls.sh reads to assert that the per-frame receive
@@ -216,7 +217,16 @@ host_test_targets() { # builddir
 # 123 with perf_prof_report.
 # Two branches raised this against the same base on the same day; the merge
 # is the SUM of what each added, not the larger of the two numbers.
-HOST_TESTS_EXPECTED=123
+# 121, plus netdev_lance_csr.
+# 122, plus usergroup_credentials, usergroup_db, usergroup_ids, usergroup_misc (amend in place: BACKLOG cites lines).
+# 127, plus fuzz_cis_seeds and fuzz_cis_sweep.
+# 129, plus netdev_cmds.
+# 130, plus netdev_isapnp.
+# 131, plus netdev_dp8390.
+# 132, plus netdev_diag.
+# 133, plus netdev_unit.
+# 134, plus ami_random.
+HOST_TESTS_EXPECTED=138
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -428,6 +438,21 @@ stage_host() {
         return 1
     fi
 
+    # CMake cannot switch a compiler in place, but every CI-owned build tree
+    # follows the pinned compiler.  The refresh path is normally exercised
+    # only on the first run after a pin update, so prove both its destructive
+    # and no-op decisions explicitly on disposable fixtures every time.
+    if tools/cmake-toolchain-cache-selftest.sh > \
+            "$BUILD/cmake-cache-selftest.log" 2>&1; then
+        note "CMake cache selftest: $(sed -n \
+              's/^cmake_cache_selftest=PASS //p' \
+              "$BUILD/cmake-cache-selftest.log")"
+    else
+        cat "$BUILD/cmake-cache-selftest.log"
+        fail "the pinned-compiler CMake cache refresh is unsafe"
+        return 1
+    fi
+
     if tools/classicwb-identity-selftest.sh > \
             "$BUILD/classicwb-identity.log" 2>&1; then
         note "$(cat "$BUILD/classicwb-identity.log")"
@@ -456,6 +481,16 @@ stage_host() {
     else
         cat "$BUILD/peercap-selftest.log"
         fail "tests/perf/peercap-selftest.sh"
+        return 1
+    fi
+
+    if tests/tools/peersender-selftest.sh > "$BUILD/peersender-selftest.log" 2>&1
+    then
+        note "$(sed -n 's/^peersender-selftest: /peer sender selftest: /p' \
+              "$BUILD/peersender-selftest.log")"
+    else
+        cat "$BUILD/peersender-selftest.log"
+        fail "tests/tools/peersender-selftest.sh"
         return 1
     fi
 
@@ -539,6 +574,21 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
     else
         cat "$BUILD/check-backlog.log"
         fail "docs/BACKLOG.md cites something that is not there (tools/check-backlog.sh)"
+        return 1
+    fi
+
+    # The sweep's nine-card table is not the list of supported cards, and it
+    # reads as though it were.  A core added to netdev_cards[] without a board
+    # to boot it or a reason it cannot be booted is coverage that shrank
+    # without saying so, on the only cross-core check there is.
+    if tools/check-card-coverage.sh > "$BUILD/card-coverage.log" 2>&1; then
+        note "card coverage: $(sed -n 's/^card_coverage_supported=/supported /p' \
+                               "$BUILD/card-coverage.log") $(sed -n \
+              's/^card_coverage_swept=/swept /p' "$BUILD/card-coverage.log")"
+    else
+        cat "$BUILD/card-coverage.log"
+        fail "a card in netdev_cards[] is neither swept nor declared" \
+             "(tools/check-card-coverage.sh)"
         return 1
     fi
 
@@ -658,6 +708,31 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         cat "$BUILD/stage-coverage.log"
         fail "a ci.sh stage is declared and invoked by no workflow\
  (tools/check-stage-coverage.sh)"
+        return 1
+    fi
+
+    # ...AND WIRED IS NOT RUN.  check-stage-coverage above asks whether a
+    # workflow NAMES each stage; it is green on emulator.yml, which names
+    # sixteen of them and has 0 successes in its last 20 runs.  This asks the
+    # question none of the wiring gates ask -- did the thing that calls it
+    # finish -- and carries the sixteen as a declared baseline so a
+    # SEVENTEENTH going dark, or one of them coming back, is the failure.
+    #
+    # It needs gh and the network.  When they are absent this is a SKIP through
+    # ci.sh's own mechanism, so it lands in the summary's skipped list rather
+    # than vanishing into an exit 0 nobody reads.
+    if tools/check-stage-freshness.sh > "$BUILD/stage-freshness.log" 2>&1; then
+        if grep -q "^stage_freshness=SKIPPED" "$BUILD/stage-freshness.log"; then
+            skip "stage freshness: no gh cli here, so nothing checked whether\
+ the workflows behind these stages still finish"
+        else
+            note "stage freshness: $(sed -n 's/^stage_freshness_total //p' \
+                  "$BUILD/stage-freshness.log")"
+        fi
+    else
+        cat "$BUILD/stage-freshness.log"
+        fail "a stage's workflow has stopped finishing, or a dead one revived\
+ (tools/check-stage-freshness.sh)"
         return 1
     fi
 
@@ -995,6 +1070,10 @@ stage_cross() {
         fi
 
         hr "cross build: $name ${opts:-(default)}"
+
+        refresh_cmake_compiler_cache \
+            "$BUILD/$name" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" \
+            "cross/$name"
 
         # shellcheck disable=SC2086
         cmake -S . -B "$BUILD/$name" \
@@ -1412,6 +1491,9 @@ stage_ltoprobe() {
     fi
     export AMINETXDUO_KICKSTART
 
+    refresh_cmake_compiler_cache \
+        "$dir" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" ltoprobe
+
     cmake -S . -B "$dir" \
         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
         -DCMAKE_BUILD_TYPE=Release \
@@ -1653,6 +1735,36 @@ stage_e2e() {
         2) fail "release e2e: an ingredient is missing on this machine" ;;
         3) fail "release e2e: no second machine could reach the Amiga" ;;
         *) fail "release e2e: exit $rc" ;;
+    esac
+    [ "$rc" = 0 ] || return "$rc"
+
+    #
+    # THE DRAWER CONTRACT HAD NO STAGE AT ALL.  run-workbench.sh -D stages a
+    # machine that already carries another TCP/IP stack and then checks that
+    # not one byte of its libraries, driver, configuration or AmiTCP:db moved
+    # (run-workbench.sh:1146-1303).  That is the strongest thing this tree
+    # asserts about coexisting with Roadshow or AmiTCP, and grepping this file
+    # for run-workbench.sh finds -H and nothing else: it has only ever been run
+    # by hand.  Same class as stage_rate being declared and never invoked.
+    #
+    # -g rather than plain -D, and the difference is the whole point.  -D
+    # plants S:AmiNetXDuo-drawer, Install-AmiNetXDuo:747 reads it into
+    # FORCE_DRAWER, and :769 asks the layout question ONLY when FORCE_DRAWER is
+    # 0 -- so the scripted route SKIPS the page a person actually answers.  -g
+    # omits the sentinel and answers the askchoice, which covers both the
+    # contract and the page.
+    #
+    # It reuses the archive and the ingredients already proven above, so the
+    # cost is one more boot, not another set of requirements.
+    note "drawer layout, answered through its own page"
+    "$ROOT/install/test/run-workbench.sh" -l AVERAGE -D -g -p drawer \
+        -a "$archive" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  a self-contained install, chosen from the GUI page" ;;
+        2) fail "release e2e drawer: an ingredient is missing on this machine" ;;
+        3) fail "release e2e drawer: no second machine could reach the Amiga" ;;
+        *) fail "release e2e drawer: exit $rc" ;;
     esac
     return "$rc"
 }
@@ -2341,6 +2453,41 @@ stage_bridged() {
         esac
     fi
 
+    # THE FIRST RPC EXCHANGE, which nothing here spoke until bifat's 0.26.5
+    # report.  `RPC: Port mapper failure - Unable to receive` reached a user
+    # through a hole with no test in it at all: grep for portmap, rpcbind or
+    # nfs across tests/ and src/ found only usergroup's own files.
+    #
+    # Four arms over one code path, because what separates them is what names
+    # the defect: an ephemeral source port (what the resolver does), a RESERVED
+    # one (bindresvport, what RPC does), a connect()ed datagram socket, and
+    # that again with a signal mask handed to WaitSelect() the way AmiTCP's
+    # net.lib does.  Each exchanges twice on one socket, since a retry does not
+    # open a new one.
+    #
+    # No rpcbind and no NFS server: tests/tools/rpcpeer.py answers a
+    # PMAPPROC_GETPORT and exits, so the peer's configuration is untouched.
+    printf '\n-- the first RPC exchange: portmap over UDP, four ways\n'
+    if [ -z "${AMINETXDUO_FITZ_PEER:-}" ]; then
+        skip "rpcprobe: AMINETXDUO_FITZ_PEER is not set, so there is no third" \
+             "machine to answer a portmap call.  RPC is unproven on this" \
+             "runner, which is the state it shipped 0.26.5 in."
+    else
+        rc=0
+        "$ROOT/tests/tools/run-rpcprobe.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_FITZ_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  a portmap call and its reply carried on an" \
+                    "ephemeral port, a reserved one, a connected socket and" \
+                    "with a WaitSelect signal mask, twice each" ;;
+            2) fail "rpcprobe: an ingredient is missing, or the guest address" \
+                    "is taken -- the harness names which" ; bad=1 ;;
+            *) fail "rpcprobe: read ephem/resv/conn/sig above; the verdict" \
+                    "line names which half of the stack owns it" ; bad=1 ;;
+        esac
+    fi
+
     printf '\n-- TCP: is an AmigaDOS device, and stock commands use it\n'
     if [ -z "${AMINETXDUO_PEER:-}" ]; then
         skip "tcphandler: AMINETXDUO_PEER is not set, so there is no third" \
@@ -2595,20 +2742,40 @@ stage_lossgate() {
         return "$NOTHING"
     fi
 
-    # THE GATE NEEDS A COUNTERS BUILD AND $BUILD/default IS NOT ONE.  Two of
-    # its four metrics, dropped_rx and retransmitted, are parsed out of
-    # netstat's tcp block, and that block compiles to `if (0)` under
-    # NX_DISABLE_TCP_INFO (src/tools/netstat.c:511) -- which is what ships,
-    # because AMINETXDUO_NX_COUNTERS defaults OFF.  Run against a shipping
-    # build on 2026-09-06 this gate reported read_kbs and write_kbs both `ok`
-    # and still FAILED, on the two it could not collect at all.  The baseline
-    # carries values for both, so it was recorded with them compiled in.
+    # THE GATE NEEDS A COUNTERS BUILD.  Two of its four metrics, dropped_rx
+    # and retransmitted, are parsed out of netstat's tcp block, and that block
+    # compiles to `if (0)` under NX_DISABLE_TCP_INFO (src/tools/netstat.c:511).
+    # Run against a build without it on 2026-09-06 this gate reported read_kbs
+    # and write_kbs both `ok` and still FAILED, on the two it could not collect
+    # at all.  The baseline carries values for both, so it was recorded with
+    # them compiled in.
+    #
+    # "-- WHICH IS WHAT SHIPS" WAS TRUE UNTIL 5cb04a48 AND IS NOT NOW.  That
+    # commit stopped defining NX_DISABLE_TCP_INFO, NX_DISABLE_UDP_INFO and
+    # NX_DISABLE_ARP_INFO by default, because four shipped callers read those
+    # families and were getting zeros (CMakeLists.txt, and the six paths named
+    # there).  A default build now carries the tcp counters: only
+    # NX_DISABLE_IGMP_INFO and NX_DISABLE_RARP_INFO survive in it, checked in
+    # the generated flags for both arms of AMINETXDUO_NX_COUNTERS.
+    #
+    # SO THE SECOND CROSS BUILD BELOW IS PROBABLY REDUNDANT NOW, and it is not
+    # being removed on that argument.  The only remaining difference from
+    # $BUILD/default is the RARP and IGMP counters, which no metric here
+    # reads -- but the baseline was recorded on a counters-ON build, so
+    # changing what this gate measures against changes what its numbers mean.
+    # That wants one run each way to settle, and this lab cannot run the gate
+    # at all: it needs a peer that can shape the link, and playhouse2 has no
+    # `tc` on PATH and no passwordless sudo (2026-09-08).  Left alone
+    # deliberately rather than left alone by accident.
     #
     # So build one here.  It costs a second cross build of the libraries in a
     # tier that already boots an emulator nine times, and it is the difference
     # between a verdict and a guaranteed red.
     local lgbuild="$BUILD/lossgate"
-    if [ ! -x "$lgbuild/src/bsdsocket/bsdsocket.library" ]; then
+    refresh_cmake_compiler_cache \
+        "$lgbuild" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" lossgate
+    if [ ! -x "$lgbuild/src/bsdsocket/bsdsocket.library" ] ||
+       [ ! -f "$lgbuild/CMakeCache.txt" ]; then
         note "lossgate: building with AMINETXDUO_NX_COUNTERS=ON, which is what"\
              "its baseline was recorded on"
         cmake -S "$ROOT" -B "$lgbuild" \
@@ -2684,6 +2851,35 @@ stage_smb() {
     return "$bad"
 }
 
+# ------------------------------------------------------------- the survey ----
+
+stage_survey() {
+    hr "aminet survey: derived tables"
+
+    # A GATE THAT NOTHING RUNS IS NOT A GATE.  check-derived.sh was written to
+    # prove docs/aminet-survey's published tables are derivable from the raw
+    # ledger, and then nothing ever called it -- not ci.sh, not a workflow.  It
+    # was green because it never ran, which is the same shape as the crt0
+    # defect that shipped for three releases.
+    #
+    # It is cheap (no toolchain, no network, about a second) so it belongs in
+    # the default set rather than behind a variable.
+    tools/aminet-survey/test-survey-io.sh || { fail "survey: ledger I/O"; return 1; }
+    # The scanner, against HUNK executables built here so the right answer is
+    # known exactly.  Real archives cannot check it: a miss is invisible when
+    # nobody knows what the correct result was.  These found a live defect on
+    # their first run -- calls_for stopped 6 bytes short of the end of a code
+    # hunk, which is precisely where a tail call sits.
+    python3 tools/aminet-survey/test-scan.py || { fail "survey: scanner"; return 1; }
+    tools/aminet-survey/check-derived.sh  || {
+        fail "survey: a published table no longer matches results.tsv --\
+ regenerate with tools/aminet-survey/usage.py, rare.py and callers.py"
+        return 1; }
+    note "$(awk -F'\t' 'NR>1' docs/aminet-survey/results.tsv | wc -l) archives\
+ scanned, $(awk -F'\t' 'NR>1 && $3>0' docs/aminet-survey/lvo-usage.tsv | wc -l)\
+ of 143 vectors with a caller"
+}
+
 # ------------------------------------------------------------------ main ----
 
 mkdir -p "$BUILD"
@@ -2708,7 +2904,7 @@ mkdir -p "$BUILD"
 #
 WANT=("$@")
 if [ ${#WANT[@]} -eq 0 ]; then
-    WANT=(host host32 cross web conformance)
+    WANT=(host host32 cross web conformance survey)
     # THE VARIABLE IS THE ASK.  Setting it and getting a run that prints
     # "analyze NOT RUN" is the mechanism behind every false green report this
     # gate has produced; the variable was necessary and not sufficient, and
@@ -2765,6 +2961,7 @@ for s in "${WANT[@]}"; do
         smb)         stage_smb || srrc=$? ;;
         e2e)         stage_e2e || srrc=$? ;;
         e2ecards)    stage_e2ecards || srrc=$? ;;
+        survey)      stage_survey || srrc=$? ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
     [ "$srrc" = "$NOTHING" ] || STAGES_TESTED=$((STAGES_TESTED + 1))

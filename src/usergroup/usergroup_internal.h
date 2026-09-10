@@ -21,6 +21,27 @@
 #include <dos/dos.h>
 #include <utility/tagitem.h>
 
+#include "aminetxduo/compat.h"
+
+/*
+ * WHICH VECTOR WAS CALLED LAST, which is the one thing a crash in the CALLER
+ * does not say.
+ *
+ * bifat's 0.26.5 report is `Software Failure #80000006` from ch_nfsmount with
+ * this library open and no crash at all with Roadshow's.  0x80000006 is
+ * ACPU_CHK, a bounds-check trap, and it fires in the caller -- so the Amiga
+ * names the program and nothing names the function that handed it the value.
+ * This file had exactly ONE log line before this (ug_library.c, init), so an
+ * AMINETXDUO_LOG build could not narrow it either.
+ *
+ * AMI_INFO compiles to nothing when AMINETXDUO_LOG is off (compat.h:133 keeps
+ * it inside `if (0)` so the format is still checked), so a release build pays
+ * nothing and the 9000-byte budget in tools/check-image-size.sh is untouched.
+ * These calls are a handful per mount, not a packet path, so INFO is the right
+ * level: the log is read once, after a crash.
+ */
+#define UG_ENTER(name)  AMI_INFO("ug: " name)
+
 /* ------------------------------------------------------------ ABI records,
  *
  * Layout-compatible with the AmiTCP and Roadshow <pwd.h>, <grp.h>, <utmp.h>

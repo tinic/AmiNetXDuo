@@ -14,6 +14,7 @@ option(AMINETXDUO_NETDEV_LINK
 
 set(NETDEV_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open
+    netdev_unit.c       # unit/opener helpers, host-testable
     netdev_io.c         # BeginIO/AbortIO field handling, host-testable
     netdev_direct.c     # claim/completion half of the single-copy RX path
     netdev_queue.c      # queued IORequest invariants, host-testable
@@ -299,6 +300,24 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_lance COMMAND test_netdev_lance)
 
+    # The accessors the DEVICE runs.  The test above replaces LANCE_CSR_GET
+    # and LANCE_CSR_PUT with a mock, so everything behind lance.c's
+    # `#ifndef LANCE_CSR_GET` -- the RAP/RDP pair and the select cache -- is
+    # compiled out of it and had no coverage anywhere.  This one includes
+    # lance.c without the override.
+    add_executable(test_netdev_lance_csr
+        test/test_netdev_lance_csr.c)
+
+    target_include_directories(test_netdev_lance_csr PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_lance_csr PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_lance_csr COMMAND test_netdev_lance_csr)
+
     # The derived station address.  Determinism, the locally-administered and
     # unicast bits, and "two different machines get two different addresses"
     # are all properties an emulator cannot show: its card has a valid PROM,
@@ -334,6 +353,24 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_bus PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_bus COMMAND test_netdev_bus)
+
+    # The write side needs the seam, so it INCLUDES netdev_bus.c rather than
+    # linking it: the data port is one address and a linked build can observe
+    # only the last value written, never the order or the count.  n68k_iocopy.c
+    # is still linked for the read-path primitives the file does not seam.
+    add_executable(test_netdev_buswrite
+        test/test_netdev_buswrite.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+
+    target_include_directories(test_netdev_buswrite PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_buswrite PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_buswrite COMMAND test_netdev_buswrite)
 
     # The NE2000 probe ORDER, which is the half test_netdev_bus.c cannot see.
     # ne2000_detect() demands the command register read back as a reset chip
@@ -396,6 +433,153 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_event PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
+
+    # What an opener's filter state and its departure do to a unit.  These
+    # three lived in netdev_device.c, which cannot be compiled off target --
+    # a raw romtag asm at its head and <exec/execbase.h> at :19 -- so none of
+    # them had ever run on a host.  netdev_unit.c is the split that let them,
+    # at a MEASURED 4 bytes of resident RAM (38,832 -> 38,836 with -flto,
+    # budget 40,000), and the same 4 whether one function moves or all three,
+    # because the cost is the extra translation unit and not its contents.
+    #
+    # The hash is why it was worth 4 bytes.  netdev_rebuild_filter() builds
+    # the 64-bit multicast filter every core programs into its chip, and a bit
+    # not set there means the card drops the router's neighbour solicitation
+    # to 33:33:ff:xx:xx:xx -- on-link IPv6 works, off-link never resolves.
+    # emulator.yml:466-470 records exactly that happening to three cards.
+    add_executable(test_netdev_unit
+        test/test_netdev_unit.c
+        netdev_unit.c
+        netdev_mcaf.c)
+
+    target_include_directories(test_netdev_unit PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_unit PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_unit COMMAND test_netdev_unit)
+
+    # The probe record and the semaphore it is published on -- the ONLY channel
+    # by which a machine nobody here has can report what the probe decided.
+    # Three card rows are marked UNVERIFIED ON HARDWARE in netdev_cards.c, the
+    # X-Surf 500 has no emulator at all, and the ISA PnP sequence records its
+    # vendor id, serial, checksum and settle rounds here and nowhere else.
+    #
+    # The publish path is the half worth a test: a SECOND anxnet.device on one
+    # machine has to find the first one's record and leave it alone, and its
+    # expunge must not RemSemaphore() a semaphore it never added.  The exec
+    # stubs keep a real list and fail an Add or Rem outside Forbid().
+    add_executable(test_netdev_diag
+        test/test_netdev_diag.c
+        netdev_diag.c
+        netdev_cards.c)
+
+    target_include_directories(test_netdev_diag PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_diag PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_diag COMMAND test_netdev_diag)
+
+    # The DP8390 core, beneath ne2000.c AND ed.c and therefore beneath six of
+    # the nine cards the sweep drives: X-Surf, X-Surf 100, Ariadne II, Hydra,
+    # LAN Rover and the PCMCIA slot.  It had NO host test, and the way that
+    # was missed is worth writing down: test_netdev_ne2000.c and
+    # test_netdev_ed.c cover their card glue by #including it whole and STUB
+    # all seven entry points of the core underneath (:133-140 and :33-37), so
+    # the two tests that look like they drive a DP8390 are the two that
+    # guarantee they do not.
+    #
+    # No other source: NIC_GET/NIC_PUT are redirected to a model that BANKS
+    # the register file.  A DP8390 is four pages of sixteen selected by CR
+    # bits 7..6, so PAR0 on page 1 and PSTART on page 0 are one register
+    # index -- an array fuses them and a driver that forgot to select page 1
+    # before writing the station address would still pass.
+    add_executable(test_netdev_dp8390
+        test/test_netdev_dp8390.c)
+
+    target_include_directories(test_netdev_dp8390 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_dp8390 PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_dp8390 COMMAND test_netdev_dp8390)
+
+    # The ISA Plug and Play sequence in front of an X-Surf's RTL8019AS, the
+    # last file in this directory a host could compile and nothing did.
+    #
+    # The emulated xsurf arm does NOT cover it in the way that sounds: it
+    # proves the card came up, so it proves the sequence works against
+    # Amiberry's model of the board.  It says nothing about which byte went to
+    # which address -- and the ADDRESS and WRITE_DATA ports are ONE board
+    # address with a latch bit between them, so a sequence that sent the whole
+    # initiation key to the wrong one still produces a plausible log.
+    #
+    # netdev_cards.c is linked for real, not stood in for: the row is where a
+    # card is added, and the two numbers its comment states -- both ports at
+    # board+$84f2, and (reg_off - io_win) / stride == ISA port $300 -- are
+    # asserted against it rather than against a fixture.
+    add_executable(test_netdev_isapnp
+        test/test_netdev_isapnp.c
+        netdev_cards.c)
+
+    target_include_directories(test_netdev_isapnp PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_isapnp PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_isapnp COMMAND test_netdev_isapnp)
+
+    # The SANA-II command table itself, 818 lines that nothing compiled
+    # off-target until now: test_netdev_beginio below REPLACES netdev_cmds.c
+    # with a recorder, because that test is about what BeginIO writes before
+    # dispatch.  So the twenty cases in it had the coverage an emulated a2065
+    # run gives them -- CMD_READ, CMD_WRITE, S2_CONFIGINTERFACE, S2_ONLINE --
+    # and every error path was unasserted.  The error codes ARE the contract:
+    # they are the ones Individual Computers' x-surf.device returns.
+    #
+    # netdev_mcast.c is linked for real rather than stood in for: the group
+    # table and its refcounts are what several of the cases turn on, and the
+    # deliberate divergence from both IC drivers -- accepting a join whose
+    # group bit is set, where they test bit 7 and so refuse every real IPv4
+    # and IPv6 multicast address -- is asserted through it in both directions.
+    add_executable(test_netdev_cmds
+        test/test_netdev_cmds.c
+        netdev_cmds.c
+        netdev_mcast.c)
+
+    target_include_directories(test_netdev_cmds PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_cmds PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_cmds COMMAND test_netdev_cmds)
 
     # What BeginIO does to a request before it dispatches it.  netdev_event.c
     # is driven directly by the test above, which is why it stayed green over

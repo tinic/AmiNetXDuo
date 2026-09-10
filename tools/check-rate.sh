@@ -60,6 +60,36 @@ fi
 
 [ -r "$BASELINE" ] || { echo "rate=error reason=no_baseline file=$BASELINE" >&2; exit 1; }
 
+# REFUSE TO MEASURE A TREE THE BUILD DID NOT FINISH.
+#
+# `cmake --build` can return non-zero with the library and device still
+# linked -- one unrelated target failing is enough -- and the binaries left
+# behind are then whatever the PREVIOUS build produced.  An A/B script that
+# does not check the build's exit code measures those and prints a clean
+# rate=PASS for them.  That happened twice on this rig in one sitting, and
+# both times the numbers looked entirely reasonable, which is the danger.
+#
+# The build's exit code is not visible from here, but staleness is: if any
+# source is newer than the artefact that is about to be measured, that
+# artefact does not correspond to this tree.  Cheap, and it catches the case
+# no amount of care in the caller does.
+_stale=""
+for _art in "$BUILD/src/bsdsocket/bsdsocket.library" \
+            "$BUILD/src/netdev/anxnet.device"; do
+    [ -e "$_art" ] || { echo "rate=error reason=missing_artefact file=$_art" >&2; exit 1; }
+    _newer=$(find src port include third_party/netxduo/common/src \
+                  -name '*.[ch]' -newer "$_art" -print -quit 2>/dev/null || true)
+    [ -n "$_newer" ] && _stale="$_stale $_art(newer: $_newer)"
+done
+if [ -n "$_stale" ]; then
+    echo "rate=error reason=stale_build build=$BUILD" >&2
+    printf '  %s\n' $_stale >&2
+    echo "  A source file is newer than the binary about to be measured, so" >&2
+    echo "  that binary is from an earlier build.  Rebuild and check the exit" >&2
+    echo "  code before measuring." >&2
+    exit 1
+fi
+
 # ------------------------------------------------------------------ measure --
 
 #
@@ -100,7 +130,15 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 round_rate() {           # $1 = direction (tcp-rx / tcp-tx), $2 = log
-    sed -n "s/^dir=$1 .*bits_per_sec=\([0-9]*\) .*/\1/p" "$2" | head -1
+    # AVERAGE EVERY TRANSFER IN THE ROUND, not just the first.
+    # AMINETXDUO_IPERF_RX_REPEAT exists to run several receive transfers
+    # inside one boot so the between-boot variance -- which is most of this
+    # harness's ~2% spread -- can be averaged out (tests/tools/run-iperf.sh).
+    # `head -1` threw every repeat away, so the option cost wall clock and
+    # bought nothing, and nothing said so.  A single line averages to itself,
+    # so callers that do not set the option see exactly what they saw.
+    sed -n "s/^dir=$1 .*bits_per_sec=\([0-9]*\) .*/\1/p" "$2" |
+        awk '{ s += $1; n++ } END { if (n) printf "%d\n", s / n }'
 }
 
 declare -A samples

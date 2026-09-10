@@ -25,6 +25,15 @@ fail() { printf 'FAIL %s\n' "$*" >&2; bad=$((bad + 1)); }
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/anxd-tcsel.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
+# The fixtures below borrow crt0 objects and an objdump from a resolved
+# toolchain.  Without one there is nothing to build them from, and a fixture
+# the resolver refuses tests nothing about selection.
+if [ -z "${AMIGA_TOOLCHAIN_ROOT:-}" ] || [ ! -d "${AMIGA_TOOLCHAIN_ROOT:-}" ]; then
+    say toolchain_resolve_selftest SKIPPED
+    say reason "no resolved AMIGA_TOOLCHAIN_ROOT to build fixtures from"
+    exit 0
+fi
+
 # A root the resolvers accept: an executable that answers -dumpversion, plus
 # the NDK headers they check for beyond the selection itself.
 make_root() {
@@ -36,6 +45,27 @@ make_root() {
     chmod +x "$dir/bin/m68k-amigaos-gcc"
     : > "$dir/m68k-amigaos/ndk-include/exec/types.h"
     : > "$dir/m68k-amigaos/ndk-include/inline/dos.h"
+
+    # AND REAL crt0 OBJECTS, because the resolver checks them now.
+    #
+    # tools/amiga-toolchain.sh verifies the crt0 argc/argv contract before it
+    # hands a root back, and a fixture holding a stub gcc and nothing else
+    # answers
+    # "no crt0.o under <root>" and is refused -- so every case below saw
+    # rc=2 and an empty root, and both of them failed for a reason that has
+    # nothing to do with selection.  That is what this file tests.
+    #
+    # Symlinks, not copies: the objects are the same bytes and the fixture is
+    # thrown away with $TMP.  Borrowed from the toolchain the resolver has
+    # ALREADY blessed -- if $AMIGA_TOOLCHAIN_ROOT is set, it passed the same
+    # check, so the fixture cannot be safer or less safe than the real thing.
+    ln -sf "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-objdump" \
+           "$dir/bin/m68k-amigaos-objdump"
+    ( cd "$AMIGA_TOOLCHAIN_ROOT" && find m68k-amigaos -name '*crt0.o' ) |
+    while IFS= read -r crt; do
+        mkdir -p "$dir/$(dirname "$crt")"
+        ln -sf "$AMIGA_TOOLCHAIN_ROOT/$crt" "$dir/$crt"
+    done
 }
 
 CACHE="$TMP/cache"

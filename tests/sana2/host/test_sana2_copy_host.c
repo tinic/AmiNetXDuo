@@ -12,6 +12,7 @@
 
 static unsigned long h_checks;
 static unsigned long h_failures;
+static unsigned long h_copy_bytes_calls;
 
 static void h_check(int ok, const char *what)
 {
@@ -28,6 +29,7 @@ static void h_check(int ok, const char *what)
    bytes are asked for, not how they are moved. */
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
+    h_copy_bytes_calls++;
     if (len != 0)
         memcpy(to, from, (size_t)len);
 }
@@ -164,6 +166,93 @@ static void test_copy_to_buff(void)
     h_check(slot.copied == 0, "and reports zero bytes rather than the last count");
 }
 
+/*
+ * The hook's checksum, at both parities.
+ *
+ * Our own cores always hand this hook an even payload pointer, so the fused
+ * branch takes every frame on the rig and the fallback below it is only ever
+ * reached through a THIRD-PARTY device -- x-surf-100.device is the one that
+ * matters, and no rig here can run it.  A path that cannot be measured has to
+ * be pinned by a test instead.
+ */
+static void test_copy_to_buff_sum(void)
+{
+#ifdef AMINETXDUO_RX_VERIFY
+    AmiRxSlot slot;
+    NX_PACKET pkt;
+    static ULONG dstwords[64];              /* longword aligned by type */
+    static ULONG refwords[64];
+    UCHAR       *dst = (UCHAR *)dstwords;
+    UCHAR       *ref = (UCHAR *)refwords;
+    ULONG        odd_sum, ref_sum;
+    unsigned long copy_calls_before;
+    const ULONG  n = 128;
+    /* This case ran with slot.stats NULL, so the hook's counters were never
+       touched here.  The parity counter is the point of the case now, so it
+       needs somewhere to land. */
+    AmiSana2Stats stats;
+
+    printf("sana2: S2_CopyToBuff carries a sum at either parity\n");
+
+    memset(&pkt, 0, sizeof(pkt));
+    memset(&slot, 0, sizeof(slot));
+    slot.packet   = &pkt;
+    slot.dst      = dst;
+    slot.capacity = sizeof(dstwords);
+    memset(&stats, 0, sizeof(stats));
+    slot.stats    = &stats;
+
+    /* Even destination, even source: the shape our own cores produce. */
+    h_check(ami_sana2_copy_to_buff(&slot, frame, n) == TRUE,
+            "an aligned frame is taken");
+    h_check(slot.summed != FALSE, "and it carries its own sum");
+
+    /* Odd source.  A device we do not own is under no obligation to give us
+       an even payload pointer, and this used to copy without summing --
+       leaving n68k_rx_verify_sum() to walk the whole payload a second time. */
+    memset(dstwords, 0, sizeof(dstwords));
+    slot.summed = FALSE;
+    slot.sum    = 0;
+    copy_calls_before = h_copy_bytes_calls;
+    h_check(stats.rx_copy_unaligned == 0,
+            "no unaligned copy is counted before an odd frame arrives");
+    h_check(ami_sana2_copy_to_buff(&slot, frame + 1, n) == TRUE,
+            "an odd source frame is taken");
+    /* THE COUNTER THAT REPLACED A DEAD DISCRIMINATOR.  rx_copy_summed used to
+       say whether this branch ran; once the branch learned to accumulate its
+       own sum both branches set summed, so it says nothing.  On the rig,
+       x-surf-100.device produced 0 of 21,178 frames here -- a number that
+       could not be read at all until this counter existed. */
+    h_check(stats.rx_copy_unaligned == 1,
+            "an odd source frame is counted as an unaligned copy");
+    h_check(stats.rx_copy_summed == stats.rx_copy_hook,
+            "and summed still equals the fill count, which is why it cannot"
+            " report the odd path on its own");
+    h_check(memcmp(dst, frame + 1, n) == 0,
+            "and every byte arrives unchanged");
+    h_check(slot.copied == n, "and `copied` is the length");
+    h_check(slot.summed != FALSE,
+            "AND IT IS SUMMED, so no second pass is owed");
+    h_check(h_copy_bytes_calls == copy_calls_before,
+            "and it does not run a separate bulk-copy pass first");
+    odd_sum = slot.sum;
+
+    /* The answer must be the SAME answer.  Same bytes through the aligned
+       branch: if the two disagree the fallback is worse than useless, because
+       a wrong sum is a dropped frame rather than a slow one. */
+    memcpy(ref, frame + 1, n);
+    slot.dst    = ref;
+    slot.summed = FALSE;
+    slot.sum    = 0;
+    h_check(ami_sana2_copy_to_buff(&slot, ref, n) == TRUE,
+            "the same bytes go through the aligned branch");
+    ref_sum = slot.sum;
+
+    h_check(odd_sum == ref_sum,
+            "and the odd path's sum equals the aligned path's");
+#endif
+}
+
 static void test_rx_direct(void)
 {
     AmiSana2If iface;
@@ -180,6 +269,9 @@ static void test_rx_direct(void)
     memset(&pkt, 0, sizeof(pkt));
     owner.iface   = &iface;
     slot.owner    = &owner;
+    /* ami_sana2_rx_start() resolves this once per slot; the hooks reach the
+       counters through it rather than chasing owner->iface per frame. */
+    slot.stats    = &iface.stats;
     slot.packet   = &pkt;
     slot.dst      = dst;
     slot.capacity = sizeof(dst);
@@ -482,6 +574,7 @@ int main(void)
     frame_init();
 
     test_copy_to_buff();
+    test_copy_to_buff_sum();
     test_rx_direct();
     test_from_buff_guards();
     test_from_buff_whole();

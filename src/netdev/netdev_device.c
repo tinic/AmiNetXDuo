@@ -598,6 +598,15 @@ static VOID nd_zero(UBYTE *p, ULONG n)
 }
 
 /* NewList() lives in amiga.lib, which a -nostartfiles image does not link. */
+/*
+ * netdev_reply(), netdev_rebuild_filter() and netdev_drop_writes() were here
+ * and are src/netdev/netdev_unit.c now.  They need neither the romtag asm at
+ * the head of this file nor <exec/execbase.h>, so moving them is what let a
+ * host test drive the multicast hash.  Measured cost of the extra translation
+ * unit: 4 bytes of resident RAM, and the same 4 whether one function moves or
+ * all three.
+ */
+
 static VOID nd_newlist(struct List *l)
 {
     l->lh_Head     = (struct Node *)&l->lh_Tail;
@@ -605,16 +614,6 @@ static VOID nd_newlist(struct List *l)
     l->lh_TailPred = (struct Node *)&l->lh_Head;
 }
 
-VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire)
-{
-    io->ios2_Req.io_Error = (BYTE)err;
-    io->ios2_WireError    = wire;
-
-    if ((io->ios2_Req.io_Flags & IOF_QUICK) != 0)
-        return;
-
-    ReplyMsg(&io->ios2_Req.io_Message);
-}
 
 /*
  * The buffer-management hooks are m68k register-convention (a0 = to, a1 = from,
@@ -1119,33 +1118,6 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
 
 /* ------------------------------------------------------------- the filter -- */
 
-VOID netdev_rebuild_filter(NetdevUnit *unit)
-{
-    UBYTE mar[8];
-    UWORD i;
-
-    netdev_mar_clear(mar);
-
-    if (unit->nu_Nic.promisc || unit->nu_AllMulti != 0)
-    {
-        netdev_mar_all(mar);
-    }
-    else
-    {
-        for (i = 0; i < NETDEV_MCAST_MAX; i++)
-        {
-            if (unit->nu_Mcast[i].refs != 0)
-                netdev_mar_set(mar, unit->nu_Mcast[i].addr);
-        }
-    }
-
-    for (i = 0; i < 8; i++)
-        unit->nu_Nic.mar[i] = mar[i];
-
-    Disable();
-    unit->nu_Nic.ops->setfilter(&unit->nu_Nic);
-    Enable();
-}
 
 /* ------------------------------------------------------ online / offline -- */
 
@@ -1184,31 +1156,6 @@ LONG netdev_online(NetdevUnit *unit)
     return 0;
 }
 
-/*
- * Take one opener's CMD_WRITEs off the unit's queue.  Disable(), because the
- * interrupt server walks the same list and AddTail() on it is Disable()d too --
- * that is the only arbitration this driver has.
- */
-VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
-{
-    struct Node *n;
-
-    Disable();
-    n = unit->nu_Writes.lh_Head;
-    while (n->ln_Succ != NULL)
-    {
-        struct IOSana2Req *io   = (struct IOSana2Req *)n;
-        struct Node       *next = n->ln_Succ;
-
-        if (NETDEV_OPENER(io->ios2_Req.io_Unit) == op)
-        {
-            Remove(n);
-            netdev_reply(io, IOERR_ABORTED, 0);
-        }
-        n = next;
-    }
-    Enable();
-}
 
 /*
  * The unit outlives every opener, so anything an opener changed about it must

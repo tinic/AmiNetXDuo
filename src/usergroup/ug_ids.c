@@ -15,6 +15,8 @@
 
 #include <proto/exec.h>
 
+#include <stdint.h>
+
 static BOOL ug_privileged(struct UserGroupBase *base)
 {
     return (BOOL)(base->ug_Cred.cr_euid == 0);
@@ -24,17 +26,20 @@ static BOOL ug_privileged(struct UserGroupBase *base)
 
 LONG ugl_getuid(UG_A6)
 {
+    UG_ENTER("getuid");
     return base->ug_Cred.cr_ruid;
 }
 
 LONG ugl_geteuid(UG_A6)
 {
+    UG_ENTER("geteuid");
     return base->ug_Cred.cr_euid;
 }
 
-LONG ugl_setreuid(UG_A6, register LONG real __asm("d0"),
-                         register LONG effective __asm("d1"))
+LONG ugl_setreuid(UG_A6, UG_REG(LONG real, "d0"),
+                         UG_REG(LONG effective, "d1"))
 {
+    UG_ENTER("setreuid");
     if (!ug_privileged(base) &&
         ((real >= 0 && real != base->ug_Cred.cr_ruid) ||
          (effective >= 0 && effective != base->ug_Cred.cr_ruid)))
@@ -53,8 +58,9 @@ LONG ugl_setreuid(UG_A6, register LONG real __asm("d0"),
     return 0;
 }
 
-LONG ugl_setuid(UG_A6, register LONG uid __asm("d0"))
+LONG ugl_setuid(UG_A6, UG_REG(LONG uid, "d0"))
 {
+    UG_ENTER("setuid");
     if (!ug_privileged(base) && uid != base->ug_Cred.cr_ruid)
     {
         ug_set_err(base, UG_EPERM);
@@ -72,11 +78,13 @@ LONG ugl_setuid(UG_A6, register LONG uid __asm("d0"))
 
 LONG ugl_getgid(UG_A6)
 {
+    UG_ENTER("getgid");
     return base->ug_Cred.cr_rgid;
 }
 
 LONG ugl_getegid(UG_A6)
 {
+    UG_ENTER("getegid");
     /*
      * The credentials block has no cr_egid: 4.4BSD keeps the effective gid in
      * cr_groups[0], and this does the same.
@@ -85,9 +93,10 @@ LONG ugl_getegid(UG_A6)
                                           : base->ug_Cred.cr_rgid;
 }
 
-LONG ugl_setregid(UG_A6, register LONG real __asm("d0"),
-                         register LONG effective __asm("d1"))
+LONG ugl_setregid(UG_A6, UG_REG(LONG real, "d0"),
+                         UG_REG(LONG effective, "d1"))
 {
+    UG_ENTER("setregid");
     if (!ug_privileged(base))
     {
         ug_set_err(base, UG_EPERM);
@@ -108,8 +117,9 @@ LONG ugl_setregid(UG_A6, register LONG real __asm("d0"),
     return 0;
 }
 
-LONG ugl_setgid(UG_A6, register LONG gid __asm("d0"))
+LONG ugl_setgid(UG_A6, UG_REG(LONG gid, "d0"))
 {
+    UG_ENTER("setgid");
     if (!ug_privileged(base))
     {
         ug_set_err(base, UG_EPERM);
@@ -128,9 +138,10 @@ LONG ugl_setgid(UG_A6, register LONG gid __asm("d0"))
 
 /* ------------------------------------------------------ group vectors --- */
 
-LONG ugl_getgroups(UG_A6, register LONG gidsetlen __asm("d0"),
-                          register LONG *gidset __asm("a1"))
+LONG ugl_getgroups(UG_A6, UG_REG(LONG gidsetlen, "d0"),
+                          UG_REG(LONG *gidset, "a1"))
 {
+    UG_ENTER("getgroups");
     LONG count = base->ug_Cred.cr_ngroups;
     LONG i;
 
@@ -158,9 +169,10 @@ LONG ugl_getgroups(UG_A6, register LONG gidsetlen __asm("d0"),
     return count;
 }
 
-LONG ugl_setgroups(UG_A6, register LONG gidsetlen __asm("d0"),
-                          register LONG *gidset __asm("a1"))
+LONG ugl_setgroups(UG_A6, UG_REG(LONG gidsetlen, "d0"),
+                          UG_REG(LONG *gidset, "a1"))
 {
+    UG_ENTER("setgroups");
     LONG i;
 
     if (!ug_privileged(base))
@@ -194,9 +206,10 @@ LONG ugl_setgroups(UG_A6, register LONG gidsetlen __asm("d0"),
  * initgroups() rebuilds the supplementary list from the group database:
  * basegid first, then every group that lists `name` as a member.
  */
-LONG ugl_initgroups(UG_A6, register STRPTR name __asm("a1"),
-                           register LONG basegid __asm("d0"))
+LONG ugl_initgroups(UG_A6, UG_REG(STRPTR name, "a1"),
+                           UG_REG(LONG basegid, "d0"))
 {
+    UG_ENTER("initgroups");
     struct UgDatabase *db;
     WORD count = 0;
     UWORD i;
@@ -251,8 +264,9 @@ LONG ugl_initgroups(UG_A6, register STRPTR name __asm("a1"),
  * The .sfd declares "ULONG umask(UWORD mask)", so only the low word of d0 is
  * meaningful. The caller can leave anything in the top half.
  */
-ULONG ugl_umask(UG_A6, register ULONG mask __asm("d0"))
+ULONG ugl_umask(UG_A6, UG_REG(ULONG mask, "d0"))
 {
+    UG_ENTER("umask");
     ULONG previous = base->ug_Cred.cr_umask;
 
     base->ug_Cred.cr_umask = (UWORD)(mask & 0xFFFF);
@@ -262,6 +276,7 @@ ULONG ugl_umask(UG_A6, register ULONG mask __asm("d0"))
 
 ULONG ugl_getumask(UG_A6)
 {
+    UG_ENTER("getumask");
     return base->ug_Cred.cr_umask;
 }
 
@@ -273,28 +288,32 @@ ULONG ugl_getumask(UG_A6)
  */
 LONG ugl_setsid(UG_A6)
 {
-    base->ug_Cred.cr_session = (LONG)FindTask(NULL);
+    UG_ENTER("setsid");
+    base->ug_Cred.cr_session = (LONG)(uintptr_t)FindTask(NULL);
 
     return base->ug_Cred.cr_session;
 }
 
 LONG ugl_getpgrp(UG_A6)
 {
+    UG_ENTER("getpgrp");
     if (base->ug_Cred.cr_session == 0)
-        base->ug_Cred.cr_session = (LONG)FindTask(NULL);
+        base->ug_Cred.cr_session = (LONG)(uintptr_t)FindTask(NULL);
 
     return base->ug_Cred.cr_session;
 }
 
 STRPTR ugl_getlogin(UG_A6)
 {
+    UG_ENTER("getlogin");
     ug_resolve_login(base);
 
     return (STRPTR)base->ug_Cred.cr_login;
 }
 
-LONG ugl_setlogin(UG_A6, register STRPTR name __asm("a1"))
+LONG ugl_setlogin(UG_A6, UG_REG(STRPTR name, "a1"))
 {
+    UG_ENTER("setlogin");
     if (!ug_privileged(base))
     {
         ug_set_err(base, UG_EPERM);

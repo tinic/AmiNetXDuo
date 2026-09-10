@@ -3,7 +3,8 @@
 # Run an AmigaOS executable under FS-UAE with Enforcer (and optionally MungWall)
 # installed, and report every illegal memory access it makes.
 #
-#   tools/enforcer-run.sh [-t SECONDS] [-T TAG] [-m] [-M] <executable> [files...]
+#   tools/enforcer-run.sh [-t SECONDS] [-T TAG] [-c COMMAND] [-a ARGS] [-w SECONDS]
+#                         [-m] [-M] <executable> [files...]
 #
 # Enforcer needs a real MMU, so the CPU is overridden to a 68030 (a bare 68020
 # WEDGES) and JIT must stay off (Enforcer installs but reports nothing at all).
@@ -26,20 +27,36 @@ TAG="${AMINETXDUO_RUN_TAG:-enforcer}"
 WANT_ENFORCER=1
 WANT_MUNGWALL=0
 NETWORK=0
+TARGET_ARGS=""
+POST_WAIT=0
+SETUP_COMMAND=""
 
-while getopts "t:T:mMn" opt; do
+usage() {
+    echo "usage: $0 [-t seconds] [-T tag] [-c command] [-a args] [-w seconds] [-m|-M] <executable> [files...]" >&2
+}
+
+while getopts "t:T:c:a:w:mMn" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
+        c) SETUP_COMMAND="$OPTARG" ;;
+        a) TARGET_ARGS="$OPTARG" ;;
+        w) POST_WAIT="$OPTARG" ;;
         m) WANT_MUNGWALL=1 ;;
         n) NETWORK=1 ;;
         M) WANT_MUNGWALL=1; WANT_ENFORCER=0 ;;
-        *) echo "usage: $0 [-t seconds] [-T tag] [-m|-M] <executable> [files...]" >&2; exit 2 ;;
+        *) usage; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
 
-[ $# -ge 1 ] || { echo "usage: $0 [-t seconds] [-T tag] [-m|-M] <executable> [files...]" >&2; exit 2; }
+[ $# -ge 1 ] || { usage; exit 2; }
+case "$TIMEOUT" in
+    ''|*[!0-9]*) echo "timeout must be whole seconds" >&2; exit 2 ;;
+esac
+case "$POST_WAIT" in
+    ''|*[!0-9]*) echo "post-wait must be whole seconds" >&2; exit 2 ;;
+esac
 
 EXE="$1"; shift
 [ -f "$EXE" ] || { echo "no such executable: $EXE" >&2; exit 2; }
@@ -97,10 +114,16 @@ cp "$EXE" "$HD/c/$EXE_NAME"
 for extra in "$@"; do cp -R "$extra" "$HD/"; done
 
 # waitsecs: the bare boot has no C:Wait, and a resident debugging tool needs a
-# few seconds to install before the program under test starts.
+# few seconds to install before the program under test starts.  Link it with
+# the project's tiny command startup, not the toolchain crt0: the affected
+# newlib source makes __argv a null pointer and writes through it before main().
+# A test harness must not manufacture the hit it is meant to attribute.
 WAITSECS="$ROOT/build/waitsecs"
-if [ ! -x "$WAITSECS" ] || [ "$ROOT/tools/enforcer/waitsecs.c" -nt "$WAITSECS" ]; then
-    "$GCC" -O2 -m68020 -I"$NDK" -o "$WAITSECS" "$ROOT/tools/enforcer/waitsecs.c" \
+if [ ! -x "$WAITSECS" ] || [ "$ROOT/tools/enforcer/waitsecs.c" -nt "$WAITSECS" ] || \
+   [ "$ROOT/src/tools/tool_startup.S" -nt "$WAITSECS" ] || [ "$0" -nt "$WAITSECS" ]; then
+    "$GCC" -O2 -m68020 -nostartfiles -Dmain=tool_main -D_main=_tool_main \
+        -I"$NDK" -o "$WAITSECS" "$ROOT/src/tools/tool_startup.S" \
+        "$ROOT/tools/enforcer/waitsecs.c" \
         || { echo "failed to build waitsecs" >&2; exit 2; }
 fi
 cp "$WAITSECS" "$HD/c/waitsecs"
@@ -130,8 +153,11 @@ fi
         echo "run >NIL: <NIL: c:enforcer FSPACE"
         echo "c:waitsecs 5"
     fi
-    echo "$EXE_NAME >DH0:stdout.txt"
-    echo "echo >DH0:.done \"\$RC\""
+    [ -z "$SETUP_COMMAND" ] || echo "$SETUP_COMMAND"
+    echo "$EXE_NAME $TARGET_ARGS >DH0:stdout.txt"
+    echo "set TESTRC \"\$RC\""
+    [ "$POST_WAIT" = "0" ] || echo "c:waitsecs $POST_WAIT"
+    echo "echo >DH0:.done \"\$TESTRC\""
 } > "$HD/s/Startup-Sequence"
 
 # ------------------------------------------------------------------ running --

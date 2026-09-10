@@ -206,6 +206,14 @@ static UWORD le_get16(NetdevNic *nic, ULONG off)
 /* ---------------------------------------------------------- registers ---- */
 
 /*
+ * Not a CSR number the part has, so it can never match and suppress a write.
+ * Declared OUTSIDE the LANCE_CSR_GET guard below: the reset paths that store
+ * it compile whether or not a test has replaced the accessors, and
+ * src/netdev/test/test_netdev_lance.c does replace them.
+ */
+#define LE_RAP_UNKNOWN  0xFFFFU
+
+/*
  * RAP selects, RDP reads and writes.  netdev_bus's byte accessors are not used
  * here: a LANCE register is a word and half of one is not a register.
  */
@@ -222,15 +230,24 @@ static volatile UWORD *le_rap(NetdevNic *nic)
            (nic->board + nic->card->reg_off + 2);
 }
 
+static VOID le_rap_select(NetdevNic *nic, UWORD csr)
+{
+    if (nic->le_rap == csr)
+        return;                         /* the port already selects it */
+
+    *le_rap(nic) = le_swap(nic, csr);
+    nic->le_rap = csr;
+}
+
 static UWORD le_csr_get(NetdevNic *nic, UWORD csr)
 {
-    *le_rap(nic) = le_swap(nic, csr);
+    le_rap_select(nic, csr);
     return le_swap(nic, *le_rdp(nic));
 }
 
 static VOID le_csr_put(NetdevNic *nic, UWORD csr, UWORD v)
 {
-    *le_rap(nic) = le_swap(nic, csr);
+    le_rap_select(nic, csr);
     *le_rdp(nic) = le_swap(nic, v);
 }
 
@@ -279,6 +296,9 @@ LONG lance_init(NetdevNic *nic);
 
 VOID lance_halt(NetdevNic *nic)
 {
+    /* A reset leaves RAP undefined, so the cache cannot be trusted across
+       one.  Cheap: it costs one extra RAP write on the next access. */
+    nic->le_rap = LE_RAP_UNKNOWN;
     LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_STOP);
     nic->running = FALSE;
 }
@@ -393,6 +413,9 @@ LONG lance_init(NetdevNic *nic)
     UWORD n = 1000;
     UWORD csr0;
 
+    /* A reset leaves RAP undefined, so the cache cannot be trusted across
+       one.  Cheap: it costs one extra RAP write on the next access. */
+    nic->le_rap = LE_RAP_UNKNOWN;
     LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_STOP);
 
     le_rings(nic);
@@ -718,6 +741,10 @@ LONG lance_attach(NetdevNic *nic)
 {
     UWORD i;
     UWORD csr0;
+
+    /* A reset leaves RAP undefined, so the cache cannot be trusted across
+       one.  Cheap: it costs one extra RAP write on the next access. */
+    nic->le_rap = LE_RAP_UNKNOWN;
 
     if (nic->card->mem_size < LE_END)
         return -1;

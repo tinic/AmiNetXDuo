@@ -113,7 +113,17 @@ jobs:
         run: tools/fetch-toolchain.sh --check-inlines
 
       - name: 32-bit host libraries
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
+        run: |
+          # A vendor's apt index must not fail a RELEASE.  Google's
+          # chrome-stable served a Hash Sum mismatch on 2026-09-09 and took CI
+          # red twice; `apt-get update` exits non-zero on any source it could
+          # not read.  ONLY *google*: Ubuntu's own repositories live in that
+          # same directory as ubuntu.sources, and removing them cost a second
+          # red build.  See .github/workflows/ci.yml.
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-multilib
 
       - name: tools/ci.sh
         run: AMINETXDUO_ANALYZE=1 tools/ci.sh host host32 analyze
@@ -195,6 +205,14 @@ jobs:
       # unrun and the stage still reports green.
       - name: 32-bit host libraries
         run: |
+          # A vendor's apt index must not fail a RELEASE.  Google's
+          # chrome-stable served a Hash Sum mismatch on 2026-09-09 and took CI
+          # red twice; `apt-get update` exits non-zero on any source it could
+          # not read.  ONLY *google*: Ubuntu's own repositories live in that
+          # same directory as ubuntu.sources, and removing them cost a second
+          # red build.  See .github/workflows/ci.yml.
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-multilib
 
@@ -283,7 +301,17 @@ jobs:
       # files at a 100.0% ratio, 3.3 MB that should be about half of it.
       # jlha is already one of the three make-dist.sh probes for.
       - name: An archiver that can create
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq jlha-utils
+        run: |
+          # A vendor's apt index must not fail a RELEASE.  Google's
+          # chrome-stable served a Hash Sum mismatch on 2026-09-09 and took CI
+          # red twice; `apt-get update` exits non-zero on any source it could
+          # not read.  ONLY *google*: Ubuntu's own repositories live in that
+          # same directory as ubuntu.sources, and removing them cost a second
+          # red build.  See .github/workflows/ci.yml.
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jlha-utils
 
       # Name exactly what the step above built, so none of the packed client
       # artifacts can come from a stale tree.

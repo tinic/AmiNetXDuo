@@ -80,9 +80,14 @@ VOID ami_mem_open_delta(LONG delta);
  */
 VOID ami_log(int level, const char *fmt, ...);
 
-/* ami_log() for a caller that already holds a RawDoFmt argument stream; `tag`
-   may be NULL.  bsdsocket.library's vsyslog() is the reason this exists. */
-VOID ami_log_raw(int level, const char *tag, const char *fmt, APTR args);
+/*
+ * The serial sink beneath ami_log().  `args` is RawDoFmt's packed argument
+ * stream, not a host va_list.  Policy belongs to the caller: ami_log() applies
+ * ANXDLOGLEVEL first, while bsdsocket.library's vsyslog() applies the opener's
+ * SBTC_LOGMASK.  Keeping the sink unfiltered prevents one policy silently
+ * overriding the other.
+ */
+VOID ami_serial_logv(int level, const char *fmt, const void *args);
 
 /*
  * How much of it comes out, AMI_LOG_ERROR..AMI_LOG_TRACE.  A RUNTIME dial and

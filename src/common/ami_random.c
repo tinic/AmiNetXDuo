@@ -274,7 +274,16 @@ static VOID pool_mix(const void *data, ULONG length, ULONG credit_bits)
  * NOTHING.  It is read because the read is a Chip RAM cycle that contends
  * with display DMA and so varies the interval measured below.
  */
+/*
+ * The video beam position.  Redirected by src/common/test/test_ami_random.c:
+ * a host has no $DFF006 and reading it is a SEGV, so the gatherer that spins
+ * against the beam could not run off target at all -- which is why the
+ * SHA-256 below, whose own comment asks for a harness against the published
+ * vectors, had never had one.  Expands to the same volatile read it replaces.
+ */
+#ifndef CUSTOM_VHPOSR
 #define CUSTOM_VHPOSR   ((volatile UWORD *)0x00DFF006)
+#endif
 
 typedef struct
 {

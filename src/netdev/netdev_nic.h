@@ -137,6 +137,25 @@ struct NetdevNic
     UBYTE               el3_win;
     UWORD               el3_media;
 
+    /*
+     * LANCE.  le_rap is the register the address port last selected, cached
+     * for the same reason el3_win above is: RAP is write-only, so every CSR
+     * access had to set it, and a CSR access is two Zorro transactions where
+     * one would do.  In the steady state EVERY access is CSR0 -- the
+     * interrupt handler's read, acknowledge and re-read, and lance_tx's
+     * demand write -- so after the first the port already holds what the next
+     * access wants.
+     *
+     * SAFE AGAINST THE INTERRUPT, and no more exposed than the code it
+     * replaces: an interrupt that lands between a RAP write and its RDP
+     * access already corrupted that access before this cache existed, and
+     * both sides of that window use CSR0 anyway.  Every writer goes through
+     * le_csr_get/le_csr_put, so a mismatch simply writes RAP again and the
+     * cache heals itself.  LE_RAP_UNKNOWN is stored wherever the chip may
+     * have been reset under us, because a reset leaves RAP undefined.
+     */
+    UWORD               le_rap;
+
     /* LANCE ring cursors.  The DP8390 cores do not use them: their ring is
        the chip's own page walk, not an indexed descriptor list. */
     UWORD               rx_next;

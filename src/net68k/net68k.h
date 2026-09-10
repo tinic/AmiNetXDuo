@@ -144,6 +144,29 @@ typedef struct N68kRxVerifyStats
 extern N68kRxVerifyStats n68k_rx_verify_stats;
 
 /*
+ * ip_ok, transport_ok, from_copy and v6_ok fire on EVERY received frame, and
+ * they fire inside the reader's nx_ip_protection hold, where a calibrated burn
+ * put a cycle at about 1.53 times what it costs outside (netdev_cmds.c:218).
+ * Each is a longword read-modify-write to an absolute address.
+ *
+ * They answer one question -- is the carried-sum fast path being taken -- and
+ * netstack.c says so itself: "The counters are for confirming that on a rig,
+ * not for finding it."  So they are compiled in when asked for, like
+ * AMINETXDUO_RXPROBE and AMINETXDUO_NX_COUNTERS, and not otherwise.
+ *
+ * THE ERROR AND SKIP COUNTERS STAY UNCONDITIONAL.  They sit on paths a bulk
+ * transfer does not take, so they cost nothing per frame, and they are the
+ * ones worth having when something is actually wrong.
+ */
+#ifdef AMINETXDUO_RX_VERIFY_STATS
+#  define N68K_RXV_HOT(f)       (n68k_rx_verify_stats.f++)
+#  define N68K_RXV_HOT_BUILT    1
+#else
+#  define N68K_RXV_HOT(f)       ((void)0)
+#  define N68K_RXV_HOT_BUILT    0
+#endif
+
+/*
  * Check a freshly received frame, with prepend pointing at the IPv4 header.
  * Returns the nx_packet_interface_capability_flag bits to publish, and sets
  * *drop when the frame is corrupt and must not reach the stack.

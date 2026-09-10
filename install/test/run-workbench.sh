@@ -31,11 +31,12 @@ KEEP=0
 TERMINAL=0
 STATIC=0
 DRAWER=0
+DRAWER_GUI=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSD" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDg" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -48,6 +49,7 @@ while getopts "b:a:l:p:N:t:T:kHSD" opt; do
         H) TERMINAL=1 ;;
         S) STATIC=1 ;;
         D) DRAWER=1 ;;
+        g) DRAWER_GUI=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S]" >&2
@@ -88,40 +90,39 @@ if [ "$STATIC" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
 fi
 
 # -p takes a name, not a gadget number: the number is this file's business.
-# The stack page is found by its OPTION COUNT (DRIVE_PICK_OPTIONS in
-# installdrive.c) and then by gadget id, and the option gadgets are numbered
-# from 1 up in the order the (choices ...) list gives them.
-#
-# IT WAS A TWO-OPTION PAGE AND IT IS A THREE-OPTION PAGE NOW.  Adding the micro
-# stack moved it, so the old "2:" specs no longer match any page and a -p run
-# would silently take the default -- the vacuous pass this file exists not to
-# produce.  The count and the ids move together, which is why they are one
-# string and not two settings.
+# "minimal" is the second option of the two-option stack page, which is the
+# only askchoice in the script with two options -- the card question has nine.
 PICK_SPEC=""
 case "$PICK" in
 "")        ;;
-# options:gadget-id:skip.
-#
-# The ids run FORWARD from 2 in (choices ...) order, which is what
-# installdrive.c's own header says: "the options are numbered from 2 upward in
-# the order the script lists them".  So on the three-option stack page 2 is
-# "Everything", 3 is "Minimal" and 4 is "Micro".
-#
-# AND TWO EARLIER PAGES ALSO CARRY THREE OPTIONS, so every spec skips two.
-# Measured, not guessed: with skip 1 the pick landed on a page whose ids are
-# also 4/3/2 and the stack came out full; with skip 2 it lands on the stack
-# page and gadget 4 installs micro (158,472 bytes on the disk).  A page is
-# recognised by its option COUNT and that does not identify it, which is the
-# whole reason this needs a skip at all.
-#
-# AND ONE EARLIER PAGE ALSO HAS THREE OPTIONS: the Installer's own user-level
-# page.  A page is recognised by its option COUNT, so every spec here skips
-# that one.  Without the skip the driver picks there and the stack page takes
-# its default, which asks for micro and installs full.
+# INVERTED UNTIL 2026-09-08, AND THAT IS WHY -p NEVER WORKED.  The options are
+# numbered from 2 up IN THE ORDER THE SCRIPT LISTS THEM and
+# Install-AmiNetXDuo:667 lists (choices "Everything" "Minimal, no IPv6/TLS"),
+# so 2 is the FULL stack and 3 is the minimal one.  Measured on the rig: on the
+# askchoice page gadget 2 carries GFLG_SELECTED (0x80) before anything is
+# clicked, which is the default, and the default is MINPICK 0 = Everything.
+# With the two swapped, `-p minimal` picked "Everything" and the run reported
+# "asked for the minimal stack and full was installed" -- which read as the
+# click missing the page, and was the click landing on the wrong option.
+# <options>:<gadget id>[:<which matching page>].  The third field exists
+# because the stack choice and the drawer layout are BOTH two-option pages, so
+# "the first page with two options" can only ever address the earlier one.
+# THE STACK PAGE HAS THREE OPTIONS SINCE micro JOINED IT, so its specs move
+# from "2:" to "3:" and micro is the third, gadget 4.  Two earlier pages also
+# carry three options, so the stack page is match 2.
 full)      PICK_SPEC="3:2:2" ;;
 minimal)   PICK_SPEC="3:3:2" ;;
 micro)     PICK_SPEC="3:4:2" ;;
-*)         echo "-p takes full, minimal or micro, not \"$PICK\"" >&2; exit 2 ;;
+# The SECOND two-option askchoice is the drawer layout at
+# Install-AmiNetXDuo:770, "Into the system" / "Into its own drawer", so it is
+# skip 1 and gadget 3.  Reaching it needs FORCE_DRAWER to be 0, which means NOT
+# planting S:AmiNetXDuo-drawer -- see -g.
+# AND THE DRAWER PAGE MOVED WITH IT.  It used to be the SECOND two-option
+# askchoice because the stack page was the first; the stack page has three
+# options now, so the layout page is the only two-option one left.  UNVERIFIED
+# on the rig -- the stack picks were measured, this index was derived.
+drawer)    PICK_SPEC="2:3:0" ;;
+*)         echo "-p takes full, minimal, micro or drawer, not \"$PICK\"" >&2; exit 2 ;;
 esac
 
 # It needs a level for the same reason -H does: at NOVICE the page is never
@@ -531,23 +532,20 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 # $1 names the binary, $2 is how many times it runs the Installer, $3 is the
 # label of the yes/no button to press instead of the first one (empty: press
 # the first, which is every question's default), $4 names an askchoice option
-# to select before Proceed as "<options>:<gadget id>:<pages to skip>" (empty:
-# take that page's default).  See installdrive.c on why an option is named by
-# number and not by text: it carries none.
-#
-# THE SKIP IS NOT OPTIONAL DECORATION.  A page is recognised by how many
-# options it has, and that does not identify it: the Installer's own user-level
-# page has three options and so does the stack page.  Without a skip the driver
-# picks on the user-level page and the stack page takes its default, which is a
-# -p run that tested nothing.
+# to select before Proceed as "<options>:<gadget id>" (empty: take that page's
+# default).  See installdrive.c on why an option is named by number and not by
+# text: it carries none.
 build_driver() {
     local out="$1" runs="$2" label="$3" pick="${4:-}"
     local opts=0 gid=0 skip=0
     if [ -n "$pick" ]; then
-        opts=${pick%%:*}
-        local _rest=${pick#*:}
-        gid=${_rest%%:*}
-        case "$_rest" in *:*) skip=${_rest##*:} ;; esac
+        # <options>:<id>[:<skip>].  `${pick##*:}` took the LAST field as the
+        # id, which is the skip once there are three, so the fields are cut
+        # explicitly rather than from either end.
+        opts=$(echo "$pick" | cut -d: -f1)
+        gid=$(echo "$pick" | cut -d: -f2)
+        skip=$(echo "$pick" | cut -d: -f3)
+        [ -n "$skip" ] || skip=0
     fi
     "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
            -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
@@ -628,6 +626,40 @@ FOREIGN_LINES=(
     "C:SetPatch QUIET"
     "; -- end SomeOtherApp --"
 )
+
+# Drawer mode exists for a machine that ALREADY HAS another TCP/IP stack, so
+# that is the only meaningful fixture for it.  The files are deliberately not
+# Amiga libraries: if ActivateAmiNetXDuo leaves system LIBS: first, opening
+# bsdsocket.library fails and the boot half below goes red.  If the installer
+# still performs its old fixed-path backups, the byte snapshot goes red first.
+FOREIGN_STACK_FILES=()
+if [ "$DRAWER" = "1" ]; then
+    mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
+             "$HD/Devs/Networks" "$HD/ForeignAmiTCP/db"
+    printf 'foreign bsdsocket.library -- must not be moved\n' \
+        > "$HD/Libs/bsdsocket.library"
+    printf 'foreign usergroup.library -- must not be moved\n' \
+        > "$HD/Libs/usergroup.library"
+    printf 'foreign tls.library -- must not be moved\n' \
+        > "$HD/Libs/tls.library"
+    printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
+        > "$HD/Devs/NetInterfaces/foreign0"
+    printf 'DEFAULT=10.0.0.1\n' > "$HD/Devs/Internet/routes"
+    printf 'foreign nfs table\n' > "$HD/ForeignAmiTCP/db/ch_nfstab"
+    chmod 644 "$HD/Libs/bsdsocket.library" "$HD/Libs/usergroup.library" \
+        "$HD/Libs/tls.library" "$HD/Devs/NetInterfaces/foreign0" \
+        "$HD/Devs/Internet/routes" "$HD/ForeignAmiTCP/db/ch_nfstab"
+
+    FOREIGN_LINES+=("Assign AmiTCP: DH0:ForeignAmiTCP")
+    FOREIGN_STACK_FILES=(
+        Libs/bsdsocket.library
+        Libs/usergroup.library
+        Libs/tls.library
+        Devs/NetInterfaces/foreign0
+        Devs/Internet/routes
+        ForeignAmiTCP/db/ch_nfstab
+    )
+fi
 mkdir -p "$HD/S"
 printf '%s\n' "${FOREIGN_LINES[@]}" > "$HD/S/User-Startup"
 chmod 644 "$HD/S/User-Startup"
@@ -639,11 +671,24 @@ chmod 644 "$HD/S/User-Startup"
 # guest-relative path a check resolves has to start there. S:User-Startup is
 # NOT prefixed: it stays in S: whichever layout was chosen, which is the whole
 # point of the assigns.
+#
+# TWO WAYS INTO THE DRAWER LAYOUT, AND ONLY ONE OF THEM WAS EVER TESTED.
+# Planting S:AmiNetXDuo-drawer sets FORCE_DRAWER, and Install-AmiNetXDuo:769
+# asks the layout question only when FORCE_DRAWER is 0 -- so every -D run has
+# SKIPPED the GUI page it is meant to be covering.  With -g the sentinel is not
+# planted and the answer comes from the askchoice instead, which is the same
+# install by the path a person actually takes.  Everything else about -D is
+# unchanged, so the whole self-contained contract below is reused rather than
+# written twice.
 if [ "$DRAWER" = "1" ]; then
     INST=AmiNetXDuo/
-    : > "$HD/S/AmiNetXDuo-drawer"
-    chmod 644 "$HD/S/AmiNetXDuo-drawer"
-    echo "==> scripted drawer layout: S:AmiNetXDuo-drawer planted"
+    if [ "$DRAWER_GUI" = "1" ]; then
+        echo "==> GUI drawer layout: no sentinel, answering the askchoice"
+    else
+        : > "$HD/S/AmiNetXDuo-drawer"
+        chmod 644 "$HD/S/AmiNetXDuo-drawer"
+        echo "==> scripted drawer layout: S:AmiNetXDuo-drawer planted"
+    fi
 fi
 
 # AmigaDOS does not care about case and this host does, so a file the guest
@@ -716,6 +761,16 @@ if [ -d "$HD/Devs/Networks" ]; then
 fi
 echo "==> DEVS:Networks before the install: $DEVS_NETWORKS_BEFORE" \
      "${STALE_DEVICE:+(a stale anxnet.device staged in it)}"
+
+FOREIGN_STACK_BEFORE=""
+if [ "$DRAWER" = "1" ]; then
+    FOREIGN_STACK_FILES+=(Devs/Networks/anxnet.device)
+    FOREIGN_STACK_BEFORE=$(
+        for f in "${FOREIGN_STACK_FILES[@]}"; do
+            shasum "$HD/$f"
+        done
+    )
+fi
 
 # The download, where a download would be: its own drawer, not the one the
 # installer is going to create.
@@ -1058,8 +1113,11 @@ check_file "${INST}Libs/usergroup.library"
 # copies.  Without this a -p "Minimal" run whose click missed the page would
 # install the full stack and pass every check below it, which is the vacuous
 # pass this file exists not to produce -- and the harness could not reach that
-# page at all until installdrive.c learned DRIVE_PICK_LABEL, so `minimal` had
-# never been installed by any run.
+# page at all until the option ids were unswapped (see PICK_SPEC above), so
+# `minimal` had never been installed by any run.  An earlier version of this
+# note credited a DRIVE_PICK_LABEL in installdrive.c; there is no such thing
+# in the tree and never was -- installdrive.c:88 says the options carry no
+# label to match on, which is the whole reason they are named by id.
 STACK_INSTALLED=unknown
 _stack_real=$(amiga_path "${INST}Libs/bsdsocket.library" || true)
 
@@ -1082,13 +1140,12 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     _min_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library")
     _micro_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/micro/bsdsocket.library")
 
-    # AMBIGUITY IS REPORTED, NOT RESOLVED.  This used to be three assignments
-    # in a row with the last one winning, so an archive whose drawers happened
-    # to hold the SAME library reported whichever was tested last -- and an
-    # archive built with AMINETXDUO_BUILD_MINIMAL pointing at the -b tree does
-    # exactly that.  A run then failed with "asked for the full stack and
-    # minimal was installed" and the archive, not the product, was the defect.
-    # Counting the matches first says which happened.
+    # AMBIGUITY IS REPORTED, NOT RESOLVED.  Three assignments in a row let the
+    # LAST match win, so an archive whose drawers hold the same library named
+    # whichever was tested last -- and one built with AMINETXDUO_BUILD_MINIMAL
+    # pointing at the -b tree does exactly that.  The run then failed with
+    # "asked for the full stack and minimal was installed" and the ARCHIVE, not
+    # the product, was the defect.  Counting the matches says which happened.
     _matches=""
     [ -n "$_full_bytes" ]  && [ "$_stack_bytes" = "$_full_bytes" ]  && _matches="$_matches full"
     [ -n "$_min_bytes" ]   && [ "$_stack_bytes" = "$_min_bytes" ]   && _matches="$_matches minimal"
@@ -1109,20 +1166,52 @@ else
 fi
 
 case "$PICK" in
-""|full) WANT_STACK=full ;;
-minimal) WANT_STACK=minimal ;;
-micro)   WANT_STACK=micro ;;
+""|full)      WANT_STACK=full ;;
+minimal)      WANT_STACK=minimal ;;
+micro)        WANT_STACK=micro ;;
+# -p drawer answers the LAYOUT page, not the stack page, so the stack page
+# takes its own default and that default is the full stack.
+drawer)       WANT_STACK=full ;;
 esac
 if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
     fail=1
 fi
-for cmd in AddNetInterface Online Offline ShowNetStatus ping netstat host fetch; do
+for cmd in ActivateAmiNetXDuo AddNetInterface Online Offline ShowNetStatus \
+           ping netstat host fetch; do
     check_file "${INST}C/$cmd"
 done
 check_file "${INST}Devs/NetInterfaces/eth0"
 check_file "${INST}Devs/Internet/name_resolution"
 check_file S/User-Startup
+
+# The self-contained contract, in one comparison: none of the system stack's
+# libraries, driver, configuration, or AmiTCP:db data moved by even one byte.
+# The old implementation renamed the first three libraries and the driver,
+# reused foreign0 instead of writing its own eth0, and claimed AmiTCP: itself.
+if [ "$DRAWER" = "1" ]; then
+    FOREIGN_STACK_AFTER=$(
+        for f in "${FOREIGN_STACK_FILES[@]}"; do
+            shasum "$HD/$f" 2>/dev/null || echo "MISSING $f"
+        done
+    )
+    if [ "$FOREIGN_STACK_AFTER" = "$FOREIGN_STACK_BEFORE" ]; then
+        echo "  ok      foreign stack files unchanged"
+    else
+        echo "!! the drawer install changed another stack's files"
+        diff -u <(printf '%s\n' "$FOREIGN_STACK_BEFORE") \
+                <(printf '%s\n' "$FOREIGN_STACK_AFTER") || true
+        fail=1
+    fi
+
+    for old in Libs/bsdsocket.library.old Libs/usergroup.library.old \
+               Libs/tls.library.old Devs/Networks/anxnet.device.old; do
+        if amiga_path "$old" >/dev/null 2>&1; then
+            echo "!! drawer install created system $old"
+            fail=1
+        fi
+    done
+fi
 
 # ---------------------------------------- anxnet.device, into DEVS:Networks --
 #
@@ -1173,7 +1262,22 @@ echo "devs_networks_before=$DEVS_NETWORKS_BEFORE"
 echo "anxnet_installed=$([ -n "$ANXNET_INSTALLED" ] && echo yes || echo no)"
 echo "anxnet_backup=$([ -n "$ANXNET_OLD" ] && echo yes || echo no)"
 
-if [ "$DEVS_NETWORKS_BEFORE" = "absent" ]; then
+if [ "$DRAWER" = "1" ]; then
+    # The stale file was in SYSTEM DEVS:, not in the private destination.  One
+    # install therefore makes no private backup; a second install backs up the
+    # first private copy.  Neither case may touch the system file, asserted by
+    # FOREIGN_STACK_BEFORE above.
+    if [ "$DRIVE_RUNS" = "1" ] && [ -n "$ANXNET_OLD" ]; then
+        echo "!! first drawer install made a private anxnet.device.old from"
+        echo "   a file that existed only in system DEVS:"
+        fail=1
+    elif [ "$DRIVE_RUNS" != "1" ] && [ -z "$ANXNET_OLD" ]; then
+        echo "!! repeated drawer install did not back up its own prior driver"
+        fail=1
+    else
+        echo "  ok      driver backup stayed inside the selected layout"
+    fi
+elif [ "$DEVS_NETWORKS_BEFORE" = "absent" ]; then
     # The stock-Workbench half: there was no drawer, so the installer's own
     # makedir is the only thing that could have made one.
     if [ -n "$ANXNET_INSTALLED" ]; then
@@ -1287,7 +1391,7 @@ done
 # tls.library and the trust store are what https: needs, and their absence is
 # the first thing to know if the https: check fails.
 for f in Libs/tls.library Devs/Internet/certificates; do
-    real=$(amiga_path "$f" || true)
+    real=$(amiga_path "${INST}$f" || true)
     if [ -n "$real" ] && [ -f "$real" ]; then
         printf '  ok      %-32s %s bytes\n' "$f" "$(wc -c < "$real" | tr -d ' ')"
     else
@@ -1475,17 +1579,37 @@ FOREIGN=no
 foreign_intact && FOREIGN=yes
 TERM_LINES=$(startup_count 'httpd')
 TERM_ASSIGNS=$(startup_count 'Assign AmiNetXDuo:')
+SELECT_LINES=$(startup_count 'ActivateAmiNetXDuo')
+AMITCP_LINES=$(startup_count 'Assign AmiTCP:')
 
 echo
 echo "startup_foreign_lines_intact=$FOREIGN"
 echo "startup_httpd_lines=$TERM_LINES"
 echo "startup_assign_lines=$TERM_ASSIGNS"
+echo "startup_selector_lines=$SELECT_LINES"
+echo "startup_amitcp_lines=$AMITCP_LINES"
 echo "startup_installer_runs=$DRIVE_RUNS"
 
 if [ "$FOREIGN" != "yes" ]; then
     echo
     echo "!! S:User-Startup lost lines that were not ours.  The installer's"
     echo "   contract is that it touches only its own marked block."
+    fail=1
+fi
+
+WANT_SELECTOR=0
+WANT_AMITCP=0
+if [ "$DRAWER" = "1" ]; then
+    WANT_SELECTOR=1
+    WANT_AMITCP=1                 # the foreign line, never one of ours
+fi
+if [ "$SELECT_LINES" != "$WANT_SELECTOR" ]; then
+    echo "!! startup has $SELECT_LINES selector line(s), want $WANT_SELECTOR"
+    fail=1
+fi
+if [ "$AMITCP_LINES" != "$WANT_AMITCP" ]; then
+    echo "!! startup has $AMITCP_LINES AmiTCP: line(s), want only the"
+    echo "   $WANT_AMITCP line(s) that existed before installation"
     fail=1
 fi
 

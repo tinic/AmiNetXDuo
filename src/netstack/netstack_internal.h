@@ -61,10 +61,33 @@
  * AMI_AUTOIP_STACK_SIZE is: 812 bytes measured, plus headroom for the Exec
  * calls its send path reaches on a target with no guard page.
  */
-/* 2048, measured: a fill-and-scan probe over every ThreadX stack read this
-   thread's deepest byte at 976 across run-dhcpv6, run-bringup, run-mld and
-   run-socket.  Was 4096.  No MMU, so the 2x margin is deliberate. */
-#define AMI_DHCPV6_STACK_SIZE       2048
+/* 4096, RESTORED: the 2048 cut had the same scope error 75a00c2e fixed for
+   DHCP, and it is the same mechanism on the same kind of thread.
+ *
+ * This thread SENDS.  nx_ip_packet_send() from here reaches
+ * ami_sana2_driver_entry NX_LINK_PACKET_SEND (sana2_driver.c:364) ->
+ * ami_sana2_tx_send() -> BeginIO(), and "a device is free to complete the
+ * write synchronously" (sana2_tx.c:165).  So a third-party driver's inline
+ * transmit path runs on THIS stack, and none of it is visible to a probe on
+ * the rig.
+ *
+ * The 976-byte fill-and-scan that justified 2048 ran run-dhcpv6,
+ * run-bringup, run-mld and run-socket against the rig's own driver only. It
+ * bounds our transmit path and nothing else -- exactly what the DHCP
+ * measurement did before genet.device overflowed the 2 KiB it produced and
+ * the documented A1200/PiStorm32 setup fell back to AutoIP.
+ *
+ * There is no MMU: an overrun is silent memory corruption that kills the
+ * machine somewhere unrelated.  Do not lower this floor without measuring
+ * the complete supported-device matrix, including the synchronous driver
+ * call. */
+#ifndef AMI_DHCPV6_STACK_SIZE
+#define AMI_DHCPV6_STACK_SIZE       4096
+#endif
+
+#if AMI_DHCPV6_STACK_SIZE < 4096
+#error "DHCPv6 sends through the SANA-II bridge; a third-party BeginIO runs on this stack"
+#endif
 
 /*
  * And the deferred-work thread's, which is small because that thread wakes on
@@ -102,11 +125,11 @@
  */
 #define AMI_MDNS_LOCAL_CACHE_BYTES  \
     (1024 + AMI_CFG_MAX_SD_SERVICES * 384)
-/* Overridable: 32 KB holds a hundred-odd learnt records, which is a network
-   far larger than an Amiga is on.  The cache evicts the oldest when it is
-   full, so a smaller one forgets sooner and loses nothing else. */
+/* Overridable, but keep NetX Duo's established 32 KB capacity by default.
+   A smaller cache is a compatibility trade: it evicts learnt peers sooner
+   and can make service discovery intermittent on a busy network. */
 #ifndef AMI_MDNS_PEER_CACHE_BYTES
-#define AMI_MDNS_PEER_CACHE_BYTES   8192
+#define AMI_MDNS_PEER_CACHE_BYTES   32768
 #endif
 #endif
 
@@ -137,6 +160,23 @@
 #define AMI_ADDRESS_POLL_TICKS      ((ULONG)NX_IP_PERIODIC_RATE / 10UL)
 
 /* --------------------------------------------------------------- the state */
+
+/*
+ * DHCP and DNS keep independent packet reservations without putting their
+ * packet arrays back inside every AmiNetStack.  The blocks are allocated only
+ * when the corresponding client is created.  This preserves the small static
+ * configuration while preventing RX/TCP traffic from consuming the packets a
+ * lease renewal or resolver query needs.
+ */
+typedef struct AmiNsClientPoolBlock
+{
+    NX_PACKET_POOL pool;
+    ULONG memory[1];
+} AmiNsClientPoolBlock;
+
+UINT ami_ns_client_pool_create(AmiNsClientPoolBlock **owner,
+                               CHAR *name, ULONG payload, ULONG memory_bytes);
+VOID ami_ns_client_pool_delete(AmiNsClientPoolBlock **owner);
 
 struct AmiNetStack
 {
@@ -186,6 +226,7 @@ struct AmiNetStack
 
 #ifdef AMINETXDUO_DHCP
     NX_DHCP             ns_Dhcp;
+    AmiNsClientPoolBlock *ns_DhcpPool;
     BOOL                ns_DhcpCreated;
 
     /*
@@ -233,6 +274,7 @@ struct AmiNetStack
     BOOL                ns_AutoIpRunning;
 
     NX_DNS              ns_Dns;
+    AmiNsClientPoolBlock *ns_DnsPool;
     BOOL                ns_DnsCreated;
 
     /* A BOUND notification can run on the DHCP client's own ThreadX task.

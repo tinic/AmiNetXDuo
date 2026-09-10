@@ -11,6 +11,7 @@
 #include <proto/exec.h>
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* ----------------------------------------------------------------- errno, */
 
@@ -55,10 +56,13 @@ void ug_context_init(struct UserGroupBase *base)
     base->ug_Cred.cr_ruid     = 0;
     base->ug_Cred.cr_rgid     = 0;
     base->ug_Cred.cr_euid     = 0;
-    base->ug_Cred.cr_umask    = 0;
+    /* AmiTCP and Roadshow both start each credentials context at 022.  NFS
+       clients consume this field directly when the mount does not supply an
+       explicit UMASK, so zero is not an interchangeable default. */
+    base->ug_Cred.cr_umask    = 0022;
     base->ug_Cred.cr_ngroups  = 1;
     base->ug_Cred.cr_groups[0] = 0;
-    base->ug_Cred.cr_session  = (LONG)self;
+    base->ug_Cred.cr_session  = (LONG)(uintptr_t)self;
     base->ug_Cred.cr_login[0] = '\0';
 
     ug_strncpy(base->ug_ProgName, "", sizeof(base->ug_ProgName));
@@ -95,9 +99,10 @@ void ug_resolve_login(struct UserGroupBase *base)
 
 /* ------------------------------------------------------------- vectors --- */
 
-LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
-                             register struct TagItem *tags __asm("a1"))
+LONG ugl_SetupContextTagList(UG_A6, UG_REG(STRPTR name, "a0"),
+                             UG_REG(struct TagItem *tags, "a1"))
 {
+    UG_ENTER("SetupContextTagList");
     struct TagItem *ti = tags;
 
     if (name != NULL)
@@ -115,7 +120,7 @@ LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
 
         if (tag == TAG_MORE)
         {
-            ti = (struct TagItem *)data;
+            ti = (struct TagItem *)(uintptr_t)data;
             continue;
         }
 
@@ -128,22 +133,22 @@ LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
         switch (tag)
         {
             case UGT_ERRNOBPTR:
-                base->ug_ErrnoPtr  = (APTR)data;
+                base->ug_ErrnoPtr  = (APTR)(uintptr_t)data;
                 base->ug_ErrnoSize = 1;
                 break;
 
             case UGT_ERRNOWPTR:
-                base->ug_ErrnoPtr  = (APTR)data;
+                base->ug_ErrnoPtr  = (APTR)(uintptr_t)data;
                 base->ug_ErrnoSize = 2;
                 break;
 
             case UGT_ERRNOLPTR:
-                base->ug_ErrnoPtr  = (APTR)data;
+                base->ug_ErrnoPtr  = (APTR)(uintptr_t)data;
                 base->ug_ErrnoSize = 4;
                 break;
 
             case UGT_OWNER:
-                base->ug_Owner = (struct Task *)data;
+                base->ug_Owner = (struct Task *)(uintptr_t)data;
                 base->ug_Cred.cr_session = (LONG)data;
                 break;
 
@@ -165,11 +170,13 @@ LONG ugl_SetupContextTagList(UG_A6, register STRPTR name __asm("a0"),
 
 LONG ugl_GetErr(UG_A6)
 {
+    UG_ENTER("GetErr");
     return base->ug_Err;
 }
 
-STRPTR ugl_StrError(UG_A6, register LONG err __asm("d1"))
+STRPTR ugl_StrError(UG_A6, UG_REG(LONG err, "d1"))
 {
+    UG_ENTER("StrError");
     (void)base;
 
     switch (err)
@@ -194,10 +201,19 @@ STRPTR ugl_StrError(UG_A6, register LONG err __asm("d1"))
  * as Forbid() is released, so a pointer into it would already be stale before
  * the caller could dereference it.  Cross-task results are copied into the
  * querying opener while the child list is frozen.
+ *
+ * A task does not have to open usergroup.library to have credentials.  That is
+ * the point of this vector: filesystem handlers such as ch_nfsc ask for the
+ * credentials of the task that sent a DOS packet, and ordinary applications
+ * behind those packets never open this library.  AmiTCP documents every valid
+ * task as a success.  On an OS with no protection domains, an unknown task
+ * therefore inherits this opener's effective credentials; returning ESRCH
+ * made the first NFS request after a mount lose its authentication context.
  */
 struct ug_credentials *ugl_getcredentials(UG_A6,
-                                          register struct Task *task __asm("a0"))
+                                          UG_REG(struct Task *task, "a0"))
 {
+    UG_ENTER("getcredentials");
     struct UgGlobal *g = base->ug_Global;
     struct ug_credentials *result = NULL;
     struct MinNode *node;
@@ -232,7 +248,17 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
     Permit();
 
     if (result == NULL)
-        ug_set_err(base, UG_ESRCH);
+    {
+        /* Do not dereference `task`: the caller owns that pointer and a stale
+           one must not turn compatibility fallback into an Enforcer hit. */
+        ug_resolve_login(base);
+        /* There is one protection domain on this system.  Roadshow returns
+           the caller's credentials unchanged for a task which has no library
+           opener; it does not manufacture a session id from an arbitrary
+           Task pointer. */
+        base->ug_CredResult = base->ug_Cred;
+        result = &base->ug_CredResult;
+    }
 
     return result;
 }

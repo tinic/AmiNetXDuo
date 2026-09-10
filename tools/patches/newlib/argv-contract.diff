@@ -1,0 +1,154 @@
+Applied by tools/build-toolchain.sh to bebbo/newlib-cygwin commit
+0909ae9abc18b38595425143e7a63d9e2fc31174.  Commit 120371e changed __argv
+from an array to a pointer to fix amiga-gcc issue #8, but crt0 retained two
+writes through the pointer before the command-line initializer assigned it.
+Both startup paths consequently write a longword through address zero.
+
+Follow libnix's ownership model instead of giving the bad writes private
+backing storage: crt0 only captures the OS startup state, while
+__nocommandline constructs __argc/__argv during the init list.  An application
+which overrides that hook gets its documented no-argument state, main(0,
+NULL), from BSS initialization.
+
+The shared header is part of the fix.  The array/pointer regression crossed a
+translation-unit boundary, so keeping independent declarations would permit
+the same defect again.  It also corrects the existing incompatible
+_WBenchMsg definitions, which -flto -Wlto-type-mismatch diagnoses.  Mark the
+link anchor used because an optimized standalone crt0 build otherwise removes
+it and fails to pull the default parser from libc.
+
+diff --git a/newlib/libc/sys/amigaos/Makefile.am b/newlib/libc/sys/amigaos/Makefile.am
+--- a/newlib/libc/sys/amigaos/Makefile.am
++++ b/newlib/libc/sys/amigaos/Makefile.am
+@@ -6,6 +6,7 @@ INCLUDES = $(NEWLIB_CFLAGS) $(CROSS_CFLAGS) $(TARGET_CFLAGS)
+ AM_CCASFLAGS = $(INCLUDES)
+ 
+ noinst_LIBRARIES = lib.a
++EXTRA_DIST = startup.h
+ 
+ lib_a_SOURCES = dummy.c open.c __divsi3.c  \
+ __adddf3.c  __divdf3.c  __eqdf2.c        __fixdfsi.c     __fixunssfsi.c  __floatunsidf.c  __mulsf3.c  __negsf2.c  __truncdfsf2.c \
+diff --git a/newlib/libc/sys/amigaos/Makefile.in b/newlib/libc/sys/amigaos/Makefile.in
+--- a/newlib/libc/sys/amigaos/Makefile.in
++++ b/newlib/libc/sys/amigaos/Makefile.in
+@@ -220,6 +220,7 @@ top_srcdir = @top_srcdir@
+ INCLUDES = $(NEWLIB_CFLAGS) $(CROSS_CFLAGS) $(TARGET_CFLAGS)
+ AM_CCASFLAGS = $(INCLUDES)
+ noinst_LIBRARIES = lib.a
++EXTRA_DIST = startup.h
+ lib_a_SOURCES = dummy.c open.c __divsi3.c  \
+ __adddf3.c  __divdf3.c  __eqdf2.c        __fixdfsi.c     __fixunssfsi.c  __floatunsidf.c  __mulsf3.c  __negsf2.c  __truncdfsf2.c \
+ __addsf3.c  __divsf3.c  __eqsf2.c        __fixsfsi.c     __floatsidf.c   __floatunsisf.c  __mulsi3.c  __subdf3.c  __udivsi3.c \
+diff --git a/newlib/libc/sys/amigaos/__nocommandline.c b/newlib/libc/sys/amigaos/__nocommandline.c
+index aede1f2..84b8ee7 100644
+--- a/newlib/libc/sys/amigaos/__nocommandline.c
++++ b/newlib/libc/sys/amigaos/__nocommandline.c
+@@ -5,12 +5,7 @@
+ #include <dos/dos.h>
+ #include <proto/dos.h>
+ #include "stabs.h"
+-
+-extern int __argc; /* Defined in startup */
+-extern char **__argv;
+-extern char *__commandline;
+-extern unsigned long __commandlen;
+-extern struct WBStartup *_WBenchMsg;
++#include "startup.h"
+ 
+ extern char * __stdiowin;
+ 
+diff --git a/newlib/libc/sys/amigaos/crt0.c b/newlib/libc/sys/amigaos/crt0.c
+index 61a6b54..7b61a33 100644
+--- a/newlib/libc/sys/amigaos/crt0.c
++++ b/newlib/libc/sys/amigaos/crt0.c
+@@ -7,6 +7,7 @@
+ #include <inline/exec.h>
+ #include <string.h>
+ #include <stabs.h>
++#include "startup.h"
+ 
+ #pragma GCC push_options
+ #pragma GCC optimize ("no-toplevel-reorder")
+@@ -31,12 +32,15 @@ struct ExecBase * SysBase;
+ static int __savedSp;
+ static unsigned short cleanupflag;
+ 
+-char ** __argv = {0, 0};
++/* The command-line initializer owns __argc and __argv.  Their zero-filled
++ * defaults are also the documented no-argument state when an application
++ * overrides __nocommandline. */
++char **__argv;
+ int __argc;
+-int __commandlen;
+-void * __commandline;
++unsigned long __commandlen;
++char *__commandline;
+ 
+-struct Message * _WBenchMsg;
++struct WBStartup *_WBenchMsg;
+ 
+ #if defined(__pic__) || defined (__PIC__)
+ extern const int __bss_init_size;
+@@ -45,7 +49,7 @@ void __restore_a4(void);
+ __saveds
+ #endif
+ 
+-__entrypoint __regargs void ____start(int cmdlen, void * cmdline, int sp asm("sp")) {
++__entrypoint __regargs void ____start(unsigned long cmdlen, char *cmdline, int sp asm("sp")) {
+ #if defined(__pic__) || defined (__PIC__)
+ 	asm("lea ___a4_init,a4");
+ 	// clear bss
+@@ -65,12 +69,7 @@ __entrypoint __regargs void ____start(int cmdlen, void * cmdline, int sp asm("sp
+ 	struct Process * task = (struct Process *) FindTask(0);
+ 	if (!task->pr_CLI) {
+ 		WaitPort(&task->pr_MsgPort);
+-		_WBenchMsg = GetMsg(&task->pr_MsgPort);
+-		__argv[0] = (char *)_WBenchMsg;
+-		__argc = 0;
+-	} else {
+-		__argv[0] = __commandline;
+-		__argc = 1;
++		_WBenchMsg = (struct WBStartup *) GetMsg(&task->pr_MsgPort);
+ 	}
+ 	callfuncs(&__INIT_LIST__[0] + 1, 0);
+ 	exit(main(__argc, __argv));
+@@ -100,7 +99,7 @@ __entrypoint __stdargs int exit(int rc) {
+ 
+ 	if (_WBenchMsg) {
+ 		Forbid();
+-		ReplyMsg(_WBenchMsg);
++		ReplyMsg((struct Message *) _WBenchMsg);
+ 	}
+ 
+ 	asm("move.l %0,sp"::"r"(__savedSp));
+@@ -204,8 +203,9 @@ void __exitcpp() {
+     (*p++)();
+ }
+ 
+-extern void __nocommandline() ;
+-static void (*used_commandline)() = __nocommandline;
++/* Pull the default initializer out of libc unless the application supplies
++ * the documented no-argument override. */
++static void (*used_commandline)(void) __attribute__((used)) = __nocommandline;
+ 
+ ADD2INIT(__initlibraries, -100);
+ ADD2EXIT(__exitlibraries, -100);
+diff --git a/newlib/libc/sys/amigaos/startup.h b/newlib/libc/sys/amigaos/startup.h
+new file mode 100644
+index 0000000..3562e34
+--- /dev/null
++++ b/newlib/libc/sys/amigaos/startup.h
+@@ -0,0 +1,13 @@
++#ifndef _AMIGAOS_STARTUP_H
++#define _AMIGAOS_STARTUP_H
++
++#include <workbench/startup.h>
++
++extern int __argc;
++extern char **__argv;
++extern char *__commandline;
++extern unsigned long __commandlen;
++extern struct WBStartup *_WBenchMsg;
++void __nocommandline(void);
++
++#endif

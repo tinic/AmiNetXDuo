@@ -35,6 +35,23 @@ NOISE_RE = re.compile(
     r'|^#(?!\s*(define|include|if|ifdef|ifndef|elif|pragma|error|undef))\s'
     r'|^\}\s*(else|while)?')            # shell comment, but not a cpp directive
 
+def is_anchor(text):
+    return bool(text) and text not in NOISE and not NOISE_RE.match(text)
+
+
+def nearest_anchor(lines, ln, span=12):
+    """Closest line either side of `ln` that would satisfy the check.
+
+    Every repair of a drifted cite is the same question -- where did the
+    anchor go -- and answering it by hand is why these rows sit stale.
+    """
+    for d in range(1, span + 1):
+        for cand in (ln + d, ln - d):
+            if 1 <= cand <= len(lines) and is_anchor(lines[cand - 1].strip()):
+                return cand
+    return None
+
+
 for line in open(path, encoding='utf-8'):
     if not line.startswith('| ') or line.startswith('| Item') or set(line.strip()) <= set('|- '):
         continue
@@ -79,10 +96,14 @@ for line in open(path, encoding='utf-8'):
             # end-of-file check silently.  25 of 25 in-range cites were wrong
             # after one comment sweep, every one of them still in range.
             text = lines[int(ln) - 1].strip()
-            if not text or text in NOISE or NOISE_RE.match(text):
+            if not is_anchor(text):
                 broken += 1
                 print("backlog_broken_cite=%s reason=no_anchor line=%r row=%r"
                       % (cite, text[:40], title))
+                near = nearest_anchor(lines, int(ln))
+                if near:
+                    print("  nearest_anchor=%s:%d %r"
+                          % (f, near, lines[near - 1].strip()[:56]))
 
 print("backlog_rows=%d" % rows)
 print("backlog_broken_cites=%d" % broken)

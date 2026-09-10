@@ -189,8 +189,31 @@ point_current_at_pin() {
     say "    $CACHE/current -> $ROOT"
 }
 
+repair_and_verify_crt0() {
+    local tree="$1"
+    command -v python3 >/dev/null 2>&1 || {
+        echo "!! python3 is required to repair and verify crt0" >&2
+        return 2
+    }
+    if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$tree" >&2; then
+        echo "!! crt0 repair failed; refusing a toolchain whose startup" >&2
+        echo "!! objects are unsafe or have an unrecognized shape." >&2
+        return 1
+    fi
+    if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" \
+         "$tree" --check >&2; then
+        echo "!! crt0 did not pass verification after repair." >&2
+        return 1
+    fi
+}
+
 if [ "$FORCE" = "0" ] && [ -x "$ROOT/bin/m68k-amigaos-gcc" ]; then
     say "==> toolchain already at $ROOT"
+    # The directory name is the raw asset hash, not the version of the repair
+    # applied after extraction.  A local warm cache can therefore predate a
+    # new repair even though CI's separate cache key cannot.  Repair and check
+    # it before returning rather than trusting how it first arrived.
+    repair_and_verify_crt0 "$ROOT" || exit 1
     # A cache that already holds the pinned tree took this exit without looking
     # at `current`, so a symlink the swap above failed to move stayed wrong for
     # every later run as well.  Repointing is this script's own bookkeeping.
@@ -279,26 +302,20 @@ fi
     exit 1
 }
 
-# The libnix crt0.o in some builds saves three registers at _start and restores
-# four at ___exit, so every command built with it dies the moment it returns to
-# the Shell.  It is repaired HERE, once, before the tree is installed, not in
-# every link line downstream.  There are four affected crt0.o files, one per
-# CPU multilib, which is a second reason a per-target workaround was the wrong
-# shape.  tools/fix-toolchain-crt0.py says what the bug is and why this is the
-# seam; it is idempotent and it leaves an already-correct toolchain alone, so a
-# future image that has been fixed upstream needs no change here.
+# Newlib crt0 defects have appeared in the entry/exit frame, the value passed
+# as argv, and the storage written during argv initialization.  Repair them
+# HERE, once across every multilib, before the tree is installed.  The checker
+# accepts an already-correct upstream object only when its relocations prove
+# the same invariants, so a future compiler can need no edit without turning an
+# unfamiliar startup sequence into a silent pass.
 # Both repairs print their progress to stdout, and under --export stdout is a
 # shell script being eval'd by the caller.  `== frame skew' then reaches the
 # shell as a command and tools/ci.sh dies with `==: command not found' before
 # it builds anything.  First run only -- the second finds a warm cache and
 # skips both repairs -- which is why CI never sees it and a fresh machine
 # always does.  Their output is progress, so stderr is where it belonged.
-say "==> repairing the newlib crt0 frame skew"
-if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$TMP/x/$TC_PREFIX_IN_TAR" >&2; then
-    echo "!! crt0 repair failed, refusing to install a toolchain that" >&2
-    echo "!! builds commands which crash on return to the Shell." >&2
-    exit 1
-fi
+say "==> repairing and verifying the newlib crt0"
+repair_and_verify_crt0 "$TMP/x/$TC_PREFIX_IN_TAR" || exit 1
 
 # The NDK inline headers const-qualify 46 register parameters, and GCC drops
 # the register binding on a const one whose value is a link-time constant, so

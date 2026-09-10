@@ -9,40 +9,67 @@ version at the top when it merges.
 
 ## Unreleased
 
+### Compatibility
+
+- AmiTCP `syslog()`/`vsyslog()` now honors each opener's log tag, `LOG_PID` and
+  priority mask, expands `%m`, and sends accepted messages to the serial
+  diagnostic sink
+
+### Diagnostics
+
+- `netstat -s` reports `unaligned copies`: receive frames a SANA-II driver
+  handed over at an odd address. Measured 0 of 21,178 on x-surf-100.device
+
+## 0.26.5
+
+### Compatibility
+
+- Every SANA-II reader again retains its 8 KiB stack floor; measurements from one device no longer reduce stacks used by third-party drivers
+- Odd-address SANA-II receive buffers are copied and checksummed in one pass instead of rereading the device buffer
+- DHCP and DNS have on-demand private packet pools, so data traffic cannot consume the packets needed for lease renewal or name resolution
+- The established capacities of 32 listening ports and a 32 KiB mDNS peer cache are restored
+- Resident cost of those restores: `sizeof(AmiNetStack)` grows 42,340 to 67,628 default, 16,064 to 16,776 minimal
+- The 24 KiB of that growth is the mDNS peer cache; `AMINETXDUO_MDNS=OFF` recovers it
+
+## 0.26.4
+
+### Compatibility
+
+- DHCP on `genet.device` (A1200/PiStorm32): DHCP task stack restored from 2 KiB to 4 KiB for synchronous SANA-II transmit calls
+- DHCPv6 client task stack restored from 2 KiB to 4 KiB: it sends through the same synchronous SANA-II bridge, so a third-party driver's BeginIO runs on it too
+- Resident cost of the two stack restores: `sizeof(AmiNetStack)` grows 2 KiB, 40,292 to 42,340 default and 14,016 to 16,064 minimal
+- `ch_nfsc` obtains credentials for a task that never opened `usergroup.library`. An unknown task inherits the querying opener's credentials; NFS mounts authenticate again
+- `ssh` no longer writes a longword through address zero before `main()`. Both the CLI and Workbench startup paths are repaired
+- Every multilib crt0 is checked at configure, at client build, and by `tests/toolchain/test_crt0_gate.py`. An unsafe or unrecognised startup shape is refused
+- Locally built toolchains patch newlib to give `__argv` real backing storage
+- A self-contained install coexists with another TCP/IP stack. It no longer renames system libraries or `anxnet.device`, creates `DEVS:Internet`, or claims `AmiTCP:`
+- `ActivateAmiNetXDuo` selects the private drawer at boot, putting its `LIBS:`, `C:` and `DEVS:` entries ahead of the existing multi-assigns, all of them preserved
+- The ixemul fix stays the resident `usergroup.library` hold plus the fallback through an existing `AmiTCP:`; neither mutates the namespace
+
 ### Receive
 
-Two blocks of work, each measured end to end against its own starting point on
-playhouse3: clean build per arm, md5 checked before a round ran, six rounds
-alternating which arm went first.
+Clean build per arm, both md5s checked before a round ran, order alternated.
+Totals are end to end; per-change figures do not sum to them.
 
 | | before | now | |
 |---|---|---|---|
 | iperf tcp-rx | 5,553,818 | **5,796,608** | **+4.1%** |
 | iperf tcp-tx | 2,982,376 | **3,130,634** | **+5.1%** |
+| iperf tcp-rx, earlier in the cycle | 5,347,499 | 5,522,706 | +3.0% |
 | Fitz write, kbytes/s | 2,541.5 | **2,607.0** | +2.4% |
-
-| earlier in this cycle | before | now | |
-|---|---|---|---|
-| iperf tcp-rx | 5,347,499 | 5,522,706 | +3.0% |
 | Fitz read, kbytes/s | 3,272 | 3,562 | +9.0% |
-
-What changed, and what each was worth on its own:
 
 | change | rx | tx |
 |---|---|---|
+| TX completion handback takes a compiler barrier, not `Forbid()`/`Permit()` | X-Surf 100 carries bytes both ways on the vendor driver | same path |
 | the SANA-II reader stops sweeping 32 read slots per drain to post nothing | +3.16% | +5.30% |
-| the LANCE receive buffer starts two bytes in, so the payload the copy hook reads lands on a longword | +3.09% | flat |
+| the LANCE receive buffer starts two bytes in, landing the payload on a longword | +3.09% | flat |
 | `le_rint` stops rewriting a descriptor field the chip never writes | none | none |
 | CMD_READ reaches its handler without the generic command dispatch | none | none |
 
-| | |
-|---|---|
-| totals | measured end to end; the per-change figures do not add to them |
-| transmit | moved by the reader change alone; the rig's ~4.5 ms ack sets the floor, not our share of it |
-| Fitz | application-visible file throughput, never a wire rate; do not compare to the iperf figures |
-| `fitz_read` | cannot resolve a few per cent; two sets of it disagreed in sign |
-| noise | three null controls on identical binaries gave +0.22%, +2.75%, -0.29%; one A/B settles nothing between 1 and 3 per cent |
-| method | clean build per arm, md5 checked, six rounds or sittings, order alternated, two sittings for anything under 3 per cent |
+- Transmit moved by the reader change alone. The rig's ~4.5 ms acknowledgement sets that floor
+- Fitz is application-visible file throughput, not a wire rate. `fitz_read` cannot resolve a few per cent; two sets disagreed in sign
+- One A/B settles nothing between one and three per cent. Three null controls on identical binaries read +0.22%, +2.75%, -0.29%
 
 Later in the same cycle, measured with the harness rebuilt around what the rig
 can actually resolve: twenty boots an arm, four receive transfers a boot

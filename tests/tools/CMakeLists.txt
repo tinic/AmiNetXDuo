@@ -160,6 +160,20 @@ endif()
 target_compile_options(test_dnsprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_dnsprobe PROPERTIES OUTPUT_NAME "DnsProbe")
 
+# RpcProbe makes the one request/response an RPC client makes before anything
+# else -- a PMAPPROC_GETPORT over UDP -- from an ephemeral source port and from
+# a RESERVED one, because bindresvport() is the thing an RPC client does that a
+# resolver does not.  There was no RPC, portmap or NFS coverage in this tree at
+# all, which is the hole bifat's 0.26.5 "Port mapper failure - Unable to
+# receive" reached a user through.  Published LVOs only, as ch_nfs uses them.
+add_executable(test_rpcprobe rpcprobe.c)
+target_include_directories(test_rpcprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_rpcprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_rpcprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_rpcprobe PROPERTIES OUTPUT_NAME "RpcProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence, accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList(), against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches

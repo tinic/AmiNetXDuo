@@ -22,6 +22,7 @@ set(BSDSOCKET_SOURCES
     options.c
     select.c
     errno.c
+    syslog.c                # AmiTCP vsyslog/syslog LVO, per-opener policy
     inet.c
     resolver.c
     netdb.c                 # get{serv,proto,net}by* over src/config/netdb.c

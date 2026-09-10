@@ -86,7 +86,7 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-libraries}"
 
 verdict() {
     # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
-    verdict_guest "libraries" 24 "$1" \
+    verdict_guest "libraries" 26 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0
     exit $?

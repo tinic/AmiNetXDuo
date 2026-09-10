@@ -685,6 +685,7 @@ ULONG bsd_open_count(struct AmiSocketBase *base);
 
 VOID  bsd_set_errno(struct AmiSocketBase *base, LONG code);
 VOID  bsd_set_herrno(struct AmiSocketBase *base, LONG code);
+const char *bsd_errno_string(LONG code);
 LONG  bsd_errno_from_nx(UINT status);
 /* The same, for a status from a call that was given `wait`, see errno.c. */
 LONG  bsd_wait_errno(ULONG wait, UINT status);

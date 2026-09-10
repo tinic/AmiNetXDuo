@@ -147,6 +147,32 @@ if(NOT EXISTS "${AMIGA_TOOLCHAIN_ROOT}/bin/m68k-amigaos-gcc")
         "bin/m68k-amigaos-gcc.")
 endif()
 
+# Validate the startup objects here, before CMake links even its compiler
+# probe.  CI also runs this check explicitly, but a direct local configure or
+# an explicitly selected external toolchain must not be able to bypass it.
+# The checker is semantic and per multilib: it accepts the reviewed upstream
+# backing-storage shape as well as our repaired prebuilt objects, and refuses
+# an instruction shape it cannot prove.
+find_program(_AMIGA_PYTHON3 NAMES python3 REQUIRED)
+execute_process(
+    COMMAND "${_AMIGA_PYTHON3}"
+            "${CMAKE_CURRENT_LIST_DIR}/../tools/fix-toolchain-crt0.py"
+            "${AMIGA_TOOLCHAIN_ROOT}" --check
+    RESULT_VARIABLE _amiga_crt0_result
+    OUTPUT_VARIABLE _amiga_crt0_stdout
+    ERROR_VARIABLE _amiga_crt0_stderr)
+if(NOT _amiga_crt0_result EQUAL 0)
+    message(FATAL_ERROR
+        "The selected m68k-amigaos toolchain has an unsafe or unrecognized "
+        "crt0:\n${_amiga_crt0_stdout}${_amiga_crt0_stderr}\n"
+        "Repair it with tools/fix-toolchain-crt0.py "
+        "${AMIGA_TOOLCHAIN_ROOT}, or fetch the pinned toolchain.")
+endif()
+unset(_amiga_crt0_result)
+unset(_amiga_crt0_stdout)
+unset(_amiga_crt0_stderr)
+unset(_AMIGA_PYTHON3 CACHE)
+
 set(AMIGA_TOOLCHAIN_BIN "${AMIGA_TOOLCHAIN_ROOT}/bin")
 set(AMIGA_TOOLCHAIN_PREFIX "${AMIGA_TOOLCHAIN_BIN}/m68k-amigaos-")
 
@@ -280,6 +306,43 @@ endif()
 # that way, so this only fills it in when nobody has said otherwise.
 set(AMIGA_ARCH_FLAGS "${_amiga_cpu_flags_${AMINETXDUO_CPU}}"
     CACHE STRING "Target CPU flags (derived from AMINETXDUO_CPU)")
+
+# A CONFIGURED DIRECTORY CANNOT BE MOVED TO ANOTHER CPU, AND SAYING NOTHING
+# ABOUT IT IS HOW THREE TREES CAME TO COMPILE -m68000 WHILE REPORTING 68020 --
+# this machine's build/cm and BOTH A/B worktrees on the rig, so every rate
+# number taken out of them was of an architecture nobody asked for.  The
+# default is `any`, which is -m68000; add -DAMINETXDUO_CPU=68020 to a
+# directory that already exists and the label moves while the compiler does
+# not.  `set(... CACHE ...)` without FORCE leaves an existing entry alone, and
+# CMAKE_C_FLAGS_INIT above is consulted only when the cache is created, so the
+# flags that actually reach gcc keep their first value forever.
+#
+# Refuse, rather than repair: CMAKE_C_FLAGS is already written and forcing
+# AMIGA_ARCH_FLAGS would fix the label and not the build, which is the same
+# lie one level down.  A fresh directory costs a rebuild; a silent mismatch
+# costs every measurement taken since.
+#
+# An AMIGA_ARCH_FLAGS matching no entry in the table is a deliberate override
+# -- the probe builds behind docs/RESEARCH.md 45 were done that way -- and is
+# left alone, which is what the comment above promises.
+if(NOT AMIGA_ARCH_FLAGS STREQUAL "${_amiga_cpu_flags_${AMINETXDUO_CPU}}")
+    set(_amiga_flags_are_a_cpu FALSE)
+    foreach(_amiga_c 68000 68020 68040 68060 any)
+        if(AMIGA_ARCH_FLAGS STREQUAL "${_amiga_cpu_flags_${_amiga_c}}")
+            set(_amiga_flags_are_a_cpu TRUE)
+        endif()
+    endforeach()
+    if(_amiga_flags_are_a_cpu)
+        message(FATAL_ERROR
+            "AMINETXDUO_CPU=${AMINETXDUO_CPU} wants "
+            "'${_amiga_cpu_flags_${AMINETXDUO_CPU}}', but this build directory "
+            "was configured with '${AMIGA_ARCH_FLAGS}' and CMAKE_C_FLAGS still "
+            "carries it.  A cached entry is not rewritten by -D, so the "
+            "compiler would keep the old architecture while every report said "
+            "the new one.  Configure a FRESH build directory.")
+    endif()
+endif()
+
 string(REPLACE ";" " " AMIGA_ARCH_FLAGS_STR "${AMIGA_ARCH_FLAGS}")
 
 set(CMAKE_C_FLAGS_INIT "${AMIGA_ARCH_FLAGS_STR} -fomit-frame-pointer -fno-strict-aliasing")
