@@ -31,8 +31,9 @@ version at the top when it merges.
 ### Compatibility
 
 - AmiTCP `syslog()`/`vsyslog()` now honors each opener's log tag, `LOG_PID` and
-  priority mask, expands `%m`, and sends accepted messages to the serial
-  diagnostic sink
+  priority mask, and expands `%m`. Accepted messages reach the serial
+  diagnostic sink only in a build with `AMINETXDUO_LOG`, and follow
+  `ENV:ANXDLOGLEVEL` there
 ### NFS
 
 - `getdtablesize()` answers 64 again. It answered 256 from 0.24.0, and an

@@ -60,6 +60,13 @@ const char *bsd_errno_string(LONG code)
     return code == AMI_EIO ? "Input/output error" : "Unknown error";
 }
 
+/* vsyslog() gates the sink on the runtime level as well as the build option;
+   this test wants every priority through. */
+int ami_log_level(VOID)
+{
+    return AMI_LOG_TRACE;
+}
+
 VOID ami_serial_logv(int level, const char *fmt, const void *args)
 {
     h_emits++;

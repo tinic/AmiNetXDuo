@@ -15,6 +15,13 @@
 
 #include <sys/syslog.h>
 
+/* The serial sink is a build option, like every other diagnostic. */
+#ifdef AMINETXDUO_LOG
+#  define BSD_LOG_SINK 1
+#else
+#  define BSD_LOG_SINK 0
+#endif
+
 #define BSD_SYSLOG_FORMAT_SIZE      1024UL
 #define BSD_SYSLOG_FALLBACK_SIZE     128UL
 
@@ -201,7 +208,12 @@ VOID bsd_vsyslog(register LONG priority __asm("d0"),
                    bsd_errno_string(SocketBase->sb_Errno));
     *b.at = '\0';
 
-    ami_serial_logv(bsd_log_level(effective), format, args);
+    /* ami_serial_logv() is the raw sink and filters nothing; ami_log() is what
+       normally gates it.  Ungated, every syslog() went to the serial port of a
+       build with AMINETXDUO_LOG off, a blocking RawPutChar per byte.  The
+       constant rather than an #ifdef, so args and bsd_log_level stay used. */
+    if (BSD_LOG_SINK && bsd_log_level(effective) <= ami_log_level())
+        ami_serial_logv(bsd_log_level(effective), format, args);
 
     if (allocated)
         ami_free(format);

@@ -324,7 +324,11 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_syslog PRIVATE
         -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
 
+    # AMINETXDUO_LOG: the serial sink is a build option, and this test reads
+    # what vsyslog() renders THROUGH that sink.  Without it the test sees an
+    # empty capture and asserts nothing.
     target_compile_definitions(test_syslog PRIVATE
+        AMINETXDUO_LOG
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
     add_test(NAME syslog_policy_format COMMAND test_syslog)
