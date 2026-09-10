@@ -765,10 +765,15 @@ static VOID ami_ns_name_after_card(AmiNetStack *ns)
              "`hostname <name>`");
 }
 
+#if AMI_CFG_MAX_ATTACHED > 1
 /*
  * Take one interface out of the tables and give its device back.  FALSE means
  * the device still owns SANA-II requests written into this stack's memory,
  * and the caller must then tear the whole stack down.
+ *
+ * Its only callers are in the secondary-interface placement below, so it
+ * carries the same guard: at AMI_CFG_MAX_ATTACHED == 1 there is nothing to
+ * drop, and -Werror=unused-function would otherwise fail the build.
  */
 static BOOL ami_ns_drop_iface(AmiNetStack *ns, UWORD slot)
 {
@@ -784,6 +789,7 @@ static BOOL ami_ns_drop_iface(AmiNetStack *ns, UWORD slot)
 
     return TRUE;
 }
+#endif /* AMI_CFG_MAX_ATTACHED > 1 */
 
 #ifdef AMINETXDUO_RXPROBE
 /*
@@ -822,7 +828,9 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     ULONG              actual;
     UINT               status;
     UWORD              i;
+#if AMI_CFG_MAX_ATTACHED > 1
     UWORD              kept;
+#endif
 
     if (!ami_ns_system_initialised)
     {
@@ -910,6 +918,27 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_ip_fragment_enable failed (%ld)", (long)status);
 
+#if AMI_CFG_MAX_ATTACHED > 1
+    /*
+     * THERE IS NO SECOND INTERFACE TO PLACE when only one can be attached, and
+     * the compiler has to be told so rather than left to infer it.  The loop
+     * below starts at index 1 and the arrays it writes are
+     * AMI_CFG_MAX_ATTACHED long, so at 1 every subscript in here is out of
+     * bounds ON PAPER.  It is unreachable in fact -- ns_IfaceCount can never
+     * exceed AMI_CFG_MAX_ATTACHED, the open loop breaks on
+     * `opened >= AMI_CFG_MAX_ATTACHED` -- but GCC cannot see that across the
+     * two functions and says so:
+     *
+     *   netstack.c:929: array subscript 1 is above array bounds of
+     *   'AmiSana2If *[1]' [-Werror=array-bounds=]
+     *
+     * WHICH MEANT THE MICRO PROFILE DID NOT COMPILE WITHOUT LTO.  With LTO the
+     * warning does not fire and the arm builds, so nothing noticed: no CI arm
+     * builds micro with AMINETXDUO_LTO=OFF.  A non-LTO map is the only way to
+     * attribute micro's size to a component -- an LTO link folds everything
+     * into four ltrans partitions -- so the profile's own size method was
+     * blocked on this.
+     */
     /*
      * Secondary interfaces.  nx_ip_interface_attach() drives the driver from this
      * context, so the binding must exist first here too.  One that does not attach
@@ -975,6 +1004,8 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         ns->ns_IfaceCount             = kept;
         ns->ns_Config.interface_count = kept;
     }
+
+#endif /* AMI_CFG_MAX_ATTACHED > 1 */
 
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
