@@ -9,6 +9,23 @@ version at the top when it merges.
 
 ## Unreleased
 
+### Interfaces are started, not found
+
+**Upgrading from 0.26.x needs one line in your startup.** A file in
+`DEVS:NetInterfaces` is a definition; it no longer starts the interface it
+describes. `AddNetInterface <name>` starts one, as in Roadshow.
+
+- Opening `bsdsocket.library` opened every interface file in the drawer, up to
+  four, whether or not anyone had asked for them. A PiStorm with `genet.device`
+  and `wifipi.device` defined brought both up, and the unassociated card took
+  an AutoIP address nobody wanted
+- If the Installer wrote your boot script and you chose networking at boot, it
+  already names an interface and nothing changes. If you declined, or added a
+  second interface file by hand, add a line for each interface you want:
+  `C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET`
+- The stack now starts with no IP instance and creates one when the first
+  interface starts. A socket opened before then answers `ENETDOWN`
+
 ## 0.26.6
 
 ### New
