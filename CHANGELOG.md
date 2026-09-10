@@ -9,17 +9,6 @@ version at the top when it merges.
 
 ## Unreleased
 
-### Compatibility
-
-- DHCP on several live interfaces no longer makes the last lease or renewal
-  steal the machine-wide default route. The first interface named to
-  `AddNetInterface` owns it; before one is named, the first configured
-  interface is preferred. Another live interface carries the default only
-  while the preferred interface has no usable gateway. Explicit route-file
-  and run-time default routes remain authoritative. The selected interface is
-  retained even when two cards are on the same subnet and advertise the same
-  router address.
-
 ## 0.26.6
 
 ### New
@@ -45,18 +34,28 @@ version at the top when it merges.
   priority mask, and expands `%m`. Accepted messages reach the serial
   diagnostic sink only in a build with `AMINETXDUO_LOG`, and follow
   `ENV:ANXDLOGLEVEL` there
-### Multiple network interfaces
+
+### Several network cards in one machine
 
 - An interface with no IPv4 address no longer carries the machine's traffic. It
   had address 0 and netmask 0, and NetX Duo asks "is this destination on your
   network?" as `(mask & destination) == network`, so it answered yes to every
   address and took the routes and the default gateway from the interface
-  holding the lease
-- Reproduced with two cards where the address-less one sorts first in
-  `DEVS:NetInterfaces`: `ping` of the router that issued the other card's lease
-  was 100% loss, and every packet left the wrong card
+  holding the lease. Two cards, the address-less one first in
+  `DEVS:NetInterfaces`: every packet left the wrong card, and `ping` of the
+  router that issued the other card's lease was 100% loss
+- DHCP on several live interfaces no longer lets the last lease or renewal take
+  the machine-wide default route. The first interface named to
+  `AddNetInterface` owns it; before one is named, the first configured
+  interface is preferred. Another live interface carries the default only while
+  the preferred one has no usable gateway. Route-file and run-time default
+  routes stay authoritative, and the selected interface is kept even when two
+  cards share a subnet and advertise the same router
 - An unbound IPv4 raw socket asks the routing table which interface to use. It
-  was pinned to interface 0. TCP and UDP were never affected
+  was pinned to interface 0, so `ping` could not obey a corrected route. TCP
+  and UDP were never affected
+- IPv6 was never affected: source and interface selection there is RFC 6724
+  (`src/ipv6/ipv6_srcsel.c`), which has no "matches every destination" state
 
 ### NFS
 
