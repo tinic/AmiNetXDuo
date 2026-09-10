@@ -22,6 +22,8 @@ version at the top when it merges.
   it would never select
 - Micro holds 212,148 bytes of RAM while it is up against the full drawer's
   426,436: half the stack on a machine that has none to spare
+- The Installer quotes memory when it asks which stack to install. Minimal
+  holds 166 KB less RAM than full, and micro 43 KB less again
 
 What each drawer costs, in bytes. File sizes are what the archive holds; RAM
 figures are code, data and BSS after `LoadSeg`. The two images below stay open
