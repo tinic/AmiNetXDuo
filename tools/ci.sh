@@ -195,7 +195,7 @@ host_test_targets() { # builddir
 # 132, plus netdev_diag.
 # 133, plus netdev_unit.
 # 134, plus ami_random.
-HOST_TESTS_EXPECTED=135
+HOST_TESTS_EXPECTED=136
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

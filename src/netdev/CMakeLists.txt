@@ -354,6 +354,24 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_bus COMMAND test_netdev_bus)
 
+    # The write side needs the seam, so it INCLUDES netdev_bus.c rather than
+    # linking it: the data port is one address and a linked build can observe
+    # only the last value written, never the order or the count.  n68k_iocopy.c
+    # is still linked for the read-path primitives the file does not seam.
+    add_executable(test_netdev_buswrite
+        test/test_netdev_buswrite.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+
+    target_include_directories(test_netdev_buswrite PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_buswrite PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_buswrite COMMAND test_netdev_buswrite)
+
     # The NE2000 probe ORDER, which is the half test_netdev_bus.c cannot see.
     # ne2000_detect() demands the command register read back as a reset chip
     # before it ever asks whether the odd registers can be read, and the reset

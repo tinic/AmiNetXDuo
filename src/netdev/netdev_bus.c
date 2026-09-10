@@ -20,6 +20,36 @@
 #define BUS_ALIGN(p, n) (((unsigned long)(const void *)(p)) & (unsigned long)(n))
 
 /*
+ * THE WRITE SIDE'S SEAM, and the reason it exists.  Every read path here is
+ * observable from its destination buffer, so test_netdev_bus.c drives the
+ * real code and checks what came out.  A write path has no such thing: the
+ * data port is ONE address, so each access overwrites the last and a host
+ * test can see only the final value -- not the order, not the count, not
+ * whether every byte went out.  That is why bus_wdata() and bus_wdata_long()
+ * were the last functions in src/netdev reached by nothing.
+ *
+ * Each macro expands to the identical access, so the m68k object is unchanged
+ * and no core sees a different instruction stream; the tests that need the
+ * sequence define them before including this file.  Same idiom as NIC_GET/PUT
+ * in dp8390.c and PNP_W8 in netdev_isapnp.c.
+ */
+#ifndef BUS_PUT8
+#define BUS_PUT8(p, v)                  (*(p) = (v))
+#endif
+#ifndef BUS_PUT16
+#define BUS_PUT16(p, v)                 (*(p) = (v))
+#endif
+#ifndef BUS_PUT32
+#define BUS_PUT32(p, v)                 (*(p) = (v))
+#endif
+#ifndef BUS_OUT_L
+#define BUS_OUT_L(port, from, blocks)   n68k_port_out((port), (from), (blocks))
+#endif
+#ifndef BUS_OUT_W
+#define BUS_OUT_W(port, from, blocks)   n68k_port_out_w((port), (from), (blocks))
+#endif
+
+/*
  * The 32-bit window is 128 bytes of the same FIFO mirrored end to end, so a
  * `movem.l` reads sixteen longwords from sixteen consecutive addresses and
  * every one of them is the port.  That is the only reason a burst wider than
@@ -67,17 +97,17 @@ static VOID bus_wdata_long(const NetdevBus *bus, const UBYTE *src, UWORD len)
 
     if (i != 0)
     {
-        n68k_port_out(bus->wide, in, (ULONG)(i >> 5));
+        BUS_OUT_L(bus->wide, in, (ULONG)(i >> 5));
         in += (i >> 2);
     }
 
     for (; i + 4 <= len; i += 4)
-        *port = *in++;
+        BUS_PUT32(port, *in++);
 
     if (i < len)
     {
         volatile UWORD *w = (volatile UWORD *)bus->asic;
-        *w = *(const UWORD *)(const void *)in;
+        BUS_PUT16(w, *(const UWORD *)(const void *)in);
     }
 }
 
@@ -180,14 +210,14 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
             volatile UBYTE *b = bus->asic;
 
             for (i = 0; i < len; i++)
-                *b = src[i];
+                BUS_PUT8(b, src[i]);
             return;
         }
 
         for (i = 0; i + 2 <= len; i += 2)
-            *port = (UWORD)(((UWORD)src[i] << 8) | src[i + 1]);
+            BUS_PUT16(port, (UWORD)(((UWORD)src[i] << 8) | src[i + 1]));
         if (i < len)
-            *port = (UWORD)(src[i] << 8);
+            BUS_PUT16(port, (UWORD)(src[i] << 8));
         return;
     }
 
@@ -196,14 +226,14 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
     i = (UWORD)(len & (UWORD)~31u);
     if (i != 0)
     {
-        n68k_port_out_w(port, in, (ULONG)(i >> 5));
+        BUS_OUT_W(port, in, (ULONG)(i >> 5));
         in += (i >> 1);
     }
 
     for (; i + 2 <= len; i += 2)
-        *port = *in++;
+        BUS_PUT16(port, *in++);
     if (i < len)
-        *port = (UWORD)(src[i] << 8);
+        BUS_PUT16(port, (UWORD)(src[i] << 8));
 }
 
 /* --------------------------------------------------------- fused drain ---- */

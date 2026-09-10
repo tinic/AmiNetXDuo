@@ -427,6 +427,106 @@ static void test_can_sum(void)
     ok("a 32-bit window can", netdev_bus_can_sum(&bus, even) == TRUE);
 }
 
+/* ------------------------------------------------------- the narrow reads -- */
+
+/*
+ * THE 8-BIT RECEIVE PATH, and it was reached by nothing until now: this file
+ * could have its whole `dmode == NETDEV_DMODE_BYTE` branch in bus_rdata()
+ * replaced by `if (0)` and still print PASS.  Found by mutation while covering
+ * the write side.  It is the path a card takes when the probe settles on a
+ * byte-wide port -- the PCMCIA NE2000 at stride 1 -- so it is not decoration.
+ *
+ * THE PORT IS ONE ADDRESS and cannot hand out a changing value, so "it read
+ * the right thing" is stated the only way it can be: the byte at the port is
+ * made DIFFERENT from the byte after it, so a routine that reached for a word
+ * instead would put that second byte into half the destination and be caught.
+ */
+static void test_rdata_byte(void)
+{
+    static UBYTE dst[72];
+    NetdevBus    bus;
+    UWORD        i;
+    UBYTE        bv;
+    int          all_bv = 1, guard_ok = 1;
+    static const UWORD lens[] = { 1, 2, 3, 7, 8, 31, 32, 33, 64 };
+    UWORD        n;
+
+    netdev_bus_setup(&bus, sum_regs.b, 2, NULL);
+    bus.dmode = NETDEV_DMODE_BYTE;
+
+    /* The data port is the word at byte 32, which is ASIC register 0. */
+    sum_regs.b[32] = 0xA5u;
+    sum_regs.b[33] = 0x5Au;     /* deliberately not the same */
+    bv = sum_regs.b[32];
+
+    for (n = 0; n < (UWORD)(sizeof(lens) / sizeof(lens[0])); n++)
+    {
+        UWORD len = lens[n];
+
+        memset(dst, 0xEE, sizeof(dst));
+        netdev_bus_rdata(&bus, dst, len);
+
+        for (i = 0; i < len; i++)
+            if (dst[i] != bv)
+                all_bv = 0;
+        if (dst[len] != 0xEEu)
+            guard_ok = 0;
+    }
+
+    ok("an 8-bit port fills the destination from the byte port", all_bv);
+    ok("and writes not one byte past the length", guard_ok);
+
+    /*
+     * WHAT THIS CANNOT SEE, and no host test can.  Replacing `*b` with
+     * `(UBYTE)*port` -- reading the 16-bit port and keeping its low half --
+     * survives here, because on a LITTLE-endian host the low half of the word
+     * at an address IS the byte at that address.  On the 68000 it is the byte
+     * AFTER it, so the mutation is a real defect that this machine cannot
+     * distinguish.  The width of the access is the claim, and only the target
+     * can check it; saying so is better than leaving the branch looking
+     * covered in both directions.
+     */
+}
+
+/*
+ * The odd-destination split, the other arm of the same branch.  A 68000 cannot
+ * write a word to an odd address, so the port is read as a word and taken
+ * apart -- high half first, which is wire order.
+ */
+static void test_rdata_odd_dst(void)
+{
+    static union { UWORD w[40]; UBYTE b[80]; } arena;
+    NetdevBus  bus;
+    UBYTE     *dst = arena.b + 1;          /* odd by construction */
+    UWORD      pv;
+    UWORD      i;
+    int        good = 1;
+
+    netdev_bus_setup(&bus, sum_regs.b, 2, NULL);
+    bus.dmode = NETDEV_DMODE_WORD;
+
+    sum_regs.b[32] = 0xA5u;
+    sum_regs.b[33] = 0x5Au;
+    pv = *(volatile UWORD *)(void *)(sum_regs.b + 32);
+
+    memset(arena.b, 0xEE, sizeof(arena.b));
+    netdev_bus_rdata(&bus, dst, 9);
+
+    for (i = 0; (UWORD)(i + 2) <= 9u; i += 2)
+    {
+        if (dst[i] != (UBYTE)(pv >> 8) || dst[i + 1] != (UBYTE)pv)
+            good = 0;
+    }
+    /* The odd tail keeps the HIGH half and discards the low one. */
+    if (dst[8] != (UBYTE)(pv >> 8))
+        good = 0;
+    if (dst[9] != 0xEEu)
+        good = 0;
+
+    ok("an odd destination is filled a split word at a time, high half first",
+       good);
+}
+
 int main(void)
 {
     test_split();
@@ -434,6 +534,8 @@ int main(void)
     test_refused();
     test_rdata_sum();
     test_can_sum();
+    test_rdata_byte();
+    test_rdata_odd_dst();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
 
