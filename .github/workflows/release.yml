@@ -281,6 +281,37 @@ jobs:
                 -DAMINETXDUO_TCP_SYNCACHE=32
           cmake --build build/release-minimal --parallel
 
+          # AND THE MICRO DRAWER, which dist/make-dist.sh packs into
+          # Libs/micro and refuses to run without.  It was added to make-dist
+          # and to tools/ci.sh's arms without ever being added here, so the
+          # first release after it went in failed at the archive step with
+          # `missing build: build/release-micro` -- after every cross arm had
+          # passed.  The options are MICRO_OPTIONS from dist/make-dist.sh, and
+          # tools/check-shipping-config.sh holds those to tools/ci.sh's micro
+          # arm; if this list drifts from that one, that gate is what says so.
+          cmake -S . -B build/release-micro \
+                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
+                -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF \
+                -DAMINETXDUO_MULTICAST=OFF \
+                -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF \
+                -DAMINETXDUO_MAX_INTERFACES=1 \
+                -DAMINETXDUO_TCP_SYNCACHE=32 \
+                -DAMINETXDUO_NX_ERROR_CHECKING=OFF \
+                -DAMINETXDUO_NETSTATUS=OFF \
+                -DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF \
+                -DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_NETMONITOR=OFF \
+                -DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF \
+                -DAMINETXDUO_NXCACHE=OFF \
+                -DAMINETXDUO_TCP_WINDOW_SCALING=OFF \
+                -DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF \
+                -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF \
+                -DAMINETXDUO_TCP_LOSS_PROBE=OFF \
+                -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_NETADMIN=OFF \
+                -DAMINETXDUO_CPU=68000
+          cmake --build build/release-micro --parallel
+
       # ssh and scp come from clients/, not the CMake tree, so a `cmake --build`
       # does not produce them. Built here so a release always carries both;
       # dbclient defaults to the 25519 rewritten for this machine.
