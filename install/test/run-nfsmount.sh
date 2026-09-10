@@ -118,7 +118,7 @@ find_cmd() {
     return 1
 }
 DOSCMDS=""
-for c in Assign List Type Wait; do
+for c in Assign List Type Wait Execute; do
     f=$(find_cmd "$c") || {
         echo "!! no AmigaDOS '$c' on this machine.  Assemble a Workbench" >&2
         echo "   (install/test/run-smbmount.sh does, from the 3.1 ADFs) or" >&2
@@ -139,7 +139,7 @@ HD="$ROOT/build/amiberry-testhd-$TAG"
 REPORT="$HD/tools.txt"
 rm -rf "$STAGE" "$OUT"; mkdir -p "$OUT" "$STAGE/c" "$STAGE/libs" \
         "$STAGE/devs/NetInterfaces" "$STAGE/AmiTCP/bin" "$STAGE/AmiTCP/db" \
-        "$STAGE/AmiTCP/libs"
+        "$STAGE/AmiTCP/libs" "$STAGE/s"
 
 for f in $DOSCMDS; do cp "$f" "$STAGE/c/"; done
 cp "$A2065"  "$STAGE/devs/a2065.device"
@@ -193,11 +193,38 @@ IFEOF
 
 # Each line is one command and ToolsSmoke records its rc, so a failure names
 # the step rather than the run.
+# THE STACK ch_nfsc READS IS ITS OWN CLI'S, NOT THE PROCESS STACK.
+#
+# ToolsSmoke raises its own cli_DefaultStack and hands the command NP_StackSize
+# (src/tools/toolssmoke.c), and neither reaches here: ch_nfsmount starts
+# ch_nfsc, and THAT child's CommandLineInterface gets DOS's default
+# cli_DefaultStack -- about 4 KB -- which is the number ch_nfsc inspects and
+# refuses ("stacksize too low", it wants 30,000).  It then creates the NFS:
+# entry and dies, so `List NFS:` blocks on a handler that is gone.
+#
+# `Stack` is a Shell built-in, so it has to run INSIDE a script the Shell
+# executes; setting it in a parent process does nothing for a grandchild.
+#
+# `Run ch_nfsc` AND NOT `ch_nfsmount NFS:`, deliberately.  ch_nfsmount reads
+# the table and then starts the handler ITSELF, and that child does not get
+# this shell's cli_DefaultStack -- so ch_nfsc still reads ~4 KB, refuses, and
+# leaves an NFS: entry with no handler behind it.  Started from the script
+# with `Run`, it inherits the 65536 set on the line above and mounts.
+#
+# ch_nfsmount LIST stays, because it is what proves the two things this test
+# exists for: that AmiTCP:db/ch_nfstab parses, and that the USER in it was
+# looked up in AmiTCP:db/passwd -- the pipe-delimited AmiTCP 4 database
+# src/usergroup/ug_parse.c learned to read.
+cat > "$STAGE/s/NFS-Mount" <<SCRIPTEOF
+Stack 65536
+C:ch_nfsmount LIST from AmiTCP:db/ch_nfstab
+Run AmiTCP:bin/ch_nfsc $PEERADDR:$EXPORT_NAME NFS: USER $NFSUSER UMASK 022
+SCRIPTEOF
+
 cat > "$STAGE/commands.txt" <<CMDEOF
 SYS:c/Assign AmiTCP: SYS:AmiTCP
 SYS:AddNetInterface eth0
-SYS:c/ch_nfsmount LIST from AmiTCP:db/ch_nfstab
-SYS:c/ch_nfsmount NFS: VERBOSE from AmiTCP:db/ch_nfstab
+SYS:c/Execute SYS:s/NFS-Mount
 SYS:c/Wait 8
 SYS:c/List NFS:
 SYS:c/Type NFS:payload.txt
@@ -262,7 +289,7 @@ set +e
 "$ROOT/tools/amiberry-run.sh" -m "$MODEL" -N a2065 -B "$BACKEND" \
     -t "$TIMEOUT" \
     "$CMDDIR/ToolsSmoke" "$CMDFILE" "$STAGE/c" "$STAGE/libs" \
-    "$STAGE/devs" "$STAGE/AmiTCP" "$STAGE/AddNetInterface"
+    "$STAGE/devs" "$STAGE/AmiTCP" "$STAGE/s" "$STAGE/AddNetInterface"
 RUN_RC=$?
 set -e
 
@@ -296,7 +323,7 @@ if [ -f "$REPORT" ]; then
     echo "==================================================================="
     ASSIGN_RC=$(step_rc "Assign AmiTCP:");        ASSIGN_RC="${ASSIGN_RC:-none}"
     IFACE_RC=$(step_rc "AddNetInterface eth0");   IFACE_RC="${IFACE_RC:-none}"
-    MOUNT_RC=$(step_rc "ch_nfsmount NFS: VERBOSE");            MOUNT_RC="${MOUNT_RC:-none}"
+    MOUNT_RC=$(step_rc "Execute SYS:s/NFS-Mount");            MOUNT_RC="${MOUNT_RC:-none}"
     LIST_RC=$(step_rc "List NFS:");               LIST_RC="${LIST_RC:-none}"
     TYPE_RC=$(step_rc "Type NFS:payload.txt");    TYPE_RC="${TYPE_RC:-none}"
     GOT=$(step_out "Type NFS:payload.txt" | tr -d '\r' | sed '/^$/d' | head -1)
