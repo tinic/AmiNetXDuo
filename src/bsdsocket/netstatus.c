@@ -23,6 +23,8 @@
 
 #include "tx_amiga.h"
 
+#ifdef AMINETXDUO_NETSTATUS
+
 #ifdef AMINETXDUO_IPV6
 /* ND_CACHE_STATE_*, which nx_api.h does not carry. */
 #include "nx_nd_cache.h"
@@ -1440,9 +1442,20 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_Post.nbl_Count   = ami_budget.post.count;
             out->nrb_Post.nbl_Sum     = ami_budget.post.sum;
             out->nrb_Post.nbl_Max     = ami_budget.post.max;
+            out->nrb_Repost.nbl_Count = ami_budget.repost.count;
+            out->nrb_Repost.nbl_Sum   = ami_budget.repost.sum;
+            out->nrb_Repost.nbl_Max   = ami_budget.repost.max;
+            ami_budget_probe();     /* fresh floor beside the legs */
+            out->nrb_Verify.nbl_Count = ami_budget.verify.count;
+            out->nrb_Verify.nbl_Sum   = ami_budget.verify.sum;
+            out->nrb_Verify.nbl_Max   = ami_budget.verify.max;
+            out->nrb_Probe.nbl_Count  = ami_budget.probe.count;
+            out->nrb_Probe.nbl_Sum    = ami_budget.probe.sum;
+            out->nrb_Probe.nbl_Max    = ami_budget.probe.max;
             out->nrb_RxDirect         = ami_budget.rx_direct;
             out->nrb_RxFallback       = ami_budget.rx_fallback;
             out->nrb_HoldTotal        = ami_budget.hold_total;
+            out->nrb_HoldTicks        = ami_budget.hold_ticks;
             out->nrb_HoldSlow         = ami_budget.hold_slow;
             out->nrb_HoldMax          = ami_budget.hold_max;
             out->nrb_HoldThreshold    = ami_budget.hold_threshold;
@@ -1482,6 +1495,9 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                     out->nrb_Reap.nbl_Hist[i]   = ami_budget.reap.hist[i];
                     out->nrb_Stuff.nbl_Hist[i]  = ami_budget.stuff.hist[i];
                     out->nrb_Post.nbl_Hist[i]   = ami_budget.post.hist[i];
+                    out->nrb_Repost.nbl_Hist[i] = ami_budget.repost.hist[i];
+                    out->nrb_Verify.nbl_Hist[i] = ami_budget.verify.hist[i];
+                    out->nrb_Probe.nbl_Hist[i]  = ami_budget.probe.hist[i];
                 }
             }
 #endif
@@ -2054,3 +2070,31 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
 
     return rc;
 }
+
+#else /* !AMINETXDUO_NETSTATUS */
+
+/*
+ * The slots stay, the reports go.  Both vectors are PRIVATE and both only
+ * read, so a caller that loses them loses a report and never a packet.
+ */
+LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
+                       register ULONG what __asm("d1"),
+                       register APTR buffer __asm("a0"),
+                       register ULONG size __asm("d2"),
+                       register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)magic; (VOID)what; (VOID)buffer; (VOID)size;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
+                         register ULONG op __asm("d1"),
+                         register APTR arg __asm("a0"),
+                         register ULONG size __asm("d2"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)magic; (VOID)op; (VOID)arg; (VOID)size;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+#endif /* AMINETXDUO_NETSTATUS */

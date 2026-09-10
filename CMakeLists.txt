@@ -270,6 +270,11 @@ if(AMINETXDUO_MDNS)
     add_compile_definitions(AMINETXDUO_MDNS)
 endif()
 
+option(AMINETXDUO_DHCP "Build the DHCP client" ON)
+if(AMINETXDUO_DHCP)
+    add_compile_definitions(AMINETXDUO_DHCP)
+endif()
+
 # The ARexx host on the AMITCP port: the QUERY/SET variable space and the
 # process that services it.  Off, netstack.c creates the port as a bare public
 # MsgPort instead, so `WaitForPort AMITCP` in S:User-Startup still returns and
@@ -484,6 +489,239 @@ endif()
 # acknowledged arriving a second time.  Without these there is no number for
 # how much, only the cost of trimming it.  OFF is what ships and this changes
 # nothing about it.
+# NetX Duo's and ThreadX's argument validation: every public API has an _nxe_
+# or _txe_ wrapper that checks the caller's pointers and handles before calling
+# the real one.  ON is what ships, because a wrong argument from a program
+# through bsdsocket.library should come back as an error and not as a jump
+# through a null pointer on a machine with no MMU.
+#
+# The floor build turns it off.  Nothing outside this tree calls NetX Duo
+# directly -- bsdsocket.library validates at its own vectors first -- so what
+# the wrappers re-check there is what we already checked.  Worth 8,808 bytes
+# measured on the micro arm, 7,788 of it NetX and 1,020 ThreadX.
+# NetStackQuery() and NetStackControl(), the two PRIVATE vectors netstat,
+# ShowNetStatus and CheckNetConfig read the live stack through.  They are the
+# largest single file in the bsdsocket surface and they report; nothing routes
+# a packet through them.
+#
+# The floor build answers both with ENOSYS, the way AMINETXDUO_BPF answers its
+# five (src/bsdsocket/bpf.c:135).  The vectors stay in the table whatever the
+# build -- an LVO that moved would be an ABI break -- so this removes the
+# bodies and not the slots.  A drawer built this way does not install the tools
+# that call them.
+# RFC 3542 ancillary data: IP_PKTINFO, IP_RECVDSTADDR and the IPv6 half, the
+# control messages sendmsg() and recvmsg() carry beside the payload.
+#
+# The most entangled of these options -- five entry points reaching options.c,
+# in6.c, socket.c, transfer.c and raw.c -- so each stub matches a convention the
+# built version already has rather than inventing one:
+#
+#   bsd_cmsg_option()       1, "not ours" (cmsg.c:734), so options.c falls
+#                           through to its own switch and IP_PKTINFO lands on
+#                           the default that answers ENOPROTOOPT.
+#   bsd_cmsg_parse()        0 with no control data, EINVAL with some -- exactly
+#                           what the built version does with a cmsg it cannot
+#                           recognise (cmsg.c:390-392 and :398).
+#   bsd_cmsg_source_index() -1, its documented failure; unreachable anyway,
+#                           because transfer.c:673 gates it on cs_Have and
+#                           nothing can set that now.
+#   bsd_cmsg_reset()        STILL ZEROES as_CmsgSticky.  transfer.c:1717 and
+#                           :1781 read that struct whatever this option says.
+option(AMINETXDUO_CMSG "Build RFC 3542 ancillary data" ON)
+if(AMINETXDUO_CMSG)
+    add_compile_definitions(AMINETXDUO_CMSG)
+endif()
+
+# TCP urgent data: MSG_OOB, SIOCATMARK and SIGURG.  No vector of its own -- it
+# is a flag on send() and recv() and an ioctl -- so this gates oob.c and the
+# three entry points transfer.c and socket.c reach it through.
+#
+# telnet is the classic caller and a floor drawer does not install one.
+#
+# bsd_tcp_urgent_notify() stays a real function and is still handed to
+# nx_tcp_socket_create() (socket.c:991, :1337); off, it is a no-op, so the
+# callback registration is unchanged and socket.c is not edited.  MSG_OOB on
+# send() answers ENOSYS and bsd_oob_take() reports no mark.
+option(AMINETXDUO_OOB "Build TCP urgent data (MSG_OOB, SIOCATMARK)" ON)
+if(AMINETXDUO_OOB)
+    add_compile_definitions(AMINETXDUO_OOB)
+endif()
+
+# SOCK_RAW.  No vector of its own -- a raw socket is reached through socket()
+# with a protocol number -- so what this gates is raw.c and the NetX Duo raw
+# hook underneath it.  ping and traceroute are the callers; a floor drawer does
+# not install them.
+#
+# socket(AF_INET, SOCK_RAW, n) fails with EPROTONOSUPPORT because bsd_raw_open()
+# fails and socket.c:975 already returns -1 on that, so socket.c needs no edit.
+#
+# NX_ENABLE_IP_RAW_PACKET_FILTER goes with it (port/netxduo-amiga/inc/nx_user.h),
+# which is the larger half: the filter changes the NX_IP layout and every
+# translation unit sees it, so it is not something LTO can collect.
+
+# The network monitoring hooks: AddNetMonitorHookTagList and its Remove, and
+# the three internal helpers socket.c and transfer.c call to decide whether a
+# hook wants to see a bind, a connect or a send.
+#
+# Off, bsd_netmon_have() is a function that returns FALSE and nothing else, so
+# the three call sites -- transfer.c:1665, socket.c:1172 and socket.c:2393 --
+# fold away entirely rather than testing a counter that can never be non-zero.
+# That is why this option does not touch either file.
+#
+# bsd_netmon_dispatch() answers 0, which is "not denied": a hook that is not
+# there cannot veto a bind or a connect.
+option(AMINETXDUO_NETMONITOR "Build the network monitoring hooks" ON)
+if(AMINETXDUO_NETMONITOR)
+    add_compile_definitions(AMINETXDUO_NETMONITOR)
+endif()
+
+# Handing a socket from one task to another: ReleaseSocket, ReleaseCopyOfSocket
+# and ObtainSocket, the inetd-style pattern where one process accepts and
+# another serves.  ObtainServerSocket and ProcessIsServer are vectors of the
+# same family and already answer ENOENT and FALSE in the built version, so they
+# do not change.
+#
+# Off, ObtainSocket answers AMI_ENOENT -- the same code the built version gives
+# for an id nobody released, which is exactly the situation, and which
+# tcp_handler.c:400 already maps to ERROR_OBJECT_NOT_FOUND.  The two Release
+# calls answer AMI_ENOSYS: they are handed a live socket, so "there is no such
+# id" would be the wrong thing to say.
+#
+# bsd_handoff_init() still clears the list.  Nothing reads sb_Handoffs with the
+# feature off, but library.c:566 already zeroes a child's copy and leaving the
+# master's undefined would be a trap for whoever adds the next reader.
+
+# The address-allocation message: CreateAddrAllocMessageA, its Delete, and the
+# BeginInterfaceConfig/AbortInterfaceConfig pair a configuration program drives
+# it with.  Four vectors and one internal helper.
+#
+# This is the interface Roadshow's own DHCP-style configurators use to ask the
+# stack to bring an interface up asynchronously.  A floor machine is given a
+# static address in DEVS:NetInterfaces and never runs one -- and with
+# AMINETXDUO_DHCP off there is no client to drive it either.
+#
+# bsd_aam_busy() stays and answers FALSE.  library.c's expunge asks it whether
+# a configuration is outstanding (library.c:1215); with nothing able to start
+# one the answer is no, and the expunge proceeds as it should.
+option(AMINETXDUO_ADDRALLOC "Build the AddressAllocationMessage interface" ON)
+if(AMINETXDUO_ADDRALLOC)
+    add_compile_definitions(AMINETXDUO_ADDRALLOC)
+endif()
+
+# The Roadshow routing API: AddRoute/ChangeRoute/DeleteRouteTagList and the
+# GetRouteInfo/FreeRouteInfo pair.  Five vectors, no caller inside the library.
+#
+# THIS IS NOT THE STACK'S ROUTING.  A machine's own addresses and its default
+# gateway come from DEVS:NetInterfaces through netstack.c and
+# netstack_gateway.c, which are untouched by this; what goes is the interface
+# a PROGRAM uses to add or delete a route at runtime.  A floor machine has one
+# interface and one gateway and nothing to say about either.
+#
+# Off, the three TagList calls answer AMI_ENOSYS, GetRouteInfo() answers NULL
+# (its documented failure) and FreeRouteInfo() accepts the NULL back.
+# The interface-configuration and Roadshow-administration vectors: eleven of
+# them, and no Aminet caller for any one.  The survey attributes 833 binaries
+# and AddInterfaceTagList, ConfigureInterfaceTagList, RemoveInterface,
+# if_nameindex, if_indextoname, if_freenameindex, AddDomainNameServer,
+# RemoveDomainNameServer, SetDefaultDomainName, In_LocalAddr and In_CanForward
+# score zero between them -- see docs/aminet-survey/lvo-usage.tsv.
+#
+# if_nametoindex and GetDefaultDomainName are NOT here: they have no Aminet
+# caller either, but our own tools call them (own-tools.tsv), and a vector our
+# shipped tools need is not dead because the corpus does not use it.
+#
+# Off, each answers the way the built version answers when it cannot do the
+# job -- EINVAL, ENXIO, or 0 for "not one of ours" -- so no caller sees a
+# return value it does not already handle.
+option(AMINETXDUO_NETADMIN "Build the interface and Roadshow admin vectors" ON)
+if(AMINETXDUO_NETADMIN)
+    add_compile_definitions(AMINETXDUO_NETADMIN)
+endif()
+
+option(AMINETXDUO_ROUTING "Build the Roadshow AddRoute/DeleteRoute API" ON)
+if(AMINETXDUO_ROUTING)
+    add_compile_definitions(AMINETXDUO_ROUTING)
+endif()
+
+# getaddrinfo(), getnameinfo(), freeaddrinfo() and gai_strerror(): POSIX's
+# protocol-independent name lookup.  Four vectors and no caller inside the
+# library, which is what makes it separable at all.
+#
+# Off, all four answer through the vector table as usual -- getaddrinfo() and
+# getnameinfo() with EAI_NONAME, a value every caller already handles because a
+# name that does not resolve is the ordinary outcome they are written for.
+# A program that predates the API uses gethostbyname(), which is in
+# resolver.c and is not touched by this.
+option(AMINETXDUO_ADDRINFO "Build getaddrinfo/getnameinfo" ON)
+if(AMINETXDUO_ADDRINFO)
+    add_compile_definitions(AMINETXDUO_ADDRINFO)
+endif()
+
+# GetNetworkStatistics() rides the same option: 4.4BSD's ipstat/tcpstat/
+# udpstat/icmpstat is a report too, and an option each would be two names for
+# one decision.
+option(AMINETXDUO_NETSTATUS
+       "Build the live-stack reports: NetStackQuery/Control, GetNetworkStatistics" ON)
+if(AMINETXDUO_NETSTATUS)
+    add_compile_definitions(AMINETXDUO_NETSTATUS)
+endif()
+
+# OFF, AND THE DEFAULT MOVED ON A MEASUREMENT.  The `_nxe_*` and `_txe_*`
+# wrappers validate pointers, IDs and caller context in front of every NetX Duo
+# and ThreadX API entry, and the only caller of those APIs in this tree is this
+# tree.  Six sittings on playhouse3, three arms position-balanced A B C C B A,
+# five rounds each, three distinct library md5s printed before any round ran:
+#
+#     arm                          tcp-rx      tcp-tx
+#     A  base                      5,957,717   3,183,053
+#     B  A + the capture change     5,920,716   3,201,533
+#     C  B + this option OFF        5,988,292   3,306,244
+#
+# C against B isolates it: +3.27% transmit, +1.14% receive.  C against A is
+# +3.87% transmit.  The two arms' transmit samples do not overlap.  A NULL
+# CONTROL THE SAME DAY -- four sittings against a byte-identical library --
+# put the floor at 0.90% receive and 0.83% transmit, so the transmit figure is
+# four times the noise and the receive one is at it.  Claim transmit; do not
+# claim receive.
+#
+# WHY TRANSMIT AND NOT RECEIVE: the send path crosses more API entries per
+# packet than the receive path does, and the profile agrees -- on a pure
+# RECEIVE run the three visible shims are only 1.1% together
+# (`_nxe_packet_allocate` 0.5, `_nxe_packet_release` 0.5,
+# `_nxe_packet_transmit_release` 0.1).  Per rate-baseline.txt, a change that
+# shortens the CPU path between an arriving ACK and the window reopening shows
+# MORE on transmit than on receive, because a bulk send drains one or two
+# frames a wake and per-wake fixed cost is a larger share of it.
+#
+# WHAT IS GIVEN UP: a NULL or a bad ID that would have come back NX_PTR_ERROR
+# is undefined behaviour instead.  The `instr` arm builds it ON so both sides
+# stay compiled, and micro/microcompat have shipped without it since the micro
+# profile landed.
+#
+# CROSS ONLY, AND CI IS WHAT SAID SO.  The macro does not just remove a check,
+# it changes WHICH SYMBOL the shipping source calls: `nx_arp_entry_delete()`
+# expands to `_nxe_arp_entry_delete` with checking on and `_nx_arp_entry_delete`
+# without it.  The host tier links a curated subset of NetX and stubs the rest
+# BY ENTRY-POINT NAME -- fourteen `_nxe_*` stubs in test_dhcp6_host.c alone,
+# and ten more host files do the same -- so flipping this under them broke the
+# link in test_dhcp6 and fuzz_mdns with undefined references to
+# `_nx_arp_entry_delete`, `_nxd_nd_cache_entry_set` and `_tx_timer_change`.
+#
+# The option is a property of the SHIPPED library; which name a stub must carry
+# is a property of the harness.  So the definitions go to the cross build only,
+# and the host tier keeps linking what it has always linked.
+#
+# MY LOCAL `tools/ci.sh host` PASSED BEFORE THE PUSH AND WAS WRONG: it reused a
+# build directory configured before the flip, so the option never reached it.
+# A clean configure is the only run that tests an option change.
+option(AMINETXDUO_NX_ERROR_CHECKING
+       "Compile NetX Duo and ThreadX argument checking" OFF)
+if(NOT AMINETXDUO_NX_ERROR_CHECKING AND CMAKE_CROSSCOMPILING)
+    add_compile_definitions(
+        NX_DISABLE_ERROR_CHECKING
+        TX_DISABLE_ERROR_CHECKING)
+endif()
+
 option(AMINETXDUO_NX_COUNTERS
        "Compile NetX Duo's TCP/UDP/ARP/RARP/IGMP counters, for diagnosis" OFF)
 #
@@ -589,6 +827,39 @@ endif()
 # of a transfer that tests/perf/perf_test.c cannot account for actually goes,
 # not something the library ships.  It adds nothing to src/.
 option(AMINETXDUO_PROFILER "Build the PC sampling profiler in tests/perf/prof" OFF)
+
+# EIGHT PER CENT OF THE RECEIVE PROFILE SITS IN THREE SYMBOLS WHOSE CONTENTS
+# THE TOOL CANNOT SEE.  `_bsd_recv_iov` 2.7 is bsd_recv_tcp() inlined into it
+# -- static, one call site, transfer.c:1522 -- `_ami_sana2_rx_thread` 3.1 has
+# the whole drain and ami_sana2_rx_complete() inside it, and
+# `_ami_sana2_rx_post_slot` 2.4 swallows ami_sana2_rx_arm() and _mark().  A
+# sample lands on the outermost surviving symbol, so reading those shares
+# against the code they name gives cycle counts three to ten times what the
+# visible statements can account for, and several ticks of this campaign were
+# spent on exactly that arithmetic.
+#
+# -fno-inline-functions-called-once is the one that matters: at -Os GCC folds
+# every static helper with a single caller, which is most of the receive path.
+# The others keep the small leaf helpers separate too.
+#
+# THIS CHANGES WHAT IS BEING PROFILED.  Calls that the shipped image does not
+# make are made here, so the SHARES move and the total rate falls.  It answers
+# "which statement inside this blob" and nothing else -- never quote a share
+# from a build with this on, and never compare one against a build without it.
+option(AMINETXDUO_PROFILER_NOINLINE
+       "Keep static helpers as their own symbols, so the profile can name them"
+       OFF)
+if(AMINETXDUO_PROFILER_NOINLINE)
+    if(NOT AMINETXDUO_PROFILER)
+        message(FATAL_ERROR
+            "AMINETXDUO_PROFILER_NOINLINE needs AMINETXDUO_PROFILER=ON: it is "
+            "an attribution aid for the sampler, not a build mode.")
+    endif()
+    add_compile_options(
+        -fno-inline-functions-called-once
+        -fno-inline-small-functions
+        -fno-optimize-sibling-calls)
+endif()
 
 option(AMINETXDUO_NXCENSUS "Count and time the ThreadX bracket" OFF)
 if(AMINETXDUO_NXCENSUS)
@@ -1210,15 +1481,21 @@ target_link_libraries(netxduo PUBLIC threadx)
 
 # NetX Duo add-ons we actually use.
 set(NETXDUO_ADDON_SOURCES
-    "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c"
-    "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c"
     "${AMINETXDUO_NETXDUO}/addons/auto_ip/nx_auto_ip.c")
+
+if(AMINETXDUO_DHCP)
+    list(APPEND NETXDUO_ADDON_SOURCES
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c")
+endif()
+
+list(APPEND NETXDUO_ADDON_SOURCES
+    "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c")
 
 # The DHCPv6 client, in the IPv6 build only.  It is the largest single addon
 # here and every byte of it is unreachable without IPv6, so the floor build
 # does not compile it -- the same arrangement src/netstack/CMakeLists.txt uses
 # for netstack_ipv6.c.
-if(AMINETXDUO_IPV6)
+if(AMINETXDUO_IPV6 AND AMINETXDUO_DHCP)
     list(APPEND NETXDUO_ADDON_SOURCES
         "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcpv6_client.c")
 endif()

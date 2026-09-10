@@ -8,6 +8,8 @@
 #include "nx_tcp.h"
 #include "nx_packet.h"
 
+#ifdef AMINETXDUO_OOB
+
 #include <netinet/in.h>
 #include <proto/exec.h>
 
@@ -297,3 +299,33 @@ BOOL bsd_oob_take(AmiSocket *sock, UBYTE *out)
 
     return TRUE;
 }
+
+#else /* !AMINETXDUO_OOB */
+
+/*
+ * Still a real function and still what nx_tcp_socket_create() is handed
+ * (socket.c:991, :1337), so the registration does not change shape -- it just
+ * has nothing to record.
+ */
+VOID bsd_tcp_urgent_notify(NX_TCP_SOCKET *socket_ptr)
+{
+    (VOID)socket_ptr;
+}
+
+LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte,
+                  LONG flags)
+{
+    (VOID)sock; (VOID)byte; (VOID)flags;
+    return bsd_fail(base, AMI_ENOSYS);
+}
+
+/* FALSE is "no mark waiting", which is what the built version reports for a
+   socket that never saw urgent data. */
+BOOL bsd_oob_take(AmiSocket *sock, UBYTE *out)
+{
+    (VOID)sock;
+    (VOID)out;
+    return FALSE;
+}
+
+#endif /* AMINETXDUO_OOB */

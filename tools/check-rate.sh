@@ -92,6 +92,40 @@ fi
 
 # ------------------------------------------------------------------ measure --
 
+#
+# A LIVE EMULATOR MAKES THIS MEASURE THE WRONG BOOT, AND IT HAS.
+#
+# Every arm writes build/amiberry-serial-$TAG.log and this harness reads what
+# it finds there.  A leftover emulator from an earlier job -- one that survived
+# a pkill, which run-lossgate.sh's arms routinely do, because bash defers
+# SIGTERM while a foreground child runs and the loop is then reparented to
+# init -- keeps writing the SAME log under the SAME tag.  The rounds below then
+# read a boot from the other job's build, and the number is a fabrication that
+# looks exactly like a measurement.
+#
+# tests/perf/run-rate-ab.sh already refuses on this; the check belongs HERE
+# too, because that is where the reading happens and this file has other
+# callers.  It names the count so the operator can see what to kill:
+#
+#   ps -eo pid,ppid,args | grep -E 'run-lossgate|amiberry|serial-time'
+#   kill -9 <the loop script>          then the emulator, then the reader
+#
+# See tools/check-rate.sh's own note on medians: this is the same class of
+# defect, a number arriving from somewhere other than the build under test.
+#
+STALE=$(ps -eo args 2>/dev/null |
+        grep -E 'amiberry/build/amiberry|serial-timestamp\.py' |
+        grep -cv grep)
+if [ "${STALE:-0}" != "0" ] && [ "${AMINETXDUO_RATE_ALLOW_STALE:-0}" = "0" ]; then
+    echo "rate=error reason=stale_emulator count=$STALE" >&2
+    echo "  Another emulator is writing serial logs; these rounds would read" >&2
+    echo "  its boots.  Kill the loop script by PID with -9 first, then" >&2
+    echo "  amiberry, then serial-timestamp.py, and re-check with ps." >&2
+    echo "  AMINETXDUO_RATE_ALLOW_STALE=1 overrides, for a rig that really is" >&2
+    echo "  running two isolated guests." >&2
+    exit 1
+fi
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 

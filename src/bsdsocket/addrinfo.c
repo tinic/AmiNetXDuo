@@ -10,6 +10,8 @@
 
 #include <proto/exec.h>
 
+#ifdef AMINETXDUO_ADDRINFO
+
 /* Resolver timeout, in ThreadX ticks. Matches resolver.c. */
 #define BSD_GAI_TIMEOUT     (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
@@ -793,3 +795,58 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
 
     return 0;
 }
+
+#else /* !AMINETXDUO_ADDRINFO */
+
+/*
+ * The four vectors with no lookup behind them.  EAI_NONAME rather than a new
+ * code: it is what netstack_dns_off.c reports for a name it cannot answer, and
+ * every caller of getaddrinfo() already has a path for it.  freeaddrinfo() and
+ * gai_strerror() still behave, because a caller that got a failure will call
+ * both anyway.
+ */
+LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
+                     register STRPTR servname         __asm("a1"),
+                     register struct addrinfo *hints  __asm("a2"),
+                     register struct addrinfo **res   __asm("a3"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)nodename; (VOID)servname; (VOID)hints; (VOID)SocketBase;
+
+    if (res != NULL)
+        *res = NULL;
+
+    return EAI_NONAME;
+}
+
+VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
+                      register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* Nothing was ever handed out, so there is nothing to give back. */
+    (VOID)ai;
+    (VOID)SocketBase;
+}
+
+STRPTR bsd_gai_strerror(register LONG errnum __asm("a0"),
+                        register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)errnum;
+    (VOID)SocketBase;
+    return (STRPTR)"name resolution is not built into this library";
+}
+
+LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
+                     register ULONG salen         __asm("d0"),
+                     register STRPTR host         __asm("a1"),
+                     register ULONG hostlen       __asm("d1"),
+                     register STRPTR serv         __asm("a2"),
+                     register ULONG servlen       __asm("d2"),
+                     register ULONG flags         __asm("d3"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)sa; (VOID)salen; (VOID)host; (VOID)hostlen;
+    (VOID)serv; (VOID)servlen; (VOID)flags; (VOID)SocketBase;
+    return EAI_NONAME;
+}
+
+#endif /* AMINETXDUO_ADDRINFO */

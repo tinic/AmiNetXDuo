@@ -26,6 +26,16 @@ static VOID  mock_csr_put(NetdevNic *nic, UWORD csr, UWORD value);
 #define LANCE_CSR_GET(nic, csr)       mock_csr_get((nic), (csr))
 #define LANCE_CSR_PUT(nic, csr, val)  mock_csr_put((nic), (csr), (val))
 
+/*
+ * The RDP seam answers as CSR0 and that is the point of it: lance_intr()
+ * points the RAP once and then goes straight to the RDP, which is only correct
+ * because the service touches no other register.  If a future change reaches
+ * CSR1 or CSR3 from inside that loop, this mock will answer CSR0 and the
+ * interrupt tests below fail -- which is the check.
+ */
+#define LANCE_RDP_GET(nic)            mock_csr_get((nic), LE_CSR0)
+#define LANCE_RDP_PUT(nic, val)       mock_csr_put((nic), LE_CSR0, (val))
+
 #include "lance.c"
 
 static union

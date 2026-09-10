@@ -30,44 +30,10 @@ static VOID direct_addr6(UBYTE *to, const UBYTE *from)
     *(UWORD *)(APTR)(to + 4) = *(const UWORD *)(const APTR)(from + 4);
 }
 
-/*
- * Bounded by the highest slot ever taken, not by the array.  The profile put
- * this at 26% of the hand-over, because it scanned all sixteen entries for
- * every opener on every frame, and usually nothing is tracked.  An opener that
- * tracks two types now scans two.
- */
-NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type)
-{
-    UWORD i;
-
-    for (i = 0; i < op->op_TrackHigh; i++)
-    {
-        if (op->op_Track[i].used && op->op_Track[i].type == type)
-            return &op->op_Track[i];
-    }
-
-    return NULL;
-}
-
-struct IOSana2Req *netdev_take(struct List *list, ULONG type)
-{
-    struct Node *n;
-
-    for (n = list->lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
-    {
-        struct IOSana2Req *io = (struct IOSana2Req *)n;
-
-        /* (ULONG)-1, not ~0UL: this file also builds on the test host, where
-           unsigned long is wider than ULONG and ~0UL could never match. */
-        if (type == (ULONG)-1 || io->ios2_PacketType == type)
-        {
-            nd_remove(n);       /* Exec's Remove(), without the jsr */
-            return io;
-        }
-    }
-
-    return NULL;
-}
+/* netdev_track_find() and netdev_take() moved to netdev_internal.h as static
+   inlines: once a frame each, one call site each in the hot path, and both
+   were in this file while that site is in netdev_device.c.  See the note
+   there. */
 
 /*
  * Which read would take this type, without taking it?  netdev_rx_claim() must
@@ -174,6 +140,24 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
         flags = (UBYTE)((*(const ULONG *)(const APTR)hdr == 0xffffffffUL &&
                          *(const UWORD *)(const APTR)(hdr + 4) == 0xffffu)
                         ? SANA2IOF_BCAST : SANA2IOF_MCAST);
+    }
+
+    /*
+     * The link header, written where the opener will read it, instead of
+     * taken apart into the request for the opener to put back together.
+     * `dst` is the payload, so the header is the fourteen bytes in front of
+     * it -- which is only true because the raw case was refused above.
+     *
+     * The request fields are filled either way: SANA-II promises them, and an
+     * opener that asked for the header may still read ios2_SrcAddr.
+     */
+    if (cand->op_RxLinkHdr)
+    {
+        UBYTE *lh = dst - NETDEV_HDR_LEN;
+        UWORD  i;
+
+        for (i = 0; i < NETDEV_HDR_LEN; i++)
+            lh[i] = hdr[i];
     }
 
     direct_addr6(io->ios2_DstAddr, hdr);

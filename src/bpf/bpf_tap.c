@@ -75,6 +75,27 @@ VOID ami_bpf_set_address_hook(AmiBpfAddrFn fn)
     ami_bpf_addr_hook = fn;
 }
 
+static AmiBpfCaptureFn ami_bpf_capture_hook;
+
+VOID ami_bpf_set_capture_hook(AmiBpfCaptureFn fn)
+{
+    ami_bpf_capture_hook = fn;
+
+    /* Deliver the current state on registration. Otherwise the answer depends
+       on whether a channel happened to bind before the stack attached, and a
+       hook that is only ever told about CHANGES starts out wrong. */
+    if (fn != NULL)
+        fn(ami_bpf_bound_channels);
+}
+
+VOID ami_bpf_capture_notify(UWORD capturing)
+{
+    AmiBpfCaptureFn fn = ami_bpf_capture_hook;
+
+    if (fn != NULL)
+        fn(capturing);
+}
+
 ULONG ami_bpf_cookie_address(APTR cookie)
 {
     AmiBpfAddrFn fn = ami_bpf_addr_hook;

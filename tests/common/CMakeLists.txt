@@ -57,7 +57,18 @@ if(NOT CMAKE_CROSSCOMPILING)
         __ashldi3=anxd_ashldi3
         __ashrdi3=anxd_ashrdi3)
 
+    # The arrival entropy source's stop condition.  A header inline, so no
+    # Exec, no timer base and no pool: the bound is arithmetic and is asserted
+    # as arithmetic.
+    add_executable(test_random_arrival_host host/test_random_arrival_host.c)
+    # <aminetxduo/random.h> starts with <exec/types.h>; the sana2 host shim is
+    # the one that already answers that, and nothing else is needed.
+    target_include_directories(test_random_arrival_host PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim")
+
     include(CTest)
     add_test(NAME rt_host COMMAND test_rt_host)
+    add_test(NAME random_arrival_host COMMAND test_random_arrival_host)
 
 endif()

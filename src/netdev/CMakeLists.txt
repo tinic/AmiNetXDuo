@@ -664,7 +664,13 @@ option(AMINETXDUO_NETDEV_TIME
        "Report where interrupt time goes, in beam positions, to the serial port"
        OFF)
 if(AMINETXDUO_NETDEV_TIME AND TARGET anxnet_device)
-    target_compile_definitions(anxnet_device PRIVATE NETDEV_TRACE=1 NETDEV_TIME=1)
+    # NETDEV_TIME alone.  It used to imply NETDEV_TRACE, which prints a line
+    # per COMMAND -- one per received frame -- and raw serial under this
+    # emulator is slow enough that the trace throttled the guest to 76 frames a
+    # second against 480.  Every span the instrument reported was then measured
+    # on a machine the instrument had slowed by six times.  The report's own
+    # output goes through the same serial path but runs once per 512 frames.
+    target_compile_definitions(anxnet_device PRIVATE NETDEV_TIME=1)
 endif()
 
 option(AMINETXDUO_NETDEV_TRACE "Trace anxnet.device to the serial port" OFF)

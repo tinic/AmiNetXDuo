@@ -25,6 +25,35 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+#
+# THE PREVIOUS RUN'S TRANSCRIPT GOES NOW, NOT AT THE STAGING STEP.
+#
+# This script already wipes the whole hard drive before it stages -- but that
+# is line 362, and every check above it exits first.  A missing Kickstart exits
+# at the Kickstart check with the last run's DH0: fully intact -- and so does
+# the amiberry-not-found check above it -- so the caller
+# then finds build/amiberry-testhd-$TAG/tools.txt still there and reads it.
+#
+# THAT IS NOT A HYPOTHETICAL.  An A/B of 36 rounds came back bit-identical --
+# 5,886,527 nine times, then nine more -- because amiberry answered "No boot
+# ROM" in three and a half seconds a round and every round re-read one
+# tools.txt written hours earlier.  Same byte count, same millisecond count,
+# same EPHEMERAL PORT in every "round", which a fresh connection cannot do.
+#
+# Five harnesses read $HD/tools.txt and none of them cleared it:
+# run-iperf.sh, run-fitzbench.sh, run-stackprof.sh, run-reqresp.sh,
+# run-poolshare.sh.  run-stackprof.sh also reads $HD/fitz.prof, and a profile
+# is exactly as capable of being last week's as a transcript is.
+#
+# SO IT IS THE WHOLE DIRECTORY, NOT ONE FILE IN IT.  This is the same `rm -rf`
+# the staging step does further down -- moved to where no check can exit in
+# front of it.  Nothing depends on the drive surviving a run: staging destroys
+# it unconditionally on every path that gets that far, so doing it sooner
+# cannot take anything away, and it covers every artefact a guest writes rather
+# than the one that was noticed.
+#
+rm -rf "$ROOT/build/amiberry-testhd-${AMINETXDUO_RUN_TAG:-amiberry}"
 TIMEOUT=120
 MODEL=A1200
 CPU=""

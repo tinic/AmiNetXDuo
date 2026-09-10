@@ -243,6 +243,13 @@ static VOID show_health(const ToolStats *st)
  * three fullest power-of-two buckets. Ticks convert at ~709/ms, so
  * `ticks * 1000 / (rate / 1000)` stays inside 32 bits for every legal delta.
  */
+/*
+ * The floor, in E-Clock ticks, so every leg can print what is left after it.
+ * Set from nrb_Probe before the legs are shown; zero until then, which is what
+ * an older library or a build with no probe leg gives.
+ */
+static ULONG budget_floor;
+
 static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
                             ULONG rate)
 {
@@ -257,10 +264,44 @@ static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
         return;
     }
 
-    tool_printf("\t%s: %lu samples, mean %lu us, max %lu us\n", (LONG)name,
-                leg->nbl_Count,
-                (leg->nbl_Sum / leg->nbl_Count) * 1000UL / khz,
-                leg->nbl_Max * 1000UL / khz);
+    /*
+     * THE TOTAL, BECAUSE n x mean IS WHAT A READER ACTUALLY WANTS AND THIS
+     * MADE THEM DO IT BY HAND.
+     *
+     * A leg's share of the run is its total, not its mean: `defer` at 74 us
+     * looks negligible beside `ack` at 4,562 until you notice defer ran 1,311
+     * times and ack 1,726.  The first reading of this report needed a
+     * calculator for all twelve rows before any of them could be ranked.
+     *
+     * Milliseconds, because a leg that matters is tens to thousands of them
+     * and microseconds would just be noise on the end.
+     */
+    {
+        /*
+         * NET, BECAUSE THE BRACKET IS NOT FREE AND THREE LEGS SIT ON IT.
+         *
+         * Each leg is two ami_budget_clock() calls and each is ReadEClock, a
+         * timer.device call.  `probe` brackets nothing and measured 43 us, and
+         * subtracting it is what made `verify` agree with the wire profile:
+         * 124 raw becomes 81, which is 2.7% of a frame against the profile's
+         * 3.1% for _n68k_rx_verify_sum.  Two instruments, one answer.
+         *
+         * Printed beside the raw mean rather than instead of it: a reader
+         * checking one number against another run needs the mean that run
+         * printed, and a floor that changes with the clock rate would silently
+         * move a "net" column under them.
+         */
+        ULONG mean = (leg->nbl_Sum / leg->nbl_Count) * 1000UL / khz;
+        ULONG fl   = budget_floor * 1000UL / khz;
+
+        tool_printf("\t%s: %lu samples, mean %lu us (net %lu), max %lu us, "
+                    "total %lu ms\n",
+                    (LONG)name,
+                    leg->nbl_Count, mean,
+                    (mean > fl) ? (mean - fl) : 0UL,
+                    leg->nbl_Max * 1000UL / khz,
+                    leg->nbl_Sum / khz);
+    }
 
     for (i = 0; i < NETSTATUS_BUDGET_BUCKETS; i++)
     {
@@ -302,9 +343,10 @@ static VOID show_budget_holds(const NetStatusRxBudget *b)
     UWORD i;
     UWORD n;
 
-    tool_printf("\tholds:  %lu measured, %lu over %lu ms, max %lu ms\n",
+    tool_printf("\tholds:  %lu measured, %lu over %lu ms, max %lu ms, held %lu ms total\n",
                 b->nrb_HoldTotal, b->nrb_HoldSlow,
-                b->nrb_HoldThreshold / khz, b->nrb_HoldMax / khz);
+                b->nrb_HoldThreshold / khz, b->nrb_HoldMax / khz,
+                b->nrb_HoldTicks / khz);
 
     for (i = 0; i < NETSTATUS_HOLD_RING; i++)
         done[i] = (b->nrb_Hold[i].nsh_Seq == 0UL);
@@ -401,7 +443,16 @@ static VOID show_budget(VOID)
 
     b = (NetStatusRxBudget *)(buf + sizeof(NetStatusHeader));
 
-    tool_printf("\nreceive budget:\n");
+    /*
+     * CUMULATIVE ACROSS EVERY ARM OF THE BOOT, WHICH IS A TRAP.  run-iperf.sh
+     * runs tcp-tx, udp-tx, tcp-rx and udp-rx in one machine and prints this
+     * after several of them, so a transmit leg's count is every arm's sends
+     * and not the receive arm's.  The first reading of it saw 1,726 transmits
+     * against 1,285 received frames and nearly called it an acknowledgement
+     * storm; `xmit` is the only leg that counts receive-provoked transmits,
+     * and it read 396.
+     */
+    tool_printf("\nreceive budget (counts are cumulative over the boot):\n");
 
     /* BEFORE the not-instrumented return below, not after it.  The twelve
        timed legs belong to a probe build; the green census the library fills
@@ -424,7 +475,26 @@ static VOID show_budget(VOID)
        -- the immediate form, not _nx_ip_packet_deferred_receive() -- so IP
        input and the TCP input under it run ON THE READER and this leg is
        their whole cost.  It is the largest receive leg there is. */
-    show_budget_leg("drain,  reader runs IP input", &b->nrb_Drain,
+    /*
+     * "drain" NAMES THE LOOP AND BRACKETS ONE CALL IN IT, AND I READ IT WRONG
+     * FOR TWO SITTINGS.  The stamp is round ami_sana2_rx_deliver() alone
+     * (sana2_rx.c:1100), not round ami_sana2_rx_drain(), so its 815 us is one
+     * delivery into NetX Duo and not the reader's whole turn.  Reading it as
+     * the loop put eleven hundred microseconds a frame in the wrong place and
+     * sent the next leg -- `repost` -- looking for them there.
+     *
+     * The label says what it brackets now.  What it measured all along:
+     *
+     *     deliver 815 us  -- one rx_deliver
+     *       settle 469    -- of that, deliver to receive notify: NetX
+     *       the other 346 -- ours: rx_verify_sum, the ethertype, IP validation
+     *     repost   97 us  -- the CMD_READ handed back, 12% of deliver
+     */
+    /* Before any leg is shown, so every one of them can net it out. */
+    budget_floor = (b->nrb_Probe.nbl_Count != 0)
+                 ? (b->nrb_Probe.nbl_Sum / b->nrb_Probe.nbl_Count) : 0UL;
+
+    show_budget_leg("deliver, one rx_deliver call", &b->nrb_Drain,
                     b->nrb_EClockRate);
     show_budget_leg("baton,  asking to holding   ", &b->nrb_Baton,
                     b->nrb_EClockRate);
@@ -458,6 +528,13 @@ static VOID show_budget(VOID)
     show_budget_leg("stuff,  claim and framing   ", &b->nrb_Stuff,
                     b->nrb_EClockRate);
     show_budget_leg("post,   BeginIO to return   ", &b->nrb_Post,
+                    b->nrb_EClockRate);
+    show_budget_leg("repost, rx re-arm to return ", &b->nrb_Repost,
+                    b->nrb_EClockRate);
+    show_budget_leg("verify, rx_verify_sum alone ", &b->nrb_Verify,
+                    b->nrb_EClockRate);
+    /* The floor every leg above sits on: two clock reads and no work. */
+    show_budget_leg("probe,  a bracket round nothing", &b->nrb_Probe,
                     b->nrb_EClockRate);
 
     /* Coverage of the direct-completion fork, not a duration: recv() requests

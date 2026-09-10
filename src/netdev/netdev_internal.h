@@ -88,6 +88,7 @@ typedef struct NetdevOpener
     APTR                op_CopyFrom;
     APTR                op_Filter;
     APTR                op_RxDirect;    /* aminetxduo/anxs2ext.h, or NULL */
+    BOOL                op_RxLinkHdr;   /* write the link header before dst */
     APTR                op_RxFilled;
 
     UBYTE               op_Raw;
@@ -111,6 +112,36 @@ static inline BOOL netdev_io_is_raw(const NetdevOpener *op,
 {
     return (BOOL)(op->op_Raw ||
                   (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
+}
+
+/*
+ * EXEC'S LIST PRIMITIVES ARE ROM CALLS, AND TWO OF THEM RUN PER FRAME.
+ *
+ * <inline/exec.h> expands Remove() to `jsr a6@(-252:W)` -- a register setup,
+ * a jump into Kickstart and an rts around three pointer stores.  On the
+ * receive path that is paid twice for every frame: netdev_take() unlinks the
+ * CMD_READ it matched, and netdev_queue_read() links the re-post back at the
+ * head.  It was three until the batched reply was reverted for costing 0.55%
+ * of receive and 1.11% of transmit; the tail helper stays because
+ * netdev_queue_read()'s S2_READORPHAN arm uses it.
+ *
+ * These are the same three stores, written out.  The layout is Exec's and is
+ * not being reinterpreted: nd_newlist() in netdev_device.c already builds
+ * lh_Head/lh_Tail/lh_TailPred by hand for the same reason -- NewList() lives
+ * in amiga.lib, which a -nostartfiles image does not link.
+ *
+ * COLD SITES KEEP THE ROM CALL.  Opening a unit, closing it, expunging the
+ * device: those run once and are better left reading as the ordinary Exec
+ * idiom.  Only what runs once a frame is written out here.
+ */
+static inline VOID nd_list_addtail(struct List *l, struct Node *n)
+{
+    struct Node *pred = l->lh_TailPred;
+
+    n->ln_Succ     = (struct Node *)(APTR)&l->lh_Tail;
+    n->ln_Pred     = pred;
+    pred->ln_Succ  = n;
+    l->lh_TailPred = n;
 }
 
 typedef struct NetdevUnit
@@ -250,8 +281,59 @@ VOID netdev_tx_pump(NetdevUnit *unit);
    from the romtag so it can run as an ordinary host test.  There is no
    unclaim: neither supported port core has a recoverable error once its
    drain has begun, so a claim commits (netdev_nic.h states the contract). */
-NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type);
-struct IOSana2Req *netdev_take(struct List *list, ULONG type);
+/*
+ * THE LAST TWO PER-FRAME HELPERS THAT WERE STILL A CROSS-TU CALL.
+ *
+ * Both run once for every received frame from netdev_rx_body()
+ * (netdev_device.c:724), and both lived in netdev_direct.c, so whether the
+ * shipped image pays a jsr for them was a decision LTO made rather than one
+ * the source stated -- the same gap 05b90c97 closed for netdev_payload() and
+ * netdev_filter_ok(), and unanswerable the same way: anxnet.device links with
+ * -flto and `nm` on a KEEP_SYMBOLS build returns 136 entries with every local
+ * name collapsed, so tools/check-hot-calls.sh cannot count the sites.
+ *
+ * _netdev_take is 1.0% of the real-path profile and _netdev_track_find scans
+ * op_TrackHigh entries, which is three.  Neither body is bigger than its own
+ * call sequence.  The cold callers -- the two drain loops in netdev_close()
+ * (netdev_device.c:1193) -- get a copy each and run once.
+ */
+
+/* Bounded by the highest slot ever taken, not by the array.  The profile put
+   this at 26% of the hand-over when it scanned all sixteen entries for every
+   opener on every frame, and usually nothing is tracked.  An opener that
+   tracks two types now scans two. */
+static inline NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type)
+{
+    UWORD i;
+
+    for (i = 0; i < op->op_TrackHigh; i++)
+    {
+        if (op->op_Track[i].used && op->op_Track[i].type == type)
+            return &op->op_Track[i];
+    }
+
+    return NULL;
+}
+
+static inline struct IOSana2Req *netdev_take(struct List *list, ULONG type)
+{
+    struct Node *n;
+
+    for (n = list->lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    {
+        struct IOSana2Req *io = (struct IOSana2Req *)n;
+
+        /* (ULONG)-1, not ~0UL: this file also builds on the test host, where
+           unsigned long is wider than ULONG and ~0UL could never match. */
+        if (type == (ULONG)-1 || io->ios2_PacketType == type)
+        {
+            nd_remove(n);
+            return io;
+        }
+    }
+
+    return NULL;
+}
 UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                        APTR *token);
 VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed);
@@ -265,10 +347,54 @@ VOID netdev_queue_head(struct List *list, struct IOSana2Req *io);
 VOID netdev_event(NetdevUnit *unit, ULONG mask);
 VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_event_rescan(NetdevUnit *unit);
-BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
-                      const UBYTE *data);
-const UBYTE *netdev_payload(const NetdevOpener *op, const struct IOSana2Req *io,
-                            const UBYTE *frame, UWORD len, ULONG *plen);
+
+/*
+ * BOTH OF THESE RUN ONCE A FRAME AND EACH HAS EXACTLY ONE CALL SITE, and both
+ * lived in netdev_event.c while that site is in netdev_device.c -- so whether
+ * the shipped image pays a jsr for them was a decision LTO made, not one this
+ * source stated.  netdev_io_is_raw() directly above has always been inline for
+ * the same reason.
+ *
+ * tools/check-hot-calls.sh exists because that distinction cost a rig run
+ * once: a helper the profiler names may already be inlined, and the only way
+ * to tell is to disassemble a shipping-shaped build.  IT CANNOT ANSWER FOR
+ * THIS FILE -- anxnet.device links with -flto and its symbol table collapses
+ * to 136 entries with every local name gone, so there is nothing to count.
+ * Where a gate cannot assert the property, the source states it.
+ *
+ * The test tier still calls both by name (test_netdev_event.c): a static
+ * inline in the header is callable from there exactly as the extern was.
+ */
+
+/* The frame from byte 0 for a RAW request, the payload past the 14-byte
+   Ethernet header otherwise.  The filter sees the same data CopyToBuff would
+   (copybuff.spec autodoc). */
+static inline const UBYTE *netdev_payload(const NetdevOpener *op,
+                                          const struct IOSana2Req *io,
+                                          const UBYTE *frame, UWORD len,
+                                          ULONG *plen)
+{
+    if (netdev_io_is_raw(op, io))
+    {
+        *plen = len;
+        return frame;
+    }
+
+    *plen = (ULONG)(len - NETDEV_HDR_LEN);
+    return frame + NETDEV_HDR_LEN;
+}
+
+/* TRUE when the packet can be handed over.  The hook itself runs at interrupt
+   level, in the middle of the card's own service, and the autodoc requires it:
+   "This function must be callable from interupts." */
+static inline BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
+                                    const UBYTE *data)
+{
+    if (op->op_Filter == NULL)
+        return TRUE;
+
+    return netdev_hook_call(op->op_Filter, io, (APTR)data);
+}
 
 /* netdev_pcmcia.c: the slot has no autoconfig record, so it is claimed
    rather than found.  NULL when there is no slot, nothing in it, or what is
@@ -303,6 +429,8 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event);
 
 /* netdev_cmds.c */
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
+/* The two bulk commands, reachable without the generic dispatch. */
+VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 /* The CMD_READ / S2_READORPHAN half of it, reachable without the dispatch. */
 VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io);

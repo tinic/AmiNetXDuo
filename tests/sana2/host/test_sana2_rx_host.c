@@ -558,6 +558,47 @@ static void test_completion_length_consistency(void)
 #endif
 }
 
+/*
+ * THE LINK HEADER IS FOURTEEN BYTES OF PACKET WHOEVER WROTE IT.
+ *
+ * 1bbb3803 narrowed the synthesis guard to `!iface->raw_mode &&
+ * !slot->hdr_written` and took `length += AMI_ETH_HEADER_SIZE` inside it with
+ * it, so a device answering ANXD_S2_RX_LINK_HDR had every frame delivered
+ * fourteen bytes short.  It survived a day of rig runs because the a2065 never
+ * claims (lance.c:296) and only the direct path sets hdr_written.
+ *
+ * ami_sana2_rx_frame_length() does not take the slot, so the answer CANNOT
+ * depend on who filled the header in.  These checks pin that.
+ */
+static void test_link_header_is_counted_either_way(void)
+{
+    AmiSana2If lh;
+
+    printf("sana2: the link header counts whoever wrote it\n");
+
+    memset(&lh, 0, sizeof(lh));
+
+    lh.raw_mode = FALSE;
+    h_check(ami_sana2_rx_frame_length(&lh, 1460UL) ==
+            1460UL + AMI_ETH_HEADER_SIZE,
+            "cooked: the payload gains the link header");
+    h_check(ami_sana2_rx_frame_length(&lh, 0UL) == AMI_ETH_HEADER_SIZE,
+            "cooked: an empty payload is still a header");
+
+    lh.raw_mode = TRUE;
+    h_check(ami_sana2_rx_frame_length(&lh, 1460UL) == 1460UL,
+            "raw: the frame is what the device copied");
+
+    /* The regression itself: the same payload through both fill paths.  There
+       is no slot argument to differ on, which is the fix. */
+    lh.raw_mode = FALSE;
+    h_check(ami_sana2_rx_frame_length(&lh, 60UL) ==
+            ami_sana2_rx_frame_length(&lh, 60UL),
+            "the answer does not depend on who wrote the header");
+    h_check(ami_sana2_rx_frame_length(&lh, 60UL) == 74UL,
+            "and it is the payload plus fourteen");
+}
+
 #ifdef AMINETXDUO_RX_VERIFY
 
 static void test_verify_publishes_only_what_it_checked(void)
@@ -1081,6 +1122,7 @@ int main(void)
     test_payload_alignment();
     test_runt();
     test_completion_length_consistency();
+    test_link_header_is_counted_either_way();
     test_block_only_on_an_empty_port();
     test_a_burst_is_never_left_on_the_port();
 

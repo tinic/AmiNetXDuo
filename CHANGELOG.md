@@ -71,6 +71,25 @@ Totals are end to end; per-change figures do not sum to them.
 - Fitz is application-visible file throughput, not a wire rate. `fitz_read` cannot resolve a few per cent; two sets disagreed in sign
 - One A/B settles nothing between one and three per cent. Three null controls on identical binaries read +0.22%, +2.75%, -0.29%
 
+Later in the same cycle, measured with the harness rebuilt around what the rig
+can actually resolve: twenty boots an arm, four receive transfers a boot
+averaged into one value, the harness itself pinned to one revision so both
+arms are measured by the same code.
+
+| | before | now | |
+|---|---|---|---|
+| iperf tcp-rx | 5,995,824 | **6,076,460** | **+1.34%**, p=0.0012 |
+
+| what it cost to lose | |
+|---|---|
+| the fused copy-and-checksum, forced off | **-8.7%**, p<0.00001 |
+
+| | |
+|---|---|
+| unit | the boot, not the transfer: four transfers inside one boot are correlated, and permuting them as independent put this result at p=0.0001 instead of p=0.0012 |
+| the fused fill | a card whose receive fill produces no sum has every frame walked a second time; `netstat` prints `summed while filling` against `copy/direct fill` |
+| floor | ~1.0% at ten boots an arm; a single five-round A/B settles nothing below three per cent |
+
 ## 0.26.3
 
 ### Memory a running machine keeps

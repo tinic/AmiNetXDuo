@@ -87,6 +87,7 @@ AmiNetXDuo/Installer                | not-installed | always    | Commodore's In
 
 AmiNetXDuo/C/*                      | installed     | always    | (source S_C)
 AmiNetXDuo/Libs/minimal/*           | not-installed | sometimes | The user-chosen alternative, and exactly one of the two drawers ships to the disk.  Answering "minimal" in section 4 points S_LIBS at this drawer (MINPICK, S_LIBSBASE) and the top of Libs/ becomes the drawer that is not installed.  Which one is left behind is the user's answer, not a defect.
+AmiNetXDuo/Libs/micro/*             | not-installed | always    | PACKED, AND THE INSTALLER DOES NOT OFFER IT YET.  The floor build: minimal again with the resolver iteration, the admin vectors, OOB, cmsg, the route and address-allocation calls and NetX's error checking compiled out.  It ships so it can be measured and so the release that does offer it needs no second download, but section 4 has two answers and neither points S_LIBS here, so nothing copies this drawer to the disk.  ALWAYS not-installed, not `sometimes`: minimal is one of two the user chooses between, and this is chosen by nobody.
 AmiNetXDuo/Libs/bsdsocket.library   | installed     | always    | (tackon S_LIBS "bsdsocket.library")
 AmiNetXDuo/Libs/usergroup.library   | installed     | always    | (tackon S_LIBS "usergroup.library")
 AmiNetXDuo/Libs/tls.library         | installed     | sometimes | (tackon S_LIBS "tls.library")

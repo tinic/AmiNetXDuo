@@ -862,6 +862,10 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_FILLED;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_rx_filled;
     tag++;
+    iface->link_hdr_ok              = FALSE;
+    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_LINK_HDR;
+    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->link_hdr_ok;
+    tag++;
 #if AMI_SANA2_OFFER_COPY16
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff16;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;
@@ -989,12 +993,29 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 #endif
     iface->raw_mode = (iface->raw_supported && ami_raw_allowed) ? TRUE : FALSE;
 
+    /* The cached arm capacity is derived from raw_mode (it decides whether dst
+       leaves room for a link header), so it is invalidated wherever raw_mode
+       is decided.  See ami_sana2_rx_arm(). */
+    iface->rx_capacity = 0UL;
+
     if (iface->raw_mode && iface->addr_bytes != AMI_ETH_ADDR_SIZE)
     {
         /* Raw framing only means anything when the link header shape is
            known. */
         iface->raw_mode = FALSE;
+        iface->rx_capacity = 0UL;
     }
+
+    /*
+     * DERIVED FROM raw_mode, AFTER BOTH PLACES THAT DECIDE IT.
+     *
+     * ami_sana2_rx_arm() and ami_sana2_rx_post_slot() each read raw_mode and
+     * branch on it once a frame, for an answer this open already knows.  Both
+     * are set here rather than beside either assignment above, because the
+     * second one overrides the first.
+     */
+    iface->rx_dst_off  = iface->raw_mode ? 0UL : (ULONG)AMI_ETH_HEADER_SIZE;
+    iface->rx_io_flags = iface->raw_mode ? (UBYTE)SANA2IOF_RAW : (UBYTE)0;
 
     ami_sana2_tx_init(iface);
 

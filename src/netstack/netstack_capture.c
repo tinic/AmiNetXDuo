@@ -10,6 +10,8 @@
 
 #include "aminetxduo/bpf.h"
 
+#include <proto/exec.h>
+
 /* ------------------------------------------------------------ the lo0 tap */
 
 /* The address of this object identifies the loopback pseudo-interface.  It is
@@ -18,6 +20,9 @@ static const UBYTE ami_ns_lo_cookie;
 
 #define AMI_NS_LO_NAME      "lo0"
 #define AMI_NS_LO_MTU       65535UL
+
+/* Whose nx_ip_packet_filter_extended ami_ns_capture_state() owns. */
+static AmiNetStack *ami_ns_capture_ns;
 
 static UINT ami_ns_capture_filter(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
                                   UINT direction)
@@ -136,6 +141,33 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
 
 /* ------------------------------------------------------------- lifecycle */
 
+/* Fitted here, above its only caller, and below ami_ns_capture_filter, whose
+ * address it takes.
+ *
+ * _nx_ip_packet_receive() calls nx_ip_packet_filter_extended for EVERY packet
+ * in BOTH directions (nx_ip_packet_receive.c:141), and an early-out inside the
+ * filter does not save the indirect call that reached it -- no inliner can
+ * remove a call through a struct member.  While nobody is capturing, the
+ * filter's answer is always NX_SUCCESS, so the pointer is not installed at all
+ * and the call does not happen.
+ *
+ * Disable() rather than a bare store: a 68000 writes a longword as two bus
+ * cycles, and the IP thread reading a half-updated function pointer is a wild
+ * jump rather than a stale answer.  Once per capture start or stop.
+ */
+static VOID ami_ns_capture_state(UWORD capturing)
+{
+    AmiNetStack *ns = ami_ns_capture_ns;
+
+    if (ns == NULL || !ns->ns_IpCreated)
+        return;
+
+    Disable();
+    ns->ns_Ip.nx_ip_packet_filter_extended =
+        (capturing != 0) ? ami_ns_capture_filter : NX_NULL;
+    Enable();
+}
+
 /*
  * The address behind a capture cookie, for AMI_BPF_SIOCGIFADDR.  Read from the
  * live NX_INTERFACE every time, so a DHCP lease that lands between two calls
@@ -197,7 +229,11 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
 
     ami_bpf_set_address_hook(ami_ns_capture_address);
 
-    ns->ns_Ip.nx_ip_packet_filter_extended = ami_ns_capture_filter;
+    ami_ns_capture_ns = ns;
+
+    /* Registering DELIVERS the current state, so this both arms the hook and
+       installs the filter if a channel is somehow already bound. */
+    ami_bpf_set_capture_hook(ami_ns_capture_state);
 
     AMI_INFO("netstack: capture attached (%ld interface(s) plus "
              AMI_NS_LO_NAME ")", (long)ns->ns_IfaceCount);
@@ -245,7 +281,11 @@ VOID ami_netstack_capture_stop(AmiNetStack *ns)
     if (ns->ns_IpCreated)
         ns->ns_Ip.nx_ip_packet_filter_extended = NX_NULL;
 
-    /* With the filter, and for the same reason: the hook reads ns_Ip. */
+    /* With the filter, and for the same reason: the hooks read ns_Ip. The
+       capture hook goes first -- ami_bpf_detach_interface() below unbinds
+       channels, and a zero crossing would call back in here. */
+    ami_bpf_set_capture_hook(NULL);
+    ami_ns_capture_ns = NULL;
     ami_bpf_set_address_hook(NULL);
 
     ami_bpf_detach_interface((APTR)&ami_ns_lo_cookie);

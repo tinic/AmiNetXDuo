@@ -1681,6 +1681,87 @@ static void test_ioctl_close_reopen(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+
+/* -------------------------------------------- the capture-state hook */
+
+static int cap_hook_calls;
+static int cap_hook_last;
+
+static VOID test_capture_state(UWORD capturing)
+{
+    cap_hook_calls++;
+    cap_hook_last = (capturing != 0);
+}
+
+/*
+ * The hook exists so the stack can keep nx_ip_packet_filter_extended OUT of
+ * the per-packet path while nobody is capturing, so what has to be exact is
+ * the ZERO CROSSING: fire on 0->1 and 1->0, and NOT on a second channel
+ * binding or unbinding on top of the first.  A hook that fired per bind would
+ * still be correct; one that MISSED a crossing would leave the filter
+ * uninstalled during a capture, and no test above this one would notice.
+ */
+static void test_capture_state_hook(void)
+{
+    printf("bpf: capture-state hook, zero crossings only\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+
+    cap_hook_calls = 0;
+    cap_hook_last  = -1;
+
+    /* Registration DELIVERS the current state: nothing bound, so 0. */
+    ami_bpf_set_capture_hook(test_capture_state);
+    CHECK(cap_hook_calls == 1);
+    CHECK(cap_hook_last == 0);
+
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(cap_hook_calls == 1);                 /* open does not bind */
+
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+    CHECK(cap_hook_calls == 2);                 /* 0 -> 1 */
+    CHECK(cap_hook_last == 1);
+
+    /* A SECOND channel on the same interface is not a crossing. */
+    CHECK(ami_bpf_open(T_BPF_OWNER, 1) == 1);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCSETIF, "eth0") == 0);
+    CHECK(cap_hook_calls == 2);
+    CHECK(cap_hook_last == 1);
+
+    /* Nor is closing it, while the first is still bound. */
+    CHECK(ami_bpf_close(T_BPF_OWNER, 1) == 0);
+    CHECK(cap_hook_calls == 2);
+    CHECK(cap_hook_last == 1);
+
+    /* The last one is. */
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(cap_hook_calls == 3);                 /* 1 -> 0 */
+    CHECK(cap_hook_last == 0);
+
+    /* Detaching an interface out from under a bound channel crosses too. */
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+    CHECK(cap_hook_calls == 4);
+    CHECK(cap_hook_last == 1);
+
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(cap_hook_calls == 5);
+    CHECK(cap_hook_last == 0);
+
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(cap_hook_calls == 5);
+
+    /* Unregistering delivers nothing, and cleanup must not call a hook that
+       is no longer there. */
+    ami_bpf_set_capture_hook(NULL);
+    CHECK(cap_hook_calls == 5);
+
+    ami_bpf_cleanup();
+    CHECK(cap_hook_calls == 5);
+}
+
 /* -------------------------------------------------------------------- main */
 
 int main(int argc, char **argv)
@@ -1714,6 +1795,7 @@ int main(int argc, char **argv)
     test_control_close_reopen();
     test_getter_close_reopen();
     test_reopen_under_reader();
+    test_capture_state_hook();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

@@ -6,6 +6,7 @@
 
 #include "bsdsocket_vectors.h"
 
+
 #ifdef AMINETXDUO_IPV6
 #include "nx_ip.h"
 #include "nx_ipv6.h"
@@ -50,7 +51,6 @@ static ULONG bsd_raw_queue_max(VOID)
 
     return queue;
 }
-
 /* Caller holds nx_ip_protection. */
 static VOID bsd_raw_flush(AmiSocket *sock)
 {

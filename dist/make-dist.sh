@@ -99,6 +99,19 @@ case "$MINIMAL_BUILD" in /*) ;; *) MINIMAL_BUILD="$ROOT/$MINIMAL_BUILD" ;; esac
 WANT_MINIMAL=1
 [ -z "${AMINETXDUO_DIST_NO_MINIMAL:-}" ] || WANT_MINIMAL=0
 
+# micro is the floor: minimal again with the resolver iteration, the admin
+# vectors, OOB, cmsg, the route and address-allocation calls and NetX's error
+# checking compiled out as well.  IT IS PACKED AND NOT INSTALLED -- the
+# Installer does not offer it yet, and install/ARCHIVE-MANIFEST carries the row
+# that says so.  Shipping it in the archive is what lets somebody measure it,
+# and lets the next release offer it without a second download.
+MICRO_BUILD="${AMINETXDUO_BUILD_MICRO:-$BUILD-micro}"
+case "$MICRO_BUILD" in /*) ;; *) MICRO_BUILD="$ROOT/$MICRO_BUILD" ;; esac
+
+# AMINETXDUO_DIST_NO_MICRO=1 leaves it out, for a test archive from one tree.
+WANT_MICRO=1
+[ -z "${AMINETXDUO_DIST_NO_MICRO:-}" ] || WANT_MICRO=0
+
 # The nine the release workflow turns off or pins for the floor drawer.  Kept
 # here so a hand-run of this script produces the same minimal library CI does;
 # the workflow's own copy at .github/workflows/release.yml:258 is the other
@@ -115,8 +128,24 @@ MINIMAL_OPTIONS="-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
 -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF \
 -DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
 
+# The micro arm, from tools/ci.sh.  Same three-way agreement as the list above:
+# this copy exists so a hand-run builds the library CI builds.
+MICRO_OPTIONS="-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
+-DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF \
+-DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF \
+-DAMINETXDUO_MAX_INTERFACES=1 -DAMINETXDUO_TCP_SYNCACHE=32 \
+-DAMINETXDUO_NX_ERROR_CHECKING=OFF -DAMINETXDUO_NETSTATUS=OFF \
+-DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF \
+-DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_NETMONITOR=OFF \
+-DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF -DAMINETXDUO_DHCP=OFF \
+-DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF \
+-DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF \
+-DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF \
+-DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_NETADMIN=OFF"
+
 BUILDS=("$BUILD")
 [ "$WANT_MINIMAL" = "0" ] || BUILDS+=("$MINIMAL_BUILD")
+[ "$WANT_MICRO" = "0" ]   || BUILDS+=("$MICRO_BUILD")
 
 # WHAT IS IN THE TREE IS WHAT GETS PACKED, so check that it is the build that
 # runs everywhere.  A build directory configured before the default changed --
@@ -160,6 +189,7 @@ for b in "${BUILDS[@]}"; do
         cpu_flag=-DAMINETXDUO_CPU=any
         min_flags=
         [ "$b" != "$MINIMAL_BUILD" ] || min_flags="$MINIMAL_OPTIONS"
+        [ "$b" != "$MICRO_BUILD" ]   || min_flags="$MICRO_OPTIONS"
 
         echo "==> configuring $b" >&2
         # shellcheck disable=SC2086
@@ -306,6 +336,7 @@ stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
 
 stage_build "$BUILD" ""
 [ "$WANT_MINIMAL" = "0" ] || stage_build "$MINIMAL_BUILD" "minimal"
+[ "$WANT_MICRO" = "0" ]   || stage_build "$MICRO_BUILD" "micro"
 
 # The trust store comes from the primary build, and is packed whenever any
 # build produced a tls.library.

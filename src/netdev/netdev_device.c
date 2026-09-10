@@ -124,7 +124,7 @@ static VOID netdev_prof_segtag(NetdevDevice *base, BPTR seglist)
                            t->np_LibBase + t->np_SegList);
 }
 
-#ifdef NETDEV_TRACE
+#if defined(NETDEV_TRACE) || defined(NETDEV_TIME)
 /*
  * Raw serial, straight at the custom chips: a device's romtag init runs before
  * anything of ours is open, and this is the only channel needing no library.
@@ -161,11 +161,20 @@ static VOID nd_tracex(const char *tag, ULONG v)
 
 /* nd_trace is static, so netdev_cmds.c reports the command number of every
    request through here.  Without it -DAMINETXDUO_NETDEV_TRACE=ON does not
-   link. */
+   link.
+ *
+ * NOT UNDER NETDEV_TIME.  A line per COMMAND is a line per received frame, and
+ * raw serial under this emulator is slow enough that the trace, not the
+ * timing, is what made a NETDEV_TIME build run at 987 Kbit/s against 5.9
+ * Mbit/s -- the guest took 76 frames a second instead of 480, and every span
+ * the instrument reported was measured on a machine the instrument had
+ * throttled.  The report itself prints once per 512 frames and is fine. */
+#ifdef NETDEV_TRACE
 VOID netdev_trace_cmd(UWORD c)
 {
     nd_tracex("anx: cmd ", (ULONG)c);
 }
+#endif
 
 /* For the chip cores, which cannot see nd_tracex. */
 VOID netdev_trace_val(const char *tag, ULONG v)
@@ -183,20 +192,196 @@ VOID netdev_trace_val(const char *tag, ULONG v)
  * needs a base this code cannot hold.  VHPOSR is 227 colour clocks of 280 ns to
  * the line; the low eight bits of vpos wrap every 256 lines, which is 16 ms.
  */
-#define ND_TICKS_WRAP   (256UL * 227UL)
+/*
+ * BEAM UNITS, NOT COLOUR CLOCKS, AND THE MULTIPLY IS WHY.
+ *
+ * This returned `vpos * 227 + hpos`, which is the true colour-clock count and
+ * cost a MULU.L to get.  cpucal measures MULU.L on this rig at 43 cycles
+ * against ADD.L's 2, and the emulator charges 76 ns a cycle -- so the multiply
+ * alone was about 3 us, TWICE per measured span, and NETDEV_TIME's own
+ * `t probe16` self-calibration read 4.9 us per nd_now().  That is what made
+ * the instrument useless against events of tens of microseconds, and it was
+ * blamed on the VHPOSR read: cpucal says the chip access is TWENTY-EIGHT
+ * NANOSECONDS.  The multiply was the whole cost.
+ *
+ * A shift instead.  Each line then contributes 256 units of which 227 are
+ * real, so a unit is 227/256 of a colour clock -- 0.248 us against 0.280 --
+ * and every span is scaled the same way.  Spans stay comparable with each
+ * other, which is all this instrument is for; an absolute figure has to be
+ * multiplied by 227/256 first, and the report says so.
+ */
+/* The eight-bit wrap this clock used to rely on.  nd_now() now returns the
+   full nine-bit vpos and nd_since() learns the field height, so nothing tests
+   against a fixed range any more; kept out of the build rather than kept
+   around to be believed. */
+#define ND_UNIT_NUM     227UL           /* a unit is 227/256 colour clocks */
+#define ND_UNIT_DEN     256UL
+
+/*
+ * NINE BITS OF VPOS, NOT EIGHT, AND A FIELD SIZE THIS LEARNS FOR ITSELF.
+ *
+ * The eight-bit form fell back to zero TWICE -- once when vpos carried past
+ * 255 and once at the end of the field -- and nd_since() told them apart BY
+ * SIZE, on the stated assumption that "a span this instrument measures is
+ * under a millisecond".  THAT ASSUMPTION IS FALSE FOR `isr`, and the counter
+ * added in ddfb73b7 measured how false:
+ *
+ *     t maxisr 52,924 units   against a half-range of 32,768
+ *
+ * A span of 13.1 ms straddling the vpos carry has t0 - t1 UNDER the half-range
+ * and was classified as an end-of-field and dropped.  The drops are therefore
+ * the LONGEST samples, and the bias is not small:
+ *
+ *     dropisr 13 of 160 interrupts (8.1%)   dropup 12 of 513 frames (2.3%)
+ *     isr 346,793 against up 890,887 -- SHORT BY 544,094 over 13 drops,
+ *     which is 41,853 units each, the same order as maxisr.
+ *
+ * That is the whole of the isr < up contradiction, and it closes to the unit.
+ *
+ * VPOSR bit 0 is vpos bit 8, so the full line number is available for three
+ * chip reads instead of one -- 28 ns each, measured, against the 4.9 us the
+ * MULU this replaced used to cost.  VPOSR is read twice around VHPOSR because
+ * the pair is not atomic: a line boundary between them would pair a new high
+ * bit with an old low byte.  Disagreement is rare and costs one retry.
+ *
+ * With the full vpos there is only ONE discontinuity left, the end of the
+ * field, so nd_since() no longer has to guess which one it saw.  The field
+ * height in units is not a constant this file may assume -- PAL and NTSC
+ * differ and an interlaced mode alternates -- so it is LEARNED: the largest
+ * value ever returned, plus one, is the wrap, and it is correct from the first
+ * field onwards.  Before that, a span is only dropped if the pre-calibration
+ * guess is short, which the initial ND_FIELD_MIN prevents.
+ */
+#define ND_FIELD_MIN    (262UL * 256UL)     /* NTSC, the smaller of the two */
+
+static ULONG nd_field_top;                  /* largest value seen, self-taught */
 
 static ULONG nd_now(VOID)
 {
-    UWORD vh = *(volatile UWORD *)0xdff006;
+    volatile UWORD *vposr  = (volatile UWORD *)0xdff004;
+    volatile UWORD *vhposr = (volatile UWORD *)0xdff006;
+    UWORD           hi0;
+    UWORD           vh;
+    UWORD           hi1;
+    ULONG           v;
 
-    return (ULONG)((vh >> 8) & 0xff) * 227UL + (ULONG)(vh & 0xff);
+    do
+    {
+        hi0 = (UWORD)(*vposr & 1u);
+        vh  = *vhposr;
+        hi1 = (UWORD)(*vposr & 1u);
+    }
+    while (hi0 != hi1);
+
+    v = (((ULONG)hi0 << 8) | (ULONG)(vh >> 8)) << 8 | (ULONG)(vh & 0xff);
+
+    if (v > nd_field_top)
+        nd_field_top = v;
+
+    return v;
+}
+
+/*
+ * A BACKWARDS STEP IS TWO DIFFERENT EVENTS AND THIS TREATED BOTH AS ONE.
+ *
+ * VHPOSR's high byte is the LOW EIGHT BITS of vpos, so the value this clock
+ * returns falls back to zero twice, not once, and only one of the two is the
+ * modular wrap the old line assumed:
+ *
+ *   vpos 255 -> 256   the low byte carries, t0 ~ 65,300 and t1 ~ 100.  A real
+ *                     wrap of the eight-bit range, and adding it was right.
+ *   vpos 312 -> 0     the END OF THE PAL FIELD, every 20 ms.  The low byte
+ *                     goes 56 -> 0, a drop of about 14,336 -- and the old line
+ *                     added 65,536 to it and returned about 51,200 units,
+ *                     which is 12.7 MILLISECONDS of invented time charged to
+ *                     whichever span happened to be open.
+ *
+ * THAT IS WHAT THE FIRST FULL REPORT MEASURED, and the sums say so without a
+ * second run: `up` brackets the whole hand-over and `isr` brackets `up`, so
+ * both must be at least as large as the parts inside them, and neither was.
+ * One report of 523 frames read up 1,667,633 units against inner spans summing
+ * to 2,982,931, and isr 878,956 -- LESS THAN THE CALLBACK IT CONTAINS.  The
+ * excess is 1.3M units; 59 field boundaries in that 1.18 s window at ~51,200
+ * units each is 3.0M spread over every span open at the time.  find at 468,574
+ * units for a loop bounded by op_TrackHigh, which is one, was nine field
+ * boundaries and almost nothing else.
+ *
+ * The two are told apart by size: a span this instrument measures is under a
+ * millisecond, so a step back of more than half the range is the carry and
+ * anything smaller is the field.  A field-straddling sample cannot be repaired
+ * -- the clock does not say how many units the field was -- so it is DROPPED,
+ * and nd_n_wrap counts the drops so a reader can see what the average is an
+ * average of.  Dropping biases a span low by the few per cent of samples that
+ * straddle; the old behaviour biased it high by three hundred.
+ *
+ * `iss` is why this went unnoticed: it runs under Disable() for ~85 us, so it
+ * straddled a boundary about once in a report and its 352/348-unit steady
+ * state was real.  Every longer span in the same report was not.
+ */
+static ULONG nd_n_wrap;
+
+/*
+ * AND ONE UNEXPLAINED THING IS LEFT, WHICH THIS IS HERE TO NAME.
+ *
+ * `isr` brackets ops->intr(), and lance_intr() -> le_rint() -> nic->rx() is
+ * netdev_rx(), which is what `up` brackets.  isr therefore CONTAINS up and
+ * cannot be smaller than it.  The first report taken with the repaired clock
+ * says otherwise:
+ *
+ *     frames 532   nint 187   2.845 frames an interrupt
+ *     up       901,366 units  1,694 a frame  ->  4,819 an interrupt
+ *     isr      467,680 units  2,501 an interrupt
+ *
+ * A factor of 1.9 the wrong way.  Both callers of netdev_interrupt() are
+ * bracketed (netdev_device.c:1298 the server, :1348 the vertical-blank poll),
+ * the report itself runs outside the bracket, and the drop rule cannot explain
+ * it: an isr span is ~6% of a PAL field, so ~11 of 187 samples should straddle,
+ * not half of them.
+ *
+ * So the counters are split.  `t dropisr` and `t dropup` say how many samples
+ * each of those two brackets actually lost, and `t maxisr` is the longest span
+ * the isr bracket measured.  IT READ 52,924 AGAINST A HALF-RANGE OF 32,768,
+ * which is the answer: an isr span is 13 ms, the size test could not tell a
+ * carry from a field, and the samples it threw away were the longest ones.
+ * nd_now() now returns nine bits of vpos and nd_since() learns the field
+ * height, so there is one discontinuity and no guess.  These counters stay --
+ * they now count spans REPAIRED across a field rather than lost, and
+ * `t fldtop` says what height was learned.
+ */
+static ULONG nd_n_wrap_isr;
+static ULONG nd_n_wrap_up;
+static ULONG nd_n_wrap_hook;
+static ULONG nd_n_wrap_hand;
+static ULONG nd_t_isr_max;
+
+static ULONG nd_since_at(ULONG t0, ULONG *drops)
+{
+    ULONG t1 = nd_now();
+    ULONG wrap;
+
+    if (t1 >= t0)
+        return t1 - t0;
+
+    /*
+     * ONE DISCONTINUITY, SO NO GUESSING.  A backwards step is the end of the
+     * field and nothing else, and the field's height is the largest value this
+     * clock has returned -- learned within the first field, floored at NTSC's
+     * so a span taken before that is not credited with a short one.
+     */
+    wrap = nd_field_top + 1UL;
+    if (wrap < ND_FIELD_MIN)
+        wrap = ND_FIELD_MIN;
+
+    nd_n_wrap++;                            /* counted: it is a repaired span */
+    if (drops != NULL)
+        (*drops)++;
+
+    return wrap + t1 - t0;
 }
 
 static ULONG nd_since(ULONG t0)
 {
-    ULONG t1 = nd_now();
-
-    return (t1 >= t0) ? (t1 - t0) : (ND_TICKS_WRAP + t1 - t0);
+    return nd_since_at(t0, NULL);
 }
 
 static ULONG nd_t_isr;      /* ops->intr(), the whole chip service */
@@ -204,11 +389,41 @@ static ULONG nd_t_copy;     /* the ring-to-rxbuf copy inside it */
 static ULONG nd_t_up;       /* handing frames to the openers */
 static ULONG nd_t_tx;       /* netdev_tx_pump() after the service */
 static ULONG nd_t_hook;     /* the stack's CopyToBuff, inside the hand-over */
-static ULONG nd_t_pre;      /* type, group test, stats, before the walk      */
-static ULONG nd_t_take;     /* netdev_take: the pending-read list walk       */
-static ULONG nd_t_find;     /* netdev_track_find: the 16-entry scan          */
-static ULONG nd_t_addr;     /* the two addresses and the request fields      */
-static ULONG nd_t_reply;    /* netdev_reply: ReplyMsg at interrupt level     */
+/*
+ * THE WHOLE HAND-OVER, WHICH IS THE ONE BRACKET THIS CLOCK CAN AFFORD HERE.
+ *
+ * `up` reads about 2,000 beam units a frame and `hook` -- the copy -- about
+ * 1,000, so ROUGHLY A QUARTER OF A MILLISECOND A FRAME IS SPENT IN THE DEVICE
+ * OUTSIDE THE COPY.  At ~500 frames a second that is about twelve per cent of
+ * a receive run, all of it ours, and the report has never said where it goes:
+ * the four short brackets that tried were smaller than the instrument (see the
+ * note in nd_time_report) and are gone.
+ *
+ * A bracket costs 50 units, so it has to go around something big enough not to
+ * care.  netdev_hand_over() is of the order of 1,400 units, where 50 is under
+ * four per cent, and IT WORKED -- 512 frames, one report:
+ *
+ *     up    1,655 units a frame   410.9 us
+ *     hand  1,425                 353.9      hand < up, as it must be
+ *     hook    996                 247.4      hook < hand, as it must be
+ *
+ *     up - hand    230 units   57.0 us   opener walk, take, find, stats, tail
+ *     hand - hook  429 units  106.5 us   addresses, payload, filter, ReplyMsg
+ *     hook         996 units  247.4 us   the copy
+ *
+ * SO THE QUARTER-MILLISECOND IS ReplyMsg AND A LIST WALK, AND NEITHER IS
+ * AVAILABLE.  Batching the reply was measured at -0.55% receive and -1.11%
+ * transmit and is in the refuted list; netdev_take() and netdev_track_find()
+ * are already inlined.  The device's non-copy time is Exec's, not ours.
+ *
+ * AND `replISR` WENT WITH THE OTHER FOUR, for the same reason and on this same
+ * report: it read 824 units a frame while `hand`, WHICH CONTAINS IT ALONG WITH
+ * THE COPY, read 1,425 -- and hook alone is 996, so hook + reply is 1,821
+ * inside a 1,425 that contains both.  Arithmetically impossible, so not a
+ * measurement.  Three brackets survive here and they are consistent with each
+ * other; that is the whole of what this instrument can say about a frame.
+ */
+static ULONG nd_t_hand;     /* the whole netdev_hand_over(), copy included   */
 static ULONG nd_t_probe;    /* what 16 back-to-back probes cost, to subtract */
 static ULONG nd_t_bld;      /* the opener's CopyFrom, framing a transmit     */
 static ULONG nd_t_iss;      /* ops->tx: register setup and the port writes   */
@@ -248,17 +463,109 @@ static VOID nd_time_report(VOID)
     netdev_time_regs = nd_regs_isr = nd_regs_tx = 0;
     nd_tracex("t isr    ", nd_t_isr);
     nd_tracex("t copy   ", nd_t_copy);
+    /*
+     * ONE OF THESE TWO IS TRUSTWORTHY AND THE OTHER IS NOT, AND A READER
+     * COMPARING THEM AS EQUALS GETS THE WRONG ANSWER -- I nearly did.
+     *
+     * `iss` is ops->tx and runs under Disable(), so nothing preempts it.
+     * Measured across three reports of one transfer it read 352, 348 and 575
+     * beam units a transmit; the first two are the steady state and agree to
+     * one per cent, and the third is the tail, where the guest sends 226 times
+     * against 142 and the work per send is genuinely different.
+     *
+     * `bld` is the opener's CopyFrom and the framing, at TASK level with
+     * interrupts ON, so it absorbs every interrupt that lands inside it.  The
+     * same three reports read 928, 550 and 1071 units a transmit -- a factor
+     * of two, on identical work.  IT IS NOT A COST, IT IS A COST PLUS
+     * WHATEVER ELSE THE MACHINE DID.
+     *
+     * `iss` at 352 units is 87 us, which is 1,149 cycles at the 76 ns a cycle
+     * cpucal measures on this rig.  That is ordinary instruction count for
+     * lance_tx's twenty board writes, netdev_track_find and the stats -- NOT a
+     * slow bus: the a2065 reads at 77.1 ns/B against Fast RAM's 76.96.
+     */
     nd_tracex("t ntx    ", nd_n_tx);
-    nd_tracex("t bld    ", nd_t_bld);
-    nd_tracex("t iss    ", nd_t_iss);
+    nd_tracex("t bldTASK", nd_t_bld);        /* preempted: NOT a cost */
+    nd_tracex("t issDISA", nd_t_iss);        /* under Disable(): a cost */
     nd_tracex("t rep    ", nd_t_rep);
+    /*
+     * THE PER-FRAME IOREQUEST ROUND TRIP, WHICH THIS REPORT COLLECTED AND
+     * NEVER SHOWED.  Five accumulators were summed on every frame and then
+     * cleared unprinted, so the block they measure has only ever been
+     * estimated -- by adding profile rows, which is how it got its current
+     * "about eleven to twelve per cent of a receive run".
+     *
+     * That block is now the largest identified one after the copies, and the
+     * change it points at -- a shared ring between this device and the reader,
+     * SANA-II kept for third-party drivers -- is weeks of work.  Nobody should
+     * start it on a number obtained by adding up shares from a sampling
+     * profiler when the device already times the parts.
+     *
+     * `reply` is ReplyMsg at interrupt level, so it is under Disable() and
+     * trustworthy the way `iss` is; `pre`, `take`, `find` and `addr` are all
+     * inside the interrupt service too.  Divide by `frames`, not by `int`.
+     */
+    nd_tracex("t handovr", nd_t_hand);
+    nd_tracex("t txpump ", nd_t_tx);
+    nd_tracex("t nint   ", nd_n_int);
+    nd_tracex("t nhook  ", nd_n_hook);
     nd_tracex("t probe16", nd_t_probe);
+    nd_tracex("t dropped", nd_n_wrap);
+    /*
+     * EVERY SPAN NOW SAYS HOW MANY OF ITS SAMPLES NEEDED A FIELD CORRECTION,
+     * BECAUSE ONE CORRECTED SAMPLE CAN BE THE WHOLE SUM.
+     *
+     * With the clock repaired, a backwards step is unambiguously the end of a
+     * field and `wrap + t1 - t0` is the TRUE elapsed time -- including any
+     * higher-level interrupt that preempted the span.  That is right and it is
+     * also brutal for a short one: `find` is about fifty units, a field is
+     * 80,098, so a single preempted sample is sixteen hundred of them.  The
+     * first report with the repair read find 271,901 against 24,468 before,
+     * which is four corrections and not a change in the work.
+     *
+     * So the counts are printed beside the sums.  A span with `wrapfind 4` is
+     * four fields of somebody else's time plus the real cost, and the reader
+     * can subtract 4 x `fldtop`.  A span with zero is clean.
+     *
+     * `bldTASK` has always carried this caveat in words -- "preempted: NOT a
+     * cost" -- and this is the same caveat as a number, for every row.
+     *
+     * PRE, TAKE, FIND AND ADDR ARE GONE, AND THE REASON IS THE INSTRUMENT.
+     * `t probe16` prices sixteen back-to-back nd_now() calls at 400 beam
+     * units: 25 a call, 50 for the pair that brackets one span -- the same
+     * order as those four ever were.  Three runs of the identical code path
+     * measured findISR at 24,468 then 271,901 then 513,768, a factor of
+     * twenty-one, with three to eight field corrections between them to
+     * account for it.  They were never measurements.
+     *
+     * AND THEY WERE MAKING THE ROWS THAT ARE.  Four bracket pairs inside
+     * netdev_rx_body() is 200 units of nd_now() charged to `up`, which reads
+     * about 2,000 a frame -- a TENTH of the number, spent measuring four
+     * things that could not be measured.  Removing them costs nothing and
+     * makes `up`, `hook` and `replISR` more nearly the work.
+     *
+     * What is left resolves: `up` ~2,000 units a frame, `hook` ~1,000,
+     * `replISR` a few hundred, `isr` several thousand an interrupt, and those
+     * are stable run to run.  Anything smaller than a few hundred units wants
+     * a different instrument, not this one.
+     */
+    nd_tracex("t dropisr", nd_n_wrap_isr);
+    nd_tracex("t dropup ", nd_n_wrap_up);
+    nd_tracex("t wraphnd", nd_n_wrap_hand);
+    nd_tracex("t wraphok", nd_n_wrap_hook);
+    nd_tracex("t maxisr ", nd_t_isr_max);
+    nd_tracex("t fldtop ", nd_field_top);
+    /* The scale, so a reader does not take a beam unit for a colour clock. */
+    nd_tracex("t unitnum", ND_UNIT_NUM);
+    nd_tracex("t unitden", ND_UNIT_DEN);
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
-    nd_t_pre = nd_t_take = nd_t_find = nd_t_addr = nd_t_reply = 0;
+    nd_t_hand = 0;
     nd_t_bld = nd_t_iss = nd_t_rep = nd_n_tx = 0;
-    nd_n_int = nd_n_frame = nd_n_hook = 0;
+    nd_n_int = nd_n_frame = nd_n_hook = nd_n_wrap = 0;
+    nd_n_wrap_isr = nd_n_wrap_up = nd_t_isr_max = 0;
+    nd_n_wrap_hook = nd_n_wrap_hand = 0;
 }
 #endif
 
@@ -381,10 +688,6 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     ULONG        plen;
     const UBYTE *payload = netdev_payload(op, io, frame, len, &plen);
 
-#ifdef NETDEV_TIME
-    {
-        ULONG ta = nd_now();
-#endif
     nd_addr6(io->ios2_DstAddr, frame);
     nd_addr6(io->ios2_SrcAddr, frame + NETDEV_ADDR_LEN);
     io->ios2_PacketType = type;
@@ -392,10 +695,6 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
     io->ios2_Req.io_Flags =
         (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
                 flags);
-#ifdef NETDEV_TIME
-        nd_t_addr += nd_since(ta);
-    }
-#endif
 
     if (!netdev_filter_ok(op, io, payload))
         return NETDEV_RX_REJECTED;
@@ -406,7 +705,7 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         BOOL  ok = netdev_copy_call(op->op_CopyTo, io->ios2_Data,
                                     (APTR)payload, plen);
 
-        nd_t_hook += nd_since(th);
+        nd_t_hook += nd_since_at(th, &nd_n_wrap_hook);
         nd_n_hook++;
         if (!ok)
         {
@@ -424,16 +723,7 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
         return NETDEV_RX_FAILED;
     }
 
-#ifdef NETDEV_TIME
-    {
-        ULONG tr = nd_now();
-
-        netdev_reply(io, 0, 0);
-        nd_t_reply += nd_since(tr);
-    }
-#else
     netdev_reply(io, 0, 0);
-#endif
     return NETDEV_RX_TAKEN;
 }
 
@@ -449,7 +739,7 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
     ULONG t0 = nd_now();
 
     netdev_rx_body(arg, frame, len);
-    nd_t_up += nd_since(t0);
+    nd_t_up += nd_since_at(t0, &nd_n_wrap_up);
     nd_n_frame++;
 }
 
@@ -474,10 +764,6 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         return;
     }
 
-#ifdef NETDEV_TIME
-    {
-        ULONG tp = nd_now();
-#endif
     /* The frame is even-aligned, so the type is one word and the broadcast
        test is one longword and one word rather than six byte reads. */
     type = *(const UWORD *)(const APTR)(frame + 12);
@@ -490,32 +776,26 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
     }
 
     unit->nu_Stats.PacketsReceived++;
-#ifdef NETDEV_TIME
-        nd_t_pre += nd_since(tp);
-    }
-#endif
 
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
         NetdevOpener      *op = (NetdevOpener *)n;
         struct IOSana2Req *io;
         NetdevTrack       *tr;
-#ifdef NETDEV_TIME
-        ULONG tf = nd_now();
-
-        tr = netdev_track_find(op, type);
-        nd_t_find += nd_since(tf);
-        tf = nd_now();
-        io = netdev_take(&op->op_Reads, type);
-        nd_t_take += nd_since(tf);
-#else
         tr = netdev_track_find(op, type);
         io = netdev_take(&op->op_Reads, type);
-#endif
         if (io != NULL)
         {
+#ifdef NETDEV_TIME
+            ULONG          th = nd_now();
+            NetdevRxResult r  = netdev_hand_over(op, io, frame, len, type,
+                                                 flags);
+
+            nd_t_hand += nd_since_at(th, &nd_n_wrap_hand);
+#else
             NetdevRxResult r = netdev_hand_over(op, io, frame, len, type,
                                                 flags);
+#endif
 
             if (r == NETDEV_RX_REJECTED)
             {
@@ -978,7 +1258,13 @@ ULONG netdev_interrupt(NetdevUnit *unit)
         BOOL  mine;
 
         mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
-        nd_t_isr += nd_since(t0);
+        {
+            ULONG span = nd_since_at(t0, &nd_n_wrap_isr);
+
+            nd_t_isr += span;
+            if (span > nd_t_isr_max)
+                nd_t_isr_max = span;
+        }
         nd_regs_isr += netdev_time_regs - r0;
         nd_n_int++;
         if (!mine)
@@ -1623,6 +1909,16 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
             op->op_CopyTo = (APTR)tags->ti_Data;
         else if (tag == ANXD_S2_RX_DIRECT)
             op->op_RxDirect = (APTR)tags->ti_Data;
+        else if (tag == ANXD_S2_RX_LINK_HDR)
+        {
+            /* Answering IS the acceptance: the opener reads this back to
+               decide whether it still has to synthesise the header. */
+            if (tags->ti_Data != 0)
+            {
+                op->op_RxLinkHdr        = TRUE;
+                *(BOOL *)tags->ti_Data  = TRUE;
+            }
+        }
         else if (tag == ANXD_S2_RX_FILLED)
             op->op_RxFilled = (APTR)tags->ti_Data;
         else if (tag == S2_CopyFromBuff)

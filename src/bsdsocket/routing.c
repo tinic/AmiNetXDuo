@@ -13,6 +13,8 @@
 
 #include <proto/exec.h>
 
+#ifdef AMINETXDUO_ROUTING
+
 #define BSD_ROUTE_RESOLVE_TIMEOUT   (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 
@@ -775,3 +777,52 @@ VOID bsd_FreeRouteInfo(register struct rt_msghdr *table __asm("a0"),
     if (table != NULL)
         ami_free(table);
 }
+
+#else /* !AMINETXDUO_ROUTING */
+
+/*
+ * The five vectors with no route table behind them.  The stack still routes:
+ * this is the API a program would have used to change what it routes over.
+ */
+LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
+                         register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)tags;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
+                            register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)tags;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
+                            register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)tags;
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+/* NULL is what a caller already handles: it is what the built version answers
+   when the table cannot be allocated. */
+struct rt_msghdr *bsd_GetRouteInfo(register LONG address_family __asm("d0"),
+                                   register LONG flags __asm("d1"),
+                                   register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)address_family;
+    (VOID)flags;
+    (VOID)bsd_fail(SocketBase, AMI_ENOSYS);
+    return NULL;
+}
+
+VOID bsd_FreeRouteInfo(register struct rt_msghdr *table __asm("a0"),
+                       register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* Nothing was handed out, so this can only be the NULL above. */
+    (VOID)table;
+    (VOID)SocketBase;
+}
+
+#endif /* AMINETXDUO_ROUTING */

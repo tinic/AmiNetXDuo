@@ -61,6 +61,11 @@ static void expect_u32(const char *what, unsigned long got, unsigned long want)
 
 static int           seen_perform;
 static int           seen_abort;
+
+/* WHICH handler took the request, not just that one did.  seen_perform stays a
+   total so every assertion below keeps reading the same way. */
+typedef enum { TOOK_NONE = 0, TOOK_PERFORM, TOOK_READ, TOOK_WRITE } Took;
+static Took          seen_took;
 static NetdevOpener *seen_op;
 static ULONG         seen_wire_error;
 static BYTE          seen_io_error;
@@ -68,6 +73,7 @@ static BOOL          abort_answer = TRUE;
 
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 {
+    seen_took = TOOK_PERFORM;
     seen_perform++;
     seen_op         = op;
     seen_wire_error = io->ios2_WireError;
@@ -86,6 +92,21 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
 {
     (VOID)cmd;
 
+    seen_took = TOOK_READ;
+    seen_perform++;
+    seen_op         = op;
+    seen_wire_error = io->ios2_WireError;
+    seen_io_error   = io->ios2_Req.io_Error;
+}
+
+/* CMD_WRITE is dispatched the same way, and for the same reason: on a receive
+   it is the acknowledgement path.  Counted into seen_perform for the same
+   reason CMD_READ is. */
+VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
+{
+    (VOID)cmd;
+
+    seen_took = TOOK_WRITE;
     seen_perform++;
     seen_op         = op;
     seen_wire_error = io->ios2_WireError;
@@ -330,6 +351,69 @@ static void g_abort_io(void)
 }
 
 
+
+/*
+ * THE FAST PATH IS A CLAIM ABOUT WHICH FUNCTION RUNS, SO ASSERT THAT.
+ *
+ * netdev_begin_io() sends CMD_READ to netdev_queue_read() and CMD_WRITE to
+ * netdev_write_cmd() rather than through netdev_perform()'s twenty-case jump
+ * table, 40-byte frame and movem of five registers.  Those two are what this
+ * device is asked for in bulk: one CMD_READ per received frame, and on an
+ * inbound transfer one CMD_WRITE for roughly every second frame, which is the
+ * acknowledgement that reopens the peer's window.
+ *
+ * NOTHING ELSE IN THE TREE CAN CHECK THIS.  tools/check-hot-calls.sh counts
+ * jsr sites in bsdsocket.library; anxnet.device links with -flto and `nm` on a
+ * KEEP_SYMBOLS build returns 136 entries with every local name collapsed onto
+ * one address, so there is nothing there to count.  A `static` dropped, a
+ * helper moved, or a stray edit to the dispatch in netdev_io.c would put the
+ * jump table back on a path that runs 480 times a second and no other gate
+ * would notice.
+ *
+ * S2_MULTICAST and S2_BROADCAST share netdev_write_cmd()'s body but are rare,
+ * so they are asserted to keep taking the generic path -- if that ever changes
+ * it should change deliberately.
+ */
+static void h_the_two_bulk_commands_skip_the_jump_table(void)
+{
+    struct IOSana2Req io;
+
+    printf("  the two bulk commands skip the jump table\n");
+
+    fill(&io, CMD_READ, 0x1234, 1);
+    seen_took = TOOK_NONE;
+    netdev_begin_io(&fake_device, &io);
+    expect(seen_took == TOOK_READ,
+           "CMD_READ goes straight to netdev_queue_read");
+
+    fill(&io, CMD_WRITE, 0x1234, 1);
+    seen_took = TOOK_NONE;
+    netdev_begin_io(&fake_device, &io);
+    expect(seen_took == TOOK_WRITE,
+           "CMD_WRITE goes straight to netdev_write_cmd");
+
+    /* Rare, and deliberately still generic. */
+    fill(&io, S2_BROADCAST, 0x1234, 1);
+    seen_took = TOOK_NONE;
+    netdev_begin_io(&fake_device, &io);
+    expect(seen_took == TOOK_PERFORM,
+           "S2_BROADCAST still takes the generic path");
+
+    fill(&io, S2_READORPHAN, 0x1234, 1);
+    seen_took = TOOK_NONE;
+    netdev_begin_io(&fake_device, &io);
+    expect(seen_took == TOOK_PERFORM,
+           "S2_READORPHAN still takes the generic path");
+
+    /* An unattached CMD_WRITE has no opener to hand the fast path, so it must
+       fall through to netdev_perform(), which answers it with an error. */
+    fill(&io, CMD_WRITE, 0x1234, 0);
+    seen_took = TOOK_NONE;
+    netdev_begin_io(&fake_device, &io);
+    expect(seen_took == TOOK_PERFORM,
+           "an unattached CMD_WRITE falls back to the generic path");
+}
+
 int main(void)
 {
     memset(&opener, 0, sizeof(opener));
@@ -344,6 +428,7 @@ int main(void)
     e_an_unattached_request_still_dispatches();
     f_the_opener_round_trips();
     g_abort_io();
+    h_the_two_bulk_commands_skip_the_jump_table();
 
     printf("%d checks, %d failures, %s\n", checks, failures,
            (failures == 0) ? "PASS" : "FAIL");

@@ -127,34 +127,6 @@ VOID netdev_event(NetdevUnit *unit, ULONG mask)
 
 /* ----------------------------------------------------------- the filter -- */
 
-/*
- * What the opener is shown, and what is copied to it: the frame from byte 0 for
- * a RAW request, the payload past the 14-byte Ethernet header otherwise.  The
- * filter sees the same data CopyToBuff would (copybuff.spec autodoc).
- */
-const UBYTE *netdev_payload(const NetdevOpener *op, const struct IOSana2Req *io,
-                            const UBYTE *frame, UWORD len, ULONG *plen)
-{
-    if (netdev_io_is_raw(op, io))
-    {
-        *plen = len;
-        return frame;
-    }
-
-    *plen = (ULONG)(len - NETDEV_HDR_LEN);
-    return frame + NETDEV_HDR_LEN;
-}
-
-/*
- * TRUE when the packet can be handed over.  The hook itself runs at interrupt
- * level, in the middle of the card's own service, and the autodoc requires it:
- * "This function must be callable from interupts."
- */
-BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
-                      const UBYTE *data)
-{
-    if (op->op_Filter == NULL)
-        return TRUE;
-
-    return netdev_hook_call(op->op_Filter, io, (APTR)data);
-}
+/* netdev_payload() and netdev_filter_ok() moved to netdev_internal.h as static
+   inlines: one call site each, once a frame, and it was in another translation
+   unit.  See the note there. */

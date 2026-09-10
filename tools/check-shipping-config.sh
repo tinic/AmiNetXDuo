@@ -183,6 +183,33 @@ def main():
                 % (",".join(only_dist) or "-", ",".join(only_ci) or "-"))
             bad += 1
 
+    # AND THE SAME FOR MICRO, which dist/make-dist.sh packs into Libs/micro/
+    # without the Installer offering it.  It is a fourth copy of an option set
+    # and nothing else can see it drift: release.yml does not build a micro
+    # drawer, so the two-way comparison above never reaches it.  The minimal
+    # list drifted exactly this way when it was the only unwatched copy.
+    m = re.search(r'MICRO_OPTIONS="(.*?)"', dist, re.S)
+    if not m:
+        say("drawer_micro_dist", "no_MICRO_OPTIONS_in_dist/make-dist.sh")
+        bad += 1
+    else:
+        dist_micro = dict(OPT.findall(m.group(1).replace("\\\n", " ")))
+        want_micro = dict(ci.get("micro", {}))
+        if not want_micro:
+            say("drawer_micro_dist", "no_micro_arm_in_tools/ci.sh")
+            bad += 1
+        elif dist_micro == want_micro:
+            say("drawer_micro_dist", "matches_ci_arm_micro")
+        else:
+            only_dist = sorted(k for k in dist_micro
+                               if dist_micro[k] != want_micro.get(k))
+            only_ci = sorted(k for k in want_micro
+                             if want_micro[k] != dist_micro.get(k))
+            say("drawer_micro_dist",
+                "DIVERGES dist_only=%s ci_only=%s"
+                % (",".join(only_dist) or "-", ",".join(only_ci) or "-"))
+            bad += 1
+
     say("shipping_config_errors", bad)
     say("shipping_config", "PASS" if bad == 0 else "FAIL")
     return 0 if bad == 0 else 1

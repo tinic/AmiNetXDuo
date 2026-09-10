@@ -12,10 +12,12 @@
 #include <exec/memory.h>
 #include <dos/dos.h>
 #include <devices/timer.h>
+#include <libraries/configvars.h>
 #include <proto/exec.h>
 #include <inline/macros.h>
 #include <proto/dos.h>
 #include <proto/timer.h>
+#include <proto/expansion.h>
 
 #include <stdarg.h>
 #include <string.h>
@@ -147,6 +149,62 @@ extern VOID cal_movem (APTR dst, APTR src, ULONG longs, ULONG reps);
 #define K_WRITE     7
 #define K_M2M       8
 #define K_MOVEM     9
+#define K_CHIPREAD  10
+#define K_INTENA    11
+#define K_FORBID    12
+
+/*
+ * WHAT THE EMULATOR CHARGES FOR TOUCHING SOMETHING THAT IS NOT MEMORY.
+ *
+ * This campaign has been misled twice by assuming an access is cheap because
+ * it is one instruction.  NETDEV_TIME's own self-calibration put a VHPOSR read
+ * at 4.9 US -- against an ADD.L at a few nanoseconds -- which made every span
+ * it measured useless and was only noticed because the report prints its own
+ * probe cost.  The receive path takes one Disable()/Enable() pair per frame in
+ * netdev_queue_read() (netdev_cmds.c:299), and nothing here knew what that
+ * costs.
+ *
+ * These are C rather than kernels in cpucal.S because the per-rep cost is
+ * microseconds: the loop is noise beside the body, and Disable() needs a6 the
+ * compiler is already managing.
+ */
+static volatile UWORD c_chip_sink;
+
+static VOID cal_chipread(ULONG reps)
+{
+volatile const UWORD   *vh = (volatile const UWORD *)0xdff006UL;   /* VHPOSR */
+ULONG                   i;
+UWORD                   acc = 0U;
+
+    for (i = 0UL; i < reps; i++)
+        acc = (UWORD)(acc + *vh);
+
+    c_chip_sink = acc;
+}
+
+static VOID cal_intena(ULONG reps)
+{
+ULONG   i;
+
+    /* Each pair re-enables, so interrupts are serviced between iterations and
+       a long loop starves nothing. */
+    for (i = 0UL; i < reps; i++)
+    {
+        Disable();
+        Enable();
+    }
+}
+
+static VOID cal_forbid(ULONG reps)
+{
+ULONG   i;
+
+    for (i = 0UL; i < reps; i++)
+    {
+        Forbid();
+        Permit();
+    }
+}
 
 static APTR     c_buf_a;
 static APTR     c_buf_b;
@@ -166,6 +224,9 @@ static VOID c_run(ULONG kind, ULONG reps)
     case K_WRITE:  cal_write(c_buf_a, c_window, reps);               break;
     case K_M2M:    cal_m2m(c_buf_a, c_buf_b, c_window, reps);        break;
     case K_MOVEM:  cal_movem(c_buf_a, c_buf_b, c_window, reps);      break;
+    case K_CHIPREAD: cal_chipread(reps);                             break;
+    case K_INTENA:   cal_intena(reps);                               break;
+    case K_FORBID:   cal_forbid(reps);                               break;
     default:                                                         break;
     }
 }
@@ -261,6 +322,75 @@ ULONG   ratio_x100;
           (LONG)real_020, (LONG)real_030);
 }
 
+/*
+ * ZORRO BOARD RAM, WHICH IS WHERE THE RECEIVE PATH'S BIGGEST COPY READS FROM.
+ *
+ * `_n68k_copy_sum_longwords` is the largest row in the receive profile and its
+ * SOURCE is the a2065's on-board SRAM, not Fast RAM -- the LANCE writes the
+ * frame there and the copy hook reads it in place (lance.c:426).  Everything
+ * this tree has said about that copy being instruction-bound was reasoned from
+ * Fast RAM figures.  If board RAM is several times slower, the copy is bus
+ * bound and there is nothing in it; if it is not, the arithmetic stands.
+ *
+ * READ ONLY.  A board's address space is its hardware: sweeping it with writes
+ * would be poking registers on whatever card happens to be in the slot.  A
+ * read is what the receive path does anyway, and read bandwidth is the number
+ * the question turns on.
+ *
+ * NOT A MEMORY BOARD, WHICH THE FIRST VERSION OF THIS PICKED.  "The first
+ * board with at least 64 KB" found the 8 MB Zorro II RAM card at 0x00200000
+ * and measured it at 77.4 ns/B -- identical to Fast RAM, because that is what
+ * it is.  The a2065 carries 32 KB of SRAM and was excluded by the size floor
+ * it did not meet.
+ *
+ * ERTF_MEMLIST is the bit Expansion sets on a board whose space it added to
+ * the free memory list, so skipping it leaves the cards that are hardware.
+ * The floor drops to 16 KB for the same reason.
+ *
+ * No such board, no line -- a machine configured without one is not a failure,
+ * it just cannot answer.
+ */
+static APTR c_board_find(ULONG *size_out)
+{
+struct ConfigDev   *cd = NULL;
+
+    if (ExpansionBase == NULL)
+        return NULL;
+
+    while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
+    {
+        if (cd->cd_BoardAddr == NULL || cd->cd_BoardSize < 16384UL)
+            continue;
+
+        if ((cd->cd_Rom.er_Type & ERTF_MEMLIST) != 0)
+            continue;               /* RAM, and already measured as Fast */
+
+        *size_out = cd->cd_BoardSize;
+        return cd->cd_BoardAddr;
+    }
+
+    return NULL;
+}
+
+/*
+ * The I/O kernels, in nanoseconds and in ADD.L units.  No "real 68020 cycles"
+ * column: what these cost on silicon is a bus property and what they cost here
+ * is an emulator property, and the whole point is that the second is not the
+ * first.
+ */
+static VOID c_print_io(const char *what, ULONG kind)
+{
+ULONG   reps = 0UL;
+ULONG   raw  = c_measure_ps(kind, 16UL, &reps);
+ULONG   ps   = (raw > c_empty_ps) ? (raw - c_empty_ps) : 0UL;
+ULONG   adds = (c_add_ps != 0UL) ? (ps / c_add_ps) : 0UL;
+
+    c_log("  %-22s %6ld.%03ld us  = %6ld ADD.L",
+          (LONG)what,
+          (LONG)(ps / 1000000UL), (LONG)((ps / 1000UL) % 1000UL),
+          (LONG)adds);
+}
+
 /* Sweeps c_window longwords per rep, rounded down to the 16-longword inner
    block.  "Bytes" counts payload only, matching the rest of tests/perf/. */
 static ULONG c_print_mem(const char *what, ULONG kind)
@@ -314,8 +444,91 @@ ULONG   big_read, small_read;
     c_window = C_BIG_LONGS;
     big_read = c_print_mem("read  32 KB window (bus)", K_READ);
     (VOID)c_print_mem("write 32 KB window (bus)", K_WRITE);
-    (VOID)c_print_mem("m2m   32 KB window (bus)", K_M2M);
-    (VOID)c_print_mem("movem 32 KB window (bus)", K_MOVEM);
+    {
+    ULONG   m2m   = c_print_mem("m2m   32 KB window (bus)", K_M2M);
+    ULONG   movem = c_print_mem("movem 32 KB window (bus)", K_MOVEM);
+
+    /*
+     * THE RATIO BETWEEN TWO SEQUENCES HERE IS AN EMULATOR PROPERTY, AND IT
+     * DOES NOT TRANSFER TO SILICON.  movem.l moves eight longwords for one
+     * instruction fetch and a fixed setup cost paid once, which is why
+     * n68k_copy.S uses it; an emulator that charges per instruction executed
+     * rather than per bus cycle can make the sequence with FEWER instructions
+     * the SLOWER one, and on this rig it does.
+     *
+     * That is worth knowing and it is not a reason to change the copy: the
+     * library ships to real 68020s, where the published costs say movem wins.
+     * The line below states which way this machine leans so nobody reads the
+     * two numbers above as a verdict on the instruction.
+     */
+    if (m2m != 0UL && movem != 0UL)
+    {
+        /* AND THE RATIO IS NOT STABLE RUN TO RUN EITHER.  Two runs of this
+           binary an hour apart read m2m 117.7 then 144.6 ns/B -- twenty-three
+           per cent apart -- while movem moved 0.6 per cent.  So the ratio
+           flipped from 1.10 to 0.90 with no change to anything.  Read ONE
+           run's ratio as an observation about that run and nothing more; the
+           rate arm that chased the first one measured +0.36 per cent, inside
+           the noise, which is what "no difference" looks like. */
+        c_log("    movem/m2m %ld.%02ldx on THIS emulator, THIS run -- neither "
+              "a fact about the silicon nor stable between runs",
+              (LONG)((movem * 100UL / m2m) / 100UL),
+              (LONG)((movem * 100UL / m2m) % 100UL));
+    }
+    }
+
+    {
+    ULONG   bsize = 0UL;
+    APTR    board = c_board_find(&bsize);
+
+    if (board != NULL)
+    {
+        APTR    save = c_buf_a;
+        ULONG   fast_read;
+
+        c_log("");
+        ULONG   win = C_BIG_LONGS;
+
+        /* A 32 KB card cannot be swept with a 32 KB window and a guard: take
+           half the board, so the sweep stays inside it whatever it is. */
+        if ((bsize / 8UL) < win)
+            win = bsize / 8UL;
+
+        ULONG   board_read;
+
+        c_log(" , Zorro board (not memory) at 0x%08lx, %ld KB --", (LONG)board,
+              (LONG)(bsize / 1024UL));
+        fast_read  = big_read;
+        c_buf_a    = board;
+        c_window   = win;
+        board_read = c_print_mem("read  window (bus)", K_READ);
+        c_window   = C_BIG_LONGS;
+        c_buf_a    = save;
+
+        /*
+         * THE RATIO IS THE ANSWER, NOT THE TWO NUMBERS.  The question this
+         * sweep exists for is whether the receive path's biggest copy is bus
+         * bound: it reads the frame out of THIS space, in place, and every
+         * claim this tree has made about that copy being instruction bound was
+         * reasoned from Fast RAM figures.  Say the ratio so nobody has to
+         * eyeball two lines twenty apart -- twice now I read the wrong pair.
+         */
+        if (fast_read != 0UL && board_read != 0UL)
+        {
+            c_log("    board/fast read %ld.%02ldx -- "
+                  "at ~1x the card is not the bottleneck and a copy out of it "
+                  "is instruction bound",
+                  (LONG)((board_read * 100UL / fast_read) / 100UL),
+                  (LONG)((board_read * 100UL / fast_read) % 100UL));
+        }
+        (VOID)fast_read;
+    }
+    else
+    {
+        c_log("");
+        c_log(" , no Zorro board with 64 KB or more: nothing to sweep --");
+    }
+    }
 
     if (small_read != 0UL)
     {
@@ -380,6 +593,12 @@ ULONG   reps;
     c_print_reg("ADDX.L Dn,Dm",   K_ADDX,    2UL,  2UL);
     c_print_reg("MULU.L Dn,Dm",   K_MULU,   43UL, 44UL);
     c_print_reg("MULU.L Dn,Dh:Dl",K_MULU64, 45UL, 44UL);
+
+    c_log("");
+    c_log("what the emulator charges for a NON-MEMORY access:");
+    c_print_io("VHPOSR read",          K_CHIPREAD);
+    c_print_io("Disable()/Enable()",   K_INTENA);
+    c_print_io("Forbid()/Permit()",    K_FORBID);
 
     if (c_add_ps != 0UL)
     {

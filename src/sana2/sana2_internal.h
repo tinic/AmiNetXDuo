@@ -471,6 +471,11 @@ typedef struct AmiRxSlot
     BOOL                summed;
 #endif
     BOOL                posted;
+    /* The device wrote the fourteen-byte link header in front of the payload
+       because the opener asked for it with ANXD_S2_RX_LINK_HDR.  A driver
+       that does not know the tag never sets this and the reader synthesises
+       the header as it always did. */
+    BOOL        hdr_written;
 } AmiRxSlot;
 
 /*
@@ -590,6 +595,19 @@ struct AmiSana2If
        list is an input to OpenDevice and outlives the open. */
     char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[12];
+    BOOL                link_hdr_ok;    /* device answered ANXD_S2_RX_LINK_HDR */
+    ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
+    /*
+     * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
+     *
+     * raw_mode is fixed by the open and never changes, but the arm read it
+     * twice a frame -- once to place slot->dst and once to build io_Flags.
+     * _ami_sana2_rx_post_slot carries 2.6% of the real-path receive profile
+     * for a body that touches no packet data at all, so the loads, the tests
+     * and the branches all come out and leave two plain stores.
+     */
+    ULONG               rx_dst_off;     /* 0 raw, AMI_ETH_HEADER_SIZE cooked */
+    UBYTE               rx_io_flags;    /* SANA2IOF_RAW, or 0                */
 
     /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */
     UCHAR               mac[AMI_ETH_ADDR_SIZE];
@@ -698,6 +716,7 @@ VOID ami_sana2_unbind(AmiSana2If *iface);
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
+ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 
 #ifndef AMINETXDUO_GREEN_REALM

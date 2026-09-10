@@ -37,6 +37,42 @@ Usage:
 SPDX-License-Identifier: MIT
 """
 
+#
+# A PROFILE SHARE IS WHERE, NOT HOW MUCH, AND HERE IS THE CALIBRATION.
+#
+# This build is -DAMINETXDUO_LTO=OFF by construction (a profile needs symbols),
+# and the shipping build is not.  A function that is a symbol here can be
+# inlined and folded away there, so its share is partly its own call frame --
+# work the shipped image never does.  That caveat has been in the campaign
+# ledger for weeks in words.  On 2026-09-07 it got a number:
+#
+#   _netdev_perform was 1.8-2.1% of this report, the largest ours-row in
+#   anxnet.device.  Two commits sent CMD_READ and CMD_WRITE straight to their
+#   handlers instead of through its twenty-case jump table, and it is now
+#   ABSENT from the top 25.  The rate moved by +0.04% -- five rounds an arm,
+#   positions alternated, all twenty rounds distinct, rx 5,954,208 ->
+#   5,956,386, by position -0.69% and +0.76%.
+#
+#   AND THE FULL RANKING SAYS WHY, WHICH THE TOP 25 DID NOT.  The work did not
+#   go anywhere; the LABEL did:
+#
+#       _netdev_queue_read   1.4%      neither of these appears in the
+#       _netdev_begin_io     0.6%      profile taken before the change
+#       -------------------------
+#       total                2.0%      against _netdev_perform's 1.8-2.1%
+#
+#   A jump table was removed and its two destinations became symbols of their
+#   own.  What ran per frame -- the Disable, the tests, the AddHead, the frame
+#   BeginIO builds -- runs still.  The wire agreed with the arithmetic to four
+#   hundredths of a per cent.
+#
+# So: a row LEAVING this report is not work leaving the machine.  Look at the
+# FULL ranking, not the top 25, and account for where the samples went before
+# claiming anything.  For what a change is worth there is
+# tests/perf/run-rate-ab.sh, and the effect must clear about one per cent
+# before it can see it at all.
+#
+
 import argparse
 import bisect
 import collections
@@ -175,16 +211,30 @@ SEC_OF_TYPE = {"t": ".text", "T": ".text", "w": ".text", "W": ".text",
 # bare section name skipped every one of them, so their addresses resolved to
 # whatever object was parsed last before the run -- crt0.o in an LTO build,
 # libgcc's _umoddi3.o without it.  Both looked like a hot function taking half
-# the profile; neither was running at all.  The suffix is outside the capture
-# so group(1) stays ".text".
-MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss))(?:\.\S+)?\s+"
+# the profile; neither was running at all.
+#
+# THE SUFFIX IS ALSO THE ANSWER TO THE COLLISION BELOW, so it is captured now
+# rather than discarded.  Under -ffunction-sections one object contributes
+# SEVERAL .text sections at several output addresses, and nm reports every one
+# of its symbols at offset 0 -- of its OWN section.  Adding `addr + 0` for each
+# symbol at each contribution therefore puts every symbol of the object at
+# every one of its addresses.  That is what made
+# _nx_tcp_socket_state_data_check share an address with
+# _nx_tcp_socket_state_data_trim.  ld already wrote which function each
+# contribution is: ".text._nx_tcp_socket_state_data_check" is not a hint, it is
+# the name.  group(2) keeps it.
+MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss))((?:\.\S+)?)\s+"
                      r"0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
-MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss))(?:\.\S+)?\s*$")
+MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss))((?:\.\S+)?)\s*$")
 MAP_SEC_TAIL = re.compile(r"^\s+0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
 
 
 def parse_map(path):
-    """[(section, out_addr, size, object)] for every input contribution."""
+    """[(section, only, out_addr, size, object)] for every input contribution.
+
+    `only`, when not None, is the single symbol name this contribution holds,
+    taken from the ".text.<name>" section name ld emitted for it.
+    """
     out = []
     pending = None
     with open(path, "r", errors="replace") as fh:
@@ -192,18 +242,19 @@ def parse_map(path):
             if pending is not None:
                 m = MAP_SEC_TAIL.match(line)
                 if m:
-                    out.append((pending, int(m.group(1), 16),
+                    out.append((pending[0], pending[1], int(m.group(1), 16),
                                 int(m.group(2), 16), m.group(3)))
                 pending = None
                 continue
             m = MAP_SEC.match(line)
             if m:
-                out.append((m.group(1), int(m.group(2), 16),
-                            int(m.group(3), 16), m.group(4)))
+                out.append((m.group(1), m.group(2)[1:] or None,
+                            int(m.group(3), 16), int(m.group(4), 16),
+                            m.group(5)))
                 continue
             m = MAP_SEC_SPLIT.match(line)
             if m:
-                pending = m.group(1)
+                pending = (m.group(1), m.group(2)[1:] or None)
     return out
 
 
@@ -254,14 +305,15 @@ def build_symbol_table(nm, mapfile, objdir):
     # measured case, a C++ static destructor that cannot run during a transfer.
     # That is not a ranking with a caveat, it is a fiction, so it is not
     # printed at all.
-    ltrans = [obj for _sec, _addr, size, obj in contributions
+    ltrans = [obj for _sec, _only, _addr, size, obj in contributions
               if ".ltrans" in obj and size]
     if ltrans:
         die("%s is an LTO link: %d bytes of code are in %s, which the linker\n"
             "  deleted, so nothing here can be attributed.  Rebuild the "
             "profiler with\n  -DAMINETXDUO_LTO=OFF and profile that."
             % (mapfile,
-               sum(sz for _s, _a, sz, o in contributions if ".ltrans" in o),
+               sum(sz for _s, _o, _a, sz, o in contributions
+                   if ".ltrans" in o),
                ltrans[0].split("/")[-1]))
 
     cache = {}
@@ -278,7 +330,7 @@ def build_symbol_table(nm, mapfile, objdir):
     lost_bytes = 0
     lost_names = []
 
-    for section, addr, size, obj in contributions:
+    for section, only, addr, size, obj in contributions:
         if size == 0:
             continue
 
@@ -304,7 +356,26 @@ def build_symbol_table(nm, mapfile, objdir):
         if m:
             module = "%s(%s)" % (os.path.basename(spec), member)
 
-        for value, stype, name in cache[key]:
+        # The section name says which function this contribution is, so take
+        # that symbol alone.  Without it every symbol of the object lands at
+        # every address the object contributed to -- nm reports each at offset
+        # 0 of its own section, and the offsets are not comparable across
+        # sections.  Fall back to the whole list when nothing matches, so an
+        # unexpected section name degrades to the old behaviour rather than
+        # dropping the contribution.
+        # The assembler's leading underscore is on the nm name and not on the
+        # section name: ld writes ".text._nx_tcp_socket_state_data_check" for
+        # a symbol nm calls "__nx_tcp_socket_state_data_check".  Both spellings
+        # are accepted so this works either way round.
+        syms = cache[key]
+        if only is not None:
+            exact = [t for t in syms
+                     if t[2] == only or t[2] == "_" + only
+                     or "_" + t[2] == only]
+            if exact:
+                syms = exact
+
+        for value, stype, name in syms:
             if SEC_OF_TYPE.get(stype) != section:
                 continue
             if value > size:

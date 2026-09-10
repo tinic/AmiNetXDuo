@@ -50,6 +50,32 @@ VOID ami_budget_baton(ULONG dt)
     ami_budget_leg(&ami_budget.baton, dt);
 }
 
+VOID ami_budget_repost(ULONG dt)
+{
+    ami_budget_leg(&ami_budget.repost, dt);
+}
+
+VOID ami_budget_verify(ULONG dt)
+{
+    ami_budget_leg(&ami_budget.verify, dt);
+}
+
+/*
+ * Sixteen brackets round nothing.  Called once per netstatus read, so the leg
+ * carries a fresh sample set beside the legs it is the floor for.
+ */
+VOID ami_budget_probe(VOID)
+{
+    UWORD i;
+
+    for (i = 0; i < 16U; i++)
+    {
+        ULONG t0 = ami_budget_clock();
+
+        ami_budget_leg(&ami_budget.probe, ami_budget_clock() - t0);
+    }
+}
+
 VOID ami_budget_deliver(ULONG now)
 {
     ami_budget.deliver_at = now;
@@ -217,6 +243,7 @@ VOID ami_budget_hold_end(APTR thread, const char *name, ULONG state, UWORD site)
         return;
 
     ami_budget.hold_total++;
+    ami_budget.hold_ticks += dt;        /* before the threshold return below */
 
     /* ~50 ms in E-Clock ticks, from the measured rate rather than the PAL
        constant an NTSC machine would be 1% wrong by.  Cached: the rate never

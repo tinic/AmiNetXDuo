@@ -496,8 +496,29 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         return;
     }
 
+    /*
+     * ONE WORD ON THE 68000, TWO BYTES EVERYWHERE ELSE.
+     *
+     * prepend_ptr is nx_packet_data_start + AMI_SANA2_RX_PAD, and the static
+     * assertions below put data_start on a longword and the pad at 2, so byte
+     * 12 of the frame is at an EVEN address on every packet this reader sees
+     * -- which is all a 68000 needs, an address error being an odd-address
+     * fault and not an unaligned one.  netdev_rx() reads the same field the
+     * same way (netdev_device.c) and this side had not caught up.
+     *
+     * THE HOST TIER COMPILES THIS FILE AND THE HOST IS LITTLE-ENDIAN, which is
+     * what the byte form was for: the first version of this read the two bytes
+     * as a native USHORT and turned every ethertype round on x86 -- twelve
+     * demux checks failed at once.  Same shape as N68K_RDW16 in
+     * src/net68k/n68k_rx_verify.c, and for the same two reasons.
+     */
+#if defined(__mc68000__) || defined(__m68k__)
+    type = (UINT)*(const USHORT *)(const APTR)
+                 (packet->nx_packet_prepend_ptr + 12);
+#else
     type = (((UINT)packet->nx_packet_prepend_ptr[12]) << 8) |
            ((UINT)packet->nx_packet_prepend_ptr[13]);
+#endif
 
     packet->nx_packet_address.nx_packet_interface_ptr = iface->interface_ptr;
 
@@ -505,9 +526,21 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     packet->nx_packet_prepend_ptr += AMI_ETH_HEADER_SIZE;
     packet->nx_packet_length      -= AMI_ETH_HEADER_SIZE;
 
-    switch (type)
+    /*
+     * IPv4 AHEAD OF THE SWITCH, BECAUSE IT IS EVERY FRAME AND WAS THE LAST
+     * COMPARE REACHED.  GCC builds a binary search over the four case
+     * values, and 0x0800 sits on the far side of it: the generated demux ran
+     * `cmp.w #-32715` then `jhi` then `cmp.w #2048` before taking the arm a
+     * bulk receive takes every time.  Testing it first costs the other three
+     * one compare each, which they can afford -- ARP is a handful a minute
+     * and the rest are rarer still.
+     *
+     * A straight hoist, not a restructure: every case here is self-contained
+     * and ends in break, the switch is the last statement in the function,
+     * and this arm already returns early on a dropped frame.
+     */
+    if (type == AMI_ETHERTYPE_IPV4)
     {
-    case AMI_ETHERTYPE_IPV4:
 #ifdef AMINETXDUO_RX_VERIFY
         /*
          * Checked here and reported to the stack so it does not walk the
@@ -523,11 +556,30 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
              * was doing.  A slot that did not sum (misaligned, or no slot at
              * all) passes zero and the verifier walks.
              */
+#ifdef AMINETXDUO_RXPROBE
+            {
+                /*
+                 * Both entries, because which one runs is the question the
+                 * from_copy counter answers and this leg must not depend on
+                 * the answer.  See the note beside AmiBudgetLeg verify.
+                 */
+                ULONG vt0 = ami_budget_clock();
+
+                if ((sum != NULL) && (sum->summed != FALSE))
+                    caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
+                                              &drop);
+                else
+                    caps = n68k_rx_verify(packet, &drop);
+
+                ami_budget_verify(ami_budget_clock() - vt0);
+            }
+#else
             if ((sum != NULL) && (sum->summed != FALSE))
                 caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
                                           &drop);
             else
                 caps = n68k_rx_verify(packet, &drop);
+#endif
 
             if (drop != NX_FALSE)
             {
@@ -561,8 +613,11 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 #endif
         iface->stats.packets_received++;
         ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV4);
-        break;
+        return;
+    }
 
+    switch (type)
+    {
     case AMI_ETHERTYPE_IPV6:
 #if defined(AMINETXDUO_RX_VERIFY) && defined(FEATURE_NX_IPV6)
         /* Same two entries as IPv4 above: no header checksum exists to claim,
@@ -649,11 +704,23 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
     packet->nx_packet_length      = 0;
 
     /* Cooked: leave room for the synthesised header. Raw: the device supplies
-       it. */
-    slot->dst = iface->raw_mode ? base : (base + AMI_ETH_HEADER_SIZE);
+       it.  The offset is settled by the open (sana2_internal.h rx_dst_off), so
+       this is an add and not a test and a branch. */
+    slot->dst = base + iface->rx_dst_off;
 
-    slot->capacity = (ULONG)(packet->nx_packet_data_end - slot->dst);
-    slot->copied   = 0;
+    /*
+     * A POOL CONSTANT, ARRIVED AT PER FRAME.  Every packet in a pool has the
+     * same payload size, and dst is data_start plus a fixed 2 + 14 (or 2 in
+     * raw mode), so data_end - dst is the same number for every packet this
+     * interface will ever arm.  Computed on the first arm and reused: what
+     * changes between packets is the ADDRESS, which is recomputed above.
+     */
+    if (iface->rx_capacity == 0UL)
+        iface->rx_capacity = (ULONG)(packet->nx_packet_data_end - slot->dst);
+
+    slot->capacity    = iface->rx_capacity;
+    slot->copied      = 0;
+    slot->hdr_written = FALSE;
 #ifdef AMINETXDUO_RX_VERIFY
     /* ami_sana2_copy_to_buff() clears this on entry and sets it only on the
        aligned path.  A driver that never calls the copy hook -- it is optional
@@ -737,23 +804,58 @@ static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
 
     ami_sana2_rx_arm(iface, slot);
 
+    /*
+     * FIVE STORES, NOT NINE.  Only what the round trip actually disturbs is
+     * written back here; the rest is established once, where the slot is built
+     * (ami_sana2_rx_start below), and nothing between then and here touches
+     * it.
+     *
+     * ln_Type      Exec's ReplyMsg() leaves NT_REPLYMSG behind.  Our own
+     *              device puts NT_MESSAGE back at queue time
+     *              (netdev_queue.c:15), but a third-party device need not, so
+     *              this side restores it.
+     * io_Flags     BeginIO() and the device both use IOF_QUICK.  The VALUE is
+     *              a constant of the open, so the raw_mode test that used to
+     *              build it is gone -- see sana2_internal.h rx_io_flags.
+     * io_Error,
+     * WireError,
+     * PacketType,  the device's four answers about the frame that just
+     * DataLength   arrived.  PacketType is an OUT parameter of a cooked
+     *              CMD_READ, so it is an input again only once reset.
+     *
+     * Hoisted, because no code path writes any of them after the slot is
+     * built: mn_ReplyPort, io_Command and ios2_Data.  Checked across
+     * src/netdev -- the only request field the device assigns is ln_Type.
+     */
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    slot->req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-    slot->req.ios2_Req.io_Command = CMD_READ;
-    slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
+    slot->req.ios2_Req.io_Flags   = iface->rx_io_flags;
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
     slot->req.ios2_PacketType     = rx->packet_type;
     slot->req.ios2_DataLength     = 0;
-    slot->req.ios2_Data           = slot;
     ami_sana2_rx_mark(rx, slot, TRUE);
 
     /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
        SANA2IOF_RAW just set. Both lines it runs are above. */
-    BeginIO((struct IORequest *)&slot->req);
 #ifdef AMINETXDUO_RXPROBE
+    {
+        /*
+         * The receive side of the transmit path's `post` leg.  `drain` is
+         * about 1,620 us a frame and `settle`, the whole IP-to-notify chain
+         * inside it, is 462 -- so eleven hundred a frame of the reader's loop
+         * has never been timed, and this call is the largest thing in it that
+         * is not NetX.  The stamp goes round the whole re-arm, allocate
+         * included, because a pool round trip is exactly what it might be.
+         */
+        ULONG rp0 = ami_budget_clock();
+
+        BeginIO((struct IORequest *)&slot->req);
+        ami_budget_repost(ami_budget_clock() - rp0);
+    }
     rx->probe.posts++;
     rx->probe.live++;
+#else
+    BeginIO((struct IORequest *)&slot->req);
 #endif
 
     return TRUE;
@@ -867,6 +969,32 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 /* Reconcile the device's ios2_DataLength answer with the bytes its CopyToBuff
    call actually initialized.  A smaller reported length invalidates the carried
    checksum; a larger one would expose stale packet-pool bytes. */
+/*
+ * How long the packet is once the link header in front of the payload is
+ * counted.  Non-static and separate from the synthesis above it for the same
+ * reason ami_sana2_rx_resolve_length() is: it is the arithmetic that got this
+ * wrong, and the host tier can only pin arithmetic it can call.
+ *
+ * It deliberately does NOT take the slot.  Who wrote the header -- this file
+ * or the device answering ANXD_S2_RX_LINK_HDR -- cannot change how long the
+ * packet is, and making that impossible to express is the fix.
+ */
+ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload)
+{
+    /*
+     * NOT `payload + iface->rx_dst_off`, WHICH IS THE SAME TWO ANSWERS AND
+     * WAS TRIED.  rx_dst_off is derived from raw_mode by ami_sana2_open(), so
+     * reading it here would make this function's answer depend on whether
+     * that open has run -- and the whole reason this arithmetic lives in its
+     * own non-static function is that the host tier can call it directly, on
+     * an interface it builds itself.  It does, and three checks in
+     * test_sana2_rx_host.c caught it at once: a cooked frame silently lost
+     * its fourteen bytes.  Two instructions a frame is not worth a function
+     * that is only correct after an initialiser it does not name.
+     */
+    return iface->raw_mode ? payload : (payload + AMI_ETH_HEADER_SIZE);
+}
+
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length)
 {
     if (slot == NULL || length == NULL)
@@ -929,7 +1057,19 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
         return;
     }
 
-    if (!iface->raw_mode)
+    /*
+     * THE FOURTEEN BYTES USED TO TRAVEL A LONG WAY FOR WHAT THEY ARE.  The
+     * device lifted both addresses out of the frame into ios2_SrcAddr and
+     * ios2_DstAddr, and this rebuilt them into the packet and added the type:
+     * four six-byte moves and a word, per frame, for bytes the device was
+     * holding when it started.  ANXD_S2_RX_LINK_HDR asks it to write the
+     * header where the payload's fourteen leading bytes belong instead, and
+     * slot->hdr_written says it did.
+     *
+     * A driver that does not know the tag never sets it, so the synthesis
+     * below is still the answer for every other SANA-II device.
+     */
+    if (!iface->raw_mode && !slot->hdr_written)
     {
         eth = packet->nx_packet_prepend_ptr;
 
@@ -960,9 +1100,26 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 
         eth[12] = (UCHAR)(slot->req.ios2_PacketType >> 8);
         eth[13] = (UCHAR)(slot->req.ios2_PacketType);
-
-        length += AMI_ETH_HEADER_SIZE;
     }
+
+    /*
+     * OUTSIDE THE SYNTHESIS, AND 1bbb3803 LEFT IT INSIDE.  The fourteen bytes
+     * are in front of the payload in cooked mode whether this function wrote
+     * them or the device did; the length is a fact about the PACKET, not about
+     * who filled it in.  Narrowing the guard to `&& !slot->hdr_written` took
+     * the addition with it, so a device that answers ANXD_S2_RX_LINK_HDR
+     * delivered every frame FOURTEEN BYTES SHORT: ami_sana2_rx_deliver() reads
+     * the type at prepend_ptr[12], then advances prepend_ptr by fourteen and
+     * subtracts fourteen from a length that never had them.
+     *
+     * NOT REACHED ON THE RIG, WHICH IS WHY IT SURVIVED THE DAY.  hdr_written
+     * is set only from ami_sana2_rx_filled(), which is the DIRECT path, and
+     * the a2065 does not use it -- lance.c hands up a whole frame out of board
+     * SRAM and never claims (lance.c:296).  dp8390 and el3 do claim
+     * (dp8390.c:366, el3.c:693), so this was every frame on an ne2000, an
+     * X-Surf or an Ariadne II.
+     */
+    length = ami_sana2_rx_frame_length(iface, length);
 
     packet->nx_packet_length     = length;
     packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + length;
@@ -1146,7 +1303,15 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
         /* The reply message is the slot: ios2_Req.io_Message is its first
            member's first member. */
         AmiRxSlot *slot = (AmiRxSlot *)msg;
-        LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
+        /*
+         * THE BYTE IS TESTED, THE SIGN EXTENSION IS NOT ON THIS PATH.  It was
+         * `LONG err = (LONG)(BYTE)...` before the branch, and the drain loop
+         * then ran `move.b d6,d1; extb.l d1` on EVERY frame for a value only
+         * the error arms read -- the branch below tests the byte either way.
+         * The widening still happens where io_Error is compared against the
+         * negative Exec codes, which is what it is for.
+         */
+        UBYTE      raw  = slot->req.ios2_Req.io_Error;
 
         ami_sana2_rx_mark(rx, slot, FALSE);
         took++;
@@ -1154,15 +1319,15 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
         if (rx->stop)
             continue;
 
-        if (err == 0)
+        if (raw == 0)
         {
             ami_sana2_rx_complete(rx, slot);
         }
-        else if (err == (LONG)IOERR_ABORTED)
+        else if ((LONG)(BYTE)raw == (LONG)IOERR_ABORTED)
         {
             /* Asked for here, so nothing to count. */
         }
-        else if (err == (LONG)S2ERR_OUTOFSERVICE)
+        else if ((LONG)(BYTE)raw == (LONG)S2ERR_OUTOFSERVICE)
         {
             /*
              * NetX Duo learns link state only from NX_LINK_ENABLE/DISABLE, so
@@ -1414,6 +1579,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         rx->slot[i].req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
         rx->slot[i].req.ios2_Req.io_Message.mn_Length =
             (UWORD)sizeof(struct IOSana2Req);
+        /* Invariants of the slot, so that the re-arm on the hot path does not
+           write them once a frame.  ami_sana2_rx_post_slot() names them. */
+        rx->slot[i].req.ios2_Req.io_Command = CMD_READ;
+        rx->slot[i].req.ios2_Data           = &rx->slot[i];
     }
 
     ami_sana2_rx_mark_reset(rx);

@@ -16,6 +16,8 @@
 
 #include <dos/dostags.h>
 
+#ifdef AMINETXDUO_ADDRALLOC
+
 /*
  * The cookie. Arbitrary, and unlikely in a hand-filled message: a caller that
  * memsets its message to zero, which the autodoc tells it to do, leaves
@@ -785,3 +787,55 @@ VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *aam __as
 
     Permit();
 }
+
+#else /* !AMINETXDUO_ADDRALLOC */
+
+/*
+ * No message can be created, so none can be outstanding, so none of the three
+ * calls that operate on one can be reached with a message this library made.
+ */
+LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
+                                 register LONG protocol __asm("d1"),
+                                 register STRPTR interface_name __asm("a0"),
+                                 register struct AddressAllocationMessage **result_ptr __asm("a1"),
+                                 register struct TagItem *tags __asm("a2"),
+                                 register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)version; (VOID)protocol; (VOID)interface_name; (VOID)tags;
+
+    if (result_ptr != NULL)
+        *result_ptr = NULL;
+
+    return bsd_fail(SocketBase, AMI_ENOSYS);
+}
+
+VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __asm("a0"),
+                                register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* "Passing a NULL pointer in place of a valid message address is
+       harmless", and NULL is the only thing Create could have handed out. */
+    (VOID)aam;
+    (VOID)SocketBase;
+}
+
+VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)aam;
+    (VOID)SocketBase;
+}
+
+VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)aam;
+    (VOID)SocketBase;
+}
+
+/* library.c:1215 asks this before it expunges.  Nothing can be in flight. */
+BOOL bsd_aam_busy(VOID)
+{
+    return FALSE;
+}
+
+#endif /* AMINETXDUO_ADDRALLOC */

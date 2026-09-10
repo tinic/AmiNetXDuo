@@ -621,7 +621,12 @@ static UWORD  arrival_n;
 static ULONG  arrival_prev;
 static BOOL   arrival_have_prev;
 static ULONG  arrival_bits;             /* credited from this source so far */
+static ULONG  arrival_batches;          /* how many have been mixed at all  */
+static ULONG  arrival_barren;           /* consecutive batches crediting zero */
 static BOOL   arrival_done;             /* the gate on the receive path     */
+
+/* The bound and its reasoning live in <aminetxduo/random.h>, beside the
+   predicate the host tier asserts against. */
 
 static VOID arrival_flush(const UBYTE *batch)
 {
@@ -643,20 +648,27 @@ static VOID arrival_flush(const UBYTE *batch)
         varying = AMI_RANDOM_ARRIVAL_MAX_BITS - arrival_bits;
 
     arrival_bits += varying;
+    arrival_batches++;
+    if (varying == 0UL)
+        arrival_barren++;
+    else
+        arrival_barren = 0UL;
 
     pool_mix(batch, (ULONG)ARRIVAL_BATCH, varying);
 
     AMI_DEBUG("random: arrival batch varied %lu of %lu bit(s), %lu credited",
               (LONG)varying, (LONG)ARRIVAL_BITS_KEPT, (LONG)arrival_bits);
 
-    if (arrival_bits >= AMI_RANDOM_ARRIVAL_MAX_BITS ||
-        pool_bits >= AMI_RANDOM_MIN_BITS)
+    if (ami_random_arrival_stop(arrival_bits, arrival_batches, pool_bits,
+                                arrival_barren))
     {
         arrival_done = TRUE;
 
         /* INFO rather than DEBUG: it fires exactly once per machine. */
-        AMI_INFO("random: arrivals credited %lu bits, pool %lu, seeded=%s",
-                 (LONG)arrival_bits, (LONG)pool_bits,
+        AMI_INFO("random: arrivals credited %lu bits in %lu batches "
+                 "(%lu barren), pool %lu, seeded=%s",
+                 (LONG)arrival_bits, (LONG)arrival_batches,
+                 (LONG)arrival_barren, (LONG)pool_bits,
                  (LONG)(ami_random_is_seeded() ? "TRUE" : "FALSE"));
     }
 }

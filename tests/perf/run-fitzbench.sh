@@ -43,8 +43,9 @@ BOARD=a2065
 LOSSCAP=0
 MAXLOSS=""
 MAXEFF=""
+MINWRITE=""
 
-while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
+while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:W:" opt; do
     case "$opt" in
         H) PEER="$OPTARG" ;;
         A) PEER_ADDR="$OPTARG" ;;
@@ -68,6 +69,23 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
         w) LOSSCAP=1 ;;
         l) LOSSCAP=1; MAXLOSS="$OPTARG" ;;
         L) LOSSCAP=1; MAXEFF="$OPTARG" ;;
+        # -W <kbs>|auto: fail if fitz_write comes back below it.
+        # `auto` takes the floor from tests/perf/rate-baseline.txt at the
+        # rate gate's 12 per cent.
+        #
+        # THE ONE FIGURE THIS HARNESS PRODUCES THAT A GATE CAN USE.  Twelve
+        # sittings on 2026-09-07 put fitz_write's per-arm spread at 0.68 and
+        # 1.18 per cent while fitz_read's was 9.5 and 12.7 -- read gave -0.3,
+        # -5.6 and +13.5 per cent on the SAME two builds in three consecutive
+        # passes.  So there is no -R twin of this option and there should not
+        # be: a floor on a figure that swings ten per cent is a red run
+        # waiting to happen.
+        #
+        # fitz_write is also what the application feels.  The argument-checking
+        # flip measured +3.87 per cent on iperf transmit and +6.0 here, six
+        # sittings an arm with the two sets disjoint, so a transmit regression
+        # shows up LARGER on this than on the rate gate.
+        W) MINWRITE="$OPTARG" ;;
         *) echo "usage: $0 [-H user@host] [-A addr] [-m model] [-c cpu]" \
                 "[-b build] [-k KB] [-C chunk] [-r reps] [-T tag] [-t secs]" \
                 "[-p port] [-s] [-x] [-R roadshowdir] [-a] [-B iface]" \
@@ -430,6 +448,61 @@ FIGURES=$(awk '
 echo "==> results ($MODEL${CPU:+/$CPU}, $KB KB, chunk $CHUNK, $REPS reps)"
 grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /'
 printf '%s\n' "$FIGURES"
+
+# THE TWO FITZ FIGURES ARE NOT WORTH THE SAME AND THE OUTPUT USED TO IMPLY
+# THEY WERE.  Twelve sittings on 2026-09-07 -- two builds, six sittings each,
+# three orders -- gave:
+#
+#     fitz_write   arm A spread 0.68%,  arm B 1.18%,  the two sets DISJOINT
+#     fitz_read    arm A spread 9.5%,   arm B 12.7%,  per-pass deltas
+#                  -0.3%, -5.6% and +13.5% on the SAME pair of builds
+#
+# So write resolves a six per cent difference with twelve samples and no
+# overlap, and read cannot resolve anything: its own noise is several times
+# any effect this campaign has produced.  A read pair that looks like a
+# regression is one sitting of a metric that swings nineteen points between
+# sittings -- I chased exactly that for half an hour before the third pass
+# came back the other way.
+echo "    NOTE fitz_write resolves ~1%; fitz_read swings ~10% between sittings"
+echo "         (12 sittings, 2026-09-07).  Do not read a fitz_read delta of"
+echo "         less than about 15% as a result, in either direction."
+
+if [ "$MINWRITE" = auto ]; then
+    # THE FLOOR LIVES IN ONE PLACE OR IT ROTS.  A number typed into whatever
+    # shell invocation happens to run this is a number nobody updates when the
+    # tree moves, and tests/perf/rate-baseline.txt is already where this tree
+    # keeps the rates a gate compares against.
+    #
+    # The rate gate's 12 per cent, for the reason stage_rate gives: a floor is
+    # there to catch a regression that gives back a campaign, not to police
+    # noise.  fitz_write moves 0.36 per cent between sittings, so 12 is thirty
+    # times the spread -- and the +6.0 the argument-checking flip earned would
+    # still be caught many times over if it were given back.
+    base=$(sed -n 's/^fitz-write  *//p' "$ROOT/tests/perf/rate-baseline.txt" \
+           | head -1)
+    if [ -z "$base" ]; then
+        echo "fitz_write=FAIL reason=no_baseline file=tests/perf/rate-baseline.txt" >&2
+        exit 1
+    fi
+    MINWRITE=$(( base * 88 / 100 ))
+    echo "    floor from rate-baseline.txt: fitz-write $base, 12% -> $MINWRITE"
+fi
+
+if [ -n "$MINWRITE" ]; then
+    got=$(printf '%s\n' "$FIGURES" | sed -n 's/^fitz_write_kbs=//p' | head -1)
+    if [ -z "$got" ]; then
+        echo "fitz_write=FAIL reason=no_figure floor=$MINWRITE" >&2
+        exit 1
+    elif [ "$got" -lt "$MINWRITE" ]; then
+        echo "fitz_write=FAIL kbs=$got floor=$MINWRITE" >&2
+        echo "  The application write path is below the floor.  iperf's rate" >&2
+        echo "  gate can miss this: the same change measured +3.87 per cent" >&2
+        echo "  there and +6.0 here." >&2
+        exit 1
+    else
+        echo "fitz_write=PASS kbs=$got floor=$MINWRITE"
+    fi
+fi
 
 echo
 awk -v kb="$KB" -v reps="$REPS" -v board="$BOARD" '

@@ -736,6 +736,9 @@ typedef struct NetStatusRxBudget
        nrb_Push: src/sana2/sana2_tx.c says exactly what each spans. */
     NetStatusBudgetLeg  nrb_Reap;       /* TX completion reap walk           */
     NetStatusBudgetLeg  nrb_Stuff;      /* slot claim + framing, to BeginIO  */
+    NetStatusBudgetLeg  nrb_Repost;     /* rx re-arm: allocate, arm, BeginIO */
+    NetStatusBudgetLeg  nrb_Verify;     /* n68k_rx_verify_sum(), ours        */
+    NetStatusBudgetLeg  nrb_Probe;      /* two clock reads, nothing between  */
     NetStatusBudgetLeg  nrb_Post;       /* BeginIO enter -> return (the copy
                                            hook and FIFO stuffing run inside) */
     /* The direct-completion fork (AMINETXDUO_RX_DIRECT_COMPLETE): recv()
@@ -747,6 +750,7 @@ typedef struct NetStatusRxBudget
        nrb_HoldThreshold (E-Clock ticks, ~50 ms) are counted, maxed and
        ringed with the holder's identity. */
     ULONG               nrb_HoldTotal;
+    ULONG               nrb_HoldTicks;  /* summed hold duration, E-Clock     */
     ULONG               nrb_HoldSlow;
     ULONG               nrb_HoldMax;    /* E-Clock ticks                     */
     ULONG               nrb_HoldThreshold;

@@ -191,7 +191,12 @@ IMPLEMENTED = {
     "bpf_set_notify_mask", "bpf_set_interrupt_mask",
     "bpf_ioctl", "bpf_data_waiting",
     # errno / tags
-    "Errno", "SetErrnoPtr", "SocketBaseTagList", "vsyslog",
+    "Errno", "SetErrnoPtr", "SocketBaseTagList",
+    # syslog. The library was
+    # storing SBTC_LOGTAGPTR, SBTC_LOGSTAT and SBTC_LOGFACILITY and throwing
+    # every call that used them away; an Aminet survey found telnetd calling
+    # this 4 times, lpd 8 and AmiFTPd 28 or more, into nothing.
+    "vsyslog",
     # address conversion
     "inet_addr", "inet_aton", "inet_network", "inet_ntop", "inet_pton",
     "Inet_NtoA", "Inet_LnaOf", "Inet_NetOf", "Inet_MakeAddr",

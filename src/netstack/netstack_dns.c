@@ -90,6 +90,28 @@ static BOOL ami_ns_domain_same(const char *a, const char *b)
  * on a later pass; the buffer and the option size do not change within a
  * lease, so NX_DHCP_DEST_TO_SMALL is a refusal and not a retry.
  */
+/*
+ * Every lease read below goes through this.  With AMINETXDUO_DHCP off there is
+ * no client to ask and no lease to ask about, so it reports the option absent
+ * and each reader takes the "this lease carries no such option" path it
+ * already has.
+ */
+#ifdef AMINETXDUO_DHCP
+#define AMI_NS_DHCP_OPTION(ns, iface, opt, raw, size)                         \
+    nx_dhcp_interface_user_option_retrieve(&(ns)->ns_Dhcp, (UINT)(iface),     \
+                                           (opt), (raw), (size))
+#else
+static UINT ami_ns_dhcp_absent(UINT *size)
+{
+    *size = 0U;
+    return NX_DHCP_PARSE_ERROR;     /* reads as AMI_NS_DNS_OPTION_ABSENT */
+}
+
+#define AMI_NS_DHCP_OPTION(ns, iface, opt, raw, size)                         \
+    ((VOID)(ns), (VOID)(iface), (VOID)(opt), (VOID)(raw),                     \
+     ami_ns_dhcp_absent((size)))
+#endif
+
 static AmiNsDnsOptionRead ami_ns_dhcp_option_read(UINT status)
 {
     if (status == NX_SUCCESS)
@@ -116,8 +138,8 @@ static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
     UINT               i;
 
     out[0] = '\0';
-    read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
-        &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_DOMAIN, raw, &size));
+    read = ami_ns_dhcp_option_read(AMI_NS_DHCP_OPTION(
+        ns, iface, AMI_DHCP_OPTION_DOMAIN, raw, &size));
 
     if (read == AMI_NS_DNS_OPTION_REFUSED)
         return TRUE;            /* longer than a name we would use */
@@ -153,8 +175,8 @@ static BOOL ami_ns_dhcp_hostname_option(AmiNetStack *ns, UWORD iface,
     AmiNsDnsOptionRead read;
 
     out[0] = '\0';
-    read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
-        &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_HOST_NAME, raw, &size));
+    read = ami_ns_dhcp_option_read(AMI_NS_DHCP_OPTION(
+        ns, iface, NX_DHCP_OPTION_HOST_NAME, raw, &size));
     if (read == AMI_NS_DNS_OPTION_REFUSED)
         return TRUE;            /* too long for a host name is no offer */
     if (!ami_ns_dns_option_usable(read))
@@ -401,6 +423,7 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
      * Snapshot both option families under one client lock, so a renewal cannot
      * splice the servers from one Reply to the domains from another.
      */
+#ifdef AMINETXDUO_DHCP
     if (options_valid)
     {
         if (tx_mutex_get(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex,
@@ -458,6 +481,10 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
                      (long)option_status);
         }
     }
+#else
+    (VOID)options_valid;
+    (VOID)option_status;
+#endif
 
     /* Out: a later valid Reply may shorten the list or omit the option. A
        server still owned by RDNSS remains in both resolver views. */
@@ -1002,8 +1029,8 @@ static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface,
     {
         /* raw[] is 256 and an option's length is one octet, so option 119
            cannot answer AMI_NS_DNS_OPTION_REFUSED here. */
-        read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
-            &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_SEARCH, raw, &size));
+        read = ami_ns_dhcp_option_read(AMI_NS_DHCP_OPTION(
+            ns, iface, AMI_DHCP_OPTION_SEARCH, raw, &size));
         if (!ami_ns_dns_option_usable(read))
             return (BOOL)(!ami_ns_dns_option_retry(read));
         if (read == AMI_NS_DNS_OPTION_READ)
@@ -1150,9 +1177,8 @@ static BOOL ami_ns_dhcp_reconcile_with(AmiNetStack *ns, UWORD iface,
 
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
-        read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
-            &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
-            (UCHAR *)raw, &size));
+        read = ami_ns_dhcp_option_read(AMI_NS_DHCP_OPTION(
+            ns, iface, NX_DHCP_OPTION_DNS_SVR, (UCHAR *)raw, &size));
 
         /*
          * raw[] holds NX_DNS_MAX_SERVERS addresses, so a server offering more is

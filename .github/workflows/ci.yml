@@ -73,7 +73,8 @@ jobs:
       matrix:
         config: [nolto, noipv6, nomdns, notls, nomcast, noasm, nonet68kasm,
                  norxverify, nosack, ts, nxcounters, nowscale, log, census, minimal, if2,
-                 instr, tcpextra, pathswap, green]
+                 instr, noinline, symbols, tcpextra, pathswap, green, micro,
+                 microcompat]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -314,4 +315,8 @@ jobs:
             tools/emu-board.sh \
             tools/sana2-stage.sh \
             install/test/run-workbench.sh \
+            tools/aminet-batch.sh \
+            tools/check-generated.sh \
+            tools/check-lvo-matrix.sh \
+            tools/check-option-stubs.sh \
             install/test/run-workbench-cards.sh

@@ -111,6 +111,26 @@ CROSS_CONFIGS=(
     # arm above it moves it; that is how it was found, by CI going red for a
     # row that had been right when it was written.
     "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
+    # Below `minimal` on purpose: the row above is cited by line number.
+    #
+    # The floor under the floor.  It is the minimal drawer plus the DHCP
+    # client and the seven options minimal leaves on.  A machine built this way
+    # is given a static address, and it RESOLVES NAMES.
+    #
+    # WHAT IT TURNS OFF IS WHAT THE CORPUS DOES NOT CALL, 2026-09-09.  Every
+    # option here is checked against docs/aminet-survey/lvo-usage.tsv, 833
+    # attributed binaries:
+    #
+    #   off, 0 callers   ROUTING (5 vectors), ADDRALLOC (4), NETMONITOR (2),
+    #                    NETSTATUS, ADDRINFO, BPF, the mbuf and ipf blocks
+    #   ON, measured     DNS         gethostbyname 607, gethostbyaddr 177
+    #                    HANDOFF     ObtainSocket 173, Dup2Socket 83
+    #                    RAWSOCKET   48 binaries, invisible to any LVO count
+    #
+    # The three ON rows were off until this change; `microcompat` existed to
+    # carry two of them and is now the same arm, so it is gone.  It does not
+    # ship a drawer yet, so tools/check-shipping-config.sh does not look at it.
+    "micro:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=1 -DAMINETXDUO_TCP_SYNCACHE=32 -DAMINETXDUO_NX_ERROR_CHECKING=OFF -DAMINETXDUO_NETSTATUS=OFF -DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF -DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_NETMONITOR=OFF -DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF -DAMINETXDUO_DHCP=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF -DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_NETADMIN=OFF"
     # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
     # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled
     # for as long as it took someone to type it by hand.  Grouped rather than
@@ -122,7 +142,17 @@ CROSS_CONFIGS=(
     # sampling profiler.  None changes a struct a shipped image lays out, so
     # one build compiles them all and a break in any is a break in this arm.
     # The serial log is not among them any more: it is in every build.
-    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON"
+    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON"
+    # The profiler's attribution aid, on its own arm.  It CANNOT ride `instr`:
+    # -fno-inline-functions-called-once is the whole point of it, and `instr`
+    # is the arm check-hot-calls.sh reads to assert that the per-frame receive
+    # helpers are still INLINED.  Putting both on one arm made that gate fail
+    # on _ami_bpf_tap_rx the first time it ran, which is the gate working.
+    "noinline:-DAMINETXDUO_PROFILER=ON -DAMINETXDUO_PROFILER_NOINLINE=ON -DAMINETXDUO_LTO=OFF"
+    # Shipping options plus a symbol table, and nothing else.  This is the arm
+    # check-hot-calls.sh reads: the claim it makes is about the image users
+    # get, so it cannot be answered by an instrumented build.
+    "symbols:-DAMINETXDUO_KEEP_SYMBOLS=ON"
     # One RTO estimator in three options: early retransmit and the tail loss
     # probe both read what TCP_RTT measures, so RTT=OFF with either of the
     # other two ON is not a configuration to defend.  All three off together
@@ -184,6 +214,7 @@ host_test_targets() { # builddir
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
 # 116, plus netdev_ne2000, pool_window, netdev_beginio and perf_stallgaps.
+# 123 with perf_prof_report.
 # Two branches raised this against the same base on the same day; the merge
 # is the SUM of what each added, not the larger of the two numbers.
 # 121, plus netdev_lance_csr.
@@ -195,7 +226,7 @@ host_test_targets() { # builddir
 # 132, plus netdev_diag.
 # 133, plus netdev_unit.
 # 134, plus ami_random.
-HOST_TESTS_EXPECTED=136
+HOST_TESTS_EXPECTED=138
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -364,6 +395,19 @@ stage_host() {
     else
         cat "$BUILD/netdev-delays.log"
         fail "a delay in src/netdev counts bus reads instead of measuring time"
+        return 1
+    fi
+
+    # The receive re-arm's hoisted request fields are still hoistable: nothing
+    # in src/netdev writes them during the round trip, and post_slot still
+    # restores the ones Exec and the device do write.  Source only, and the
+    # host tier cannot see it -- its BeginIO() is a no-op stub, so it never
+    # writes anything back for the next re-arm to find.
+    if tools/check-rearm-invariants.sh > "$BUILD/rearm-invariants.log" 2>&1; then
+        note "rearm invariants: ok"
+    else
+        cat "$BUILD/rearm-invariants.log"
+        fail "the receive re-arm hoisted a request field the device now writes"
         return 1
     fi
 
@@ -705,6 +749,32 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # Which vectors each profile answers with a stub.  Generated from the
+    # vector table, the #ifdef in the file that defines each one, and the arm
+    # lines below; a stale table is a diff rather than a surprise.
+    if tools/check-lvo-matrix.sh > "$BUILD/lvo-matrix.log" 2>&1; then
+        note "lvo matrix: $(sed -n 's/^lvo_matrix_rows=/rows /p' \
+              "$BUILD/lvo-matrix.log")"
+    else
+        cat "$BUILD/lvo-matrix.log"
+        fail "tests/profiles/lvo-matrix.tsv is stale\
+ (tools/check-lvo-matrix.sh --write)"
+        return 1
+    fi
+
+    # An option's OFF side must define every function its ON side does.  The
+    # link only notices on the arm that turns the option off, which is the arm
+    # nobody builds locally; raw.c cost three of them in one sitting.
+    if tools/check-option-stubs.sh > "$BUILD/option-stubs.log" 2>&1; then
+        note "option stubs: $(sed -n 's/^option_stubs_files=/files /p' \
+              "$BUILD/option-stubs.log") checked"
+    else
+        cat "$BUILD/option-stubs.log"
+        fail "an option's off side is missing a stub its on side defines\
+ (tools/check-option-stubs.sh)"
+        return 1
+    fi
+
     local st log
     for st in tests/*/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue
@@ -1016,8 +1086,41 @@ stage_cross() {
         if cmake --build "$BUILD/$name" --parallel "$JOBS" > "$BUILD/$name-build.log" 2>&1; then
             note "built clean"
 
+            # No per-frame receive function has grown.  Removing the verify
+            # whole measures +3.40%, so an instruction on this path is
+            # ~0.029% of receive and a twenty-instruction regression is ~0.6%
+            # -- BELOW what the rig resolves at twenty boots an arm.  Counting
+            # is the only instrument with the resolution for it.  One arm
+            # answers, so the numbers are comparable run to run.
+            if [ "$name" = default ]; then
+                if tools/check-hotpath-budget.sh "$BUILD/$name" \
+                        > "$BUILD/$name-hotpath-budget.log" 2>&1; then
+                    note "$(sed -n 's/^hotpath_budget=PASS /hot path: /p' \
+                          "$BUILD/$name-hotpath-budget.log" | head -1)"
+                elif grep -q 'hotpath_budget=skipped' \
+                        "$BUILD/$name-hotpath-budget.log"; then
+                    : # no compile_commands.json in this arm
+                else
+                    cat "$BUILD/$name-hotpath-budget.log"
+                    fail "a per-frame receive function grew past its instruction ceiling"
+                fi
+            fi
+
             # And that no runtime helper became a call to itself.  It links,
             # exports the right symbol, and eats the stack; see the script.
+            # And that the per-frame receive helpers are still inlined.  Only
+            # the arm that keeps its symbols can answer; every other one skips.
+            if tools/check-hot-calls.sh "$BUILD/$name" \
+                    > "$BUILD/$name-hot-calls.log" 2>&1; then
+                note "$(sed -n 's/^hot_calls=PASS /hot receive calls: /p' \
+                      "$BUILD/$name-hot-calls.log" | head -1)"
+            elif grep -q 'hot_calls=skipped' "$BUILD/$name-hot-calls.log"; then
+                : # stripped or no toolchain: the instr arm is the one that answers
+            else
+                cat "$BUILD/$name-hot-calls.log"
+                fail "a per-frame receive helper is no longer inlined ($name)"
+            fi
+
             if tools/check-rt-recursion.sh "$BUILD/$name" \
                     > "$BUILD/$name-rt-recursion.log" 2>&1; then
                 note "$(sed -n 's/^rt_recursion=/runtime helpers: /p' \

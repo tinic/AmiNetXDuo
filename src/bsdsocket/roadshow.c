@@ -9,6 +9,13 @@
 
 #include <proto/exec.h>
 
+/*
+ * Six of the eight vectors here manage the resolver, so they are gated on the
+ * resolver itself rather than on an option of their own: with no DNS client
+ * there is nothing for AddDomainNameServer() to add to.  In_LocalAddr() and
+ * In_CanForward() below are routing helpers and are always built.
+ */
+
 BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
                               register LONG buffer_size __asm("d0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -128,6 +135,7 @@ struct List *bsd_ObtainDomainNameServerList(
  */
 
 /* AMI_NET_* to the errno the autodoc names for these two calls. */
+#ifdef AMINETXDUO_NETADMIN
 static LONG bsd_dns_result(struct AmiSocketBase *SocketBase, LONG result,
                            LONG missing)
 {
@@ -140,7 +148,9 @@ static LONG bsd_dns_result(struct AmiSocketBase *SocketBase, LONG result,
         default:                  return bsd_fail(SocketBase, AMI_EINVAL);
     }
 }
+#endif /* AMINETXDUO_NETADMIN */
 
+#ifdef AMINETXDUO_NETADMIN
 LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
                              register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -167,6 +177,18 @@ LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
     return bsd_fail(SocketBase, AMI_EINVAL);
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
+                            register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)address;
+    return bsd_fail(SocketBase, AMI_EINVAL);
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
+#ifdef AMINETXDUO_NETADMIN
 LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
                                 register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -192,11 +214,23 @@ LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
     return bsd_fail(SocketBase, AMI_EINVAL);
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
+                               register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)address;
+    return bsd_fail(SocketBase, AMI_EINVAL);
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
 /*
  * The VOID return is deliberate. clib/bsdsocket_protos.h:184 says
  *
  *     __stdargs VOID SetDefaultDomainName( STRPTR buffer );
  */
+#ifdef AMINETXDUO_NETADMIN
 VOID bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -209,6 +243,17 @@ VOID bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
     }
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+VOID bsd_SetDefaultDomainName(register STRPTR name __asm("a0"),
+                              register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    (VOID)name;
+    (VOID)bsd_fail(SocketBase, AMI_EINVAL);
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
 VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
                                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -219,10 +264,12 @@ VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
         ami_free(list);
 }
 
+
 /*
  * 4.4BSD in_localaddr(): non-zero if the address is on a network this host is
  * directly attached to. Roadshow keeps the same meaning. "Directly attached"
  */
+#ifdef AMINETXDUO_NETADMIN
 LONG bsd_In_LocalAddr(register in_addr_t address __asm("d0"),
                       register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -258,10 +305,25 @@ LONG bsd_In_LocalAddr(register in_addr_t address __asm("d0"),
     return 0;
 }
 
+#else /* !AMINETXDUO_NETADMIN */
+
+LONG bsd_In_LocalAddr(register in_addr_t address __asm("d0"),
+                      register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* 0 is "not one of ours", which is what the built version answers for
+       an address on no configured interface. */
+    (VOID)address;
+    (VOID)SocketBase;
+    return 0;
+}
+
+#endif /* AMINETXDUO_NETADMIN */
+
 /*
  * 4.4BSD in_canforward(): an address can be forwarded unless it is loopback,
  * multicast/class D, class E, or has a zero network part.
  */
+#ifdef AMINETXDUO_NETADMIN
 LONG bsd_In_CanForward(register in_addr_t address __asm("d0"),
                        register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -281,3 +343,16 @@ LONG bsd_In_CanForward(register in_addr_t address __asm("d0"),
 
     return 1;
 }
+
+#else /* !AMINETXDUO_NETADMIN */
+
+LONG bsd_In_CanForward(register in_addr_t address __asm("d0"),
+                       register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    /* 0 is the built version's answer for anything it will not forward. */
+    (VOID)address;
+    (VOID)SocketBase;
+    return 0;
+}
+
+#endif /* AMINETXDUO_NETADMIN */

@@ -296,12 +296,37 @@ else
 fi
 
 PEER_PIDS=()
+#
+# KILLING THE SSH CLIENT DOES NOT KILL THE PEER, and six of them per run were
+# outliving it.  `ps` on the peer 130 seconds after a finished run:
+#
+#     timeout 390 python3 /tmp/iperfpeer-iperf.py serve tcp --port 24541 ...
+#     timeout 390 python3 /tmp/iperfpeer-iperf.py serve udp --port 24542 ...
+#     timeout 390 python3 /tmp/iperfpeer-iperf.py serve tcp --port 24543 ...
+#
+# each with its `timeout` wrapper, still holding the ports this harness will
+# want again.  The startup pkill at the top of this file is what has been
+# papering over it -- a leftover only ever died because the NEXT run killed it,
+# which is the same shape as the stale-emulator rule in RIG HYGIENE, one
+# machine over.
+#
+# So the stop reaches the far end too, with the pattern the startup already
+# uses.  This is not the fix for the empty peer .out files -- that is a
+# separate defect, see below -- it is the leak underneath it.
+#
 stop_peers() {
     local p
     for p in "${PEER_PIDS[@]:-}"; do
         [ -n "$p" ] && kill "$p" 2>/dev/null || true
     done
+
+    [ -z "${PEERHOST:-}" ] ||
+        ssh -o BatchMode=yes "$PEERHOST" \
+            "pkill -f '[i]perfpeer-$AMINETXDUO_RUN_TAG' 2>/dev/null; exit 0" \
+            > /dev/null 2>&1 || true
 }
+
+
 trap stop_peers EXIT INT TERM HUP
 
 # Each extra receive transfer is another SRV_WINDOW the guest spends listening,
@@ -331,7 +356,6 @@ start_sender() { # logname proto port [wanted] [after-pid]
         # peer_val_n() reads.
         got=0
         deadline=$(( $(date +%s) + PEER_LIFE ))
-
         # WAIT FOR THE SENDER THIS ONE FOLLOWS.  The guest listens in the
         # order its commands.txt lists, TCP server before UDP server, so a
         # UDP sender started at t=0 spends the whole TCP half of the run
@@ -341,7 +365,6 @@ start_sender() { # logname proto port [wanted] [after-pid]
               [ "$(date +%s)" -lt "$deadline" ]; do
             sleep 1
         done
-
         while [ "$got" -lt "$wanted" ] && [ "$(date +%s)" -lt "$deadline" ]; do
             if out=$(peer_cmd send "$proto" "$ADDRESS" --port "$port" \
                         --seconds "$SECS" --kbit "$kbit" \
@@ -405,6 +428,28 @@ done
 echo "==> peers up on $PORT_TCP $PORT_UDP $PORT_SIZE, nothing on $PORT_DEAD"
 
 # --------------------------------------------------------------------- run ---
+
+#
+# THE PREVIOUS RUN'S TRANSCRIPT IS NOT THIS RUN'S RESULT.
+#
+# $REPORT is build/amiberry-testhd-$TAG/tools.txt, written by the guest into a
+# hard-drive directory that PERSISTS between runs.  When the boot fails the
+# check below is `if [ ! -f "$REPORT" ]` -- and the file is still there from
+# the last boot that worked, so the script sails past it and asserts against a
+# transcript from another build, another hour, another commit.
+#
+# THAT IS NOT A HYPOTHETICAL.  An A/B of 36 rounds returned bit-identical rates
+# in every round of every pass -- 5,886,527 nine times, then nine more --
+# because amiberry answered "No boot ROM" in three and a half seconds each
+# time and all thirty-six rounds re-read one stale tools.txt.  Same byte count,
+# same millisecond count, same EPHEMERAL PORT (53352) in every "round", which
+# is the tell: a fresh connection cannot reuse one.
+#
+# It is the stale-emulator rule in RIG HYGIENE, one artefact along: a leftover
+# read as a measurement.  Delete it, and a failed boot then reports "the guest
+# wrote no $REPORT" the way it was always meant to.
+#
+rm -f "$REPORT"
 
 set +e
 if [ -n "$IFACE" ]; then
@@ -477,15 +522,41 @@ says() { # banner nth ere description
 }
 
 # One key out of the guest's key=value result line.
+#
+# A MISSING KEY IS AN ANSWER, NOT A REASON TO STOP, AND THIS FILE ALREADY KNEW
+# THAT -- IT JUST COULD NEVER SAY SO.
+#
+# Both helpers are used as `X=$(guest_val ...)`, and this script runs under
+# `set -euo pipefail`.  When grep matches nothing it exits 1, pipefail hands
+# that to the pipeline, the command substitution fails, and set -e kills the
+# run THERE -- before the very next lines, which are written to report exactly
+# this:
+#
+#     if [ -z "${G_BYTES:-}" ] || [ -z "${P_BYTES:-}" ]; then
+#         fail "no byte count to compare: guest '...' peer '...'"
+#
+# So every peer-side failure arrived as a bare `rc=1` with no verdict, no FAIL
+# line and no transcript -- the log simply stopped after the last `ok:`.  Found
+# with all five peer .out files zero bytes and srvudp.err holding two
+# TimeoutError tracebacks: the diagnosis was sitting in the file and unreachable
+# by four lines.
+#
+# tools/check-rate.sh discards a round whose harness returns non-zero, so this
+# also made THE ONLY GATE THAT MEASURES A BYTE PER SECOND unable to report why
+# it measured nothing.
+#
+# `|| true` binds to the whole pipeline, which is what is wanted: no match
+# means an empty string, and the caller decides.
+#
 guest_val() { # banner nth key
     block "$1" "$2" | grep -o "[[:space:]]$3=[^[:space:]]*" | tail -1 |
-        cut -d= -f2
+        cut -d= -f2 || true
 }
 
 # One key out of a peer's line.
 peer_val() { # logname key
     [ -f "$PEERLOG/$1.out" ] || return 0
-    grep -o "$2=[^[:space:]]*" "$PEERLOG/$1.out" | tail -1 | cut -d= -f2
+    grep -o "$2=[^[:space:]]*" "$PEERLOG/$1.out" | tail -1 | cut -d= -f2 || true
 }
 
 # The same, from the Nth of several sends.  peer_val() takes the LAST line,

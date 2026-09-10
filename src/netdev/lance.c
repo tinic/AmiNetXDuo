@@ -251,11 +251,43 @@ static VOID le_csr_put(NetdevNic *nic, UWORD csr, UWORD v)
     *le_rdp(nic) = le_swap(nic, v);
 }
 
+/*
+ * RDP ONLY, FOR A CALLER THAT HAS ALREADY POINTED THE RAP.
+ *
+ * THE RAP IS STATEFUL AND lance_intr() REWRITES IT WITH THE SAME VALUE THREE
+ * TIMES.  Every le_csr_get()/le_csr_put() above writes the RAP first, and the
+ * interrupt service touches nothing but CSR0 -- le_rint() and le_tint() reach
+ * the descriptors and the frame buffers through le_ram() + mem_off, which is
+ * SRAM and not the register window, and the two paths that DO move the RAP
+ * (lance_reset() from MERR, and le_tint() returning TRUE) both make
+ * lance_intr() return at once.
+ *
+ * A word through the register window is the expensive access on this board:
+ * NETDEV_TIME prices ops->tx, which is about twenty of them plus the stats, at
+ * 344 beam units under Disable() -- 85 us, so roughly 4 us each, against the
+ * 77.1 ns a BYTE that a bulk SRAM read costs.  Removing two of them from each
+ * interrupt is the same kind of saving as the RMD2 write dropped in le_rint()
+ * below: a bus cycle no inliner can take away, at no cost.
+ */
+static UWORD le_rdp_get(NetdevNic *nic)
+{
+    return le_swap(nic, *le_rdp(nic));
+}
+
+static VOID le_rdp_put(NetdevNic *nic, UWORD v)
+{
+    *le_rdp(nic) = le_swap(nic, v);
+}
+
 /* A RAP/RDP pair is stateful rather than memory.  The seams let the host test
    model its write-one-to-clear and INIT behaviour; they compile to the two
-   direct helpers above in the device. */
+   direct helpers above in the device.  The RDP seam is what encodes the
+   invariant: the host mock answers it as CSR0, which is a check that the
+   service really does touch nothing else. */
 #define LANCE_CSR_GET(nic, csr)       le_csr_get((nic), (csr))
 #define LANCE_CSR_PUT(nic, csr, val)  le_csr_put((nic), (csr), (val))
+#define LANCE_RDP_GET(nic)            le_rdp_get((nic))
+#define LANCE_RDP_PUT(nic, val)       le_rdp_put((nic), (val))
 #endif
 
 LONG lance_init(NetdevNic *nic);
@@ -647,6 +679,8 @@ BOOL lance_intr(NetdevNic *nic)
     if (!nic->running)
         return FALSE;
 
+    /* This one points the RAP at CSR0; everything below it in this function
+       goes straight to the RDP.  See the seam above. */
     csr0 = LANCE_CSR_GET(nic, LE_CSR0);
     if ((csr0 & LE_C0_INTR) == 0)
         return FALSE;
@@ -654,8 +688,8 @@ BOOL lance_intr(NetdevNic *nic)
     do
     {
         /* The bits written back are the acknowledge.  INEA is kept set. */
-        LANCE_CSR_PUT(
-            nic, LE_CSR0,
+        LANCE_RDP_PUT(
+            nic,
             (UWORD)((csr0 & (LE_C0_BABL | LE_C0_CERR | LE_C0_MISS |
                              LE_C0_MERR | LE_C0_RINT | LE_C0_TINT)) |
                     LE_C0_INEA));
@@ -677,7 +711,7 @@ BOOL lance_intr(NetdevNic *nic)
             return TRUE;
         }
 
-        csr0 = LANCE_CSR_GET(nic, LE_CSR0);
+        csr0 = LANCE_RDP_GET(nic);
     }
     while ((csr0 & LE_C0_INTR) != 0 && --rounds != 0);
 

@@ -1,0 +1,402 @@
+# Which Aminet archives the survey has actually examined.
+#
+# The ledger behind aminet-evidence.tsv's coverage figure, and the reason a
+# later tick does not re-survey the same archive.  tools/check-lvo-matrix.sh
+# COUNTS these rows rather than trusting a hand-typed percentage, because a
+# hand-typed one is stale the moment a batch reports.
+#
+# CORPUS	5372	comm/{tcp,net,www,irc,mail,news,misc,term,bbs,fido,ums,xeno,maxs,cnet,dlg}
+#
+# method:  attributed  SocketBase resolved from its OpenLibrary store; only
+#                      movea.l/jsr pairs counted.  The only method whose
+#                      verdicts may be quoted.
+#          rejected    examined and found to carry no bsdsocket call at all
+#          packed      a cruncher hides the code; not statically observable
+#
+# HOW THE COUNT ADDS UP, after it did not.  Every `# BULK n` row counts
+# archives that are NOT listed individually below it; listing an archive AND
+# counting it in a bulk row is what put the reported coverage at 103.1 per
+# cent of a corpus, which is impossible and was the tell.  The bulk numbers
+# were recomputed from the batch outputs with the individually-listed archives
+# removed: 5,155 bulk + 161 distinct listed = 5,316 of 5,372.
+#
+# Eleven archives appear on two lines -- screened once and attributed later,
+# after the a6-clobber fix -- so a line count reads 5,317.  Both rows are worth
+# keeping: the pair is the evidence for what that fix was worth.
+#
+# archive	method	result
+/comm/tcp/AmiTCP-demo-40.lha	attributed	28 of 62 binaries use bsdsocket; ObtainSocket in serv/ftpd, serv/in.fingerd, serv/netfs-server, l/netfs-handler, bin/inetd; gethostby* across ~14 clients
+/comm/tcp/AmiFTP.lha	attributed	AmiFTP 1.843, exactly 18 LVOs, SocketBase=a4+11100 hand-verified; minimal ok, micro degraded on gethostbyname
+/comm/tcp/ftpd2.lha	attributed	ObtainSocket(dm_ID,dm_Family,dm_Type,0) at 0x41bc then Dup2Socket(fd,0/1/2); AmiTCP NETLIB:autoinitd.o; ships C source
+/comm/tcp/AmFTP191.lha	attributed	dual-stack bsdsocket/AS225; real set 18 LVOs after splitting branches; micro degraded
+/comm/tcp/AvePING.lha	attributed	socket(AF_INET,SOCK_RAW,IPPROTO_ICMP) at 0x1772 and ObtainSocket at 0x35ea; micro BREAKS twice
+/comm/www/AWeb_APL34_full_020.lha	attributed	reaches TCP through its own 18-slot 4EF9 vtable; exactly 12 LVOs; minimal ok, micro degraded
+/util/libs/AmiSSL-v5-OS3.lha	attributed	OpenSSL port, 9 socket stubs incl WaitSelect and SocketBaseTagList; all ok in minimal and micro
+/comm/tcp/amtelnet.lha	packed	AmTelnet-II 2.4 main binary crunched, entropy 7.97, 84-byte decruncher stub; only vapor_* libraries readable
+/comm/irc/amirc.lha	packed	AmIRC 3.5 packed with a custom Vapor scheme, 230 KB payload inside HUNK_DEBUG; vapor_toolkit only probes bsdsocket
+/comm/net/Ping_1.6.lha	rejected	Commodore Envoy ping (envoy/nipc.h, nipc.library), not TCP/IP at all
+/comm/irc/AInfoBOT.lha	rejected	ARexx bot driving AmIRC's port; its two binaries make no bsdsocket call
+/comm/tcp/AIP.lha	rejected	no bsdsocket string in its single binary
+/comm/tcp/telnetd2_0.lha	attributed	9 LVOs; ObtainSocket via net.lib init_inet_daemon(); telnetd.c:234 and :250 show BOTH build variants need it; ships TnServ.c standalone listener
+/comm/tcp/lpd.lha	attributed	6 LVOs, no socket()/bind()/accept() at all; ObtainSocket + vsyslog x8; byte-identical startup to identd
+/comm/tcp/AveHTTPD.lha	attributed	13 LVOs after splitting the AS225 branch; stores both stack bases in one global
+/comm/tcp/IdentD1_2.lha	attributed	5 LVOs; ObtainSocket, no socket()/bind()
+/comm/tcp/nfsd_bin031014.lha	attributed	10 LVOs, validated against nfsd/src/main.c ground truth; no micro-gated call -- clean
+/comm/tcp/tftpserver.lha	rejected	no 68k binary shipped; the .exe is PowerPC ELF
+/comm/mail/iris.lha	attributed	irispop 10 LVOs, IrisSMTP 11; main binary only probes bsdsocket. micro DEGRADED on gethostbyname
+/comm/tcp/amiftpd19.lha	attributed	25 LVOs, the richest set found; ObtainSocket x4 with three on the per-connection path plus ReleaseSocket; micro BREAKS
+/comm/tcp/AmiTCP-popd.lha	attributed	8 LVOs; ObtainSocket then Dup2Socket, inetd mandatory per POPd.guide; micro BREAKS
+/comm/tcp/AmPOP3D.lha	rejected	ixemul-hosted; zero bsdsocket vectors visible though it IS an inetd daemon
+/comm/tcp/FTP4ALL226a.lha	rejected	ixemul.library v47 port; all socket work via ixemul LVOs
+/comm/www/GetURL-1.06.lha	rejected	ARexx script, no binary
+/comm/mail/MailDemon4_11.lha	rejected	no bsdsocket string in any binary
+/comm/www/HTTPResume.lha	attributed	10 LVOs, SocketBase a4+20560 via a SAS/C 4EF9 veneer table that must be FOLLOWED (opposite of AWeb's, which must not be); hands SocketBase to AmiSSL by tag, so that surface is invisible here
+/comm/irc/WookieChat2.11_OS3.lha	attributed	18 LVOs, newest 68k IRC client in the corpus; micro degraded on gethostbyname only
+/comm/irc/BlackIRC.lha	attributed	6 network binaries: main 10 LVOs, DCCSrv 10, DCCRcv 5, IdentD 9, AmVideoConf 9, AmVideoConfD 14; the four helpers are fully ok on every profile
+/comm/www/wget-1.11.4-amigaos.lha	rejected	ixemul-hosted; zero occurrences of the byte string bsdsocket
+/comm/www/httpget.lha	rejected	ixemul-hosted; same
+# Screening pass, 2026-09-07.  method=screened is NOT exhaustive: a hit counts,
+# an absence does not, and a CLEAN row may not cite these.
+/comm/mail/AmigaSmail3-29.lha	screened	binary smail_amitcp, 13 vectors incl ObtainSocket, Dup2Socket and vsyslog -- the inetd daemon signature; survived the a6-clobber fix
+/comm/mail/AEMail230.lha	screened	binary AEMAIL, 7 vectors after the a6-clobber fix; its AddRouteTagList was a phantom, see the METHOD row
+/comm/mail/AirMailPro.lha	screened	1 vector reported, same
+/comm/mail/SuperMailBox.lha	screened	2 vectors reported, same
+/comm/mail/AmiGmail.lha	screened	2 vectors reported
+/comm/mail/AmiMAIL.lha	screened	2 vectors reported
+/comm/misc/AminetFileRequester.lha	screened	3 vectors reported
+/comm/mail/EmailCheck.lha	screened	1 vector reported
+#
+# 300-archive pass, 2026-09-07, tools/aminet-batch.sh over the fixed scanner.
+# 274 carried no Amiga binary that opens bsdsocket -- comm/ is mostly documents,
+# ARexx and source.  Counted, not listed.
+# BULK	274	no bsdsocket binary in the archive
+# BULK	14	lost to download or extract failure, not examined
+/comm/bbs/ConnectLine.lha	screened	SIX daemons -- CLChatD, CLChatIRCD, clfingerd, cltcpmond and two more -- all calling ObtainSocket; a whole BBS daemon suite in the inetd family
+/comm/bbs/CL51-upd02.lha	unresolved	unresolved from the 300-archive pass
+/comm/bbs/CL51_Demo.lha	unresolved	unresolved from the 300-archive pass
+/comm/bbs/DC-X107i.lha	ixemul	ixemul/unresolved from the 300-archive pass
+/comm/bbs/D_wall.lha	packed	packed from the 300-archive pass
+/comm/bbs/DayDreamBBS.lha	screened	attributed from the 300-archive pass
+/comm/bbs/FCheck251.lha	packed	packed from the 300-archive pass
+/comm/bbs/G5_FTest.lha	ixemul	ixemul/packed from the 300-archive pass
+/comm/bbs/G5_Sys.lha	unresolved	unresolved from the 300-archive pass
+/comm/bbs/GMC-BBS-262.lha	packed	packed from the 300-archive pass
+/comm/bbs/Reccoon-Eval.lha	packed	packed from the 300-archive pass
+/comm/bbs/SKYLINEIIBBS2.lha	packed	packed from the 300-archive pass
+#
+# 400-archive pass, 2026-09-07, archives 361-760 of the worklist -- all of
+# comm/bbs.  368 of 400 carried no Amiga binary that opens bsdsocket, which is
+# 92% against the previous pass's 91%: the yield estimate holds on a second,
+# disjoint slice.  Every API these eighteen archives call is `ok` on default
+# AND on minimal.  Micro fails only ObtainSocket, and degrades gethostbyname
+# and gethostbyaddr to hosts-only; microcompat covers everything but the names.
+# BULK	368	no bsdsocket binary in the archive
+# BULK	14	lost to download or extract failure, not examined
+/comm/bbs/ddbbs130b4.lha	attributed	ftpd, 23 vectors -- the richest binary in the corpus; ObtainSocket, Dup2Socket, vsyslog, and the whole Inet_LnaOf/MakeAddr/NetOf/NtoA quartet
+/comm/bbs/clchat415.lha	attributed	CLChatD 6 and CLChatIRCD 8, both ObtainSocket+vsyslog; CLChatLink 10 is an ordinary client; SendChatBotFile calls gethostid alone
+/comm/bbs/Zeus_BBS_release_1.7.lha	attributed	ZNewsXfer 10, ZPOP3Xfer 7, ZSMTPXfer 5 -- three mail/news transports, no daemon vector between them
+/comm/bbs/zeus_upd_1_2.lha	attributed	the same two transports at 9 and 5, an older build of the above
+/comm/bbs/novia.lha	attributed	NOVIA, 6 vectors, 2530 raw jsr d16(a6) -- a large program with a small network surface
+/comm/bbs/zlogin.lha	rejected	opens bsdsocket and makes no attributed call; the string is in a message, not a code path
+/comm/bbs/hardchecker1_8.lha	ixemul	ixemul-hosted; the contract is inside ixemul.library
+/comm/bbs/CL51-upd02.lha	unresolved	SocketBase not provable from the OpenLibrary store
+/comm/bbs/rbt-tlnt.lha	unresolved	same
+/comm/bbs/sertrans20.lha	unresolved	same, three binaries
+/comm/bbs/G5_Sys.lha	unresolved	same
+/comm/bbs/TempDemo_v340.lha	packed	cruncher, four binaries
+/comm/bbs/TrinityBBS20.lha	packed	cruncher
+/comm/bbs/VNET-ALTER1_0b.lha	packed	cruncher
+/comm/bbs/bbs_200s.lha	packed	cruncher, four binaries
+/comm/bbs/dtr-d05.lha	packed	cruncher
+/comm/bbs/dtr-sw10.lha	packed	cruncher
+/comm/bbs/hsdisk1.lha	packed	cruncher
+/comm/bbs/madlertc.lha	packed	cruncher
+/comm/bbs/xlspiceprov16d.lha	packed	cruncher
+#
+# 400-archive pass, 2026-09-07, archives 761-1160 -- the rest of comm/bbs and
+# all of comm/cnet.  374 of 400 barren (93.5%), a third slice agreeing with the
+# first two.  ONE archive carries the whole yield: cnet4demo ships eight
+# attributed binaries including a traceroute and three inetd-family daemons.
+# BULK	374	no bsdsocket binary in the archive
+# BULK	21	lost to download or extract failure, not examined
+/comm/cnet/cnet4demo.lha	attributed	EIGHT binaries: ctelnet 16, traceroute 13, CNetIRC 9, cnsmtpd 8 (ReleaseSocket), cnfingerd 7 (ObtainSocket+Dup2Socket+vsyslog), nntpget 7, mail-task 7, identd 4 (ObtainSocket). First citations for getprotobyname, getservbyname, gethostname, SetErrnoPtr and inet_addr
+/comm/cnet/ZoolDIZII.lha	packed	cruncher
+/comm/cnet/cnmp_10b.lha	packed	cruncher
+/comm/cnet/scripts242e.lha	packed	cruncher
+/comm/cnet/xscripts.lha	ixemul	ixemul-hosted
+#
+# 400-archive pass, 2026-09-07, archives 1161-1560 -- the rest of comm/cnet,
+# all of comm/dlg, the start of comm/fido.  368 barren, and ONE attributed
+# binary in four hundred archives: the thinnest slice yet, and the reason the
+# yield row says the corpus will not keep producing.
+# BULK	368	no bsdsocket binary in the archive
+# BULK	27	lost to download or extract failure, not examined
+/comm/fido/AmiBinkd10_18.lha	attributed	AmiBinkD, 3 vectors -- Inet_NtoA, SocketBaseTagList, WaitSelect -- from 226 raw jsr d16(a6). A FidoNet mailer whose socket surface the scan cannot see past; the floor rule applies
+/comm/dlg/DLG_Disk1.lha	packed	cruncher
+/comm/dlg/food118.lha	packed	cruncher
+/comm/dlg/keirsey.lha	packed	cruncher
+/comm/dlg/upload1.lha	packed	cruncher
+#
+# 400-archive pass, 2026-09-07, archives 1561-1960 -- the rest of comm/fido and
+# all of comm/irc.  THE YIELD ROW NEEDED CORRECTING AFTER THIS ONE: 328 of 400
+# barren, 82 per cent against 91-93.5 on the four passes before it, and 16
+# attributed binaries against 1.  The barren fraction is a property of the
+# DRAWER, not of comm/ -- comm/irc is dense and comm/dlg is empty.
+#
+# AND THE IXEMUL SHARE IS THE OTHER HALF OF THE STORY: 34 of 400 archives here
+# are ixemul-hosted -- every IRC DAEMON in the corpus (UnrealIRCd, epic4,
+# eggdrop, bitlbee x4, BitchX, IRCServices, AmIRCD) -- and a vector scan sees
+# nothing in any of them.  The server side of comm/irc is invisible to this
+# method, not absent from it.
+#
+# 25 distinct vectors across the 16 attributed binaries and NOT ONE BREAKS
+# MICRO: no ObtainSocket, no ReleaseSocket, no SOCK_RAW anywhere.  Only
+# gethostbyname, gethostbyaddr and gethostname degrade to hosts-only.  The
+# first slice where micro itself is clean apart from names -- IRC clients are
+# pure client-side socket users.
+# BULK	328	no bsdsocket binary in the archive
+# BULK	30	lost to download or extract failure, not examined
+# BULK	4	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	14	ixemul-hosted, invisible to a vector scan
+# BULK	5	packed by a cruncher
+/comm/irc/ChatBox1_164.lha	attributed	ChatBox, 13 vectors including the whole Inet_ address quartet, from 1253 raw jsr d16(a6)
+/comm/irc/DwarfxNW.lha	attributed	MiniDrop, 14 vectors -- accept, bind, listen AND connect, so it is client and server at once
+/comm/irc/BlackIRC.lha	attributed	BlackIRCDCCRcv 3, BlackIRCDCCSrv 8, AmVideoConfD 13; re-confirmed against the earlier hand-verified pass
+/comm/irc/BlackIRC-FW.lha	attributed	the same three binaries in the firewall build, identical vector sets
+/comm/irc/CCTCPv66.lha	attributed	FTPGet, 11 vectors, getservbyname
+/comm/irc/KuangEleven25.lha	attributed	Kuang Eleven 2.5
+/comm/irc/KuangEleven29.lha	attributed	Kuang Eleven 2.9
+/comm/irc/amirc_362_68000.lha	attributed	AmIRC 3.62, 68000 build
+/comm/irc/apartee-0.8.1.lha	attributed	apartee
+/comm/irc/FloodHunter.lha	attributed	FloodHunter
+/comm/irc/Henry.lha	attributed	Henry
+/comm/irc/Ilona.lha	attributed	Ilona
+/comm/irc/RexxServ.lha	attributed	RexxServ
+/comm/irc/dns.lha	attributed	dns
+/comm/fido/crashedit_aos.lha	attributed	crashedit, 7 vectors, a FidoNet node-list editor that fetches over TCP
+/comm/fido/fidoblitz.lha	attributed	fidoblitz
+#
+# 400-archive pass, 2026-09-07, archives 1961-2360 -- the rest of comm/irc, all
+# of comm/mail, the start of comm/maxs.  342 barren (85.5%), 20 attributed, 39
+# ixemul.  comm/mail is the second dense drawer, and like comm/irc its daemons
+# are largely ixemul-hosted.
+#
+# THREE ARCHIVES RE-SCANNED HERE WERE ALREADY IN THIS LEDGER FROM THE 60-ARCHIVE
+# SCREENING PASS, AND THE NUMBERS MOVED: AirMailPro 1 -> 7 vectors,
+# AminetFileRequester 3 -> 8, AEMail230 7 -> 7.  The a6-clobber fix is what
+# changed, and it is why a `screened` row is a floor and may not carry a CLEAN
+# claim.  AEMail matching exactly is the control.
+# BULK	342	no bsdsocket binary in the archive
+# BULK	12	lost to download or extract failure, not examined
+# BULK	7	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	18	ixemul-hosted, invisible to a vector scan
+# BULK	4	packed by a cruncher
+/comm/mail/Relay.lha	attributed	Relay and Relay.68000, 9 vectors each including ObtainSocket + vsyslog -- an SMTP relay in the inetd family, and the first mail DAEMON found that is not ixemul-hosted
+/comm/mail/AmigaSmail3-29.lha	attributed	smail_amitcp, 13 vectors, ObtainSocket + Dup2Socket + vsyslog; re-confirmed against the screening pass
+/comm/mail/SpamFryer.lha	attributed	inet-handler, 8 vectors with Dup2Socket and accept but NO ObtainSocket -- a handler that is given its socket some other way
+/comm/mail/bomb20.lha	attributed	smtp.exp 12 vectors incl the whole Inet_ quartet, pop3.imp 7
+/comm/mail/iris.lha	attributed	IrisSMTP 11 and irispop 10, both inet_addr and gethostname
+/comm/mail/AirMailPro32p.lha	attributed	AirMailPro, AirMailProPlugin and SuperMailBox, 7 vectors each -- was 1 before the a6-clobber fix
+/comm/mail/AminetFileReq.lha	attributed	AminetFileRequester, 8 vectors -- was 3 before the a6-clobber fix
+/comm/mail/AEMail230.lha	attributed	AEMAIL, 7 vectors, unchanged from the screening pass: the control for the two rows above
+/comm/mail/POP3send.lha	attributed	POP3send, 6 vectors with vsyslog
+/comm/mail/weazel.lha	attributed	weazel, 6 vectors with vsyslog
+/comm/mail/AntiSpam2.lha	attributed	EmailCheck, 9 vectors -- was 1 before the a6-clobber fix
+/comm/mail/AmiGmail.lha	attributed	AmiGmail, 6 vectors -- was 2
+/comm/mail/AmiMAIL.lha	attributed	AmiMAIL, 7 vectors -- was 2
+/comm/mail/StarGate2_2.lha	attributed	StarGate, 6 vectors
+/comm/mail/mailstat.lha	attributed	mailstat, 8 vectors
+#
+# 400-archive pass, 2026-09-07, archives 2361-2760 -- all of comm/maxs and the
+# start of comm/misc.  360 barren (90%), 14 attributed, 8 ixemul.  32 distinct
+# vectors and lvo-matrix.tsv answers `ok` for every profile on all but the
+# three name resolvers: the third drawer running where MICRO ITSELF is clean
+# apart from names.
+# BULK	360	no bsdsocket binary in the archive
+# BULK	16	lost to download or extract failure, not examined
+# BULK	3	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	6	ixemul-hosted, invisible to a vector scan
+# BULK	8	packed by a cruncher
+/comm/misc/AmigaTText-m68k-amigaos.lha	attributed	AmigaTText_OS3, 24 vectors -- the richest CLIENT in the corpus, and the FIRST binary anywhere to call the Roadshow interface-enumeration API: QueryInterfaceTagList and ReleaseInterfaceList. accept+bind+listen alongside connect, and recvfrom/sendto as well as recv/send
+/comm/misc/AmigaTText-ppc-warpup.lha	attributed	the WarpUP build, 24 vectors, and it adds ObtainInterfaceList -- so all three of that group are proven called
+/comm/misc/FENStarter.lha	attributed	an entire AmiTCP utility suite: arp 12 (getnetbyname, the only citation for it), ch_nfsc 15 (sendmsg, getdtablesize), finger 8, askhost 4, ch_setowner 4, GetMail.prg and PutMail.prg 6 each. vsyslog in four of the seven
+/comm/misc/AmiWeatherForeCasts16.lha	attributed	AmiWeatherForecasts and AmiWFPrefs, 8 vectors each, getprotobyname and inet_addr
+/comm/misc/AmiWeather-0.1.0.lha	attributed	AmiWeather, 10 vectors
+/comm/misc/AmiAIMv008.lha	attributed	AmiAIM 0.08, 9 vectors
+/comm/misc/AmiAIMv11.lha	attributed	AmiAIM 1.1, 6 vectors
+#
+# 400-archive pass, 2026-09-07, archives 2761-3160 -- comm/misc continues.  339
+# barren (85%), 11 attributed, 18 packed, 17 unresolved.  26 distinct vectors
+# and only the three name resolvers are anything but `ok` in every profile.
+#
+# FIVE MORE BINARIES CARRY THE SAME 24-VECTOR SIGNATURE AS AmigaTText, down to
+# the interface-list group: Nuntius, Serial Door and SonosController in three
+# builds.  Identical sets across unrelated programs mean a shared framework
+# rather than five authors making the same choices, so those 24 count as ONE
+# piece of evidence about what software needs, not six.
+# BULK	339	no bsdsocket binary in the archive
+# BULK	21	lost to download or extract failure, not examined
+# BULK	10	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	5	ixemul-hosted, invisible to a vector scan
+# BULK	12	packed by a cruncher
+# BULK	2	examined, no attributed call
+/comm/misc/SonosController_OS3.lha	attributed	SonosController, 24 vectors, the AmigaTText signature including QueryInterfaceTagList and ReleaseInterfaceList
+/comm/misc/SonosController_OS3fpu.lha	attributed	the FPU build, and it adds ObtainInterfaceList
+/comm/misc/SonosController_WOS.lha	attributed	the WarpOS build, same 24 with ObtainInterfaceList
+/comm/misc/Nuntius_68k.lha	attributed	Nuntius, the same 24-vector set
+/comm/misc/Serial_Door_68k.lha	attributed	Serial Door, the same 24-vector set
+/comm/misc/gegAIM.lha	attributed	gegAIM, 9 vectors, and the ONLY GetSocketEvents call in the corpus so far
+/comm/misc/cddb-lib.lha	attributed	cddb.library, 7 vectors -- a shared LIBRARY that opens bsdsocket itself
+/comm/misc/amigg.lha	attributed	AmiGG_m68k, 9 vectors, accept+bind+listen
+/comm/misc/Twiny.lha	attributed	Twiny, 7 vectors, a pure server: accept, bind, listen, recv, no connect
+/comm/misc/StreAmi.lha	attributed	StreAmi, 8 vectors
+/comm/misc/SendSMS.lha	attributed	SendSMS, 8 vectors
+#
+# 400-archive pass, 2026-09-07, archives 3161-3560 -- the rest of comm/misc and
+# the start of comm/net.  THE RICHEST SLICE BY FAR: 294 barren (73.5%), 66
+# attributed binaries, 45 distinct vectors.  comm/net is where the networking
+# software actually is, which the four thin drawers before it did not predict.
+#
+# FIRST SLICE SINCE comm/mail TO BREAK MICRO: ObtainSocket, ReleaseSocket AND
+# ReleaseCopyOfSocket all appear -- AmiTCP's own inetd, letnet, and the whole
+# NetFS suite -- plus the first SOCK_RAW outside the ping family.
+# BULK	293	no bsdsocket binary in the archive
+# BULK	29	lost to download or extract failure, not examined
+# BULK	19	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	17	ixemul-hosted, invisible to a vector scan
+# BULK	3	packed by a cruncher
+# BULK	23	attributed, not listed individually
+# BULK	4	examined, no attributed call
+/comm/net/AmiTCP-bin-30b2.lha	attributed	AmiTCP 3.0b2's own binaries: inetd 17 vectors, letnet 5, ch_nfsc 15. The reference implementation of the handoff contract micro stubs out
+/comm/net/NetFS-revised.lha	attributed	FIVE binaries at 21-22 vectors each -- netfs-server, netfs-handler, NetFSPort, NetFSInfo, NetFS-Explorer -- all in the ObtainSocket family. A whole distributed filesystem on the inetd handoff
+/comm/net/NetFS.lha	attributed	the older build, netfs-handler 7 and netfs-server 10
+/comm/net/Amitory10.lha	attributed	rxsocket.library, 33 vectors AND sock_raw=1 -- an ARexx wrapper that exposes the whole API, so it is evidence about the SURFACE and not about what an application needs
+/comm/net/binkd_1.1a-115.lha	attributed	binkd 1.1a, 19 vectors, and the ONLY getnameinfo call in 3,593 archives. Plausible -- binkd is a portable Unix daemon with IPv6 support -- but it is ONE binary at ONE offset and getaddrinfo, which such code almost always uses beside it, does not appear. Corroborate before quoting it
+/comm/misc/stricq_1371.lha	attributed	STRICQ 1.371, 21 vectors
+/comm/misc/stricq.lha	attributed	stricq, 20 vectors
+/comm/net/ALynx.lha	attributed	ALynx, 18 vectors
+/comm/net/RexxNet.lha	attributed	rexxnetd_amitcp in 000 and 020 builds, 15 vectors each
+/comm/net/AmiSpeedTest.lha	attributed	AmiSpeedTest, 16 vectors
+/comm/net/chnfsc102-30b2.lha	attributed	ch_nfsc, 15 vectors
+#
+# 400-archive pass, 2026-09-07, archives 3561-3960 -- the rest of comm/net and
+# the start of comm/tcp.  252 barren (63%), 120 attributed, 103 UNRESOLVED, 52
+# ixemul.  Denser still than comm/net's first half, and the unresolved share is
+# the highest anywhere: a quarter of the drawer stores SocketBase somewhere the
+# scan cannot follow.
+#
+# AND THE SCAN CAUGHT ITSELF, MECHANICALLY, FOR THE FIRST TIME.  Five binaries
+# reported the `reserved` slot -- AveHOST, AveHTTPD, AveNTP, AvePING, AveWHOIS.
+# A reserved entry is bsd_enosys and CANNOT be called, so a hit on one proves
+# the base the scan followed is not bsdsocket's.  That is the AS225 dual-stack
+# family the METHOD row named a hundred archives ago, still firing because
+# nothing checked.  tools/aminet-scan.py refuses them now: `dual-stack-suspect`.
+# Their vector lists below are NOT evidence and are not counted.
+# BULK	251	no bsdsocket binary in the archive
+# BULK	10	lost to download or extract failure, not examined
+# BULK	40	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	18	ixemul-hosted, invisible to a vector scan
+# BULK	3	packed by a cruncher
+# BULK	53	attributed, not listed individually
+# BULK	5	examined, no attributed call
+/comm/tcp/AvePING.lha	dual-stack-suspect	the `reserved` tripwire fires: 11 vectors including GetRouteInfo and ProcessIsServer, which are exec FreeVec and CreatePool read through the wrong base. Re-scanned after the guard landed and refused
+/comm/tcp/AveHTTPD.lha	dual-stack-suspect	same family, same tripwire -- and the archive the AS225 METHOD row was written from
+/comm/tcp/AveHOST.lha	dual-stack-suspect	same
+/comm/tcp/AveNTP.lha	dual-stack-suspect	same
+/comm/tcp/AveWHOIS.lha	dual-stack-suspect	same
+/comm/net/ncftp-3.3.0.lha	attributed	SIX binaries at 23-24 vectors -- ncftp, ncftpget, ncftpput, ncftpls, ncftpbatch, ncftpbookmarks -- all carrying ObtainSocket. A full FTP suite, and NOT ixemul-hosted
+/comm/tcp/AmiTCP_tnserv.lha	attributed	tnserv, 13 vectors, ReleaseSocket -- the standalone server shape the ReleaseSocket row was first written from
+/comm/tcp/AmiTCPsmtpd.lha	attributed	in.smtpd, 7 vectors, the inetd family
+/comm/tcp/AmiTCP-popd.lha	attributed	POPd, 8 vectors
+/comm/tcp/AmiTALK155.lha	attributed	amitcp-talk 20 vectors and amitcp-talkd 8
+/comm/tcp/AmiMsgWin.lha	attributed	amimsgd, 3 vectors
+/comm/tcp/AmiTCP_ups10.lha	attributed	upsd, 2 vectors
+/comm/news/IvoRSS_OS3_1.1.1.lha	attributed	IvoRSS, 24 vectors
+#
+# 400-archive pass, 2026-09-07, archives 3961-4360 -- comm/tcp, the core
+# drawer.  Only 211 barren (53%), the lowest anywhere: 137 attributed, 86
+# ixemul, 81 unresolved, 48 distinct vectors.  ObtainSocket, ReleaseSocket and
+# ReleaseCopyOfSocket all appear, so micro breaks here as it does in comm/net.
+# BULK	211	no bsdsocket binary in the archive
+# BULK	10	lost to download or extract failure, not examined
+# BULK	47	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	37	ixemul-hosted, invisible to a vector scan
+# BULK	11	packed by a cruncher
+# BULK	64	attributed, not listed individually
+# BULK	12	examined, no attributed call
+/comm/tcp/TcpSpeed.lha	attributed	TcpSpeed, 5 vectors and sock_raw=1 -- a GENUINE raw-socket user outside the ping/traceroute family, so RAWSOCKET=OFF breaks more than the three programs that row cites
+/comm/tcp/Patch2AmiTCP43.lha	attributed	socket.library, FORTY-ONE vectors, the highest count in the corpus. A wrapper library: surface, not demand -- see the wrapper-libraries METHOD row
+/comm/tcp/getit.lha	attributed	rxsocket.library again, 33 vectors and sock_raw=1, same reading
+/comm/tcp/MiamiDx10cmain.lha	attributed	miamisecureshell.library reports ONE vector and that vector is AbortInterfaceConfig (-0x1ec). An SSH library does not abort an interface configuration; a single hit at a single offset is the weakest shape evidence takes, and this is recorded as SUSPECT rather than as the first citation for that API
+#
+# 400-archive pass, 2026-09-07, archives 4361-4760 -- the rest of comm/tcp and
+# the start of comm/www.  284 barren, 89 attributed, 43 distinct vectors, and
+# NOTHING NEW: ObtainSocket, ReleaseSocket, ReleaseCopyOfSocket and the three
+# name resolvers are the whole of what any profile changes, exactly as the last
+# four passes said.
+#
+# AND SAMBA 2.0.7 SHOWS THE STATIC-LINK PATTERN AT ITS CLEAREST.  Eight of its
+# binaries report the IDENTICAL 25 vectors -- including make_printerdef,
+# make_smbcodepage and make_unicodemap, which are codepage BUILD TOOLS that do
+# not network at all.  A statically linked binary carries its library's whole
+# call surface whether it reaches it or not, so those 25 are one library's
+# surface counted eight times, not eight programs needing them.
+# BULK	283	no bsdsocket binary in the archive
+# BULK	30	lost to download or extract failure, not examined
+# BULK	15	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	19	ixemul-hosted, invisible to a vector scan
+# BULK	2	packed by a cruncher
+# BULK	42	attributed, not listed individually
+# BULK	3	examined, no attributed call
+/comm/tcp/samba207_w1251.lha	attributed	EIGHT binaries at 25 vectors each, three of which are codepage build tools with no network function. Static linking, not demand -- see the static-link METHOD row
+/comm/tcp/rxsocket.lha	attributed	rxsocket.library 2.x, 27 vectors -- the ARexx wrapper again, surface not demand
+#
+# 400-archive pass, 2026-09-07, archives 4761-5160 -- all of comm/www.  331
+# barren, 42 attributed, 45 ixemul, 25 distinct vectors.
+#
+# AND THE ReleaseSocket ROW GAINS A CONTEXT IT DID NOT HAVE: IBrowse.  Its four
+# protocol libraries -- http, https, ftp, gopher -- each carry the same 13
+# vectors INCLUDING ReleaseSocket, across every release from 1.02 to 1.22 in
+# both 68000 and 68020 builds.  Every previous citation for that vector was a
+# SERVER: AmiTCP's inetd, TnServ, AmiFTPd19, cnet4demo's cnsmtpd.  A browser
+# needs it because it hands a socket to a process it spawned per transfer,
+# which is the same contract for the opposite reason.  Micro breaks the most
+# widely used Amiga browser there is.
+# BULK	331	no bsdsocket binary in the archive
+# BULK	22	lost to download or extract failure, not examined
+# BULK	5	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	14	ixemul-hosted, invisible to a vector scan
+# BULK	8	packed by a cruncher
+# BULK	11	attributed, not listed individually
+# BULK	2	examined, no attributed call
+/comm/www/IBrowse1.x-1.22-68000.lha	attributed	http, https, ftp and gopher.library at 13 vectors each, ReleaseSocket among them; two more binaries beside
+/comm/www/IBrowse1.x-1.22-68020.lha	attributed	the 68020 build, identical sets
+/comm/www/IBrowse112a-00.lha	attributed	1.12a, the same shape five binaries deep
+/comm/www/IBrowse112a-20.lha	attributed	the 68020 build of 1.12a
+/comm/www/IBrowse1.1-1.11-68000.lha	attributed	1.11, still ReleaseSocket
+/comm/www/IBrowse1.02-1.1-68000.lha	attributed	1.02, the oldest release scanned, and it is already there
+#
+# THE LAST 212 ARCHIVES, 2026-09-07: 5161-5372, the rest of comm/www.  159
+# barren, 43 ixemul, 10 attributed, 10 unresolved.  THE CORPUS IS COMPLETE.
+#
+# NETSURF REPORTS ProcessIsServer AND THAT MAKES ITS WHOLE LIST SUSPECT.  The
+# DECODED rows say -690 is exec FreeVec in every binary examined, so at least
+# one of NetSurf's 23 vectors is an alias read through a base that is not
+# bsdsocket's -- and the `reserved` tripwire does not catch it, because
+# ProcessIsServer is a REAL api and a hit on it is not provably wrong the way a
+# bsd_enosys placeholder is.  Recorded, not counted.  The os3 build reports 16
+# vectors with no phantom among them and is the one to read.
+# BULK	175	no bsdsocket binary in the archive
+# BULK	7	lost to download or extract failure, not examined
+# BULK	5	unresolved: SocketBase not provable from the OpenLibrary store
+# BULK	12	ixemul-hosted, invisible to a vector scan
+# BULK	2	packed by a cruncher
+# BULK	1	examined, no attributed call
+/comm/www/netsurf_os3.lha	attributed	NetSurf OS3, 16 vectors and NO phantom -- inet_aton, and accept+bind+listen beside connect. The build to quote
+/comm/www/netsurf-m68k.lha	screened	NetSurf and NetSurf-AGA report 23 vectors each INCLUDING ProcessIsServer, which the DECODED rows put at exec FreeVec. Suspect, not attributed
+/comm/www/hserv.lha	attributed	rxsocket.library, 27 vectors -- ObtainSocket, ReleaseSocket AND ReleaseCopyOfSocket together, the only binary in the corpus with all three. A wrapper: surface, not demand
+/comm/www/lynx.lha	attributed	inet-handler, 8 vectors with Dup2Socket and accept -- the SpamFryer shape again, a handler given its socket some other way
+/comm/www/lynx-mos.lha	attributed	the MorphOS build ships the identical handler
+/comm/www/graburl-2.lha	attributed	graburl, 14 vectors, the whole Inet_ address quartet and vsyslog
+/comm/www/gng_upd101.lha	attributed	http and http_DEBUG, 10 and 11 vectors
+/comm/www/http_post.lha	attributed	http_post, 5 vectors with vsyslog

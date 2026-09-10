@@ -4,6 +4,233 @@
 #
 # rig: playhouse3, -B ens18 -P playhouse2.local.tinic.net
 #
+# THE FITZ WRITE BASELINE, 2026-09-07.  Four sittings at 50570c3e, `-r 3`
+# each, one build: 2809, 2817, 2817, 2819 -- a spread of 0.36 per cent.  The
+# lowest fitz_write this tree has produced across every sitting today, fourteen
+# of them, is 2797.
+#
+#     fitz-write 2797
+#
+# THE LOWEST OBSERVED, not the median, for the same reason the receive and
+# transmit numbers above take the lower of two: a floor set above what the tree
+# reproduces is a gate that reds on an unchanged main, and this file's history
+# is a list of raises that had to be defended afterwards.
+#
+# run-fitzbench.sh -W auto reads it and applies the rate gate's 12 per cent,
+# giving a floor of 2461.  That is far below the 0.36 per cent this figure
+# actually moves, which is deliberate: the gate exists to catch a regression
+# that gives back a campaign, not to police noise.  The +6.0 per cent the
+# argument-checking flip earned here is twenty times the sitting spread and
+# would be caught at a much tighter tolerance -- but tightening it is how a
+# gate starts crying wolf, and this file already says so about the rate one.
+#
+# THERE IS NO fitz-read LINE AND THERE SHOULD NOT BE: twelve sittings put its
+# per-arm spread at 9.5 and 12.7 per cent, with -0.3, -5.6 and +13.5 per cent
+# measured on the SAME two builds in three consecutive passes.
+#
+#
+# THE DAY ON THE APPLICATION WORKLOAD, 2026-09-07: fitz_write +5.9 per cent,
+# fitz_read NOT MEASURABLE.  d8f77786 against 5622fbde, TWELVE sittings -- six
+# an arm, three orders (A B B A, B A A B, A B A B), md5s 010c55093e94 and
+# 8837b02171a0:
+#
+#     fitz_write   A 2647 2659 2665 2652 2654 2653   median 2653
+#                  B 2830 2817 2804 2797 2824 2801   median 2810
+#                  +5.9%, spreads 0.68 and 1.18 per cent, THE TWO SETS DISJOINT
+#
+#     fitz_read    A 3517 3609 3701 3692 3438 3379   spread  9.5%
+#                  B 3578 3526 3486 3494 3929 3670   spread 12.7%
+#                  per-pass deltas -0.3%, -5.6%, +13.5% ON THE SAME TWO BUILDS
+#
+# WRITE IS SETTLED AND READ CANNOT SETTLE ANYTHING.  The one transmit change of
+# the day -- NetX and ThreadX argument checking, +3.87 per cent on iperf tx --
+# owns a direction, and Fitz write is transmit-shaped, so the application sees
+# about 1.5x what iperf reports.  Fitz read did not move; iperf receive did
+# +2.54 per cent, and the two are different regimes, which this file already
+# says.
+#
+# AND I SPENT HALF AN HOUR CHASING A REGRESSION THAT WAS NOISE.  Pass two read
+# -5.6 per cent and I wrote it up as a possible receive regression with a
+# bisect point named.  Pass three read +13.5 per cent on the same two builds.
+# A fitz_read delta under about fifteen per cent is not a result in either
+# direction, and run-fitzbench.sh prints that beside the figure now.
+#
+#
+# NO EFFECT, 2026-09-07: n68k_copy_bytes with a move.l loop instead of movem.
+# Four sittings, P Q Q P, five rounds each, distinct md5s (29727635af1d /
+# f998da5336d2), the arm script refusing to run if the two hashed the same:
+#
+#     arm                       sitting 1   sitting 2   median
+#     P  movem (ships)          6,110,919   6,103,353   6,107,136
+#     Q  -DN68K_NO_MOVEM=1      6,108,776   6,149,007   6,128,892
+#
+#     +0.36 per cent receive, +0.13 transmit.  Inside the 0.90 per cent floor.
+#
+# THE EXPERIMENT NEEDED NO NEW CODE: n68k_copy.S already carries N68K_NO_MOVEM
+# for the 68060 arm, and the flag was verified to land before the run -- movem
+# instructions inside _n68k_copy_bytes go 12 to 2.
+#
+# WHY IT WAS RUN, AND WHY THE RESULT IS NOT A CONTRADICTION.  cpucal's memory
+# section on this rig reads m2m 117.7 ns/B against movem 129.8 -- the move.l
+# loop TEN PER CENT faster -- while n68k_copy.S:17 is built on movem being the
+# only way to cut the instruction count further.  _n68k_copy_bytes is 9.5 per
+# cent of the receive profile, so ten per cent of it is 0.9 of the run, which
+# is exactly the floor.  Both instruments point the same way and neither can
+# resolve it end to end.
+#
+# AND THE COPY IS NOT "AT THE MEMORY FLOOR", WHICH THIS TREE HAS CLAIMED FROM
+# CYCLE ARITHMETIC.  cpucal measures the floor directly: 117.7 ns/B for a
+# memory-to-memory sweep.  The receive path's copy runs at about 135 -- 9.5 per
+# cent of 8,034 ms over 5.6 MB -- so it is roughly 13 per cent above the
+# measured floor, and 13 per cent of 9.5 is 1.2 per cent of the run.  That is
+# the whole remaining headroom in the second-largest row, and it is under the
+# resolution of this rig.
+#
+# DO NOT FLIP THE DEFAULT ON THIS EVIDENCE.  The ratio between two instruction
+# sequences on an emulator that charges per instruction is not a fact about
+# 68020 silicon, where the published costs say movem wins.  cpucal now prints
+# that caveat beside the two numbers.
+#
+#
+# NO EFFECT, 2026-09-07: 1bbb3803, the device writing the link header.  Four
+# sittings, P Q Q P, five rounds each, distinct md5s (7d83079fd4d9 /
+# d4c48e5993c7):
+#
+#     arm                  sitting 1   sitting 2   median
+#     P  da7899fb before   6,083,342   6,285,200   6,184,271
+#     Q  1bbb3803 after    6,171,162   6,184,355   6,177,759
+#
+#     -0.11 per cent.  The rig cannot see it.
+#
+# The change is kept anyway, on the same footing as the capture filter: it
+# provably removes four six-byte moves and a word per received frame, the
+# netdev test asserts both halves of the contract, and a change that removes
+# work does not become wrong because an instrument cannot resolve it.  What it
+# does not get is a number.
+#
+# AND THIS SITTING WAS NOISIER THAN THE NULL CONTROL SAYS THE RIG IS.  P's two
+# sittings span 3.3 per cent -- 6,083,342 against 6,285,200, the highest
+# receive median this tree has ever produced -- while Q's agree to 0.21.  The
+# 0.90 per cent floor was measured in a quiet hour and is a FLOOR, not a
+# ceiling: an arm whose two sittings disagree by more than that has not
+# measured anything, whichever way the difference points.
+#
+#
+# END TO END, 2026-09-07: the day's three wins measured TOGETHER, which is the
+# only honest way to quote them as one number.  d8f77786 (the day's first
+# commit) against 4b1747ba, four sittings A B B A, five rounds each, distinct
+# md5s (010c55093e94 / 5fc3af272f37):
+#
+#     arm                  sitting 1   sitting 2   median
+#     A  d8f77786          6,018,025   5,926,434   5,972,230   rx
+#                          3,199,275   3,197,144   3,198,210   tx
+#     B  4b1747ba          6,150,210   6,097,299   6,123,755   rx
+#                          3,319,384   3,328,085   3,323,735   tx
+#
+#     tcp-rx  +2.54 per cent      tcp-tx  +3.92 per cent
+#
+# GAINS DO NOT ADD, AND HERE IS THE ARITHMETIC.  The two receive changes
+# measured +3.04 and +1.80 ALONE, which compound to about 4.9; together they
+# deliver 2.54.  Transmit had exactly one change and reads +3.92 against its
+# own +3.87, which is the control: where one change owns a direction, the
+# end-to-end figure reproduces it.
+#
+# AND THE RIG DRIFTS UPWARD WITHIN A SESSION.  d8f77786 measured 5,981,308 and
+# 5,934,125 receive in the morning's bundle arm, and 6,018,025 and 5,926,434
+# here -- the same binary, medians 5,957,717 against 5,972,230, 0.24 per cent
+# apart, with individual sittings spanning 1.6.  That is inside the 0.90 per
+# cent null floor for medians and is why an arm's comparison point is rebuilt
+# in the SAME sitting.
+#
+#
+# RAISED 2026-09-07 on receive again, for a27be6a6 -- bsd_recv_tcp() fetching
+# the packet directly on the NX_NO_WAIT drain path instead of through
+# bsd_wait_sliced() and an indirect call.  Four sittings, P Q Q P, five rounds
+# each, distinct md5s (d59168945d3e / 1a99c6e37ced):
+#
+#     arm                     sitting 1   sitting 2   median     own spread
+#     P  a773ef4f before      6,019,230   6,022,066   6,020,648      0.05%
+#     Q  a27be6a6 after       6,132,140   6,126,568   6,129,354      0.09%
+#
+# +1.80 per cent, ahead in both positions, AND THE TIGHTEST MEASUREMENT THIS
+# CAMPAIGN HAS PRODUCED: each arm's two sittings agree to within a tenth of a
+# per cent, against a null control whose four sittings spanned 0.90.  Transmit
+# reads -0.23 per cent, which is what a receive-only change should say.
+#
+# AND BOTH OF THE DAY'S EARLIER RAISES REPRODUCED IN THIS SITTING, which is the
+# check a raise needs and rarely gets: the P arm measures 6,019,230 and
+# 6,022,066 against a receive baseline of 6,013,939 (pct 100), and 3,326,977
+# and 3,330,303 against a transmit baseline of 3,287,723 (pct 101).  Neither
+# raise reds on an unchanged tree.
+#
+#     direction   was          now          sittings on the new tree
+#     tcp-rx      6,013,939    6,126,568    6,132,140 (5 rounds), 6,126,568 (5)
+#
+# GAINS DO NOT ADD, and the day's three wins were measured in three separate
+# sittings rather than end to end, so the honest way to quote them is one at a
+# time: +3.87 per cent transmit for the argument checking, +3.04 per cent
+# receive for the IPv4 verify fast path, +1.80 per cent receive for this.  An
+# end-to-end arm against the day's starting commit would say what they come to
+# together and has not been run.
+#
+#
+# RAISED 2026-09-07 on RECEIVE, for 237ea45e -- the IPv4 receive-verify fast
+# path.  Four sittings, two arms, position-balanced P Q Q P, five rounds each,
+# distinct md5s (68ac21ebabd1 / 2836e73cc13d):
+#
+#     arm                     sitting 1   sitting 2   median
+#     P  6c7bc0a6 before      5,941,505   5,906,307   5,923,906
+#     Q  237ea45e after       6,013,939   6,193,833   6,103,886
+#
+# +3.04 per cent, AHEAD IN BOTH POSITIONS, against a same-day null floor of
+# 0.90 per cent.  Transmit does not move: P 3,208,057 against Q 3,207,517,
+# -0.02 per cent, which is what a receive-only change should read.
+#
+# PREDICTED 1.2 PER CENT, MEASURED 3.0.  The note further down about the
+# "430 frames/s so 100 cycles = 0.3%" arithmetic running 4x low holds again,
+# and in the same direction: do not prune a candidate with it.
+#
+# Q's two sittings spread 3.0 per cent between themselves, which is wider than
+# the null floor and is the reason the position balance matters -- both Q
+# sittings beat both P sittings, and P's own spread is 0.6 per cent.
+#
+#     direction   was          now          sittings on the new tree
+#     tcp-rx      5,770,903    6,013,939    6,193,833 (5 rounds), 6,013,939 (5)
+#
+#
+# RAISED 2026-09-07 on transmit only, for the NetX/ThreadX argument checking
+# default flipping OFF.  Six sittings, three arms, position-balanced A B C C B A,
+# five rounds each, three DISTINCT library md5s printed before any round ran
+# (010c55093e94 / 68ac21ebabd1 / 4a29d89dd1db -- the previous attempt at this
+# arm printed the SAME md5 twice because the option did not exist on the tree
+# it ran against, and was a null control by accident):
+#
+#     arm                        tcp-rx      tcp-tx
+#     A  base                    5,957,717   3,183,053
+#     B  A + the capture change  5,920,716   3,201,533
+#     C  B + checking OFF        5,988,292   3,306,244
+#
+# C against B is +3.27% transmit and +1.14% receive; C against A is +3.87%
+# transmit.  The two arms' transmit samples do not overlap -- C measured
+# 3,324,764 and 3,287,723 against A's 3,181,994 and 3,184,112.
+#
+# AND THE NULL CONTROL FOR IT WAS MEASURED THE SAME DAY, which is what the note
+# below demands of anything in the 1-3% band: FOUR sittings of five rounds
+# against a BYTE-IDENTICAL library (md5 630a843a3f7f) gave
+# 5,905,187 / 5,940,630 / 5,924,700 / 5,887,844 receive and
+# 3,189,709 / 3,187,294 / 3,163,356 / 3,183,053 transmit.
+#
+#     floor: 0.90% receive, 0.83% transmit
+#
+# So transmit is four times the noise and receive is AT it.  Transmit is
+# raised; RECEIVE IS NOT, because +1.14% against a 0.90% floor is not a result.
+# The recorded transmit figure is the LOWER of C's two medians, per the rule
+# below, not the median of medians.
+#
+#     direction   was          now          sittings on the new tree
+#     tcp-tx      3,133,475    3,287,723    3,324,764 (5 rounds), 3,287,723 (5)
+#
+#
 # GAINS DO NOT ADD.  MEASURE THE ACCUMULATED SET, NEVER THE SUM OF PARTS.
 # 2026-09-06, 3a71a026 against main, six rounds alternated, the base rebuilt to
 # md5 7522050095ef for the fourth time that day:
@@ -317,5 +544,6 @@
 # +3.3% and +2.6% on receive, ahead in both positions both times.  Quote ABOUT
 # +3%.  Transmit read -0.7% and then +0.3%, which is what no change looks like
 # here -- the first of those two is in no sense a regression.
-tcp-rx 5770903
-tcp-tx 3133475
+tcp-rx 6126568
+tcp-tx 3287723
+fitz-write 2797
