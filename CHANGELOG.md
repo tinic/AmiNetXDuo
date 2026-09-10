@@ -20,20 +20,22 @@ version at the top when it merges.
 - Micro is built for the 68000 alone. Its code is the same code the full stack
   already runs on a 68000; what it drops are the 68020, 68040 and 68060 variants
   it would never select
-- Micro holds 223,136 bytes of RAM while it is up against the full drawer's
-  444,924: half the stack on a machine that has none to spare
+- Micro holds 212,148 bytes of RAM while it is up against the full drawer's
+  426,436: half the stack on a machine that has none to spare
 
-What each drawer costs, in bytes. The two images at the top stay open for as
-long as the machine is up, and `sizeof(AmiNetStack)` is the stack's one runtime
-allocation, so those three lines are the RAM a running stack holds.
-`usergroup.library` and `tls.library` are opened by the programs that want them.
+What each drawer costs, in bytes. File sizes are what the archive holds; RAM
+figures are code, data and BSS after `LoadSeg`. The two images below stay open
+for as long as the machine is up, and `sizeof(AmiNetStack)` is the stack's one
+runtime allocation. `usergroup.library` and `tls.library` are opened by the
+programs that want them.
 
 | | full | minimal | micro |
 |---|---|---|---|
-| `bsdsocket.library` | 338,216 | 213,916 | **168,548** |
-| `anxnet.device` | 39,056 | 39,056 | 39,060 |
+| `bsdsocket.library`, file | 338,216 | 213,916 | **168,548** |
+| `bsdsocket.library`, in RAM | 321,476 | 202,228 | **159,308** |
+| `anxnet.device`, in RAM | 37,308 | 37,308 | 37,312 |
 | `sizeof(AmiNetStack)` | 67,652 | 16,792 | **15,528** |
-| **RAM while the stack is up** | **444,924** | **269,764** | **223,136** |
+| **RAM while the stack is up** | **426,436** | **256,328** | **212,148** |
 | `usergroup.library`, on open | 7,284 | 7,284 | 7,284 |
 | `tls.library`, on open | 195,636 | not installed | not installed |
 
