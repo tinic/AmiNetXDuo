@@ -10,19 +10,26 @@
  * nothing here can currently reproduce it.
  *
  * WHAT AN RPC CLIENT DOES THAT A DNS CLIENT DOES NOT, which is the whole point
- * of the two arms below:
+ * of the three arms below:
  *
+ *   ephem  binds port 0 and lets the stack choose, which is what the resolver
+ *          does and what this tree already exercises.  The control.
  *   resv   binds a RESERVED local port first -- bindresvport() walks down from
  *          1023 -- because an NFS server may refuse a request that did not
  *          come from one.  The reply then has to come back to THAT port.
- *   ephem  binds port 0 and lets the stack choose, which is what the resolver
- *          does and what this tree already exercises.
+ *   conn   does that and then connect()s the datagram socket, which is the
+ *          other shape an RPC client takes; the receive filter is different.
  *
- * THE CONTROL ARM IS NOT DECORATION.  If `resv` fails and `ephem` passes, the
- * defect is in binding or demultiplexing a low local port.  If BOTH fail, it
- * is the receive path for a bound, unconnected UDP socket.  If BOTH pass, this
- * stack is not where the mount is failing and the next place to look is what
- * ch_nfs does with the reply -- a pass here is a real answer, not a shrug.
+ * AND EACH ARM EXCHANGES TWICE ON ONE SOCKET.  An RPC client retries on the
+ * socket it already has, so a stack that carries the first reply and loses the
+ * second fails a mount while passing anything that asks once.
+ *
+ * THE CONTROL ARM IS NOT DECORATION.  ephem passing while resv fails is bind
+ * or demultiplex of a low local port; an unconnected arm passing while conn
+ * fails is the connected-UDP receive filter; none passing is the receive path
+ * itself.  All passing is a real answer and not a shrug: it says the mount is
+ * not failing in this stack and the next place to look is what ch_nfs does
+ * with the reply.
  *
  * The payload is a genuine PMAPPROC_GETPORT call (RFC 1057), so this also
  * works unchanged against a real rpcbind if one is ever put on the peer.
@@ -229,6 +236,59 @@ static ULONG p_inet_addr(struct Library *base, const char *cp)
     return res;
 }
 
+static LONG p_connect(struct Library *base, LONG s, const ProbeAddr *sa)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = s;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)sa;
+    register LONG            d1  __asm("d1") = (LONG)sizeof(*sa);
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-54:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
+static LONG p_send(struct Library *base, LONG s, const void *buf, LONG len)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = s;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)buf;
+    register LONG            d1  __asm("d1") = len;
+    register LONG            d2  __asm("d2") = 0;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-66:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
+static LONG p_recv(struct Library *base, LONG s, void *buf, LONG len)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = s;
+    register APTR            a0  __asm("a0") = (APTR)buf;
+    register LONG            d1  __asm("d1") = len;
+    register LONG            d2  __asm("d2") = 0;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-78:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 /* ----------------------------------------------------------- the payload -- */
 
 static UBYTE  call_buf[56];
@@ -270,17 +330,108 @@ static VOID build_call(ULONG xid)
 
 /* --------------------------------------------------------------- an arm --- */
 
-/* `resv` walks down from 1023 the way bindresvport() does; `ephem` asks for 0
-   and takes what it is given. */
-static LONG arm(struct Library *sb, const char *tag, BOOL reserved,
-                ULONG dest, UWORD dport)
+#define ARM_EPHEM  0    /* bind 0, sendto/recvfrom -- what a resolver does   */
+#define ARM_RESV   1    /* bindresvport, sendto/recvfrom -- what RPC does    */
+#define ARM_CONN   2    /* bindresvport + connect(), send/recv               */
+
+/*
+ * ONE call and its reply on an already-open socket.  Returns 1 when the reply
+ * came back and matched.  `round` is only for the key names, so a retry is
+ * distinguishable from the first try in the log.
+ */
+static LONG exchange(struct Library *sb, const char *tag, LONG round, LONG s,
+                     LONG mode, const ProbeAddr *to)
 {
-    ProbeAddr sa, to, from;
+    ProbeAddr from;
     ULONG     readfds[8];
     ProbeTime tv;
-    LONG      s, rc, n, i, fromlen, namelen;
+    LONG      rc, n, i, fromlen;
+
+    call_xid += 1UL;
+    build_call(call_xid);
+
+    if (mode == ARM_CONN)
+        n = p_send(sb, s, call_buf, (LONG)sizeof(call_buf));
+    else
+        n = p_sendto(sb, s, call_buf, (LONG)sizeof(call_buf), to);
+
+    Printf((CONST_STRPTR)"%s_r%ld_send=%ld\n", (LONG)tag, round, n);
+    if (n != (LONG)sizeof(call_buf))
+    {
+        Printf((CONST_STRPTR)"%s_r%ld_send_errno=%ld\n", (LONG)tag, round,
+               p_errno(sb));
+        return 0;
+    }
+
+    for (i = 0; i < 8; i++)
+        readfds[i] = 0UL;
+    readfds[s / 32] |= 1UL << (s % 32);
+
+    tv.tv_sec  = 5;
+    tv.tv_usec = 0;
+
+    rc = p_waitselect(sb, s + 1, readfds, &tv);
+    Printf((CONST_STRPTR)"%s_r%ld_waitselect=%ld\n", (LONG)tag, round, rc);
+    if (rc <= 0)
+    {
+        Printf((CONST_STRPTR)"%s_r%ld_waitselect_errno=%ld\n", (LONG)tag,
+               round, (LONG)((rc < 0) ? p_errno(sb) : 0));
+        Printf((CONST_STRPTR)"%s_r%ld_error=nothing became readable in 5 s\n",
+               (LONG)tag, round);
+        return 0;
+    }
+
+    fromlen = (LONG)sizeof(from);
+    from.sin_port = 0;
+    if (mode == ARM_CONN)
+        n = p_recv(sb, s, reply_buf, (LONG)sizeof(reply_buf));
+    else
+        n = p_recvfrom(sb, s, reply_buf, (LONG)sizeof(reply_buf), &from,
+                       &fromlen);
+
+    Printf((CONST_STRPTR)"%s_r%ld_recv=%ld\n", (LONG)tag, round, n);
+    if (n < 0)
+    {
+        Printf((CONST_STRPTR)"%s_r%ld_recv_errno=%ld\n", (LONG)tag, round,
+               p_errno(sb));
+        return 0;
+    }
+
+    if (mode != ARM_CONN)
+        Printf((CONST_STRPTR)"%s_r%ld_from_port=%ld\n", (LONG)tag, round,
+               (LONG)from.sin_port);
+
+    if (n < 24)
+    {
+        Printf((CONST_STRPTR)"%s_r%ld_error=reply is %ld bytes, too short\n",
+               (LONG)tag, round, n);
+        return 0;
+    }
+
+    {
+        ULONG xid   = get32(&reply_buf[0]);
+        ULONG mtype = get32(&reply_buf[4]);
+
+        Printf((CONST_STRPTR)"%s_r%ld_xid_match=%ld\n", (LONG)tag, round,
+               (LONG)((xid == call_xid) ? 1 : 0));
+        return (LONG)((xid == call_xid && mtype == 1UL) ? 1 : 0);
+    }
+}
+
+/*
+ * TWO EXCHANGES ON ONE SOCKET, not one.  An RPC client retries on the socket
+ * it already has -- that is what a timeout does -- so a stack that carries the
+ * first reply and loses the second fails a mount while passing any test that
+ * asks once.  Both rounds must land for the arm to pass.
+ */
+static LONG arm(struct Library *sb, const char *tag, LONG mode, ULONG dest,
+                UWORD dport)
+{
+    ProbeAddr sa, to;
+    LONG      s, rc, i;
     LONG      bound = -1;
-    LONG      ok = 0;
+    LONG      namelen;
+    LONG      r1, r2;
 
     for (i = 0; i < (LONG)sizeof(sa.sin_zero); i++)
         sa.sin_zero[i] = 0;
@@ -294,35 +445,7 @@ static LONG arm(struct Library *sb, const char *tag, BOOL reserved,
         return 0;
     }
 
-    if (reserved)
-    {
-        UWORD port;
-
-        for (port = 1023; port >= 900; port--)
-        {
-            sa.sin_len    = (UBYTE)sizeof(sa);
-            sa.sin_family = P_AF_INET;
-            sa.sin_port   = port;
-            sa.sin_addr   = 0UL;            /* INADDR_ANY */
-
-            rc = p_bind(sb, s, &sa);
-            if (rc == 0)
-            {
-                bound = (LONG)port;
-                break;
-            }
-        }
-        Printf((CONST_STRPTR)"%s_bind_reserved=%ld\n", (LONG)tag, bound);
-        if (bound < 0)
-        {
-            Printf((CONST_STRPTR)"%s_bind_errno=%ld\n", (LONG)tag,
-                   p_errno(sb));
-            Printf((CONST_STRPTR)"%s_RESULT=FAIL\n", (LONG)tag);
-            (VOID)p_close(sb, s);
-            return 0;
-        }
-    }
-    else
+    if (mode == ARM_EPHEM)
     {
         sa.sin_len    = (UBYTE)sizeof(sa);
         sa.sin_family = P_AF_INET;
@@ -340,15 +463,38 @@ static LONG arm(struct Library *sb, const char *tag, BOOL reserved,
             return 0;
         }
     }
+    else
+    {
+        UWORD port;
 
-    /* What the stack thinks the socket is bound to, which is the port the
-       reply has to come back to. */
+        for (port = 1023; port >= 900; port--)
+        {
+            sa.sin_len    = (UBYTE)sizeof(sa);
+            sa.sin_family = P_AF_INET;
+            sa.sin_port   = port;
+            sa.sin_addr   = 0UL;
+
+            if (p_bind(sb, s, &sa) == 0)
+            {
+                bound = (LONG)port;
+                break;
+            }
+        }
+        Printf((CONST_STRPTR)"%s_bind_reserved=%ld\n", (LONG)tag, bound);
+        if (bound < 0)
+        {
+            Printf((CONST_STRPTR)"%s_bind_errno=%ld\n", (LONG)tag,
+                   p_errno(sb));
+            Printf((CONST_STRPTR)"%s_RESULT=FAIL\n", (LONG)tag);
+            (VOID)p_close(sb, s);
+            return 0;
+        }
+    }
+
     namelen = (LONG)sizeof(sa);
     if (p_getsockname(sb, s, &sa, &namelen) == 0)
         Printf((CONST_STRPTR)"%s_local_port=%ld\n", (LONG)tag,
                (LONG)sa.sin_port);
-    else
-        Printf((CONST_STRPTR)"%s_local_port=unknown\n", (LONG)tag);
 
     for (i = 0; i < (LONG)sizeof(to.sin_zero); i++)
         to.sin_zero[i] = 0;
@@ -357,76 +503,28 @@ static LONG arm(struct Library *sb, const char *tag, BOOL reserved,
     to.sin_port   = dport;
     to.sin_addr   = dest;
 
-    call_xid += 1UL;
-    build_call(call_xid);
-
-    n = p_sendto(sb, s, call_buf, (LONG)sizeof(call_buf), &to);
-    Printf((CONST_STRPTR)"%s_sendto=%ld\n", (LONG)tag, n);
-    if (n != (LONG)sizeof(call_buf))
+    if (mode == ARM_CONN)
     {
-        Printf((CONST_STRPTR)"%s_sendto_errno=%ld\n", (LONG)tag, p_errno(sb));
-        Printf((CONST_STRPTR)"%s_RESULT=FAIL\n", (LONG)tag);
-        (VOID)p_close(sb, s);
-        return 0;
+        rc = p_connect(sb, s, &to);
+        Printf((CONST_STRPTR)"%s_connect_rc=%ld\n", (LONG)tag, rc);
+        if (rc != 0)
+        {
+            Printf((CONST_STRPTR)"%s_connect_errno=%ld\n", (LONG)tag,
+                   p_errno(sb));
+            Printf((CONST_STRPTR)"%s_RESULT=FAIL\n", (LONG)tag);
+            (VOID)p_close(sb, s);
+            return 0;
+        }
     }
 
-    for (i = 0; i < 8; i++)
-        readfds[i] = 0UL;
-    readfds[s / 32] |= 1UL << (s % 32);
-
-    tv.tv_sec  = 5;
-    tv.tv_usec = 0;
-
-    rc = p_waitselect(sb, s + 1, readfds, &tv);
-    Printf((CONST_STRPTR)"%s_waitselect=%ld\n", (LONG)tag, rc);
-    if (rc <= 0)
-    {
-        Printf((CONST_STRPTR)"%s_waitselect_errno=%ld\n", (LONG)tag,
-               (LONG)((rc < 0) ? p_errno(sb) : 0));
-        Printf((CONST_STRPTR)"%s_error=nothing became readable in 5 s: the "
-                             "reply never reached the socket\n", (LONG)tag);
-        Printf((CONST_STRPTR)"%s_RESULT=FAIL\n", (LONG)tag);
-        (VOID)p_close(sb, s);
-        return 0;
-    }
-
-    fromlen = (LONG)sizeof(from);
-    n = p_recvfrom(sb, s, reply_buf, (LONG)sizeof(reply_buf), &from, &fromlen);
-    Printf((CONST_STRPTR)"%s_recvfrom=%ld\n", (LONG)tag, n);
-    if (n < 0)
-    {
-        Printf((CONST_STRPTR)"%s_recvfrom_errno=%ld\n", (LONG)tag,
-               p_errno(sb));
-        Printf((CONST_STRPTR)"%s_RESULT=FAIL\n", (LONG)tag);
-        (VOID)p_close(sb, s);
-        return 0;
-    }
-
-    Printf((CONST_STRPTR)"%s_from_port=%ld\n", (LONG)tag, (LONG)from.sin_port);
-
-    if (n >= 24)
-    {
-        ULONG xid   = get32(&reply_buf[0]);
-        ULONG mtype = get32(&reply_buf[4]);
-
-        Printf((CONST_STRPTR)"%s_reply_xid_match=%ld\n", (LONG)tag,
-               (LONG)((xid == call_xid) ? 1 : 0));
-        Printf((CONST_STRPTR)"%s_reply_is_reply=%ld\n", (LONG)tag,
-               (LONG)((mtype == 1UL) ? 1 : 0));
-        if (xid == call_xid && mtype == 1UL)
-            ok = 1;
-    }
-    else
-    {
-        Printf((CONST_STRPTR)"%s_error=the reply is %ld bytes, too short for "
-                             "an RPC reply header\n", (LONG)tag, n);
-    }
+    r1 = exchange(sb, tag, 1, s, mode, &to);
+    r2 = exchange(sb, tag, 2, s, mode, &to);
 
     Printf((CONST_STRPTR)"%s_RESULT=%s\n", (LONG)tag,
-           ok ? (LONG)"PASS" : (LONG)"FAIL");
+           (r1 && r2) ? (LONG)"PASS" : (LONG)"FAIL");
 
     (VOID)p_close(sb, s);
-    return ok;
+    return (LONG)((r1 && r2) ? 1 : 0);
 }
 
 int main(int argc, char **argv)
@@ -434,7 +532,7 @@ int main(int argc, char **argv)
     struct Library *sb;
     ULONG           dest;
     LONG            dport = 111;
-    LONG            resv_ok, ephem_ok;
+    LONG            resv_ok, ephem_ok, conn_ok;
 
     if (argc < 2)
     {
@@ -473,34 +571,36 @@ int main(int argc, char **argv)
 
     call_xid = 0x52504331UL;    /* "RPC1" */
 
-    ephem_ok = arm(sb, "ephem", FALSE, dest, (UWORD)dport);
+    ephem_ok = arm(sb, "ephem", ARM_EPHEM, dest, (UWORD)dport);
     Delay(25);
-    resv_ok  = arm(sb, "resv",  TRUE,  dest, (UWORD)dport);
+    resv_ok  = arm(sb, "resv",  ARM_RESV,  dest, (UWORD)dport);
+    Delay(25);
+    conn_ok  = arm(sb, "conn",  ARM_CONN,  dest, (UWORD)dport);
 
     /*
-     * THE TWO ARMS TOGETHER ARE THE ANSWER, and each combination names a
-     * different place to look.  Said here so a reader of the log does not have
-     * to reconstruct it.
+     * EACH COMBINATION NAMES A DIFFERENT PLACE TO LOOK, said here so a reader
+     * of the log does not have to reconstruct it.
      */
-    if (resv_ok && ephem_ok)
-        Printf((CONST_STRPTR)"verdict=both arms carried a portmap "
-                             "request and its reply; this stack is not where "
-                             "the mount fails\n");
+    if (ephem_ok && resv_ok && conn_ok)
+        Printf((CONST_STRPTR)"verdict=all three arms carried a portmap "
+                             "request and its reply, twice each on one "
+                             "socket; this stack is not where the mount "
+                             "fails\n");
     else if (ephem_ok && !resv_ok)
         Printf((CONST_STRPTR)"verdict=an ephemeral source port works and a "
-                             "RESERVED one does not: bind or demultiplex of a "
-                             "low local port\n");
-    else if (!ephem_ok && !resv_ok)
-        Printf((CONST_STRPTR)"verdict=neither arm received: the receive path "
-                             "for a bound unconnected UDP socket\n");
+                             "RESERVED one does not: bind or demultiplex of "
+                             "a low local port\n");
+    else if ((ephem_ok || resv_ok) && !conn_ok)
+        Printf((CONST_STRPTR)"verdict=an unconnected socket works and a "
+                             "connect()ed one does not: the connected-UDP "
+                             "receive filter\n");
+    else if (!ephem_ok && !resv_ok && !conn_ok)
+        Printf((CONST_STRPTR)"verdict=no arm received: the receive path for "
+                             "a bound UDP socket\n");
     else
-        Printf((CONST_STRPTR)"verdict=the reserved arm works and the "
-                             "ephemeral one does not, which is backwards and "
-                             "means the peer answered only one of them\n");
-
-    Printf((CONST_STRPTR)"RESULT=%s\n",
-           (resv_ok && ephem_ok) ? (LONG)"PASS" : (LONG)"FAIL");
+        Printf((CONST_STRPTR)"verdict=a mixed result; read the per-round "
+                             "keys above, r1 against r2\n");
 
     CloseLibrary(sb);
-    return (resv_ok && ephem_ok) ? RETURN_OK : RETURN_WARN;
+    return (resv_ok && ephem_ok && conn_ok) ? RETURN_OK : RETURN_WARN;
 }
