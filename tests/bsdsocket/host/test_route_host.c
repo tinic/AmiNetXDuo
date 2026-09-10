@@ -208,6 +208,11 @@ struct TagItem *bsd_next_tag(struct TagItem **cursor)
     return NULL;
 }
 
+VOID netstack_gateway_override_set(ULONG gw)
+{ (VOID)gw; }
+VOID netstack_gateway_override_clear(VOID)
+{ }
+
 NX_IP *netstack_ip(VOID)
 {
     return h_ip_ptr;

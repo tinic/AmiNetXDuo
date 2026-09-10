@@ -171,6 +171,10 @@ BOOL netstack_iface_mdns(UWORD i)
 { (VOID)i; h_unreachable("netstack_iface_mdns"); return FALSE; }
 LONG netstack_hostname_offer(UWORD src, const char *n)
 { (VOID)src; (VOID)n; h_unreachable("netstack_hostname_offer"); return -1; }
+VOID netstack_gateway_override_set(ULONG gw)
+{ (VOID)gw; h_unreachable("netstack_gateway_override_set"); }
+VOID netstack_gateway_override_clear(VOID)
+{ h_unreachable("netstack_gateway_override_clear"); }
 LONG netstack_interface_start(const AmiIfConfig *c, UWORD *out)
 { (VOID)c; (VOID)out; h_unreachable("netstack_interface_start"); return -1; }
 LONG netstack_interface_remove(UWORD i, BOOL force)
