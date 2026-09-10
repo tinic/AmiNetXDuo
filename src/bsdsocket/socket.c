@@ -193,6 +193,32 @@ static LONG bsd_table_ensure(struct AmiSocketBase *base)
     return 0;
 }
 
+/*
+ * THE ADVERTISED DEFAULT MAY NEVER EXCEED AN AmiTCP fd_set, AND THIS IS THE
+ * CHECK THAT SAYS SO.
+ *
+ * getdtablesize() is what a caller sizes its select() by -- Sun RPC's
+ * `select(_rpc_dtablesize(), &set, ...)` literally hands our answer back to us
+ * as nfds -- and AmiTCP's FD_SETSIZE is 64, so an fd_set compiled against it
+ * is eight bytes.  Answer more than 64 by DEFAULT and WaitSelect reads, and
+ * used to write, past that object: 1c5a5809 raised this to 256 for a reason
+ * that looked good, no test could see it, and it shipped through five releases
+ * until a user's NFS mount failed with "RPC: Port mapper failure - Unable to
+ * receive" (24a92828).
+ *
+ * A program may still raise its own table with SBTC_DTABLESIZE, up to
+ * BSD_MAX_DTABLESIZE -- the conformance suite does exactly that
+ * (third_party/bsdsocktest/src/test_waitselect.c:430) -- and by asking it
+ * takes responsibility for its own fd_set being big enough.  What it cannot
+ * do is have that responsibility handed to it silently by a default it never
+ * chose.
+ */
+#define BSD_AMITCP_FD_SETSIZE 64
+_Static_assert(BSD_DEFAULT_DTABLESIZE <= BSD_AMITCP_FD_SETSIZE,
+               "getdtablesize()'s default must fit an AmiTCP fd_set: a caller "
+               "passes it straight back as nfds and WaitSelect would touch "
+               "memory past a 64-bit set");
+
 LONG bsd_table_size(struct AmiSocketBase *base)
 {
     if (base->sb_TableSize == 0)
