@@ -123,26 +123,15 @@ WANT_MICRO=1
 # DIFFERENT library from the one that ships.  check-shipping-config.sh compares
 # release.yml against ci.sh and cannot see this file, which is why it went
 # unnoticed; it reads this list too now.
-MINIMAL_OPTIONS="-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
--DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF \
--DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF \
--DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
+# FROM CMakePresets.json, not written out again here.  These two lists used to
+# be hand-copied from tools/ci.sh, and .github/workflows/release.yml had a
+# third copy that nobody compared -- which is why 0.26.6 failed at this step
+# with `missing build: build/release-micro`.
+MINIMAL_OPTIONS="$("$ROOT/tools/preset-options.sh" minimal)"
 
 # The micro arm, from tools/ci.sh.  Same three-way agreement as the list above:
 # this copy exists so a hand-run builds the library CI builds.
-MICRO_OPTIONS="-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
--DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF \
--DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF \
--DAMINETXDUO_MAX_INTERFACES=1 -DAMINETXDUO_TCP_SYNCACHE=32 \
--DAMINETXDUO_NX_ERROR_CHECKING=OFF -DAMINETXDUO_NETSTATUS=OFF \
--DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF \
--DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_NETMONITOR=OFF \
--DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF \
--DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF \
--DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF \
--DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF \
--DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_NETADMIN=OFF \
--DAMINETXDUO_CPU=68000"
+MICRO_OPTIONS="$("$ROOT/tools/preset-options.sh" micro)"
 
 BUILDS=("$BUILD")
 [ "$WANT_MINIMAL" = "0" ] || BUILDS+=("$MINIMAL_BUILD")

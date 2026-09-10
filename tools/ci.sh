@@ -116,7 +116,7 @@ CROSS_CONFIGS=(
     # tools/check-backlog.sh checks the anchor still reads here.  Inserting an
     # arm above it moves it; that is how it was found, by CI going red for a
     # row that had been right when it was written.
-    "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=2 -DAMINETXDUO_TCP_SYNCACHE=32"
+    "minimal:$("$ROOT/tools/preset-options.sh" minimal)"
     # Below `minimal` on purpose: the row above is cited by line number.
     #
     # The floor under the floor.  It is the minimal drawer plus the DHCP
@@ -136,7 +136,7 @@ CROSS_CONFIGS=(
     # The three ON rows were off until this change; `microcompat` existed to
     # carry two of them and is now the same arm, so it is gone.  It does not
     # ship a drawer yet, so tools/check-shipping-config.sh does not look at it.
-    "micro:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF -DAMINETXDUO_MAX_INTERFACES=1 -DAMINETXDUO_TCP_SYNCACHE=32 -DAMINETXDUO_NX_ERROR_CHECKING=OFF -DAMINETXDUO_NETSTATUS=OFF -DAMINETXDUO_ADDRINFO=OFF -DAMINETXDUO_ROUTING=OFF -DAMINETXDUO_ADDRALLOC=OFF -DAMINETXDUO_NETMONITOR=OFF -DAMINETXDUO_OOB=OFF -DAMINETXDUO_CMSG=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_TCP_WINDOW_SCALING=OFF -DAMINETXDUO_TCP_SACK=OFF -DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_NETADMIN=OFF -DAMINETXDUO_CPU=68000"
+    "micro:$("$ROOT/tools/preset-options.sh" micro)"
     # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
     # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled
     # for as long as it took someone to type it by hand.  Grouped rather than

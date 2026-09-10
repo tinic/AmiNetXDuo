@@ -26,6 +26,7 @@ SPDX-License-Identifier: MIT
 
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -77,6 +78,13 @@ def cross_configs():
         if not line or ":" not in line:
             continue
         name, opts = line.split(":", 1)
+        # A shipping drawer takes its options from CMakePresets.json, so the
+        # arm reads `$("$ROOT/tools/preset-options.sh" micro)` and there is
+        # nothing to match here.  Ask the same helper ci.sh asks.
+        if "preset-options.sh" in opts:
+            opts = subprocess.run(
+                [os.path.join(ROOT, "tools", "preset-options.sh"), name],
+                capture_output=True, text=True).stdout
         out[name] = dict(re.findall(r"-D(AMINETXDUO_[A-Z0-9_]+)=(\w+)", opts))
     return out
 

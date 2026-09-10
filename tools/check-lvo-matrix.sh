@@ -58,9 +58,18 @@ for _l in _vl:
 # option a profile turns off, straight from the arm lines in tools/ci.sh
 ci=open('tools/ci.sh').read()
 def arm(name):
-    m=re.search(r'"'+name+r':([^"]*)"',ci)
+    # To the end of the LINE, not to the next quote: a drawer's arm reads
+    # `$("$ROOT/tools/preset-options.sh" micro)` and [^"]* stops inside it.
+    m=re.search(r'^\s*"'+name+r':(.*)"\s*$',ci,re.M)
     if not m: raise SystemExit(f"lvo_matrix=FAIL reason=no_{name}_arm_in_ci.sh")
-    return set(re.findall(r'-DAMINETXDUO_([A-Z_0-9]+)=OFF',m.group(1)))
+    opts=m.group(1)
+    # A shipping drawer's options live in CMakePresets.json, so the arm line is
+    # a call to the helper and there is nothing to match in it.  Ask the helper.
+    if 'preset-options.sh' in opts:
+        import subprocess
+        opts=subprocess.run(['tools/preset-options.sh',name],
+                            capture_output=True,text=True).stdout
+    return set(re.findall(r'-DAMINETXDUO_([A-Z_0-9]+)=OFF',opts))
 # THREE PROFILES, which is all there are: full, minimal, micro.  `microcompat`
 # was a fourth that existed only to put the socket handoff and SOCK_RAW back
 # into micro; the Aminet survey settled that argument -- ObtainSocket has 173

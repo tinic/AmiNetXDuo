@@ -1,0 +1,167 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "amiga",
+      "hidden": true,
+      "description": "Every shipping drawer: the pinned m68k toolchain, Release.",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-m68k-amigaos.cmake",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "default",
+      "inherits": "amiga",
+      "displayName": "full",
+      "description": "The full stack. Libs/ at the top of the archive."
+    },
+    {
+      "name": "minimal",
+      "inherits": "amiga",
+      "displayName": "minimal",
+      "description": "Libs/minimal. No IPv6, TLS, mDNS, BPF, multicast, ARexx or TCP:.",
+      "cacheVariables": {
+        "AMINETXDUO_AREXX": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_BPF": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_IPV6": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_MAX_INTERFACES": "2",
+        "AMINETXDUO_MDNS": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_MULTICAST": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCPDEVICE": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCP_SYNCACHE": "32",
+        "AMINETXDUO_TLS": {
+          "type": "BOOL",
+          "value": "OFF"
+        }
+      }
+    },
+    {
+      "name": "micro",
+      "inherits": "amiga",
+      "displayName": "micro",
+      "description": "Libs/micro. Minimal, one interface, 68000 only.",
+      "cacheVariables": {
+        "AMINETXDUO_ADDRALLOC": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_ADDRINFO": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_AREXX": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_BPF": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_CMSG": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_CPU": "68000",
+        "AMINETXDUO_HOT_O2": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_IPV6": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_MAX_INTERFACES": "1",
+        "AMINETXDUO_MDNS": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_MULTICAST": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_NETADMIN": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_NETMONITOR": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_NETSTATUS": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_NXCACHE": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_NX_ERROR_CHECKING": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_OOB": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_ROUTING": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCPDEVICE": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCP_EARLY_RETRANSMIT": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCP_LOSS_PROBE": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCP_RTT": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCP_SACK": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TCP_SYNCACHE": "32",
+        "AMINETXDUO_TCP_WINDOW_SCALING": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_TLS": {
+          "type": "BOOL",
+          "value": "OFF"
+        }
+      }
+    }
+  ]
+}

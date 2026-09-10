@@ -1,219 +1,130 @@
 #!/usr/bin/env python3
-"""Every library in the archive is built in a configuration CI compiles.
+"""Every shipping drawer is declared once, and every consumer uses that one.
 
     tools/check-shipping-config.sh
 
-dist/make-dist.sh packs two drawers -- the full stack at the top of Libs: and
-`minimal` below it -- and .github/workflows/release.yml is what builds them.
-There used to be four, one per CPU; the CPU is gone from the archive entirely,
-so what is left to check is the FEATURE set.  tools/ci.sh's CROSS_CONFIGS is
-what compiles configurations with warnings fatal, and its own comment says of
-the minimal arm: "It must stay byte-for-byte the options
-.github/workflows/release.yml gives build/release-minimal."
+The full stack, `minimal` and `micro` are declared in CMakePresets.json and
+nowhere else.  tools/ci.sh compiles them with warnings fatal,
+.github/workflows/release.yml builds the trees the archive is packed from, and
+dist/make-dist.sh packs them.  All three read the preset.
 
-Nothing checked that, and it is not true.  A drawer built with options no CI
-arm compiles is a binary that ships having been compiled exactly once, on the
-release runner, with nothing watching.
+THIS REPLACED A COMPARISON OF HAND-COPIES.  The option lists used to be written
+out in each of those three files; this script compared two of them by regex and
+had no idea the third existed.  So `micro` was added to ci.sh and make-dist.sh,
+release.yml never learned about it, every cross arm passed, and 0.26.6's
+release died at the last step with `missing build: build/release-micro`.
 
-This reads the cmake invocations out of release.yml, emulator.yml's archive
-step and ci.sh, and compares the option sets.  Divergences that are known and
-deliberate are listed in KNOWN below with a reason; anything else fails.  A
-KNOWN entry that no longer diverges also fails, so the list cannot rot.
+What is checked now:
+
+  declared    each shipping drawer is a configure preset
+  built       release.yml builds every non-default preset it must pack
+  derived     ci.sh and make-dist.sh take their options from the preset
+  unique      no consumer carries its own -DAMINETXDUO_ list for a drawer
 
 Output is key=value plus an exit code.
 
 SPDX-License-Identifier: MIT
 """
 
+import json
 import os
 import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Divergences that are recorded rather than fixed, because which side is right
-# is a decision about what ships and not about the test.  Key is the drawer;
-# value is (the pair that disagrees, why it is here).
-KNOWN = {
-    # Empty, and it should stay that way.  The one entry it held was the
-    # minimal drawer: release.yml gave five OFF flags where ci.sh's arm gave
-    # seven, so the drawer that shipped carried the ARexx host and the TCP:
-    # handler and the arm that compiled it under fatal warnings did not, while
-    # emulator.yml's end-to-end installed the seven-option build -- three
-    # answers to one question.  Settled at seven, measured: the two options are
-    # 12,248 bytes, on the 1 MB machine that drawer is for.
-}
+# The drawers dist/make-dist.sh packs.  `default` is the top of Libs: and is
+# configured by ci.sh's own cross stage, so release.yml builds it as `default`
+# rather than as build/release-<name>.
+PACKED = ["minimal", "micro"]
 
-OPT = re.compile(r"-D(AMINETXDUO_[A-Z0-9_]+)=(\w+)")
+errors = 0
 
 
-def say(k, v):
-    print("%s=%s" % (k, v))
+def say(key, value):
+    print("%s=%s" % (key, value))
 
 
-def read(path):
-    with open(os.path.join(ROOT, path), errors="replace") as fh:
+def fail(key, value):
+    global errors
+    errors += 1
+    print("%s=%s" % (key, value))
+
+
+def read(rel):
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
         return fh.read()
 
 
-def uncommented(text):
-    """Drop whole-line comments; both YAML and shell use '#'."""
-    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+# ------------------------------------------------------------- declared ----
 
+try:
+    presets = json.loads(read("CMakePresets.json"))["configurePresets"]
+except (OSError, ValueError, KeyError) as exc:
+    print("shipping_config=FAIL no_usable_CMakePresets.json (%s)" % exc)
+    raise SystemExit(1)
 
-def cmake_configs(text):
-    """{build-dir: {OPTION: VALUE}} for every `cmake -S . -B <dir> ...` run.
-
-    A cmake invocation continues over backslash-joined lines, so they are
-    rejoined before the options are read; reading line by line found only the
-    flags that happened to be on the first line."""
-    joined = re.sub(r"\\\s*\n", " ", uncommented(text))
-    out = {}
-    for m in re.finditer(r"cmake\s+-S\s+\.\s+-B\s+(\S+)([^\n]*)", joined):
-        d, rest = m.group(1), m.group(2)
-        out[d] = dict(OPT.findall(rest))
-    return out
-
-
-def ci_cross_configs():
-    """{name: {OPTION: VALUE}} out of tools/ci.sh's CROSS_CONFIGS array."""
-    text = read("tools/ci.sh")
-    block = re.search(r"CROSS_CONFIGS=\((.*?)\n\)", text, re.S)
-    if not block:
-        return None
-    out = {}
-    for line in uncommented(block.group(1)).splitlines():
-        line = line.strip().strip('"')
-        if not line or ":" not in line:
-            continue
-        name, opts = line.split(":", 1)
-        out[name] = dict(OPT.findall(opts))
-    return out
-
-
-# Which release.yml build directory feeds which archive drawer, and which
-# ci.sh arm is supposed to be the same options.  From dist/make-dist.sh's
-# CPU_DIRS and CPU_BUILD, whose default build root is build/cm; the release
-# workflow passes -b build/release, so the suffixes are the same.
-DRAWERS = [
-    #  drawer      release.yml dir           ci.sh arm
-    ("full",      "build/release",          "default"),
-    ("minimal",   "build/release-minimal",  "minimal"),
-]
-
-
-def main():
-    rel = cmake_configs(read(".github/workflows/release.yml"))
-    ci = ci_cross_configs()
-    if ci is None:
-        say("shipping_config", "FAIL")
-        say("error", "no_CROSS_CONFIGS_in_tools/ci.sh")
-        return 1
-
-    bad = 0
-    seen_known = set()
-
-    for drawer, reldir, arm in DRAWERS:
-        # release.yml builds the three CPU drawers in a shell `for` loop whose
-        # -B is "$dir", so only the minimal one appears literally.  A loop is
-        # matched by its case arms instead.
-        if reldir in rel:
-            got = rel[reldir]
-        else:
-            say("drawer_%s" % drawer, "NOT_BUILT_BY_release.yml")
-            bad += 1
-            continue
-
-        want = dict(ci.get(arm, {}))
-        if arm not in ci:
-            say("drawer_%s" % drawer, "no_ci.sh_arm_named_%s" % arm)
-            bad += 1
-            continue
-
-        # The full drawer IS the `default` arm: no -D at all, LTO on, and
-        # nothing else distinguishes them.
-        if arm == "default":
-            want = {}
-
-        if got == want:
-            say("drawer_%s" % drawer, "matches_ci_arm_%s" % arm)
-            continue
-
-        only_rel = sorted(k for k in got if got[k] != want.get(k))
-        only_ci = sorted(k for k in want if want[k] != got.get(k))
-        detail = "release_only=%s ci_only=%s" % (
-            ",".join(only_rel) or "-", ",".join(only_ci) or "-")
-
-        if drawer in KNOWN:
-            seen_known.add(drawer)
-            say("drawer_%s" % drawer, "KNOWN_DIVERGENCE %s" % detail)
-            say("drawer_%s_why" % drawer, KNOWN[drawer][1])
-        else:
-            say("drawer_%s" % drawer, "DIVERGES %s" % detail)
-            bad += 1
-
-    for drawer in KNOWN:
-        if drawer not in seen_known:
-            say("stale_known_entry", drawer)
-            bad += 1
-
-    # dist/make-dist.sh keeps a THIRD copy of the minimal option set, for a
-    # hand-run that lets it configure build/release-minimal itself.  It is not
-    # reachable from release.yml or ci.sh, so the two-way comparison above
-    # cannot see it drift -- and it had drifted: seven options here against
-    # nine in the other two, missing MAX_INTERFACES and TCP_SYNCACHE, so a
-    # hand-built minimal drawer was not the drawer that ships.
-    dist = read("dist/make-dist.sh")
-    m = re.search(r'MINIMAL_OPTIONS="(.*?)"', dist, re.S)
-    if not m:
-        say("drawer_minimal_dist", "no_MINIMAL_OPTIONS_in_dist/make-dist.sh")
-        bad += 1
+names = {p["name"] for p in presets if not p.get("hidden")}
+for drawer in ["default"] + PACKED:
+    if drawer in names:
+        say("declared_%s" % drawer, "CMakePresets.json")
     else:
-        dist_opts = dict(OPT.findall(m.group(1).replace("\\\n", " ")))
-        want_min = dict(ci.get("minimal", {}))
-        if dist_opts == want_min:
-            say("drawer_minimal_dist", "matches_ci_arm_minimal")
-        else:
-            only_dist = sorted(k for k in dist_opts
-                               if dist_opts[k] != want_min.get(k))
-            only_ci = sorted(k for k in want_min
-                             if want_min[k] != dist_opts.get(k))
-            say("drawer_minimal_dist",
-                "DIVERGES dist_only=%s ci_only=%s"
-                % (",".join(only_dist) or "-", ",".join(only_ci) or "-"))
-            bad += 1
+        fail("declared_%s" % drawer, "MISSING_from_CMakePresets.json")
 
-    # AND THE SAME FOR MICRO, which dist/make-dist.sh packs into Libs/micro/
-    # without the Installer offering it.  It is a fourth copy of an option set
-    # and nothing else can see it drift: release.yml does not build a micro
-    # drawer, so the two-way comparison above never reaches it.  The minimal
-    # list drifted exactly this way when it was the only unwatched copy.
-    m = re.search(r'MICRO_OPTIONS="(.*?)"', dist, re.S)
-    if not m:
-        say("drawer_micro_dist", "no_MICRO_OPTIONS_in_dist/make-dist.sh")
-        bad += 1
+# ---------------------------------------------------------------- built ----
+
+release = read(".github/workflows/release.yml")
+for drawer in PACKED:
+    if re.search(r"cmake --preset %s\b" % re.escape(drawer), release):
+        say("built_%s" % drawer, "release.yml")
     else:
-        dist_micro = dict(OPT.findall(m.group(1).replace("\\\n", " ")))
-        want_micro = dict(ci.get("micro", {}))
-        if not want_micro:
-            say("drawer_micro_dist", "no_micro_arm_in_tools/ci.sh")
-            bad += 1
-        elif dist_micro == want_micro:
-            say("drawer_micro_dist", "matches_ci_arm_micro")
-        else:
-            only_dist = sorted(k for k in dist_micro
-                               if dist_micro[k] != want_micro.get(k))
-            only_ci = sorted(k for k in want_micro
-                             if want_micro[k] != dist_micro.get(k))
-            say("drawer_micro_dist",
-                "DIVERGES dist_only=%s ci_only=%s"
-                % (",".join(only_dist) or "-", ",".join(only_ci) or "-"))
-            bad += 1
+        fail("built_%s" % drawer,
+             "release.yml_does_not_build_it -- dist/make-dist.sh will stop at "
+             "`missing build`")
 
-    say("shipping_config_errors", bad)
-    say("shipping_config", "PASS" if bad == 0 else "FAIL")
-    return 0 if bad == 0 else 1
+# -------------------------------------------------------------- derived ----
 
+ci = read("tools/ci.sh")
+dist = read("dist/make-dist.sh")
 
-if __name__ == "__main__":
-    sys.exit(main())
+for drawer in PACKED:
+    if re.search(r'"%s:\$\("\$ROOT/tools/preset-options\.sh" %s\)"'
+                 % (re.escape(drawer), re.escape(drawer)), ci):
+        say("derived_ci_%s" % drawer, "preset-options.sh")
+    else:
+        fail("derived_ci_%s" % drawer, "tools/ci.sh_does_not_read_the_preset")
+
+    var = "%s_OPTIONS" % drawer.upper()
+    if re.search(r'%s="\$\("\$ROOT/tools/preset-options\.sh" %s\)"'
+                 % (var, re.escape(drawer)), dist):
+        say("derived_dist_%s" % drawer, "preset-options.sh")
+    else:
+        fail("derived_dist_%s" % drawer, "dist/make-dist.sh_does_not_read_the_preset")
+
+# --------------------------------------------------------------- unique ----
+#
+# A shipping drawer carrying its own -D list is the shape that rotted.  The
+# coverage arms in ci.sh (instr, noinline, tcpextra, pathswap and the rest)
+# legitimately own theirs -- they exist to compile one option's other side and
+# are not packed into anything -- so only the drawer names are checked.
+
+for drawer in PACKED:
+    hand = []
+
+    if re.search(r'"%s:-D' % re.escape(drawer), ci):
+        hand.append("tools/ci.sh")
+    if re.search(r'%s_OPTIONS="-D' % drawer.upper(), dist):
+        hand.append("dist/make-dist.sh")
+    if re.search(r'-B build/release-%s\b[^\n]*(?:\\\n[^\n]*)*-DAMINETXDUO_'
+                 % re.escape(drawer), release):
+        hand.append(".github/workflows/release.yml")
+
+    if hand:
+        fail("unique_%s" % drawer,
+             "hand_written_option_list_in_" + ",".join(hand))
+    else:
+        say("unique_%s" % drawer, "declared_only_in_CMakePresets.json")
+
+say("shipping_config_errors", errors)
+say("shipping_config", "PASS" if errors == 0 else "FAIL")
+raise SystemExit(0 if errors == 0 else 1)
