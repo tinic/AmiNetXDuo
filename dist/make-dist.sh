@@ -231,15 +231,28 @@ for b in "${BUILDS[@]}"; do
         exit 2
     }
 
+    # WHAT GOES IN HAS TO RUN ON EVERY 68k, which is not the same as "must be
+    # built with CPU=any".  The archive has no CPU drawers, so a packed build
+    # that stops on a machine it was not built for is the failure this check
+    # exists for -- and that is 68020, 68040 and 68060, which emit
+    # instructions a 68000 does not have.  A 68000 build runs on all of them,
+    # so it is as safe to pack as `any`; micro is built that way on purpose
+    # (tools/ci.sh, MICRO_OPTIONS above), and refusing it here refused the
+    # archive it was added for.
     got=$(cpu_of "$b")
-    [ "$got" = "any" ] || {
-        echo "!! $b was configured with AMINETXDUO_CPU=${got:-unset}." >&2
-        echo "!! The archive has no CPU drawers: one build serves every 68k," >&2
-        echo "!! and a per-CPU one packed into it would stop a machine it was" >&2
-        echo "!! not built for.  Configure it fresh -- a cached value survives" >&2
-        echo "!! a reconfigure -- or pass -DAMINETXDUO_CPU=any." >&2
-        exit 2
-    }
+    case "$got" in
+        any|68000) ;;
+        *)
+            echo "!! $b was configured with AMINETXDUO_CPU=${got:-unset}." >&2
+            echo "!! The archive has no CPU drawers, so everything in it has to" >&2
+            echo "!! run on every 68k.  any does, and so does 68000 -- a 68000" >&2
+            echo "!! binary runs on an 020, 030, 040 and 060 alike.  68020," >&2
+            echo "!! 68040 and 68060 do not: they stop a machine they were not" >&2
+            echo "!! built for.  Configure it fresh -- a cached value survives a" >&2
+            echo "!! reconfigure -- or pass -DAMINETXDUO_CPU=any." >&2
+            exit 2
+            ;;
+    esac
 
     for lib in "${LIBS[@]}"; do need "$b/src/$lib/$lib.library"; done
     for dev in "${DEVICES[@]}"; do need "$b/src/$dev.device"; done

@@ -1077,6 +1077,31 @@ stage_cross() {
 
         hr "cross build: $name ${opts:-(default)}"
 
+        # A CACHED -D OUTLIVES ITS ARM, AND THAT IS HOW AN ARM BUILDS A
+        # CONFIGURATION NOBODY ASKS FOR.  cmake is re-run with $opts below
+        # every time, so any value still PASSED is current.  A value DROPPED
+        # from CROSS_CONFIGS is not passed at all, and CMake keeps the cached
+        # one forever: `cmake -B dir -DAMINETXDUO_DHCP=OFF` then `cmake -B dir`
+        # leaves AMINETXDUO_DHCP:BOOL=OFF.
+        #
+        # micro carried -DAMINETXDUO_DHCP=OFF until DHCP came back to it.
+        # Every reused build/ci/micro went on building DHCP off and reporting
+        # itself as micro -- 156,260 bytes against the 167,984 a fresh
+        # configure of the same arm produces.  A size taken out of such a
+        # directory is of a configuration that does not exist.
+        #
+        # The option set is the directory's identity, so record it beside the
+        # directory and start over when it changes.  This subsumes the CPU
+        # case: AMINETXDUO_CPU=any and =68000 derive the same -m68000 and
+        # cannot be told apart by their flags, but they are different $opts.
+        optsig="$BUILD/$name.opts"
+        if [ -d "$BUILD/$name" ] &&
+           [ "$(cat "$optsig" 2>/dev/null || true)" != "$opts" ]; then
+            note "arm options changed since this directory was configured;\
+ configuring it fresh"
+            rm -rf "$BUILD/$name"
+        fi
+
         refresh_cmake_compiler_cache \
             "$BUILD/$name" "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-gcc" \
             "cross/$name"
@@ -1088,6 +1113,11 @@ stage_cross() {
             -DCMAKE_PROJECT_INCLUDE="$ROOT/cmake/ci-warnings.cmake" \
             $opts > "$BUILD/$name-configure.log" 2>&1 || {
                 tail -30 "$BUILD/$name-configure.log"; fail "configure $name"; continue; }
+
+        # Only after a configure that succeeded: a failed one leaves the
+        # directory in whatever state it reached, and claiming it is this
+        # arm's would skip the wipe next time.
+        printf '%s\n' "$opts" > "$optsig"
 
         if cmake --build "$BUILD/$name" --parallel "$JOBS" > "$BUILD/$name-build.log" 2>&1; then
             note "built clean"
