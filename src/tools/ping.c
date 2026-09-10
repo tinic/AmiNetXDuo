@@ -293,10 +293,8 @@ static int ping_main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * tool_socket_open(), not tool_require_stack(): opening bsdsocket.library
-     * brings the stack up, which is right here.
-     */
+    /* tool_socket_open() supplies the API; it does not select or start a
+       configured network interface. */
     sb = tool_socket_open();
     if (sb == NULL)
     {

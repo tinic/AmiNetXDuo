@@ -250,7 +250,7 @@ struct AmiSocketBase
 
     struct SignalSemaphore  sb_Lock;        /* guards the child list + stack */
     struct MinList          sb_Children;
-    ULONG                   sb_StackRefs;   /* netstack_startup() references */
+    ULONG                   sb_StackRefs;   /* openers and explicit holds    */
     ULONG                   sb_TransientStackRefs; /* async workers, no base */
 
     BOOL                    sb_StackHeld;
@@ -686,6 +686,11 @@ APTR  bsd_lib_reserved(VOID);
    the running stack so the caller's open can be closed without taking the
    network down with it.  Idempotent.  0 on success, -1 if there is no stack. */
 LONG  bsd_stack_hold(struct AmiSocketBase *base);
+
+/* Start the stack from one explicitly requested interface, or attach it to an
+ * already running stack.  The master-base lock serialises the first add. */
+LONG  bsd_stack_interface_start(struct AmiSocketBase *base,
+                                const AmiIfConfig *cfg, UWORD *index_out);
 
 /* Short-lived stack references for library workers that can outlive the base
    whose vector launched them. They hold no OpenCnt; the worker census keeps

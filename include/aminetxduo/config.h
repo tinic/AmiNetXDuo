@@ -372,6 +372,14 @@ typedef struct AmiConfig {
 LONG ami_config_load(AmiConfig *cfg);
 
 /*
+ * Read the machine-wide configuration around one already parsed interface.
+ * This is the AddNetInterface start path: it deliberately does not enumerate
+ * DEVS:NetInterfaces, because files in that drawer are definitions rather
+ * than an implicit list of devices to open.
+ */
+LONG ami_config_load_selected(AmiConfig *cfg, const AmiIfConfig *iface);
+
+/*
  * Give back everything ami_config_load() took, and leave *cfg a valid empty
  * configuration.  Safe on a zeroed AmiConfig, safe to call twice, and safe on
  * one that a failed load left half-built.

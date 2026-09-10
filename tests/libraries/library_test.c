@@ -3,9 +3,9 @@
  *
  * Proves that the two images we ship are real AmigaOS shared libraries: that
  * Exec finds the romtag in the loaded segment, runs the RTF_AUTOINIT init
- * vector, and hands back a working base, and, for bsdsocket.library, that
- * OpenLibrary() brings the whole netstack up behind it and the LVO jump table
- * dispatches.
+ * vector, and hands back a working base, and, for bsdsocket.library, that a
+ * bare OpenLibrary() starts no interface while an explicit interface request
+ * brings up the netstack and the LVO jump table dispatches.
  *
  * It is a separate executable from tests/netstack because it exercises the
  * libraries through their ABI, not through the C API: nothing here is linked
@@ -28,6 +28,8 @@
 #include <proto/exec.h>
 #include <inline/macros.h>
 #include <proto/dos.h>
+
+#include "aminetxduo/netstatus.h"
 
 #include <stdarg.h>
 #include <string.h>
@@ -207,6 +209,7 @@ static VOID t_ug_foreign_main(VOID)
 #define LVO_Dup2Socket      (-264)
 #define LVO_gethostname     (-282)
 #define LVO_inet_pton       (-606)
+#define LVO_NetStackControl (-876)
 
 /* Errno values, from the NDK's <sys/errno.h>. */
 #define T_EFAULT            14
@@ -214,6 +217,26 @@ static VOID t_ug_foreign_main(VOID)
 #define T_EMSGSIZE          40
 #define T_EPROTONOSUPPORT   43
 #define T_EOPNOTSUPP        45
+#define T_ENETDOWN          50
+
+static LONG bsd_netstack_control(struct Library *base, ULONG op,
+                                 NetStatusControl *ctl)
+{
+register struct Library *a6 __asm("a6") = base;
+register ULONG           d0 __asm("d0") = AMI_NETSTATUS_MAGIC;
+register ULONG           d1 __asm("d1") = op;
+register APTR            a0 __asm("a0") = ctl;
+register ULONG           d2 __asm("d2") = sizeof(*ctl);
+register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
+register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-876:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
+                      : "a1", "cc", "memory");
+    return(res);
+}
 
 static LONG bsd_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
@@ -730,12 +753,7 @@ char             hostname[64];
 LONG             sock;
 
 
-    /*
-     * This is the whole stack: OpenLibrary() runs the romtag init, clones a
-     * per-opener base and calls netstack_startup(), which opens the SANA-II
-     * device, starts ThreadX and blocks for a DHCP lease.
-     */
-    t_log("opening bsdsocket.library (this brings the stack up)");
+    t_log("opening bsdsocket.library (this must not open a network device)");
 
     sbase =  OpenLibrary((CONST_STRPTR) "bsdsocket.library", 4UL);
     if (!t_check((BOOL) (sbase != NULL), "OpenLibrary(bsdsocket.library)", 0UL))
@@ -745,6 +763,25 @@ LONG             sock;
     }
 
     SocketBase =  sbase;
+
+    sock = bsd_socket(sbase, T_AF_INET, T_SOCK_STREAM, 0L);
+    (VOID) t_check((BOOL) (sock == -1L && bsd_errno(sbase) == T_ENETDOWN),
+                   "bare OpenLibrary leaves the network down", (ULONG)sock);
+
+    {
+        NetStatusControl ctl;
+
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.nsc_Magic = AMI_NETSTATUS_MAGIC;
+        ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+        strcpy(ctl.nsc_Name, "eth0");
+
+        t_log("explicitly adding eth0 (this brings the stack up)");
+        (VOID) t_check((BOOL)
+                       (bsd_netstack_control(sbase, NETCTRL_INTERFACE_ADD,
+                                             &ctl) == 0),
+                       "NETCTRL_INTERFACE_ADD(eth0)", 0UL);
+    }
 
     t_log("  bsdsocket.library %ld.%ld: %s",
           (ULONG) sbase -> lib_Version, (ULONG) sbase -> lib_Revision,

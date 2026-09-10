@@ -76,6 +76,7 @@ static struct
     LONG    shutdown_calls;
     LONG    startup_calls;
     LONG    startup_result;
+    BOOL    stack_running;
     LONG    alloc_signal_calls;
     BYTE    alloc_signal_result;
     LONG    free_signal_calls;
@@ -295,6 +296,23 @@ VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_re
 BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }
 VOID bsd_tcp_handler_start(struct AmiSocketBase *m) { (VOID)m; h_unreachable("bsd_tcp_handler_start"); }
 LONG netstack_startup(VOID) { h.startup_calls++; return h.startup_result; }
+LONG netstack_startup_interface(const AmiIfConfig *c)
+{
+    (VOID)c;
+    h.startup_calls++;
+    return h.startup_result;
+}
+AmiNetStack *netstack_get(VOID)
+{
+    return h.stack_running ? (AmiNetStack *)(ULONG)1 : NULL;
+}
+LONG netstack_interface_start(const AmiIfConfig *c, UWORD *out)
+{
+    (VOID)c;
+    (VOID)out;
+    h_unreachable("netstack_interface_start");
+    return AMI_NET_ERR_STATE;
+}
 VOID n68k_cpu_select(ULONG a) { (VOID)a; h_unreachable("n68k_cpu_select"); }
 
 const APTR BsdVectorTable[] = { (APTR)-1 };
@@ -462,6 +480,13 @@ static VOID t_transient_stack_reference(VOID)
     h_base->sb_StackRefs = 1;       /* the launching opener */
 
     rc = bsd_stack_transient_hold(h_base);
+    CHECK(rc != 0, "an API opener without a network is not a stack reference");
+    CHECK(h_base->sb_StackRefs == 1,
+          "refusing the worker leaves the opener count alone");
+
+    h.stack_running = TRUE;
+
+    rc = bsd_stack_transient_hold(h_base);
     CHECK(rc == 0, "the worker acquired a running stack");
     CHECK(h_base->sb_StackRefs == 2,
           "the worker added one stack reference");
@@ -493,39 +518,43 @@ static VOID t_transient_stack_reference(VOID)
     h_report("transient", 0, 0, 0, h_teardown_ran());
 }
 
-static VOID t_startup_fallback_ownership(VOID)
+static VOID t_explicit_startup_fallback_ownership(VOID)
 {
-    struct AmiSocketBase *opened;
+    AmiIfConfig cfg;
+    LONG        rc;
 
-    printf("failed startup without a child Process\n");
+    printf("failed explicit interface startup without a child Process\n");
+
+    memset(&cfg, 0, sizeof(cfg));
+    strcpy(cfg.name, "eth0");
+    strcpy(cfg.device, "test.device");
+    cfg.configured = TRUE;
 
     h_machine_reset(TRUE);
     h.startup_result = AMI_NET_ERR_CONFIG;
     h.alloc_signal_result = (BYTE)-1;
 
-    opened = bsd_lib_open(0UL, h_base);
+    rc = bsd_stack_interface_start(h_base, &cfg, NULL);
 
-    CHECK(opened == NULL, "signal-exhausted startup refused the open");
+    CHECK(rc == AMI_NET_ERR_CONFIG,
+          "signal-exhausted startup refused the interface");
     CHECK(h.startup_calls == 1, "signal fallback attempted startup once");
     CHECK(h.shutdown_calls == 1,
           "signal fallback released the failed startup reference");
-    CHECK(h_base->sb_StackRefs == 0, "signal fallback published no stack reference");
-    CHECK(h_base->sb_Lib.lib_OpenCnt == 0, "signal fallback restored the open count");
 
     h_machine_reset(TRUE);
     h.startup_result = AMI_NET_ERR_CONFIG;
     h.alloc_signal_result = 5;
 
-    opened = bsd_lib_open(0UL, h_base);
+    rc = bsd_stack_interface_start(h_base, &cfg, NULL);
 
-    CHECK(opened == NULL, "process-creation failure refused the open");
+    CHECK(rc == AMI_NET_ERR_CONFIG,
+          "process-creation failure refused the interface");
     CHECK(h.create_proc_calls == 1, "the child Process was attempted once");
     CHECK(h.free_signal_calls == 1, "the unused startup signal was freed");
     CHECK(h.startup_calls == 1, "process fallback attempted startup once");
     CHECK(h.shutdown_calls == 1,
           "process fallback released the failed startup reference");
-    CHECK(h_base->sb_StackRefs == 0, "process fallback published no stack reference");
-    CHECK(h_base->sb_Lib.lib_OpenCnt == 0, "process fallback restored the open count");
 }
 
 int main(void)
@@ -538,7 +567,7 @@ int main(void)
     t_other_refusals();
     t_last_close_retries();
     t_transient_stack_reference();
-    t_startup_fallback_ownership();
+    t_explicit_startup_fallback_ownership();
 
     printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

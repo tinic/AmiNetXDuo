@@ -51,6 +51,9 @@ typedef struct AmiNetStack AmiNetStack;
 /* Bring the stack up: idempotent and reference-counted.  Blocks until the
    first interface has an address or the DHCP timeout expires. */
 LONG netstack_startup(VOID);
+/* Start a new stack with exactly this explicit interface.  Further
+ * interfaces are attached with netstack_interface_start(). */
+LONG netstack_startup_interface(const AmiIfConfig *cfg);
 
 /* Drop a reference. The stack goes down when the count reaches zero. */
 VOID netstack_shutdown(VOID);

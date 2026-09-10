@@ -58,6 +58,9 @@ typedef struct NetStackHostEnv
 
     UWORD   cfg_interfaces;         /* how many ami_config_load() reports    */
     UWORD   cfg_iptype;             /* AmiIpType for every one of them       */
+    ULONG   cfg_full_loads;
+    ULONG   cfg_selected_loads;
+    AmiIfConfig opened_cfg;         /* exact definition handed to SANA-II    */
     BOOL    sana2_open_fails;
     LONG    sana2_open_error;
 

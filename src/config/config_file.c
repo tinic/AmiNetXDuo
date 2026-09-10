@@ -370,7 +370,7 @@ LONG ami_config_log_level(LONG fallback)
     return value;
 }
 
-LONG ami_config_load(AmiConfig *cfg)
+static LONG begin_config_load(AmiConfig *cfg)
 {
     if (cfg == NULL)
         return AMI_CFG_ERR_SYNTAX;
@@ -386,7 +386,13 @@ LONG ami_config_load(AmiConfig *cfg)
     if (!ami_config_reserve(cfg, (UWORD)AMI_CFG_IFACE_FLOOR))
         return AMI_CFG_ERR_NOMEM;
 
-    ami_config_load_interfaces(cfg);
+    return AMI_CFG_OK;
+}
+
+static VOID finish_config_load(AmiConfig *cfg)
+{
+    const char *source;
+
     load_resolver(cfg);
     load_gateway(cfg);
 #ifdef AMINETXDUO_TCPDEVICE
@@ -398,15 +404,44 @@ LONG ami_config_load(AmiConfig *cfg)
 
     load_hostname(cfg);
 
-    {
-        const char *source = ami_config_hostname_source_text(cfg->hostname_source);
+    source = ami_config_hostname_source_text(cfg->hostname_source);
 
-        AMI_INFO("config: %lu interface(s), %lu name server(s), host '%s' (%s)",
-                 (unsigned long)cfg->interface_count,
-                 (unsigned long)cfg->resolver.nameserver_count,
-                 (cfg->hostname[0] != '\0') ? cfg->hostname : "(unnamed)",
-                 (source != NULL) ? source : "nothing named it");
+    AMI_INFO("config: %lu interface(s), %lu name server(s), host '%s' (%s)",
+             (unsigned long)cfg->interface_count,
+             (unsigned long)cfg->resolver.nameserver_count,
+             (cfg->hostname[0] != '\0') ? cfg->hostname : "(unnamed)",
+             (source != NULL) ? source : "nothing named it");
+}
+
+LONG ami_config_load(AmiConfig *cfg)
+{
+    LONG rc = begin_config_load(cfg);
+
+    if (rc != AMI_CFG_OK)
+        return rc;
+
+    ami_config_load_interfaces(cfg);
+    finish_config_load(cfg);
+
+    return AMI_CFG_OK;
+}
+
+LONG ami_config_load_selected(AmiConfig *cfg, const AmiIfConfig *iface)
+{
+    LONG rc = begin_config_load(cfg);
+
+    if (rc != AMI_CFG_OK)
+        return rc;
+    if (iface == NULL || !iface->configured || iface->name[0] == '\0' ||
+        iface->device[0] == '\0')
+    {
+        ami_config_free(cfg);
+        return AMI_CFG_ERR_SYNTAX;
     }
+
+    cfg->interfaces[0] = *iface;
+    cfg->interface_count = 1;
+    finish_config_load(cfg);
 
     return AMI_CFG_OK;
 }

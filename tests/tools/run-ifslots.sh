@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # WHICH INTERFACE GETS THE HARDWARE, when the drawer describes more of them
-# than the stack has slots for.
+# than the stack has slots for. Definitions are inert until named.
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -11,7 +11,7 @@ cd "$ROOT" || exit 2
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD=a2065
 TIMEOUT=300
-ROUNDS="named typo latefail identity"
+ROUNDS="named pattern typo latefail identity"
 
 while getopts "b:t:N:r:" opt; do
     case "$opt" in
@@ -20,7 +20,7 @@ while getopts "b:t:N:r:" opt; do
         N) BOARD="$OPTARG" ;;
         r) ROUNDS="${OPTARG//,/ }" ;;
         *) echo "usage: $0 [-b builddir] [-t seconds] [-N board]\
- [-r named|typo|latefail|identity]" >&2; exit 2 ;;
+ [-r named|pattern|typo|latefail|identity]" >&2; exit 2 ;;
     esac
 done
 
@@ -158,6 +158,7 @@ round_named() {
         echo "SYS:AddNetInterface aeth0"
         echo "SYS:AddNetInterface beth1"
         echo "SYS:AddNetInterface meth2"
+        echo "SYS:netstat -i"
         echo "SYS:AddNetInterface neth3"
         echo "SYS:RemoveNetInterface aeth0"
         echo "SYS:AddNetInterface neth3"
@@ -248,8 +249,19 @@ round_named() {
     [ "$ok3" = 1 ] && claim 3 PASS "a definition that is not first can be brought up" \
                    || claim 3 FAIL "a definition that is not first can be brought up"
 
+    for n in aeth0 beth1 meth2 neth3; do
+        if block "SYS:netstat -i" 1 | grep -qE "^${n}[[:space:]]"; then
+            fail "$n was attached although only zeth4 was named"
+            ok3=0
+        else
+            pass "$n remains inert when only zeth4 is named"
+        fi
+    done
+    [ "$ok3" = 1 ] && claim 3a PASS "one explicit add opens only that interface" \
+                   || claim 3a FAIL "one explicit add opens only that interface"
+
     local ok4=1 named=0 up4=0
-    many=$(block "SYS:netstat -i" 1)
+    many=$(block "SYS:netstat -i" 2)
     for n in aeth0 beth1 meth2 zeth4; do
         printf '%s\n' "$many" | grep -qE "^${n}[[:space:]]" &&
             up4=$((up4 + 1))
@@ -333,14 +345,62 @@ round_named() {
     return 0
 }
 
+round_pattern() {
+    local stage="$ROOT/build/ifslots-stage-pattern"
+    local ifaces rc n ok=1
+
+    echo
+    echo "=============================================================="
+    echo "==> the user explicitly asks for the whole drawer by pattern"
+    echo "=============================================================="
+
+    rm -rf "$stage"
+    mkdir -p "$stage/libs" "$stage/devs/NetInterfaces"
+    cp "$BSD" "$stage/libs/bsdsocket.library"
+    cp "$A2065" "$stage/devs/a2065.device"
+
+    printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.77.5\nNETMASK=255.255.255.0\n' \
+        > "$stage/devs/NetInterfaces/aeth0"
+    printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.78.5\nNETMASK=255.255.255.0\n' \
+        > "$stage/devs/NetInterfaces/beth1"
+    printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.79.5\nNETMASK=255.255.255.0\n' \
+        > "$stage/devs/NetInterfaces/ceth2"
+
+    {
+        echo 'SYS:AddNetInterface DEVS:NetInterfaces/~(#?.info)'
+        echo "SYS:netstat -i"
+    } > "$stage/commands.txt"
+
+    boot ifslots-pattern "$stage"
+    rc=$?
+    if [ "$rc" != 0 ]; then
+        rig "the explicit-pattern round did not produce a transcript to read"
+        return 2
+    fi
+
+    ifaces=$(block "SYS:netstat -i" 1)
+    for n in aeth0 beth1 ceth2; do
+        if printf '%s\n' "$ifaces" | grep -qE "^${n}[[:space:]]"; then
+            pass "the explicit drawer pattern attached $n"
+        else
+            fail "the explicit drawer pattern did not attach $n"
+            ok=0
+        fi
+    done
+
+    [ "$ok" = 1 ] && claim 3b PASS "the standard Network-Startup pattern is explicit and works" \
+                  || claim 3b FAIL "the standard Network-Startup pattern is explicit and works"
+    return 0
+}
+
 round_typo() {
     local stage="$ROOT/build/ifslots-stage-typo"
     local ok=1 refusal ifaces rc
 
     echo
     echo "=============================================================="
-    echo "==> every slot held, three of them by interfaces nobody asked"
-    echo "==> for, and the one asked for names a driver that is not there"
+    echo "==> one interface is live, three definitions are inert, and"
+    echo "==> the one asked for names a driver that is not there"
     echo "=============================================================="
 
     rm -rf "$stage"
@@ -383,11 +443,10 @@ round_typo() {
     ifaces=$(block "SYS:netstat -i" 1)
     for n in beth1 ceth2 deth3; do
         if printf '%s\n' "$ifaces" | grep -qE "^${n}[[:space:]]"; then
-            pass "$n is still up: no slot was taken for an interface that\
- could not come up"
-        else
-            fail "$n was taken down for zbad4, which never opened its device"
+            fail "$n was attached although nobody named it"
             ok=0
+        else
+            pass "$n remains an inert definition"
         fi
     done
     if printf '%s\n' "$ifaces" | grep -qE "^aeth0[[:space:]]"; then
@@ -403,8 +462,8 @@ round_typo() {
         pass "and zbad4 is not a live interface"
     fi
 
-    [ "$ok" = 1 ] && claim 4b PASS "a slot is never taken for an interface that cannot come up" \
-                  || claim 4b FAIL "a slot is never taken for an interface that cannot come up"
+    [ "$ok" = 1 ] && claim 4b PASS "a failed explicit add starts no other definition" \
+                  || claim 4b FAIL "a failed explicit add starts no other definition"
 
     return 0
 }
@@ -415,8 +474,8 @@ round_latefail() {
 
     echo
     echo "=============================================================="
-    echo "==> the newcomer's device opens and the interface fails"
-    echo "==> anyway: does the slot go back where it came from?"
+    echo "==> four explicitly named interfaces hold the slots; a fifth"
+    echo "==> fails without disturbing any of them"
     echo "=============================================================="
 
     rm -rf "$stage"
@@ -439,10 +498,14 @@ round_latefail() {
 
     {
         echo "SYS:AddNetInterface aeth0"
+        echo "SYS:AddNetInterface beth1"
+        echo "SYS:AddNetInterface ceth2"
+        echo "SYS:AddNetInterface deth3"
         echo "SYS:netstat -i"
         echo "SYS:AddNetInterface ydup4"
         echo "SYS:netstat -i"
         echo "SYS:ShowNetStatus INTERFACES"
+        echo "SYS:RemoveNetInterface deth3"
         echo "SYS:AddNetInterface zgw5"
         echo "SYS:netstat -i"
         echo "SYS:ShowNetStatus EVENTS"
@@ -456,8 +519,8 @@ round_latefail() {
     fi
 
     refusal=$(block "SYS:AddNetInterface ydup4" 1)
-    if printf '%s\n' "$refusal" | grep -qiE "refused|did not"; then
-        pass "the add of an interface that cannot be finished is refused"
+    if printf '%s\n' "$refusal" | grep -qiE "refused|slots are in use"; then
+        pass "the fifth explicit interface is refused"
     else
         fail "the add reported no failure at all"
         ok=0
@@ -508,8 +571,8 @@ round_latefail() {
         pass "no interface was left merely 'defined' by the failed add"
     fi
 
-    [ "$ok" = 1 ] && claim 4c PASS "an add that fails after its device opened puts the slot back" \
-                  || claim 4c FAIL "an add that fails after its device opened puts the slot back"
+    [ "$ok" = 1 ] && claim 4c PASS "a refused fifth add leaves four named interfaces intact" \
+                  || claim 4c FAIL "a refused fifth add leaves four named interfaces intact"
 
     refusal=$(block "SYS:AddNetInterface zgw5" 1)
     ifaces=$(block "SYS:netstat -i" 3)
@@ -646,6 +709,7 @@ round_identity() {
 for r in $ROUNDS; do
     case "$r" in
         named)    round_named ;;
+        pattern)  round_pattern ;;
         typo)     round_typo ;;
         latefail) round_latefail ;;
         identity) round_identity ;;

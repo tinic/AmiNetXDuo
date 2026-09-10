@@ -669,10 +669,7 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     bsd_retain_dead((UBYTE *)child - neg, neg, neg + pos, child->sb_Task);
 }
 
-/*
- * netstack_startup() parses DEVS: and runs all of NetX Duo's init on the
- * calling task's stack, it adopts that task (netstack.c, ami_ns_bring_up()).
- */
+/* NetX Duo initialisation needs more stack than a Shell command promises. */
 #define BSD_STARTUP_STACK   (64UL * 1024UL)
 
 typedef struct
@@ -680,13 +677,14 @@ typedef struct
     struct Task *nb_Parent;
     ULONG        nb_SigMask;
     LONG         nb_Result;
+    AmiIfConfig  nb_Config;
 } BsdNetBoot;
 
 static BsdNetBoot *bsd_net_boot;
 
-static LONG bsd_netstack_start_owned(VOID)
+static LONG bsd_netstack_start_owned(const AmiIfConfig *cfg)
 {
-    LONG result = netstack_startup();
+    LONG result = netstack_startup_interface(cfg);
 
     if (result != AMI_NET_OK)
         netstack_shutdown();
@@ -698,12 +696,12 @@ static VOID bsd_netstack_boot_main(VOID)
 {
     BsdNetBoot *b = bsd_net_boot;
 
-    b->nb_Result = bsd_netstack_start_owned();
+    b->nb_Result = bsd_netstack_start_owned(&b->nb_Config);
 
     Signal(b->nb_Parent, b->nb_SigMask);
 }
 
-static LONG bsd_netstack_bringup(VOID)
+static LONG bsd_netstack_bringup(const AmiIfConfig *cfg)
 {
     BsdNetBoot      boot;
     struct TagItem  tags[5];
@@ -714,11 +712,12 @@ static LONG bsd_netstack_bringup(VOID)
        its thread run-signal, so sharing it wakes this Wait() early. */
     sig = (BYTE)AllocSignal(-1);
     if (sig < 0)
-        return bsd_netstack_start_owned(); /* no signal: caller-stack fallback */
+        return bsd_netstack_start_owned(cfg); /* caller-stack fallback */
 
     boot.nb_Parent  = FindTask(NULL);
     boot.nb_SigMask = 1UL << sig;
     boot.nb_Result  = AMI_NET_ERR_KERNEL;
+    boot.nb_Config  = *cfg;
     bsd_net_boot    = &boot;
 
     tags[0].ti_Tag  = NP_Entry;     tags[0].ti_Data = (ULONG)bsd_netstack_boot_main;
@@ -732,7 +731,7 @@ static LONG bsd_netstack_bringup(VOID)
     {
         bsd_net_boot = NULL;
         FreeSignal(sig);
-        return bsd_netstack_start_owned();
+        return bsd_netstack_start_owned(cfg);
     }
 
     Wait(boot.nb_SigMask);
@@ -740,6 +739,38 @@ static LONG bsd_netstack_bringup(VOID)
     FreeSignal(sig);
 
     return boot.nb_Result;
+}
+
+LONG bsd_stack_interface_start(struct AmiSocketBase *base,
+                               const AmiIfConfig *cfg, UWORD *index_out)
+{
+    struct AmiSocketBase *master = base;
+    LONG                  rc;
+
+    if (master == NULL || cfg == NULL)
+        return AMI_NET_ERR_CONFIG;
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    /* In particular this protects bsd_net_boot: two simultaneous first adds
+       cannot each launch an IP instance or overwrite the boot hand-off. */
+    ObtainSemaphore(&master->sb_Lock);
+    if (netstack_get() == NULL)
+    {
+        rc = bsd_netstack_bringup(cfg);
+        if (rc == AMI_NET_OK && index_out != NULL)
+            *index_out = 0;
+    }
+    else
+        rc = netstack_interface_start(cfg, index_out);
+    ReleaseSemaphore(&master->sb_Lock);
+
+#ifdef AMINETXDUO_TCPDEVICE
+    if (rc == AMI_NET_OK)
+        bsd_tcp_handler_start(master);
+#endif
+
+    return rc;
 }
 
 struct AmiSocketBase *bsd_lib_open(
@@ -768,16 +799,9 @@ struct AmiSocketBase *bsd_lib_open(
 
     bsd_usergroup_open();
 
-    if (master->sb_StackRefs == 0)
-    {
-        if (bsd_netstack_bringup() != AMI_NET_OK)
-        {
-            ReleaseSemaphore(&master->sb_Lock);
-            master->sb_Lib.lib_OpenCnt--;
-            AMI_ERROR("bsdsocket: netstack_startup failed");
-            return NULL;
-        }
-    }
+    /* Loading the socket API is not a request to open every card described in
+       DEVS:NetInterfaces.  AddNetInterface starts the first explicit one via
+       NETCTRL_INTERFACE_ADD; until then socket operations report ENETDOWN. */
     master->sb_StackRefs++;
 
     ReleaseSemaphore(&master->sb_Lock);
@@ -793,12 +817,6 @@ struct AmiSocketBase *bsd_lib_open(
         master->sb_Lib.lib_OpenCnt--;
         return NULL;
     }
-
-#ifdef AMINETXDUO_TCPDEVICE
-    bsd_tcp_handler_start(master);
-#else
-    (VOID)master;
-#endif
 
     return child;
 }
@@ -865,7 +883,8 @@ LONG bsd_stack_transient_hold(struct AmiSocketBase *base)
 
     ObtainSemaphore(&master->sb_Lock);
 
-    if (master->sb_StackRefs != 0 &&
+    if (netstack_get() != NULL &&
+        master->sb_StackRefs != 0 &&
         master->sb_StackRefs != (ULONG)-1 &&
         master->sb_TransientStackRefs != (ULONG)-1)
     {
@@ -927,7 +946,7 @@ LONG bsd_stack_hold(struct AmiSocketBase *base)
 
     if (!master->sb_StackHeld)
     {
-        if (master->sb_StackRefs == 0)
+        if (master->sb_StackRefs == 0 || netstack_get() == NULL)
         {
             rc = -1;
         }

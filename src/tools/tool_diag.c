@@ -538,28 +538,16 @@ VOID tool_explain_no_stack(VOID)
 
 BOOL tool_stack_library_running(VOID)
 {
-    struct Library *lib;
     BOOL            running = FALSE;
 
     /*
-     * Looking, not opening: OpenLibrary("bsdsocket.library") would bring the
-     * stack up, which a status command must not do. Either sign is enough --
-     * the AMITCP port, or a non-zero open count on the library.
+     * Looking, not opening.  A loaded bsdsocket.library is not evidence of a
+     * network: OpenLibrary() deliberately attaches no interface.  The public
+     * AMITCP port is created only when the netstack itself starts.
      */
     Forbid();
-
     if (FindPort((CONST_STRPTR)"AMITCP") != NULL)
-    {
         running = TRUE;
-    }
-    else
-    {
-        lib = (struct Library *)FindName(&SysBase->LibList,
-                                         (CONST_STRPTR)"bsdsocket.library");
-        if (lib != NULL && lib->lib_OpenCnt > 0)
-            running = TRUE;
-    }
-
     Permit();
 
     return running;
@@ -747,14 +735,11 @@ struct Library *tool_stack_start(VOID)
 {
     /*
      * The stack singleton cannot live in a command: ThreadX runs its Tasks on
-     * stacks inside the hunk that created them. It lives inside
-     * bsdsocket.library, which brings it up on its first OpenLibrary().
-     * NETCTRL_STACK_HOLD keeps it up without leaking a base per invocation;
-     * it is idempotent.
+     * stacks inside the hunk that created them.  Opening bsdsocket.library
+     * only obtains the API; NETCTRL_INTERFACE_ADD starts an explicitly named
+     * interface.  If one is already running, retain it now.
      */
-    struct Library  *base;
-    NetStatusControl ctl;
-    ULONG            w;
+    struct Library *base;
 
     tool_stack_held = FALSE;
 
@@ -767,13 +752,53 @@ struct Library *tool_stack_start(VOID)
     if (!tool_stack_is_ours(base))
         return base;
 
+    (VOID)tool_stack_hold(base);
+
+    return base;
+}
+
+BOOL tool_stack_hold(struct Library *base)
+{
+    NetStatusControl ctl;
+    ULONG            w;
+
+    if (base == NULL || !tool_stack_is_ours(base))
+        return FALSE;
+    if (tool_stack_held)
+        return TRUE;
+
     for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
         ((ULONG *)&ctl)[w] = 0;
 
-    if (tool_netstatus_control(base, NETCTRL_STACK_HOLD, &ctl, NULL) == 0)
-        tool_stack_held = TRUE;
+    if (tool_netstatus_control(base, NETCTRL_STACK_HOLD, &ctl, NULL) != 0)
+        return FALSE;
 
-    return base;
+    tool_stack_held = TRUE;
+    return TRUE;
+}
+
+LONG tool_stack_add_interface(struct Library *base, const char *name,
+                              BOOL force_up)
+{
+    NetStatusControl ctl;
+    LONG             err = 0;
+    ULONG            w;
+    ULONG            i;
+
+    if (base == NULL || name == NULL || name[0] == '\0')
+        return EINVAL;
+
+    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+        ((ULONG *)&ctl)[w] = 0;
+    for (i = 0; i + 1 < (ULONG)sizeof(ctl.nsc_Name) && name[i] != '\0'; i++)
+        ctl.nsc_Name[i] = name[i];
+    if (force_up)
+        ctl.nsc_Flags |= NETCTRL_F_UP;
+
+    if (tool_netstatus_control(base, NETCTRL_INTERFACE_ADD, &ctl, &err) == 0)
+        return 0;
+
+    return (err != 0) ? err : EIO;
 }
 
 VOID tool_stack_release(struct Library *base)
@@ -781,21 +806,8 @@ VOID tool_stack_release(struct Library *base)
     if (base == NULL)
         return;
 
-    /*
-     * Ours and holding its own reference, or not ours at all: either way this
-     * open has no job left.
-     */
-    if (tool_stack_held || !tool_stack_is_ours(base))
-    {
-        CloseLibrary(base);
-        return;
-    }
-
-    /*
-     * Ours, and it did not take the request: an older library in LIBS: than the
-     * command in C:. This open is then the only thing keeping the network up,
-     * so it is kept.
-     */
+    /* The persistent hold, when present, is independent of this opener. */
+    CloseLibrary(base);
 }
 
 /*
@@ -1134,10 +1146,7 @@ struct Library *tool_netstatus_open(BOOL quiet)
 {
     struct Library *base;
 
-    /*
-     * Looking before opening: OpenLibrary() on a stack that is not running would
-     * start it.
-     */
+    /* Do not turn a loaded but deliberately idle API into a running stack. */
     if (!tool_stack_library_running())
     {
         if (!quiet)

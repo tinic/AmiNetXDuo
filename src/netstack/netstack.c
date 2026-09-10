@@ -50,6 +50,7 @@ static BOOL                     ami_ns_kernel_started;
 
 static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
                                      const char *reason);
+static VOID ami_ns_gateway_name_primary(AmiNetStack *ns, UWORD index);
 
 static VOID ami_ns_lock_init(VOID)
 {
@@ -659,7 +660,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 _Static_assert((int)AMI_CFG_MAX_ATTACHED == (int)NX_MAX_PHYSICAL_INTERFACES,
                "AMI_CFG_MAX_ATTACHED must equal NX_MAX_PHYSICAL_INTERFACES");
 
-static LONG ami_ns_open_devices(AmiNetStack *ns)
+static LONG ami_ns_open_devices(AmiNetStack *ns, BOOL explicitly_selected)
 {
     UWORD i;
     UWORD opened = 0;
@@ -718,11 +719,10 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
 
         ns->ns_IfaceCfg[opened] = opened;
 
-        /*
-         * Nobody asked for this one; it was merely found in the drawer.
-         * ami_ns_yield_candidate() may offer its slot to an interface that IS named.
-         */
-        ns->ns_IfaceWanted[opened] = FALSE;
+        /* The library path contains exactly the interface named by
+           AddNetInterface.  The legacy directly-linked diagnostic path may
+           still load a complete drawer and marks those entries unrequested. */
+        ns->ns_IfaceWanted[opened] = explicitly_selected;
 
         opened++;
     }
@@ -1907,7 +1907,7 @@ static LONG ami_ns_kernel_stop_locked(VOID)
     return AMI_NET_OK;
 }
 
-static LONG ami_ns_bring_up(VOID)
+static LONG ami_ns_bring_up(const AmiIfConfig *selected)
 {
     AmiNetCaller  caller;
     AmiNetStack  *ns;
@@ -1931,7 +1931,9 @@ static LONG ami_ns_bring_up(VOID)
         return AMI_NET_ERR_NOMEM;
     }
 
-    if (ami_config_load(&ns->ns_Config) != AMI_CFG_OK)
+    if (((selected != NULL)
+             ? ami_config_load_selected(&ns->ns_Config, selected)
+             : ami_config_load(&ns->ns_Config)) != AMI_CFG_OK)
     {
         ami_config_free(&ns->ns_Config);
         ami_free(ns);
@@ -1954,7 +1956,7 @@ static LONG ami_ns_bring_up(VOID)
         return AMI_NET_ERR_CONFIG;
     }
 
-    status = ami_ns_open_devices(ns);
+    status = ami_ns_open_devices(ns, selected != NULL);
     if (status != AMI_NET_OK)
     {
         ami_ns_destroy(ns);
@@ -2068,6 +2070,9 @@ static LONG ami_ns_bring_up(VOID)
                              ami_netstack_rexx_resume);
 #endif
 
+    if (selected != NULL)
+        ami_ns_gateway_name_primary(ns, 0);
+
     if (status != AMI_NET_OK)
     {
         AMI_WARN("netstack: up, but no interface has an address, check the "
@@ -2080,7 +2085,7 @@ static LONG ami_ns_bring_up(VOID)
     return AMI_NET_OK;
 }
 
-LONG netstack_startup(VOID)
+static LONG ami_ns_startup(const AmiIfConfig *selected)
 {
     LONG status;
 
@@ -2102,7 +2107,7 @@ LONG netstack_startup(VOID)
         return status;
     }
 
-    status = ami_ns_bring_up();
+    status = ami_ns_bring_up(selected);
 
     if (status != AMI_NET_OK && ami_ns != NULL)
     {
@@ -2112,6 +2117,21 @@ LONG netstack_startup(VOID)
     ReleaseSemaphore(&ami_ns_lock);
 
     return status;
+}
+
+LONG netstack_startup(VOID)
+{
+    /* Directly linked diagnostics explicitly ask for the traditional complete
+       configuration.  bsdsocket.library never uses this path. */
+    return ami_ns_startup(NULL);
+}
+
+LONG netstack_startup_interface(const AmiIfConfig *cfg)
+{
+    if (cfg == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    return ami_ns_startup(cfg);
 }
 
 VOID netstack_shutdown(VOID)

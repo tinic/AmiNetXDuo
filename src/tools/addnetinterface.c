@@ -26,6 +26,12 @@ enum
 #define ADDIF_TIMEOUT       10UL
 
 #define ADDNETIF_MIN_FREE   (200UL * 1024UL)
+#define ADDIF_MATCH_PATH    512UL
+
+/* ReadArgs owns its result only until FreeArgs(), and MatchFirst reuses its
+ * path buffer. Keep the explicit expansion in command-owned storage. */
+static char   addif_expanded[AMI_CFG_MAX_ATTACHED][ADDIF_MATCH_PATH];
+static STRPTR addif_names[AMI_CFG_MAX_ATTACHED + 1];
 
 static VOID advise_out_of_memory(ULONG freemem)
 {
@@ -155,6 +161,92 @@ static VOID sort_names(STRPTR *names, ULONG count)
     }
 }
 
+static BOOL add_expanded_name(const char *path, ULONG *count)
+{
+    if (*count >= (ULONG)AMI_CFG_MAX_ATTACHED)
+    {
+        tool_error("attach: more than %ld interface definitions matched",
+                   (LONG)AMI_CFG_MAX_ATTACHED);
+        tool_hint("Name %ld or fewer; the rest can stay in "
+                  "DEVS:NetInterfaces.", (LONG)AMI_CFG_MAX_ATTACHED);
+        return FALSE;
+    }
+
+    tool_copy_string(addif_expanded[*count], ADDIF_MATCH_PATH, path);
+    addif_names[*count] = (STRPTR)addif_expanded[*count];
+    (*count)++;
+    addif_names[*count] = NULL;
+    return TRUE;
+}
+
+/* Roadshow and AmiTCP_NG both ship a Network-Startup which explicitly passes
+ * DEVS:NetInterfaces/~(#?.info). Opening the library remains inert; this is
+ * the user-owned, command-line request to enumerate the drawer. */
+static BOOL expand_interface_argument(const char *argument, ULONG *count)
+{
+    struct AnchorPath *anchor;
+    LONG               err;
+    BOOL               matched = FALSE;
+    BOOL               ok = TRUE;
+
+    if (FilePart((STRPTR)argument) == (STRPTR)argument)
+        return add_expanded_name(argument, count);
+
+    anchor = (struct AnchorPath *)AllocVec(
+        (ULONG)sizeof(*anchor) + ADDIF_MATCH_PATH, MEMF_PUBLIC | MEMF_CLEAR);
+    if (anchor == NULL)
+    {
+        tool_error("out of memory expanding interface pattern");
+        return FALSE;
+    }
+
+    anchor->ap_Strlen = ADDIF_MATCH_PATH;
+    anchor->ap_BreakBits = SIGBREAKF_CTRL_C;
+
+    err = MatchFirst((STRPTR)argument, anchor);
+    while (err == 0)
+    {
+        const char *path = (const char *)anchor->ap_Buf;
+        const char *name = tool_basename(path);
+        ULONG       len = 0;
+
+        while (name[len] != '\0')
+            len++;
+
+        if (anchor->ap_Info.fib_DirEntryType < 0 &&
+            (len < 5 || tool_stricmp(name + len - 5, ".info") != 0))
+        {
+            matched = TRUE;
+            if (!add_expanded_name(name, count))
+            {
+                ok = FALSE;
+                break;
+            }
+        }
+
+        err = MatchNext(anchor);
+    }
+
+    MatchEnd(anchor);
+    FreeVec(anchor);
+
+    if (!ok)
+        return FALSE;
+    if (!matched)
+    {
+        tool_error("no interface configuration matched \"%s\"",
+                   (LONG)argument);
+        return FALSE;
+    }
+    if (err != 0 && err != ERROR_NO_MORE_ENTRIES)
+    {
+        tool_fault(err);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 /* Static: this table is most of a Shell command's 4 KB stack on its own. */
 static struct
 {
@@ -271,88 +363,9 @@ static LONG running_index(struct Library *base, const char *name,
     return -1;
 }
 
-static char  addif_was_up[NX_MAX_PHYSICAL_INTERFACES][NETSTATUS_NAME_LEN];
-static UWORD addif_was_up_count;
-
-static VOID note_what_is_up(struct Library *base)
-{
-    LONG n;
-    LONG i;
-
-    addif_was_up_count = 0;
-
-    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
-                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
-
-    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
-    {
-        if (!(addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_NAMED))
-            continue;
-
-        tool_copy_string(addif_was_up[addif_was_up_count],
-                         sizeof(addif_was_up[0]),
-                         addif_ifaces.e[i].nsi_Name);
-        addif_was_up_count++;
-    }
-}
-
-static VOID report_what_yielded(struct Library *base, const char *added)
-{
-    LONG  n;
-    LONG  i;
-    UWORD w;
-
-    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
-                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
-    if (n < 0)
-        return;
-
-    for (w = 0; w < addif_was_up_count; w++)
-    {
-        BOOL still = FALSE;
-
-        for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
-        {
-            if (!(addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_NAMED))
-                continue;
-
-            if (tool_stricmp(addif_ifaces.e[i].nsi_Name, addif_was_up[w]) == 0)
-            {
-                still = TRUE;
-                break;
-            }
-        }
-
-        if (still || tool_stricmp(addif_was_up[w], added) == 0)
-            continue;
-
-        tool_printf("%s: %s was brought up by the boot and nobody asked for "
-                    "it, so it gave up its interface slot.\n",
-                    (LONG)added, (LONG)addif_was_up[w]);
-        tool_printf("%s: %s is defined and not attached now.  "
-                    "AddNetInterface %s brings it back.\n",
-                    (LONG)added, (LONG)addif_was_up[w],
-                    (LONG)addif_was_up[w]);
-    }
-}
-
 static LONG add_to_running_stack(struct Library *base, const char *name)
 {
-    NetStatusControl ctl;
-    LONG             err = 0;
-    ULONG            w;
-    ULONG            i;
-
-    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
-        ((ULONG *)&ctl)[w] = 0;
-
-    for (i = 0; i + 1 < (ULONG)sizeof(ctl.nsc_Name) && name[i] != '\0'; i++)
-        ctl.nsc_Name[i] = name[i];
-
-    if (tool_netstatus_control(base, NETCTRL_INTERFACE_ADD, &ctl, &err) == 0)
-        return 0;
-
-    return (err != 0) ? err : EIO;
+    return tool_stack_add_interface(base, name, FALSE);
 }
 
 static VOID explain_no_slot(struct Library *base, const char *name)
@@ -492,6 +505,7 @@ int main(int argc, char **argv)
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
     AmiIfConfig     ifc;
+    STRPTR         *arguments;
     STRPTR         *names;
     const char     *name;
     const char     *primary;
@@ -527,7 +541,8 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    names   = (STRPTR *)args[ARG_INTERFACE];
+    arguments = (STRPTR *)args[ARG_INTERFACE];
+    names     = addif_names;
     quiet   = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
     timeout = ADDIF_TIMEOUT;
 
@@ -545,10 +560,7 @@ int main(int argc, char **argv)
         timeout = (given > (LONG)ADDIF_TIMEOUT) ? (ULONG)given : ADDIF_TIMEOUT;
     }
 
-    while (names != NULL && names[count] != NULL)
-        count++;
-
-    if (count == 0)
+    if (arguments == NULL || arguments[0] == NULL)
     {
         tool_error("no interface was named");
         tool_usage("<interface name> [<interface name>...]",
@@ -559,16 +571,13 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (count > (ULONG)AMI_CFG_MAX_ATTACHED)
+    for (n = 0; arguments[n] != NULL; n++)
     {
-        tool_error("attach: at most %ld interfaces can be online at once, "
-                   "and %lu were named",
-                   (LONG)AMI_CFG_MAX_ATTACHED, count);
-        tool_hint("Name %ld or fewer; the rest can stay in "
-                  "DEVS:NetInterfaces.", (LONG)AMI_CFG_MAX_ATTACHED);
-
-        FreeArgs(rda);
-        return RETURN_ERROR;
+        if (!expand_interface_argument((const char *)arguments[n], &count))
+        {
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
     }
 
     sort_names(names, count);
@@ -673,13 +682,10 @@ int main(int argc, char **argv)
             {
                 LONG add_err;
 
-                note_what_is_up(base);
                 add_err = add_to_running_stack(base, name);
 
                 if (add_err == EEXIST)
                     add_err = 0;
-                else if (add_err == 0 && !quiet)
-                    report_what_yielded(base, name);
 
                 if (add_err != 0)
                 {
@@ -691,9 +697,15 @@ int main(int argc, char **argv)
                     continue;
                 }
 
-                /* The add may have been given a slot that was free only
-                   because an unasked-for interface yielded it, so the address
-                   read before it is stale. */
+                if (!tool_stack_hold(base))
+                {
+                    tool_error("the library could not keep the network running");
+                    rc = RETURN_FAIL;
+                    continue;
+                }
+
+                /* The add may have created the interface, so the address read
+                   before it is stale. */
                 where = running_index(base, name, &addr);
                 if (where == -2)
                 {

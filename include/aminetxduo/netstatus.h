@@ -872,6 +872,9 @@ typedef struct NetStatusRxBudget
 #define NETCTRL_F_GATEWAY       0x00000008
 /* NETCTRL_INTERFACE_MDNS: set is on, clear is off. */
 #define NETCTRL_F_MDNS          0x00000010
+/* NETCTRL_INTERFACE_ADD: Online requested the interface, so STATE=DOWN in
+ * the stored definition does not leave it down. */
+#define NETCTRL_F_UP            0x00000020
 
 typedef struct NetStatusControl
 {

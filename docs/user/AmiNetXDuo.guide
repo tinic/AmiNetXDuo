@@ -364,14 +364,14 @@
 
   @{b}More than one card@{ub}
 
-  Put one file in DEVS:NetInterfaces per card. They are read in
-  alphabetical order. At most @{b}four@{ub} interfaces are attached to the stack.
-  Further files are parsed and then dropped with a warning in the debug
-  log.
+  Put one file in DEVS:NetInterfaces per card. A file is a definition,
+  not a request to open the card: only an interface named to
+  AddNetInterface or Online is attached. More than one name can be given
+  to AddNetInterface; those names are handled in alphabetical order. At
+  most @{b}four@{ub} interfaces are attached to the stack.
 
   IPv4 has one default route for the whole machine. The first interface
-  named to AddNetInterface is preferred for a gateway; until one is
-  named, the first configured interface is preferred. A later DHCP lease
+  named to AddNetInterface is preferred for a gateway. A later DHCP lease
   or renewal on another interface does not steal it. If the preferred
   interface has no usable gateway, the first live interface which has
   one carries the default until the preferred interface recovers. The
@@ -779,7 +779,7 @@
 
                         @{b}Starting the stack@{ub}
 
-  The stack comes up in one of two ways. Use the first.
+  The stack comes up when an interface is explicitly requested.
 
   @{b}At boot, from S:User-Startup@{ub}
 
@@ -794,16 +794,10 @@
   fails still prints why. To see the report of a start that works,
   omit QUIET while the configuration is still being written.
 
-  @{b}By itself, when a program asks for it@{ub}
-
-  If nothing has run AddNetInterface, the stack starts automatically
-  the first time any program opens bsdsocket.library, and stops again
-  when the last program closes it.
-
-  Every program then pays the startup cost, up to 30 seconds if it is
-  waiting for a DHCP lease, and the lease is thrown away and
-  re-acquired each time. Run AddNetInterface at boot instead. The stack
-  then starts once and stays up.
+  Merely opening bsdsocket.library starts no interface and opens no
+  network driver. This matches Roadshow and AmiTCP_NG: interface files
+  remain inert until AddNetInterface or Online names one. A program that
+  uses sockets before then receives "Network is down".
 
   @{b}A drawer, and a Shell in a browser, at boot@{ub}
 
@@ -1018,6 +1012,8 @@
   Reads DEVS:NetInterfaces/<INTERFACE>, starts the network stack if it
   is not running already, and brings that interface online. This is the
   command that starts the stack, and the one to put in S:User-Startup.
+  Other files in DEVS:NetInterfaces are not read and their devices are
+  not opened.
 
   @{b}INTERFACE@{ub}  The interface, which is the name of its file in
              DEVS:NetInterfaces. Required. A full path is accepted
@@ -1028,7 +1024,14 @@
 
              More than one can be given. They are sorted by name
              before any of them is used, and the files are all read
-             and checked before anything is started.
+             and checked before anything is started. AmigaDOS patterns
+             are expanded explicitly, so the Roadshow and AmiTCP_NG
+             Network-Startup form starts every non-icon definition:
+
+                 AddNetInterface DEVS:NetInterfaces/~(#?.info)
+
+             This enumeration happens only because that command asks
+             for it; opening bsdsocket.library never scans the drawer.
 
   @{b}QUIET@{ub}      Suppress the report of what worked. For S:User-Startup.
              Errors are still printed, and the return code is
@@ -1806,10 +1809,9 @@
   Nothing has started the stack. On a machine where S:User-Startup does
   not run AddNetInterface, that is the state after every reboot.
 
-  A command does not always fail because of it. Opening
-  bsdsocket.library starts the stack, so the first command to open it
-  pays the startup cost and then works. The messages above appear when
-  that start was tried and did not succeed.
+  Opening bsdsocket.library alone does not change this state. It starts
+  no interface, just as Roadshow and AmiTCP_NG start none until an
+  AddNetInterface command names one.
 
   @{b}Fix@{ub}
 
@@ -2280,7 +2282,7 @@
   @{b}Symptom@{ub}
 
   The boot stops for half a minute at the AddNetInterface line, or a
-  network program takes half a minute to start.
+  network operation takes half a minute to finish.
 
   @{b}What it means@{ub}
 
@@ -2288,10 +2290,9 @@
   coming. The wait is 30 seconds, after which the stack gives up. See
   @{"Nothing happens and there is no address" link T_NOLEASE}.
 
-  @{b}If a program pauses rather than the boot@{ub}, the likely cause is that
-  nothing started the stack at boot. The program starts the stack
-  itself, pays the DHCP wait, and shuts it down again when it exits.
-  Put
+  If nothing started the stack at boot, a network program instead reports
+  that the network is down; opening bsdsocket.library does not implicitly
+  open a card. Put
 
       C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 
@@ -2412,12 +2413,9 @@
        and skipped, so nothing here survives a reboot by itself.
     o  @{b}At most four interfaces@{ub} are online at once, however many
        interface files DEVS:NetInterfaces holds -- and it may hold as
-       many as you like; every one is read and listed by ShowNetStatus.
-       An interface the boot brought up on its own gives its slot to
-       one you ask for by name, and says so; an interface you named
-       keeps its slot, and a fifth AddNetInterface is refused with the
-       names of the four holding them. RemoveNetInterface frees one, and
-       an AddNetInterface that FAILS puts back whatever stood down.
+       many as you like. Definitions not named to AddNetInterface or
+       Online remain inert. A fifth AddNetInterface is refused with the
+       names of the four holding the slots; RemoveNetInterface frees one.
     o  @{b}Only Ethernet-style SANA-II drivers have been tested.@{ub} A
        point-to-point driver such as ppp.device or slip.device is not
        refused, but none has been tested, so a modem or DSL connection

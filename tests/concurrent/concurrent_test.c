@@ -632,7 +632,7 @@ static VOID ct_main_body(VOID)
     ct_log("concurrent: 2 x %ld s of deadline; needs -t %ld or more\n",
            (LONG)CT_DEADLINE_SECS, (LONG)CT_BUDGET_SECS);
 
-    ct_log("concurrent: opening the library (this starts the stack)\n");
+    ct_log("concurrent: opening the already-started stack library\n");
     ct_trace("parent: OpenLibrary(bsdsocket.library)");
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     ct_log("concurrent: library base %s\n",

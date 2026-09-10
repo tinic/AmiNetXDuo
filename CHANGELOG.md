@@ -25,8 +25,10 @@ from `startnet`; neither starts one from inside the library.
   already names an interface and nothing changes. If you declined, or added a
   second interface file by hand, add a line for each interface you want:
   `C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET`
-- The stack now starts with no IP instance and creates one when the first
-  interface starts. A socket opened before then answers `ENETDOWN`
+- Opening the socket library loads only its API; it creates no IP instance and
+  opens no network driver. The first `AddNetInterface` or `Online` request
+  builds the stack around exactly the named definition. A socket opened before
+  then answers `ENETDOWN`
 
 ## 0.26.6
 

@@ -201,9 +201,8 @@ VOID tool_explain_resolve(const char *name, LONG err); /* a lookup failed    */
 VOID tool_explain_no_stack(VOID);                     /* nothing is running  */
 
 /*
- * TRUE when bsdsocket.library is in memory with at least one opener, the
- * only way one command can tell that another has the stack up. Does not open
- * the library, since that would start the stack.
+ * TRUE when AmiNetXDuo's public stack port exists. A loaded library is not
+ * enough: opening bsdsocket.library deliberately starts no interface.
  */
 BOOL tool_stack_library_running(VOID);
 
@@ -211,16 +210,17 @@ BOOL tool_stack_library_running(VOID);
 BOOL tool_stack_installed(VOID);
 
 /*
- * Start the network by opening bsdsocket.library, which brings the stack up on
- * its first open, and ask the library to hold that stack itself so the network
- * outlives this command. NULL means the library is missing or the stack refused
- * to start.
+ * Open bsdsocket.library. The caller must then add an explicitly named
+ * interface and take a hold so the network outlives this command. NULL means
+ * the library is missing.
  *
  * Hand the base back to tool_stack_release() on every exit path, including the
- * failing ones. It closes when closing is safe and keeps the open when it is
- * not, which is the one case a command must not decide for itself.
+ * failing ones. The persistent stack hold is independent of this opener.
  */
 struct Library *tool_stack_start(VOID);
+BOOL tool_stack_hold(struct Library *base);
+LONG tool_stack_add_interface(struct Library *base, const char *name,
+                              BOOL force_up);
 VOID tool_stack_release(struct Library *base);
 
 /*

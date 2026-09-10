@@ -358,10 +358,8 @@ static LONG fetch_run(VOID)
 
     fetch_head_start(&head, fetch_head, (ULONG)sizeof(fetch_head));
 
-    /*
-     * This open starts the stack.  The close at the end stops it again if
-     * nobody else wants it.  See tool_stack_start().
-     */
+    /* Opening the API never selects a card. AddNetInterface or Online must
+       already have started an explicitly named interface. */
     sbase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     if (sbase == NULL)
     {

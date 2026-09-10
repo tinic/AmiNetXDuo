@@ -6,6 +6,8 @@
 
 add_executable(library_test library_test.c)
 
+target_include_directories(library_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
+
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(library_test PRIVATE "${AMIGA_NDK_INCLUDE}")
 endif()

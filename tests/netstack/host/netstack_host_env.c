@@ -474,6 +474,7 @@ LONG ami_config_load(AmiConfig *cfg)
 {
     UWORD i;
 
+    nsh.cfg_full_loads++;
     memset(cfg, 0, sizeof(*cfg));
 
     if (nsh.cfg_interfaces == 0)
@@ -502,6 +503,25 @@ LONG ami_config_load(AmiConfig *cfg)
     return AMI_CFG_OK;
 }
 
+LONG ami_config_load_selected(AmiConfig *cfg, const AmiIfConfig *iface)
+{
+    nsh.cfg_selected_loads++;
+    memset(cfg, 0, sizeof(*cfg));
+
+    if (iface == NULL || !iface->configured || iface->name[0] == '\0' ||
+        iface->device[0] == '\0')
+        return AMI_CFG_ERR_SYNTAX;
+
+    cfg->interfaces = (AmiIfConfig *)calloc(1, sizeof(AmiIfConfig));
+    if (cfg->interfaces == NULL)
+        return AMI_CFG_ERR_NOMEM;
+
+    cfg->interfaces[0] = *iface;
+    cfg->interface_count = 1;
+    cfg->interface_capacity = 1;
+    return AMI_CFG_OK;
+}
+
 VOID ami_config_free(AmiConfig *cfg)
 {
     free(cfg->interfaces);
@@ -517,6 +537,8 @@ static UBYTE nsh_iface_cookie[4][1];
 AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 {
     static UWORD n;
+
+    nsh.opened_cfg = *cfg;
 
     if (nsh.sana2_open_fails)
     {

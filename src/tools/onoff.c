@@ -572,10 +572,7 @@ int main(int argc, char **argv)
 
     if (err == AMI_NET_ERR_STATE)
     {
-        /*
-         * No stack in this command: it lives in bsdsocket.library and comes up
-         * on first open, which brings every configured interface up at once.
-         */
+        /* No stack in this command: ask the library to start this definition. */
         if (tool_stack_library_running())
         {
             /* The stack is up inside bsdsocket.library. */
@@ -615,6 +612,24 @@ int main(int argc, char **argv)
                 return RETURN_WARN;
             }
 
+            err = tool_stack_add_interface(base, name, TRUE);
+            if (err != 0 && err != EEXIST)
+            {
+                tool_error("%s did not join the running network: %s (%ld)",
+                           (LONG)name, (LONG)tool_code_errno(err), err);
+                tool_stack_release(base);
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            }
+
+            if (!tool_stack_hold(base))
+            {
+                tool_error("the library could not keep the network running");
+                tool_stack_release(base);
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            }
+
             /* While the base is still open: the IPv6 addresses come from a
                NetStackQuery() and there is no base after the release below. */
             {
@@ -626,8 +641,8 @@ int main(int argc, char **argv)
                                         sizeof(started6));
             }
 
-            /* The library is holding the stack now (tool_stack_start()), so
-               this open has done its job and goes back like any other. */
+            /* The explicit hold is independent of this opener, so this open
+               has done its job and goes back like any other. */
             tool_stack_release(base);
         }
 

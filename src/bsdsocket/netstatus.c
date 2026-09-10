@@ -1742,6 +1742,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         {
             AmiIfConfig cfg;
             LONG        err;
+            UWORD       index = 0;
 
             if (!ns_terminated(ctl->nsc_Name, sizeof(ctl->nsc_Name)) ||
                 ctl->nsc_Name[0] == '\0')
@@ -1750,7 +1751,10 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             if (ami_config_load_interface(ctl->nsc_Name, &cfg) != AMI_CFG_OK)
                 return bsd_fail(SocketBase, AMI_ENOENT);
 
-            err = netstack_interface_start(&cfg, NULL);
+            err = bsd_stack_interface_start(SocketBase, &cfg, &index);
+
+            if (err == AMI_NET_OK && (ctl->nsc_Flags & NETCTRL_F_UP) != 0)
+                err = netstack_interface_up(index);
 
             switch (err)
             {

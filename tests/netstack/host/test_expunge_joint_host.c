@@ -77,6 +77,40 @@ static void t_running(void)
     h_teardown();
 }
 
+/* The library's first explicit add must not fall back to the drawer-loading
+ * entry point: that was the path which opened every configured card. */
+static void t_selected_startup(void)
+{
+    AmiIfConfig cfg;
+
+    printf("netstack startup: one explicitly selected interface\n");
+
+    nsh_reset();
+    memset(&cfg, 0, sizeof(cfg));
+    strcpy(cfg.name, "genet");
+    strcpy(cfg.device, "genet.device");
+    cfg.unit = 3;
+    cfg.iptype = AMI_IPTYPE_STATIC;
+    cfg.address = 0xC0A80105UL;
+    cfg.netmask = 0xFFFFFF00UL;
+    cfg.up = TRUE;
+    cfg.configured = TRUE;
+
+    CHECK(netstack_startup_interface(&cfg) == AMI_NET_OK,
+          "the selected interface starts the stack");
+    CHECK(nsh.cfg_selected_loads == 1,
+          "the selected configuration path was used once");
+    CHECK(nsh.cfg_full_loads == 0,
+          "the interface drawer was not loaded");
+    CHECK(strcmp(nsh.opened_cfg.name, "genet") == 0,
+          "the named interface reached SANA-II");
+    CHECK(strcmp(nsh.opened_cfg.device, "genet.device") == 0 &&
+          nsh.opened_cfg.unit == 3,
+          "the named device and unit reached SANA-II unchanged");
+
+    h_teardown();
+}
+
 /*
  * The joint.  A stop that fails leaves ami_ns_kernel_started set, and
  * netstack_can_unload() must keep answering FALSE even though the singleton
@@ -223,6 +257,7 @@ int main(void)
 
     t_idle();
     t_running();
+    t_selected_startup();
     t_failed_stop_holds_the_flag();
     t_clean_stop_releases();
     t_startup_refuses_over_a_failed_stop();
