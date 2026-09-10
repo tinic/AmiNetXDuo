@@ -34,6 +34,12 @@ CROSS_CONFIGS=(
     # answer sensibly without them.
     "nomdns:-DAMINETXDUO_MDNS=OFF"
     "notls:-DAMINETXDUO_TLS=OFF"
+    # DHCP off was micro's job until micro took DHCP back, and then nothing
+    # compiled the other side: 32 guard sites across six files plus the whole
+    # of netstack_dhcpv6_off.c would have rotted unbuilt.  A coverage arm keeps
+    # them honest without a profile having to want them, which is what the
+    # noXXX arms above are for.
+    "nodhcp:-DAMINETXDUO_DHCP=OFF"
     # The floor drawer's answer to IGMP. mcast.c is the only caller of NetX
     # Duo's IGMP services, so this arm is what proves the rest of the tree
     # still builds and binds without it, bind() classifies a class D address

@@ -71,7 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: [nolto, noipv6, nomdns, notls, nomcast, noasm, nonet68kasm,
+        config: [nolto, noipv6, nomdns, notls, nomcast, noasm, nonet68kasm, nodhcp,
                  norxverify, nosack, ts, nxcounters, nowscale, log, census, minimal, if2,
                  instr, noinline, symbols, tcpextra, pathswap, green, micro,
                  microcompat]
