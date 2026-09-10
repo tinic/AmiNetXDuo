@@ -174,6 +174,22 @@ endif()
 target_compile_options(test_rpcprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_rpcprobe PROPERTIES OUTPUT_NAME "RpcProbe")
 
+# NfsProbe carries RpcProbe's question through to a file.  RpcProbe asks
+# whether a portmap reply arrives; this asks whether a full NFS sequence --
+# GETPORT, MNT, LOOKUP, READ -- can be built, sent from a RESERVED port,
+# understood, and its bytes matched.  Its reason for existing is the
+# credentials: every one of those calls carries AUTH_UNIX uid, gid and the
+# supplementary group list out of usergroup.library, and no other test in this
+# tree makes a guest produce them.  That library is what ch_nfsc could not get
+# credentials from in 0.26.5.  Published LVOs only, as ch_nfs uses them.
+add_executable(test_nfsprobe nfsprobe.c)
+target_include_directories(test_nfsprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_nfsprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_nfsprobe PRIVATE -Wall -Wextra)
+set_target_properties(test_nfsprobe PROPERTIES OUTPUT_NAME "NfsProbe")
+
 # TcpHandoff runs the whole socket-to-file-handle sequence, accept(),
 # ReleaseCopyOfSocket(), Open("TCP:OBTAIN="), SystemTagList(), against two
 # stock AmigaDOS commands.  Linked against nothing of ours: it reaches
