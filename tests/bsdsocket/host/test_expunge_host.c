@@ -296,9 +296,8 @@ VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_re
 BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }
 VOID bsd_tcp_handler_start(struct AmiSocketBase *m) { (VOID)m; h_unreachable("bsd_tcp_handler_start"); }
 LONG netstack_startup(VOID) { h.startup_calls++; return h.startup_result; }
-LONG netstack_startup_interface(const AmiIfConfig *c)
+LONG netstack_startup_loopback(VOID)
 {
-    (VOID)c;
     h.startup_calls++;
     return h.startup_result;
 }
@@ -518,43 +517,41 @@ static VOID t_transient_stack_reference(VOID)
     h_report("transient", 0, 0, 0, h_teardown_ran());
 }
 
-static VOID t_explicit_startup_fallback_ownership(VOID)
+static VOID t_loopback_startup_failure_ownership(VOID)
 {
-    AmiIfConfig cfg;
-    LONG        rc;
+    struct AmiSocketBase *opened;
 
-    printf("failed explicit interface startup without a child Process\n");
-
-    memset(&cfg, 0, sizeof(cfg));
-    strcpy(cfg.name, "eth0");
-    strcpy(cfg.device, "test.device");
-    cfg.configured = TRUE;
+    printf("failed loopback startup during library open\n");
 
     h_machine_reset(TRUE);
     h.startup_result = AMI_NET_ERR_CONFIG;
     h.alloc_signal_result = (BYTE)-1;
 
-    rc = bsd_stack_interface_start(h_base, &cfg, NULL);
+    opened = bsd_lib_open(4UL, h_base);
 
-    CHECK(rc == AMI_NET_ERR_CONFIG,
-          "signal-exhausted startup refused the interface");
+    CHECK(opened == NULL, "signal-exhausted startup refused the open");
     CHECK(h.startup_calls == 1, "signal fallback attempted startup once");
     CHECK(h.shutdown_calls == 1,
           "signal fallback released the failed startup reference");
+    CHECK(h_base->sb_Lib.lib_OpenCnt == 0,
+          "failed startup returned the library open count");
+    CHECK(h_base->sb_StackRefs == 0,
+          "failed startup created no opener stack reference");
 
     h_machine_reset(TRUE);
     h.startup_result = AMI_NET_ERR_CONFIG;
     h.alloc_signal_result = 5;
 
-    rc = bsd_stack_interface_start(h_base, &cfg, NULL);
+    opened = bsd_lib_open(4UL, h_base);
 
-    CHECK(rc == AMI_NET_ERR_CONFIG,
-          "process-creation failure refused the interface");
+    CHECK(opened == NULL, "process-creation failure refused the open");
     CHECK(h.create_proc_calls == 1, "the child Process was attempted once");
     CHECK(h.free_signal_calls == 1, "the unused startup signal was freed");
     CHECK(h.startup_calls == 1, "process fallback attempted startup once");
     CHECK(h.shutdown_calls == 1,
           "process fallback released the failed startup reference");
+    CHECK(h_base->sb_Lib.lib_OpenCnt == 0,
+          "the second failed startup returned the open count");
 }
 
 int main(void)
@@ -567,8 +564,7 @@ int main(void)
     t_other_refusals();
     t_last_close_retries();
     t_transient_stack_reference();
-    t_explicit_startup_fallback_ownership();
-
+    t_loopback_startup_failure_ownership();
     printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
 }

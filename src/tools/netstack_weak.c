@@ -23,9 +23,8 @@ TOOL_WEAK LONG netstack_startup(VOID)
     return AMI_NET_ERR_STATE;
 }
 
-TOOL_WEAK LONG netstack_startup_interface(const AmiIfConfig *cfg)
+TOOL_WEAK LONG netstack_startup_loopback(VOID)
 {
-    (VOID)cfg;
     return AMI_NET_ERR_STATE;
 }
 

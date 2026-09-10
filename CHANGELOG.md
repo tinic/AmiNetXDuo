@@ -25,10 +25,11 @@ from `startnet`; neither starts one from inside the library.
   already names an interface and nothing changes. If you declined, or added a
   second interface file by hand, add a line for each interface you want:
   `C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET`
-- Opening the socket library loads only its API; it creates no IP instance and
-  opens no network driver. The first `AddNetInterface` or `Online` request
-  builds the stack around exactly the named definition. A socket opened before
-  then answers `ENETDOWN`
+- Opening the socket library creates a complete loopback-only stack, as
+  Roadshow and AmiTCP_NG do, but opens no network driver. Local sockets on
+  `127.0.0.1` work immediately, as does `::1` in the IPv6 build.
+  `AddNetInterface` or `Online` opens exactly the named physical interface;
+  other definitions remain inert
 
 ## 0.26.6
 

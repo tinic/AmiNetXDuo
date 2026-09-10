@@ -779,7 +779,8 @@
 
                         @{b}Starting the stack@{ub}
 
-  The stack comes up when an interface is explicitly requested.
+  The physical network comes up when an interface is explicitly requested.
+  Opening bsdsocket.library by itself creates only the built-in loopback.
 
   @{b}At boot, from S:User-Startup@{ub}
 
@@ -788,16 +789,19 @@
     C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 
   replacing eth0 with the name of the interface file. The command reads
-  the configuration, starts the stack, brings the interface online, and
-  keeps it up until the next reboot. QUIET suppresses the report of
+  the configuration, starts the physical network, brings the interface
+  online, and keeps it up until the next reboot. QUIET suppresses the report of
   what came up, so a boot that works prints nothing and a boot that
   fails still prints why. To see the report of a start that works,
   omit QUIET while the configuration is still being written.
 
-  Merely opening bsdsocket.library starts no interface and opens no
-  network driver. This matches Roadshow and AmiTCP_NG: interface files
-  remain inert until AddNetInterface or Online names one. A program that
-  uses sockets before then receives "Network is down".
+  Merely opening bsdsocket.library creates the complete stack with its
+  built-in loopback, 127.0.0.1 and, in the full IPv6 build, ::1, but starts
+  no physical interface and opens no network driver. This matches Roadshow
+  and AmiTCP_NG: interface files remain inert until AddNetInterface or Online
+  names one.
+  Local sockets work before then; there is naturally no route to an
+  external network.
 
   @{b}A drawer, and a Shell in a browser, at boot@{ub}
 
@@ -1009,9 +1013,9 @@
 
       AddNetInterface INTERFACE/M,QUIET/S,TIMEOUT/K/N
 
-  Reads DEVS:NetInterfaces/<INTERFACE>, starts the network stack if it
-  is not running already, and brings that interface online. This is the
-  command that starts the stack, and the one to put in S:User-Startup.
+  Reads DEVS:NetInterfaces/<INTERFACE> and brings that interface online.
+  This is the command that starts the physical network, and the one to put
+  in S:User-Startup.
   Other files in DEVS:NetInterfaces are not read and their devices are
   not opened.
 
@@ -1809,9 +1813,9 @@
   Nothing has started the stack. On a machine where S:User-Startup does
   not run AddNetInterface, that is the state after every reboot.
 
-  Opening bsdsocket.library alone does not change this state. It starts
-  no interface, just as Roadshow and AmiTCP_NG start none until an
-  AddNetInterface command names one.
+  Opening bsdsocket.library alone starts only the built-in loopback. It
+  starts no physical interface, just as Roadshow and AmiTCP_NG start none
+  until an AddNetInterface command names one.
 
   @{b}Fix@{ub}
 
@@ -2290,9 +2294,9 @@
   coming. The wait is 30 seconds, after which the stack gives up. See
   @{"Nothing happens and there is no address" link T_NOLEASE}.
 
-  If nothing started the stack at boot, a network program instead reports
-  that the network is down; opening bsdsocket.library does not implicitly
-  open a card. Put
+  If nothing started a physical interface at boot, local loopback still
+  works but an external network operation reports that there is no route;
+  opening bsdsocket.library does not implicitly open a card. Put
 
       C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 

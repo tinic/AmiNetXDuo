@@ -660,7 +660,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 _Static_assert((int)AMI_CFG_MAX_ATTACHED == (int)NX_MAX_PHYSICAL_INTERFACES,
                "AMI_CFG_MAX_ATTACHED must equal NX_MAX_PHYSICAL_INTERFACES");
 
-static LONG ami_ns_open_devices(AmiNetStack *ns, BOOL explicitly_selected)
+static LONG ami_ns_open_devices(AmiNetStack *ns)
 {
     UWORD i;
     UWORD opened = 0;
@@ -719,10 +719,9 @@ static LONG ami_ns_open_devices(AmiNetStack *ns, BOOL explicitly_selected)
 
         ns->ns_IfaceCfg[opened] = opened;
 
-        /* The library path contains exactly the interface named by
-           AddNetInterface.  The legacy directly-linked diagnostic path may
-           still load a complete drawer and marks those entries unrequested. */
-        ns->ns_IfaceWanted[opened] = explicitly_selected;
+        /* Nobody named this one; the directly-linked diagnostic path merely
+           found it in the drawer. */
+        ns->ns_IfaceWanted[opened] = FALSE;
 
         opened++;
     }
@@ -843,16 +842,31 @@ static VOID ami_ns_park_unaddressed(AmiNetStack *ns, UWORD index)
         nxif->nx_interface_ip_network = 0xFFFFFFFFUL;
 }
 
+/*
+ * nx_ip_create() requires a primary link driver even though it independently
+ * creates NetX Duo's built-in loopback interface.  The library-first path uses
+ * this driver only until NX_IP_INITIALIZE_DONE, then detaches physical slot 0.
+ * The first explicitly named SANA-II interface can therefore take slot 0 just
+ * as it does in a normal IP instance.
+ */
+static VOID ami_ns_bootstrap_driver(NX_IP_DRIVER *request)
+{
+    if (request == NULL)
+        return;
+
+    if (request->nx_ip_driver_interface != NULL &&
+        request->nx_ip_driver_command == NX_LINK_INITIALIZE)
+        request->nx_ip_driver_interface->nx_interface_ip_mtu_size = 1500UL;
+
+    request->nx_ip_driver_status = NX_SUCCESS;
+}
+
 static LONG ami_ns_create_ip(AmiNetStack *ns)
 {
-    const AmiIfConfig *cfg0;
-    ULONG              addr0;
-    ULONG              mask0;
-
-    if (ns->ns_Config.interfaces == NULL || ns->ns_Config.interface_count == 0)
-        return AMI_NET_ERR_CONFIG;
-
-    cfg0 = &ns->ns_Config.interfaces[0];
+    const AmiIfConfig *cfg0 = NULL;
+    ULONG              addr0 = 0UL;
+    ULONG              mask0 = 0UL;
+    VOID             (*driver)(NX_IP_DRIVER *) = ami_ns_bootstrap_driver;
     ULONG              actual;
     UINT               status;
     UWORD              i;
@@ -875,24 +889,25 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         return AMI_NET_ERR_NOMEM;
     }
 
-    addr0 = (cfg0->iptype == AMI_IPTYPE_STATIC) ? cfg0->address : 0UL;
-    mask0 = (cfg0->iptype == AMI_IPTYPE_STATIC && cfg0->netmask != 0UL)
-                ? cfg0->netmask : 0UL;
-
-    /*
-     * Bind interface 0 before nx_ip_create(): the IP thread calls the driver for
-     * NX_LINK_INITIALIZE the moment it starts, and the driver finds its
-     * AmiSana2If through the binding table.
-     */
-    if (ami_sana2_attach(ns->ns_Iface[0], &ns->ns_Ip, 0) != AMI_NET_OK)
+    if (ns->ns_IfaceCount != 0)
     {
-        AMI_ERROR("netstack: cannot bind interface 0");
-        return AMI_NET_ERR_STATE;
+        cfg0 = &ns->ns_Config.interfaces[0];
+        addr0 = (cfg0->iptype == AMI_IPTYPE_STATIC) ? cfg0->address : 0UL;
+        mask0 = (cfg0->iptype == AMI_IPTYPE_STATIC && cfg0->netmask != 0UL)
+                    ? cfg0->netmask : 0UL;
+        driver = ami_sana2_driver_entry;
+
+        /* The IP thread calls the driver as soon as it starts. */
+        if (ami_sana2_attach(ns->ns_Iface[0], &ns->ns_Ip, 0) != AMI_NET_OK)
+        {
+            AMI_ERROR("netstack: cannot bind interface 0");
+            return AMI_NET_ERR_STATE;
+        }
     }
 
     AMI_INFO("netstack: nx_ip_create");
     status = nx_ip_create(&ns->ns_Ip, (CHAR *)"AmiNetXDuo", addr0, mask0,
-                          &ns->ns_Pool, ami_sana2_driver_entry,
+                          &ns->ns_Pool, driver,
                           ns->ns_IpStack, (ULONG)AMI_IP_STACK_SIZE,
                           AMI_IP_THREAD_PRIORITY);
     if (status != NX_SUCCESS)
@@ -913,6 +928,17 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     {
         AMI_ERROR("netstack: IP instance did not initialise (%ld)", (long)status);
         return AMI_NET_ERR_NODEV;
+    }
+
+    if (ns->ns_IfaceCount == 0)
+    {
+        status = nx_ip_interface_detach(&ns->ns_Ip, 0U);
+        if (status != NX_SUCCESS)
+        {
+            AMI_ERROR("netstack: bootstrap interface detach failed (%ld)",
+                      (long)status);
+            return AMI_NET_ERR_KERNEL;
+        }
     }
 
     /*
@@ -1083,7 +1109,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         AMI_WARN("netstack: nx_icmp_enable failed (%ld)", (long)status);
 #endif
 
-    if (ns->ns_Config.default_gateway != 0UL)
+    if (ns->ns_IfaceCount != 0 && ns->ns_Config.default_gateway != 0UL)
     {
         status = nx_ip_gateway_address_set(&ns->ns_Ip,
                                            ns->ns_Config.default_gateway);
@@ -1778,6 +1804,13 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 #endif
 #endif
 
+    if (ns->ns_IfaceCount == 0)
+    {
+        AMI_INFO("netstack: loopback is ready; no physical interface was "
+                 "requested");
+        return AMI_NET_OK;
+    }
+
     /*
      * The IPv6-only machine returns here.  Bring-up never waits for an IPv6
      * address: the link-local is TENTATIVE for a second of DAD and a SLAAC or
@@ -1907,7 +1940,7 @@ static LONG ami_ns_kernel_stop_locked(VOID)
     return AMI_NET_OK;
 }
 
-static LONG ami_ns_bring_up(const AmiIfConfig *selected)
+static LONG ami_ns_bring_up(BOOL loopback_only)
 {
     AmiNetCaller  caller;
     AmiNetStack  *ns;
@@ -1931,9 +1964,8 @@ static LONG ami_ns_bring_up(const AmiIfConfig *selected)
         return AMI_NET_ERR_NOMEM;
     }
 
-    if (((selected != NULL)
-             ? ami_config_load_selected(&ns->ns_Config, selected)
-             : ami_config_load(&ns->ns_Config)) != AMI_CFG_OK)
+    if ((loopback_only ? ami_config_load_base(&ns->ns_Config)
+                       : ami_config_load(&ns->ns_Config)) != AMI_CFG_OK)
     {
         ami_config_free(&ns->ns_Config);
         ami_free(ns);
@@ -1946,7 +1978,7 @@ static LONG ami_ns_bring_up(const AmiIfConfig *selected)
                              ? (UBYTE)AMI_NS_GATEWAY_FIXED
                              : (UBYTE)AMI_NS_GATEWAY_AUTO;
 
-    if (ns->ns_Config.interface_count == 0)
+    if (!loopback_only && ns->ns_Config.interface_count == 0)
     {
         AMI_ERROR("netstack: nothing to bring up, DEVS:NetInterfaces holds "
                   "no usable interface file. Run NetSetup to write one, or "
@@ -1956,14 +1988,17 @@ static LONG ami_ns_bring_up(const AmiIfConfig *selected)
         return AMI_NET_ERR_CONFIG;
     }
 
-    status = ami_ns_open_devices(ns, selected != NULL);
+    status = AMI_NET_OK;
+    if (!loopback_only)
+        status = ami_ns_open_devices(ns);
     if (status != AMI_NET_OK)
     {
         ami_ns_destroy(ns);
         return status;
     }
 
-    ami_ns_name_after_card(ns);
+    if (!loopback_only)
+        ami_ns_name_after_card(ns);
 
     ns->ns_PoolPackets = ami_ns_pool_packets();
     ns->ns_PoolBytes   = ns->ns_PoolPackets * ami_ns_packet_stride();
@@ -2041,8 +2076,11 @@ static LONG ami_ns_bring_up(const AmiIfConfig *selected)
      * .local name going to the unicast servers.  Failure is not fatal and is not
      * waited for.
      */
-    AMI_INFO("netstack: starting mDNS");
-    (VOID)ami_netstack_mdns_start(ns);
+    if (!loopback_only)
+    {
+        AMI_INFO("netstack: starting mDNS");
+        (VOID)ami_netstack_mdns_start(ns);
+    }
 #endif
 
     /*
@@ -2070,9 +2108,6 @@ static LONG ami_ns_bring_up(const AmiIfConfig *selected)
                              ami_netstack_rexx_resume);
 #endif
 
-    if (selected != NULL)
-        ami_ns_gateway_name_primary(ns, 0);
-
     if (status != AMI_NET_OK)
     {
         AMI_WARN("netstack: up, but no interface has an address, check the "
@@ -2085,7 +2120,7 @@ static LONG ami_ns_bring_up(const AmiIfConfig *selected)
     return AMI_NET_OK;
 }
 
-static LONG ami_ns_startup(const AmiIfConfig *selected)
+static LONG ami_ns_startup(BOOL loopback_only)
 {
     LONG status;
 
@@ -2107,7 +2142,7 @@ static LONG ami_ns_startup(const AmiIfConfig *selected)
         return status;
     }
 
-    status = ami_ns_bring_up(selected);
+    status = ami_ns_bring_up(loopback_only);
 
     if (status != AMI_NET_OK && ami_ns != NULL)
     {
@@ -2123,15 +2158,12 @@ LONG netstack_startup(VOID)
 {
     /* Directly linked diagnostics explicitly ask for the traditional complete
        configuration.  bsdsocket.library never uses this path. */
-    return ami_ns_startup(NULL);
+    return ami_ns_startup(FALSE);
 }
 
-LONG netstack_startup_interface(const AmiIfConfig *cfg)
+LONG netstack_startup_loopback(VOID)
 {
-    if (cfg == NULL)
-        return AMI_NET_ERR_CONFIG;
-
-    return ami_ns_startup(cfg);
+    return ami_ns_startup(TRUE);
 }
 
 VOID netstack_shutdown(VOID)
@@ -3752,6 +3784,12 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         ns->ns_IfaceCount = (UWORD)(slot + 1);
 
     ami_ns_park_unaddressed(ns, (UWORD)slot);
+    ns->ns_Ip.nx_ip_interface[slot].nx_interface_ip_conflict_notify_handler =
+        ami_ns_ip_conflict;
+
+    /* A library-open stack has no card from which to derive its fallback name.
+       Do that now, before DHCP and mDNS consume it. */
+    ami_ns_name_after_card(ns);
 
     ns->ns_IfaceCfg[slot]  = (UWORD)slot;
 

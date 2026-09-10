@@ -414,6 +414,7 @@ UINT _nxe_ip_create(NX_IP *ip_ptr, CHAR *name, ULONG ip_address,
     {
         memset(ip_ptr, 0, sizeof(*ip_ptr));
         ip_ptr -> nx_ip_id = NX_IP_ID;
+        ip_ptr -> nx_ip_interface[0].nx_interface_valid = 1;
     }
 
     return nsh.ip_create_status;
@@ -503,22 +504,17 @@ LONG ami_config_load(AmiConfig *cfg)
     return AMI_CFG_OK;
 }
 
-LONG ami_config_load_selected(AmiConfig *cfg, const AmiIfConfig *iface)
+LONG ami_config_load_base(AmiConfig *cfg)
 {
-    nsh.cfg_selected_loads++;
+    nsh.cfg_base_loads++;
     memset(cfg, 0, sizeof(*cfg));
 
-    if (iface == NULL || !iface->configured || iface->name[0] == '\0' ||
-        iface->device[0] == '\0')
-        return AMI_CFG_ERR_SYNTAX;
-
-    cfg->interfaces = (AmiIfConfig *)calloc(1, sizeof(AmiIfConfig));
+    cfg->interfaces = (AmiIfConfig *)
+        calloc(AMI_CFG_IFACE_FLOOR, sizeof(AmiIfConfig));
     if (cfg->interfaces == NULL)
         return AMI_CFG_ERR_NOMEM;
 
-    cfg->interfaces[0] = *iface;
-    cfg->interface_count = 1;
-    cfg->interface_capacity = 1;
+    cfg->interface_capacity = AMI_CFG_IFACE_FLOOR;
     return AMI_CFG_OK;
 }
 
@@ -539,6 +535,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     static UWORD n;
 
     nsh.opened_cfg = *cfg;
+    nsh.sana2_opens++;
 
     if (nsh.sana2_open_fails)
     {
@@ -675,10 +672,21 @@ ULONG ami_config_pool_divisor(ULONG fallback)
 
 BOOL ami_config_reserve(AmiConfig *cfg, UWORD want)
 {
-    (VOID)cfg;
-    (VOID)want;
+    AmiIfConfig *grown;
 
-    return FALSE;
+    if (cfg->interface_capacity >= want)
+        return TRUE;
+
+    grown = (AmiIfConfig *)realloc(cfg->interfaces,
+                                  (size_t)want * sizeof(AmiIfConfig));
+    if (grown == NULL)
+        return FALSE;
+
+    memset(grown + cfg->interface_capacity, 0,
+           (size_t)(want - cfg->interface_capacity) * sizeof(AmiIfConfig));
+    cfg->interfaces = grown;
+    cfg->interface_capacity = want;
+    return TRUE;
 }
 
 VOID ami_event(UWORD code, UWORD index, ULONG value)
@@ -1097,21 +1105,33 @@ UINT _nxe_ip_interface_address_set(NX_IP *ip_ptr, UINT interface_index, ULONG ip
 
 UINT _nxe_ip_interface_attach(NX_IP *ip_ptr, CHAR *interface_name, ULONG ip_address, ULONG network_mask, VOID (*ip_link_driver)(struct NX_IP_DRIVER_STRUCT *))
 {
-    (VOID)ip_ptr;
+    UINT i;
+
     (VOID)interface_name;
     (VOID)ip_address;
     (VOID)network_mask;
     (VOID)ip_link_driver;
 
-    return TX_SUCCESS;
+    nsh.iface_attaches++;
+    for (i = 0; i < NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (ip_ptr->nx_ip_interface[i].nx_interface_valid == 0)
+        {
+            ip_ptr->nx_ip_interface[i].nx_interface_valid = 1;
+            return NX_SUCCESS;
+        }
+    }
+
+    return NX_NO_MORE_ENTRIES;
 }
 
 UINT _nxe_ip_interface_detach(NX_IP *ip_ptr, UINT index)
 {
-    (VOID)ip_ptr;
-    (VOID)index;
+    nsh.iface_detaches++;
+    memset(&ip_ptr->nx_ip_interface[index], 0,
+           sizeof(ip_ptr->nx_ip_interface[index]));
 
-    return TX_SUCCESS;
+    return NX_SUCCESS;
 }
 
 UINT _nxe_ip_status_check(NX_IP *ip_ptr, ULONG needed_status, ULONG *actual_status, ULONG wait_option)

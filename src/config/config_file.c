@@ -426,21 +426,12 @@ LONG ami_config_load(AmiConfig *cfg)
     return AMI_CFG_OK;
 }
 
-LONG ami_config_load_selected(AmiConfig *cfg, const AmiIfConfig *iface)
+LONG ami_config_load_base(AmiConfig *cfg)
 {
     LONG rc = begin_config_load(cfg);
 
     if (rc != AMI_CFG_OK)
         return rc;
-    if (iface == NULL || !iface->configured || iface->name[0] == '\0' ||
-        iface->device[0] == '\0')
-    {
-        ami_config_free(cfg);
-        return AMI_CFG_ERR_SYNTAX;
-    }
-
-    cfg->interfaces[0] = *iface;
-    cfg->interface_count = 1;
     finish_config_load(cfg);
 
     return AMI_CFG_OK;

@@ -48,12 +48,13 @@ typedef struct AmiNetStack AmiNetStack;
    running and full, where AMI_NET_ERR_STATE says it is not running. */
 #define AMI_NET_ERR_NOSLOT    (-12)
 
-/* Bring the stack up: idempotent and reference-counted.  Blocks until the
-   first interface has an address or the DHCP timeout expires. */
+/* Bring the stack up from every configured interface: the directly-linked
+   diagnostic entry point.  Idempotent and reference-counted. */
 LONG netstack_startup(VOID);
-/* Start a new stack with exactly this explicit interface.  Further
- * interfaces are attached with netstack_interface_start(). */
-LONG netstack_startup_interface(const AmiIfConfig *cfg);
+
+/* Bring up protocols and the built-in loopback interface, but no SANA-II
+   device.  Physical interfaces are attached with netstack_interface_start(). */
+LONG netstack_startup_loopback(VOID);
 
 /* Drop a reference. The stack goes down when the count reaches zero. */
 VOID netstack_shutdown(VOID);

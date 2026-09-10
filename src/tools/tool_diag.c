@@ -736,8 +736,8 @@ struct Library *tool_stack_start(VOID)
     /*
      * The stack singleton cannot live in a command: ThreadX runs its Tasks on
      * stacks inside the hunk that created them.  Opening bsdsocket.library
-     * only obtains the API; NETCTRL_INTERFACE_ADD starts an explicitly named
-     * interface.  If one is already running, retain it now.
+     * starts only loopback; the caller explicitly adds a physical interface
+     * and takes the persistent hold after that succeeds.
      */
     struct Library *base;
 
@@ -751,8 +751,6 @@ struct Library *tool_stack_start(VOID)
        one. The caller reports the foreign stack and closes. */
     if (!tool_stack_is_ours(base))
         return base;
-
-    (VOID)tool_stack_hold(base);
 
     return base;
 }

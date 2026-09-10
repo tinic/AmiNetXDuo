@@ -77,15 +77,26 @@ static void t_running(void)
     h_teardown();
 }
 
-/* The library's first explicit add must not fall back to the drawer-loading
- * entry point: that was the path which opened every configured card. */
-static void t_selected_startup(void)
+/* Opening the library creates a real IP instance with loopback, while the
+ * first explicitly named physical interface still occupies slot zero. */
+static void t_loopback_then_selected(void)
 {
     AmiIfConfig cfg;
+    UWORD       index = 99;
 
-    printf("netstack startup: one explicitly selected interface\n");
+    printf("netstack startup: loopback, then one selected interface\n");
 
     nsh_reset();
+    CHECK(netstack_startup_loopback() == AMI_NET_OK,
+          "the loopback-only stack comes up");
+    CHECK(nsh.cfg_base_loads == 1, "only machine-wide configuration was read");
+    CHECK(nsh.cfg_full_loads == 0, "the interface drawer was not loaded");
+    CHECK(nsh.sana2_opens == 0, "no SANA-II device was opened");
+    CHECK(nsh.iface_detaches == 1,
+          "the temporary primary slot was returned");
+    CHECK(netstack_get() != NULL, "a complete stack instance exists");
+    CHECK(netstack_interface_count() == 0, "no physical interface is present");
+
     memset(&cfg, 0, sizeof(cfg));
     strcpy(cfg.name, "genet");
     strcpy(cfg.device, "genet.device");
@@ -96,12 +107,11 @@ static void t_selected_startup(void)
     cfg.up = TRUE;
     cfg.configured = TRUE;
 
-    CHECK(netstack_startup_interface(&cfg) == AMI_NET_OK,
-          "the selected interface starts the stack");
-    CHECK(nsh.cfg_selected_loads == 1,
-          "the selected configuration path was used once");
-    CHECK(nsh.cfg_full_loads == 0,
-          "the interface drawer was not loaded");
+    CHECK(netstack_interface_start(&cfg, &index) == AMI_NET_OK,
+          "the selected interface joins the stack");
+    CHECK(index == 0, "the first physical interface owns slot zero");
+    CHECK(nsh.iface_attaches == 1, "one physical interface was attached");
+    CHECK(nsh.sana2_opens == 1, "exactly one SANA-II device was opened");
     CHECK(strcmp(nsh.opened_cfg.name, "genet") == 0,
           "the named interface reached SANA-II");
     CHECK(strcmp(nsh.opened_cfg.device, "genet.device") == 0 &&
@@ -257,7 +267,7 @@ int main(void)
 
     t_idle();
     t_running();
-    t_selected_startup();
+    t_loopback_then_selected();
     t_failed_stop_holds_the_flag();
     t_clean_stop_releases();
     t_startup_refuses_over_a_failed_stop();

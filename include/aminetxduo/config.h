@@ -372,12 +372,11 @@ typedef struct AmiConfig {
 LONG ami_config_load(AmiConfig *cfg);
 
 /*
- * Read the machine-wide configuration around one already parsed interface.
- * This is the AddNetInterface start path: it deliberately does not enumerate
- * DEVS:NetInterfaces, because files in that drawer are definitions rather
- * than an implicit list of devices to open.
+ * Read only the machine-wide configuration.  Interface files are definitions,
+ * not an implicit list of devices to open; bsdsocket.library uses this form
+ * for its loopback-only first-open state.
  */
-LONG ami_config_load_selected(AmiConfig *cfg, const AmiIfConfig *iface);
+LONG ami_config_load_base(AmiConfig *cfg);
 
 /*
  * Give back everything ami_config_load() took, and leave *cfg a valid empty

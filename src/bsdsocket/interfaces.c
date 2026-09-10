@@ -73,12 +73,17 @@ static const AmiIfConfig *bsd_if_config(UINT index)
 
 static BOOL bsd_if_name_of(NX_IP *ip, UINT index, char *out, ULONG outlen)
 {
-    const NX_INTERFACE *nxif = &ip->nx_ip_interface[index];
+    const NX_INTERFACE *nxif;
     const AmiIfConfig  *cfg;
     const char         *nxname;
 
     if (outlen > 0)
         out[0] = '\0';
+
+    if (ip == NULL)
+        return FALSE;
+
+    nxif = &ip->nx_ip_interface[index];
 
     if (nxif->nx_interface_valid == 0)
         return FALSE;

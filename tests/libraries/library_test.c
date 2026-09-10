@@ -209,6 +209,7 @@ static VOID t_ug_foreign_main(VOID)
 #define LVO_Dup2Socket      (-264)
 #define LVO_gethostname     (-282)
 #define LVO_inet_pton       (-606)
+#define LVO_getaddrinfo     (-810)
 #define LVO_NetStackControl (-876)
 
 /* Errno values, from the NDK's <sys/errno.h>. */
@@ -217,7 +218,28 @@ static VOID t_ug_foreign_main(VOID)
 #define T_EMSGSIZE          40
 #define T_EPROTONOSUPPORT   43
 #define T_EOPNOTSUPP        45
-#define T_ENETDOWN          50
+#define T_EAI_NONAME        (-2)
+
+static LONG bsd_getaddrinfo(struct Library *base, const char *node,
+                            APTR *res_out)
+{
+register struct Library *a6 __asm("a6") = base;
+register const char     *a0 __asm("a0") = node;
+register APTR            a1 __asm("a1") = NULL;
+register APTR            a2 __asm("a2") = NULL;
+register APTR           *a3 __asm("a3") = res_out;
+register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
+register LONG _clob_a0 __asm("a0");
+register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-810:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (a1), "r" (a2), "r" (a3)
+                      : "cc", "memory");
+    return(res);
+}
 
 static LONG bsd_netstack_control(struct Library *base, ULONG op,
                                  NetStatusControl *ctl)
@@ -765,8 +787,26 @@ LONG             sock;
     SocketBase =  sbase;
 
     sock = bsd_socket(sbase, T_AF_INET, T_SOCK_STREAM, 0L);
-    (VOID) t_check((BOOL) (sock == -1L && bsd_errno(sbase) == T_ENETDOWN),
-                   "bare OpenLibrary leaves the network down", (ULONG)sock);
+    if (t_check((BOOL) (sock >= 0L),
+                "bare OpenLibrary creates the socket stack", (ULONG)sock))
+    {
+        struct t_sockaddr_in loop;
+
+        t_addr_in(&loop, 0x7F000001UL, 7709);
+        (VOID)t_check((BOOL)(bsd_bind(sbase, sock, &loop,
+                                      (LONG)sizeof(loop)) == 0L),
+                      "127.0.0.1 is live before a physical interface", 0UL);
+        (VOID)bsd_close_socket(sbase, sock);
+    }
+
+    {
+        APTR list = (APTR)1;
+        LONG rc = bsd_getaddrinfo(sbase, "fe80::1%eth0", &list);
+
+        (VOID) t_check((BOOL) (rc == T_EAI_NONAME && list == NULL),
+                       "scoped getaddrinfo before an interface is safe",
+                       (ULONG)rc);
+    }
 
     {
         NetStatusControl ctl;
@@ -776,7 +816,7 @@ LONG             sock;
         ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
         strcpy(ctl.nsc_Name, "eth0");
 
-        t_log("explicitly adding eth0 (this brings the stack up)");
+        t_log("explicitly adding eth0 (this opens the first network device)");
         (VOID) t_check((BOOL)
                        (bsd_netstack_control(sbase, NETCTRL_INTERFACE_ADD,
                                              &ctl) == 0),

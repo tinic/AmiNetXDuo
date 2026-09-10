@@ -286,8 +286,8 @@ aminetxduo_add_tool(tool_offline Offline  SOURCES onoff.c ${TOOLS_DEVDIAG}
 aminetxduo_add_tool(tool_hostname hostname SOURCES hostname.c)
 
 # host resolves through bsdsocket.library like every other client command,
-# and toolsock.c is where tool_socket_open() lives, opening the library is
-# what starts the stack, which host used to refuse to do.
+# and toolsock.c is where tool_socket_open() lives. Opening the library creates
+# the loopback-only stack, which host used to refuse to do; it opens no card.
 aminetxduo_add_tool(tool_host    host     SOURCES host.c toolsock.c toolbudget.c)
 
 # nslookup asks for the record types host cannot: MX, TXT, NS, SRV, SOA and
