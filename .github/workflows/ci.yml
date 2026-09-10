@@ -307,6 +307,7 @@ jobs:
             tests/tools/bringupfail-verdict.sh \
             tests/tools/bringupfail-verdict-selftest.sh \
             tests/tools/check-no-log-advice.sh \
+            tests/tools/peersender-selftest.sh \
             tests/tools/run-cardsweep6.sh \
             tools/emu-mac.sh \
             tools/emu-board.sh \

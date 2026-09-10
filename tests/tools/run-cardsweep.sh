@@ -150,6 +150,8 @@ mkdir -p "$KEEPDIR"
 SWEEP_START=$(date +%s)
 NPASS=0; NFAIL=0; NSKIP=0; NCARRIED=0; IDX=0
 
+echo "==> sweep id $SWEEP_ID, slot $SWEEP_SLOT (0 runs the table's own"\
+     "addresses and MACs unmoved; 1-5 shift them by -10 and +32)"
 echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card," \
      "peer ports from $PORTBASE"
 
@@ -247,8 +249,8 @@ while read -r -u 3 board model addr mac; do
                 break
             done
             if [ -z "$found" ]; then
-                printf 'card=%s board=%s model=%s status=skip_address_in_use wall_s=0 reason="%s, and every other slot for this card is taken too; the arm would lose duplicate-address detection and time out"\n' \
-                       "$board" "$board" "$model" "$taken"
+                printf 'card=%s board=%s model=%s addr=%s mac=%s status=skip_address_in_use wall_s=0 reason="%s, and every other slot for this card is taken too; the arm would lose duplicate-address detection and time out"\n' \
+                       "$board" "$board" "$model" "$addr" "$mac" "$taken"
                 continue
             fi
             echo "  $addr is taken ($conflict); this arm moves to $found"
@@ -267,8 +269,8 @@ while read -r -u 3 board model addr mac; do
         else
             reason="no $drv in the driver store; set AMINETXDUO_SANA2_STORE"
         fi
-        printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=skip_no_driver wall_s=0 reason="%s"\n' \
-               "$board" "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
+        printf 'card=%s board=%s model=%s addr=%s mac=%s driver=%s driver_source=%s anxcard=%s status=skip_no_driver wall_s=0 reason="%s"\n' \
+               "$board" "$board" "$model" "$addr" "$mac" "$drv" "$SANA2_SEL_SOURCE" \
                "${anxcard:-none}" "$reason" | tee -a "$RESULTS"
         NSKIP=$((NSKIP + 1))
         continue
@@ -407,8 +409,16 @@ while read -r -u 3 board model addr mac; do
         *)           NFAIL=$((NFAIL + 1)) ;;
     esac
 
-    printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s udp_peerreport=%s wall_s=%s log=%s evidence=%s%s\n' \
-           "$board" "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
+    # addr= AND mac= ARE NOT DECORATION.  SWEEP_SLOT moves both per sweep --
+    # base - slot*10 and base + slot*32 -- and slot 0 alone is left unmoved, so
+    # two arms of the same card routinely run on different addresses and a row
+    # that omits them cannot be told apart afterwards.  Seven rows from seven
+    # arms were read here as seven runs on one address; they were four
+    # addresses, and the conclusion drawn from them ("it is not the address")
+    # had nothing under it.  A row that does not say what it ran on is not
+    # evidence.
+    printf 'card=%s board=%s model=%s addr=%s mac=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s udp_peerreport=%s wall_s=%s log=%s evidence=%s%s\n' \
+           "$board" "$board" "$model" "$addr" "$mac" "$drv" "$SANA2_SEL_SOURCE" \
            "${anxcard:-none}" "$status" "$rc" "${iface_rc:-none}" \
            "$tx" "$peer_rx" "$rx" "$peer_tx" "$utx" "$peer_urx" "$upeer" \
            "$wall" "$LOGDIR/$board.log" "$kept" "$why" | tee -a "$RESULTS"
