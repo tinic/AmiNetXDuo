@@ -2350,6 +2350,41 @@ stage_bridged() {
         esac
     fi
 
+    # THE FIRST RPC EXCHANGE, which nothing here spoke until bifat's 0.26.5
+    # report.  `RPC: Port mapper failure - Unable to receive` reached a user
+    # through a hole with no test in it at all: grep for portmap, rpcbind or
+    # nfs across tests/ and src/ found only usergroup's own files.
+    #
+    # Four arms over one code path, because what separates them is what names
+    # the defect: an ephemeral source port (what the resolver does), a RESERVED
+    # one (bindresvport, what RPC does), a connect()ed datagram socket, and
+    # that again with a signal mask handed to WaitSelect() the way AmiTCP's
+    # net.lib does.  Each exchanges twice on one socket, since a retry does not
+    # open a new one.
+    #
+    # No rpcbind and no NFS server: tests/tools/rpcpeer.py answers a
+    # PMAPPROC_GETPORT and exits, so the peer's configuration is untouched.
+    printf '\n-- the first RPC exchange: portmap over UDP, four ways\n'
+    if [ -z "${AMINETXDUO_FITZ_PEER:-}" ]; then
+        skip "rpcprobe: AMINETXDUO_FITZ_PEER is not set, so there is no third" \
+             "machine to answer a portmap call.  RPC is unproven on this" \
+             "runner, which is the state it shipped 0.26.5 in."
+    else
+        rc=0
+        "$ROOT/tests/tools/run-rpcprobe.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_FITZ_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  a portmap call and its reply carried on an" \
+                    "ephemeral port, a reserved one, a connected socket and" \
+                    "with a WaitSelect signal mask, twice each" ;;
+            2) fail "rpcprobe: an ingredient is missing, or the guest address" \
+                    "is taken -- the harness names which" ; bad=1 ;;
+            *) fail "rpcprobe: read ephem/resv/conn/sig above; the verdict" \
+                    "line names which half of the stack owns it" ; bad=1 ;;
+        esac
+    fi
+
     printf '\n-- TCP: is an AmigaDOS device, and stock commands use it\n'
     if [ -z "${AMINETXDUO_PEER:-}" ]; then
         skip "tcphandler: AMINETXDUO_PEER is not set, so there is no third" \
