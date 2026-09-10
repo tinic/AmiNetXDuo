@@ -28,6 +28,22 @@ if [ -x "$ROOT/tools/check-generated.sh" ]; then
     fi
 fi
 
+# A change to the shipping surface states its changelog decision here, not in
+# a reconstruction at release time.  0.26.6 was assembled by reading 201
+# commits, and an installer that had been lying about DHCP for three weeks is
+# what that found.
+if [ -x "$ROOT/tools/check-changelog-entry.sh" ]; then
+    if ! "$ROOT/tools/check-changelog-entry.sh"; then
+        echo
+        echo "pre-commit: this commit changes what ships and does not touch"
+        echo "CHANGELOG.md.  Add the entry under Unreleased, or say why there"
+        echo "is none:"
+        echo
+        echo "  AMINETXDUO_NO_CHANGELOG=\"refactor, identical objects\" git commit ..."
+        exit 1
+    fi
+fi
+
 [ -x "$ROOT/tools/check-changelog-prose.sh" ] || exit 0
 if ! "$ROOT/tools/check-changelog-prose.sh"; then
     echo

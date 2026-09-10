@@ -9,16 +9,46 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.26.6
+
+### New
+
+- A third stack, **micro**, installs from the Installer's "Micro, one interface"
+  choice and lives in `Libs/micro`. It is the minimal stack with the route,
+  address-allocation, `getaddrinfo`, netstat-query, out-of-band and ancillary-data
+  vectors left out, and one network interface instead of two. DHCP works
+- Micro is built for the 68000 alone. Its code is the same code the full stack
+  already runs on a 68000; what it drops are the 68020, 68040 and 68060 variants
+  it would never select
+
+| resident library | full | minimal | micro |
+|---|---|---|---|
+| `bsdsocket.library` | 337,328 | 213,100 | **167,984** |
+| `usergroup.library` | 7,284 | 7,284 | 7,284 |
+| `tls.library` | 195,636 | not installed | not installed |
+| `anxnet.device` | 39,064 | 39,064 | 39,064 |
+
 ### Compatibility
 
 - AmiTCP `syslog()`/`vsyslog()` now honors each opener's log tag, `LOG_PID` and
   priority mask, expands `%m`, and sends accepted messages to the serial
   diagnostic sink
+- `usergroup.library` answers `getpwnam`, `getgrnam` and `getgroups` with the
+  record shapes AmiTCP's own library returns, so `ch_nfs` reads the credentials
+  it expects
 
 ### Diagnostics
 
 - `netstat -s` reports `unaligned copies`: receive frames a SANA-II driver
   handed over at an odd address. Measured 0 of 21,178 on x-surf-100.device
+
+### Building from source
+
+- Eleven parts of the stack become options, each off in micro and on everywhere
+  else: `AMINETXDUO_DNS`, `_DHCP`, `_NETSTATUS`, `_ADDRINFO`, `_ROUTING`,
+  `_ADDRALLOC`, `_HANDOFF`, `_NETMONITOR`, `_RAWSOCKET`, `_OOB`, `_CMSG`. A
+  vector whose option is off answers `ENOSYS`, `EAI_NONAME` or `ENOENT` rather
+  than being absent
 
 ## 0.26.5
 
