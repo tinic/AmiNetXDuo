@@ -48,6 +48,9 @@ static AmiNetStack             *ami_ns;
 static BOOL                     ami_ns_system_initialised;
 static BOOL                     ami_ns_kernel_started;
 
+static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
+                                     const char *reason);
+
 static VOID ami_ns_lock_init(VOID)
 {
     Forbid();
@@ -1434,10 +1437,30 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
     switch (new_state)
     {
     case NX_DHCP_STATE_BOUND:
+    {
+        UINT i;
+
+        ns->ns_DhcpGateway[iface_index] = 0UL;
+        for (i = 0; i < (UINT)NX_DHCP_CLIENT_MAX_RECORDS; i++)
+        {
+            const NX_DHCP_INTERFACE_RECORD *record =
+                &dhcp_ptr->nx_dhcp_interface_record[i];
+
+            if (record->nx_dhcp_record_valid != NX_FALSE &&
+                record->nx_dhcp_interface_index == iface_index)
+            {
+                ns->ns_DhcpGateway[iface_index] =
+                    record->nx_dhcp_gateway_address;
+                break;
+            }
+        }
+
         AMI_INFO("netstack: interface %ld has a DHCP lease",
                  (long)iface_index);
+        ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE, "DHCP bind");
         ami_netstack_dns_dhcp_changed(ns, (UWORD)iface_index);
         break;
+    }
 
     case NX_DHCP_STATE_RENEWING:
         AMI_INFO("netstack: interface %ld is renewing its DHCP lease",
@@ -1453,10 +1476,14 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
     case NX_DHCP_STATE_INIT:
         if (previous >= (UBYTE)NX_DHCP_STATE_BOUND)
         {
+            ns->ns_DhcpGateway[iface_index] = 0UL;
             AMI_WARN("netstack: interface %ld has LOST its DHCP lease. The "
                      "address and the gateway are off it. Every open "
                      "connection through it is dead",
                      (long)iface_index);
+
+            ami_ns_gateway_reconcile(ns, (UWORD)iface_index,
+                                     "DHCP lease loss");
 
             ami_netstack_dns_dhcp_changed(ns, (UWORD)iface_index);
 
@@ -1911,6 +1938,12 @@ static LONG ami_ns_bring_up(VOID)
         return AMI_NET_ERR_CONFIG;
     }
 
+    ns->ns_GatewayPrimary = 0;
+    ns->ns_GatewayFixed = ns->ns_Config.default_gateway;
+    ns->ns_GatewayMode = (ns->ns_GatewayFixed != 0UL)
+                             ? (UBYTE)AMI_NS_GATEWAY_FIXED
+                             : (UBYTE)AMI_NS_GATEWAY_AUTO;
+
     if (ns->ns_Config.interface_count == 0)
     {
         AMI_ERROR("netstack: nothing to bring up, DEVS:NetInterfaces holds "
@@ -2352,6 +2385,10 @@ LONG netstack_interface_up(UWORD index)
     status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, NX_LINK_ENABLE,
                                                    (UINT)index, &value);
 
+    if (status == NX_SUCCESS)
+        ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE,
+                                 "interface up");
+
 #ifdef AMINETXDUO_IPV6
     if (status == NX_SUCCESS)
     {
@@ -2389,6 +2426,9 @@ static LONG ami_ns_interface_disable(UWORD index, UINT command)
 
     status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, command,
                                                    (UINT)index, &value);
+
+    if (status == NX_SUCCESS)
+        ami_ns_gateway_reconcile(ns, index, "interface down");
 
     ami_netstack_leave_free(caller);
 
@@ -2496,74 +2536,130 @@ static BOOL ami_ns_same_name(const char *a, const char *b);
 static ULONG ami_ns_gateway_of(AmiNetStack *ns, UWORD index)
 {
     const AmiIfConfig *cfg = &ns->ns_Config.interfaces[index];
-    ULONG              router = 0UL;
-    UINT               size = (UINT)sizeof(router);
 
 #ifdef AMINETXDUO_DHCP
-    if (cfg->iptype == AMI_IPTYPE_DHCP && ns->ns_DhcpCreated &&
-        ns->ns_DhcpState[index] >= (UBYTE)NX_DHCP_STATE_BOUND &&
-        nx_dhcp_interface_user_option_retrieve(
-            &ns->ns_Dhcp, (UINT)index, NX_DHCP_OPTION_GATEWAYS,
-            (UCHAR *)&router, &size) == NX_SUCCESS &&
-        size >= (UINT)sizeof(ULONG) && router != 0UL)
-        return router;
-#else
-    (VOID)router;
-    (VOID)size;
+    if (cfg->iptype == AMI_IPTYPE_DHCP &&
+        ns->ns_DhcpGateway[index] != 0UL)
+        return ns->ns_DhcpGateway[index];
 #endif
 
     if (cfg->gateway != 0UL)
         return cfg->gateway;
 
-    return ns->ns_Config.default_gateway;
+    return 0UL;
 }
 
 /*
- * nx_ip_interface_detach() takes the machine's default gateway with the
- * interface that carried it, so a survivor that has one has to reinstall it or
- * nothing reaches off its own subnet.  Must be called inside the bracket.
+ * Apply the one machine-wide policy.  DHCP callbacks call this while holding
+ * the DHCP mutex; that lock order is supported because the unmodified client
+ * used to make the same IP calls at exactly those points.  Other callers are
+ * already inside a ThreadX bracket.  `skip` excludes a lease that just died or
+ * an interface whose detach has not finished clearing its slot yet.
  */
-static VOID ami_ns_gateway_reinstate(AmiNetStack *ns, UWORD removed)
+static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
+                                     const char *reason)
 {
     AmiNsGatewayIface table[AMI_CFG_MAX_ATTACHED];
-    ULONG             candidate[AMI_CFG_MAX_ATTACHED];
+    AmiNsGatewayCandidate candidate[AMI_CFG_MAX_ATTACHED];
     ULONG             installed = 0UL;
+    ULONG             wanted = 0UL;
     UWORD             count;
     UWORD             i;
+    UINT              status;
 
-    if (nx_ip_gateway_address_get(&ns->ns_Ip, &installed) == NX_SUCCESS &&
-        installed != 0UL)
+    if (ns == NULL || !ns->ns_IpCreated)
         return;
+
+    (VOID)nx_ip_gateway_address_get(&ns->ns_Ip, &installed);
+
+    if (ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_CLEARED)
+    {
+        if (installed != 0UL)
+            (VOID)nx_ip_gateway_address_clear(&ns->ns_Ip);
+        return;
+    }
+
+    if (ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_FIXED)
+    {
+        wanted = ns->ns_GatewayFixed;
+        if (wanted == 0UL || wanted == installed)
+            return;
+
+        status = nx_ip_gateway_address_set(&ns->ns_Ip, wanted);
+        if (status != NX_SUCCESS)
+        {
+            ami_event(NETEVENT_GATEWAY_REFUSED, ns->ns_GatewayPrimary,
+                      (ULONG)status);
+            AMI_WARN("netstack: fixed default gateway was refused after %s "
+                     "(%ld)", reason, (long)status);
+        }
+        return;
+    }
 
     for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
     {
-        table[i].present = (BOOL)(i < ns->ns_IfaceCount &&
-                                  ns->ns_Iface[i] != NULL &&
-                                  ns->ns_Config.interfaces[i].configured);
+        table[i].present = (BOOL)(
+            i < ns->ns_IfaceCount && ns->ns_Iface[i] != NULL &&
+            ns->ns_Config.interfaces[i].configured &&
+            ns->ns_Ip.nx_ip_interface[i].nx_interface_valid != 0 &&
+            ns->ns_Ip.nx_ip_interface[i].nx_interface_link_up != NX_FALSE);
         table[i].gateway = table[i].present ? ami_ns_gateway_of(ns, i) : 0UL;
     }
 
     count = ami_ns_gateway_candidates(table, (UWORD)AMI_CFG_MAX_ATTACHED,
-                                      removed, candidate,
+                                      ns->ns_GatewayPrimary, skip, candidate,
                                       (UWORD)AMI_CFG_MAX_ATTACHED);
 
     for (i = 0; i < count; i++)
     {
-        if (nx_ip_gateway_address_set(&ns->ns_Ip, candidate[i]) != NX_SUCCESS)
+        if (candidate[i].gateway == installed &&
+            ns->ns_Ip.nx_ip_gateway_interface ==
+                &ns->ns_Ip.nx_ip_interface[candidate[i].iface])
+            return;
+
+        if (nx_ip_gateway_interface_address_set(
+                &ns->ns_Ip, (UINT)candidate[i].iface,
+                candidate[i].gateway) != NX_SUCCESS)
             continue;
 
-        AMI_INFO("netstack: default gateway %lu.%lu.%lu.%lu reinstalled after "
-                 "interface %ld went",
-                 (unsigned long)((candidate[i] >> 24) & 0xFFUL),
-                 (unsigned long)((candidate[i] >> 16) & 0xFFUL),
-                 (unsigned long)((candidate[i] >>  8) & 0xFFUL),
-                 (unsigned long)(candidate[i] & 0xFFUL), (long)removed);
+        AMI_INFO("netstack: default gateway %lu.%lu.%lu.%lu selected after %s",
+                 (unsigned long)((candidate[i].gateway >> 24) & 0xFFUL),
+                 (unsigned long)((candidate[i].gateway >> 16) & 0xFFUL),
+                 (unsigned long)((candidate[i].gateway >>  8) & 0xFFUL),
+                 (unsigned long)(candidate[i].gateway & 0xFFUL), reason);
         return;
     }
 
+    if (installed != 0UL)
+        (VOID)nx_ip_gateway_address_clear(&ns->ns_Ip);
+
     if (count != 0)
-        AMI_WARN("netstack: no surviving interface can carry a default "
-                 "gateway after interface %ld went", (long)removed);
+        AMI_WARN("netstack: no live interface accepted a default gateway "
+                 "after %s", reason);
+}
+
+/* A successful route command is authoritative until another route command
+   changes it.  DHCP can neither replace it nor resurrect a deleted default. */
+VOID netstack_gateway_override_set(ULONG gateway)
+{
+    AmiNetStack *ns = ami_ns;
+
+    if (ns == NULL)
+        return;
+
+    ns->ns_GatewayFixed = gateway;
+    ns->ns_GatewayMode = (UBYTE)AMI_NS_GATEWAY_FIXED;
+}
+
+VOID netstack_gateway_override_clear(VOID)
+{
+    AmiNetStack *ns = ami_ns;
+
+    if (ns == NULL)
+        return;
+
+    ns->ns_GatewayFixed = 0UL;
+    ns->ns_GatewayMode = (UBYTE)AMI_NS_GATEWAY_CLEARED;
 }
 
 static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
@@ -2661,7 +2757,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
 
     if (status == NX_SUCCESS)
-        ami_ns_gateway_reinstate(ns, index);
+        ami_ns_gateway_reconcile(ns, index, "interface removal");
 
     ami_netstack_leave_free(caller);
 
@@ -2686,6 +2782,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 
     ns->ns_Iface[index] = NULL;
     ns->ns_Config.interfaces[index].configured = FALSE;
+    ns->ns_DhcpGateway[index] = 0UL;
 
     AMI_INFO("netstack: interface %ld removed", (long)index);
 
@@ -3135,6 +3232,8 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
     (VOID)nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index);
 
     ns->ns_DhcpState[index] = NX_DHCP_STATE_NOT_STARTED;
+    ns->ns_DhcpGateway[index] = 0UL;
+    ami_ns_gateway_reconcile(ns, index, "DHCP stop");
     ami_netstack_dns_dhcp_changed(ns, index);
 
     ami_netstack_leave_free(caller);
@@ -3390,6 +3489,28 @@ static LONG ami_ns_take_interface_slot(AmiNetStack *ns, LONG victim)
 static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
                                           UWORD *index_out, BOOL wanted);
 
+/* The first interface explicitly named by AddNetInterface owns the automatic
+   default.  Later commands may name more interfaces without changing it. */
+static VOID ami_ns_gateway_name_primary(AmiNetStack *ns, UWORD index)
+{
+    AmiNetCaller *caller;
+
+    if (ns == NULL || ns->ns_GatewayPrimaryNamed ||
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED)
+        return;
+
+    ns->ns_GatewayPrimary = index;
+    ns->ns_GatewayPrimaryNamed = TRUE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return;
+
+    ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE,
+                             "primary interface selection");
+    ami_netstack_leave_free(caller);
+}
+
 /*
  * Put back the interface that stood down, because the one it stood down for
  * did not come up.  `wanted` is FALSE: it goes back to being one the boot
@@ -3458,7 +3579,10 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
              * there is nothing to attach.  The duplicate is still refused.
              */
             if (wanted)
+            {
                 ns->ns_IfaceWanted[i] = TRUE;
+                ami_ns_gateway_name_primary(ns, i);
+            }
 
             return AMI_NET_ERR_CONFIG;
         }
@@ -3613,6 +3737,9 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
     ns->ns_IfaceWanted[slot] = wanted;
 
+    if (wanted)
+        ami_ns_gateway_name_primary(ns, (UWORD)slot);
+
     /*
      * MDNS= is acted on and not merely recorded.  Cleared first, because a slot
      * re-used by a different interface must not inherit the last one's answer.
@@ -3744,10 +3871,8 @@ static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
             goto rollback;
     }
 
-    if (gateway != 0UL)
+    if (gateway != 0UL || ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_AUTO)
     {
-        UINT status;
-
         caller = ami_netstack_enter_alloc();
         if (caller == NULL)
         {
@@ -3755,24 +3880,9 @@ static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
             goto rollback;
         }
 
-        status = nx_ip_gateway_address_set(&ns->ns_Ip, gateway);
+        ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE,
+                                 "interface start");
         ami_netstack_leave_free(caller);
-
-        if (status != NX_SUCCESS)
-        {
-            /*
-             * A refused gateway is not a reason to destroy an interface.
-             * nx_ip_gateway_address_set() refuses a next hop on no interface's
-             * network, which is what a mistyped GATEWAY line looks like.
-             */
-            ami_event(NETEVENT_GATEWAY_REFUSED, index, (ULONG)status);
-            AMI_WARN("netstack: '%s' is up, and the default route %lu.%lu.%lu."
-                     "%lu it asked for was refused (%ld)", cfg->name,
-                     (unsigned long)((gateway >> 24) & 0xFFUL),
-                     (unsigned long)((gateway >> 16) & 0xFFUL),
-                     (unsigned long)((gateway >> 8) & 0xFFUL),
-                     (unsigned long)(gateway & 0xFFUL), (long)status);
-        }
     }
 
     if (index_out != NULL)

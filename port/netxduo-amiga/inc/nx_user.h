@@ -262,6 +262,11 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    interface explicitly; the public disable API also clears IP parameters. */
 #define NX_DHCP_CLIENT_DISABLE_DEFAULT_INTERFACE
 
+/* One NX_IP has one default gateway while DHCP may run on every interface.
+   Keep option 3 in the per-interface DHCP records and let netstack.c select
+   the one machine-wide owner deterministically. */
+#define NX_DHCP_CLIENT_DISABLE_DEFAULT_GATEWAY
+
 #define NX_DHCP_CLIENT_SEND_ARP_PROBE
 
 

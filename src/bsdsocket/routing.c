@@ -187,6 +187,8 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
     if (req.brr_HaveDefault)
     {
         status = nx_ip_gateway_address_set(ip, req.brr_Default);
+        if (status == NX_SUCCESS)
+            netstack_gateway_override_set(req.brr_Default);
     }
     else if (req.brr_HaveDest && req.brr_HaveGateway)
     {
@@ -254,6 +256,8 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
         }
 
         status = nx_ip_gateway_address_clear(ip);
+        if (status == NX_SUCCESS)
+            netstack_gateway_override_clear();
     }
     else
     {
@@ -366,6 +370,8 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
            with interrupts off (nx_ip_gateway_address_set.c). No window in
            which the machine has no default route. */
         status = nx_ip_gateway_address_set(ip, req.brr_Default);
+        if (status == NX_SUCCESS)
+            netstack_gateway_override_set(req.brr_Default);
     }
     else if (req.brr_HaveDest && req.brr_HaveGateway)
     {

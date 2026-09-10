@@ -175,6 +175,12 @@ LONG    netstack_interface_remove_named(const char *name, BOOL force);
 LONG    netstack_interface_claim(const char *name, UWORD *index_out);
 VOID    netstack_interface_release(UWORD index);
 
+/* Record a successful external default-route change.  Callers have already
+   applied the route to NX_IP; these keep automatic DHCP reconciliation from
+   replacing it or resurrecting an explicitly cleared route. */
+VOID    netstack_gateway_override_set(ULONG gateway);
+VOID    netstack_gateway_override_clear(VOID);
+
 /* ------------------------------------------- DHCP on one interface --------
    One NX_DHCP for the machine, because there is one UDP port 68.  Not one
    blocking call: the caller holds the deadline and polls

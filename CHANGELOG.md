@@ -9,6 +9,17 @@ version at the top when it merges.
 
 ## Unreleased
 
+### Compatibility
+
+- DHCP on several live interfaces no longer makes the last lease or renewal
+  steal the machine-wide default route. The first interface named to
+  `AddNetInterface` owns it; before one is named, the first configured
+  interface is preferred. Another live interface carries the default only
+  while the preferred interface has no usable gateway. Explicit route-file
+  and run-time default routes remain authoritative. The selected interface is
+  retained even when two cards are on the same subnet and advertise the same
+  router address.
+
 ## 0.26.6
 
 ### New

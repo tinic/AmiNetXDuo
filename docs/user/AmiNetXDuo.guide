@@ -365,10 +365,18 @@
   @{b}More than one card@{ub}
 
   Put one file in DEVS:NetInterfaces per card. They are read in
-  alphabetical order, and the gateway of the first file read becomes
-  the default route. At most @{b}two@{ub} interfaces are attached to the stack.
+  alphabetical order. At most @{b}four@{ub} interfaces are attached to the stack.
   Further files are parsed and then dropped with a warning in the debug
   log.
+
+  IPv4 has one default route for the whole machine. The first interface
+  named to AddNetInterface is preferred for a gateway; until one is
+  named, the first configured interface is preferred. A later DHCP lease
+  or renewal on another interface does not steal it. If the preferred
+  interface has no usable gateway, the first live interface which has
+  one carries the default until the preferred interface recovers. The
+  interface remains part of that choice when two cards are on the same
+  subnet and both leases name the same router address.
 
   Interface names are truncated at 15 characters. Workbench icon files
   (anything ending in .info) in the drawer are skipped, so interface
@@ -493,7 +501,9 @@
   one, only the local network is reachable.
 
   With @{b}CONFIGURE=DHCP the gateway arrives with the lease@{ub} and is not
-  configured.
+  configured. With more than one DHCP interface, the selection rule in
+  @{"More than one card" link IFACE} decides which lease supplies the one
+  machine-wide default route; lease arrival and renewal order do not.
 
   With a static address, set it in DEVS:Internet/routes:
 

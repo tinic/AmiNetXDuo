@@ -778,11 +778,14 @@ VOID ami_ns_dhcp_hostname_displace(AmiNsDhcpHostnameState *state)
     (VOID)state;
 }
 
-UWORD ami_ns_gateway_candidates(const AmiNsGatewayIface *iface, UWORD count, UWORD removed, ULONG *out, UWORD max)
+UWORD ami_ns_gateway_candidates(const AmiNsGatewayIface *iface, UWORD count,
+                                UWORD preferred, UWORD skip,
+                                AmiNsGatewayCandidate *out, UWORD max)
 {
     (VOID)iface;
     (VOID)count;
-    (VOID)removed;
+    (VOID)preferred;
+    (VOID)skip;
     (VOID)out;
     (VOID)max;
 
@@ -1038,6 +1041,24 @@ UINT _nxe_ip_gateway_address_set(NX_IP *ip_ptr, ULONG ip_address)
 {
     (VOID)ip_ptr;
     (VOID)ip_address;
+
+    return TX_SUCCESS;
+}
+
+UINT _nxe_ip_gateway_interface_address_set(NX_IP *ip_ptr,
+                                           UINT interface_index,
+                                           ULONG ip_address)
+{
+    (VOID)ip_ptr;
+    (VOID)interface_index;
+    (VOID)ip_address;
+
+    return TX_SUCCESS;
+}
+
+UINT _nxe_ip_gateway_address_clear(NX_IP *ip_ptr)
+{
+    (VOID)ip_ptr;
 
     return TX_SUCCESS;
 }

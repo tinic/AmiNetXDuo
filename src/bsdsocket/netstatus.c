@@ -1794,6 +1794,13 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             status = (ctl->nsc_Gateway != 0)
                          ? nx_ip_gateway_address_set(cip, ctl->nsc_Gateway)
                          : nx_ip_gateway_address_clear(cip);
+            if (status == NX_SUCCESS)
+            {
+                if (ctl->nsc_Gateway != 0)
+                    netstack_gateway_override_set(ctl->nsc_Gateway);
+                else
+                    netstack_gateway_override_clear();
+            }
             rc2 = ns_map_status(SocketBase, status);
 
             bsd_nx_leave(SocketBase);
@@ -1964,11 +1971,15 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
     {
         case NETCTRL_GATEWAY_SET:
             status = nx_ip_gateway_address_set(ip, ctl->nsc_Gateway);
+            if (status == NX_SUCCESS)
+                netstack_gateway_override_set(ctl->nsc_Gateway);
             rc = ns_map_status(SocketBase, status);
             break;
 
         case NETCTRL_GATEWAY_CLEAR:
             status = nx_ip_gateway_address_clear(ip);
+            if (status == NX_SUCCESS)
+                netstack_gateway_override_clear();
             rc = ns_map_status(SocketBase, status);
             break;
 

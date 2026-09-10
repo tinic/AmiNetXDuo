@@ -224,6 +224,19 @@ struct AmiNetStack
      */
     BOOL                ns_IfaceWanted[AMI_CFG_MAX_ATTACHED];
 
+    /*
+     * One NX_IP has one IPv4 default gateway, even though every interface may
+     * have a DHCP option 3 of its own.  NetX Duo is built not to install those
+     * automatically; this table and the preferred slot make lease arrival
+     * order irrelevant.  The first interface explicitly named by
+     * AddNetInterface replaces the boot-time slot-0 preference once.
+     */
+    ULONG               ns_DhcpGateway[AMI_CFG_MAX_ATTACHED];
+    ULONG               ns_GatewayFixed;
+    UWORD               ns_GatewayPrimary;
+    BOOL                ns_GatewayPrimaryNamed;
+    UBYTE               ns_GatewayMode;       /* AmiNsGatewayMode */
+
 #ifdef AMINETXDUO_DHCP
     NX_DHCP             ns_Dhcp;
     AmiNsClientPoolBlock *ns_DhcpPool;
