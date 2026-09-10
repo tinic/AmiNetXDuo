@@ -977,14 +977,30 @@ for arm in "${ARMS[@]}"; do
     # That is the defect 1ec557b9 fixed, and the reason it survived a year is
     # that nothing in the lab ever asked for a size with anything to pad.
     #
-    # MEASURED AGAINST THE SCREEN, NOT THE REQUEST.  `C:chipscreen ... 0` opens
-    # nothing and reports the front screen, and that report is the reference:
-    # Workbench rounds a 632-pixel request up to 640 and the console is right to
-    # serve 640 when it does.
+    # MEASURED AGAINST THE SCREEN, NOT THE REQUEST, and the reference has to be
+    # THE SCREEN THE CONSOLE IS SERVING -- which is the FRONT screen.  It used
+    # to be `wb_size` from chipscreen for every arm that is not a chipset one,
+    # and THAT WAS WRONG FOR THE RTG ARMS: chipscreen's report_workbench()
+    # takes LockPubScreen(NULL), which is the default public screen, and an
+    # rtgbars screen is not it.  So rtg-unaligned compared the console's view
+    # of a 633x475 card screen against WORKBENCH at 640x475 and failed a
+    # console that was right:
+    #
+    #     rtgbars.txt      screen=633x475x8      <- what the console served
+    #     frontscreen.txt  wb_size=640x475       <- Workbench, behind it
+    #
+    # rtgbars already reports the screen it opened, from sc->Width
+    # (tests/perf/rtgbars.c:252), so an RTG arm reads that.  Three kinds of arm,
+    # three references, and none of them is the request.
     front_size=""
     if [ -n "$CHIP" ]; then
         front_size=$(awk -F= '/^screen_size=/ { print $2 }' \
                      "$HD/chipscreen.txt" 2>/dev/null | tail -1 || true)
+    elif [ "$RTG" = 1 ]; then
+        # screen=633x475x8 -> 633x475; the depth is checked separately below.
+        front_size=$(awk -F'[= ]' '/^screen=/ { print $2 }' \
+                     "$HD/rtgbars.txt" 2>/dev/null | tail -1 || true)
+        front_size="${front_size%x*}"
     else
         front_size=$(awk -F= '/^wb_size=/ { print $2 }' \
                      "$HD/frontscreen.txt" 2>/dev/null | tail -1 || true)
@@ -1004,11 +1020,13 @@ for arm in "${ARMS[@]}"; do
  measured against nothing"
         VERDICT=fail
     elif [ "${got_w:-none}x${got_h:-none}" != "$front_size" ]; then
-        say "${tag}_error" "the screen the guest opened is $front_size and the\
- geom word says ${got_w:-none}x${got_h:-none}: the console is serving the\
- bitmap's allocation, not the screen"
-        say "${tag}_hint" "the DWidth clamp in fb_geometry_of(),\
- src/tools/httpfb.c, and http_rtg_describe(), src/tools/httprtg.c"
+        say "${tag}_error" "the front screen is $front_size and the geom word\
+ says ${got_w:-none}x${got_h:-none}: the console is not serving the screen it\
+ is in front of"
+        say "${tag}_hint" "the width clamp in fb_geometry_of(),\
+ src/tools/httpfb.c, and http_rtg_describe(), src/tools/httprtg.c -- but check\
+ FIRST that \$front_size names the screen the console serves and not one\
+ behind it, which is what made this arm fail against a correct console"
         VERDICT=fail
     fi
 
