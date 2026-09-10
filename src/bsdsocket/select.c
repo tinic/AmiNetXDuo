@@ -575,7 +575,28 @@ static VOID bsd_fdset_in(ULONG *dst, const APTR src, LONG words)
         dst[i] = (src != NULL) ? ((const ULONG *)src)[i] : 0;
 }
 
-static VOID bsd_fdset_out(APTR dst, const ULONG *src, LONG words)
+/*
+ * ONLY WHERE IT CHANGES, WHICH IS THE ONLY BOUND WE HAVE.
+ *
+ * `words` comes from nfds, and nfds is the caller's word about how many bits
+ * its fd_set holds.  When that word is wrong -- and the Sun RPC idiom
+ * `select(getdtablesize(), &set, ...)` makes it wrong whenever the table is
+ * larger than the caller's FD_SETSIZE -- writing every word puts zeroes into
+ * memory past the caller's object.  We cannot learn the object's real size,
+ * so we do the next best thing and never write a word we would not change.
+ *
+ * `in` is the copy bsd_fdset_in() took of that same memory, so src[i] == in[i]
+ * means the store would put back the value already there.  Skipping it is
+ * observably identical and, in the one case this is reachable in -- trailing
+ * memory that is all zero, so the validity scan above found no bits to reject
+ * and no descriptor there can be ready -- it is the difference between
+ * clearing 24 bytes of somebody else's stack and touching nothing.
+ *
+ * Where the caller's nfds is honest this changes nothing: a word that differs
+ * is still written, and one that does not never needed to be.
+ */
+static VOID bsd_fdset_out(APTR dst, const ULONG *src, const ULONG *in,
+                          LONG words)
 {
     LONG i;
 
@@ -583,7 +604,10 @@ static VOID bsd_fdset_out(APTR dst, const ULONG *src, LONG words)
         return;
 
     for (i = 0; i < words; i++)
-        ((ULONG *)dst)[i] = src[i];
+    {
+        if (src[i] != in[i])
+            ((ULONG *)dst)[i] = src[i];
+    }
 }
 
 LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
@@ -756,9 +780,9 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         bsd_bzero(ready->except, (ULONG)words * sizeof(ULONG));
     }
 
-    bsd_fdset_out(read_fds,   ready->read,   words);
-    bsd_fdset_out(write_fds,  ready->write,  words);
-    bsd_fdset_out(except_fds, ready->except, words);
+    bsd_fdset_out(read_fds,   ready->read,   in_read,   words);
+    bsd_fdset_out(write_fds,  ready->write,  in_write,  words);
+    bsd_fdset_out(except_fds, ready->except, in_except, words);
 
     if (signals != NULL)
         *signals = got_signals;
