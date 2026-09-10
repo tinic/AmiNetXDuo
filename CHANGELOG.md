@@ -35,6 +35,12 @@ version at the top when it merges.
   diagnostic sink
 ### NFS
 
+- `getdtablesize()` answers 64 again. It answered 256 from 0.24.0, and an
+  AmiTCP `fd_set` holds 64, so `select(_rpc_dtablesize(), ...)` -- what every
+  Sun RPC client does -- had `WaitSelect` read 32 bytes out of an 8-byte set
+- That returned `EBADF` on the first RPC call and surfaced as
+  `RPC: Port mapper failure - Unable to receive`. `ch_nfsc` mounts now
+- A program that wants a larger table sets `SBTC_DTABLESIZE`, still to 1024
 - `usergroup.library` reads AmiTCP 4's own pipe-delimited `passwd` and `group`
   files. An existing AmiTCP user database is used as it stands, with no
   conversion

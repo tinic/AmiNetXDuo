@@ -152,11 +152,34 @@
 #define BSD_LOG_USER        (1L << 3)
 
 /*
- * 256, matching Roadshow's documented default. <sys/types.h> makes FD_SETSIZE
- * 256, so `WaitSelect(FD_SETSIZE, ...)`, common in ported code, failed
- * with EINVAL on the 64 we used to ship.
+ * 64, WHICH IS WHAT AN AmiTCP-ERA fd_set HOLDS.
+ *
+ * This was 256 from 1c5a5809 until now, "matching Roadshow's documented
+ * default", to stop `WaitSelect(FD_SETSIZE, ...)` failing with EINVAL on the
+ * 64 we used to ship.  That reason expired four days later: d6e4a259 made
+ * WaitSelect CLAMP nfds to the table size (select.c) rather than reject it,
+ * so a caller may pass any FD_SETSIZE it likes and 64 costs it nothing.
+ *
+ * What the 256 cost is every Sun-RPC client.  The canonical idiom is
+ *
+ *     select(_rpc_dtablesize(), &readfds, ...)
+ *
+ * where _rpc_dtablesize() caches getdtablesize() -- and AmiTCP's FD_SETSIZE
+ * is 64, so that fd_set is EIGHT BYTES.  Answering 256 makes WaitSelect
+ * compute (256+31)/32 = 8 longwords and read THIRTY-TWO bytes out of it,
+ * twenty-four of them the caller's live stack.  In ch_nfsc 1.02BETA those
+ * bytes are a length, a live pointer and a timeval, so bits are always set
+ * for descriptors past the table, every one fails the `fd < nfds` scan in
+ * select.c, and WaitSelect returns EBADF on the first call.  Sun RPC turns
+ * that into RPC_CANTRECV, which is the "RPC: Port mapper failure - Unable to
+ * receive" reported against 0.26.5.  Deterministic, not a race.
+ *
+ * A program that genuinely wants more says so with SBTC_DTABLESIZE, which
+ * still raises it to BSD_MAX_DTABLESIZE below.  64 is also what this tree's
+ * own reference says twice (third_party/bsdsocktest/docs/AMITCP_API.md:249
+ * and :1028).
  */
-#define BSD_DEFAULT_DTABLESIZE 256
+#define BSD_DEFAULT_DTABLESIZE 64
 #define BSD_MAX_DTABLESIZE     1024
 
 #define BSD_FD_BITS         32
