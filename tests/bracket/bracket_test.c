@@ -780,15 +780,31 @@ static VOID bt_test_no_signal_reap(VOID)
         t_check(tx_amiga_stack_in_use(arena, arena_size) == TX_TRUE,
                 "an enclosing range overlaps the target stack", 0);
 
+        /* The overlap rejection is _txe_thread_create()'s, and the shipping
+           build compiles argument checking out, so there the probe is really
+           created and has to come straight back out: left on the created list
+           it owns the arena that is freed below, and every later
+           tx_amiga_stack_in_use() would answer for it. */
         status = tx_thread_create(&bt_overlap_probe,
                                   (CHAR *)"overlap probe",
                                   bt_reap_target_entry, 0UL,
                                   arena, arena_size,
                                   20U, 20U, TX_NO_TIME_SLICE,
                                   TX_DONT_START);
+#ifdef TX_DISABLE_ERROR_CHECKING
+        t_check(status == TX_SUCCESS,
+                "without argument checking the overlapping stack is taken",
+                (LONG)status);
+        if (status == TX_SUCCESS)
+        {
+            (VOID)tx_thread_terminate(&bt_overlap_probe);
+            (VOID)tx_thread_delete(&bt_overlap_probe);
+        }
+#else
         t_check(status == TX_PTR_ERROR,
                 "ThreadX rejects a stack containing an existing stack",
                 (LONG)status);
+#endif
 
         historic_before = tx_amiga_zombie_tasks();
         live_before = tx_amiga_zombie_tasks_live();
