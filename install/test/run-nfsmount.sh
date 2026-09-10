@@ -40,6 +40,7 @@ BACKEND="${AMINETXDUO_EMU_BACKEND:-ens18}"
 TAG="${AMINETXDUO_RUN_TAG:-nfsmount}"
 PEERHOST="${AMINETXDUO_FITZ_PEER:-}"
 KEEP=0
+DIRECT=0
 EXPORT_NAME="/export"
 CONTENT='AmiNetXDuo NFS payload, 0123456789'
 NFSUSER=ch
@@ -48,7 +49,7 @@ NFSGID=100
 ADDRESS="${AMINETXDUO_NFSMOUNT_ADDRESS:-192.168.1.237}"
 GATEWAY="${AMINETXDUO_NFSMOUNT_GATEWAY:-192.168.1.1}"
 
-while getopts "m:B:t:T:P:b:kh" opt; do
+while getopts "m:B:t:T:P:b:kdh" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
@@ -57,12 +58,16 @@ while getopts "m:B:t:T:P:b:kh" opt; do
         P) PEERHOST="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         k) KEEP=1 ;;
+        d) DIRECT=1 ;;   # run ch_nfsc ourselves, output kept
         h) sed -n '3,7p' "$0"; exit 0 ;;
         *) sed -n '3,7p' "$0" >&2; exit 2 ;;
     esac
 done
 
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/${BUILD#./}" ;; esac
+# amiberry-run.sh names its drive from this.  Unexported, the report
+# landed in build/amiberry-testhd-amiberry and every step read "none".
+export AMINETXDUO_RUN_TAG="$TAG"
 
 need() { [ -e "$1" ] || { echo "!! missing $1${2:+ -- $2}" >&2; exit 2; }; }
 
@@ -113,7 +118,7 @@ find_cmd() {
     return 1
 }
 DOSCMDS=""
-for c in Assign List Type; do
+for c in Assign List Type Wait; do
     f=$(find_cmd "$c") || {
         echo "!! no AmigaDOS '$c' on this machine.  Assemble a Workbench" >&2
         echo "   (install/test/run-smbmount.sh does, from the 3.1 ADFs) or" >&2
@@ -164,6 +169,19 @@ cat > "$STAGE/AmiTCP/db/ch_nfstab" <<TABEOF
 $PEERADDR:$EXPORT_NAME NFS: USER $NFSUSER UMASK 022
 TABEOF
 
+# ch_nfsmount starts ch_nfsc detached and discards its output, so when the
+# mount does not appear there is nothing to read.  This runs the handler the
+# same way, with its output kept, and is what names the failure.
+cat > "$STAGE/commands-direct.txt" <<DCMDEOF
+SYS:c/Assign AmiTCP: SYS:AmiTCP
+SYS:AddNetInterface eth0
+&SYS:AmiTCP/bin/ch_nfsc $PEERADDR:$EXPORT_NAME NFS: USER $NFSUSER UMASK 022 >SYS:chnfsc.txt
+SYS:c/Wait 10
+SYS:c/List NFS:
+SYS:c/Type NFS:payload.txt
+SYS:c/Type SYS:chnfsc.txt
+DCMDEOF
+
 cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
 DEVICE=a2065.device
 UNIT=0
@@ -178,19 +196,72 @@ IFEOF
 cat > "$STAGE/commands.txt" <<CMDEOF
 SYS:c/Assign AmiTCP: SYS:AmiTCP
 SYS:AddNetInterface eth0
-SYS:c/ch_nfsmount NFS: from AmiTCP:db/ch_nfstab
+SYS:c/ch_nfsmount LIST from AmiTCP:db/ch_nfstab
+SYS:c/ch_nfsmount NFS: VERBOSE from AmiTCP:db/ch_nfstab
+SYS:c/Wait 8
 SYS:c/List NFS:
 SYS:c/Type NFS:payload.txt
 CMDEOF
 
+# ------------------------------------------------------------- the server ----
+#
+# By PID from a file the peer writes, never `pkill -f`: the pattern would match
+# the very shell that starts it.  The `timeout` on the far side is the other
+# half -- killing the local ssh does not kill what it started there.
+
+RSRV="/tmp/nfsserver-$TAG.py"
+RROOT="/tmp/nfsroot-$TAG"
+RLOG="/tmp/nfsserver-$TAG.log"
+RPID="/tmp/nfsserver-$TAG.pid"
+
+stop_server() {
+    scp -q "$PEERHOST:$RLOG" "$OUT/server.log" 2>/dev/null || true
+    ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
+        "[ -f $RPID ] && kill \$(cat $RPID) 2>/dev/null; \
+         rm -rf $RSRV $RPID $RROOT; exit 0" >/dev/null 2>&1 || true
+    return 0
+}
+trap stop_server EXIT INT TERM HUP
+
+scp -q "$ROOT/tests/tools/nfsserver.py" "$PEERHOST:$RSRV" || {
+    echo "!! cannot copy the server to $PEERHOST" >&2; exit 2; }
+
+ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
+    "rm -rf $RROOT && mkdir -p $RROOT && \
+     printf '%s\\n' '$CONTENT' > $RROOT/payload.txt && chmod -R a+rX $RROOT" || {
+    echo "!! cannot stage the export on $PEERHOST" >&2; exit 2; }
+
+ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
+    "nohup timeout $((TIMEOUT + 120)) python3 $RSRV --root $RROOT \
+         --export $EXPORT_NAME --seconds $((TIMEOUT + 60)) \
+         > $RLOG 2>&1 & echo \$! > $RPID" >/dev/null 2>&1 || {
+    echo "!! cannot start the server on $PEERHOST" >&2; exit 2; }
+
+for _ in $(seq 1 20); do
+    ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
+        "grep -q '^rpcbind_registered=' $RLOG" 2>/dev/null && break
+    sleep 1
+done
+REG=$(ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
+      "sed -n 's/^rpcbind_registered=//p' $RLOG" 2>/dev/null || true)
+[ -n "$REG" ] && [ "$REG" != none ] || {
+    echo "!! the server did not register with the peer's rpcbind:" >&2
+    ssh -o BatchMode=yes -n "$PEERHOST" "cat $RLOG" >&2 2>/dev/null || true
+    exit 2; }
+echo "==> serving $RROOT as $EXPORT_NAME from $PEERADDR (rpcbind: $REG)"
+
 # --------------------------------------------------------------------- run ---
 
+CMDFILE="$STAGE/commands.txt"
+[ "$DIRECT" = 1 ] && CMDFILE="$STAGE/commands-direct.txt"
+cp "$CMDFILE" "$STAGE/commands.txt" 2>/dev/null || true
+CMDFILE="$STAGE/commands.txt"
 echo "==> booting $MODEL, a2065 bridged on $BACKEND, guest static at $ADDRESS"
 echo "==> mounting NFS: as $NFSUSER (uid $NFSUID) with ch_nfsc 1.02BETA"
 set +e
 "$ROOT/tools/amiberry-run.sh" -m "$MODEL" -N a2065 -B "$BACKEND" \
     -t "$TIMEOUT" \
-    "$CMDDIR/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/c" "$STAGE/libs" \
+    "$CMDDIR/ToolsSmoke" "$CMDFILE" "$STAGE/c" "$STAGE/libs" \
     "$STAGE/devs" "$STAGE/AmiTCP" "$STAGE/AddNetInterface"
 RUN_RC=$?
 set -e
@@ -225,7 +296,7 @@ if [ -f "$REPORT" ]; then
     echo "==================================================================="
     ASSIGN_RC=$(step_rc "Assign AmiTCP:");        ASSIGN_RC="${ASSIGN_RC:-none}"
     IFACE_RC=$(step_rc "AddNetInterface eth0");   IFACE_RC="${IFACE_RC:-none}"
-    MOUNT_RC=$(step_rc "ch_nfsmount");            MOUNT_RC="${MOUNT_RC:-none}"
+    MOUNT_RC=$(step_rc "ch_nfsmount NFS: VERBOSE");            MOUNT_RC="${MOUNT_RC:-none}"
     LIST_RC=$(step_rc "List NFS:");               LIST_RC="${LIST_RC:-none}"
     TYPE_RC=$(step_rc "Type NFS:payload.txt");    TYPE_RC="${TYPE_RC:-none}"
     GOT=$(step_out "Type NFS:payload.txt" | tr -d '\r' | sed '/^$/d' | head -1)

@@ -326,6 +326,12 @@ def main():
 
     reg = []
     for prog, vers in ((MNT_PROG, MNT_VERS), (NFS_PROG, NFS_VERS)):
+        # UNSET FIRST, ALWAYS.  rpcbind refuses a SET for a prog/vers that is
+        # already registered, so a previous run whose UNSET did not happen --
+        # killed by a signal, or its `finally` skipped -- makes every later run
+        # fail to register and look like a broken server.  Unsetting an entry
+        # that is not there is harmless.
+        pmap(PMAPPROC_UNSET, prog, vers, port)
         if pmap(PMAPPROC_SET, prog, vers, port):
             reg.append("%d/%d" % (prog, vers))
         else:

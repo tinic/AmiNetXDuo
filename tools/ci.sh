@@ -2550,6 +2550,31 @@ stage_bridged() {
         esac
     fi
 
+    # AND THE SAME QUESTION ASKED BY THE PROGRAM THE REPORTS ARE ABOUT.
+    # NfsProbe builds its own RPC, so it can only ask what we thought to ask.
+    # ch_nfsc 1.02BETA is what bifat mounts with; this mounts a real export
+    # with it and reads a file back through AmigaDOS.  It also puts
+    # AmiTCP:db/passwd in AmiTCP 4's pipe-delimited format, which is the file
+    # ug_parse.c learned to read in 0.26.6 -- mount as the named user or not
+    # at all.
+    printf '\n-- ch_nfsc mounts a real export and a file is read back\n'
+    if [ -z "${AMINETXDUO_FITZ_PEER:-}" ]; then
+        skip "nfsmount: AMINETXDUO_FITZ_PEER is not set, so there is no third" \
+             "machine to export from."
+    else
+        rc=0
+        "$ROOT/install/test/run-nfsmount.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_FITZ_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  ch_nfsc mounted NFS: and the file read back matched" ;;
+            2) fail "nfsmount: an ingredient is missing -- the handler in the" \
+                    "asset store, a Workbench Assign/List/Type, or the peer" ; bad=1 ;;
+            *) fail "nfsmount: the status line names the step -- assign," \
+                    "iface, mount, list or type" ; bad=1 ;;
+        esac
+    fi
+
     printf '\n-- TCP: is an AmigaDOS device, and stock commands use it\n'
     if [ -z "${AMINETXDUO_PEER:-}" ]; then
         skip "tcphandler: AMINETXDUO_PEER is not set, so there is no third" \

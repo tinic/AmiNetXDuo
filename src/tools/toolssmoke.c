@@ -279,6 +279,7 @@ static int run_command(const char *command)
                         SYS_Input,  (Tag)in,
                         SYS_Output, (Tag)out,
                         SYS_Asynch, (Tag)DOSTRUE,
+                        NP_StackSize, (Tag)65536,
                         TAG_DONE);
 
         if (rc == -1)
@@ -292,7 +293,25 @@ static int run_command(const char *command)
     }
     else
     {
-        rc = SystemTagList((CONST_STRPTR)line, NULL);
+        /*
+         * NP_StackSize, BECAUSE 4 KB IS NOT ENOUGH FOR EVERY GUEST.
+         *
+         * SystemTagList() hands unrecognised tags to CreateNewProc(), and
+         * without NP_StackSize a command runs on the default ~4 KB.  Our own
+         * tools fit; a third-party one under test need not.  ch_nfsc 1.02BETA
+         * states 30,000 bytes of stack in its own guide (Requirements), and on
+         * 4 KB its ch_nfsmount returned 0, printed NOTHING -- not even the
+         * contents of the table its LIST switch exists to print -- and mounted
+         * nothing.  A silent return is what a blown stack looks like from
+         * here.
+         *
+         * 65,536 rather than 30,000: this is the shell a person would have
+         * typed `Stack 60000` into before running any of it, and the memory is
+         * a test machine's.
+         */
+        rc = SystemTags((CONST_STRPTR)line,
+                        NP_StackSize, (Tag)65536,
+                        TAG_DONE);
     }
 
     if (rc == -1)
@@ -485,6 +504,29 @@ int main(int argc, char **argv)
 
     (void)argc;
     (void)argv;
+
+    /*
+     * THE STACK A CHILD INHERITS, WHICH IS NOT THE ONE THIS PROCESS HAS.
+     *
+     * cli_DefaultStack is what the Shell's `Stack` command sets, it is in
+     * LONGWORDS, and every CLI started from this one inherits it -- including
+     * a command's own children.  NP_StackSize below covers the command this
+     * file starts; only this covers what THAT starts.
+     *
+     * ch_nfsc 1.02BETA asks for 30,000 bytes in its guide.  On the default
+     * ~4 KB its ch_nfsmount returned 0 and printed nothing at all, not even
+     * the table its LIST switch exists to print; with a real stack it prints
+     * the table and the command line it runs.  A silent success is what a
+     * blown stack looks like from the outside, and a harness that cannot run
+     * a third-party program is not measuring the stack under it.
+     */
+    if (self != NULL && self->pr_CLI != (BPTR)0)
+    {
+        struct CommandLineInterface *cli =
+            (struct CommandLineInterface *)BADDR(self->pr_CLI);
+        if (cli != NULL && cli->cli_DefaultStack < (LONG)(65536L / 4L))
+            cli->cli_DefaultStack = (LONG)(65536L / 4L);
+    }
 
     /* A Shell command started from a script sees argc == 1 here, so the
        drawer arrives through ReadArgs and never through argv. */
