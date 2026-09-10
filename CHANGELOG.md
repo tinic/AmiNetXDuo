@@ -33,14 +33,24 @@ version at the top when it merges.
 - AmiTCP `syslog()`/`vsyslog()` now honors each opener's log tag, `LOG_PID` and
   priority mask, expands `%m`, and sends accepted messages to the serial
   diagnostic sink
-- `usergroup.library` answers `getpwnam`, `getgrnam` and `getgroups` with the
-  record shapes AmiTCP's own library returns, so `ch_nfs` reads the credentials
-  it expects
+### NFS
+
+- `usergroup.library` reads AmiTCP 4's own pipe-delimited `passwd` and `group`
+  files. An existing AmiTCP user database is used as it stands, with no
+  conversion
+- A credential query from a task that never opened the library keeps the
+  querying opener's session instead of failing. This is how `ch_nfsc` obtains
+  credentials for the task it mounts on
+- The credentials umask is initialized to 022
+- An Amiga raw-LVO regression test shaped like `ch_nfsc`'s own call sequence
+  now runs against the library
 
 ### Diagnostics
 
 - `netstat -s` reports `unaligned copies`: receive frames a SANA-II driver
   handed over at an odd address. Measured 0 of 21,178 on x-surf-100.device
+- Every `usergroup.library` vector logs its entry under `AMINETXDUO_LOG`. A
+  CHK exception names no function; this names the vector it happened in
 
 ### Building from source
 
