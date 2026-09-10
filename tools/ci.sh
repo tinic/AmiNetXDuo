@@ -1099,7 +1099,9 @@ stage_cross() {
            [ "$(cat "$optsig" 2>/dev/null || true)" != "$opts" ]; then
             note "arm options changed since this directory was configured;\
  configuring it fresh"
-            rm -rf "$BUILD/$name"
+            # ${var:?} on both halves: shellcheck SC2115, and it is a real
+            # guard -- an empty BUILD or name here would `rm -rf /`.
+            rm -rf "${BUILD:?}/${name:?}"
         fi
 
         refresh_cmake_compiler_cache \
