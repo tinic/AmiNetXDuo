@@ -215,6 +215,10 @@ VOID netstack_gateway_override_clear(VOID)
 { h_unreachable("netstack_gateway_override_clear"); }
 LONG netstack_interface_start(const AmiIfConfig *c, UWORD *out)
 { (VOID)c; (VOID)out; h_unreachable("netstack_interface_start"); return -1; }
+LONG bsd_stack_interface_start(struct AmiSocketBase *b, const AmiIfConfig *c,
+                               UWORD *out)
+{ (VOID)b; (VOID)c; (VOID)out; h_unreachable("bsd_stack_interface_start");
+  return -1; }
 LONG netstack_interface_remove(UWORD i, BOOL force)
 { (VOID)i; (VOID)force; h_unreachable("netstack_interface_remove"); return -1; }
 LONG netstack_interface_up(UWORD i)
