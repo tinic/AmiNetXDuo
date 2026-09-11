@@ -9,13 +9,16 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.27.0
+
 ### Interfaces are started, not found
 
 **Upgrading from 0.26.x needs one line in your startup.** A file in
 `DEVS:NetInterfaces` is a definition; it no longer starts the interface it
 describes. `AddNetInterface <name>` does, from your startup script, where you
-can change it. Roadshow starts interfaces from `S/Network-Startup` and AmiTCP
-from `startnet`; neither starts one from inside the library.
+can change it. Roadshow starts interfaces from `S/Network-Startup`, AmiTCP_NG
+ships the same script, and AmiTCP from `startnet`; none of them opens a network
+card from inside the library.
 
 - Opening `bsdsocket.library` opened every interface file in the drawer, up to
   four, whether or not anyone had asked for them. A PiStorm with `genet.device`
