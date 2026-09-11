@@ -851,12 +851,61 @@ static VOID ami_ns_park_unaddressed(AmiNetStack *ns, UWORD index)
  */
 static VOID ami_ns_bootstrap_driver(NX_IP_DRIVER *request)
 {
+    NX_INTERFACE *nxif;
+
     if (request == NULL)
         return;
 
-    if (request->nx_ip_driver_interface != NULL &&
-        request->nx_ip_driver_command == NX_LINK_INITIALIZE)
-        request->nx_ip_driver_interface->nx_interface_ip_mtu_size = 1500UL;
+    nxif = request->nx_ip_driver_interface;
+
+    switch (request->nx_ip_driver_command)
+    {
+        case NX_LINK_INITIALIZE:
+            if (nxif != NULL)
+            {
+                nxif->nx_interface_ip_mtu_size = 1500UL;
+
+                /* DOWN, and it stays down.  This slot has no wire: it exists
+                   so nx_ip_create() has the primary driver it insists on, and
+                   it is detached as soon as the IP thread is up.  A slot that
+                   claims a link is one the stack will route over and send to,
+                   and everything sent here is lost. */
+                nxif->nx_interface_link_up = NX_FALSE;
+                nxif->nx_interface_address_mapping_needed = NX_FALSE;
+            }
+            break;
+
+        case NX_LINK_ENABLE:
+            /* Enabling a driver with nothing behind it does not raise a link.
+               src/sana2/sana2_driver.c:336 raises it for a card that answered;
+               there is no card here. */
+            if (nxif != NULL)
+                nxif->nx_interface_link_up = NX_FALSE;
+            break;
+
+        case NX_LINK_PACKET_SEND:
+        case NX_LINK_PACKET_BROADCAST:
+        case NX_LINK_ARP_SEND:
+        case NX_LINK_ARP_RESPONSE_SEND:
+        case NX_LINK_RARP_SEND:
+            /* THE PACKET GOES BACK.  A driver that answers a send with
+               NX_SUCCESS and keeps the packet leaks it out of the pool for
+               good, and the first version of this did exactly that: with IPv6
+               on, bring-up puts MLD and DAD traffic on the primary interface
+               in the window before the detach, and each one was gone.  A
+               drained pool is a socket call that waits for a packet that will
+               never come, which showed up as a boot that hung about half the
+               time in `Run' of anything that opened the library.
+               src/sana2/sana2_driver.c:230-243 does the same for a send to an
+               interface it has no binding for. */
+            if (request->nx_ip_driver_packet != NULL)
+                nx_packet_transmit_release(request->nx_ip_driver_packet);
+            request->nx_ip_driver_status = NX_INVALID_INTERFACE;
+            return;
+
+        default:
+            break;
+    }
 
     request->nx_ip_driver_status = NX_SUCCESS;
 }
