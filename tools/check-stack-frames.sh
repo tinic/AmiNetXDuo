@@ -9,8 +9,9 @@
 # LADDER_EDGES below, and anything else missing counts as zero.
 #
 # The build is its own: -fstack-usage and -save-temps=obj are not in the
-# shipping configuration.  Pass a build directory that already has .su/.s files
-# in it to skip the build.
+# shipping configuration.  A directory that already has .su/.s files is reused
+# ONLY while every source is older than it; anything newer and it is rebuilt,
+# because data that predates the code describes code that is not there.
 #
 # SPDX-License-Identifier: MIT
 
@@ -140,11 +141,30 @@ say() { echo "$@"; }
 
 # Both halves, or the graph has frame sizes and no edges and every root looks
 # like a leaf -- which would pass every budget while measuring nothing.
+#
+# AND THE DATA HAS TO BE NEWER THAN THE CODE IT DESCRIBES.  Reusing whatever
+# .su files happened to be in the directory made this gate measure a tree that
+# was no longer there: on 2026-09-11 a release run failed bsd_NetStackControl
+# at 2868 bytes against files built the previous evening, hours after the path
+# had been moved onto its own stack and measured at 1852 in a fresh directory.
+# A stale PASS is worse than that stale FAIL and reads identically.
 need_build=1
 if [ -d "$BUILD" ] &&
    [ -n "$(find "$BUILD" -name '*.su' -print -quit 2>/dev/null)" ] &&
    [ -n "$(find "$BUILD" -name '*.ltrans*.s' -print -quit 2>/dev/null)" ]; then
     need_build=0
+
+    _stale=$(find "$ROOT/src" "$ROOT/include" "$ROOT/port" \
+                  -name '*.c' -o -name '*.h' 2>/dev/null |
+             while read -r _src; do
+                 [ "$_src" -nt "$BUILD" ] && { echo "$_src"; break; }
+             done)
+    if [ -n "$_stale" ]; then
+        say "stack_frames=rebuilding reason=source_newer_than_data" \
+            "first=${_stale#"$ROOT"/}"
+        rm -rf "${BUILD:?}"
+        need_build=1
+    fi
 fi
 
 if [ "$need_build" = 1 ]; then
