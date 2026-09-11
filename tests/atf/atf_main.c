@@ -391,6 +391,9 @@ int atfc_run(int (*add_tcs)(atf_tp_t *), const char *progname)
         return 20;
     }
 
+    if (tap_bring_up(SocketBase) != 0)
+        atfc_line("AddNetInterface(tap0) was refused");
+
     /*
      * What makes an unmodified `errno == EADDRINUSE` work: the library writes
      * every failure through this pointer, so the test reads the real newlib

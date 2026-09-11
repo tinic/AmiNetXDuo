@@ -5,9 +5,11 @@
 #   tests/udpdrill/run-udpdrill.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
 # NO DRIVER, AND NO BACKEND. The test installs its own interface,
-# tests/tcpdrill/tapdev.c, made at run time, and
-# tests/tcpdrill/devs/NetInterfaces/tap0 names it, so nothing here needs
-# a2065.device or anything on the wire.  It used to ask for `-N a2065 -B slirp`
+# tests/tcpdrill/tapdev.c, made at run time, and names it to the library
+# itself once the device exists (tap_bring_up()); nothing here needs
+# a2065.device or anything on the wire.  Until 0.27 the library opened
+# tests/tcpdrill/devs/NetInterfaces/tap0 by itself on its first open, and this
+# harness leaned on that without saying so.  It used to ask for `-N a2065 -B slirp`
 # anyway, under an -A flag that chose between two branches which both ran
 # Amiberry; `-B none` is the honest spelling of a test that puts nothing on a
 # link, and it keeps a SLIRP backend out of a run that has no use for one.
@@ -15,6 +17,11 @@
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
+
+# The interface this harness uses names a SANA-II device the guest
+# creates at run time, so no boot script can bring it up; the guest
+# names it itself once the device exists.  See tap_bring_up().
+export AMINETXDUO_NO_AUTOIF=1
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MODEL=A1200

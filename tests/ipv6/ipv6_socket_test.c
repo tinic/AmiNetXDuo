@@ -3113,6 +3113,9 @@ int main(void)
         return(20);
     }
 
+    (VOID)t_check((BOOL)(tap_bring_up(SocketBase) == 0),
+                  "AddNetInterface(tap0)", 0);
+
     t_test_conversions();
     t_test_socket_basics();
     t_test_tcp_loopback();

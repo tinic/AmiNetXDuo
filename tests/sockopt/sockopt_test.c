@@ -1047,6 +1047,9 @@ int main(void)
         return(20);
     }
 
+    (VOID)t_check((BOOL)(tap_bring_up(SocketBase) == 0),
+                  "AddNetInterface(tap0)", 0);
+
     t_test_accepted_and_ignored();
     t_test_buffers();
     t_test_pool_clamps();

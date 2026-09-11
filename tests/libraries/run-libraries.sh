@@ -18,6 +18,11 @@
 
 set -euo pipefail
 
+# What this harness proves is that a bare OpenLibrary() starts no card and
+# that an explicit request does, so nothing may name an interface before
+# the guest runs.
+export AMINETXDUO_NO_AUTOIF=1
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MODEL=A1200
 TIMEOUT=180

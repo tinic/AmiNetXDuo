@@ -1404,6 +1404,9 @@ int main(void)
         return(20);
     }
 
+    (VOID)t_check((BOOL)(tap_bring_up(SocketBase) == 0),
+                  "AddNetInterface(tap0)", 0);
+
     t_case_unconnected();
     t_case_connected();
     t_case_icmp_refused();

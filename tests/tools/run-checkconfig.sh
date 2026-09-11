@@ -9,6 +9,10 @@
 
 set -euo pipefail
 
+# WHICH interfaces come up is what this harness measures, so nothing may
+# bring the drawer up behind it.
+export AMINETXDUO_NO_AUTOIF=1
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 

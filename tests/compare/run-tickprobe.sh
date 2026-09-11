@@ -16,6 +16,11 @@
 
 set -euo pipefail
 
+# The interface this harness uses names a SANA-II device the guest
+# creates at run time, so no boot script can bring it up; the guest
+# names it itself once the device exists.  See tap_bring_up().
+export AMINETXDUO_NO_AUTOIF=1
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 STACK=""
@@ -79,6 +84,13 @@ case "$STACK" in
         [ -f "$BUILD/src/usergroup/usergroup.library" ] &&
             cp "$BUILD/src/usergroup/usergroup.library" "$STAGE/libs/"
         cp "$ROOT/tests/compare/tick-if.ours" "$STAGE/devs/NetInterfaces/tap0"
+        ADDIF="$BUILD/src/tools/AddNetInterface"
+        [ -f "$ADDIF" ] || { echo "missing $ADDIF, build it first" >&2; exit 2; }
+        cp "$ADDIF" "$STAGE/AddNetInterface"
+        # Symmetric with the roadshow arm below: each stack brings the
+        # interface up with its OWN command, and neither library opens a card
+        # by itself.
+        printf 'DH0:AddNetInterface DEVS:NetInterfaces/tap0\n' > "$STAGE/tickif.txt"
         NOTE="AmiNetXDuo from $BUILD"
         ;;
     roadshow)
@@ -96,9 +108,8 @@ case "$STACK" in
                 [ -f "$cand" ] && { cp "$cand" "$STAGE/libs/$lib.library"; break; }
             done
         done
-        # Our own library configures DEVS:NetInterfaces when it opens; theirs
-        # does not, and their AddNetInterface is the only thing that should
-        # ever bring a Roadshow interface up.
+        # Their AddNetInterface is the only thing that should ever bring a
+        # Roadshow interface up.
         printf 'DH0:AddNetInterface DEVS:NetInterfaces/tap0\n' > "$STAGE/tickif.txt"
         NOTE="Roadshow from $RSDIR"
         ;;

@@ -344,6 +344,27 @@ if [ ! -x "$ENVSETUP" ] || [ "$ROOT/tools/envsetup/envsetup.c" -nt "$ENVSETUP" ]
 fi
 cp "$ENVSETUP" "$HD/c/envsetup"
 
+# ------------------------------------------------- interface bring-up --
+#
+# The same line tools/amiberry-run.sh adds, and for the same reason: since
+# 0.27 bsdsocket.library opens no card of its own, so a staged
+# DEVS:NetInterfaces has to be named from the boot script the way Roadshow
+# names it in S/Network-Startup.  AMINETXDUO_NO_AUTOIF=1 for a guest that
+# links the stack directly or builds its own SANA-II device.
+AUTOIF=""
+if [ "${AMINETXDUO_NO_AUTOIF:-0}" != 1 ] && [ -d "$HD/devs/NetInterfaces" ] &&
+   [ -n "$(find "$HD/devs/NetInterfaces" -maxdepth 1 -type f \
+            ! -name '*.info' -print -quit)" ]; then
+    ADDIF="${AMINETXDUO_ADDIF:-$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface}"
+    [ -f "$ADDIF" ] || {
+        echo "no AddNetInterface at $ADDIF, and $HD/devs/NetInterfaces" >&2
+        echo "holds a definition that nothing would bring up." >&2
+        exit 2
+    }
+    cp "$ADDIF" "$HD/c/AddNetInterface"
+    AUTOIF='AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET'
+fi
+
 # UAEquit is WinUAE's own Amiga-side "stop the emulator" program, shipped with
 # it.  Running it as the last line of the boot script is what lets a run END
 # rather than be killed: WinUAE exits on its own, flushes its log, and the host
@@ -358,9 +379,9 @@ QUIT_LINE=""
 
 # AMINETXDUO_GUEST_PRECMD runs before the executable, one command per line.
 # A command that needs the network up, nc, ping, anything using
-# bsdsocket.library rather than linking the stack, wants an
-# AddNetInterface here, and the library and DEVS:NetInterfaces staged as
-# extra files.
+# bsdsocket.library rather than linking the stack, needs the library and
+# DEVS:NetInterfaces staged as extra files; $AUTOIF above then names the
+# drawer before it runs.
 # Enforcer needs a real MMU and no JIT cache: it traps through the MMU tables,
 # and a cached translation would let a bad access through unseen.
 ENFORCER_MMU=""
@@ -379,6 +400,7 @@ cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
 c:envsetup
 $ENFORCER_LINES
+$AUTOIF
 ${AMINETXDUO_GUEST_PRECMD:-}
 $EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt
 echo >DH0:.done "\$RC"

@@ -6,6 +6,12 @@
 
 set -euo pipefail
 
+# This guest links the netstack directly and brings its own stack up with
+# netstack_startup(), which still reads the whole drawer.  A boot-script
+# AddNetInterface would start a SECOND stack inside bsdsocket.library
+# beside it, and both would try to open the same card.
+export AMINETXDUO_NO_AUTOIF=1
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MODEL=A1200
 TIMEOUT=240

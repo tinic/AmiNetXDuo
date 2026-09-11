@@ -12,6 +12,7 @@
 #define TCPDRILL_TAPDEV_H
 
 #include <exec/types.h>
+#include <exec/libraries.h>
 
 #define TAP_DEVICE_NAME     "tcpdrill.device"
 
@@ -39,6 +40,12 @@ VOID tap_remove(VOID);
 
 /* TRUE between S2_ONLINE and S2_OFFLINE. */
 BOOL tap_is_online(VOID);
+
+/* Name DEVS:NetInterfaces/tap0 to a just-opened bsdsocket.library.  Until 0.27
+   the library opened that drawer itself on its first open; it now opens no
+   card, and this device does not exist before tap_install() runs, so no boot
+   script can name it for us.  0 on success, else the library's errno. */
+LONG tap_bring_up(struct Library *base);
 
 /* Returns length, or 0 when the ring is empty.  `stamp` receives the E-Clock
    reading taken inside BeginIO. */

@@ -22,6 +22,8 @@
 
 #include "sana2_device.h"
 
+#include "aminetxduo/netstatus.h"
+
 #define ETH_HDR         14
 #define ETH_ADDR        6
 
@@ -635,6 +637,42 @@ ULONG tap_reads_for(UWORD ether_type)
 BOOL tap_is_online(VOID)
 {
     return (tap_dev != NULL && tap_dev->online) ? TRUE : FALSE;
+}
+
+/* NetStackControl() is LVO -876.  Called by hand rather than through an inline
+   because these harnesses link no bsdsocket protos. */
+LONG tap_bring_up(struct Library *base)
+{
+    NetStatusControl ctl;
+    ULONG            i;
+
+register struct Library *a6 __asm("a6") = base;
+register ULONG           d0 __asm("d0") = AMI_NETSTATUS_MAGIC;
+register ULONG           d1 __asm("d1") = NETCTRL_INTERFACE_ADD;
+register APTR            a0 __asm("a0") = &ctl;
+register ULONG           d2 __asm("d2") = (ULONG)sizeof(ctl);
+register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
+register LONG _clob_a0 __asm("a0");
+
+    if (base == NULL)
+        return -1;
+
+    for (i = 0; i < (ULONG)(sizeof(ctl) / sizeof(ULONG)); i++)
+        ((ULONG *)&ctl)[i] = 0;
+
+    ctl.nsc_Magic   = AMI_NETSTATUS_MAGIC;
+    ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+    ctl.nsc_Name[0] = 't';
+    ctl.nsc_Name[1] = 'a';
+    ctl.nsc_Name[2] = 'p';
+    ctl.nsc_Name[3] = '0';
+
+    __asm __volatile ("jsr a6@(-876:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
 }
 
 VOID tap_get_stats(TapStats *out)

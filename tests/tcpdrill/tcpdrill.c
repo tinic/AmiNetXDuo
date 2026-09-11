@@ -3887,6 +3887,11 @@ int main(void)
         return 20;
     }
 
+    /* The library opens no card of its own, and no boot script can name a
+       device this program creates.  See tap_bring_up(). */
+    if (tap_bring_up(SockBase) != 0)
+        SAY0("!! AddNetInterface(tap0) was refused");
+
     for (tries = 0; tries < 250 && !tap_is_online(); tries++)
         Delay(1);
 
