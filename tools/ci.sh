@@ -392,6 +392,17 @@ stage_host() {
         return 1
     fi
 
+    # The SocketBaseTagList() surface, counted rather than claimed: three of
+    # Roadshow's 52 codes are unanswered, and docs/GAPS.md carried the wrong
+    # arithmetic for both sides until this was written.
+    if tools/check-sbtc-tags.sh > "$BUILD/sbtc-tags.log" 2>&1; then
+        note "$(sed -n 's/^sbtc_tags //p' "$BUILD/sbtc-tags.log" | head -1)"
+    else
+        cat "$BUILD/sbtc-tags.log"
+        fail "tools/check-sbtc-tags.sh"
+        return 1
+    fi
+
     # No delay in the netdev cores may be a counted loop again.  The unit test
     # beside it proves the wait primitive measures time; this proves the call
     # sites go through it, which is the half a unit test cannot see.  Source

@@ -203,6 +203,10 @@ static VOID load_resolver(AmiConfig *cfg)
         }
     }
 
+    /* And last, the interface files: AmiTCP_NG's installer writes NAMESERVER
+       and DOMAIN there, and nothing here read them. */
+    ami_config_resolver_from_interfaces(cfg);
+
     /* The strongest host-name source; nothing later can displace it. */
     if (cfg->hostname[0] != '\0')
         cfg->hostname_source = (UWORD)AMI_HOSTNAME_NAMERES;

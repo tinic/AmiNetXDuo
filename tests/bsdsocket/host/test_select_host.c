@@ -163,6 +163,17 @@ ULONG SetSignal(ULONG newSignals, ULONG signalSet)
     return old;
 }
 
+/*
+ * The one task this tier has.  bsd_timer_open() asks who is calling so that
+ * the timer port signals whoever owns its bit, which on a shared base is not
+ * the opener; here they are the same task and h_task is both.
+ */
+struct Task *FindTask(const char *name)
+{
+    (VOID)name;
+    return &h_task;
+}
+
 VOID Signal(struct Task *task, ULONG signalSet)
 {
     (VOID)task;

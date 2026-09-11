@@ -2434,6 +2434,192 @@ static void test_interface_drawer(void)
     clear_drawer();
 }
 
+/*
+ * WHERE A NAMED INTERFACE FILE IS LOOKED FOR.
+ *
+ * Roadshow and AmiTCP_NG take a path as a path.  This tree joined
+ * DEVS:NetInterfaces to whatever it was handed and looked nowhere else, so
+ * `AddNetInterface Work:weth0' read DEVS:NetInterfaces/Work:weth0 -- and once
+ * the caller had reduced the argument to its basename, a DIFFERENT FILE that
+ * happened to share the name, reported as success.
+ *
+ * The order is asserted here rather than only on the rig, because the rig
+ * round that covers it needs an emulator and this needs a compiler.
+ */
+static void test_interface_search_order(void)
+{
+    AmiIfConfig iface;
+
+    printf("interface: where a named file is looked for\n");
+
+    /* 1. A bare name in DEVS:NetInterfaces. */
+    clear_fixtures();
+    set_fixture("DEVS:NetInterfaces/weth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\n"
+                "ADDRESS=192.168.91.5\nNETMASK=255.255.255.0\n");
+    CHECK(ami_config_load_interface("weth0", &iface) == AMI_CFG_OK);
+    CHECK_STR(iface.name, "weth0");
+    CHECK_IP(iface.address, 192, 168, 91, 5);
+
+    /* 2. A bare name that is only in the Storage drawer. */
+    clear_fixtures();
+    set_fixture("SYS:Storage/NetInterfaces/weth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\n"
+                "ADDRESS=192.168.93.5\nNETMASK=255.255.255.0\n");
+    CHECK(ami_config_load_interface("weth0", &iface) == AMI_CFG_OK);
+    CHECK_IP(iface.address, 192, 168, 93, 5);
+
+    /* 3. In both: DEVS: is the live drawer, Storage holds what is not in use. */
+    clear_fixtures();
+    set_fixture("DEVS:NetInterfaces/weth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\n"
+                "ADDRESS=192.168.91.5\nNETMASK=255.255.255.0\n");
+    set_fixture("SYS:Storage/NetInterfaces/weth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\n"
+                "ADDRESS=192.168.93.5\nNETMASK=255.255.255.0\n");
+    CHECK(ami_config_load_interface("weth0", &iface) == AMI_CFG_OK);
+    CHECK_IP(iface.address, 192, 168, 91, 5);
+
+    /* 4. THE MIGRATION CASE.  A path names one file, and a file with the same
+       basename in the drawer does not get to answer for it.  The interface is
+       still called by its basename afterwards -- that is what
+       RemoveNetInterface and ShowNetStatus will be given. */
+    clear_fixtures();
+    set_fixture("DEVS:NetInterfaces/weth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\n"
+                "ADDRESS=192.168.91.5\nNETMASK=255.255.255.0\n");
+    set_fixture("DH0:elsewhere/weth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\n"
+                "ADDRESS=192.168.92.5\nNETMASK=255.255.255.0\n");
+    CHECK(ami_config_load_interface("DH0:elsewhere/weth0", &iface) == AMI_CFG_OK);
+    CHECK_IP(iface.address, 192, 168, 92, 5);
+    CHECK_STR(iface.name, "weth0");
+
+    /* A volume with no directory part is still a path. */
+    clear_fixtures();
+    set_fixture("DEVS:NetInterfaces/weth0", "DEVICE=a2065.device\nUNIT=0\n"
+                "CONFIGURE=STATIC\nADDRESS=192.168.91.5\n"
+                "NETMASK=255.255.255.0\n");
+    set_fixture("Work:weth0", "DEVICE=a2065.device\nUNIT=0\n"
+                "CONFIGURE=STATIC\nADDRESS=192.168.94.5\n"
+                "NETMASK=255.255.255.0\n");
+    CHECK(ami_config_load_interface("Work:weth0", &iface) == AMI_CFG_OK);
+    CHECK_IP(iface.address, 192, 168, 94, 5);
+
+    /* 5. A PATH THAT IS NOT THERE IS NOT THERE.  The drawer holds the
+       basename, and it must not answer: a typo in a path would otherwise
+       bring up a different interface and call it success.  This is the shape
+       that made a staging omission in the rig round look like a search-order
+       defect. */
+    clear_fixtures();
+    set_fixture("DEVS:NetInterfaces/weth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\n"
+                "ADDRESS=192.168.91.5\nNETMASK=255.255.255.0\n");
+    CHECK(ami_config_load_interface("DH0:elsewhere/weth0", &iface)
+          == AMI_CFG_ERR_IO);
+
+    /* And a bare name that is in neither drawer. */
+    clear_fixtures();
+    CHECK(ami_config_load_interface("weth0", &iface) == AMI_CFG_ERR_IO);
+
+    clear_fixtures();
+}
+
+/*
+ * NAMESERVER AND DOMAIN IN AN INTERFACE FILE, which AmiTCP_NG's installer
+ * writes there.  Nothing read them, so a machine migrated from AmiTCP_NG came
+ * up with no name server and was told nothing about it.
+ */
+static void test_resolver_from_interfaces(void)
+{
+    AmiConfig cfg;
+
+    printf("resolver: NAMESERVER in an interface file\n");
+
+    /* 1. No name_resolution file at all: the interface file supplies it. */
+    memset(&cfg, 0, sizeof(cfg));
+    clear_fixtures();
+    clear_drawer();
+    stage_interface("eth0", 0);
+    set_fixture("DEVS:NetInterfaces/eth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n"
+                "NAMESERVER=192.168.1.1\nDOMAIN=home.example\n");
+
+    ami_config_resolver_from_interfaces(&cfg);
+
+    CHECK(cfg.resolver.nameserver_count == 1);
+    CHECK_IP(cfg.resolver.nameserver[0], 192, 168, 1, 1);
+    CHECK_STR(cfg.resolver.domain, "home.example");
+
+    /* 2. A resolver that already has one is NOT displaced: this is the last
+          source, so an installation with a name_resolution file is unchanged. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.resolver.nameserver_count = 1;
+    cfg.resolver.nameserver[0]    = 0x08080808UL;      /* 8.8.8.8 */
+    (void)snprintf(cfg.resolver.domain, sizeof(cfg.resolver.domain), "%s",
+                   "already.set");
+
+    ami_config_resolver_from_interfaces(&cfg);
+
+    CHECK(cfg.resolver.nameserver_count == 1);
+    CHECK_IP(cfg.resolver.nameserver[0], 8, 8, 8, 8);
+    CHECK_STR(cfg.resolver.domain, "already.set");
+
+    /* 3. Half of it: a domain from the file, the name server already held. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.resolver.nameserver_count = 1;
+    cfg.resolver.nameserver[0]    = 0x08080808UL;
+
+    ami_config_resolver_from_interfaces(&cfg);
+
+    CHECK(cfg.resolver.nameserver_count == 1);
+    CHECK_IP(cfg.resolver.nameserver[0], 8, 8, 8, 8);
+    CHECK_STR(cfg.resolver.domain, "home.example");
+
+    /*
+     * 3b. AND IT SAYS NOTHING ABOUT THE FILE'S OTHER KEYWORDS.  The first
+     * shape of this ran ami_cfg_parse_resolver() over the interface file,
+     * which reports what it does not recognise -- so every interface file
+     * grew four complaints that DEVICE, UNIT, CONFIGURE and STATE are
+     * unknown and that "this file holds NAMESERVER, DOMAIN and SEARCH
+     * lines".  They are the interface parser's keywords; this pass is a
+     * guest in its file.
+     */
+    memset(&cfg, 0, sizeof(cfg));
+    clear_fixtures();
+    clear_drawer();
+    stage_interface("eth0", 0);
+    set_fixture("DEVS:NetInterfaces/eth0",
+                "DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\nSTATE=UP\n"
+                "NAMESERVER=192.168.1.1\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_config_resolver_from_interfaces(&cfg);
+    ami_config_set_reporter(NULL, NULL);
+
+    CHECK(cfg.resolver.nameserver_count == 1);
+    /* Exactly one problem: the note saying where the value came from. */
+    CHECK(seen_count == 1);
+    CHECK(!seen_mentions("unknown keyword"));
+    CHECK(!seen_mentions("DEVICE"));
+
+    /* 4. An interface file with neither leaves the resolver empty rather than
+          inventing something. */
+    memset(&cfg, 0, sizeof(cfg));
+    clear_fixtures();
+    clear_drawer();
+    stage_interface("eth0", 0);          /* DEVICE/UNIT/CONFIGURE only */
+
+    ami_config_resolver_from_interfaces(&cfg);
+
+    CHECK(cfg.resolver.nameserver_count == 0);
+    CHECK_STR(cfg.resolver.domain, "");
+
+    clear_fixtures();
+    clear_drawer();
+}
+
 /* The growth itself: what it keeps, what it costs, and what it refuses. */
 static void test_interface_reserve(void)
 {
@@ -2513,6 +2699,8 @@ int main(int argc, char **argv)
 #endif
     test_interface_card();
     test_interface_drawer();
+    test_interface_search_order();
+    test_resolver_from_interfaces();
     test_interface_reserve();
     test_hostname_syntax();
     test_hostname_precedence();

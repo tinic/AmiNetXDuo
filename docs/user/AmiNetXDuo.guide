@@ -1233,9 +1233,10 @@
                            @{b}ShowNetStatus@{ub}
 
       ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
-                    DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,
+                    DNS=DOMAINNAMESERVERS/S,ICMP/S,IGMP/S,IP/S,MB=MEMORY/S,
+                    MR=MULTICASTROUTING/S,RT=ROUTING/S,
                     TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S,
-                    EVENTS/S,NAMES/S,ALL/S,REPEAT/S
+                    EVENTS/S,NAMES/S,ALL/S,REPEAT/S,QUIET/S
 
   Reports the state of the network stack. With no options, ShowNetStatus
   prints a summary that combines the settings taken from the
@@ -1253,6 +1254,11 @@
   @{b}DNS@{ub}         The name servers in use.
   @{b}IP@{ub}          Internet Protocol counters.
   @{b}ICMP@{ub}        Echo and control message counters.
+  @{b}IGMP@{ub}        The multicast groups this machine has joined: which
+              interface each is on, and how many programs hold it.
+              A group is joined once per interface and shared, so two
+              programs on 224.0.0.251 are one membership and two
+              references.
   @{b}TCP@{ub}         Transmission Control Protocol counters.
   @{b}UDP@{ub}         User Datagram Protocol counters.
   @{b}MEMORY@{ub}      The packet pool: how many buffers there are, how many
@@ -1275,12 +1281,16 @@
               DEVS:Internet and then from the name servers.
   @{b}ALL@{ub}         With TCPSOCKETS or UDPSOCKETS, include the sockets
               that are only bound here and not connected.
+  @{b}MR@{ub}          Multicast routing. This machine forwards no multicast,
+              and says so; IGMP above lists what it has joined.
+  @{b}RT@{ub}          Routing. This stack keeps no per-event routing counters,
+              and prints the table instead.
   @{b}REPEAT@{ub}      Print the report again every second, clearing the
               screen first, until Ctrl-C.
-
-  There is no QUIET option. The report is the whole of what this command
-  does. GetNetStatus answers the same questions with a return code and
-  prints nothing.
+  @{b}QUIET@{ub}       Drop the "What to look at" advice under the report.
+              The report itself and every error are still printed, and
+              the return code is unchanged. GetNetStatus answers the
+              same questions with a return code and prints nothing.
 
   @{b}Example@{ub}
 

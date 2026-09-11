@@ -7,6 +7,7 @@
 #include <exec/types.h>
 #include <exec/lists.h>
 #include <dos/dos.h>
+#include <dos/dostags.h>      /* NP_Entry and the rest, for the shared-base child */
 #include <utility/hooks.h>
 #include <utility/tagitem.h>
 
@@ -348,6 +349,54 @@ static VOID p_capability_phase(struct Library *base)
            (LONG)((rc == 0 && have != 0) ? ", TRUE, correctly"
                                          : ", FALSE, WRONG"));
 
+    /*
+     * SBTC_CAN_SHARE_LIBRARY_BASES.  The SDK defines it as a capability --
+     * "whether or not library bases can be shared by different callers" --
+     * and here it is read-write per opener and acted on by nothing, so a
+     * program that SETs TRUE reads TRUE back from a library that cannot
+     * share.  Printed rather than judged: this pins what the tag does today
+     * so that docs/GAPS.md's row is checkable, and so that making a base
+     * shareable, or making the report read-only, has to move a line here.
+     */
+    {
+        ULONG share = 0xdeadbeefUL;
+        LONG  rc_get, rc_set, rc_again;
+
+        tags[0].ti_Tag  = SBTM_GETREF(SBTC_CAN_SHARE_LIBRARY_BASES);
+        tags[0].ti_Data = (ULONG)&share;
+        tags[1].ti_Tag  = TAG_DONE;
+        tags[1].ti_Data = 0;
+        rc_get = p_socketbase(base, tags);
+
+        Printf((CONST_STRPTR)"SBTC_CAN_SHARE_LIBRARY_BASES: rc %ld value "
+                             "%ld%s\n",
+               rc_get, (LONG)share,
+               (LONG)((rc_get == 0 && share == 0) ? ", FALSE on a fresh base"
+                                                  : ", NOT FALSE on a fresh"
+                                                    " base"));
+
+        tags[0].ti_Tag  = SBTM_SETVAL(SBTC_CAN_SHARE_LIBRARY_BASES);
+        tags[0].ti_Data = 1;
+        tags[1].ti_Tag  = TAG_DONE;
+        tags[1].ti_Data = 0;
+        rc_set = p_socketbase(base, tags);
+
+        share = 0xdeadbeefUL;
+        tags[0].ti_Tag  = SBTM_GETREF(SBTC_CAN_SHARE_LIBRARY_BASES);
+        tags[0].ti_Data = (ULONG)&share;
+        tags[1].ti_Tag  = TAG_DONE;
+        tags[1].ti_Data = 0;
+        rc_again = p_socketbase(base, tags);
+
+        Printf((CONST_STRPTR)"SBTC_CAN_SHARE_LIBRARY_BASES after SET TRUE: "
+                             "set rc %ld, get rc %ld value %ld%s\n",
+               rc_set, rc_again, (LONG)share,
+               (LONG)((rc_again == 0 && share != 0)
+                          ? ", echoed back: the tag is writable and the report"
+                            " is not fixed"
+                          : ", not echoed"));
+    }
+
     /* Read a tunable, write it straight back, and read something after it. */
     tags[0].ti_Tag  = SBTM_GETREF(SBTC_IP_DEFAULT_TTL);
     tags[0].ti_Data = (ULONG)&ttl;
@@ -388,6 +437,234 @@ static VOID p_capability_phase(struct Library *base)
 #define PROBE_PORT      7788
 #define PROBE_DENY      13          /* EACCES, and nothing else returns it */
 
+/* ------------------------------------------------- a base, two tasks ------ */
+
+/*
+ * SBTC_CAN_SHARE_LIBRARY_BASES IS AN OPT-IN, NOT AN ADVERT.
+ *
+ * AmiTCP_NG's socketbasetags.h has it as "Roadshow's opt-in to sharing one
+ * library base between tasks... the escape hatch for an application that
+ * accepts the restrictions", and CHECK_TASK() in amiga_libcallentry.h refuses
+ * a non-opener caller until SBFF_CAN_SHARE is set.  THIS LIBRARY ENFORCES NO
+ * SUCH RULE -- no call path looks at the calling task -- so the restriction
+ * the tag relaxes does not exist here and a second task can already use the
+ * base.
+ *
+ * Which makes what it can and cannot do the thing worth proving.  A timed
+ * WaitSelect() from a second task used to Wait() on a signal bit allocated in
+ * one task while timer.device signalled another, so the timeout never arrived
+ * and the call hung until a socket event or forever.  The child below asks for
+ * a 1-second timeout on no sockets at all: it must come back.
+ */
+
+struct ShareArgs
+{
+    struct Library *sa_Base;
+    struct Task    *sa_Parent;
+    ULONG           sa_Signal;
+    volatile LONG   sa_Result;
+    volatile LONG   sa_Done;
+    volatile LONG   sa_Release;     /* the parent says "you may exit now" */
+    volatile LONG   sa_Gone;
+};
+
+static struct ShareArgs share_args;
+
+static LONG p_waitselect(struct Library *base, LONG nfds, APTR readfds,
+                         APTR tv, APTR sigs)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register LONG            d0  __asm("d0") = nfds;
+    register APTR            a0  __asm("a0") = readfds;
+    register APTR            a1  __asm("a1") = NULL;
+    register APTR            a2  __asm("a2") = NULL;
+    register APTR            a3  __asm("a3") = tv;
+    register APTR            d1  __asm("d1") = sigs;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-126:W)"         /* WaitSelect -0x07e */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
+                        "r" (a3), "r" (d1)
+                      : "cc", "memory");
+    return res;
+}
+
+struct ProbeTimeval
+{
+    LONG tv_secs;
+    LONG tv_micro;
+};
+
+static VOID share_child(VOID)
+{
+    struct ShareArgs   *a = &share_args;
+    struct ProbeTimeval tv;
+
+    tv.tv_secs  = 1;
+    tv.tv_micro = 0;
+
+    /* The parent's base, from another task, with a timeout and no sockets. */
+    a->sa_Result = p_waitselect(a->sa_Base, 0, NULL, &tv, NULL);
+    a->sa_Done   = 1;
+
+    if (a->sa_Parent != NULL)
+        Signal(a->sa_Parent, a->sa_Signal);
+
+    /*
+     * STAY ALIVE until the parent says so.  The parent tests the base once
+     * while this task still exists and once after it is gone, which is what
+     * separates "a second task CALLED into the base" from "a second task
+     * EXITED after calling into it".
+     */
+    while (a->sa_Release == 0)
+        Delay(5);
+
+    a->sa_Gone = 1;
+}
+
+static VOID p_share_phase(struct Library *base)
+{
+    struct Process *child;
+    BYTE            sig;
+    ULONG           waited;
+
+    /*
+     * THE SAME CALL, FROM THE OPENER, FIRST.  Everything below is about a
+     * SECOND task, and that is worth nothing until the first task's own
+     * result is on the record: a WaitSelect() with no descriptors and a
+     * timeout is an unusual call however many tasks are involved, and
+     * blaming sharing for what an empty select does anywhere would be a
+     * wrong finding, loudly asserted.
+     */
+    {
+        struct ProbeTimeval tv0;
+        LONG                r0;
+        LONG                s0;
+
+        tv0.tv_secs  = 1;
+        tv0.tv_micro = 0;
+
+        r0 = p_waitselect(base, 0, NULL, &tv0, NULL);
+        s0 = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+
+        Printf((CONST_STRPTR)"shared base: the OPENER's own empty timed "
+                             "WaitSelect: %ld, then socket() %ld (errno %ld)"
+                             "%s\n", r0, s0, p_errno(base),
+               (LONG)((s0 >= 0) ? ", still up" : ", ALREADY DOWN"));
+
+        if (s0 >= 0)
+            (VOID)p_close(base, s0);
+    }
+
+    sig = (BYTE)AllocSignal(-1);
+    if (sig < 0)
+    {
+        Printf((CONST_STRPTR)"shared base: no signal, SKIPPED\n");
+        return;
+    }
+
+    share_args.sa_Base   = base;
+    share_args.sa_Parent = FindTask(NULL);
+    share_args.sa_Signal = 1UL << sig;
+    share_args.sa_Result = -2;
+    share_args.sa_Done   = 0;
+
+    child = CreateNewProcTags(NP_Entry,     (ULONG)share_child,
+                              NP_Name,      (ULONG)"monprobe share",
+                              NP_StackSize, 8192UL,
+                              NP_Cli,       (ULONG)FALSE,
+                              TAG_DONE);
+    if (child == NULL)
+    {
+        FreeSignal(sig);
+        Printf((CONST_STRPTR)"shared base: no process, SKIPPED\n");
+        return;
+    }
+
+    /*
+     * BOUNDED.  A child that hangs must cost this one claim and not the rest
+     * of the run, so this polls its own flag on dos.library's clock rather
+     * than waiting on the signal for as long as it takes.  10 x 50 ticks is
+     * ten seconds against a one-second timeout.
+     */
+    for (waited = 0; waited < 10UL && share_args.sa_Done == 0; waited++)
+        Delay(50);
+
+    if (share_args.sa_Done == 0)
+    {
+        Printf((CONST_STRPTR)"shared base: WaitSelect from a second task DID "
+                             "NOT RETURN in ten seconds\n");
+        /* The child still holds the signal; leaking it beats freeing a bit it
+           is about to signal. */
+        return;
+    }
+
+    (VOID)Wait(share_args.sa_Signal);
+    FreeSignal(sig);
+
+    /*
+     * EITHER answer is legal.  A fresh base serves the first task that asks
+     * for a timeout, whoever it is, and returns 0 when the timeout fires; a
+     * base whose timer another task already owns refuses with EINVAL.  Which
+     * one happens depends on what ran before this, so the claim is on the
+     * pair, not on one of them.
+     */
+    Printf((CONST_STRPTR)"shared base: WaitSelect from a second task returned "
+                         "%ld%s\n", share_args.sa_Result,
+           (LONG)((share_args.sa_Result == 0)
+                      ? ", the timeout fired"
+                      : ", refused"));
+
+    /*
+     * AND THE BASE STILL WORKS.  This is the half that matters: running this
+     * probe before the hook phase once cost thirteen claims, because the
+     * parent's socket() came back -1 and every bind() after it was EBADF.
+     * Whatever a second task leaves behind, the opener's own calls have to
+     * keep working -- this library lets any task use any base, so that is not
+     * an exotic case.
+     */
+    {
+        LONG s2 = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+        LONG e2 = p_errno(base);
+        LONG s3;
+        LONG e3;
+        ULONG spin;
+
+        if (s2 >= 0)
+            (VOID)p_close(base, s2);
+
+        /* Let it go, and wait for it to have gone. */
+        share_args.sa_Release = 1;
+        for (spin = 0; spin < 200UL && share_args.sa_Gone == 0; spin++)
+            Delay(2);
+        Delay(25);
+
+        s3 = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
+        e3 = p_errno(base);
+        if (s3 >= 0)
+            (VOID)p_close(base, s3);
+
+        /* errno is only meaningful on a failure; printing the base's stale
+           one beside a successful call reads as a contradiction. */
+        Printf((CONST_STRPTR)"shared base: the opener's socket() while the "
+                             "second task lives: %ld%s\n", s2,
+               (LONG)((s2 >= 0) ? "" : " (failed)"));
+        if (s2 < 0)
+            Printf((CONST_STRPTR)"shared base:   errno %ld\n", e2);
+        Printf((CONST_STRPTR)"shared base: the opener's socket() after it: "
+                             "%ld%s\n", s3,
+               (LONG)((s3 >= 0) ? ", the base still works"
+                                : ", THE BASE IS BROKEN"));
+        if (s3 < 0)
+            Printf((CONST_STRPTR)"shared base:   errno %ld\n", e3);
+    }
+}
+
 int main(void)
 {
     struct Library *base;
@@ -408,6 +685,7 @@ int main(void)
     }
 
     p_capability_phase(base);
+    p_share_phase(base);
 
     probe_hook_init(&hook_a, &state_a);
     probe_hook_init(&hook_b, &state_b);
@@ -672,6 +950,7 @@ int main(void)
     p_remove_hook(base, NULL);
     p_remove_hook(base, &hook_a);
     Printf((CONST_STRPTR)"RemoveNetMonitorHook(NULL) and twice: returned\n");
+
 
     CloseLibrary(base);
 

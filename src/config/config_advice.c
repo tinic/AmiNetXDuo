@@ -98,6 +98,12 @@ static const char *const ami_cfg_advice_text[] =
     "the service name is too long",
     "the txt= field is too long",
     "there are more services here than can be advertised",
+    "the name server was taken from an interface file, where AmiTCP"
+    "_NG's installer writes it",
+    "Roadshow keeps NAMESERVER and DOMAIN in DEVS:Internet/name_res"
+    "olution, and this stack reads that file first.  The interface "
+    "file is read only when it finds none, so move the line there b"
+    "efore the interface is changed.",
 };
 
 const char *ami_cfg_advice(UWORD code)

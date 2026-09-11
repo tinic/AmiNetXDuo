@@ -217,7 +217,11 @@ static BOOL expand_interface_argument(const char *argument, ULONG *count)
             (len < 5 || tool_stricmp(name + len - 5, ".info") != 0))
         {
             matched = TRUE;
-            if (!add_expanded_name(name, count))
+            /* THE PATH MatchFirst FOUND, not its basename.  A pattern can
+               match outside DEVS:NetInterfaces, and reducing the result to a
+               name sends the loader back to the drawer to find something
+               else with that name -- or nothing. */
+            if (!add_expanded_name(path, count))
             {
                 ok = FALSE;
                 break;
@@ -363,9 +367,10 @@ static LONG running_index(struct Library *base, const char *name,
     return -1;
 }
 
-static LONG add_to_running_stack(struct Library *base, const char *name)
+static LONG add_to_running_stack(struct Library *base, const char *name,
+                                 const char *spec)
 {
-    return tool_stack_add_interface(base, name, FALSE);
+    return tool_stack_add_interface(base, name, spec, FALSE);
 }
 
 static VOID explain_no_slot(struct Library *base, const char *name)
@@ -590,7 +595,7 @@ int main(int argc, char **argv)
      */
     for (n = 0; n < count; n++)
     {
-        name = tool_basename((const char *)names[n]);
+        name = (const char *)names[n];
 
         if (!load_interface(name, &ifc, FALSE))
         {
@@ -609,8 +614,9 @@ int main(int argc, char **argv)
     {
         for (n = 0; n < count; n++)
         {
+            /* Load by what the user gave; NAME it by its file part. */
             name = tool_basename((const char *)names[n]);
-            (VOID)load_interface(name, &ifc, TRUE);
+            (VOID)load_interface((const char *)names[n], &ifc, TRUE);
             if (ifc.card[0] != '\0')
                 tool_printf("%s: %s unit %ld card %s\n", (LONG)name,
                             (LONG)ifc.device, (LONG)ifc.unit, (LONG)ifc.card);
@@ -665,7 +671,7 @@ int main(int argc, char **argv)
             LONG  where;
 
             name = tool_basename((const char *)names[n]);
-            (VOID)load_interface(name, &ifc, TRUE);
+            (VOID)load_interface((const char *)names[n], &ifc, TRUE);
 
             where = running_index(base, name, &addr);
 
@@ -682,7 +688,8 @@ int main(int argc, char **argv)
             {
                 LONG add_err;
 
-                add_err = add_to_running_stack(base, name);
+                add_err = add_to_running_stack(base, name,
+                                               (const char *)names[n]);
 
                 if (add_err == EEXIST)
                     add_err = 0;
@@ -800,7 +807,7 @@ int main(int argc, char **argv)
     for (n = 0; n < count; n++)
     {
         name = tool_basename((const char *)names[n]);
-        (VOID)load_interface(name, &ifc, TRUE);
+        (VOID)load_interface((const char *)names[n], &ifc, TRUE);
 
         index = tool_find_interface(name);
         if (index < 0)

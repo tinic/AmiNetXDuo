@@ -42,6 +42,42 @@ static VOID join_path(char *dst, ULONG dstlen, const char *dir, const char *name
     ami_cfg_copy_string(dst + pos, dstlen - pos, name);
 }
 
+/* ---------------------------------------------------------------- paths -- */
+
+BOOL ami_cfg_has_path(const char *name)
+{
+    const char *p;
+
+    if (name == NULL)
+        return FALSE;
+
+    for (p = name; *p != '\0'; p++)
+    {
+        if (*p == ':' || *p == '/')
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+const char *ami_cfg_file_part(const char *name)
+{
+    const char *last;
+    const char *p;
+
+    if (name == NULL)
+        return NULL;
+
+    last = name;
+    for (p = name; *p != '\0'; p++)
+    {
+        if (*p == ':' || *p == '/')
+            last = p + 1;
+    }
+
+    return last;
+}
+
 /* ------------------------------------------------------------- one file -- */
 
 LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
@@ -53,14 +89,56 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
     if (name == NULL || out == NULL)
         return AMI_CFG_ERR_SYNTAX;
 
-    join_path(path, sizeof(path), AMI_CFG_DIR_NETINTERFACES, name);
+    /*
+     * WHERE AN INTERFACE FILE IS LOOKED FOR, and it is not one place.
+     *
+     * Roadshow and AmiTCP_NG both take a path as a path: the file named on the
+     * command line, then DEVS:NetInterfaces, then SYS:Storage/NetInterfaces.
+     * This joined DEVS:NetInterfaces to whatever it was given and looked
+     * nowhere else, so `AddNetInterface Work:mycfg' quietly read
+     * DEVS:NetInterfaces/Work:mycfg -- or, once the caller had reduced the
+     * argument to its basename, a DIFFERENT FILE with the same name.  A user
+     * migrating a working script gets the wrong interface or none.
+     *
+     * The interface's NAME is still its basename, whichever file supplied it:
+     * that is what RemoveNetInterface, Online and ShowNetStatus will be given.
+     * The two drawers are searched only for a BARE name; see below.
+     */
+    buf = NULL;
 
-    buf = (char *)ami_cfg_read_file(path, NULL);
+    if (ami_cfg_has_path(name))
+    {
+        /*
+         * A PATH IS NOT A HINT.  A name carrying a device or a directory names
+         * ONE file, and if that file is not there the answer is "not there" --
+         * never the drawer's file that happens to share the basename.  Falling
+         * back would turn `AddNetInterface Work:weth0' with a typo in it into
+         * a DIFFERENT interface coming up, reported as success, which is the
+         * failure this whole search order exists to remove.
+         */
+        buf = (char *)ami_cfg_read_file(name, NULL);
+    }
+    else
+    {
+        join_path(path, sizeof(path), AMI_CFG_DIR_NETINTERFACES, name);
+        buf = (char *)ami_cfg_read_file(path, NULL);
+
+        if (buf == NULL)
+        {
+            join_path(path, sizeof(path), AMI_CFG_DIR_STORAGE_NETINTERFACES,
+                      name);
+            buf = (char *)ami_cfg_read_file(path, NULL);
+        }
+    }
+
     if (buf == NULL)
     {
         ami_cfg_zero(out, sizeof(*out));
         return AMI_CFG_ERR_IO;
     }
+
+    if (ami_cfg_has_path(name))
+        ami_cfg_copy_string(path, sizeof(path), name);
 
     /*
      * `path` is on this stack frame and the reporter is handed it by pointer,
@@ -68,7 +146,7 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
      * the next caller to overwrite.
      */
     ami_cfg_problem_file(path);
-    result = ami_cfg_parse_interface(name, buf, out);
+    result = ami_cfg_parse_interface(ami_cfg_file_part(name), buf, out);
     ami_cfg_problem_file(NULL);
 
     ami_free(buf);
@@ -252,6 +330,131 @@ VOID ami_cfg_take_interface(AmiConfig *cfg, const char *name)
  * FALSE only when the drawer is missing, which has its own message; an empty
  * drawer scans successfully and is caught by the count below.
  */
+/* ------------------------------------------------- resolver, from a card -- */
+
+/*
+ * NAMESERVER AND DOMAIN IN AN INTERFACE FILE.
+ *
+ * AmiTCP_NG's installer writes them there.  Roadshow keeps them in
+ * DEVS:Internet/name_resolution and this tree reads that file and the netdb
+ * file -- and nothing else, so a machine migrated from AmiTCP_NG came up with
+ * NO NAME SERVER and was told nothing about it: the keywords parse, and the
+ * interface parser had them marked as handled elsewhere when they were handled
+ * nowhere.
+ *
+ * They are read here as the LAST source, so an installation that has a
+ * name_resolution file is unchanged.  A note says where the value came from
+ * and where it belongs, because a setting that works only because a fallback
+ * found it is one file edit away from failing silently.
+ */
+static VOID resolver_from_one(AmiConfig *cfg, const char *name)
+{
+    char  path[AMI_CFG_PATH_LEN + AMI_CFG_NAME_LEN + 8];
+    char *buf;
+    char *cursor;
+    char *line;
+    BOOL  took_server = FALSE;
+    BOOL  want_server;
+
+    if (cfg == NULL || name == NULL)
+        return;
+
+    if (cfg->resolver.nameserver_count != 0 && cfg->resolver.domain[0] != '\0')
+        return;
+
+    /* Only what is MISSING.  A resolver that already has a name server keeps
+       exactly the ones it was configured with: appending a second from here
+       would change which server answers, on a machine whose name_resolution
+       file is right. */
+    want_server = (BOOL)(cfg->resolver.nameserver_count == 0);
+
+    join_path(path, sizeof(path), AMI_CFG_DIR_NETINTERFACES, name);
+    buf = (char *)ami_cfg_read_file(path, NULL);
+    if (buf == NULL)
+        return;
+
+    /*
+     * Two keywords, read by hand.
+     *
+     * ami_cfg_parse_resolver() would have done it in one call and was the
+     * first shape of this -- but it REPORTS the keywords it does not know,
+     * so every interface file grew four complaints that DEVICE, UNIT,
+     * CONFIGURE and STATE are unknown and that "this file holds NAMESERVER,
+     * DOMAIN and SEARCH lines".  They are not unknown here; they are the
+     * interface parser's, and this pass is a guest in its file.
+     */
+    cursor = buf;
+    while ((line = ami_cfg_next_line(&cursor)) != NULL)
+    {
+        char *pos;
+        char *key;
+        char *value;
+
+        ami_cfg_strip_comment(line, "#;");
+        line = ami_cfg_trim(line);
+        if (*line == '\0')
+            continue;
+
+        pos = line;
+        if (!ami_cfg_next_pair(&pos, &key, &value))
+            continue;
+
+        if (ami_cfg_stricmp(key, "nameserver") == 0)
+        {
+            ULONG addr = 0;
+
+            if (!want_server ||
+                cfg->resolver.nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
+                continue;
+
+            /* A bad one IS reported: it was written to be used. */
+            if (!ami_config_parse_ip(value, &addr))
+            {
+                ami_cfg_problem_file(path);
+                ami_cfg_problem_code(0, AMI_CFG_PROBLEM_ERROR,
+                                     AMI_CFG_SAYS_NAMESERVER_IN_AN_INTERFACE,
+                                     AMI_CFG_ADVICE_A_NAME_SERVER_IS);
+                ami_cfg_problem_file(NULL);
+                continue;
+            }
+
+            /* Negative: statically configured, one reference. */
+            cfg->resolver.nameserver_use[cfg->resolver.nameserver_count] = -1;
+            cfg->resolver.nameserver[cfg->resolver.nameserver_count]     = addr;
+            cfg->resolver.nameserver_count++;
+            took_server = TRUE;
+        }
+        else if (ami_cfg_stricmp(key, "domain") == 0)
+        {
+            if (cfg->resolver.domain[0] == '\0')
+                ami_cfg_copy_string(cfg->resolver.domain,
+                                    sizeof(cfg->resolver.domain), value);
+        }
+    }
+
+    ami_free(buf);
+
+    if (took_server)
+    {
+        ami_cfg_problem_file(path);
+        ami_cfg_problem_code(0, AMI_CFG_PROBLEM_NOTE,
+                             AMI_CFG_SAYS_NAMESERVER_IN_AN_INTERFACE,
+                             AMI_CFG_ADVICE_PUT_IT_IN_NAME_RESOLUTION);
+        ami_cfg_problem_file(NULL);
+    }
+}
+
+VOID ami_config_resolver_from_interfaces(AmiConfig *cfg)
+{
+    if (cfg == NULL)
+        return;
+
+    if (cfg->resolver.nameserver_count != 0 && cfg->resolver.domain[0] != '\0')
+        return;
+
+    (VOID)ami_cfg_scan_interfaces(cfg, resolver_from_one);
+}
+
 VOID ami_config_load_interfaces(AmiConfig *cfg)
 {
     if (cfg == NULL)

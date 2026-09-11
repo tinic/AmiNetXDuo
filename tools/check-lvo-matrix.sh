@@ -147,7 +147,12 @@ for sym,off,idx,api in rows:
         # implementation at all.  The survey found telnetd calling vsyslog 4x,
         # lpd 8x and AmiFTPd 28+ times against a column that read `ok`, which
         # is the matrix inviting exactly the wrong conclusion.
-        if sym=='bsd_enosys': return 'enosys'
+        # THE FAMILY, NOT THE ONE NAME.  This tested sym=='bsd_enosys' and
+        # missed bsd_enosys_ptr and bsd_enosys_bool, so eight more vectors --
+        # the mbuf block and a RoadshowData one -- read `ok' in every column
+        # while being the same empty stub.  A matrix that decides what micro
+        # may drop must not call an unimplemented vector implemented.
+        if sym.startswith('bsd_enosys'): return 'enosys'
         if g!='-' and g in off: return 'STUB'
         if res and 'DNS' in off:  return 'hosts-only'
         return 'ok'

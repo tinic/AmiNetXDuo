@@ -23,6 +23,7 @@
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <dos/rdargs.h>
+#include <utility/tagitem.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -220,7 +221,13 @@ BOOL tool_stack_installed(VOID);
 struct Library *tool_stack_start(VOID);
 BOOL tool_stack_hold(struct Library *base);
 LONG tool_stack_add_interface(struct Library *base, const char *name,
-                              BOOL force_up);
+                              const char *spec, BOOL force_up);
+
+/* ConfigureInterfaceTagList(): the interface states and the MTU, which the
+   library implements in Roadshow's documented order.  0, or -1 with *errno_out
+   set. */
+LONG tool_configure_interface(struct Library *base, const char *name,
+                              struct TagItem *tags, LONG *errno_out);
 VOID tool_stack_release(struct Library *base);
 
 /*

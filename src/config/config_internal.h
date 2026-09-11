@@ -23,6 +23,10 @@ extern "C" {
 /* ------------------------------------------------------------------ paths */
 
 #define AMI_CFG_DIR_NETINTERFACES   "DEVS:NetInterfaces"
+
+/* The second place Roadshow and AmiTCP_NG look for an interface file,
+   and where our own Installer puts the examples it ships. */
+#define AMI_CFG_DIR_STORAGE_NETINTERFACES  "SYS:Storage/NetInterfaces"
 #define AMI_CFG_DIR_INTERNET        "DEVS:Internet"
 
 #define AMI_CFG_FILE_NAMERES        AMI_CFG_DIR_INTERNET "/name_resolution"
@@ -98,6 +102,12 @@ VOID ami_cfg_take_interface(AmiConfig *cfg, const char *name);
 
 /* Scan the drawer and take every file in it, however many there are. */
 VOID ami_config_load_interfaces(AmiConfig *cfg);
+
+/* NAMESERVER and DOMAIN out of the interface files, as the LAST source: what
+   AmiTCP_NG's installer writes there was read by nothing, so a migrated
+   machine had no name server and no message about it.  Does nothing once the
+   resolver has both. */
+VOID ami_config_resolver_from_interfaces(AmiConfig *cfg);
 
 /* ------------------------------------------------------------ diagnostics */
 
@@ -184,6 +194,13 @@ int  ami_cfg_stricmp(const char *a, const char *b);
 ULONG ami_cfg_strlen(const char *s);
 VOID ami_cfg_copy_string(char *dst, ULONG dstlen, const char *src);
 VOID ami_cfg_zero(APTR p, ULONG len);
+
+/* TRUE when a name carries a path -- a volume (`Work:cfg') or a
+   directory (`net/eth0').  A bare name does not. */
+BOOL ami_cfg_has_path(const char *name);
+
+/* The file part of a name: everything after the last ':' or '/'. */
+const char *ami_cfg_file_part(const char *name);
 
 /* Decimal (or 0x.. / 0.. ) unsigned integer. FALSE on trailing garbage. */
 BOOL ami_cfg_parse_ulong(const char *s, ULONG *out);

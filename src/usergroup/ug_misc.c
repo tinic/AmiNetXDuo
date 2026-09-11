@@ -19,11 +19,18 @@
  * against.  The built-in database has no passwords, and a passwd file on an
  * AmigaOS volume is readable by anyone in any case.
  *
- * crypt() therefore fails, and it fails the safe way. It returns a valid,
- * stable, never-NULL string that cannot match any stored hash. Callers that do
- * the usual strcmp(crypt(typed, salt), pw->pw_passwd) get "no match" instead
- * of a NULL dereference, and callers that check ug_GetErr() see ENOSYS.
+ * crypt() therefore fails, and it has to fail the safe way: a valid, stable,
+ * never-NULL string, because the usual caller is
+ * strcmp(crypt(typed, salt), pw->pw_passwd) and a NULL there is a crash.
+ *
+ * IT MUST ALSO NOT BE "*".  That was the sentinel here, and "*" is the
+ * conventional LOCKED-ACCOUNT marker in a passwd file: against a locked
+ * account, that strcmp matched, and every password typed at a ported server
+ * was accepted for exactly the accounts that were meant to be shut.  A string
+ * with a space in it cannot be a DES hash, cannot be a lock marker, and cannot
+ * be a password field any tool would write.
  */
+#define UG_CRYPT_NO_MATCH   "* no crypt *"
 UBYTE *ugl_crypt(UG_A6, UG_REG(UBYTE *key, "a0"),
                         UG_REG(UBYTE *set, "a1"))
 {
@@ -31,8 +38,15 @@ UBYTE *ugl_crypt(UG_A6, UG_REG(UBYTE *key, "a0"),
     (void)key;
     (void)set;
 
-    base->ug_PassBuf[0] = '*';
-    base->ug_PassBuf[1] = '\0';
+    {
+        const char *p = UG_CRYPT_NO_MATCH;
+        ULONG       i;
+
+        for (i = 0; i + 1 < (ULONG)sizeof(base->ug_PassBuf) && p[i] != '\0';
+             i++)
+            base->ug_PassBuf[i] = p[i];
+        base->ug_PassBuf[i] = '\0';
+    }
 
     ug_set_err(base, UG_ENOSYS);
 

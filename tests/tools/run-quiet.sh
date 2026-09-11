@@ -109,6 +109,7 @@ for t in $NEEDED; do cp "$TOOLS/$t" "$STAGE/$t"; done
 
 cat > "$STAGE/commands.txt" <<EOF
 # ---- the stack is not running yet ----
+SYS:ShowNetStatus
 SYS:ShowNetStatus QUIET
 SYS:AddNetInterface nosuch0 QUIET
 SYS:CheckNetConfig
@@ -253,16 +254,44 @@ want_rc() { # banner nth expected what
     fi
 }
 
-BOOTS=$(grep -c "^===== SYS:ShowNetStatus QUIET =====" "$REPORT" || true)
+BOOTS=$(grep -c "^===== SYS:ShowNetStatus =====" "$REPORT" || true)
 if [ "$BOOTS" -eq 1 ]; then
     pass "the machine booted once, so the block numbering below holds"
 else
     fail "THE MACHINE REBOOTED or the run stopped: $BOOTS runs of the first line"
 fi
 
-says "SYS:ShowNetStatus QUIET" 1 'no interface called "QUIET"' \
-     "ShowNetStatus no longer takes QUIET, and says which word it choked on"
-want_rc "SYS:ShowNetStatus QUIET" 1 10 "and fails rather than reporting"
+# ShowNetStatus QUIET was removed in 42ff6106 because it silenced two error
+# messages and printed the whole report anyway -- the opposite of what QUIET
+# means here.  It is back with the tree's own rule applied to it: the data and
+# the errors are kept, the commentary is dropped.  On this command the
+# commentary is the "What to look at" block, which is why both claims below
+# read the report AND the advice, not one of them.
+# The advice is the "What to look at" block when there is something to say and
+# "No problems found" when there is not; one of the two is always printed, and
+# QUIET drops whichever it would have been.
+ADVICE='What to look at|No problems found'
+
+if block "SYS:ShowNetStatus" 1 | grep -Eq "$ADVICE"; then
+    pass "the loud run has advice under it, so QUIET has something to drop"
+else
+    fail "the loud run printed no advice, so the QUIET claim below proves nothing"
+    block "SYS:ShowNetStatus" 1 | sed 's/^/       /' >&2
+fi
+if block "SYS:ShowNetStatus QUIET" 1 | grep -Eq "$ADVICE"; then
+    fail "ShowNetStatus QUIET still printed the advice"
+    block "SYS:ShowNetStatus QUIET" 1 | sed 's/^/       /' >&2
+else
+    pass "ShowNetStatus QUIET drops the advice"
+fi
+if block "SYS:ShowNetStatus QUIET" 1 | grep -qi "interface"; then
+    pass "and still prints the report it is for"
+else
+    fail "ShowNetStatus QUIET printed no report, which is the whole command"
+    block "SYS:ShowNetStatus QUIET" 1 | sed 's/^/       /' >&2
+fi
+same_rc "SYS:ShowNetStatus" 1 "SYS:ShowNetStatus QUIET" 1 \
+        "and returns what the loud run returned"
 
 says "SYS:AddNetInterface nosuch0 QUIET" 1 'no interface called "nosuch0"' \
      "AddNetInterface QUIET still reports a missing interface file"

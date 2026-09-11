@@ -1,5 +1,5 @@
 offset	lvo	aminet_callers	our_tool_mentions
--30	socket	659	114
+-30	socket	659	115
 -36	bind	272	7
 -42	listen	204	19
 -48	accept	208	40
@@ -59,7 +59,7 @@ offset	lvo	aminet_callers	our_tool_mentions
 -432	FreeRouteInfo	0	0
 -438	GetRouteInfo	0	0
 -444	AddInterfaceTagList	0	0
--450	ConfigureInterfaceTagList	0	0
+-450	ConfigureInterfaceTagList	0	3
 -456	ReleaseInterfaceList	10	0
 -462	ObtainInterfaceList	10	0
 -468	QueryInterfaceTagList	10	0

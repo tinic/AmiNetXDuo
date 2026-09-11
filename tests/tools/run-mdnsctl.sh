@@ -85,14 +85,19 @@ done
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus eth0
+SYS:ShowNetStatus IGMP
 SYS:host $LABEL.local TIMEOUT 5
 SYS:ConfigureNetInterface eth0 MDNS=YES
 wait 4
 SYS:ShowNetStatus eth0
+SYS:ShowNetStatus IGMP
 SYS:host $LABEL.local TIMEOUT 5
 SYS:ConfigureNetInterface eth0 MDNS=NO
 wait 3
 SYS:ShowNetStatus eth0
+SYS:ShowNetStatus IGMP
+SYS:ShowNetStatus MR
+SYS:ShowNetStatus RT
 SYS:host $LABEL.local TIMEOUT 5
 SYS:ConfigureNetInterface eth0 MDNS=YES
 wait 4
@@ -243,6 +248,39 @@ says   "$STATUS" 5 '^ *mDNS +no$' \
     "4: an interface removed and re-added does not claim mDNS it was not asked for"
 denies "$LOOKUP" 5 "has address" \
     "4: and $LABEL.local does not resolve after the re-add"
+
+# ---- the membership behind it -------------------------------------------
+#
+# mDNS answers on 224.0.0.251, and the responder joins that group when it
+# starts and leaves it when it stops.  ShowNetStatus IGMP reports the
+# memberships this machine holds, so the group has to be ABSENT before MDNS=YES
+# and PRESENT after it: a section that printed a fixed list, or nothing, fails
+# both ways round rather than passing one of them.
+
+IGMP="SYS:ShowNetStatus IGMP"
+
+if block "$IGMP" 1 | grep -q "224\.0\.0\.251"; then
+    fail "5: 224.0.0.251 was already joined before MDNS=YES, so the claim below\
+ cannot tell a membership from a fixed list"
+    block "$IGMP" 1 | sed 's/^/       /' >&2
+else
+    pass "5: no mDNS group is joined before the responder is switched on"
+fi
+
+says "$IGMP" 2 "224\.0\.0\.251" \
+     "5: MDNS=YES joins 224.0.0.251, and ShowNetStatus IGMP reports it"
+
+if block "$IGMP" 3 | grep -q "224\.0\.0\.251"; then
+    fail "5: 224.0.0.251 is still joined after MDNS=NO"
+    block "$IGMP" 3 | sed 's/^/       /' >&2
+else
+    pass "5: and MDNS=NO leaves it again"
+fi
+
+says "SYS:ShowNetStatus MR" 1 "does not forward multicast" \
+     "5: MULTICASTROUTING is accepted and says what this machine does"
+says "SYS:ShowNetStatus RT" 1 "Routing" \
+     "5: ROUTING is accepted and prints the table it can account for"
 
 # ---- what another machine saw --------------------------------------------
 

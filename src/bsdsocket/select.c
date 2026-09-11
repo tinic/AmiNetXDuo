@@ -453,7 +453,21 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
     base->sb_TimerPort.mp_Node.ln_Type = NT_MSGPORT;
     base->sb_TimerPort.mp_Flags        = PA_SIGNAL;
     base->sb_TimerPort.mp_SigBit       = sig;
-    base->sb_TimerPort.mp_SigTask      = base->sb_Task;
+    /*
+     * THE TASK THAT OWNS THE BIT, WHICH IS NOT ALWAYS THE OPENER.
+     *
+     * AllocSignal() allocates in the CALLING task and this runs lazily, on the
+     * first WaitSelect() with a timeout.  mp_SigTask was the opener, so on a
+     * base shared between tasks -- which this library permits, because it
+     * enforces no same-task rule anywhere -- timer.device signalled the OPENER
+     * on a bit the WAITER had allocated, and the waiter sat in Wait() until a
+     * socket event arrived or forever.  A timeout that never fires is the
+     * hardest kind of hang to attribute.
+     *
+     * The port serves one task: whoever opens it here.  A second task asking
+     * for a timeout is refused below rather than left to hang.
+     */
+    base->sb_TimerPort.mp_SigTask      = FindTask(NULL);
     base->sb_TimerPort.mp_MsgList.lh_Head =
         (struct Node *)&base->sb_TimerPort.mp_MsgList.lh_Tail;
     base->sb_TimerPort.mp_MsgList.lh_Tail = NULL;
@@ -720,6 +734,52 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         if (timeout != NULL && !timer_running)
         {
+            /*
+             * One timer, one task, and this refusal is LOAD-BEARING.
+             *
+             * The signal bit belongs to whichever task opened the port and one
+             * IORequest cannot serve two concurrent waits.  Measured on the
+             * rig, with this guard removed and a child process doing the first
+             * timed WaitSelect() on its parent's base: the child's own call
+             * returned 0 and its timeout fired, and from then on the OPENER's
+             * socket() returned ENETDOWN -- while the child was still alive,
+             * so it is the timer being opened from a foreign task that does
+             * it, not the task exiting afterwards.  Thirteen unrelated claims
+             * in the same probe failed behind it.
+             *
+             * Per-task timer state is reopening the library, which is what
+             * Roadshow's own autodoc recommends for sharing.  Until there is
+             * any, a second task is told no.
+             */
+            {
+                struct Task *me = FindTask(NULL);
+
+                /*
+                 * The OPENER's timer, whether or not it has been opened yet.
+                 * Refusing only once another task holds it left the hole
+                 * open: the first timed WaitSelect() on a base still got to
+                 * open the port wherever it was called from, and if that was
+                 * not the opener it took the base down with it.
+                 */
+                if (SocketBase->sb_Task != NULL && me != SocketBase->sb_Task)
+                {
+                    AMI_WARN("bsdsocket: WaitSelect timeout from a task "
+                             "that did not open this base. Open "
+                             "bsdsocket.library in the task that waits: one "
+                             "base per task is what the timer, the signals "
+                             "and errno are all per");
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                }
+
+                if (SocketBase->sb_TimerOpen &&
+                    SocketBase->sb_TimerPort.mp_SigTask != me)
+                {
+                    AMI_WARN("bsdsocket: WaitSelect timeout from a second "
+                             "task; the timer belongs to another one");
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                }
+            }
+
             if (!bsd_timer_open(SocketBase))
                 return bsd_fail(SocketBase, AMI_ENOMEM);
 

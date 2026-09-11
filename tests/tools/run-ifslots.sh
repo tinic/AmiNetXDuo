@@ -15,7 +15,7 @@ cd "$ROOT" || exit 2
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD=a2065
 TIMEOUT=300
-ROUNDS="named pattern typo latefail identity"
+ROUNDS="named pattern elsewhere typo latefail identity"
 
 while getopts "b:t:N:r:" opt; do
     case "$opt" in
@@ -24,7 +24,7 @@ while getopts "b:t:N:r:" opt; do
         N) BOARD="$OPTARG" ;;
         r) ROUNDS="${OPTARG//,/ }" ;;
         *) echo "usage: $0 [-b builddir] [-t seconds] [-N board]\
- [-r named|pattern|typo|latefail|identity]" >&2; exit 2 ;;
+ [-r named|pattern|elsewhere|typo|latefail|identity]" >&2; exit 2 ;;
     esac
 done
 
@@ -45,6 +45,12 @@ for t in $NEEDED; do
                             exit 2; }
 done
 [ -f "$BSD" ] || { echo "build $BUILD first: no $BSD" >&2; exit 2; }
+
+# Existing is not current.  A round run against a tree that was not rebuilt
+# after the change under test reports the PREVIOUS build's behaviour.
+. "$ROOT/tools/preflight.sh"
+pf_require_fresh "$BSD" "$ROOT/src" "$ROOT/include" || exit 2
+pf_require_fresh "$TOOLS/AddNetInterface" "$ROOT/src" "$ROOT/include" || exit 2
 
 [ -n "${AMINETXDUO_KICKSTART:-}" ] || {
     echo "No Kickstart.  Set AMINETXDUO_KICKSTART=<rom>." >&2; exit 2; }
@@ -74,8 +80,9 @@ claim() { # n verdict text
 
 rig() { echo "  RIG  $*"; RIG=$((RIG + 1)); }
 
-boot() { # tag stagedir  -> sets REPORT
+boot() { # tag stagedir [extra...]  -> sets REPORT
     local tag="$1" stage="$2" rc
+    shift 2
 
     REPORT="$ROOT/build/amiberry-testhd-$tag/tools.txt"
     rm -f "$REPORT"
@@ -86,7 +93,7 @@ boot() { # tag stagedir  -> sets REPORT
             "$TOOLS/ToolsSmoke" "$stage/devs" "$stage/libs" \
             "$TOOLS/AddNetInterface" "$TOOLS/RemoveNetInterface" \
             "$TOOLS/ShowNetStatus" "$TOOLS/CheckNetConfig" \
-            "$TOOLS/netstat" "$TOOLS/ping" "$stage/commands.txt"
+            "$TOOLS/netstat" "$TOOLS/ping" "$stage/commands.txt" "$@"
     )
     rc=$?
 
@@ -400,6 +407,96 @@ round_pattern() {
 
     [ "$ok" = 1 ] && claim 3b PASS "the standard Network-Startup pattern is explicit and works" \
                   || claim 3b FAIL "the standard Network-Startup pattern is explicit and works"
+    return 0
+}
+
+round_elsewhere() {
+    local stage="$ROOT/build/ifslots-stage-elsewhere"
+    local ifaces rc ok=1
+
+    echo
+    echo "=============================================================="
+    echo "==> an interface file that is NOT in DEVS:NetInterfaces"
+    echo "=============================================================="
+
+    # THE MIGRATION CASE.  Roadshow and AmiTCP_NG read the file a user names;
+    # this read DEVS:NetInterfaces and nothing else, after reducing the
+    # argument to its basename.  So a script that worked under Roadshow either
+    # started a DIFFERENT interface that happened to share a name, or none --
+    # silently, because a name that resolves is not an error.
+    #
+    # Both files are staged, with different addresses, and the one named by
+    # path has to be the one that comes up.  A harness that staged only the
+    # outside file could not tell "read the right file" from "read the only
+    # file there is".
+    rm -rf "$stage"
+    mkdir -p "$stage/libs" "$stage/devs/NetInterfaces" "$stage/elsewhere"
+    cp "$BSD" "$stage/libs/bsdsocket.library"
+    cp "$A2065" "$stage/devs/a2065.device"
+
+    printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.91.5\nNETMASK=255.255.255.0\n' \
+        > "$stage/devs/NetInterfaces/weth0"
+    printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.92.5\nNETMASK=255.255.255.0\n' \
+        > "$stage/elsewhere/weth0"
+
+    {
+        # FIRST, that nothing has already done it.  The round reads an address
+        # to decide WHICH file was read, and an interface that was up before
+        # the command ran makes that address say nothing about the search
+        # order -- which is exactly what happened when the runner's AUTOIF
+        # line brought the drawer's weth0 up from the boot script.  Asking is
+        # cheap; the round below refuses to give a verdict if this is not
+        # empty.
+        echo "SYS:netstat -i"
+        echo "SYS:AddNetInterface DH0:elsewhere/weth0"
+        echo "SYS:netstat -i"
+        echo "SYS:ShowNetStatus INTERFACE weth0"
+    } > "$stage/commands.txt"
+
+    # The outside directory has to reach the guest as well as the drawer;
+    # boot() stages devs and libs and nothing else unless it is told.
+    #
+    # AUTOIF is off for this round ON PURPOSE.  amiberry-run.sh adds
+    # Roadshow's `AddNetInterface DEVS:NetInterfaces/~(#?.info)' to the boot
+    # script whenever that drawer has a file in it, so the drawer's weth0
+    # would already be up -- at 192.168.91.5 -- before the command under test
+    # ran, and the round would report the search order was wrong when what it
+    # actually saw was the boot script winning the race.
+    AMINETXDUO_NO_AUTOIF=1 boot ifslots-elsewhere "$stage" "$stage/elsewhere"
+    rc=$?
+    if [ "$rc" != 0 ]; then
+        rig "the elsewhere round did not produce a transcript to read"
+        return 2
+    fi
+
+    # The first netstat, before the command under test.
+    if block "SYS:netstat -i" 1 | grep -qE "^weth0[[:space:]]"; then
+        rig "weth0 was already up before AddNetInterface ran, so the address\
+ below cannot say which file was read"
+        return 2
+    fi
+
+    ifaces=$(block "SYS:netstat -i" 2)
+    if printf '%s\n' "$ifaces" | grep -qE "^weth0[[:space:]]"; then
+        pass "the file named by path came up"
+    else
+        fail "naming a file outside DEVS:NetInterfaces attached nothing"
+        ok=0
+    fi
+
+    # WHICH of the two it read, which is the whole point.
+    if block "SYS:ShowNetStatus INTERFACE weth0" 1 | grep -q "192.168.92.5"; then
+        pass "and it is the file that was named, not the one in the drawer"
+    elif block "SYS:ShowNetStatus INTERFACE weth0" 1 | grep -q "192.168.91.5"; then
+        fail "the drawer's file was read instead of the one named by path"
+        ok=0
+    else
+        fail "neither address appeared; the interface has no configuration"
+        ok=0
+    fi
+
+    [ "$ok" = 1 ] && claim 3c PASS "an interface file outside the drawer is read from where it is" \
+                  || claim 3c FAIL "an interface file outside the drawer is read from where it is"
     return 0
 }
 
@@ -720,6 +817,7 @@ for r in $ROUNDS; do
     case "$r" in
         named)    round_named ;;
         pattern)  round_pattern ;;
+        elsewhere) round_elsewhere ;;
         typo)     round_typo ;;
         latefail) round_latefail ;;
         identity) round_identity ;;

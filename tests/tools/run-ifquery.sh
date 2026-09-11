@@ -751,6 +751,57 @@ else
     fail "SBTC_HAVE_MONITORING_API answers FALSE although hooks install"
 fi
 
+# SBTC_CAN_SHARE_LIBRARY_BASES is an application OPT-IN, not a capability
+# advert: AmiTCP_NG's socketbasetags.h calls it "Roadshow's opt-in to sharing
+# one library base between tasks", and CHECK_TASK() refuses a non-opener caller
+# until it is set.  This library enforces no same-task rule at all, so the
+# restriction it relaxes does not exist here and the tag is accepted and
+# recorded.  Rejecting a SET would refuse an application that is asking for
+# something it already has.
+if grep -q "^SBTC_CAN_SHARE_LIBRARY_BASES: rc 0 value 0, FALSE on a fresh base" \
+        "$REPORT"; then
+    pass "SBTC_CAN_SHARE_LIBRARY_BASES is FALSE on a base nobody set it on"
+else
+    fail "SBTC_CAN_SHARE_LIBRARY_BASES is not FALSE on a fresh base"
+    grep -m1 "^SBTC_CAN_SHARE_LIBRARY_BASES:" "$REPORT" | sed 's/^/       /' >&2
+fi
+
+if grep -q "^SBTC_CAN_SHARE_LIBRARY_BASES after SET TRUE: .*echoed back" \
+        "$REPORT"; then
+    pass "and an application that opts in is accepted, not refused"
+else
+    fail "SBTC_CAN_SHARE_LIBRARY_BASES no longer accepts the opt-in -- an\
+ application asking to share a base is being refused something this library\
+ already permits"
+    grep -m1 "^SBTC_CAN_SHARE_LIBRARY_BASES after" "$REPORT" |
+        sed 's/^/       /' >&2
+fi
+
+# And what the opt-in is FOR.  A timed WaitSelect() from a second task used to
+# Wait() on a bit allocated in one task while timer.device signalled another,
+# so the timeout never arrived: the call hung until a socket event or forever.
+# It must now COME BACK -- served if the base's timer is free, refused if
+# another task already owns it, both legal -- and this is the claim that fails
+# by TIMING OUT if it regresses, which is why MonProbe bounds its own wait.
+if grep -qE "^shared base: WaitSelect from a second task returned (0, the timeout fired|-1, refused)" \
+        "$REPORT"; then
+    pass "a second task's timed WaitSelect on a shared base comes back"
+else
+    fail "a second task's timed WaitSelect on a shared base neither timed out\
+ nor was refused"
+    grep -m1 "^shared base: WaitSelect" "$REPORT" | sed 's/^/       /' >&2
+fi
+
+# The half that matters more.  This library lets any task use any base, so what
+# a second task leaves behind has to leave the opener working.
+if grep -q "^shared base: the opener's socket() after it: .*, the base still works" \
+        "$REPORT"; then
+    pass "and the opener's own base still works afterwards"
+else
+    fail "a second task's WaitSelect left the opener's base broken"
+    grep -m1 "^shared base: the opener's socket" "$REPORT" | sed 's/^/       /' >&2
+fi
+
 if grep -q "^set IP_DEFAULT_TTL to its own value.*, accepted and the next tag was serviced, correctly" "$REPORT"; then
     pass "writing a tunable back at its current value is not a change"
 else

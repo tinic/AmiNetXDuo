@@ -28,8 +28,17 @@ cd "$ROOT" || exit 1
 # Documentation, for this purpose: prose a build never reads.  tests/HARNESSES
 # is here because it is a table of descriptions; the harnesses themselves are
 # code and are not.
+#
+# docs/aminet-survey/*.tsv is NOT prose by that definition, whatever drawer it
+# sits in.  It is derived data that tools/aminet-survey/check-derived.sh
+# regenerates and compares on every CI run, so it changes when the CODE changes
+# -- own-tools.tsv counts the vectors our own commands call, and it went red
+# the moment ConfigureNetInterface started calling ConfigureInterfaceTagList().
+# Refusing that as bookkeeping leaves the tree with a failing gate and no legal
+# commit that fixes it.
 is_doc() {
     case "$1" in
+        docs/aminet-survey/*.tsv) return 1 ;;
         *.md|docs/*|tests/HARNESSES|LICENSE) return 0 ;;
         *) return 1 ;;
     esac

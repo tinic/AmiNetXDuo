@@ -612,7 +612,9 @@ int main(int argc, char **argv)
                 return RETURN_WARN;
             }
 
-            err = tool_stack_add_interface(base, name, TRUE);
+            /* Online names an interface, never a file: the definition it
+               brings up is the one in the drawers. */
+            err = tool_stack_add_interface(base, name, NULL, TRUE);
             if (err != 0 && err != EEXIST)
             {
                 tool_error("%s did not join the running network: %s (%ld)",

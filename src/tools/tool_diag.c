@@ -775,8 +775,12 @@ BOOL tool_stack_hold(struct Library *base)
     return TRUE;
 }
 
+/* `name' is the interface's name -- its file part -- and `spec' is the file as
+   the user gave it, which may carry a device or a directory.  Handing the
+   library only the name made `AddNetInterface Work:weth0' start
+   DEVS:NetInterfaces/weth0 instead, and report success. */
 LONG tool_stack_add_interface(struct Library *base, const char *name,
-                              BOOL force_up)
+                              const char *spec, BOOL force_up)
 {
     NetStatusControl ctl;
     LONG             err = 0;
@@ -790,6 +794,20 @@ LONG tool_stack_add_interface(struct Library *base, const char *name,
         ((ULONG *)&ctl)[w] = 0;
     for (i = 0; i + 1 < (ULONG)sizeof(ctl.nsc_Name) && name[i] != '\0'; i++)
         ctl.nsc_Name[i] = name[i];
+
+    if (spec != NULL && spec[0] != '\0')
+    {
+        /* A path that does not fit is REFUSED, never shortened: a truncated
+           path names a different file, or none, and the caller would be told
+           the interface it asked for came up. */
+        for (i = 0; spec[i] != '\0'; i++)
+            ;
+        if (i >= (ULONG)sizeof(ctl.nsc_File))
+            return ENAMETOOLONG;
+        for (i = 0; spec[i] != '\0'; i++)
+            ctl.nsc_File[i] = spec[i];
+    }
+
     if (force_up)
         ctl.nsc_Flags |= NETCTRL_F_UP;
 
@@ -1110,6 +1128,33 @@ BOOL tool_parse_ip6(const char *text, ULONG out[4])
 }
 
 /* Errno(), LVO -0x0a2: what the two above leave behind on failure. */
+/*
+ * ConfigureInterfaceTagList(), the Roadshow vector at -450.  The library
+ * already implements every interface state and the MTU clamp behind it, in
+ * the order Roadshow documents -- SM_Online before the rest of the call, SM_Up
+ * after it -- so a command that wants those asks for them here rather than
+ * building a second set of semantics on top of NetStackControl().
+ */
+static LONG tool_call_configure_interface(struct Library *base,
+                                          const char *name,
+                                          struct TagItem *tags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register APTR            a1  __asm("a1") = (APTR)tags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-450:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (a1)
+                      : "cc", "memory");
+    return res;
+}
+
 static LONG tool_call_errno(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -1232,6 +1277,24 @@ LONG tool_netstatus_query(struct Library *base, ULONG what,
         return -1;
 
     return (LONG)hdr->nsh_Count;
+}
+
+LONG tool_configure_interface(struct Library *base, const char *name,
+                              struct TagItem *tags, LONG *errno_out)
+{
+    LONG rc;
+
+    if (errno_out != NULL)
+        *errno_out = 0;
+
+    if (base == NULL || name == NULL || tags == NULL)
+        return -1;
+
+    rc = tool_call_configure_interface(base, name, tags);
+    if (rc != 0 && errno_out != NULL)
+        *errno_out = tool_call_errno(base);
+
+    return rc;
 }
 
 LONG tool_netstatus_control(struct Library *base, ULONG op,

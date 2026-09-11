@@ -9,6 +9,45 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `AddNetInterface` takes a path as a path. Search order is now the file as
+  given, then `DEVS:NetInterfaces`, then `SYS:Storage/NetInterfaces` — the
+  Roadshow and AmiTCP_NG order. `AddNetInterface Work:mycfg` previously read
+  `DEVS:NetInterfaces` and started a different interface of that name, or
+  none. The interface is still named by its file part, as `Online`, `Offline`
+  and `RemoveNetInterface` expect. A name that carries a device or a directory
+  names one file: if it is not there the answer is "not there", never the
+  drawer's file of the same name
+- `ConfigureNetInterface` takes `MTU`, `ONLINE`, `OFFLINE`, `UP` and `DOWN`,
+  the five Roadshow keywords it was missing. `MTU` is clamped to what the card
+  carries and refused under 68 bytes. `DOWN` stops transmitting and leaves the
+  device on the network; `OFFLINE` takes it off
+- `ShowNetStatus` takes `IGMP`, `MULTICASTROUTING` (`MR`), `ROUTING` (`RT`)
+  and `QUIET`, the four Roadshow keywords it was missing. `IGMP` lists the
+  multicast groups this machine has joined, which interface each is on and how
+  many programs hold it; `QUIET` drops the "What to look at" advice and keeps
+  the report and every error
+- `NAMESERVER` and `DOMAIN` in an interface file are read, as the last source
+  after `DEVS:Internet/name_resolution` and the netdb file. AmiTCP_NG's
+  installer writes them there; nothing read them, so a machine migrated from
+  AmiTCP_NG came up with no name server and no message. A note says where the
+  value came from and where it belongs
+- `WaitSelect()` with a timeout, called from a task that did not open the
+  library, waited on a signal bit `timer.device` was signalling to another
+  task: the timeout never fired, the call sat there, and the opener's own
+  `socket()` then returned `ENETDOWN`. The timer belongs to the opener, and a
+  task that did not open the base is refused a timeout with `EINVAL`. One base
+  per task is what Roadshow's autodoc recommends for this
+- **`crypt()` accepted any password for a locked account.** Its failure string
+  was `"*"`, the locked-account marker, so
+  `strcmp(crypt(typed, salt), pw->pw_passwd)` matched. Now `"* no crypt *"`,
+  which no password field can equal
+- **Install `bsdsocket.library` and the commands together.** netstatus version
+  12 -> 13, library revision 8 -> 9: `NetStatusControl` carries the interface
+  file with its path. A 0.27.0 command refuses the call
+- Eight vectors wired to an ENOSYS stub reported as implemented in the profile
+  matrix (`tests/profiles/lvo-matrix.tsv`). They are the mbuf block and one
+  RoadshowData vector; they now read `enosys` in every profile
+
 ## 0.27.0
 
 ### Interfaces are started, not found

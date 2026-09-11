@@ -4,7 +4,7 @@ Facts, not plans: what is missing, where the evidence is, and what a user loses.
 "never" is a legitimate answer, and `docs/BACKLOG.md` is where a decided one
 goes. Compared against **Roadshow 1.15** (`NDK3.2/SANA+RoadshowTCP-IP/sfd/bsdsocket_lib.sfd`,
 125 entries; `netinclude/libraries/bsdsocket.h`, 53 tags) and **AmiTCP_NG
-4.1.5-beta** (`src/netinclude/fd/socket_lib.fd`, `src/api/`, `src/kern/`,
+4.1.7** (`src/netinclude/fd/socket_lib.fd`, 45 entries; `src/api/`, `src/kern/`,
 `src/tools/`).
 
 ## Not gaps
@@ -17,6 +17,8 @@ goes. Compared against **Roadshow 1.15** (`NDK3.2/SANA+RoadshowTCP-IP/sfd/bsdsoc
 | `TCP:` handler | `src/bsdsocket/tcp_handler.c`, `TCPHANDLER=` in the interface file |
 | `syslog` / `vsyslog` | AmiTCP's `syslog()` inline forwards its packed argument stream to the `vsyslog` LVO. We honor the opener's tag, `LOG_PID` and mask, expand `%m`, accept facility bits, and emit through the serial diagnostic sink |
 | Interface, routing, monitoring, status, DNS, local-database, address-conversion APIs | implemented, and `SBTC_HAVE_*` says so truthfully (`errno.c:488-536`) |
+| Interface files | named by path (`AddNetInterface Work:weth0`), else `DEVS:NetInterfaces` then `SYS:Storage/NetInterfaces`; a name with a device or directory in it is looked for nowhere else. `NAMESERVER` and `DOMAIN` in one are read as the last resolver source, with a note (`config_list.c`) |
+| `ConfigureNetInterface` `MTU` `ONLINE` `OFFLINE` `UP` `DOWN`, `ShowNetStatus` `IGMP` `MULTICASTROUTING` `ROUTING` `QUIET` | taken, through `ConfigureInterfaceTagList()` and `NETSTATUS_MULTICAST` |
 
 ## Missing vectors
 
@@ -32,20 +34,31 @@ and nine more) are excluded: they are stub-level, not LVOs.
 
 ## Missing SocketBaseTagList tags
 
-Three, against Roadshow's 53; we answer 51.
+Three, of Roadshow's 52 codes (53 defines, one a macro: `SBTC_ERRNOPTR(size)`
+picks among the three `ERRNO*PTR` codes we implement). We answer 49, counted by
+`tools/check-sbtc-tags.sh` rather than asserted here.
 
 | Tag | What a user loses |
 |---|---|
 | `SBTC_LOG_FILE_NAME` `SBTC_LOG_HOOK` | Where the stack's own messages go. This is the mechanism behind Roadshow's `NetLogViewer`: a program cannot redirect the log or catch it |
 | `SBTC_IP_FILTER_HOOK` | The hook the IP filter installs. Goes with the `ipf_*` vectors |
 
+`SBTC_CAN_SHARE_LIBRARY_BASES` is an application **opt-in**, not a capability
+advert: AmiTCP_NG's `socketbasetags.h` has it as "Roadshow's opt-in to sharing
+one library base between tasks", and `CHECK_TASK()` refuses a non-opener caller
+until it is set. **We enforce no same-task rule at all**, so the restriction it
+relaxes does not exist here and a SET is accepted rather than refused. What
+sharing does not buy is what Roadshow documents — signals go to the opener,
+`errno` is per base — plus one of ours: `WaitSelect()`'s timer is served by the
+first task that asks for a timeout, and a second gets `EINVAL`. Per-task timer
+state is reopening the library, which Roadshow's autodoc recommends anyway.
+Pinned by `run-ifquery.sh`, including a second task's timed `WaitSelect`.
+
 AmiTCP_NG carries 34 further tags Roadshow does not define — `SBTC_TPM_*` (23),
 `SBTC_SOWK_*` (5), the `SBTC_TCP_*` counters, `SBTC_SB_MAX`, `SBTC_HOSTID`,
 `SBTC_LINK_SPEED`, `SBTC_DETECTED_RAM`, `SBTC_LOG`, `SBTC_COMPAT43`. AmiTCP 4.x
-and Miami era, so answering them is a compatibility question about AmiTCP-era
-software and not a Roadshow one; Roadshow answers none of them either. The
-`TPM`/`SOWK` counters are reported in a different shape, through
-`NETSTATUS_STATS`.
+and Miami era; Roadshow answers none of them either, and the `TPM`/`SOWK`
+counters are reported in another shape through `NETSTATUS_STATS`.
 
 ## ARexx: parsed but refused
 
@@ -54,8 +67,8 @@ software and not a Roadshow one; Roadshow answers none of them either. The
 
 | Keyword | State |
 |---|---|
-| `QUERY` `SET` `KILL` | implemented, `:250-258`. `KILL` takes the interfaces down; now that `NETCTRL_STACK_NOTIFY` and `_RELEASE` exist it should do what `NetShutdown` does (`:153`), or the ARexx path stays a third of the job |
-| `READ` `ROUTE` `ADD` `RESET` | recognised, refused "not implemented" at `:273-279`. `ADD` and `RESET` would need AmiTCP's mutable in-memory net database; `src/config/netdb.c` is immutable after `ami_netdb_load()`, which is why it needs no lock |
+| `QUERY` `SET` `KILL` | implemented, `:250-258`. `KILL` takes the interfaces down; with `NETCTRL_STACK_NOTIFY` and `_RELEASE` it should do what `NetShutdown` does (`:153`) |
+| `READ` `ROUTE` `ADD` `RESET` | recognised, refused at `:273-279`. `ADD` and `RESET` need AmiTCP's mutable net database; `netdb.c` is immutable after `ami_netdb_load()`, which is why it needs no lock |
 
 ## Missing configuration
 
@@ -79,8 +92,10 @@ answers are defensible for each — implement it, or refuse it in one line.
 | `METRIC` `PRIORITY`/`PRI` | Ordering two interfaces |
 | `LEASE` `DHCPUNICAST` | DHCP lease time and unicast renewal (`ID` we do read) |
 | `BROADCASTADDRESS` | A broadcast address other than the one the netmask implies |
-| `NAMESERVER` `DOMAIN` | Per-interface resolver settings; we take both from `DEVS:Internet/name_resolution` |
 | `FILTER` `DEBUG` `ARPTYPE`/`HARDWARETYPE` `LINKSTATUSCOMMAND` | Packet filter, driver debug, ARP hardware type, link-change command |
+
+Roadshow's `ConfigureNetInterface` takes one keyword per interface-file key, so
+that list is also what it cannot be asked for at runtime.
 
 `DEVS:Internet/`: `hosts`, `networks`, `protocols`, `services`, `routes`,
 `name_resolution`, plus our own `certificates`, `service_discovery`,
@@ -88,7 +103,7 @@ answers are defensible for each — implement it, or refuse it in one line.
 
 | File | Note |
 |---|---|
-| `users`, `groups` | **We read `passwd` and `group` instead** (`ug_db.c:32-41`), which are AmiTCP's names. AmiTCP 4's native pipe-delimited `passwd` and `group` records are supported. Roadshow's manual §2675 and §3371 instead call the files `users` and `groups` and say each uses a different format from the Unix file; their record format and ReadArgs behavior still have not been checked against a real Roadshow install, although `README.md` claims we read the same configuration files Roadshow does |
+| `users`, `groups` | **We read `passwd` and `group` instead** (`ug_db.c:32-41`), AmiTCP's names, and `ug_parse.c:95` already takes `\|` or `:` per record, so the separator was never the gap. Roadshow's are ReadArgs lines, from its own manuscript: `users` is `NAME/A,PASSWORD/K,UID/A/N,GID/A/N,GECOS,DIR,SHELL` and `groups` is `NAME/A,ID/A/N,USERS/M`, `#` comments and blank lines skipped, **password in plain text**. Roadshow's manual calls both files obsolete, "provided only in order to assist the few applications which require them", and recommends against putting login data in them — so this is a small parser for a facility its own author deprecates, not a missing subsystem |
 | `rpc` | RPC program numbers, `getrpcbyname()`. Niche |
 | `servers` | The inetd-style superserver table. Out of scope while we ship no daemons |
 
@@ -100,16 +115,13 @@ do with PPP, PPPoE, SLIP or a modem.
 
 | Command | Theirs | What a user loses |
 |---|---|---|
-| `RoadshowControl` | Roadshow | Reading and setting the tunables above, and `ENV:Roadshow/<group>/<name>` so they survive a reboot. Needs the RoadshowData vectors first |
-| `ManageNetInterfaces` | Roadshow | Moving interface files between `DEVS:NetInterfaces` and `SYS:Storage/NetInterfaces` so a card that is not present does not fail at boot |
-| `SampleNetSpeed` | Roadshow | A window showing throughput per interface |
-| `NetLogViewer` | Roadshow | A commodity that catches what the stack and its clients log |
-| `ipf` `ipfstat` `ipnat` `ipmon` | Roadshow | Packet filtering and NAT |
-| `CheckRoadshowConfig` | Roadshow | We have `CheckNetConfig`, the same idea under our name |
-| `wget`, `tcpdump` | Roadshow | We have `fetch` and `NetCapture` |
+| `RoadshowControl` | Roadshow | The tunables above, and `ENV:Roadshow/<group>/<name>` so they survive a reboot. Needs the RoadshowData vectors first |
+| `ManageNetInterfaces` | Roadshow | Moving interface files between `DEVS:NetInterfaces` and `SYS:Storage/NetInterfaces`. Both drawers are searched for a bare name, so a file in either one comes up when it is named; what is missing is the command that moves it |
+| `SampleNetSpeed`, `NetLogViewer` | Roadshow | A throughput window per interface, and a commodity that catches what the stack and its clients log |
+| `ipf` `ipfstat` `ipnat` `ipmon` | Roadshow | Packet filtering and NAT, on the `ipf_*` vectors above |
+| `CheckRoadshowConfig`, `wget`, `tcpdump` | Roadshow | We have `CheckNetConfig`, `fetch` and `NetCapture` under our own names |
 
 ## Behaviour, not surface
 
-| Item | Evidence |
-|---|---|
-| Internationalised domain names | Roadshow translates a Latin-1 domain name to Punycode transparently (manual §73, `SBTC_IDN_DEFAULT_CHARACTER_SET`). We have no Punycode anywhere |
+**Internationalised domain names.** Roadshow translates Latin-1 to Punycode
+transparently (manual §73, `SBTC_IDN_DEFAULT_CHARACTER_SET`); we have none.

@@ -6,6 +6,11 @@
 
 #include "tools.h"
 
+/* IFC_LimitMTU, IFC_State and the four SM_ states.  <sys/types.h> first:
+   libraries/bsdsocket.h reaches sys/socket.h, which names ssize_t. */
+#include <sys/types.h>
+#include <libraries/bsdsocket.h>
+
 const char *const tool_name = "ConfigureNetInterface";
 
 static const char version_tag[] __attribute__((used)) =
@@ -13,7 +18,8 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,GATEWAY/K,"     \
                     "ADDRESS6/K,GATEWAY6/K,MDNS/K,CONFIGURE/K,CONFIGURE6/K," \
-                    "RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N"
+                    "RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N,MTU/K/N,"          \
+                    "ONLINE/S,OFFLINE/S,UP/S,DOWN/S"
 
 enum
 {
@@ -29,6 +35,11 @@ enum
     ARG_CONFIGURE6,
     ARG_RELEASE,
     ARG_TIMEOUT,
+    ARG_MTU,
+    ARG_ONLINE,
+    ARG_OFFLINE,
+    ARG_UP,
+    ARG_DOWN,
     ARG_COUNT
 };
 
@@ -45,6 +56,10 @@ enum
 #define CNI_EADDRNOTAVAIL   49
 #define CNI_ENOTCONN        57
 #define CNI_ENOSYS          78
+#define CNI_ENETDOWN        50
+
+/* RFC 791 2: 68 bytes is the smallest datagram every host must carry. */
+#define CNI_MTU_MIN         68
 
 /* Sized here rather than from nx_user.h: those constants exist only in an
    AMINETXDUO_IPV6 build and this command is one binary for either library. */
@@ -299,6 +314,63 @@ static LONG control(struct Library *base, ULONG op, LONG index, ULONG dest,
     return tool_netstatus_control(base, op, &ctl, err);
 }
 
+
+/*
+ * THE INTERFACE'S STATE AND ITS MTU, through ConfigureInterfaceTagList().
+ *
+ * The library implements all four of Roadshow's states behind that vector,
+ * in the order Roadshow documents -- SM_Online before the rest of the call,
+ * SM_Up after it -- and clamps the MTU to what the hardware will carry.  This
+ * command asks for them there rather than building a second set of semantics
+ * on NetStackControl(), which is what let the address half of the two drift
+ * apart in the first place.
+ *
+ * ONLINE puts the driver back on the wire; OFFLINE takes it off.  UP and DOWN
+ * are the protocol's own state: DOWN stops transmitting and leaves the device
+ * on the network, so the readers keep feeding a stack that does not answer,
+ * unless the interface file says DOWNGOESOFFLINE.
+ */
+static BOOL apply_state(struct Library *base, const char *name, BOOL have_mtu,
+                        ULONG mtu, BOOL have_state, LONG state, LONG *err)
+{
+    struct TagItem tags[3];
+    ULONG          n = 0;
+
+    if (have_mtu)
+    {
+        tags[n].ti_Tag  = IFC_LimitMTU;
+        tags[n].ti_Data = (ULONG)mtu;
+        n++;
+    }
+
+    if (have_state)
+    {
+        tags[n].ti_Tag  = IFC_State;
+        tags[n].ti_Data = (ULONG)state;
+        n++;
+    }
+
+    if (n == 0)
+        return TRUE;
+
+    tags[n].ti_Tag  = TAG_DONE;
+    tags[n].ti_Data = 0;
+
+    return (BOOL)(tool_configure_interface(base, name, tags, err) == 0);
+}
+
+/* What the four switches are called on the screen, in the order asked for. */
+static const char *state_word(LONG state)
+{
+    switch (state)
+    {
+        case SM_Online:  return "online";
+        case SM_Offline: return "offline";
+        case SM_Up:      return "up";
+        default:         return "down";
+    }
+}
+
 /* TRUE when the running library has IPv6 in it at all. */
 static BOOL stack_has_ipv6(struct Library *base)
 {
@@ -486,6 +558,10 @@ int main(int argc, char **argv)
     BOOL             want_dhcp    = FALSE;
     BOOL             want_release = FALSE;
     ULONG            timeout      = CNI_DHCP_TIMEOUT;
+    BOOL             have_mtu     = FALSE;
+    ULONG            mtu          = 0;
+    BOOL             have_state   = FALSE;
+    LONG             state        = 0;
     LONG             index;
     LONG             err = 0;
     char             text[16];
@@ -510,6 +586,11 @@ int main(int argc, char **argv)
     args[ARG_CONFIGURE6] = 0;
     args[ARG_RELEASE]   = 0;
     args[ARG_TIMEOUT]   = 0;
+    args[ARG_MTU]       = 0;
+    args[ARG_ONLINE]    = 0;
+    args[ARG_OFFLINE]   = 0;
+    args[ARG_UP]        = 0;
+    args[ARG_DOWN]      = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
@@ -518,7 +599,8 @@ int main(int argc, char **argv)
         tool_usage("<interface> [QUIET] [ADDRESS <a>[/<bits>]] [NETMASK <m>] "
                    "[GATEWAY <g>|NONE] [ADDRESS6 <a>] [GATEWAY6 <g>|NONE] "
                    "[MDNS YES|NO] [CONFIGURE DHCP] [CONFIGURE6 <mode>] "
-                   "[RELEASE] [TIMEOUT <secs>]",
+                   "[RELEASE] [TIMEOUT <secs>] [MTU <bytes>] "
+                   "[ONLINE|OFFLINE|UP|DOWN]",
                    "Change what a running interface is addressed with.");
         return RETURN_ERROR;
     }
@@ -716,11 +798,62 @@ int main(int argc, char **argv)
         timeout = (ULONG)seconds;
     }
 
+    /* One state, or none.  Two of them name two different interfaces to end
+       up as, and applying either one silently would be a guess. */
+    {
+        LONG asked = (args[ARG_ONLINE]  != 0 ? 1 : 0) +
+                     (args[ARG_OFFLINE] != 0 ? 1 : 0) +
+                     (args[ARG_UP]      != 0 ? 1 : 0) +
+                     (args[ARG_DOWN]    != 0 ? 1 : 0);
+
+        if (asked > 1)
+        {
+            tool_error("ONLINE, OFFLINE, UP and DOWN are four states, so only "
+                       "one of them can be asked for at a time");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        if (asked == 1)
+        {
+            have_state = TRUE;
+            if (args[ARG_ONLINE] != 0)
+                state = SM_Online;
+            else if (args[ARG_OFFLINE] != 0)
+                state = SM_Offline;
+            else if (args[ARG_UP] != 0)
+                state = SM_Up;
+            else
+                state = SM_Down;
+        }
+    }
+
+    if (args[ARG_MTU] != 0)
+    {
+        LONG bytes = *(LONG *)args[ARG_MTU];
+
+        /* RFC 791 2.  Below this a host cannot be required to reassemble a
+           datagram, so an interface set there drops traffic it is given
+           rather than carrying it slowly.  The library clamps the other end
+           down to what the hardware will carry. */
+        if (bytes < CNI_MTU_MIN)
+        {
+            tool_error("an MTU of %ld is below the %ld bytes IPv4 requires",
+                       bytes, (LONG)CNI_MTU_MIN);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        have_mtu = TRUE;
+        mtu      = (ULONG)bytes;
+    }
+
     if (!have_address && !have_netmask && !have_gateway && !have_gateway6 &&
-        !have_mdns && !want_dhcp && !want_release)
+        !have_mdns && !want_dhcp && !want_release && !have_mtu && !have_state)
     {
         tool_error("nothing to change: give ADDRESS, NETMASK, GATEWAY, "
-                   "GATEWAY6, MDNS, CONFIGURE or RELEASE");
+                   "GATEWAY6, MDNS, MTU, CONFIGURE, RELEASE, or one of "
+                   "ONLINE, OFFLINE, UP and DOWN");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -759,6 +892,31 @@ int main(int argc, char **argv)
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_FAIL;
+    }
+
+    /*
+     * ONLINE before the rest of the call, which is the order Roadshow
+     * documents: an interface that was off the wire is put back on it, and
+     * everything below then applies to a live interface rather than failing
+     * against a dead one.
+     */
+    if (have_state && state == SM_Online)
+    {
+        if (!apply_state(base, name, FALSE, 0, TRUE, state, &err))
+        {
+            if (err == CNI_ENOSYS)
+                tool_error("this bsdsocket.library was built without the "
+                           "interface-administration vectors, so its state "
+                           "cannot be changed here");
+            else
+                tool_error("%s did not go online", (LONG)name);
+
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        say("%s: online\n", (LONG)name);
     }
 
     /* RELEASE first, so `RELEASE CONFIGURE=DHCP` gives the lease back and
@@ -1009,6 +1167,52 @@ int main(int argc, char **argv)
         else
             say("%s: no longer answering .local here, and the network was "
                 "told to forget the name\n", (LONG)name);
+    }
+
+    /*
+     * The MTU and the remaining three states, after the addresses: SM_Up is
+     * documented to come last, and an MTU set before an address would be
+     * applied to an interface the call is about to change anyway.
+     */
+    if (have_mtu || (have_state && state != SM_Online))
+    {
+        BOOL late_state = (BOOL)(have_state && state != SM_Online);
+
+        if (!apply_state(base, name, have_mtu, mtu, late_state, state, &err))
+        {
+            if (err == CNI_ENOSYS)
+                tool_error("this bsdsocket.library was built without the "
+                           "interface-administration vectors, so neither the "
+                           "MTU nor the state can be changed here");
+            else if (err == CNI_ENETDOWN)
+                tool_error("%s is not on the network, so its MTU cannot be "
+                           "set", (LONG)name);
+            else if (have_mtu && !late_state)
+                tool_error("%s did not take an MTU of %lu", (LONG)name, mtu);
+            else if (have_mtu)
+                tool_error("%s: neither the MTU nor %s was applied",
+                           (LONG)name, (LONG)state_word(state));
+            else
+                tool_error("%s did not go %s", (LONG)name,
+                           (LONG)state_word(state));
+
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        /* What the interface now has, not what was asked for: the library
+           clamps an MTU down to what the hardware carries. */
+        if (have_mtu)
+        {
+            if (find_index(base, name) >= 0 && (row = iface_row(index)) != NULL)
+                say("%s: MTU %lu\n", (LONG)name, row->nsi_MTU);
+            else
+                say("%s: MTU %lu\n", (LONG)name, mtu);
+        }
+
+        if (late_state)
+            say("%s: %s\n", (LONG)name, (LONG)state_word(state));
     }
 
     /* Said last, so it is the line left on the screen. */

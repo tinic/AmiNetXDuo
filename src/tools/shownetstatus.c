@@ -21,9 +21,10 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ShowNetStatus");
 
 #define TEMPLATE    "INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S," \
-                    "DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S," \
+                    "DNS=DOMAINNAMESERVERS/S,ICMP/S,IGMP/S,IP/S,MB=MEMORY/S," \
+                    "MR=MULTICASTROUTING/S,RT=ROUTING/S," \
                     "TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S," \
-                    "EVENTS/S,NAMES/S,ALL/S,REPEAT/S"
+                    "EVENTS/S,NAMES/S,ALL/S,REPEAT/S,QUIET/S"
 
 enum
 {
@@ -33,8 +34,11 @@ enum
     ARG_ROUTES,
     ARG_DNS,
     ARG_ICMP,
+    ARG_IGMP,
     ARG_IP,
     ARG_MEMORY,
+    ARG_MULTICASTROUTING,
+    ARG_ROUTING,
     ARG_TCP,
     ARG_UDP,
     ARG_TCPSOCKETS,
@@ -44,6 +48,7 @@ enum
     ARG_NAMES,
     ARG_ALL,
     ARG_REPEAT,
+    ARG_QUIET,
     ARG_COUNT
 };
 
@@ -57,6 +62,9 @@ typedef struct Wanted
     BOOL    routes;
     BOOL    dns;
     BOOL    icmp;
+    BOOL    igmp;
+    BOOL    mcastrouting;
+    BOOL    routing;
     BOOL    ip;
     BOOL    memory;
     BOOL    tcp;
@@ -70,12 +78,37 @@ typedef struct Wanted
     BOOL    summary;                /* no category was asked for            */
 } Wanted;
 
+
 /* ------------------------------------------------------------- diagnosis, */
 
 static UWORD problem_count;
 
+/* QUIET.  The advice is what it drops -- the sentences under the report, which
+   is what Roadshow's ShowNetStatus QUIET is for.  Every problem is still
+   counted and the return code is unchanged, and an error is still an error:
+   nothing here silences tool_error(). */
+static BOOL quiet_advice;
+
+static VOID advice(const char *fmt, ...)
+{
+    va_list ap;
+
+    if (quiet_advice)
+        return;
+
+    va_start(ap, fmt);
+    VPrintf((CONST_STRPTR)fmt, (APTR)ap);
+    va_end(ap);
+}
+
 static VOID problem_head(VOID)
 {
+    if (quiet_advice)
+    {
+        problem_count++;
+        return;
+    }
+
     if (problem_count++ == 0)
         tool_printf("\nWhat to look at\n");
 }
@@ -1038,6 +1071,125 @@ static VOID show_udp_sockets(const ToolSnapshot *snap, BOOL all)
 
 /* ------------------------------------------------------------- diagnosis, */
 
+/* ---------------------------------------------------------------- IGMP, */
+
+/* NX_MAX_MULTICAST_GROUPS is 7 for IPv4 and as many again in an IPv6 build,
+   so 16 covers both tables with room to notice a longer one. */
+#define SNS_MAX_GROUPS      16
+
+/*
+ * STATIC, NOT ON THE STACK.  A Shell gives a command 4096 bytes and there is
+ * no MMU, so an overrun writes over whatever is below instead of trapping.
+ * report() and show_igmp() both inline into main(), so the buffer went
+ * straight into that one frame: main() measured 1232 bytes with it there and
+ * 892 with it here.  One report runs at a time, so one buffer does.
+ */
+static UBYTE sns_mcast_buf[sizeof(NetStatusHeader) +
+                           SNS_MAX_GROUPS * sizeof(NetStatusMulticast)];
+
+/*
+ * IGMP is what announces a multicast membership on the wire, so this section
+ * is about the memberships: which groups this machine has joined, on which
+ * interface, and how many programs are holding each one.  A group is joined
+ * once per interface and reference-counted, so two programs on 224.0.0.251
+ * are one membership and two references.
+ *
+ * The counters NetX Duo can keep for IGMP -- reports sent, queries received,
+ * checksum errors -- are compiled out unless the build asks for them
+ * (NX_DISABLE_IGMP_INFO, CMakeLists.txt), and a block of zeroes that cannot
+ * change would say less than nothing.  The memberships are always there.
+ */
+static VOID show_igmp(const AmiConfig *cfg, BOOL stack_running)
+{
+    struct Library *base;
+    NetStatusHeader          *hdr = (NetStatusHeader *)sns_mcast_buf;
+    const NetStatusMulticast *rows;
+    LONG                      n;
+    UWORD                     i;
+    char                      text[AMI_CFG_IP6_STRLEN];
+
+    tool_printf("\nMulticast groups\n");
+
+    if (!stack_running)
+    {
+        tool_printf("  the network is not running, so nothing is joined\n");
+        return;
+    }
+
+    base = tool_netstatus_open(TRUE);
+    if (base == NULL)
+    {
+        tool_printf("  the stack is not readable from here\n");
+        return;
+    }
+
+    n = tool_netstatus_query(base, NETSTATUS_MULTICAST, sns_mcast_buf,
+                             sizeof(sns_mcast_buf),
+                             sizeof(NetStatusMulticast));
+    if (n < 0)
+    {
+        tool_printf("  this bsdsocket.library does not report memberships\n");
+        tool_netstatus_close(base);
+        return;
+    }
+
+    if (n == 0)
+    {
+        tool_printf("  none joined\n");
+        tool_netstatus_close(base);
+        return;
+    }
+
+    tool_printf("Group                                   Refs  Interface\n");
+
+    rows = (const NetStatusMulticast *)(hdr + 1);
+
+    for (i = 0; i < (UWORD)n; i++)
+    {
+        if ((rows[i].nsm_Flags & NETSTATUS_MCAST_IPV6) != 0)
+            tool_format_ip6(rows[i].nsm_Group6, text, sizeof(text));
+        else
+            address_text(rows[i].nsm_Group, text, sizeof(text));
+
+        tool_printf("%-39s %5lu  %s\n", (LONG)text, rows[i].nsm_Count,
+                    (LONG)iface_name(cfg, rows[i].nsm_Interface));
+    }
+
+    if (hdr->nsh_Available > hdr->nsh_Count)
+        tool_printf("(%lu more than this list holds)\n",
+                    (ULONG)(hdr->nsh_Available - hdr->nsh_Count));
+
+    tool_netstatus_close(base);
+}
+
+/*
+ * Roadshow prints multicast ROUTING statistics here.  This stack forwards
+ * nothing -- it is a host, not a router, and there is no mrouted for it to
+ * feed -- so the honest answer is the one below rather than a block of zeroes
+ * that would read as a facility being idle.  The keyword is accepted so that a
+ * script carried over from Roadshow runs instead of stopping on the template.
+ */
+static VOID show_mcast_routing(VOID)
+{
+    tool_printf("\nMulticast routing\n");
+    tool_printf("  this machine does not forward multicast, so there is "
+                "none\n");
+    tool_printf("  ShowNetStatus IGMP lists the groups it has joined\n");
+}
+
+/*
+ * Roadshow's ROUTING is the routing statistics, where ROUTES is the table.
+ * NetX Duo keeps no per-event routing counters, so what can be said truthfully
+ * is the shape of the table and whether anything can leave this machine --
+ * which is what the question behind "routing statistics" usually is.
+ */
+static VOID show_routing(const AmiConfig *cfg, BOOL have_live)
+{
+    tool_printf("\nRouting\n");
+    tool_printf("  no per-event counters: this stack does not keep them\n");
+    show_routes(cfg, have_live);
+}
+
 /* Field values that are individually correct and collectively a machine that
    cannot reach anything. */
 static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
@@ -1054,19 +1206,19 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     if (!up)
     {
         problem_head();
-        tool_printf("  * %s is offline, so nothing can go in or out of it.\n",
+        advice("  * %s is offline, so nothing can go in or out of it.\n",
                     (LONG)cfg->name);
-        tool_printf("    Bring it up with:   Online %s\n", (LONG)cfg->name);
+        advice("    Bring it up with:   Online %s\n", (LONG)cfg->name);
         return;
     }
 
     if (live == NULL || !live->attached)
     {
         problem_head();
-        tool_printf("  * %s is described in DEVS:NetInterfaces but was never "
+        advice("  * %s is described in DEVS:NetInterfaces but was never "
                     "attached, so it is not part of the running network.\n",
                     (LONG)cfg->name);
-        tool_printf("    ShowNetStatus EVENTS names the call that refused; "
+        advice("    ShowNetStatus EVENTS names the call that refused; "
                     "if every interface slot is taken, RemoveNetInterface "
                     "frees one.\n");
         return;
@@ -1075,10 +1227,10 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     if (!live->link_up)
     {
         problem_head();
-        tool_printf("  * %s has no link: the card sees no network.\n",
+        advice("  * %s has no link: the card sees no network.\n",
                     (LONG)cfg->name);
-        tool_printf("    Check the cable at both ends. Check that the device\n");
-        tool_printf("    at the far end is switched on.\n");
+        advice("    Check the cable at both ends. Check that the device\n");
+        advice("    at the far end is switched on.\n");
     }
 
     /*
@@ -1092,30 +1244,30 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         ami_config_iface_wants_ipv6(cfg))
     {
         problem_head();
-        tool_printf("  * %s carries IPv6 only and has no IPv6 address yet.\n",
+        advice("  * %s carries IPv6 only and has no IPv6 address yet.\n",
                     (LONG)cfg->name);
-        tool_printf("    Check the cable, and that a router on this network\n");
-        tool_printf("    advertises IPv6. Even without one the link-local\n");
-        tool_printf("    address should appear within a few seconds.\n");
+        advice("    Check the cable, and that a router on this network\n");
+        advice("    advertises IPv6. Even without one the link-local\n");
+        advice("    address should appear within a few seconds.\n");
         return;
     }
 
     {
         problem_head();
-        tool_printf("  * %s has no address, so it cannot be used yet.\n",
+        advice("  * %s has no address, so it cannot be used yet.\n",
                     (LONG)cfg->name);
 
         if (cfg->iptype == AMI_IPTYPE_DHCP)
         {
-            tool_printf("    It is set to ask for one (DHCP) and nothing has\n");
-            tool_printf("    answered. Check the cable. Check that something\n");
-            tool_printf("    on this network hands out addresses. To use a\n");
-            tool_printf("    fixed address instead, run NetSetup.\n");
+            advice("    It is set to ask for one (DHCP) and nothing has\n");
+            advice("    answered. Check the cable. Check that something\n");
+            advice("    on this network hands out addresses. To use a\n");
+            advice("    fixed address instead, run NetSetup.\n");
         }
         else
         {
-            tool_printf("    It is set to use a fixed address but the interface\n");
-            tool_printf("    file has no ADDRESS line. Run NetSetup to set one.\n");
+            advice("    It is set to use a fixed address but the interface\n");
+            advice("    file has no ADDRESS line. Run NetSetup to set one.\n");
         }
     }
 }
@@ -1643,6 +1795,12 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         show_ip_stats(&stats);
     if (w->icmp)
         show_icmp_stats(&stats);
+    if (w->igmp)
+        show_igmp(cfg, stack_running);
+    if (w->mcastrouting)
+        show_mcast_routing();
+    if (w->routing)
+        show_routing(cfg, have_live);
     if (w->tcp)
         show_tcp_stats(&stats);
     if (w->udp)
@@ -1698,11 +1856,11 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     if (!stack_running)
     {
         problem_head();
-        tool_printf("  * The network has not been started.\n");
-        tool_printf("    Start it with:   AddNetInterface %s\n",
+        advice("  * The network has not been started.\n");
+        advice("    Start it with:   AddNetInterface %s\n",
                     (LONG)cfg->interfaces[0].name);
-        tool_printf("    Put that line in S:User-Startup to run it at every\n");
-        tool_printf("    boot.\n");
+        advice("    Put that line in S:User-Startup to run it at every\n");
+        advice("    boot.\n");
     }
 
     /*
@@ -1724,26 +1882,26 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 (!have_live && cfg->default_gateway == 0))
             {
                 problem_head();
-                tool_printf("  * There is no default route, so only machines "
+                advice("  * There is no default route, so only machines "
                             "on this\n");
-                tool_printf("    network can be reached, nothing beyond it.\n");
-                tool_printf("    Run NetSetup and give it the router address, "
+                advice("    network can be reached, nothing beyond it.\n");
+                advice("    Run NetSetup and give it the router address, "
                             "or put\n");
-                tool_printf("    DEFAULT=<router address> in "
+                advice("    DEFAULT=<router address> in "
                             "DEVS:Internet/routes.\n");
             }
 
             if (!have_ns)
             {
                 problem_head();
-                tool_printf("  * No name server is configured, so names like\n");
-                tool_printf("    www.example.com cannot be looked up. Numeric "
+                advice("  * No name server is configured, so names like\n");
+                advice("    www.example.com cannot be looked up. Numeric "
                             "addresses\n");
-                tool_printf("    still work.\n");
-                tool_printf("    Run NetSetup, or put  NAMESERVER <address>  in\n");
-                tool_printf("    DEVS:Internet/name_resolution. On a home network "
+                advice("    still work.\n");
+                advice("    Run NetSetup, or put  NAMESERVER <address>  in\n");
+                advice("    DEVS:Internet/name_resolution. On a home network "
                             "the\n");
-                tool_printf("    router is usually the name server too.\n");
+                advice("    router is usually the name server too.\n");
             }
         }
     }
@@ -1751,14 +1909,14 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     if (elsewhere)
     {
         problem_head();
-        tool_printf("  * The counters and per-interface detail above come from\n");
-        tool_printf("    the configuration, not from the running stack. The\n");
-        tool_printf("    stack is inside bsdsocket.library, which has no call\n");
-        tool_printf("    yet that lets another command read it.\n");
+        advice("  * The counters and per-interface detail above come from\n");
+        advice("    the configuration, not from the running stack. The\n");
+        advice("    stack is inside bsdsocket.library, which has no call\n");
+        advice("    yet that lets another command read it.\n");
     }
 
     if (problem_count == 0)
-        tool_printf("\nNo problems found.\n");
+        advice("\nNo problems found.\n");
 
     return RETURN_OK;
 }
@@ -1802,7 +1960,16 @@ static int shownetstatus_main(int argc, char **argv)
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
     {
+        /* Every other command in this tree names its keywords here.  This one
+           printed the DOS error alone, which on a mistyped category says
+           "required argument missing" and nothing about what the categories
+           are. */
         tool_fault(IoErr());
+        tool_usage("[<interface>...] [INTERFACES] [ARP] [ROUTES] [DNS] [IP] "
+                   "[ICMP] [IGMP] [TCP] [UDP] [MEMORY] [MULTICASTROUTING] "
+                   "[ROUTING] [TCPSOCKETS] [UDPSOCKETS] [USERS] [EVENTS] "
+                   "[NAMES] [ALL] [REPEAT] [QUIET]",
+                   "Report the state of the network.");
         return RETURN_ERROR;
     }
 
@@ -1812,6 +1979,9 @@ static int shownetstatus_main(int argc, char **argv)
     w.routes     = (args[ARG_ROUTES]     != 0) ? TRUE : FALSE;
     w.dns        = (args[ARG_DNS]        != 0) ? TRUE : FALSE;
     w.icmp       = (args[ARG_ICMP]       != 0) ? TRUE : FALSE;
+    w.igmp       = (args[ARG_IGMP]       != 0) ? TRUE : FALSE;
+    w.mcastrouting = (args[ARG_MULTICASTROUTING] != 0) ? TRUE : FALSE;
+    w.routing    = (args[ARG_ROUTING]    != 0) ? TRUE : FALSE;
     w.ip         = (args[ARG_IP]         != 0) ? TRUE : FALSE;
     w.memory     = (args[ARG_MEMORY]     != 0) ? TRUE : FALSE;
     w.tcp        = (args[ARG_TCP]        != 0) ? TRUE : FALSE;
@@ -1829,9 +1999,15 @@ static int shownetstatus_main(int argc, char **argv)
      * neither counts here.
      */
     w.summary = (BOOL)!(w.interfaces || w.arp || w.routes || w.dns ||
-                        w.icmp || w.ip || w.memory || w.tcp || w.udp ||
+                        w.icmp || w.igmp || w.ip || w.memory || w.tcp ||
+                        w.udp || w.mcastrouting || w.routing ||
                         w.tcpsockets || w.udpsockets || w.users ||
                         (w.interface != NULL && w.interface[0] != NULL));
+
+    /* QUIET drops the advice, never the data and never an error: Roadshow's
+       ShowNetStatus has it for a script that wants the report without the
+       sentences under it. */
+    quiet_advice = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
 
     names_prepare(w.names);
 

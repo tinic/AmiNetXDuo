@@ -44,6 +44,11 @@ for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" \
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
+# Existing is not current: -b <dir> names a directory, not a commit.
+. "$ROOT/tools/preflight.sh"
+pf_require_fresh "$BSD" "$ROOT/src" "$ROOT/include" || exit 2
+pf_require_fresh "$TOOLS/ConfigureNetInterface" "$ROOT/src" "$ROOT/include" || exit 2
+
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
     for candidate in \
@@ -120,10 +125,33 @@ SYS:ConfigureNetInterface eth0 QUIET ADDRESS 10.0.2.15/24 GATEWAY 10.0.2.2
 SYS:netstat -i
 SYS:netstat -r
 SYS:ping 10.0.2.2 -c 2 -t 20
+SYS:ConfigureNetInterface eth0 MTU 1000
+SYS:netstat -i
+SYS:ConfigureNetInterface eth0 MTU 40
+SYS:ConfigureNetInterface eth0 MTU 9000
+SYS:netstat -i
+SYS:ConfigureNetInterface eth0 UP DOWN
+SYS:ConfigureNetInterface eth0 DOWN
+SYS:netstat -i
+SYS:ConfigureNetInterface eth0 UP
+SYS:netstat -i
+SYS:ConfigureNetInterface eth0 OFFLINE
+SYS:netstat -i
+SYS:ConfigureNetInterface eth0 ONLINE
+SYS:netstat -i
+SYS:ping 10.0.2.2 -c 2 -t 20
 EOF
 
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-ifconfigure}"
+
+# This run names its own interface, in the command list below, and its first
+# claim is about the command BEFORE there is one: what ConfigureNetInterface
+# says when the network is not running.  amiberry-run.sh adds Roadshow's
+# `AddNetInterface DEVS:NetInterfaces/~(#?.info)' to the boot script whenever
+# that drawer holds a definition, which brought eth0 up before the first
+# command ran and made four claims read a live interface.
+export AMINETXDUO_NO_AUTOIF=1
 
 STARTED=$(date +%s)
 set +e
@@ -397,6 +425,78 @@ else
     routes 5 | sed 's/^/       /' >&2
 fi
 pinged 3 "and after every change above the gateway still answers"
+
+# --------------------------------------------------------------- MTU and ---
+# ---------------------------------------------------- the four states -------
+#
+# Roadshow's ConfigureNetInterface takes MTU, ONLINE, OFFLINE, UP and DOWN; the
+# library has implemented all five behind ConfigureInterfaceTagList() since
+# before this command existed, and the command did not offer them.  Every claim
+# below reads netstat -i AFTER the change, so a keyword accepted and ignored
+# fails rather than passes -- which is what a no-op would look like from the
+# command's own output.
+
+mtu_of() { ifaces "$1" | awk '$1 == "eth0" { print $2; exit }'; }
+link_of() { ifaces "$1" | awk '$1 == "eth0" { print $4; exit }'; }
+
+want_rc "SYS:ConfigureNetInterface eth0 MTU 1000" 1 0 "MTU 1000 is accepted"
+if [ "$(mtu_of 6)" = 1000 ]; then
+    pass "and netstat -i reports an MTU of 1000"
+else
+    fail "MTU 1000 was accepted and the interface still reports $(mtu_of 6)"
+    ifaces 6 | sed 's/^/       /' >&2
+fi
+
+says "SYS:ConfigureNetInterface eth0 MTU 40" 1 "below the 68 bytes" \
+     "an MTU under the IPv4 minimum is refused, with the number"
+want_rc "SYS:ConfigureNetInterface eth0 MTU 40" 1 10 "and returns ERROR"
+
+# The library clamps down to what the hardware carries, so this is 1500 on an
+# Ethernet card and never 9000.
+want_rc "SYS:ConfigureNetInterface eth0 MTU 9000" 1 0 "MTU 9000 is accepted"
+if [ "$(mtu_of 7)" = 1500 ]; then
+    pass "and is clamped to the 1500 the card carries"
+else
+    fail "MTU 9000 left the interface at $(mtu_of 7), not the card's 1500"
+    ifaces 7 | sed 's/^/       /' >&2
+fi
+
+says "SYS:ConfigureNetInterface eth0 UP DOWN" 1 "only.*one of them" \
+     "two states in one call are refused"
+want_rc "SYS:ConfigureNetInterface eth0 UP DOWN" 1 10 "and returns ERROR"
+
+want_rc "SYS:ConfigureNetInterface eth0 DOWN" 1 0 "DOWN is accepted"
+if [ "$(link_of 8)" = down ]; then
+    pass "and netstat -i reports the link down"
+else
+    fail "DOWN was accepted and netstat -i still reports '$(link_of 8)'"
+    ifaces 8 | sed 's/^/       /' >&2
+fi
+
+want_rc "SYS:ConfigureNetInterface eth0 UP" 1 0 "UP is accepted"
+if [ "$(link_of 9)" = up ]; then
+    pass "and brings the link back"
+else
+    fail "UP did not bring the link back: '$(link_of 9)'"
+    ifaces 9 | sed 's/^/       /' >&2
+fi
+
+want_rc "SYS:ConfigureNetInterface eth0 OFFLINE" 1 0 "OFFLINE is accepted"
+if [ "$(link_of 10)" = down ]; then
+    pass "and takes the driver off the wire"
+else
+    fail "OFFLINE was accepted and netstat -i still reports '$(link_of 10)'"
+    ifaces 10 | sed 's/^/       /' >&2
+fi
+
+want_rc "SYS:ConfigureNetInterface eth0 ONLINE" 1 0 "ONLINE is accepted"
+if [ "$(link_of 11)" = up ]; then
+    pass "and puts it back"
+else
+    fail "ONLINE did not put the driver back: '$(link_of 11)'"
+    ifaces 11 | sed 's/^/       /' >&2
+fi
+pinged 4 "and the gateway answers again after OFFLINE and ONLINE"
 
 echo
 echo "==> the whole run took ${ELAPSED}s against a ${TIMEOUT}s ceiling"

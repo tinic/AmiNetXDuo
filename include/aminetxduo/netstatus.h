@@ -22,7 +22,7 @@ extern "C" {
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
    different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       12
+#define AMI_NETSTATUS_VERSION       13
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -38,11 +38,15 @@ extern "C" {
 #define NETSTATUS_SVC_TYPE_LEN  24
 #define NETSTATUS_SVC_HOST_LEN  64
 #define NETSTATUS_SVC_TXT_LEN   192
+/* An interface file with its path.  AMI_CFG_PATH_LEN in <aminetxduo/config.h>
+   is the same number; this header stands alone on <exec/types.h>, so it says
+   it again rather than pulling that one in. */
+#define NETSTATUS_FILE_LEN      128
 
 /* Callers MUST check lib_Revision >= this before any netstatus call: an older
    library has no such vector and the jump lands past the table terminator.
    Bump when a netstatus vector is added or AMI_NETSTATUS_VERSION moves. */
-#define AMI_NETSTATUS_MIN_REVISION  8
+#define AMI_NETSTATUS_MIN_REVISION  9
 
 /* ------------------------------------------------------------ selectors --- */
 #define NETSTATUS_SYSTEM        1   /* one NetStatusSystem                   */
@@ -63,6 +67,7 @@ extern "C" {
 #define NETSTATUS_EVENTS       16   /* NetStatusEvent[]                      */
 #define NETSTATUS_RXBUDGET     17   /* one NetStatusRxBudget                 */
 #define NETSTATUS_DHCP6        18   /* NetStatusDhcp6[]                      */
+#define NETSTATUS_MULTICAST    19   /* NetStatusMulticast[]                  */
 
 /* Every buffer starts with this.  Truncation is detectable rather than silent:
    nsh_Count < nsh_Available. */
@@ -405,6 +410,26 @@ typedef struct NetStatusArp
     UWORD   nsa_Retries;                /* requests sent while unresolved    */
     UWORD   nsa_Interface;              /* the interface it was learnt on    */
 } NetStatusArp;
+
+/* ------------------------------------------------ NETSTATUS_MULTICAST --- */
+
+/*
+ * The multicast groups this host has joined, from nx_ipv4_multicast_entry[]
+ * and, in an IPv6 build, nx_ipv6_multicast_entry[].  A group is joined per
+ * interface and counted: two programs on one group hold one membership and
+ * two references, and the group is left when the last one goes.  IGMP is what
+ * announces these on the wire, so this is the state an IGMP report is about.
+ */
+#define NETSTATUS_MCAST_IPV6    0x0001  /* nsm_Group6, not nsm_Group         */
+
+typedef struct NetStatusMulticast
+{
+    ULONG   nsm_Group;                  /* host byte order, IPv4             */
+    ULONG   nsm_Group6[4];              /* host byte order, four words       */
+    ULONG   nsm_Count;                  /* references held on it             */
+    UWORD   nsm_Interface;              /* the interface it is joined on     */
+    UWORD   nsm_Flags;                  /* NETSTATUS_MCAST_*                 */
+} NetStatusMulticast;
 
 /* ----------------------------------------------- NETSTATUS_NEIGHBOURS --- */
 
@@ -825,10 +850,16 @@ typedef struct NetStatusRxBudget
    which resets them.  Removing one interface does not renumber the others. */
 #define NETCTRL_INTERFACE_REMOVE 16 /* nsc_Index, nsc_Flags                  */
 
-/* nsc_Name is a file in DEVS:NetInterfaces.  This reads a file, so it must be
-   called from a Process.  The address is not waited for: poll
-   NETSTATUS_INTERFACES' nsi_Address, or give up. */
-#define NETCTRL_INTERFACE_ADD   17  /* nsc_Name                              */
+/* nsc_File is the file, as the caller was given it: a bare name is looked for
+   in DEVS:NetInterfaces then SYS:Storage/NetInterfaces, and a name carrying a
+   device or a directory names ONE file and is not looked for anywhere else.
+   Empty falls back to nsc_Name, which is 24 bytes and cannot hold a path.
+   nsc_Name is the interface's name either way -- the file part, which is what
+   NETCTRL_INTERFACE_REMOVE, Online and ShowNetStatus are given afterwards.
+
+   This reads a file, so it must be called from a Process.  The address is not
+   waited for: poll NETSTATUS_INTERFACES' nsi_Address, or give up. */
+#define NETCTRL_INTERFACE_ADD   17  /* nsc_File, nsc_Name                    */
 
 /* The library takes a reference of its own, so a command that started the
    network can CloseLibrary() without taking it down.  Idempotent.
@@ -899,6 +930,11 @@ typedef struct NetStatusControl
        is 24 bytes, the width of a DNS-SD service type, and a host name is up
        to 63 (RFC 1123 2.1). */
     char    nsc_HostName[NETSTATUS_HOSTNAME_LEN];
+    /* An interface file for NETCTRL_INTERFACE_ADD, for the same reason as
+       nsc_HostName: a path does not fit in 24 bytes, and truncating one reads
+       a DIFFERENT FILE rather than failing.  A caller whose path does not fit
+       here must refuse rather than send a short one. */
+    char    nsc_File[NETSTATUS_FILE_LEN];
 } NetStatusControl;
 
 #ifdef __cplusplus

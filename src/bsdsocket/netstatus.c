@@ -1027,6 +1027,90 @@ static VOID ns_fill_health(NetStatusHealth *out)
  * The ARP cache is a hash table of circular lists. nx_arp_active_next of the
  * last entry in a bucket points back at the bucket head, not at NX_NULL, so
  */
+
+/*
+ * The multicast groups this host holds, IPv4 and -- where the build has it --
+ * IPv6.  NetX Duo keeps both as fixed tables with a zero address for a free
+ * slot and a reference count for the programs sharing one membership, so this
+ * is a walk rather than a list.
+ */
+static VOID ns_fill_multicast(NX_IP *ip, NsWriter *w)
+{
+#ifndef NX_DISABLE_IPV4
+    UINT g;
+
+    for (g = 0; g < (UINT)NX_MAX_MULTICAST_GROUPS; g++)
+    {
+        NX_IPV4_MULTICAST_ENTRY *e = &ip->nx_ipv4_multicast_entry[g];
+        NetStatusMulticast      *out;
+        UINT                     i;
+
+        if (e->nx_ipv4_multicast_join_list == 0 ||
+            e->nx_ipv4_multicast_join_count == 0)
+            continue;
+
+        out = (NetStatusMulticast *)ns_writer_next(w);
+        if (out == NULL)
+            continue;
+
+        out->nsm_Group = e->nx_ipv4_multicast_join_list;
+        out->nsm_Count = e->nx_ipv4_multicast_join_count;
+
+        for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+        {
+            if (e->nx_ipv4_multicast_join_interface_list ==
+                &ip->nx_ip_interface[i])
+            {
+                out->nsm_Interface = (UWORD)i;
+                break;
+            }
+        }
+    }
+#endif
+
+#ifdef NX_ENABLE_IPV6_MULTICAST
+    {
+        UINT g6;
+
+        for (g6 = 0; g6 < (UINT)NX_MAX_MULTICAST_GROUPS; g6++)
+        {
+            NX_IPV6_MULTICAST_ENTRY *e = &ip->nx_ipv6_multicast_entry[g6];
+            NetStatusMulticast      *out;
+            UINT                     i;
+
+            if (e->nx_ip_mld_join_count == 0)
+                continue;
+
+            out = (NetStatusMulticast *)ns_writer_next(w);
+            if (out == NULL)
+                continue;
+
+            out->nsm_Group6[0] = e->nx_ip_mld_join_list[0];
+            out->nsm_Group6[1] = e->nx_ip_mld_join_list[1];
+            out->nsm_Group6[2] = e->nx_ip_mld_join_list[2];
+            out->nsm_Group6[3] = e->nx_ip_mld_join_list[3];
+            out->nsm_Count     = e->nx_ip_mld_join_count;
+            out->nsm_Flags     = NETSTATUS_MCAST_IPV6;
+
+            for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+            {
+                if (e->nx_ip_mld_join_interface_list ==
+                    &ip->nx_ip_interface[i])
+                {
+                    out->nsm_Interface = (UWORD)i;
+                    break;
+                }
+            }
+        }
+    }
+#endif
+
+#if defined(NX_DISABLE_IPV4) && !defined(NX_ENABLE_IPV6_MULTICAST)
+    (VOID)ip;
+    (VOID)w;
+#endif
+}
+
 static VOID ns_fill_arp(NX_IP *ip, NsWriter *w)
 {
 #ifndef NX_DISABLE_IPV4
@@ -1354,6 +1438,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_STATS:       need = sizeof(NetStatusStats);   break;
         case NETSTATUS_INTERFACES:  need = 0;                        break;
         case NETSTATUS_ARP:         need = 0;                        break;
+        case NETSTATUS_MULTICAST:   need = 0;                        break;
         case NETSTATUS_ROUTES:      need = 0;                        break;
         case NETSTATUS_SOCKETS:     need = 0;                        break;
         case NETSTATUS_DHCP:        need = 0;                        break;
@@ -1606,6 +1691,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_finish(&w);
             break;
 
+        case NETSTATUS_MULTICAST:
+            ns_writer_init(&w, hdr, size, NETSTATUS_MULTICAST,
+                           sizeof(NetStatusMulticast));
+            ns_fill_multicast(ip, &w);
+            ns_writer_finish(&w);
+            break;
+
         case NETSTATUS_ROUTES:
             ns_writer_init(&w, hdr, size, NETSTATUS_ROUTES,
                            sizeof(NetStatusRoute));
@@ -1744,11 +1836,20 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             LONG        err;
             UWORD       index = 0;
 
+            const char *spec;
+
             if (!ns_terminated(ctl->nsc_Name, sizeof(ctl->nsc_Name)) ||
                 ctl->nsc_Name[0] == '\0')
                 return bsd_fail(SocketBase, AMI_EINVAL);
 
-            if (ami_config_load_interface(ctl->nsc_Name, &cfg) != AMI_CFG_OK)
+            if (!ns_terminated(ctl->nsc_File, sizeof(ctl->nsc_File)))
+                return bsd_fail(SocketBase, AMI_EINVAL);
+
+            /* The file the caller was given, which may carry a path; the
+               older callers that have only a name send an empty one. */
+            spec = (ctl->nsc_File[0] != '\0') ? ctl->nsc_File : ctl->nsc_Name;
+
+            if (ami_config_load_interface(spec, &cfg) != AMI_CFG_OK)
                 return bsd_fail(SocketBase, AMI_ENOENT);
 
             err = bsd_stack_interface_start(SocketBase, &cfg, &index);

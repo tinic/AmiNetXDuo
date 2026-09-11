@@ -100,7 +100,9 @@ ami_if_keywords[] =
     { "priority",           IF_KEY_IGNORED   },
     { "pri",                IF_KEY_IGNORED   },
 
-    /* Written by AmiTCP_NG's installer. Harmless, handled elsewhere. */
+    /* Written by AmiTCP_NG's installer.  ami_config_resolver_from_interfaces()
+       reads them when DEVS:Internet/name_resolution supplies none, and says so
+       when it does; they are not part of an interface's own configuration. */
     { "nameserver",         IF_KEY_IGNORED   },
     { "domain",             IF_KEY_IGNORED   },
 
@@ -289,8 +291,11 @@ static VOID report_inert_keyword(ULONG line, const char *key)
         }
     }
 
-    /* NAMESERVER and DOMAIN in an interface file: handled elsewhere, and not
-       inert. */
+    /* NAMESERVER and DOMAIN in an interface file are not inert and get no note
+       here: ami_config_resolver_from_interfaces() reads them as the last
+       resolver source and reports where the value came from, which is the
+       thing worth saying.  A note here would fire on every interface file
+       whether or not the value was used. */
 }
 
 /* "bad ADDRESS '10.0.0.300'" + whatever the keyword's own advice is. */
