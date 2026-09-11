@@ -107,6 +107,33 @@ done
 # so a one-board run is byte for byte the run it always was.
 BOARD="${BOARDS[0]:-}"
 
+
+# WHERE AddNetInterface COMES FROM.  Not a fixed path: the rig runs out of
+# build/cm and CI out of build/ci/<arm>, and assuming the first hard-failed
+# every arm in the emulator workflow on 2026-09-11 -- sixteen of them, for a
+# file that was built all along, one directory over.  The guest under test
+# names its own build tree, so ask it.
+addif_path() {
+    local d
+    if [ -n "${AMINETXDUO_ADDIF:-}" ]; then
+        printf '%s' "$AMINETXDUO_ADDIF"
+        return 0
+    fi
+    d=$(cd "$(dirname "$1")" 2>/dev/null && pwd) || return 1
+    while [ -n "$d" ] && [ "$d" != "/" ]; do
+        if [ -f "$d/src/tools/AddNetInterface" ]; then
+            printf '%s' "$d/src/tools/AddNetInterface"
+            return 0
+        fi
+        d=$(dirname "$d")
+    done
+    if [ -f "$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface" ]; then
+        printf '%s' "$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface"
+        return 0
+    fi
+    return 1
+}
+
 EXE="$1"; shift
 [ -f "$EXE" ] || { echo "no such executable: $EXE" >&2; exit 2; }
 EXE_NAME=$(basename "$EXE")
@@ -428,15 +455,14 @@ AUTOIF=""
 if [ "${AMINETXDUO_NO_AUTOIF:-0}" != 1 ] && [ -d "$HD/devs/NetInterfaces" ] &&
    [ -n "$(find "$HD/devs/NetInterfaces" -maxdepth 1 -type f \
             ! -name '*.info' -print -quit)" ]; then
-    ADDIF="${AMINETXDUO_ADDIF:-$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface}"
     # Not a skip: a staged drawer that nothing brings up is a guest that tests
     # the network without one, which is how a harness passes while seeing
     # nothing.
-    [ -f "$ADDIF" ] || {
-        echo "no AddNetInterface at $ADDIF, and $HD/devs/NetInterfaces" >&2
-        echo "holds a definition that nothing would bring up.  Build it, or" >&2
-        echo "set AMINETXDUO_ADDIF, or AMINETXDUO_NO_AUTOIF=1 if the guest" >&2
-        echo "names its own interface." >&2
+    ADDIF=$(addif_path "$EXE") || {
+        echo "no AddNetInterface anywhere above $EXE, and" >&2
+        echo "$HD/devs/NetInterfaces holds a definition that nothing would" >&2
+        echo "bring up.  Build it, or set AMINETXDUO_ADDIF, or" >&2
+        echo "AMINETXDUO_NO_AUTOIF=1 if the guest names its own interface." >&2
         exit 2
     }
     cp "$ADDIF" "$HD/c/AddNetInterface"
