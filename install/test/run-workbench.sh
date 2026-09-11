@@ -158,6 +158,9 @@ case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 . "$ROOT/tests/tools/cards.sh"
 # shellcheck source=../../tools/sana2-stage.sh
 . "$ROOT/tools/sana2-stage.sh"
+
+# shellcheck source=../../tools/emu-watch.sh
+. "$ROOT/tools/emu-watch.sh"
 # shellcheck source=../../tools/emu-board.sh
 . "$ROOT/tools/emu-board.sh"
 # shellcheck source=../../tools/emu-rig-lock.sh
@@ -1005,6 +1008,14 @@ EOF
     SERIAL_PID=$!
 
     BOOT_STATUS=124
+    BOOT_STALLED=0
+
+    # This is the longest wait in the tree and it used to print nothing at all
+    # until it expired, so a guest that died at 20s and one still working were
+    # the same 720s of silence.  See tools/emu-watch.sh.
+    local stall="${AMINETXDUO_STALL_SECS:-150}"
+    emu_watch_init "$HD" "$serial"
+
     while [ "$elapsed" -lt "$timeout" ]; do
         if [ -f "$HD/.done" ]; then
             BOOT_STATUS=$(tr -dc '0-9' < "$HD/.done" | head -c 4)
@@ -1015,6 +1026,20 @@ EOF
             echo "!! amiberry exited early after ${elapsed}s" >&2
             break
         }
+
+        # Every five seconds: $HD is a whole Workbench here, and walking it is
+        # the expensive part of this loop.
+        if [ "$((elapsed % 5))" = 0 ]; then
+            if emu_watch_poll "$elapsed"; then
+                printf '    [%4ds] %s\n' "$elapsed" "$EMU_WATCH_NOTE"
+            elif emu_watch_stalled "$elapsed" "$stall"; then
+                emu_watch_say_stall "$elapsed"
+                BOOT_STALLED=1
+                BOOT_STATUS=125
+                break
+            fi
+        fi
+
         sleep 1
         elapsed=$((elapsed + 1))
     done
@@ -1033,7 +1058,12 @@ EOF
     fi
     [ -z "$LOGPIPE" ] || { rm -f "$LOGPIPE"; LOGPIPE=""; }
 
-    echo "    ($name finished after ${elapsed}s, status $BOOT_STATUS)"
+    if [ "$BOOT_STALLED" = 1 ]; then
+        echo "    ($name STALLED after ${elapsed}s of ${timeout}s, status $BOOT_STATUS)"
+    else
+        echo "    ($name finished after ${elapsed}s, status $BOOT_STATUS)"
+    fi
+    echo "    last thing the guest did, at ${EMU_WATCH_AT}s: $EMU_WATCH_NOTE"
     if [ -s "$serial" ]; then
         echo "---- serial ----"
         tail -40 "$serial"
@@ -1059,6 +1089,17 @@ startup_with() {
     else
         sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
     fi
+    # BREADCRUMBS.  DH0: is a directory on this host, so a marker written
+    # here is readable while the guest is still running, and a boot that stops
+    # says WHERE it stopped instead of only that it did.  The pair around
+    # User-Startup is the one that matters: everything the installer wrote
+    # runs between them.
+    sed -i.bak -e 's|^\(.*Execute S:User-Startup.*\)$|Echo >DH0:progress.txt "boot: entering User-Startup"\n\1\nEcho >>DH0:progress.txt "boot: left User-Startup"|' \
+        "$HD/S/Startup-Sequence" 2>/dev/null || true
+    rm -f "$HD/S/Startup-Sequence.bak"
+
+    printf '\n%s\n' "Echo >>DH0:progress.txt \"boot: reached the harness tail\"" \
+        >> "$HD/S/Startup-Sequence"
     printf '\n%s\n' "$tail_cmds" >> "$HD/S/Startup-Sequence"
     chmod 755 "$HD/S/Startup-Sequence"
     STARTUP_SUM=$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)

@@ -226,6 +226,9 @@ done
 # shellcheck source=emu-board.sh
 . "$ROOT/tools/emu-board.sh"
 
+# shellcheck source=emu-watch.sh
+. "$ROOT/tools/emu-watch.sh"
+
 board_lines() { # board mac
     emu_board_lines "$1" "$2" "$BACKEND" \
                     "${AMINETXDUO_AMIBERRY_BOARD_OPTIONS:-}" || exit 2
@@ -747,6 +750,13 @@ status=124
 elapsed=0
 EARLY_EXIT=0
 TOKEN_SEEN=0
+STALLED=0
+
+# A guest that stops doing anything costs this window, not the whole timeout,
+# and says what it last did.  See tools/emu-watch.sh.
+STALL_SECS="${AMINETXDUO_STALL_SECS:-150}"
+emu_watch_init "$HD" "$SERIAL"
+
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
     # THE PAIRING CHECK, AS SOON AS THERE IS ANYTHING TO CHECK.  The same
     # assertion is made again after the run, over the finished file, but by
@@ -796,6 +806,19 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
         EARLY_EXIT=1
         break
     fi
+
+    # Every five seconds, not every one: $HD is a whole Workbench on the
+    # release gate and walking it is the expensive part of this loop.
+    if [ "$((elapsed % 5))" = 0 ]; then
+        if emu_watch_poll "$elapsed"; then
+            printf '    [%4ds] %s\n' "$elapsed" "$EMU_WATCH_NOTE"
+        elif emu_watch_stalled "$elapsed" "$STALL_SECS"; then
+            emu_watch_say_stall "$elapsed"
+            STALLED=1
+            break
+        fi
+    fi
+
     sleep 1
     elapsed=$((elapsed + 1))
 done
@@ -918,7 +941,13 @@ if [ "$EARLY_EXIT" = "1" ]; then
 fi
 
 if [ "$status" = "124" ]; then
-    echo "==> TIMEOUT after ${TIMEOUT}s (no DH0:.done)"
+    if [ "${STALLED:-0}" = 1 ]; then
+        echo "==> STALLED after ${elapsed}s of ${TIMEOUT}s (no DH0:.done)"
+        echo "    last thing the guest did, at ${EMU_WATCH_AT}s: $EMU_WATCH_NOTE"
+    else
+        echo "==> TIMEOUT after ${TIMEOUT}s (no DH0:.done)"
+        echo "    last thing the guest did, at ${EMU_WATCH_AT}s: $EMU_WATCH_NOTE"
+    fi
     # A timeout with NOTHING on the serial port is a different fault from a
     # slow one, and the two are indistinguishable unless this says so.  The
     # machine never reached the program: the model, the CPU and the ROM
