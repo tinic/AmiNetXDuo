@@ -1762,7 +1762,11 @@
 ; assigns.  A user with a second card edits one obvious file and the managed
 ; block above it stays the installer's to rewrite.
 (if DO_STARTUP
-    (set BOOT_CMD (cat BOOT_CMD "Execute S:Network-Startup\n")))
+    (set BOOT_CMD
+      (cat BOOT_CMD
+           "If EXISTS S:Network-Startup\n"
+           "  Execute S:Network-Startup\n"
+           "EndIf\n")))
 
 ; The assign is written here ONLY when the drawer install did not already
 ; write one.  A drawer install emits `Assign AmiNetXDuo: "<D_ROOT>"` at the top
@@ -1856,7 +1860,9 @@
       (append "; configuration is still being written and the command says\n")
       (append "; what came up.  A boot that FAILS prints why either way.\n")
       (append "\n")
-      (append "C:AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n"))
+      (append "Echo >>DH0:progress.txt \"netstartup: entered\"\n")
+      (append "C:AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n")
+      (append "Echo >>DH0:progress.txt \"netstartup: left\"\n"))
   ))
 
 (if DO_STARTUP
