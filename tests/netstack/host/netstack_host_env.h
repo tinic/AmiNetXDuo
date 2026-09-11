@@ -58,6 +58,7 @@ typedef struct NetStackHostEnv
 
     UWORD   cfg_interfaces;         /* how many ami_config_load() reports    */
     UWORD   cfg_iptype;             /* AmiIpType for every one of them       */
+    ULONG   packet_releases;        /* bootstrap driver handed packets back */
     ULONG   cfg_full_loads;
     ULONG   cfg_base_loads;
     ULONG   sana2_opens;

@@ -420,6 +420,19 @@ UINT _nxe_ip_create(NX_IP *ip_ptr, CHAR *name, ULONG ip_address,
     return nsh.ip_create_status;
 }
 
+/* The bootstrap link driver returns every packet it is handed rather than
+   swallowing it, so the host tier links this now.  Nothing here owns a pool;
+   counting the calls is what a test would want to assert on. */
+UINT _nxe_packet_transmit_release(NX_PACKET **packet_ptr_ptr)
+{
+    if (packet_ptr_ptr == NULL || *packet_ptr_ptr == NULL)
+        return NX_PTR_ERROR;
+
+    nsh.packet_releases++;
+    *packet_ptr_ptr = NULL;
+    return NX_SUCCESS;
+}
+
 UINT _nxe_packet_pool_create(NX_PACKET_POOL *pool_ptr, CHAR *name,
                              ULONG payload_size, VOID *memory_ptr,
                              ULONG memory_size, UINT pool_control_block_size)

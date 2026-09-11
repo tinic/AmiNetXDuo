@@ -530,9 +530,16 @@ static VOID t_loopback_startup_failure_ownership(VOID)
     opened = bsd_lib_open(4UL, h_base);
 
     CHECK(opened == NULL, "signal-exhausted startup refused the open");
-    CHECK(h.startup_calls == 1, "signal fallback attempted startup once");
-    CHECK(h.shutdown_calls == 1,
-          "signal fallback released the failed startup reference");
+
+    /* AND IT DID NOT RUN BRING-UP HERE.  There used to be a caller-stack
+       fallback, on the argument that refusing an open helps nobody.  Bring-up
+       is 2876 bytes against a Shell's 4096 with the calling program's frames
+       already in it, and there is no MMU, so the fallback did not fail -- it
+       wrote over whatever was below and the machine broke later.  Refusing is
+       the whole point now, so the refusal is what is asserted. */
+    CHECK(h.startup_calls == 0,
+          "a signal-exhausted open does not bring up on the caller's stack");
+    CHECK(h.shutdown_calls == 0, "and takes no reference to release");
     CHECK(h_base->sb_Lib.lib_OpenCnt == 0,
           "failed startup returned the library open count");
     CHECK(h_base->sb_StackRefs == 0,
@@ -547,9 +554,9 @@ static VOID t_loopback_startup_failure_ownership(VOID)
     CHECK(opened == NULL, "process-creation failure refused the open");
     CHECK(h.create_proc_calls == 1, "the child Process was attempted once");
     CHECK(h.free_signal_calls == 1, "the unused startup signal was freed");
-    CHECK(h.startup_calls == 1, "process fallback attempted startup once");
-    CHECK(h.shutdown_calls == 1,
-          "process fallback released the failed startup reference");
+    CHECK(h.startup_calls == 0,
+          "and a process it could not create is not run here instead");
+    CHECK(h.shutdown_calls == 0, "with nothing to release");
     CHECK(h_base->sb_Lib.lib_OpenCnt == 0,
           "the second failed startup returned the open count");
 }
