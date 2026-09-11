@@ -754,7 +754,7 @@ STALLED=0
 
 # A guest that stops doing anything costs this window, not the whole timeout,
 # and says what it last did.  See tools/emu-watch.sh.
-STALL_SECS="${AMINETXDUO_STALL_SECS:-150}"
+STALL_SECS="${AMINETXDUO_STALL_SECS:-300}"
 emu_watch_init "$HD" "$SERIAL"
 
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
@@ -812,7 +812,11 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
     if [ "$((elapsed % 5))" = 0 ]; then
         if emu_watch_poll "$elapsed"; then
             printf '    [%4ds] %s\n' "$elapsed" "$EMU_WATCH_NOTE"
-        elif emu_watch_stalled "$elapsed" "$STALL_SECS"; then
+        elif emu_watch_heartbeat "$elapsed" 60; then
+            printf '    [%4ds] quiet %ss, last: %s\n' \
+                   "$elapsed" "$EMU_WATCH_QUIET" "$EMU_WATCH_NOTE"
+        fi
+        if emu_watch_stalled "$elapsed" "$STALL_SECS"; then
             emu_watch_say_stall "$elapsed"
             STALLED=1
             break

@@ -1013,7 +1013,7 @@ EOF
     # This is the longest wait in the tree and it used to print nothing at all
     # until it expired, so a guest that died at 20s and one still working were
     # the same 720s of silence.  See tools/emu-watch.sh.
-    local stall="${AMINETXDUO_STALL_SECS:-150}"
+    local stall="${AMINETXDUO_STALL_SECS:-300}"
     emu_watch_init "$HD" "$serial"
 
     while [ "$elapsed" -lt "$timeout" ]; do
@@ -1032,7 +1032,11 @@ EOF
         if [ "$((elapsed % 5))" = 0 ]; then
             if emu_watch_poll "$elapsed"; then
                 printf '    [%4ds] %s\n' "$elapsed" "$EMU_WATCH_NOTE"
-            elif emu_watch_stalled "$elapsed" "$stall"; then
+            elif emu_watch_heartbeat "$elapsed" 60; then
+            printf '    [%4ds] quiet %ss, last: %s\n' \
+                   "$elapsed" "$EMU_WATCH_QUIET" "$EMU_WATCH_NOTE"
+        fi
+        if emu_watch_stalled "$elapsed" "$stall"; then
                 emu_watch_say_stall "$elapsed"
                 BOOT_STALLED=1
                 BOOT_STATUS=125

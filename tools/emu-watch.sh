@@ -15,10 +15,17 @@
 # into the thing a stuck run needs: a running account of what the guest last
 # did, and an early stop when it stops doing anything.
 #
-# A stall is not automatically a failure -- a guest waiting 30 s for a DHCP
-# lease is quiet and healthy -- so the window has to be wider than the longest
-# legitimate silence.  What it buys is that a DEAD guest costs the window
-# rather than the timeout, and says what it last managed to do.
+# A stall is not automatically a failure -- a guest waiting on a TLS handshake
+# to a host that will never answer is quiet and healthy -- so the window has to
+# be wider than the longest legitimate silence.  300 s, because the release
+# e2e's check script fetches https from several hosts in turn and a run that
+# was working was cut at 150 s of that.  What the window buys is that a DEAD
+# guest costs it rather than the whole timeout, and says what it last did.
+#
+# The window is the BACKSTOP, not the indicator.  Quiet is reported as it
+# happens, so a long legitimate pause is visible as a pause rather than as
+# silence -- which is the thing that made a stuck boot and a working one look
+# identical in the first place.
 #
 # SPDX-License-Identifier: MIT
 
@@ -69,6 +76,16 @@ emu_watch_poll() {
 
     EMU_WATCH_QUIET=$((elapsed - EMU_WATCH_AT))
     return 1
+}
+
+# emu_watch_heartbeat <elapsed> <every>
+# True when a quiet run is due to say so again, so a pause is reported as a
+# pause.  Silence is what this whole file exists to remove.
+emu_watch_heartbeat() {
+    local elapsed="$1" every="$2" quiet=$((${1} - EMU_WATCH_AT))
+    [ "$quiet" -ge "$every" ] || return 1
+    [ "$((quiet % every))" = 0 ] || return 1
+    return 0
 }
 
 # emu_watch_stalled <elapsed> <window>
