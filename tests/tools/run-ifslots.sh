@@ -158,7 +158,6 @@ round_named() {
         echo "SYS:AddNetInterface zeth4"
         echo "SYS:netstat -i"
         echo "SYS:ping 10.0.2.2 -c 2 -t 20"
-        echo "SYS:netstat -h"
         echo "SYS:AddNetInterface aeth0"
         echo "SYS:AddNetInterface beth1"
         echo "SYS:AddNetInterface meth2"
@@ -167,6 +166,13 @@ round_named() {
         echo "SYS:RemoveNetInterface aeth0"
         echo "SYS:AddNetInterface neth3"
         echo "SYS:RemoveNetInterface neth3"
+        # Both samples have to see the SAME interfaces attached, or the
+        # difference is the cost of the ones that joined in between and not a
+        # leak.  It used to be taken right after zeth4 came up, which was
+        # sound only while opening the library attached the whole drawer for
+        # it; with interfaces attached on request it read one interface before
+        # and three after, and called the two extra +8.
+        echo "SYS:netstat -h"
         for i in 1 2 3 4 5; do
             echo "SYS:AddNetInterface aeth0"
             echo "SYS:RemoveNetInterface aeth0"
