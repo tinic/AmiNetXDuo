@@ -1766,7 +1766,8 @@
       (cat BOOT_CMD
            "If EXISTS S:Network-Startup\n"
            "  Execute S:Network-Startup\n"
-           "EndIf\n")))
+           "EndIf\n"
+           "Echo >>DH0:progress.txt \"userstartup: past EndIf\"\n")))
 
 ; The assign is written here ONLY when the drawer install did not already
 ; write one.  A drawer install emits `Assign AmiNetXDuo: "<D_ROOT>"` at the top
@@ -1869,6 +1870,9 @@
     (set P_BOOT
       (cat "Adding AmiNetXDuo to S:User-Startup, so that the network starts "
            "when the Amiga boots.")))
+
+(set BOOT_CMD
+  (cat BOOT_CMD "Echo >>DH0:progress.txt \"userstartup: end of block\"\n"))
 
 (if DO_BOOT
     (startup APPNAME
