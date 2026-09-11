@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **The installer no longer moves a library aside before it has the
+  replacement.** `bsdsocket.library`, `usergroup.library`, `tls.library` and
+  `anxnet.device` are copied in under a `.new` name first and swapped after, so
+  a copy that fails or is declined leaves the installed file in place. The old
+  order left `LIBS:` with no `bsdsocket.library` at all
+
 - `AddNetInterface` takes a path as a path. Search order is now the file as
   given, then `DEVS:NetInterfaces`, then `SYS:Storage/NetInterfaces` — the
   Roadshow and AmiTCP_NG order. `AddNetInterface Work:mycfg` previously read

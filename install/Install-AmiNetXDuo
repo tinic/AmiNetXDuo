@@ -836,6 +836,12 @@
 (set D_TLS_OLD (cat D_TLS ".old"))
 (set D_ANX_OLD (cat D_ANX ".old"))
 
+; The staging names.  See "STAGED, THEN SWAPPED" in section 5.
+(set D_BSD_NEW (cat D_BSD ".new"))
+(set D_UG_NEW  (cat D_UG  ".new"))
+(set D_TLS_NEW (cat D_TLS ".new"))
+(set D_ANX_NEW (cat D_ANX ".new"))
+
 (set OLD_BSD (if (exists D_BSD (noreq)) 1 0))
 (set OLD_UG  (if (exists D_UG  (noreq)) 1 0))
 (set OLD_TLS (if (exists D_TLS (noreq)) 1 0))
@@ -1221,49 +1227,98 @@
        "running.  Reboot, then run this installer again before anything "
        "else.\n"))
 
-(if OLD_BSD
-  (
-    (if (exists D_BSD_OLD (noreq))
-        (delete D_BSD_OLD
-                (prompt "Removing the previous bsdsocket.library.old")
-                (help @copyfiles-help)
-                (optional "force" "nofail")))
-    (rename D_BSD D_BSD_OLD
-            (prompt "Renaming the old bsdsocket.library out of the way")
-            (help H_REPLACELIB))
-  ))
-
-(if OLD_UG
-  (
-    (if (exists D_UG_OLD (noreq))
-        (delete D_UG_OLD
-                (prompt "Removing the previous usergroup.library.old")
-                (help @copyfiles-help)
-                (optional "force" "nofail")))
-    (rename D_UG D_UG_OLD
-            (prompt "Renaming the old usergroup.library out of the way")
-            (help H_REPLACELIB))
-  ))
+; STAGED, THEN SWAPPED.
+;
+; A library that is open cannot be written over, so the one that is there has
+; to be moved aside -- but moving it aside FIRST and copying afterwards leaves
+; a window with no bsdsocket.library in LIBS: at all, and anything that ends
+; the copy inside that window leaves the machine without the library its
+; network IS: a full disk, a media error, or the user answering no to the
+; copy's own (confirm) requester.  It is not a disk-full-only hazard; a
+; declined requester is one click.
+;
+; So the new file is copied in beside the live one under a .new name, and only
+; then is the swap made.  The space and the user's decision are both committed
+; before anything live is touched, and the swap itself is renames: no disk
+; space, nothing that can half-finish.  If the copy did not happen, no .new
+; exists, the swap is skipped and the library that is there is the library
+; that stays.
+;
+; copylib became copyfiles because the version comparison copylib does was
+; already doing nothing here: the old file had been renamed away before it
+; ran, so there was never a destination to compare against.
 
 (working "Installing the libraries")
 
-(copylib
+; A .new left behind by a run that was stopped between the copy and the swap.
+(if (exists D_BSD_NEW (noreq))
+    (delete D_BSD_NEW
+            (prompt "Removing a leftover bsdsocket.library.new")
+            (help @copyfiles-help)
+            (optional "force" "nofail")))
+(if (exists D_UG_NEW (noreq))
+    (delete D_UG_NEW
+            (prompt "Removing a leftover usergroup.library.new")
+            (help @copyfiles-help)
+            (optional "force" "nofail")))
+
+(copyfiles
   (prompt (cat "Installing bsdsocket.library into LIBS:\n\n"
                "One build for every processor.  It picks the code for this "
                "processor when it opens."))
   (help   @copylib-help)
   (source (tackon S_LIBS "bsdsocket.library"))
   (dest   D_LIBS)
+  (newname "bsdsocket.library.new")
   (confirm)
   (optional "force"))
 
-(copylib
+(copyfiles
   (prompt "Installing usergroup.library into LIBS:")
   (help   @copylib-help)
   (source (tackon S_LIBS "usergroup.library"))
   (dest   D_LIBS)
+  (newname "usergroup.library.new")
   (confirm)
   (optional "force"))
+
+; The swap.  Guarded on the staged file: a copy that failed or was declined
+; leaves the installed library alone.
+(if (exists D_BSD_NEW (noreq))
+  (
+    (if OLD_BSD
+      (
+        (if (exists D_BSD_OLD (noreq))
+            (delete D_BSD_OLD
+                    (prompt "Removing the previous bsdsocket.library.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (rename D_BSD D_BSD_OLD
+                (prompt "Renaming the old bsdsocket.library out of the way")
+                (help H_REPLACELIB))
+      ))
+    (rename D_BSD_NEW D_BSD
+            (prompt "Putting the new bsdsocket.library in place")
+            (help H_REPLACELIB))
+  ))
+
+(if (exists D_UG_NEW (noreq))
+  (
+    (if OLD_UG
+      (
+        (if (exists D_UG_OLD (noreq))
+            (delete D_UG_OLD
+                    (prompt "Removing the previous usergroup.library.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (rename D_UG D_UG_OLD
+                (prompt "Renaming the old usergroup.library out of the way")
+                (help H_REPLACELIB))
+      ))
+    (rename D_UG_NEW D_UG
+            (prompt "Putting the new usergroup.library in place")
+            (help H_REPLACELIB))
+  ))
 
 ; --- anxnet.device -------------------------------------------------------
 ;
@@ -1296,17 +1351,14 @@
               "drivers live in")
       (help   @makedir-help))
 
-    (if (exists D_ANX (noreq))
-      (
-        (if (exists D_ANX_OLD (noreq))
-            (delete D_ANX_OLD
-                    (prompt "Removing the previous anxnet.device.old")
-                    (help @copyfiles-help)
-                    (optional "force" "nofail")))
-        (rename D_ANX D_ANX_OLD
-                (prompt "Renaming the old anxnet.device out of the way")
-                (help H_ANXNET))
-      ))
+    ; Staged, then swapped, for the reason given at the libraries above: a
+    ; driver that is open cannot be written over, and moving it aside before
+    ; the copy leaves a window with no anxnet.device at all.
+    (if (exists D_ANX_NEW (noreq))
+        (delete D_ANX_NEW
+                (prompt "Removing a leftover anxnet.device.new")
+                (help @copyfiles-help)
+                (optional "force" "nofail")))
 
     (copyfiles
       (prompt (cat "Installing anxnet.device into DEVS:Networks\n\n"
@@ -1317,7 +1369,26 @@
       (help   H_ANXNET)
       (source S_ANXNET)
       (dest   (tackon D_DEVS "Networks"))
+      (newname "anxnet.device.new")
       (optional "force"))
+
+    (if (exists D_ANX_NEW (noreq))
+      (
+        (if (exists D_ANX (noreq))
+          (
+            (if (exists D_ANX_OLD (noreq))
+                (delete D_ANX_OLD
+                        (prompt "Removing the previous anxnet.device.old")
+                        (help @copyfiles-help)
+                        (optional "force" "nofail")))
+            (rename D_ANX D_ANX_OLD
+                    (prompt "Renaming the old anxnet.device out of the way")
+                    (help H_ANXNET))
+          ))
+        (rename D_ANX_NEW D_ANX
+                (prompt "Putting the new anxnet.device in place")
+                (help H_ANXNET))
+      ))
   ))
 
 ; --- tls.library, if this archive has one --------------------------------
@@ -1329,25 +1400,22 @@
 
 (if (exists (tackon S_LIBS "tls.library") (noreq))
   (
-    ; Replace tls.library the same way bsdsocket.library is -- rename the old
-    ; one aside first -- rather than leaving it to copylib's version check.
-    ; copylib copies only when the source romtag is NEWER, so an old
-    ; tls.library whose version never moved would be left in place beside a
+    ; Replace tls.library the same way bsdsocket.library is, and for the same
+    ; two reasons.  copylib copies only when the source romtag is NEWER, so an
+    ; old tls.library whose version never moved would be left in place beside a
     ; freshly installed bsdsocket.library: exactly the mismatched pair the note
     ; above rules out, and how a stale CBC-only TLS survived a stack upgrade.
-    ; Renaming aside also lets the copy succeed when the library is held open.
-    (if OLD_TLS
-      (
-        (if (exists D_TLS_OLD (noreq))
-            (delete D_TLS_OLD
-                    (prompt "Removing the previous tls.library.old")
-                    (help @copyfiles-help)
-                    (optional "force" "nofail")))
-        (rename D_TLS D_TLS_OLD
-                (prompt "Renaming the old tls.library out of the way")
-                (help H_REPLACELIB))
-      ))
-    (copylib
+    ; Moving the old one aside also lets the copy succeed while the library is
+    ; held open -- but it happens AFTER the new file is staged, not before.
+
+    ; Staged, then swapped, for the reason given at the libraries above.
+    (if (exists D_TLS_NEW (noreq))
+        (delete D_TLS_NEW
+                (prompt "Removing a leftover tls.library.new")
+                (help @copyfiles-help)
+                (optional "force" "nofail")))
+
+    (copyfiles
       (prompt (cat "Installing tls.library into LIBS:\n\n"
                    "This library makes encrypted (https:) connections "
                    "possible.  Only a program that asks for it opens it, so "
@@ -1355,8 +1423,27 @@
       (help   @copylib-help)
       (source (tackon S_LIBS "tls.library"))
       (dest   D_LIBS)
+      (newname "tls.library.new")
       (confirm)
       (optional "force"))
+
+    (if (exists D_TLS_NEW (noreq))
+      (
+        (if OLD_TLS
+          (
+            (if (exists D_TLS_OLD (noreq))
+                (delete D_TLS_OLD
+                        (prompt "Removing the previous tls.library.old")
+                        (help @copyfiles-help)
+                        (optional "force" "nofail")))
+            (rename D_TLS D_TLS_OLD
+                    (prompt "Renaming the old tls.library out of the way")
+                    (help H_REPLACELIB))
+          ))
+        (rename D_TLS_NEW D_TLS
+                (prompt "Putting the new tls.library in place")
+                (help H_REPLACELIB))
+      ))
   ))
 
 ; THE ONLY WAY TO END UP WITHOUT ENCRYPTION IS TO HAVE ASKED FOR IT.  It used

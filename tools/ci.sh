@@ -392,6 +392,17 @@ stage_host() {
         return 1
     fi
 
+    # The installer must not move a live library aside before it has the new
+    # one on the disk.  Text order, so it costs nothing and runs everywhere.
+    if tools/check-installer-transaction.sh > "$BUILD/installer-txn.log" 2>&1; then
+        note "$(sed -n 's/^installer_txn=/installer transaction: /p' \
+              "$BUILD/installer-txn.log" | head -1)"
+    else
+        cat "$BUILD/installer-txn.log"
+        fail "tools/check-installer-transaction.sh"
+        return 1
+    fi
+
     # The SocketBaseTagList() surface, counted rather than claimed: three of
     # Roadshow's 52 codes are unanswered, and docs/GAPS.md carried the wrong
     # arithmetic for both sides until this was written.
