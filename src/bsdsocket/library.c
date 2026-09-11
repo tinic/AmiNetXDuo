@@ -674,49 +674,62 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
 
 typedef struct
 {
-    struct Task *nb_Parent;
-    ULONG        nb_SigMask;
-    LONG         nb_Result;
+    struct Task       *nb_Parent;
+    ULONG              nb_SigMask;
+    LONG               nb_Result;
+    /* NULL is "bring the stack up".  Anything else is the interface to
+       attach, which needs the same stack and for the same reason. */
+    const AmiIfConfig *nb_Cfg;
+    UWORD             *nb_IndexOut;
 } BsdNetBoot;
 
 static BsdNetBoot *bsd_net_boot;
-
-static LONG bsd_netstack_start_owned(VOID)
-{
-    LONG result = netstack_startup_loopback();
-
-    if (result != AMI_NET_OK)
-        netstack_shutdown();
-
-    return result;
-}
 
 static VOID bsd_netstack_boot_main(VOID)
 {
     BsdNetBoot *b = bsd_net_boot;
 
-    b->nb_Result = bsd_netstack_start_owned();
+    if (b->nb_Cfg != NULL)
+    {
+        b->nb_Result = netstack_interface_start(b->nb_Cfg, b->nb_IndexOut);
+    }
+    else
+    {
+        b->nb_Result = netstack_startup_loopback();
+        if (b->nb_Result != AMI_NET_OK)
+            netstack_shutdown();
+    }
 
     Signal(b->nb_Parent, b->nb_SigMask);
 }
 
-static LONG bsd_netstack_bringup(VOID)
+/*
+ * Run one netstack job on a stack this library owns.
+ *
+ * A Shell hands a command 4096 bytes and there is no MMU, so a path that wants
+ * more does not trap -- it writes over whatever is below and the machine fails
+ * somewhere else, later, about half the time.  Two paths want more:
+ *
+ *   netstack_startup_loopback()   2224 bytes
+ *   netstack_interface_start()    3484 bytes   (tools/stack-depth.py)
+ *
+ * The second is what AddNetInterface enters through NETCTRL_INTERFACE_ADD, and
+ * before 0.27 it was never the path that did the work from a Shell: opening
+ * the library had already attached the drawer, so the add found the interface
+ * up and returned EEXIST from the shallow end.  Now it always does the work,
+ * and 3484 of a command's 4096 bytes leaves nothing for the command itself.
+ */
+/* The tags both launchers use.  BSD_STARTUP_STACK is the whole point of
+   them: a Shell hands a command 4096 bytes and there is no MMU, so a path
+   that wants more writes over whatever is below instead of trapping. */
+static struct Process *bsd_netstack_spawn(BsdNetBoot *boot, BYTE sig)
 {
-    BsdNetBoot      boot;
-    struct TagItem  tags[5];
-    struct Process *proc;
-    BYTE            sig;
+    struct TagItem tags[5];
 
-    /* A private signal, never SIGF_SINGLE: the ThreadX port uses SIGF_SINGLE as
-       its thread run-signal, so sharing it wakes this Wait() early. */
-    sig = (BYTE)AllocSignal(-1);
-    if (sig < 0)
-        return bsd_netstack_start_owned(); /* caller-stack fallback */
-
-    boot.nb_Parent  = FindTask(NULL);
-    boot.nb_SigMask = 1UL << sig;
-    boot.nb_Result  = AMI_NET_ERR_KERNEL;
-    bsd_net_boot    = &boot;
+    boot->nb_Parent  = FindTask(NULL);
+    boot->nb_SigMask = 1UL << sig;
+    boot->nb_Result  = AMI_NET_ERR_KERNEL;
+    bsd_net_boot     = boot;
 
     tags[0].ti_Tag  = NP_Entry;     tags[0].ti_Data = (ULONG)bsd_netstack_boot_main;
     tags[1].ti_Tag  = NP_Name;      tags[1].ti_Data = (ULONG)"bsdsocket stack";
@@ -724,12 +737,83 @@ static LONG bsd_netstack_bringup(VOID)
     tags[3].ti_Tag  = NP_Cli;       tags[3].ti_Data = (ULONG)FALSE;
     tags[4].ti_Tag  = TAG_DONE;     tags[4].ti_Data = 0;
 
-    proc = CreateNewProc(tags);
-    if (proc == NULL)
+    return CreateNewProc(tags);
+}
+
+/*
+ * Bring the stack up.  NO caller-stack fallback, for the same reason the
+ * attach has none: ami_ns_bring_up() alone is 948 bytes and the path through
+ * it measured 2876 against a Shell's 4096 with the calling program's frames
+ * already in it -- and tools/check-stack-frames.sh notes the static figure
+ * runs about 800 light, so the real number has no margin at all.
+ *
+ * It used to run here when no signal or process could be had, on the argument
+ * that refusing the open helps nobody.  Corrupting the caller helps less.
+ * AllocSignal() fails only with all 32 signals spoken for and CreateNewProc()
+ * only out of memory; an open that says so is a diagnosable machine.
+ */
+static LONG bsd_netstack_bringup(VOID)
+{
+    BsdNetBoot boot;
+    BYTE       sig;
+
+    boot.nb_Cfg      = NULL;
+    boot.nb_IndexOut = NULL;
+
+    /* A private signal, never SIGF_SINGLE: the ThreadX port uses SIGF_SINGLE as
+       its thread run-signal, so sharing it wakes this Wait() early. */
+    sig = (BYTE)AllocSignal(-1);
+    if (sig < 0)
+    {
+        AMI_ERROR("bsdsocket: no signal for the startup task");
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    if (bsd_netstack_spawn(&boot, sig) == NULL)
     {
         bsd_net_boot = NULL;
         FreeSignal(sig);
-        return bsd_netstack_start_owned();
+        AMI_ERROR("bsdsocket: no task for the startup");
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    Wait(boot.nb_SigMask);
+    bsd_net_boot = NULL;
+    FreeSignal(sig);
+
+    return boot.nb_Result;
+}
+
+/*
+ * Attach one interface.  3484 bytes, which is what AddNetInterface enters
+ * through NETCTRL_INTERFACE_ADD, and it has NO caller-stack fallback on
+ * purpose: 3484 of a command's 4096 is the corruption these launchers exist
+ * to avoid, and a command that says why it failed beats a machine that
+ * misbehaves later.  Before 0.27 this path was never the one that did the
+ * work from a Shell -- opening the library had already attached the drawer,
+ * so the add found the interface up and returned EEXIST from the shallow end.
+ */
+static LONG bsd_netstack_attach(const AmiIfConfig *cfg, UWORD *index_out)
+{
+    BsdNetBoot boot;
+    BYTE       sig;
+
+    boot.nb_Cfg      = cfg;
+    boot.nb_IndexOut = index_out;
+
+    sig = (BYTE)AllocSignal(-1);
+    if (sig < 0)
+    {
+        AMI_ERROR("bsdsocket: no signal for the interface task");
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    if (bsd_netstack_spawn(&boot, sig) == NULL)
+    {
+        bsd_net_boot = NULL;
+        FreeSignal(sig);
+        AMI_ERROR("bsdsocket: no task for the interface attach");
+        return AMI_NET_ERR_KERNEL;
     }
 
     Wait(boot.nb_SigMask);
@@ -750,9 +834,10 @@ LONG bsd_stack_interface_start(struct AmiSocketBase *base,
     if (master->sb_Master != NULL)
         master = master->sb_Master;
 
-    /* Serialise interface transactions with opens and closes. */
+    /* Serialise interface transactions with opens and closes.  The lock also
+       keeps bsd_net_boot to one job at a time. */
     ObtainSemaphore(&master->sb_Lock);
-    rc = netstack_interface_start(cfg, index_out);
+    rc = bsd_netstack_attach(cfg, index_out);
     ReleaseSemaphore(&master->sb_Lock);
 
     return rc;

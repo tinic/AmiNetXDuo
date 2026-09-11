@@ -46,7 +46,21 @@ LADDER_EDGES=(
 # the receive path reaches.  It stops being harmless the moment anything moves
 # work on to the reader, and then it fails a budget for a call that does not
 # exist.
-NOT_A_CALL=( --cut ami_sana2_rx_thread )
+# bsd_netstack_boot_main is a PROCESS, not a call.  bsd_netstack_bringup() and
+# bsd_netstack_attach() name it in a CreateNewProc tag and then Wait(), so the
+# assembly has an edge where the runtime has a 64 KB stack of its own
+# (BSD_STARTUP_STACK).  Measuring through it charges the caller for work that
+# never touches the caller's stack -- and hides the thing worth measuring,
+# which is how much of a Shell's 4096 the vector itself takes before it hands
+# the job over.
+# tcp_ctrl_main and tcp_session_main are PROCESSES too, launched with their
+# own NP_StackSize (TCP_CTRL_STACK, TCP_SESSION_STACK in
+# src/bsdsocket/tcp_handler.c).  bsd_lib_open() starts the handler and returns;
+# measuring through them charged the opener 908 bytes of tcp_session_open()
+# that its stack never sees.  They want budgets of their own, against the
+# stacks they are actually given -- not against a Shell's.
+NOT_A_CALL=( --cut ami_sana2_rx_thread --cut bsd_netstack_boot_main
+             --cut tcp_ctrl_main --cut tcp_session_main )
 
 # The reader's own edges, and deliberately NOT in LADDER_EDGES.  NetX Duo
 # dispatches the transport receivers and the link driver through function
@@ -97,7 +111,19 @@ RX_EDGES=(
 # stack calls them and none is a symbol on this path.  Runtime probes cover
 # three drivers, but cannot establish a smaller safe floor for every external
 # driver.
+# THE VECTORS A SHELL COMMAND ENTERS THROUGH had no row at all until 0.27, and
+# that is how NETCTRL_INTERFACE_ADD came to want 3484 bytes of a Shell's 4096:
+# every root here was a resolver, a reader or a TLS path, so the gate said
+# clean while AddNetInterface corrupted the stack under it about half the time.
+# A budget that does not cover the way in is not a budget for the way in.
+#
+# bsd_lib_open carries the bring-up fallback, which runs on the caller's stack
+# when no signal or process can be had -- 2212 measured.  bsd_NetStackControl
+# is 1868 now that the attach runs on the library's own stack; the margin is
+# the same eighth of a Shell stack the resolver rows keep.
 BUDGETS=(
+    "bsdsocket:bsd_lib_open:2432"
+    "bsdsocket:bsd_NetStackControl:2432"
     "bsdsocket:ami_sana2_rx_thread:3072"
     "bsdsocket:bsd_getaddrinfo:2432"
     "bsdsocket:bsd_getnameinfo:2432"
