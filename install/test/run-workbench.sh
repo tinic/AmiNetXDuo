@@ -2166,7 +2166,10 @@ Echo >DH0:.done "$RC"' nouserstartup
 
     AFTER_HTTPD=$(startup_count 'httpd')
     AFTER_ASSIGN=$(startup_count 'Assign AmiNetXDuo:')
-    AFTER_IFACE=$(startup_count 'AddNetInterface')
+    # The boot line is now `Execute S:Network-Startup'; the AddNetInterface
+    # it runs lives in that file.  Counting AddNetInterface here would pass on
+    # zero and report a machine that never brings its card up.
+    AFTER_IFACE=$(startup_count 'Execute S:Network-Startup')
     AFTER_FOREIGN=no
     foreign_intact && AFTER_FOREIGN=yes
 
@@ -2200,10 +2203,26 @@ Echo >DH0:.done "$RC"' nouserstartup
     fi
     if [ "$AFTER_IFACE" != "1" ]; then
         printf '  %-34s %s\n' \
-               "AddNetInterface still there, once" "$AFTER_IFACE"
+               "Network-Startup still run, once" "$AFTER_IFACE"
         bad=1
     else
-        printf '  %-34s yes\n' "AddNetInterface still there, once"
+        printf '  %-34s yes\n' "Network-Startup still run, once"
+    fi
+
+    # And the file it runs still names an interface.  Two files now carry what
+    # one used to, so both have to be looked at or the half that moved stops
+    # being checked.
+    NS_FILE=$(amiga_path S/Network-Startup 2>/dev/null || true)
+    NS_IFACE=0
+    [ -n "$NS_FILE" ] && [ -f "$NS_FILE" ] &&
+        NS_IFACE=$(grep -c '^[^;]*AddNetInterface' "$NS_FILE" || true)
+    echo "network_startup_addnetinterface_lines=$NS_IFACE"
+    if [ "${NS_IFACE:-0}" != "1" ]; then
+        printf '  %-34s %s\n' \
+               "S:Network-Startup names one iface" "$NS_IFACE"
+        bad=1
+    else
+        printf '  %-34s yes\n' "S:Network-Startup names one iface"
     fi
     if [ "$AFTER_FOREIGN" != "yes" ]; then
         printf '  %-34s NO\n' "somebody else's lines intact"

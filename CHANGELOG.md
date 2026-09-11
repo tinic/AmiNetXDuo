@@ -24,10 +24,16 @@ card from inside the library.
   four, whether or not anyone had asked for them. A PiStorm with `genet.device`
   and `wifipi.device` defined brought both up, and the unassociated card took
   an AutoIP address nobody wanted
+- The network starts from **`S:Network-Startup`**, the file Roadshow and
+  AmiTCP_NG both use. `S:User-Startup` holds one line: `Execute
+  S:Network-Startup`. Edit `S:Network-Startup` to add a card, to start every
+  definition with `AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET`, or to
+  comment the line out and stop the network starting at boot. An existing
+  `S:Network-Startup` is renamed to `S:Network-Startup.old` first
 - If the Installer wrote your boot script and you chose networking at boot, it
   already names an interface and nothing changes. If you declined, or added a
-  second interface file by hand, add a line for each interface you want:
-  `C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET`
+  second interface file by hand, put a line in `S:Network-Startup` for each
+  interface you want: `C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET`
 - Opening the socket library creates a complete loopback-only stack, as
   Roadshow and AmiTCP_NG do, but opens no network driver. Local sockets on
   `127.0.0.1` work immediately, as does `::1` in the IPv6 build.

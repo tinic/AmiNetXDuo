@@ -250,7 +250,8 @@ for stale in C/httpd C/ssh C/AddNetInterface Libs/bsdsocket.library \
         exit 2; }
 done
 if [ -f "$HD/S/User-Startup" ] &&
-   grep -qi 'AddNetInterface\|BEGIN AmiNetXDuo' "$HD/S/User-Startup"; then
+   grep -qi 'AddNetInterface\|Network-Startup\|BEGIN AmiNetXDuo' \
+        "$HD/S/User-Startup"; then
     say error "the snapshot's S/User-Startup already names AmiNetXDuo"
     exit 2
 fi
@@ -561,10 +562,23 @@ check_written S/User-Startup
 IFACE_LINES=0
 USTART=$(amiga_path S/User-Startup || true)
 [ -n "$USTART" ] && [ -f "$USTART" ] &&
-    IFACE_LINES=$(grep -c 'AddNetInterface' "$USTART" || true)
-say startup_addnetinterface_lines "${IFACE_LINES:-0}"
+    IFACE_LINES=$(grep -c 'Execute S:Network-Startup' "$USTART" || true)
+say startup_network_startup_lines "${IFACE_LINES:-0}"
 [ "${IFACE_LINES:-0}" = "1" ] || {
-    say install_missing_file "S/User-Startup: AddNetInterface"
+    say install_missing_file "S/User-Startup: Execute S:Network-Startup"
+    MISSING=$((MISSING + 1)); }
+
+# The interface is named in S:Network-Startup now, not in User-Startup.  Both
+# halves are checked: counting only the Execute line would pass on a script
+# that starts nothing, which is the same silent no-network this check exists
+# to catch.
+NS_LINES=0
+NSTART=$(amiga_path S/Network-Startup || true)
+[ -n "$NSTART" ] && [ -f "$NSTART" ] &&
+    NS_LINES=$(grep -c '^[^;]*AddNetInterface' "$NSTART" || true)
+say network_startup_addnetinterface_lines "${NS_LINES:-0}"
+[ "${NS_LINES:-0}" = "1" ] || {
+    say install_missing_file "S/Network-Startup: AddNetInterface"
     MISSING=$((MISSING + 1)); }
 
 say install_files "$CHECKED"

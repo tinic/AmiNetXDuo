@@ -237,11 +237,16 @@
 (set H_STARTUP
   (cat "S:User-Startup is the file that the Amiga runs at every boot.  "
        "This line in it starts the network automatically:"
-       "\n\n\tC:AddNetInterface DEVS:NetInterfaces/<interface> QUIET\n\n"
+       "\n\n\tExecute S:Network-Startup\n\n"
+       "S:Network-Startup is written here too, and is the file to edit "
+       "afterwards: it names the interface chosen on the last page, and says "
+       "how to add a second card or start every definition in the drawer the "
+       "way Roadshow does.  An S:Network-Startup already on this disk is "
+       "renamed to S:Network-Startup.old rather than overwritten.\n\n"
        "If the answer is no, no physical network interface starts by itself.  "
-       "Type that command by hand when you want one.  A network program which "
-       "opens bsdsocket.library gets the built-in loopback, but no card is "
-       "opened and there is no route to an external network.\n\n"
+       "Type AddNetInterface by hand when you want one.  A network program "
+       "which opens bsdsocket.library gets the built-in loopback, but no card "
+       "is opened and there is no route to an external network.\n\n"
        "For an installation in its own drawer, the managed block first runs "
        "ActivateAmiNetXDuo.  That command puts the drawer's LIBS:, C: and "
        "DEVS: entries first while preserving every directory already in "
@@ -1752,10 +1757,12 @@
 
 (if DO_STARTUP (set DO_BOOT 1))
 
+; The network starts from a file of its own, the way Roadshow starts it from
+; S:Network-Startup, rather than from a line buried in User-Startup among the
+; assigns.  A user with a second card edits one obvious file and the managed
+; block above it stays the installer's to rewrite.
 (if DO_STARTUP
-    (set BOOT_CMD
-      (cat BOOT_CMD
-           ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF))))
+    (set BOOT_CMD (cat BOOT_CMD "Execute S:Network-Startup\n")))
 
 ; The assign is written here ONLY when the drawer install did not already
 ; write one.  A drawer install emits `Assign AmiNetXDuo: "<D_ROOT>"` at the top
@@ -1786,6 +1793,71 @@
 (set P_BOOT
   (cat "Adding AmiNetXDuo's drawer selector to S:User-Startup.  Its files "
        "are selected at boot, but the network does not start by itself."))
+
+; --------------------------------------------------------------------------
+; S:Network-Startup
+;
+; Roadshow ships this file with a wildcard in it and AmiTCP_NG ships the same
+; line, so a user arriving from either already knows where the network starts.
+; Ours names the ONE interface that was chosen here, because a definition in
+; DEVS:NetInterfaces is not a request to open that card -- which is the whole
+; of the 0.27 change.  The wildcard is one edit away and the file says so.
+;
+; An existing file is somebody's configuration, very possibly the Roadshow one
+; this installation is replacing, and it is renamed rather than overwritten.
+; Same .old convention as the libraries above.
+(if DO_STARTUP
+  (
+    (if (exists "S:Network-Startup" (noreq))
+      (
+        (if (exists "S:Network-Startup.old" (noreq))
+            (delete "S:Network-Startup.old"
+                    (prompt "Removing the previous S:Network-Startup.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (rename "S:Network-Startup" "S:Network-Startup.old"
+                (prompt "Renaming the old S:Network-Startup out of the way")
+                (help "S:Network-Startup already exists -- Roadshow keeps its "
+                      "own there, and so may an earlier AmiNetXDuo.  It is "
+                      "renamed to S:Network-Startup.old rather than being "
+                      "overwritten, so nothing in it is lost.  To go back to "
+                      "it, rename it over the new one from a Shell."))
+      ))
+
+    (textfile
+      (prompt "Writing S:Network-Startup")
+      (help   "This is the file that starts the network at boot.  "
+              "S:User-Startup does nothing but Execute it, so this is the one "
+              "file to edit when the machine gains a card, loses one, or "
+              "should stop bringing the network up by itself.")
+      (dest   "S:Network-Startup")
+      (append "; S:Network-Startup -- written by the AmiNetXDuo installer.\n")
+      (append ";\n")
+      (append "; This file starts the network.  S:User-Startup runs it and\n")
+      (append "; nothing else, so this is the file to edit.\n")
+      (append ";\n")
+      (append "; A file in DEVS:NetInterfaces DESCRIBES an interface.  It\n")
+      (append "; does not start it.  The line below starts the one chosen\n")
+      (append "; when AmiNetXDuo was installed.\n")
+      (append ";\n")
+      (append "; To start another card as well, add a line for it:\n")
+      (append ";\n")
+      (append ";     AddNetInterface DEVS:NetInterfaces/eth1 QUIET\n")
+      (append ";\n")
+      (append "; To start EVERY definition in the drawer, which is what\n")
+      (append "; Roadshow does, use the pattern instead of a name:\n")
+      (append ";\n")
+      (append ";     AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET\n")
+      (append ";\n")
+      (append "; To stop the network starting at boot, comment the line out\n")
+      (append "; with a leading semicolon.  Nothing else has to change.\n")
+      (append ";\n")
+      (append "; QUIET keeps a boot that works silent.  Remove it while the\n")
+      (append "; configuration is still being written and the command says\n")
+      (append "; what came up.  A boot that FAILS prints why either way.\n")
+      (append "\n")
+      (append "C:AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n"))
+  ))
 
 (if DO_STARTUP
     (set P_BOOT

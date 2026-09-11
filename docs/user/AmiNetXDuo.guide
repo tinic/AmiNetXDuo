@@ -782,9 +782,13 @@
   The physical network comes up when an interface is explicitly requested.
   Opening bsdsocket.library by itself creates only the built-in loopback.
 
-  @{b}At boot, from S:User-Startup@{ub}
+  @{b}At boot, from S:Network-Startup@{ub}
 
-  Add this line to S:User-Startup:
+  The Installer writes S:Network-Startup and has S:User-Startup run it:
+
+    Execute S:Network-Startup
+
+  S:Network-Startup is the file to edit. It holds one line per interface:
 
     C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 
@@ -794,6 +798,17 @@
   what came up, so a boot that works prints nothing and a boot that
   fails still prints why. To see the report of a start that works,
   omit QUIET while the configuration is still being written.
+
+  Add a line to start a second card. To start every definition in
+  DEVS:NetInterfaces, which is what Roadshow's own S:Network-Startup does,
+  use the pattern in place of a name:
+
+    C:AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET
+
+  To stop the network coming up at boot, comment the line out with a
+  leading semicolon; nothing else has to change. An S:Network-Startup
+  already on the disk when AmiNetXDuo is installed -- Roadshow keeps its
+  own there -- is renamed to S:Network-Startup.old rather than overwritten.
 
   Merely opening bsdsocket.library creates the complete stack with its
   built-in loopback, 127.0.0.1 and, in the full IPv6 build, ::1, but starts
