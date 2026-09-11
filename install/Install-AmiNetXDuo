@@ -1757,17 +1757,6 @@
 
 (if DO_STARTUP (set DO_BOOT 1))
 
-; The network starts from a file of its own, the way Roadshow starts it from
-; S:Network-Startup, rather than from a line buried in User-Startup among the
-; assigns.  A user with a second card edits one obvious file and the managed
-; block above it stays the installer's to rewrite.
-(if DO_STARTUP
-    (set BOOT_CMD
-      (cat BOOT_CMD
-           "If EXISTS S:Network-Startup\n"
-           "  Execute S:Network-Startup\n"
-           "EndIf\n"
-           "Echo >>DH0:progress.txt \"userstartup: past EndIf\"\n")))
 
 ; The assign is written here ONLY when the drawer install did not already
 ; write one.  A drawer install emits `Assign AmiNetXDuo: "<D_ROOT>"` at the top
@@ -1791,6 +1780,28 @@
         (cat BOOT_CMD
              ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T\n" HTTPD_ROOT HTTPD_PORT)))
     ))
+
+; THE NETWORK GOES LAST, AND THE ORDER IS LOAD-BEARING.
+;
+; Roadshow starts the network from S:Network-Startup and so do we, but a script
+; reached through a nested Execute -- Startup-Sequence executes User-Startup,
+; which executes this one -- leaves the Shell unable to complete a later `Run'
+; in the same script.  With the Execute above the httpd line, boot reached
+; `Run >NIL: <NIL: C:httpd' and never returned from it: proved on a Workbench
+; 3.1 boot, where progress markers stopped at the line before the Run and the
+; guest sat there until the harness gave up.  Roadshow never meets this because
+; nothing of its own runs after its Execute.
+;
+; Putting the Execute last means every `Run' in the block happens at one level
+; of Execute, as it did before there was a script.  httpd starting a moment
+; before the card is attached costs nothing now: since 0.27 OpenLibrary gives
+; it a working loopback stack, and the interface joins a moment later.
+(if DO_STARTUP
+    (set BOOT_CMD
+      (cat BOOT_CMD
+           "If EXISTS S:Network-Startup\n"
+           "  Execute S:Network-Startup\n"
+           "EndIf\n")))
 
 ; Three cases, and (startup) covers all of them because it writes the block
 ; whole: selection plus network start, selection on its own for a drawer
@@ -1861,18 +1872,14 @@
       (append "; configuration is still being written and the command says\n")
       (append "; what came up.  A boot that FAILS prints why either way.\n")
       (append "\n")
-      (append "Echo >>DH0:progress.txt \"netstartup: entered\"\n")
       (append "C:AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n")
-      (append "Echo >>DH0:progress.txt \"netstartup: left\"\n"))
+      )
   ))
 
 (if DO_STARTUP
     (set P_BOOT
       (cat "Adding AmiNetXDuo to S:User-Startup, so that the network starts "
            "when the Amiga boots.")))
-
-(set BOOT_CMD
-  (cat BOOT_CMD "Echo >>DH0:progress.txt \"userstartup: end of block\"\n"))
 
 (if DO_BOOT
     (startup APPNAME
