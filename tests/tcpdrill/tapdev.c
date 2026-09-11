@@ -639,21 +639,36 @@ BOOL tap_is_online(VOID)
     return (tap_dev != NULL && tap_dev->online) ? TRUE : FALSE;
 }
 
-/* NetStackControl() is LVO -876.  Called by hand rather than through an inline
-   because these harnesses link no bsdsocket protos. */
+/*
+ * NetStackControl() is LVO -876, called by hand because these harnesses link
+ * no bsdsocket protos.  Nothing but the call lives in here: a register asm
+ * variable only holds its register across the statements the compiler can see
+ * between the initialiser and the asm, so any setup code in the same function
+ * is free to reuse a0/d0/d1/d2.  That is what made the first version of this
+ * return an error with a correctly filled request.
+ */
+static LONG tap_netctl(struct Library *base, ULONG op, NetStatusControl *ctl)
+{
+register struct Library *a6 __asm("a6") = base;
+register ULONG           d0 __asm("d0") = AMI_NETSTATUS_MAGIC;
+register ULONG           d1 __asm("d1") = op;
+register APTR            a0 __asm("a0") = ctl;
+register ULONG           d2 __asm("d2") = (ULONG)sizeof(*ctl);
+register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
+register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-876:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 LONG tap_bring_up(struct Library *base)
 {
     NetStatusControl ctl;
     ULONG            i;
-
-register struct Library *a6 __asm("a6") = base;
-register ULONG           d0 __asm("d0") = AMI_NETSTATUS_MAGIC;
-register ULONG           d1 __asm("d1") = NETCTRL_INTERFACE_ADD;
-register APTR            a0 __asm("a0") = &ctl;
-register ULONG           d2 __asm("d2") = (ULONG)sizeof(ctl);
-register LONG            res __asm("d0");
-register LONG _clob_d1 __asm("d1");
-register LONG _clob_a0 __asm("a0");
 
     if (base == NULL)
         return -1;
@@ -668,11 +683,7 @@ register LONG _clob_a0 __asm("a0");
     ctl.nsc_Name[2] = 'p';
     ctl.nsc_Name[3] = '0';
 
-    __asm __volatile ("jsr a6@(-876:W)"
-                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
-                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
-                      : "a1", "cc", "memory");
-    return res;
+    return tap_netctl(base, (ULONG)NETCTRL_INTERFACE_ADD, &ctl);
 }
 
 VOID tap_get_stats(TapStats *out)

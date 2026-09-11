@@ -1404,8 +1404,11 @@ int main(void)
         return(20);
     }
 
-    (VOID)t_check((BOOL)(tap_bring_up(SocketBase) == 0),
-                  "AddNetInterface(tap0)", 0);
+    {
+        LONG addrc = tap_bring_up(SocketBase);
+        (VOID)t_check((BOOL)(addrc == 0), "AddNetInterface(tap0)",
+                      (ULONG)addrc);
+    }
 
     t_case_unconnected();
     t_case_connected();
