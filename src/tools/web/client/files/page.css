@@ -447,6 +447,7 @@ dialog.editor-dialog {
   color: #b54708;
 }
 #editor-host {
+  --editor-caret: #1d4ed8;
   min-height: 0;
   overflow: hidden;
   background: #fff;
@@ -468,7 +469,11 @@ dialog.editor-dialog {
 }
 #editor-host .cm-content {
   padding: 0.65rem 0;
-  caret-color: #1d4ed8;
+  caret-color: var(--editor-caret);
+}
+#editor-host .cm-cursor,
+#editor-host .cm-dropCursor {
+  border-left-color: var(--editor-caret);
 }
 #editor-host .cm-gutters {
   color: #98a2b3;
@@ -778,14 +783,14 @@ dialog.editor-dialog {
     color: #fdb022;
   }
 
+  #editor-host {
+    --editor-caret: #93c5fd;
+  }
+
   #editor-host,
   #editor-host .cm-editor {
     color: #e4e7ec;
     background: #0f172a;
-  }
-
-  #editor-host .cm-content {
-    caret-color: #93c5fd;
   }
 
   #editor-host .cm-gutters {

@@ -31,9 +31,10 @@ const js = await esbuild.build({
 });
 if (js.outputFiles.length !== 1) throw new Error("expected one script output");
 
+const pageCss = readFileSync(join(SRC, "page.css"), "utf8");
 const css = await esbuild.build({
   stdin: {
-    contents: readFileSync(join(SRC, "page.css"), "utf8"),
+    contents: pageCss,
     loader: "css",
     resolveDir: SRC,
   },
@@ -59,6 +60,12 @@ const html = template
 
 const problems = [];
 if (/sourceMappingURL/.test(html)) problems.push("a source map survived");
+if (
+  !/#editor-host\s+\.cm-cursor[\s\S]*?border-left-color:\s*var\(--editor-caret\)/.test(
+    pageCss,
+  )
+)
+  problems.push("the CodeMirror cursor has no explicit visible colour");
 /* Filenames, server error text and DAV properties are hostile input.  The
    client builds its rows with textContent/createTextNode; keep future edits
    from quietly reopening the innerHTML injection found in the third-party
