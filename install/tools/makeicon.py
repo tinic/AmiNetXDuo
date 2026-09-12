@@ -339,24 +339,44 @@ def install_icon():
     return c
 
 
+# The drawer front: a globe on a bus between two machines, with the protocol
+# on a plate underneath.  Drawn for a 640x256 Workbench, where a hires pixel
+# is about half as wide as it is tall, so the globe is 26 pixels across and 13
+# down.  The name is not on it; Workbench writes that under the icon.
+DRAWER_ART = [
+    ".............................KKKKKK.............................",
+    ".........................KKKKBBBKBBKKKK.........................",
+    "......................KKWWWWBBBBKBWWWWWWKK......................",
+    ".....................KBWWWWWWBBBKWWWWWWWWBK.....................",
+    "WWWWWWWWWWWWW.......KBBBWWWWBBBBKBWWWWWWWBBK.....WWWWWWWWWWWWW..",
+    "W............K......KBBBBBWWBBBBKBBBWWWWBBBK.....W............K.",
+    "W..KKKKKKKK..K.....KKKKKKKKWWWKKKKKWWWKKKKKKK....W..KKKKKKKK..K.",
+    "W..KWBBBBBB..K......KBBBBBBBWWBBKBBWWWBBBBBK.....W..KWBBBBBB..K.",
+    "W..KBBBBBBB..K......KBBBBBBBWBBBKBBBWBBBWWBK.....W..KBBBBBBB..K.",
+    "W..KBBBBBBB..K.......KBBBBBBBBBBKBBBBBBBBBK......W..KBBBBBBB..K.",
+    "W..KBBBBBBB..K........KKKBBBBBBBKBBBBBBKKK.......W..KBBBBBBB..K.",
+    "W............K...........KKKKWWWWW.KKKK..........W............K.",
+    ".KKKKKKKKKKKKK...............W....K...............KKKKKKKKKKKKK.",
+    "WWWWWWWWWWWWWW.KKKKKKKKKKKKKKW....KKKKKKKKKKKKKKKWWWWWWWWWWWWWW.",
+    "W..KKKKK......KWWWWWWWWWWWWWWW....KWWWWWWWWWWWWWWW..KKKKK......K",
+    ".KKKKKKKKKKKKKK...............KKKKK...............KKKKKKKKKKKKKK",
+    "............WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW.............",
+    "............W......................................K............",
+    "............W.KKKKK..KKK..KKKK......K.KKKKK.KKKK...K............",
+    "............W...K...K...K.K...K.....K...K...K...K..K............",
+    "............W...K...K.....K...K....K....K...K...K..K............",
+    "............W...K...K.....KKKK....K.....K...KKKK...K............",
+    "............W...K...K.....K......K......K...K......K............",
+    "............W...K...K...K.K.....K.......K...K......K............",
+    "............W...K....KKK..K.....K.....KKKKK.K......K............",
+    ".............KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK............",
+]
+
+
 def drawer_icon():
-    """The standard Amiga drawer shape, with the name and a network on it."""
     c = Canvas(64, 26, GREY)
-
-    # The tab.  Drawn before the front so the front's bevel closes over it.
-    c.fill(2, 1, 24, 6, BLUE)
-    c.hline(2, 23, 1, WHITE)
-    c.vline(2, 1, 6, WHITE)
-    c.vline(24, 2, 6, BLACK)
-
-    c.fill(1, 5, 62, 24, BLUE)
-    c.bevel(1, 5, 62, 24)
-
-    text_s(c, 5, 8, "AmiNetXDuo", WHITE)
-    c.hline(4, 59, 15, BLACK)
-    c.hline(4, 59, 16, WHITE)
-
-    c.stamp(27, 17, NET, {"K": BLACK, "W": WHITE})
+    c.stamp(0, 0, DRAWER_ART,
+            {".": GREY, "K": BLACK, "W": WHITE, "B": BLUE})
     return c
 
 
