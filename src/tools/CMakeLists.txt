@@ -610,7 +610,8 @@ endif()
 
 add_custom_target(tools ALL)
 add_dependencies(tools
-    tool_addnetinterface tool_checknetconfig tool_checknetdevice
+    tool_activateaminetxduo tool_addnetinterface
+    tool_checknetconfig tool_checknetdevice
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface

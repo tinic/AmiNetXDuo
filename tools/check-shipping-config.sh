@@ -5,7 +5,7 @@
 
 The full stack, `minimal` and `micro` are declared in CMakePresets.json and
 nowhere else.  tools/ci.sh compiles them with warnings fatal,
-.github/workflows/release.yml builds the trees the archive is packed from, and
+tools/build-release.sh builds the trees the archive is packed from, and
 dist/make-dist.sh packs them.  All three read the preset.
 
 THIS REPLACED A COMPARISON OF HAND-COPIES.  The option lists used to be written
@@ -17,7 +17,7 @@ release died at the last step with `missing build: build/release-micro`.
 What is checked now:
 
   declared    each shipping drawer is a configure preset
-  built       release.yml builds every non-default preset it must pack
+  built       build-release.sh configures every shipping preset
   derived     ci.sh and make-dist.sh take their options from the preset
   unique      no consumer carries its own -DAMINETXDUO_ list for a drawer
 
@@ -34,7 +34,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The drawers dist/make-dist.sh packs.  `default` is the top of Libs: and is
-# configured by ci.sh's own cross stage, so release.yml builds it as `default`
+# configured by ci.sh's own cross stage, so build-release.sh names it `default`
 # rather than as build/release-<name>.
 PACKED = ["minimal", "micro"]
 
@@ -73,13 +73,13 @@ for drawer in ["default"] + PACKED:
 
 # ---------------------------------------------------------------- built ----
 
-release = read(".github/workflows/release.yml")
-for drawer in PACKED:
-    if re.search(r"cmake --preset %s\b" % re.escape(drawer), release):
-        say("built_%s" % drawer, "release.yml")
+builder = read("tools/build-release.sh")
+for drawer in ["default"] + PACKED:
+    if re.search(r"cmake --preset %s\b" % re.escape(drawer), builder):
+        say("built_%s" % drawer, "tools/build-release.sh")
     else:
         fail("built_%s" % drawer,
-             "release.yml_does_not_build_it -- dist/make-dist.sh will stop at "
+             "build-release.sh_does_not_build_it -- dist/make-dist.sh will stop at "
              "`missing build`")
 
 # -------------------------------------------------------------- derived ----
@@ -116,8 +116,8 @@ for drawer in PACKED:
     if re.search(r'%s_OPTIONS="-D' % drawer.upper(), dist):
         hand.append("dist/make-dist.sh")
     if re.search(r'-B build/release-%s\b[^\n]*(?:\\\n[^\n]*)*-DAMINETXDUO_'
-                 % re.escape(drawer), release):
-        hand.append(".github/workflows/release.yml")
+                 % re.escape(drawer), builder):
+        hand.append("tools/build-release.sh")
 
     if hand:
         fail("unique_%s" % drawer,

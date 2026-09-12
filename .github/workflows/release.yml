@@ -1,22 +1,7 @@
-# Cut a release: build the .lha and attach it to a GitHub Release.
-#
-# Triggered by pushing a plain vX.Y.Z tag, which is the only release tag form
-# this project uses -- the commit count belongs in a binary's version output
-# and nowhere else (tools/version.sh, docs/RESEARCH.md).
-#
-# The tag is CHECKED against the tree rather than trusted: pushing v0.2.0 at a
-# commit whose project() line still says 0.1.0 fails the job instead of
-# publishing an archive that misnames itself.  Same reasoning as
-# cmake/AmiNetXDuoVersion.cmake refusing to configure when a submodule bump has
-# left the recorded NetX Duo version stale.
-#
-# workflow_dispatch builds the archive and uploads it as a workflow artefact
-# WITHOUT creating a release, so the packaging can be exercised without
-# publishing anything.
-#
-# This does not run the emulator tiers -- it cannot, they need a Kickstart ROM.
-# A release therefore carries exactly the assurance tier 1 gives it, and the
-# release notes say so rather than leaving the reader to assume otherwise.
+# Promote the immutable release candidate produced by CI for this exact SHA.
+# No source is compiled here: successful CI is the build-and-test attestation,
+# and release-candidate.txt binds the downloaded archive to its commit and
+# digest.  A tag therefore cannot publish convenient-but-different bytes.
 #
 # SPDX-License-Identifier: MIT
 
@@ -28,115 +13,57 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write          # creating a release and uploading assets
+  actions: read
+  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-
-  # Every configuration the tree offers, one runner each, at the same time as
-  # the archive is built rather than in front of it.  Not `needs:` -- a
-  # failure here still reddens the run, and gating the archive on it would put
-  # these minutes back onto the critical path, which is the whole point.
-  options:
-    name: "cross: ${{ matrix.config }}"
+  verify:
+    name: exact-SHA CI verdict
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        config: [nolto, noipv6, nomdns, notls, nomcast, noasm, norxverify,
-                 nosack, ts, nxcounters, nowscale, log, census, minimal]
+    outputs:
+      run_id: ${{ steps.ci.outputs.run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
-      # The same preamble the release job runs, deliberately identical: the
-      # cached tree is a REPAIRED tree and the key has to say so, and a warm
-      # cache from before a repair must still be checked.  A shorter version
-      # here would build these arms on a toolchain the archive is not built
-      # with, which is worse than not building them.
-      - name: Toolchain pin
-        id: pin
-        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the pinned m68k toolchain
-        id: toolchain-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
-
-      - name: Fetch the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-toolchain.sh
-
-      - name: The toolchain's crt0 is repaired
-        run: tools/fetch-toolchain.sh --check-crt0
-
-      - name: The toolchain's inline register ABI is repaired
-        run: tools/fetch-toolchain.sh --check-inlines
-
-      - name: Build it
-        run: AMINETXDUO_CI_CROSS="${{ matrix.config }}" tools/ci.sh cross
-
-  # The validation that does not feed the archive, off the critical path.
-  checks:
-    name: host tiers and the analyser
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Toolchain pin
-        id: pin
-        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the pinned m68k toolchain
-        id: toolchain-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
-
-      - name: Fetch the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-toolchain.sh
-
-      - name: The toolchain's crt0 is repaired
-        run: tools/fetch-toolchain.sh --check-crt0
-
-      - name: The toolchain's inline register ABI is repaired
-        run: tools/fetch-toolchain.sh --check-inlines
-
-      - name: 32-bit host libraries
+      - name: Check the tag against the tree
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          # A vendor's apt index must not fail a RELEASE.  Google's
-          # chrome-stable served a Hash Sum mismatch on 2026-09-09 and took CI
-          # red twice; `apt-get update` exits non-zero on any source it could
-          # not read.  ONLY *google*: Ubuntu's own repositories live in that
-          # same directory as ubuntu.sources, and removing them cost a second
-          # red build.  See .github/workflows/ci.yml.
-          sudo rm -f /etc/apt/sources.list.d/*google*.list \
-                     /etc/apt/sources.list.d/*google*.sources
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-multilib
+          want=$(tools/version.sh --tag)
+          got=${GITHUB_REF#refs/tags/}
+          [ "$want" = "$got" ] || {
+            echo "::error::tag $got does not match the tree, which says $want"
+            exit 1
+          }
 
-      - name: tools/ci.sh
-        run: AMINETXDUO_ANALYZE=1 tools/ci.sh host host32 analyze
+      - name: Require successful CI for this commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          verdict=$(tools/check-ci-success.sh "$GITHUB_SHA" 1200)
+          echo "$verdict"
+          run_id=$(printf '%s\n' "$verdict" | sed -n 's/.* run=\([0-9][0-9]*\) .*/\1/p')
+          [ -n "$run_id" ] || { echo "::error::CI verdict carried no run id"; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: CHANGELOG.md carries facts, not prose
+        run: tools/check-changelog-prose.sh
 
   release:
-    name: build the distribution archive
+    name: publish the CI candidate
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          # The release body quotes a commit count, and tools/version.sh
-          # --build derives it from history.
           fetch-depth: 0
 
       - name: Derive the version
@@ -144,302 +71,62 @@ jobs:
           tools/version.sh --env >> "$GITHUB_ENV"
           echo "### $(tools/version.sh --long)" >> "$GITHUB_STEP_SUMMARY"
 
-      # A tag that disagrees with the tree is a release that lies about its own
-      # contents, which is worse than no release.
-      - name: Check the tag against the tree
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          want=$(tools/version.sh --tag)
-          got=${GITHUB_REF#refs/tags/}
-          if [ "$want" != "$got" ]; then
-              echo "::error::tag $got does not match the tree, which says $want."
-              echo "Bump project(AmiNetXDuo VERSION ...) in CMakeLists.txt, or retag."
-              exit 1
-          fi
-          echo "tag $got matches the tree"
-
-      - name: Toolchain pin
-        id: pin
-        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
-
-      # The key carries a hash of the crt0 repair as well as the toolchain
-      # pin: the cached tree is a REPAIRED tree, so it is only reusable by a
-      # build whose repair is the same one. Bumping a hand-written suffix was
-      # the first attempt and it went stale immediately -- a cache saved by
-      # the 4-file version of the script was restored by the 11-file version,
-      # which correctly refused to build on it.
-      - name: Cache the pinned m68k toolchain
-        id: toolchain-cache
-        uses: actions/cache@v4
+      - name: Download the exact CI candidate
+        uses: actions/download-artifact@v4
         with:
-          path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+          name: release-candidate-${{ github.sha }}
+          path: build/candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.verify.outputs.run_id }}
 
-      - name: Fetch the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-toolchain.sh
+      - name: Verify source identity and archive digest
+        run: tools/check-release-candidate.sh build/candidate "$GITHUB_SHA"
 
-      # A cache restored from before the crt0 repair existed contains the
-      # BROKEN crt0, and the fetch above does not run on a hit -- so this is
-      # not belt-and-braces, it is the only thing standing between a warm
-      # cache and shipping commands that crash on return to the Shell. The
-      # key is versioned too, so an old cache is not reused in the first
-      # place; this catches the case where it is restored anyway.
-      - name: The toolchain's crt0 is repaired
-        run: tools/fetch-toolchain.sh --check-crt0
-
-      # Same reasoning for the NDK inlines: a warm cache from before the
-      # repair builds a Write() that reads its buffer pointer out of a
-      # register nobody wrote, and nothing else notices.
-      - name: The toolchain's inline register ABI is repaired
-        run: tools/fetch-toolchain.sh --check-inlines
-
-      - name: Report the toolchain
-        run: |
-          . tools/amiga-toolchain.sh
-          echo "AMIGA_TOOLCHAIN_ROOT=$AMIGA_TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
-          "$AMIGA_GCC" --version | head -1
-
-      # host32 needs -m32, which on the runner means gcc-multilib.  Without it
-      # tools/ci.sh's host32 stage skips itself, so the two drivers below go
-      # unrun and the stage still reports green.
-      - name: 32-bit host libraries
-        run: |
-          # A vendor's apt index must not fail a RELEASE.  Google's
-          # chrome-stable served a Hash Sum mismatch on 2026-09-09 and took CI
-          # red twice; `apt-get update` exits non-zero on any source it could
-          # not read.  ONLY *google*: Ubuntu's own repositories live in that
-          # same directory as ubuntu.sources, and removing them cost a second
-          # red build.  See .github/workflows/ci.yml.
-          sudo rm -f /etc/apt/sources.list.d/*google*.list \
-                     /etc/apt/sources.list.d/*google*.sources
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-multilib
-
-      # Tier 1 in full before packaging anything.  A release that was never
-      # built clean is not a release, and this is the same script a developer
-      # runs locally.
-      #
-      # host32 was not in this list and is in ci.yml's, so "tier 1 in full" was
-      # not what a release got: fuzz_mdns and fuzz_tls_crypto were the two
-      # stages a release skipped.  Both read bytes chosen by somebody else --
-      # unauthenticated multicast, and a TLS server's handshake before any key
-      # exists to check it against -- and both need sizeof(void*) == 4, which
-      # is why they are a separate build and why they are easy to leave out.
-      # THE OPTION ARMS ARE A SEPARATE JOB, in parallel, because twelve cross
-      # builds at ~82 s each on a hosted runner is fifteen minutes of a
-      # twenty-two minute release and the ceiling is ten.  They validate; they
-      # build nothing this job packs -- the archive comes from build/release
-      # and build/release-minimal below, configured here.  `default` stays:
-      # the conformance stage needs build/ci/default to exist.
-      # ONLY WHAT THE ARCHIVE NEEDS.  host, host32 and analyze moved to the
-      # `checks` job beside this one: they validate the same tree and produce
-      # nothing packed here, and on the critical path they were four minutes
-      # of a build that has a ten-minute ceiling.  `cross` stays at default
-      # because conformance wants build/ci/default.
-      - name: tools/ci.sh
-        run: >-
-          AMINETXDUO_CI_CROSS="default"
-          tools/ci.sh cross web conformance
-
-      # TLS is on by default, and the archive ships tls.library and the trust
-      # store.  make-dist.sh refuses to pack a missing or host-scavenged store,
-      # so a release cannot silently ship one that trusts nothing.
-      #
-      # TWO BUILDS, because the archive carries two libraries: the one every
-      # 68k runs, and `minimal` for a measured 1 MB machine.  It was four, one
-      # per CPU, and the CPU is gone from the archive entirely -- each library,
-      # device and command is built -m68000 and picks its own inner loops from
-      # AttnFlags at init.  The directory names are what make-dist.sh derives
-      # from -b, so they are not free-form.
-      #
-      - name: Build the shipping configuration
-        run: |
-          cmake -S . -B build/release \
-                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/release --parallel
-
-          # The second drawer: everything optional compiled out, for somebody
-          # who has measured their machine and wants the memory back.
-          #
-          # SEVEN OPTIONS, not five.  This step used to give five and ci.sh's
-          # minimal arm gave seven, so the drawer that shipped carried the
-          # ARexx host and the TCP: handler and the arm that compiled it under
-          # fatal warnings did not -- and emulator.yml's end-to-end installed
-          # the seven-option one, so what was tested on a real Workbench was
-          # not what shipped either.  Measured: the two are 12,248 bytes,
-          # which on the 1 MB machine this drawer exists for is the point.
-          cmake --preset minimal -B build/release-minimal
-          cmake --build build/release-minimal --parallel
-
-          # AND THE MICRO DRAWER, which dist/make-dist.sh packs into
-          # Libs/micro and refuses to run without.  It was added to make-dist
-          # and to tools/ci.sh's arms without ever being added here, so the
-          # first release after it went in failed at the archive step with
-          # `missing build: build/release-micro` -- after every cross arm had
-          # passed.  The options are MICRO_OPTIONS from dist/make-dist.sh, and
-          # tools/check-shipping-config.sh holds those to tools/ci.sh's micro
-          # arm; if this list drifts from that one, that gate is what says so.
-          cmake --preset micro -B build/release-micro
-          cmake --build build/release-micro --parallel
-
-      # ssh and scp come from clients/, not the CMake tree, so a `cmake --build`
-      # does not produce them. Built here so a release always carries both;
-      # dbclient defaults to the 25519 rewritten for this machine.
-      # ONCE.  It used to be three times, one per processor drawer, because a
-      # 68020 binary takes an illegal instruction on a 68000 and the 68060
-      # dropped instructions the 68020 build uses.  AMINETXDUO_CLIENT_ANY=1
-      # builds one that carries both X25519 field multiplies and picks at the
-      # first handshake (clients/dropbear/amiga_25519.c).
-      - name: Build the ported clients
-        run: |
-          AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
-              clients/dropbear/build.sh -b build/ssh
-
-      # An archiver that can CREATE.  Lhasa, which is what "lha" usually is on
-      # a Linux box, only extracts, and make-dist.sh then falls back to
-      # dist/lhapack.py, which writes a valid archive with nothing compressed
-      # in it.  Every release up to and including 0.17.0 shipped that way: 86
-      # files at a 100.0% ratio, 3.3 MB that should be about half of it.
-      # jlha is already one of the three make-dist.sh probes for.
-      - name: An archiver that can create
-        run: |
-          # A vendor's apt index must not fail a RELEASE.  Google's
-          # chrome-stable served a Hash Sum mismatch on 2026-09-09 and took CI
-          # red twice; `apt-get update` exits non-zero on any source it could
-          # not read.  ONLY *google*: Ubuntu's own repositories live in that
-          # same directory as ubuntu.sources, and removing them cost a second
-          # red build.  See .github/workflows/ci.yml.
-          sudo rm -f /etc/apt/sources.list.d/*google*.list \
-                     /etc/apt/sources.list.d/*google*.sources
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jlha-utils
-
-      # Name exactly what the step above built, so none of the packed client
-      # artifacts can come from a stale tree.
-      - name: Build the distribution archive
-        env:
-          AMINETXDUO_SSH: build/ssh/dbclient
-          AMINETXDUO_SCP: build/ssh/scp
-          AMINETXDUO_SCP_RUNNER: build/ssh/scp-runner
-          # Report a missing build rather than making one: here it means the
-          # build step above did not run, and building it inside the packer
-          # would hide that.
-          AMINETXDUO_DIST_NO_BUILD: 1
-        run: dist/make-dist.sh -b build/release
-
-      # A release that silently lost ssh or the bundled Installer would look
-      # fine -- until someone tried to install with nothing to run the script.
-      # The manual is here for the same reason and a worse history: it was
-      # missing from every archive for a month, because make-dist.sh globbed
-      # the wrong directory and said so in a note nobody read.
-      - name: ssh, scp, the Installer and the manual really are in the archive
-        run: |
-          # ssh is in this list because a per-CPU one was not, once, and its
-          # absence is silent at every step: make-dist.sh skips a binary that is
-          # not executable rather than failing, and the installer copies it only
-          # `(if (exists ...))`, so a machine could install with no C:ssh and no
-          # message.  There is one name now and this is where it is checked.
-          for f in C/ssh C/scp C/scp-runner Installer \
-                   Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info; do
-              [ -f "build/dist/AmiNetXDuo/$f" ] || {
-                  echo "::error::$f is missing from the archive"; exit 1; }
-          done
-          ls -l build/dist/AmiNetXDuo/C/ssh build/dist/AmiNetXDuo/C/scp \
-                build/dist/AmiNetXDuo/C/scp-runner \
-                build/dist/AmiNetXDuo/Installer
-          ls -l build/dist/AmiNetXDuo/Docs/
-
-      # The two libraries the archive carries.  There used to be four, one per
-      # CPU, and a release that lost one looked fine right up until somebody
-      # with that machine ran the installer and it aborted.  Now there is
-      # nothing to resolve: Libs/ is what every machine gets and Libs/minimal/
-      # is what somebody asks for.
-      - name: Both libraries really are in the archive
-        run: |
-          for f in Libs/bsdsocket.library Libs/tls.library \
-                   Libs/minimal/bsdsocket.library; do
-              [ -f "build/dist/AmiNetXDuo/$f" ] || {
-                  echo "::error::$f is missing"; exit 1; }
-          done
-          # minimal is built with -DAMINETXDUO_TLS=OFF, so it must NOT have one.
-          [ ! -e "build/dist/AmiNetXDuo/Libs/minimal/tls.library" ] || {
-              echo "::error::Libs/minimal has a tls.library; that build has TLS off"
-              exit 1; }
-          ls -lR build/dist/AmiNetXDuo/Libs/
-
-      - name: Describe what is in it
-        run: |
-          {
-            echo "### $(tools/version.sh --long)"
-            echo
-            echo '```'
-            ls -l build/dist/*.lha
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # Always uploaded, tag or not, so workflow_dispatch exercises packaging
-      # without publishing.
-      - name: CHANGELOG.md carries facts, not prose
-        # NOT inside "Publish the release": that step is tag-only, so the gate
-        # would never run on a workflow_dispatch and could not be validated
-        # without cutting a real release.  The published notes are generated
-        # from this file, so it is checked on every run of this workflow.
-        run: tools/check-changelog-prose.sh
-
-      - name: Upload the archive as a workflow artefact
+      # Keep an artifact on this workflow as well, so workflow_dispatch remains
+      # a non-publishing exercise of the complete promotion path.
+      - name: Upload the verified archive
         uses: actions/upload-artifact@v4
         with:
           name: AmiNetXDuo-${{ env.AMINETXDUO_VERSION_COMPOUND }}
-          path: build/dist/*.lha
+          path: build/candidate/*.lha
           if-no-files-found: error
           retention-days: 30
+          compression-level: 0
 
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # A RELEASE THAT ALREADY EXISTS BELONGS TO WHOEVER CUT IT.  A release
-          # cut by hand carries things this step cannot know -- which gates it
-          # was held against, what is still open, which known issues it ships
-          # with -- and `gh release create` on an existing tag fails, so a
-          # hand-cut release used to redden the very run that was validating
-          # it.  The archive is uploaded as a workflow artefact above either
-          # way, so nothing is lost by standing down here.
-          if gh release view "${GITHUB_REF#refs/tags/}" > /dev/null 2>&1; then
-            echo "::notice::${GITHUB_REF#refs/tags/} is already published; leaving it alone"
+          tag=${GITHUB_REF#refs/tags/}
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::$tag is already published; leaving it alone"
             exit 0
           fi
 
           notes=$(mktemp)
+          body=$(mktemp)
+          trap 'rm -f "$notes" "$body"' EXIT
+          ver=$(tools/version.sh --product)
+          awk -v v="## $ver" -v pfx="## ${ver%.*}." '
+              $0 == v {found = 1; next}
+              found && /^## / && index($0, pfx) != 1 {exit}
+              found {print}
+          ' CHANGELOG.md > "$body"
+          [ -s "$body" ] || {
+              echo "::error::CHANGELOG.md has no '## $ver' section"
+              exit 1
+          }
+
           {
             echo "$(tools/version.sh --long)"
             echo
-            echo "Drop \`AmiNetXDuo-$(tools/version.sh --product).lha\` on a Workbench"
-            echo "window and run \`Install-AmiNetXDuo\`."
+            echo "Drop \`AmiNetXDuo-$ver.lha\` on a Workbench window and run \`Install-AmiNetXDuo\`."
             echo
-
-            # This release's section of CHANGELOG.md, plus every earlier
-            # section of the same minor -- somebody arriving at 0.14.2 wants
-            # what 0.14.1 and 0.14.0 changed too, not just the last patch.
-            # Its own heading is dropped (the version is already the title);
-            # the earlier ones are kept so the groups stay legible.  A missing
-            # section is a release that would ship with no summary, so it fails
-            # rather than publishes.
-            ver=$(tools/version.sh --product)
-            awk -v v="## $ver" -v pfx="## ${ver%.*}." '
-                $0 == v {found = 1; next}
-                found && /^## / && index($0, pfx) != 1 {exit}
-                found {print}
-            ' CHANGELOG.md > "$notes.body"
-            [ -s "$notes.body" ] || {
-                echo "::error::CHANGELOG.md has no '## $ver' section"; exit 1; }
-            cat "$notes.body"
+            cat "$body"
           } > "$notes"
 
-          gh release create "${GITHUB_REF#refs/tags/}" \
+          gh release create "$tag" \
              --title "$(tools/version.sh --long)" \
              --notes-file "$notes" \
-             build/dist/*.lha
+             build/candidate/*.lha

@@ -5,8 +5,8 @@
 #   tools/preset-options.sh micro
 #
 # ONE DECLARATION.  The three shipping drawers used to have their option lists
-# written out by hand in tools/ci.sh, dist/make-dist.sh and
-# .github/workflows/release.yml, and tools/check-shipping-config.sh existed to
+# written out by hand in tools/ci.sh, dist/make-dist.sh and the release
+# workflow, and tools/check-shipping-config.sh existed to
 # compare two of the three.  The third was never compared, and 0.26.6's release
 # failed at the archive step because the micro drawer had never been added to
 # it.  CMakePresets.json is the declaration now; this is how a shell caller

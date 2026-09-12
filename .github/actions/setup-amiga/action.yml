@@ -1,0 +1,62 @@
+name: Set up the AmiNetXDuo toolchain
+description: Restore the pinned repaired toolchain and a per-profile compiler cache
+
+inputs:
+  cache-profile:
+    description: Stable name for this build configuration
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Toolchain pin
+      id: pin
+      shell: bash
+      run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the pinned m68k toolchain
+      id: toolchain-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/aminetxduo/toolchain
+        key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
+
+    - name: Fetch the toolchain
+      if: steps.toolchain-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: tools/fetch-toolchain.sh
+
+    - name: Check the repaired toolchain
+      shell: bash
+      run: |
+        tools/fetch-toolchain.sh --check-crt0
+        tools/fetch-toolchain.sh --check-inlines
+
+    - name: Restore compiled objects
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/aminetxduo/ccache
+        key: aminetxduo-ccache-v1-${{ runner.os }}-${{ inputs.cache-profile }}-${{ steps.pin.outputs.sha }}-${{ github.sha }}
+        restore-keys: |
+          aminetxduo-ccache-v1-${{ runner.os }}-${{ inputs.cache-profile }}-${{ steps.pin.outputs.sha }}-
+
+    - name: Enable compiler cache
+      shell: bash
+      run: |
+        if ! command -v ccache >/dev/null 2>&1; then
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ccache
+        fi
+        mkdir -p "$HOME/.cache/aminetxduo/ccache"
+        ccache --set-config "cache_dir=$HOME/.cache/aminetxduo/ccache"
+        ccache --set-config max_size=300M
+        ccache --zero-stats
+        {
+          echo "CCACHE_DIR=$HOME/.cache/aminetxduo/ccache"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          echo "CCACHE_NOHASHDIR=true"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+          echo "CMAKE_ASM_COMPILER_LAUNCHER=ccache"
+        } >> "$GITHUB_ENV"

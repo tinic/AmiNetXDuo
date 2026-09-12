@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# The set of cross arms tools/ci.sh declares and the set the GitHub matrix runs
-# must be the SAME SET, checked in BOTH directions.
+# The set of cross arms and the hosted matrix are emitted by one command.  This
+# gate checks both the exclusions and that ci.yml actually consumes the output.
 #
 #   declared but not run   cpu68060 and if2 were in CROSS_CONFIGS and in no
 #                          workflow matrix, so two arms compiled only where
@@ -32,8 +32,13 @@ default:built by the analyze and tier1 jobs, not the options matrix
 
 arms=$(sed -n '/^CROSS_CONFIGS=(/,/^)/p' "$CI" \
        | grep -oE '^[[:space:]]*"[a-z0-9_]+' | tr -d ' "' | sort -u)
-matrix=$(sed -n '/^[[:space:]]*config:[[:space:]]*\[/,/\]/p' "$WF" \
-         | tr -d ' \n' | sed 's/.*config:\[//; s/\].*//' | tr ',' '\n' | sort -u)
+matrix=$("$CI" --list-cross | sort -u)
+
+if ! grep -q 'config:.*fromJSON(needs\.plan\.outputs\.matrix)' "$WF" ||
+   ! grep -q 'tools/ci\.sh --list-cross' "$WF"; then
+    echo "ci_arm_matrix_wiring=MISSING dynamic matrix is not connected"
+    exit 1
+fi
 
 errors=0
 for a in $arms; do
@@ -71,4 +76,4 @@ done <<< "$ALLOW"
 echo "ci_arm_coverage_errors=$errors"
 echo "ci_arms=$(printf '%s\n' "$arms" | wc -l) matrix=$(printf '%s\n' "$matrix" | wc -l)"
 echo "ci_arm_coverage=$([ "$errors" -eq 0 ] && echo PASS || echo FAIL)"
-exit $([ "$errors" -eq 0 ] && echo 0 || echo 1)
+if [ "$errors" -eq 0 ]; then exit 0; else exit 1; fi

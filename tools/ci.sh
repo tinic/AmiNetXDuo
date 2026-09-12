@@ -112,7 +112,7 @@ CROSS_CONFIGS=(
     # combination is what a user downloads, and the arms above do not cover it
     # BPF=OFF appears nowhere else at all, and the interactions between five
     # of them appear nowhere else at all.  It must stay byte-for-byte the
-    # options .github/workflows/release.yml gives build/release-minimal.
+    # options CMakePresets.json gives the build/release-minimal tree.
     "minimal:$("$ROOT/tools/preset-options.sh" minimal)"
     #
     # The floor under the floor.  It is the minimal drawer plus the DHCP
@@ -686,27 +686,21 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
-    # The release workflow was red for three releases and all three archives
-    # were built by hand. tools/check-release-ready.sh runs its job set before
-    # a tag; this asserts it can still see that job set in release.yml.
+    # The release workflow packages only an exact SHA already accepted by CI.
+    # Keep the local preflight and that workflow contract in agreement.
     if tools/check-release-ready.sh --list > "$BUILD/release-ready.log" 2>&1; then
-        note "release job set: $(grep -c '^release-job:' \
-              "$BUILD/release-ready.log") ci.sh calls + $(sed -n \
-              's/^release-arms: //p' "$BUILD/release-ready.log" | wc -w) arms"
+        note "release job set: exact-SHA CI verdict + package-only publish"
     else
         cat "$BUILD/release-ready.log"
-        fail "tools/check-release-ready.sh can no longer read release.yml's\
- job set, so nothing runs it before a tag"
+        fail "tools/check-release-ready.sh no longer describes the release gate"
         return 1
     fi
 
-    # Every drawer in the archive is a configuration this script compiles.
-    # The minimal drawer is not, and says so with its reason.
+    # Every drawer in the archive has one preset consumed by CI, the candidate
+    # builder and the packer; none carries another hand-written option list.
     if tools/check-shipping-config.sh > "$BUILD/shipping-config.log" 2>&1; then
-        note "shipping config: $(grep -c '=matches_ci_arm_' \
-              "$BUILD/shipping-config.log") of 4 drawers match their cross arm"
-        grep '=KNOWN_DIVERGENCE' "$BUILD/shipping-config.log" |
-            while read -r l; do note "$l"; done
+        note "shipping config: $(grep -c '^declared_.*=CMakePresets.json' \
+              "$BUILD/shipping-config.log") drawers, one declaration each"
     else
         cat "$BUILD/shipping-config.log"
         fail "a shipped drawer is built in a configuration no cross arm compiles"
@@ -1378,6 +1372,11 @@ stage_cross() {
         fi
     done
 
+}
+
+# ----------------------------------------------------------- stackframes ----
+
+stage_stackframes() {
     # The stack every path in the shipping libraries needs, against a budget.
     # Its own build: -fstack-usage and -save-temps=obj change no code but are
     # in no configuration above, and the frames this bounds -- the DHCP/RA
@@ -3100,6 +3099,19 @@ stage_survey() {
 
 # ------------------------------------------------------------------ main ----
 
+# The workflow matrix is derived from this file rather than carrying a second
+# hand-written copy.  Keep the two deliberately unhosted entries out of the
+# hosted option matrix: default is built by tier1 and cpu68060 is the known
+# toolchain failure recorded by check-ci-arm-coverage.sh.
+if [ "${1:-}" = "--list-cross" ]; then
+    for entry in "${CROSS_CONFIGS[@]}"; do
+        name="${entry%%:*}"
+        case "$name" in default|cpu68060) continue ;; esac
+        printf '%s\n' "$name"
+    done
+    exit 0
+fi
+
 mkdir -p "$BUILD"
 
 #
@@ -3116,13 +3128,13 @@ mkdir -p "$BUILD"
 # named -- so `tools/ci.sh analyze` skipped and `AMINETXDUO_ANALYZE=1
 # tools/ci.sh` printed "analyze NOT RUN" and "all green" together.
 #
-# The release workflow does both, so nothing ships unanalysed. A default run
-# says out loud that it skipped, because a stage that goes quiet reads as
+# CI does both before producing a release candidate, so nothing ships
+# unanalysed. A default run says out loud that it skipped, because silence is
 # coverage it is not providing.
 #
 WANT=("$@")
 if [ ${#WANT[@]} -eq 0 ]; then
-    WANT=(host host32 clientshims cross web conformance survey)
+    WANT=(host host32 clientshims cross stackframes web conformance survey)
     # THE VARIABLE IS THE ASK.  Setting it and getting a run that prints
     # "analyze NOT RUN" is the mechanism behind every false green report this
     # gate has produced; the variable was necessary and not sufficient, and
@@ -3137,7 +3149,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|fetchtls|bridged|lossgate|smb|matrix|clientshims)
+        cross|stackframes|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|fetchtls|bridged|lossgate|smb|matrix|clientshims)
             stage_toolchain; break ;;
     esac
 done
@@ -3161,6 +3173,7 @@ for s in "${WANT[@]}"; do
         # command in a stage from taking the summary down with it.  It used to
         # be `|| true`, which threw the one thing the caller needed away.
         cross)       stage_cross || srrc=$? ;;
+        stackframes) stage_stackframes || srrc=$? ;;
         web)         stage_web || srrc=$? ;;
         analyze)     stage_analyze || srrc=$? ;;
         conformance) stage_conformance || srrc=$? ;;

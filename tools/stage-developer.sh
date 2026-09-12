@@ -71,7 +71,7 @@ done
 while IFS= read -r f; do
     f=${f#./}
     stage "$ROOT/developer/include/$f" "$DEST/include/$f"
-done < <(cd "$ROOT/developer/include" && find . -type f)
+done < <(cd "$ROOT/developer/include" && find . -type f ! -name '.*')
 stage "$ROOT/developer/sfd/aminetxduo_lib.sfd" "$DEST/sfd/aminetxduo_lib.sfd"
 stage "$ROOT/developer/sfd/tls_lib.sfd"        "$DEST/sfd/tls_lib.sfd"
 stage "$ROOT/developer/ReadMe"                 "$DEST/ReadMe"

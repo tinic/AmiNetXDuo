@@ -20,12 +20,11 @@ cmake --build build --parallel
 
 ## `tools/ci.sh` — everything CI runs
 
-`.github/workflows/ci.yml`, `emulator.yml` and `release.yml` all call this
-script and add only caching, a matrix and a job summary. Bare `tools/ci.sh` runs
-`host host32 cross web conformance survey` — everything needing neither an
-emulator nor a licensed ROM, less `analyze`. Stages can be picked in any
-combination; the release set is `host host32 analyze` then `cross web
-conformance` (`.github/workflows/release.yml:129`, `:243`).
+`.github/workflows/ci.yml` and `emulator.yml` call this script. Bare
+`tools/ci.sh` runs `host host32 clientshims cross stackframes web conformance
+survey` — every non-emulator stage except `analyze`. Stages can be combined.
+The release workflow promotes CI's exact candidate after checking its commit
+and digest; it does not compile.
 
 | Stage | What it does | Needs |
 |---|---|---|
@@ -33,6 +32,7 @@ conformance` (`.github/workflows/release.yml:129`, `:243`).
 | `host` | the pre-build gates, then builds the host test targets and runs `ctest`; the count is exact against `HOST_TESTS_EXPECTED` in `tools/ci.sh`, so adding a test turns CI red until that line is raised | nothing |
 | `host32` | the targets needing `sizeof(void*) == 4`: the two fuzzers, and the socket files whose static assertions pin the 4.4BSD `iovec`/`msghdr` shape | `-m32` (gcc-multilib) |
 | `cross` | every cross configuration in `CROSS_CONFIGS`, warnings fatal (`cmake/ci-warnings.cmake`) | toolchain |
+| `stackframes` | the shipping library stack-frame budget; separate because it is invariant across the option matrix | toolchain |
 | `web` | httpd's terminal page still matches the TypeScript it is generated from, and vendored xterm.js is untouched | node |
 | `analyze` | `tools/analyze.sh` — GCC `-fanalyzer` vs a triaged baseline — then `tools/cppcheck.sh` vs its baseline when cppcheck is installed, skipping that half when it is not. **Not in the default set** | toolchain |
 | `conformance` | builds `bsdsocktest` for m68k; running it is tier 2 | toolchain |

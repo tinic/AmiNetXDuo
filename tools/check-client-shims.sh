@@ -5,8 +5,8 @@
 #   tools/check-client-shims.sh
 #
 # clients/dropbear/build.sh puts -Werror=missing-prototypes on these, and that
-# build runs in .github/workflows/release.yml and nowhere else -- so until this
-# existed the gate failed a RELEASE and never a push.  Every function these
+# build once ran in the release workflow and nowhere else -- so until this
+# existed the gate failed a release and never a push.  Every function these
 # files define is an entry point somebody else calls: libc symbols the port
 # interposes, __wrap_ targets the linker redirects, and the two knobs in
 # clients/compat/amiga_compat.h.  A signature that drifts from the declaration
@@ -15,7 +15,7 @@
 # SIX OF THE SEVEN, and the seventh is not an oversight.  amiga_scp.c includes
 # "scpmisc.h", which lives in the Dropbear checkout, so it cannot be compiled
 # without third_party/dropbear and the generated options.h that go with it.
-# That one stays covered by the release build.  amiga_dropbear.c, which carries
+# That one stays covered by CI's candidate build.  amiga_dropbear.c, which carries
 # 33 of the 51 findings this gate was written for, needs nothing but the
 # toolchain and the tree.
 #

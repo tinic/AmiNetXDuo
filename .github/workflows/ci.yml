@@ -35,79 +35,95 @@ concurrency:
 
 jobs:
 
+  # One cheap job always runs, including for prose-only commits.  It also
+  # derives the option matrix from tools/ci.sh, so the workflow cannot carry
+  # a stale hand-written copy.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.changes.outputs.mode }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify the change
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: tools/ci-plan.sh "$BASE_SHA" "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Derive the option matrix
+        id: matrix
+        run: |
+          matrix=$(tools/ci.sh --list-cross | jq -Rsc 'split("\n") | map(select(length > 0))')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "mode=${{ steps.changes.outputs.mode }} matrix=$matrix" >> "$GITHUB_STEP_SUMMARY"
+
   # -fanalyzer over the tree, beside the rest rather than in front of it.
   analyze:
     name: static analysis
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Toolchain pin
-        id: pin
-        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the pinned m68k toolchain
-        id: toolchain-cache
-        uses: actions/cache@v4
+      - name: Set up the toolchain and compiler cache
+        uses: ./.github/actions/setup-amiga
         with:
-          path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
-
-      - name: Fetch the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-toolchain.sh
-
-      - name: The toolchain's crt0 is repaired
-        run: tools/fetch-toolchain.sh --check-crt0
-
-      - name: The toolchain's inline register ABI is repaired
-        run: tools/fetch-toolchain.sh --check-inlines
+          cache-profile: analyze
 
       - name: tools/ci.sh analyze
         run: AMINETXDUO_ANALYZE=1 tools/ci.sh analyze
 
-  # Every option arm, one runner each, at the same time as the job above.
-  # Not `needs:` -- a failure here reddens the run without putting these
-  # minutes back on the critical path, which is the point of splitting them.
+  # Every option arm, one runner each.  All depend only on the cheap planner,
+  # so they still fan out together and remain off the tier1 critical path.
   options:
     name: "cross: ${{ matrix.config }}"
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        config: [nolto, noipv6, nomdns, notls, nomcast, noasm, nonet68kasm, nodhcp,
-                 norxverify, nosack, ts, nxcounters, nowscale, log, census, minimal, if2,
-                 instr, noinline, symbols, tcpextra, pathswap, green, micro]
+        config: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Toolchain pin
-        id: pin
-        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the pinned m68k toolchain
-        id: toolchain-cache
-        uses: actions/cache@v4
+      - name: Set up the toolchain and compiler cache
+        uses: ./.github/actions/setup-amiga
         with:
-          path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
-
-      - name: Fetch the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-toolchain.sh
-
-      - name: The toolchain's crt0 is repaired
-        run: tools/fetch-toolchain.sh --check-crt0
-
-      - name: The toolchain's inline register ABI is repaired
-        run: tools/fetch-toolchain.sh --check-inlines
+          cache-profile: cross-${{ matrix.config }}
 
       - name: Build it
         run: AMINETXDUO_CI_CROSS="${{ matrix.config }}" tools/ci.sh cross
+
+  # stage_cross used to build this once per matrix arm.  It is invariant with
+  # respect to those arms and takes about 77 seconds, so run exactly one copy.
+  stackframes:
+    name: stack-frame budget
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up the toolchain and compiler cache
+        uses: ./.github/actions/setup-amiga
+        with:
+          cache-profile: stackframes
+
+      - name: Check stack frames
+        run: tools/ci.sh stackframes
 
   # ------------------------------------------------------------------------
   # Host tests + every cross configuration in tools/ci.sh's CROSS_CONFIGS +
@@ -115,6 +131,8 @@ jobs:
   # ------------------------------------------------------------------------
   tier1:
     name: build + host tests
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -132,47 +150,10 @@ jobs:
           tools/version.sh --env >> "$GITHUB_ENV"
           echo "### $(tools/version.sh --long)" >> "$GITHUB_STEP_SUMMARY"
 
-      # The key is read out of the script rather than copied into this file.
-      # It used to be duplicated here as a literal, which is a pin you can
-      # forget to update -- and a stale cache key is invisible: it just serves
-      # the wrong toolchain forever.
-      - name: Toolchain pin
-        id: pin
-        run: echo "sha=$(tools/fetch-toolchain.sh --print-sha)" >> "$GITHUB_OUTPUT"
-
-      # The key carries a hash of the crt0 repair as well as the toolchain
-      # pin: the cached tree is a REPAIRED tree, so it is only reusable by a
-      # build whose repair is the same one. Bumping a hand-written suffix was
-      # the first attempt and it went stale immediately -- a cache saved by
-      # the 4-file version of the script was restored by the 11-file version,
-      # which correctly refused to build on it.
-      - name: Cache the pinned m68k toolchain
-        id: toolchain-cache
-        uses: actions/cache@v4
+      - name: Set up the toolchain and compiler cache
+        uses: ./.github/actions/setup-amiga
         with:
-          path: ~/.cache/aminetxduo/toolchain
-          key: m68k-amigaos-gcc-16.2.0-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py') }}
-
-      # On a warm cache this does not run at all, so the mirror is touched
-      # once per pin change rather than once per build.
-      - name: Fetch the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        run: tools/fetch-toolchain.sh
-
-      # A cache restored from before the crt0 repair existed contains the
-      # BROKEN crt0, and the fetch above does not run on a hit -- so this is
-      # not belt-and-braces, it is the only thing standing between a warm
-      # cache and shipping commands that crash on return to the Shell. The
-      # key is versioned too, so an old cache is not reused in the first
-      # place; this catches the case where it is restored anyway.
-      - name: The toolchain's crt0 is repaired
-        run: tools/fetch-toolchain.sh --check-crt0
-
-      # Same reasoning for the NDK inlines: a warm cache from before the
-      # repair builds a Write() that reads its buffer pointer out of a
-      # register nobody wrote, and nothing else notices.
-      - name: The toolchain's inline register ABI is repaired
-        run: tools/fetch-toolchain.sh --check-inlines
+          cache-profile: tier1
 
       - name: Report the toolchain
         run: |
@@ -250,6 +231,8 @@ jobs:
   # ------------------------------------------------------------------------
   host-clang:
     name: host tests (macOS / clang)
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -268,6 +251,8 @@ jobs:
   # ------------------------------------------------------------------------
   shellcheck:
     name: shell scripts
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -284,6 +269,11 @@ jobs:
           # -e SC1091: the sourced toolchain resolver is found at run time.
           shellcheck -S warning -e SC1091 \
             tools/ci.sh \
+            tools/ci-plan.sh \
+            tools/check-ci-success.sh \
+            tools/check-release-candidate.sh \
+            tools/build-release.sh \
+            tools/stage-developer.sh \
             tools/check-release-ready.sh \
             tools/analyze.sh \
             tools/cppcheck.sh \
@@ -338,3 +328,102 @@ jobs:
             tools/nx-discard-scan.sh \
             tools/check-slot-clear.sh \
             install/test/run-workbench-cards.sh
+
+  package:
+    name: release candidate
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Derive the version
+        run: tools/version.sh --env >> "$GITHUB_ENV"
+
+      - name: Set up the toolchain and compiler cache
+        uses: ./.github/actions/setup-amiga
+        with:
+          cache-profile: release-shipping
+
+      - name: Install the archive writer
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*google*.sources
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jlha-utils
+
+      - name: Build and verify the candidate
+        run: tools/build-release.sh
+
+      - name: Upload the immutable candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: |
+            build/dist/*.lha
+            build/dist/release-candidate.txt
+          if-no-files-found: error
+          # Nightly installer E2E consumes this same candidate.  Keep enough
+          # history for a quiet main branch without rebuilding on that runner.
+          retention-days: 90
+          compression-level: 0
+
+  docs:
+    name: documentation gates
+    needs: plan
+    if: needs.plan.outputs.mode == 'docs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Check documentation and derived survey tables
+        run: |
+          tools/check-doc-budget.sh
+          tools/check-changelog-prose.sh
+          tools/ci.sh survey
+
+  # The stable required check.  Expensive jobs are allowed to be skipped only
+  # when the planner proved that every changed file is documentation.
+  gate:
+    name: tier 1 report
+    if: always()
+    needs: [plan, analyze, options, stackframes, tier1, host-clang, shellcheck, package, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          PLAN: ${{ needs.plan.result }}
+          ANALYZE: ${{ needs.analyze.result }}
+          OPTIONS: ${{ needs.options.result }}
+          STACKFRAMES: ${{ needs.stackframes.result }}
+          TIER1: ${{ needs.tier1.result }}
+          HOST_CLANG: ${{ needs.host-clang.result }}
+          SHELLCHECK: ${{ needs.shellcheck.result }}
+          PACKAGE: ${{ needs.package.result }}
+          DOCS: ${{ needs.docs.result }}
+        run: |
+          printf 'mode=%s plan=%s analyze=%s options=%s stackframes=%s tier1=%s host_clang=%s shellcheck=%s package=%s docs=%s\n' \
+            "$MODE" "$PLAN" "$ANALYZE" "$OPTIONS" "$STACKFRAMES" \
+            "$TIER1" "$HOST_CLANG" "$SHELLCHECK" "$PACKAGE" "$DOCS"
+          [ "$PLAN" = success ] || exit 1
+          case "$MODE" in
+            full)
+              [ "$ANALYZE" = success ] && [ "$OPTIONS" = success ] &&
+              [ "$STACKFRAMES" = success ] && [ "$TIER1" = success ] &&
+              [ "$HOST_CLANG" = success ] && [ "$SHELLCHECK" = success ] &&
+              [ "$PACKAGE" = success ] &&
+              [ "$DOCS" = skipped ]
+              ;;
+            docs)
+              [ "$DOCS" = success ] && [ "$ANALYZE" = skipped ] &&
+              [ "$OPTIONS" = skipped ] && [ "$STACKFRAMES" = skipped ] &&
+              [ "$TIER1" = skipped ] && [ "$HOST_CLANG" = skipped ] &&
+              [ "$SHELLCHECK" = skipped ] && [ "$PACKAGE" = skipped ]
+              ;;
+            *) echo "unknown CI mode: $MODE" >&2; exit 1 ;;
+          esac

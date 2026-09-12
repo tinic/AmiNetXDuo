@@ -1716,6 +1716,24 @@ add_subdirectory(src/rfb)
 # above a 68020 has a usable cycle model.  tools/profiler/CMakeLists.txt.
 add_subdirectory(tools/profiler)
 
+if(CMAKE_CROSSCOMPILING)
+    # The archive needs substantially less than the default ALL target, which
+    # also compiles every on-Amiga harness and benchmark.  Keep the payload
+    # boundary in CMake so the release builder cannot grow another hand-kept
+    # target list.  The smaller drawers contribute libraries only; commands,
+    # the profiler and the trust store always come from the full build.
+    add_custom_target(release_libraries)
+    add_dependencies(release_libraries
+        bsdsocket_library usergroup_library anxnet_device)
+
+    add_custom_target(release_payload)
+    add_dependencies(release_payload
+        release_libraries tools Profile profspin)
+    if(TARGET tls_library)
+        add_dependencies(release_payload tls_library certstore)
+    endif()
+endif()
+
 if(AMINETXDUO_TESTS)
     add_subdirectory(tests)
     # Diagnostic probes, built, never auto-run.  Two of them crash on
