@@ -1084,6 +1084,20 @@ static VOID term_runners_collect(VOID)
     }
 }
 
+/* Runners still holding a task: the current session's plus every abandoned
+   one that has not died yet. */
+static ULONG term_runners_live(VOID)
+{
+    const TermRunner *r;
+    ULONG             n = 0;
+
+    for (r = term_runners; r != NULL; r = r->rn_Next)
+        if (r->rn_Done == 0 || term_task_alive(r->rn_Task))
+            n++;
+
+    return n;
+}
+
 static BOOL term_runners_done(VOID)
 {
     TermRunner *r;
@@ -1345,7 +1359,10 @@ VOID http_term_mode_sent(VOID)
     term_mode_pending = 0;
 }
 
-static char term_st_buf[96];
+/* Five labels and five 32-bit numbers: 46 characters of label and up to 50 of
+   digits, so 96 was already within a few bytes of the worst case before
+   `shells=' was added. */
+static char term_st_buf[160];
 
 static ULONG term_st_put(ULONG at, const char *label, ULONG v)
 {
@@ -1367,6 +1384,13 @@ const char *http_term_stats_word(VOID)
     at = term_st_put(at, " wbytes=",      term_st_wbytes);
     at = term_st_put(at, " frames=",      term_st_frames);
     at = term_st_put(at, " fbytes=",      term_st_fbytes);
+
+    /* THE ONE NUMBER THAT SAYS WHETHER SHELLS ARE PILING UP.  A Shell that
+       will not stop is abandoned and the next visitor gets a fresh one, so a
+       leak shows only as the machine slowly going soft: `/' answers in
+       seconds rather than hundredths, and nothing says why.  Counting the
+       live runners makes it a number a drill can assert on. */
+    at = term_st_put(at, " shells=",      term_runners_live());
     term_st_buf[at] = '\0';
 
     return term_st_buf;
