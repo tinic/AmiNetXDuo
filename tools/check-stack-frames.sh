@@ -122,6 +122,73 @@ RX_EDGES=(
 # when no signal or process can be had -- 2212 measured.  bsd_NetStackControl
 # is 1868 now that the attach runs on the library's own stack; the margin is
 # the same eighth of a Shell stack the resolver rows keep.
+# THE OTHER HALF OF THE SAME ADDITION.  The rows above bound what the LIBRARY
+# uses on a Shell's stack.  What the COMMAND uses before it calls in had no row
+# at all, and the two add: a command reaches bsdsocket.library through the LVO
+# table, on its own stack, where -fstack-usage cannot see across the image
+# boundary.  This is the same gap, on the other side, that let
+# NETCTRL_INTERFACE_ADD want 3484 bytes of 4096 while the gate said clean.
+#
+# ONLY fetch swaps to a stack of its own (64 KB, for tls.library).  The other
+# 35 commands run on whatever the Shell gave them, which is 4096, and AmigaOS
+# has no MMU: an overrun corrupts and does not trap.
+#
+# WHAT THESE NUMBERS ARE, AND ARE NOT.  Each is the measured worst case rounded
+# up, so the gate fails on GROWTH.  That is what it can prove.  It does NOT
+# prove the composition is safe: adding a command's worst case to a library
+# budget is pessimistic, because OpenLibrary() is called near the top of main()
+# where the stack is shallow and not at the deepest point of it.  The sound
+# bound is the depth AT the call site plus the library's, which static data
+# does not give.  Ten commands are over the 1664 that bsd_lib_open's 2432
+# leaves of 4096 -- fetch by design, and these nine to be settled on the rig
+# with stack_test, which measures what is actually touched:
+#
+#   httpd 3136   ShowNetStatus 2660   Online 2156   AddNetInterface 2068
+#   Offline 2064   netstat 1976   nslookup 1912   CheckNetConfig 1900
+#   hostname 1724
+#
+# The brief for this work said ShowNetStatus main() was 1232 "measured by
+# hand".  It is 2660.  A budget set from that figure would have passed a
+# command with less headroom than the library it calls expects to find.
+COMMAND_BUDGETS=(
+    "ActivateAmiNetXDuo:128"
+    "AddNetInterface:2112"
+    "AddNetRoute:960"
+    "CheckNetConfig:1984"
+    "CheckNetDevice:512"
+    "ConfigureNetInterface:704"
+    "DeleteNetRoute:896"
+    "El3Diag:192"
+    "GetNetStatus:640"
+    "NetCapture:1216"
+    "NetSetup:1152"
+    "NetShutdown:512"
+    "NetTrace:1024"
+    "Offline:2112"
+    "Online:2240"
+    "RemoveNetInterface:448"
+    "ShowNetServices:1216"
+    "ShowNetStatus:2752"
+    "ToolsSmoke:1472"
+    "arp:576"
+    "fetch:3456"
+    "host:704"
+    "hostname:1792"
+    "httpd:3200"
+    "iperf:960"
+    "nc:960"
+    "netstat:2048"
+    "nslookup:1984"
+    "paysum:640"
+    "ping:1088"
+    "sntp:704"
+    "telnet:832"
+    "tftp:1344"
+    "traceroute:832"
+    "wbgrab:448"
+    "whois:896"
+)
+
 BUDGETS=(
     "bsdsocket:bsd_lib_open:2432"
     "bsdsocket:bsd_NetStackControl:2432"
@@ -185,8 +252,17 @@ if [ "$need_build" = 1 ]; then
         exit 2
     fi
 
+    # The commands too, and their target list comes from the CONFIGURED build
+    # rather than a grep of the CMakeLists: tool_censusprobe and friends exist
+    # only under options this arm does not set, and naming one that is not
+    # there stops the build with "No rule to make target".
+    _tools=$(cmake --build "$BUILD" --target help 2>/dev/null |
+             sed -n 's/^\.\.\. \(tool_[a-z_0-9]*\)$/\1/p' |
+             grep -vE '_check$|_page$' | tr '\n' ' ')
+
+    # shellcheck disable=SC2086
     if ! cmake --build "$BUILD" --parallel "$JOBS" \
-            --target bsdsocket_library tls_library \
+            --target bsdsocket_library tls_library $_tools \
             > "$BUILD-build.log" 2>&1; then
         say "stack_frames=skipped reason=build_failed log=$BUILD-build.log"
         exit 2
@@ -243,6 +319,59 @@ for row in "${BUDGETS[@]}"; do
         say "stack_frames_bytes binary=$lib root=$sym bytes=$got budget=$budget"
     fi
 done
+
+# ------------------------------------------------------- the commands ------
+#
+# LTO puts a command's frame data in the LINK directory, not the object one:
+# <output>.ltrans0.ltrans.{su,s}.  All 36 land in the same directory and each
+# has its own main(), so stack-depth.py -- which walks a directory -- has to be
+# given one command at a time or it sees 36 roots called main and answers 0.
+# That zero is what the "symbol_not_found" arm above would report, which is the
+# gate failing honestly rather than passing on nothing.
+tools_dir="$BUILD/src/tools"
+one="$BUILD/.one-command"
+
+for row in "${COMMAND_BUDGETS[@]}"; do
+    cmd=${row%%:*}
+    budget=${row##*:}
+
+    su="$tools_dir/$cmd.ltrans0.ltrans.su"
+    if [ ! -f "$su" ]; then
+        say "stack_frames=FAILED command=$cmd reason=no_frame_data"
+        say "  expected $su -- the command did not build, or LTO is off and"
+        say "  the data is somewhere else.  Not measuring it is not a pass."
+        rc=1
+        continue
+    fi
+
+    rm -rf "$one"; mkdir -p "$one"
+    cp "$tools_dir/$cmd".ltrans*.ltrans.su "$tools_dir/$cmd".ltrans*.ltrans.s \
+       "$one/" 2>/dev/null
+
+    out=$("$PYTHON" "$DEPTH" --quiet "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+          "$one" main 2>/dev/null)
+    got=${out##*worst_case_bytes=}
+    got=${got%%[!0-9]*}
+
+    if [ -z "$got" ] || [ "$got" = 0 ]; then
+        say "stack_frames=FAILED command=$cmd reason=main_not_found"
+        rc=1
+        continue
+    fi
+
+    checked=$((checked + 1))
+    if [ "$got" -gt "$budget" ]; then
+        say "stack_frames=FAILED command=$cmd bytes=$got budget=$budget"
+        say "  A Shell gives 4096 and only fetch swaps to a stack of its own."
+        say "  The deepest path:"
+        "$PYTHON" "$DEPTH" "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+            "$one" main 2>/dev/null | sed -n '2,$p' | sed 's/^/  /'
+        rc=1
+    else
+        say "stack_frames_bytes command=$cmd bytes=$got budget=$budget"
+    fi
+done
+rm -rf "$one"
 
 if [ "$rc" = 0 ]; then
     say "stack_frames=clean roots=$checked"
