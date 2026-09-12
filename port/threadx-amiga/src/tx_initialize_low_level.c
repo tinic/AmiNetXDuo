@@ -1547,7 +1547,12 @@ UINT         status;
        above this line is allowed to refuse and leave it adopted.  */
     if (adopted != TX_NULL)
     {
-        (VOID) tx_amiga_orphan_thread(adopted);
+        /* CLEANUP.  Its refusals are TX_CALLER_ERROR for a thread that is not
+           this Task's and TX_PTR_ERROR for a null one, and `adopted\' came out
+           of this Task's own adoption check above, so neither applies.  Past
+           this line the kernel is coming down whatever it answers: there is
+           nothing left to refuse on behalf of. */
+        AMI_NX_CLEANUP(tx_amiga_orphan_thread(adopted));
     }
 
     /* ---- 1. the tick ----------------------------------------------------- */
@@ -1585,8 +1590,8 @@ UINT         status;
            safe to leave behind.  The ordinary reaper wakes it.  */
         ULONG zombies_before =  _tx_amiga_zombies_live;
 
-        (VOID) _tx_thread_terminate(&_tx_timer_thread);
-        (VOID) _tx_thread_delete(&_tx_timer_thread);
+        AMI_NX_ONLY_SUCCESS(_tx_thread_terminate(&_tx_timer_thread));
+        AMI_NX_CLEANUP(_tx_thread_delete(&_tx_timer_thread));
 
         if (_tx_amiga_zombies_live != zombies_before)
         {

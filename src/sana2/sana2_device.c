@@ -5,6 +5,7 @@
  */
 
 #include "sana2_internal.h"
+#include "aminetxduo/nxstatus.h"
 #include "aminetxduo/anxs2ext.h"
 
 #include "aminetxduo/anxnet.h"
@@ -131,8 +132,12 @@ LONG ami_sana2_do_io(struct IORequest *req)
         SendIO(req);
         while (CheckIO(req) == NULL)
         {
-            (VOID)tx_amiga_green_wait(
-                1UL << req->io_Message.mn_ReplyPort->mp_SigBit);
+            /* EITHER WAY: the mask that comes back is not the answer.  A green
+           wait returns whatever signals arrived, zero if it refused, and the
+           CheckIO() the loop re-tests is the authority in every case -- a
+           spurious or empty return simply goes round again. */
+            AMI_NX_EITHER_WAY(tx_amiga_green_wait(
+                1UL << req->io_Message.mn_ReplyPort->mp_SigBit));
         }
         (VOID)WaitIO(req);
         return (LONG)(BYTE)req->io_Error;
@@ -385,7 +390,11 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
        direct WaitIO() in that window would park the entire realm. */
     while (CheckIO((struct IORequest *)&req) == NULL)
     {
-        (VOID)tx_amiga_green_wait(1UL << port->mp_SigBit);
+        /* EITHER WAY: the mask that comes back is not the answer.  A green
+           wait returns whatever signals arrived, zero if it refused, and the
+           CheckIO() the loop re-tests is the authority in every case -- a
+           spurious or empty return simply goes round again. */
+        AMI_NX_EITHER_WAY(tx_amiga_green_wait(1UL << port->mp_SigBit));
     }
 #endif
     WaitIO((struct IORequest *)&req);

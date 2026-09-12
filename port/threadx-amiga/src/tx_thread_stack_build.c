@@ -137,8 +137,14 @@ struct _tx_amiga_ctrl   *ctrl;
 
     TXTRACE("TXT entry task=%08lx thr=%08lx", (LONG) FindTask((STRPTR) 0), (LONG) thread_ptr);
 
-    /* Do not touch a single ThreadX structure until the scheduler says so.  */
-    (VOID) _tx_amiga_thread_park(thread_ptr);
+    /* Do not touch a single ThreadX structure until the scheduler says so.
+
+       EXPECTED: TX_TRUE and nothing else.  Park's TX_FALSE return lives in its
+       `no control block\' branch, and this entry point runs only on a Task the
+       port created, which has one -- it came out of ctrl above.  A Task with a
+       control block that is told to die is destroyed inside park and never
+       returns here at all.  */
+    AMI_NX_ONLY_SUCCESS(_tx_amiga_thread_park(thread_ptr));
 
     TXTRACE("TXT dispatched task=%08lx", (LONG) FindTask((STRPTR) 0));
 

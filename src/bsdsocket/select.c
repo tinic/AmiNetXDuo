@@ -194,7 +194,16 @@ static VOID bsd_listen_refill(AmiSocket *listener)
         if (status != NX_SUCCESS && status != NX_CONNECTION_PENDING)
             continue;
 
-        (VOID)nx_tcp_server_socket_accept(&p->as_Nx.tcp, NX_NO_WAIT);
+        /* OPTIONAL.  With NX_NO_WAIT the arm answers NX_IN_PROGRESS, or
+           NX_SUCCESS if a connection landed between the relisten above and
+           here.  Anything else is NX_NOT_LISTEN_STATE: the socket left the
+           listen state in that window and the slot is armed nowhere, so the
+           next connection to this port is dropped with no other trace. */
+        status = nx_tcp_server_socket_accept(&p->as_Nx.tcp, NX_NO_WAIT);
+        if (status != NX_IN_PROGRESS && status != NX_SUCCESS)
+            AMI_WARN("bsdsocket: port %ld was relistened but not armed (%ld); "
+                     "the next connection to it is dropped",
+                     (long)listener->as_ListenPort, (long)status);
         break;
     }
 

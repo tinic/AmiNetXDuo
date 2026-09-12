@@ -8,6 +8,7 @@
  */
 
 #include "netstack_internal.h"
+#include "aminetxduo/nxstatus.h"
 
 #include <proto/exec.h>
 
@@ -396,10 +397,15 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
     if (goodbye_queued &&
         tx_amiga_caller_is_thread() != (UINT)TX_FALSE)
     {
-        (VOID)tx_thread_sleep(AMI_MDNS_GOODBYE_WAIT_TICKS);
+        /* EITHER WAY: TX_SUCCESS, or TX_CALLER_ERROR, which the
+           tx_amiga_caller_is_thread() test above is there to exclude.  If it
+           still refused, the goodbye does not make it onto the wire and the
+           delete below happens regardless -- which is also what a successful
+           sleep leads to. */
+        AMI_NX_EITHER_WAY(tx_thread_sleep(AMI_MDNS_GOODBYE_WAIT_TICKS));
     }
 
-    (VOID)nx_mdns_delete(&ns->ns_Mdns);
+    AMI_NX_CLEANUP(nx_mdns_delete(&ns->ns_Mdns));
     ns->ns_MdnsCreated = FALSE;
     ns->ns_MdnsClaimed = FALSE;
 

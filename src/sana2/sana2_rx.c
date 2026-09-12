@@ -7,6 +7,7 @@
  */
 
 #include "sana2_internal.h"
+#include "aminetxduo/nxstatus.h"
 #include "aminetxduo/budget.h"
 
 /* tx_amiga_stack_in_use(), for the reader stacks. */
@@ -1639,7 +1640,11 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * running the IP thread.  There is no baton bracket on this path, so
          * the probe's baton leg reads zero here by design.
          */
-        (VOID)tx_amiga_green_wait(rx->wake_mask | rx->reap_mask);
+        /* EITHER WAY: the mask that comes back is not read.  The loop
+           re-tests the port and the reap list on the next pass, and they are
+           the authority whether this returned the signals, none of them, or
+           refused outright. */
+        AMI_NX_EITHER_WAY(tx_amiga_green_wait(rx->wake_mask | rx->reap_mask));
 #else
         /*
          * Block ONLY when there is nothing to take.  The bracket is a

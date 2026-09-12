@@ -141,7 +141,8 @@ int http_ws_live_ping_due(unsigned long progress, int pinged,
 
 /* SHA-1, which the accept is built on. Implemented in httpsha1.c over NetX
    Duo's own SHA-1, because this file must build with nothing but a C compiler. */
-void http_ws_sha1(const unsigned char *data, unsigned long len,
+/* 1 when `out' holds the digest, 0 when it does not. */
+int  http_ws_sha1(const unsigned char *data, unsigned long len,
                   unsigned char out[20]);
 
 #endif /* AMINETXDUO_HTTPWS_H */

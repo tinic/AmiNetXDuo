@@ -4,6 +4,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/nxstatus.h"
 
 #include "aminetxduo/config.h"
 
@@ -398,9 +399,19 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
         }
         else
         {
-            (VOID)nx_ip_static_route_delete(ip, req.brr_Dest, mask);
-            status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
-                                            req.brr_Gateway);
+            /*
+             * REQUIRED, and this is the reason the delete is here at all.
+             * nx_ip_static_route_add() finds an existing entry by
+             * (dest, mask), updates ONLY its next hop and returns NX_SUCCESS;
+             * it never touches nx_ip_routing_entry_ip_interface.  So a delete
+             * that did not happen makes the add below report success with the
+             * route still on the old interface, and the caller is told a
+             * change took that did not.
+             */
+            status = nx_ip_static_route_delete(ip, req.brr_Dest, mask);
+            if (status == NX_SUCCESS)
+                status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
+                                                req.brr_Gateway);
         }
 #else
         bsd_nx_leave(SocketBase);

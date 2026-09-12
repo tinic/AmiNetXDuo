@@ -172,8 +172,19 @@ LONG tls_server_identity(TLSConnection *conn, CONST_STRPTR cert_path,
      */
     if (key_type == TLS_KEY_RSA)
     {
-        (VOID)_nx_secure_tls_session_protocol_version_override(
-                  &conn->tc_Session, NX_SECURE_TLS_VERSION_TLS_1_2);
+        /*
+         * REQUIRED, and this function can say so: an RSA identity is pinned to
+         * TLS 1.2 on purpose, and if the override does not take, the session
+         * offers 1.3 with a key exchange this build does not complete.  The
+         * handshake then fails somewhere that says nothing about why, so the
+         * refusal happens here instead.  (tls.library has no log to warn
+         * into -- every status in it was discarded for that reason -- so the
+         * only honest report is the return value.)
+         */
+        if (_nx_secure_tls_session_protocol_version_override(
+                &conn->tc_Session, NX_SECURE_TLS_VERSION_TLS_1_2)
+                    != NX_SUCCESS)
+            return TLS_ERR_INTERNAL;
     }
 #endif
 

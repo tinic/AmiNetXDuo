@@ -193,7 +193,22 @@ VOID        *stack_start;
 
     /* Slow path: somebody else holds the baton or outranks us.  Wait for it.  */
     _tx_amiga_wake_scheduler();
-    (VOID) _tx_amiga_thread_park(thread_ptr);
+
+    /* REQUIRED.  Park answers TX_FALSE when the Task was marked to die while it
+       waited: it sets TX_AMIGA_THREAD_ORPHANED and hands control back so the
+       caller can unwind.  Returning TX_SUCCESS after that tells the application
+       it is now a ThreadX thread while the flags say it is not, and every caller
+       goes on to use the TX_THREAD.
+
+       Unreachable today -- the only writer of TX_AMIGA_THREAD_DIE is
+       _tx_amiga_reap(), which returns before setting it when the Task has no
+       control block, and an adopted Task never has one -- so this costs a
+       compare against a reaper that grows a second path.  The teardown is that
+       reaper's, not ours: it owns the TX_THREAD and the handshake signal.  */
+    if (_tx_amiga_thread_park(thread_ptr) == ((UINT) TX_FALSE))
+    {
+        return(TX_NOT_DONE);
+    }
 
     return(TX_SUCCESS);
 }
@@ -244,7 +259,7 @@ UINT         wake;
     /* The core lock stays held across the suspend: _tx_thread_system_state is one
        global that every Task reads, so a window with it raised and task switching
        enabled makes other Tasks look like ISRs and fails their socket calls.  */
-    (VOID) _tx_thread_suspend(thread_ptr);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_suspend(thread_ptr));
 
     _tx_thread_system_state--;
 
@@ -305,7 +320,7 @@ struct Task *me;
     _tx_thread_system_state++;
 
     /* Held across the resume, for the reason tx_amiga_adopt_suspend() gives.  */
-    (VOID) _tx_thread_resume(thread_ptr);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_resume(thread_ptr));
 
     _tx_thread_system_state--;
 
@@ -387,7 +402,7 @@ UINT         taken;
 
     _tx_thread_system_state++;
 
-    (VOID) _tx_thread_resume(thread_ptr);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_resume(thread_ptr));
 
     /* The adopt fast-path condition, minus the system_state term (ours is
        the only raise, and it comes back down either way).  */
@@ -400,7 +415,7 @@ UINT         taken;
 
         /* The resume surfaced somebody who outranks us.  Put the thread back;
            execute_ptr is recomputed by the suspend under this same Forbid().  */
-        (VOID) _tx_thread_suspend(thread_ptr);
+        AMI_NX_ONLY_SUCCESS(_tx_thread_suspend(thread_ptr));
         _tx_thread_system_state--;
         Permit();
         return(TX_NOT_DONE);
@@ -481,8 +496,8 @@ BYTE         sig;
     /* The core lock stays held, for the reason tx_amiga_adopt_suspend() gives.
        _tx_amiga_reap() is the one thing under delete that Wait()s, and it returns
        at its first test for an adopted thread, so nothing here blocks.  */
-    (VOID) _tx_thread_terminate(thread_ptr);
-    (VOID) _tx_thread_delete(thread_ptr);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_terminate(thread_ptr));
+    AMI_NX_CLEANUP(_tx_thread_delete(thread_ptr));
 
     _tx_thread_system_state--;
 
@@ -587,8 +602,8 @@ UINT         wake;
        behalf now that we are nobody.  Core lock held across it, as in discard.  */
     _tx_thread_system_state++;
 
-    (VOID) _tx_thread_terminate(thread_ptr);
-    (VOID) _tx_thread_delete(thread_ptr);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_terminate(thread_ptr));
+    AMI_NX_CLEANUP(_tx_thread_delete(thread_ptr));
 
     _tx_thread_system_state--;
 

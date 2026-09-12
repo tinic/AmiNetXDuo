@@ -9,6 +9,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/nxstatus.h"
 #include "aminetxduo/budget.h"
 
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
@@ -47,18 +48,24 @@ VOID bsd_rxdirect_pump(AmiSocket *sock, BOOL may_release)
             break;
         }
 
+        /* Judged by length, which is zero going in: a failure leaves it
+           zero, take below becomes zero, and nothing is moved. */
         length = 0;
-        (VOID)nx_packet_length_get(packet, &length);
+        AMI_NX_BY_OUTPUT(nx_packet_length_get(packet, &length));
 
         take = sock->as_RxDWant - sock->as_RxDFilled;
         if (take > length)
             take = length;
 
+        /* Judged by moved, zero going in and read on the next line: an
+           extract that did not happen advances as_RxDFilled by nothing and
+           leaves the packet pending, which is the same handling a short
+           extract gets. */
         moved = 0;
         if (take > 0)
-            (VOID)nx_packet_data_extract_offset(
+            AMI_NX_BY_OUTPUT(nx_packet_data_extract_offset(
                       packet, 0, sock->as_RxDDst + sock->as_RxDFilled,
-                      take, &moved);
+                      take, &moved));
 
         sock->as_RxDFilled += moved;
 

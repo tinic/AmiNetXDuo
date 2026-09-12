@@ -5,6 +5,7 @@
  */
 
 #include "netstack_internal.h"
+#include "aminetxduo/nxstatus.h"
 
 #include <exec/memory.h>
 #include <stddef.h>
@@ -52,6 +53,6 @@ VOID ami_ns_client_pool_delete(AmiNsClientPoolBlock **owner)
 
     block = *owner;
     *owner = NULL;
-    (VOID)nx_packet_pool_delete(&block->pool);
+    AMI_NX_CLEANUP(nx_packet_pool_delete(&block->pool));
     ami_free(block);
 }

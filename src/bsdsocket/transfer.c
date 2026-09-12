@@ -6,6 +6,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/nxstatus.h"
 #include "aminetxduo/budget.h"
 #include "netmonitor.h"
 #include "packet_extract.h"
@@ -376,7 +377,8 @@ LONG bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr,
         ULONG next_hop = 0;
 
         tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        (VOID)_nx_ip_route_find(ip, addr->nxd_ip_address.v4, &iface, &next_hop);
+        /* Judged by iface, which is NX_NULL going in and tested below. */
+        AMI_NX_BY_OUTPUT(_nx_ip_route_find(ip, addr->nxd_ip_address.v4, &iface, &next_hop));
         tx_mutex_put(&ip->nx_ip_protection);
     }
 

@@ -5,6 +5,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/nxstatus.h"
 
 #include "nx_ipv4.h"
 
@@ -799,8 +800,13 @@ NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why)
 
         if (packet != NX_NULL)
         {
+            /* EITHER WAY: TX_SUCCESS, or TX_NO_INSTANCE when the count is
+               already zero.  The semaphore only wakes a blocked reader; the
+               queue this packet came off is the truth, and it has already
+               been taken. */
             if (sock->as_RawSemOk)
-                (VOID)tx_semaphore_get(&sock->as_RawSem, TX_NO_WAIT);
+                AMI_NX_EITHER_WAY(tx_semaphore_get(&sock->as_RawSem,
+                                                   TX_NO_WAIT));
 
             return packet;
         }
@@ -916,8 +922,13 @@ VOID bsd_raw_revalidate_endpoint(AmiSocket *sock)
         {
             nx_packet_release(packet);
 
+            /* EITHER WAY: TX_SUCCESS, or TX_NO_INSTANCE when the count is
+               already zero.  The semaphore only wakes a blocked reader; the
+               queue this packet came off is the truth, and it has already
+               been taken. */
             if (sock->as_RawSemOk)
-                (VOID)tx_semaphore_get(&sock->as_RawSem, TX_NO_WAIT);
+                AMI_NX_EITHER_WAY(tx_semaphore_get(&sock->as_RawSem,
+                                                   TX_NO_WAIT));
         }
     }
 

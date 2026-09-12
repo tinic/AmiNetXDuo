@@ -6,6 +6,7 @@
  */
 
 #include "netstack_internal.h"
+#include "aminetxduo/nxstatus.h"
 #include "netstack_dns_domain.h"
 #include "netstack_dns_status.h"
 #include "netstack_retry.h"
@@ -466,7 +467,14 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
                 names, sizeof(sc->names));
         }
 
-        (VOID)tx_mutex_put(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex);
+        /*
+         * REQUIRED.  This is the release half of the client mutex taken
+         * above.  A put that does not happen leaves the DHCPv6 client locked
+         * against itself, and the next thing to want it waits for ever, so it
+         * is worth a line in the log rather than a silent cast.
+         */
+        if (tx_mutex_put(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex) != TX_SUCCESS)
+            AMI_ERROR("netstack: the DHCPv6 client mutex was not released");
 
         /*
          * The domain list is the only thing this can have lost, so it is the only
@@ -1340,7 +1348,7 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
     {
         AMI_ERROR("netstack: DNS private packet pool failed (%ld)",
                   (long)status);
-        (VOID)nx_dns_delete(&ns->ns_Dns);
+        AMI_NX_CLEANUP(nx_dns_delete(&ns->ns_Dns));
         ns->ns_DnsCreated = FALSE;
         ami_ns_client_pool_delete(&ns->ns_DnsPool);
         return AMI_NET_ERR_KERNEL;
@@ -1403,7 +1411,7 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns)
     if (ns == NULL || !ns->ns_DnsCreated)
         return;
 
-    (VOID)nx_dns_delete(&ns->ns_Dns);
+    AMI_NX_CLEANUP(nx_dns_delete(&ns->ns_Dns));
     ns->ns_DnsCreated = FALSE;
 }
 

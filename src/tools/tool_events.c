@@ -67,6 +67,19 @@ static const ToolEventRow tool_event_rows[] =
       "because that address is on no network this machine is on",
       "NetX Duo status" },
 
+    { NETEVENT_ADDR_REFUSED,
+      "this interface would not take the address it was configured with, and "
+      "is not counted as configured",
+      "NetX Duo status" },
+    { NETEVENT_DHCP_UNREPORTED,
+      "DHCP will not say when it binds, so a lease can arrive that nothing "
+      "acts on and anything waiting for an address goes on waiting",
+      "NetX Duo status" },
+    { NETEVENT_ADDR_UNREPORTED,
+      "nothing will be told when an address changes, so a change is noticed "
+      "by polling or not at all",
+      "NetX Duo status" },
+
     { NETEVENT_OUT_OF_SERVICE,
       "the device went out of service and the link was marked down",
       NULL },

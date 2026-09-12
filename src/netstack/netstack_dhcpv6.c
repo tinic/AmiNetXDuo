@@ -14,6 +14,7 @@
  */
 
 #include "netstack_internal.h"
+#include "aminetxduo/nxstatus.h"
 #include "dhcpv6_wire.h"
 
 #include "nx_ipv6.h"
@@ -162,7 +163,11 @@ static VOID ami_ns6_ra_flags(NX_IP *ip_ptr, UINT ra_flag)
 
     ns->ns_Dhcpv6Asked = TRUE;
 
-    (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, want, TX_OR);
+    /* REQUIRED.  The worker does the asking; a flag that is not set is a
+       request nobody ever acts on, and ns_Dhcpv6Asked above already says it
+       was made, so nothing asks again. */
+    if (tx_event_flags_set(&ns->ns_Dhcpv6Events, want, TX_OR) != TX_SUCCESS)
+        AMI_ERROR("netstack: the DHCPv6 worker was not told to start");
 }
 
 /* A create succeeded but the object could not be configured: delete every
@@ -172,7 +177,7 @@ static LONG ami_ns6_dhcp_discard_partial(AmiNetStack *ns)
 {
     if (ns != NULL && ns->ns_Dhcpv6Created)
     {
-        (VOID)nx_dhcpv6_client_delete(&ns->ns_Dhcpv6);
+        AMI_NX_CLEANUP(nx_dhcpv6_client_delete(&ns->ns_Dhcpv6));
         ns->ns_Dhcpv6Created = FALSE;
         ami_netstack_ipv6_reclaim_notify(ns);
     }
@@ -482,15 +487,25 @@ VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns)
            router: creating the client and moving it to SENDING_SOLICIT blocks,
            and the bring-up path is the one thing this must not cost. */
         ns->ns_Dhcpv6Asked = TRUE;
-        (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, AMI_DHCPV6_EV_STATEFUL,
-                                 TX_OR);
+        /* REQUIRED, as above: CONFIGURE6=DHCP is an outright request, and it
+           is this flag that carries it to the worker. */
+        if (tx_event_flags_set(&ns->ns_Dhcpv6Events, AMI_DHCPV6_EV_STATEFUL,
+                               TX_OR) != TX_SUCCESS)
+            AMI_ERROR("netstack: CONFIGURE6=DHCP was not passed to the "
+                      "DHCPv6 worker");
         AMI_INFO("netstack: DHCPv6 asked for outright by CONFIGURE6");
         return;
     }
 
     /* AUTO.  Nothing is created and nothing is sent until a router
        advertisement asks for it. */
-    (VOID)nxd_icmpv6_ra_flag_callback_set(&ns->ns_Ip, ami_ns6_ra_flags);
+    /* REQUIRED.  Under AUTO this callback is the only thing that ever starts
+       DHCPv6: without it the router's advertisement arrives and nothing reads
+       the flags, so the wait never ends. */
+    if (nxd_icmpv6_ra_flag_callback_set(&ns->ns_Ip, ami_ns6_ra_flags)
+            != NX_SUCCESS)
+        AMI_ERROR("netstack: the router-advertisement flags will not be read; "
+                  "DHCPv6 will never be asked for under CONFIGURE6=AUTO");
 
     AMI_INFO("netstack: DHCPv6 ready, waiting for the router to ask for it");
 }
@@ -601,7 +616,10 @@ VOID ami_netstack_dhcpv6_resume(AmiNetStack *ns, UWORD interface_index)
 
     event = (action == AMI_DHCPV6_ACT_STATEFUL)
                 ? AMI_DHCPV6_EV_STATEFUL : AMI_DHCPV6_EV_STATELESS;
-    (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, event, TX_OR);
+    /* REQUIRED, as above. */
+    if (tx_event_flags_set(&ns->ns_Dhcpv6Events, event, TX_OR) != TX_SUCCESS)
+        AMI_ERROR("netstack: a router advertisement asked for DHCPv6 and the "
+                  "worker was not told");
 }
 
 /* The client's own nx_dhcpv6_state, NOT ns_Dhcpv6State: that mirror is written
@@ -693,14 +711,14 @@ VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
     /* The RA callback first: it reaches ns_Dhcpv6Events and runs on the IP
        thread, which is still going. */
     if (ns->ns_Ipv6Enabled && ns->ns_IpCreated)
-        (VOID)nxd_icmpv6_ra_flag_callback_set(&ns->ns_Ip, NX_NULL);
+        AMI_NX_CLEANUP(nxd_icmpv6_ra_flag_callback_set(&ns->ns_Ip, NX_NULL));
 
     ns->ns_Dhcpv6WorkReady = FALSE;
 
     if (ns->ns_Dhcpv6EventsReady)
     {
-        (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, AMI_DHCPV6_EV_QUIT,
-                                 TX_OR);
+        AMI_NX_CLEANUP(tx_event_flags_set(&ns->ns_Dhcpv6Events, AMI_DHCPV6_EV_QUIT,
+                                 TX_OR));
     }
 
     if (ns->ns_Dhcpv6Work.tx_thread_id != 0)
@@ -728,13 +746,13 @@ VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
             }
         }
 
-        (VOID)tx_thread_terminate(&ns->ns_Dhcpv6Work);
-        (VOID)tx_thread_delete(&ns->ns_Dhcpv6Work);
+        AMI_NX_CLEANUP(tx_thread_terminate(&ns->ns_Dhcpv6Work));
+        AMI_NX_CLEANUP(tx_thread_delete(&ns->ns_Dhcpv6Work));
     }
 
     if (ns->ns_Dhcpv6EventsReady)
     {
-        (VOID)tx_event_flags_delete(&ns->ns_Dhcpv6Events);
+        AMI_NX_CLEANUP(tx_event_flags_delete(&ns->ns_Dhcpv6Events));
         ns->ns_Dhcpv6EventsReady = FALSE;
     }
 
@@ -742,10 +760,10 @@ VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
     {
         if (ns->ns_Dhcpv6Started)
         {
-            (VOID)nx_dhcpv6_stop(&ns->ns_Dhcpv6);
+            AMI_NX_CLEANUP(nx_dhcpv6_stop(&ns->ns_Dhcpv6));
             ns->ns_Dhcpv6Started = FALSE;
         }
-        (VOID)nx_dhcpv6_client_delete(&ns->ns_Dhcpv6);
+        AMI_NX_CLEANUP(nx_dhcpv6_client_delete(&ns->ns_Dhcpv6));
         ns->ns_Dhcpv6Created = FALSE;
     }
 

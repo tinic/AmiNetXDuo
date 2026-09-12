@@ -9,6 +9,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/nxstatus.h"
 #include "interfaces.h"
 #include "opt_time.h"
 
@@ -236,10 +237,21 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 {
                     if (bsd_nx_enter(SocketBase) != 0)
                         return bsd_fail(SocketBase, AMI_ENETDOWN);
-                    (VOID)nx_tcp_socket_reuse_address_set(&sock->as_Nx.tcp,
-                                                          (value != 0) ? NX_TRUE
-                                                                       : NX_FALSE);
-                    bsd_nx_leave(SocketBase);
+                    /*
+                      * REQUIRED.  setsockopt() answering 0 is a promise the
+                      * option is in force; discarding this made that promise
+                      * whether or not it was kept.
+                      */
+                    {
+                        UINT st = nx_tcp_socket_reuse_address_set(
+                                      &sock->as_Nx.tcp,
+                                      (value != 0) ? NX_TRUE : NX_FALSE);
+
+                        bsd_nx_leave(SocketBase);
+
+                        if (st != NX_SUCCESS)
+                            return bsd_fail(SocketBase, AMI_EINVAL);
+                    }
                 }
                 return 0;
 
@@ -326,10 +338,22 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 {
                     if (bsd_nx_enter(SocketBase) != 0)
                         return bsd_fail(SocketBase, AMI_ENETDOWN);
-                    (VOID)nx_tcp_socket_receive_queue_max_set(
-                        &sock->as_Nx.tcp,
-                        bsd_opt_packets(value, NX_TCP_MAXIMUM_RX_QUEUE));
-                    bsd_nx_leave(SocketBase);
+                    /*
+                      * REQUIRED.  setsockopt() answering 0 is a promise the
+                      * option is in force, and docs/CONFORMANCE.md says this
+                      * one IS applied; a discarded failure made both untrue.
+                      */
+                    {
+                        UINT st = nx_tcp_socket_receive_queue_max_set(
+                                      &sock->as_Nx.tcp,
+                                      bsd_opt_packets(value,
+                                                      NX_TCP_MAXIMUM_RX_QUEUE));
+
+                        bsd_nx_leave(SocketBase);
+
+                        if (st != NX_SUCCESS)
+                            return bsd_fail(SocketBase, AMI_EINVAL);
+                    }
                 }
 #endif
                 if ((sock->as_Flags & (ASF_UDP | ASF_DELETED)) == ASF_UDP &&
@@ -965,7 +989,9 @@ static BOOL bsd_v4_source_for(AmiSocket *sock, ULONG *addr_out)
             return FALSE;
 
         tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        (VOID)_nx_ip_route_find(ip, peer, &nxif, &next_hop);
+        /* Judged by nxif: NX_NULL going in, and the validity test below
+           rejects anything route_find left that is not a usable interface. */
+        AMI_NX_BY_OUTPUT(_nx_ip_route_find(ip, peer, &nxif, &next_hop));
         tx_mutex_put(&ip->nx_ip_protection);
     }
 

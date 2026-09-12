@@ -11,6 +11,7 @@
 #define AMINETXDUO_BSDSOCKET_PACKET_EXTRACT_H
 
 #include "nx_api.h"
+#include "aminetxduo/nxstatus.h"
 
 #include <string.h>
 
@@ -19,8 +20,9 @@ static inline ULONG bsd_packet_length(const NX_PACKET *packet)
 #ifdef TX_ENABLE_EVENT_TRACE
     ULONG length = 0;
 
+    /* Judged by length, which is zero going in and is what is returned. */
     if (packet != NX_NULL)
-        (VOID)nx_packet_length_get((NX_PACKET *)packet, &length);
+        AMI_NX_BY_OUTPUT(nx_packet_length_get((NX_PACKET *)packet, &length));
 
     return length;
 #else

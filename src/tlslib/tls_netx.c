@@ -27,6 +27,7 @@
  */
 
 #include "tls_internal.h"
+#include "aminetxduo/nxstatus.h"
 
 #include <exec/semaphores.h>
 #include <proto/exec.h>
@@ -134,7 +135,7 @@ UINT _nx_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
     {
         LONG err = (got < 0) ? tls_sock_errno(transport->tt_SocketBase) : 0;
 
-        (VOID)_nx_packet_release(packet);
+        AMI_NX_CLEANUP(_nx_packet_release(packet));
 
         if (got == 0)
         {
@@ -234,7 +235,7 @@ UINT _nx_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
 
     /* NetX Duo's contract: the stack owns the packet once the send has
        succeeded, and the caller releases it only on failure. */
-    (VOID)_nx_packet_release(packet_ptr);
+    AMI_NX_CLEANUP(_nx_packet_release(packet_ptr));
 
     return NX_SUCCESS;
 }

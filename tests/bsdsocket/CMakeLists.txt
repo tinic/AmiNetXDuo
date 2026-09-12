@@ -366,8 +366,12 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_extract_offset.c"
         "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_data_extract_offset.c")
 
+    # include/ as well as the shim: packet_extract.h names a class from
+    # <aminetxduo/nxstatus.h> for the status it does not read.  The shim comes
+    # first and still wins any name it provides.
     target_include_directories(test_packet_extract PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/bsdsocket"
         "${AMINETXDUO_THREADX}/common/inc"
         "${AMINETXDUO_NETXDUO}/common/inc"
@@ -384,6 +388,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_include_directories(test_packet_extract_trace PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/bsdsocket"
         "${AMINETXDUO_THREADX}/common/inc"
         "${AMINETXDUO_NETXDUO}/common/inc"

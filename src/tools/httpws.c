@@ -167,7 +167,8 @@ int http_ws_accept(const char *key, char *out, unsigned long outlen)
     for (i = 0; i < 36UL; i++)
         concat[24 + i] = (unsigned char)ws_guid[i];
 
-    http_ws_sha1(concat, sizeof(concat), digest);
+    if (!http_ws_sha1(concat, sizeof(concat), digest))
+        return 0;
 
     return (http_ws_b64_encode(digest, sizeof(digest), out, outlen) == 28UL)
                ? 1 : 0;

@@ -5,6 +5,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/nxstatus.h"
 #include "netmonitor.h"
 
 #include "nx_tcp.h"
@@ -1409,7 +1410,13 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
 
     if (status == NX_SUCCESS || status == NX_CONNECTION_PENDING)
     {
-        (VOID)nx_tcp_server_socket_accept(&spare->as_Nx.tcp, NX_NO_WAIT);
+        /* OPTIONAL, as in bsd_listen_return() below. */
+        UINT armed = nx_tcp_server_socket_accept(&spare->as_Nx.tcp, NX_NO_WAIT);
+
+        if (armed != NX_IN_PROGRESS && armed != NX_SUCCESS)
+            AMI_WARN("bsdsocket: port %ld was relistened but not armed (%ld); "
+                     "the next connection to it is dropped",
+                     (long)sock->as_ListenPort, (long)armed);
 
         if (status == NX_CONNECTION_PENDING)
             sock->as_Flags |= ASF_ACCEPTPEND;
@@ -1455,7 +1462,17 @@ static VOID bsd_listen_return(struct AmiSocketBase *base, AmiSocket *sock,
 
     if (status == NX_SUCCESS || status == NX_CONNECTION_PENDING)
     {
-        (VOID)nx_tcp_server_socket_accept(&incoming->as_Nx.tcp, NX_NO_WAIT);
+        /* OPTIONAL.  NX_NO_WAIT arms rather than waits, so NX_IN_PROGRESS is
+           the ordinary answer and NX_SUCCESS means a connection arrived in the
+           window above.  Anything else is NX_NOT_LISTEN_STATE, and a slot that
+           is on the incoming list but armed nowhere drops the next connection
+           to this port silently. */
+        UINT armed = nx_tcp_server_socket_accept(&incoming->as_Nx.tcp, NX_NO_WAIT);
+
+        if (armed != NX_IN_PROGRESS && armed != NX_SUCCESS)
+            AMI_WARN("bsdsocket: port %ld was relistened but not armed (%ld); "
+                     "the next connection to it is dropped",
+                     (long)sock->as_ListenPort, (long)armed);
         return;
     }
 
@@ -1681,7 +1698,11 @@ static UINT bsd_connect_once(VOID *arg, ULONG wait)
     BsdConnectArgs *a    = (BsdConnectArgs *)arg;
     AmiSocket      *sock = a->sock;
 
-    (VOID)nx_tcp_socket_state_wait(&sock->as_Nx.tcp, NX_TCP_ESTABLISHED, wait);
+    /* Judged by nx_tcp_socket_state and ASF_CONNECTED, tested immediately
+       below: the wait returning NX_NOT_CONNECTED and the state not being
+       ESTABLISHED are the same fact, and the state is the one that decides. */
+    AMI_NX_BY_OUTPUT(nx_tcp_socket_state_wait(&sock->as_Nx.tcp,
+                                              NX_TCP_ESTABLISHED, wait));
 
     if ((sock->as_Flags & ASF_CONNECTED) != 0 ||
         sock->as_Nx.tcp.nx_tcp_socket_state == NX_TCP_ESTABLISHED)
@@ -1951,7 +1972,9 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
         ULONG         next_hop = 0;
 
         tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        (VOID)_nx_ip_route_find(ip, dest->nxd_ip_address.v4, &nxif, &next_hop);
+        /* Judged by next_hop, which route_find zeroes before it can fail, and
+           by nxif still pointing at the interface the caller asked for. */
+        AMI_NX_BY_OUTPUT(_nx_ip_route_find(ip, dest->nxd_ip_address.v4, &nxif, &next_hop));
         tx_mutex_put(&ip->nx_ip_protection);
 
         if (nxif != &ip->nx_ip_interface[*index] || next_hop == 0)

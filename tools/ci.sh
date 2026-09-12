@@ -814,6 +814,19 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # A NetX Duo or ThreadX status thrown away with a bare (VOID) cannot be
+    # told from a defect by reading it, and two of the 49 that were there
+    # were defects.  include/aminetxduo/nxstatus.h names what a discard can
+    # be; this refuses one that names nothing.
+    if tools/check-nx-status.sh > "$BUILD/nx-status.log" 2>&1; then
+        note "$(sed -n 's/^nx_status=PASS /nx status: /p' "$BUILD/nx-status.log")"
+    else
+        cat "$BUILD/nx-status.log"
+        fail "a NetX Duo or ThreadX status is discarded without a reason\
+ (tools/check-nx-status.sh)"
+        return 1
+    fi
+
     local st log
     for st in tests/*/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue

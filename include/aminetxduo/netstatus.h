@@ -675,6 +675,12 @@ typedef struct NetStatusOpener
 #define NETEVENT_GATEWAY_REFUSED 17 /* the default route was refused;
                                        value = NetX Duo status               */
 
+/* Same shape as GATEWAY_REFUSED above: the interface exists and one thing
+   about it did not take. */
+#define NETEVENT_ADDR_REFUSED   18  /* the interface would not take its static
+                                       address and is not counted as
+                                       configured; value = the NX_ status    */
+
 /* --- the wire ----------------------------------------------------------- */
 /* OUT_OF_SERVICE marks the interface offline, which makes the next
    ami_sana2_offline() a no-op -- and that no-op is OFFLINE_SKIPPED. */
@@ -700,6 +706,27 @@ typedef struct NetStatusOpener
 #define NETEVENT_EXP_TCP        3   /* the TCP: handler is alive             */
 #define NETEVENT_EXP_ADDRALLOC  4   /* an address allocation is running      */
 #define NETEVENT_EXP_NETMON     5   /* a monitoring hook is installed        */
+
+/* --- what the stack cannot tell anyone ---------------------------------- */
+/*
+ * A callback that would not register.  The stack works; what it cannot do is
+ * say when something changed, so whatever was waiting goes on waiting.
+ *
+ * These are events rather than only AMI_ERROR() lines because AMINETXDUO_LOG
+ * is OFF in every shipped build -- AMI_ERROR is do { if (0) ... } while (0)
+ * there -- so a diagnostic line is not a report a user can ever see.  A new
+ * event id and nothing else, as with NETEVENT_GATEWAY_REFUSED: the record
+ * shape is unchanged, AMI_NETSTATUS_VERSION stays where it is, and an older
+ * command prints the row as an unnamed code.
+ */
+#define NETEVENT_DHCP_UNREPORTED 50 /* the DHCP state-change callback would not
+                                       register: a lease can arrive that
+                                       nothing acts on and every waiter goes
+                                       on waiting; value = the NX_ status    */
+#define NETEVENT_ADDR_UNREPORTED 51 /* nx_ip_address_change_notify() refused:
+                                       an address change is noticed by
+                                       polling, late, or not at all;
+                                       value = the NX_ status                */
 
 typedef struct NetStatusEvent
 {

@@ -4,6 +4,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/nxstatus.h"
 
 /*
  * How many (socket, group, interface) memberships the library tracks at once.
@@ -138,10 +139,14 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
     row->bm_Iface = (UINT)iface;
 
     /* Read once, by the join, into the group's own entry. See the top. */
+    /* ONLY SUCCESS: the one other return either of these has is
+       NX_NOT_SUPPORTED under NX_DISABLE_IPV4, and nothing in this tree
+       defines it -- this file is IPv4 multicast and would not compile
+       usefully without IPv4 at all. */
     if (sock->as_McastLoop != 0)
-        (VOID)nx_igmp_loopback_enable(ip);
+        AMI_NX_ONLY_SUCCESS(nx_igmp_loopback_enable(ip));
     else
-        (VOID)nx_igmp_loopback_disable(ip);
+        AMI_NX_ONLY_SUCCESS(nx_igmp_loopback_disable(ip));
 
     status = nx_igmp_multicast_interface_join(ip, group, (UINT)iface);
 
@@ -191,7 +196,7 @@ static LONG bsd_mcast_leave(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EADDRNOTAVAIL);
     }
 
-    (VOID)nx_igmp_multicast_interface_leave(ip, group, (UINT)iface);
+    AMI_NX_CLEANUP(nx_igmp_multicast_interface_leave(ip, group, (UINT)iface));
     row->bm_Sock = NULL;
 
     bsd_nx_leave(base);
@@ -216,8 +221,8 @@ VOID bsd_mcast_close(AmiSocket *sock)
             continue;
 
         if (ip != NULL)
-            (VOID)nx_igmp_multicast_interface_leave(ip, e->bm_Group,
-                                                    e->bm_Iface);
+            AMI_NX_CLEANUP(nx_igmp_multicast_interface_leave(ip, e->bm_Group,
+                                                    e->bm_Iface));
         e->bm_Sock = NULL;
     }
 
@@ -645,7 +650,7 @@ static LONG bsd_mcast6_leave(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EADDRNOTAVAIL);
     }
 
-    (VOID)nxd_ipv6_multicast_interface_leave(ip, &group, (UINT)iface);
+    AMI_NX_CLEANUP(nxd_ipv6_multicast_interface_leave(ip, &group, (UINT)iface));
     row->bm_Sock = NULL;
 
     bsd_nx_leave(base);
@@ -673,7 +678,7 @@ static VOID bsd_mcast6_close(NX_IP *ip, AmiSocket *sock)
             group.nxd_ip_address.v6[2] = e->bm_Group[2];
             group.nxd_ip_address.v6[3] = e->bm_Group[3];
 
-            (VOID)nxd_ipv6_multicast_interface_leave(ip, &group, e->bm_Iface);
+            AMI_NX_CLEANUP(nxd_ipv6_multicast_interface_leave(ip, &group, e->bm_Iface));
         }
 
         e->bm_Sock = NULL;

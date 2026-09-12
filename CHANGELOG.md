@@ -11,6 +11,34 @@ version at the top when it merges.
 
 - The `AmiNetXDuo` drawer icon is a picture: a globe on a bus between two machines, with the protocol on a plate under it
 - The installer icon is the familiar arrow going into a drive slot, and the `Docs` and `Examples` drawers use the stock Workbench drawer shape
+- **A static interface whose address the stack refused was reported as
+  configured.** `nx_ip_interface_address_set()`'s result was thrown away and
+  the interface was marked resolved regardless, so a machine with a static
+  address that could not be applied came up believing it had one: no error and
+  no address. The interface now reports the refusal and is not counted as
+  resolved
+- **Changing a route's interface reported success and left the route where it
+  was.** Adding a route whose interface differs deletes the old entry first;
+  the delete's result was discarded. A delete that did not happen left the
+  route on the old interface and answered 0
+- **TLS session setup no longer continues past a step that failed.** Six
+  calls -- the ECC tables, the packet buffer, the remote certificate
+  allocation, the SNI extension, the clock, and the certificate callback --
+  had their results discarded. The last is the certificate check itself: a
+  registration that failed left the handshake running with nothing verifying
+  the peer's certificate, and the connection succeeded
+- `setsockopt()` answering 0 is a promise the option is in force.
+  `SO_REUSEADDR` and `SO_RCVBUF` answered 0 whether or not NetX Duo took the
+  value; both now answer `EINVAL` when it did not
+- DHCP says when it cannot report. A client whose state-change callback would
+  not register took a lease that nothing was told about, and one whose client
+  ID was refused sent requests a server keying on it would not match. Both are
+  reported, as is each option the server will not be asked for
+- A WebSocket handshake no longer answers with a `Sec-WebSocket-Accept` it
+  could not compute. `http_ws_sha1()` reports failure and the reply is not
+  sent, instead of a digest of whatever was in the buffer
+- A listening port that is relisted but not re-armed says so. The next
+  connection to it was dropped with no trace at all
 
 - **The installer no longer moves a library aside before it has the
   replacement.** `bsdsocket.library`, `usergroup.library`, `tls.library` and

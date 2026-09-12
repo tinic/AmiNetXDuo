@@ -9,6 +9,7 @@
 #include "tx_thread.h"
 #include "tx_timer.h"
 #include "tx_amiga.h"
+#include "aminetxduo/nxstatus.h"
 
 #include <exec/types.h>
 #include <exec/nodes.h>

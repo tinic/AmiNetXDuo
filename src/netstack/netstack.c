@@ -5,6 +5,7 @@
  */
 
 #include "netstack_internal.h"
+#include "aminetxduo/nxstatus.h"
 
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/events.h"
@@ -165,7 +166,7 @@ VOID ami_netstack_leave(AmiNetCaller *caller)
 
     if (caller->nc_Adopted)
     {
-        (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
+        AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
         caller->nc_Adopted = FALSE;
     }
 }
@@ -224,7 +225,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
         }
 
         if (tx_amiga_orphan_thread(&caller->nc_Thread) != TX_SUCCESS)
-            (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+            AMI_NX_CLEANUP(tx_amiga_discard_thread(&caller->nc_Thread));
         caller->nc_Live = FALSE;
         caller->nc_Task = NULL;
     }
@@ -293,7 +294,7 @@ LONG ami_netstack_try_enter_cached(AmiNetCaller *caller)
             return AMI_NET_ERR_BUSY;        /* contended; gate instead */
 
         if (tx_amiga_orphan_thread(&caller->nc_Thread) != TX_SUCCESS)
-            (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+            AMI_NX_CLEANUP(tx_amiga_discard_thread(&caller->nc_Thread));
         caller->nc_Live = FALSE;
         caller->nc_Task = NULL;
     }
@@ -346,7 +347,7 @@ VOID ami_netstack_leave_cached(AmiNetCaller *caller)
         caller->nc_Task = NULL;
     }
 
-    (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
+    AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
 }
 
 VOID ami_netstack_release(AmiNetCaller *caller)
@@ -366,7 +367,7 @@ VOID ami_netstack_release(AmiNetCaller *caller)
     if (caller->nc_Adopted && caller->nc_Task == me)
     {
         caller->nc_Adopted = FALSE;
-        (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
+        AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
         caller->nc_Live = FALSE;
         caller->nc_Task = NULL;
         return;
@@ -375,9 +376,9 @@ VOID ami_netstack_release(AmiNetCaller *caller)
     if (caller->nc_Task == me)
     {
         if (tx_amiga_adopt_resume(&caller->nc_Thread) == TX_SUCCESS)
-            (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
+            AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
         else
-            (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+            AMI_NX_CLEANUP(tx_amiga_discard_thread(&caller->nc_Thread));
     }
     else
     {
@@ -523,8 +524,8 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     if (ns->ns_SecondCreated)
     {
         ns->ns_SecondCreated = FALSE;
-        (VOID)tx_timer_deactivate(&ns->ns_Second);
-        (VOID)tx_timer_delete(&ns->ns_Second);
+        AMI_NX_CLEANUP(tx_timer_deactivate(&ns->ns_Second));
+        AMI_NX_CLEANUP(tx_timer_delete(&ns->ns_Second));
     }
 
     /*
@@ -534,13 +535,13 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     if (ns->ns_AddrArrivedReady)
     {
         ns->ns_AddrArrivedReady = FALSE;
-        (VOID)tx_semaphore_delete(&ns->ns_AddrArrived);
+        AMI_NX_CLEANUP(tx_semaphore_delete(&ns->ns_AddrArrived));
     }
 
     if (ns->ns_AutoIpCreated)
     {
-        (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
-        (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+        AMI_NX_CLEANUP(nx_auto_ip_stop(&ns->ns_AutoIp));
+        AMI_NX_CLEANUP(nx_auto_ip_delete(&ns->ns_AutoIp));
         ns->ns_AutoIpCreated = FALSE;
         ns->ns_AutoIpRunning = FALSE;
     }
@@ -550,10 +551,10 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     {
         if (ns->ns_DhcpStarted)
         {
-            (VOID)nx_dhcp_stop(&ns->ns_Dhcp);
+            AMI_NX_CLEANUP(nx_dhcp_stop(&ns->ns_Dhcp));
             ns->ns_DhcpStarted = FALSE;
         }
-        (VOID)nx_dhcp_delete(&ns->ns_Dhcp);
+        AMI_NX_CLEANUP(nx_dhcp_delete(&ns->ns_Dhcp));
         ns->ns_DhcpCreated = FALSE;
     }
 #endif
@@ -572,7 +573,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 
     if (ns->ns_IpCreated)
     {
-        (VOID)nx_ip_delete(&ns->ns_Ip);
+        AMI_NX_CLEANUP(nx_ip_delete(&ns->ns_Ip));
         ns->ns_IpCreated = FALSE;
     }
 
@@ -618,7 +619,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 
     if (ns->ns_PoolMemory != NULL)
     {
-        (VOID)nx_packet_pool_delete(&ns->ns_Pool);
+        AMI_NX_CLEANUP(nx_packet_pool_delete(&ns->ns_Pool));
         ami_free(ns->ns_PoolMemory);
         ns->ns_PoolMemory = NULL;
     }
@@ -1324,7 +1325,7 @@ static LONG ami_ns_start_autoip(AmiNetStack *ns, LONG requested_interface)
     rc = ami_ns_autoip_select(ns, requested_interface);
     if (rc != AMI_NET_OK)
     {
-        (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+        AMI_NX_CLEANUP(nx_auto_ip_delete(&ns->ns_AutoIp));
         ns->ns_AutoIpCreated = FALSE;
         ami_free(ns->ns_AutoIpStack);
         ns->ns_AutoIpStack = NULL;
@@ -1430,12 +1431,23 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
          * _nx_ip_interface_address_set() releases the protection mutex before calling
          * this notify, so re-taking it is not a recursion.
          */
-        if (addr != 0UL)
-            (VOID)nx_arp_gratuitous_send(&ns->ns_Ip, NX_NULL);
+        /* OPTIONAL.  The announcement is courtesy: a peer with a stale ARP
+           entry finds out a little later instead. */
+        if (addr != 0UL && nx_arp_gratuitous_send(&ns->ns_Ip, NX_NULL)
+                               != NX_SUCCESS)
+            AMI_WARN("netstack: the new address was not announced; a peer "
+                     "holding the old one will take longer to notice");
 
-        /* tx_semaphore_put() does not block, which matters on the IP thread. */
-        if (ns->ns_AddrArrivedReady)
-            (VOID)tx_semaphore_put(&ns->ns_AddrArrived);
+        /*
+          * REQUIRED.  This is what wakes whoever is waiting for an address.
+          * tx_semaphore_put() does not block, which matters on the IP thread;
+          * if it fails nothing is coming, and the waiter falls back to
+          * polling only because it was told.
+          */
+        if (ns->ns_AddrArrivedReady &&
+            tx_semaphore_put(&ns->ns_AddrArrived) != TX_SUCCESS)
+            AMI_ERROR("netstack: an address arrived and the waiter was not "
+                      "woken. It will find it by polling, late");
 
         if (addr == 0UL)
         {
@@ -1462,7 +1474,11 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             addr != 0UL && !ami_ns_is_linklocal(addr) &&
             tx_thread_identify() != &ns->ns_AutoIp.nx_auto_ip_thread)
         {
-            (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
+            /* OPTIONAL.  A link-local hunt that will not stop costs ARP
+               traffic for an address nothing uses; the routable address is
+               already in place either way. */
+            if (nx_auto_ip_stop(&ns->ns_AutoIp) != NX_SUCCESS)
+                AMI_WARN("netstack: link-local configuration would not stop");
             ns->ns_AutoIpRunning = FALSE;
             AMI_INFO("netstack: link-local configuration stopped, interface "
                      "%ld has a routable address now", (long)i);
@@ -1641,10 +1657,17 @@ static BOOL ami_ns_wait_for_address(AmiNetStack *ns, ULONG timeout_ticks)
  */
 static VOID ami_ns_dhcp_discover_now(NX_DHCP *dhcp)
 {
-    (VOID)tx_timer_deactivate(&dhcp->nx_dhcp_timer);
-    (VOID)tx_timer_change(&dhcp->nx_dhcp_timer, 1UL,
-                          (ULONG)NX_DHCP_TIME_INTERVAL);
-    (VOID)tx_timer_activate(&dhcp->nx_dhcp_timer);
+    /*
+     * OPTIONAL, all three.  This only brings the first DISCOVER forward; if
+     * any step fails the client still discovers on its own schedule, which is
+     * the flat second this exists to save and not a working network.
+     */
+    if (tx_timer_deactivate(&dhcp->nx_dhcp_timer) != TX_SUCCESS ||
+        tx_timer_change(&dhcp->nx_dhcp_timer, 1UL,
+                        (ULONG)NX_DHCP_TIME_INTERVAL) != TX_SUCCESS ||
+        tx_timer_activate(&dhcp->nx_dhcp_timer) != TX_SUCCESS)
+        AMI_WARN("netstack: the first DHCP DISCOVER was not brought forward; "
+                 "it goes out on the client's own schedule");
 }
 
 /*
@@ -1688,28 +1711,79 @@ static UINT ami_ns_dhcp_client_id(NX_DHCP *dhcp_ptr, UINT iface_index,
     return NX_TRUE;
 }
 
+/*
+ * Each option this asks the server for, and what losing it costs.  The table
+ * is walked rather than unrolled so one failure does not hide the next: NetX
+ * Duo keeps NX_DHCP_MAX_USER_REQUEST_OPTIONS of these, and once the table is
+ * full every later request fails with the same status a duplicate gives.
+ * Unrolled and discarded, a stack that asked for six and got four looked
+ * exactly like one that got all six.
+ */
+static const struct
+{
+    UINT        option;
+    const char *what;
+} ami_ns_dhcp_options[] =
+{
+    { NX_DHCP_OPTION_GATEWAYS,      "the default gateway"      },
+    { NX_DHCP_OPTION_DNS_SVR,       "the name servers"         },
+    { NX_DHCP_OPTION_HOST_NAME,     "the host name"            },
+    { AMI_DHCP_OPTION_DOMAIN,       "the domain name"          },
+    { AMI_DHCP_OPTION_SEARCH,       "the search list"          },
+    { AMI_DHCP_OPTION_STATIC_ROUTE, "the static routes"        },
+};
+
 static VOID ami_ns_dhcp_configure(AmiNetStack *ns)
 {
-    (VOID)nx_dhcp_interface_state_change_notify(&ns->ns_Dhcp,
-                                                ami_ns_dhcp_state_changed);
+    UINT status;
+    UWORD i;
 
-    (VOID)nx_dhcp_user_option_add_callback_set(&ns->ns_Dhcp,
-                                               ami_ns_dhcp_client_id);
+    /*
+     * REQUIRED.  Without this callback nothing is told when the client binds,
+     * so the lease arrives and the stack never notices: the address is there
+     * and every waiter is still waiting.
+     */
+    status = nx_dhcp_interface_state_change_notify(&ns->ns_Dhcp,
+                                                   ami_ns_dhcp_state_changed);
+    if (status != NX_SUCCESS)
+    {
+        ami_event(NETEVENT_DHCP_UNREPORTED, NETEVENT_NOINDEX, (ULONG)status);
+        AMI_ERROR("netstack: DHCP will not report when it binds (%ld). "
+                  "An address may arrive that nothing acts on", (long)status);
+    }
 
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_GATEWAYS);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_DNS_SVR);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, NX_DHCP_OPTION_HOST_NAME);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_DOMAIN);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_SEARCH);
-    (VOID)nx_dhcp_user_option_request(&ns->ns_Dhcp, AMI_DHCP_OPTION_STATIC_ROUTE);
+    /*
+     * OPTIONAL.  RFC 2132 option 61 identifies this machine to the server.
+     * Without it the request still goes out and most servers still answer;
+     * one that keys its reservations on the client ID will not.
+     */
+    status = nx_dhcp_user_option_add_callback_set(&ns->ns_Dhcp,
+                                                  ami_ns_dhcp_client_id);
+    if (status != NX_SUCCESS)
+        AMI_WARN("netstack: DHCP requests carry no client ID (%ld). A server "
+                 "with a reservation for this machine will not match it",
+                 (long)status);
+
+    /*
+     * OPTIONAL, one at a time, and NAMED: losing the gateway request is a
+     * machine that leases an address and cannot route, which is worth more
+     * than a count of failures.
+     */
+    for (i = 0; i < (UWORD)(sizeof ami_ns_dhcp_options /
+                            sizeof ami_ns_dhcp_options[0]); i++)
+    {
+        status = nx_dhcp_user_option_request(&ns->ns_Dhcp,
+                                             ami_ns_dhcp_options[i].option);
+        if (status != NX_SUCCESS)
+            AMI_WARN("netstack: DHCP will not ask for %s (%ld)",
+                     ami_ns_dhcp_options[i].what, (long)status);
+    }
 }
 #endif /* AMINETXDUO_DHCP */
 
 static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 {
-#ifdef AMINETXDUO_DHCP
-    UINT  status;                       /* only the client create/start reads it */
-#endif
+    UINT  status;       /* the static address set, and the DHCP create/start */
     UWORD i;
     BOOL  resolved = FALSE;
 
@@ -1725,8 +1799,19 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         AMI_WARN("netstack: no address-arrival semaphore. The first address "
                  "is found by polling instead");
 
-    (VOID)nx_ip_address_change_notify(&ns->ns_Ip, ami_ns_address_changed,
-                                      NX_NULL);
+    /*
+     * REQUIRED, for the same reason as the DHCP state-change callback: without
+     * it an address can arrive and nothing is told, so the announcement above
+     * never goes out and the semaphore is never put.
+     */
+    status = nx_ip_address_change_notify(&ns->ns_Ip, ami_ns_address_changed,
+                                         NX_NULL);
+    if (status != NX_SUCCESS)
+    {
+        ami_event(NETEVENT_ADDR_UNREPORTED, NETEVENT_NOINDEX, (ULONG)status);
+        AMI_ERROR("netstack: nothing will be told when an address changes. "
+                  "Addresses will be found by polling");
+    }
 
     /*
      * The conflict handler is per interface and there is no API that sets it, so
@@ -1743,9 +1828,26 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         if (cfg->iptype != AMI_IPTYPE_STATIC || cfg->address == 0UL)
             continue;
 
-        (VOID)nx_ip_interface_address_set(&ns->ns_Ip, (UINT)i, cfg->address,
-                                          (cfg->netmask != 0UL) ? cfg->netmask
-                                                                : 0xFFFFFF00UL);
+        /*
+         * REQUIRED.  This is the whole of what a static interface gets, and
+         * the result used to be thrown away with `resolved = TRUE' set after
+         * it either way -- so an address the stack could not apply left the
+         * machine believing it was configured, and whoever was waiting for an
+         * address stopped waiting.  An interface with no address is now an
+         * interface that says so, and does not count as resolved.
+         */
+        status = nx_ip_interface_address_set(&ns->ns_Ip, (UINT)i, cfg->address,
+                                             (cfg->netmask != 0UL)
+                                                 ? cfg->netmask
+                                                 : 0xFFFFFF00UL);
+        if (status != NX_SUCCESS)
+        {
+            ami_event(NETEVENT_ADDR_REFUSED, (UWORD)i, (ULONG)status);
+            AMI_ERROR("netstack: %s did not take its address (%ld)",
+                      cfg->name, (long)status);
+            continue;
+        }
+
         resolved = TRUE;
     }
 
@@ -1782,7 +1884,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             {
                 AMI_ERROR("netstack: DHCP private packet pool failed (%ld)",
                           (long)status);
-                (VOID)nx_dhcp_delete(&ns->ns_Dhcp);
+                AMI_NX_CLEANUP(nx_dhcp_delete(&ns->ns_Dhcp));
                 ns->ns_DhcpCreated = FALSE;
                 ami_ns_client_pool_delete(&ns->ns_DhcpPool);
             }
@@ -1910,7 +2012,13 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         ULONG addr = 0UL;
         ULONG mask = 0UL;
 
-        (VOID)nx_ip_address_get(&ns->ns_Ip, &addr, &mask);
+        /* EXPECTED.  A failure leaves both at the zero they were set to,
+           which is what "no address" is reported as anyway. */
+        if (nx_ip_address_get(&ns->ns_Ip, &addr, &mask) != NX_SUCCESS)
+        {
+            addr = 0UL;
+            mask = 0UL;
+        }
 
         if (addr == 0UL && !ami_ns_wants_ipv4(ns))
         {
@@ -2671,12 +2779,20 @@ static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
     if (ns == NULL || !ns->ns_IpCreated)
         return;
 
-    (VOID)nx_ip_gateway_address_get(&ns->ns_Ip, &installed);
+    /* REQUIRED.  Every branch below turns on `installed', and a failed read
+       leaves it whatever it was: the stack would decide there is no gateway to
+       clear and leave the old one routing. */
+    if (nx_ip_gateway_address_get(&ns->ns_Ip, &installed) != NX_SUCCESS)
+        installed = 0UL;
 
     if (ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_CLEARED)
     {
         if (installed != 0UL)
-            (VOID)nx_ip_gateway_address_clear(&ns->ns_Ip);
+            /* REQUIRED.  If the old gateway will not go, traffic keeps
+               leaving through it, which is the thing this was asked to stop. */
+            if (nx_ip_gateway_address_clear(&ns->ns_Ip) != NX_SUCCESS)
+                AMI_ERROR("netstack: the default gateway would not clear; "
+                          "traffic still leaves through the old one");
         return;
     }
 
@@ -2732,7 +2848,11 @@ static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
     }
 
     if (installed != 0UL)
-        (VOID)nx_ip_gateway_address_clear(&ns->ns_Ip);
+        /* REQUIRED, as above: a gateway that will not clear is one that is
+           still routing. */
+        if (nx_ip_gateway_address_clear(&ns->ns_Ip) != NX_SUCCESS)
+            AMI_ERROR("netstack: the default gateway would not clear before "
+                      "installing another");
 
     if (count != 0)
         AMI_WARN("netstack: no live interface accepted a default gateway "
@@ -2848,8 +2968,8 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     if (ns->ns_AutoIpCreated &&
         ns->ns_AutoIp.nx_ip_interface_index == (UINT)index)
     {
-        (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
-        (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+        AMI_NX_CLEANUP(nx_auto_ip_stop(&ns->ns_AutoIp));
+        AMI_NX_CLEANUP(nx_auto_ip_delete(&ns->ns_AutoIp));
         ns->ns_AutoIpCreated = FALSE;
         ns->ns_AutoIpRunning = FALSE;
         autoip_removed = TRUE;
@@ -2996,7 +3116,7 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
     {
         AMI_ERROR("netstack: DHCP private packet pool failed (%ld)",
                   (long)status);
-        (VOID)nx_dhcp_delete(&ns->ns_Dhcp);
+        AMI_NX_CLEANUP(nx_dhcp_delete(&ns->ns_Dhcp));
         ns->ns_DhcpCreated = FALSE;
         ami_ns_client_pool_delete(&ns->ns_DhcpPool);
         return AMI_NET_ERR_KERNEL;
@@ -3049,8 +3169,13 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
      * and a server that disagrees answers NAK rather than offering another.
      */
     if (requested_address != 0)
-        (VOID)nx_dhcp_interface_request_client_ip(&ns->ns_Dhcp, (UINT)index,
-                                                  requested_address, 0);
+        /* OPTIONAL.  The wish is not granted, so the server offers whatever
+           it likes and the lease still works. */
+        if (nx_dhcp_interface_request_client_ip(&ns->ns_Dhcp, (UINT)index,
+                                                requested_address, 0)
+                != NX_SUCCESS)
+            AMI_WARN("netstack: the address this interface asked to keep was "
+                     "not requested; the server will offer its own");
 
     status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
 
@@ -3061,7 +3186,7 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
      */
     if (status == NX_DHCP_ALREADY_STARTED)
     {
-        (VOID)nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index);
+        AMI_NX_CLEANUP(nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index));
         status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
     }
 
@@ -3209,8 +3334,11 @@ LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
         out->adl_NetMask = mask;
     }
 
-    (VOID)nx_dhcp_interface_server_address_get(&ns->ns_Dhcp, (UINT)index,
-                                               &out->adl_Server);
+    /* EXPECTED.  Reported as "no server" when it cannot be read, which is
+       what the caller shows. */
+    if (nx_dhcp_interface_server_address_get(&ns->ns_Dhcp, (UINT)index,
+                                             &out->adl_Server) != NX_SUCCESS)
+        out->adl_Server = 0UL;
 
     size = (UINT)sizeof(buffer);
     if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
@@ -3328,9 +3456,9 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
         return AMI_NET_ERR_KERNEL;
 
     if (release)
-        (VOID)nx_dhcp_interface_release(&ns->ns_Dhcp, (UINT)index);
+        AMI_NX_CLEANUP(nx_dhcp_interface_release(&ns->ns_Dhcp, (UINT)index));
 
-    (VOID)nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index);
+    AMI_NX_CLEANUP(nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index));
 
     ns->ns_DhcpState[index] = NX_DHCP_STATE_NOT_STARTED;
     ns->ns_DhcpGateway[index] = 0UL;
@@ -4013,13 +4141,13 @@ rollback:
         {
             if (!autoip_running_before && ns->ns_AutoIpRunning)
             {
-                (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
+                AMI_NX_CLEANUP(nx_auto_ip_stop(&ns->ns_AutoIp));
                 ns->ns_AutoIpRunning = FALSE;
             }
 
             if (!autoip_created_before && ns->ns_AutoIpCreated)
             {
-                (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+                AMI_NX_CLEANUP(nx_auto_ip_delete(&ns->ns_AutoIp));
                 ns->ns_AutoIpCreated = FALSE;
             }
 

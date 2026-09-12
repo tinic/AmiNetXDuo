@@ -107,7 +107,7 @@ UINT    i;
             if (gw -> gw_thread -> tx_thread_state == ((UINT) TX_SUSPENDED))
             {
                 _tx_thread_system_state++;
-                (VOID) _tx_thread_resume(gw -> gw_thread);
+                AMI_NX_ONLY_SUCCESS(_tx_thread_resume(gw -> gw_thread));
                 _tx_thread_system_state--;
             }
         }
@@ -234,7 +234,11 @@ UINT                     i;
            again from the top, iteratively, so a sustained full table deepens no
            stack.  */
         Permit();
-        (VOID) _tx_thread_sleep(1);
+        /* EITHER WAY: TX_SUCCESS, or TX_CALLER_ERROR from an ISR or before
+           the kernel is up, neither of which reaches here.  If it somehow did,
+           the back-off would not happen and the `continue\' below runs the
+           whole test again, which is what it does after a successful sleep. */
+        AMI_NX_EITHER_WAY(_tx_thread_sleep(1));
         continue;
     }
 
@@ -263,7 +267,7 @@ UINT                     i;
 
     /* Off the ready list, without switching (interrupt-context shape).  */
     _tx_thread_system_state++;
-    (VOID) _tx_thread_suspend(thread);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_suspend(thread));
     _tx_thread_system_state--;
 
     /* Release the baton and give the machine back to the realm loop.  */
@@ -432,8 +436,12 @@ BYTE ami_green_checked_waitio(struct IORequest *request)
 #endif
         do
         {
-            (VOID) tx_amiga_green_wait(
-                1UL << request -> io_Message.mn_ReplyPort -> mp_SigBit);
+            /* EITHER WAY: the mask that comes back is not the answer.  A green
+           wait returns whatever signals arrived, zero if it refused, and the
+           CheckIO() the loop re-tests is the authority in every case -- a
+           spurious or empty return simply goes round again. */
+            AMI_NX_EITHER_WAY(tx_amiga_green_wait(
+                1UL << request -> io_Message.mn_ReplyPort -> mp_SigBit));
         }
         while (CheckIO(request) == (struct IORequest *) 0);
     }
@@ -478,7 +486,9 @@ UINT            noted;
             noted =  (UINT) TX_TRUE;
         }
 
-        (VOID) tx_amiga_green_wait(1UL << port -> mp_SigBit);
+        /* EITHER WAY, as in ami_green_checked_waitio() above: the loop
+           re-tests the port, which is the authority. */
+        AMI_NX_EITHER_WAY(tx_amiga_green_wait(1UL << port -> mp_SigBit));
     }
 }
 
@@ -505,7 +515,10 @@ static VOID _tx_gate_proxy_entry(ULONG id)
     (VOID) id;
     for (;;)
     {
-        (VOID) _tx_thread_sleep(0x7FFFFFFFUL);
+        /* EITHER WAY: this is the never-entered proxy entry, and the point
+           of the loop is that it does not come back.  A refused sleep goes
+           round and asks again. */
+        AMI_NX_EITHER_WAY(_tx_thread_sleep(0x7FFFFFFFUL));
     }
 }
 
@@ -691,7 +704,7 @@ ULONG   sigs;
        may run the moment the realm picks it.  Interrupt-context shape, as
        everywhere a non-thread touches ThreadX state.  */
     _tx_thread_system_state++;
-    (VOID) _tx_thread_resume(&gate -> ag_Thread);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_resume(&gate -> ag_Thread));
     _tx_thread_system_state--;
 
     Permit();
@@ -744,7 +757,7 @@ UINT         dead;
     _tx_timer_time_slice   =  ((ULONG) 0);
 
     _tx_thread_system_state++;
-    (VOID) _tx_thread_suspend(thread);
+    AMI_NX_ONLY_SUCCESS(_tx_thread_suspend(thread));
     _tx_thread_system_state--;
 
     gate -> ag_Done =  1U;
@@ -808,8 +821,8 @@ BYTE    sig;
 
         Forbid();
         _tx_thread_system_state++;
-        (VOID) _tx_thread_terminate(&gate -> ag_Thread);
-        (VOID) _tx_thread_delete(&gate -> ag_Thread);
+        AMI_NX_ONLY_SUCCESS(_tx_thread_terminate(&gate -> ag_Thread));
+        AMI_NX_CLEANUP(_tx_thread_delete(&gate -> ag_Thread));
         _tx_thread_system_state--;
         Permit();
 
@@ -864,8 +877,8 @@ UINT    reaped;
     {
 
         _tx_thread_system_state++;
-        (VOID) _tx_thread_terminate(&gate -> ag_Thread);
-        (VOID) _tx_thread_delete(&gate -> ag_Thread);
+        AMI_NX_ONLY_SUCCESS(_tx_thread_terminate(&gate -> ag_Thread));
+        AMI_NX_CLEANUP(_tx_thread_delete(&gate -> ag_Thread));
         _tx_thread_system_state--;
 
         gate -> ag_Live =  0U;

@@ -320,4 +320,5 @@ jobs:
             tools/check-option-stubs.sh \
             tools/check-test-duration.sh \
             tools/tree-stamp.sh \
+            tools/check-nx-status.sh \
             install/test/run-workbench-cards.sh

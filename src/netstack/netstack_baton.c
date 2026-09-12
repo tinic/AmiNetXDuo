@@ -299,7 +299,10 @@ VOID ami_netstack_baton_release(VOID)
     /* Off the ready list.  With the system state raised this returns here
        rather than ending in _tx_thread_system_return().  The Forbid() is held
        across it, see the note above ami_baton_observe_state(). */
-    (VOID)tx_thread_suspend(thread);
+    /* REQUIRED.  The baton is handed on by suspending this thread; one that
+       will not suspend keeps running with the baton released. */
+    if (tx_thread_suspend(thread) != TX_SUCCESS)
+        AMI_ERROR("netstack: a thread would not suspend to release the baton");
 
     if (_tx_thread_current_ptr == thread)
     {
@@ -375,7 +378,10 @@ VOID ami_netstack_baton_acquire(VOID)
     ami_baton_stats.bs_Transitions++;
 
     /* Held across the resume, same rule as release(). */
-    (VOID)tx_thread_resume(thread);
+    /* REQUIRED.  A resume that does not happen is a thread that never runs
+       again, which is the whole of what the baton is for. */
+    if (tx_thread_resume(thread) != TX_SUCCESS)
+        AMI_ERROR("netstack: a thread waiting for the baton was not resumed");
 
     _tx_thread_system_state--;
 
@@ -391,6 +397,16 @@ VOID ami_netstack_baton_acquire(VOID)
     if (wake == (UINT) TX_TRUE)
         _tx_amiga_wake_scheduler();
 
-    (VOID)_tx_amiga_thread_park(thread);
+    /*
+     * OPTIONAL.  Park answers TX_FALSE when the Task was marked to die while
+     * it waited for the baton: it is no longer a ThreadX thread, and this
+     * function has already handed the baton on, so the caller returns without
+     * one.  Nothing above can be undone from here -- the slot is released and
+     * the resume has happened -- so this says what was lost rather than
+     * pretending to recover.
+     */
+    if (_tx_amiga_thread_park(thread) == (UINT)TX_FALSE)
+        AMI_ERROR("netstack: a task waiting for the baton was orphaned; "
+                  "it continues without one");
 }
 

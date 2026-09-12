@@ -290,6 +290,11 @@ UINT         wake;
     }
 
     /* Park.  A completed or terminated thread stays here until
-       tx_thread_delete() reaps it, which keeps teardown on one path.  */
-    (VOID) _tx_amiga_thread_park(thread_ptr);
+       tx_thread_delete() reaps it, which keeps teardown on one path.
+
+       EXPECTED, both answers.  TX_FALSE means the Task was orphaned while it
+       waited and should stop being a thread, and returning from here is exactly
+       how it stops: this function is VOID and its caller unwinds.  There is
+       nothing to add to that.  */
+    AMI_NX_CLEANUP(_tx_amiga_thread_park(thread_ptr));
 }

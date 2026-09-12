@@ -8,6 +8,7 @@
  */
 
 #include "netstack_internal.h"
+#include "aminetxduo/nxstatus.h"
 
 #include "nx_ipv6.h"
 #include "nx_icmpv6.h"
@@ -62,7 +63,12 @@ LONG ami_netstack_ipv6_enable(AmiNetStack *ns)
     ns->ns_Ip.nx_ipv6_rdnss_notify = ami_ns6_rdnss;
     ns->ns_Ip.nx_ipv6_dnssl_notify = ami_ns6_dnssl;
 
-    (VOID)nxd_ipv6_address_change_notify(&ns->ns_Ip, ami_ns6_address_changed);
+    /* REQUIRED, as for IPv4: without it an address arrives and nothing is
+       told, so nothing waiting on one is woken. */
+    if (nxd_ipv6_address_change_notify(&ns->ns_Ip, ami_ns6_address_changed)
+            != NX_SUCCESS)
+        AMI_ERROR("netstack: nothing will be told when an IPv6 address "
+                  "changes; they will be found by polling");
 
     ns->ns_Ipv6Enabled = TRUE;
 
@@ -337,7 +343,16 @@ VOID ami_netstack_ipv6_reclaim_notify(AmiNetStack *ns)
     if (ns == NULL || !ns->ns_Ipv6Enabled)
         return;
 
-    (VOID)nxd_ipv6_address_change_notify(&ns->ns_Ip, ami_ns6_address_changed);
+    /*
+     * REQUIRED, and this is not teardown however much it looks like it: the
+     * callback is being PUT BACK into the slot nx_dhcpv6_client_create() just
+     * took.  Losing it here is losing every IPv6 address change for the rest
+     * of the session, quietly.
+     */
+    if (nxd_ipv6_address_change_notify(&ns->ns_Ip, ami_ns6_address_changed)
+            != NX_SUCCESS)
+        AMI_ERROR("netstack: the IPv6 address-change callback was not "
+                  "reclaimed from the DHCPv6 client; changes will be missed");
 }
 
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns)
