@@ -372,20 +372,46 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         char  addr6[AMI_CFG_IP6_STRLEN];
         ULONG live = 0;
 
-        /* The live address, not the one in the file: see addnetinterface.c. */
-        if (live_index(base, name, &online) >= 0)
-        {
-            LONG n;
+        /* THE LINK BEING UP IS NOT THE SAME AS HAVING AN ADDRESS.  The wait
+           above returns when the interface reports itself up, which on a DHCP
+           interface happens before the server has answered: `Online genet'
+           then printed the link-local, or nothing, and the next command in the
+           script found no route.  Wait the same allowance the caller gave the
+           link, and for the same reason AddNetInterface does. */
+        ULONG waited = 0;
 
-            for (n = 0; n < (LONG)onoff_ifaces.hdr.nsh_Count &&
-                        n < (LONG)NX_MAX_PHYSICAL_INTERFACES; n++)
+        for (;;)
+        {
+            live = 0;
+
+            /* The live address, not the one in the file: see
+               addnetinterface.c. */
+            if (live_index(base, name, &online) >= 0)
             {
-                if (onoff_ifaces.e[n].nsi_Index == (UWORD)index)
+                LONG n;
+
+                for (n = 0; n < (LONG)onoff_ifaces.hdr.nsh_Count &&
+                            n < (LONG)NX_MAX_PHYSICAL_INTERFACES; n++)
                 {
-                    live = onoff_ifaces.e[n].nsi_Address;
-                    break;
+                    if (onoff_ifaces.e[n].nsi_Index == (UWORD)index)
+                    {
+                        live = onoff_ifaces.e[n].nsi_Address;
+                        break;
+                    }
                 }
             }
+
+            if (live != 0 || index < 0)
+                break;
+            if (ifc == NULL || ifc->iptype == AMI_IPTYPE_STATIC ||
+                ifc->iptype == AMI_IPTYPE_NONE)
+                break;
+            if (waited >= timeout)
+                break;
+            if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+                break;
+
+            waited++;
         }
 
         if (live != 0)

@@ -9,6 +9,18 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.27.2
+
+- **`AddNetInterface` and `Online` returned before DHCP had answered.** The wait
+  for an address ended on the IPv6 link-local, an address derived from the MAC
+  and configured without a server, so the interface reported `fe80::...` or no
+  address at all and the next command in a startup found no route. A `wait 3`
+  after `AddNetInterface` was the workaround. `TIMEOUT` seconds, 10 by default,
+  are now spent waiting for an address a server had to give, and `Online` waits
+  for one where it did not wait at all. Reported by mja65 on a PiStorm with
+  `genet.device`, where `Online genet` printed no IPv4 and `sntp` run next
+  could not find its server
+
 ## 0.27.1
 
 - **`NetCapture` could not capture on an interface that was up.** It reported

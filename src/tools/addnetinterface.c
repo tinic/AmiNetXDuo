@@ -300,8 +300,20 @@ static VOID report_refused_gateway(struct Library *base, const char *name,
  * detection is not one anything may use yet, and reporting it would mean this
  * command declares success a second before the address is real.
  */
+/* fe80::/10.  A link-local address is derived from the MAC and configured the
+   moment the interface comes up: it needs no server and proves nothing about
+   whether DHCP has answered.  Treating it as "the interface has an address"
+   is what made the TIMEOUT below expire in nobody's favour -- mja65 reported
+   `Online' printing no IPv4, and sntp failing unless a `wait 3' was put after
+   AddNetInterface, both on a DHCP interface that did get its lease a moment
+   later. */
+static BOOL addif_ip6_link_local(const ULONG *a)
+{
+    return (BOOL)((a[0] & 0xFFC00000UL) == 0xFE800000UL);
+}
+
 static BOOL running_address6(struct Library *base, UWORD nx_index,
-                             char *text, ULONG text_len)
+                             char *text, ULONG text_len, BOOL *link_local)
 {
     LONG n;
     LONG i;
@@ -322,6 +334,8 @@ static BOOL running_address6(struct Library *base, UWORD nx_index,
 
         if (text != NULL)
             tool_format_ip6(a6->nsn_Address, text, text_len);
+        if (link_local != NULL)
+            *link_local = addif_ip6_link_local(a6->nsn_Address);
 
         return TRUE;
     }
@@ -456,8 +470,16 @@ static BOOL wait_for_running_address(struct Library *base, const char *name,
             return TRUE;
         }
 
-        if (running_address6(base, (UWORD)where, text6, text6_len))
-            return TRUE;
+        /* A routable v6 address is an answer; a link-local is not.  Keep it
+           in text6 so the caller can still report it when the wait runs out,
+           and go on waiting for something a server had to give us. */
+        {
+            BOOL ll = FALSE;
+
+            if (running_address6(base, (UWORD)where, text6, text6_len, &ll) &&
+                !ll)
+                return TRUE;
+        }
 
         if (waited >= seconds)
             return FALSE;
@@ -732,7 +754,7 @@ int main(int argc, char **argv)
                                                text6, sizeof(text6), &broken);
             else if (where >= 0)
                 (VOID)running_address6(base, (UWORD)where, text6,
-                                       sizeof(text6));
+                                       sizeof(text6), NULL);
 
             if (addr != 0)
             {
