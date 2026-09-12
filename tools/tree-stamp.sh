@@ -37,8 +37,23 @@ cd "$ROOT" || exit 1
     #
     # -f: the regular files.  Drops the gitlinks, and drops a symlink whose
     # target is missing rather than failing on it.
+    # WHAT THE HOST STAGE CANNOT READ CANNOT BREAK IT.  The stamp answers one
+    # question -- did the host stage pass on THIS tree -- so a file the stage
+    # never opens has no bearing on the answer, and hashing it only forces a
+    # ten-minute rerun to prove a release note did not break a unit test.  On
+    # 2026-09-12 that cost three of eleven host stages in one day: the release
+    # commit was CHANGELOG.md plus a version line, and it paid the same price
+    # as a change to the receive path.
+    #
+    # The exclusions are narrow on purpose.  Anything a gate READS stays in --
+    # tools/, tests/, cmake/, install/ and every source tree -- so a change
+    # that can move a host result still invalidates the stamp.  Excluded:
+    # prose for humans, and the CI definitions the host stage does not consult.
     git ls-files -z --cached --others --exclude-standard |
     while IFS= read -r -d '' f; do
+        case "$f" in
+            docs/*|CHANGELOG.md|README.md|*.guide|*.info|.github/*) continue ;;
+        esac
         [ -f "$f" ] && printf '%s\0' "$f"
     done | sort -z | xargs -0 sha256sum
 
