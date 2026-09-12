@@ -590,7 +590,7 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
 
 /* Copy the caller's set in. If the caller passed NULL, the local copy is left
    zeroed. */
-static VOID bsd_fdset_in(ULONG *dst, const APTR src, LONG words)
+static VOID bsd_fdset_in(ULONG *dst, CONST_APTR src, LONG words)
 {
     LONG i;
 

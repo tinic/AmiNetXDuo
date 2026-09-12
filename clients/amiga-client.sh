@@ -38,7 +38,12 @@ AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -
 # a signature that drifts from the declaration its callers see is a silent
 # wrong-ABI call rather than a build failure -- which is how __wrap_read() and
 # __wrap_write() came to return int where read() and write() return _ssize_t.
-AMIGA_CLIENT_SHIM_WARN="-Wmissing-prototypes"
+#
+# -Werror= and not plain -W: nothing in this build reads warnings, so a plain
+# -Wmissing-prototypes would print into a log and exit 0, which is a gate that
+# cannot fail.  Scoped to this one diagnostic rather than -Werror, because the
+# shims still carry two -Wpointer-sign warnings that are not this item's.
+AMIGA_CLIENT_SHIM_WARN="-Werror=missing-prototypes"
 
 export AMIGA_CLIENT_ROOT AMIGA_CLIENT_ARCH AMIGA_CLIENT_OPT AMIGA_CLIENT_CFLAGS
 export AMIGA_CLIENT_SHIM_WARN

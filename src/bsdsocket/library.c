@@ -141,7 +141,14 @@ VOID bsd_bzero(APTR p, ULONG size)
         *q++ = 0;
 }
 
-VOID bsd_bcopy(const APTR src, APTR dst, ULONG size)
+/* CONST_APTR, not `const APTR': APTR is `void *', so `const APTR' is a const
+   POINTER and says nothing about the bytes.  Every caller that had a genuinely
+   const source was casting that away at the call, fourteen places; the promise
+   is in the type now and the one cast that breaks it is here.  It is the NDK's:
+   <inline/exec.h>'s CopyMem() macro assigns its argument to a plain APTR before
+   the jsr, so there is no const-correct way to spell the call.  CopyMem() does
+   not write through source. */
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
 {
     if (size > 0)
         CopyMem((APTR)src, dst, size);

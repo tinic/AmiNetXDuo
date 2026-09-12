@@ -920,7 +920,7 @@ struct TagItem *bsd_next_tag(struct TagItem **cursor);
 ULONG bsd_strlen(const char *s);
 VOID  bsd_strncpy(char *dst, const char *src, ULONG size);
 VOID  bsd_bzero(APTR p, ULONG size);
-VOID  bsd_bcopy(const APTR src, APTR dst, ULONG size);
+VOID  bsd_bcopy(CONST_APTR src, APTR dst, ULONG size);
 
 /* Host byte order and network byte order are the same on m68k. Spelled out
    for clarity. */

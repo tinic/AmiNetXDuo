@@ -99,7 +99,7 @@ AmiSocket *bsd_lookup(struct AmiSocketBase *base, LONG fd)
 
 LONG bsd_table_size(struct AmiSocketBase *base) { (VOID)base; return H_FDS; }
 
-VOID bsd_bcopy(const APTR src, APTR dst, ULONG size)
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
 {
     memmove(dst, src, size);
 }

@@ -388,7 +388,7 @@ VOID bsd_bzero(APTR p, ULONG size)
     memset(p, 0, (size_t)size);
 }
 
-VOID bsd_bcopy(const APTR src, APTR dst, ULONG size)
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
 {
     memmove(dst, src, (size_t)size);
 }

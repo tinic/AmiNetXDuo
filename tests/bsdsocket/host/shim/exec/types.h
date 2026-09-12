@@ -21,6 +21,7 @@ typedef unsigned char  *STRPTR;
 typedef unsigned char   TEXT;
 typedef const unsigned char *CONST_STRPTR;
 typedef void           *APTR;
+typedef const void     *CONST_APTR;
 typedef short           BOOL;
 
 #ifndef VOID

@@ -280,7 +280,7 @@ static VOID one_long(ULONG longs, ULONG portval)
 
     for (i = 0UL; i < bytes; i += 4UL)
     {
-        if (*(const ULONG *)(const APTR)(dst + i) != portval)
+        if (*(const ULONG *)(CONST_APTR)(dst + i) != portval)
             bytes_ok = FALSE;
     }
 

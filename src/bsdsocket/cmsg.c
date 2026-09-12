@@ -146,7 +146,7 @@ static VOID bsd_cmsg_put(BsdCmsgOut *out, LONG level, LONG type,
     hdr->cmsg_level = level;
     hdr->cmsg_type  = type;
 
-    bsd_bcopy((const APTR)data, CMSG_DATA(hdr), (ULONG)len);
+    bsd_bcopy((CONST_APTR)data, CMSG_DATA(hdr), (ULONG)len);
 
     out->co_Used += space;
 }

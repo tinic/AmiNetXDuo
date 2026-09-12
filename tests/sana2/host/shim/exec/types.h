@@ -20,6 +20,7 @@ typedef signed   int    LONG;
 typedef unsigned char  *STRPTR;
 typedef unsigned char   TEXT;
 typedef void           *APTR;
+typedef const void     *CONST_APTR;
 typedef short           BOOL;
 
 #ifndef VOID

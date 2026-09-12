@@ -25,9 +25,9 @@
  */
 static VOID direct_addr6(UBYTE *to, const UBYTE *from)
 {
-    *(UWORD *)(APTR)to       = *(const UWORD *)(const APTR)from;
-    *(UWORD *)(APTR)(to + 2) = *(const UWORD *)(const APTR)(from + 2);
-    *(UWORD *)(APTR)(to + 4) = *(const UWORD *)(const APTR)(from + 4);
+    *(UWORD *)(APTR)to       = *(const UWORD *)(CONST_APTR)from;
+    *(UWORD *)(APTR)(to + 2) = *(const UWORD *)(CONST_APTR)(from + 2);
+    *(UWORD *)(APTR)(to + 4) = *(const UWORD *)(CONST_APTR)(from + 4);
 }
 
 /* netdev_track_find() and netdev_take() moved to netdev_internal.h as static
@@ -93,7 +93,7 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     if (frame_len < NETDEV_HDR_LEN)
         return NULL;
 
-    type = *(const UWORD *)(const APTR)(hdr + 12);
+    type = *(const UWORD *)(CONST_APTR)(hdr + 12);
     plen = (UWORD)(frame_len - NETDEV_HDR_LEN);
 
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
@@ -137,8 +137,8 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
 
     if ((hdr[0] & 1) != 0)
     {
-        flags = (UBYTE)((*(const ULONG *)(const APTR)hdr == 0xffffffffUL &&
-                         *(const UWORD *)(const APTR)(hdr + 4) == 0xffffu)
+        flags = (UBYTE)((*(const ULONG *)(CONST_APTR)hdr == 0xffffffffUL &&
+                         *(const UWORD *)(CONST_APTR)(hdr + 4) == 0xffffu)
                         ? SANA2IOF_BCAST : SANA2IOF_MCAST);
     }
 

@@ -576,8 +576,8 @@ static VOID nd_time_report(VOID)
  */
 static VOID nd_addr6(UBYTE *to, const UBYTE *from)
 {
-    *(ULONG *)(APTR)to        = *(const ULONG *)(const APTR)from;
-    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(const APTR)(from + 4);
+    *(ULONG *)(APTR)to        = *(const ULONG *)(CONST_APTR)from;
+    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(CONST_APTR)(from + 4);
 }
 
 static VOID nd_zero(UBYTE *p, ULONG n)
@@ -766,12 +766,12 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 
     /* The frame is even-aligned, so the type is one word and the broadcast
        test is one longword and one word rather than six byte reads. */
-    type = *(const UWORD *)(const APTR)(frame + 12);
+    type = *(const UWORD *)(CONST_APTR)(frame + 12);
 
     if ((frame[0] & 1) != 0)
     {
-        flags = (UBYTE)((*(const ULONG *)(const APTR)frame == 0xffffffffUL &&
-                         *(const UWORD *)(const APTR)(frame + 4) == 0xffffu)
+        flags = (UBYTE)((*(const ULONG *)(CONST_APTR)frame == 0xffffffffUL &&
+                         *(const UWORD *)(CONST_APTR)(frame + 4) == 0xffffu)
                         ? SANA2IOF_BCAST : SANA2IOF_MCAST);
     }
 

@@ -514,7 +514,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
      * src/net68k/n68k_rx_verify.c, and for the same two reasons.
      */
 #if defined(__mc68000__) || defined(__m68k__)
-    type = (UINT)*(const USHORT *)(const APTR)
+    type = (UINT)*(const USHORT *)(CONST_APTR)
                  (packet->nx_packet_prepend_ptr + 12);
 #else
     type = (((UINT)packet->nx_packet_prepend_ptr[12]) << 8) |
@@ -678,8 +678,8 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
  */
 static VOID ami_sana2_addr6(UCHAR *to, const UCHAR *from)
 {
-    *(ULONG *)(APTR)to       = *(const ULONG *)(const APTR)from;
-    *(UWORD *)(APTR)(to + 4) = *(const UWORD *)(const APTR)(from + 4);
+    *(ULONG *)(APTR)to       = *(const ULONG *)(CONST_APTR)from;
+    *(UWORD *)(APTR)(to + 4) = *(const UWORD *)(CONST_APTR)(from + 4);
 }
 
 /* ------------------------------------------------------------ slot arming */

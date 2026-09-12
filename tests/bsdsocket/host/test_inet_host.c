@@ -59,7 +59,7 @@ VOID bsd_set_errno(struct AmiSocketBase *base, LONG err)
     h_last_errno = err;
 }
 
-VOID bsd_bcopy(const APTR src, APTR dst, ULONG size)
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
 {
     memmove(dst, src, (size_t)size);
 }
