@@ -252,8 +252,11 @@ def test_size_is_taken():
 
 
 def test_ssh_password():
-    """The prompt-and-read phase: raw mode arrives before a secret can be typed.
+    """Host confirmation terminates, then raw mode precedes password input.
 
+    Dropbear reads the unknown-host answer through stdio and then drains stdin
+    to LF.  An Amiga console supplies CR, so that path used to consume the `y`
+    and wait forever for a byte that was never coming.  After it advances,
     ssh's getpass() calls SetMode(Input(), 1).  Two things must follow: the
     server must tell the page it is now in raw mode BEFORE the password can be
     typed, and nothing of what is typed may come back.
@@ -280,7 +283,21 @@ def test_ssh_password():
     s.keys("stack 65536\n")
     s.pump(5.0)
 
-    s.keys("ssh -y -p %s %s@%s\n" % (SSHD_PORT, USER, HOST_FROM_GUEST))
+    s.keys("ssh -p %s %s@%s\n" % (SSHD_PORT, USER, HOST_FROM_GUEST))
+
+    # Do not bypass the first interactive read with -y.  The answer arrives
+    # from CON: with CR, and the POSIX stdio shim must present LF so Dropbear's
+    # input-draining loop can finish.
+    got = s.pump(120.0, want="continue connecting")
+    reached_confirm = b"continue connecting" in got
+    check(reached_confirm,
+          "ssh asks to confirm an unknown host (last 200 bytes: %r)"
+          % s.out[-200:])
+    if not reached_confirm:
+        s.close()
+        free()
+        return
+    s.keys("y\n")
 
     # The prompt.  Generous, because this is a key exchange on a 68020.
     got = s.pump(120.0, want="assword")

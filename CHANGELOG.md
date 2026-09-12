@@ -9,6 +9,16 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`ssh` could wait forever after an unknown-host answer.** Amiga console
+  input ends a cooked line with CR, while Dropbear's stdio path drained the
+  answer until LF. The client shim now performs the POSIX newline translation,
+  so answering `y` advances to authentication
+- **`scp` could not authenticate with a password.** Its private `ssh` process
+  mistook the SCP protocol pipe for the terminal: it read the password from
+  that pipe and wrote the prompt into it. The process hand-off now carries the
+  invoking console separately; authentication reads there and sends its prompt
+  to the console/error stream without touching file-transfer bytes
+
 ## 0.27.2
 
 - **`AddNetInterface` and `Online` returned before DHCP had answered.** An IPv6

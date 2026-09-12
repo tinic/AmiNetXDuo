@@ -30,6 +30,9 @@ struct amiga_stdio_override
     ULONG magic;
     struct amiga_mempipe *input;
     struct amiga_mempipe *output;
+    /* ssh's fd 0 is the SCP protocol pipe, but authentication prompts still
+       belong to the console from which scp was invoked. */
+    BPTR  prompt_input;
     BPTR  error;
     BPTR  command_segment;
     STRPTR arguments;

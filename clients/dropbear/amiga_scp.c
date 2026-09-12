@@ -489,6 +489,7 @@ static int scp_start_ssh(struct scp_child *c)
     c->stdio.magic           = AMIGA_STDIO_MAGIC;
     c->stdio.input           = &c->input_pipe;
     c->stdio.output          = &c->output_pipe;
+    c->stdio.prompt_input    = Input();
     c->stdio.error           = c->error_dest;
     c->stdio.command_segment = seg;
     c->stdio.arguments       = (STRPTR)c->arguments;

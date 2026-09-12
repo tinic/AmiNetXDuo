@@ -650,6 +650,27 @@ static int amiga_raw_read(int fd, void *buf, size_t len)
     return (int)n;
 }
 
+/* Amiga console handlers terminate a cooked line with CR.  stdio's fgets(),
+   getc() and getchar() have a POSIX contract and Dropbear's host-key prompt
+   drains input until LF; leaving CR unchanged makes that drain wait for a
+   byte which will never arrive.  Protocol pipes are byte streams and must not
+   be translated. */
+static void amiga_stdio_normalize_newline(int fd, void *buf, size_t len)
+{
+    unsigned char *p = (unsigned char *)buf;
+    BPTR handle;
+    size_t i;
+
+    if (fd != 0 || amiga_stdio_pipe(0) != NULL)
+        return;
+    handle = Input();
+    if (handle == (BPTR)0 || !IsInteractive(handle))
+        return;
+    for (i = 0; i < len; i++)
+        if (p[i] == '\r')
+            p[i] = '\n';
+}
+
 extern _ssize_t __real__read_r(struct _reent *, int, void *, size_t);
 
 extern __typeof__(_read_r) __wrap__read_r;
@@ -661,6 +682,8 @@ _ssize_t __wrap__read_r(struct _reent *reent, int fd, void *buf, size_t len)
         return __real__read_r(reent, fd, buf, len);
 
     n = amiga_raw_read(fd, buf, len);
+    if (n > 0)
+        amiga_stdio_normalize_newline(fd, buf, (size_t)n);
     if (n < 0 && reent != NULL)
         reent->_errno = errno;
     return (_ssize_t)n;
@@ -2005,16 +2028,19 @@ int tcsetattr(int fd, int actions, const struct termios *t)
 char *getpass(const char *prompt)
 {
     static char buf[128];
-    BPTR  in  = Input();
+    struct amiga_stdio_override *stdio = amiga_stdio_descriptor();
+    BPTR  in  = (stdio != NULL && stdio->prompt_input != (BPTR)0)
+              ? stdio->prompt_input : Input();
     int   raw = 0;
     ULONG n   = 0;
     char  c;
 
-    /* Output through __wrap_write(), not DOS Write(): the CR-for-LF fixup that
-       makes the other prompts break lines lives there, and Read() consuming the
-       Return in raw mode means the newline has to be emitted by us. */
+    /* Authentication prompts are terminal diagnostics, not stdout.  For scp,
+       stdout is the file-transfer protocol pipe: writing the prompt there both
+       corrupts the protocol and hides it from the user.  fd 2 resolves to the
+       invoking console through the same stdio hand-off as `in` above. */
     if (prompt != NULL)
-        __wrap_write(1, prompt, strlen(prompt));
+        __wrap_write(2, prompt, strlen(prompt));
 
     if (IsInteractive(in))
         raw = SetMode(in, 1) ? 1 : 0;
@@ -2039,7 +2065,7 @@ char *getpass(const char *prompt)
     if (raw)
         SetMode(in, 0);
 
-    __wrap_write(1, "\n", 1);      /* con_write() gives it the CR the console needs */
+    __wrap_write(2, "\n", 1);      /* con_write() gives it the CR the console needs */
 
     return buf;
 }
