@@ -321,5 +321,6 @@ jobs:
             tools/check-test-duration.sh \
             tools/tree-stamp.sh \
             tools/check-nx-status.sh \
+            tools/nx-discard-scan.sh \
             tools/check-slot-clear.sh \
             install/test/run-workbench-cards.sh

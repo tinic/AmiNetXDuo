@@ -143,7 +143,10 @@ CROSS_CONFIGS=(
     # Seven diagnostics that only ADD -- counters, a probe, a symbol table, the
     # sampling profiler.  None changes a struct a shipped image lays out, so
     # one build compiles them all and a break in any is a break in this arm.
-    # The serial log is not among them any more: it is in every build.
+    # The serial log is NOT among them and is in no shipping build: it is OFF
+    # by default (CMakeLists.txt) and has the `log' arm below to itself, which
+    # is why AMI_ERROR/WARN compile to do { if (0) ... } while (0) everywhere
+    # else.  A failure a user must see takes an event, not a diagnostic line.
     "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON"
     # The profiler's attribution aid, on its own arm.  It CANNOT ride `instr`:
     # -fno-inline-functions-called-once is the whole point of it, and `instr`

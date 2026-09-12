@@ -139,10 +139,13 @@ static VOID tls_conn_leave(TLSConnection *conn)
     if (conn == NULL)
         return;
 
-    /* EITHER WAY: TX_SUCCESS, or TX_NOT_OWNED / TX_NOT_DONE, which mean
-       tls_conn_enter() did not take it -- and it returns -1 when it could not,
-       so the caller never reaches here.  This function is VOID and
-       tls.library has no diagnostic sink to report into. */
+    /* EITHER WAY: TX_SUCCESS, or TX_MUTEX_ERROR.  tls.library does not link
+       ThreadX's mutex -- it links the shim in tls_netx.c, which answers
+       TX_MUTEX_ERROR for a mutex it has no slot for and nothing else -- so the
+       ThreadX statuses this comment used to name cannot arrive here.  Either
+       way tls_conn_enter() returns -1 when it could not take the lock, so a
+       caller that did not hold it never reaches this line.  This function is
+       VOID and tls.library has no diagnostic sink to report into. */
     AMI_NX_EITHER_WAY(_tx_mutex_put(&_nx_secure_tls_protection));
 }
 

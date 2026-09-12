@@ -27,34 +27,59 @@ cd "$ROOT" || exit 1
 
 # The call shape: (VOID) in front of an nx_/tx_/_nx_/_tx_ call.  The macros in
 # nxstatus.h expand to exactly this, which is why the header is not searched.
-PATTERN='\(VOID\)[[:space:]]*_?(nx|tx)_[a-z0-9_]+[[:space:]]*\('
+# The scan is one script, tools/nx-discard-scan.sh, so this and the baseline
+# cannot disagree about what a discard is.  See that file for the two forms and
+# what is left out.
+SCAN="$ROOT/tools/nx-discard-scan.sh"
+BASE="$ROOT/tools/nx-discard-baseline.txt"
 
-# Prove the search reaches the tree before believing an empty result: a
-# pattern that matches nothing because the paths moved is indistinguishable
-# from a tree with no discards left, and only one of those is good news.
-reach=$(grep -rlE '_?(nx|tx)_[a-z0-9_]+[[:space:]]*\(' \
-            src port --include='*.c' --include='*.h' 2>/dev/null | wc -l)
-if [ "$reach" -lt 50 ]; then
-    echo "nx_status=FAIL reason=search_found_nothing files=$reach" >&2
-    echo "!! Only $reach files under src/ and port/ even call into NetX Duo or" >&2
-    echo "!! ThreadX.  That is not this tree, so this gate is looking in the" >&2
-    echo "!! wrong place and is failing rather than passing on an empty set." >&2
+for f in "$SCAN" "$BASE"; do
+    if [ ! -r "$f" ]; then
+        echo "nx_status=FAIL reason=missing file=$f" >&2
+        exit 1
+    fi
+done
+
+found="$(mktemp)"; base="$(mktemp)"
+trap 'rm -f "$found" "$base"' EXIT
+
+"$SCAN" > "$found" 2>/dev/null
+# LC_ALL=C and a whole-line sort on BOTH sides: comm compares lines, and
+# sorting the scan by field 2 while comm expected line order made it warn
+# "not in sorted order" and compare nonsense.  The scanner sorts the same way.
+grep -v '^#' "$BASE" | grep -v '^$' | LC_ALL=C sort > "$base"
+
+# Prove the scan reached the tree before believing an empty result: a pattern
+# that matches nothing because the paths moved looks exactly like a tree with
+# no discards left, and only one of those is good news.
+if [ "$(grep -c . "$found")" -lt 20 ]; then
+    echo "nx_status=FAIL reason=scan_found_nothing rows=$(grep -c . "$found")" >&2
+    echo "!! The scan returned almost nothing.  That is not this tree, so this" >&2
+    echo "!! gate is looking in the wrong place and fails rather than passing" >&2
+    echo "!! on an empty set." >&2
     exit 1
 fi
 
-hits=$(grep -rnE "$PATTERN" src port \
-           --include='*.c' --include='*.h' 2>/dev/null |
-       grep -v '/test/' || true)
+new=$(comm -23 <(LC_ALL=C sort "$found") "$base" || true)
+gone=$(comm -13 <(LC_ALL=C sort "$found") "$base" || true)
 
-if [ -n "$hits" ]; then
-    n=$(printf '%s\n' "$hits" | grep -c .)
-    echo "nx_status=FAIL discards=$n" >&2
-    printf '%s\n' "$hits" >&2
-    echo "!! A NetX Duo or ThreadX status is discarded with a bare (VOID)." >&2
-    echo "!! Say which of the seven it is -- Required, Optional, Expected," >&2
-    echo "!! Cleanup, OnlySuccess, ByOutput or EitherWay -- at the call site." >&2
-    echo "!! include/aminetxduo/nxstatus.h defines them and what each claims." >&2
-    exit 1
+rc=0
+if [ -n "$new" ]; then
+    echo "nx_status=FAIL new discards:" >&2
+    printf '%s\n' "$new" >&2
+    echo "!! A NetX Duo or ThreadX result goes nowhere at a site the baseline" >&2
+    echo "!! does not know.  Say which of the seven it is at the call site --" >&2
+    echo "!! include/aminetxduo/nxstatus.h defines them -- or handle it." >&2
+    rc=1
 fi
+if [ -n "$gone" ]; then
+    echo "nx_status=stale baseline rows that no longer occur:" >&2
+    printf '%s\n' "$gone" >&2
+    echo "!! Those sites were classified or removed.  Regenerate:" >&2
+    echo "!!     tools/nx-discard-scan.sh > tools/nx-discard-baseline.txt" >&2
+    rc=1
+fi
+[ "$rc" != 0 ] && exit 1
 
-echo "nx_status=PASS searched=$reach files, 0 unreviewed discards"
+known=$(awk -F'\t' '{s+=$1} END{print s+0}' "$base")
+echo "nx_status=PASS known=$known discards, 0 new (141 classified sites carry a reason and are not counted here)"

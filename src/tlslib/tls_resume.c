@@ -1035,12 +1035,13 @@ static UINT tls_resume_finish(NX_SECURE_TLS_SESSION *s, UCHAR *packet_start,
      * _nx_secure_tls_packet_allocate() can suspend.
      */
     /* EITHER WAY, both of them, and this pair is the vendored dance rather
-       than ours.  The put is TX_SUCCESS or TX_NOT_OWNED, and not owning it
-       here would mean the caller reached this line without the handshake
-       lock, which the callers above cannot.  The get is TX_WAIT_FOREVER, so
-       it is TX_SUCCESS unless the mutex is deleted or the wait aborted from
-       under us -- and in both of those the allocation below is checked and
-       the session is going down anyway. */
+       than ours.  tls.library links the mutex shim in tls_netx.c, not
+       ThreadX's, so each answers TX_SUCCESS or TX_MUTEX_ERROR and nothing
+       else: the shim has a fixed slot table and TX_MUTEX_ERROR is what a
+       mutex it has no slot for gets.  Not owning the lock here would mean a
+       caller reached this line without the handshake lock, which the callers
+       above cannot, and a get that failed leaves the allocation below --
+       which IS checked -- to end the session. */
     AMI_NX_EITHER_WAY(_tx_mutex_put(&_nx_secure_tls_protection));
     status = _nx_secure_tls_packet_allocate(s, pool, &send_packet, wait_option);
     AMI_NX_EITHER_WAY(_tx_mutex_get(&_nx_secure_tls_protection,
