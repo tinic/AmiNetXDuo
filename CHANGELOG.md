@@ -18,6 +18,11 @@ version at the top when it merges.
   that pipe and wrote the prompt into it. The process hand-off now carries the
   invoking console separately; authentication reads there and sends its prompt
   to the console/error stream without touching file-transfer bytes
+- **Ctrl-C could not stop a hung `scp`.** The parent forwarded the Amiga break
+  signal, but its hosted `ssh` process did not include that signal in socket
+  waits and a password prompt could sleep inside a blocking console read. The
+  hosted client now treats the forwarded break as cancellation in every wait,
+  and password input polls the console while checking for Ctrl-C
 
 ## 0.27.2
 

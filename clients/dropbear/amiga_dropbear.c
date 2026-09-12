@@ -561,6 +561,11 @@ static struct amiga_mempipe *amiga_stdio_pipe(int fd)
     return fd == 0 ? stdio->input : fd == 1 ? stdio->output : NULL;
 }
 
+static int amiga_stdio_hosted(void)
+{
+    return amiga_stdio_descriptor() != NULL;
+}
+
 /* RunCommand() is hosting this invocation when scp installed a stdio
    descriptor.  Its small runner must regain control after Dropbear calls
    exit(), so the common argv shim returns the status instead of terminating
@@ -1242,6 +1247,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     int   con_watch = 0;              /* the interactive console is in readfds */
     int   con_fd = -1;
     int   mem_watch = 0;              /* scp's shared-memory stdin */
+    int   hosted = amiga_stdio_hosted();
     int   fd;
     LONG  rc;
 
@@ -1319,18 +1325,28 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
         /* Always include the reader's signal while watching the console, never
            conditionally on the ring being empty: a byte landing in between is a
-           lost wakeup.  Ctrl-C rides the same mask and is fed on as a ^C. */
+           lost wakeup.  Ctrl-C rides the same mask: a direct session receives
+           ^C, while the private ssh process hosted by scp is cancelled. */
         sigs = 0;
-        if (con_watch)    sigs |= con_reader->cr_DataSig;
-        if (con_active()) sigs |= SIGBREAKF_CTRL_C;
-        if (mem_watch)    sigs |= SIGBREAKF_CTRL_F;
+        if (con_watch)             sigs |= con_reader->cr_DataSig;
+        if (con_active() || hosted) sigs |= SIGBREAKF_CTRL_C;
+        if (mem_watch)             sigs |= SIGBREAKF_CTRL_F;
 
         rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv, &sigs);
         if (rc < 0)
             return -1;
 
         if ((sigs & SIGBREAKF_CTRL_C) != 0)
+        {
+            /* A direct interactive ssh sends ^C through its channel.  The ssh
+               process hosted by scp has no terminal channel: its parent sent
+               this break to cancel the transport, so returning to its runner
+               is the only useful interpretation.  exit() is caught by the
+               argv shim and therefore returns cleanly from RunCommand(). */
+            if (hosted)
+                exit(EXIT_FAILURE);
             con_intr = 1;
+        }
 
         /* The reader woke us for a window resize: hand it to Dropbear's SIGWINCH
            handler, which sets cli_ses.winchange, and the session loop sends the
@@ -1374,7 +1390,11 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     }
     else if (mem_watch && !dos_readable(0))
     {
-        (VOID)Wait(SIGBREAKF_CTRL_F);
+        ULONG got = Wait(SIGBREAKF_CTRL_F |
+                         (hosted ? SIGBREAKF_CTRL_C : 0));
+
+        if (hosted && (got & SIGBREAKF_CTRL_C) != 0)
+            exit(EXIT_FAILURE);
         if (dos_readable(0)) { FD_SET(0, &out_r); ready++; }
     }
     else if (other_ready == 0)
@@ -2047,6 +2067,21 @@ char *getpass(const char *prompt)
 
     while (n + 1 < sizeof(buf))
     {
+        if (raw)
+        {
+            /* Read() on a raw CON: handle can remain asleep while the Shell
+               posts Ctrl-C as an Exec break signal.  Poll the console so the
+               signal is observed promptly; return a literal ^C because
+               Dropbear's getpass_or_cancel() already owns that contract. */
+            if ((SetSignal(0, 0) & SIGBREAKF_CTRL_C) != 0)
+            {
+                SetSignal(0, SIGBREAKF_CTRL_C);
+                buf[n++] = 0x03;
+                break;
+            }
+            if (!WaitForChar(in, CON_POLL_US))
+                continue;
+        }
         if (Read(in, &c, 1) != 1)
             break;
         if (c == '\n' || c == '\r')

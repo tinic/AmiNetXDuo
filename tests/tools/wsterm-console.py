@@ -345,11 +345,23 @@ def test_ssh_password():
         time.sleep(0.02)
     s.keys("\n")
 
-    s.pump(30.0)
+    got = s.pump(30.0, want="assword")
     echoed = s.out[before:]
     check(SECRET.encode("latin-1") not in s.out,
           "the password is never sent back (found it in %r)"
           % echoed[:200])
+
+    # A rejected password normally produces another prompt.  Ctrl-C there is
+    # an Exec break signal rather than a byte returned by Read(), so getpass()
+    # must poll for it; otherwise ssh (and the ssh process hosted by scp) stays
+    # asleep forever.  Some servers allow only one attempt, in which case the
+    # process has already ended and there is nothing left to interrupt.
+    if b"assword" in got:
+        s.keys("\003")
+        got = s.pump(30.0, want=">")
+        check(b">" in got,
+              "Ctrl-C at a password prompt returns to the Shell "
+              "(last 200 bytes: %r)" % s.out[-200:])
 
     # And the mode goes back, or every prompt after this one would be silent.
     s.pump(20.0)
