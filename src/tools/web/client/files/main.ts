@@ -2,6 +2,22 @@
  * SPDX-License-Identifier: MIT
  */
 
+import {
+  defaultKeymap,
+  history as undoHistory,
+  historyKeymap,
+  indentWithTab,
+} from "@codemirror/commands";
+import { searchKeymap } from "@codemirror/search";
+import { EditorState } from "@codemirror/state";
+import {
+  drawSelection,
+  EditorView,
+  highlightSpecialChars,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
+
 type DavEntry = {
   href: string;
   name: string;
@@ -32,11 +48,24 @@ const askText = byId<HTMLParagraphElement>("ask-text");
 const askField = byId<HTMLLabelElement>("ask-field");
 const askName = byId<HTMLInputElement>("ask-name");
 const askOk = byId<HTMLButtonElement>("ask-ok");
+const editorDialog = byId<HTMLDialogElement>("editor-dialog");
+const editorHost = byId<HTMLDivElement>("editor-host");
+const editorName = byId<HTMLElement>("editor-name");
+const editorPath = byId<HTMLElement>("editor-path");
+const editorState = byId<HTMLElement>("editor-state");
+const editorMessage = byId<HTMLElement>("editor-message");
+const editorClose = byId<HTMLButtonElement>("editor-close");
+const editorSave = byId<HTMLButtonElement>("editor-save");
 
 let current = "/";
 let loadSerial = 0;
 let volumeRoot = false;
 let dragDepth = 0;
+let editorView: EditorView | null = null;
+let editorHref = "";
+let editorEtag = "";
+let editorSaved = "";
+let editorSaving = false;
 
 function say(text: string, bad = false): void {
   status.textContent = text;
@@ -296,6 +325,7 @@ function draw(entries: DavEntry[]): void {
     ops.className = "ops";
     if (!(volumeRoot && current === "/")) {
       if (!entry.drawer) {
+        ops.append(opButton("Edit", "edit", () => void editEntry(entry)));
         const download = document.createElement("a");
         download.className = "download";
         download.href = entry.href;
@@ -331,10 +361,8 @@ async function load(): Promise<void> {
         "<resourcetype/><getcontentlength/><getlastmodified/>" +
         "</prop></propfind>",
     );
-    if (path === "/") {
-      volumeRoot = response.headers.get("X-AmiNetXDuo-Root") === "volumes";
-      drawCrumbs();
-    }
+    volumeRoot = response.headers.get("X-AmiNetXDuo-Root") === "volumes";
+    drawCrumbs();
     const entries = parseListing(await response.text(), path);
     if (serial !== loadSerial) return;
     draw(entries);
@@ -409,6 +437,197 @@ async function deleteEntry(entry: DavEntry): Promise<void> {
   }
 }
 
+function latin1Decode(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let text = "";
+
+  /* Avoid both quadratic concatenation and spreading a large file onto the
+     JavaScript call stack. */
+  for (let at = 0; at < bytes.length; at += 8192) {
+    const end = Math.min(at + 8192, bytes.length);
+    let part = "";
+    for (let i = at; i < end; i++) part += String.fromCharCode(bytes[i]);
+    text += part;
+  }
+  return text;
+}
+
+function latin1Encode(text: string): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) {
+    const value = text.charCodeAt(i);
+    if (value > 255)
+      throw new Error(
+        "The file contains a character that AmigaOS cannot store as one byte.",
+      );
+    bytes[i] = value;
+  }
+  return bytes;
+}
+
+function editorText(): string {
+  return editorView?.state.sliceDoc() ?? "";
+}
+
+function editorDirty(): boolean {
+  return editorView !== null && editorText() !== editorSaved;
+}
+
+function drawEditorState(message = "Amiga 8-bit text", bad = false): void {
+  const dirty = editorDirty();
+  editorState.textContent = editorSaving
+    ? "Saving..."
+    : dirty
+      ? "Modified"
+      : "Saved";
+  editorState.className = dirty ? "changed" : "";
+  editorSave.disabled = editorSaving || !dirty;
+  editorClose.disabled = editorSaving;
+  editorMessage.textContent = message;
+  editorMessage.className = bad ? "bad" : "";
+}
+
+function editableType(response: Response): boolean {
+  const type = (response.headers.get("Content-Type") ?? "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  return (
+    type.startsWith("text/") ||
+    type === "application/javascript" ||
+    type === "application/json" ||
+    type === "application/xml"
+  );
+}
+
+async function editEntry(entry: DavEntry): Promise<void> {
+  say("Opening " + entry.name + " ...");
+  try {
+    const response = await request("GET", entry.href);
+    if (!editableType(response)) {
+      if (response.body !== null) await response.body.cancel();
+      throw new Error(entry.name + " is binary; download it to edit it.");
+    }
+
+    const text = latin1Decode(await response.arrayBuffer());
+    const separator = text.includes("\r\n")
+      ? "\r\n"
+      : text.includes("\r")
+        ? "\r"
+        : "\n";
+
+    editorHref = entry.href;
+    editorEtag = response.headers.get("ETag") ?? "";
+    editorSaved = text;
+    editorName.textContent = entry.name;
+    editorPath.textContent = entry.href
+      .split("/")
+      .map(displaySegment)
+      .join("/");
+    editorView?.destroy();
+    editorView = null;
+    editorHost.replaceChildren();
+    if (!editorDialog.open) editorDialog.showModal();
+
+    editorView = new EditorView({
+      doc: text,
+      parent: editorHost,
+      extensions: [
+        lineNumbers(),
+        highlightSpecialChars(),
+        undoHistory(),
+        drawSelection(),
+        EditorState.lineSeparator.of(separator),
+        EditorView.lineWrapping,
+        keymap.of([
+          {
+            key: "Mod-s",
+            preventDefault: true,
+            run: () => {
+              void saveEditor();
+              return true;
+            },
+          },
+          indentWithTab,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+        ]),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) drawEditorState();
+        }),
+      ],
+    });
+    drawEditorState();
+    editorView.focus();
+    say("Editing " + entry.name);
+  } catch (error) {
+    say(error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+async function saveEditor(): Promise<void> {
+  if (editorView === null || editorSaving || !editorDirty()) return;
+
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = latin1Encode(editorText());
+  } catch (error) {
+    drawEditorState(error instanceof Error ? error.message : String(error), true);
+    return;
+  }
+
+  editorSaving = true;
+  drawEditorState("Writing " + editorName.textContent + " ...");
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (editorEtag !== "") headers["If-Match"] = editorEtag;
+
+    const response = await fetch(editorHref, {
+      method: "PUT",
+      headers,
+      body: new Blob([bytes], { type: "application/octet-stream" }),
+      cache: "no-store",
+    });
+    if (response.status === 412)
+      throw new Error(
+        "The file changed after it was opened. Close and reopen it before saving.",
+      );
+    if (!response.ok)
+      throw new Error("Save failed (" + response.status + ").");
+
+    editorSaved = editorText();
+    try {
+      const head = await request("HEAD", editorHref);
+      editorEtag = head.headers.get("ETag") ?? "";
+    } catch {
+      editorEtag = "";
+    }
+    editorSaving = false;
+    drawEditorState("Saved " + editorName.textContent);
+    say("Saved " + editorName.textContent);
+    await load();
+  } catch (error) {
+    editorSaving = false;
+    drawEditorState(error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+async function closeEditor(): Promise<void> {
+  if (editorSaving) return;
+  if (editorDirty()) {
+    const answer = await ask(
+      "Discard changes?",
+      "The changes to " + editorName.textContent + " have not been saved.",
+      "Discard",
+    );
+    if (answer === null) return;
+  }
+  editorDialog.close();
+}
+
 function put(file: File, href: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -457,6 +676,20 @@ byId("refresh").onclick = () => void load();
 up.onclick = () => go(parentOf(current));
 mkdir.onclick = () => void createDrawer();
 upload.onclick = () => pick.click();
+editorSave.onclick = () => void saveEditor();
+editorClose.onclick = () => void closeEditor();
+editorDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  void closeEditor();
+});
+editorDialog.addEventListener("close", () => {
+  editorView?.destroy();
+  editorView = null;
+  editorHost.replaceChildren();
+  editorHref = "";
+  editorEtag = "";
+  editorSaved = "";
+});
 pick.onchange = () => {
   if (pick.files) void uploadFiles(pick.files);
   pick.value = "";
@@ -480,6 +713,11 @@ window.addEventListener("drop", (event) => {
   dragDepth = 0;
   drop.classList.remove("on");
   if (event.dataTransfer?.files) void uploadFiles(event.dataTransfer.files);
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!editorDirty()) return;
+  event.preventDefault();
+  event.returnValue = "";
 });
 
 if (location.hash.length <= 1) history.replaceState(null, "", "#/");

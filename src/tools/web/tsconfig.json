@@ -27,7 +27,11 @@
     "types": [],
     "baseUrl": ".",
     "paths": {
-      "@xterm/addon-fit": ["./vendor/xterm/addon-fit.d.ts"]
+      "@xterm/addon-fit": ["./vendor/xterm/addon-fit.d.ts"],
+      "@codemirror/commands": ["../../../tools/web/node_modules/@codemirror/commands/dist/index.d.ts"],
+      "@codemirror/search": ["../../../tools/web/node_modules/@codemirror/search/dist/index.d.ts"],
+      "@codemirror/state": ["../../../tools/web/node_modules/@codemirror/state/dist/index.d.ts"],
+      "@codemirror/view": ["../../../tools/web/node_modules/@codemirror/view/dist/index.d.ts"]
     }
   },
   "include": ["client/**/*.ts", "vendor/xterm/xterm.d.ts"]

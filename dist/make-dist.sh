@@ -492,6 +492,9 @@ need "$ROOT/src/tools/web/files.html"
 need "$ROOT/src/tools/web/files.html.gz"
 cp "$ROOT/src/tools/web/files.html"    "$TREE/Terminal/files.html"
 cp "$ROOT/src/tools/web/files.html.gz" "$TREE/Terminal/files.html.gz"
+need "$ROOT/src/tools/web/vendor/codemirror/LICENSE"
+cp "$ROOT/src/tools/web/vendor/codemirror/LICENSE" \
+   "$TREE/Terminal/CodeMirror-LICENSE"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"

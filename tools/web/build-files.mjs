@@ -26,6 +26,7 @@ const js = await esbuild.build({
   sourcemap: false,
   legalComments: "none",
   charset: "ascii",
+  nodePaths: [join(HERE, "node_modules")],
   write: false,
 });
 if (js.outputFiles.length !== 1) throw new Error("expected one script output");

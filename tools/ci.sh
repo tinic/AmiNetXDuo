@@ -1472,7 +1472,11 @@ stage_web() {
         return "$NOTHING"
     fi
 
-    if [ ! -d tools/web/node_modules/esbuild ]; then
+    if [ ! -d tools/web/node_modules/esbuild ] ||
+       [ ! -d tools/web/node_modules/@codemirror/commands ] ||
+       [ ! -d tools/web/node_modules/@codemirror/search ] ||
+       [ ! -d tools/web/node_modules/@codemirror/state ] ||
+       [ ! -d tools/web/node_modules/@codemirror/view ]; then
         if ! (cd tools/web && npm ci --silent --no-audit --no-fund) \
                 > "$BUILD/web-npm.log" 2>&1; then
             tail -5 "$BUILD/web-npm.log"

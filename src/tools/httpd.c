@@ -3558,7 +3558,7 @@ static VOID httpd_do_propfind(HttpConn *c)
     httpd_begin(c, 207);
     httpd_header(c, "DAV", "1,2");
     httpd_header(c, "Content-Type", "text/xml; charset=utf-8");
-    if (c->is_volumes_root)
+    if (httpd_volumes)
         httpd_header(c, "X-AmiNetXDuo-Root", "volumes");
 
     if (c->head_only)

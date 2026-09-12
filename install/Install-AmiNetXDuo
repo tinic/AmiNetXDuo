@@ -267,7 +267,7 @@
        "Finder, in Explorer and on Linux, with nothing installed at the far "
        "end.  With "
        "the browser pages on, httpd also answers at /files with a file "
-       "manager and at /shell with an AmigaDOS Shell.\n\n"
+       "manager and text editor, and at /shell with an AmigaDOS Shell.\n\n"
        "None of them has a password, and no setting adds one.  Anyone who "
        "can reach the port can read and write every mounted volume.  Anyone "
        "who can reach the port gets a Shell on this machine.  Behind a home router "
@@ -369,7 +369,7 @@
 
 (set F_HTTPD
   (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
-       "manager at /files and a Shell at /shell.  Neither asks for a password.\n"))
+       "manager and text editor at /files and a Shell at /shell.  Neither asks for a password.\n"))
 
 (set H_DOCDIR
   (cat "The documentation, the example configuration files and the "

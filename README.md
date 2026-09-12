@@ -119,9 +119,12 @@ takes `-4` and `-6`.
 `httpd -F` serves a file manager at **`http://<address>/files`**. It browses the
 mounted volumes and opens, uploads, creates, renames and deletes files and
 drawers through the same WebDAV interface that desktop file managers mount.
+Its CodeMirror editor provides line numbers, undo and redo, search, and
+Ctrl/Cmd+S saving without leaving the browser. Saves carry the file's ETag,
+so a copy changed after it was opened is refused instead of overwritten.
 It detects extensionless Amiga text such as `startup-sequence`, while keeping
 binary files as downloads.
-Nothing is fetched from the Internet; the whole page is about 6 KB compressed.
+Nothing is fetched from the Internet; the whole page is about 107 KB compressed.
 Starting `httpd` with an explicit drawer, such as `httpd Work:Public 8080 -F`,
 keeps the older restricted-share form and exposes only that drawer.
 
@@ -212,4 +215,5 @@ MIT, with these exceptions, each confined to the files it names:
 | ThreadX and NetX Duo | MIT (Microsoft and the Eclipse ThreadX contributors). Both are maintained forks: `github.com/tinic/threadx` is four commits past upstream `44d7c95c` (hosted-port stack creation and overlap checks, and a pre-relinquish port hook); `github.com/tinic/netxduo` is an integrated line of patches past upstream `473d1928`, pinned by the submodule, with each defect's patch also on its own branch | `third_party/threadx`, `third_party/netxduo` |
 | The NE2000 core of `anxnet.device` | BSD-2-Clause, adapted from NetBSD's `dp8390` driver | `src/netdev/dp8390.c`, `ne2000.c`, `ed.c`, `netdev_mcaf.c` |
 | `ssh` and `scp` | Dropbear's MIT-style licence | `third_party/dropbear`, `clients/dropbear` |
+| The `/files` text editor | CodeMirror 6 and its support packages, MIT | bundled into `src/tools/web/files.html`; notice in `src/tools/web/vendor/codemirror` |
 | The CA root set | MPL 2.0, Mozilla's, file-scoped | `DEVS:Internet/certificates`, from `third_party/cacert` |

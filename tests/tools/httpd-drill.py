@@ -57,6 +57,11 @@ def test_volume_root():
         check(a[1].get("x-aminetxduo-root") == "volumes",
               "and identifies the non-writable virtual root to the browser")
 
+    a = once(req("PROPFIND", "/DH0/", {"Depth": "0"}))
+    check(a is not None and
+          a[1].get("x-aminetxduo-root") == "volumes",
+          "a direct link inside a volume identifies the same namespace")
+
     a = once(req("PUT", "/", {"Content-Length": "1"}, "x"))
     check(a is not None and a[0] == 403,
           "the virtual root cannot be replaced")
@@ -1095,8 +1100,9 @@ def test_files_page():
     if a is not None:
         check(a[1].get("content-length") == str(len(a[2])),
               "its Content-Length is the page that arrived")
-        check(b"AmiNetXDuo Files" in a[2] and b"PROPFIND" in a[2],
-              "and it is the self-contained DAV client")
+        check(b"AmiNetXDuo Files" in a[2] and b"PROPFIND" in a[2] and
+              b"Ctrl/Cmd+S saves" in a[2] and b"If-Match" in a[2],
+              "and it is the self-contained DAV client and editor")
 
     a = once(req("GET", FILES, {"Accept-Encoding": "gzip"}))
     check(a is not None and a[0] == 200 and
@@ -1107,8 +1113,9 @@ def test_files_page():
             plain = gzip.decompress(a[2])
         except (OSError, EOFError):
             plain = b""
-        check(b"AmiNetXDuo Files" in plain and b"PROPFIND" in plain,
-              "and it unpacks to the DAV client")
+        check(b"AmiNetXDuo Files" in plain and b"PROPFIND" in plain and
+              b"Ctrl/Cmd+S saves" in plain and b"If-Match" in plain,
+              "and it unpacks to the DAV client and editor")
 
     a = once(req("PROPFIND", FILES, {"Depth": "0"}))
     check(a is not None and a[0] == 405,

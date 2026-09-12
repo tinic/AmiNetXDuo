@@ -873,8 +873,10 @@
   with the port given to the Installer. httpd then serves every mounted
   volume over HTTP and WebDAV under one virtual root, so they mount as one
   drive on a desktop machine. -F adds a file manager in a web browser at
-  http://<this machine>/files, with browsing, inline viewing, downloads, uploads, new
-  drawers, renaming and deletion. -T adds an AmigaDOS Shell at
+  http://<this machine>/files, with browsing, inline viewing, editing,
+  downloads, uploads, new drawers, renaming and deletion. The editor has
+  line numbers, undo, search and Ctrl/Cmd+S saving. A save is refused when
+  the file changed elsewhere after it was opened. -T adds an AmigaDOS Shell at
   http://<this machine>/shell. The file manager follows the browser's
   light or dark appearance setting.
 

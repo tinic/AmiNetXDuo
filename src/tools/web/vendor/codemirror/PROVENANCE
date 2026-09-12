@@ -1,0 +1,20 @@
+# CodeMirror 6, bundled into files.html by tools/web/build-files.mjs.
+# Source packages come from the npm registry and are pinned, with integrity
+# hashes, by tools/web/package-lock.json:
+#
+# @codemirror/commands       6.11.0
+# @codemirror/language       6.12.4
+# @codemirror/search         6.7.2
+# @codemirror/state          6.7.4
+# @codemirror/view           6.43.11
+# @lezer/common              1.5.2
+# @lezer/highlight           1.2.3
+# @lezer/lr                  1.4.10
+# @marijn/find-cluster-break 1.0.4
+# crelt                      1.0.7
+# style-mod                  4.1.3
+# w3c-keyname                2.2.8
+#
+# The licence notice is maintained here and copied into the release beside
+# the page containing the bundled code.
+43f75f4892abee9a60518b4114f2f8bf5553b002ea680362706cac0f835ffde2  LICENSE

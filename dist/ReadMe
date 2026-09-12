@@ -108,7 +108,7 @@ The installer asks, in this order:
                                                    card's address)
      Start the network at boot                    (yes)
      Start httpd at boot, with a browser file
-       manager and Shell; which port              (no)
+       manager, text editor and Shell; which port (no)
 
 At Novice level every question takes its default without being shown.
 
@@ -364,6 +364,8 @@ MIT, with these exceptions, each confined to the files it names:
   *  The NE2000 core of anxnet.device is adapted from NetBSD's dp8390
      driver, under the BSD 2-clause licence.
   *  ssh and scp are Dropbear's, under Dropbear's MIT-style licence.
+  *  The /files text editor contains CodeMirror 6 and its support packages,
+     under the MIT licence.  Its notice is in Terminal/CodeMirror-LICENSE.
   *  DEVS:Internet/certificates is the Mozilla root certificate set, which
      is covered by the Mozilla Public License 2.0.  It is built, unmodified
      in substance, from the dated snapshot at third_party/cacert/cacert.pem

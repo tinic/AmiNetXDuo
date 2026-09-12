@@ -205,7 +205,7 @@ th:nth-child(3) {
   width: 13rem;
 }
 th:last-child {
-  width: 12rem;
+  width: 16rem;
 }
 td {
   padding: 0.72rem 1rem;
@@ -374,6 +374,9 @@ dialog label {
   font-size: 0.88rem;
   font-weight: 600;
 }
+dialog label[hidden] {
+  display: none;
+}
 
 dialog input {
   width: 100%;
@@ -396,6 +399,112 @@ dialog input:focus {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 1.2rem;
+}
+
+dialog.editor-dialog {
+  width: min(90rem, calc(100% - 2rem));
+  max-width: none;
+  height: min(54rem, calc(100% - 2rem));
+  max-height: none;
+  overflow: hidden;
+}
+.editor-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+.editor-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.72rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  background: #fafbfc;
+}
+.editor-heading {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+.editor-heading strong,
+.editor-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-heading span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+#editor-state {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+#editor-state.changed {
+  color: #b54708;
+}
+#editor-host {
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+#editor-host .cm-editor {
+  height: 100%;
+  color: #172033;
+  background: #fff;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.91rem;
+  line-height: 1.55;
+}
+#editor-host .cm-editor.cm-focused {
+  outline: none;
+}
+#editor-host .cm-scroller {
+  overflow: auto;
+}
+#editor-host .cm-content {
+  padding: 0.65rem 0;
+  caret-color: #1d4ed8;
+}
+#editor-host .cm-gutters {
+  color: #98a2b3;
+  background: #f8fafc;
+  border-right-color: var(--line);
+}
+#editor-host .cm-activeLine,
+#editor-host .cm-activeLineGutter {
+  background: #eff6ff;
+}
+#editor-host .cm-selectionBackground,
+#editor-host .cm-content ::selection {
+  background: #bfdbfe !important;
+}
+#editor-host .cm-panels {
+  color: #344054;
+  background: #f8fafc;
+}
+#editor-host .cm-panels input {
+  color: #182230;
+  background: #fff;
+  border: 1px solid #98a2b3;
+}
+.editor-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.8rem;
+  color: var(--muted);
+  background: #fafbfc;
+  border-top: 1px solid var(--line);
+  font-size: 0.78rem;
+}
+.editor-foot .bad {
+  color: #b42318;
+  font-weight: 600;
 }
 @media (max-width: 780px) {
   header {
@@ -430,6 +539,9 @@ dialog input:focus {
   }
   td.ops .download:after {
     content: "Download";
+  }
+  td.ops .edit:after {
+    content: "Edit";
   }
   td.ops .rename:after {
     content: "Rename";
@@ -472,6 +584,22 @@ dialog input:focus {
   }
   footer {
     padding: 0.7rem;
+  }
+  dialog.editor-dialog {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: 0;
+  }
+  .editor-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .editor-heading span,
+  #editor-state {
+    display: none;
+  }
+  .editor-foot span:last-child {
+    display: none;
   }
 }
 
@@ -639,5 +767,54 @@ dialog input:focus {
     color: #f2f4f7;
     background: #182230;
     border-color: #475467;
+  }
+
+  .editor-bar,
+  .editor-foot {
+    background: #182230;
+  }
+
+  #editor-state.changed {
+    color: #fdb022;
+  }
+
+  #editor-host,
+  #editor-host .cm-editor {
+    color: #e4e7ec;
+    background: #0f172a;
+  }
+
+  #editor-host .cm-content {
+    caret-color: #93c5fd;
+  }
+
+  #editor-host .cm-gutters {
+    color: #667085;
+    background: #111827;
+  }
+
+  #editor-host .cm-activeLine,
+  #editor-host .cm-activeLineGutter {
+    background: #172554;
+  }
+
+  #editor-host .cm-selectionBackground,
+  #editor-host .cm-content ::selection {
+    background: #1e3a8a !important;
+  }
+
+  #editor-host .cm-panels {
+    color: #d0d5dd;
+    background: #182230;
+  }
+
+  #editor-host .cm-panels input {
+    color: #f2f4f7;
+    background: #111827;
+    border-color: #475467;
+  }
+
+  .editor-foot .bad {
+    color: #fda29b;
   }
 }

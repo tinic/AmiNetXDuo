@@ -128,8 +128,8 @@ case_red usage src/tools/removenetinterface.c \
     'a synopsis keyword the template does not have'
 
 case_red usage src/tools/httpd.c \
-    'tool_usage("[<drawer>] [<port>] [-v] [TRACE]' \
-    'tool_usage("[<drawer>] [<port>] [-x] [TRACE]' \
+    'tool_usage("[<drawer>] [PORT <port>] [-v] [TRACE]' \
+    'tool_usage("[<drawer>] [PORT <port>] [-x] [TRACE]' \
     'a synopsis short flag the template does not have'
 
 
