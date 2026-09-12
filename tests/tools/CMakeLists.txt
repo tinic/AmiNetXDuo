@@ -5,6 +5,22 @@
 # battery died, rather than from FS-UAE's default of "the host's wall clock",
 # which is the one state in which the interesting half of the test cannot run.
 
+# The DHCP readiness wait is small and has no target-only dependency.  Compile
+# the shipping translation unit on the host with its two side effects mocked:
+# the test can then hold DHCP in WORKING after an address has appeared, which
+# neither SLIRP nor the lab DHCP server can do deterministically.
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test_tool_wait_host
+        host/test_tool_wait_host.c
+        "${CMAKE_SOURCE_DIR}/src/tools/tool_wait.c")
+    target_compile_definitions(test_tool_wait_host PRIVATE
+        AMINETXDUO_TOOLS_H)
+    target_compile_options(test_tool_wait_host PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/tool_wait_host.h"
+        -Wall -Wextra -Werror)
+    add_test(NAME tool_dhcp_wait COMMAND test_tool_wait_host)
+endif()
+
 # CardGrab is the second owner of the PCMCIA socket that the lab has never
 # had.  netdev_pcmcia.c declines a slot another handle holds and
 # netdev_device.c claims it on a later OpenDevice(); neither path had ever

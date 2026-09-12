@@ -187,6 +187,21 @@ static BOOL live_address6(struct Library *base, UWORD nx_index,
     return FALSE;
 }
 
+/* The IPv4 address in the NETSTATUS_INTERFACES snapshot live_index() took. */
+static ULONG live_address4(UWORD nx_index)
+{
+    LONG i;
+
+    for (i = 0; i < (LONG)onoff_ifaces.hdr.nsh_Count &&
+                i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (onoff_ifaces.e[i].nsi_Index == nx_index)
+            return onoff_ifaces.e[i].nsi_Address;
+    }
+
+    return 0;
+}
+
 /*
  * The same answer for a build with src/netstack linked in. FALSE in every
  * shipped build, where netstack_ipv6_address_get() is the weak stub.
@@ -265,14 +280,12 @@ static LONG live_index(struct Library *base, const char *name, BOOL *online)
 /*
  * Wait for the interface to reach the state that was asked for, reading the
  * live stack each time round. `seconds` 0 waits for as long as it takes.
- * FALSE means the time ran out, or, with *broken set, that Ctrl-C was
+ * FALSE means the shared time ran out, or wait->broken says Ctrl-C was
  * pressed.
  */
 static BOOL wait_for_live_state(struct Library *base, const char *name,
-                                BOOL want_up, ULONG seconds, BOOL *broken)
+                                BOOL want_up, ToolWait *wait)
 {
-    ULONG waited = 0;
-
     for (;;)
     {
         BOOL now = FALSE;
@@ -283,16 +296,32 @@ static BOOL wait_for_live_state(struct Library *base, const char *name,
         if (now == want_up)
             return TRUE;
 
-        if (seconds != 0 && waited >= seconds)
+        if (!tool_wait_second(wait))
             return FALSE;
+    }
+}
 
-        if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
-        {
-            *broken = TRUE;
-            return FALSE;
-        }
+static VOID report_live_online(struct Library *base, const char *name,
+                               UWORD index, ULONG addr)
+{
+    char addr4[16];
+    char addr6[AMI_CFG_IP6_STRLEN];
 
-        waited++;
+    if (addr == 0)
+        addr = live_address4(index);
+
+    if (addr != 0)
+    {
+        ami_config_format_ip(addr, addr4, sizeof(addr4));
+        tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr4);
+    }
+    else if (live_address6(base, index, addr6, sizeof(addr6)))
+    {
+        tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr6);
+    }
+    else
+    {
+        tool_printf("%s is online but has no address yet\n", (LONG)name);
     }
 }
 
@@ -311,6 +340,9 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
     LONG             err = 0;
     LONG             rc  = RETURN_OK;
     ULONG            i;
+    ToolWait         wait;
+
+    tool_wait_init(&wait, timeout);
 
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
@@ -329,7 +361,8 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         return RETURN_ERROR;
     }
 
-    if (online == up)
+    if (online == up && (!up || ifc == NULL ||
+                         ifc->iptype != AMI_IPTYPE_DHCP))
     {
         tool_printf("%s is already %s\n", (LONG)name,
                     (LONG)(up ? "online" : "offline"));
@@ -338,101 +371,56 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         return RETURN_OK;
     }
 
-    for (i = 0; i < (ULONG)(sizeof(ctl) / sizeof(ULONG)); i++)
-        ((ULONG *)&ctl)[i] = 0;
-
-    ctl.nsc_Index = (UWORD)index;
-
-    if (tool_netstatus_control(base,
-                               up ? NETCTRL_INTERFACE_UP
-                                  : NETCTRL_INTERFACE_DOWN,
-                               &ctl, &err) != 0)
+    if (online != up)
     {
-        tool_error("%s did not go %s", (LONG)name,
-                   (LONG)(up ? "online" : "offline"));
+        for (i = 0; i < (ULONG)(sizeof(ctl) / sizeof(ULONG)); i++)
+            ((ULONG *)&ctl)[i] = 0;
 
-        if (up && ifc != NULL)
-            tool_explain_device(ifc->device, ifc->unit, ifc->card);
+        ctl.nsc_Index = (UWORD)index;
 
-        tool_netstatus_close(base);
-        FreeArgs(rda);
-        return RETURN_FAIL;
+        if (tool_netstatus_control(base,
+                                   up ? NETCTRL_INTERFACE_UP
+                                      : NETCTRL_INTERFACE_DOWN,
+                                   &ctl, &err) != 0)
+        {
+            tool_error("%s did not go %s", (LONG)name,
+                       (LONG)(up ? "online" : "offline"));
+
+            if (up && ifc != NULL)
+                tool_explain_device(ifc->device, ifc->unit, ifc->card);
+
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
     }
 
-    if (!wait_for_live_state(base, name, up, timeout, &broken) && !broken)
+    if (!wait_for_live_state(base, name, up, &wait) && !wait.broken)
     {
         tool_error("%s was still %s %lu seconds after the request to go %s",
                    (LONG)name, (LONG)(up ? "down" : "up"), timeout,
                    (LONG)(up ? "up" : "down"));
         rc = RETURN_WARN;
     }
-    else if (!broken && up)
+    else if (!wait.broken && up)
     {
-        char  addr[16];
-        char  addr6[AMI_CFG_IP6_STRLEN];
-        ULONG live = 0;
+        ULONG addr = 0;
 
-        /* THE LINK BEING UP IS NOT THE SAME AS HAVING AN ADDRESS.  The wait
-           above returns when the interface reports itself up, which on a DHCP
-           interface happens before the server has answered: `Online genet'
-           then printed the link-local, or nothing, and the next command in the
-           script found no route.  Wait the same allowance the caller gave the
-           link, and for the same reason AddNetInterface does. */
-        ULONG waited = 0;
-
-        for (;;)
+        if (ifc != NULL && ifc->iptype == AMI_IPTYPE_DHCP &&
+            !tool_wait_dhcp_bound(base, (UWORD)index, &wait, &addr))
         {
-            live = 0;
-
-            /* The live address, not the one in the file: see
-               addnetinterface.c. */
-            if (live_index(base, name, &online) >= 0)
+            if (!wait.broken)
             {
-                LONG n;
-
-                for (n = 0; n < (LONG)onoff_ifaces.hdr.nsh_Count &&
-                            n < (LONG)NX_MAX_PHYSICAL_INTERFACES; n++)
-                {
-                    if (onoff_ifaces.e[n].nsi_Index == (UWORD)index)
-                    {
-                        live = onoff_ifaces.e[n].nsi_Address;
-                        break;
-                    }
-                }
+                tool_error("%s had no DHCP lease after %lu seconds",
+                           (LONG)name, wait.elapsed);
+                tool_explain_dhcp(name);
+                rc = RETURN_WARN;
             }
-
-            if (live != 0 || index < 0)
-                break;
-            if (ifc == NULL || ifc->iptype == AMI_IPTYPE_STATIC ||
-                ifc->iptype == AMI_IPTYPE_NONE)
-                break;
-            if (waited >= timeout)
-                break;
-            if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
-                break;
-
-            waited++;
-        }
-
-        if (live != 0)
-        {
-            ami_config_format_ip(live, addr, sizeof(addr));
-            tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr);
-        }
-        else if (index >= 0 &&
-                 live_address6(base, (UWORD)index, addr6, sizeof(addr6)))
-        {
-            tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr6);
         }
         else
-        {
-            tool_printf("%s is online but has no address yet\n", (LONG)name);
-
-            if (ifc != NULL && ifc->iptype == AMI_IPTYPE_DHCP)
-                tool_explain_dhcp(name);
-        }
+            report_live_online(base, name, (UWORD)index, addr);
     }
-    else if (!broken)
+    else if (!wait.broken)
     {
         tool_printf("%s is offline\n", (LONG)name);
     }
@@ -440,6 +428,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
     tool_netstatus_close(base);
     FreeArgs(rda);
 
+    broken = wait.broken;
     if (broken || tool_break())
     {
         tool_fault(ERROR_BREAK);
@@ -451,14 +440,11 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
 
 /*
  * Wait for the interface to reach the state that was asked for. `seconds` 0
- * waits for as long as it takes. FALSE means the time ran out, or, with
- * *broken set, that Ctrl-C was pressed.
+ * waits for as long as it takes. FALSE means the shared time ran out, or
+ * wait->broken says Ctrl-C was pressed.
  */
-static BOOL wait_for_state(LONG index, BOOL want_up, ULONG seconds,
-                           BOOL *broken)
+static BOOL wait_for_state(LONG index, BOOL want_up, ToolWait *wait)
 {
-    ULONG waited = 0;
-
     for (;;)
     {
         BOOL now = netstack_interface_is_up((UWORD)index) ? TRUE : FALSE;
@@ -466,18 +452,60 @@ static BOOL wait_for_state(LONG index, BOOL want_up, ULONG seconds,
         if (now == want_up)
             return TRUE;
 
-        if (seconds != 0 && waited >= seconds)
+        if (!tool_wait_second(wait))
             return FALSE;
-
-        if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
-        {
-            *broken = TRUE;
-            return FALSE;
-        }
-
-        waited++;
     }
 }
+
+#ifndef TOOL_OFFLINE
+static BOOL wait_for_linked_dhcp(UWORD index, ToolWait *wait,
+                                 ULONG *addr_out)
+{
+    for (;;)
+    {
+        if (netstack_interface_dhcp_state(index) == AMI_DHCP_BOUND)
+        {
+            NX_IP *ip = netstack_ip();
+
+            *addr_out = (ip != NULL)
+                            ? ip->nx_ip_interface[index].nx_interface_ip_address
+                            : 0;
+            return TRUE;
+        }
+
+        if (!tool_wait_second(wait))
+            return FALSE;
+    }
+}
+
+static VOID report_linked_online(const char *name, UWORD index, ULONG addr)
+{
+    char addr4[16];
+    char addr6[AMI_CFG_IP6_STRLEN];
+
+    if (addr == 0)
+    {
+        NX_IP *ip = netstack_ip();
+
+        if (ip != NULL)
+            addr = ip->nx_ip_interface[index].nx_interface_ip_address;
+    }
+
+    if (addr != 0)
+    {
+        ami_config_format_ip(addr, addr4, sizeof(addr4));
+        tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr4);
+    }
+    else if (linked_address6(index, addr6, sizeof(addr6)))
+    {
+        tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr6);
+    }
+    else
+    {
+        tool_printf("%s is online but has no address yet\n", (LONG)name);
+    }
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -491,18 +519,10 @@ int main(int argc, char **argv)
     ULONG          timeout;
     BOOL           had_unit;
     BOOL           broken = FALSE;
+    ToolWait       wait;
     LONG           index;
     LONG           err;
-#ifndef TOOL_OFFLINE
-    /* Captured while the library base is open; printed after it is released. */
-    char           started6[AMI_CFG_IP6_STRLEN];
-#endif
-
     (VOID)argv;
-
-#ifndef TOOL_OFFLINE
-    started6[0] = '\0';
-#endif
 
     if (tool_from_workbench(argc))
         return RETURN_FAIL;
@@ -541,6 +561,7 @@ int main(int argc, char **argv)
     unit     = had_unit ? (ULONG)*(const LONG *)args[ARG_UNIT] : 0UL;
     timeout  = (args[ARG_TIMEOUT] != 0)
                    ? (ULONG)*(const LONG *)args[ARG_TIMEOUT] : 0UL;
+    tool_wait_init(&wait, timeout);
 
     /* Resolve NAME: interface first, then driver. */
     if (load_interface(given, &ifc, FALSE))
@@ -658,46 +679,15 @@ int main(int argc, char **argv)
                 return RETURN_FAIL;
             }
 
-            /* While the base is still open: the IPv6 addresses come from a
-               NetStackQuery() and there is no base after the release below. */
-            {
-                BOOL  online6 = FALSE;
-                LONG  where6  = live_index(base, name, &online6);
-
-                if (where6 >= 0)
-                    (VOID)live_address6(base, (UWORD)where6, started6,
-                                        sizeof(started6));
-            }
-
             /* The explicit hold is independent of this opener, so this open
                has done its job and goes back like any other. */
             tool_stack_release(base);
         }
 
-        {
-            ULONG addr = 0;
-            char  text[16];
-
-            if (tool_stack_query(&addr, NULL, 0) && addr != 0)
-            {
-                ami_config_format_ip(addr, text, sizeof(text));
-                tool_printf("%s is online, address %s\n", (LONG)name, (LONG)text);
-            }
-            else if (started6[0] != '\0')
-            {
-                tool_printf("%s is online, address %s\n", (LONG)name,
-                            (LONG)started6);
-            }
-            else
-            {
-                tool_printf("%s is online but has no address yet\n", (LONG)name);
-                if (ifc.iptype == AMI_IPTYPE_DHCP)
-                    tool_explain_dhcp(name);
-            }
-        }
-
-        FreeArgs(rda);
-        return RETURN_OK;
+        /* The same live path handles an already-running stack and this first
+           explicit start.  In particular it waits for this named interface's
+           DHCP row and reports this interface's address, never gethostid(). */
+        return switch_live(name, &ifc, TRUE, timeout, rda);
     }
 
     if (err != AMI_NET_OK)
@@ -753,7 +743,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (!wait_for_state(index, FALSE, timeout, &broken) && !broken)
+    if (!wait_for_state(index, FALSE, &wait) && !wait.broken)
     {
         tool_error("%s was still up %lu seconds after the request to go down",
                    (LONG)name, timeout);
@@ -761,28 +751,32 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    if (!broken)
+    if (!wait.broken)
         tool_printf("%s is offline\n", (LONG)name);
 #else
-    if (netstack_interface_is_up((UWORD)index))
+    if (netstack_interface_is_up((UWORD)index) &&
+        ifc.iptype != AMI_IPTYPE_DHCP)
     {
         tool_printf("%s is already online\n", (LONG)name);
         FreeArgs(rda);
         return RETURN_OK;
     }
 
-    err = netstack_interface_up((UWORD)index);
-    if (err != AMI_NET_OK)
+    if (!netstack_interface_is_up((UWORD)index))
     {
-        tool_error("netstack_interface_up (S2_ONLINE): %s: %s (%s, %ld)",
-                   (LONG)name, (LONG)tool_net_error(err),
-                   (LONG)tool_code_net(err), err);
-        tool_explain_device(ifc.device, ifc.unit, ifc.card);
-        FreeArgs(rda);
-        return RETURN_FAIL;
+        err = netstack_interface_up((UWORD)index);
+        if (err != AMI_NET_OK)
+        {
+            tool_error("netstack_interface_up (S2_ONLINE): %s: %s (%s, %ld)",
+                       (LONG)name, (LONG)tool_net_error(err),
+                       (LONG)tool_code_net(err), err);
+            tool_explain_device(ifc.device, ifc.unit, ifc.card);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
     }
 
-    if (!wait_for_state(index, TRUE, timeout, &broken) && !broken)
+    if (!wait_for_state(index, TRUE, &wait) && !wait.broken)
     {
         tool_error("%s was still down %lu seconds after the request to come up",
                    (LONG)name, timeout);
@@ -790,36 +784,28 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    if (!broken)
+    if (!wait.broken)
     {
-        NX_IP *ip = netstack_ip();
-        char   addr[16];
-        char   addr6[AMI_CFG_IP6_STRLEN];
-        ULONG  live = 0;
+        ULONG addr = 0;
 
-        /* The live address, not the one in the file: see addnetinterface.c. */
-        if (ip != NULL)
-            live = ip->nx_ip_interface[index].nx_interface_ip_address;
-
-        if (live != 0)
+        if (ifc.iptype == AMI_IPTYPE_DHCP &&
+            !wait_for_linked_dhcp((UWORD)index, &wait, &addr))
         {
-            ami_config_format_ip(live, addr, sizeof(addr));
-            tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr);
-        }
-        else if (linked_address6((UWORD)index, addr6, sizeof(addr6)))
-        {
-            tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr6);
+            if (!wait.broken)
+            {
+                tool_error("%s had no DHCP lease after %lu seconds",
+                           (LONG)name, wait.elapsed);
+                tool_explain_dhcp(name);
+                FreeArgs(rda);
+                return RETURN_WARN;
+            }
         }
         else
-        {
-            tool_printf("%s is online but has no address yet\n", (LONG)name);
-
-            if (ifc.iptype == AMI_IPTYPE_DHCP)
-                tool_explain_dhcp(name);
-        }
+            report_linked_online(name, (UWORD)index, addr);
     }
 #endif
 
+    broken = wait.broken;
     if (broken || tool_break())
     {
         tool_fault(ERROR_BREAK);

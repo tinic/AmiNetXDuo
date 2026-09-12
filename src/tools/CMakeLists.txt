@@ -15,6 +15,7 @@
 set(TOOLS_COMMON_SOURCES
     tool_util.c
     tool_diag.c
+    tool_wait.c
     netstack_weak.c)
 
 # Only in a measuring build.  tool_startup.S calls into it around main(), both

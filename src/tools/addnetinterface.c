@@ -300,20 +300,8 @@ static VOID report_refused_gateway(struct Library *base, const char *name,
  * detection is not one anything may use yet, and reporting it would mean this
  * command declares success a second before the address is real.
  */
-/* fe80::/10.  A link-local address is derived from the MAC and configured the
-   moment the interface comes up: it needs no server and proves nothing about
-   whether DHCP has answered.  Treating it as "the interface has an address"
-   is what made the TIMEOUT below expire in nobody's favour -- mja65 reported
-   `Online' printing no IPv4, and sntp failing unless a `wait 3' was put after
-   AddNetInterface, both on a DHCP interface that did get its lease a moment
-   later. */
-static BOOL addif_ip6_link_local(const ULONG *a)
-{
-    return (BOOL)((a[0] & 0xFFC00000UL) == 0xFE800000UL);
-}
-
 static BOOL running_address6(struct Library *base, UWORD nx_index,
-                             char *text, ULONG text_len, BOOL *link_local)
+                             char *text, ULONG text_len)
 {
     LONG n;
     LONG i;
@@ -334,9 +322,6 @@ static BOOL running_address6(struct Library *base, UWORD nx_index,
 
         if (text != NULL)
             tool_format_ip6(a6->nsn_Address, text, text_len);
-        if (link_local != NULL)
-            *link_local = addif_ip6_link_local(a6->nsn_Address);
-
         return TRUE;
     }
 
@@ -449,12 +434,14 @@ static VOID explain_add_failure(struct Library *base, LONG err,
     }
 }
 
-static BOOL wait_for_running_address(struct Library *base, const char *name,
-                                     ULONG seconds, ULONG *addr_out,
-                                     char *text6, ULONG text6_len,
-                                     BOOL *broken)
+static BOOL wait_for_running_ready(struct Library *base, const char *name,
+                                   const AmiIfConfig *ifc, ULONG seconds,
+                                   ULONG *addr_out, char *text6,
+                                   ULONG text6_len, BOOL *broken)
 {
-    ULONG waited = 0;
+    ToolWait wait;
+
+    tool_wait_init(&wait, seconds);
 
     for (;;)
     {
@@ -464,41 +451,46 @@ static BOOL wait_for_running_address(struct Library *base, const char *name,
         if (where < 0)
             return FALSE;
 
-        if (addr != 0)
+        if (ifc->iptype == AMI_IPTYPE_DHCP)
         {
-            *addr_out = addr;
-            return TRUE;
+            if (tool_wait_dhcp_bound(base, (UWORD)where, &wait, &addr))
+            {
+                *addr_out = addr;
+                (VOID)running_address6(base, (UWORD)where, text6, text6_len);
+                return TRUE;
+            }
+
+            *broken = wait.broken;
+            return FALSE;
         }
-
-        /* A routable v6 address is an answer; a link-local is not.  Keep it
-           in text6 so the caller can still report it when the wait runs out,
-           and go on waiting for something a server had to give us. */
+        else
         {
-            BOOL ll = FALSE;
+            if (addr != 0)
+            {
+                *addr_out = addr;
+                return TRUE;
+            }
 
-            if (running_address6(base, (UWORD)where, text6, text6_len, &ll) &&
-                !ll)
+            if (running_address6(base, (UWORD)where, text6, text6_len))
                 return TRUE;
         }
 
-        if (waited >= seconds)
-            return FALSE;
-
-        if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+        if (!tool_wait_second(&wait))
         {
-            *broken = TRUE;
+            *broken = wait.broken;
             return FALSE;
         }
-
-        waited++;
     }
 }
 
 /* The same wait, against an interface of a stack that is linked in here. */
-static BOOL wait_for_interface_address(LONG index, ULONG seconds,
-                                       ULONG *addr_out, BOOL *broken)
+static BOOL wait_for_interface_ready(LONG index, const AmiIfConfig *ifc,
+                                     ULONG seconds, ULONG *addr_out,
+                                     BOOL *broken)
 {
-    ULONG waited = 0;
+    ToolWait wait;
+
+    tool_wait_init(&wait, seconds);
 
     for (;;)
     {
@@ -508,22 +500,19 @@ static BOOL wait_for_interface_address(LONG index, ULONG seconds,
         if (ip != NULL)
             addr = ip->nx_ip_interface[index].nx_interface_ip_address;
 
-        if (addr != 0)
+        if ((ifc->iptype == AMI_IPTYPE_DHCP &&
+             netstack_interface_dhcp_state((UWORD)index) == AMI_DHCP_BOUND) ||
+            (ifc->iptype != AMI_IPTYPE_DHCP && addr != 0))
         {
             *addr_out = addr;
             return TRUE;
         }
 
-        if (waited >= seconds)
-            return FALSE;
-
-        if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+        if (!tool_wait_second(&wait))
         {
-            *broken = TRUE;
+            *broken = wait.broken;
             return FALSE;
         }
-
-        waited++;
     }
 }
 
@@ -749,12 +738,13 @@ int main(int argc, char **argv)
 
             text6[0] = '\0';
 
-            if (addr == 0)
-                (VOID)wait_for_running_address(base, name, allowance, &addr,
-                                               text6, sizeof(text6), &broken);
+            if (ifc.iptype == AMI_IPTYPE_DHCP || addr == 0)
+                (VOID)wait_for_running_ready(base, name, &ifc, allowance,
+                                             &addr, text6, sizeof(text6),
+                                             &broken);
             else if (where >= 0)
                 (VOID)running_address6(base, (UWORD)where, text6,
-                                       sizeof(text6), NULL);
+                                       sizeof(text6));
 
             if (addr != 0)
             {
@@ -872,11 +862,11 @@ int main(int argc, char **argv)
             ULONG live_mask = 0;
             NX_IP *ip;
 
-            (VOID)wait_for_interface_address(index,
-                                             (ifc.iptype != AMI_IPTYPE_STATIC &&
-                                              ifc.iptype != AMI_IPTYPE_NONE)
-                                                 ? timeout : 0UL,
-                                             &live_addr, &broken);
+            (VOID)wait_for_interface_ready(index, &ifc,
+                                           (ifc.iptype != AMI_IPTYPE_STATIC &&
+                                            ifc.iptype != AMI_IPTYPE_NONE)
+                                               ? timeout : 0UL,
+                                           &live_addr, &broken);
 
             ip = netstack_ip();
             if (ip != NULL)

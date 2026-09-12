@@ -245,7 +245,9 @@ host_test_targets() { # builddir
 #      29 files byte for byte as one whole run.  Change RFB_SHARDS,
 #      RFB_SGROUPS or RFB_GEN_PARTS in src/rfb/CMakeLists.txt and this moves
 #      with them.
-HOST_TESTS_EXPECTED=381
+#      382 with test_tool_wait, which covers the DHCP readiness policy the
+#      0.27.2 fix turns on.
+HOST_TESTS_EXPECTED=382
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

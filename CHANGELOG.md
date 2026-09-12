@@ -11,15 +11,16 @@ version at the top when it merges.
 
 ## 0.27.2
 
-- **`AddNetInterface` and `Online` returned before DHCP had answered.** The wait
-  for an address ended on the IPv6 link-local, an address derived from the MAC
-  and configured without a server, so the interface reported `fe80::...` or no
-  address at all and the next command in a startup found no route. A `wait 3`
-  after `AddNetInterface` was the workaround. `TIMEOUT` seconds, 10 by default,
-  are now spent waiting for an address a server had to give, and `Online` waits
-  for one where it did not wait at all. Reported by mja65 on a PiStorm with
-  `genet.device`, where `Online genet` printed no IPv4 and `sntp` run next
-  could not find its server
+- **`AddNetInterface` and `Online` returned before DHCP had answered.** An IPv6
+  link-local address, a global IPv6 address, AutoIP, or an IPv4 address becoming
+  visible is not proof that the DHCP lease, routes and resolver options are
+  ready. Both commands now wait for the named interface's DHCP state to become
+  `BOUND`; the query also installs pending resolver options before it returns.
+  One `TIMEOUT` covers both link-up and DHCP, and `Online`'s default zero still
+  means no time limit. A host regression holds DHCP in `WORKING` after addresses
+  appear and verifies that neither command's shared wait returns early.
+  Reported by mja65, where `Online genet` printed no IPv4 and `sntp` run next
+  could not find its server unless startup inserted `wait 3`
 
 ## 0.27.1
 

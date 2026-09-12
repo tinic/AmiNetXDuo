@@ -1112,8 +1112,11 @@
   @{b}TIMEOUT@{ub}    Seconds to wait for an interface that asks for its
              address to be given one. Default 10, which is also the
              smallest value accepted -- a DHCP exchange given less time
-             than that reports a failure that is not one. An interface
-             with its address in its file does not wait.
+             than that reports a failure that is not one. For DHCP, the
+             wait ends when that interface's lease is BOUND and its route
+             and name-server options have been installed, not merely when
+             some address appears. An interface with its address in its
+             file does not wait.
 
   @{b}Example@{ub}
 
@@ -1202,9 +1205,10 @@
             used, and the command reports which one.
   @{b}UNIT@{ub}      Which unit of the driver, when NAME is a driver.
             Default 0.
-  @{b}TIMEOUT@{ub}   Seconds to wait for the interface to come up. 0, the
-            default, waits indefinitely. Ctrl-C stops the wait in
-            either case.
+  @{b}TIMEOUT@{ub}   Seconds for the whole operation: link-up and, on a DHCP
+            interface, its lease becoming BOUND with routes and name-server
+            options installed. 0, the default, waits indefinitely. Ctrl-C
+            stops the wait in either case.
 
   @{b}Example@{ub}
 

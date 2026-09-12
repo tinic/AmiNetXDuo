@@ -102,6 +102,17 @@ BOOL tool_break(VOID);
 /* Delay() in small slices so a break is noticed promptly. ticks are 1/50 s. */
 BOOL tool_delay_ticks(ULONG ticks);        /* TRUE if interrupted            */
 
+/* A command's single wall-clock allowance, shared by consecutive waits. */
+typedef struct ToolWait
+{
+    ULONG limit;                           /* seconds; zero means unlimited  */
+    ULONG elapsed;
+    BOOL  broken;
+} ToolWait;
+
+VOID tool_wait_init(ToolWait *wait, ULONG seconds);
+BOOL tool_wait_second(ToolWait *wait);
+
 /* ------------------------------------------------------------- formatting */
 
 VOID tool_format_mac(const UBYTE *mac, char *buf, ULONG buflen);
@@ -331,6 +342,21 @@ BOOL tool_parse_ip6(const char *text, ULONG out[4]);
  */
 LONG tool_netstatus_query(struct Library *base, ULONG what,
                           APTR buffer, ULONG size, ULONG entry_size);
+
+/*
+ * The DHCP state of one live interface, from NETSTATUS_DHCP.  The return is
+ * NETSTATUS_DHCP_OFF/WORKING/BOUND, or -1 when the stack did not answer or
+ * supplied no row for `index`.  A BOUND answer may also return the lease's
+ * address.  Keeping this lookup here gives commands one definition of DHCP
+ * readiness: an address appearing in NETSTATUS_INTERFACES is not the same
+ * event as the lease, its routes and its resolver options becoming usable.
+ */
+LONG tool_netstatus_dhcp_state(struct Library *base, UWORD index,
+                               ULONG *addr_out);
+
+/* Wait until that row is BOUND. Address presence is deliberately ignored. */
+BOOL tool_wait_dhcp_bound(struct Library *base, UWORD index, ToolWait *wait,
+                          ULONG *addr_out);
 
 /*
  * The mutating half. The caller fills `ctl` except for the magic and version,

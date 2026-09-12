@@ -1279,6 +1279,40 @@ LONG tool_netstatus_query(struct Library *base, ULONG what,
     return (LONG)hdr->nsh_Count;
 }
 
+LONG tool_netstatus_dhcp_state(struct Library *base, UWORD index,
+                               ULONG *addr_out)
+{
+    static struct
+    {
+        NetStatusHeader hdr;
+        NetStatusDhcp   e[NX_MAX_PHYSICAL_INTERFACES];
+    } answer;
+    LONG n;
+    LONG i;
+
+    if (addr_out != NULL)
+        *addr_out = 0;
+
+    n = tool_netstatus_query(base, NETSTATUS_DHCP, &answer, sizeof(answer),
+                             sizeof(NetStatusDhcp));
+    if (n < 0)
+        return -1;
+
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (answer.e[i].nsd_Index != index)
+            continue;
+
+        if (addr_out != NULL &&
+            answer.e[i].nsd_State == NETSTATUS_DHCP_BOUND)
+            *addr_out = answer.e[i].nsd_Address;
+
+        return (LONG)answer.e[i].nsd_State;
+    }
+
+    return -1;
+}
+
 LONG tool_configure_interface(struct Library *base, const char *name,
                               struct TagItem *tags, LONG *errno_out)
 {
