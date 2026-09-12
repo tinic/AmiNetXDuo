@@ -64,8 +64,9 @@ SMOKE="$BUILD/src/tools/ToolsSmoke"
 ADDIF="$BUILD/src/tools/AddNetInterface"
 CAPTURE="$BUILD/src/tools/NetCapture"
 PING="$BUILD/src/tools/ping"
+NETSTAT="$BUILD/src/tools/netstat"
 
-for f in "$BSD" "$SMOKE" "$ADDIF" "$CAPTURE" "$PING"; do
+for f in "$BSD" "$SMOKE" "$ADDIF" "$CAPTURE" "$PING" "$NETSTAT"; do
     [ -f "$f" ] || refuse "build_missing:$f"
 done
 
@@ -147,6 +148,7 @@ run_card() {
     cp "$ADDIF"   "$stage/AddNetInterface"
     cp "$CAPTURE" "$stage/NetCapture"
     cp "$PING"    "$stage/ping"
+    cp "$NETSTAT" "$stage/netstat"
 
     sana2_select "$board" "$BUILD"
     if [ -z "$SANA2_SEL_PATH" ]; then
@@ -183,7 +185,8 @@ EOF
         "$ROOT/tools/amiberry-run.sh" \
         -N "$board" -B "$BACKEND" -m "$model" -t "$TIMEOUT" \
         "$SMOKE" "$stage/devs" "$stage/libs" "$stage/AddNetInterface" \
-        "$stage/NetCapture" "$stage/ping" "$stage/commands.txt" \
+        "$stage/NetCapture" "$stage/ping" "$stage/netstat" \
+        "$stage/commands.txt" \
         > "$ROOT/build/$tag.out" 2>&1 < /dev/null
     run_rc=$?
 
