@@ -10,10 +10,11 @@ and for a crash not yet known to be reachable from the network.
 There is no bounty and no guaranteed response time. This is a hobby project.
 
 A useful report states which build (`--version` on any command prints it), which
-SANA-II driver and card, and what the machine received or was asked to do. A
-serial log is worth more than a description of the symptom, and a shipped build
-writes one: `SetEnv ANXDLOGLEVEL 2`, restart the network, and capture the serial
-port with a null modem or Sashimi.
+SANA-II driver and card, and what the machine received or was asked to do.
+`ShowNetStatus EVENTS` lists what the network did and which call refused; a
+shipped build keeps that ring and writes no serial log. A build configured with
+`-DAMINETXDUO_LOG=ON` does: `SetEnv ANXDLOGLEVEL 2`, restart the network, and
+capture the serial port with a null modem or Sashimi.
 
 ## Supported versions
 
@@ -55,11 +56,11 @@ Trusted, and listed because that trust is not obvious:
 | | |
 |---|---|
 | Conformance | `bsdsocktest`, an independent suite written for this ABI by someone else. `tests/conformance/run-conformance.sh` |
-| Fuzzing, host, ASan + UBSan, in `ctest` | `fuzz_config` (every parser that reads a file out of `DEVS:`), `fuzz_bpf`, `fuzz_dns`, `fuzz_usergroup`, `fuzz_dhcp`, `fuzz_tls_record`, `fuzz_tls_x509`, `fuzz_httpframe` |
+| Fuzzing, host, ASan + UBSan, in `ctest` | `fuzz_config` (every parser that reads a file out of `DEVS:`), `fuzz_bpf`, `fuzz_dns`, `fuzz_usergroup`, `fuzz_dhcp`, `fuzz_tls_record`, `fuzz_tls_x509`, `fuzz_httpframe`, `fuzz_cis` (the PCMCIA card information structure) |
 | Fuzzing needing a 32-bit build (`tools/ci.sh host32`) | `fuzz_mdns` and `fuzz_tls_crypto`. NetX Duo's mDNS cache keeps pointers in `ULONG` slots, and the TLS crypto paths cast a pointer to a 32-bit `ULONG` in the signature bounds check itself. The stage counts the tests it ran, so a 64-bit configuration cannot report green having registered none |
 | Fuzz depth | `fuzz_dns` drives the real client through `_nx_dns_response_receive()`, the name unencoder and the resource walk. `fuzz_mdns` enters at `_nx_mdns_thread_entry()`, so the module's own receive loop, interface lookup and packet processing run for real |
-| Static analysis | GCC `-fanalyzer` over the whole tree against a triaged baseline, in CI, warnings fatal. cppcheck against a separate baseline, run locally rather than in CI because its output moves between its own releases |
-| Build configurations | every arm in `CROSS_CONFIGS` (`tools/ci.sh`), including 68000, 68040 and 68060, and the builds with IPv6, TLS, mDNS, multicast, BPF and each TCP option turned off |
+| Static analysis | GCC `-fanalyzer` over the whole tree against a triaged baseline, in CI, warnings fatal. cppcheck against a separate baseline in the same stage, skipped where cppcheck is not installed, which it is not on the CI runners, because its output moves between its own releases |
+| Build configurations | every arm in `CROSS_CONFIGS` (`tools/ci.sh`): the one-binary-for-every-68k default, the 68060-pinned arm, and the builds with IPv6, TLS, mDNS, multicast, BPF and each TCP option turned off |
 | Emulation | Enforcer and MungWall, which is how illegal accesses and freed-memory writes surface on a machine with no MMU. Also every supported network card, one guest each (`tools/ci.sh cards`) |
 | Real hardware | an A3000/060 with an X-Surf-100, by a user, which is where two bugs were found that emulation had not |
 

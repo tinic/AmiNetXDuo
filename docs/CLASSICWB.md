@@ -28,8 +28,8 @@ launcher refuses it by name.
 
 | Variant | Screen | Serves |
 |---|---|---|
-| plain | chipset, 640x256 | `/` drawer, `/shell` |
-| rtg | uaegfx 640x480x8 | `/` drawer, `/shell`, `/console` |
+| plain | chipset, 640x256 | `/` drawer, `/shell`, `/console` (chipset screen; the `console=` line is printed for rtg only) |
+| rtg | uaegfx 640x480x8 | the same, on the graphics card |
 
 The rtg mode is four variables, not three constants: `AMINETXDUO_CWB_RTG_MODE`,
 `_RTG_W`, `_RTG_H`, `_RTG_DEPTH`. `0x50041100` is 800x600x16, which is what a
@@ -58,9 +58,9 @@ launch copies it, builds a release archive from the build directory, unpacks it
 on the copy, and boots once with the Installer running against it, so a run that
 wedges its drive costs the copy and not the install. `-a` takes an archive as
 given instead. `dbclient` comes from `clients/dropbear/build.sh` rather than
-from CMake, and `ssh` is otherwise missing from the archive. The install adds 50
-to 92 seconds; a whole launch is 77 to 151 seconds. Four steps run after the
-Installer, each one the Installer's own text describes as the user's:
+from CMake, and `ssh` is otherwise missing from the archive. The install boot
+takes a little over two minutes (`tools/classicwb.sh:43`, ceiling 600 s). Four
+steps run after the Installer, each one the Installer's own text describes as the user's:
 `anxnet.device` into `DEVS:Networks` with a `CARD=` line, `MDNS=` on, the host
 name, and httpd on the chosen drawer and port.
 

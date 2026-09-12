@@ -1,5 +1,5 @@
 @database AmiNetXDuo.guide
-@$VER: AmiNetXDuo.guide 1.0 (25.7.2026)
+@$VER: AmiNetXDuo.guide 1.1 (11.9.2026)
 @author "The AmiNetXDuo project"
 @(c) "MIT licence"
 @width 76
@@ -128,13 +128,17 @@
   archive carries for every processor, the 68000 included. A first
   handshake on a 68000 takes a minute or two. On an A600 it took 58.4
   seconds against an RSA certificate and 97.7 seconds against an EC
-  one. A resumed connection to the same site takes under a second. The
-  minimal stack, which the Installer offers for a 1 MB machine, leaves
-  tls.library out along with IPv6, mDNS, the packet filter, IPv4
-  multicast, the ARexx host and the TCP: handler. It also carries two
-  interface slots rather than four, which is 2,528 bytes of the stack's
-  single allocation and 428 of BSS given back to a machine that has one
-  card. DHCP is in it: a minimal machine still leases its address.
+  one. A resumed connection to the same site takes under a second.
+
+  The archive holds three stacks, and the Installer asks which one to
+  put on. The full stack holds 426 KB of RAM while it is up. The
+  minimal stack leaves tls.library out along with IPv6, mDNS, the
+  packet filter, IPv4 multicast, the ARexx host and the TCP: handler,
+  carries two interface slots rather than four, and holds 256 KB. The
+  micro stack leaves all of that out, carries one interface and no
+  route or address-allocation calls, and holds 212 KB; it is the one
+  for a 1 MB machine. DHCP is in every stack: a minimal or micro
+  machine still leases its address.
 
   @{b}A network card and its driver@{ub}
 
@@ -145,8 +149,9 @@
     o  the @{b}unit number@{ub}, which is 0 with only one card fitted
 
   The driver comes from the card's manufacturer or from Aminet.
-  AmiNetXDuo does not ship one. Under an emulator, uaenet.device or an
-  emulated A2065 is the usual choice.
+  AmiNetXDuo also ships one of its own, anxnet.device, which drives
+  twelve cards; see @{"anxnet.device" link CHECKNETDEVICE}. Under an
+  emulator, uaenet.device or an emulated A2065 is the usual choice.
 
   @{b}A network@{ub}
 
@@ -201,11 +206,10 @@
   Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver.
   Copy it to DEVS:Networks, which is what the Installer offers to do.
   Nothing uses it until an interface file names it with
-  DEVICE=DEVS:Networks/anxnet.device. The Libs/minimal drawer holds
-  the same stack with the large options compiled out. It is the
-  alternative to the top-level Libs, not an addition to it, and it is
-  the one thing here the Installer chooses between rather than copying
-  both.
+  DEVICE=anxnet.device. The Libs/minimal and Libs/micro drawers hold
+  the same stack with the large options compiled out. Each is an
+  alternative to the top-level Libs, not an addition to it, and the
+  Installer copies one of the three rather than all of them.
 
   Then make the two configuration drawers, if they are not there
   already:
@@ -351,16 +355,46 @@
              A @{b}word@{ub} here (IPTYPE=DHCP) is the AmiTCP way of writing
              CONFIGURE, and is accepted. In a new file, use CONFIGURE.
 
-  @{b}MTU@{ub}        Accepted but not used. The packet size comes from the
-             driver, which is asked for it when the interface opens.
+  @{b}MTU@{ub}        The largest packet this interface sends. It is clamped
+             to what the driver reports and refused under 68. Without
+             it, the driver's own figure is used.
+
+  @{b}CARD@{ub}       For anxnet.device only: which board the driver is to
+             probe for, when it cannot be told from the machine. See
+             @{"CheckNetDevice" link CHECKNETDEVICE}.
+
+  @{b}ID@{ub}         A name for this machine, the weakest of the four
+             sources. See @{"The machine's name" link HOSTNAME}.
+
+  @{b}HARDWAREADDRESS@{ub}
+             Six hexadecimal bytes. Sets the card's address, so two
+             cards that shipped with the same one can both be on the
+             network.
+
+  @{b}DOWNGOESOFFLINE@{ub}
+             YES or NO. YES takes the card off the wire when the
+             interface goes down, rather than only stopping traffic.
+             Default NO.
+
+  @{b}REQUIRESINITDELAY@{ub}
+             YES or NO. YES waits a second between opening the card
+             and using it, for a card that needs it. Roadshow names
+             the original Ariadne. Default NO.
+
+  @{b}NAMESERVER@{ub}, @{b}DOMAIN@{ub}
+             Written here by AmiTCP_NG's installer. They are read as
+             the last source after DEVS:Internet/name_resolution and
+             the netdb file, and a note says where the value came
+             from and where it belongs.
 
   Interface files written for Roadshow usually carry other keywords:
-  IPREQUESTS, WRITEREQUESTS, COPYMODE, ALIAS, HARDWAREADDRESS, FILTER,
-  ID, METRIC and PRIORITY among them. AmiNetXDuo recognises them and
-  ignores them, so an existing Roadshow file can be used unchanged and
-  produces no complaints. Anything it does @{b}not@{ub} recognise is reported
-  as an unknown keyword in the debug log
-  (@{"Reading the debug log" link LOGGING}).
+  IPREQUESTS, WRITEREQUESTS, ARPREQUESTS, COPYMODE, ALIAS, FILTER,
+  METRIC, PRIORITY, LEASE, DHCPUNICAST, LINKSTATUSCOMMAND, MULTICAST,
+  POINTTOPOINT, DESTINATION and BROADCASTADDRESS among them.
+  AmiNetXDuo recognises them and ignores them, so an existing Roadshow
+  file can be used unchanged and produces no complaints. Anything it
+  does @{b}not@{ub} recognise is reported as an unknown keyword by
+  CheckNetConfig and by AddNetInterface.
 
   @{b}More than one card@{ub}
 
@@ -415,7 +449,9 @@
   outside the range the router hands out by DHCP. Two machines
   otherwise end up with the same address.
 
-  MANUAL and NONE are accepted as other spellings of STATIC.
+  MANUAL is another spelling of STATIC. NONE (also OFF, NO and
+  DISABLED) means no IPv4 address on this interface at all; IPv6
+  carries it. The Installer writes NONE for an IPv6-only interface.
 
   @{b}CONFIGURE=AUTO, link-local, no server needed@{ub}
 
@@ -738,12 +774,14 @@
       ADDRESS6   = 2001:db8::10/64
       GATEWAY6   = fe80::1
 
-  @{b}CONFIGURE6@{ub}  OFF, LINKLOCAL, AUTO or STATIC. Default AUTO, which
-              always configures the link-local address and takes a
+  @{b}CONFIGURE6@{ub}  OFF, LINKLOCAL, AUTO, DHCP or STATIC. Default AUTO,
+              which always configures the link-local address, takes a
               global address from a router advertisement if one
-              arrives. On a network with no IPv6 router, AUTO costs
-              three packets and behaves exactly like LINKLOCAL.
-              IPTYPE6 is accepted as another spelling.
+              arrives, and asks a DHCPv6 server when the advertisement
+              says to. DHCP (also DHCPV6, STATEFUL) asks a DHCPv6
+              server whatever the router says. On a network with no
+              IPv6 router, AUTO costs three packets and behaves exactly
+              like LINKLOCAL. IPTYPE6 is accepted as another spelling.
 
   @{b}ADDRESS6@{ub}    A static address with an optional prefix length. If the
               prefix length is omitted, /64 is assumed. ADDRESS6
@@ -786,7 +824,9 @@
 
   The Installer writes S:Network-Startup and has S:User-Startup run it:
 
-    Execute S:Network-Startup
+    If EXISTS S:Network-Startup
+      Execute S:Network-Startup
+    EndIf
 
   S:Network-Startup is the file to edit. It holds one line per interface:
 
@@ -849,10 +889,12 @@
 
   @{b}Stopping@{ub}
 
-  There is no command that shuts the stack down. @{"Offline" link OFFLINE}
-  takes an interface off the network, which stops all traffic, and
-  @{"Online" link ONLINE} puts it back. To unload the stack entirely,
-  reboot.
+  NetShutdown takes every interface down, closes the connections and
+  tells the programs holding sockets to stop; a later AddNetInterface
+  puts the machine back on the network. @{"Offline" link OFFLINE}
+  takes one interface off the wire, which stops its traffic, and
+  @{"Online" link ONLINE} puts it back. The library itself stays in
+  memory; to unload it entirely, reboot.
 
 @endnode
 
@@ -875,7 +917,7 @@
   interface that is not 0.0.0.0:
 
       Network stack:  running
-      Stack version:  bsdsocket.library 0.24.0 (AmiNetXDuo, ABI 4.6)
+      Stack version:  bsdsocket.library 0.27.0 (AmiNetXDuo, ABI 4.9)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
@@ -953,7 +995,7 @@
     ConfigureNetInterface  change a running interface's address, or
                       renew and release its DHCP lease
     hostname          what this machine is called, and where the name
-                      came from
+                      came from; with a name, set it
     AddNetRoute       add a route by hand
     DeleteNetRoute    remove a route
 
@@ -963,7 +1005,7 @@
     @{"CheckNetDevice  " link CHECKNETDEVICE}  what anxnet.device found, card by card
     @{"netstat         " link NETSTAT}  interfaces, routes and connections
     GetNetStatus      the same, for a script to read
-    ShowNetServices   what this machine is announcing
+    ShowNetServices   what the other machines on this network offer
     NetCapture        capture packets to a file Wireshark reads
     NetTrace          the same, for a transfer it runs itself
     arp               the machines on this network
@@ -983,6 +1025,7 @@
     nc                open a connection and pipe data through it
     telnet            log in to another machine
     ssh               the same, encrypted
+    scp               copy files over ssh, either direction, recursive
     tftp              the small file transfer protocol
     iperf             measure throughput against an iperf server, or
                       act as one
@@ -1028,18 +1071,25 @@
 
       AddNetInterface INTERFACE/M,QUIET/S,TIMEOUT/K/N
 
-  Reads DEVS:NetInterfaces/<INTERFACE> and brings that interface online.
-  This is the command that starts the physical network, and the one to put
-  in S:User-Startup.
+  Reads the interface file and brings that interface online. This is
+  the command that starts the physical network, and the one to put in
+  S:Network-Startup.
   Other files in DEVS:NetInterfaces are not read and their devices are
   not opened.
 
   @{b}INTERFACE@{ub}  The interface, which is the name of its file in
-             DEVS:NetInterfaces. Required. A full path is accepted
-             too, so both of these do the same thing:
+             DEVS:NetInterfaces. Required. A path is taken as a path:
+             the file is looked for as given, then in
+             DEVS:NetInterfaces, then in SYS:Storage/NetInterfaces,
+             the Roadshow and AmiTCP_NG order. The interface is still
+             named by the file part, so both of these start eth0:
 
                  AddNetInterface eth0
                  AddNetInterface DEVS:NetInterfaces/eth0
+
+             A name that carries a device or a directory names one
+             file: if it is not there, the answer is "not there",
+             never the drawer's file of the same name.
 
              More than one can be given. They are sorted by name
              before any of them is used, and the files are all read
@@ -1052,7 +1102,7 @@
              This enumeration happens only because that command asks
              for it; opening bsdsocket.library never scans the drawer.
 
-  @{b}QUIET@{ub}      Suppress the report of what worked. For S:User-Startup.
+  @{b}QUIET@{ub}      Suppress the report of what worked. For S:Network-Startup.
              Errors are still printed, and the return code is
              unchanged, so a boot that fails still reports why.
   @{b}TIMEOUT@{ub}    Seconds to wait for an interface that asks for its
@@ -1296,7 +1346,7 @@
 
       1> ShowNetStatus
       Network stack:  running
-      Stack version:  bsdsocket.library 0.24.0 (AmiNetXDuo, ABI 4.6)
+      Stack version:  bsdsocket.library 0.27.0 (AmiNetXDuo, ABI 4.9)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
@@ -1614,7 +1664,7 @@
 
   Reports what anxnet.device found on this machine.
 
-  anxnet.device is one driver for ten cards. It finds the card itself,
+  anxnet.device is one driver for twelve cards. It finds the card itself,
   so nothing needs configuring. CARD= in the interface file pins it to
   one when a machine has more than one. Naming a card the driver does
   not know is reported as an error, with the list beside it. The names
@@ -1803,8 +1853,8 @@
     6.  ping of an address on the Internet answers
     7.  host of a name answers
 
-  See also @{"Reading the debug log" link LOGGING}. The log carries far
-  more detail than the screen output, and for driver and configuration
+  See also @{"Reading the debug log" link LOGGING}. ShowNetStatus EVENTS
+  names the call that refused, and for driver and configuration
   problems it usually names the cause outright.
 
 @endnode
@@ -1835,8 +1885,10 @@
 
   @{b}What it means@{ub}
 
-  Nothing has started the stack. On a machine where S:User-Startup does
-  not run AddNetInterface, that is the state after every reboot.
+  Nothing has started the stack. On a machine where S:Network-Startup
+  names no interface, that is the state after every reboot. An
+  installation from 0.26.x or earlier started its interfaces when the
+  library opened; after an upgrade, the line has to be there.
 
   Opening bsdsocket.library alone starts only the built-in loopback. It
   starts no physical interface, just as Roadshow and AmiTCP_NG start none
@@ -1848,7 +1900,7 @@
 
       AddNetInterface eth0
 
-  If that works, add the line to S:User-Startup so that it runs at
+  If that works, add the line to S:Network-Startup so that it runs at
   every boot. See @{"Starting the stack" link STARTING}.
 
   If AddNetInterface prints a message of its own instead, that message
@@ -1979,13 +2031,9 @@
   network stack already has the card. Check that no other TCP/IP stack
   is started from S:User-Startup, and that the card is seated.
 
-  The debug log names the exact failure. See
-  @{"Reading the debug log" link LOGGING}:
-
-      [ERR ] sana2: cannot open nosuch.device unit 0 (-1)
-      [ERR ] netstack: interface 'eth0' did not open: nosuch.device
-             unit 0 did not answer, is the driver in DEVS:Networks/
-             and is the card installed on that unit?
+  AddNetInterface names the exact failure, the call that failed and
+  what it answered, and ShowNetStatus EVENTS repeats it afterwards. See
+  @{"Reading the debug log" link LOGGING}.
 
 @endnode
 
@@ -2325,7 +2373,7 @@
 
       C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
 
-  in S:User-Startup so that the stack starts once and stays up.
+  in S:Network-Startup so that the stack starts once and stays up.
 
   @{b}Other operations that are slow@{ub}
 
@@ -2354,8 +2402,9 @@
        time.
     o  Record exactly what was in progress: which command, which
        program, how long after boot.
-    o  Capture the debug log -- see
-       @{"Reading the debug log" link LOGGING}. The last lines before a
+    o  Run ShowNetStatus EVENTS after the reboot if the network was
+       stopped rather than the machine -- see
+       @{"Reading the debug log" link LOGGING}. The last events before a
        crash are the most useful part of a bug report.
     o  If a Guru appears, record the numbers.
 
@@ -2380,46 +2429,48 @@
 
                       @{b}Reading the debug log@{ub}
 
-  AmiNetXDuo reports far more detail than it prints on screen. That
-  detail goes to the @{b}serial debug port@{ub}, the standard place for AmigaOS
-  system diagnostics. Configuration mistakes and driver failures are
-  usually named outright there.
+  A shipped build writes no debug log. What it keeps instead is an
+  @{b}event ring@{ub}: the interfaces that came up and went down, the calls
+  that were refused and what they answered, with a code, an interface
+  and a value per event. It costs nothing while nothing happens, and it
+  is on in every build.
 
-  A successful boot produces lines like these:
+      ShowNetStatus EVENTS
+
+  prints it as sentences, newest last. A bring-up that failed names
+  the call that refused, and a lease that was lost names the interface
+  that lost it. See @{"ShowNetStatus" link SHOWNETSTATUS}.
+
+  @{b}netstat -h@{ub} reads the health counters without opening the library,
+  allocating or taking a lock, so it answers while the rest of the
+  stack has stopped answering.
+
+  @{b}The serial log@{ub}
+
+  A build made for a bug report, configured with AMINETXDUO_LOG=ON,
+  also writes a running commentary to the @{b}serial debug port@{ub}, the
+  standard place for AmigaOS system diagnostics. A successful boot
+  produces lines like these:
 
       [INFO] config: interface eth0: a2065.device unit 0
-      [INFO] config: 1 interface(s), 1 name server(s), host 'amiga'
-             (name_resolution)
       [INFO] sana2: a2065.device unit 0 hw 1 mtu 1500 bps 10000000
-             addr 48 bits cooked
-      [INFO] netstack: 10105016 bytes free, pool = 256 x 1568
-      [INFO] netstack: starting ThreadX
-      [INFO] netstack: NX_IP up, configuring addresses
       [INFO] netstack: DHCP started, waiting up to 1500 ticks
       [INFO] netstack: address 10.0.2.15 mask 255.255.255.0
-      [INFO] netstack: starting the resolver
-      [INFO] netstack: DHCP name server 10.0.2.3
 
-  A failure produces lines like these:
+  and a failure lines like these:
 
       [WARN] config: broken: no DEVICE keyword, ignoring interface
       [ERR ] sana2: cannot open nosuch.device unit 0 (-1)
-      [ERR ] netstack: interface 'eth0' did not open: nosuch.device
-             unit 0 did not answer, is the driver in DEVS:Networks/
-             and is the card installed on that unit?
-
-  @{b}How to read it@{ub}
 
   On a real Amiga, either attach a terminal to the serial port, or run
-  one of the debug-output catchers from Aminet. Sashimi is the usual
-  choice and collects the same output into a window or a file:
+  one of the debug-output catchers from Aminet; Sashimi collects the
+  same output into a window or a file:
 
       run >NIL: Sashimi
 
-  Under an emulator, point the emulated serial port at a file.
-
-  Levels are ERR, WARN, INFO and, in debug builds, DEBUG and TRACE.
-  Anything at ERR level is a real failure. WARN usually names a
+  Under an emulator, point the emulated serial port at a file. The
+  level is SetEnv ANXDLOGLEVEL <n>, read when the network starts: 2
+  reaches INFO. Anything at ERR level is a real failure. WARN names a
   configuration line the stack rejected, including unknown keywords.
 
 @endnode
@@ -2449,27 +2500,30 @@
        point-to-point driver such as ppp.device or slip.device is not
        refused, but none has been tested, so a modem or DSL connection
        is unsupported for now.
-    o  @{b}MTU= in the interface file is ignored.@{ub} The packet size comes
-       from the driver.
+    o  @{b}MTU= cannot exceed what the driver reports.@{ub} It is clamped
+       downwards, and refused under 68 bytes.
     o  @{b}No multicast routing, and no source filtering.@{ub} Joining a group
        works, in both families. IP_ADD_SOURCE_MEMBERSHIP and the
        MCAST_* family of RFC 3678 are absent.
 
   @{b}For software authors and porters@{ub}
 
-    o  @{b}Raw sockets are not supported.@{ub} socket() with SOCK_RAW fails with
-       ESOCKTNOSUPPORT. Programs that build their own IP or ICMP
-       packets will not run.
-    o  @{b}Out-of-band TCP data is not supported.@{ub} MSG_OOB is refused with
-       EOPNOTSUPP rather than quietly ignored.
-    o  @{b}bind() to a particular local address binds only the port.@{ub} The
-       address is not honoured.
-    o  @{b}The Roadshow interface, routing and statistics calls@{ub} --
-       ObtainInterfaceList, QueryInterfaceTagList, AddRoute,
-       GetNetworkStatistics, the RoadshowData calls and their
-       neighbours -- return ENOSYS. The parts whose behaviour is fully
-       documented (GetDefaultDomainName, ObtainDomainNameServerList,
-       In_LocalAddr, In_CanForward) do work.
+    o  @{b}Raw sockets and out-of-band data are in the full and minimal
+       stacks only.@{ub} In the micro stack, socket() with SOCK_RAW and
+       MSG_OOB answer ENOSYS. So do the route, address-allocation and
+       statistics calls there.
+    o  @{b}bind() to a particular local address on a machine with several
+       addressed interfaces binds only the port.@{ub} With one addressed
+       interface it is the same socket either way. An address this
+       machine does not have is refused with EADDRNOTAVAIL.
+    o  @{b}The RoadshowData calls@{ub} -- ObtainRoadshowData,
+       ReleaseRoadshowData and ChangeRoadshowData -- return ENOSYS.
+       Every other Roadshow vector is implemented, including
+       ObtainInterfaceList, QueryInterfaceTagList, AddRouteTagList and
+       GetNetworkStatistics.
+    o  @{b}The mbuf and ipf vectors return ENOSYS.@{ub} They are AmiTCP's own
+       buffer and packet-filter internals, which no shipped program
+       calls.
     o  @{b}AddDomainNameServer and RemoveDomainNameServer@{ub} take an IPv6
        literal as well as a dotted quad, so an address
        ObtainDomainNameServerList reports can be handed straight back to
@@ -2739,10 +2793,9 @@
                                       manufacturer, not from this
                                       distribution
       DEVS:Networks/anxnet.device     AmiNetXDuo's own SANA-II driver.
-                                      It ships in the archive, and the
-                                      Installer does not install it.
-                                      Copy it across by hand to use
-                                      it
+                                      The Installer offers to put it
+                                      here, and nothing reads it until
+                                      an interface file names it
 
 @endnode
 
@@ -2779,8 +2832,8 @@
 
   A useful report states which Amiga and which Kickstart, which network
   card and driver, the contents of the interface file, what the command
-  printed, and the last lines of the
-  @{"debug log" link LOGGING}. Check @{"Known limitations" link LIMITS}
+  printed, and what ShowNetStatus EVENTS lists -- see
+  @{"Reading the debug log" link LOGGING}. Check @{"Known limitations" link LIMITS}
   first, in case the fault is already known.
 
 @endnode

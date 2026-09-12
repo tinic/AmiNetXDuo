@@ -11,6 +11,8 @@ version at the top when it merges.
 
 - The `AmiNetXDuo` drawer icon is a picture: a globe on a bus between two machines, with the protocol on a plate under it
 - The installer icon is the familiar arrow going into a drive slot, and the `Docs` and `Examples` drawers use the stock Workbench drawer shape
+- The example interface files for the Ariadne II, AmigaNet, X-Surf and X-Surf 100 name the drivers those cards ship with: `ariadne_ii.device`, `hydra.device`, `x-surf.device`, `x-surf-100.device`
+- The ReadMe and the manual describe the current installer, the three stacks, `S:Network-Startup`, `scp`, `ShowNetStatus EVENTS`, and every interface-file keyword
 - **A static interface whose address the stack refused was reported as
   configured.** `nx_ip_interface_address_set()`'s result was thrown away and
   the interface was marked resolved regardless, so a machine with a static

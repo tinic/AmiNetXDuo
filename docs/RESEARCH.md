@@ -9,7 +9,7 @@ is in git history, `git show 2b54025b:docs/RESEARCH.md`.
 | § | Conclusion | Authority | Status |
 |---|---|---|---|
 | 3.1 | `SocketBase` is per-opener and never shared: every returned struct lives in the child base, never a file static. | `src/bsdsocket/netdb.c:15` | see code |
-| 3.2 | The 121-LVO offset table comes from the Roadshow NDK `bsdsocket_pragmas.h`; four probes call vectors by raw LVO against it. `ipf_*` is out of scope. | `tools/gen_vectors.py:106` | current |
+| 3.2 | The 143-vector offset table comes from the Roadshow NDK `bsdsocket_pragmas.h` and the `.sfd` files; four probes call vectors by raw LVO against it. `ipf_*` is out of scope. | `tools/gen_vectors.py` | current |
 | 3.3 | Pin every Amiga ABI struct with `_Static_assert`: the toolchain's `ndk-include/pwd.h` substitutes newlib's 10-field `passwd` over usergroup's 7-field one. | `include/aminetxduo/mbuf.h:245`, `bpf.h:250` | current |
 | 5.4 | `-noixemul` is unusable on this newlib toolchain: it breaks `sys/reent.h`. | `cmake/toolchain-m68k-amigaos.cmake:111` | see code |
 | 5.4 | The 2026-07 build-spike byte counts. | git history | historical |

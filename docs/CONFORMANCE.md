@@ -10,9 +10,7 @@ self-contained; one that stops being true is deleted, not annotated.
 | RFC | Requirement | Where | Effect |
 |---|---|---|---|
 | 3810 §6.2 / 2710 §3 | A received MLD message without a Hop-by-Hop Router Alert MUST be discarded | `nx_mld_packet_process.c` checks hop limit 1 and a link-local source, and nothing else. `_nx_ipv6_process_hop_by_hop_option()` skips the option and records nothing, and `NX_PACKET` has no field to carry the answer forward | A query forged from on-link without the option is answered. The hop-limit and source-scope checks are what keep off-link senders out |
-| 5280 §4.2 | Unrecognized critical extension MUST be rejected | flag written at `nx_secure_x509_extension_find.c:191`, declared at `nx_secure_x509.h:611`, read nowhere | nameConstraints and every other critical extension silently ignored |
-| 5280 §6.1.3 | Revocation | `nx_secure_x509_crl_revocation_check.c` is built (`nx_secure/CMakeLists.txt:207`) and called from nothing | A stolen key stays usable indefinitely |
-| 7627 / 9325 §3.5 | Extended master secret MUST be supported | absent from the vendored tree; `src/tlslib/tls_resume.c:46-51` records that nx_secure does not implement it | Session resumption restores a master secret that was never bound to a handshake transcript |
+| 5280 §6.1.3 | Revocation | `nx_secure_x509_crl_revocation_check.c` is built (`nx_secure/CMakeLists.txt:209`) and called from nothing | A stolen key stays usable indefinitely |
 
 ## Accepted, and not detectable by the caller
 
@@ -22,7 +20,7 @@ self-contained; one that stops being true is deleted, not annotated.
 | `ConfigureNetInterface UP` after `OFFLINE` | brings the driver back online. Roadshow's `.doc` has `UP` as the protocol half alone — "the protocol stack will attempt to transmit messages through this interface (even though it might not be online yet)" — so there it leaves the driver offline. `SM_Up` maps to `NX_LINK_ENABLE` here, which is `ONLINE`'s action; `DOWN`, `OFFLINE` and `ONLINE` match the document. Kept deliberately: `UP` that leaves an offline interface unable to send reads as broken to anyone who typed it, and the survey finds no Aminet caller of `ConfigureInterfaceTagList` at all | `interfaces.c:793`, `run-ifquery.sh` |
 | `ShowNetStatus IGMP` | lists the multicast groups this machine has joined, per interface, with the references held on each. Roadshow prints IGMP **statistics**. NetX Duo's counters are behind `NX_DISABLE_IGMP_INFO`, which this tree defines, so the alternative was a block of zeroes that cannot change | `shownetstatus.c`, `NETSTATUS_MULTICAST` |
 | `SO_BROADCAST`, `SO_OOBINLINE`, and `SO_REUSEPORT`'s share-arrivals half | success, no effect. A broadcast `sendto()` without `SO_BROADCAST` succeeds where 4.4BSD returns `EACCES` | `options.c:221-228`, `:266-268` |
-| `SO_RCVBUF` on TCP | applied, in packets: `nx_tcp_socket_receive_queue_max_set()` from the byte value the caller set, capped at `NX_TCP_MAXIMUM_RX_QUEUE`. The arm is inside `#ifdef NX_ENABLE_LOW_WATERMARK`, which `port/netxduo-amiga/inc/nx_user.h:109` **does** define — this row said it did not. What is still not settable is the advertised window, sized from the packet pool at create time | `options.c:317-343`, `nx_user.h:109` |
+| `SO_RCVBUF` on TCP | applied, in packets: `nx_tcp_socket_receive_queue_max_set()` from the byte value the caller set, capped at `NX_TCP_MAXIMUM_RX_QUEUE`. The arm is inside `#ifdef NX_ENABLE_LOW_WATERMARK`, which `port/netxduo-amiga/inc/nx_user.h:109` **does** define  What is still not settable is the advertised window, sized from the packet pool at create time | `options.c:317-343`, `nx_user.h:109` |
 | `DAV: 1,2` | class claim. §18.1 needs all Class 1 MUSTs (PROPFIND body gap) and §18.2 needs §6-§10 (LOCK on unmapped URL, Depth-0 collection). Advertising `DAV: 1` would be honest, but Finder reads that as read-only | `httpd.c:3449`, `:3536` |
 
 Refused rather than silently ignored, which is correct: unknown ancillary types
@@ -34,7 +32,7 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 
 | Location | Claim | Reality |
 |---|---|---|
-| `README.md:165-166` | certificates "checked against the usual set of root authorities" | overstated: revocation, critical-extension rejection, EKU and nameConstraints are all absent |
+| `README.md:152-153` | certificates "checked against Mozilla's root set" | checked, but never for revocation: `nx_secure_x509_crl_revocation_check.c` is called from nothing |
 | `ami_random.c:564-577` | clock credit conditional on the seconds field being wall time | the guard at `:590` tests non-zero. On a no-RTC machine uptime is non-zero a second after boot, so 8 bits are credited in the case the comment excludes |
 | `netstack_dns.c:719` | RFC 6762 §6.7 | §6.7 is Legacy Unicast Responses; the rule is §3, which `:757` and `:929` cite correctly |
 | `sntp.c:62-63` | all RFC 4330 §5 checks present | `sntp_validate()` (`:485-530`) checks mode, version, LI, stratum, transmit and originate. §5 check 5, root delay and dispersion, is absent |
@@ -43,7 +41,7 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 
 | RFC | What is done | Where |
 |---|---|---|
-| 4987 §3.4, §3.6 | A connection to a listening port lives in a 512-entry SYN cache at 80 bytes each (~40 KB) until its handshake completes: no socket committed, no packet held. Past the cache the SYN-ACK's ISN is a stateless HalfSipHash-2-4 cookie carrying the MSS index, window scale, SACK-permitted and timestamps, so options are not downgraded under attack, and the peer's ISN is hashed in rather than summed. A RST against a cached connection is checked for sequence number (RFC 5961 §3). On by default, no flag | `nx_tcp_syncache.c` |
+| 4987 §3.4, §3.6 | A connection to a listening port lives in a 512-entry SYN cache at 72 bytes each (~36 KB) until its handshake completes: no socket committed, no packet held. Past the cache the SYN-ACK's ISN is a stateless HalfSipHash-2-4 cookie carrying the MSS index, window scale, SACK-permitted and timestamps, so options are not downgraded under attack, and the peer's ISN is hashed in rather than summed. A RST against a cached connection is checked for sequence number (RFC 5961 §3). On by default, no flag | `nx_tcp_syncache.c` |
 
 Nine emulated cards at 100 SYN/s: pre-fix 0 of 5 legitimate connections
 complete, defended 5 of 5. `tests/tools/run-synflood.sh` carries the figures
@@ -80,14 +78,9 @@ OPTION_PREFERENCE (RFC 8415 18.2.1) is implemented by the vendored client and is
 | IGMPv3 | the vendored tree speaks IGMPv2 and does not implement v3. Source-specific multicast has no caller here |
 | RFC 4191, RFC 7371 | router preference and more-specific routes, and the updated IPv6 multicast flags. Neither has ever been asked for on a machine of this kind |
 | RFC 3396 long-option concatenation, and option 52 overload | we request six options (1, 3, 6, 12, 15, 33) whose combined payload is far below the 312-byte options area, so a server has nothing to split |
-| DHCPv6 | stateless autoconfiguration covers the routers people have. Cost: a managed+other-stateful router describes an IPv6-only machine, and `config_parse.c:1007` refuses an interface with no IPv4 address, so such a machine cannot be configured at all -- see `BACKLOG.md` |
 
 ## Constraints on anything built next
 
-- A DNS bailiwick check must land together with CNAME chain following. CNAME
-  processing is compiled out, and the following A record is accepted only
-  because no owner-name check exists; adding the check alone would fail every
-  CNAME-hosted name.
 - RFC 4086 contains no RFC 2119 keywords. The normative obligation is RFC 5246
   §D.1. The DRBG construction meets it; the seeding does not.
 - RFC 8659 §1.1 forbids using CAA in validation. Having no CAA code is correct.

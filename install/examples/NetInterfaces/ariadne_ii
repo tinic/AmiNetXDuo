@@ -1,5 +1,5 @@
 ;
-; DEVS:NetInterfaces/eth0 -- Individual Computers X-Surf, Zorro II
+; DEVS:NetInterfaces/eth0 -- Village Tronic Ariadne II, Zorro II (NE2000)
 ;
 ; Copy this into DEVS:NetInterfaces and call the copy "eth0", then
 ; either reboot or type
@@ -11,7 +11,7 @@
 ;
 ;
 
-DEVICE=xsurf.device
+DEVICE=ariadne_ii.device
 UNIT=0
 
 ; Ask the network for an address.  If nothing on the network hands

@@ -17,7 +17,7 @@ is at `-(30 + 6n)`; the four standard vectors occupy `-6..-24`.
 |---|---|---|
 | `[0]`..`[136]`, to `-0x336` | the NDK's SFD, ending at `getnameinfo` | |
 | `[137]`..`[142]`, `-0x33c`..`-0x35a` | Commodore's `==reserve 6` block | Not ours to take. It is what a regenerated SFD fills first, so a binary compiled against our meaning of `-0x33c` would jump into a different function with nothing to diagnose it |
-| `[143]` `-0x360` | `ObtainNetXDuoContext`, for `tls.library` | Compiled in only under `AMINETXDUO_TLS_CONTEXT`, otherwise `bsd_enosys` |
+| `[143]` `-0x360` | reserved, was `ObtainNetXDuoContext` | `bsd_enosys` (`bsdsocket_vectors.c:173`). `tls.library` runs on any `bsdsocket.library` and no longer reaches into this one |
 | `[144]` `-0x366`, `[145]` `-0x36c` | `NetStackQuery`, `NetStackControl` | Declared in the drawer's SFD from revision 2; the vector table still comments them PRIVATE. Published means frozen: `NetStatusHeader` and every `NETCTRL_*` request struct become ABI |
 | `[146]`..`[149]`, `-0x372`..`-0x384` | RFC 3493 §4, `if_nametoindex`, `if_indextoname`, `if_nameindex`, `if_freenameindex`, revision 3 and up | `==bias 870` in the SFD is what places them. Fixed forever |
 | `[150]` `-0x38a` | next free | Extensions continue past the end of the SFD, never inside it |
