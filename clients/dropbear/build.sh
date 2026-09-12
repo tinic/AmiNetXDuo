@@ -117,7 +117,7 @@ esac
 # is one fd_set and one struct timeval across the whole program.
 SHIM_O="$CLIENT_OBJ/db-amiga_dropbear.o"
 echo "  CC amiga_dropbear.c"
-"$AMIGA_GCC" $DB_CFLAGS -Wall -Wextra -c -o "$SHIM_O" \
+"$AMIGA_GCC" $DB_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -Wextra -c -o "$SHIM_O" \
              "$ROOT/clients/dropbear/amiga_dropbear.c"
 
 # The machine's one entropy pool, and the timer base it reads the E-Clock
@@ -144,7 +144,7 @@ for c in "$ROOT/src/common/ami_random.c" "$ROOT/src/common/compat.c" \
          "$ROOT/src/common/ami_diag.c"; do
     o="$CLIENT_OBJ/db-$(basename "${c%.c}").o"
     echo "  CC $(basename "$c")"
-    "$AMIGA_GCC" $AMI_CFLAGS -Wall -c -o "$o" "$c"
+    "$AMIGA_GCC" $AMI_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -c -o "$o" "$c"
     SHIM_OBJS+=("$o")
 done
 
@@ -456,11 +456,11 @@ if [ "$WANT_SCP" = "1" ]; then
 
     echo "  CC amiga_scp.c"
     "$AMIGA_GCC" $DB_CFLAGS -I"$OUT" -I"$DB_DIR/src" \
-                 -DDROPBEAR_CLIENT -Wall -Wextra -c -o "$SCP_SHIM_O" \
+                 -DDROPBEAR_CLIENT $AMIGA_CLIENT_SHIM_WARN -Wall -Wextra -c -o "$SCP_SHIM_O" \
                  "$ROOT/clients/dropbear/amiga_scp.c"
 
     echo "  CC amiga_scp_runner.c"
-    "$AMIGA_GCC" $DB_CFLAGS -Wall -Wextra -c -o "$SCP_RUNNER_O" \
+    "$AMIGA_GCC" $DB_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -Wextra -c -o "$SCP_RUNNER_O" \
                  "$ROOT/clients/dropbear/amiga_scp_runner.c"
     "$AMIGA_GCC" $AMIGA_CLIENT_ARCH -o "$OUT/scp-runner" "$SCP_RUNNER_O"
 

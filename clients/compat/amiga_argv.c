@@ -19,8 +19,6 @@
 #include <stdio.h>
 
 extern int __real_main(int argc, char **argv);
-extern int amiga_client_exit_returns(void);
-extern unsigned long amiga_client_stack_size(void);
 
 /* Generous, and static: this runs before the client's main() sets anything up,
    on whatever stack the crt0 provided.  A command line longer than this is
@@ -202,6 +200,11 @@ static VOID argv_exit_via_main(int status)
     longjmp(argv_exit_jmp, 1);
 }
 
+/* As in amiga_dropbear.c: the wrapper is declared with the type of what it
+   replaces, so -Wl,--wrap= cannot redirect a call into a mismatched signature
+   without the compiler saying so.  Here the anchor is the __real_ alias rather
+   than a libc name, because main() has no declaration to borrow. */
+extern __typeof__(__real_exit) __wrap_exit;
 void __wrap_exit(int status)
 {
     argv_restore_bounds();
@@ -209,6 +212,7 @@ void __wrap_exit(int status)
     __real_exit(status);
 }
 
+extern __typeof__(__real__exit) __wrap__exit;
 void __wrap__exit(int status)
 {
     argv_restore_bounds();
@@ -221,6 +225,7 @@ static int argv_is_space(char c)
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
 }
 
+extern __typeof__(__real_main) __wrap_main;
 int __wrap_main(int argc_ignored, char **argv_ignored)
 {
     struct Process *proc = (struct Process *)FindTask(NULL);

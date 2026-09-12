@@ -31,7 +31,17 @@ AMIGA_CLIENT_OPT="${AMIGA_CLIENT_OPT:--O2}"
 # file for why it is a forced include and not a patch or a shadowed <time.h>.
 AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -fno-strict-aliasing -D__USE_NEW_TIMEVAL__ -D_SYS_MBUF_H -include sys/types.h -I$AMIGA_CLIENT_ROOT/clients/compat -include amiga_compat.h"
 
+# Applied to OUR shim sources only, never to a client's own.  Every function a
+# shim defines is an entry point somebody else calls: libc symbols the port
+# interposes, __wrap_ targets the linker redirects, and the two knobs in
+# amiga_compat.h.  Without this the definition is checked against nothing, and
+# a signature that drifts from the declaration its callers see is a silent
+# wrong-ABI call rather than a build failure -- which is how __wrap_read() and
+# __wrap_write() came to return int where read() and write() return _ssize_t.
+AMIGA_CLIENT_SHIM_WARN="-Wmissing-prototypes"
+
 export AMIGA_CLIENT_ROOT AMIGA_CLIENT_ARCH AMIGA_CLIENT_OPT AMIGA_CLIENT_CFLAGS
+export AMIGA_CLIENT_SHIM_WARN
 
 amiga_client_prepare()
 {
@@ -58,7 +68,7 @@ amiga_client_prepare()
     for c in "${sources[@]}"; do
         o="$obj/$(basename "${c%.c}").o"
         echo "  CC $(basename "$c")"
-        "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS -Wall -I"$AMIGA_NDK" \
+        "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -I"$AMIGA_NDK" \
                      -c -o "$o" "$c" || return 1
         objs+=("$o")
     done
@@ -70,7 +80,7 @@ amiga_client_prepare()
     # libnet.a: one weak SocketBase, so configure-time socket tests link.
     o="$obj/amiga_net.o"
     echo "  CC amiga_net.c"
-    "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS -Wall -I"$AMIGA_NDK" \
+    "$AMIGA_GCC" $AMIGA_CLIENT_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -I"$AMIGA_NDK" \
                  -c -o "$o" "$AMIGA_CLIENT_ROOT/clients/compat/amiga_net.c" || return 1
     rm -f "$AMIGA_CLIENT_LIBDIR/libnet.a"
     "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-ar" rcs \

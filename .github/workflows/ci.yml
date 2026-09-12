@@ -292,6 +292,12 @@ jobs:
             tools/logcap.sh \
             tools/enforcer-run.sh \
             tools/ci-arm.sh \
+            clients/amiga-client.sh \
+            clients/dropbear/build.sh \
+            clients/dropbear/run-dbclient.sh \
+            clients/dropbear/run-scp.sh \
+            clients/dropbear/sshd-testserver.sh \
+            clients/dropbear/tweetnacl-count.sh \
             tests/conformance/build.sh \
             tests/conformance/run-conformance.sh \
             tests/tools/run-iperf.sh \

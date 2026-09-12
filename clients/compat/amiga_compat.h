@@ -45,6 +45,19 @@ int nanosleep(const struct timespec *req, struct timespec *rem);
 /* newlib has vsnprintf(), but neither vasprintf() nor its declaration. */
 int vasprintf(char **result, const char *format, va_list args);
 
+/* The two knobs a ported client hands the argv shim, which runs before its
+   main().  clients/compat/amiga_exit.c has a weak default for each, in its own
+   archive member so a client's strong definition interposes it on the HUNK
+   linker; amiga_dropbear.c and amiga_scp.c both do.  Four translation units
+   define or call these and none of them include each other, so the type lives
+   here or it lives in four places that cannot disagree out loud.
+
+   amiga_client_stack_size() is the stack the shim gives the client's main().
+   On a machine with no MMU a wrong answer here corrupts memory rather than
+   trapping, which is why it is not left to an implicit declaration. */
+int           amiga_client_exit_returns(void);
+unsigned long amiga_client_stack_size(void);
+
 /* Not ours: newlib's libc.a defines clearenv() (lib_a-environ.o) but never
    declares it, <stdlib.h> puts it behind a visibility guard this toolchain
    does not set.  Declared here rather than defined, because defining it is a

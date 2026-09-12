@@ -252,7 +252,12 @@ int ftruncate(int fd, off_t length)
     return -1;
 }
 
-/* Referenced by newlib's internals, not by any client directly. */
+/* Referenced by newlib's internals, not by any client directly.  newlib
+   declares this and _gettimeofday() below only under _COMPILING_NEWLIB
+   (sys/unistd.h:270, sys/time.h:294), which this is not, so the prototype is
+   repeated here rather than unlocked by pretending to be newlib. */
+int _link(const char *from, const char *to);
+
 int _link(const char *from, const char *to)
 {
     (void)from;
@@ -294,6 +299,8 @@ int vasprintf(char **result, const char *format, va_list args)
 
 
 /* ------------------------------------------------------------- clock --- */
+
+int _gettimeofday(struct timeval *tv, void *tz);
 
 int _gettimeofday(struct timeval *tv, void *tz)
 {

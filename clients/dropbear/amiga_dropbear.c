@@ -10,6 +10,17 @@
 #include <devices/conunit.h>    /* struct ConUnit, cu_XMax/cu_YMax */
 #include <proto/exec.h>
 #include <proto/dos.h>
+/* BEFORE <proto/bsdsocket.h>, and the order is load-bearing: the NDK's inline
+   header defines gethostid(), getdtablesize() and gethostname() as function-
+   like macros, which turn the declarations of the same three in <sys/unistd.h>
+   into a syntax error.  Declaring first and defining the macros afterwards
+   leaves both halves intact.  These two headers are here so that the twenty-one
+   libc functions this file interposes -- fork(), pipe(), getpass(), inet_ntoa()
+   and the rest -- are checked against the declaration every caller sees,
+   instead of being defined against nothing. */
+#include <arpa/inet.h>
+#include <unistd.h>
+
 #include <proto/bsdsocket.h>
 
 #include <sys/types.h>
@@ -483,6 +494,15 @@ static int rand_fill(void *buf, size_t len)
     return (int)len;
 }
 
+/* Each __wrap_ definition below is preceded by a declaration of its own name
+   with the type of the function it replaces.  -Wl,--wrap=X redirects calls to
+   X into __wrap_X, and no header declares __wrap_X, so nothing checked that the
+   two agree: a wrapper whose signature drifted from the real function would be
+   called through the wrong one silently.  __typeof__ states the contract the
+   linker is about to rely on, and the compiler refuses the pair if it is false.
+   It found two: __wrap_read() and __wrap_write() returned int where read() and
+   write() return _ssize_t. */
+extern __typeof__(open) __wrap_open;
 int __wrap_open(const char *path, int flags, ...)
 {
     va_list ap;
@@ -632,6 +652,7 @@ static int amiga_raw_read(int fd, void *buf, size_t len)
 
 extern _ssize_t __real__read_r(struct _reent *, int, void *, size_t);
 
+extern __typeof__(_read_r) __wrap__read_r;
 _ssize_t __wrap__read_r(struct _reent *reent, int fd, void *buf, size_t len)
 {
     int n;
@@ -649,6 +670,7 @@ _ssize_t __wrap__read_r(struct _reent *reent, int fd, void *buf, size_t len)
    see it.  In particular, Dropbear's fprintf(stderr, ...) takes this path. */
 extern _ssize_t __real__write_r(struct _reent *, int, const void *, size_t);
 
+extern __typeof__(_write_r) __wrap__write_r;
 _ssize_t __wrap__write_r(struct _reent *reent, int fd,
                          const void *buf, size_t len)
 {
@@ -663,7 +685,8 @@ _ssize_t __wrap__write_r(struct _reent *reent, int fd,
     return (_ssize_t)n;
 }
 
-int __wrap_read(int fd, void *buf, size_t len)
+extern __typeof__(read) __wrap_read;
+_ssize_t __wrap_read(int fd, void *buf, size_t len)
 {
     if (IS_SOCK(fd))
         return (int)nx_recv(SOCKOF(fd), (APTR)buf, (LONG)len, 0);
@@ -682,7 +705,8 @@ int __wrap_read(int fd, void *buf, size_t len)
     return amiga_raw_read(fd, buf, len);
 }
 
-int __wrap_write(int fd, const void *buf, size_t len)
+extern __typeof__(write) __wrap_write;
+_ssize_t __wrap_write(int fd, const void *buf, size_t len)
 {
     /* A zero-length write must not reach a DOS handler: writechannel_fallback()
        issues write(fd, p, 0) on every pass where the channel buffer is empty,
@@ -788,6 +812,7 @@ static int con_query_size(int *rows, int *cols)
    cli_ses.winchange.  Return SIG_DFL, not the SIG_ERR Dropbear reads as failure. */
 typedef void (*con_sigfn)(int);
 
+extern __typeof__(signal) __wrap_signal;
 con_sigfn __wrap_signal(int sig, con_sigfn handler)
 {
     if (sig == SIGWINCH)
@@ -799,6 +824,7 @@ extern int __real_ioctl(int fd, unsigned long request, ...);
 
 /* TIOCGWINSZ answered from the console (newlib has no answer and fell back to
    80x25), socket ioctls to the library, everything else to newlib. */
+extern __typeof__(ioctl) __wrap_ioctl;
 int __wrap_ioctl(int fd, unsigned long request, ...)
 {
     va_list ap;
@@ -839,6 +865,7 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
     return __real_ioctl(fd, request, arg);
 }
 
+extern __typeof__(close) __wrap_close;
 int __wrap_close(int fd)
 {
     /*
@@ -1593,6 +1620,14 @@ static BPTR spawn_outfile(char *name, size_t namelen)
     return (BPTR)0;
 }
 
+/* The only wrapper here that cannot be checked against the real declaration:
+   it lives in third_party/dropbear/src/dbutil.h, which includes includes.h and
+   would pull Dropbear's whole configuration into a shim that must not have it.
+   Kept identical to dbutil.h:63 by hand. */
+int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
+                         const void *exec_data, int *writefd, int *readfd,
+                         int *errfd, pid_t *pid);
+
 int __wrap_spawn_command(void (*exec_fn)(const void *user_data),
                          const void *exec_data,
                          int *ret_writefd, int *ret_readfd, int *ret_errfd,
@@ -1748,6 +1783,7 @@ char        ***environ_ptr           = &amiga_environ;
 /* getenv() over ENV: (-Wl,--wrap=getenv): environ is empty above, so newlib's
    getenv() answers NULL and pty-req would claim TERM=vt100, whose line-drawing
    charset this console has not got.  TERM defaults to the "amiga" terminfo. */
+extern __typeof__(getenv) __wrap_getenv;
 char *__wrap_getenv(const char *name)
 {
     static char value[256];

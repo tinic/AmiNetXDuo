@@ -26,6 +26,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>        /* fnmatch(), interposed below */
 #include <limits.h>
 #include <signal.h>
 #include <stdio.h>
@@ -146,6 +147,8 @@ static int scp_task_alive(struct Task *task)
    opens mathieeedoubtrans.library and mathieeesingbas.library even when -l is
    absent.  Keep this deliberately small decimal grammar and the client keeps
    the same sole runtime dependency as ssh: mathieeedoubbas.library. */
+extern __typeof__(strtod) amiga_scp_strtod;
+
 double amiga_scp_strtod(const char *text, char **endptr)
 {
     const unsigned char *p = (const unsigned char *)text;
@@ -247,6 +250,15 @@ static int scp_fd_take(struct amiga_mempipe *pipe, int readable)
     return -1;
 }
 
+/* Each __wrap_ definition below is preceded by a declaration of its own name
+   with the type of the function it replaces.  -Wl,--wrap=X redirects calls to
+   X into __wrap_X, and no header declares __wrap_X, so nothing checked that the
+   two agree: a wrapper whose signature drifted from the real function would be
+   called through the wrong one silently.  __typeof__ states the contract the
+   linker is about to rely on, and the compiler refuses the pair if it is false.
+   It found two: __wrap_read() and __wrap_write() returned int where read() and
+   write() return _ssize_t. */
+extern __typeof__(open) __wrap_open;
 int __wrap_open(const char *path, int flags, ...)
 {
     va_list ap;
@@ -283,6 +295,7 @@ int __wrap_open(const char *path, int flags, ...)
     return -1;
 }
 
+extern __typeof__(fstat) __wrap_fstat;
 int __wrap_fstat(int fd, struct stat *st)
 {
     if (fd >= SCP_DIR_FD_BASE && fd < SCP_FD_BASE)
@@ -300,7 +313,8 @@ int __wrap_fstat(int fd, struct stat *st)
     return __real_fstat(fd, st);
 }
 
-int __wrap_read(int fd, void *buf, size_t len)
+extern __typeof__(read) __wrap_read;
+_ssize_t __wrap_read(int fd, void *buf, size_t len)
 {
     if (is_scp_fd(fd))
     {
@@ -323,7 +337,8 @@ int __wrap_read(int fd, void *buf, size_t len)
     return __real_read(fd, buf, len);
 }
 
-int __wrap_write(int fd, const void *buf, size_t len)
+extern __typeof__(write) __wrap_write;
+_ssize_t __wrap_write(int fd, const void *buf, size_t len)
 {
     if (is_scp_fd(fd))
     {
@@ -346,6 +361,7 @@ int __wrap_write(int fd, const void *buf, size_t len)
     return __real_write(fd, buf, len);
 }
 
+extern __typeof__(close) __wrap_close;
 int __wrap_close(int fd)
 {
     if (fd >= SCP_DIR_FD_BASE && fd < SCP_FD_BASE)
@@ -384,6 +400,7 @@ int __wrap_close(int fd)
     return __real_close(fd);
 }
 
+extern __typeof__(ftruncate) __wrap_ftruncate;
 int __wrap_ftruncate(int fd, off_t length)
 {
     BPTR h;
@@ -599,6 +616,11 @@ static void scp_cleanup(void)
     }
     scp_child_wait();
 }
+
+/* Resolves scp.o's undefined do_cmd; clients/dropbear/prepare-scp.py pins the
+   upstream definition's exact text before renaming it, so this signature is
+   checked there rather than against a header scp.c does not have. */
+int do_cmd(char *host, char *remuser, char *remote_cmd, int *fdin, int *fdout);
 
 int do_cmd(char *host, char *remuser, char *remote_cmd,
            int *fdin, int *fdout)
