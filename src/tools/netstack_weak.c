@@ -62,6 +62,18 @@ TOOL_WEAK UWORD netstack_interface_count(VOID)
     return 0;
 }
 
+/* AMI_DHCP_IDLE, not an error: a command linked without the stack asks the
+   running library through netstatus instead, and a caller polling this for
+   AMI_DHCP_BOUND must see "not started" rather than a value it would read as
+   a lease.  Missing here, the DHCP readiness wait linked under LTO -- which
+   proved the call unreachable -- and failed the nolto arm at `undefined
+   reference to netstack_interface_dhcp_state'. */
+TOOL_WEAK LONG netstack_interface_dhcp_state(UWORD index)
+{
+    (VOID)index;
+    return AMI_DHCP_IDLE;
+}
+
 TOOL_WEAK LONG netstack_interface_up(UWORD index)
 {
     (VOID)index;
