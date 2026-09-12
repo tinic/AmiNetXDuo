@@ -24,6 +24,7 @@ typedef enum HttpPathResult
     HTTP_PATH_PARENT,           /* a ".." segment                         */
     HTTP_PATH_DEVICE,           /* a ':', an AmigaOS device reference   */
     HTTP_PATH_BACKSLASH,        /* a '\', a separator to the client     */
+    HTTP_PATH_NOT_VOLUME,       /* first segment is not a mounted volume */
     HTTP_PATH_TOO_LONG,
     HTTP_PATH_TOO_DEEP
 } HttpPathResult;
@@ -39,6 +40,11 @@ typedef struct HttpPath
 
 HttpPathResult http_path_resolve(const char *root, const char *target,
                                  HttpPath *out);
+
+/* Resolve a machine-wide URL whose first segment is a volume name.  The
+   virtual root has an empty path; "/Work/Docs/x" becomes "Work:Docs/x".
+   Whether that volume is mounted is deliberately left to the AmigaOS caller. */
+HttpPathResult http_path_resolve_volumes(const char *target, HttpPath *out);
 
 /* A sentence for the log.  Never NULL. */
 const char *http_path_error(HttpPathResult why);

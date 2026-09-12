@@ -186,8 +186,8 @@ live|NetTrace|wire|4|re:records written|-|SYS:NetTrace WIRE HOST 10.0.2.2 PORT $
 live|NetTrace|unresolvable|5|re:cannot resolve|-|SYS:NetTrace WIRE HOST no.such.host.invalid
 live|ShowNetServices|mdns-off|4|re:mDNS is not enabled|-|SYS:ShowNetServices SECONDS=1
 live|ShowNetServices|bad-type|5|re:is not a service type|-|SYS:ShowNetServices http
-live|httpd|no-root|5|re:required argument missing|-|SYS:httpd
 live|httpd|bad-root|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099
+live|httpd|volumes-no-root|5|re:TIMEOUT cannot be negative|-|SYS:httpd TIMEOUT=-1
 live|httpd|term-no-page|5|re:to serve the terminal from|-|SYS:httpd DH0: 8099 -T PAGE=DH0:nosuchpage.html
 live|httpd|term-page-checked|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099 -T PAGE=DH0:shell.html
 live|httpd|files-no-page|5|re:to serve the file manager from|-|SYS:httpd DH0: 8099 -F FILEPAGE=DH0:nosuchpage.html

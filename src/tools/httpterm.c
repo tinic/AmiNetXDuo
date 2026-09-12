@@ -1156,6 +1156,11 @@ VOID http_term_announce(const char *root, const char *dotted, UWORD port,
     tool_printf("A Shell, with no password, at http://%s:%ld%s\n",
                 (LONG)dotted, (LONG)port, (LONG)url);
 
+    /* A machine-wide httpd has a virtual volume list at /, not an AmigaDOS
+       drawer in which /shell could shadow a real entry. */
+    if (root == NULL || root[0] == '\0')
+        return;
+
     while (root[n] != '\0' && n + 1UL < sizeof(probe))
     {
         probe[n] = root[n];

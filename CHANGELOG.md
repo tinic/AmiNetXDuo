@@ -9,11 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
-- **`httpd -F` serves a file manager at `/files`.** It browses the shared
-  drawer and downloads, uploads, creates, renames and deletes through the
-  server's existing WebDAV interface. The page is self-contained, needs no
-  Internet connection, handles Amiga filename bytes without assuming UTF-8,
-  and is 6 KB compressed. The installer enables it beside `/shell`
+- **`httpd -F` serves a file manager at `/files`.** The WebDAV root and the
+  browser show every mounted volume under one virtual root.
+  Browser-displayable files open inline; uploads, new drawers, renames and
+  deletion use that same DAV namespace. The self-contained page follows the
+  browser's light or dark appearance setting, handles Amiga filename bytes,
+  and is about 6 KB compressed. An explicit drawer argument remains available
+  for a deliberately restricted share
 
 ## 0.27.3
 

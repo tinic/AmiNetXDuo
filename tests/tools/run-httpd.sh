@@ -88,7 +88,7 @@ echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
 : > "$STAGE/Public/empty.dat"
 dd if=/dev/urandom of="$STAGE/Public/blob.bin" bs=1024 count=512 status=none
 
-echo "==> serving DH0:Public on http://$ADDRESS:$PORT/ for ${WINDOW}s"
+echo "==> serving every mounted volume on http://$ADDRESS:$PORT/ for ${WINDOW}s"
 echo "==> file manager at http://$ADDRESS:$PORT/files"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-httpd}"
@@ -97,7 +97,7 @@ HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -I "$TOOLS/AddNetInterface" \
-    -a "DH0:Public $PORT -F FILEPAGE=DH0:files.html TRACE" \
+    -a "PORT $PORT -F FILEPAGE=DH0:files.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
     "$FILEPAGE" "$FILEPAGEGZ" &
 RUNNER=$!
@@ -124,7 +124,7 @@ if [ "$ANSWERED" = yes ]; then
         echo "!! GET /files answered ${got:-nothing}" >&2
         ANSWERED=no
     }
-    echo "==> point a client at http://$ADDRESS:$PORT/ now"
+    echo "==> point a client at http://$ADDRESS:$PORT/ now; DH0: is /DH0/"
 else
     echo "!! the guest never answered from this host" >&2
 fi

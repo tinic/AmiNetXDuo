@@ -226,15 +226,24 @@ td.ops {
   text-align: right;
   white-space: nowrap;
 }
-td.ops button {
+td.ops button,
+td.ops a {
+  display: inline-block;
   padding: 0.32rem 0.5rem;
   margin-left: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.42rem;
   border-color: transparent;
   box-shadow: none;
   color: #475467;
   background: transparent;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
 }
-td.ops button:hover {
+td.ops button:hover,
+td.ops a:hover {
   background: #f2f4f7;
   color: #101828;
 }
@@ -411,11 +420,16 @@ dialog input:focus {
   .tablebox {
     font-size: 0.94rem;
   }
-  td.ops button {
+  td.ops button,
+  td.ops a {
     font-size: 0;
   }
-  td.ops button:after {
+  td.ops button:after,
+  td.ops a:after {
     font-size: 0.85rem;
+  }
+  td.ops .download:after {
+    content: "Download";
   }
   td.ops .rename:after {
     content: "Rename";
@@ -588,11 +602,13 @@ dialog input:focus {
     border-color: #528bdf;
   }
 
-  td.ops button {
+  td.ops button,
+  td.ops a {
     color: #b8c1ce;
   }
 
-  td.ops button:hover {
+  td.ops button:hover,
+  td.ops a:hover {
     color: #f2f4f7;
     background: #253247;
   }

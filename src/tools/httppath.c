@@ -274,6 +274,58 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
     return HTTP_PATH_OK;
 }
 
+HttpPathResult http_path_resolve_volumes(const char *target, HttpPath *out)
+{
+    char           mapped[HTTP_PATH_MAX];
+    const char    *src;
+    unsigned long  n = 0;
+    HttpPathResult why;
+
+    /* Reuse the one decoder and all of its segment checks.  The temporary
+       device prefix makes the ordinary resolver produce a safe, normalised
+       path; only then is the first segment moved to the device position. */
+    why = http_path_resolve("@:", target, out);
+    if (why != HTTP_PATH_OK)
+        return why;
+
+    if (out->segments == 0)
+    {
+        out->path[0] = '\0';             /* the virtual volume list       */
+        return HTTP_PATH_OK;
+    }
+
+    src = out->path + 2;                 /* past the temporary "@:"      */
+    while (*src != '\0' && *src != '/')
+    {
+        if (n + 2UL >= sizeof(mapped))
+            return HTTP_PATH_TOO_LONG;
+        mapped[n++] = *src++;
+    }
+
+    mapped[n++] = ':';
+    if (*src == '/')
+        src++;                            /* "Work:Docs", not "Work:/Docs" */
+
+    while (*src != '\0')
+    {
+        if (n + 1UL >= sizeof(mapped))
+            return HTTP_PATH_TOO_LONG;
+        mapped[n++] = *src++;
+    }
+    mapped[n] = '\0';
+
+    for (n = 0; mapped[n] != '\0'; n++)
+        out->path[n] = mapped[n];
+    out->path[n] = '\0';
+
+    /* Examine()'s name for a volume root is handler-dependent.  As with a
+       configured document root, there is no leaf name to compare there. */
+    if (out->segments == 1)
+        out->name[0] = '\0';
+
+    return HTTP_PATH_OK;
+}
+
 int http_path_root(const char *given, char *out, unsigned long outlen)
 {
     unsigned long n = 0;
@@ -371,6 +423,7 @@ const char *http_path_error(HttpPathResult why)
         case HTTP_PATH_PARENT:       return "a .. that leaves the root";
         case HTTP_PATH_DEVICE:       return "a colon, an AmigaOS device";
         case HTTP_PATH_BACKSLASH:    return "a backslash";
+        case HTTP_PATH_NOT_VOLUME:   return "not a mounted volume";
         case HTTP_PATH_TOO_LONG:     return "too long";
         case HTTP_PATH_TOO_DEEP:     return "too many directories";
     }

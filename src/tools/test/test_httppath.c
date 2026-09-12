@@ -61,6 +61,16 @@ static HttpPathResult refused(const char *target)
     return http_path_resolve("Work:Public", target, &out);
 }
 
+static const char *volume_resolved(const char *target)
+{
+    static HttpPath out;
+
+    if (http_path_resolve_volumes(target, &out) != HTTP_PATH_OK)
+        return NULL;
+
+    return out.path;
+}
+
 /* --------------------------------------------------------- what must work */
 
 static void test_ordinary(void)
@@ -104,6 +114,43 @@ static void test_ordinary(void)
     CHECK_STR(resolved("RAM:", "//foo"), "RAM:foo");
     CHECK_STR(resolved("RAM:", "/a//b"), "RAM:a/b");
     CHECK_STR(resolved("RAM:", "/a/./b"), "RAM:a/b");
+}
+
+static void test_volume_root(void)
+{
+    HttpPath p;
+
+    printf("the machine-wide volume root\n");
+
+    CHECK_STR(volume_resolved("/"), "");
+    CHECK(http_path_resolve_volumes("/", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 0);
+    CHECK_STR(p.url, "/");
+
+    CHECK_STR(volume_resolved("/Workbench/"), "Workbench:");
+    CHECK(http_path_resolve_volumes("/Workbench/", &p) == HTTP_PATH_OK);
+    CHECK(p.segments == 1);
+    CHECK_STR(p.url, "/Workbench");
+    CHECK_STR(p.name, "");
+    CHECK(p.trailing_slash == 1);
+
+    CHECK_STR(volume_resolved("/Work/Source/main.c"),
+              "Work:Source/main.c");
+    CHECK(http_path_resolve_volumes("/RAM%20DISK/T/file", &p) ==
+          HTTP_PATH_OK);
+    CHECK_STR(p.path, "RAM DISK:T/file");
+    CHECK_STR(p.url, "/RAM DISK/T/file");
+    CHECK_STR(p.name, "file");
+    CHECK(p.segments == 3);
+
+    /* It is the same guarded path grammar, including absolute destinations. */
+    CHECK_STR(volume_resolved("http://amiga.local/Work/a%20b"),
+              "Work:a b");
+    CHECK(http_path_resolve_volumes("/Work/../SYS/S", &p) ==
+          HTTP_PATH_PARENT);
+    CHECK(http_path_resolve_volumes("/SYS%3AS", &p) == HTTP_PATH_DEVICE);
+    CHECK(http_path_resolve_volumes("/Work/a%5Cb", &p) ==
+          HTTP_PATH_BACKSLASH);
 }
 
 /* ------------------------------------------------------ the AmigaOS escape */
@@ -798,6 +845,7 @@ static void test_content_type(void)
 int main(void)
 {
     test_ordinary();
+    test_volume_root();
     test_device_escape();
     test_parent_escape();
     test_malformed();

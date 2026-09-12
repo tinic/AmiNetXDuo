@@ -108,7 +108,7 @@ The installer asks, in this order:
                                                    card's address)
      Start the network at boot                    (yes)
      Start httpd at boot, with a browser file
-       manager and Shell; which drawer and port   (no)
+       manager and Shell; which port              (no)
 
 At Novice level every question takes its default without being shown.
 

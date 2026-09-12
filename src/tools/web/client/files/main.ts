@@ -23,6 +23,8 @@ const progress = byId<HTMLProgressElement>("progress");
 const pick = byId<HTMLInputElement>("pick");
 const crumbs = byId<HTMLElement>("crumbs");
 const up = byId<HTMLButtonElement>("up");
+const mkdir = byId<HTMLButtonElement>("mkdir");
+const upload = byId<HTMLButtonElement>("upload");
 const drop = byId<HTMLDivElement>("drop");
 const askDialog = byId<HTMLDialogElement>("ask");
 const askTitle = byId<HTMLHeadingElement>("ask-title");
@@ -33,6 +35,7 @@ const askOk = byId<HTMLButtonElement>("ask-ok");
 
 let current = "/";
 let loadSerial = 0;
+let volumeRoot = false;
 let dragDepth = 0;
 
 function say(text: string, bad = false): void {
@@ -233,7 +236,7 @@ function drawCrumbs(): void {
   crumbs.replaceChildren();
   const root = document.createElement("button");
   root.type = "button";
-  root.textContent = "Shared drawer";
+  root.textContent = volumeRoot ? "Volumes" : "Files";
   root.onclick = () => go("/");
   crumbs.append(root);
 
@@ -249,6 +252,8 @@ function drawCrumbs(): void {
     crumbs.append(button);
   }
   up.disabled = current === "/";
+  mkdir.disabled = volumeRoot && current === "/";
+  upload.disabled = volumeRoot && current === "/";
 }
 
 function opButton(
@@ -275,7 +280,6 @@ function draw(entries: DavEntry[]): void {
     icon.className = "icon" + (entry.drawer ? " drawer" : "");
     link.className = "name";
     link.href = entry.drawer ? "#" + cleanDrawer(entry.href) : entry.href;
-    if (!entry.drawer) link.download = entry.name;
     link.append(icon, document.createTextNode(entry.name || "(unnamed)"));
     name.append(link);
 
@@ -290,10 +294,20 @@ function draw(entries: DavEntry[]): void {
       : new Date(time).toLocaleString();
     const ops = document.createElement("td");
     ops.className = "ops";
-    ops.append(
-      opButton("Rename", "rename", () => void renameEntry(entry)),
-      opButton("Delete", "delete", () => void deleteEntry(entry)),
-    );
+    if (!(volumeRoot && current === "/")) {
+      if (!entry.drawer) {
+        const download = document.createElement("a");
+        download.className = "download";
+        download.href = entry.href;
+        download.download = entry.name;
+        download.textContent = "Download";
+        ops.append(download);
+      }
+      ops.append(
+        opButton("Rename", "rename", () => void renameEntry(entry)),
+        opButton("Delete", "delete", () => void deleteEntry(entry)),
+      );
+    }
     tr.append(name, size, modified, ops);
     rows.append(tr);
   }
@@ -317,6 +331,10 @@ async function load(): Promise<void> {
         "<resourcetype/><getcontentlength/><getlastmodified/>" +
         "</prop></propfind>",
     );
+    if (path === "/") {
+      volumeRoot = response.headers.get("X-AmiNetXDuo-Root") === "volumes";
+      drawCrumbs();
+    }
     const entries = parseListing(await response.text(), path);
     if (serial !== loadSerial) return;
     draw(entries);
@@ -335,6 +353,7 @@ function go(path: string): void {
 }
 
 async function createDrawer(): Promise<void> {
+  if (volumeRoot && current === "/") return;
   const name = await ask(
     "New drawer",
     "Choose a name for the new drawer.",
@@ -412,6 +431,7 @@ function put(file: File, href: string): Promise<void> {
 }
 
 async function uploadFiles(files: FileList | File[]): Promise<void> {
+  if (volumeRoot && current === "/") return;
   const list = Array.from(files);
   if (list.length === 0) return;
   progress.hidden = false;
@@ -435,8 +455,8 @@ async function uploadFiles(files: FileList | File[]): Promise<void> {
 
 byId("refresh").onclick = () => void load();
 up.onclick = () => go(parentOf(current));
-byId("mkdir").onclick = () => void createDrawer();
-byId("upload").onclick = () => pick.click();
+mkdir.onclick = () => void createDrawer();
+upload.onclick = () => pick.click();
 pick.onchange = () => {
   if (pick.files) void uploadFiles(pick.files);
   pick.value = "";

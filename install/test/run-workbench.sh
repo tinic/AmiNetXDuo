@@ -1723,7 +1723,7 @@ fi
 
 # -H adds a fifth step, and it is the one the machine is for: wait for the
 # other machine to have finished putting files here over WebDAV, unpack the
-# archive it put, and copy what arrived out of RAM: onto DH0: so the host can
+# archive it put, and copy what arrived under the DH0 volume root so the host can
 # compare the bytes against what it sent.
 #
 # Waited rather than handshaken.  DH0: is a directory on the host, so a
@@ -1736,21 +1736,21 @@ if [ "$TERMINAL" = "1" ]; then
 
 Echo >>DH0:usercheck.txt "*N=== 5. what the other machine put here over WebDAV"
 C:Wait 240
-C:List RAM: >>DH0:usercheck.txt
+C:List DH0:payload.#? >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT davlist rc=$RC"
 ; A DRAWER THAT DID NOT EXIST A MOMENT AGO.  LhA asks
 ; "already exists, overwrite? (Y/N/A/S/Q):" on a second
 ; extraction and waits for a keystroke there is nobody to
 ; type, and a wait with nothing to end it is a run that
 ; times out rather than a run that fails.
-C:Delete RAM:Unpack ALL QUIET FORCE
-C:MakeDir RAM:Unpack
-C:lha -q x RAM:payload.lha RAM:Unpack/ >>DH0:usercheck.txt
+C:Delete DH0:Unpack ALL QUIET FORCE
+C:MakeDir DH0:Unpack
+C:lha -q x DH0:payload.lha DH0:Unpack/ >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT lha-x rc=$RC"
 C:MakeDir DH0:DavOut
-C:Copy RAM:payload.txt DH0:DavOut QUIET
+C:Copy DH0:payload.txt DH0:DavOut QUIET
 Echo >>DH0:usercheck.txt "RESULT davcopy rc=$RC"
-C:Copy RAM:Unpack DH0:DavOut/Unpack ALL QUIET
+C:Copy DH0:Unpack DH0:DavOut/Unpack ALL QUIET
 Echo >>DH0:usercheck.txt "RESULT unpackcopy rc=$RC"
 EOF
 )
@@ -2113,6 +2113,15 @@ if [ "$TERMINAL" = "1" ]; then
         bad=1
     fi
 
+    if [ "$(key dav_root_status)" = "207" ] &&
+       [ "$(key dav_root_has_dh0)" = "yes" ]; then
+        printf '  %-34s DH0 listed\n' "WebDAV mounted-volume root"
+    else
+        printf '  %-34s status=%s dh0=%s\n' "WebDAV mounted-volume root" \
+               "$(key dav_root_status)" "$(key dav_root_has_dh0)"
+        bad=1
+    fi
+
     if [ "$(key dav_roundtrip_identical)" = "yes" ]; then
         printf '  %-34s bytes identical\n' "WebDAV PUT then GET"
     else
@@ -2123,7 +2132,7 @@ if [ "$TERMINAL" = "1" ]; then
     fi
 
     # ON THE AMIGA'S DISK, not just back out of the server.  The guest copied
-    # what arrived in the served drawer onto DH0:, which is a directory on this
+    # what arrived through /DH0/ onto DH0:, which is a directory on this
     # host, so the bytes the peer sent are compared against the bytes an
     # AmigaDOS Copy wrote.
     if [ -f "$HD/DavOut/payload.txt" ] &&

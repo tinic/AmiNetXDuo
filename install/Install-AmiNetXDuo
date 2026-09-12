@@ -262,34 +262,22 @@
        "again."))
 
 (set H_HTTPD
-  (cat "httpd serves one drawer to the other machines on the network, over "
-       "HTTP and WebDAV.  The drawer appears as a drive in Finder, in "
-       "Explorer and on Linux, with nothing installed at the far end.  With "
+  (cat "httpd serves every mounted volume to the other machines on the "
+       "network, over HTTP and WebDAV.  They appear under one drive in "
+       "Finder, in Explorer and on Linux, with nothing installed at the far "
+       "end.  With "
        "the browser pages on, httpd also answers at /files with a file "
        "manager and at /shell with an AmigaDOS Shell.\n\n"
        "None of them has a password, and no setting adds one.  Anyone who "
-       "can reach the port can read and write the drawer.  Anyone who can "
-       "reach the port gets a Shell on this machine.  Behind a home router "
+       "can reach the port can read and write every mounted volume.  Anyone "
+       "who can reach the port gets a Shell on this machine.  Behind a home router "
        "that is a convenience.  On a network with unknown people on it, it "
        "is not, and that is the whole of this decision.\n\n"
        "If the answer is yes, two lines go into S:User-Startup next to the "
        "line that starts the network.  One is an assign, so httpd can find "
        "the pages served to the browser.  The other starts httpd. "
        " If the answer is no on a later run, both lines are removed.\n\n"
-       "The installer asks for the drawer and the port next."))
-
-(set H_HTTPDROOT
-  (cat "httpd needs a drawer.  Anyone who reaches the port can read, change "
-       "and delete everything in that drawer.\n\n"
-       "RAM: is offered because every Amiga has it.  RAM: is empty at boot "
-       "and nothing in it survives a boot, so it cannot expose a file that "
-       "was not put there deliberately.  It works as a drop box between "
-       "this machine and a desktop machine.\n\n"
-       "Name a real drawer instead to serve its contents at every boot.  Do "
-       "not serve a whole volume: SYS: is the system, and serving it serves "
-       "S:User-Startup and LIBS: as well.\n\n"
-       "The terminal does not depend on this drawer.  It is served from the "
-       "same port for any drawer."))
+       "The installer asks for the port next."))
 
 (set H_HTTPDPORT
   (cat "80 is offered because a browser uses that port when the address "
@@ -380,7 +368,7 @@
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_HTTPD
-  (cat "\nFrom the next reboot, httpd serves %s on port %ld, with a file "
+  (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
        "manager at /files and a Shell at /shell.  Neither asks for a password.\n"))
 
 (set H_DOCDIR
@@ -1196,12 +1184,12 @@
     (choices "Yes, at boot" "No, I will do it")
     (default 1)))
 
-; --- serve a drawer, and a Shell in a browser, at boot? ------------------
+; --- serve the volumes, and a Shell in a browser, at boot? ---------------
 ;
 ; DEFAULTS TO NO, and that is not timidity.  Every other question here has an
 ; answer that is right for almost everybody, which is what makes NOVICE mode
-; work; this one does not.  A drawer served read-write and a Shell with no
-; password are a fine thing to switch on deliberately and not a thing to hand
+; work; this one does not.  Every volume served read-write and a Shell with no
+; password is a thing to switch on deliberately and not a thing to hand
 ; to somebody who pressed Return through an installer, so the default is the
 ; answer that changes nothing.
 ;
@@ -1213,7 +1201,6 @@
 ; rewritten either way.
 
 (set DO_HTTPD   0)
-(set HTTPD_ROOT "RAM:")
 (set HTTPD_PORT 80)
 
 (if DO_STARTUP
@@ -1225,7 +1212,7 @@
     ; relies on: the first button on a page IS that page's default.
     (set DO_HTTPD
       (if (askbool
-            (prompt "Serve a drawer, and an AmigaDOS Shell in a web browser, "
+            (prompt "Serve every volume, and an AmigaDOS Shell in a web browser, "
                     "when this Amiga boots?\n\n"
                     "Neither has a password: whoever can reach the port gets "
                     "both.")
@@ -1236,14 +1223,6 @@
 
     (if DO_HTTPD
       (
-        (set HTTPD_ROOT
-          (askdir
-            (prompt "Select the drawer to serve.\n\n"
-                    "Anyone on the network can read, change and delete "
-                    "everything in it.")
-            (help    H_HTTPDROOT)
-            (default "RAM:")))
-
         (set HTTPD_PORT
           (asknumber
             (prompt "Type the port number for httpd.")
@@ -1557,10 +1536,9 @@
           "same for a transfer it runs itself.  CheckNetConfig reads the "
           "configuration back and reports what is wrong with it.  "
           "CheckNetDevice reports what anxnet.device found on this machine "
-          "when a card does not work.  httpd serves "
-          "a drawer over HTTP and WebDAV to other machines on the network, "
-          "and asks for no password.  Serve only a drawer that those "
-          "machines can read and write.\n\nAll of "
+          "when a card does not work.  httpd serves every mounted volume "
+          "over HTTP and WebDAV to other machines on the network, and asks "
+          "for no password.\n\nAll of "
           "them are installed.  They are small, and a missing command "
           "is worse than a few extra files "
           "in C:.  ssh and scp come with them.")
@@ -1941,7 +1919,7 @@
             (cat BOOT_CMD ("Assign AmiNetXDuo: \"%s\"\n" DOCDIR))))
       (set BOOT_CMD
         (cat BOOT_CMD
-             ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T -F\n" HTTPD_ROOT HTTPD_PORT)))
+             ("Run >NIL: <NIL: C:httpd PORT %ld -T -F\n" HTTPD_PORT)))
     ))
 
 ; Three cases, and (startup) covers all of them because it writes the block
@@ -2047,7 +2025,7 @@
 (set FINAL_HTTPD "")
 
 (if DO_HTTPD
-    (set FINAL_HTTPD (F_HTTPD HTTPD_ROOT HTTPD_PORT)))
+    (set FINAL_HTTPD (F_HTTPD HTTPD_PORT)))
 
 ; The 68000 https:// notice used to be here, and it is not any more.  A user
 ; who never types an https: URL was being warned about something that would

@@ -1,4 +1,4 @@
-/* httpd: an HTTP server with read-write WebDAV, serving a drawer as a drive.
+/* httpd: an HTTP server with read-write WebDAV for the machine's volumes.
  * SPDX-License-Identifier: MIT
  */
 
@@ -25,7 +25,7 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("httpd");
 
 #define TEMPLATE                                                        \
-    "ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,"     \
+    "ROOT,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,"       \
     "VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K,CONSOLE=-C/S,"           \
     "CONSOLEPAGE/K,FILES=-F/S,FILEPAGE/K"
 
@@ -71,8 +71,7 @@ static const char *const httpd_console_places[] = {
              sizeof(httpd_console_places[0])))
 
 /* The browser file manager is another self-contained page in the same
-   installed drawer.  It speaks ordinary WebDAV back to this server; unlike
-   -T and -C it adds no authority that the served drawer did not have. */
+   installed drawer.  It speaks ordinary WebDAV back to this server. */
 static const char *const httpd_files_places[] = {
     "AmiNetXDuo:Terminal/files.html",
     "PROGDIR:Terminal/files.html",
@@ -391,6 +390,8 @@ struct HttpConn
     UBYTE   is_term;                /* this request is for /shell          */
     UBYTE   is_console;             /* this request is for /console        */
     UBYTE   is_files;               /* this request is for /files          */
+    UBYTE   is_volumes_root;        /* / in machine-wide volume mode       */
+    UWORD   volume_index;           /* next mounted volume in a listing    */
     UBYTE   fb_owner;               /* this connection holds the console   */
     UBYTE   ws_upgrade;             /* Upgrade: websocket was there        */
     UBYTE   ws_connection;          /* and Connection: listed upgrade      */
@@ -430,6 +431,8 @@ static ULONG    httpd_token_start;      /* the clock when the server started   *
 
 static char        httpd_root_buf[HTTP_PATH_MAX];
 static const char *httpd_root = "";
+/* With no ROOT argument, / is a virtual list of mounted volumes. */
+static BOOL   httpd_volumes = FALSE;
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
 static ULONG  httpd_ws_idle = HTTPD_WS_IDLE_DEF;
@@ -1217,6 +1220,8 @@ static VOID httpd_reset(HttpConn *c)
     c->is_term       = 0;
     c->is_console    = 0;
     c->is_files      = 0;
+    c->is_volumes_root = 0;
+    c->volume_index    = 0;
     c->ws_take       = 0;
     c->ws_upgrade    = 0;
     c->ws_connection = 0;
@@ -1234,6 +1239,110 @@ static VOID httpd_reset(HttpConn *c)
    runs to completion in one pass of the loop. */
 static struct FileInfoBlock *httpd_fib2;
 static struct InfoData      *httpd_info;
+
+/* Copy one live volume name out from under the DosList lock.  The lock is
+   never carried across a producer pass: filesystem handlers can need the same
+   list while this server is waiting for a client to read. */
+static BOOL httpd_volume_at(UWORD wanted, char *out, ULONG outlen)
+{
+    struct DosList *dl;
+    UWORD           seen = 0;
+    BOOL            found = FALSE;
+
+    if (outlen == 0UL)
+        return FALSE;
+    out[0] = '\0';
+
+    dl = LockDosList(LDF_VOLUMES | LDF_READ);
+    if (dl == NULL)
+        return FALSE;
+
+    while ((dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
+    {
+        const UBYTE *bstr;
+        ULONG        len;
+        ULONG        i;
+
+        /* A remembered but unmounted volume has no handler.  Listing it can
+           only provoke an insert-volume requester when the client enters it. */
+        if (dl->dol_Task == NULL || dl->dol_Name == (BSTR)0)
+            continue;
+
+        if (seen++ != wanted)
+            continue;
+
+        bstr = (const UBYTE *)BADDR(dl->dol_Name);
+        len  = (ULONG)bstr[0];
+        if (len == 0UL || len + 1UL > outlen)
+            break;
+
+        for (i = 0; i < len; i++)
+            out[i] = (char)bstr[i + 1UL];
+        out[len] = '\0';
+        found = TRUE;
+        break;
+    }
+
+    UnLockDosList(LDF_VOLUMES | LDF_READ);
+    return found;
+}
+
+static BOOL httpd_volume_mounted(const char *path)
+{
+    struct DosList *dl;
+    char            name[HTTP_NAME_MAX];
+    ULONG           n = 0;
+    BOOL            found = FALSE;
+
+    while (path[n] != '\0' && path[n] != ':')
+    {
+        if (n + 1UL >= sizeof(name))
+            return FALSE;
+        name[n] = path[n];
+        n++;
+    }
+    if (n == 0UL || path[n] != ':')
+        return FALSE;
+    name[n] = '\0';
+
+    dl = LockDosList(LDF_VOLUMES | LDF_READ);
+    if (dl == NULL)
+        return FALSE;
+
+    while ((dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
+    {
+        const UBYTE *bstr;
+
+        if (dl->dol_Task == NULL || dl->dol_Name == (BSTR)0)
+            continue;
+
+        bstr = (const UBYTE *)BADDR(dl->dol_Name);
+        if ((ULONG)bstr[0] == n &&
+            hs_nicmp((const char *)&bstr[1], name, n) == 0)
+        {
+            found = TRUE;
+            break;
+        }
+    }
+
+    UnLockDosList(LDF_VOLUMES | LDF_READ);
+    return found;
+}
+
+static HttpPathResult httpd_resolve_path(const char *target, HttpPath *out)
+{
+    HttpPathResult why;
+
+    if (!httpd_volumes)
+        return http_path_resolve(httpd_root, target, out);
+
+    why = http_path_resolve_volumes(target, out);
+    if (why == HTTP_PATH_OK && out->segments > 0 &&
+        !httpd_volume_mounted(out->path))
+        return HTTP_PATH_NOT_VOLUME;
+
+    return why;
+}
 
 /* An AmigaDOS error as an HTTP status.  One table, so every write method gives
    the same answer to the same failure. */
@@ -1455,17 +1564,54 @@ static ULONG httpd_free_bytes(const char *path)
     return blocks * per;
 }
 
-/* The URL a walked path corresponds to, escaped for an href.  Every path a walk
-   produces begins with the document root, and the rest of it is the URL. */
+/* The URL a walked path corresponds to, escaped for an href.  In volume mode
+   the first colon becomes the root's volume segment; a restricted share drops
+   its configured document-root prefix as before. */
 static const char *httpd_url_of(const char *path)
 {
-    ULONG rootlen = hs_len(httpd_root);
     ULONG used = 0;
 
-    if (hs_nicmp(path, httpd_root, rootlen) != 0)
-        return "/";
+    if (httpd_volumes)
+    {
+        const char *colon = path;
 
-    path += rootlen;
+        while (*colon != '\0' && *colon != ':')
+            colon++;
+        if (*colon != ':' || colon == path)
+            return "/";
+
+        httpd_href_buf[0] = '\0';
+        (VOID)hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/");
+        while (path < colon)
+        {
+            char one[2];
+
+            one[0] = *path++;
+            one[1] = '\0';
+            if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, one))
+                return "/";
+        }
+        path++;                            /* the colon becomes a slash     */
+        if (*path != '\0' &&
+            !hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/"))
+            return "/";
+        if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, path))
+            return "/";
+
+        if (http_url_escape(httpd_href_buf, httpd_escape,
+                            sizeof(httpd_escape)) == 0UL)
+            return "/";
+        return httpd_escape;
+    }
+
+    {
+        ULONG rootlen = hs_len(httpd_root);
+
+        if (hs_nicmp(path, httpd_root, rootlen) != 0)
+            return "/";
+
+        path += rootlen;
+    }
 
     httpd_href_buf[0] = '\0';
 
@@ -3092,8 +3238,10 @@ static BOOL httpd_produce(HttpConn *c)
                     case DIR_SELF:
                     {
                         struct DateStamp date;
-                        BOOL is_dir = (c->dirlock != (BPTR)0) ? TRUE : FALSE;
+                        BOOL is_dir = (c->is_volumes_root ||
+                                       c->dirlock != (BPTR)0) ? TRUE : FALSE;
                         ULONG size = 0;
+                        char  rootname[HTTP_NAME_MAX];
 
                         date.ds_Days   = 0;
                         date.ds_Minute = 0;
@@ -3114,12 +3262,31 @@ static BOOL httpd_produce(HttpConn *c)
 
                         if (propfind)
                         {
-                            const char *name = (c->path.name[0] != '\0')
-                                                   ? c->path.name : "/";
+                            const char *name = c->path.name;
+
+                            if (name[0] == '\0' && httpd_volumes &&
+                                c->path.segments == 1)
+                            {
+                                ULONG i = 0;
+
+                                while (c->path.path[i] != '\0' &&
+                                       c->path.path[i] != ':' &&
+                                       i + 1UL < sizeof(rootname))
+                                {
+                                    rootname[i] = c->path.path[i];
+                                    i++;
+                                }
+                                rootname[i] = '\0';
+                                name = rootname;
+                            }
+                            else if (name[0] == '\0')
+                                name = "/";
 
                             len = httpd_propfind_entry(c,
                                       httpd_href(&c->path, NULL, is_dir),
-                                      name, c->path.path, is_dir, size,
+                                      name,
+                                      c->is_volumes_root ? NULL : c->path.path,
+                                      is_dir, size,
                                       &date);
                         }
                         else
@@ -3138,6 +3305,44 @@ static BOOL httpd_produce(HttpConn *c)
                     {
                         BOOL is_dir;
                         const char *name;
+
+                        if (c->is_volumes_root)
+                        {
+                            struct DateStamp date;
+                            char             volume[HTTP_NAME_MAX];
+
+                            if (!httpd_volume_at(c->volume_index++, volume,
+                                                 sizeof(volume)))
+                            {
+                                c->dir_stage = DIR_TRAILER;
+                                continue;
+                            }
+
+                            date.ds_Days   = 0;
+                            date.ds_Minute = 0;
+                            date.ds_Tick   = 0;
+
+                            if (propfind)
+                                len = httpd_propfind_entry(c,
+                                          httpd_href(&c->path, volume, TRUE),
+                                          volume, NULL, TRUE, 0, &date);
+                            else
+                                len = httpd_index_entry(
+                                          httpd_href(&c->path, volume, TRUE),
+                                          volume, TRUE, 0);
+
+                            if (len == 0UL)
+                            {
+                                ULONG used = 0;
+
+                                (VOID)hs_append(httpd_scratch,
+                                                sizeof(httpd_scratch), &used,
+                                                "<!-- volume omitted: "
+                                                "representation too large -->\n");
+                                len = used;
+                            }
+                            break;
+                        }
 
                         if (c->dirlock == (BPTR)0 || c->fib == NULL)
                         {
@@ -3345,12 +3550,16 @@ static VOID httpd_do_propfind(HttpConn *c)
         return;
     }
 
-    if (!httpd_examine(c, &is_dir, TRUE))
+    if (c->is_volumes_root)
+        is_dir = TRUE;
+    else if (!httpd_examine(c, &is_dir, TRUE))
         return;
 
     httpd_begin(c, 207);
     httpd_header(c, "DAV", "1,2");
     httpd_header(c, "Content-Type", "text/xml; charset=utf-8");
+    if (c->is_volumes_root)
+        httpd_header(c, "X-AmiNetXDuo-Root", "volumes");
 
     if (c->head_only)
     {
@@ -3386,7 +3595,9 @@ static VOID httpd_do_get(HttpConn *c)
     ULONG from = 0;
     ULONG to;
 
-    if (!httpd_examine(c, &is_dir, TRUE))
+    if (c->is_volumes_root)
+        is_dir = TRUE;
+    else if (!httpd_examine(c, &is_dir, TRUE))
         return;
 
     if (is_dir)
@@ -3912,13 +4123,15 @@ static VOID httpd_do_console(HttpConn *c)
 
 /* --------------------------------------------------------------- writing --- */
 
-/* What every write goes through first.  The document root itself is not a
-   resource a client can replace or remove. */
+/* What every write goes through first.  Neither a restricted document root
+   nor a mounted volume itself is a resource a client can replace or remove. */
 static BOOL httpd_may_write(HttpConn *c)
 {
-    if (c->path.segments == 0)
+    if (c->path.segments == 0 || (httpd_volumes && c->path.segments == 1))
     {
-        httpd_error(c, 403, "the served drawer itself is not writable");
+        httpd_error(c, 403, httpd_volumes
+                                   ? "a volume itself is not replaceable"
+                                   : "the served drawer itself is not writable");
         return FALSE;
     }
 
@@ -4352,7 +4565,7 @@ static BOOL httpd_resolve_dest(HttpConn *c)
         return FALSE;
     }
 
-    why = http_path_resolve(httpd_root, c->dest_url, &c->dest);
+    why = httpd_resolve_path(c->dest_url, &c->dest);
     if (why != HTTP_PATH_OK)
     {
         if (httpd_verbose || httpd_trace)
@@ -4364,9 +4577,11 @@ static BOOL httpd_resolve_dest(HttpConn *c)
         return FALSE;
     }
 
-    if (c->dest.segments == 0)
+    if (c->dest.segments == 0 || (httpd_volumes && c->dest.segments == 1))
     {
-        httpd_error(c, 403, "the served drawer itself is not a destination");
+        httpd_error(c, 403, httpd_volumes
+                                   ? "a volume itself is not a destination"
+                                   : "the served drawer itself is not a destination");
         return FALSE;
     }
 
@@ -4638,9 +4853,15 @@ static VOID httpd_do_lock(HttpConn *c)
     BOOL      created;
     BOOL      ok;
 
-    /* The served drawer itself is lockable, so LOCK does not go through
-       httpd_may_write(): the truncation check every other method gets from
-       there is made here instead. */
+    if (c->is_volumes_root)
+    {
+        httpd_error(c, 403, "the volume list itself is not lockable");
+        return;
+    }
+
+    /* A restricted root and an individual volume root are lockable, so LOCK
+       does not go through httpd_may_write().  The virtual list was refused
+       above; the truncation check every other method gets is made here. */
     if (httpd_name_cut(c->path.path, c->path.name))
     {
         httpd_error(c, 400,
@@ -5459,6 +5680,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         c->path.name[0]      = '\0';
         c->path.segments     = 0;
         c->path.trailing_slash = 1;
+        c->is_volumes_root = httpd_volumes ? 1 : 0;
         return TRUE;
     }
 
@@ -5515,7 +5737,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     }
 
     /* The file manager has no WebSocket half, but it is still an application
-       address rather than a file under the shared drawer. */
+       address rather than a file in the DAV namespace. */
     if (httpd_files_page[0] != '\0')
     {
         ULONG n = 0;
@@ -5534,7 +5756,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
     }
 
-    why = http_path_resolve(httpd_root, httpd_target, &c->path);
+    why = httpd_resolve_path(httpd_target, &c->path);
     if (why != HTTP_PATH_OK)
     {
         if (httpd_verbose || httpd_trace)
@@ -5546,6 +5768,9 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         httpd_error(c, 403, "that address is not one this server will open");
         return FALSE;
     }
+
+    if (httpd_volumes)
+        c->is_volumes_root = (c->path.segments == 0) ? 1 : 0;
 
     return TRUE;
 }
@@ -5571,11 +5796,14 @@ static VOID httpd_if_lookup(void *ctx, const char *tag, HttpIfState *out)
 
     if (tag[0] != '\0')
     {
-        if (http_path_resolve(httpd_root, tag, &httpd_ifpath) != HTTP_PATH_OK)
+        if (httpd_resolve_path(tag, &httpd_ifpath) != HTTP_PATH_OK)
             return;
 
         path = httpd_ifpath.path;
     }
+
+    if (path[0] == '\0')
+        return;                            /* the virtual volume collection */
 
     l = httpd_lock_on(path);
     if (l != NULL)
@@ -5591,6 +5819,9 @@ static BOOL httpd_preconditions(HttpConn *c)
 {
     char  etag[HTTPD_ETAG_MAX];
     BOOL  exists;
+
+    if (c->is_volumes_root)
+        return TRUE;                       /* a virtual collection has no tag */
 
     if (c->ifmatch[0] == '\0' && c->ifnone[0] == '\0')
         return TRUE;
@@ -7040,27 +7271,29 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<drawer> [<port>] [-v] [TRACE] [-T [PAGE <file>]] "
+        tool_usage("[<drawer>] [PORT <port>] [-v] [TRACE] [-T [PAGE <file>]] "
                    "[-C [CONSOLEPAGE <file>]] [-F [FILEPAGE <file>]]",
-                   "Serves a drawer over HTTP and WebDAV, so this machine can "
-                   "be mounted as a writable drive.  -T adds /shell, an "
+                   "Without a drawer, serves every mounted volume over HTTP "
+                   "and WebDAV.  A drawer limits access to that drawer.  -T "
+                   "adds /shell, an "
                    "AmigaDOS Shell in a browser.  -C adds /console, the "
                    "frontmost screen.  -F adds /files, a browser file "
                    "manager.  All are open to anyone who can reach the port.");
         return RETURN_ERROR;
     }
 
-    /* Trimmed before anything is resolved under it.  The root is the one path
-       here that does not go through http_path_resolve(), which is where every
-       other doubled slash is prevented. */
-    if (!http_path_root((const char *)args[ARG_ROOT], httpd_root_buf,
+    /* Omitting ROOT makes / a virtual list of live volumes.  An explicit root
+       retains the useful restricted-share form and the old command line. */
+    httpd_volumes = (args[ARG_ROOT] == 0) ? TRUE : FALSE;
+    if (!httpd_volumes &&
+        !http_path_root((const char *)args[ARG_ROOT], httpd_root_buf,
                         sizeof(httpd_root_buf)))
     {
         tool_error("the drawer path is longer than this server carries");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
-    httpd_root    = httpd_root_buf;
+    httpd_root    = httpd_volumes ? "" : httpd_root_buf;
     httpd_verbose = (args[ARG_VERBOSE] != 0) ? TRUE : FALSE;
     httpd_trace   = (args[ARG_TRACE]   != 0) ? TRUE : FALSE;
 
@@ -7112,9 +7345,10 @@ int main(int argc, char **argv)
         httpd_timeout = (ULONG)value;
     }
 
-    /* The document root has to be there before anything is served from it.  A
+    /* An explicit document root has to be there before anything is served.  A
        server that starts on a misspelled drawer answers 404 to everything and
        looks like a network fault. */
+    if (!httpd_volumes)
     {
         BPTR lock = Lock((CONST_STRPTR)httpd_root, ACCESS_READ);
 
@@ -7321,15 +7555,26 @@ int main(int argc, char **argv)
     }
 
     if (TOOL_ADDR_IS6(&address) && args[ARG_ADDRESS] == 0)
-        tool_printf("Serving %s read-write on port %ld, IPv4 and IPv6"
-                    "  (Ctrl-C to stop)\n",
-                    (LONG)httpd_root, (LONG)port);
+    {
+        if (httpd_volumes)
+            tool_printf("Serving all mounted volumes read-write on port %ld, "
+                        "IPv4 and IPv6  (Ctrl-C to stop)\n", (LONG)port);
+        else
+            tool_printf("Serving %s read-write on port %ld, IPv4 and IPv6"
+                        "  (Ctrl-C to stop)\n",
+                        (LONG)httpd_root, (LONG)port);
+    }
     else
     {
         tool_addr_text(httpd_sb, &address, dotted, sizeof(dotted));
-        tool_printf("Serving %s read-write on http://%s:%ld/"
-                    "  (Ctrl-C to stop)\n",
-                    (LONG)httpd_root, (LONG)dotted, (LONG)port);
+        if (httpd_volumes)
+            tool_printf("Serving all mounted volumes read-write on "
+                        "http://%s:%ld/  (Ctrl-C to stop)\n",
+                        (LONG)dotted, (LONG)port);
+        else
+            tool_printf("Serving %s read-write on http://%s:%ld/"
+                        "  (Ctrl-C to stop)\n",
+                        (LONG)httpd_root, (LONG)dotted, (LONG)port);
     }
 
     if (httpd_term_page[0] != '\0')

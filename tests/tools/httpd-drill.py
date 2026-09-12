@@ -14,18 +14,21 @@ import time
 argv = [a for a in sys.argv[1:] if not a.startswith("--")]
 WANT_TERMINAL = "--terminal" in sys.argv or "--ws-only" in sys.argv
 WANT_FILES = "--files" in sys.argv
+WANT_VOLUMES = "--volumes" in sys.argv
 
 GZ_URL = ""
+BASE = "/httpd-drill"
 for _a in sys.argv[1:]:
     if _a.startswith("--gz-url="):
         GZ_URL = _a[len("--gz-url="):]
+    elif _a.startswith("--base="):
+        BASE = _a[len("--base="):]
 
 WS_ONLY = "--ws-only" in sys.argv
 
 ADDR = argv[0] if len(argv) > 0 else "127.0.0.1"
 PORT = int(argv[1]) if len(argv) > 1 else 8080
 
-BASE = "/httpd-drill"
 TERM = "/shell"
 FILES = "/files"
 
@@ -40,6 +43,27 @@ WS_CHILD_THINK = float(os.environ.get("AMINETXDUO_WS_CHILD_THINK", "6"))
 
 checks = 0
 failures = []
+
+
+def test_volume_root():
+    """The machine-wide DAV root is real WebDAV, not a browser-only list."""
+    print("the mounted-volume root")
+
+    a = once(req("PROPFIND", "/", {"Depth": "1"}))
+    check(a is not None and a[0] == 207,
+          "PROPFIND / returns the volume collection")
+    if a is not None:
+        check(b"/DH0/" in a[2], "and it contains the mounted DH0 volume")
+        check(a[1].get("x-aminetxduo-root") == "volumes",
+              "and identifies the non-writable virtual root to the browser")
+
+    a = once(req("PUT", "/", {"Content-Length": "1"}, "x"))
+    check(a is not None and a[0] == 403,
+          "the virtual root cannot be replaced")
+
+    a = once(req("PUT", "/DH0", {"Content-Length": "1"}, "x"))
+    check(a is not None and a[0] == 403,
+          "a mounted volume itself cannot be replaced")
 
 
 def check(ok, what):
@@ -1425,6 +1449,8 @@ def main():
     print("httpd-drill against http://%s:%d/\n" % (ADDR, PORT))
 
     if not WS_ONLY:
+        if WANT_VOLUMES:
+            test_volume_root()
         setup()
     try:
         if WS_ONLY:

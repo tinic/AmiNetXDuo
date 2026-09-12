@@ -62,7 +62,7 @@ from CMake, and `ssh` is otherwise missing from the archive. The install boot
 takes a little over two minutes (`tools/classicwb.sh:43`, ceiling 600 s). Four
 steps run after the Installer, each one the Installer's own text describes as the user's:
 `anxnet.device` into `DEVS:Networks` with a `CARD=` line, `MDNS=` on, the host
-name, and httpd on the chosen drawer and port.
+name, and httpd on the chosen port with every mounted volume below its root.
 
 ## The gates
 

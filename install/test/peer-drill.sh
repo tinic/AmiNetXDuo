@@ -125,12 +125,21 @@ except Exception as exc:                                  # noqa: BLE001
     say("files_status", "error")
     say("files_error", type(exc).__name__)
 
-# ---- 2. WebDAV: put a file, read it back, compare the bytes ----------------
+# ---- 2. WebDAV: volumes at /, then put and read on DH0 ---------------------
 with open(txt, "rb") as fh:
     payload = fh.read()
 
 try:
-    st, _, _ = request("PUT", "/payload.txt", body=payload,
+    st, _, listing = request(
+        "PROPFIND", "/", headers={"Depth": "1", "Content-Length": "0"})
+    say("dav_root_status", st)
+    say("dav_root_has_dh0", "yes" if b"/DH0/" in listing else "no")
+except Exception as exc:                                  # noqa: BLE001
+    say("dav_root_status", "error")
+    say("dav_root_has_dh0", "no")
+
+try:
+    st, _, _ = request("PUT", "/DH0/payload.txt", body=payload,
                        headers={"Content-Length": str(len(payload))})
     say("dav_put_status", st)
 except Exception as exc:                                  # noqa: BLE001
@@ -138,7 +147,7 @@ except Exception as exc:                                  # noqa: BLE001
     say("dav_put_error", type(exc).__name__)
 
 try:
-    st, _, got = request("GET", "/payload.txt")
+    st, _, got = request("GET", "/DH0/payload.txt")
     say("dav_get_status", st)
     say("dav_get_bytes", len(got))
     say("dav_roundtrip_identical", "yes" if got == payload else "no")
@@ -156,7 +165,7 @@ say("dav_archive_bytes_sent", len(arc))
 say("dav_archive_sha256", hashlib.sha256(arc).hexdigest())
 
 try:
-    st, _, _ = request("PUT", "/payload.lha", body=arc,
+    st, _, _ = request("PUT", "/DH0/payload.lha", body=arc,
                        headers={"Content-Length": str(len(arc))})
     say("dav_put_archive_status", st)
 except Exception as exc:                                  # noqa: BLE001
@@ -170,7 +179,8 @@ except Exception as exc:                                  # noqa: BLE001
 # they are the ones that need a socket rather than a client, and having two of
 # them would be two things to keep right.
 for name, leaf, args in (
-        ("httpd_drill", "httpd-drill.py", ["--terminal", "--files"]),
+        ("httpd_drill", "httpd-drill.py",
+         ["--terminal", "--files", "--volumes", "--base=/DH0/httpd-drill"]),
         ("wsterm_console", "wsterm-console.py", []),
 ):
     script = os.path.join(drilldir, leaf)
