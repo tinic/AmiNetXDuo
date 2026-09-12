@@ -173,8 +173,12 @@
   If the archive came with an Installer script, run it. The rest of
   this node is then not needed. The Installer copies the libraries
   into LIBS:, every command in the archive's C drawer into C:, and the
-  certificate store into DEVS:Internet. It then writes the
-  configuration files.
+  certificate store into DEVS:Internet. It then asks which card, the
+  interface name, whether to answer to <hostname>.local (see
+  @{"Being found by name" link DNSSD}; it writes MDNS=YES or NO),
+  DHCP or a fixed address, the machine's name, and whether the network
+  and httpd start at boot, and writes the configuration files from the
+  answers.
 
   To install by hand, copy the files to these places:
 
@@ -1533,6 +1537,9 @@
                           state the run is in. 0, the default, imposes
                           no such limit.
   @{b}BELL@{ub}                    Ring the console bell for each reply.
+  @{b}-4@{ub}, @{b}-6@{ub}                  Resolve the name to an IPv4 or an IPv6
+                          address only. Without either, the first
+                          address the name has is used.
 
   TIMEOUT limits the whole run, not one reply. The wait for a single
   reply is five seconds and is not adjustable.
@@ -1611,6 +1618,8 @@
 
   @{b}NAME@{ub}     The name or the address. Required.
   @{b}TIMEOUT@{ub}  Seconds to wait. Default 10.
+  @{b}-4@{ub}, @{b}-6@{ub}   Ask for one family only. Every command that resolves a
+           name takes the same two switches.
 
   @{b}Examples@{ub}
 
