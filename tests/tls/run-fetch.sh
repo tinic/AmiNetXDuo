@@ -32,11 +32,12 @@ done
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
 FETCH="$ROOT/$BUILD/src/tools/fetch"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
+NETSTAT="$ROOT/$BUILD/src/tools/netstat"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 TLS="$ROOT/$BUILD/src/tlslib/tls.library"
 STORE="$ROOT/$BUILD/certificates"
 
-for f in "$SMOKE" "$FETCH" "$ADDIF" "$BSD"; do
+for f in "$SMOKE" "$FETCH" "$ADDIF" "$NETSTAT" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -69,6 +70,7 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$FETCH" "$STAGE/fetch"
 cp "$ADDIF" "$STAGE/AddNetInterface"
+cp "$NETSTAT" "$STAGE/netstat"
 
 if [ "$HAVE_TLS" = "1" ]; then
     cp "$TLS"   "$STAGE/libs/tls.library"
@@ -105,7 +107,7 @@ CPUARG=()
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
-     "$STAGE/AddNetInterface" "$STAGE/commands.txt"
+     "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/commands.txt"
 RUN_RC=$?
 set -e
 
