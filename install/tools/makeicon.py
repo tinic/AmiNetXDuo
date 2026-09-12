@@ -126,94 +126,6 @@ class Canvas:
         return bytes(out)
 
 
-# ------------------------------------------------------------------ font ---
-#
-# 5x7 glyphs, only the characters the two icons need.
-
-FONT = {
-    "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
-    "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
-    "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-    "I": ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
-    "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
-    "N": ["10001", "11001", "11001", "10101", "10011", "10011", "10001"],
-    "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
-    "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
-    "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
-    "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
-    "X": ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
-    "u": ["00000", "00000", "10001", "10001", "10001", "10011", "01101"],
-    "o": ["00000", "00000", "01110", "10001", "10001", "10001", "01110"],
-    "i": ["00100", "00000", "01100", "00100", "00100", "00100", "01110"],
-    "m": ["00000", "00000", "11010", "10101", "10101", "10101", "10101"],
-    "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
-    " ": ["00000"] * 7,
-}
-
-
-def text(canvas, x, y, s, colour):
-    for ch in s:
-        glyph = FONT.get(ch)
-        if glyph is None:
-            x += 6
-            continue
-        for dy, row in enumerate(glyph):
-            for dx, bit in enumerate(row):
-                if bit == "1":
-                    canvas.set(x + dx, y + dy, colour)
-        x += len(glyph[0]) + 1
-    return x
-
-
-# 4x6 glyphs.  The 5x7 font above needs two lines to fit "AmiNetXDuo" into 64
-# pixels, and two lines of cramped capitals is most of why these icons looked
-# hand-plotted.  At 4x6 the whole name is one 54-pixel line, which leaves the
-# rest of the front for a picture.
-
-FONT_S = {
-    "A": ["0110", "1001", "1001", "1111", "1001", "1001"],
-    "D": ["1110", "1001", "1001", "1001", "1001", "1110"],
-    "N": ["1001", "1101", "1101", "1011", "1011", "1001"],
-    "X": ["1001", "1001", "0110", "0110", "1001", "1001"],
-    "e": ["0000", "0110", "1001", "1111", "1000", "0111"],
-    "i": ["0100", "0000", "1100", "0100", "0100", "1110"],
-    "m": ["0000", "0000", "1110", "1101", "1101", "1101"],
-    "o": ["0000", "0000", "0110", "1001", "1001", "0110"],
-    "t": ["0100", "0100", "1110", "0100", "0100", "0011"],
-    "u": ["0000", "0000", "1001", "1001", "1001", "0111"],
-    " ": ["0000"] * 6,
-}
-
-
-def text_s(canvas, x, y, s, colour):
-    """The 4x6 font, one pixel of tracking."""
-    for ch in s:
-        glyph = FONT_S.get(ch)
-        if glyph is None:
-            x += 5
-            continue
-        for dy, row in enumerate(glyph):
-            for dx, bit in enumerate(row):
-                if bit == "1":
-                    canvas.set(x + dx, y + dy, colour)
-        x += 5
-    return x
-
-
-# Three nodes and the links between them.  A plug or a cable end is not
-# legible at this size, it comes out as a grey smudge, but dots joined by
-# lines reads as "network" even at eight pixels tall.
-NET = [
-    "WW     WW",
-    "WW     WW",
-    " K     K ",
-    " KKKKKKK ",
-    "    K    ",
-    "   WWW   ",
-    "   WWW   ",
-]
-
-
 # ------------------------------------------------------------ file writer --
 
 def diskobject(canvas, obj_type, default_tool=None, tooltypes=(),
@@ -299,43 +211,43 @@ def diskobject(canvas, obj_type, default_tool=None, tooltypes=(),
 
 # ----------------------------------------------------------------- icons ---
 
-PLUG = [
-    "  KKKKKK  ",
-    "  KWWWWK  ",
-    "KKKWWWWKKK",
-    "KWWWWWWWWK",
-    "KWKWKWKWWK",
-    "KWKWKWKWWK",
-    "KWWWWWWWWK",
-    "KKKKKKKKKK",
+# The installer: the motif every Amiga user knows from Install3.1, an arrow
+# with a check mark going down into a slot.  Our own pixels; Commodore's icon
+# is not ours to ship.
+INSTALL_ART = [
+    "................................................................",
+    "........................KKKKKKKKKKKKKKKKK.......................",
+    "........................KBBBBBBBBBBBBBBBK.......................",
+    "........................KBBBBBBBBBBBBBWWK.......................",
+    "........................KBBBBBBBBBBBWWWWK.......................",
+    "........................KBWWWBBBBBWWWWWBK.......................",
+    "........................KBWWWWWBWWWWWBBBK.......................",
+    "........................KBBBWWWWWWWBBBBBK.......................",
+    "........................KBBBBBWWWBBBBBBBK.......................",
+    "................KKKKKKKKBBBBBBBBBBBBBBBBBKKKKKKKK...............",
+    "..................KKBBBBBBBBBBBBBBBBBBBBBBBBBKK.................",
+    "....................KKBBBBBBBBBBBBBBBBBBBBBKK...................",
+    "......................KKBBBBBBBBBBBBBBBBBKK.....................",
+    "..WWWWWWWWWWWWWWWWWWWWWWKKBBBBBBBBBBBBBKKWWWWWWWWWWWWWWWWWWWW...",
+    "..W.......................KKBBBBBBBBBKK......................K..",
+    "..W...KKKKKKKKKKKKKKKKKKKKKKKKBBBBBKKKKKKKKKKKKKKKKKKKKKKK...K..",
+    "..W...KKKKKKKKKKKKKKKKKKKKKKKKKKBKKKKKKKKKKKKKKKKKKKKKKKKK...K..",
+    "..W...WWWWWWWWWWWWWWWWWWWWWWWWWWKWWWWWWWWWWWWWWWWWWWWWWWWW...K..",
+    "..W..........................................................K..",
+    "..W..........................................................K..",
+    "..W.................................................KKKK.....K..",
+    "..W.................................................WWWW.....K..",
+    "..W..........................................................K..",
+    "..W..........................................................K..",
+    "...KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK..",
+    "................................................................",
 ]
 
 
 def install_icon():
-    """The installer: a labelled panel with a network on it and an arrow in."""
     c = Canvas(64, 26, GREY)
-
-    c.fill(1, 1, 62, 24, BLUE)
-    c.bevel(1, 1, 62, 24)
-
-    # The name across the top, then a rule, then the picture.  Giving the text
-    # its own band instead of letting it share space with the artwork is most
-    # of the difference between this and the two-line version.
-    text_s(c, 5, 3, "AmiNetXDuo", WHITE)
-    c.hline(4, 59, 11, BLACK)
-    c.hline(4, 59, 12, WHITE)
-
-    c.stamp(15, 15, NET, {"K": BLACK, "W": WHITE})
-
-    # An arrow going in: this one installs.
-    c.stamp(36, 14, ["   KK   ",
-                     "   KK   ",
-                     "   KK   ",
-                     "KKKKKKKK",
-                     " KWWWWK ",
-                     "  KWWK  ",
-                     "   KK   "],
-            {"K": BLACK, "W": WHITE})
+    c.stamp(0, 0, INSTALL_ART,
+            {".": GREY, "K": BLACK, "W": WHITE, "B": BLUE})
     return c
 
 
@@ -404,23 +316,30 @@ def document_icon():
     return c
 
 
+# The stock Workbench 3.1 drawer, a bevelled front with a handle, for Docs
+# and Examples: a drawer that holds files should look like every other one.
+STOCK_DRAWER_ART = [
+    "..WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW....",
+    "..KWKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK...",
+    "..KWKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKWK...",
+    "..KWKWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWKWK...",
+    "..KWKWWWWWWWWWWWWWWWWKKKKKKKKKKKKKWWWWWWWWWWWWWWWWWKWK...",
+    "..KWKWWWWWWWWWWWWWWWWKKKKKKKKKKKKKWWWWWWWWWWWWWWWWWKWK...",
+    "..KWKWWWWWWWWWWWWWWWWKKWKWKWKWKWKKWWWWWWWWWWWWWWWWWKWK...",
+    "..KWKWWWWWWWWWWWWWWWWKKKKKKKKKKKKKWWWWWWWWWWWWWWWWWKWK...",
+    "..KWKWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWKWK...",
+    "..KWKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKWK...",
+    "..KWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWK...",
+    "..KWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWK...",
+    "....KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK...",
+    ".........................................................",
+]
+
+
 def plain_drawer_icon():
-    """A drawer with no lettering, for Docs and Examples."""
-    c = Canvas(52, 24, GREY)
-
-    c.fill(2, 1, 20, 6, BLUE)
-    c.hline(2, 19, 1, WHITE)
-    c.vline(2, 1, 6, WHITE)
-    c.vline(20, 2, 6, BLACK)
-
-    c.fill(1, 5, 50, 22, BLUE)
-    c.bevel(1, 5, 50, 22)
-
-    # A handle, centred, with its own highlight and shadow so the front reads
-    # as a surface rather than a flat rectangle.
-    c.fill(18, 11, 33, 14, BLACK)
-    c.hline(18, 33, 10, WHITE)
-    c.hline(18, 33, 15, WHITE)
+    c = Canvas(57, 14, GREY)
+    c.stamp(0, 0, STOCK_DRAWER_ART,
+            {".": GREY, "K": BLACK, "W": WHITE, "B": BLUE})
     return c
 
 

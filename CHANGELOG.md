@@ -10,6 +10,7 @@ version at the top when it merges.
 ## Unreleased
 
 - The `AmiNetXDuo` drawer icon is a picture: a globe on a bus between two machines, with the protocol on a plate under it
+- The installer icon is the familiar arrow going into a drive slot, and the `Docs` and `Examples` drawers use the stock Workbench drawer shape
 
 - **The installer no longer moves a library aside before it has the
   replacement.** `bsdsocket.library`, `usergroup.library`, `tls.library` and
