@@ -2,7 +2,8 @@
 #
 # Everything CI does, in one script, so it can be run before pushing.
 # .github/workflows/ci.yml and emulator.yml call THIS; with no arguments it runs
-# toolchain, host, host32, cross, web and conformance.  Exit 77 = tested nothing.
+# toolchain, host, host32, cross, web, conformance and survey.  Exit 77 = tested
+# nothing.
 #
 # SPDX-License-Identifier: MIT
 
@@ -112,12 +113,7 @@ CROSS_CONFIGS=(
     # BPF=OFF appears nowhere else at all, and the interactions between five
     # of them appear nowhere else at all.  It must stay byte-for-byte the
     # options .github/workflows/release.yml gives build/release-minimal.
-    # docs/BACKLOG.md's micro-profile row cites this line by number, and
-    # tools/check-backlog.sh checks the anchor still reads here.  Inserting an
-    # arm above it moves it; that is how it was found, by CI going red for a
-    # row that had been right when it was written.
     "minimal:$("$ROOT/tools/preset-options.sh" minimal)"
-    # Below `minimal` on purpose: the row above is cited by line number.
     #
     # The floor under the floor.  It is the minimal drawer plus the DHCP
     # client and the seven options minimal leaves on.  A machine built this way
@@ -3133,6 +3129,7 @@ for s in "${WANT[@]}"; do
         capture)     stage_capture || srrc=$? ;;
         wirequiet)   stage_wirequiet || srrc=$? ;;
         reachability) stage_reachability || srrc=$? ;;
+        rate)        stage_rate || srrc=$? ;;
         tlsloop)     stage_tlsloop || srrc=$? ;;
         fetchtls)    stage_fetchtls || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
