@@ -201,11 +201,21 @@ else
     exit 2
 fi
 
+# THE FIRST PROBE RUNS BEFORE AddNetInterface ON PURPOSE, and until 6ab40f33
+# it never got to.  amiberry-run.sh used to append Roadshow's
+# `AddNetInterface DEVS:NetInterfaces/~(#?.info)' to the boot script whenever a
+# NetInterfaces drawer was staged, so the interface was already up and BOTH
+# probes listed one.  Expecting two listings of one interface was a statement
+# about the contaminated boot, not about ObtainInterfaceList: the empty case
+# this harness exists to cover was never actually reached.  Now the list is
+# empty before the add and carries the interface after, and both halves count.
+EMPTY=$(grep -c "^ObtainInterfaceList: 0 interface(s)" "$REPORT" || true)
 LISTED=$(grep -c "^ObtainInterfaceList: 1 interface(s)" "$REPORT" || true)
-if [ "$LISTED" -eq 2 ]; then
-    pass "one interface listed, both times, obtained and released twice"
+if [ "$EMPTY" -eq 1 ] && [ "$LISTED" -eq 1 ]; then
+    pass "the list is empty before the add and carries one interface after,\
+ obtained and released both times"
 else
-    fail "expected two listings of one interface, got $LISTED"
+    fail "expected an empty list then one interface, got empty=$EMPTY one=$LISTED"
 fi
 
 if grep -q "^interface 1: eth0" "$REPORT"; then
