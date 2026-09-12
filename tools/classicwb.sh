@@ -433,6 +433,21 @@ nr_floppies=0
 uaehf0=dir,rw,DH0:System:$HD,0
 EOF
 
+# The p96 snapshot carries its own prefs asking for a uaegfx Workbench screen.
+# Without the board on THIS boot Intuition cannot open that mode, so it puts up
+# "Intuition is attempting to reset the Workbench screen" across the Installer
+# and never takes it down -- the windows it is waiting on are the Installer's
+# own.  The Installer then draws onto a screen stuck mid-reset, which is where
+# the empty page and the clipped progress text come from.  The serve config
+# below carries the same three lines; the install boot needs them too.
+if [ "$VARIANT" = rtg ]; then
+    cat >> "$INSTALL_CFG" <<'RTGEOF'
+cpu_24bit_addressing=no
+gfxcard_size=8
+rtg_modes=0x112
+RTGEOF
+fi
+
 startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt
 Echo >DH0:.done "$RC"'
