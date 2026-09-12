@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.27.1
+
 - **`NetCapture` could not capture on an interface that was up.** It reported
   `no interface '<name>' to capture on` for a card the stack listed, on any
   machine where no capture channel had yet been opened. The interface was never
