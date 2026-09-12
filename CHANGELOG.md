@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.27.3
+
 - **`ssh` could wait forever after an unknown-host answer.** Amiga console
   input ends a cooked line with CR, while Dropbear's stdio path drained the
   answer until LF. The client shim now performs the POSIX newline translation,
