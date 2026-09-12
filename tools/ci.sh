@@ -929,11 +929,12 @@ HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto test_tls_x509
                      test_tcp_handler test_transfer)
 HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$'
 # 7 until fuzz_tls_crypto_sweep was split into four streams to get under the
-# ten-second budget; 10 then, and 13 once fuzz_mdns_sweep followed it at
-# 9.31 s of that budget.  BOTH live inside the 32-bit-only block in
+# ten-second budget; 10 then, 13 once fuzz_mdns_sweep followed it at 9.31 s of
+# that budget, and 21 when four streams each turned out to still be 8.14 s on
+# the runner and became eight.  BOTH live inside the 32-bit-only block in
 # tests/fuzz/CMakeLists.txt, so neither split moves HOST_TESTS_EXPECTED --
 # which is how the first attempt at this failed, locally and not on a runner.
-HOST32_TESTS_EXPECTED=13
+HOST32_TESTS_EXPECTED=21
 
 stage_host32() {
     hr "host tests (32-bit: mDNS, TLS crypto, X.509, TCP:, transfer)"
