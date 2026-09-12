@@ -14,6 +14,15 @@ version at the top when it merges.
   no vendor driver wrote a configuration that could not come up. It now writes
   `DEVICE=DEVS:Networks/anxnet.device` and a `CARD=` line for the board. A
   vendor driver already in `DEVS:` still wins
+- **An interface that took over another's slot never announced its mDNS
+  services.** Removing an interface cleared two of the nine fields the stack
+  keeps per slot; the next interface in that slot inherited the rest. The one
+  that showed was the "services already registered" flag, so the new interface
+  skipped registration and nothing said so. Reached by `AddNetInterface` after
+  a `RemoveNetInterface`, and whenever an interface nobody named gives up its
+  slot to one somebody did. Removal now clears every field, so the DHCP state
+  and last address the new interface compares against are its own
+
 - The `AmiNetXDuo` drawer icon is a picture: a globe on a bus between two machines, with the protocol on a plate under it
 - The installer icon is the familiar arrow going into a drive slot, and the `Docs` and `Examples` drawers use the stock Workbench drawer shape
 - The example interface files for the Ariadne II, AmigaNet, X-Surf and X-Surf 100 name the drivers those cards ship with: `ariadne_ii.device`, `hydra.device`, `x-surf.device`, `x-surf-100.device`

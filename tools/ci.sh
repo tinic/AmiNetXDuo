@@ -810,6 +810,18 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # A slot that is removed is cleared in every field: slots are reused, and
+    # what a removal leaves behind is what the next interface in that slot
+    # starts life believing about itself.
+    if tools/check-slot-clear.sh > "$BUILD/slot-clear.log" 2>&1; then
+        note "$(sed -n 's/^slot_clear=PASS /slot clear: /p' "$BUILD/slot-clear.log")"
+    else
+        cat "$BUILD/slot-clear.log"
+        fail "a removed interface slot keeps state the next one inherits\
+ (tools/check-slot-clear.sh)"
+        return 1
+    fi
+
     # A NetX Duo or ThreadX status thrown away with a bare (VOID) cannot be
     # told from a defect by reading it, and two of the 49 that were there
     # were defects.  include/aminetxduo/nxstatus.h names what a discard can

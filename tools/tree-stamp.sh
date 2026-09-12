@@ -28,11 +28,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 {
+    # TRACKED **AND** UNTRACKED-BUT-NOT-IGNORED.  `git ls-files' alone lists
+    # only what is already tracked, so a gate script added in this session was
+    # invisible to the stamp until it was committed: the host stage verified a
+    # tree the stamp did not describe, and the hash moved at `git add' time for
+    # no change in content.  --others --exclude-standard adds exactly the files
+    # a commit would pick up, and nothing that .gitignore covers.
+    #
     # -f: the regular files.  Drops the gitlinks, and drops a symlink whose
     # target is missing rather than failing on it.
-    git ls-files -z | while IFS= read -r -d '' f; do
+    git ls-files -z --cached --others --exclude-standard |
+    while IFS= read -r -d '' f; do
         [ -f "$f" ] && printf '%s\0' "$f"
-    done | xargs -0 sha256sum
+    done | sort -z | xargs -0 sha256sum
 
     # ...and the submodules, by the commit each is pinned at.
     git ls-files -s | awk '$1 == "160000" { print $2, $4 }'

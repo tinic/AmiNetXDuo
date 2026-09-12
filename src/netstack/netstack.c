@@ -3001,9 +3001,36 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
      */
     ami_sana2_close(iface);
 
+    /*
+     * EVERY per-slot field, not the two this used to clear.  The slot is
+     * reused -- by AddNetInterface after a RemoveNetInterface, and routinely
+     * by ami_ns_take_interface_slot() when an interface nobody named gives up
+     * its place to one somebody did -- and whatever is left here is what the
+     * next interface in this slot starts life believing about itself.
+     *
+     * ns_IfaceMdnsSvc was the one that showed: ami_netstack_mdns_enable()
+     * registers services only `if (!ns->ns_IfaceMdnsSvc[index])', and nothing
+     * cleared it but ami_netstack_mdns_stop(), which runs at stack teardown.
+     * So an interface taking over a slot whose last occupant had registered
+     * services announced none of its own, and the guard reported success.
+     *
+     * ns_DhcpState and ns_LastAddress are the same shape and quieter: the new
+     * interface's first DHCP transition and first address change were compared
+     * against the previous occupant's values.
+     *
+     * ns_IfaceCfg, ns_IfaceWanted and ns_IfaceMdns are written by the attach
+     * and were never the bug; they are cleared here anyway so that a slot with
+     * no interface in it reads as empty in all nine places rather than two.
+     */
     ns->ns_Iface[index] = NULL;
     ns->ns_Config.interfaces[index].configured = FALSE;
-    ns->ns_DhcpGateway[index] = 0UL;
+    ns->ns_DhcpGateway[index]  = 0UL;
+    ns->ns_LastAddress[index]  = 0UL;
+    ns->ns_DhcpState[index]    = 0;
+    ns->ns_IfaceMdns[index]    = FALSE;
+    ns->ns_IfaceMdnsSvc[index] = FALSE;
+    ns->ns_IfaceWanted[index]  = FALSE;
+    ns->ns_IfaceCfg[index]     = 0;
 
     AMI_INFO("netstack: interface %ld removed", (long)index);
 
