@@ -31,6 +31,13 @@ FILES = "/files"
 
 WS_WAIT = float(os.environ.get("AMINETXDUO_WS_WAIT", "20"))
 
+# How long a person is allowed to stare at a child's prompt before answering.
+# Over half httpd's websocket idle timeout (HTTPD_WS_IDLE_DEF, 10s) so the
+# keepalive ping fires inside the test rather than being something only a real
+# person ever meets; under the whole of it so the test stays inside ten
+# seconds.
+WS_CHILD_THINK = float(os.environ.get("AMINETXDUO_WS_CHILD_THINK", "6"))
+
 checks = 0
 failures = []
 
@@ -867,7 +874,21 @@ class WsConn(Conn):
         payload = self.buf[at:at + n]
         self.buf = self.buf[at + n:]
 
-        return ((b0 & 0x80) != 0, b0 & 0x0f, payload, masked)
+        opcode = b0 & 0x0f
+
+        # RFC 6455 5.5.3, and it is LOAD-BEARING here rather than politeness:
+        # httpd pings a quiet terminal at half its idle timeout and hangs up
+        # half a timeout later if nothing answers.  A browser pongs in its
+        # network stack, so a drill that does not is testing a connection the
+        # server is about to close -- which reads exactly like a Shell that
+        # stopped accepting input, and cost a day of chasing that.
+        if opcode == 0x9:
+            try:
+                self.s.send(ws_frame(0xa, payload.decode("latin-1")))
+            except OSError:
+                pass
+
+        return ((b0 & 0x80) != 0, opcode, payload, masked)
 
     def gather(self, seconds, want=None):
         """Everything the server says for `seconds`, or until `want` appears in
@@ -1236,6 +1257,65 @@ def test_ws_shell():
           "and the pipelined session gives the Shell back")
 
 
+def test_ws_child_reads():
+    """A CHILD of the Shell reads a line, and is PROVEN to have read it.
+
+    Everything else here drives the SHELL: type a command, read what it
+    printed.  A command that READS reaches the handler on its own ACTION_READ,
+    and that is the path an interactive ssh or scp takes under the web Shell.
+    Nothing covered it, so a prompt that does not accept an answer was reported
+    from a browser rather than from CI.
+
+    `Ask' is the child because it is on every AmigaOS and needs no staging, so
+    this runs wherever the terminal does.  ITS ANSWER IS THE ASSERTION: the
+    Shell's RC is 5 for Yes and 0 for No, and No is also what Ask returns when
+    the read gives it nothing.  Seeing the prompt appear proves only that
+    output works -- RC 5 is what proves the `y' arrived.
+
+    The pause before answering is part of the test and not padding: it is
+    longer than half the idle timeout, so the server's keepalive ping fires
+    inside the test and frame() has to answer it.  Six seconds is under the
+    whole timeout, so this would still pass without the pong -- a person who
+    takes eleven seconds to read a host-key fingerprint would not, and that is
+    the case the pong is there for."""
+    print("a child program reading a line")
+
+    c = WsConn()
+    if c.status != 101:
+        check(False, "cannot upgrade to run a child (got %s)" % c.status)
+        c.close()
+        return
+
+    banner, _ = c.gather(WS_WAIT, want=">")
+    check(b">" in banner,
+          "the Shell prints a prompt (got %r)" % banner[-80:])
+
+    c.send(ws_frame(0x2, 'Ask "CHILDREAD? "\n'))
+    said, _ = c.gather(WS_WAIT, want="CHILDREAD?")
+    check(b"CHILDREAD?" in said,
+          "the child prints its own prompt (got %r)" % said[-120:])
+
+    began = time.time()
+    while time.time() - began < WS_CHILD_THINK:
+        c.gather(0.5)
+
+    c.send(ws_frame(0x2, "y\n"))
+    said, _ = c.gather(WS_WAIT, want=">")
+    check(b">" in said,
+          "the child returns and the Shell prompts again (got %r)"
+          % said[-120:])
+
+    c.send(ws_frame(0x2, 'Echo "CHILDREAD-RC-$RC"\n'))
+    said, _ = c.gather(WS_WAIT, want="CHILDREAD-RC-")
+    check(b"CHILDREAD-RC-5" in said,
+          "and the child READ the y: RC 5 is Yes, 0 is the No it answers when "
+          "the read gave it nothing (got %r)" % said[-120:])
+
+    c.close()
+    check(ws_wait_free() is not None,
+          "and the session is given back cleanly")
+
+
 def test_ws_one_session():
     """One Shell at a time, and the second asker is told so rather than
     getting a second Shell or a hung socket."""
@@ -1349,6 +1429,7 @@ def main():
     try:
         if WS_ONLY:
             test_ws_shell()
+            test_ws_child_reads()
             test_ws_page()
             test_term_gzip()
             test_term_etag()
@@ -1379,6 +1460,7 @@ def main():
 
         if WANT_TERMINAL:
             test_ws_shell()
+            test_ws_child_reads()
             test_ws_page()
             test_term_gzip()
             test_term_etag()
