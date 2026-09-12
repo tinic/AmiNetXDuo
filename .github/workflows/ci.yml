@@ -207,7 +207,8 @@ jobs:
       - name: tools/ci.sh
         run: >-
           AMINETXDUO_SANITIZE=1 AMINETXDUO_CI_CROSS="default"
-          tools/ci.sh host host32 sanitize cross web conformance survey
+          tools/ci.sh host host32 sanitize clientshims cross web conformance
+          survey
 
       # The logs are where a failure is diagnosed, and they are the only thing
       # that survives the runner.
@@ -292,6 +293,7 @@ jobs:
             tools/logcap.sh \
             tools/enforcer-run.sh \
             tools/ci-arm.sh \
+            tools/check-client-shims.sh \
             clients/amiga-client.sh \
             clients/dropbear/build.sh \
             clients/dropbear/run-dbclient.sh \

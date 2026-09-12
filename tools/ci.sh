@@ -1428,6 +1428,23 @@ stage_conformance() {
 
 # -------------------------------------------------------------- the web ----
 
+stage_clientshims() {
+    hr "the SSH/SCP port's shims, with the prototype gate on"
+
+    local rc=0
+
+    tools/check-client-shims.sh > "$BUILD/client-shims.log" 2>&1 || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        note "$(sed -n 's/^client_shims=/client shims: /p' \
+              "$BUILD/client-shims.log" | head -1)"
+    else
+        cat "$BUILD/client-shims.log"
+        fail "a port shim defines a function nothing declares" \
+             "(tools/check-client-shims.sh)"
+        return 1
+    fi
+}
+
 stage_web() {
     hr "httpd's pages"
 
@@ -3103,7 +3120,7 @@ mkdir -p "$BUILD"
 #
 WANT=("$@")
 if [ ${#WANT[@]} -eq 0 ]; then
-    WANT=(host host32 cross web conformance survey)
+    WANT=(host host32 clientshims cross web conformance survey)
     # THE VARIABLE IS THE ASK.  Setting it and getting a run that prints
     # "analyze NOT RUN" is the mechanism behind every false green report this
     # gate has produced; the variable was necessary and not sufficient, and
@@ -3118,7 +3135,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|fetchtls|bridged|lossgate|smb|matrix)
+        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|fetchtls|bridged|lossgate|smb|matrix|clientshims)
             stage_toolchain; break ;;
     esac
 done
@@ -3133,6 +3150,7 @@ for s in "${WANT[@]}"; do
     srrc=0
     case "$s" in
         toolchain)   [ -n "${AMIGA_TOOLCHAIN_ROOT:-}" ] || stage_toolchain ;;
+        clientshims) stage_clientshims || srrc=$? ;;
         host)        stage_host || srrc=$? ;;
         host32)      stage_host32 || srrc=$? ;;
         sanitize)    stage_sanitize || srrc=$? ;;
