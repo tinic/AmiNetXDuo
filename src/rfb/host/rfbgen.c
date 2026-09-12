@@ -455,43 +455,79 @@ static void seq_full(const char *dir, const char *name)
     close_pfs(f);
 }
 
+/*
+ * --part I/N: write only the captures whose POSITION in the list below is
+ * I modulo N.  The setup() calls between them are state changes and run
+ * whichever part this is, so a part writes exactly the captures it owns and
+ * they are byte for byte the ones the whole run would have written.
+ *
+ * Positional, like rfbbench's --shard and --strats, and for the same reason:
+ * the list of captures is the code below and a second copy of it anywhere
+ * else is the mistake cmake/HostTests.cmake's header records three of.
+ *
+ * It exists because rfb_captures was the slowest test in the tree once the
+ * round trip itself had been sharded -- 4.50 s under the sanitizer here,
+ * 6.85 s on the CI runner, against a ten-second budget.  It is CPU, not
+ * disk: this host writes the whole 251 MB in 0.11 s.
+ */
+static int g_part = 0, g_parts = 1, g_seqno = 0;
+
+static int part_take(void)
+{
+    return (g_seqno++ % g_parts) == g_part;
+}
+
+#define SEQ(call)   do { if (part_take()) { call; } } while (0)
+
 int main(int argc, char **argv)
 {
-    const char *dir = argc > 1 ? argv[1] : ".";
+    const char *dir = ".";
+    int         a;
+
+    for (a = 1; a < argc; a++) {
+        if (strcmp(argv[a], "--part") == 0 && a + 1 < argc) {
+            if (sscanf(argv[++a], "%d/%d", &g_part, &g_parts) != 2)
+                g_parts = 1;
+        } else {
+            dir = argv[a];
+        }
+    }
+    if (g_parts < 1) g_parts = 1;
+    if (g_part < 0 || g_part >= g_parts) g_part = 0;
 
     setup(640, 480, 3);
-    seq_idle(dir, "idle");
-    seq_type(dir, "type", 60);
-    seq_scroll(dir, "scroll", 8, 60);
-    seq_scroll(dir, "scroll16", 16, 40);
-    seq_scroll(dir, "scroll_slow", 2, 40);
-    seq_drag(dir);
-    seq_menu(dir, "menu");
-    seq_full(dir, "full");
+    SEQ(seq_idle(dir, "idle"));
+    SEQ(seq_type(dir, "type", 60));
+    SEQ(seq_scroll(dir, "scroll", 8, 60));
+    SEQ(seq_scroll(dir, "scroll16", 16, 40));
+    SEQ(seq_scroll(dir, "scroll_slow", 2, 40));
+    SEQ(seq_drag(dir));
+    SEQ(seq_menu(dir, "menu"));
+    SEQ(seq_full(dir, "full"));
 
     setup(800, 600, 8);
-    seq_idle(dir, "idle8");
-    seq_scroll(dir, "scroll8", 8, 40);
+    SEQ(seq_idle(dir, "idle8"));
+    SEQ(seq_scroll(dir, "scroll8", 8, 40));
 
     /* 128 bytes to a row, which is the widest a screen gets: a 1024-pixel
        Super-High Res screen, four planes.  The first frame of any sequence is
        encoded whole, so this walks every tile at that stride. */
     setup(1024, 768, 4);
-    seq_idle(dir, "idle1024");
-    seq_scroll(dir, "scroll1024", 8, 20);
+    SEQ(seq_idle(dir, "idle1024"));
+    SEQ(seq_scroll(dir, "scroll1024", 8, 20));
 
     /* And the RTG shape: 8-bit chunky, at the two sizes a graphics card runs
        at.  640x480 has a bytes_per_row that is a whole number of 16-byte
        tiles, and 804 wide does not.  The clipped tile at the right edge is
        therefore walked too. */
     setup_chunky(640, 480);
-    seq_idle(dir, "idle_c8");
-    seq_type(dir, "type_c8", 20);
-    seq_scroll(dir, "scroll_c8", 8, 40);
-    seq_menu(dir, "menu_c8");
+    SEQ(seq_idle(dir, "idle_c8"));
+    SEQ(seq_type(dir, "type_c8", 20));
+    SEQ(seq_scroll(dir, "scroll_c8", 8, 40));
+    SEQ(seq_menu(dir, "menu_c8"));
     setup_chunky(804, 300);
-    seq_idle(dir, "idle_c8pad");
-    seq_full(dir, "full_c8pad");
+    SEQ(seq_idle(dir, "idle_c8pad"));
+    SEQ(seq_full(dir, "full_c8pad"));
 
     /*
      * And the truecolour shape: two bytes a pixel and no palette.  640 wide
@@ -506,12 +542,12 @@ int main(int argc, char **argv)
      * gigabyte through it to test what 20 frames test.
      */
     setup_rgb565(640, 480);
-    seq_scroll(dir, "scroll_rgb", 8, 20);
-    seq_type(dir, "type_rgb", 20);
-    seq_full(dir, "full_rgb");
+    SEQ(seq_scroll(dir, "scroll_rgb", 8, 20));
+    SEQ(seq_type(dir, "type_rgb", 20));
+    SEQ(seq_full(dir, "full_rgb"));
     setup_rgb565(404, 200);
-    seq_idle(dir, "idle_rgbpad");
-    seq_menu(dir, "menu_rgbpad");
+    SEQ(seq_idle(dir, "idle_rgbpad"));
+    SEQ(seq_menu(dir, "menu_rgbpad"));
 
     /*
      * And the chipset modes.  Nothing in the encoder tells them from a planar
@@ -525,18 +561,18 @@ int main(int argc, char **argv)
      * tile at the right edge is walked as well.
      */
     setup_chipset(320, 256, 6, GEN_FMT_HAM6);
-    seq_idle(dir, "idle_ham6");
-    seq_menu(dir, "menu_ham6");
+    SEQ(seq_idle(dir, "idle_ham6"));
+    SEQ(seq_menu(dir, "menu_ham6"));
     setup_chipset(320, 256, 6, GEN_FMT_EHB);
-    seq_idle(dir, "idle_ehb");
-    seq_scroll(dir, "scroll_ehb", 8, 20);
+    SEQ(seq_idle(dir, "idle_ehb"));
+    SEQ(seq_scroll(dir, "scroll_ehb", 8, 20));
     /* HAM8 at the size HAM8 runs at, and not at 640x480.  Eight planes at a
        larger size is what idle8 and scroll8 already walk, so a bigger one here
        would be 15 MB of file and a second of round trip to test the palette
        length again. */
     setup_chipset(320, 256, 8, GEN_FMT_HAM8);
-    seq_idle(dir, "idle_ham8");
-    seq_full(dir, "full_ham8");
+    SEQ(seq_idle(dir, "idle_ham8"));
+    SEQ(seq_full(dir, "full_ham8"));
 
     free(g_idx); free(g_planes);
     return 0;

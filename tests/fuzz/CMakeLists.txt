@@ -617,9 +617,23 @@ add_test(NAME fuzz_tls_x509_sweep
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_test(NAME fuzz_mdns_seeds
              COMMAND fuzz_mdns -s)
-    add_test(NAME fuzz_mdns_sweep
-             COMMAND fuzz_mdns -r 1 ${AMINETXDUO_FUZZ_CASES})
-    set_tests_properties(fuzz_mdns_sweep PROPERTIES TIMEOUT 1800)
+    # FOUR STREAMS, for the reason fuzz_tls_crypto_sweep below has four: as one
+    # case this was 9.31 s of the ten-second budget on the CI runner.  It
+    # passed, and a runner eight per cent slower would not have, which is a red
+    # build nobody caused.  Four seeds of a quarter each is the same volume of
+    # mutations from four independent streams rather than a prefix of one --
+    # different inputs, said out loud because it is a change in what gets
+    # tested and not only in how it is scheduled.
+    math(EXPR _fm_each "${AMINETXDUO_FUZZ_CASES} / 4")
+    if(_fm_each LESS 1)
+        set(_fm_each 1)
+    endif()
+    foreach(_fm_seed RANGE 1 4)
+        add_test(NAME fuzz_mdns_sweep_${_fm_seed}
+                 COMMAND fuzz_mdns -r ${_fm_seed} ${_fm_each})
+        set_tests_properties(fuzz_mdns_sweep_${_fm_seed}
+                             PROPERTIES TIMEOUT 1800)
+    endforeach()
 
     # The TLS crypto driver is in the same build for the reason above the
     # target, not because it has anything to do with mDNS. Every case here
@@ -629,9 +643,26 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     # second knob is a second thing to remember to raise for a soak.
     add_test(NAME fuzz_tls_crypto_seeds
              COMMAND fuzz_tls_crypto -s)
-    add_test(NAME fuzz_tls_crypto_sweep
-             COMMAND fuzz_tls_crypto -r 1 ${AMINETXDUO_FUZZ_CASES})
-    set_tests_properties(fuzz_tls_crypto_sweep PROPERTIES TIMEOUT 1800)
+
+    # FOUR STREAMS, NOT ONE, and the same number of mutations between them.
+    # As a single case this was 16.15 s on the CI runner -- the slowest test in
+    # the tree and over the ten-second budget
+    # tools/check-test-duration.sh holds.  `-r <seed> <count>' runs the seed
+    # corpus and then <count> mutations from one PRNG stream, so four seeds of
+    # a quarter each is the same volume from four independent streams rather
+    # than a prefix of one.  For a randomised sweep that is not less coverage;
+    # it is different inputs, and it is said out loud here because it IS a
+    # change in what gets tested, not only in how it is scheduled.
+    math(EXPR _fc_each "${AMINETXDUO_FUZZ_CASES} / 4")
+    if(_fc_each LESS 1)
+        set(_fc_each 1)
+    endif()
+    foreach(_fc_seed RANGE 1 4)
+        add_test(NAME fuzz_tls_crypto_sweep_${_fc_seed}
+                 COMMAND fuzz_tls_crypto -r ${_fc_seed} ${_fc_each})
+        set_tests_properties(fuzz_tls_crypto_sweep_${_fc_seed}
+                             PROPERTIES TIMEOUT 1800)
+    endforeach()
 endif()
 
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.

@@ -567,10 +567,69 @@ static int selected(const char *list, const char *name)
     return 0;
 }
 
+/* One capture, every tile size and every strategy.  Lifted out of main() so
+   that it can be the whole of a forked child: the files are independent of
+   each other and of the order they are done in. */
+static int bench_file(const char *path, const tiling *tiles, int ntiles,
+                      const char *strat_filter, int reps,
+                      int sgroup, int sgroups)
+{
+    pfs s;
+    int ti, si, rc = 0;
+
+    if (pfs_load(path, &s) != 0)
+        return 1;
+    /* BMF_INTERLEAVED is a statement about eight planes and a chunky
+       source has one, so the interleaved pass of the sweep skips those
+       files. */
+    if (g_interleaved && RFB_FMT_IS_CHUNKY(s.g.format)) { free(s.data); return 0; }
+    if (g_interleaved && pfs_interleave(&s) != 0) { free(s.data); return 1; }
+    printf("seq=%s file=%s w=%u h=%u depth=%u bpr=%u fmt=%u frames=%u "
+           "frame_bytes=%u\n",
+           s.name, path, s.g.width, s.g.height, s.g.depth,
+           s.g.bytes_per_row, s.g.format, s.frames, s.frame_bytes);
+    for (ti = 0; ti < ntiles; ti++) {
+        for (si = 0; si < NSTRAT; si++) {
+            /* --strats I/N: every Nth strategy by POSITION in STRATS[], for
+               the same reason --shard counts captures rather than naming
+               them.  The union over I is the whole table. */
+            if (si % sgroups != sgroup)
+                continue;
+            if (!selected(strat_filter, STRATS[si].name))
+                continue;
+            if (STRATS[si].is_raw && ti > 0)
+                continue;
+            if (run(&s, &STRATS[si], tiles[ti], reps) != 0)
+                rc = 1;
+        }
+    }
+    free(s.data);
+    return rc;
+}
+
+
+/* The captures this invocation is to do: see --shard in main(). */
+static int sweep(char **files, int nfiles, const tiling *tiles, int ntiles,
+                 const char *strat_filter, int reps, int sgroup, int sgroups)
+{
+    int i, rc = 0;
+
+    for (i = 0; i < nfiles; i++)
+        if (bench_file(files[i], tiles, ntiles, strat_filter, reps,
+                       sgroup, sgroups) != 0)
+            rc = 1;
+    return rc;
+}
+
+
 int main(int argc, char **argv)
 {
     tiling tiles[16];
+    char  *files[256];
+    int    nfiles = 0;
     int ntiles = 0, a, rc = 0, reps = 3;
+    int    shard = 0, shards = 1, idx = 0;
+    int    sgroup = 0, sgroups = 1;
     const char *strat_filter = NULL;
 
     for (a = 1; a < argc; a++) {
@@ -594,36 +653,37 @@ int main(int argc, char **argv)
             reps = atoi(argv[++a]);
         } else if (strcmp(argv[a], "--bands") == 0 && a + 1 < argc) {
             g_bands = atoi(argv[++a]);
+        } else if (strcmp(argv[a], "--shard") == 0 && a + 1 < argc) {
+            if (sscanf(argv[++a], "%d/%d", &shard, &shards) != 2)
+                shards = 1;
+        } else if (strcmp(argv[a], "--strats") == 0 && a + 1 < argc) {
+            if (sscanf(argv[++a], "%d/%d", &sgroup, &sgroups) != 2)
+                sgroups = 1;
         } else {
             break;
         }
     }
     if (ntiles == 0) { tiles[0].tile_w = 16; tiles[0].tile_h = 8; ntiles = 1; }
 
-    for (; a < argc; a++) {
-        pfs s;
-        int ti, si;
-        if (pfs_load(argv[a], &s) != 0) { rc = 1; continue; }
-        /* BMF_INTERLEAVED is a statement about eight planes and a chunky
-           source has one, so the interleaved pass of the sweep skips those
-           files. */
-        if (g_interleaved && RFB_FMT_IS_CHUNKY(s.g.format)) { free(s.data); continue; }
-        if (g_interleaved && pfs_interleave(&s) != 0) { rc = 1; continue; }
-        printf("seq=%s file=%s w=%u h=%u depth=%u bpr=%u fmt=%u frames=%u "
-               "frame_bytes=%u\n",
-               s.name, argv[a], s.g.width, s.g.height, s.g.depth,
-               s.g.bytes_per_row, s.g.format, s.frames, s.frame_bytes);
-        for (ti = 0; ti < ntiles; ti++) {
-            for (si = 0; si < NSTRAT; si++) {
-                if (!selected(strat_filter, STRATS[si].name))
-                    continue;
-                if (STRATS[si].is_raw && ti > 0)
-                    continue;
-                if (run(&s, &STRATS[si], tiles[ti], reps) != 0)
-                    rc = 1;
-            }
-        }
-        free(s.data);
+    if (shards < 1) shards = 1;
+    if (shard < 0 || shard >= shards) shard = 0;
+    if (sgroups < 1) sgroups = 1;
+    if (sgroup < 0 || sgroup >= sgroups) sgroup = 0;
+
+    /*
+     * --shard I/N takes every Nth capture, counting from the order they were
+     * given.  Sharding by POSITION rather than by name on purpose: the capture
+     * names live in rfbgen.c, and a second copy of that list -- in CMake, or
+     * here -- is the exact mistake cmake/HostTests.cmake's header records
+     * three occurrences of.  A position needs no list.
+     */
+    for (; a < argc; a++, idx++) {
+        if (idx % shards != shard)
+            continue;
+        if (nfiles < (int) (sizeof files / sizeof files[0]))
+            files[nfiles++] = argv[a];
     }
-    return rc;
+
+    return sweep(files, nfiles, tiles, ntiles, strat_filter, reps,
+                 sgroup, sgroups) != 0 ? 1 : rc;
 }

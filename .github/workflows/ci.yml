@@ -318,4 +318,6 @@ jobs:
             tools/check-generated.sh \
             tools/check-lvo-matrix.sh \
             tools/check-option-stubs.sh \
+            tools/check-test-duration.sh \
+            tools/tree-stamp.sh \
             install/test/run-workbench-cards.sh

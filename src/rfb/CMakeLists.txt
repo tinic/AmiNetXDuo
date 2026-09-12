@@ -65,11 +65,72 @@ if(NOT CMAKE_CROSSCOMPILING)
     # that went in, for every strategy, and exits non-zero on a mismatch.  A
     # compression number from an encoder nobody round-tripped is worthless, so
     # the round trip is the test.
+    #
+    # SHARDED, and see roundtrip.cmake for why: as one case it was 90% of the
+    # host test run and 95% of the sanitizer one, and no test here may run
+    # longer than ten seconds.  The axes are the ones the sweep already had --
+    # tile size, source layout, and a slice of the captures -- so the union of
+    # the cases is the sweep that was there before, not a smaller one.
+    #
+    # Ten slices of the captures and four of the strategy table.
+    #
+    # Ten slices alone left the worst case at 11.59 s on the CI runner -- an
+    # uneven slice, and no ordering fixes that, because what a capture costs
+    # is not predictable from anything visible before it is encoded (see
+    # roundtrip.cmake).  The strategy axis bounds what a case CAN cost instead
+    # of guessing what it will: a quarter of a table of sixteen, whichever
+    # captures land in the slice.
+    #
+    # FOUR AND NOT TWO, because the budget has to hold on a machine this one
+    # cannot measure.  The runner is 2.17x this host on the encode cases and
+    # 3.0x on the generator, so the margin is set against 3x: a case has to
+    # come in under 3.3 s here to be trusted at ten there.  Two slices left
+    # the worst at 6.12 s here, which is 13 s there -- the same mistake as
+    # the size ordering, made against a different number.
     include(CTest)
-    add_test(NAME rfb_roundtrip
-             COMMAND "${CMAKE_COMMAND}"
-                     "-DGEN=$<TARGET_FILE:rfbgen>"
-                     "-DBENCH=$<TARGET_FILE:rfbbench>"
-                     "-DDIR=${CMAKE_CURRENT_BINARY_DIR}/pfs"
-                     -P "${CMAKE_CURRENT_SOURCE_DIR}/roundtrip.cmake")
+    set(RFB_PFS_DIR "${CMAKE_CURRENT_BINARY_DIR}/pfs")
+    set(RFB_SHARDS 10)
+    set(RFB_SGROUPS 4)
+
+    # Four parts, for the reason generate.cmake gives.  ctest runs every
+    # FIXTURES_SETUP case of a fixture before any case that requires it, so
+    # the round trip still sees the whole corpus.
+    set(RFB_GEN_PARTS 4)
+    math(EXPR _lastpart "${RFB_GEN_PARTS} - 1")
+    foreach(part RANGE ${_lastpart})
+        add_test(NAME rfb_captures_${part}
+                 COMMAND "${CMAKE_COMMAND}"
+                         "-DGEN=$<TARGET_FILE:rfbgen>"
+                         "-DDIR=${RFB_PFS_DIR}"
+                         "-DPART=${part}"
+                         "-DPARTS=${RFB_GEN_PARTS}"
+                         -P "${CMAKE_CURRENT_SOURCE_DIR}/generate.cmake")
+        set_tests_properties(rfb_captures_${part}
+                             PROPERTIES FIXTURES_SETUP rfb_captures)
+    endforeach()
+
+    math(EXPR _lastshard "${RFB_SHARDS} - 1")
+    math(EXPR _lastgroup "${RFB_SGROUPS} - 1")
+    foreach(layout plane interleaved)
+        foreach(tile 8x8 16x8 32x16)
+            foreach(shard RANGE ${_lastshard})
+                foreach(sgroup RANGE ${_lastgroup})
+                    set(_n rfb_roundtrip_${layout}_${tile}_${shard}_${sgroup})
+                    add_test(NAME ${_n}
+                             COMMAND "${CMAKE_COMMAND}"
+                                     "-DBENCH=$<TARGET_FILE:rfbbench>"
+                                     "-DDIR=${RFB_PFS_DIR}"
+                                     "-DTILE=${tile}"
+                                     "-DLAYOUT=${layout}"
+                                     "-DSHARD=${shard}"
+                                     "-DSHARDS=${RFB_SHARDS}"
+                                     "-DSGROUP=${sgroup}"
+                                     "-DSGROUPS=${RFB_SGROUPS}"
+                                     -P "${CMAKE_CURRENT_SOURCE_DIR}/roundtrip.cmake")
+                    set_tests_properties(${_n} PROPERTIES
+                                         FIXTURES_REQUIRED rfb_captures)
+                endforeach()
+            endforeach()
+        endforeach()
+    endforeach()
 endif()

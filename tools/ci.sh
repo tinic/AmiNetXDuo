@@ -232,7 +232,18 @@ host_test_targets() { # builddir
 # 132, plus netdev_diag.
 # 133, plus netdev_unit.
 # 134, plus ami_random.
-HOST_TESTS_EXPECTED=138
+# 138, the count before the round trip was sharded.
+# 381, and that is the shard: rfb_roundtrip was ONE case and 90% of this run
+#      (95% of the sanitizer one), at 29.27 s and 93.51 s on the CI runner.
+#      It is now 4 rfb_captures parts, which generate the corpus between them,
+#      plus 3 tile sizes x 2 layouts x 10 slices of the captures x 4 slices of
+#      the strategy table.  The union of those 240 is the sweep that was there
+#      before -- checked by diffing the sharded output against the unsharded,
+#      464 identical strat= lines, and the four generator parts write the same
+#      29 files byte for byte as one whole run.  Change RFB_SHARDS,
+#      RFB_SGROUPS or RFB_GEN_PARTS in src/rfb/CMakeLists.txt and this moves
+#      with them.
+HOST_TESTS_EXPECTED=381
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -830,7 +841,12 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
     cmake --build "$BUILD/host" --parallel "$JOBS" \
         --target $targets || { fail "host build"; return 1; }
 
-    ( cd "$BUILD/host" && ctest --output-on-failure ) || { fail "ctest"; return 1; }
+    ( cd "$BUILD/host" && ctest --output-on-failure --parallel "$JOBS" ) \
+        2>&1 | tee "$BUILD/host-ctest.log"
+    [ "${PIPESTATUS[0]}" = 0 ] || { fail "ctest"; return 1; }
+
+    tools/check-test-duration.sh "$BUILD/host-ctest.log" ||
+        { fail "a host test runs too long"; return 1; }
 
     # Against the number of TESTS, not the number of BUILD TARGETS.  Several
     # targets register more than one ctest case, so comparing 45 registered
@@ -848,6 +864,21 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         fail "$n tests registered, expected $want: tests were added without" \
              "raising HOST_TESTS_EXPECTED in tools/ci.sh, and every one of" \
              "them is slack the next removal can hide in"
+        return 1
+    fi
+
+    # THE STAMP .githooks/pre-push READS.  It records the CONTENT of the
+    # tracked files this stage passed on, not the commit, so running the stage
+    # and then committing that same content still counts.  Written last, and
+    # only here: every `return 1' above leaves the old stamp -- which no longer
+    # matches -- so a stage that failed refuses the push exactly like one that
+    # never ran.
+    if tools/tree-stamp.sh > "$BUILD/host-stage.ok" 2>/dev/null &&
+       [ -s "$BUILD/host-stage.ok" ]; then
+        note "host stage stamped: $(cut -c1-16 < "$BUILD/host-stage.ok")..."
+    else
+        rm -f "$BUILD/host-stage.ok"
+        fail "the tree stamp could not be written (tools/tree-stamp.sh)"
         return 1
     fi
 }
@@ -883,8 +914,13 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
 # the ones whose pointer round trips through 32-bit slots are load-bearing.
 HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto test_tls_x509
                      test_tcp_handler test_transfer)
-HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep)$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$'
-HOST32_TESTS_EXPECTED=7
+HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$'
+# 7 until fuzz_tls_crypto_sweep was split into four streams to get under the
+# ten-second budget; 10 then, and 13 once fuzz_mdns_sweep followed it at
+# 9.31 s of that budget.  BOTH live inside the 32-bit-only block in
+# tests/fuzz/CMakeLists.txt, so neither split moves HOST_TESTS_EXPECTED --
+# which is how the first attempt at this failed, locally and not on a runner.
+HOST32_TESTS_EXPECTED=13
 
 stage_host32() {
     hr "host tests (32-bit: mDNS, TLS crypto, X.509, TCP:, transfer)"
@@ -906,8 +942,12 @@ stage_host32() {
         --target "${HOST32_TEST_TARGETS[@]}" \
         || { fail "host32 build"; return 1; }
 
-    ( cd "$BUILD/host32" && ctest --output-on-failure -R "$HOST32_TEST_REGEX" ) \
-        || { fail "host32 ctest"; return 1; }
+    ( cd "$BUILD/host32" && ctest --output-on-failure --parallel "$JOBS" \
+           -R "$HOST32_TEST_REGEX" ) 2>&1 | tee "$BUILD/host32-ctest.log"
+    [ "${PIPESTATUS[0]}" = 0 ] || { fail "host32 ctest"; return 1; }
+
+    tools/check-test-duration.sh "$BUILD/host32-ctest.log" ||
+        { fail "a 32-bit host test runs too long"; return 1; }
 
     # An empty or incomplete selection here would otherwise pass as a green
     # stage that tested nothing.  The two fuzzers register two cases each and
@@ -969,7 +1009,14 @@ stage_sanitize() {
     cmake --build "$BUILD/san" --parallel "$JOBS" \
         --target $targets || { fail "sanitize build"; return 1; }
 
-    ( cd "$BUILD/san" && ctest --output-on-failure ) || { fail "sanitize ctest"; return 1; }
+    ( cd "$BUILD/san" && ctest --output-on-failure --parallel "$JOBS" ) \
+        2>&1 | tee "$BUILD/san-ctest.log"
+    [ "${PIPESTATUS[0]}" = 0 ] || { fail "sanitize ctest"; return 1; }
+
+    # The arm the budget is really for: everything here is three times the
+    # host arm, so it is where a case grows past ten seconds first.
+    tools/check-test-duration.sh "$BUILD/san-ctest.log" ||
+        { fail "a sanitizer test runs too long"; return 1; }
 
     # Exact, both directions, for stage_host's reason: a gate that drifts
     # below what it guards has already failed.
@@ -1014,8 +1061,15 @@ stage_sanitize() {
         --target "${HOST32_TEST_TARGETS[@]}" \
         || { fail "sanitize32 build"; return 1; }
 
-    ( cd "$BUILD/san32" && ctest --output-on-failure -R "$HOST32_TEST_REGEX" ) \
-        || { fail "sanitize32 ctest"; return 1; }
+    ( cd "$BUILD/san32" && ctest --output-on-failure --parallel "$JOBS" \
+           -R "$HOST32_TEST_REGEX" ) 2>&1 | tee "$BUILD/san32-ctest.log"
+    [ "${PIPESTATUS[0]}" = 0 ] || { fail "sanitize32 ctest"; return 1; }
+
+    # Where fuzz_tls_crypto_sweep was 16.15 s: the budget is per ARM, and
+    # wiring it into two of the four left the slowest test in the tree
+    # unwatched.
+    tools/check-test-duration.sh "$BUILD/san32-ctest.log" ||
+        { fail "a 32-bit sanitizer test runs too long"; return 1; }
 
     local n32 want32
     want32="$HOST32_TESTS_EXPECTED"

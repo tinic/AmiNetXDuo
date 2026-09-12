@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+#
+# Gate 5 of 5: refuse to push what has not been through the host stage.
+#
+# WHY THIS EXISTS.  Over sixty runs of CI, 42 were CANCELLED -- superseded by
+# the next push before they finished -- and of the 18 that completed, 5 failed.
+# Both numbers are one habit: pushing to find out whether something works
+# instead of finding out first.  Every one of those failures was reproducible
+# locally with `tools/ci.sh host', which is the same entry point the workflow
+# invokes, so none of them needed a runner to discover.
+#
+# So: the host stage writes a stamp of the tree it passed on, and this refuses
+# a push whose tree does not match it.  The stamp is the CONTENT of the tracked
+# files, not the commit id, so running the stage and then committing that same
+# content still counts -- the check is "was this verified", not "was this
+# committed in a particular order".
+#
+#   tools/ci.sh host                 # ~8 minutes, writes the stamp
+#   git push
+#
+# AMINETXDUO_PUSH_ANYWAY=1 git push  overrides it.  For a push that cannot
+# be verified here at all -- a tag, a branch deletion, a machine with no
+# toolchain.  It is not for "I am fairly sure".
+#
+# SPDX-License-Identifier: MIT
+
+set -eu
+
+ROOT="$(git rev-parse --show-toplevel)"
+STAMP="$ROOT/build/ci/host-stage.ok"
+
+if [ "${AMINETXDUO_PUSH_ANYWAY:-0}" = 1 ]; then
+    echo "pre-push: AMINETXDUO_PUSH_ANYWAY=1, host stage not required." >&2
+    exit 0
+fi
+
+# Deleting a branch, or pushing nothing, builds no tree to verify.
+only_deletes=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    [ -z "${local_sha:-}" ] && continue
+    case "$local_sha" in
+        0000000000000000000000000000000000000000) ;;
+        *) only_deletes=0 ;;
+    esac
+done
+[ "$only_deletes" = 1 ] && exit 0
+
+now="$("$ROOT/tools/tree-stamp.sh")"
+if [ -z "$now" ]; then
+    echo "pre-push: tools/tree-stamp.sh produced nothing; cannot tell whether" >&2
+    echo "this tree was verified.  AMINETXDUO_PUSH_ANYWAY=1 overrides." >&2
+    exit 1
+fi
+
+if [ ! -f "$STAMP" ]; then
+    echo >&2
+    echo "pre-push: the host stage has not run on this tree." >&2
+    echo >&2
+    echo "    tools/ci.sh host" >&2
+    echo >&2
+    echo "It is the same entry point the workflow invokes, so what it says" >&2
+    echo "here is what CI will say.  42 of the last 60 CI runs were cancelled" >&2
+    echo "by the next push and 5 of the 18 that finished were red; every one" >&2
+    echo "of those was reproducible with that one command." >&2
+    echo >&2
+    echo "AMINETXDUO_PUSH_ANYWAY=1 git push  overrides this -- for a tag, or" >&2
+    echo "a machine with no toolchain.  Not for \"I am fairly sure\"." >&2
+    exit 1
+fi
+
+was="$(cat "$STAMP")"
+if [ "$now" != "$was" ]; then
+    echo >&2
+    echo "pre-push: the tree has changed since the host stage passed." >&2
+    echo "    stamped: $was" >&2
+    echo "    now:     $now" >&2
+    echo >&2
+    echo "Run tools/ci.sh host again, or AMINETXDUO_PUSH_ANYWAY=1 to override." >&2
+    exit 1
+fi
+
+echo "pre-push: host stage passed on this tree ($now)."
