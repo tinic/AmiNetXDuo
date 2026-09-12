@@ -12,10 +12,12 @@
 #
 # So the order is fixed, per replaced file:
 #
-#   1 copy      the new file in beside the live one, under a .new name
-#   2 guard     (if (exists <X>_NEW ...)) -- nothing below runs without it
-#   3 rename    the live file to .old
-#   4 activate  the .new file to the live name
+#   1 clear     any .new left by an interrupted earlier run
+#   2 reject    the run if that fixed staging name still exists
+#   3 copy      the new file in beside the live one, under the clean name
+#   4 guard     (if (exists <X>_NEW ...)) -- nothing below runs without it
+#   5 rename    the live file to .old
+#   6 activate  the .new file to the live name
 #
 # This proves the ORDER, on every commit, without an emulator.
 #
@@ -69,24 +71,36 @@ def last_before(pattern, limit):
     hits = [h for h in all_lines(pattern) if h < limit]
     return hits[-1] if hits else 0
 
+def first_between(pattern, start, limit):
+    hits = [h for h in all_lines(pattern) if start < h < limit]
+    return hits[0] if hits else 0
+
 bad = 0
 for var, name in WATCH:
     copy     = first(r'\(newname\s+"%s\.new"\)' % re.escape(name))
     rename   = first(r'\(rename\s+%s\s+%s_OLD\b' % (re.escape(var), re.escape(var)))
     activate = first(r'\(rename\s+%s_NEW\s+%s\b' % (re.escape(var), re.escape(var)))
+    pre      = [h for h in all_lines(r'\(if\s+\(exists\s+%s_NEW\b' % re.escape(var))
+                if h < copy]
+    clear    = pre[0] if pre else 0
+    reject   = pre[-1] if len(pre) >= 2 else 0
+    abort    = first_between(r'\(abort\b', reject, copy) if reject else 0
     guard    = last_before(r'\(if\s+\(exists\s+%s_NEW\b' % re.escape(var),
                            rename or len(lines))
 
-    print("installer_txn file=%-18s copy=%-4s guard=%-4s rename=%-4s activate=%s"
-          % (name, copy or "-", guard or "-", rename or "-", activate or "-"))
+    print("installer_txn file=%-18s clear=%-4s reject=%-4s copy=%-4s "
+          "guard=%-4s rename=%-4s activate=%s"
+          % (name, clear or "-", reject or "-", copy or "-", guard or "-",
+             rename or "-", activate or "-"))
 
-    if not copy or not guard or not rename or not activate:
+    if not clear or not reject or not abort or not copy or not guard or not rename or not activate:
         print("  !! %s: the staged-then-swapped shape is not there" % name)
         bad = 1
         continue
-    if not (copy < guard < rename < activate):
+    if not (clear < reject < abort < copy < guard < rename < activate):
         print("  !! %s: out of order.  The live file must not be renamed "
-              "until the new one is on the disk and the guard has seen it."
+              "until the staging name was cleared, the new file is on the "
+              "disk, and the guard has seen it."
               % name)
         bad = 1
 

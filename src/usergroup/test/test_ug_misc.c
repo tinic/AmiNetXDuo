@@ -388,30 +388,30 @@ static void test_getsalt_defaults(void)
    rather than NULL -- and one that cannot match a stored password field. */
 static void test_crypt_is_enosys(void)
 {
+    static const char *const settings[] = {
+        "ab", "*", "!", "!!", "x", "", "* no crypt *",
+        "*0", "*0locked", "*1"
+    };
     UBYTE *r;
+    ULONG  i;
 
     world_reset();
-    r = ugl_crypt(&base, (UBYTE *)"password", (UBYTE *)"ab");
 
-    CHECK(r != NULL);
-    CHECK(base.ug_Err == UG_ENOSYS);
-    CHECK(salt_canary_intact());
+    /* Every setting, including both failure markers and the previous fixed
+       sentinel, must produce a different string.  Testing only ordinary salts
+       misses exactly the locked-account failure this contract exists to stop. */
+    for (i = 0; i < (ULONG)(sizeof(settings) / sizeof(settings[0])); i++)
+    {
+        r = ugl_crypt(&base, (UBYTE *)"password", (UBYTE *)settings[i]);
 
-    /*
-     * NOT "*", AND NOT "!".  Both are conventional locked-account markers, and
-     * the usual caller is strcmp(crypt(typed, salt), pw->pw_passwd): with "*"
-     * here, every password typed at a ported server matched exactly the
-     * accounts that were meant to be shut.
-     */
-    CHECK(strcmp((char *)r, "*") != 0);
-    CHECK(strcmp((char *)r, "!") != 0);
-    CHECK(strcmp((char *)r, "!!") != 0);
-    CHECK(strcmp((char *)r, "x") != 0);
-    CHECK(strcmp((char *)r, "") != 0);
-
-    /* A DES hash is 13 characters of [./0-9A-Za-z] and an MD5 one starts "$1$";
-       a space rules both out, so no real password field can equal this. */
-    CHECK(strchr((char *)r, ' ') != NULL);
+        CHECK(r != NULL);
+        CHECK(strcmp((char *)r, settings[i]) != 0);
+        CHECK_STR((char *)r,
+                  (settings[i][0] == '*' && settings[i][1] == '0')
+                      ? "*1" : "*0");
+        CHECK(base.ug_Err == UG_ENOSYS);
+        CHECK(salt_canary_intact());
+    }
 }
 
 /*

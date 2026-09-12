@@ -13,7 +13,9 @@ version at the top when it merges.
   replacement.** `bsdsocket.library`, `usergroup.library`, `tls.library` and
   `anxnet.device` are copied in under a `.new` name first and swapped after, so
   a copy that fails or is declined leaves the installed file in place. The old
-  order left `LIBS:` with no `bsdsocket.library` at all
+  order left `LIBS:` with no `bsdsocket.library` at all. A leftover `.new` that
+  cannot be removed now stops the installer instead of being mistaken for the
+  copy staged by the current run
 
 - `AddNetInterface` takes a path as a path. Search order is now the file as
   given, then `DEVS:NetInterfaces`, then `SYS:Storage/NetInterfaces` — the
@@ -45,8 +47,9 @@ version at the top when it merges.
   per task is what Roadshow's autodoc recommends for this
 - **`crypt()` accepted any password for a locked account.** Its failure string
   was `"*"`, the locked-account marker, so
-  `strcmp(crypt(typed, salt), pw->pw_passwd)` matched. Now `"* no crypt *"`,
-  which no password field can equal
+  `strcmp(crypt(typed, salt), pw->pw_passwd)` matched. Failure now returns
+  `"*0"`, or `"*1"` when the setting starts with `"*0"`, so it cannot repeat
+  the supplied setting
 - **Install `bsdsocket.library` and the commands together.** netstatus version
   12 -> 13, library revision 8 -> 9: `NetStatusControl` carries the interface
   file with its path. A 0.27.0 command refuses the call

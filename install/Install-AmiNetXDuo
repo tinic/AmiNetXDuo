@@ -1256,11 +1256,21 @@
             (prompt "Removing a leftover bsdsocket.library.new")
             (help @copyfiles-help)
             (optional "force" "nofail")))
+(if (exists D_BSD_NEW (noreq))
+    (abort
+      (cat "The leftover staging file " D_BSD_NEW " could not be removed. "
+           "It might be incomplete, so the installer will not mistake it "
+           "for this run's copy. Remove it and run the installer again.")))
 (if (exists D_UG_NEW (noreq))
     (delete D_UG_NEW
             (prompt "Removing a leftover usergroup.library.new")
             (help @copyfiles-help)
             (optional "force" "nofail")))
+(if (exists D_UG_NEW (noreq))
+    (abort
+      (cat "The leftover staging file " D_UG_NEW " could not be removed. "
+           "It might be incomplete, so the installer will not mistake it "
+           "for this run's copy. Remove it and run the installer again.")))
 
 (copyfiles
   (prompt (cat "Installing bsdsocket.library into LIBS:\n\n"
@@ -1359,6 +1369,11 @@
                 (prompt "Removing a leftover anxnet.device.new")
                 (help @copyfiles-help)
                 (optional "force" "nofail")))
+    (if (exists D_ANX_NEW (noreq))
+        (abort
+          (cat "The leftover staging file " D_ANX_NEW " could not be removed. "
+               "It might be incomplete, so the installer will not mistake it "
+               "for this run's copy. Remove it and run the installer again.")))
 
     (copyfiles
       (prompt (cat "Installing anxnet.device into DEVS:Networks\n\n"
@@ -1414,6 +1429,11 @@
                 (prompt "Removing a leftover tls.library.new")
                 (help @copyfiles-help)
                 (optional "force" "nofail")))
+    (if (exists D_TLS_NEW (noreq))
+        (abort
+          (cat "The leftover staging file " D_TLS_NEW " could not be removed. "
+               "It might be incomplete, so the installer will not mistake it "
+               "for this run's copy. Remove it and run the installer again.")))
 
     (copyfiles
       (prompt (cat "Installing tls.library into LIBS:\n\n"
