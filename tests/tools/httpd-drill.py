@@ -202,6 +202,35 @@ def teardown():
     once(req("DELETE", BASE))
 
 
+def test_content_detection():
+    """Unknown Amiga names are shown when their bytes are plainly text."""
+    print("content detection for files without suffixes")
+
+    script = b"Assign T: RAM:T\nSetEnv SAVE Workbench\n"
+    a = once(req("PUT", BASE + "/startup-sequence", body=script))
+    check(a is not None and a[0] in (200, 201, 204),
+          "an extensionless startup-sequence is written")
+
+    a = once(req("HEAD", BASE + "/startup-sequence"))
+    check(a is not None and a[1].get("content-type") == "text/plain",
+          "HEAD identifies its contents as text")
+
+    a = once(req("GET", BASE + "/startup-sequence"))
+    check(a is not None and a[1].get("content-type") == "text/plain"
+          and a[2] == script,
+          "GET displays the text without changing its bytes")
+
+    binary = b"\x00\x00\x03\xf3\x00\x00\x00\x00"
+    a = once(req("PUT", BASE + "/program", body=binary))
+    check(a is not None and a[0] in (200, 201, 204),
+          "an extensionless binary is written")
+
+    a = once(req("HEAD", BASE + "/program"))
+    check(a is not None and
+          a[1].get("content-type") == "application/octet-stream",
+          "and binary bytes still select download")
+
+
 
 def test_desync():
     """A refused request's body must not be read as the next request.
@@ -1473,6 +1502,7 @@ def main():
         test_refusal_keeps_the_connection()
         test_unframed_refusal_closes()
         test_etags()
+        test_content_detection()
         test_if_header()
         test_delete_destroys_locks()
         test_lock_below_stops_delete()

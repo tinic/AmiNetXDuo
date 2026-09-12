@@ -828,6 +828,12 @@ static void test_escaping(void)
 
 static void test_content_type(void)
 {
+    static const unsigned char startup[] =
+        "Assign T: RAM:T\nSetEnv SAVE Workbench\n";
+    static const unsigned char latin1[] = { 'G', 'r', 0xfc, 0xdf, 'e', '\r', '\n' };
+    static const unsigned char hunk[] = { 0x00, 0x00, 0x03, 0xf3 };
+    static const unsigned char control[] = { 'a', 0x01, 'b' };
+
     printf("content types\n");
 
     CHECK_STR(http_content_type("readme.txt"), "text/plain");
@@ -840,6 +846,13 @@ static void test_content_type(void)
               "application/octet-stream");
     /* The suffix is the last one, not the first. */
     CHECK_STR(http_content_type("archive.tar.lha"), "application/x-lha");
+
+    CHECK(http_content_looks_text(startup, sizeof(startup) - 1UL));
+    CHECK(http_content_looks_text(latin1, sizeof(latin1)));
+    CHECK(http_content_looks_text((const unsigned char *)"", 0));
+    CHECK(!http_content_looks_text(hunk, sizeof(hunk)));
+    CHECK(!http_content_looks_text(control, sizeof(control)));
+    CHECK(!http_content_looks_text(0, 1));
 }
 
 int main(void)

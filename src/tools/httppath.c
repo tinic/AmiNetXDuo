@@ -683,3 +683,24 @@ const char *http_content_type(const char *name)
 
     return "application/octet-stream";
 }
+
+int http_content_looks_text(const unsigned char *data, unsigned long len)
+{
+    unsigned long i;
+
+    if (data == 0 && len != 0UL)
+        return 0;
+
+    for (i = 0; i < len; i++)
+    {
+        unsigned int c = data[i];
+
+        if (c == 0U || c == 0x7fU)
+            return 0;
+
+        if (c < 0x20U && c != '\t' && c != '\n' && c != '\r' && c != '\f')
+            return 0;
+    }
+
+    return 1;
+}

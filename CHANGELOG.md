@@ -11,8 +11,9 @@ version at the top when it merges.
 
 - **`httpd -F` serves a file manager at `/files`.** The WebDAV root and the
   browser show every mounted volume under one virtual root.
-  Browser-displayable files open inline; uploads, new drawers, renames and
-  deletion use that same DAV namespace. The self-contained page follows the
+  Browser-displayable files open inline, including extensionless Amiga text
+  such as startup-sequence; binary files still download. Uploads, new drawers,
+  renames and deletion use that same DAV namespace. The page follows the
   browser's light or dark appearance setting, handles Amiga filename bytes,
   and is about 6 KB compressed. An explicit drawer argument remains available
   for a deliberately restricted share

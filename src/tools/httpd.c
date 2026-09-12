@@ -3590,10 +3590,12 @@ static VOID httpd_do_propfind(HttpConn *c)
 
 static VOID httpd_do_get(HttpConn *c)
 {
-    BOOL  is_dir = FALSE;
-    ULONG size;
-    ULONG from = 0;
-    ULONG to;
+    const char *content_type;
+    BOOL        inspected = FALSE;
+    BOOL        is_dir = FALSE;
+    ULONG       size;
+    ULONG       from = 0;
+    ULONG       to;
 
     if (c->is_volumes_root)
         is_dir = TRUE;
@@ -3688,7 +3690,34 @@ static VOID httpd_do_get(HttpConn *c)
         return;
     }
 
-    if (from > 0UL && Seek(c->file, (LONG)from, OFFSET_BEGINNING) < 0)
+    content_type = http_content_type(c->path.name);
+
+    /* AmigaDOS has many text files with no suffix: startup-sequence,
+       user-startup, mountlists and tool configuration among them.  A browser
+       downloads an unknown type, so look at a bounded prefix before giving up
+       on it.  High bytes remain text; NUL and non-whitespace controls do not.
+       Known types never incur this read. */
+    if (hs_equal(content_type, "application/octet-stream"))
+    {
+        LONG got = 0;
+
+        if (size > 0UL)
+        {
+            LONG want = (size < sizeof(httpd_probe))
+                            ? (LONG)size : (LONG)sizeof(httpd_probe);
+
+            got = Read(c->file, (APTR)httpd_probe, want);
+            inspected = TRUE;
+        }
+
+        if (size == 0UL ||
+            (got > 0 && http_content_looks_text(
+                            (const unsigned char *)httpd_probe, (ULONG)got)))
+            content_type = "text/plain";
+    }
+
+    if ((inspected || from > 0UL) &&
+        Seek(c->file, (LONG)from, OFFSET_BEGINNING) < 0)
     {
         (VOID)Close(c->file);
         c->file = (BPTR)0;
@@ -3697,7 +3726,7 @@ static VOID httpd_do_get(HttpConn *c)
     }
 
     httpd_begin(c, c->has_range ? 206 : 200);
-    httpd_header(c, "Content-Type", http_content_type(c->path.name));
+    httpd_header(c, "Content-Type", content_type);
     httpd_header_num(c, "Content-Length", (size > 0UL) ? (to - from + 1UL) : 0UL);
     /* A client that knows it can ask for a part will ask, which is how a 50 MB
        ADF gets opened without being copied first. */

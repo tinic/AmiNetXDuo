@@ -119,6 +119,8 @@ takes `-4` and `-6`.
 `httpd -F` serves a file manager at **`http://<address>/files`**. It browses the
 mounted volumes and opens, uploads, creates, renames and deletes files and
 drawers through the same WebDAV interface that desktop file managers mount.
+It detects extensionless Amiga text such as `startup-sequence`, while keeping
+binary files as downloads.
 Nothing is fetched from the Internet; the whole page is about 6 KB compressed.
 Starting `httpd` with an explicit drawer, such as `httpd Work:Public 8080 -F`,
 keeps the older restricted-share form and exposes only that drawer.

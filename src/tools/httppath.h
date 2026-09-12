@@ -75,4 +75,9 @@ void http_utf8_trim(char *text);
  */
 const char *http_content_type(const char *name);
 
+/* A conservative look at bytes from an otherwise unknown file.  Amiga text
+   is commonly eight-bit, so only NUL and non-whitespace control bytes make a
+   sample binary.  An empty sample is valid text. */
+int http_content_looks_text(const unsigned char *data, unsigned long len);
+
 #endif /* AMINETXDUO_HTTPPATH_H */
