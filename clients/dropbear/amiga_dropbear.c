@@ -1325,12 +1325,12 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
         /* Always include the reader's signal while watching the console, never
            conditionally on the ring being empty: a byte landing in between is a
-           lost wakeup.  Ctrl-C rides the same mask: a direct session receives
-           ^C, while the private ssh process hosted by scp is cancelled. */
+           lost wakeup.  Ctrl-C cancels a client before terminal takeover; once
+           an interactive channel owns the console it is fed on as a ^C. */
         sigs = 0;
-        if (con_watch)             sigs |= con_reader->cr_DataSig;
-        if (con_active() || hosted) sigs |= SIGBREAKF_CTRL_C;
-        if (mem_watch)             sigs |= SIGBREAKF_CTRL_F;
+        if (con_watch) sigs |= con_reader->cr_DataSig;
+        sigs |= SIGBREAKF_CTRL_C;
+        if (mem_watch) sigs |= SIGBREAKF_CTRL_F;
 
         rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv, &sigs);
         if (rc < 0)
@@ -1338,12 +1338,13 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
         if ((sigs & SIGBREAKF_CTRL_C) != 0)
         {
-            /* A direct interactive ssh sends ^C through its channel.  The ssh
-               process hosted by scp has no terminal channel: its parent sent
-               this break to cancel the transport, so returning to its runner
-               is the only useful interpretation.  exit() is caught by the
-               argv shim and therefore returns cleanly from RunCommand(). */
-            if (hosted)
+            /* A direct interactive ssh sends ^C through its channel.  Before
+               terminal takeover there is no channel which could consume it,
+               so it cancels DNS/connect/KEX or a non-PTY remote command.  The
+               ssh process hosted by scp likewise has no terminal channel.
+               Its exit() is caught by the argv shim and returns cleanly from
+               RunCommand(). */
+            if (hosted || !con_active())
                 exit(EXIT_FAILURE);
             con_intr = 1;
         }
