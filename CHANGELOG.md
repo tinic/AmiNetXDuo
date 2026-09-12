@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **The installer named a vendor driver that was not on the machine.** The
+  `DEVICE=` line always carried the card's own driver file, so an install with
+  no vendor driver wrote a configuration that could not come up. It now writes
+  `DEVICE=DEVS:Networks/anxnet.device` and a `CARD=` line for the board. A
+  vendor driver already in `DEVS:` still wins
 - The `AmiNetXDuo` drawer icon is a picture: a globe on a bus between two machines, with the protocol on a plate under it
 - The installer icon is the familiar arrow going into a drive slot, and the `Docs` and `Examples` drawers use the stock Workbench drawer shape
 - The example interface files for the Ariadne II, AmigaNet, X-Surf and X-Surf 100 name the drivers those cards ship with: `ariadne_ii.device`, `hydra.device`, `x-surf.device`, `x-surf-100.device`

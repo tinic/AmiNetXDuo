@@ -925,6 +925,8 @@
 
 (set IFNAME  "eth0")
 (set DEVUNIT 0)
+(set USE_CARD 0)
+(set CARD_KEY "")
 (set USEDHCP 1)
 (set WANTMDNS 0)
 
@@ -976,6 +978,24 @@
         "uaenet.device"
         ""))
 
+    ; The CARD= name for the same board, which is what anxnet.device binds
+    ; by.  A FOURTH list paired by position with the two above, and with
+    ; ANXNET_CARD_NAMES in include/aminetxduo/anxnet.h.  Empty means anxnet
+    ; has no row for it: UAE is not a board, and "Other" is a name typed by
+    ; hand that this script cannot map.
+    (set CARD_KEY
+      (select CARD
+        "a2065"
+        "ariadne"
+        "ariadne2"
+        "hydra"
+        "lanrover"
+        "xsurf"
+        "xsurf100"
+        "pcmcia"
+        ""
+        ""))
+
     ; PCMCIA: one more question, because the slot takes several kinds of card.
     ;
     ; SEVEN, NOT SIX.  This is an index into the (choices) above and it moved
@@ -1002,6 +1022,15 @@
             "etherlink3.device"
             "prism2.device"
             ""))
+
+        ; anxnet's rows for the slot: the NE2000 kinds are "pcmcia" and the
+        ; 3C589 is its own row.  Prism2 is wireless and anxnet has no row.
+        (set CARD_KEY
+          (select PCM
+            "pcmcia"
+            "3c589"
+            ""
+            ""))
       ))
 
     ; "not in this list", or "something else" above: ask for the name
@@ -1016,15 +1045,31 @@
             (default "mycard.device")))
           (set DEV_OK (if (= @user-level 0) 1
                         (if (> (strlen DEV_NAME) 0) 1 0))))
+        (set CARD_KEY "")
       ))
 
     (set dev_name DEV_NAME)
     (P_dev_path)
     (set DEV_WRITE dev_write)
 
+    ; The vendor driver is missing, but anxnet.device is going on this
+    ; machine and has a row for this board, so name ours and tell it which
+    ; card with CARD=.  That is the pairing H_ANXNET describes, and until
+    ; now nothing in this script ever wrote it: the DEVICE= line always
+    ; named the vendor file, so a machine with no vendor driver was given a
+    ; configuration that could not come up and a page saying so.
+    ;
+    ; A PRESENT VENDOR DRIVER STILL WINS.  Someone who has Commodore's
+    ; a2065.device in DEVS: chose it by putting it there, and an installer
+    ; is the wrong place to overrule that.
     (if (= dev_present 0)
+      (if (AND DO_ANXNET (> (strlen CARD_KEY) 0))
+        (
+          (set DEV_WRITE D_ANX)
+          (set USE_CARD  1)
+        )
         (message (F_NODEV DEV_NAME)
-                 (help H_CARD)))
+                 (help H_CARD))))
 
     ; --- unit and interface name: only an expert is asked ---------------
 
@@ -1600,6 +1645,7 @@
       (append "; Examples/NetInterfaces/eth0-ipv6.\n")
       (append ";\n")
       (append "DEVICE=" DEV_WRITE "\n")
+      (append (if USE_CARD (cat "CARD=" CARD_KEY "\n") ""))
       (append ("UNIT=%ld\n" DEVUNIT))
       (append (if USEDHCP "CONFIGURE=DHCP\n" "CONFIGURE=STATIC\n"))
       (append (if WANTMDNS "MDNS=YES\n" "MDNS=NO\n"))
