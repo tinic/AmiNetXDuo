@@ -48,6 +48,15 @@ extern const char *const tool_name;
  * Output goes through dos.library, so the format strings are RawDoFmt's, not
  * newlib's: every integer is 32 bits and must be written %ld / %lu / %lx.
  */
+#ifdef AMINETXDUO_STACKPROBE
+/* tool_startup.S reaches these and nothing else does, so they are declared
+   here for the same reason _tx_timer_interrupt() is declared in the ThreadX
+   port's header: assembly is not a prototype, and without one the definition
+   is checked against nothing. */
+VOID ami_tool_stack_paint(VOID);
+VOID ami_tool_stack_report(VOID);
+#endif
+
 VOID tool_printf(const char *fmt, ...);
 VOID tool_say(const char *fmt, ...);       /* tool_printf, flushed at once   */
 VOID tool_error(const char *fmt, ...);     /* "<tool>: ..." + newline        */

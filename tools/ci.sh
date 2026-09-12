@@ -140,14 +140,17 @@ CROSS_CONFIGS=(
     # the gate that keeps them here, tools/check-option-coverage.sh, asks only
     # that each option's other side is compiled somewhere.
     #
-    # Seven diagnostics that only ADD -- counters, a probe, a symbol table, the
-    # sampling profiler.  None changes a struct a shipped image lays out, so
-    # one build compiles them all and a break in any is a break in this arm.
+    # Eight diagnostics that only ADD -- counters, two probes, a symbol table,
+    # the sampling profiler.  None changes a struct a shipped image lays out,
+    # so one build compiles them all and a break in any is a break in this arm.
+    # AMINETXDUO_STACKPROBE rides here because it is exactly that shape: it
+    # paints a command's stack at entry and reports the high-water mark at
+    # exit, and a shipping command carries neither the code nor the calls.
     # The serial log is NOT among them and is in no shipping build: it is OFF
     # by default (CMakeLists.txt) and has the `log' arm below to itself, which
     # is why AMI_ERROR/WARN compile to do { if (0) ... } while (0) everywhere
     # else.  A failure a user must see takes an event, not a diagnostic line.
-    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON"
+    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON -DAMINETXDUO_STACKPROBE=ON"
     # The profiler's attribution aid, on its own arm.  It CANNOT ride `instr`:
     # -fno-inline-functions-called-once is the whole point of it, and `instr`
     # is the arm check-hot-calls.sh reads to assert that the per-frame receive

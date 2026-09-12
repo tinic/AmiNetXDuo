@@ -311,6 +311,16 @@ endif()
 # level starts either way; ENV:ANXDLOGLEVEL still moves it (src/config/
 # config_file.c).  AMI_DEBUG and AMI_TRACE stay behind AMINETXDUO_DEBUG.
 option(AMINETXDUO_LOG "Build the serial diagnostic log" OFF)
+
+# How much of a Shell's 4096 a command actually touches, library calls and all.
+# tools/check-stack-frames.sh bounds each command's own frames from
+# -fstack-usage and cannot see across the LVO boundary into bsdsocket.library,
+# which a command reaches on its own stack.  OFF everywhere but a measuring
+# build: it paints the stack on entry to every command.
+option(AMINETXDUO_STACKPROBE "Measure a command's stack high-water mark" OFF)
+if(AMINETXDUO_STACKPROBE)
+    add_compile_definitions(AMINETXDUO_STACKPROBE)
+endif()
 if(AMINETXDUO_LOG)
     add_compile_definitions(AMINETXDUO_LOG)
 endif()

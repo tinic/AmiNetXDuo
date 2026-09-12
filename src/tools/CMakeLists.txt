@@ -17,6 +17,13 @@ set(TOOLS_COMMON_SOURCES
     tool_diag.c
     netstack_weak.c)
 
+# Only in a measuring build.  tool_startup.S calls into it around main(), both
+# calls behind the same #ifdef, so a shipping command carries neither the code
+# nor the calls.
+if(AMINETXDUO_STACKPROBE)
+    list(APPEND TOOLS_COMMON_SOURCES tool_stackprobe.c)
+endif()
+
 # tool_devdiag.c is deliberately NOT in TOOLS_COMMON_SOURCES: it carries the
 # SANA-II driver table and the card-diagnostic prose, which only the commands
 # that configure an interface can reach.  See the head of that file for why

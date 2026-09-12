@@ -69,8 +69,17 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_CHECKSUM)
 # of the first hunk and the linker script carries no ENTRY(), so *(.text) is
 # filled in link order.  src/tools/CMakeLists.txt says the same thing and checks
 # its map for it.
-add_executable(rtgmodes "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtgmodes.c)
-add_executable(rtgbars "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtgbars.c)
+# tool_startup.S calls the stack probe around main() when AMINETXDUO_STACKPROBE
+# is on, so anything that uses the stub needs the probe beside it or the link
+# fails on an undefined reference.  These three take the stub without
+# TOOLS_COMMON_SOURCES, which is where the commands get it.
+set(RTG_STACKPROBE "")
+if(AMINETXDUO_STACKPROBE)
+    set(RTG_STACKPROBE "${CMAKE_SOURCE_DIR}/src/tools/tool_stackprobe.c")
+endif()
+
+add_executable(rtgmodes "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtgmodes.c ${RTG_STACKPROBE})
+add_executable(rtgbars "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtgbars.c ${RTG_STACKPROBE})
 
 foreach(rtgtool rtgmodes rtgbars)
     target_include_directories(${rtgtool} PRIVATE ${AMINETXDUO_CORE_INCLUDES})
@@ -86,7 +95,8 @@ endforeach()
 if(CMAKE_CROSSCOMPILING AND TARGET aminetxduo_m68k_rt)
     foreach(rtdivarm rtdiv_libgcc rtdiv_anxd)
         add_executable(${rtdivarm}
-            "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtdiv.c)
+            "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtdiv.c
+            ${RTG_STACKPROBE})
         target_include_directories(${rtdivarm} PRIVATE ${AMINETXDUO_CORE_INCLUDES})
         if(AMIGA_NDK_INCLUDE)
             target_include_directories(${rtdivarm} PRIVATE "${AMIGA_NDK_INCLUDE}")

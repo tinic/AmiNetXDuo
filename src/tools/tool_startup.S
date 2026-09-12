@@ -136,10 +136,27 @@ _____start:
         addq.l  #8,sp
 #endif
 
+#ifdef AMINETXDUO_STACKPROBE
+        | Paint before main(), read after it, so the mark covers everything
+        | main() reached -- library calls included, which is the half
+        | -fstack-usage cannot see.  d2/a2 are callee-saved and survive this,
+        | the same way they survive _ami_rt_cpu_select above.
+        jsr     _ami_tool_stack_paint
+#endif
+
         move.l  a2,sp@-
         move.l  d2,sp@-
         jsr     _main
         addq.l  #8,sp
+
+#ifdef AMINETXDUO_STACKPROBE
+        | main()'s result is in d0 and the report is an ordinary C call, so it
+        | is saved across it: d0 is scratch.
+        move.l  d0,sp@-
+        jsr     _ami_tool_stack_report
+        move.l  sp@+,d0
+#endif
+
         move.l  d0,sp@-
         jsr     _exit
 
