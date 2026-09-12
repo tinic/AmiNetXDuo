@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`NetCapture` could not capture on an interface that was up.** It reported
+  `no interface '<name>' to capture on` for a card the stack listed, on any
+  machine where no capture channel had yet been opened. The interface was never
+  registered with the packet filter and nothing reported it. Affects
+  `NetCapture` and anything else opening the BPF device
+
 - **The installer named a vendor driver that was not on the machine.** The
   `DEVICE=` line always carried the card's own driver file, so an install with
   no vendor driver wrote a configuration that could not come up. It now writes

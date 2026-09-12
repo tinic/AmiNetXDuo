@@ -248,10 +248,17 @@ VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index)
 {
     const AmiIfConfig *cfg;
 
-    /* Nothing to attach to when capture never started: ami_bpf_init() failed,
-       or this is a build without src/bpf/ at all. */
-    if (ns->ns_Ip.nx_ip_packet_filter_extended == NX_NULL ||
-        ns->ns_Iface[index] == NULL)
+    /*
+     * Nothing to attach to when capture never started: ami_bpf_init() failed,
+     * or this is a build without src/bpf/ at all.  ami_ns_capture_ns is what
+     * says so.  It used to read nx_ip_packet_filter_extended, which stopped
+     * meaning "capture started" when 6c7bc0a6 left the filter uninstalled
+     * until a channel is bound -- so on a stack where nobody had opened a
+     * channel yet, every interface attached after start was silently never
+     * registered with src/bpf/, and NetCapture's BIOCSETIF answered "no
+     * interface" for a card that was plainly up.
+     */
+    if (ami_ns_capture_ns != ns || ns->ns_Iface[index] == NULL)
         return;
 
     cfg = &ns->ns_Config.interfaces[index];
