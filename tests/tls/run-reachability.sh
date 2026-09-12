@@ -92,12 +92,32 @@ mkdir -p "$ROOT/build"
 rm -rf "$HD"
 : > "$SAMPLES"
 
+# THE ADDRESS HAS TO SURVIVE A SLOW DHCP.  AddNetInterface prints "online,
+# address <a>" once, with whatever it holds when its own wait expires, and on a
+# slow lease that is the IPv6 link-local: 8 of 78 guest transcripts in the
+# 2026-09-12 tier reported fe80:: and nothing else, on machines that then
+# answered 12 pings of 12 and completed a TLS 1.3 fetch.  One line printed once
+# is the wrong thing to wait for, so netstat repeats it until the lease lands.
+#
+# The window is padded rather than tight: the sampler cannot start until the
+# address is known, and the baseline below needs at least 3 probes at
+# $INTERVAL s before the fetch banner. Snapshots every SNAP_EVERY seconds mean
+# the address is seen within that of DHCP finishing, whenever it finishes.
 BASELINE_WAIT=$((INTERVAL * 6 + 4))
-cat > "$COMMANDS" <<EOF
-SYS:AddNetInterface eth0
-wait $BASELINE_WAIT
-SYS:fetch $URL TIMEOUT 400 TO DH0:page.txt
-EOF
+SNAP_EVERY=3
+SNAP_WINDOW=30
+
+{
+    printf 'SYS:AddNetInterface eth0\n'
+    snap_left=$SNAP_WINDOW
+    while [ "$snap_left" -gt 0 ]; do
+        printf 'SYS:netstat -i\n'
+        printf 'wait %d\n' "$SNAP_EVERY"
+        snap_left=$((snap_left - SNAP_EVERY))
+    done
+    printf 'wait %d\n' "$BASELINE_WAIT"
+    printf 'SYS:fetch %s TIMEOUT 400 TO DH0:page.txt\n' "$URL"
+} > "$COMMANDS"
 
 echo "==> peer $PEER, bridge $IFACE, build $BUILD"
 echo "==> $URL at ${CLOCK} MHz, probe every ${INTERVAL}s, floor ${FLOOR}%," \
@@ -127,6 +147,12 @@ while kill -0 "$RUNPID" 2>/dev/null; do
     if [ -s "$REPORT" ]; then
         GUESTIP=$(sed -n 's/^.*online, address \([0-9][0-9.]*\).*$/\1/p' \
                       "$REPORT" | head -1)
+        # netstat's documented third column, for the lease that landed after
+        # AddNetInterface had already printed.  Same fallback as guest_v4() in
+        # tests/tools/run-wirequiet.sh.
+        [ -n "$GUESTIP" ] || GUESTIP=$(awk '$1 == "eth0" &&
+            $3 ~ /^[0-9]+(\.[0-9]+){3}$/ && $3 != "0.0.0.0" { print $3; exit }' \
+            "$REPORT" 2>/dev/null)
         [ -n "$GUESTIP" ] && break
     fi
     sleep 1

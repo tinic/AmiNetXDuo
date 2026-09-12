@@ -175,6 +175,7 @@ wait 30
 &SYS:NetCapture OUT=DH0:five.pcap IFACE=eth0 COUNT=5 SECONDS=30 SNAP=64 PROTO=ICMP QUIET >DH0:five.txt
 wait 4
 SYS:ping $TARGET COUNT=12
+SYS:netstat -i
 wait 32
 EOF
 
@@ -216,8 +217,20 @@ EOF
     # ICMP means the pings: echo request or reply, not merely IP protocol 1.
     n_echo=$(pcap_lines "$icmp" | grep -ci 'echo re')
 
-    guest_addr=$(sed -n 's/.*online, address \([0-9.]*\).*/\1/p' \
+    # THE ADDRESS, AND WHY IT IS NOT ONE sed.  AddNetInterface prints
+    # "online, address <a>" with whatever it has when its own wait expires,
+    # and on a slow DHCP that is the IPv6 link-local -- hydra, xsurf and
+    # xsurf100z3 all reported fe80::41:4dff:fe4e:c0? on a run where ping then
+    # answered 12 of 12 from the gateway.  The old pattern was [0-9.]*, which
+    # matches the EMPTY string against fe80::, so a healthy card came back
+    # with no address and failed two assertions.  Require a leading digit, and
+    # fall back to the address netstat reports after the ping.  Same defect
+    # and same fix as guest_v4() in run-wirequiet.sh (6ab40f33).
+    guest_addr=$(sed -n 's/.*online, address \([0-9][0-9.]*\).*/\1/p' \
                  "$hd/tools.txt" 2>/dev/null | head -1)
+    [ -n "$guest_addr" ] || guest_addr=$(awk '$1 == "eth0" &&
+        $3 ~ /^[0-9]+(\.[0-9]+){3}$/ { print $3; exit }' \
+        "$hd/tools.txt" 2>/dev/null)
 
     if [ -n "$guest_addr" ]; then
         n_mac=$(pcap_lines "$icmp" "host $guest_addr and host $TARGET" |
