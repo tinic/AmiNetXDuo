@@ -3,7 +3,8 @@
 # Run an AmigaOS executable under Amiberry on Linux and capture its output.
 #
 #   tools/amiberry-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-N BOARD]...
-#                         [-B BACKEND] [-a ARGS] <executable> [extra files...]
+#                         [-B BACKEND] [-I ADDNETINTERFACE] [-a ARGS]
+#                         <executable> [extra files...]
 #
 # -N takes WinUAE's board keys unchanged, AND MAY BE REPEATED (or given a
 # comma-separated list) to put SEVERAL boards in one machine.  Each board gets
@@ -66,10 +67,11 @@ BOARD=""
 BOARDS=()
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
+ADDIF=""
 
-USAGE="usage: $0 [-t seconds] [-m model] [-c cpu] [-N board]... [-B backend] [-a args] <executable> [files...]"
+USAGE="usage: $0 [-t seconds] [-m model] [-c cpu] [-N board]... [-B backend] [-I AddNetInterface] [-a args] <executable> [files...]"
 
-while getopts "t:m:c:k:N:B:a:" opt; do
+while getopts "t:m:c:k:N:B:I:a:" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
@@ -78,6 +80,7 @@ while getopts "t:m:c:k:N:B:a:" opt; do
         N) IFS=, read -r -a _n <<< "$OPTARG"
            BOARDS+=("${_n[@]}") ;;
         B) BACKEND="$OPTARG" ;;
+        I) ADDIF="$OPTARG" ;;
         a) GUEST_ARGS="$OPTARG" ;;
         *) echo "$USAGE" >&2; exit 2 ;;
     esac
@@ -108,34 +111,12 @@ done
 BOARD="${BOARDS[0]:-}"
 
 
-# WHERE AddNetInterface COMES FROM.  Not a fixed path: the rig runs out of
-# build/cm and CI out of build/ci/<arm>, and assuming the first hard-failed
-# every arm in the emulator workflow on 2026-09-11 -- sixteen of them, for a
-# file that was built all along, one directory over.  The guest under test
-# names its own build tree, so ask it.
-addif_path() {
-    local d
-    if [ -n "${AMINETXDUO_ADDIF:-}" ]; then
-        printf '%s' "$AMINETXDUO_ADDIF"
-        return 0
-    fi
-    d=$(cd "$(dirname "$1")" 2>/dev/null && pwd) || return 1
-    while [ -n "$d" ] && [ "$d" != "/" ]; do
-        if [ -f "$d/src/tools/AddNetInterface" ]; then
-            printf '%s' "$d/src/tools/AddNetInterface"
-            return 0
-        fi
-        d=$(dirname "$d")
-    done
-    if [ -f "$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface" ]; then
-        printf '%s' "$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface"
-        return 0
-    fi
-    return 1
-}
-
 EXE="$1"; shift
 [ -f "$EXE" ] || { echo "no such executable: $EXE" >&2; exit 2; }
+[ -z "$ADDIF" ] || [ -f "$ADDIF" ] || {
+    echo "no such AddNetInterface for -I: $ADDIF" >&2
+    exit 2
+}
 EXE_NAME=$(basename "$EXE")
 
 . "$ROOT/tools/amiberry-resolve.sh"
@@ -440,33 +421,15 @@ done
 
 # ------------------------------------------------- interface bring-up --
 #
-# Until 0.27 bsdsocket.library opened every file in DEVS:NetInterfaces the
-# first time a program opened it, and every harness that stages that drawer
-# leaned on it without saying so.  The library now opens no card -- neither
-# Roadshow nor AmiTCP_NG does -- so the drawer has to be named the way a user
-# names it, from the boot script.  This is the line Roadshow ships in
-# S/Network-Startup, and running it here is also the only arm that exercises
-# AddNetInterface's pattern form on every emulator run.
-#
-# A guest that builds its own SANA-II device inside the executable cannot be
-# served from here, because the device does not exist until the guest runs.
-# Those set AMINETXDUO_NO_AUTOIF=1 and name their interface themselves.
+# Merely staging DEVS:NetInterfaces does not authorize the runner to change
+# guest state.  A harness that needs an interface before its executable starts
+# passes -I explicitly; a harness that tests AddNetInterface, an offline stack,
+# or a device it creates itself omits it.  This keeps the runner neutral and
+# makes the boot prerequisite visible at the call site.
 AUTOIF=""
-if [ "${AMINETXDUO_NO_AUTOIF:-0}" != 1 ] && [ -d "$HD/devs/NetInterfaces" ] &&
-   [ -n "$(find "$HD/devs/NetInterfaces" -maxdepth 1 -type f \
-            ! -name '*.info' -print -quit)" ]; then
-    # Not a skip: a staged drawer that nothing brings up is a guest that tests
-    # the network without one, which is how a harness passes while seeing
-    # nothing.
-    ADDIF=$(addif_path "$EXE") || {
-        echo "no AddNetInterface anywhere above $EXE, and" >&2
-        echo "$HD/devs/NetInterfaces holds a definition that nothing would" >&2
-        echo "bring up.  Build it, or set AMINETXDUO_ADDIF, or" >&2
-        echo "AMINETXDUO_NO_AUTOIF=1 if the guest names its own interface." >&2
-        exit 2
-    }
+if [ -n "$ADDIF" ]; then
     cp "$ADDIF" "$HD/c/AddNetInterface"
-    AUTOIF='AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET'
+    AUTOIF='C:AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET'
 fi
 
 # A bare directory hard drive has none of the assigns a Workbench boot makes,

@@ -117,7 +117,8 @@ echo "==> booting $MODEL, $BOARD bridged on $IFACE, MAC $AMINETXDUO_AMIBERRY_MAC
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-    -t "$TIMEOUT" -a "$PEER $PORT" \
+    -t "$TIMEOUT" -I "$ROOT/$BUILD/src/tools/AddNetInterface" \
+    -a "$PEER $PORT" \
     "$EXE" "$STAGE/devs" "$STAGE/libs" "$STAGE/netstat"
 RUN_RC=$?
 set -e

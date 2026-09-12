@@ -205,7 +205,7 @@ CPUARG=()
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" "${CPUARG[@]}" \
-    -t "$WINDOW" \
+    -t "$WINDOW" -I "$TOOLS/AddNetInterface" \
     -a "DH0:Public $GUESTPORT -T PAGE=DH0:shell.html TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
     "$STAGE/shell.html" "$STAGE/shell.html.gz" "$STAGE/c" \

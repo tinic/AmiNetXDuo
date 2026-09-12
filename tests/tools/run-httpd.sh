@@ -93,6 +93,7 @@ HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
+    -I "$TOOLS/AddNetInterface" \
     -a "DH0:Public $PORT TRACE" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" &
 RUNNER=$!

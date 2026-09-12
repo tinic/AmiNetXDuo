@@ -4,7 +4,7 @@
 # its output.  The WinUAE counterpart of tools/amiberry-run.sh.
 #
 #   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-a ARGS] [-n] [-x]
-#                       [-K] <executable> [extra files...]
+#                       [-I ADDNETINTERFACE] [-K] <executable> [extra files...]
 #
 # SETUP THE HOST NEEDS, ONCE: WinUAE installed, PSTools extracted to
 # C:\aminetxduo\pstools.
@@ -35,6 +35,7 @@ CPU=""
 NETWORK=0
 ACCURATE=0
 SETUP=0
+ADDIF=""
 
 for arg in "$@"; do
     [ "$arg" = "--setup" ] && SETUP=1
@@ -50,17 +51,19 @@ fi
 
 BOARD=a2065
 GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
+USAGE="usage: $0 [-t seconds] [-m A3000|A1200|A4000] [-c cpu] [-n] [-N board] [-I AddNetInterface] [-a args] [-x] [-K] <executable> [files...]"
 
-while getopts "t:m:c:nN:xa:" opt; do
+while getopts "t:m:c:nN:xI:a:" opt; do
     case "$opt" in
         t) TIMEOUT="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         n) NETWORK=1 ;;
         N) NETWORK=1; BOARD="$OPTARG" ;;
+        I) ADDIF="$OPTARG" ;;
         a) GUEST_ARGS="$OPTARG" ;;
         x) ACCURATE=1 ;;
-        *) echo "usage: $0 [-t seconds] [-m A3000|A1200|A4000] [-c cpu] [-n] [-N board] [-a args] [-x] [-K] <executable> [files...]" >&2; exit 2 ;;
+        *) echo "$USAGE" >&2; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -131,37 +134,15 @@ ne2000_pcmcia=${AMINETXDUO_WINUAE_A2065:-slirp}" ;;
     *)         echo "unknown network board $BOARD" >&2; exit 2 ;;
 esac
 
-[ $# -ge 1 ] || { echo "usage: $0 [-t seconds] [-m model] [-n] <executable> [files...]" >&2; exit 2; }
+[ $# -ge 1 ] || { echo "$USAGE" >&2; exit 2; }
 
-
-# WHERE AddNetInterface COMES FROM.  Not a fixed path: the rig runs out of
-# build/cm and CI out of build/ci/<arm>, and assuming the first hard-failed
-# every arm in the emulator workflow on 2026-09-11 -- sixteen of them, for a
-# file that was built all along, one directory over.  The guest under test
-# names its own build tree, so ask it.
-addif_path() {
-    local d
-    if [ -n "${AMINETXDUO_ADDIF:-}" ]; then
-        printf '%s' "$AMINETXDUO_ADDIF"
-        return 0
-    fi
-    d=$(cd "$(dirname "$1")" 2>/dev/null && pwd) || return 1
-    while [ -n "$d" ] && [ "$d" != "/" ]; do
-        if [ -f "$d/src/tools/AddNetInterface" ]; then
-            printf '%s' "$d/src/tools/AddNetInterface"
-            return 0
-        fi
-        d=$(dirname "$d")
-    done
-    if [ -f "$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface" ]; then
-        printf '%s' "$ROOT/${AMINETXDUO_BUILD:-build/cm}/src/tools/AddNetInterface"
-        return 0
-    fi
-    return 1
-}
 
 EXE="$1"; shift
 [ -f "$EXE" ] || { echo "no such executable: $EXE" >&2; exit 2; }
+[ -z "$ADDIF" ] || [ -f "$ADDIF" ] || {
+    echo "no such AddNetInterface for -I: $ADDIF" >&2
+    exit 2
+}
 EXE_NAME=$(basename "$EXE")
 
 TAG="${AMINETXDUO_RUN_TAG:-winuae}"
@@ -373,23 +354,12 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 
 # ------------------------------------------------- interface bring-up --
 #
-# The same line tools/amiberry-run.sh adds, and for the same reason: since
-# 0.27 bsdsocket.library opens no card of its own, so a staged
-# DEVS:NetInterfaces has to be named from the boot script the way Roadshow
-# names it in S/Network-Startup.  AMINETXDUO_NO_AUTOIF=1 for a guest that
-# links the stack directly or builds its own SANA-II device.
+# The same explicit -I contract as tools/amiberry-run.sh.  A staged interface
+# definition is data, not permission for the runner to bring it online.
 AUTOIF=""
-if [ "${AMINETXDUO_NO_AUTOIF:-0}" != 1 ] && [ -d "$HD/devs/NetInterfaces" ] &&
-   [ -n "$(find "$HD/devs/NetInterfaces" -maxdepth 1 -type f \
-            ! -name '*.info' -print -quit)" ]; then
-    ADDIF=$(addif_path "$EXE") || {
-        echo "no AddNetInterface anywhere above $EXE, and" >&2
-        echo "$HD/devs/NetInterfaces holds a definition that nothing would" >&2
-        echo "bring up." >&2
-        exit 2
-    }
+if [ -n "$ADDIF" ]; then
     cp "$ADDIF" "$HD/c/AddNetInterface"
-    AUTOIF='AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET'
+    AUTOIF='C:AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET'
 fi
 
 # UAEquit is WinUAE's own Amiga-side "stop the emulator" program, shipped with
@@ -405,10 +375,10 @@ QUIT_LINE=""
 [ -f "$UAEQUIT" ] && { cp "$UAEQUIT" "$HD/c/uaequit"; QUIT_LINE="c:uaequit"; }
 
 # AMINETXDUO_GUEST_PRECMD runs before the executable, one command per line.
-# A command that needs the network up, nc, ping, anything using
-# bsdsocket.library rather than linking the stack, needs the library and
-# DEVS:NetInterfaces staged as extra files; $AUTOIF above then names the
-# drawer before it runs.
+# A command that needs the network up -- nc, ping, anything using
+# bsdsocket.library rather than linking the stack -- passes -I along with the
+# library and DEVS:NetInterfaces.  That explicit request names the drawer
+# before the executable runs.
 # Enforcer needs a real MMU and no JIT cache: it traps through the MMU tables,
 # and a cached translation would let a bad access through unseen.
 ENFORCER_MMU=""

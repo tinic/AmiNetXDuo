@@ -138,6 +138,7 @@ echo "==> live: tail -f $ROOT/build/amiberry-testhd-$TAG/soak-events.txt"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$DEADLINE" \
+    -I "$ADDIF" \
     "$SOAK" "$STAGE/devs" "$STAGE/libs" "$STAGE/fitz" \
     "$STAGE/AddNetInterface" "$STAGE/localshare" "$STAGE/fitzsoak.cfg"
 RUN_RC=$?

@@ -40,13 +40,8 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-onoff}"
 
-# This run names its own interface, in the command list below, and its first
-# claim is about the command BEFORE there is one.  amiberry-run.sh adds
-# Roadshow's `AddNetInterface DEVS:NetInterfaces/~(#?.info)' to the boot script
-# whenever that drawer holds a definition, so eth0 was already up when the
-# first command ran.  Red on 0.27.0 for the same reason, and measured there:
-# the same failures, line for line.
-export AMINETXDUO_NO_AUTOIF=1
+# This run names its own interface in the command list below; its first claim
+# is deliberately about the state before that command runs.
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 REPORT="$HD/tools.txt"
 RUN_RC=0

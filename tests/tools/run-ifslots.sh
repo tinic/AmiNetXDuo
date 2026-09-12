@@ -7,7 +7,6 @@ set -uo pipefail
 
 # WHICH interfaces come up is what this harness measures, so nothing may
 # bring the drawer up behind it.
-export AMINETXDUO_NO_AUTOIF=1
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT" || exit 2
@@ -443,9 +442,8 @@ round_elsewhere() {
         # FIRST, that nothing has already done it.  The round reads an address
         # to decide WHICH file was read, and an interface that was up before
         # the command ran makes that address say nothing about the search
-        # order -- which is exactly what happened when the runner's AUTOIF
-        # line brought the drawer's weth0 up from the boot script.  Asking is
-        # cheap; the round below refuses to give a verdict if this is not
+        # order.  The runner is deliberately called without -I here; asking is
+        # cheap, and the round below refuses to give a verdict if this is not
         # empty.
         echo "SYS:netstat -i"
         echo "SYS:AddNetInterface DH0:elsewhere/weth0"
@@ -456,13 +454,10 @@ round_elsewhere() {
     # The outside directory has to reach the guest as well as the drawer;
     # boot() stages devs and libs and nothing else unless it is told.
     #
-    # AUTOIF is off for this round ON PURPOSE.  amiberry-run.sh adds
-    # Roadshow's `AddNetInterface DEVS:NetInterfaces/~(#?.info)' to the boot
-    # script whenever that drawer has a file in it, so the drawer's weth0
-    # would already be up -- at 192.168.91.5 -- before the command under test
-    # ran, and the round would report the search order was wrong when what it
-    # actually saw was the boot script winning the race.
-    AMINETXDUO_NO_AUTOIF=1 boot ifslots-elsewhere "$stage" "$stage/elsewhere"
+    # Do not pass the runner's -I option for this round.  The command under
+    # test must name the outside definition before anything starts the
+    # drawer's weth0 at 192.168.91.5.
+    boot ifslots-elsewhere "$stage" "$stage/elsewhere"
     rc=$?
     if [ "$rc" != 0 ]; then
         rig "the elsewhere round did not produce a transcript to read"

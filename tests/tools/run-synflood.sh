@@ -200,7 +200,8 @@ IFEOF
     echo "==> $board: booting $model, bridged on $PEER_IF, httpd at $address:$PORT"
     set +e
     "$ROOT/tools/amiberry-run.sh" -N "$board" -B "$PEER_IF" -m "$model" \
-        -t "$TIMEOUT" -a "DH0:Public $PORT" \
+        -t "$TIMEOUT" -I "$TOOLS/AddNetInterface" \
+        -a "DH0:Public $PORT" \
         "$TOOLS/httpd" "$stage/devs" "$stage/libs" "$stage/Public" \
         > "$OUT/$board-boot.log" 2>&1 &
     RUNNER=$!

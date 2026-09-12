@@ -368,6 +368,7 @@ if [ "$BACKEND" != slirp ]; then
 fi
 
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
+    -I "$TOOLS/AddNetInterface" \
     -a "DH0:Public $PORT -T PAGE=DH0:shell.html" \
     "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
     "$STAGE/shell.html" "$STAGE/shell.html.gz" "${EXTRA_C[@]}" \

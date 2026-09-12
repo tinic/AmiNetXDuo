@@ -146,7 +146,21 @@ replies_first() {
 }
 
 guest_v4() {
-    sed -n 's/^.*online, address \([0-9][0-9.]*\).*$/\1/p' "$REPORT" | head -1
+    local address
+
+    address=$(sed -n 's/^.*online, address \([0-9][0-9.]*\).*$/\1/p' \
+                   "$REPORT" | head -1)
+    if [ -n "$address" ]; then
+        printf '%s\n' "$address"
+        return
+    fi
+
+    # DHCP can finish after AddNetInterface's own wait expires.  The final
+    # netstat and ping then prove a live interface, but the add command has no
+    # address to print.  Read the address from netstat's documented third
+    # column rather than calling that healthy, reachable guest broken.
+    awk '$1 == "eth0" && $3 ~ /^[0-9]+(\.[0-9]+){3}$/ { print $3; exit }' \
+        "$REPORT"
 }
 
 guest_mac_reported() {

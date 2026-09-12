@@ -142,7 +142,8 @@ IFEOF
 
     set +e
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-        -t "$TIMEOUT" -a "DH0:Public $PORT" \
+        -t "$TIMEOUT" -I "$build/src/tools/AddNetInterface" \
+        -a "DH0:Public $PORT" \
         "$build/src/tools/httpd" "$stage/devs" "$stage/libs" "$stage/Public" \
         > "$OUT/$label-boot.log" 2>&1 &
     RUNNER=$!

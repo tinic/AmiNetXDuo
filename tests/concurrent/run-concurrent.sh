@@ -100,6 +100,7 @@ export AMINETXDUO_RUN_TAG="$TAG"
 #
 # A timeout with NO verdict is a real failure and still scores as one.
 OUT=$("$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
+      -I "$ROOT/$BUILD/src/tools/AddNetInterface" \
       "$EXE" "$STAGE/devs" "$STAGE/libs" 2>&1) && rc=0 || rc=$?
 printf '%s\n' "$OUT"
 

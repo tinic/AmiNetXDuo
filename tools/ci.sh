@@ -2664,9 +2664,14 @@ stage_bridged() {
     # ug_parse.c learned to read in 0.26.6 -- mount as the named user or not
     # at all.
     printf '\n-- ch_nfsc mounts a real export and a file is read back\n'
+    _chnfs="${AMINETXDUO_CHNFSC:-$HOME/amiga-assets/apps/chnfsc-1.02beta}"
     if [ -z "${AMINETXDUO_FITZ_PEER:-}" ]; then
         skip "nfsmount: AMINETXDUO_FITZ_PEER is not set, so there is no third" \
              "machine to export from."
+    elif [ ! -f "$_chnfs/bin/ch_nfsc" ] ||
+         [ ! -f "$_chnfs/bin/ch_nfsmount" ]; then
+        skip "nfsmount: ch_nfsc and ch_nfsmount are not in $_chnfs, so the" \
+             "third-party handler is unavailable on this runner."
     else
         rc=0
         "$ROOT/install/test/run-nfsmount.sh" -b "$BUILD/default" \

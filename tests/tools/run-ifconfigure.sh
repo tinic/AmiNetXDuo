@@ -145,13 +145,8 @@ EOF
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-ifconfigure}"
 
-# This run names its own interface, in the command list below, and its first
-# claim is about the command BEFORE there is one: what ConfigureNetInterface
-# says when the network is not running.  amiberry-run.sh adds Roadshow's
-# `AddNetInterface DEVS:NetInterfaces/~(#?.info)' to the boot script whenever
-# that drawer holds a definition, which brought eth0 up before the first
-# command ran and made four claims read a live interface.
-export AMINETXDUO_NO_AUTOIF=1
+# This run names its own interface in the command list below; its first claim
+# is deliberately what ConfigureNetInterface says before the network runs.
 
 STARTED=$(date +%s)
 set +e

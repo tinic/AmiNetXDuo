@@ -98,12 +98,14 @@ export AMINETXDUO_RUN_TAG="$TAG"
 set +e
 if [ "$PROBE" = "1" ]; then
     "$ROOT/tools/winuae-run.sh" -N "$BOARD" -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+        -I "$ROOT/$BUILD/src/tools/AddNetInterface" \
         "$ROOT/build/bsdsocktest/conf_probe" "$STAGE/devs" "$STAGE/libs"
     status=$?
     set -e
     exit "$status"
 fi
 "$ROOT/tools/winuae-run.sh" -N "$BOARD" -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+    -I "$ROOT/$BUILD/src/tools/AddNetInterface" \
     "$LAUNCHER" "$STAGE/devs" "$STAGE/libs" "$STAGE/bsdsocktest" \
     "$STAGE/conf-args"
 status=$?

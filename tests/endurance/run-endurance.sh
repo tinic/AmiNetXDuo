@@ -108,6 +108,7 @@ echo "==> $SECONDS_RUN s, mode $MODE, $CONNS connection(s), probes=$PROBES"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$DEADLINE" "${CLOCKARG[@]}" \
+    -I "$ROOT/$BUILD/src/tools/AddNetInterface" \
     "$OUT/Endurance" "$STAGE/devs" "$STAGE/libs" "$STAGE/endurance.cfg"
 RUN_RC=$?
 set -e

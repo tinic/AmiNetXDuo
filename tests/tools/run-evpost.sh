@@ -112,7 +112,7 @@ set +e
 echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE, ceiling ${TIMEOUT}s"
 echo "==> MAC $MAC, hostname $HOST"
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-    -t "$TIMEOUT" \
+    -t "$TIMEOUT" -I "$TOOLS/AddNetInterface" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/EvPost" "$STAGE/NetShutdown"
 RUN_RC=$?

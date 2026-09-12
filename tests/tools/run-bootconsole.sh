@@ -110,6 +110,7 @@ echo "==> one httpd -C with no Workbench on port $PORT, and a screen after it"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+    -I "$BUILD/src/tools/AddNetInterface" \
     "$SMOKE" \
     "$STAGE/devs" "$STAGE/libs" "$STAGE/httpd" "$STAGE/fetch" "$STAGE/nc" \
     "$STAGE/chipscreen" "$STAGE/console.html" "$STAGE/greeting.txt" \

@@ -124,11 +124,11 @@ SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
 SYS:netstat -i
 SYS:ShowNetStatus eth0
 $PING_COMMAND
+&SYS:NetCapture OUT=SYS:dhcpwire.pcap IFACE=eth0 PORT=67 SNAP=400 COUNT=4 SECONDS=8 QUIET >SYS:netcapture.txt
+wait 2
 SYS:ConfigureNetInterface eth0 RELEASE
 SYS:ShowNetStatus eth0
 SYS:ConfigureNetInterface eth0 RELEASE
-&SYS:NetCapture OUT=SYS:dhcpwire.pcap IFACE=eth0 PORT=67 SNAP=400 COUNT=4 SECONDS=8 QUIET >SYS:netcapture.txt
-wait 2
 SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
 wait 9
 SYS:netstat -i
@@ -146,13 +146,8 @@ EOF
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-ifdhcp}"
 
-# This run names its own interface, in the command list below, and its first
-# claim is about the command BEFORE there is one.  amiberry-run.sh adds
-# Roadshow's `AddNetInterface DEVS:NetInterfaces/~(#?.info)' to the boot script
-# whenever that drawer holds a definition, so eth0 was already up when the
-# first command ran.  Red on 0.27.0 for the same reason, and measured there:
-# the same failures, line for line.
-export AMINETXDUO_NO_AUTOIF=1
+# This run names its own interface in the command list below; its first claim
+# is deliberately about the state before that command runs.
 
 STARTED=$(date +%s)
 set +e

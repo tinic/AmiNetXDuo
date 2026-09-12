@@ -100,6 +100,7 @@ fi
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
+     -I "$ROOT/$BUILD/src/tools/AddNetInterface" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
 RUN_RC=$?
 set -e

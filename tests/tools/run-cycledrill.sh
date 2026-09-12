@@ -137,7 +137,7 @@ SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
 set +e
 echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-    -t "$TIMEOUT" \
+    -t "$TIMEOUT" -I "$TOOLS/AddNetInterface" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/CycleDrill" "$STAGE/netstat" "$STAGE/ShowNetStatus" \
     "$STAGE/NetShutdown"

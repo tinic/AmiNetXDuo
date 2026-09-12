@@ -118,6 +118,7 @@ run_api() {
     set +e
     AMINETXDUO_RUN_TAG=resume-api \
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+        -I "$ADDIF" \
         "$RESUME" "$STAGE/devs" "$STAGE/libs"
     local rc=$?
     set -e

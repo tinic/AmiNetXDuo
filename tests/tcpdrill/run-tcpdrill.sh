@@ -19,7 +19,6 @@ set -euo pipefail
 # The interface this harness uses names a SANA-II device the guest
 # creates at run time, so no boot script can bring it up; the guest
 # names it itself once the device exists.  See tap_bring_up().
-export AMINETXDUO_NO_AUTOIF=1
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 . "$ROOT/tools/test-verdict.sh"
