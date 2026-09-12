@@ -43,8 +43,10 @@ on:
   # finishes and reports nothing useful either way -- while still emailing on
   # every failure. Nightly plus on-demand gives the same coverage without the
   # noise, and tier 1 (ci.yml) still runs on every push.
-  push:
-    tags: ["v*"]
+  # NOT ON TAGS.  This tier gates MAIN, and a tag points at a tree main has
+  # already carried, so `push: tags' spent two and a half hours re-proving it
+  # and made one release cost two runs.  The schedule above and an explicit
+  # dispatch are what start it.
 
 concurrency:
   group: emulator-${{ github.ref }}

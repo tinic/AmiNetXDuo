@@ -19,7 +19,13 @@ permissions:
 
 on:
   push:
-    branches: ["**"]
+    # ONE CI RUN PER INTEGRATION.  ["**"] built the branch and then built
+    # main again for the same tree, so every item cost two runs and a
+    # re-pushed amend cost two more.  The local gate is what earns the push:
+    # .githooks/pre-push refuses a tree tools/ci.sh has not passed on, and
+    # cross arms that only CI can run are worth `tools/ci.sh cross' before a
+    # push rather than a second hosted build after one.
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
 
