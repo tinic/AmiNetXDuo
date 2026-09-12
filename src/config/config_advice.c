@@ -4,6 +4,9 @@
  */
 
 #include "aminetxduo/config_advice.h"
+/* The codes are here; ami_cfg_advice() itself is declared in config.h, so the
+   compiler can check this file against what callers are told to expect. */
+#include "aminetxduo/config.h"
 
 #include <exec/types.h>
 

@@ -293,4 +293,17 @@ extern const struct NetdevNicOps netdev_nic_el3;
 
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip);
 
+
+/*
+ * The LANCE entry points that netdev_device.c dispatches to and
+ * tests/netdev drives directly.  Declared so the compiler checks each
+ * definition against what its callers are told; lance_reset() is not here
+ * because nothing outside lance.c calls it.
+ */
+VOID lance_halt(NetdevNic *nic);
+VOID lance_setfilter(NetdevNic *nic);
+LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len);
+BOOL lance_intr(NetdevNic *nic);
+LONG lance_attach(NetdevNic *nic);
+
 #endif /* AMINETXDUO_NETDEV_NIC_H */

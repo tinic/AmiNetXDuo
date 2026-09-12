@@ -31,8 +31,39 @@
 
 option(AMINETXDUO_WERROR "Fail the build on any warning in our own sources" ON)
 
+# -Wmissing-prototypes is here so a function that is not static has to say what
+# it is somewhere a caller can see.  It found 34: eight that were only ever used
+# in their own file and are static now, one dead accessor, two asm-facing entry
+# points nothing declared, a C fallback a macro renamed out from under its own
+# prototype, and a handful of files that simply did not include the header
+# already declaring what they defined -- config_advice.c defined ami_cfg_advice()
+# without including the header that tells callers its shape.
+#
+# It is not a size lever.  Measured across the whole change: bsdsocket.library
+# 339,468 -> 339,476 bytes, +8.  Single-unit LTO already saw everything, so
+# static unlocked no internalization the linker did not have.  What it buys is
+# the compiler checking every definition against what callers were told.
 set(AMINETXDUO_WARNING_FLAGS "-Wall;-Wextra" CACHE STRING
     "Warning flags applied to sources outside third_party/")
+
+# SHIPPING SOURCES ONLY -- src/ and port/, not tests/.
+#
+# -Wmissing-prototypes says a function that is not static has to declare itself
+# somewhere a caller can see.  That is exactly right for code that ships, and
+# it found real things: a definition whose header was never included
+# (config_advice.c defined ami_cfg_advice() without including config.h, so
+# nothing checked it against what every caller is told), a C fallback a macro
+# had renamed out from under its own prototype, and eight functions never used
+# outside their own file.
+#
+# It is NOT right for tests.  tests/fuzz/fuzz_dns.c DEFINES
+# _tx_thread_system_suspend() to stand in for ThreadX's, and there is no header
+# it could be declared in that would not be a forgery of upstream's.  A test
+# that impersonates a symbol on purpose is not the bug this flag looks for, and
+# the findings there are per-configuration noise: each CI arm compiles a
+# different set of stubs.
+set(AMINETXDUO_SHIPPING_WARNING_FLAGS "-Wmissing-prototypes" CACHE STRING
+    "Warning flags applied to src/ and port/ only")
 
 # Per-file escapes, as <path fragment> <extra flags> pairs.  Every entry is a
 # bug someone has to fix, so each one says what it is; this list should shrink.
@@ -83,6 +114,7 @@ function(_aminetxduo_warnings_apply_dir dir)
         endif()
 
         set(_ours "")
+        set(_shipping "")
         foreach(_s IN LISTS _srcs)
             if(NOT IS_ABSOLUTE "${_s}")
                 set(_s "${_sdir}/${_s}")
@@ -105,6 +137,14 @@ function(_aminetxduo_warnings_apply_dir dir)
                 continue()
             endif()
             list(APPEND _ours "${_s}")
+            # src/<component>/test/ holds host tests, which stub Exec --
+            # Forbid(), Disable(), AddSemaphore() -- and there is no header
+            # those could be declared in that is not a forgery of exec.library.
+            # They live under src/ but they do not ship.
+            if((_s MATCHES "/src/" OR _s MATCHES "/port/")
+               AND NOT _s MATCHES "/test/")
+                list(APPEND _shipping "${_s}")
+            endif()
         endforeach()
 
         if(_ours)
@@ -113,6 +153,13 @@ function(_aminetxduo_warnings_apply_dir dir)
             # would drop the -m68020 the assembler needs.
             set_property(SOURCE ${_ours} TARGET_DIRECTORY ${_t}
                          APPEND PROPERTY COMPILE_OPTIONS ${_flags})
+
+            # The shipping-only half: src/ and port/, never tests/.
+            if(_shipping AND AMINETXDUO_SHIPPING_WARNING_FLAGS)
+                set_property(SOURCE ${_shipping} TARGET_DIRECTORY ${_t}
+                             APPEND PROPERTY COMPILE_OPTIONS
+                             ${AMINETXDUO_SHIPPING_WARNING_FLAGS})
+            endif()
 
             # ... then the escapes, which have to come after to win.
             list(LENGTH AMINETXDUO_WARNING_EXEMPT _n)

@@ -215,4 +215,8 @@ UINT c68k_p256_self_check(VOID);
 }
 #endif
 
+
+/* Picked by c68k_cpu.c once the processor is known. */
+VOID c68k_p256_cpu_select(UINT wide);
+
 #endif /* AMINETXDUO_C68K_P256_H */

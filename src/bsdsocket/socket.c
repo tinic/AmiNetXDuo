@@ -1624,7 +1624,7 @@ typedef struct
     AmiSocket *ready;
 } BsdAcceptArgs;
 
-UINT bsd_accept_once(VOID *arg, ULONG wait)
+static UINT bsd_accept_once(VOID *arg, ULONG wait)
 {
     BsdAcceptArgs *a = (BsdAcceptArgs *)arg;
     AmiSocket     *listening;
@@ -1676,7 +1676,7 @@ typedef struct
     AmiSocket *sock;
 } BsdConnectArgs;
 
-UINT bsd_connect_once(VOID *arg, ULONG wait)
+static UINT bsd_connect_once(VOID *arg, ULONG wait)
 {
     BsdConnectArgs *a    = (BsdConnectArgs *)arg;
     AmiSocket      *sock = a->sock;

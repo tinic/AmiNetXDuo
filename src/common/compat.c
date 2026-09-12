@@ -295,6 +295,9 @@ ULONG ami_eclock_rate(VOID)
 }
 
 #ifdef AMINETXDUO_RXPROBE
+/* budget.h declares ami_budget_clock(); this file defines it, and only in this
+   arm, so the include lives with the definition rather than at the top. */
+#include "aminetxduo/budget.h"
 /*
  * The raw E-Clock low word, for the step budget's hop stamps
  * (aminetxduo/budget.h).  Raw and not ami_millis(): the hops are tens of

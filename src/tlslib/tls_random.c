@@ -24,6 +24,7 @@
  */
 
 #include "tls_internal.h"
+#include "aminetxduo/compat.h"   /* declares ami_millis(); tls.library links its own */
 
 #include "tls.h"                /* ami_tls_timer_open(), ami_tls_eclock() */
 

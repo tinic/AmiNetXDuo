@@ -308,7 +308,7 @@ VOID lance_halt(NetdevNic *nic)
  * rebuilds the rings in the board's SRAM, zeroes txb_inuse, and bounds its own
  * IDON wait.
  */
-VOID lance_reset(NetdevNic *nic)
+static VOID lance_reset(NetdevNic *nic)
 {
     nic->resets++;
     lance_halt(nic);

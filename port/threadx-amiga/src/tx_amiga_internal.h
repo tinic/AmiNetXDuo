@@ -304,4 +304,18 @@ extern void ami_log(int level, const char *fmt, ...);
 #define TXTRACE(...)    ((void) 0)
 #endif
 
+
+/*
+ * WaitIO() and WaitPort() as the green realm needs them.  src/sana2 and
+ * src/bsdsocket each carried their own extern for these, and neither reached
+ * tx_amiga_green.c where they are defined, so nothing checked the definitions
+ * against what the callers compile against.  One declaration, here, where the
+ * Amiga types are already in scope.
+ */
+struct IORequest;
+struct MsgPort;
+struct Message;
+
+BYTE            ami_green_checked_waitio(struct IORequest *request);
+struct Message *ami_green_checked_waitport(struct MsgPort *port);
 #endif /* TX_AMIGA_INTERNAL_H */

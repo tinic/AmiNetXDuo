@@ -300,4 +300,21 @@ UINT    tx_amiga_gate_orphan(TX_AMIGA_GATE *gate);
 }
 #endif
 
+
+/* ThreadX's timer ISR entry.  Upstream declares it in no header -- it is
+   reached from the port's assembly -- so the port declares it, and the
+   definition in tx_timer_interrupt.c is checked against this.
+
+   Declaring it adds one -fanalyzer entry to tools/analyzer-baseline.txt, and
+   that entry is a GCC bug, not a finding.  `typedef void VOID; VOID f(VOID);
+   VOID f(VOID) {}' in three lines on its own reports "use of uninitialized
+   value '<return-value>'"; the same three lines written with plain `void'
+   report nothing.  Six sibling files in this directory are in the baseline
+   for exactly that reason already. */
+VOID    _tx_timer_interrupt(VOID);
+
+/* For callers outside this directory -- the netstack's release/acquire
+   bracket.  TX_TRUE means the caller must _tx_amiga_wake_scheduler() once it
+   drops the core lock. */
+UINT    _tx_amiga_dispatch_or_wake(VOID);
 #endif /* TX_AMIGA_H */

@@ -401,11 +401,6 @@ static LONG bsd_dead_base_call(VOID)
     return 0;
 }
 
-ULONG bsd_dead_base_calls(VOID)
-{
-    return bsd_dead_calls;
-}
-
 /*
  * Overwrite the whole negative half with `JMP bsd_dead_base_call`.  Entry i
  * sits at -(6 * (i + 1)), so the half is exactly lib_NegSize / 6 six-byte

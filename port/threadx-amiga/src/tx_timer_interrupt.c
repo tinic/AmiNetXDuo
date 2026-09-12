@@ -15,6 +15,7 @@
 #define TX_SOURCE_CODE
 
 #include "tx_amiga_internal.h"
+#include "tx_amiga.h"       /* declares _tx_timer_interrupt(), which asm calls */
 
 
 VOID _tx_timer_interrupt(VOID)

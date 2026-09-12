@@ -334,6 +334,11 @@ LONG tool_netstatus_control(struct Library *base, ULONG op,
 /* Convenience: open, ask for NETSTATUS_SYSTEM, close. TRUE on success. */
 BOOL tool_netstatus_system(NetStatusSystem *out);
 
+/* Whether a device of that name is already in Exec's device list.  Defined in
+   tool_diag.c and used by tool_devdiag.c; the name predates the tool_ prefix
+   the rest of this header uses, and renaming it is not this change's business. */
+BOOL diag_is_resident(const char *device);
+
 /*
  * The message for "the stack did not report on itself". It separates a foreign
  * bsdsocket.library (Roadshow, AmiTCP, an emulator's own) from ours being too

@@ -130,6 +130,7 @@ static void           mock_put(volatile unsigned short *p, unsigned short v);
 /* The probe record, which needs exec and is not what this test is about. */
 #include <exec/types.h>
 #include "netdev_cards.h"
+#include "netdev_clock.h"
 
 /* ---------------------------------------------------------- the machine -- */
 
@@ -149,7 +150,6 @@ static int           mock_beam_on;
 static unsigned long mock_cmd_busy;
 static unsigned long mock_eeprom_busy;
 
-VOID netdev_clock_test_forget(VOID);
 
 UWORD netdev_clock_test_vpos(VOID)
 {

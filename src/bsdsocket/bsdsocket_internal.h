@@ -980,4 +980,9 @@ typedef enum
 BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
                                 ULONG scope, UINT *index);
 
+
+/* The receive step tests/bsdsocket/host/test_transfer_host.c drives directly.
+   Declared here rather than left to an extern in the consumer, so the two
+   cannot drift apart. */
+UINT bsd_recv_once(VOID *arg, ULONG wait);
 #endif /* AMINETXDUO_BSDSOCKET_INTERNAL_H */

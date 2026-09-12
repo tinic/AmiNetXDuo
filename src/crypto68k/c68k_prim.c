@@ -196,6 +196,11 @@ c68k_limb   old;
  */
 #if defined(C68K_MV)
 #define c68k_div_2by1 c68k_div_2by1_c
+/* The macro above renames the C implementation AFTER crypto68k.h declared the
+   plain name, so the definition below is a different symbol with no prototype.
+   Declare it through the same macro, so one line covers both spellings. */
+c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
+                        c68k_limb *rem);
 #endif
 
 #if !defined(C68K_ASM) || defined(C68K_MV)

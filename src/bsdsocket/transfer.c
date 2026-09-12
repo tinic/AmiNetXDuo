@@ -202,7 +202,7 @@ typedef struct
     NX_PACKET      **packet;
 } BsdAllocArgs;
 
-UINT bsd_alloc_once(VOID *arg, ULONG wait)
+static UINT bsd_alloc_once(VOID *arg, ULONG wait)
 {
     BsdAllocArgs *a = (BsdAllocArgs *)arg;
 
@@ -215,7 +215,7 @@ typedef struct
     NX_PACKET     *packet;
 } BsdSendArgs;
 
-UINT bsd_send_once(VOID *arg, ULONG wait)
+static UINT bsd_send_once(VOID *arg, ULONG wait)
 {
     BsdSendArgs *a = (BsdSendArgs *)arg;
 
@@ -915,7 +915,7 @@ typedef struct
     NX_PACKET     **packet;
 } BsdRecvUdpArgs;
 
-UINT bsd_recv_udp_once(VOID *arg, ULONG wait)
+static UINT bsd_recv_udp_once(VOID *arg, ULONG wait)
 {
     BsdRecvUdpArgs *a = (BsdRecvUdpArgs *)arg;
 
@@ -929,7 +929,7 @@ typedef struct
     UINT        why;
 } BsdRecvRawArgs;
 
-UINT bsd_recv_raw_once(VOID *arg, ULONG wait)
+static UINT bsd_recv_raw_once(VOID *arg, ULONG wait)
 {
     BsdRecvRawArgs *a = (BsdRecvRawArgs *)arg;
     NX_PACKET      *packet;

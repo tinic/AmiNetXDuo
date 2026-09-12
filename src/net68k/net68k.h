@@ -183,4 +183,11 @@ ULONG n68k_rx_verify_sum(NX_PACKET *packet, ULONG carried, ULONG copied,
 
 #endif /* AMINETXDUO_RX_VERIFY */
 
+
+/* The vendored name this port replaces; NetX Duo's own callers link to it.
+   Declared so the definition in n68k_checksum_hook.c is checked against the
+   signature everything else was compiled against. */
+USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
+                               UINT data_length, ULONG *src_ip_addr,
+                               ULONG *dest_ip_addr);
 #endif /* AMINETXDUO_NET68K_H */

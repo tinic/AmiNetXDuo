@@ -770,6 +770,11 @@ VOID tls_resume_record(TLSConnection *conn)
  * always writes as zero, and append a session_ticket extension -- sent even
  * when empty, because that is how a client asks to be issued one.
  */
+/* --wrap: the linker points NetX Duo's callers here.  Prototyped so the
+   definition below is checked, since no header declares a wrapper. */
+UINT __wrap__nx_secure_tls_send_clienthello(NX_SECURE_TLS_SESSION *tls_session,
+                                            NX_PACKET *send_packet);
+
 UINT __wrap__nx_secure_tls_send_clienthello(NX_SECURE_TLS_SESSION *tls_session,
                                             NX_PACKET *send_packet)
 {
@@ -1085,6 +1090,12 @@ static UINT tls_resume_finish(NX_SECURE_TLS_SESSION *s, UCHAR *packet_start,
 
     return NX_SUCCESS;
 }
+
+/* --wrap, as above. */
+UINT __wrap__nx_secure_tls_client_handshake(NX_SECURE_TLS_SESSION *tls_session,
+                                            UCHAR *packet_buffer,
+                                            UINT data_length,
+                                            ULONG wait_option);
 
 UINT __wrap__nx_secure_tls_client_handshake(NX_SECURE_TLS_SESSION *tls_session,
                                             UCHAR *packet_buffer,

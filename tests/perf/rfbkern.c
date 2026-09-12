@@ -24,6 +24,31 @@ typedef unsigned char  rfbk_u8;
 
 typedef char rfbk_u32_is_four[(sizeof(rfbk_u32) == 4) ? 1 : -1];
 
+/*
+ * Prototyped here, through the same prefix macro the definitions use.  This
+ * file is compiled twice with different prefixes, so a shared header would
+ * have to be included twice with a different macro each time; rfbprof.c
+ * declares what it calls, and this is what checks the definitions against
+ * their own signatures.
+ */
+rfbk_u32 RFBK_PFX(xorstore)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u32 n);
+rfbk_u32 RFBK_PFX(xorkeep)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u8 *x,
+                           rfbk_u32 n);
+rfbk_u32 RFBK_PFX(cmponly)(const rfbk_u8 *s, const rfbk_u8 *d, rfbk_u32 n);
+rfbk_u32 RFBK_PFX(cmpstore)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u32 n);
+rfbk_u32 RFBK_PFX(cmpearly)(const rfbk_u8 *s, const rfbk_u8 *d, rfbk_u32 n);
+rfbk_u32 RFBK_PFX(cmponly8)(const rfbk_u8 *s, const rfbk_u8 *d, rfbk_u32 n);
+rfbk_u32 RFBK_PFX(xorkeep8)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u8 *x,
+                            rfbk_u32 n);
+rfbk_u32 RFBK_PFX(cmpstore8)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u32 n);
+rfbk_u32 RFBK_PFX(readonly)(const rfbk_u8 *s, rfbk_u32 n);
+void     RFBK_PFX(copy)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u32 n);
+void     RFBK_PFX(copyrows)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u32 rowlen,
+                            rfbk_u32 rows, rfbk_u32 stride);
+rfbk_u32 RFBK_PFX(xorkeep_tiled)(const rfbk_u8 *s, rfbk_u8 *d, rfbk_u8 *x,
+                                 rfbk_u32 bpr, rfbk_u32 rows,
+                                 rfbk_u32 tw, rfbk_u32 th);
+
 /* The shape rfb_diff_plane has today: read source, XOR against the shadow, OR
  * into an accumulator, store the source into the shadow.  Linear over a whole
  * plane rather than a 16-byte tile row, so this is the BEST the current shape

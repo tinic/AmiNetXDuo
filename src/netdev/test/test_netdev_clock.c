@@ -73,8 +73,6 @@ static ULONG beam_reads;
 static int   beam_stuck;
 static UWORD beam_frozen;
 
-VOID  netdev_clock_test_forget(VOID);
-ULONG netdev_clock_test_field(VOID);
 
 static ULONG mach_lines(void)
 {

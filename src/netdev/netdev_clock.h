@@ -72,4 +72,19 @@ ULONG netdev_clock_us_per_line(VOID);
  */
 ULONG netdev_clock_lines_per_field(VOID);
 
+#if defined(NETDEV_CLOCK_TEST)
+/*
+ * Test-only hooks: forget the measurement, and read the field length the
+ * costing came from without going through the published accessor.  Nothing in
+ * the driver calls either -- a machine does not change its chipset at runtime.
+ *
+ * Declared here rather than as an extern inside each test that wants them.
+ * test_netdev_clock.c and test_netdev_el3.c each carried their own copy and
+ * neither reached netdev_clock.c, so nothing checked the definitions against
+ * what the callers compile against.
+ */
+VOID  netdev_clock_test_forget(VOID);
+ULONG netdev_clock_test_field(VOID);
+#endif
+
 #endif /* AMINETXDUO_NETDEV_CLOCK_H */
