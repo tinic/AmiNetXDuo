@@ -111,6 +111,20 @@ except Exception as exc:                                  # noqa: BLE001
     say("terminal_status", "error")
     say("terminal_error", type(exc).__name__)
 
+# The installer enables -F beside -T.  Apart from being present, the page must
+# be the self-contained client and not a successful GET of a served file that
+# happens to have the reserved name.
+try:
+    st, hdr, body = request("GET", "/files")
+    say("files_status", st)
+    say("files_content_length", hdr.get("Content-Length", "none"))
+    say("files_body_bytes", len(body))
+    say("files_is_client", "yes" if b"AmiNetXDuo Files" in body and
+        b"PROPFIND" in body else "no")
+except Exception as exc:                                  # noqa: BLE001
+    say("files_status", "error")
+    say("files_error", type(exc).__name__)
+
 # ---- 2. WebDAV: put a file, read it back, compare the bytes ----------------
 with open(txt, "rb") as fh:
     payload = fh.read()
@@ -156,7 +170,7 @@ except Exception as exc:                                  # noqa: BLE001
 # they are the ones that need a socket rather than a client, and having two of
 # them would be two things to keep right.
 for name, leaf, args in (
-        ("httpd_drill", "httpd-drill.py", ["--terminal"]),
+        ("httpd_drill", "httpd-drill.py", ["--terminal", "--files"]),
         ("wsterm_console", "wsterm-console.py", []),
 ):
     script = os.path.join(drilldir, leaf)

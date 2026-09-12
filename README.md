@@ -69,7 +69,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 | DHCP, or a fixed address, netmask and gateway | DHCP |
 | The machine's name | `amiga-` and the card's last three address octets |
 | Start the network at boot | yes |
-| Start `httpd` at boot, sharing a drawer and a Shell in a browser, on which port | no |
+| Start `httpd` at boot, sharing a drawer with a browser file manager and Shell, on which port | no |
 
 The configuration follows the layout of Roadshow: `DEVS:NetInterfaces/<name>`
 defines an interface, `DEVS:Internet/routes`, `DEVS:Internet/name_resolution`
@@ -96,7 +96,7 @@ the NDK does not declare and the CPU profiler.
 | `arp` | the machines on this network that have answered, IPv4 and IPv6 |
 | `sntp` | set the clock from a time server |
 | `fetch` | retrieve an `http://` or `https://` URL |
-| `httpd` | share a drawer over HTTP and WebDAV, so other machines mount it as a drive. `-T` serves a Shell in a browser, `-C` the machine's own display |
+| `httpd` | share a drawer over HTTP and WebDAV, so other machines mount it as a drive. `-F` adds a browser file manager, `-T` a Shell, and `-C` the machine's display |
 | `nc` | connect or listen, TCP and UDP, port ranges, timeouts |
 | `iperf` | measure throughput against an `iperf` server, or act as one |
 | `telnet` | negotiates the options that a real server requires |
@@ -114,12 +114,17 @@ the NDK does not declare and the CPU profiler.
 The installer copies all of them into `C:`. Every command that resolves a name
 takes `-4` and `-6`.
 
-## A Shell in a web browser
+## Files, a Shell and the display in a web browser
 
-`httpd -T` serves an AmigaDOS Shell at **`http://<address>/shell`**, beside the
-drawer that it already shares. `httpd -C` serves the machine's display at
-`/console`, chipset and RTG screens alike. The installer offers to start the
-drawer and the Shell when the machine boots.
+`httpd -F` serves a file manager at **`http://<address>/files`**. It browses the
+shared drawer and downloads, uploads, creates, renames and deletes files and
+drawers through the same WebDAV interface that desktop file managers mount.
+Nothing is fetched from the Internet; the whole page is about 6 KB compressed.
+
+`httpd -T` serves an AmigaDOS Shell at `/shell`, beside the drawer that it
+already shares. `httpd -C` serves the machine's display at `/console`, chipset
+and RTG screens alike. The installer offers to start the drawer, file manager
+and Shell when the machine boots.
 
 The Shell is a real console, not a pipe. `Ed` and `More` work, and so do the
 cursor keys and the history. A program that asks how big the window is gets an

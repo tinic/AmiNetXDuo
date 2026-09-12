@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`httpd -F` serves a file manager at `/files`.** It browses the shared
+  drawer and downloads, uploads, creates, renames and deletes through the
+  server's existing WebDAV interface. The page is self-contained, needs no
+  Internet connection, handles Amiga filename bytes without assuming UTF-8,
+  and is 6 KB compressed. The installer enables it beside `/shell`
+
 ## 0.27.3
 
 - **`ssh` could wait forever after an unknown-host answer.** Amiga console

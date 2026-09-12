@@ -484,6 +484,28 @@ add_custom_target(tool_httpd_console_page ALL
 
 add_dependencies(tool_httpd tool_httpd_console_page)
 
+# The file manager is the third self-contained page.  It is generated from
+# web/client/files/ by tools/web/build-files.mjs, committed so an m68k build
+# needs no node, and staged beside httpd with its pre-compressed sibling.
+add_custom_command(
+    OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/files.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/files.html.gz"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/files.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/files.html"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/files.html.gz"
+            "${CMAKE_CURRENT_BINARY_DIR}/files.html.gz"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/files.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/files.html.gz"
+    COMMENT "Staging httpd's file-manager page")
+
+add_custom_target(tool_httpd_files_page ALL
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/files.html"
+            "${CMAKE_CURRENT_BINARY_DIR}/files.html.gz")
+
+add_dependencies(tool_httpd tool_httpd_files_page)
+
 # The crypto library in the mode that does not need nx_api.h; see
 # src/tools/nx_crypto_port.h for what that mode wants and why the port header
 # is ours.  Set on the target rather than globally: NX_CRYPTO_STANDALONE_ENABLE

@@ -1450,24 +1450,24 @@ stage_web() {
     hr "httpd's pages"
 
     #
-    # src/tools/web/shell.html and src/tools/web/console.html are COMMITTED
+    # src/tools/web/{shell,console,files}.html are COMMITTED
     # and the m68k build only copies them, so nothing about `cmake --build`
     # needs node.  The price of that is that a file can drift from the
     # TypeScript it was generated from, and a page a commit behind its sources
     # is a page whose bug is already fixed in a source nobody rebuilt.  This is
     # the check that catches it.
     #
-    # BOTH pages, each by its own builder: they share no bundle -- the Shell's
+    # All three pages, each by its own builder: they share no bundle -- the Shell's
     # carries a vendored terminal and two webfonts, the console's carries a
-    # planar decoder -- and a stage that checked one of the two would let the
-    # other rot exactly as far.
+    # planar decoder, and the file manager speaks WebDAV -- and checking fewer
+    # than all three would let the omitted one rot exactly as far.
     #
     # esbuild comes from npm and this may be a runner with no network, so a
     # missing node_modules is a SKIP with the command to fix it -- but a node
     # that is present and a page that does not match is a FAILURE.
     #
     if ! command -v node > /dev/null; then
-        skip "web: node is not installed, shell.html and console.html were not\
+        skip "web: node is not installed, the browser pages were not\
  checked against their sources (node tools/web/build.mjs --check)"
         return "$NOTHING"
     fi
@@ -1496,6 +1496,15 @@ stage_web() {
     else
         cat "$BUILD/web-console.log"
         fail "web (console.html does not match src/tools/web/client/console)"
+        return 1
+    fi
+
+    if node tools/web/build-files.mjs --check \
+            > "$BUILD/web-files.log" 2>&1; then
+        note "$(cat "$BUILD/web-files.log")"
+    else
+        cat "$BUILD/web-files.log"
+        fail "web (files.html does not match src/tools/web/client/files)"
         return 1
     fi
 

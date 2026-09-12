@@ -33,7 +33,7 @@ and digest; it does not compile.
 | `host32` | the targets needing `sizeof(void*) == 4`: the two fuzzers, and the socket files whose static assertions pin the 4.4BSD `iovec`/`msghdr` shape | `-m32` (gcc-multilib) |
 | `cross` | every cross configuration in `CROSS_CONFIGS`, warnings fatal (`cmake/ci-warnings.cmake`) | toolchain |
 | `stackframes` | the shipping library stack-frame budget; separate because it is invariant across the option matrix | toolchain |
-| `web` | httpd's terminal page still matches the TypeScript it is generated from, and vendored xterm.js is untouched | node |
+| `web` | httpd's Shell, console and file-manager pages match their sources; their focused browser self-tests pass; vendored xterm.js is untouched | node |
 | `analyze` | `tools/analyze.sh` — GCC `-fanalyzer` vs a triaged baseline — then `tools/cppcheck.sh` vs its baseline when cppcheck is installed, skipping that half when it is not. **Not in the default set** | toolchain |
 | `conformance` | builds `bsdsocktest` for m68k; running it is tier 2 | toolchain |
 | `emulator` | the on-Amiga harnesses in `EMULATOR_TESTS` | `AMINETXDUO_KICKSTART` |

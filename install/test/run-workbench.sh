@@ -2099,6 +2099,20 @@ if [ "$TERMINAL" = "1" ]; then
         bad=1
     fi
 
+    want=$(wc -c < "$HD/AmiNetXDuo/Terminal/files.html" 2>/dev/null | tr -d ' ')
+    got_len=$(key files_content_length)
+    if [ "$(key files_status)" = "200" ] &&
+       [ "$(key files_is_client)" = "yes" ] && [ -n "$want" ] &&
+       [ "$got_len" = "$want" ]; then
+        printf '  %-34s 200, Content-Length %s\n' \
+               "GET /files, from the peer" "$got_len"
+    else
+        printf '  %-34s status=%s client=%s length=%s wanted=%s\n' \
+               "GET /files, from the peer" "$(key files_status)" \
+               "$(key files_is_client)" "${got_len:-none}" "${want:-?}"
+        bad=1
+    fi
+
     if [ "$(key dav_roundtrip_identical)" = "yes" ]; then
         printf '  %-34s bytes identical\n' "WebDAV PUT then GET"
     else

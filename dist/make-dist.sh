@@ -487,6 +487,12 @@ need "$ROOT/src/tools/web/console.html.gz"
 cp "$ROOT/src/tools/web/console.html"    "$TREE/Terminal/console.html"
 cp "$ROOT/src/tools/web/console.html.gz" "$TREE/Terminal/console.html.gz"
 
+# httpd's WebDAV file manager, in lockstep with the server and the other pages.
+need "$ROOT/src/tools/web/files.html"
+need "$ROOT/src/tools/web/files.html.gz"
+cp "$ROOT/src/tools/web/files.html"    "$TREE/Terminal/files.html"
+cp "$ROOT/src/tools/web/files.html.gz" "$TREE/Terminal/files.html.gz"
+
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Docs.info"

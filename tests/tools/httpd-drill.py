@@ -13,6 +13,7 @@ import time
 
 argv = [a for a in sys.argv[1:] if not a.startswith("--")]
 WANT_TERMINAL = "--terminal" in sys.argv or "--ws-only" in sys.argv
+WANT_FILES = "--files" in sys.argv
 
 GZ_URL = ""
 for _a in sys.argv[1:]:
@@ -26,6 +27,7 @@ PORT = int(argv[1]) if len(argv) > 1 else 8080
 
 BASE = "/httpd-drill"
 TERM = "/shell"
+FILES = "/files"
 
 WS_WAIT = float(os.environ.get("AMINETXDUO_WS_WAIT", "20"))
 
@@ -1008,6 +1010,41 @@ def test_ws_page():
           % (a[0] if a else "nothing"))
 
 
+def test_files_page():
+    """The reserved address is the self-contained application, including
+    when compressed, and is never mistaken for a DAV resource."""
+    print("the WebDAV file manager's page")
+
+    a = once(req("GET", FILES))
+    check(a is not None and a[0] == 200,
+          "GET /files is 200 (got %s)" % (a[0] if a else "nothing"))
+    if a is not None:
+        check(a[1].get("content-length") == str(len(a[2])),
+              "its Content-Length is the page that arrived")
+        check(b"AmiNetXDuo Files" in a[2] and b"PROPFIND" in a[2],
+              "and it is the self-contained DAV client")
+
+    a = once(req("GET", FILES, {"Accept-Encoding": "gzip"}))
+    check(a is not None and a[0] == 200 and
+          a[1].get("content-encoding") == "gzip",
+          "a browser offering gzip gets the compressed page")
+    if a is not None and a[1].get("content-encoding") == "gzip":
+        try:
+            plain = gzip.decompress(a[2])
+        except (OSError, EOFError):
+            plain = b""
+        check(b"AmiNetXDuo Files" in plain and b"PROPFIND" in plain,
+              "and it unpacks to the DAV client")
+
+    a = once(req("PROPFIND", FILES, {"Depth": "0"}))
+    check(a is not None and a[0] == 405,
+          "/files is an application, not a DAV resource (got %s)"
+          % (a[0] if a else "nothing"))
+    if a is not None:
+        check(a[1].get("allow") == "GET, HEAD",
+              "and its Allow header names the two page methods")
+
+
 def test_term_gzip():
     """The page, compressed at build time and served as it lies.
 
@@ -1350,6 +1387,8 @@ def main():
             test_ws_one_session()
             test_ws_unmasked()
             test_term_no_gz()
+        if WANT_FILES:
+            test_files_page()
     finally:
         if not WS_ONLY:
             teardown()

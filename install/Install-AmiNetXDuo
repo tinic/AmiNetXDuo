@@ -265,16 +265,16 @@
   (cat "httpd serves one drawer to the other machines on the network, over "
        "HTTP and WebDAV.  The drawer appears as a drive in Finder, in "
        "Explorer and on Linux, with nothing installed at the far end.  With "
-       "the terminal on, httpd also answers at /shell with an AmigaDOS "
-       "Shell that runs in a web browser.\n\n"
-       "Neither half has a password, and no setting adds one.  Anyone who "
+       "the browser pages on, httpd also answers at /files with a file "
+       "manager and at /shell with an AmigaDOS Shell.\n\n"
+       "None of them has a password, and no setting adds one.  Anyone who "
        "can reach the port can read and write the drawer.  Anyone who can "
        "reach the port gets a Shell on this machine.  Behind a home router "
        "that is a convenience.  On a network with unknown people on it, it "
        "is not, and that is the whole of this decision.\n\n"
        "If the answer is yes, two lines go into S:User-Startup next to the "
        "line that starts the network.  One is an assign, so httpd can find "
-       "the page that the terminal is served from.  The other starts httpd. "
+       "the pages served to the browser.  The other starts httpd. "
        " If the answer is no on a later run, both lines are removed.\n\n"
        "The installer asks for the drawer and the port next."))
 
@@ -293,8 +293,8 @@
 
 (set H_HTTPDPORT
   (cat "80 is offered because a browser uses that port when the address "
-       "does not name one.  The terminal is then at http://<this machine>/"
-       "terminal, not at an address with a number in it.  Nothing in a "
+       "does not name one.  The file manager is then at http://<this machine>/"
+       "files, not at an address with a number in it.  Nothing in a "
        "stock Workbench listens there, and AmigaOS has no privileged "
        "ports, so a move gains nothing.\n\n"
        "If something else on this machine already uses 80, change it.  "
@@ -380,8 +380,8 @@
        "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_HTTPD
-  (cat "\nFrom the next reboot, httpd serves %s on port %ld, and a Shell in "
-       "a browser at /shell.  Neither asks for a password.\n"))
+  (cat "\nFrom the next reboot, httpd serves %s on port %ld, with a file "
+       "manager at /files and a Shell at /shell.  Neither asks for a password.\n"))
 
 (set H_DOCDIR
   (cat "The documentation, the example configuration files and the "
@@ -1884,8 +1884,8 @@
 ; startup Shell's console, which would otherwise keep that Shell alive.
 ;
 ; The assign is what lets the httpd line be short enough to be worth reading.
-; httpd looks for its page in AmiNetXDuo:Terminal/shell.html, among two
-; other places (src/tools/httpd.c httpd_term_places[]), and the drawer this
+; httpd looks for its pages in AmiNetXDuo:Terminal/, among two other places
+; (src/tools/httpd.c), and the drawer this
 ; installer put the page in is wherever the user said, so the assign is the
 ; only stable name for it.
 
@@ -1941,7 +1941,7 @@
             (cat BOOT_CMD ("Assign AmiNetXDuo: \"%s\"\n" DOCDIR))))
       (set BOOT_CMD
         (cat BOOT_CMD
-             ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T\n" HTTPD_ROOT HTTPD_PORT)))
+             ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T -F\n" HTTPD_ROOT HTTPD_PORT)))
     ))
 
 ; Three cases, and (startup) covers all of them because it writes the block

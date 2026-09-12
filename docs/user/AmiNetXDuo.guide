@@ -862,33 +862,36 @@
   Local sockets work before then; there is naturally no route to an
   external network.
 
-  @{b}A drawer, and a Shell in a browser, at boot@{ub}
+  @{b}A drawer, file manager and Shell in a browser, at boot@{ub}
 
   The Installer offers this option and defaults to no. Answering yes
   adds two more lines to the same block of S:User-Startup:
 
     Assign AmiNetXDuo: "Work:AmiNetXDuo"
-    Run >NIL: <NIL: C:httpd "RAM:" 80 -T
+    Run >NIL: <NIL: C:httpd "RAM:" 80 -T -F
 
   with the drawer and the port given to the Installer. httpd then
   serves that drawer over HTTP and WebDAV, so it mounts as a drive on a
-  desktop machine, and -T adds an AmigaDOS Shell in a web browser at
-  http://<this machine>/shell.
+  desktop machine. -F adds a file manager in a web browser at
+  http://<this machine>/files, with browsing, downloads, uploads, new
+  drawers, renaming and deletion. -T adds an AmigaDOS Shell at
+  http://<this machine>/shell. The file manager follows the browser's
+  light or dark appearance setting.
 
   A third switch, -C, serves this machine's display at
   http://<this machine>/console. The browser shows the frontmost screen
   and sends the mouse and the keyboard back. It is described under
   @{"The screen in a browser" link CONSOLE}.
 
-  None of the three has a password. There is no setting that adds one.
+  None of these has a password. There is no setting that adds one.
   Anyone who can reach the port can read and write the drawer. Anyone
   who can reach the port has an AmigaDOS Shell on this machine. With
   -C, anyone who can reach the port has the screen, the keyboard, the
   mouse, and a button that reboots the machine. Those are the complete
   terms of this option.
 
-  The assign is how -T finds the page it serves. The Installer places
-  that page in the AmiNetXDuo drawer with the documentation. Running
+  The assign is how -T and -F find the pages they serve. The Installer places
+  those pages in the AmiNetXDuo drawer with the documentation. Running
   the Installer again and answering no removes both lines.
 
   @{b}Stopping@{ub}
@@ -1033,8 +1036,8 @@
     tftp              the small file transfer protocol
     iperf             measure throughput against an iperf server, or
                       act as one
-    httpd             serve a drawer, over HTTP and WebDAV, with -T a
-                      Shell in a browser and @{"-C the screen" link CONSOLE}
+    httpd             serve a drawer over HTTP and WebDAV; -F adds a file
+                      manager, -T a Shell and @{"-C the screen" link CONSOLE}
 
   Only the linked commands have a page here. The rest answer "?" with
   their template and behave the way the same command does on other

@@ -38,8 +38,10 @@ done
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
+FILEPAGE="$ROOT/src/tools/web/files.html"
+FILEPAGEGZ="$FILEPAGE.gz"
 
-for f in "$TOOLS/httpd" "$BSD"; do
+for f in "$TOOLS/httpd" "$BSD" "$FILEPAGE" "$FILEPAGEGZ"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -87,6 +89,7 @@ echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
 dd if=/dev/urandom of="$STAGE/Public/blob.bin" bs=1024 count=512 status=none
 
 echo "==> serving DH0:Public on http://$ADDRESS:$PORT/ for ${WINDOW}s"
+echo "==> file manager at http://$ADDRESS:$PORT/files"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-httpd}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
@@ -94,8 +97,9 @@ HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" -t "$WINDOW" \
     -I "$TOOLS/AddNetInterface" \
-    -a "DH0:Public $PORT TRACE" \
-    "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" &
+    -a "DH0:Public $PORT -F FILEPAGE=DH0:files.html TRACE" \
+    "$TOOLS/httpd" "$STAGE/devs" "$STAGE/libs" "$STAGE/Public" \
+    "$FILEPAGE" "$FILEPAGEGZ" &
 RUNNER=$!
 set -e
 
@@ -104,14 +108,22 @@ for _ in $(seq 1 "$((WINDOW / 2))"); do
     sleep 2
     kill -0 "$RUNNER" 2>/dev/null || break
     if curl -s -m 4 -o /dev/null -w '%{http_code}' \
-            "http://$ADDRESS:$PORT/" 2>/dev/null | grep -q '^200$'; then
+            "http://$ADDRESS:$PORT/" 2>/dev/null | grep -q '^200$' &&
+       curl -s -m 4 -o /dev/null -w '%{http_code}' \
+            "http://$ADDRESS:$PORT/files" 2>/dev/null | grep -q '^200$'; then
         ANSWERED=yes
         break
     fi
 done
 
 if [ "$ANSWERED" = yes ]; then
-    echo "==> the guest answered a GET from this host"
+    echo "==> the guest answered GET / and GET /files from this host"
+    got=$(curl -s -m 8 -o /dev/null -w '%{http_code}' \
+              "http://$ADDRESS:$PORT/files" 2>/dev/null || true)
+    [ "$got" = 200 ] || {
+        echo "!! GET /files answered ${got:-nothing}" >&2
+        ANSWERED=no
+    }
     echo "==> point a client at http://$ADDRESS:$PORT/ now"
 else
     echo "!! the guest never answered from this host" >&2

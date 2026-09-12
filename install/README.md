@@ -87,7 +87,7 @@ adds a second machine. It then checks four more things:
 - that a pre-existing `S:User-Startup` survives
 - that the managed block is replaced rather than appended to
 - that the third install takes the added lines away again
-- that the peer, while the machine is up, can fetch `/shell`, PUT and GET a file
+- that the peer, while the machine is up, can fetch `/shell` and `/files`, PUT and GET a file
   byte-for-byte, and have the Amiga `lha x` the release archive
 
 `AMINETXDUO_PEER` names that machine and has no default. The host that runs the

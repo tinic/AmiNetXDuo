@@ -190,6 +190,8 @@ live|httpd|no-root|5|re:required argument missing|-|SYS:httpd
 live|httpd|bad-root|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099
 live|httpd|term-no-page|5|re:to serve the terminal from|-|SYS:httpd DH0: 8099 -T PAGE=DH0:nosuchpage.html
 live|httpd|term-page-checked|5|re:there is no .DH0:nosuchdirectory. to serve|-|SYS:httpd DH0:nosuchdirectory 8099 -T PAGE=DH0:shell.html
+live|httpd|files-no-page|5|re:to serve the file manager from|-|SYS:httpd DH0: 8099 -F FILEPAGE=DH0:nosuchpage.html
+live|httpd|filepage-without-f|5|re:FILEPAGE names the file manager|-|SYS:httpd DH0: 8099 FILEPAGE=DH0:files.html
 # Bare -T, both ways.
 #
 # FOUND: httpd is at SYS:, so PROGDIR: is the stage root and the page staged
@@ -394,6 +396,7 @@ stage_group() {
     printf 'hello from the amiga\n' > "$stage/greeting.txt"
     mkdir -p "$stage/Terminal" "$stage/nopage"
     printf '<html><body>stub</body></html>\n' > "$stage/Terminal/shell.html"
+    printf '<html><body>files</body></html>\n' > "$stage/Terminal/files.html"
     cp "$TOOLS/httpd" "$stage/nopage/httpd"
 }
 

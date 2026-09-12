@@ -27,7 +27,7 @@ static const char version_tag[] __attribute__((used)) =
 #define TEMPLATE                                                        \
     "ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,"     \
     "VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K,CONSOLE=-C/S,"           \
-    "CONSOLEPAGE/K"
+    "CONSOLEPAGE/K,FILES=-F/S,FILEPAGE/K"
 
 enum
 {
@@ -42,6 +42,8 @@ enum
     ARG_PAGE,
     ARG_CONSOLE,
     ARG_CONSOLEPAGE,
+    ARG_FILES,
+    ARG_FILEPAGE,
     ARG_COUNT
 };
 
@@ -67,6 +69,18 @@ static const char *const httpd_console_places[] = {
 #define HTTPD_CONSOLE_PLACES                                            \
     ((ULONG)(sizeof(httpd_console_places) /                             \
              sizeof(httpd_console_places[0])))
+
+/* The browser file manager is another self-contained page in the same
+   installed drawer.  It speaks ordinary WebDAV back to this server; unlike
+   -T and -C it adds no authority that the served drawer did not have. */
+static const char *const httpd_files_places[] = {
+    "AmiNetXDuo:Terminal/files.html",
+    "PROGDIR:Terminal/files.html",
+    "PROGDIR:files.html"
+};
+
+#define HTTPD_FILES_PLACES                                              \
+    ((ULONG)(sizeof(httpd_files_places) / sizeof(httpd_files_places[0])))
 
 /* --------------------------------------------------------------- limits --- */
 
@@ -138,6 +152,11 @@ static const char *const httpd_console_places[] = {
    parameter of the first: they are two apps, and a machine can be running
    either, both or neither. */
 #define HTTPD_CONSOLE_URL   "/console"
+
+/* A file called "files" beneath the served drawer remains reachable unless
+   -F is enabled.  With -F this address belongs to the application, exactly as
+   /shell belongs to -T. */
+#define HTTPD_FILES_URL     "/files"
 
 /* The version of RFC 6455 there is.  A client asking for another gets 426 and
    this number back, which is what 4.4 says to do rather than refusing flat. */
@@ -371,6 +390,7 @@ struct HttpConn
        same slot, the same buffers and the same event loop carry it. */
     UBYTE   is_term;                /* this request is for /shell          */
     UBYTE   is_console;             /* this request is for /console        */
+    UBYTE   is_files;               /* this request is for /files          */
     UBYTE   fb_owner;               /* this connection holds the console   */
     UBYTE   ws_upgrade;             /* Upgrade: websocket was there        */
     UBYTE   ws_connection;          /* and Connection: listed upgrade      */
@@ -426,6 +446,9 @@ static char   httpd_term_gz[HTTP_PATH_MAX];
    one string answers both where it is and whether there is a console. */
 static char   httpd_console_page[HTTP_PATH_MAX];
 static char   httpd_console_gz[HTTP_PATH_MAX];
+/* The file manager's page and compressed sibling. */
+static char   httpd_files_page[HTTP_PATH_MAX];
+static char   httpd_files_gz[HTTP_PATH_MAX];
 
 /* Which connection holds the console, or NULL.  A pointer and not a scan over
    fb_owner: the 101 goes out a pass before the session starts, and in between
@@ -1193,6 +1216,7 @@ static VOID httpd_reset(HttpConn *c)
 
     c->is_term       = 0;
     c->is_console    = 0;
+    c->is_files      = 0;
     c->ws_take       = 0;
     c->ws_upgrade    = 0;
     c->ws_connection = 0;
@@ -3615,6 +3639,26 @@ static VOID httpd_console_page_get(HttpConn *c)
                        "the console's page will not open");
 }
 
+static VOID httpd_files_page_get(HttpConn *c)
+{
+    httpd_app_page_get(c, httpd_files_page, httpd_files_gz,
+                       "the file manager's page will not open");
+}
+
+static VOID httpd_do_files(HttpConn *c)
+{
+    if (c->method->id != HTTPD_M_GET && c->method->id != HTTPD_M_HEAD)
+    {
+        httpd_begin(c, 405);
+        httpd_header(c, "Allow", "GET, HEAD");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "The file manager answers GET.\r\n");
+        return;
+    }
+
+    httpd_files_page_get(c);
+}
+
 /* Take the terminal off whoever has it.  TRUE when somebody was let go of.  A
    session that has stopped answering is taken with no permission; a live one
    only when the request asked, `?take=1`.  Nothing here starts a Shell. */
@@ -5470,6 +5514,26 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
     }
 
+    /* The file manager has no WebSocket half, but it is still an application
+       address rather than a file under the shared drawer. */
+    if (httpd_files_page[0] != '\0')
+    {
+        ULONG n = 0;
+
+        while (httpd_target[n] != '\0' && httpd_target[n] != '?')
+            n++;
+
+        if (n == hs_len(HTTPD_FILES_URL) &&
+            hs_nicmp(httpd_target, HTTPD_FILES_URL, n) == 0)
+        {
+            c->is_files = 1;
+            hs_copy(c->path.url, sizeof(c->path.url), HTTPD_FILES_URL);
+            c->path.path[0] = '\0';
+            c->path.name[0] = '\0';
+            return TRUE;
+        }
+    }
+
     why = http_path_resolve(httpd_root, httpd_target, &c->path);
     if (why != HTTP_PATH_OK)
     {
@@ -5904,6 +5968,13 @@ static VOID httpd_dispatch(HttpConn *c)
     if (c->is_console)
     {
         httpd_do_console(c);
+        httpd_log_status(c);
+        return;
+    }
+
+    if (c->is_files)
+    {
+        httpd_do_files(c);
         httpd_log_status(c);
         return;
     }
@@ -6866,6 +6937,83 @@ static VOID httpd_serve(LONG lsock)
     }
 }
 
+/* Resolve one optional browser application's page before the listener opens.
+   The page is deliberately not held open: serving it uses the ordinary file
+   producer and notices replacement between requests. */
+static BOOL httpd_find_app_page(const char *named,
+                                const char *const *places, ULONG place_count,
+                                const char *option, const char *page_option,
+                                const char *what,
+                                char *plain, ULONG plain_len,
+                                char *gz, ULONG gz_len)
+{
+    BPTR  page = (BPTR)0;
+    ULONG i;
+
+    if (named != NULL)
+    {
+        page = Open((CONST_STRPTR)named, MODE_OLDFILE);
+        if (page == (BPTR)0)
+        {
+            tool_error("there is no \"%s\" to serve the %s from",
+                       (LONG)named, (LONG)what);
+            tool_fault(IoErr());
+            return FALSE;
+        }
+    }
+    else
+    {
+        for (i = 0; i < place_count; i++)
+        {
+            page = Open((CONST_STRPTR)places[i], MODE_OLDFILE);
+            if (page != (BPTR)0)
+            {
+                named = places[i];
+                break;
+            }
+        }
+
+        if (named == NULL)
+        {
+            static char where[320];
+            ULONG       used = 0;
+            BOOL        ok = TRUE;
+
+            where[0] = '\0';
+            for (i = 0; i < place_count; i++)
+            {
+                ok = ok && hs_append(where, sizeof(where), &used, "\n    ");
+                ok = ok && hs_append(where, sizeof(where), &used, places[i]);
+            }
+            if (!ok)
+                where[0] = '\0';
+
+            tool_error("%s was given and there is no page to serve the %s "
+                       "from.  Looked for:%s\n  %s=<file> names one "
+                       "somewhere else.",
+                       (LONG)option, (LONG)what, (LONG)where,
+                       (LONG)page_option);
+            return FALSE;
+        }
+    }
+
+    (VOID)Close(page);
+    hs_copy(plain, plain_len, named);
+
+    {
+        ULONG used = 0;
+        BOOL  fits;
+
+        gz[0] = '\0';
+        fits = hs_append(gz, gz_len, &used, plain);
+        fits = fits && hs_append(gz, gz_len, &used, ".gz");
+        if (!fits)
+            gz[0] = '\0';
+    }
+
+    return TRUE;
+}
+
 int main(int argc, char **argv)
 {
     LONG            args[ARG_COUNT];
@@ -6893,12 +7041,12 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<drawer> [<port>] [-v] [TRACE] [-T [PAGE <file>]] "
-                   "[-C [CONSOLEPAGE <file>]]",
+                   "[-C [CONSOLEPAGE <file>]] [-F [FILEPAGE <file>]]",
                    "Serves a drawer over HTTP and WebDAV, so this machine can "
                    "be mounted as a writable drive.  -T adds /shell, an "
                    "AmigaDOS Shell in a browser.  -C adds /console, the "
-                   "frontmost screen.  Both are open to anyone who can "
-                   "reach the port.");
+                   "frontmost screen.  -F adds /files, a browser file "
+                   "manager.  All are open to anyone who can reach the port.");
         return RETURN_ERROR;
     }
 
@@ -6998,173 +7146,68 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /* The terminal's page, if there is to be one.  Checked here rather than
-       on the first request: a -T with nowhere to serve from refuses to start,
-       and the refusal names every place that was looked in. */
+    if (args[ARG_FILEPAGE] != 0 && args[ARG_FILES] == 0)
+    {
+        tool_error("FILEPAGE names the file manager's page, and -F turns the "
+                   "file manager on");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    /* Each optional page is resolved before the listener opens.  A requested
+       application with no page refuses to start and says every place tried;
+       silently serving a dead address looks like a network fault. */
     if (args[ARG_TERMINAL] != 0)
     {
         const char *named = (args[ARG_PAGE] != 0)
                                 ? (const char *)args[ARG_PAGE] : NULL;
-        BPTR        page  = (BPTR)0;
 
-        if (named != NULL)
+        if (!httpd_find_app_page(named, httpd_term_places,
+                                 HTTPD_TERM_PLACES, "-T", "PAGE", "terminal",
+                                 httpd_term_page, sizeof(httpd_term_page),
+                                 httpd_term_gz, sizeof(httpd_term_gz)))
         {
-            page = Open((CONST_STRPTR)named, MODE_OLDFILE);
-
-            if (page == (BPTR)0)
-            {
-                tool_error("there is no \"%s\" to serve the terminal from",
-                           (LONG)named);
-                tool_fault(IoErr());
-                FreeArgs(rda);
-                return RETURN_ERROR;
-            }
-        }
-        else
-        {
-            for (i = 0; i < HTTPD_TERM_PLACES; i++)
-            {
-                page = Open((CONST_STRPTR)httpd_term_places[i], MODE_OLDFILE);
-
-                if (page != (BPTR)0)
-                {
-                    named = httpd_term_places[i];
-                    break;
-                }
-            }
-
-            if (named == NULL)
-            {
-                static char where[320];
-                ULONG       used = 0;
-                BOOL        ok   = TRUE;
-
-                for (i = 0; i < HTTPD_TERM_PLACES; i++)
-                {
-                    ok = ok && hs_append(where, sizeof(where), &used,
-                                         "\n    ");
-                    ok = ok && hs_append(where, sizeof(where), &used,
-                                         httpd_term_places[i]);
-                }
-
-                if (!ok)
-                    where[0] = '\0';    /* cannot happen, and no place to name */
-
-                tool_error("-T was given and there is no page to serve the "
-                           "terminal from.  Looked for:%s\n"
-                           "  PAGE=<file> names one somewhere else.",
-                           (LONG)where);
-                FreeArgs(rda);
-                return RETURN_ERROR;
-            }
+            FreeArgs(rda);
+            return RETURN_ERROR;
         }
 
-        (VOID)Close(page);
-        hs_copy(httpd_term_page, sizeof(httpd_term_page), named);
-
-        /* The compressed copy's name, which is the page's own with .gz on
-           the end.  A name and not a decision: whether a file of it exists
-           is asked per request.  Left empty when it would not fit. */
-        {
-            ULONG used = 0;
-            BOOL  fits;
-
-            httpd_term_gz[0] = '\0';
-
-            fits = hs_append(httpd_term_gz, sizeof(httpd_term_gz), &used,
-                             httpd_term_page);
-            fits = fits && hs_append(httpd_term_gz, sizeof(httpd_term_gz),
-                                     &used, ".gz");
-
-            if (!fits)
-                httpd_term_gz[0] = '\0';
-        }
-
-        /* Said before the serving banner rather than in it, because this is the
-           one thing about the run the command line does not state. */
         tool_printf("Terminal page: %s\n", (LONG)httpd_term_page);
     }
 
-    /* The console's page, on exactly the -T rule above: found before anything
-       is served, and a -C with nowhere to serve from refuses to start. */
     if (args[ARG_CONSOLE] != 0)
     {
         const char *named = (args[ARG_CONSOLEPAGE] != 0)
                                 ? (const char *)args[ARG_CONSOLEPAGE] : NULL;
-        BPTR        page  = (BPTR)0;
 
-        if (named != NULL)
+        if (!httpd_find_app_page(named, httpd_console_places,
+                                 HTTPD_CONSOLE_PLACES, "-C", "CONSOLEPAGE",
+                                 "console", httpd_console_page,
+                                 sizeof(httpd_console_page), httpd_console_gz,
+                                 sizeof(httpd_console_gz)))
         {
-            page = Open((CONST_STRPTR)named, MODE_OLDFILE);
-
-            if (page == (BPTR)0)
-            {
-                tool_error("there is no \"%s\" to serve the console from",
-                           (LONG)named);
-                tool_fault(IoErr());
-                FreeArgs(rda);
-                return RETURN_ERROR;
-            }
-        }
-        else
-        {
-            for (i = 0; i < HTTPD_CONSOLE_PLACES; i++)
-            {
-                page = Open((CONST_STRPTR)httpd_console_places[i],
-                            MODE_OLDFILE);
-
-                if (page != (BPTR)0)
-                {
-                    named = httpd_console_places[i];
-                    break;
-                }
-            }
-
-            if (named == NULL)
-            {
-                static char where[320];
-                ULONG       used = 0;
-                BOOL        ok   = TRUE;
-
-                for (i = 0; i < HTTPD_CONSOLE_PLACES; i++)
-                {
-                    ok = ok && hs_append(where, sizeof(where), &used,
-                                         "\n    ");
-                    ok = ok && hs_append(where, sizeof(where), &used,
-                                         httpd_console_places[i]);
-                }
-
-                if (!ok)
-                    where[0] = '\0';
-
-                tool_error("-C was given and there is no page to serve the "
-                           "console from.  Looked for:%s\n"
-                           "  CONSOLEPAGE=<file> names one somewhere else.",
-                           (LONG)where);
-                FreeArgs(rda);
-                return RETURN_ERROR;
-            }
-        }
-
-        (VOID)Close(page);
-        hs_copy(httpd_console_page, sizeof(httpd_console_page), named);
-
-        {
-            ULONG used = 0;
-            BOOL  fits;
-
-            httpd_console_gz[0] = '\0';
-
-            fits = hs_append(httpd_console_gz, sizeof(httpd_console_gz), &used,
-                             httpd_console_page);
-            fits = fits && hs_append(httpd_console_gz,
-                                     sizeof(httpd_console_gz), &used, ".gz");
-
-            if (!fits)
-                httpd_console_gz[0] = '\0';
+            FreeArgs(rda);
+            return RETURN_ERROR;
         }
 
         tool_printf("Console page: %s\n", (LONG)httpd_console_page);
+    }
+
+    if (args[ARG_FILES] != 0)
+    {
+        const char *named = (args[ARG_FILEPAGE] != 0)
+                                ? (const char *)args[ARG_FILEPAGE] : NULL;
+
+        if (!httpd_find_app_page(named, httpd_files_places,
+                                 HTTPD_FILES_PLACES, "-F", "FILEPAGE",
+                                 "file manager", httpd_files_page,
+                                 sizeof(httpd_files_page), httpd_files_gz,
+                                 sizeof(httpd_files_gz)))
+        {
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        tool_printf("File manager page: %s\n", (LONG)httpd_files_page);
     }
 
     httpd_read_gmt_offset();
