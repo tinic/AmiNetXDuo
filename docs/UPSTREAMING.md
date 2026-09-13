@@ -101,7 +101,34 @@ holds the IP lock processing input), `crypto68k` routing, and `WIP tcp:
 timestamps on data segments, sequence accounting still wrong` — which needs
 squashing regardless.
 
-## 8. Unverified
+## 8. What a submission must satisfy
 
-Whether eclipse-threadx requires a CLA/DCO sign-off or MISRA conformance
-statements. Both would apply to every patch. Nobody has looked.
+**ECA, and it is already on file.** `CONTRIBUTING.md` requires the Eclipse
+Contributor Agreement and says it replaces the per-commit trailer: "Having an
+ECA on file associated with the email address matching the 'Author' field of
+your contribution's Git commits fulfills the DCO's requirement". Only 3 of the
+last 40 commits on `dev` carry `Signed-off-by`. Proof it is in place:
+`1ff784be`, `ccf51e1a` and `007e3cc1` are authored by `tinicuro@gmail.com`.
+**Author every patch with that address** — the ECA bot blocks a PR whose
+author email has no agreement.
+
+**MISRA is not a contribution requirement.** Zero mentions across `common`,
+`nx_secure`, `crypto_libraries` and `addons`; one incidental hit in an FTP
+test; no job in `ci-dev.yml`; nothing in `CONTRIBUTING.md`. What a PR does
+face is `ci-dev.yml`, which classifies the changed paths and runs the matching
+regression suites (`dns_test`, `mdns_test`, `crypto_test`, `dhcp_test` …), so
+our tests have to pass in their harness.
+
+**AI-assisted contributions are routine, and the disclosure is a trailer.** 11
+of the last 60 netxduo commits and 3 of 60 threadx commits name an AI
+co-author — including five by `frederic.desbiens@eclipse-foundation.org`, who
+is Eclipse Foundation staff, and two by `edouard.malot@gmail.com` using Claude:
+
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+    Co-authored-by: Codex <codex@openai.com>
+    Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+No checkbox, no statement, no separate declaration. Our commits already carry
+the same form. The Foundation's handbook still puts accuracy and IP vetting on
+the contributor however the code was produced, and the exact wording it wants
+is not stated anywhere we could find — the practice above is what merged.

@@ -20,6 +20,14 @@
 # remote is absent and --fetch was not asked for: a number this cannot compute
 # is not reported as zero.
 #
+# THE ONE THING TO GET RIGHT BEFORE SUBMITTING ANYTHING: eclipse-threadx takes
+# the Eclipse Contributor Agreement in place of a per-commit Signed-off-by, and
+# it is matched against the AUTHOR EMAIL.  Ours is on file for
+# tinicuro@gmail.com -- #408, #409 and #413 merged under it -- so a patch
+# authored from any other address is blocked by the ECA bot with nothing wrong
+# with the patch.  Printed below rather than left in docs/UPSTREAMING.md,
+# because this is the command someone runs at the moment it matters.
+#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -96,4 +104,6 @@ if [ "$missing" = 1 ]; then
 fi
 
 [ "$rc" = 0 ] && echo "upstream_drift=ok modules=${#MODULES[@]}"
+echo "upstream_eca_author=tinicuro@gmail.com" \
+     "note=author_email_must_match_the_ECA_on_file"
 exit "$rc"
