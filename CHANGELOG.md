@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`scp` hung at the unknown-host question.** `/dev/tty` did not resolve, so
+  Dropbear read the answer from standard input, which in the `ssh` that `scp`
+  starts is the file-transfer pipe. It now reaches the console the command was
+  invoked from, the one 0.27.3 gave the password prompt. Reported by mja65
+
 ## 0.27.4
 
 - **`httpd -F` serves a file manager at `/files`.** The WebDAV root and the

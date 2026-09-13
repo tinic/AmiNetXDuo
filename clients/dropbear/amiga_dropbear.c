@@ -120,10 +120,15 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #define DB_PIPE_PAIRS   8
 #define DB_PIPE_LIMIT   (DB_PIPE_BASE + 2 * DB_PIPE_PAIRS)
 #define DB_RAND_FD      DB_PIPE_LIMIT
+#define DB_TTY_FD       (DB_PIPE_LIMIT + 1)
 
 #define IS_SOCK(fd)     ((fd) >= DB_SOCK_BASE && (fd) < DB_SOCK_LIMIT)
 #define IS_PIPE(fd)     ((fd) >= DB_PIPE_BASE && (fd) < DB_PIPE_LIMIT)
 #define IS_RAND(fd)     ((fd) == DB_RAND_FD)
+#define IS_TTY(fd)      ((fd) == DB_TTY_FD)
+
+static int tty_read(void *buf, size_t len);
+extern __typeof__(read) __wrap_read;
 
 #define SOCKOF(fd)      ((LONG)((fd) - DB_SOCK_BASE))
 
@@ -510,6 +515,16 @@ int __wrap_open(const char *path, int flags, ...)
 
     path = amiga_fix_path(path);
 
+    if (path != NULL && strcmp(path, "/dev/tty") == 0)
+    {
+        if ((flags & 3) != 0)
+        {
+            errno = EACCES;
+            return -1;
+        }
+        return DB_TTY_FD;
+    }
+
     if (path != NULL && strcmp(path, AMIGA_URANDOM_DEV) == 0)
     {
         /* Read-only, and only one at a time; nothing here opens two. */
@@ -676,6 +691,22 @@ static void amiga_stdio_normalize_newline(int fd, void *buf, size_t len)
             p[i] = '\n';
 }
 
+/* newlib's fopen() reaches _open_r() from inside libc.a, so --wrap=open cannot
+   see it: cli-kex.c's fopen(_PATH_TTY, "r") would miss the mapping above and
+   fall back to reading the SCP protocol pipe.  Same reason _read_r and
+   _write_r are wrapped. */
+extern int __real__open_r(struct _reent *, const char *, int, int);
+
+extern __typeof__(_open_r) __wrap__open_r;
+int __wrap__open_r(struct _reent *reent, const char *path, int flags, int mode)
+{
+    int fd = __wrap_open(path, flags, mode);
+
+    if (fd < 0 && reent != NULL)
+        reent->_errno = errno;
+    return fd;
+}
+
 extern _ssize_t __real__read_r(struct _reent *, int, void *, size_t);
 
 extern __typeof__(_read_r) __wrap__read_r;
@@ -683,8 +714,23 @@ _ssize_t __wrap__read_r(struct _reent *reent, int fd, void *buf, size_t len)
 {
     int n;
 
+    /* THE SYNTHETIC DESCRIPTORS HAVE TO COME BACK THROUGH __wrap_read().
+       newlib's stdio reaches _read_r() directly, so a FILE* opened on one of
+       our own fds -- cli-kex.c's fopen(_PATH_TTY) is the one that matters --
+       would otherwise be handed to the real newlib read, which knows nothing
+       about it and answers end of file.  That is exactly what "Didn't
+       validate host key" was: the prompt read EOF instead of the `y'. */
     if (fd != 0)
+    {
+        if (IS_TTY(fd) || IS_RAND(fd) || IS_PIPE(fd) || IS_SOCK(fd))
+        {
+            n = __wrap_read(fd, buf, len);
+            if (n < 0 && reent != NULL)
+                reent->_errno = errno;
+            return (_ssize_t)n;
+        }
         return __real__read_r(reent, fd, buf, len);
+    }
 
     n = amiga_raw_read(fd, buf, len);
     if (n > 0)
@@ -724,6 +770,9 @@ _ssize_t __wrap_read(int fd, void *buf, size_t len)
     if (fd == 0 && con_active())
         return con_read(buf, len);
 
+    if (IS_TTY(fd))
+        return tty_read(buf, len);
+
     if (IS_RAND(fd))
         return rand_fill(buf, len);
 
@@ -748,7 +797,7 @@ _ssize_t __wrap_write(int fd, const void *buf, size_t len)
     if (IS_PIPE(fd))
         return pipe_write(fd, buf, len);
 
-    if (IS_RAND(fd))
+    if (IS_TTY(fd) || IS_RAND(fd))
         return (int)len;                /* swallowed: see rand_fill() */
 
     if (fd == 1 && amiga_stdio_pipe(fd) != NULL)
@@ -914,6 +963,9 @@ int __wrap_close(int fd)
 
     if (IS_SOCK(fd))
         return (int)nx_closesocket(SOCKOF(fd));
+
+    if (IS_TTY(fd))
+        return 0;               /* nothing was opened: see __wrap_open() */
 
     if (IS_RAND(fd))
     {
@@ -2041,6 +2093,70 @@ int tcsetattr(int fd, int actions, const struct termios *t)
         SetMode(h, 0);
     }
     return 0;
+}
+
+/*
+ * THE CONTROLLING TERMINAL, and why /dev/tty has to resolve.
+ *
+ * cli-kex.c:249 asks the unknown-host question like this:
+ *
+ *     tty = fopen(_PATH_TTY, "r");
+ *     if (tty) { response = getc(tty); fclose(tty); }
+ *     else     { response = getc(stdin); while ((getchar()) != '\n'); }
+ *
+ * Dropbear already knows the answer belongs to the TERMINAL and not to stdin.
+ * On this port /dev/tty resolved to nothing, so it always took the fallback --
+ * and in the ssh that scp SPAWNS, stdin is the SCP protocol pipe.  The `y' the
+ * person types goes to the console while the prompt reads the pipe, and the
+ * flush loop then spins on a stream that will never carry a newline.  Plain
+ * ssh was unaffected because its stdin IS the console, which is why adding the
+ * host with ssh first made scp work.
+ *
+ * 0.27.3 gave getpass() the same console through prompt_input and fixed the
+ * PASSWORD prompt; the host-key prompt never used it because it goes through
+ * stdio to fd 0.  One channel, both prompts.
+ */
+static BPTR amiga_prompt_handle(void)
+{
+    struct amiga_stdio_override *stdio = amiga_stdio_descriptor();
+
+    return (stdio != NULL && stdio->prompt_input != (BPTR)0)
+               ? stdio->prompt_input : Input();
+}
+
+static int tty_read(void *buf, size_t len)
+{
+    BPTR in = amiga_prompt_handle();
+    LONG n;
+
+    if (in == (BPTR)0 || len == 0)
+        return 0;
+    if (len > (size_t)LONG_MAX)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    n = Read(in, buf, (LONG)len);
+    if (n < 0)
+    {
+        errno = EIO;
+        return -1;
+    }
+
+    /* The console ends a cooked line with CR; getc() and the flush loop above
+       are written against LF.  Same translation __wrap__read_r does for a
+       console on fd 0, applied where the console actually is. */
+    {
+        unsigned char *p = (unsigned char *)buf;
+        LONG i;
+
+        for (i = 0; i < n; i++)
+            if (p[i] == '\r')
+                p[i] = '\n';
+    }
+
+    return (int)n;
 }
 
 /* getpass() over dos.library: SetMode(handle, 1) stops the echo and makes Read()
