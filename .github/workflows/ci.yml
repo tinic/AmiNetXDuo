@@ -275,6 +275,7 @@ jobs:
             tools/build-release.sh \
             tools/stage-developer.sh \
             tools/check-release-ready.sh \
+            tools/upstream-drift.sh \
             tools/analyze.sh \
             tools/cppcheck.sh \
             tools/version.sh \
