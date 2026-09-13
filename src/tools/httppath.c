@@ -276,8 +276,8 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
 
 HttpPathResult http_path_resolve_volumes(const char *target, HttpPath *out)
 {
-    char           mapped[HTTP_PATH_MAX];
     const char    *src;
+    char          *dst;
     unsigned long  n = 0;
     HttpPathResult why;
 
@@ -294,29 +294,30 @@ HttpPathResult http_path_resolve_volumes(const char *target, HttpPath *out)
         return HTTP_PATH_OK;
     }
 
+    /*
+     * IN PLACE, AND THE 256-BYTE COPY THIS REPLACED WAS A STACK DEFECT.  The
+     * rewrite only ever shortens: "@:Work/Docs" becomes "Work:Docs", two
+     * characters of prefix and a separator out for a colon in.  So the writer
+     * never catches the reader and no second buffer is needed -- and the one
+     * that was here sat in httpd_resolve_path()'s frame, inlined, for the
+     * whole of the http_path_resolve() call below it.  That put httpd's
+     * deepest path (the If: header's resolver ladder) at 3436 bytes against
+     * the 3200 a 4096-byte Shell stack allows.
+     */
     src = out->path + 2;                 /* past the temporary "@:"      */
-    while (*src != '\0' && *src != '/')
-    {
-        if (n + 2UL >= sizeof(mapped))
-            return HTTP_PATH_TOO_LONG;
-        mapped[n++] = *src++;
-    }
+    dst = out->path;
 
-    mapped[n++] = ':';
+    while (*src != '\0' && *src != '/')
+        dst[n++] = *src++;
+
+    dst[n++] = ':';
     if (*src == '/')
         src++;                            /* "Work:Docs", not "Work:/Docs" */
 
     while (*src != '\0')
-    {
-        if (n + 1UL >= sizeof(mapped))
-            return HTTP_PATH_TOO_LONG;
-        mapped[n++] = *src++;
-    }
-    mapped[n] = '\0';
+        dst[n++] = *src++;
 
-    for (n = 0; mapped[n] != '\0'; n++)
-        out->path[n] = mapped[n];
-    out->path[n] = '\0';
+    dst[n] = '\0';
 
     /* Examine()'s name for a volume root is handler-dependent.  As with a
        configured document root, there is no leaf name to compare there. */

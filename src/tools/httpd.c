@@ -1287,7 +1287,17 @@ static BOOL httpd_volume_at(UWORD wanted, char *out, ULONG outlen)
     return found;
 }
 
-static BOOL httpd_volume_mounted(const char *path)
+/*
+ * NOINLINE, and it is the same stack decision as the in-place rewrite in
+ * http_path_resolve_volumes().  This carries a 112-byte name buffer, and
+ * httpd_resolve_path() reaches it on one branch and http_path_resolve() on
+ * another.  Inlined, the buffer sits in httpd_resolve_path()'s frame for the
+ * whole of the other call, so the two costs add rather than alternate.  A real
+ * call confines it to the branch that uses it, and httpd's deepest path -- the
+ * If: header's resolver ladder, measured by tools/check-stack-frames.sh --
+ * keeps the room a 4096-byte Shell stack has to give it.
+ */
+static __attribute__((noinline)) BOOL httpd_volume_mounted(const char *path)
 {
     struct DosList *dl;
     char            name[HTTP_NAME_MAX];

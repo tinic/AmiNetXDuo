@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.27.4
+
 - **`httpd -F` serves a file manager at `/files`.** The WebDAV root and the
   browser show every mounted volume under one virtual root.
   Browser-displayable files open inline, including extensionless Amiga text
