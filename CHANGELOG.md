@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`ShowNetStatus` reported a DHCP machine's `.local` name as unclaimed for
+  as long as it ran.** The name answered throughout: 42 of 49 queries, median
+  23 ms. The status line now shows it. Reported from an A3000
+
 - **`scp` hung at the unknown-host question.** `/dev/tty` did not resolve, so
   Dropbear read the answer from standard input, which in the `ssh` that `scp`
   starts is the file-transfer pipe. It now reaches the console the command was

@@ -786,7 +786,34 @@ const char *netstack_mdns_hostname(VOID)
 {
     AmiNetStack *ns = ami_netstack_raw();
 
-    if (ns == NULL || !ns->ns_MdnsCreated || !ns->ns_MdnsClaimed)
+    if (ns == NULL || !ns->ns_MdnsCreated)
+        return NULL;
+
+    /*
+     * ns_MdnsClaimed IS NOT THE TEST, AND REQUIRING IT SAID "still claiming a
+     * name" FOREVER ON A MACHINE THAT WAS ANSWERING.
+     *
+     * That flag is set only from NX_MDNS_LOCAL_HOST_REGISTERED_SUCCESS, which
+     * nxd_mdns.c raises on one edge: the A record's PROBING -> ANNOUNCING
+     * transition.  A DHCP machine never makes that transition.  Its address
+     * arrives after nx_mdns_enable(), and the module's own
+     * _nx_mdns_address_change_process() re-registers the host name with
+     * type = NX_FALSE -- "the host does not need to repeat the Probing step,
+     * Only Announcing the A/AAAA" -- so the record goes straight to
+     * ANNOUNCING, the edge never occurs, and the callback is never called at
+     * all.  Instrumented to log every invocation: zero.
+     *
+     * The record is nonetheless live.  Measured on a bridged guest: state 9
+     * (NX_MDNS_RR_STATE_VALID), 42 of 49 queries answered with a median
+     * latency of 23 ms, IP TTL 255, both checksums valid, and a second machine
+     * on the LAN resolving the name to the guest's address.
+     *
+     * So the test is whether the module holds a host name, which it does once
+     * the registration has run.  A collision still shows through: the module
+     * renames in place, and this returns the name it settled on rather than
+     * the one that was asked for.
+     */
+    if (ns->ns_Mdns.nx_mdns_host_name[0] == '\0')
         return NULL;
 
     /* The claimed name, not the configured one: the two differ after a
