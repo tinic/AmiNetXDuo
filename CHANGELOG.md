@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.27.5
+
 - **`ShowNetStatus` reported a DHCP machine's `.local` name as unclaimed for
   as long as it ran.** The name answered throughout: 42 of 49 queries, median
   23 ms. The status line now shows it. Reported from an A3000
