@@ -2494,6 +2494,9 @@ stage_bridged() {
 "toolsay|tests/tools/run-toolsay.sh|-B @|the branches where a shipped command reached a return and printed no sentence at all" \
 "netstack|tests/netstack/run-amiberry.sh|-B @|netstack bring-up (14 checks, floor 12)" \
 "ifquery|tests/tools/run-ifquery.sh|-B @|the Roadshow interface and statistics APIs, which have no other home: QueryInterfaceTagList over its whole tag surface, the statistics counters, and the address-allocation message against the DHCP server on the wire" \
+"ahost|tests/tools/run-ahost.sh|-B @|c-ares adig and ahost from Aminet, the highest-value third-party clients in docs/aminet-survey for marginal API coverage: ObtainSocket, Dup2Socket, SocketBaseTagList and ProcessIsServer have 173, 83, 429 and 12 callers out there and had none here, and adig +tcp asks a name server over TCP, which no command of ours does" \
+"binkd|tests/tools/run-binkd.sh|-B @|binkd 1.1a-115 from Aminet against the identical version on the peer: an authenticated BinkP session in both directions with a file on the wire, checked where the guest cannot fake it. Brings inet_addr, Inet_NtoA, getservbyname and getpeername, which real software calls and nothing else here does" \
+"ftpd|tests/tools/run-ftpd.sh|-B @|AmiTCP 4.0 inetd handing an accepted socket to DayDream's ftpd, which is the only thing here that exercises ObtainSocket, ReleaseSocket and Dup2Socket -- 275 Aminet callers between them. The FTP banner is the assertion: it cannot arrive unless the handoff completed. The login is RED and says so every run" \
     ; do
         hname="${entry%%|*}";  rest="${entry#*|}"
         hpath="${rest%%|*}";   rest="${rest#*|}"
