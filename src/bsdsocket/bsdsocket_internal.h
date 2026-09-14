@@ -719,6 +719,24 @@ LONG  bsd_errno_from_nx(UINT status);
 LONG  bsd_wait_errno(ULONG wait, UINT status);
 LONG  bsd_fail(struct AmiSocketBase *base, LONG code);   /* set errno, ret -1 */
 
+/*
+ * loghook.c, SBTC_LOG_HOOK: the machine's one log hook.  _set() refuses a
+ * hook with no h_Entry and remembers `base` as the owner; _drop_owner() is
+ * the owner closing.  _deliver() hands a rendered line to the hook on the
+ * calling context, or not at all under Forbid()/Disable() or on the tick;
+ * _emit() renders `fmt` with RawDoFmt's packed `args` first.
+ */
+VOID  bsd_log_hook_init(VOID);
+VOID  bsd_log_hook_exit(VOID);
+struct Hook *bsd_log_hook_get(VOID);
+BOOL  bsd_log_hook_set(struct AmiSocketBase *base, struct Hook *hook);
+BOOL  bsd_log_hook_installed(VOID);
+VOID  bsd_log_hook_drop_owner(struct AmiSocketBase *base);
+VOID  bsd_log_hook_deliver(LONG priority, STRPTR tag, ULONG id,
+                           const char *message);
+VOID  bsd_log_hook_emit(LONG priority, STRPTR tag, ULONG id, const char *fmt,
+                        APTR args);
+
 AmiSocket *bsd_lookup(struct AmiSocketBase *base, LONG fd);
 LONG       bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock);
 LONG       bsd_fd_reserve(struct AmiSocketBase *base, LONG fd);

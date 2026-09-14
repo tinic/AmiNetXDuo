@@ -101,6 +101,15 @@ VOID ami_log_level_set(int level);
 int  ami_log_level(VOID);
 
 /*
+ * A whole line, once the serial port has had it.  bsdsocket.library hands it
+ * to an application's SBTC_LOG_HOOK; nothing else installs one.  `line` is
+ * on the logging task's stack and is gone when the sink returns.  Called on
+ * whatever context logged, the tick's included: the sink decides.
+ */
+typedef VOID (*AmiLogLineFn)(int level, const char *line, APTR ctx);
+VOID ami_log_line_sink_set(AmiLogLineFn fn, APTR ctx);
+
+/*
  * The compiler runtime's own CPU choice.  Pass non-zero when SysBase->AttnFlags
  * has AFF_68020; never calling it leaves the 68000 routines, correct anywhere.
  */

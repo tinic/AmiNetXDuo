@@ -88,6 +88,11 @@ VOID  RemPort(struct MsgPort *port);
 struct MsgPort *FindPort(const UBYTE *name);
 ULONG AvailMem(ULONG requirements);
 
+/* loghook.c renders a syslog() format with it.  The ROM's formatter is not
+   on the host; a test defines one that passes the format through. */
+VOID  RawDoFmt(const UBYTE *formatString, APTR dataStream,
+               VOID (*putChProc)(VOID), APTR putChData);
+
 VOID  CacheClearU(VOID);
 VOID  SetTaskPri(struct Task *task, LONG priority);
 

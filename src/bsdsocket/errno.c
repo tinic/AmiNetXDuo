@@ -545,6 +545,18 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
             bsd_tag_store(item, by_ref, (ULONG)base->sb_HErrnoPtr);
             return TRUE;
 
+        /* The machine's one log hook, loghook.c. */
+        case SBTC_LOG_HOOK:
+            bsd_tag_store(item, by_ref, (ULONG)bsd_log_hook_get());
+            return TRUE;
+
+        /* No log file: nothing in the stack may do DOS file I/O from an IP
+           thread, and there is no task to hand the lines to.  Reading the
+           name says "none"; setting one is ENOSYS below. */
+        case SBTC_LOG_FILE_NAME:
+            bsd_tag_store(item, by_ref, 0UL);
+            return TRUE;
+
         /*
          * Total bytes in and out, as an SBQUAD_T the caller supplies.
          * Roadshow's SampleNetSpeed measures throughput from these. Without
@@ -717,6 +729,13 @@ static BOOL bsd_tag_set(struct AmiSocketBase *base, struct TagItem *item,
             base->sb_HErrnoPtr = (LONG *)value;
             bsd_set_herrno(base, base->sb_HErrno);
             return TRUE;
+
+        case SBTC_LOG_HOOK:
+            return bsd_log_hook_set(base, (struct Hook *)value);
+
+        case SBTC_LOG_FILE_NAME:
+            bsd_set_errno(base, AMI_ENOSYS);
+            return FALSE;
 
         default:
             return FALSE;

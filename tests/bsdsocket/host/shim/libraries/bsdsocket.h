@@ -73,4 +73,21 @@ struct SendMonitorMessage
     struct msghdr   *smm_Msg;
 };
 
+/*
+ * What SBTC_LOG_HOOK's hook is handed.  NDK 3.2
+ * netinclude/libraries/bsdsocket.h:303-316; loghook.c fills one per line and
+ * the member order is ABI.
+ */
+#include <dos/dos.h>
+
+struct LogHookMessage
+{
+    LONG             lhm_Size;
+    LONG             lhm_Priority;
+    struct DateStamp lhm_Date;
+    STRPTR           lhm_Tag;
+    ULONG            lhm_ID;
+    STRPTR           lhm_Message;
+};
+
 #endif

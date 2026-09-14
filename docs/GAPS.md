@@ -32,14 +32,21 @@ and nine more) are excluded: they are stub-level, not LVOs.
 
 ## Missing SocketBaseTagList tags
 
-Three, of Roadshow's 52 codes (53 defines, one a macro: `SBTC_ERRNOPTR(size)`
-picks among the three `ERRNO*PTR` codes we implement). We answer 49, counted by
+One, of Roadshow's 52 codes (53 defines, one a macro: `SBTC_ERRNOPTR(size)`
+picks among the three `ERRNO*PTR` codes we implement). We answer 51, counted by
 `tools/check-sbtc-tags.sh` rather than asserted here.
 
 | Tag | What a user loses |
 |---|---|
-| `SBTC_LOG_FILE_NAME` `SBTC_LOG_HOOK` | Where the stack's own messages go. This is the mechanism behind Roadshow's `NetLogViewer`: a program cannot redirect the log or catch it |
 | `SBTC_IP_FILTER_HOOK` | The hook the IP filter installs. Goes with the `ipf_*` vectors |
+
+`SBTC_LOG_HOOK` is answered (`src/bsdsocket/loghook.c`): one hook for the
+machine, handed every `syslog()` an application makes, as a
+`struct LogHookMessage` with the tag, the task and a `DateStamp`. This is
+what Roadshow's `NetLogViewer` installs. The stack's own lines reach it only
+in a build with `AMINETXDUO_LOG`: a shipping library carries no sentences.
+`SBTC_LOG_FILE_NAME` reads as no file and refuses a set with `ENOSYS`: no
+task in the stack may do DOS file I/O, so a log file would need one.
 
 `SBTC_CAN_SHARE_LIBRARY_BASES` is an application **opt-in**, not a capability
 advert: AmiTCP_NG's `socketbasetags.h` has it as "Roadshow's opt-in to sharing

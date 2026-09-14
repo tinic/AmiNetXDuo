@@ -32,4 +32,13 @@ typedef LONG BSTR;
 
 #define MKBADDR(x) (((LONG)(x)) >> 2)
 #define BADDR(x)   ((APTR)((ULONG)(x) << 2))
+
+/* NDK dos/dos.h: what DateStamp() fills, and what struct LogHookMessage
+   carries. */
+struct DateStamp
+{
+    LONG ds_Days;
+    LONG ds_Minute;
+    LONG ds_Tick;
+};
 #endif

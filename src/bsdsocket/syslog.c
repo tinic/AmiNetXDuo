@@ -4,9 +4,10 @@
  * The public syslog() macro builds a RawDoFmt argument stream and calls this
  * LVO.  Log policy is per opener: SocketBaseTagList() owns the tag, facility,
  * option bits and priority mask in AmiSocketBase.  AmiNetXDuo has no resident
- * NETTRACE task or log-file queue, so an accepted message goes to the serial
- * diagnostic already present in every image.  No permanent buffer or task is
- * added for a function that must remain usable on a one-megabyte machine.
+ * NETTRACE task or log-file queue: an accepted message goes to the machine's
+ * SBTC_LOG_HOOK (loghook.c) and, in a build with the serial diagnostic, to
+ * the serial port.  No permanent buffer or task is added for a function that
+ * must remain usable on a one-megabyte machine.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -159,6 +160,8 @@ VOID bsd_vsyslog(register LONG priority __asm("d0"),
     BsdSyslogBuilder b;
     LONG effective;
     const char *tag;
+    const char *body;
+    const struct Task *task;
 
     if (SocketBase == NULL || fmt == NULL)
         return;
@@ -183,16 +186,15 @@ VOID bsd_vsyslog(register LONG priority __asm("d0"),
     b.at = format;
     b.end = format + (allocated ? BSD_SYSLOG_FORMAT_SIZE
                                : BSD_SYSLOG_FALLBACK_SIZE) - 1;
-    tag = (const char *)SocketBase->sb_LogTag;
+    tag  = (const char *)SocketBase->sb_LogTag;
+    task = SocketBase->sb_SysBase != NULL ? SocketBase->sb_SysBase->ThisTask
+                                          : SocketBase->sb_Task;
 
     if (tag != NULL)
         bsd_log_data(&b, tag);
 
     if ((SocketBase->sb_LogStat & LOG_PID) != 0)
     {
-        const struct Task *task = SocketBase->sb_SysBase != NULL
-                                ? SocketBase->sb_SysBase->ThisTask
-                                : SocketBase->sb_Task;
         bsd_log_char(&b, '[');
         bsd_log_hex(&b, (unsigned long)task);
         bsd_log_char(&b, ']');
@@ -204,9 +206,21 @@ VOID bsd_vsyslog(register LONG priority __asm("d0"),
         bsd_log_char(&b, ' ');
     }
 
+    /* The caller's text starts here: the hook gets it without the prefix,
+       the tag goes in lhm_Tag and the task in lhm_ID. */
+    body = b.at;
     bsd_log_format(&b, (const char *)fmt,
                    bsd_errno_string(SocketBase->sb_Errno));
     *b.at = '\0';
+
+    /* SBTC_LOG_HOOK sees every accepted message whether or not the serial
+       sink is built: the hook is how NetLogViewer and its like read the log
+       on a machine with no serial capture.  The task address is the AmiTCP
+       process identifier, the number LOG_PID prints. */
+    if (bsd_log_hook_installed())
+        bsd_log_hook_emit(effective, SocketBase->sb_LogTag,
+                          (ULONG)(unsigned long)task,
+                          body, args);
 
     /* ami_serial_logv() is the raw sink and filters nothing; ami_log() is what
        normally gates it.  Ungated, every syslog() went to the serial port of a

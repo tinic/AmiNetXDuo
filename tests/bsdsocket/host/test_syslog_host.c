@@ -75,6 +75,31 @@ VOID ami_serial_logv(int level, const char *fmt, const void *args)
     snprintf(h_format, sizeof(h_format), "%s", fmt);
 }
 
+/* loghook.c: whether a hook is installed, and what vsyslog() hands it. */
+static BOOL        h_hook_on;
+static int         h_hook_emits;
+static LONG        h_hook_priority;
+static const char *h_hook_tag;
+static ULONG       h_hook_id;
+static char        h_hook_fmt[1200];
+static const void *h_hook_args;
+
+BOOL bsd_log_hook_installed(VOID)
+{
+    return h_hook_on;
+}
+
+VOID bsd_log_hook_emit(LONG priority, STRPTR tag, ULONG id, const char *fmt,
+                       APTR args)
+{
+    h_hook_emits++;
+    h_hook_priority = priority;
+    h_hook_tag      = (const char *)tag;
+    h_hook_id       = id;
+    h_hook_args     = args;
+    snprintf(h_hook_fmt, sizeof(h_hook_fmt), "%s", fmt);
+}
+
 static VOID reset_sink(VOID)
 {
     h_emits = 0;
@@ -82,6 +107,13 @@ static VOID reset_sink(VOID)
     h_seen_args = NULL;
     h_format[0] = '\0';
     h_fail_alloc = FALSE;
+    h_hook_on = FALSE;
+    h_hook_emits = 0;
+    h_hook_priority = -1;
+    h_hook_tag = NULL;
+    h_hook_id = 0;
+    h_hook_fmt[0] = '\0';
+    h_hook_args = NULL;
 }
 
 static VOID reset_base(VOID)
@@ -209,6 +241,44 @@ static VOID test_null_format(VOID)
     CHECK(h_allocs == before, "NULL format allocates nothing");
 }
 
+static VOID test_log_hook(VOID)
+{
+    printf("SBTC_LOG_HOOK gets the caller's text, the tag and the task apart\n");
+    reset_base();
+    h_base.sb_LogTag  = (STRPTR)"fetch";
+    h_base.sb_LogStat = LOG_PID;
+    h_exec.ThisTask   = (struct Task *)(unsigned long)0x1234UL;
+    h_hook_on = TRUE;
+
+    call_log(LOG_INFO, "open %s: %m");
+
+    CHECK(h_hook_emits == 1, "an accepted message reaches the hook");
+    CHECK(h_hook_priority == (LOG_USER | LOG_INFO),
+          "with the opener's facility filled in");
+    CHECK(h_hook_tag == (const char *)h_base.sb_LogTag,
+          "the tag goes as itself, for lhm_Tag");
+    CHECK(h_hook_id == 0x1234UL,
+          "the task address is the identifier, the number LOG_PID prints");
+    CHECK(strcmp(h_hook_fmt, "open %s: Input/output error") == 0,
+          "the text is the caller's with %m expanded and no prefix");
+    CHECK(h_hook_args == (const void *)h_args,
+          "and the caller's argument stream goes with it");
+    CHECK(strcmp(h_format, "fetch[1234]: open %s: Input/output error") == 0,
+          "the serial line keeps its prefix");
+
+    reset_sink();
+    h_hook_on = TRUE;
+    h_base.sb_LogMask = LOG_MASK(LOG_ERR);
+    call_log(LOG_INFO, "hidden");
+    CHECK(h_hook_emits == 0, "a masked priority does not reach the hook");
+
+    reset_sink();
+    call_log(LOG_ERR, "no hook");
+    CHECK(h_hook_emits == 0 && h_emits == 1,
+          "no hook installed: nothing is rendered for one, the sink still "
+          "gets the line");
+}
+
 int main(void)
 {
     test_format_and_errno();
@@ -217,6 +287,7 @@ int main(void)
     test_mask_and_priority();
     test_low_memory_fallback();
     test_null_format();
+    test_log_hook();
 
     printf("syslog_host checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

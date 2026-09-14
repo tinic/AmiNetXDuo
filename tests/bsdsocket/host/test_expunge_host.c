@@ -185,6 +185,9 @@ BOOL bsd_netmon_busy(VOID)
 }
 
 VOID ami_netdb_free(VOID)           { h.netdb_free_calls++; }
+VOID bsd_log_hook_init(VOID)        { }
+VOID bsd_log_hook_exit(VOID)        { }
+VOID bsd_log_hook_drop_owner(struct AmiSocketBase *base) { (VOID)base; }
 VOID bsd_runtime_close(VOID)        { h.runtime_close_calls++; }
 
 /* bsd_lib_open() calls this on every open, to hold usergroup.library resident

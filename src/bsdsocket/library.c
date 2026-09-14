@@ -374,6 +374,7 @@ static struct AmiSocketBase *bsd_lib_init(
     base->sb_TransientStackRefs = 0;
     base->sb_StackHeld          = FALSE;
     bsd_handoff_init(base);
+    bsd_log_hook_init();
 
     bsd_master_base = base;
 
@@ -638,6 +639,9 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     bsd_close_all(child);
 
     bsd_bpf_close_all(child);
+
+    /* A log hook this base installed dies with it. */
+    bsd_log_hook_drop_owner(child);
 
     if (child->sb_TimerOpen)
     {
@@ -1338,6 +1342,7 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     ami_set_address_change_hook(NULL);
     ami_set_second_hook(NULL);
     ami_set_shutdown_hook(NULL);
+    bsd_log_hook_exit();
     bsd_master_base = NULL;
 
     ami_event_unpublish();

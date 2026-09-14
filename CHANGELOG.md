@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`SBTC_LOG_HOOK` is answered.** One hook for the machine, handed every
+  `syslog()` an application makes as a `struct LogHookMessage`: priority,
+  `DateStamp`, the opener's tag, the calling task, the text. What Roadshow's
+  `NetLogViewer` installs. Not called under `Forbid()`, from the tick, or
+  from itself. `SBTC_LOG_FILE_NAME` reads as no file and refuses a set with
+  `ENOSYS`
+
 - **`IPREQUESTS`, `ARPREQUESTS` and `WRITEREQUESTS` in an interface file now
   set the queue depths.** The two read keys take 1 to 32, over the depth the
   stack plans from the wire speed; `WRITEREQUESTS` takes 1 to 8. Above the

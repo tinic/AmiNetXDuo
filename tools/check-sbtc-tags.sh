@@ -6,7 +6,7 @@
 # enough that nobody rechecked it.  Both numbers were wrong: Roadshow's header
 # has 53 SBTC_ defines but one of them is a MACRO -- SBTC_ERRNOPTR(size), which
 # selects among the three ERRNO*PTR codes -- so there are 52 codes, and
-# src/bsdsocket/errno.c answers 49 of them.
+# src/bsdsocket/errno.c answers 51 of them.
 #
 # A sentence in a document cannot notice a tag being added on either side.
 # This can, so the document says what this prints.
@@ -20,9 +20,11 @@ cd "$ROOT" || exit 1
 
 ERRNO="src/bsdsocket/errno.c"
 
-# The three Roadshow answers, with the reason each is not here.  A fourth
-# appearing means the list below is stale, not that the gate is wrong.
-KNOWN_MISSING="SBTC_IP_FILTER_HOOK SBTC_LOG_FILE_NAME SBTC_LOG_HOOK"
+# The one Roadshow answer not here: the IP filter's hook goes with the ipf_*
+# vectors, which are not implemented.  A second appearing means the list
+# below is stale, not that the gate is wrong.  SBTC_LOG_FILE_NAME is counted
+# as answered: it reads as "no file" and refuses a set with ENOSYS.
+KNOWN_MISSING="SBTC_IP_FILTER_HOOK"
 
 # IN A SUBSHELL.  Sourcing amiga-toolchain.sh runs whatever it does in THIS
 # shell, and on a machine with no toolchain it exits -- which killed this gate

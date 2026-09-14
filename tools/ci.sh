@@ -247,7 +247,9 @@ host_test_targets() { # builddir
 #      with them.
 #      382 with test_tool_wait, which covers the DHCP readiness policy the
 #      0.27.2 fix turns on.
-HOST_TESTS_EXPECTED=382
+#      383 with test_loghook: SBTC_LOG_HOOK, and the contexts it is not
+#      called on.
+HOST_TESTS_EXPECTED=383
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -418,8 +420,8 @@ stage_host() {
         return 1
     fi
 
-    # The SocketBaseTagList() surface, counted rather than claimed: three of
-    # Roadshow's 52 codes are unanswered, and docs/GAPS.md carried the wrong
+    # The SocketBaseTagList() surface, counted rather than claimed: one of
+    # Roadshow's 52 codes is unanswered, and docs/GAPS.md carried the wrong
     # arithmetic for both sides until this was written.
     if tools/check-sbtc-tags.sh > "$BUILD/sbtc-tags.log" 2>&1; then
         note "$(sed -n 's/^sbtc_tags //p' "$BUILD/sbtc-tags.log" | head -1)"

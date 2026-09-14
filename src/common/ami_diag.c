@@ -43,13 +43,44 @@
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
 #endif
 
-/* RawDoFmt callback: one character to the serial debug port. */
-static VOID put_char(register UBYTE c   __asm("d0"),
-                     register APTR unused __asm("a3"))
+/*
+ * A line is formatted whole before anything sees it, so a sink can be handed
+ * a string.  On the logging task's stack: the port's tick task has 4 KB, and
+ * the stack's own lines are short.  Anything past the end is dropped.
+ */
+#define AMI_LOG_LINE_MAX    160
+
+typedef struct AmiLogLine
 {
-    (VOID)unused;
-    if (c != '\0')
-        RawPutChar(c);
+    char *at;
+    char *end;
+} AmiLogLine;
+
+/* RawDoFmt callback: one character into the line. */
+static VOID put_char(register UBYTE c __asm("d0"),
+                     register AmiLogLine *line __asm("a3"))
+{
+    if (c != '\0' && line->at < line->end)
+        *line->at++ = (char)c;
+}
+
+static AmiLogLineFn ami_log_line_fn;
+static APTR         ami_log_line_ctx;
+
+VOID ami_log_line_sink_set(AmiLogLineFn fn, APTR ctx)
+{
+    /* The function last on install and first on removal, so a logger between
+       the two stores sees no sink or a whole one. */
+    if (fn == NULL)
+    {
+        ami_log_line_fn  = NULL;
+        ami_log_line_ctx = ctx;
+    }
+    else
+    {
+        ami_log_line_ctx = ctx;
+        ami_log_line_fn  = fn;
+    }
 }
 
 /*
@@ -77,24 +108,31 @@ int ami_log_level(VOID)
 VOID ami_serial_logv(int level, const char *fmt, const void *args)
 {
     static const char *const prefix[] = { "ERR ", "WARN", "INFO", "DBG ", "TRC " };
+    char        text[AMI_LOG_LINE_MAX];
+    AmiLogLine  line;
+    const char *p;
 
     if (fmt == NULL)
         return;
     if (level < AMI_LOG_ERROR || level > AMI_LOG_TRACE)
         level = AMI_LOG_INFO;
 
+    line.at  = text;
+    line.end = text + sizeof(text) - 1;
+    RawDoFmt((STRPTR)fmt, (APTR)args, (void (*)())put_char, &line);
+    *line.at = '\0';
+
     RawPutChar('[');
-    {
-        const char *p = prefix[level];
-        while (*p != '\0')
-            RawPutChar(*p++);
-    }
+    for (p = prefix[level]; *p != '\0'; p++)
+        RawPutChar(*p);
     RawPutChar(']');
     RawPutChar(' ');
-
-    RawDoFmt((STRPTR)fmt, (APTR)args, (void (*)())put_char, NULL);
-
+    for (p = text; *p != '\0'; p++)
+        RawPutChar(*p);
     RawPutChar('\n');
+
+    if (ami_log_line_fn != NULL)
+        ami_log_line_fn(level, text, ami_log_line_ctx);
 }
 
 VOID ami_log(int level, const char *fmt, ...)

@@ -16,6 +16,8 @@ LONG  Write(BPTR file, const APTR buffer, LONG length);
 BPTR  Input(VOID);
 BPTR  Output(VOID);
 LONG  Delay(ULONG ticks);
+VOID  DateStamp(struct DateStamp *ds);
+extern struct DosLibrary *DOSBase;
 struct Process *FindTaskProcess(VOID);
 struct Process *CreateNewProc(const struct TagItem *tags);
 

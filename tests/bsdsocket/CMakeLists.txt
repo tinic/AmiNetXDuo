@@ -333,6 +333,33 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME syslog_policy_format COMMAND test_syslog)
 
+    # loghook.c, the one SBTC_LOG_HOOK: what the hook is handed, and the
+    # contexts it is not called on -- Forbid(), Disable(), the port's timer
+    # task, its own re-entry.  The ROM's RawDoFmt is not on the host: the
+    # test's passes the format through a character at a time, which is the
+    # contract the renderer relies on.  Without AMINETXDUO_LOG, so the serial
+    # line sink is not compiled and the test names no ami_diag symbol.
+    add_executable(test_loghook host/test_loghook_host.c
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/loghook.c")
+
+    target_include_directories(test_loghook PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_loghook PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_loghook PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME loghook_contexts COMMAND test_loghook)
+
     # transfer.c's connected-UDP readiness and FIONREAD paths inspect packets
     # before nx_udp_socket_receive() removes the UDP header.  netstats.c also
     # reads UDP queue payloads and TCP's distinct sent-list accounting.  This
