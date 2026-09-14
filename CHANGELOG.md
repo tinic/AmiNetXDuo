@@ -9,13 +9,6 @@ version at the top when it merges.
 
 ## Unreleased
 
-- **A DHCP machine never claimed its `.local` name.** mDNS registers the
-  address record only when the interface already holds an address, and the
-  responder starts before the lease is bound, so nothing was ever probed:
-  `ShowNetStatus` said "still claiming a name" for as long as the machine ran
-  and no mDNS left it. The name is now registered again when the address
-  arrives. Reported from an A3000 that sent 7 mDNS datagrams in fifteen minutes
-
 - **`scp` hung at the unknown-host question.** `/dev/tty` did not resolve, so
   Dropbear read the answer from standard input, which in the `ssh` that `scp`
   starts is the file-transfer pipe. It now reaches the console the command was
