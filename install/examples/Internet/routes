@@ -22,8 +22,8 @@ DEFAULT=192.168.1.1
 ; the destination, VIA the gateway to reach it through.  NETDST and HOSTDST
 ; say explicitly whether the destination is a network or a single machine.
 ;
-; AmiNetXDuo parses these and does not install them yet -- only the default
-; route is acted on.
+; AmiNetXDuo installs these when their VIA address becomes reachable.  That
+; may be at stack start for a static interface or when DHCP finishes later.
 ;
 ;DST=10.0.0.0    VIA=192.168.1.254
 ;HOSTDST=10.1.2.3 VIA=192.168.1.254

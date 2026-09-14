@@ -2020,6 +2020,7 @@ static void test_ra_nameserver6(void)
 
 static void test_gateway(void)
 {
+    AmiConfig cfg;
     ULONG gw;
     char *buf;
 
@@ -2051,6 +2052,50 @@ static void test_gateway(void)
     ami_cfg_parse_gateway(buf, &gw);
     free(buf);
     CHECK(gw == 0);
+
+    /* The same file loaded as the real configuration keeps every specific
+       route, applies the command's HOSTDST/NETDST defaults, canonicalises a
+       CIDR destination, and lets a later duplicate replace its gateway. */
+    memset(&cfg, 0, sizeof(cfg));
+    buf = dup_text(
+        "DEFAULT=192.168.1.1\n"
+        "DST=10.2.3.99/24 VIA=192.168.1.2\n"
+        "HOSTDST=10.4.5.6 VIA=192.168.1.3\n"
+        "NETDST=172.16.0.0 VIA=192.168.1.4\n"
+        "DST=10.2.3.0/24 VIA=192.168.1.9\n");
+    ami_cfg_parse_routes(buf, &cfg);
+    free(buf);
+
+    CHECK_IP(cfg.default_gateway, 192, 168, 1, 1);
+    CHECK(cfg.static_route_count == 3);
+    CHECK_IP(cfg.static_route[0].destination, 10, 2, 3, 0);
+    CHECK_IP(cfg.static_route[0].netmask, 255, 255, 255, 0);
+    CHECK_IP(cfg.static_route[0].gateway, 192, 168, 1, 9);
+    CHECK_IP(cfg.static_route[1].destination, 10, 4, 5, 6);
+    CHECK_IP(cfg.static_route[1].netmask, 255, 255, 255, 255);
+    CHECK_IP(cfg.static_route[2].destination, 172, 16, 0, 0);
+    CHECK_IP(cfg.static_route[2].netmask, 255, 255, 0, 0);
+
+    /* A compatibility default already found in default_gateway wins, while
+       the Roadshow file still contributes its specific route. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.default_gateway = 0xC0A801FEUL;
+    buf = dup_text("DEFAULT=192.168.1.1\n"
+                   "HOSTDST=10.0.0.7 VIA=192.168.1.2\n");
+    ami_cfg_parse_routes(buf, &cfg);
+    free(buf);
+    CHECK_IP(cfg.default_gateway, 192, 168, 1, 254);
+    CHECK(cfg.static_route_count == 1);
+
+    /* 0.0.0.0 is not a next hop.  Treating it as one leaves a persistent
+       entry that can never be installed and hides the typo until runtime. */
+    memset(&cfg, 0, sizeof(cfg));
+    buf = dup_text("DEFAULT=0.0.0.0\n"
+                   "HOSTDST=10.0.0.7 VIA=0.0.0.0\n");
+    ami_cfg_parse_routes(buf, &cfg);
+    free(buf);
+    CHECK(cfg.default_gateway == 0);
+    CHECK(cfg.static_route_count == 0);
 }
 
 static void test_tcp_handler(void)

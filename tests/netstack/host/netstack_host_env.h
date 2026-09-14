@@ -58,6 +58,7 @@ typedef struct NetStackHostEnv
 
     UWORD   cfg_interfaces;         /* how many ami_config_load() reports    */
     UWORD   cfg_iptype;             /* AmiIpType for every one of them       */
+    UWORD   cfg_static_routes;      /* zero or one persistent route          */
     ULONG   packet_releases;        /* bootstrap driver handed packets back */
     ULONG   cfg_full_loads;
     ULONG   cfg_base_loads;
@@ -72,6 +73,11 @@ typedef struct NetStackHostEnv
     ULONG   iface_attaches;
     ULONG   iface_detaches;
     ULONG   iface_address;          /* what nx_ip_interface_address_get() has */
+    UINT    static_route_status;
+    ULONG   static_route_adds;
+    ULONG   static_route_dest;
+    ULONG   static_route_mask;
+    ULONG   static_route_gateway;
 
     /* ---- Exec ---------------------------------------------------------- */
 

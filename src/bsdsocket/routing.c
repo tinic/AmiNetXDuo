@@ -194,10 +194,15 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
     else if (req.brr_HaveDest && req.brr_HaveGateway)
     {
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
-        status = nx_ip_static_route_add(ip, req.brr_Dest,
-                                        bsd_route_mask_for(req.brr_Dest,
-                                                           req.brr_DestKind),
-                                        req.brr_Gateway);
+        {
+            ULONG mask = bsd_route_mask_for(req.brr_Dest,
+                                            req.brr_DestKind);
+
+            status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
+                                            req.brr_Gateway);
+            if (status == NX_SUCCESS)
+                netstack_config_route_added(req.brr_Dest, mask);
+        }
 #else
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_ENOSYS);
@@ -272,6 +277,8 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
         }
 
         status = nx_ip_static_route_delete(ip, req.brr_Dest, mask);
+        if (status == NX_SUCCESS)
+            netstack_config_route_deleted(req.brr_Dest, mask);
 #else
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_ENOSYS);
@@ -413,6 +420,8 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
                 status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
                                                 req.brr_Gateway);
         }
+        if (status == NX_SUCCESS)
+            netstack_config_route_added(req.brr_Dest, mask);
 #else
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_ENOSYS);

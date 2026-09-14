@@ -1538,13 +1538,123 @@ UWORD ami_config_search_withdraw_rfc3397(AmiResolverConfig *res,
 
 /* -------------------------------------------------- default_gateway/routes */
 
-VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
+typedef enum
+{
+    CFG_ROUTE_DST = 0,
+    CFG_ROUTE_HOST,
+    CFG_ROUTE_NET
+} CfgRouteKind;
+
+static ULONG cfg_route_mask(ULONG address)
+{
+    if (address == 0UL)
+        return 0UL;
+    if ((address & 0x00FFFFFFUL) == 0UL)
+        return 0xFF000000UL;
+    if ((address & 0x0000FFFFUL) == 0UL)
+        return 0xFFFF0000UL;
+    if ((address & 0x000000FFUL) == 0UL)
+        return 0xFFFFFF00UL;
+
+    return 0xFFFFFFFFUL;
+}
+
+/* The same destination grammar AddNetRoute exposes: an explicit /0../32 wins;
+   HOSTDST defaults to /32, and DST/NETDST infer a network at a trailing zero
+   octet.  Configuration is deliberately numeric: resolving a route through
+   DNS would require the route being configured, a cycle with no safe answer. */
+static BOOL cfg_route_destination(char *text, CfgRouteKind kind,
+                                  ULONG *destination, ULONG *netmask)
+{
+    char *slash;
+    ULONG bits = 0UL;
+    BOOL  have_prefix = FALSE;
+
+    if (text == NULL || destination == NULL || netmask == NULL)
+        return FALSE;
+
+    slash = text;
+    while (*slash != '\0' && *slash != '/')
+        slash++;
+
+    if (*slash == '/')
+    {
+        char *p = slash + 1;
+
+        if (*p == '\0')
+            return FALSE;
+
+        while (*p != '\0')
+        {
+            if (*p < '0' || *p > '9')
+                return FALSE;
+            bits = bits * 10UL + (ULONG)(*p++ - '0');
+            if (bits > 32UL)
+                return FALSE;
+        }
+
+        *slash = '\0';
+        have_prefix = TRUE;
+    }
+
+    if (!ami_config_parse_ip(text, destination))
+        return FALSE;
+
+    if (have_prefix)
+        *netmask = (bits == 0UL) ? 0UL : 0xFFFFFFFFUL << (32UL - bits);
+    else if (kind == CFG_ROUTE_HOST)
+        *netmask = 0xFFFFFFFFUL;
+    else
+        *netmask = cfg_route_mask(*destination);
+
+    /* NETDST names a network, not the default route or one host. */
+    if (kind == CFG_ROUTE_NET &&
+        (*netmask == 0UL || *netmask == 0xFFFFFFFFUL))
+        return FALSE;
+
+    *destination &= *netmask;
+    return TRUE;
+}
+
+static VOID cfg_route_store(AmiConfig *cfg, ULONG line, ULONG destination,
+                            ULONG netmask, ULONG gateway)
+{
+    UWORD i;
+
+    for (i = 0; i < cfg->static_route_count; i++)
+    {
+        AmiRouteConfig *route = &cfg->static_route[i];
+
+        if (route->destination == destination && route->netmask == netmask)
+        {
+            /* NetX Duo has the same replace-on-equal rule.  A later line in
+               the file therefore has exactly the effect AddNetRoute would. */
+            route->gateway = gateway;
+            return;
+        }
+    }
+
+    if (cfg->static_route_count >= (UWORD)AMI_CFG_MAX_STATIC_ROUTES)
+    {
+        ami_cfg_problem(line, AMI_CFG_PROBLEM_ERROR,
+                        "the static route table holds four entries; this route was ignored",
+                        AMI_CFG_ADVICE_A_ROUTES_FILE_HOLDS);
+        return;
+    }
+
+    cfg->static_route[cfg->static_route_count].destination = destination;
+    cfg->static_route[cfg->static_route_count].netmask     = netmask;
+    cfg->static_route[cfg->static_route_count].gateway     = gateway;
+    cfg->static_route_count++;
+}
+
+static VOID cfg_parse_routes(char *buf, ULONG *default_out, AmiConfig *cfg)
 {
     char *cursor = buf;
     char *line;
     ULONG lineno = 0;
 
-    if (buf == NULL || out == NULL)
+    if (buf == NULL || default_out == NULL)
         return;
 
     while ((line = ami_cfg_next_line(&cursor)) != NULL)
@@ -1553,9 +1663,13 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
         char *key;
         char *value;
         ULONG gateway    = 0;
+        ULONG destination = 0;
+        ULONG netmask     = 0;
         BOOL  have_gw    = FALSE;
         BOOL  have_dst   = FALSE;
+        BOOL  valid_dst  = TRUE;
         BOOL  is_default = FALSE;
+        CfgRouteKind kind = CFG_ROUTE_DST;
 
         lineno++;
 
@@ -1570,7 +1684,7 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
             if (ami_cfg_stricmp(key, "gateway") == 0 ||
                 ami_cfg_stricmp(key, "via") == 0)
             {
-                if (ami_config_parse_ip(value, &gateway))
+                if (ami_config_parse_ip(value, &gateway) && gateway != 0UL)
                 {
                     have_gw = TRUE;
                 }
@@ -1586,8 +1700,13 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
             {
                 is_default = TRUE;
                 /* Roadshow's routes file: DEFAULT=<address>. */
-                if (*value != '\0' && ami_config_parse_ip(value, &gateway))
+                if (*value != '\0' && ami_config_parse_ip(value, &gateway) &&
+                    gateway != 0UL)
                     have_gw = TRUE;
+                else
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "the default gateway", value,
+                                     AMI_CFG_ADVICE_THIS_IS_THE_ADDRESS);
             }
             else if (ami_cfg_stricmp(key, "device") == 0 ||
                      ami_cfg_stricmp(key, "unit") == 0)
@@ -1595,15 +1714,40 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
                 AMI_DEBUG("config: default_gateway: %s=%s", key, value);
             }
             else if (ami_cfg_stricmp(key, "dst") == 0 ||
-                     ami_cfg_stricmp(key, "destination") == 0 ||
-                     ami_cfg_stricmp(key, "hostdst") == 0 ||
-                     ami_cfg_stricmp(key, "hostdestination") == 0 ||
-                     ami_cfg_stricmp(key, "netdst") == 0 ||
+                     ami_cfg_stricmp(key, "destination") == 0)
+            {
+                have_dst = TRUE;
+                kind = CFG_ROUTE_DST;
+                valid_dst = cfg_route_destination(value, kind,
+                                                   &destination, &netmask);
+                if (!valid_dst)
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "the route destination", value,
+                                     AMI_CFG_ADVICE_THIS_IS_THE_ADDRESS);
+            }
+            else if (ami_cfg_stricmp(key, "hostdst") == 0 ||
+                     ami_cfg_stricmp(key, "hostdestination") == 0)
+            {
+                have_dst = TRUE;
+                kind = CFG_ROUTE_HOST;
+                valid_dst = cfg_route_destination(value, kind,
+                                                   &destination, &netmask);
+                if (!valid_dst)
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "the host route destination", value,
+                                     AMI_CFG_ADVICE_THIS_IS_THE_ADDRESS);
+            }
+            else if (ami_cfg_stricmp(key, "netdst") == 0 ||
                      ami_cfg_stricmp(key, "netdestination") == 0)
             {
-                /* A specific route, not the default one. */
                 have_dst = TRUE;
-                AMI_DEBUG("config: routes: skipping %s=%s", key, value);
+                kind = CFG_ROUTE_NET;
+                valid_dst = cfg_route_destination(value, kind,
+                                                   &destination, &netmask);
+                if (!valid_dst)
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "the network route destination", value,
+                                     AMI_CFG_ADVICE_THIS_IS_THE_ADDRESS);
             }
             else
             {
@@ -1615,14 +1759,46 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
             }
         }
 
-        /* default_gateway has no DEFAULT keyword -- its GATEWAY is the
-           default route.  In routes, only a DEFAULT= line is. */
-        if (have_dst && !is_default)
+        if (is_default)
+        {
+            if (have_gw && *default_out == 0UL)
+                *default_out = gateway;
             continue;
+        }
 
-        if (have_gw && *out == 0)
-            *out = gateway;
+        if (have_dst)
+        {
+            if (!have_gw)
+            {
+                ami_cfg_problem(lineno, AMI_CFG_PROBLEM_ERROR,
+                                "the route has a destination but no VIA gateway",
+                                AMI_CFG_ADVICE_A_ROUTES_FILE_HOLDS);
+                continue;
+            }
+
+            if (valid_dst && cfg != NULL)
+                cfg_route_store(cfg, lineno, destination, netmask, gateway);
+            continue;
+        }
+
+        /* default_gateway has no DEFAULT keyword: its bare GATEWAY is the
+           default route.  In Roadshow's routes file it is not. */
+        if (cfg == NULL && have_gw && *default_out == 0UL)
+            *default_out = gateway;
     }
+}
+
+VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
+{
+    cfg_parse_routes(buf, out, NULL);
+}
+
+VOID ami_cfg_parse_routes(char *buf, AmiConfig *cfg)
+{
+    if (cfg == NULL)
+        return;
+
+    cfg_parse_routes(buf, &cfg->default_gateway, cfg);
 }
 
 /* --------------------------------------------------------- tcp_handler */

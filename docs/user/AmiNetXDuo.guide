@@ -562,8 +562,7 @@
       # Everything else goes to the router.
       DEFAULT = 192.168.1.1
 
-  DEFAULTGATEWAY is accepted as another spelling of DEFAULT, and a
-  plain GATEWAY= or VIA= line is also read as the default gateway.
+  DEFAULTGATEWAY is accepted as another spelling of DEFAULT.
 
   If a file called DEVS:Internet/default_gateway exists it is read
   first, in the form
@@ -573,17 +572,20 @@
   and if neither file supplies a gateway, a GATEWAY= line in the
   @{"interface file" link IFACE} is used.
 
-  @{b}The routes file carries the default route only.@{ub} Lines in it that
-  describe a specific route -- those carrying DST, HOSTDST or NETDST --
-  are parsed and skipped.
+  The same file can keep four specific routes. DST chooses a host or network
+  from the address, HOSTDST is explicitly one host, and NETDST is explicitly
+  a network. A /0 through /32 prefix may be written after the destination:
 
-  A route to one particular network through a second router is added at
-  run time instead, with AddNetRoute, and removed with DeleteNetRoute.
-  The stack holds four such routes and consults them before the default
-  gateway, longest prefix first. There is no Unix-style route command.
-  AddNetRoute and DeleteNetRoute are the pair. Nothing writes these
-  routes to a file, so a script in S:User-Startup is what makes one
-  survive a reboot.
+      DST = 10.20.0.0/16 VIA = 192.168.1.254
+      HOSTDST = 10.30.0.7 VIA = 192.168.1.253
+
+  They are installed as soon as VIA is reachable. For a DHCP interface that
+  can be after the lease arrives. The stack consults specific routes before
+  the default gateway, longest prefix first.
+
+  AddNetRoute and DeleteNetRoute make temporary changes to the running table.
+  Deleting a configured route keeps it gone until the next stack start; edit
+  DEVS:Internet/routes to change what survives a reboot.
 
 @endnode
 
@@ -2520,10 +2522,8 @@
 
   @{b}Networking@{ub}
 
-    o  @{b}Four static routes, and none of them in a file.@{ub} A route to a
-       particular network through a second gateway is added with
-       AddNetRoute. Specific routes in DEVS:Internet/routes are read
-       and skipped, so nothing here survives a reboot by itself.
+    o  @{b}At most four specific IPv4 routes@{ub} can be kept in
+       DEVS:Internet/routes or added with AddNetRoute.
     o  @{b}At most four interfaces@{ub} are online at once, however many
        interface files DEVS:NetInterfaces holds -- and it may hold as
        many as you like. Definitions not named to AddNetInterface or
@@ -2545,10 +2545,9 @@
        stacks only.@{ub} In the micro stack, socket() with SOCK_RAW and
        MSG_OOB answer ENOSYS. So do the route, address-allocation and
        statistics calls there.
-    o  @{b}bind() to a particular local address on a machine with several
-       addressed interfaces binds only the port.@{ub} With one addressed
-       interface it is the same socket either way. An address this
-       machine does not have is refused with EADDRNOTAVAIL.
+    o  bind() to a particular local address is enforced for TCP listeners and
+       UDP delivery. An address this machine does not have is refused with
+       EADDRNOTAVAIL.
     o  @{b}The RoadshowData calls@{ub} -- ObtainRoadshowData,
        ReleaseRoadshowData and ChangeRoadshowData -- return ENOSYS.
        Every other Roadshow vector is implemented, including
@@ -2623,10 +2622,12 @@
   user: root, uid 0, home SYS:, shell C:Shell. That satisfies almost
   all software.
 
-  For anything else, it reads DEVS:Internet/passwd and
-  DEVS:Internet/group. Both ordinary Unix colon-delimited records and
-  AmiTCP 4's native pipe-delimited records are accepted. AmiTCP:db/passwd
-  and AmiTCP:db/group are also read, for an existing AmiTCP installation.
+  For anything else, Roadshow's DEVS:Internet/users and
+  DEVS:Internet/groups are read first, in their native ReadArgs-line format.
+  The older DEVS:Internet/passwd and DEVS:Internet/group names accept ordinary
+  Unix colon-delimited records. AmiTCP:db/passwd and AmiTCP:db/group accept
+  AmiTCP 4's native pipe-delimited records. Existing installations therefore
+  keep their UID and GID mappings without moving or rewriting the files.
 
   AmiNetXDuo never creates or changes AmiTCP:. That name belongs to an
   installed AmiTCP and to programs which keep compatibility data beneath
@@ -2790,15 +2791,17 @@
 
       DEVS:NetInterfaces/<name>       one per network card
       DEVS:Internet/name_resolution   name servers, domain, host name
-      DEVS:Internet/routes            the default gateway
+      DEVS:Internet/routes            default and specific IPv4 routes
       DEVS:Internet/hosts             local names
       DEVS:Internet/services          local service names
       DEVS:Internet/protocols         protocol numbers
       DEVS:Internet/networks          network names
       DEVS:Internet/service_discovery servers running here, announced
                                       to the local network
-      DEVS:Internet/passwd            optional, for usergroup.library
-      DEVS:Internet/group             optional, for usergroup.library
+      DEVS:Internet/users             Roadshow user records, optional
+      DEVS:Internet/groups            Roadshow group records, optional
+      DEVS:Internet/passwd            Unix user-record fallback, optional
+      DEVS:Internet/group             Unix group-record fallback, optional
 
   Installed rather than written:
 

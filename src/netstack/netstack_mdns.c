@@ -782,38 +782,73 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
     return (written < max) ? written : max;
 }
 
+/*
+ * A name in nx_mdns_host_name is configuration, not publication.  The module
+ * fills it at create time, before an interface has an address or a record to
+ * answer with, and leaves it there when a collision exhausts every retry.
+ *
+ * Ask the local cache instead.  These are exactly the two states accepted by
+ * _nx_mdns_response_send() for an answer: ANNOUNCING covers DHCP's late-address
+ * path (which deliberately skips probing), and VALID covers the steady state.
+ * PROBING has not won the name yet; GOODBYE and SUSPEND no longer own it.
+ */
+BOOL ami_netstack_mdns_is_published(AmiNetStack *ns, UWORD wanted_index)
+{
+    NX_MDNS    *mdns;
+    NX_MDNS_RR *rr;
+    ULONG      *head;
+    ULONG      *tail;
+    BOOL        published = FALSE;
+
+    if (ns == NULL || !ns->ns_MdnsCreated)
+        return FALSE;
+
+    mdns = &ns->ns_Mdns;
+    if (!mdns->nx_mdns_started || mdns->nx_mdns_local_service_cache == NULL)
+        return FALSE;
+
+    if (tx_mutex_get(&mdns->nx_mdns_mutex, TX_WAIT_FOREVER) != TX_SUCCESS)
+        return FALSE;
+
+    head = (ULONG *)mdns->nx_mdns_local_service_cache;
+    tail = (ULONG *)(*head);
+
+    for (rr = (NX_MDNS_RR *)((UCHAR *)head + sizeof(ULONG));
+         (ULONG *)rr < tail; rr++)
+    {
+        UINT index = (UINT)rr->nx_mdns_rr_interface_index;
+
+        if (index >= (UINT)NX_MAX_PHYSICAL_INTERFACES ||
+            (wanted_index < (UWORD)NX_MAX_PHYSICAL_INTERFACES &&
+             index != (UINT)wanted_index) ||
+            !mdns->nx_mdns_interface_enabled[index])
+            continue;
+
+        if ((rr->nx_mdns_rr_type == NX_MDNS_RR_TYPE_A ||
+             rr->nx_mdns_rr_type == NX_MDNS_RR_TYPE_AAAA) &&
+            (rr->nx_mdns_rr_state == NX_MDNS_RR_STATE_ANNOUNCING ||
+             rr->nx_mdns_rr_state == NX_MDNS_RR_STATE_VALID))
+        {
+            published = TRUE;
+            break;
+        }
+    }
+
+    /* We own a valid mutex after the successful get above, which is the only
+       condition _tx_mutex_put() accepts and its only successful exit. */
+    AMI_NX_ONLY_SUCCESS(tx_mutex_put(&mdns->nx_mdns_mutex));
+
+    return published;
+}
+
 const char *netstack_mdns_hostname(VOID)
 {
     AmiNetStack *ns = ami_netstack_raw();
 
-    if (ns == NULL || !ns->ns_MdnsCreated)
-        return NULL;
-
-    /*
-     * ns_MdnsClaimed IS NOT THE TEST, AND REQUIRING IT SAID "still claiming a
-     * name" FOREVER ON A MACHINE THAT WAS ANSWERING.
-     *
-     * That flag is set only from NX_MDNS_LOCAL_HOST_REGISTERED_SUCCESS, which
-     * nxd_mdns.c raises on one edge: the A record's PROBING -> ANNOUNCING
-     * transition.  A DHCP machine never makes that transition.  Its address
-     * arrives after nx_mdns_enable(), and the module's own
-     * _nx_mdns_address_change_process() re-registers the host name with
-     * type = NX_FALSE -- "the host does not need to repeat the Probing step,
-     * Only Announcing the A/AAAA" -- so the record goes straight to
-     * ANNOUNCING, the edge never occurs, and the callback is never called at
-     * all.  Instrumented to log every invocation: zero.
-     *
-     * The record is nonetheless live.  Measured on a bridged guest: state 9
-     * (NX_MDNS_RR_STATE_VALID), 42 of 49 queries answered with a median
-     * latency of 23 ms, IP TTL 255, both checksums valid, and a second machine
-     * on the LAN resolving the name to the guest's address.
-     *
-     * So the test is whether the module holds a host name, which it does once
-     * the registration has run.  A collision still shows through: the module
-     * renames in place, and this returns the name it settled on rather than
-     * the one that was asked for.
-     */
-    if (ns->ns_Mdns.nx_mdns_host_name[0] == '\0')
+    if (ns == NULL || !ns->ns_MdnsCreated ||
+        ns->ns_Mdns.nx_mdns_host_name[0] == '\0' ||
+        !ami_netstack_mdns_is_published(
+            ns, (UWORD)NX_MAX_PHYSICAL_INTERFACES))
         return NULL;
 
     /* The claimed name, not the configured one: the two differ after a

@@ -15,6 +15,8 @@
 /* Both parse in place: text is written through and the records point into it. */
 void ug_db_parse_passwd(struct UgDatabase *db, char *text);
 void ug_db_parse_group(struct UgDatabase *db, char *text, ULONG len);
+void ug_db_parse_users(struct UgDatabase *db, char *text);
+void ug_db_parse_groups(struct UgDatabase *db, char *text, ULONG len);
 
 /* The single-user, single-group tables that a machine with no files gets. */
 void ug_db_default_passwd(struct UgDatabase *db);

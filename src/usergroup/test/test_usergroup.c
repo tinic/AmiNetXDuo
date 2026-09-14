@@ -149,6 +149,31 @@ static struct UgDatabase *load_passwd(const char *text)
     return db;
 }
 
+static struct UgDatabase *load_users(const char *text)
+{
+    struct UgDatabase *db = (struct UgDatabase *)calloc(1, sizeof(*db));
+    char *copy = (char *)malloc(strlen(text) + 1);
+
+    strcpy(copy, text);
+    ug_db_parse_users(db, copy);
+    db->pw_text = copy;
+
+    return db;
+}
+
+static struct UgDatabase *load_groups(const char *text)
+{
+    struct UgDatabase *db = (struct UgDatabase *)calloc(1, sizeof(*db));
+    ULONG len = (ULONG)strlen(text);
+    char *copy = (char *)malloc(len + 1);
+
+    memcpy(copy, text, len + 1);
+    ug_db_parse_groups(db, copy, len);
+    db->gr_text = copy;
+
+    return db;
+}
+
 /* Count a gr_mem vector by walking it to its terminator, as a caller does. */
 static int member_count(char **mem)
 {
@@ -428,6 +453,86 @@ static void test_amitcp_pipe_records(void)
     free_db(gr);
 }
 
+static void test_roadshow_readargs_records(void)
+{
+    struct UgDatabase *pw;
+    struct UgDatabase *gr;
+
+    printf("Roadshow ReadArgs records\n");
+
+    pw = load_users(
+        "# users\n"
+        "NAME=root PASSWORD=* UID=0 GID=0 GECOS=\"The Judge\" DIR=SYS: SHELL=C:Shell\n"
+        "jane 100 200 \"Jane *\"J*\" Doe\" Work:Tools C:Shell\n"
+        "NAME = spaced UID 300 GID = 301 DIR Work:Spaced ; comment\n");
+    CHECK(pw->pw_count == 3);
+    CHECK_STR(pw->pw[0].pw_name, "root");
+    CHECK(pw->pw[0].pw_uid == 0);
+    CHECK_STR(pw->pw[0].pw_gecos, "The Judge");
+    CHECK_STR(pw->pw[0].pw_dir, "SYS:");
+    CHECK_STR(pw->pw[1].pw_name, "jane");
+    CHECK(pw->pw[1].pw_uid == 100);
+    CHECK(pw->pw[1].pw_gid == 200);
+    CHECK_STR(pw->pw[1].pw_gecos, "Jane \"J\" Doe");
+    CHECK_STR(pw->pw[1].pw_dir, "Work:Tools");
+    CHECK_STR(pw->pw[2].pw_name, "spaced");
+    CHECK(pw->pw[2].pw_uid == 300);
+    CHECK(pw->pw[2].pw_gid == 301);
+    CHECK_STR(pw->pw[2].pw_dir, "Work:Spaced");
+    free_db(pw);
+
+    /* /N is not atoi: Roadshow's ReadArgs rejects malformed and overflowing
+       IDs instead of quietly turning them into uid zero. */
+    pw = load_users(
+        "NAME=bad UID=oops GID=0\n"
+        "NAME=huge UID=999999999999 GID=0\n"
+        "NAME=quoted UID=9 GID=\"9\n"
+        "NAME=good UID=7 GID=8\n"
+        "NAME=edge UID=-2147483648 GID=2147483647\n");
+    CHECK(pw->pw_count == 2);
+    CHECK_STR(pw->pw[0].pw_name, "good");
+    CHECK(pw->pw[0].pw_uid == 7);
+    CHECK(pw->pw[0].pw_gid == 8);
+    CHECK(pw->pw[1].pw_uid == (-2147483647L - 1L));
+    CHECK(pw->pw[1].pw_gid == 2147483647L);
+    free_db(pw);
+
+    gr = load_groups(
+        "NAME=wheel ID=0 USERS=root jane\n"
+        "NAME=users ID=100 USERS=jane,bob\n"
+        "NAME crew ID 200 USERS a b\n");
+    CHECK(gr->gr_count == 3);
+    CHECK_STR(gr->gr[0].gr_name, "wheel");
+    CHECK(gr->gr[0].gr_gid == 0);
+    CHECK(member_count(gr->gr[0].gr_mem) == 2);
+    CHECK_STR(gr->gr[0].gr_mem[0], "root");
+    CHECK_STR(gr->gr[0].gr_mem[1], "jane");
+    CHECK_STR(gr->gr[1].gr_name, "users");
+    CHECK(gr->gr[1].gr_gid == 100);
+    CHECK(member_count(gr->gr[1].gr_mem) == 2);
+    CHECK_STR(gr->gr[1].gr_mem[1], "bob");
+    CHECK_STR(gr->gr[2].gr_name, "crew");
+    CHECK(gr->gr[2].gr_gid == 200);
+    CHECK(member_count(gr->gr[2].gr_mem) == 2);
+    free_db(gr);
+
+    gr = load_groups("NAME=bad ID=nope USERS=root\n"
+                     "NAME=good ID=20 USERS=jane\n");
+    CHECK(gr->gr_count == 1);
+    CHECK_STR(gr->gr[0].gr_name, "good");
+    CHECK(gr->gr[0].gr_gid == 20);
+    CHECK_STR(gr->gr[0].gr_mem[0], "jane");
+    free_db(gr);
+
+    /* One ReadArgs token can contain many comma-separated USERS.  The member
+       arena accounts for each one, not merely for whitespace words. */
+    gr = load_groups("NAME=crew ID=30 USERS=a,b,c,d,e,f,g,h\n");
+    CHECK(gr->gr_count == 1);
+    CHECK(member_count(gr->gr[0].gr_mem) == 8);
+    CHECK_STR(gr->gr[0].gr_mem[7], "h");
+    free_db(gr);
+}
+
 static void test_passwd_edges(void)
 {
     struct UgDatabase *db;
@@ -480,6 +585,7 @@ int main(int argc, char **argv)
     test_group_edges();
     test_passwd_line_endings();
     test_amitcp_pipe_records();
+    test_roadshow_readargs_records();
     test_passwd_edges();
 
     CHECK(ami_alloc_count() == 0);
