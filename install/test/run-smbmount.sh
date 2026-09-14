@@ -177,7 +177,7 @@ case "$STACK" in
         LIBBSD="$BUILD/src/bsdsocket/bsdsocket.library"
         LIBUG="$BUILD/src/usergroup/usergroup.library"
         CMDDIR="$BUILD/src/tools"
-        STACK_TOOLS="AddNetInterface ShowNetStatus netstat ping nc host NetTrace iperf"
+        STACK_TOOLS="AddNetInterface ShowNetStatus netstat ping nc host NetTrace iperf ShowNetServices"
         ;;
     roadshow)
         RSDIR="${AMINETXDUO_CMP_ROADSHOW:-$HOME/amiga-assets/stacks/Roadshow-Demo-1.15/Workbench}"
@@ -547,6 +547,7 @@ Echo >>DH0:smbcheck.txt \"RESULT nc445 rc=\$RC\""
 fi
 if [ "$HAVE_NETSTAT" = yes ]; then
     NETSTATLINE="C:netstat -a -s >>DH0:smbcheck.txt"
+    SVCLINE="C:ShowNetServices TYPE _ipps._tcp SECONDS 4 >>DH0:smbcheck.txt"
 fi
 
 # The boot shell's half.  It brings the network up, says what it sees, starts
@@ -567,6 +568,7 @@ Echo >>DH0:smbcheck.txt "RESULT ping rc=\$RC"
 $NCLINE
 Echo >>DH0:smbcheck.txt "*N=== 3. connections before the mount"
 $NETSTATLINE
+${SVCLINE:-Echo >NIL: ""}
 
 Echo >>DH0:smbcheck.txt "*N=== 4. Mount, List and Info, detached"
 Run >NIL: <NIL: Execute S:SMB-Work

@@ -1326,7 +1326,7 @@ static VOID ns_fill_tcpstall(NX_IP *ip, NsWriter *w)
  */
 #define NS_SERVICE_MAX      48
 
-static VOID ns_fill_services(NsWriter *w)
+static VOID ns_fill_services(NsWriter *w, const char *type)
 {
     AmiMdnsService *rows;
     UWORD           count;
@@ -1338,7 +1338,7 @@ static VOID ns_fill_services(NsWriter *w)
     if (rows == NULL)
         return;
 
-    count = netstack_mdns_browse_collect(NULL, rows, NS_SERVICE_MAX,
+    count = netstack_mdns_browse_collect(type, rows, NS_SERVICE_MAX,
                                          &available);
 
     for (i = 0; i < count; i++)
@@ -1448,6 +1448,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_NEIGHBOURS:  need = 0;                        break;
         case NETSTATUS_HEALTH:      need = sizeof(NetStatusHealth);  break;
         case NETSTATUS_SERVICES:    need = 0;                        break;
+        case NETSTATUS_SERVICES_TYPE:
+                                    need = sizeof(NetStatusService); break;
         case NETSTATUS_OPENERS:     need = 0;                        break;
         case NETSTATUS_TCPSTALL:    need = 0;                        break;
         case NETSTATUS_DEST6:       need = 0;                        break;
@@ -1622,7 +1624,43 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         ns_writer_init(&w, hdr, size, NETSTATUS_SERVICES,
                        sizeof(NetStatusService));
 #ifdef AMINETXDUO_MDNS
-        ns_fill_services(&w);
+        ns_fill_services(&w, NULL);
+#endif
+        ns_writer_finish(&w);
+        return (LONG)hdr->nsh_Count;
+    }
+
+    if (what == NETSTATUS_SERVICES_TYPE)
+    {
+#ifdef AMINETXDUO_MDNS
+        char type[NETSTATUS_SVC_TYPE_LEN];
+        UWORD i;
+#endif
+
+        /*
+         * READ THE TYPE BEFORE THE WRITER TOUCHES THE BUFFER.  It arrives in
+         * entry 0, which is the same storage the first answer is written to --
+         * that is the whole point of carrying it there rather than widening
+         * NetStatusHeader, which sits in front of the entries and cannot grow
+         * without moving every one of them for every caller ever built.
+         */
+#ifdef AMINETXDUO_MDNS
+        {
+            const NetStatusService *in =
+                (const NetStatusService *)NETSTATUS_ENTRIES(hdr);
+
+            for (i = 0; i + 1 < (UWORD)sizeof(type) &&
+                        in->nsv_Type[i] != '\0'; i++)
+                type[i] = in->nsv_Type[i];
+            type[i] = '\0';
+        }
+#endif
+
+        ns_writer_init(&w, hdr, size, NETSTATUS_SERVICES_TYPE,
+                       sizeof(NetStatusService));
+#ifdef AMINETXDUO_MDNS
+        /* Empty is every type, which is exactly NETSTATUS_SERVICES. */
+        ns_fill_services(&w, (type[0] != '\0') ? type : NULL);
 #endif
         ns_writer_finish(&w);
         return (LONG)hdr->nsh_Count;

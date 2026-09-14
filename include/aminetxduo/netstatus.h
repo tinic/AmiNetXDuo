@@ -22,7 +22,7 @@ extern "C" {
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
    different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       13
+#define AMI_NETSTATUS_VERSION       14
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -46,7 +46,7 @@ extern "C" {
 /* Callers MUST check lib_Revision >= this before any netstatus call: an older
    library has no such vector and the jump lands past the table terminator.
    Bump when a netstatus vector is added or AMI_NETSTATUS_VERSION moves. */
-#define AMI_NETSTATUS_MIN_REVISION  9
+#define AMI_NETSTATUS_MIN_REVISION  10
 
 /* ------------------------------------------------------------ selectors --- */
 #define NETSTATUS_SYSTEM        1   /* one NetStatusSystem                   */
@@ -68,6 +68,27 @@ extern "C" {
 #define NETSTATUS_RXBUDGET     17   /* one NetStatusRxBudget                 */
 #define NETSTATUS_DHCP6        18   /* NetStatusDhcp6[]                      */
 #define NETSTATUS_MULTICAST    19   /* NetStatusMulticast[]                  */
+/*
+ * NetStatusService[], of ONE service type.
+ *
+ * NETSTATUS_SERVICES answers with every service the mDNS cache holds, of every
+ * type, and the answer is bounded.  A caller that wanted one type therefore
+ * spent that bound on types it was going to discard, and could miss an
+ * instance of the type it asked for while being told only that "more were
+ * available" -- a count that was also across every type.
+ *
+ * THE TYPE TRAVELS IN THE FIRST ENTRY SLOT, which is why this is a new
+ * selector rather than a wider header: NetStatusHeader sits at the head of the
+ * caller's buffer, so a field added to it moves every entry and breaks callers
+ * built against any earlier version.  Fill nsv_Type of entry 0 with the type
+ * to match ("_ipps._tcp"), leave the rest alone, and the library overwrites
+ * the slot with the first answer.  An empty nsv_Type means every type and is
+ * exactly NETSTATUS_SERVICES.
+ *
+ * The buffer must hold at least one entry, or the type could not have been
+ * passed.
+ */
+#define NETSTATUS_SERVICES_TYPE 20  /* NetStatusService[], one type; see above */
 
 /* Every buffer starts with this.  Truncation is detectable rather than silent:
    nsh_Count < nsh_Available. */

@@ -356,9 +356,32 @@ static VOID browse_stop(struct Library *base, const char *type)
     (VOID)tool_netstatus_control(base, NETCTRL_MDNS_BROWSE_STOP, &ctl, NULL);
 }
 
-static LONG read_services(struct Library *base)
+/*
+ * `type' NULL asks for every service; a type asks the library to match it.
+ *
+ * Matching in the LIBRARY and not here is what makes the answer's counts mean
+ * something.  NETSTATUS_SERVICES returns the cache of every type, bounded, so
+ * a listing of one type spent that bound on types it then discarded -- and
+ * could miss an instance of the type asked for while reporting only that more
+ * were "available", a figure that was also across every type.  The type
+ * travels in entry 0, which tool_netstatus_query() leaves alone: it fills the
+ * header and nothing else.
+ */
+static LONG read_services(struct Library *base, const char *type)
 {
-    return tool_netstatus_query(base, NETSTATUS_SERVICES, &svc_answer,
+    ULONG what = NETSTATUS_SERVICES;
+    UWORD i;
+
+    if (type != NULL && type[0] != '\0')
+    {
+        for (i = 0; i + 1 < (UWORD)sizeof(svc_answer.entry[0].nsv_Type) &&
+                    type[i] != '\0'; i++)
+            svc_answer.entry[0].nsv_Type[i] = type[i];
+        svc_answer.entry[0].nsv_Type[i] = '\0';
+        what = NETSTATUS_SERVICES_TYPE;
+    }
+
+    return tool_netstatus_query(base, what, &svc_answer,
                                 sizeof(svc_answer), sizeof(NetStatusService));
 }
 
@@ -477,7 +500,7 @@ int main(int argc, char **argv)
        run out first. The query is retired either way, below. */
     broke = tool_delay_ticks(seconds * 50UL);
 
-    count = read_services(base);
+    count = read_services(base, all ? NULL : type);
 
     if (all && broke)
         all = FALSE;
@@ -499,7 +522,7 @@ int main(int argc, char **argv)
         if (!broke)
             broke = tool_delay_ticks(seconds * 50UL);
 
-        count = read_services(base);
+        count = read_services(base, NULL);
 
         for (i = 0; i < ntypes; i++)
             browse_stop(base, svc_types[i]);

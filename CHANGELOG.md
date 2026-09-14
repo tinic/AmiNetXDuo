@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`ShowNetServices TYPE ...` could miss a service, and its "More answered"
+  warning counted every type.** The library now matches the type; the answer's
+  48 entries hold only that type. New selector `NETSTATUS_SERVICES_TYPE`,
+  netstatus version 14
+
 ## 0.27.5
 
 - **`ShowNetStatus` reported a DHCP machine's `.local` name as unclaimed for
