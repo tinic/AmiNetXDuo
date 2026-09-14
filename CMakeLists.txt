@@ -312,6 +312,50 @@ endif()
 # config_file.c).  AMI_DEBUG and AMI_TRACE stay behind AMINETXDUO_DEBUG.
 option(AMINETXDUO_LOG "Build the serial diagnostic log" OFF)
 
+# ---------------------------------------------------------- the tick rate --
+#
+# ONE NUMBER FOR TWO HEADERS.  TX_TIMER_TICKS_PER_SECOND (port/threadx-amiga/
+# inc/tx_port.h) and NX_IP_PERIODIC_RATE (port/netxduo-amiga/inc/nx_user.h)
+# must agree: NetX Duo states every timeout as a divisor of its own, so a
+# disagreement does not fail, it scales every TCP timer by the ratio.  Both are
+# #ifndef-guarded so this is the only place either moves.
+#
+# WHY IT IS 50 AND WHAT RAISING IT BUYS.  The wakeup source is timer.device
+# UNIT_VBLANK, which cannot exceed the field rate, so 50 is the ceiling of the
+# free clock.  A tick is therefore 20 ms, and that quantum is visible in the
+# data path in two places:
+#
+#   src/sana2/sana2_tx.c   a send that finds all AMI_SANA2_TX_SLOTS busy does
+#                          tx_thread_sleep(1) up to AMI_SANA2_TX_WAIT_TICKS
+#                          times -- 80 ms of sleeping, then the frame is
+#                          dropped as congestion.  The reply port signals the
+#                          READER, so a sender has nothing else to wait on.
+#   src/sana2/sana2_rx.c   the receive loop refuses to use the tick for
+#                          fairness at all, and says why in place: "a ThreadX
+#                          tick is 20 ms, which is worse than the monopoly it
+#                          would prevent".
+#
+# ABOVE THE FIELD RATE THE SOURCE MUST CHANGE.  UNIT_VBLANK rounds a request up
+# to the next blank, so asking it for 200/s yields 50 and a wheel that runs
+# four times slow.  Anything over TX_AMIGA_TIMER_PROBE_MAX_HZ needs
+# TX_AMIGA_TIMER_UNIT=0 (UNIT_MICROHZ) with it, and then every tick is a real
+# timer.device round trip and a Forbid() window at Exec priority 20 -- which is
+# why this is a knob and not a default: it is a trade a 68030 loses.
+set(AMINETXDUO_TICK_HZ "" CACHE STRING
+    "ThreadX/NetX tick rate in Hz (blank = 50, the VBlank default)")
+if(AMINETXDUO_TICK_HZ)
+    add_compile_definitions(
+        TX_TIMER_TICKS_PER_SECOND=${AMINETXDUO_TICK_HZ}UL
+        NX_IP_PERIODIC_RATE=${AMINETXDUO_TICK_HZ})
+    if(AMINETXDUO_TICK_HZ GREATER 120)
+        # Past the probe's accept band; VBlank would silently under-deliver.
+        add_compile_definitions(TX_AMIGA_TIMER_UNIT=0)
+        message(STATUS "tick: ${AMINETXDUO_TICK_HZ} Hz on UNIT_MICROHZ")
+    else()
+        message(STATUS "tick: ${AMINETXDUO_TICK_HZ} Hz")
+    endif()
+endif()
+
 # How much of a Shell's 4096 a command actually touches, library calls and all.
 # tools/check-stack-frames.sh bounds each command's own frames from
 # -fstack-usage and cannot see across the LVO boundary into bsdsocket.library,

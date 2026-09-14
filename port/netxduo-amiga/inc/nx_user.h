@@ -12,9 +12,17 @@
 
 /* Must equal TX_TIMER_TICKS_PER_SECOND in port/threadx-amiga/inc/tx_port.h.
    NetX Duo expresses its own rates as divisors of this, so a disagreement
-   silently scales every TCP timer by the ratio. */
+   silently scales every TCP timer by the ratio.
 
+   Guarded so -DAMINETXDUO_TICK_HZ can move BOTH together; the build passes the
+   same number to both headers and nowhere else may define either.  It is a
+   compile-time constant here on purpose: NetX Duo uses NX_IP_PERIODIC_RATE
+   inside array sizes and #if expressions, so this cannot become a variable
+   read from ExecBase at run time without rewriting those. */
+
+#ifndef NX_IP_PERIODIC_RATE
 #define NX_IP_PERIODIC_RATE                     50
+#endif
 
 
 /* ------------------------------------------------------------- receive --- */
