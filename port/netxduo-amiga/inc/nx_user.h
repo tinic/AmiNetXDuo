@@ -86,30 +86,28 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
 
 /* ------------------------------------------------------------------ TCP --- */
 
-/* 8, against the vendor's 20.  The refutation of 20 was taken on a clean link
-   and its own note says the ring never filled there -- full=0 spins=0 drops=0
-   over 1024 sends -- so it measured a queue depth on a workload where the
-   queue has no depth to use.  That is the mistake "SACK (neutral)" made, and
-   SACK turned out to be carrying the lossy case entirely.
+/* THE CEILING, NOT THE DEFAULT.  Each socket starts with a share of the packet
+   pool (bsd_tcp_tx_queue_default(), src/bsdsocket/socket.c: pool/8, floor 8,
+   ceiling this) and SO_SNDBUF may raise it up to this.
 
-   Re-asked on the workload where retransmits do occupy the queue,
-   tests/perf/run-lossgate.sh, nine arms, counters build, same baseline:
+   8 was the fixed depth from wave 1 to 0.27.5, held against the vendor's 20 by
+   two emulator measurements that could not see what the depth does: the
+   emulated cards answer a write in microseconds, so eight segments were never
+   the thing in flight.  A real machine showed it at once.  A1200 + PiStorm32,
+   genet.device, whose round trip is ~5 ms on its own (AmiTCP_NG pings it in
+   3-10 ms too), iperf2 TCP 10 s to a Linux peer, 2026-09-14:
 
-       metric        depth 8   depth 20
-       read_kbs        314.0      366.0    +16.6%, gate iqr 28.7%
-       write_kbs     2,527.0    2,342.0     -7.3%, gate iqr  9.7%
-       dropped_rx       13.0       11.0
-       verdict          PASS       PASS
+       sender                              depth   Amiga sends
+       AmiNetXDuo 0.27.5, blocking httpd     8      17.4 Mbit/s   = 8 x 1460 x 8 / 5 ms
+       AmiNetXDuo 0.27.5, non-blocking       8       5.7 Mbit/s   (never woken by an ACK)
+       Roadshow 1.15 demo, 16 KiB sendspace          44 Mbit/s
+       AmiTCP_NG 4.1                                 56 Mbit/s
 
-   INCONCLUSIVE, and 8 stays.  Both moves sit inside the gate's own spread, the
-   arms are from different sittings, and write -- the metric a transmit queue
-   depth ought to move -- went the wrong way.  Unlike SACK, which moved three
-   to six times and left nothing to argue about.
-
-   So the row is no longer refuted on a workload where it was inert; it is
-   unresolved on the right one.  Settling it wants both arms in a single
-   sitting, which is nine emulator boots each. */
-#define NX_TCP_MAXIMUM_TX_QUEUE                 8
+   Eight segments a round trip is a bandwidth cap in its own right, and no
+   card can lift it.  64 x 1460 is 93 KiB, more than a 64 KiB window without
+   scaling can use, so the window is the limit again and not this.  The
+   pool-share default keeps a 1 MB machine where it was. */
+#define NX_TCP_MAXIMUM_TX_QUEUE                 64
 
 /* Compiles the per-socket receive-queue cap; src/bsdsocket/socket.c must size
    nx_tcp_socket_receive_queue_maximum from each socket's window or a sub-MSS

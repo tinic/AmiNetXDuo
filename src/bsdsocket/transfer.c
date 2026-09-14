@@ -319,6 +319,11 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         }
         if (status != NX_SUCCESS)
         {
+            /* The queue or the window is what stopped a non-blocking send:
+               the next acknowledgment with room posts FD_WRITE (select.c). */
+            if (wait == NX_NO_WAIT &&
+                (status == NX_TX_QUEUE_DEPTH || status == NX_WINDOW_OVERFLOW))
+                sock->as_TxWait = 1;
             sent += bsd_send_consumed(packet, filled);
             nx_packet_release(packet);
 

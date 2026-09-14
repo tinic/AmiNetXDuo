@@ -400,7 +400,8 @@
 
   @{b}WRITEREQUESTS@{ub}
              How many packets are handed to the driver at once, 1 to
-             8. Above 8 is 8, and CheckNetConfig says so. Default 8.
+             32. Above 32 is 32, and CheckNetConfig says so. Default
+             32, which is also what Roadshow gives a driver.
 
   Interface files written for Roadshow usually carry other keywords:
   COPYMODE, ALIAS, FILTER, METRIC, PRIORITY, LEASE, DHCPUNICAST,

@@ -536,6 +536,14 @@ static void t_writability(void)
     s = h_tcp(0, NX_TCP_ESTABLISHED);
     s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count = H_TX_QUEUE_MAX;
     CHECK(bsd_writable(s) == FALSE, "a full transmit queue is not writable");
+    CHECK(s->as_TxWait == 1,
+          "and it leaves the FD_WRITE request behind for the next ACK");
+
+    /* The request is taken back when there is room, so an acknowledgment
+       later does not post FD_WRITE to a writer that never waited. */
+    s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count = 1;
+    CHECK(bsd_writable(s) == TRUE, "room again is writable");
+    CHECK(s->as_TxWait == 0, "and takes the FD_WRITE request back");
 
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);

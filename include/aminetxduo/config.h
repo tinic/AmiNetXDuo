@@ -46,7 +46,7 @@ extern "C" {
  * layer's rings are this size (sana2_internal.h checks that they agree).
  */
 #define AMI_CFG_READREQUESTS_MAX    32
-#define AMI_CFG_WRITEREQUESTS_MAX   8
+#define AMI_CFG_WRITEREQUESTS_MAX   32
 #define AMI_CFG_PATH_LEN            128
 
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says

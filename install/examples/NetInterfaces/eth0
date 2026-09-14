@@ -104,11 +104,11 @@ CONFIGURE=DHCP
 ; IPREQUESTS and ARPREQUESTS -- how many reads of that kind wait at the
 ; driver, 1 to 32.  Leave them out and the stack sizes the queues from the
 ; wire speed and the memory it has.  WRITEREQUESTS -- how many packets are
-; handed to the driver at once, 1 to 8; above 8 is 8.
+; handed to the driver at once, 1 to 32; above 32 is 32.
 ;
 ;IPREQUESTS=32
 ;ARPREQUESTS=2
-;WRITEREQUESTS=8
+;WRITEREQUESTS=32
 
 ; These are real Roadshow keywords.  AmiNetXDuo parses them so that a
 ; Roadshow interface file produces no complaints, but they belong to the

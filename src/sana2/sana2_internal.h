@@ -234,7 +234,18 @@
 #endif
 
 #ifndef AMI_SANA2_TX_SLOTS
-#define AMI_SANA2_TX_SLOTS          8
+/* 32, from 8 on 2026-09-14.  The ring bounds what can be handed to the driver
+   at once, and with a TCP transmit queue deeper than the ring every extra
+   segment paid a tick's sleep in ami_sana2_tx_send(): on an A1200/PiStorm32
+   with genet.device a 64-deep queue over an 8-slot ring SENT SLOWER (13.6
+   Mbit/s httpd, 2.7 iperf) than the 8-deep queue it replaced (17.4 / 5.7).
+   32 is what Roadshow gives every SANA-II driver by default ("32 buffers of
+   1500 byte each, both inbound and outbound", its interface files), so no
+   driver meets a deeper queue here than it has met for fifteen years.  The
+   per-socket TCP default is capped at this (src/bsdsocket/socket.c).  Cost:
+   24 more AmiTxSlot per attached interface, no buffers -- the packet is
+   NetX Duo's. */
+#define AMI_SANA2_TX_SLOTS          32
 #endif
 
 /* The interface file's IPREQUESTS/ARPREQUESTS and WRITEREQUESTS are checked

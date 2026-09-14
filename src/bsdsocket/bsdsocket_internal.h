@@ -209,6 +209,14 @@ typedef struct
 #define BSD_UDP_QUEUE_CEILING   64
 #define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
 
+/* The TCP transmit queue, in unacknowledged segments.  bsd_tcp_tx_queue_default()
+   in socket.c sizes each socket from the pool: 1/N of it, never below the old
+   fixed depth, never above NX_TCP_MAXIMUM_TX_QUEUE (nx_user.h, the SO_SNDBUF
+   ceiling).  On a 512-packet pool that is the ceiling; on the 16-packet floor
+   it is the old 8.  Why it moves at all is in nx_user.h. */
+#define BSD_TCP_TX_QUEUE_MIN    8
+#define BSD_TCP_TX_POOL_SHARE   8       /* 1/N of the pool per socket       */
+
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
 #define BSD_NTOA_BUFLEN         16
 
@@ -602,6 +610,14 @@ typedef struct AmiSocket
      */
     /* The urgent byte a peer sent us, held for recv(MSG_OOB), see oob.c. */
     UBYTE                   as_OobData;
+
+    /* A writer found the transmit queue full (bsd_writable(), or a
+       non-blocking send that came up short) and wants FD_WRITE when an
+       acknowledgment makes room.  Set on the caller's task, cleared by the
+       window-update notify on the IP thread: one byte, one writer each way,
+       and it is SET BEFORE the queue is looked at so an acknowledgment that
+       lands between the look and the sleep still posts.  See select.c. */
+    UBYTE                   as_TxWait;
 
     /*
      * Orderly-close list. CloseSocket() sends a FIN and returns, so the

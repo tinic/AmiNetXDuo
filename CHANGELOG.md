@@ -9,6 +9,18 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **Sending from a fast card was capped at eight segments a round trip, and a
+  non-blocking sender was never woken by an acknowledgment.** On an A1200
+  with a PiStorm32 and `genet.device`, whose round trip is about 5 ms on its
+  own, that put `httpd` at 17 Mbit/s and `iperf` at 5.7 where Roadshow sent
+  44 and AmiTCP_NG 56. The transmit queue is now sized from the packet pool
+  (an eighth of it, never below the old eight, up to the driver's write ring,
+  which grows from 8 to 32 requests, Roadshow's default for every driver;
+  `SO_SNDBUF` may ask up to 64), and an acknowledgment that makes room posts
+  `FD_WRITE` to a writer parked in `WaitSelect()` or waiting on
+  `SetSocketSignals`. A 1 MB machine keeps the old depth. Reported as
+  "Roadshow has better performance", and it did
+
 - **`SBTC_LOG_HOOK` is answered.** One hook for the machine, handed every
   `syslog()` an application makes as a `struct LogHookMessage`: priority,
   `DateStamp`, the opener's tag, the calling task, the text. What Roadshow's
@@ -18,7 +30,7 @@ version at the top when it merges.
 
 - **`IPREQUESTS`, `ARPREQUESTS` and `WRITEREQUESTS` in an interface file now
   set the queue depths.** The two read keys take 1 to 32, over the depth the
-  stack plans from the wire speed; `WRITEREQUESTS` takes 1 to 8. Above the
+  stack plans from the wire speed; `WRITEREQUESTS` takes 1 to 32. Above the
   ceiling is the ceiling, and `CheckNetConfig` says so. The same by tag:
   `IFA_NumReadRequests`, `IFA_NumARPRequests`, `IFA_NumWriteRequests`. The
   three were read and dropped, with a note calling the depths fixed

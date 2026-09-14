@@ -1046,7 +1046,7 @@ static void test_request_counts_have_ceilings(void)
                    "configure = dhcp\n"         /* line 2 */
                    "iprequests = 64\n"          /* line 3: above 32, a note */
                    "arprequests = 32\n"         /* line 4: the ceiling, fine */
-                   "writerequests = 16\n"       /* line 5: above 8, a note */
+                   "writerequests = 64\n"       /* line 5: above 32, a note */
                    "unit = 0\n");               /* line 6 */
 
     CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);

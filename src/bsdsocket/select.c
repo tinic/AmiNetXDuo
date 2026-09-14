@@ -136,9 +136,23 @@ static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
     bsd_event_post(sock, FD_CLOSE | FD_READ | FD_WRITE);
 }
 
+/*
+ * NetX Duo calls this from the IP thread on every acknowledgment that leaves
+ * the transmit queue with room (the fork's nx_tcp_socket_state_transmit_check
+ * runs for a registered notify, not only for a suspended sender).  Most of
+ * those are of no interest to anybody, so the post is gated on a writer
+ * having actually hit the wall: as_TxWait is what bsd_writable() and a short
+ * non-blocking send leave behind.  Without the gate every ACK would Signal()
+ * a task that asked for SIGIO.
+ */
 static VOID bsd_tcp_window_notify(NX_TCP_SOCKET *socket_ptr)
 {
-    bsd_event_post((AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr, FD_WRITE);
+    AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
+
+    if (sock == NULL || sock->as_TxWait == 0)
+        return;
+    sock->as_TxWait = 0;
+    bsd_event_post(sock, FD_WRITE);
 }
 
 static VOID bsd_udp_receive_notify(NX_UDP_SOCKET *socket_ptr)
@@ -430,8 +444,17 @@ BOOL bsd_writable(AmiSocket *sock)
     if (sock->as_Nx.tcp.nx_tcp_socket_state != NX_TCP_ESTABLISHED)
         return FALSE;
 
-    return (sock->as_Nx.tcp.nx_tcp_socket_transmit_sent_count <
-            sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum);
+    /* Ask to be told BEFORE looking: an acknowledgment that frees the queue
+       between the look and the caller's Wait() then still posts FD_WRITE
+       (bsd_tcp_window_notify).  A queue with room takes the request back. */
+    sock->as_TxWait = 1;
+    if (sock->as_Nx.tcp.nx_tcp_socket_transmit_sent_count <
+        sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum)
+    {
+        sock->as_TxWait = 0;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 BOOL bsd_exception(AmiSocket *sock)

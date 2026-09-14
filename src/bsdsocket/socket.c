@@ -6,6 +6,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/nxstatus.h"
+#include "aminetxduo/config.h"
 #include "netmonitor.h"
 
 #include "nx_tcp.h"
@@ -165,6 +166,40 @@ static VOID bsd_tcp_rx_queue_cap(NX_TCP_SOCKET *tcp)
 #else
     (VOID)tcp;
 #endif
+}
+
+/*
+ * Bound the transmit queue in unacknowledged segments, from the pool.
+ *
+ * NetX Duo's compile-time NX_TCP_MAXIMUM_TX_QUEUE is the ceiling SO_SNDBUF may
+ * ask for; what a socket starts with is a share of the pool, so a machine
+ * with sixteen packets keeps the old eight and a machine with five hundred
+ * can keep a round trip's worth in flight.  The number that matters is
+ * segments per round trip: on genet.device (5 ms) eight segments cap a sender
+ * at 17 Mbit/s whatever the link does.  See nx_user.h.
+ */
+static VOID bsd_tcp_tx_queue_default(NX_TCP_SOCKET *tcp)
+{
+    NX_PACKET_POOL *pool  = netstack_pool();
+    ULONG           depth = BSD_TCP_TX_QUEUE_MIN;
+
+    if (pool != NULL)
+    {
+        depth = pool->nx_packet_pool_total / BSD_TCP_TX_POOL_SHARE;
+        if (depth < BSD_TCP_TX_QUEUE_MIN)
+            depth = BSD_TCP_TX_QUEUE_MIN;
+        if (depth > NX_TCP_MAXIMUM_TX_QUEUE)
+            depth = NX_TCP_MAXIMUM_TX_QUEUE;
+        /* Never deeper than the SANA-II write ring: a segment the ring cannot
+           take costs a tick's sleep in the driver's send, and measured on
+           genet.device that made a 64-deep queue slower than an 8-deep one
+           (sana2_internal.h, AMI_SANA2_TX_SLOTS).  SO_SNDBUF may still ask
+           for more, knowingly. */
+        if (depth > (ULONG)AMI_CFG_WRITEREQUESTS_MAX)
+            depth = (ULONG)AMI_CFG_WRITEREQUESTS_MAX;
+    }
+    tcp->nx_tcp_socket_transmit_queue_maximum         = depth;
+    tcp->nx_tcp_socket_transmit_queue_maximum_default = depth;
 }
 
 static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
@@ -1022,6 +1057,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
             bsd_tcp_seed_isn(&sock->as_Nx.tcp);
             bsd_tcp_keepalive_default(&sock->as_Nx.tcp);
             bsd_tcp_rx_queue_cap(&sock->as_Nx.tcp);
+            bsd_tcp_tx_queue_default(&sock->as_Nx.tcp);
         }
     }
     else
@@ -1370,6 +1406,7 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
     }
 
     bsd_tcp_seed_isn(&spare->as_Nx.tcp);
+    bsd_tcp_tx_queue_default(&spare->as_Nx.tcp);
     bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
     bsd_tcp_rx_queue_cap(&spare->as_Nx.tcp);
 
@@ -1536,6 +1573,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
         bsd_tcp_seed_isn(&incoming->as_Nx.tcp);
         bsd_tcp_keepalive_default(&incoming->as_Nx.tcp);
         bsd_tcp_rx_queue_cap(&incoming->as_Nx.tcp);
+        bsd_tcp_tx_queue_default(&incoming->as_Nx.tcp);
     }
     if (status != NX_SUCCESS)
     {
