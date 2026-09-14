@@ -683,18 +683,28 @@ def test_name_truncation():
 
 
 
-def test_listing_omission_yields():
-    """An unrepresentable child does not turn enumeration into a busy loop.
+def test_listing_widest_members():
+    """The widest member a name can make is still listed whole.
 
-    A row containing this many ampersands expands once in its href and again
-    in its XML display name, past the server's one-chunk scratch on filesystems
-    that retain long Amiga names.  Each omitted row is represented by its own
-    harmless comment chunk.  That detail is intentional: one chunk means one
-    return from the producer, and therefore one scheduling point for the
-    server's other connections.  Merely completing the listing would not catch
-    the old `continue`, which completed too after monopolising the event loop.
-    """
-    print("oversized listing members yield between directory entries")
+    A row of ampersands expands once in its href, where each becomes %26, and
+    again in its XML display name, where each becomes &amp;.  That is the
+    widest a single listing entry gets, and this asserts the server emits all
+    of it.
+
+    THIS USED TO ASSERT AN OMISSION, AND THAT CONDITION CANNOT HAPPEN.
+    httpd builds one entry into a HTTPD_CHUNK_MAX scratch (1400).  Bound the
+    entry from the limits either side of it: HTTP_NAME_MAX is 112, so the
+    display name cannot pass 560 and the name's share of the href cannot pass
+    336; HTTP_PATH_MAX is 256, so the rest of the href cannot pass 144; the
+    element boilerplate is about 300.  The widest possible entry is therefore
+    near 1340 and ALWAYS FITS.  The old assertion -- one omitted-entry comment
+    per member -- counted 0 against a wanted 4 on every run, because nothing
+    was ever omitted.  Nesting the drawer to force it only pushed the PUTs past
+    HTTP_PATH_MAX, which turned the red into a silent skip and tested nothing.
+
+    httpd's omission branch stays: it is cheap insurance if those limits move.
+    It is simply not reachable from here, so this asserts what is."""
+    print("the widest listing members are emitted whole")
 
     paths = [BASE + "/" + ("&" * 96) + ("%02d" % i) for i in range(4)]
     made = []
@@ -705,20 +715,24 @@ def test_listing_omission_yields():
             made.append(path)
 
     if len(made) != len(paths):
-        print("  (this filesystem cannot retain names long enough to expand "
-              "past one listing chunk; not applicable)")
+        print("  (this filesystem cannot retain long Amiga names; "
+              "not applicable)")
         for path in made:
             once(req("DELETE", path))
         return
 
     try:
         answer = once(req("PROPFIND", BASE, {"Depth": "1"}))
-        marker = b"<!-- listing entry omitted: representation too large -->"
         check(answer is not None and answer[0] == 207,
-              "the drawer remains listable with oversized members")
+              "the drawer remains listable with maximum-length members")
         if answer is not None:
-            check(answer[2].count(marker) == len(paths),
-                  "each omitted member consumes its own producer pass")
+            # Every one of them, in full.  A name of 96 `&' is 480 bytes once
+            # XML-escaped and 288 once percent-escaped into the href, which is
+            # the widest a single entry gets; all four must still appear, and
+            # the ordinary member beside them must survive the same listing.
+            for i in range(len(paths)):
+                check(("&amp;" * 96 + "%02d" % i).encode() in answer[2],
+                      "member %d is listed whole" % i)
             check(b"keepme.txt" in answer[2],
                   "ordinary members remain in the same listing")
     finally:
@@ -1517,7 +1531,7 @@ def main():
         test_overlapping_moves()
         test_destination_contains_source()
         test_name_truncation()
-        test_listing_omission_yields()
+        test_listing_widest_members()
         test_propfind_body()
         test_depth0_collection_lock()
 
