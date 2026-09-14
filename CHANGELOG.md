@@ -35,6 +35,23 @@ version at the top when it merges.
   `IFA_NumReadRequests`, `IFA_NumARPRequests`, `IFA_NumWriteRequests`. The
   three were read and dropped, with a note calling the depths fixed
 
+- **Specific routes in `DEVS:Internet/routes` now survive a restart.** `DST`,
+  `HOSTDST` and `NETDST` entries with a `VIA` gateway fill the same four-entry
+  table as `AddNetRoute`. Routes waiting for a DHCP interface are installed
+  when its address arrives; deleting one at run time keeps it gone until the
+  next stack start.
+
+- **Existing Roadshow account files now work with `usergroup.library`.**
+  `DEVS:Internet/users` and `groups` are read first in Roadshow's native
+  ReadArgs-line format. The Unix/AmiTCP `passwd` and `group` fallbacks remain.
+
+- **`ShowNetStatus` could print a `.local` name that was not answering.** An
+  mDNS object already contains its configured name before an address record
+  exists, and retains it after every collision retry fails. Status now reports
+  the system name and an interface's "answering" state only while that enabled
+  interface has an announcing or valid A/AAAA record -- the same states the
+  responder itself will answer from.
+
 - **`ShowNetServices TYPE ...` could miss a service, and its "More answered"
   warning counted every type.** The library now matches the type; the answer's
   48 entries hold only that type. New selector `NETSTATUS_SERVICES_TYPE`,

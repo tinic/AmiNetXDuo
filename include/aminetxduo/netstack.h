@@ -185,6 +185,12 @@ VOID    netstack_interface_release(UWORD index);
 VOID    netstack_gateway_override_set(ULONG gateway);
 VOID    netstack_gateway_override_clear(VOID);
 
+/* The same authority rule for configured specific routes. A successful live
+   delete suppresses the matching file entry until restart; a live add marks
+   that destination as already satisfied. */
+VOID    netstack_config_route_added(ULONG destination, ULONG netmask);
+VOID    netstack_config_route_deleted(ULONG destination, ULONG netmask);
+
 /* ------------------------------------------- DHCP on one interface --------
    One NX_DHCP for the machine, because there is one UDP port 68.  Not one
    blocking call: the caller holds the deadline and polls

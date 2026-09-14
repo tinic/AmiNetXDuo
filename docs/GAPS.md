@@ -98,7 +98,7 @@ it.
 | `POINTTOPOINT` `DESTINATION` | Point-to-point links |
 | `MULTICAST` | Asking the driver for multicast explicitly |
 | `REPORTOFFLINE` | Whether an interface going offline is reported |
-| `METRIC` `PRIORITY`/`PRI` | Ordering two interfaces |
+| `METRIC` `PRIORITY`/`PRI` | Ordering two interfaces; the first interface explicitly named still owns the automatic default route |
 | `LEASE` `DHCPUNICAST` | DHCP lease time and unicast renewal (`ID` we do read) |
 | `BROADCASTADDRESS` | A broadcast address other than the one the netmask implies |
 | `FILTER` `DEBUG` `ARPTYPE`/`HARDWARETYPE` `LINKSTATUSCOMMAND` | Packet filter, driver debug, ARP hardware type, link-change command |
@@ -112,7 +112,6 @@ that list is also what it cannot be asked for at runtime.
 
 | File | Note |
 |---|---|
-| `users`, `groups` | **We read `passwd` and `group` instead** (`ug_db.c:32-41`), AmiTCP's names, and `ug_parse.c:95` already takes `\|` or `:` per record, so the separator was never the gap. Roadshow's are ReadArgs lines, from its own manuscript: `users` is `NAME/A,PASSWORD/K,UID/A/N,GID/A/N,GECOS,DIR,SHELL` and `groups` is `NAME/A,ID/A/N,USERS/M`, `#` comments and blank lines skipped, **password in plain text**. Roadshow's manual calls both files obsolete, "provided only in order to assist the few applications which require them", and recommends against putting login data in them — so this is a small parser for a facility its own author deprecates, not a missing subsystem |
 | `rpc` | RPC program numbers, `getrpcbyname()`. Niche |
 | `servers` | The inetd-style superserver table. Out of scope while we ship no daemons |
 
@@ -127,7 +126,7 @@ PPPoE, SLIP or a modem are decided against and are not in this table.
 | `ManageNetInterfaces` | Roadshow | Moving interface files between `DEVS:NetInterfaces` and `SYS:Storage/NetInterfaces`. Both drawers are searched for a bare name, so a file in either one comes up when it is named; what is missing is the command that moves it |
 | `SampleNetSpeed`, `NetLogViewer` | Roadshow | A throughput window per interface, and a commodity that catches what the stack and its clients log |
 | `ipf` `ipfstat` `ipnat` `ipmon` | Roadshow | Packet filtering and NAT, on the `ipf_*` vectors above |
-| `CheckRoadshowConfig`, `wget`, `tcpdump` | Roadshow | We have `CheckNetConfig`, `fetch` and `NetCapture` under our own names |
+| `CheckRoadshowConfig`, `wget`, `tcpdump` | Roadshow | We have `CheckNetConfig`, `fetch` and `NetCapture`. Aliasing the names is unsafe: their option syntax differs, and the installer must not replace commands belonging to another stack |
 
 ## Behaviour, not surface
 

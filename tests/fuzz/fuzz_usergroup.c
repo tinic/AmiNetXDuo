@@ -58,7 +58,7 @@ VOID ami_log(int level, const char *fmt, ...)
 /* Every string the parser produced is read into this, so nothing is elided. */
 static volatile size_t fz_sink;
 
-static void fz_run_group(const char *data, size_t len)
+static void fz_run_group_parser(const char *data, size_t len, int roadshow)
 {
     struct UgDatabase *db = (struct UgDatabase *)calloc(1, sizeof(*db));
     char *text = (char *)malloc(len + 1);
@@ -74,7 +74,10 @@ static void fz_run_group(const char *data, size_t len)
     memcpy(text, data, len);
     text[len] = '\0';
 
-    ug_db_parse_group(db, text, (ULONG)len);
+    if (roadshow)
+        ug_db_parse_groups(db, text, (ULONG)len);
+    else
+        ug_db_parse_group(db, text, (ULONG)len);
 
     for (i = 0; i < db->gr_count; i++)
     {
@@ -97,7 +100,7 @@ static void fz_run_group(const char *data, size_t len)
     free(db);
 }
 
-static void fz_run_passwd(const char *data, size_t len)
+static void fz_run_passwd_parser(const char *data, size_t len, int roadshow)
 {
     struct UgDatabase *db = (struct UgDatabase *)calloc(1, sizeof(*db));
     char *text = (char *)malloc(len + 1);
@@ -113,7 +116,10 @@ static void fz_run_passwd(const char *data, size_t len)
     memcpy(text, data, len);
     text[len] = '\0';
 
-    ug_db_parse_passwd(db, text);
+    if (roadshow)
+        ug_db_parse_users(db, text);
+    else
+        ug_db_parse_passwd(db, text);
 
     for (i = 0; i < db->pw_count; i++)
     {
@@ -131,9 +137,15 @@ static void fz_run_passwd(const char *data, size_t len)
 static void fz_run_once(const char *data, size_t len, int which)
 {
     if (which != 'p')
-        fz_run_group(data, len);
+    {
+        fz_run_group_parser(data, len, 0);
+        fz_run_group_parser(data, len, 1);
+    }
     if (which != 'g')
-        fz_run_passwd(data, len);
+    {
+        fz_run_passwd_parser(data, len, 0);
+        fz_run_passwd_parser(data, len, 1);
+    }
 
     if (ami_alloc_count() != 0)
         abort();
@@ -155,7 +167,10 @@ static void fz_seeds(void)
         ":\r:\r:\r:\r:\r:\r:\r:\r",
         "",
         "root:*:0:0:AmigaOS user:SYS::\rjane:*:1000:100:J:W:S:\r",
-        "root\rjane:*\rbob:*:1\r"
+        "root\rjane:*\rbob:*:1\r",
+        "NAME=root PASSWORD=* UID=0 GID=0 DIR=SYS: SHELL=C:Shell\r",
+        "wheel 0 root jane\rNAME=staff ID=20 USERS=jane,root\r",
+        "NAME=bad UID=oops GID=0\rNAME=good UID=1 GID=2\r"
     };
     char big[4096];
     unsigned i;
@@ -199,6 +214,7 @@ static const char *const fz_atoms[] =
     "\n", "\r", "\r\n", "\n\r", ":", ",", "#", " ", "\t", "*",
     "a", "Z", "0", "9", "root", "wheel", "jane", "users", "guests",
     "SYS:", "C:Shell", "AmigaOS user", "-1", "+7", "4294967296",
+    "=", "\"", "*\"", "NAME=", "PASSWORD=", "UID=", "GID=", "ID=", "USERS=",
     "::::::", ",,,,,,", "a:*:0:", "a:*:0:x,y,z", ":*:0:",
     "\x7f", "\x80", "\xff", "%s"
 };

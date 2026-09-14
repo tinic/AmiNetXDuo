@@ -6,11 +6,12 @@
  * exactly one user, root, uid 0, gid 0, home SYS:, shell C:Shell, and one
  * group.
  *
- * If DEVS:Internet/passwd (or AmiTCP:db/passwd) does exist, it is used
- * instead. Unix-style ':' records and AmiTCP 4's native '|' records are both
- * accepted; the latter preserve Amiga paths such as SYS: inside a field. The
- * read is deliberately self-contained: src/config/ owns netdb parsing, but
- * this must not depend on it, and it must never pull in newlib stdio.
+ * Roadshow's DEVS:Internet/users and groups are preferred when present, in
+ * their native ReadArgs-line format.  DEVS:Internet/passwd/group and
+ * AmiTCP:db/passwd/group remain fallbacks; Unix ':' and AmiTCP 4's native '|'
+ * records are both accepted.  The read is deliberately self-contained:
+ * src/config/ owns netdb parsing, but this must not depend on it, and it must
+ * never pull in newlib stdio.
  *
  * The parsed tables are shared by every opener and immutable once built. Only
  * the iteration cursor and the returned record live in the per-opener base,
@@ -31,6 +32,7 @@
 
 static const char *const ug_passwd_paths[] =
 {
+    "DEVS:Internet/users",
     "DEVS:Internet/passwd",
     "AmiTCP:db/passwd",
     NULL
@@ -38,6 +40,7 @@ static const char *const ug_passwd_paths[] =
 
 static const char *const ug_group_paths[] =
 {
+    "DEVS:Internet/groups",
     "DEVS:Internet/group",
     "AmiTCP:db/group",
     NULL
@@ -115,7 +118,8 @@ char *ug_db_read_file(struct UserGroupBase *base, const char *path, ULONG *len_o
 }
 
 static char *ug_db_read_first(struct UserGroupBase *base,
-                              const char *const *paths, ULONG *len_out)
+                              const char *const *paths, ULONG *len_out,
+                              UWORD *which_out)
 {
     UWORD i;
 
@@ -126,6 +130,8 @@ static char *ug_db_read_first(struct UserGroupBase *base,
         if (text != NULL)
         {
             AMI_DEBUG("usergroup: using %s", paths[i]);
+            if (which_out != NULL)
+                *which_out = i;
             return text;
         }
     }
@@ -143,11 +149,18 @@ void ug_db_require_passwd(struct UserGroupBase *base)
 
     if (!g->db.pw_loaded)
     {
+        UWORD which = 0;
+
         g->db.pw_loaded = TRUE;
-        g->db.pw_text = ug_db_read_first(base, ug_passwd_paths, NULL);
+        g->db.pw_text = ug_db_read_first(base, ug_passwd_paths, NULL, &which);
 
         if (g->db.pw_text != NULL)
-            ug_db_parse_passwd(&g->db, g->db.pw_text);
+        {
+            if (which == 0)
+                ug_db_parse_users(&g->db, g->db.pw_text);
+            else
+                ug_db_parse_passwd(&g->db, g->db.pw_text);
+        }
         else
             ug_db_default_passwd(&g->db);
     }
@@ -166,12 +179,18 @@ void ug_db_require_group(struct UserGroupBase *base)
     if (!g->db.gr_loaded)
     {
         ULONG len = 0;
+        UWORD which = 0;
 
         g->db.gr_loaded = TRUE;
-        g->db.gr_text = ug_db_read_first(base, ug_group_paths, &len);
+        g->db.gr_text = ug_db_read_first(base, ug_group_paths, &len, &which);
 
         if (g->db.gr_text != NULL)
-            ug_db_parse_group(&g->db, g->db.gr_text, len);
+        {
+            if (which == 0)
+                ug_db_parse_groups(&g->db, g->db.gr_text, len);
+            else
+                ug_db_parse_group(&g->db, g->db.gr_text, len);
+        }
         else
             ug_db_default_group(&g->db);
     }

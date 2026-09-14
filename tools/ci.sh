@@ -249,7 +249,9 @@ host_test_targets() { # builddir
 #      0.27.2 fix turns on.
 #      383 with test_loghook: SBTC_LOG_HOOK, and the contexts it is not
 #      called on.
-HOST_TESTS_EXPECTED=383
+#      384 with test_config_routes_host: persistent Roadshow route startup,
+#      DHCP retry and explicit deletion precedence.
+HOST_TESTS_EXPECTED=384
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

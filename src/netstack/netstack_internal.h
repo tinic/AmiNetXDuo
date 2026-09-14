@@ -236,6 +236,7 @@ struct AmiNetStack
     UWORD               ns_GatewayPrimary;
     BOOL                ns_GatewayPrimaryNamed;
     UBYTE               ns_GatewayMode;       /* AmiNsGatewayMode */
+    UBYTE               ns_ConfigRouteInstalled[AMI_CFG_MAX_STATIC_ROUTES];
 
 #ifdef AMINETXDUO_DHCP
     NX_DHCP             ns_Dhcp;
@@ -387,6 +388,10 @@ struct AmiNetStack
 #endif
 };
 
+/* Persistent DEVS:Internet/routes, separate so netstack.c remains within the
+   GCC analyzer's per-translation-unit complexity budget. */
+VOID ami_netstack_config_routes_install(AmiNetStack *ns);
+
 #ifdef AMINETXDUO_IPV6
 /* netstack_ipv6.c.  Both callers must hold a ThreadX bracket.
    _configure_one() is idempotent: an interface that already has its
@@ -506,6 +511,9 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns);
 /* One interface, either way, while the stack runs.  netstack_iface_mdns_set()
    in <aminetxduo/netstack.h> is the published spelling. */
 LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable);
+/* The cache, not ns_IfaceMdns[]: TRUE only while this interface has an A or
+   AAAA record in a state the responder will publish. */
+BOOL ami_netstack_mdns_is_published(AmiNetStack *ns, UWORD index);
 LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks);
 /* The browse is public to bsdsocket.library.  See <aminetxduo/netstack.h>. */

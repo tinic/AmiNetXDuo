@@ -4,7 +4,7 @@
  * The on-disk format is Roadshow's (see docs/RESEARCH.md §6.6):
  *   DEVS:NetInterfaces/<name>      one file per interface
  *   DEVS:Internet/name_resolution  NAMESERVER / DOMAIN / SEARCH
- *   DEVS:Internet/routes           where Roadshow 1.15 keeps the default route
+ *   DEVS:Internet/routes           Roadshow default and specific IPv4 routes
  *   DEVS:Internet/default_gateway  DEVICE / UNIT / GATEWAY, not Roadshow's but
  *                                  read first, see src/config/config_parse.c:25
  *   DEVS:Internet/{hosts,networks,protocols,services}   netdb
@@ -31,6 +31,7 @@ extern "C" {
 #define AMI_CFG_IFACE_FLOOR         AMI_CFG_MAX_ATTACHED
 #define AMI_CFG_MAX_NAMESERVERS     4
 #define AMI_CFG_MAX_SEARCH          6
+#define AMI_CFG_MAX_STATIC_ROUTES   4
 
 /* What ami_config_search_list() can return: every search[] entry, plus the
    DOMAIN line for a file that has no SEARCH line. */
@@ -319,6 +320,16 @@ typedef enum {
     AMI_HOSTNAME_NAMERES        /* DEVS:Internet/name_resolution             */
 } AmiHostnameSource;
 
+/* One persistent IPv4 route from DEVS:Internet/routes.  The ceiling matches
+   NX_IP_ROUTING_TABLE_SIZE in port/netxduo-amiga/inc/nx_user.h: every entry
+   read here can therefore be installed, and the configuration never promises
+   a route for which the running stack has no slot. */
+typedef struct AmiRouteConfig {
+    ULONG destination;                /* host byte order, masked to network */
+    ULONG netmask;                    /* host byte order                    */
+    ULONG gateway;                    /* reachable next hop                 */
+} AmiRouteConfig;
+
 typedef struct AmiConfig {
     /*
      * Every interface DESCRIBED, and there is no limit on how many: see the
@@ -343,6 +354,8 @@ typedef struct AmiConfig {
     char                hostname[AMI_CFG_NAME_LEN];
     UWORD               hostname_source;     /* AmiHostnameSource                */
     ULONG               default_gateway;     /* 0 = none / from DHCP             */
+    AmiRouteConfig      static_route[AMI_CFG_MAX_STATIC_ROUTES];
+    UWORD               static_route_count;
 
     /*
      * Publish the TCP: device. TRUE unless DEVS:Internet/tcp_handler turns it

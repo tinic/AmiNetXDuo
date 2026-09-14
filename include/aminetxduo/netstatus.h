@@ -116,8 +116,8 @@ typedef struct NetStatusHeader
    this build and NETCTRL_ROUTE_ADD/DELETE answer ENOSYS. */
 #define NETSTATUS_SYS_ROUTING   0x0008UL
 
-/* AMINETXDUO_MDNS.  Set with an empty nss_MdnsName means the responder is
-   there but has not claimed a name yet. */
+/* AMINETXDUO_MDNS.  nss_MdnsName remains empty unless the responder has an
+   announcing or valid address record on an enabled interface. */
 #define NETSTATUS_SYS_MDNS      0x0010UL
 
 typedef struct NetStatusSystem

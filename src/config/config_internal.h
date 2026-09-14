@@ -253,13 +253,13 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count);
  */
 VOID ami_cfg_hostname_from_files(AmiConfig *cfg, char *env_text);
 
-/*
- * Parse DEVS:Internet/default_gateway (DEVICE/UNIT/GATEWAY) or
- * DEVS:Internet/routes (DEFAULT=/DEFAULTGATEWAY=, plus DST/VIA lines that are
- * skipped).
- * Sets *out only when a default gateway is found.
- */
+/* Parse only the default route, retained for the legacy default_gateway file
+   and for parser/fuzz callers that ask that one question. */
 VOID ami_cfg_parse_gateway(char *buf, ULONG *out);
+
+/* Parse Roadshow's routes file: DEFAULT=/DEFAULTGATEWAY= and up to the exact
+   capacity of NetX Duo's persistent DST/HOSTDST/NETDST VIA entries. */
+VOID ami_cfg_parse_routes(char *buf, AmiConfig *cfg);
 
 /*
  * Parse DEVS:Internet/tcp_handler. TCPHANDLER=ON/OFF, or the bare word on a

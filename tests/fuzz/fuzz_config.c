@@ -165,6 +165,15 @@ static void fz_run_once(char *data, size_t len, int which)
     ami_cfg_parse_gateway(scratch, &value);
     free(scratch);
 
+    scratch = (char *)malloc(len + 1);
+    if (scratch == NULL)
+        return;
+    memcpy(scratch, data, len);
+    scratch[len] = '\0';
+    memset(&cfg, 0, sizeof(cfg));
+    ami_cfg_parse_routes(scratch, &cfg);
+    free(scratch);
+
     /* The scalar converters, on a NUL-terminated copy. */
     scratch = (char *)malloc(len + 1);
     if (scratch == NULL)
@@ -192,6 +201,7 @@ static const char *const fz_atoms[] =
     " ", "\t", "\n", "\r", "\r\n", "#", ";", "\"", "\"\"", "\"\"\"\"",
     "\\", "/", "=", ".", ":", "-", "a", "Z", "0", "9", "127.0.0.1",
     "255.255.255.255", "HOST", "NAMESERVER", "DOMAIN", "SEARCH", "domain",
+    "DST", "HOSTDST", "NETDST", "VIA", "GATEWAY", "DEFAULT", "/", "/24",
     "21/tcp", "0x", "4294967296", "-1", "eth0", "localhost", "\"a b\"",
     "\"unterminated", "%s", "\x7f", "\x80", "\xff",
     /* service_discovery: the type grammar, the txt= field and its separator. */

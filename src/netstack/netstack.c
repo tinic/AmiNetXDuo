@@ -1159,6 +1159,8 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         AMI_WARN("netstack: nx_icmp_enable failed (%ld)", (long)status);
 #endif
 
+    ami_netstack_config_routes_install(ns);
+
     if (ns->ns_IfaceCount != 0 && ns->ns_Config.default_gateway != 0UL)
     {
         status = nx_ip_gateway_address_set(&ns->ns_Ip,
@@ -2488,12 +2490,19 @@ const AmiIfConfig *netstack_iface_config(UWORD nx_index)
 
 BOOL netstack_iface_mdns(UWORD nx_index)
 {
-    const AmiNetStack *ns = ami_netstack_raw();
+    AmiNetStack *ns = ami_netstack_raw();
 
     if (ns == NULL || nx_index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return FALSE;
 
-    return ns->ns_IfaceMdns[nx_index];
+#ifdef AMINETXDUO_MDNS
+    if (!ns->ns_IfaceMdns[nx_index])
+        return FALSE;
+
+    return ami_netstack_mdns_is_published(ns, nx_index);
+#else
+    return FALSE;
+#endif
 }
 
 LONG netstack_iface_mdns_set(UWORD nx_index, BOOL enable)
@@ -2779,6 +2788,8 @@ static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
     if (ns == NULL || !ns->ns_IpCreated)
         return;
 
+    ami_netstack_config_routes_install(ns);
+
     /* REQUIRED.  Every branch below turns on `installed', and a failed read
        leaves it whatever it was: the stack would decide there is no gateway to
        clear and leave the old one routing. */
@@ -2978,7 +2989,18 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
 
     if (status == NX_SUCCESS)
+    {
+        UWORD route;
+
+        /* NetX removes every static route owned by the detached interface.
+           Forget all installation marks; the reconcile immediately below
+           re-adds those whose next hop is still reachable through a survivor. */
+        for (route = 0; route < ns->ns_Config.static_route_count; route++)
+            if (ns->ns_ConfigRouteInstalled[route] == 1U)
+                ns->ns_ConfigRouteInstalled[route] = 0U;
+
         ami_ns_gateway_reconcile(ns, index, "interface removal");
+    }
 
     ami_netstack_leave_free(caller);
 
@@ -4133,7 +4155,9 @@ static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
             goto rollback;
     }
 
-    if (gateway != 0UL || ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_AUTO)
+    if (gateway != 0UL ||
+        ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_AUTO ||
+        ns->ns_Config.static_route_count != 0)
     {
         caller = ami_netstack_enter_alloc();
         if (caller == NULL)

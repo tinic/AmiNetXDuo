@@ -51,6 +51,7 @@ VOID nsh_reset(VOID)
     nsh.dhcp_restart_status = NX_SUCCESS;
     nsh.dhcp_create_status  = NX_SUCCESS;
     nsh.ip_create_status    = NX_SUCCESS;
+    nsh.static_route_status = NX_SUCCESS;
     nsh.cfg_interfaces      = 1;
     nsh.cfg_iptype          = (UWORD)AMI_IPTYPE_DHCP;
     nsh.iface_address       = 0xC0A80132UL;     /* 192.168.1.50 */
@@ -502,6 +503,14 @@ LONG ami_config_load(AmiConfig *cfg)
     cfg->interface_count    = nsh.cfg_interfaces;
     cfg->interface_capacity = nsh.cfg_interfaces;
 
+    if (nsh.cfg_static_routes != 0)
+    {
+        cfg->static_route_count = 1;
+        cfg->static_route[0].destination = 0x0A140000UL; /* 10.20.0.0/16 */
+        cfg->static_route[0].netmask     = 0xFFFF0000UL;
+        cfg->static_route[0].gateway     = 0xC0A80101UL;
+    }
+
     for (i = 0; i < nsh.cfg_interfaces; i++)
     {
         AmiIfConfig *ifc = &cfg->interfaces[i];
@@ -528,6 +537,14 @@ LONG ami_config_load_base(AmiConfig *cfg)
         return AMI_CFG_ERR_NOMEM;
 
     cfg->interface_capacity = AMI_CFG_IFACE_FLOOR;
+
+    if (nsh.cfg_static_routes != 0)
+    {
+        cfg->static_route_count = 1;
+        cfg->static_route[0].destination = 0x0A140000UL;
+        cfg->static_route[0].netmask     = 0xFFFF0000UL;
+        cfg->static_route[0].gateway     = 0xC0A80101UL;
+    }
     return AMI_CFG_OK;
 }
 
@@ -1104,6 +1121,18 @@ UINT _nxe_ip_gateway_address_clear(NX_IP *ip_ptr)
     (VOID)ip_ptr;
 
     return TX_SUCCESS;
+}
+
+UINT _nxe_ip_static_route_add(NX_IP *ip_ptr, ULONG network_address,
+                              ULONG net_mask, ULONG next_hop)
+{
+    (VOID)ip_ptr;
+    nsh.static_route_adds++;
+    nsh.static_route_dest    = network_address;
+    nsh.static_route_mask    = net_mask;
+    nsh.static_route_gateway = next_hop;
+
+    return nsh.static_route_status;
 }
 
 UINT _nxe_ip_interface_address_set(NX_IP *ip_ptr, UINT interface_index, ULONG ip_address, ULONG network_mask)

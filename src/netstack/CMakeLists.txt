@@ -6,6 +6,7 @@
 
 set(NETSTACK_SOURCES
     netstack.c
+    netstack_routes.c
     netstack_baton.c
     netstack_client_pool.c
     netstack_gateway.c

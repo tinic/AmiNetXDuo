@@ -214,22 +214,26 @@ static VOID load_resolver(AmiConfig *cfg)
 
 static VOID load_gateway(AmiConfig *cfg)
 {
-    static const char *const files[] =
+    char *buf;
+
+    /* The compatibility file wins for the default only.  The Roadshow file
+       is still always read below, because it can carry specific routes even
+       when this older file already supplied DEFAULT. */
+    buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_GATEWAY, NULL);
+    if (buf != NULL)
     {
-        AMI_CFG_FILE_GATEWAY,   /* docs/RESEARCH.md §6.6 and the config.h contract */
-        AMI_CFG_FILE_ROUTES,    /* where Roadshow 1.15 really keeps it */
-        NULL
-    };
-    int i;
-
-    for (i = 0; files[i] != NULL && cfg->default_gateway == 0; i++)
-    {
-        char *buf = (char *)ami_cfg_read_file(files[i], NULL);
-
-        if (buf == NULL)
-            continue;
-
+        ami_cfg_problem_file(AMI_CFG_FILE_GATEWAY);
         ami_cfg_parse_gateway(buf, &cfg->default_gateway);
+        ami_cfg_problem_file(NULL);
+        ami_free(buf);
+    }
+
+    buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_ROUTES, NULL);
+    if (buf != NULL)
+    {
+        ami_cfg_problem_file(AMI_CFG_FILE_ROUTES);
+        ami_cfg_parse_routes(buf, cfg);
+        ami_cfg_problem_file(NULL);
         ami_free(buf);
     }
 

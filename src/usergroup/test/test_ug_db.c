@@ -176,10 +176,10 @@ static void test_no_file_gives_root(void)
     CHECK(g.db.pw_text == NULL);            /* nothing was read */
     CHECK(base.ug_Err == 0);
 
-    /* Both candidate paths were tried, and each Open() was made with the
+    /* All three candidate paths were tried, and each Open() was made with the
        requester suppressed. */
-    CHECK(shim_dos_opens == 2);
-    CHECK(shim_dos_open_unwindowed == 2);
+    CHECK(shim_dos_opens == 3);
+    CHECK(shim_dos_open_unwindowed == 3);
     CHECK(shim_dos_closes == 0);            /* neither one opened */
     CHECK(shim_semaphore_depth == 0);
 
@@ -230,7 +230,7 @@ static void test_devs_file_wins(void)
         CHECK_STR(pw->pw_shell, "sh");
     }
     CHECK(g.db.pw_count == 2);
-    CHECK(shim_dos_opens == 1);             /* stopped at the first hit */
+    CHECK(shim_dos_opens == 2);             /* users missed, passwd hit */
     CHECK(shim_dos_closes == 1);
     CHECK(base.ug_Err == 0);
 
@@ -239,6 +239,36 @@ static void test_devs_file_wins(void)
     CHECK(pw != NULL);
     if (pw != NULL)
         CHECK_STR(pw->pw_gecos, "Root");
+
+    world_free();
+}
+
+/* Roadshow's native name and format take precedence over the older passwd
+   fallback, so an existing installation keeps its UID/GID mapping. */
+static void test_roadshow_users_win(void)
+{
+    static const char users[] =
+        "NAME=root UID=0 GID=0 GECOS=Roadshow DIR=SYS: SHELL=C:Shell\n"
+        "NAME=jane UID=501 GID=20 DIR=Work:Users/jane\n";
+    static const char passwd[] = "root::0:0:WRONG:SYS:\n";
+    struct ug_passwd *pw;
+
+    world_reset();
+    shim_dos_add_file("DEVS:Internet/users", users,
+                      (long)sizeof(users) - 1);
+    shim_dos_add_file("DEVS:Internet/passwd", passwd,
+                      (long)sizeof(passwd) - 1);
+
+    pw = ugl_getpwnam(&base, (STRPTR)"jane");
+    CHECK(pw != NULL);
+    if (pw != NULL)
+    {
+        CHECK(pw->pw_uid == 501);
+        CHECK(pw->pw_gid == 20);
+        CHECK_STR(pw->pw_dir, "Work:Users/jane");
+    }
+    CHECK(shim_dos_opens == 1);
+    CHECK(shim_dos_closes == 1);
 
     world_free();
 }
@@ -259,7 +289,7 @@ static void test_amitcp_fallback(void)
     CHECK(pw != NULL);
     if (pw != NULL)
         CHECK_STR(pw->pw_gecos, "FromAmiTCP");
-    CHECK(shim_dos_opens == 2);             /* DEVS: missed, AmiTCP: hit */
+    CHECK(shim_dos_opens == 3);             /* two DEVS: names missed */
     CHECK(shim_dos_closes == 1);
 
     world_free();
@@ -289,7 +319,7 @@ static void test_amitcp_group_fallback(void)
             CHECK(gr->gr_mem[2] == NULL);
         }
     }
-    CHECK(shim_dos_opens == 2);
+    CHECK(shim_dos_opens == 3);
     CHECK(shim_dos_closes == 1);
 
     world_free();
@@ -308,11 +338,11 @@ static void test_read_once(void)
     shim_dos_add_file("DEVS:Internet/passwd", devs, (long)sizeof(devs) - 1);
 
     CHECK(ugl_getpwuid(&base, 0) != NULL);
-    CHECK(shim_dos_opens == 1);
+    CHECK(shim_dos_opens == 2);
 
     CHECK(ugl_getpwnam(&base, (STRPTR)"root") != NULL);
     CHECK(ugl_getpwuid(&base, 0) != NULL);
-    CHECK(shim_dos_opens == 1);             /* still one */
+    CHECK(shim_dos_opens == 2);             /* still read only once */
     CHECK(shim_dos_closes == 1);
 
     world_free();
@@ -361,7 +391,7 @@ static void test_oversize_file_ignored(void)
         CHECK_STR(pw->pw_name, "root");
     CHECK(g.db.pw_count == 1);
     CHECK(g.db.pw_text == NULL);
-    CHECK(shim_dos_opens == 2);             /* DEVS: refused, AmiTCP: tried */
+    CHECK(shim_dos_opens == 3);             /* users missed, passwd refused, AmiTCP tried */
     CHECK(shim_dos_closes == 1);            /* only DEVS: ever opened */
 
     world_free();
@@ -425,6 +455,7 @@ int main(void)
     test_no_file_gives_root();
     test_unknown_uid_and_name();
     test_devs_file_wins();
+    test_roadshow_users_win();
     test_amitcp_fallback();
     test_amitcp_group_fallback();
     test_read_once();

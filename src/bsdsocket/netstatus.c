@@ -2131,6 +2131,9 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             status = nx_ip_static_route_add(ip, ctl->nsc_Destination,
                                             ctl->nsc_NetMask,
                                             ctl->nsc_Gateway);
+            if (status == NX_SUCCESS)
+                netstack_config_route_added(ctl->nsc_Destination,
+                                            ctl->nsc_NetMask);
             rc = ns_map_status(SocketBase, status);
 #else
             rc = bsd_fail(SocketBase, AMI_ENOSYS);
@@ -2141,6 +2144,9 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
             status = nx_ip_static_route_delete(ip, ctl->nsc_Destination,
                                                ctl->nsc_NetMask);
+            if (status == NX_SUCCESS)
+                netstack_config_route_deleted(ctl->nsc_Destination,
+                                              ctl->nsc_NetMask);
             rc = ns_map_status(SocketBase, status);
 #else
             rc = bsd_fail(SocketBase, AMI_ENOSYS);
