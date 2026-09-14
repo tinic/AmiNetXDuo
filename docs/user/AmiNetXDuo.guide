@@ -391,10 +391,21 @@
              the netdb file, and a note says where the value came
              from and where it belongs.
 
+  @{b}IPREQUESTS@{ub}, @{b}ARPREQUESTS@{ub}
+             How many reads of that kind wait at the driver, 1 to 32.
+             Without them the stack sizes the queues from the wire
+             speed and the memory it has, and that is the right
+             answer on every card that was measured. The packet
+             pool's share still bounds the number asked for.
+
+  @{b}WRITEREQUESTS@{ub}
+             How many packets are handed to the driver at once, 1 to
+             8. Above 8 is 8, and CheckNetConfig says so. Default 8.
+
   Interface files written for Roadshow usually carry other keywords:
-  IPREQUESTS, WRITEREQUESTS, ARPREQUESTS, COPYMODE, ALIAS, FILTER,
-  METRIC, PRIORITY, LEASE, DHCPUNICAST, LINKSTATUSCOMMAND, MULTICAST,
-  POINTTOPOINT, DESTINATION and BROADCASTADDRESS among them.
+  COPYMODE, ALIAS, FILTER, METRIC, PRIORITY, LEASE, DHCPUNICAST,
+  LINKSTATUSCOMMAND, MULTICAST, POINTTOPOINT, DESTINATION and
+  BROADCASTADDRESS among them.
   AmiNetXDuo recognises them and ignores them, so an existing Roadshow
   file can be used unchanged and produces no complaints. Anything it
   does @{b}not@{ub} recognise is reported as an unknown keyword by

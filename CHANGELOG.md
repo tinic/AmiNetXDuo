@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`IPREQUESTS`, `ARPREQUESTS` and `WRITEREQUESTS` in an interface file now
+  set the queue depths.** The two read keys take 1 to 32, over the depth the
+  stack plans from the wire speed; `WRITEREQUESTS` takes 1 to 8. Above the
+  ceiling is the ceiling, and `CheckNetConfig` says so. The same by tag:
+  `IFA_NumReadRequests`, `IFA_NumARPRequests`, `IFA_NumWriteRequests`. The
+  three were read and dropped, with a note calling the depths fixed
+
 - **`ShowNetServices TYPE ...` could miss a service, and its "More answered"
   warning counted every type.** The library now matches the type; the answer's
   48 entries hold only that type. New selector `NETSTATUS_SERVICES_TYPE`,

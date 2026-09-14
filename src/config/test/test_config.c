@@ -746,6 +746,9 @@ static void test_interface_static(void)
         "iptype=2048\r\n"
         "hardwareaddress=00:60:30:00:11:22\r\n"
         "id = a1200\r\n"
+        "IPREQUESTS = 16\r\n"
+        "arprequests=3\r\n"
+        "WriteRequests = 6\r\n"
         "state=down\r\n"
         "# end\r\n");
 
@@ -761,6 +764,9 @@ static void test_interface_static(void)
     CHECK_IP(iface.netmask, 255, 255, 255, 0);
     CHECK_IP(iface.gateway, 192, 168, 1, 1);
     CHECK(iface.mtu == 1500);
+    CHECK(iface.ip_requests == 16);
+    CHECK(iface.arp_requests == 3);
+    CHECK(iface.write_requests == 6);
     CHECK(iface.up == FALSE);
     free(buf);
 }
@@ -953,8 +959,8 @@ static void test_inert_keywords_are_notes(void)
     buf = dup_text("device = a2065.device\n"    /* line 1 */
                    "unit = 0\n"                 /* line 2 */
                    "configure = dhcp\n"         /* line 3 */
-                   "iprequests = 32\n"          /* line 4 */
-                   "writerequests = 32\n"       /* line 5 */
+                   "filter = ipandarp\n"        /* line 4 */
+                   "lease = 3600\n"             /* line 5 */
                    "copymode = 1\n"             /* line 6 */
                    "multicast = yes\n");        /* line 7 */
 
@@ -963,8 +969,8 @@ static void test_inert_keywords_are_notes(void)
     ami_config_set_reporter(NULL, NULL);
 
     CHECK(seen_count == 4);
-    CHECK(seen_mentions("iprequests"));
-    CHECK(seen_mentions("writerequests"));
+    CHECK(seen_mentions("filter"));
+    CHECK(seen_mentions("lease"));
     CHECK(seen_mentions("copymode"));
     CHECK(seen_mentions("multicast"));
     CHECK(seen[0].line == 4);
@@ -1023,6 +1029,60 @@ static void test_inert_keywords_are_notes(void)
 /* CARD= names come from include/aminetxduo/anxnet.h; an unknown name must
    refuse the interface, not fall back to UNIT. */
 
+
+static void test_request_counts_have_ceilings(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: IPREQUESTS/ARPREQUESTS/WRITEREQUESTS above the ring "
+           "are the ring, with a note\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
+
+    buf = dup_text("device = a2065.device\n"    /* line 1 */
+                   "configure = dhcp\n"         /* line 2 */
+                   "iprequests = 64\n"          /* line 3: above 32, a note */
+                   "arprequests = 32\n"         /* line 4: the ceiling, fine */
+                   "writerequests = 16\n"       /* line 5: above 8, a note */
+                   "unit = 0\n");               /* line 6 */
+
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+
+    CHECK(iface.ip_requests == AMI_CFG_READREQUESTS_MAX);
+    CHECK(iface.arp_requests == AMI_CFG_READREQUESTS_MAX);
+    CHECK(iface.write_requests == AMI_CFG_WRITEREQUESTS_MAX);
+
+    CHECK(seen_count == 2);
+    CHECK(seen[0].line == 3);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_NOTE);
+    CHECK(seen_mentions("IPREQUESTS"));
+    CHECK(seen[1].line == 5);
+    CHECK(seen[1].severity == AMI_CFG_PROBLEM_NOTE);
+    CHECK(seen_mentions("WRITEREQUESTS"));
+
+    /* Not a number, or nought, is a warning and leaves the field unsaid. */
+    seen_count = 0;
+    buf = dup_text("device = a2065.device\n"    /* line 1 */
+                   "configure = dhcp\n"         /* line 2 */
+                   "iprequests = lots\n"        /* line 3 */
+                   "writerequests = 0\n");      /* line 4 */
+
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+
+    CHECK(iface.ip_requests == 0);
+    CHECK(iface.write_requests == 0);
+    CHECK(seen_count == 2);
+    CHECK(seen[0].line == 3);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_WARN);
+    CHECK(seen[1].line == 4);
+    CHECK(seen[1].severity == AMI_CFG_PROBLEM_WARN);
+}
 static void test_interface_ipv6_only(void)
 {
     AmiIfConfig iface;
@@ -2693,6 +2753,7 @@ int main(int argc, char **argv)
     test_interface_errors();
     test_problem_reporter();
     test_inert_keywords_are_notes();
+    test_request_counts_have_ceilings();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6
     test_ipv6_only_no_error();

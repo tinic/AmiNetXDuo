@@ -37,7 +37,10 @@ typedef enum
     IF_KEY_MDNS,
     IF_KEY_DOWNGOESOFFLINE,
     IF_KEY_REQUIRESINITDELAY,
-    IF_KEY_HARDWAREADDRESS
+    IF_KEY_HARDWAREADDRESS,
+    IF_KEY_IPREQUESTS,
+    IF_KEY_ARPREQUESTS,
+    IF_KEY_WRITEREQUESTS
 } IfKey;
 
 static const struct IfKeyword
@@ -65,6 +68,9 @@ ami_if_keywords[] =
     { "downgoesoffline",    IF_KEY_DOWNGOESOFFLINE   },
     { "requiresinitdelay",  IF_KEY_REQUIRESINITDELAY },
     { "hardwareaddress",    IF_KEY_HARDWAREADDRESS   },
+    { "iprequests",         IF_KEY_IPREQUESTS        },
+    { "arprequests",        IF_KEY_ARPREQUESTS       },
+    { "writerequests",      IF_KEY_WRITEREQUESTS     },
 
     /* IPv6 keywords: the IPv4 keyword plus a "6".  In the floor build (no
        AMINETXDUO_IPV6) they must stay RECOGNISED and be ignored, so the same
@@ -78,9 +84,6 @@ ami_if_keywords[] =
     /* Roadshow keywords with nowhere to put them; listed so a stock
        configuration file produces no warnings. */
     { "arptype",            IF_KEY_IGNORED   },
-    { "iprequests",         IF_KEY_IGNORED   },
-    { "writerequests",      IF_KEY_IGNORED   },
-    { "arprequests",        IF_KEY_IGNORED   },
     { "debug",              IF_KEY_IGNORED   },
     { "pointtopoint",       IF_KEY_IGNORED   },
     { "multicast",          IF_KEY_IGNORED   },
@@ -257,9 +260,6 @@ static const struct { const char *key; const char *why; } cfg_inert_keys[] =
     { "destinationaddr",   "point-to-point links are not supported" },
     { "dhcpunicast",       "DHCP renewal is always broadcast here" },
     { "filter",            "there is no packet filter to give rules to" },
-    { "iprequests",        "the number of queued requests is fixed" },
-    { "arprequests",       "the number of queued requests is fixed" },
-    { "writerequests",     "the number of queued requests is fixed" },
     { "lease",             "the lease time asked for is the server's to choose" },
     { "linkstatuscommand", "nothing is run when the link changes" },
     { "metric",            "routes have no metric here, so interfaces cannot be ordered by one" },
@@ -330,6 +330,43 @@ static VOID report_bad_value_built(ULONG line, UWORD severity,
     ami_cfg_join3(text, sizeof(text), keyword, quoted, NULL);
 
     ami_cfg_problem_built(line, severity, text, hint);
+}
+
+/*
+ * IPREQUESTS, ARPREQUESTS and WRITEREQUESTS: a count with a ceiling.  Above
+ * it the ceiling is used, and CheckNetConfig says so; nothing is wrong with
+ * the file, so that is a note.  Not a number is a warning, like MTU.
+ */
+static VOID parse_request_count(ULONG lineno, const char *ifname,
+                                const char *keyword, const char *value,
+                                ULONG max, UWORD hint, ULONG *out)
+{
+    ULONG n;
+
+    if (!ami_cfg_parse_ulong(value, &n) || n == 0)
+    {
+        AMI_WARN("config: %s: bad %s '%s'", ifname, keyword, value);
+        report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, keyword, value, hint);
+        return;
+    }
+
+    if (n > max)
+    {
+        char text[128];
+
+        AMI_WARN("config: %s: %s %lu is more than %lu, %lu used", ifname,
+                 keyword, (unsigned long)n, (unsigned long)max,
+                 (unsigned long)max);
+        if (ami_cfg_problems_wanted())
+        {
+            ami_cfg_join3(text, sizeof(text), keyword,
+                          " is more than the driver can be given: ", value);
+            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_NOTE, text, hint);
+        }
+        n = max;
+    }
+
+    *out = n;
 }
 
 /* CARD names one board by name where UNIT only says "Nth in probe order".
@@ -675,6 +712,27 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad MTU '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MTU", value, AMI_CFG_ADVICE_MTU_IS_A_PLAIN);
                 }
+                break;
+
+            case IF_KEY_IPREQUESTS:
+                parse_request_count(lineno, out->name, "IPREQUESTS", value,
+                                    (ULONG)AMI_CFG_READREQUESTS_MAX,
+                                    AMI_CFG_ADVICE_IPREQUESTS_AND_ARPREQUESTS_ARE,
+                                    &out->ip_requests);
+                break;
+
+            case IF_KEY_ARPREQUESTS:
+                parse_request_count(lineno, out->name, "ARPREQUESTS", value,
+                                    (ULONG)AMI_CFG_READREQUESTS_MAX,
+                                    AMI_CFG_ADVICE_IPREQUESTS_AND_ARPREQUESTS_ARE,
+                                    &out->arp_requests);
+                break;
+
+            case IF_KEY_WRITEREQUESTS:
+                parse_request_count(lineno, out->name, "WRITEREQUESTS", value,
+                                    (ULONG)AMI_CFG_WRITEREQUESTS_MAX,
+                                    AMI_CFG_ADVICE_WRITEREQUESTS_IS_HOW,
+                                    &out->write_requests);
                 break;
 
             case IF_KEY_CONFIGURE:

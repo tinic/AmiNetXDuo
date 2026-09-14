@@ -237,6 +237,15 @@
 #define AMI_SANA2_TX_SLOTS          8
 #endif
 
+/* The interface file's IPREQUESTS/ARPREQUESTS and WRITEREQUESTS are checked
+   against these two by the parser, which cannot see this header. */
+#if AMI_SANA2_RX_MAX_DEPTH != AMI_CFG_READREQUESTS_MAX
+#error "AMI_CFG_READREQUESTS_MAX (config.h) must equal AMI_SANA2_RX_MAX_DEPTH"
+#endif
+#if AMI_SANA2_TX_SLOTS != AMI_CFG_WRITEREQUESTS_MAX
+#error "AMI_CFG_WRITEREQUESTS_MAX (config.h) must equal AMI_SANA2_TX_SLOTS"
+#endif
+
 #include "../thread_priorities.h"
 /*
  * The reader runs IP input, and TCP input with it, itself
@@ -326,11 +335,14 @@ typedef struct AmiRxDepths
 /*
  * `bps` is what S2_DEVICEQUERY reported (0 when the device did not say),
  * `pool_total` is nx_packet_pool_total (0 when there is no pool yet), `ifaces`
- * is how many interfaces share that pool (0 read as 1).  Scalars rather than
- * the interface, so the arithmetic runs under tests/sana2/host.
+ * is how many interfaces share that pool (0 read as 1), `ask_ip` and
+ * `ask_arp` are the interface file's IPREQUESTS and ARPREQUESTS (0 = not
+ * said).  Scalars rather than the interface, so the arithmetic runs under
+ * tests/sana2/host.
  */
 VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
-                       UWORD ifaces, AmiRxDepths *out);
+                       UWORD ifaces, UWORD ask_ip, UWORD ask_arp,
+                       AmiRxDepths *out);
 
 /* How many interfaces are bound to an NX_IP right now, which is how many
    readers' worth of pool packets are already spoken for.  In sana2_driver.c,
@@ -613,6 +625,13 @@ struct AmiSana2If
     UCHAR               mac[AMI_ETH_ADDR_SIZE];
     ULONG               mtu;
     ULONG               bps;
+
+    /* The interface file's IPREQUESTS, ARPREQUESTS (0 = the plan decides)
+       and WRITEREQUESTS (1..AMI_SANA2_TX_SLOTS: how many of tx[] are
+       claimed). */
+    UWORD               rx_want_ip;
+    UWORD               rx_want_arp;
+    UWORD               tx_slots;
     ULONG               hw_type;
     UWORD               addr_bits;
     UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */

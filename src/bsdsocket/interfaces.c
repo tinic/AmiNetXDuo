@@ -897,9 +897,30 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                 break;
             }
 
+            /* The interface file's IPREQUESTS, WRITEREQUESTS, ARPREQUESTS
+               by tag; above the ring they are the ring, as in the file. */
             case IFA_NumReadRequests:
             case IFA_NumWriteRequests:
             case IFA_NumARPRequests:
+            {
+                ULONG n   = (ULONG)item->ti_Data;
+                ULONG max = (item->ti_Tag == IFA_NumWriteRequests)
+                          ? (ULONG)AMI_CFG_WRITEREQUESTS_MAX
+                          : (ULONG)AMI_CFG_READREQUESTS_MAX;
+
+                if (n == 0)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                if (n > max)
+                    n = max;
+                if (item->ti_Tag == IFA_NumReadRequests)
+                    cfg->ip_requests = n;
+                else if (item->ti_Tag == IFA_NumWriteRequests)
+                    cfg->write_requests = n;
+                else
+                    cfg->arp_requests = n;
+                break;
+            }
+
             case IFA_CopyMode:
                 break;
 

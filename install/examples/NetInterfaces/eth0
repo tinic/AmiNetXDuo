@@ -101,11 +101,18 @@ CONFIGURE=DHCP
 ;
 ;MTU=1500
 
+; IPREQUESTS and ARPREQUESTS -- how many reads of that kind wait at the
+; driver, 1 to 32.  Leave them out and the stack sizes the queues from the
+; wire speed and the memory it has.  WRITEREQUESTS -- how many packets are
+; handed to the driver at once, 1 to 8; above 8 is 8.
+;
+;IPREQUESTS=32
+;ARPREQUESTS=2
+;WRITEREQUESTS=8
+
 ; These are real Roadshow keywords.  AmiNetXDuo parses them so that a
 ; Roadshow interface file produces no complaints, but they belong to the
-; SANA-II layer and are not acted on yet.
+; SANA-II layer and are not acted on.
 ;
-;IPREQUESTS=64
-;WRITEREQUESTS=64
 ;COPYMODE=fast
 ;IPTYPE=2048

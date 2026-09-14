@@ -697,6 +697,46 @@ static void case_special_recovery_stats(void)
 
 /* ------------------------------------------------------------------ main -- */
 
+/* IPREQUESTS, ARPREQUESTS and WRITEREQUESTS reach the interface at open, and
+   WRITEREQUESTS above the ring, or unsaid, is the whole ring. */
+static void case_request_counts(void)
+{
+    AmiSana2If *iface;
+    LONG        err = 0;
+
+    printf("  the interface file's request counts reach the interface\n");
+
+    h_config();
+    h_cfg.ip_requests    = 16;
+    h_cfg.arp_requests   = 3;
+    h_cfg.write_requests = 6;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL, "opened with request counts");
+    if (iface != NULL)
+    {
+        h_check(iface->rx_want_ip == 16 && iface->rx_want_arp == 3,
+                "IPREQUESTS and ARPREQUESTS are carried to the readers");
+        h_check(iface->tx_slots == 6, "WRITEREQUESTS=6 claims six slots");
+        (VOID)ami_sana2_close(iface);
+    }
+
+    h_config();
+    h_cfg.write_requests = 64;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && iface->tx_slots == AMI_SANA2_TX_SLOTS,
+            "WRITEREQUESTS above the ring is the ring");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_config();
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && iface->tx_slots == AMI_SANA2_TX_SLOTS &&
+            iface->rx_want_ip == 0 && iface->rx_want_arp == 0,
+            "unsaid is the whole ring and a plan the readers make");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+}
+
 int main(void)
 {
     printf("sana2 device: open, online, offline, close\n");
@@ -711,6 +751,7 @@ int main(void)
     case_shared_unit();
     case_distinct_units();
     case_special_recovery_stats();
+    case_request_counts();
 
     h_check(h_ports_made > 0, "reply ports were created");
     h_check(h_ports_live == 0, "every reply port was deleted");

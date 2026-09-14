@@ -107,6 +107,11 @@ static const char *const ami_cfg_advice_text[] =
     "olution, and this stack reads that file first.  The interface "
     "file is read only when it finds none, so move the line there b"
     "efore the interface is changed.",
+    "IPREQUESTS and ARPREQUESTS are how many reads of that kind wai"
+    "t at the driver, 1 to 32.  Leave them out and the stack sizes "
+    "the queues from the wire speed and the memory it has.",
+    "WRITEREQUESTS is how many packets are handed to the driver at "
+    "once, 1 to 8.  Leave it out for 8.",
 };
 
 const char *ami_cfg_advice(UWORD code)

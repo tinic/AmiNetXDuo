@@ -27,6 +27,11 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
        still complete somewhere. */
     ami_sana2_port_init(&iface->tx_port, NULL, 0, PA_IGNORE);
 
+    /* WRITEREQUESTS was applied by ami_sana2_open(); an interface built any
+       other way claims every slot. */
+    if (iface->tx_slots == 0 || iface->tx_slots > (UWORD)AMI_SANA2_TX_SLOTS)
+        iface->tx_slots = (UWORD)AMI_SANA2_TX_SLOTS;
+
     for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
     {
         AmiTxSlot *slot = &iface->tx[i];
@@ -440,7 +445,7 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
      * regions break serial, floppy and audio.
      */
     Forbid();
-    for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
+    for (i = 0; i < iface->tx_slots; i++)
     {
         if (!iface->tx[i].busy)
         {

@@ -1808,7 +1808,8 @@ static UWORD ami_sana2_rx_window_depth(ULONG pool_total)
 }
 
 VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
-                       UWORD ifaces, AmiRxDepths *out)
+                       UWORD ifaces, UWORD ask_ip, UWORD ask_arp,
+                       AmiRxDepths *out)
 {
     UWORD want;
     UWORD cap;
@@ -1825,14 +1826,33 @@ VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
     if (ifaces == 0)
         ifaces = 1;
 
+    if (ask_ip > (UWORD)AMI_SANA2_RX_MAX_DEPTH)
+        ask_ip = (UWORD)AMI_SANA2_RX_MAX_DEPTH;
+    if (ask_arp > (UWORD)AMI_SANA2_RX_MAX_DEPTH)
+        ask_arp = (UWORD)AMI_SANA2_RX_MAX_DEPTH;
+
     want = ami_sana2_rx_window_depth(pool_total);
     cap  = ami_sana2_rx_wire_depth(bps);
     if (want > cap)
         want = cap;
 
+    /*
+     * IPREQUESTS and ARPREQUESTS are the user's numbers, over the ladder's:
+     * the ladder is what was measured to be enough, and the interface file is
+     * the one place a user can say this card wants more, or a small machine
+     * less.  The pool budget below still holds -- a queue cannot pin packets
+     * the stack does not have -- so an ask is met as far as the pool goes.
+     */
+    if (ask_ip != 0)
+        want = ask_ip;
+
     out->ipv4 = (UWORD)AMI_SANA2_RX_DEPTH_IPV4;
     out->arp  = (UWORD)AMI_SANA2_RX_DEPTH_ARP;
     out->ipv6 = dual_stack ? (UWORD)AMI_SANA2_RX_DEPTH_IPV6 : (UWORD)0;
+    if (ask_ip != 0 && ask_ip < out->ipv4)
+        out->ipv4 = ask_ip;
+    if (ask_arp != 0 && ask_arp < out->arp)
+        out->arp = ask_arp;
 
     /* The share is the machine's and it is divided here, not multiplied
        elsewhere: one interface gets exactly what it always got. */
@@ -1846,6 +1866,14 @@ VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
         give = (UWORD)spare;
     out->ipv4 = (UWORD)(out->ipv4 + give);
     spare    -= (ULONG)give;
+
+    /* An ARP ask above the floor comes out of the same spare, after IP: it is
+       explicit, so it goes before the IPv6 default. */
+    give = (ask_arp > out->arp) ? (UWORD)(ask_arp - out->arp) : (UWORD)0;
+    if ((ULONG)give > spare)
+        give = (UWORD)spare;
+    out->arp = (UWORD)(out->arp + give);
+    spare   -= (ULONG)give;
 
     if (dual_stack)
     {
@@ -1920,7 +1948,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 
     ami_sana2_rx_plan(iface->bps, iface->pool->nx_packet_pool_total,
                       (BOOL)(AMI_SANA2_RX_READERS == 3),
-                      ami_sana2_bound_count(), &depths);
+                      ami_sana2_bound_count(), iface->rx_want_ip,
+                      iface->rx_want_arp, &depths);
 
     AMI_INFO("sana2: read queues ip %ld arp %ld ip6 %ld "
              "(pool %ld packets, %ld bps, %ld interface(s))",

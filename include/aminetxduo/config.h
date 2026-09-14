@@ -40,6 +40,13 @@ extern "C" {
 /* An Ethernet address, for HARDWAREADDRESS.  Every SANA-II device this runs
    on is 6 bytes; a driver with a wider one keeps its own. */
 #define AMI_CFG_MAC_SIZE            6
+
+/*
+ * The most IPREQUESTS/ARPREQUESTS and WRITEREQUESTS can ask for.  The SANA-II
+ * layer's rings are this size (sana2_internal.h checks that they agree).
+ */
+#define AMI_CFG_READREQUESTS_MAX    32
+#define AMI_CFG_WRITEREQUESTS_MAX   8
 #define AMI_CFG_PATH_LEN            128
 
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says
@@ -165,6 +172,17 @@ typedef struct AmiIfConfig {
     ULONG       netmask;
     ULONG       gateway;
     ULONG       mtu;                         /* 0 = ask the driver               */
+
+    /*
+     * IPREQUESTS, ARPREQUESTS, WRITEREQUESTS. How many CMD_READs of that
+     * type, and how many CMD_WRITEs, are with the driver at once.  0 is
+     * "not said": the reads are then planned from the wire speed and the
+     * packet pool (ami_sana2_rx_plan), the writes get every slot.  A number
+     * above the maximum is used as the maximum, with a note.
+     */
+    ULONG       ip_requests;
+    ULONG       arp_requests;
+    ULONG       write_requests;
     BOOL        up;                          /* bring online at startup          */
     BOOL        configured;                  /* slot in use                      */
     BOOL        down_goes_offline;           /* IFA_DownGoesOffline; default FALSE */

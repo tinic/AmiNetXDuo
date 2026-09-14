@@ -706,7 +706,17 @@ static void plan_for(ULONG bps, ULONG pool, BOOL dual, UWORD ifaces,
     d->ipv4 = 0xEEEE;
     d->arp  = 0xEEEE;
     d->ipv6 = 0xEEEE;
-    ami_sana2_rx_plan(bps, pool, dual, ifaces, d);
+    ami_sana2_rx_plan(bps, pool, dual, ifaces, 0, 0, d);
+}
+
+/* The same, with the interface file's IPREQUESTS and ARPREQUESTS. */
+static void plan_asked(ULONG bps, ULONG pool, UWORD ask_ip, UWORD ask_arp,
+                       AmiRxDepths *d)
+{
+    d->ipv4 = 0xEEEE;
+    d->arp  = 0xEEEE;
+    d->ipv6 = 0xEEEE;
+    ami_sana2_rx_plan(bps, pool, TRUE, 1, ask_ip, ask_arp, d);
 }
 
 /* One interface, which is what every case below this line means and what the
@@ -926,6 +936,59 @@ static void test_plan_arp_is_flat(void)
     }
 }
 
+static void test_plan_asked(void)
+{
+    AmiRxDepths d;
+    AmiRxDepths plain;
+
+    printf("sana2: IPREQUESTS and ARPREQUESTS are met as far as the pool "
+           "goes\n");
+
+    /* A serial-speed wire the ladder holds at four: the file says sixteen. */
+    plan_asked(115200UL, PLAN_BIG_POOL, 16, 0, &d);
+    h_check(d.ipv4 == 16, "IPREQUESTS=16 on a slow wire is sixteen");
+    h_check(d.arp == AMI_SANA2_RX_DEPTH_ARP, "and ARP is untouched");
+
+    /* Below the floor is honoured too: a small machine's ask. */
+    plan_asked(10000000UL, PLAN_BIG_POOL, 2, 1, &d);
+    h_check(d.ipv4 == 2, "IPREQUESTS=2 is two, under the floor");
+    h_check(d.arp == 1, "ARPREQUESTS=1 is one, under the floor");
+
+    /* Above the ring is the ring. */
+    plan_asked(10000000UL, PLAN_BIG_POOL, 64, 64, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH, "IPREQUESTS=64 is the ceiling");
+    h_check(d.arp == AMI_SANA2_RX_MAX_DEPTH, "ARPREQUESTS=64 is the ceiling");
+
+    /* An ARP ask comes out of the same spare, and before the IPv6 default. */
+    plan_asked(10000000UL, PLAN_BIG_POOL, 0, 8, &d);
+    plan_at(10000000UL, PLAN_BIG_POOL, TRUE, &plain);
+    h_check(d.arp == 8, "ARPREQUESTS=8 is eight");
+    h_check(d.ipv4 == plain.ipv4, "and IPv4 is planned as without it");
+    h_check(d.ipv6 == plain.ipv6, "and so is IPv6, on a pool this size");
+
+    /* The pool budget still holds: seventeen packets buy the floors. */
+    plan_asked(100000000UL, 17UL, 32, 32, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_IPV4 &&
+            d.arp  == AMI_SANA2_RX_DEPTH_ARP,
+            "an ask cannot pin packets a seventeen-packet pool has not got");
+
+    /* 47 packets: the budget is 11, the floors 8, so three to give, and IP
+       gets them before ARP. */
+    plan_asked(10000000UL, 47UL, 32, 32, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_IPV4 + 3 &&
+            d.arp  == AMI_SANA2_RX_DEPTH_ARP,
+            "47 packets: the spare goes to IP first");
+    plan_asked(10000000UL, 47UL, 0, 32, &d);
+    h_check(d.ipv4 == 5 && d.arp == AMI_SANA2_RX_DEPTH_ARP + 2 && d.ipv6 == 2,
+            "47 packets, ARP asked alone: IP keeps its plan, ARP takes the "
+            "rest before IPv6");
+
+    /* Nothing asked is the plan as it was. */
+    plan_asked(10000000UL, 127UL, 0, 0, &d);
+    h_check(d.ipv4 == 15 && d.arp == 2 && d.ipv6 == 8,
+            "no ask: 127 packets are still 15/2/8");
+}
+
 static void test_plan_shares_one_pool(void)
 {
     AmiRxDepths one;
@@ -1132,6 +1195,7 @@ int main(void)
     test_plan_floors();
     test_plan_single_stack();
     test_plan_arp_is_flat();
+    test_plan_asked();
     test_plan_shares_one_pool();
 
 #ifdef AMINETXDUO_RX_VERIFY

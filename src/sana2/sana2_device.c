@@ -809,7 +809,7 @@ VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out)
         }
     }
 
-    out->write_requests = (ULONG)AMI_SANA2_TX_SLOTS;
+    out->write_requests = (ULONG)iface->tx_slots;
 
     for (i = 0; i < (UWORD)AMI_SANA2_TX_SLOTS; i++)
     {
@@ -847,6 +847,15 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     ami_str_copy(iface->device, cfg->device, (ULONG)sizeof(iface->device));
     ami_str_copy(iface->card, cfg->card, (ULONG)sizeof(iface->card));
     iface->unit = cfg->unit;
+
+    /* IPREQUESTS, ARPREQUESTS, WRITEREQUESTS.  Here, before anything can
+       send: the probe writes further down claim from tx[] up to tx_slots. */
+    iface->rx_want_ip  = (UWORD)cfg->ip_requests;
+    iface->rx_want_arp = (UWORD)cfg->arp_requests;
+    iface->tx_slots    = (UWORD)AMI_SANA2_TX_SLOTS;
+    if (cfg->write_requests != 0 &&
+        cfg->write_requests < (ULONG)AMI_SANA2_TX_SLOTS)
+        iface->tx_slots = (UWORD)cfg->write_requests;
 
     /*
      * The buffer-management tag list is an input to OpenDevice and must outlive

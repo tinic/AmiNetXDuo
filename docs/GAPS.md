@@ -70,21 +70,24 @@ counters are reported in another shape through `NETSTATUS_STATS`.
 
 ## Missing configuration
 
-`DEVS:NetInterfaces/<name>`. The 19 keys acted on are listed at
+`DEVS:NetInterfaces/<name>`. The 22 keys acted on are listed at
 `src/config/config_parse.c:78`, with the AmiTCP spellings of four of them.
 `ADDRESS6` takes two lines per interface; every other key takes one.
+`IPREQUESTS` and `ARPREQUESTS` set a read queue's depth, 1 to 32, over the
+plan the stack makes from the wire speed; the packet pool's share still
+bounds them. `WRITEREQUESTS` is 1 to 8, the transmit ring; above it is 8, and
+`CheckNetConfig` says so.
 
-**The other 21 are accepted and dropped with a note**: `config_parse.c:80`
+**The other 18 are accepted and dropped with a note**: `config_parse.c:86`
 maps them to `IF_KEY_IGNORED` so a stock Roadshow file produces no warning,
-and `cfg_inert_keys[]` (`:247`) gives `CheckNetConfig` a one-line reason per
+and `cfg_inert_keys[]` (`:250`) gives `CheckNetConfig` a one-line reason per
 key to print. Two answers remain defensible for each — implement it, or refuse
 it.
 
 | Key | What it would do |
 |---|---|
-| `ALIAS` | A second address on one interface |
+| `ALIAS` | A second address on one interface. Refused: NetX Duo has one address per interface, and a second demultiplex on every frame is not worth it |
 | `COPYMODE` | Which SANA-II copy mode the driver is asked for |
-| `IPREQUESTS` `WRITEREQUESTS` `ARPREQUESTS` | How many requests are queued to the driver at once — the throughput knob for a slow card |
 | `POINTTOPOINT` `DESTINATION` | Point-to-point links |
 | `MULTICAST` | Asking the driver for multicast explicitly |
 | `REPORTOFFLINE` | Whether an interface going offline is reported |
