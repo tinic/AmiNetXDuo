@@ -175,6 +175,16 @@ VOID netstack_gateway_override_set(ULONG gw)
 { (VOID)gw; h_unreachable("netstack_gateway_override_set"); }
 VOID netstack_gateway_override_clear(VOID)
 { h_unreachable("netstack_gateway_override_clear"); }
+/* Route notes from the routes file (netstack_routes.c): nothing to record
+   here, NETCTRL_ROUTE_ADD/DELETE only have to link. */
+VOID netstack_config_route_added(ULONG destination, ULONG netmask)
+{
+    (VOID)destination; (VOID)netmask;
+}
+VOID netstack_config_route_deleted(ULONG destination, ULONG netmask)
+{
+    (VOID)destination; (VOID)netmask;
+}
 LONG netstack_interface_start(const AmiIfConfig *c, UWORD *out)
 { (VOID)c; (VOID)out; h_unreachable("netstack_interface_start"); return -1; }
 LONG bsd_stack_interface_start(struct AmiSocketBase *b, const AmiIfConfig *c,

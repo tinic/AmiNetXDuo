@@ -212,6 +212,16 @@ VOID netstack_gateway_override_set(ULONG gw)
 { (VOID)gw; }
 VOID netstack_gateway_override_clear(VOID)
 { }
+/* Route notes from the routes file (netstack_routes.c): nothing to record
+   here, NETCTRL_ROUTE_ADD/DELETE only have to link. */
+VOID netstack_config_route_added(ULONG destination, ULONG netmask)
+{
+    (VOID)destination; (VOID)netmask;
+}
+VOID netstack_config_route_deleted(ULONG destination, ULONG netmask)
+{
+    (VOID)destination; (VOID)netmask;
+}
 
 NX_IP *netstack_ip(VOID)
 {
