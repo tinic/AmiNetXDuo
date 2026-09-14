@@ -395,11 +395,12 @@ cat > "$HD/Devs/NetInterfaces/eth0" <<EOF
 DEVICE=${SMB_DEVICE:-a2065.device}
 ${AMINETXDUO_SMB_MTU:+MTU=$AMINETXDUO_SMB_MTU}
 UNIT=0
+MDNS=${AMINETXDUO_SMB_MDNS:-NO}
 $IFCONF
 EOF
 
 cat > "$HD/Devs/Internet/name_resolution" <<EOF
-hostname amiga-smb
+hostname ${AMINETXDUO_SMB_HOST:-amiga-smb}
 EOF
 
 # THE DOSDRIVER, verbatim from smb2fs's own README, and in
@@ -751,7 +752,7 @@ CAP_PID=""
 if [ "$CAPTURE" = 1 ]; then
     rm -f "$CAPFILE"
     tcpdump -i "$BACKEND" -s 0 -U -w "$CAPFILE" \
-        "host $SMBHOST and (port $SMBPORT or port 139${CAPEXTRA:-})" \
+        "(host $SMBHOST and (port $SMBPORT or port 139${CAPEXTRA:-})) or port 5353 or igmp" \
         > "$ROOT/build/smb-$TAG-tcpdump.log" 2>&1 &
     CAP_PID=$!
     sleep 2
