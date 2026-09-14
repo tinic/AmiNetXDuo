@@ -242,6 +242,46 @@ static LONG ami_ns_mdns_enable_one(AmiNetStack *ns, UWORD index)
     return AMI_NET_OK;
 }
 
+/*
+ * The address arrived after mDNS was enabled, so the module holds no A record
+ * for this interface and has nothing to probe.  nx_mdns_disable() then
+ * nx_mdns_enable() is the module's own supported way back: enable calls
+ * _nx_mdns_host_name_register() again, and this time the interface has an
+ * address for it to build the record from.
+ *
+ * Quiet on failure by design.  This runs from the IP thread's address-change
+ * notify; a machine that cannot claim a .local name still has every other
+ * service it had a moment ago, and the state it lands in is the one
+ * ShowNetStatus already reports.
+ */
+VOID ami_netstack_mdns_readdress(AmiNetStack *ns, UWORD index)
+{
+    UINT status;
+
+    if (ns == NULL || !ns->ns_MdnsCreated || index >= ns->ns_IfaceCount)
+        return;
+
+    if (!ns->ns_IfaceMdns[index])
+        return;
+
+    status = nx_mdns_disable(&ns->ns_Mdns, (UINT)index);
+    if (status != NX_MDNS_SUCCESS && status != NX_MDNS_NOT_ENABLED)
+    {
+        AMI_WARN("netstack: mDNS could not be restarted on interface %ld "
+                 "after its address arrived (%ld)", (long)index, (long)status);
+        return;
+    }
+
+    /* The services go with it: a disable suspends their records, and
+       ami_ns_mdns_enable_one() puts them back when this flag is clear. */
+    ns->ns_IfaceMdnsSvc[index] = FALSE;
+
+    if (ami_ns_mdns_enable_one(ns, index) == AMI_NET_OK)
+        AMI_INFO("netstack: mDNS probing for '%s.local' again, now that "
+                 "interface %ld has an address", ns->ns_MdnsLabel,
+                 (long)index);
+}
+
 LONG ami_netstack_mdns_start(AmiNetStack *ns)
 {
     UWORD i;

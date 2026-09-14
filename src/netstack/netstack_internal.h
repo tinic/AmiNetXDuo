@@ -503,6 +503,11 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
    netstack_resolve() takes before it reaches the unicast DNS client. */
 LONG ami_netstack_mdns_start(AmiNetStack *ns);
 VOID ami_netstack_mdns_stop(AmiNetStack *ns);
+
+/* An interface has just acquired an address.  Re-runs the host-name
+   registration, which nxd_mdns.c skips entirely when the interface had none:
+   see the comment at the call site in netstack.c. */
+VOID ami_netstack_mdns_readdress(AmiNetStack *ns, UWORD index);
 /* One interface, either way, while the stack runs.  netstack_iface_mdns_set()
    in <aminetxduo/netstack.h> is the published spelling. */
 LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable);

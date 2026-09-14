@@ -1449,6 +1449,36 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             AMI_ERROR("netstack: an address arrived and the waiter was not "
                       "woken. It will find it by polling, late");
 
+#ifdef AMINETXDUO_MDNS
+        /*
+         * REQUIRED, AND THE REASON A DHCP MACHINE HAD NO .local NAME.
+         *
+         * _nx_mdns_host_name_register() adds the A record only when the
+         * interface ALREADY holds an address:
+         *
+         *     if (ip_ptr -> nx_ip_interface[index].nx_interface_ip_address)
+         *         _nx_mdns_rr_a_aaaa_add(...);
+         *     return(NX_SUCCESS);
+         *
+         * -- and returns success either way.  ami_netstack_mdns_start() runs
+         * from the stack's start path, where CONFIGURE=DHCP has only been
+         * STARTED and the lease is not bound, so the address is 0, no record
+         * is created, and there is nothing to probe.  nx_mdns_enable() reports
+         * success, ShowNetStatus prints "mDNS yes, answering .local", and the
+         * machine transmits no mDNS at all: 7 UDP datagrams in fifteen minutes
+         * on the reporter's A3000, "still claiming a name" for ever, and
+         * neither of the module's failure states ever reached because probing
+         * never began.
+         *
+         * The address arriving is the moment the record can exist.  Re-running
+         * the registration here is what a static-address machine got for free
+         * by having the address before the start path ran.
+         */
+        if (addr != 0UL && ns->ns_MdnsCreated && ns->ns_IfaceMdns[i] &&
+            !ns->ns_MdnsClaimed)
+            ami_netstack_mdns_readdress(ns, i);
+#endif
+
         if (addr == 0UL)
         {
             /* NetX Duo cleared the network with the address. */
