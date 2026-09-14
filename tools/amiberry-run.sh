@@ -898,6 +898,32 @@ if [ -n "$BOARD" ]; then
     esac
 fi
 
+# AND THE CASE THE CHECK ABOVE CANNOT SEE: no board at all.
+#
+# That one only runs `if [ -n "$BOARD" ]', so a config whose only networking is
+# `sana2=true' -- uaenet.device, which takes NO backend option -- skips it and
+# lands on user-mode NAT silently.  The guest then boots, leases, pings, mounts
+# and transfers, and every throughput number is the NAT's.
+#
+# The address is the tell, and it is the same one whatever the route in, so
+# this is checked for every run and not just the boardless ones.  Measured
+# 2026-09-13: 18 s on SLIRP against 3 s bridged for one 32 MB SMB2 read, after
+# a whole investigation spent explaining the 18 s.
+if [ "${AMINETXDUO_ALLOW_SLIRP:-0}" != 1 ] && [ -f "$UAELOG" ]; then
+    case "$BACKEND" in
+        slirp|slirp_inbound|none) ;;
+        *)
+            . "$ROOT/tools/emu-bridge.sh"
+            case "$(emu_bridge_addr "$UAELOG" ${SERIAL:+"$SERIAL"})" in
+                10.0.2.*)
+                    echo "!! THE GUEST CAME UP ON USER-MODE NAT (10.0.2.x)." >&2
+                    echo "!! Nothing this run measured about the LAN is real." >&2
+                    echo "!! AMINETXDUO_ALLOW_SLIRP=1 if that is what you wanted." >&2
+                    BACKEND_MISSING=1 ;;
+            esac ;;
+    esac
+fi
+
 # ------------------------------------------------------------------- output --
 
 echo "---- serial ($SERIAL) ----"

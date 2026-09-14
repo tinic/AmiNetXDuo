@@ -40,6 +40,40 @@ ACTIVATE=0
 CAPTURE=0
 KEEP=0
 STACK=ours
+# AMINETXDUO_SMB_UAENET=1 swaps the emulated Zorro card for amiberry's own
+# uaenet.device: no register-level card emulation, so the link is not capped at
+# the a2065's 10 Mbit.  The emulator supplies the driver, so nothing is staged.
+if [ "${AMINETXDUO_SMB_UAENET:-0}" = 1 ]; then
+    UAENET_CFG="sana2=true"
+    SMB_DEVICE="uaenet.device"
+fi
+
+# AMINETXDUO_SMB_BOARD=<card> boots an emulated card instead, driven by our own
+# anxnet.device.  The cards are drained at hsync and uaenet at vsync
+# (amiberry sana2.cpp:1849 vs ne2000.cpp:1287), which is the difference this
+# option exists to measure.
+if [ -n "${AMINETXDUO_SMB_BOARD:-}" ]; then
+    UAENET_CFG=""
+    # DEVICE= is written into DEVS:NetInterfaces/eth0 long before the driver is
+    # staged, so the NAME has to be settled here.  Deciding it at staging time
+    # left eth0 saying anxnet.device while the vendor driver was the one on
+    # disk, and the interface refused with ENXIO.
+    if [ "${AMINETXDUO_SMB_VENDOR:-0}" = 1 ]; then
+        case "$AMINETXDUO_SMB_BOARD" in
+            xsurf100z2|xsurf100z3) SMB_DEVICE=x-surf-100.device ;;
+            xsurf)                 SMB_DEVICE=x-surf.device ;;
+            ariadne2)              SMB_DEVICE=ariadne_ii.device ;;
+            ariadne)               SMB_DEVICE=ariadne.device ;;
+            hydra)                 SMB_DEVICE=hydra.device ;;
+            eb920)                 SMB_DEVICE=eb920.device ;;
+            a2065)                 SMB_DEVICE=a2065.device ;;
+            ne2000_pcmcia)         SMB_DEVICE=cnet.device ;;
+            *)                     SMB_DEVICE="$AMINETXDUO_SMB_BOARD.device" ;;
+        esac
+    else
+        SMB_DEVICE="anxnet.device"
+    fi
+fi
 EXTRA=""
 CLIENT=smb2
 
@@ -143,7 +177,7 @@ case "$STACK" in
         LIBBSD="$BUILD/src/bsdsocket/bsdsocket.library"
         LIBUG="$BUILD/src/usergroup/usergroup.library"
         CMDDIR="$BUILD/src/tools"
-        STACK_TOOLS="AddNetInterface ShowNetStatus netstat ping nc host NetTrace"
+        STACK_TOOLS="AddNetInterface ShowNetStatus netstat ping nc host NetTrace iperf"
         ;;
     roadshow)
         RSDIR="${AMINETXDUO_CMP_ROADSHOW:-$HOME/amiga-assets/stacks/Roadshow-Demo-1.15/Workbench}"
@@ -155,7 +189,29 @@ case "$STACK" in
         # them say so rather than disappearing.
         STACK_TOOLS="AddNetInterface ShowNetStatus ping"
         ;;
-    *) echo "-s takes ours or roadshow" >&2; exit 2 ;;
+    amitcpng)
+        # AmiTCP_NG 4.1.5, staged by another checkout's harness.  The third
+        # stack mja65 compared against, and the one this harness kept dropping
+        # because -s only knew two names.  Its tree is lowercase `libs' and
+        # `amitcp/C', and it spells the status command GetNetStatus, so the
+        # names are mapped here rather than left to fail as a missing file.
+        NGDIR="${AMINETXDUO_CMP_AMITCPNG:-$HOME/anxd-metro/build/amitcpng-stage}"
+        need "$NGDIR/libs/bsdsocket.library" "set AMINETXDUO_CMP_AMITCPNG"
+        LIBBSD="$NGDIR/libs/bsdsocket.library"
+        LIBUG="$NGDIR/libs/usergroup.library"
+        CMDDIR="$NGDIR/amitcp/C"
+        STACK_TOOLS="AddNetInterface ping netstat"
+        # AmiTCP_NG is not driven like the other two.  ~/anxd-metro's own
+        # commands.txt shows the form: the tree is assigned to AmiTCP: and
+        # AddNetInterface takes the PATH to the interface file rather than the
+        # interface name.  Without both it never opens the device and the arm
+        # runs out its whole boot budget with an empty serial log, which is
+        # what happened on the first attempt.
+        NG_TREE="$NGDIR/amitcp"
+        NG_IFUP="C:Assign AmiTCP: SYS:amitcp
+SYS:amitcp/C/AddNetInterface DEVS:NetInterfaces/eth0"
+        ;;
+    *) echo "-s takes ours, roadshow or amitcpng" >&2; exit 2 ;;
 esac
 
 A2065="${AMINETXDUO_A2065:-}"
@@ -290,6 +346,7 @@ mkdir -p "$HD/L" "$HD/Libs" "$HD/C" "$HD/S" \
 cp "$A2065" "$HD/Devs/a2065.device"
 cp "$A2065" "$HD/Devs/Networks/a2065.device"
 cp "$LIBBSD" "$HD/Libs/bsdsocket.library"
+[ -n "${NG_TREE:-}" ] && cp -R "$NG_TREE" "$HD/amitcp"
 [ -f "$LIBUG" ] && cp "$LIBUG" "$HD/Libs/usergroup.library"
 HAVE_NETSTAT=no; HAVE_NC=no
 for t in $STACK_TOOLS; do
@@ -322,10 +379,23 @@ fi
 chmod 755 "$HD/Devs/a2065.device" "$HD/Devs/Networks/a2065.device"
 chmod 755 "$HD/C/"* 2>/dev/null || true
 
+# AMINETXDUO_SMB_ADDR pins the guest's address.  Required for any leg where
+# the PEER has to initiate -- an iperf RECEIVE, where the peer must know where
+# to connect before the guest has booted.  DHCP everywhere else.
+if [ -n "${AMINETXDUO_SMB_ADDR:-}" ]; then
+    IFCONF="CONFIGURE=STATIC
+ADDRESS=$AMINETXDUO_SMB_ADDR
+NETMASK=${AMINETXDUO_SMB_MASK:-255.255.255.0}
+GATEWAY=${AMINETXDUO_SMB_GW:-192.168.1.1}"
+else
+    IFCONF="CONFIGURE=DHCP"
+fi
+
 cat > "$HD/Devs/NetInterfaces/eth0" <<EOF
-DEVICE=a2065.device
+DEVICE=${SMB_DEVICE:-a2065.device}
+${AMINETXDUO_SMB_MTU:+MTU=$AMINETXDUO_SMB_MTU}
 UNIT=0
-CONFIGURE=DHCP
+$IFCONF
 EOF
 
 cat > "$HD/Devs/Internet/name_resolution" <<EOF
@@ -378,6 +448,22 @@ C:Mount SMB2: >DH0:w2-mount-out.txt
 Echo >DH0:w3-mount-rc.txt "$RC"
 EOF
 fi
+# THE CONTROL'S SOURCE FILE, WHICH DID NOT EXIST UNTIL 2026-09-13.
+#
+# S/SMB-Work has copied DH0:localsrc.dat since the control was added, and
+# nothing ever created it: Copy failed instantly, the two C:Date stamps came
+# out equal, and the harness reported a 0 s local copy -- a control that
+# measured nothing and could not say so.  Same size as the SMB payload and the
+# same destination volume, so the difference between the two stamps is the SMB
+# path and nothing else.
+#
+# 32 MB matches bigfile.dat on the peer's share.  DH0 is a DIRECTORY MAPPING,
+# so this write goes through amiberry's filesystem emulation exactly as
+# copytmp.dat does.
+if [ ! -s "$HD/localsrc.dat" ]; then
+    dd if=/dev/zero of="$HD/localsrc.dat" bs=1M count=32 status=none
+fi
+
 cat >> "$HD/S/SMB-Work" <<'EOF'
 C:SMBProbe LOCK DEVICE=SMB2: LOG=DH0:w4-probe.txt >DH0:w4-probe-console.txt
 Echo >DH0:w5-probe-rc.txt "$RC"
@@ -385,8 +471,72 @@ C:List SMB2: >DH0:w6-list-out.txt
 Echo >DH0:w7-list-rc.txt "$RC"
 C:Info SMB2: >DH0:w8-info-out.txt
 Echo >DH0:w9-info-rc.txt "$RC"
+C:Date >DH0:wE-local-start.txt
+C:Copy DH0:localsrc.dat TO DH0:localdst.dat >DH0:wE2-local-out.txt
+Echo >DH0:wE3-local-rc.txt "$RC"
+C:Date >DH0:wF-local-end.txt
+C:Delete DH0:localdst.dat >NIL:
+@RX@Run >DH0:wX2-rx-out.txt <NIL: C:iperf -s -p 5002
+@RX@C:Wait 2
+@WIRE@C:Date >DH0:wW1-wire-start.txt
+@WIRE@C:iperf @TCPHOST@ -p 5001 -n 32768 >DH0:wW2-wire-out.txt
+@WIRE@Echo >DH0:wW3-wire-rc.txt "$RC"
+@WIRE@C:Date >DH0:wW4-wire-end.txt
+@LOOP@Run >NIL: <NIL: C:iperf -s -p 5999
+@LOOP@C:Wait 3
+@LOOP@C:Date >DH0:wL1-loop-start.txt
+@LOOP@C:iperf 127.0.0.1 -p 5999 -n 32768 >DH0:wL2-loop-out.txt
+@LOOP@Echo >DH0:wL3-loop-rc.txt "$RC"
+@LOOP@C:Date >DH0:wL4-loop-end.txt
+@TCPCTRL@C:Date >DH0:wN1-nil-start.txt
+@TCPCTRL@C:nc @TCPHOST@ @TCPPORT@ >NIL:
+@TCPCTRL@Echo >DH0:wN2-nil-rc.txt "$RC"
+@TCPCTRL@C:Date >DH0:wN3-nil-end.txt
+C:Date >DH0:wR1-ram-start.txt
+C:Copy SMB2:midfile.dat TO RAM:midram.dat >DH0:wR2-ram-out.txt
+Echo >DH0:wR3-ram-rc.txt "$RC"
+C:Date >DH0:wR4-ram-end.txt
+C:Delete RAM:midram.dat >NIL:
+C:Date >DH0:wR5-dh0-start.txt
+C:Copy SMB2:midfile.dat TO DH0:middh0.dat >DH0:wR6-dh0-out.txt
+Echo >DH0:wR7-dh0-rc.txt "$RC"
+C:Date >DH0:wR8-dh0-end.txt
+C:Delete DH0:middh0.dat >NIL:
+C:Date >DH0:wB-read-start.txt
+C:Copy SMB2:hello.txt TO RAM: >DH0:wB0-small-out.txt
+Echo >DH0:wB1-small-rc.txt "$RC"
+C:Copy SMB2:bigfile.dat TO DH0:copytmp.dat >DH0:wB2-copy-out.txt
+Echo >DH0:wC-read-rc.txt "$RC"
+C:Date >DH0:wD-read-end.txt
+C:Delete DH0:copytmp.dat >NIL:
 Echo >DH0:wA-end.txt "done"
 EOF
+
+# The control's lines are marked so they can be filled in or removed whole;
+# the heredoc above is quoted, so nothing in it expands on its own.
+if [ "${AMINETXDUO_SMB_RX:-0}" = 1 ]; then
+    sed -i -e "s|@RX@||" "$HD/S/SMB-Work"
+else
+    sed -i -e "/@RX@/d" "$HD/S/SMB-Work"
+fi
+if [ "${AMINETXDUO_SMB_WIRE:-0}" = 1 ]; then
+    sed -i -e "s|@WIRE@||" -e "s|@TCPHOST@|$SMBHOST|" "$HD/S/SMB-Work"
+else
+    sed -i -e "/@WIRE@/d" "$HD/S/SMB-Work"
+fi
+if [ "${AMINETXDUO_SMB_LOOP:-0}" = 1 ]; then
+    sed -i -e "s|@LOOP@||" "$HD/S/SMB-Work"
+else
+    sed -i -e "/@LOOP@/d" "$HD/S/SMB-Work"
+fi
+if [ "${AMINETXDUO_SMB_TCPCTRL:-0}" = 1 ]; then
+    sed -i -e "s|@TCPCTRL@||" \
+           -e "s|@TCPHOST@|$SMBHOST|" \
+           -e "s|@TCPPORT2@|$((PEERPORT + 101))|" \
+           -e "s|@TCPPORT@|$((PEERPORT + 100))|" "$HD/S/SMB-Work"
+else
+    sed -i -e "/@TCPCTRL@/d" "$HD/S/SMB-Work"
+fi
 
 NCLINE="Echo >>DH0:smbcheck.txt \"RESULT nc445 rc=skipped\""
 NETSTATLINE="Echo >>DH0:smbcheck.txt \"(this stack ships no netstat)\""
@@ -395,7 +545,7 @@ if [ "$HAVE_NC" = yes ]; then
 Echo >>DH0:smbcheck.txt \"RESULT nc445 rc=\$RC\""
 fi
 if [ "$HAVE_NETSTAT" = yes ]; then
-    NETSTATLINE="C:netstat -a >>DH0:smbcheck.txt"
+    NETSTATLINE="C:netstat -a -s >>DH0:smbcheck.txt"
 fi
 
 # The boot shell's half.  It brings the network up, says what it sees, starts
@@ -406,7 +556,7 @@ FailAt 9999
 Stack 200000
 
 Echo >DH0:smbcheck.txt "=== 1. the network"
-C:AddNetInterface eth0 >>DH0:smbcheck.txt
+${NG_IFUP:-C:AddNetInterface eth0} >>DH0:smbcheck.txt
 Echo >>DH0:smbcheck.txt "RESULT addnet rc=\$RC"
 C:ShowNetStatus >>DH0:smbcheck.txt
 
@@ -526,6 +676,72 @@ if [ -n "$PEERHOST" ]; then
         ssh -o ConnectTimeout=10 "$PEERHOST" "cat $REMOTE_LOG" >&2 2>/dev/null
         exit 2; }
     echo "==> serving RETRO from $PEERHOST on $PEERADDR:$PEERPORT"
+
+    # THE SAME iperf THE GUEST RUNS OVER LOOPBACK, OVER THE WIRE INSTEAD.
+    # Loopback measures the stack; this measures the stack plus the SANA-II
+    # path, uaenet.device and the emulator's network trap.  One tool, one
+    # boot, one difference.
+    if [ "${AMINETXDUO_SMB_WIRE:-0}" = 1 ]; then
+        scp -q "$ROOT/tests/tools/iperfpeer.py" "$PEERHOST:/tmp/iperfpeer.py" ||
+            { echo "cannot copy iperfpeer to $PEERHOST" >&2; exit 2; }
+        ssh -o ConnectTimeout=10 "$PEERHOST" \
+            "nohup timeout $((TIMEOUT + 120)) python3 /tmp/iperfpeer.py serve tcp \
+                 --port 5001 --seconds $((TIMEOUT)) \
+                 > /tmp/iperfpeer-$TAG.log 2>&1 &" >/dev/null 2>&1 || {
+            echo "cannot start iperfpeer on $PEERHOST" >&2; exit 2; }
+        sleep 2
+        echo "==> iperf peer serving tcp on $PEERADDR:5001"
+    fi
+
+    # The RECEIVE direction, which is the one every slow case is in.  The peer
+    # initiates, so this needs AMINETXDUO_SMB_ADDR: it retries until the
+    # guest's `iperf -s' is listening.  The peer's own count is the oracle.
+    if [ "${AMINETXDUO_SMB_RX:-0}" = 1 ]; then
+        scp -q "$ROOT/tests/tools/iperfpeer.py" "$PEERHOST:/tmp/iperfpeer.py" \
+            >/dev/null 2>&1 || true
+        echo "==> iperf RECEIVE armed: waiting for the guest's address"
+    fi
+
+    # THE CONTROL THAT SEPARATES THE PROTOCOL FROM THE STACK.
+    #
+    # Same guest, same driver, same 32 MB, same destination volume -- but read
+    # over a plain TCP stream instead of SMB2, so the only difference between
+    # this number and the SMB one is smb2-handler/filesysbox and the SMB2
+    # request/response cadence.  Without it a slow SMB copy cannot be told
+    # apart from a slow stack, which is the question that has been open.
+    #
+    # A one-shot listener: it writes 32 MB and closes, and the close is what
+    # ends the guest's read.
+    if [ "${AMINETXDUO_SMB_TCPCTRL:-0}" = 1 ]; then
+        TCPPORT=$((PEERPORT + 100))
+        ssh -o ConnectTimeout=10 "$PEERHOST" \
+            "nohup timeout $((TIMEOUT + 120)) sh -c \
+                 'dd if=/dev/zero bs=1M count=32 2>/dev/null | \
+                  nc -l -p $TCPPORT -q 1' > /tmp/tcpctrl-$TAG.log 2>&1 &" \
+            >/dev/null 2>&1 || {
+            echo "cannot start the TCP control on $PEERHOST" >&2; exit 2; }
+        # A SECOND one-shot listener, so the same 32 MB can be taken twice:
+        # once discarded and once written.  The pair is what separates our
+        # socket path from the DOS write path -- nc is the only arm where the
+        # WHOLE path is ours and the sender never waits, so it cannot hide a
+        # request/response stall the way an SMB read does.
+        ssh -o ConnectTimeout=10 "$PEERHOST" \
+            "nohup timeout $((TIMEOUT + 120)) sh -c \
+                 'dd if=/dev/zero bs=1M count=32 2>/dev/null | \
+                  nc -l -p $((TCPPORT + 1)) -q 1' >> /tmp/tcpctrl-$TAG.log 2>&1 &" \
+            >/dev/null 2>&1 || {
+            echo "cannot start the second TCP control on $PEERHOST" >&2; exit 2; }
+        sleep 2
+        echo "==> TCP control: 32 MB from $PEERADDR:$TCPPORT (to NIL:) and" \
+             "$((TCPPORT + 1)) (to DH0:)"
+    fi
+fi
+
+# The TCP control runs on its own ports; without them the capture records
+# the SMB conversation only and the control arm cannot be analysed at all.
+CAPEXTRA=""
+if [ "${AMINETXDUO_SMB_TCPCTRL:-0}" = 1 ]; then
+    CAPEXTRA=" or port $((PEERPORT + 100)) or port $((PEERPORT + 101))"
 fi
 
 # ------------------------------------------------------------- the capture --
@@ -535,7 +751,7 @@ CAP_PID=""
 if [ "$CAPTURE" = 1 ]; then
     rm -f "$CAPFILE"
     tcpdump -i "$BACKEND" -s 0 -U -w "$CAPFILE" \
-        "host $SMBHOST and (port $SMBPORT or port 139)" \
+        "host $SMBHOST and (port $SMBPORT or port 139${CAPEXTRA:-})" \
         > "$ROOT/build/smb-$TAG-tcpdump.log" 2>&1 &
     CAP_PID=$!
     sleep 2
@@ -566,6 +782,47 @@ rig_claim_port "run-smbmount $TAG" || exit 2
 PORT="$RIG_PORT"
 : > "$SERIAL"
 
+if [ -n "${AMINETXDUO_SMB_BOARD:-}" ]; then
+    . "$ROOT/tools/emu-board.sh"
+    BOARD_CFG=$(emu_board_lines "$AMINETXDUO_SMB_BOARD" "$MAC" "$BACKEND") ||
+        { echo "!! unknown board $AMINETXDUO_SMB_BOARD" >&2; exit 2; }
+    # AMINETXDUO_SMB_VENDOR=1 stages the BOARD VENDOR'S driver instead of ours.
+    # Comparing two stacks on our own driver is not a comparison of the stacks:
+    # anxnet.device is known to do worse under Roadshow, which charges Roadshow
+    # for our driver.  The vendor driver is the common ground.
+    if [ "${AMINETXDUO_SMB_VENDOR:-0}" = 1 ]; then
+        . "$ROOT/tools/sana2-stage.sh"
+        VDRV=$(sana2_driver_for "$AMINETXDUO_SMB_BOARD")
+        VSRC="${AMINETXDUO_SANA2_DIR:-$HOME/amiga-assets/devs}/$VDRV"
+        [ -f "$VSRC" ] || { echo "!! no vendor driver at $VSRC" >&2; exit 2; }
+        cp "$VSRC" "$HD/Devs/Networks/$VDRV"
+        chmod 755 "$HD/Devs/Networks/$VDRV"
+    else
+        ANX="${AMINETXDUO_ANXNET:-$BUILD/src/netdev/anxnet.device}"
+        [ -f "$ANX" ] || { echo "!! no anxnet.device at $ANX" >&2; exit 2; }
+        cp "$ANX" "$HD/Devs/Networks/anxnet.device"
+        chmod 755 "$HD/Devs/Networks/anxnet.device"
+    fi
+    # CARD takes OUR driver's board name, not the emulator's config key, and
+    # the two differ.  Getting it wrong fails the whole interface file, so the
+    # mapping lives here rather than in a caller's env var.
+    case "${AMINETXDUO_SMB_CARD:-$AMINETXDUO_SMB_BOARD}" in
+        xsurf100z2|xsurf100z3) NDCARD=XSURF100 ;;
+        xsurf)                 NDCARD=XSURF ;;
+        ariadne2)              NDCARD=ARIADNE2 ;;
+        ariadne)               NDCARD=ARIADNE ;;
+        hydra)                 NDCARD=HYDRA ;;
+        eb920)                 NDCARD=LANROVER ;;
+        a2065)                 NDCARD=A2065 ;;
+        ne2000_pcmcia)         NDCARD=PCMCIA ;;
+        *)                     NDCARD=$(printf '%s' \
+                                   "${AMINETXDUO_SMB_CARD:-$AMINETXDUO_SMB_BOARD}" \
+                                   | tr 'a-z' 'A-Z') ;;
+    esac
+    [ "${AMINETXDUO_SMB_VENDOR:-0}" = 1 ] ||
+        printf 'CARD=%s\n' "$NDCARD" >> "$HD/Devs/NetInterfaces/eth0"
+fi
+
 cat > "$CFG" <<EOF
 config_description=AmiNetXDuo smb $TAG
 use_gui=no
@@ -577,9 +834,37 @@ floppy0type=-1
 nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
 serial_port=tcp://127.0.0.1:$PORT/wait
-a2065_rom_file=:ENABLED
-a2065_rom_options=mac=$MAC,$BACKEND
+${BOARD_CFG:-${UAENET_CFG:-a2065_rom_file=:ENABLED
+a2065_rom_options=mac=$MAC,$BACKEND}}
 EOF
+
+# THE CPU, AND WHY THIS BLOCK HAS TO EXIST.  This harness writes its own
+# emulator config instead of going through tools/amiberry-run.sh, so it did not
+# read AMINETXDUO_AMIBERRY_EXTRA and a caller passing cpu_model/cachesize on the
+# command line had it SILENTLY DISCARDED.  Every SMB measurement taken before
+# 2026-09-13 therefore ran on a stock 68020 A1200 at 14 MHz with no JIT, where
+# smb2-handler through filesysbox is the bottleneck and the stack underneath it
+# barely matters -- which is not the question this harness is asked.
+if [ -n "${AMINETXDUO_AMIBERRY_EXTRA:-}" ]; then
+    printf '%s\n' "${AMINETXDUO_AMIBERRY_EXTRA}" | tr ';' '\n' >> "$CFG"
+    echo "==> extra config: ${AMINETXDUO_AMIBERRY_EXTRA}"
+fi
+
+# A CONFIG THAT CAN ONLY PRODUCE THE NAT IS KNOWABLE NOW, NOT AFTER A BOOT.
+#
+# uaenet.device takes no backend, so `sana2=true' with no emulated card is
+# user-mode NAT every time -- see tools/emu-bridge.sh for what that costs.  The
+# post-boot address check still runs; this is here so the two minutes are not
+# spent first.
+if [ -n "${UAENET_CFG:-}" ] && [ -z "${AMINETXDUO_SMB_BOARD:-}" ] \
+   && [ "${AMINETXDUO_ALLOW_SLIRP:-0}" != 1 ]; then
+    echo "!! AMINETXDUO_SMB_UAENET=1 gives amiberry's user-mode NAT, not a" >&2
+    echo "   bridge: uaenet.device has no backend option. Throughput measured" >&2
+    echo "   this way is the NAT's (18 s vs 3 s on a 32 MB SMB2 read)." >&2
+    echo "   Use AMINETXDUO_SMB_BOARD=<card> for a bridged run, or" >&2
+    echo "   AMINETXDUO_ALLOW_SLIRP=1 if the NAT is what you want." >&2
+    exit 3
+fi
 
 EMU_PID=""; SERIAL_PID=""
 cleanup() {
@@ -592,10 +877,33 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-echo "==> booting, ${TIMEOUT}s budget, a2065 bridged on $BACKEND as $MAC"
-( trap '' PIPE; exec "$AMIBERRY" --log -f "$CFG" ) \
-    > "$ROOT/build/smb-$TAG-amiberry.log" 2>&1 &
-EMU_PID=$!
+echo "==> booting, ${TIMEOUT}s budget, ${SMB_DEVICE:-a2065.device} on $BACKEND as $MAC"
+#
+# --log IS NOT FREE, AND ON A THROUGHPUT ARM IT IS THE MEASUREMENT.
+#
+# amiberry's drawing.cpp:8307 prints "Denise queue without lock!" from
+# waitqueue(), once per call, unthrottled, whenever thread_debug_lock is false
+# -- which it is for the whole run of a headless guest.  write_log() takes a
+# GLOBAL semaphore and does a vsnprintf + timestamp + SDL_Log write per line,
+# on the emulation thread.  Every SMB arm measured before 2026-09-13 paid it:
+# smb-q1024 1,346,127 of 1,346,649 lines, smb-smbC-ours 14,962,727 of
+# 14,963,424 -- 99.9% in each.  A peer session measured 2.4 GB in one run and a
+# guest starved so hard the SANA-II interface never came up at all.
+#
+# Nothing here reads this file: the result comes off the serial port and out of
+# DH0:smbcheck.txt.  So it is off unless asked for, and when it IS asked for
+# the flood is dropped at the pipe -- that still pays the formatting, but not
+# the write.  A number taken with AMINETXDUO_SMB_EMULOG=1 is not a number.
+ALOG="$ROOT/build/smb-$TAG-amiberry.log"
+if [ "${AMINETXDUO_SMB_EMULOG:-0}" = 1 ]; then
+    echo "==> --log is ON: this arm is instrumented, not measured"
+    ( trap '' PIPE; exec "$AMIBERRY" --log -f "$CFG" ) \
+        > >(grep -v --line-buffered 'Denise queue without lock' > "$ALOG") 2>&1 &
+    EMU_PID=$!   # a pipeline's $! is grep, not the emulator; this is not one
+else
+    ( trap '' PIPE; exec "$AMIBERRY" -f "$CFG" ) > "$ALOG" 2>&1 &
+    EMU_PID=$!
+fi
 (
     for _ in $(seq 1 60); do
         kill -0 "$EMU_PID" 2>/dev/null || exit 0
@@ -604,6 +912,31 @@ EMU_PID=$!
     done
 ) &
 SERIAL_PID=$!
+
+# A PEER-INITIATED LEG CANNOT KNOW THE GUEST'S ADDRESS IN ADVANCE.
+#
+# A static address was tried and is not reachable on this bridge -- the guest
+# comes up with it and pings nothing.  DHCP is what works, so the address is
+# read back out of the serial log the moment the stack prints it, and the peer
+# is told then.  Backgrounded: the boot wait below must not be delayed by it.
+if [ "${AMINETXDUO_SMB_RX:-0}" = 1 ] && [ -n "$PEERHOST" ]; then
+(
+    GUESTIP=""
+    for _ in $(seq 1 240); do
+        GUESTIP=$(sed -n 's/.*online, address \([0-9.]*\).*/\1/p' "$SERIAL" \
+                  2>/dev/null | head -1)
+        [ -n "$GUESTIP" ] && break
+        sleep 1
+    done
+    [ -n "$GUESTIP" ] || { echo "!! never saw the guest's address" >&2; exit 0; }
+    echo "==> iperf RECEIVE: peer sending 32 MB to $GUESTIP:5002"
+    ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "for i in \$(seq 1 90); do \
+             python3 /tmp/iperfpeer.py send tcp $GUESTIP --port 5002 \
+                 --seconds 60 && break; sleep 2; done" \
+        > "$ROOT/build/smb-$TAG-iperfrx.log" 2>&1
+) &
+fi
 
 elapsed=0; STATUS=124
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
@@ -616,6 +949,12 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
 done
 echo "    (finished after ${elapsed}s, boot status $STATUS)"
 cleanup
+
+# WAS THIS RUN ON THE BRIDGE, OR ON AMIBERRY'S NAT?  Every number below
+# is void if it was the NAT, and nothing else in the run says so.
+# tools/emu-bridge.sh carries the evidence and the escape hatch.
+. "$ROOT/tools/emu-bridge.sh"
+emu_bridge_assert "$SERIAL" "$HD/smbcheck.txt" || BRIDGE_BAD=1
 trap - EXIT INT TERM HUP
 
 # ------------------------------------------------------------- the result --
@@ -692,6 +1031,11 @@ echo "stack=$STACK"
 echo "drive=$HD"
 [ -s "$CAPFILE" ] && echo "capture=$CAPFILE"
 
+if [ "${BRIDGE_BAD:-0}" = 1 ]; then
+    echo "verdict=not_bridged"
+    echo "!! the numbers above are the NAT's, not a measurement" >&2
+    exit 3
+fi
 if [ "$STOPPED" = none ] && [ "${MOUNT_RC:-1}" = 0 ] && [ "${LIST_RC:-1}" = 0 ] \
    && [ "$LISTED" = yes ]; then
     echo "verdict=mounted"
