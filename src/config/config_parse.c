@@ -334,39 +334,51 @@ static VOID report_bad_value_built(ULONG line, UWORD severity,
 
 /*
  * IPREQUESTS, ARPREQUESTS and WRITEREQUESTS: a count with a ceiling.  Above
- * it the ceiling is used, and CheckNetConfig says so; nothing is wrong with
- * the file, so that is a note.  Not a number is a warning, like MTU.
+ * it the ceiling is stored.  No reporting here, and no buffer: this sits
+ * between the parser and report_bad_value() on the deepest path of every
+ * command that reads an interface file, and a frame of its own put five of
+ * them over their stack budgets.
  */
-static VOID parse_request_count(ULONG lineno, const char *ifname,
-                                const char *keyword, const char *value,
-                                ULONG max, UWORD hint, ULONG *out)
+typedef enum CfgCount
+{
+    CFG_COUNT_OK,
+    CFG_COUNT_BAD,          /* not a number, or nought */
+    CFG_COUNT_CLAMPED       /* above the ceiling: the ceiling was stored */
+} CfgCount;
+
+static CfgCount parse_request_count(const char *value, ULONG max, ULONG *out)
 {
     ULONG n;
 
     if (!ami_cfg_parse_ulong(value, &n) || n == 0)
-    {
-        AMI_WARN("config: %s: bad %s '%s'", ifname, keyword, value);
-        report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, keyword, value, hint);
-        return;
-    }
+        return CFG_COUNT_BAD;
 
     if (n > max)
     {
-        char text[128];
-
-        AMI_WARN("config: %s: %s %lu is more than %lu, %lu used", ifname,
-                 keyword, (unsigned long)n, (unsigned long)max,
-                 (unsigned long)max);
-        if (ami_cfg_problems_wanted())
-        {
-            ami_cfg_join3(text, sizeof(text), keyword,
-                          " is more than the driver can be given: ", value);
-            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_NOTE, text, hint);
-        }
-        n = max;
+        *out = max;
+        return CFG_COUNT_CLAMPED;
     }
 
     *out = n;
+    return CFG_COUNT_OK;
+}
+
+/* "WRITEREQUESTS is more than the driver can be given: '64'".  A note:
+   nothing is wrong with the file, and only CheckNetConfig prints notes. */
+static VOID report_clamped(ULONG line, const char *keyword, const char *value,
+                           UWORD hint)
+{
+    char text[128];
+    char quoted[64];
+
+    if (!ami_cfg_problems_wanted())
+        return;
+
+    ami_cfg_join3(quoted, sizeof(quoted),
+                  " is more than the driver can be given: '", value, "'");
+    ami_cfg_join3(text, sizeof(text), keyword, quoted, NULL);
+
+    ami_cfg_problem(line, AMI_CFG_PROBLEM_NOTE, text, hint);
 }
 
 /* CARD names one board by name where UNIT only says "Nth in probe order".
@@ -715,25 +727,54 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
 
             case IF_KEY_IPREQUESTS:
-                parse_request_count(lineno, out->name, "IPREQUESTS", value,
-                                    (ULONG)AMI_CFG_READREQUESTS_MAX,
-                                    AMI_CFG_ADVICE_IPREQUESTS_AND_ARPREQUESTS_ARE,
-                                    &out->ip_requests);
-                break;
-
             case IF_KEY_ARPREQUESTS:
-                parse_request_count(lineno, out->name, "ARPREQUESTS", value,
-                                    (ULONG)AMI_CFG_READREQUESTS_MAX,
-                                    AMI_CFG_ADVICE_IPREQUESTS_AND_ARPREQUESTS_ARE,
-                                    &out->arp_requests);
-                break;
-
             case IF_KEY_WRITEREQUESTS:
-                parse_request_count(lineno, out->name, "WRITEREQUESTS", value,
-                                    (ULONG)AMI_CFG_WRITEREQUESTS_MAX,
-                                    AMI_CFG_ADVICE_WRITEREQUESTS_IS_HOW,
-                                    &out->write_requests);
+            {
+                IfKey       which = lookup_if_keyword(key);
+                const char *keyword;
+                ULONG      *field;
+                ULONG       max  = (ULONG)AMI_CFG_READREQUESTS_MAX;
+                UWORD       hint = AMI_CFG_ADVICE_IPREQUESTS_AND_ARPREQUESTS_ARE;
+
+                if (which == IF_KEY_IPREQUESTS)
+                {
+                    keyword = "IPREQUESTS";
+                    field   = &out->ip_requests;
+                }
+                else if (which == IF_KEY_ARPREQUESTS)
+                {
+                    keyword = "ARPREQUESTS";
+                    field   = &out->arp_requests;
+                }
+                else
+                {
+                    keyword = "WRITEREQUESTS";
+                    field   = &out->write_requests;
+                    max     = (ULONG)AMI_CFG_WRITEREQUESTS_MAX;
+                    hint    = AMI_CFG_ADVICE_WRITEREQUESTS_IS_HOW;
+                }
+
+                switch (parse_request_count(value, max, field))
+                {
+                    case CFG_COUNT_BAD:
+                        AMI_WARN("config: %s: bad %s '%s'", out->name, keyword,
+                                 value);
+                        report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, keyword,
+                                         value, hint);
+                        break;
+
+                    case CFG_COUNT_CLAMPED:
+                        AMI_WARN("config: %s: %s '%s' is more than %lu, %lu "
+                                 "used", out->name, keyword, value,
+                                 (unsigned long)max, (unsigned long)max);
+                        report_clamped(lineno, keyword, value, hint);
+                        break;
+
+                    default:
+                        break;
+                }
                 break;
+            }
 
             case IF_KEY_CONFIGURE:
                 if (lookup_iptype(value, &type))
