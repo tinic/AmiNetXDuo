@@ -90,6 +90,8 @@ typedef struct NetdevOpener
     APTR                op_Filter;
     APTR                op_RxDirect;    /* aminetxduo/anxs2ext.h, or NULL */
     BOOL                op_RxLinkHdr;   /* write the link header before dst */
+    UBYTE               op_RxFlags;     /* ANXD_S2_RXF_* bits beyond SUMMED the
+                                           opener asked for (ANXD_S2_RX_FLAGS) */
     APTR                op_RxFilled;
 
     UBYTE               op_Raw;
@@ -338,7 +340,7 @@ static inline struct IOSana2Req *netdev_take(struct List *list, ULONG type)
 }
 UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                        APTR *token);
-VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed);
+VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags);
 
 /* Every request that stops being quick and enters a list must be prepared the
    same way, whether it goes at the head or tail. */

@@ -45,7 +45,12 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #              every other library's, so this half is the data half; the two
 #              together are what makes tls.library callable from SAS/C and
 #              vbcc, which it was not.
-PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h tlslib.h)
+#   anxs2ext.h the SANA-II extensions a DRIVER may implement: the direct
+#              receive pair (RX_DIRECT / RX_FILLED), the link-header tag and
+#              the RX_FLAGS tag with the VERIFIED and CONTINUES bits behind
+#              the receive offload (GRO).  Tags and typedefs only, no vectors;
+#              published so any SANA-II driver can offer them, not just ours.
+PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h tlslib.h anxs2ext.h)
 
 # Copy only when the bytes differ.  The CMake build re-runs this on EVERY
 # build (developer_drawer, tests/tools/CMakeLists.txt) so that editing a

@@ -55,6 +55,11 @@ CROSS_CONFIGS=(
     # out.  -DAMINETXDUO_RX_VERIFY=OFF did not build at all, and nothing said
     # so, because no arm turned it off.
     "norxverify:-DAMINETXDUO_RX_VERIFY=OFF"
+    # The receive offload off with the verify pass on: the held-run code in
+    # sana2_rx.c and the RX_FLAGS tag compile out, the rest of the verify
+    # path must still build and the host tests must still pass without the
+    # chaining cases.  (RX_VERIFY=OFF above turns GRO off with it.)
+    "nogro:-DAMINETXDUO_GRO=OFF"
     # The three TCP option flags that change the layout of NX_TCP_SOCKET and
     # are in no arm above.  SACK=OFF did not compile at all until it was built
     # here, and with all three on by default these arms are also the only place

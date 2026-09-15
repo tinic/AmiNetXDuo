@@ -36,7 +36,7 @@
 #define NETDEV_DRAIN_MAX    32
 
 /* Room for a core's own special-statistics records. */
-#define NETDEV_CORE_STATS   12
+#define NETDEV_CORE_STATS   15
 
 typedef struct NetdevNic NetdevNic;
 struct NetdevMcast;
@@ -111,11 +111,14 @@ struct NetdevNic
      * NETDEV_HDR_LEN bytes, where the payload should be drained to; a NULL
      * answer or a NULL hook means stage-and-rx() as always.  A claimed frame is
      * always finished with rx_claimed.  Both run in the same context rx() does.
+     * `flags` are the ANXD_S2_RXF_* bits (aminetxduo/anxs2ext.h): SUMMED when
+     * `sum` is the fused sum, and whatever else the core can say about the
+     * frame; the device masks them to what the opener asked for.
      */
     UBYTE            *(*rx_claim)(APTR arg, const UBYTE *hdr, UWORD frame_len,
                                   APTR *token);
     VOID              (*rx_claimed)(APTR arg, APTR token, ULONG sum,
-                                    UBYTE summed);
+                                    UBYTE flags);
 
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an

@@ -32,6 +32,7 @@
 #include "dp8390.h"     /* the DP8390_TX_* return codes are the shared contract */
 #include "n68k_iocopy.h"
 #include "netdev_clock.h"
+#include "aminetxduo/anxs2ext.h"   /* the RX_FILLED flag bits */
 
 #include <exec/execbase.h>
 #include <exec/memory.h>
@@ -102,7 +103,34 @@ typedef struct GenetCore
     UBYTE   phy_set;        /* the PHY's delays and negotiation were set up */
     ULONG   irq_pending;    /* status the top half took, for the bottom half */
     ULONG   phyid;
+
+    /*
+     * The stream the previous delivered frame belonged to, for the CONTINUES
+     * mark (aminetxduo/anxs2ext.h): the four-tuple, the sequence number the
+     * next in-order segment must carry, and the acknowledgment, window and
+     * flags it must repeat.  Valid while gro_live; cleared at the end of every
+     * burst, because the opener flushes what it holds at the end of its own
+     * drain and a mark across bursts would only ever be a false one.
+     */
+    ULONG   gro_addr[8];    /* source, destination: two words for IPv4,
+                               eight for IPv6                               */
+    ULONG   gro_ports;      /* source port << 16 | destination port         */
+    ULONG   gro_seq;        /* the next in-order sequence number            */
+    ULONG   gro_ack;
+    UWORD   gro_win;
+    UBYTE   gro_flags;      /* the TCP flag byte: ACK, or ACK|PSH           */
+    UBYTE   gro_live;
+    UBYTE   gro_run;        /* frames marked in this run, against GE_GRO_MAX */
+    UBYTE   gro_words;      /* address words that make the key: 2 or 8      */
 } GenetCore;
+
+/*
+ * How many segments an opener is asked to chain into one.  Sixteen full
+ * segments is 23 KB, which the stack's window (256 KB on a long path, 64 KB
+ * on this LAN) holds several times over; the mark is a hint and the opener
+ * has its own cap.
+ */
+#define GE_GRO_MAX      16
 
 #define GE(nic)         ((GenetCore *)(nic)->core)
 
@@ -119,8 +147,17 @@ enum
     GE_ST_RXPROD0,          /* RX producer index read back after init      */
     GE_ST_TXCONS0,          /* TX consumer index read back after init      */
     GE_ST_INTS,             /* interrupt status words seen non-zero        */
+    GE_ST_VERIFIED,         /* frames delivered with their checksums checked */
+    GE_ST_CONTINUES,        /* frames marked as continuing the previous one */
+    GE_ST_RUNS,             /* runs of two or more frames (continues/runs
+                               is the mean number of frames a run saved) */
+    GE_ST_BURST_MAX,        /* the most frames one burst held               */
+    GE_ST_UNCLAIMED,        /* frames the opener had no read posted for     */
     GE_ST_COUNT
 };
+
+_Static_assert(GE_ST_COUNT <= NETDEV_CORE_STATS,
+               "the GENET core has more counters than NetdevNic carries");
 
 static const char *const ge_stat_names[GE_ST_COUNT + 1] =
 {
@@ -134,6 +171,11 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET RX producer after init",
     "GENET TX consumer after init",
     "GENET interrupts with status",
+    "GENET frames verified in the driver",
+    "GENET frames marked as continuing",
+    "GENET runs of continuing frames",
+    "GENET largest burst",
+    "GENET frames with no read posted",
     NULL
 };
 
@@ -772,6 +814,250 @@ static ULONG ge_copy_sum(ULONG *to, const ULONG *from, ULONG count)
     return acc;
 }
 
+/* Sixteen-bit ones-complement fold of a 32-bit accumulator. */
+static UWORD ge_fold16(ULONG acc)
+{
+    acc = (acc & 0xffffUL) + (acc >> 16);
+    acc = (acc & 0xffffUL) + (acc >> 16);
+    return (UWORD)acc;
+}
+
+/*
+ * WHAT THE COPY'S SUM IS WORTH ONCE THE HEADERS ARE IN CACHE.
+ *
+ * ge_copy_sum() has just moved the IP packet and produced the ones-complement
+ * sum of every longword of it, which is also the ones-complement sum of its
+ * sixteen-bit words.  The IP header's own sum is twenty bytes of that, the
+ * TCP or UDP checksum wants the rest plus a pseudo header of the two
+ * addresses, the protocol and the transport length, and both answers are
+ * "0xffff or not".  Some forty adds, on words already in cache, against the
+ * stack walking the frame again or the checksum being trusted blind.
+ *
+ * Refused, so that VERIFIED is never set on a frame it does not describe:
+ * anything but IPv4 with a twenty-byte header; a fragment; an IP total
+ * length that is not the whole payload (Ethernet padding is summed and is
+ * not the datagram's); a protocol other than TCP or UDP; a UDP checksum of
+ * zero, which means "none".
+ *
+ * `ip` is the payload's start in the ring buffer, on a longword; `plen` the
+ * payload's length; `sum` the copy's.  Returns the ANXD_S2_RXF_* bits earned
+ * and fills the stream key for the CONTINUES test when the frame is TCP.
+ */
+typedef struct GeSegment
+{
+    ULONG   addr[8];        /* two words for IPv4, eight for IPv6           */
+    UBYTE   words;          /* how many of them                             */
+    ULONG   ports;
+    ULONG   seq;
+    ULONG   ack;
+    UWORD   win;
+    UWORD   data;           /* TCP payload bytes                            */
+    UBYTE   flags;
+    UBYTE   tcp;            /* a TCP segment with no options                */
+} GeSegment;
+
+/* The TCP header at `t` (twenty bytes are there: the callers checked the
+   transport length) into the stream key; the addresses are the caller's. */
+static VOID ge_tcp_key(const UBYTE *t, UWORD tlen, GeSegment *seg)
+{
+    const UWORD *w = (const UWORD *)(CONST_APTR)t;
+
+    seg->ports = ((ULONG)w[0] << 16) | w[1];
+    seg->seq   = ((ULONG)w[2] << 16) | w[3];
+    seg->ack   = ((ULONG)w[4] << 16) | w[5];
+    seg->flags = t[13];
+    seg->win   = w[7];
+    seg->data  = (UWORD)(tlen - 20);
+    seg->tcp   = (UBYTE)(((t[12] >> 4) == 5) ? 1 : 0);
+}
+
+static UBYTE ge_verify4(const UBYTE *ip, UWORD plen, ULONG sum, GeSegment *seg)
+{
+    const UWORD *w = (const UWORD *)(CONST_APTR)ip;
+    UWORD        total;
+    UWORD        tlen;
+    UBYTE        proto;
+    ULONG        acc;
+    UWORD        i;
+
+    seg->tcp = 0;
+
+    if (ip[0] != 0x45)
+        return 0;                       /* not IPv4, or options */
+    total = (UWORD)((ip[2] << 8) | ip[3]);
+    if (total != plen || total < 20)
+        return 0;                       /* padded, truncated, or short */
+    if ((ip[6] & 0x3f) != 0 || ip[7] != 0)
+        return 0;                       /* MF, or a fragment offset */
+    proto = ip[9];
+    if (proto != 6 && proto != 17)
+        return 0;
+
+    /* The header: ten words summing to 0xffff, checksum field included. */
+    acc = 0;
+    for (i = 0; i < 10; i++)
+        acc += w[i];
+    if (ge_fold16(acc) != 0xffffu)
+        return 0;
+
+    /*
+     * The transport: everything after the header plus the pseudo header.
+     * The copy's sum covers the header too, and a valid header sums to
+     * 0xffff, which is ones-complement zero -- so the copy's sum IS the
+     * transport's sum already, and the header needs no taking out.  The
+     * copy summed `plen` bytes from `ip`, and plen == total, so nothing past
+     * the datagram is in it either.
+     */
+    tlen = (UWORD)(total - 20);
+    if (proto == 17)
+    {
+        if (tlen < 8)
+            return 0;
+        if (w[13] == 0)                 /* UDP checksum absent */
+            return 0;
+    }
+    else if (tlen < 20)
+        return 0;
+
+    acc  = ge_fold16(sum);
+    acc += w[6];                        /* source address                  */
+    acc += w[7];
+    acc += w[8];                        /* destination address             */
+    acc += w[9];
+    acc += proto;
+    acc += tlen;
+    if (ge_fold16(acc) != 0xffffu)
+        return 0;
+
+    if (proto == 6)
+    {
+        seg->addr[0] = ((ULONG)w[6] << 16) | w[7];
+        seg->addr[1] = ((ULONG)w[8] << 16) | w[9];
+        seg->words   = 2;
+        ge_tcp_key(ip + 20, tlen, seg);
+    }
+
+    return ANXD_S2_RXF_VERIFIED;
+}
+
+/*
+ * THE SAME FOR IPv6, WHICH HAS NO HEADER CHECKSUM TO CANCEL OUT.  The copy's
+ * sum covers the forty-byte header too, and here those words are not
+ * ones-complement zero, so the four that are not addresses are taken back
+ * out (the sixteen address words stay: the pseudo header wants them), and
+ * the upper-layer length and next header go in.  Refused: a version that is
+ * not 6, a payload length that is not the rest of the frame, any next
+ * header but TCP or UDP right after the fixed header (an extension header
+ * would need walking), and a UDP checksum of zero, which IPv6 forbids.
+ */
+static UBYTE ge_verify6(const UBYTE *ip, UWORD plen, ULONG sum, GeSegment *seg)
+{
+    const UWORD *w = (const UWORD *)(CONST_APTR)ip;
+    UWORD        tlen;
+    UBYTE        nh;
+    ULONG        acc;
+    UWORD        i;
+
+    seg->tcp = 0;
+
+    if ((ip[0] >> 4) != 6)
+        return 0;
+    tlen = w[2];                        /* payload length                  */
+    if ((UWORD)(tlen + 40) != plen)
+        return 0;                       /* padded or truncated             */
+    nh = ip[6];
+    if (nh != 6 && nh != 17)
+        return 0;                       /* an extension header, or other   */
+
+    if (nh == 17)
+    {
+        if (tlen < 8)
+            return 0;
+        if (w[23] == 0)                 /* UDP checksum absent             */
+            return 0;
+    }
+    else if (tlen < 20)
+        return 0;
+
+    acc  = ge_fold16(sum);
+    acc += (UWORD)~ge_fold16((ULONG)w[0] + w[1] + w[2] + w[3]);
+    acc += tlen;
+    acc += nh;
+    if (ge_fold16(acc) != 0xffffu)
+        return 0;
+
+    if (nh == 6)
+    {
+        for (i = 0; i < 8; i++)
+            seg->addr[i] = ((ULONG)w[4 + 2 * i] << 16) | w[5 + 2 * i];
+        seg->words = 8;
+        ge_tcp_key(ip + 40, tlen, seg);
+    }
+
+    return ANXD_S2_RXF_VERIFIED;
+}
+
+/*
+ * THE CONTINUES MARK.  A verified TCP segment with no options, carrying data,
+ * whose flags are ACK or ACK+PSH, is the next of the same stream as the
+ * previous one when the four-tuple, the acknowledgment, the window and the
+ * flags repeat and its sequence number is where the previous one ended.
+ * Anything else starts a new run (a TCP segment) or ends the run (anything
+ * else): the opener holds at most one head, and a frame that is not the next
+ * of that stream makes it deliver the head, so a mark across it would be a
+ * lie.
+ */
+static UBYTE ge_continues(GenetCore *c, const GeSegment *seg, UBYTE verified)
+{
+    BOOL candidate = (BOOL)(verified != 0 && seg->tcp != 0 &&
+                            seg->data != 0 &&
+                            (seg->flags == 0x10 || seg->flags == 0x18));
+
+    if (!candidate)
+    {
+        c->gro_live = 0;
+        return 0;
+    }
+
+    if (c->gro_live &&
+        c->gro_run < GE_GRO_MAX &&
+        c->gro_words == seg->words &&
+        c->gro_ports == seg->ports &&
+        c->gro_seq   == seg->seq &&
+        c->gro_ack   == seg->ack &&
+        c->gro_win   == seg->win &&
+        c->gro_flags == seg->flags)
+    {
+        UBYTE i;
+
+        for (i = 0; i < seg->words; i++)
+            if (c->gro_addr[i] != seg->addr[i])
+                break;
+        if (i == seg->words)
+        {
+            c->gro_seq = seg->seq + seg->data;
+            c->gro_run++;
+            return ANXD_S2_RXF_CONTINUES;
+        }
+    }
+
+    {
+        UBYTE i;
+
+        for (i = 0; i < seg->words; i++)
+            c->gro_addr[i] = seg->addr[i];
+    }
+    c->gro_words   = seg->words;
+    c->gro_ports   = seg->ports;
+    c->gro_seq     = seg->seq + seg->data;
+    c->gro_ack     = seg->ack;
+    c->gro_win     = seg->win;
+    c->gro_flags   = seg->flags;
+    c->gro_live    = 1;
+    c->gro_run     = 1;
+    return 0;
+}
+
 static VOID ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     APTR   token = NULL;
@@ -818,11 +1104,63 @@ static VOID ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
                 sum++;                  /* end-around carry */
         }
 
-        nic->rx_claimed(nic->rx_arg, token, sum, 1);
+        /*
+         * The frame is in cache now, both copies of it.  Check it here, from
+         * the sum the copy already produced, and say whether it continues the
+         * stream the previous frame belonged to (aminetxduo/anxs2ext.h); the
+         * device masks the answer to what the opener asked for.  The
+         * ethertype is at frame + 12, big-endian.
+         */
+        {
+            GenetCore *c     = GE(nic);
+            UBYTE      flags = ANXD_S2_RXF_SUMMED;
+
+            if (frame[12] == 0x08 && frame[13] == 0x00)
+            {
+                GeSegment seg;
+                UBYTE     v = ge_verify4(src, plen, sum, &seg);
+
+                if (v != 0)
+                    nic->core_stat[GE_ST_VERIFIED]++;
+                flags |= v;
+                flags |= ge_continues(c, &seg, v);
+                if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
+                {
+                    nic->core_stat[GE_ST_CONTINUES]++;
+                    if (c->gro_run == 2)
+                        nic->core_stat[GE_ST_RUNS]++;
+                }
+            }
+            else if (frame[12] == 0x86 && frame[13] == 0xdd)
+            {
+                GeSegment seg;
+                UBYTE     v = ge_verify6(src, plen, sum, &seg);
+
+                if (v != 0)
+                    nic->core_stat[GE_ST_VERIFIED]++;
+                flags |= v;
+                flags |= ge_continues(c, &seg, v);
+                if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
+                {
+                    nic->core_stat[GE_ST_CONTINUES]++;
+                    if (c->gro_run == 2)
+                        nic->core_stat[GE_ST_RUNS]++;
+                }
+            }
+            else
+            {
+                c->gro_live = 0;
+            }
+
+            nic->rx_claimed(nic->rx_arg, token, sum, flags);
+        }
         return;
     }
 
-    /* Handed up where it lies, like the LANCE: no staging copy. */
+    /* Handed up where it lies, like the LANCE: no staging copy.  Not a
+       frame the opener will chain, so the run ends here. */
+    GE(nic)->gro_live = 0;
+    nic->core_stat[GE_ST_UNCLAIMED]++;
     if (nic->rx != NULL)
         nic->rx(nic->rx_arg, frame, len);
 }
@@ -841,6 +1179,8 @@ static BOOL ge_rxintr(NetdevNic *nic)
         total = GE_RX_RING;     /* cannot happen: the chip stops on a full ring */
 
     nic->core_stat[GE_ST_BURSTS]++;
+    if (total > nic->core_stat[GE_ST_BURST_MAX])
+        nic->core_stat[GE_ST_BURST_MAX] = total;
     /*
      * The DMA wrote these buffers behind the cache: one operation for the
      * whole burst, after the producer index said the writes are complete.
@@ -903,6 +1243,7 @@ static BOOL ge_rxintr(NetdevNic *nic)
     }
 
     ge_wr(nic, GENET_RX_DMA_CONS_INDEX(GE_Q), c->rx_cidx);
+    c->gro_live = 0;                    /* a run does not span bursts */
     return TRUE;
 }
 

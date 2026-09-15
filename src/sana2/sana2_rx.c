@@ -8,6 +8,7 @@
 
 #include "sana2_internal.h"
 #include "aminetxduo/nxstatus.h"
+#include "aminetxduo/anxs2ext.h"
 #include "aminetxduo/budget.h"
 
 /* tx_amiga_stack_in_use(), for the reader stacks. */
@@ -475,18 +476,31 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     (VOID)sum;
 #endif
 
-#ifdef AMINETXDUO_BPF
+#if defined(AMINETXDUO_BPF) || defined(AMINETXDUO_RXPROBE)
     /*
      * Before the link header is stripped below, so one call covers both modes
      * and the frame is a complete link-layer frame in one contiguous run.
+     *
+     * THE FIRST BUFFER'S BYTES, NOT THE PACKET'S LENGTH.  A held run
+     * (ami_sana2_gro_flush) arrives here as a chain whose head carries the
+     * whole run's length, and a tap that reads that many bytes from the head
+     * runs off the end of its buffer.  What is contiguous is the head's own
+     * frame, which is what a capture of a chain gets: its first frame with
+     * the run's IP length, the same thing tcpdump shows on a host whose
+     * driver coalesces.
      */
-    ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr,
-                   packet->nx_packet_length);
-#endif
+    {
+        ULONG head_len = (ULONG)(packet->nx_packet_append_ptr -
+                                 packet->nx_packet_prepend_ptr);
 
+#ifdef AMINETXDUO_BPF
+        ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr, head_len);
+#endif
 #ifdef AMINETXDUO_RXPROBE
-    ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr,
-                              packet->nx_packet_length);
+        ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr,
+                                  head_len);
+#endif
+    }
 #endif
 
     if (packet->nx_packet_length < AMI_ETH_HEADER_SIZE)
@@ -575,6 +589,30 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
                 ami_budget_verify(ami_budget_clock() - vt0);
             }
 #else
+            /*
+             * VERIFIED, AND NOTHING HERE WALKS THE FRAME.  The device checked
+             * the IPv4 header and the transport checksum from the sum its own
+             * copy produced (aminetxduo/anxs2ext.h says exactly what the bit
+             * promises: a full, unfragmented, option-free header and a
+             * transport sum that closed), so the verifier has nothing left to
+             * establish; only the protocol byte is read, to say which
+             * transport bit the stack may trust.  A chained run
+             * (ami_sana2_gro_flush) always takes this arm: every frame in it
+             * was VERIFIED, and its rewritten IP length is no longer covered
+             * by the header checksum, which is why the IPv4 bit must come
+             * from here and not from a walk.
+             */
+#ifdef AMINETXDUO_GRO
+            if ((sum != NULL) &&
+                ((sum->flags & ANXD_S2_RXF_VERIFIED) != 0))
+            {
+                caps = NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
+                       ((packet->nx_packet_prepend_ptr[9] == 6U)
+                            ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
+                            : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM);
+            }
+            else
+#endif
             if ((sum != NULL) && (sum->summed != FALSE))
                 caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
                                           &drop);
@@ -627,6 +665,16 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
             UINT    drop =  NX_FALSE;
             ULONG   caps;
 
+            /* VERIFIED, as for IPv4: the device's word, the next header
+               byte saying which transport it is about. */
+#ifdef AMINETXDUO_GRO
+            if ((sum != NULL) &&
+                ((sum->flags & ANXD_S2_RXF_VERIFIED) != 0))
+                caps = (packet->nx_packet_prepend_ptr[6] == 6U)
+                           ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
+                           : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM;
+            else
+#endif
             if ((sum != NULL) && (sum->summed != FALSE))
                 caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
                                           &drop);
@@ -729,6 +777,7 @@ static inline VOID __attribute__((always_inline)) ami_sana2_rx_arm(
        aligned path.  A driver that never calls the copy hook -- it is optional
        in SANA-II -- would otherwise leave the previous frame's verdict here. */
     slot->summed   = FALSE;
+    slot->rxflags  = 0;
 #endif
 }
 
@@ -1022,8 +1071,13 @@ BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length)
         return FALSE;
 
 #ifdef AMINETXDUO_RX_VERIFY
+    /* A device that reports fewer bytes than it filled has summed, and
+       verified, bytes the packet will not carry. */
     if (*length != slot->copied)
-        slot->summed = FALSE;
+    {
+        slot->summed  = FALSE;
+        slot->rxflags = 0;
+    }
 #endif
 
     return TRUE;
@@ -1046,6 +1100,160 @@ BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length)
  * first. The failure path re-posts too: the packet is still in the slot, and a
  * slot held back until the next sweep is a read the device does not have.
  */
+#ifdef AMINETXDUO_GRO
+/*
+ * THE HELD RUN GOES UP.  One IP datagram whose payload is the run's segments
+ * end to end: the head keeps its Ethernet, IP and TCP headers and the chain
+ * behind it carries payload only, so the IP length is rewritten to what the
+ * chain now holds and the TCP header is already right -- every frame in the
+ * run repeated its acknowledgment, window and flags and the sequence number
+ * is the head's.  The header checksum is now stale, and ami_sana2_rx_deliver()
+ * reports the run VERIFIED so the stack takes the IPv4 bit from the device's
+ * verdict rather than from the header.  A one-frame hold is the frame as it
+ * arrived.
+ *
+ * Under a stop the run is dropped, not delivered: the stopper holds the IP
+ * mutex this reader would deliver under, and a frame lost at shutdown is a
+ * frame lost at shutdown.
+ */
+VOID ami_sana2_gro_flush(AmiSana2Rx *rx)
+{
+    NX_PACKET *head = rx->gro_head;
+
+    if (head == NULL)
+        return;
+
+    rx->gro_head = NULL;
+    rx->gro_tail = NULL;
+
+    if (rx->gro_count > 1)
+    {
+        UCHAR *ip    = head->nx_packet_prepend_ptr + AMI_ETH_HEADER_SIZE;
+        ULONG  total = head->nx_packet_length - AMI_ETH_HEADER_SIZE;
+
+        if ((ip[0] >> 4) == 6U)
+        {
+            /* IPv6 carries the payload length, header excluded. */
+            total -= 40UL;
+            ip[4] = (UCHAR)(total >> 8);
+            ip[5] = (UCHAR)total;
+        }
+        else
+        {
+            ip[2] = (UCHAR)(total >> 8);
+            ip[3] = (UCHAR)total;
+        }
+    }
+
+    if (rx->stop)
+    {
+        /* Teardown: the run is dropped and there is nobody to tell. */
+        AMI_NX_CLEANUP(nx_packet_release(head));
+        return;
+    }
+
+#ifdef AMINETXDUO_RXPROBE
+    {
+        ULONG t0 = ami_budget_clock();
+
+        ami_sana2_rx_deliver(rx->iface, head, &rx->gro_sum);
+        ami_budget_drain(ami_budget_clock() - t0);
+    }
+#else
+    ami_sana2_rx_deliver(rx->iface, head, &rx->gro_sum);
+#endif
+}
+
+/*
+ * HOLD IT, CHAIN IT, OR LET IT GO.  TRUE when this function took the packet.
+ *
+ * The device marks a frame CONTINUES against the frame it delivered just
+ * before, whatever that was, so the head this chains onto must be that frame
+ * and nothing older: every frame that is not chained flushes whatever is held
+ * before it is dealt with, and the two error arms that never reach here flush
+ * too.  A CONTINUES frame that finds nothing held -- the head was not one this
+ * side would hold, or an error came between -- is simply the start of a run.
+ *
+ * What is held is any VERIFIED TCP frame from a device that answered the tag
+ * with CONTINUES: the device only marks a frame against a verified TCP one,
+ * so holding every such frame is what makes the next mark always find its
+ * head, and the hold costs no latency because the drain that took it flushes
+ * it before it gives the machine back.
+ *
+ * Fifty-four bytes are stepped over on a chained IPv4 frame, seventy-four on
+ * IPv6: Ethernet, an IP header with no options or extensions and a TCP
+ * header with no options, which is what the mark promises; the device does
+ * not mark a frame it could not see through.  Which of the two, the head
+ * says: a run never changes family, the mark being a same-stream mark.
+ */
+#define AMI_SANA2_GRO_SKIP4 (AMI_ETH_HEADER_SIZE + 20UL + 20UL)
+#define AMI_SANA2_GRO_SKIP6 (AMI_ETH_HEADER_SIZE + 40UL + 20UL)
+
+/* The transport protocol byte of a frame at its link header: IPv4's
+   protocol, IPv6's next header, 0 for anything else. */
+static UBYTE ami_sana2_gro_proto(const UCHAR *eth)
+{
+    if (eth[12] == 0x08U && eth[13] == 0x00U)
+        return eth[AMI_ETH_HEADER_SIZE + 9];
+    if (eth[12] == 0x86U && eth[13] == 0xDDU)
+        return eth[AMI_ETH_HEADER_SIZE + 6];
+    return 0;
+}
+
+BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet,
+                        const AmiRxSum *sum)
+{
+    UBYTE flags = sum->flags;
+
+    if ((flags & ANXD_S2_RXF_CONTINUES) != 0 && rx->gro_head != NULL)
+    {
+        NX_PACKET *head = rx->gro_head;
+        ULONG      skip = ((head->nx_packet_prepend_ptr[AMI_ETH_HEADER_SIZE]
+                            >> 4) == 6U)
+                              ? AMI_SANA2_GRO_SKIP6 : AMI_SANA2_GRO_SKIP4;
+        ULONG      data;
+
+        if (packet->nx_packet_length <= skip)
+            goto not_continuing;
+
+        data = packet->nx_packet_length - skip;
+        packet->nx_packet_prepend_ptr += skip;
+        packet->nx_packet_length       = data;
+        packet->nx_packet_next         = NX_NULL;
+
+        rx->gro_tail->nx_packet_next = packet;
+        rx->gro_tail                 = packet;
+        head->nx_packet_last         = packet;
+        head->nx_packet_length      += data;
+
+        if (++rx->gro_count >= AMI_SANA2_GRO_MAX)
+            ami_sana2_gro_flush(rx);
+
+        return TRUE;
+    }
+
+not_continuing:
+    ami_sana2_gro_flush(rx);
+
+    /* TCP only: the device never continues anything else, so holding a
+       verified UDP datagram would only delay it to the end of the drain. */
+    if ((flags & ANXD_S2_RXF_VERIFIED) != 0 &&
+        (rx->iface->rx_flags_ok & ANXD_S2_RXF_CONTINUES) != 0 &&
+        ami_sana2_gro_proto(packet->nx_packet_prepend_ptr) == 6U)
+    {
+        packet->nx_packet_next = NX_NULL;
+        packet->nx_packet_last = NX_NULL;
+        rx->gro_head  = packet;
+        rx->gro_tail  = packet;
+        rx->gro_sum   = *sum;
+        rx->gro_count = 1;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+#endif /* AMINETXDUO_GRO */
+
 static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 {
     AmiSana2If *iface  = rx->iface;
@@ -1066,6 +1274,9 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
         iface->stats.rx_errors++;
         iface->stats.rx_err_length++;
         (VOID)ami_sana2_rx_post_slot(rx, slot);
+#ifdef AMINETXDUO_GRO
+        ami_sana2_gro_flush(rx);    /* the device's previous frame was this */
+#endif
         return;
     }
 
@@ -1161,15 +1372,23 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 #ifdef AMINETXDUO_RX_VERIFY
     sum.sum    = slot->sum;
     sum.summed = slot->summed;
+    sum.flags  = slot->rxflags;
 #else
     sum.sum    = 0;
     sum.summed = FALSE;
+    sum.flags  = 0;
 #endif
 
     slot->packet = NULL;     /* ownership passes to NetX Duo */
 
     /* Back on the wire before the frame goes upstream, not after. */
     (VOID)ami_sana2_rx_post_slot(rx, slot);
+
+#ifdef AMINETXDUO_GRO
+    /* Held, or chained behind the held head: the run goes up together. */
+    if (ami_sana2_gro_take(rx, packet, &sum))
+        return;
+#endif
 
 #ifdef AMINETXDUO_RXPROBE
     {
@@ -1334,8 +1553,16 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
         if (raw == 0)
         {
             ami_sana2_rx_complete(rx, slot);
+            continue;
         }
-        else if ((LONG)(BYTE)raw == (LONG)IOERR_ABORTED)
+
+#ifdef AMINETXDUO_GRO
+        /* A failed read was still the device's previous frame: the run the
+           reader holds is not what the next CONTINUES will mean. */
+        ami_sana2_gro_flush(rx);
+#endif
+
+        if ((LONG)(BYTE)raw == (LONG)IOERR_ABORTED)
         {
             /* Asked for here, so nothing to count. */
         }
@@ -1362,6 +1589,12 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
             rx->iface->stats.rx_err_io++;
         }
     }
+
+#ifdef AMINETXDUO_GRO
+    /* Nothing is held past the drain that took it: the run ends with the
+       batch, under the same lock, before the machine is given back. */
+    ami_sana2_gro_flush(rx);
+#endif
 
     _nx_ip_input_thread = outer;
     tx_mutex_put(&ip->nx_ip_protection);
@@ -1791,7 +2024,8 @@ typedef struct AmiRxSpeedStep
 static const AmiRxSpeedStep ami_sana2_rx_ladder[] =
 {
     {     4000000UL,  AMI_SANA2_RX_DEPTH_IPV4 },
-    { 0xFFFFFFFFUL,   AMI_SANA2_RX_MAX_DEPTH  }
+    {   100000000UL,  AMI_SANA2_RX_DEPTH_LAN  },
+    { 0xFFFFFFFFUL,   AMI_SANA2_RX_MAX_DEPTH  }   /* the driver's ring */
 };
 
 static UWORD ami_sana2_rx_wire_depth(ULONG bps)
@@ -1904,7 +2138,11 @@ VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
     {
         UWORD want6 = want;
 
-        if (want6 > (UWORD)AMI_SANA2_RX_WANT_IPV6)
+        /* The IPv6 cap is a small machine's economy; a wire on the ladder's
+           top row is a machine with the pool for both, and a run of IPv6
+           segments meets the same ring as a run of IPv4 ones. */
+        if (cap < (UWORD)AMI_SANA2_RX_MAX_DEPTH &&
+            want6 > (UWORD)AMI_SANA2_RX_WANT_IPV6)
             want6 = (UWORD)AMI_SANA2_RX_WANT_IPV6;
 
         give = (want6 > out->ipv6) ? (UWORD)(want6 - out->ipv6) : (UWORD)0;
@@ -1949,6 +2187,24 @@ static APTR ami_sana2_alloc_stack(ULONG size)
                   "in %ld tries", (long)n);
 
     return stack;
+}
+
+
+VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
+{
+    UWORD i;
+
+    for (i = 0; i < AMI_SANA2_RX_READERS; i++)
+    {
+        AmiSana2Rx *rx = &iface->rx[i];
+
+        if (rx->slot != NULL)
+        {
+            ami_free(rx->slot);
+            rx->slot       = NULL;
+            rx->slot_alloc = 0;
+        }
+    }
 }
 
 LONG ami_sana2_rx_start(AmiSana2If *iface)
@@ -2005,6 +2261,11 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
            signalled on a bit it does not hold. */
         rx->wake_mask   = 0;
         rx->orphans     = 0;
+#ifdef AMINETXDUO_GRO
+        rx->gro_head    = NULL;
+        rx->gro_tail    = NULL;
+        rx->gro_count   = 0;
+#endif
 
         /* The first reader carries the TX reaping duty. It is the IPv4 one,
            the reader that always exists, but nothing depends on which: any
@@ -2013,6 +2274,29 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 
         if (rx->depth > AMI_SANA2_RX_MAX_DEPTH)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
+
+        /* The slots, to the planned depth.  Kept across a stop and start
+           when the plan has not changed; the previous run's reads were all
+           reaped (ami_sana2_rx_teardown) or the restart was refused above. */
+        if (rx->slot != NULL && rx->slot_alloc != rx->depth)
+        {
+            ami_free(rx->slot);
+            rx->slot       = NULL;
+            rx->slot_alloc = 0;
+        }
+        if (rx->slot == NULL)
+        {
+            rx->slot = (AmiRxSlot *)ami_alloc((ULONG)rx->depth *
+                                              (ULONG)sizeof(AmiRxSlot));
+            if (rx->slot == NULL)
+            {
+                AMI_ERROR("sana2: no memory for %ld read slots",
+                          (long)rx->depth);
+                ami_sana2_rx_stop(iface);
+                return -1;
+            }
+            rx->slot_alloc = rx->depth;
+        }
 
         rx->stack = ami_sana2_alloc_stack((ULONG)AMI_SANA2_RX_STACK_SIZE);
 #ifdef AMINETXDUO_RXPROBE

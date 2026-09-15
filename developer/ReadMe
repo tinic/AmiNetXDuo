@@ -175,6 +175,43 @@ here.  They work, but publishing them freezes their request structures, and
 that is worth deciding on rather than drifting into.
 
 
+For SANA-II driver authors: the receive extensions
+--------------------------------------------------
+
+<aminetxduo/anxs2ext.h> is the other direction: not what a program asks the
+library, but what the library asks a DRIVER, through the buffer-management
+tag list it passes to OpenDevice().  A driver that does not know a tag
+ignores it and everything works as SANA-II always did; one that answers
+gets a faster receive path.  Tags and function-pointer types only, no
+vectors, no library to open.
+
+    ANXD_S2_RX_DIRECT / ANXD_S2_RX_FILLED
+        the direct receive pair.  Before copying a frame, the driver asks
+        where the payload of a posted CMD_READ should land and writes it
+        there itself; RX_FILLED then reports the length, the running
+        ones-complement sum the copy produced, and a flag byte.  One copy
+        instead of two, and the checksum for free.
+
+    ANXD_S2_RX_LINK_HDR
+        the driver writes the fourteen-byte Ethernet header in front of the
+        payload, instead of the opener rebuilding it from ios2_SrcAddr,
+        ios2_DstAddr and ios2_PacketType.
+
+    ANXD_S2_RX_FLAGS
+        the receive offload (GRO).  A driver that answers may set two more
+        bits in RX_FILLED's flag byte: VERIFIED, it checked the IPv4 or IPv6
+        header and the TCP or UDP checksum of this frame itself, so the stack
+        skips its own pass; and CONTINUES, this TCP segment is the next
+        in-order bytes of the same stream as the frame delivered just before
+        it, so the stack chains the two and hands TCP one segment where the
+        wire carried up to sixteen.  The header says exactly when each bit
+        may be set; a driver that is unsure leaves it clear and loses nothing
+        but the speed.
+
+anxgenet.device implements all three; anxnet.device the first two.  The
+header is the contract, and the shipped drivers are the reference.
+
+
 Regenerating
 ------------
 

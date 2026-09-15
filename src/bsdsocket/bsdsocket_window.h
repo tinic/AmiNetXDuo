@@ -78,16 +78,28 @@
  *      75,264     134
  *     100,352      62-68
  *
- * A 1 Gbit peer puts the whole window on the wire at once; the receiver
- * drains at 134 Mbit/s, the driver's ring holds what is between, and above
- * about 75 KB the ring loses the tail of every burst and the transfer runs
- * in loss recovery.  So a socket that comes up on a link of
- * BSD_TCP_WINDOW_FAST_BPS or more, on a LAN round trip, settles at
- * BSD_TCP_WINDOW_FAST -- one unscaled window, under the measured knee -- and
- * a socket on a slower link keeps BSD_TCP_WINDOW_LAN, which the 100 Mbit
- * X-Surf 100 (emulated) took at 39-40 Mbit/s where 262,144 gave 27.  The
- * WAN case is unaffected: a long round trip grows the window whatever the
- * link, because the far end's bottleneck paces the bursts.
+ * A 1 Gbit peer puts the whole window on the wire at once, and what was
+ * lost above 75 KB was NOT the driver's ring: it was the READ QUEUE.  The
+ * shim posted 32 CMD_READs, the driver empties its 128-frame ring in one
+ * bottom half, a frame into a posted read each, and every frame past the
+ * 32nd of a burst went nowhere -- sana2_internal.h, AMI_SANA2_RX_MAX_DEPTH,
+ * found 2026-09-15 with the receive offload's own counter.  With 128 reads
+ * on a gigabit wire the same machine, same test, receive offload on:
+ *
+ *     window      receive           lost frames
+ *      65,535     186 / 186 / 186   0 in three rounds
+ *     100,352     196 / 197 / 197 / 199   0 in one boot, 178 in the next
+ *
+ * So the knee moved up with the queue, and the unscaled window is kept as
+ * the setting until the reader's occasional lag behind a 100 KB burst is
+ * understood: it is a five per cent difference and the 65,535 arm has never
+ * dropped a frame.  A socket that comes up on a link of
+ * BSD_TCP_WINDOW_FAST_BPS or more, on a LAN round trip, therefore settles at
+ * BSD_TCP_WINDOW_FAST, and a socket on a slower link keeps
+ * BSD_TCP_WINDOW_LAN, which the 100 Mbit X-Surf 100 (emulated) took at 39-40
+ * Mbit/s where 262,144 gave 27.  The WAN case is unaffected: a long round
+ * trip grows the window whatever the link, because the far end's bottleneck
+ * paces the bursts.
  */
 #ifndef BSD_TCP_WINDOW_FAST
 #define BSD_TCP_WINDOW_FAST         65535UL

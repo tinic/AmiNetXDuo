@@ -111,8 +111,8 @@ static const char *const ami_cfg_advice_text[] =
     "file is read only when it finds none, so move the line there b"
     "efore the interface is changed.",
     "IPREQUESTS and ARPREQUESTS are how many reads of that kind wai"
-    "t at the driver, 1 to 32.  Leave them out and the stack sizes "
-    "the queues from the wire speed and the memory it has.",
+    "t at the driver, 1 to 128.  Leave them out and the stack sizes"
+    " the queues from the wire speed and the memory it has.",
     "WRITEREQUESTS is how many packets are handed to the driver at "
     "once, 1 to " AMI_CFG_STRINGIFY(AMI_CFG_WRITEREQUESTS_MAX)
     ".  Leave it out for " AMI_CFG_STRINGIFY(AMI_CFG_WRITEREQUESTS_MAX) ".",

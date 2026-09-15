@@ -56,6 +56,16 @@ PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). The installer
 offers to put both in `DEVS:Networks`; an interface file selects one with
 `DEVICE=`.
 
+**Receive offload (GRO).** `anxgenet.device` verifies every IPv4 and IPv6
+frame's header and TCP or UDP checksum itself, from the sum its copy already
+produced, and marks each TCP segment that continues the one before it. The
+stack skips its own checksum pass on a verified frame and hands TCP one
+segment where the wire carried up to sixteen, the receive side of a
+large-receive offload; it does the same for IPv6. A 1 Gbit/s GENET behind a
+PiStorm32 receives 186 Mbit/s this way, 142 without. The two SANA-II
+extensions that carry it are published for any driver to implement,
+`Developer/include/aminetxduo/anxs2ext.h`.
+
 ## Installing
 
 Download the `.lha` from [Releases](https://github.com/tinic/AmiNetXDuo/releases),

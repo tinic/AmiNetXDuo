@@ -9,6 +9,30 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **Receive offload (GRO).** `anxgenet.device` verifies each IPv4 and
+  IPv6 frame's header and TCP or UDP checksum itself, from the sum its copy
+  already produced, and marks a TCP segment that continues the one before
+  it (same stream, next in-order bytes, same acknowledgment, window and
+  flags). The stack skips its own checksum pass on a verified frame and
+  chains continued segments into one delivery of up to sixteen frames, the
+  receive side of a large-receive offload, for IPv4 and IPv6 alike. On the
+  A1200 + PiStorm32, iperf into the Amiga: 142 -> 186 Mbit/s, no
+  retransmissions; a 20 MB upload over IPv6 arrives byte for byte. The two
+  SANA-II extensions that carry it, `ANXD_S2_RX_FLAGS` and the VERIFIED and
+  CONTINUES bits of `RX_FILLED`'s flag byte, are published in the Developer
+  drawer as `include/aminetxduo/anxs2ext.h` for any driver to implement;
+  every other driver is unchanged. `NetDevStats` shows the verified
+  frames, the continuing frames, the runs, the largest burst and the frames
+  that found no read posted. Build option `AMINETXDUO_GRO`, on
+
+- On a gigabit link the stack posts 128 reads per stream reader, the size of
+  the GENET's receive ring, where every card had 32; a 10/100 card keeps 32
+  and the slots are allocated to what was planned, so no other machine pays
+  for it. The driver empties its ring in one pass, and a burst longer than
+  the reads posted lost its tail with no error but the driver's new counter:
+  36-frame bursts against 32 reads cost 685 frames and 632 retransmissions
+  in one ten-second transfer. `IPREQUESTS` may now ask for up to 128
+
 - The Raspberry Pi 4 GENET core is its own driver, `anxgenet.device`
   (21,724 bytes; `DEVICE=anxgenet.device`, `UNIT=0`). `anxnet.device` is
   back to the Amiga cards, 48,064 -> 39,828 bytes. The installer puts both

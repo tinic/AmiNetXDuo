@@ -80,7 +80,7 @@ counters are reported in another shape through `NETSTATUS_STATS`.
 `DEVS:NetInterfaces/<name>`. The 22 keys acted on are listed at
 `src/config/config_parse.c:78`, with the AmiTCP spellings of four of them.
 `ADDRESS6` takes two lines per interface; every other key takes one.
-`IPREQUESTS` and `ARPREQUESTS` set a read queue's depth, 1 to 32, over the
+`IPREQUESTS` and `ARPREQUESTS` set a read queue's depth, 1 to 128, over the
 plan the stack makes from the wire speed; the packet pool's share still
 bounds them. `WRITEREQUESTS` is 1 to the build's transmit-ring limit (32 in
 the full build, 8 in minimal and micro); above it is that limit, and

@@ -33,7 +33,9 @@
    before the variable was found: the receive WINDOW the iperf socket got,
    which is the budget shared with the web shell's own connection -- 50 KB
    at 512, 75 KB at 768, 100 KB from 1024 up -- and a 100 KB window on a
-   1 Gbit link is what that core's ring cannot absorb (bsdsocket_window.h).
+   1 Gbit link is what the shim's 32 posted reads could not absorb (the
+   ring was never the limit: bsdsocket_window.h, sana2_internal.h
+   AMI_SANA2_RX_MAX_DEPTH).
    A 512 pool moved 1 MB up in memory was as fast as one in place; the
    pool is handed out LIFO with at most ~41 packets outstanding, and nothing
    walks it.  Do not size the pool by throughput again; size the window.

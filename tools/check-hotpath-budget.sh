@@ -77,10 +77,15 @@ TABLE = {
     # call sites, 70 instructions each; tools/check-hot-calls.sh is what
     # wants it that way), so its copies are counted here and it has no row
     # of its own.  A frame runs ONE copy.
-    "sana2_rx.c":       [("_ami_sana2_rx_thread",    600),    # 573, carries the
-                         ("_ami_sana2_rx_deliver",    95)],   #  inlined drain
-                                                             #  loop, rx_complete
-                                                             #  and post_slot
+    "sana2_rx.c":       [("_ami_sana2_rx_thread",    600),    # 545, carries the
+                         ("_ami_sana2_rx_deliver",   115)],   #  inlined drain
+                                                             #  loop, rx_complete,
+                                                             #  post_slot and the
+                                                             #  held run (gro)
+    # rx_deliver 95 -> 114 with the held run: the VERIFIED test that skips the
+    # verifier (a flag test and a protocol byte, in place of a 220-instruction
+    # walk on every frame a device verified) and the first-buffer length the
+    # tap takes on a chain.  rx_thread fell 573 -> 545 in the same change.
     # The SANA-II copy hook: called once a frame BY THE DEVICE, so its entry
     # guards are load-bearing rather than paranoia -- a third-party driver can
     # hand it anything, and `len > slot->capacity` is a bounds check on a

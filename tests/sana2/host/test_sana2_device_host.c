@@ -309,6 +309,12 @@ LONG AbortIO(struct IORequest *req)
 
 /* --------------------------------------------- the rest of the sana2 shim -- */
 
+/* No reader ever started here, so there are no slot arrays to give back. */
+VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
 /* The real one's middle phase, which is the only one without a ThreadX thread
    in it: offline, then reap what the device gave back. */
 VOID ami_sana2_rx_stop(AmiSana2If *iface)

@@ -44,10 +44,12 @@ extern "C" {
 
 /*
  * The most IPREQUESTS/ARPREQUESTS and WRITEREQUESTS can ask for.  The receive
- * ring is fixed; the transmit ring is smaller in low-memory profiles
- * (sana2_internal.h checks that the parser and allocation agree).
+ * ceiling is the GENET ring (sana2_internal.h, AMI_SANA2_RX_MAX_DEPTH); a
+ * 10/100 card is planned 32 unless the file asks for more.  The transmit ring
+ * is smaller in low-memory profiles (sana2_internal.h checks that the parser
+ * and allocation agree).
  */
-#define AMI_CFG_READREQUESTS_MAX    32
+#define AMI_CFG_READREQUESTS_MAX    128
 #ifndef AMINETXDUO_TX_SLOTS
 #define AMINETXDUO_TX_SLOTS         32
 #endif

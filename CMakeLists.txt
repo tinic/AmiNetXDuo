@@ -1461,6 +1461,28 @@ if(AMINETXDUO_RX_VERIFY)
     add_compile_definitions(AMINETXDUO_RX_VERIFY)
 endif()
 
+# GRO, the receive offload: a driver that answers ANXD_S2_RX_FLAGS
+# (include/aminetxduo/anxs2ext.h) verifies each frame's IP header and TCP/UDP
+# checksum itself and marks TCP segments that continue the previous one; the
+# SANA-II glue skips its own checksum pass on a verified frame and chains
+# continued segments into one delivery of up to AMI_SANA2_GRO_MAX frames.
+# Needs the verify path: it is what gets skipped, and the run's checksums are
+# the driver's word.  Measured 2026-09-15, A1200 + PiStorm32, anxgenet.device,
+# iperf into the Amiga: 142 -> 186 Mbit/s.  Any other driver is unchanged.
+option(AMINETXDUO_GRO
+       "Receive offload: driver-verified checksums and chained TCP segments"
+       ON)
+
+if(AMINETXDUO_GRO AND NOT AMINETXDUO_RX_VERIFY)
+    # Not an error: the norxverify CI arm turns the verify path off alone,
+    # and a build without the pass has nothing for the offload to skip.
+    message(STATUS "AMINETXDUO_GRO is off: it needs AMINETXDUO_RX_VERIFY")
+    set(AMINETXDUO_GRO OFF)
+endif()
+if(AMINETXDUO_GRO)
+    add_compile_definitions(AMINETXDUO_GRO)
+endif()
+
 # The four rxverify counters that fire on every received frame, inside the
 # protection hold.  Off by default; see src/net68k/net68k.h.  The error and
 # skip counters are unconditional and do not need this.

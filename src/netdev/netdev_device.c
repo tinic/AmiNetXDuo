@@ -2112,6 +2112,18 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
         }
         else if (tag == ANXD_S2_RX_FILLED)
             op->op_RxFilled = (APTR)tags->ti_Data;
+        else if (tag == ANXD_S2_RX_FLAGS)
+        {
+            /* Same shape as the link header: answering is the acceptance.
+               Every core may set both; the ones that never verify a frame
+               simply never do. */
+            if (tags->ti_Data != 0)
+            {
+                op->op_RxFlags = (UBYTE)(ANXD_S2_RXF_VERIFIED |
+                                         ANXD_S2_RXF_CONTINUES);
+                *(UBYTE *)tags->ti_Data = op->op_RxFlags;
+            }
+        }
         else if (tag == S2_CopyFromBuff)
             op->op_CopyFrom = (APTR)tags->ti_Data;
         else if (tag == S2_PacketFilter)

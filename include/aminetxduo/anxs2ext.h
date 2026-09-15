@@ -46,8 +46,44 @@
  * third-party direct-path driver's frames a header of stale bytes. */
 #define ANXD_S2_RX_LINK_HDR     (0x80000000UL + 0xB0000UL + 0x4183UL)
 
+/* MORE IN RX_FILLED's LAST ARGUMENT THAN A YES OR NO.
+ *
+ * `summed` was a boolean.  It is a flag byte now, and the old meaning is its
+ * low bit, so a device and an opener that know only the boolean still agree:
+ * a device that sets SUMMED alone is the device there was, and an opener that
+ * tests `!= 0` sees the same thing it saw, because the two new bits are only
+ * ever set by a device that was told it may.
+ *
+ * VERIFIED   the device checked this frame itself: the IPv4 header checksum
+ *            and the TCP or UDP checksum, from the sum its copy already
+ *            produced and the headers it had in cache.  The opener may skip
+ *            its own walk and mark the packet's checksums as done.  Never set
+ *            on a frame with Ethernet padding past the IP total length, an
+ *            IP header with options, a fragment, or a UDP checksum of zero.
+ * CONTINUES  this frame's TCP payload is the next bytes of the SAME stream as
+ *            the frame the device delivered immediately before it: same
+ *            addresses and ports, the previous segment's end is this one's
+ *            sequence number, the same acknowledgment, window and flags
+ *            (ACK, or ACK+PSH), no TCP options, both VERIFIED.  An opener may
+ *            chain the two into one segment -- the receive side of what a
+ *            large-receive-offload does -- and hand the stack one packet
+ *            where the wire carried several.  It is a hint about the bytes,
+ *            not an instruction: an opener that has already delivered the
+ *            previous frame delivers this one whole, and nothing is lost.
+ *
+ * ANXD_S2_RX_FLAGS, in the buffer-management list, is how an opener says it
+ * understands the two.  ti_Data IS A POINTER TO A UBYTE; a device that
+ * understands the tag writes the flags it may set (VERIFIED, CONTINUES, or
+ * both) into it, and sets only those from then on.  Without the tag a device
+ * sets SUMMED alone, whatever it could have said. */
+#define ANXD_S2_RX_FLAGS        (0x80000000UL + 0xB0000UL + 0x4184UL)
+
+#define ANXD_S2_RXF_SUMMED      0x01
+#define ANXD_S2_RXF_VERIFIED    0x02
+#define ANXD_S2_RXF_CONTINUES   0x04
+
 typedef UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,
-                                 UBYTE summed);
+                                 UBYTE flags);
 
 #endif /* AMINETXDUO_ANXS2EXT_H */

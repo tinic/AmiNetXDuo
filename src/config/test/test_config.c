@@ -1042,10 +1042,12 @@ static void test_request_counts_have_ceilings(void)
     ami_config_set_reporter(collect, NULL);
     ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
 
+    /* The read ceiling is 128 since the receive offload (the GENET ring);
+       the write ceiling is still the 32-slot transmit ring. */
     buf = dup_text("device = a2065.device\n"    /* line 1 */
                    "configure = dhcp\n"         /* line 2 */
-                   "iprequests = 64\n"          /* line 3: above 32, a note */
-                   "arprequests = 32\n"         /* line 4: the ceiling, fine */
+                   "iprequests = 200\n"         /* line 3: above 128, a note */
+                   "arprequests = 128\n"        /* line 4: the ceiling, fine */
                    "writerequests = 64\n"       /* line 5: above 32, a note */
                    "unit = 0\n");               /* line 6 */
 

@@ -957,6 +957,16 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_LINK_HDR;
     iface->buffer_tags[tag].ti_Data = (ULONG)&iface->link_hdr_ok;
     tag++;
+#ifdef AMINETXDUO_GRO
+    /* The VERIFIED and CONTINUES bits are only useful to a build that verifies
+       here (it is what gets skipped, and what makes a chained segment's
+       checksum a solved question); a build that leaves checksums to NetX
+       does not ask, and the device sets SUMMED alone. */
+    iface->rx_flags_ok              = 0;
+    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_FLAGS;
+    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->rx_flags_ok;
+    tag++;
+#endif
 #if AMI_SANA2_OFFER_COPY16
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff16;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;
@@ -987,6 +997,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 
         if (port == NULL)
         {
+            ami_sana2_rx_free_slots(iface);
             ami_free(iface);
             if (err != NULL)
                 *err = AMI_NET_ERR_NOMEM;
@@ -1015,6 +1026,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         else
             AMI_ERROR("sana2: cannot open %s unit %ld (%ld)", iface->device,
                       (long)iface->unit, (long)status);
+        ami_sana2_rx_free_slots(iface);
         ami_free(iface);
         if (err != NULL)
             *err = AMI_NET_ERR_NODEV;
@@ -1169,6 +1181,7 @@ BOOL ami_sana2_close(AmiSana2If *iface)
     /* Drop the (NX_IP, index) -> iface binding before the memory goes away. */
     ami_sana2_unbind(iface);
 
+    ami_sana2_rx_free_slots(iface);
     ami_free(iface);
 
     return TRUE;

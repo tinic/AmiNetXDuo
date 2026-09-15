@@ -5,6 +5,7 @@
  */
 
 #include "sana2_internal.h"
+#include "aminetxduo/anxs2ext.h"
 
 /* BeginIO(), which the transmit path posts with; the shim declares it and
    this file defines it. */
@@ -79,6 +80,7 @@ VOID  Signal(struct Task *task, ULONG mask) { (VOID)task; (VOID)mask; }
 VOID  CloseDevice(struct IORequest *req) { (VOID)req; }
 
 APTR ami_alloc_flags(ULONG size, ULONG memf) { (VOID)size; (VOID)memf; return NULL; }
+APTR ami_alloc(ULONG size) { (VOID)size; return NULL; }
 VOID ami_free(APTR ptr) { (VOID)ptr; }
 
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
@@ -302,9 +304,11 @@ static AmiRxSum h_sum_of(const AmiRxSlot *s)
 #ifdef AMINETXDUO_RX_VERIFY
     sum.sum    = s->sum;
     sum.summed = s->summed;
+    sum.flags  = s->rxflags;
 #else
     sum.sum    = 0;
     sum.summed = FALSE;
+    sum.flags  = 0;
 #endif
 
     return sum;
@@ -699,6 +703,284 @@ static void test_verify_uses_the_carried_sum(void)
 
 #endif /* AMINETXDUO_RX_VERIFY */
 
+#ifdef AMINETXDUO_GRO
+/* ---- the held run: VERIFIED frames and the CONTINUES chain ------------- */
+
+/*
+ * The reader's take/flush pair on a fake reader: the packets are the two
+ * static ones below, the receiver stubs above see what goes up.  A TCP frame
+ * here is Ethernet, a 20-byte IPv4 header (0x45, proto 6, total length) and
+ * a 20-byte TCP header in front of `payload` bytes -- the shape the device's
+ * VERIFIED mark promises, and the fifty-four bytes a chained frame steps over.
+ */
+static UCHAR      buffer2[256];
+static NX_PACKET  pkt2;
+static AmiSana2Rx rxs;
+
+static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
+{
+    UCHAR *base = buf + AMI_SANA2_RX_PAD;
+    UCHAR *ip   = base + AMI_ETH_HEADER_SIZE;
+    ULONG  total = 40UL + payload;
+    ULONG  i;
+
+    memset(buf, 0, 256);
+    memset(p, 0, sizeof(*p));
+
+    base[12] = 0x08;
+    base[13] = 0x00;
+    ip[0]    = 0x45;
+    ip[2]    = (UCHAR)(total >> 8);
+    ip[3]    = (UCHAR)total;
+    ip[9]    = proto;
+    for (i = 0; i < payload; i++)
+        ip[40 + i] = (UCHAR)(0x40 + i);
+
+    p->nx_packet_data_start  = buf;
+    p->nx_packet_data_end    = buf + 256;
+    p->nx_packet_prepend_ptr = base;
+    p->nx_packet_append_ptr  = ip + total;
+    p->nx_packet_length      = AMI_ETH_HEADER_SIZE + total;
+}
+
+static AmiRxSum h_flagged(UBYTE flags)
+{
+    AmiRxSum sum;
+
+    sum.copied = 0;
+    sum.sum    = 0;
+    sum.summed = FALSE;
+    sum.flags  = flags;
+    return sum;
+}
+
+static void gro_init(UBYTE answered)
+{
+    fixture_init();
+    memset(&rxs, 0, sizeof(rxs));
+    rxs.iface          = &iface;
+    iface.rx_flags_ok  = answered;
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    _nx_ip_input_thread = tx_thread_identify();
+}
+
+static void gro_done(void)
+{
+    _nx_ip_input_thread = TX_NULL;
+    tx_mutex_put(&ip.nx_ip_protection);
+}
+
+static void test_verified_skips_the_walk(void)
+{
+    printf("sana2: a VERIFIED frame is not walked and claims by protocol\n");
+
+    fixture_init();
+    tcp_frame_init(&pkt, buffer, 6, 40);
+    {
+        AmiRxSum sum = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+
+        tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+        ami_sana2_rx_deliver(&iface, &pkt, &sum);
+        tx_mutex_put(&ip.nx_ip_protection);
+    }
+    h_check(h_went == TO_IP, "a verified TCP frame reaches the IP thread");
+    h_check(h_verify_walks == 0 && h_verify_sums == 0,
+            "without the verifier running at all");
+    h_check(pkt.nx_packet_interface_capability_flag ==
+                (NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
+                 NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM),
+            "claiming the IPv4 header and the TCP checksum");
+
+    fixture_init();
+    tcp_frame_init(&pkt, buffer, 17, 40);
+    {
+        AmiRxSum sum = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+
+        tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+        ami_sana2_rx_deliver(&iface, &pkt, &sum);
+        tx_mutex_put(&ip.nx_ip_protection);
+    }
+    h_check(pkt.nx_packet_interface_capability_flag ==
+                (NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
+                 NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM),
+            "and a verified UDP frame claims the UDP checksum");
+
+    /* SUMMED alone is the old contract: the verifier runs on the sum. */
+    fixture_init();
+    tcp_frame_init(&pkt, buffer, 6, 40);
+    {
+        AmiRxSum sum = h_flagged(ANXD_S2_RXF_SUMMED);
+
+        sum.summed = TRUE;
+        sum.copied = 80;
+        tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+        ami_sana2_rx_deliver(&iface, &pkt, &sum);
+        tx_mutex_put(&ip.nx_ip_protection);
+    }
+    h_check(h_verify_sums == 1, "a merely summed frame still goes through the verifier");
+}
+
+static void test_held_frame_goes_up_on_flush(void)
+{
+    AmiRxSum sum = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+
+    printf("sana2: a verified frame is held and goes up whole on the flush\n");
+
+    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    tcp_frame_init(&pkt, buffer, 6, 40);
+
+    h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == TRUE, "the reader takes it");
+    h_check(h_went == TO_NOWHERE, "and nothing has gone up yet");
+    h_check(rxs.gro_head == &pkt && rxs.gro_count == 1, "it is the held head");
+
+    ami_sana2_gro_flush(&rxs);
+
+    h_check(h_went == TO_IP, "the flush delivers it");
+    h_check(h_seen_length == 80, "as the frame it was, header stripped");
+    h_check(pkt.nx_packet_next == NX_NULL && pkt.nx_packet_last == NX_NULL,
+            "a run of one is not a chain");
+    h_check(buffer[AMI_SANA2_RX_PAD + 16] == 0 &&
+            buffer[AMI_SANA2_RX_PAD + 17] == 80,
+            "and its IP length is untouched");
+    h_check(rxs.gro_head == NX_NULL, "and nothing is held after");
+
+    /* A verified UDP datagram is not held: nothing will continue it. */
+    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    tcp_frame_init(&pkt, buffer, 17, 40);
+    h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == FALSE,
+            "a verified UDP datagram is left to the caller");
+    h_check(rxs.gro_head == NX_NULL, "and not held");
+
+    /* A device that never answered the tag: verified frames are not held. */
+    gro_init(0);
+    tcp_frame_init(&pkt, buffer, 6, 40);
+    h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == FALSE,
+            "without CONTINUES on offer nothing is held");
+    h_check(h_went == TO_NOWHERE && rxs.gro_head == NX_NULL,
+            "and the caller delivers the frame itself");
+    gro_done();
+}
+
+static void test_continuing_frame_is_chained(void)
+{
+    AmiRxSum head = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+    AmiRxSum next = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED |
+                              ANXD_S2_RXF_CONTINUES);
+
+    printf("sana2: a CONTINUES frame is chained behind the head, headers off\n");
+
+    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    tcp_frame_init(&pkt,  buffer,  6, 40);
+    tcp_frame_init(&pkt2, buffer2, 6, 30);
+
+    h_check(ami_sana2_gro_take(&rxs, &pkt, &head) == TRUE, "the head is held");
+    h_check(ami_sana2_gro_take(&rxs, &pkt2, &next) == TRUE, "the next is taken");
+    h_check(h_went == TO_NOWHERE, "nothing has gone up");
+    h_check(rxs.gro_count == 2 && rxs.gro_tail == &pkt2, "the run is two long");
+    h_check(pkt.nx_packet_next == &pkt2 && pkt.nx_packet_last == &pkt2,
+            "chained behind the head");
+    h_check(pkt2.nx_packet_prepend_ptr ==
+                buffer2 + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE + 40,
+            "with its fifty-four header bytes stepped over");
+    h_check((ULONG)(pkt2.nx_packet_append_ptr - pkt2.nx_packet_prepend_ptr) == 30,
+            "leaving its thirty payload bytes");
+    h_check(pkt.nx_packet_length == 14 + 80 + 30,
+            "and the head's length is the run's");
+
+    ami_sana2_gro_flush(&rxs);
+
+    h_check(h_went == TO_IP, "the flush delivers the run");
+    h_check(h_seen_length == 80 + 30, "as one datagram of both payloads");
+    h_check(buffer[AMI_SANA2_RX_PAD + 16] == 0 &&
+            buffer[AMI_SANA2_RX_PAD + 17] == 110,
+            "with the head's IP length rewritten to the run");
+    h_check(pkt.nx_packet_interface_capability_flag ==
+                (NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
+                 NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM),
+            "and both checksum claims, the header's now being stale");
+    h_check(h_verify_walks == 0 && h_verify_sums == 0,
+            "with the verifier never run");
+    gro_done();
+}
+
+static void test_run_ends_on_a_frame_that_does_not_continue(void)
+{
+    AmiRxSum head  = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+    AmiRxSum plain = h_flagged(ANXD_S2_RXF_SUMMED);
+    AmiRxSum cont  = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED |
+                               ANXD_S2_RXF_CONTINUES);
+
+    printf("sana2: a frame that does not continue the run flushes it first\n");
+
+    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    tcp_frame_init(&pkt,  buffer,  6, 40);
+    tcp_frame_init(&pkt2, buffer2, 6, 30);
+
+    (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
+    h_check(ami_sana2_gro_take(&rxs, &pkt2, &plain) == FALSE,
+            "an unverified frame is not taken");
+    h_check(h_went == TO_IP && h_seen_length == 80,
+            "but the held head went up ahead of it, alone");
+    h_check(rxs.gro_head == NX_NULL, "and nothing is held");
+
+    /* CONTINUES with nothing held: the start of a run, not a chain. */
+    h_went = TO_NOWHERE;
+    tcp_frame_init(&pkt2, buffer2, 6, 30);
+    h_check(ami_sana2_gro_take(&rxs, &pkt2, &cont) == TRUE,
+            "a CONTINUES frame with no head is held as one");
+    h_check(rxs.gro_head == &pkt2 && rxs.gro_count == 1 &&
+            pkt2.nx_packet_prepend_ptr == buffer2 + AMI_SANA2_RX_PAD,
+            "whole, headers on");
+    ami_sana2_gro_flush(&rxs);
+    h_check(h_went == TO_IP && h_seen_length == 70, "and goes up as itself");
+
+    /* A stop drops what is held instead of delivering under the stopper. */
+    h_went = TO_NOWHERE;
+    tcp_frame_init(&pkt, buffer, 6, 40);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
+    rxs.stop = TRUE;
+    ami_sana2_gro_flush(&rxs);
+    h_check(h_went == TO_RELEASED && h_releases == 1,
+            "a flush under stop releases the run");
+    rxs.stop = FALSE;
+    gro_done();
+}
+
+static void test_run_is_capped(void)
+{
+    AmiRxSum head = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+    AmiRxSum cont = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED |
+                              ANXD_S2_RXF_CONTINUES);
+    static NX_PACKET  many[AMI_SANA2_GRO_MAX];
+    static UCHAR      bufs[AMI_SANA2_GRO_MAX][256];
+    UWORD i;
+
+    printf("sana2: a run of AMI_SANA2_GRO_MAX frames goes up without a flush\n");
+
+    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    tcp_frame_init(&pkt, buffer, 6, 10);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
+
+    for (i = 1; i < AMI_SANA2_GRO_MAX; i++)
+    {
+        tcp_frame_init(&many[i], bufs[i], 6, 10);
+        h_check(ami_sana2_gro_take(&rxs, &many[i], &cont) == TRUE,
+                "each continuing frame is taken");
+        if (i + 1 < AMI_SANA2_GRO_MAX)
+            h_check(h_went == TO_NOWHERE, "and held");
+    }
+
+    h_check(h_went == TO_IP, "the frame that fills the run delivers it");
+    h_check(h_seen_length == 50UL + 10UL * (AMI_SANA2_GRO_MAX - 1),
+            "as the whole run");
+    h_check(rxs.gro_head == NX_NULL, "and nothing is held after");
+    h_check(pkt.nx_packet_last == &many[AMI_SANA2_GRO_MAX - 1],
+            "with the last frame as the chain's last");
+    gro_done();
+}
+
+#endif /* AMINETXDUO_GRO */
+
 /* Enough packets that the budget never binds: the ladder alone decides. */
 #define PLAN_BIG_POOL   512UL
 
@@ -740,8 +1022,10 @@ static void test_plan_ladder(void)
         {     4000001UL, 32, "one bit past it"                             },
         {    10000000UL, 32, "ten-megabit Ethernet"                        },
         {   100000000UL, 32, "a hundred-megabit card"                      },
-        {  1000000000UL, 32, "a gigabit wire"                              },
-        {  0xFFFFFFFFUL, 32, "a rate that did not fit a ULONG"             }
+        /* The ring's row, capped here by PLAN_BIG_POOL's share (512 / 8):
+           the pool decides on a small machine, the wire on a big one. */
+        {  1000000000UL, 64, "a gigabit wire goes past the LAN's 32"        },
+        {  0xFFFFFFFFUL, 64, "a rate that did not fit a ULONG"             }
     };
     AmiRxDepths d;
     unsigned    i;
@@ -831,13 +1115,33 @@ static void test_plan_budget(void)
             "513 packets: 32/2/8, which is what the A3000 printed");
 
     plan_at(10000000UL, 368UL, TRUE, &d);
-    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
-            "368 packets: IPv4 gets the ceiling");
+    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_LAN,
+            "368 packets: IPv4 gets the LAN ceiling");
     h_check(d.ipv6 == AMI_SANA2_RX_WANT_IPV6,
             "and IPv6 gets its own cap rather than two");
     plan_at(100000000UL, 368UL, TRUE, &d);
-    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
+    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_LAN,
             "and a hundred-megabit card on that machine asks for no more");
+
+    /* THE GIGABIT ROW IS THE RING.  The A1200 + PiStorm32's 4096-packet pool
+       on anxgenet.device: both stream readers get the driver's 128, the
+       whole plan inside a quarter of the pool; the same wire on the lab's
+       368 packets is capped by the pool share and still gives IPv6 what it
+       gives IPv4, because a run of segments meets the same ring either way. */
+    plan_at(1000000000UL, 4096UL, TRUE, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
+            "4096 packets on a gigabit wire: IPv4 gets the ring");
+    h_check(d.ipv6 == AMI_SANA2_RX_MAX_DEPTH,
+            "and so does IPv6");
+    h_check((ULONG)d.ipv4 + d.arp + d.ipv6 <= 4096UL / AMI_SANA2_RX_BUDGET_SHARE,
+            "inside a quarter of the pool");
+    plan_at(1000000000UL, 368UL, TRUE, &d);
+    h_check(d.ipv4 < AMI_SANA2_RX_MAX_DEPTH && d.ipv4 > AMI_SANA2_RX_DEPTH_LAN,
+            "368 packets on a gigabit wire: the pool share caps it above 32");
+    h_check(d.ipv6 > AMI_SANA2_RX_WANT_IPV6,
+            "and IPv6 is planned past its small-machine cap");
+    h_check((ULONG)d.ipv4 + d.arp + d.ipv6 <= 368UL / AMI_SANA2_RX_BUDGET_SHARE,
+            "inside a quarter of that pool");
 
     plan_at(10000000UL, 4096UL, TRUE, &d);
     h_check(d.ipv6 == AMI_SANA2_RX_WANT_IPV6,
@@ -958,10 +1262,13 @@ static void test_plan_asked(void)
     h_check(d.ipv4 == 2, "IPREQUESTS=2 is two, under the floor");
     h_check(d.arp == 1, "ARPREQUESTS=1 is one, under the floor");
 
-    /* Above the ring is the ring. */
-    plan_asked(10000000UL, PLAN_BIG_POOL, 64, 64, &d);
-    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH, "IPREQUESTS=64 is the ceiling");
-    h_check(d.arp == AMI_SANA2_RX_MAX_DEPTH, "ARPREQUESTS=64 is the ceiling");
+    /* Above the ring is the ring, and an ask goes past the wire's row. */
+    plan_asked(10000000UL, 4096UL, 64, 64, &d);
+    h_check(d.ipv4 == 64, "IPREQUESTS=64 on a slow wire is sixty-four");
+    h_check(d.arp == 64, "ARPREQUESTS=64 is sixty-four");
+    plan_asked(10000000UL, 4096UL, 200, 200, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH, "IPREQUESTS=200 is the ceiling");
+    h_check(d.arp == AMI_SANA2_RX_MAX_DEPTH, "ARPREQUESTS=200 is the ceiling");
 
     /* An ARP ask comes out of the same spare, and before the IPv6 default. */
     plan_asked(10000000UL, PLAN_BIG_POOL, 0, 8, &d);
@@ -1023,8 +1330,8 @@ static void test_plan_shares_one_pool(void)
     plan_for(10000000UL, 368UL, TRUE, 2, &two);
     plan_for(10000000UL, 368UL, TRUE, 4, &four);
 
-    h_check(one.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
-            "368 packets, one interface: the ceiling, as before");
+    h_check(one.ipv4 == AMI_SANA2_RX_DEPTH_LAN,
+            "368 packets, one interface: the LAN ceiling, as before");
     h_check(two.ipv4 <= one.ipv4 && four.ipv4 <= two.ipv4,
             "and more interfaces never plan a deeper queue than fewer");
 
@@ -1206,6 +1513,13 @@ int main(void)
     test_verify_publishes_only_what_it_checked();
     test_verify_drop();
     test_verify_uses_the_carried_sum();
+#endif
+#ifdef AMINETXDUO_GRO
+    test_verified_skips_the_walk();
+    test_held_frame_goes_up_on_flush();
+    test_continuing_frame_is_chained();
+    test_run_ends_on_a_frame_that_does_not_continue();
+    test_run_is_capped();
 #endif
 
     printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,

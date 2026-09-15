@@ -172,7 +172,7 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     return dst;
 }
 
-VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed)
+VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags)
 {
     NetdevUnit        *unit = (NetdevUnit *)arg;
     struct IOSana2Req *io   = (struct IOSana2Req *)token;
@@ -180,8 +180,12 @@ VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed)
     NetdevTrack       *tr   = netdev_track_find(op, io->ios2_PacketType);
     UWORD              len  = (UWORD)(io->ios2_DataLength + NETDEV_HDR_LEN);
 
+    /* Only the bits this opener asked for, beyond the one every opener has
+       always understood (aminetxduo/anxs2ext.h). */
     ((AnxdS2RxFilled)op->op_RxFilled)(io->ios2_Data, io->ios2_DataLength,
-                                      sum, summed);
+                                      sum,
+                                      (UBYTE)(flags & (ANXD_S2_RXF_SUMMED |
+                                                       op->op_RxFlags)));
 
     unit->nu_Stats.PacketsReceived++;
     if (tr != NULL)

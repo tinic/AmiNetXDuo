@@ -73,8 +73,27 @@
 #define AMI_SANA2_RX_BUDGET_SHARE   4
 #endif
 
+/*
+ * THE POSTED QUEUE MUST HOLD THE DRIVER'S RING, 2026-09-15.  anxgenet.device
+ * empties its 128-frame receive ring in one bottom half under Disable(), a
+ * frame into a posted read each, and the reader cannot re-post while that
+ * runs: a burst longer than the reads posted loses its tail with no error
+ * anywhere but the driver's "no read posted" count.  Measured on the A1200
+ * + PiStorm32 with the held-run receive path, whose one acknowledgment per
+ * run makes the peer's bursts longer: bursts of 36 against 32 posted reads,
+ * 685 frames dropped and 632 retransmitted in a ten-second transfer, 131
+ * Mbit/s where the frame-at-a-time path did 142.  So the ceiling is the
+ * ring, and ami_sana2_rx_ladder gives it only to a gigabit wire: a 10 or
+ * 100 Mbit card keeps the 32 it always had (AMI_SANA2_RX_DEPTH_LAN), the
+ * pool share still caps a small machine, and the slots are allocated to the
+ * planned depth, not to this, so nobody pays for a queue they were not
+ * given.  The drain budget (AMI_SANA2_RX_RUN_MAX) follows it, as it must.
+ */
 #ifndef AMI_SANA2_RX_MAX_DEPTH
-#define AMI_SANA2_RX_MAX_DEPTH      32
+#define AMI_SANA2_RX_MAX_DEPTH      128
+#endif
+#ifndef AMI_SANA2_RX_DEPTH_LAN
+#define AMI_SANA2_RX_DEPTH_LAN      32
 #endif
 
 /*
@@ -210,8 +229,17 @@
  * burstier than 8.8.  Fitz also shows dry 0 against iperf's dry 8 -- it never
  * once woke to an empty queue.
  */
+/* The most frames one held run chains: sixteen full segments is 23 KB, well
+   inside the smallest window a socket settles at (bsdsocket_window.h). */
+#ifndef AMI_SANA2_GRO_MAX
+#define AMI_SANA2_GRO_MAX           16
+#endif
+#if defined(AMINETXDUO_GRO) && !defined(AMINETXDUO_RX_VERIFY)
+#error "AMINETXDUO_GRO needs AMINETXDUO_RX_VERIFY (CMakeLists.txt turns it off)"
+#endif
+
 #ifndef AMI_SANA2_RX_RUN_MAX
-#define AMI_SANA2_RX_RUN_MAX        32
+#define AMI_SANA2_RX_RUN_MAX        AMI_SANA2_RX_MAX_DEPTH
 #endif
 
 #if AMI_SANA2_RX_RUN_MAX < 1
@@ -353,6 +381,10 @@ VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
                        UWORD ifaces, UWORD ask_ip, UWORD ask_arp,
                        AmiRxDepths *out);
 
+/* Give back every reader's slot array; safe on an interface whose readers
+   never started, and after ami_sana2_rx_stop() only. */
+VOID ami_sana2_rx_free_slots(AmiSana2If *iface);
+
 /* How many interfaces are bound to an NX_IP right now, which is how many
    readers' worth of pool packets are already spoken for.  In sana2_driver.c,
    where the bindings are. */
@@ -490,6 +522,9 @@ typedef struct AmiRxSlot
      */
     ULONG               sum;
     BOOL                summed;
+    /* The whole ANXD_S2_RXF_* byte the device handed RX_FILLED, for the
+       VERIFIED and CONTINUES bits (aminetxduo/anxs2ext.h). */
+    UBYTE               rxflags;
 #endif
     BOOL                posted;
     /* The device wrote the fourteen-byte link header in front of the payload
@@ -515,6 +550,7 @@ typedef struct AmiRxSum
     ULONG   sum;        /* ones-complement sum the copy carried            */
     ULONG   copied;     /* over how many bytes                             */
     BOOL    summed;     /* whether the copy took the summing path          */
+    UBYTE   flags;      /* the device's ANXD_S2_RXF_* byte, 0 = none      */
 } AmiRxSum;
 
 typedef struct AmiSana2Rx
@@ -556,6 +592,25 @@ typedef struct AmiSana2Rx
     volatile BOOL       stop;
     volatile BOOL       failed;
 
+#ifdef AMINETXDUO_GRO
+    /*
+     * THE HELD HEAD.  A verified TCP segment the device may be about to
+     * continue (ANXD_S2_RXF_CONTINUES, aminetxduo/anxs2ext.h) waits here
+     * instead of going to the stack at once; each continuing frame is chained
+     * behind it with its own headers skipped, and the whole run goes up as
+     * ONE segment when a frame that does not continue it arrives, when the
+     * run is AMI_SANA2_GRO_MAX long, or when the drain that started it ends
+     * -- so nothing waits past one pass of the reader.  The stack then pays
+     * its per-segment work once for the run: the receive side of what a
+     * large-receive offload does, with the device deciding the runs and this
+     * side only holding the chain.
+     */
+    NX_PACKET          *gro_head;
+    NX_PACKET          *gro_tail;
+    AmiRxSum            gro_sum;
+    UWORD               gro_count;      /* frames in the held run           */
+#endif /* AMINETXDUO_GRO */
+
     /* Reads the device would not give back at teardown. Nonzero means this
        reader's slots, pinned packets and reply port are still reachable by the
        device, so none of them can be freed, see ami_sana2_rx_teardown(). */
@@ -565,7 +620,11 @@ typedef struct AmiSana2Rx
     AmiRxProbe          probe;
 #endif
 
-    AmiRxSlot           slot[AMI_SANA2_RX_MAX_DEPTH];
+    /* `depth` of them, allocated by ami_sana2_rx_start() and freed with the
+       interface (ami_sana2_rx_free_slots): a 128-deep queue is a gigabit
+       wire's and nobody else's memory. */
+    AmiRxSlot          *slot;
+    UWORD               slot_alloc;     /* how many `slot` holds             */
 } AmiSana2Rx;
 
 /* --------------------------------------------------------------- TX slots */
@@ -617,6 +676,8 @@ struct AmiSana2If
     char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[12];
     BOOL                link_hdr_ok;    /* device answered ANXD_S2_RX_LINK_HDR */
+    UBYTE               rx_flags_ok;    /* ANXD_S2_RX_FLAGS: the bits the device
+                                           will set beyond SUMMED, 0 = none  */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
@@ -769,6 +830,13 @@ BOOL ami_sana2_rx_should_block(const AmiSana2Rx *rx, UWORD taken);
  */
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
                           const AmiRxSum *sum);
+#ifdef AMINETXDUO_GRO
+/* The held run (sana2_rx.c): extern only so the host test can drive the
+   chaining without a reader; the reader is their one caller on the machine. */
+BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet,
+                        const AmiRxSum *sum);
+VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
+#endif
 
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);

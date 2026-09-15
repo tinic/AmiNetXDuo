@@ -114,7 +114,8 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
      * a standing property of the receive path.  Read the table as what a
      * misaligned source costs, not as what this hook costs today.
      */
-    slot->summed = FALSE;
+    slot->summed  = FALSE;
+    slot->rxflags = 0;
 
     /* The counter a user can read lives on the interface; the slot carries a
        pointer straight to it (sana2_internal.h), because this runs at
@@ -486,10 +487,12 @@ UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
 
 /*
  * ANXD_S2_RX_FILLED.  The device wrote the payload itself, straight off the
- * hardware.  `summed` carries whether `sum` is the longword ones-complement
- * running sum the verifier expects; without it the verifier walks the frame.
+ * hardware.  `flags` is the ANXD_S2_RXF_* byte: SUMMED says `sum` is the
+ * longword ones-complement running sum the verifier expects (without it the
+ * verifier walks the frame); VERIFIED and CONTINUES are kept whole for the
+ * reader, which only sees them from a device that answered ANXD_S2_RX_FLAGS.
  */
-VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
+VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE flags)
 {
     AmiRxSlot *slot = (AmiRxSlot *)ios2_data;
 
@@ -518,15 +521,16 @@ VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
     {
         slot->stats->rx_copy_hook++;
         slot->stats->rx_direct_fill++;
-        if (summed != 0)
+        if ((flags & ANXD_S2_RXF_SUMMED) != 0)
             slot->stats->rx_copy_summed++;
     }
 
 #ifdef AMINETXDUO_RX_VERIFY
-    slot->sum    = sum;
-    slot->summed = (BOOL)(summed != 0);
+    slot->sum     = sum;
+    slot->summed  = (BOOL)((flags & ANXD_S2_RXF_SUMMED) != 0);
+    slot->rxflags = flags;
 #else
     (VOID)sum;
-    (VOID)summed;
+    (VOID)flags;
 #endif
 }
