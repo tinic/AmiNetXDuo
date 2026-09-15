@@ -282,6 +282,201 @@ static void g_the_a1200_with_no_fast_ram(void)
 }
 
 
+/*
+ * THE OTHER END OF THE RANGE, 2026-09-15.  A 32 MB, a 128 MB and a 1.8 GB
+ * machine (an A3000 with Zorro III RAM, a PiStorm) were all the same machine
+ * while the clamp was 512: a budget of 64 packets, one socket at 100,352
+ * bytes, 18 Mbit/s at 22 ms whatever the link.  Now the divisor sizes the
+ * pool until the clamp, the clamp sits past 107 MB free, and a socket has two
+ * windows: the one it opens with, which is still the old ceiling at most
+ * (bursts on a LAN), and the one it may grow to once its handshake has shown
+ * a long path, bounded by BSD_TCP_WINDOW_MAX -- a claim about links, not
+ * about memory.  Where it SETTLES once the link and the path are known is
+ * ami_bsd_tcp_window_settle(), tested below.
+ */
+static void h_a_big_machine_is_bounded_by_the_link(void)
+{
+    static const ULONG big[] = { 33554432UL, 134217728UL, 1887436800UL };
+    ULONG floor128 = (134217728UL / (ULONG)AMI_POOL_MEM_DIVISOR) / M68K_STRIDE;
+    int   i, j;
+
+    /* The clamp is out of the way of a 128 MB machine's own sixteenth, and
+       the clamped pool's budget backs two sockets at the maximum. */
+    h_check(floor128 > (ULONG)AMI_POOL_MAX_PACKETS,
+            "a 128 MB machine no longer reaches the pool clamp");
+    h_check(ami_bsd_tcp_budget((ULONG)AMI_POOL_MAX_PACKETS,
+                               (ULONG)AMI_POOL_PAYLOAD) >=
+            2UL * (ULONG)BSD_TCP_WINDOW_MAX,
+            "the clamped pool's budget cannot back two sockets at the maximum");
+
+    for (i = 0; i < (int)(sizeof(big) / sizeof(big[0])); i++)
+        for (j = 0; j < H_STRIDE_N; j++)
+        {
+            ULONG pool = ami_ns_pool_packets_for(big[i],
+                                                 (ULONG)AMI_POOL_MEM_DIVISOR,
+                                                 h_stride[j]);
+            ULONG budget = ami_bsd_tcp_budget(pool, (ULONG)AMI_POOL_PAYLOAD);
+            ULONG one  = ami_bsd_tcp_window_for(pool, (ULONG)AMI_POOL_PAYLOAD,
+                                                0UL);
+            ULONG two  = ami_bsd_tcp_window_for(pool, (ULONG)AMI_POOL_PAYLOAD,
+                                                1UL);
+            ULONG max1 = ami_bsd_tcp_window_max_for(pool,
+                                                    (ULONG)AMI_POOL_PAYLOAD,
+                                                    0UL);
+            ULONG max2 = ami_bsd_tcp_window_max_for(pool,
+                                                    (ULONG)AMI_POOL_PAYLOAD,
+                                                    1UL);
+            ULONG want1 = budget;
+            ULONG want2 = budget / 2UL;
+
+            /* The budget first, the link ceiling only where the budget is
+               past it: a 32 MB machine at the widest stride buys 1,110
+               packets, a budget of 217 KB, and that is its first socket's
+               maximum. */
+            if (want1 > (ULONG)BSD_TCP_WINDOW_CEILING)
+                want1 = (ULONG)BSD_TCP_WINDOW_CEILING;
+            if (want2 > (ULONG)BSD_TCP_WINDOW_CEILING)
+                want2 = (ULONG)BSD_TCP_WINDOW_CEILING;
+
+            h_checkf(pool <= (ULONG)AMI_POOL_MAX_PACKETS,
+                     "the pool passed the clamp", big[i], h_stride[j], 16UL);
+
+            /* What a socket OPENS with on a big machine is the old ceiling,
+               whatever the budget: that is the window whose bursts a LAN
+               was measured to take. */
+            h_checkf(one == (ULONG)BSD_TCP_WINDOW_LAN,
+                     "the first socket does not open at the LAN window",
+                     big[i], h_stride[j], 16UL);
+            h_checkf(two == (ULONG)BSD_TCP_WINDOW_LAN,
+                     "a second socket does not open at the LAN window",
+                     big[i], h_stride[j], 16UL);
+
+            /* What it may GROW to is min(its share, the link ceiling). */
+            h_checkf(max1 == want1,
+                     "the first socket's maximum is not min(budget, link ceiling)",
+                     big[i], h_stride[j], 16UL);
+            h_checkf(max2 == want2,
+                     "a second socket's maximum is not min(half budget, ceiling)",
+                     big[i], h_stride[j], 16UL);
+            h_checkf(max1 >= one && max2 >= two,
+                     "a maximum below the window it opens with",
+                     big[i], h_stride[j], 16UL);
+            h_checkf(2UL * max2 <= budget,
+                     "two grown sockets between them exceed the budget",
+                     big[i], h_stride[j], 16UL);
+            /* From 128 MB up, memory is no longer what bounds a socket. */
+            if (big[i] >= 134217728UL)
+                h_checkf(max1 == (ULONG)BSD_TCP_WINDOW_CEILING &&
+                         max2 == (ULONG)BSD_TCP_WINDOW_CEILING,
+                         "a 128 MB machine's maxima are not at the link ceiling",
+                         big[i], h_stride[j], 16UL);
+        }
+
+    /* 1.8 GB and 128 MB are the same pool: the clamp, not the memory. */
+    h_check(ami_ns_pool_packets_for(1887436800UL, (ULONG)AMI_POOL_MEM_DIVISOR,
+                                    M68K_STRIDE) ==
+            ami_ns_pool_packets_for(134217728UL, (ULONG)AMI_POOL_MEM_DIVISOR,
+                                    M68K_STRIDE),
+            "past the clamp, more memory still buys packets");
+    h_check(ami_ns_pool_packets_for(134217728UL, (ULONG)AMI_POOL_MEM_DIVISOR,
+                                    M68K_STRIDE) == (ULONG)AMI_POOL_MAX_PACKETS,
+            "a 128 MB machine does not sit exactly on the clamp");
+
+    /* And both windows are a policy under the budget, never above it: on
+       12 MB (a pool of 470, under the old clamp) the budget still decides,
+       and the two windows are the same number -- nothing to grow to. */
+    {
+        ULONG pool = ami_ns_pool_packets_for(12582912UL,
+                                             (ULONG)AMI_POOL_MEM_DIVISOR,
+                                             M68K_STRIDE);
+        ULONG one  = ami_bsd_tcp_window_for(pool, (ULONG)AMI_POOL_PAYLOAD, 0UL);
+        ULONG max1 = ami_bsd_tcp_window_max_for(pool, (ULONG)AMI_POOL_PAYLOAD,
+                                                0UL);
+
+        h_check(one < (ULONG)BSD_TCP_WINDOW_LAN,
+                "a 12 MB machine is not bounded by its budget any more");
+        h_check(one == ami_bsd_tcp_budget(pool, (ULONG)AMI_POOL_PAYLOAD),
+                "a 12 MB machine's first socket does not get its whole budget");
+        h_check(max1 == one,
+                "a 12 MB machine has something to grow to");
+    }
+
+    /* Every machine in the small table: the window it opens with is exactly
+       what it was before any of this. */
+    {
+        int k;
+
+        for (k = 0; k < H_AVAIL_N; k++)
+        {
+            ULONG pool = ami_ns_pool_packets_for(h_avail[k],
+                                                 (ULONG)AMI_POOL_MEM_DIVISOR,
+                                                 M68K_STRIDE);
+            ULONG one  = ami_bsd_tcp_window_for(pool, (ULONG)AMI_POOL_PAYLOAD,
+                                                0UL);
+            ULONG old  = ami_bsd_tcp_budget(pool, (ULONG)AMI_POOL_PAYLOAD);
+
+            if (old > 100352UL)
+                old = 100352UL;
+            if (old < (ULONG)BSD_TCP_WINDOW)
+                old = (ULONG)BSD_TCP_WINDOW;
+
+            h_checkf(one == old, "a machine up to 32 MB opens differently",
+                     h_avail[k], M68K_STRIDE, 16UL);
+        }
+    }
+}
+
+
+/*
+ * WHERE A SOCKET SETTLES, from the numbers in bsdsocket_window.h.  The window
+ * it opened with (`created`) is the LAN window or the budget share, the
+ * maximum is what the link ceiling allows, the link speed comes from the
+ * interface the connection landed on, the round trip from its own handshake.
+ */
+static void i_the_window_settles_for_the_path_and_the_link(void)
+{
+    const ULONG lan   = (ULONG)BSD_TCP_WINDOW_LAN;      /* 100,352 */
+    const ULONG max   = (ULONG)BSD_TCP_WINDOW_MAX;      /* 262,144 */
+    const ULONG fast  = (ULONG)BSD_TCP_WINDOW_FAST;     /*  65,535 */
+    const ULONG gbit  = (ULONG)BSD_TCP_WINDOW_FAST_BPS;
+    const ULONG tenm  = 10000000UL;
+    const ULONG hundm = 100000000UL;
+    const ULONG rtt   = (ULONG)BSD_TCP_WINDOW_GROW_RTT_MS;
+
+    /* A long path grows to the maximum on any link, even a gigabit one. */
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt) == max,
+            "a long path on a gigabit link does not grow");
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 22UL) == max,
+            "a 22 ms path on 100 Mbit does not grow");
+    h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 95UL) == max,
+            "a long path on an unknown link does not grow");
+    /* ... but never past what it was created with when there is no maximum
+       (a peer with no scaling, a small machine). */
+    h_check(ami_bsd_tcp_window_settle(lan, lan, gbit, rtt) == lan,
+            "a long path grew past a maximum equal to the created window");
+    h_check(ami_bsd_tcp_window_settle(8192UL, 8192UL, 0UL, 300UL) == 8192UL,
+            "a small machine's floor window moved on a long path");
+
+    /* A LAN round trip on a gigabit link: the ring's knee, not the budget. */
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt - 1UL) == fast,
+            "a gigabit LAN socket did not settle at one unscaled window");
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 0UL) == fast,
+            "a passive gigabit socket did not settle at one unscaled window");
+    h_check(ami_bsd_tcp_window_settle(50176UL, max, gbit, 0UL) == 50176UL,
+            "a window already under the knee was moved");
+
+    /* A LAN round trip on 10 or 100 Mbit: exactly what it opened with. */
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 1UL) == lan,
+            "a 100 Mbit LAN socket did not keep the LAN window");
+    h_check(ami_bsd_tcp_window_settle(lan, max, tenm, 5UL) == lan,
+            "a 10 Mbit LAN socket did not keep the LAN window");
+    h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 0UL) == lan,
+            "an unknown link on a LAN did not keep the LAN window");
+    h_check(fast < 75264UL && fast > 50176UL,
+            "the gigabit LAN window is outside the measured 50-75 KB band");
+}
+
+
 int main(void)
 {
     printf("packet pool sizing and the window it backs, v0.25.5\n");
@@ -293,6 +488,8 @@ int main(void)
     e_more_memory_never_buys_less();
     f_the_working_floor_covers_the_window_twice();
     g_the_a1200_with_no_fast_ram();
+    h_a_big_machine_is_bounded_by_the_link();
+    i_the_window_settles_for_the_path_and_the_link();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

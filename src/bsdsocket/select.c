@@ -97,13 +97,27 @@ static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
     sock->as_Flags |= ASF_CONNECTED;
 
     /* A socket still parked on a listen port belongs to its listener. The
-       application selects on the listener, not on the parked socket. */
+       application selects on the listener, not on the parked socket.  Its
+       window settles for the link it came up on; it has no handshake this
+       side timed, so it never grows (bsdsocket_window.h). */
     if ((sock->as_Flags & ASF_INCOMING) != 0 && sock->as_Parent != NULL)
     {
+        bsd_tcp_window_settle(socket_ptr, 0UL);
         sock->as_Parent->as_Flags |= ASF_ACCEPTPEND;
         bsd_event_post(sock->as_Parent, FD_ACCEPT | FD_READ);
         return;
     }
+
+    /*
+     * The handshake just measured the path: SYN out at as_ConnectMillis,
+     * SYN/ACK in now.  A long round trip is a link where the window is the
+     * transfer rate, so the socket takes its maximum before any data
+     * arrives; a short one is a LAN, where the window is sized to the link
+     * it came up on (bsdsocket_window.h).  ami_millis() is E-clock time, so
+     * this resolves the 1-5 ms a LAN takes from the 20 and up the Internet
+     * takes, which the 50 Hz RTT estimator cannot.
+     */
+    bsd_tcp_window_settle(socket_ptr, ami_millis() - sock->as_ConnectMillis);
 
     bsd_event_post(sock, FD_CONNECT | FD_WRITE);
 }

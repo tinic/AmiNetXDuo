@@ -67,6 +67,17 @@ set(_anxd_maxpkt ${CMAKE_MATCH_1})
 
 math(EXPR _anxd_wincap "(${_anxd_maxpkt} / ${_anxd_share}) * ${_anxd_payload}")
 
+# The budget at the clamp is past the per-socket policy ceiling now that the
+# clamp follows the machine, so the ceiling is the smaller of the two.
+string(REGEX MATCH "#define[ \t]+BSD_TCP_WINDOW_MAX[ \t]+([0-9]+)"
+       _anxd_m "${_anxd_bsd_src}")
+if(NOT _anxd_m)
+    message(FATAL_ERROR "no BSD_TCP_WINDOW_MAX default in ${_anxd_bsd_h}")
+endif()
+if(${CMAKE_MATCH_1} LESS ${_anxd_wincap})
+    set(_anxd_wincap ${CMAKE_MATCH_1})
+endif()
+
 # Without the window scale option the sixteen-bit field is the ceiling, and
 # the header says so the same way.
 if(NOT AMINETXDUO_TCP_WINDOW_SCALING)

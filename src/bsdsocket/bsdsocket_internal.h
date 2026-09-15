@@ -443,6 +443,7 @@ typedef struct AmiSocket
     ULONG                   as_Events;      /* pending FD_* bits             */
     ULONG                   as_EventMask;   /* SO_EVENTMASK                  */
     LONG                    as_SoError;     /* SO_ERROR, cleared when read   */
+    ULONG                   as_ConnectMillis; /* ami_millis() at the SYN     */
 
     NXD_ADDRESS             as_LocalAddr;
     UINT                    as_LocalPort;
@@ -802,6 +803,7 @@ VOID       bsd_bpf_close_all(struct AmiSocketBase *base);
 
 /* socket.c, the receive window this machine can afford right now. */
 ULONG      ami_bsd_tcp_window(VOID);
+VOID       bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms);
 
 /* handoff.c, cross-base descriptor transfer. The registry lives in the master
  * base. bsd_handoff_flush() runs from bsd_lib_close() when the last opener

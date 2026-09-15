@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A TCP socket settles its receive window when its handshake completes:
+  262,144 bytes on a round trip of 10 ms or more, 65,535 on a LAN over a
+  gigabit link, unchanged otherwise. AmiSpeedTest download on the A1200 +
+  PiStorm32 9.4 -> 25-72 Mb/s; LAN receive through the GENET core 134 ->
+  142 Mbit/s. The packet pool clamp is 4096 packets, was 512; a machine
+  with 8 MB or less is unchanged
+
 - `NetDevStats` ships in C:, 6,132 bytes: every SANA-II counter and named
   record of any driver
 

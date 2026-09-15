@@ -7,6 +7,7 @@
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/nxstatus.h"
 #include "aminetxduo/config.h"
+#include "aminetxduo/sana2.h"
 #include "netmonitor.h"
 
 #include "nx_tcp.h"
@@ -115,27 +116,107 @@ ULONG ami_bsd_tcp_window(VOID)
     budget = ami_bsd_tcp_budget(pool->nx_packet_pool_total,
                                 pool->nx_packet_pool_payload_size);
 
-#ifdef BSD_TCP_WINDOW_CEILING
     cap = (ULONG)BSD_TCP_WINDOW_CEILING;
-#else
-    /* A window-scaling build has no ceiling but the budget: one consumer takes
-       half of it and every further one takes less.  bsdsocket_window.h says
-       why there is no second number here. */
-    cap = budget;
-#endif
+    if (cap > budget)
+        cap = budget;
 
     if (budget != last_budget)
     {
         last_budget = budget;
         AMI_INFO("bsdsocket: TCP window budget %ld bytes (pool %ld packets), "
-                 "%ld..%ld per socket",
+                 "%ld..%ld per socket, %ld to open with",
                  (long)budget, (long)pool->nx_packet_pool_total,
-                 (long)BSD_TCP_WINDOW, (long)cap);
+                 (long)BSD_TCP_WINDOW, (long)cap, (long)BSD_TCP_WINDOW_LAN);
     }
 
     return ami_bsd_tcp_window_for(pool->nx_packet_pool_total,
                                   pool->nx_packet_pool_payload_size,
                                   bsd_tcp_consumer_count(ip));
+}
+
+/*
+ * The window a socket may grow to once its handshake has measured the path
+ * (bsdsocket_window.h).  Set on the NetX socket right after create, before
+ * anything can send a SYN, because the fork negotiates the window scale from
+ * it; the socket's advertised window stays at what it was created with until
+ * bsd_tcp_window_grow() decides otherwise.
+ */
+static VOID bsd_tcp_window_maximum(NX_TCP_SOCKET *tcp)
+{
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    NX_PACKET_POOL *pool = netstack_pool();
+    NX_IP          *ip   = netstack_ip();
+
+    if (pool == NULL || ip == NULL)
+        return;                         /* create left it at the window */
+
+    /* The same consumer count the window itself was drawn against: this
+       socket is still CLOSED and is not among them. */
+    tcp->nx_tcp_socket_rx_window_maximum =
+        ami_bsd_tcp_window_max_for(pool->nx_packet_pool_total,
+                                   pool->nx_packet_pool_payload_size,
+                                   bsd_tcp_consumer_count(ip));
+#else
+    /* Without the scale option there is no field and nothing to grow to:
+       sixteen bits is the ceiling and the socket was created at it. */
+    (VOID)tcp;
+#endif
+}
+
+/* What a socket may grow to: the maximum where the build keeps one, else
+   the window it was created with. */
+static ULONG bsd_tcp_window_top(const NX_TCP_SOCKET *tcp)
+{
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    return tcp->nx_tcp_socket_rx_window_maximum;
+#else
+    return tcp->nx_tcp_socket_rx_window_default;
+#endif
+}
+
+/*
+ * Settle a freshly established socket's window (bsdsocket_window.h).  IP
+ * thread, from the establish notify, with the receive queue still empty:
+ * current and default move together, so what the next acknowledgment
+ * advertises is the new buffer and nothing already queued is counted twice.
+ * Growth needs the scale negotiated for the maximum at SYN time; a peer that
+ * offered no scaling had both fields pinned at 65535 by the fork already and
+ * the maximum is not expressible, so it stays.  Shrinking needs nothing.
+ */
+VOID bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
+{
+    NX_INTERFACE *nxif = tcp->nx_tcp_socket_connect_interface;
+    AmiSana2If   *sana = (nxif != NX_NULL)
+                       ? (AmiSana2If *)nxif->nx_interface_additional_link_info
+                       : NULL;
+    ULONG cur  = tcp->nx_tcp_socket_rx_window_default;
+    ULONG want = ami_bsd_tcp_window_settle(cur, bsd_tcp_window_top(tcp),
+                                           (sana != NULL)
+                                               ? ami_sana2_get_bps(sana) : 0UL,
+                                           rtt_ms);
+
+    if (want == cur)
+        return;
+    if (want > cur)
+    {
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+        if ((want >> tcp->nx_tcp_rcv_win_scale_value) > 65535UL)
+            return;
+#else
+        return;
+#endif
+        tcp->nx_tcp_socket_rx_window_current += want - cur;
+        tcp->nx_tcp_socket_rx_window_default  = want;
+        return;
+    }
+
+    /* Smaller: only what is not yet spoken for comes off, which before the
+       first data is all of it. */
+    if (tcp->nx_tcp_socket_rx_window_current > cur - want)
+        tcp->nx_tcp_socket_rx_window_current -= cur - want;
+    else
+        tcp->nx_tcp_socket_rx_window_current = 0;
+    tcp->nx_tcp_socket_rx_window_default = want;
 }
 
 /*
@@ -156,7 +237,9 @@ static VOID bsd_tcp_keepalive_default(NX_TCP_SOCKET *tcp)
 static VOID bsd_tcp_rx_queue_cap(NX_TCP_SOCKET *tcp)
 {
 #ifdef NX_ENABLE_LOW_WATERMARK
-    ULONG cap = tcp->nx_tcp_socket_rx_window_default / BSD_TCP_RX_MSS_REF +
+    /* From the maximum, not the default: the window may grow to it after the
+       handshake and the queue must be able to hold what it then advertises. */
+    ULONG cap = bsd_tcp_window_top(tcp) / BSD_TCP_RX_MSS_REF +
                 BSD_TCP_RX_QUEUE_SLACK;
 
     if (cap < NX_TCP_MAXIMUM_RX_QUEUE)
@@ -1056,6 +1139,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         {
             bsd_tcp_seed_isn(&sock->as_Nx.tcp);
             bsd_tcp_keepalive_default(&sock->as_Nx.tcp);
+            bsd_tcp_window_maximum(&sock->as_Nx.tcp);
             bsd_tcp_rx_queue_cap(&sock->as_Nx.tcp);
             bsd_tcp_tx_queue_default(&sock->as_Nx.tcp);
         }
@@ -1408,6 +1492,7 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
     bsd_tcp_seed_isn(&spare->as_Nx.tcp);
     bsd_tcp_tx_queue_default(&spare->as_Nx.tcp);
     bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
+    bsd_tcp_window_maximum(&spare->as_Nx.tcp);
     bsd_tcp_rx_queue_cap(&spare->as_Nx.tcp);
 
     spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
@@ -1572,6 +1657,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     {
         bsd_tcp_seed_isn(&incoming->as_Nx.tcp);
         bsd_tcp_keepalive_default(&incoming->as_Nx.tcp);
+        bsd_tcp_window_maximum(&incoming->as_Nx.tcp);
         bsd_tcp_rx_queue_cap(&incoming->as_Nx.tcp);
         bsd_tcp_tx_queue_default(&incoming->as_Nx.tcp);
     }
@@ -2377,6 +2463,10 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
     sock->as_PeerPort = port;
     sock->as_PeerScopeId = scope;
     sock->as_Flags   |= ASF_CONNECTING;
+
+    /* When the SYN leaves; the establish notify reads the clock again and
+       has the handshake's round trip, which is what sizes the window. */
+    sock->as_ConnectMillis = ami_millis();
 
     status = src_pinned
                  ? nxd_tcp_client_socket_source_connect(

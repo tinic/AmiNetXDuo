@@ -102,7 +102,11 @@ TABLE = {
     #
     # A bump that trips this is NOT a defect -- it is a number to look at and
     # then raise on purpose.
-    "nx_tcp_socket_state_data_check.c":  [("__nx_tcp_socket_state_data_check",  467)],  # 429
+    # 467 -> 471 on 2026-09-15: NX_TCP_ACK_THRESHOLD_MAX, one compare-and-cap
+    # on the data-ACK ramp's limit, so a 256 KB receive window (the WAN case
+    # of bsdsocket_window.h) does not acknowledge every 128 KB.  Four
+    # instructions per segment, bought on purpose.
+    "nx_tcp_socket_state_data_check.c":  [("__nx_tcp_socket_state_data_check",  471)],  # 429
     "nx_tcp_packet_process.c":           [("__nx_tcp_packet_process",           546)],  # 502
     "nx_tcp_socket_packet_process.c":    [("__nx_tcp_socket_packet_process",    515)],  # 474
     "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   604)],  # 556

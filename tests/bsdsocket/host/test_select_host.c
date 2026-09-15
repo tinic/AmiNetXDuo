@@ -263,6 +263,14 @@ AmiSocket *bsd_incoming_first_ready(const AmiSocket *listener)
 
 LONG bsd_errno_from_nx(UINT status) { return (LONG)status; }
 
+/* The establish notify settles the socket's receive window from the
+   handshake's round trip (socket.c, bsdsocket_window.h); the policy has its
+   own host test in tests/netstack/host/test_pool_window_host.c and this file
+   only needs the notify to run, so both are inert here. */
+VOID  bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
+{ (VOID)tcp; (VOID)rtt_ms; }
+ULONG ami_millis(VOID) { return 0UL; }
+
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
                        UINT src_port, ULONG src_scope)
 {

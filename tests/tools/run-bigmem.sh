@@ -52,14 +52,19 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 RESULTS="$ROOT/build/bigmem-results.txt"
 : > "$RESULTS"
 
-POOL_CEILING=520
+# AMI_POOL_MAX_PACKETS, plus the slack the bring-up report rounds by.  4096
+# since 2026-09-15; it was 512, which a 32 MB machine already reached.
+POOL_CEILING=4104
 POOL_MIN=16
 
 # The window ceiling, written out rather than derived, for the same reason
-# tests/sockopt/sockopt_test.c writes it out: (512 / 8) * 1568.  That test only
-# range-asserts FLOOR <= window <= CEILING, which passes whether or not the
-# ceiling ever bound.  A saturated arm is the one machine where it MUST bind,
-# and until this ran nothing had ever observed it doing so.
+# tests/sockopt/sockopt_test.c writes it out: BSD_TCP_WINDOW_LAN, 100352, the
+# window an UNCONNECTED socket reports (the 262144 maximum is taken only after
+# a connect handshake that measured a long round trip, which sockopt_test
+# never performs).  That test only range-asserts FLOOR <= window <= CEILING,
+# which passes whether or not the ceiling ever bound.  A saturated arm is the
+# one machine where it MUST bind: both accel arms have budgets past it (32 MB
+# buys ~1,400 packets, a 275 KB budget; 128 MB sits on the clamp, 800 KB).
 TCP_WINDOW_CEILING=100352
 
 clamp_arm() { # name model cpu fastmem z3mem poolexpect
@@ -179,15 +184,19 @@ if [ "$SKIPPED_BIG" = 0 ]; then
     p128="${POOL_accel_128m:-0}"
     p8="${POOL_lab_a1200:-0}"
 
-    if [ "$p32" != "$p128" ]; then
-        echo "pool_saturation=FAIL 32m=$p32 128m=$p128 differ" >> "$RESULTS"
+    # 128 MB is past the clamp and sits on it; 32 MB is under the clamp and
+    # scales, so the two must DIFFER and be ordered, where they used to be
+    # equal.  A 128 MB pool below 4096 means the clamp is not what it says.
+    if [ "$p128" -lt 4090 ] || [ "$p128" -gt "$POOL_CEILING" ]; then
+        echo "pool_saturation=FAIL 128m=$p128 is not on the clamp (4096)" \
+             >> "$RESULTS"
         FAILED=$((FAILED + 1))
-    elif [ "$p32" -le "$p8" ]; then
-        echo "pool_saturation=FAIL 32m=$p32 is not above the 8 MB arm ($p8)" \
+    elif [ "$p32" -ge "$p128" ] || [ "$p32" -le "$p8" ]; then
+        echo "pool_saturation=FAIL 32m=$p32 is not between 8 MB ($p8) and 128 MB ($p128)" \
              >> "$RESULTS"
         FAILED=$((FAILED + 1))
     else
-        echo "pool_saturation=PASS 32m=$p32 == 128m=$p128, above 8 MB ($p8)" \
+        echo "pool_saturation=PASS 8m=$p8 < 32m=$p32 < 128m=$p128 (clamp)" \
              >> "$RESULTS"
     fi
 fi
@@ -206,10 +215,10 @@ fi
 echo
 echo "bigmem: FAIL -- $FAILED of $COUNT arms" >&2
 echo >&2
-echo "  pool_saturation=FAIL, 32m and 128m DIFFER    the sizing arithmetic" >&2
-echo "    is still scaling past AMI_POOL_MAX_PACKETS.  If the 128 MB figure" >&2
-echo "    is the SMALLER of the two, that is the overflow this arm exists" >&2
-echo "    for: src/netstack/netstack.c:541, avail/divisor/stride." >&2
+echo "  pool_saturation=FAIL, 128m not on the clamp    the sizing arithmetic" >&2
+echo "    is not stopping at AMI_POOL_MAX_PACKETS (4096), or the 128 MB" >&2
+echo "    figure came out SMALLER than 32 MB's, which is the avail/divisor/" >&2
+echo "    stride overflow this arm exists for: src/netstack/netstack.c:541." >&2
 echo >&2
 echo "  pool_saturation=FAIL, 32m not above the 8 MB arm  the Zorro III" >&2
 echo "    memory never reached the guest.  It maps on an A3000 and on" >&2
@@ -218,7 +227,7 @@ echo "    really booted an A3000 with AMINETXDUO_KICKSTART_A3000." >&2
 echo >&2
 echo "  ceiling_bound=0 on a saturated arm  the pool is big enough for the" >&2
 echo "    window ceiling to bind and it did not: the window came out at" >&2
-echo "    something other than (512 / 8) * 1568.  src/netstack/netstack.c:541" >&2
+echo "    something other than BSD_TCP_WINDOW_LAN.  src/netstack/netstack.c:541" >&2
 echo "    and the SO_RCVBUF answer in src/bsdsocket/sockopt.c." >&2
 echo >&2
 echo "  bring-up red only on the accel arms  the stack does not survive a" >&2

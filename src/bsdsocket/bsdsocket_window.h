@@ -24,27 +24,91 @@
 #endif
 
 /*
- * DEFINED ONLY WHERE THERE IS SOMETHING TO HIT.
+ * TWO WINDOWS PER SOCKET: the one it opens with, and the one it may grow to.
  *
- * Without window scaling the field itself is the ceiling: the window goes on
- * the wire in sixteen bits and there is nothing to scale it by, so 65535 is
- * what the wire format allows rather than a policy of ours
- * (nxe_tcp_socket_create.c:170).
+ * A window is what the peer may put in flight at once, and the right size
+ * depends on the path, which a socket does not know when it is created.  On
+ * a LAN the round trip is under a millisecond and a fast peer sends a whole
+ * window back to back; the card's receive ring has to absorb that burst at
+ * wire speed while the CPU drains it at its own -- measured 2026-09-15 on
+ * the emulated X-Surf 100 (A3000, 128 MB): a 262,144-byte window received
+ * at 24-28 Mbit/s where 100,352 received at 39-40, three interleaved rounds
+ * each, the bigger window losing to its own bursts.  Across the Internet the
+ * same window is what the transfer rate IS: at 22 ms, 100,352 bytes cannot
+ * exceed 36 Mbit/s and bursts are paced by the far end's link anyway.
  *
- * With scaling there is no such number, and the one that used to stand here
- * was not one either.  It was
+ * So a socket is created at BSD_TCP_WINDOW_LAN -- exactly the window every
+ * socket had before this, the pool's eighth-share budget capped at what a
+ * 512-packet pool gave -- and carries BSD_TCP_WINDOW_MAX as the size the
+ * fork negotiates its window scale for.  When the socket's own connect
+ * handshake measures a round trip of BSD_TCP_WINDOW_GROW_RTT_MS or more
+ * (select.c, the establish notify), the window grows to the maximum in one
+ * step, before any data has arrived.  A passive socket (accept) has no
+ * handshake this side times and stays at the LAN window; a machine whose
+ * budget is under the LAN window never sees any of this.
  *
- *     (AMI_POOL_MAX_PACKETS / BSD_TCP_WINDOW_POOL_SHARE) * AMI_POOL_PAYLOAD
+ * Without the scale option the field itself is the ceiling: sixteen bits on
+ * the wire, 65535 (nxe_tcp_socket_create.c:170), and there is nothing to
+ * grow to.
  *
- * which is `budget` below spelled over the compile-time bound of the same
- * pool.  The pool cannot exceed that bound and the window is the budget
- * divided among the live consumers, so window <= budget <= ceiling held by
- * construction and the clamp could not fire.  It never had.  The share of the
- * buffer the stack really has is the whole policy; a second cap derived from
- * the first is a restatement of it.
+ * 262,144 is 100 Mbit/s over 21 ms and the GENET's 128 x 2 KB ring, a claim
+ * about links and rings, not a derivation from the pool.  The 10 ms
+ * threshold is a coarse but safe line: the real A1200's LAN round trip is
+ * 1-5 ms, the emulator's under 1, the Internet's 20 and up.
  */
+#ifndef BSD_TCP_WINDOW_LAN
+#define BSD_TCP_WINDOW_LAN      100352UL    /* (512 / 8) * 1568, the old ceiling */
+#endif
+
+#ifndef BSD_TCP_WINDOW_MAX
+#define BSD_TCP_WINDOW_MAX      262144UL
+#endif
+
+#ifndef BSD_TCP_WINDOW_GROW_RTT_MS
+#define BSD_TCP_WINDOW_GROW_RTT_MS  10UL
+#endif
+
+/*
+ * THE LAN WINDOW ON A GIGABIT LINK, measured 2026-09-15 on the A1200 +
+ * PiStorm32 through our GENET core, iperf into the Amiga, three rounds a
+ * boot, the window being what the iperf socket got from the budget:
+ *
+ *     window      receive
+ *      50,176     134 Mbit/s
+ *      75,264     134
+ *     100,352      62-68
+ *
+ * A 1 Gbit peer puts the whole window on the wire at once; the receiver
+ * drains at 134 Mbit/s, the driver's ring holds what is between, and above
+ * about 75 KB the ring loses the tail of every burst and the transfer runs
+ * in loss recovery.  So a socket that comes up on a link of
+ * BSD_TCP_WINDOW_FAST_BPS or more, on a LAN round trip, settles at
+ * BSD_TCP_WINDOW_FAST -- one unscaled window, under the measured knee -- and
+ * a socket on a slower link keeps BSD_TCP_WINDOW_LAN, which the 100 Mbit
+ * X-Surf 100 (emulated) took at 39-40 Mbit/s where 262,144 gave 27.  The
+ * WAN case is unaffected: a long round trip grows the window whatever the
+ * link, because the far end's bottleneck paces the bursts.
+ */
+#ifndef BSD_TCP_WINDOW_FAST
+#define BSD_TCP_WINDOW_FAST         65535UL
+#endif
+#ifndef BSD_TCP_WINDOW_FAST_BPS
+#define BSD_TCP_WINDOW_FAST_BPS     1000000000UL
+#endif
+
+/*
+ * The window a socket settles at once its handshake is done.  `created` is
+ * what it opened with, `maximum` what it may grow to, `bps` the link it came
+ * up on (0 = unknown), `rtt_ms` the handshake's round trip (0 = not
+ * measured, which a passive socket cannot).  Pure arithmetic, host-tested.
+ */
+ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
+                                ULONG rtt_ms);
+
 #ifndef BSD_TCP_WINDOW_CEILING
-#ifndef AMINETXDUO_TCP_WINDOW_SCALING
+#ifdef AMINETXDUO_TCP_WINDOW_SCALING
+#define BSD_TCP_WINDOW_CEILING  BSD_TCP_WINDOW_MAX
+#else
 #define BSD_TCP_WINDOW_CEILING  65535UL
 #endif
 #endif
@@ -58,11 +122,14 @@ ULONG ami_bsd_tcp_budget(ULONG pool_packets, ULONG payload);
 
 /*
  * That budget divided between the sockets that will draw on it, floored at
- * BSD_TCP_WINDOW and capped at BSD_TCP_WINDOW_CEILING only where that is
- * defined.  `consumers` is how many sockets are already live, so the caller's
- * own is the +1.
+ * BSD_TCP_WINDOW.  `consumers` is how many sockets are already live, so the
+ * caller's own is the +1.  _for() is the window a socket opens with, capped
+ * at BSD_TCP_WINDOW_LAN and the wire's ceiling; _max_for() is the one it may
+ * grow to, capped at BSD_TCP_WINDOW_CEILING, and never below _for().
  */
 ULONG ami_bsd_tcp_window_for(ULONG pool_packets, ULONG payload,
                              ULONG consumers);
+ULONG ami_bsd_tcp_window_max_for(ULONG pool_packets, ULONG payload,
+                                 ULONG consumers);
 
 #endif /* AMINETXDUO_BSDSOCKET_WINDOW_H */

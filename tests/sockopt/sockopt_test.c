@@ -441,7 +441,9 @@ LONG value;
 /* The literals below are written out rather than included: a gate that computes
    its expectation from the thing under test cannot fail when that changes. */
 #define T_TCP_WINDOW_FLOOR      8192L       /* BSD_TCP_WINDOW               */
-#define T_TCP_WINDOW_CEILING    100352L     /* (512 / 8) * 1568             */
+#define T_TCP_WINDOW_CEILING    100352L     /* BSD_TCP_WINDOW_LAN: what an  */
+                                            /* unconnected socket has; the  */
+                                            /* 262144 maximum is post-SYN   */
 #define T_UDP_QUEUE_MIN         11680L      /* 8 datagrams x 1460           */
 #define T_UDP_QUEUE_CEILING     93440L      /* 64 datagrams x 1460          */
 

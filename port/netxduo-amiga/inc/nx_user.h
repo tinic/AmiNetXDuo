@@ -109,6 +109,17 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    pool-share default keeps a 1 MB machine where it was. */
 #define NX_TCP_MAXIMUM_TX_QUEUE                 64
 
+/* The data-driven acknowledgment threshold (the fork's
+   nx_tcp_socket_state_data_check.c) ramps from two segments to half the
+   receive buffer.  That was 50,176 bytes at most while the buffer topped out
+   at (512 / 8) * 1568; with the pool clamp following the machine and
+   BSD_TCP_WINDOW_MAX at 262,144 the buffer's half would be 128 KB, one
+   acknowledgment per ninety segments, and every one of them releases a
+   burst that size at the sender's line rate into the card's receive ring.
+   Pinned at what the largest pre-scaling buffer produced, so a machine that
+   was already at the old ceiling acknowledges exactly as it did. */
+#define NX_TCP_ACK_THRESHOLD_MAX                50176
+
 /* Compiles the per-socket receive-queue cap; src/bsdsocket/socket.c must size
    nx_tcp_socket_receive_queue_maximum from each socket's window or a sub-MSS
    peer pins the whole pool.  The pool-wide low watermark half stays inert. */
