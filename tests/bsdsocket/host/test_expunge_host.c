@@ -325,6 +325,9 @@ LONG netstack_interface_stack_down(UWORD i)
 { (VOID)i; h_unreachable("netstack_interface_stack_down"); return -1; }
 LONG netstack_interface_remove(UWORD i, BOOL force)
 { (VOID)i; (VOID)force; h_unreachable("netstack_interface_remove"); return -1; }
+LONG netstack_interface_remove_named(const char *name, BOOL force)
+{ (VOID)name; (VOID)force; h_unreachable("netstack_interface_remove_named");
+  return -1; }
 VOID n68k_cpu_select(ULONG a) { (VOID)a; h_unreachable("n68k_cpu_select"); }
 
 const APTR BsdVectorTable[] = { (APTR)-1 };

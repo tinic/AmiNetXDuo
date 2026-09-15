@@ -43,11 +43,15 @@ extern "C" {
 #define AMI_CFG_MAC_SIZE            6
 
 /*
- * The most IPREQUESTS/ARPREQUESTS and WRITEREQUESTS can ask for.  The SANA-II
- * layer's rings are this size (sana2_internal.h checks that they agree).
+ * The most IPREQUESTS/ARPREQUESTS and WRITEREQUESTS can ask for.  The receive
+ * ring is fixed; the transmit ring is smaller in low-memory profiles
+ * (sana2_internal.h checks that the parser and allocation agree).
  */
 #define AMI_CFG_READREQUESTS_MAX    32
-#define AMI_CFG_WRITEREQUESTS_MAX   32
+#ifndef AMINETXDUO_TX_SLOTS
+#define AMINETXDUO_TX_SLOTS         32
+#endif
+#define AMI_CFG_WRITEREQUESTS_MAX   AMINETXDUO_TX_SLOTS
 #define AMI_CFG_PATH_LEN            128
 
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says

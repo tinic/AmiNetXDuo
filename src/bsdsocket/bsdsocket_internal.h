@@ -718,8 +718,11 @@ LONG  bsd_stack_interface_start(struct AmiSocketBase *base,
 #define BSD_JOB_DOWN        3   /* netstack_interface_down() */
 #define BSD_JOB_STACK_DOWN  4   /* netstack_interface_stack_down() */
 #define BSD_JOB_REMOVE      5   /* netstack_interface_remove(index, force) */
+#define BSD_JOB_REMOVE_NAMED 6  /* netstack_interface_remove_named() */
 LONG  bsd_stack_interface_link(struct AmiSocketBase *base, UWORD job,
                                UWORD index, BOOL force);
+LONG  bsd_stack_interface_remove_named(struct AmiSocketBase *base,
+                                       const char *name, BOOL force);
 
 /* Short-lived stack references for library workers that can outlive the base
    whose vector launched them. They hold no OpenCnt; the worker census keeps

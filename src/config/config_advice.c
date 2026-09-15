@@ -10,6 +10,9 @@
 
 #include <exec/types.h>
 
+#define AMI_CFG_STRINGIFY_INNER(x) #x
+#define AMI_CFG_STRINGIFY(x)       AMI_CFG_STRINGIFY_INNER(x)
+
 static const char *const ami_cfg_advice_text[] =
 {
     (const char *)0,
@@ -111,7 +114,8 @@ static const char *const ami_cfg_advice_text[] =
     "t at the driver, 1 to 32.  Leave them out and the stack sizes "
     "the queues from the wire speed and the memory it has.",
     "WRITEREQUESTS is how many packets are handed to the driver at "
-    "once, 1 to 32.  Leave it out for 32.",
+    "once, 1 to " AMI_CFG_STRINGIFY(AMI_CFG_WRITEREQUESTS_MAX)
+    ".  Leave it out for " AMI_CFG_STRINGIFY(AMI_CFG_WRITEREQUESTS_MAX) ".",
 };
 
 const char *ami_cfg_advice(UWORD code)

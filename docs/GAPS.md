@@ -82,7 +82,8 @@ counters are reported in another shape through `NETSTATUS_STATS`.
 `ADDRESS6` takes two lines per interface; every other key takes one.
 `IPREQUESTS` and `ARPREQUESTS` set a read queue's depth, 1 to 32, over the
 plan the stack makes from the wire speed; the packet pool's share still
-bounds them. `WRITEREQUESTS` is 1 to 32, the transmit ring; above it is 32, and
+bounds them. `WRITEREQUESTS` is 1 to the build's transmit-ring limit (32 in
+the full build, 8 in minimal and micro); above it is that limit, and
 `CheckNetConfig` says so.
 
 **The other 18 are accepted and dropped with a note**: `config_parse.c:86`

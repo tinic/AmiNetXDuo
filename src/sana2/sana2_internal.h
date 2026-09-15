@@ -233,7 +233,6 @@
 #error "AMI_SANA2_RX_RUN_MAX must be >= AMI_SANA2_RX_MAX_DEPTH: a drain that stops short of the ring pays nx_ip_protection again for the rest of it"
 #endif
 
-#ifndef AMI_SANA2_TX_SLOTS
 /* 32, from 8 on 2026-09-14.  The ring bounds what can be handed to the driver
    at once, and with a TCP transmit queue deeper than the ring every extra
    segment paid a tick's sleep in ami_sana2_tx_send(): on an A1200/PiStorm32
@@ -242,11 +241,10 @@
    32 is what Roadshow gives every SANA-II driver by default ("32 buffers of
    1500 byte each, both inbound and outbound", its interface files), so no
    driver meets a deeper queue here than it has met for fifteen years.  The
-   per-socket TCP default is capped at this (src/bsdsocket/socket.c).  Cost:
-   24 more AmiTxSlot per attached interface, no buffers -- the packet is
-   NetX Duo's. */
-#define AMI_SANA2_TX_SLOTS          32
-#endif
+   per-socket TCP default is capped at this (src/bsdsocket/socket.c).  The
+   full build pays for 24 more AmiTxSlot per attached interface, no buffers --
+   the packet is NetX Duo's; minimal and micro deliberately retain 8. */
+#define AMI_SANA2_TX_SLOTS          AMINETXDUO_TX_SLOTS
 
 /* The interface file's IPREQUESTS/ARPREQUESTS and WRITEREQUESTS are checked
    against these two by the parser, which cannot see this header. */

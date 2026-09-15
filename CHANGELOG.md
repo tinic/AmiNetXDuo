@@ -9,6 +9,19 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Interface status polling no longer retains a SANA-II pointer across a
+  sleep. Removing an interface during a statistics refresh could otherwise
+  make the next poll read freed memory
+
+- The public `RemoveInterface()` vector now performs both its name lookup and
+  removal on the library's 64 KB worker, under the same master lock as the
+  other interface changes. It no longer runs a SANA-II driver on a Shell's
+  stack or races a reusable interface slot
+
+- Minimal and micro builds keep eight SANA-II transmit requests per interface,
+  saving 2,832 bytes for each attached interface. The full build retains the
+  32-request ring that improved throughput
+
 ## 0.27.6
 
 - **`Online genet` after `Offline genet` took the machine down with

@@ -54,6 +54,7 @@
           "value": "OFF"
         },
         "AMINETXDUO_TCP_SYNCACHE": "32",
+        "AMINETXDUO_TX_SLOTS": "8",
         "AMINETXDUO_TLS": {
           "type": "BOOL",
           "value": "OFF"
@@ -153,6 +154,7 @@
           "value": "OFF"
         },
         "AMINETXDUO_TCP_SYNCACHE": "32",
+        "AMINETXDUO_TX_SLOTS": "8",
         "AMINETXDUO_TCP_WINDOW_SCALING": {
           "type": "BOOL",
           "value": "OFF"

@@ -900,11 +900,32 @@ static VOID ns_refresh_sana2_stats(struct AmiSocketBase *SocketBase, NX_IP *ip)
     {
         BOOL pending = FALSE;
 
+        /* An interface may be removed while Delay() yields.  Its SANA-II
+           state is detached and freed under this bracket, so do not touch a
+           saved pointer until the same slot still owns it. */
+        if (bsd_nx_enter(SocketBase) != 0)
+            return;
+
         for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
         {
-            if (sana[i] != NULL && ami_sana2_stats_epoch(sana[i]) == epoch[i])
-                pending = TRUE;
+            if (sana[i] != NULL)
+            {
+                NX_INTERFACE *nxif = &ip->nx_ip_interface[i];
+
+                if (nxif->nx_interface_valid == 0 ||
+                    nxif->nx_interface_additional_link_info != sana[i])
+                {
+                    sana[i] = NULL;
+                }
+                else if (ami_sana2_stats_epoch(sana[i]) == epoch[i])
+                {
+                    pending = TRUE;
+                }
+            }
         }
+
+        bsd_nx_leave(SocketBase);
+
         if (!pending)
             return;
         Delay(1);

@@ -400,8 +400,10 @@
 
   @{b}WRITEREQUESTS@{ub}
              How many packets are handed to the driver at once, 1 to
-             32. Above 32 is 32, and CheckNetConfig says so. Default
-             32, which is also what Roadshow gives a driver.
+             the build's limit. The full build's limit and default is
+             32, which is also what Roadshow gives a driver; minimal
+             and micro use 8 to save 2,832 bytes per attached
+             interface. CheckNetConfig reports the applicable limit.
 
   Interface files written for Roadshow usually carry other keywords:
   COPYMODE, ALIAS, FILTER, METRIC, PRIORITY, LEASE, DHCPUNICAST,

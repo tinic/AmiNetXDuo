@@ -470,6 +470,16 @@ if(NOT AMINETXDUO_TCP_SYNCACHE EQUAL 512)
         NX_TCP_SYNCACHE_BUCKETS=${_anxd_syncache_buckets})
 endif()
 
+# The full build's deeper transmit ring buys throughput.  Minimal and micro
+# deliberately spend fewer than three kilobytes per attached interface on it.
+set(AMINETXDUO_TX_SLOTS "32" CACHE STRING
+    "SANA-II writes in flight per interface (1..32; full defaults to 32)")
+if(AMINETXDUO_TX_SLOTS LESS 1 OR AMINETXDUO_TX_SLOTS GREATER 32)
+    message(FATAL_ERROR
+        "AMINETXDUO_TX_SLOTS=${AMINETXDUO_TX_SLOTS} is outside 1..32")
+endif()
+add_compile_definitions(AMINETXDUO_TX_SLOTS=${AMINETXDUO_TX_SLOTS})
+
 set(AMINETXDUO_MAX_INTERFACES "4" CACHE STRING
     "Interfaces that can be online at once (1 or more; 4 ships)")
 if(AMINETXDUO_MAX_INTERFACES LESS 1)

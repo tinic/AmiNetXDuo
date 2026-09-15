@@ -1053,9 +1053,10 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
         return 0;
     }
 
-    /* Physical slots are reusable, so resolve and remove under one lock. */
-    rc = netstack_interface_remove_named((const char *)name,
-                                         (force != 0) ? TRUE : FALSE);
+    /* The worker resolves and removes under the master lock: slots are
+       reusable, and a SANA-II driver needs more than a Shell's stack. */
+    rc = bsd_stack_interface_remove_named(SocketBase, (const char *)name,
+                                          (force != 0) ? TRUE : FALSE);
     if (rc == AMI_NET_OK)
         return 1;
 

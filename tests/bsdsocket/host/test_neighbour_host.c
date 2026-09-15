@@ -33,6 +33,14 @@ static NX_IP           h_ip;
 static NX_INTERFACE   *h_if0;
 static NX_INTERFACE   *h_if1;
 static BOOL            h_ipv6_on = TRUE;
+static UBYTE           h_sana_storage;
+static BOOL            h_stats_active;
+static BOOL            h_stats_removed;
+static ULONG           h_epoch_after_remove;
+static ULONG           h_delay_calls;
+static struct Task      h_query_task;
+
+#define H_SANA ((AmiSana2If *)(void *)&h_sana_storage)
 
 #define R0  0xFE800000UL
 #define R3  0x00000001UL
@@ -56,7 +64,12 @@ static VOID h_reset(VOID)
     h_if0->nx_interface_valid = NX_TRUE;
     h_if1->nx_interface_valid = NX_TRUE;
 
-    h_ipv6_on = TRUE;
+    h_ipv6_on            = TRUE;
+    h_stats_active       = FALSE;
+    h_stats_removed      = FALSE;
+    h_epoch_after_remove = 0;
+    h_delay_calls        = 0;
+    h_query_task.tc_Node.ln_Type = 0;
 }
 
 static VOID h_neighbour(UINT slot, ULONG last, UCHAR state,
@@ -95,7 +108,7 @@ static NetStatusNeighbour  *h_entry;
 static UBYTE                h_buffer[sizeof(NetStatusHeader) +
                                      H_MAX * sizeof(NetStatusNeighbour)];
 
-static LONG h_query(VOID)
+static LONG h_query_what(ULONG what)
 {
     h_hdr   = (NetStatusHeader *)h_buffer;
     h_entry = (NetStatusNeighbour *)NETSTATUS_ENTRIES(h_hdr);
@@ -104,8 +117,13 @@ static LONG h_query(VOID)
     h_hdr->nsh_Magic   = AMI_NETSTATUS_MAGIC;
     h_hdr->nsh_Version = AMI_NETSTATUS_VERSION;
 
-    return bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_NEIGHBOURS,
+    return bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, what,
                              h_buffer, (ULONG)sizeof(h_buffer), NULL);
+}
+
+static LONG h_query(VOID)
+{
+    return h_query_what(NETSTATUS_NEIGHBOURS);
 }
 
 /* The entry for an address, or NULL: the walk is over cache slots and its
@@ -184,15 +202,33 @@ VOID netstack_config_route_added(ULONG destination, ULONG netmask)
 
 /* The device-derived counters a status query asks reader 0 for
    (sana2_device.c): no reader here, so nothing is asked and nothing waited. */
-BOOL  ami_sana2_stats_request(AmiSana2If *iface) { (VOID)iface; return FALSE; }
+BOOL ami_sana2_stats_request(AmiSana2If *iface)
+{
+    return (BOOL)(h_stats_active && iface == H_SANA);
+}
 
 /* The status query's wait for the readers runs on a Process and sleeps in
-   Delay(); a Task reads the copy as it stands.  A Task here, so nothing
-   sleeps, and Delay() only has to link. */
-static struct Task h_query_task;
+   Delay(); a Task reads the copy as it stands.  Tests start as a Task and the
+   refresh/removal case explicitly changes this to a Process. */
 struct Task *FindTask(const char *name) { (VOID)name; return &h_query_task; }
-LONG Delay(ULONG ticks) { (VOID)ticks; return 0; }
-ULONG ami_sana2_stats_epoch(const AmiSana2If *iface) { (VOID)iface; return 0; }
+LONG Delay(ULONG ticks)
+{
+    (VOID)ticks;
+    h_delay_calls++;
+    if (h_stats_active && !h_stats_removed)
+    {
+        h_stats_removed = TRUE;
+        h_if0->nx_interface_valid = NX_FALSE;
+        h_if0->nx_interface_additional_link_info = NULL;
+    }
+    return 0;
+}
+ULONG ami_sana2_stats_epoch(const AmiSana2If *iface)
+{
+    if (iface == H_SANA && h_stats_removed)
+        h_epoch_after_remove++;
+    return 0;
+}
 VOID netstack_config_route_deleted(ULONG destination, ULONG netmask)
 {
     (VOID)destination; (VOID)netmask;
@@ -427,9 +463,26 @@ static VOID t_invalid_slots_are_skipped(VOID)
     CHECK(h_find(R3) == NULL, "the INVALID slot's address is not reported");
 }
 
+/* A status refresh waits outside the NetX bracket.  Removal during that wait
+   must retire the saved SANA-II pointer before the next epoch read. */
+static VOID t_stats_wait_revalidates_interface(VOID)
+{
+    h_reset();
+    h_if0->nx_interface_additional_link_info = H_SANA;
+    h_stats_active = TRUE;
+    h_query_task.tc_Node.ln_Type = NT_PROCESS;
+
+    (VOID)h_query_what(NETSTATUS_INTERFACES);
+
+    CHECK(h_delay_calls == 1, "the pending statistics request waited once");
+    CHECK(h_stats_removed, "the interface disappeared during that wait");
+    CHECK(h_epoch_after_remove == 0,
+          "the retired SANA-II pointer was not read after removal");
+}
+
 int main(void)
 {
-    printf("NETSTATUS_NEIGHBOURS host tests\n");
+    printf("NETSTATUS host tests\n");
 
     t_router_without_back_pointer();
     t_router_with_back_pointer();
@@ -437,7 +490,8 @@ int main(void)
     t_other_interface_is_not_flagged();
     t_no_routers_at_all();
     t_invalid_slots_are_skipped();
+    t_stats_wait_revalidates_interface();
 
-    printf("neighbour_router checks=%lu failures=%lu\n", h_checks, h_failures);
+    printf("netstatus checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
 }

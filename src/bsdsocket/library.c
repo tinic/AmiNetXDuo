@@ -685,9 +685,10 @@ typedef struct
     LONG               nb_Result;
     UWORD              nb_Job;          /* BSD_JOB_* */
     UWORD              nb_Index;        /* the link jobs' interface */
-    BOOL               nb_Force;        /* BSD_JOB_REMOVE */
+    BOOL               nb_Force;        /* BSD_JOB_REMOVE[_NAMED] */
     const AmiIfConfig *nb_Cfg;          /* BSD_JOB_ATTACH */
     UWORD             *nb_IndexOut;
+    char               nb_Name[BSD_IFNAME_SIZE]; /* BSD_JOB_REMOVE_NAMED */
 } BsdNetBoot;
 
 static BsdNetBoot *bsd_net_boot;
@@ -712,6 +713,10 @@ static VOID bsd_netstack_boot_main(VOID)
             break;
         case BSD_JOB_REMOVE:
             b->nb_Result = netstack_interface_remove(b->nb_Index, b->nb_Force);
+            break;
+        case BSD_JOB_REMOVE_NAMED:
+            b->nb_Result = netstack_interface_remove_named(b->nb_Name,
+                                                            b->nb_Force);
             break;
         default:
             b->nb_Result = netstack_startup_loopback();
@@ -878,6 +883,32 @@ LONG bsd_stack_interface_link(struct AmiSocketBase *base, UWORD job,
 
     ObtainSemaphore(&master->sb_Lock);
     rc = bsd_netstack_run(&boot, "link change");
+    ReleaseSemaphore(&master->sb_Lock);
+
+    return rc;
+}
+
+LONG bsd_stack_interface_remove_named(struct AmiSocketBase *base,
+                                      const char *name, BOOL force)
+{
+    struct AmiSocketBase *master = base;
+    BsdNetBoot            boot = { 0 };
+    LONG                  rc;
+
+    if (master == NULL || name == NULL ||
+        bsd_strlen(name) >= (ULONG)BSD_IFNAME_SIZE)
+        return AMI_NET_ERR_CONFIG;
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    boot.nb_Job   = BSD_JOB_REMOVE_NAMED;
+    boot.nb_Force = force;
+    bsd_strncpy(boot.nb_Name, name, (ULONG)sizeof boot.nb_Name);
+
+    /* Name lookup and removal are one transaction: physical slots are
+       reusable, and the lock also owns the single worker handoff. */
+    ObtainSemaphore(&master->sb_Lock);
+    rc = bsd_netstack_run(&boot, "named interface removal");
     ReleaseSemaphore(&master->sb_Lock);
 
     return rc;

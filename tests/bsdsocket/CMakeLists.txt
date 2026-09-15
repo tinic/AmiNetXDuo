@@ -200,13 +200,16 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME socket_options COMMAND test_sockopt)
 
-    # netstatus.c, for NETSTATUS_NEIGHBOURS and the one flag `arp` prints from
-    # it. The router flag came from a NetX Duo back pointer that is only
+    # netstatus.c, for NETSTATUS_NEIGHBOURS, the one flag `arp` prints from
+    # it, and the interface-statistics wait. The router flag came from a NetX
+    # Duo back pointer that is only
     # written when a router advertisement carried a Source Link-Layer Address
     # option, so whether the segment's own router was flagged came out
     # differently from one boot to the next and no emulator run could hold it
     # still. Here the neighbour cache and the default router table are staged
-    # by hand, which is the only way to ask the question at all.
+    # by hand, which is the only way to ask the question at all. The statistics
+    # case removes an interface from Delay(), proving the next poll does not
+    # read its retired SANA-II pointer.
     #
     # host/shim-netstatus/tx_amiga.h exists for this target: netstatus.c
     # includes the real one, which cannot be on the include path here. A
