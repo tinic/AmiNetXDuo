@@ -544,6 +544,28 @@ LONG ami_sana2_online(AmiSana2If *iface)
     return 0;
 }
 
+/*
+ * Drivers that must never see S2_OFFLINE.
+ *
+ * genet.device (rondoval/emu68-genet-driver, the PiStorm32-lite's Ethernet),
+ * every release from 1.3 to 3.15: S2_OFFLINE runs bcmgenet_gmac_eth_stop(),
+ * which phy_destroy()s unit->phydev and sets it NULL; S2_ONLINE then runs
+ * bcmgenet_gmac_eth_start(), whose phy_startup(unit->phydev) reads
+ * phydev->addr with no check.  The unit task takes 8000 000B.  Measured on a
+ * real A1200 with genet.device 1.3: `Offline genet` then `Online genet`,
+ * seven boots, seven gurus, the last line the stack logged each time being
+ * the S2_ONLINE it had just issued.  The driver honours AbortIO() on a
+ * queued CMD_READ and CMD_FLUSH returns the rest, so the readers reclaim
+ * their reads without it; the unit stays online across a link-down, and the
+ * S2_ONLINE a link-up issues is the driver's own no-op for a unit already
+ * online.  What S2_OFFLINE would have saved is the MAC receiving into a
+ * ring nobody reads, which the driver counts and drops.
+ */
+BOOL ami_sana2_keeps_online(const char *device)
+{
+    return ami_str_equal(device, "genet.device");
+}
+
 LONG ami_sana2_offline(AmiSana2If *iface)
 {
     struct IOSana2Req req = iface->templ;
@@ -565,6 +587,13 @@ LONG ami_sana2_offline(AmiSana2If *iface)
        CMD_READs only on S2_OFFLINE holds this one's until CloseDevice(). */
     if (!ami_sana2_unit_leave(iface))
         return 0;
+
+    if (iface->keep_online)
+    {
+        AMI_INFO("sana2: %s stays online, it cannot take S2_OFFLINE",
+                 iface->device);
+        return 0;
+    }
 
     err = ami_sana2_command(iface, &req, S2_OFFLINE);
     if (err != 0 && req.ios2_WireError != S2WERR_UNIT_OFFLINE)
@@ -888,6 +917,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     }
 
     ami_str_copy(iface->device, cfg->device, (ULONG)sizeof(iface->device));
+    iface->keep_online = ami_sana2_keeps_online(iface->device);
     ami_str_copy(iface->card, cfg->card, (ULONG)sizeof(iface->card));
     iface->unit = cfg->unit;
 

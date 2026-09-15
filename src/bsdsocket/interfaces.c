@@ -742,7 +742,8 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
     nxif = &ip->nx_ip_interface[index];
 
     if (req.bcr_HaveState && req.bcr_State == SM_Online &&
-        netstack_interface_up(index) != AMI_NET_OK)
+        bsd_stack_interface_link(SocketBase, BSD_JOB_UP, index, FALSE) !=
+            AMI_NET_OK)
     {
         result = bsd_fail(SocketBase, AMI_ENXIO);
         goto out;
@@ -791,11 +792,14 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
     if (req.bcr_HaveState && req.bcr_State != SM_Online)
     {
         if (req.bcr_State == SM_Up)
-            rc = netstack_interface_up(index);
+            rc = bsd_stack_interface_link(SocketBase, BSD_JOB_UP, index,
+                                          FALSE);
         else if (req.bcr_State == SM_Down)
-            rc = netstack_interface_stack_down(index);
+            rc = bsd_stack_interface_link(SocketBase, BSD_JOB_STACK_DOWN,
+                                          index, FALSE);
         else
-            rc = netstack_interface_down(index);
+            rc = bsd_stack_interface_link(SocketBase, BSD_JOB_DOWN, index,
+                                          FALSE);
 
         if (rc != AMI_NET_OK)
         {

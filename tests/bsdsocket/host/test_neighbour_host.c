@@ -203,6 +203,10 @@ LONG bsd_stack_interface_start(struct AmiSocketBase *b, const AmiIfConfig *c,
                                UWORD *out)
 { (VOID)b; (VOID)c; (VOID)out; h_unreachable("bsd_stack_interface_start");
   return -1; }
+LONG bsd_stack_interface_link(struct AmiSocketBase *b, UWORD job, UWORD i,
+                              BOOL force)
+{ (VOID)b; (VOID)job; (VOID)i; (VOID)force;
+  h_unreachable("bsd_stack_interface_link"); return -1; }
 LONG netstack_interface_remove(UWORD i, BOOL force)
 { (VOID)i; (VOID)force; h_unreachable("netstack_interface_remove"); return -1; }
 LONG netstack_interface_up(UWORD i)

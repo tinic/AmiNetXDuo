@@ -859,29 +859,42 @@ static VOID ns_fill_dest6(NX_IP *ip, NsWriter *w)
  * measures 2664 and the query's with the commands in it measured 1788, and a
  * real A1200 took 8000 000B a few minutes after running them there.  Delay()
  * needs a Process; a Task reads the copy as it stands.
+ *
+ * The ask is inside a bracket of its own and the wait is outside it: Delay()
+ * is an Exec Wait(), which has no business inside a ThreadX bracket.
  */
-static VOID ns_refresh_sana2_stats(NX_IP *ip)
+static VOID ns_refresh_sana2_stats(struct AmiSocketBase *SocketBase, NX_IP *ip)
 {
-    ULONG epoch[NX_MAX_PHYSICAL_INTERFACES];
-    UBYTE asked[NX_MAX_PHYSICAL_INTERFACES];
-    UINT  i;
-    UWORD tries;
+    AmiSana2If *sana[NX_MAX_PHYSICAL_INTERFACES];
+    ULONG       epoch[NX_MAX_PHYSICAL_INTERFACES];
+    UINT        i;
+    UWORD       tries;
+    BOOL        asked = FALSE;
 
     if (FindTask(NULL)->tc_Node.ln_Type != NT_PROCESS)
+        return;
+
+    if (bsd_nx_enter(SocketBase) != 0)
         return;
 
     for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
         NX_INTERFACE *nxif = &ip->nx_ip_interface[i];
-        AmiSana2If   *sana = (nxif->nx_interface_valid != 0)
-                           ? (AmiSana2If *)nxif->nx_interface_additional_link_info
-                           : NULL;
 
-        asked[i] = 0;
-        epoch[i] = ami_sana2_stats_epoch(sana);
-        if (sana != NULL && ami_sana2_stats_request(sana))
-            asked[i] = 1;
+        sana[i]  = (nxif->nx_interface_valid != 0)
+                 ? (AmiSana2If *)nxif->nx_interface_additional_link_info
+                 : NULL;
+        epoch[i] = ami_sana2_stats_epoch(sana[i]);
+        if (sana[i] != NULL && ami_sana2_stats_request(sana[i]))
+            asked = TRUE;
+        else
+            sana[i] = NULL;
     }
+
+    bsd_nx_leave(SocketBase);
+
+    if (!asked)
+        return;
 
     for (tries = 0; tries < 10; tries++)
     {
@@ -889,10 +902,7 @@ static VOID ns_refresh_sana2_stats(NX_IP *ip)
 
         for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
         {
-            if (asked[i] != 0 &&
-                ami_sana2_stats_epoch((AmiSana2If *)ip->nx_ip_interface[i]
-                                          .nx_interface_additional_link_info)
-                    == epoch[i])
+            if (sana[i] != NULL && ami_sana2_stats_epoch(sana[i]) == epoch[i])
                 pending = TRUE;
         }
         if (!pending)
@@ -904,8 +914,6 @@ static VOID ns_refresh_sana2_stats(NX_IP *ip)
 static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
 {
     UINT i;
-
-    ns_refresh_sana2_stats(ip);
 
     for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
@@ -1477,6 +1485,7 @@ static LONG ns_header_ok(const NetStatusHeader *hdr, ULONG size)
     return 1;
 }
 
+
 LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                        register ULONG what __asm("d1"),
                        register APTR buffer __asm("a0"),
@@ -1749,6 +1758,10 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
+    /* Before the bracket below, because it waits. */
+    if (what == NETSTATUS_INTERFACES)
+        ns_refresh_sana2_stats(SocketBase, ip);
+
     if (bsd_nx_enter(SocketBase) != 0)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
@@ -1912,17 +1925,19 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
     switch (op)
     {
         case NETCTRL_INTERFACE_UP:
-            return (netstack_interface_up(ctl->nsc_Index) == AMI_NET_OK)
+            return (bsd_stack_interface_link(SocketBase, BSD_JOB_UP,
+                                             ctl->nsc_Index, FALSE) == AMI_NET_OK)
                        ? 0 : bsd_fail(SocketBase, AMI_ENXIO);
 
         case NETCTRL_INTERFACE_DOWN:
-            return (netstack_interface_down(ctl->nsc_Index) == AMI_NET_OK)
+            return (bsd_stack_interface_link(SocketBase, BSD_JOB_DOWN,
+                                             ctl->nsc_Index, FALSE) == AMI_NET_OK)
                        ? 0 : bsd_fail(SocketBase, AMI_ENXIO);
 
         case NETCTRL_INTERFACE_REMOVE:
         {
-            LONG err = netstack_interface_remove(
-                           ctl->nsc_Index,
+            LONG err = bsd_stack_interface_link(
+                           SocketBase, BSD_JOB_REMOVE, ctl->nsc_Index,
                            (ctl->nsc_Flags & NETCTRL_F_FORCE) ? TRUE : FALSE);
 
             if (err == AMI_NET_OK)
@@ -1957,7 +1972,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             err = bsd_stack_interface_start(SocketBase, &cfg, &index);
 
             if (err == AMI_NET_OK && (ctl->nsc_Flags & NETCTRL_F_UP) != 0)
-                err = netstack_interface_up(index);
+                err = bsd_stack_interface_link(SocketBase, BSD_JOB_UP, index,
+                                               FALSE);
 
             switch (err)
             {

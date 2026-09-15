@@ -708,6 +708,19 @@ LONG  bsd_stack_hold(struct AmiSocketBase *base);
 LONG  bsd_stack_interface_start(struct AmiSocketBase *base,
                                 const AmiIfConfig *cfg, UWORD *index_out);
 
+/* The netstack_interface_*() link changes, on the same launched process and
+   its 64 KB as the attach: each runs the SANA-II driver's BeginIO() on the
+   calling stack, and a Shell command's has 4096 with the command's own frames
+   already in it (library.c).  The result is theirs. */
+#define BSD_JOB_LOOPBACK    0
+#define BSD_JOB_ATTACH      1
+#define BSD_JOB_UP          2   /* netstack_interface_up() */
+#define BSD_JOB_DOWN        3   /* netstack_interface_down() */
+#define BSD_JOB_STACK_DOWN  4   /* netstack_interface_stack_down() */
+#define BSD_JOB_REMOVE      5   /* netstack_interface_remove(index, force) */
+LONG  bsd_stack_interface_link(struct AmiSocketBase *base, UWORD job,
+                               UWORD index, BOOL force);
+
 /* Short-lived stack references for library workers that can outlive the base
    whose vector launched them. They hold no OpenCnt; the worker census keeps
    the segment loaded until the release. */

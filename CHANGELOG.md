@@ -9,6 +9,24 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`Online genet` after `Offline genet` took the machine down with
+  8000 000B.** `genet.device`, the PiStorm32-lite's Ethernet, releases 1.3
+  to 3.15: `S2_OFFLINE` destroys the driver's PHY object and `S2_ONLINE`
+  then reads through the NULL pointer, in the driver's own task. Seven
+  boots of a real A1200, seven gurus, the stack's last logged line the
+  `S2_ONLINE` it had just issued. The stack no longer sends that driver an
+  `S2_OFFLINE`: its `AbortIO()` returns queued reads, so the readers stop
+  without one, the unit stays online across `Offline`, and the `S2_ONLINE`
+  at `Online` is the driver's no-op. Every other driver is offlined as
+  before
+
+- **`Online`, `Offline` and `RemoveNetInterface` ran the SANA-II driver on
+  the Shell's stack.** A link change is 808 bytes of the library's own
+  frames to the driver's `BeginIO()`, `Online` is 1228 deep where it calls,
+  the vector 884, and a Shell gives a command 4096. The four run on the
+  library's own 64 KB process now, the way `AddNetInterface` has since
+  0.27. `ConfigureInterfaceTags()` state changes the same
+
 - **A TCP segment `anxnet.device` copied twice went out with no checksum.**
   The transmit checksum fused into the copy was stored in the driver's buffer
   only, and a write the card had no room for is copied again from the

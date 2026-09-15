@@ -315,6 +315,16 @@ LONG netstack_interface_start(const AmiIfConfig *c, UWORD *out)
     h_unreachable("netstack_interface_start");
     return AMI_NET_ERR_STATE;
 }
+
+/* The link jobs the same launcher runs (library.c): nothing here opens one. */
+LONG netstack_interface_up(UWORD i)
+{ (VOID)i; h_unreachable("netstack_interface_up"); return -1; }
+LONG netstack_interface_down(UWORD i)
+{ (VOID)i; h_unreachable("netstack_interface_down"); return -1; }
+LONG netstack_interface_stack_down(UWORD i)
+{ (VOID)i; h_unreachable("netstack_interface_stack_down"); return -1; }
+LONG netstack_interface_remove(UWORD i, BOOL force)
+{ (VOID)i; (VOID)force; h_unreachable("netstack_interface_remove"); return -1; }
 VOID n68k_cpu_select(ULONG a) { (VOID)a; h_unreachable("n68k_cpu_select"); }
 
 const APTR BsdVectorTable[] = { (APTR)-1 };

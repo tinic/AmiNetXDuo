@@ -657,6 +657,9 @@ struct AmiSana2If
     /* Whether this interface currently holds a share of its unit's use count.
        See the per-unit block in sana2_device.c. */
     BOOL                unit_counted;
+    /* S2_OFFLINE is never issued to this device: ami_sana2_keeps_online() in
+       sana2_device.c names the drivers and why. */
+    BOOL                keep_online;
     /* Administrative state: the stack's intent, not the wire's condition.
        Only the driver entry's enable/disable cases write it. */
     BOOL                admin_up;
@@ -741,6 +744,7 @@ VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
 LONG ami_sana2_do_io(struct IORequest *req);
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command);
 LONG ami_sana2_online(AmiSana2If *iface);
+BOOL ami_sana2_keeps_online(const char *device);
 LONG ami_sana2_offline(AmiSana2If *iface);
 LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
                          ULONG addr_msw, ULONG addr_lsw);

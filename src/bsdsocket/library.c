@@ -683,9 +683,10 @@ typedef struct
     struct Task       *nb_Parent;
     ULONG              nb_SigMask;
     LONG               nb_Result;
-    /* NULL is "bring the stack up".  Anything else is the interface to
-       attach, which needs the same stack and for the same reason. */
-    const AmiIfConfig *nb_Cfg;
+    UWORD              nb_Job;          /* BSD_JOB_* */
+    UWORD              nb_Index;        /* the link jobs' interface */
+    BOOL               nb_Force;        /* BSD_JOB_REMOVE */
+    const AmiIfConfig *nb_Cfg;          /* BSD_JOB_ATTACH */
     UWORD             *nb_IndexOut;
 } BsdNetBoot;
 
@@ -695,15 +696,28 @@ static VOID bsd_netstack_boot_main(VOID)
 {
     BsdNetBoot *b = bsd_net_boot;
 
-    if (b->nb_Cfg != NULL)
+    switch (b->nb_Job)
     {
-        b->nb_Result = netstack_interface_start(b->nb_Cfg, b->nb_IndexOut);
-    }
-    else
-    {
-        b->nb_Result = netstack_startup_loopback();
-        if (b->nb_Result != AMI_NET_OK)
-            netstack_shutdown();
+        case BSD_JOB_ATTACH:
+            b->nb_Result = netstack_interface_start(b->nb_Cfg, b->nb_IndexOut);
+            break;
+        case BSD_JOB_UP:
+            b->nb_Result = netstack_interface_up(b->nb_Index);
+            break;
+        case BSD_JOB_DOWN:
+            b->nb_Result = netstack_interface_down(b->nb_Index);
+            break;
+        case BSD_JOB_STACK_DOWN:
+            b->nb_Result = netstack_interface_stack_down(b->nb_Index);
+            break;
+        case BSD_JOB_REMOVE:
+            b->nb_Result = netstack_interface_remove(b->nb_Index, b->nb_Force);
+            break;
+        default:
+            b->nb_Result = netstack_startup_loopback();
+            if (b->nb_Result != AMI_NET_OK)
+                netstack_shutdown();
+            break;
     }
 
     Signal(b->nb_Parent, b->nb_SigMask);
@@ -724,6 +738,15 @@ static VOID bsd_netstack_boot_main(VOID)
  * the library had already attached the drawer, so the add found the interface
  * up and returned EEXIST from the shallow end.  Now it always does the work,
  * and 3484 of a command's 4096 bytes leaves nothing for the command itself.
+ *
+ * The link jobs run here too, since 0.27.6.  netstack_interface_up() and
+ * _down() are 808 bytes of our own frames to the SANA-II driver's BeginIO()
+ * (--edge _nx_ip_driver_interface_direct_command=ami_sana2_driver_entry; the
+ * gate has no such edge, so its bsd_NetStackControl row never saw them), and
+ * what the driver adds on top is the driver's.  Online is 1228 deep at its
+ * call and bsd_NetStackControl 884, and a real A1200 with genet.device took
+ * 8000 000B on `Online genet` from a Shell, twice, with nothing else running.
+ * netstack_interface_remove() is 940 the same way, through the mDNS rebind.
  */
 /* The tags both launchers use.  BSD_STARTUP_STACK is the whole point of
    them: a Shell hands a command 4096 bytes and there is no MMU, so a path
@@ -758,36 +781,43 @@ static struct Process *bsd_netstack_spawn(BsdNetBoot *boot, BYTE sig)
  * AllocSignal() fails only with all 32 signals spoken for and CreateNewProc()
  * only out of memory; an open that says so is a diagnosable machine.
  */
-static LONG bsd_netstack_bringup(VOID)
+/* Run one job to completion on the launched process.  The caller holds the
+   master base's sb_Lock, which keeps bsd_net_boot to one job at a time. */
+static LONG bsd_netstack_run(BsdNetBoot *boot, const char *what)
 {
-    BsdNetBoot boot;
-    BYTE       sig;
-
-    boot.nb_Cfg      = NULL;
-    boot.nb_IndexOut = NULL;
+    BYTE sig;
 
     /* A private signal, never SIGF_SINGLE: the ThreadX port uses SIGF_SINGLE as
        its thread run-signal, so sharing it wakes this Wait() early. */
     sig = (BYTE)AllocSignal(-1);
     if (sig < 0)
     {
-        AMI_ERROR("bsdsocket: no signal for the startup task");
+        AMI_ERROR("bsdsocket: no signal for the %s task", what);
         return AMI_NET_ERR_KERNEL;
     }
 
-    if (bsd_netstack_spawn(&boot, sig) == NULL)
+    if (bsd_netstack_spawn(boot, sig) == NULL)
     {
         bsd_net_boot = NULL;
         FreeSignal(sig);
-        AMI_ERROR("bsdsocket: no task for the startup");
+        AMI_ERROR("bsdsocket: no task for the %s", what);
         return AMI_NET_ERR_KERNEL;
     }
 
-    Wait(boot.nb_SigMask);
+    Wait(boot->nb_SigMask);
     bsd_net_boot = NULL;
     FreeSignal(sig);
 
-    return boot.nb_Result;
+    return boot->nb_Result;
+}
+
+static LONG bsd_netstack_bringup(VOID)
+{
+    BsdNetBoot boot = { 0 };
+
+    boot.nb_Job = BSD_JOB_LOOPBACK;
+
+    return bsd_netstack_run(&boot, "startup");
 }
 
 /*
@@ -801,32 +831,13 @@ static LONG bsd_netstack_bringup(VOID)
  */
 static LONG bsd_netstack_attach(const AmiIfConfig *cfg, UWORD *index_out)
 {
-    BsdNetBoot boot;
-    BYTE       sig;
+    BsdNetBoot boot = { 0 };
 
+    boot.nb_Job      = BSD_JOB_ATTACH;
     boot.nb_Cfg      = cfg;
     boot.nb_IndexOut = index_out;
 
-    sig = (BYTE)AllocSignal(-1);
-    if (sig < 0)
-    {
-        AMI_ERROR("bsdsocket: no signal for the interface task");
-        return AMI_NET_ERR_KERNEL;
-    }
-
-    if (bsd_netstack_spawn(&boot, sig) == NULL)
-    {
-        bsd_net_boot = NULL;
-        FreeSignal(sig);
-        AMI_ERROR("bsdsocket: no task for the interface attach");
-        return AMI_NET_ERR_KERNEL;
-    }
-
-    Wait(boot.nb_SigMask);
-    bsd_net_boot = NULL;
-    FreeSignal(sig);
-
-    return boot.nb_Result;
+    return bsd_netstack_run(&boot, "interface attach");
 }
 
 LONG bsd_stack_interface_start(struct AmiSocketBase *base,
@@ -844,6 +855,29 @@ LONG bsd_stack_interface_start(struct AmiSocketBase *base,
        keeps bsd_net_boot to one job at a time. */
     ObtainSemaphore(&master->sb_Lock);
     rc = bsd_netstack_attach(cfg, index_out);
+    ReleaseSemaphore(&master->sb_Lock);
+
+    return rc;
+}
+
+LONG bsd_stack_interface_link(struct AmiSocketBase *base, UWORD job,
+                              UWORD index, BOOL force)
+{
+    struct AmiSocketBase *master = base;
+    BsdNetBoot            boot = { 0 };
+    LONG                  rc;
+
+    if (master == NULL)
+        return AMI_NET_ERR_CONFIG;
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    boot.nb_Job   = job;
+    boot.nb_Index = index;
+    boot.nb_Force = force;
+
+    ObtainSemaphore(&master->sb_Lock);
+    rc = bsd_netstack_run(&boot, "link change");
     ReleaseSemaphore(&master->sb_Lock);
 
     return rc;

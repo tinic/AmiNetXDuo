@@ -737,6 +737,45 @@ static void case_stats_request(void)
     h_check(h_tear_down(iface), "the statistics-request interface closes");
 }
 
+/* genet.device takes 8000 000B on an S2_ONLINE that follows an S2_OFFLINE
+   (sana2_device.c, ami_sana2_keeps_online), so it is never sent one: a link
+   cycle on it is one S2_ONLINE at the start and one at the return, and the
+   close sends none either.  Any other name still gets the offline. */
+static void case_keeps_online(void)
+{
+    AmiSana2If *iface;
+    LONG        err = 0;
+
+    h_device_reset();
+    h_config();
+    strcpy(h_cfg.device, "genet.device");
+
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL, "genet.device opens");
+    if (iface == NULL)
+        return;
+
+    h_check(iface->keep_online == TRUE, "and is marked to stay online");
+    h_check(ami_sana2_online(iface) == 0, "it goes online");
+    h_check(h_dev.online_cmds == 1, "with one S2_ONLINE");
+
+    h_check(ami_sana2_offline(iface) == 0, "taking it offline succeeds");
+    h_check(h_dev.offline_cmds == 0, "and issues NO S2_OFFLINE");
+    h_check(iface->online == FALSE, "though the stack sees it down");
+
+    h_check(ami_sana2_online(iface) == 0, "it comes back online");
+    h_check(h_dev.online_cmds == 2, "with a second S2_ONLINE");
+    h_check(iface->online == TRUE, "and the stack sees it up");
+
+    h_check(h_tear_down(iface), "the genet interface closes");
+    h_check(h_dev.offline_cmds == 0, "still no S2_OFFLINE at the close");
+
+    h_check(ami_sana2_keeps_online("a2065.device") == FALSE,
+            "an a2065.device is not kept online");
+    h_check(ami_sana2_keeps_online("genet.device") == TRUE,
+            "genet.device is");
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 /* IPREQUESTS, ARPREQUESTS and WRITEREQUESTS reach the interface at open, and
@@ -794,6 +833,7 @@ int main(void)
     case_distinct_units();
     case_special_recovery_stats();
     case_stats_request();
+    case_keeps_online();
     case_request_counts();
 
     h_check(h_ports_made > 0, "reply ports were created");
