@@ -108,6 +108,7 @@ in.identd	Patch2AmiTCP43.lha
 in.identd	gendemo104.lha
 in.smtpd	AmiTCPsmtpd.lha
 in.smtpd	amiconnect.lha
+inetd	AmiTCP-bin-22.lha
 inetd	AmiTCP-demo-40.lha
 inetd	FENStarter.lha
 inetd	GG-Lite-net-m68k.lha
@@ -120,6 +121,8 @@ login	GG-Lite-net-m68k.lha
 login	gendemo104.lha
 lpd	lpd.lha
 lpr	port-lpr.lha
+mailkick	Tallahassee.lha
+mailkick	amiconnect.lha
 mailmap	AmBoS-CGI.lha
 metaserver	opennap.lha
 micq	micq-0.4.0.lha

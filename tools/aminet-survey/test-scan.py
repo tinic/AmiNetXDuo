@@ -46,7 +46,7 @@ def be16(*v):
     return b''.join(struct.pack('>H', x & 0xFFFF) for x in v)
 
 
-def build(code, data=NAME, relocs=None):
+def build(code, data=NAME, relocs=None, data_relocs=None):
     """A two-hunk executable: CODE then DATA, with RELOC32 from code to data.
 
     relocs is a list of byte offsets within `code` holding a pointer into
@@ -62,6 +62,8 @@ def build(code, data=NAME, relocs=None):
         out += be32(HUNK_RELOC32, len(relocs), 1) + be32(*relocs) + be32(0)
     out += be32(HUNK_END)
     out += be32(HUNK_DATA, len(data) // 4) + data
+    if data_relocs:
+        out += be32(HUNK_RELOC32, len(data_relocs), 0) + be32(*data_relocs) + be32(0)
     out += be32(HUNK_END)
     return out
 
@@ -290,6 +292,302 @@ CODE_REG = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
 v, offs, _t = scan_blob(build(CODE_REG, relocs=[2]))
 check("register-held base", (v, offs), ('OK', [-30]))
 
+# The Amiga library ABI does not require calls through a6.  AmiVNC keeps the
+# returned base in a4 and emits jsr d16(a4); only proven BASE provenance makes
+# that safe, not the choice of register.
+CODE_REG_CALL = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+                 + be16(0x4EAE, 0xFDD8)
+                 + be16(0x2640)                  # movea.l d0,a3
+                 + be16(0x4EAB, 0xFFE2)          # jsr -30(a3)
+                 + be16(0x267C) + be32(123)      # rebind a3
+                 + be16(0x4EAB, 0xFF88)          # not ours
+                 + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_REG_CALL, relocs=[2]))
+check("direct call through non-a6 base", (v, offs), ('OK', [-30]))
+
+
+# ---- a base passed to a directly called helper ---------------------------
+# FTPMount keeps SocketBase in a5, passes it to a helper in a0, and the helper
+# moves it to its own callee-saved register before calling vectors.  The
+# direct target and the live BASE value are both proven at the call site.
+_direct_main = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+                + be16(0x4EAE, 0xFDD8)
+                + be16(0x2A40)                  # movea.l d0,a5
+                + be16(0x204D)                  # movea.l a5,a0
+                + be16(0x6100, 0)               # bsr.w helper
+                + be16(0x4E75))
+_direct_helper = (be16(0x2648)                   # movea.l a0,a3
+                  + be16(0x4EAB, 0xFFE2)         # jsr -30(a3)
+                  + be16(0x4E75))
+_bsr_at = len(_direct_main) - 6
+CODE_DIRECT_ARG = (_direct_main[:_bsr_at]
+                   + be16(0x6100, len(_direct_main) - (_bsr_at + 2))
+                   + _direct_main[_bsr_at + 4:] + _direct_helper)
+v, offs, _t = scan_blob(build(CODE_DIRECT_ARG, relocs=[2]))
+check("base passed to direct helper", (v, offs), ('OK', [-30]))
+
+# Rebinding the argument before the call removes the proof.  The same helper
+# body must not be scanned as though every a0 argument were SocketBase.
+_clobber = be16(0x207C) + be32(123)              # movea.l #123,a0
+_bad_prefix = _direct_main[:_bsr_at] + _clobber
+_bad_bsr_at = len(_bad_prefix)
+_bad_main = (_bad_prefix
+             + be16(0x6100, _bad_bsr_at + 6 - (_bad_bsr_at + 2))
+             + be16(0x4E75))
+CODE_DIRECT_ARG_BAD = _bad_main + _direct_helper
+v, offs, _t = scan_blob(build(CODE_DIRECT_ARG_BAD, relocs=[2]))
+check("rebound direct helper argument", offs, [])
+
+# A short bsr is intentionally not enough evidence for interprocedural flow.
+# Real CODE hunks contain inline ASCII, where any bytes 0x61xx spell bsr.b to
+# a linear scanner; admitting those targets recursively spread one a6 fact
+# through hundreds of invented callees and manufactured reserved-vector hits.
+_short_main = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+               + be16(0x4EAE, 0xFDD8)
+               + be16(0x2040)                   # movea.l d0,a0
+               + be16(0x6102)                   # bsr.b helper
+               + be16(0x4E75))
+v, offs, _t = scan_blob(build(_short_main + _direct_helper, relocs=[2]))
+check("short-bsr helper is not propagated", offs, [])
+
+
+# ---- 68020 full-extension stable displacement ---------------------------
+# Samba uses mode 6 with extension 0x0170 and a long base displacement.  It
+# looks indexed syntactically, but 0x0170 explicitly suppresses the index and
+# memory indirection, so `bd.l(a4)` is the same stable global on every use.
+_FULL_A4_400 = be16(0x0170) + be32(400)
+CODE_FULL_DISP = (be16(0x45F4) + _FULL_A4_400     # lea 400(a4),a2
+                  + be16(0x43F9) + be32(0)
+                  + be16(0x2C78, 0x0004)
+                  + be16(0x4EAE, 0xFDD8)
+                  + be16(0x2480)                 # move.l d0,(a2)
+                  + be16(0x2C74) + _FULL_A4_400  # movea.l 400(a4),a6
+                  + be16(0x4EAE, 0xFFE2)
+                  + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_FULL_DISP, relocs=[10]))
+check("68020 suppressed-index global", (v, offs), ('OK', [-30]))
+
+# With the index active, the effective address varies with d0 and is not a
+# stable key.  The scanner must not equate it with the fixed SocketBase cell.
+_FULL_A4_D0_400 = be16(0x0130) + be32(400)
+CODE_FULL_INDEXED = (be16(0x45F4) + _FULL_A4_400
+                     + be16(0x43F9) + be32(0)
+                     + be16(0x2C78, 0x0004)
+                     + be16(0x4EAE, 0xFDD8)
+                     + be16(0x2480)
+                     + be16(0x2C74) + _FULL_A4_D0_400
+                     + be16(0x4EAE, 0xFFE2)
+                     + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_FULL_INDEXED, relocs=[10]))
+check("68020 active-index global rejected", offs, [])
+
+# The same short-bsr ambiguity must not manufacture an opener return.  The
+# bytes `ar` below sit inside a printable run and decode as bsr.b +0x72 only if
+# inline text is mistaken for code.  A real short opener call remains valid.
+_short_opener = (be16(0x43F9) + be32(0)
+                 + be16(0x2C78, 0x0004)
+                 + be16(0x4EAE, 0xFDD8)
+                 + be16(0x4E75))
+_short_caller = (b'xxxxxxar'                    # false bsr.b at byte 6
+                 + be16(0x23C0) + be32(400)
+                 + be16(0x2C79) + be32(400)
+                 + be16(0x4EAE, 0xFFE2)
+                 + be16(0x4E75))
+CODE_SHORT_OPENER = (_short_caller
+                     + b'\0' * (122 - len(_short_caller)) + _short_opener)
+v, offs, _t = scan_blob(build(CODE_SHORT_OPENER,
+                               relocs=[122 + 2]))
+check("printable short-bsr opener is not inferred", offs, [])
+
+_real_short_caller = (be16(0x6112)              # bsr.b opener
+                      + be16(0x23C0) + be32(400)
+                      + be16(0x2C79) + be32(400)
+                      + be16(0x4EAE, 0xFFE2)
+                      + be16(0x4E75))
+CODE_REAL_SHORT_OPENER = _real_short_caller + _short_opener
+v, offs, _t = scan_blob(build(CODE_REAL_SHORT_OPENER,
+                               relocs=[len(_real_short_caller) + 2]))
+check("real short-bsr opener remains valid", offs, [-30])
+
+# Operand words are not instructions.  Samba's full-extension displacement
+# ended in 0x268e, which is also `move.l a6,(a3)` when decoded out of context;
+# that used to copy BASE into the unrelated global addressed by a3.
+CODE_WORD_OPERAND = (be16(0x43F9) + be32(0)
+                     + be16(0x2C78, 0x0004)
+                     + be16(0x4EAE, 0xFDD8)
+                     + be16(0x23C0) + be32(400)
+                     + be16(0x47EC, 800)         # lea 800(a4),a3
+                     + be16(0x2C79) + be32(400)
+                     + be16(0x39BC, 0x0001, 0x0170)
+                     + be32(0x0000268E)          # not a move.l opcode
+                     + be16(0x2C6C, 800)
+                     + be16(0x4EAE, 0xFFE2)
+                     + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_WORD_OPERAND, relocs=[2]))
+check("MOVE.W full-extension operand is skipped", offs, [])
+
+# ctelnet has `clr.l $3144(a4)` directly before loading the library name.
+# 0x3144 is itself a valid MOVE.W opcode; failing to consume CLR's EA operand
+# makes a linear decoder skip the following LEA and lose the obvious base.
+CODE_CLR_BOUNDARY = (be16(0x42AC, 0x3144)
+                     + be16(0x43F9) + be32(0)
+                     + be16(0x2C78, 0x0004)
+                     + be16(0x4EAE, 0xFDD8)
+                     + be16(0x23C0) + be32(400)
+                     + be16(0x2C79) + be32(400)
+                     + be16(0x4EAE, 0xFFE2)
+                     + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_CLR_BOUNDARY, relocs=[6]))
+check("CLR effective-address boundary", (v, offs), ('OK', [-30]))
+
+# A Bcc extension can itself look like a MOVE instruction.  It must not skip
+# an explicit a6 rebind and leave the previous SocketBase live at a call made
+# through another library (the false bpf_read in GiambyNetGrabber's http).
+CODE_BRANCH_BOUNDARY = (be16(0x2C4C)              # a6 = BASE (seeded a4)
+                        + be16(0x6700, 0x258C)     # beq.w; 0x258c is operand
+                        + be16(0x2C79) + be32(404) # a6 = unrelated location
+                        + be16(0x4EAE, 0xFE86)
+                        + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_BRANCH_BOUNDARY, ctx, set(), initial_base_regs=(4,))
+check("Bcc displacement cannot hide a6 rebind", hits, [])
+
+CODE_TST_BOUNDARY = (be16(0x2C4C)                 # a6 = BASE (seeded a4)
+                     + be16(0x4A79) + be32(0x31B4)
+                     + be16(0x2C79) + be32(404)   # a6 = unrelated location
+                     + be16(0x4EAE, 0xFE62)
+                     + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_TST_BOUNDARY, ctx, set(), initial_base_regs=(4,))
+check("TST operand cannot hide a6 rebind", hits, [])
+
+CODE_IMMEDIATE_BOUNDARY = (be16(0x2C4C)             # a6 = BASE (seeded a4)
+                           + be16(0x0280) + be32(0x0000FFFF)
+                           + be16(0x2C79) + be32(404)
+                           + be16(0x4EAE, 0xFE38)
+                           + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_IMMEDIATE_BOUNDARY, ctx, set(), initial_base_regs=(4,))
+check("immediate operand cannot hide a6 rebind", hits, [])
+
+CODE_ADDA_BOUNDARY = (be16(0x2C4C)                  # a6 = BASE (seeded a4)
+                      + be16(0xD3EF, 0x30E8)        # adda.l d16(a7),a1
+                      + be16(0x2C6C, 404)           # a6 = unrelated location
+                      + be16(0x4EAE, 0xFE38)
+                      + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_ADDA_BOUNDARY, ctx, set(), initial_base_regs=(4,))
+check("ADDA operand cannot hide a6 rebind", hits, [])
+
+CODE_CMPA_BOUNDARY = (be16(0xB4FC, 0x0000)       # cmpa.w #0,a2
+                      + be16(0x284C)              # a4 = BASE (seeded a4)
+                      + be16(0x2C4C)
+                      + be16(0x4EAE, 0xFFE2)
+                      + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_CMPA_BOUNDARY, ctx, set(), initial_base_regs=(4,))
+check("CMPA immediate cannot hide a base use", [d for _site, d in hits], [-30])
+
+# A CODE hunk may put padding/data immediately before a called function.  The
+# padding's last zero word decodes as ORI.B and would consume the first opcode
+# when sweeping from hunk offset zero.  The direct call proves the opener's
+# aligned entry, from which its real base store can be recovered.
+_aligned_head = (be16(0x6100, 6) + be16(0x4E75) + be16(0x0000))
+_aligned_opener = (be16(0x43F9) + be32(0)
+                   + be16(0x2C78, 0x0004)
+                   + be16(0x4EAE, 0xFDD8)
+                   + be16(0x23C0) + be32(400)
+                   + be16(0x4E75))
+_aligned_user = (be16(0x2C79) + be32(400)
+                 + be16(0x4EAE, 0xFFE2) + be16(0x4E75))
+v, offs, _t = scan_blob(build(_aligned_head + _aligned_opener + _aligned_user,
+                              relocs=[len(_aligned_head) + 2]))
+check("called opener aligned after inline data", (v, offs), ('OK', [-30]))
+
+# AmFTP's opener returns a connection object, not SocketBase itself.  The
+# callee proves that field zero is the named OpenLibrary result and returns the
+# same object pointer; the caller stores and passes it to a helper, which loads
+# field zero into a6.  Keep this provenance distinct from BASE throughout.
+_obj_main = (be16(0x6100, 20)
+             + be16(0x23C0) + be32(400)
+             + be16(0x2079) + be32(400)
+             + be16(0x6100, 24)
+             + be16(0x4E75))
+_obj_opener = (be16(0x43F9) + be32(0)
+               + be16(0x2C78, 0x0004)
+               + be16(0x4EAE, 0xFDD8)
+               + be16(0x2A80)              # move.l d0,(a5)
+               + be16(0x200D)              # move.l a5,d0
+               + be16(0x4E75))
+_obj_helper = (be16(0x2A48)                 # movea.l a0,a5
+               + be16(0x2C55)              # movea.l (a5),a6
+               + be16(0x4EAE, 0xFFE2)
+               + be16(0x4E75))
+v, offs, _t = scan_blob(build(_obj_main + _obj_opener + _obj_helper,
+                              relocs=[len(_obj_main) + 2]))
+check("base in returned object field zero", (v, offs), ('OK', [-30]))
+
+# Merely storing the base through one register is insufficient: returning a
+# different pointer must not confer BASEPTR provenance on the caller.
+_not_obj_opener = _obj_opener[:-4] + be16(0x200C) + be16(0x4E75)
+v, offs, _t = scan_blob(build(_obj_main + _not_obj_opener + _obj_helper,
+                              relocs=[len(_obj_main) + 2]))
+check("unrelated returned pointer is not a base object", offs, [])
+
+# The bytes for move.l a5,d0 inside another instruction's operand are not a
+# return-value proof (a real corpus binary has CMPI.W #$200d,d0 here).
+_operand_return_opener = (_obj_opener[:-4]
+                          + be16(0x0C40, 0x200D) + be16(0x4E75))
+v, offs, _t = scan_blob(build(_obj_main + _operand_return_opener + _obj_helper,
+                              relocs=[len(_obj_main) + 2]))
+check("operand bytes are not a returned base object", offs, [])
+
+CODE_QUICK_BOUNDARY = (be16(0x2C4C)               # a6 = BASE (seeded a4)
+                       + be16(0x53AD, 0x002E)       # subq.l #1,46(a5)
+                       + be16(0x42AD, 0x0032)       # clr.l 50(a5)
+                       + be16(0x2C78, 0x0004)       # a6 = ExecBase
+                       + be16(0x4EAE, 0xFE86)       # Exec ReplyMsg
+                       + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_QUICK_BOUNDARY, ctx, set(), initial_base_regs=(4,))
+check("ADDQ/SUBQ operand cannot hide a6 rebind", hits, [])
+
+# Scc has an EA even though the same size bits spell an invalid ADDQ size.
+# Its displacement must not be decoded as a fresh immediate instruction and
+# allowed to swallow the following ExecBase reload.
+CODE_SCC_BOUNDARY = (be16(0x2C4C)               # a6 = BASE (seeded a4)
+                     + be16(0xBEAC, 0x0010)      # cmp.l 16(a4),d7
+                     + be16(0x57ED, 0x0244)      # seq 580(a5)
+                     + be16(0x2C78, 0x0004)      # a6 = ExecBase
+                     + be16(0x4EAE, 0xFE7A)      # Exec call at -390
+                     + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_SCC_BOUNDARY, ctx, set(), initial_base_regs=(4,))
+check("ALU and Scc operands cannot hide a6 rebind", hits, [])
+
+# A forward unconditional branch skips inline data; execution resumes at the
+# proven target.  Sweeping through the literal words as instructions can hide
+# the first real instruction there and retain a stale library base.
+CODE_BRA_INLINE = (be16(0x2C4C)                  # a6 = BASE (seeded a4)
+                   + be16(0x41FA, 0x0008)        # lea literal(pc),a0
+                   + be16(0x2008)                # move.l a0,d0
+                   + be16(0x6000, 0x0008)        # bra.w target below
+                   + be16(0x0001, 0x0000, 0x0000)# literal: six bytes
+                   + be16(0x2C78, 0x0004)        # target: a6 = ExecBase
+                   + be16(0x4EAE, 0xFE9E)
+                   + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_BRA_INLINE, ctx, set(), initial_base_regs=(4,))
+check("forward BRA skips inline data", hits, [])
+
 
 # ---- an opener function: the callee names the library, the caller stores ---
 # AWeb's helper.  The caller never mentions bsdsocket, so nothing at the store
@@ -305,6 +603,35 @@ CODE_OPENER = _head + _opener
 CODE_OPENER = (be16(0x6100, len(_head) - 2) + CODE_OPENER[4:])
 v, offs, _t = scan_blob(build(CODE_OPENER, relocs=[len(_head) + 2]))
 check("opener function", (v, offs), ('OK', [-30]))
+
+# ctelnet restores selected saved registers after the opener-return helper.
+# MOVEM's register mask is an operand word, and d0 remains live when its bit is
+# clear; decoding the mask as instructions both lost that fact and fabricated
+# arbitrary operations from the mask bits.
+CODE_MOVEM_RESULT = (be16(0x207C) + be32(400)     # a0 = known global address
+                     + be16(0x200C)              # d0 = BASE (seeded a4)
+                     + be16(0x4CDF, 0x6800)      # restore a3/a5/a6, not d0
+                     + be16(0x2080)              # move.l d0,(a0)
+                     + be16(0x2C50)              # movea.l (a0),a6
+                     + be16(0x4EAE, 0xFFE2)
+                     + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_MOVEM_RESULT, ctx, set(), initial_base_regs=(4,))
+check("movem preserves unmasked base", [d for _site, d in hits], [-30])
+
+# EXT.W/EXT.L share MOVEM's upper opcode bits, but register-direct mode is not
+# legal for MOVEM.  Treating EXT.W d0 as a mask word consumed the following
+# DOSBase reload in AmiTCP rsh and mislabelled DOS FPutC (-312) as SocketBase.
+CODE_EXT_NOT_MOVEM = (be16(0x2C4C)                  # a6 = BASE (seeded a4)
+                      + be16(0x4880)                # ext.w d0
+                      + be16(0x2C79) + be32(404)    # a6 = unrelated location
+                      + be16(0x4EAE, 0xFEC8)
+                      + be16(0x4E75))
+ctx = scan.dataflow.Ctx(set(), set(), {}, set(), 0)
+_found, hits, _o, _n = scan.dataflow.walk(
+    CODE_EXT_NOT_MOVEM, ctx, set(), initial_base_regs=(4,))
+check("EXT is not MOVEM", hits, [])
 
 
 # ---- a shared wrapper reached through a linker jump island ----------------
@@ -362,12 +689,109 @@ v, offs, _t = scan_blob(build(CODE_DOS, relocs=[2]))
 check("adjacent DOSBase is not ours", (v, offs), ('OK', [-30]))
 
 
+# ---- a function-local stack slot -----------------------------------------
+# AmiBabel stores the named result at 0x490(sp), crosses branches and calls,
+# then reloads that slot into a6.  The raw displacement is NOT global: the
+# identical 8(sp) in the following function must not inherit the first one's
+# provenance.
+CODE_STACK = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+              + be16(0x4EAE, 0xFDD8)
+              + be16(0x2F40, 0x0008)           # move.l d0,8(sp)
+              + be16(0x2C6F, 0x0008)           # movea.l 8(sp),a6
+              + be16(0x4EAE, 0xFFE2)           # socket -- ours
+              + be16(0x4E75)
+              + be16(0x2C6F, 0x0008)           # another function's 8(sp)
+              + be16(0x4EAE, 0xFF88)           # must not be attributed
+              + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_STACK, relocs=[2]))
+check("function-scoped stack base", (v, offs), ('OK', [-30]))
+
+
+# ---- a relocated library-name table -------------------------------------
+# SAS/C startup tables load a pointer from a stable a4 cell into a1.  The data
+# relocation proves that cell points at our exact name; the zero beside it is
+# deliberately not assumed to be the base slot.  Only the explicit d0 store
+# establishes that second cell as SocketBase.
+_table_head = (be16(0x49F9) + be32(0)            # lea data:0,a4
+               + be16(0x226C, 0x0000)           # movea.l 0(a4),a1
+               + be16(0x2C78, 0x0004)
+               + be16(0x4EAE, 0xFDD8)
+               + be16(0x2940, 0x0004)           # move.l d0,4(a4)
+               + be16(0x2C6C, 0x0004)
+               + be16(0x4EAE, 0xFFE2)
+               + be16(0x4E75))
+_table_name_at = len(_table_head)
+CODE_TABLE = _table_head + NAME
+v, offs, _t = scan_blob(build(CODE_TABLE, data=be32(_table_name_at, 0),
+                              relocs=[2], data_relocs=[0]))
+check("relocated name-pointer table", (v, offs), ('OK', [-30]))
+
+
+# ---- an offset-zero field of a live object -------------------------------
+# RegistrationUtility allocates an object into a5, stores SocketBase at
+# (a5), then reloads it twice.  The next function reuses the encoding (a5),
+# but that must not inherit the first function's object identity.
+CODE_OBJECT = (be16(0x43F9) + be32(0) + be16(0x2C78, 0x0004)
+               + be16(0x4EAE, 0xFDD8)
+               + be16(0x2A80)                   # move.l d0,(a5)
+               + be16(0x2C55)                   # movea.l (a5),a6
+               + be16(0x4EAE, 0xFFE2)
+               + be16(0x4E75)
+               + be16(0x2C55)                   # another function's (a5)
+               + be16(0x4EAE, 0xFF88)
+               + be16(0x4E75))
+v, offs, _t = scan_blob(build(CODE_OBJECT, relocs=[2]))
+check("function-scoped indirect object", (v, offs), ('OK', [-30]))
+
+
+# ---- a transient pointer walking a {base,name} table ---------------------
+# The opener receives a2 from its caller, so the store has no stable address
+# locally.  The field relation is nevertheless proven by code, the name cell
+# by relocation, and the base cell by an exact a6 load elsewhere.
+_walk_head = (be16(0x49F9) + be32(0)             # stable a4 origin
+              + be16(0x226A, 0x0004)            # movea.l 4(a2),a1
+              + be16(0x2C78, 0x0004)
+              + be16(0x4EAE, 0xFDD8)
+              + be16(0x2480)                    # move.l d0,(a2)
+              + be16(0x4E75)
+              + be16(0x45EC, 0x0000)            # lea 0(a4),a2
+              + be16(0x2C52)                    # movea.l (a2),a6
+              + be16(0x4EAE, 0xFFE2)
+              + be16(0x4E75))
+_walk_name_at = len(_walk_head)
+CODE_TABLE_WALK = _walk_head + NAME
+v, offs, _t = scan_blob(build(CODE_TABLE_WALK,
+                              data=be32(0, _walk_name_at),
+                              relocs=[2], data_relocs=[4]))
+check("transient table walker", (v, offs), ('OK', [-30]))
+
+# Relocated adjacency and a later a6 load are not enough without code proving
+# the table's field relation.
+_no_walk_head = (be16(0x49F9) + be32(0)
+                 + be16(0x2C6C, 0x0000)
+                 + be16(0x4EAE, 0xFFE2)
+                 + be16(0x4E75))
+_no_walk_name_at = len(_no_walk_head)
+v, offs, _t = scan_blob(build(_no_walk_head + NAME,
+                              data=be32(0, _no_walk_name_at),
+                              relocs=[2], data_relocs=[4]))
+check("table adjacency without opener proof", offs, [])
+
+
 if fails:
     for f in fails:
         print(f"scan_fixture=FAIL {f}")
     sys.exit(1)
-print("scan_fixture=PASS 22 fixtures: call shapes, tail call, rebound a6, "
+print("scan_fixture=PASS 47 fixtures: call shapes, tail call, rebound a6, "
       "data hunks, a6 via d0 and via a register hop with both clobbers, "
       "scan() end to end incl SOCK_RAW, one pinned limitation, and the six "
       "v14 shapes: OldOpenLibrary, register-held base, opener function, "
-      "wrapper behind a jump island, derived small-data bias, adjacent DOSBase")
+      "wrapper behind a jump island, derived small-data bias, adjacent DOSBase, "
+      "function-scoped stack base, relocated name-pointer table, "
+      "function-scoped indirect object, transient table walker and its "
+      "adjacency-only rejection, direct non-a6 base call, and direct helper "
+      "argument propagation with its rebound and short-bsr rejections, and "
+      "68020 full-extension globals with active-index and short-opener "
+      "rejections, full-extension MOVE.W, CLR, TST and Bcc operand-boundary "
+      "guards, immediate-operation, ADDA/SUBA/CMPA, general ALU, ADDQ/SUBQ and Scc operands, forward-BRA inline data, aligned opener recovery, returned base-object provenance and rejection, selective MOVEM restoration, "
+      "and EXT/MOVEM disambiguation")

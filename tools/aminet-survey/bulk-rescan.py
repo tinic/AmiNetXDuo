@@ -102,6 +102,11 @@ def main():
             r[4] = 'calls=%d' % ncalls
         r[5] = names
         r[6] = 'scanner=%d' % scan.SCANNER_VERSION
+        # Keep the declared SHA-256 column present without emitting trailing
+        # whitespace for the few historical archive-level rows whose hash was
+        # never recorded.  A dash is the ledger's explicit unknown value.
+        if len(r) > 8 and not r[8]:
+            r[8] = '-'
         if before != (r[2], r[3], r[4], r[5]):
             changed += 1
         kept += 1

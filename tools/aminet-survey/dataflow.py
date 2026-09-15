@@ -14,8 +14,8 @@ them as table rows: `movea.l d0,a3` says nothing about what a3 holds forty
 instructions later.  The answer is not a wider table, it is to actually follow
 the value.  This module tracks a tiny lattice -- NAME (the address of the
 "bsdsocket.library" string), BASE (the value OpenLibrary returned), ADDR(key)
-(a known memory address) -- across a linear sweep, and drops it at exactly the
-points the ABI says it dies:
+(a known memory address) -- plus function-local stack and indirect-object
+facts across a linear sweep, and drops each fact where its lifetime ends:
 
   * d0/d1/a0/a1 are SCRATCH across any call (AmigaOS register convention), so
     a call clears them; a2-a6 are callee-saved and survive.
@@ -53,8 +53,9 @@ def s8(v): return v - 256 if v > 127 else v
 def ea(code, i, mode, reg):
     """(kind, value, extension_bytes) for the EA whose extension starts at i.
 
-    kind is 'd' (data reg), 'a' (addr reg), 'ind' ((An)), 'disp' ((d16,An)),
-    'abs' ((xxx).W/.L), 'pc' ((d16,PC)), 'imm' (#imm.l), or None.
+    kind is 'd' (data reg), 'a' (addr reg), 'ind' ((An)), 'disp'
+    ((d16,An), or a stable 68020 full-extension displacement), 'abs'
+    ((xxx).W/.L), 'pc' ((d16,PC)), 'imm' (#imm.l), or None.
     """
     if mode == 0: return ('d', reg, 0)
     if mode == 1: return ('a', reg, 0)
@@ -64,6 +65,32 @@ def ea(code, i, mode, reg):
     if mode == 5:
         if i + 2 > len(code): return (None, None, 0)
         return ('disp', (reg, s16(code, i)), 2)
+    if mode == 6:
+        if i + 2 > len(code): return (None, None, 0)
+        ext = u16(code, i)
+        if not (ext & 0x0100):                    # brief: live index register
+            return (None, None, 2)
+        # 68020 full extension.  Only the non-indirect form with the index
+        # SUPPRESSED denotes one stable cell relative to An.  Samba uses
+        # exactly 0x0170 + bd.l: a4 is present, Dn is suppressed, the base
+        # displacement is long, and there is no memory indirection.
+        base_suppressed = bool(ext & 0x0080)
+        index_suppressed = bool(ext & 0x0040)
+        bd_size = (ext >> 4) & 3
+        indirect = ext & 7
+        ln = {1: 2, 2: 4, 3: 6}.get(bd_size, 2)
+        if i + ln > len(code): return (None, None, 0)
+        if base_suppressed or not index_suppressed or indirect != 0:
+            return (None, None, ln)
+        if bd_size == 1:                         # null base displacement
+            disp = 0
+        elif bd_size == 2:
+            disp = s16(code, i + 2)
+        elif bd_size == 3:
+            disp = struct.unpack_from('>i', code, i + 2)[0]
+        else:                                    # reserved encoding
+            return (None, None, ln)
+        return ('disp', (reg, disp), ln)
     if mode == 7:
         if reg == 0:
             # ABSOLUTE SHORT IS ITS OWN NAMESPACE, and this is not pedantry.
@@ -91,21 +118,36 @@ def ea(code, i, mode, reg):
 # this is used only to skip an operand that would otherwise be read as an
 # opcode -- an immediate longword containing 0x4EAE is the classic way a linear
 # sweep invents a library call.
-def ea_len(code, i, mode, reg):
+def ea_len(code, i, mode, reg, size=4):
     if mode == 5: return 2
-    if mode == 6: return 2
+    if mode == 6:
+        if i + 2 > len(code): return 0
+        ext = u16(code, i)
+        if not (ext & 0x0100): return 2
+        return {1: 2, 2: 4, 3: 6}.get((ext >> 4) & 3, 2)
     if mode == 7:
-        return {0: 2, 1: 4, 2: 2, 3: 2, 4: 4}.get(reg, 0)
+        return {0: 2, 1: 4, 2: 2, 3: 2,
+                4: 4 if size == 4 else 2}.get(reg, 0)
     return 0
 
 
 class State:
     """Registers d0-d7 (0-7) and a0-a7 (8-15), plus the memory we care about."""
-    __slots__ = ('r', 'base_keys', 'name_pushed_at')
+    __slots__ = ('r', 'base_keys', 'local_base', 'indirect_base',
+                 'name_pushed_at')
 
     def __init__(self):
         self.r = [None] * 16
         self.base_keys = set()
+        # Stack displacements are meaningful only inside one function.  They
+        # must never enter base_keys: 4(sp) in two functions is two unrelated
+        # locations, which was the source of the old cross-function matches.
+        self.local_base = set()
+        # A bare (An) has no program-global identity, but it is safe while the
+        # same, unmodified register remains live in one function.  This covers
+        # heap/object fields at offset zero without ever equating (a5) in two
+        # functions (the false-positive shape that the old table admitted).
+        self.indirect_base = set()
         self.name_pushed_at = None
 
     def clear_scratch(self):
@@ -113,9 +155,14 @@ class State:
         # is precisely why a base parked in a3 is still the base afterwards.
         for x in (0, 1, 8, 9):
             self.r[x] = None
+        self.indirect_base.discard(0)
+        self.indirect_base.discard(1)
 
     def clear_all(self):
         self.r = [None] * 16
+        self.local_base.clear()
+        self.indirect_base.clear()
+        self.name_pushed_at = None
 
 
 def frame_pointers(code_hunks):
@@ -169,17 +216,26 @@ class Ctx:
     """Everything hunk-global the walk needs: where the name is, which
     functions are open-wrappers, and how a relocated operand finds its hunk."""
     __slots__ = ('name_sites', 'name_offsets', 'target_of', 'wrappers', 'hunk',
-                 'name_disps', 'openers', 'global_regs')
+                 'name_disps', 'name_pointer_keys', 'openers',
+                 'object_openers', 'global_regs')
 
     def __init__(self, name_sites, name_offsets, target_of, wrappers, hunk,
-                 name_disps=(), openers=(), global_regs=(4,)):
+                 name_disps=(), name_pointer_keys=(), openers=(),
+                 object_openers=(), global_regs=(4,)):
         self.name_sites = name_sites          # {(hunk_idx, offset)}
         self.name_offsets = name_offsets      # {offset} -- small-data model
         self.target_of = target_of            # operand offset -> target hunk
         self.wrappers = wrappers              # {(hunk_idx, offset)} open-wrappers
         self.hunk = hunk                      # index of the hunk being walked
         self.name_disps = set(name_disps)     # a4-relative displacements of the name
+        # Stable memory cells whose relocated initial value is the address of
+        # the name.  This is the common library-table form: MOVEA.L cell,A1,
+        # not LEA name,A1.  Relocations prove the pointee; adjacency does not.
+        self.name_pointer_keys = set(name_pointer_keys)
         self.openers = set(openers)           # functions that open bsdsocket themselves
+        # Functions proven to return a pointer whose field zero is SocketBase.
+        # Kept separate from plain openers: their d0 is not itself a base.
+        self.object_openers = set(object_openers)
         self.global_regs = set(global_regs)   # registers that key GLOBAL memory
 
 
@@ -255,7 +311,7 @@ def derive_bias(hunks, code_hunks, our_offsets):
     return bias, {off - bias for off in our_offsets}
 
 
-NAME, BASE = 'NAME', 'BASE'
+NAME, BASE, BASEPTR = 'NAME', 'BASE', 'BASEPTR'
 
 def _call_target(code, i, w, ctx):
     """(hunk, offset) a jsr/bsr reaches, or None when it is not a direct call."""
@@ -275,6 +331,22 @@ def _call_target(code, i, w, ctx):
             if tgt is not None:
                 return (tgt, u32(code, i + 2))
     return None
+
+
+def _in_printable_run(code, i, width=2, minimum=6):
+    """Whether the bytes at i are embedded in an inline printable string.
+
+    This is used only to disambiguate bsr.b, whose opcode is literally any
+    ASCII `a` followed by another byte.  Six contiguous printable bytes around
+    the pair is positive data evidence; ordinary instructions before and after
+    a genuine two-byte call do not form such a run.
+    """
+    lo, hi = i, i + width
+    while lo > 0 and 32 <= code[lo - 1] < 127:
+        lo -= 1
+    while hi < len(code) and 32 <= code[hi] < 127:
+        hi += 1
+    return lo <= i and i + width <= hi and hi - lo >= minimum
 
 
 def follow_thunks(hunks_code, ctxs, h, off, hops=4):
@@ -346,8 +418,8 @@ def named_open_regions(code, ctx, limit=4096):
 
 
 def find_wrappers(hunks_code, ctxs, limit=4096):
-    """Two sets: functions that call OpenLibrary at all (`wrappers`), and
-    functions that open OUR library by name (`openers`).
+    """Three sets: generic OpenLibrary wrappers, plain bsdsocket openers, and
+    bsdsocket openers that return a pointer to a base-containing object.
 
     A caller that pushes "bsdsocket.library" into a wrapper has opened our
     library; so has a caller that simply calls an opener and stores d0, which
@@ -359,7 +431,16 @@ def find_wrappers(hunks_code, ctxs, limit=4096):
         ctx = ctxs[idx]
         i = 0
         while i < len(code) - 3:
-            t = _call_target(code, i, u16(code, i), ctx)
+            w = u16(code, i)
+            # A linear sweep cannot distinguish bsr.b from inline ASCII: any
+            # `a?` pair is 0x61xx.  Samba's error strings produced targets in
+            # the middle of its real bsdsocket opener; those false callers
+            # then made unrelated return values (including ExecBase) look
+            # like SocketBase.  Preserve genuine short calls, but reject a
+            # pair embedded in a printable run -- direct evidence it is data.
+            short_bsr = (w & 0xFF00) == 0x6100 and (w & 0xFF) not in (0, 0xFF)
+            t = None if short_bsr and _in_printable_run(code, i) \
+                else _call_target(code, i, w, ctx)
             if t is not None:
                 targets.add(t)
             i += 2
@@ -367,7 +448,7 @@ def find_wrappers(hunks_code, ctxs, limit=4096):
     regions = {idx: named_open_regions(code, ctxs[idx], limit)
                for idx, code in hunks_code.items()}
 
-    wrappers, openers = set(), set()
+    wrappers, openers, object_openers = set(), set(), set()
     for t in targets:
         chain = follow_thunks(hunks_code, ctxs, t[0], t[1])
         h, off = chain[-1]
@@ -375,7 +456,13 @@ def find_wrappers(hunks_code, ctxs, limit=4096):
         if code is None or not (0 <= off < len(code) - 3):
             continue
         if any(lo <= off < hi for lo, hi in regions.get(h, ())):
-            openers.update(chain)
+            returned = []
+            walk(code, ctxs[h], set(), collect_calls=False, start=off,
+                 stop_at_return=True, return_values=returned)
+            if returned and returned[-1] is BASEPTR:
+                object_openers.update(chain)
+            else:
+                openers.update(chain)
             wrappers.update(chain)
             continue
         j, end = off, min(len(code) - 3, off + limit)
@@ -387,10 +474,13 @@ def find_wrappers(hunks_code, ctxs, limit=4096):
                 wrappers.update(chain)          # the island counts too
                 break
             j += 2
-    return wrappers, openers
+
+    return wrappers, openers, object_openers
 
 
-def walk(code, ctx, base_keys, collect_calls=True):
+def walk(code, ctx, base_keys, collect_calls=True, start=0,
+         initial_base_regs=(), stop_at_return=False, transfers=None,
+         return_values=None):
     """One linear pass.  Returns (base_keys, [(site, lvo)], opens, named_opens).
 
     Hits carry their call SITE, not just the displacement: v13's peephole runs
@@ -402,9 +492,22 @@ def walk(code, ctx, base_keys, collect_calls=True):
     uses those keys, because a store can sit textually after the calls it
     enables (net.lib opens the library in its own object and the program calls
     it from another -- AmFinger has three CODE hunks and that is why).
+
+    A bounded function pass may start at a proven direct-call target, seed the
+    address registers that held BASE at that exact call, and stop at its first
+    return.  `transfers`, when supplied, receives the corresponding direct
+    targets and live BASE registers for a conservative interprocedural queue.
     """
     st = State()
     st.base_keys = set(base_keys)
+    for token in initial_base_regs:
+        # Direct helper transfers encode BASE argument registers as 0/1 and
+        # BASEPTR argument registers as 8/9.  Public fixture callers continue
+        # to seed ordinary base registers with the original 0..6 spelling.
+        if 0 <= token < 7:
+            st.r[8 + token] = BASE
+        elif 8 <= token < 15:
+            st.r[token] = BASEPTR
     hits, opens, named = [], 0, 0
     found = set()
 
@@ -432,20 +535,55 @@ def walk(code, ctx, base_keys, collect_calls=True):
 
     def val_of(kind, v, ext_at, allow_name):
         if kind == 'd':  return st.r[v]
-        if kind == 'a':  return st.r[8 + v]
+        if kind == 'a':
+            # The register itself is a pointer to an object known to contain
+            # SocketBase at field zero.  This lets `move.l a5,d0` return the
+            # object without confusing the pointer with the base it contains.
+            return BASEPTR if v in st.indirect_base else st.r[8 + v]
+        if kind == 'ind':
+            held = st.r[8 + v]
+            if held is BASEPTR:
+                return BASE
+            if isinstance(held, tuple) and held[0] == 'ADDR' \
+                    and held[1] in st.base_keys:
+                return BASE
+            return BASE if v in st.indirect_base else None
         if kind in ('abs', 'absw', 'disp'):
             if allow_name and is_name(code, ctx, kind, v, ext_at):
                 return NAME
+            if kind == 'disp' and v[0] == 7:
+                return BASE if v[1] in st.local_base else None
             if not usable(kind, v):
                 return None
             k = key_at(kind, v, ext_at)
+            if allow_name and k in ctx.name_pointer_keys:
+                return NAME
+            if ('baseptr', k) in st.base_keys:
+                return BASEPTR
             return BASE if k in st.base_keys else None
         if kind == 'imm':
             return NAME if is_name(code, ctx, kind, v, ext_at) else None
         return None
 
     def store(kind, v, value, ext_at=None):
-        if value is not BASE:
+        if kind == 'disp' and v[0] == 7:
+            # Function-scoped stack provenance.  A modelled overwrite kills
+            # the fact just as a register overwrite does.
+            if value is BASE:
+                st.local_base.add(v[1])
+            else:
+                st.local_base.discard(v[1])
+            return
+        if value not in (BASE, BASEPTR):
+            if kind == 'ind':
+                st.indirect_base.discard(v)
+            return
+        if value is BASEPTR:
+            if kind in ('abs', 'absw', 'disp') and usable(kind, v):
+                k = key_at(kind, v, ext_at)
+                if k is not None:
+                    tagged = ('baseptr', k)
+                    st.base_keys.add(tagged); found.add(tagged)
             return
         if kind in ('abs', 'absw', 'disp'):
             if not usable(kind, v):
@@ -461,19 +599,245 @@ def walk(code, ctx, base_keys, collect_calls=True):
             held = st.r[8 + v]
             if isinstance(held, tuple) and held[0] == 'ADDR':
                 st.base_keys.add(held[1]); found.add(held[1])
+            else:
+                st.indirect_base.add(v)
 
-    i = 0
+    i = start
     n = len(code)
     while i < n - 1:
         w = u16(code, i)
         step = 2
 
         if w in (0x4E75, 0x4E73, 0x4E77):            # rts / rte / rtr
+            if stop_at_return:
+                if return_values is not None:
+                    return_values.append(st.r[0])
+                break
             st.clear_all(); st.name_pushed_at = None
             i += 2; continue
-        if (w & 0xFFC0) == 0x4CC0:                   # movem.l <ea>,regs
-            st.clear_all()
-            i += 2; continue
+        if (w & 0xFB80) == 0x4880 and (w & 0x38) >= 0x10 \
+                and not ((w & 0x38) == 0x38 and (w & 7) >= 4):
+                                                        # movem.w/l regs,<ea> or <ea>,regs
+            # The word after the opcode is a REGISTER MASK, not another
+            # instruction.  The old two-byte skip decoded that mask as code
+            # and, for a load, discarded every live value.  ctelnet restores
+            # a few saved registers immediately after an opener-return helper;
+            # d0 is deliberately absent from the mask and remains SocketBase.
+            if i + 4 > n:
+                break
+            mask = u16(code, i + 2)
+            mode, reg = (w >> 3) & 7, w & 7
+            direction_load = bool(w & 0x0400)
+            if direction_load:
+                for r in range(16):
+                    if mask & (1 << r):
+                        st.r[r] = None
+                        if 8 <= r < 15:
+                            st.indirect_base.discard(r - 8)
+            # Addressing modes with update also change their EA register,
+            # independently of the transfer mask.
+            if mode in (3, 4):
+                st.r[8 + reg] = None
+                if reg < 7:
+                    st.indirect_base.discard(reg)
+            size = 4 if w & 0x0040 else 2
+            i += 4 + ea_len(code, i + 4, mode, reg, size)
+            continue
+        if (w & 0xFFF8) in (0x4E50, 0x4E58):         # link / unlk aN
+            # LINK replaces An with the old stack pointer; UNLK restores a
+            # frame pointer saved before this function.  Neither value is the
+            # caller's live SocketBase merely because the register was.
+            reg = w & 7
+            st.r[8 + reg] = None
+            st.indirect_base.discard(reg)
+            i += 4 if (w & 0xFFF8) == 0x4E50 else 2
+            continue
+
+        # ---- BRA / Bcc (BSR is handled as a direct call below) -------------
+        # A word/long branch displacement is an operand, not code.  In gng's
+        # HTTP helper a BEQ.W displacement of 0x258c looked like MOVE.L and
+        # skipped the following load of another library base; the old a6 value
+        # then falsely attributed that library's -378 vector as bpf_read.
+        if (w & 0xF000) == 0x6000 and (w & 0x0F00) != 0x0100:
+            d8 = w & 0xFF
+            ln = 4 if d8 == 0 else (6 if d8 == 0xFF else 2)
+            if (w & 0x0F00) == 0:                    # unconditional BRA
+                if d8 == 0 and i + 4 <= n:
+                    target = i + 2 + s16(code, i + 2)
+                elif d8 == 0xFF and i + 6 <= n:
+                    target = i + 2 + struct.unpack_from('>i', code, i + 2)[0]
+                else:
+                    target = i + 2 + s8(d8)
+                # SAS/C argument setup emits `lea literal(pc),aN; move.l
+                # aN,d0; bra after_literal`.  Here the LEA independently
+                # proves that the skipped bytes are addressed data, so they
+                # must not be decoded as instructions.  Do NOT follow every
+                # forward BRA: UMS uses one to skip a genuine alternative
+                # that opens bsdsocket, and a linear survey must inspect both
+                # arms unless it has this positive inline-data evidence.
+                inline = False
+                if i >= 6:
+                    move_an_d0 = u16(code, i - 2)
+                    src = move_an_d0 & 7
+                    if move_an_d0 == 0x2008 + src \
+                            and u16(code, i - 6) == 0x41FA + (src << 9):
+                        literal = i - 4 + s16(code, i - 4)
+                        inline = i + ln <= literal < target
+                if inline and target <= n:
+                    i = target
+                    continue
+            i += ln
+            continue
+
+        # ---- CLR.B / CLR.W / CLR.L -----------------------------------------
+        # CLR has a full effective-address operand.  Merely stepping over its
+        # opcode lets a displacement such as ctelnet's 0x3144 masquerade as a
+        # MOVE.W and skip the following, real `lea bsdsocket.library,a1`.
+        if (w & 0xFF00) == 0x4200:
+            sz = (w >> 6) & 3
+            size = (1, 2, 4)[sz] if sz < 3 else 2
+            mode, reg = (w >> 3) & 7, w & 7
+            if mode in (0, 1):
+                dst = (8 if mode == 1 else 0) + reg
+                st.r[dst] = None
+                if mode == 1:
+                    st.indirect_base.discard(reg)
+            i += 2 + ea_len(code, i + 2, mode, reg, size)
+            continue
+
+        # ---- TST.B / TST.W / TST.L -----------------------------------------
+        # Same operand-boundary requirement as CLR.  AmiGG's `tst.w
+        # $31b4.l` otherwise decodes 0x31b4 as MOVE.W, skips an ExecBase reload
+        # and calls Exec CloseLibrary through a stale SocketBase proof.
+        if (w & 0xFF00) == 0x4A00:
+            sz = (w >> 6) & 3
+            size = (1, 2, 4)[sz] if sz < 3 else 2
+            mode, reg = (w >> 3) & 7, w & 7
+            i += 2 + ea_len(code, i + 2, mode, reg, size)
+            continue
+
+        # ---- immediate arithmetic/logical operations -----------------------
+        # ORI/ANDI/SUBI/ADDI/EORI/CMPI carry an immediate word or longword
+        # before their destination EA.  MiamiHost's `andi.l #$ffff,d0` left
+        # those bytes to be decoded as code and hid a subsequent library-base
+        # reload, producing a false ReleaseInterfaceList call.
+        if (w & 0xFF00) in (0x0000, 0x0200, 0x0400,
+                            0x0600, 0x0A00, 0x0C00):
+            sz = (w >> 6) & 3
+            if sz < 3:
+                size = (1, 2, 4)[sz]
+                imm_len = 4 if size == 4 else 2
+                mode, reg = (w >> 3) & 7, w & 7
+                if mode == 0:
+                    st.r[reg] = None
+                # ORI/ANDI/EORI to CCR/SR encode 0x3c as part of the opcode;
+                # there is no separate effective-address extension.
+                dest_len = 0 if (w & 0x3F) == 0x3C else ea_len(
+                    code, i + 2 + imm_len, mode, reg, size)
+                i += 2 + imm_len + dest_len
+                continue
+
+        # ---- ADDA / SUBA / CMPA --------------------------------------------
+        # These consume a source EA; arithmetic replaces its destination
+        # address register, while CMPA only reads it.  MiamiHost's ADDA.L
+        # displacement (0x30e8) otherwise looked like MOVE.W and hid the
+        # following non-socket library-base load.  Conversely, tcp_AmiTCP's
+        # `cmpa.w #0,a2` exposed its zero immediate as an ORI instruction,
+        # which swallowed the following bsdsocket name load and lost every
+        # real call in the program.
+        adda_suba_cmpa = (w & 0xF0C0)
+        if adda_suba_cmpa in (0x90C0, 0xB0C0, 0xD0C0):
+            dst = (w >> 9) & 7
+            mode, reg = (w >> 3) & 7, w & 7
+            size = 4 if w & 0x0100 else 2
+            if adda_suba_cmpa != 0xB0C0:
+                st.r[8 + dst] = None
+                st.indirect_base.discard(dst)
+            i += 2 + ea_len(code, i + 2, mode, reg, size)
+            continue
+
+        # ---- register/memory arithmetic and comparisons -------------------
+        # OR/SUB/CMP/EOR/AND/ADD all carry a full source or destination EA.
+        # UMS has `cmp.l 16(a4),d7` before the Scc case below; decoding its
+        # displacement as ORI consumed the Scc opcode and still hid the
+        # following ExecBase reload.  The 8/C opmode 3/7 forms are DIV/MUL
+        # with the same source-EA boundary.  Register-only special encodings
+        # (ABCD/SBCD/ADDX/SUBX/EXG) have mode 0/1 and therefore no extension,
+        # so the shared length rule remains correct for them.
+        alu = w & 0xF000
+        opmode = (w >> 6) & 7
+        if alu in (0x8000, 0x9000, 0xB000, 0xC000, 0xD000) \
+                and (opmode in (0, 1, 2, 4, 5, 6)
+                     or (alu in (0x8000, 0xC000) and opmode in (3, 7))):
+            dreg = (w >> 9) & 7
+            mode, reg = (w >> 3) & 7, w & 7
+            size = {0: 1, 1: 2, 2: 4, 3: 2,
+                    4: 1, 5: 2, 6: 4, 7: 2}[opmode]
+            if opmode in (0, 1, 2, 3, 7):
+                st.r[dreg] = None
+            elif mode in (0, 1):
+                dst = (8 if mode == 1 else 0) + reg
+                st.r[dst] = None
+                if mode == 1:
+                    st.indirect_base.discard(reg)
+            i += 2 + ea_len(code, i + 2, mode, reg, size)
+            continue
+
+        # ---- Scc / DBcc ----------------------------------------------------
+        # Size code 3 in the 0x5xxx group is not quick arithmetic.  Scc has a
+        # byte-sized destination EA, while DBcc has a displacement word.
+        # UMS uses `seq 580(a5)` immediately before loading ExecBase.  Reading
+        # 580 as an ANDI operand consumed that load and left SocketBase live,
+        # falsely turning Exec calls into SetSocketSignals/getdtablesize/BPF.
+        if (w & 0xF0C0) == 0x50C0:
+            mode, reg = (w >> 3) & 7, w & 7
+            if mode == 1:                              # DBcc Dn,d16
+                i += 4
+            else:                                      # Scc <ea>
+                if mode == 0:
+                    st.r[reg] = None
+                i += 2 + ea_len(code, i + 2, mode, reg, 1)
+            continue
+
+        # ---- ADDQ / SUBQ ---------------------------------------------------
+        # Quick arithmetic has a destination EA.  FTPMount's `subq.l
+        # #1,46(a5)` ends in 0x002e; reading that displacement as ORI.B made
+        # the sweep consume the following CLR and ExecBase reload, leaving a
+        # stale SocketBase in a6 and calling Exec ReplyMsg (-378) `bpf_read`.
+        # Size 3 belongs to Scc/DBcc rather than ADDQ/SUBQ.
+        if (w & 0xF000) == 0x5000:
+            sz = (w >> 6) & 3
+            if sz < 3:
+                size = (1, 2, 4)[sz]
+                mode, reg = (w >> 3) & 7, w & 7
+                if mode in (0, 1):
+                    dst = (8 if mode == 1 else 0) + reg
+                    st.r[dst] = None
+                    if mode == 1:
+                        st.indirect_base.discard(reg)
+                i += 2 + ea_len(code, i + 2, mode, reg, size)
+                continue
+
+        # ---- MOVE.B / MOVE.W -----------------------------------------------
+        # These values cannot carry a pointer or library base, but their full
+        # instruction LENGTH still matters.  Samba's `move.w #1,bd.l(a4)`
+        # ends in the displacement word 0x268e; stepping through its operands
+        # interpreted that word as `move.l a6,(a3)` and invented a SocketBase
+        # store into ExecBase.  Decode both EAs and skip the whole instruction.
+        if (w & 0xF000) in (0x1000, 0x3000):
+            size = 1 if (w & 0xF000) == 0x1000 else 2
+            dreg, dmode = (w >> 9) & 7, (w >> 6) & 7
+            smode, sreg = (w >> 3) & 7, w & 7
+            slen = ea_len(code, i + 2, smode, sreg, size)
+            d_at = i + 2 + slen
+            dlen = ea_len(code, d_at, dmode, dreg, size)
+            if dmode in (0, 1):
+                dst = (8 if dmode == 1 else 0) + dreg
+                st.r[dst] = None
+                if dmode == 1:
+                    st.indirect_base.discard(dreg)
+            i += 2 + slen + dlen
+            continue
 
         # ---- MOVE.L / MOVEA.L ------------------------------------------------
         if (w & 0xF000) == 0x2000:
@@ -485,6 +849,13 @@ def walk(code, ctx, base_keys, collect_calls=True):
                 dk, dv, dlen = ea(code, i + 2 + slen, dmode, dreg)
                 if dmode in (0, 1):
                     st.r[(8 if dmode == 1 else 0) + dreg] = value
+                    if dmode == 1:
+                        # Preserve the identity only for an explicit address-
+                        # register copy.  Every other assignment rebinds An.
+                        if sk == 'a' and sv in st.indirect_base:
+                            st.indirect_base.add(dreg)
+                        else:
+                            st.indirect_base.discard(dreg)
                 elif dmode == 4 and dreg == 7:       # move.l x,-(sp) : a push
                     if value is NAME:
                         st.name_pushed_at = i
@@ -496,11 +867,12 @@ def walk(code, ctx, base_keys, collect_calls=True):
         # ---- LEA -------------------------------------------------------------
         if (w & 0xF1C0) == 0x41C0:
             dreg = (w >> 9) & 7
+            st.indirect_base.discard(dreg)
             k, v, ln = ea(code, i + 2, (w >> 3) & 7, w & 7)
             if is_name(code, ctx, k, v, i + 2):
                 st.r[8 + dreg] = NAME
             elif k in ('abs', 'absw', 'disp'):
-                mk = _memkey(k, v)
+                mk = key_at(k, v, i + 2)
                 st.r[8 + dreg] = ('ADDR', mk) if mk else None
             else:
                 st.r[8 + dreg] = None
@@ -513,10 +885,13 @@ def walk(code, ctx, base_keys, collect_calls=True):
                 st.name_pushed_at = i
             i += 2 + ln; continue
 
-        # ---- library call through a6 ----------------------------------------
-        if w in (0x4EAE, 0x4EEE) and i + 4 <= n:
+        # ---- library call through a proven base register --------------------
+        # GCC commonly keeps a library base in a4/a5 and emits jsr d16(a4)
+        # directly.  The ABI does not require a6; provenance does.
+        if (w & 0xFFF8) in (0x4EA8, 0x4EE8) and i + 4 <= n:
+            call_reg = w & 7
             d = s16(code, i + 2)
-            if d in OPENS:
+            if call_reg == 6 and d in OPENS:
                 opens += 1
                 is_ours = st.r[9] is NAME or (
                     st.name_pushed_at is not None and i - st.name_pushed_at <= 40)
@@ -526,7 +901,7 @@ def walk(code, ctx, base_keys, collect_calls=True):
                     named += 1
                     st.r[0] = BASE                   # d0 = SocketBase
             else:
-                if collect_calls and st.r[14] is BASE:
+                if collect_calls and st.r[8 + call_reg] is BASE:
                     hits.append((i, d))          # site, so a union dedupes
                 st.clear_scratch()
             i += 4; continue
@@ -534,13 +909,33 @@ def walk(code, ctx, base_keys, collect_calls=True):
         # ---- direct call: a wrapper counts as an OpenLibrary ------------------
         tgt = _call_target(code, i, w, ctx)
         if tgt is not None:
+            # A direct call preserves a proof across the function boundary
+            # when the caller demonstrably puts BASE in an address ARGUMENT
+            # register.  Limit this to scratch argument registers a0/a1: a
+            # callee-saved a2-a6 value merely remains live across every call,
+            # and recursively treating it as an argument fans one fact across
+            # an entire call graph.  Also refuse bsr.b here.  Inline ASCII in
+            # real CODE hunks frequently spells 0x61xx (`a?`) and therefore
+            # looks like a short bsr to a linear sweep; compiler-generated
+            # cross-function calls in the measured cases use bsr.w/jsr.
+            short_bsr = (w & 0xFF00) == 0x6100 and (w & 0xFF) not in (0, 0xFF)
+            if transfers is not None and not short_bsr:
+                passed = tuple(reg if st.r[8 + reg] is BASE else reg + 8
+                               for reg in range(2)
+                               if st.r[8 + reg] in (BASE, BASEPTR))
+                if passed:
+                    transfers.append((tgt, passed))
             named_here = (st.name_pushed_at is not None and i - st.name_pushed_at <= 40) \
                 or any(st.r[8 + x] is NAME for x in range(8))
             wrapper = tgt in ctx.wrappers
             opener = tgt in ctx.openers
+            object_opener = tgt in ctx.object_openers
             st.clear_scratch()
             st.name_pushed_at = None
-            if opener:
+            if object_opener:
+                opens += 1; named += 1
+                st.r[0] = BASEPTR
+            elif opener:
                 opens += 1; named += 1
                 st.r[0] = BASE
             elif wrapper and named_here:

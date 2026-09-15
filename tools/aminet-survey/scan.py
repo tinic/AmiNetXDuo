@@ -51,7 +51,7 @@ if not LVOMAP:
 # rescan.sh re-runs every archive whose row carries an older version, off the
 # local unpack tree, so no re-fetch is needed.  Rows with no scanner= field at
 # all predate this and are the ones to redo first.
-SCANNER_VERSION = 14
+SCANNER_VERSION = 15
 
 OPENLIB = 0xFDD8            # -552 as a 16-bit displacement
 # A NAME THAT IS NOT UNIQUE CANNOT BE A KEY.  18 offsets in lvomap.tsv are all
@@ -634,7 +634,7 @@ def scan_v13(path):
     return (v, offs, len(allhits))
 
 def scan(path):
-    """v14: SocketBase resolved by dataflow (see dataflow.py).
+    """v15: SocketBase resolved by dataflow (see dataflow.py).
 
     v13 attributed 731 binaries and filed 460 -- 43% of everything holding a
     bsdsocket binary -- as NO_SOCKETBASE_STORE or BASE_BUT_NO_CALLS, which are
@@ -648,6 +648,13 @@ def scan(path):
 
     v13's peephole runs too and its hits are unioned in, so nothing it found
     can go missing -- verified over all 731: zero binaries lost a vector.
+
+    v15 adds only lifetime- or relocation-qualified facts: stack and bare
+    indirect fields die at a function boundary, relocated table cells must
+    point at the exact name, and a transient {base,name} table must prove both
+    its field relation and an exact load of that base cell into a call-base
+    register.  A complete v14/v15 corpus comparison retained every old vector
+    in all 909 previously attributed rows while attributing 72 more binaries.
     """
     blob = open(path, 'rb').read()
     if b'bsdsocket.library' not in blob:
@@ -695,6 +702,97 @@ def scan(path):
     # build is deciding about.
     global_regs = {4} | ({5} if 5 not in fp else set())
 
+    # A library table holds POINTERS TO names.  Seeing the string itself is not
+    # enough; the HUNK relocations let us prove which stable memory cells hold
+    # its address.  Resolve both absolute cells and cells addressed through a
+    # compiler's stable small-data register.
+    pointer_cells = set()
+    for idx, _t, _o, pay, rel in hs:
+        for tgt, rel_offs in rel.items():
+            for at in rel_offs:
+                if at + 4 <= len(pay) and (tgt, u32(pay, at)) in name_sites:
+                    pointer_cells.add((idx, at))
+
+    small_anchors = set()
+    for idx, t, _o, pay, rel in hs:
+        if t != hunk.HUNK_CODE:
+            continue
+        target_of = {at: tgt for tgt, rel_offs in rel.items() for at in rel_offs}
+        for at in range(0, len(pay) - 5, 2):
+            w = u16(pay, at)
+            # lea (xxx).l,a4/a5 -- the startup establishes the small-data
+            # origin.  Both the target hunk and offset are relocation facts.
+            if w not in (0x49F9, 0x4BF9):
+                continue
+            tgt = target_of.get(at + 2)
+            if tgt is not None:
+                small_anchors.add(((w >> 9) & 7, tgt, u32(pay, at + 2)))
+
+    name_pointer_keys = {('h%d' % idx, at) for idx, at in pointer_cells}
+    for reg, tgt, origin in small_anchors:
+        for cell_hunk, cell_at in pointer_cells:
+            disp = cell_at - origin
+            if cell_hunk == tgt and -32768 <= disp <= 32767:
+                name_pointer_keys.add(('a%d' % reg, disp))
+
+    # Some startup code walks entries shaped {base, name, version}: the table
+    # pointer lives in a transient register, so neither member has a stable EA
+    # at the OpenLibrary site.  Derive the field relation from the code itself
+    # (load name at d16(An), store d0 at (An)), then accept a candidate base
+    # cell only when that exact stable cell is also loaded into a6 elsewhere.
+    # This is deliberately three pieces of evidence; "the word before a name
+    # pointer" alone is merely adjacency and is false in real binaries.
+    table_name_deltas = set()
+    a6_loaded_keys = set()
+    for idx, t, _o, pay, rel in hs:
+        if t != hunk.HUNK_CODE:
+            continue
+        target_of = {at: tgt for tgt, rel_offs in rel.items() for at in rel_offs}
+        for at in range(0, len(pay) - 3, 2):
+            w = u16(pay, at)
+            if w == 0x2C79 and at + 6 <= len(pay):
+                tgt = target_of.get(at + 2)
+                key = ('h%d' % tgt, u32(pay, at + 2)) if tgt is not None \
+                    else ('abs', u32(pay, at + 2))
+                a6_loaded_keys.add(key)
+            elif (w & 0xFFF8) == 0x2C68 and at + 4 <= len(pay):
+                reg = w & 7
+                if reg in global_regs:
+                    a6_loaded_keys.add(('a%d' % reg, s16(pay, at + 2)))
+            elif (w & 0xF1F8) == 0x41E8 and at + 6 <= len(pay):
+                # lea d16(a4/a5),aN ; movea.l (aN),a6
+                src, dst = w & 7, (w >> 9) & 7
+                if src in global_regs and u16(pay, at + 4) == (0x2C50 | dst):
+                    a6_loaded_keys.add(('a%d' % src, s16(pay, at + 2)))
+
+            if w not in (0x4EAE, 0x4EEE) or s16(pay, at + 2) not in dataflow.OPENS:
+                continue
+            for before in range(max(0, at - 20), at, 2):
+                wb = u16(pay, before)
+                # movea.l d16(An),a1
+                if (wb & 0xFFF8) != 0x2268 or before + 4 > len(pay):
+                    continue
+                reg = wb & 7
+                delta = s16(pay, before + 2)
+                for after in range(at + 4, min(len(pay) - 1, at + 20), 2):
+                    # move.l d0,(An), with the same table pointer register.
+                    if u16(pay, after) == (0x2080 | (reg << 9)):
+                        table_name_deltas.add(delta)
+                        break
+
+    table_base_keys = set()
+    for cell_hunk, name_at in pointer_cells:
+        for delta in table_name_deltas:
+            base_at = name_at - delta
+            if base_at < 0:
+                continue
+            table_base_keys.add(('h%d' % cell_hunk, base_at))
+            for reg, tgt, origin in small_anchors:
+                disp = base_at - origin
+                if cell_hunk == tgt and -32768 <= disp <= 32767:
+                    table_base_keys.add(('a%d' % reg, disp))
+    table_base_keys &= a6_loaded_keys
+
     codes, ctxs = {}, {}
     for idx, t, _o, pay, rel in hs:
         if t != hunk.HUNK_CODE:
@@ -704,28 +802,87 @@ def scan(path):
             for o in offs:
                 target_of[o] = tgt
         codes[idx] = pay
-        ctxs[idx] = dataflow.Ctx(name_sites, name_offsets, target_of, set(), idx,
-                                 name_disps, global_regs=global_regs)
+        ctxs[idx] = dataflow.Ctx(
+            name_sites, name_offsets, target_of, set(), idx, name_disps,
+            name_pointer_keys=name_pointer_keys, global_regs=global_regs)
 
-    wrappers, openers = dataflow.find_wrappers(codes, ctxs)
+    wrappers, openers, object_openers = dataflow.find_wrappers(codes, ctxs)
+    if dual and object_openers:
+        # A base-containing object is only type-stable when the program opens
+        # one socket ABI into that field.  AmFTP stores either SocketBase or
+        # AS225's socket.library base in field zero according to a runtime
+        # branch; without path-sensitive control flow, following the object
+        # would merge both vector tables and report 26 bsdsocket calls where
+        # neither execution path makes them.  Preserve the old conservative
+        # plain-opener treatment for such binaries.
+        openers |= object_openers
+        object_openers = set()
     for c in ctxs.values():
         c.wrappers = wrappers
         c.openers = openers
+        c.object_openers = object_openers
 
-    base_keys, opens, named = set(), 0, 0
+    base_keys, opens, named = set(table_base_keys), 0, 0
     for idx, code in codes.items():
         found, _h, o, nm = dataflow.walk(code, ctxs[idx], base_keys,
                                          collect_calls=False)
         base_keys |= found; opens += o; named += nm
 
+    # CODE hunks legally contain inline strings and tables.  A sweep from byte
+    # zero can therefore reach a real function entry while it is still
+    # consuming an apparent instruction that began in the preceding data.
+    # nntpsend has zero padding immediately before its bsdsocket opener: the
+    # last zero looks like ORI.B and its immediate is the opener's first
+    # `movea.l (4).w,a6`.  Direct call targets give us independently proven,
+    # instruction-aligned entries.  Re-walk only the entries already proven by
+    # find_wrappers() to open bsdsocket, bounded by their first return; this is
+    # alignment recovery, not a guess that arbitrary hunk bytes are code.
+    for idx, entry in sorted(openers | object_openers):
+        code = codes.get(idx)
+        if code is None or not (0 <= entry < len(code) - 1):
+            continue
+        found, _h, _o, _nm = dataflow.walk(
+            code, ctxs[idx], base_keys, collect_calls=False, start=entry,
+            stop_at_return=True)
+        base_keys |= found
+
     # THE CALL PASS RUNS EVEN WITH NO STORED BASE: a base that never reaches
     # memory is still a base (AMarqueed keeps it in a2 and calls
     # `movea.l a2,a6 / jsr -294(a6)`).
     sites = {}
+    transfers = []
     for idx, code in codes.items():
-        _f, h, _o, _n = dataflow.walk(code, ctxs[idx], base_keys)
+        _f, h, _o, _n = dataflow.walk(code, ctxs[idx], base_keys,
+                                      transfers=transfers)
         for site, d in h:
             sites[(idx, site)] = d
+
+    # Follow only DIRECT calls whose caller has already proven that an a0/a1
+    # argument contains SocketBase.  Each callee is bounded by its first
+    # return, so a register fact cannot leak into the next function merely
+    # because both functions share a CODE hunk.  FTPMount is the motivating
+    # real shape: its opener keeps the base in a5, passes it in a0, and the
+    # helper copies a0 to a5 before making the socket calls.
+    pending = list(transfers)
+    seen_transfers = set()
+    while pending:
+        (target, passed) = pending.pop()
+        chain = dataflow.follow_thunks(codes, ctxs, target[0], target[1])
+        hunk_idx, entry = chain[-1]
+        key = (hunk_idx, entry, passed)
+        if key in seen_transfers:
+            continue
+        seen_transfers.add(key)
+        code = codes.get(hunk_idx)
+        if code is None or not (0 <= entry < len(code) - 1):
+            continue
+        nested = []
+        _f, h, _o, _n = dataflow.walk(
+            code, ctxs[hunk_idx], base_keys, start=entry,
+            initial_base_regs=passed, stop_at_return=True, transfers=nested)
+        for site, d in h:
+            sites[(hunk_idx, site)] = d
+        pending.extend(nested)
     if base_keys:
         for idx, code in codes.items():
             for site, d in calls_for_sites(code, base_keys, ctxs[idx].target_of):
