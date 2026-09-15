@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.27.6
+
 - **`Online genet` after `Offline genet` took the machine down with
   8000 000B.** `genet.device`, the PiStorm32-lite's Ethernet, releases 1.3
   to 3.15: `S2_OFFLINE` destroys the driver's PHY object and `S2_ONLINE`
