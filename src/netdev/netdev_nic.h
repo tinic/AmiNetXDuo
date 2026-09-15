@@ -36,7 +36,18 @@
 #define NETDEV_DRAIN_MAX    32
 
 /* Room for a core's own special-statistics records. */
-#define NETDEV_CORE_STATS   15
+#define NETDEV_CORE_STATS   18
+
+/*
+ * rx_claim's answer when NOBODY HAS A READ POSTED for the frame's type but an
+ * opener with the direct pair has been reading that type: the reader is
+ * behind, not absent.  A core with a ring of its own may then leave the frame
+ * where it is, set rx_behind and stop the pass; the shell runs the core again
+ * on ANXD_CMD_RX_POLL and the vertical blank, and the next interrupt does
+ * too.  A core without a ring hands the frame to rx() as always.  Returned in
+ * *token with a NULL result; never dereferenced.
+ */
+#define NETDEV_CLAIM_BEHIND ((APTR)1)
 
 typedef struct NetdevNic NetdevNic;
 struct NetdevMcast;
@@ -128,6 +139,10 @@ struct NetdevNic
     UBYTE               mar[8];         /* the multicast hash, host order */
     BOOL                promisc;
     BOOL                running;
+    /* Set by a core that left received frames in its ring for want of a
+       posted read (NETDEV_CLAIM_BEHIND); cleared by the pass that drains
+       them.  The shell's ANXD_CMD_RX_POLL runs the core when it is set. */
+    UBYTE               rx_behind;
 
     /*
      * The unit's exact multicast table, for a core that filters on addresses

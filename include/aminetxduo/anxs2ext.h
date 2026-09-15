@@ -82,6 +82,20 @@
 #define ANXD_S2_RXF_VERIFIED    0x02
 #define ANXD_S2_RXF_CONTINUES   0x04
 
+/* ANXD_CMD_RX_POLL: "hand over what you are holding for my reads".
+ *
+ * A driver that empties a deep hardware ring in one interrupt can find the
+ * opener's posted reads run out part way through a burst.  Rather than drop
+ * the rest, a driver that knows this command leaves those frames where they
+ * are and delivers them the next time reads are posted: at its next
+ * interrupt, or when the opener sends this command, which an opener does
+ * once at the end of each pass over its completed reads, after it has
+ * re-posted them and before it sleeps.  Quick (IOF_QUICK honoured, nothing
+ * to wait for), no arguments, io_Error 0; a driver that does not know it
+ * answers IOERR_NOCMD like any other unknown command and the opener stops
+ * sending it.  The number is in the same private range as the tags above. */
+#define ANXD_CMD_RX_POLL        0x4190
+
 typedef UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,
                                  UBYTE flags);

@@ -90,6 +90,10 @@ typedef struct GenetCore
     UBYTE  *rx_buf;         /* GE_RX_RING buffers, page aligned            */
     UBYTE  *tx_buf;         /* GE_TX_RING buffers                          */
     UWORD   rx_cidx;        /* the chip's 16-bit ring counters, not indices */
+    UWORD   rx_clean;       /* ring counter up to which the receive buffers
+                               have had their cache operation since the DMA
+                               wrote them; frames between rx_cidx and here
+                               are waiting for the opener to post a read   */
     UWORD   tx_cidx;
     UWORD   tx_pidx;        /* descriptors written                          */
     UWORD   tx_kicked;      /* the producer index the chip was last told    */
@@ -122,6 +126,8 @@ typedef struct GenetCore
     UBYTE   gro_live;
     UBYTE   gro_run;        /* frames marked in this run, against GE_GRO_MAX */
     UBYTE   gro_words;      /* address words that make the key: 2 or 8      */
+    UBYTE   held_blanks;    /* blanks the head of the ring has been held for */
+    UBYTE   drop_held;      /* the next unclaimable head frame is dropped    */
 } GenetCore;
 
 /*
@@ -131,6 +137,12 @@ typedef struct GenetCore
  * has its own cap.
  */
 #define GE_GRO_MAX      16
+
+/* Blanks a unicast frame may wait at the head of the ring for its reader to
+   post a read before it is dropped: five is 100 ms, ten thousand frames at
+   this wire's rate, and a reader that has not run in that time is not going
+   to. */
+#define GE_HOLD_BLANKS  5
 
 #define GE(nic)         ((GenetCore *)(nic)->core)
 
@@ -152,7 +164,11 @@ enum
     GE_ST_RUNS,             /* runs of two or more frames (continues/runs
                                is the mean number of frames a run saved) */
     GE_ST_BURST_MAX,        /* the most frames one burst held               */
-    GE_ST_UNCLAIMED,        /* frames the opener had no read posted for     */
+    GE_ST_UNCLAIMED,        /* frames nobody had a read posted for: dropped */
+    GE_ST_HELD,             /* passes cut short with frames left in the ring
+                               for a reader that was behind (no frame lost) */
+    GE_ST_HELD_FRAMES,      /* frames left waiting, summed over those passes */
+    GE_ST_TICK_RESUMES,     /* held passes resumed by the vertical blank     */
     GE_ST_COUNT
 };
 
@@ -176,6 +192,9 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET runs of continuing frames",
     "GENET largest burst",
     "GENET frames with no read posted",
+    "GENET passes held for a reader behind",
+    "GENET frames left waiting in those passes",
+    "GENET held passes resumed by the blank",
     NULL
 };
 
@@ -587,7 +606,9 @@ static VOID ge_init_rings(NetdevNic *nic)
           v | GENET_TX_DMA_CTRL_EN | GENET_TX_DMA_CTRL_RBUF_EN(GE_Q));
 
     /* Receive: every descriptor points at its own buffer for good. */
-    c->rx_cidx = 0;
+    c->rx_cidx  = 0;
+    c->rx_clean = 0;
+    nic->rx_behind = 0;
     for (i = 0; i < GE_RX_RING; i++)
     {
         ge_wr(nic, GENET_RX_DESC_ADDRESS_LO(i),
@@ -1058,12 +1079,34 @@ static UBYTE ge_continues(GenetCore *c, const GeSegment *seg, UBYTE verified)
     return 0;
 }
 
-static VOID ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
+/* FALSE when the frame was left in the ring: the opener that reads this type
+   has no read posted right now (NETDEV_CLAIM_BEHIND), and holding the frame
+   until it does is what a 128-deep ring is for.  TRUE otherwise, whether the
+   frame was claimed, staged or dropped. */
+static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     APTR   token = NULL;
     UBYTE *dst   = (nic->rx_claim != NULL)
                  ? nic->rx_claim(nic->rx_arg, frame, len, &token)
                  : NULL;
+
+    /*
+     * UNICAST ONLY, AND NOT FOREVER.  The ring is one queue for every type,
+     * so a frame held for one reader stands in front of every other reader's
+     * frames.  A broadcast or multicast frame (an ARP request, a neighbour
+     * solicitation) whose reader has fallen behind is dropped the way every
+     * busy host drops one: its reader is planned two reads deep and a third
+     * within one burst would otherwise stall a transfer for another reader
+     * to wake and poll -- measured as 173 blank-resumed holds and 45
+     * spurious retransmissions in ten seconds.  A unicast frame is data
+     * somebody is waiting for and is worth the wait; if the wait passes
+     * GE_HOLD_BLANKS the reader is stuck and the frame is dropped after all
+     * (genet_tick), so a dead reader costs its own frames and not the wire.
+     */
+    if (dst == NULL && token == NETDEV_CLAIM_BEHIND &&
+        (frame[0] & 1) == 0 && !GE(nic)->drop_held)
+        return FALSE;
+    GE(nic)->drop_held = 0;
 
     nic->rx_packets++;
 
@@ -1154,7 +1197,7 @@ static VOID ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 
             nic->rx_claimed(nic->rx_arg, token, sum, flags);
         }
-        return;
+        return TRUE;
     }
 
     /* Handed up where it lies, like the LANCE: no staging copy.  Not a
@@ -1163,6 +1206,7 @@ static VOID ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
     nic->core_stat[GE_ST_UNCLAIMED]++;
     if (nic->rx != NULL)
         nic->rx(nic->rx_arg, frame, len);
+    return TRUE;
 }
 
 /* TRUE when the ring had frames. */
@@ -1186,23 +1230,41 @@ static BOOL ge_rxintr(NetdevNic *nic)
      * whole burst, after the producer index said the writes are complete.
      * The burst is contiguous in the ring unless it wraps, so it is one range
      * or two, and the page op prices a range by its pages.
+     *
+     * ONLY WHAT IS NEW SINCE THE LAST PASS.  A pass that stopped with frames
+     * waiting for a read (below) already did this for them, and the CPU has
+     * only read those buffers since; rx_clean is where that pass got to, so
+     * a resumed pass pays for the frames that arrived meanwhile and not for
+     * the whole backlog again on every poll.
      */
     {
-        UWORD first = (UWORD)(c->rx_cidx & (GE_RX_RING - 1));
-        UWORD room  = (UWORD)(GE_RX_RING - first);
+        UWORD done  = (UWORD)(c->rx_clean - c->rx_cidx);
+        UWORD fresh;
 
-        if (total <= room)
+        if (done > total)
+            done = 0;               /* cannot happen; start over if it does */
+        fresh = (UWORD)(total - done);
+        if (fresh != 0)
         {
-            ge_cache(nic, c->rx_buf + (ULONG)first * GE_BUFSZ,
-                     (ULONG)total * GE_BUFSZ);
+            UWORD first = (UWORD)(c->rx_clean & (GE_RX_RING - 1));
+            UWORD room  = (UWORD)(GE_RX_RING - first);
+
+            if (fresh <= room)
+            {
+                ge_cache(nic, c->rx_buf + (ULONG)first * GE_BUFSZ,
+                         (ULONG)fresh * GE_BUFSZ);
+            }
+            else
+            {
+                ge_cache(nic, c->rx_buf + (ULONG)first * GE_BUFSZ,
+                         (ULONG)room * GE_BUFSZ);
+                ge_cache(nic, c->rx_buf, (ULONG)(fresh - room) * GE_BUFSZ);
+            }
         }
-        else
-        {
-            ge_cache(nic, c->rx_buf + (ULONG)first * GE_BUFSZ,
-                     (ULONG)room * GE_BUFSZ);
-            ge_cache(nic, c->rx_buf, (ULONG)(total - room) * GE_BUFSZ);
-        }
+        c->rx_clean = pidx;
     }
+
+    nic->rx_behind = 0;
 
     for (n = 0; n < total; n++)
     {
@@ -1230,9 +1292,23 @@ static BOOL ge_rxintr(NetdevNic *nic)
             nic->rx_errors++;
             nic->core_stat[GE_ST_RX_LEN]++;
         }
-        else
+        else if (!ge_deliver(nic, buf + GE_RX_PAD, (UWORD)(len - GE_RX_PAD)))
         {
-            ge_deliver(nic, buf + GE_RX_PAD, (UWORD)(len - GE_RX_PAD));
+            /*
+             * THE READER IS BEHIND, AND THE RING IS THE BACKLOG.  This frame
+             * and everything after it stay where the DMA put them, their
+             * descriptors untouched, and the consumer index handed back
+             * below stops short of them; the chip keeps filling what is
+             * left of the ring.  The pass resumes on the next interrupt, on
+             * the opener's ANXD_CMD_RX_POLL once it has re-posted its
+             * reads, or on the vertical blank.  Before this, a burst longer
+             * than the reads posted lost its tail here, silently: 685
+             * frames and 632 retransmissions in one ten-second transfer.
+             */
+            nic->rx_behind = 1;
+            nic->core_stat[GE_ST_HELD]++;
+            nic->core_stat[GE_ST_HELD_FRAMES] += (ULONG)(total - n);
+            break;
         }
 
         /* The descriptor is re-armed by rewriting its address, the way the
@@ -1435,6 +1511,24 @@ static BOOL genet_tick(NetdevNic *nic)
     {
         c->blanks = 0;
         ge_link_poll(nic);
+    }
+
+    /* Frames held for a reader that was behind (ge_rxintr): the blank is the
+       backstop when neither an interrupt nor the opener's poll came, and
+       the clock on how long the head of the ring may wait. */
+    if (nic->rx_behind)
+    {
+        nic->core_stat[GE_ST_TICK_RESUMES]++;
+        if (++c->held_blanks >= GE_HOLD_BLANKS)
+        {
+            c->held_blanks = 0;
+            c->drop_held   = 1;         /* ge_deliver lets the head go */
+        }
+        (VOID)ge_rxintr(nic);
+    }
+    else
+    {
+        c->held_blanks = 0;
     }
 
     /* Completed transmits are reclaimed here when nothing else has: with no

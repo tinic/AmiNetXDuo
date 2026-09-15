@@ -109,7 +109,27 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
         cand_io = hit;
     }
 
-    if (cand == NULL || cand->op_RxDirect == NULL || cand->op_RxFilled == NULL)
+    if (cand == NULL)
+    {
+        /* Nobody has a read of this type posted.  If a direct-path opener
+           has been reading it, its reader is behind rather than gone, and a
+           core with a ring may hold the frame for it. */
+        for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL;
+             n = n->ln_Succ)
+        {
+            NetdevOpener *op = (NetdevOpener *)n;
+
+            if (op->op_RxDirect != NULL && op->op_RxFilled != NULL &&
+                op->op_Filter == NULL && !op->op_Raw &&
+                netdev_reads_type(op, type))
+            {
+                *token = NETDEV_CLAIM_BEHIND;
+                break;
+            }
+        }
+        return NULL;
+    }
+    if (cand->op_RxDirect == NULL || cand->op_RxFilled == NULL)
         return NULL;
     if (cand->op_Filter != NULL)
         return NULL;

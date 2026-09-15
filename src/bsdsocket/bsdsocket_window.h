@@ -70,8 +70,8 @@
 
 /*
  * THE LAN WINDOW ON A GIGABIT LINK, measured 2026-09-15 on the A1200 +
- * PiStorm32 through our GENET core, iperf into the Amiga, three rounds a
- * boot, the window being what the iperf socket got from the budget:
+ * PiStorm32 through anxgenet.device, iperf into the Amiga, three rounds a
+ * boot.  The first table, before the receive offload:
  *
  *     window      receive
  *      50,176     134 Mbit/s
@@ -80,30 +80,27 @@
  *
  * A 1 Gbit peer puts the whole window on the wire at once, and what was
  * lost above 75 KB was NOT the driver's ring: it was the READ QUEUE.  The
- * shim posted 32 CMD_READs, the driver empties its 128-frame ring in one
+ * shim posted 32 CMD_READs, the driver emptied its 128-frame ring in one
  * bottom half, a frame into a posted read each, and every frame past the
- * 32nd of a burst went nowhere -- sana2_internal.h, AMI_SANA2_RX_MAX_DEPTH,
- * found 2026-09-15 with the receive offload's own counter.  With 128 reads
- * on a gigabit wire the same machine, same test, receive offload on:
+ * 32nd of a burst went nowhere -- found with the receive offload's own
+ * counter.  Two things changed that day: the shim posts 128 reads on a
+ * gigabit wire (sana2_internal.h, AMI_SANA2_RX_MAX_DEPTH), and the driver
+ * holds a burst's tail in its ring for the reader instead of dropping it
+ * (genet.c, the held pass; ANXD_CMD_RX_POLL).  With both, receive offload
+ * on, same machine, same test, no frame lost at any row:
  *
- *     window      receive           lost frames
- *      65,535     186 / 186 / 186   0 in three rounds
- *     100,352     196 / 197 / 197 / 199   0 in one boot, 178 in the next
+ *     window      receive
+ *      65,535     186 / 186 / 186
+ *     100,352     197 / 197 / 197
+ *     262,144     202 / 202 / 202
  *
- * So the knee moved up with the queue, and the unscaled window is kept as
- * the setting until the reader's occasional lag behind a 100 KB burst is
- * understood: it is a five per cent difference and the 65,535 arm has never
- * dropped a frame.  A socket that comes up on a link of
- * BSD_TCP_WINDOW_FAST_BPS or more, on a LAN round trip, therefore settles at
- * BSD_TCP_WINDOW_FAST, and a socket on a slower link keeps
- * BSD_TCP_WINDOW_LAN, which the 100 Mbit X-Surf 100 (emulated) took at 39-40
- * Mbit/s where 262,144 gave 27.  The WAN case is unaffected: a long round
- * trip grows the window whatever the link, because the far end's bottleneck
- * paces the bursts.
+ * So a socket that comes up on a link of BSD_TCP_WINDOW_FAST_BPS or more
+ * settles at its maximum, exactly as a long path does: the ring backs the
+ * burst, the window is the rate.  A socket on a slower link keeps
+ * BSD_TCP_WINDOW_LAN, which the 100 Mbit X-Surf 100 (emulated) took at
+ * 39-40 Mbit/s where 262,144 gave 27 -- that card has no ring behind it.
+ * BSD_TCP_WINDOW_FAST, the 65,535 the first table forced, is gone.
  */
-#ifndef BSD_TCP_WINDOW_FAST
-#define BSD_TCP_WINDOW_FAST         65535UL
-#endif
 #ifndef BSD_TCP_WINDOW_FAST_BPS
 #define BSD_TCP_WINDOW_FAST_BPS     1000000000UL
 #endif

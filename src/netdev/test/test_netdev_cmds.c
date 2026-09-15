@@ -39,6 +39,7 @@
 #include <proto/exec.h>
 
 #include "netdev_internal.h"
+#include "aminetxduo/anxs2ext.h"
 
 /* Not in the SANA-II autodocs' command list, and netdev_cmds.c
    defines it for the same reason. */
@@ -195,6 +196,17 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event)
     offline_calls++;
     offline_event = event;
     unit->nu_Online = 0;
+}
+
+/* ANXD_CMD_RX_POLL runs the chip service when a core left frames behind; this
+   harness has no core, so it counts the call and reports nothing found. */
+static int interrupt_calls;
+
+ULONG netdev_interrupt(NetdevUnit *unit)
+{
+    interrupt_calls++;
+    unit->nu_Nic.rx_behind = 0;
+    return 0;
 }
 
 static int cancel_resume_calls;
@@ -830,7 +842,7 @@ static void j_the_advertised_list_is_the_real_one(void)
                  last_wire == (ULONG)S2WERR_GENERIC_ERROR), what);
     }
 
-    expect(n == 22, "the advertised list is the length this test read it at");
+    expect(n == 23, "the advertised list is the length this test read it at");
 }
 
 /* Anything else is what both IC drivers answer, and what a caller probes
@@ -1060,7 +1072,7 @@ static void n_special_stats_respect_the_caller(void)
             full = box.hdr.RecordCountSupplied;
     }
 
-    expect(full == 17, "the table is the seventeen records this test read");
+    expect(full == 19, "the table is the nineteen records this test read");
 
     reset();
     req(&io, S2_GETSPECIALSTATS);
@@ -1311,6 +1323,78 @@ static void r_abort_finds_each_list(void)
 
 /* A dispatch with no opener at all is the detached-request case, and answers
    the error Exec's own devices answer. */
+/* ANXD_CMD_RX_POLL: runs the chip service only when a core is holding frames,
+   answers quick either way, and is in the supported-command list. */
+static void t_rx_poll(void)
+{
+    struct IOSana2Req io;
+    UWORD            *cmds;
+    int               listed = 0;
+
+    reset();
+    req(&io, ANXD_CMD_RX_POLL);
+    io.ios2_Req.io_Flags = IOF_QUICK;
+    interrupt_calls = 0;
+    netdev_perform(&opener, &io);
+    expect_u32("a poll with nothing held", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+    expect(interrupt_calls == 0, "does not run the chip service");
+    expect((io.ios2_Req.io_Flags & IOF_QUICK) != 0, "and stays quick");
+
+    reset();
+    req(&io, ANXD_CMD_RX_POLL);
+    io.ios2_Req.io_Flags = IOF_QUICK;
+    unit.nu_Nic.rx_behind = 1;
+    interrupt_calls = 0;
+    netdev_perform(&opener, &io);
+    expect(interrupt_calls == 1, "a poll with frames held runs the chip service once");
+    expect(unit.nu_Nic.rx_behind == 0, "and the service cleared the flag");
+    expect_u32("with no error", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+
+    reset();
+    req(&io, ANXD_CMD_RX_POLL);
+    unit.nu_Nic.rx_behind = 1;
+    unit.nu_Online        = 0;
+    interrupt_calls = 0;
+    netdev_perform(&opener, &io);
+    expect(interrupt_calls == 0, "an offline unit is not serviced by a poll");
+
+    /* Also the type note: a CMD_READ remembers its packet type so a claim
+       can tell a reader that is behind from a type nobody reads. */
+    reset();
+    opener.op_ReadTypeCount = 0;
+    opener.op_ReadTypeLast  = 0;
+    req(&io, CMD_READ);
+    io.ios2_PacketType = 0x0800;
+    netdev_perform(&opener, &io);
+    expect(netdev_reads_type(&opener, 0x0800), "a posted read notes its type");
+    expect(!netdev_reads_type(&opener, 0x86DD), "and no other");
+
+    /* The list, through the query that hands it out. */
+    {
+        struct IOStdReq   std;
+        struct
+        {
+            ULONG  DevQueryFormat;
+            ULONG  SizeAvailable;
+            UWORD  DeviceType;
+            UWORD  DeviceSubType;
+            UWORD *SupportedCommands;
+        } answer;
+
+        reset();
+        memset(&std, 0, sizeof(std));
+        memset(&answer, 0, sizeof(answer));
+        std.io_Command = NSCMD_DEVICEQUERY;
+        std.io_Data    = &answer;
+        std.io_Length  = sizeof(answer);
+        netdev_perform(&opener, (struct IOSana2Req *)&std);
+        for (cmds = answer.SupportedCommands; cmds != NULL && *cmds != 0; cmds++)
+            if (*cmds == ANXD_CMD_RX_POLL)
+                listed = 1;
+    }
+    expect(listed, "ANXD_CMD_RX_POLL is in the supported-command list");
+}
+
 static void s_no_opener(void)
 {
     struct IOSana2Req io;
@@ -1345,6 +1429,7 @@ int main(void)
     q_flush_returns_everything();
     r_abort_finds_each_list();
     s_no_opener();
+    t_rx_poll();
 
     if (failures != 0)
     {

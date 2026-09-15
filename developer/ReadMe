@@ -208,8 +208,16 @@ vectors, no library to open.
         may be set; a driver that is unsure leaves it clear and loses nothing
         but the speed.
 
-anxgenet.device implements all three; anxnet.device the first two.  The
-header is the contract, and the shipped drivers are the reference.
+    ANXD_CMD_RX_POLL
+        not a tag but a command, sent by the opener at the end of every
+        pass over its completed reads: "deliver what you are holding for my
+        reads".  A driver with a deep hardware ring can keep a burst's tail
+        there when the opener's reads ran out, and hand it over on this
+        command instead of dropping it.  A driver that does not know the
+        command answers IOERR_NOCMD and is not asked again.
+
+anxgenet.device implements all of them; anxnet.device the first two tags.
+The header is the contract, and the shipped drivers are the reference.
 
 
 Regenerating

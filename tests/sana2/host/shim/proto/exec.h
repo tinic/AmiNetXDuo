@@ -34,6 +34,7 @@ struct Message *GetMsg(struct MsgPort *port);
 VOID            ReplyMsg(struct Message *msg);
 VOID            SendIO(struct IORequest *req);
 LONG            AbortIO(struct IORequest *req);
+BYTE            WaitIO(struct IORequest *req);
 
 VOID            NewList(struct List *list);
 VOID            AddTail(struct List *list, struct Node *node);

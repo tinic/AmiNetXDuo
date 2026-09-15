@@ -1830,6 +1830,14 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         rx->slot[i].req.ios2_Data           = &rx->slot[i];
     }
 
+    /* The poll request: the opened request's device, unit and cookie, this
+       reader's port, and the private command. */
+    rx->poll = iface->templ;
+    rx->poll.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    rx->poll.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
+    rx->poll.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
+    rx->poll.ios2_Req.io_Command = ANXD_CMD_RX_POLL;
+
     ami_sana2_rx_mark_reset(rx);
 
 #ifdef AMINETXDUO_RXPROBE
@@ -1956,6 +1964,28 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #endif /* AMINETXDUO_GREEN_REALM */
 
         (VOID)ami_sana2_rx_drain(rx, (UWORD)AMI_SANA2_RX_RUN_MAX);
+
+        /*
+         * THE POLL, AFTER THE DRAIN AND BEFORE THE SLEEP.  Every slot this
+         * pass took a frame out of is posted again, so a driver that held
+         * frames in its ring for want of one (anxgenet.device, when the
+         * reader was behind a burst) can deliver them now; they arrive as
+         * completions on this port and the loop goes round again without
+         * blocking.  A driver that does not know the command says so once,
+         * IOERR_NOCMD, and is not asked again.  Quick on our device; a
+         * device that queues it instead replies here, and the reply is taken
+         * back before the drain can mistake it for a slot.
+         */
+        if (iface->rx_poll_ok && !rx->stop)
+        {
+            rx->poll.ios2_Req.io_Flags = IOF_QUICK;
+            rx->poll.ios2_Req.io_Error = 0;
+            BeginIO((struct IORequest *)&rx->poll);
+            if ((rx->poll.ios2_Req.io_Flags & IOF_QUICK) == 0)
+                (VOID)WaitIO((struct IORequest *)&rx->poll);
+            if (rx->poll.ios2_Req.io_Error == IOERR_NOCMD)
+                iface->rx_poll_ok = FALSE;
+        }
 
 #ifdef AMINETXDUO_RXPROBE
         /* Keep probe_dev_rx within a few hundred frames of the truth: the

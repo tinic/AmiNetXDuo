@@ -105,7 +105,42 @@ typedef struct NetdevOpener
 
     NetdevTrack         op_Track[NETDEV_TRACK_MAX];
     UWORD               op_TrackHigh;   /* one past the highest used slot */
+
+    /* The packet types this opener has posted CMD_READs for, so that a
+       frame of one of them arriving with no read posted is "the reader is
+       behind" (NETDEV_CLAIM_BEHIND) and not "nobody wants this type".  Four
+       is one more than the shim's three readers; a fifth type is simply not
+       remembered and is dropped the old way.  op_ReadTypeLast makes the
+       once-a-frame note one compare in the steady state. */
+#define NETDEV_READ_TYPES   4
+    ULONG               op_ReadTypes[NETDEV_READ_TYPES];
+    ULONG               op_ReadTypeLast;
+    UWORD               op_ReadTypeCount;
 } NetdevOpener;
+
+static inline VOID netdev_note_read_type(NetdevOpener *op, ULONG type)
+{
+    UWORD i;
+
+    if (type == op->op_ReadTypeLast)
+        return;
+    op->op_ReadTypeLast = type;
+    for (i = 0; i < op->op_ReadTypeCount; i++)
+        if (op->op_ReadTypes[i] == type)
+            return;
+    if (op->op_ReadTypeCount < NETDEV_READ_TYPES)
+        op->op_ReadTypes[op->op_ReadTypeCount++] = type;
+}
+
+static inline BOOL netdev_reads_type(const NetdevOpener *op, ULONG type)
+{
+    UWORD i;
+
+    for (i = 0; i < op->op_ReadTypeCount; i++)
+        if (op->op_ReadTypes[i] == type)
+            return TRUE;
+    return FALSE;
+}
 
 /* RAW is permitted on either the opener or one individual request.  Keep
    that SANA-II rule in one predicate: receive hand-over, direct receive and
@@ -171,6 +206,8 @@ typedef struct NetdevUnit
     UWORD                       nu_TxWedges;  /* how often it had to be reset  */
     ULONG                       nu_IntSeen;   /* claimed interrupts delivered  */
     ULONG                       nu_TickPolls; /* tick-serviced during silence  */
+    ULONG                       nu_RxPolls;     /* ANXD_CMD_RX_POLL received    */
+    ULONG                       nu_RxPollsHeld; /* of those, with frames held   */
     UWORD                       nu_IntSilent; /* blanks since a claimed one    */
     ULONG                       nu_RxDirect;  /* completed direct RX fills      */
     UWORD                       nu_RxKickWait;/* blanks toward an RX re-roll   */

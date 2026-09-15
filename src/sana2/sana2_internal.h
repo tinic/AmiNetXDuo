@@ -625,6 +625,12 @@ typedef struct AmiSana2Rx
        wire's and nobody else's memory. */
     AmiRxSlot          *slot;
     UWORD               slot_alloc;     /* how many `slot` holds             */
+
+    /* ANXD_CMD_RX_POLL (aminetxduo/anxs2ext.h), sent once at the end of
+       every drain so a driver holding frames for the reads just re-posted
+       delivers them before this reader sleeps.  Replied on rx->port when a
+       device does not honour IOF_QUICK, and taken back at once. */
+    struct IOSana2Req   poll;
 } AmiSana2Rx;
 
 /* --------------------------------------------------------------- TX slots */
@@ -678,6 +684,8 @@ struct AmiSana2If
     BOOL                link_hdr_ok;    /* device answered ANXD_S2_RX_LINK_HDR */
     UBYTE               rx_flags_ok;    /* ANXD_S2_RX_FLAGS: the bits the device
                                            will set beyond SUMMED, 0 = none  */
+    UBYTE               rx_poll_ok;     /* the device knows ANXD_CMD_RX_POLL;
+                                           TRUE until it says IOERR_NOCMD    */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.

@@ -437,7 +437,6 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
 {
     const ULONG lan   = (ULONG)BSD_TCP_WINDOW_LAN;      /* 100,352 */
     const ULONG max   = (ULONG)BSD_TCP_WINDOW_MAX;      /* 262,144 */
-    const ULONG fast  = (ULONG)BSD_TCP_WINDOW_FAST;     /*  65,535 */
     const ULONG gbit  = (ULONG)BSD_TCP_WINDOW_FAST_BPS;
     const ULONG tenm  = 10000000UL;
     const ULONG hundm = 100000000UL;
@@ -457,13 +456,17 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
     h_check(ami_bsd_tcp_window_settle(8192UL, 8192UL, 0UL, 300UL) == 8192UL,
             "a small machine's floor window moved on a long path");
 
-    /* A LAN round trip on a gigabit link: the ring's knee, not the budget. */
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt - 1UL) == fast,
-            "a gigabit LAN socket did not settle at one unscaled window");
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 0UL) == fast,
-            "a passive gigabit socket did not settle at one unscaled window");
-    h_check(ami_bsd_tcp_window_settle(50176UL, max, gbit, 0UL) == 50176UL,
-            "a window already under the knee was moved");
+    /* A LAN round trip on a gigabit link: the maximum, as on a long path --
+       the driver's ring and 128 posted reads back the burst (202 Mbit/s at
+       262,144 against 186 at 65,535, no frame lost, bsdsocket_window.h). */
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt - 1UL) == max,
+            "a gigabit LAN socket did not settle at the maximum");
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 0UL) == max,
+            "a passive gigabit socket did not settle at the maximum");
+    h_check(ami_bsd_tcp_window_settle(50176UL, max, gbit, 0UL) == max,
+            "a small created window on a gigabit LAN did not grow");
+    h_check(ami_bsd_tcp_window_settle(lan, lan, gbit, 0UL) == lan,
+            "a gigabit LAN socket grew past a maximum equal to its window");
 
     /* A LAN round trip on 10 or 100 Mbit: exactly what it opened with. */
     h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 1UL) == lan,
@@ -472,8 +475,6 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
             "a 10 Mbit LAN socket did not keep the LAN window");
     h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 0UL) == lan,
             "an unknown link on a LAN did not keep the LAN window");
-    h_check(fast < 75264UL && fast > 50176UL,
-            "the gigabit LAN window is outside the measured 50-75 KB band");
 }
 
 

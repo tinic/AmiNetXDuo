@@ -1014,6 +1014,13 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         DeleteMsgPort(port);
     }
 
+    /* ANXD_CMD_RX_POLL goes only to a device that answered our tags: a
+       third-party driver is owed IOERR_NOCMD for an unknown command by the
+       standard and not always by its author, and this stack's rule is that
+       such a driver is never handed anything it did not ask for.  The device
+       may still refuse it (an older anxnet.device), once. */
+    iface->rx_poll_ok = (UBYTE)(status == 0 && iface->link_hdr_ok);
+
     if (status != 0)
     {
         /* The card is in the message when one was pinned: "cannot open

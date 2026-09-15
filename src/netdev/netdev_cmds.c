@@ -18,6 +18,7 @@
  */
 
 #include "netdev_internal.h"
+#include "aminetxduo/anxs2ext.h"
 #include "dp8390.h"
 
 #include <exec/errors.h>
@@ -57,6 +58,7 @@ static UWORD netdev_supported[] =
     S2_ONEVENT, S2_READORPHAN, S2_ONLINE, S2_OFFLINE,
     S2_ADDMULTICASTADDRESSES, S2_DELMULTICASTADDRESSES,
     NSCMD_DEVICEQUERY,
+    ANXD_CMD_RX_POLL,
     0
 };
 
@@ -109,6 +111,8 @@ static const char netdev_stat_drx[]   = "Direct receive fills";
 static const char netdev_stat_tick[]  = "Vertical-blank interrupt polls";
 static const char netdev_stat_kick[]  = "PCMCIA deaf-receiver resets";
 static const char netdev_stat_txerr[] = "Transmit errors";
+static const char netdev_stat_poll[]  = "Opener polls";
+static const char netdev_stat_pollh[] = "Opener polls that found frames held";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -201,6 +205,10 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
        collisions on el3; the TSR error bits on dp8390), appended so every
        older record keeps its index.  Frames the wire never saw. */
     STAT(netdev_stat_txerr, unit->nu_Nic.tx_errors);
+    /* ANXD_CMD_RX_POLL: how often the opener asked, and how often a core
+       had frames waiting for it (aminetxduo/anxs2ext.h). */
+    STAT(netdev_stat_poll,  unit->nu_RxPolls);
+    STAT(netdev_stat_pollh, unit->nu_RxPollsHeld);
 
     /* Whatever the core itself counts, after everything above. */
     if (unit->nu_Nic.core_stat_names != NULL)
@@ -316,7 +324,10 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
     {
         /* Once a frame, inside a Disable(): see netdev_internal.h. */
         if (cmd == CMD_READ)
+        {
             nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            netdev_note_read_type(op, io->ios2_PacketType);
+        }
         else
             nd_list_addtail(&op->op_Orphans,
                             &io->ios2_Req.io_Message.mn_Node);
@@ -409,6 +420,31 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case CMD_READ:
     case S2_READORPHAN:
         netdev_queue_read(op, io, cmd);
+        return;
+
+    case ANXD_CMD_RX_POLL:
+        /*
+         * The opener has re-posted its reads and is about to sleep: if a
+         * core left frames in its ring for want of one
+         * (NETDEV_CLAIM_BEHIND), deliver them now rather than at the next
+         * interrupt or blank.  The same masked context the server and the
+         * blank give the core; nu_InIsr keeps the three apart.  Quick, and
+         * answered with nothing: the frames arrive as the CMD_READs.
+         */
+        unit->nu_RxPolls++;
+        if (unit->nu_Nic.rx_behind && unit->nu_Online)
+        {
+            unit->nu_RxPollsHeld++;
+            Disable();
+            if (unit->nu_InIsr == 0)
+            {
+                unit->nu_InIsr = 1;
+                (VOID)netdev_interrupt(unit);
+                unit->nu_InIsr = 0;
+            }
+            Enable();
+        }
+        netdev_reply(io, 0, 0);
         return;
 
     case CMD_WRITE:

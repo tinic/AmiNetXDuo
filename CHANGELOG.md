@@ -33,6 +33,16 @@ version at the top when it merges.
   36-frame bursts against 32 reads cost 685 frames and 632 retransmissions
   in one ten-second transfer. `IPREQUESTS` may now ask for up to 128
 
+- `anxgenet.device` keeps a burst's tail in its receive ring when the
+  stack's reads have run out, instead of dropping it: a unicast frame waits
+  there for the reader to catch up (at most 100 ms), a broadcast is dropped
+  as before, and the stack asks the driver for what it holds at the end of
+  every pass over its reads (`ANXD_CMD_RX_POLL`, `anxs2ext.h`; any driver
+  that does not know the command is asked once). With only 16 reads posted
+  the transfer still runs at 175 Mbit/s without a lost frame; with the
+  normal 128 and the 262,144-byte window, **202 Mbit/s** (186 before). Two
+  more `NetDevStats` records: passes held, and frames left waiting
+
 - The Raspberry Pi 4 GENET core is its own driver, `anxgenet.device`
   (21,724 bytes; `DEVICE=anxgenet.device`, `UNIT=0`). `anxnet.device` is
   back to the Amiga cards, 48,064 -> 39,828 bytes. The installer puts both
@@ -40,10 +50,9 @@ version at the top when it merges.
   record
 
 - A TCP socket settles its receive window when its handshake completes:
-  262,144 bytes on a round trip of 10 ms or more, 65,535 on a LAN over a
-  gigabit link, unchanged otherwise. AmiSpeedTest download on the A1200 +
-  PiStorm32 9.4 -> 25-72 Mb/s; LAN receive through the GENET core 134 ->
-  142 Mbit/s. The packet pool clamp is 4096 packets, was 512; a machine
+  262,144 bytes on a round trip of 10 ms or more or on a gigabit link,
+  unchanged otherwise. AmiSpeedTest download on the A1200 + PiStorm32 9.4
+  -> 25-72 Mb/s. The packet pool clamp is 4096 packets, was 512; a machine
   with 8 MB or less is unchanged
 
 - `NetDevStats` ships in C:, 6,132 bytes: every SANA-II counter and named

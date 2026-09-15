@@ -49,6 +49,7 @@ VOID Permit(VOID)  { }
 VOID SendIO(struct IORequest *req) { (VOID)req; }
 VOID BeginIO(struct IORequest *req) { (VOID)req; }
 LONG AbortIO(struct IORequest *req) { (VOID)req; return 0; }
+BYTE WaitIO(struct IORequest *req) { (VOID)req; return 0; }
 struct Message *GetMsg(struct MsgPort *port) { (VOID)port; return NULL; }
 VOID ReplyMsg(struct Message *msg) { (VOID)msg; }
 

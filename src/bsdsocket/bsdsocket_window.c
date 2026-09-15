@@ -58,10 +58,11 @@ ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
         return (maximum > created) ? maximum : created;
 
     /* A short path on a link that can put the whole window on the wire at
-       once: under the ring's knee, whatever the budget offered. */
-    if (bps >= (ULONG)BSD_TCP_WINDOW_FAST_BPS &&
-        created > (ULONG)BSD_TCP_WINDOW_FAST)
-        return (ULONG)BSD_TCP_WINDOW_FAST;
+       once: the driver's ring and its posted reads back the burst now
+       (sana2_internal.h, AMI_SANA2_RX_MAX_DEPTH; genet.c, the held pass), so
+       the window is the rate here too. */
+    if (bps >= (ULONG)BSD_TCP_WINDOW_FAST_BPS)
+        return (maximum > created) ? maximum : created;
 
     return created;
 }
