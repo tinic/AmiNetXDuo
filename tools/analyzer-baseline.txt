@@ -8,6 +8,7 @@
 1	port/threadx-amiga/src/tx_thread_stack_build.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	port/threadx-amiga/src/tx_thread_system_return.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	port/threadx-amiga/src/tx_timer_interrupt.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
+1	src/bsdsocket/netstatus.c	-Wanalyzer-null-dereference	dereference of NULL 'out'
 1	src/crypto68k/c68k_cpu.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	src/crypto68k/c68k_crt.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	src/crypto68k/c68k_sha256.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
@@ -33,4 +34,3 @@
 4	port/threadx-amiga/src/tx_initialize_low_level.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 4	src/crypto68k/c68k_powm.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 5	src/crypto68k/c68k_poly1305.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
-7	src/bsdsocket/netstatus.c	-Wanalyzer-null-dereference	dereference of NULL 'out'

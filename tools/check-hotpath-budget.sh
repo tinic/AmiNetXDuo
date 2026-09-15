@@ -73,10 +73,14 @@ ccjson = sys.argv[1]
 # tu : [(function, budget)].  Counts on the `default` cross arm, 2026-09-08.
 TABLE = {
     "n68k_rx_verify.c": [("_n68k_rx_verify_sum",     230)],   # 220
-    "sana2_rx.c":       [("_ami_sana2_rx_thread",    385),    # 366, carries the
-                         ("_ami_sana2_rx_deliver",    95),    #  inlined drain
-                         ("_ami_sana2_rx_post_slot",  70)],   #  loop and
-                                                             #  rx_complete
+    # 573 since 97f658f6: ami_sana2_rx_post_slot() is always_inline (three
+    # call sites, 70 instructions each; tools/check-hot-calls.sh is what
+    # wants it that way), so its copies are counted here and it has no row
+    # of its own.  A frame runs ONE copy.
+    "sana2_rx.c":       [("_ami_sana2_rx_thread",    600),    # 573, carries the
+                         ("_ami_sana2_rx_deliver",    95)],   #  inlined drain
+                                                             #  loop, rx_complete
+                                                             #  and post_slot
     # The SANA-II copy hook: called once a frame BY THE DEVICE, so its entry
     # guards are load-bearing rather than paranoia -- a third-party driver can
     # hand it anything, and `len > slot->capacity` is a bounds check on a
