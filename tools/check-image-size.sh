@@ -45,14 +45,16 @@ ARM="${AMINETXDUO_IMAGE_ARM:-$(basename "$BUILD")}"
 # AMINETXDUO_LOG off, which is where they belong.
 BUDGETS=(
     "default:src/bsdsocket/bsdsocket.library:354000"
-    "default:src/netdev/anxnet.device:50000"
+    "default:src/netdev/anxnet.device:41000"
+    "default:src/netdev/anxgenet.device:23000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
     # survive installing this usergroup.library without trusting malformed DBs.
     "default:src/usergroup/usergroup.library:10000"
     "default:src/tlslib/tls.library:198000"
     "minimal:src/bsdsocket/bsdsocket.library:226000"
-    "minimal:src/netdev/anxnet.device:50000"
+    "minimal:src/netdev/anxnet.device:41000"
+    "minimal:src/netdev/anxgenet.device:23000"
     "minimal:src/usergroup/usergroup.library:10000"
 )
 

@@ -70,7 +70,7 @@ LIBS=(bsdsocket usergroup)
 # every reinstall; install/test/run-workbench.sh now asserts the installed copy
 # byte for byte against the one packed here, so the two cannot drift apart
 # again in silence.
-DEVICES=(netdev/anxnet)
+DEVICES=(netdev/anxnet netdev/anxgenet)
 CMDS=(ActivateAmiNetXDuo AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp

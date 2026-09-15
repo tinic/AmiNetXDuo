@@ -23,7 +23,7 @@ static AnxDiagMark *netdev_diag;
 
 /* The published name, as a writable array: ln_Name is char *, and a Node
    must not point at a string literal. */
-static char netdev_diag_name[] = ANXDIAG_NAME;
+static char netdev_diag_name[] = NETDEV_DEVICE_NAME ANXDIAG_NAME_SUFFIX;
 
 VOID netdev_diag_reset(AnxDiagMark *mark)
 {

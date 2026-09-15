@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The Raspberry Pi 4 GENET core is its own driver, `anxgenet.device`
+  (21,724 bytes; `DEVICE=anxgenet.device`, `UNIT=0`). `anxnet.device` is
+  back to the Amiga cards, 48,064 -> 39,828 bytes. The installer puts both
+  in `DEVS:Networks`; `CheckNetDevice DEVICE anxgenet.device` reads its probe
+  record
+
 - A TCP socket settles its receive window when its handshake completes:
   262,144 bytes on a round trip of 10 ms or more, 65,535 on a LAN over a
   gigabit link, unchanged otherwise. AmiSpeedTest download on the A1200 +

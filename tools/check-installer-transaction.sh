@@ -46,12 +46,18 @@ import re, sys
 path = sys.argv[1]
 lines = open(path, errors='ignore').read().split('\n')
 
-# var, the file name the copy lands under
+# (live var, .new var, .old var, the newname the copy lands under, label)
+#
+# The three libraries are spelled out in the script with D_<X>, D_<X>_NEW and
+# D_<X>_OLD.  The two SANA-II drivers go through ONE procedure,
+# P_install_device, whose variables are dev_dest / dev_new / dev_old and whose
+# newname is (cat dev_file ".new"); the shape is checked once in the
+# procedure body and the calls below check that each driver goes through it.
 WATCH = [
-    ("D_BSD", "bsdsocket.library"),
-    ("D_UG",  "usergroup.library"),
-    ("D_TLS", "tls.library"),
-    ("D_ANX", "anxnet.device"),
+    ("D_BSD", "D_BSD_NEW", "D_BSD_OLD", r'"bsdsocket\.library\.new"', "bsdsocket.library"),
+    ("D_UG",  "D_UG_NEW",  "D_UG_OLD",  r'"usergroup\.library\.new"', "usergroup.library"),
+    ("D_TLS", "D_TLS_NEW", "D_TLS_OLD", r'"tls\.library\.new"',       "tls.library"),
+    ("dev_dest", "dev_new", "dev_old",  r'\(cat dev_file "\.new"\)',  "P_install_device"),
 ]
 
 def all_lines(pattern):
@@ -76,16 +82,16 @@ def first_between(pattern, start, limit):
     return hits[0] if hits else 0
 
 bad = 0
-for var, name in WATCH:
-    copy     = first(r'\(newname\s+"%s\.new"\)' % re.escape(name))
-    rename   = first(r'\(rename\s+%s\s+%s_OLD\b' % (re.escape(var), re.escape(var)))
-    activate = first(r'\(rename\s+%s_NEW\s+%s\b' % (re.escape(var), re.escape(var)))
-    pre      = [h for h in all_lines(r'\(if\s+\(exists\s+%s_NEW\b' % re.escape(var))
+for var, new_var, old_var, newname_rx, name in WATCH:
+    copy     = first(r'\(newname\s+%s\)' % newname_rx)
+    rename   = first(r'\(rename\s+%s\s+%s\b' % (re.escape(var), re.escape(old_var)))
+    activate = first(r'\(rename\s+%s\s+%s\b' % (re.escape(new_var), re.escape(var)))
+    pre      = [h for h in all_lines(r'\(if\s+\(exists\s+%s\b' % re.escape(new_var))
                 if h < copy]
     clear    = pre[0] if pre else 0
     reject   = pre[-1] if len(pre) >= 2 else 0
     abort    = first_between(r'\(abort\b', reject, copy) if reject else 0
-    guard    = last_before(r'\(if\s+\(exists\s+%s_NEW\b' % re.escape(var),
+    guard    = last_before(r'\(if\s+\(exists\s+%s\b' % re.escape(new_var),
                            rename or len(lines))
 
     print("installer_txn file=%-18s clear=%-4s reject=%-4s copy=%-4s "
@@ -104,6 +110,19 @@ for var, name in WATCH:
               % name)
         bad = 1
 
+# Every driver image the archive carries goes through the procedure: a
+# (set dev_file "<name>") followed by a (P_install_device) call, inside the
+# DO_ANXNET yes.  A device added to dist/make-dist.sh's DEVICES without a
+# call here would ship and never install, which is the silence this whole
+# gate exists for.
+for name in ("anxnet.device", "anxgenet.device"):
+    setline = first(r'\(set\s+dev_file\s+"%s"\)' % re.escape(name))
+    call    = first_between(r'\(P_install_device\)', setline, setline + 12) if setline else 0
+    print("installer_txn file=%-18s via=P_install_device set=%-4s call=%s"
+          % (name, setline or "-", call or "-"))
+    if not setline or not call:
+        print("  !! %s: not installed through P_install_device" % name)
+        bad = 1
 print("installer_txn=%s" % ("FAIL" if bad else "PASS"))
 sys.exit(1 if bad else 0)
 PY

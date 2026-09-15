@@ -39,19 +39,47 @@ enum
  */
 static AnxDiagMark cnd_mark;
 
+/* The semaphore the driver publishes under: its own name plus the suffix,
+   so anxnet.device and anxgenet.device each have a record and DEVICE <name>
+   picks one.  A path ("DEVS:Networks/anxgenet.device") is reduced to the
+   name, which is what Exec calls the device.  Built once, before Forbid(). */
+static char cnd_sem_name[64];
+static const char *cnd_device = ANXNET_DEVICE_NAME;   /* what the messages name */
+
+static const char *cnd_sem_name_for(const char *device)
+{
+    const char *base = device;
+    const char *p;
+    ULONG       n    = 0;
+
+    for (p = device; *p != '\0'; p++)
+    {
+        if (*p == '/' || *p == ':')
+            base = p + 1;
+    }
+    for (p = base; *p != '\0' && n < sizeof(cnd_sem_name) - 1; p++)
+        cnd_sem_name[n++] = *p;
+    for (p = ANXDIAG_NAME_SUFFIX; *p != '\0' && n < sizeof(cnd_sem_name) - 1; p++)
+        cnd_sem_name[n++] = *p;
+    cnd_sem_name[n] = '\0';
+
+    return cnd_sem_name;
+}
+
 #define CND_BAD_VERSION     1
 #define CND_ABSENT          2
 #define CND_OK              0
 
-static UWORD cnd_read(VOID)
+static UWORD cnd_read(const char *device)
 {
     const AnxDiagMark *mark;
     UWORD              status = CND_ABSENT;
+    const char        *name   = cnd_sem_name_for(device);
 
     Forbid();
 
     /* (STRPTR): NDK 3.9 declares FindSemaphore(STRPTR), 3.2 CONST_STRPTR. */
-    mark = (const AnxDiagMark *)FindSemaphore((STRPTR)ANXDIAG_NAME);
+    mark = (const AnxDiagMark *)FindSemaphore((STRPTR)name);
 
     if (mark != NULL && mark->ad_Magic == ANXDIAG_MAGIC)
     {
@@ -369,7 +397,7 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  Odd-numbered registers are read as bytes, which is normal.\n");
         return;
     case ANXDIAG_UNIT:
-        say("  This card is unit %lu of anxnet.device.\n", v);
+        say("  This card is unit %lu of %s.\n", v, (LONG)cnd_device);
         return;
 
     /* ---- the PCMCIA slot ---- */
@@ -963,15 +991,17 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("[DEVICE <name>] [NOLOAD] [RAW]",
-                   "Say what anxnet.device found when it probed this "
-                   "machine, and why any card it did not take was refused.");
+                   "Say what anxnet.device (or DEVICE anxgenet.device) found "
+                   "when it probed this machine, and why any card it did not "
+                   "take was refused.");
         return RETURN_ERROR;
     }
 
     if (args[ARG_DEVICE] != 0)
         device = (const char *)args[ARG_DEVICE];
+    cnd_device = device;
 
-    status = cnd_read();
+    status = cnd_read(device);
 
     /*
      * A driver that never ran is not an answer, so without NOLOAD the driver
@@ -981,7 +1011,7 @@ int main(int argc, char **argv)
     if (status == CND_ABSENT && args[ARG_NOLOAD] == 0)
     {
         (VOID)tool_device_probe(device, 0, NULL);
-        status = cnd_read();
+        status = cnd_read(device);
     }
 
     say("%s: what %s found on this machine\n", (LONG)tool_name, (LONG)device);
@@ -991,12 +1021,12 @@ int main(int argc, char **argv)
         tool_error("the driver publishes a probe record this command cannot "
                    "read");
         say("\n  The record says version %lu, %lu bytes.  This command was\n"
-            "  built for version %lu, %lu bytes.  DEVS:Networks/anxnet.device\n"
+            "  built for version %lu, %lu bytes.  DEVS:Networks/%s\n"
             "  and C:%s ship together, so one of the two is from a different\n"
             "  release.  Update both.\n",
             (ULONG)cnd_mark.ad_Version, (ULONG)cnd_mark.ad_Size,
             (ULONG)ANXDIAG_VERSION, (ULONG)sizeof(AnxDiagMark),
-            (LONG)tool_name);
+            (LONG)device, (LONG)tool_name);
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -1012,7 +1042,7 @@ int main(int argc, char **argv)
             "it.");
         say("\n");
         tool_wrap(2,
-            "Check that DEVS:Networks/anxnet.device exists. Then run this "
+            "Check that the driver exists in DEVS:Networks. Then run this "
             "command again without NOLOAD, which loads the driver so it can "
             "probe.");
         FreeArgs(rda);
@@ -1038,7 +1068,7 @@ int main(int argc, char **argv)
     {
         tool_wrap(2,
             "No card came up. Every card this driver looked at is above, "
-            "with the step it stopped at. Nothing will open anxnet.device "
+            "with the step it stopped at. Nothing will open the driver "
             "until one of them attaches.");
         rc = RETURN_WARN;
     }

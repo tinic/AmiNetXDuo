@@ -19,6 +19,7 @@
 #include <dos/dos.h>          /* BPTR, for the expunge seglist */
 
 #include "aminetxduo/anxnet.h"
+#include "netdev_roster.h"
 
 /*
  * Exec's AddHead() and Remove() are a jsr through the library base and back
@@ -406,15 +407,22 @@ VOID netdev_trace_val(const char *tag, ULONG v);
  * netdev_reset.c: stop every bus-master unit before a warm reboot, through
  * a ColdReboot() patch and a keyboard reset handler.  Installed once, on
  * the first such unit's online; remove() is FALSE when the patch cannot be
- * taken out cleanly, and the device then stays resident.
+ * taken out cleanly, and the device then stays resident.  Only the GENET
+ * masters RAM, so an image without the tree has nothing to guard.
  */
+#if NETDEV_HAS_DTREE
 VOID netdev_reset_guard(NetdevDevice *dev);
 BOOL netdev_reset_guard_remove(VOID);
+#else
+#define netdev_reset_guard(dev)         ((VOID)(dev))
+#define netdev_reset_guard_remove()     TRUE
+#endif
 /*
  * Claim the slot, identify what is in it from its CIS, and configure it for
  * the row that drives that card.  *card_out is that row, set only on success.
  * Called once, not once per PCMCIA row: there is one slot and one handle.
  */
+#if NETDEV_HAS_PCMCIA
 APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out);
 /* The card's own CIS bytes, for the derived-address fingerprint.  0 when
    there is no slot or nothing was read from it. */
@@ -425,13 +433,23 @@ BOOL netdev_pcmcia_is_unit(const NetdevUnit *unit);
 BOOL netdev_pcmcia_available(const NetdevUnit *unit);
 /* An explicit S2_OFFLINE while the socket is empty overrides hot-plug resume. */
 VOID netdev_pcmcia_cancel_resume(const NetdevUnit *unit);
+#else
+/* No slot in this image (netdev_roster.h): no unit is ever a PCMCIA unit,
+   every unit is always available, and the fingerprint has no CIS to read. */
+#define netdev_pcmcia_fingerprint(buf, max)   ((VOID)(buf), (VOID)(max), (UWORD)0)
+#define netdev_pcmcia_is_unit(unit)           ((VOID)(unit), FALSE)
+#define netdev_pcmcia_available(unit)         ((VOID)(unit), TRUE)
+#define netdev_pcmcia_cancel_resume(unit)     ((VOID)(unit))
+#endif
 /* The status-change callback uses the same core service as a Zorro INT2
    server, but card.resource owns the PCMCIA interrupt latch. */
 ULONG netdev_interrupt(NetdevUnit *unit);
+#if NETDEV_HAS_PCMCIA
 /* Card removal has no hardware left to stop.  Drain the software side only. */
 VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event);
 /* Re-establish the bus and chip half of an existing hot-plugged unit. */
 BOOL netdev_pcmcia_reattach(NetdevUnit *unit, const NetdevCard *card, APTR base);
+#endif
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 LONG netdev_online(NetdevUnit *unit);

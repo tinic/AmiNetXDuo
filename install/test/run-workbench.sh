@@ -1303,9 +1303,42 @@ else
     fi
 fi
 
+# The second driver image, anxgenet.device, goes through the same procedure
+# in the installer and is asserted the same way: the archive's bytes, in
+# DEVS:Networks, whatever was there before.
+ANXGENET_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxgenet.device"
+ANXGENET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxgenet.device" 2>/dev/null || true)
+
+if [ ! -f "$ANXGENET_ARCHIVE" ]; then
+    echo "  MISSING Devs/Networks/anxgenet.device IN THE ARCHIVE"
+    echo "!! dist/make-dist.sh's DEVICES list carries netdev/anxgenet; the archive"
+    echo "   this ran from has no such file."
+    fail=1
+elif [ -z "$ANXGENET_INSTALLED" ] || [ ! -f "$ANXGENET_INSTALLED" ]; then
+    echo "  MISSING DEVS:Networks/anxgenet.device"
+    echo "!! THE INSTALLER DID NOT INSTALL THE GENET DRIVER.  P_install_device"
+    echo "   in Install-AmiNetXDuo is called once per image; the anxgenet call"
+    echo "   did not land a file."
+    fail=1
+else
+    _ang_want=$(shasum "$ANXGENET_ARCHIVE"   | cut -d' ' -f1)
+    _ang_got=$(shasum  "$ANXGENET_INSTALLED" | cut -d' ' -f1)
+    _ang_bytes=$(wc -c < "$ANXGENET_INSTALLED" | tr -d ' ')
+    if [ "$_ang_want" = "$_ang_got" ]; then
+        printf '  ok      %-32s %s bytes\n' \
+               "Devs/Networks/anxgenet.device" "$_ang_bytes"
+    else
+        printf '  WRONG   %-32s %s bytes\n' \
+               "Devs/Networks/anxgenet.device" "$_ang_bytes"
+        echo "!! DEVS:Networks/anxgenet.device is not the driver in the archive."
+        fail=1
+    fi
+fi
+
 echo "devs_networks_before=$DEVS_NETWORKS_BEFORE"
 echo "anxnet_installed=$([ -n "$ANXNET_INSTALLED" ] && echo yes || echo no)"
 echo "anxnet_backup=$([ -n "$ANXNET_OLD" ] && echo yes || echo no)"
+echo "anxgenet_installed=$([ -n "$ANXGENET_INSTALLED" ] && echo yes || echo no)"
 
 if [ "$DRAWER" = "1" ]; then
     # The stale file was in SYSTEM DEVS:, not in the private destination.  One

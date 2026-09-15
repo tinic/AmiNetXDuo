@@ -1,4 +1,4 @@
-# anxnet.device: one SANA-II driver for the whole NE2000/DP8390 card family.
+# anxnet.device and anxgenet.device: the SANA-II drivers, one core.
 #
 # netdev_device.c carries the romtag and the entry guard and must stay FIRST in
 # the object order, same rule as the three .library images: the
@@ -10,9 +10,13 @@
 # stack in could not be loaded by any other stack.
 
 option(AMINETXDUO_NETDEV_LINK
-       "Link DEVS:Networks/anxnet.device, the NE2000/DP8390 family driver" ON)
+       "Link DEVS:Networks/anxnet.device and anxgenet.device, the SANA-II drivers" ON)
 
-set(NETDEV_SOURCES
+# THE CORE: the AmigaOS device, the SANA-II command table, the queues, the
+# events, the probe record, the bus accessors and the address helpers.  Every
+# image carries all of it; netdev_roster.h decides at compile time which buses
+# it probes and which chip cores it links.
+set(NETDEV_CORE_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open
     netdev_unit.c       # unit/opener helpers, host-testable
     netdev_io.c         # BeginIO/AbortIO field handling, host-testable
@@ -24,51 +28,82 @@ set(NETDEV_SOURCES
     netdev_mcast.c      # exact multicast membership and range transactions
     netdev_bus.c        # register stride and the data port
     netdev_clock.c      # a wait measured against the beam, not counted in reads
-    netdev_cards.c      # the card table
-    netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
-    netdev_cis.c        # the PC Card configuration table, host-testable
-    netdev_isapnp.c     # the X-Surf's chip, which is behind an ISA PnP bridge
+    netdev_cards.c      # the card table, rows by roster
     netdev_diag.c       # the probe record, published for CheckNetDevice
     netdev_mcaf.c       # the multicast hash, host-testable
     netdev_macgen.c     # the derived station address, host-testable
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+
+# anxnet.device: every Amiga card.  Zorro boards, the A600/A1200 PCMCIA slot
+# and the fixed-address X-Surf 500; the DP8390 family, the LANCE, the
+# EtherLink III.
+set(NETDEV_CLASSIC_SOURCES
+    netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
+    netdev_cis.c        # the PC Card configuration table, host-testable
+    netdev_isapnp.c     # the X-Surf's chip, which is behind an ISA PnP bridge
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue
     ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
     lance.c             # Am7990/Am79C960: A2065 and Ariadne
-    el3.c               # 3Com EtherLink III: the 3C589 in the PCMCIA slot
+    el3.c)              # 3Com EtherLink III: the 3C589 in the PCMCIA slot
+
+# anxgenet.device: the Raspberry Pi 4 / CM4's own Ethernet behind a PiStorm32
+# running Emu68, and nothing else.  Split out on 2026-09-15: the GENET core
+# took anxnet.device from 39 KB to 48 KB of RAM on every machine, and most of
+# them have no Pi in them.
+set(NETDEV_GENET_SOURCES
     genet.c             # Broadcom GENET v5: the Pi 4's MAC behind a PiStorm32
     netdev_dtree.c      # Emu68's device tree and its GIC, for the GENET row
-    netdev_reset.c      # a bus master is stopped before a warm reboot
-    # The data path's bulk moves, from src/net68k rather than a private copy:
-    # the movem.l block and its measurements live there.  Two files, the same
-    # arrangement as src/net68k's own target -- the .S is #ifdef'd end to end
-    # on AMINETXDUO_NET68K_ASM and the .c supplies the symbols when it is off.
-    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
-    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+    netdev_reset.c)     # a bus master is stopped before a warm reboot
 
-if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
-    add_executable(anxnet_device ${NETDEV_SOURCES})
-    set_target_properties(anxnet_device PROPERTIES
-        OUTPUT_NAME "anxnet.device")
+# NETDEV_SOURCES is everything, for the host tests and anything that wants
+# the one-image view.
+set(NETDEV_SOURCES ${NETDEV_CORE_SOURCES} ${NETDEV_CLASSIC_SOURCES}
+                   ${NETDEV_GENET_SOURCES})
 
-    # Nothing references a romtag; -flto removes it and the link still
-    # succeeds.  See the -flto note in the top-level CMakeLists.txt.  The
-    # guard above already means cross-only, so this needs no second one.
-    target_link_options(anxnet_device PRIVATE "-Wl,-u,_netdev_romtag")
-
-    # Profile can recover the device's hunk addresses from the segment tag in
-    # its base.  Keep the other half of that contract beside the binary: a
-    # diagnostic non-LTO build's map and objects name every file-static
-    # routine once profreport.py has relocated those hunks.
-    target_link_options(anxnet_device PRIVATE
-        "-Wl,-Map=$<TARGET_FILE_DIR:anxnet_device>/anxnet.device.map")
-
-    target_include_directories(anxnet_device PRIVATE
+# One SANA-II device image.  `target` is the CMake target, `name` the file
+# (and the Exec device name), `roster` the NETDEV_ROSTER_* define, and the
+# rest are the sources beyond the core.
+function(anxd_add_netdev target name roster)
+    add_executable(${target} ${NETDEV_CORE_SOURCES} ${ARGN})
+    set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}")
+    target_compile_definitions(${target} PRIVATE
+        ${roster}
+        "NETDEV_DEVICE_NAME=\"${name}\"")
+    target_link_options(${target} PRIVATE "-Wl,-u,_netdev_romtag")
+    target_link_options(${target} PRIVATE
+        "-Wl,-Map=$<TARGET_FILE_DIR:${target}>/${name}.map")
+    target_include_directories(${target} PRIVATE
         ${AMINETXDUO_CORE_INCLUDES}
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_SOURCE_DIR}/src/net68k"   # n68k_iocopy.h, and nothing else
         "${CMAKE_SOURCE_DIR}/src/sana2")   # sana2_device.h, the command numbers
+    target_link_options(${target} PRIVATE -nostartfiles -Wl,--gc-sections)
+    target_compile_options(${target} PRIVATE -Os)
+    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:${target}>"
+            VERBATIM)
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DLIBRARY_BINARY=$<TARGET_FILE:${target}>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
+        VERBATIM)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DTOOL_BINARY=$<TARGET_FILE:${target}>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
+        VERBATIM)
+    if(AMIGA_SIZE)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:${target}>"
+            COMMENT "${name} size")
+    endif()
+endfunction()
 
+if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     if(AMINETXDUO_NET68K_ASM)
         set_source_files_properties(
             "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
@@ -79,84 +114,11 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
             PROPERTIES COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
     endif()
 
-    # No aminetxduo_common: that library defines its own SysBase handling and
-    # pulls the logging macros, and this image defines SysBase itself.
-    target_link_options(anxnet_device PRIVATE -nostartfiles -Wl,--gc-sections)
-
-    # -Os, and this used to be -O2 for the whole target -- "interrupt-path code
-    # and the receive service is the whole throughput figure".
-    #
-    # -O2 costs 15-21 KB here, which is far more than it looked. Built four
-    # ways at one commit:
-    #
-    #                    -O2       -Os
-    #     LTO          51,628    30,544
-    #     non-LTO      48,636    33,236
-    #
-    # It is also the whole reason anxnet.device was the one image that GREW
-    # under -flto while the other three shrank: at -O2 the LTO inliner is
-    # aggressive rather than size-constrained, so it added 3,652 bytes of code
-    # (relocations shrank ~670, netting +2,992). At -Os it behaves like
-    # everywhere else and comes out 8.1% smaller than non-LTO. LTO was never
-    # the anomaly; -O2 on a whole target was.
-    #
-    # 21 KB is a lot on a 2 MB A1200, but this is a driver and read throughput
-    # is the field metric, so size alone did not decide it. Measured on the
-    # A1200 + a2065 reference, 18 runs interleaved ABABAB/BABABA/ABABAB, nine
-    # per arm, loadavg recorded before each:
-    #
-    #     read    -O2 592.8 KB/s   -Os 586.2 KB/s   -1.12%, 95% CI -2.5..+0.2
-    #     write   -O2 346.7 KB/s   -Os 330.2 KB/s   -4.73%, t=16.8
-    #
-    # READ DOES NOT SEPARATE. The distributions overlap almost completely --
-    # the best -Os run beats seven of the nine -O2 runs, the worst -O2 run is
-    # below five of the nine -Os runs -- and the interval on the difference
-    # includes zero. The load asymmetry ran AGAINST -O2 (mean 2.54 against
-    # 1.98), so it cannot be what produced -O2's edge.
-    #
-    # WRITE REGRESSES 4.7% AND THAT ONE IS REAL: the two TX ranges do not
-    # overlap at all across nine runs each, and the 64 KB size-bounded arm
-    # shows the same 5.5%. Recorded rather than hidden. Read is the field
-    # metric and a write regression alone does not block a change, so this
-    # landed on 21,080 bytes for no measurable read cost.
-    target_compile_options(anxnet_device PRIVATE -Os)
-
-    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
-        add_custom_command(TARGET anxnet_device POST_BUILD
-            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:anxnet_device>"
-            VERBATIM)
-    endif()
-
-    # The same HUNK check the libraries use: magic, resident name list, and
-    # hunk 0 is HUNK_CODE.  It takes a path, so the name of the parameter is
-    # the only thing about it that says "library".
-    add_custom_command(TARGET anxnet_device POST_BUILD
-        COMMAND "${CMAKE_COMMAND}"
-                "-DLIBRARY_BINARY=$<TARGET_FILE:anxnet_device>"
-                -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
-        VERBATIM)
-
-    # The $VER: string, checked the way every command in src/tools is.  Found
-    # by AmigaDOS scanning the file, so no reference exists for the linker to
-    # see, and this target links --gc-sections.
-    add_custom_command(TARGET anxnet_device POST_BUILD
-        COMMAND "${CMAKE_COMMAND}"
-                "-DTOOL_BINARY=$<TARGET_FILE:anxnet_device>"
-                -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
-        VERBATIM)
-
-    if(AMIGA_SIZE)
-        add_custom_command(TARGET anxnet_device POST_BUILD
-            COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:anxnet_device>"
-            COMMENT "anxnet.device size")
-    endif()
+    anxd_add_netdev(anxnet_device   anxnet.device   NETDEV_ROSTER_CLASSIC
+                    ${NETDEV_CLASSIC_SOURCES})
+    anxd_add_netdev(anxgenet_device anxgenet.device NETDEV_ROSTER_GENET
+                    ${NETDEV_GENET_SOURCES})
 endif()
-
-# ---------------------------------------------------------------- host test --
-#
-# netdev_mcaf.c is the multicast hash and nothing else, which is why it is its
-# own file: it needs no chip, no bus and no Amiga, and it is the arithmetic
-# that decides whether an IPv6 solicited-node frame is ever delivered.
 
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_netdev_mcaf

@@ -15,6 +15,9 @@
 
 #include <exec/types.h>
 
+#include "aminetxduo/anxnet.h"
+#include "netdev_roster.h"
+
 /*
  * Chip family.  The value picks the ops table in netdev_nic_ops_for(), at the
  * foot of netdev_cards.c, so a LANCE (A2065, Ariadne I) is a new value here

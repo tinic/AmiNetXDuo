@@ -13,8 +13,12 @@
 extern "C" {
 #endif
 
-/* Long enough that no other publisher can hit it, and it names the driver. */
-#define ANXDIAG_NAME        "anxnet.device.Probe"
+/* Long enough that no other publisher can hit it, and it names the driver:
+   anxnet.device publishes under ANXDIAG_NAME, anxgenet.device under its own
+   name with the same suffix (netdev_diag.c), and CheckNetDevice DEVICE
+   <name> reads either. */
+#define ANXDIAG_NAME_SUFFIX ".Probe"
+#define ANXDIAG_NAME        "anxnet.device" ANXDIAG_NAME_SUFFIX
 #define ANXDIAG_MAGIC       0x414E5844UL      /* 'ANXD' */
 #define ANXDIAG_VERSION     1
 

@@ -50,16 +50,22 @@ asm("    .text                   \n"
 #define NETDEV_VERSION      1
 #define NETDEV_REVISION     0
 
-static char netdev_name[] = ANXNET_DEVICE_NAME;
+static char netdev_name[] = NETDEV_DEVICE_NAME;
 
 static const char netdev_ver[] __attribute__((used)) =
-    "$VER: " ANXNET_DEVICE_NAME " " AMINETXDUO_VERSION
+    "$VER: " NETDEV_DEVICE_NAME " " AMINETXDUO_VERSION
     " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH
     AMINETXDUO_VERSION_CPU;
 
 static char netdev_id[] =
-    ANXNET_DEVICE_NAME " " AMINETXDUO_VERSION
-    " (AmiNetXDuo, NE2000/DP8390 family)\r\n";
+    NETDEV_DEVICE_NAME " " AMINETXDUO_VERSION
+#if NETDEV_HAS_CLASSIC && NETDEV_HAS_DTREE
+    " (AmiNetXDuo, every card)\r\n";
+#elif NETDEV_HAS_CLASSIC
+    " (AmiNetXDuo, NE2000/DP8390, LANCE, EtherLink III)\r\n";
+#else
+    " (AmiNetXDuo, Raspberry Pi 4 GENET behind Emu68)\r\n";
+#endif
 
 static struct Device *netdev_open(
     register struct Device     *dev   __asm("a6"),
@@ -1229,6 +1235,7 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event)
     netdev_set_offline(unit, event, TRUE);
 }
 
+#if NETDEV_HAS_PCMCIA
 VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event)
 {
     /* card.resource has already reset the socket control registers.  The
@@ -1236,6 +1243,7 @@ VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event)
        to empty space. */
     netdev_set_offline(unit, event, FALSE);
 }
+#endif
 
 /* ------------------------------------------------------ interrupt server -- */
 
@@ -1313,11 +1321,13 @@ static VOID netdev_int_add(NetdevUnit *unit)
 {
     if (netdev_pcmcia_is_unit(unit))
         return;
+#if NETDEV_HAS_DTREE
     if (unit->nu_Nic.card->bus == NETDEV_BUS_DTREE)
     {
         (VOID)netdev_dtree_int_add(unit->nu_Nic.dt_irq, &unit->nu_Intr);
         return;
     }
+#endif
     AddIntServer(INTB_PORTS, &unit->nu_Intr);
 }
 
@@ -1325,11 +1335,13 @@ static VOID netdev_int_rem(NetdevUnit *unit)
 {
     if (netdev_pcmcia_is_unit(unit))
         return;
+#if NETDEV_HAS_DTREE
     if (unit->nu_Nic.card->bus == NETDEV_BUS_DTREE)
     {
         netdev_dtree_int_rem(unit->nu_Nic.dt_irq, &unit->nu_Intr);
         return;
     }
+#endif
     RemIntServer(INTB_PORTS, &unit->nu_Intr);
 }
 
@@ -1620,11 +1632,13 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
      * configured, so this runs before attach.  A refusal is not passed on to
      * attach, which would read a floating bus and file the wrong reason.
      */
+#if NETDEV_HAS_ZORRO
     if (!netdev_isapnp_configure(card, board))
     {
         nd_trace("anx: isapnp failed\r\n");
         return FALSE;
     }
+#endif
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
         nd_trace("anx: attach failed\r\n");
@@ -1689,6 +1703,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     return TRUE;
 }
 
+#if NETDEV_HAS_PCMCIA
 BOOL netdev_pcmcia_reattach(NetdevUnit *unit, const NetdevCard *card, APTR board)
 {
     if (unit == NULL || card == NULL || card->bus != NETDEV_BUS_PCMCIA ||
@@ -1708,8 +1723,10 @@ BOOL netdev_pcmcia_reattach(NetdevUnit *unit, const NetdevCard *card, APTR board
     unit->nu_Nic.board = (volatile UBYTE *)board;
     return (BOOL)(unit->nu_Nic.ops->attach(&unit->nu_Nic) == 0);
 }
+#endif /* NETDEV_HAS_PCMCIA */
 
-static VOID netdev_probe(NetdevDevice *dev)
+#if NETDEV_HAS_ZORRO
+static VOID netdev_probe_zorro(NetdevDevice *dev)
 {
     struct ConfigDev *cd = NULL;
     ULONG             boards = 0;
@@ -1775,96 +1792,130 @@ static VOID netdev_probe(NetdevDevice *dev)
     }
 
     netdev_diag_note(ANXDIAG_BOARDS, ANXDIAG_NOCARD, (ULONG)boards);
+}
+#endif /* NETDEV_HAS_ZORRO */
+
+#if NETDEV_HAS_FIXED
+static VOID netdev_probe_fixed(NetdevDevice *dev)
+{
+    UWORD i;
+
+    /* The fixed-address rows: nothing to claim and nothing to configure.
+       The board is wherever the machine puts it, and attach() deciding
+       the chip is not answering is the whole of the probe. */
+    for (i = 0; i < netdev_card_count; i++)
+    {
+        const NetdevCard *card = &netdev_cards[i];
+        APTR              base;
+
+        if (card->bus != NETDEV_BUS_FIXED)
+            continue;
+        if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
+        {
+            dev->nd_UnitsDropped++;
+            netdev_diag_note(ANXDIAG_UNITS_FULL, i,
+                             (ULONG)NETDEV_MAX_UNITS);
+            break;
+        }
+
+        base = (APTR)(ULONG)card->base;
+        netdev_diag_note(ANXDIAG_FIXED_TRY, i, (ULONG)base);
+
+        nd_tracex("anx: fixed base ", (ULONG)base);
+        (VOID)netdev_add_unit(dev, card, base, 0, NULL);
+    }
+}
+#endif /* NETDEV_HAS_FIXED */
+
+#if NETDEV_HAS_PCMCIA
+static VOID netdev_probe_pcmcia(NetdevDevice *dev)
+{
+    /*
+     * The slot once, not once per PCMCIA row.  There is one slot and
+     * netdev_pcmcia.c holds one handle for it, so a second claim would
+     * overwrite the handle card.resource still holds.
+     */
+    if (dev->nd_UnitCount < NETDEV_MAX_UNITS)
+    {
+        const NetdevCard *card = NULL;
+        APTR              base;
+
+        ObtainSemaphore(&dev->nd_PcmciaLock);
+        base = netdev_pcmcia_claim(dev, &card);
+
+        if (base != NULL)
+        {
+            nd_tracex("anx: pcmcia base ", (ULONG)base);
+            if (!netdev_add_unit(dev, card, base, 0, NULL))
+                netdev_pcmcia_release();
+            else
+                netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
+        }
+        ReleaseSemaphore(&dev->nd_PcmciaLock);
+    }
+}
+#endif /* NETDEV_HAS_PCMCIA */
+
+#if NETDEV_HAS_DTREE
+static VOID netdev_probe_dtree(NetdevDevice *dev)
+{
+    UWORD i;
 
     /*
-     * The slot last, so a machine with both keeps its Zorro unit numbers where
-     * they were: a PCMCIA card is the one card that can be inserted between two
-     * boots.
+     * The device-tree rows LAST: a board Emu68 describes rather than one
+     * the bus enumerates.  No tree, no unit, which is every machine that
+     * is not a PiStorm; the lookup itself is what says so.  After the
+     * slot for the same reason the slot is after Zorro: the 3c589 in an
+     * A1200's slot was unit 0 before this row existed, and an interface
+     * file that says UNIT=0 keeps meaning it.  CARD=genet names this row
+     * whatever else is fitted.
      */
+    for (i = 0; i < netdev_card_count; i++)
     {
-        UWORD i;
+        const NetdevCard *card = &netdev_cards[i];
+        NetdevDtInfo      dt;
 
-        /* The fixed-address rows: nothing to claim and nothing to configure.
-           The board is wherever the machine puts it, and attach() deciding
-           the chip is not answering is the whole of the probe. */
-        for (i = 0; i < netdev_card_count; i++)
+        if (card->bus != NETDEV_BUS_DTREE || card->compat == NULL)
+            continue;
+        if (!netdev_dtree_find(card->compat, &dt))
+            continue;
+        netdev_diag_note(ANXDIAG_DTREE_FOUND, i, dt.base);
+        if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
         {
-            const NetdevCard *card = &netdev_cards[i];
-            APTR              base;
-
-            if (card->bus != NETDEV_BUS_FIXED)
-                continue;
-            if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
-            {
-                dev->nd_UnitsDropped++;
-                netdev_diag_note(ANXDIAG_UNITS_FULL, i,
-                                 (ULONG)NETDEV_MAX_UNITS);
-                break;
-            }
-
-            base = (APTR)(ULONG)card->base;
-            netdev_diag_note(ANXDIAG_FIXED_TRY, i, (ULONG)base);
-
-            nd_tracex("anx: fixed base ", (ULONG)base);
-            (VOID)netdev_add_unit(dev, card, base, 0, NULL);
+            dev->nd_UnitsDropped++;
+            netdev_diag_note(ANXDIAG_UNITS_FULL, i,
+                             (ULONG)NETDEV_MAX_UNITS);
+            break;
         }
 
-        /*
-         * The slot once, not once per PCMCIA row.  There is one slot and
-         * netdev_pcmcia.c holds one handle for it, so a second claim would
-         * overwrite the handle card.resource still holds.
-         */
-        if (dev->nd_UnitCount < NETDEV_MAX_UNITS)
-        {
-            const NetdevCard *card = NULL;
-            APTR              base;
-
-            ObtainSemaphore(&dev->nd_PcmciaLock);
-            base = netdev_pcmcia_claim(dev, &card);
-
-            if (base != NULL)
-            {
-                nd_tracex("anx: pcmcia base ", (ULONG)base);
-                if (!netdev_add_unit(dev, card, base, 0, NULL))
-                    netdev_pcmcia_release();
-                else
-                    netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
-            }
-            ReleaseSemaphore(&dev->nd_PcmciaLock);
-        }
-
-        /*
-         * The device-tree rows LAST: a board Emu68 describes rather than one
-         * the bus enumerates.  No tree, no unit, which is every machine that
-         * is not a PiStorm; the lookup itself is what says so.  After the
-         * slot for the same reason the slot is after Zorro: the 3c589 in an
-         * A1200's slot was unit 0 before this row existed, and an interface
-         * file that says UNIT=0 keeps meaning it.  CARD=genet names this row
-         * whatever else is fitted.
-         */
-        for (i = 0; i < netdev_card_count; i++)
-        {
-            const NetdevCard *card = &netdev_cards[i];
-            NetdevDtInfo      dt;
-
-            if (card->bus != NETDEV_BUS_DTREE || card->compat == NULL)
-                continue;
-            if (!netdev_dtree_find(card->compat, &dt))
-                continue;
-            netdev_diag_note(ANXDIAG_DTREE_FOUND, i, dt.base);
-            if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
-            {
-                dev->nd_UnitsDropped++;
-                netdev_diag_note(ANXDIAG_UNITS_FULL, i,
-                                 (ULONG)NETDEV_MAX_UNITS);
-                break;
-            }
-
-            nd_tracex("anx: dtree base ", dt.base);
-            (VOID)netdev_add_unit(dev, card, (APTR)dt.base, 0, &dt);
-        }
-
+        nd_tracex("anx: dtree base ", dt.base);
+        (VOID)netdev_add_unit(dev, card, (APTR)dt.base, 0, &dt);
     }
+}
+#endif /* NETDEV_HAS_DTREE */
+
+/*
+ * The buses in the order that keeps unit numbers stable across boots and
+ * across cards that come and go: Zorro (autoconfig order), the fixed rows,
+ * the PCMCIA slot last among the Amiga buses because it is the one card that
+ * can be inserted between two boots, and the device tree after all of them
+ * so an A1200's 3c589 keeps UNIT=0 when the Pi's Ethernet is added.  Which of
+ * these exist in this image is netdev_roster.h's business.
+ */
+static VOID netdev_probe(NetdevDevice *dev)
+{
+#if NETDEV_HAS_ZORRO
+    netdev_probe_zorro(dev);
+#endif
+#if NETDEV_HAS_FIXED
+    netdev_probe_fixed(dev);
+#endif
+#if NETDEV_HAS_PCMCIA
+    netdev_probe_pcmcia(dev);
+#endif
+#if NETDEV_HAS_DTREE
+    netdev_probe_dtree(dev);
+#endif
 }
 
 /* ------------------------------------------------------------ unit lookup - */
@@ -1937,6 +1988,7 @@ static NetdevUnit *netdev_find_unit(NetdevDevice *dev, ULONG unit,
  * slot, so a card inserted after the romtag probe needs one task-context retry.
  * PCMCIA is deliberately last in probe order.
  */
+#if NETDEV_HAS_PCMCIA
 static BOOL netdev_request_is_pcmcia(NetdevDevice *dev, ULONG unit,
                                      const char *pin_name,
                                      const NetdevCard **wanted)
@@ -2012,6 +2064,10 @@ static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
     ReleaseSemaphore(&dev->nd_PcmciaLock);
     return found;
 }
+#else
+#define netdev_try_pcmcia_open(dev, unit, pin, why) \
+    ((VOID)(dev), (VOID)(unit), (VOID)(pin), (VOID)(why), (NetdevUnit *)NULL)
+#endif /* NETDEV_HAS_PCMCIA */
 
 /* ---------------------------------------------------------- the tag list -- */
 
@@ -2352,7 +2408,9 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
      * removal Interrupt hanging off it are statics in this driver's own BSS, so
      * an unload without a release leaves card.resource a node in freed memory.
      */
+#if NETDEV_HAS_PCMCIA
     netdev_pcmcia_release();
+#endif
 
     /*
      * nd_Diag is inside this device base, so the record must leave the semaphore

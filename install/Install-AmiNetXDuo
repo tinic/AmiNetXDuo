@@ -293,8 +293,11 @@
 (set H_ANXNET
   (cat "anxnet.device is the SANA-II driver AmiNetXDuo builds itself.  It "
        "drives the A2065, the Ariadne, the Ariadne II, the X-Surf, the "
-       "X-Surf 100 and NE2000-compatible PCMCIA cards, and it goes where "
-       "SANA-II drivers belong, in DEVS:Networks.\n\n"
+       "X-Surf 100, NE2000-compatible PCMCIA cards and the 3Com 3C589, and it "
+       "goes where SANA-II drivers belong, in DEVS:Networks.  anxgenet.device "
+       "goes beside it: the same driver with only the Raspberry Pi 4's own "
+       "Ethernet in it, for a PiStorm32 running Emu68 "
+       "(DEVICE=anxgenet.device, UNIT=0).\n\n"
        "COPYING IT CHANGES NOTHING BY ITSELF.  Which driver this machine "
        "opens is the DEVICE= line in DEVS:NetInterfaces, and this installer "
        "writes that line with the driver that came with the card.  Nothing "
@@ -304,10 +307,10 @@
        "\tDEVICE=DEVS:Networks/anxnet.device\n\tCARD=<the card>\n\n"
        "CheckNetDevice reports what it found on this machine, and the guide "
        "lists the cards and their CARD= names.\n\n"
-       "Say no on a machine that has no use for it, or to keep an "
+       "Say no on a machine that has no use for them, or to keep an "
        "anxnet.device that is already there exactly as it is.\n\n"
-       "An existing one is renamed to anxnet.device.old rather than being "
-       "deleted, so the previous driver can be put back by hand."))
+       "An existing one is renamed to .old rather than being deleted, so "
+       "the previous driver can be put back by hand."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -547,10 +550,16 @@
 ; so a machine kept whatever anxnet.device it already had; an existence test
 ; that skipped the copy without a word would be the same defect wearing a
 ; guard.
-(set S_ANXNET (tackon (tackon S_DEVS "Networks") "anxnet.device"))
+(set S_ANXNET   (tackon (tackon S_DEVS "Networks") "anxnet.device"))
+(set S_ANXGENET (tackon (tackon S_DEVS "Networks") "anxgenet.device"))
 
 (if (NOT (exists S_ANXNET (noreq)))
     (abort "This archive has no Devs/Networks/anxnet.device.\n\n"
+           "The download is incomplete, or was unpacked with a tool that "
+           "dropped the subdrawers.\n\n"
+           "Nothing was changed."))
+(if (NOT (exists S_ANXGENET (noreq)))
+    (abort "This archive has no Devs/Networks/anxgenet.device.\n\n"
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
@@ -1354,7 +1363,50 @@
             (help H_REPLACELIB))
   ))
 
-; --- anxnet.device -------------------------------------------------------
+; One driver image into DEVS:Networks: dev_file is the name, dev_source the
+; archive copy, dev_prompt what the copy says.  Staged as .new, the previous
+; one renamed to .old, then the new one put in place.
+(procedure P_install_device
+  (set dev_dest (tackon (tackon D_DEVS "Networks") dev_file))
+  (set dev_new  (cat dev_dest ".new"))
+  (set dev_old  (cat dev_dest ".old"))
+  (if (exists dev_new (noreq))
+      (delete dev_new
+              (prompt (cat "Removing a leftover " dev_file ".new"))
+              (help @copyfiles-help)
+              (optional "force" "nofail")))
+  (if (exists dev_new (noreq))
+      (abort
+        (cat "The leftover staging file " dev_new " could not be removed. "
+             "It might be incomplete, so the installer will not mistake it "
+             "for this run's copy. Remove it and run the installer again.")))
+  (copyfiles
+    (prompt  dev_prompt)
+    (help    H_ANXNET)
+    (source  dev_source)
+    (dest    (tackon D_DEVS "Networks"))
+    (newname (cat dev_file ".new"))
+    (optional "force"))
+  (if (exists dev_new (noreq))
+    (
+      (if (exists dev_dest (noreq))
+        (
+          (if (exists dev_old (noreq))
+              (delete dev_old
+                      (prompt (cat "Removing the previous " dev_file ".old"))
+                      (help @copyfiles-help)
+                      (optional "force" "nofail")))
+          (rename dev_dest dev_old
+                  (prompt (cat "Renaming the old " dev_file " out of the way"))
+                  (help H_ANXNET))
+        ))
+      (rename dev_new dev_dest
+              (prompt (cat "Putting the new " dev_file " in place"))
+              (help H_ANXNET))
+    ))
+)
+
+; --- anxnet.device and anxgenet.device -------------------------------------------------------
 ;
 ; The decision, and why it changed, is at DO_ANXNET in section 4 beside the
 ; question.  This is what a yes does.
@@ -1387,47 +1439,23 @@
 
     ; Staged, then swapped, for the reason given at the libraries above: a
     ; driver that is open cannot be written over, and moving it aside before
-    ; the copy leaves a window with no anxnet.device at all.
-    (if (exists D_ANX_NEW (noreq))
-        (delete D_ANX_NEW
-                (prompt "Removing a leftover anxnet.device.new")
-                (help @copyfiles-help)
-                (optional "force" "nofail")))
-    (if (exists D_ANX_NEW (noreq))
-        (abort
-          (cat "The leftover staging file " D_ANX_NEW " could not be removed. "
-               "It might be incomplete, so the installer will not mistake it "
-               "for this run's copy. Remove it and run the installer again.")))
+    ; the copy leaves a window with no driver at all.  Once per image.
+    (set dev_file   "anxnet.device")
+    (set dev_source S_ANXNET)
+    (set dev_prompt (cat "Installing anxnet.device into DEVS:Networks\n\n"
+                         "The SANA-II driver for the A2065, the Ariadne, the "
+                         "Ariadne II, the X-Surf, the X-Surf 100, NE2000 PCMCIA "
+                         "cards and the 3C589.  Nothing uses it until an "
+                         "interface file names it."))
+    (P_install_device)
 
-    (copyfiles
-      (prompt (cat "Installing anxnet.device into DEVS:Networks\n\n"
-                   "The SANA-II driver for the A2065, the Ariadne, the "
-                   "Ariadne II, the X-Surf, the X-Surf 100 and NE2000 PCMCIA "
-                   "cards.  Nothing uses it until an interface file names "
-                   "it."))
-      (help   H_ANXNET)
-      (source S_ANXNET)
-      (dest   (tackon D_DEVS "Networks"))
-      (newname "anxnet.device.new")
-      (optional "force"))
-
-    (if (exists D_ANX_NEW (noreq))
-      (
-        (if (exists D_ANX (noreq))
-          (
-            (if (exists D_ANX_OLD (noreq))
-                (delete D_ANX_OLD
-                        (prompt "Removing the previous anxnet.device.old")
-                        (help @copyfiles-help)
-                        (optional "force" "nofail")))
-            (rename D_ANX D_ANX_OLD
-                    (prompt "Renaming the old anxnet.device out of the way")
-                    (help H_ANXNET))
-          ))
-        (rename D_ANX_NEW D_ANX
-                (prompt "Putting the new anxnet.device in place")
-                (help H_ANXNET))
-      ))
+    (set dev_file   "anxgenet.device")
+    (set dev_source S_ANXGENET)
+    (set dev_prompt (cat "Installing anxgenet.device into DEVS:Networks\n\n"
+                         "The same driver with only the Raspberry Pi 4's own "
+                         "Ethernet in it, for a PiStorm32 running Emu68.  "
+                         "Nothing uses it until an interface file names it."))
+    (P_install_device)
   ))
 
 ; --- tls.library, if this archive has one --------------------------------

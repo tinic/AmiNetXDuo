@@ -91,7 +91,7 @@ AmiNetXDuo/Libs/micro/*             | not-installed | sometimes | The floor stac
 AmiNetXDuo/Libs/bsdsocket.library   | installed     | always    | (tackon S_LIBS "bsdsocket.library")
 AmiNetXDuo/Libs/usergroup.library   | installed     | always    | (tackon S_LIBS "usergroup.library")
 AmiNetXDuo/Libs/tls.library         | installed     | sometimes | (tackon S_LIBS "tls.library")
-AmiNetXDuo/Devs/Networks/*          | installed     | always    | (source S_ANXNET)
+AmiNetXDuo/Devs/Networks/*          | installed     | always    | (source  dev_source)
 AmiNetXDuo/Devs/Internet/certificates | installed   | sometimes | (tackon (tackon S_DEVS "Internet") "certificates")
 AmiNetXDuo/Devs/Internet/*          | installed     | always    | (tackon (tackon S_DEVS "Internet") NDB_F)
 

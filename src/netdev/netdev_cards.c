@@ -1,5 +1,8 @@
 /*
- * anxnet.device, the card table.
+ * anxnet.device and anxgenet.device, the card table.  One source, two
+ * images: netdev_roster.h decides which rows an image carries, and a row's
+ * unit pin is (its index in THAT image's table + 1) * 100, so anxgenet.device
+ * has the GENET at pin 100 and anxnet.device keeps every pin it published.
  *
  * The registers are byte-swapped on the Amiga side of all of these, which is
  * why nothing in netdev_bus.c swaps anything.
@@ -10,6 +13,7 @@
 #include "netdev_cards.h"
 #include "netdev_nic.h"
 
+#if NETDEV_HAS_CLASSIC
 /*
  * The X-Surf 500's register file, transcribed from
  * wiki.icomp.de/wiki/X-Surf-500_registers and not computed: the ACA500 header
@@ -41,12 +45,14 @@ static const NetdevIsaPnp xsurf_pnp =
     0,          /* logical device 0                                          */
     32          /* ports: the NE2000 register file, NIC block plus ASIC      */
 };
+#endif /* NETDEV_HAS_CLASSIC */
 
 const NetdevCard netdev_cards[] =
 {
     /* name        manid prodid reg_off stride wide_off
        chip                bps         ax  mem_off mem_size prom_off
        bus               base      odd_off  swap  regmap  oui  pnp */
+#if NETDEV_HAS_CLASSIC
     { "xsurf100",  4626,   100, 0x0800,     4, 0x8880,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
       NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
@@ -151,6 +157,9 @@ const NetdevCard netdev_cards[] =
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
       NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
 
+#endif /* NETDEV_HAS_CLASSIC */
+
+#if NETDEV_HAS_DTREE
     /*
      * The Raspberry Pi 4 / CM4's own Ethernet, reached through a PiStorm32
      * running Emu68.  No autoconfig record and no fixed address: Emu68's
@@ -163,6 +172,7 @@ const NetdevCard netdev_cards[] =
     { "genet",        0,     0, 0x0000,     4,      0,
       NETDEV_CHIP_GENET, 1000000000UL, 0,       0,       0,       0,
       NETDEV_BUS_DTREE, 0, 0, 0, NULL, 0, NULL, "brcm,bcm2711-genet-v5" },
+#endif /* NETDEV_HAS_DTREE */
 };
 
 const UWORD netdev_card_count =
@@ -175,6 +185,7 @@ const UWORD netdev_card_count =
  */
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
 {
+#if NETDEV_HAS_CLASSIC
     if (chip == NETDEV_CHIP_NE2000)
         return &netdev_nic_ne2000;
     if (chip == NETDEV_CHIP_ED)
@@ -183,8 +194,11 @@ const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
         return &netdev_nic_lance;
     if (chip == NETDEV_CHIP_EL3)
         return &netdev_nic_el3;
+#endif
+#if NETDEV_HAS_DTREE
     if (chip == NETDEV_CHIP_GENET)
         return &netdev_nic_genet;
+#endif
 
     return NULL;
 }

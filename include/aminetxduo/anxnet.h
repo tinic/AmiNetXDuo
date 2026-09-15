@@ -7,6 +7,8 @@
 #define AMINETXDUO_ANXNET_H
 
 #define ANXNET_DEVICE_NAME      "anxnet.device"
+/* The same driver core with only the Pi 4's GENET in it (netdev_roster.h). */
+#define ANXGENET_DEVICE_NAME    "anxgenet.device"
 
 /* S2_Dummy is (TAG_USER + 0xB0000); Commodore used +1..+3, and +4/+5 are the
    widely-deployed CopyToBuff16 pair, so this sits clear of both. */
