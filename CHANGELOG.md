@@ -13,6 +13,9 @@ version at the top when it merges.
   on: the card sends PAUSE when seven receive pages remain instead of
   overrunning and resetting. 28 bytes in `anxnet.device`
 
+- The A2065 and Ariadne receive ring is 16 buffers, 19 ms of back-to-back
+  maximum frames at 10 Mbit; it was 8. 30,980 of the 32 KB SRAM in use
+
 - `CheckNetDevice` reports the 3c589's transmit FIFO size, read once at
   attach from an empty FIFO. A real card answers 3068 bytes, two 1514-byte
   frames

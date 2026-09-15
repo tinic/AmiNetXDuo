@@ -53,18 +53,26 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  */
 
 /*
- * The rings and buffers, as offsets into the board's SRAM.  Eight receive
- * buffers is a frame every 1.2 ms at 10 Mbit before the ring can overrun.
+ * The rings and buffers, as offsets into the board's SRAM.  Sixteen receive
+ * buffers is 19 ms of back-to-back maximum frames at 10 Mbit before the ring
+ * can overrun; eight was 9.6 ms, and left 14 KB of the 32 KB SRAM unused.
+ * The chip drops a frame it has no descriptor for (MISS, counted in
+ * rx_errors) and every such drop is a TCP retransmit on a machine that was
+ * already too busy to drain the ring -- a 7 MHz A2000 under a bulk receive.
+ * The depth is the one lever the board has against that, and it is free:
+ * 0x100 + 16 x 1536 + 4 + 4 x 1536 = 30,980 of 32,768.  The emulator never
+ * shows a MISS at any depth (417 rig runs, rx_errors 0), so this is sized
+ * for the real machine rather than measured on the rig.
  */
-#define LE_RX_LOG       3
-#define LE_RX_RING      (1u << LE_RX_LOG)       /* 8 */
+#define LE_RX_LOG       4
+#define LE_RX_RING      (1u << LE_RX_LOG)       /* 16 */
 #define LE_TX_LOG       2
 #define LE_TX_RING      (1u << LE_TX_LOG)       /* 4 */
 #define LE_BUFSZ        1536
 
 #define LE_INIT_OFF     0x0000                  /* 24 bytes */
-#define LE_RXD_OFF      0x0020                  /* 8 x 8 */
-#define LE_TXD_OFF      0x0060                  /* 4 x 8 */
+#define LE_RXD_OFF      0x0020                  /* 16 x 8, to 0xa0 */
+#define LE_TXD_OFF      0x00a0                  /* 4 x 8, to 0xc0 */
 
 /*
  * THE RECEIVE BUFFERS START TWO BYTES IN, AND THAT IS THE POINT.
@@ -170,6 +178,16 @@ LANCE cannot place"
 #endif
 #if LE_TXB_OFF < (LE_RXB_OFF + LE_RX_RING * LE_BUFSZ)
 #error "the transmit buffers overlap the receive ring"
+#endif
+#if LE_TXD_OFF < (LE_RXD_OFF + LE_RX_RING * 8) || \
+    (LE_TXD_OFF + LE_TX_RING * 8) > LE_RXB_OFF - LE_RXB_PHASE
+#error "the descriptor rings overlap each other or the first receive buffer"
+#endif
+#if (LE_RXD_OFF & 7u) != 0 || (LE_TXD_OFF & 7u) != 0
+#error "the Am7990 reads descriptor rings on quadword boundaries"
+#endif
+#if LE_END > 0x8000
+#error "the rings and buffers do not fit a 32 KB SRAM"
 #endif
 
 static volatile UBYTE *le_ram(NetdevNic *nic)
