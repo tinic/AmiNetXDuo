@@ -78,7 +78,8 @@ CMDS=(ActivateAmiNetXDuo AddNetInterface NetSetup Online Offline ShowNetStatus S
       iperf
       CheckNetConfig CheckNetDevice GetNetStatus NetShutdown RemoveNetInterface
       ConfigureNetInterface
-      AddNetRoute DeleteNetRoute)
+      AddNetRoute DeleteNetRoute
+      NetDevStats)
 
 # ------------------------------------------------------------- the builds --
 #

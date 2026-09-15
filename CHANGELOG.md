@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `NetDevStats` ships in C:, 6,132 bytes: every SANA-II counter and named
+  record of any driver
+
 - **`anxnet.device` drives the Raspberry Pi 4 / CM4's own Ethernet behind
   a PiStorm32 running Emu68: card type `genet`.** The GENET v5 MAC is found
   through Emu68's device tree (`devicetree.resource`: register window,
