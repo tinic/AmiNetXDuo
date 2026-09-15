@@ -694,8 +694,10 @@ _Static_assert(((AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE) & 3) == 0,
 _Static_assert((NX_PACKET_ALIGNMENT % 4) == 0,
                "packet payloads are not longword aligned");
 
-/* Position the packet and work out where the copy hook must write. */
-static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
+/* Position the packet and work out where the copy hook must write.
+   always_inline for the reason ami_sana2_rx_post_slot() gives. */
+static inline VOID __attribute__((always_inline)) ami_sana2_rx_arm(
+    AmiSana2If *iface, AmiRxSlot *slot)
 {
     NX_PACKET *packet = slot->packet;
     UCHAR     *base   = packet->nx_packet_data_start + AMI_SANA2_RX_PAD;
@@ -782,7 +784,16 @@ static VOID ami_sana2_rx_mark_reset(AmiSana2Rx *rx)
  * interrupt level and the device may complete this read before a store made
  * after the BeginIO() would have landed.
  */
-static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
+/*
+ * always_inline, and not left to the heuristic.  Three call sites, and the
+ * -Os inliner weighs each against a size estimate that shifts with the rest
+ * of the LTO unit: 1b0bcbbc added routes and account-file parsing nowhere
+ * near this file and this went out of line, a jsr on the per-frame path.
+ * Pinning it moved the same verdict onto ami_sana2_rx_arm(), so that one is
+ * pinned too.  tools/check-hot-calls.sh is what notices.
+ */
+static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
+    AmiSana2Rx *rx, AmiRxSlot *slot)
 {
     AmiSana2If *iface = rx->iface;
 
