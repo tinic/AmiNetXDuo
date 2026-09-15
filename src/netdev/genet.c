@@ -62,6 +62,24 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define GE_ALIGN        4096        /* a page: the cache op works in pages */
 #define GE_Q            GENET_DMA_DEFAULT_QUEUE
 
+/*
+ * Receive interrupt coalescing: an interrupt after this many frames, or this
+ * many 8.192 us ticks (125 MHz / 1024) after the first one waiting.  Every
+ * interrupt on Emu68 is ~60 us of ROM before this driver sees it (the
+ * profile puts it in timer.device's INT6 region), so fewer is the whole
+ * lever; the timeout bounds the latency a lone frame pays.  Measured on
+ * the A1200, iperf RX / TX Mbit/s: 500 us 120-122 / 63-65, 750 us 117 / 69,
+ * 1000 us 112 / 73 -- the timeout trades receive for transmit almost one
+ * for one, and receive is what a download is, so 500 us.  The frame count
+ * makes no measured difference at these rates (5 frames arrive in 500 us).
+ */
+#ifndef GE_RX_COALESCE_FRAMES
+#define GE_RX_COALESCE_FRAMES   32
+#endif
+#ifndef GE_RX_COALESCE_TICKS
+#define GE_RX_COALESCE_TICKS    61      /* 500 us */
+#endif
+
 /* The chip shifts every received frame two bytes into its buffer
    (GENET_RBUF_ALIGN_2B), which puts the IP header on a longword. */
 #define GE_RX_PAD       2
@@ -554,17 +572,14 @@ static VOID ge_init_rings(NetdevNic *nic)
     ge_wr(nic, GENET_RX_DMA_READ_PTR_LO(GE_Q), 0);
     ge_wr(nic, GENET_RX_DMA_READ_PTR_HI(GE_Q), 0);
     /*
-     * Interrupt after 16 frames or 500 us (125 MHz / 1024 ticks: 61).  The
-     * reference driver says 10 and 57 us; at the rates this machine
-     * receives (100 Mbit/s is a frame every 115 us) that was an interrupt
-     * per frame, and each one is ~40 us of Emu68's interrupt path.  500 us
-     * is what genet.device 3.14 settled on for the same machine, and its
-     * 20 us arm measured slower.
+     * The reference driver says 10 frames and 57 us; at the rates this
+     * machine receives (100 Mbit/s is a frame every 115 us) that was an
+     * interrupt per frame.  GE_RX_COALESCE_* above says what was measured.
      */
-    ge_wr(nic, GENET_RX_DMA_MBUF_DONE_THRES(GE_Q), 16);
+    ge_wr(nic, GENET_RX_DMA_MBUF_DONE_THRES(GE_Q), GE_RX_COALESCE_FRAMES);
     v = ge_rd(nic, GENET_RX_DMA_RING_TIMEOUT(GE_Q));
     ge_wr(nic, GENET_RX_DMA_RING_TIMEOUT(GE_Q),
-          (v & ~GENET_DMA_RING_TIMEOUT_MASK) | 61);
+          (v & ~GENET_DMA_RING_TIMEOUT_MASK) | GE_RX_COALESCE_TICKS);
     ge_wr(nic, GENET_RX_DMA_RING_CFG, 1UL << GE_Q);
     v = ge_rd(nic, GENET_RX_DMA_CTRL);
     ge_wr(nic, GENET_RX_DMA_CTRL,
@@ -734,6 +749,29 @@ static VOID genet_reset(NetdevNic *nic)
 
 /* ------------------------------------------------------------- receive --- */
 
+/*
+ * Copy `count` longwords and return their ones-complement sum: the contract of
+ * src/net68k's n68k_copy_sum_longwords(), written out here because that
+ * routine lives behind the stack's headers and this device links none of
+ * them.  A plain loop, and on Emu68's JIT -- the only place a GENET is --
+ * that is what the movem version would become anyway.
+ */
+static ULONG ge_copy_sum(ULONG *to, const ULONG *from, ULONG count)
+{
+    ULONG acc = 0;
+
+    while (count-- != 0)
+    {
+        ULONG w = *from++;
+
+        *to++ = w;
+        acc += w;
+        if (acc < w)
+            acc++;                      /* end-around carry */
+    }
+    return acc;
+}
+
 static VOID ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     APTR   token = NULL;
@@ -745,18 +783,42 @@ static VOID ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 
     if (dst != NULL)
     {
-        /* Payload to the opener's slot.  frame + 14 is on a longword: the
-           buffer is 64-aligned and the chip shifted the frame by two. */
-        UWORD plen = (UWORD)(len - NETDEV_HDR_LEN);
-        UWORD bulk = (UWORD)(plen & (UWORD)~3u);
-        UWORD i;
+        /*
+         * Payload to the opener's slot, summed on the way: the copy's loads
+         * pay for the ones-complement sum the stack's verifier wants, and a
+         * frame handed up summed is not walked a second time.  frame + 14 is
+         * on a longword -- the buffer is page-aligned and the chip shifted
+         * the frame by two -- and the slot's payload pointer is aligned by
+         * construction.  The 1..3 bytes past the last longword are summed as
+         * a zero-padded final longword, which is what the verifier's
+         * "sum of `copied` bytes" means.
+         */
+        UWORD        plen = (UWORD)(len - NETDEV_HDR_LEN);
+        UWORD        bulk = (UWORD)(plen & (UWORD)~3u);
+        const UBYTE *src  = frame + NETDEV_HDR_LEN;
+        ULONG        sum  = 0;
+        UWORD        i;
 
         if (bulk != 0)
-            n68k_copy_longs(dst, frame + NETDEV_HDR_LEN, (ULONG)(bulk >> 2));
-        for (i = bulk; i < plen; i++)
-            dst[i] = frame[NETDEV_HDR_LEN + i];
+            sum = ge_copy_sum((ULONG *)(APTR)dst,
+                              (const ULONG *)(CONST_APTR)src,
+                              (ULONG)(bulk >> 2));
+        if (bulk != plen)
+        {
+            ULONG tail = 0;
+            ULONG was  = sum;
 
-        nic->rx_claimed(nic->rx_arg, token, 0, 0);
+            for (i = bulk; i < plen; i++)
+            {
+                dst[i] = src[i];
+                tail |= (ULONG)src[i] << (24 - 8 * (i - bulk));
+            }
+            sum += tail;
+            if (sum < was)
+                sum++;                  /* end-around carry */
+        }
+
+        nic->rx_claimed(nic->rx_arg, token, sum, 1);
         return;
     }
 

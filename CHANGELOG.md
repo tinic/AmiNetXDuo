@@ -28,7 +28,10 @@ version at the top when it merges.
   and whether the engine was still running from before the reboot. Going
   offline or rebooting leaves both rings' pointers and indices at zero:
   genet.device 3.14 takes the producer index as it finds it, and after a
-  128-descriptor ring it was looking 142 descriptors away from the frames
+  128-descriptor ring it was looking 142 descriptors away from the frames.
+  The receive copy carries the checksum, one pass over the payload instead
+  of two; coalescing 32 frames / 500 us (750 us: RX 117 / TX 69, 1 ms:
+  112 / 73)
 
 - **`NetDevStats`** prints every counter a SANA-II unit keeps -- the
   standard block and the driver's own named special statistics -- for any
