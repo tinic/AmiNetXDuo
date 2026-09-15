@@ -1020,7 +1020,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
        standard and not always by its author, and this stack's rule is that
        such a driver is never handed anything it did not ask for.  The device
        may still refuse it (an older anxnet.device), once. */
-    iface->rx_poll_ok = (UBYTE)(status == 0 && iface->link_hdr_ok);
+    iface->rx_poll_ok  = (UBYTE)(status == 0 && iface->link_hdr_ok);
+    iface->rx_batch_ok = iface->rx_poll_ok;
 
     if (status != 0)
     {

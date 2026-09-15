@@ -23,6 +23,7 @@
 VOID         Disable(VOID);
 VOID         Enable(VOID);
 VOID         ReplyMsg(struct Message *msg);
+VOID         Signal(struct Task *task, ULONG mask);
 
 /*
  * The scheduler lock and the public semaphore list, for

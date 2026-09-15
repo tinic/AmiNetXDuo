@@ -29,5 +29,6 @@ struct Message
 #define PA_SIGNAL   0
 #define PA_SOFTINT  1
 #define PA_IGNORE   2
+#define PF_ACTION   3
 
 #endif

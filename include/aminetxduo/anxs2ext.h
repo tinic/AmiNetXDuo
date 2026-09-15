@@ -99,6 +99,20 @@
  * sending it.  The number is in the same private range as the tags above. */
 #define ANXD_CMD_RX_POLL        0x4190
 
+/* ANXD_CMD_READ_BATCH: many CMD_READs in one call.
+ *
+ * ios2_Data points to an Exec List of IOSana2Req, each prepared exactly as a
+ * CMD_READ about to be sent with BeginIO() (io_Command, ios2_PacketType,
+ * ios2_Data, the reply port); the driver queues them all as if each had
+ * been sent in list order, under one Disable(), and the list is emptied.
+ * Quick, no arguments of its own, io_Error 0; IOERR_NOCMD from a driver that
+ * does not know it, with the list untouched, and the opener sends them one
+ * by one from then on.  An offline unit answers each request in the list
+ * S2ERR_OUTOFSERVICE the way it answers a CMD_READ.  On Emu68 a BeginIO() is
+ * a trapped Disable() pair, 5.5 us; a reader re-posting a burst of reads
+ * pays it once with this. */
+#define ANXD_CMD_READ_BATCH     0x4191
+
 typedef UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,
                                  UBYTE flags);

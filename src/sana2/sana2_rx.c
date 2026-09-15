@@ -861,8 +861,29 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
     slot->req.ios2_DataLength     = 0;
     ami_sana2_rx_mark(rx, slot, TRUE);
 
-    /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
-       SANA2IOF_RAW just set. Both lines it runs are above. */
+    /*
+     * BATCHED WHEN THE DEVICE TAKES A LIST.  Inside a drain, with a device
+     * that answered our tags, the armed request goes on rx->topost and the
+     * whole list is handed over in one ANXD_CMD_READ_BATCH at the end of
+     * the drain (ami_sana2_rx_drain): one trapped Disable() pair for the
+     * burst instead of one BeginIO() per frame, which on Emu68 is 5.5 us a
+     * frame.  The device has the rest of its 128 posted reads meanwhile,
+     * and holds a burst's tail for the reader if it must.  Outside a drain
+     * (the sweep in ami_sana2_rx_post, the first arming), or on a device
+     * without the command, the request is posted here as always.
+     *
+     * BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
+     * SANA2IOF_RAW just set. Both lines it runs are above.
+     */
+    if (rx->batching)
+    {
+        AddTail(&rx->topost, &slot->req.ios2_Req.io_Message.mn_Node);
+#ifdef AMINETXDUO_RXPROBE
+        rx->probe.posts++;
+        rx->probe.live++;
+#endif
+        return TRUE;
+    }
 #ifdef AMINETXDUO_RXPROBE
     {
         /*
@@ -885,6 +906,41 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
 #endif
 
     return TRUE;
+}
+
+/*
+ * The drain's armed reads, to the device in one call; one by one if the
+ * device turns the command down (once, and the flag remembers).
+ */
+static VOID ami_sana2_rx_post_batch(AmiSana2Rx *rx)
+{
+    AmiSana2If *iface = rx->iface;
+
+    rx->batching = FALSE;
+    if (rx->topost.lh_Head->ln_Succ == NULL)
+        return;
+
+    if (iface->rx_batch_ok)
+    {
+        rx->batch.ios2_Req.io_Flags = IOF_QUICK;
+        rx->batch.ios2_Req.io_Error = 0;
+        rx->batch.ios2_Data         = &rx->topost;
+        BeginIO((struct IORequest *)&rx->batch);
+        if ((rx->batch.ios2_Req.io_Flags & IOF_QUICK) == 0)
+            (VOID)WaitIO((struct IORequest *)&rx->batch);
+        if (rx->batch.ios2_Req.io_Error != IOERR_NOCMD)
+            return;                     /* taken; the list came back empty */
+        iface->rx_batch_ok = FALSE;     /* an older device: the long way */
+    }
+
+    {
+        struct Node *n;
+        struct Node *next;
+
+        for (n = rx->topost.lh_Head; (next = n->ln_Succ) != NULL; n = next)
+            BeginIO((struct IORequest *)n);
+        NewList(&rx->topost);
+    }
 }
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
@@ -1397,6 +1453,9 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
 {
     NX_IP          *ip = rx->iface->ip;
     struct Message *msg;
+    struct List     batch;
+    struct Node    *node;
+    struct Node    *next;
     TX_THREAD      *outer;
     UWORD           took = 0;
 
@@ -1503,8 +1562,43 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
     outer = _nx_ip_input_thread;
     _nx_ip_input_thread = tx_thread_identify();
 
-    while (took < budget && (msg = GetMsg(rx->port)) != NULL)
+    /*
+     * THE WHOLE PORT IN ONE DISABLE, NOT A GetMsg() PER FRAME.  GetMsg() is
+     * a Disable()/Enable() pair around one unlink, and on Emu68 that pair is
+     * a 5.5 us trap -- nine per cent of the CPU at 17,000 frames a second,
+     * for list bookkeeping.  The port's list is spliced onto a local one
+     * under one Disable() and walked from there; nothing else ever lands on
+     * this port (the poll is quick, and a device that queued it would have
+     * its reply taken back before the next drain), and the posted depth
+     * bounds the batch at what `budget` allowed anyway.  The port's signal
+     * may stay set after the splice, which costs one empty wake at most.
+     */
     {
+        struct List *pl = &rx->port->mp_MsgList;
+
+        NewList(&batch);
+        Disable();
+        if (pl->lh_Head->ln_Succ != NULL)
+        {
+            batch.lh_Head             = pl->lh_Head;
+            batch.lh_TailPred         = pl->lh_TailPred;
+            batch.lh_Head->ln_Pred    = (struct Node *)&batch.lh_Head;
+            batch.lh_TailPred->ln_Succ = (struct Node *)&batch.lh_Tail;
+            NewList(pl);
+        }
+        Enable();
+    }
+
+    /* Re-posts collect on rx->topost for one ANXD_CMD_READ_BATCH after the
+       walk, when the device takes one (ami_sana2_rx_post_slot). */
+    rx->batching = (BOOL)(rx->iface->rx_batch_ok != 0);
+    NewList(&rx->topost);
+
+    for (node = batch.lh_Head;
+         took < budget && (next = node->ln_Succ) != NULL;
+         node = next)
+    {
+        msg = (struct Message *)node;
 #ifdef AMINETXDUO_RXPROBE
         if (rx->probe.live != 0)
             rx->probe.live--;
@@ -1567,6 +1661,29 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
             rx->iface->stats.rx_err_io++;
         }
     }
+
+    /* A batch longer than the budget (a device that answered more reads than
+       this reader posted): what was not walked goes back to the front of the
+       port, in order, for the next drain.  Cannot happen with our depth, said
+       in code rather than assumed. */
+    if (node->ln_Succ != NULL)
+    {
+        struct List *pl      = &rx->port->mp_MsgList;
+        struct Node *last    = batch.lh_TailPred;
+        struct Node *oldhead;
+
+        Disable();
+        oldhead          = pl->lh_Head;     /* or the tail sentinel */
+        node->ln_Pred    = (struct Node *)&pl->lh_Head;
+        last->ln_Succ    = oldhead;
+        oldhead->ln_Pred = last;            /* lh_TailPred when it was empty */
+        pl->lh_Head      = node;
+        Enable();
+    }
+
+    /* The reads this drain re-armed, back to the device in one call, before
+       the run goes up: the device is fed first, the stack second. */
+    ami_sana2_rx_post_batch(rx);
 
 #ifdef AMINETXDUO_GRO
     /* Nothing is held past the drain that took it: the run ends with the
@@ -1815,6 +1932,13 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rx->poll.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
     rx->poll.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
     rx->poll.ios2_Req.io_Command = ANXD_CMD_RX_POLL;
+    rx->batch = iface->templ;
+    rx->batch.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    rx->batch.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
+    rx->batch.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
+    rx->batch.ios2_Req.io_Command = ANXD_CMD_READ_BATCH;
+    rx->batching = FALSE;
+    NewList(&rx->topost);
 
     ami_sana2_rx_mark_reset(rx);
 

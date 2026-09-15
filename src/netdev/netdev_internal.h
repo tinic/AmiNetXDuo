@@ -210,6 +210,11 @@ typedef struct NetdevUnit
     ULONG                       nu_RxPollsHeld; /* of those, with frames held   */
     UWORD                       nu_IntSilent; /* blanks since a claimed one    */
     ULONG                       nu_RxDirect;  /* completed direct RX fills      */
+    /* Claimed CMD_READs waiting for the pass's one reply (NetdevNic
+       reply_batch); netdev_rx_flush_replies() empties it. */
+#define NETDEV_PENDING_MAX  128
+    struct IOSana2Req          *nu_Pending[NETDEV_PENDING_MAX];
+    UWORD                       nu_PendingCount;
     UWORD                       nu_RxKickWait;/* blanks toward an RX re-roll   */
     UWORD                       nu_RxKicks;   /* deaf-boot resets performed    */
     volatile UBYTE              nu_InIsr;     /* interrupt server on the chip  */
@@ -378,6 +383,7 @@ static inline struct IOSana2Req *netdev_take(struct List *list, ULONG type)
 UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                        APTR *token, UBYTE *wanted);
 VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags);
+VOID netdev_rx_flush_replies(APTR arg);
 
 /* Every request that stops being quick and enters a list must be prepared the
    same way, whether it goes at the head or tail. */

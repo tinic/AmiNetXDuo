@@ -131,6 +131,20 @@ struct NetdevNic
                                   APTR *token, UBYTE *wanted);
     VOID              (*rx_claimed)(APTR arg, APTR token, ULONG sum,
                                     UBYTE flags);
+    /*
+     * BATCHED REPLIES, for a core on a machine where an Exec call is a trap.
+     * A core that sets reply_batch has its claimed frames' CMD_READs held by
+     * the shell instead of replied one by one, and calls rx_flush at the end
+     * of each pass: the shell then puts every held request on its port under
+     * ONE Disable() and signals each port ONCE.  On Emu68 ReplyMsg() is
+     * about three trapped instructions (a Disable() and Signal()'s two SR
+     * writes), 11-16 us a frame at 5.5 us a pair -- a fifth of the CPU at
+     * 17,000 frames a second; batched over a burst it is that once.  Not
+     * set by the classic cores: on a real 68k the batching was measured a
+     * loss (netdev_device.c), and the emulator that measured it agrees.
+     */
+    UBYTE               reply_batch;
+    VOID              (*rx_flush)(APTR arg);
 
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an

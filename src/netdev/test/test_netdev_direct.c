@@ -118,6 +118,18 @@ static int node_on_a_watched_list(const struct Node *n)
 VOID Disable(VOID) {}
 VOID Enable(VOID) {}
 
+/* The batched reply's one signal per port. */
+static int          signals;
+static struct Task *signalled;
+static ULONG        signal_mask;
+
+VOID Signal(struct Task *task, ULONG mask)
+{
+    signals++;
+    signalled   = task;
+    signal_mask = mask;
+}
+
 VOID ReplyMsg(struct Message *msg)
 {
     replies++;
@@ -422,6 +434,83 @@ static void test_other_type_does_not_block(void)
     netdev_rx_claimed(&unit, token, 0, 0);
 }
 
+/*
+ * reply_batch: a claimed request is held, not replied, until the core's
+ * flush, which puts every held request on its port's list in order under one
+ * Disable() and signals the port's task once; a port that is not PA_SIGNAL
+ * still goes through ReplyMsg().
+ */
+static void test_batched_replies(void)
+{
+    UBYTE           hdr[NETDEV_HDR_LEN];
+    APTR            token;
+    struct MsgPort  port;
+    struct MsgPort  soft;
+    struct IOSana2Req read_c;
+    int             fake_task;
+
+    reset_fixture();
+    make_header(hdr, 0x0800);
+    memset(&port, 0, sizeof(port));
+    memset(&soft, 0, sizeof(soft));
+    memset(&read_c, 0, sizeof(read_c));
+    NewList(&port.mp_MsgList);
+    NewList(&soft.mp_MsgList);
+    port.mp_Flags   = PA_SIGNAL;
+    port.mp_SigBit  = 5;
+    port.mp_SigTask = &fake_task;
+    soft.mp_Flags   = PA_SOFTINT;
+    unit.nu_Nic.reply_batch = 1;
+    unit.nu_PendingCount    = 0;
+    signals = 0;
+
+    read_a.ios2_Req.io_Message.mn_ReplyPort = &port;
+    read_b.ios2_Req.io_Message.mn_ReplyPort = &port;
+    read_c.ios2_Req.io_Message.mn_ReplyPort = &soft;
+    read_c.ios2_Req.io_Unit = read_a.ios2_Req.io_Unit;
+    read_c.ios2_Data        = read_a.ios2_Data;
+    queue_read(&opener_a, &read_a, 0x0800);
+    queue_read(&opener_a, &read_b, 0x0800);
+    queue_read(&opener_a, &read_c, 0x0800);
+
+    /* Three frames claimed and completed: nothing replied yet. */
+    token = NULL;
+    expect_ptr("first claim", netdev_rx_claim(&unit, hdr, 60, &token, NULL), direct_buffer);
+    netdev_rx_claimed(&unit, token, 1UL, 1);
+    token = NULL;
+    expect_ptr("second claim", netdev_rx_claim(&unit, hdr, 60, &token, NULL), direct_buffer);
+    netdev_rx_claimed(&unit, token, 2UL, 1);
+    token = NULL;
+    expect_ptr("third claim", netdev_rx_claim(&unit, hdr, 60, &token, NULL), direct_buffer);
+    netdev_rx_claimed(&unit, token, 3UL, 1);
+    expect_u32("three held", unit.nu_PendingCount, 3);
+    expect_u32("no reply before the flush", replies, 0);
+    expect_u32("no signal before the flush", signals, 0);
+    expect_u32("but three fills", filled_calls, 3);
+
+    netdev_rx_flush_replies(&unit);
+
+    expect_u32("nothing held after", unit.nu_PendingCount, 0);
+    expect_u32("the signal port was signalled once", signals, 1);
+    expect_ptr("at its task", signalled, &fake_task);
+    expect_u32("on its bit", signal_mask, 1UL << 5);
+    expect_u32("the two signal-port requests are on its list", list_count(&port.mp_MsgList), 2);
+    expect_u32("in the order they completed",
+               (port.mp_MsgList.lh_Head == (struct Node *)&read_a.ios2_Req.io_Message &&
+                port.mp_MsgList.lh_Head->ln_Succ == (struct Node *)&read_b.ios2_Req.io_Message), 1);
+    expect_u32("marked replied", (unsigned)read_a.ios2_Req.io_Message.mn_Node.ln_Type, NT_REPLYMSG);
+    expect_u32("the softint port went through ReplyMsg", replies, 1);
+    expect_u32("and is not on a list", list_count(&soft.mp_MsgList), 0);
+
+    /* An empty flush is nothing. */
+    netdev_rx_flush_replies(&unit);
+    expect_u32("an empty flush signals nobody", signals, 1);
+
+    unit.nu_Nic.reply_batch = 0;
+    read_a.ios2_Req.io_Message.mn_ReplyPort = NULL;
+    read_b.ios2_Req.io_Message.mn_ReplyPort = NULL;
+}
+
 static void test_broadcast_metadata(void)
 {
     UBYTE hdr[NETDEV_HDR_LEN];
@@ -448,6 +537,7 @@ int main(void)
     test_declines_unsafe_claims();
     test_other_type_does_not_block();
     test_broadcast_metadata();
+    test_batched_replies();
 
     if (failures != 0)
         printf("netdev direct: %d failure(s)\n", failures);

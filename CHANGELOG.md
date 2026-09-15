@@ -36,6 +36,25 @@ version at the top when it merges.
   36-frame bursts against 32 reads cost 685 frames and 632 retransmissions
   in one ten-second transfer. `IPREQUESTS` may now ask for up to 128
 
+- The receive path pays Exec once per burst instead of three times per
+  frame, which on a PiStorm32 is the difference between 202 and 270 Mbit/s:
+  `anxgenet.device` replies a burst's completed reads together (one list
+  operation and one signal per port), the stack takes its reply port's whole
+  list in one step instead of a `GetMsg()` per frame, and re-posts the
+  burst's reads with one `ANXD_CMD_READ_BATCH` (`anxs2ext.h`) instead of a
+  `BeginIO()` each. Emu68 traps every interrupt-disable and signal at about
+  5.5 us; the classic cards, on real 68k silicon, are unchanged. A1200 +
+  PiStorm32, iperf into the Amiga: 202 -> 241 (replies and the port) ->
+  **272 / 272 / 269 Mbit/s** (re-posts), no frame lost
+
+- `anxgenet.device` hands the GENET back in its power-on reset state when it
+  stops (receive buffer and MAC through their resets, filter off, interrupts
+  masked), so a warm reboot into `genet.device` 3.14 finds the chip as a
+  cold boot would. Twice today 3.14 came up after such a reboot with the
+  link up and no DHCP request reaching the wire until it was removed and
+  re-added; three warm-reboot cycles under traffic now give it its lease
+  every time
+
 - `anxgenet.device` keeps a burst's tail in its receive ring when the
   stack's reads have run out, instead of dropping it: a unicast frame waits
   there for the reader to catch up (at most 100 ms), a broadcast is dropped

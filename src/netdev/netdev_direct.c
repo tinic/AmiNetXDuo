@@ -13,6 +13,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <exec/ports.h>
 #include <proto/exec.h>
 
 #include "netdev_internal.h"
@@ -219,5 +220,78 @@ VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags)
         tr->st.BytesReceived += len;
     }
     unit->nu_RxDirect++;
+
+    if (unit->nu_Nic.reply_batch)
+    {
+        /* Held for the pass's one reply (netdev_rx_flush_replies); a full
+           array flushes early, which cannot happen with a ring the size of
+           the array but costs nothing to say. */
+        if (unit->nu_PendingCount >= NETDEV_PENDING_MAX)
+            netdev_rx_flush_replies(unit);
+        io->ios2_Req.io_Error = 0;
+        io->ios2_WireError    = 0;
+        unit->nu_Pending[unit->nu_PendingCount++] = io;
+        return;
+    }
+
     netdev_reply(io, 0, 0);
+}
+
+/*
+ * THE PASS'S ONE REPLY.  What ReplyMsg() does per message -- NT_REPLYMSG,
+ * AddTail on the port's list under Disable(), Signal() the port's task --
+ * done once per port for every request held: one Disable() pair and one
+ * Signal() for a whole burst instead of one of each per frame.  Only a
+ * PA_SIGNAL port is answered this way; any other action goes through
+ * ReplyMsg() as before, so a port that wants a software interrupt or nothing
+ * gets exactly that.  The direct pair's opener owns its port and the port
+ * outlives every posted read (the reader reaps them before it goes), so
+ * mp_SigTask is live.
+ *
+ * Interrupt context: Disable() nests inside the bottom half's own, and
+ * Signal() is made for this.  The array is swept in port order, one pass per
+ * distinct port -- three at most, one per reader, and nearly always one.
+ */
+VOID netdev_rx_flush_replies(APTR arg)
+{
+    NetdevUnit *unit = (NetdevUnit *)arg;
+    UWORD       n    = unit->nu_PendingCount;
+    UWORD       i;
+
+    if (n == 0)
+        return;
+    unit->nu_PendingCount = 0;
+
+    for (i = 0; i < n; i++)
+    {
+        struct IOSana2Req *io   = unit->nu_Pending[i];
+        struct MsgPort    *port;
+        UWORD              j;
+
+        if (io == NULL)
+            continue;
+        port = io->ios2_Req.io_Message.mn_ReplyPort;
+        if (port == NULL || (port->mp_Flags & PF_ACTION) != PA_SIGNAL ||
+            port->mp_SigTask == NULL)
+        {
+            unit->nu_Pending[i] = NULL;
+            ReplyMsg(&io->ios2_Req.io_Message);
+            continue;
+        }
+
+        Disable();
+        for (j = i; j < n; j++)
+        {
+            struct IOSana2Req *q = unit->nu_Pending[j];
+
+            if (q != NULL && q->ios2_Req.io_Message.mn_ReplyPort == port)
+            {
+                q->ios2_Req.io_Message.mn_Node.ln_Type = NT_REPLYMSG;
+                AddTail(&port->mp_MsgList, &q->ios2_Req.io_Message.mn_Node);
+                unit->nu_Pending[j] = NULL;
+            }
+        }
+        Enable();
+        Signal((struct Task *)port->mp_SigTask, 1UL << port->mp_SigBit);
+    }
 }

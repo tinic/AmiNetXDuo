@@ -634,6 +634,11 @@ typedef struct AmiSana2Rx
        delivers them before this reader sleeps.  Replied on rx->port when a
        device does not honour IOF_QUICK, and taken back at once. */
     struct IOSana2Req   poll;
+    /* ANXD_CMD_READ_BATCH: the slots this drain armed and has not yet handed
+       to the device, and the carrier that hands them over in one call. */
+    struct List         topost;
+    struct IOSana2Req   batch;
+    BOOL                batching;       /* inside a drain: arm, do not post  */
 } AmiSana2Rx;
 
 /* --------------------------------------------------------------- TX slots */
@@ -689,6 +694,7 @@ struct AmiSana2If
                                            will set beyond SUMMED, 0 = none  */
     UBYTE               rx_poll_ok;     /* the device knows ANXD_CMD_RX_POLL;
                                            TRUE until it says IOERR_NOCMD    */
+    UBYTE               rx_batch_ok;    /* the same for ANXD_CMD_READ_BATCH  */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.

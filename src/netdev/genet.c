@@ -790,7 +790,40 @@ static VOID ge_dma_stop(NetdevNic *nic)
 
 static VOID genet_stop(NetdevNic *nic)
 {
+    ULONG v;
+
     ge_dma_stop(nic);
+
+    /*
+     * HANDED BACK AS THE POWER-ON RESET LEFT IT, not as this driver had it.
+     * The stop above is what the next boot needs -- no DMA engine writing
+     * into its RAM -- but a warm reboot from here goes on to load whichever
+     * driver the user runs, and genet.device 3.14 twice came up with the
+     * link up, frames arriving and NOT ONE DHCP DISCOVER reaching the wire
+     * (2026-09-15 morning and 23:00), until its own close and re-open put
+     * the MAC through a full cycle; a cold boot never did that, and a cold
+     * boot hands it the chip in reset.  So: the MAC's TX and RX off, the
+     * receive buffer and the UniMAC through their resets (the same sequence
+     * genet_init starts with, NetBSD's), the address filter off, every
+     * interrupt masked and cleared.  What the other driver assumes about
+     * the chip it finds is then what it assumed when it worked.
+     */
+    ge_wr(nic, GENET_UMAC_CMD, 0);
+
+    v = ge_rd(nic, GENET_SYS_RBUF_FLUSH_CTRL);
+    ge_wr(nic, GENET_SYS_RBUF_FLUSH_CTRL, v | GENET_SYS_RBUF_FLUSH_RESET);
+    ge_delay_us(nic, 10);
+    ge_wr(nic, GENET_SYS_RBUF_FLUSH_CTRL, v & ~GENET_SYS_RBUF_FLUSH_RESET);
+    ge_delay_us(nic, 10);
+    ge_wr(nic, GENET_SYS_RBUF_FLUSH_CTRL, 0);
+    ge_delay_us(nic, 10);
+
+    ge_wr(nic, GENET_UMAC_CMD,
+          GENET_UMAC_CMD_LCL_LOOP_EN | GENET_UMAC_CMD_SW_RESET);
+    ge_delay_us(nic, 10);
+    ge_wr(nic, GENET_UMAC_CMD, 0);
+
+    ge_wr(nic, GENET_UMAC_MDF_CTRL, 0);
 
     ge_wr(nic, GENET_INTRL2_CPU_SET_MASK, 0xffffffffUL);
     ge_wr(nic, GENET_INTRL2_CPU_CLEAR, 0xffffffffUL);
@@ -1331,6 +1364,10 @@ static BOOL ge_rxintr(NetdevNic *nic)
 
     ge_wr(nic, GENET_RX_DMA_CONS_INDEX(GE_Q), c->rx_cidx);
     c->gro_live = 0;                    /* a run does not span bursts */
+
+    /* The burst's completions, replied together (NetdevNic reply_batch). */
+    if (nic->rx_flush != NULL)
+        nic->rx_flush(nic->rx_arg);
     return TRUE;
 }
 
@@ -1644,6 +1681,7 @@ static LONG genet_attach(NetdevNic *nic)
     c->pageops = (UBYTE)((SysBase->AttnFlags & AFF_68040) != 0);
     c->phy    = (nic->dt_phy != 0xff) ? nic->dt_phy : 1;
     nic->core_stat_names = ge_stat_names;
+    nic->reply_batch     = 1;           /* Emu68: an Exec call is a trap */
     nic->isr = genet_isr;
 #ifdef NETDEV_GENET_POLL_ONLY
     /* A bring-up arm: no server at all, the vertical blank is the whole of

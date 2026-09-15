@@ -216,6 +216,12 @@ vectors, no library to open.
         command instead of dropping it.  A driver that does not know the
         command answers IOERR_NOCMD and is not asked again.
 
+    ANXD_CMD_READ_BATCH
+        many CMD_READs in one call: ios2_Data is an Exec List of prepared
+        read requests, queued in order under one interrupt-disable.  A
+        driver that does not know it answers IOERR_NOCMD with the list
+        untouched, and the opener posts them one by one from then on.
+
 anxgenet.device implements all of them; anxnet.device the first two tags.
 The header is the contract, and the shipped drivers are the reference.
 

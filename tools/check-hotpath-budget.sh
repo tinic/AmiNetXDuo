@@ -77,7 +77,7 @@ TABLE = {
     # call sites, 70 instructions each; tools/check-hot-calls.sh is what
     # wants it that way), so its copies are counted here and it has no row
     # of its own.  A frame runs ONE copy.
-    "sana2_rx.c":       [("_ami_sana2_rx_thread",    600),    # 545, carries the
+    "sana2_rx.c":       [("_ami_sana2_rx_thread",    720),    # 704, carries the
                          ("_ami_sana2_rx_deliver",   115)],   #  inlined drain
                                                              #  loop, rx_complete,
                                                              #  post_slot and the
@@ -85,7 +85,11 @@ TABLE = {
     # rx_deliver 95 -> 114 with the held run: the VERIFIED test that skips the
     # verifier (a flag test and a protocol byte, in place of a 220-instruction
     # walk on every frame a device verified) and the first-buffer length the
-    # tap takes on a chain.  rx_thread fell 573 -> 545 in the same change.
+    # tap takes on a chain.  rx_thread fell 573 -> 545 in the same change,
+    # then 545 -> 704 with the one-Disable port splice, the batched re-post
+    # (ANXD_CMD_READ_BATCH) and the poll: all three run ONCE PER DRAIN, not
+    # per frame, and they are what took the A1200 from 202 to 270 Mbit/s by
+    # removing two trapped Exec calls from every frame.
     # The SANA-II copy hook: called once a frame BY THE DEVICE, so its entry
     # guards are load-bearing rather than paranoia -- a third-party driver can
     # hand it anything, and `len > slot->capacity` is a bounds check on a

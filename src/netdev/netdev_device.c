@@ -1600,6 +1600,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Nic.rx_arg = unit;
     unit->nu_Nic.rx_claim   = netdev_rx_claim;
     unit->nu_Nic.rx_claimed = netdev_rx_claimed;
+    unit->nu_Nic.rx_flush   = netdev_rx_flush_replies;
     unit->nu_Nic.mc_table   = unit->nu_Mcast;
     unit->nu_Nic.mc_max     = NETDEV_MCAST_MAX;
 
