@@ -25,7 +25,10 @@ version at the top when it merges.
   and 120 s. `DEVICE=anxnet.device` with `CARD=genet` in the interface file;
   the row is probed after the PCMCIA slot, so a 3c589's `UNIT=0` keeps its
   meaning. `CheckNetDevice` reports the tree's answers, the PHY identifier
-  and whether the engine was still running from before the reboot
+  and whether the engine was still running from before the reboot. Going
+  offline or rebooting leaves both rings' pointers and indices at zero:
+  genet.device 3.14 takes the producer index as it finds it, and after a
+  128-descriptor ring it was looking 142 descriptors away from the frames
 
 - **`NetDevStats`** prints every counter a SANA-II unit keeps -- the
   standard block and the driver's own named special statistics -- for any

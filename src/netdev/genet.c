@@ -678,6 +678,36 @@ static VOID ge_dma_stop(NetdevNic *nic)
 
     v = ge_rd(nic, GENET_UMAC_CMD);
     ge_wr(nic, GENET_UMAC_CMD, v & ~GENET_UMAC_CMD_TXEN);
+
+    /*
+     * THE RING POINTERS GO BACK TO ZERO, FOR THE NEXT DRIVER'S SAKE.
+     *
+     * The engine keeps two positions per ring: a 16-bit index the driver
+     * reads, and a word pointer into the descriptor block that only it
+     * advances, wrapping at the ring's END.  They agree at power-on and
+     * they stay in step for one ring size.  This core's ring is 128
+     * descriptors; genet.device 3.14's is 256, and on its start it takes
+     * the producer index as it finds it and never writes the pointer, which
+     * is what a driver following its own previous run can get away with.
+     * Following this one it could not: measured on the A1200, index $CDCD
+     * against a pointer at descriptor 63, every frame landing where the
+     * other driver was not looking -- link up, IPv6 from the multicast
+     * that got through, no DHCP, 11% "bad data" -- and a warm reboot does
+     * not clear it.  Both positions zeroed with the engines stopped is the
+     * state every driver starts from cleanly, ours included.
+     */
+    ge_wr(nic, GENET_RX_DMA_WRITE_PTR_LO(GE_Q), 0);
+    ge_wr(nic, GENET_RX_DMA_WRITE_PTR_HI(GE_Q), 0);
+    ge_wr(nic, GENET_RX_DMA_READ_PTR_LO(GE_Q), 0);
+    ge_wr(nic, GENET_RX_DMA_READ_PTR_HI(GE_Q), 0);
+    ge_wr(nic, GENET_RX_DMA_PROD_INDEX(GE_Q), 0);
+    ge_wr(nic, GENET_RX_DMA_CONS_INDEX(GE_Q), 0);
+    ge_wr(nic, GENET_TX_DMA_READ_PTR_LO(GE_Q), 0);
+    ge_wr(nic, GENET_TX_DMA_READ_PTR_HI(GE_Q), 0);
+    ge_wr(nic, GENET_TX_DMA_WRITE_PTR_LO(GE_Q), 0);
+    ge_wr(nic, GENET_TX_DMA_WRITE_PTR_HI(GE_Q), 0);
+    ge_wr(nic, GENET_TX_DMA_CONS_INDEX(GE_Q), 0);
+    ge_wr(nic, GENET_TX_DMA_PROD_INDEX(GE_Q), 0);
 }
 
 static VOID genet_stop(NetdevNic *nic)
