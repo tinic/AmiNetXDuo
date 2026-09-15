@@ -59,6 +59,24 @@
 
 #define AX88190_NODEID_OFFSET   0x400
 
+/*
+ * The AX88796B's flow-control register: whole-file register 0x1a, unpaged,
+ * reset default 0x07.  FLWC turns on IEEE 802.3x: when the receive ring's
+ * free page count falls to the high-water mark the MAC sends a PAUSE frame
+ * and the link partner holds its transmit until the ring drains, instead of
+ * the ring filling, the chip raising OVW and dp8390_intr() resetting it --
+ * which discards every frame in the ring and every transmit still queued.
+ * HWPC is kept at the reset default, seven 256-byte pages.
+ *
+ * WRITTEN, NEVER READ.  On a plain NE2000 registers 0x18..0x1f are the reset
+ * port, and the emulators model them that way for every card: Amiberry
+ * routes a WRITE there to a no-op and a READ to a chip reset.  A
+ * read-modify-write would reset the emulated card under the probe.
+ */
+#define AX88796_FCR             0x1a
+#define AX88796_FCR_FLWC        0x80
+#define AX88796_FCR_HWPC_RESET  0x07
+
 #ifdef NETDEV_TRACE
 extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define NE_TRACE(t, v)  netdev_trace_val((t), (ULONG)(v))
@@ -815,6 +833,17 @@ static LONG ne2000_attach(NetdevNic *nic)
     }
 
     dp8390_halt(nic);
+
+    /*
+     * Once, here, after the probe's reset pulse and before the first init.
+     * dp8390_halt()/dp8390_init() program the DP8390 register file and leave
+     * the MAC's configuration alone, so every later reset -- the watchdog's,
+     * the overwrite recovery's -- keeps this; only the reset port would clear
+     * it, and nothing strobes that after detection.  Gated on the card row:
+     * on an RTL8019 or a real DP8390 this offset is not a register.
+     */
+    if (nic->card->ax88796)
+        NIC_PUT(nic, AX88796_FCR, AX88796_FCR_FLWC | AX88796_FCR_HWPC_RESET);
 
     return 0;
 }

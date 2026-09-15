@@ -754,6 +754,39 @@ static void test_attach_installs_the_hooks(void)
     ok("and is 16 KB", nic.mem_size == 16384);
 }
 
+/*
+ * 802.3x flow control is an AX88796B register and nothing else's.  Row 0 is
+ * the X-Surf 100 (ax88796 = 1): attach must leave FLWC set with the high-water
+ * count at its reset value.  The Ariadne II is an RTL8019, where 0x1a is not
+ * a register: attach must not touch it.
+ */
+static void test_attach_flow_control(void)
+{
+    static const unsigned char mac[6] = { 0x00, 0x40, 0x95, 0xaa, 0xbb, 0xcc };
+    const NetdevCard *plain = netdev_card_by_name("ariadne2");
+    NetdevNic nic;
+
+    printf("\n-- attach: AX88796B flow control\n");
+
+    ok("row 0 is an AX88796B", netdev_cards[0].ax88796 != 0);
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(mac, 1);
+    ok("attaches", ne2000_attach(&nic) == 0);
+    expect_u32("FCR carries FLWC and the reset-default high-water count",
+               mock_reg[0x1a], 0x87u);
+
+    ok("the Ariadne II row exists and is not an AX88796B",
+       plain != NULL && plain->ax88796 == 0);
+    board_contiguous(&nic, plain);
+    chip_begin(0, 0);
+    mock_wide_fault = WIDE_OK;
+    prom_stage(mac, 1);
+    ok("attaches", ne2000_attach(&nic) == 0);
+    expect_u32("and register 0x1a is left alone", mock_reg[0x1a], 0u);
+}
+
 int main(void)
 {
     test_clone_warm();
@@ -764,6 +797,7 @@ int main(void)
     test_wide_probe();
     test_attach_station_address();
     test_attach_installs_the_hooks();
+    test_attach_flow_control();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
 

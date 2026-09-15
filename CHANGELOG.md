@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The X-Surf 100 and X-Surf 500 (AX88796B) run with IEEE 802.3x flow control
+  on: the card sends PAUSE when seven receive pages remain instead of
+  overrunning and resetting. 28 bytes in `anxnet.device`
+
 - `CheckNetDevice` reports the 3c589's transmit FIFO size, read once at
   attach from an empty FIFO. A real card answers 3068 bytes, two 1514-byte
   frames
