@@ -132,6 +132,12 @@ extern "C" {
                                        can configure                          */
 #define ANXDIAG_PC_MFCIOBASE   79   /* the I/O base written into the function's
                                        IOBASE_0/1 configuration registers      */
+#define ANXDIAG_EL3_FIFO       80   /* EtherLink III: window 1 TX_FREE straight
+                                       after the global reset, high half, and
+                                       window 0 product ID, low half.  An empty
+                                       transmit FIFO reports its whole size, so
+                                       the high half is the FIFO the transmit
+                                       start threshold has to work with       */
 #define ANXDIAG_CR_RETRY       76   /* the command register did not read back
                                        as a reset chip, so the reset port was
                                        strobed again through the word path and

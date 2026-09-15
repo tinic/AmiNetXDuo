@@ -896,6 +896,29 @@ LONG el3_attach(NetdevNic *nic)
                      (ULONG)nic->el3_media);
 
     /*
+     * How much transmit FIFO there is.  The reset above emptied it, and an
+     * empty FIFO reports its whole size in TX_FREE; the product ID rides
+     * along because 3Com's Linux driver derives an "8K FIFO split 5:3" from
+     * its low bits and this says whether the card agrees.  Read once, here,
+     * because el3_init() sets the transmit start threshold to a whole frame
+     * on the assumption that only one fits, and that assumption has never
+     * been measured on the card.
+     */
+    {
+        UWORD pid;
+        UWORD tx_free;
+
+        el3_window(nic, 0);
+        pid = el3_get(nic, EL3_W0_PRODUCT_ID);
+        el3_window(nic, 1);
+        tx_free = el3_get(nic, EL3_W1_TX_FREE);
+        el3_window(nic, 0);
+
+        netdev_diag_note(ANXDIAG_EL3_FIFO, netdev_diag_card(nic->card),
+                         ((ULONG)tx_free << 16) | pid);
+    }
+
+    /*
      * Two station addresses: words 0..2 are 3Com's own and words 10..12 the OEM
      * one.  The OEM address is taken first, as 3c589.device does, with 3Com's
      * own as the fallback.  Each word holds two octets, the earlier one high.

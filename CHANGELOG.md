@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `CheckNetDevice` reports the 3c589's transmit FIFO size, read once at
+  attach from an empty FIFO. A real card answers 3068 bytes, two 1514-byte
+  frames
+
 - Interface status polling no longer retains a SANA-II pointer across a
   sleep. Removing an interface during a statistics refresh could otherwise
   make the next poll read freed memory

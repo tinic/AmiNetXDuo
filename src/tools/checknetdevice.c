@@ -771,6 +771,14 @@ static VOID cnd_step(const AnxDiagStep *st)
             (LONG)((v & 0x1000) != 0 ? " 10BASE2" : ""),
             (LONG)((v & 0x2000) != 0 ? " AUI" : ""));
         return;
+    case ANXDIAG_EL3_FIFO:
+        say("  The empty transmit FIFO reported %lu bytes free; the product ID\n"
+            "  word is $%04lx.  A 1514-byte frame costs 1520 of that FIFO, so\n"
+            "  this is how many whole frames the card can hold ahead of the\n"
+            "  wire: %lu.\n",
+            (ULONG)(v >> 16), (ULONG)(v & 0xffff),
+            (ULONG)((v >> 16) / 1520UL));
+        return;
 
     default:
         break;
