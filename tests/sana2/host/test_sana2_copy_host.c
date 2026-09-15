@@ -566,6 +566,25 @@ static void test_from_buff_fused_checksum(void)
     h_check((pkt.nx_packet_interface_capability_flag &
              NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
             "and the packet no longer claims the checksum is owed");
+
+    /* The packet carries it too.  A device may copy the frame a second time
+       (anxnet.device rebuilds a write its FIFO had no room for); with the
+       flag now clear that copy is the plain walk over the packet, and it
+       must find the checksum there, not the zero NetX Duo left. */
+    h_check(dgram[36] == out[36] && dgram[37] == out[37],
+            "and the packet's own checksum field holds the same value");
+    {
+        UCHAR again[sizeof(dgram)];
+
+        memset(again, 0, sizeof(again));
+        h_check(ami_sana2_copy_from_buff(again, &slot,
+                                         (ULONG)sizeof(dgram)) == TRUE,
+                "a second copy of the same write is handed over");
+        h_check(h_deferred_checksums == deferred_before,
+                "without NetX Duo summing it");
+        h_check(memcmp(again, out, sizeof(out)) == 0,
+                "and it is byte for byte the frame the first copy made");
+    }
 }
 
 

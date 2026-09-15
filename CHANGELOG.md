@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **A TCP segment `anxnet.device` copied twice went out with no checksum.**
+  The transmit checksum fused into the copy was stored in the driver's buffer
+  only, and a write the card had no room for is copied again from the
+  packet. On a real A1200 with a 3c589 every third frame of a burst was
+  lost, 22% of the segments retransmitted, `iperf` at 0.17 Mbit/s; 8.3
+  Mbit/s and 0 retransmitted with the checksum stored in the packet as
+  well. An NE2000 or A2065 the same once its buffers are full. UDP was
+  never affected
+
 - **Sending from a fast card was capped at eight segments a round trip, and a
   non-blocking sender was never woken by an acknowledgment.** On an A1200
   with a PiStorm32 and `genet.device`, whose round trip is about 5 ms on its
