@@ -18,6 +18,19 @@ version at the top when it merges.
   well. An NE2000 or A2065 the same once its buffers are full. UDP was
   never affected
 
+- **A 3c589 counted 32 collisions, 32 FIFO underruns and 32 transmit errors
+  at start, reset its transmitter for each, and never saw a transmit status
+  entry again.** The status byte sits at an odd offset, which a byte read
+  through Gayle's PCMCIA window does not return; it is read as the upper
+  half of the word beside it now, and the status stack is popped before
+  every transmit. 0 of each on the same card
+
+- **`ShowNetStatus` and `netstat` show the card's own transmit trouble:**
+  collisions, FIFO underruns, chip resets, transmitter watchdog resets and
+  the chip's transmit error count, from `anxnet.device`'s special
+  statistics. A 3c589 was losing 42% of what it sent with every visible
+  counter at zero. netstatus version 15
+
 - **Sending from a fast card was capped at eight segments a round trip, and a
   non-blocking sender was never woken by an acknowledgment.** On an A1200
   with a PiStorm32 and `genet.device`, whose round trip is about 5 ms on its

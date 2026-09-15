@@ -219,6 +219,18 @@ VOID netstack_config_route_added(ULONG destination, ULONG netmask)
 {
     (VOID)destination; (VOID)netmask;
 }
+
+/* The device-derived counters a status query asks reader 0 for
+   (sana2_device.c): no reader here, so nothing is asked and nothing waited. */
+BOOL  ami_sana2_stats_request(AmiSana2If *iface) { (VOID)iface; return FALSE; }
+
+/* The status query's wait for the readers runs on a Process and sleeps in
+   Delay(); a Task reads the copy as it stands.  A Task here, so nothing
+   sleeps, and Delay() only has to link. */
+static struct Task h_query_task;
+struct Task *FindTask(const char *name) { (VOID)name; return &h_query_task; }
+LONG Delay(ULONG ticks) { (VOID)ticks; return 0; }
+ULONG ami_sana2_stats_epoch(const AmiSana2If *iface) { (VOID)iface; return 0; }
 VOID netstack_config_route_deleted(ULONG destination, ULONG netmask)
 {
     (VOID)destination; (VOID)netmask;

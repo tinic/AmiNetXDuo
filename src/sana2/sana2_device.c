@@ -691,9 +691,10 @@ LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
 /* --------------------------------------------------------------- statistics */
 
 /*
- * Refresh the device-derived half of AmiSana2Stats.  Called only from the IP
- * thread or from open/close, because it borrows the calling task for its reply
- * port.
+ * Refresh the device-derived half of AmiSana2Stats: two device commands on
+ * the calling task's stack.  Called from the IP thread (link-up, the driver's
+ * count commands) and from reader 0 for a status query
+ * (ami_sana2_stats_request()) -- never from the query's own task.
  */
 VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 {
@@ -747,6 +748,16 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
                 iface->stats.tick_polls = special.rec[i].Count;
             else if (ami_str_equal(name, "PCMCIA deaf-receiver resets"))
                 iface->stats.rx_kicks = special.rec[i].Count;
+            else if (ami_str_equal(name, "Collisions"))
+                iface->stats.collisions = special.rec[i].Count;
+            else if (ami_str_equal(name, "Transmit FIFO underruns"))
+                iface->stats.tx_underruns = special.rec[i].Count;
+            else if (ami_str_equal(name, "Chip resets"))
+                iface->stats.chip_resets = special.rec[i].Count;
+            else if (ami_str_equal(name, "Transmitter watchdog resets"))
+                iface->stats.tx_wedges = special.rec[i].Count;
+            else if (ami_str_equal(name, "Transmit errors"))
+                iface->stats.drv_tx_errors = special.rec[i].Count;
         }
     }
 
@@ -754,6 +765,38 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
     iface->probe_dev_rx = stats.PacketsReceived;
     iface->probe_dev_tx = stats.PacketsSent;
 #endif
+}
+
+/*
+ * For a status query, on whatever task asked.  The device-derived counters are
+ * a copy the readers and the IP thread keep, and bringing it up to date takes
+ * two device commands.  Those do NOT run here: bsd_NetStackQuery() runs on the
+ * caller's stack, a Shell gives a command 4096 bytes, ShowNetStatus's own path
+ * measures 2664 and the query's with the commands in it measured 1788, and a
+ * real A1200 that ran them there took 8000 000B a few minutes later.  Reader 0
+ * runs them instead (sana2_rx.c) and bumps stats_epoch when done; the caller
+ * compares that against ami_sana2_stats_epoch() taken before asking.  FALSE
+ * when there is no running reader to ask: the copy is then what it was.
+ */
+BOOL ami_sana2_stats_request(AmiSana2If *iface)
+{
+    AmiSana2Rx *rx;
+
+    if (iface == NULL || !iface->device_open)
+        return FALSE;
+
+    rx = &iface->rx[0];
+    if (!rx->running || rx->stop || rx->task == NULL || rx->wake_mask == 0)
+        return FALSE;
+
+    iface->stats_want = TRUE;
+    Signal(rx->task, rx->wake_mask);
+    return TRUE;
+}
+
+ULONG ami_sana2_stats_epoch(const AmiSana2If *iface)
+{
+    return (iface != NULL) ? iface->stats_epoch : 0UL;
 }
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)

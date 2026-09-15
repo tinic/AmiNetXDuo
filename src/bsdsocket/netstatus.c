@@ -23,6 +23,10 @@
 
 #include "tx_amiga.h"
 
+#include <proto/exec.h>
+#include <proto/dos.h>
+#include <exec/nodes.h>
+
 #ifdef AMINETXDUO_NETSTATUS
 
 #ifdef AMINETXDUO_IPV6
@@ -844,9 +848,64 @@ static VOID ns_fill_dest6(NX_IP *ip, NsWriter *w)
 #endif
 }
 
+/*
+ * The device-derived half of a SANA-II interface's counters (the driver's
+ * global and special statistics) is a copy the shim keeps; without this a
+ * status query showed the counters of the moment the interface came up next
+ * to live software counters.  Each interface's reader 0 is asked to bring it
+ * up to date (ami_sana2_stats_request()) and this waits for the answers, ten
+ * ticks at most.  The two device commands must not run here: this is the
+ * caller's stack, a Shell gives a command 4096 bytes, ShowNetStatus's own path
+ * measures 2664 and the query's with the commands in it measured 1788, and a
+ * real A1200 took 8000 000B a few minutes after running them there.  Delay()
+ * needs a Process; a Task reads the copy as it stands.
+ */
+static VOID ns_refresh_sana2_stats(NX_IP *ip)
+{
+    ULONG epoch[NX_MAX_PHYSICAL_INTERFACES];
+    UBYTE asked[NX_MAX_PHYSICAL_INTERFACES];
+    UINT  i;
+    UWORD tries;
+
+    if (FindTask(NULL)->tc_Node.ln_Type != NT_PROCESS)
+        return;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        NX_INTERFACE *nxif = &ip->nx_ip_interface[i];
+        AmiSana2If   *sana = (nxif->nx_interface_valid != 0)
+                           ? (AmiSana2If *)nxif->nx_interface_additional_link_info
+                           : NULL;
+
+        asked[i] = 0;
+        epoch[i] = ami_sana2_stats_epoch(sana);
+        if (sana != NULL && ami_sana2_stats_request(sana))
+            asked[i] = 1;
+    }
+
+    for (tries = 0; tries < 10; tries++)
+    {
+        BOOL pending = FALSE;
+
+        for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+        {
+            if (asked[i] != 0 &&
+                ami_sana2_stats_epoch((AmiSana2If *)ip->nx_ip_interface[i]
+                                          .nx_interface_additional_link_info)
+                    == epoch[i])
+                pending = TRUE;
+        }
+        if (!pending)
+            return;
+        Delay(1);
+    }
+}
+
 static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
 {
     UINT i;
+
+    ns_refresh_sana2_stats(ip);
 
     for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
@@ -903,6 +962,11 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_RxDirectFill     = stats.rx_direct_fill;
             out->nsi_TickPolls        = stats.tick_polls;
             out->nsi_RxKicks          = stats.rx_kicks;
+            out->nsi_Collisions       = stats.collisions;
+            out->nsi_TxUnderruns      = stats.tx_underruns;
+            out->nsi_ChipResets       = stats.chip_resets;
+            out->nsi_TxWedges         = stats.tx_wedges;
+            out->nsi_DrvTxErrors      = stats.drv_tx_errors;
             out->nsi_AllocFailures    = stats.alloc_failures;
         }
 

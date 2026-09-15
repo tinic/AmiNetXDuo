@@ -695,6 +695,48 @@ static void case_special_recovery_stats(void)
     h_check(h_tear_down(iface), "the statistics interface closes");
 }
 
+/* A status query does not run the device commands itself: it asks reader 0
+   (ami_sana2_stats_request()) and reads the epoch.  Without a reader there is
+   nothing to ask and the answer says so; with one the flag is raised and the
+   epoch is still the reader's to move. */
+static void case_stats_request(void)
+{
+    AmiSana2If *iface;
+    struct Task fake_task;
+    ULONG       epoch;
+
+    h_device_reset();
+    iface = h_bring_up_unit(0);
+    h_check(iface != NULL, "the interface opened for a statistics request");
+    if (iface == NULL)
+        return;
+
+    epoch = ami_sana2_stats_epoch(iface);
+    h_check(ami_sana2_stats_request(iface) == FALSE,
+            "with no reader running the request is refused");
+    h_check(iface->stats_want == FALSE, "and no flag is left raised");
+    h_check(ami_sana2_stats_epoch(iface) == epoch, "and the epoch stands");
+
+    memset(&fake_task, 0, sizeof(fake_task));
+    iface->rx[0].running   = TRUE;
+    iface->rx[0].stop      = FALSE;
+    iface->rx[0].task      = &fake_task;
+    iface->rx[0].wake_mask = 1UL << 20;
+
+    h_check(ami_sana2_stats_request(iface) == TRUE,
+            "with reader 0 running the request is accepted");
+    h_check(iface->stats_want == TRUE, "and the flag is raised for it");
+    h_check(ami_sana2_stats_epoch(iface) == epoch,
+            "and the epoch has not moved: only the reader moves it");
+
+    iface->rx[0].running   = FALSE;
+    iface->rx[0].task      = NULL;
+    iface->rx[0].wake_mask = 0;
+    iface->stats_want      = FALSE;
+
+    h_check(h_tear_down(iface), "the statistics-request interface closes");
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 /* IPREQUESTS, ARPREQUESTS and WRITEREQUESTS reach the interface at open, and
@@ -751,6 +793,7 @@ int main(void)
     case_shared_unit();
     case_distinct_units();
     case_special_recovery_stats();
+    case_stats_request();
     case_request_counts();
 
     h_check(h_ports_made > 0, "reply ports were created");

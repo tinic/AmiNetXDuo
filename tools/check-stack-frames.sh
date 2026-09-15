@@ -192,6 +192,7 @@ COMMAND_BUDGETS=(
 BUDGETS=(
     "bsdsocket:bsd_lib_open:2432"
     "bsdsocket:bsd_NetStackControl:2432"
+    "bsdsocket:bsd_NetStackQuery:2432"
     "bsdsocket:ami_sana2_rx_thread:3072"
     "bsdsocket:bsd_getaddrinfo:2432"
     "bsdsocket:bsd_getnameinfo:2432"

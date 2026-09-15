@@ -201,6 +201,14 @@ static VOID show_counters(const char *name, const AmiSana2Stats *st)
     tool_printf("  buffer failures   %10lu\n", st->alloc_failures);
     tool_printf("  vblank RX polls   %10lu    deaf RX resets    %10lu\n",
                 st->tick_polls, st->rx_kicks);
+    /* The card's own transmit trouble, from anxnet.device's special
+       statistics.  A frame the wire never saw shows up here and nowhere
+       else: the shim counted its write as sent. */
+    tool_printf("  collisions        %10lu    FIFO underruns    %10lu\n",
+                st->collisions, st->tx_underruns);
+    tool_printf("  chip resets       %10lu    TX watchdog resets%10lu\n",
+                st->chip_resets, st->tx_wedges);
+    tool_printf("  driver TX errors  %10lu\n", st->drv_tx_errors);
 }
 
 /*

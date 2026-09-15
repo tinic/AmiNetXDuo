@@ -169,6 +169,11 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             info->stats.rx_direct_fill   = src->nsi_RxDirectFill;
             info->stats.tick_polls       = src->nsi_TickPolls;
             info->stats.rx_kicks         = src->nsi_RxKicks;
+            info->stats.collisions       = src->nsi_Collisions;
+            info->stats.tx_underruns     = src->nsi_TxUnderruns;
+            info->stats.chip_resets      = src->nsi_ChipResets;
+            info->stats.tx_wedges        = src->nsi_TxWedges;
+            info->stats.drv_tx_errors    = src->nsi_DrvTxErrors;
             info->stats.alloc_failures   = src->nsi_AllocFailures;
         }
     }

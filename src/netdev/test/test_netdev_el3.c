@@ -21,6 +21,7 @@ static unsigned short mock_win[MOCK_WINDOWS][MOCK_REGS];
 static unsigned char  mock_window;      /* which window is selected */
 static unsigned short mock_status;
 static int            mock_swapped;     /* the bus exchanges word halves */
+#define MOCK_TX_ARMED 0xee                 /* see mock_tx_status_set()      */
 
 /* The last command of each opcode, and how many of them were seen. */
 static unsigned short mock_cmd_arg[32];
@@ -281,6 +282,10 @@ static unsigned short mock_get(volatile unsigned short *p)
 
     v = mock_win[mock_window][i];
 
+    if (mock_window == 1 && off == EL3_W1_TIMER &&
+        odd[EL3_W1_TX_STATUS - 1] != MOCK_TX_ARMED)
+        v &= 0x00ffu;               /* popped: no entry in the status half */
+
     if (mock_window == 0 && off == EL3_W0_EEPROM_CMD && mock_eeprom_busy != 0)
     {
         mock_eeprom_busy--;
@@ -333,6 +338,29 @@ static void mock_put(volatile unsigned short *p, unsigned short v)
         mock_win[0][EL3_W0_EEPROM_CMD / 2] =
             (unsigned short)(chip & (unsigned short)~EL3_EE_BUSY);
     }
+}
+
+/*
+ * The transmit status byte is the high half of the word at window 1 offset
+ * 0x0a, whose low half is the timer; the driver reads the word and splits it,
+ * because a byte read of an odd register does not work through Gayle's
+ * PCMCIA I/O window.  The mock keeps one entry: a word write of 0 pops it.
+ */
+/* MOCK_TX_ARMED in the byte the driver pops (a byte write to 0x0b, any value)
+   is "the entry is still on the stack"; the driver's pop overwrites it. */
+static void mock_tx_status_set(unsigned char st)
+{
+    mock_win[1][EL3_W1_TIMER / 2] = (unsigned short)((unsigned short)st << 8);
+    odd[EL3_W1_TX_STATUS - 1]     = MOCK_TX_ARMED;
+}
+
+/* What the driver's word read returns for the status half: the entry until
+   it is popped, then nothing. */
+static unsigned char mock_tx_status(void)
+{
+    if (odd[EL3_W1_TX_STATUS - 1] != MOCK_TX_ARMED)
+        return 0;
+    return (unsigned char)(mock_win[1][EL3_W1_TIMER / 2] >> 8);
 }
 
 static void mock_do_command(unsigned short cmd)
@@ -833,7 +861,7 @@ static void test_tx_status(void)
     (void)el3_init(&nic);
 
     /* A clean completion: popped, nothing counted, no recovery. */
-    odd[EL3_W1_TX_STATUS - 1] = EL3_TXS_COMPLETE;
+    mock_tx_status_set(EL3_TXS_COMPLETE);
     nic.tx_errors = 0;
     nic.tx_completed = 0;
     {
@@ -841,7 +869,7 @@ static void test_tx_status(void)
 
         el3_drain_tx_status(&nic);
         expect_u32("clean entry popped",
-                   (unsigned long)odd[EL3_W1_TX_STATUS - 1], 0);
+                   (unsigned long)mock_tx_status(), 0);
         expect_u32("nothing counted", (unsigned long)nic.tx_errors, 0);
         expect_u32("and no transmitter reset",
                    (unsigned long)mock_cmd_count[EL3_C_TX_RESET],
@@ -851,7 +879,7 @@ static void test_tx_status(void)
                (unsigned long)nic.tx_completed, 1);
 
     /* An underrun counts, resets the transmitter and re-enables it. */
-    odd[EL3_W1_TX_STATUS - 1] = (UBYTE)(EL3_TXS_COMPLETE | EL3_TXS_UNDERRUN);
+    mock_tx_status_set((UBYTE)(EL3_TXS_COMPLETE | EL3_TXS_UNDERRUN));
     nic.tx_errors    = 0;
     nic.overruns     = 0;
     nic.tx_underruns = 0;
@@ -874,8 +902,7 @@ static void test_tx_status(void)
     }
 
     /* Maximum collisions re-enables without a reset. */
-    odd[EL3_W1_TX_STATUS - 1] =
-        (UBYTE)(EL3_TXS_COMPLETE | EL3_TXS_MAX_COLLISION);
+    mock_tx_status_set((UBYTE)(EL3_TXS_COMPLETE | EL3_TXS_MAX_COLLISION));
     nic.collisions = 0;
     {
         int resets  = mock_cmd_count[EL3_C_TX_RESET];
@@ -1116,13 +1143,13 @@ static void test_interrupt(void)
                (unsigned long)(mock_status & EL3_S_TX_AVAIL), 0);
 
     /* Transmit-complete pops the stack rather than acknowledging. */
-    odd[EL3_W1_TX_STATUS - 1] = EL3_TXS_COMPLETE;
+    mock_tx_status_set(EL3_TXS_COMPLETE);
     mock_status = EL3_S_INT_LATCH | EL3_S_TX_COMPLETE;
     mock_win[1][EL3_W1_TX_FREE / 2] = 2048;
     expect_u32("a transmit-complete interrupt is ours",
                (unsigned long)el3_intr(&nic), 1);
     expect_u32("the stack was popped",
-               (unsigned long)odd[EL3_W1_TX_STATUS - 1], 0);
+               (unsigned long)mock_tx_status(), 0);
 
     /* An adapter failure restarts the part and counts a reset. */
     nic.resets  = 0;

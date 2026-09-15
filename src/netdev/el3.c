@@ -485,7 +485,7 @@ LONG el3_init(NetdevNic *nic)
         el3_cmd(nic, EL3_C_COAX_START, 0);
         netdev_wait_begin(&w, EL3_COAX_WAIT_US, EL3_COAX_SPINS);
 
-        while (netdev_bus_r8(&nic->bus, EL3_W1_TIMER) != 0xff &&
+        while ((UBYTE)el3_get(nic, EL3_W1_TIMER) != 0xff &&
                !netdev_wait_done(&w))
             ;
     }
@@ -545,15 +545,52 @@ VOID el3_reset(NetdevNic *nic)
  * byte, write anything back, repeat until the read is zero.  It is a byte at an
  * odd offset and so goes through netdev_bus, into Gayle's second window.
  */
+/*
+ * TX_STATUS (0x0b) and the timer (0x0a) are the two bytes of one word, and
+ * they are read as that word and split.  A byte read of an odd register
+ * through Gayle's PCMCIA I/O window does not return the register
+ * (netdev_bus.h, cnet16's GETODD is the same fact): on a real 3c589 in an
+ * A1200 the byte read below came back non-zero 32 times at init, counted 32
+ * collisions, 32 underruns and 32 errors that never happened, reset the
+ * transmitter 32 times, and then never saw a real entry again -- while the
+ * card lost 42% of what it sent with every counter frozen.  The pop is a
+ * word write for the same reason; the timer half is read-only.
+ */
+static UBYTE el3_tx_status(NetdevNic *nic)
+{
+    /*
+     * The word at 0x0a, split: the chip's low octet is the timer, its high
+     * octet TX_STATUS, and el3_get() hands the chip's own word order back
+     * whatever the window does.  The timer proves the split -- it reads the
+     * same through a byte load of 0x0a and through this half -- and a byte
+     * load of 0x0b through Gayle's odd window came back 0xff on a real
+     * A1200 nearly every time, so the drain counted a fatal entry and reset
+     * the transmitter on every read.
+     */
+    UWORD w  = el3_get(nic, EL3_W1_TIMER);
+    UBYTE st = (UBYTE)(w >> 8);
+
+    return st;
+}
+
+static VOID el3_tx_status_pop(NetdevNic *nic)
+{
+    /* A byte write, which does go through that window (the read is what
+       does not): any value pops the entry. */
+    netdev_bus_w8(&nic->bus, EL3_W1_TX_STATUS, 0);
+}
+
 VOID el3_drain_tx_status(NetdevNic *nic)
 {
     UWORD guard = 32;
 
     while (guard-- != 0)
     {
-        UBYTE st = netdev_bus_r8(&nic->bus, EL3_W1_TX_STATUS);
+        UBYTE st = el3_tx_status(nic);
 
-        if (st == 0)
+        /* Bit 7 is "this entry is a completed transmit"; without it there is
+           no entry, whatever the other bits say. */
+        if ((st & EL3_TXS_COMPLETE) == 0)
             return;
 
         if ((st & (EL3_TXS_JABBER | EL3_TXS_UNDERRUN |
@@ -566,7 +603,7 @@ VOID el3_drain_tx_status(NetdevNic *nic)
 
         /* Any value pops it.  Zero is the value, so that nothing here reads
            as a bit written back into a register that has none. */
-        netdev_bus_w8(&nic->bus, EL3_W1_TX_STATUS, 0);
+        el3_tx_status_pop(nic);
         nic->tx_completed++;
 
         /*
@@ -602,6 +639,15 @@ LONG el3_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
         return DP8390_TX_OFFLINE;
 
     el3_window(nic, 1);
+
+    /*
+     * Pop what the last transmits left on the status stack before adding to
+     * it.  A completed frame with no error raises no interrupt (the length
+     * word never asks for one), so nothing else pops those entries; the
+     * stack is 31 deep and a full one stops the transmitter.  This is where
+     * the Linux driver pops too.  One word read when the stack is empty.
+     */
+    el3_drain_tx_status(nic);
 
     if (el3_get(nic, EL3_W1_TX_FREE) < need)
     {

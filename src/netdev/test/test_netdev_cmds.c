@@ -1060,7 +1060,7 @@ static void n_special_stats_respect_the_caller(void)
             full = box.hdr.RecordCountSupplied;
     }
 
-    expect(full == 16, "the table is the sixteen records this test read");
+    expect(full == 17, "the table is the seventeen records this test read");
 
     reset();
     req(&io, S2_GETSPECIALSTATS);

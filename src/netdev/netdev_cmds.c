@@ -108,6 +108,7 @@ static const char netdev_stat_godd[]  = "Odd registers read as words";
 static const char netdev_stat_drx[]   = "Direct receive fills";
 static const char netdev_stat_tick[]  = "Vertical-blank interrupt polls";
 static const char netdev_stat_kick[]  = "PCMCIA deaf-receiver resets";
+static const char netdev_stat_txerr[] = "Transmit errors";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -196,6 +197,10 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
        survive the SANA-II boundary to be useful in a field report. */
     STAT(netdev_stat_tick,  unit->nu_TickPolls);
     STAT(netdev_stat_kick,  unit->nu_RxKicks);
+    /* The chip's own transmit failures (jabber, underrun, excessive
+       collisions on el3; the TSR error bits on dp8390), appended so every
+       older record keeps its index.  Frames the wire never saw. */
+    STAT(netdev_stat_txerr, unit->nu_Nic.tx_errors);
 
 #undef STAT
 

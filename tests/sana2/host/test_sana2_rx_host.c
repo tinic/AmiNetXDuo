@@ -271,6 +271,10 @@ VOID ami_sana2_tx_lazy_start(AmiSana2If *iface) { (VOID)iface; }
 VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface) { (VOID)iface; }
 #endif
 LONG ami_sana2_offline(AmiSana2If *iface) { (VOID)iface; return 0; }
+
+/* The device-derived counters a status query asks the reader for
+   (sana2_device.c): no device here, only a link. */
+VOID ami_sana2_refresh_stats(AmiSana2If *iface) { (VOID)iface; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }

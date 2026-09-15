@@ -275,7 +275,8 @@ static UWORD print_type(UWORD count, const char *type, BOOL want_txt)
 
 static BOOL mdns_enabled_somewhere(struct Library *base)
 {
-    struct
+    /* Off the stack for the same reason svc_answer is. */
+    static struct
     {
         NetStatusHeader    hdr;
         NetStatusInterface e[NX_MAX_PHYSICAL_INTERFACES];

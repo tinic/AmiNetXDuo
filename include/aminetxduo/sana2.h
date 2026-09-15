@@ -116,9 +116,26 @@ typedef struct AmiSana2Stats {
        drivers leave them zero. */
     ULONG   tick_polls;
     ULONG   rx_kicks;
+    /* The driver's own transmit trouble, read through S2_GETSPECIALSTATS by
+       name (netdev_cmds.c); zero for a driver that does not report them.
+       Added for the 3c589, whose frames were vanishing with no counter
+       anyone could see. */
+    ULONG   collisions;         /* "Collisions"                            */
+    ULONG   tx_underruns;       /* "Transmit FIFO underruns"               */
+    ULONG   chip_resets;        /* "Chip resets"                           */
+    ULONG   tx_wedges;          /* "Transmitter watchdog resets"           */
+    ULONG   drv_tx_errors;      /* "Transmit errors", the chip's own count */
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);
+/* Re-read the device-derived half: two device commands on the calling task's
+   stack, so the IP thread and the readers only.  ami_sana2_get_stats() then
+   copies it. */
+VOID ami_sana2_refresh_stats(AmiSana2If *iface);
+/* A status query's way to the same thing from any task: ask reader 0 to run
+   the commands; the epoch changes when it has.  FALSE with no reader. */
+BOOL  ami_sana2_stats_request(AmiSana2If *iface);
+ULONG ami_sana2_stats_epoch(const AmiSana2If *iface);
 
 /*
  * What QueryInterfaceTagList() asks for by name, read out of the shim's own

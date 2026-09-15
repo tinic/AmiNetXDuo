@@ -660,6 +660,12 @@ struct AmiSana2If
     /* Administrative state: the stack's intent, not the wire's condition.
        Only the driver entry's enable/disable cases write it. */
     BOOL                admin_up;
+    /* A status query wants the device-derived counters of now: it sets
+       stats_want and wakes reader 0 (ami_sana2_stats_request()), the reader
+       runs the two device commands and bumps stats_epoch.  Never on the
+       query's own task: a Shell gives it 4096 bytes of stack. */
+    volatile BOOL       stats_want;
+    volatile ULONG      stats_epoch;
     BOOL                raw_supported;
     BOOL                raw_mode;
     /* Set once a device answers an error to a raw CMD_WRITE this shim sent on

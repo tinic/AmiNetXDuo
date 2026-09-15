@@ -1626,6 +1626,20 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             ami_sana2_tx_reap(iface);
         }
 
+        /*
+         * A status query asked for the device's counters of now
+         * (ami_sana2_stats_request()).  The two device commands run here, on
+         * a stack sized for device I/O, and the epoch tells the query they
+         * are done.  Every reader tests the flag; only reader 0 is woken for
+         * it, and the first to see it clears it.
+         */
+        if (iface->stats_want)
+        {
+            iface->stats_want = FALSE;
+            ami_sana2_refresh_stats(iface);
+            iface->stats_epoch++;
+        }
+
         if (ami_sana2_rx_post(rx) == 0)
         {
             /* Either the pool is empty or the interface is down. Back off

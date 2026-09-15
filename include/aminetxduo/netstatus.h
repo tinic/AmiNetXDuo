@@ -22,7 +22,7 @@ extern "C" {
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
    different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       14
+#define AMI_NETSTATUS_VERSION       15
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -191,6 +191,13 @@ typedef struct NetStatusInterface
     /* anxnet.device recovery counters; zero for other SANA-II drivers. */
     ULONG   nsi_TickPolls;
     ULONG   nsi_RxKicks;
+    /* The driver's own transmit trouble (S2_GETSPECIALSTATS by name); zero
+       for a driver that reports none.  Version 15. */
+    ULONG   nsi_Collisions;
+    ULONG   nsi_TxUnderruns;
+    ULONG   nsi_ChipResets;
+    ULONG   nsi_TxWedges;
+    ULONG   nsi_DrvTxErrors;
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */
