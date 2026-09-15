@@ -12,6 +12,7 @@
 #include "netdev_watchdog.h"
 #include "netdev_macgen.h"
 #include "dp8390.h"
+#include "netdev_dtree.h"
 
 #include "aminetxduo/version.h"
 
@@ -1145,6 +1146,11 @@ LONG netdev_online(NetdevUnit *unit)
 
     netdev_rebuild_filter(unit);
 
+    /* A bus master into RAM must be stopped before any reboot: the hook
+       goes in the first time one is running. */
+    if (unit->nu_Nic.core_mem != NULL)
+        netdev_reset_guard(unit->nu_Dev);
+
     unit->nu_Online = 1;
     unit->nu_Stats.Reconfigurations++;
     netdev_event(unit, S2EVENT_ONLINE);
@@ -1297,9 +1303,76 @@ ULONG netdev_interrupt(NetdevUnit *unit)
     return 1;
 }
 
+/*
+ * Where a unit's interrupt comes from.  A Zorro board shares INT2; the PCMCIA
+ * slot is card.resource's and is bound elsewhere; a device-tree board is on
+ * the Pi's GIC, behind gic400.library.  Every site that adds or removes the
+ * server goes through here so the three cannot drift.
+ */
+static VOID netdev_int_add(NetdevUnit *unit)
+{
+    if (netdev_pcmcia_is_unit(unit))
+        return;
+    if (unit->nu_Nic.card->bus == NETDEV_BUS_DTREE)
+    {
+        (VOID)netdev_dtree_int_add(unit->nu_Nic.dt_irq, &unit->nu_Intr);
+        return;
+    }
+    AddIntServer(INTB_PORTS, &unit->nu_Intr);
+}
+
+static VOID netdev_int_rem(NetdevUnit *unit)
+{
+    if (netdev_pcmcia_is_unit(unit))
+        return;
+    if (unit->nu_Nic.card->bus == NETDEV_BUS_DTREE)
+    {
+        netdev_dtree_int_rem(unit->nu_Nic.dt_irq, &unit->nu_Intr);
+        return;
+    }
+    RemIntServer(INTB_PORTS, &unit->nu_Intr);
+}
+
+/*
+ * The bottom half of a two-part interrupt: an Exec software interrupt, raised
+ * by the server below for a core with a top half.  Under Disable(), because
+ * the service is written for the masked context the server and the vertical
+ * blank both provide.
+ */
+static ULONG netdev_soft(register NetdevUnit *unit __asm("a1"))
+{
+    Disable();
+    if (unit->nu_InIsr == 0)
+    {
+        unit->nu_InIsr = 1;
+        if (netdev_interrupt(unit) != 0)
+        {
+            unit->nu_IntSeen++;
+            unit->nu_IntSilent = 0;
+        }
+        unit->nu_InIsr = 0;
+    }
+    Enable();
+
+    return 0;
+}
+
 static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 {
     ULONG mine;
+
+    /* A core with a top half: quieten the source, and let the software
+       interrupt do the work where a cache operation and a long ring walk
+       are welcome. */
+    if (unit->nu_Nic.isr != NULL)
+    {
+        if (!unit->nu_Nic.isr(&unit->nu_Nic))
+            return 0;
+        unit->nu_IntSeen++;
+        unit->nu_IntSilent = 0;
+        Cause(&unit->nu_Soft);
+        return 1;
+    }
 
     unit->nu_InIsr = 1;
     mine = netdev_interrupt(unit);
@@ -1347,6 +1420,12 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
      */
     if (unit->nu_IntSilent < 0xffffu)
         unit->nu_IntSilent++;
+
+    /* A core with a link to poll or completions to collect, once a blank. */
+    if (unit->nu_Online && unit->nu_InIsr == 0 &&
+        unit->nu_Nic.ops->tick != NULL &&
+        unit->nu_Nic.ops->tick(&unit->nu_Nic))
+        netdev_tx_pump(unit);
 
     if (unit->nu_Online && unit->nu_IntSilent >= 10u && unit->nu_InIsr == 0 &&
         (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))
@@ -1470,12 +1549,28 @@ UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt)
  * walk below, and the PCMCIA slot, which has no ConfigDev at all.
  */
 static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
-                            APTR board, ULONG serial)
+                            APTR board, ULONG serial, const NetdevDtInfo *dt)
 {
     NetdevUnit *unit;
+    UWORD       i;
 
     unit = &dev->nd_Units[dev->nd_UnitCount];
     nd_zero((UBYTE *)unit, sizeof(*unit));
+
+    /* What the device tree said, for a core found through one.  Before
+       attach, which is what reads it. */
+    if (dt != NULL)
+    {
+        unit->nu_Nic.dt_irq    = dt->irq;
+        unit->nu_Nic.dt_mac_ok = dt->mac_ok;
+        unit->nu_Nic.dt_phy    = dt->phy;
+        for (i = 0; i < NETDEV_ADDR_LEN; i++)
+            unit->nu_Nic.dt_mac[i] = dt->mac[i];
+    }
+    else
+    {
+        unit->nu_Nic.dt_phy = 0xff;
+    }
 
     unit->nu_Nic.ops = netdev_nic_ops_for(card->chip);
     if (unit->nu_Nic.ops == NULL)
@@ -1493,6 +1588,8 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Nic.rx_arg = unit;
     unit->nu_Nic.rx_claim   = netdev_rx_claim;
     unit->nu_Nic.rx_claimed = netdev_rx_claimed;
+    unit->nu_Nic.mc_table   = unit->nu_Mcast;
+    unit->nu_Nic.mc_max     = NETDEV_MCAST_MAX;
 
     netdev_bus_setup(&unit->nu_Nic.bus,
              (APTR)((UBYTE *)board + card->reg_off),
@@ -1581,6 +1678,12 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Tick.is_Data     = unit;
     unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick;
 
+    unit->nu_Soft.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Soft.is_Node.ln_Pri  = 16;
+    unit->nu_Soft.is_Node.ln_Name = netdev_name;
+    unit->nu_Soft.is_Data     = unit;
+    unit->nu_Soft.is_Code     = (VOID (*)())netdev_soft;
+
     dev->nd_UnitCount++;
 
     return TRUE;
@@ -1667,7 +1770,7 @@ static VOID netdev_probe(NetdevDevice *dev)
         }
 
         if (!netdev_add_unit(dev, card, (APTR)cd->cd_BoardAddr,
-                             cd->cd_Rom.er_SerialNumber))
+                             cd->cd_Rom.er_SerialNumber, NULL))
             continue;
     }
 
@@ -1703,7 +1806,7 @@ static VOID netdev_probe(NetdevDevice *dev)
             netdev_diag_note(ANXDIAG_FIXED_TRY, i, (ULONG)base);
 
             nd_tracex("anx: fixed base ", (ULONG)base);
-            (VOID)netdev_add_unit(dev, card, base, 0);
+            (VOID)netdev_add_unit(dev, card, base, 0, NULL);
         }
 
         /*
@@ -1722,13 +1825,45 @@ static VOID netdev_probe(NetdevDevice *dev)
             if (base != NULL)
             {
                 nd_tracex("anx: pcmcia base ", (ULONG)base);
-                if (!netdev_add_unit(dev, card, base, 0))
+                if (!netdev_add_unit(dev, card, base, 0, NULL))
                     netdev_pcmcia_release();
                 else
                     netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
             }
             ReleaseSemaphore(&dev->nd_PcmciaLock);
         }
+
+        /*
+         * The device-tree rows LAST: a board Emu68 describes rather than one
+         * the bus enumerates.  No tree, no unit, which is every machine that
+         * is not a PiStorm; the lookup itself is what says so.  After the
+         * slot for the same reason the slot is after Zorro: the 3c589 in an
+         * A1200's slot was unit 0 before this row existed, and an interface
+         * file that says UNIT=0 keeps meaning it.  CARD=genet names this row
+         * whatever else is fitted.
+         */
+        for (i = 0; i < netdev_card_count; i++)
+        {
+            const NetdevCard *card = &netdev_cards[i];
+            NetdevDtInfo      dt;
+
+            if (card->bus != NETDEV_BUS_DTREE || card->compat == NULL)
+                continue;
+            if (!netdev_dtree_find(card->compat, &dt))
+                continue;
+            netdev_diag_note(ANXDIAG_DTREE_FOUND, i, dt.base);
+            if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
+            {
+                dev->nd_UnitsDropped++;
+                netdev_diag_note(ANXDIAG_UNITS_FULL, i,
+                                 (ULONG)NETDEV_MAX_UNITS);
+                break;
+            }
+
+            nd_tracex("anx: dtree base ", dt.base);
+            (VOID)netdev_add_unit(dev, card, (APTR)dt.base, 0, &dt);
+        }
+
     }
 }
 
@@ -1856,7 +1991,7 @@ static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
         base = netdev_pcmcia_claim(dev, &card);
         if (base != NULL && (wanted == NULL || wanted == card))
         {
-            if (netdev_add_unit(dev, card, base, 0))
+            if (netdev_add_unit(dev, card, base, 0, NULL))
             {
                 netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
                 netdev_diag_counts(dev->nd_UnitCount, dev->nd_UnitsDropped);
@@ -2074,8 +2209,7 @@ static struct Device *netdev_open(
 
     if (first_opener && !hw->nu_IntrAdded)
     {
-        if (!netdev_pcmcia_is_unit(hw))
-            AddIntServer(INTB_PORTS, &hw->nu_Intr);
+        netdev_int_add(hw);
         AddIntServer(INTB_VERTB, &hw->nu_Tick);
         hw->nu_IntrAdded = 1;
     }
@@ -2149,8 +2283,7 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
             netdev_release_unit(hw);
             if (hw->nu_IntrAdded)
             {
-                if (!netdev_pcmcia_is_unit(hw))
-                    RemIntServer(INTB_PORTS, &hw->nu_Intr);
+                netdev_int_rem(hw);
                 RemIntServer(INTB_VERTB, &hw->nu_Tick);
                 hw->nu_IntrAdded = 0;
             }
@@ -2181,12 +2314,20 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
         return (BPTR)0;
     }
 
+    /* The reboot hook comes out first, and if it cannot -- somebody patched
+       the vector after us -- the device stays, hook and all, rather than
+       leave a jump into freed memory in exec's table. */
+    if (!netdev_reset_guard_remove())
+    {
+        dev->dd_Library.lib_Flags |= LIBF_DELEXP;
+        return (BPTR)0;
+    }
+
     for (i = 0; i < d->nd_UnitCount; i++)
     {
         if (d->nd_Units[i].nu_IntrAdded)
         {
-            if (!netdev_pcmcia_is_unit(&d->nd_Units[i]))
-                RemIntServer(INTB_PORTS, &d->nd_Units[i].nu_Intr);
+            netdev_int_rem(&d->nd_Units[i]);
             RemIntServer(INTB_VERTB, &d->nd_Units[i].nu_Tick);
             d->nd_Units[i].nu_IntrAdded = 0;
         }
@@ -2195,6 +2336,15 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
             d->nd_Units[i].nu_Nic.running)
             d->nd_Units[i].nu_Nic.ops->stop(&d->nd_Units[i].nu_Nic);
         Enable();
+
+        /* A bus master's rings, allocated at attach.  After stop: the chip
+           has been told to let go of them. */
+        if (d->nd_Units[i].nu_Nic.core_mem != NULL)
+        {
+            FreeMem(d->nd_Units[i].nu_Nic.core_mem,
+                    d->nd_Units[i].nu_Nic.core_size);
+            d->nd_Units[i].nu_Nic.core_mem = NULL;
+        }
     }
 
     /*

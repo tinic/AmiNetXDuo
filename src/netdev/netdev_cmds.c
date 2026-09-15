@@ -202,6 +202,14 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
        older record keeps its index.  Frames the wire never saw. */
     STAT(netdev_stat_txerr, unit->nu_Nic.tx_errors);
 
+    /* Whatever the core itself counts, after everything above. */
+    if (unit->nu_Nic.core_stat_names != NULL)
+    {
+        for (i = 0; i < NETDEV_CORE_STATS &&
+                    unit->nu_Nic.core_stat_names[i] != NULL; i++)
+            STAT(unit->nu_Nic.core_stat_names[i], unit->nu_Nic.core_stat[i]);
+    }
+
 #undef STAT
 
     hdr->RecordCountSupplied = n;

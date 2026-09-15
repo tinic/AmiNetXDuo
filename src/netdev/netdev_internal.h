@@ -161,6 +161,7 @@ typedef struct NetdevUnit
 
     struct Interrupt            nu_Intr;      /* INT2, the card               */
     struct Interrupt            nu_Tick;      /* INT3 vertical blank, watchdog */
+    struct Interrupt            nu_Soft;      /* the bottom half, nic->isr cores */
     UBYTE                       nu_TxBuilding; /* a task owns nu_TxBuf         */
     UBYTE                      *nu_TxAt;      /* where the frame was built    */
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
@@ -400,6 +401,15 @@ static inline BOOL netdev_filter_ok(NetdevOpener *op, struct IOSana2Req *io,
    rather than found.  NULL when there is no slot, nothing in it, or what is
    in it is not a LAN card. */
 VOID netdev_trace_val(const char *tag, ULONG v);
+
+/*
+ * netdev_reset.c: stop every bus-master unit before a warm reboot, through
+ * a ColdReboot() patch and a keyboard reset handler.  Installed once, on
+ * the first such unit's online; remove() is FALSE when the patch cannot be
+ * taken out cleanly, and the device then stays resident.
+ */
+VOID netdev_reset_guard(NetdevDevice *dev);
+BOOL netdev_reset_guard_remove(VOID);
 /*
  * Claim the slot, identify what is in it from its CIS, and configure it for
  * the row that drives that card.  *card_out is that row, set only on success.

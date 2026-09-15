@@ -50,8 +50,9 @@ for emulators. Any other driver name can be typed in.
 
 `anxnet.device`, the SANA-II driver AmiNetXDuo builds itself, drives the A2065,
 the Ariadne, the Ariadne II, the X-Surf, the X-Surf 100, NE2000-compatible
-PCMCIA cards and the 3C589. The installer offers to put it in `DEVS:Networks`;
-an interface file selects it with `DEVICE=anxnet.device`.
+PCMCIA cards, the 3C589 and the Raspberry Pi 4/CM4's own Ethernet behind a
+PiStorm32 running Emu68 (`CARD=genet`). The installer offers to put it in
+`DEVS:Networks`; an interface file selects it with `DEVICE=anxnet.device`.
 
 ## Installing
 

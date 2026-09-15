@@ -49,7 +49,7 @@ const NetdevCard netdev_cards[] =
        bus               base      odd_off  swap  regmap  oui  pnp */
     { "xsurf100",  4626,   100, 0x0800,     4, 0x8880,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
 
     /*
      * reg_off is the one place the register base is written down.  The chip
@@ -59,19 +59,19 @@ const NetdevCard netdev_cards[] =
      */
     { "xsurf",     4626,    23, 0x8600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, &xsurf_pnp },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, &xsurf_pnp, NULL },
 
     { "ariadne2",  2167,   202, 0x0600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
 
     { "hydra",     2121,     1, 0xffe1,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,       0,  0x4000,  0xffc0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
 
     { "lanrover",  1023,   254, 0x0001,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,  0x8000,  0x8000,  0x0100,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
 
     /*
      * The two LANCE boards.  Registers are RDP then RAP, a word apart, and the
@@ -80,11 +80,11 @@ const NetdevCard netdev_cards[] =
      */
     { "a2065",      514,   112, 0x4000,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080, NULL, NULL },
 
     { "ariadne",   2167,   201, 0x0370,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060, NULL, NULL },
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
@@ -93,7 +93,7 @@ const NetdevCard netdev_cards[] =
      */
     { "pcmcia",       0,     0, 0x0300,     1,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
     /*
      * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B at a fixed
      * $EE0000 with no autoconfig record, so it is probed rather than found and
@@ -110,7 +110,7 @@ const NetdevCard netdev_cards[] =
      */
     { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0, NULL },
+      NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0, NULL, NULL },
 
     /*
      * The 3Com EtherLink III PCMCIA card, a 3C589 of any revision.  manid/prodid
@@ -122,7 +122,7 @@ const NetdevCard netdev_cards[] =
      */
     { "3c589",   0x0101, 0x0589, 0x0300,     1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
 
     /*
      * The two Megahertz/3Com LAN+modem combo cards the CIS walk reaches.
@@ -146,17 +146,30 @@ const NetdevCard netdev_cards[] =
      */
     { "3ccfem556", 0x0101, 0x0556, 0x0300,   1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
     { "3cxem556",  0x0101, 0x0035, 0x0300,   1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
+
+    /*
+     * The Raspberry Pi 4 / CM4's own Ethernet, reached through a PiStorm32
+     * running Emu68.  No autoconfig record and no fixed address: Emu68's
+     * device tree names the register window, the interrupt and the station
+     * address, and netdev_dtree.c reads all three.  reg_off 0 and stride 4
+     * describe the 32-bit little-endian register file for the bus record;
+     * the core reads it through its own accessor and swaps.  Appended, like
+     * every row, because the pin number (index + 1) * 100 is published.
+     */
+    { "genet",        0,     0, 0x0000,     4,      0,
+      NETDEV_CHIP_GENET, 1000000000UL, 0,       0,       0,       0,
+      NETDEV_BUS_DTREE, 0, 0, 0, NULL, 0, NULL, "brcm,bcm2711-genet-v5" },
 };
 
 const UWORD netdev_card_count =
     (UWORD)(sizeof(netdev_cards) / sizeof(netdev_cards[0]));
 
 /*
- * Chip family -> core.  Here rather than in any of the four cores, because a
+ * Chip family -> core.  Here rather than in any of the five cores, because a
  * core that names another cannot be built without it.  NULL for a family with
  * no core: the board is recognised and skipped rather than enumerated.
  */
@@ -170,6 +183,8 @@ const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
         return &netdev_nic_lance;
     if (chip == NETDEV_CHIP_EL3)
         return &netdev_nic_el3;
+    if (chip == NETDEV_CHIP_GENET)
+        return &netdev_nic_genet;
 
     return NULL;
 }

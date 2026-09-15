@@ -110,6 +110,7 @@ UNTESTABLE_CARDS="
 3ccfem556   as 3c589, and its CIS tuple is covered by test_netdev_cis.c
 3cxem556    as 3c589, and its CIS tuple is covered by test_netdev_cis.c
 xsurf500    no ACA500 and no X-Surf 500 is modelled by any emulator (netdev_cards.c)
+genet       the Pi 4's own MAC behind a PiStorm32: no emulator has a GENET or an Emu68 device tree; proven on the real A1200 only
 "
 
 cards_rows() { # [board[,board...]]

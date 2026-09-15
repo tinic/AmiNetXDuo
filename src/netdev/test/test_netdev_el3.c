@@ -239,6 +239,7 @@ UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt)
 const struct NetdevNicOps netdev_nic_ne2000;
 const struct NetdevNicOps netdev_nic_ed;
 const struct NetdevNicOps netdev_nic_lance;
+const struct NetdevNicOps netdev_nic_genet;
 
 #include "el3.c"
 

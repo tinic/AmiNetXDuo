@@ -60,6 +60,7 @@ VOID netdev_rebuild_filter(NetdevUnit *unit)
 
     for (i = 0; i < 8; i++)
         unit->nu_Nic.mar[i] = mar[i];
+    unit->nu_Nic.all_multi = (UBYTE)(unit->nu_AllMulti != 0);
 
     Disable();
     unit->nu_Nic.ops->setfilter(&unit->nu_Nic);

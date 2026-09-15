@@ -25,6 +25,8 @@
 #define NETDEV_CHIP_ED      1   /* DP8390 with a memory-mapped packet buffer */
 #define NETDEV_CHIP_LANCE   2   /* Am7990/Am79C960: bus master, rings in RAM  */
 #define NETDEV_CHIP_EL3     3   /* 3Com EtherLink III: windowed, PIO FIFO     */
+#define NETDEV_CHIP_GENET   4   /* Broadcom GENET v5: the Pi 4's own MAC, bus
+                                   master with descriptors in its registers  */
 
 /*
  * How the board reports that the interrupt was its own.  A Zorro INT2 is
@@ -41,6 +43,9 @@
 #define NETDEV_BUS_ZORRO    0
 #define NETDEV_BUS_PCMCIA   1
 #define NETDEV_BUS_FIXED    2   /* a fixed address, no autoconfig, no claim */
+#define NETDEV_BUS_DTREE    3   /* named by a device tree: Emu68's
+                                   devicetree.resource says where it is, and
+                                   its interrupt goes through gic400.library */
 
 /*
  * The X-Surf is a Zorro II board carrying an RTL8019AS on a private ISA bus.
@@ -112,6 +117,12 @@ typedef struct NetdevCard
      * written down.
      */
     const NetdevIsaPnp *pnp;
+    /*
+     * NETDEV_BUS_DTREE only: the `compatible` string the board's tree node
+     * carries.  The tree, not this table, says where the board is.  NULL on
+     * every row that is found some other way.
+     */
+    const char *compat;
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];

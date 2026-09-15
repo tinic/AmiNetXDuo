@@ -78,6 +78,19 @@ extern "C" {
 #define ANXDIAG_PC_MANFID      34   /* man << 16 | product, or ANXDIAG_ABSENT */
 #define ANXDIAG_PC_FUNCE       35   /* first FUNCE subtuple, or ANXDIAG_ABSENT */
 #define ANXDIAG_PC_NODEID      36   /* a LAN node ID was found in the CIS    */
+
+/* --- a device-tree board (Emu68's GENET) ------------------------------- */
+#define ANXDIAG_DTREE_FOUND    90   /* the tree named the board; value = its
+                                       68k register window                   */
+#define ANXDIAG_GENET_REV      91   /* SYS_REV_CTRL exactly as read          */
+#define ANXDIAG_GENET_MEM      92   /* the receive buffers' address           */
+#define ANXDIAG_GENET_IRQ      93   /* the GIC interrupt number, 0 = none    */
+#define ANXDIAG_GENET_PHY      94   /* PHY ID registers 2:3, ffffffff = no
+                                       answer on the MDIO bus                 */
+#define ANXDIAG_GENET_DMA      95   /* RX_DMA_CTRL as found at attach: bit 0
+                                       set = the previous driver's receive
+                                       DMA was still running into its old
+                                       buffers across the reboot             */
 #define ANXDIAG_PC_NOCONFIG    37   /* no CISTPL_CONFIG: cannot be configured */
 #define ANXDIAG_PC_CFGBASE     38   /* TPCC_RADR from CISTPL_CONFIG          */
 #define ANXDIAG_PC_NOCFTABLE   39   /* no CISTPL_CFTABLE_ENTRY               */
@@ -189,6 +202,12 @@ extern "C" {
 #define ANXDIAG_WHY_MEM        10   /* the 32-byte probe of the buffer passed
                                        and a full 16 KB pass did not, which is
                                        buffer RAM rather than the data port   */
+#define ANXDIAG_WHY_REV        11   /* GENET: the version register is not a
+                                       v5 part                                */
+#define ANXDIAG_WHY_NOMEM      12   /* GENET: no fast RAM for the rings      */
+#define ANXDIAG_WHY_NODMA      13   /* GENET: the RAM the rings got is not in
+                                       the tree's physical memory, so the DMA
+                                       could not have reached it              */
 
 /* ANXDIAG_MAC_SOURCE values. */
 #define ANXDIAG_MAC_PROM        0   /* the card's address PROM               */
@@ -196,6 +215,7 @@ extern "C" {
 #define ANXDIAG_MAC_CIS         2   /* the card's CIS LAN node ID            */
 #define ANXDIAG_MAC_DERIVED     3   /* derived: the PROM was blank           */
 #define ANXDIAG_MAC_SERIAL      4   /* the autoconfig serial number (LANCE)  */
+#define ANXDIAG_MAC_DTREE       5   /* the device tree's local-mac-address   */
 
 typedef struct AnxDiagStep
 {

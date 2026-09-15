@@ -420,5 +420,6 @@ const struct NetdevNicOps netdev_nic_ed =
     dp8390_tx,
     dp8390_setfilter,
     dp8390_intr,
-    dp8390_reset
+    dp8390_reset,
+    NULL                /* no link to poll: the wire is the link */
 };

@@ -126,6 +126,16 @@ static const char *cnd_why(ULONG why)
     case ANXDIAG_WHY_EEPROM:
         return "the card's EEPROM never reported itself ready, so no station "
                "address was read out of it";
+    case ANXDIAG_WHY_REV:
+        return "the GENET version register does not describe a v5 part, so "
+               "whatever the device tree pointed at is not the MAC this core "
+               "drives";
+    case ANXDIAG_WHY_NOMEM:
+        return "no fast RAM could be allocated for the GENET's rings";
+    case ANXDIAG_WHY_NODMA:
+        return "the RAM allocated for the GENET's rings lies outside what the "
+               "device tree calls physical memory, so the MAC's DMA could not "
+               "have reached it";
     default:
         break;
     }
@@ -147,6 +157,8 @@ static const char *cnd_macsource(ULONG src)
         return "this machine: the PROM was blank";
     case ANXDIAG_MAC_SERIAL:
         return "the autoconfig serial number";
+    case ANXDIAG_MAC_DTREE:
+        return "the device tree (local-mac-address)";
     default:
         break;
     }
@@ -162,6 +174,7 @@ static const char *cnd_chip(ULONG chip)
     case 1:  return "a DP8390 with a memory-mapped packet buffer";
     case 2:  return "an Am7990 LANCE, which masters the bus itself";
     case 3:  return "a 3Com EtherLink III, windowed, with PIO FIFOs";
+    case 4:  return "a Broadcom GENET v5, the Pi 4's own MAC, a bus master";
     default: break;
     }
 
@@ -250,6 +263,38 @@ static VOID cnd_step(const AnxDiagStep *st)
     case ANXDIAG_NO_CORE:
         say("  This driver has no chip core for chip type %lu, so the card\n"
             "  cannot be driven even though it was recognised.\n", v);
+        return;
+    case ANXDIAG_DTREE_FOUND:
+        say("  Named by the device tree: register window at $%08lx.\n", v);
+        return;
+    case ANXDIAG_GENET_REV:
+        say("  GENET version register $%08lx (major %lu, minor %lu).\n",
+            v, (v >> 24) & 0x0fUL, (v >> 16) & 0x0fUL);
+        return;
+    case ANXDIAG_GENET_MEM:
+        say("  Receive buffers at $%08lx, fast RAM the MAC's DMA reaches.\n",
+            v);
+        return;
+    case ANXDIAG_GENET_IRQ:
+        if (v == 0)
+            say("  The tree named no interrupt; the unit will be polled.\n");
+        else
+            say("  GIC interrupt %lu (SPI %lu), through gic400.library.\n",
+                v, v - 32UL);
+        return;
+    case ANXDIAG_GENET_DMA:
+        say("  Receive DMA control read $%08lx at attach: the engine was %s\n"
+            "  across the reboot.\n", v,
+            (LONG)((v & 1UL) != 0 ? "STILL RUNNING into its old buffers"
+                                  : "stopped"));
+        return;
+    case ANXDIAG_GENET_PHY:
+        if (v == 0xffffffffUL)
+            say("  The PHY did not answer on the MDIO bus.\n");
+        else
+            say("  PHY identifier $%08lx (OUI bits $%06lx, model $%02lx,\n"
+                "  revision %lu).\n", v, v >> 10, (v >> 4) & 0x3fUL,
+                v & 0x0fUL);
         return;
     case ANXDIAG_CR_READ:
         say("  Detection read the command register as $%02lx.\n", v);

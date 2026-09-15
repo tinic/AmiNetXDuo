@@ -9,6 +9,29 @@ version at the top when it merges.
 
 ## Unreleased
 
+- **`anxnet.device` drives the Raspberry Pi 4 / CM4's own Ethernet behind
+  a PiStorm32 running Emu68: card type `genet`.** The GENET v5 MAC is found
+  through Emu68's device tree (`devicetree.resource`: register window,
+  interrupt, station address, PHY), its interrupt arrives through
+  `gic400.library`, and the BSD-licensed NetBSD `bcmgenet` register
+  sequences drive it. Rings of 128 receive and 32 transmit 2 KB buffers in
+  fast RAM, one cache operation per burst, not per frame, transmits
+  kicked as they come. Cache maintenance is the 68040 page push, which
+  Emu68 runs as a range operation (1.7 us) where `CacheClearE()` is a whole
+  cache (43 us clean, 290 us under traffic). A `ColdReboot()` patch and a
+  keyboard reset handler stop the DMA before a warm reboot. On an A1200 +
+  PiStorm32-lite, Emu68 1.1.0-beta.1: iperf RX 123 Mbit/s, TX 65, SMB2 read
+  of 691 MB 67 s (10.3 MB/s); genet.device 3.14 on the same machine 66, 29
+  and 120 s. `DEVICE=anxnet.device` with `CARD=genet` in the interface file;
+  the row is probed after the PCMCIA slot, so a 3c589's `UNIT=0` keeps its
+  meaning. `CheckNetDevice` reports the tree's answers, the PHY identifier
+  and whether the engine was still running from before the reboot
+
+- **`NetDevStats`** prints every counter a SANA-II unit keeps -- the
+  standard block and the driver's own named special statistics -- for any
+  driver, `DEVICE`/`UNIT`/`CARD` optional. `ShowNetStatus` shows the seven
+  it has names for
+
 - The X-Surf 100 and X-Surf 500 (AX88796B) run with IEEE 802.3x flow control
   on: the card sends PAUSE when seven receive pages remain instead of
   overrunning and resetting. 28 bytes in `anxnet.device`

@@ -35,7 +35,11 @@
 /* How many times one interrupt can go round before it gives the machine back. */
 #define NETDEV_DRAIN_MAX    32
 
+/* Room for a core's own special-statistics records. */
+#define NETDEV_CORE_STATS   12
+
 typedef struct NetdevNic NetdevNic;
+struct NetdevMcast;
 
 typedef VOID (*NetdevRxFn)(APTR arg, const UBYTE *frame, UWORD len);
 
@@ -71,6 +75,15 @@ struct NetdevNicOps
      * milliseconds.  A core that cannot wedge supplies a no-op, never NULL.
      */
     VOID  (*reset)(NetdevNic *nic);
+    /*
+     * Once a vertical blank, under Disable(), for a core whose link state is
+     * behind a PHY that nothing interrupts on -- the GENET's is polled -- or
+     * whose transmit completions are found rather than delivered.  TRUE when
+     * transmit slots were freed and the shell's queue should be pumped.  Same
+     * budget as reset: this must not poll for milliseconds.  NULL for a core
+     * that has nothing to say between interrupts, which is all the others.
+     */
+    BOOL  (*tick)(NetdevNic *nic);
 };
 
 struct NetdevNic
@@ -82,6 +95,16 @@ struct NetdevNic
 
     NetdevRxFn          rx;
     APTR                rx_arg;
+
+    /*
+     * The top half, for a core whose interrupt must be quietened in the
+     * server and serviced later: it acknowledges and masks the source and
+     * answers whether the interrupt was this board's, nothing more.  The
+     * shell then raises a software interrupt that runs ops->intr under
+     * Disable(), the same way the vertical blank does.  NULL for a core whose
+     * intr() is the server, which is every core on a Zorro or PCMCIA bus.
+     */
+    BOOL              (*isr)(NetdevNic *nic);
 
     /*
      * The direct-receive path.  rx_claim asks, from the frame's first
@@ -102,6 +125,17 @@ struct NetdevNic
     UBYTE               mar[8];         /* the multicast hash, host order */
     BOOL                promisc;
     BOOL                running;
+
+    /*
+     * The unit's exact multicast table, for a core that filters on addresses
+     * rather than a hash (the GENET has 17 exact slots and no hash).  Set by
+     * the shell beside rx/rx_arg; all_multi is the shell's "a range too wide
+     * for the table" latch, refreshed with every filter rebuild.
+     */
+    const struct NetdevMcast *mc_table;
+    UWORD               mc_max;
+    UBYTE               all_multi;
+    UBYTE               pad_mc;
 
     /* DP8390 ring state, the names are NetBSD's. */
     /*
@@ -239,6 +273,33 @@ struct NetdevNic
     UBYTE               diag_why;       /* ANXDIAG_WHY_*, 0 = did not say     */
     UBYTE               mac_source;     /* ANXDIAG_MAC_*                      */
 
+    /*
+     * NETDEV_BUS_DTREE: what the device tree said about the board, filled by
+     * the probe before attach() runs.  dt_irq is the interrupt controller's
+     * own number (a GIC SPI is its number plus 32), 0 when the tree named none.
+     */
+    ULONG               dt_irq;
+    UBYTE               dt_mac[NETDEV_ADDR_LEN] __attribute__((aligned(2)));
+    UBYTE               dt_mac_ok;      /* the tree carried local-mac-address */
+    UBYTE               dt_phy;         /* MDIO address of the PHY, from the tree */
+
+    /*
+     * Memory a core allocated for itself at attach -- a bus-master's rings and
+     * buffers -- and freed by the shell at expunge, since the ops table has no
+     * detach.  NULL for every core whose buffer is on the board.
+     */
+    APTR                core_mem;
+    ULONG               core_size;
+    APTR                core;           /* the core's own state inside it     */
+
+    /*
+     * Counters only this core has names for, appended to S2_GETSPECIALSTATS
+     * after the shell's own so nothing learned by index moves.  core_stat_names
+     * is NULL-terminated; core_stat[i] goes with core_stat_names[i].
+     */
+    const char *const  *core_stat_names;
+    ULONG               core_stat[NETDEV_CORE_STATS];
+
     /* One frame at a time comes out of the ring, into here. */
     ULONG               rxbuf[(NETDEV_RXBUF_MAX + 7) / 4];
 };
@@ -285,11 +346,12 @@ UWORD netdev_diag_card(const NetdevCard *card);
 VOID  netdev_diag_publish(AnxDiagMark *mark);
 VOID  netdev_diag_unpublish(AnxDiagMark *mark);
 
-/* The four cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
+/* The five cores. netdev_nic_ops_for() returns NULL for a chip with no core. */
 extern const struct NetdevNicOps netdev_nic_ne2000;
 extern const struct NetdevNicOps netdev_nic_ed;
 extern const struct NetdevNicOps netdev_nic_lance;
 extern const struct NetdevNicOps netdev_nic_el3;
+extern const struct NetdevNicOps netdev_nic_genet;
 
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip);
 

@@ -36,6 +36,9 @@ set(NETDEV_SOURCES
     ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
     lance.c             # Am7990/Am79C960: A2065 and Ariadne
     el3.c               # 3Com EtherLink III: the 3C589 in the PCMCIA slot
+    genet.c             # Broadcom GENET v5: the Pi 4's MAC behind a PiStorm32
+    netdev_dtree.c      # Emu68's device tree and its GIC, for the GENET row
+    netdev_reset.c      # a bus master is stopped before a warm reboot
     # The data path's bulk moves, from src/net68k rather than a private copy:
     # the movem.l block and its measurements live there.  Two files, the same
     # arrangement as src/net68k's own target -- the .S is #ifdef'd end to end
@@ -217,6 +220,20 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_ed COMMAND test_netdev_ed)
     add_test(NAME netdev_cards COMMAND test_netdev_cards)
+
+    # The device-tree reader over a tree built in memory: the eleven
+    # devicetree.resource calls are the seam, supplied by the test.
+    add_executable(test_netdev_dtree
+        test/test_netdev_dtree.c
+        netdev_dtree.c)
+    target_compile_definitions(test_netdev_dtree PRIVATE NETDEV_DTREE_TEST=1)
+    target_include_directories(test_netdev_dtree PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+    target_compile_options(test_netdev_dtree PRIVATE -Wall -Wextra)
+    add_test(NAME netdev_dtree COMMAND test_netdev_dtree)
 
     # netdev_float.h is header-only because both callers of it -- the PCMCIA
     # slot and the ISA PnP bridge -- are files of m68k inline asm that no host

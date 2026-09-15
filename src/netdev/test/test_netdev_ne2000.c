@@ -165,6 +165,7 @@ UWORD netdev_diag_card(const NetdevCard *c) { (VOID)c; return 0; }
 const struct NetdevNicOps netdev_nic_ed;
 const struct NetdevNicOps netdev_nic_lance;
 const struct NetdevNicOps netdev_nic_el3;
+const struct NetdevNicOps netdev_nic_genet;
 
 /*
  * Both live in netdev_device.c, which reads SysBase, Expansion and the PCMCIA

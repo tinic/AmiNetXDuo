@@ -815,5 +815,6 @@ const struct NetdevNicOps netdev_nic_lance =
     lance_tx,
     lance_setfilter,
     lance_intr,
-    lance_reset
+    lance_reset,
+    NULL                /* no link to poll: the wire is the link */
 };

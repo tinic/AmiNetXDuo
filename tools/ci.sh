@@ -251,7 +251,10 @@ host_test_targets() { # builddir
 #      called on.
 #      384 with test_config_routes_host: persistent Roadshow route startup,
 #      DHCP retry and explicit deletion precedence.
-HOST_TESTS_EXPECTED=384
+#      385 with test_netdev_dtree: Emu68's device tree read over a tree built
+#      in memory -- the /scb ranges translation, the GIC interrupt number,
+#      the station address, the PHY, and the memory@0 check.
+HOST_TESTS_EXPECTED=385
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

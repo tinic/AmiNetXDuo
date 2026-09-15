@@ -250,6 +250,12 @@ aminetxduo_add_tool(tool_checknetdevice CheckNetDevice
 aminetxduo_add_tool(tool_el3diag El3Diag
     SOURCES el3diag.c)
 
+# NetDevStats prints every counter a SANA-II unit keeps, the driver's own
+# named records included, for any driver.  ShowNetStatus shows the seven it
+# has names for; a new chip core is debugged from the rest.
+aminetxduo_add_tool(tool_netdevstats NetDevStats
+    SOURCES netdevstats.c)
+
 # The interactive configurator.  Config-only: it writes the files the parser
 # reads and then runs AddNetInterface, rather than starting a stack itself.
 aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})

@@ -37,8 +37,11 @@ HOISTED='io_Command|ios2_Data|mn_ReplyPort'
 # An assignment to one of them, discounting == and >= and friends.  ios2_Data
 # is matched on the word boundary so ios2_DataLength -- which the device DOES
 # write, and which post_slot still resets -- does not trip it.
+# netdev_reset.c writes io_Command on ITS OWN request to keyboard.device
+# (KBD_ADDRESETHANDLER and friends); no SANA-II request passes through it.
 hits=$(grep -rnE "(\.|->)(${HOISTED})\b[[:space:]]*=[^=]" \
-           src/netdev/*.c src/netdev/*.h 2>/dev/null) || true
+           src/netdev/*.c src/netdev/*.h 2>/dev/null |
+       grep -v '^src/netdev/netdev_reset\.c:') || true
 
 if [ -n "$hits" ]; then
     echo "check-rearm-invariants: the device writes a field the receive re-arm"

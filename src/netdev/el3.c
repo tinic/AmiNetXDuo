@@ -981,5 +981,6 @@ const struct NetdevNicOps netdev_nic_el3 =
     el3_tx,
     el3_setfilter,
     el3_intr,
-    el3_reset
+    el3_reset,
+    NULL                /* no link to poll: the wire is the link */
 };
