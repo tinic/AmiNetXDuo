@@ -78,7 +78,7 @@ static struct IOSana2Req *netdev_peek_take(struct List *list, ULONG type)
  * before the copy), or an opener that never offered the direct pair.
  */
 UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
-                       APTR *token)
+                       APTR *token, UBYTE *wanted)
 {
     NetdevUnit        *unit = (NetdevUnit *)arg;
     NetdevOpener      *cand = NULL;
@@ -89,6 +89,9 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     UBYTE              flags = 0;
     UBYTE             *dst;
     UWORD              plen;
+
+    if (wanted != NULL)
+        *wanted = 0;
 
     if (frame_len < NETDEV_HDR_LEN)
         return NULL;
@@ -189,6 +192,8 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                 flags);
 
     *token = io;
+    if (wanted != NULL)
+        *wanted = cand->op_RxFlags;
     return dst;
 }
 

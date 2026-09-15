@@ -736,7 +736,7 @@ static BOOL el3_rint(NetdevNic *nic)
         {
             APTR   token = NULL;
             UBYTE *dst   = (nic->rx_claim != NULL)
-                         ? nic->rx_claim(nic->rx_arg, buf, len, &token)
+                         ? nic->rx_claim(nic->rx_arg, buf, len, &token, NULL)
                          : NULL;
 
             if (dst != NULL)

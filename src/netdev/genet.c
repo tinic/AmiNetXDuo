@@ -932,7 +932,9 @@ static UBYTE ge_verify4(const UBYTE *ip, UWORD plen, ULONG sum, GeSegment *seg)
     tlen = (UWORD)(total - 20);
     if (proto == 17)
     {
-        if (tlen < 8)
+        /* UDP's length is the checksum boundary.  Only certify the frame
+           when it describes the same bytes as the enclosing IP packet. */
+        if (tlen < 8 || w[12] != tlen)
             return 0;
         if (w[13] == 0)                 /* UDP checksum absent */
             return 0;
@@ -992,7 +994,7 @@ static UBYTE ge_verify6(const UBYTE *ip, UWORD plen, ULONG sum, GeSegment *seg)
 
     if (nh == 17)
     {
-        if (tlen < 8)
+        if (tlen < 8 || w[22] != tlen)  /* UDP length must match payload */
             return 0;
         if (w[23] == 0)                 /* UDP checksum absent             */
             return 0;
@@ -1086,8 +1088,9 @@ static UBYTE ge_continues(GenetCore *c, const GeSegment *seg, UBYTE verified)
 static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     APTR   token = NULL;
+    UBYTE  wanted = 0;
     UBYTE *dst   = (nic->rx_claim != NULL)
-                 ? nic->rx_claim(nic->rx_arg, frame, len, &token)
+                 ? nic->rx_claim(nic->rx_arg, frame, len, &token, &wanted)
                  : NULL;
 
     /*
@@ -1158,7 +1161,8 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
             GenetCore *c     = GE(nic);
             UBYTE      flags = ANXD_S2_RXF_SUMMED;
 
-            if (frame[12] == 0x08 && frame[13] == 0x00)
+            if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
+                frame[12] == 0x08 && frame[13] == 0x00)
             {
                 GeSegment seg;
                 UBYTE     v = ge_verify4(src, plen, sum, &seg);
@@ -1166,7 +1170,10 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
                 if (v != 0)
                     nic->core_stat[GE_ST_VERIFIED]++;
                 flags |= v;
-                flags |= ge_continues(c, &seg, v);
+                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
+                    flags |= ge_continues(c, &seg, v);
+                else
+                    c->gro_live = 0;
                 if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
                 {
                     nic->core_stat[GE_ST_CONTINUES]++;
@@ -1174,7 +1181,8 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
                         nic->core_stat[GE_ST_RUNS]++;
                 }
             }
-            else if (frame[12] == 0x86 && frame[13] == 0xdd)
+            else if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
+                     frame[12] == 0x86 && frame[13] == 0xdd)
             {
                 GeSegment seg;
                 UBYTE     v = ge_verify6(src, plen, sum, &seg);
@@ -1182,7 +1190,10 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
                 if (v != 0)
                     nic->core_stat[GE_ST_VERIFIED]++;
                 flags |= v;
-                flags |= ge_continues(c, &seg, v);
+                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
+                    flags |= ge_continues(c, &seg, v);
+                else
+                    c->gro_live = 0;
                 if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
                 {
                     nic->core_stat[GE_ST_CONTINUES]++;

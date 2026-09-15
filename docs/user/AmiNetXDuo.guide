@@ -1713,7 +1713,9 @@
       3ccfem556  3cxem556    genet
 
   genet is the Ethernet of a Raspberry Pi 4 or CM4 on a PiStorm32
-  running Emu68 1.1 or newer. The driver finds it through Emu68's
+  running Emu68 1.1 alpha.1 or newer. Emu68 1.0.3 is not supported: it
+  predates both the working RGMII pin setup and the /scb mapping the driver
+  consumes. The driver finds GENET through Emu68's
   device tree and takes its interrupt through gic400.library; it is
   probed after the PCMCIA slot, so a 3c589's UNIT=0 keeps its meaning
   and CARD=genet is the way to name it. Measured on an A1200 with a

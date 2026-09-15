@@ -2114,13 +2114,21 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
             op->op_RxFilled = (APTR)tags->ti_Data;
         else if (tag == ANXD_S2_RX_FLAGS)
         {
-            /* Same shape as the link header: answering is the acceptance.
-               Every core may set both; the ones that never verify a frame
-               simply never do. */
+            /* Zero is the first published, output-only form and means all.
+               A newer opener may request VERIFIED without the stateful
+               CONTINUES capability. */
             if (tags->ti_Data != 0)
             {
-                op->op_RxFlags = (UBYTE)(ANXD_S2_RXF_VERIFIED |
-                                         ANXD_S2_RXF_CONTINUES);
+                UBYTE supported = (UBYTE)(ANXD_S2_RXF_VERIFIED |
+                                          ANXD_S2_RXF_CONTINUES);
+                UBYTE wanted    = *(UBYTE *)tags->ti_Data;
+
+                if (wanted == 0)
+                    wanted = supported;
+                wanted &= supported;
+                if ((wanted & ANXD_S2_RXF_VERIFIED) == 0)
+                    wanted &= (UBYTE)~ANXD_S2_RXF_CONTINUES;
+                op->op_RxFlags = wanted;
                 *(UBYTE *)tags->ti_Data = op->op_RxFlags;
             }
         }
@@ -2450,4 +2458,3 @@ static ULONG netdev_null(VOID)
 {
     return 0;
 }
-

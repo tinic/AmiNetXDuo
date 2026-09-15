@@ -54,7 +54,9 @@ PCMCIA cards and the 3C589. `anxgenet.device`, the same driver core with only
 the Raspberry Pi 4/CM4's own Ethernet in it, drives that port behind a
 PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). The installer
 offers to put both in `DEVS:Networks`; an interface file selects one with
-`DEVICE=`.
+`DEVICE=`. `anxgenet.device` needs Emu68 1.1 alpha.1 or newer: that is the
+first release line that maps GENET's `/scb` range into the Amiga address space.
+Emu68 1.0.3 is not supported.
 
 **Receive offload (GRO).** `anxgenet.device` verifies every IPv4 and IPv6
 frame's header and TCP or UDP checksum itself, from the sum its copy already
@@ -64,7 +66,10 @@ segment where the wire carried up to sixteen, the receive side of a
 large-receive offload; it does the same for IPv6. A 1 Gbit/s GENET behind a
 PiStorm32 receives 202 Mbit/s this way, 142 without. The two SANA-II
 extensions that carry it are published for any driver to implement,
-`Developer/include/aminetxduo/anxs2ext.h`.
+`Developer/include/aminetxduo/anxs2ext.h`. They are negotiated additions to
+SANA-II, not a replacement network API: a driver may offer VERIFIED checksum
+results without implementing CONTINUES/GRO, and an ordinary SANA-II driver
+uses the unchanged receive path.
 
 ## Installing
 

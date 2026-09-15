@@ -376,7 +376,7 @@ static inline struct IOSana2Req *netdev_take(struct List *list, ULONG type)
     return NULL;
 }
 UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
-                       APTR *token);
+                       APTR *token, UBYTE *wanted);
 VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags);
 
 /* Every request that stops being quick and enters a list must be prepared the

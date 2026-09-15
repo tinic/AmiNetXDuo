@@ -476,33 +476,6 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     (VOID)sum;
 #endif
 
-#if defined(AMINETXDUO_BPF) || defined(AMINETXDUO_RXPROBE)
-    /*
-     * Before the link header is stripped below, so one call covers both modes
-     * and the frame is a complete link-layer frame in one contiguous run.
-     *
-     * THE FIRST BUFFER'S BYTES, NOT THE PACKET'S LENGTH.  A held run
-     * (ami_sana2_gro_flush) arrives here as a chain whose head carries the
-     * whole run's length, and a tap that reads that many bytes from the head
-     * runs off the end of its buffer.  What is contiguous is the head's own
-     * frame, which is what a capture of a chain gets: its first frame with
-     * the run's IP length, the same thing tcpdump shows on a host whose
-     * driver coalesces.
-     */
-    {
-        ULONG head_len = (ULONG)(packet->nx_packet_append_ptr -
-                                 packet->nx_packet_prepend_ptr);
-
-#ifdef AMINETXDUO_BPF
-        ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr, head_len);
-#endif
-#ifdef AMINETXDUO_RXPROBE
-        ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr,
-                                  head_len);
-#endif
-    }
-#endif
-
     if (packet->nx_packet_length < AMI_ETH_HEADER_SIZE)
     {
         nx_packet_release(packet);
@@ -571,24 +544,6 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
              * was doing.  A slot that did not sum (misaligned, or no slot at
              * all) passes zero and the verifier walks.
              */
-#ifdef AMINETXDUO_RXPROBE
-            {
-                /*
-                 * Both entries, because which one runs is the question the
-                 * from_copy counter answers and this leg must not depend on
-                 * the answer.  See the note beside AmiBudgetLeg verify.
-                 */
-                ULONG vt0 = ami_budget_clock();
-
-                if ((sum != NULL) && (sum->summed != FALSE))
-                    caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
-                                              &drop);
-                else
-                    caps = n68k_rx_verify(packet, &drop);
-
-                ami_budget_verify(ami_budget_clock() - vt0);
-            }
-#else
             /*
              * VERIFIED, AND NOTHING HERE WALKS THE FRAME.  The device checked
              * the IPv4 header and the transport checksum from the sum its own
@@ -602,7 +557,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
              * by the header checksum, which is why the IPv4 bit must come
              * from here and not from a walk.
              */
-#ifdef AMINETXDUO_GRO
+#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
             if ((sum != NULL) &&
                 ((sum->flags & ANXD_S2_RXF_VERIFIED) != 0))
             {
@@ -613,12 +568,22 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
             }
             else
 #endif
-            if ((sum != NULL) && (sum->summed != FALSE))
-                caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
-                                          &drop);
-            else
-                caps = n68k_rx_verify(packet, &drop);
+            {
+#ifdef AMINETXDUO_RXPROBE
+                /* Measure whichever verifier lane this frame actually takes.
+                   A GRO run never reaches this block: its rewritten header is
+                   deliberately represented by the device verdict above. */
+                ULONG vt0 = ami_budget_clock();
 #endif
+                if ((sum != NULL) && (sum->summed != FALSE))
+                    caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
+                                              &drop);
+                else
+                    caps = n68k_rx_verify(packet, &drop);
+#ifdef AMINETXDUO_RXPROBE
+                ami_budget_verify(ami_budget_clock() - vt0);
+#endif
+            }
 
             if (drop != NX_FALSE)
             {
@@ -667,7 +632,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 
             /* VERIFIED, as for IPv4: the device's word, the next header
                byte saying which transport it is about. */
-#ifdef AMINETXDUO_GRO
+#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
             if ((sum != NULL) &&
                 ((sum->flags & ANXD_S2_RXF_VERIFIED) != 0))
                 caps = (packet->nx_packet_prepend_ptr[6] == 6U)
@@ -1383,6 +1348,19 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 
     /* Back on the wire before the frame goes upstream, not after. */
     (VOID)ami_sana2_rx_post_slot(rx, slot);
+
+#if defined(AMINETXDUO_BPF) || defined(AMINETXDUO_RXPROBE)
+    /* Observe every original wire frame after replacing its read slot, but
+       while the frame is still contiguous and before GRO can strip
+       continuation headers or rewrite the head length.  Capturing at final
+       delivery would expose only the coalesced head and lose the rest. */
+#ifdef AMINETXDUO_BPF
+    ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr, length);
+#endif
+#ifdef AMINETXDUO_RXPROBE
+    ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr, length);
+#endif
+#endif
 
 #ifdef AMINETXDUO_GRO
     /* Held, or chained behind the held head: the run goes up together. */

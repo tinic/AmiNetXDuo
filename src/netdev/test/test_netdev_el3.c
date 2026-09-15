@@ -497,9 +497,10 @@ static void mock_rx(APTR arg, const UBYTE *frame, UWORD len)
 }
 
 static UBYTE *mock_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
-                            APTR *token)
+                            APTR *token, UBYTE *wanted)
 {
     (void)arg;
+    (void)wanted;
     mock_claim_calls++;
     mock_claim_len = frame_len;
     memcpy(mock_claim_header, hdr, sizeof(mock_claim_header));

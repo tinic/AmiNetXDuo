@@ -187,6 +187,55 @@ USHORT sum;
     return total;
 }
 
+/* A deliberately inconsistent datagram: the enclosing IP packet carries
+   `actual` UDP bytes while the UDP header declares `declared`.  Its checksum
+   is valid over the enclosing payload, which catches a verifier that ignores
+   UDP's own checksum boundary and certifies the wrong span. */
+static ULONG build_v4_udp_mismatch(ULONG actual, ULONG declared)
+{
+UCHAR  *ip  = buf4;
+UCHAR  *udp = buf4 + v4_ihl;
+UCHAR   addr[8];
+ULONG   total = v4_ihl + actual;
+ULONG   hs = 0;
+ULONG   i;
+USHORT  sum;
+
+    memset(buf4, 0, sizeof buf4_store);
+
+    ip[0] = 0x45;
+    ip[2] = (UCHAR)(total >> 8);
+    ip[3] = (UCHAR)(total & 0xFF);
+    ip[8] = 64;
+    ip[9] = NX_PROTOCOL_UDP;
+    ip[12] = 192; ip[13] = 168; ip[14] = 1; ip[15] = 1;
+    ip[16] = 192; ip[17] = 168; ip[18] = 1; ip[19] = 2;
+
+    for (i = 0; i + 1 < v4_ihl; i += 2)
+        hs += ((ULONG)ip[i] << 8) | ip[i + 1];
+    while (hs >> 16)
+        hs = (hs & 0xFFFFUL) + (hs >> 16);
+    sum = (USHORT)(~hs & 0xFFFFUL);
+    ip[10] = (UCHAR)(sum >> 8);
+    ip[11] = (UCHAR)(sum & 0xFF);
+
+    udp[0] = 0x30; udp[1] = 0x39;
+    udp[2] = 0x00; udp[3] = 0x35;
+    udp[4] = (UCHAR)(declared >> 8);
+    udp[5] = (UCHAR)(declared & 0xFF);
+    for (i = 8; i < actual; i++)
+        udp[i] = (UCHAR)(0x70 + i);
+
+    memcpy(addr, &ip[12], 8);
+    sum = ref_sum(udp, actual, addr, 8, NX_PROTOCOL_UDP);
+    if (sum == 0)
+        sum = 0xFFFF;
+    udp[6] = (UCHAR)(sum >> 8);
+    udp[7] = (UCHAR)(sum & 0xFF);
+
+    return total;
+}
+
 static ULONG build_v6(ULONG plen_field, UCHAR next_header)
 {
 UCHAR *ip  = buf6;
@@ -755,6 +804,10 @@ ULONG   v6_bits = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
          v4_ihl + v4_payload, NX_FALSE,
          NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM);
 
+    frame = build_v4_udp_mismatch(16, 12);
+    both("v4 UDP length differs from IP", buf4, frame, frame, NX_FALSE,
+         NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM);
+
     {
         unsigned long r;
 
@@ -785,6 +838,27 @@ ULONG   v6_bits = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
     frame = build_v6(v6_payload + 100, NX_PROTOCOL_TCP);
     both("v6 length overclaims", buf6, 40 + v6_payload, 40 + v6_payload,
          NX_FALSE, 0UL);
+
+    {
+    V6Upper udp = { NX_PROTOCOL_UDP, 16 };
+    UCHAR  *up;
+    UCHAR   addr[32];
+    USHORT  sum;
+
+        frame = build_v6x(NULL, 0, udp, 0);
+        up = &buf6[40];
+        up[4] = 0; up[5] = 12;              /* disagrees with IPv6 payload */
+        up[6] = 0; up[7] = 0;
+        memcpy(addr, v6src, 16);
+        memcpy(addr + 16, v6dst, 16);
+        sum = ref_sum(up, udp.bytes, addr, 32, NX_PROTOCOL_UDP);
+        if (sum == 0)
+            sum = 0xFFFF;
+        up[6] = (UCHAR)(sum >> 8);
+        up[7] = (UCHAR)(sum & 0xFF);
+        both("v6 UDP length differs from IP", buf6, frame, frame,
+             NX_FALSE, 0UL);
+    }
 
     /* Ethernet padding: the copy carried more than the datagram, so the fused
        lane must fall back rather than fold the padding in. */

@@ -55,10 +55,13 @@ CROSS_CONFIGS=(
     # out.  -DAMINETXDUO_RX_VERIFY=OFF did not build at all, and nothing said
     # so, because no arm turned it off.
     "norxverify:-DAMINETXDUO_RX_VERIFY=OFF"
-    # The receive offload off with the verify pass on: the held-run code in
-    # sana2_rx.c and the RX_FLAGS tag compile out, the rest of the verify
-    # path must still build and the host tests must still pass without the
-    # chaining cases.  (RX_VERIFY=OFF above turns GRO off with it.)
+    # Device checksum verdicts are a capability of their own, below GRO.  This
+    # proves a conventional-driver-only build: RX_VERIFY stays as its fallback
+    # while the RX_FLAGS tag, VERIFIED shortcut and GRO all compile out.
+    "nooffload:-DAMINETXDUO_RX_CHECKSUM_OFFLOAD=OFF"
+    # GRO off with driver checksum verdicts still on: VERIFIED remains useful,
+    # and the held-run code alone compiles out.  (RX_VERIFY=OFF above turns
+    # both optional layers off with it.)
     "nogro:-DAMINETXDUO_GRO=OFF"
     # The three TCP option flags that change the layout of NX_TCP_SOCKET and
     # are in no arm above.  SACK=OFF did not compile at all until it was built

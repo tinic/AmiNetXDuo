@@ -296,7 +296,7 @@
        "X-Surf 100, NE2000-compatible PCMCIA cards and the 3Com 3C589, and it "
        "goes where SANA-II drivers belong, in DEVS:Networks.  anxgenet.device "
        "goes beside it: the same driver with only the Raspberry Pi 4's own "
-       "Ethernet in it, for a PiStorm32 running Emu68 "
+       "Ethernet in it, for a PiStorm32 running Emu68 1.1 alpha.1 or newer "
        "(DEVICE=anxgenet.device, UNIT=0).\n\n"
        "COPYING IT CHANGES NOTHING BY ITSELF.  Which driver this machine "
        "opens is the DEVICE= line in DEVS:NetInterfaces, and this installer "
@@ -1453,7 +1453,8 @@
     (set dev_source S_ANXGENET)
     (set dev_prompt (cat "Installing anxgenet.device into DEVS:Networks\n\n"
                          "The same driver with only the Raspberry Pi 4's own "
-                         "Ethernet in it, for a PiStorm32 running Emu68.  "
+                         "Ethernet in it, for a PiStorm32 running Emu68 1.1 "
+                         "alpha.1 or newer.  "
                          "Nothing uses it until an interface file names it."))
     (P_install_device)
   ))

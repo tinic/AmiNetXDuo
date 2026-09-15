@@ -1461,22 +1461,33 @@ if(AMINETXDUO_RX_VERIFY)
     add_compile_definitions(AMINETXDUO_RX_VERIFY)
 endif()
 
-# GRO, the receive offload: a driver that answers ANXD_S2_RX_FLAGS
-# (include/aminetxduo/anxs2ext.h) verifies each frame's IP header and TCP/UDP
-# checksum itself and marks TCP segments that continue the previous one; the
-# SANA-II glue skips its own checksum pass on a verified frame and chains
-# continued segments into one delivery of up to AMI_SANA2_GRO_MAX frames.
-# Needs the verify path: it is what gets skipped, and the run's checksums are
-# the driver's word.  Measured 2026-09-15, A1200 + PiStorm32, anxgenet.device,
-# iperf into the Amiga: 142 -> 186 Mbit/s.  Any other driver is unchanged.
-option(AMINETXDUO_GRO
-       "Receive offload: driver-verified checksums and chained TCP segments"
-       ON)
+# The first optional SANA-II receive capability is deliberately independent
+# of GRO: a driver may verify a frame's IP and TCP/UDP checksums while copying
+# it and set ANXD_S2_RXF_VERIFIED without tracking flows or chaining packets.
+# The ordinary RX_VERIFY pass remains the fallback for every other driver.
+option(AMINETXDUO_RX_CHECKSUM_OFFLOAD
+       "Use driver-verified receive checksums when negotiated" ON)
 
-if(AMINETXDUO_GRO AND NOT AMINETXDUO_RX_VERIFY)
+if(AMINETXDUO_RX_CHECKSUM_OFFLOAD AND NOT AMINETXDUO_RX_VERIFY)
+    message(STATUS "AMINETXDUO_RX_CHECKSUM_OFFLOAD is off: it needs AMINETXDUO_RX_VERIFY")
+    set(AMINETXDUO_RX_CHECKSUM_OFFLOAD OFF)
+endif()
+if(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+    add_compile_definitions(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+endif()
+
+# GRO is the second, stateful capability: a driver that negotiated VERIFIED
+# may also mark TCP segments that continue the previous one.  The SANA-II glue
+# chains them into one delivery of up to AMI_SANA2_GRO_MAX frames.  Measured
+# 2026-09-15, A1200 + PiStorm32, anxgenet.device, iperf into the Amiga:
+# 142 -> 186 Mbit/s.  Any driver that does not negotiate it is unchanged.
+option(AMINETXDUO_GRO
+       "Receive offload: chain driver-marked continuing TCP segments" ON)
+
+if(AMINETXDUO_GRO AND NOT AMINETXDUO_RX_CHECKSUM_OFFLOAD)
     # Not an error: the norxverify CI arm turns the verify path off alone,
-    # and a build without the pass has nothing for the offload to skip.
-    message(STATUS "AMINETXDUO_GRO is off: it needs AMINETXDUO_RX_VERIFY")
+    # and a build that cannot accept VERIFIED cannot safely chain frames.
+    message(STATUS "AMINETXDUO_GRO is off: it needs AMINETXDUO_RX_CHECKSUM_OFFLOAD")
     set(AMINETXDUO_GRO OFF)
 endif()
 if(AMINETXDUO_GRO)

@@ -376,7 +376,7 @@ static VOID dp8390_rint(NetdevNic *nic)
                 {
                     APTR   token = NULL;
                     UBYTE *dst   = nic->rx_claim(nic->rx_arg, hdr, flen,
-                                                 &token);
+                                                 &token, NULL);
 
                     if (dst != NULL)
                     {

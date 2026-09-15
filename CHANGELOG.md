@@ -20,10 +20,13 @@ version at the top when it merges.
   retransmissions; a 20 MB upload over IPv6 arrives byte for byte. The two
   SANA-II extensions that carry it, `ANXD_S2_RX_FLAGS` and the VERIFIED and
   CONTINUES bits of `RX_FILLED`'s flag byte, are published in the Developer
-  drawer as `include/aminetxduo/anxs2ext.h` for any driver to implement;
-  every other driver is unchanged. `NetDevStats` shows the verified
+  drawer as `include/aminetxduo/anxs2ext.h` for any driver to implement.
+  VERIFIED is negotiated independently, so a driver can add stateless
+  checksum verification without flow tracking or GRO; CONTINUES is requested
+  only by a GRO build, and every other driver is unchanged. `NetDevStats` shows the verified
   frames, the continuing frames, the runs, the largest burst and the frames
-  that found no read posted. Build option `AMINETXDUO_GRO`, on
+  that found no read posted. Build options
+  `AMINETXDUO_RX_CHECKSUM_OFFLOAD` and `AMINETXDUO_GRO`, both on by default
 
 - On a gigabit link the stack posts 128 reads per stream reader, the size of
   the GENET's receive ring, where every card had 32; a 10/100 card keeps 32

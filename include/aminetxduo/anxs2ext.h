@@ -72,10 +72,13 @@
  *            previous frame delivers this one whole, and nothing is lost.
  *
  * ANXD_S2_RX_FLAGS, in the buffer-management list, is how an opener says it
- * understands the two.  ti_Data IS A POINTER TO A UBYTE; a device that
- * understands the tag writes the flags it may set (VERIFIED, CONTINUES, or
- * both) into it, and sets only those from then on.  Without the tag a device
- * sets SUMMED alone, whatever it could have said. */
+ * understands the two.  ti_Data IS A POINTER TO A UBYTE.  The opener may
+ * preload the flags it wants; the device replaces them with the intersection
+ * it accepted and sets only those from then on.  A zero input retains the
+ * first published contract and asks for every flag the device supports, so an
+ * older opener and a newer device still agree.  CONTINUES requires VERIFIED;
+ * an opener may request VERIFIED alone.  Without the tag a device sets SUMMED
+ * alone, whatever it could have said. */
 #define ANXD_S2_RX_FLAGS        (0x80000000UL + 0xB0000UL + 0x4184UL)
 
 #define ANXD_S2_RXF_SUMMED      0x01

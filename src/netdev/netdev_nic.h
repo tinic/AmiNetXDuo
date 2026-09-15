@@ -122,12 +122,13 @@ struct NetdevNic
      * NETDEV_HDR_LEN bytes, where the payload should be drained to; a NULL
      * answer or a NULL hook means stage-and-rx() as always.  A claimed frame is
      * always finished with rx_claimed.  Both run in the same context rx() does.
-     * `flags` are the ANXD_S2_RXF_* bits (aminetxduo/anxs2ext.h): SUMMED when
-     * `sum` is the fused sum, and whatever else the core can say about the
-     * frame; the device masks them to what the opener asked for.
+     * rx_claim writes the optional ANXD_S2_RXF_* bits the opener negotiated
+     * to `wanted`, so a core need not calculate capabilities nobody consumes.
+     * `flags` on completion are SUMMED when `sum` is the fused sum, plus the
+     * subset of `wanted` the core can say about this frame.
      */
     UBYTE            *(*rx_claim)(APTR arg, const UBYTE *hdr, UWORD frame_len,
-                                  APTR *token);
+                                  APTR *token, UBYTE *wanted);
     VOID              (*rx_claimed)(APTR arg, APTR token, ULONG sum,
                                     UBYTE flags);
 

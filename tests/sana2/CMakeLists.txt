@@ -53,6 +53,9 @@ target_compile_definitions(test_sana2_copy PRIVATE
 # us a frame.
 if(AMINETXDUO_RX_VERIFY)
     target_compile_definitions(test_sana2_copy PRIVATE AMINETXDUO_RX_VERIFY)
+    if(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+        target_compile_definitions(test_sana2_copy PRIVATE AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+    endif()
     if(AMINETXDUO_GRO)
         target_compile_definitions(test_sana2_copy PRIVATE AMINETXDUO_GRO)
     endif()
@@ -148,6 +151,9 @@ target_compile_definitions(test_sana2_rx PRIVATE
 # behind the same #ifdef.
 if(AMINETXDUO_RX_VERIFY)
     target_compile_definitions(test_sana2_rx PRIVATE AMINETXDUO_RX_VERIFY)
+    if(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+        target_compile_definitions(test_sana2_rx PRIVATE AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+    endif()
     if(AMINETXDUO_GRO)
         target_compile_definitions(test_sana2_rx PRIVATE AMINETXDUO_GRO)
     endif()
@@ -192,6 +198,9 @@ target_compile_definitions(test_sana2_driver PRIVATE
 # test has to know which one it is compiling, the same as test_sana2_rx.
 if(AMINETXDUO_RX_VERIFY)
     target_compile_definitions(test_sana2_driver PRIVATE AMINETXDUO_RX_VERIFY)
+    if(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+        target_compile_definitions(test_sana2_driver PRIVATE AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+    endif()
     if(AMINETXDUO_GRO)
         target_compile_definitions(test_sana2_driver PRIVATE AMINETXDUO_GRO)
     endif()
@@ -232,6 +241,9 @@ target_compile_definitions(test_sana2_device PRIVATE
 # It changes the layout of AmiRxSlot, which AmiSana2If contains.
 if(AMINETXDUO_RX_VERIFY)
     target_compile_definitions(test_sana2_device PRIVATE AMINETXDUO_RX_VERIFY)
+    if(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+        target_compile_definitions(test_sana2_device PRIVATE AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+    endif()
     if(AMINETXDUO_GRO)
         target_compile_definitions(test_sana2_device PRIVATE AMINETXDUO_GRO)
     endif()

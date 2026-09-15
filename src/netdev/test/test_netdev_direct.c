@@ -17,6 +17,7 @@
 #include <proto/exec.h>
 
 #include "netdev_internal.h"
+#include "aminetxduo/anxs2ext.h"
 
 static int failures;
 static int replies;
@@ -267,7 +268,7 @@ static void test_link_header(void)
     queue_read(&opener_a, &read_a, 0x0800);
     opener_a.op_RxLinkHdr = TRUE;
 
-    dst = netdev_rx_claim(&unit, hdr, 60, &token);
+    dst = netdev_rx_claim(&unit, hdr, 60, &token, NULL);
     expect_ptr("link header: accepted", dst, direct_buffer);
     expect_mem("link header written in front of the payload",
                direct_buffer - NETDEV_HDR_LEN, hdr, NETDEV_HDR_LEN);
@@ -283,7 +284,7 @@ static void test_link_header(void)
     queue_read(&opener_a, &read_a, 0x0800);
     opener_a.op_RxLinkHdr = FALSE;
 
-    dst = netdev_rx_claim(&unit, hdr, 60, &token);
+    dst = netdev_rx_claim(&unit, hdr, 60, &token, NULL);
     expect_ptr("no tag: accepted", dst, direct_buffer);
     {
         UBYTE zero[NETDEV_HDR_LEN];
@@ -299,6 +300,7 @@ static void test_claim_complete(void)
     UBYTE hdr[NETDEV_HDR_LEN];
     APTR token = NULL;
     UBYTE *dst;
+    UBYTE wanted = 0xff;
 
     reset_fixture();
     make_header(hdr, 0x0800);
@@ -306,8 +308,9 @@ static void test_claim_complete(void)
     opener_a.op_TrackHigh = 1;
     opener_a.op_Track[0].used = 1;
     opener_a.op_Track[0].type = 0x0800;
+    opener_a.op_RxFlags = ANXD_S2_RXF_VERIFIED;
 
-    dst = netdev_rx_claim(&unit, hdr, 60, &token);
+    dst = netdev_rx_claim(&unit, hdr, 60, &token, &wanted);
     expect_ptr("accepted destination", dst, direct_buffer);
     expect_ptr("claim token", token, &read_a);
     expect_u32("one direct callback", direct_calls, 1);
@@ -317,6 +320,8 @@ static void test_claim_complete(void)
     expect_u32("request payload length", read_a.ios2_DataLength, 46);
     expect_mem("destination address", read_a.ios2_DstAddr, hdr, 6);
     expect_mem("source address", read_a.ios2_SrcAddr, hdr + 6, 6);
+    expect_u32("claim returns negotiated receive flags", wanted,
+               ANXD_S2_RXF_VERIFIED);
 
     netdev_rx_claimed(&unit, token, 0x12345678UL, 1);
     expect_u32("one filled callback", filled_calls, 1);
@@ -343,7 +348,7 @@ static void test_raw_request_restored(void)
     make_header(hdr, 0x0806);
     queue_read(&opener_a, &read_a, 0x0806);
     read_a.ios2_Req.io_Flags |= SANA2IOF_RAW;
-    expect_ptr("raw request declines", netdev_rx_claim(&unit, hdr, 64, &token),
+    expect_ptr("raw request declines", netdev_rx_claim(&unit, hdr, 64, &token, NULL),
                NULL);
     expect_u32("raw decline restores one reader",
                list_count(&opener_a.op_Reads), 1);
@@ -365,7 +370,7 @@ static void test_declines_unsafe_claims(void)
     reset_fixture();
     queue_read(&opener_a, &read_a, 0x86dd);
     queue_read(&opener_b, &read_b, 0x86dd);
-    expect_ptr("two readers decline", netdev_rx_claim(&unit, hdr, 80, &token),
+    expect_ptr("two readers decline", netdev_rx_claim(&unit, hdr, 80, &token, NULL),
                NULL);
     expect_u32("first reader retained", list_count(&opener_a.op_Reads), 1);
     expect_u32("second reader retained", list_count(&opener_b.op_Reads), 1);
@@ -374,7 +379,7 @@ static void test_declines_unsafe_claims(void)
     reset_fixture();
     queue_read(&opener_a, &read_a, 0x86dd);
     opener_a.op_Raw = 1;
-    expect_ptr("raw reader declines", netdev_rx_claim(&unit, hdr, 80, &token),
+    expect_ptr("raw reader declines", netdev_rx_claim(&unit, hdr, 80, &token, NULL),
                NULL);
     expect_u32("raw reader retained", list_count(&opener_a.op_Reads), 1);
     expect_u32("raw reader never asked", direct_calls, 0);
@@ -383,19 +388,19 @@ static void test_declines_unsafe_claims(void)
     queue_read(&opener_a, &read_a, 0x86dd);
     opener_a.op_Filter = (APTR)&unit;
     expect_ptr("filtered reader declines",
-               netdev_rx_claim(&unit, hdr, 80, &token), NULL);
+               netdev_rx_claim(&unit, hdr, 80, &token, NULL), NULL);
 
     reset_fixture();
     queue_read(&opener_a, &read_a, 0x86dd);
     opener_a.op_RxFilled = NULL;
     expect_ptr("unpaired hooks decline",
-               netdev_rx_claim(&unit, hdr, 80, &token), NULL);
+               netdev_rx_claim(&unit, hdr, 80, &token, NULL), NULL);
 
     reset_fixture();
     queue_read(&opener_a, &read_a, 0x86dd);
     direct_accept = 0;
     expect_ptr("stack destination declines",
-               netdev_rx_claim(&unit, hdr, 80, &token), NULL);
+               netdev_rx_claim(&unit, hdr, 80, &token, NULL), NULL);
     expect_u32("declined destination restores reader",
                list_count(&opener_a.op_Reads), 1);
     expect_u32("declined destination asked once", direct_calls, 1);
@@ -411,7 +416,7 @@ static void test_other_type_does_not_block(void)
     queue_read(&opener_a, &read_a, 0x0800);
     queue_read(&opener_b, &read_b, 0x0806);
     expect_ptr("different packet type does not block",
-               netdev_rx_claim(&unit, hdr, 60, &token), direct_buffer);
+               netdev_rx_claim(&unit, hdr, 60, &token, NULL), direct_buffer);
     expect_ptr("right packet type claimed", token, &read_a);
     expect_u32("other reader retained", list_count(&opener_b.op_Reads), 1);
     netdev_rx_claimed(&unit, token, 0, 0);
@@ -427,7 +432,7 @@ static void test_broadcast_metadata(void)
     memset(hdr, 0xff, 6);
     queue_read(&opener_a, &read_a, 0x0800);
     read_a.ios2_Req.io_Flags = SANA2IOF_MCAST;
-    expect_ptr("broadcast claim", netdev_rx_claim(&unit, hdr, 60, &token),
+    expect_ptr("broadcast claim", netdev_rx_claim(&unit, hdr, 60, &token, NULL),
                direct_buffer);
     expect_u32("broadcast flag replaces multicast",
                read_a.ios2_Req.io_Flags & (SANA2IOF_BCAST | SANA2IOF_MCAST),

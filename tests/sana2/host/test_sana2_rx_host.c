@@ -704,8 +704,8 @@ static void test_verify_uses_the_carried_sum(void)
 
 #endif /* AMINETXDUO_RX_VERIFY */
 
-#ifdef AMINETXDUO_GRO
-/* ---- the held run: VERIFIED frames and the CONTINUES chain ------------- */
+#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
+/* ---- negotiated device verdicts, then the optional held run ------------ */
 
 /*
  * The reader's take/flush pair on a fake reader: the packets are the two
@@ -714,10 +714,6 @@ static void test_verify_uses_the_carried_sum(void)
  * a 20-byte TCP header in front of `payload` bytes -- the shape the device's
  * VERIFIED mark promises, and the fifty-four bytes a chained frame steps over.
  */
-static UCHAR      buffer2[256];
-static NX_PACKET  pkt2;
-static AmiSana2Rx rxs;
-
 static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
 {
     UCHAR *base = buf + AMI_SANA2_RX_PAD;
@@ -753,22 +749,6 @@ static AmiRxSum h_flagged(UBYTE flags)
     sum.summed = FALSE;
     sum.flags  = flags;
     return sum;
-}
-
-static void gro_init(UBYTE answered)
-{
-    fixture_init();
-    memset(&rxs, 0, sizeof(rxs));
-    rxs.iface          = &iface;
-    iface.rx_flags_ok  = answered;
-    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
-    _nx_ip_input_thread = tx_thread_identify();
-}
-
-static void gro_done(void)
-{
-    _nx_ip_input_thread = TX_NULL;
-    tx_mutex_put(&ip.nx_ip_protection);
 }
 
 static void test_verified_skips_the_walk(void)
@@ -819,6 +799,29 @@ static void test_verified_skips_the_walk(void)
         tx_mutex_put(&ip.nx_ip_protection);
     }
     h_check(h_verify_sums == 1, "a merely summed frame still goes through the verifier");
+}
+
+#ifdef AMINETXDUO_GRO
+/* ---- the held run: VERIFIED frames and the CONTINUES chain ------------- */
+
+static UCHAR      buffer2[256];
+static NX_PACKET  pkt2;
+static AmiSana2Rx rxs;
+
+static void gro_init(UBYTE answered)
+{
+    fixture_init();
+    memset(&rxs, 0, sizeof(rxs));
+    rxs.iface          = &iface;
+    iface.rx_flags_ok  = answered;
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    _nx_ip_input_thread = tx_thread_identify();
+}
+
+static void gro_done(void)
+{
+    _nx_ip_input_thread = TX_NULL;
+    tx_mutex_put(&ip.nx_ip_protection);
 }
 
 static void test_held_frame_goes_up_on_flush(void)
@@ -981,6 +984,7 @@ static void test_run_is_capped(void)
 }
 
 #endif /* AMINETXDUO_GRO */
+#endif /* AMINETXDUO_RX_CHECKSUM_OFFLOAD */
 
 /* Enough packets that the budget never binds: the ladder alone decides. */
 #define PLAN_BIG_POOL   512UL
@@ -1515,8 +1519,10 @@ int main(void)
     test_verify_drop();
     test_verify_uses_the_carried_sum();
 #endif
-#ifdef AMINETXDUO_GRO
+#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
     test_verified_skips_the_walk();
+#endif
+#ifdef AMINETXDUO_GRO
     test_held_frame_goes_up_on_flush();
     test_continuing_frame_is_chained();
     test_run_ends_on_a_frame_that_does_not_continue();

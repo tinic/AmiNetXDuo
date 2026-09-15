@@ -334,13 +334,24 @@ UINT    next;
         return (NX_FALSE);
     }
 
-    /* A UDP datagram may carry a zero checksum, which means the sender
-       computed none.  There is then nothing to check and no bit to claim.
-       Over IPv6 that is illegal, but the stack is the one that says so. */
-    if ((next == NX_PROTOCOL_UDP) && (N68K_RD16(&ip[at + 6UL]) == 0UL))
+    if (next == NX_PROTOCOL_UDP)
     {
-        N68K_RXV_COUNT(skip_udp_nosum);
-        return (NX_FALSE);
+        /* UDP's own length, not the enclosing IP payload length, defines the
+           bytes its checksum covers.  Claiming a checksum over a larger span
+           would certify bytes outside the UDP datagram. */
+        if ((ULONG)N68K_RD16(&ip[at + 4UL]) != end - at)
+        {
+            N68K_RXV_COUNT(skip_length);
+            return (NX_FALSE);
+        }
+
+        /* Zero means the sender computed no UDP checksum.  Over IPv6 that is
+           illegal, but the stack is the one that says so. */
+        if (N68K_RD16(&ip[at + 6UL]) == 0UL)
+        {
+            N68K_RXV_COUNT(skip_udp_nosum);
+            return (NX_FALSE);
+        }
     }
 
     *protocol =  next;
@@ -543,6 +554,17 @@ UINT        ok;
 
     default:
         N68K_RXV_COUNT(skip_protocol);
+        return (flags);
+    }
+
+    /* UDP's declared length is the checksum boundary.  Only publish the
+       offload bit when it is exactly the IP transport payload NetX would
+       otherwise checksum. */
+    if ((protocol == NX_PROTOCOL_UDP) &&
+        ((payload < 8U) ||
+         ((ULONG)N68K_RD16(&ip[ihl + 4U]) != (ULONG)payload)))
+    {
+        N68K_RXV_COUNT(skip_length);
         return (flags);
     }
 
@@ -804,6 +826,16 @@ UINT    offset;
     if (((protocol != NX_PROTOCOL_TCP) && (protocol != NX_PROTOCOL_UDP)) ||
         ((frag & 0x3FFFUL) != 0UL))
     {
+        return (n68k_rx_verify(packet, drop));
+    }
+
+    /* Same boundary rule as the walking entry.  The carried sum may include
+       enclosing payload that UDP's own length excludes. */
+    if ((protocol == NX_PROTOCOL_UDP) &&
+        ((payload < 8U) ||
+         ((ULONG)N68K_RDW16(&ip[ihl + 4U]) != (ULONG)payload)))
+    {
+        N68K_RXV_COUNT(skip_length);
         return (n68k_rx_verify(packet, drop));
     }
 
