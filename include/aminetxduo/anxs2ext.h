@@ -95,8 +95,10 @@
  * once at the end of each pass over its completed reads, after it has
  * re-posted them and before it sleeps.  Quick (IOF_QUICK honoured, nothing
  * to wait for), no arguments, io_Error 0; a driver that does not know it
- * answers IOERR_NOCMD like any other unknown command and the opener stops
- * sending it.  The number is in the same private range as the tags above. */
+ * answers IOERR_NOCMD like any other unknown command, a unit whose card
+ * cannot hold a frame for a late read answers S2ERR_NOT_SUPPORTED, and on
+ * either the opener stops sending it.  The number is in the same private
+ * range as the tags above. */
 #define ANXD_CMD_RX_POLL        0x4190
 
 /* ANXD_CMD_READ_BATCH: many CMD_READs in one call.
@@ -106,8 +108,10 @@
  * ios2_Data, the reply port); the driver queues them all as if each had
  * been sent in list order, under one Disable(), and the list is emptied.
  * Quick, no arguments of its own, io_Error 0; IOERR_NOCMD from a driver that
- * does not know it, with the list untouched, and the opener sends them one
- * by one from then on.  An offline unit answers each request in the list
+ * does not know it, S2ERR_NOT_SUPPORTED from a unit whose card cannot hold
+ * frames while its reads are away (the list untouched either way), and the
+ * opener sends them one by one from then on -- the list, not the error, says
+ * who owns the reads.  An offline unit answers each request in the list
  * S2ERR_OUTOFSERVICE the way it answers a CMD_READ.  On Emu68 a BeginIO() is
  * a trapped Disable() pair, 5.5 us; a reader re-posting a burst of reads
  * pays it once with this. */

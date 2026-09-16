@@ -1355,6 +1355,19 @@ static void u_read_batch(void)
     opener.op_ReadTypeCount   = 0;
     opener.op_ReadTypeLast    = 0;
 
+    /* A core that cannot hold frames turns the batch down, list untouched:
+       its opener must post each read at once. */
+    unit.nu_Nic.rx_holds = 0;
+    netdev_perform(&opener, &carrier);
+    expect_u32("a core without a holding ring refuses the batch",
+               (unsigned long)(UBYTE)carrier.ios2_Req.io_Error, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+    expect(list_len(&l) == 2, "and leaves the list to the opener");
+    expect(list_len(&opener.op_Reads) == 0, "queueing nothing");
+
+    unit.nu_Nic.rx_holds = 1;
+    req(&carrier, ANXD_CMD_READ_BATCH);
+    carrier.ios2_Req.io_Flags = IOF_QUICK;
+    carrier.ios2_Data         = &l;
     netdev_perform(&opener, &carrier);
 
     expect_u32("the batch is accepted", (unsigned long)(UBYTE)carrier.ios2_Req.io_Error, 0);
@@ -1368,6 +1381,7 @@ static void u_read_batch(void)
 
     /* Offline: each request answered, nothing queued. */
     reset();
+    unit.nu_Nic.rx_holds = 1;
     unit.nu_Online = 0;
     req(&r1, CMD_READ);
     NewList(&l);
@@ -1384,6 +1398,7 @@ static void u_read_batch(void)
 
     /* No list at all is a bad argument. */
     reset();
+    unit.nu_Nic.rx_holds = 1;
     req(&carrier, ANXD_CMD_READ_BATCH);
     carrier.ios2_Data = NULL;
     netdev_perform(&opener, &carrier);
@@ -1398,7 +1413,19 @@ static void t_rx_poll(void)
     UWORD            *cmds;
     int               listed = 0;
 
+    /* A unit that holds nothing for a late read declines polls once. */
     reset();
+    req(&io, ANXD_CMD_RX_POLL);
+    io.ios2_Req.io_Flags = IOF_QUICK;
+    unit.nu_Nic.rx_holds = 0;
+    interrupt_calls = 0;
+    netdev_perform(&opener, &io);
+    expect_u32("a core without a holding ring declines the poll",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+    expect(interrupt_calls == 0, "and runs nothing");
+
+    reset();
+    unit.nu_Nic.rx_holds = 1;
     req(&io, ANXD_CMD_RX_POLL);
     io.ios2_Req.io_Flags = IOF_QUICK;
     interrupt_calls = 0;
@@ -1408,6 +1435,7 @@ static void t_rx_poll(void)
     expect((io.ios2_Req.io_Flags & IOF_QUICK) != 0, "and stays quick");
 
     reset();
+    unit.nu_Nic.rx_holds = 1;
     req(&io, ANXD_CMD_RX_POLL);
     io.ios2_Req.io_Flags = IOF_QUICK;
     unit.nu_Nic.rx_behind = 1;
@@ -1418,6 +1446,7 @@ static void t_rx_poll(void)
     expect_u32("with no error", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
 
     reset();
+    unit.nu_Nic.rx_holds = 1;
     req(&io, ANXD_CMD_RX_POLL);
     unit.nu_Nic.rx_behind = 1;
     unit.nu_Online        = 0;

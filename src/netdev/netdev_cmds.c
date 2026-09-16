@@ -441,6 +441,15 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         struct Node *next;
         BOOL         queued;
 
+        /* Only a core that holds frames for a late read (NetdevNic
+           rx_holds); for any other the opener's immediate re-post is the
+           right thing and this says so the standard way, list untouched. */
+        if (!unit->nu_Nic.rx_holds)
+        {
+            netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
+            return;
+        }
+
         if (l == NULL || op->op_CopyTo == NULL)
         {
             netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
@@ -497,6 +506,15 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          * blank give the core; nu_InIsr keeps the three apart.  Quick, and
          * answered with nothing: the frames arrive as the CMD_READs.
          */
+        /* A poll only means something to a core that holds frames for a
+           late read (NetdevNic rx_holds); every other unit says so once and
+           the opener stops asking -- on a 68030 a device call per drain is
+           measurable, and there would be nothing at the end of it. */
+        if (!unit->nu_Nic.rx_holds)
+        {
+            netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
+            return;
+        }
         unit->nu_RxPolls++;
         if (unit->nu_Nic.rx_behind && unit->nu_Online)
         {

@@ -169,6 +169,17 @@ struct NetdevNic
      * Disable() pair is a 5.5 us trap, so a core there asks for one section.
      */
     UBYTE               tx_short_build;
+    /*
+     * The core keeps received frames in its own ring while the opener has
+     * no read posted (NETDEV_CLAIM_BEHIND) -- so the opener may re-post its
+     * reads late, in one ANXD_CMD_READ_BATCH after its drain, and nothing is
+     * lost meanwhile.  A core without this has a card buffer of a few frames
+     * and needs every read back before the next frame lands: the shell
+     * answers READ_BATCH with IOERR_NOCMD for it and the opener posts each
+     * read the moment it has it, as it always did.  Measured on the
+     * emulated X-Surf 100: batched re-posts 24-26 Mbit/s, immediate 39-41.
+     */
+    UBYTE               rx_holds;
 
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an

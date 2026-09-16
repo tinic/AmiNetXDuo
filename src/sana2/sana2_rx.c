@@ -2099,7 +2099,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             BeginIO((struct IORequest *)&rx->poll);
             if ((rx->poll.ios2_Req.io_Flags & IOF_QUICK) == 0)
                 (VOID)WaitIO((struct IORequest *)&rx->poll);
-            if (rx->poll.ios2_Req.io_Error == IOERR_NOCMD)
+            /* Any refusal ends the polling: IOERR_NOCMD from a device that
+               does not know the command, S2ERR_NOT_SUPPORTED from a unit
+               that holds nothing for a late read and has nothing to say. */
+            if (rx->poll.ios2_Req.io_Error != 0)
                 iface->rx_poll_ok = FALSE;
         }
 
