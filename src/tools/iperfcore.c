@@ -35,6 +35,19 @@ enum
 #define IPERF_SEND_BURST    64
 
 /*
+ * Transfers between clock reads inside a burst.  ami_millis() is ReadEClock():
+ * a Disable(), six CIA bus cycles and an Enable(), 22 us on an A1200 with a
+ * PiStorm32 where each of the two is a trap.  Read after every 4 KB send it was
+ * 11% of the sender's profile (tx2.prof, 2026-09-16), and at 9,000 4 KB
+ * receives a second it is a third of the machine -- inside the benchmark, not
+ * the stack.  Eight transfers is 32 KB, about a millisecond at 300 Mbit/s,
+ * against a deadline counted in seconds.  The byte target is checked on every
+ * transfer, it needs no clock; a paced sender reads it on every datagram, its
+ * pacing does.
+ */
+#define IPERF_CLOCK_EVERY   8
+
+/*
  * How long a sender with nothing to do sleeps.  Short, because on a datagram
  * socket there is no event to wake it: it is a sleep and not a wait, and a
  * pause that clears in a millisecond must not be waited out for twenty.
@@ -128,6 +141,21 @@ static VOID iperf_clock_start(IperfRun *run)
     }
 }
 
+/* TRUE once the run has moved the bytes it was asked to move.  No clock. */
+static BOOL iperf_bytes_met(const IperfRun *run)
+{
+    if (!run->clock_on || run->plan.kbytes == 0)
+        return FALSE;
+
+    if (run->res.bytes_hi > run->want_bytes_hi)
+        return TRUE;
+    if (run->res.bytes_hi == run->want_bytes_hi
+        && run->res.bytes_lo >= run->want_bytes_lo)
+        return TRUE;
+
+    return FALSE;
+}
+
 /* TRUE once the run has moved everything it was asked to move. */
 static BOOL iperf_target_met(const IperfRun *run, ULONG now)
 {
@@ -137,23 +165,19 @@ static BOOL iperf_target_met(const IperfRun *run, ULONG now)
     if (run->t_deadline != 0 && (LONG)(now - run->t_deadline) >= 0)
         return TRUE;
 
-    if (run->plan.kbytes != 0)
-    {
-        if (run->res.bytes_hi > run->want_bytes_hi)
-            return TRUE;
-        if (run->res.bytes_hi == run->want_bytes_hi
-            && run->res.bytes_lo >= run->want_bytes_lo)
-            return TRUE;
-    }
-
-    return FALSE;
+    return iperf_bytes_met(run);
 }
 
-static VOID iperf_count(IperfRun *run, LONG n)
+/* `now` is the caller's last reading: the idle test this feeds is in seconds,
+   and a reading per transfer was the clock's whole cost (IPERF_CLOCK_EVERY).
+   Never backwards: the reading can predate a t_begin that clock_start took
+   between it and the transfer, and res.ms is t_lastact - t_begin. */
+static VOID iperf_count(IperfRun *run, LONG n, ULONG now)
 {
     iperf_add64(&run->res.bytes_hi, &run->res.bytes_lo, (ULONG)n);
     run->res.packets++;
-    run->t_lastact = ami_millis();
+    if ((LONG)(now - run->t_lastact) > 0)
+        run->t_lastact = now;
 }
 
 /* ------------------------------------------------------------------ setup - */
@@ -543,7 +567,7 @@ static VOID iperf_slice_send(IperfRun *run)
 
         if (n > 0)
         {
-            iperf_count(run, n);
+            iperf_count(run, n, now);
         }
         else if (n < 0)
         {
@@ -561,6 +585,12 @@ static VOID iperf_slice_send(IperfRun *run)
             iperf_fail(run, "send", e);
             return;
         }
+
+        if (iperf_bytes_met(run))
+            return;
+
+        if (run->plan.rate_kbit == 0 && (burst % IPERF_CLOCK_EVERY) != 0)
+            continue;
 
         now = ami_millis();
 
@@ -629,7 +659,7 @@ static VOID iperf_slice_recv(IperfRun *run)
                 }
 
                 iperf_clock_start(run);
-                iperf_count(run, n);
+                iperf_count(run, n, now);
 
                 if (id < 0)
                 {
@@ -659,8 +689,11 @@ static VOID iperf_slice_recv(IperfRun *run)
             else
             {
                 iperf_clock_start(run);
-                iperf_count(run, n);
+                iperf_count(run, n, now);
             }
+
+            if (!iperf_bytes_met(run) && (burst % IPERF_CLOCK_EVERY) != 0)
+                continue;
 
             now = ami_millis();
 

@@ -195,6 +195,8 @@ VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface)
  * Callable from any thread and from several at once: GetMsg() is atomic and
  * nx_packet_transmit_release() does its own TX_DISABLE.
  */
+static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot);
+
 VOID ami_sana2_tx_reap(AmiSana2If *iface)
 {
     struct Message *msg;
@@ -234,8 +236,21 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
         msg = (struct Message *)node;
         /* ios2_Req.io_Message is the first member of the first member of
            AmiTxSlot, so the reply message is the slot. */
-        AmiTxSlot *slot = (AmiTxSlot *)msg;
-        LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
+        ami_sana2_tx_complete(iface, (AmiTxSlot *)msg);
+    }
+}
+
+/*
+ * One finished write: the reply's verdict, the packet back in the shape NetX
+ * Duo handed over, the slot handed back.  From the reap for a write the device
+ * replied, and from ami_sana2_tx_send() itself for one it completed inside
+ * BeginIO() with IOF_QUICK kept (tx_quick_ok).
+ */
+static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
+{
+    LONG err = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
+
+    {
 
 #ifdef AMINETXDUO_RXPROBE
         if (slot->write_at != 0UL)
@@ -667,7 +682,18 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
     slot->req.ios2_Req.io_Message.mn_ReplyPort    = &iface->tx_port;
     slot->req.ios2_Req.io_Command = CMD_WRITE;
-    slot->req.ios2_Req.io_Flags   = raw_write ? SANA2IOF_RAW : 0;
+    /*
+     * IOF_QUICK, TO OUR OWN DRIVERS.  Exec's contract: a device that finishes
+     * the request inside BeginIO() leaves the flag set and posts no reply; one
+     * that queues it clears the flag and replies later.  anxnet.device and
+     * anxgenet.device keep it (netdev_reply, netdev_queue_prepare), and a
+     * kept flag is a ReplyMsg() -- a Disable() pair, two traps on Emu68 -- and
+     * a reap splice the write never pays.  A third-party driver has only ever
+     * seen SendIO()'s cleared flag on CMD_WRITE from the stacks it was written
+     * for, so it does not get the offer.
+     */
+    slot->req.ios2_Req.io_Flags   = (UBYTE)((raw_write ? SANA2IOF_RAW : 0) |
+                                            (iface->tx_quick_ok ? IOF_QUICK : 0));
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
     slot->req.ios2_PacketType     = (ULONG)ether_type;
@@ -728,6 +754,14 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 #endif
 
     BeginIO((struct IORequest *)&slot->req);
+
+    /* Kept: finished in there, no reply coming.  Cleared: queued, the reap
+       collects it.  Read after BeginIO(), which is where the device decides. */
+    if (iface->tx_quick_ok &&
+        (slot->req.ios2_Req.io_Flags & IOF_QUICK) != 0)
+    {
+        ami_sana2_tx_complete(iface, slot);
+    }
 
 #ifdef AMINETXDUO_RXPROBE
     ami_budget_reap(probe_t1 - probe_t0);

@@ -9,6 +9,20 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Transmit completions on our own drivers cost no reply: a `CMD_WRITE` to
+  `anxnet.device` or `anxgenet.device` goes out `IOF_QUICK`, the driver
+  finishes it inside `BeginIO()` and posts nothing, and the stack hands the
+  slot back on the spot instead of reaping a `ReplyMsg()` (a `Disable()`
+  pair, two traps on Emu68) per frame. Third-party drivers are never offered
+  the flag. Emulated X-Surf 100 iperf out 20.9 -> 21.5 Mbit/s, A2065 3.35 ->
+  3.40, receive unchanged
+
+- `iperf` reads the clock every eighth transfer, was twice per 4 KB: on an
+  A1200 + PiStorm32 a `ReadEClock()` is two traps and six CIA bus cycles,
+  22 us, and the tool spent 11% of a send profile and about a third of a
+  294 Mbit/s receive in it. The byte target is still checked per transfer
+  and a paced UDP sender still reads it per datagram
+
 ## 0.28.0
 
 - **Receive offload (GRO).** `anxgenet.device` verifies each IPv4 and

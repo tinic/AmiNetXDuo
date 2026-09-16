@@ -1022,6 +1022,9 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
        may still refuse it (an older anxnet.device), once. */
     iface->rx_poll_ok  = (UBYTE)(status == 0 && iface->link_hdr_ok);
     iface->rx_batch_ok = iface->rx_poll_ok;
+    /* Same door: IOF_QUICK on CMD_WRITE is Exec's contract, but only a driver
+       whose BeginIO() has been read is offered it (sana2_tx.c). */
+    iface->tx_quick_ok = iface->rx_poll_ok;
 
     if (status != 0)
     {

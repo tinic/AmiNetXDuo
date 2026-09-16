@@ -42,10 +42,17 @@ VOID SendIO(struct IORequest *req)
     BeginIO(req);
 }
 
+/* What the device does with IOF_QUICK: 0 = a driver that queues (clears the
+   flag, replies later, the shipped third-party shape), 1 = anxnet's direct
+   path (finishes inside BeginIO, keeps the flag, posts nothing). */
+static int h_quick_kept;
+
 VOID BeginIO(struct IORequest *req)
 {
     h_sent = req;
     h_sends++;
+    if (!h_quick_kept)
+        req->io_Flags &= (UBYTE)~IOF_QUICK;
 }
 
 LONG AbortIO(struct IORequest *req)
@@ -273,6 +280,7 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_releases = 0;
     h_sleeps   = 0;
     h_reply_on_sleep = 0;
+    h_quick_kept = 0;
 }
 
 static void packet_init(const UCHAR *body, ULONG len)
@@ -693,9 +701,69 @@ static void test_lazy_parks_and_unparks(void)
 }
 #endif /* AMINETXDUO_TX_LAZY_COLLECT */
 
+/* IOF_QUICK on the write: only to a device that answered our tags, and then
+   a kept flag is a finished write -- slot back, packet back, nothing to reap;
+   a cleared flag is a queued one and the reap still owns it. */
+static void test_quick_write_completes_inline(void)
+{
+    printf("sana2: an ANXD device's write goes out IOF_QUICK and a kept flag "
+           "is complete without a reply\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(arp_frame, ARP_LEN);
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                              0xFFFFFFFF) == NX_SUCCESS,
+            "a third-party device's write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & IOF_QUICK) == 0,
+            "without IOF_QUICK: it was never offered");
+    h_check(iface.tx[0].busy == TRUE && h_releases == 0,
+            "and the slot waits for the reply");
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+    h_check(iface.tx[0].busy == FALSE && h_releases == 1,
+            "which the reap completes as before");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_quick_ok = TRUE;
+    h_quick_kept      = 1;
+    packet_init(arp_frame, ARP_LEN);
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                              0xFFFFFFFF) == NX_SUCCESS,
+            "an ANXD device's write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & IOF_QUICK) != 0,
+            "with IOF_QUICK");
+    h_check(iface.tx[0].busy == FALSE, "a kept flag: the slot is back");
+    h_check(h_releases == 1, "and the packet is released");
+    h_check(pkt.nx_packet_length == ARP_LEN,
+            "at the length it arrived with");
+    h_check(iface.stats.packets_sent == 1, "and it counts as sent");
+    h_check(iface.tx_port.mp_MsgList.lh_TailPred ==
+            (struct Node *)&iface.tx_port.mp_MsgList,
+            "and nothing is on the reply port");
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1, "so the reap has nothing to do");
+
+    /* The same device with its ring full queues the write: flag cleared,
+       reply later, the slot stays busy until the reap. */
+    h_quick_kept = 0;
+    packet_init(arp_frame, ARP_LEN);
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                              0xFFFFFFFF) == NX_SUCCESS,
+            "a queued write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & IOF_QUICK) == 0,
+            "and the device cleared the flag");
+    h_check(iface.tx[0].busy == TRUE && h_releases == 1,
+            "so the slot is still the device's");
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+    h_check(iface.tx[0].busy == FALSE && h_releases == 2,
+            "until the reply is reaped");
+}
+
 int main(void)
 {
     frames_init();
+    test_quick_write_completes_inline();
 
     test_pad_cooked_no_fusion();
     test_pad_cooked_with_fusion();

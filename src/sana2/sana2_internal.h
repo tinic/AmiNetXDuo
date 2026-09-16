@@ -696,6 +696,10 @@ struct AmiSana2If
                                            TRUE until it says IOERR_NOCMD    */
     UBYTE               rx_batch_ok;    /* try ANXD_CMD_READ_BATCH while it
                                            consumes every offered read      */
+    UBYTE               tx_quick_ok;    /* CMD_WRITE goes out IOF_QUICK: an
+                                           ANXD device (link_hdr_ok) honours
+                                           it, a kept flag is a finished
+                                           write with no reply to reap      */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
