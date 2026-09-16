@@ -64,7 +64,7 @@ produced, and marks each TCP segment that continues the one before it. The
 stack skips its own checksum pass on a verified frame and hands TCP one
 segment where the wire carried up to sixteen, the receive side of a
 large-receive offload; it does the same for IPv6. A 1 Gbit/s GENET behind a
-PiStorm32 receives 270 Mbit/s this way, 142 without. The two SANA-II
+PiStorm32 receives 290 Mbit/s this way and sends 107, 142 and 65 without. The two SANA-II
 extensions that carry it are published for any driver to implement,
 `Developer/include/aminetxduo/anxs2ext.h`. They are negotiated additions to
 SANA-II, not a replacement network API: a driver may offer VERIFIED checksum

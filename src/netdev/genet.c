@@ -68,18 +68,36 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * Receive interrupt coalescing: an interrupt after this many frames, or this
  * many 8.192 us ticks (125 MHz / 1024) after the first one waiting.  Every
  * interrupt on Emu68 is ~60 us of ROM before this driver sees it (the
- * profile puts it in timer.device's INT6 region), so fewer is the whole
- * lever; the timeout bounds the latency a lone frame pays.  Measured on
- * the A1200, iperf RX / TX Mbit/s: 500 us 120-122 / 63-65, 750 us 117 / 69,
- * 1000 us 112 / 73 -- the timeout trades receive for transmit almost one
- * for one, and receive is what a download is, so 500 us.  The frame count
- * makes no measured difference at these rates (5 frames arrive in 500 us).
+ * profile puts it in timer.device's INT6 region, 11% of a transmit run at
+ * 500 us), so fewer is the whole lever; the timeout bounds the latency a
+ * lone frame pays, and under load the frame count fires first.
+ *
+ * First measured 2026-09-15 with 32 posted reads: 500 us 120-122 / 63-65
+ * Mbit/s RX / TX, 750 us 117 / 69, 1000 us 112 / 73 -- the timeout traded
+ * receive for transmit, and 500 us was chosen.  What it was really trading
+ * was the read queue: a longer timeout means a longer burst, and past 32
+ * frames the burst's tail was dropped (sana2_internal.h,
+ * AMI_SANA2_RX_MAX_DEPTH).  With 128 reads and the held pass, 2026-09-16,
+ * iperf on the A1200, eth0 offline:
+ *
+ *     timeout      RX               TX
+ *      500 us      272              83
+ *     1000 us      280 / 280        97
+ *     2000 us      294 / 273       107.5 / 107.5 / 107.5
+ *     4000 us      292             103.5
+ *
+ * Transmit is the acknowledgment stream, 60-byte frames far apart, which
+ * only the timeout collects; past 2 ms the sender's 32-segment queue waits
+ * on acknowledgments the chip is still holding.  Receive at these rates is
+ * the 32-frame threshold, which fires every 1.3 ms at 300 Mbit/s whatever
+ * the timeout says.  So 2 ms: a lone frame waits at most that long, and a
+ * round trip to this machine grows by it.
  */
 #ifndef GE_RX_COALESCE_FRAMES
 #define GE_RX_COALESCE_FRAMES   32
 #endif
 #ifndef GE_RX_COALESCE_TICKS
-#define GE_RX_COALESCE_TICKS    61      /* 500 us */
+#define GE_RX_COALESCE_TICKS    244     /* 2000 us */
 #endif
 
 /* The chip shifts every received frame two bytes into its buffer
@@ -1526,6 +1544,8 @@ static LONG genet_attach(NetdevNic *nic)
     c->phy    = (nic->dt_phy != 0xff) ? nic->dt_phy : 1;
     nic->core_stat_names = ge_stat_names;
     nic->reply_batch     = 1;           /* Emu68: an Exec call is a trap */
+    nic->tx_reclaim      = ge_txintr;   /* no TX interrupt: retire on ask */
+    nic->tx_short_build  = 1;           /* the copy is 0.4 us, the mask 5.5 */
     nic->isr = genet_isr;
 #ifdef NETDEV_GENET_POLL_ONLY
     /* A bring-up arm: no server at all, the vertical blank is the whole of

@@ -150,6 +150,26 @@ struct NetdevNic
     UBYTE               reply_batch;
     VOID              (*rx_flush)(APTR arg);
 
+    /*
+     * A core whose transmit completions are found by reading the chip, not
+     * by an interrupt (the GENET takes no TX interrupt), retires them here on
+     * request: the shell asks before it calls the ring full and queues a
+     * write.  Without it a write that met a momentarily full ring waited for
+     * the next receive interrupt or the vertical blank to be issued, and the
+     * shim's sender slept a tick behind it -- transmit ran in bursts of one
+     * ring at a time and the A1200 sent 65 Mbit/s while receiving 270.
+     * TRUE when something was retired.  NULL for a core with an interrupt.
+     */
+    BOOL              (*tx_reclaim)(NetdevNic *nic);
+    /*
+     * The write's frame is built inside the same Disable() that issues it.
+     * netdev_tx_direct() takes the mask twice per write so that the opener's
+     * copy -- 135 of the 219 us a transmit took on a real 68020 -- runs with
+     * interrupts on; on Emu68 that copy is under a microsecond and the second
+     * Disable() pair is a 5.5 us trap, so a core there asks for one section.
+     */
+    UBYTE               tx_short_build;
+
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an
        address error on a 68000 if a field reorder ever lands them odd. */

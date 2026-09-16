@@ -1024,6 +1024,12 @@ static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
  */
 VOID netdev_tx_pump(NetdevUnit *unit)
 {
+    /* A ring that only looks full: let the core retire what the chip has
+       finished before this pump is judged to have nowhere to go. */
+    if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
+        unit->nu_Nic.tx_reclaim != NULL)
+        (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
+
     while (unit->nu_Nic.txb_inuse < unit->nu_Nic.txb_cnt)
     {
         struct IOSana2Req *io;
@@ -1080,6 +1086,12 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
         return;
     }
 
+    /* Same as the pump: a full-looking ring is asked about before a write
+       is queued behind it. */
+    if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
+        unit->nu_Nic.tx_reclaim != NULL)
+        (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
+
     if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
         unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
     {
@@ -1089,11 +1101,17 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
         return;
     }
     unit->nu_TxBuilding = 1;
-    Enable();
-
-    total = netdev_tx_timed_build(unit, io, op);
-
-    Disable();
+    if (!unit->nu_Nic.tx_short_build)
+    {
+        Enable();
+        total = netdev_tx_timed_build(unit, io, op);
+        Disable();
+    }
+    else
+    {
+        /* One section: the copy is cheaper than the mask on this machine. */
+        total = netdev_tx_timed_build(unit, io, op);
+    }
     unit->nu_TxBuilding = 0;
     if (total == 0)
     {

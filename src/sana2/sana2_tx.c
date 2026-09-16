@@ -198,9 +198,40 @@ VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface)
 VOID ami_sana2_tx_reap(AmiSana2If *iface)
 {
     struct Message *msg;
+    struct List     batch;
+    struct Node    *node;
+    struct Node    *next;
 
-    while ((msg = GetMsg(&iface->tx_port)) != NULL)
+    /*
+     * NOT A GetMsg() PER REPLY, AND NOT ONE AT ALL WHEN THERE IS NOTHING.
+     * This runs at the head of every send, and GetMsg() is a Disable() pair
+     * around one unlink -- on Emu68 a 5.5 us trap, paid even for an empty
+     * port: 8% of a transmit profile sat here.  The emptiness test is one
+     * load with no lock (a reply landing after it is picked up by the next
+     * send, or by the reader); when there is something, the whole list is
+     * spliced off under one Disable() and walked from here, the shape
+     * ami_sana2_rx_drain() uses for the read replies.
+     */
+    if (iface->tx_port.mp_MsgList.lh_Head->ln_Succ == NULL)
+        return;
+
+    NewList(&batch);
+    Disable();
+    if (iface->tx_port.mp_MsgList.lh_Head->ln_Succ != NULL)
     {
+        struct List *pl = &iface->tx_port.mp_MsgList;
+
+        batch.lh_Head              = pl->lh_Head;
+        batch.lh_TailPred          = pl->lh_TailPred;
+        batch.lh_Head->ln_Pred     = (struct Node *)&batch.lh_Head;
+        batch.lh_TailPred->ln_Succ = (struct Node *)&batch.lh_Tail;
+        NewList(pl);
+    }
+    Enable();
+
+    for (node = batch.lh_Head; (next = node->ln_Succ) != NULL; node = next)
+    {
+        msg = (struct Message *)node;
         /* ios2_Req.io_Message is the first member of the first member of
            AmiTxSlot, so the reply message is the slot. */
         AmiTxSlot *slot = (AmiTxSlot *)msg;

@@ -38,6 +38,17 @@ version at the top when it merges.
   36-frame bursts against 32 reads cost 685 frames and 632 retransmissions
   in one ten-second transfer. `IPREQUESTS` may now ask for up to 128
 
+- Transmit through `anxgenet.device`, A1200 + PiStorm32, iperf out of the
+  Amiga: **65 -> 107 Mbit/s**, receive 270 -> 294. Four things: the driver
+  retires finished transmits when asked, before a write is queued behind a
+  ring that only looked full; one interrupt-disable per write instead of
+  two, since the copy is cheaper than the mask on Emu68; no `GetMsg()` per
+  send when nothing has completed (one lock-free test, one splice when it
+  has); and the receive interrupt coalescing timeout is 2 ms instead of
+  500 us, now that the read queue holds the longer bursts -- a lone frame
+  waits at most 2 ms, and the acknowledgment stream of a transmit costs a
+  quarter of the interrupts it did
+
 - The receive path pays Exec once per burst instead of three times per
   frame, which on a PiStorm32 is the difference between 202 and 270 Mbit/s:
   `anxgenet.device` replies a burst's completed reads together (one list

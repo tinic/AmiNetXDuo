@@ -856,6 +856,11 @@ BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet,
 VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
 #endif
 
+#ifdef AMINETXDUO_SANA2_RX_HOST_TEST
+/* The host harness's way into the static batch post (sana2_rx.c). */
+VOID ami_sana2_rx_post_batch_host_test(AmiSana2Rx *rx);
+#endif
+
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);
 VOID ami_sana2_tx_reap(AmiSana2If *iface);
