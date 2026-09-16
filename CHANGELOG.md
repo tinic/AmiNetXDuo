@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.0
+
 - **Receive offload (GRO).** `anxgenet.device` verifies each IPv4 and
   IPv6 frame's header and TCP or UDP checksum itself, from the sum its copy
   already produced, and marks a TCP segment that continues the one before
@@ -83,8 +85,8 @@ version at the top when it merges.
   more `NetDevStats` records: passes held, and frames left waiting
 
 - The Raspberry Pi 4 GENET core is its own driver, `anxgenet.device`
-  (21,724 bytes; `DEVICE=anxgenet.device`, `UNIT=0`). `anxnet.device` is
-  back to the Amiga cards, 48,064 -> 39,828 bytes. The installer puts both
+  (24,688 bytes; `DEVICE=anxgenet.device`, `UNIT=0`). `anxnet.device` is
+  back to the Amiga cards, 48,064 -> 41,480 bytes. The installer puts both
   in `DEVS:Networks`; `CheckNetDevice DEVICE anxgenet.device` reads its probe
   record
 
@@ -110,9 +112,9 @@ version at the top when it merges.
   keyboard reset handler stop the DMA before a warm reboot. On an A1200 +
   PiStorm32-lite, Emu68 1.1.0-beta.1: iperf RX 123 Mbit/s, TX 65, SMB2 read
   of 691 MB 67 s (10.3 MB/s); genet.device 3.14 on the same machine 66, 29
-  and 120 s. `DEVICE=anxnet.device` with `CARD=genet` in the interface file;
-  the row is probed after the PCMCIA slot, so a 3c589's `UNIT=0` keeps its
-  meaning. `CheckNetDevice` reports the tree's answers, the PHY identifier
+  and 120 s. Shipped as `DEVICE=anxgenet.device`, `UNIT=0` (above); the
+  `CARD=genet` row of `anxnet.device` it began as is gone. `CheckNetDevice`
+  reports the tree's answers, the PHY identifier
   and whether the engine was still running from before the reboot. Going
   offline or rebooting leaves both rings' pointers and indices at zero:
   genet.device 3.14 takes the producer index as it finds it, and after a
