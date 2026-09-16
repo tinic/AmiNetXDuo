@@ -143,6 +143,7 @@ target_include_directories(test_sana2_rx PRIVATE
 
 target_compile_definitions(test_sana2_rx PRIVATE
     NX_INCLUDE_USER_DEFINE_FILE
+    AMINETXDUO_SANA2_RX_HOST_TEST
     AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
 # The default build has it on (see the option in the top-level CMakeLists), and

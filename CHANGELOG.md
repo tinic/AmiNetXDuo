@@ -43,7 +43,8 @@ version at the top when it merges.
   list in one step instead of a `GetMsg()` per frame, and re-posts the
   burst's reads with one `ANXD_CMD_READ_BATCH` (`anxs2ext.h`) instead of a
   `BeginIO()` each. Emu68 traps every interrupt-disable and signal at about
-  5.5 us; the classic cards, on real 68k silicon, are unchanged. A1200 +
+  5.5 us. Batched replies are GENET-only; the common port drain and batched
+  re-post are also used by `anxnet.device`. A1200 +
   PiStorm32, iperf into the Amiga: 202 -> 241 (replies and the port) ->
   **272 / 272 / 269 Mbit/s** (re-posts), no frame lost
 

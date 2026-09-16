@@ -694,7 +694,8 @@ struct AmiSana2If
                                            will set beyond SUMMED, 0 = none  */
     UBYTE               rx_poll_ok;     /* the device knows ANXD_CMD_RX_POLL;
                                            TRUE until it says IOERR_NOCMD    */
-    UBYTE               rx_batch_ok;    /* the same for ANXD_CMD_READ_BATCH  */
+    UBYTE               rx_batch_ok;    /* try ANXD_CMD_READ_BATCH while it
+                                           consumes every offered read      */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.

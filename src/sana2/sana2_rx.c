@@ -928,9 +928,14 @@ static VOID ami_sana2_rx_post_batch(AmiSana2Rx *rx)
         BeginIO((struct IORequest *)&rx->batch);
         if ((rx->batch.ios2_Req.io_Flags & IOF_QUICK) == 0)
             (VOID)WaitIO((struct IORequest *)&rx->batch);
-        if (rx->batch.ios2_Req.io_Error != IOERR_NOCMD)
-            return;                     /* taken; the list came back empty */
-        iface->rx_batch_ok = FALSE;     /* an older device: the long way */
+
+        /* The list, not the carrier's error, says who owns the reads.  A
+           device that accepted the command returns it empty.  Any requests
+           left belong to us and must be posted individually, whether the
+           rejection was IOERR_NOCMD, another error, or a partial take. */
+        if (rx->topost.lh_Head->ln_Succ == NULL)
+            return;
+        iface->rx_batch_ok = FALSE;     /* this device cannot take a batch */
     }
 
     {
@@ -942,6 +947,15 @@ static VOID ami_sana2_rx_post_batch(AmiSana2Rx *rx)
         NewList(&rx->topost);
     }
 }
+
+#ifdef AMINETXDUO_SANA2_RX_HOST_TEST
+/* The production helper is static; expose only its ownership transaction to
+   the host harness.  No symbol or branch reaches a shipping image. */
+VOID ami_sana2_rx_post_batch_host_test(AmiSana2Rx *rx)
+{
+    ami_sana2_rx_post_batch(rx);
+}
+#endif
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
    are in flight afterwards. */

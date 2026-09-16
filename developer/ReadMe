@@ -222,8 +222,11 @@ vectors, no library to open.
         driver that does not know it answers IOERR_NOCMD with the list
         untouched, and the opener posts them one by one from then on.
 
-anxgenet.device implements all of them; anxnet.device the first two tags.
-The header is the contract, and the shipped drivers are the reference.
+Both shipped devices implement the direct pair, link-header handoff and read
+batch. anxgenet.device additionally produces VERIFIED and CONTINUES verdicts
+and can retain a burst tail for RX_POLL; the classic cores simply have no such
+verdict or held ring to report. The header is the contract, and the shipped
+drivers are the reference.
 
 
 Regenerating
