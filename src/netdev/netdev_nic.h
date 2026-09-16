@@ -131,6 +131,10 @@ struct NetdevNic
                                   APTR *token, UBYTE *wanted);
     VOID              (*rx_claimed)(APTR arg, APTR token, ULONG sum,
                                     UBYTE flags);
+    /* ANXD_S2_RXF_* verdicts this core can produce.  The shell intersects
+       negotiation with this after it knows which unit was opened. */
+    UBYTE               rx_flags_supported;
+    ULONG               rx_verified;   /* direct frames carrying VERIFIED */
     /*
      * BATCHED REPLIES, for a core on a machine where an Exec call is a trap.
      * A core that sets reply_batch has its claimed frames' CMD_READs held by

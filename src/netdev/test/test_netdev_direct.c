@@ -335,12 +335,15 @@ static void test_claim_complete(void)
     expect_u32("claim returns negotiated receive flags", wanted,
                ANXD_S2_RXF_VERIFIED);
 
-    netdev_rx_claimed(&unit, token, 0x12345678UL, 1);
+    netdev_rx_claimed(&unit, token, 0x12345678UL,
+                      ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
     expect_u32("one filled callback", filled_calls, 1);
     expect_ptr("filled ios2_Data", filled_data, &data_cookie);
     expect_u32("filled payload length", filled_len, 46);
     expect_u32("filled checksum", filled_sum, 0x12345678UL);
-    expect_u32("filled checksum valid", filled_summed, 1);
+    expect_u32("filled checksum and verdict", filled_summed,
+               ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+    expect_u32("verified direct frame counted", unit.nu_Nic.rx_verified, 1);
     expect_u32("one reply", replies, 1);
     expect_u32("unit packets", unit.nu_Stats.PacketsReceived, 1);
     expect_u32("direct packets", unit.nu_RxDirect, 1);

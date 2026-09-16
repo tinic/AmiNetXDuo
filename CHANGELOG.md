@@ -23,8 +23,10 @@ version at the top when it merges.
   drawer as `include/aminetxduo/anxs2ext.h` for any driver to implement.
   VERIFIED is negotiated independently, so a driver can add stateless
   checksum verification without flow tracking or GRO; CONTINUES is requested
-  only by a GRO build, and every other driver is unchanged. `NetDevStats` shows the verified
-  frames, the continuing frames, the runs, the largest burst and the frames
+  only by a GRO build. `anxnet.device` also reports VERIFIED, without flow
+  state or GRO, when its EL3 or word/long NE2000 direct drain has already
+  accumulated the checksum. `NetDevStats` shows the verified frames, the
+  continuing frames, the runs, the largest burst and the frames
   that found no read posted. Build options
   `AMINETXDUO_RX_CHECKSUM_OFFLOAD` and `AMINETXDUO_GRO`, both on by default
 

@@ -21,6 +21,7 @@ set(NETDEV_CORE_SOURCES
     netdev_unit.c       # unit/opener helpers, host-testable
     netdev_io.c         # BeginIO/AbortIO field handling, host-testable
     netdev_direct.c     # claim/completion half of the single-copy RX path
+    netdev_verify.c     # stateless IPv4/IPv6 checksum verdict
     netdev_queue.c      # queued IORequest invariants, host-testable
     netdev_cmds.c       # the S2_* table
     netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
@@ -241,6 +242,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # the clock existed.  A stub would be a second answer to that question.
     add_executable(test_netdev_el3
         test/test_netdev_el3.c
+        netdev_verify.c
         netdev_bus.c
         netdev_cards.c
         netdev_clock.c
@@ -485,7 +487,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     # index -- an array fuses them and a driver that forgot to select page 1
     # before writing the station address would still pass.
     add_executable(test_netdev_dp8390
-        test/test_netdev_dp8390.c)
+        test/test_netdev_dp8390.c
+        netdev_verify.c)
 
     target_include_directories(test_netdev_dp8390 PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -604,6 +607,19 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_direct PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_direct COMMAND test_netdev_direct)
+
+    add_executable(test_netdev_verify
+        test/test_netdev_verify.c
+        netdev_verify.c)
+
+    target_include_directories(test_netdev_verify PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_verify PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_verify COMMAND test_netdev_verify)
 
     add_executable(test_netdev_watchdog
         test/test_netdev_watchdog.c

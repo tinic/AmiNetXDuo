@@ -45,7 +45,9 @@ ARM="${AMINETXDUO_IMAGE_ARM:-$(basename "$BUILD")}"
 # AMINETXDUO_LOG off, which is where they belong.
 BUDGETS=(
     "default:src/bsdsocket/bsdsocket.library:354000"
-    "default:src/netdev/anxnet.device:41000"
+    # 41,412 after stateless receive-checksum verification was added to the
+    # EL3 and word/long NE2000 direct paths, 2026-09-15.
+    "default:src/netdev/anxnet.device:43000"
     # 21,724 at the split; 23,032 with the receive offload (IPv4 and IPv6
     # verification, the CONTINUES mark and its four counters); 24,440 with
     # the held pass, the batched replies, the reset on stop and their
@@ -57,7 +59,7 @@ BUDGETS=(
     "default:src/usergroup/usergroup.library:10000"
     "default:src/tlslib/tls.library:198000"
     "minimal:src/bsdsocket/bsdsocket.library:226000"
-    "minimal:src/netdev/anxnet.device:41000"
+    "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:26000"
     "minimal:src/usergroup/usergroup.library:10000"
 )

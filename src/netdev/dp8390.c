@@ -24,7 +24,9 @@
 #include "dp8390.h"
 #include "netdev_bsdtypes.h"
 #include "netdev_clock.h"
+#include "netdev_verify.h"
 #include "dp8390reg.h"
+#include "aminetxduo/anxs2ext.h"
 
 #include <proto/exec.h>
 
@@ -375,8 +377,9 @@ static VOID dp8390_rint(NetdevNic *nic)
 
                 {
                     APTR   token = NULL;
+                    UBYTE  wanted = 0;
                     UBYTE *dst   = nic->rx_claim(nic->rx_arg, hdr, flen,
-                                                 &token, NULL);
+                                                 &token, &wanted);
 
                     if (dst != NULL)
                     {
@@ -400,6 +403,10 @@ static VOID dp8390_rint(NetdevNic *nic)
                         if (summed == 0)
                             (VOID)netdev_ring_copy_exact(
                                 nic, src + NETDEV_HDR_LEN, dst, plen);
+
+                        if (summed != 0 &&
+                            (wanted & ANXD_S2_RXF_VERIFIED) != 0)
+                            summed |= netdev_rx_verify(dst, plen, sum);
 
                         nic->rx_packets++;
                         nic->rx_claimed(nic->rx_arg, token, sum, summed);

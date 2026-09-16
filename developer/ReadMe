@@ -223,10 +223,11 @@ vectors, no library to open.
         untouched, and the opener posts them one by one from then on.
 
 Both shipped devices implement the direct pair, link-header handoff and read
-batch. anxgenet.device additionally produces VERIFIED and CONTINUES verdicts
-and can retain a burst tail for RX_POLL; the classic cores simply have no such
-verdict or held ring to report. The header is the contract, and the shipped
-drivers are the reference.
+batch. anxgenet.device produces VERIFIED and CONTINUES verdicts and can retain
+a burst tail for RX_POLL. anxnet.device produces VERIFIED on EL3 and on
+word/long NE2000 direct drains; mapped, byte-wide and fallback reads leave
+verification to the stack. The header is the contract, and the shipped drivers
+are the reference.
 
 
 Regenerating

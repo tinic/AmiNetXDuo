@@ -32,6 +32,7 @@
 #include "dp8390.h"     /* the DP8390_TX_* return codes are the shared contract */
 #include "n68k_iocopy.h"
 #include "netdev_clock.h"
+#include "netdev_verify.h"
 #include "aminetxduo/anxs2ext.h"   /* the RX_FILLED flag bits */
 
 #include <exec/execbase.h>
@@ -868,14 +869,6 @@ static ULONG ge_copy_sum(ULONG *to, const ULONG *from, ULONG count)
     return acc;
 }
 
-/* Sixteen-bit ones-complement fold of a 32-bit accumulator. */
-static UWORD ge_fold16(ULONG acc)
-{
-    acc = (acc & 0xffffUL) + (acc >> 16);
-    acc = (acc & 0xffffUL) + (acc >> 16);
-    return (UWORD)acc;
-}
-
 /*
  * WHAT THE COPY'S SUM IS WORTH ONCE THE HEADERS ARE IN CACHE.
  *
@@ -893,165 +886,10 @@ static UWORD ge_fold16(ULONG acc)
  * not the datagram's); a protocol other than TCP or UDP; a UDP checksum of
  * zero, which means "none".
  *
- * `ip` is the payload's start in the ring buffer, on a longword; `plen` the
- * payload's length; `sum` the copy's.  Returns the ANXD_S2_RXF_* bits earned
- * and fills the stream key for the CONTINUES test when the frame is TCP.
+ * The stateless half is shared with the classic direct paths now.  GENET adds
+ * only the stream key and state which make CONTINUES possible.
  */
-typedef struct GeSegment
-{
-    ULONG   addr[8];        /* two words for IPv4, eight for IPv6           */
-    UBYTE   words;          /* how many of them                             */
-    ULONG   ports;
-    ULONG   seq;
-    ULONG   ack;
-    UWORD   win;
-    UWORD   data;           /* TCP payload bytes                            */
-    UBYTE   flags;
-    UBYTE   tcp;            /* a TCP segment with no options                */
-} GeSegment;
-
-/* The TCP header at `t` (twenty bytes are there: the callers checked the
-   transport length) into the stream key; the addresses are the caller's. */
-static VOID ge_tcp_key(const UBYTE *t, UWORD tlen, GeSegment *seg)
-{
-    const UWORD *w = (const UWORD *)(CONST_APTR)t;
-
-    seg->ports = ((ULONG)w[0] << 16) | w[1];
-    seg->seq   = ((ULONG)w[2] << 16) | w[3];
-    seg->ack   = ((ULONG)w[4] << 16) | w[5];
-    seg->flags = t[13];
-    seg->win   = w[7];
-    seg->data  = (UWORD)(tlen - 20);
-    seg->tcp   = (UBYTE)(((t[12] >> 4) == 5) ? 1 : 0);
-}
-
-static UBYTE ge_verify4(const UBYTE *ip, UWORD plen, ULONG sum, GeSegment *seg)
-{
-    const UWORD *w = (const UWORD *)(CONST_APTR)ip;
-    UWORD        total;
-    UWORD        tlen;
-    UBYTE        proto;
-    ULONG        acc;
-    UWORD        i;
-
-    seg->tcp = 0;
-
-    if (ip[0] != 0x45)
-        return 0;                       /* not IPv4, or options */
-    total = (UWORD)((ip[2] << 8) | ip[3]);
-    if (total != plen || total < 20)
-        return 0;                       /* padded, truncated, or short */
-    if ((ip[6] & 0x3f) != 0 || ip[7] != 0)
-        return 0;                       /* MF, or a fragment offset */
-    proto = ip[9];
-    if (proto != 6 && proto != 17)
-        return 0;
-
-    /* The header: ten words summing to 0xffff, checksum field included. */
-    acc = 0;
-    for (i = 0; i < 10; i++)
-        acc += w[i];
-    if (ge_fold16(acc) != 0xffffu)
-        return 0;
-
-    /*
-     * The transport: everything after the header plus the pseudo header.
-     * The copy's sum covers the header too, and a valid header sums to
-     * 0xffff, which is ones-complement zero -- so the copy's sum IS the
-     * transport's sum already, and the header needs no taking out.  The
-     * copy summed `plen` bytes from `ip`, and plen == total, so nothing past
-     * the datagram is in it either.
-     */
-    tlen = (UWORD)(total - 20);
-    if (proto == 17)
-    {
-        /* UDP's length is the checksum boundary.  Only certify the frame
-           when it describes the same bytes as the enclosing IP packet. */
-        if (tlen < 8 || w[12] != tlen)
-            return 0;
-        if (w[13] == 0)                 /* UDP checksum absent */
-            return 0;
-    }
-    else if (tlen < 20)
-        return 0;
-
-    acc  = ge_fold16(sum);
-    acc += w[6];                        /* source address                  */
-    acc += w[7];
-    acc += w[8];                        /* destination address             */
-    acc += w[9];
-    acc += proto;
-    acc += tlen;
-    if (ge_fold16(acc) != 0xffffu)
-        return 0;
-
-    if (proto == 6)
-    {
-        seg->addr[0] = ((ULONG)w[6] << 16) | w[7];
-        seg->addr[1] = ((ULONG)w[8] << 16) | w[9];
-        seg->words   = 2;
-        ge_tcp_key(ip + 20, tlen, seg);
-    }
-
-    return ANXD_S2_RXF_VERIFIED;
-}
-
-/*
- * THE SAME FOR IPv6, WHICH HAS NO HEADER CHECKSUM TO CANCEL OUT.  The copy's
- * sum covers the forty-byte header too, and here those words are not
- * ones-complement zero, so the four that are not addresses are taken back
- * out (the sixteen address words stay: the pseudo header wants them), and
- * the upper-layer length and next header go in.  Refused: a version that is
- * not 6, a payload length that is not the rest of the frame, any next
- * header but TCP or UDP right after the fixed header (an extension header
- * would need walking), and a UDP checksum of zero, which IPv6 forbids.
- */
-static UBYTE ge_verify6(const UBYTE *ip, UWORD plen, ULONG sum, GeSegment *seg)
-{
-    const UWORD *w = (const UWORD *)(CONST_APTR)ip;
-    UWORD        tlen;
-    UBYTE        nh;
-    ULONG        acc;
-    UWORD        i;
-
-    seg->tcp = 0;
-
-    if ((ip[0] >> 4) != 6)
-        return 0;
-    tlen = w[2];                        /* payload length                  */
-    if ((UWORD)(tlen + 40) != plen)
-        return 0;                       /* padded or truncated             */
-    nh = ip[6];
-    if (nh != 6 && nh != 17)
-        return 0;                       /* an extension header, or other   */
-
-    if (nh == 17)
-    {
-        if (tlen < 8 || w[22] != tlen)  /* UDP length must match payload */
-            return 0;
-        if (w[23] == 0)                 /* UDP checksum absent             */
-            return 0;
-    }
-    else if (tlen < 20)
-        return 0;
-
-    acc  = ge_fold16(sum);
-    acc += (UWORD)~ge_fold16((ULONG)w[0] + w[1] + w[2] + w[3]);
-    acc += tlen;
-    acc += nh;
-    if (ge_fold16(acc) != 0xffffu)
-        return 0;
-
-    if (nh == 6)
-    {
-        for (i = 0; i < 8; i++)
-            seg->addr[i] = ((ULONG)w[4 + 2 * i] << 16) | w[5 + 2 * i];
-        seg->words = 8;
-        ge_tcp_key(ip + 40, tlen, seg);
-    }
-
-    return ANXD_S2_RXF_VERIFIED;
-}
+typedef NetdevRxSegment GeSegment;
 
 /*
  * THE CONTINUES MARK.  A verified TCP segment with no options, carrying data,
@@ -1198,7 +1036,10 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
                 frame[12] == 0x08 && frame[13] == 0x00)
             {
                 GeSegment seg;
-                UBYTE     v = ge_verify4(src, plen, sum, &seg);
+                UBYTE     v = netdev_rx_verify4(src, plen, sum);
+
+                if (v != 0)
+                    netdev_rx_segment4(src, &seg);
 
                 if (v != 0)
                     nic->core_stat[GE_ST_VERIFIED]++;
@@ -1218,7 +1059,10 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
                      frame[12] == 0x86 && frame[13] == 0xdd)
             {
                 GeSegment seg;
-                UBYTE     v = ge_verify6(src, plen, sum, &seg);
+                UBYTE     v = netdev_rx_verify6(src, plen, sum);
+
+                if (v != 0)
+                    netdev_rx_segment6(src, &seg);
 
                 if (v != 0)
                     nic->core_stat[GE_ST_VERIFIED]++;
@@ -1710,6 +1554,8 @@ static LONG genet_attach(NetdevNic *nic)
 
     nic->txb_cnt       = GE_TX_RING;
     nic->tx_at         = genet_tx_at;
+    nic->rx_flags_supported = (UBYTE)(ANXD_S2_RXF_VERIFIED |
+                                      ANXD_S2_RXF_CONTINUES);
     nic->ring_copy_sum = NULL;
     nic->frame_at      = NULL;
     nic->read_hdr      = NULL;

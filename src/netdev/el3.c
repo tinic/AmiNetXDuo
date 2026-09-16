@@ -16,6 +16,8 @@
 #include "netdev_clock.h"
 #include "netdev_mcaf.h"
 #include "netdev_macgen.h"
+#include "netdev_verify.h"
+#include "aminetxduo/anxs2ext.h"
 
 #ifndef EL3_RX_DRAIN_SUM
 #define EL3_RX_DRAIN_SUM(dst, port, len) \
@@ -734,9 +736,11 @@ static BOOL el3_rint(NetdevNic *nic)
 
         if (el3_rx_wanted(nic, buf))
         {
-            APTR   token = NULL;
+            APTR   token  = NULL;
+            UBYTE  wanted = 0;
             UBYTE *dst   = (nic->rx_claim != NULL)
-                         ? nic->rx_claim(nic->rx_arg, buf, len, &token, NULL)
+                         ? nic->rx_claim(nic->rx_arg, buf, len, &token,
+                                         &wanted)
                          : NULL;
 
             if (dst != NULL)
@@ -747,13 +751,20 @@ static BOOL el3_rint(NetdevNic *nic)
                  * which is the routine's one requirement.
                  */
                 ULONG sum = EL3_RX_DRAIN_SUM(dst,
-                                             (const volatile void *)
-                                                 nic->bus.asic,
+                                             (const volatile void *)nic->bus.asic,
                                              (ULONG)(len - NETDEV_HDR_LEN));
+
+                if ((wanted & ANXD_S2_RXF_VERIFIED) != 0)
+                    wanted = netdev_rx_verify(dst,
+                                             (UWORD)(len - NETDEV_HDR_LEN),
+                                             sum);
+                else
+                    wanted = 0;
 
                 el3_discard(nic);
                 nic->rx_packets++;
-                nic->rx_claimed(nic->rx_arg, token, sum, 1);
+                nic->rx_claimed(nic->rx_arg, token, sum,
+                                (UBYTE)(ANXD_S2_RXF_SUMMED | wanted));
 
                 return TRUE;
             }
@@ -966,6 +977,7 @@ LONG el3_attach(NetdevNic *nic)
     nic->read_hdr  = NULL;
     nic->ring_copy = NULL;
     nic->ring_copy_sum = NULL;  /* el3_rint() fuses its own FIFO drain */
+    nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
     nic->frame_at  = NULL;
     nic->tx_at     = NULL;
     nic->write_buf = NULL;

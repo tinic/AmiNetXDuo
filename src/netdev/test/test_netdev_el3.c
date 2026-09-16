@@ -1033,6 +1033,8 @@ static void test_receive_direct(void)
     netdev_mar_clear(nic.mar);
     nic.rx_claim = mock_rx_claim;
     nic.rx_claimed = mock_rx_claimed;
+    expect_u32("EL3 advertises only stateless receive verification",
+               nic.rx_flags_supported, ANXD_S2_RXF_VERIFIED);
 
     mock_rxlen = 77;                    /* payload 63: three-byte tail */
     mock_rxpos = 0;

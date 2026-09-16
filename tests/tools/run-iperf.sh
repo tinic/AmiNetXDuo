@@ -95,7 +95,9 @@ REPORT="$HD/tools.txt"
 RUN_RC=0
 
 SERVER_ARMS=no
-if [ -n "$IFACE" ]; then
+if [ "$IFACE" = slirp ]; then
+    : # a non-A2065 board behind SLIRP: outbound arms only
+elif [ -n "$IFACE" ]; then
     if [ -z "$PEERHOST" ]; then
         echo "-B without -P: a bridged guest cannot be reached from the" \
              "machine running the emulator, so -P must name a third one." >&2
@@ -103,15 +105,23 @@ if [ -n "$IFACE" ]; then
     fi
     SERVER_ARMS=yes
 elif [ "$BOARD" != a2065 ] && [ -z "$REPLAY" ]; then
-    echo "-N $BOARD needs -B <iface>: the SLIRP branch here boots an a2065" >&2
-    echo "and nothing else, so a board key would be ignored." >&2
+    echo "-N $BOARD needs -B <iface> for a bridge or -B slirp." >&2
     exit 2
 fi
 
 # The address the guest calls.  SLIRP's gateway is the emulator host itself.
 if [ "$SERVER_ARMS" = yes ]; then
     PEERNAME="${PEERHOST#*@}"
-    PEERADDR=$(getent ahostsv4 "$PEERNAME" 2>/dev/null | awk 'NR==1{print $1}')
+    if command -v getent >/dev/null 2>&1; then
+        PEERADDR=$(getent ahostsv4 "$PEERNAME" 2>/dev/null |
+                   awk 'NR==1{print $1}')
+    else
+        # macOS has no getent.  The harness requires Python for the peer
+        # immediately below, and socket.gethostbyname follows the host's
+        # normal resolver just as getent does.
+        PEERADDR=$(python3 -c 'import socket,sys; print(socket.gethostbyname(sys.argv[1]))' \
+                   "$PEERNAME" 2>/dev/null || true)
+    fi
     if [ -z "$PEERADDR" ]; then
         case "$PEERNAME" in
             *[!0-9.]*) echo "cannot resolve $PEERNAME to an address for the" \
@@ -136,7 +146,8 @@ if [ -n "$REPLAY" ]; then
     echo "==> REPLAY of $REPORT: nothing was run, this only checks the checks"
 else
 
-for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/iperf" "$BSD"; do
+for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/iperf" \
+         "$TOOLS/NetDevStats" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -235,6 +246,7 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$TOOLS/iperf"           "$STAGE/iperf"
 cp "$TOOLS/netstat"         "$STAGE/netstat"
+cp "$TOOLS/NetDevStats"     "$STAGE/NetDevStats"
 
 # The commands, in order.  Every assertion below indexes by position, so this
 # list and the checks move together.
@@ -268,6 +280,9 @@ cp "$TOOLS/netstat"         "$STAGE/netstat"
         done
         echo "SYS:iperf -s -u -p $PORT_SRV_UDP -t $SRV_WINDOW"
         echo "SYS:netstat -s"
+    fi
+    if [ "$DRIVER_SOURCE" = anxnet ]; then
+        echo "SYS:NetDevStats DEVICE $WANT_DEVICE UNIT 0 CARD $WANT_CARD"
     fi
 } > "$STAGE/commands.txt"
 
@@ -458,13 +473,13 @@ if [ -n "$IFACE" ]; then
         -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
         "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat" \
-        "$STAGE/env"
+        "$STAGE/NetDevStats" "$STAGE/env"
 else
     echo "==> booting $MODEL with the A2065 on SLIRP"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
         "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat" \
-        "$STAGE/env"
+        "$STAGE/NetDevStats" "$STAGE/env"
 fi
 RUN_RC=$?
 set -e
@@ -848,6 +863,28 @@ if [ "$SERVER_ARMS" = yes ]; then
 else
     skip "the two directions with the guest as the server: a SLIRP guest" \
          "cannot be called in to.  Re-run with -B <iface> -P <third-machine>."
+fi
+
+# The classic offload is deliberately path-specific: a fused direct drain can
+# certify a frame, while a wrapped or byte-wide read simply leaves validation
+# to the stack.  A run asking to prove the feature therefore checks the
+# driver's own counter after real receive traffic rather than inferring it from
+# a successful transfer.
+if [ "$DRIVER_SOURCE" = anxnet ]; then
+    NDSCMD="SYS:NetDevStats DEVICE $WANT_DEVICE UNIT 0 CARD $WANT_CARD"
+    want_rc "$NDSCMD" 1 0 "NetDevStats reads the exercised anxnet.device unit"
+    if [ "${AMINETXDUO_EXPECT_RX_VERIFIED:-0}" = 1 ]; then
+        RX_VERIFIED=$(block "$NDSCMD" 1 |
+            sed -n 's/^  *[0-9][0-9]*  *\([0-9][0-9]*\)  Direct receive frames verified$/\1/p' |
+            head -1)
+        if [ "${RX_VERIFIED:-0}" -gt 0 ]; then
+            pass "anxnet.device produced $RX_VERIFIED VERIFIED receive verdicts"
+        else
+            fail "anxnet.device produced no VERIFIED verdict on the requested" \
+                 "receive-offload run"
+            show "$NDSCMD" 1
+        fi
+    fi
 fi
 
 # ---- nothing wrote an unbounded file ------------------------------------

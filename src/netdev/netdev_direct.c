@@ -213,6 +213,9 @@ VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags)
                                       (UBYTE)(flags & (ANXD_S2_RXF_SUMMED |
                                                        op->op_RxFlags)));
 
+    if ((flags & op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
+        unit->nu_Nic.rx_verified++;
+
     unit->nu_Stats.PacketsReceived++;
     if (tr != NULL)
     {

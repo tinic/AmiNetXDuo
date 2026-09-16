@@ -2073,7 +2073,7 @@ static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
 /* ---------------------------------------------------------- the tag list -- */
 
 static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
-                             const char **pin)
+                             const char **pin, UBYTE **rx_flags_answer)
 {
     while (tags != NULL)
     {
@@ -2131,6 +2131,7 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
                     wanted &= (UBYTE)~ANXD_S2_RXF_CONTINUES;
                 op->op_RxFlags = wanted;
                 *(UBYTE *)tags->ti_Data = op->op_RxFlags;
+                *rx_flags_answer = (UBYTE *)tags->ti_Data;
             }
         }
         else if (tag == S2_CopyFromBuff)
@@ -2204,6 +2205,7 @@ static struct Device *netdev_open(
     const char   *why  = "no such board";
     BOOL          first_opener;
     BOOL          first_promisc;
+    UBYTE        *rx_flags_answer = NULL;
 
     io->ios2_Req.io_Error = 0;
 
@@ -2220,7 +2222,7 @@ static struct Device *netdev_open(
     }
 
     netdev_take_tags((const struct TagItem *)io->ios2_BufferManagement,
-                     op, &pin);
+                     op, &pin, &rx_flags_answer);
 
     nd_tracex("anx: open unit ", unit);
     hw = netdev_find_unit(d, unit, pin, &why);
@@ -2241,6 +2243,16 @@ static struct Device *netdev_open(
         io->ios2_Req.io_Error  = IOERR_OPENFAIL;
         return NULL;
     }
+
+    /* Tag parsing precedes unit selection because CARD= is one of those tags.
+       Now that the core is known, publish only verdicts it can actually
+       produce.  A LANCE or mapped-buffer ED unit therefore answers zero; an
+       NE2000 or EL3 answers VERIFIED; GENET also answers CONTINUES. */
+    op->op_RxFlags &= hw->nu_Nic.rx_flags_supported;
+    if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) == 0)
+        op->op_RxFlags &= (UBYTE)~ANXD_S2_RXF_CONTINUES;
+    if (rx_flags_answer != NULL)
+        *rx_flags_answer = op->op_RxFlags;
 
     op->op_Hw        = hw;
     op->op_Raw       = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);

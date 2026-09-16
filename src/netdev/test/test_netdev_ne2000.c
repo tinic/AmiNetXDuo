@@ -746,6 +746,8 @@ static void test_attach_installs_the_hooks(void)
     ok("read_hdr is installed",  nic.read_hdr  != NULL);
     ok("ring_copy is installed", nic.ring_copy != NULL);
     ok("write_buf is installed", nic.write_buf != NULL);
+    ok("a wide direct drain offers stateless checksum verification",
+       nic.rx_flags_supported == ANXD_S2_RXF_VERIFIED);
     /* A port has no address to hand out, so this one must stay NULL: a
        non-NULL frame_at would have the receive path hand up a pointer into a
        card that cannot be addressed. */

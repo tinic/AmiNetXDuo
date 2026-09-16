@@ -54,6 +54,7 @@
 #include "netdev_bsdtypes.h"
 #include "netdev_clock.h"
 #include "netdev_macgen.h"
+#include "aminetxduo/anxs2ext.h"
 #include "dp8390reg.h"
 #include "ne2000reg.h"
 
@@ -737,6 +738,8 @@ static LONG ne2000_attach(NetdevNic *nic)
     nic->write_buf = ne2000_write_buf;
 
     ne2000_probe_wide(nic);
+    nic->rx_flags_supported = (UBYTE)(
+        nic->bus.dmode != NETDEV_DMODE_BYTE ? ANXD_S2_RXF_VERIFIED : 0);
 
     /*
      * Where the station address is depends on the part.  The AX88796 keeps it

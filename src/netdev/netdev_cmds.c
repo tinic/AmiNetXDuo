@@ -113,6 +113,7 @@ static const char netdev_stat_kick[]  = "PCMCIA deaf-receiver resets";
 static const char netdev_stat_txerr[] = "Transmit errors";
 static const char netdev_stat_poll[]  = "Opener polls";
 static const char netdev_stat_pollh[] = "Opener polls that found frames held";
+static const char netdev_stat_ver[]   = "Direct receive frames verified";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -217,6 +218,10 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
                     unit->nu_Nic.core_stat_names[i] != NULL; i++)
             STAT(unit->nu_Nic.core_stat_names[i], unit->nu_Nic.core_stat[i]);
     }
+
+    /* Last so every previously published numeric Type, including a core's
+       private records, stays where it was. */
+    STAT(netdev_stat_ver, unit->nu_Nic.rx_verified);
 
 #undef STAT
 
