@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.1
+
 - Transmit completions on our own drivers cost no reply: a `CMD_WRITE` to
   `anxnet.device` or `anxgenet.device` goes out `IOF_QUICK`, the driver
   finishes it inside `BeginIO()` and posts nothing, and the stack hands the
