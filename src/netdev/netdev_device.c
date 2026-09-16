@@ -13,6 +13,10 @@
 #include "netdev_macgen.h"
 #include "dp8390.h"
 #include "netdev_dtree.h"
+#if NETDEV_HAS_ZORRO
+#include "netdev_cache.h"
+#include <libraries/configregs.h>
+#endif
 
 #include "aminetxduo/version.h"
 
@@ -1579,7 +1583,8 @@ UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt)
  * walk below, and the PCMCIA slot, which has no ConfigDev at all.
  */
 static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
-                            APTR board, ULONG serial, const NetdevDtInfo *dt)
+                            APTR board, ULONG serial, const NetdevDtInfo *dt,
+                            const struct ConfigDev *cd)
 {
     NetdevUnit *unit;
     UWORD       i;
@@ -1658,6 +1663,28 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
         return FALSE;
     }
 #endif
+    /*
+     * A Zorro III board on a 68030 is cacheable, and a cached register is a
+     * register that never changes (netdev_cache.h).  Settled before attach,
+     * which is the first thing to read one, and recorded whatever it came
+     * to: NONE on the machines that need nothing is as much a finding as
+     * TT0 on the one that did.
+     */
+#if NETDEV_HAS_ZORRO
+    if (cd != NULL && (cd->cd_Rom.er_Type & ERT_TYPEMASK) == ERT_ZORROIII)
+    {
+        netdev_diag_note(ANXDIAG_CACHE_GUARD, netdev_diag_card(card),
+                         (ULONG)netdev_cache_guard(&unit->nu_Nic,
+                                                   (ULONG)board,
+                                                   cd->cd_BoardSize));
+        if (unit->nu_Nic.cache_why != 0)
+            netdev_diag_note(ANXDIAG_CACHE_WHY, netdev_diag_card(card),
+                             (ULONG)unit->nu_Nic.cache_why);
+    }
+#else
+    (VOID)cd;
+#endif
+
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
         nd_trace("anx: attach failed\r\n");
@@ -1665,6 +1692,9 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
            Zero is ANXDIAG_WHY_UNKNOWN, so a refusal is never silent. */
         netdev_diag_note(ANXDIAG_ATTACH_FAIL, netdev_diag_card(card),
                          (ULONG)unit->nu_Nic.diag_why);
+#if NETDEV_HAS_ZORRO
+        netdev_cache_release(&unit->nu_Nic);
+#endif
         return FALSE;       /* the board did not answer as a DP8390 */
     }
     nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
@@ -1806,7 +1836,7 @@ static VOID netdev_probe_zorro(NetdevDevice *dev)
         }
 
         if (!netdev_add_unit(dev, card, (APTR)cd->cd_BoardAddr,
-                             cd->cd_Rom.er_SerialNumber, NULL))
+                             cd->cd_Rom.er_SerialNumber, NULL, cd))
             continue;
     }
 
@@ -1841,7 +1871,7 @@ static VOID netdev_probe_fixed(NetdevDevice *dev)
         netdev_diag_note(ANXDIAG_FIXED_TRY, i, (ULONG)base);
 
         nd_tracex("anx: fixed base ", (ULONG)base);
-        (VOID)netdev_add_unit(dev, card, base, 0, NULL);
+        (VOID)netdev_add_unit(dev, card, base, 0, NULL, NULL);
     }
 }
 #endif /* NETDEV_HAS_FIXED */
@@ -1865,7 +1895,7 @@ static VOID netdev_probe_pcmcia(NetdevDevice *dev)
         if (base != NULL)
         {
             nd_tracex("anx: pcmcia base ", (ULONG)base);
-            if (!netdev_add_unit(dev, card, base, 0, NULL))
+            if (!netdev_add_unit(dev, card, base, 0, NULL, NULL))
                 netdev_pcmcia_release();
             else
                 netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
@@ -1908,7 +1938,7 @@ static VOID netdev_probe_dtree(NetdevDevice *dev)
         }
 
         nd_tracex("anx: dtree base ", dt.base);
-        (VOID)netdev_add_unit(dev, card, (APTR)dt.base, 0, &dt);
+        (VOID)netdev_add_unit(dev, card, (APTR)dt.base, 0, &dt, NULL);
     }
 }
 #endif /* NETDEV_HAS_DTREE */
@@ -2062,7 +2092,7 @@ static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
         base = netdev_pcmcia_claim(dev, &card);
         if (base != NULL && (wanted == NULL || wanted == card))
         {
-            if (netdev_add_unit(dev, card, base, 0, NULL))
+            if (netdev_add_unit(dev, card, base, 0, NULL, NULL))
             {
                 netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
                 netdev_diag_counts(dev->nd_UnitCount, dev->nd_UnitsDropped);
@@ -2443,6 +2473,11 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
             d->nd_Units[i].nu_Nic.running)
             d->nd_Units[i].nu_Nic.ops->stop(&d->nd_Units[i].nu_Nic);
         Enable();
+
+#if NETDEV_HAS_ZORRO
+        /* After stop, which was the last register access. */
+        netdev_cache_release(&d->nd_Units[i].nu_Nic);
+#endif
 
         /* A bus master's rings, allocated at attach.  After stop: the chip
            has been told to let go of them. */

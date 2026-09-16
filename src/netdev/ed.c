@@ -421,5 +421,6 @@ const struct NetdevNicOps netdev_nic_ed =
     dp8390_setfilter,
     dp8390_intr,
     dp8390_reset,
-    NULL                /* no link to poll: the wire is the link */
+    NULL,               /* no link to poll: the wire is the link */
+    NULL                /* Zorro II boards: the machine keeps the cache off */
 };

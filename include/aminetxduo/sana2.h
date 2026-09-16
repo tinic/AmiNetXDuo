@@ -64,6 +64,9 @@ LONG        ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index);
 VOID        ami_sana2_get_mac(const AmiSana2If *iface, UCHAR mac[AMI_ETH_ADDR_SIZE]);
 ULONG       ami_sana2_get_mtu(const AmiSana2If *iface);
 ULONG       ami_sana2_get_bps(const AmiSana2If *iface);
+/* Bytes the card holds from the wire with nobody draining it, 0 = not
+   stated (aminetxduo/anxs2ext.h, ANXD_CMD_RX_CAPACITY). */
+ULONG       ami_sana2_get_hw_rx_bytes(const AmiSana2If *iface);
 BOOL        ami_sana2_is_online(const AmiSana2If *iface);
 
 /*

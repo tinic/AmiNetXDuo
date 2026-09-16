@@ -195,6 +195,14 @@ VOID bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
                                                ? ami_sana2_get_bps(sana) : 0UL,
                                            rtt_ms);
 
+    /* ... and never more than the card behind this interface can hold from
+       the wire at once (bsdsocket_window.h, ami_bsd_tcp_window_fit).  The
+       segment size is the one the handshake settled: nx_tcp_socket_mss is
+       what the application asked for and stays 0 on an accepted socket. */
+    if (sana != NULL)
+        want = ami_bsd_tcp_window_fit(want, ami_sana2_get_hw_rx_bytes(sana),
+                                      tcp->nx_tcp_socket_connect_mss);
+
     if (want == cur)
         return;
     if (want > cur)

@@ -799,6 +799,7 @@ LONG lance_attach(NetdevNic *nic)
     nic->mem_end   = (LONG)nic->card->mem_size;
     nic->mem_ring  = 0;
     nic->txb_cnt   = LE_TX_RING;
+    nic->rx_capacity = (ULONG)LE_RX_RING * LE_BUFSZ;
     nic->tx_at     = lance_tx_at;
     nic->ring_copy_sum = NULL;  /* no ring_copy either: see below */
     nic->frame_at  = NULL;      /* the receive path hands up the ring buffer
@@ -816,5 +817,6 @@ const struct NetdevNicOps netdev_nic_lance =
     lance_setfilter,
     lance_intr,
     lance_reset,
-    NULL                /* no link to poll: the wire is the link */
+    NULL,               /* no link to poll: the wire is the link */
+    NULL                /* Zorro II boards: the machine keeps the cache off */
 };

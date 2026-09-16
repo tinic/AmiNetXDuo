@@ -117,6 +117,23 @@
  * pays it once with this. */
 #define ANXD_CMD_READ_BATCH     0x4191
 
+/* ANXD_CMD_RX_CAPACITY: "how much can your hardware hold from the wire?"
+ *
+ * Answered in ios2_DataLength: the bytes of received frames the unit's own
+ * receive memory holds, at line rate, while nobody drains it -- the ring
+ * or FIFO after which the next frame is lost.  A card that can pause the
+ * wire instead may answer 0, which means "no limit worth stating", and so
+ * does a driver that cannot say.  Quick, no arguments, io_Error 0;
+ * IOERR_NOCMD from a driver that does not know it.
+ *
+ * What an opener does with it: keep the TCP window it advertises on that
+ * interface inside the number, so a peer on the same LAN cannot put more
+ * on the wire at once than the card can take.  Measured 2026-09-16 on an
+ * A3000 (25 MHz 68030) with an X-Surf 100: a 100,352-byte window against
+ * a 13 KB ring was 42 overruns and 42 chip resets in ten seconds and
+ * 2.8 Mbit/s. */
+#define ANXD_CMD_RX_CAPACITY    0x4192
+
 typedef UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,
                                  UBYTE flags);

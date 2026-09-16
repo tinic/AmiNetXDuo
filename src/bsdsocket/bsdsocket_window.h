@@ -114,6 +114,21 @@
 ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
                                 ULONG rtt_ms);
 
+/*
+ * The window a card can absorb: `hw_bytes` is what the driver holds from
+ * the wire with nobody draining it (ANXD_CMD_RX_CAPACITY, 0 = not stated),
+ * `mss` the segment the peer will send.  A peer on the same LAN puts the
+ * whole window on the wire at once, and on a card that cannot pause the
+ * wire every byte of it has to fit in that memory while the CPU catches up
+ * -- a 25 MHz 68030 behind an X-Surf 100's 13 KB ring drained 100,352
+ * bytes at 2.8 Mbit/s, 42 overruns and 42 chip resets in ten seconds.
+ * Whole frames: the ring stores each segment with its headers in 256-byte
+ * pages, so the number is frames-that-fit times the payload of one,
+ * floored at two segments so the connection keeps moving.  Pure
+ * arithmetic, host-tested.
+ */
+ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss);
+
 #ifndef BSD_TCP_WINDOW_CEILING
 #ifdef AMINETXDUO_TCP_WINDOW_SCALING
 #define BSD_TCP_WINDOW_CEILING  BSD_TCP_WINDOW_MAX

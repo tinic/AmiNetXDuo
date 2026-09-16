@@ -125,6 +125,13 @@ static VOID ne_delay(NetdevNic *nic, ULONG us)
     while (!netdev_wait_done(&w));
 }
 
+/* A few register reads' worth of bus time, for the chip to fill its port. */
+static VOID dp_pause_reads(NetdevNic *nic, UWORD n)
+{
+    while (n-- != 0)
+        (VOID)NIC_GET(nic, ED_P0_CR);
+}
+
 static int ne_memcmp(const UBYTE *a, const UBYTE *b, UWORD n)
 {
     while (n-- != 0)
@@ -676,6 +683,41 @@ static VOID ne2000_probe_wide(NetdevNic *nic)
     nic->bus.dmode = NETDEV_DMODE_LONG;
 }
 
+/*
+ * netdev_cache.c's question: four distinct words written to the card and
+ * read back through the port.  A data cache in the way answers the first
+ * word four times -- one fill, three hits on the same address -- so the
+ * mismatch is at word 1.  Reset first: this runs before detect, on a chip
+ * in whatever state the last driver left it.  Every wait inside is bounded
+ * by a count, so a stale ISR read costs a timeout and not a hang.
+ */
+static const UBYTE ne_coherence_pattern[8] =
+{
+    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88
+};
+
+static BOOL ne2000_coherent(NetdevNic *nic)
+{
+    ULONG  inbuf[2];
+    UBYTE *back  = (UBYTE *)inbuf;
+    UBYTE  saved = nic->bus.dmode;
+
+    ne2000_probe_reset(nic);
+    NIC_PUT(nic, ED_P0_RCR, ED_RCR_MON);
+    NIC_PUT(nic, ED_P0_DCR, ED_DCR_FT1 | ED_DCR_LS | ED_DCR_WTS);
+
+    nic->bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_writemem(nic, ne_coherence_pattern, 16384,
+                    (UWORD)sizeof(ne_coherence_pattern));
+    ne2000_readmem(nic, 16384, back, (UWORD)sizeof(ne_coherence_pattern));
+    nic->bus.dmode = saved;
+
+    NIC_PUT(nic, ED_P0_ISR, 0xff);
+
+    return (BOOL)(ne_memcmp(ne_coherence_pattern, back,
+                            (UWORD)sizeof(ne_coherence_pattern)) == 0);
+}
+
 /* --------------------------------------------------------------- attach --- */
 
 /*
@@ -755,10 +797,33 @@ static LONG ne2000_attach(NetdevNic *nic)
     }
     else if (nic->card->ax88796)
     {
+        UBYTE saved = nic->bus.dmode;
+        UBYTE id[8];
+
+        /*
+         * The node ID, through the 16-bit port whatever the data mode, with
+         * the FIFO threshold the frame path uses.  This read once set DCR to
+         * WTS alone and took the longword window: on a real X-Surf 100 in an
+         * A3000 the window's first longword of the burst came back stale
+         * (A4 A6 A3 AC 28 CD for 28 CD 4C FF F2 A6, the card then on the
+         * wrong address) while the same six bytes through the port, read
+         * after a few register reads' pause, were right every time.  A
+         * 32-bit access is two chip reads with no wait between them, and
+         * with a one-word threshold the second finds nothing ready.  Six
+         * bytes once at attach: the port is the right path.
+         */
         NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
-        NIC_PUT(nic, ED_P0_DCR, ED_DCR_WTS);
-        ne2000_readmem(nic, AX88190_NODEID_OFFSET, nic->factory,
-                       NETDEV_ADDR_LEN);
+        NIC_PUT(nic, ED_P0_DCR, nic->dcr_reg);
+        nic->bus.dmode = NETDEV_DMODE_WORD;
+        ne2000_dma_start(nic, AX88190_NODEID_OFFSET, 8, 0);
+        dp_pause_reads(nic, 8);
+        netdev_bus_rdata(&nic->bus, id, 8);
+        nic->bus.dmode = saved;
+        for (i = 0; i < NETDEV_ADDR_LEN; i++)
+            nic->factory[i] = id[i];
+        netdev_diag_note(ANXDIAG_NE_NODEID_PORT, netdev_diag_card(nic->card),
+                         ((ULONG)id[0] << 24) | ((ULONG)id[1] << 16) |
+                         ((ULONG)id[2] << 8) | id[3]);
     }
     else
     {
@@ -860,5 +925,6 @@ const struct NetdevNicOps netdev_nic_ne2000 =
     dp8390_setfilter,
     dp8390_intr,
     dp8390_reset,
-    NULL                /* no link to poll: the wire is the link */
+    NULL,               /* no link to poll: the wire is the link */
+    ne2000_coherent
 };

@@ -43,6 +43,7 @@ set(NETDEV_CLASSIC_SOURCES
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
     netdev_cis.c        # the PC Card configuration table, host-testable
     netdev_isapnp.c     # the X-Surf's chip, which is behind an ISA PnP bridge
+    netdev_cache.c      # a 68030's data cache kept off a Zorro III board
     dp8390.c            # NetBSD chip core
     ne2000.c            # NetBSD remote-DMA glue
     ed.c                # NetBSD mapped-buffer glue: Hydra, ASDG LAN Rover
@@ -115,8 +116,14 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
             PROPERTIES COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
     endif()
 
-    anxd_add_netdev(anxnet_device   anxnet.device   NETDEV_ROSTER_CLASSIC
-                    ${NETDEV_CLASSIC_SOURCES})
+    # The file and Exec name of the classic image.  A candidate under another
+    # name can be opened beside the installed anxnet.device on a machine
+    # whose only network is that card: an interface file naming
+    # DEVICE=anxtest.device loads it while the shipped one stays resident.
+    set(AMINETXDUO_ANXNET_NAME "anxnet.device" CACHE STRING
+        "File and Exec device name of the classic-card SANA-II image")
+    anxd_add_netdev(anxnet_device   ${AMINETXDUO_ANXNET_NAME}
+                    NETDEV_ROSTER_CLASSIC ${NETDEV_CLASSIC_SOURCES})
     anxd_add_netdev(anxgenet_device anxgenet.device NETDEV_ROSTER_GENET
                     ${NETDEV_GENET_SOURCES})
 endif()
@@ -532,6 +539,24 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_isapnp PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_isapnp COMMAND test_netdev_isapnp)
+
+    # The 68030 data-cache guard for a Zorro III board, its six machine seams
+    # and the core's coherence question supplied by the test.  netdev_cache.c
+    # is #included under NETDEV_CACHE_TEST for the seams.
+    add_executable(test_netdev_cache
+        test/test_netdev_cache.c)
+
+    target_include_directories(test_netdev_cache PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_cache PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_cache COMMAND test_netdev_cache)
 
     # The SANA-II command table itself, 818 lines that nothing compiled
     # off-target until now: test_netdev_beginio below REPLACES netdev_cmds.c

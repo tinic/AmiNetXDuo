@@ -889,6 +889,33 @@ static void fz_selftest(void)
 
     fz_pool_check();
     fz_stop();
+
+    /* Somebody else's service announcement is not cached unless something
+       here is asking: the peer cache stays empty, and the same datagram
+       lands once a browse for the type is open.  The gate is in
+       _nx_mdns_packet_process(), and it is what keeps a 25 MHz 68030 from
+       spending a tenth of itself on a chatty LAN. */
+    fz_case_name = "selftest-passive";
+    fzw_reset(&w);
+    fzm_service_ptr(&w, FZ_LOCAL);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len = w.len;
+    fz_start();
+    fz_delivered = 0;
+    fz_pump(NX_MDNS_PKT_RX_EVENT);
+    if (fz_mdns.nx_mdns_peer_rr_count != 0)
+        fz_fail("an announcement nothing asked for was cached");
+    if (nx_mdns_service_continuous_query(&fz_mdns, NX_NULL,
+                                         (UCHAR *)"_http._tcp",
+                                         NX_NULL) != NX_SUCCESS)
+        fz_fail("the browse would not open");
+    before       = fz_mdns.nx_mdns_peer_rr_count;   /* the query's own record */
+    fz_delivered = 0;
+    fz_pump(NX_MDNS_PKT_RX_EVENT);
+    if (fz_mdns.nx_mdns_peer_rr_count <= before)
+        fz_fail("the announcement a browse was waiting for was not cached");
+    fz_pool_check();
+    fz_stop();
 }
 
 static void fz_setup(void)

@@ -717,6 +717,10 @@ struct AmiSana2If
     UCHAR               mac[AMI_ETH_ADDR_SIZE];
     ULONG               mtu;
     ULONG               bps;
+    /* ANXD_CMD_RX_CAPACITY: the bytes the card holds from the wire with
+       nobody draining it, 0 = not stated.  The TCP window a socket on this
+       interface settles at stays inside it (bsdsocket_window.h). */
+    ULONG               hw_rx_bytes;
 
     /* The interface file's IPREQUESTS, ARPREQUESTS (0 = the plan decides)
        and WRITEREQUESTS (1..AMI_SANA2_TX_SLOTS: how many of tx[] are
@@ -809,6 +813,10 @@ struct AmiSana2If
 /* sana2_copy.c, called by the device in m68k register convention. */
 UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len);
 VOID   ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed);
+
+/* Bytes a known vendor driver's card holds from the wire, by name; 0 for
+   any other (sana2_device.c). */
+ULONG  ami_sana2_known_rx_bytes(const char *device);
 BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
                             register ULONG len  __asm("d0"));

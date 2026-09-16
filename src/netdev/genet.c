@@ -1547,6 +1547,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->tx_reclaim      = ge_txintr;   /* no TX interrupt: retire on ask */
     nic->tx_short_build  = 1;           /* the copy is 0.4 us, the mask 5.5 */
     nic->rx_holds        = 1;           /* the ring keeps frames for a late read */
+    nic->rx_capacity     = (ULONG)GE_RX_RING * GE_BUFSZ;
     nic->isr = genet_isr;
 #ifdef NETDEV_GENET_POLL_ONLY
     /* A bring-up arm: no server at all, the vertical blank is the whole of
@@ -1595,5 +1596,6 @@ const struct NetdevNicOps netdev_nic_genet =
     genet_setfilter,
     genet_intr,
     genet_reset,
-    genet_tick
+    genet_tick,
+    NULL                /* Emu68's 68040 maps the MAC non-cacheable */
 };

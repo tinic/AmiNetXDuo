@@ -475,6 +475,21 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
             "a 10 Mbit LAN socket did not keep the LAN window");
     h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 0UL) == lan,
             "an unknown link on a LAN did not keep the LAN window");
+
+    /* The card's own memory caps whatever settled: an X-Surf 100's 13 KB
+       ring (52 pages) holds eight 1536-byte frames of 1460 payload each;
+       the GENET's 256 KB holds more than the LAN window; a card that says
+       nothing caps nothing; two segments is the floor. */
+    h_check(ami_bsd_tcp_window_fit(lan, 52UL * 256UL, 1460UL) == 8UL * 1460UL,
+            "a 13 KB ring did not cap the window at eight segments");
+    h_check(ami_bsd_tcp_window_fit(lan, 128UL * 2048UL, 1460UL) == lan,
+            "a 256 KB ring capped a window it can hold");
+    h_check(ami_bsd_tcp_window_fit(lan, 0UL, 1460UL) == lan,
+            "an unstated capacity capped the window");
+    h_check(ami_bsd_tcp_window_fit(8192UL, 2048UL, 1460UL) == 2UL * 1460UL,
+            "a one-frame ring did not floor the window at two segments");
+    h_check(ami_bsd_tcp_window_fit(lan, 52UL * 256UL, 0UL) == lan,
+            "a zero MSS was not left alone");
 }
 
 

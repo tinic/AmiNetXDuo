@@ -927,6 +927,12 @@ LONG el3_attach(NetdevNic *nic)
 
         netdev_diag_note(ANXDIAG_EL3_FIFO, netdev_diag_card(nic->card),
                          ((ULONG)tx_free << 16) | pid);
+
+        /* The 3C589's 8 KB packet buffer less the transmit FIFO the card
+           just reported is what receive can hold; what an opener asking
+           ANXD_CMD_RX_CAPACITY is told to keep its window under. */
+        nic->rx_capacity = (tx_free != 0 && tx_free < 8192u)
+                         ? 8192UL - (ULONG)tx_free : 4096UL;
     }
 
     /*
@@ -994,5 +1000,6 @@ const struct NetdevNicOps netdev_nic_el3 =
     el3_setfilter,
     el3_intr,
     el3_reset,
-    NULL                /* no link to poll: the wire is the link */
+    NULL,               /* no link to poll: the wire is the link */
+    NULL                /* a PCMCIA card: no Zorro III, no guard */
 };

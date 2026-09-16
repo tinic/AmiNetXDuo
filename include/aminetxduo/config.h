@@ -190,6 +190,15 @@ typedef struct AmiIfConfig {
     ULONG       ip_requests;
     ULONG       arp_requests;
     ULONG       write_requests;
+    /*
+     * RXBUFFER: the bytes the card holds from the wire before it must drop
+     * a frame -- its receive ring or FIFO.  The TCP window a socket on this
+     * interface advertises stays inside it, so a peer on the LAN cannot put
+     * more on the wire at once than the card can take.  0 is "not said":
+     * the driver is asked (ANXD_CMD_RX_CAPACITY), and a vendor driver whose
+     * hardware is known gets a default by name.  A number here wins.
+     */
+    ULONG       rx_buffer;
     BOOL        up;                          /* bring online at startup          */
     BOOL        configured;                  /* slot in use                      */
     BOOL        down_goes_offline;           /* IFA_DownGoesOffline; default FALSE */

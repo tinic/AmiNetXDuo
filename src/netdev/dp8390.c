@@ -84,6 +84,9 @@ VOID dp8390_config(NetdevNic *nic)
     nic->mem_ring       =
         nic->mem_start + ((LONG)(nic->txb_cnt * ED_TXBUF_SIZE) << ED_PAGE_SHIFT);
     nic->mem_end        = nic->mem_start + nic->mem_size;
+    /* The receive ring, in bytes: what ANXD_CMD_RX_CAPACITY answers. */
+    nic->rx_capacity    =
+        (ULONG)(nic->rec_page_stop - nic->rec_page_start) << ED_PAGE_SHIFT;
 }
 
 /* ----------------------------------------------------------------- halt --- */
@@ -469,6 +472,74 @@ rx_done:;
         goto loop;
 }
 
+/* ------------------------------------------------------------ overwrite --- */
+
+/*
+ * The ring overflowed: the receiver got ahead of the drain and stopped.
+ * This is the DP8390's documented recovery (National AN-874, the sequence
+ * NetBSD's dp8390_intr runs), and what it does NOT do is throw the ring
+ * away.  The reset this replaced discarded every frame already received and
+ * every transmit still queued, and on a machine whose ring overflows once a
+ * burst -- an A3000 (25 MHz 68030) with an X-Surf 100, 42 overwrites in ten
+ * seconds -- each one was a TCP retransmit timeout: 2.8 Mbit/s on a 100
+ * Mbit link.
+ *
+ * Stop the chip and wait for it (ISR.RST, at most DP8390_STOP_WAIT_US, which
+ * is longer than the frame that may be in progress); note whether a
+ * transmit was cut off (in flight and neither PTX nor TXE reported); clear
+ * the remote byte count; loop the transmitter back so nothing goes out
+ * while the ring is drained; start; drain; acknowledge OVW; take the
+ * loopback off; resend the cut-off frame.  The caller holds the interrupt
+ * context, and the wait is the one price -- the same one dp8390_halt()
+ * pays, and paid only on an overwrite.
+ *
+ * TRUE when the drain found the ring pointers corrupt and reset the chip
+ * itself: nothing below the caller's loop is valid then.
+ */
+static BOOL dp8390_overwrite(NetdevNic *nic, UBYTE isr)
+{
+    NetdevWait w;
+    BOOL       resend;
+    ULONG      before = nic->resets;
+
+    NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
+    netdev_wait_begin(&w, DP8390_STOP_WAIT_US, DP8390_HALT_SPINS);
+    do
+    {
+        if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) != 0)
+            break;
+    }
+    while (!netdev_wait_done(&w));
+
+    resend = (BOOL)(nic->txb_inuse != 0 &&
+                    (isr & (ED_ISR_PTX | ED_ISR_TXE)) == 0);
+
+    NIC_PUT(nic, ED_P0_RBCR0, 0);
+    NIC_PUT(nic, ED_P0_RBCR1, 0);
+    NIC_PUT(nic, ED_P0_TCR, ED_TCR_LB0);
+    NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
+
+    dp8390_rint(nic);
+    if (nic->resets != before)
+        return TRUE;
+
+    NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
+    dp_pause(nic, 1);
+    NIC_PUT(nic, ED_P0_ISR, ED_ISR_OVW);
+    NIC_PUT(nic, ED_P0_TCR, 0);
+
+    if (resend)
+    {
+        /* The buffer the stop cut off is the one before txb_next_tx. */
+        nic->txb_next_tx = (UWORD)((nic->txb_next_tx == 0)
+                                   ? nic->txb_cnt - 1u
+                                   : nic->txb_next_tx - 1u);
+        dp8390_xmit(nic);
+    }
+
+    return FALSE;
+}
+
 /* ------------------------------------------------------------ interrupt --- */
 
 /*
@@ -540,7 +611,8 @@ BOOL dp8390_intr(NetdevNic *nic)
             if ((isr & ED_ISR_OVW) != 0)
             {
                 nic->overruns++;
-                dp8390_reset(nic);
+                if (dp8390_overwrite(nic, isr))
+                    return TRUE;        /* reset: the file is fresh */
             }
             else
             {

@@ -842,7 +842,7 @@ static void j_the_advertised_list_is_the_real_one(void)
                  last_wire == (ULONG)S2WERR_GENERIC_ERROR), what);
     }
 
-    expect(n == 24, "the advertised list is the length this test read it at");
+    expect(n == 25, "the advertised list is the length this test read it at");
 }
 
 /* Anything else is what both IC drivers answer, and what a caller probes
@@ -1491,6 +1491,55 @@ static void t_rx_poll(void)
     expect(listed, "ANXD_CMD_RX_POLL is in the supported-command list");
 }
 
+/* ANXD_CMD_RX_CAPACITY answers what the core said at attach, quick, and is
+   advertised. */
+static void v_rx_capacity(void)
+{
+    struct IOSana2Req io;
+    int               listed = 0;
+
+    reset();
+    unit.nu_Nic.rx_capacity = 52UL * 256UL;
+    req(&io, ANXD_CMD_RX_CAPACITY);
+    io.ios2_DataLength = 0;
+    netdev_perform(&opener, &io);
+    expect(last_err == 0, "ANXD_CMD_RX_CAPACITY is answered");
+    expect(io.ios2_DataLength == 52UL * 256UL,
+           "ANXD_CMD_RX_CAPACITY reports the core's ring bytes");
+
+    unit.nu_Nic.rx_capacity = 0;
+    req(&io, ANXD_CMD_RX_CAPACITY);
+    io.ios2_DataLength = 1;
+    netdev_perform(&opener, &io);
+    expect(io.ios2_DataLength == 0,
+           "a core that cannot say answers 0");
+
+    {
+        struct IOStdReq   std;
+        struct
+        {
+            ULONG  DevQueryFormat;
+            ULONG  SizeAvailable;
+            UWORD  DeviceType;
+            UWORD  DeviceSubType;
+            UWORD *SupportedCommands;
+        } answer;
+        const UWORD *cmds;
+
+        reset();
+        memset(&std, 0, sizeof(std));
+        memset(&answer, 0, sizeof(answer));
+        std.io_Command = NSCMD_DEVICEQUERY;
+        std.io_Data    = &answer;
+        std.io_Length  = sizeof(answer);
+        netdev_perform(&opener, (struct IOSana2Req *)&std);
+        for (cmds = answer.SupportedCommands; cmds != NULL && *cmds != 0; cmds++)
+            if (*cmds == ANXD_CMD_RX_CAPACITY)
+                listed = 1;
+    }
+    expect(listed, "ANXD_CMD_RX_CAPACITY is in the supported-command list");
+}
+
 static void s_no_opener(void)
 {
     struct IOSana2Req io;
@@ -1527,6 +1576,7 @@ int main(void)
     s_no_opener();
     t_rx_poll();
     u_read_batch();
+    v_rx_capacity();
 
     if (failures != 0)
     {

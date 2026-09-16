@@ -95,6 +95,14 @@ struct NetdevNicOps
      * that has nothing to say between interrupts, which is all the others.
      */
     BOOL  (*tick)(NetdevNic *nic);
+    /*
+     * Do reads of this chip return what the chip holds, or a stale copy?
+     * Asked before attach, on a chip that may be in any state, by
+     * netdev_cache.c on a 68030 driving a Zorro III board: write a few words
+     * to the card and read them back through the port.  NULL for a core
+     * that cannot be asked; such a core is not guarded.
+     */
+    BOOL  (*coherent)(NetdevNic *nic);
 };
 
 struct NetdevNic
@@ -179,6 +187,13 @@ struct NetdevNic
      * read the moment it has it, as it always did.  Measured on the
      * emulated X-Surf 100: batched re-posts 24-26 Mbit/s, immediate 39-41.
      */
+    /*
+     * Bytes of received frames the card's own memory holds before it must
+     * drop one: the DP8390 ring, the LANCE's buffers, the EtherLink III's
+     * FIFO, the GENET's ring.  Set at attach, answered to
+     * ANXD_CMD_RX_CAPACITY; 0 when the core cannot say.
+     */
+    ULONG               rx_capacity;
     UBYTE               rx_holds;
 
     /* Even, and stated rather than inherited from what precedes them:
@@ -221,6 +236,12 @@ struct NetdevNic
     UWORD               txb_cnt;
     ULONG               serial;     /* the board's autoconfig serial number */
     UWORD               txb_inuse;
+
+    /* netdev_cache.c: how the 68030's data cache is kept off this board,
+       NETDEV_CACHE_*, and what to put back when it is let go. */
+    UBYTE               cache_guard;
+    UBYTE               cache_why;      /* NETDEV_CACHE_WHY_* */
+    ULONG               cache_saved;
 
     /*
      * Hardware transmit completions, successful or not.  Unlike tx_packets this

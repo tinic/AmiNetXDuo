@@ -58,7 +58,7 @@ static UWORD netdev_supported[] =
     S2_ONEVENT, S2_READORPHAN, S2_ONLINE, S2_OFFLINE,
     S2_ADDMULTICASTADDRESSES, S2_DELMULTICASTADDRESSES,
     NSCMD_DEVICEQUERY,
-    ANXD_CMD_RX_POLL, ANXD_CMD_READ_BATCH,
+    ANXD_CMD_RX_POLL, ANXD_CMD_READ_BATCH, ANXD_CMD_RX_CAPACITY,
     0
 };
 
@@ -111,6 +111,7 @@ static const char netdev_stat_drx[]   = "Direct receive fills";
 static const char netdev_stat_tick[]  = "Vertical-blank interrupt polls";
 static const char netdev_stat_kick[]  = "PCMCIA deaf-receiver resets";
 static const char netdev_stat_txerr[] = "Transmit errors";
+static const char netdev_stat_ints[]  = "Interrupts claimed";
 static const char netdev_stat_poll[]  = "Opener polls";
 static const char netdev_stat_pollh[] = "Opener polls that found frames held";
 static const char netdev_stat_ver[]   = "Direct receive frames verified";
@@ -222,6 +223,12 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
     /* Last so every previously published numeric Type, including a core's
        private records, stays where it was. */
     STAT(netdev_stat_ver, unit->nu_Nic.rx_verified);
+    /* Interrupts the server claimed: the counter the vertical-blank poll is
+       the inverse of.  Without it "the card interrupts" and "the card is
+       being polled and nobody noticed" read the same in a field report --
+       an A3000 with an X-Surf 100 received 2.8 Mbit/s on the poll for
+       exactly that reason. */
+    STAT(netdev_stat_ints, unit->nu_IntSeen);
 
 #undef STAT
 
@@ -496,6 +503,13 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         netdev_reply(io, 0, 0);
         return;
     }
+
+    case ANXD_CMD_RX_CAPACITY:
+        /* What the card holds from the wire with nobody draining it
+           (aminetxduo/anxs2ext.h): the core said at attach. */
+        io->ios2_DataLength = unit->nu_Nic.rx_capacity;
+        netdev_reply(io, 0, 0);
+        return;
 
     case ANXD_CMD_RX_POLL:
         /*

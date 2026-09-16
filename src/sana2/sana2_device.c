@@ -83,6 +83,24 @@ static VOID ami_str_copy(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
+/* The same, ignoring case: a device name is a file name. */
+static BOOL ami_str_iequal(const char *a, const char *b)
+{
+    while (*a != '\0' && *b != '\0')
+    {
+        char x = *a++;
+        char y = *b++;
+
+        if (x >= 'A' && x <= 'Z')
+            x = (char)(x + ('a' - 'A'));
+        if (y >= 'A' && y <= 'Z')
+            y = (char)(y + ('a' - 'A'));
+        if (x != y)
+            return FALSE;
+    }
+    return (BOOL)(*a == *b);
+}
+
 static BOOL ami_str_equal(const char *a, const char *b)
 {
     ULONG i = 0;
@@ -1022,6 +1040,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
        may still refuse it (an older anxnet.device), once. */
     iface->rx_poll_ok  = (UBYTE)(status == 0 && iface->link_hdr_ok);
     iface->rx_batch_ok = iface->rx_poll_ok;
+    iface->hw_rx_bytes = 0;
     /* Same door: IOF_QUICK on CMD_WRITE is Exec's contract, but only a driver
        whose BeginIO() has been read is offered it (sana2_tx.c). */
     iface->tx_quick_ok = iface->rx_poll_ok;
@@ -1059,6 +1078,29 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
             *err = AMI_NET_ERR_DEVBAD;
         return NULL;
     }
+
+    /*
+     * How much the card holds from the wire.  The file's RXBUFFER wins;
+     * then a driver that answered our tags is asked (the same rule as
+     * ANXD_CMD_RX_POLL: a third-party driver is handed nothing it did not
+     * ask for); then a vendor driver whose hardware is known gets its number
+     * by name.  0 is no cap.
+     */
+    if (cfg->rx_buffer != 0)
+        iface->hw_rx_bytes = cfg->rx_buffer;
+    else if (iface->link_hdr_ok)
+    {
+        struct IOSana2Req req = iface->templ;
+
+        req.ios2_DataLength = 0;
+        if (ami_sana2_command(iface, &req, ANXD_CMD_RX_CAPACITY) == 0)
+            iface->hw_rx_bytes = req.ios2_DataLength;
+    }
+    else
+        iface->hw_rx_bytes = ami_sana2_known_rx_bytes(iface->device);
+    AMI_INFO("sana2: %s unit %ld holds %lu bytes from the wire",
+             iface->device, (long)iface->unit,
+             (unsigned long)iface->hw_rx_bytes);
 
     /*
      * MTU= from the interface configuration, applied after the driver has been
@@ -1220,6 +1262,69 @@ ULONG ami_sana2_get_mtu(const AmiSana2If *iface)
 ULONG ami_sana2_get_bps(const AmiSana2If *iface)
 {
     return (iface != NULL) ? iface->bps : 0;
+}
+
+ULONG ami_sana2_get_hw_rx_bytes(const AmiSana2If *iface)
+{
+    return (iface != NULL) ? iface->hw_rx_bytes : 0;
+}
+
+/*
+ * What a vendor driver's card holds from the wire, by the driver's name,
+ * for the drivers whose hardware is known: they cannot be asked.  The
+ * basename of a path, case-insensitive, so DEVS:Networks/X-Surf-100.device
+ * and x-surf-100.device are the same driver.
+ *
+ *   x-surf-100, x-surf, cnet, ariadne2: an NE2000-class chip with 16 KB of
+ *     SRAM, two 1.5 KB transmit buffers off the top, 52 pages of ring.
+ *   a2065, ariadne: a LANCE with 32 KB of SRAM; the classic drivers give
+ *     the receive side sixteen 1.5 KB buffers.
+ *   3c589, etherlink3: the 3C589's 8 KB packet buffer less its 3 KB
+ *     transmit FIFO.
+ *
+ * Anything else is 0: no cap, which is what every driver got before.
+ */
+ULONG ami_sana2_known_rx_bytes(const char *device)
+{
+    static const struct
+    {
+        const char *name;
+        ULONG       bytes;
+    }
+    known[] =
+    {
+        { "x-surf-100.device", 52UL * 256UL },
+        { "xsurf100.device",   52UL * 256UL },
+        { "x-surf.device",     52UL * 256UL },
+        { "xsurf.device",      52UL * 256UL },
+        { "cnet.device",       52UL * 256UL },
+        { "ariadne2.device",   52UL * 256UL },
+        { "a2065.device",      16UL * 1536UL },
+        { "ariadne.device",    16UL * 1536UL },
+        { "3c589.device",      5UL * 1024UL },
+        { "etherlink3.device", 5UL * 1024UL },
+    };
+    const char *base;
+    const char *p;
+    UWORD       i;
+
+    if (device == NULL)
+        return 0;
+
+    base = device;
+    for (p = device; *p != '\0'; p++)
+    {
+        if (*p == '/' || *p == ':')
+            base = p + 1;
+    }
+
+    for (i = 0; i < (UWORD)(sizeof(known) / sizeof(known[0])); i++)
+    {
+        if (ami_str_iequal(base, known[i].name))
+            return known[i].bytes;
+    }
+
+    return 0;
 }
 
 BOOL ami_sana2_is_online(const AmiSana2If *iface)

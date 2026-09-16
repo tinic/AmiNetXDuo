@@ -405,6 +405,21 @@
              and micro use 8 to save 2,832 bytes per attached
              interface. CheckNetConfig reports the applicable limit.
 
+  @{b}RXBUFFER@{ub}
+             The bytes the card holds from the wire before it has to
+             drop a frame: its receive ring or FIFO. The TCP window a
+             socket on this interface advertises stays inside it, so
+             a peer on the same network cannot put more on the wire
+             at once than the card can take. Leave it out and
+             anxnet.device and anxgenet.device say their own number,
+             and the vendor drivers whose hardware is known are
+             assumed: x-surf-100, x-surf, cnet and ariadne2 13312
+             (16 KB SRAM less the transmit buffers), a2065 and
+             ariadne 24576, 3c589 and etherlink3 5120. Measured on an
+             A3000 (25 MHz 68030) with an X-Surf 100: without it the
+             ring overflowed 42 times in ten seconds and the card
+             received 2.8 Mbit/s.
+
   Interface files written for Roadshow usually carry other keywords:
   COPYMODE, ALIAS, FILTER, METRIC, PRIORITY, LEASE, DHCPUNICAST,
   LINKSTATUSCOMMAND, MULTICAST, POINTTOPOINT, DESTINATION and
@@ -1732,6 +1747,16 @@
   wanted.
   xsurf500 has never been run on the hardware it is written for. A
   report of it working, or not working, is wanted.
+
+  xsurf100 runs in Zorro II or Zorro III mode as the card's jumper says.
+  In Zorro III mode on a 68030 the machine caches the card's registers,
+  so the driver marks the board's 16 MB block cache-inhibited through a
+  free transparent-translation register (TT0 or TT1) before it touches
+  the chip; if both are taken, or memory shares the block, it turns the
+  data cache off for as long as it holds the board. CheckNetDevice says
+  which. Measured on an A3000 (25 MHz 68030, Buster -06): iperf 3.9
+  Mbit/s in and 3.0 out in Zorro III, 3.5 and 2.8 in Zorro II; the CPU
+  is the limit on that machine either way.
 
   xsurf carries its chip behind an ISA Plug and Play bridge, and the
   driver configures it at boot. That sequence has been run against an

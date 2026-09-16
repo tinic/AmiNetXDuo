@@ -77,6 +77,17 @@ struct NetdevBus
     UBYTE           getodd;
 
     const struct NetdevBusOps *ops;
+
+    /*
+     * Where each of the 32 register indices is, settled once by
+     * netdev_bus_setup() and its two follow-ups from regmap, odd, nic and
+     * shift above.  Those three tests used to run on every register access
+     * and the compiler kept them out of line: at -Os netdev_bus_at() was a
+     * call from netdev_bus_r8(), itself a call, and the pair cost a 25 MHz
+     * 68030 4.8% of a transfer (A3000, X-Surf 100, sampled).  A table lookup
+     * is one indexed move at each site and inlines everywhere.
+     */
+    volatile UBYTE *at[32];
 };
 
 /* The stride-driven implementation every card in the family uses today. */
@@ -131,17 +142,11 @@ extern ULONG netdev_time_regs;      /* scalar register accesses, per report */
 #define NETDEV_BUS_COUNT()  ((VOID)0)
 #endif
 
-/* Where register `reg` is.  One predictable test for the cards that need the
-   split, and NULL for every board whose file is contiguous. */
+/* Where register `reg` is: the table, filled by netdev_bus_setup() and
+   kept right by netdev_bus_split() and netdev_bus_regmap(). */
 static inline volatile UBYTE *netdev_bus_at(const NetdevBus *bus, UWORD reg)
 {
-    if (bus->regmap != NULL)
-        return &bus->nic[bus->regmap[reg & 31u]];
-
-    if (bus->odd != NULL && (reg & 1) != 0)
-        return &bus->odd[(ULONG)(reg - 1) << bus->shift];
-
-    return &bus->nic[(ULONG)reg << bus->shift];
+    return bus->at[reg & 31u];
 }
 
 /*

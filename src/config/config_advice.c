@@ -116,6 +116,10 @@ static const char *const ami_cfg_advice_text[] =
     "WRITEREQUESTS is how many packets are handed to the driver at "
     "once, 1 to " AMI_CFG_STRINGIFY(AMI_CFG_WRITEREQUESTS_MAX)
     ".  Leave it out for " AMI_CFG_STRINGIFY(AMI_CFG_WRITEREQUESTS_MAX) ".",
+    "RXBUFFER is the bytes the card holds from the wire before it dr"
+    "ops a frame: its receive ring or FIFO, 13312 on an X-Surf.  The"
+    " TCP window stays inside it.  Leave it out and the driver is as"
+    "ked, or a known one is assumed.",
 };
 
 const char *ami_cfg_advice(UWORD code)

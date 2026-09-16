@@ -23,6 +23,42 @@ version at the top when it merges.
   294 Mbit/s receive in it. The byte target is still checked per transfer
   and a paced UDP sender still reads it per datagram
 
+- **The X-Surf 100 on a real A3000 (25 MHz 68030).** A TCP window of
+  100,352 bytes into a 13 KB receive ring: 42 overruns and 42 chip resets in
+  ten seconds, 2.8 Mbit/s received. Now the driver answers what its card
+  holds from the wire (`ANXD_CMD_RX_CAPACITY`) and the socket's window stays
+  inside it, 8 segments on that card; the overwrite recovery is the DP8390
+  datasheet's, which keeps the ring and resends the cut-off transmit, not a
+  chip reset that threw away every frame and every queued write. Vendor
+  drivers whose hardware is known are capped by name, and `RXBUFFER=` in
+  the interface file sets the number by hand. `NetDevStats` shows
+  "Interrupts claimed" beside the vertical-blank polls. The X-Surf 100's
+  station address is read through the 16-bit port: through the 32-bit
+  window a warm card answered A4:A6:A3:AC:28:CD for 28:CD:4C:FF:F2:A6, and
+  came up on another address. Then the profile of that machine: the mDNS
+  thread was 9% of the CPU during a transfer, decoding and caching every
+  other machine's announcements on the LAN, and now caches a response only
+  while a lookup or browse is open or the record carries one of this
+  machine's own names; the window fit applied to an accepted socket at last
+  (it read the segment size from a field only a connecting socket fills);
+  a ring-sized window announces every two segments instead of parking the
+  sender on the delayed-ACK timer at every edge; and the driver's register
+  accesses are one table lookup each where they were two calls. Measured
+  with iperf on that A3000: received 2.6 -> 3.5 Mbit/s, sent 1.7-2.3 ->
+  2.8, two overruns in a minute of transfers where there were 38 in five
+  seconds. The machine's limit is now the CPU: of every 3.9 ms a segment
+  costs, 0.6 is the Zorro II port copy and the rest is the stack and the
+  copy to the application. And Zorro III mode on a 68030, where the
+  card had failed its buffer test ("$0002: $49 written, $54 read back":
+  the port's first word served again from the data cache): before
+  attach the driver asks the chip whether reads are honest and, if not,
+  marks the board's 16 MB block cache-inhibited through a free
+  transparent-translation register, or turns the data cache off for as
+  long as it holds the board when neither is free or memory shares the
+  block; CheckNetDevice reports which. On that A3000 (Buster -06) Zorro
+  III now attaches through TT0 with the data cache on: 3.9 Mbit/s in and
+  3.0 out, from 3.5 and 2.8 in Zorro II
+
 ## 0.28.0
 
 - **Receive offload (GRO).** `anxgenet.device` verifies each IPv4 and

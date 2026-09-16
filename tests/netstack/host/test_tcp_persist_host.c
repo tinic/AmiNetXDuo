@@ -527,6 +527,40 @@ static void h_the_half_buffer_step_still_fires(void)
            (unsigned int)h_acks, (unsigned long)h_last_window);
 }
 
+/*
+ * A window cut to a card's receive ring announces every two segments: the
+ * half-buffer step is for windows the pool sizes, and at eight segments it
+ * left the sender parked on the delayed-ACK timer at every window edge.
+ */
+static void i_a_ring_sized_window_steps_by_two_segments(void)
+{
+    ULONG step;
+
+    h_fixture();
+
+    h_sock.nx_tcp_socket_rx_window_default = H_MSS * 8UL;
+    step = _nx_tcp_socket_window_update_step(&h_sock);
+    h_check_eq(step, H_MSS * 2UL,
+               "an eight-segment window did not step by two segments");
+
+    h_sock.nx_tcp_socket_rx_window_default = H_MSS * 2UL;
+    step = _nx_tcp_socket_window_update_step(&h_sock);
+    h_check_eq(step, H_MSS,
+               "a two-segment window lost its half-buffer step");
+
+    h_sock.nx_tcp_socket_rx_window_default = H_MSS * 17UL;
+    step = _nx_tcp_socket_window_update_step(&h_sock);
+    h_check_eq(step, (H_MSS * 17UL) / 2UL,
+               "a seventeen-segment window was stepped like a ring");
+
+    h_sock.nx_tcp_socket_rx_window_default = 100352UL;
+    step = _nx_tcp_socket_window_update_step(&h_sock);
+    h_check_eq(step, 50176UL, "the LAN window's half-buffer step moved");
+
+    printf("  ring-sized window   steps %lu at 8 segments\n",
+           (unsigned long)(H_MSS * 2UL));
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -549,6 +583,7 @@ int main(void)
     f_one_segment_does_not_escape();
     g_a_full_last_advertisement_does_not_escape();
     h_the_half_buffer_step_still_fires();
+    i_a_ring_sized_window_steps_by_two_segments();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

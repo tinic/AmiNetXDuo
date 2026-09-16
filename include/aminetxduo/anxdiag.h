@@ -91,6 +91,16 @@ extern "C" {
 #define ANXDIAG_GENET_IRQ      93   /* the GIC interrupt number, 0 = none    */
 #define ANXDIAG_GENET_PHY      94   /* PHY ID registers 2:3, ffffffff = no
                                        answer on the MDIO bus                 */
+#define ANXDIAG_NE_NODEID_PORT 97   /* AX88796: node ID bytes 0..3, through
+                                       the 16-bit port (ne2000.c says why)   */
+#define ANXDIAG_CACHE_GUARD    98   /* a Zorro III board on a 68030: how the
+                                       data cache is kept off it, 0 not
+                                       needed, 1 TT0, 2 TT1, 3 the cache is
+                                       off, 4 nothing made it coherent      */
+#define ANXDIAG_CACHE_WHY      99   /* why the transparent-translation
+                                       registers were passed over: bit 0 RAM
+                                       in the block, 1/2 TT0/TT1 in use,
+                                       3/4 TT0/TT1 set and no help          */
 #define ANXDIAG_GENET_DMA      95   /* RX_DMA_CTRL as found at attach: bit 0
                                        set = the previous driver's receive
                                        DMA was still running into its old

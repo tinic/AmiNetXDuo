@@ -310,6 +310,33 @@ static VOID cnd_step(const AnxDiagStep *st)
             say("  GIC interrupt %lu (SPI %lu), through gic400.library.\n",
                 v, v - 32UL);
         return;
+    case ANXDIAG_NE_NODEID_PORT:
+        say("  AX88796 node ID, first four bytes, through the 16-bit port:\n"
+            "  $%08lx.\n", v);
+        return;
+    case ANXDIAG_CACHE_GUARD:
+        {
+            static const char *const how[] =
+            {
+                "coherent as found, nothing done",
+                "TT0 marks the board's block cache-inhibited",
+                "TT1 marks the board's block cache-inhibited",
+                "the data cache is OFF while the driver holds the board",
+                "NOTHING made it coherent; attach will say what it saw"
+            };
+
+            say("  Zorro III board on a 68030, data cache: %s.\n",
+                (LONG)((v < 5UL) ? how[v] : "?"));
+        }
+        return;
+    case ANXDIAG_CACHE_WHY:
+        say("  The transparent-translation registers were passed over:%s%s%s%s%s.\n",
+            (LONG)((v & 0x01UL) ? " Exec memory shares the 16 MB block" : ""),
+            (LONG)((v & 0x02UL) ? " TT0 is in use" : ""),
+            (LONG)((v & 0x04UL) ? " TT1 is in use" : ""),
+            (LONG)((v & 0x08UL) ? " TT0 set did not help" : ""),
+            (LONG)((v & 0x10UL) ? " TT1 set did not help" : ""));
+        return;
     case ANXDIAG_GENET_DMA:
         say("  Receive DMA control read $%08lx at attach: the engine was %s\n"
             "  across the reboot.\n", v,

@@ -323,9 +323,30 @@ ULONG netdev_bus_rdata_sum(const NetdevBus *bus, UBYTE *dst, UWORD len)
 const struct NetdevBusOps netdev_bus_generic = { bus_rdata, bus_wdata };
 
 /* The odd-register window, for a bus whose register file is not contiguous. */
+/*
+ * The register table: the scatter map when there is one, else the odd
+ * window for odd indices when there is one, else the stride.  Run again
+ * after each of the three setup calls, since each changes an input.
+ */
+static VOID bus_fill_at(NetdevBus *bus)
+{
+    UWORD reg;
+
+    for (reg = 0; reg < 32u; reg++)
+    {
+        if (bus->regmap != NULL)
+            bus->at[reg] = &bus->nic[bus->regmap[reg]];
+        else if (bus->odd != NULL && (reg & 1) != 0)
+            bus->at[reg] = &bus->odd[(ULONG)(reg - 1) << bus->shift];
+        else
+            bus->at[reg] = &bus->nic[(ULONG)reg << bus->shift];
+    }
+}
+
 VOID netdev_bus_split(NetdevBus *bus, APTR odd)
 {
     bus->odd = (volatile UBYTE *)odd;
+    bus_fill_at(bus);
 }
 
 /*
@@ -337,6 +358,7 @@ VOID netdev_bus_regmap(NetdevBus *bus, const ULONG *map, APTR data_port)
 {
     bus->regmap = map;
     bus->asic   = (volatile UBYTE *)data_port;
+    bus_fill_at(bus);
 }
 
 /*
@@ -373,4 +395,5 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
     bus->dmode  = NETDEV_DMODE_WORD;
     bus->getodd = 0;            /* ne2000_detect() turns it on if it is needed */
     bus->ops    = &netdev_bus_generic;
+    bus_fill_at(bus);
 }

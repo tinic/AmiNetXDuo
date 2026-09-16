@@ -40,7 +40,8 @@ typedef enum
     IF_KEY_HARDWAREADDRESS,
     IF_KEY_IPREQUESTS,
     IF_KEY_ARPREQUESTS,
-    IF_KEY_WRITEREQUESTS
+    IF_KEY_WRITEREQUESTS,
+    IF_KEY_RXBUFFER
 } IfKey;
 
 static const struct IfKeyword
@@ -71,6 +72,7 @@ ami_if_keywords[] =
     { "iprequests",         IF_KEY_IPREQUESTS        },
     { "arprequests",        IF_KEY_ARPREQUESTS       },
     { "writerequests",      IF_KEY_WRITEREQUESTS     },
+    { "rxbuffer",           IF_KEY_RXBUFFER          },
 
     /* IPv6 keywords: the IPv4 keyword plus a "6".  In the floor build (no
        AMINETXDUO_IPV6) they must stay RECOGNISED and be ignored, so the same
@@ -723,6 +725,19 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     AMI_WARN("config: %s: bad MTU '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MTU", value, AMI_CFG_ADVICE_MTU_IS_A_PLAIN);
+                }
+                break;
+
+            case IF_KEY_RXBUFFER:
+                if (ami_cfg_parse_ulong(value, &n))
+                {
+                    out->rx_buffer = n;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad RXBUFFER '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "RXBUFFER",
+                                     value, AMI_CFG_ADVICE_RXBUFFER_IS_THE);
                 }
                 break;
 

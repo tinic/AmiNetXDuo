@@ -50,6 +50,27 @@ ULONG ami_bsd_tcp_window_max_for(ULONG pool_packets, ULONG payload,
     return (max < lan) ? lan : max;
 }
 
+ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss)
+{
+    ULONG frame;
+    ULONG frames;
+    ULONG fit;
+
+    if (hw_bytes == 0UL || mss == 0UL)
+        return window;
+
+    /* A segment on the wire: MSS + 40 of TCP/IP + 14 of Ethernet, rounded
+       up to the 256-byte page a DP8390 ring stores it in, plus that ring's
+       4-byte header.  The GENET's 2 KB buffers round the same way. */
+    frame  = (mss + 40UL + 14UL + 4UL + 255UL) & ~255UL;
+    frames = hw_bytes / frame;
+    if (frames < 2UL)
+        frames = 2UL;
+    fit = frames * mss;
+
+    return (fit < window) ? fit : window;
+}
+
 ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
                                 ULONG rtt_ms)
 {
