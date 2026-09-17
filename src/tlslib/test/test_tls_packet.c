@@ -70,19 +70,35 @@ static void fixture_close(Fixture *f)
 
 static void test_count(void)
 {
-    printf("tls_packet: the block count follows TLSA_RecordBuffer\n");
+    ULONG cipher = ((ULONG)NX_SECURE_TLS_MAX_CIPHERTEXT_LENGTH_1_3 +
+                    TLS_MIN_SEGMENT_FILL - 1UL) / TLS_MIN_SEGMENT_FILL;
+    ULONG plain  = ((ULONG)NX_SECURE_TLS_MAX_PLAINTEXT_LENGTH +
+                    TLS_PACKET_PAYLOAD - 1UL) / TLS_PACKET_PAYLOAD;
 
-    /* The default record buffer is TLS_DEFAULT_RECORD_BUFFER, and a decrypted
-       record that big is a chain of ceil(10240/2560) blocks. */
+    printf("tls_packet: the block count holds a full record both ways\n");
+
+    /* nx_secure holds a whole incoming record's ciphertext AND its decrypted
+       plaintext in this pool at once, and a server picks its own record size
+       up to nx_secure's ceiling.  The pool is sized for one max ciphertext
+       record (fragmented at the MSS) plus one max plaintext record plus the
+       spares -- not for the handshake reassembly buffer, which does not bound
+       an application record.  Sizing it for record_bytes alone wedged every
+       download from a 16 KB-record server. */
     CHECK(tls_packet_pool_count(TLS_DEFAULT_RECORD_BUFFER) ==
-          (TLS_DEFAULT_RECORD_BUFFER / TLS_PACKET_PAYLOAD) + TLS_PACKET_SPARE);
+          cipher + plain + TLS_PACKET_SPARE);
 
-    /* Not a multiple, and not zero: both round up to a whole block. */
-    CHECK(tls_packet_pool_count(TLS_PACKET_PAYLOAD + 1) == 2 + TLS_PACKET_SPARE);
-    CHECK(tls_packet_pool_count(0) == 1 + TLS_PACKET_SPARE);
+    /* Below the app-data ceiling the count does not move: a small record
+       buffer cannot shrink the pool below what one 16 KB record needs. */
+    CHECK(tls_packet_pool_count(TLS_PACKET_PAYLOAD + 1) ==
+          cipher + plain + TLS_PACKET_SPARE);
+    CHECK(tls_packet_pool_count(0) == cipher + plain + TLS_PACKET_SPARE);
+    CHECK(tls_packet_pool_count(4096) == tls_packet_pool_count(16384));
 
-    /* A caller that raises the ceiling pays for the chain it just allowed. */
-    CHECK(tls_packet_pool_count(16384) > tls_packet_pool_count(4096));
+    /* A caller that raises the record buffer past that ceiling -- a very large
+       certificate flight -- pays for the longer ciphertext chain it allowed. */
+    CHECK(tls_packet_pool_count((ULONG)NX_SECURE_TLS_MAX_CIPHERTEXT_LENGTH_1_3
+                                + 4UL * TLS_PACKET_PAYLOAD) >
+          tls_packet_pool_count(TLS_DEFAULT_RECORD_BUFFER));
 }
 
 /* ------------------------------------------------------------- allocate --- */

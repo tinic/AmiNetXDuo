@@ -102,6 +102,22 @@ version at the top when it merges.
   iperf out: 275 -> 323-333 Mbit/s to one peer, 283 -> 357 to another; in
   unchanged, 0 transmit errors over a 25 s bidirectional run.
   `anxnet.device` is untouched
+- `https://` downloads from a server that sends 16 KB TLS records -- nginx's
+  and OpenSSL's default -- completed at last. `tls.library`'s packet pool held
+  8 blocks, sized for one 10 KB handshake flight; but nx_secure keeps every
+  block of an incoming record queued until the record is whole
+  (`nx_secure_record_queue_header`) and then allocates a SECOND chain from the
+  same pool for the decrypted plaintext, so a 16 KB record needs ~7 blocks of
+  ciphertext and ~7 of plaintext at once. The pool ran dry mid-record,
+  `_nx_packet_allocate` blocked with nothing to free, the receive window
+  pinned at zero, and the transfer was RST. On a real A3000 (X-Surf 100) every
+  such download died at ~128 KB with zero body bytes; a 512 KB file now
+  arrives byte-perfect. The pool is sized for one maximum record each way, the
+  ciphertext side counted at the MSS since a window we have driven small draws
+  one segment per block. Only servers using small records (many CDNs) ever
+  worked before. `tls.library` is unchanged in size; the per-connection pool
+  grows from about 21 KB to 74 KB, freed at `TLSClose`. `tools/ci.sh` runs the
+  host `tls_packet_pool` test, which now pins the full-record contract
 
 - `bsdsocket.library`'s `memcpy()` is net68k's `movem.l` copy again. Every
   `-flto` build up to 0.28.3 linked libc's instead: GCC emits the `memcpy`

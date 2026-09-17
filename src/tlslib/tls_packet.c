@@ -35,15 +35,46 @@
 #define TLS_PKT_ALIGN(n) \
     (((n) + (NX_PACKET_ALIGNMENT - 1UL)) & ~(NX_PACKET_ALIGNMENT - 1UL))
 
-/* See tls_internal.h for why the count follows TLSA_RecordBuffer. */
+/*
+ * The pool holds a whole record's fragments at once, in BOTH forms.
+ *
+ * nx_secure queues every packet of an incoming record in
+ * nx_secure_record_queue_header until the record is complete
+ * (nx_secure_tls_process_record returns NX_CONTINUE until then), and then
+ * _nx_secure_tls_record_payload_decrypt allocates a SECOND chain from this
+ * same pool for the decrypted plaintext (nx_packet_data_append).  So the peak
+ * is one record's ciphertext plus one record's plaintext, held together.
+ *
+ * A server picks its own record size and we advertise no record_size_limit,
+ * so the ceiling is nx_secure's own: 16640 bytes of TLS 1.3 ciphertext and
+ * 16384 of plaintext.  The ciphertext side is bounded by TCP FRAGMENTATION,
+ * not by the payload: a bulk transfer drives our window small and the peer
+ * then sends one segment per round trip, so a record spans
+ * ceil(max / TLS_MIN_SEGMENT_FILL) packets.  The plaintext side is copied by
+ * nx_packet_data_append(), which fills each packet, so it is ceil(max /
+ * payload).
+ *
+ * The old count -- ceil(record_bytes / payload) + spare -- sized the pool for
+ * one 10 KB flight and nothing for the decrypt.  It fit only the <=2560-byte
+ * records the test server (and, in practice, latency-tuned CDNs) send; against
+ * a server using 16 KB records, which nginx and OpenSSL default to, the pool
+ * ran dry mid-record and _nx_packet_allocate blocked with the receive window
+ * at zero.  Measured on a real A3000: every such download RST at ~128 KB with
+ * zero body bytes delivered.  record_bytes is the handshake reassembly buffer
+ * and does not bound an application record, but a caller may raise it past the
+ * app-data ceiling for a large certificate flight, so it still floors the
+ * ciphertext side.
+ */
 ULONG tls_packet_pool_count(ULONG record_bytes)
 {
-    ULONG chain = (record_bytes + TLS_PACKET_PAYLOAD - 1UL) / TLS_PACKET_PAYLOAD;
+    ULONG cipher_bytes = (record_bytes > (ULONG)NX_SECURE_TLS_MAX_CIPHERTEXT_LENGTH_1_3)
+                         ? record_bytes
+                         : (ULONG)NX_SECURE_TLS_MAX_CIPHERTEXT_LENGTH_1_3;
+    ULONG cipher = (cipher_bytes + TLS_MIN_SEGMENT_FILL - 1UL) / TLS_MIN_SEGMENT_FILL;
+    ULONG plain  = ((ULONG)NX_SECURE_TLS_MAX_PLAINTEXT_LENGTH + TLS_PACKET_PAYLOAD - 1UL)
+                   / TLS_PACKET_PAYLOAD;
 
-    if (chain == 0)
-        chain = 1;
-
-    return chain + TLS_PACKET_SPARE;
+    return cipher + plain + TLS_PACKET_SPARE;
 }
 
 ULONG tls_packet_pool_bytes(ULONG packets)

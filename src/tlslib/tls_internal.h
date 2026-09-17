@@ -309,6 +309,17 @@ struct TLSLibBase
 #define TLS_PACKET_SPARE            4
 
 /*
+ * The smallest TCP segment tls_packet_pool_count() assumes when it budgets
+ * the ciphertext receive queue.  nx_secure holds every packet of an incoming
+ * record at once (nx_secure_record_queue_header), one recv() per packet, and
+ * a bulk transfer whose window we have driven small delivers one segment per
+ * packet -- so the pool has to cover a maximum record fragmented this fine.
+ * 1024 is below the Ethernet MSS (1460) and below a PPPoE or tunnelled path's,
+ * and stops short of the tiny-segment cases no real peer produces.
+ */
+#define TLS_MIN_SEGMENT_FILL        1024
+
+/*
  * NX_TCP_SOCKET first and by value, not by pointer: nx_secure is handed
  * &tt_Socket and reads its fields, and _nx_tcp_socket_send() and
  * _nx_tcp_socket_receive() cast the same address back to this.
