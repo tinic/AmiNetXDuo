@@ -493,6 +493,48 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
 }
 
 
+/*
+ * The bytes the pool is sized from are the fastest memory class's, not
+ * everything Exec has: the A3000 with 12 MB of motherboard RAM ahead of a
+ * 256 MB Zorro III card, and the machines that must stay exactly as they
+ * were -- one header, several at one priority, none at all.
+ */
+static void j_the_pool_is_sized_from_the_fastest_class(void)
+{
+    static const LONG  a3000_pri[]  = { 30, 20 };
+    static const ULONG a3000_free[] = { 12UL << 20, 256UL << 20 };
+    static const LONG  one_pri[]    = { 20 };
+    static const ULONG one_free[]   = { 128UL << 20 };
+    static const LONG  two_pri[]    = { 20, 20 };
+    static const ULONG two_free[]   = { 16UL << 20, 16UL << 20 };
+    static const LONG  card_pri[]   = { 30, 40 };
+    static const ULONG card_free[]  = { 16UL << 20, 128UL << 20 };
+    static const LONG  z2_pri[]     = { 0, 20 };
+    static const ULONG z2_free[]    = { 8UL << 20, 64UL << 20 };
+    ULONG stride = 1568UL + 64UL;
+
+    h_check(ami_ns_pool_avail_of(a3000_pri, a3000_free, 2) == (12UL << 20),
+            "the A3000 is sized from its 12 MB of motherboard RAM, not 268");
+    h_check(ami_ns_pool_packets_for(12UL << 20, (ULONG)AMI_POOL_MEM_DIVISOR,
+                                    stride) == ((12UL << 20) / 16UL) / stride,
+            "and that is a few hundred packets, not the cap");
+    h_check(ami_ns_pool_avail_of(one_pri, one_free, 1) == (128UL << 20),
+            "one header: the number AvailMem() gave");
+    h_check(ami_ns_pool_avail_of(two_pri, two_free, 2) == (32UL << 20),
+            "two boards at one priority: summed, as before");
+    h_check(ami_ns_pool_avail_of(card_pri, card_free, 2) == (128UL << 20),
+            "a CPU card's RAM above the motherboard's: the card's");
+    h_check(ami_ns_pool_avail_of(z2_pri, z2_free, 2) == (64UL << 20),
+            "Zorro III RAM above Zorro II: the Zorro III");
+    h_check(ami_ns_pool_avail_of(NULL, NULL, 0) == 0UL,
+            "no Fast RAM at all: 0, and the caller asks AvailMem()");
+
+    printf("  fastest class     A3000 12 MB -> %lu packets\n",
+           (unsigned long)ami_ns_pool_packets_for(12UL << 20,
+                                                  (ULONG)AMI_POOL_MEM_DIVISOR,
+                                                  stride));
+}
+
 int main(void)
 {
     printf("packet pool sizing and the window it backs, v0.25.5\n");
@@ -506,6 +548,7 @@ int main(void)
     g_the_a1200_with_no_fast_ram();
     h_a_big_machine_is_bounded_by_the_link();
     i_the_window_settles_for_the_path_and_the_link();
+    j_the_pool_is_sized_from_the_fastest_class();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

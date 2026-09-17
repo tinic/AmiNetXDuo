@@ -116,6 +116,16 @@ ULONG AvailMem(ULONG requirements)
     return 8UL * 1024UL * 1024UL;
 }
 
+/* No memory list on the host: the pool is sized from AvailMem() above. */
+ULONG ami_ns_fast_headers(LONG *pri, ULONG *free, ULONG max)
+{
+    (VOID)pri;
+    (VOID)free;
+    (VOID)max;
+
+    return 0UL;
+}
+
 VOID Forbid(VOID)
 {
     nsh.forbids++;

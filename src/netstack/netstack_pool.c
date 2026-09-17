@@ -40,3 +40,23 @@ ULONG ami_ns_pool_packets_for(ULONG avail, ULONG divisor, ULONG stride)
 
     return packets;
 }
+
+ULONG ami_ns_pool_avail_of(const LONG *pri, const ULONG *free, ULONG n)
+{
+    ULONG i;
+    LONG  top = 0;
+    ULONG sum = 0;
+
+    if (n == 0UL)
+        return 0UL;
+
+    for (i = 0; i < n; i++)
+        if (i == 0UL || pri[i] > top)
+            top = pri[i];
+
+    for (i = 0; i < n; i++)
+        if (pri[i] == top)
+            sum += free[i];
+
+    return sum;
+}

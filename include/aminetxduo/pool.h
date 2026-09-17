@@ -63,4 +63,26 @@
  */
 ULONG ami_ns_pool_packets_for(ULONG avail, ULONG divisor, ULONG stride);
 
+/*
+ * The free bytes the pool is sized from: those of the FASTEST memory class,
+ * which is every Fast RAM header at the highest priority Exec holds one at,
+ * summed.  `pri[i]` and `free[i]` describe the Fast RAM headers, n of them;
+ * 0 when there are none, and the caller falls back to AvailMem().
+ *
+ * Why not AvailMem(): an A3000 with 12 MB of 32-bit motherboard RAM at
+ * priority 30 ahead of 256 MB on a Zorro III card at 20 computed the pool
+ * from 268 MB and hit the 4,096 cap, 6.7 MB that filled the fast block to
+ * its last 2.7 KB; 93 packets were ever in use, and everything loaded after
+ * the network ran from the card's RAM, 26% slower for a 1 MB read.  Sized
+ * from the 12 MB it is 480 packets.  One memory class, which is every
+ * other machine in the lab, gives the number AvailMem() gave.
+ */
+ULONG ami_ns_pool_avail_of(const LONG *pri, const ULONG *free, ULONG n);
+
+/* Exec's Fast RAM headers as (priority, free bytes), at most `max` of them:
+   the number filled in.  netstack_memlist.c walks the list under Forbid();
+   the host tier answers 0. */
+#define AMI_NS_POOL_HEADERS 16
+ULONG ami_ns_fast_headers(LONG *pri, ULONG *free, ULONG max);
+
 #endif /* AMINETXDUO_POOL_H */

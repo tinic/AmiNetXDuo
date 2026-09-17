@@ -942,20 +942,23 @@
 
   @{b}How much memory the network takes@{ub}
 
-  Most of it is the packet pool, sized when the network starts from what
-  is free: a sixteenth of it, between 16 and 4,096 packets of 1,568
-  bytes. ShowNetStatus MEMORY shows the pool and the fewest packets it
-  ever had free. Two variables, read from ENV: when the network starts,
-  change the size; set them in ENVARC: to keep them:
+  Most of it is the packet pool, sized when the network starts from the
+  free memory of the fastest kind the machine has: a sixteenth of it,
+  between 16 and 4,096 packets of 1,568 bytes. "Fastest kind" is the
+  Fast RAM Exec lists at its highest priority -- a CPU card's RAM above
+  the motherboard's, the motherboard's above a Zorro III card's, Zorro
+  III above Zorro II -- so on an A3000 with 12 MB of motherboard RAM and
+  256 MB on a Zorro III card the pool is sized from the 12 MB (about 480
+  packets) and leaves that block for everything else; a machine with one
+  kind of memory gets the same pool it always did. ShowNetStatus MEMORY
+  shows the pool and the fewest packets it ever had free. Two variables,
+  read from ENV: when the network starts, override the size; set them in
+  ENVARC: to keep them:
 
       SetEnv ANXDPOOLPACKETS 512      the pool outright, 16 to 4096
-      SetEnv ANXDPOOLDIV 32           the share of free memory, 4 to 64
+      SetEnv ANXDPOOLDIV 32           the share of that memory, 4 to 64
 
-  When to: a machine whose memory is not all the same speed. An A3000
-  with 12 MB of 32-bit motherboard RAM ahead of 256 MB on a Zorro III
-  card computed a 4,096-packet pool of which 93 were ever used, and the
-  pool filled the fast block so that every program after it ran from the
-  slow one. 512 leaves it room. A mistyped value is ignored.
+  A mistyped value is ignored.
 
 @endnode
 

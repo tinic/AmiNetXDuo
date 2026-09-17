@@ -406,13 +406,25 @@ static ULONG ami_ns_packet_stride(VOID)
     return (stride + 3UL) & ~3UL;
 }
 
+/* The bytes the pool is sized from: the fastest memory class's
+   (netstack_memlist.c, pool.h says why), else what AvailMem() says. */
+static ULONG ami_ns_pool_avail(VOID)
+{
+    LONG  pri[AMI_NS_POOL_HEADERS];
+    ULONG free[AMI_NS_POOL_HEADERS];
+    ULONG n     = ami_ns_fast_headers(pri, free, (ULONG)AMI_NS_POOL_HEADERS);
+    ULONG avail = ami_ns_pool_avail_of(pri, free, n);
+
+    return (avail != 0UL) ? avail : AvailMem(MEMF_PUBLIC);
+}
+
 static ULONG ami_ns_pool_packets(VOID)
 {
     ULONG avail;
     ULONG divisor;
     ULONG packets;
 
-    avail = AvailMem(MEMF_PUBLIC);
+    avail = ami_ns_pool_avail();
 
     divisor = ami_config_pool_divisor((ULONG)AMI_POOL_MEM_DIVISOR);
 

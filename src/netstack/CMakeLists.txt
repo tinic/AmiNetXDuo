@@ -11,6 +11,7 @@ set(NETSTACK_SOURCES
     netstack_client_pool.c
     netstack_gateway.c
     netstack_pool.c
+    netstack_memlist.c
     netstack_retry.c)
 
 # The resolver.  netstack_dns_status.c and the lease/domain/handoff helpers

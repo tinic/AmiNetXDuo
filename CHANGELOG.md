@@ -9,6 +9,14 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The packet pool is sized from the fastest memory the machine has, not
+  from all of it: the Fast RAM Exec lists at its highest priority, summed
+  across headers at that priority. On the A3000 above that is the 12 MB of
+  motherboard RAM (481 packets) instead of 268 MB (the 4,096 cap), and the
+  block stays free for what loads after the network; a machine with one
+  kind of memory gets the pool it always did. `ANXDPOOLPACKETS` still
+  overrides
+
 - `SetEnv ANXDPOOLPACKETS <n>` sets the packet pool's size outright (16 to
   4,096; `ShowNetStatus MEMORY` shows what it is and the fewest ever
   free). For a machine whose memory is not all one speed: an A3000 with
