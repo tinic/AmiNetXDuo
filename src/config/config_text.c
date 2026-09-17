@@ -423,6 +423,45 @@ BOOL ami_cfg_next_pair(char **cursor, char **key, char **value)
 
 /* --------------------------------------------------------------- numbers */
 
+/* A signed decimal: an optional '-' or '+' in front of what ami_cfg_parse_ulong
+   takes.  Magnitudes past LONG range are refused, not wrapped. */
+BOOL ami_cfg_parse_long(const char *s, LONG *out)
+{
+    ULONG magnitude;
+    BOOL  negative = FALSE;
+
+    if (s == NULL)
+        return FALSE;
+
+    while (*s == ' ' || *s == '\t')
+        s++;
+
+    if (*s == '-' || *s == '+')
+    {
+        negative = (*s == '-');
+        s++;
+    }
+
+    if (!ami_cfg_parse_ulong(s, &magnitude))
+        return FALSE;
+
+    if (negative)
+    {
+        if (magnitude > 0x80000000UL)
+            return FALSE;
+        *out = (magnitude == 0x80000000UL) ? (LONG)0x80000000UL
+                                           : -(LONG)magnitude;
+    }
+    else
+    {
+        if (magnitude > 0x7FFFFFFFUL)
+            return FALSE;
+        *out = (LONG)magnitude;
+    }
+
+    return TRUE;
+}
+
 BOOL ami_cfg_parse_ulong(const char *s, ULONG *out)
 {
     ULONG value = 0;

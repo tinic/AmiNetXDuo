@@ -176,9 +176,57 @@ static void h_case_primary_loss_fails_over(void)
 }
 
 
+/* PRIORITY outranks arrival order and the primary: the A1200's 3c589 in slot
+   0 (primary, bound first) against an anxgenet.device in slot 1 that the
+   interface file gives PRIORITY=5. */
+static void h_case_priority_outranks_the_primary(void)
+{
+    AmiNsGatewayIface table[AMI_CFG_MAX_ATTACHED];
+    AmiNsGatewayCandidate out[AMI_CFG_MAX_ATTACHED];
+    UWORD             n;
+
+    h_two(table);
+    table[1].priority = 5;
+    n = ami_ns_gateway_candidates(table, (UWORD)AMI_CFG_MAX_ATTACHED,
+                                  0U, AMI_NS_GATEWAY_NO_IFACE, out,
+                                  (UWORD)AMI_CFG_MAX_ATTACHED);
+    h_check(n == 2U && out[0].gateway == GW_B && out[0].iface == 1U &&
+            out[1].gateway == GW_A && out[1].iface == 0U,
+            "the higher PRIORITY is offered before the primary");
+
+    /* Its link goes: the primary is the failover. */
+    table[1].present = FALSE;
+    n = ami_ns_gateway_candidates(table, (UWORD)AMI_CFG_MAX_ATTACHED,
+                                  0U, AMI_NS_GATEWAY_NO_IFACE, out,
+                                  (UWORD)AMI_CFG_MAX_ATTACHED);
+    h_check(n == 1U && out[0].gateway == GW_A && out[0].iface == 0U,
+            "with the preferred card down the primary carries the default");
+
+    /* Equal priorities: the old order, primary first, then slot order. */
+    h_two(table);
+    table[0].priority = 5;
+    table[1].priority = 5;
+    n = ami_ns_gateway_candidates(table, (UWORD)AMI_CFG_MAX_ATTACHED,
+                                  1U, AMI_NS_GATEWAY_NO_IFACE, out,
+                                  (UWORD)AMI_CFG_MAX_ATTACHED);
+    h_check(n == 2U && out[0].iface == 1U && out[1].iface == 0U,
+            "equal priorities keep the primary first");
+
+    /* A negative priority sorts below the unset ones. */
+    h_two(table);
+    table[0].priority = -1;
+    n = ami_ns_gateway_candidates(table, (UWORD)AMI_CFG_MAX_ATTACHED,
+                                  0U, AMI_NS_GATEWAY_NO_IFACE, out,
+                                  (UWORD)AMI_CFG_MAX_ATTACHED);
+    h_check(n == 2U && out[0].iface == 1U && out[1].iface == 0U,
+            "PRIORITY=-1 yields to a card that named none");
+}
+
+
 int main(void)
 {
     h_case_survivor_replaces_the_lost_gateway();
+    h_case_priority_outranks_the_primary();
     h_case_the_removed_slot_is_never_offered();
     h_case_shared_and_empty();
     h_case_primary_wins_arrival_order();

@@ -203,6 +203,30 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_source_connect COMMAND test_tcp_source_connect)
 
+    # The interface file's PRIORITY at the route lookup: the same two-cards-
+    # one-subnet machine against the real _nx_ip_route_find() and
+    # _nx_ip_gateway_address_set(), which take the highest priority and fall
+    # back when its link goes.
+    add_executable(test_route_priority
+        host/test_route_priority_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_set.c")
+
+    target_compile_options(test_route_priority PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_route_priority PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_route_priority PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME route_priority COMMAND test_route_priority)
+
     # RFC 6298's round-trip time estimator: the arithmetic on its own, and the
     # path that feeds it.  Same shim and the same -UAMINETXDUO_IPV6 as above.
     # nx_tcp_socket_state_ack_check.c is here as well as the output path,

@@ -1085,6 +1085,57 @@ static void test_request_counts_have_ceilings(void)
     CHECK(seen[1].line == 4);
     CHECK(seen[1].severity == AMI_CFG_PROBLEM_WARN);
 }
+static void test_interface_priority(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: PRIORITY (Roadshow's, PRI too) is a small signed number, "
+           "0 when left out\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/genet");
+
+    buf = dup_text("device = anxgenet.device\n"  /* line 1 */
+                   "unit = 0\n"                  /* line 2 */
+                   "configure = dhcp\n"          /* line 3 */
+                   "priority = 5\n");            /* line 4 */
+    CHECK(ami_cfg_parse_interface("genet", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(iface.priority == 5);
+    CHECK(seen_count == 0);
+
+    buf = dup_text("device = anxnet.device\n"
+                   "configure = dhcp\n"
+                   "pri = -3\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(iface.priority == -3);
+    CHECK(seen_count == 0);
+
+    buf = dup_text("device = anxnet.device\n"
+                   "configure = dhcp\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(iface.priority == 0);
+
+    /* Out of range or not a number: a warning, the field stays 0. */
+    seen_count = 0;
+    buf = dup_text("device = anxnet.device\n"   /* line 1 */
+                   "configure = dhcp\n"         /* line 2 */
+                   "priority = 200\n"           /* line 3 */
+                   "priority = high\n");        /* line 4 */
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+    CHECK(iface.priority == 0);
+    CHECK(seen_count == 2);
+    CHECK(seen[0].line == 3 && seen[0].severity == AMI_CFG_PROBLEM_WARN);
+    CHECK(seen[1].line == 4 && seen[1].severity == AMI_CFG_PROBLEM_WARN);
+    CHECK(seen_mentions("PRIORITY"));
+}
+
 static void test_interface_ipv6_only(void)
 {
     AmiIfConfig iface;
@@ -2822,6 +2873,7 @@ int main(int argc, char **argv)
     test_problem_reporter();
     test_inert_keywords_are_notes();
     test_request_counts_have_ceilings();
+    test_interface_priority();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6
     test_ipv6_only_no_error();

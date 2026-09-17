@@ -120,6 +120,9 @@ static const char *const ami_cfg_advice_text[] =
     "ops a frame: its receive ring or FIFO, 13312 on an X-Surf.  The"
     " TCP window stays inside it.  Leave it out and the driver is as"
     "ked, or a known one is assumed.",
+    "PRIORITY is a number from -128 to 127, 0 when left out.  When t"
+    "wo interfaces could carry a packet -- two cards on one network,"
+    " two default routers -- the higher one carries it.",
 };
 
 const char *ami_cfg_advice(UWORD code)

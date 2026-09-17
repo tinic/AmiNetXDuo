@@ -39,12 +39,47 @@ UWORD ami_ns_gateway_candidates(const AmiNsGatewayIface *iface, UWORD count,
     if (count > (UWORD)AMI_CFG_MAX_ATTACHED)
         count = (UWORD)AMI_CFG_MAX_ATTACHED;
 
-    if (preferred < count && preferred != skip)
-        ami_ns_gateway_offer(iface, preferred, out, max, &written);
+    /* One pass per distinct priority, highest first: within a pass the
+       order is the old one.  A handful of slots, so the quadratic walk is
+       cheaper than sorting them. */
+    {
+        LONG  level;
+        BOOL  have_level = FALSE;
 
-    for (i = 0; i < count && written < max; i++)
-        if (i != preferred && i != skip)
-            ami_ns_gateway_offer(iface, i, out, max, &written);
+        for (;;)
+        {
+            LONG next = 0;
+            BOOL have_next = FALSE;
+
+            /* The highest priority below the last level served. */
+            for (i = 0; i < count; i++)
+            {
+                if (!iface[i].present || iface[i].gateway == 0UL || i == skip)
+                    continue;
+                if (have_level && iface[i].priority >= level)
+                    continue;
+                if (!have_next || iface[i].priority > next)
+                {
+                    next = iface[i].priority;
+                    have_next = TRUE;
+                }
+            }
+
+            if (!have_next)
+                break;
+
+            level = next;
+            have_level = TRUE;
+
+            if (preferred < count && preferred != skip &&
+                iface[preferred].priority == level)
+                ami_ns_gateway_offer(iface, preferred, out, max, &written);
+
+            for (i = 0; i < count && written < max; i++)
+                if (i != preferred && i != skip && iface[i].priority == level)
+                    ami_ns_gateway_offer(iface, i, out, max, &written);
+        }
+    }
 
     return written;
 }

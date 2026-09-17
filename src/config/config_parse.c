@@ -41,7 +41,8 @@ typedef enum
     IF_KEY_IPREQUESTS,
     IF_KEY_ARPREQUESTS,
     IF_KEY_WRITEREQUESTS,
-    IF_KEY_RXBUFFER
+    IF_KEY_RXBUFFER,
+    IF_KEY_PRIORITY
 } IfKey;
 
 static const struct IfKeyword
@@ -73,6 +74,8 @@ ami_if_keywords[] =
     { "arprequests",        IF_KEY_ARPREQUESTS       },
     { "writerequests",      IF_KEY_WRITEREQUESTS     },
     { "rxbuffer",           IF_KEY_RXBUFFER          },
+    { "priority",           IF_KEY_PRIORITY          },   /* Roadshow's, and PRI */
+    { "pri",                IF_KEY_PRIORITY          },
 
     /* IPv6 keywords: the IPv4 keyword plus a "6".  In the floor build (no
        AMINETXDUO_IPV6) they must stay RECOGNISED and be ignored, so the same
@@ -102,8 +105,6 @@ ami_if_keywords[] =
     { "lease",              IF_KEY_IGNORED   },
     { "dhcpunicast",        IF_KEY_IGNORED   },
     { "linkstatuscommand",  IF_KEY_IGNORED   },
-    { "priority",           IF_KEY_IGNORED   },
-    { "pri",                IF_KEY_IGNORED   },
 
     /* Written by AmiTCP_NG's installer.  ami_config_resolver_from_interfaces()
        reads them when DEVS:Internet/name_resolution supplies none, and says so
@@ -679,6 +680,29 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                                      value, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN);
                 }
                 break;
+
+            /*
+             * Roadshow's PRIORITY (PRI): the interface that carries a packet
+             * when more than one could -- two cards on one subnet, two
+             * default routers.  Higher wins, equals keep attach order.
+             * Signed and small, like a task priority.
+             */
+            case IF_KEY_PRIORITY:
+            {
+                LONG pri;
+
+                if (ami_cfg_parse_long(value, &pri) && pri >= -128 && pri <= 127)
+                {
+                    out->priority = (BYTE)pri;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad PRIORITY '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "PRIORITY",
+                                     value, AMI_CFG_ADVICE_PRIORITY_IS_A_SMALL);
+                }
+                break;
+            }
 
             case IF_KEY_ADDRESS:
                 /* "address=dhcp" is legal Roadshow and means "ask the server". */

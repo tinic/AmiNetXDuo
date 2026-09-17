@@ -860,6 +860,19 @@ static VOID ami_ns_park_unaddressed(AmiNetStack *ns, UWORD index)
 }
 
 /*
+ * The interface file's PRIORITY, handed to NetX Duo: nx_ip_route_find(),
+ * nx_ip_gateway_address_set() and nxd_ipv6_interface_find() take the
+ * highest-priority interface of those that could carry a packet, and equals
+ * keep attach order, which without this line is the whole rule -- a 3c589 in
+ * slot 0 carried a subnet an anxgenet.device in slot 1 shares.
+ */
+static VOID ami_ns_apply_priority(AmiNetStack *ns, UWORD index)
+{
+    ns->ns_Ip.nx_ip_interface[index].nx_interface_priority =
+        (INT)ns->ns_Config.interfaces[index].priority;
+}
+
+/*
  * nx_ip_create() requires a primary link driver even though it independently
  * creates NetX Duo's built-in loopback interface.  The library-first path uses
  * this driver only until NX_IP_INITIALIZE_DONE, then detaches physical slot 0.
@@ -1130,6 +1143,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
         ami_ns_park_unaddressed(ns, i);
+        ami_ns_apply_priority(ns, i);
 
         if (ns->ns_Ip.nx_ip_interface[i].nx_interface_link_up == NX_FALSE)
             ami_event(NETEVENT_LINK_DOWN, i, 0UL);
@@ -2848,6 +2862,9 @@ static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
             ns->ns_Ip.nx_ip_interface[i].nx_interface_valid != 0 &&
             ns->ns_Ip.nx_ip_interface[i].nx_interface_link_up != NX_FALSE);
         table[i].gateway = table[i].present ? ami_ns_gateway_of(ns, i) : 0UL;
+        table[i].priority = table[i].present
+                                ? ns->ns_Ip.nx_ip_interface[i].nx_interface_priority
+                                : 0;
     }
 
     count = ami_ns_gateway_candidates(table, (UWORD)AMI_CFG_MAX_ATTACHED,
@@ -4026,6 +4043,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         ns->ns_IfaceCount = (UWORD)(slot + 1);
 
     ami_ns_park_unaddressed(ns, (UWORD)slot);
+    ami_ns_apply_priority(ns, (UWORD)slot);
     ns->ns_Ip.nx_ip_interface[slot].nx_interface_ip_conflict_notify_handler =
         ami_ns_ip_conflict;
 

@@ -204,6 +204,7 @@ const char *ami_cfg_file_part(const char *name);
 
 /* Decimal (or 0x.. / 0.. ) unsigned integer. FALSE on trailing garbage. */
 BOOL ami_cfg_parse_ulong(const char *s, ULONG *out);
+BOOL ami_cfg_parse_long(const char *s, LONG *out);
 
 /* YES/NO/TRUE/FALSE/ON/OFF/1/0. */
 BOOL ami_cfg_parse_bool(const char *s, BOOL *out);

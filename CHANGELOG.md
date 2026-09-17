@@ -9,6 +9,19 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `PRIORITY=` in an interface file (Roadshow's keyword; `PRI` too): -128 to
+  127, 0 when left out. When more than one interface could carry a packet
+  -- two cards on one subnet, two routers each offering a default -- the
+  higher PRIORITY carries it; equals keep attach order, an offline
+  interface is skipped and the next best carries the traffic until it is
+  back. IPv4 routes, the default gateway's binding and IPv6 (on-link and
+  default routers) all follow it; `ShowNetStatus` shows it. On an A1200
+  with a PCMCIA card as eth0 in slot 0 and the PiStorm32's own Ethernet
+  brought up second, a new connection left through the 3c589 at 8.3
+  Mbit/s; with `PRIORITY=5` in the GENET's file it leaves through the GENET
+  at 130, comes back through the 3c589 while the GENET is offline, and
+  AmiSpeedTest through the default gateway runs at 63 Mb/s with both cards
+  up
 - `httpd -C`: a 16-bit screen is packed by the pixel. PackBits on the
   console's RGB565 format counts two-byte pixels, so a flat area is a run
   where by the byte it was two alternating values and never one. A

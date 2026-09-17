@@ -264,7 +264,10 @@ host_test_targets() { # builddir
 #      the station address, the PHY, and the memory@0 check.
 #      386 with test_netdev_verify: the shared netdev_verify.c (37b22054)
 #      checks IPv4/IPv6 headers and TCP/UDP sums for every direct-path core
-HOST_TESTS_EXPECTED=387
+#      388 with test_route_priority: the interface file's PRIORITY at the
+#      real _nx_ip_route_find() and _nx_ip_gateway_address_set(), two cards
+#      on one subnet
+HOST_TESTS_EXPECTED=388
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

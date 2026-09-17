@@ -19,6 +19,7 @@ typedef struct AmiNsGatewayIface
 {
     BOOL  present;              /* attached, valid and able to route    */
     ULONG gateway;              /* its next hop, 0 = it offers none     */
+    LONG  priority;             /* the interface file's PRIORITY        */
 } AmiNsGatewayIface;
 
 typedef struct AmiNsGatewayCandidate
@@ -37,10 +38,11 @@ typedef enum AmiNsGatewayMode
 } AmiNsGatewayMode;
 
 /*
- * Put `preferred` first, then every other slot in stable slot order.  `skip`
- * is omitted even if its table entry has not been cleared yet.  Zero gateways
- * are omitted. Equal addresses on different interfaces remain separate: the
- * interface is part of the route, especially when two cards share one subnet.
+ * Highest PRIORITY first; among equals `preferred` first, then every other
+ * slot in stable slot order.  `skip` is omitted even if its table entry has
+ * not been cleared yet.  Zero gateways are omitted. Equal addresses on
+ * different interfaces remain separate: the interface is part of the route,
+ * especially when two cards share one subnet.
  */
 UWORD ami_ns_gateway_candidates(const AmiNsGatewayIface *iface, UWORD count,
                                 UWORD preferred, UWORD skip,

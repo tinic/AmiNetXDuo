@@ -391,6 +391,19 @@
              the netdb file, and a note says where the value came
              from and where it belongs.
 
+  @{b}PRIORITY@{ub}   A number from -128 to 127; 0 when left out. When more
+             than one interface could carry a packet -- two cards on
+             one network, two routers each offering a default -- the
+             one with the higher PRIORITY carries it; among equals the
+             one attached first, which is the file order at startup.
+             An interface that goes offline stops being a candidate
+             and the next best carries the traffic until it is back;
+             a TCP connection stays on the interface it was opened
+             on. PRI is accepted for it, as in Roadshow. On an A1200
+             with a PCMCIA card as eth0 and a PiStorm32's own
+             Ethernet as genet, PRIORITY=5 in genet's file is what
+             sends the traffic through the fast card.
+
   @{b}IPREQUESTS@{ub}, @{b}ARPREQUESTS@{ub}
              How many reads of that kind wait at the driver, 1 to 32.
              Without them the stack sizes the queues from the wire

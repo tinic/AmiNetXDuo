@@ -99,7 +99,7 @@ it.
 | `POINTTOPOINT` `DESTINATION` | Point-to-point links |
 | `MULTICAST` | Asking the driver for multicast explicitly |
 | `REPORTOFFLINE` | Whether an interface going offline is reported |
-| `METRIC` `PRIORITY`/`PRI` | Ordering two interfaces; the first interface explicitly named still owns the automatic default route |
+| `METRIC` | A route cost |
 | `LEASE` `DHCPUNICAST` | DHCP lease time and unicast renewal (`ID` we do read) |
 | `BROADCASTADDRESS` | A broadcast address other than the one the netmask implies |
 | `FILTER` `DEBUG` `ARPTYPE`/`HARDWARETYPE` `LINKSTATUSCOMMAND` | Packet filter, driver debug, ARP hardware type, link-change command |

@@ -199,6 +199,9 @@ typedef struct AmiIfConfig {
      * hardware is known gets a default by name.  A number here wins.
      */
     ULONG       rx_buffer;
+    BYTE        priority;                    /* PRIORITY=, -128..127, 0 unset: the
+                                                highest wins a route two
+                                                interfaces could carry        */
     BOOL        up;                          /* bring online at startup          */
     BOOL        configured;                  /* slot in use                      */
     BOOL        down_goes_offline;           /* IFA_DownGoesOffline; default FALSE */

@@ -496,6 +496,10 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                        cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local" :
                        cfg->iptype == AMI_IPTYPE_NONE      ? "no IPv4"
                                                            : "static"));
+    /* Only when the file set one: 0 is every interface that did not, and the
+       line would say nothing about which of them carries a shared subnet. */
+    if (cfg->priority != 0)
+        tool_printf("  priority    %ld\n", (LONG)cfg->priority);
 
     /*
      * Printed only when there is something to say: the floor build always

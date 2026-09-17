@@ -101,6 +101,13 @@ CONFIGURE=DHCP
 ;
 ;MTU=1500
 
+; PRIORITY -- when more than one interface could carry a packet (two cards on
+; one network, two routers each offering a default), the one with the higher
+; PRIORITY carries it; equals keep the order they were attached in.  -128 to
+; 127, 0 when left out.  Give the fast card the higher number.
+;
+;PRIORITY=0
+
 ; IPREQUESTS and ARPREQUESTS -- how many reads of that kind wait at the
 ; driver, 1 to 32.  Leave them out and the stack sizes the queues from the
 ; wire speed and the memory it has.
