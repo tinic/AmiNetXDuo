@@ -1323,7 +1323,7 @@ static LONG genet_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
           GENET_TX_DESC_STATUS_BUFLEN(len));
 
     c->tx_pidx++;
-    nic->txb_inuse++;
+    nic->txb_inuse = (UWORD)(c->tx_pidx - c->tx_cidx);
 
     /* Straight to the chip: the page push is two microseconds, so nothing
        is gained by holding a frame back for company. */
@@ -1335,20 +1335,27 @@ static LONG genet_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
 /* TRUE when the chip retired frames. */
 static BOOL ge_txintr(NetdevNic *nic)
 {
-    GenetCore *c    = GE(nic);
-    UWORD      cidx = (UWORD)(ge_rd(nic, GENET_TX_DMA_CONS_INDEX(GE_Q)) & 0xffffu);
-    UWORD      n    = (UWORD)(cidx - c->tx_cidx);
+    GenetCore *c = GE(nic);
+    UWORD      cidx;
+    UWORD      n;
 
-    if (n > nic->txb_inuse)
-        n = nic->txb_inuse;     /* cannot happen: the chip never runs ahead */
+    cidx = (UWORD)(ge_rd(nic, GENET_TX_DMA_CONS_INDEX(GE_Q)) & 0xffffu);
+    n    = (UWORD)(cidx - c->tx_cidx);
+
+    if (n > (UWORD)(c->tx_pidx - c->tx_cidx))
+        n = (UWORD)(c->tx_pidx - c->tx_cidx);  /* cannot happen: the chip never runs ahead */
 
     if (n != 0)
     {
         nic->tx_packets   += n;
         nic->tx_completed += n;
-        nic->txb_inuse     = (UWORD)(nic->txb_inuse - n);
         c->tx_cidx         = cidx;
     }
+
+    /* The in-use count is the two indices' difference, never a shared
+       read-modify-write: the task advances tx_pidx under Forbid()
+       (tx_task_lock), this advances tx_cidx from either context. */
+    nic->txb_inuse = (UWORD)(c->tx_pidx - c->tx_cidx);
 
     return (BOOL)(n != 0);
 }
@@ -1398,7 +1405,9 @@ static BOOL genet_intr(NetdevNic *nic)
        blank polls through here too, and a frame is a frame. */
     if (ge_rxintr(nic))
         mine = TRUE;
-    if (ge_txintr(nic))
+    /* Not while a task is mid-transmit: it reclaims for itself
+       (tx_task_lock).  */
+    if (!nic->tx_busy && ge_txintr(nic))
         mine = TRUE;
 
     /* Re-arm what the top half masked, now that the rings are drained. */
@@ -1446,7 +1455,7 @@ static BOOL genet_tick(NetdevNic *nic)
 
     /* Completed transmits are reclaimed here when nothing else has: with no
        completion interrupt this is what frees a full ring on a quiet wire. */
-    return (BOOL)(nic->txb_inuse != 0 && ge_txintr(nic));
+    return (BOOL)(!nic->tx_busy && nic->txb_inuse != 0 && ge_txintr(nic));
 }
 
 /* -------------------------------------------------------------- attach --- */
@@ -1549,6 +1558,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->reply_batch     = 1;           /* Emu68: an Exec call is a trap */
     nic->tx_reclaim      = ge_txintr;   /* no TX interrupt: retire on ask */
     nic->tx_short_build  = 1;           /* the copy is 0.4 us, the mask 5.5 */
+    nic->tx_task_lock    = 1;           /* and Forbid() is 0.1: no interrupt produces */
     nic->rx_holds        = 1;           /* the ring keeps frames for a late read */
     /* A frame takes a whole buffer whatever its size, so what the ring holds
        is GE_RX_RING full frames, not GE_RX_RING * GE_BUFSZ bytes of them: the

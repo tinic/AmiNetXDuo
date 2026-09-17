@@ -1028,6 +1028,11 @@ static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
  */
 VOID netdev_tx_pump(NetdevUnit *unit)
 {
+    /* A task is mid-transmit under Forbid() (tx_task_lock): it pumps for
+       itself when it is done, and nothing here may touch the ring now. */
+    if (unit->nu_Nic.tx_busy)
+        return;
+
     /* A ring that only looks full: let the core retire what the chip has
        finished before this pump is judged to have nowhere to go. */
     if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
@@ -1073,11 +1078,25 @@ VOID netdev_tx_pump(NetdevUnit *unit)
  * take the mask again only for the chip: the opener's CopyFrom is 135 us of the
  * 219 us a transmit spends here and must not run with interrupts off.
  */
+#if NETDEV_HAS_DTREE
+static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io);
+#endif
+
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
 {
     NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
     UWORD         total;
     LONG          rc;
+
+#if NETDEV_HAS_DTREE
+    /* Only the GENET core asks for this, and only anxgenet.device carries
+       it: anxnet.device's cores keep the arm below and its image its size. */
+    if (unit->nu_Nic.tx_task_lock)
+    {
+        netdev_tx_direct_task(unit, io);
+        return;
+    }
+#endif
 
     Disable();
     /* The command-table check is outside this critical section.  If OFFLINE
@@ -1144,6 +1163,97 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
         netdev_reply(io, 0, 0);
     }
 }
+
+/*
+ * The same write for a core whose interrupt never produces (tx_task_lock):
+ * Forbid() keeps other tasks out, tx_busy keeps the interrupt's reclaim and
+ * the blank's pump off the ring for the whole of the build and the issue,
+ * and Disable() is taken only around the unit's write list, which the pump
+ * shares -- the rare path, a ring that is full.  On Emu68 the Disable()
+ * pair this replaces was a 5.5 us trap per frame against a 0.4 us copy.
+ */
+#if NETDEV_HAS_DTREE
+static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
+{
+    NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    UWORD         total;
+    LONG          rc;
+    BOOL          queued = FALSE;
+
+    Forbid();
+    unit->nu_Nic.tx_busy = 1;
+
+    if (!unit->nu_Online || !unit->nu_Nic.running)
+    {
+        unit->nu_Nic.tx_busy = 0;
+        Permit();
+        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
+        return;
+    }
+
+    /* A full-looking ring is asked about first: the reclaim is this task's
+       now, the interrupt's stands off. */
+    if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
+        unit->nu_Nic.tx_reclaim != NULL)
+        (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
+
+    /* Behind whatever the blank's pump still holds, or into a full ring:
+       onto the list, under the mask the pump takes for it. */
+    if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
+        unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
+    {
+        Disable();
+        netdev_queue_tail(&unit->nu_Writes, io);
+        unit->nu_Nic.tx_busy = 0;
+        netdev_tx_pump(unit);
+        Enable();
+        Permit();
+        return;
+    }
+
+    unit->nu_TxBuilding = 1;
+    total = netdev_tx_timed_build(unit, io, op);
+    if (total != 0)
+    {
+        rc = netdev_tx_timed_issue(unit, io, op, total);
+        if (rc == DP8390_TX_BUSY)
+        {
+            Disable();
+            netdev_queue_head(&unit->nu_Writes, io);
+            Enable();
+            queued = TRUE;
+        }
+    }
+    else
+    {
+        rc = 0;                     /* the build failed and answered io */
+        queued = TRUE;
+    }
+    unit->nu_TxBuilding = 0;
+    unit->nu_Nic.tx_busy = 0;
+
+    /* Anything the blank queued while this task held the ring. */
+    if (!IsListEmpty(&unit->nu_Writes))
+    {
+        Disable();
+        netdev_tx_pump(unit);
+        Enable();
+    }
+    Permit();
+
+    if (queued)
+        return;
+    if (rc != 0)
+    {
+        netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
+        netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
+    }
+    else
+    {
+        netdev_reply(io, 0, 0);
+    }
+}
+#endif /* NETDEV_HAS_DTREE */
 
 /* ------------------------------------------------------------- the filter -- */
 

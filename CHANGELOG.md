@@ -17,6 +17,14 @@ version at the top when it merges.
   A1200 + PiStorm32 receiving from a peer through an emulated 300 Mbit,
   26 ms link: 42 -> 278 Mbit/s (window 184 KB -> 1 MB), 0 retransmits;
   LAN unchanged
+- `anxgenet.device` takes Forbid() around a write, not Disable(): its
+  interrupt only reclaims finished frames and stands off while a task is
+  mid-transmit, so the trapped Disable() pair -- 5.5 us on Emu68 per frame
+  against a 0.4 us copy, a fifth of the transmit path -- is taken only when
+  the ring is full and the write joins the unit's list. A1200 + PiStorm32
+  iperf out: 275 -> 323-333 Mbit/s to one peer, 283 -> 357 to another; in
+  unchanged, 0 transmit errors over a 25 s bidirectional run.
+  `anxnet.device` is untouched
 
 - `bsdsocket.library`'s `memcpy()` is net68k's `movem.l` copy again. Every
   `-flto` build up to 0.28.3 linked libc's instead: GCC emits the `memcpy`

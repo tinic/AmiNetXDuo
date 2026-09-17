@@ -178,6 +178,23 @@ struct NetdevNic
      */
     UBYTE               tx_short_build;
     /*
+     * The core's transmit side needs no interrupt mask from a task: its
+     * interrupt reclaims finished frames (the consumer index) and never
+     * produces, it stands off while a task-level transmit is under way
+     * (tx_busy below), and the in-use count is recomputed from the two
+     * indices rather than shared.  netdev_tx_direct() then takes Forbid()
+     * -- 0.1 us on Emu68 where the Disable() pair is a 5.5 us trap, 13% of
+     * the CPU at 24,000 frames a second -- and Disable() only around the
+     * unit's write list, which the vertical blank's pump shares.  A core
+     * whose interrupt transmits (the DP8390's completion interrupt pumps
+     * the list) leaves this clear.
+     */
+    UBYTE               tx_task_lock;
+    /* Set by netdev_tx_direct() for the whole of a task-level build and
+       issue under tx_task_lock; the core's interrupt-side reclaim and the
+       blank's pump stand off while it is set. */
+    volatile UBYTE      tx_busy;
+    /*
      * The core keeps received frames in its own ring while the opener has
      * no read posted (NETDEV_CLAIM_BEHIND) -- so the opener may re-post its
      * reads late, in one ANXD_CMD_READ_BATCH after its drain, and nothing is
