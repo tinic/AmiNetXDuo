@@ -36,7 +36,11 @@
 #define NETDEV_DRAIN_MAX    32
 
 /* Room for a core's own special-statistics records. */
+#ifdef GE_PROBE_ST
+#define NETDEV_CORE_STATS   28      /* + the GENET bottom-half probe's ten */
+#else
 #define NETDEV_CORE_STATS   18
+#endif
 
 /*
  * rx_claim's answer when NOBODY HAS A READ POSTED for the frame's type but an

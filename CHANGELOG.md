@@ -9,6 +9,16 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` copies and sums a received segment with the stack's
+  movem form of the loop (src/net68k, its 68020 arm) instead of a C loop
+  with a carry test per longword: on Emu68's JIT that loop cost 4.3 us a
+  frame against a 0.4 us copy, two thirds of what the driver spent on a
+  frame. A1200 + PiStorm32, iperf in from a 1 Gbit peer: 593 -> **787
+  Mbit/s** (64 KB reads), 590 -> 659 (4 KB reads); every frame still
+  verified in the driver, 0 checksum errors; out unchanged. A measurement
+  build (`-DGE_PROBE_ST`) times the driver's receive phases on the Pi's
+  system timer and reports them through `NetDevStats`
+
 - A connection accepted across a long path grows its receive window the way
   one this end opened does: the SYN cache times its own handshake, SYN-ACK
   out to ACK in, on the E-Clock, and the accepted socket settles for that

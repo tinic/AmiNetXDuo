@@ -191,6 +191,21 @@ enum
                                for a reader that was behind (no frame lost) */
     GE_ST_HELD_FRAMES,      /* frames left waiting, summed over those passes */
     GE_ST_TICK_RESUMES,     /* held passes resumed by the vertical blank     */
+#ifdef GE_PROBE_ST
+    /* The bottom half timed on the Pi's system timer (bus 0x7E003000, 68k
+       0xF8003000 through Emu68's /scb mapping, 1 MHz, a 10 ns read):
+       microseconds summed, per phase.  A measurement build only. */
+    GE_ST_P_INTR_US,        /* genet_intr, whole                            */
+    GE_ST_P_CACHE_US,       /* the burst's cache invalidate                 */
+    GE_ST_P_DESC_US,        /* descriptor status reads and re-arms          */
+    GE_ST_P_DELIVER_US,     /* ge_deliver: claim, copy+sum, verify, GRO mark */
+    GE_ST_P_FLUSH_US,       /* the reply flush per burst                    */
+    GE_ST_P_FRAMES,         /* frames ge_deliver was given                  */
+    GE_ST_P_CLAIM_US,       /* the claim into the shell and the opener       */
+    GE_ST_P_COPY_US,        /* the fused copy and sum                        */
+    GE_ST_P_VERIFY_US,      /* verify, segment parse, the CONTINUES mark     */
+    GE_ST_P_CLAIMED_US,     /* rx_claimed: the completion into the opener    */
+#endif
     GE_ST_COUNT
 };
 
@@ -217,8 +232,32 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET passes held for a reader behind",
     "GENET frames left waiting in those passes",
     "GENET held passes resumed by the blank",
+#ifdef GE_PROBE_ST
+    "PROBE genet_intr us",
+    "PROBE cache op us",
+    "PROBE descriptor us",
+    "PROBE deliver us",
+    "PROBE reply flush us",
+    "PROBE frames delivered",
+    "PROBE claim us",
+    "PROBE copy+sum us",
+    "PROBE verify+mark us",
+    "PROBE claimed us",
+#endif
     NULL
 };
+
+#ifdef GE_PROBE_ST
+static __inline__ ULONG ge_st_us(VOID)
+{
+    return __builtin_bswap32(*(volatile ULONG *)0xF8003004UL);
+}
+#define GE_P_START(v)       ULONG v = ge_st_us()
+#define GE_P_ADD(nic, k, v) ((nic)->core_stat[k] += ge_st_us() - (v))
+#else
+#define GE_P_START(v)       do { } while (0)
+#define GE_P_ADD(nic, k, v) do { } while (0)
+#endif
 
 static LONG genet_init(NetdevNic *nic);
 static VOID genet_stop(NetdevNic *nic);
@@ -874,20 +913,21 @@ static VOID genet_reset(NetdevNic *nic)
  * them.  A plain loop, and on Emu68's JIT -- the only place a GENET is --
  * that is what the movem version would become anyway.
  */
+/* src/net68k/n68k_checksum.S, its 68020 form (NETDEV_GENET_SOURCES): copy
+   `count` longwords and return their ones-complement sum. */
+extern ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count);
+
 static ULONG ge_copy_sum(ULONG *to, const ULONG *from, ULONG count)
 {
-    ULONG acc = 0;
-
-    while (count-- != 0)
-    {
-        ULONG w = *from++;
-
-        *to++ = w;
-        acc += w;
-        if (acc < w)
-            acc++;                      /* end-around carry */
-    }
-    return acc;
+    /*
+     * The movem form: one load of fourteen registers, each stored and folded
+     * into the accumulator through the addx chain.  Priced by the
+     * bottom-half probe on the A1200, 2026-09-17, per 1460-byte segment: a
+     * C loop with a carry test per longword 4.34 us, a two-accumulator C
+     * loop 2.48, the movem copy alone 0.4 -- Emu68's JIT runs a movem block
+     * at memory speed and a branchy loop at a nanosecond an instruction.
+     */
+    return n68k_copy_sum_longwords(to, from, count);
 }
 
 /*
@@ -981,9 +1021,11 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     APTR   token = NULL;
     UBYTE  wanted = 0;
+    GE_P_START(p1);
     UBYTE *dst   = (nic->rx_claim != NULL)
                  ? nic->rx_claim(nic->rx_arg, frame, len, &token, &wanted)
                  : NULL;
+    GE_P_ADD(nic, GE_ST_P_CLAIM_US, p1);
 
     /*
      * UNICAST ONLY, AND NOT FOREVER.  The ring is one queue for every type,
@@ -1022,6 +1064,7 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
         const UBYTE *src  = frame + NETDEV_HDR_LEN;
         ULONG        sum  = 0;
         UWORD        i;
+        GE_P_START(p2);
 
         if (bulk != 0)
             sum = ge_copy_sum((ULONG *)(APTR)dst,
@@ -1049,9 +1092,11 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
          * device masks the answer to what the opener asked for.  The
          * ethertype is at frame + 12, big-endian.
          */
+        GE_P_ADD(nic, GE_ST_P_COPY_US, p2);
         {
             GenetCore *c     = GE(nic);
             UBYTE      flags = ANXD_S2_RXF_SUMMED;
+            GE_P_START(p3);
 
             if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
                 frame[12] == 0x08 && frame[13] == 0x00)
@@ -1104,7 +1149,12 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
                 c->gro_live = 0;
             }
 
-            nic->rx_claimed(nic->rx_arg, token, sum, flags);
+            GE_P_ADD(nic, GE_ST_P_VERIFY_US, p3);
+            {
+                GE_P_START(p4);
+                nic->rx_claimed(nic->rx_arg, token, sum, flags);
+                GE_P_ADD(nic, GE_ST_P_CLAIMED_US, p4);
+            }
         }
         return TRUE;
     }
@@ -1119,6 +1169,20 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
 }
 
 /* TRUE when the ring had frames. */
+#ifdef GE_PROBE_ST
+static BOOL ge_probe_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
+{
+    ULONG t = ge_st_us();
+    BOOL  r = ge_deliver(nic, frame, len);
+
+    nic->core_stat[GE_ST_P_DELIVER_US] += ge_st_us() - t;
+    nic->core_stat[GE_ST_P_FRAMES]++;
+    return r;
+}
+#else
+#define ge_probe_deliver(nic, frame, len)   ge_deliver((nic), (frame), (len))
+#endif
+
 static BOOL ge_rxintr(NetdevNic *nic)
 {
     GenetCore *c = GE(nic);
@@ -1157,6 +1221,7 @@ static BOOL ge_rxintr(NetdevNic *nic)
         {
             UWORD first = (UWORD)(c->rx_clean & (GE_RX_RING - 1));
             UWORD room  = (UWORD)(GE_RX_RING - first);
+            GE_P_START(pc);
 
             if (fresh <= room)
             {
@@ -1169,6 +1234,7 @@ static BOOL ge_rxintr(NetdevNic *nic)
                          (ULONG)room * GE_BUFSZ);
                 ge_cache(nic, c->rx_buf, (ULONG)(fresh - room) * GE_BUFSZ);
             }
+            GE_P_ADD(nic, GE_ST_P_CACHE_US, pc);
         }
         c->rx_clean = pidx;
     }
@@ -1178,9 +1244,11 @@ static BOOL ge_rxintr(NetdevNic *nic)
     for (n = 0; n < total; n++)
     {
         UWORD  idx    = (UWORD)(c->rx_cidx & (GE_RX_RING - 1));
+        GE_P_START(pd);
         ULONG  status = ge_rd(nic, GENET_RX_DESC_STATUS(idx));
         UWORD  len    = (UWORD)GENET_RX_DESC_STATUS_BUFLEN(status);
         UBYTE *buf    = c->rx_buf + (ULONG)idx * GE_BUFSZ;
+        GE_P_ADD(nic, GE_ST_P_DESC_US, pd);
 
         if ((status & GENET_RX_DESC_STATUS_ALL_ERRS) != 0)
         {
@@ -1201,7 +1269,7 @@ static BOOL ge_rxintr(NetdevNic *nic)
             nic->rx_errors++;
             nic->core_stat[GE_ST_RX_LEN]++;
         }
-        else if (!ge_deliver(nic, buf + GE_RX_PAD, (UWORD)(len - GE_RX_PAD)))
+        else if (!ge_probe_deliver(nic, buf + GE_RX_PAD, (UWORD)(len - GE_RX_PAD)))
         {
             /*
              * THE READER IS BEHIND, AND THE RING IS THE BACKLOG.  This frame
@@ -1222,8 +1290,12 @@ static BOOL ge_rxintr(NetdevNic *nic)
 
         /* The descriptor is re-armed by rewriting its address, the way the
            reference driver reloads it, before it is handed back. */
-        ge_wr(nic, GENET_RX_DESC_ADDRESS_LO(idx), (ULONG)buf);
-        ge_wr(nic, GENET_RX_DESC_ADDRESS_HI(idx), 0);
+        {
+            GE_P_START(pr);
+            ge_wr(nic, GENET_RX_DESC_ADDRESS_LO(idx), (ULONG)buf);
+            ge_wr(nic, GENET_RX_DESC_ADDRESS_HI(idx), 0);
+            GE_P_ADD(nic, GE_ST_P_DESC_US, pr);
+        }
         c->rx_cidx++;
     }
 
@@ -1232,7 +1304,11 @@ static BOOL ge_rxintr(NetdevNic *nic)
 
     /* The burst's completions, replied together (NetdevNic reply_batch). */
     if (nic->rx_flush != NULL)
+    {
+        GE_P_START(pf);
         nic->rx_flush(nic->rx_arg);
+        GE_P_ADD(nic, GE_ST_P_FLUSH_US, pf);
+    }
     return TRUE;
 }
 
@@ -1385,7 +1461,18 @@ static BOOL genet_isr(NetdevNic *nic)
 }
 
 /* The bottom half, and the vertical blank's poll: under Disable(). */
+static BOOL genet_intr_body(NetdevNic *nic);
+
 static BOOL genet_intr(NetdevNic *nic)
+{
+    GE_P_START(pi);
+    BOOL r = genet_intr_body(nic);
+
+    GE_P_ADD(nic, GE_ST_P_INTR_US, pi);
+    return r;
+}
+
+static BOOL genet_intr_body(NetdevNic *nic)
 {
     GenetCore *c = GE(nic);
     ULONG      stat;
