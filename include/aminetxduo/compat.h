@@ -154,6 +154,9 @@ ULONG ami_millis(VOID);
 /* The same, for a caller that may not block: 0 rather than opening the timer.
    src/common/events.c says why. */
 ULONG ami_millis_quick(VOID);
+/* The SYN cache's handshake clock (port/netxduo-amiga/inc/nx_user.h,
+   NX_TCP_SYNCACHE_CLOCK): ami_millis() once timer.device is up, 0 before. */
+ULONG _nx_amiga_handshake_millis(VOID);
 ULONG ami_eclock_rate(VOID);
 
 /* Hands timer.device back the open ami_millis() took lazily. A library must

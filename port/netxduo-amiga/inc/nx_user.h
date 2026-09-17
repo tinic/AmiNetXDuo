@@ -122,6 +122,16 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    was already at the old ceiling acknowledges exactly as it did. */
 #define NX_TCP_ACK_THRESHOLD_MAX                50176
 
+/* The clock the SYN cache times a handshake with (nx_tcp_syncache.c): the
+   E-Clock in milliseconds, src/common/compat.c.  An accepted socket then
+   carries its SYN-ACK-to-ACK round trip in nx_tcp_socket_handshake_rtt and
+   bsdsocket.library settles its window for the path the way it does for a
+   socket this end connected (select.c, the establish notify).  Ticks would
+   not do: 20 ms apiece, a LAN handshake would read as a long path one time
+   in fourteen.  A host test that compiles the SYN cache provides this.  */
+ULONG _nx_amiga_handshake_millis(VOID);
+#define NX_TCP_SYNCACHE_CLOCK()                 _nx_amiga_handshake_millis()
+
 /* Compiles the per-socket receive-queue cap; src/bsdsocket/socket.c must size
    nx_tcp_socket_receive_queue_maximum from each socket's window or a sub-MSS
    peer pins the whole pool.  The pool-wide low watermark half stays inert. */

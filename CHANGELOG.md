@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A connection accepted across a long path grows its receive window the way
+  one this end opened does: the SYN cache times its own handshake, SYN-ACK
+  out to ACK in, on the E-Clock, and the accepted socket settles for that
+  round trip. Nothing is measured across a retransmitted SYN-ACK, from a
+  cookie, or before the timer is up, and such a socket keeps the LAN window.
+  A1200 + PiStorm32 receiving from a peer through an emulated 300 Mbit,
+  26 ms link: 42 -> 278 Mbit/s (window 184 KB -> 1 MB), 0 retransmits;
+  LAN unchanged
+
 - `bsdsocket.library`'s `memcpy()` is net68k's `movem.l` copy again. Every
   `-flto` build up to 0.28.3 linked libc's instead: GCC emits the `memcpy`
   calls after the archives are scanned, the linker rescans only libc, and

@@ -98,11 +98,13 @@ static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
 
     /* A socket still parked on a listen port belongs to its listener. The
        application selects on the listener, not on the parked socket.  Its
-       window settles for the link it came up on; it has no handshake this
-       side timed, so it never grows (bsdsocket_window.h). */
+       window settles for the link it came up on and for the round trip the
+       SYN cache measured from its SYN-ACK to the ACK
+       (nx_tcp_socket_handshake_rtt; 0 when nothing was measured, which is
+       the LAN policy, bsdsocket_window.h). */
     if ((sock->as_Flags & ASF_INCOMING) != 0 && sock->as_Parent != NULL)
     {
-        bsd_tcp_window_settle(socket_ptr, 0UL);
+        bsd_tcp_window_settle(socket_ptr, socket_ptr->nx_tcp_socket_handshake_rtt);
         sock->as_Parent->as_Flags |= ASF_ACCEPTPEND;
         bsd_event_post(sock->as_Parent, FD_ACCEPT | FD_READ);
         return;

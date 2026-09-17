@@ -18,6 +18,12 @@
 
 
 static ULONG host_now;
+static ULONG host_ms;       /* NX_TCP_SYNCACHE_CLOCK, the port's millisecond clock */
+
+ULONG _nx_amiga_handshake_millis(VOID)
+{
+    return host_ms;
+}
 
 ULONG _tx_time_get(VOID)
 {
@@ -400,6 +406,7 @@ static void rig_reset(void)
 
 
     host_now = 100000;
+    host_ms  = 0;
     stub_synacks = 0;
     stub_rsts = 0;
     stub_established = 0;
@@ -768,6 +775,98 @@ static UINT cache_case(void)
     eq("a lost SYN-ACK is sent again, a bounded number of times",
        (unsigned long) stub_synacks, NX_TCP_SYNCACHE_RETRIES);
     eq("and the entry is given up in the end", cache -> nx_tcp_syncache_count, 0);
+
+    /* The handshake's round trip, on the port's clock: SYN-ACK out to ACK
+       in, handed to the socket; not measured across a retransmitted SYN-ACK,
+       from a cookie, or without a clock; not inflated by a wait in the
+       accept queue. */
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    host_ms = 1000;
+    {
+        ULONG iss = rig_syn(93, 0xE000);
+
+        host_ms = 1026;
+        ok("a handshake completes", rig_ack(93, 0xE000, iss) == NX_TRUE);
+        eq("and the socket carries its round trip",
+           rig_socket.nx_tcp_socket_handshake_rtt, 26);
+    }
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    host_ms = 1000;
+    {
+        ULONG iss = rig_syn(94, 0xE100);
+
+        ok("the ACK in the same millisecond", rig_ack(94, 0xE100, iss) == NX_TRUE);
+        eq("is a round trip of one, not of nothing measured",
+           rig_socket.nx_tcp_socket_handshake_rtt, 1);
+    }
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    {
+        ULONG iss = rig_syn(95, 0xE200);
+
+        host_ms = 500;
+        ok("without a clock the handshake completes", rig_ack(95, 0xE200, iss) == NX_TRUE);
+        eq("and measured nothing", rig_socket.nx_tcp_socket_handshake_rtt, 0);
+    }
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    host_ms = 2000;
+    {
+        ULONG iss = rig_syn(96, 0xE300);
+
+        /* Past the first rung of the retry ladder (the file's own
+           NX_TCP_SYNCACHE_RETRY_LADDER starts at one second). */
+        stub_synacks = 0;
+        for (i = 0; i < 3 && stub_synacks == 0; i++)
+        {
+            host_now += NX_IP_PERIODIC_RATE;
+            _nx_tcp_syncache_periodic(&rig_ip);
+        }
+        eq("the SYN-ACK was sent again", (unsigned long) stub_synacks, 1);
+        host_ms = 2030;
+        ok("and the ACK completes it", rig_ack(96, 0xE300, iss) == NX_TRUE);
+        eq("with no round trip: it could answer either copy",
+           rig_socket.nx_tcp_socket_handshake_rtt, 0);
+    }
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
+    host_ms = 3000;
+    {
+        ULONG iss = rig_syn(97, 0xE400);
+
+        host_ms = 3040;
+        ok("with no socket parked the handshake is queued",
+           rig_ack(97, 0xE400, iss) == NX_TRUE);
+        eq("in the accept queue", cache -> nx_tcp_syncache_accept_count, 1);
+        host_ms = 9000;
+        rig_socket.nx_tcp_socket_state = NX_TCP_LISTEN_STATE;
+        rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+        ok("a relisten takes it", _nx_tcp_syncache_deliver(&rig_ip, &rig_listen,
+                                                           &rig_socket) == NX_TRUE);
+        eq("with the round trip of the handshake, not of the wait",
+           rig_socket.nx_tcp_socket_handshake_rtt, 40);
+    }
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
+    host_ms = 4000;
+    for (i = 0; i < NX_TCP_SYNCACHE_SIZE; i++)
+    {
+        (void) rig_syn(8000 + i, 0xF000 + i);
+    }
+    iss_last = rig_syn(8999, 0xF999);                    /* past full: a cookie */
+    host_ms = 4030;
+    rig_socket.nx_tcp_socket_state = NX_TCP_LISTEN_STATE;
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    ok("a cookie completes", rig_ack(8999, 0xF999, iss_last) == NX_TRUE);
+    eq("and carries no round trip: nothing was stored to time it",
+       rig_socket.nx_tcp_socket_handshake_rtt, 0);
 
     return failures == 0 ? NX_TRUE : NX_FALSE;
 }

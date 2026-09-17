@@ -281,6 +281,15 @@ VOID ami_timer_close(VOID)
  * does not open.  A stack that has ever taken a timestamp -- which is every one
  * that got as far as bringing an interface up -- answers a real time.
  */
+/* nx_user.h's NX_TCP_SYNCACHE_CLOCK: the SYN cache's handshake clock.  Quick
+   in the sense above -- it runs under the IP protection from TCP input and
+   must not open timer.device there; before the timer is up it answers 0 and
+   the cache measures nothing. */
+ULONG _nx_amiga_handshake_millis(VOID)
+{
+    return ami_timer_ready ? ami_millis() : 0UL;
+}
+
 ULONG ami_millis_quick(VOID)
 {
     return ami_timer_ready ? ami_millis() : 0UL;
