@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- TCP congestion avoidance grows the window by the bytes acknowledged
+  (RFC 3465): one segment once a window's worth is in, the remainder
+  carried, instead of `MSS*MSS/cwnd` on every acknowledgment. The same
+  growth, one segment a round trip, without a division per ACK -- on the
+  68000 build that was a subroutine, 1.7% of the A1200's transmit profile
+
 - `WaitSelect()` keeps its timer.device request outstanding across calls
   instead of sending and aborting one per call: it is reaped on entry,
   cancelled only when the next wait wants an earlier deadline, and

@@ -630,6 +630,91 @@ static void wiring_cases(void)
 
 /* --------------------------------------------------------------- main ----- */
 
+/* --------------------------------------------- congestion avoidance ----- */
+
+/*
+ * RFC 5681 3.1 with RFC 3465's byte counting: in congestion avoidance the
+ * window grows by one segment once a window's worth of bytes has been
+ * acknowledged -- not a fraction per acknowledgment, and not several
+ * segments for one large acknowledgment.  Slow start is untouched: one
+ * segment (or the bytes acknowledged, if fewer) per acknowledgment.
+ */
+static void cwnd_cases(void)
+{
+    ULONG seq;
+    UINT  i;
+
+    printf("congestion avoidance grows the window by the byte count\n");
+
+    /* At the threshold from the start: congestion avoidance.  Eight
+       segments of H_SEG_BYTES fill a 4096-byte window exactly. */
+    h_fixture();
+    h_sock.nx_tcp_socket_tx_window_congestion    = 4096;
+    h_sock.nx_tcp_socket_tx_slow_start_threshold = 4096;
+    for (i = 0; i < 8; i++)
+        h_check_eq(h_send(), NX_SUCCESS, "a send did not go out");
+
+    seq = H_ISN;
+    for (i = 1; i <= 7; i++)
+    {
+        seq += H_SEG_BYTES;
+        (void)h_ack(seq);
+        h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 4096,
+                   "the window grew before a window's worth was acknowledged");
+    }
+    h_check_eq(h_sock.nx_tcp_socket_tx_cwnd_acked, 7 * H_SEG_BYTES,
+               "the bytes acknowledged so far are not counted");
+    seq += H_SEG_BYTES;                     /* 4096 acknowledged in all */
+    (void)h_ack(seq);
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 4096 + 1460,
+               "a window's worth acknowledged did not buy one segment");
+    h_check_eq(h_sock.nx_tcp_socket_tx_cwnd_acked, 0,
+               "the count did not start over");
+
+    /* A count carried from before: the segment comes when the total
+       passes the window, and the remainder carries. */
+    h_fixture();
+    h_sock.nx_tcp_socket_tx_window_congestion    = 1024;
+    h_sock.nx_tcp_socket_tx_slow_start_threshold = 1024;
+    h_sock.nx_tcp_socket_tx_cwnd_acked           = 900;
+    (void)h_send();
+    (void)h_ack(H_ISN + H_SEG_BYTES);
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 1024 + 1460,
+               "900 counted plus 512 acknowledged did not buy the segment");
+    h_check_eq(h_sock.nx_tcp_socket_tx_cwnd_acked, 900 + 512 - 1024,
+               "the remainder did not carry");
+
+    /* One acknowledgment after a long stall counts for one segment: the
+       carry is capped at a window, never several segments at once. */
+    h_fixture();
+    h_sock.nx_tcp_socket_tx_window_congestion    = 1024;
+    h_sock.nx_tcp_socket_tx_slow_start_threshold = 1024;
+    h_sock.nx_tcp_socket_tx_cwnd_acked           = 3000;
+    (void)h_send();
+    (void)h_ack(H_ISN + H_SEG_BYTES);
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 1024 + 1460,
+               "a count of several windows bought more than one segment");
+    h_check_eq(h_sock.nx_tcp_socket_tx_cwnd_acked, 1024,
+               "the carry past one window is not capped at a window");
+
+    /* Below the threshold: slow start, one segment or the bytes per ACK,
+       and no count left behind. */
+    h_fixture();
+    h_sock.nx_tcp_socket_tx_window_congestion    = 4096;
+    h_sock.nx_tcp_socket_tx_slow_start_threshold = 65535;
+    h_sock.nx_tcp_socket_tx_cwnd_acked           = 77;
+    for (i = 0; i < 4; i++)
+        (void)h_send();
+    (void)h_ack(H_ISN + H_SEG_BYTES);
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 4096 + H_SEG_BYTES,
+               "slow start did not add the bytes acknowledged");
+    (void)h_ack(H_ISN + 4 * H_SEG_BYTES);
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 4096 + H_SEG_BYTES + 1460,
+               "slow start did not add one segment for a large acknowledgment");
+    h_check_eq(h_sock.nx_tcp_socket_tx_cwnd_acked, 0,
+               "slow start left a byte count behind for congestion avoidance");
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -651,6 +736,7 @@ int main(void)
 
     formula_cases();
     wiring_cases();
+    cwnd_cases();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
