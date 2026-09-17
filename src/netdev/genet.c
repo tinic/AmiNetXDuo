@@ -56,7 +56,10 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * 1.5 ms of full-size ones; 32 transmit slots is the same reserve the shell's
  * queue offered the LANCE eight times over.  2 KB buffers because the ring
  * register takes a buffer length and a 1518-byte tagged frame plus the
- * 2-byte alignment shift must fit in one descriptor.
+ * 2-byte alignment shift must fit in one descriptor.  The chip has 256
+ * descriptors (the descriptor RAM ends at the ring registers, 0xc00 / 12);
+ * all 256 were tried 2026-09-17 against a 262 KB window from a 1 Gbit peer
+ * and received 598-600 Mbit/s against 589-602 with 128, so 128 stays.
  */
 #define GE_RX_RING      128
 #define GE_TX_RING      32
@@ -1547,7 +1550,11 @@ static LONG genet_attach(NetdevNic *nic)
     nic->tx_reclaim      = ge_txintr;   /* no TX interrupt: retire on ask */
     nic->tx_short_build  = 1;           /* the copy is 0.4 us, the mask 5.5 */
     nic->rx_holds        = 1;           /* the ring keeps frames for a late read */
-    nic->rx_capacity     = (ULONG)GE_RX_RING * GE_BUFSZ;
+    /* A frame takes a whole buffer whatever its size, so what the ring holds
+       is GE_RX_RING full frames, not GE_RX_RING * GE_BUFSZ bytes of them: the
+       opener's page arithmetic (bsdsocket_window.h, ami_bsd_tcp_window_fit)
+       would count a third more full-size segments than there are buffers. */
+    nic->rx_capacity     = (ULONG)GE_RX_RING * (1500UL + 14UL);
     nic->isr = genet_isr;
 #ifdef NETDEV_GENET_POLL_ONLY
     /* A bring-up arm: no server at all, the vertical blank is the whole of

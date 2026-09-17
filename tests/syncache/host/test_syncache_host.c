@@ -31,6 +31,7 @@ static NX_TCP_SOCKET *stub_last_socket;
 static ULONG stub_last_seq;
 static ULONG stub_synack_mss;
 static ULONG stub_synack_scale;
+static ULONG stub_synack_window;
 
 VOID _nx_tcp_packet_send_syn(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
 {
@@ -56,11 +57,19 @@ VOID _nx_tcp_packet_send_syn(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
 #ifdef NX_ENABLE_TCP_WINDOW_SCALING
     if (socket_ptr -> nx_tcp_snd_win_scale_value != 0xFF)
     {
-        UINT scale;
+        UINT  scale;
+        ULONG scale_window = socket_ptr -> nx_tcp_socket_rx_window_current;
+
+        /* The shipped sender's arithmetic: from the largest window the socket
+           may grow to, not the one it advertises now.  */
+        if (socket_ptr -> nx_tcp_socket_rx_window_maximum > scale_window)
+        {
+            scale_window = socket_ptr -> nx_tcp_socket_rx_window_maximum;
+        }
 
         for (scale = 0; scale < 15; scale++)
         {
-            if ((socket_ptr -> nx_tcp_socket_rx_window_current >> scale) < 65536)
+            if ((scale_window >> scale) < 65536)
             {
                 break;
             }
@@ -78,6 +87,7 @@ VOID _nx_tcp_packet_send_syn(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
 #endif
 
     stub_synack_mss = socket_ptr -> nx_tcp_socket_connect_mss;
+    stub_synack_window = socket_ptr -> nx_tcp_socket_rx_window_current;
 #ifdef NX_ENABLE_TCP_WINDOW_SCALING
     stub_synack_scale = socket_ptr -> nx_tcp_rcv_win_scale_value;
 #endif
@@ -652,6 +662,55 @@ static UINT cache_case(void)
 #ifdef NX_ENABLE_TCP_WINDOW_SCALING
     eq("with the scale the SYN-ACK announced, not the parked socket's",
        rig_socket.nx_tcp_rcv_win_scale_value, stub_synack_scale);
+#endif
+
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    /* A port whose sockets open small and may grow (bsdsocket.library opens
+       at 100,352 and lets a socket settle at 262,144 once the link is
+       known): the SYN-ACK's scale is the grown size's, from the cache and
+       from a cookie alike, or the grown window is not expressible and the
+       socket stays small for the whole connection.  */
+    rig_reset();
+    rig_listen.nx_tcp_listen_rx_window = 100352;
+    rig_listen.nx_tcp_listen_rx_window_maximum = 262144;
+    rig_socket.nx_tcp_socket_rx_window_default = 100352;
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    {
+        ULONG iss = rig_syn(90, 0xC100);
+
+        eq("a cached SYN-ACK advertises the window the socket opened with",
+           stub_synack_window, 100352);
+        eq("with the scale of the window it may grow to", stub_synack_scale, 3);
+        ok("the handshake completes", rig_ack(90, 0xC100, iss) == NX_TRUE);
+        eq("and the socket carries that scale",
+           rig_socket.nx_tcp_rcv_win_scale_value, 3);
+    }
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
+    rig_listen.nx_tcp_listen_rx_window = 100352;
+    rig_listen.nx_tcp_listen_rx_window_maximum = 262144;
+    for (i = 0; i < NX_TCP_SYNCACHE_SIZE; i++)
+    {
+        (void) rig_syn(7000 + i, 0xA100 + i);
+    }
+    iss_last = rig_syn(7999, 0xB100);                    /* past full: a cookie */
+    eq("a cookie SYN-ACK announces the grown window's scale too",
+       stub_synack_scale, 3);
+    rig_socket.nx_tcp_socket_state = NX_TCP_LISTEN_STATE;
+    rig_socket.nx_tcp_socket_rx_window_default = 100352;
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    ok("the cookie completes", rig_ack(7999, 0xB100, iss_last) == NX_TRUE);
+    eq("and the ACK reconstructs that scale, not the advertised window's",
+       rig_socket.nx_tcp_rcv_win_scale_value, 3);
+
+    /* A port that never set a maximum scales from the window, as before.  */
+    rig_reset();
+    rig_listen.nx_tcp_listen_rx_window = 100352;
+    rig_socket.nx_tcp_socket_rx_window_default = 100352;
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    (void) rig_syn(91, 0xC200);
+    eq("no maximum: the scale is the advertised window's", stub_synack_scale, 1);
 #endif
 
     rig_reset();

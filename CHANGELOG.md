@@ -34,6 +34,21 @@ version at the top when it merges.
   `DEVS:` as before when it does not. With the drawer last, a Roadshow
   machine's own `DEVS:NetInterfaces` hid the drawer's. `tls.library` still
   keeps its session cache at `DEVS:Internet/tlssessions` through the assign
+- A connection accepted on a gigabit link gets the receive window the
+  policy already gave one this end opened: the SYN-ACK's window scale is
+  now derived from the window the socket may grow to, not the one it
+  starts with. Since 0.28.0 an accepted socket negotiated scale 1 from its
+  100,352-byte opening window, the grown 262,144 was not expressible in it,
+  and every inbound transfer to a server on this machine -- iperf, `httpd`,
+  scp in, an ssh session's output -- ran at 100 KB in flight for its whole
+  life. A1200 + PiStorm32, iperf in: 522 -> 575-588 Mbit/s from a 1 Gbit
+  peer, receive-window-limited still, 0 retransmits; out unchanged
+- `anxgenet.device` states what its ring holds as 128 full frames, not
+  128 x 2 KB buffers: the opener counted a third more segments than
+  there are buffers and advertised 248 KB against a 128-frame ring. 184 KB
+  now. Measured against a peer on a 10 Gbit uplink through a 1 Gbit switch
+  port: 248 KB in flight lost frames in the switch every burst (240-404
+  Mbit/s, 90-256 retransmits a run), 184 KB none (575-579)
 
 ## 0.28.3
 
