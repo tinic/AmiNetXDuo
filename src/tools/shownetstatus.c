@@ -209,6 +209,10 @@ static VOID show_counters(const char *name, const AmiSana2Stats *st)
     tool_printf("  chip resets       %10lu    TX watchdog resets%10lu\n",
                 st->chip_resets, st->tx_wedges);
     tool_printf("  driver TX errors  %10lu\n", st->drv_tx_errors);
+    /* Writes that found the ring full and waited for a slot, and the ones
+       that found the wait queue full too and were dropped. */
+    tool_printf("  writes queued     %10lu    write queue full  %10lu\n",
+                st->tx_queued, st->tx_queue_full);
 }
 
 /*

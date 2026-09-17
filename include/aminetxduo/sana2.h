@@ -128,6 +128,12 @@ typedef struct AmiSana2Stats {
     ULONG   chip_resets;        /* "Chip resets"                           */
     ULONG   tx_wedges;          /* "Transmitter watchdog resets"           */
     ULONG   drv_tx_errors;      /* "Transmit errors", the chip's own count */
+    /* Writes that found every slot busy and waited in the shim's own queue
+       for one (sana2_tx.c, ami_sana2_tx_send); tx_queue_full is the ones
+       that found that queue full too and were dropped, counted in tx_errors
+       as well. */
+    ULONG   tx_queued;
+    ULONG   tx_queue_full;
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);

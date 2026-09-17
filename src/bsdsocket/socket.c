@@ -83,6 +83,14 @@ static ULONG bsd_udp_queue_max(VOID)
     return queue;
 }
 
+/*
+ * The sockets that can still draw on the receive budget: connecting or
+ * connected, or closed by this end only (FIN_WAIT, the peer may still send).
+ * One the peer has finished with (CLOSE_WAIT, CLOSING, LAST_ACK, TIMED_WAIT)
+ * receives nothing more and does not halve the next socket's window --
+ * every connection the web shell or a fetch has just finished sat in the
+ * count for its 2MSL.
+ */
 static ULONG bsd_tcp_consumer_count(NX_IP *ip)
 {
     NX_TCP_SOCKET *tcp   = ip->nx_ip_tcp_created_sockets_ptr;
@@ -92,8 +100,10 @@ static ULONG bsd_tcp_consumer_count(NX_IP *ip)
 
     for (i = 0; i < total && tcp != NX_NULL; i++)
     {
-        if (tcp->nx_tcp_socket_state != NX_TCP_CLOSED &&
-            tcp->nx_tcp_socket_state != NX_TCP_LISTEN_STATE)
+        UINT state = tcp->nx_tcp_socket_state;
+
+        if ((state >= NX_TCP_SYN_SENT && state <= NX_TCP_ESTABLISHED) ||
+            state == NX_TCP_FIN_WAIT_1 || state == NX_TCP_FIN_WAIT_2)
             live++;
 
         tcp = tcp->nx_tcp_socket_created_next;
@@ -189,17 +199,18 @@ VOID bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
     AmiSana2If   *sana = (nxif != NX_NULL)
                        ? (AmiSana2If *)nxif->nx_interface_additional_link_info
                        : NULL;
+    ULONG bps  = (sana != NULL) ? ami_sana2_get_bps(sana) : 0UL;
     ULONG cur  = tcp->nx_tcp_socket_rx_window_default;
-    ULONG want = ami_bsd_tcp_window_settle(cur, bsd_tcp_window_top(tcp),
-                                           (sana != NULL)
-                                               ? ami_sana2_get_bps(sana) : 0UL,
+    ULONG want = ami_bsd_tcp_window_settle(cur, bsd_tcp_window_top(tcp), bps,
                                            rtt_ms);
 
     /* ... and never more than the card behind this interface can hold from
-       the wire at once (bsdsocket_window.h, ami_bsd_tcp_window_fit).  The
-       segment size is the one the handshake settled: nx_tcp_socket_mss is
-       what the application asked for and stays 0 on an accepted socket. */
-    if (sana != NULL)
+       the wire at once (bsdsocket_window.h, ami_bsd_tcp_window_fit), where
+       the whole window can arrive at once -- a LAN, or a card slower than
+       the path (ami_bsd_tcp_window_burst_bound).  The segment size is the
+       one the handshake settled: nx_tcp_socket_mss is what the application
+       asked for and stays 0 on an accepted socket. */
+    if (sana != NULL && ami_bsd_tcp_window_burst_bound(bps, rtt_ms))
         want = ami_bsd_tcp_window_fit(want, ami_sana2_get_hw_rx_bytes(sana),
                                       tcp->nx_tcp_socket_connect_mss);
 
@@ -264,10 +275,15 @@ static VOID bsd_tcp_rx_queue_cap(NX_TCP_SOCKET *tcp)
  *
  * NetX Duo's compile-time NX_TCP_MAXIMUM_TX_QUEUE is the ceiling SO_SNDBUF may
  * ask for; what a socket starts with is a share of the pool, so a machine
- * with sixteen packets keeps the old eight and a machine with five hundred
+ * with sixteen packets keeps the old eight and a machine with four thousand
  * can keep a round trip's worth in flight.  The number that matters is
  * segments per round trip: on genet.device (5 ms) eight segments cap a sender
- * at 17 Mbit/s whatever the link does.  See nx_user.h.
+ * at 17 Mbit/s whatever the link does, and 32 (the SANA-II write ring, which
+ * this was pinned to until 2026-09-17) cap it at 46 KB a round trip -- 250
+ * Mbit/s on a 1.5 ms LAN, 14 over 26 ms.  The ring no longer bounds it: a
+ * write that finds the ring full waits in the shim's own queue for the next
+ * completion instead of sleeping a tick (sana2_internal.h,
+ * AMI_SANA2_TX_PEND).  See nx_user.h.
  */
 static VOID bsd_tcp_tx_queue_default(NX_TCP_SOCKET *tcp)
 {
@@ -281,13 +297,6 @@ static VOID bsd_tcp_tx_queue_default(NX_TCP_SOCKET *tcp)
             depth = BSD_TCP_TX_QUEUE_MIN;
         if (depth > NX_TCP_MAXIMUM_TX_QUEUE)
             depth = NX_TCP_MAXIMUM_TX_QUEUE;
-        /* Never deeper than the SANA-II write ring: a segment the ring cannot
-           take costs a tick's sleep in the driver's send, and measured on
-           genet.device that made a 64-deep queue slower than an 8-deep one
-           (sana2_internal.h, AMI_SANA2_TX_SLOTS).  SO_SNDBUF may still ask
-           for more, knowingly. */
-        if (depth > (ULONG)AMI_CFG_WRITEREQUESTS_MAX)
-            depth = (ULONG)AMI_CFG_WRITEREQUESTS_MAX;
     }
     tcp->nx_tcp_socket_transmit_queue_maximum         = depth;
     tcp->nx_tcp_socket_transmit_queue_maximum_default = depth;

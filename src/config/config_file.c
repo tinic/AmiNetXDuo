@@ -43,7 +43,7 @@
 #define AMI_CFG_OWN_DEVS        "AmiNetXDuo:Devs"
 #define AMI_CFG_DEVS_PREFIX     "DEVS:"
 
-static BOOL own_devs_exists(VOID)
+static BOOL exists_quietly(const char *name)
 {
     struct Process *me = (struct Process *)FindTask(NULL);
     APTR            saved;
@@ -56,7 +56,7 @@ static BOOL own_devs_exists(VOID)
 
     saved = me->pr_WindowPtr;
     me->pr_WindowPtr = (APTR)-1L;
-    lock = Lock((STRPTR)AMI_CFG_OWN_DEVS, ACCESS_READ);
+    lock = Lock((STRPTR)name, ACCESS_READ);
     me->pr_WindowPtr = saved;
 
     if (lock == 0)
@@ -64,6 +64,11 @@ static BOOL own_devs_exists(VOID)
 
     UnLock(lock);
     return TRUE;
+}
+
+static BOOL own_devs_exists(VOID)
+{
+    return exists_quietly(AMI_CFG_OWN_DEVS);
 }
 
 const char *ami_cfg_resolve(const char *path, char *buf, ULONG buflen)
@@ -88,6 +93,17 @@ const char *ami_cfg_resolve(const char *path, char *buf, ULONG buflen)
         return path;
 
     ami_cfg_join3(buf, buflen, AMI_CFG_OWN_DEVS "/", path + i, NULL);
+
+    /* Only to something that is there.  A self-contained installation
+       carries Devs/Networks and Devs/Internet in its drawer and no
+       NetInterfaces at all when the machine's interface files were written
+       into the system's DEVS: before it -- both bench machines, 2026-09-17:
+       every DEVS:NetInterfaces/<name> went to a drawer that does not exist
+       and AddNetInterface answered ENOENT for every interface.  What the
+       drawer has wins; what it lacks is read where it has always been. */
+    if (!exists_quietly(buf))
+        return path;
+
     return buf;
 }
 

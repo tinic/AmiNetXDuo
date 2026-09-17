@@ -21,6 +21,34 @@ version at the top when it merges.
   only this change: `fetch http://` 3.06 -> 3.87 Mbit/s, the copy 18.3% ->
   8.3% of the CPU; iperf 4.15 receive / 3.22 send unchanged, its 4,096-byte
   aligned reads never took the byte loop
+- A socket may keep a round trip's worth of segments in flight when it
+  sends: an eighth of the pool, 513 on a machine with 4,096 packets, where
+  it was pinned to the 32 writes the SANA-II ring holds. A write that finds
+  the ring full waits in the stack's own queue, in order, and the completion
+  that frees a slot launches it; before, it slept a 20 ms tick. A1200 +
+  PiStorm32 through `anxgenet.device`, iperf out: 180 -> 275 Mbit/s on the
+  LAN; through an emulated 26 ms path 12.2 -> 198 Mbit/s. `ShowNetStatus`
+  counts the writes that waited and the ones a full queue dropped
+- `DEVS:` is redirected into `AmiNetXDuo:Devs` only for a file or drawer
+  that is there. A self-contained installation whose interface files were
+  written into the system's `DEVS:NetInterfaces` before it (both bench
+  machines) had every interface answer ENOENT, the drawer having Networks
+  and Internet but no NetInterfaces
+
+- A socket that connects across a long path (a 10 ms round trip or more)
+  may grow its receive window to 1 MB, from 262,144: the window is the
+  transfer rate there, and 262,144 over 26 ms is 80 Mbit/s whatever the
+  link. The card's ring no longer caps it on a gigabit card over such a
+  path -- the far link paces the data, the card drains at wire speed -- and
+  on a machine whose pool is 2,048 packets or more TCP receive may take half
+  the pool instead of an eighth, so one download beside the web shell's
+  connection gets the whole megabyte; a socket the peer has finished with
+  no longer counts against the next one's share. Gigabit LAN sockets keep
+  262,144, 10 and 100 Mbit cards keep everything as it was. A1200 +
+  PiStorm32 downloading through an emulated 300 Mbit, 26 ms link: 47 -> 272
+  Mbit/s (window 184 KB -> 1 MB); AmiSpeedTest over the real WAN 70 -> 96
+  Mb/s to a server 27 ms away. An accepted socket still settles for the
+  LAN: it has no handshake this side timed
 
 - A self-contained installation is LAST in `LIBS:`, `C:` and `DEVS:`, not
   first. `ActivateAmiNetXDuo` is gone; the managed block is the three

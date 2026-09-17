@@ -51,8 +51,9 @@
  * the wire, 65535 (nxe_tcp_socket_create.c:170), and there is nothing to
  * grow to.
  *
- * 262,144 is 100 Mbit/s over 21 ms and the GENET's 128 x 2 KB ring, a claim
- * about links and rings, not a derivation from the pool.  The 10 ms
+ * The maxima are claims about links and rings, not derivations from the
+ * pool: 262,144 on a gigabit LAN is the burst the GENET's ring was measured
+ * to take, 1 MB on a long path is 300 Mbit/s at 26 ms (below).  The 10 ms
  * threshold is a coarse but safe line: the real A1200's LAN round trip is
  * 1-5 ms, the emulator's under 1, the Internet's 20 and up.
  */
@@ -60,8 +61,41 @@
 #define BSD_TCP_WINDOW_LAN      100352UL    /* (512 / 8) * 1568, the old ceiling */
 #endif
 
+/*
+ * THE LONG PATH IS THE WINDOW, 2026-09-17.  A1200 + PiStorm32 through
+ * anxgenet.device, AmiSpeedTest against a server 26 ms away on a 300 Mbit
+ * WAN, the socket settled at the GENET's 184 KB: 70.3 Mb/s, which is
+ * 184 KB over 21 ms -- the window, not the wire, not the CPU (the same
+ * machine receives 588 Mbit/s on the LAN).  300 Mbit/s at 26 ms is 975 KB
+ * in flight.  So the maximum a socket may grow to on a long path is 1 MB,
+ * paid for out of the pool's budget as before (a machine whose budget is
+ * smaller grows to its share), and the card's ring is not consulted on a
+ * long path over a gigabit card: the data arrives at the far link's pace,
+ * spread over the round trip, not as one wire-speed burst (see
+ * ami_bsd_tcp_window_burst_bound).  A gigabit LAN keeps the 262,144 it was
+ * measured at (BSD_TCP_WINDOW_MAX_LAN): there the whole window IS one burst.
+ */
 #ifndef BSD_TCP_WINDOW_MAX
-#define BSD_TCP_WINDOW_MAX      262144UL
+#define BSD_TCP_WINDOW_MAX      1048576UL
+#endif
+
+#ifndef BSD_TCP_WINDOW_MAX_LAN
+#define BSD_TCP_WINDOW_MAX_LAN  262144UL
+#endif
+
+/* A pool this size or larger is a big machine's, mostly idle (41 packets
+   were the most ever outstanding on the A1200, pool.h), and TCP receive may
+   take half of it instead of an eighth: 4,096 packets buy a 3.2 MB budget,
+   one socket at the maximum beside two others -- measured 2026-09-17, a
+   download on the A1200 runs beside the web shell's connection and one
+   more, and a quarter share gave it 536 KB, 120 Mbit/s over 33 ms where the
+   emulated link had 300.  Below the line every machine keeps the eighth it
+   had. */
+#ifndef BSD_TCP_WINDOW_BIG_POOL
+#define BSD_TCP_WINDOW_BIG_POOL     2048UL
+#endif
+#ifndef BSD_TCP_WINDOW_POOL_SHARE_BIG
+#define BSD_TCP_WINDOW_POOL_SHARE_BIG   2
 #endif
 
 #ifndef BSD_TCP_WINDOW_GROW_RTT_MS
@@ -128,6 +162,21 @@ ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
  * arithmetic, host-tested.
  */
 ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss);
+
+/*
+ * Whether the card has to hold the whole window from the wire at once, and
+ * so whether ami_bsd_tcp_window_fit() applies.  On a LAN round trip it does:
+ * a peer there puts the window on the wire back to back.  On a long path
+ * (BSD_TCP_WINDOW_GROW_RTT_MS and up) over a link of BSD_TCP_WINDOW_FAST_BPS
+ * or more, no: the far end's link is the slower one and paces the data, the
+ * congestion window grows a round trip at a time, and the card drains at
+ * wire speed into reads the stack keeps posted.  A slower card on a long
+ * path is still burst-bound -- the Internet is faster than a 100 Mbit card,
+ * so its bursts arrive at the card's own line rate and a 25 MHz 68030
+ * behind a 13 KB ring cannot take them (anxs2ext.h, ANXD_CMD_RX_CAPACITY).
+ * Pure arithmetic, host-tested.
+ */
+BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms);
 
 #ifndef BSD_TCP_WINDOW_CEILING
 #ifdef AMINETXDUO_TCP_WINDOW_SCALING

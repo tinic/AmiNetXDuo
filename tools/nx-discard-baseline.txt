@@ -69,6 +69,7 @@
 1	src/sana2/sana2_rx.c	tx_thread_delete
 1	src/sana2/sana2_rx.c	tx_thread_terminate
 1	src/sana2/sana2_tx.c	nx_packet_release
+1	src/sana2/sana2_tx.c	tx_thread_sleep
 1	src/sana2/sana2_tx.c	tx_timer_deactivate
 1	src/sana2/sana2_tx.c	tx_timer_delete
 1	src/tlslib/tls_conn.c	_nx_secure_tls_initialize
@@ -102,7 +103,6 @@
 2	src/netstack/netstack_rexx_vars.c	tx_mutex_get
 2	src/netstack/netstack_rexx_vars.c	tx_mutex_put
 2	src/sana2/sana2_rx.c	tx_mutex_put
-2	src/sana2/sana2_tx.c	tx_thread_sleep
 3	port/threadx-amiga/src/tx_amiga_adopt.c	_tx_amiga_reap
 3	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_timer_park
 3	src/bsdsocket/raw.c	tx_semaphore_delete

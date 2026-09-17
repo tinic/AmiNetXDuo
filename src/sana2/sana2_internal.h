@@ -272,7 +272,8 @@
    32 is what Roadshow gives every SANA-II driver by default ("32 buffers of
    1500 byte each, both inbound and outbound", its interface files), so no
    driver meets a deeper queue here than it has met for fifteen years.  The
-   per-socket TCP default is capped at this (src/bsdsocket/socket.c).  The
+   per-socket TCP default was capped at this until 2026-09-17; writes past
+   the ring now wait in AMI_SANA2_TX_PEND below (src/bsdsocket/socket.c).  The
    full build pays for 24 more AmiTxSlot per attached interface, no buffers --
    the packet is NetX Duo's; minimal and micro deliberately retain 8. */
 #define AMI_SANA2_TX_SLOTS          AMINETXDUO_TX_SLOTS
@@ -329,7 +330,33 @@
 #error "SANA-II readers need 8 KiB until every supported third-party driver is bounded"
 #endif
 
-/* Ticks to spin on a full TX ring before dropping the frame. */
+/*
+ * Writes waiting for a slot.  A full ring used to cost the sender a
+ * tx_thread_sleep(1) -- a 20 ms tick -- per spin (AMI_SANA2_TX_WAIT_TICKS of
+ * them, then a drop), which is why the per-socket transmit queue was pinned
+ * to the ring's 32 slots: 32 segments a round trip, 46 KB, 250 Mbit/s on a
+ * 1.5 ms LAN and 14 Mbit/s over 26 ms.  Now a write that finds no slot is
+ * queued here, in order, and the next completion launches it
+ * (ami_sana2_tx_kick); the queue is what lets the transmit queue grow to a
+ * round trip's worth.  Sixteen frames per slot: 512 in the full build, the
+ * pool share a big machine's socket may have in flight; 128 in minimal and
+ * micro.  Pointers only, the packet is NetX Duo's.
+ */
+#ifndef AMI_SANA2_TX_PEND
+#define AMI_SANA2_TX_PEND           (AMI_SANA2_TX_SLOTS * 16)
+#endif
+
+typedef struct AmiTxPending
+{
+    NX_PACKET  *packet;
+    ULONG       dst_msw;
+    ULONG       dst_lsw;
+    UWORD       ether_type;
+} AmiTxPending;
+
+/* Ticks to spin on a full TX ring before dropping the frame: the queue above
+   replaced the spin in ami_sana2_tx_send(); ami_sana2_tx_drain() still waits
+   this long for the device to hand back what it holds. */
 #ifndef AMI_SANA2_TX_WAIT_TICKS
 #define AMI_SANA2_TX_WAIT_TICKS     4
 #endif
@@ -772,6 +799,14 @@ struct AmiSana2If
     struct MsgPort      tx_port;
     AmiTxSlot           tx[AMI_SANA2_TX_SLOTS];
 
+    /* Writes waiting for a slot, oldest at tx_pend_head, tx_pend_count of
+       them; under Forbid() with the slots.  tx_kicking: one task at a time
+       moves them into slots, so they leave in the order they came. */
+    AmiTxPending        tx_pend[AMI_SANA2_TX_PEND];
+    UWORD               tx_pend_head;
+    UWORD               tx_pend_count;
+    volatile BOOL       tx_kicking;
+
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     /*
      * Lazy completion collection, see ami_sana2_tx_lazy_tick().  Parking only
@@ -876,6 +911,9 @@ VOID ami_sana2_rx_post_batch_host_test(AmiSana2Rx *rx);
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);
 VOID ami_sana2_tx_reap(AmiSana2If *iface);
+/* Launch queued writes into free slots, in order; from the reap and the
+   send.  Nothing to do when nothing waits. */
+VOID ami_sana2_tx_kick(AmiSana2If *iface);
 VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit);
 VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface);
 VOID ami_sana2_tx_defer(AmiSana2If *iface);

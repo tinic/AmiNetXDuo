@@ -306,8 +306,23 @@ static void h_a_big_machine_is_bounded_by_the_link(void)
             "a 128 MB machine no longer reaches the pool clamp");
     h_check(ami_bsd_tcp_budget((ULONG)AMI_POOL_MAX_PACKETS,
                                (ULONG)AMI_POOL_PAYLOAD) >=
-            2UL * (ULONG)BSD_TCP_WINDOW_MAX,
-            "the clamped pool's budget cannot back two sockets at the maximum");
+            (ULONG)BSD_TCP_WINDOW_MAX,
+            "the clamped pool's budget cannot back one socket at the maximum");
+    /* A big pool gives TCP receive a quarter, a small one the eighth it had:
+       the line is BSD_TCP_WINDOW_BIG_POOL, and 8 MB machines are under it. */
+    h_check(ami_bsd_tcp_budget((ULONG)BSD_TCP_WINDOW_BIG_POOL,
+                               (ULONG)AMI_POOL_PAYLOAD) ==
+            ((ULONG)BSD_TCP_WINDOW_BIG_POOL / BSD_TCP_WINDOW_POOL_SHARE_BIG) *
+                (ULONG)AMI_POOL_PAYLOAD,
+            "a big pool does not give TCP receive the half share");
+    h_check(ami_bsd_tcp_budget((ULONG)BSD_TCP_WINDOW_BIG_POOL - 1UL,
+                               (ULONG)AMI_POOL_PAYLOAD) ==
+            (((ULONG)BSD_TCP_WINDOW_BIG_POOL - 1UL) / BSD_TCP_WINDOW_POOL_SHARE) *
+                (ULONG)AMI_POOL_PAYLOAD,
+            "a pool under the line does not keep the eighth share");
+    h_check(ami_ns_pool_packets_for(8388608UL, (ULONG)AMI_POOL_MEM_DIVISOR,
+                                    M68K_STRIDE) < (ULONG)BSD_TCP_WINDOW_BIG_POOL,
+            "an 8 MB machine's pool is over the big-pool line");
 
     for (i = 0; i < (int)(sizeof(big) / sizeof(big[0])); i++)
         for (j = 0; j < H_STRIDE_N; j++)
@@ -364,11 +379,12 @@ static void h_a_big_machine_is_bounded_by_the_link(void)
             h_checkf(2UL * max2 <= budget,
                      "two grown sockets between them exceed the budget",
                      big[i], h_stride[j], 16UL);
-            /* From 128 MB up, memory is no longer what bounds a socket. */
+            /* From 128 MB up, memory is no longer what bounds the first
+               socket: its share of the clamped pool's half is past the
+               ceiling. */
             if (big[i] >= 134217728UL)
-                h_checkf(max1 == (ULONG)BSD_TCP_WINDOW_CEILING &&
-                         max2 == (ULONG)BSD_TCP_WINDOW_CEILING,
-                         "a 128 MB machine's maxima are not at the link ceiling",
+                h_checkf(max1 == (ULONG)BSD_TCP_WINDOW_CEILING,
+                         "a 128 MB machine's first maximum is not the link ceiling",
                          big[i], h_stride[j], 16UL);
         }
 
@@ -436,7 +452,8 @@ static void h_a_big_machine_is_bounded_by_the_link(void)
 static void i_the_window_settles_for_the_path_and_the_link(void)
 {
     const ULONG lan   = (ULONG)BSD_TCP_WINDOW_LAN;      /* 100,352 */
-    const ULONG max   = (ULONG)BSD_TCP_WINDOW_MAX;      /* 262,144 */
+    const ULONG max   = (ULONG)BSD_TCP_WINDOW_MAX;      /* 1,048,576 */
+    const ULONG lmax  = (ULONG)BSD_TCP_WINDOW_MAX_LAN;  /* 262,144 */
     const ULONG gbit  = (ULONG)BSD_TCP_WINDOW_FAST_BPS;
     const ULONG tenm  = 10000000UL;
     const ULONG hundm = 100000000UL;
@@ -456,15 +473,38 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
     h_check(ami_bsd_tcp_window_settle(8192UL, 8192UL, 0UL, 300UL) == 8192UL,
             "a small machine's floor window moved on a long path");
 
-    /* A LAN round trip on a gigabit link: the maximum, as on a long path --
-       the driver's ring and 128 posted reads back the burst (202 Mbit/s at
-       262,144 against 186 at 65,535, no frame lost, bsdsocket_window.h). */
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt - 1UL) == max,
-            "a gigabit LAN socket did not settle at the maximum");
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 0UL) == max,
-            "a passive gigabit socket did not settle at the maximum");
-    h_check(ami_bsd_tcp_window_settle(50176UL, max, gbit, 0UL) == max,
+    /* A LAN round trip on a gigabit link: the size the burst was measured
+       at -- the driver's ring and 128 posted reads back it (202 Mbit/s at
+       262,144 against 186 at 65,535, no frame lost, bsdsocket_window.h) --
+       and no further, whatever the maximum: there the window is one burst. */
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt - 1UL) == lmax,
+            "a gigabit LAN socket did not settle at the LAN maximum");
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 0UL) == lmax,
+            "a passive gigabit socket did not settle at the LAN maximum");
+    h_check(ami_bsd_tcp_window_settle(50176UL, max, gbit, 0UL) == lmax,
             "a small created window on a gigabit LAN did not grow");
+    h_check(ami_bsd_tcp_window_settle(lan, 200000UL, gbit, 0UL) == 200000UL,
+            "a gigabit LAN socket grew past a maximum under the LAN maximum");
+    /* ... while the same socket on a long path takes the whole maximum. */
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt) == max &&
+            max > lmax,
+            "a long path over a gigabit link stopped at the LAN maximum");
+
+    /* Whether the card must hold the window: a LAN round trip always, a
+       slower card on any path; a gigabit card on a long path is drained at
+       wire speed into posted reads while the far link paces the data. */
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, rtt - 1UL) == TRUE,
+            "a gigabit LAN socket is not burst-bound");
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, 0UL) == TRUE,
+            "a passive gigabit socket is not burst-bound");
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, rtt) == FALSE,
+            "a gigabit card on a long path is burst-bound");
+    h_check(ami_bsd_tcp_window_burst_bound(hundm, 26UL) == TRUE,
+            "a 100 Mbit card on a long path is not burst-bound");
+    h_check(ami_bsd_tcp_window_burst_bound(tenm, 300UL) == TRUE,
+            "a 10 Mbit card on a long path is not burst-bound");
+    h_check(ami_bsd_tcp_window_burst_bound(0UL, 95UL) == TRUE,
+            "an unknown link on a long path is not burst-bound");
     h_check(ami_bsd_tcp_window_settle(lan, lan, gbit, 0UL) == lan,
             "a gigabit LAN socket grew past a maximum equal to its window");
 

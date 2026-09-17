@@ -760,10 +760,125 @@ static void test_quick_write_completes_inline(void)
             "until the reply is reaped");
 }
 
+/* A full ring queues the write instead of sleeping a tick: the queue keeps
+   the order, the completion that frees a slot launches the head, a full
+   queue is the one drop left, and an interface going down releases what
+   waits. */
+#define Q_N     ((UWORD)AMI_SANA2_TX_SLOTS)
+#define Q_MANY  (Q_N + AMI_SANA2_TX_PEND + 2)
+static NX_PACKET q_pkt[Q_MANY];
+static UCHAR     q_buf[Q_MANY][POOL_BYTES];
+
+static NX_PACKET *q_packet(UWORD i)
+{
+    NX_PACKET *p = &q_pkt[i];
+
+    memset(p, 0, sizeof(*p));
+    p->nx_packet_data_start  = q_buf[i];
+    p->nx_packet_data_end    = q_buf[i] + POOL_BYTES;
+    p->nx_packet_prepend_ptr = q_buf[i] + NX_PHYSICAL_HEADER;
+    p->nx_packet_append_ptr  = q_buf[i] + NX_PHYSICAL_HEADER + ARP_LEN;
+    p->nx_packet_length      = ARP_LEN;
+    memcpy(p->nx_packet_prepend_ptr, arp_frame, ARP_LEN);
+    return p;
+}
+
+static UINT q_send(UWORD i)
+{
+    return ami_sana2_tx_send(&iface, q_packet(i), AMI_ETHERTYPE_ARP, 0xFFFF,
+                             0xFFFFFFFF);
+}
+
+/* The packet the slot a write went into carries. */
+static NX_PACKET *q_sent_packet(void)
+{
+    return ((AmiTxSlot *)sent_req()->ios2_Data)->packet;
+}
+
+static void test_full_ring_queues_in_order(void)
+{
+    UWORD i;
+    ULONG sends;
+
+    printf("sana2: a full write ring queues the write, in order, with no "
+           "sleep\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    for (i = 0; i < Q_N; i++)
+        h_check(q_send(i) == NX_SUCCESS, "a write into a free slot is posted");
+    h_check(h_sends == Q_N && iface.tx_pend_count == 0,
+            "every slot took one and nothing waits");
+
+    h_check(q_send(Q_N) == NX_SUCCESS,
+            "the write past the ring is accepted");
+    h_check(h_sends == Q_N, "and not posted: no slot is free");
+    h_check(h_sleeps == 0, "and nothing slept for one");
+    h_check(iface.tx_pend_count == 1 && iface.stats.tx_queued == 1,
+            "it waits in the queue");
+    h_check(h_releases == 0 && iface.stats.tx_errors == 0,
+            "and was neither released nor counted as an error");
+
+    h_check(q_send(Q_N + 1) == NX_SUCCESS && iface.tx_pend_count == 2,
+            "a second one waits behind it");
+
+    /* A slot the device hands back launches the head of the queue. */
+    ReplyMsg(&iface.tx[3].req.ios2_Req.io_Message);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1, "the reap completed the finished write");
+    h_check(h_sends == Q_N + 1, "and launched one that waited");
+    h_check(q_sent_packet() == &q_pkt[Q_N],
+            "the oldest one, into the freed slot");
+    h_check(sent_req() == &iface.tx[3].req, "which is the slot handed back");
+    h_check(iface.tx_pend_count == 1, "leaving the newer one waiting");
+
+    /* A send that finds a free slot while writes wait goes behind them. */
+    iface.tx[5].busy = FALSE;
+    h_check(q_send(Q_N + 2) == NX_SUCCESS, "a send while writes wait");
+    h_check(h_sends == Q_N + 2 && q_sent_packet() == &q_pkt[Q_N + 1],
+            "launched the one that waited, not itself");
+    h_check(iface.tx_pend_count == 1 &&
+            iface.tx_pend[iface.tx_pend_head].packet == &q_pkt[Q_N + 2],
+            "and took its own place at the back");
+
+    ReplyMsg(&iface.tx[3].req.ios2_Req.io_Message);
+    ami_sana2_tx_reap(&iface);
+    h_check(iface.tx_pend_count == 0 && h_sends == Q_N + 3,
+            "the next completion empties the queue");
+
+    /* Nothing waiting: a write into a free slot is direct again. */
+    ReplyMsg(&iface.tx[7].req.ios2_Req.io_Message);
+    ami_sana2_tx_reap(&iface);
+    sends = h_sends;
+    h_check(q_send(0) == NX_SUCCESS && h_sends == sends + 1 &&
+            iface.tx_pend_count == 0,
+            "with the queue empty a free slot is taken at once");
+
+    /* The queue is finite: past it the write is dropped, as a full ring was. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    for (i = 0; i < Q_N + AMI_SANA2_TX_PEND; i++)
+        (void)q_send(i);
+    h_check(iface.tx_pend_count == AMI_SANA2_TX_PEND && h_releases == 0,
+            "the queue holds AMI_SANA2_TX_PEND writes behind a full ring");
+    h_check(q_send(Q_N + AMI_SANA2_TX_PEND) == NX_TX_QUEUE_DEPTH,
+            "one more is refused");
+    h_check(h_releases == 1 && iface.stats.tx_queue_full == 1 &&
+            iface.stats.tx_errors == 1,
+            "released and counted, once");
+
+    /* Down: what waits goes back to the pool. */
+    h_reply_on_sleep = 0;
+    ami_sana2_tx_drain(&iface);
+    h_check(iface.tx_pend_count == 0,
+            "the drain empties the queue");
+    h_check(h_releases >= 1 + AMI_SANA2_TX_PEND,
+            "and released every write that waited");
+}
+
 int main(void)
 {
     frames_init();
     test_quick_write_completes_inline();
+    test_full_ring_queues_in_order();
 
     test_pad_cooked_no_fusion();
     test_pad_cooked_with_fusion();

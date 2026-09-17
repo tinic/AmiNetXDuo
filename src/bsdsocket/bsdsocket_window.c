@@ -8,7 +8,11 @@
 
 ULONG ami_bsd_tcp_budget(ULONG pool_packets, ULONG payload)
 {
-    return (pool_packets / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) * payload;
+    ULONG share = (pool_packets >= (ULONG)BSD_TCP_WINDOW_BIG_POOL)
+                ? (ULONG)BSD_TCP_WINDOW_POOL_SHARE_BIG
+                : (ULONG)BSD_TCP_WINDOW_POOL_SHARE;
+
+    return (pool_packets / share) * payload;
 }
 
 static ULONG bsd_window_share(ULONG pool_packets, ULONG payload,
@@ -81,9 +85,23 @@ ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
     /* A short path on a link that can put the whole window on the wire at
        once: the driver's ring and its posted reads back the burst now
        (sana2_internal.h, AMI_SANA2_RX_MAX_DEPTH; genet.c, the held pass), so
-       the window is the rate here too. */
+       the window is the rate here too -- up to the size that burst was
+       measured at (bsdsocket_window.h, BSD_TCP_WINDOW_MAX_LAN). */
     if (bps >= (ULONG)BSD_TCP_WINDOW_FAST_BPS)
+    {
+        if (maximum > (ULONG)BSD_TCP_WINDOW_MAX_LAN)
+            maximum = (ULONG)BSD_TCP_WINDOW_MAX_LAN;
         return (maximum > created) ? maximum : created;
+    }
 
     return created;
+}
+
+BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms)
+{
+    if (rtt_ms >= (ULONG)BSD_TCP_WINDOW_GROW_RTT_MS &&
+        bps >= (ULONG)BSD_TCP_WINDOW_FAST_BPS)
+        return FALSE;
+
+    return TRUE;
 }

@@ -104,10 +104,12 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
        AmiTCP_NG 4.1                                 56 Mbit/s
 
    Eight segments a round trip is a bandwidth cap in its own right, and no
-   card can lift it.  64 x 1460 is 93 KiB, more than a 64 KiB window without
-   scaling can use, so the window is the limit again and not this.  The
-   pool-share default keeps a 1 MB machine where it was. */
-#define NX_TCP_MAXIMUM_TX_QUEUE                 64
+   card can lift it.  1024 x 1460 is 1.4 MB, past the 1 MB receive window a
+   peer on a long path may offer (bsdsocket_window.h), so the peer's window
+   is the limit again and not this.  The pool-share default (an eighth of
+   the pool, 513 segments on a 4,096-packet pool) keeps a 1 MB machine where
+   it was; this is the ceiling SO_SNDBUF may ask for. */
+#define NX_TCP_MAXIMUM_TX_QUEUE                 1024
 
 /* The data-driven acknowledgment threshold (the fork's
    nx_tcp_socket_state_data_check.c) ramps from two segments to half the

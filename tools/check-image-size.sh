@@ -58,7 +58,11 @@ BUDGETS=(
     # survive installing this usergroup.library without trusting malformed DBs.
     "default:src/usergroup/usergroup.library:10000"
     "default:src/tlslib/tls.library:198000"
-    "minimal:src/bsdsocket/bsdsocket.library:226000"
+    # 225,876 -> 226,216 on 2026-09-17: the write queue behind the SANA-II
+    # ring and its launcher (a round trip in flight for every card: A1200
+    # sends 180 -> 275 Mbit/s on the LAN, 12 -> 198 over 26 ms), the 1 MB
+    # long-path window, and DEVS: redirected only to what exists.
+    "minimal:src/bsdsocket/bsdsocket.library:226500"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:26000"
     "minimal:src/usergroup/usergroup.library:10000"

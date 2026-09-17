@@ -5,6 +5,7 @@
  */
 
 #include "sana2_internal.h"
+#include "aminetxduo/nxstatus.h"
 
 #include "aminetxduo/budget.h"
 
@@ -54,6 +55,10 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
         slot->write_at = 0UL;
 #endif
     }
+
+    iface->tx_pend_head  = 0;
+    iface->tx_pend_count = 0;
+    iface->tx_kicking    = FALSE;
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     iface->tx_lazy_timer_up  = FALSE;
@@ -238,6 +243,11 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
            AmiTxSlot, so the reply message is the slot. */
         ami_sana2_tx_complete(iface, (AmiTxSlot *)msg);
     }
+
+    /* The slots just handed back are what the queued writes were waiting
+       for. */
+    if (iface->tx_pend_count != 0)
+        ami_sana2_tx_kick(iface);
 }
 
 /*
@@ -393,6 +403,28 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
     UWORD i;
     UWORD spins;
     UWORD busy = 0;
+
+    /* Writes still waiting for a slot go back to the pool: the interface is
+       going down and nothing will launch them. */
+    for (;;)
+    {
+        NX_PACKET *packet = NULL;
+
+        Forbid();
+        if (iface->tx_pend_count != 0)
+        {
+            packet = iface->tx_pend[iface->tx_pend_head].packet;
+            iface->tx_pend_head = (UWORD)((iface->tx_pend_head + 1) %
+                                          AMI_SANA2_TX_PEND);
+            iface->tx_pend_count--;
+        }
+        Permit();
+
+        if (packet == NULL)
+            break;
+        AMI_NX_CLEANUP(nx_packet_transmit_release(packet));
+        iface->stats.tx_errors++;
+    }
 
     for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
     {
@@ -550,17 +582,119 @@ LONG ami_sana2_inject(AmiSana2If *iface, UWORD ether_type, const UBYTE *dst,
                ? 0 : -1;
 }
 
+static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
+                                NX_PACKET *packet, UWORD ether_type,
+                                ULONG dst_msw, ULONG dst_lsw);
+
+/*
+ * Queue a write behind the ones already waiting.  FALSE when the queue is
+ * full, and the caller drops the packet.  Un-parks the reply port: while
+ * writes wait, every completion has to be collected at once, by the reader,
+ * because the collection is what launches the next one.
+ */
+static BOOL ami_sana2_tx_enqueue(AmiSana2If *iface, NX_PACKET *packet,
+                                 UWORD ether_type, ULONG dst_msw,
+                                 ULONG dst_lsw)
+{
+    AmiTxPending *pend = NULL;
+
+    Forbid();
+    if (iface->tx_pend_count < (UWORD)AMI_SANA2_TX_PEND)
+    {
+        pend = &iface->tx_pend[(iface->tx_pend_head + iface->tx_pend_count) %
+                               AMI_SANA2_TX_PEND];
+        pend->packet     = packet;
+        pend->dst_msw    = dst_msw;
+        pend->dst_lsw    = dst_lsw;
+        pend->ether_type = ether_type;
+        iface->tx_pend_count++;
+    }
+    Permit();
+
+    if (pend == NULL)
+        return FALSE;
+
+    iface->stats.tx_queued++;
+
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    if (iface->tx_lazy_parked)
+    {
+        Disable();
+        if (iface->tx_port.mp_SigTask != NULL)
+            iface->tx_port.mp_Flags = PA_SIGNAL;
+        iface->tx_lazy_parked = FALSE;
+        Enable();
+    }
+#endif
+
+    return TRUE;
+}
+
+VOID ami_sana2_tx_kick(AmiSana2If *iface)
+{
+    for (;;)
+    {
+        AmiTxSlot   *slot = NULL;
+        AmiTxPending pend;
+        UWORD        i;
+
+        /* One launcher at a time keeps the queue's order on the wire: the
+           flag is held from the dequeue through BeginIO().  A second task
+           finding it held leaves the rest to the holder, which comes back
+           round for anything queued behind its back; a write queued after
+           the holder has gone is launched by its own sender's kick. */
+        Forbid();
+        if (!iface->tx_kicking && iface->tx_pend_count != 0)
+        {
+            for (i = 0; i < iface->tx_slots; i++)
+            {
+                if (!iface->tx[i].busy)
+                {
+                    iface->tx[i].busy = TRUE;
+                    slot = &iface->tx[i];
+                    break;
+                }
+            }
+            if (slot != NULL)
+            {
+                iface->tx_kicking = TRUE;
+                pend = iface->tx_pend[iface->tx_pend_head];
+                iface->tx_pend_head = (UWORD)((iface->tx_pend_head + 1) %
+                                              AMI_SANA2_TX_PEND);
+                iface->tx_pend_count--;
+            }
+        }
+        Permit();
+
+        if (slot == NULL)
+            return;
+
+        if (!iface->online)
+        {
+            /* The interface went down while the write waited: teardown. */
+            slot->busy = FALSE;
+            AMI_NX_CLEANUP(nx_packet_transmit_release(pend.packet));
+            iface->stats.tx_errors++;
+        }
+        else
+        {
+            /* The verdict is the launch's own: a packet that fails here was
+               released by it, as one from the direct path is. */
+            (VOID)ami_sana2_tx_launch(iface, slot, pend.packet, pend.ether_type,
+                                      pend.dst_msw, pend.dst_lsw);
+        }
+
+        iface->tx_kicking = FALSE;
+    }
+}
+
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw)
 {
     AmiTxSlot *slot;
-    UWORD      spins;
-    ULONG      length;
-    BOOL       raw_write;
 #ifdef AMINETXDUO_RXPROBE
     ULONG probe_t0 = ami_budget_clock();
     ULONG probe_t1;
-    ULONG probe_t2;
 #endif
 
     if (iface == NULL || packet == NULL)
@@ -576,6 +710,7 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 
 #ifdef AMINETXDUO_RXPROBE
     probe_t1 = ami_budget_clock();
+    ami_budget_reap(probe_t1 - probe_t0);
 #endif
 
     if (!iface->online)
@@ -585,22 +720,52 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         return NX_NOT_ENABLED;
     }
 
-    slot = ami_sana2_tx_claim(iface);
-    for (spins = 0; slot == NULL && spins < AMI_SANA2_TX_WAIT_TICKS; spins++)
-    {
-        tx_thread_sleep(1);
-        ami_sana2_tx_reap(iface);
+    /*
+     * Behind whatever is already waiting, or straight into a slot.  A full
+     * ring is not a wait any more (it was a 20 ms tx_thread_sleep per spin,
+     * sana2_internal.h, AMI_SANA2_TX_PEND) and not a drop until the queue is
+     * full too: the write waits its turn and the completion that frees a
+     * slot launches it.
+     */
+    if (iface->tx_pend_count != 0)
+        slot = NULL;
+    else
         slot = ami_sana2_tx_claim(iface);
-    }
 
     if (slot == NULL)
     {
-        /* A full ring is congestion, not an error: drop and let the upper
-           layers retransmit. */
-        nx_packet_transmit_release(packet);
-        iface->stats.tx_errors++;
-        return NX_TX_QUEUE_DEPTH;
+        if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw))
+        {
+            /* Congestion, not an error: drop and let the upper layers
+               retransmit. */
+            nx_packet_transmit_release(packet);
+            iface->stats.tx_errors++;
+            iface->stats.tx_queue_full++;
+            return NX_TX_QUEUE_DEPTH;
+        }
+        ami_sana2_tx_kick(iface);
+        return NX_SUCCESS;
     }
+
+    return ami_sana2_tx_launch(iface, slot, packet, ether_type, dst_msw,
+                               dst_lsw);
+}
+
+/*
+ * One write into a claimed slot: the link header where the wire needs it,
+ * the pad, the tap, the request, BeginIO(), and the completion when the
+ * device kept IOF_QUICK.  Owns the packet from here, success or failure.
+ */
+static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
+                                NX_PACKET *packet, UWORD ether_type,
+                                ULONG dst_msw, ULONG dst_lsw)
+{
+    ULONG      length;
+    BOOL       raw_write;
+#ifdef AMINETXDUO_RXPROBE
+    ULONG probe_t1 = ami_budget_clock();
+    ULONG probe_t2;
+#endif
 
     slot->hdr_len = 0;
 
@@ -730,7 +895,8 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
      * with the tick live, and only over a PA_SIGNAL port.
      */
     iface->tx_lazy_last_send = tx_time_get();
-    if (iface->tx_lazy_timer_up && !iface->tx_lazy_parked)
+    if (iface->tx_lazy_timer_up && !iface->tx_lazy_parked &&
+        iface->tx_pend_count == 0)
     {
         Disable();
         if (iface->tx_port.mp_SigTask != NULL &&
@@ -764,7 +930,6 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     }
 
 #ifdef AMINETXDUO_RXPROBE
-    ami_budget_reap(probe_t1 - probe_t0);
     ami_budget_stuff(probe_t2 - probe_t1);
     ami_budget_post(ami_budget_clock() - probe_t2);
 #endif
