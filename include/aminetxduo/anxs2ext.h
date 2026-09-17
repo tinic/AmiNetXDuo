@@ -85,6 +85,31 @@
 #define ANXD_S2_RXF_VERIFIED    0x02
 #define ANXD_S2_RXF_CONTINUES   0x04
 
+/* THE TRANSPORT CHECKSUM, WRITTEN BY THE CARD ON THE WAY OUT.
+ * ti_Data IS A POINTER TO A UBYTE, preloaded by the opener with the
+ * ANXD_S2_TXF_* bits it can prepare frames for PLUS ANXD_S2_TXF_ASKED; the
+ * device replaces the byte with the intersection it will honour, ASKED
+ * cleared.  A device that does not know the tag leaves the byte alone, and
+ * the opener that reads ASKED back knows nothing was agreed: a device that
+ * answers every other tag here and not this one would otherwise be sent
+ * frames whose checksum field it never finishes.  For each bit accepted, a
+ * CMD_WRITE that carries
+ * ANXD_S2IOF_L4_CSUM in io_Flags promises: a cooked IPv4 datagram, not a
+ * fragment, whose transport header is TCP (TXF_TCP) or UDP (TXF_UDP), and
+ * whose checksum field holds the ones-complement sum of the pseudo-header,
+ * folded to sixteen bits and not complemented.  The device sums the
+ * transport header and payload on top of it and writes the complement into
+ * the field before the frame leaves; the opener writes nothing else there.
+ * The bit is in SANA-II's unused part of io_Flags (bits 1-4) and is set only
+ * on a device that answered the tag, so no other driver ever sees it. */
+#define ANXD_S2_TX_CSUM         (0x80000000UL + 0xB0000UL + 0x4185UL)
+
+#define ANXD_S2_TXF_TCP         0x01
+#define ANXD_S2_TXF_UDP         0x02
+#define ANXD_S2_TXF_ASKED       0x80
+
+#define ANXD_S2IOF_L4_CSUM      0x10
+
 /* ANXD_CMD_RX_POLL: "hand over what you are holding for my reads".
  *
  * A driver that empties a deep hardware ring in one interrupt can find the

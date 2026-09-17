@@ -279,6 +279,55 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
  * caller to hand to NetX Duo.  The pseudo-header is RFC 793's; the segment is
  * summed with its checksum field zero, the identity for a ones-complement sum.
  */
+/*
+ * `ip` starts a whole IPv4 TCP segment of `len` bytes, not a fragment:
+ * *ihl_out its header length, *total_out the datagram's total length, at
+ * most `len` (the rest is padding).  What both checksum paths ask first.
+ */
+static BOOL ami_sana2_tx_tcp_segment(const UCHAR *ip, ULONG len,
+                                     ULONG *ihl_out, ULONG *total_out)
+{
+    ULONG ihl, total;
+
+    if (len < 40 || (ip[0] & 0xF0) != 0x40)
+        return FALSE;                   /* not IPv4                          */
+
+    ihl = (ULONG)(ip[0] & 0x0F) * 4UL;
+    if (ihl < 20 || ihl + 20 > len)
+        return FALSE;
+
+    if (ip[9] != 6)                     /* not TCP                           */
+        return FALSE;
+
+    if ((((ULONG)ip[6] << 8) | ip[7]) & 0x3FFF)
+        return FALSE;                   /* a fragment has no whole segment   */
+
+    total = ((ULONG)ip[2] << 8) | ip[3];
+    if (total > len || total < ihl + 20)
+        return FALSE;                   /* padded or malformed               */
+
+    *ihl_out   = ihl;
+    *total_out = total;
+    return TRUE;
+}
+
+/* The pseudo-header of RFC 793, folded to sixteen bits and not complemented:
+   what a checksum over the segment starts from. */
+static ULONG ami_sana2_tx_pseudo_header(const UCHAR *ip, ULONG tcp_len)
+{
+    ULONG sum;
+
+    sum  = ((ULONG)ip[12] << 8) | ip[13];
+    sum += ((ULONG)ip[14] << 8) | ip[15];
+    sum += ((ULONG)ip[16] << 8) | ip[17];
+    sum += ((ULONG)ip[18] << 8) | ip[19];
+    sum += 6UL;
+    sum += tcp_len;
+    while (sum >> 16)
+        sum = (sum & 0xFFFFUL) + (sum >> 16);
+    return sum;
+}
+
 static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
 {
     NX_PACKET *pkt = slot->packet;
@@ -298,23 +347,8 @@ static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
 #endif
 
     ip = (const UCHAR *)pkt->nx_packet_prepend_ptr;
-
-    if (len < 40 || (ip[0] & 0xF0) != 0x40)
-        return FALSE;                   /* not IPv4                          */
-
-    ihl = (ULONG)(ip[0] & 0x0F) * 4UL;
-    if (ihl < 20 || ihl + 20 > len)
+    if (!ami_sana2_tx_tcp_segment(ip, len, &ihl, &total))
         return FALSE;
-
-    if (ip[9] != 6)                     /* not TCP                           */
-        return FALSE;
-
-    if ((((ULONG)ip[6] << 8) | ip[7]) & 0x3FFF)
-        return FALSE;                   /* a fragment has no whole segment   */
-
-    total = ((ULONG)ip[2] << 8) | ip[3];
-    if (total > len || total < ihl + 20)
-        return FALSE;                   /* padded or malformed               */
 
     tcp_len = total - ihl;
 
@@ -327,19 +361,11 @@ static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
     if (len > total)
         ami_sana2_copy_bytes(out + total, ip + total, len - total);
 
-    /* Fold what the copy accumulated to sixteen bits before the
-       pseudo-header goes on top of it. */
+    /* Fold what the copy accumulated to sixteen bits, the pseudo-header on
+       top of it, folded again. */
     while (sum >> 16)
         sum = (sum & 0xFFFFUL) + (sum >> 16);
-
-    /* The pseudo-header: addresses, protocol, TCP length. */
-    sum += ((ULONG)ip[12] << 8) | ip[13];
-    sum += ((ULONG)ip[14] << 8) | ip[15];
-    sum += ((ULONG)ip[16] << 8) | ip[17];
-    sum += ((ULONG)ip[18] << 8) | ip[19];
-    sum += 6UL;
-    sum += tcp_len;
-
+    sum += ami_sana2_tx_pseudo_header(ip, tcp_len);
     while (sum >> 16)
         sum = (sum & 0xFFFFUL) + (sum >> 16);
 
@@ -368,6 +394,39 @@ static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
     slot->cursor     = pkt;
     slot->cursor_off = len;
 
+    return TRUE;
+}
+
+/*
+ * The card finishes the TCP checksum (ANXD_S2_TX_CSUM): a cooked IPv4 TCP
+ * segment that is not a fragment, its TCP header whole in the first buffer
+ * and its checksum field the zero NetX Duo left for the interface, gets the
+ * pseudo-header sum written there, folded and not complemented, and the
+ * packet's checksum flag cleared so every copy of it from here on is the
+ * plain walk.  FALSE leaves the packet as it was, for the fused copy or the
+ * stack's own walk.  A retransmission zeroes the field and sets the flag
+ * again (nx_tcp_socket_retransmit.c), so it arrives here as new.
+ */
+BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt)
+{
+    UCHAR *ip  = (UCHAR *)pkt->nx_packet_prepend_ptr;
+    ULONG  len = pkt->nx_packet_length;
+    ULONG  ihl, total, sum;
+    UCHAR *csum;
+
+    if (!ami_sana2_tx_tcp_segment(ip, len, &ihl, &total) || total != len)
+        return FALSE;                   /* padding is the fusion's case      */
+
+    if ((ULONG)(pkt->nx_packet_append_ptr - ip) < ihl + 20)
+        return FALSE;                   /* the field is not in this buffer   */
+
+    sum     = ami_sana2_tx_pseudo_header(ip, total - ihl);
+    csum    = ip + ihl + 16;
+    csum[0] = (UCHAR)(sum >> 8);
+    csum[1] = (UCHAR)(sum & 0xFF);
+
+    pkt->nx_packet_interface_capability_flag &=
+        (ULONG)(~NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM);
     return TRUE;
 }
 

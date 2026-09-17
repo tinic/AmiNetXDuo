@@ -92,6 +92,8 @@ typedef struct NetdevOpener
     BOOL                op_RxLinkHdr;   /* write the link header before dst */
     UBYTE               op_RxFlags;     /* ANXD_S2_RXF_* bits beyond SUMMED the
                                            opener asked for (ANXD_S2_RX_FLAGS) */
+    UBYTE               op_TxCsum;      /* ANXD_S2_TXF_* bits agreed for this
+                                           opener's flagged writes (ANXD_S2_TX_CSUM) */
     APTR                op_RxFilled;
 
     UBYTE               op_Raw;

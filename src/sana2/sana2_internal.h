@@ -727,6 +727,9 @@ struct AmiSana2If
                                            ANXD device (link_hdr_ok) honours
                                            it, a kept flag is a finished
                                            write with no reply to reap      */
+    UBYTE               tx_csum_ok;     /* ANXD_S2_TX_CSUM: the ANXD_S2_TXF_*
+                                           checksums the device writes on the
+                                           way out, 0 = none (sana2_tx.c)   */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
@@ -855,6 +858,7 @@ ULONG  ami_sana2_known_rx_bytes(const char *device);
 BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
                             register ULONG len  __asm("d0"));
+BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
                               register ULONG len __asm("d0"));

@@ -976,6 +976,11 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
     NetdevTrack *tr;
     LONG         rc;
 
+    /* The opener's flagged write asks the chip for the transport checksum,
+       within what the two agreed at open; every other write asks nothing. */
+    unit->nu_Nic.tx_csum =
+        ((io->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) != 0) ? op->op_TxCsum
+                                                            : 0;
     rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;
@@ -2231,7 +2236,8 @@ static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
 /* ---------------------------------------------------------- the tag list -- */
 
 static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
-                             const char **pin, UBYTE **rx_flags_answer)
+                             const char **pin, UBYTE **rx_flags_answer,
+                             UBYTE **tx_csum_answer)
 {
     while (tags != NULL)
     {
@@ -2290,6 +2296,17 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
                 op->op_RxFlags = wanted;
                 *(UBYTE *)tags->ti_Data = op->op_RxFlags;
                 *rx_flags_answer = (UBYTE *)tags->ti_Data;
+            }
+        }
+        else if (tag == ANXD_S2_TX_CSUM)
+        {
+            /* What the opener can prepare; the unit's core narrows it
+               below, once it is known, and the answer goes back. */
+            if (tags->ti_Data != 0)
+            {
+                op->op_TxCsum   = (UBYTE)(*(UBYTE *)tags->ti_Data &
+                                          (UBYTE)~ANXD_S2_TXF_ASKED);
+                *tx_csum_answer = (UBYTE *)tags->ti_Data;
             }
         }
         else if (tag == S2_CopyFromBuff)
@@ -2364,6 +2381,7 @@ static struct Device *netdev_open(
     BOOL          first_opener;
     BOOL          first_promisc;
     UBYTE        *rx_flags_answer = NULL;
+    UBYTE        *tx_csum_answer  = NULL;
 
     io->ios2_Req.io_Error = 0;
 
@@ -2380,7 +2398,8 @@ static struct Device *netdev_open(
     }
 
     netdev_take_tags((const struct TagItem *)io->ios2_BufferManagement,
-                     op, &pin, &rx_flags_answer);
+                     op, &pin, &rx_flags_answer,
+                     &tx_csum_answer);
 
     nd_tracex("anx: open unit ", unit);
     hw = netdev_find_unit(d, unit, pin, &why);
@@ -2411,6 +2430,9 @@ static struct Device *netdev_open(
         op->op_RxFlags &= (UBYTE)~ANXD_S2_RXF_CONTINUES;
     if (rx_flags_answer != NULL)
         *rx_flags_answer = op->op_RxFlags;
+    op->op_TxCsum &= hw->nu_Nic.tx_csum_supported;
+    if (tx_csum_answer != NULL)
+        *tx_csum_answer = op->op_TxCsum;
 
     op->op_Hw        = hw;
     op->op_Raw       = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);

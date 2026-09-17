@@ -5,6 +5,7 @@
  */
 
 #include "sana2_internal.h"
+#include "aminetxduo/anxs2ext.h"
 
 /* BeginIO(), which the transmit path posts with; the shim declares it and
    this file defines it. */
@@ -429,6 +430,157 @@ static void test_pad_cooked_with_fusion(void)
     ami_sana2_tx_reap(&iface);
     h_check(pkt.nx_packet_length == ACK_LEN,
             "and the packet goes back at its own length");
+}
+
+/*
+ * ANXD_S2_TX_CSUM: a device that finishes the TCP checksum gets the
+ * pseudo-header sum in the field, folded and not complemented, the write
+ * flagged, and the plain copy; the fusion is not run.  10.0.0.1 -> 10.0.0.2,
+ * TCP, twenty bytes: 0x0a01 + 0x0a02 + 6 + 20 = 0x141d.
+ */
+static void test_chip_checksum_flags_the_write(void)
+{
+    printf("sana2: a device that writes the checksum gets the pseudo-header sum and a flagged write\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_csum_ok = ANXD_S2_TXF_TCP;
+    packet_init(ack_frame, ACK_LEN);
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) == NX_SUCCESS,
+            "the write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) != 0,
+            "and carries the checksum flag");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
+            "cooked, as the device's header offsets assume");
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
+            "the packet's deferred checksum is answered for");
+    h_check(pkt.nx_packet_prepend_ptr[36] == 0x14 &&
+            pkt.nx_packet_prepend_ptr[37] == 0x1d,
+            "by the pseudo-header sum in the field");
+    h_check(sent_req()->ios2_DataLength == 46, "padded to 46 all the same");
+
+    h_check(device_copy() == TRUE, "the copy hook hands over all 46");
+    h_check(devbuf[36] == 0x14 && devbuf[37] == 0x1d,
+            "the plain walk copies the pseudo-header sum, the fusion did not run");
+    h_check(memcmp(devbuf, ack_frame, 36) == 0 &&
+            memcmp(devbuf + 38, ack_frame + 38, ACK_LEN - 38) == 0,
+            "and the rest of the datagram as it was");
+    h_check(tail_is_zero(ACK_LEN, 46), "and the 6 after it are zero");
+
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1, "the reap releases the packet");
+}
+
+static void test_chip_checksum_needs_the_tag(void)
+{
+    printf("sana2: without the device's answer the write is not flagged and the fusion answers\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_csum_ok = 0;
+    packet_init(ack_frame, ACK_LEN);
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) == NX_SUCCESS,
+            "the write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) == 0,
+            "and is not flagged");
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0,
+            "the checksum is still the copy's to fill");
+    h_check(pkt.nx_packet_prepend_ptr[36] == 0 &&
+            pkt.nx_packet_prepend_ptr[37] == 0,
+            "and the field is the zero NetX Duo left");
+    h_check(device_copy() == TRUE, "the copy hook hands over all 46");
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
+            "and the fusion answered for it");
+    h_check(devbuf[36] != 0x14 || devbuf[37] != 0x1d,
+            "with the whole checksum, not the pseudo-header sum");
+
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+}
+
+static void test_chip_checksum_raw_takes_the_stack(void)
+{
+    printf("sana2: a raw write is never flagged, the stack fills its checksum first\n");
+
+    fixture_init(TRUE, S2WireType_Ethernet);
+    iface.tx_csum_ok = ANXD_S2_TXF_TCP;
+    packet_init(ack_frame, ACK_LEN);
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) == NX_SUCCESS,
+            "the write is posted");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) != 0, "raw");
+    h_check((sent_req()->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) == 0,
+            "and not flagged");
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
+            "the stack's walk answered for the checksum before the header went on");
+
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+}
+
+/* What the pseudo-header path declines, so the fusion or the stack keeps it:
+   each leaves the field zero and the packet's flag set. */
+static void test_chip_checksum_declines(void)
+{
+    static const struct { int at; UCHAR v; const char *why; } cases[] = {
+        { 9,  17,   "UDP" },
+        { 0,  0x60, "IPv6" },
+        { 6,  0x20, "a fragment (more fragments)" },
+        { 7,  0x01, "a fragment (offset)" },
+        { 3,  ACK_LEN + 6, "a total length past the packet" },
+        { 0,  0x4f, "an IP header longer than the packet" },
+    };
+    ULONG i;
+
+    printf("sana2: the pseudo-header sum is only for a whole IPv4 TCP segment\n");
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        packet_init(ack_frame, ACK_LEN);
+        pkt.nx_packet_prepend_ptr[cases[i].at] = cases[i].v;
+        pkt.nx_packet_interface_capability_flag =
+            NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+        h_check(ami_sana2_tx_pseudo_sum(&pkt) == FALSE, cases[i].why);
+        h_check(pkt.nx_packet_prepend_ptr[36] == 0 &&
+                pkt.nx_packet_prepend_ptr[37] == 0 &&
+                (pkt.nx_packet_interface_capability_flag &
+                 NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0,
+                "and the packet is left as it was");
+    }
+
+    /* The TCP header not whole in the first buffer: the field is elsewhere. */
+    packet_init(ack_frame, ACK_LEN);
+    pkt.nx_packet_append_ptr = pkt.nx_packet_prepend_ptr + 30;
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+    h_check(ami_sana2_tx_pseudo_sum(&pkt) == FALSE,
+            "a TCP header split across buffers");
+
+    /* And the one it takes. */
+    packet_init(ack_frame, ACK_LEN);
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+    h_check(ami_sana2_tx_pseudo_sum(&pkt) == TRUE, "a whole IPv4 TCP segment");
+    h_check(pkt.nx_packet_prepend_ptr[36] == 0x14 &&
+            pkt.nx_packet_prepend_ptr[37] == 0x1d,
+            "0x141d: addresses, protocol 6, twenty bytes");
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
+            "and the flag is taken");
 }
 
 static void test_pad_raw(void)
@@ -882,6 +1034,10 @@ int main(void)
 
     test_pad_cooked_no_fusion();
     test_pad_cooked_with_fusion();
+    test_chip_checksum_flags_the_write();
+    test_chip_checksum_needs_the_tag();
+    test_chip_checksum_raw_takes_the_stack();
+    test_chip_checksum_declines();
     test_pad_raw();
     test_high_ethertype_goes_raw();
     test_high_ethertype_checksum_first();

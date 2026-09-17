@@ -62,7 +62,11 @@ BUDGETS=(
     # ring and its launcher (a round trip in flight for every card: A1200
     # sends 180 -> 275 Mbit/s on the LAN, 12 -> 198 over 26 ms), the 1 MB
     # long-path window, and DEVS: redirected only to what exists.
-    "minimal:src/bsdsocket/bsdsocket.library:226500"
+    # -> 226,788 the same day: the transport checksum written by the card
+    # (ANXD_S2_TX_CSUM: the tag, the pseudo-header sum at launch, the flag
+    # on the write), A1200 sends 337 -> 462 Mbit/s with the page push it
+    # made possible.
+    "minimal:src/bsdsocket/bsdsocket.library:227000"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:26000"
     "minimal:src/usergroup/usergroup.library:10000"

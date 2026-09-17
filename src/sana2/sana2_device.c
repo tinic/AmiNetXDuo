@@ -986,6 +986,15 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->buffer_tags[tag].ti_Data = (ULONG)&iface->rx_flags_ok;
     tag++;
 #endif
+    iface->tx_csum_ok               = 0;
+#ifdef AMINETXDUO_RX_VERIFY
+    /* The transport checksum by the card, TCP only: what the fused copy
+       does in software otherwise, and the same reason it stops at TCP. */
+    iface->tx_csum_ok               = ANXD_S2_TXF_TCP | ANXD_S2_TXF_ASKED;
+    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_TX_CSUM;
+    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->tx_csum_ok;
+    tag++;
+#endif
 #if AMI_SANA2_OFFER_COPY16
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff16;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;
@@ -1044,6 +1053,11 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     /* Same door: IOF_QUICK on CMD_WRITE is Exec's contract, but only a driver
        whose BeginIO() has been read is offered it (sana2_tx.c). */
     iface->tx_quick_ok = iface->rx_poll_ok;
+    /* A device that does not know ANXD_S2_TX_CSUM left the preload alone,
+       ASKED still in it -- anxnet.device 0.28 answers every other tag and
+       would have been handed frames it never finishes. */
+    if (status != 0 || (iface->tx_csum_ok & ANXD_S2_TXF_ASKED) != 0)
+        iface->tx_csum_ok = 0;
 
     if (status != 0)
     {

@@ -6,6 +6,7 @@
 
 #include "sana2_internal.h"
 #include "aminetxduo/nxstatus.h"
+#include "aminetxduo/anxs2ext.h"
 
 #include "aminetxduo/budget.h"
 
@@ -762,6 +763,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
 {
     ULONG      length;
     BOOL       raw_write;
+    BOOL       csum_hw = FALSE;
 #ifdef AMINETXDUO_RXPROBE
     ULONG probe_t1 = ami_budget_clock();
     ULONG probe_t2;
@@ -821,6 +823,18 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
         eth[13] = (UCHAR)(ether_type);
     }
 
+    /*
+     * The transport checksum by the card (ANXD_S2_TX_CSUM): the pseudo-header
+     * sum goes into the field now, the copy hook then copies the segment as
+     * it is, and the write carries the flag.  Before the pad, whose zero
+     * bytes add nothing to a ones-complement sum either way; after the raw
+     * block, which has already handed such a packet to NetX Duo's walk.
+     */
+    if (iface->tx_csum_ok != 0 && !raw_write &&
+        (packet->nx_packet_interface_capability_flag &
+         NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0)
+        csum_hw = ami_sana2_tx_pseudo_sum(packet);
+
     /* After the raw block, so any header it prepended is already in
        nx_packet_length, and before the tap, so a capture shows the frame the
        wire sees. */
@@ -858,7 +872,8 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
      * for, so it does not get the offer.
      */
     slot->req.ios2_Req.io_Flags   = (UBYTE)((raw_write ? SANA2IOF_RAW : 0) |
-                                            (iface->tx_quick_ok ? IOF_QUICK : 0));
+                                            (iface->tx_quick_ok ? IOF_QUICK : 0) |
+                                            (csum_hw ? ANXD_S2IOF_L4_CSUM : 0));
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
     slot->req.ios2_PacketType     = (ULONG)ether_type;

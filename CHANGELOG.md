@@ -9,6 +9,28 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` has the chip write the TCP checksum of a frame on its
+  way out (the TBUF's 64-byte transmit status block, TBUF_CTRL 64B_EN, set
+  outright and cleared at stop like the RBUF's): the library puts the
+  pseudo-header sum in the field and flags the write, under a new private
+  buffer-management tag (`ANXD_S2_TX_CSUM`, `include/aminetxduo/anxs2ext.h`)
+  the device answers; a device that leaves the tag alone is never sent a
+  flagged write, and every other card keeps the fused copy. The frame sits
+  two bytes into its transmit buffer so both sides of the copy are longword
+  aligned. A1200 + PiStorm32 iperf out to a 1 Gbit peer: 337-340 -> 359-361
+  Mbit/s; the peer counted 0 checksum errors over 1.4 million segments and a
+  61 MB file arrived with its md5
+
+- `anxgenet.device` pushes its ring pages to memory with a plain call, not
+  through `Supervisor()`: on Emu68 the trap alone is 1.5 us and the page push
+  behind it 0.2, and the emulator executes `cpushp` from user mode. The
+  attach probes exactly that, one page of its own memory under the task's
+  trap handler, and keeps the `Supervisor()` entry where a privilege
+  violation is raised (`NetDevStats`: "page push without the trap"). Per
+  transmitted frame 3.3 -> 1.1 us; A1200 + PiStorm32 iperf out 359-361 ->
+  460-462 Mbit/s, in unchanged (883-886, 64 KB reads), 61 MB each way with
+  its md5
+
 - `anxgenet.device` sets the receive-buffer registers it depends on instead
   of or-ing its bits into whatever the previous driver left there, and puts
   them back when it stops. Those two registers survive the chip's resets

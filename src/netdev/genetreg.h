@@ -76,6 +76,22 @@
 #define GENET_RX_STATUS64_LEN           64
 #define GENET_RX_STATUS64_LENGTH_STATUS 0
 #define GENET_RX_STATUS64_CSUM          8
+/* The transmit side of the same: TBUF_CTRL's 64B_EN (the RBUF bit's
+   position) puts a 64-byte status block in front of every frame the DMA
+   reads, and tx_csum_info in it, a little-endian word at 48, asks the TBUF
+   to finish a transport checksum: bits 16-30 the offset of the transport
+   header from the start of the frame, bits 0-14 the offset of the checksum
+   field, bit 15 for UDP, bit 31 (length valid) to take the request.  The
+   field must already hold the pseudo-header sum; the block sums from the
+   header offset to the end of the frame on top of it and writes the
+   complement into the field.  FreeBSD if_genet.c (Karels, McNeill,
+   BSD-2-Clause) is the reference for the layout. */
+#define GENET_TBUF_CTRL                 0x600
+#define GENET_TX_STATUS64_LEN           64
+#define GENET_TX_STATUS64_CSUM_INFO     48
+#define  GENET_TX_CSUM_LEN_VALID        (1UL << 31)
+#define  GENET_TX_CSUM_START_SHIFT      16
+#define  GENET_TX_CSUM_UDP              (1UL << 15)
 #define GENET_UMAC_CMD                  0x808
 #define  GENET_UMAC_CMD_LCL_LOOP_EN     (1UL << 15)
 #define  GENET_UMAC_CMD_SW_RESET        (1UL << 13)
@@ -164,6 +180,7 @@
 #define  GENET_TX_DESC_STATUS_SOP       (1UL << 13)
 #define  GENET_TX_DESC_STATUS_QTAG      (0x3fUL << 7)
 #define  GENET_TX_DESC_STATUS_CRC       (1UL << 6)
+#define  GENET_TX_DESC_STATUS_CKSUM     (1UL << 4)
 #define GENET_TX_DESC_ADDRESS_LO(i)     (GENET_TX_BASE + GENET_DMA_DESC_SIZE * (i) + 0x04)
 #define GENET_TX_DESC_ADDRESS_HI(i)     (GENET_TX_BASE + GENET_DMA_DESC_SIZE * (i) + 0x08)
 

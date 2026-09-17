@@ -37,9 +37,9 @@
 
 /* Room for a core's own special-statistics records. */
 #ifdef GE_PROBE_ST
-#define NETDEV_CORE_STATS   31      /* + the GENET bottom-half probe's thirteen */
+#define NETDEV_CORE_STATS   37      /* + the GENET probe's thirteen RX, four TX */
 #else
-#define NETDEV_CORE_STATS   18
+#define NETDEV_CORE_STATS   20
 #endif
 
 /*
@@ -146,6 +146,12 @@ struct NetdevNic
     /* ANXD_S2_RXF_* verdicts this core can produce.  The shell intersects
        negotiation with this after it knows which unit was opened. */
     UBYTE               rx_flags_supported;
+    /* ANXD_S2_TXF_* checksums this core's chip can write on the way out, and
+       the shell's request for the frame ops->tx is being handed: the
+       negotiated bits of an opener whose write carries ANXD_S2IOF_L4_CSUM,
+       else zero. */
+    UBYTE               tx_csum_supported;
+    UBYTE               tx_csum;
     ULONG               rx_verified;   /* direct frames carrying VERIFIED */
     /*
      * BATCHED REPLIES, for a core on a machine where an Exec call is a trap.

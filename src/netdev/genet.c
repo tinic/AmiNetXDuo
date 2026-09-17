@@ -37,6 +37,7 @@
 
 #include <exec/execbase.h>
 #include <exec/memory.h>
+#include <exec/tasks.h>
 #include <proto/exec.h>
 
 extern struct ExecBase *SysBase;
@@ -108,6 +109,12 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define GE_RX_PAD       2
 /* ... after the 64-byte status block the RBUF writes first (RBUF_64B_EN). */
 #define GE_RX_HEAD      (GENET_RX_STATUS64_LEN + GE_RX_PAD)
+/* A transmit buffer: two bytes of nothing, the block the TBUF reads
+   (TBUF_CTRL 64B_EN), the frame.  The two put the frame's IP header on a
+   longword, where the stack's copy of the segment is too, so the copy
+   between them moves aligned longwords on both sides. */
+#define GE_TX_PAD       2
+#define GE_TX_HEAD      (GE_TX_PAD + GENET_TX_STATUS64_LEN)
 
 typedef struct GenetCore
 {
@@ -128,6 +135,8 @@ typedef struct GenetCore
     UBYTE   in_mdio;        /* a transaction is in flight, tick stays out   */
     UBYTE   cache;          /* cache maintenance around DMA is on           */
     UBYTE   pageops;        /* cpushp a page at a time, not CacheClearE     */
+    UBYTE   cpush_direct;   /* ... called, not entered through Supervisor():
+                               the attach saw no privilege violation      */
     UBYTE   phy_set;        /* the PHY's delays and negotiation were set up */
     ULONG   irq_pending;    /* status the top half took, for the bottom half */
     ULONG   phyid;
@@ -193,6 +202,8 @@ enum
                                for a reader that was behind (no frame lost) */
     GE_ST_HELD_FRAMES,      /* frames left waiting, summed over those passes */
     GE_ST_TICK_RESUMES,     /* held passes resumed by the vertical blank     */
+    GE_ST_TX_CSUM,          /* frames whose transport checksum the TBUF wrote */
+    GE_ST_CPUSH_DIRECT,     /* 1: page pushes are plain calls, 0: Supervisor() */
 #ifdef GE_PROBE_ST
     /* The bottom half timed on the Pi's system timer (bus 0x7E003000, 68k
        0xF8003000 through Emu68's /scb mapping, 1 MHz, a 10 ns read):
@@ -210,6 +221,10 @@ enum
     GE_ST_P_HWSUM_A,        /* RXCHK checksum == the software sum, as read   */
     GE_ST_P_HWSUM_B,        /* ... == the software sum, halves swapped       */
     GE_ST_P_HWSUM_NE,       /* neither                                       */
+    GE_ST_P_TX_US,          /* genet_tx, whole                               */
+    GE_ST_P_TXCACHE_US,     /* the kick's page push                          */
+    GE_ST_P_TXKICK_US,      /* the kick's producer write                     */
+    GE_ST_P_TX_COPIES,      /* frames genet_tx had to copy into the ring     */
 #endif
     GE_ST_COUNT
 };
@@ -237,6 +252,8 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET passes held for a reader behind",
     "GENET frames left waiting in those passes",
     "GENET held passes resumed by the blank",
+    "GENET transmit checksums by the chip",
+    "GENET page push without the trap (1)",
 #ifdef GE_PROBE_ST
     "PROBE genet_intr us",
     "PROBE cache op us",
@@ -251,6 +268,10 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "PROBE hw csum equal (as read)",
     "PROBE hw csum equal (swapped)",
     "PROBE hw csum unequal",
+    "PROBE genet_tx us",
+    "PROBE tx kick cache us",
+    "PROBE tx kick write us",
+    "PROBE tx copies into ring",
 #endif
     NULL
 };
@@ -379,12 +400,38 @@ static BOOL ge_mii_write(NetdevNic *nic, UBYTE reg, UWORD val)
  * Only a 68040-or-better executes cpushp; anything else takes CacheClearE.
  * The GENET is only ever behind Emu68, which emulates a 68040, so the fall
  * back is for the one machine that lied about its CPU.
+ *
+ * AND THE TRAP IS MOST OF IT.  Measured again on 2026-09-17 (cpushbench):
+ * Supervisor() with an RTE and nothing else 1.5 us, the page push behind it
+ * 0.2, and Emu68 executes cpushp from user mode without a privilege
+ * violation, 0.3 us for a dirtied page.  So the attach probes exactly that,
+ * one page of its own memory with the task's trap handler catching the
+ * violation a stricter emulator would raise, and a core that passed pushes
+ * its pages with a plain call from then on; one that did not keeps the
+ * Supervisor() entry.  On the transmit path that is a page push per frame,
+ * 3.3 us of the 8.4 the driver spent on a frame.
  */
 #define GE_PAGE         4096UL
 
 __asm__(
 "    .text\n"
 "    .arch 68040\n"
+/* a0 = first page, d0 = pages; whatever mode the caller is in, ends in RTS */
+"    .globl _ge_cpushp_pages\n"
+"_ge_cpushp_pages:\n"
+"1:  cpushp %dc,(%a0)\n"
+"    add.l #4096,%a0\n"
+"    subq.l #1,%d0\n"
+"    bne 1b\n"
+"    rts\n"
+/* The attach probe's trap handler: the trap number on top of the stack, the
+   exception frame under it.  Steps past the two-byte instruction. */
+"    .globl _ge_trap_skip\n"
+"_ge_trap_skip:\n"
+"    addq.l #4,%sp\n"
+"    addq.l #2,(2,%sp)\n"
+"    st _ge_trapped\n"
+"    rte\n"
 "    .globl _ge_sup_cpushp\n"
 "_ge_sup_cpushp:\n"
 "1:  cpushp %dc,(%a0)\n"
@@ -394,6 +441,24 @@ __asm__(
 "    rte\n"
 );
 extern VOID ge_sup_cpushp(VOID);
+extern VOID ge_cpushp_pages(register APTR page __asm("a0"),
+                            register ULONG pages __asm("d0"));
+extern VOID ge_trap_skip(VOID);
+UBYTE ge_trapped;
+
+/* Supervisor(): the routine runs in supervisor mode and ends in RTE. */
+static VOID ge_sup_pages(ULONG first, ULONG pages)
+{
+    register ULONG            _d0 __asm("d0") = pages;
+    register ULONG            _a0 __asm("a0") = first;
+    register VOID           (*_a5)(VOID) __asm("a5") = ge_sup_cpushp;
+    register struct ExecBase *_a6 __asm("a6") = SysBase;
+
+    __asm__ __volatile__ ("jsr a6@(-30:W)"
+                          : "+r" (_d0), "+r" (_a0)
+                          : "r" (_a5), "r" (_a6)
+                          : "cc", "memory", "d1", "a1");
+}
 
 static VOID ge_cache(NetdevNic *nic, APTR addr, ULONG len)
 {
@@ -407,16 +472,12 @@ static VOID ge_cache(NetdevNic *nic, APTR addr, ULONG len)
     {
         ULONG first = (ULONG)addr & ~(GE_PAGE - 1UL);
         ULONG last  = ((ULONG)addr + len - 1UL) & ~(GE_PAGE - 1UL);
-        register ULONG            _d0 __asm("d0") = (last - first) / GE_PAGE + 1UL;
-        register ULONG            _a0 __asm("a0") = first;
-        register VOID           (*_a5)(VOID) __asm("a5") = ge_sup_cpushp;
-        register struct ExecBase *_a6 __asm("a6") = SysBase;
+        ULONG pages = (last - first) / GE_PAGE + 1UL;
 
-        /* Supervisor(): the routine runs in supervisor mode and ends in RTE. */
-        __asm__ __volatile__ ("jsr a6@(-30:W)"
-                              : "+r" (_d0), "+r" (_a0)
-                              : "r" (_a5), "r" (_a6)
-                              : "cc", "memory", "d1", "a1");
+        if (c->cpush_direct)
+            ge_cpushp_pages((APTR)first, pages);
+        else
+            ge_sup_pages(first, pages);
         return;
     }
 
@@ -591,6 +652,10 @@ static VOID ge_reset(NetdevNic *nic)
     v &= ~(GENET_RBUF_RXCHK_EN | GENET_RBUF_SKIP_FCS | GENET_RBUF_L3_PARSE_DIS);
     ge_wr(nic, GENET_RBUF_CHK_CTRL,
           v | GENET_RBUF_RXCHK_EN | GENET_RBUF_L3_PARSE_DIS);
+    /* The transmit status block, for the checksum the TBUF finishes; the
+       same bit, the same reason to set it outright and clear it in stop. */
+    v = ge_rd(nic, GENET_TBUF_CTRL);
+    ge_wr(nic, GENET_TBUF_CTRL, v | GENET_RBUF_64B_EN);
 
     ge_wr(nic, GENET_RBUF_TBUF_SIZE_CTRL, 1);
 }
@@ -916,6 +981,8 @@ static VOID genet_stop(NetdevNic *nic)
     v = ge_rd(nic, GENET_RBUF_CHK_CTRL);
     ge_wr(nic, GENET_RBUF_CHK_CTRL,
           v & ~(GENET_RBUF_RXCHK_EN | GENET_RBUF_L3_PARSE_DIS));
+    v = ge_rd(nic, GENET_TBUF_CTRL);
+    ge_wr(nic, GENET_TBUF_CTRL, v & ~GENET_RBUF_64B_EN);
 
     ge_wr(nic, GENET_UMAC_MDF_CTRL, 0);
 
@@ -1367,17 +1434,25 @@ static VOID ge_tx_kick(NetdevNic *nic)
     n     = (UWORD)(c->tx_pidx - c->tx_kicked);
     first = (UWORD)(c->tx_kicked & (GE_TX_RING - 1));
     room  = (UWORD)(GE_TX_RING - first);
-    if (n <= room)
     {
-        ge_cache(nic, c->tx_buf + (ULONG)first * GE_BUFSZ, (ULONG)n * GE_BUFSZ);
+        GE_P_START(pk);
+        if (n <= room)
+        {
+            ge_cache(nic, c->tx_buf + (ULONG)first * GE_BUFSZ, (ULONG)n * GE_BUFSZ);
+        }
+        else
+        {
+            ge_cache(nic, c->tx_buf + (ULONG)first * GE_BUFSZ,
+                     (ULONG)room * GE_BUFSZ);
+            ge_cache(nic, c->tx_buf, (ULONG)(n - room) * GE_BUFSZ);
+        }
+        GE_P_ADD(nic, GE_ST_P_TXCACHE_US, pk);
     }
-    else
     {
-        ge_cache(nic, c->tx_buf + (ULONG)first * GE_BUFSZ,
-                 (ULONG)room * GE_BUFSZ);
-        ge_cache(nic, c->tx_buf, (ULONG)(n - room) * GE_BUFSZ);
+        GE_P_START(pw);
+        ge_wr(nic, GENET_TX_DMA_PROD_INDEX(GE_Q), c->tx_pidx);
+        GE_P_ADD(nic, GE_ST_P_TXKICK_US, pw);
     }
-    ge_wr(nic, GENET_TX_DMA_PROD_INDEX(GE_Q), c->tx_pidx);
     c->tx_kicked = c->tx_pidx;
     nic->core_stat[GE_ST_KICKS]++;
 }
@@ -1389,16 +1464,30 @@ static UBYTE *genet_tx_at(NetdevNic *nic)
 
     if (nic->txb_inuse >= GE_TX_RING)
         return NULL;
-    return c->tx_buf + (ULONG)(c->tx_pidx & (GE_TX_RING - 1)) * GE_BUFSZ;
+    return c->tx_buf + (ULONG)(c->tx_pidx & (GE_TX_RING - 1)) * GE_BUFSZ +
+           GE_TX_HEAD;
 }
 
 static BOOL ge_txintr(NetdevNic *nic);
 
+static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len);
+
 static LONG genet_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
+{
+    GE_P_START(pt);
+    LONG rc = genet_tx_body(nic, frame, len);
+    GE_P_ADD(nic, GE_ST_P_TX_US, pt);
+    return rc;
+}
+
+static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     GenetCore *c = GE(nic);
     UWORD      idx;
+    UBYTE     *slot;
     UBYTE     *buf;
+    ULONG      status;
+    ULONG      info;
 
     if (!nic->running)
         return DP8390_TX_OFFLINE;
@@ -1414,26 +1503,62 @@ static LONG genet_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     if (len < NETDEV_FRAME_MIN)
         len = NETDEV_FRAME_MIN;
 
-    idx = (UWORD)(c->tx_pidx & (GE_TX_RING - 1));
-    buf = c->tx_buf + (ULONG)idx * GE_BUFSZ;
+    idx  = (UWORD)(c->tx_pidx & (GE_TX_RING - 1));
+    slot = c->tx_buf + (ULONG)idx * GE_BUFSZ;
+    buf  = slot + GE_TX_HEAD;
 
     if (frame != buf)
     {
         UWORD bulk = (UWORD)(len & (UWORD)~3u);
         UWORD i;
 
+#ifdef GE_PROBE_ST
+        nic->core_stat[GE_ST_P_TX_COPIES]++;
+#endif
         if (bulk != 0)
             n68k_copy_longs(buf, frame, (ULONG)(bulk >> 2));
         for (i = bulk; i < len; i++)
             buf[i] = frame[i];
     }
 
-    ge_wr(nic, GENET_TX_DESC_ADDRESS_LO(idx), (ULONG)buf);
+    /*
+     * The transport checksum, by the TBUF: the opener that asked for it
+     * (ANXD_S2_TX_CSUM, the flag on this write) has put the pseudo-header
+     * sum in the field, and the header offsets are in the frame itself.
+     * Anything else gets a zero word, which the block ignores.
+     */
+    status = GENET_TX_DESC_STATUS_SOP | GENET_TX_DESC_STATUS_EOP |
+             GENET_TX_DESC_STATUS_CRC | GENET_TX_DESC_STATUS_QTAG |
+             GENET_TX_DESC_STATUS_BUFLEN(len + GENET_TX_STATUS64_LEN);
+    info = 0;
+    if (nic->tx_csum != 0)
+    {
+        ULONG start = (ULONG)NETDEV_HDR_LEN + ((ULONG)(buf[14] & 0x0F) << 2);
+        UBYTE proto = buf[23];
+
+        if (proto == 6 && (nic->tx_csum & ANXD_S2_TXF_TCP) != 0)
+            info = (start << GENET_TX_CSUM_START_SHIFT) | (start + 16UL);
+        else if (proto == 17 && (nic->tx_csum & ANXD_S2_TXF_UDP) != 0)
+            info = (start << GENET_TX_CSUM_START_SHIFT) | (start + 6UL) |
+                   GENET_TX_CSUM_UDP;
+        if (info != 0)
+        {
+            info   |= GENET_TX_CSUM_LEN_VALID;
+            status |= GENET_TX_DESC_STATUS_CKSUM;
+            nic->core_stat[GE_ST_TX_CSUM]++;
+        }
+    }
+    {
+        /* Little-endian, two words: the block sits two bytes into the slot. */
+        UWORD *w = (UWORD *)(slot + GE_TX_PAD + GENET_TX_STATUS64_CSUM_INFO);
+
+        w[0] = __builtin_bswap16((UWORD)(info & 0xffffUL));
+        w[1] = __builtin_bswap16((UWORD)(info >> 16));
+    }
+
+    ge_wr(nic, GENET_TX_DESC_ADDRESS_LO(idx), (ULONG)(slot + GE_TX_PAD));
     ge_wr(nic, GENET_TX_DESC_ADDRESS_HI(idx), 0);
-    ge_wr(nic, GENET_TX_DESC_STATUS(idx),
-          GENET_TX_DESC_STATUS_SOP | GENET_TX_DESC_STATUS_EOP |
-          GENET_TX_DESC_STATUS_CRC | GENET_TX_DESC_STATUS_QTAG |
-          GENET_TX_DESC_STATUS_BUFLEN(len));
+    ge_wr(nic, GENET_TX_DESC_STATUS(idx), status);
 
     c->tx_pidx++;
     nic->txb_inuse = (UWORD)(c->tx_pidx - c->tx_cidx);
@@ -1677,6 +1802,21 @@ static LONG genet_attach(NetdevNic *nic)
     c->tx_buf = c->rx_buf + (ULONG)GE_RX_RING * GE_BUFSZ;
     c->cache  = 1;
     c->pageops = (UBYTE)((SysBase->AttnFlags & AFF_68040) != 0);
+    c->cpush_direct = 0;
+    if (c->pageops)
+    {
+        /* One page push from here, user mode, with this task's trap handler
+           swapped for one that notes the violation and steps over it. */
+        struct Task *me  = FindTask(NULL);
+        APTR         old = me->tc_TrapCode;
+
+        ge_trapped      = 0;
+        me->tc_TrapCode = (APTR)ge_trap_skip;
+        ge_cpushp_pages((APTR)((ULONG)mem & ~(GE_PAGE - 1UL)), 1UL);
+        me->tc_TrapCode = old;
+        c->cpush_direct = (UBYTE)(ge_trapped == 0);
+    }
+    nic->core_stat[GE_ST_CPUSH_DIRECT] = c->cpush_direct;
     c->phy    = (nic->dt_phy != 0xff) ? nic->dt_phy : 1;
     nic->core_stat_names = ge_stat_names;
     nic->reply_batch     = 1;           /* Emu68: an Exec call is a trap */
@@ -1719,6 +1859,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->tx_at         = genet_tx_at;
     nic->rx_flags_supported = (UBYTE)(ANXD_S2_RXF_VERIFIED |
                                       ANXD_S2_RXF_CONTINUES);
+    nic->tx_csum_supported  = (UBYTE)(ANXD_S2_TXF_TCP | ANXD_S2_TXF_UDP);
     nic->ring_copy_sum = NULL;
     nic->frame_at      = NULL;
     nic->read_hdr      = NULL;
