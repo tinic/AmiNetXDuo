@@ -1506,6 +1506,21 @@ static ULONG netdev_soft(register NetdevUnit *unit __asm("a1"))
     return 0;
 }
 
+VOID netdev_nic_poll(NetdevNic *nic)
+{
+    NetdevUnit *unit = (NetdevUnit *)((UBYTE *)nic -
+                                      offsetof(NetdevUnit, nu_Nic));
+
+    Disable();
+    if (unit->nu_InIsr == 0 && unit->nu_Online)
+    {
+        unit->nu_InIsr = 1;
+        (VOID)netdev_interrupt(unit);
+        unit->nu_InIsr = 0;
+    }
+    Enable();
+}
+
 static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 {
     ULONG mine;
@@ -2610,6 +2625,11 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
         /* After stop, which was the last register access. */
         netdev_cache_release(&d->nd_Units[i].nu_Nic);
 #endif
+
+        /* A core's task, before the memory it runs on goes. */
+        if (d->nd_Units[i].nu_Nic.ops->detach != NULL &&
+            d->nd_Units[i].nu_Nic.core_mem != NULL)
+            d->nd_Units[i].nu_Nic.ops->detach(&d->nd_Units[i].nu_Nic);
 
         /* A bus master's rings, allocated at attach.  After stop: the chip
            has been told to let go of them. */

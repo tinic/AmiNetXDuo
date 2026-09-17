@@ -11,6 +11,17 @@ version at the top when it merges.
 
 ## 0.28.5
 
+- `anxgenet.device` delivers without an interrupt whenever the machine is
+  free to take it: a task at the lowest priority watches the receive ring for
+  half a millisecond after a frame last came or went and runs the service
+  pass itself the moment one is there, so a reply lands microseconds after
+  its last byte; a stream leaves the poller its gaps and the interrupt
+  delivers as before when the gaps do not come, and a CPU-bound task above
+  it simply starves it back to that. On the A1200 + PiStorm32, on top of the
+  timeout change below: a Fitz share read 26.5 -> 31.6 MB/s, iperf in
+  832 -> 910 Mbit/s, out 541 -> 564; in a ten-second receive run half the
+  frames arrived with no interrupt at all
+
 - `anxgenet.device` answers a request four times sooner. Its receive
   interrupt waited 2 ms for a batch of 32 frames to form, and a reply shorter
   than that -- a ping, a DNS answer, a file server's 32 KB read -- sat the

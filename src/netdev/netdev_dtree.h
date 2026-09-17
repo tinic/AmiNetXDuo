@@ -35,6 +35,15 @@ typedef struct NetdevDtInfo
 BOOL netdev_dtree_find(const char *compat, NetdevDtInfo *out);
 
 /*
+ * A fixed address on the bus the node `bus` (a path, "/soc") gives its
+ * children, translated to a 68k address.  For what the tree does not name:
+ * Emu68's tree has no node for the SoC's system timer, which it keeps for
+ * itself, and the BCM283x/2711 peripheral map puts it at 0x7e003000 on /soc
+ * whatever the tree says.  FALSE with no tree, no such node or no range.
+ */
+BOOL netdev_dtree_bus_addr(const char *bus, ULONG addr, ULONG *out);
+
+/*
  * Whether [addr, addr + len) lies inside what the tree's memory nodes call
  * physical RAM -- the only RAM a bus master's DMA can be pointed at.  FALSE
  * with no tree at all.

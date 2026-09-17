@@ -51,8 +51,10 @@ BUDGETS=(
     # 21,724 at the split; 23,032 with the receive offload (IPv4 and IPv6
     # verification, the CONTINUES mark and its four counters); 24,440 with
     # the held pass, the batched replies, the reset on stop and their
-    # counters -- 142 -> 270 Mbit/s between them, 2026-09-15.
-    "default:src/netdev/anxgenet.device:26000"
+    # counters -- 142 -> 270 Mbit/s between them, 2026-09-15.  26,828 with
+    # the idle poller (its task, the clock through /soc, three counters):
+    # Fitz read 26.5 -> 31.6 MB/s, iperf in 832 -> 910, 2026-09-17.
+    "default:src/netdev/anxgenet.device:27500"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
     # survive installing this usergroup.library without trusting malformed DBs.
@@ -70,7 +72,7 @@ BUDGETS=(
     # ten thousand 63 -> 537 Mbit/s out on the A1200.
     "minimal:src/bsdsocket/bsdsocket.library:227500"
     "minimal:src/netdev/anxnet.device:43000"
-    "minimal:src/netdev/anxgenet.device:26000"
+    "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/usergroup/usergroup.library:10000"
 )
 

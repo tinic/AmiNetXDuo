@@ -37,9 +37,9 @@
 
 /* Room for a core's own special-statistics records. */
 #ifdef GE_PROBE_ST
-#define NETDEV_CORE_STATS   37      /* + the GENET probe's thirteen RX, four TX */
+#define NETDEV_CORE_STATS   40      /* + the GENET probe's thirteen RX, four TX */
 #else
-#define NETDEV_CORE_STATS   20
+#define NETDEV_CORE_STATS   23
 #endif
 
 /*
@@ -107,7 +107,20 @@ struct NetdevNicOps
      * that cannot be asked; such a core is not guarded.
      */
     BOOL  (*coherent)(NetdevNic *nic);
+    /*
+     * The unit is going away, after stop and before its rings are freed:
+     * a core that started a task at attach ends it here.  NULL for a core
+     * with nothing to end.
+     */
+    VOID  (*detach)(NetdevNic *nic);
 };
+
+/*
+ * A core's own task asks for a service pass: the masked context the
+ * interrupt server, the software interrupt and the vertical blank give the
+ * core, excluded from all three, from a task.
+ */
+VOID netdev_nic_poll(NetdevNic *nic);
 
 struct NetdevNic
 {

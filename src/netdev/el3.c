@@ -1001,5 +1001,6 @@ const struct NetdevNicOps netdev_nic_el3 =
     el3_intr,
     el3_reset,
     NULL,               /* no link to poll: the wire is the link */
-    NULL                /* a PCMCIA card: no Zorro III, no guard */
+    NULL                /* a PCMCIA card: no Zorro III, no guard */,
+    NULL                /* no task to end */
 };

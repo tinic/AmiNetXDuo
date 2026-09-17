@@ -122,6 +122,38 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define GE_RX_COALESCE_TICKS    61      /* 500 us */
 #endif
 
+/*
+ * The interrupt is the backstop; delivery when the CPU is free is a poll.
+ *
+ * Whatever the timeout above says, one policy serves two wires: a stream
+ * wants frames batched, a lone reply wants delivering now, and the chip
+ * cannot tell one from the other (it has no timer that restarts per frame,
+ * and its other rings are steered by static filters).  So a task at the
+ * lowest priority reads the producer index -- a plain load, the registers
+ * are mapped straight through on Emu68 -- for GE_POLL_GRACE_US after a
+ * frame last came or went, and runs the service pass itself the moment a
+ * frame is there, with no interrupt taken.  It runs only when no other task
+ * wants the CPU: a machine waiting on a reply is idle and sees the reply
+ * within microseconds of its last byte; a machine busy receiving a stream
+ * leaves the poller its gaps, and the interrupt delivers as before when the
+ * gaps do not come.  A CPU-bound task above it starves it into exactly the
+ * behaviour above.  It sleeps the moment the ring holds frames for a reader
+ * that is behind: that reader needs the CPU more, and if anything ever put
+ * the poller above it, spinning here would be what kept it behind.  What
+ * Linux arrived at as NAPI with deferred re-arm and busy polling, with the
+ * idle task standing in for the timer.
+ *
+ * A1200, 2026-09-17, on top of the 500 us timeout: Fitz read 26.5 -> 31.6
+ * MB/s, iperf in 832 -> 910 Mbit/s, out 541 -> 564; in a 10 s receive run
+ * 512k of 1.05M frames were delivered by the poller with no interrupt.
+ */
+#ifndef GE_POLL_GRACE_US
+#define GE_POLL_GRACE_US        500
+#endif
+#define GE_POLL_STACK           8192    /* the service pass and the opener's
+                                           receive hooks run on it            */
+#define GE_POLL_PRI             (-128)
+
 /* The chip shifts every received frame two bytes into its buffer
    (GENET_RBUF_ALIGN_2B), which puts the IP header on a longword. */
 #define GE_RX_PAD       2
@@ -179,6 +211,14 @@ typedef struct GenetCore
     UBYTE   gro_words;      /* address words that make the key: 2 or 8      */
     UBYTE   held_blanks;    /* blanks the head of the ring has been held for */
     UBYTE   drop_held;      /* the next unclaimable head frame is dropped    */
+
+    /* The poller (GE_POLL_GRACE_US above). */
+    struct Task    *poll_task;      /* NULL: none (no clock, or no memory)   */
+    APTR            poll_mem;       /* its Task and stack, one allocation    */
+    ULONG           poll_sig;       /* the wake signal, allocated by itself  */
+    volatile UBYTE  poll_asleep;    /* in Wait(): the next transmit wakes it */
+    volatile ULONG *clock;          /* the Pi's system timer, 1 MHz, from the
+                                       device tree; little-endian            */
 } GenetCore;
 
 /*
@@ -222,6 +262,9 @@ enum
     GE_ST_TICK_RESUMES,     /* held passes resumed by the vertical blank     */
     GE_ST_TX_CSUM,          /* frames whose transport checksum the TBUF wrote */
     GE_ST_CPUSH_DIRECT,     /* 1: page pushes are plain calls, 0: Supervisor() */
+    GE_ST_POLL_WAKES,       /* the poller woken by a transmit                */
+    GE_ST_POLL_PASSES,      /* service passes it ran with frames waiting     */
+    GE_ST_POLL_FRAMES,      /* frames those passes found in the ring         */
 #ifdef GE_PROBE_ST
     /* The bottom half timed on the Pi's system timer (bus 0x7E003000, 68k
        0xF8003000 through Emu68's /scb mapping, 1 MHz, a 10 ns read):
@@ -272,6 +315,9 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET held passes resumed by the blank",
     "GENET transmit checksums by the chip",
     "GENET page push without the trap (1)",
+    "GENET poll wakes",
+    "GENET poll passes",
+    "GENET poll frames",
 #ifdef GE_PROBE_ST
     "PROBE genet_intr us",
     "PROBE cache op us",
@@ -308,6 +354,7 @@ static __inline__ ULONG ge_st_us(VOID)
 
 static LONG genet_init(NetdevNic *nic);
 static VOID genet_stop(NetdevNic *nic);
+static __inline__ VOID ge_poll_wake(GenetCore *c);
 static VOID ge_dma_stop(NetdevNic *nic);
 static VOID genet_setfilter(NetdevNic *nic);
 
@@ -1495,6 +1542,8 @@ static LONG genet_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     GE_P_START(pt);
     LONG rc = genet_tx_body(nic, frame, len);
     GE_P_ADD(nic, GE_ST_P_TX_US, pt);
+    if (GE(nic)->poll_task != NULL)
+        ge_poll_wake(GE(nic));
     return rc;
 }
 
@@ -1671,7 +1720,12 @@ static BOOL genet_intr_body(NetdevNic *nic)
     /* Both rings are walked whether or not their bit was set: the vertical
        blank polls through here too, and a frame is a frame. */
     if (ge_rxintr(nic))
+    {
         mine = TRUE;
+        /* Frames came: more may follow.  The poller takes them from here. */
+        if (c->poll_task != NULL)
+            ge_poll_wake(c);
+    }
     /* Not while a task is mid-transmit: it reclaims for itself
        (tx_task_lock).  */
     if (!nic->tx_busy && ge_txintr(nic))
@@ -1723,6 +1777,131 @@ static BOOL genet_tick(NetdevNic *nic)
     /* Completed transmits are reclaimed here when nothing else has: with no
        completion interrupt this is what frees a full ring on a quiet wire. */
     return (BOOL)(!nic->tx_busy && nic->txb_inuse != 0 && ge_txintr(nic));
+}
+
+/* -------------------------------------------------------------- poller --- */
+
+static __inline__ ULONG ge_clock(const GenetCore *c)
+{
+    return __builtin_bswap32(*c->clock);
+}
+
+/*
+ * The task.  Asleep until a transmit wakes it (genet_tx); then, until
+ * GE_POLL_GRACE_US pass with nothing new in the ring, it runs the service
+ * pass whenever the producer index has moved.  Back to sleep as soon as the
+ * ring holds frames for a reader that is behind: nothing changes until that
+ * reader re-posts, it asks for its own pass then (ANXD_CMD_RX_POLL), and
+ * the next frame in or out wakes this task again.  Nothing is held between
+ * passes, so the detach may RemTask() it wherever it stands.
+ */
+static VOID ge_poll_task(VOID)
+{
+    struct Task *me  = FindTask(NULL);
+    NetdevNic   *nic = (NetdevNic *)me->tc_UserData;
+    GenetCore   *c   = GE(nic);
+    BYTE         sig = AllocSignal(-1);
+
+    if (sig < 0)
+        for (;;)
+            (VOID)Wait(0);              /* until the detach takes it away */
+    c->poll_sig = 1UL << sig;
+
+    for (;;)
+    {
+        ULONG last;
+
+        c->poll_asleep = 1;
+        (VOID)Wait(c->poll_sig);
+        nic->core_stat[GE_ST_POLL_WAKES]++;
+        last = ge_clock(c);
+        while (nic->running && !nic->rx_behind)
+        {
+            UWORD pidx = (UWORD)(ge_rd(nic, GENET_RX_DMA_PROD_INDEX(GE_Q)) &
+                                 0xffffu);
+
+            if (pidx != c->rx_cidx)
+            {
+                nic->core_stat[GE_ST_POLL_PASSES]++;
+                nic->core_stat[GE_ST_POLL_FRAMES] += (UWORD)(pidx - c->rx_cidx);
+                netdev_nic_poll(nic);
+                last = ge_clock(c);
+            }
+            else if (ge_clock(c) - last > GE_POLL_GRACE_US)
+            {
+                break;
+            }
+        }
+    }
+}
+
+/* A frame came or went: more may follow.  From genet_tx under its lock,
+   or from the service pass under Disable(); Signal() is allowed from both. */
+static __inline__ VOID ge_poll_wake(GenetCore *c)
+{
+    if (c->poll_asleep)
+    {
+        c->poll_asleep = 0;
+        Signal(c->poll_task, c->poll_sig);
+    }
+}
+
+/* At attach, from the opener's task.  Without the clock there is no poller,
+   and the unit is served as it was. */
+static VOID ge_poll_start(NetdevNic *nic)
+{
+    GenetCore   *c = GE(nic);
+    ULONG        st;
+    struct Task *t;
+
+    /* The SoC's system timer: 1 MHz, CLO at +4.  Emu68's tree has no node
+       for it (netdev_dtree.h), so its bus address goes through /soc's ranges;
+       the A1200's tree puts it at 0xF2003000. */
+    if (!netdev_dtree_bus_addr("/soc", 0x7e003000UL, &st))
+        return;
+    c->clock = (volatile ULONG *)(st + 4);
+
+    c->poll_mem = AllocMem(sizeof(struct Task) + GE_POLL_STACK,
+                           MEMF_PUBLIC | MEMF_CLEAR);
+    if (c->poll_mem == NULL)
+        return;
+    t = (struct Task *)c->poll_mem;
+    t->tc_Node.ln_Type = NT_TASK;
+    t->tc_Node.ln_Pri  = GE_POLL_PRI;
+    t->tc_Node.ln_Name = (char *)"anxgenet poll";
+    t->tc_SPLower      = (APTR)(t + 1);
+    t->tc_SPUpper      = (APTR)((UBYTE *)(t + 1) + GE_POLL_STACK);
+    t->tc_SPReg        = t->tc_SPUpper;
+    t->tc_UserData     = nic;
+    /* An empty list: nothing for RemTask() to free. */
+    t->tc_MemEntry.lh_Head     = (struct Node *)&t->tc_MemEntry.lh_Tail;
+    t->tc_MemEntry.lh_Tail     = NULL;
+    t->tc_MemEntry.lh_TailPred = (struct Node *)&t->tc_MemEntry.lh_Head;
+    if (AddTask(t, (APTR)ge_poll_task, NULL) == NULL)
+    {
+        FreeMem(c->poll_mem, sizeof(struct Task) + GE_POLL_STACK);
+        c->poll_mem = NULL;
+        return;
+    }
+    c->poll_task = t;
+}
+
+static VOID genet_detach(NetdevNic *nic)
+{
+    GenetCore   *c = GE(nic);
+    struct Task *t;
+    APTR         mem;
+
+    Forbid();
+    t   = c->poll_task;
+    mem = c->poll_mem;
+    c->poll_task = NULL;
+    c->poll_mem  = NULL;
+    if (t != NULL)
+        RemTask(t);
+    Permit();
+    if (mem != NULL)
+        FreeMem(mem, sizeof(struct Task) + GE_POLL_STACK);
 }
 
 /* -------------------------------------------------------------- attach --- */
@@ -1883,6 +2062,8 @@ static LONG genet_attach(NetdevNic *nic)
     nic->read_hdr      = NULL;
     nic->ring_copy     = NULL;
 
+    ge_poll_start(nic);
+
     GE_TRACE("ge: attached rev ", rev);
     return 0;
 }
@@ -1897,5 +2078,6 @@ const struct NetdevNicOps netdev_nic_genet =
     genet_intr,
     genet_reset,
     genet_tick,
-    NULL                /* Emu68's 68040 maps the MAC non-cacheable */
+    NULL,               /* Emu68's 68040 maps the MAC non-cacheable */
+    genet_detach
 };

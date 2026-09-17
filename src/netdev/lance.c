@@ -818,5 +818,6 @@ const struct NetdevNicOps netdev_nic_lance =
     lance_intr,
     lance_reset,
     NULL,               /* no link to poll: the wire is the link */
-    NULL                /* Zorro II boards: the machine keeps the cache off */
+    NULL                /* Zorro II boards: the machine keeps the cache off */,
+    NULL                /* no task to end */
 };

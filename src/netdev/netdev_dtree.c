@@ -209,9 +209,17 @@ static BOOL dt_stringlist_has(APTR key, const char *name, const char *want)
  * can express; a range whose high cell is not zero is not one we can reach.
  * No `ranges` at all is the identity, as the binding says.
  */
+/* `addr` in the address space `parent` gives its children, translated up
+   through every `ranges` to the CPU's. */
+static BOOL dt_translate_up(APTR parent, ULONG addr, ULONG *out);
+
 static BOOL dt_translate(APTR node, ULONG addr, ULONG *out)
 {
-    APTR parent = dt_getparent(node);
+    return dt_translate_up(dt_getparent(node), addr, out);
+}
+
+static BOOL dt_translate_up(APTR parent, ULONG addr, ULONG *out)
+{
 
     while (parent != NULL)
     {
@@ -255,7 +263,6 @@ static BOOL dt_translate(APTR node, ULONG addr, ULONG *out)
                 return FALSE;
         }
 
-        node   = parent;
         parent = grand;
     }
 
@@ -306,6 +313,22 @@ static APTR dt_find_compat(APTR key, const char *compat, UWORD depth)
 }
 
 /* -------------------------------------------------------------- lookup -- */
+
+BOOL netdev_dtree_bus_addr(const char *bus, ULONG addr, ULONG *out)
+{
+    APTR node;
+    BOOL ok;
+
+    dt_base = OpenResource((CONST_STRPTR)"devicetree.resource");
+    if (dt_base == NULL)
+        return FALSE;
+    node = dt_openkey(bus);
+    if (node == NULL)
+        return FALSE;
+    ok = dt_translate_up(node, addr, out);
+    dt_closekey(node);
+    return ok;
+}
 
 BOOL netdev_dtree_find(const char *compat, NetdevDtInfo *out)
 {

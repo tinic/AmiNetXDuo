@@ -112,11 +112,11 @@ static BOOL m_coherent(NetdevNic *nic)
 
 static const struct NetdevNicOps m_ops_asking =
 {
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, m_coherent
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, m_coherent, NULL
 };
 static const struct NetdevNicOps m_ops_mute =
 {
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 static NetdevNic m_nic;

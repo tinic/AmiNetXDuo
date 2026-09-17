@@ -926,5 +926,6 @@ const struct NetdevNicOps netdev_nic_ne2000 =
     dp8390_intr,
     dp8390_reset,
     NULL,               /* no link to poll: the wire is the link */
-    ne2000_coherent
+    ne2000_coherent,
+    NULL                /* no task to end */
 };
