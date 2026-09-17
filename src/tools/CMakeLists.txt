@@ -922,3 +922,18 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME tools_refusals      COMMAND test_refusals)
     add_test(NAME httpterm_gate       COMMAND test_httpterm)
 endif()
+
+# The commands this configuration builds, one file name per line, for
+# dist/make-dist.sh's shipping check: what it scanned before was the build
+# directory, and a binary left there by a tree that no longer builds it
+# (ActivateAmiNetXDuo after 332477fb) read as a command that ships nowhere.
+get_property(_anxd_tool_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+set(_anxd_tool_manifest "")
+foreach(_t IN LISTS _anxd_tool_targets)
+    get_target_property(_type ${_t} TYPE)
+    if(_type STREQUAL "EXECUTABLE" AND NOT _t MATCHES "^test_")
+        string(APPEND _anxd_tool_manifest "$<TARGET_FILE_NAME:${_t}>\n")
+    endif()
+endforeach()
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tools.manifest" CONTENT "${_anxd_tool_manifest}")
+

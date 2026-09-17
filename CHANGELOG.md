@@ -11,6 +11,12 @@ version at the top when it merges.
 
 ## 0.28.4
 
+- `dist/make-dist.sh`'s shipping check reads the commands the build system
+  built (`tools.manifest`, written by `src/tools/CMakeLists.txt`) instead of
+  scanning the build directory, where a reused tree keeps the binaries of
+  commands the source no longer has: `ActivateAmiNetXDuo`, gone in this
+  release, read as "built but ships nowhere"
+
 - A lost segment no longer costs a sender the rest of its transfer. The
   fast recovery counted a hole the peer had described (SACK) as data in
   flight, so it was filled one segment per acknowledgment, each a round trip

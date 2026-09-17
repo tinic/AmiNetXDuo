@@ -262,10 +262,25 @@ for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 # a bench instrument; none has a use on a user's machine.
 NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
-for path in "$CMD_BUILD"/src/tools/*; do
-    [ -f "$path" ] && [ -x "$path" ] || continue
-    name=$(basename "$path")
-    case "$name" in *.map|*.cmake|Makefile|*.o) continue ;; esac
+# What the build system says it builds (src/tools/CMakeLists.txt writes the
+# manifest), not what happens to lie in the directory: a reused build tree
+# keeps the binaries of commands the tree no longer has, and those are not
+# commands that ship nowhere.  A build without the manifest is scanned as
+# before.
+built_cmds=()
+if [ -f "$CMD_BUILD/tools.manifest" ]; then
+    while IFS= read -r name; do
+        [ -n "$name" ] && built_cmds+=("$name")
+    done < "$CMD_BUILD/tools.manifest"
+else
+    for path in "$CMD_BUILD"/src/tools/*; do
+        [ -f "$path" ] && [ -x "$path" ] || continue
+        name=$(basename "$path")
+        case "$name" in *.map|*.cmake|Makefile|*.o) continue ;; esac
+        built_cmds+=("$name")
+    done
+fi
+for name in "${built_cmds[@]}"; do
     for known in "${CMDS[@]}" "${NOT_SHIPPED[@]}"; do
         [ "$name" = "$known" ] && continue 2
     done
