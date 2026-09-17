@@ -119,10 +119,13 @@
     o  1 MB of RAM
 
   Memory matters more than processor speed. At startup AmiNetXDuo
-  claims one sixteenth of the free memory for its packet buffers, at
-  least 16 buffers and at most 512, each 1568 bytes. On a machine with
-  8 MB free that is 512 buffers, about 800 KB. On a 1 MB machine the
-  floor of 16 applies and the stack still runs.
+  claims one sixteenth of the fastest RAM the machine has for its
+  packet buffers, at least 16 buffers and at most 4,096, each 1568
+  bytes. On a machine with 8 MB that is about 320 buffers, half a
+  megabyte. On a 1 MB machine the floor of 16 applies and the stack
+  still runs. The buffers come from the fastest class of memory and
+  their share is tunable; see "How much memory the network takes"
+  under @{"Starting the stack" link STARTING}.
 
   Encrypted (https:) connections use LIBS:tls.library, which the
   archive carries for every processor, the 68000 included. A first
@@ -150,7 +153,7 @@
 
   The driver comes from the card's manufacturer or from Aminet.
   AmiNetXDuo also ships one of its own, anxnet.device, which drives
-  twelve cards; see @{"anxnet.device" link CHECKNETDEVICE}. Under an
+  thirteen cards; see @{"anxnet.device" link CHECKNETDEVICE}. Under an
   emulator, uaenet.device or an emulated A2065 is the usual choice.
 
   @{b}A network@{ub}
@@ -1011,7 +1014,7 @@
   interface that is not 0.0.0.0:
 
       Network stack:  running
-      Stack version:  bsdsocket.library 0.27.0 (AmiNetXDuo, ABI 4.9)
+      Stack version:  bsdsocket.library 0.28.3 (AmiNetXDuo, ABI 4.10)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
@@ -1442,7 +1445,7 @@
 
       1> ShowNetStatus
       Network stack:  running
-      Stack version:  bsdsocket.library 0.27.0 (AmiNetXDuo, ABI 4.9)
+      Stack version:  bsdsocket.library 0.28.3 (AmiNetXDuo, ABI 4.10)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
@@ -1887,9 +1890,12 @@
 
   @{b}This is work in progress@{ub}
 
-  It serves the planar screens of the Amiga chipset, and 8-bit screens
-  on a graphics card under Picasso96 or CyberGraphX. A screen of 15, 16,
-  24 or 32 bits is refused by name. Those depths are not served yet.
+  It serves the planar screens of the Amiga chipset, palette screens on
+  a graphics card under Picasso96 or CyberGraphX, and 15-, 16-, 24- and
+  32-bit truecolour screens, which it repacks to 16-bit R5G6B5 for the
+  wire so the encoder and the browser have one truecolour path. Only a
+  pixel format that neither graphics library names is refused, rather
+  than guessed at, and the refusal says what it found.
 
   A graphics card is much slower to read than to write, so the console
   measures its own readback when a card session starts and uses the
@@ -2902,12 +2908,22 @@
       DEVS:Internet/default_gateway   an older place for the gateway
       ENV:HOSTNAME                    this machine's name
 
+  Written by the library itself:
+
+      DEVS:Internet/tlssessions       tls.library's cache of resumable
+                                      TLS sessions, so a second https:
+                                      connection to a site it has
+                                      already reached skips the slow
+                                      public-key handshake. Safe to
+                                      delete; it is rebuilt as
+                                      connections are made
+
   @{b}Not written to@{ub}
 
-  The stack writes to none of these files. NetSetup, the Installer and
-  a text editor are what create them. Nothing here creates a drawer of
-  its own or patches the operating system, and deleting the files above
-  removes AmiNetXDuo completely.
+  Apart from that session cache, the stack writes none of these files.
+  NetSetup, the Installer and a text editor are what create them.
+  Nothing here creates a drawer of its own or patches the operating
+  system, and deleting the files above removes AmiNetXDuo completely.
 
   @{b}Drivers@{ub}
 
