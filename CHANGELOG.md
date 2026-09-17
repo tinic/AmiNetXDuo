@@ -9,6 +9,19 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `bsdsocket.library`'s `memcpy()` is net68k's `movem.l` copy again. Every
+  `-flto` build up to 0.28.3 linked libc's instead: GCC emits the `memcpy`
+  calls after the archives are scanned, the linker rescans only libc, and
+  the 68000 libc's `memcpy` copies a byte at a time whenever a pointer is
+  not longword aligned. Profiled on a real A3000 (25 MHz 68030, X-Surf 100),
+  `fetch http://` of 24 MB at 3.06 Mbit/s: 18.3% of every sample on that
+  byte loop, in the `recv()` copy, CPU 98% busy, idle 1.8%. The link names
+  the symbol (`-Wl,-u,_memcpy`), `tools/check-memcpy-hook.sh` reads the map
+  in every cross arm. Library 12 bytes smaller. Measured on that A3000 with
+  only this change: `fetch http://` 3.06 -> 3.87 Mbit/s, the copy 18.3% ->
+  8.3% of the CPU; iperf 4.15 receive / 3.22 send unchanged, its 4,096-byte
+  aligned reads never took the byte loop
+
 - A self-contained installation is LAST in `LIBS:`, `C:` and `DEVS:`, not
   first. `ActivateAmiNetXDuo` is gone; the managed block is the three
   `Assign ... ADD` lines AmiTCP and Miami wrote, and the drawer answers only

@@ -126,6 +126,23 @@ if(AMINETXDUO_BSDSOCKET_LINK)
         target_link_options(bsdsocket_library PRIVATE "-Wl,-u,_bsd_romtag")
     endif()
 
+    # memcpy() is meant to be net68k's movem.l copy (src/net68k/CMakeLists.txt,
+    # AMINETXDUO_NET68K_MEMCPY), and under -flto it was not.  GCC treats
+    # memcpy as a builtin: no object on the link line is UNDEFINED on it when
+    # the archives are scanned, so libaminetxduo_net68k.a's hook is never
+    # pulled, and when the LTO partitions come out calling memcpy the only
+    # archive the linker rescans is libc.  The map said so all along --
+    # `libc.a(lib_a-memcpy.o)` pulled in by `ltrans0.ltrans.o (memcpy)` -- and
+    # the 68000 libc's memcpy takes a byte loop for any pointer that is not
+    # longword aligned.  Profiled on a real A3000 (25 MHz 68030, X-Surf 100,
+    # 0.28.3, `fetch http://` of 24 MB at 3.06 Mbit/s): 18.3% of every sample
+    # on that loop's two instructions, called from the recv() copy, with the
+    # CPU 98% busy.  Naming the symbol here holds the hook the way the line
+    # above holds the romtag.  tools/check-memcpy-hook.sh reads the map.
+    if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_MEMCPY)
+        target_link_options(bsdsocket_library PRIVATE "-Wl,-u,_memcpy")
+    endif()
+
     target_include_directories(bsdsocket_library PRIVATE
         ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(bsdsocket_library PRIVATE

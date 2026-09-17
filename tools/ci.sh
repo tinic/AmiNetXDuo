@@ -1324,6 +1324,19 @@ stage_cross() {
                 fail "a diagnostic sentence is in a shipped image ($name)"
             fi
 
+            # And that bsdsocket.library's memcpy is net68k's.  The link
+            # succeeds with libc's, which is how every -flto build up to
+            # 0.28.3 shipped a byte loop as the recv() copy; only the map
+            # says which one came in.
+            if tools/check-memcpy-hook.sh "$BUILD/$name" \
+                    > "$BUILD/$name-memcpy-hook.log" 2>&1; then
+                note "$(sed -n 's/^memcpy_hook=/memcpy hook: /p' \
+                      "$BUILD/$name-memcpy-hook.log" | head -1)"
+            else
+                cat "$BUILD/$name-memcpy-hook.log"
+                fail "bsdsocket.library links libc's memcpy ($name)"
+            fi
+
             # And how big the resident images came out.  bsdsocket.library and
             # anxnet.device are open for the life of the machine, so their
             # size is RAM; nothing above measures it, which is how 0.26.0

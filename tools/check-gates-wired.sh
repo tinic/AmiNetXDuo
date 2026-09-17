@@ -63,6 +63,7 @@ want image-size     tools/ci.sh                      'check-image-size\.sh'
 want ram-size       tools/ci.sh                      'check-ram-size\.sh'
 want rate           tools/ci.sh                      'check-rate\.sh'
 want diag-strings   tools/ci.sh                      'check-no-diag-strings\.sh'
+want memcpy-hook    tools/ci.sh                      'check-memcpy-hook\.sh'
 want backlog        tools/ci.sh                      'check-backlog\.sh'
 want doc-budget     tools/ci.sh                      'check-doc-budget\.sh'
 # stage-coverage is the gate that caught stage_rate being declared and invoked
