@@ -284,8 +284,8 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
  * *ihl_out its header length, *total_out the datagram's total length, at
  * most `len` (the rest is padding).  What both checksum paths ask first.
  */
-static BOOL ami_sana2_tx_tcp_segment(const UCHAR *ip, ULONG len,
-                                     ULONG *ihl_out, ULONG *total_out)
+static inline BOOL __attribute__((always_inline)) ami_sana2_tx_tcp_segment(
+    const UCHAR *ip, ULONG len, ULONG *ihl_out, ULONG *total_out)
 {
     ULONG ihl, total;
 
@@ -313,7 +313,13 @@ static BOOL ami_sana2_tx_tcp_segment(const UCHAR *ip, ULONG len,
 
 /* The pseudo-header of RFC 793, folded to sixteen bits and not complemented:
    what a checksum over the segment starts from. */
-static ULONG ami_sana2_tx_pseudo_header(const UCHAR *ip, ULONG tcp_len)
+/* Both helpers are always_inline, not left to the heuristic: at -Os the LTO
+   inliner put them out of line the day the fork grew by a hundred lines,
+   right after ami_sana2_copy_to_buff() with no symbol of their own, and the
+   hot-call gate read their four call sites as calls into it
+   (tools/check-hot-calls.sh); `inline` alone did not bring them back. */
+static inline ULONG __attribute__((always_inline)) ami_sana2_tx_pseudo_header(
+    const UCHAR *ip, ULONG tcp_len)
 {
     ULONG sum;
 

@@ -9,6 +9,21 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A lost segment no longer costs a sender the rest of its transfer. The
+  fast recovery counted a hole the peer had described (SACK) as data in
+  flight, so it was filled one segment per acknowledgment, each a round trip
+  behind the receive coalescing, and every partial acknowledgment of a
+  coalesced batch resent segments the next acknowledgment in the same batch
+  already covered; one drop in ten thousand ran an A1200 + PiStorm32 send
+  at 63 Mbit/s out of 640, and one run in thirteen to a busy peer collapsed
+  that way on its own. The fork now takes what lies below the peer's blocks
+  as lost (RFC 6675), sends the hole under the congestion window as each
+  duplicate acknowledgment moves a block, resends nothing twice in one
+  recovery, and resends nothing on a partial acknowledgment from a SACK
+  peer that reports no block. Same A1200, segments dropped at the peer:
+  1 in 10,000 63 -> 537 Mbit/s, 1 in 1,000 162 -> 178, 1 in 100 23 -> 26,
+  clean unchanged; `tests/netstack/host/test_tcp_lossrecovery_host.c`
+  holds the captured scenario
 - `httpd` reads a request body 16 KB at a time, not 512. The WebDAV PUT sink
   read the body into a 512-byte stack buffer and `Write()` it to disk a
   `recv()` at a time -- two dozen socket reads and two dozen DOS packets per

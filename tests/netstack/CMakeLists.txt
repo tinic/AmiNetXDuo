@@ -290,6 +290,37 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_earlyretx COMMAND test_tcp_earlyretx)
 
+    # RFC 6675 loss recovery: a hole the peer described leaves in one walk,
+    # a partial acknowledgment of a segment already resent resends nothing,
+    # and a coalesced batch of acknowledgments is not acted on one stale
+    # member at a time.  The A1200 sent 63 Mbit/s at 0.01 % loss without
+    # these (2026-09-17).  Same sources as test_tcp_earlyretx.
+    add_executable(test_tcp_lossrecovery
+        host/test_tcp_lossrecovery_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
+
+    target_compile_options(test_tcp_lossrecovery PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_lossrecovery PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_lossrecovery PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_lossrecovery COMMAND test_tcp_lossrecovery)
+
     # A sub-MSS peer cannot pin more than a full-MSS window's worth of packets.
     # The window is a byte budget but the pool is spent a whole packet per
     # segment, so without a per-socket packet-count cap a one-byte-at-a-time

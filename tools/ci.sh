@@ -267,7 +267,10 @@ host_test_targets() { # builddir
 #      388 with test_route_priority: the interface file's PRIORITY at the
 #      real _nx_ip_route_find() and _nx_ip_gateway_address_set(), two cards
 #      on one subnet
-HOST_TESTS_EXPECTED=388
+#      389 with test_tcp_lossrecovery: RFC 6675 recovery of a hole the peer
+#      described, at the real send, acknowledgment-check and retransmit
+#      code -- the A1200's 63 Mbit/s at 0.01 % loss, before and after
+HOST_TESTS_EXPECTED=389
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
