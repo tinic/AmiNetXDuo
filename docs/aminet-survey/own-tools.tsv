@@ -7,7 +7,7 @@ offset	lvo	aminet_callers	our_tool_mentions
 -60	sendto	217	1
 -66	send	758	78
 -72	recvfrom	198	2
--78	recv	696	13
+-78	recv	696	14
 -84	shutdown	198	5
 -90	setsockopt	364	1
 -96	getsockopt	132	1
@@ -15,7 +15,7 @@ offset	lvo	aminet_callers	our_tool_mentions
 -108	getpeername	138	0
 -114	IoctlSocket	372	1
 -120	CloseSocket	755	3
--126	WaitSelect	474	17
+-126	WaitSelect	474	18
 -132	SetSocketSignals	27	0
 -138	getdtablesize	38	0
 -144	ObtainSocket	197	0

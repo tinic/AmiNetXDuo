@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <exec/tasks.h>
 #include <proto/exec.h>
 
 #include "netdev_internal.h"
@@ -450,13 +451,18 @@ static void test_batched_replies(void)
     struct MsgPort  port;
     struct MsgPort  soft;
     struct IOSana2Req read_c;
-    int             fake_task;
+    struct IOSana2Req read_d;
+    struct IOSana2Req read_e;
+    struct Task     fake_task;
 
     reset_fixture();
     make_header(hdr, 0x0800);
     memset(&port, 0, sizeof(port));
     memset(&soft, 0, sizeof(soft));
     memset(&read_c, 0, sizeof(read_c));
+    memset(&read_d, 0, sizeof(read_d));
+    memset(&read_e, 0, sizeof(read_e));
+    memset(&fake_task, 0, sizeof(fake_task));
     NewList(&port.mp_MsgList);
     NewList(&soft.mp_MsgList);
     port.mp_Flags   = PA_SIGNAL;
@@ -508,6 +514,32 @@ static void test_batched_replies(void)
     /* An empty flush is nothing. */
     netdev_rx_flush_replies(&unit);
     expect_u32("an empty flush signals nobody", signals, 1);
+
+    /*
+     * A reader still holding the bit from the last burst is not signalled
+     * again; the request is on its list all the same.
+     */
+    fake_task.tc_SigRecvd = 1UL << 5;
+    read_d.ios2_Req.io_Message.mn_ReplyPort = &port;
+    read_e.ios2_Req.io_Message.mn_ReplyPort = &port;
+    queue_read(&opener_a, &read_d, 0x0800);
+    token = NULL;
+    expect_ptr("claim with the bit held", netdev_rx_claim(&unit, hdr, 60, &token, NULL), direct_buffer);
+    netdev_rx_claimed(&unit, token, 4UL, 1);
+    netdev_rx_flush_replies(&unit);
+    expect_u32("held, not signalled", signals, 1);
+    expect_u32("but on the list", list_count(&port.mp_MsgList), 3);
+    expect_u32("and nothing held", unit.nu_PendingCount, 0);
+
+    /* The bit collected: the next flush signals. */
+    fake_task.tc_SigRecvd = 0;
+    queue_read(&opener_a, &read_e, 0x0800);
+    token = NULL;
+    expect_ptr("claim with the bit clear", netdev_rx_claim(&unit, hdr, 60, &token, NULL), direct_buffer);
+    netdev_rx_claimed(&unit, token, 5UL, 1);
+    netdev_rx_flush_replies(&unit);
+    expect_u32("signalled again", signals, 2);
+    expect_u32("four on the list", list_count(&port.mp_MsgList), 4);
 
     unit.nu_Nic.reply_batch = 0;
     read_a.ios2_Req.io_Message.mn_ReplyPort = NULL;

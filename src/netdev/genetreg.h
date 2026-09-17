@@ -59,7 +59,23 @@
 #define  GENET_RBUF_BAD_DIS             (1UL << 2)
 #define  GENET_RBUF_ALIGN_2B            (1UL << 1)
 #define  GENET_RBUF_64B_EN              (1UL << 0)
+/* The receive checksum block: with RXCHK_EN the RBUF sums each frame from
+   the end of its Ethernet header (L3_PARSE_DIS: whatever the type) to its
+   end, and writes it into the 64-byte status block RBUF_64B_EN puts in
+   front of the frame in the buffer.  SKIP_FCS leaves the FCS out when the
+   MAC forwards one; this driver never sets CRC_FWD, so it is not set. */
+#define GENET_RBUF_CHK_CTRL             0x314
+#define  GENET_RBUF_RXCHK_EN            (1UL << 0)
+#define  GENET_RBUF_SKIP_FCS            (1UL << 4)
+#define  GENET_RBUF_L3_PARSE_DIS        (1UL << 5)
 #define GENET_RBUF_TBUF_SIZE_CTRL       0x3b4
+
+/* The 64-byte receive status block (RBUF_64B_EN), little-endian words as the
+   DMA writes them: length_status at 0 is the descriptor's status word,
+   rx_csum at 8 carries the checksum in its low half. */
+#define GENET_RX_STATUS64_LEN           64
+#define GENET_RX_STATUS64_LENGTH_STATUS 0
+#define GENET_RX_STATUS64_CSUM          8
 #define GENET_UMAC_CMD                  0x808
 #define  GENET_UMAC_CMD_LCL_LOOP_EN     (1UL << 15)
 #define  GENET_UMAC_CMD_SW_RESET        (1UL << 13)

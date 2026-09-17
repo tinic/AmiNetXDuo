@@ -85,10 +85,6 @@
 
         .text
         .even
-| N68K_ONLY_COPY_SUM: a user of this file that wants only the copying form
-| (anxgenet.device links the 68020 form of it and nothing else) leaves the
-| sum-only routine out; it is 300 bytes of a resident image with a budget.
-#ifndef N68K_ONLY_COPY_SUM
         .globl  N68K_MV_SYM(_n68k_sum_longwords)
 
 | The seven-longword step below is the whole inner loop.  Which form of it is
@@ -255,7 +251,6 @@ N68K_MV_SYM(_n68k_sum_longwords):
 .Ldone:
         movem.l sp@+,d2-d7/a2
         rts
-#endif /* N68K_ONLY_COPY_SUM */
 
 
 | ---------------------------------------------------------------------------

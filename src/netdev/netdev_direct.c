@@ -14,6 +14,7 @@
  */
 
 #include <exec/ports.h>
+#include <exec/tasks.h>
 #include <proto/exec.h>
 
 #include "netdev_internal.h"
@@ -282,7 +283,16 @@ VOID netdev_rx_flush_replies(APTR arg)
             continue;
         }
 
-        Disable();
+        /*
+         * No Disable() of its own: every caller is already under one --
+         * netdev_soft() and netdev_tick() take it around the whole bottom
+         * half, ANXD_CMD_RX_POLL runs the core in the same masked context,
+         * and the classic server path is an interrupt whose only rival for
+         * the pending array, the blank, stands off on nu_InIsr.  The port's
+         * list is safe against the reader for the same reason: GetMsg() and
+         * Wait() hold Disable() themselves, so this never runs inside
+         * either.  On Emu68 a nested pair was 2.9 us per burst.
+         */
         for (j = i; j < n; j++)
         {
             struct IOSana2Req *q = unit->nu_Pending[j];
@@ -294,7 +304,23 @@ VOID netdev_rx_flush_replies(APTR arg)
                 unit->nu_Pending[j] = NULL;
             }
         }
-        Enable();
-        Signal((struct Task *)port->mp_SigTask, 1UL << port->mp_SigBit);
+
+        /*
+         * Signal() only when the reader is not already holding the bit:
+         * a reader that is behind has the signal from the last burst
+         * uncollected, and the messages are on its list either way -- it
+         * finds them on its next GetMsg() or when its Wait() returns at
+         * once.  Wait() clears the bit under Disable(), so the test cannot
+         * race it.  On Emu68 the call is an 11 us trap, most bursts of a
+         * bulk receive land while the reader is behind, and the reader
+         * cannot wake any sooner than it already will.
+         */
+        {
+            struct Task *task = (struct Task *)port->mp_SigTask;
+            ULONG        bit  = 1UL << port->mp_SigBit;
+
+            if ((task->tc_SigRecvd & bit) == 0)
+                Signal(task, bit);
+        }
     }
 }

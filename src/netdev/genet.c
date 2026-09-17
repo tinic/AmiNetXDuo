@@ -106,6 +106,8 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 /* The chip shifts every received frame two bytes into its buffer
    (GENET_RBUF_ALIGN_2B), which puts the IP header on a longword. */
 #define GE_RX_PAD       2
+/* ... after the 64-byte status block the RBUF writes first (RBUF_64B_EN). */
+#define GE_RX_HEAD      (GENET_RX_STATUS64_LEN + GE_RX_PAD)
 
 typedef struct GenetCore
 {
@@ -205,6 +207,9 @@ enum
     GE_ST_P_COPY_US,        /* the fused copy and sum                        */
     GE_ST_P_VERIFY_US,      /* verify, segment parse, the CONTINUES mark     */
     GE_ST_P_CLAIMED_US,     /* rx_claimed: the completion into the opener    */
+    GE_ST_P_HWSUM_A,        /* RXCHK checksum == the software sum, as read   */
+    GE_ST_P_HWSUM_B,        /* ... == the software sum, halves swapped       */
+    GE_ST_P_HWSUM_NE,       /* neither                                       */
 #endif
     GE_ST_COUNT
 };
@@ -243,6 +248,9 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "PROBE copy+sum us",
     "PROBE verify+mark us",
     "PROBE claimed us",
+    "PROBE hw csum equal (as read)",
+    "PROBE hw csum equal (swapped)",
+    "PROBE hw csum unequal",
 #endif
     NULL
 };
@@ -565,8 +573,24 @@ static VOID ge_reset(NetdevNic *nic)
 
     ge_wr(nic, GENET_UMAC_MAX_FRAME_LEN, 1536);
 
+    /*
+     * SET, NOT OR'ED IN.  These two registers survive the UniMAC and RBUF
+     * resets above and a warm reboot: whatever the previous driver left in
+     * them is what this one finds.  Or'ing kept a stale RBUF_64B_EN, and a
+     * driver without the status block then read 64 bytes of it as every
+     * frame's Ethernet header -- link up, "unknown types" climbing, DHCP
+     * never answered, on the A1200 on 2026-09-17 after a test build of
+     * this driver, and the shape of the report from the field where
+     * genet.device had run before anxgenet.device.  genet_stop() clears
+     * them for the same reason in the other direction.
+     */
     v = ge_rd(nic, GENET_RBUF_CTRL);
-    ge_wr(nic, GENET_RBUF_CTRL, v | GENET_RBUF_ALIGN_2B);
+    v &= ~(GENET_RBUF_64B_EN | GENET_RBUF_ALIGN_2B | GENET_RBUF_BAD_DIS);
+    ge_wr(nic, GENET_RBUF_CTRL, v | GENET_RBUF_ALIGN_2B | GENET_RBUF_64B_EN);
+    v = ge_rd(nic, GENET_RBUF_CHK_CTRL);
+    v &= ~(GENET_RBUF_RXCHK_EN | GENET_RBUF_SKIP_FCS | GENET_RBUF_L3_PARSE_DIS);
+    ge_wr(nic, GENET_RBUF_CHK_CTRL,
+          v | GENET_RBUF_RXCHK_EN | GENET_RBUF_L3_PARSE_DIS);
 
     ge_wr(nic, GENET_RBUF_TBUF_SIZE_CTRL, 1);
 }
@@ -884,6 +908,15 @@ static VOID genet_stop(NetdevNic *nic)
     ge_delay_us(nic, 10);
     ge_wr(nic, GENET_UMAC_CMD, 0);
 
+    /* The status block and the checksum off again: neither reset above
+       touches them, and a driver that does not know them would read the
+       block as the frame (genet_init). */
+    v = ge_rd(nic, GENET_RBUF_CTRL);
+    ge_wr(nic, GENET_RBUF_CTRL, v & ~GENET_RBUF_64B_EN);
+    v = ge_rd(nic, GENET_RBUF_CHK_CTRL);
+    ge_wr(nic, GENET_RBUF_CHK_CTRL,
+          v & ~(GENET_RBUF_RXCHK_EN | GENET_RBUF_L3_PARSE_DIS));
+
     ge_wr(nic, GENET_UMAC_MDF_CTRL, 0);
 
     ge_wr(nic, GENET_INTRL2_CPU_SET_MASK, 0xffffffffUL);
@@ -913,27 +946,10 @@ static VOID genet_reset(NetdevNic *nic)
  * them.  A plain loop, and on Emu68's JIT -- the only place a GENET is --
  * that is what the movem version would become anyway.
  */
-/* src/net68k/n68k_checksum.S, its 68020 form (NETDEV_GENET_SOURCES): copy
-   `count` longwords and return their ones-complement sum. */
-extern ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count);
-
-static ULONG ge_copy_sum(ULONG *to, const ULONG *from, ULONG count)
-{
-    /*
-     * The movem form: one load of fourteen registers, each stored and folded
-     * into the accumulator through the addx chain.  Priced by the
-     * bottom-half probe on the A1200, 2026-09-17, per 1460-byte segment: a
-     * C loop with a carry test per longword 4.34 us, a two-accumulator C
-     * loop 2.48, the movem copy alone 0.4 -- Emu68's JIT runs a movem block
-     * at memory speed and a branchy loop at a nanosecond an instruction.
-     */
-    return n68k_copy_sum_longwords(to, from, count);
-}
-
 /*
  * WHAT THE COPY'S SUM IS WORTH ONCE THE HEADERS ARE IN CACHE.
  *
- * ge_copy_sum() has just moved the IP packet and produced the ones-complement
+ * The copy has just moved the IP packet and the chip supplied the ones-complement
  * sum of every longword of it, which is also the ones-complement sum of its
  * sixteen-bit words.  The IP header's own sum is twenty bytes of that, the
  * TCP or UDP checksum wants the rest plus a pseudo header of the two
@@ -1050,40 +1066,33 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
     if (dst != NULL)
     {
         /*
-         * Payload to the opener's slot, summed on the way: the copy's loads
-         * pay for the ones-complement sum the stack's verifier wants, and a
-         * frame handed up summed is not walked a second time.  frame + 14 is
-         * on a longword -- the buffer is page-aligned and the chip shifted
-         * the frame by two -- and the slot's payload pointer is aligned by
-         * construction.  The 1..3 bytes past the last longword are summed as
-         * a zero-padded final longword, which is what the verifier's
-         * "sum of `copied` bytes" means.
+         * Payload to the opener's slot with the movem copy, and the
+         * ones-complement sum the stack's verifier wants from the chip: the
+         * RBUF's checksum block (RBUF_RXCHK_EN, RBUF_L3_PARSE_DIS) sums the
+         * frame from the end of its Ethernet header to its end -- exactly
+         * the bytes `src[0..plen)` are -- and writes it into the status
+         * block in front of the frame: the low half of the little-endian
+         * word at 8, so the two bytes there read in little-endian order are
+         * the folded sum.  Checked on the A1200, 2026-09-17: equal to the software sum
+         * for 529,799 of 529,799 frames.  A summing copy cost 1.7 us a
+         * segment in its best form (movem feeding an addx chain) and 4.3 in
+         * its worst; the plain copy is 0.4.  frame + 14 is on a longword --
+         * the buffer is page-aligned, the status block is 64 bytes and the
+         * chip shifted the frame by two -- and the slot's payload pointer
+         * is aligned by construction.
          */
         UWORD        plen = (UWORD)(len - NETDEV_HDR_LEN);
         UWORD        bulk = (UWORD)(plen & (UWORD)~3u);
         const UBYTE *src  = frame + NETDEV_HDR_LEN;
-        ULONG        sum  = 0;
+        ULONG        sum  = (ULONG)__builtin_bswap16(*(const UWORD *)(CONST_APTR)
+                            (frame - GE_RX_HEAD + GENET_RX_STATUS64_CSUM));
         UWORD        i;
         GE_P_START(p2);
 
         if (bulk != 0)
-            sum = ge_copy_sum((ULONG *)(APTR)dst,
-                              (const ULONG *)(CONST_APTR)src,
-                              (ULONG)(bulk >> 2));
-        if (bulk != plen)
-        {
-            ULONG tail = 0;
-            ULONG was  = sum;
-
-            for (i = bulk; i < plen; i++)
-            {
-                dst[i] = src[i];
-                tail |= (ULONG)src[i] << (24 - 8 * (i - bulk));
-            }
-            sum += tail;
-            if (sum < was)
-                sum++;                  /* end-around carry */
-        }
+            n68k_copy_longs(dst, src, (ULONG)(bulk >> 2));
+        for (i = bulk; i < plen; i++)
+            dst[i] = src[i];
 
         /*
          * The frame is in cache now, both copies of it.  Check it here, from
@@ -1093,6 +1102,30 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
          * ethertype is at frame + 12, big-endian.
          */
         GE_P_ADD(nic, GE_ST_P_COPY_US, p2);
+#ifdef GE_PROBE_ST
+        {
+            /* The chip's sum against a software pass over what was copied,
+               folded to sixteen bits: the measurement that put the chip's
+               in charge, kept so a doubt can be settled on any frame. */
+            ULONG sw = 0;
+            ULONG k;
+
+            for (k = 0; k < (ULONG)plen; k += 2)
+            {
+                ULONG w = ((ULONG)dst[k] << 8) |
+                          ((k + 1 < (ULONG)plen) ? dst[k + 1] : 0UL);
+
+                sw += w;
+            }
+            sw = (sw >> 16) + (sw & 0xffffUL);
+            sw = (sw >> 16) + (sw & 0xffffUL);
+            sw &= 0xffffUL;
+            if (sum == sw)
+                nic->core_stat[GE_ST_P_HWSUM_A]++;
+            else
+                nic->core_stat[GE_ST_P_HWSUM_NE]++;
+        }
+#endif
         {
             GenetCore *c     = GE(nic);
             UBYTE      flags = ANXD_S2_RXF_SUMMED;
@@ -1245,9 +1278,13 @@ static BOOL ge_rxintr(NetdevNic *nic)
     {
         UWORD  idx    = (UWORD)(c->rx_cidx & (GE_RX_RING - 1));
         GE_P_START(pd);
-        ULONG  status = ge_rd(nic, GENET_RX_DESC_STATUS(idx));
-        UWORD  len    = (UWORD)GENET_RX_DESC_STATUS_BUFLEN(status);
         UBYTE *buf    = c->rx_buf + (ULONG)idx * GE_BUFSZ;
+        /* The descriptor's status word, from the status block the RBUF
+           wrote in front of the frame: memory the cache op above just
+           made current, not a register read per frame. */
+        ULONG  status = __builtin_bswap32(*(const ULONG *)(CONST_APTR)
+                                          (buf + GENET_RX_STATUS64_LENGTH_STATUS));
+        UWORD  len    = (UWORD)GENET_RX_DESC_STATUS_BUFLEN(status);
         GE_P_ADD(nic, GE_ST_P_DESC_US, pd);
 
         if ((status & GENET_RX_DESC_STATUS_ALL_ERRS) != 0)
@@ -1263,13 +1300,13 @@ static BOOL ge_rxintr(NetdevNic *nic)
         else if ((status & (GENET_RX_DESC_STATUS_SOP |
                             GENET_RX_DESC_STATUS_EOP)) !=
                  (GENET_RX_DESC_STATUS_SOP | GENET_RX_DESC_STATUS_EOP) ||
-                 len < GE_RX_PAD + NETDEV_HDR_LEN ||
-                 len > GE_RX_PAD + NETDEV_RXBUF_MAX)
+                 len < GE_RX_HEAD + NETDEV_HDR_LEN ||
+                 len > GE_RX_HEAD + NETDEV_RXBUF_MAX)
         {
             nic->rx_errors++;
             nic->core_stat[GE_ST_RX_LEN]++;
         }
-        else if (!ge_probe_deliver(nic, buf + GE_RX_PAD, (UWORD)(len - GE_RX_PAD)))
+        else if (!ge_probe_deliver(nic, buf + GE_RX_HEAD, (UWORD)(len - GE_RX_HEAD)))
         {
             /*
              * THE READER IS BEHIND, AND THE RING IS THE BACKLOG.  This frame

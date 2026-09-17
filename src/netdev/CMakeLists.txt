@@ -57,14 +57,7 @@ set(NETDEV_CLASSIC_SOURCES
 set(NETDEV_GENET_SOURCES
     genet.c             # Broadcom GENET v5: the Pi 4's MAC behind a PiStorm32
     netdev_dtree.c      # Emu68's device tree and its GIC, for the GENET row
-    netdev_reset.c      # a bus master is stopped before a warm reboot
-    # The stack's checksum loops in their 68020 form, movem feeding an addx
-    # chain: the only place a GENET is, Emu68's JIT, runs a movem-based loop
-    # at the speed of a plain copy and a C loop with a carry test per
-    # longword ten times slower (the bottom-half probe, 2026-09-17).  One
-    # form, chosen here rather than by AttnFlags: Emu68 reports a 68040 or
-    # 68060, whose no-movem forms are the wrong bet on a JIT.
-    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_checksum.S")
+    netdev_reset.c)     # a bus master is stopped before a warm reboot
 
 # NETDEV_SOURCES is everything, for the host tests and anything that wants
 # the one-image view.
@@ -122,13 +115,6 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
             "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
             PROPERTIES COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
     endif()
-    # The 68020 form of the checksum loops for anxgenet.device (see
-    # NETDEV_GENET_SOURCES): -m68020 for the movem addressing it uses, and
-    # N68K_MV=20 so the file takes that arm whatever the compiler's CPU.
-    set_source_files_properties(
-        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_checksum.S"
-        PROPERTIES COMPILE_DEFINITIONS "N68K_MV=20;AMINETXDUO_NET68K_ASM=1;N68K_ONLY_COPY_SUM=1"
-                   COMPILE_OPTIONS "-m68020")
 
     # The file and Exec name of the classic image.  A candidate under another
     # name can be opened beside the installed anxnet.device on a machine

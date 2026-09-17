@@ -15,6 +15,12 @@ struct Task {
     struct Node tc_Node;
     UBYTE       tc_Flags;
     UBYTE       tc_State;
+    BYTE        tc_IDNestCnt;
+    BYTE        tc_TDNestCnt;
+    ULONG       tc_SigAlloc;
+    ULONG       tc_SigWait;
+    ULONG       tc_SigRecvd;
+    ULONG       tc_SigExcept;
 };
 
 #endif

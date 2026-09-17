@@ -43,8 +43,13 @@ static UBYTE iperf_payload[IPERF_BUF_MAX];
 static IperfRun iperf_run;
 static char iperf_line[192];
 
-/* iperf 2's own defaults, so a run here and a run there are the same run. */
-#define IPERF_TCP_DEFAULT_LEN   4096
+/* The UDP rate is iperf 2's own default.  The TCP read and write size is
+   the payload buffer, 64 KB: iperf 2 reads 128 KB at a time and 4 KB here
+   understated what the stack receives by a sixth once it passed 700 Mbit/s
+   (A1200 + PiStorm32, 2026-09-17: 730 with 4 KB reads, 870 with 64 KB) --
+   each recv() is a library call and a WaitSelect() round.  The buffer is
+   static and already this size, so the default costs nothing. */
+#define IPERF_TCP_DEFAULT_LEN   IPERF_BUF_MAX
 #define IPERF_UDP_DEFAULT_RATE  1000UL      /* kbit/s */
 
 static VOID iperf_help(VOID)
@@ -57,7 +62,7 @@ static VOID iperf_help(VOID)
     tool_printf("  -p PORT                         port to use (5001)\n");
     tool_printf("  -t SECONDS                      how long to run (10)\n");
     tool_printf("  -n KBYTES                       stop after this much instead\n");
-    tool_printf("  -l BYTES                        bytes per send or recv (4096, UDP 1470)\n");
+    tool_printf("  -l BYTES                        bytes per send or recv (65536, UDP 1470)\n");
     tool_printf("  -b KBIT                         UDP send rate, 0 flat out (1000)\n");
     tool_printf("  -q                              print only the key=value line\n");
     tool_printf("  -4 / -6                         pin the address family\n");

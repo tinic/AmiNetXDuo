@@ -9,6 +9,36 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` sets the receive-buffer registers it depends on instead
+  of or-ing its bits into whatever the previous driver left there, and puts
+  them back when it stops. Those two registers survive the chip's resets
+  and a warm reboot, so a driver that ran before -- one that uses the
+  64-byte status block -- left the next one reading the block as every
+  frame's Ethernet header: link up, "unknown types" climbing, DHCP never
+  answered. Reproduced on the A1200 on 2026-09-17 after a warm reboot from
+  a test build; it is the shape of the report from a PiStorm32 Lite where
+  `genet.device` had run before `anxgenet.device`
+- `anxgenet.device` signals the stack's reader once per burst only when
+  the reader is not already holding that signal, and takes no interrupt
+  mask of its own for the reply list (every caller already holds one): the
+  two were a 14 us trap pair per burst on Emu68. A1200 + PiStorm32 iperf
+  in: 870 -> **898 Mbit/s** (64 KB reads), 730 -> 763 (4 KB); out 337-340
+
+- `iperf` reads and writes 64 KB at a time by default, from 4 KB (`-l`
+  still sets it). The stack was faster than the tool measured: A1200 +
+  PiStorm32, the same library and driver, 730 Mbit/s in with 4 KB reads
+  against 870 with 64 KB
+
+- `anxgenet.device` takes the receive checksum from the chip: the RBUF's
+  checksum block sums each frame from the end of its Ethernet header into
+  a 64-byte status block in front of the frame, and the driver reads it
+  there -- and the frame's length and status too, instead of a register
+  per frame -- so the copy into the stack's buffer is the plain movem copy.
+  Equal to the software sum for 1.18 million of 1.18 million frames on the
+  A1200. iperf in from a 1 Gbit peer: 787 -> **870-875 Mbit/s** (64 KB
+  reads), 659 -> 730 (4 KB reads); every frame still verified, 0 checksum
+  errors; out unchanged
+
 - TCP congestion avoidance grows the window by the bytes acknowledged
   (RFC 3465): one segment once a window's worth is in, the remainder
   carried, instead of `MSS*MSS/cwnd` on every acknowledgment. The same

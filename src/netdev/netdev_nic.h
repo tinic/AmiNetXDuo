@@ -37,7 +37,7 @@
 
 /* Room for a core's own special-statistics records. */
 #ifdef GE_PROBE_ST
-#define NETDEV_CORE_STATS   28      /* + the GENET bottom-half probe's ten */
+#define NETDEV_CORE_STATS   31      /* + the GENET bottom-half probe's thirteen */
 #else
 #define NETDEV_CORE_STATS   18
 #endif
