@@ -635,7 +635,7 @@ int main(int argc, char **argv)
      * has started it yet, so a configured but unstarted interface still yields
      * a clock.
      */
-    sbase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    sbase = tool_open_library("bsdsocket.library", 4UL);
     if (sbase == NULL)
     {
         tool_error("the network is not available");

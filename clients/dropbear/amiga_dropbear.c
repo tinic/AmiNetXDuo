@@ -311,7 +311,14 @@ static int amiga_sock_init(void)
     if (SocketBase != NULL)
         return 0;
 
-    SocketBase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
+    /* The Libs beside the C drawer this command came from, then LIBS:.  A
+       self-contained installation is the last member of LIBS:, so the bare
+       name alone would open another stack's library on a machine that has
+       one; src/tools/tool_util.c tool_open_library() says the rest.
+       Requesters are already off (above), so a missing PROGDIR: is a NULL. */
+    SocketBase = OpenLibrary((CONST_STRPTR)"PROGDIR:/Libs/bsdsocket.library", 4);
+    if (SocketBase == NULL)
+        SocketBase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (SocketBase == NULL)
     {
         errno = ENOSYS;

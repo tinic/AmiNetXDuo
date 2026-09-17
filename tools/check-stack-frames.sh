@@ -151,7 +151,6 @@ RX_EDGES=(
 # hand".  It is 2660.  A budget set from that figure would have passed a
 # command with less headroom than the library it calls expects to find.
 COMMAND_BUDGETS=(
-    "ActivateAmiNetXDuo:128"
     "AddNetInterface:2112"
     "AddNetRoute:960"
     "CheckNetConfig:1984"

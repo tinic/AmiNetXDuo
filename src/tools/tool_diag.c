@@ -485,9 +485,16 @@ VOID tool_config_unwatch(VOID)
 
 VOID tool_explain_interface_file(const char *name)
 {
-    char path[TOOL_NAME_LEN * 2];
+    /* Static: two paths are 256 bytes, and this is on AddNetInterface's and
+       Offline's deepest path, which their budgets do not leave room for. */
+    static char where[AMI_CFG_PATH_LEN];
+    static char path[AMI_CFG_PATH_LEN];
 
-    tool_join_path(path, sizeof(path), DIAG_DIR_INTERFACES, name);
+    /* Name the file the stack looked for: in a self-contained installation
+       that is the drawer's, not the first DEVS:NetInterfaces in the assign. */
+    tool_join_path(path, sizeof(path),
+                   ami_cfg_resolve(DIAG_DIR_INTERFACES, where, sizeof(where)),
+                   name);
     tool_printf("%s: %s: no such interface file\n", (LONG)tool_name, (LONG)path);
 }
 
@@ -743,7 +750,7 @@ struct Library *tool_stack_start(VOID)
 
     tool_stack_held = FALSE;
 
-    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    base = tool_open_library("bsdsocket.library", 4UL);
     if (base == NULL)
         return NULL;
 
@@ -840,7 +847,7 @@ BOOL tool_stack_lookup(const char *name, ULONG *addr_out)
     if (name == NULL || addr_out == NULL || !tool_stack_library_running())
         return FALSE;
 
-    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    base = tool_open_library("bsdsocket.library", 4UL);
     if (base == NULL)
         return FALSE;
 
@@ -874,7 +881,7 @@ BOOL tool_stack_lookup_addr(ULONG addr, char *name_out, ULONG name_len)
 
     name_out[0] = '\0';
 
-    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    base = tool_open_library("bsdsocket.library", 4UL);
     if (base == NULL)
         return FALSE;
 
@@ -942,7 +949,7 @@ ULONG tool_stack_name_servers(char out[][AMI_CFG_IP6_STRLEN], ULONG max)
     if (out == NULL || max == 0 || !tool_stack_library_running())
         return 0;
 
-    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    base = tool_open_library("bsdsocket.library", 4UL);
     if (base == NULL)
         return 0;
 
@@ -995,7 +1002,7 @@ BOOL tool_stack_query(ULONG *addr_out, char *host, ULONG hostlen)
     if (!tool_stack_library_running())
         return FALSE;
 
-    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    base = tool_open_library("bsdsocket.library", 4UL);
     if (base == NULL)
         return FALSE;
 
@@ -1027,7 +1034,7 @@ BOOL tool_stack_domain(char *domain, ULONG domainlen)
     if (!tool_stack_library_running())
         return FALSE;
 
-    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    base = tool_open_library("bsdsocket.library", 4UL);
     if (base == NULL)
         return FALSE;
 
@@ -1201,7 +1208,7 @@ struct Library *tool_netstatus_open(BOOL quiet)
         return NULL;
     }
 
-    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    base = tool_open_library("bsdsocket.library", 4UL);
     if (base == NULL)
     {
         if (!quiet)

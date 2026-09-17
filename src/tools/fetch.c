@@ -360,7 +360,7 @@ static LONG fetch_run(VOID)
 
     /* Opening the API never selects a card. AddNetInterface or Online must
        already have started an explicitly named interface. */
-    sbase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    sbase = tool_open_library("bsdsocket.library", 4UL);
     if (sbase == NULL)
     {
         if (tool_stack_installed())
@@ -404,7 +404,7 @@ static LONG fetch_run(VOID)
              * is original, and demanding the constant would break https:
              * against a working older library.
              */
-            tbase = OpenLibrary((CONST_STRPTR)TLS_LIB_NAME, 1UL);
+            tbase = tool_open_library(TLS_LIB_NAME, 1UL);
             if (tbase == NULL)
             {
                 tool_error("https: needs LIBS:tls.library, and there is none");

@@ -9,6 +9,26 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A self-contained installation is LAST in `LIBS:`, `C:` and `DEVS:`, not
+  first. `ActivateAmiNetXDuo` is gone; the managed block is the three
+  `Assign ... ADD` lines AmiTCP and Miami wrote, and the drawer answers only
+  for what the system does not have. The head of a multi-assign is where
+  every other installer's `Copy foo LIBS:` lands and what `Dir C:` and
+  `DEVS:Networks` show, and the drawer was that head from 0.26.5
+- What selects the stack is `S:Network-Startup`. In the drawer layout it
+  runs `AmiNetXDuo:C/AddNetInterface`; every command opens
+  `PROGDIR:/Libs/bsdsocket.library` and `tls.library` before the name
+  through `LIBS:`; `bsdsocket.library` opens `AmiNetXDuo:Libs/usergroup.library`
+  before the system's; once one stack's library is in memory every later
+  open gets it. `httpd` started from the drawer's block is named through the
+  assign too. To run the other stack, put its `S:Network-Startup` back and
+  reboot
+- The library and the commands read and write `DEVS:NetInterfaces` and
+  `DEVS:Internet` inside `AmiNetXDuo:Devs` when that drawer exists, and in
+  `DEVS:` as before when it does not. With the drawer last, a Roadshow
+  machine's own `DEVS:NetInterfaces` hid the drawer's. `tls.library` still
+  keeps its session cache at `DEVS:Internet/tlssessions` through the assign
+
 ## 0.28.3
 
 - The ThreadX port's critical section reads `SysBase` from the library's own

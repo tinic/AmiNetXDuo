@@ -632,9 +632,16 @@ FOREIGN_LINES=(
 
 # Drawer mode exists for a machine that ALREADY HAS another TCP/IP stack, so
 # that is the only meaningful fixture for it.  The files are deliberately not
-# Amiga libraries: if ActivateAmiNetXDuo leaves system LIBS: first, opening
-# bsdsocket.library fails and the boot half below goes red.  If the installer
-# still performs its old fixed-path backups, the byte snapshot goes red first.
+# Amiga libraries, and they are deliberately FIRST: the drawer's Libs is the
+# last member of LIBS:, so a command that opened bsdsocket.library by name
+# would get this text file, fail, and turn the boot half below red.  The
+# drawer's commands open PROGDIR:/Libs/ before LIBS:, and the boot passing is
+# the proof.  Likewise foreign0 and the foreign routes file sit in the system
+# DEVS:, first in the assign: a stack that read DEVS:NetInterfaces through
+# the assign would bring up foreign0 on a driver this machine does not have
+# and route everything to 10.0.0.1, so fetch failing is what that looks
+# like.  If the installer still performs its old fixed-path backups, the
+# byte snapshot goes red first.
 FOREIGN_STACK_FILES=()
 if [ "$DRAWER" = "1" ]; then
     mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
@@ -1222,7 +1229,7 @@ if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
     fail=1
 fi
-for cmd in ActivateAmiNetXDuo AddNetInterface Online Offline ShowNetStatus \
+for cmd in AddNetInterface Online Offline ShowNetStatus \
            ping netstat host fetch; do
     check_file "${INST}C/$cmd"
 done
@@ -1657,14 +1664,18 @@ FOREIGN=no
 foreign_intact && FOREIGN=yes
 TERM_LINES=$(startup_count 'httpd')
 TERM_ASSIGNS=$(startup_count 'Assign AmiNetXDuo:')
-SELECT_LINES=$(startup_count 'ActivateAmiNetXDuo')
+# The three ADD assigns, and ADD is the word being counted: a block that
+# put the drawer first again would be three lines that do not say it.
+SELECT_LINES=$(( $(startup_count 'Assign LIBS: AmiNetXDuo:Libs ADD') +
+                 $(startup_count 'Assign C:    AmiNetXDuo:C ADD') +
+                 $(startup_count 'Assign DEVS: AmiNetXDuo:Devs ADD') ))
 AMITCP_LINES=$(startup_count 'Assign AmiTCP:')
 
 echo
 echo "startup_foreign_lines_intact=$FOREIGN"
 echo "startup_httpd_lines=$TERM_LINES"
 echo "startup_assign_lines=$TERM_ASSIGNS"
-echo "startup_selector_lines=$SELECT_LINES"
+echo "startup_add_assign_lines=$SELECT_LINES"
 echo "startup_amitcp_lines=$AMITCP_LINES"
 echo "startup_installer_runs=$DRIVE_RUNS"
 
@@ -1678,11 +1689,11 @@ fi
 WANT_SELECTOR=0
 WANT_AMITCP=0
 if [ "$DRAWER" = "1" ]; then
-    WANT_SELECTOR=1
+    WANT_SELECTOR=3
     WANT_AMITCP=1                 # the foreign line, never one of ours
 fi
 if [ "$SELECT_LINES" != "$WANT_SELECTOR" ]; then
-    echo "!! startup has $SELECT_LINES selector line(s), want $WANT_SELECTOR"
+    echo "!! startup has $SELECT_LINES ADD assign line(s), want $WANT_SELECTOR"
     fail=1
 fi
 if [ "$AMITCP_LINES" != "$WANT_AMITCP" ]; then

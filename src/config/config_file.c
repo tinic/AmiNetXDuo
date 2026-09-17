@@ -17,21 +17,133 @@
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <proto/dos.h>
+#include <proto/exec.h>
+
+/* ------------------------------------------------------------ where DEVS: is */
+
+/*
+ * A self-contained installation keeps its configuration beside its library,
+ * under AmiNetXDuo:Devs, and its Devs is the LAST member of the DEVS:
+ * multi-assign, behind the system's.  So on a machine that also has Roadshow,
+ * DEVS:NetInterfaces is Roadshow's drawer and DEVS:Internet/routes is
+ * Roadshow's file, and the files this installer wrote would never be read.
+ * Every DEVS: path this layer opens is therefore redirected into that drawer
+ * when it exists; the strings stay "DEVS:..." everywhere else because that is
+ * the documented name and the right one on a system install, where
+ * AmiNetXDuo: is either the documentation drawer, which has no Devs, or not
+ * assigned at all.
+ *
+ * A path the caller gave with DEVS: in it is redirected too, deliberately:
+ * the installer's own S:Network-Startup line names DEVS:NetInterfaces/eth0,
+ * and on the Roadshow machine above that name resolves to Roadshow's eth0.
+ *
+ * Probed on every call, not cached: the library outlives any assign, and a
+ * Lock on an assigned directory costs nothing worth remembering.
+ */
+#define AMI_CFG_OWN_DEVS        "AmiNetXDuo:Devs"
+#define AMI_CFG_DEVS_PREFIX     "DEVS:"
+
+static BOOL own_devs_exists(VOID)
+{
+    struct Process *me = (struct Process *)FindTask(NULL);
+    APTR            saved;
+    BPTR            lock;
+
+    /* Lock() from a task is not allowed, and on a system install the name
+       may not be assigned: no "Please insert volume AmiNetXDuo". */
+    if (me == NULL || me->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+        return FALSE;
+
+    saved = me->pr_WindowPtr;
+    me->pr_WindowPtr = (APTR)-1L;
+    lock = Lock((STRPTR)AMI_CFG_OWN_DEVS, ACCESS_READ);
+    me->pr_WindowPtr = saved;
+
+    if (lock == 0)
+        return FALSE;
+
+    UnLock(lock);
+    return TRUE;
+}
+
+const char *ami_cfg_resolve(const char *path, char *buf, ULONG buflen)
+{
+    static const char prefix[] = AMI_CFG_DEVS_PREFIX;
+    ULONG i;
+
+    if (path == NULL || buf == NULL || buflen == 0)
+        return path;
+
+    for (i = 0; prefix[i] != '\0'; i++)
+    {
+        char c = path[i];
+
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 'a' + 'A');
+        if (c != prefix[i])
+            return path;
+    }
+
+    if (!own_devs_exists())
+        return path;
+
+    ami_cfg_join3(buf, buflen, AMI_CFG_OWN_DEVS "/", path + i, NULL);
+    return buf;
+}
+
+/*
+ * The resolved name, in a buffer from the pool rather than the stack: this
+ * runs under bsd_lib_open(), whose depth is what every Shell command's 4 KB
+ * has to leave room for (tools/check-stack-frames.sh), and 128 bytes there
+ * is 128 bytes off every command.  NULL means the pool is empty, and the
+ * caller uses the name as given.
+ */
+static char *resolved_path(const char *path)
+{
+    char *where = (char *)ami_alloc((ULONG)AMI_CFG_PATH_LEN);
+
+    if (where == NULL)
+        return NULL;
+
+    if (ami_cfg_resolve(path, where, (ULONG)AMI_CFG_PATH_LEN) == path)
+    {
+        ami_free(where);
+        return NULL;
+    }
+
+    return where;
+}
 
 /* -------------------------------------------------------------- file read */
 
+static APTR read_file_at(const char *path, ULONG *size_out);
+
 APTR ami_cfg_read_file(const char *path, ULONG *size_out)
 {
-    BPTR  file;
-    LONG  size;
-    LONG  got;
-    char *buf;
+    char *where;
+    APTR  result;
 
     if (size_out != NULL)
         *size_out = 0;
 
     if (path == NULL)
         return NULL;
+
+    where  = resolved_path(path);
+    result = read_file_at((where != NULL) ? where : path, size_out);
+
+    if (where != NULL)
+        ami_free(where);
+
+    return result;
+}
+
+static APTR read_file_at(const char *path, ULONG *size_out)
+{
+    BPTR  file;
+    LONG  size;
+    LONG  got;
+    char *buf;
 
     file = Open((STRPTR)path, MODE_OLDFILE);
     if (file == 0)
@@ -113,20 +225,29 @@ BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
 {
     struct FileInfoBlock *fib;
     BPTR                  lock;
+    char                 *where;
+    const char           *dir;
 
     if (cfg == NULL || sink == NULL)
         return FALSE;
 
-    lock = Lock((STRPTR)AMI_CFG_DIR_NETINTERFACES, ACCESS_READ);
+    where = resolved_path(AMI_CFG_DIR_NETINTERFACES);
+    dir   = (where != NULL) ? where : AMI_CFG_DIR_NETINTERFACES;
+    lock  = Lock((STRPTR)dir, ACCESS_READ);
     if (lock == 0)
     {
-        AMI_WARN("config: no " AMI_CFG_DIR_NETINTERFACES " drawer");
+        AMI_WARN("config: no %s drawer", dir);
 
-        ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
+        ami_cfg_problem_file(dir);
         ami_cfg_problem_code(0, AMI_CFG_PROBLEM_ERROR, AMI_CFG_SAYS_THERE_IS_NO_DEVS, AMI_CFG_ADVICE_RUN_NETSETUP_IT_ASKS);
         ami_cfg_problem_file(NULL);
+        if (where != NULL)
+            ami_free(where);
         return FALSE;
     }
+
+    if (where != NULL)
+        ami_free(where);
 
     fib = (struct FileInfoBlock *)ami_alloc(sizeof(struct FileInfoBlock));
     if (fib == NULL)

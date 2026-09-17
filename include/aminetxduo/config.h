@@ -450,6 +450,19 @@ BOOL ami_config_reserve(AmiConfig *cfg, UWORD want);
 LONG ami_config_load_interface(const char *name, AmiIfConfig *out);
 
 /*
+ * Where a DEVS: path really is.  A self-contained installation keeps its
+ * configuration under AmiNetXDuo:Devs, and that drawer is the LAST member of
+ * the DEVS: multi-assign, so a DEVS:NetInterfaces or DEVS:Internet that the
+ * system also has would hide it.  When AmiNetXDuo:Devs exists, a path that
+ * starts with DEVS: is rewritten into it (in `buf`, which is returned); on a
+ * system install, or for any other path, `path` itself comes back.  Every
+ * read this library makes goes through it; a command that opens, lists or
+ * writes a configuration file itself must too, or it and the stack disagree
+ * about which file that is.  Needs a Process, as any dos call does.
+ */
+const char *ami_cfg_resolve(const char *path, char *buf, ULONG buflen);
+
+/*
  * Offer `name` as this machine's host name on behalf of `source`. It is taken,
  * and TRUE returned, when `source` ranks at or above whatever set the current
  * name, so a fresh arrival from the same source (a DHCP renewal) replaces it

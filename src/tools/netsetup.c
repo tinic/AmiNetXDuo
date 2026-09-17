@@ -41,8 +41,35 @@ enum
     ARG_COUNT
 };
 
-#define DIR_INTERFACES  "DEVS:NetInterfaces"
-#define DIR_INTERNET    "DEVS:Internet"
+/*
+ * Where the files go: the drawer the stack reads.  In a self-contained
+ * installation that is AmiNetXDuo:Devs, the LAST member of DEVS:, and a file
+ * written to the DEVS: name alone would land in the system's drawer, where
+ * the stack -- which redirects the same way, through ami_cfg_resolve() --
+ * would never look for it.  Static: two paths against a Shell command's
+ * 4 KB stack.
+ */
+static const char *dir_interfaces(VOID)
+{
+    static char where[AMI_CFG_PATH_LEN];
+
+    if (where[0] == '\0' &&
+        ami_cfg_resolve("DEVS:NetInterfaces", where, sizeof(where)) != where)
+        tool_copy_string(where, sizeof(where), "DEVS:NetInterfaces");
+
+    return where;
+}
+
+static const char *dir_internet(VOID)
+{
+    static char where[AMI_CFG_PATH_LEN];
+
+    if (where[0] == '\0' &&
+        ami_cfg_resolve("DEVS:Internet", where, sizeof(where)) != where)
+        tool_copy_string(where, sizeof(where), "DEVS:Internet");
+
+    return where;
+}
 
 #define ANSWER_LEN      80
 #define FILE_LEN        512
@@ -521,14 +548,14 @@ static VOID show_plan(const Plan *plan, const char *ifpath)
     if (plan->have_gateway)
     {
         ami_config_format_ip(plan->gateway, text, sizeof(text));
-        tool_printf("\n  %s/routes\n", (LONG)DIR_INTERNET);
+        tool_printf("\n  %s/routes\n", (LONG)dir_internet());
         tool_printf("      DEFAULT = %s\n", (LONG)text);
     }
 
     if (plan->have_dns)
     {
         ami_config_format_ip(plan->dns, text, sizeof(text));
-        tool_printf("\n  %s/name_resolution\n", (LONG)DIR_INTERNET);
+        tool_printf("\n  %s/name_resolution\n", (LONG)dir_internet());
         tool_printf("      NAMESERVER %s\n", (LONG)text);
     }
 }
@@ -722,7 +749,7 @@ static BOOL ask_name(Plan *plan)
     char answer[ANSWER_LEN];
 
     tool_printf("\nThe interface needs a name. It is only a label: it becomes\n");
-    tool_printf("the name of the file in %s, and the name to type\n", (LONG)DIR_INTERFACES);
+    tool_printf("the name of the file in %s, and the name to type\n", (LONG)dir_interfaces());
     tool_printf("after Online, Offline and ShowNetStatus.\n");
 
     for (;;)
@@ -1149,7 +1176,7 @@ int main(int argc, char **argv)
 
     /* ---- confirm --------------------------------------------------------- */
 
-    tool_join_path(ifpath, sizeof(ifpath), DIR_INTERFACES, plan.name);
+    tool_join_path(ifpath, sizeof(ifpath), dir_interfaces(), plan.name);
 
     if (interactive)
     {
@@ -1190,7 +1217,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (!ensure_dir(DIR_INTERFACES))
+    if (!ensure_dir(dir_interfaces()))
     {
         ami_free(blob);
         FreeArgs(rda);
@@ -1210,7 +1237,7 @@ int main(int argc, char **argv)
     {
         char path[PATH_LEN];
 
-        if (!ensure_dir(DIR_INTERNET))
+        if (!ensure_dir(dir_internet()))
         {
             restore_file(ifpath, kept_if);
             ami_free(blob);
@@ -1220,7 +1247,7 @@ int main(int argc, char **argv)
 
         if (plan.have_gateway)
         {
-            tool_join_path(path, sizeof(path), DIR_INTERNET, "routes");
+            tool_join_path(path, sizeof(path), dir_internet(), "routes");
             build_routes_file(&plan, blob);
             if (!write_file(path, blob, &kept_route))
             {
@@ -1236,12 +1263,12 @@ int main(int argc, char **argv)
         {
             char rpath[PATH_LEN];
 
-            tool_join_path(rpath, sizeof(rpath), DIR_INTERNET,
+            tool_join_path(rpath, sizeof(rpath), dir_internet(),
                            "name_resolution");
             build_resolver_file(&plan, blob);
             if (!write_file(rpath, blob, &kept_res))
             {
-                tool_join_path(path, sizeof(path), DIR_INTERNET, "routes");
+                tool_join_path(path, sizeof(path), dir_internet(), "routes");
                 if (plan.have_gateway)
                     restore_file(path, kept_route);
                 restore_file(ifpath, kept_if);

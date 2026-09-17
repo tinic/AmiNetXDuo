@@ -372,6 +372,51 @@ AmiNetStack *tool_require_stack(VOID)
     return stack;
 }
 
+/*
+ * The library beside this command first, then the library by name.
+ *
+ * A self-contained installation keeps bsdsocket.library and tls.library in
+ * the Libs drawer next to the C drawer this command was loaded from, and
+ * that Libs is the LAST member of LIBS:, behind the system's.  On a machine
+ * that also has Roadshow or AmiTCP, "bsdsocket.library" is theirs; on one
+ * that has an older AmiNetXDuo in LIBS:, "tls.library" is the older one.
+ * PROGDIR:/Libs is the drawer the command came from, one level up: for a
+ * system install that is SYS:C -> SYS:Libs, the same file LIBS: names.
+ *
+ * OpenLibrary() with a path first looks through the libraries already in
+ * memory by the bare name, so once any bsdsocket.library is loaded every
+ * caller gets that one -- which is what makes the S:Network-Startup line
+ * the thing that selects the stack: it runs the drawer's AddNetInterface,
+ * that opens the drawer's library, and everything after it finds that one.
+ *
+ * Requesters are off for the path: a command made resident has no PROGDIR:,
+ * and a drawer somebody copied the command out of has no Libs beside it.
+ *
+ * The path is static, not a frame: 56 bytes here put GetNetStatus and arp
+ * over their stack budgets (tools/check-stack-frames.sh), and a command is
+ * one process.
+ */
+struct Library *tool_open_library(const char *name, ULONG version)
+{
+    static char     path[TOOL_NAME_LEN + 16];
+    struct Process *me   = (struct Process *)FindTask(NULL);
+    struct Library *base = NULL;
+
+    if (me != NULL && me->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+    {
+        APTR saved = me->pr_WindowPtr;
+
+        tool_join_path(path, sizeof(path), "PROGDIR:/Libs", name);
+        me->pr_WindowPtr = (APTR)-1L;
+        base = OpenLibrary((CONST_STRPTR)path, version);
+        me->pr_WindowPtr = saved;
+    }
+
+    if (base == NULL)
+        base = OpenLibrary((CONST_STRPTR)name, version);
+
+    return base;
+}
 
 const char *tool_basename(const char *path)
 {

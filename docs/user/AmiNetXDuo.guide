@@ -198,14 +198,21 @@
   selected on the preceding page. The Installer neither moves nor replaces
   files belonging to the system stack.
 
-  Its S:User-Startup block assigns AmiNetXDuo: to that drawer and runs
-  ActivateAmiNetXDuo before starting the network. The command puts the
-  drawer's Libs, C and Devs first in their respective multi-assigns while
-  retaining all earlier entries behind them. This is necessary because
-  Assign ADD appends: ADD by itself leaves an existing system
-  LIBS:bsdsocket.library in control. To select another installed stack,
-  change which stack's startup block is enabled and reboot. Do not try to
-  exchange a bsdsocket.library which is already resident.
+  Its S:User-Startup block assigns AmiNetXDuo: to that drawer and ADDs
+  the drawer's Libs, C and Devs to LIBS:, C: and DEVS:, after everything
+  already there, the way AmiTCP and Miami did it. The system's
+  directories keep answering first and the drawer answers for what they
+  lack; nothing of another stack's is moved or hidden. What selects the
+  stack is S:Network-Startup: it runs AmiNetXDuo:C/AddNetInterface, which
+  opens the library beside it, and every program that opens
+  bsdsocket.library after that gets that one. The library reads its
+  configuration from AmiNetXDuo:Devs, so DEVS:NetInterfaces and
+  DEVS:Internet mean that drawer's to it. Every command opens the library
+  beside itself the same way. To run another installed stack, put its
+  S:Network-Startup back and reboot; do not try to exchange a
+  bsdsocket.library which is already resident. On such a machine name the
+  drawer's commands in full, AmiNetXDuo:C/ShowNetStatus, because C:
+  reaches the other stack's first.
 
   Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver.
   Copy it to DEVS:Networks, which is what the Installer offers to do.
@@ -898,6 +905,13 @@
   already on the disk when AmiNetXDuo is installed -- Roadshow keeps its
   own there -- is renamed to S:Network-Startup.old rather than overwritten.
 
+  In the self-contained layout the line names the drawer's own command,
+  AmiNetXDuo:C/AddNetInterface, because C: reaches that drawer last and a
+  plain C:AddNetInterface would be another stack's on a machine that has
+  one. That command opens the library beside it, and the stack it starts
+  is the one every program gets from then on. This is what selects the
+  stack, and S:Network-Startup is the file to swap to run another.
+
   Merely opening bsdsocket.library creates the complete stack with its
   built-in loopback, 127.0.0.1 and, in the full IPv6 build, ::1, but starts
   no physical interface and opens no network driver. This matches Roadshow
@@ -1060,8 +1074,6 @@
 
   @{b}Setting up and controlling the stack@{ub}
 
-    ActivateAmiNetXDuo  select a self-contained install at boot while
-                      preserving the old LIBS:, C: and DEVS: paths
     @{"AddNetInterface " link ADDNETINTERFACE}  start the stack and bring an interface up
     @{"Online          " link ONLINE}  put an interface back on the network
     @{"Offline         " link OFFLINE}  take an interface off the network

@@ -39,7 +39,7 @@ BOOL tool_fd_isset(const ToolFdSet *set, LONG fd)
 
 struct Library *tool_socket_open(VOID)
 {
-    struct Library *base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    struct Library *base = tool_open_library("bsdsocket.library", 4UL);
 
     if (base == NULL)
     {

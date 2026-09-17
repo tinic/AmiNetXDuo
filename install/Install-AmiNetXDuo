@@ -247,13 +247,16 @@
        "Type AddNetInterface by hand when you want one.  A network program "
        "which opens bsdsocket.library gets the built-in loopback, but no card "
        "is opened and there is no route to an external network.\n\n"
-       "For an installation in its own drawer, the managed block first runs "
-       "ActivateAmiNetXDuo.  That command puts the drawer's LIBS:, C: and "
-       "DEVS: entries first while preserving every directory already in "
-       "those assigns.  This selects AmiNetXDuo at boot without moving or "
-       "renaming another stack's files.  Disable this block and enable the "
-       "other stack's startup block to switch back, then reboot; a loaded "
-       "bsdsocket.library cannot be exchanged in a running system.\n\n"
+       "For an installation in its own drawer, the managed block first "
+       "assigns AmiNetXDuo: to the drawer and ADDs its Libs, C and Devs to "
+       "LIBS:, C: and DEVS:, after everything already there, the way AmiTCP "
+       "and Miami did.  Nothing belonging to another stack is moved, renamed "
+       "or shadowed.  What selects the stack is S:Network-Startup: it runs "
+       "AmiNetXDuo:C/AddNetInterface, which opens the library beside it, and "
+       "every program that opens bsdsocket.library afterwards gets that one.  "
+       "To run the other stack instead, put its S:Network-Startup back and "
+       "reboot; a loaded bsdsocket.library cannot be exchanged in a running "
+       "system.\n\n"
        "AmiNetXDuo never creates or changes the AmiTCP: assign.  That name "
        "belongs to AmiTCP and to software which keeps compatibility data "
        "under AmiTCP:db.\n\n"
@@ -362,13 +365,16 @@
 ; command list and the troubleshooting notes that used to be here are in the
 ; guide, which is where someone will look for them a second time anyway.
 
+; %s twice: the command's name, which in the drawer layout goes through the
+; AmiNetXDuo: assign (C_PREFIX, set once the layout is known), and the
+; interface.
 (set F_START_YES
   (cat "It starts by itself at the next reboot.  To start it now:\n\n"
-       "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
+       "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_START_NO
   (cat "It does not start by itself.  To start it:\n\n"
-       "    C:AddNetInterface DEVS:NetInterfaces/%s\n"))
+       "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
 (set F_HTTPD
   (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
@@ -747,10 +753,20 @@
 ;
 ; Issue #9: a machine that keeps Roadshow, AmiTCP and this one side by side
 ; cannot have all three owning LIBS:bsdsocket.library.  In drawer mode every
-; file goes below the one documentation drawer chosen above.  At boot,
-; ActivateAmiNetXDuo prepends its Libs, C and Devs while retaining every old
-; member of those multi-assigns.  A plain ADD cannot select the stack: it adds
-; at the end, behind the system bsdsocket.library this feature must preserve.
+; file goes below the one documentation drawer chosen above, and the managed
+; block ADDs its Libs, C and Devs to LIBS:, C: and DEVS: -- LAST, behind
+; everything already there, the way AmiTCP and Miami did it.  The drawer
+; answers only for what the system does not have.  Putting it FIRST was tried
+; (ActivateAmiNetXDuo, 0.26.5 to 0.28.3) and is wrong: the head of a
+; multi-assign is where every other installer's `Copy foo LIBS:` lands and
+; what `Dir C:` and DEVS:Networks show, so the drawer swallowed the system.
+;
+; A plain ADD cannot select the stack, and does not have to.  The stack is
+; selected by whoever opens its library first: S:Network-Startup runs
+; AmiNetXDuo:C/AddNetInterface, every command opens PROGDIR:/Libs/ before
+; LIBS:, and the library reads AmiNetXDuo:Devs rather than the DEVS: the
+; assign would hand it (src/config/config_file.c).  Which stack runs is which
+; S:Network-Startup is in place.
 ;
 ; NOT ASKED AT NOVICE, where the Installer draws no questions at all: that
 ; level takes the system layout, which is what every install has done so far.
@@ -790,11 +806,12 @@
                         "bsdsocket.library into LIBS:, the commands into C:, "
                         "the driver and the configuration into DEVS:.\n\n"
                         "Into a drawer of its own keeps every file together "
-                        "and selects it at boot without moving another "
-                        "stack's files.  ActivateAmiNetXDuo puts this "
-                        "drawer's LIBS:, C: and DEVS: entries first and keeps "
-                        "the directories those assigns already contained.  "
-                        "Switch startup blocks and reboot to change stacks."
+                        "and moves none of another stack's.  The drawer's "
+                        "Libs, C and Devs are added to LIBS:, C: and DEVS: "
+                        "after everything already there, and its own "
+                        "S:Network-Startup starts its own stack.  Put the "
+                        "other stack's S:Network-Startup back and reboot to "
+                        "change stacks."
                         "\n\n"
                         @askchoice-help))
              ; 22 characters is the ceiling; over it the page silently
@@ -819,6 +836,13 @@
       (makedir (tackon D_DEVS "NetInterfaces"))
       (makedir (tackon D_DEVS "Internet"))
     )))
+
+; How a startup file names one of OUR commands.  C: reaches the drawer LAST,
+; so on a machine with another stack "C:AddNetInterface" is that stack's
+; command; the drawer's is named through the assign the block makes first.
+; The system layout keeps the plain C: that every earlier install wrote.
+(set C_PREFIX "C:")
+(if DRAWER_LAYOUT (set C_PREFIX "AmiNetXDuo:C/"))
 
 ; Everything from here on examines THE CHOSEN DESTINATION.  Before drawer
 ; mode existed these tests quite reasonably named LIBS: and DEVS: directly;
@@ -1902,16 +1926,20 @@
 (set BOOT_CMD "")
 (set DO_BOOT 0)
 
-; FIRST in the block, before anything opens a library.  ADD alone is not a
-; selector: AssignAdd appends, so an existing system bsdsocket.library still
-; wins.  ActivateAmiNetXDuo prepends the three private directories and retains
-; the complete old assignment lists behind them.  The command is named through
-; AmiNetXDuo: because C: has deliberately not been changed yet.
+; FIRST in the block, before anything opens a library.  ADD, and LAST: an
+; ADD assign appends, so the system's directories keep answering first and
+; the drawer answers for what they lack.  Nothing here selects the stack;
+; the S:Network-Startup written below does, by naming the drawer's own
+; AddNetInterface, which opens the library beside it.  A drawer install
+; without the startup is reachable through AmiNetXDuo: and, for whatever
+; the system has no copy of, through the three assigns.
 (if (> (strlen D_ROOT) 0)
   (
     (set BOOT_CMD
       (cat ("Assign AmiNetXDuo: \"%s\"\n" D_ROOT)
-           "AmiNetXDuo:C/ActivateAmiNetXDuo\n"))
+           "Assign LIBS: AmiNetXDuo:Libs ADD\n"
+           "Assign C:    AmiNetXDuo:C ADD\n"
+           "Assign DEVS: AmiNetXDuo:Devs ADD\n"))
     (set DO_BOOT 1)
   ))
 
@@ -1930,8 +1958,9 @@
 
 ; The assign is written here ONLY when the drawer install did not already
 ; write one.  A drawer install emits `Assign AmiNetXDuo: "<D_ROOT>"` at the top
-; of this block, and that name is load-bearing: the selector and anything else
-; refer to the private installation through it.  A
+; of this block, and that name is load-bearing: the three ADD assigns, the
+; S:Network-Startup line and the library's own configuration lookup all refer
+; to the private installation through it.  A
 ; second `Assign AmiNetXDuo:` here does not add a name, it REPOINTS the one
 ; already given, so on a drawer install with httpd the drawer's own name ended
 ; up meaning the documentation directory instead.
@@ -1946,17 +1975,19 @@
       (if (NOT (> (strlen D_ROOT) 0))
           (set BOOT_CMD
             (cat BOOT_CMD ("Assign AmiNetXDuo: \"%s\"\n" DOCDIR))))
+      ; The drawer's httpd by its own name: C: reaches the drawer last, and
+      ; a system httpd of any origin would be the one that ran.
       (set BOOT_CMD
         (cat BOOT_CMD
-             ("Run >NIL: <NIL: C:httpd PORT %ld -T -F\n" HTTPD_PORT)))
+             ("Run >NIL: <NIL: %shttpd PORT %ld -T -F\n" C_PREFIX HTTPD_PORT)))
     ))
 
 ; Three cases, and (startup) covers all of them because it writes the block
 ; whole: selection plus network start, selection on its own for a drawer
 ; install, or no block for a system install that must not start at boot.
 (set P_BOOT
-  (cat "Adding AmiNetXDuo's drawer selector to S:User-Startup.  Its files "
-       "are selected at boot, but the network does not start by itself."))
+  (cat "Adding AmiNetXDuo's drawer assigns to S:User-Startup.  Its files "
+       "are reachable at boot, but the network does not start by itself."))
 
 ; --------------------------------------------------------------------------
 ; S:Network-Startup
@@ -1970,6 +2001,17 @@
 ; An existing file is somebody's configuration, very possibly the Roadshow one
 ; this installation is replacing, and it is renamed rather than overwritten.
 ; Same .old convention as the libraries above.
+; Said in the file, for the drawer layout only: the one line in it that
+; differs from a system install, and why.
+(set NS_DRAWER_NOTE "")
+(if DRAWER_LAYOUT
+    (set NS_DRAWER_NOTE
+      (cat ";\n"
+           "; This installation lives in AmiNetXDuo: and is LAST in\n"
+           "; C:, LIBS: and DEVS:.  The command is named through the\n"
+           "; assign so that it, and not another stack's, is the one\n"
+           "; that runs; to AmiNetXDuo, DEVS: here means AmiNetXDuo:Devs.\n")))
+
 (if DO_STARTUP
   (
     (if (exists "S:Network-Startup" (noreq))
@@ -2006,12 +2048,12 @@
       (append ";\n")
       (append "; To start another card as well, add a line for it:\n")
       (append ";\n")
-      (append ";     AddNetInterface DEVS:NetInterfaces/eth1 QUIET\n")
+      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/eth1 QUIET\n")
       (append ";\n")
       (append "; To start EVERY definition in the drawer, which is what\n")
       (append "; Roadshow does, use the pattern instead of a name:\n")
       (append ";\n")
-      (append ";     AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET\n")
+      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET\n")
       (append ";\n")
       (append "; To stop the network starting at boot, comment the line out\n")
       (append "; with a leading semicolon.  Nothing else has to change.\n")
@@ -2019,8 +2061,9 @@
       (append "; QUIET keeps a boot that works silent.  Remove it while the\n")
       (append "; configuration is still being written and the command says\n")
       (append "; what came up.  A boot that FAILS prints why either way.\n")
+      (append NS_DRAWER_NOTE)
       (append "\n")
-      (append "C:AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n"))
+      (append C_PREFIX "AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n"))
   ))
 
 (if DO_STARTUP
@@ -2045,8 +2088,8 @@
 ; ==========================================================================
 
 (if DO_STARTUP
-    (set FINAL_START (F_START_YES START_IF))
-    (set FINAL_START (F_START_NO  START_IF)))
+    (set FINAL_START (F_START_YES C_PREFIX START_IF))
+    (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
 ; Said again on the last page, and deliberately.  The question that turned it
 ; on was one of a dozen; this is the sentence somebody reads after the fact and

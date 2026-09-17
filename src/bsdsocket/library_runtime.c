@@ -42,14 +42,41 @@ BOOL bsd_runtime_open(VOID)
 /*
  * usergroup.library, opened and held for as long as this library is loaded.
  *
+ * Three places, in order.  A self-contained installation ships its own copy
+ * under AmiNetXDuo:Libs, and that drawer is the LAST member of LIBS:, so a
+ * bare name would open AmiTCP's or Roadshow's copy from the system first.
+ * OpenLibrary() given a path strips it to look through the libraries already
+ * in memory, so a usergroup.library that is already loaded is the one every
+ * caller gets whichever name is used.  Then the bare name, which is LIBS:.
+ * Then where AmiTCP keeps it.  The two named paths run with requesters off:
+ * on a system install neither assign need exist.
  */
 static struct Library *bsd_usergroup_base;
 
-VOID bsd_usergroup_open(VOID)
+static struct Library *bsd_usergroup_try(const char *path)
 {
     struct Process *me;
     APTR            saved;
+    struct Library *base;
 
+    me = (struct Process *)FindTask(NULL);
+    if (me == NULL || me->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+        return NULL;
+
+    saved = me->pr_WindowPtr;
+    me->pr_WindowPtr = (APTR)-1L;
+    base = OpenLibrary((STRPTR)path, 0);
+    me->pr_WindowPtr = saved;
+
+    return base;
+}
+
+VOID bsd_usergroup_open(VOID)
+{
+    if (bsd_usergroup_base != NULL)
+        return;
+
+    bsd_usergroup_base = bsd_usergroup_try("AmiNetXDuo:Libs/usergroup.library");
     if (bsd_usergroup_base != NULL)
         return;
 
@@ -57,15 +84,7 @@ VOID bsd_usergroup_open(VOID)
     if (bsd_usergroup_base != NULL)
         return;
 
-    me = (struct Process *)FindTask(NULL);
-    if (me == NULL || me->pr_Task.tc_Node.ln_Type != NT_PROCESS)
-        return;
-
-    saved = me->pr_WindowPtr;
-    me->pr_WindowPtr = (APTR)-1L;
-    bsd_usergroup_base =
-        OpenLibrary((STRPTR)"AmiTCP:libs/usergroup.library", 0);
-    me->pr_WindowPtr = saved;
+    bsd_usergroup_base = bsd_usergroup_try("AmiTCP:libs/usergroup.library");
 }
 
 VOID bsd_runtime_close(VOID)

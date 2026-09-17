@@ -214,6 +214,22 @@ static BOOL line_starts_with(const char *line, const char *keyword)
                   line[n] == '\n' || line[n] == '\r');
 }
 
+/*
+ * The file the stack reads.  In a self-contained installation DEVS: means
+ * AmiNetXDuo:Devs, the LAST member of the multi-assign, so the name alone
+ * would open another stack's file on a machine that has one; the library
+ * redirects through the same ami_cfg_resolve().  The findings keep naming
+ * the DEVS: form, which is the documented name and stays a valid one.
+ * Static: 128 bytes against a Shell command's 4 KB stack, and every caller
+ * uses the result before the next call.
+ */
+static const char *cnc_where(const char *path)
+{
+    static char where[AMI_CFG_PATH_LEN];
+
+    return ami_cfg_resolve(path, where, sizeof(where));
+}
+
 /* The 1-based line of `path` whose first word is `keyword`, or 0. */
 static ULONG keyword_line(const char *path, const char *keyword)
 {
@@ -222,7 +238,7 @@ static ULONG keyword_line(const char *path, const char *keyword)
     ULONG lineno = 0;
     ULONG found  = 0;
 
-    file = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    file = Open((CONST_STRPTR)cnc_where(path), MODE_OLDFILE);
     if (file == (BPTR)0)
         return 0;
 
@@ -802,7 +818,7 @@ static VOID check_netdb_file(const NetdbFile *spec)
     ULONG lineno = 0;
     UWORD said   = 0;
 
-    file = Open((CONST_STRPTR)spec->path, MODE_OLDFILE);
+    file = Open((CONST_STRPTR)cnc_where(spec->path), MODE_OLDFILE);
     if (file == (BPTR)0)
         return;                     /* missing is normal: there are built-ins */
 
@@ -983,7 +999,8 @@ int main(int argc, char **argv)
     cnc_quiet   = (args[ARG_QUIET]   != 0) ? TRUE : FALSE;
     cnc_verbose = (args[ARG_VERBOSE] != 0) ? TRUE : FALSE;
 
-    if (!tool_exists("DEVS:Internet") && !tool_exists(CNC_DIR_INTERFACES))
+    if (!tool_exists(cnc_where("DEVS:Internet")) &&
+        !tool_exists(cnc_where(CNC_DIR_INTERFACES)))
     {
         cnc_errors++;
 
@@ -1013,7 +1030,7 @@ int main(int argc, char **argv)
 
     for (i = 0; i < (ULONG)(sizeof(cnc_netdb) / sizeof(cnc_netdb[0])); i++)
     {
-        if (cnc_verbose && tool_exists(cnc_netdb[i].path))
+        if (cnc_verbose && tool_exists(cnc_where(cnc_netdb[i].path)))
             say("  checked %s\n", (LONG)cnc_netdb[i].path);
 
         check_netdb_file(&cnc_netdb[i]);

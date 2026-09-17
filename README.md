@@ -81,7 +81,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 | Which stack: Everything, Minimal, Micro | Everything |
 | Install `anxnet.device` | yes |
 | Where the `AmiNetXDuo` drawer of documentation and examples goes | any drawer; nothing in it is needed for the network |
-| Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer selected at boot by `ActivateAmiNetXDuo` beside another stack's files (Intermediate and Expert) | into the system |
+| Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer beside another stack's files, added last to those assigns (Intermediate and Expert) | into the system |
 | Which card, and the interface name | the driver found in `DEVS:` |
 | Answer to `<hostname>.local` on the network | no |
 | DHCP, or a fixed address, netmask and gateway | DHCP |
@@ -127,7 +127,6 @@ the NDK does not declare and the CPU profiler.
 | `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `hostname` | the name of this machine, and where the name came from |
-| `ActivateAmiNetXDuo` | select the stack's own drawer at boot, in the drawer layout |
 
 The installer copies all of them into `C:`. Every command that resolves a name
 takes `-4` and `-6`.

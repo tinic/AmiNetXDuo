@@ -129,6 +129,15 @@ const char *tool_net_error(LONG err);
  */
 AmiNetStack *tool_require_stack(VOID);
 
+/*
+ * OpenLibrary() for the stack's own libraries: PROGDIR:/Libs/<name> first,
+ * the drawer this command was installed beside, then <name> through LIBS:.
+ * Every command opens bsdsocket.library and tls.library through this, so a
+ * self-contained installation runs its own copies even when the system has
+ * another stack's.  Closed with CloseLibrary() as usual.
+ */
+struct Library *tool_open_library(const char *name, ULONG version);
+
 /* Interface index in config order, or -1 after printing a message. */
 LONG tool_find_interface(const char *name);
 

@@ -73,8 +73,13 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL loud)
  */
 static ULONG list_interfaces(char names[][TOOL_NAME_LEN])
 {
-    return tool_list_dir("DEVS:NetInterfaces", names,
-                         (ULONG)ONOFF_MAX_FILES, NULL);
+    char where[AMI_CFG_PATH_LEN];
+
+    /* The drawer the stack reads, which in a self-contained installation is
+       not the first DEVS:NetInterfaces the multi-assign finds. */
+    return tool_list_dir(ami_cfg_resolve("DEVS:NetInterfaces", where,
+                                         sizeof(where)),
+                         names, (ULONG)ONOFF_MAX_FILES, NULL);
 }
 
 /*
