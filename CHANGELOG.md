@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.2
+
 - The packet pool is sized from the fastest memory the machine has, not
   from all of it: the Fast RAM Exec lists at its highest priority, summed
   across headers at that priority. On the A3000 above that is the 12 MB of
