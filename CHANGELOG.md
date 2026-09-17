@@ -9,6 +9,20 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd` reads a request body 16 KB at a time, not 512. The WebDAV PUT sink
+  read the body into a 512-byte stack buffer and `Write()` it to disk a
+  `recv()` at a time -- two dozen socket reads and two dozen DOS packets per
+  receive window, so the socket drained slower than it filled and the window
+  sat at zero half the time. On a real A3000 an upload to `Ram Disk:` held
+  ~1.3 Mbit/s no matter the link (wifi and wired alike, confirmed by a
+  sender-side capture: no loss, RTT fine, the receiver just could not drain).
+  The buffer is a 16 KB static now -- one read and one write clears the
+  card's 8-segment window -- and the same upload runs at **3.4 Mbit/s, 2.5x**,
+  close to the stack's own receive ceiling; the bytes are identical. A
+  counted (`Content-Length`) body still reads no further than its end; a
+  chunked body's read stays bounded to what the pipelined-request buffer can
+  hold
+
 - `anxgenet.device` has the chip write the TCP checksum of a frame on its
   way out (the TBUF's 64-byte transmit status block, TBUF_CTRL 64B_EN, set
   outright and cleared at stop like the RBUF's): the library puts the

@@ -99,6 +99,13 @@ static const char *const httpd_files_places[] = {
    falls back to out[]. */
 #define HTTPD_FILE_BUF     32768UL
 #define HTTPD_CHUNK_MAX     1400    /* one generated piece, framed into out */
+/* The request-body read/sink chunk.  Big so a bulk upload recv()s and
+   Write()s a whole receive window at a time: at 512 bytes it did two dozen
+   recv()+Write() rounds per window and WebDAV PUT sat at ~1.3 Mbit/s on a
+   real A3000 whatever the network did (the socket drained slower than it
+   filled, so the window sat at zero half the time).  16 KB clears the
+   card's 8-segment window (11,680 bytes) in one read. */
+#define HTTPD_BODY_BUF     16384UL
 #define HTTPD_HEADERS_MAX     48    /* header lines in one request          */
 #define HTTPD_BODY_MAX     65536UL  /* a buffered request body: the XML     */
 #define HTTPD_TIMEOUT_DEF     30UL  /* seconds of no progress               */
@@ -424,6 +431,10 @@ static HttpConn *httpd_conn;
    the connections interleave between passes, never inside one. */
 static char httpd_scratch[HTTPD_CHUNK_MAX];
 static char httpd_escape[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 3];
+/* The request-body read buffer, static for the reason above and large for
+   the reason at HTTPD_BODY_BUF.  Filled and drained inside one
+   httpd_readable() pass, so it shares the "one request per pass" safety. */
+static UBYTE httpd_body_buf[HTTPD_BODY_BUF];
 static char httpd_text[HTTP_URL_MAX * 6];
 static char httpd_href_buf[HTTP_URL_MAX + HTTP_NAME_MAX + 2];
 static char httpd_target[HTTP_URL_MAX];
@@ -6603,16 +6614,29 @@ static BOOL httpd_readable(HttpConn *c)
 
     if (c->state == CONN_BODY)
     {
-        UBYTE scratch[512];
-        LONG  want = (LONG)sizeof(scratch);
+        LONG  want = (LONG)sizeof(httpd_body_buf);
         LONG  took;
 
-        /* A chunked body has no count to stop at, so the framing is what says
-           where it ends and the read is whatever the socket has. */
-        if (c->chunk.state == HTTP_CHUNK_OFF && (ULONG)want > c->body_left)
-            want = (LONG)c->body_left;
+        /* A counted body reads at most what is left of it, so recv() never
+           crosses into the next request and there is no leftover to keep.
+           A chunked body has no count -- the framing says where it ends --
+           so it may read past the terminating chunk; bound that read to what
+           c->in can still hold, because the tail past the body is the next
+           request and it is stashed there. */
+        if (c->chunk.state == HTTP_CHUNK_OFF)
+        {
+            if ((ULONG)want > c->body_left)
+                want = (LONG)c->body_left;
+        }
+        else
+        {
+            LONG room = (LONG)sizeof(c->in) - (LONG)c->in_len;
 
-        got = tool_sock_recv(httpd_sb, c->sock, scratch, want);
+            if (want > room)
+                want = room;
+        }
+
+        got = tool_sock_recv(httpd_sb, c->sock, httpd_body_buf, want);
 
         if (got == 0)
             return FALSE;
@@ -6624,7 +6648,7 @@ static BOOL httpd_readable(HttpConn *c)
             return (err == TOOL_EWOULDBLOCK || err == TOOL_EINTR) ? TRUE : FALSE;
         }
 
-        took = httpd_consume_body(c, scratch, got);
+        took = httpd_consume_body(c, httpd_body_buf, got);
         c->progress  = httpd_now();
         c->body_got += (ULONG)got;
 
@@ -6639,7 +6663,7 @@ static BOOL httpd_readable(HttpConn *c)
         /* Anything past the end of the body is the next request, and it has
            already been taken out of the socket. */
         while (took < got && c->in_len < sizeof(c->in))
-            c->in[c->in_len++] = scratch[took++];
+            c->in[c->in_len++] = httpd_body_buf[took++];
 
         if (httpd_body_done(c))
         {
