@@ -215,10 +215,23 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
  * moment or only the band it is about to encode.  Reads state, changes none. */
 int rfb_scroll_probe_due(const rfb_encoder *e);
 
-/* PackBits, exposed because the decoder and the tests want the same pair. */
+/* PackBits, exposed because the decoder and the tests want the same pair.
+ * Two pairs: the unit a count counts is a byte, or on RFB_FMT_RGB565 a
+ * two-byte pixel (rfb_pb_unit()).  The 16 pair takes n in UNITS from an even
+ * address and answers bytes; the unpacker's out_n is bytes.  Both packers
+ * answer RFB_PB_FAIL when the output would pass cap, and when the first
+ * quarter of the input has no run in it (see rfb_encode.c). */
 rfb_u32 rfb_packbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
                      int min_run);
 long rfb_unpackbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 out_n);
+rfb_u32 rfb_packbits16(const rfb_u16 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
+                       int min_run);
+long rfb_unpackbits16(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 out_n);
+
+/* The PackBits unit for a format: 2 on RFB_FMT_RGB565, else 1.  A tile of an
+ * RGB565 screen is whole pixels -- rfb_encoder_init() refuses an odd tile_w
+ * there -- so every plane a PB code carries is a whole number of units. */
+#define rfb_pb_unit(format) (((format) == RFB_FMT_RGB565) ? 2u : 1u)
 
 #ifdef __cplusplus
 }

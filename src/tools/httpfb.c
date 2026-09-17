@@ -65,6 +65,19 @@
    session that sat still for a minute must not then run flat out. */
 #define FB_IDLE_BANK        2
 
+/* A screen nobody is drawing on is read back and compared all the same, and
+   on a card that is the whole pass: 1280x720x16 on a 25 MHz 68030 is 0.2 s of
+   readback and 0.25 s of compare to find nothing, which at the share above is
+   72% of the machine spent looking at a still picture.  So a pass that found
+   nothing is followed by more idle than the share asks: its own cost times
+   the number of empty passes in a row, up to FB_QUIET_MULT passes' worth and
+   never more than FB_QUIET_IDLE_MAX fiftieths, so that a program which starts
+   drawing is seen within a couple of seconds.  Anything from the viewer --
+   a key, a button, the pointer -- ends the backoff at once: what the viewer
+   does is what the screen is about to answer. */
+#define FB_QUIET_MULT       4
+#define FB_QUIET_IDLE_MAX   100
+
 /* How often a `refresh` can force a full frame, in fiftieths.  The first ask is
    answered at once; the floor applies to the second and later inside a second,
    so a viewer that asks every frame degrades to one re-sync a second. */
@@ -196,6 +209,11 @@ static ULONG           fb_pass_ticks;
 /* And what the pass in progress has cost so far, since it is charged a band
    at a time. */
 static ULONG           fb_pass_acc;
+
+/* Whether the pass in progress has changed anything at the far end, and how
+   many whole passes in a row have not.  See FB_QUIET_MULT. */
+static UBYTE           fb_pass_found;
+static UBYTE           fb_quiet;
 
 /* When the pass in flight began, which is what FB_GRAB_FLOOR is measured from.
    Zero between passes; a tick of 0 is nudged to 1 by its writer. */
@@ -1782,6 +1800,10 @@ static VOID fb_input_close(VOID)
    to the input task and returns.  No lock is held across this. */
 static VOID fb_write_event(VOID)
 {
+    /* Whatever this is, the viewer did it, and the screen is about to answer:
+       an idle backoff in force ends here. */
+    fb_quiet = 0;
+
     if (!fb_in_open)
         return;
 
@@ -2222,8 +2244,16 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_input_left = 0;
     fb_hot_ty0    = 0;
     fb_hot_have   = 0;
-    fb_pass_ticks = 0;
+    /* The first pass is priced before it runs: every tile of the screen is
+       dirty against an empty shadow, which is the most expensive pass a
+       session ever makes.  Taken whole, nothing reaches the viewer until
+       all of it is encoded -- 18 s to the first byte of a 1280x720x16 screen
+       on a 25 MHz 68030, then the frame at line speed.  Banded, the first
+       strip is on its way while the second is being read. */
+    fb_pass_ticks = FB_BAND_WHEN;
     fb_pass_acc   = 0;
+    fb_pass_found = 0;
+    fb_quiet      = 0;
     fb_pass_t0    = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
@@ -2590,6 +2620,7 @@ BOOL http_fb_slice(ULONG now)
         UWORD ty0;
         UWORD ty1;
         rfb_u32 was_dirty = fb_enc.st.tiles_dirty;
+        rfb_u32 was_copies = fb_enc.st.copies;
 
         /* A key is owed an answer and the console knows which band the last
            change was in, so that one is produced before the rest of the pass.
@@ -2630,6 +2661,10 @@ BOOL http_fb_slice(ULONG now)
             fb_hot_have = 1;
             fb_input_left = 0;          /* the viewer has its answer */
         }
+        if (rc == FB_GRAB_OK && !palette_moved &&
+            (fb_enc.st.tiles_dirty != was_dirty ||
+             fb_enc.st.copies != was_copies))
+            fb_pass_found = 1;
         else if (fb_input_left != 0)
         {
             /* Every band and not only a chased one.  A key that draws nothing
@@ -2714,6 +2749,9 @@ BOOL http_fb_slice(ULONG now)
                             "the new screen could not be read");
             return TRUE;
         }
+        /* A first frame again, against a shadow that is empty again. */
+        fb_pass_ticks = FB_BAND_WHEN;
+        fb_band_ty0   = 0;
         return TRUE;
 
     case FB_GRAB_REFUSED:
@@ -2841,8 +2879,28 @@ BOOL http_fb_write(ULONG now)
             fb_pass_ticks = fb_pass_acc;
             fb_pass_acc = 0;
 
+            if (fb_pass_found)
+                fb_quiet = 0;
+            else if (fb_quiet < 255)
+                fb_quiet++;
+            fb_pass_found = 0;
+
             owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
+
+            /* A still screen is looked at less often the longer it has been
+               still.  See FB_QUIET_MULT. */
+            if (fb_quiet != 0)
+            {
+                ULONG mult = (fb_quiet > FB_QUIET_MULT)
+                             ? (ULONG)FB_QUIET_MULT : (ULONG)fb_quiet;
+                ULONG back = fb_pass_ticks * mult;
+
+                if (back > (ULONG)FB_QUIET_IDLE_MAX)
+                    back = (ULONG)FB_QUIET_IDLE_MAX;
+                if (back > idle)
+                    idle = back;
+            }
 
             /* Except that somebody typed while this pass was running.  The
                share and the floor are both about not spending the machine on

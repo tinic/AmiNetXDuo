@@ -150,10 +150,8 @@ static struct IOStdReq term_ioreq;
 
 static struct MsgPort *term_port;
 
-#define TERM_ID_IN      1
-#define TERM_ID_OUT     2
-
-#define TERM_ID_CON     3
+/* TERM_ID_IN, TERM_ID_OUT and TERM_ID_CON: httpterm_owner.h, beside the
+   decision of which ring a packet on each of them means. */
 
 static UWORD term_gen = 1;
 
@@ -164,20 +162,16 @@ static LONG term_handle_arg(LONG id)
 
 static TermPipe *term_pipe_of(LONG arg, LONG type)
 {
-    LONG id;
-
     if ((ULONG)arg >> 8 != (ULONG)term_gen)
         return NULL;                /* a session that has been let go of    */
 
-    id = arg & 0xFF;
-
-    /* The one handle that is both.  Which ring it means is the packet. */
-    if (id == TERM_ID_CON)
-        return (type == ACTION_READ) ? &term_in : &term_out;
-
-    if (id == TERM_ID_IN)  return &term_in;
-    if (id == TERM_ID_OUT) return &term_out;
-    return NULL;
+    /* The packet decides the ring, not the handle: httpterm_owner.h. */
+    switch (term_ring_for((int)(arg & 0xFF), (int)type))
+    {
+        case TERM_RING_IN:  return &term_in;
+        case TERM_RING_OUT: return &term_out;
+        default:            return NULL;
+    }
 }
 
 /*

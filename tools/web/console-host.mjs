@@ -317,33 +317,41 @@ export function writePfs(cap) {
  * something it has shipped since 1985, so whatever the encoder branch settles
  * on for the framing, this part of it is a fair bet.
  */
-export function packBits(src) {
+/*
+ * `unit` is what a count counts: a byte, or on RGB565 a two-byte pixel, whose
+ * two bytes go out in memory order.  src.length must be a multiple of it.
+ */
+export function packBits(src, unit = 1) {
   const out = [];
+  const n = src.length / unit;
+  const same = (a, b) => unit === 1
+    ? src[a] === src[b]
+    : src[2 * a] === src[2 * b] && src[2 * a + 1] === src[2 * b + 1];
   let i = 0;
 
-  while (i < src.length) {
+  while (i < n) {
     /* A run is worth coding at three, not two: two identical bytes cost two
        bytes literal and two bytes as a run, and a run breaks a literal that
        could have continued. */
     let run = 1;
-    while (i + run < src.length && src[i + run] === src[i] && run < 128) run++;
+    while (i + run < n && same(i + run, i) && run < 128) run++;
 
     if (run >= 3) {
-      out.push(257 - run, src[i]);
+      out.push(257 - run);
+      for (let k = 0; k < unit; k++) out.push(src[i * unit + k]);
       i += run;
       continue;
     }
 
     let lit = 0;
-    while (i + lit < src.length && lit < 128) {
-      let same = 1;
-      while (i + lit + same < src.length &&
-             src[i + lit + same] === src[i + lit] && same < 3) same++;
-      if (same >= 3) break;
+    while (i + lit < n && lit < 128) {
+      let eq = 1;
+      while (i + lit + eq < n && same(i + lit + eq, i + lit) && eq < 3) eq++;
+      if (eq >= 3) break;
       lit++;
     }
     out.push(lit - 1);
-    for (let k = 0; k < lit; k++) out.push(src[i + k]);
+    for (let k = 0; k < lit * unit; k++) out.push(src[i * unit + k]);
     i += lit;
   }
 
@@ -396,6 +404,12 @@ export function encodeFrame(g, shadow, next, seq, copy) {
   const chunky = fmt === 1 || fmt === 2;
   const depth = chunky ? 1 : g.screen.depth;
   const plane = bpr * h;
+  /* PackBits counts pixels on the sixteen-bit format, so a tile there has to
+     be whole pixels: the C encoder refuses an odd tile_w on it. */
+  const unit = fmt === 2 ? 2 : 1;
+  if (unit === 2 && (g.tileW & 1) !== 0) {
+    throw new Error("an odd tile width splits a 16-bit pixel");
+  }
 
   const head = Buffer.alloc(4);
   head.writeUInt8(1, 0);
@@ -466,8 +480,8 @@ export function encodeFrame(g, shadow, next, seq, copy) {
 
         mask |= 1 << p;
 
-        const pbRaw = packBits(raw.subarray(0, want));
-        const pbXor = packBits(xor.subarray(0, want));
+        const pbRaw = packBits(raw.subarray(0, want), unit);
+        const pbXor = packBits(xor.subarray(0, want), unit);
 
         /* Smallest of the three, counting the two length bytes the packed
            forms carry and the raw form does not. */

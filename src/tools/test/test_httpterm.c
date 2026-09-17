@@ -293,6 +293,38 @@ static void test_callers(void)
     CHECK(!admits(&s, &c), "a session that is over still answers packets");
 }
 
+/* One console under three handles: a read is keystrokes and a write is the
+   screen whichever handle carries it.  The READ-on-Output row is 3.2's Dir
+   asking the window's size; a read parked on the output ring never returns. */
+static void test_rings(void)
+{
+    const int END = 1007;                       /* ACTION_END */
+
+    printf("the rings\n");
+
+    CHECK(term_ring_for(TERM_ID_OUT, TERM_PKT_READ) == TERM_RING_IN,
+          "a Read() on Output() is not served from the keyboard");
+    CHECK(term_ring_for(TERM_ID_CON, TERM_PKT_READ) == TERM_RING_IN,
+          "a Read() on Open(\"*\") is not served from the keyboard");
+    CHECK(term_ring_for(TERM_ID_IN, TERM_PKT_READ) == TERM_RING_IN,
+          "a Read() on Input() is not served from the keyboard");
+    CHECK(term_ring_for(TERM_ID_IN, TERM_PKT_WRITE) == TERM_RING_OUT,
+          "a Write() on Input() does not reach the screen");
+    CHECK(term_ring_for(TERM_ID_OUT, TERM_PKT_WRITE) == TERM_RING_OUT,
+          "a Write() on Output() does not reach the screen");
+    CHECK(term_ring_for(TERM_ID_CON, TERM_PKT_WRITE) == TERM_RING_OUT,
+          "a Write() on Open(\"*\") does not reach the screen");
+    CHECK(term_ring_for(TERM_ID_IN, END) == TERM_RING_IN,
+          "closing Input() is not about the input ring");
+    CHECK(term_ring_for(TERM_ID_OUT, END) == TERM_RING_OUT,
+          "closing Output() is not about the output ring");
+    CHECK(term_ring_for(TERM_ID_CON, END) == TERM_RING_OUT,
+          "closing Open(\"*\") is not about the output ring");
+    CHECK(term_ring_for(0, TERM_PKT_READ) == TERM_RING_NONE &&
+          term_ring_for(4, TERM_PKT_WRITE) == TERM_RING_NONE,
+          "a handle id that is not one of the three is answered");
+}
+
 int main(void)
 {
     char *text = slurp("src/tools/httpterm.c");
@@ -346,6 +378,7 @@ int main(void)
     free(text);
 
     test_callers();
+    test_rings();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

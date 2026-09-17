@@ -123,7 +123,9 @@ static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
                     if (i + 2 > n) return -10;
                     len = rd16(in + i); i += 2;
                     if (i + len > n) return -11;
-                    got = rfb_unpackbits(in + i, len, tile, tw * th);
+                    got = (rfb_pb_unit(d->g.format) == 2u)
+                        ? rfb_unpackbits16(in + i, len, tile, tw * th)
+                        : rfb_unpackbits(in + i, len, tile, tw * th);
                     i += len;
                     if (got != (long)(tw * th)) return -12;
                 }

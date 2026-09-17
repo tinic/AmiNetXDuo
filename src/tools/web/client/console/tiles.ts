@@ -23,6 +23,9 @@
  *                          1 PB_RAW  u16 len, PackBits of the same
  *                          2 PB_XOR  u16 len, PackBits of it XORed with what
  *                                    is already there
+ *                 PackBits counts UNITS: a byte, or on FMT_RGB565 a two-byte
+ *                 pixel (a run of a pixel's two bytes, a literal of pixels).
+ *                 The format decides the unit; nothing on the wire names it.
  *   OP_TILE8 0x03 u16 index, then ONE plane's u8 code and payload, exactly as
  *                 above.  The RTG sibling of OP_TILE: an eight-bit or a
  *                 sixteen-bit source has one plane, so the mask would say 1
@@ -37,8 +40,9 @@
  * wrong is a picture that is right until the screen is not a whole number of
  * tiles wide.  A byte is eight pixels planar, one chunky and half of one at
  * sixteen bits, which is the only other place the formats part company: the
- * PackBits, the XOR and the copies are byte operations and read the same
- * whichever it is.
+ * XOR and the copies are byte operations and read the same whichever it is,
+ * and PackBits counts pixels on the sixteen-bit format (the encoder refuses
+ * an odd tile_w there, so a tile is whole pixels).
  *
  * This is the only file that reads a byte off the socket.  It was written
  * against a placeholder framing for as long as the encoder did not exist, and
@@ -197,6 +201,7 @@ export function paletteFromWord(w: string, colours: number): Uint8Array {
  */
 export function unpackBits(
   src: Uint8Array, at: number, end: number, dst: Uint8Array, want: number,
+  unit = 1,
 ): number {
   let o = 0;
   let i = at;
@@ -208,24 +213,41 @@ export function unpackBits(
     if (n === 128) continue;
 
     if (n < 128) {
-      const run = n + 1;
+      const run = (n + 1) * unit;
       if (i + run > end || o + run > want) {
         throw new Error("PackBits literal of " + run + " does not fit");
       }
       dst.set(src.subarray(i, i + run), o);
       i += run;
       o += run;
-    } else {
+    } else if (unit === 1) {
       const run = 257 - n;
       if (i >= end || o + run > want) {
         throw new Error("PackBits run of " + run + " does not fit");
       }
       dst.fill(src[i++], o, o + run);
       o += run;
+    } else {
+      /* A run of one two-byte pixel: its bytes in memory order. */
+      const run = 257 - n;
+      if (i + 2 > end || o + 2 * run > want) {
+        throw new Error("PackBits run of " + run + " pixels does not fit");
+      }
+      const hi = src[i++];
+      const lo = src[i++];
+      for (let k = 0; k < run; k++) {
+        dst[o++] = hi;
+        dst[o++] = lo;
+      }
     }
   }
 
   return i;
+}
+
+/* The PackBits unit for a format, rfb_pb_unit() in the encoder's header. */
+export function packBitsUnit(fmt: number): number {
+  return fmt === FMT_RGB565 ? 2 : 1;
 }
 
 /* One plane of one tile, which is the most a single op decodes into. */
@@ -275,6 +297,7 @@ export function applyUpdate(
      does, which is why the test is chunkiness and not format 0. */
   const onePlane = isChunky(fmt);
   const perByte = pixelsPerByte(g.screen);
+  const unit = packBitsUnit(fmt);
 
   const d: Damage = {
     x0: w, y0: h, x1: 0, y1: 0,
@@ -399,7 +422,7 @@ export function applyUpdate(
           throw new Error("a packed tile claims " + len + " bytes and " +
                           (b.length - i) + " are left");
         }
-        unpackBits(b, i, i + len, scratch, want);
+        unpackBits(b, i, i + len, scratch, want, unit);
         i += len;
         src = scratch;
         so = 0;

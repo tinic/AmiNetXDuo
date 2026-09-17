@@ -382,6 +382,34 @@ ok("a file with the old magic is refused rather than read as this one",
   }
   ok("PackBits round trips", all, why);
 
+  /* The two-byte unit: a run repeats a pixel's two bytes, a literal counts
+     pixels.  The flat case is the one that carried the change -- a flat
+     16-bit area packed by the byte is not a run at all. */
+  let all16 = true;
+  let why16 = "";
+  for (const c of [
+    Buffer.alloc(0),
+    Buffer.from([0x12, 0x34]),
+    Buffer.from(Array.from({ length: 600 }, (_, i) => (i & 1) ? 0x34 : 0x12)),
+    Buffer.from(Array.from({ length: 500 }, (_, i) => (i * 37) & 0xff)),
+    Buffer.concat([Buffer.alloc(200, 7), Buffer.from([1, 2, 3, 4]), Buffer.alloc(130, 9)]),
+  ]) {
+    const packed = packBits(c, 2);
+    const out = new Uint8Array(c.length);
+    M.unpackBits(packed, 0, packed.length, out, c.length, 2);
+    if (Buffer.compare(Buffer.from(out), c) !== 0) {
+      all16 = false;
+      why16 = "length " + c.length;
+      break;
+    }
+    if (c.length === 600 && packed.length > 12) {
+      all16 = false;
+      why16 = "a flat 16-bit run packed to " + packed.length + " bytes";
+      break;
+    }
+  }
+  ok("PackBits round trips in two-byte units", all16, why16);
+
   ok("PackBits refuses to run off the end",
      throws(() => M.unpackBits(Buffer.from([0x00]), 0, 1, new Uint8Array(4), 4)));
 }
@@ -403,14 +431,13 @@ for (const [name, w, h, depth, tw, th, fmt] of [
   ["634x242x4 ragged grid", 634, 242, 4, 12, 10, FMT_PLANAR],
   /* And the RTG shapes: one plane of bytes, a tile grid over a stride that is
      bytes and not pixels, and a width that pads so the tile at the right
-     edge is clipped.  The 11-byte tile on the last row is the case nothing
-     else reaches: an odd tile width puts a tile boundary between the two
-     bytes of a pixel, so the damage rectangle has to round its left edge
-     down to a pixel and its right edge up to one. */
+     edge is clipped.  The 10-byte tile over an 808-byte row leaves an 8-byte
+     tile at the right edge, and the RGB565 tiles are even because PackBits
+     counts pixels there: the encoder refuses an odd tile_w on that format. */
   ["640x480 chunky 16x8 tiles", 640, 480, 8, 16, 8, FMT_CLUT8],
   ["804x300 chunky ragged grid", 804, 300, 8, 32, 16, FMT_CLUT8],
   ["640x480 rgb565 16x8 tiles", 640, 480, 16, 16, 8, FMT_RGB565],
-  ["404x200 rgb565 odd tile", 404, 200, 16, 11, 10, FMT_RGB565],
+  ["404x200 rgb565 ragged grid", 404, 200, 16, 10, 10, FMT_RGB565],
 ]) {
   const cap = synthOf(fmt, w, h, depth, 20);
   const g = makeGeometry(cap.screen, tw, th);

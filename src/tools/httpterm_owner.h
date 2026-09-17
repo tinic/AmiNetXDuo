@@ -72,4 +72,36 @@ static int term_owner_admits(const TermOwner *s, const TermCallerId *c,
     return (c->tc_Task == s->to_ShellTask) ? 1 : 0;
 }
 
+/*
+ * Which ring a packet on one of the session's handles means.  The three
+ * handles -- the Shell's input, its output, and what Open("*") gives -- are
+ * ONE console, as a CON: window is: a READ is keystrokes and a WRITE is the
+ * screen whichever handle carries it.  It was decided by the handle once, and
+ * 3.2's Dir hung the Shell: it asks the window's size by writing CSI 0 q to
+ * Output() and reading the answer back from that same handle, and the read
+ * sat on the output ring, where no keystroke ever arrives.  Only closing is
+ * about the handle being closed.
+ */
+#define TERM_ID_IN      1
+#define TERM_ID_OUT     2
+#define TERM_ID_CON     3
+
+#define TERM_RING_NONE  0
+#define TERM_RING_IN    1
+#define TERM_RING_OUT   2
+
+#define TERM_PKT_READ   82      /* ACTION_READ  */
+#define TERM_PKT_WRITE  87      /* ACTION_WRITE */
+
+static int term_ring_for(int id, int type)
+{
+    if (id != TERM_ID_IN && id != TERM_ID_OUT && id != TERM_ID_CON)
+        return TERM_RING_NONE;
+    if (type == TERM_PKT_READ)
+        return TERM_RING_IN;
+    if (type == TERM_PKT_WRITE)
+        return TERM_RING_OUT;
+    return (id == TERM_ID_IN) ? TERM_RING_IN : TERM_RING_OUT;
+}
+
 #endif /* AMINETXDUO_HTTPTERM_OWNER_H */

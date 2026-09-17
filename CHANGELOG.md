@@ -9,6 +9,44 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd -C`: a 16-bit screen is packed by the pixel. PackBits on the
+  console's RGB565 format counts two-byte pixels, so a flat area is a run
+  where by the byte it was two alternating values and never one. A
+  1280x720x16 Workbench on a real A3000 (25 MHz 68030, ZZ9000) went out as
+  1.82 MB of raw tiles after 18 s of encoding; it is now 150 KB, the first
+  band is on the wire 2.3 s after the page opens and the whole screen in
+  7.4 s. Packing also gives up on a tile whose first quarter has no run in
+  it, so a photograph is sent raw without the two full passes that
+  proved it. The browser page and the encoder ship together; an old page
+  cached against a new server misreads the tiles, so reload it
+
+- `httpd -C`: the first pass of a session, and the first after the screen
+  changes shape, goes out in bands, so the top of the screen is visible
+  while the rest is still being read
+
+- `httpd -C` looks at a screen nobody is drawing on less often the longer
+  it has been still: a pass that found nothing is followed by up to four
+  passes' worth of idle, never more than two seconds, and anything from
+  the viewer ends the backoff at once. On the A3000 above a pass over the
+  card's 1.84 MB costs a second of reading and comparing, and the idle
+  console held 72% of the machine; it now settles under 25%
+
+- `httpd -F`, and every file the server sends: a file is read 32 KB at a
+  time into a buffer of its own instead of 2 KB into the header buffer.
+  On the A3000 a download off the CF card went 117 -> 330 KB/s and one
+  from RAM: 247 -> 399 KB/s
+
+- `httpd -T`: the Shell no longer hangs on 3.2's `Dir`. It asks the window
+  its size by writing to Output() and reading the answer back from the
+  same handle, as any console lets it; the terminal's handler served a
+  read on the output handle from the output ring, where no keystroke ever
+  arrives. A read is keystrokes and a write is the screen whichever of
+  the three handles carries it now
+
+- `httpd` started on the dual-stack wildcard printed whatever the stack
+  held where the `-T` and `-C` lines name the machine's address; it now
+  prints the host's own address
+
 ## 0.28.2
 
 - The packet pool is sized from the fastest memory the machine has, not

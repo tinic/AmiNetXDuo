@@ -26,52 +26,113 @@ typedef char rfb_u32_is_four_bytes[(sizeof(rfb_u32) == 4) ? 1 : -1];
 #define RFB_PROBE_MIN_BLK     16
 
 /* ------------------------------------------------------------- PackBits --- */
+/*
+ * PackBits over UNITS of one or two bytes.  The unit is what a run repeats and
+ * what a count counts.  On RFB_FMT_RGB565 a pixel is two bytes, and a byte-wise
+ * run exists only where a pixel's two bytes happen to be equal: packed by the
+ * byte, every RGB565 capture in the corpus came out RAW (rfbbench ratio 0.985,
+ * c_pbraw=0) and a 1280x720 screen on a real A3000 cost 13 s of PackBits to
+ * be sent raw anyway.  Packed by the pixel a flat area is a run.  The far end
+ * picks the unit from the format, so nothing on the wire names it.
+ *
+ * Both packers give up with RFB_PB_FAIL the moment the output would pass `cap`
+ * -- and ALSO when the first quarter of the input held no run at all.  A tile
+ * that starts as noise is noise (a photograph, a dither), and the literal scan
+ * costs a 25 MHz 68030 more than sending the tile raw: without the bail a
+ * screen of noise costs two full passes a plane on its way to going out RAW.
+ * The bail is a guess about the rest of the tile, and a wrong guess costs
+ * compression on that tile, never correctness.  Inputs under RFB_PB_BAIL_MIN
+ * are too short to guess about.
+ *
+ * The loops are written for what gcc -Os makes of them on the 68030: pointers
+ * and precomputed ends, no per-byte bounds arithmetic.  The three-run literal
+ * scan looks at bytes q[1] and q[2] first, because when those differ neither
+ * q nor q+1 can start a run and the scan moves by two.
+ */
+
+#define RFB_PB_BAIL_MIN 32u
+
+/* Where a literal that started at p has to stop: at the run that begins at
+ * the answer, at p + 128, or at end.  The unit at p itself cannot start a
+ * run; the caller's run scan said so. */
+static const rfb_u8 *rfb_pb8_literal_end(const rfb_u8 *p, const rfb_u8 *end,
+                                         int min_run)
+{
+    const rfb_u8 *lim = (end - p > 128) ? p + 128 : end;
+    const rfb_u8 *q = p + 1;
+
+    if (min_run == 3) {
+        /* The last unit that can start a three-run is end - 3, so the scan
+         * stops short of end - 2; below that q[2] is always in bounds. */
+        const rfb_u8 *se = (end - p >= 2) ? end - 2 : p;
+        if (se > lim)
+            se = lim;
+        while (q < se) {
+            if (q[1] != q[2])
+                q += 2;
+            else if (q[0] == q[1])
+                return q;
+            else
+                q++;
+        }
+        return lim;
+    }
+
+    {
+        const rfb_u8 *se = (end - p >= 1) ? end - 1 : p;
+        if (se > lim)
+            se = lim;
+        while (q < se) {
+            if (q[0] == q[1])
+                return q;
+            q++;
+        }
+        return lim;
+    }
+}
 
 rfb_u32 rfb_packbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
                      int min_run)
 {
-    rfb_u32 i = 0, o = 0;
+    const rfb_u8 *p = in;
+    const rfb_u8 *const end = in + n;
+    const rfb_u8 *const bail = (n >= RFB_PB_BAIL_MIN) ? in + (n >> 2) : end;
+    rfb_u8 *o = out;
+    rfb_u8 *const ocap = out + cap;
+    int seen_run = 0;
 
     if (min_run < 2)
         min_run = 2;
 
-    while (i < n) {
-        rfb_u32 run = 1;
-        rfb_u8 b = in[i];
+    while (p < end) {
+        const rfb_u8 b = *p;
+        const rfb_u8 *const rend = (end - p > 128) ? p + 128 : end;
+        const rfb_u8 *q = p + 1;
 
-        while (i + run < n && in[i + run] == b && run < 128u)
-            run++;
+        while (q < rend && *q == b)
+            q++;
 
-        if (run >= (rfb_u32)min_run) {
-            if (o + 2u > cap)
+        if (q - p >= min_run) {
+            if (o + 2 > ocap)
                 return RFB_PB_FAIL;
-            out[o++] = (rfb_u8)(257u - run);
-            out[o++] = b;
-            i += run;
-        } else {
-            rfb_u32 start = i, lit = 0;
-            /* A literal stops where a codeable run starts.  min_run is 2 or 3.
-             * Either way the first byte here cannot start one, because the run
-             * scan above already said it does not. */
-            while (i < n && lit < 128u) {
-                if (min_run == 2) {
-                    if (i + 1u < n && in[i] == in[i + 1u] && lit > 0)
-                        break;
-                } else {
-                    if (i + 2u < n && in[i] == in[i + 1u] && in[i] == in[i + 2u])
-                        break;
-                }
-                i++;
-                lit++;
-            }
-            if (o + 1u + lit > cap)
-                return RFB_PB_FAIL;
-            out[o++] = (rfb_u8)(lit - 1u);
-            memcpy(out + o, in + start, (size_t)lit);
-            o += lit;
+            *o++ = (rfb_u8)(257u - (rfb_u32)(q - p));
+            *o++ = b;
+            p = q;
+            seen_run = 1;
+            continue;
         }
+
+        q = rfb_pb8_literal_end(p, end, min_run);
+        if (!seen_run && q >= bail)
+            return RFB_PB_FAIL;
+        if (o + 1 + (q - p) > ocap)
+            return RFB_PB_FAIL;
+        *o++ = (rfb_u8)((q - p) - 1);
+        memcpy(o, p, (size_t)(q - p));
+        o += q - p;
+        p = q;
     }
-    return o;
+    return (rfb_u32)(o - out);
 }
 
 long rfb_unpackbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 out_n)
@@ -93,6 +154,118 @@ long rfb_unpackbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 out_n)
                 return RFB_E_OVERFLOW;
             memset(out + o, in[i++], (size_t)run);
             o += run;
+        }
+    }
+    return (long)o;
+}
+
+/* The two-byte-unit pair.  `in` is read as sixteen-bit words, so it has to be
+ * even (the encoder's buffers are) and n is in UNITS; the wire bytes of a unit
+ * are its two bytes in memory order, which is what makes this the same stream
+ * on either endianness.  cap and the answer are bytes, as for the byte pair. */
+static const rfb_u16 *rfb_pb16_literal_end(const rfb_u16 *p,
+                                           const rfb_u16 *end, int min_run)
+{
+    const rfb_u16 *lim = (end - p > 128) ? p + 128 : end;
+    const rfb_u16 *q = p + 1;
+
+    if (min_run == 3) {
+        const rfb_u16 *se = (end - p >= 2) ? end - 2 : p;
+        if (se > lim)
+            se = lim;
+        while (q < se) {
+            if (q[1] != q[2])
+                q += 2;
+            else if (q[0] == q[1])
+                return q;
+            else
+                q++;
+        }
+        return lim;
+    }
+
+    {
+        const rfb_u16 *se = (end - p >= 1) ? end - 1 : p;
+        if (se > lim)
+            se = lim;
+        while (q < se) {
+            if (q[0] == q[1])
+                return q;
+            q++;
+        }
+        return lim;
+    }
+}
+
+rfb_u32 rfb_packbits16(const rfb_u16 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
+                       int min_run)
+{
+    const rfb_u16 *p = in;
+    const rfb_u16 *const end = in + n;
+    const rfb_u16 *const bail = (n >= RFB_PB_BAIL_MIN) ? in + (n >> 2) : end;
+    rfb_u8 *o = out;
+    rfb_u8 *const ocap = out + cap;
+    int seen_run = 0;
+
+    if (min_run < 2)
+        min_run = 2;
+
+    while (p < end) {
+        const rfb_u16 b = *p;
+        const rfb_u16 *const rend = (end - p > 128) ? p + 128 : end;
+        const rfb_u16 *q = p + 1;
+
+        while (q < rend && *q == b)
+            q++;
+
+        if (q - p >= min_run) {
+            if (o + 3 > ocap)
+                return RFB_PB_FAIL;
+            *o++ = (rfb_u8)(257u - (rfb_u32)(q - p));
+            memcpy(o, p, 2);
+            o += 2;
+            p = q;
+            seen_run = 1;
+            continue;
+        }
+
+        q = rfb_pb16_literal_end(p, end, min_run);
+        if (!seen_run && q >= bail)
+            return RFB_PB_FAIL;
+        if (o + 1 + 2 * (q - p) > ocap)
+            return RFB_PB_FAIL;
+        *o++ = (rfb_u8)((q - p) - 1);
+        memcpy(o, p, (size_t)(2 * (q - p)));
+        o += 2 * (q - p);
+        p = q;
+    }
+    return (rfb_u32)(o - out);
+}
+
+long rfb_unpackbits16(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 out_n)
+{
+    rfb_u32 i = 0, o = 0;
+
+    while (i < n) {
+        rfb_u8 c = in[i++];
+        if (c < 128u) {
+            rfb_u32 lit = 2u * ((rfb_u32)c + 1u);
+            if (i + lit > n || o + lit > out_n)
+                return RFB_E_OVERFLOW;
+            memcpy(out + o, in + i, (size_t)lit);
+            i += lit;
+            o += lit;
+        } else if (c > 128u) {
+            rfb_u32 run = 257u - (rfb_u32)c;
+            rfb_u8 hi, lo;
+            if (i + 2u > n || o + 2u * run > out_n)
+                return RFB_E_OVERFLOW;
+            hi = in[i++];
+            lo = in[i++];
+            while (run--) {
+                out[o++] = hi;
+                out[o++] = lo;
+            }
         }
     }
     return (long)o;
@@ -128,8 +301,9 @@ static int rfb_geom_ok(const rfb_geom *g)
             return 0;
         /* Two bytes a pixel, so an odd row would put the second byte of a
          * pixel in the next row.  The caller rounds bytes_per_row up and this
-         * is what says so. */
-        if ((g->bytes_per_row & 1u) != 0u)
+         * is what says so.  An odd tile would split a pixel between two
+         * tiles, and PackBits on this format counts pixels. */
+        if ((g->bytes_per_row & 1u) != 0u || (g->tile_w & 1u) != 0u)
             return 0;
         break;
     case RFB_FMT_HAM6:
@@ -495,11 +669,16 @@ static int rfb_band_clean(const rfb_encoder *e, const rfb_u8 *const *planes,
 /* Take the tile-plane.  ONE read of the source into raw; the XOR, the shadow
  * write and the wire bytes all come from that single copy, so a screen drawn
  * on underneath cannot desynchronise the shadow from what was sent. */
-static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
-                           rfb_u8 *xb, rfb_u32 bpr, rfb_u32 tw, rfb_u32 th,
-                           int keep_xor, int word)
+/* Answers whether the shadow it replaced was all zero, which with keep_xor
+ * means the XOR plane IS the raw plane: a tile's first appearance, every
+ * tile of a session's first frame.  The caller then codes it once, not
+ * twice. */
+static int rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
+                          rfb_u8 *xb, rfb_u32 bpr, rfb_u32 tw, rfb_u32 th,
+                          int keep_xor, int word)
 {
     rfb_u32 r = th;
+    rfb_u32 was = 0;
 
     if (word) {
         const rfb_u32 words = tw >> 2;
@@ -515,7 +694,9 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
                 rfb_u32 *xw = (rfb_u32 *)(void *)xb;
                 while (n--) {
                     rfb_u32 sv = *sw++;
-                    *xw++ = sv ^ *dw;
+                    rfb_u32 dv = *dw;
+                    was |= dv;
+                    *xw++ = sv ^ dv;
                     *dw++ = sv;
                     *ww++ = sv;
                 }
@@ -535,15 +716,17 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
                 rfb_u32 c = tail;
                 while (c--) {
                     rfb_u8 sv = *s++;
-                    if (keep_xor)
+                    if (keep_xor) {
+                        was |= *d;
                         *xb++ = (rfb_u8)(sv ^ *d);
+                    }
                     *d++ = sv;
                     *raw++ = sv;
                 }
             }
             src += bpr; sh += bpr;
         } while (--r);
-        return;
+        return keep_xor && was == 0;
     }
 
     do {
@@ -552,13 +735,28 @@ static void rfb_take_plane(const rfb_u8 *src, rfb_u8 *sh, rfb_u8 *raw,
         rfb_u32 c = tw;
         while (c--) {
             rfb_u8 sv = *s++;
-            if (keep_xor)
+            if (keep_xor) {
+                was |= *d;
                 *xb++ = (rfb_u8)(sv ^ *d);
+            }
             *d++ = sv;
             *raw++ = sv;
         }
         src += bpr; sh += bpr;
     } while (--r);
+    return keep_xor && was == 0;
+}
+
+/* PackBits in the format's unit.  raw_len is bytes; on RGB565 it is even
+ * (tile_w is) and the buffers are four-aligned, which is what the sixteen-bit
+ * reads need. */
+static rfb_u32 rfb_pb(int unit16, const rfb_u8 *in, rfb_u32 raw_len,
+                      rfb_u8 *out, rfb_u32 cap, int min_run)
+{
+    if (unit16)
+        return rfb_packbits16((const rfb_u16 *)(const void *)in,
+                              raw_len >> 1, out, cap, min_run);
+    return rfb_packbits(in, raw_len, out, cap, min_run);
 }
 
 /* A plane that did not change but must be sent anyway (no RFB_F_PLANEMASK).
@@ -944,11 +1142,12 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
     int first, last;
 
     rfb_u32 bpr, depth, tb, tile_row;
-    int keep_xor, min_run, word, chunky;
+    int keep_xor, min_run, word, chunky, unit16;
     rfb_out o;
     rfb_u32 ty, tx, p, y0, top = 0, tile_index, walk0;
     rfb_u32 dirty_tiles = 0;
     rfb_u32 dirty_plane[RFB_MAX_DEPTH];
+    int fresh_plane[RFB_MAX_DEPTH];     /* shadow was zero: XOR is RAW */
     rfb_u8 *sh_plane[RFB_MAX_DEPTH];
     rfb_u8 *raw_plane[RFB_MAX_DEPTH];
     rfb_u8 *xor_plane[RFB_MAX_DEPTH];
@@ -970,6 +1169,7 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
      * and its depth is about the far end, nothing here. */
     depth = e->nplanes;
     chunky = RFB_FMT_IS_CHUNKY(e->g.format) ? 1 : 0;
+    unit16 = (rfb_pb_unit(e->g.format) == 2u);
     tb = (rfb_u32)e->g.tile_w * e->g.tile_h;
     keep_xor = (e->flags & RFB_F_XOR) ? 1 : 0;
     min_run = (e->flags & RFB_F_RLE2) ? 2 : 3;
@@ -1084,10 +1284,12 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
                 mask = (1u << depth) - 1u;
 
             for (p = 0; p < depth; p++) {
+                fresh_plane[p] = 0;
                 if (!(mask & (1u << p)))
                     continue;
                 if (dirty_plane[p])
-                    rfb_take_plane(planes[p] + off, sh_plane[p] + off,
+                    fresh_plane[p] = rfb_take_plane(
+                                   planes[p] + off, sh_plane[p] + off,
                                    raw_plane[p], xor_plane[p],
                                    e->row_stride, tw, th, keep_xor, word);
                 else
@@ -1120,19 +1322,23 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
 
                 if (e->flags & RFB_F_BESTOF) {
                     /* Each candidate is capped at what is already the best, so
-                     * a losing one stops early instead of finishing. */
+                     * a losing one stops early instead of finishing.  A plane
+                     * whose shadow was zero has an XOR equal to its RAW, so
+                     * the second candidate would be the first one over again:
+                     * that is every tile of a first frame, which is the frame
+                     * a viewer waits for. */
                     if (keep_xor) {
-                        la = rfb_packbits(xor_plane[p], raw_len,
-                                          e->pb_a, best_len - 1u, min_run);
+                        la = rfb_pb(unit16, xor_plane[p], raw_len,
+                                    e->pb_a, best_len - 1u, min_run);
                         if (la != RFB_PB_FAIL) {
                             best_code = RFB_CODE_PB_XOR;
                             best_len = la;
                             best_ptr = e->pb_a;
                         }
                     }
-                    if (e->flags & RFB_F_PACKBITS) {
-                        lb = rfb_packbits(raw, raw_len,
-                                          e->pb_b, best_len - 1u, min_run);
+                    if ((e->flags & RFB_F_PACKBITS) && !fresh_plane[p]) {
+                        lb = rfb_pb(unit16, raw, raw_len,
+                                    e->pb_b, best_len - 1u, min_run);
                         if (lb != RFB_PB_FAIL) {
                             best_code = RFB_CODE_PB_RAW;
                             best_len = lb;
@@ -1140,16 +1346,16 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
                         }
                     }
                 } else if (keep_xor) {
-                    la = rfb_packbits(xor_plane[p], raw_len, e->pb_a,
-                                      RFB_PB_BOUND(raw_len), min_run);
+                    la = rfb_pb(unit16, xor_plane[p], raw_len, e->pb_a,
+                                RFB_PB_BOUND(raw_len), min_run);
                     if (la != RFB_PB_FAIL) {
                         best_code = RFB_CODE_PB_XOR;
                         best_len = la;
                         best_ptr = e->pb_a;
                     }
                 } else if (e->flags & RFB_F_PACKBITS) {
-                    lb = rfb_packbits(raw, raw_len, e->pb_b,
-                                      RFB_PB_BOUND(raw_len), min_run);
+                    lb = rfb_pb(unit16, raw, raw_len, e->pb_b,
+                                RFB_PB_BOUND(raw_len), min_run);
                     if (lb != RFB_PB_FAIL) {
                         best_code = RFB_CODE_PB_RAW;
                         best_len = lb;

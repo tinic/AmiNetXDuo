@@ -88,6 +88,16 @@ static const char *const httpd_files_places[] = {
 
 #define HTTPD_IN_MAX        2048    /* request line and headers together    */
 #define HTTPD_OUT_MAX       2048    /* one send() worth of answer           */
+/* A file goes out through its own buffer, taken when a connection first
+   serves one and kept for as long as the connection lives.  out[] is one
+   send() of headers; a file read 2 KB at a time was the download rate:
+   6.5 ms a Read() on a CF card, so 100-150 KB/s on a machine whose socket
+   alone moves 400+, and every 2 KB a segment and a half on the wire.  32 KB
+   reads move 1.4 MB/s off the same card and leave the tail of one segment
+   per 32 KB, not per 2.  Eight connections at 32 KB is 256 KB, and only for
+   connections that have served a file; a machine that cannot spare it
+   falls back to out[]. */
+#define HTTPD_FILE_BUF     32768UL
 #define HTTPD_CHUNK_MAX     1400    /* one generated piece, framed into out */
 #define HTTPD_HEADERS_MAX     48    /* header lines in one request          */
 #define HTTPD_BODY_MAX     65536UL  /* a buffered request body: the XML     */
@@ -370,6 +380,8 @@ struct HttpConn
 
     /* the answer */
     UBYTE   out[HTTPD_OUT_MAX];
+    UBYTE  *fbuf;                   /* HTTPD_FILE_BUF, or NULL: see above  */
+    UBYTE   out_in_fbuf;            /* out_len/out_sent index fbuf, not out */
     ULONG   out_len;
     ULONG   out_sent;
     ULONG   wrote;                  /* what send() has accepted, in total   */
@@ -1094,6 +1106,10 @@ static VOID httpd_close(HttpConn *c)
         c->file = (BPTR)0;
     }
 
+    ami_free(c->fbuf);
+    c->fbuf        = NULL;
+    c->out_in_fbuf = 0;
+
     if (c->dirlock != (BPTR)0)
     {
         UnLock(c->dirlock);
@@ -1163,6 +1179,7 @@ static VOID httpd_reset(HttpConn *c)
     c->method    = NULL;
     c->out_len   = 0;
     c->out_sent  = 0;
+    c->out_in_fbuf = 0;
     c->overflow  = 0;
     c->chunked   = 0;
     c->head_only = 0;
@@ -3199,23 +3216,34 @@ static VOID httpd_emit_chunk(HttpConn *c, ULONG len)
    each time; the connection carries the position it left off at. */
 static BOOL httpd_produce(HttpConn *c)
 {
-    c->out_len  = 0;
-    c->out_sent = 0;
+    c->out_len     = 0;
+    c->out_sent    = 0;
+    c->out_in_fbuf = 0;
 
     switch (c->producer)
     {
         case PROD_FILE:
         {
-            LONG want = (LONG)sizeof(c->out);
-            LONG got;
+            UBYTE *buf = c->out;
+            LONG   want = (LONG)sizeof(c->out);
+            LONG   got;
 
             if (c->file_left == 0UL || c->file == (BPTR)0)
                 return FALSE;
 
+            if (c->fbuf == NULL)
+                c->fbuf = (UBYTE *)ami_alloc(HTTPD_FILE_BUF);
+            if (c->fbuf != NULL)
+            {
+                buf  = c->fbuf;
+                want = (LONG)HTTPD_FILE_BUF;
+                c->out_in_fbuf = 1;
+            }
+
             if ((ULONG)want > c->file_left)
                 want = (LONG)c->file_left;
 
-            got = Read(c->file, (APTR)c->out, want);
+            got = Read(c->file, (APTR)buf, want);
 
 
             if (got <= 0)
@@ -6703,9 +6731,10 @@ static BOOL httpd_writable(HttpConn *c)
 
         if (c->out_sent < c->out_len)
         {
-            LONG want = (LONG)(c->out_len - c->out_sent);
+            LONG   want = (LONG)(c->out_len - c->out_sent);
+            UBYTE *from = c->out_in_fbuf ? c->fbuf : c->out;
 
-            sent = tool_sock_send(httpd_sb, c->sock, &c->out[c->out_sent],
+            sent = tool_sock_send(httpd_sb, c->sock, &from[c->out_sent],
                                   want);
 
             /* What send() says it took, totalled per answer.  One line
@@ -7530,6 +7559,8 @@ int main(int argc, char **argv)
         httpd_conn[i].sock        = -1;
         httpd_conn[i].state       = CONN_FREE;
         httpd_conn[i].fib         = NULL;
+        httpd_conn[i].fbuf        = NULL;
+        httpd_conn[i].out_in_fbuf = 0;
         httpd_conn[i].put         = (BPTR)0;
         httpd_conn[i].put_temp[0] = '\0';
         httpd_conn[i].walk        = WALK_NONE;
@@ -7595,6 +7626,9 @@ int main(int argc, char **argv)
 
     if (TOOL_ADDR_IS6(&address) && args[ARG_ADDRESS] == 0)
     {
+        ULONG    self = 0;
+        ToolAddr v4;
+
         if (httpd_volumes)
             tool_printf("Serving all mounted volumes read-write on port %ld, "
                         "IPv4 and IPv6  (Ctrl-C to stop)\n", (LONG)port);
@@ -7602,6 +7636,14 @@ int main(int argc, char **argv)
             tool_printf("Serving %s read-write on port %ld, IPv4 and IPv6"
                         "  (Ctrl-C to stop)\n",
                         (LONG)httpd_root, (LONG)port);
+
+        /* The dual-stack wildcard names no address, and the -T and -C lines
+           below print one: the host's own, as gethostid() gives it, which is
+           the address a browser on the LAN would type.  Left unset, those
+           lines printed whatever the stack held. */
+        (VOID)tool_stack_query(&self, NULL, 0);
+        tool_addr_v4(&v4, self);
+        tool_addr_text(httpd_sb, &v4, dotted, sizeof(dotted));
     }
     else
     {

@@ -606,8 +606,11 @@ class Wire:
 
 # ------------------------------------------------------------ the decoder --
 
-def unpackbits(src, at, end, want):
-    """IFF ILBM byte RLE.  Returns (bytes, where it ended)."""
+def unpackbits(src, at, end, want, unit=1):
+    """IFF ILBM RLE over units of `unit` bytes: a byte, or on rgb565 a
+    two-byte pixel (rfb_pb_unit() in rfb_encode.h).  A count counts units;
+    a run repeats the unit's bytes in memory order.  Returns (bytes, where
+    it ended)."""
     out = bytearray()
     i = at
     while len(out) < want:
@@ -618,17 +621,17 @@ def unpackbits(src, at, end, want):
         if n == 128:
             continue
         if n < 128:
-            run = n + 1
+            run = (n + 1) * unit
             if i + run > end or len(out) + run > want:
                 raise Bad("a PackBits literal of %d does not fit" % run)
             out += src[i:i + run]
             i += run
         else:
             run = 257 - n
-            if i >= end or len(out) + run > want:
+            if i + unit > end or len(out) + run * unit > want:
                 raise Bad("a PackBits run of %d does not fit" % run)
-            out += bytes([src[i]]) * run
-            i += 1
+            out += bytes(src[i:i + unit]) * run
+            i += unit
     return bytes(out), i
 
 
@@ -770,7 +773,8 @@ class Screen:
                     if i + ln > len(b):
                         raise Bad("a packed tile claims %d bytes and %d are left"
                                   % (ln, len(b) - i))
-                    src, _ = unpackbits(b, i, i + ln, want)
+                    src, _ = unpackbits(b, i, i + ln, want,
+                                        2 if self.fmt == FMT_RGB565 else 1)
                     i += ln
                 else:
                     raise Bad("tile code %d is not one of ours" % code)
@@ -1412,6 +1416,7 @@ def main(argv):
 
     started = time.time()
     first_at = None
+    first_bytes = 0
 
     try:
         while time.time() - started < seconds:
@@ -1486,6 +1491,7 @@ def main(argv):
 
             if first_at is None:
                 first_at = arrived
+                first_bytes = len(body)
 
             seq, t, c = screen.apply(body)
             frames += 1
@@ -1602,6 +1608,13 @@ def main(argv):
     wire.close()
 
     say("seconds", "%.2f" % elapsed)
+    # From the connect to the first frame off the socket: what a viewer waits
+    # before the screen is there at all.  The whole first screen is one pass
+    # of dirty tiles, banded on a real 68030, so this is the first band's
+    # cost plus its time on the wire and not the whole picture's.
+    if first_at is not None:
+        say("first_frame_seconds", "%.2f" % (first_at - started))
+        say("first_frame_bytes", first_bytes)
     say("frames", frames)
     say("payload_bytes", payload)
     say("words", words)
