@@ -272,4 +272,8 @@ VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out);
 }
 #endif
 
+
+/* config_text.c: one number in an ENV: variable, in [lo, hi], else fallback. */
+ULONG ami_cfg_env_number(const char *text, ULONG lo, ULONG hi, ULONG fallback);
+
 #endif /* AMINETXDUO_CONFIG_INTERNAL_H */

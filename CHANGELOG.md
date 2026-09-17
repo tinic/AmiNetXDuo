@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `SetEnv ANXDPOOLPACKETS <n>` sets the packet pool's size outright (16 to
+  4,096; `ShowNetStatus MEMORY` shows what it is and the fewest ever
+  free). For a machine whose memory is not all one speed: an A3000 with
+  12 MB of motherboard RAM ahead of the ZZ9000's 256 MB computed a
+  4,096-packet pool of which 93 were ever used, filling the fast block,
+  and everything loaded after the network ran from the Zorro III card's
+  RAM, which a 1 MB read timed 26% slower. `ANXDPOOLDIV` is documented
+  beside it
+
 ## 0.28.1
 
 - Transmit completions on our own drivers cost no reply: a `CMD_WRITE` to

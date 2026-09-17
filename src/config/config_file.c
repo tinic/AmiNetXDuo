@@ -11,6 +11,7 @@
 #include "config_internal.h"
 
 #include "aminetxduo/config_advice.h"
+#include "aminetxduo/pool.h"
 #include "aminetxduo/compat.h"
 
 #include <dos/dos.h>
@@ -321,28 +322,33 @@ static VOID load_hostname(AmiConfig *cfg)
  * free memory that sizes the packet pool.  Anything else is the fallback,
  * silently.
  */
-ULONG ami_config_pool_divisor(ULONG fallback)
+/* One number in an ENV: file, inside [lo, hi], else `fallback`.  The text
+   rule is ami_cfg_env_number()'s in config_text.c, where the host test
+   drives it; this is only the file. */
+static ULONG cfg_env_number(const char *path, ULONG lo, ULONG hi,
+                            ULONG fallback)
 {
-    char  *buf = (char *)ami_cfg_read_file("ENV:ANXDPOOLDIV", NULL);
-    ULONG  value = 0UL;
-    char  *p = buf;
+    char  *buf = (char *)ami_cfg_read_file(path, NULL);
+    ULONG  value;
 
     if (buf == NULL)
         return fallback;
 
-    while (*p == ' ' || *p == '\t')
-        p++;
-    while (*p >= '0' && *p <= '9' && value <= 6400UL)
-        value = value * 10UL + (ULONG)(*p++ - '0');
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
-        p++;
-
-    if (*p != '\0' || value < 4UL || value > 64UL)
-        value = fallback;
-
+    value = ami_cfg_env_number(buf, lo, hi, fallback);
     ami_free(buf);
 
     return value;
+}
+
+ULONG ami_config_pool_divisor(ULONG fallback)
+{
+    return cfg_env_number("ENV:ANXDPOOLDIV", 4UL, 64UL, fallback);
+}
+
+ULONG ami_config_pool_packets(VOID)
+{
+    return cfg_env_number("ENV:ANXDPOOLPACKETS", (ULONG)AMI_POOL_MIN_PACKETS,
+                          (ULONG)AMI_POOL_MAX_PACKETS, 0UL);
 }
 
 /*

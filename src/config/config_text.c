@@ -693,3 +693,30 @@ VOID ami_cfg_problem_code(ULONG line, UWORD severity, UWORD text, UWORD hint)
 
     ami_cfg_reporter(&problem, ami_cfg_reporter_user);
 }
+
+/*
+ * One number in an ENV: variable's text, inside [lo, hi], else `fallback`:
+ * leading blanks, digits, trailing blanks or a newline, and nothing else.  A
+ * mistyped variable is the fallback, silently -- a typo must not be the
+ * reason a machine's pool is a different size.  ENV:ANXDPOOLDIV and
+ * ENV:ANXDPOOLPACKETS read through this.
+ */
+ULONG ami_cfg_env_number(const char *text, ULONG lo, ULONG hi, ULONG fallback)
+{
+    const char *p     = text;
+    ULONG       value = 0UL;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (*p < '0' || *p > '9')
+        return fallback;
+    while (*p >= '0' && *p <= '9' && value <= 100000UL)
+        value = value * 10UL + (ULONG)(*p++ - '0');
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+
+    if (*p != '\0' || value < lo || value > hi)
+        return fallback;
+
+    return value;
+}

@@ -2783,6 +2783,27 @@ static void test_interface_reserve(void)
     CHECK(ami_alloc_count() == base);
 }
 
+/* The number an ENV: variable holds, as ENV:ANXDPOOLDIV and
+   ENV:ANXDPOOLPACKETS read it: one reader, each caller its own range and
+   its own answer for "absent" (config_file.c). */
+static void test_env_number(void)
+{
+    printf("env: one number in a variable, in range or the fallback\n");
+
+    CHECK(ami_cfg_env_number("32\n", 4UL, 64UL, 16UL) == 32UL);
+    CHECK(ami_cfg_env_number("3", 4UL, 64UL, 16UL) == 16UL);
+    CHECK(ami_cfg_env_number("65", 4UL, 64UL, 16UL) == 16UL);
+    CHECK(ami_cfg_env_number("512\n", 16UL, 4096UL, 0UL) == 512UL);
+    CHECK(ami_cfg_env_number("  4096 ", 16UL, 4096UL, 0UL) == 4096UL);
+    CHECK(ami_cfg_env_number("15", 16UL, 4096UL, 0UL) == 0UL);
+    CHECK(ami_cfg_env_number("4097", 16UL, 4096UL, 0UL) == 0UL);
+    CHECK(ami_cfg_env_number("512 packets", 16UL, 4096UL, 0UL) == 0UL);
+    CHECK(ami_cfg_env_number("", 16UL, 4096UL, 0UL) == 0UL);
+    CHECK(ami_cfg_env_number("\n", 16UL, 4096UL, 0UL) == 0UL);
+    CHECK(ami_cfg_env_number("99999999999", 16UL, 4096UL, 0UL) == 0UL);
+    CHECK(ami_cfg_env_number("-5", 16UL, 4096UL, 0UL) == 0UL);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1 && strcmp(argv[1], "-v") == 0)
@@ -2825,6 +2846,7 @@ int main(int argc, char **argv)
     test_netdb_missing_files();
     test_netdb_garbage();
     test_service_discovery();
+    test_env_number();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

@@ -477,6 +477,17 @@ BOOL ami_config_hostname_valid(const char *name);
 ULONG ami_config_pool_divisor(ULONG fallback);
 
 /*
+ * The packet pool's size outright, in packets, from ENV:ANXDPOOLPACKETS: a
+ * number from AMI_POOL_MIN_PACKETS to AMI_POOL_MAX_PACKETS, or 0 when the
+ * variable is absent or not that, which leaves the computed size.  For a
+ * machine whose memory is not all the same speed: an A3000 with 12 MB of
+ * 32-bit motherboard RAM ahead of 256 MB on a Zorro III card computed a
+ * 4,096-packet pool (6.7 MB) of which 93 were ever used, and the pool
+ * filled the fast block so that everything after it ran from the slow one.
+ */
+ULONG ami_config_pool_packets(VOID);
+
+/*
  * How loud the serial diagnostic is, AMI_LOG_ERROR..AMI_LOG_TRACE.
  *
  * `fallback` unless ENV:ANXDLOGLEVEL holds a single digit 0 to 4.  The

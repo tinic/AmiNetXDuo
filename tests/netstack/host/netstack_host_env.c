@@ -700,6 +700,12 @@ ULONG ami_config_pool_divisor(ULONG fallback)
     return fallback;
 }
 
+/* No ENV: on the host: the computed size stands. */
+ULONG ami_config_pool_packets(VOID)
+{
+    return 0UL;
+}
+
 BOOL ami_config_reserve(AmiConfig *cfg, UWORD want)
 {
     AmiIfConfig *grown;

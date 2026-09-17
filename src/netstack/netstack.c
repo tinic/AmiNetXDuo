@@ -420,6 +420,10 @@ static ULONG ami_ns_pool_packets(VOID)
        over every machine size: test_pool_window_host.c. */
     packets = ami_ns_pool_packets_for(avail, divisor, ami_ns_packet_stride());
 
+    /* Told outright: ENV:ANXDPOOLPACKETS (config.h says for which machine). */
+    if (ami_config_pool_packets() != 0UL)
+        packets = ami_config_pool_packets();
+
     AMI_INFO("netstack: %lu bytes free / %lu, pool = %lu x %lu",
              (unsigned long)avail, (unsigned long)divisor,
              (unsigned long)packets, (unsigned long)AMI_POOL_PAYLOAD);
