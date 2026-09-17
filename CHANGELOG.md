@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.5
+
 - `anxgenet.device` answers a request four times sooner. Its receive
   interrupt waited 2 ms for a batch of 32 frames to form, and a reply shorter
   than that -- a ping, a DNS answer, a file server's 32 KB read -- sat the
