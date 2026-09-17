@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.3
+
 - The ThreadX port's critical section reads `SysBase` from the library's own
   fast RAM instead of location 4: on an A1200 location 4 is chip RAM, behind
   a PiStorm32 a bus cycle through the emulator, and NetX Duo enters a
