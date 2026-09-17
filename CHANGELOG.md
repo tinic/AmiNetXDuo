@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.4
+
 - A lost segment no longer costs a sender the rest of its transfer. The
   fast recovery counted a hole the peer had described (SACK) as data in
   flight, so it was filled one segment per acknowledgment, each a round trip
