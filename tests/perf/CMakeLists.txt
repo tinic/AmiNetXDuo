@@ -371,24 +371,37 @@ endif()
 
 if(CMAKE_CROSSCOMPILING)
 
+    # Every public function of the encoder, read off its header, so that a
+    # second copy of the source under another prefix renames ALL of them.
+    # The list was typed out three times here and a new pair
+    # (rfb_packbits16) missed every copy: the default cross arm then failed
+    # to link rfbprof, on the runner, after the host stage had passed.
+    file(STRINGS "${CMAKE_SOURCE_DIR}/include/aminetxduo/rfb_encode.h"
+         _rfb_decls REGEX "^[a-z0-9_]+ +rfb_[a-z0-9_]+\\(")
+    set(RFB_EXPORTS "")
+    foreach(_d IN LISTS _rfb_decls)
+        string(REGEX REPLACE "^[a-z0-9_]+ +(rfb_[a-z0-9_]+)\\(.*$" "\\1"
+               _n "${_d}")
+        list(APPEND RFB_EXPORTS "${_n}")
+    endforeach()
+    list(LENGTH RFB_EXPORTS _rfb_n)
+    if(_rfb_n LESS 12)
+        message(FATAL_ERROR "rfb_encode.h: ${_rfb_n} exports matched; the"
+                            " declaration regex above no longer fits the header")
+    endif()
+
+    function(rfb_rename_exports target prefix)
+        foreach(_n IN LISTS RFB_EXPORTS)
+            string(REGEX REPLACE "^rfb_" "${prefix}_" _r "${_n}")
+            target_compile_definitions(${target} PRIVATE "${_n}=${_r}")
+        endforeach()
+    endfunction()
+
     add_library(rfb_encode_020 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
     target_include_directories(rfb_encode_020 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
     target_compile_options(rfb_encode_020 PRIVATE
         -m68020 -ffunction-sections -fno-optimize-sibling-calls -Wall -Wextra)
-    target_compile_definitions(rfb_encode_020 PRIVATE
-        rfb_planes=rfb020_planes
-        rfb_pal_colours=rfb020_pal_colours
-        rfb_encode_band=rfb020_encode_band
-        rfb_scroll_probe_due=rfb020_scroll_probe_due
-        rfb_packbits=rfb020_packbits
-        rfb_unpackbits=rfb020_unpackbits
-        rfb_shadow_size=rfb020_shadow_size
-        rfb_scratch_size=rfb020_scratch_size
-        rfb_worst_case_frame=rfb020_worst_case_frame
-        rfb_scroll_defaults=rfb020_scroll_defaults
-        rfb_encoder_init=rfb020_encoder_init
-        rfb_encode_frame=rfb020_encode_frame
-        rfb_encode_frame_planes=rfb020_encode_frame_planes)
+    rfb_rename_exports(rfb_encode_020 rfb020)
 
     # The tree builds at -Os and the encoder's inner loop is where that shows:
     # at -Os GCC fetches the source longword a second time to store it into the
@@ -399,40 +412,14 @@ if(CMAKE_CROSSCOMPILING)
     target_compile_options(rfb_encode_o2 PRIVATE
         -m68000 -O2 -ffunction-sections -fno-optimize-sibling-calls
         -Wall -Wextra)
-    target_compile_definitions(rfb_encode_o2 PRIVATE
-        rfb_planes=rfbo2_planes
-        rfb_pal_colours=rfbo2_pal_colours
-        rfb_encode_band=rfbo2_encode_band
-        rfb_scroll_probe_due=rfbo2_scroll_probe_due
-        rfb_packbits=rfbo2_packbits
-        rfb_unpackbits=rfbo2_unpackbits
-        rfb_shadow_size=rfbo2_shadow_size
-        rfb_scratch_size=rfbo2_scratch_size
-        rfb_worst_case_frame=rfbo2_worst_case_frame
-        rfb_scroll_defaults=rfbo2_scroll_defaults
-        rfb_encoder_init=rfbo2_encoder_init
-        rfb_encode_frame=rfbo2_encode_frame
-        rfb_encode_frame_planes=rfbo2_encode_frame_planes)
+    rfb_rename_exports(rfb_encode_o2 rfbo2)
 
     add_library(rfb_encode_o220 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
     target_include_directories(rfb_encode_o220 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
     target_compile_options(rfb_encode_o220 PRIVATE
         -m68020 -O2 -ffunction-sections -fno-optimize-sibling-calls
         -Wall -Wextra)
-    target_compile_definitions(rfb_encode_o220 PRIVATE
-        rfb_planes=rfb220_planes
-        rfb_pal_colours=rfb220_pal_colours
-        rfb_encode_band=rfb220_encode_band
-        rfb_scroll_probe_due=rfb220_scroll_probe_due
-        rfb_packbits=rfb220_packbits
-        rfb_unpackbits=rfb220_unpackbits
-        rfb_shadow_size=rfb220_shadow_size
-        rfb_scratch_size=rfb220_scratch_size
-        rfb_worst_case_frame=rfb220_worst_case_frame
-        rfb_scroll_defaults=rfb220_scroll_defaults
-        rfb_encoder_init=rfb220_encoder_init
-        rfb_encode_frame=rfb220_encode_frame
-        rfb_encode_frame_planes=rfb220_encode_frame_planes)
+    rfb_rename_exports(rfb_encode_o220 rfb220)
 
     add_library(rfbkern STATIC rfbkern.c)
     target_compile_options(rfbkern PRIVATE -Wall -Wextra)
