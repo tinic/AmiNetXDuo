@@ -202,17 +202,21 @@
   the drawer's Libs, C and Devs to LIBS:, C: and DEVS:, after everything
   already there, the way AmiTCP and Miami did it. The system's
   directories keep answering first and the drawer answers for what they
-  lack; nothing of another stack's is moved or hidden. What selects the
-  stack is S:Network-Startup: it runs AmiNetXDuo:C/AddNetInterface, which
-  opens the library beside it, and every program that opens
-  bsdsocket.library after that gets that one. The library reads its
-  configuration from AmiNetXDuo:Devs, so DEVS:NetInterfaces and
-  DEVS:Internet mean that drawer's to it. Every command opens the library
-  beside itself the same way. To run another installed stack, put its
-  S:Network-Startup back and reboot; do not try to exchange a
-  bsdsocket.library which is already resident. On such a machine name the
-  drawer's commands in full, AmiNetXDuo:C/ShowNetStatus, because C:
-  reaches the other stack's first.
+  lack; nothing already there is moved or hidden. S:Network-Startup runs
+  AmiNetXDuo:C/AddNetInterface, which opens the library beside it, and
+  every program that opens bsdsocket.library after that gets that one.
+  The library reads its configuration from AmiNetXDuo:Devs, so
+  DEVS:NetInterfaces and DEVS:Internet mean that drawer's to it. Every
+  command opens the library beside itself the same way.
+
+  Because the drawer comes last, a bsdsocket.library already in LIBS:
+  would keep answering every program and the drawer's would never run,
+  so the Installer refuses the drawer layout while one is there. It says
+  which version it found and changes nothing. Install into the system
+  instead, which renames that library to bsdsocket.library.old, or remove
+  the other stack first. The one exception is the drawer's own library,
+  which LIBS: reaches through the block above on a machine that already
+  has this layout: a reinstall into the same drawer goes ahead.
 
   Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver.
   Copy it to DEVS:Networks, which is what the Installer offers to do.
@@ -907,10 +911,9 @@
 
   In the self-contained layout the line names the drawer's own command,
   AmiNetXDuo:C/AddNetInterface, because C: reaches that drawer last and a
-  plain C:AddNetInterface would be another stack's on a machine that has
-  one. That command opens the library beside it, and the stack it starts
-  is the one every program gets from then on. This is what selects the
-  stack, and S:Network-Startup is the file to swap to run another.
+  plain C:AddNetInterface would be whatever an earlier member of C: has of
+  that name. That command opens the library beside it, and the stack it
+  starts is the one every program gets from then on.
 
   Merely opening bsdsocket.library creates the complete stack with its
   built-in loopback, 127.0.0.1 and, in the full IPv6 build, ::1, but starts

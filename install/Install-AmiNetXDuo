@@ -250,13 +250,11 @@
        "For an installation in its own drawer, the managed block first "
        "assigns AmiNetXDuo: to the drawer and ADDs its Libs, C and Devs to "
        "LIBS:, C: and DEVS:, after everything already there, the way AmiTCP "
-       "and Miami did.  Nothing belonging to another stack is moved, renamed "
-       "or shadowed.  What selects the stack is S:Network-Startup: it runs "
+       "and Miami did.  Nothing already in those directories is moved, "
+       "renamed or shadowed.  S:Network-Startup runs "
        "AmiNetXDuo:C/AddNetInterface, which opens the library beside it, and "
-       "every program that opens bsdsocket.library afterwards gets that one.  "
-       "To run the other stack instead, put its S:Network-Startup back and "
-       "reboot; a loaded bsdsocket.library cannot be exchanged in a running "
-       "system.\n\n"
+       "every program that opens bsdsocket.library afterwards gets that "
+       "one.\n\n"
        "AmiNetXDuo never creates or changes the AmiTCP: assign.  That name "
        "belongs to AmiTCP and to software which keeps compatibility data "
        "under AmiTCP:db.\n\n"
@@ -321,7 +319,7 @@
        "Roadshow, or an earlier AmiNetXDuo.\n\n"
        "This question appears only for an installation into the system "
        "directories.  An installation in its own drawer never changes this "
-       "file.\n\n"
+       "file, and is refused while it exists.\n\n"
        "If the answer is yes, the old file is renamed to bsdsocket.library."
        "old.  It is not deleted, so it can be restored by hand later.  If "
        "the answer is no, the other stack stays in place and only the "
@@ -359,6 +357,17 @@
   (cat "LIBS:bsdsocket.library already exists (version %ld.%ld).\n\n"
        "AmiNetXDuo must replace it.  The old file is renamed to "
        "bsdsocket.library.old.  It is not deleted."))
+
+(set F_DRAWER_REFUSED
+  (cat "LIBS:bsdsocket.library already exists (version %ld.%ld), so "
+       "AmiNetXDuo cannot be installed into a drawer of its own.\n\n"
+       "A drawer is added to LIBS: after the directories already there.  "
+       "That library would go on answering every program that opens "
+       "bsdsocket.library, and the one in the drawer would never run.\n\n"
+       "Run this installer again and choose \"Into the system\", which "
+       "renames the existing library to bsdsocket.library.old, or remove "
+       "the other stack first.\n\n"
+       "Nothing was changed."))
 
 ; The final page does not scroll: anything past the bottom of the requester is
 ; simply lost, so it is kept short enough to fit rather than complete.  The
@@ -751,22 +760,23 @@
 
 ; --- system directories, or a drawer of its own --------------------------
 ;
-; Issue #9: a machine that keeps Roadshow, AmiTCP and this one side by side
-; cannot have all three owning LIBS:bsdsocket.library.  In drawer mode every
-; file goes below the one documentation drawer chosen above, and the managed
-; block ADDs its Libs, C and Devs to LIBS:, C: and DEVS: -- LAST, behind
-; everything already there, the way AmiTCP and Miami did it.  The drawer
-; answers only for what the system does not have.  Putting it FIRST was tried
-; (ActivateAmiNetXDuo, 0.26.5 to 0.28.3) and is wrong: the head of a
-; multi-assign is where every other installer's `Copy foo LIBS:` lands and
-; what `Dir C:` and DEVS:Networks show, so the drawer swallowed the system.
+; Issue #9 asked for a layout that keeps every file of this stack in one
+; drawer.  In drawer mode every file goes below the one documentation drawer
+; chosen above, and the managed block ADDs its Libs, C and Devs to LIBS:, C:
+; and DEVS: -- LAST, behind everything already there, the way AmiTCP and
+; Miami did it.  The drawer answers only for what the system does not have.
+; Putting it FIRST was tried (ActivateAmiNetXDuo, 0.26.5 to 0.28.3) and is
+; wrong: the head of a multi-assign is where every other installer's
+; `Copy foo LIBS:` lands and what `Dir C:` and DEVS:Networks show, so the
+; drawer swallowed the system.
 ;
-; A plain ADD cannot select the stack, and does not have to.  The stack is
-; selected by whoever opens its library first: S:Network-Startup runs
-; AmiNetXDuo:C/AddNetInterface, every command opens PROGDIR:/Libs/ before
-; LIBS:, and the library reads AmiNetXDuo:Devs rather than the DEVS: the
-; assign would hand it (src/config/config_file.c).  Which stack runs is which
-; S:Network-Startup is in place.
+; Last means a bsdsocket.library already in LIBS: would win, so a machine
+; that has one is refused below rather than given a drawer that never runs.
+; On a machine that has none, the stack is selected by whoever opens its
+; library first: S:Network-Startup runs AmiNetXDuo:C/AddNetInterface, every
+; command opens PROGDIR:/Libs/ before LIBS:, and the library reads
+; AmiNetXDuo:Devs rather than the DEVS: the assign would hand it
+; (src/config/config_file.c).
 ;
 ; NOT ASKED AT NOVICE, where the Installer draws no questions at all: that
 ; level takes the system layout, which is what every install has done so far.
@@ -780,13 +790,71 @@
 (set FORCE_DRAWER (exists "S:AmiNetXDuo-drawer" (noreq)))
 (set DRAWER_LAYOUT 0)
 
-(if FORCE_DRAWER
+(if FORCE_DRAWER (set DRAWER_LAYOUT 1))
+
+(if (AND (= FORCE_DRAWER 0) (>= @user-level 1))
+  (if (= 1 (askchoice
+             (prompt "Where should the stack itself go?")
+             (help (cat "Into the system is the ordinary answer: "
+                        "bsdsocket.library into LIBS:, the commands into C:, "
+                        "the driver and the configuration into DEVS:.\n\n"
+                        "Into a drawer of its own keeps every file together.  "
+                        "The drawer's Libs, C and Devs are added to LIBS:, C: "
+                        "and DEVS: after everything already there, and its "
+                        "own S:Network-Startup starts its stack.  A machine "
+                        "that already has a bsdsocket.library in LIBS: is "
+                        "refused: that library would keep answering every "
+                        "program, and the drawer's would never run."
+                        "\n\n"
+                        @askchoice-help))
+             ; 22 characters is the ceiling; over it the page silently
+             ; drops gadgets, which tools/check-installer refuses.
+             (choices "Into the system"
+                      "Into its own drawer")
+             (default 0)))
+    (set DRAWER_LAYOUT 1)))
+
+; A DRAWER BESIDE A LIBRARY THAT IS ALREADY IN LIBS: IS REFUSED.  The drawer
+; is added to LIBS: last, so a bsdsocket.library the system already has --
+; AmiTCP's, Miami's, Roadshow's, an AmiNetXDuo installed into the system --
+; would go on answering every program that opens the library by name, and
+; the one in the drawer would only ever run for the commands that open it by
+; path.  Two stacks on one machine is not a state this installer produces.
+; The system layout is the answer: it renames that library to .old.
+;
+; The one bsdsocket.library that is allowed in LIBS: is the drawer's own,
+; which a machine that already has this layout carries there through its
+; startup block -- last, so the name reaches it only when nothing earlier
+; has one.  Same bytes, not same name: a different AmiNetXDuo in SYS:Libs
+; has the drawer's name too, and is exactly the case above.
+;
+; BEFORE the makedirs: a refused run leaves no drawer behind.
+(if DRAWER_LAYOUT
   (
-    (set DRAWER_LAYOUT 1)
+    ; The documentation prompt already selected this exact drawer.  Asking
+    ; for a second parent produced two AmiNetXDuo drawers and made the
+    ; startup code guess which one held Terminal and which held the stack.
     (set D_ROOT DOCDIR)
     (set D_LIBS (tackon D_ROOT "Libs"))
     (set D_C    (tackon D_ROOT "C"))
     (set D_DEVS (tackon D_ROOT "Devs"))
+
+    (set OWN_BSD (tackon D_LIBS "bsdsocket.library"))
+    (set LIBS_BSD_IS_OWN 0)
+    (if (AND (exists "LIBS:bsdsocket.library" (noreq))
+             (exists OWN_BSD (noreq)))
+        (if (= (getsum "LIBS:bsdsocket.library") (getsum OWN_BSD))
+            (set LIBS_BSD_IS_OWN 1)))
+
+    (if (AND (exists "LIBS:bsdsocket.library" (noreq))
+             (= LIBS_BSD_IS_OWN 0))
+      (
+        (set LIBS_BSD_RAW (getversion "LIBS:bsdsocket.library"))
+        (set LIBS_BSD_VER (/ LIBS_BSD_RAW 65536))
+        (set LIBS_BSD_REV (- LIBS_BSD_RAW (* LIBS_BSD_VER 65536)))
+        (abort (F_DRAWER_REFUSED LIBS_BSD_VER LIBS_BSD_REV))
+      ))
+
     (makedir D_ROOT (infos))
     (makedir D_LIBS)
     (makedir D_C)
@@ -799,48 +867,11 @@
     (makedir (tackon D_DEVS "Internet"))
   ))
 
-(if (AND (= FORCE_DRAWER 0) (>= @user-level 1))
-  (if (= 1 (askchoice
-             (prompt "Where should the stack itself go?")
-             (help (cat "Into the system is the ordinary answer: "
-                        "bsdsocket.library into LIBS:, the commands into C:, "
-                        "the driver and the configuration into DEVS:.\n\n"
-                        "Into a drawer of its own keeps every file together "
-                        "and moves none of another stack's.  The drawer's "
-                        "Libs, C and Devs are added to LIBS:, C: and DEVS: "
-                        "after everything already there, and its own "
-                        "S:Network-Startup starts its own stack.  Put the "
-                        "other stack's S:Network-Startup back and reboot to "
-                        "change stacks."
-                        "\n\n"
-                        @askchoice-help))
-             ; 22 characters is the ceiling; over it the page silently
-             ; drops gadgets, which tools/check-installer refuses.
-             (choices "Into the system"
-                      "Into its own drawer")
-             (default 0)))
-    (
-      (set DRAWER_LAYOUT 1)
-      ; The documentation prompt already selected this exact drawer.  Asking
-      ; for a second parent produced two AmiNetXDuo drawers and made the
-      ; startup code guess which one held Terminal and which held the stack.
-      (set D_ROOT DOCDIR)
-      (set D_LIBS (tackon D_ROOT "Libs"))
-      (set D_C    (tackon D_ROOT "C"))
-      (set D_DEVS (tackon D_ROOT "Devs"))
-      (makedir D_ROOT (infos))
-      (makedir D_LIBS)
-      (makedir D_C)
-      (makedir D_DEVS)
-      (makedir (tackon D_DEVS "Networks"))
-      (makedir (tackon D_DEVS "NetInterfaces"))
-      (makedir (tackon D_DEVS "Internet"))
-    )))
-
 ; How a startup file names one of OUR commands.  C: reaches the drawer LAST,
-; so on a machine with another stack "C:AddNetInterface" is that stack's
-; command; the drawer's is named through the assign the block makes first.
-; The system layout keeps the plain C: that every earlier install wrote.
+; so "C:AddNetInterface" is whatever earlier member has one -- another
+; stack's leftover commands outlive its library; the drawer's is named
+; through the assign the block makes first.  The system layout keeps the
+; plain C: that every earlier install wrote.
 (set C_PREFIX "C:")
 (if DRAWER_LAYOUT (set C_PREFIX "AmiNetXDuo:C/"))
 
@@ -2009,8 +2040,8 @@
       (cat ";\n"
            "; This installation lives in AmiNetXDuo: and is LAST in\n"
            "; C:, LIBS: and DEVS:.  The command is named through the\n"
-           "; assign so that it, and not another stack's, is the one\n"
-           "; that runs; to AmiNetXDuo, DEVS: here means AmiNetXDuo:Devs.\n")))
+           "; assign so that this drawer's is the one that runs; to\n"
+           "; AmiNetXDuo, DEVS: here means AmiNetXDuo:Devs.\n")))
 
 (if DO_STARTUP
   (

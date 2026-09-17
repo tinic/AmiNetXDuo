@@ -630,24 +630,25 @@ FOREIGN_LINES=(
     "; -- end SomeOtherApp --"
 )
 
-# Drawer mode exists for a machine that ALREADY HAS another TCP/IP stack, so
-# that is the only meaningful fixture for it.  The files are deliberately not
-# Amiga libraries, and they are deliberately FIRST: the drawer's Libs is the
-# last member of LIBS:, so a command that opened bsdsocket.library by name
-# would get this text file, fail, and turn the boot half below red.  The
-# drawer's commands open PROGDIR:/Libs/ before LIBS:, and the boot passing is
-# the proof.  Likewise foreign0 and the foreign routes file sit in the system
-# DEVS:, first in the assign: a stack that read DEVS:NetInterfaces through
-# the assign would bring up foreign0 on a driver this machine does not have
-# and route everything to 10.0.0.1, so fetch failing is what that looks
-# like.  If the installer still performs its old fixed-path backups, the
-# byte snapshot goes red first.
+# Drawer mode is for a machine that keeps this stack in one drawer, and the
+# fixture is what another stack leaves behind on such a machine: everything
+# EXCEPT a bsdsocket.library, which the installer refuses the drawer beside
+# (that refusal is its own phase below, before run 1).  The files are
+# deliberately not Amiga libraries, and they are deliberately FIRST: the
+# drawer's Libs is the last member of LIBS:, so a library or command that
+# opened usergroup.library or tls.library by name would get a text file.
+# bsdsocket.library opens AmiNetXDuo:Libs/usergroup.library first and the
+# commands open PROGDIR:/Libs/ first, and the boot passing is the proof.
+# Likewise foreign0 and the foreign routes file sit in the system DEVS:,
+# first in the assign: a stack that read DEVS:NetInterfaces through the
+# assign would bring up foreign0 on a driver this machine does not have and
+# route everything to 10.0.0.1, so fetch failing is what that looks like.
+# If the installer still performs its old fixed-path backups, the byte
+# snapshot goes red first.
 FOREIGN_STACK_FILES=()
 if [ "$DRAWER" = "1" ]; then
     mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
              "$HD/Devs/Networks" "$HD/ForeignAmiTCP/db"
-    printf 'foreign bsdsocket.library -- must not be moved\n' \
-        > "$HD/Libs/bsdsocket.library"
     printf 'foreign usergroup.library -- must not be moved\n' \
         > "$HD/Libs/usergroup.library"
     printf 'foreign tls.library -- must not be moved\n' \
@@ -656,13 +657,12 @@ if [ "$DRAWER" = "1" ]; then
         > "$HD/Devs/NetInterfaces/foreign0"
     printf 'DEFAULT=10.0.0.1\n' > "$HD/Devs/Internet/routes"
     printf 'foreign nfs table\n' > "$HD/ForeignAmiTCP/db/ch_nfstab"
-    chmod 644 "$HD/Libs/bsdsocket.library" "$HD/Libs/usergroup.library" \
+    chmod 644 "$HD/Libs/usergroup.library" \
         "$HD/Libs/tls.library" "$HD/Devs/NetInterfaces/foreign0" \
         "$HD/Devs/Internet/routes" "$HD/ForeignAmiTCP/db/ch_nfstab"
 
     FOREIGN_LINES+=("Assign AmiTCP: DH0:ForeignAmiTCP")
     FOREIGN_STACK_FILES=(
-        Libs/bsdsocket.library
         Libs/usergroup.library
         Libs/tls.library
         Devs/NetInterfaces/foreign0
@@ -1117,6 +1117,79 @@ startup_with() {
 }
 
 take_lock
+
+# ------------------------------------------------ run 0, drawer only: refused --
+#
+# A bsdsocket.library already in LIBS: and the drawer layout asked for.  The
+# drawer is added to LIBS: last, so that library would keep answering every
+# program and the drawer's would never run; the installer refuses instead of
+# installing a drawer that never runs (Install-AmiNetXDuo, F_DRAWER_REFUSED).
+# Refused means REFUSED: the library it found is byte for byte what it was,
+# no AmiNetXDuo drawer was created -- the check sits before the makedirs --
+# and S:User-Startup has none of our lines.  The Installer shows the abort
+# on a page of its own and goes away when it is answered, so installdrive
+# reports a completed run; the files are the verdict.  The foreign library
+# is then taken away and run 1 installs on the same disk.
+if [ "$DRAWER" = "1" ]; then
+    echo
+    echo "============================================================"
+    echo "  0/2  a bsdsocket.library already in LIBS:, drawer refused"
+    echo "============================================================"
+
+    printf 'foreign bsdsocket.library -- must not be moved\n' \
+        > "$HD/Libs/bsdsocket.library"
+    chmod 644 "$HD/Libs/bsdsocket.library"
+    REFUSED_LIB_BEFORE=$(shasum "$HD/Libs/bsdsocket.library")
+
+    startup_with 'FailAt 9999
+C:installdrive >DH0:install-console.txt
+Echo >DH0:.done "$RC"'
+
+    boot refused "$INSTALL_TIMEOUT"
+    REFUSED_STATUS=$BOOT_STATUS
+
+    echo
+    echo "---- Installer log ----"
+    cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
+    echo
+
+    refused_ok=1
+    if [ "$REFUSED_LIB_BEFORE" != "$(shasum "$HD/Libs/bsdsocket.library" 2>/dev/null)" ]; then
+        echo "!! the refused drawer install changed LIBS:bsdsocket.library"
+        refused_ok=0
+    fi
+    if amiga_path AmiNetXDuo >/dev/null 2>&1; then
+        echo "!! the refused drawer install created the AmiNetXDuo drawer"
+        refused_ok=0
+    fi
+    if [ "$(startup_count 'AmiNetXDuo')" != "0" ]; then
+        echo "!! the refused drawer install wrote into S:User-Startup"
+        refused_ok=0
+    fi
+    if amiga_path S/Network-Startup >/dev/null 2>&1; then
+        echo "!! the refused drawer install wrote S:Network-Startup"
+        refused_ok=0
+    fi
+    if ! foreign_intact; then
+        echo "!! the refused drawer install touched somebody else's lines"
+        refused_ok=0
+    fi
+    echo "drawer_refused=$([ "$refused_ok" = "1" ] && echo yes || echo no)" \
+         "status=$REFUSED_STATUS"
+    if [ "$refused_ok" != "1" ] || [ "$REFUSED_STATUS" != "0" ]; then
+        echo
+        echo "!! the drawer layout must be refused beside an existing"
+        echo "   LIBS:bsdsocket.library, and refused means nothing written."
+        echo "   the drive is left at $HD"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=refused boot_status=refused-$REFUSED_STATUS"
+        exit 1
+    fi
+    echo "  ok      refused, nothing written"
+
+    rm -f "$HD/Libs/bsdsocket.library" "$HD/install-log.txt" \
+          "$HD/install-console.txt" "$HD/installdrive.txt"
+fi
 
 # ------------------------------------------------------------------ run 1 ---
 

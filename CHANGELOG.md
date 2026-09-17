@@ -21,8 +21,14 @@ version at the top when it merges.
   through `LIBS:`; `bsdsocket.library` opens `AmiNetXDuo:Libs/usergroup.library`
   before the system's; once one stack's library is in memory every later
   open gets it. `httpd` started from the drawer's block is named through the
-  assign too. To run the other stack, put its `S:Network-Startup` back and
-  reboot
+  assign too
+- The installer refuses the drawer layout while `LIBS:` already has a
+  `bsdsocket.library`, naming its version and changing nothing: last in
+  `LIBS:`, the drawer's would never run. The system layout, which renames
+  that library to `.old`, is the answer on such a machine. The drawer's own
+  library, reached through `LIBS:` on a machine that already has this
+  layout, is told apart by checksum, so a reinstall into the drawer goes
+  ahead
 - The library and the commands read and write `DEVS:NetInterfaces` and
   `DEVS:Internet` inside `AmiNetXDuo:Devs` when that drawer exists, and in
   `DEVS:` as before when it does not. With the drawer last, a Roadshow

@@ -146,14 +146,16 @@ inside the selected AmiNetXDuo drawer.  No existing system library, command,
 driver, configuration file or AmiTCP: assign is changed.  At boot, the
 drawer's Libs, C and Devs are ADDed to LIBS:, C: and DEVS: after everything
 already there, the way AmiTCP and Miami did it, so the drawer answers only
-for what the system does not have.  What selects the stack is
-S:Network-Startup: it runs AmiNetXDuo:C/AddNetInterface, which opens the
-library beside it, and every program that opens bsdsocket.library after that
-gets that one.  The library reads its configuration from AmiNetXDuo:Devs.
-To run the other stack, put its S:Network-Startup back and reboot.  A
-bsdsocket.library already resident in memory cannot be exchanged safely.
-On such a machine type the drawer's commands by their full name,
-AmiNetXDuo:C/ShowNetStatus, since C: reaches the other stack's first.
+for what the system does not have.  S:Network-Startup runs
+AmiNetXDuo:C/AddNetInterface, which opens the library beside it, and every
+program that opens bsdsocket.library after that gets that one.  The library
+reads its configuration from AmiNetXDuo:Devs.
+
+Because the drawer comes last, a bsdsocket.library already in LIBS: --
+AmiTCP's, Miami's, Roadshow's, or an AmiNetXDuo installed into the system --
+would keep answering every program, so the installer refuses the drawer
+layout while one is there.  Install into the system instead, which renames
+that library to bsdsocket.library.old, or remove the other stack first.
 
 In the system layout, a bsdsocket.library already in LIBS: -- from AmiTCP,
 Miami, Genesis or Roadshow -- is renamed to bsdsocket.library.old rather

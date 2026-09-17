@@ -81,7 +81,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 | Which stack: Everything, Minimal, Micro | Everything |
 | Install `anxnet.device` | yes |
 | Where the `AmiNetXDuo` drawer of documentation and examples goes | any drawer; nothing in it is needed for the network |
-| Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer beside another stack's files, added last to those assigns (Intermediate and Expert) | into the system |
+| Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer, added last to those assigns; refused if `LIBS:` already has a `bsdsocket.library` (Intermediate and Expert) | into the system |
 | Which card, and the interface name | the driver found in `DEVS:` |
 | Answer to `<hostname>.local` on the network | no |
 | DHCP, or a fixed address, netmask and gateway | DHCP |
