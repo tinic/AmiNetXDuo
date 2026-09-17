@@ -76,6 +76,9 @@ static struct
     ULONG        sendios;
     ULONG        abortios;
     ULONG        waitios;
+    ULONG        checkios;
+    BOOL         io_done;       /* CheckIO() says the request has replied  */
+    ULONG        tick_jump;     /* ticks a planned timer wake advances     */
     ULONG        signal_calls;
     ULONG        last_signalled;
 
@@ -194,6 +197,14 @@ ULONG Wait(ULONG signalSet)
     arrived = h.wait_plan[h.wait_calls++] & signalSet;
     h.signals &= ~arrived;
 
+    /* A timer wake is the request replying: CheckIO() sees it and the
+       clock has moved on by the timeout. */
+    if ((arrived & H_TIMER_SIG) != 0)
+    {
+        h.io_done = TRUE;
+        h.ticks  += h.tick_jump;
+    }
+
     if (h.wait_establishes != NULL)
     {
         h.wait_establishes->as_Nx.tcp.nx_tcp_socket_state = NX_TCP_ESTABLISHED;
@@ -214,9 +225,14 @@ BYTE OpenDevice(const UBYTE *devName, ULONG unit, struct IORequest *io,
     return h.open_result;
 }
 
-VOID SendIO(struct IORequest *io)  { (VOID)io; h.sendios++;  }
-LONG AbortIO(struct IORequest *io) { (VOID)io; h.abortios++; return 0; }
-LONG WaitIO(struct IORequest *io)  { (VOID)io; h.waitios++;  return 0; }
+VOID SendIO(struct IORequest *io)  { (VOID)io; h.sendios++; h.io_done = FALSE; }
+LONG AbortIO(struct IORequest *io) { (VOID)io; h.abortios++; h.io_done = TRUE; return 0; }
+LONG WaitIO(struct IORequest *io)  { (VOID)io; h.waitios++; h.io_done = FALSE; return 0; }
+struct IORequest *CheckIO(struct IORequest *io)
+{
+    h.checkios++;
+    return h.io_done ? io : NULL;
+}
 
 BYTE ami_signal_alloc(VOID)        { return (BYTE)H_TIMER_BIT; }
 VOID ami_signal_free(BYTE sig)     { (VOID)sig; }
@@ -818,6 +834,7 @@ static void t_waitselect_timeout(void)
     h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
     h.wait_plan[0] = H_TIMER_SIG;
     h.wait_planned = 1;
+    h.tick_jump    = TX_TIMER_TICKS_PER_SECOND;     /* the second, in ticks */
     memset(&s, 0, sizeof(s));
     h_set(s.read, 0);
 
@@ -831,7 +848,27 @@ static void t_waitselect_timeout(void)
           "and its signal was in the wait mask");
     CHECK(h.waitios == 1 && h.abortios == 0,
           "an expired request is collected with WaitIO and not aborted");
+    CHECK(!h_base.sb_TimerArmed, "and nothing is left out at the device");
     CHECK(!h_isset(s.read, 0), "and the result set comes back cleared");
+
+    /* A kept request that fires before this wait's own deadline -- it was
+       armed for an earlier, shorter wait -- is re-armed for the remainder. */
+    h_reset();
+    (void)h_tcp(0, NX_TCP_SYN_SENT);
+    h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
+    h.wait_plan[0] = H_TIMER_SIG;
+    h.wait_plan[1] = H_TIMER_SIG;
+    h.wait_planned = 2;
+    h.tick_jump    = TX_TIMER_TICKS_PER_SECOND / 2; /* fires at half the second */
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, &one_second, NULL, &h_base);
+    CHECK(n == 0 && h.wait_calls == 2,
+          "a request that fires early is followed by a second wait");
+    CHECK(h.sendios == 2, "armed once more, for the remainder");
+    CHECK(h_base.sb_TimerReq.tr_time.tv_secs == 0 &&
+          h_base.sb_TimerReq.tr_time.tv_micro == 500000UL,
+          "which is the half second still owed");
 
     h_reset();
     (void)h_tcp(0, NX_TCP_SYN_SENT);
@@ -845,8 +882,56 @@ static void t_waitselect_timeout(void)
     n = bsd_WaitSelect(1, NULL, s.write, NULL, &one_second, NULL, &h_base);
     CHECK(n == 1, "a connect that completed during the wait ends it");
     CHECK(h_isset(s.write, 0), "and the descriptor comes back writable");
-    CHECK(h.abortios == 1 && h.waitios == 1,
-          "and the outstanding timeout request is aborted and collected");
+    CHECK(h.abortios == 0 && h.waitios == 0 && h_base.sb_TimerArmed,
+          "and the timeout request is left out at the device for the next wait");
+
+    /* The next timed wait with the same timeout keeps that request: no
+       SendIO, no AbortIO.  A shorter timeout than the request's remainder
+       aborts it and arms afresh.  One that fired in between is reaped on
+       entry, then armed afresh. */
+    h_sock[0].as_Nx.tcp.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+    h.wait_plan[0]     = H_EVENT_SIG;
+    h.wait_planned     = 1;
+    h.wait_calls       = 0;
+    h.wait_establishes = &h_sock[0];
+    h.sendios = h.abortios = h.waitios = 0;
+    memset(&s, 0, sizeof(s));
+    h_set(s.write, 0);
+    n = bsd_WaitSelect(1, NULL, s.write, NULL, &one_second, NULL, &h_base);
+    CHECK(n == 1 && h.sendios == 0 && h.abortios == 0 && h.waitios == 0 &&
+          h_base.sb_TimerArmed,
+          "the same timeout again reuses the request that is out");
+
+    {
+        struct timeval tenth = { 0, 100000 };
+
+        h_sock[0].as_Nx.tcp.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+        h.wait_plan[0]     = H_EVENT_SIG;
+        h.wait_planned     = 1;
+        h.wait_calls       = 0;
+        h.wait_establishes = &h_sock[0];
+        h.sendios = h.abortios = h.waitios = 0;
+        memset(&s, 0, sizeof(s));
+        h_set(s.write, 0);
+        n = bsd_WaitSelect(1, NULL, s.write, NULL, &tenth, NULL, &h_base);
+        CHECK(n == 1 && h.abortios == 1 && h.waitios == 1 && h.sendios == 1,
+              "a shorter timeout aborts the request that is out and arms its own");
+        CHECK(h_base.sb_TimerReq.tr_time.tv_micro == 100000UL,
+              "for the shorter time");
+    }
+
+    h_sock[0].as_Nx.tcp.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+    h.io_done          = TRUE;          /* it fired while nobody waited */
+    h.wait_plan[0]     = H_EVENT_SIG;
+    h.wait_planned     = 1;
+    h.wait_calls       = 0;
+    h.wait_establishes = &h_sock[0];
+    h.sendios = h.abortios = h.waitios = 0;
+    memset(&s, 0, sizeof(s));
+    h_set(s.write, 0);
+    n = bsd_WaitSelect(1, NULL, s.write, NULL, &one_second, NULL, &h_base);
+    CHECK(n == 1 && h.waitios == 1 && h.abortios == 0 && h.sendios == 1,
+          "a request that fired between waits is reaped, not aborted, and a new one armed");
 
     /* timer.device refusing to open is ENOMEM, not a silent block. */
     h_reset();

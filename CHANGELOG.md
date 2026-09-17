@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `WaitSelect()` keeps its timer.device request outstanding across calls
+  instead of sending and aborting one per call: it is reaped on entry,
+  cancelled only when the next wait wants an earlier deadline, and
+  re-armed for the remainder when it fires early. On Emu68 each of the
+  three requests was a trap; iperf's non-blocking loop paid them on every
+  turn of the receive window. A1200 + PiStorm32, same driver, back-to-back
+  boots twice: in 610-638 -> 651-659 Mbit/s (64 KB reads), out 315-332 ->
+  326-343; emulated X-Surf 100 and A2065 unchanged
+
 - `anxgenet.device` copies and sums a received segment with the stack's
   movem form of the loop (src/net68k, its 68020 arm) instead of a C loop
   with a carry test per longword: on Emu68's JIT that loop cost 4.3 us a

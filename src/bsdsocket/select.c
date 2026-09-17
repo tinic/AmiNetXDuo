@@ -540,6 +540,85 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
     return TRUE;
 }
 
+/*
+ * THE TIMER REQUEST STAYS OUT.
+ *
+ * WaitSelect() with a timeout used to SendIO() a timer.device request on the
+ * way in and AbortIO()+WaitIO() it on the way out, on every call.  timer.device
+ * reads the E-Clock inside each of those, and on an A1200 behind a PiStorm32
+ * that is two traps and six CIA bus cycles a time -- the pair was 12% of a
+ * receive profile and 13% of a transmit one (rx3/tx3.prof, 2026-09-17), at
+ * the ~9,000 waits a second a streaming socket makes, none of which ever
+ * reached its timeout.
+ *
+ * The request is left outstanding when a wait ends on data.  The next timed
+ * wait keeps it when it fires no later than about a tick after what is asked
+ * (TX_TIMER_TICKS_PER_SECOND, 20 ms), aborts it only when it would fire too
+ * late, and a request that fired while nobody waited is reaped on entry.  An
+ * early firing -- a kept request that was armed for less than this wait asked
+ * -- re-arms for the remainder, so no wait ends before its time.  The
+ * deadline arithmetic is on ThreadX's tick, one fast-RAM read, never the
+ * E-Clock.
+ */
+#define BSD_TICK_US   (1000000UL / (ULONG)TX_TIMER_TICKS_PER_SECOND)
+
+/* A timeout in ticks, rounded up: never shorter than asked.  Saturates. */
+static ULONG bsd_timeout_ticks(const struct timeval *tv)
+{
+    ULONG secs  = (ULONG)tv->tv_secs;
+    ULONG ticks = secs * (ULONG)TX_TIMER_TICKS_PER_SECOND;
+
+    if (secs != 0 && ticks / secs != (ULONG)TX_TIMER_TICKS_PER_SECOND)
+        return 0xFFFFFFFFUL;
+    ticks += ((ULONG)tv->tv_micro + BSD_TICK_US - 1UL) / BSD_TICK_US;
+    return ticks;
+}
+
+/* Take back a request that has fired with nobody waiting.  TRUE while one is
+   still out. */
+static BOOL bsd_timer_reap(struct AmiSocketBase *base)
+{
+    if (!base->sb_TimerArmed)
+        return FALSE;
+
+    if (CheckIO((struct IORequest *)&base->sb_TimerReq) != NULL)
+    {
+        WaitIO((struct IORequest *)&base->sb_TimerReq);
+        base->sb_TimerArmed = FALSE;
+    }
+
+    return base->sb_TimerArmed;
+}
+
+static VOID bsd_timer_cancel(struct AmiSocketBase *base)
+{
+    if (!base->sb_TimerArmed)
+        return;
+
+    AbortIO((struct IORequest *)&base->sb_TimerReq);
+    WaitIO((struct IORequest *)&base->sb_TimerReq);
+    base->sb_TimerArmed = FALSE;
+}
+
+/* Called on the base's own teardown; a request out at the device would
+   otherwise reply into freed memory. */
+VOID bsd_timer_teardown(struct AmiSocketBase *base)
+{
+    bsd_timer_cancel(base);
+}
+
+static VOID bsd_timer_arm(struct AmiSocketBase *base, ULONG secs, ULONG micro,
+                          ULONG due)
+{
+    base->sb_TimerReq.tr_node.io_Command = TR_ADDREQUEST;
+    base->sb_TimerReq.tr_time.tv_secs    = secs;
+    base->sb_TimerReq.tr_time.tv_micro   = micro;
+
+    SendIO((struct IORequest *)&base->sb_TimerReq);
+    base->sb_TimerArmed = TRUE;
+    base->sb_TimerDue   = due;
+}
+
 
 /*
  * One readiness sweep, inside a ThreadX context bracket.
@@ -689,7 +768,8 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     ULONG      break_mask  = SocketBase->sb_BreakMask & ~user_mask;
     ULONG      got_signals = 0;
     ULONG      wait_mask;
-    BOOL       timer_running = FALSE;
+    BOOL       timer_running = FALSE;   /* this wait relies on the request */
+    ULONG      wanted_due    = 0UL;     /* the tick this wait's timeout is at */
     BOOL       poll_only     = FALSE;
 
     if (nfds < 0)
@@ -741,15 +821,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         pending = SetSignal(0UL, 0UL);
 
         if ((pending & break_mask) != 0)
-        {
-            if (timer_running)
-            {
-                AbortIO((struct IORequest *)&SocketBase->sb_TimerReq);
-                WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
-            }
-
-            return bsd_fail(SocketBase, AMI_EINTR);
-        }
+            return bsd_fail(SocketBase, AMI_EINTR);   /* the request stays out */
 
         if ((pending & user_mask) != 0)
             got_signals |= SetSignal(0UL, user_mask) & user_mask;
@@ -764,15 +836,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         count = bsd_poll_sets(SocketBase, nfds, in_read, in_write, in_except,
                               ready);
         if (count < 0)
-        {
-            if (timer_running)
-            {
-                AbortIO((struct IORequest *)&SocketBase->sb_TimerReq);
-                WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
-            }
-
             return bsd_fail(SocketBase, AMI_ENETDOWN);
-        }
 
         if (count > 0 || got_signals != 0)
             break;
@@ -831,12 +895,26 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
             if (!bsd_timer_open(SocketBase))
                 return bsd_fail(SocketBase, AMI_ENOMEM);
 
-            SocketBase->sb_TimerReq.tr_node.io_Command = TR_ADDREQUEST;
-            SocketBase->sb_TimerReq.tr_time.tv_secs    = timeout->tv_secs;
-            SocketBase->sb_TimerReq.tr_time.tv_micro   = timeout->tv_micro;
+            {
+                ULONG now   = tx_time_get();
+                ULONG want  = bsd_timeout_ticks(timeout);
 
-            SetSignal(0, SocketBase->sb_TimerSigMask);
-            SendIO((struct IORequest *)&SocketBase->sb_TimerReq);
+                wanted_due = now + want;
+
+                /* A request still out is kept unless it would fire more than
+                   a tick after this wait's deadline. */
+                if (bsd_timer_reap(SocketBase) &&
+                    (LONG)(SocketBase->sb_TimerDue - now) > (LONG)want + 1L)
+                    bsd_timer_cancel(SocketBase);
+
+                /* Reaped or cancelled, so a set bit is stale; a kept request
+                   sets it again when it fires. */
+                SetSignal(0, SocketBase->sb_TimerSigMask);
+
+                if (!SocketBase->sb_TimerArmed)
+                    bsd_timer_arm(SocketBase, (ULONG)timeout->tv_secs,
+                                  (ULONG)timeout->tv_micro, wanted_due);
+            }
 
             timer_running = TRUE;
             wait_mask    |= SocketBase->sb_TimerSigMask;
@@ -846,12 +924,6 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         if ((received & break_mask) != 0)
         {
-            if (timer_running)
-            {
-                AbortIO((struct IORequest *)&SocketBase->sb_TimerReq);
-                WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
-            }
-
             Signal(SocketBase->sb_Task, received & break_mask);
 
             return bsd_fail(SocketBase, AMI_EINTR);
@@ -861,7 +933,30 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         if (timer_running && (received & SocketBase->sb_TimerSigMask) != 0)
         {
+            ULONG now;
+            LONG  left;
+
+            /* The bit without the reply is stale (a previous wait's request
+               fired after it left): the request now out is still running. */
+            if (CheckIO((struct IORequest *)&SocketBase->sb_TimerReq) == NULL)
+                continue;
+
             WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
+            SocketBase->sb_TimerArmed = FALSE;
+
+            /* A kept request armed for an earlier wait fires early for this
+               one: arm the remainder and keep waiting. */
+            now  = tx_time_get();
+            left = (LONG)(wanted_due - now);
+            if (left > 0)
+            {
+                ULONG us = (ULONG)left * BSD_TICK_US;
+
+                bsd_timer_arm(SocketBase, us / 1000000UL, us % 1000000UL,
+                              wanted_due);
+                continue;
+            }
+
             timer_running = FALSE;
 
             SetSignal(0, SocketBase->sb_EventSigMask);
@@ -875,11 +970,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         }
     }
 
-    if (timer_running)
-    {
-        AbortIO((struct IORequest *)&SocketBase->sb_TimerReq);
-        WaitIO((struct IORequest *)&SocketBase->sb_TimerReq);
-    }
+    /* A wait that ended on data leaves the request out for the next one. */
 
     if (count <= 0 && words > 0)
     {

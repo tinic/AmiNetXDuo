@@ -189,6 +189,9 @@ VOID bsd_log_hook_init(VOID)        { }
 VOID bsd_log_hook_exit(VOID)        { }
 VOID bsd_log_hook_drop_owner(struct AmiSocketBase *base) { (VOID)base; }
 VOID bsd_runtime_close(VOID)        { h.runtime_close_calls++; }
+/* select.c takes WaitSelect()'s timer request back before the base closes
+   timer.device; the base under test never armed one. */
+VOID bsd_timer_teardown(struct AmiSocketBase *base) { (VOID)base; }
 
 /* bsd_lib_open() calls this on every open, to hold usergroup.library resident
    for ixemul clients.  Nothing here depends on it, and the real one only opens

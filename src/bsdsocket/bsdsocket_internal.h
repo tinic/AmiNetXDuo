@@ -344,6 +344,8 @@ struct AmiSocketBase
     struct MsgPort          sb_TimerPort;
     struct timerequest      sb_TimerReq;
     BOOL                    sb_TimerOpen;
+    BOOL                    sb_TimerArmed;      /* sb_TimerReq is out at timer.device */
+    ULONG                   sb_TimerDue;        /* the tick it fires at, tx_time_get() */
     BYTE                    sb_TimerSignal;
     ULONG                   sb_TimerSigMask;
 
@@ -943,6 +945,10 @@ VOID  bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr);
 BOOL  bsd_readable(AmiSocket *sock);
 BOOL  bsd_writable(AmiSocket *sock);
 BOOL  bsd_exception(AmiSocket *sock);
+
+/* select.c: WaitSelect()'s timer request stays out at timer.device between
+   waits; the base's teardown takes it back before closing the device. */
+VOID  bsd_timer_teardown(struct AmiSocketBase *base);
 
 /* Wait option for a blocking call, in ThreadX ticks. */
 /* A NetX Duo call narrowed to (wait timeout) -> status, so bsd_wait_sliced()

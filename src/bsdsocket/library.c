@@ -645,6 +645,7 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
 
     if (child->sb_TimerOpen)
     {
+        bsd_timer_teardown(child);
         CloseDevice((struct IORequest *)&child->sb_TimerReq);
         child->sb_TimerOpen = FALSE;
         ami_signal_free(child->sb_TimerSignal);
