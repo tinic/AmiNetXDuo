@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The web Shell (`httpd -T`) never raises a DOS requester on the machine's
+  screen. A command typed from a browser naming a volume that was not
+  mounted -- `Copy SMB0:file TO RAM:` after the share had gone -- put "Please
+  insert volume SMB0:" on the Workbench in front of the owner, blocked that
+  Shell behind it, and waited for a hand at the keyboard; the remote user saw
+  only a session that stopped answering. The Shell's process now refuses
+  requesters (`pr_WindowPtr` = -1): the same command fails with the ordinary
+  error, and everything it starts inherits the refusal
+
 ## 0.28.5
 
 - `anxgenet.device` delivers without an interrupt whenever the machine is

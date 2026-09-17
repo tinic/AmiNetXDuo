@@ -1010,6 +1010,17 @@ static VOID term_runner_main(VOID)
             cli->cli_DefaultStack = TERM_SHELL_STACK / 4UL;
     }
 
+    /*
+     * No DOS requesters from this Shell, ever.  Whoever types here is at
+     * the far end of a network and cannot see the machine's screen; a
+     * "Please insert volume SMB0:" from a name that is not mounted would
+     * sit on the Workbench in front of the owner, block this process and
+     * every command after it, and wait for someone at the keyboard.  -1
+     * turns each such request into the error the command gets anyway.
+     * Commands this Shell runs, `Run` and System() included, inherit it.
+     */
+    me->pr_WindowPtr = (APTR)-1;
+
     r->rn_Rc = (LONG)Execute((CONST_STRPTR)TERM_SHELL_SETUP,
                              r->rn_In, r->rn_Out);
 
