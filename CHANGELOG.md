@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` answers a request four times sooner. Its receive
+  interrupt waited 2 ms for a batch of 32 frames to form, and a reply shorter
+  than that -- a ping, a DNS answer, a file server's 32 KB read -- sat the
+  whole 2 ms in the ring; a Fitz share read on the A1200 + PiStorm32 ran at
+  11.8 MB/s (one 32 KB request in flight, 2.7 ms each) and a ping came back in
+  2.3 ms. The wait is 500 us: the same read 26.5 MB/s, the ping 0.83 ms; a
+  stream still fills its 32-frame batch first, receiving 832 Mbit/s against
+  896 and sending 541 against 619 (an acknowledgment batch is now smaller)
+
 ## 0.28.4
 
 - `dist/make-dist.sh`'s shipping check reads the commands the build system

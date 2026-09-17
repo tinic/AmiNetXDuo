@@ -94,14 +94,32 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * only the timeout collects; past 2 ms the sender's 32-segment queue waits
  * on acknowledgments the chip is still holding.  Receive at these rates is
  * the 32-frame threshold, which fires every 1.3 ms at 300 Mbit/s whatever
- * the timeout says.  So 2 ms: a lone frame waits at most that long, and a
- * round trip to this machine grows by it.
+ * the timeout says.
+ *
+ * What 2 ms cost was every reply shorter than the threshold: a request/
+ * response protocol answers with a few frames and then waits for the next
+ * request, so each answer sat the whole timeout in the ring.  A Fitz share
+ * read (one 32 KB request in flight, 22 frames back) ran at 11.8 MB/s =
+ * 32 KB per 2.7 ms, a ping answered in 2.3 ms.  2026-09-17, the same
+ * device with only this constant changed, A1200, eth0 offline:
+ *
+ *     timeout   ping RTT   Fitz read / write   iperf RX / TX   frames per
+ *                          32 KB, MB/s         Mbit/s          interrupt
+ *     2000 us   2.30 ms    11.8 / 28.1         896 / 619       32
+ *     1000 us   1.30 ms    18.6 / 27.5         864 / 610       22.5
+ *      500 us   0.83 ms    26.5 / 29.4         832 / 541       19.6
+ *      246 us   0.59 ms    28.8 / 24.4         728 / 481       14.0
+ *       98 us   0.40 ms    31.4 / 22.7         115 / 377        1.0
+ *
+ * Below 500 us the stream side falls away (at 98 us the sender is paced to
+ * one frame per interrupt); above it every exchange waits.  500 us: a lone
+ * frame waits at most that long, a stream keeps the threshold.
  */
 #ifndef GE_RX_COALESCE_FRAMES
 #define GE_RX_COALESCE_FRAMES   32
 #endif
 #ifndef GE_RX_COALESCE_TICKS
-#define GE_RX_COALESCE_TICKS    244     /* 2000 us */
+#define GE_RX_COALESCE_TICKS    61      /* 500 us */
 #endif
 
 /* The chip shifts every received frame two bytes into its buffer
