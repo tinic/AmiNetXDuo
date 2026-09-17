@@ -604,6 +604,26 @@ static void scp_cleanup(void)
 {
     int i;
 
+    /*
+     * Every file still open through newlib -- the one sink() was writing, or
+     * source() reading, when Ctrl-C ended the transfer.  Ctrl-C reaches scp
+     * as a failed pipe read (amiga_mempipe_wait), sink() calls lostconn() and
+     * that calls exit(); nothing on the way closes the file descriptor.  Unix
+     * closes a dying process's descriptors; AmigaDOS does not, and a Process
+     * that exits with a FileHandle open leaves the file "in use" until the
+     * machine is rebooted, with the bytes already written not yet the file's.
+     * The three Shell handles are the Shell's.  Closed before the pipes and
+     * the child wait, so the file is released even if those hang.
+     */
+    if (__fh != NULL)
+    {
+        for (i = 3; i < __maxfh; i++)
+        {
+            if (__fh[i] != (BPTR)0)
+                (void)__real_close(i);
+        }
+    }
+
     for (i = 0; i < SCP_FD_COUNT; i++)
     {
         if (scp_fds[i].pipe != NULL)

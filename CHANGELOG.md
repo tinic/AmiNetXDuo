@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `scp` closes the file it was writing (or reading) when Ctrl-C ends a
+  transfer. It exited with the descriptor open, and AmigaDOS kept the file
+  "in use" until a reboot
+
 - `PRIORITY=` in an interface file (Roadshow's keyword; `PRI` too): -128 to
   127, 0 when left out. When more than one interface could carry a packet
   -- two cards on one subnet, two routers each offering a default -- the
