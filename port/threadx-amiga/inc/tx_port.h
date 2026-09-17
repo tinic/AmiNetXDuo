@@ -162,17 +162,25 @@ VOID   _tx_thread_interrupt_restore(UINT previous_posture);
 #define TX_AMIGA_OFF_TDNESTCNT      0x0127                  /* BYTE  */
 #define TX_AMIGA_OFF_ATTNRESCHED    0x012A                  /* UWORD */
 
-/* SysBase, loaded with asm because -Warray-bounds rejects a deref of absolute
-   location 4.  Not volatile: the value never changes, so GCC may hoist it.  */
+/* SysBase.  NOT READ FROM LOCATION 4 ON THE DATA PATH: on an A1200 location 4 is
+   chip RAM, and behind a PiStorm32 a chip RAM read is a bus cycle through the
+   emulator -- microseconds, under display DMA -- paid twice per TX_DISABLE /
+   TX_RESTORE pair, which NetX Duo takes a dozen times per segment.  Every image
+   that links this port already holds the pointer in fast RAM: the `SysBase`
+   global its startup fills in before anything runs (crt0 for a tool, LibInit
+   for the library), the one <proto/exec.h> calls go through.  Declared here
+   against a forward tag, since this header cannot see <exec/execbase.h> (the
+   note above); the tag is what makes it the same object to LTO.  One absolute
+   load, two bytes longer per site than `move.l 4.w,a0` was (a long address,
+   not a short one); the nest counter and AttnResched stay where Exec keeps
+   them.  */
+struct ExecBase;
+extern struct ExecBase     *SysBase;
+
 static __inline__ __attribute__((always_inline)) char *_tx_amiga_execbase(void)
 {
 
-char   *base;
-
-
-    __asm__ ("move.l 4,%0" : "=a" (base));
-
-    return(base);
+    return((char *) SysBase);
 }
 
 /* Both fields off one base register: GCC will not hold a volatile address across

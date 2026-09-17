@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The ThreadX port's critical section reads `SysBase` from the library's own
+  fast RAM instead of location 4: on an A1200 location 4 is chip RAM, behind
+  a PiStorm32 a bus cycle through the emulator, and NetX Duo enters a
+  critical section about a dozen times per segment. Two of the five chip
+  accesses per entry/exit pair are gone; `TDNestCnt` and `AttnResched` stay
+  where Exec keeps them. A1200 + PiStorm32 iperf out 130 -> 205 Mbit/s,
+  in 412 -> 522. `bsdsocket.library` +2,252 bytes (a long absolute load
+  per site, was a short one)
+
 - `scp` closes the file it was writing (or reading) when Ctrl-C ends a
   transfer. It exited with the descriptor open, and AmigaDOS kept the file
   "in use" until a reboot
