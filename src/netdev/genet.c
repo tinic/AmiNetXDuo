@@ -143,6 +143,13 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * Linux arrived at as NAPI with deferred re-arm and busy polling, with the
  * idle task standing in for the timer.
  *
+ * Only for AmiNetXDuo's own shell (NetdevNic anxd_openers).  Under Roadshow
+ * 1.15 on the A1200, 2026-09-18, a session with the poller running lost the
+ * machine twice a few minutes into a Fitz transfer (no ARP, no ping); the
+ * same driver without the poller had served Roadshow's 691 MB SMB reads.
+ * Roadshow's receive hooks, run from this task under Disable(), are the
+ * difference that fits; a plain SANA-II opener gets the interrupt path.
+ *
  * A1200, 2026-09-17, on top of the 500 us timeout: Fitz read 26.5 -> 31.6
  * MB/s, iperf in 832 -> 910 Mbit/s, out 541 -> 564; in a 10 s receive run
  * 512k of 1.05M frames were delivered by the poller with no interrupt.
@@ -150,8 +157,10 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #ifndef GE_POLL_GRACE_US
 #define GE_POLL_GRACE_US        500
 #endif
-#define GE_POLL_STACK           8192    /* the service pass and the opener's
-                                           receive hooks run on it            */
+#define GE_POLL_STACK           32768   /* the service pass and the opener's
+                                           receive hooks run on it: 275 bytes
+                                           under AmiNetXDuo's own hooks, and
+                                           another stack's hooks are unknown  */
 #define GE_POLL_PRI             (-128)
 
 /* The chip shifts every received frame two bytes into its buffer
@@ -354,7 +363,7 @@ static __inline__ ULONG ge_st_us(VOID)
 
 static LONG genet_init(NetdevNic *nic);
 static VOID genet_stop(NetdevNic *nic);
-static __inline__ VOID ge_poll_wake(GenetCore *c);
+static __inline__ VOID ge_poll_wake(NetdevNic *nic, GenetCore *c);
 static VOID ge_dma_stop(NetdevNic *nic);
 static VOID genet_setfilter(NetdevNic *nic);
 
@@ -1543,7 +1552,7 @@ static LONG genet_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     LONG rc = genet_tx_body(nic, frame, len);
     GE_P_ADD(nic, GE_ST_P_TX_US, pt);
     if (GE(nic)->poll_task != NULL)
-        ge_poll_wake(GE(nic));
+        ge_poll_wake(nic, GE(nic));
     return rc;
 }
 
@@ -1724,7 +1733,7 @@ static BOOL genet_intr_body(NetdevNic *nic)
         mine = TRUE;
         /* Frames came: more may follow.  The poller takes them from here. */
         if (c->poll_task != NULL)
-            ge_poll_wake(c);
+            ge_poll_wake(nic, c);
     }
     /* Not while a task is mid-transmit: it reclaims for itself
        (tx_task_lock).  */
@@ -1815,7 +1824,7 @@ static VOID ge_poll_task(VOID)
         (VOID)Wait(c->poll_sig);
         nic->core_stat[GE_ST_POLL_WAKES]++;
         last = ge_clock(c);
-        while (nic->running && !nic->rx_behind)
+        while (nic->running && !nic->rx_behind && nic->anxd_openers != 0)
         {
             UWORD pidx = (UWORD)(ge_rd(nic, GENET_RX_DMA_PROD_INDEX(GE_Q)) &
                                  0xffffu);
@@ -1837,9 +1846,9 @@ static VOID ge_poll_task(VOID)
 
 /* A frame came or went: more may follow.  From genet_tx under its lock,
    or from the service pass under Disable(); Signal() is allowed from both. */
-static __inline__ VOID ge_poll_wake(GenetCore *c)
+static __inline__ VOID ge_poll_wake(NetdevNic *nic, GenetCore *c)
 {
-    if (c->poll_asleep)
+    if (c->poll_asleep && nic->anxd_openers != 0)
     {
         c->poll_asleep = 0;
         Signal(c->poll_task, c->poll_sig);

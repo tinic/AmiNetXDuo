@@ -95,6 +95,7 @@ typedef struct NetdevOpener
     UBYTE               op_TxCsum;      /* ANXD_S2_TXF_* bits agreed for this
                                            opener's flagged writes (ANXD_S2_TX_CSUM) */
     APTR                op_RxFilled;
+    UBYTE               op_Anxd;        /* passed any ANXD_S2_* tag at open  */
 
     UBYTE               op_Raw;
     UBYTE               op_Promisc;

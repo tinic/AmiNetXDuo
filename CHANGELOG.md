@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device`'s idle poller runs only for AmiNetXDuo's own stack. A
+  plain SANA-II opener -- Roadshow, AmiTCP -- gets the interrupt path alone,
+  the one that had already served Roadshow's 691 MB SMB reads; under
+  Roadshow 1.15 with the poller a Fitz transfer took the A1200 off the
+  network twice within minutes. The poller's stack is 32 KB, sized for
+  another stack's receive hooks as well as this one's
+
 - The web Shell (`httpd -T`) never raises a DOS requester on the machine's
   screen. A command typed from a browser naming a volume that was not
   mounted -- `Copy SMB0:file TO RAM:` after the share had gone -- put "Please

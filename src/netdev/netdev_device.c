@@ -2276,6 +2276,11 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
             continue;
         }
 
+        if (tag == ANXD_S2_RX_DIRECT || tag == ANXD_S2_RX_LINK_HDR ||
+            tag == ANXD_S2_RX_FILLED || tag == ANXD_S2_RX_FLAGS ||
+            tag == ANXD_S2_TX_CSUM)
+            op->op_Anxd = 1;            /* AmiNetXDuo's own shell is opening */
+
         if (tag == S2_CopyToBuff)
             op->op_CopyTo = (APTR)tags->ti_Data;
         else if (tag == ANXD_S2_RX_DIRECT)
@@ -2480,6 +2485,8 @@ static struct Device *netdev_open(
     /* Counted here and not after Enable(): the test above reads it, so an
        increment outside the bracket is the same race one line further down. */
     first_opener  = (BOOL)(hw->nu_Openers++ == 0);
+    if (op->op_Anxd)
+        hw->nu_Nic.anxd_openers++;
     first_promisc = (BOOL)(op->op_Promisc && hw->nu_Promisc++ == 0);
     Enable();
 
@@ -2529,6 +2536,8 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
 
         Disable();
         Remove((struct Node *)&op->op_Node);
+        if (op->op_Anxd && hw->nu_Nic.anxd_openers != 0)
+            hw->nu_Nic.anxd_openers--;
         Enable();
 
         while ((q = netdev_take(&op->op_Reads, ~0UL)) != NULL)

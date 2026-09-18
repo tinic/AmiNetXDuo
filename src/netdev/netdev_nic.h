@@ -248,6 +248,14 @@ struct NetdevNic
        posted read (NETDEV_CLAIM_BEHIND); cleared by the pass that drains
        them.  The shell's ANXD_CMD_RX_POLL runs the core when it is set. */
     UBYTE               rx_behind;
+    /*
+     * Openers that passed an ANXD_S2_* tag at OpenDevice(): AmiNetXDuo's own
+     * shell.  A core's optional machinery that only pays off for that shell
+     * (the GENET idle poller) runs while this is non-zero and stays out of a
+     * plain SANA-II session (Roadshow, AmiTCP), which gets the interrupt
+     * path alone.  Maintained by the shell under Disable().
+     */
+    UWORD               anxd_openers;
 
     /*
      * The unit's exact multicast table, for a core that filters on addresses
