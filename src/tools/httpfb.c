@@ -1693,7 +1693,10 @@ static BOOL fb_take_buffers(const FbGeometry *g)
        matching the zeroed shadow the host would otherwise have sent from. */
     fb_offload = (BOOL)(RFB_FMT_IS_CHUNKY(g->format) && httpzz_available());
     if (fb_offload)
-        httpzz_reset();
+        httpzz_configure((UWORD)fb_rg.width, (UWORD)fb_rg.height,
+                         (UWORD)fb_rg.bytes_per_row, (UBYTE)fb_rg.depth,
+                         (UBYTE)fb_rg.tile_w, (UBYTE)fb_rg.tile_h,
+                         (UBYTE)fb_rg.format, (ULONG)fb_flags);
 
     /* The shape is queued and the colours are not.  Zeroing the remembered
        palette is what makes the next grab report a change; queueing one here

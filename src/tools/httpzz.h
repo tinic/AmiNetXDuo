@@ -47,12 +47,20 @@
  */
 typedef struct HttpZzEncodeReq
 {
-    ULONG  surface_handle;   /* from ZZ9KMapFramebufferSurface                 */
+    ULONG  surface_handle;   /* from ZZ9KMapFramebufferSurface (the pixel base) */
     ULONG  out_handle;       /* shared buffer the encoder writes into          */
     ULONG  out_capacity;     /* its length                                     */
-    UWORD  ty0, ty1;         /* tile rows [ty0,ty1) -- the band, as rfb_encode */
-    UWORD  flags;            /* HTTPZZ_F_*                                     */
+    ULONG  enc_flags;        /* rfb_encoder_init() flags (RFB_F_*): the host's */
+    UWORD  width;            /* rfb_geom, verbatim from the host's encoder     */
+    UWORD  height;           /*   configuration -- see httpzz_configure().  The*/
+    UWORD  bytes_per_row;    /*   card frames bands from THESE, not from the   */
+    UWORD  ty0, ty1;         /*   surface, so tiles_x/tiles_y and every delta  */
+    UWORD  flags;            /*   match the host byte for byte.  HTTPZZ_F_*    */
     UWORD  codec;            /* requested wire codec (HTTPZZ_CODEC_*)          */
+    UBYTE  depth;            /* rfb_geom.depth (plane count; 1 for chunky)     */
+    UBYTE  tile_w;           /* rfb_geom.tile_w, in BYTES                      */
+    UBYTE  tile_h;           /* rfb_geom.tile_h, in rows                       */
+    UBYTE  fmt;              /* rfb_geom.format (RFB_FMT_*)                     */
 } HttpZzEncodeReq;
 
 typedef struct HttpZzEncodeReply
@@ -66,6 +74,18 @@ typedef struct HttpZzEncodeReply
    surface capability is advertised, and the 0x8200 service is registered.
    Probed once and cached; safe to call every frame. */
 BOOL httpzz_available(VOID);
+
+/*
+ * Hand the card the host encoder's exact geometry and flags before the first
+ * band of a screen (httpfb.c calls this from fb_take_buffers with fb_rg and
+ * fb_flags).  The card configures an identical rfb_encoder, so its band framing
+ * and deltas match the host's to the byte; the scroll config is the shared
+ * rfb_scroll_defaults() on both sides and so is not sent.  Implies a reset: the
+ * next band is a keyframe.
+ */
+VOID httpzz_configure(UWORD width, UWORD height, UWORD bytes_per_row,
+                      UBYTE depth, UBYTE tile_w, UBYTE tile_h, UBYTE fmt,
+                      ULONG enc_flags);
 
 /*
  * Encode tile-row band [ty0,ty1) of the displayed framebuffer on the card --

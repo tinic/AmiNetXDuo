@@ -48,6 +48,12 @@ static ZZ9KSharedBuffer zz_out;        /* the encoder's output, allocated once *
 static ULONG            zz_out_cap;    /* its length, 0 when none              */
 static UWORD            zz_reset;       /* next encode drops the delta baseline */
 
+/* The host encoder's geometry and flags, cached by httpzz_configure() and sent
+   with every band so the card's encoder is configured identically. */
+static ULONG            zz_enc_flags;
+static UWORD            zz_w, zz_h, zz_bpr;
+static UBYTE            zz_depth, zz_tw, zz_th, zz_fmt;
+
 /* ----------------------------------------------------- library vectors --- */
 
 static int zz_query_caps(ZZ9KCaps *caps)
@@ -189,10 +195,18 @@ LONG httpzz_encode(UWORD ty0, UWORD ty1, UBYTE *out, ULONG out_max,
     er.surface_handle = fb.handle;
     er.out_handle     = zz_out.handle;
     er.out_capacity   = zz_out_cap;
+    er.enc_flags      = zz_enc_flags;
+    er.width          = zz_w;
+    er.height         = zz_h;
+    er.bytes_per_row  = zz_bpr;
     er.ty0   = ty0;
     er.ty1   = ty1;
     er.codec = HTTPZZ_CODEC_NONE;
     er.flags = (UWORD)(zz_reset ? HTTPZZ_F_RESET : 0U);
+    er.depth  = zz_depth;
+    er.tile_w = zz_tw;
+    er.tile_h = zz_th;
+    er.fmt    = zz_fmt;
 
     memset(&req, 0, sizeof(req));
     req.entry.opcode      = (UWORD)HTTPZZ_OP_ENCODE;
@@ -216,6 +230,21 @@ LONG httpzz_encode(UWORD ty0, UWORD ty1, UBYTE *out, ULONG out_max,
 
     zz_reset = 0;                       /* the baseline is current again */
     return (LONG)n;
+}
+
+VOID httpzz_configure(UWORD width, UWORD height, UWORD bytes_per_row,
+                      UBYTE depth, UBYTE tile_w, UBYTE tile_h, UBYTE fmt,
+                      ULONG enc_flags)
+{
+    zz_w         = width;
+    zz_h         = height;
+    zz_bpr       = bytes_per_row;
+    zz_depth     = depth;
+    zz_tw        = tile_w;
+    zz_th        = tile_h;
+    zz_fmt       = fmt;
+    zz_enc_flags = enc_flags;
+    zz_reset     = 1;                   /* a fresh configuration is a keyframe */
 }
 
 VOID httpzz_reset(VOID)
