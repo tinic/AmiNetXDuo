@@ -9,6 +9,20 @@ version at the top when it merges.
 
 ## Unreleased
 
+- TCP sends leave slow start on the first loss, not at the window the peer's
+  SYN carried. NetX Duo set the initial slow-start threshold to that window:
+  a SYN's window is never scaled (RFC 7323), at most 65,535 bytes, 42,340
+  from an Ookla server; RFC 5681 3.1 asks for an arbitrarily high threshold.
+  On a 23 ms path with no loss a 60 MB upload had 43 KB in flight after two
+  round trips and then grew one segment a round trip: 415 KB and 86 Mbit/s
+  after five seconds against a peer window of 660 KB on a 300 Mbit/s link
+  (A1200 + PiStorm32, AmiSpeedTest, 2026-09-18). The threshold now starts at
+  `NX_TCP_INITIAL_SSTHRESH` (0x7FFFFFFF, `nx_tcp.h`); a loss sets it from the
+  flight as before. Invisible on a LAN, where a segment a round trip is a
+  segment a millisecond. `test_tcp_slowstart` drives the real handshake
+  handlers and the send/acknowledgment path: the flight reaches a 534 KB peer
+  window in 13 round trips; the old rule was at 62 segments after 40.
+
 - `anxwifipi.device`: the Raspberry Pi 4's own Wi-Fi behind a PiStorm32
   running Emu68, in `DEVS:Networks` beside `anxgenet.device`. It is the MPL-2.0
   fork of Michal Schulz's WiFiPi.device (`github.com/tinic/WiFiPi.device`,

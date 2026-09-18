@@ -321,6 +321,41 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_lossrecovery COMMAND test_tcp_lossrecovery)
 
+    # RFC 5681 3.1 initial slow-start threshold: arbitrarily high, so a
+    # connection leaves slow start on its first loss and not at the window
+    # the peer's SYN carried (unscaled, 42,340 in the A1200's 2026-09-18
+    # upload capture: 43 KB in flight after two round trips, one segment a
+    # round trip from there, 86 Mbit/s against a 660 KB peer window).  Drives
+    # the real handshake handlers and the same send/acknowledgment path as
+    # test_tcp_lossrecovery.
+    add_executable(test_tcp_slowstart
+        host/test_tcp_slowstart_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_syn_sent.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_syn_received.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")
+
+    target_compile_options(test_tcp_slowstart PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_slowstart PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_slowstart PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_slowstart COMMAND test_tcp_slowstart)
+
     # A sub-MSS peer cannot pin more than a full-MSS window's worth of packets.
     # The window is a byte budget but the pool is spent a whole packet per
     # segment, so without a per-socket packet-count cap a one-byte-at-a-time

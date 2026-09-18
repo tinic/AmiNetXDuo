@@ -270,7 +270,10 @@ host_test_targets() { # builddir
 #      389 with test_tcp_lossrecovery: RFC 6675 recovery of a hole the peer
 #      described, at the real send, acknowledgment-check and retransmit
 #      code -- the A1200's 63 Mbit/s at 0.01 % loss, before and after
-HOST_TESTS_EXPECTED=389
+#      390 with test_tcp_slowstart: the RFC 5681 3.1 initial threshold at
+#      the real handshake handlers -- slow start reaches a 534 KB peer
+#      window in a dozen round trips, not three hundred
+HOST_TESTS_EXPECTED=390
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
