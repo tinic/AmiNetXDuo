@@ -9,6 +9,34 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `NetShutdown` removes the interfaces instead of leaving them attached with
+  the link down. Left in place they kept two things alive: the TCP
+  connections of the programs that had not let go, suspended in their
+  receives until TCP gave up minutes later -- a file-system handler suspended
+  that way never saw its dismount (mja65, 0.28.5, smb2-handler: "the Amiga
+  then hangs when I try and kill the network share") -- and the slots
+  themselves, which the next `AddNetInterface` found and reported as online
+  with the old address while nothing could be sent ("network unreachable",
+  no address from the next driver until a reboot). The removal resets those
+  connections and closes the SANA-II device, so the dismount goes through
+  and the next `AddNetInterface` is a real one: on the A1200, share mounted,
+  `NetShutdown`, dismount, `AddNetInterface` for both interfaces, DHCP, ping
+  and the web Shell all back inside a minute
+
+- `AddNetInterface` on an interface that is already attached but down --
+  after `Offline`, or a shutdown that left it -- brings it back up, the way
+  `Online` does, and reports the state it then sees; before, it answered
+  "online, address x" with the link still down
+
+- `anxgenet.device` hands the GENET back the way a cold boot presents it:
+  its stop resets the PHY and restores the RGMII pad control, and its next
+  start sets the PHY up again instead of trusting what it left. Running
+  Emu68's `genet.device` and then this driver on the same chip gave a link
+  that was up and no DHCP address, until a power cycle (mja65, 0.28.5, with
+  the two drivers the other way round); on the A1200 the sequence
+  anxgenet -> genet.device 3.14 -> anxgenet now comes up with its address
+  and its full 910 / 563 Mbit/s
+
 ## 0.28.6
 
 - `anxgenet.device`'s idle poller runs only for AmiNetXDuo's own stack. A

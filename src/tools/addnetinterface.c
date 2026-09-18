@@ -366,6 +366,26 @@ static LONG running_index(struct Library *base, const char *name,
     return -1;
 }
 
+/* Whether the attached interface at `index` has its link up. */
+static BOOL running_is_up(struct Library *base, UWORD index)
+{
+    LONG n;
+    LONG i;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
+                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
+    if (n < 0)
+        return TRUE;                    /* cannot tell: leave it alone */
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (addif_ifaces.e[i].nsi_Index != index)
+            continue;
+        return (addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_LINKUP)
+                   ? TRUE : FALSE;
+    }
+    return TRUE;
+}
+
 static LONG add_to_running_stack(struct Library *base, const char *name,
                                  const char *spec)
 {
@@ -703,7 +723,41 @@ int main(int argc, char **argv)
                                                (const char *)names[n]);
 
                 if (add_err == EEXIST)
+                {
+                    /*
+                     * Already attached.  If it is down -- an Offline, or
+                     * a shutdown that left it -- this is the request to
+                     * bring it back, not a report that it never left: the
+                     * command used to answer "online, address x" here for
+                     * an interface whose link was down and whose address was
+                     * a memory (mja65, 2026-09-18).  The same operation
+                     * Online performs; the wait below then sees the real
+                     * state.
+                     */
+                    LONG idx = running_index(base, name, NULL);
+
                     add_err = 0;
+                    if (idx >= 0 && !running_is_up(base, (UWORD)idx))
+                    {
+                        NetStatusControl upctl;
+                        ULONG            w;
+                        LONG             uperr = 0;
+
+                        for (w = 0; w < (ULONG)(sizeof(upctl) / sizeof(ULONG));
+                             w++)
+                            ((ULONG *)&upctl)[w] = 0;
+                        upctl.nsc_Index = (UWORD)idx;
+                        if (tool_netstatus_control(base, NETCTRL_INTERFACE_UP,
+                                                   &upctl, &uperr) != 0)
+                        {
+                            tool_error("%s is attached but did not come "
+                                       "online", (LONG)name);
+                            explain_add_failure(base, uperr, name, &ifc);
+                            rc = RETURN_FAIL;
+                            continue;
+                        }
+                    }
+                }
 
                 if (add_err != 0)
                 {

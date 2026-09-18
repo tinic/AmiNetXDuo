@@ -197,6 +197,9 @@ typedef struct GenetCore
     UBYTE   cpush_direct;   /* ... called, not entered through Supervisor():
                                the attach saw no privilege violation      */
     UBYTE   phy_set;        /* the PHY's delays and negotiation were set up */
+    UBYTE   pre_saved;      /* the two below were read before this driver
+                               changed anything                            */
+    ULONG   pre_rgmii_oob;  /* EXT_RGMII_OOB_CTRL as the firmware left it   */
     ULONG   irq_pending;    /* status the top half took, for the bottom half */
     ULONG   phyid;
 
@@ -908,6 +911,13 @@ static LONG genet_init(NetdevNic *nic)
     ge_dma_stop(nic);
     ge_reset(nic);
 
+    if (!c->pre_saved)
+    {
+        /* What the next driver will find at genet_stop: see there. */
+        c->pre_rgmii_oob = ge_rd(nic, GENET_EXT_RGMII_OOB_CTRL);
+        c->pre_saved     = 1;
+    }
+
     if (!c->phy_set && c->phyid != 0xffffffffUL)
     {
         LONG bmsr;
@@ -1014,7 +1024,8 @@ static VOID ge_dma_stop(NetdevNic *nic)
 
 static VOID genet_stop(NetdevNic *nic)
 {
-    ULONG v;
+    GenetCore *c = GE(nic);
+    ULONG      v;
 
     ge_dma_stop(nic);
 
@@ -1031,7 +1042,42 @@ static VOID genet_stop(NetdevNic *nic)
      * genet_init starts with, NetBSD's), the address filter off, every
      * interrupt masked and cleared.  What the other driver assumes about
      * the chip it finds is then what it assumed when it worked.
+     *
+     * AND THE PHY, which no MAC reset touches.  genet_init writes the
+     * BCM54213's receive skew on and its transmit clock delay off
+     * (ge_phy_delays) and pairs that with EXT_RGMII_OOB_CTRL on the MAC
+     * side; a driver that inherits the PHY half of that with its own MAC
+     * half has a link that is up and frames that do not arrive, or do not
+     * leave.  mja65, 2026-09-18, 0.28.5: anxgenet.device, NetShutdown,
+     * genet.device, "cannot pick up an IP address" until a reboot.  A PHY
+     * soft reset (BMCR_RESET) puts every PHY register, the shadow ones
+     * included, back to its defaults and restarts negotiation -- the state
+     * a cold boot presents -- and the pad control goes back to the value
+     * read before this driver's first change.  Done while the MAC still
+     * runs: MDIO is the UniMAC's, and the UniMAC is reset below.
      */
+    if (c->phy_set)
+    {
+        (VOID)ge_mii_write(nic, MII_BMCR, BMCR_RESET);
+        {
+            UWORD i;
+
+            /* The bit clears itself when the reset is done: under a
+               millisecond on this PHY, ten at the outside. */
+            for (i = 0; i < 100; i++)
+            {
+                LONG bmcr = ge_mii_read(nic, MII_BMCR);
+
+                if (bmcr < 0 || (bmcr & BMCR_RESET) == 0)
+                    break;
+                ge_delay_us(nic, 100);
+            }
+        }
+        c->phy_set = 0;                 /* genet_init sets it up again */
+    }
+    if (c->pre_saved)
+        ge_wr(nic, GENET_EXT_RGMII_OOB_CTRL, c->pre_rgmii_oob);
+
     ge_wr(nic, GENET_UMAC_CMD, 0);
 
     v = ge_rd(nic, GENET_SYS_RBUF_FLUSH_CTRL);

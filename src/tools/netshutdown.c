@@ -296,7 +296,7 @@ int main(int argc, char **argv)
         const char               *name;
         LONG                      err = 0;
 
-        if (!(nsi->nsi_Flags & NETSTATUS_IF_LINKUP))
+        if (!(nsi->nsi_Flags & NETSTATUS_IF_ATTACHED))
             continue;
 
         name = (nsi->nsi_Flags & NETSTATUS_IF_NAMED) ? nsi->nsi_Name
@@ -306,8 +306,23 @@ int main(int argc, char **argv)
             ((ULONG *)&ctl)[w] = 0;
 
         ctl.nsc_Index = nsi->nsi_Index;
+        /*
+         * Removed, not taken down.  A shutdown that left the interfaces in
+         * place, link down, left two things behind it: the TCP connections
+         * of the programs that did not answer the request above, suspended
+         * in their receives until TCP gave up minutes later -- a file-system
+         * handler suspended that way never reads the packet that dismounts
+         * it (mja65, 2026-09-18, smb2-handler) -- and the slots themselves,
+         * which the next AddNetInterface found and called online, address
+         * and all, with the link still down (the same report: no address
+         * from the next driver until a reboot).  The removal with
+         * NETCTRL_F_FORCE resets those connections, closes the SANA-II
+         * device so the next driver finds the chip as a boot leaves it, and
+         * makes the next AddNetInterface a real one.
+         */
+        ctl.nsc_Flags = NETCTRL_F_FORCE;
 
-        if (tool_netstatus_control(base, NETCTRL_INTERFACE_DOWN, &ctl,
+        if (tool_netstatus_control(base, NETCTRL_INTERFACE_REMOVE, &ctl,
                                    &err) != 0)
         {
             tool_error("%s did not go down", (LONG)name);
