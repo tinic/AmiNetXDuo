@@ -112,6 +112,39 @@ export const THEME: ITheme = {
 };
 
 /*
+ * THE SECOND PALETTE.
+ *
+ * A conventional terminal, so SGR reads the standard way -- `Echo "*e[33m"` is
+ * yellow, not the Amiga's blue -- for anyone who would rather see ANSI colours
+ * than the Workbench pens.  The eight (and their brights) are the xterm/VGA set
+ * most terminals ship, on a black ground.  The top bar offers it; the default
+ * is still the Workbench palette above.
+ */
+export const ANSI: ITheme = {
+  background: "#000000",
+  foreground: "#cccccc",
+
+  cursor: "#cccccc",
+  cursorAccent: "#000000",
+
+  selectionBackground: "#264f78",
+  selectionForeground: "#ffffff",
+
+  black: "#000000",   red: "#cd0000",     green: "#00cd00",  yellow: "#cdcd00",
+  blue: "#0000ee",    magenta: "#cd00cd", cyan: "#00cdcd",   white: "#e5e5e5",
+
+  brightBlack: "#7f7f7f",   brightRed: "#ff0000",     brightGreen: "#00ff00",
+  brightYellow: "#ffff00",  brightBlue: "#5c5cff",    brightMagenta: "#ff00ff",
+  brightCyan: "#00ffff",    brightWhite: "#ffffff",
+};
+
+/* What the top bar switches between, in order.  The first is the default. */
+export const THEMES: ReadonlyArray<{ name: string; theme: ITheme }> = [
+  { name: "Workbench", theme: THEME },
+  { name: "ANSI", theme: ANSI },
+];
+
+/*
  * Hack, embedded, with a system monospace behind it.
  *
  * src/tools/web/vendor/hack/, subset to printable Latin-1 and box drawing and

@@ -56,6 +56,8 @@ export interface LineHandlers {
   onEof: () => void;
   /* Enter on a dead socket, which is how you ask for a new session. */
   onDeadEnter: () => void;
+  /* Tab: ask the far side to complete the word before the cursor. */
+  onComplete: (arg: string) => void;
 }
 
 export class LineEditor {
@@ -74,6 +76,11 @@ export class LineEditor {
   private anchorY = 0;              /* ABSOLUTE row: baseY + cursorY */
 
   private enabled = false;
+
+  /* Tab completion: the matches for the current word and where we are in
+     them, so a repeated Tab cycles like PowerShell; null when not cycling. */
+  private cyc: { start: number; cands: string[]; idx: number } | null = null;
+  private pendCompStart = 0;        /* where a pending completion replaces from */
 
   /* Every write goes through one chain.  term.write() is asynchronous -- the
      parser runs on its own schedule -- so reading the cursor back straight
@@ -228,6 +235,9 @@ export class LineEditor {
   // ----------------------------------------------------------------- keys --
 
   private async take(data: string): Promise<void> {
+    /* Any input but a lone Tab ends a completion cycle. */
+    if (data !== "\t") this.cyc = null;
+
     let i = 0;
 
     /* A dead socket takes one key.  Anything else would build up a line
@@ -256,6 +266,22 @@ export class LineEditor {
        * lost characters out of the middle of a pasted line.
        */
       if (c === 9) {
+        /*
+         * A Tab on its own is a completion request.  A Tab arriving inside a
+         * larger chunk is part of a paste and still expands to the next tab
+         * stop: the far side splits arguments on whitespace and does not care
+         * which, and dropping it lost characters out of a pasted line.
+         */
+        if (data.length === 1) {
+          if (this.cyc !== null) {
+            this.cyc.idx = (this.cyc.idx + 1) % this.cyc.cands.length;
+            await this.showCandidate();
+          } else {
+            this.requestComplete();
+          }
+          i += 1;
+          continue;
+        }
         const to = 8 - ((this.anchorX + this.cur) % 8);
         this.insert(" ".repeat(to));
         i += 1;
@@ -355,6 +381,54 @@ export class LineEditor {
   }
 
   // ---------------------------------------------------------------- verbs --
+
+  /*
+   * Tab.  The word before the cursor, and whether it is the command -- the
+   * first word on the line -- so the far side knows to offer C: as well as
+   * the current directory.  It answers with `comp <remainder>`.
+   */
+  private requestComplete(): void {
+    /* The word before the cursor, and the point inside it a match replaces
+       from: after the last '/' or ':', so a path keeps its directory and only
+       the leaf is completed. */
+    let ws = this.cur;
+    while (ws > 0 && this.buf[ws - 1] !== " ") ws--;
+    let ps = ws;
+    for (let k = ws; k < this.cur; k++) {
+      const ch = this.buf[k];
+      if (ch === "/" || ch === ":") ps = k + 1;
+    }
+    this.pendCompStart = ps;
+    const token = this.buf.slice(ws, this.cur);
+    /* The command position is the first word on the line. */
+    const col0 = this.buf.slice(0, ws).trim().length === 0 ? "1" : "0";
+    this.h.onComplete(col0 + " " + token);
+  }
+
+  /*
+   * The far side's answer: the matching names, one per line.  The first
+   * replaces the word; further Tabs cycle through the rest (see the Tab key).
+   * Queued, so it lands after whatever was mid-edit, and only in line mode.
+   */
+  applyCompletion(list: string): void {
+    const cands = list.split("\n").filter((x) => x.length > 0);
+    this.queue(async () => {
+      if (!this.enabled || cands.length === 0) return;
+      this.cyc = { start: this.pendCompStart, cands, idx: 0 };
+      await this.showCandidate();
+    });
+  }
+
+  /* Put the current candidate in place of what was completed last, keeping any
+     text that was to the right of the cursor. */
+  private async showCandidate(): Promise<void> {
+    if (this.cyc === null) return;
+    const cand = this.cyc.cands[this.cyc.idx];
+    this.buf = this.buf.slice(0, this.cyc.start) + cand + this.buf.slice(this.cur);
+    this.cur = this.cyc.start + cand.length;
+    this.hAt = this.history.length;
+    await this.redraw();
+  }
 
   private insert(s: string): void {
     this.buf = this.buf.slice(0, this.cur) + s + this.buf.slice(this.cur);

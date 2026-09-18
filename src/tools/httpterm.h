@@ -83,6 +83,11 @@ VOID        http_term_mode_sent(VOID);
 const char *http_term_stats_word(VOID);
 VOID        http_term_stats_sent(VOID);
 
+/* Tab completion: the `comp <remainder>` answer to a page's `complete` word,
+   the text to append at the cursor.  Same peek-then-take pair. */
+const char *http_term_comp_word(VOID);
+VOID        http_term_comp_sent(VOID);
+
 /* How big the page says its window is.  A zero in either is ignored.  A
    terminal component still laying out reports it, and a program told it has no
    columns divides by it. */
@@ -144,7 +149,8 @@ typedef struct HttpTermSock
     UWORD           ctl_n;
     UWORD           ctl_at;
 
-    char            word[24];       /* a text frame, see the vocabulary     */
+    char            word[128];      /* a text frame; a `complete` carries a
+                                       token, the rest are a few bytes        */
     UBYTE           word_n;
     UBYTE           word_over;      /* it did not fit and must be ignored   */
 

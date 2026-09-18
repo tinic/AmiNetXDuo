@@ -25,6 +25,7 @@
  */
 
 #include "httpterm_owner.h"
+#include "httpterm_complete.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -501,6 +502,92 @@ static void test_formfeed(void)
     free(term);
 }
 
+/*
+ * TAB COMPLETION, the arithmetic.
+ *
+ * Splitting a token into a directory and a prefix, matching a name the
+ * case-insensitive AmigaDOS way, and collecting the matches into the sorted,
+ * de-duplicated, one-per-line list the page cycles through.  The directory
+ * read that finds the names is DOS and is on the guest; this is what is done
+ * with them.
+ */
+static void chk_split(const char *tok, const char *edir, const char *epfx)
+{
+    char d[64], p[64];
+    term_comp_split(tok, d, sizeof(d), p, sizeof(p));
+    CHECK(strcmp(d, edir) == 0 && strcmp(p, epfx) == 0,
+          "split %s -> dir '%s' prefix '%s', wanted dir '%s' prefix '%s'",
+          tok, d, p, edir, epfx);
+}
+
+static void test_completion(void)
+{
+    TermCompletion c;
+    char out[512];
+
+    printf("tab completion\n");
+
+    /* the split */
+    chk_split("mkl",          "",         "mkl");
+    chk_split("busybox/mkl",  "busybox",  "mkl");
+    chk_split("Work:mkl",     "Work:",    "mkl");
+    chk_split("Work:sub/mkl", "Work:sub", "mkl");
+    chk_split("Work:",        "Work:",    "");
+    chk_split("busybox/",     "busybox",  "");
+    chk_split("",             "",         "");
+
+    /* case-insensitive prefix match */
+    CHECK(term_comp_match("MkLinks", "mk"), "MkLinks does not match mk");
+    CHECK(term_comp_match("mklinks", "MK"), "mklinks does not match MK");
+    CHECK(!term_comp_match("busybox", "mk"), "busybox matches mk");
+    CHECK(term_comp_match("anything", ""), "empty prefix matches nothing");
+
+    /* one file: itself, then a newline */
+    term_comp_init(&c);
+    term_comp_add(&c, "mklinks", 0);
+    term_comp_sort(&c);
+    term_comp_emit(&c, out, sizeof(out));
+    CHECK(strcmp(out, "mklinks\n") == 0, "one file gave '%s'", out);
+
+    /* a directory carries a trailing slash */
+    term_comp_init(&c);
+    term_comp_add(&c, "Devs", 1);
+    term_comp_sort(&c);
+    term_comp_emit(&c, out, sizeof(out));
+    CHECK(strcmp(out, "Devs/\n") == 0, "one drawer gave '%s'", out);
+
+    /* several, collected out of order, come back sorted case-insensitively */
+    term_comp_init(&c);
+    term_comp_add(&c, "shuf",      0);
+    term_comp_add(&c, "sha256sum", 0);
+    term_comp_add(&c, "sha1sum",   0);
+    term_comp_sort(&c);
+    term_comp_emit(&c, out, sizeof(out));
+    CHECK(strcmp(out, "sha1sum\nsha256sum\nshuf\n") == 0,
+          "sorted list gave '%s'", out);
+    CHECK(c.tc_count == 3, "count %u, wanted 3", (unsigned)c.tc_count);
+
+    /* a name from two of C:'s drawers is kept once */
+    term_comp_init(&c);
+    term_comp_add(&c, "Copy", 0);
+    term_comp_add(&c, "copy", 0);          /* same name, other case */
+    term_comp_add(&c, "Copy", 0);
+    CHECK(c.tc_count == 1, "duplicates not folded: count %u", (unsigned)c.tc_count);
+
+    /* nothing matched: an empty list */
+    term_comp_init(&c);
+    term_comp_sort(&c);
+    term_comp_emit(&c, out, sizeof(out));
+    CHECK(strcmp(out, "") == 0, "no match gave '%s'", out);
+
+    /* the name's own case is what comes back, not the prefix's */
+    term_comp_init(&c);
+    term_comp_add(&c, "AddNetInterface", 0);
+    term_comp_sort(&c);
+    term_comp_emit(&c, out, sizeof(out));
+    CHECK(strcmp(out, "AddNetInterface\n") == 0, "case gave '%s'", out);
+}
+
 int main(void)
 {
     char *text = slurp("src/tools/httpterm.c");
@@ -558,6 +645,7 @@ int main(void)
     test_winsize();
     test_cursor();
     test_formfeed();
+    test_completion();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

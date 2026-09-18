@@ -17,7 +17,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { LineEditor } from "./line";
 import { Wire, type WireState } from "./wire";
-import { FONT, THEME } from "./theme";
+import { FONT, THEME, THEMES } from "./theme";
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -104,6 +104,7 @@ const line = new LineEditor(term, {
   onBreak: () => wire.word("break"),
   onEof: () => wire.word("eof"),
   onDeadEnter: () => connect(),
+  onComplete: (arg) => wire.word("complete " + arg),
 });
 
 const wire = new Wire({
@@ -133,6 +134,8 @@ function heard(w: string): void {
   if (w === "mode raw" || w === "mode cooked") {
     if (PINNED !== null) return;      /* ?input= wins, deliberately */
     setInput(w === "mode raw" ? "char" : "line");
+  } else if (w.slice(0, 5) === "comp ") {
+    line.applyCompletion(w.slice(5));
   }
 }
 
@@ -177,6 +180,36 @@ const wordEl = $("word");
 const brkEl = $("brk") as HTMLButtonElement;
 const eofEl = $("eof") as HTMLButtonElement;
 const againEl = $("again") as HTMLButtonElement;
+const themeEl = $("theme") as HTMLButtonElement;
+
+/*
+ * The colour theme, chosen in the bar and remembered per browser.  Default is
+ * the Workbench palette; the other is standard ANSI (see theme.ts).  Bold in
+ * bright colours is the ANSI convention and wrong for the Workbench pens, so
+ * it rides with the choice.
+ */
+let themeIdx = 0;
+
+function applyTheme(idx: number): void {
+  themeIdx = ((idx % THEMES.length) + THEMES.length) % THEMES.length;
+  const t = THEMES[themeIdx];
+  term.options.theme = t.theme;
+  term.options.drawBoldTextInBrightColors = themeIdx === 1;
+  themeEl.textContent = t.name;
+  try { localStorage.setItem("theme", t.name); } catch { /* private mode */ }
+}
+
+themeEl.addEventListener("click", () => applyTheme(themeIdx + 1));
+
+(() => {
+  let saved = 0;
+  try {
+    const s = localStorage.getItem("theme");
+    saved = THEMES.findIndex((t) => t.name === s);
+    if (saved < 0) saved = 0;
+  } catch { saved = 0; }
+  applyTheme(saved);
+})();
 
 const WORDS: Record<WireState, string> = {
   connecting: "connecting",

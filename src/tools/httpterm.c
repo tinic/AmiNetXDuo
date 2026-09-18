@@ -5,6 +5,7 @@
 
 #include "httpterm.h"
 #include "httpterm_owner.h"
+#include "httpterm_complete.h"
 
 #include <dos/dostags.h>
 #include <dos/dosasl.h>
@@ -1734,9 +1735,189 @@ static const char *sock_number(const char *s, UWORD *out)
     return s;
 }
 
+/* ------------------------------------------------------- tab completion --- */
+
+/* The `comp <remainder>` answer, peeked and taken like the mode word. */
+static char  term_comp_word[1280];  /* "comp " + the name list */
+static UBYTE term_comp_pending;
+
+const char *http_term_comp_word(VOID)
+{
+    if (!term_active || !term_comp_pending)
+        return NULL;
+
+    return term_comp_word;
+}
+
+VOID http_term_comp_sent(VOID)
+{
+    term_comp_pending = 0;
+}
+
+/* One directory -- an already-held shared lock -- into the accumulator, every
+   entry whose name begins with prefix.  fib is longword-aligned from
+   AllocDosObject; cap bounds the work on a very large drawer. */
+static VOID term_comp_scan(BPTR lock, const char *prefix,
+                           struct FileInfoBlock *fib, TermCompletion *acc,
+                           ULONG cap)
+{
+    if (lock == (BPTR)0)
+        return;
+
+    if (!Examine(lock, fib))
+        return;
+
+    while (ExNext(lock, fib))
+    {
+        if (acc->tc_count >= cap)
+            break;
+        if (term_comp_match(fib->fib_FileName, prefix))
+            term_comp_add(acc, fib->fib_FileName,
+                          fib->fib_DirEntryType > 0);
+    }
+}
+
+/* Every directory C: is assigned to, primary and ADDed, into the accumulator.
+   The locks are duplicated while the assign list is held and read afterwards,
+   so no directory I/O runs under the DOS list lock. */
+static VOID term_comp_scan_cmds(const char *prefix, struct FileInfoBlock *fib,
+                                TermCompletion *acc)
+{
+    BPTR            locks[8];
+    int             nlocks = 0;
+    int             i;
+    struct DosList *dl;
+
+    dl = LockDosList(LDF_ASSIGNS | LDF_READ);
+    if (dl != NULL)
+    {
+        struct DosList *c = FindDosEntry(dl, (CONST_STRPTR)"C",
+                                         LDF_ASSIGNS);
+        if (c != NULL)
+        {
+            struct AssignList *al;
+
+            if (c->dol_Lock != (BPTR)0 && nlocks < 8)
+                locks[nlocks++] = DupLock(c->dol_Lock);
+            for (al = c->dol_misc.dol_assign.dol_List;
+                 al != NULL && nlocks < 8;
+                 al = al->al_Next)
+                if (al->al_Lock != (BPTR)0)
+                    locks[nlocks++] = DupLock(al->al_Lock);
+        }
+    }
+    UnLockDosList(LDF_ASSIGNS | LDF_READ);
+
+    for (i = 0; i < nlocks; i++)
+    {
+        term_comp_scan(locks[i], prefix, fib, acc, 4096UL);
+        if (locks[i] != (BPTR)0)
+            UnLock(locks[i]);
+    }
+}
+
+/*
+ * Answer `complete <c> <token>`: c is '1' at the command position, and token
+ * is the word before the cursor.  Resolved against the Shell's current
+ * directory -- the Shell is parked in Read() at its prompt, so its
+ * pr_CurrentDir is not moving -- and, at the command position for a bare word,
+ * against every directory C: names.  The names come back sorted in
+ * `comp <name>\n<name>\n...` for the page to cycle through.
+ */
+static TermCompletion term_comp_acc;   /* static: too large for the stack */
+
+static VOID term_complete(const char *arg)
+{
+    struct Process       *sh;
+    struct FileInfoBlock *fib;
+    char                  dir[TERM_COMP_PATHMAX];
+    char                  prefix[TERM_COMP_PATHMAX];
+    const char           *token;
+    int                   col0;
+    BPTR                  lock;
+    BPTR                  shcwd;
+    ULONG                 n;
+
+    while (*arg == ' ')
+        arg++;
+    col0 = (*arg == '1');
+    while (*arg != '\0' && *arg != ' ')     /* past the flag */
+        arg++;
+    while (*arg == ' ')
+        arg++;
+    token = arg;
+
+    term_comp_split(token, dir, sizeof(dir), prefix, sizeof(prefix));
+
+    sh = (struct Process *)term_shell_task;
+    if (sh == NULL || sh->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+        return;
+    shcwd = sh->pr_CurrentDir;
+
+    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
+    if (fib == NULL)
+        return;
+
+    term_comp_init(&term_comp_acc);
+
+    /* The token's own directory, read relative to the Shell's.  A bare word is
+       the current directory itself; a word with a path is locked with the
+       Shell's directory current, then restored at once. */
+    if (dir[0] == '\0')
+    {
+        lock = (shcwd != (BPTR)0) ? DupLock(shcwd) : (BPTR)0;
+        if (lock == (BPTR)0)
+        {
+            BPTR old = CurrentDir(shcwd);
+            lock = Lock((CONST_STRPTR)"", ACCESS_READ);
+            CurrentDir(old);
+        }
+        term_comp_scan(lock, prefix, fib, &term_comp_acc, 4096UL);
+        if (lock != (BPTR)0)
+            UnLock(lock);
+    }
+    else
+    {
+        BPTR old = CurrentDir(shcwd);
+        lock = Lock((CONST_STRPTR)dir, ACCESS_READ);
+        CurrentDir(old);
+        term_comp_scan(lock, prefix, fib, &term_comp_acc, 4096UL);
+        if (lock != (BPTR)0)
+            UnLock(lock);
+    }
+
+    /* At the command position, and only for a bare word, the commands in every
+       directory C: is assigned to as well. */
+    if (col0 && dir[0] == '\0')
+        term_comp_scan_cmds(prefix, fib, &term_comp_acc);
+
+    FreeDosObject(DOS_FIB, fib);
+
+    term_comp_sort(&term_comp_acc);
+
+    term_comp_word[0] = 'c';
+    term_comp_word[1] = 'o';
+    term_comp_word[2] = 'm';
+    term_comp_word[3] = 'p';
+    term_comp_word[4] = ' ';
+    n = 5UL + (ULONG)term_comp_emit(&term_comp_acc, term_comp_word + 5,
+                                    sizeof(term_comp_word) - 5UL);
+    term_comp_word[n] = '\0';
+
+    term_comp_pending = 1;
+    term_kick();                /* nudge the service loop to send it */
+}
+
 static VOID sock_word(const char *w)
 {
     const char *rest;
+
+    rest = sock_after(w, "complete");
+    if (rest != NULL)
+    {
+        term_complete(rest);
+        return;
+    }
 
     rest = sock_after(w, "break");
     if (rest != NULL && *rest == '\0')
@@ -1973,7 +2154,8 @@ BOOL http_term_sock_wants_write(const HttpTermSock *t)
     if (t->out_sent < t->out_len || t->ctl_at < t->ctl_n || t->closing)
         return TRUE;
 
-    if (http_term_mode_word() != NULL || http_term_stats_word() != NULL)
+    if (http_term_mode_word() != NULL || http_term_stats_word() != NULL ||
+        http_term_comp_word() != NULL)
         return TRUE;
 
     if (http_term_pending() > 0UL)
@@ -2091,12 +2273,17 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
 
         {
             const char *word = http_term_mode_word();
-            BOOL        ismode = TRUE;
+            int         src  = 0;           /* 0 mode, 1 stats, 2 comp */
 
             if (word == NULL)
             {
-                word   = http_term_stats_word();
-                ismode = FALSE;
+                word = http_term_stats_word();
+                src  = 1;
+            }
+            if (word == NULL)
+            {
+                word = http_term_comp_word();
+                src  = 2;
             }
 
             if (word != NULL)
@@ -2106,7 +2293,7 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
                 unsigned long hn;
                 unsigned long i;
 
-                while (word[n] != '\0')
+                while (word[n] != '\0' && 10UL + n < t->out_size)
                 {
                     t->out[10 + n] = (UBYTE)word[n];
                     n++;
@@ -2120,10 +2307,12 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
                 t->out_sent = 10UL - hn;
                 t->out_len  = 10UL + n;
 
-                if (ismode)
+                if (src == 0)
                     http_term_mode_sent();
-                else
+                else if (src == 1)
                     http_term_stats_sent();
+                else
+                    http_term_comp_sent();
                 continue;
             }
         }

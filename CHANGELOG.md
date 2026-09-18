@@ -28,6 +28,17 @@ version at the top when it merges.
   old "--- More (n%) ---" prompt scrolled into the next page instead of the
   page starting clean.
 
+- The web Shell (`httpd -T`) completes the word before the cursor on Tab, the
+  way PowerShell does: the first match replaces the word and further Tabs cycle
+  through the rest. Filenames come from the Shell's current directory, and a
+  path keeps its directory while only its leaf completes; at the command
+  position the commands in every directory C: is assigned to come too. In raw
+  mode -- `ssh`, `Ed`, `More` -- Tab still reaches the program.
+
+- The web Shell's top bar switches the terminal colours between the Workbench
+  palette (the default) and standard ANSI, remembered per browser. `Echo
+  "*e[33m"` is the Amiga's blue on the first and yellow on the second.
+
 ## 0.28.7
 
 - `NetShutdown` removes the interfaces instead of leaving them attached with
