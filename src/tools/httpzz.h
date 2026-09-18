@@ -34,7 +34,7 @@
 #define HTTPZZ_CODEC_DEFLATE    3
 
 /* Request flag bits (HttpZzEncodeReq.flags). */
-#define HTTPZZ_F_KEEP_DELTA     0x0001U   /* delta against the card's prev frame */
+#define HTTPZZ_F_RESET          0x0001U   /* drop the delta baseline first (a fresh screen) */
 
 /* Reply flag bits (HttpZzEncodeReply.flags). */
 #define HTTPZZ_RF_KEYFRAME      0x0001U   /* the answer is a full frame          */
@@ -50,7 +50,7 @@ typedef struct HttpZzEncodeReq
     ULONG  surface_handle;   /* from ZZ9KMapFramebufferSurface                 */
     ULONG  out_handle;       /* shared buffer the encoder writes into          */
     ULONG  out_capacity;     /* its length                                     */
-    UWORD  x, y, w, h;       /* the rectangle to encode                        */
+    UWORD  ty0, ty1;         /* tile rows [ty0,ty1) -- the band, as rfb_encode */
     UWORD  flags;            /* HTTPZZ_F_*                                     */
     UWORD  codec;            /* requested wire codec (HTTPZZ_CODEC_*)          */
 } HttpZzEncodeReq;
@@ -68,14 +68,15 @@ typedef struct HttpZzEncodeReply
 BOOL httpzz_available(VOID);
 
 /*
- * Encode rect (x,y,w,h) of the displayed framebuffer on the card and copy the
- * result into out[0..out_max).  keep_delta asks the card to diff against the
- * frame it is holding; otherwise it produces a keyframe.  Returns the number of
- * bytes written, or -1 when the offload could not run this frame (the caller
- * then falls back).  *codec_out receives the wire codec used.
+ * Encode tile-row band [ty0,ty1) of the displayed framebuffer on the card --
+ * the same banding rfb_encode_band() uses -- and copy the RFB bytes into
+ * out[0..out_max).  The card holds the delta baseline; httpzz_reset() makes the
+ * next band a keyframe.  Returns bytes written, or -1 when the offload could
+ * not run this band (the caller then falls back).  *codec_out gets the wire
+ * codec used.
  */
-LONG httpzz_encode(UWORD x, UWORD y, UWORD w, UWORD h, BOOL keep_delta,
-                   UBYTE *out, ULONG out_max, UWORD *codec_out);
+LONG httpzz_encode(UWORD ty0, UWORD ty1, UBYTE *out, ULONG out_max,
+                   UWORD *codec_out);
 
 /* Drop the delta baseline; the next httpzz_encode is a keyframe.  Called when
    the screen, its geometry, or its format changes. */

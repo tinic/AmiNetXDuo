@@ -30,7 +30,10 @@
 #define ZZ9K_LIB_NAME   "zz9k.library"
 #define ZZ9K_MIN_VER    2
 
-/* fd vector offsets: 0x1e + 6*(index-1). */
+/* fd vector offsets: 0x1e + 6*(index-1).  Kept as the documented vector table;
+   the LP wrappers below must pass the number as a literal, because LP stringizes
+   its offset argument (jsr a6@(-"#offs":W)) and a macro name would not expand --
+   so each literal carries the name in a trailing comment. */
 #define ZZLVO_QUERY_CAPS        0x1e
 #define ZZLVO_QUERY_SERVICE     0x24
 #define ZZLVO_CALL              0x30
@@ -43,27 +46,27 @@ static int             zz_probed;      /* 0 unknown, 1 available, -1 no */
 
 static ZZ9KSharedBuffer zz_out;        /* the encoder's output, allocated once */
 static ULONG            zz_out_cap;    /* its length, 0 when none              */
-static UWORD            zz_keyframe;    /* force a keyframe on the next encode  */
+static UWORD            zz_reset;       /* next encode drops the delta baseline */
 
 /* ----------------------------------------------------- library vectors --- */
 
 static int zz_query_caps(ZZ9KCaps *caps)
 {
-    return LP1(ZZLVO_QUERY_CAPS, int, ZZ9KQueryCaps,
+    return LP1(0x1e /* QUERY_CAPS */, int, ZZ9KQueryCaps,
                ZZ9KCaps *, caps, a0,
                , zz_base);
 }
 
 static int zz_query_service(ULONG id, ZZ9KServiceInfo *si)
 {
-    return LP2(ZZLVO_QUERY_SERVICE, int, ZZ9KQueryService,
+    return LP2(0x24 /* QUERY_SERVICE */, int, ZZ9KQueryService,
                ULONG, id, d0, ZZ9KServiceInfo *, si, a0,
                , zz_base);
 }
 
 static int zz_call(ZZ9KRequest *req, ZZ9KMailboxEntry *reply, ULONG timeout)
 {
-    return LP3(ZZLVO_CALL, int, ZZ9KCall,
+    return LP3(0x30 /* CALL */, int, ZZ9KCall,
                ZZ9KRequest *, req, a0, ZZ9KMailboxEntry *, reply, a1,
                ULONG, timeout, d0,
                , zz_base);
@@ -72,7 +75,7 @@ static int zz_call(ZZ9KRequest *req, ZZ9KMailboxEntry *reply, ULONG timeout)
 static int zz_alloc_shared(ULONG len, ULONG align, ULONG flags,
                            ZZ9KSharedBuffer *buf)
 {
-    return LP4(ZZLVO_ALLOC_SHARED, int, ZZ9KAllocShared,
+    return LP4(0x48 /* ALLOC_SHARED */, int, ZZ9KAllocShared,
                ULONG, len, d0, ULONG, align, d1, ULONG, flags, d2,
                ZZ9KSharedBuffer *, buf, a0,
                , zz_base);
@@ -80,14 +83,14 @@ static int zz_alloc_shared(ULONG len, ULONG align, ULONG flags,
 
 static int zz_free_shared(ULONG handle)
 {
-    return LP1(ZZLVO_FREE_SHARED, int, ZZ9KFreeShared,
+    return LP1(0x4e /* FREE_SHARED */, int, ZZ9KFreeShared,
                ULONG, handle, d0,
                , zz_base);
 }
 
 static int zz_map_fb(ZZ9KSurface *surf)
 {
-    return LP1(ZZLVO_MAP_FB_SURFACE, int, ZZ9KMapFramebufferSurface,
+    return LP1(0x72 /* MAP_FB_SURFACE */, int, ZZ9KMapFramebufferSurface,
                ZZ9KSurface *, surf, a0,
                , zz_base);
 }
@@ -157,8 +160,8 @@ static BOOL zz_out_ensure(ULONG need)
     return TRUE;
 }
 
-LONG httpzz_encode(UWORD x, UWORD y, UWORD w, UWORD h, BOOL keep_delta,
-                   UBYTE *out, ULONG out_max, UWORD *codec_out)
+LONG httpzz_encode(UWORD ty0, UWORD ty1, UBYTE *out, ULONG out_max,
+                   UWORD *codec_out)
 {
     ZZ9KSurface       fb;
     ZZ9KRequest       req;
@@ -174,7 +177,7 @@ LONG httpzz_encode(UWORD x, UWORD y, UWORD w, UWORD h, BOOL keep_delta,
         return -1;
 
     /* The displayed framebuffer surface can change under a mode switch, so it
-       is mapped afresh each frame; the call just hands back the current one. */
+       is mapped afresh each band; the call just hands back the current one. */
     memset(&fb, 0, sizeof(fb));
     if (zz_map_fb(&fb) != ZZ9K_STATUS_OK)
         return -1;
@@ -186,9 +189,10 @@ LONG httpzz_encode(UWORD x, UWORD y, UWORD w, UWORD h, BOOL keep_delta,
     er.surface_handle = fb.handle;
     er.out_handle     = zz_out.handle;
     er.out_capacity   = zz_out_cap;
-    er.x = x; er.y = y; er.w = w; er.h = h;
+    er.ty0   = ty0;
+    er.ty1   = ty1;
     er.codec = HTTPZZ_CODEC_NONE;
-    er.flags = (UWORD)((keep_delta && !zz_keyframe) ? HTTPZZ_F_KEEP_DELTA : 0U);
+    er.flags = (UWORD)(zz_reset ? HTTPZZ_F_RESET : 0U);
 
     memset(&req, 0, sizeof(req));
     req.entry.opcode      = (UWORD)HTTPZZ_OP_ENCODE;
@@ -202,20 +206,21 @@ LONG httpzz_encode(UWORD x, UWORD y, UWORD w, UWORD h, BOOL keep_delta,
 
     memcpy(&rr, reply.payload.inline_data, sizeof(rr));
     n = rr.out_len;
-    if (n == 0UL || n > zz_out_cap || n > out_max)
+    if (n > zz_out_cap || n > out_max)
         return -1;
 
-    memcpy(out, (const void *)zz_out.data, n);
+    if (n != 0UL)
+        memcpy(out, (const void *)zz_out.data, n);
     if (codec_out != NULL)
         *codec_out = rr.codec;
 
-    zz_keyframe = 0;                    /* the baseline is current again */
+    zz_reset = 0;                       /* the baseline is current again */
     return (LONG)n;
 }
 
 VOID httpzz_reset(VOID)
 {
-    zz_keyframe = 1;
+    zz_reset = 1;
 }
 
 VOID httpzz_cleanup(VOID)
