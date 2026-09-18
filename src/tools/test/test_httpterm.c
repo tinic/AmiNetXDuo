@@ -325,6 +325,124 @@ static void test_rings(void)
           "a handle id that is not one of the three is answered");
 }
 
+/* How many times `needle` occurs in `text`. */
+static int count_of(const char *text, const char *needle)
+{
+    int         n = 0;
+    const char *p = text;
+
+    while ((p = strstr(p, needle)) != NULL) {
+        n++;
+        p++;
+    }
+    return n;
+}
+
+/* Is there an `a` before a `b` in [text+from, text+to)?  Both must be present
+   and in that order, or 0. */
+static int a_before_b(const char *text, long from, long to,
+                      const char *a, const char *b)
+{
+    long oa, ob;
+    const char *pa, *pb;
+
+    pa = strstr(text + from, a);
+    pb = strstr(text + from, b);
+    if (pa == NULL || pb == NULL)
+        return 0;
+    oa = (long)(pa - text);
+    ob = (long)(pb - text);
+    if (oa >= to || ob >= to)
+        return 0;
+    return oa < ob;
+}
+
+/*
+ * THE WINDOW SIZE.
+ *
+ * A console client -- Dropbear's ssh (con_query_size), C:More -- asks the size
+ * with ACTION_DISK_INFO, reads the returned IORequest's io_Unit as a ConUnit,
+ * and takes cu_XMax/cu_YMax.  httpterm had left io_Unit at zero, so the read
+ * was NULL and the client fell back to 80x25 (ssh) or nothing (More reported
+ * zero rows).  term_sync_conunit() points io_Unit at a ConUnit whose
+ * cu_XMax/cu_YMax are term_cols-1/term_rows-1, and is called on every size
+ * change so a client that cached the unit pointer still sees a resize.
+ *
+ * The client adds one back (cu_XMax + 1); asserting httpterm's minus-one beside
+ * the client's plus-one proves the round trip is the identity, off-A3000.
+ */
+static void test_winsize(void)
+{
+    char *term   = slurp("src/tools/httpterm.c");
+    char *client = slurp("clients/dropbear/amiga_dropbear.c");
+    long  disk, disk_end, resize, resize_end;
+
+    printf("the window size\n");
+
+    if (term == NULL || client == NULL) {
+        failures++;
+        free(term);
+        free(client);
+        return;
+    }
+
+    /* io_Unit is pointed at the ConUnit, not left NULL. */
+    CHECK(strstr(term, "term_ioreq.io_Unit") != NULL &&
+          strstr(term, "&term_conunit") != NULL,
+          "httpterm.c: term_ioreq.io_Unit is not pointed at a ConUnit, so a"
+          " client reads NULL and falls back to 80x25");
+
+    /* The size the client will read is term_cols-1/term_rows-1. */
+    CHECK(strstr(term, "cu_XMax = (WORD)(term_cols > 0 ? term_cols - 1")
+              != NULL &&
+          strstr(term, "cu_YMax = (WORD)(term_rows > 0 ? term_rows - 1")
+              != NULL,
+          "httpterm.c: cu_XMax/cu_YMax are not term_cols-1/term_rows-1");
+
+    /* The ACTION_DISK_INFO arm refreshes the unit before handing it back.
+       Anchored on the InfoData the handler fills, not the "case" label, which
+       also appears in the packet-name table. */
+    disk = offset_of(term, "struct InfoData *id = (struct InfoData *)BADDR");
+    disk_end = disk >= 0 ? offset_of(term + disk, "term_reply(pkt") : -1;
+    if (disk_end >= 0)
+        disk_end += disk;
+    CHECK(disk >= 0 && disk_end > disk &&
+          a_before_b(term, disk, disk_end, "term_sync_conunit()",
+                     "id->id_InUse"),
+          "httpterm.c: ACTION_DISK_INFO hands back id_InUse without first"
+          " syncing the ConUnit, so the size is whatever it last was");
+
+    /* A resize refreshes it too -- a cached unit pointer sees the new size. */
+    resize = offset_of(term, "http_term_resize(UWORD");
+    resize_end = resize >= 0 ? offset_of(term + resize, "http_term_write")
+                             : -1;
+    if (resize_end >= 0)
+        resize_end += resize;
+    CHECK(resize >= 0 && resize_end > resize &&
+          a_before_b(term, resize, resize_end, "term_rows = rows",
+                     "term_sync_conunit()"),
+          "httpterm.c: http_term_resize() stores the new size without"
+          " re-syncing the ConUnit, so a client that cached the unit keeps"
+          " the old size");
+
+    /* Called at least at init, in ACTION_DISK_INFO and in http_term_resize,
+       past its one definition. */
+    CHECK(count_of(term, "term_sync_conunit") >= 4,
+          "httpterm.c: term_sync_conunit is not called from all of init,"
+          " ACTION_DISK_INFO and http_term_resize");
+
+    /* The client's plus-one, partner of httpterm's minus-one: the round trip
+       is size-preserving, no off-by-one. */
+    CHECK(strstr(client, "cu->cu_XMax + 1") != NULL &&
+          strstr(client, "cu->cu_YMax + 1") != NULL,
+          "amiga_dropbear.c: con_query_size no longer adds one back to"
+          " cu_XMax/cu_YMax, so the size it reports is off by one from the"
+          " one httpterm stored");
+
+    free(term);
+    free(client);
+}
+
 int main(void)
 {
     char *text = slurp("src/tools/httpterm.c");
@@ -379,6 +497,7 @@ int main(void)
 
     test_callers();
     test_rings();
+    test_winsize();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

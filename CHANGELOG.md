@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The web Shell (`httpd -T`) answers a program that reads its window size from
+  the console unit -- `ssh` and `htop` run over it, and `More`. The terminal
+  handler points the IORequest it returns from `ACTION_DISK_INFO` at a `ConUnit`
+  holding `cu_XMax`/`cu_YMax`; with those left unset a client took 80x25 (`ssh`,
+  and `htop` then filling only that) or read no rows (`more Work:busybox/mklinks`
+  showed "--- More (0%) ---" and a blank page). The size follows a browser resize
+
 ## 0.28.7
 
 - `NetShutdown` removes the interfaces instead of leaving them attached with

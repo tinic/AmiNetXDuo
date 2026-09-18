@@ -10,6 +10,7 @@
 #include <dos/dosasl.h>
 #include <exec/execbase.h>          /* task lists, for runner lifetime      */
 #include <exec/io.h>                /* struct IOStdReq, for ACTION_DISK_INFO */
+#include <devices/conunit.h>        /* struct ConUnit, so the size is readable */
 
 #define TERM_OUT_BUF    4096UL
 #define TERM_IN_BUF     1024UL
@@ -147,6 +148,21 @@ static struct MsgPort *term_break_port;
 #define TERM_DISK_RAWCON  0x52415700L     /* 'RAW\0' */
 
 static struct IOStdReq term_ioreq;
+
+/* ACTION_DISK_INFO hands back term_ioreq, whose io_Unit a console client
+   (Dropbear's ssh, C:More) reads as a ConUnit for cu_XMax/cu_YMax -- the
+   window size.  Only those two fields are ever read; the rest stays zero.
+   The pointer is stable and cached by the client, so a later resize is seen
+   by keeping the fields current (term_sync_conunit, called on every size
+   change), not by handing back a new unit. */
+static struct ConUnit term_conunit;
+
+static void term_sync_conunit(void)
+{
+    term_conunit.cu_XMax = (WORD)(term_cols > 0 ? term_cols - 1 : 79);
+    term_conunit.cu_YMax = (WORD)(term_rows > 0 ? term_rows - 1 : 24);
+    term_ioreq.io_Unit   = (struct Unit *)&term_conunit;
+}
 
 static struct MsgPort *term_port;
 
@@ -816,6 +832,7 @@ VOID http_term_service(VOID)
                     id->id_DiskType      = term_raw ? TERM_DISK_RAWCON
                                                     : TERM_DISK_CON;
                     id->id_VolumeNode    = (BPTR)0;
+                    term_sync_conunit();
                     id->id_InUse         = (LONG)&term_ioreq;
                 }
 
@@ -1344,6 +1361,7 @@ BOOL http_term_start(VOID)
     term_break_port   = NULL;
     term_cols         = 80;
     term_rows         = 25;
+    term_sync_conunit();
     term_seq_n        = 0;
     term_seq_esc      = 0;
     term_want_resize  = 0;
@@ -1423,6 +1441,7 @@ VOID http_term_resize(UWORD cols, UWORD rows)
 
     term_cols = cols;
     term_rows = rows;
+    term_sync_conunit();
 
     if (term_active && term_want_resize)
         term_resize_event();
