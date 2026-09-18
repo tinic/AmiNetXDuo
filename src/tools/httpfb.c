@@ -1557,9 +1557,15 @@ skip_readback:
             *encoded = httpzz_encode(ty0, ty1, out, out_cap, &codec);
             if (*encoded < 0L || codec != HTTPZZ_CODEC_NONE)
             {
+                /* The card could not encode this band.  Give the offload up
+                   for the session and treat this pass as an UNREADABLE one --
+                   NOT a negative *encoded, which the caller reads as an encoder
+                   failure and closes the socket on.  The next pass runs the
+                   host readback + encode; the viewer keeps its picture until
+                   then. */
                 fb_offload = FALSE;
                 fb_forget_shadow();
-                *encoded = -1L;
+                rc = FB_GRAB_UNREADABLE;
             }
         }
         else

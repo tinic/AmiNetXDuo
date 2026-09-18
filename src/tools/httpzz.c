@@ -30,6 +30,10 @@
 #define ZZ9K_LIB_NAME   "zz9k.library"
 #define ZZ9K_MIN_VER    2
 
+/* ZZ9KCall completion-poll spin budget for an encode band (the SDK default of
+   250 is for quick ops and times out on a whole-band encode). */
+#define HTTPZZ_CALL_SPINS   200000UL
+
 /* fd vector offsets: 0x1e + 6*(index-1).  Kept as the documented vector table;
    the LP wrappers below must pass the number as a literal, because LP stringizes
    its offset argument (jsr a6@(-"#offs":W)) and a macro name would not expand --
@@ -214,7 +218,14 @@ LONG httpzz_encode(UWORD ty0, UWORD ty1, UBYTE *out, ULONG out_max,
     memcpy(req.entry.payload.inline_data, &er, sizeof(er));
 
     memset(&reply, 0, sizeof(reply));
-    if (zz_call(&req, &reply, 0UL) != ZZ9K_STATUS_OK ||
+    /* A synchronous call: block until the card completes.  ZZ9KCall's timeout
+       is a completion-poll SPIN COUNT, and the SDK default (250, sized for
+       quick crypto ops) returns TIMEOUT long before a whole-band framebuffer
+       encode finishes -- measured on the A3000.  Use a large budget: the call
+       returns as soon as the card posts completion, so this is only the
+       ceiling for a stuck encode, which the card's own watchdog already
+       bounds; a rare overrun falls back to the host encode (see httpfb.c). */
+    if (zz_call(&req, &reply, HTTPZZ_CALL_SPINS) != ZZ9K_STATUS_OK ||
         reply.status != ZZ9K_STATUS_OK)
         return -1;
 
