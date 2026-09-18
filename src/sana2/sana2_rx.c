@@ -2150,10 +2150,10 @@ static const ULONG ami_sana2_rx_types[AMI_SANA2_RX_READERS] =
 
 static const CHAR *const ami_sana2_rx_names[AMI_SANA2_RX_READERS] =
 {
-    "sana2 rx ip",
-    "sana2 rx arp"
+    "AmiNetXDuo rx ip",
+    "AmiNetXDuo rx arp"
 #ifdef AMINETXDUO_IPV6
-, "sana2 rx ip6"
+, "AmiNetXDuo rx ip6"
 #endif
 };
 

@@ -387,4 +387,17 @@ ULONG _nx_amiga_handshake_millis(VOID);
    a unique record would be answered never. */
 #define NX_MDNS_RESPONSE_UNIQUE_DELAY           1
 
+
+/* -------------------------------------------------------------- threads, */
+
+/* Every ThreadX thread is an Exec Task here, named as a task list shows it.
+   One convention across the stack, "AmiNetXDuo <what>": the addons' own
+   literals ("NetX DHCP Client", "mDNS Thread") would sit beside the port's
+   tasks under three different names.  The rest are in the tree's own create
+   calls (src/sana2, src/netstack, port/threadx-amiga). */
+#define NX_DHCP_THREAD_NAME                     "AmiNetXDuo dhcp"
+#define NX_DHCPV6_THREAD_NAME                   "AmiNetXDuo dhcpv6"
+#define NX_AUTO_IP_THREAD_NAME                  "AmiNetXDuo autoip"
+#define NX_MDNS_THREAD_NAME                     "AmiNetXDuo mdns"
+
 #endif /* NX_USER_H */

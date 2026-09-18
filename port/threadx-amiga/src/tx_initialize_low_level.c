@@ -333,7 +333,7 @@ BYTE             sig;
     _tx_amiga_timer_stack =  _tx_amiga_alloc(_tx_amiga_timer_stack_size, MEMF_PUBLIC | MEMF_CLEAR);
     if (_tx_amiga_timer_stack != (APTR) 0)
     {
-        _tx_amiga_timer_task =  (VOID *) _tx_amiga_task_create("ThreadX tick",
+        _tx_amiga_timer_task =  (VOID *) _tx_amiga_task_create("AmiNetXDuo tick",
                                                                (BYTE) TX_AMIGA_TIMER_PRIORITY,
                                                                _tx_amiga_timer_task_entry,
                                                                _tx_amiga_timer_stack,
@@ -1044,7 +1044,7 @@ UINT                 armed;
 
         _tx_amiga_vblank_int.is_Node.ln_Type =  NT_INTERRUPT;
         _tx_amiga_vblank_int.is_Node.ln_Pri  =  -60;
-        _tx_amiga_vblank_int.is_Node.ln_Name =  (char *) "ThreadX tick";
+        _tx_amiga_vblank_int.is_Node.ln_Name =  (char *) "AmiNetXDuo tick";
         _tx_amiga_vblank_int.is_Data         =  (APTR) 0;
         _tx_amiga_vblank_int.is_Code         =  (VOID (*)()) _tx_amiga_vblank_entry;
 
@@ -1265,7 +1265,7 @@ ULONG        stack_size =  8192UL;
     _tx_amiga_timer_gone      =  0UL;
     _tx_amiga_master_gone     =  0UL;
 
-    task =  _tx_amiga_task_create("ThreadX", (BYTE) TX_AMIGA_TASK_PRIORITY,
+    task =  _tx_amiga_task_create("AmiNetXDuo kernel", (BYTE) TX_AMIGA_TASK_PRIORITY,
                                   _tx_amiga_kernel_task_entry, stack, stack_size, (APTR) 0);
     if (task == (struct Task *) 0)
     {

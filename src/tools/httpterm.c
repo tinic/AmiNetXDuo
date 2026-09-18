@@ -1358,7 +1358,7 @@ BOOL http_term_start(VOID)
     term_runner->rn_Done   = 0;
 
     tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)term_runner_main;
-    tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"httpd terminal runner";
+    tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"AmiNetXDuo httpd terminal";
     tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = TERM_RUNNER_STACK;
     tags[3].ti_Tag = NP_Cli;       tags[3].ti_Data = TRUE;
     tags[4].ti_Tag = TAG_END;      tags[4].ti_Data = 0;

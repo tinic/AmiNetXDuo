@@ -440,7 +440,7 @@ VOID ami_netstack_rexx_start(VOID)
     tags[0].ti_Tag  = NP_Entry;
     tags[0].ti_Data = (ULONG)ami_rx_main;
     tags[1].ti_Tag  = NP_Name;
-    tags[1].ti_Data = (ULONG)"AmiNetXDuo ARexx";
+    tags[1].ti_Data = (ULONG)"AmiNetXDuo arexx";
     tags[2].ti_Tag  = NP_StackSize;
     tags[2].ti_Data = RX_STACK;
     tags[3].ti_Tag  = NP_Priority;

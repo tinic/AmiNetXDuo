@@ -9,6 +9,20 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Every task the stack runs is named `AmiNetXDuo <what>` in a task list
+  (Scout, Xoper, TaskE): `AmiNetXDuo kernel`, `tick`, `ip`, `rx ip`, `rx arp`,
+  `rx ip6`, `dhcp`, `dhcpv6`, `dhcpv6 work`, `autoip`, `mdns`, `stack`,
+  `address allocation`, `arexx`, `TCP: handler`, `TCP: session`, `proxy`,
+  `httpd terminal`, and the drivers' `genet poll`, `pcmcia`, `wifi unit`,
+  `wifi poller`, `wifi scanner`, `wifi receiver`. They were `ThreadX`,
+  `ThreadX tick`, `AmiNetXDuo`, `sana2 rx ip`, `NetX DHCP Client`, `mDNS
+  Thread`, `anxgenet poll`, `WiFiPi Poller` and so on, one convention per
+  source. The four NetX Duo addon names come from `NX_*_THREAD_NAME` in
+  `nx_user.h` (fork f2f19bf5); the four WiFiPi ones from `WIFIPI_TASK_*`
+  (fork c5920bd). The vertical-blank interrupt server is `AmiNetXDuo tick`
+  with its task; the drivers' card interrupt and reset servers keep their
+  device names.
+
 ## 0.28.8
 
 - TCP sends leave slow start on the first loss, not at the window the peer's

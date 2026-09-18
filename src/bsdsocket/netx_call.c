@@ -54,7 +54,7 @@ static LONG bsd_gate_enter(struct AmiSocketBase *base)
 
     if (gate->ag_Live == 0U)
     {
-        if (tx_amiga_gate_bind(gate, (CHAR *)"aminetxduo proxy",
+        if (tx_amiga_gate_bind(gate, (CHAR *)"AmiNetXDuo proxy",
                                AMI_CALLER_PRIORITY) != TX_SUCCESS)
         {
             base->sb_NxGateDead = TRUE;

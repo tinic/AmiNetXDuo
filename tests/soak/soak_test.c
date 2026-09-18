@@ -1468,7 +1468,7 @@ ULONG   i;
     }
 
     (VOID) S_CHECK(_tx_amiga_timer_task == (VOID *) 0,
-                   "teardown: the ThreadX tick task exited", i);
+                   "teardown: the tick task exited", i);
 }
 
 

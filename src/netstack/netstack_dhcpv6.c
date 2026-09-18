@@ -467,7 +467,7 @@ VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns)
     }
     ns->ns_Dhcpv6EventsReady = TRUE;
 
-    if (tx_thread_create(&ns->ns_Dhcpv6Work, (CHAR *)"anxd dhcpv6 work",
+    if (tx_thread_create(&ns->ns_Dhcpv6Work, (CHAR *)"AmiNetXDuo dhcpv6 work",
                          ami_ns6_dhcp_worker, (ULONG)ns,
                          ns->ns_Dhcpv6WorkStack,
                          (ULONG)AMI_DHCPV6_WORK_STACK_SIZE,
