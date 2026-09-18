@@ -44,6 +44,11 @@
  * on the wire (68k native): a vendor payload is opaque to zz9k.library, which
  * passes the bytes through, so the ARM module byte-swaps on read.  Both halves
  * are ours, so the contract is ours to fix.
+ *
+ * The field order -- 4-byte, then 2-byte, then 1-byte -- is deliberate: every
+ * field lands on its natural boundary with no internal padding, so the host's
+ * raw struct copy and the ARM's fixed-offset decode (which does not rely on the
+ * ARM compiler's struct layout) see the same bytes.  Keep it that way.
  */
 typedef struct HttpZzEncodeReq
 {
