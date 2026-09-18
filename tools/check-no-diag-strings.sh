@@ -41,6 +41,7 @@ IMAGES="
 src/bsdsocket/bsdsocket.library
 src/netdev/anxnet.device
 src/netdev/anxgenet.device
+src/wifipi/anxwifipi.device
 src/usergroup/usergroup.library
 src/tlslib/tls.library
 "

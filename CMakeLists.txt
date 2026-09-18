@@ -1770,6 +1770,8 @@ add_subdirectory(src/sana2)
 # The far side of src/sana2: anxnet.device is a SANA-II provider, not a
 # consumer, and links none of the stack.
 add_subdirectory(src/netdev)
+# anxwifipi.device: the Pi 4's Wi-Fi, built from third_party/wifipi.
+add_subdirectory(src/wifipi)
 add_subdirectory(src/mbuf)
 if(AMINETXDUO_BPF)
     add_subdirectory(src/bpf)
@@ -1812,6 +1814,9 @@ if(CMAKE_CROSSCOMPILING)
     add_custom_target(release_libraries)
     add_dependencies(release_libraries
         bsdsocket_library usergroup_library anxnet_device anxgenet_device)
+    if(TARGET anxwifipi_device)
+        add_dependencies(release_libraries anxwifipi_device)
+    endif()
 
     add_custom_target(release_payload)
     add_dependencies(release_payload

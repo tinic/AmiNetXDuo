@@ -58,6 +58,20 @@ offers to put both in `DEVS:Networks`; an interface file selects one with
 first release line that maps GENET's `/scb` range into the Amiga address space.
 Emu68 1.0.3 is not supported.
 
+`anxwifipi.device` is the same machine's Wi-Fi: the Pi 4's own Broadcom 43455
+on SDIO, behind a PiStorm32 running Emu68 (`DEVICE=anxwifipi.device`,
+`UNIT=0`). It is the MPL-2.0 fork of Michal Schulz's WiFiPi.device kept at
+`github.com/tinic/WiFiPi.device` (branch `gcc16`, submodule
+`third_party/wifipi`), built here with the tree's toolchain, and it carries a
+receiver that watches the card's line without an interrupt, the single-copy
+receive path above, and counters behind `S2_GETSPECIALSTATS`. It needs the
+Wi-Fi firmware Emu68 installs in `DEVS:Firmware`, and a supplicant to join a
+network -- WirelessManager from Aminet's `driver/net/prism2v2` reads
+`ENVARC:Sys/Wireless.prefs` and associates through the SANA-II wireless
+commands; the interface file names the device as any other. On an A1200 +
+PiStorm32 Lite on a 5 GHz network at -71 dBm: 36 Mbit/s in, 57 out, 6 ms
+round trips.
+
 **Receive offload (GRO).** `anxgenet.device` verifies every IPv4 and IPv6
 frame's header and TCP or UDP checksum itself, from the sum its copy already
 produced, and marks each TCP segment that continues the one before it. The
@@ -234,3 +248,4 @@ MIT, with these exceptions, each confined to the files it names:
 | `ssh` and `scp` | Dropbear's MIT-style licence | `third_party/dropbear`, `clients/dropbear` |
 | The `/files` text editor | CodeMirror 6 and its support packages, MIT | bundled into `src/tools/web/files.html`; notice in `src/tools/web/vendor/codemirror` |
 | The CA root set | MPL 2.0, Mozilla's, file-scoped | `DEVS:Internet/certificates`, from `third_party/cacert` |
+| `anxwifipi.device` | MPL 2.0 (Michal Schulz's WiFiPi.device, forked; ISC Broadcom/OpenBSD headers and an Apache-2.0 register header inside it, listed in its NOTICE). File-scoped: its sources are the submodule's and are published there | `third_party/wifipi`, built by `src/wifipi/CMakeLists.txt` |

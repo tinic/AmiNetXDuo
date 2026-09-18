@@ -55,6 +55,7 @@ BUDGETS=(
     # the idle poller (its task, the clock through /soc, three counters):
     # Fitz read 26.5 -> 31.6 MB/s, iperf in 832 -> 910, 2026-09-17.
     "default:src/netdev/anxgenet.device:27500"
+    "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
     # survive installing this usergroup.library without trusting malformed DBs.
@@ -73,6 +74,7 @@ BUDGETS=(
     "minimal:src/bsdsocket/bsdsocket.library:227500"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
+    "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
 )
 

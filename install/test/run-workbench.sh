@@ -1415,10 +1415,41 @@ else
     fi
 fi
 
+# The third driver image, anxwifipi.device, likewise.
+ANXWIFIPI_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxwifipi.device"
+ANXWIFIPI_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxwifipi.device" 2>/dev/null || true)
+
+if [ ! -f "$ANXWIFIPI_ARCHIVE" ]; then
+    echo "  MISSING Devs/Networks/anxwifipi.device IN THE ARCHIVE"
+    echo "!! dist/make-dist.sh's DEVICES list carries wifipi/anxwifipi; the archive"
+    echo "   this ran from has no such file."
+    fail=1
+elif [ -z "$ANXWIFIPI_INSTALLED" ] || [ ! -f "$ANXWIFIPI_INSTALLED" ]; then
+    echo "  MISSING DEVS:Networks/anxwifipi.device"
+    echo "!! THE INSTALLER DID NOT INSTALL THE WI-FI DRIVER.  P_install_device"
+    echo "   in Install-AmiNetXDuo is called once per image; the anxwifipi call"
+    echo "   did not land a file."
+    fail=1
+else
+    _anw_want=$(shasum "$ANXWIFIPI_ARCHIVE"   | cut -d' ' -f1)
+    _anw_got=$(shasum  "$ANXWIFIPI_INSTALLED" | cut -d' ' -f1)
+    _anw_bytes=$(wc -c < "$ANXWIFIPI_INSTALLED" | tr -d ' ')
+    if [ "$_anw_want" = "$_anw_got" ]; then
+        printf '  ok      %-32s %s bytes\n' \
+               "Devs/Networks/anxwifipi.device" "$_anw_bytes"
+    else
+        printf '  WRONG   %-32s %s bytes\n' \
+               "Devs/Networks/anxwifipi.device" "$_anw_bytes"
+        echo "!! DEVS:Networks/anxwifipi.device is not the driver in the archive."
+        fail=1
+    fi
+fi
+
 echo "devs_networks_before=$DEVS_NETWORKS_BEFORE"
 echo "anxnet_installed=$([ -n "$ANXNET_INSTALLED" ] && echo yes || echo no)"
 echo "anxnet_backup=$([ -n "$ANXNET_OLD" ] && echo yes || echo no)"
 echo "anxgenet_installed=$([ -n "$ANXGENET_INSTALLED" ] && echo yes || echo no)"
+echo "anxwifipi_installed=$([ -n "$ANXWIFIPI_INSTALLED" ] && echo yes || echo no)"
 
 if [ "$DRAWER" = "1" ]; then
     # The stale file was in SYSTEM DEVS:, not in the private destination.  One

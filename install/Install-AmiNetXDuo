@@ -298,7 +298,10 @@
        "goes where SANA-II drivers belong, in DEVS:Networks.  anxgenet.device "
        "goes beside it: the same driver with only the Raspberry Pi 4's own "
        "Ethernet in it, for a PiStorm32 running Emu68 1.1 alpha.1 or newer "
-       "(DEVICE=anxgenet.device, UNIT=0).\n\n"
+       "(DEVICE=anxgenet.device, UNIT=0).  anxwifipi.device is the third: the "
+       "Pi 4's own Wi-Fi, for the same machines (DEVICE=anxwifipi.device, "
+       "UNIT=0; it needs the Wi-Fi firmware Emu68 puts in DEVS:Firmware and "
+       "a supplicant such as Aminet's WirelessManager to join a network).\n\n"
        "COPYING IT CHANGES NOTHING BY ITSELF.  Which driver this machine "
        "opens is the DEVICE= line in DEVS:NetInterfaces, and this installer "
        "writes that line with the driver that came with the card.  Nothing "
@@ -567,6 +570,7 @@
 ; guard.
 (set S_ANXNET   (tackon (tackon S_DEVS "Networks") "anxnet.device"))
 (set S_ANXGENET (tackon (tackon S_DEVS "Networks") "anxgenet.device"))
+(set S_ANXWIFIPI (tackon (tackon S_DEVS "Networks") "anxwifipi.device"))
 
 (if (NOT (exists S_ANXNET (noreq)))
     (abort "This archive has no Devs/Networks/anxnet.device.\n\n"
@@ -575,6 +579,11 @@
            "Nothing was changed."))
 (if (NOT (exists S_ANXGENET (noreq)))
     (abort "This archive has no Devs/Networks/anxgenet.device.\n\n"
+           "The download is incomplete, or was unpacked with a tool that "
+           "dropped the subdrawers.\n\n"
+           "Nothing was changed."))
+(if (NOT (exists S_ANXWIFIPI (noreq)))
+    (abort "This archive has no Devs/Networks/anxwifipi.device.\n\n"
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
@@ -1461,7 +1470,7 @@
     ))
 )
 
-; --- anxnet.device and anxgenet.device -------------------------------------------------------
+; --- anxnet.device, anxgenet.device and anxwifipi.device ------------------------------------
 ;
 ; The decision, and why it changed, is at DO_ANXNET in section 4 beside the
 ; question.  This is what a yes does.
@@ -1511,6 +1520,17 @@
                          "Ethernet in it, for a PiStorm32 running Emu68 1.1 "
                          "alpha.1 or newer.  "
                          "Nothing uses it until an interface file names it."))
+    (P_install_device)
+
+    (set dev_file   "anxwifipi.device")
+    (set dev_source S_ANXWIFIPI)
+    (set dev_prompt (cat "Installing anxwifipi.device into DEVS:Networks\n\n"
+                         "The Raspberry Pi 4's own Wi-Fi, for a PiStorm32 "
+                         "running Emu68.  It needs the Wi-Fi firmware Emu68 "
+                         "installs in DEVS:Firmware, and a supplicant such as "
+                         "WirelessManager (Aminet driver/net/prism2v2) to join "
+                         "a network.  Nothing uses it until an interface file "
+                         "names it."))
     (P_install_device)
   ))
 

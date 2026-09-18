@@ -9,6 +9,32 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxwifipi.device`: the Raspberry Pi 4's own Wi-Fi behind a PiStorm32
+  running Emu68, in `DEVS:Networks` beside `anxgenet.device`. It is the MPL-2.0
+  fork of Michal Schulz's WiFiPi.device (`github.com/tinic/WiFiPi.device`,
+  branch `gcc16`, submodule `third_party/wifipi`), built by the tree with its
+  own name, `$VER` and gates (`src/wifipi/CMakeLists.txt`; the ROMTag is a link
+  root and `tools/check-image.sh` proves the chain in the bytes). Against the
+  driver Emu68 ships (git 9ac02f7, 2019), on an A1200 + PiStorm32 Lite on a
+  5 GHz network: TCP in 29.6 -> 35.9 Mbit/s, out 57, round trips 12.7 -> 6.4 ms
+  under load and 51 -> 6.3 ms after a quiet second. What changed in the
+  receiver: every queued SDPCM frame is taken per wake-up, not one; a task at
+  priority -128 watches the card's line in the SDHCI status register (the
+  card's interrupts enabled, the host's IRQ enable not -- the line the SD card
+  driver holds is never touched) and wakes the receiver within microseconds;
+  writes leave 200 us after they are queued instead of at the next timer tick;
+  the idle tick backs off to 2 ms instead of 100; the card's status and mailbox
+  are serviced the way brcmfmac does (the upstream `GetIntStatus` cleared
+  chipcommon's register, not the SDIO core's); AmiNetXDuo's single-copy
+  receive (`RX_DIRECT`/`RX_FILLED`/`RX_LINK_HDR`/`RX_FLAGS`) is offered, so
+  every frame is claimed at the device and summed on the way in; nine
+  receiver counters answer `S2_GETSPECIALSTATS`. Measured dead ends stay out:
+  power save 0 (no change), waking on every write (TX -33 %), the card
+  interrupt through gic400.library (its line is the SD card's, one server per
+  line). The device needs Emu68's Wi-Fi firmware in `DEVS:Firmware` and a
+  supplicant such as WirelessManager (Aminet `driver/net/prism2v2`) to join a
+  network; the installer installs it like the other two drivers.
+
 - The web Shell (`httpd -T`) answers a program that reads its window size from
   the console unit -- `ssh` and `htop` run over it, and `More`. The terminal
   handler points the IORequest it returns from `ACTION_DISK_INFO` at a `ConUnit`
