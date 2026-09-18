@@ -47,6 +47,7 @@
 import type { Terminal } from "@xterm/xterm";
 
 const ESC = "\u001B";
+const HIST_KEY = "aminetxduo-shell-history";
 
 export interface LineHandlers {
   /* A finished line, without its terminator.  The caller adds one. */
@@ -58,6 +59,8 @@ export interface LineHandlers {
   onDeadEnter: () => void;
   /* Tab: ask the far side to complete the word before the cursor. */
   onComplete: (arg: string) => void;
+  /* Reverse history search: the prompt to show, or null when it ends. */
+  onSearch: (prompt: string | null) => void;
 }
 
 export class LineEditor {
@@ -82,6 +85,11 @@ export class LineEditor {
   private cyc: { start: number; cands: string[]; idx: number } | null = null;
   private pendCompStart = 0;        /* where a pending completion replaces from */
 
+  /* Ctrl-R reverse search: the query, the history line it found, and the line
+     it interrupted, to restore on cancel; null when not searching. */
+  private search:
+    { query: string; matchIdx: number; saved: string; savedCur: number } | null = null;
+
   /* Every write goes through one chain.  term.write() is asynchronous -- the
      parser runs on its own schedule -- so reading the cursor back straight
      after a write reads where the cursor USED to be.  Serialising on the
@@ -94,6 +102,7 @@ export class LineEditor {
     this.term = term;
     this.h = h;
     this.table = this.buildTable();
+    this.loadHistory();
   }
 
   setEnabled(on: boolean): void {
@@ -249,6 +258,22 @@ export class LineEditor {
 
     while (i < data.length) {
       const rest = data.slice(i);
+
+      /* Ctrl-R starts, or steps to the next older match of, a reverse search
+         through the history. */
+      if (data.charCodeAt(i) === 0x12) {
+        if (this.search === null) await this.searchStart();
+        else await this.searchStep();
+        i += 1;
+        continue;
+      }
+      /* While searching, a key refines the query, cancels, or is accepted --
+         the match stays on the line and the key is then handled below. */
+      if (this.search !== null) {
+        const n = await this.searchKey(rest);
+        if (n > 0) { i += n; continue; }
+        await this.searchEnd(true);
+      }
 
       /* Enter, in either of the forms a terminal produces, and the CRLF a
          paste from a Windows editor arrives as. */
@@ -430,6 +455,113 @@ export class LineEditor {
     await this.redraw();
   }
 
+  // ------------------------------------------------------------- history --
+
+  private loadHistory(): void {
+    try {
+      const raw = localStorage.getItem(HIST_KEY);
+      if (raw === null) return;
+      const a: unknown = JSON.parse(raw);
+      if (Array.isArray(a)) {
+        this.history = a.filter((x): x is string => typeof x === "string").slice(-200);
+        this.hAt = this.history.length;
+      }
+    } catch {
+      /* Private window, blocked storage, or a corrupt value: start empty. */
+    }
+  }
+
+  private saveHistory(): void {
+    try {
+      localStorage.setItem(HIST_KEY, JSON.stringify(this.history));
+    } catch {
+      /* Not fatal: the history is still live for this session. */
+    }
+  }
+
+  // --------------------------------------------------- reverse-i-search ---
+
+  /* The newest history entry at or before `fromIdx` that contains `query`,
+     case-insensitively, or -1. */
+  private findMatch(query: string, fromIdx: number): number {
+    if (query.length === 0) return -1;
+    const q = query.toLowerCase();
+    for (let k = fromIdx - 1; k >= 0; k--)
+      if (this.history[k].toLowerCase().includes(q)) return k;
+    return -1;
+  }
+
+  private async searchStart(): Promise<void> {
+    this.search = { query: "", matchIdx: -1, saved: this.buf, savedCur: this.cur };
+    await this.searchShow();
+  }
+
+  /* Ctrl-R again: the next match older than the one shown. */
+  private async searchStep(): Promise<void> {
+    if (this.search === null) return;
+    const from = this.search.matchIdx >= 0 ? this.search.matchIdx : this.history.length;
+    const m = this.findMatch(this.search.query, from);
+    if (m >= 0) this.search.matchIdx = m;
+    await this.searchShow();
+  }
+
+  /* The query changed: search again from the newest. */
+  private async searchRefine(): Promise<void> {
+    if (this.search === null) return;
+    this.search.matchIdx = this.findMatch(this.search.query, this.history.length);
+    await this.searchShow();
+  }
+
+  private async searchShow(): Promise<void> {
+    if (this.search === null) return;
+    const s = this.search;
+    if (s.matchIdx >= 0) {
+      this.buf = this.history[s.matchIdx];
+      this.cur = this.buf.length;
+    }
+    const failing = s.query.length > 0 && s.matchIdx < 0 ? "failing " : "";
+    this.h.onSearch("(" + failing + "reverse-i-search)`" + s.query + "': ");
+    await this.redraw();
+  }
+
+  /* End the search.  Accept keeps the match on the line (the caller then lets
+     the key that ended it -- Enter, an arrow -- act on it); cancel restores
+     the line the search interrupted. */
+  private async searchEnd(accept: boolean): Promise<void> {
+    if (this.search === null) return;
+    const s = this.search;
+    this.search = null;
+    this.h.onSearch(null);
+    if (!accept) {
+      this.buf = s.saved;
+      this.cur = s.savedCur;
+      await this.redraw();
+    }
+  }
+
+  /* A key while searching.  Returns how many characters it consumed; 0 means
+     it is not a search key, so the caller accepts the match and re-handles it.
+     Ctrl-G and Ctrl-C cancel; backspace and any printable refine. */
+  private async searchKey(rest: string): Promise<number> {
+    if (this.search === null) return 0;
+    const c = rest.charCodeAt(0);
+    if (c === 0x7f || c === 0x08) {
+      this.search.query = this.search.query.slice(0, -1);
+      await this.searchRefine();
+      return 1;
+    }
+    if (c === 0x07 || c === 0x03) {
+      await this.searchEnd(false);
+      return 1;
+    }
+    if (c >= 0x20 && c < 0x7f) {
+      this.search.query += rest[0];
+      await this.searchRefine();
+      return 1;
+    }
+    return 0;
+  }
+
   private insert(s: string): void {
     this.buf = this.buf.slice(0, this.cur) + s + this.buf.slice(this.cur);
     this.cur += s.length;
@@ -588,6 +720,7 @@ export class LineEditor {
         this.history[this.history.length - 1] !== line) {
       this.history.push(line);
       if (this.history.length > 200) this.history.shift();
+      this.saveHistory();
     }
     this.hAt = this.history.length;
     this.hSaved = "";

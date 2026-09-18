@@ -39,6 +39,15 @@ version at the top when it merges.
   palette (the default) and standard ANSI, remembered per browser. `Echo
   "*e[33m"` is the Amiga's blue on the first and yellow on the second.
 
+- The web Shell (`httpd -T`) keeps its command history across page reloads,
+  per browser, and Ctrl-R searches back through it: type to match, Ctrl-R for
+  the next older, Enter to accept it, Ctrl-G to cancel.
+
+- The web Shell's bar has a Find (the button, or Cmd-F / Ctrl-Shift-F) that
+  searches the scrollback and highlights the match, since a browser's own Find
+  cannot see the canvas the terminal draws on. Enter steps to the older match,
+  Shift-Enter to the newer.
+
 ## 0.28.7
 
 - `NetShutdown` removes the interfaces instead of leaving them attached with

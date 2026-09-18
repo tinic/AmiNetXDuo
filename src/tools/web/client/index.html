@@ -46,7 +46,13 @@
     <button id="eof"   type="button" title="Ctrl-D, end of input">EOF</button>
     <button id="clear" type="button" title="Ctrl-L">Clear</button>
     <button id="again" type="button">Reconnect</button>
+    <button id="findbtn" type="button" title="Find in the output (Cmd-F or Ctrl-Shift-F)">Find</button>
   </span>
+  <span id="find" hidden>
+    <input id="findq" type="text" placeholder="find in output" spellcheck="false" autocomplete="off" autocapitalize="off">
+    <span id="findn"></span>
+  </span>
+  <span id="isearch" hidden></span>
   <button id="theme" type="button" title="Terminal colours: click to switch between the Workbench palette and standard ANSI">Workbench</button>
   <span id="size" title="columns by rows"></span>
   <span id="state"><i id="dot"></i><span id="word">connecting</span></span>

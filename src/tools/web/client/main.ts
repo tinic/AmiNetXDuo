@@ -17,6 +17,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { LineEditor } from "./line";
 import { Wire, type WireState } from "./wire";
+import { Find } from "./find";
 import { FONT, THEME, THEMES } from "./theme";
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -105,6 +106,7 @@ const line = new LineEditor(term, {
   onEof: () => wire.word("eof"),
   onDeadEnter: () => connect(),
   onComplete: (arg) => wire.word("complete " + arg),
+  onSearch: (prompt) => setSearch(prompt),
 });
 
 const wire = new Wire({
@@ -170,6 +172,14 @@ term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
   if (e.key === "v") return false;
   if (e.key === "a" && e.metaKey) return false;      /* macOS select all */
   if (e.key === "c" && input === "char") { wire.word("break"); return false; }
+  /* Cmd-F, or Ctrl-Shift-F, opens the scrollback find -- the browser's own
+     Find cannot see canvas text. */
+  if ((e.metaKey && e.key === "f") ||
+      (e.ctrlKey && e.shiftKey && (e.key === "f" || e.key === "F"))) {
+    e.preventDefault();
+    find.open();
+    return false;
+  }
   return true;
 });
 
@@ -177,10 +187,25 @@ term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
 
 const stateEl = $("state");
 const wordEl = $("word");
+const isearchEl = $("isearch");
+
+/* The reverse-search prompt in the bar, shown while Ctrl-R is active. */
+function setSearch(prompt: string | null): void {
+  if (prompt === null) {
+    isearchEl.hidden = true;
+    isearchEl.textContent = "";
+  } else {
+    isearchEl.textContent = prompt;
+    isearchEl.hidden = false;
+  }
+}
 const brkEl = $("brk") as HTMLButtonElement;
 const eofEl = $("eof") as HTMLButtonElement;
 const againEl = $("again") as HTMLButtonElement;
 const themeEl = $("theme") as HTMLButtonElement;
+const findBtn = $("findbtn") as HTMLButtonElement;
+const find = new Find(term, $("find"), $("findq") as HTMLInputElement, $("findn"));
+findBtn.addEventListener("click", () => find.open());
 
 /*
  * The colour theme, chosen in the bar and remembered per browser.  Default is

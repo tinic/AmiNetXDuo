@@ -98,6 +98,29 @@ body {
 
 #theme { margin-left: auto; }
 
+#isearch {
+  font-style: italic;
+  color: var(--pen1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#isearch[hidden] { display: none; }
+
+#find { display: flex; align-items: center; gap: 0.35rem; }
+#find[hidden] { display: none; }
+#findq {
+  font: inherit;
+  font-size: 13px;
+  color: var(--pen1);
+  background: var(--pen2);
+  border: 1px solid var(--pen1);
+  border-radius: 0;
+  padding: 1px 4px;
+  width: 14ch;
+}
+#findn { font-style: italic; white-space: nowrap; }
+
 #size {
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
