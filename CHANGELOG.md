@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.6
+
 - `anxgenet.device`'s idle poller runs only for AmiNetXDuo's own stack. A
   plain SANA-II opener -- Roadshow, AmiTCP -- gets the interrupt path alone,
   the one that had already served Roadshow's 691 MB SMB reads; under
