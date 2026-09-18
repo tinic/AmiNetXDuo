@@ -478,6 +478,29 @@ static void test_cursor(void)
           " answer's bytes as pager keystrokes");
 }
 
+/*
+ * THE FORM FEED.
+ *
+ * 0x0C clears and homes on the Amiga console; a browser terminal (xterm binds
+ * FF to lineFeed) scrolls instead, so a page a program clears with it -- More
+ * -- never clears.  Sent on as CSI H CSI 2 J it clears the same on both.
+ */
+static void test_formfeed(void)
+{
+    char *term = slurp("src/tools/httpterm.c");
+
+    printf("the form feed\n");
+    if (term == NULL) { failures++; return; }
+
+    CHECK(strstr(term, "TERM_FF_CLEAR") != NULL &&
+          strstr(term, "0x9B, (UBYTE)'H', 0x9B, (UBYTE)'2'") != NULL,
+          "httpterm.c: no form-feed-to-clear translation");
+    CHECK(strstr(term, "b == 0x0C") != NULL,
+          "httpterm.c: form feed is not intercepted in the output");
+
+    free(term);
+}
+
 int main(void)
 {
     char *text = slurp("src/tools/httpterm.c");
@@ -534,6 +557,7 @@ int main(void)
     test_rings();
     test_winsize();
     test_cursor();
+    test_formfeed();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

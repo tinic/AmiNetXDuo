@@ -418,6 +418,14 @@ static BOOL term_seq_has(ULONG want)
  * the caller's bytes were taken, which is not the same as how many reached the
  * ring, because a swallowed sequence is taken and never appears.
  */
+/* Form feed (0x0C) clears the screen and homes the cursor on the Amiga
+   console.  A browser terminal treats it as a line feed -- xterm binds LF, VT
+   and FF to one handler -- so a page a program clears with it never clears.
+   CSI H then CSI 2 J is the same clear-and-home, and is rendered the same on
+   both.  8-bit CSI so it travels like the rest of this handler's output. */
+static const UBYTE TERM_FF_CLEAR[5] = { 0x9B, (UBYTE)'H', 0x9B, (UBYTE)'2',
+                                        (UBYTE)'J' };
+
 static ULONG term_out_put(const UBYTE *src, ULONG len)
 {
     ULONG done = 0;
@@ -425,11 +433,16 @@ static ULONG term_out_put(const UBYTE *src, ULONG len)
     while (done < len)
     {
         UBYTE b = src[done];
+        ULONG need = (ULONG)term_seq_n + 1UL;
 
-        /* Room for everything held plus this byte, checked before the byte is
-           taken.  That is the invariant that lets term_seq_flush() write
-           without checking, so a sequence can never end up half in the ring. */
-        if (ring_free(&term_out) < (ULONG)term_seq_n + 1UL)
+        /* A form feed leaves as the five bytes of the clear it becomes; every
+           other byte as itself.  Room for it -- plus anything held -- checked
+           before the byte is taken, the invariant that lets term_seq_flush()
+           and the clear write without checking. */
+        if (term_seq_n == 0 && b == 0x0C)
+            need = sizeof(TERM_FF_CLEAR);
+
+        if (ring_free(&term_out) < need)
             break;
 
         done++;
@@ -441,6 +454,11 @@ static ULONG term_out_put(const UBYTE *src, ULONG len)
                 term_seq[0]  = b;
                 term_seq_n   = 1;
                 term_seq_esc = (UBYTE)((b == 0x1B) ? 1 : 0);
+            }
+            else if (b == 0x0C)
+            {
+                (VOID)ring_put(&term_out, TERM_FF_CLEAR,
+                               sizeof(TERM_FF_CLEAR));
             }
             else
             {

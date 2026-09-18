@@ -22,6 +22,12 @@ version at the top when it merges.
   filled the screen with "--- More ---" on a page-down and Space would not
   page. `More` counts lines on its own when no answer comes.
 
+- The web Shell (`httpd -T`) renders a form feed (`0x0C`) from a program as a
+  screen clear and cursor home, the way the Amiga console does; a browser
+  terminal treats it as a line feed. `More` clears each page with it, so its
+  old "--- More (n%) ---" prompt scrolled into the next page instead of the
+  page starting clean.
+
 ## 0.28.7
 
 - `NetShutdown` removes the interfaces instead of leaving them attached with
