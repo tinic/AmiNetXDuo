@@ -20,6 +20,7 @@
 #define AMINETXDUO_HTTPZZ_H
 
 #include <exec/types.h>
+#include <stddef.h>   /* offsetof, for the layout guard below */
 
 /* Vendor service id (0x8000+ range; JEDI owns 0x8100).  Recorded in the SDK
    vendor table as the AmiNetXDuo console encoder. */
@@ -74,6 +75,32 @@ typedef struct HttpZzEncodeReply
     UWORD  codec;            /* codec actually used                            */
     UWORD  flags;            /* HTTPZZ_RF_*                                    */
 } HttpZzEncodeReply;
+
+/* The ARM decoder reads these fields by fixed byte offset (see the reference
+   handler in docs/plans/zz9000-console-offload.md), so the layout is the
+   contract, not an implementation detail.  These fail the build if a field
+   moves -- the one desync a cross-compile would not otherwise catch. */
+typedef char HttpZzEncodeReq_offsets_fixed[
+    (offsetof(HttpZzEncodeReq, surface_handle) == 0  &&
+     offsetof(HttpZzEncodeReq, out_handle)     == 4  &&
+     offsetof(HttpZzEncodeReq, out_capacity)   == 8  &&
+     offsetof(HttpZzEncodeReq, enc_flags)      == 12 &&
+     offsetof(HttpZzEncodeReq, width)          == 16 &&
+     offsetof(HttpZzEncodeReq, height)         == 18 &&
+     offsetof(HttpZzEncodeReq, bytes_per_row)  == 20 &&
+     offsetof(HttpZzEncodeReq, ty0)            == 22 &&
+     offsetof(HttpZzEncodeReq, ty1)            == 24 &&
+     offsetof(HttpZzEncodeReq, flags)          == 26 &&
+     offsetof(HttpZzEncodeReq, codec)          == 28 &&
+     offsetof(HttpZzEncodeReq, depth)          == 30 &&
+     offsetof(HttpZzEncodeReq, tile_w)         == 31 &&
+     offsetof(HttpZzEncodeReq, tile_h)         == 32 &&
+     offsetof(HttpZzEncodeReq, fmt)            == 33) ? 1 : -1];
+
+typedef char HttpZzEncodeReply_offsets_fixed[
+    (offsetof(HttpZzEncodeReply, out_len) == 0 &&
+     offsetof(HttpZzEncodeReply, codec)   == 4 &&
+     offsetof(HttpZzEncodeReply, flags)   == 6) ? 1 : -1];
 
 /* TRUE when the offload can run now: zz9k.library >= v2 opened, the framebuffer
    surface capability is advertised, and the 0x8200 service is registered.
