@@ -96,8 +96,9 @@ body {
   white-space: nowrap;
 }
 
+#theme { margin-left: auto; }
+
 #size {
-  margin-left: auto;
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
