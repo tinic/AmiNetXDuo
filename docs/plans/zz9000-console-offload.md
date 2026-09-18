@@ -201,21 +201,51 @@ it little-endian for the ARM with the same `RFB_*` config the host uses.
   public side-load path, the module file could ride in the archive; that is a
   firmware capability, not a host one, and is out of scope here.)
 
+## Firmware build & flash (done 2026-09-18)
+
+The `0x8200` handler is built into ZZ9000OS and staged on the A3000's card.
+The remote path -- no case opening, no SD removal -- is `ZZFwUpdate`.
+
+Base: `BlitterStudio/zz9000-firmware` `v2.8.0-rc3` (the A3000 already runs a
+v2.8.0-rc build; `zz9k.library 2.29`, SDK ABI 2.0).
+
+Integration (patch: `AmiNetXDuo:zz9000-fw-console-encode.patch`, also on the
+A3000):
+- `ZZ9000OS/src/sdk_mailbox.c`: `handle_console_encode()` + a persistent
+  `rfb_encoder` (shadow/scratch `malloc`'d, seq preserved across resets); the
+  `0x8200` row in `sdk_services[]`; the `SDK_OP_CONSOLE_ENCODE` dispatch case;
+  `#include <aminetxduo/rfb_encode.h>` + `<stdlib.h>`.  It resolves the
+  displayed framebuffer (`get_surface_info`), validates the host geometry
+  against the real surface, `prepare_surface_for_arm_read`s it, runs
+  `rfb_encode_band` into the shared out buffer, `Xil_DCacheFlushRange`es it,
+  and writes the `HttpZzEncodeReply`.
+- `ZZ9000OS/src/sdk_mailbox.h`: `SDK_SERVICE_CONSOLE`/`SDK_OP_CONSOLE_ENCODE`
+  `0x8200`, `SDK_CAP_CONSOLE_ENCODE (1U << 28)`.
+- `ZZ9000OS/src/rfb/` + `src/aminetxduo/`: the portable encoder, byte-identical
+  to the 68k fallback (only `<string.h>`); added to the Makefile `C_SRCS`.
+
+Build (ARM-only change, no Vivado -- committed bitstream/FSBL):
+```
+./build_firmware.sh        # arm-none-eabi-gcc; downloads deps
+BOOTGEN=<path>/bootgen ./build_bootimage.sh   # -> bootimage_work/BOOT.bin
+```
+Sandbox-toolchain notes (Debian's stricter GCC 14, NOT needed with the official
+Arm GNU Toolchain the repo expects): demote the GCC-14 permerrors --
+`build_libpng.sh` +`-Wno-error=incompatible-pointer-types`, `ZZ9000OS/Makefile`
++`-Wno-int-conversion -Wno-implicit-int`.  `bootgen` was built from
+`Xilinx/bootgen` source.
+
+Flash (staged, not yet activated): `ZZFwUpdate AmiNetXDuo:BOOT.bin BOOT.bin`
+wrote 3,839,744 bytes to `0:/BOOT.bin` (old kept as `BOOT.bak`).
+
 ## Status
 
-Host side complete; the one remaining piece is a firmware build.
-
-- [x] submodule `third_party/zz9000-sdk`
-- [x] `0x8200` reserved in the SDK fork's vendor table
-- [x] host `httpzz.c` -- detect (`httpzz_available`) + encode call + fallback, cross-compiles
-- [x] contract carries the host encoder geometry so the card frames bands
-      identically (`httpzz_configure`, `HttpZzEncodeReq`)
-- [x] `httpfb.c` prefers the offload on a chunky (card) screen when available,
-      skips the host readback, and falls back cleanly on any failure
-- [x] CMake: httpd sees the SDK headers (tool_httpd include dirs)
-- [x] firmware reference handler written (above) -- shares `httpzz.h` + `src/rfblib`
-- [ ] **handoff: build the `0x8200` handler into ZZ9000OS (Zynq toolchain) and
-      validate on the A3000** -- the only open item
+- [x] host side: `httpzz` detect + encode + fallback, `httpfb.c` offload,
+      geometry-carrying contract, layout assertion (merged to `main`)
+- [x] `0x8200` firmware handler built into ZZ9000OS (v2.8.0-rc3 base)
+- [x] `BOOT.bin` built and staged on the A3000 SD via `ZZFwUpdate` (`BOOT.bak` kept)
+- [ ] **power-cycle the A3000 to activate, then validate `/console` offload**
+      (`ZZFwUpdate RESTORE` rolls back if it misbehaves)
 - [ ] optional `DEFLATE` wrap (browser-native decode), measured choice -- deferred
 - [ ] Zorro II support -- deferred (v1 is Zorro III / A3000)
 
