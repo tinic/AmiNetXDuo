@@ -10,7 +10,7 @@
  * httpfb.c keeps the existing httprtg.c readback + rfb_encode path.
  *
  * The ARM module and this file share ONE contract: the 0x8200 vendor service
- * and the request/reply below.  See docs/zz9000-console-offload.md and
+ * and the request/reply below.  See docs/plans/zz9000-console-offload.md and
  * third_party/zz9000-sdk/docs/zz9k-vendor-services.md.
  *
  * SPDX-License-Identifier: MIT

@@ -5,6 +5,7 @@ comment beside the code, not an entry here.
 **ONE LINE PER ROW.** What is wrong and where. Not how it was found.
 | Item | Why it is open | Cite |
 |---|---|---|
+| The ZZ9000 console offload's ARM module is not built | httpd auto-detects `zz9k.library` + the `0x8200` service and falls back to the Zorro-readback path; the loadable module (rfb_encode over `MAP_FRAMEBUFFER_SURFACE`) must be built in the zz9000-firmware repo (Zynq toolchain) and validated on the A3000 | `docs/plans/zz9000-console-offload.md`, `src/tools/httpzz.c` |
 | `stage_console` runs (`run-console.sh -c playhouse2 -C ham6 -m A1200` gave `RESULT=PASS`) and no workflow invokes it | still allowlisted in `tools/check-stage-coverage.sh`, so it proves nothing on a push | `tools/ci.sh`, `.github/workflows/emulator.yml` |
 | A workflow arm whose `-r` variable is unset SKIPS and reports success | `AMINETXDUO_RATE_IFACE` and `AMINETXDUO_RATE_PEER` are undefined in CI, so the throughput gate has never run there and the step shows green; the wiring gates check that a stage is named, not that it ran | `tools/ci-arm.sh:78-90` |
 | The guru after `NetShutdown` is unreproduced | `run-hwcard.sh -a shutdown` tells `machine_stopped` from `network_did_not_return`; it needs a run on the real A1200, which answers when it is up | `tests/tools/run-hwcard.sh` |
