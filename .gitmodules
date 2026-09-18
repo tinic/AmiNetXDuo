@@ -14,3 +14,6 @@
 	path = third_party/dropbear
 	url = https://github.com/mkj/dropbear.git
 	branch = main
+[submodule "third_party/zz9000-sdk"]
+	path = third_party/zz9000-sdk
+	url = https://github.com/tinic/zz9000-sdk
