@@ -16,11 +16,11 @@ version at the top when it merges.
   and `htop` then filling only that) or read no rows (`more Work:busybox/mklinks`
   showed "--- More (0%) ---" and a blank page). The size follows a browser resize
 
-- The web Shell (`httpd -T`) answers a program's `CSI 6 n` cursor-position
-  query itself, in the window coordinates it reports, and no longer forwards it
-  to the browser. The browser's answer had crossed the network into the pager's
-  key reads, and `more <file>` filled the screen with "--- More ---" on a
-  page-down. The terminal handler now tracks the cursor from the Shell's output.
+- The web Shell (`httpd -T`) no longer forwards a program's `CSI 6 n`
+  cursor-position query to the browser; it swallows it. The browser's answer
+  crossed the network and landed in the pager's key reads, so `more <file>`
+  filled the screen with "--- More ---" on a page-down and Space would not
+  page. `More` counts lines on its own when no answer comes.
 
 ## 0.28.7
 
