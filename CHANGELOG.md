@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.7
+
 - `NetShutdown` removes the interfaces instead of leaving them attached with
   the link down. Left in place they kept two things alive: the TCP
   connections of the programs that had not let go, suspended in their
