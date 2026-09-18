@@ -443,6 +443,46 @@ static void test_winsize(void)
     free(client);
 }
 
+/*
+ * THE CURSOR REPORT.
+ *
+ * More writes CSI 6 n after every line, and the answer is the cursor row it
+ * paginates by.  Forwarded to the browser, the answer crossed the LAN and
+ * arrived in the pager's key reads (the "--- More ---" flood).  The handler
+ * answers it itself, off a cursor it tracks from the Shell's output, and does
+ * not forward the query.
+ */
+static void test_cursor(void)
+{
+    char *term = slurp("src/tools/httpterm.c");
+    long  dsr, dsr_end;
+
+    printf("the cursor report\n");
+
+    if (term == NULL) { failures++; return; }
+
+    /* The report exists and is written into the INPUT ring, as CSI ... R. */
+    CHECK(strstr(term, "term_cursor_report") != NULL &&
+          strstr(term, "(UBYTE)'R'") != NULL &&
+          strstr(term, "term_inject(b, n)") != NULL,
+          "httpterm.c: no CSI 6 n cursor report injected into the input");
+
+    /* The cursor is tracked from the output, not guessed. */
+    CHECK(strstr(term, "term_track_byte") != NULL &&
+          strstr(term, "term_seq_param") != NULL,
+          "httpterm.c: the cursor is not tracked from the Shell's output");
+
+    /* The DSR arm answers 6 and does NOT fall through to term_seq_flush --
+       forwarding it is exactly the bug. */
+    dsr = offset_of(term, "case (UBYTE)'n':");
+    dsr_end = dsr >= 0 ? offset_of(term + dsr, "break;") : -1;
+    if (dsr_end >= 0) dsr_end += dsr;
+    CHECK(dsr >= 0 && dsr_end > dsr &&
+          a_before_b(term, dsr, dsr_end, "term_seq_param(0UL, 0UL) == 6UL",
+                     "term_cursor_report()"),
+          "httpterm.c: CSI 6 n is not answered before it could be forwarded");
+}
+
 int main(void)
 {
     char *text = slurp("src/tools/httpterm.c");
@@ -498,6 +538,7 @@ int main(void)
     test_callers();
     test_rings();
     test_winsize();
+    test_cursor();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

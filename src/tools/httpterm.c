@@ -414,6 +414,123 @@ static BOOL term_seq_has(ULONG want)
 }
 
 /*
+ * THE CURSOR, TRACKED HERE.
+ *
+ * More writes CSI 6 n (DSR, "where is the cursor") after every line and asks it
+ * again under its pager prompt.  A real console answers on the spot; here the
+ * answer would cross the LAN to the browser and back, arriving after More had
+ * gone on to read its pager key -- which then reads the report's bytes as
+ * keystrokes, and under the prompt that is a re-query-and-reprompt loop (the
+ * screen fills with "--- More ---").  So the report is answered from here,
+ * synchronously, the way term_bounds_report() answers the aWSR, and CSI 6 n is
+ * never forwarded.  That needs the cursor, tracked off the Shell's own output
+ * in the 1-based coordinates the report is written in and clamped to the size
+ * term_bounds_report() hands out.
+ */
+static UWORD term_cx = 1;               /* column, 1-based                    */
+static UWORD term_cy = 1;               /* row, 1-based                       */
+static UWORD term_sx = 1;               /* DECSC save (ESC 7 / ESC 8)         */
+static UWORD term_sy = 1;
+
+static UWORD term_clampx(LONG v)
+{
+    if (v < 1)                 return 1;
+    if ((UWORD)v > term_cols)  return term_cols;
+    return (UWORD)v;
+}
+
+static UWORD term_clampy(LONG v)
+{
+    if (v < 1)                 return 1;
+    if ((UWORD)v > term_rows)  return term_rows;
+    return (UWORD)v;
+}
+
+/* The Nth (0-based) numeric parameter of the held CSI, or def when it is
+   absent or empty.  Parameters are the runs of digits between the introducer
+   and the final byte, separated by ';'. */
+static ULONG term_seq_param(ULONG n, ULONG def)
+{
+    ULONG i   = term_seq_esc ? 2UL : 1UL;
+    ULONG idx = 0;
+    ULONG v   = 0;
+    BOOL  any = FALSE;
+
+    for (; i < (ULONG)term_seq_n; i++)
+    {
+        UBYTE c = term_seq[i];
+
+        if (c >= (UBYTE)'0' && c <= (UBYTE)'9')
+        {
+            v   = v * 10UL + (ULONG)(c - (UBYTE)'0');
+            any = TRUE;
+        }
+        else if (c == (UBYTE)';')
+        {
+            if (idx == n)
+                return any ? v : def;
+            idx++;
+            v   = 0;
+            any = FALSE;
+        }
+    }
+
+    return (idx == n && any) ? v : def;
+}
+
+/* Advance the tracked cursor for one plain (non-sequence) output byte. */
+static VOID term_track_byte(UBYTE b)
+{
+    if (b == (UBYTE)'\n')
+    {
+        term_cx = 1;
+        if (term_cy < term_rows)
+            term_cy++;                  /* else the screen has scrolled       */
+    }
+    else if (b == (UBYTE)'\r')
+    {
+        term_cx = 1;
+    }
+    else if (b == (UBYTE)'\b')
+    {
+        if (term_cx > 1)
+            term_cx--;
+    }
+    else if (b == (UBYTE)'\t')
+    {
+        term_cx = term_clampx((LONG)(((term_cx - 1U) / 8U + 1U) * 8U + 1U));
+    }
+    else if (b >= 0x20)
+    {
+        if (term_cx < term_cols)
+        {
+            term_cx++;
+        }
+        else                            /* autowrap                           */
+        {
+            term_cx = 1;
+            if (term_cy < term_rows)
+                term_cy++;
+        }
+    }
+}
+
+/* CSI 6 n: report the cursor as CSI row ; col R, into the INPUT ring, now. */
+static VOID term_cursor_report(VOID)
+{
+    UBYTE b[24];
+    ULONG n = 0;
+
+    b[n++] = 0x9B;
+    n += term_num(&b[n], (ULONG)term_cy);
+    b[n++] = (UBYTE)';';
+    n += term_num(&b[n], (ULONG)term_cx);
+    b[n++] = (UBYTE)'R';
+
+    term_inject(b, n);
+}
+
+/*
  * The Shell's output, scanned on its way into the ring.  Returns how many of
  * the caller's bytes were taken, which is not the same as how many reached the
  * ring, because a swallowed sequence is taken and never appears.
@@ -445,6 +562,7 @@ static ULONG term_out_put(const UBYTE *src, ULONG len)
             else
             {
                 (VOID)ring_put(&term_out, &b, 1UL);
+                term_track_byte(b);
             }
             continue;
         }
@@ -454,9 +572,23 @@ static ULONG term_out_put(const UBYTE *src, ULONG len)
         if (term_seq_esc && term_seq_n == 1)
         {
             if (b == (UBYTE)'[')
+            {
                 term_seq[term_seq_n++] = b;
+            }
             else
+            {
+                if (b == (UBYTE)'7')            /* DECSC, save cursor      */
+                {
+                    term_sx = term_cx;
+                    term_sy = term_cy;
+                }
+                else if (b == (UBYTE)'8')       /* DECRC, restore cursor   */
+                {
+                    term_cx = term_sx;
+                    term_cy = term_sy;
+                }
                 term_seq_flush(&b);
+            }
             continue;
         }
 
@@ -493,6 +625,50 @@ static ULONG term_out_put(const UBYTE *src, ULONG len)
                     term_want_resize = 0;
                 term_seq_n   = 0;
                 term_seq_esc = 0;
+                break;
+
+            case (UBYTE)'n':                /* DSR                          */
+                if (term_seq_param(0UL, 0UL) == 6UL)
+                {
+                    /* Cursor position: answered here, never forwarded, so the
+                       browser cannot answer it late into the pager's keys. */
+                    term_seq_n   = 0;
+                    term_seq_esc = 0;
+                    term_cursor_report();
+                    break;
+                }
+                term_seq_flush(&b);         /* other DSR: pass it through    */
+                break;
+
+            case (UBYTE)'H':                /* CUP, cursor position         */
+            case (UBYTE)'f':
+                term_cy = term_clampy((LONG)term_seq_param(0UL, 1UL));
+                term_cx = term_clampx((LONG)term_seq_param(1UL, 1UL));
+                term_seq_flush(&b);
+                break;
+
+            case (UBYTE)'A':                /* CUU, cursor up               */
+                term_cy = term_clampy((LONG)term_cy
+                                      - (LONG)term_seq_param(0UL, 1UL));
+                term_seq_flush(&b);
+                break;
+
+            case (UBYTE)'B':                /* CUD, cursor down             */
+                term_cy = term_clampy((LONG)term_cy
+                                      + (LONG)term_seq_param(0UL, 1UL));
+                term_seq_flush(&b);
+                break;
+
+            case (UBYTE)'C':                /* CUF, cursor forward          */
+                term_cx = term_clampx((LONG)term_cx
+                                      + (LONG)term_seq_param(0UL, 1UL));
+                term_seq_flush(&b);
+                break;
+
+            case (UBYTE)'D':                /* CUB, cursor back             */
+                term_cx = term_clampx((LONG)term_cx
+                                      - (LONG)term_seq_param(0UL, 1UL));
+                term_seq_flush(&b);
                 break;
 
             default:
@@ -1361,6 +1537,10 @@ BOOL http_term_start(VOID)
     term_break_port   = NULL;
     term_cols         = 80;
     term_rows         = 25;
+    term_cx           = 1;
+    term_cy           = 1;
+    term_sx           = 1;
+    term_sy           = 1;
     term_sync_conunit();
     term_seq_n        = 0;
     term_seq_esc      = 0;
