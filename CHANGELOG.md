@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.8
+
 - TCP sends leave slow start on the first loss, not at the window the peer's
   SYN carried. NetX Duo set the initial slow-start threshold to that window:
   a SYN's window is never scaled (RFC 7323), at most 65,535 bytes, 42,340
