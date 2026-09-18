@@ -43,7 +43,31 @@ the SDK's vendor table.
     screen is on the ZZ9000 (RTG), else the existing `httprtg.c` readback +
     `rfb_encode`.
 
+## Bandwidth: optional LZ4/zstd on top of RFB
+
+The RFB stream already tiles + deltas, but the ARM can compress its output
+further before it crosses the wire.  Negotiated, not fixed:
+
+- The browser advertises what it can inflate.  It has **gzip/deflate natively**
+  (`DecompressionStream`); **LZ4 and zstd need a small JS/WASM lib** bundled
+  into `shell.html` (e.g. a compact LZ4 block decoder, or `fzstd` for zstd).
+- The ARM module wraps the RFB bytes in the best codec both sides agree on and
+  the Zynq can sustain at frame rate.  **LZ4** (fast, modest ratio) vs **zstd**
+  (slower, better ratio) is a **measured** choice per the `zz9k-m68kbench`-style
+  model -- pick by throughput vs bandwidth on real frames.  The module bundles
+  the encoder (both are portable C; the SDK's CODEC only *decompresses*, so the
+  compressor is ours, alongside `rfb_encode`).
+- Order on the wire: `RFB encode -> [LZ4|zstd|none] -> WebSocket`; the client
+  reverses it. A `comp`/format tag on the frame says which was used.
+
 ## ABI reference (from the submodule)
+
+Host request builders are header-only in `host/include/zz9k/request.h`
+(`zz9k_request_query_service`, `_query_caps`, `_alloc_shared`,
+`_alloc_surface`, `_mem_copy`, ...); `ZZ9KRequest` is in `host/include/zz9k/host.h`
+and, for AmigaOS, `amiga/include/zz9k/library.h` (+ `proto/zz9k.h`,
+`clib/zz9k_protos.h`, `fd/zz9k_lib.fd`).  `ZZ9KCall(lib, &request, &reply, timeout)`.
+
 
 - Host FD: `third_party/zz9000-sdk/amiga/fd/zz9k_lib.fd`
   (`ZZ9KQueryCaps`, `ZZ9KQueryService`, `ZZ9KCall`, `ZZ9KCallAsync*`).
@@ -71,7 +95,10 @@ the SDK's vendor table.
 - [x] submodule `third_party/zz9000-sdk`
 - [ ] `0x8200` reserved in the SDK vendor table
 - [ ] ARM module source (rfb_encode over MAP_FRAMEBUFFER_SURFACE)
-- [ ] host `httpzz.c` (detect + call + fallback), wired into `httpfb.c`
-- [ ] CMake: httpd sees the SDK headers; dist ships the module
+- [x] host `httpzz.c` -- detect (`httpzz_available`) + encode call + fallback, cross-compiles
+- [ ] wire `httpfb.c` to prefer the offload when available (RTG screen)
+- [x] CMake: httpd sees the SDK headers (tool_httpd include dirs)
+- [ ] dist ships the ARM module
 - [ ] host tests for the detect/format glue; cross-compile clean
+- [ ] optional LZ4/zstd wrap (ARM encoder + client decoder), measured choice
 - [ ] handoff: firmware build of the module, on-card validation
