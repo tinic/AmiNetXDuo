@@ -477,6 +477,8 @@ static void test_cursor(void)
     CHECK(strstr(term, "term_cursor_report") == NULL,
           "httpterm.c: CSI 6 n is answered into the input; More reads the"
           " answer's bytes as pager keystrokes");
+
+    free(term);
 }
 
 /*
