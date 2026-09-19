@@ -9,6 +9,28 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The web console (`httpd -C`) looks at a still screen twice a second, not
+  fifteen times. The idle after a pass that found nothing was a multiple of
+  the pass's own cost, which on a machine where a pass is cheap is no idle at
+  all: an A1200 + PiStorm32 (Emu68) reads and compares a 1024x768x8 VideoCore
+  screen in 13 ms, waited 52, and spent 14.6% of itself on a screen nobody was
+  drawing on (286 passes in 26 s, nothing found in any of them). The idle now
+  has a floor in time that doubles with every empty pass -- 60, 120, 240, 480
+  ms, then half a second -- and a pass that found only a tile or two (a shell's
+  cursor blinking, a clock's digit) keeps that ladder where it is instead of
+  starting it over. Anything the viewer types or clicks still ends the wait at
+  once and restarts the ladder at its short end. Measured on that machine:
+  14.6% -> 5.6% with windows being moved on the screen; a still screen costs
+  two passes a second, 2.6%. Scrolling text on a VideoCore screen is a
+  different bill: the profile shows 78% of the machine in rtg.library's own
+  software scroll, the console's share of a scroll is 13-20% per viewer at the
+  2-3 frames a second its share allows.
+
+- The web console draws the pointer on a graphics-card screen a pixel to a
+  pixel. It scaled it by the display database's sprite-to-pixel ratio, the
+  chipset's rule, and on a 1024x768 VideoCore screen under Picasso96 the arrow
+  came out five times too wide. A card draws the pointer 1:1, so the scale on
+  a chunky screen is 1.
 - Every task the stack runs is named `AmiNetXDuo <what>` in a task list
   (Scout, Xoper, TaskE): `AmiNetXDuo kernel`, `tick`, `ip`, `rx ip`, `rx arp`,
   `rx ip6`, `dhcp`, `dhcpv6`, `dhcpv6 work`, `autoip`, `mdns`, `stack`,

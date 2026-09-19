@@ -79,6 +79,24 @@
 #define FB_QUIET_MULT       4
 #define FB_QUIET_IDLE_MAX   100
 
+/* ... and a floor on that idle in TIME, because the multiple above is of the
+   pass's own cost and says nothing on a machine where a pass is cheap.  An
+   A1200 + PiStorm32 (Emu68) reads and compares a 1024x768x8 VideoCore screen
+   in 13 ms; four times that is 52 ms, so a still screen was looked at fifteen
+   times a second for ever, at 14.6% of the machine (measured 2026-09-18 with
+   the probe's fbstat: 286 passes in 26 s, 188 ticks of encode, nothing found
+   in any of them).  So the idle after an empty pass is at least
+   FB_QUIET_FLOOR fiftieths, doubling with every further empty pass up to
+   FB_QUIET_FLOOR_MAX: 60, 120, 240, 480 ms, then half a second -- two looks
+   a second at a still screen, 2.6% of that machine, and a program that starts
+   drawing is still seen within half a second.  Input from the viewer resets
+   the count (fb_write_event) as well as ending the wait, so the pass after a
+   key and the ones after it come at the short end of the ladder: what a key
+   draws lands within 60 ms of the pass that missed it, not 500. */
+#define FB_QUIET_FLOOR      3
+#define FB_QUIET_FLOOR_MAX  25
+#define FB_QUIET_SMALL      2
+
 /* How often a `refresh` can force a full frame, in fiftieths.  The first ask is
    answered at once; the floor applies to the second and later inside a second,
    so a viewer that asks every frame degrades to one re-sync a second. */
@@ -214,6 +232,7 @@ static ULONG           fb_pass_acc;
 /* Whether the pass in progress has changed anything at the far end, and how
    many whole passes in a row have not.  See FB_QUIET_MULT. */
 static UBYTE           fb_pass_found;
+static ULONG           fb_pass_tiles;   /* dirty tiles + copies this pass found */
 static UBYTE           fb_quiet;
 
 /* When the pass in flight began, which is what FB_GRAB_FLOOR is measured from.
@@ -1027,6 +1046,21 @@ static VOID fb_pointer_scale(struct Screen *sc, UWORD *xs, UWORD *ys)
     UBYTE            resn = (UBYTE)SPRITERESN_ECS;
 
     fb_display_units(sc);
+
+    /* On a graphics card the pointer is not a chipset sprite: the RTG driver
+       draws the same 16-pixel image a pixel to a pixel, whatever the display
+       database says about ticks.  The database said 8 ticks a pixel for a
+       1024x768 VideoCore mode under Picasso96 against 44 for the sprite, and
+       the viewer drew the arrow five times too wide (A1200 + PiStorm32,
+       2026-09-18).  The session's own format says which kind of screen this
+       is -- it was read from the bitmap, not the mode -- and only a card's
+       bitmap is chunky. */
+    if (fb_geom.format == RFB_FMT_CLUT8 || fb_geom.format == RFB_FMT_RGB565)
+    {
+        *xs = 1;
+        *ys = 1;
+        return;
+    }
 
     /* Only a V39 ColorMap has the fields.  An older one is an ECS sprite. */
     if (cm != NULL && cm->Type >= (UBYTE)COLORMAP_TYPE_V39)
@@ -2313,6 +2347,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_pass_ticks = FB_BAND_WHEN;
     fb_pass_acc   = 0;
     fb_pass_found = 0;
+    fb_pass_tiles = 0;
     fb_quiet      = 0;
     fb_pass_t0    = 0;
     fb_frames     = 0;
@@ -2729,7 +2764,11 @@ BOOL http_fb_slice(ULONG now)
         if (rc == FB_GRAB_OK && !palette_moved &&
             (fb_enc.st.tiles_dirty != was_dirty ||
              fb_enc.st.copies != was_copies))
+        {
             fb_pass_found = 1;
+            fb_pass_tiles += (fb_enc.st.tiles_dirty - was_dirty) +
+                             (fb_enc.st.copies - was_copies);
+        }
         else if (fb_input_left != 0)
         {
             /* Every band and not only a chased one.  A key that draws nothing
@@ -2944,11 +2983,18 @@ BOOL http_fb_write(ULONG now)
             fb_pass_ticks = fb_pass_acc;
             fb_pass_acc = 0;
 
-            if (fb_pass_found)
+            /* A pass that found a tile or two -- a shell's cursor blinking,
+               a clock's digit -- keeps the ladder where it is rather than
+               starting it over: on a screen with one blinking cursor the
+               reset made every blink four quick passes and the still-screen
+               rate 4.7 a second (7.7% of an Emu68 A1200) instead of two.
+               More than FB_QUIET_SMALL tiles is somebody drawing. */
+            if (fb_pass_found && fb_pass_tiles > (ULONG)FB_QUIET_SMALL)
                 fb_quiet = 0;
-            else if (fb_quiet < 255)
+            else if (!fb_pass_found && fb_quiet < 255)
                 fb_quiet++;
             fb_pass_found = 0;
+            fb_pass_tiles = 0;
 
             owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
@@ -2961,8 +3007,15 @@ BOOL http_fb_write(ULONG now)
                              ? (ULONG)FB_QUIET_MULT : (ULONG)fb_quiet;
                 ULONG back = fb_pass_ticks * mult;
 
+                ULONG floor = (ULONG)FB_QUIET_FLOOR
+                              << ((fb_quiet > 4) ? 4 : (fb_quiet - 1));
+
                 if (back > (ULONG)FB_QUIET_IDLE_MAX)
                     back = (ULONG)FB_QUIET_IDLE_MAX;
+                if (floor > (ULONG)FB_QUIET_FLOOR_MAX)
+                    floor = (ULONG)FB_QUIET_FLOOR_MAX;
+                if (floor > back)
+                    back = floor;       /* see FB_QUIET_FLOOR */
                 if (back > idle)
                     idle = back;
             }
