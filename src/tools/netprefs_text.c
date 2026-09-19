@@ -25,6 +25,7 @@ static long field_of_line(const char *line, size_t len,
                           NpTextField *fields, size_t count)
 {
     size_t begin = 0, end, i;
+    long first = -1;
     while (begin < len && (line[begin] == ' ' || line[begin] == '\t')) begin++;
     if (begin == len || line[begin] == '#' || line[begin] == ';') return -1;
     end = begin;
@@ -36,9 +37,14 @@ static long field_of_line(const char *line, size_t len,
     while (end < len && line[end] != '=' && line[end] != ' ' &&
            line[end] != '\t' && line[end] != '\r' && line[end] != '\n') end++;
     for (i = 0; i < count; i++)
-        if (equal_nocase(line + begin, end - begin, fields[i].key))
-            return (long)i;
-    return -1;
+    {
+        if (!equal_nocase(line + begin, end - begin, fields[i].key))
+            continue;
+        if (first < 0) first = (long)i;
+        if (!fields[i].seen) return (long)i;
+    }
+    /* More old occurrences than fields are still duplicates and are dropped. */
+    return first;
 }
 
 static int append(char *out, size_t cap, size_t *used,

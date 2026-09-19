@@ -14,6 +14,7 @@
 #include "aminetxduo/version.h"
 
 #include <exec/libraries.h>
+#include <exec/lists.h>
 #include <exec/memory.h>
 #include <graphics/gfxbase.h>
 #include <intuition/intuition.h>
@@ -39,30 +40,55 @@ struct Library       *GadToolsBase;
 #define NP_PATH_LEN        192
 #define NP_FILE_MAX        (256UL * 1024UL)
 #define NP_VALUE_LEN       160
+#define NP_SAVE_FIELDS     24
 
 enum
 {
     GID_INTERFACE = 1,
+    GID_PANEL,
     GID_NEW,
     GID_NAME,
+    GID_ID,
     GID_DEVICE,
     GID_UNIT,
     GID_CARD,
+    GID_HWADDRESS,
     GID_IPV4,
     GID_ADDRESS,
     GID_NETMASK,
     GID_GATEWAY,
     GID_IPV6,
+    GID_ADDRESS6_1,
+    GID_ADDRESS6_2,
+    GID_GATEWAY6,
     GID_MDNS,
     GID_STATE,
     GID_BOOT,
     GID_PRIORITY,
+    GID_DOWN_OFFLINE,
+    GID_INIT_DELAY,
+    GID_PROMISCUOUS,
+    GID_MTU,
+    GID_RXBUFFER,
+    GID_IPREQUESTS,
+    GID_ARPREQUESTS,
+    GID_WRITEREQUESTS,
     GID_STATUS,
     GID_SAVE,
     GID_APPLY,
     GID_LIVE_ACTION,
     GID_REMOVE,
     GID_CLOSE
+};
+
+enum
+{
+    NP_PANEL_GENERAL,
+    NP_PANEL_IPV4,
+    NP_PANEL_IPV6,
+    NP_PANEL_DEVICE,
+    NP_PANEL_TUNING,
+    NP_PANEL_COUNT
 };
 
 enum
@@ -81,30 +107,44 @@ typedef struct NetPrefs
     struct Screen *screen;
     struct Window *window;
     struct Gadget *gadgets;
+    struct Gadget *panel_gadgets[NP_PANEL_COUNT];
     APTR           visual;
     struct Gadget *g_interface;
+    struct Gadget *g_panel;
     struct Gadget *g_name;
+    struct Gadget *g_id;
     struct Gadget *g_device;
     struct Gadget *g_unit;
     struct Gadget *g_card;
+    struct Gadget *g_hwaddress;
     struct Gadget *g_ipv4;
     struct Gadget *g_address;
     struct Gadget *g_netmask;
     struct Gadget *g_gateway;
     struct Gadget *g_ipv6;
+    struct Gadget *g_address6[AMI_CFG_MAX_ADDRESS6];
+    struct Gadget *g_gateway6;
     struct Gadget *g_mdns;
     struct Gadget *g_state;
     struct Gadget *g_boot;
     struct Gadget *g_priority;
+    struct Gadget *g_down_offline;
+    struct Gadget *g_init_delay;
+    struct Gadget *g_promiscuous;
+    struct Gadget *g_mtu;
+    struct Gadget *g_rxbuffer;
+    struct Gadget *g_iprequests;
+    struct Gadget *g_arprequests;
+    struct Gadget *g_writerequests;
     struct Gadget *g_status;
     struct Gadget *g_live_status;
     struct Gadget *g_live_action;
-    struct Gadget *g_hardware_title;
-    struct Gadget *g_addressing_title;
+    struct List    interface_list;
+    struct Node    interface_nodes[NP_MAX_INTERFACES];
     char           names[NP_MAX_INTERFACES][TOOL_NAME_LEN];
-    STRPTR         labels[NP_MAX_INTERFACES + 2];
     ULONG          count;
     LONG           selected;
+    ULONG          active_panel;
     LONG           live_state;
 } NetPrefs;
 
@@ -112,7 +152,19 @@ static NetPrefs np = { .live_state = NP_LIVE_UNKNOWN };
 static char np_address[16];
 static char np_netmask[16];
 static char np_gateway[16];
+static char np_address6[AMI_CFG_MAX_ADDRESS6][AMI_CFG_IP6_STRLEN + 5];
+static char np_gateway6[AMI_CFG_IP6_STRLEN];
+static char np_hwaddress[18];
 static char np_status[128];
+
+static VOID show_panel(ULONG which);
+static VOID select_panel(ULONG which);
+
+static const STRPTR panel_labels[] =
+{
+    (STRPTR)"General", (STRPTR)"IPv4", (STRPTR)"IPv6",
+    (STRPTR)"Device", (STRPTR)"Tuning", NULL
+};
 
 static const STRPTR ipv4_labels[] =
 {
@@ -123,7 +175,7 @@ static const STRPTR ipv4_labels[] =
 static const STRPTR ipv6_labels[] =
 {
     (STRPTR)"Off", (STRPTR)"Link-local", (STRPTR)"Automatic",
-    (STRPTR)"Static (keep ADDRESS6)", (STRPTR)"DHCPv6", NULL
+    (STRPTR)"Static", (STRPTR)"DHCPv6", NULL
 };
 
 static ULONG text_len(const char *s)
@@ -268,6 +320,14 @@ static VOID set_static_fields(BOOL enabled)
     set_attr(np.g_address, GA_Disabled, (ULONG)!enabled);
     set_attr(np.g_netmask, GA_Disabled, (ULONG)!enabled);
     set_attr(np.g_gateway, GA_Disabled, (ULONG)!enabled);
+}
+
+static VOID set_static6_fields(BOOL enabled)
+{
+    ULONG i;
+    for (i = 0; i < AMI_CFG_MAX_ADDRESS6; i++)
+        set_attr(np.g_address6[i], GA_Disabled, (ULONG)!enabled);
+    set_attr(np.g_gateway6, GA_Disabled, (ULONG)!enabled);
 }
 
 static BOOL ensure_dir(const char *path)
@@ -563,38 +623,96 @@ static VOID scan_interfaces(VOID)
                                       sizeof(resolved));
     ULONG i;
 
+    /* GadTools may be walking the old list while it repaints; detach it before
+       rebuilding the Exec list in place. */
+    if (np.window != NULL && np.g_interface != NULL)
+        set_attr(np.g_interface, GTLV_Labels, (ULONG)~0UL);
     np.count = tool_list_dir(dir, np.names, NP_MAX_INTERFACES, NULL);
     sort_names();
-    np.labels[0] = (STRPTR)"<new interface>";
-    for (i = 0; i < np.count; i++) np.labels[i + 1] = (STRPTR)np.names[i];
-    np.labels[np.count + 1] = NULL;
+    /* NewList() is in amiga.lib, which -nostartfiles tools do not link. */
+    np.interface_list.lh_Head = (struct Node *)&np.interface_list.lh_Tail;
+    np.interface_list.lh_Tail = NULL;
+    np.interface_list.lh_TailPred =
+        (struct Node *)&np.interface_list.lh_Head;
+    for (i = 0; i < np.count; i++)
+    {
+        np.interface_nodes[i].ln_Name = np.names[i];
+        np.interface_nodes[i].ln_Type = 0;
+        np.interface_nodes[i].ln_Pri = 0;
+        AddTail(&np.interface_list, &np.interface_nodes[i]);
+    }
+    if (np.window != NULL && np.g_interface != NULL)
+        set_attr(np.g_interface, GTLV_Labels, (ULONG)&np.interface_list);
 }
 
 static VOID clear_form(VOID)
 {
+    ULONG i;
+    ULONG restore = np.active_panel;
+
+    show_panel(NP_PANEL_GENERAL);
     set_attr(np.g_name, GA_Disabled, FALSE);
     set_attr(np.g_name, GTST_String, (ULONG)"");
+    set_attr(np.g_id, GTST_String, (ULONG)"");
+    set_attr(np.g_mdns, GTCB_Checked, FALSE);
+    set_attr(np.g_state, GTCB_Checked, TRUE);
+    set_attr(np.g_boot, GTCB_Checked, FALSE);
+    set_attr(np.g_priority, GTIN_Number, 0);
+    show_panel(NP_PANEL_DEVICE);
     set_attr(np.g_device, GTST_String, (ULONG)"");
     set_attr(np.g_unit, GTIN_Number, 0);
     set_attr(np.g_card, GTST_String, (ULONG)"");
+    set_attr(np.g_hwaddress, GTST_String, (ULONG)"");
+    set_attr(np.g_down_offline, GTCB_Checked, FALSE);
+    set_attr(np.g_init_delay, GTCB_Checked, FALSE);
+    set_attr(np.g_promiscuous, GTCB_Checked, FALSE);
+    show_panel(NP_PANEL_IPV4);
     set_attr(np.g_ipv4, GTCY_Active, AMI_IPTYPE_DHCP);
     set_attr(np.g_address, GTST_String, (ULONG)"");
     set_attr(np.g_netmask, GTST_String, (ULONG)"");
     set_attr(np.g_gateway, GTST_String, (ULONG)"");
     set_static_fields(FALSE);
+    show_panel(NP_PANEL_IPV6);
     set_attr(np.g_ipv6, GTCY_Active, AMI_IP6TYPE_AUTO);
-    set_attr(np.g_mdns, GTCB_Checked, FALSE);
-    set_attr(np.g_state, GTCB_Checked, TRUE);
-    set_attr(np.g_boot, GTCB_Checked, FALSE);
-    set_attr(np.g_priority, GTIN_Number, 0);
+#ifndef AMINETXDUO_IPV6
+    set_attr(np.g_ipv6, GA_Disabled, TRUE);
+#endif
+    for (i = 0; i < AMI_CFG_MAX_ADDRESS6; i++)
+        set_attr(np.g_address6[i], GTST_String, (ULONG)"");
+    set_attr(np.g_gateway6, GTST_String, (ULONG)"");
+    set_static6_fields(FALSE);
+    show_panel(NP_PANEL_TUNING);
+    set_attr(np.g_mtu, GTIN_Number, 0);
+    set_attr(np.g_rxbuffer, GTIN_Number, 0);
+    set_attr(np.g_iprequests, GTIN_Number, 0);
+    set_attr(np.g_arprequests, GTIN_Number, 0);
+    set_attr(np.g_writerequests, GTIN_Number, 0);
     np.selected = -1;
     set_status("New interface: enter a name and device, then Save.");
+    show_panel(restore < NP_PANEL_COUNT ? restore : NP_PANEL_GENERAL);
+}
+
+static VOID format_ip6_prefix(const AmiIp6Address *address, char *out,
+                              ULONG outlen)
+{
+    char prefix[12];
+    ULONG used;
+
+    ami_config_format_ip6(address->addr, out, outlen);
+    used = text_len(out);
+    if (used + 2 >= outlen) return;
+    out[used++] = '/';
+    out[used] = '\0';
+    decimal(address->prefix, prefix, sizeof(prefix));
+    tool_copy_string(out + used, outlen - used, prefix);
 }
 
 static VOID load_form(LONG index)
 {
     AmiIfConfig cfg;
     BOOL wildcard;
+    ULONG i;
+    ULONG restore;
 
     if (index < 0 || (ULONG)index >= np.count) { clear_form(); return; }
     if (ami_config_load_interface(np.names[index], &cfg) != AMI_CFG_OK)
@@ -607,11 +725,42 @@ static VOID load_form(LONG index)
     ami_config_format_ip(cfg.address, np_address, sizeof(np_address));
     ami_config_format_ip(cfg.netmask, np_netmask, sizeof(np_netmask));
     ami_config_format_ip(cfg.gateway, np_gateway, sizeof(np_gateway));
+    for (i = 0; i < AMI_CFG_MAX_ADDRESS6; i++)
+    {
+        if (i < cfg.address6_count)
+            format_ip6_prefix(&cfg.address6[i], np_address6[i],
+                              sizeof(np_address6[i]));
+        else
+            np_address6[i][0] = '\0';
+    }
+    if (cfg.have_gateway6)
+        ami_config_format_ip6(cfg.gateway6, np_gateway6, sizeof(np_gateway6));
+    else
+        np_gateway6[0] = '\0';
+    if (cfg.have_hw_address)
+        tool_format_mac(cfg.hw_address, np_hwaddress, sizeof(np_hwaddress));
+    else
+        np_hwaddress[0] = '\0';
+    restore = np.active_panel;
+
+    show_panel(NP_PANEL_GENERAL);
     set_attr(np.g_name, GTST_String, (ULONG)cfg.name);
     set_attr(np.g_name, GA_Disabled, TRUE);
+    set_attr(np.g_id, GTST_String, (ULONG)cfg.id);
+    set_attr(np.g_mdns, GTCB_Checked, (ULONG)cfg.mdns);
+    set_attr(np.g_state, GTCB_Checked, (ULONG)cfg.up);
+    set_attr(np.g_boot, GTCB_Checked,
+             (ULONG)boot_state(cfg.name, &wildcard));
+    set_attr(np.g_priority, GTIN_Number, (ULONG)(LONG)cfg.priority);
+    show_panel(NP_PANEL_DEVICE);
     set_attr(np.g_device, GTST_String, (ULONG)cfg.device);
     set_attr(np.g_unit, GTIN_Number, cfg.unit);
     set_attr(np.g_card, GTST_String, (ULONG)cfg.card);
+    set_attr(np.g_hwaddress, GTST_String, (ULONG)np_hwaddress);
+    set_attr(np.g_down_offline, GTCB_Checked, (ULONG)cfg.down_goes_offline);
+    set_attr(np.g_init_delay, GTCB_Checked, (ULONG)cfg.requires_init_delay);
+    set_attr(np.g_promiscuous, GTCB_Checked, (ULONG)cfg.promiscuous);
+    show_panel(NP_PANEL_IPV4);
     set_attr(np.g_ipv4, GTCY_Active, (ULONG)cfg.iptype);
     set_attr(np.g_address, GTST_String,
              (ULONG)(cfg.address != 0 ? np_address : ""));
@@ -620,14 +769,28 @@ static VOID load_form(LONG index)
     set_attr(np.g_gateway, GTST_String,
              (ULONG)(cfg.gateway != 0 ? np_gateway : ""));
     set_static_fields((BOOL)(cfg.iptype == AMI_IPTYPE_STATIC));
+    show_panel(NP_PANEL_IPV6);
     set_attr(np.g_ipv6, GTCY_Active, (ULONG)cfg.ip6type);
-    set_attr(np.g_mdns, GTCB_Checked, (ULONG)cfg.mdns);
-    set_attr(np.g_state, GTCB_Checked, (ULONG)cfg.up);
-    set_attr(np.g_boot, GTCB_Checked,
-             (ULONG)boot_state(cfg.name, &wildcard));
-    set_attr(np.g_priority, GTIN_Number, (ULONG)(LONG)cfg.priority);
+#ifndef AMINETXDUO_IPV6
+    set_attr(np.g_ipv6, GA_Disabled, TRUE);
+#endif
+    for (i = 0; i < AMI_CFG_MAX_ADDRESS6; i++)
+        set_attr(np.g_address6[i], GTST_String, (ULONG)np_address6[i]);
+    set_attr(np.g_gateway6, GTST_String, (ULONG)np_gateway6);
+#ifdef AMINETXDUO_IPV6
+    set_static6_fields((BOOL)(cfg.ip6type == AMI_IP6TYPE_STATIC));
+#else
+    set_static6_fields(FALSE);
+#endif
+    show_panel(NP_PANEL_TUNING);
+    set_attr(np.g_mtu, GTIN_Number, cfg.mtu);
+    set_attr(np.g_rxbuffer, GTIN_Number, cfg.rx_buffer);
+    set_attr(np.g_iprequests, GTIN_Number, cfg.ip_requests);
+    set_attr(np.g_arprequests, GTIN_Number, cfg.arp_requests);
+    set_attr(np.g_writerequests, GTIN_Number, cfg.write_requests);
     set_status(wildcard ? "Starts at boot through the all-interface wildcard."
-                        : "Definition loaded. Save keeps advanced settings and comments.");
+                        : "Loaded. Unknown settings and comments are preserved.");
+    show_panel(restore < NP_PANEL_COUNT ? restore : NP_PANEL_GENERAL);
 }
 
 static BOOL get_cycle(struct Gadget *g, ULONG *value)
@@ -638,50 +801,132 @@ static BOOL get_cycle(struct Gadget *g, ULONG *value)
     return (BOOL)(GT_GetGadgetAttrsA(g, np.window, NULL, tags) != 0);
 }
 
+static BOOL parse_mac(const char *s)
+{
+    ULONG i;
+
+    if (s == NULL) return FALSE;
+    for (i = 0; i < AMI_CFG_MAC_SIZE; i++)
+    {
+        ULONG digit;
+        if (i != 0 && (*s == ':' || *s == '-')) s++;
+        for (digit = 0; digit < 2; digit++, s++)
+            if (!( (*s >= '0' && *s <= '9') ||
+                   (*s >= 'a' && *s <= 'f') ||
+                   (*s >= 'A' && *s <= 'F') ))
+                return FALSE;
+    }
+    return (BOOL)(*s == '\0');
+}
+
 static BOOL save_form(BOOL apply)
 {
     char name[AMI_CFG_NAME_LEN], path[NP_PATH_LEN], resolved[AMI_CFG_PATH_LEN];
-    char unit[12], priority[12];
+    char unit[12], priority[12], mtu[12], rxbuffer[12];
+    char iprequests[12], arprequests[12], writerequests[12];
     char *old, *patched;
     ULONG oldlen = 0, newlen = 0, ipv4 = 0, ipv6 = 0;
     LONG pri = integer_value(np.g_priority);
+    LONG mtu_n = integer_value(np.g_mtu);
+    LONG rxbuffer_n = integer_value(np.g_rxbuffer);
+    LONG iprequests_n = integer_value(np.g_iprequests);
+    LONG arprequests_n = integer_value(np.g_arprequests);
+    LONG writerequests_n = integer_value(np.g_writerequests);
     ULONG address, mask, gateway = 0;
-    NpTextField fields[11];
+#ifdef AMINETXDUO_IPV6
+    ULONG parsed6[AMI_CFG_IP6_WORDS], prefix6;
+#endif
+    NpTextField *fields;
     BOOL existed, old_boot, wildcard;
-    ULONG i;
+    ULONG i, field_count = 0;
 
     tool_copy_string(name, sizeof(name), string_value(np.g_name));
     if (!sane_name(name))
     {
+        select_panel(NP_PANEL_GENERAL);
         requester("The name must be 1-63 characters and cannot contain\n"
                   "spaces, a slash, colon, semicolon or #.");
         return FALSE;
     }
     if (string_value(np.g_device)[0] == '\0')
     {
+        select_panel(NP_PANEL_DEVICE);
         requester("Choose a SANA-II device before saving.");
         return FALSE;
     }
-    if (integer_value(np.g_unit) < 0 || pri < -128 || pri > 127)
+    if (integer_value(np.g_unit) < 0)
     {
-        requester("Unit must not be negative; priority must be -128 through 127.");
+        select_panel(NP_PANEL_DEVICE);
+        requester("The device unit must not be negative.");
+        return FALSE;
+    }
+    if (pri < -128 || pri > 127)
+    {
+        select_panel(NP_PANEL_GENERAL);
+        requester("Priority must be -128 through 127.");
+        return FALSE;
+    }
+    if (mtu_n < 0 || (mtu_n != 0 && mtu_n < 68) || rxbuffer_n < 0 ||
+        iprequests_n < 0 || iprequests_n > AMI_CFG_READREQUESTS_MAX ||
+        arprequests_n < 0 || arprequests_n > AMI_CFG_READREQUESTS_MAX ||
+        writerequests_n < 0 || writerequests_n > AMI_CFG_WRITEREQUESTS_MAX)
+    {
+        select_panel(NP_PANEL_TUNING);
+        requester("Tuning values must be zero (automatic) or positive. MTU must\n"
+                  "be at least 68; read queues may not exceed 128, and the\n"
+                  "write queue may not exceed this build's limit.");
+        return FALSE;
+    }
+    if (string_value(np.g_hwaddress)[0] != '\0' &&
+        !parse_mac(string_value(np.g_hwaddress)))
+    {
+        select_panel(NP_PANEL_DEVICE);
+        requester("Hardware address must contain exactly six hexadecimal bytes.");
         return FALSE;
     }
     (VOID)get_cycle(np.g_ipv4, &ipv4);
+#ifdef AMINETXDUO_IPV6
     (VOID)get_cycle(np.g_ipv6, &ipv6);
-    if (ipv6 == AMI_IP6TYPE_STATIC && np.selected < 0)
+    if (ipv6 == AMI_IP6TYPE_STATIC)
     {
-        requester("NetPrefs preserves existing ADDRESS6 lines, including two-address\n"
-                  "configurations, but does not reduce them to one GUI field.\n"
-                  "Create a static IPv6 definition with NetSetup or a text editor.");
-        return FALSE;
+        prefix6 = 64;
+        if (string_value(np.g_address6[0])[0] == '\0' ||
+            !ami_config_parse_ip6(string_value(np.g_address6[0]), parsed6,
+                                  &prefix6))
+        {
+            select_panel(NP_PANEL_IPV6);
+            requester("Static IPv6 needs a valid first address, optionally followed by /prefix.");
+            return FALSE;
+        }
+        if (string_value(np.g_address6[1])[0] != '\0')
+        {
+            prefix6 = 64;
+            if (!ami_config_parse_ip6(string_value(np.g_address6[1]), parsed6,
+                                      &prefix6))
+            {
+                select_panel(NP_PANEL_IPV6);
+                requester("The second IPv6 address is not valid.");
+                return FALSE;
+            }
+        }
+        if (string_value(np.g_gateway6)[0] != '\0' &&
+            !ami_config_parse_ip6(string_value(np.g_gateway6), parsed6, NULL))
+        {
+            select_panel(NP_PANEL_IPV6);
+            requester("The IPv6 gateway is not valid.");
+            return FALSE;
+        }
     }
+#else
+    (VOID)ipv6;
+#endif
     if (ipv4 == AMI_IPTYPE_STATIC)
     {
         if (!ami_config_parse_ip(string_value(np.g_address), &address) ||
             address == 0 || !ami_config_parse_ip(string_value(np.g_netmask), &mask) ||
             mask == 0 || (((~mask) & ((~mask) + 1UL)) != 0))
         {
+            select_panel(NP_PANEL_IPV4);
             requester("A static IPv4 interface needs a valid address and netmask.");
             return FALSE;
         }
@@ -689,6 +934,7 @@ static BOOL save_form(BOOL apply)
             (!ami_config_parse_ip(string_value(np.g_gateway), &gateway) ||
              gateway == 0))
         {
+            select_panel(NP_PANEL_IPV4);
             requester("The gateway is not a valid IPv4 address.");
             return FALSE;
         }
@@ -700,34 +946,72 @@ static BOOL save_form(BOOL apply)
 
     decimal((ULONG)integer_value(np.g_unit), unit, sizeof(unit));
     signed_decimal(pri, priority, sizeof(priority));
-    fields[0].key = "DEVICE"; fields[0].value = string_value(np.g_device);
-    fields[1].key = "UNIT"; fields[1].value = unit;
-    fields[2].key = "CARD"; fields[2].value = string_value(np.g_card)[0] != '\0'
-                                           ? string_value(np.g_card) : NULL;
-    fields[3].key = "CONFIGURE"; fields[3].value =
-        ipv4 == AMI_IPTYPE_DHCP ? "DHCP" :
-        ipv4 == AMI_IPTYPE_LINKLOCAL ? "LINKLOCAL" :
-        ipv4 == AMI_IPTYPE_NONE ? "NONE" : "STATIC";
-    fields[4].key = "ADDRESS"; fields[4].value =
-        ipv4 == AMI_IPTYPE_STATIC ? string_value(np.g_address) : NULL;
-    fields[5].key = "NETMASK"; fields[5].value =
-        ipv4 == AMI_IPTYPE_STATIC ? string_value(np.g_netmask) : NULL;
-    fields[6].key = "GATEWAY"; fields[6].value =
-        ipv4 == AMI_IPTYPE_STATIC && gateway != 0 ? string_value(np.g_gateway) : NULL;
-    fields[7].key = "CONFIGURE6"; fields[7].value =
-        ipv6 == AMI_IP6TYPE_LINKLOCAL ? "LINKLOCAL" :
-        ipv6 == AMI_IP6TYPE_AUTO ? "AUTO" :
-        ipv6 == AMI_IP6TYPE_STATIC ? "STATIC" :
-        ipv6 == AMI_IP6TYPE_DHCP ? "DHCP" : "OFF";
-    fields[8].key = "MDNS"; fields[8].value = checked(np.g_mdns) ? "YES" : "NO";
-    fields[9].key = "PRIORITY"; fields[9].value = priority;
-    fields[10].key = "STATE"; fields[10].value = checked(np.g_state) ? "UP" : "DOWN";
-    for (i = 0; i < 11; i++) fields[i].seen = FALSE;
+    decimal((ULONG)mtu_n, mtu, sizeof(mtu));
+    decimal((ULONG)rxbuffer_n, rxbuffer, sizeof(rxbuffer));
+    decimal((ULONG)iprequests_n, iprequests, sizeof(iprequests));
+    decimal((ULONG)arprequests_n, arprequests, sizeof(arprequests));
+    decimal((ULONG)writerequests_n, writerequests, sizeof(writerequests));
+    fields = (NpTextField *)ami_alloc(NP_SAVE_FIELDS * sizeof(*fields));
+    if (fields == NULL)
+    {
+        requester("There is not enough free memory to prepare the new definition.");
+        return FALSE;
+    }
+#define FIELD(key_, value_) do { \
+    fields[field_count].key = (key_); \
+    fields[field_count].value = (value_); \
+    fields[field_count].seen = FALSE; \
+    field_count++; \
+} while (0)
+    FIELD("DEVICE", string_value(np.g_device));
+    FIELD("UNIT", unit);
+    FIELD("CARD", string_value(np.g_card)[0] != '\0'
+                  ? string_value(np.g_card) : NULL);
+    FIELD("ID", string_value(np.g_id)[0] != '\0'
+                ? string_value(np.g_id) : NULL);
+    FIELD("CONFIGURE", ipv4 == AMI_IPTYPE_DHCP ? "DHCP" :
+                       ipv4 == AMI_IPTYPE_LINKLOCAL ? "LINKLOCAL" :
+                       ipv4 == AMI_IPTYPE_NONE ? "NONE" : "STATIC");
+    FIELD("ADDRESS", ipv4 == AMI_IPTYPE_STATIC
+                     ? string_value(np.g_address) : NULL);
+    FIELD("NETMASK", ipv4 == AMI_IPTYPE_STATIC
+                     ? string_value(np.g_netmask) : NULL);
+    FIELD("GATEWAY", ipv4 == AMI_IPTYPE_STATIC && gateway != 0
+                     ? string_value(np.g_gateway) : NULL);
+#ifdef AMINETXDUO_IPV6
+    FIELD("CONFIGURE6", ipv6 == AMI_IP6TYPE_LINKLOCAL ? "LINKLOCAL" :
+                        ipv6 == AMI_IP6TYPE_AUTO ? "AUTO" :
+                        ipv6 == AMI_IP6TYPE_STATIC ? "STATIC" :
+                        ipv6 == AMI_IP6TYPE_DHCP ? "DHCP" : "OFF");
+    FIELD("ADDRESS6", ipv6 == AMI_IP6TYPE_STATIC
+                      ? string_value(np.g_address6[0]) : NULL);
+    FIELD("ADDRESS6", ipv6 == AMI_IP6TYPE_STATIC &&
+                      string_value(np.g_address6[1])[0] != '\0'
+                      ? string_value(np.g_address6[1]) : NULL);
+    FIELD("GATEWAY6", ipv6 == AMI_IP6TYPE_STATIC &&
+                      string_value(np.g_gateway6)[0] != '\0'
+                      ? string_value(np.g_gateway6) : NULL);
+#endif
+    FIELD("MDNS", checked(np.g_mdns) ? "YES" : "NO");
+    FIELD("PRIORITY", priority);
+    FIELD("STATE", checked(np.g_state) ? "UP" : "DOWN");
+    FIELD("HARDWAREADDRESS", string_value(np.g_hwaddress)[0] != '\0'
+                              ? string_value(np.g_hwaddress) : NULL);
+    FIELD("DOWNGOESOFFLINE", checked(np.g_down_offline) ? "YES" : NULL);
+    FIELD("REQUIRESINITDELAY", checked(np.g_init_delay) ? "YES" : NULL);
+    FIELD("FILTER", checked(np.g_promiscuous) ? "EVERYTHING" : NULL);
+    FIELD("MTU", mtu_n != 0 ? mtu : NULL);
+    FIELD("RXBUFFER", rxbuffer_n != 0 ? rxbuffer : NULL);
+    FIELD("IPREQUESTS", iprequests_n != 0 ? iprequests : NULL);
+    FIELD("ARPREQUESTS", arprequests_n != 0 ? arprequests : NULL);
+    FIELD("WRITEREQUESTS", writerequests_n != 0 ? writerequests : NULL);
+#undef FIELD
 
     tool_copy_string(path, sizeof(path),
         ami_cfg_resolve("DEVS:NetInterfaces", resolved, sizeof(resolved)));
     if (!ensure_dir(path))
     {
+        ami_free(fields);
         requester("DEVS:NetInterfaces could not be created.");
         return FALSE;
     }
@@ -736,7 +1020,11 @@ static BOOL save_form(BOOL apply)
     existed = tool_exists(path);
     old = read_file(path, &oldlen, (BOOL)!existed);
     /* Do not flatten an existing file merely because it became unreadable. */
-    if (old == NULL && existed) return FALSE;
+    if (old == NULL && existed)
+    {
+        ami_free(fields);
+        return FALSE;
+    }
     if (old == NULL)
     {
         static const char heading[] =
@@ -744,10 +1032,15 @@ static BOOL save_form(BOOL apply)
             "# Unknown keywords and comments are preserved when edited.\n\n";
         oldlen = sizeof(heading) - 1;
         old = (char *)ami_alloc(oldlen + 1);
-        if (old == NULL) return FALSE;
+        if (old == NULL)
+        {
+            ami_free(fields);
+            return FALSE;
+        }
         for (i = 0; i <= oldlen; i++) old[i] = heading[i];
     }
-    patched = patch_fields(old, oldlen, fields, 11, &newlen);
+    patched = patch_fields(old, oldlen, fields, field_count, &newlen);
+    ami_free(fields);
     ami_free(old);
     if (patched == NULL)
     {
@@ -770,13 +1063,12 @@ static BOOL save_form(BOOL apply)
         return FALSE;
     }
     scan_interfaces();
-    set_attr(np.g_interface, GTCY_Labels, (ULONG)np.labels);
     for (i = 0; i < np.count; i++)
     {
         if (tool_stricmp(np.names[i], name) == 0)
         {
             np.selected = (LONG)i;
-            set_attr(np.g_interface, GTCY_Active, i + 1);
+            set_attr(np.g_interface, GTLV_Selected, i);
             set_attr(np.g_name, GA_Disabled, TRUE);
             break;
         }
@@ -794,7 +1086,7 @@ static BOOL save_form(BOOL apply)
         set_status("Saved and applied. The interface was restarted.");
     }
     else
-        set_status("Saved. Use Apply to restart the interface with these settings.");
+        set_status("Saved. Use Save & Start to restart with these settings.");
     return TRUE;
 }
 
@@ -830,8 +1122,7 @@ static VOID remove_form(VOID)
         return;
     }
     scan_interfaces();
-    set_attr(np.g_interface, GTCY_Labels, (ULONG)np.labels);
-    set_attr(np.g_interface, GTCY_Active, 0);
+    set_attr(np.g_interface, GTLV_Selected, (ULONG)~0UL);
     clear_form();
     set_status("Removed. The old definition remains beside the drawer as .disabled.info.");
 }
@@ -890,8 +1181,7 @@ static VOID update_live_state(VOID)
 {
     static const char *const status_text[] =
     {
-        "Status: New", "Status: Stack off", "Status: Not added",
-        "Status: Offline", "Status: Online", "Status: Unknown"
+        "New", "Stack off", "Not added", "Offline", "Online", "Unknown"
     };
     static const char *const action_text[] =
     {
@@ -925,16 +1215,22 @@ static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
     return CreateGadgetA(kind, previous, &ng, tags);
 }
 
-/* GadTools has no group-box gadget.  Draw complete recessed frames, then
- * redraw padded text gadgets over their top edges.  That is the usual
- * Workbench labelled-box treatment and keeps both bevel pens clear of the
- * title glyphs.  The frames are window decoration, so redraw them after
- * GadTools has refreshed its gadgets. */
+/* GadTools has no page gadget.  The common controls and each page therefore
+ * have separate gadget lists; show_panel() removes one list and attaches the
+ * next.  The recessed panel and separator are window decoration and must be
+ * restored after Intuition refreshes the window. */
 static VOID draw_layout(VOID)
 {
+    struct DrawInfo *dri;
+    struct RastPort *rp;
     struct TagItem tags[3];
+    BYTE old_fg, old_bg, old_mode;
 
     if (np.window == NULL) return;
+    rp = np.window->RPort;
+    old_fg = rp->FgPen;
+    old_bg = rp->BgPen;
+    old_mode = rp->DrawMode;
     tags[0].ti_Tag = GT_VisualInfo;
     tags[0].ti_Data = (ULONG)np.visual;
     tags[1].ti_Tag = GTBB_Recessed;
@@ -942,15 +1238,56 @@ static VOID draw_layout(VOID)
     tags[2].ti_Tag = TAG_DONE;
     tags[2].ti_Data = 0;
 
-    DrawBevelBoxA(np.window->RPort, 8,   25, 614, 2,  tags);
-    DrawBevelBoxA(np.window->RPort, 8,   33, 288, 90, tags);
-    DrawBevelBoxA(np.window->RPort, 306, 33, 316, 90, tags);
+    DrawBevelBoxA(rp, 166, 25, 456, 108, tags);
 
-    /* Repainting the title gadgets after the frames masks the top bevel under
-       their full padded rectangles, instead of leaving a shine or shadow
-       touching the first and last letters. */
-    set_attr(np.g_hardware_title, GTTX_Text, (ULONG)"Hardware");
-    set_attr(np.g_addressing_title, GTTX_Text, (ULONG)"Addressing");
+    /* A two-pixel shadow/shine pair is a proper recessed separator.  A
+       two-pixel bevel box collapses to one visible edge on classic GadTools. */
+    dri = GetScreenDrawInfo(np.screen);
+    if (dri != NULL)
+    {
+        SetAPen(rp, dri->dri_Pens[SHADOWPEN]);
+        Move(rp, 156, 5);
+        Draw(rp, 156, 152);
+        SetAPen(rp, dri->dri_Pens[SHINEPEN]);
+        Move(rp, 157, 5);
+        Draw(rp, 157, 152);
+        if (np.active_panel == NP_PANEL_TUNING)
+        {
+            SetAPen(rp, dri->dri_Pens[TEXTPEN]);
+            SetDrMd(rp, JAM1);
+            Move(rp, 430, 106);
+            Text(rp, (CONST_STRPTR)"0 = automatic", 13);
+        }
+        FreeScreenDrawInfo(np.screen, dri);
+    }
+    SetAPen(rp, (ULONG)(UBYTE)old_fg);
+    SetBPen(rp, (ULONG)(UBYTE)old_bg);
+    SetDrMd(rp, (ULONG)(UBYTE)old_mode);
+}
+
+static VOID show_panel(ULONG which)
+{
+    struct RastPort *rp;
+
+    if (np.window == NULL || which >= NP_PANEL_COUNT ||
+        which == np.active_panel) return;
+    if (np.active_panel < NP_PANEL_COUNT)
+        (VOID)RemoveGList(np.window, np.panel_gadgets[np.active_panel], -1);
+
+    rp = np.window->RPort;
+    SetAPen(rp, rp->BgPen);
+    RectFill(rp, 164, 23, 623, 134);
+    np.active_panel = which;
+    draw_layout();
+    (VOID)AddGList(np.window, np.panel_gadgets[which], (UWORD)-1, -1, NULL);
+    RefreshGList(np.panel_gadgets[which], np.window, NULL, -1);
+}
+
+static VOID select_panel(ULONG which)
+{
+    if (which >= NP_PANEL_COUNT) return;
+    set_attr(np.g_panel, GTCY_Active, which);
+    show_panel(which);
 }
 
 static BOOL make_window(VOID)
@@ -978,77 +1315,132 @@ static BOOL make_window(VOID)
     g=(var); \
 } while (0)
 
-    TAG1(GTCY_Labels, np.labels);
-    ADD(np.g_interface,CYCLE_KIND,GID_INTERFACE,86,5,156,15,"Interface",PLACETEXT_LEFT);
+    tags[0].ti_Tag=GTLV_Labels; tags[0].ti_Data=(ULONG)&np.interface_list;
+    tags[1].ti_Tag=GTLV_Selected;
+    tags[1].ti_Data=np.count != 0 ? 0 : (ULONG)~0UL;
+    tags[2].ti_Tag=GTLV_ScrollWidth; tags[2].ti_Data=16;
+    tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
+    ADD(np.g_interface,LISTVIEW_KIND,GID_INTERFACE,8,20,142,112,
+        "Interfaces",PLACETEXT_ABOVE);
     TAG1(TAG_DONE, 0);
-    ADD(g,BUTTON_KIND,GID_NEW,250,5,58,15,"New",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_REMOVE,314,5,66,15,"Remove",PLACETEXT_IN);
-    TAG1(GTCB_Checked, TRUE);
-    ADD(np.g_state,CHECKBOX_KIND,GID_STATE,386,6,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
-        "Start online",PLACETEXT_RIGHT);
-    TAG1(GTCB_Checked, FALSE);
-    ADD(np.g_boot,CHECKBOX_KIND,GID_BOOT,530,6,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
-        "At boot",PLACETEXT_RIGHT);
-
-    tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Hardware";
-    tags[1].ti_Tag=GTTX_CopyText; tags[1].ti_Data=FALSE;
-    tags[2].ti_Tag=GTTX_Justification; tags[2].ti_Data=GTJ_CENTER;
-    tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
-    ADD(np.g_hardware_title,TEXT_KIND,0,12,29,76,10,NULL,0);
-    tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Addressing";
-    tags[1].ti_Tag=GTTX_CopyText; tags[1].ti_Data=FALSE;
-    tags[2].ti_Tag=GTTX_Justification; tags[2].ti_Data=GTJ_CENTER;
-    tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
-    ADD(np.g_addressing_title,TEXT_KIND,0,310,29,88,10,NULL,0);
-
-    TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
-    ADD(np.g_name,STRING_KIND,GID_NAME,72,40,212,15,"Name",PLACETEXT_LEFT);
-    TAG1(GTST_MaxChars, AMI_CFG_PATH_LEN - 1);
-    ADD(np.g_device,STRING_KIND,GID_DEVICE,72,60,212,15,"Device",PLACETEXT_LEFT);
-    TAG1(GTIN_MaxChars, 3);
-    ADD(np.g_unit,INTEGER_KIND,GID_UNIT,72,80,38,15,"Unit",PLACETEXT_LEFT);
-    TAG1(GTIN_MaxChars, 4);
-    ADD(np.g_priority,INTEGER_KIND,GID_PRIORITY,200,80,66,15,"Priority",PLACETEXT_LEFT);
-    TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
-    ADD(np.g_card,STRING_KIND,GID_CARD,72,100,212,15,"Card",PLACETEXT_LEFT);
-
-    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv4_labels;
-    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IPTYPE_DHCP;
+    ADD(g,BUTTON_KIND,GID_NEW,8,137,66,15,"New",PLACETEXT_IN);
+    ADD(g,BUTTON_KIND,GID_REMOVE,82,137,68,15,"Remove",PLACETEXT_IN);
+    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)panel_labels;
+    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=NP_PANEL_GENERAL;
     tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(np.g_ipv4,CYCLE_KIND,GID_IPV4,376,40,124,15,"IPv4",PLACETEXT_LEFT);
-    TAG1(GTCB_Checked, FALSE);
-    ADD(np.g_mdns,CHECKBOX_KIND,GID_MDNS,530,41,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
-        "mDNS",PLACETEXT_RIGHT);
-    TAG1(GTST_MaxChars, 15);
-    ADD(np.g_address,STRING_KIND,GID_ADDRESS,376,56,220,15,"Address",PLACETEXT_LEFT);
-    TAG1(GTST_MaxChars, 15);
-    ADD(np.g_netmask,STRING_KIND,GID_NETMASK,376,72,220,15,"Mask",PLACETEXT_LEFT);
-    TAG1(GTST_MaxChars, 15);
-    ADD(np.g_gateway,STRING_KIND,GID_GATEWAY,376,88,220,15,"Gateway",PLACETEXT_LEFT);
-    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv6_labels;
-    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IP6TYPE_AUTO;
-    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(np.g_ipv6,CYCLE_KIND,GID_IPV6,376,104,220,15,"IPv6",PLACETEXT_LEFT);
-
+    ADD(np.g_panel,CYCLE_KIND,GID_PANEL,236,5,170,15,"Settings",PLACETEXT_LEFT);
     tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Loading definitions...";
     tags[1].ti_Tag=GTTX_Border; tags[1].ti_Data=TRUE;
     tags[2].ti_Tag=GTTX_CopyText; tags[2].ti_Data=FALSE;
     tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
-    ADD(np.g_status,TEXT_KIND,GID_STATUS,8,129,614,15,NULL,0);
+    ADD(np.g_status,TEXT_KIND,GID_STATUS,166,137,456,15,NULL,0);
     TAG1(TAG_DONE, 0);
-    ADD(g,BUTTON_KIND,GID_SAVE,8,152,72,17,"Save",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_APPLY,88,152,120,17,"Save & Start",PLACETEXT_IN);
-    tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Status: Unknown";
+    ADD(g,BUTTON_KIND,GID_SAVE,8,157,66,17,"Save",PLACETEXT_IN);
+    ADD(g,BUTTON_KIND,GID_APPLY,82,157,116,17,"Save & Start",PLACETEXT_IN);
+    tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Unknown";
     tags[1].ti_Tag=GTTX_Border; tags[1].ti_Data=TRUE;
     tags[2].ti_Tag=GTTX_CopyText; tags[2].ti_Data=FALSE;
     tags[3].ti_Tag=GTTX_Justification; tags[3].ti_Data=GTJ_CENTER;
     tags[4].ti_Tag=TAG_DONE; tags[4].ti_Data=0;
-    ADD(np.g_live_status,TEXT_KIND,0,216,153,156,15,NULL,0);
+    ADD(np.g_live_status,TEXT_KIND,0,206,158,144,15,NULL,0);
     TAG1(GA_Disabled, TRUE);
-    ADD(np.g_live_action,BUTTON_KIND,GID_LIVE_ACTION,380,152,120,17,
+    ADD(np.g_live_action,BUTTON_KIND,GID_LIVE_ACTION,358,157,90,17,
         "Online",PLACETEXT_IN);
     TAG1(TAG_DONE, 0);
-    ADD(g,BUTTON_KIND,GID_CLOSE,552,152,70,17,"Close",PLACETEXT_IN);
+    ADD(g,BUTTON_KIND,GID_CLOSE,552,157,70,17,"Close",PLACETEXT_IN);
+
+    /* General page. */
+    context = CreateContext(&np.panel_gadgets[NP_PANEL_GENERAL]);
+    if (context == NULL) return FALSE;
+    g = context;
+    TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
+    ADD(np.g_name,STRING_KIND,GID_NAME,250,37,350,15,"Name",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
+    ADD(np.g_id,STRING_KIND,GID_ID,250,59,350,15,"ID",PLACETEXT_LEFT);
+    TAG1(GTIN_MaxChars, 4);
+    ADD(np.g_priority,INTEGER_KIND,GID_PRIORITY,250,81,70,15,
+        "Priority",PLACETEXT_LEFT);
+    TAG1(GTCB_Checked, TRUE);
+    ADD(np.g_state,CHECKBOX_KIND,GID_STATE,350,83,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
+        "Start online",PLACETEXT_RIGHT);
+    TAG1(GTCB_Checked, FALSE);
+    ADD(np.g_boot,CHECKBOX_KIND,GID_BOOT,500,83,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
+        "At boot",PLACETEXT_RIGHT);
+    ADD(np.g_mdns,CHECKBOX_KIND,GID_MDNS,250,107,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
+        "mDNS",PLACETEXT_RIGHT);
+
+    /* IPv4 page. */
+    context = CreateContext(&np.panel_gadgets[NP_PANEL_IPV4]);
+    if (context == NULL) return FALSE;
+    g = context;
+    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv4_labels;
+    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IPTYPE_DHCP;
+    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
+    ADD(np.g_ipv4,CYCLE_KIND,GID_IPV4,250,37,180,15,"Mode",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, 15);
+    ADD(np.g_address,STRING_KIND,GID_ADDRESS,250,59,350,15,"Address",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, 15);
+    ADD(np.g_netmask,STRING_KIND,GID_NETMASK,250,81,350,15,"Netmask",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, 15);
+    ADD(np.g_gateway,STRING_KIND,GID_GATEWAY,250,103,350,15,"Gateway",PLACETEXT_LEFT);
+
+    /* IPv6 page. */
+    context = CreateContext(&np.panel_gadgets[NP_PANEL_IPV6]);
+    if (context == NULL) return FALSE;
+    g = context;
+    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv6_labels;
+    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IP6TYPE_AUTO;
+    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
+    ADD(np.g_ipv6,CYCLE_KIND,GID_IPV6,250,37,180,15,"Mode",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN + 3);
+    ADD(np.g_address6[0],STRING_KIND,GID_ADDRESS6_1,250,59,350,15,
+        "Address 1",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN + 3);
+    ADD(np.g_address6[1],STRING_KIND,GID_ADDRESS6_2,250,81,350,15,
+        "Address 2",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN - 1);
+    ADD(np.g_gateway6,STRING_KIND,GID_GATEWAY6,250,103,350,15,
+        "Gateway",PLACETEXT_LEFT);
+
+    /* Device page. */
+    context = CreateContext(&np.panel_gadgets[NP_PANEL_DEVICE]);
+    if (context == NULL) return FALSE;
+    g = context;
+    TAG1(GTST_MaxChars, AMI_CFG_PATH_LEN - 1);
+    ADD(np.g_device,STRING_KIND,GID_DEVICE,250,37,350,15,"Device",PLACETEXT_LEFT);
+    TAG1(GTIN_MaxChars, 3);
+    ADD(np.g_unit,INTEGER_KIND,GID_UNIT,250,59,60,15,"Unit",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
+    ADD(np.g_card,STRING_KIND,GID_CARD,390,59,210,15,"Card",PLACETEXT_LEFT);
+    TAG1(GTST_MaxChars, 17);
+    ADD(np.g_hwaddress,STRING_KIND,GID_HWADDRESS,250,81,350,15,
+        "MAC",PLACETEXT_LEFT);
+    TAG1(GTCB_Checked, FALSE);
+    ADD(np.g_down_offline,CHECKBOX_KIND,GID_DOWN_OFFLINE,178,107,
+        CHECKBOX_WIDTH,CHECKBOX_HEIGHT,"Offline on down",PLACETEXT_RIGHT);
+    ADD(np.g_init_delay,CHECKBOX_KIND,GID_INIT_DELAY,342,107,
+        CHECKBOX_WIDTH,CHECKBOX_HEIGHT,"Init delay",PLACETEXT_RIGHT);
+    ADD(np.g_promiscuous,CHECKBOX_KIND,GID_PROMISCUOUS,478,107,
+        CHECKBOX_WIDTH,CHECKBOX_HEIGHT,"Promiscuous",PLACETEXT_RIGHT);
+
+    /* Tuning page. Zero means automatic for every value. */
+    context = CreateContext(&np.panel_gadgets[NP_PANEL_TUNING]);
+    if (context == NULL) return FALSE;
+    g = context;
+    TAG1(GTIN_MaxChars, 6);
+    ADD(np.g_mtu,INTEGER_KIND,GID_MTU,250,37,90,15,"MTU",PLACETEXT_LEFT);
+    TAG1(GTIN_MaxChars, 10);
+    ADD(np.g_rxbuffer,INTEGER_KIND,GID_RXBUFFER,500,37,100,15,
+        "RX buffer",PLACETEXT_LEFT);
+    TAG1(GTIN_MaxChars, 3);
+    ADD(np.g_iprequests,INTEGER_KIND,GID_IPREQUESTS,250,66,90,15,
+        "IP reads",PLACETEXT_LEFT);
+    TAG1(GTIN_MaxChars, 3);
+    ADD(np.g_arprequests,INTEGER_KIND,GID_ARPREQUESTS,500,66,100,15,
+        "ARP reads",PLACETEXT_LEFT);
+    TAG1(GTIN_MaxChars, 3);
+    ADD(np.g_writerequests,INTEGER_KIND,GID_WRITEREQUESTS,250,95,90,15,
+        "Writes",PLACETEXT_LEFT);
 
 #undef ADD
 #undef TAG1
@@ -1061,7 +1453,8 @@ static BOOL make_window(VOID)
     win[3].ti_Tag=WA_Height; win[3].ti_Data=height;
     win[4].ti_Tag=WA_Title; win[4].ti_Data=(ULONG)"AmiNetXDuo Network Preferences";
     win[5].ti_Tag=WA_IDCMP; win[5].ti_Data=IDCMP_CLOSEWINDOW|IDCMP_REFRESHWINDOW|
-        BUTTONIDCMP|CHECKBOXIDCMP|CYCLEIDCMP|STRINGIDCMP|IDCMP_INTUITICKS;
+        BUTTONIDCMP|CHECKBOXIDCMP|CYCLEIDCMP|STRINGIDCMP|LISTVIEWIDCMP|
+        IDCMP_INTUITICKS;
     win[6].ti_Tag=WA_Flags; win[6].ti_Data=WFLG_DRAGBAR|WFLG_DEPTHGADGET|
         WFLG_CLOSEGADGET|WFLG_ACTIVATE|WFLG_SMART_REFRESH|WFLG_GIMMEZEROZERO;
     win[7].ti_Tag=WA_Gadgets; win[7].ti_Data=(ULONG)np.gadgets;
@@ -1071,7 +1464,8 @@ static BOOL make_window(VOID)
     np.window = OpenWindowTagList(NULL, win);
     if (np.window == NULL) return FALSE;
     GT_RefreshWindow(np.window, NULL);
-    draw_layout();
+    np.active_panel = NP_PANEL_COUNT;
+    show_panel(NP_PANEL_GENERAL);
     return TRUE;
 }
 
@@ -1081,6 +1475,14 @@ static VOID close_ui(VOID)
     np.window = NULL;
     if (np.gadgets != NULL) FreeGadgets(np.gadgets);
     np.gadgets = NULL;
+    {
+        ULONG i;
+        for (i = 0; i < NP_PANEL_COUNT; i++)
+        {
+            if (np.panel_gadgets[i] != NULL) FreeGadgets(np.panel_gadgets[i]);
+            np.panel_gadgets[i] = NULL;
+        }
+    }
     if (np.visual != NULL) FreeVisualInfo(np.visual);
     np.visual = NULL;
     if (np.screen != NULL) UnlockPubScreen(NULL, np.screen);
@@ -1129,12 +1531,20 @@ static VOID event_loop(VOID)
                 switch (id)
                 {
                     case GID_INTERFACE:
-                        if (code == 0) clear_form();
-                        else load_form((LONG)code - 1);
+                        load_form((LONG)code);
                         break;
-                    case GID_NEW: set_attr(np.g_interface, GTCY_Active, 0); clear_form(); break;
+                    case GID_PANEL:
+                        show_panel((ULONG)code);
+                        break;
+                    case GID_NEW:
+                        set_attr(np.g_interface, GTLV_Selected, (ULONG)~0UL);
+                        clear_form();
+                        break;
                     case GID_IPV4:
                         set_static_fields((BOOL)(code == AMI_IPTYPE_STATIC));
+                        break;
+                    case GID_IPV6:
+                        set_static6_fields((BOOL)(code == AMI_IP6TYPE_STATIC));
                         break;
                     case GID_SAVE: (VOID)save_form(FALSE); break;
                     case GID_APPLY: (VOID)save_form(TRUE); break;
@@ -1189,7 +1599,7 @@ int main(int argc, char **argv)
     }
     if (np.count != 0)
     {
-        set_attr(np.g_interface, GTCY_Active, 1);
+        set_attr(np.g_interface, GTLV_Selected, 0);
         load_form(0);
     }
     else clear_form();
