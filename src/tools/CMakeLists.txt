@@ -648,7 +648,7 @@ endif()
 
 add_custom_target(tools ALL)
 add_dependencies(tools
-    tool_addnetinterface
+    tool_addnetinterface tool_installsamefile tool_installnetprobe
     tool_checknetconfig tool_checknetdevice tool_netdevstats
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
