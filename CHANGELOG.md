@@ -9,6 +9,22 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxwifipi.device` leaves a multicast group when the stack leaves it. The
+  driver's `S2_DELMULTICASTADDRESS` handler compared the command against the
+  add command (a copy of the add handler), so every single-address leave --
+  the form every stack sends -- built its lookup from the destination field a
+  leave does not fill and matched nothing: the group stayed in the firmware
+  filter and in the driver's range list until the next boot. Measured on an
+  A1200 + PiStorm32 (Emu68): join 239.1.2.3, leave, send 200 datagrams to the
+  group with nothing listening -- the driver counted 166 more frames, about
+  17 of them background traffic. The join itself works: 291 of 300 datagrams
+  in 30 s over Wi-Fi through the joined socket, 494 of 498 over
+  `anxgenet.device`. A multicast list the firmware refuses
+  (more groups than its filter holds) now falls back to accepting every
+  multicast frame with the driver's own range list narrowing it, as brcmfmac
+  does; before, the join succeeded in the driver and the frames never came up
+  the bus.
+
 - The web console (`httpd -C`) looks at a still screen twice a second, not
   fifteen times. The idle after a pass that found nothing was a multiple of
   the pass's own cost, which on a machine where a pass is cheap is no idle at
