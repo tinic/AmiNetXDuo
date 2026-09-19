@@ -252,8 +252,12 @@ VOID _nx_tcp_socket_retransmit_queue_flush(NX_TCP_SOCKET *socket_ptr)
 #define H_MSS           1460UL
 #define H_BUF           2048
 #define H_PACKETS       12
+#ifndef H_ISN
 #define H_ISN           0x10000000UL
+#endif
+#ifndef H_ISN_RX
 #define H_ISN_RX        0x20000000UL
+#endif
 
 /* What the peer offers on its SYN, and therefore Max(SND.WND) until it offers
    more.  Half of it, 32767, is the rule (3) threshold on this fixture. */
@@ -301,6 +305,10 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_tx_slow_start_threshold  = H_PEER_WINDOW;
     h_sock.nx_tcp_socket_tx_outstanding_bytes     = 0;
     h_sock.nx_tcp_socket_tx_sequence              = H_ISN;
+    /* What the SYN leaves behind (nx_tcp_packet_send_syn.c): both
+       relative to the ISN, so a flight straddling 2^31 compares right. */
+    h_sock.nx_tcp_socket_tx_sequence_recover  = H_ISN - 1;
+    h_sock.nx_tcp_socket_previous_highest_ack = H_ISN - 1;
     h_sock.nx_tcp_socket_rx_sequence              = H_ISN_RX;
 }
 
@@ -525,6 +533,10 @@ static void j_peak_window_is_remembered(void)
     h_sock.nx_tcp_socket_tx_window_advertised     = 0;
     h_sock.nx_tcp_socket_tx_window_advertised_max = 0;
     h_sock.nx_tcp_socket_tx_sequence              = H_ISN;
+    /* What the SYN leaves behind (nx_tcp_packet_send_syn.c): both
+       relative to the ISN, so a flight straddling 2^31 compares right. */
+    h_sock.nx_tcp_socket_tx_sequence_recover  = H_ISN - 1;
+    h_sock.nx_tcp_socket_previous_highest_ack = H_ISN - 1;
 
     memset(&hdr, 0, sizeof(hdr));
     hdr.nx_tcp_header_word_0         = (80UL << NX_SHIFT_BY_16) | 40000UL;

@@ -450,6 +450,54 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_persist COMMAND test_tcp_persist)
 
+    # The same eight sockets with their sequence numbers straddling 2^31 and
+    # 2^32.  Roadshow 1.15 wedges a sender whose send sequence crosses 2^31
+    # (snd_una stuck at 0x7fffffe6 on a 1.7 GB SMB2 upload, zz9000-firmware
+    # #29): one comparison that is not modular, reached only by a low initial
+    # sequence number plus a sustained multi-hundred-megabyte transfer, so it
+    # rarely surfaces and never in a short test.  Every fixture above seeds
+    # H_ISN at 0x10000000, which reaches neither edge in 130 segments.  These
+    # arms move the seeds so the flight -- the hole, the duplicate
+    # acknowledgments, the retransmit, the window edge -- lies across each
+    # boundary, in both directions, and the checks are the same ones.
+    #
+    # The first run of the 2^31 arm failed, in the fixture: a socket built
+    # without a SYN had nx_tcp_socket_tx_sequence_recover at zero, and the
+    # RFC 6582 test in nx_tcp_socket_state_ack_check.c compares the
+    # acknowledgment against it modularly, which is right on a connection --
+    # nx_tcp_packet_send_syn.c seeds it at the ISN -- and wrong against zero
+    # once the high bit is set.  The fixtures now seed what the SYN leaves.
+    foreach(seqtest IN ITEMS retries rtt earlyretx lossrecovery slowstart
+                             rxflood sws persist)
+        foreach(edge IN ITEMS 31 32)
+            if(edge EQUAL 31)
+                set(seq_tx 0x7FFFE000UL)
+                set(seq_rx 0x7FFFF000UL)
+            else()
+                set(seq_tx 0xFFFFE000UL)
+                set(seq_rx 0xFFFFF000UL)
+            endif()
+            set(base test_tcp_${seqtest})
+            set(arm ${base}_seq${edge})
+            get_target_property(seq_sources ${base} SOURCES)
+            get_target_property(seq_includes ${base} INCLUDE_DIRECTORIES)
+            get_target_property(seq_defines ${base} COMPILE_DEFINITIONS)
+            get_target_property(seq_options ${base} COMPILE_OPTIONS)
+            get_target_property(seq_libs ${base} LINK_LIBRARIES)
+            add_executable(${arm} ${seq_sources})
+            target_include_directories(${arm} PRIVATE ${seq_includes})
+            target_compile_definitions(${arm} PRIVATE ${seq_defines}
+                H_ISN=${seq_tx} H_ISN_RX=${seq_rx})
+            if(seq_options)
+                target_compile_options(${arm} PRIVATE ${seq_options})
+            endif()
+            if(seq_libs)
+                target_link_libraries(${arm} PRIVATE ${seq_libs})
+            endif()
+            add_test(NAME tcp_${seqtest}_seq${edge} COMMAND ${arm})
+        endforeach()
+    endforeach()
+
     # The third of the three v0.25.3/v0.25.5 window fixes, and the only one
     # that was measured rather than gated: the pool arithmetic that stopped a
     # machine with no Fast RAM advertising a window its own packet pool could

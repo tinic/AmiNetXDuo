@@ -70,8 +70,10 @@ BUDGETS=(
     # on the write), A1200 sends 337 -> 462 Mbit/s with the page push it
     # made possible.  -> 227,148: RFC 6675 loss recovery in the fork (the
     # lost accounting, HighRxt, the walk on every duplicate): one drop in
-    # ten thousand 63 -> 537 Mbit/s out on the A1200.
-    "minimal:src/bsdsocket/bsdsocket.library:227500"
+    # ten thousand 63 -> 537 Mbit/s out on the A1200.  -> 227,512: the DNS
+    # cache dropped with the server that filled it (nxd_dns.c
+    # _nx_dns_cache_drop), so a name does not resolve after NetShutdown.
+    "minimal:src/bsdsocket/bsdsocket.library:227600"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/wifipi/anxwifipi.device:56000"

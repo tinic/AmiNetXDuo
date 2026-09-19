@@ -27,6 +27,28 @@ version at the top when it merges.
   send after a short one overshot a 64 KB target to 103,660 bytes once in
   five emulator runs. The last send is now the remainder.
 
+- A name resolved before `NetShutdown` no longer resolves after it. The
+  resolver's cache was consulted before the stack looked for a name server,
+  so `gethostbyname()` kept answering from the last lease for the rest of
+  each record's TTL with no interface on the machine, and a program that
+  decides "online" by resolving a name -- AreWeOnline, the tool behind
+  AmiTCP_NG's issue #4 -- read a shut-down machine as connected. Roadshow
+  refuses the lookup. The NetX Duo client now drops its cache whenever a
+  server is removed from it: a lease ending, an advertisement expiring, an
+  interface removed, a `RemoveDomainNameServer()` call. A renewal that keeps
+  its servers keeps its answers, and a gate holds the patch in the vendored
+  client across submodule bumps.
+
+- The eight TCP host tests run twice more, with the sequence numbers
+  straddling 2^31 and 2^32. Roadshow 1.15 wedges a sender whose send
+  sequence crosses 2^31 (`snd_una` stuck at 0x7fffffe6 on a 1.7 GB SMB2
+  upload, zz9000-firmware #29); nothing here had ever put a flight across
+  either edge. All sixteen arms pass. The first run of the 2^31 arm failed,
+  in the fixtures: a socket built without a SYN left `recover` at zero, which
+  the RFC 6582 check compares against modularly -- right on a connection,
+  where the SYN seeds it at the ISN, wrong against zero once the high bit is
+  set -- so the fixtures now seed what the SYN leaves.
+
 ## 0.28.9
 
 - `httpd` sleeps between the web console's passes. With a viewer attached its

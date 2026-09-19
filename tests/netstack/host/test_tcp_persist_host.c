@@ -246,8 +246,12 @@ ULONG          ack_seq;
 
 #define H_MSS       1460UL
 #define H_WINDOW    8192UL          /* RCV.BUFF/2 is 4096, above 2*MSS */
+#ifndef H_ISN
 #define H_ISN       0x10000000UL
+#endif
+#ifndef H_ISN_RX
 #define H_ISN_RX    0x20000000UL
+#endif
 #define H_BUF       256
 
 static NX_IP          h_ip;
@@ -289,6 +293,14 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_connect_mss2 = H_MSS * H_MSS;
 
     h_sock.nx_tcp_socket_tx_sequence         = H_ISN;
+
+    /* What the SYN leaves behind (nx_tcp_packet_send_syn.c): both
+
+       relative to the ISN, so a flight straddling 2^31 compares right. */
+
+    h_sock.nx_tcp_socket_tx_sequence_recover  = H_ISN - 1;
+
+    h_sock.nx_tcp_socket_previous_highest_ack = H_ISN - 1;
     h_sock.nx_tcp_socket_rx_sequence         = H_ISN_RX;
     h_sock.nx_tcp_socket_rx_sequence_acked   = H_ISN_RX;
     h_sock.nx_tcp_socket_rx_window_default   = H_WINDOW;

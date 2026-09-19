@@ -20,6 +20,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef H_ISN_RX
+#define H_ISN_RX        0x20000000UL
+#endif
+
 static ULONG h_now = 1000;
 
 ULONG _tx_time_get(VOID)
@@ -185,7 +189,9 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 #define H_MSS           1460UL
 #define H_BUF           1600
 #define H_PACKETS       200
+#ifndef H_ISN
 #define H_ISN           0x10000000UL
+#endif
 #define H_LOG           4096
 
 static NX_IP          h_ip;
@@ -295,7 +301,11 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_tx_slow_start_threshold = 400000UL;
     h_sock.nx_tcp_socket_tx_outstanding_bytes    = 0;
     h_sock.nx_tcp_socket_tx_sequence             = H_ISN;
-    h_sock.nx_tcp_socket_rx_sequence             = 0x20000000UL;
+    /* What the SYN leaves behind (nx_tcp_packet_send_syn.c): both
+       relative to the ISN, so a flight straddling 2^31 compares right. */
+    h_sock.nx_tcp_socket_tx_sequence_recover  = H_ISN - 1;
+    h_sock.nx_tcp_socket_previous_highest_ack = H_ISN - 1;
+    h_sock.nx_tcp_socket_rx_sequence             = H_ISN_RX;
     h_sock.nx_tcp_socket_transmit_queue_maximum  = H_PACKETS;
 #ifdef NX_ENABLE_TCP_SACK
     h_sock.nx_tcp_socket_sack_permitted          = NX_TRUE;
