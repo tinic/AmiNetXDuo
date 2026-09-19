@@ -58,7 +58,7 @@ PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). The installer
 offers to put all three supplied drivers in `DEVS:Networks`; on Emu68 it reads
 the device tree and
 creates definitions for the supported Ethernet and Wi-Fi devices it finds.
-An interface file selects one with `DEVICE=`. `anxgenet.device` needs Emu68
+An interface file selects one with `DEVICE=`. `anxgenet.device` needs [Emu68](https://github.com/michalsc/Emu68/releases)
 1.1 alpha.1 or newer: that is the
 first release line that maps GENET's `/scb` range into the Amiga address space.
 Emu68 1.0.3 is not supported.
@@ -70,7 +70,7 @@ on SDIO, behind a PiStorm32 running Emu68 (`DEVICE=anxwifipi.device`,
 `third_party/wifipi`), built here with the tree's toolchain, with the
 single-copy receive path above and counters behind `S2_GETSPECIALSTATS`. It
 needs the Wi-Fi firmware Emu68 installs in `DEVS:Firmware`, and a supplicant
-to join a network -- WirelessManager from Aminet's `driver/net/prism2v2` reads
+to join a network -- WirelessManager from Aminet's [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2) reads
 `ENVARC:Sys/Wireless.prefs` and associates through the SANA-II wireless
 commands; the interface file names the device as any other. On an A1200 +
 PiStorm32 Lite on a 5 GHz network at -69 dBm: 34-36 Mbit/s in, 52-61 out,

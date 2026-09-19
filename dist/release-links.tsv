@@ -1,0 +1,6 @@
+# Links a release page carries beside the archive, rendered by
+# tools/release-notes.sh.  name<TAB>https://url<TAB>why (a few words).
+# Open the URL when you change the line.
+Emu68	https://github.com/michalsc/Emu68/releases	PiStorm32; 1.1 alpha.1 or newer
+WirelessManager (prism2v2.lha)	https://aminet.net/package/driver/net/prism2v2	joins Wi-Fi networks
+ZZ9000 driver package	https://source.mnt.re/amiga/zz9000-firmware/-/releases	`ZZ9000Net.device`

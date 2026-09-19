@@ -104,27 +104,12 @@ jobs:
             exit 0
           fi
 
+          # Download link, the tag's paragraph, the CHANGELOG section folded.
+          # The script refuses a tag that does not name this tree and a
+          # CHANGELOG.md without the version's section.
           notes=$(mktemp)
-          body=$(mktemp)
-          trap 'rm -f "$notes" "$body"' EXIT
-          ver=$(tools/version.sh --product)
-          awk -v v="## $ver" -v pfx="## ${ver%.*}." '
-              $0 == v {found = 1; next}
-              found && /^## / && index($0, pfx) != 1 {exit}
-              found {print}
-          ' CHANGELOG.md > "$body"
-          [ -s "$body" ] || {
-              echo "::error::CHANGELOG.md has no '## $ver' section"
-              exit 1
-          }
-
-          {
-            echo "$(tools/version.sh --long)"
-            echo
-            echo "Drop \`AmiNetXDuo-$ver.lha\` on a Workbench window and run \`Install-AmiNetXDuo\`."
-            echo
-            cat "$body"
-          } > "$notes"
+          trap 'rm -f "$notes"' EXIT
+          tools/release-notes.sh "$tag" > "$notes"
 
           gh release create "$tag" \
              --title "$(tools/version.sh --long)" \

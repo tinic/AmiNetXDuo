@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The GitHub release page leads with the archive link, then the downloads a
+  machine may need (Emu68, WirelessManager, the ZZ9000 driver package), with
+  the change list folded below. `dist/release-links.tsv` holds the links.
+
 ## 1.0.0-beta1
 
 - `NetPrefs` no longer hangs the machine after a Save made from a page other
