@@ -44,9 +44,40 @@ export function defaultEndpoint(): string {
   return scheme + location.host + CONSOLE_URL;
 }
 
+/* Inflate a frame whose ops (bytes 4..) are zlib-deflated, via the browser's
+   native DecompressionStream -- no bundled codec.  The 4-byte header
+   (version, flags, seq) is copied through raw and the flag cleared, so the
+   decoder sees an ordinary frame. */
+async function inflateFrame(u: Uint8Array): Promise<ArrayBuffer> {
+  const ds = new DecompressionStream("deflate");
+  const w = ds.writable.getWriter();
+  void w.write(u.subarray(4));
+  void w.close();
+  const r = ds.readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await r.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  const out = new Uint8Array(4 + total);
+  out.set(u.subarray(0, 4), 0);
+  out[1] = 0;
+  let off = 4;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.length;
+  }
+  return out.buffer;
+}
+
 export class Wire {
   private ws: WebSocket | null = null;
   private readonly h: WireHandlers;
+  /* Serialises async inflation so frames reach the decoder in wire order. */
+  private q: Promise<void> = Promise.resolve();
 
   constructor(h: WireHandlers) {
     this.h = h;
@@ -86,7 +117,20 @@ export class Wire {
         this.h.onWord(e.data);
         return;
       }
-      this.h.onFrame(e.data as ArrayBuffer);
+      /* A binary frame may carry deflate-compressed ops (header flags bit 0).
+         Inflation is async (DecompressionStream), so every binary frame goes
+         through one promise chain to stay in wire order: a delta applied out
+         of order corrupts every frame after it. */
+      const buf = e.data as ArrayBuffer;
+      const u = new Uint8Array(buf);
+      if (u.length >= 4 && (u[1] & 0x01) !== 0) {
+        this.q = this.q
+          .then(() => inflateFrame(u))
+          .then((b) => this.h.onFrame(b))
+          .catch(() => { /* drop it; the next frame's seq gap forces a refresh */ });
+      } else {
+        this.q = this.q.then(() => { this.h.onFrame(buf); });
+      }
     };
   }
 

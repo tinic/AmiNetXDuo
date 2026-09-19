@@ -231,6 +231,13 @@ static ULONG           fb_pass_t0;
    when its own band comes round. */
 #define FB_BAND_WHEN        2
 
+/* The offload aims each wire message at this many DEFLATED bytes: a cheap
+   Workbench frame fits whole and goes in one send (fast), a photo backdrop is
+   split into chunks this size so the viewer never falls behind and the socket
+   is not stale-closed.  Chosen from the last frame's bytes-per-tile-row. */
+#define FB_OFFLOAD_BUDGET   6000UL
+#define FB_OFFLOAD_DEFROWS  8UL
+
 /* The fewest and the most bands an input event is chased for.  The event is
    handed to input.device and returns at once, so the character is not on the
    screen yet when the band after it is produced; the band the last change was
@@ -276,6 +283,8 @@ static ULONG           fb_resync_at;   /* when the last one was honoured   */
 
 static ULONG           fb_frames;
 static ULONG           fb_bytes;
+static ULONG           fb_frame_bytes;      /* wire bytes of the frame in flight */
+static ULONG           fb_last_frame_bytes; /* the last complete frame's, for adaptive sizing */
 static ULONG           fb_grab_ticks;
 static ULONG           fb_encode_ticks;
 static ULONG           fb_since_stat;
@@ -2693,8 +2702,32 @@ BOOL http_fb_slice(ULONG now)
         /* The band to produce this pass: FB_BAND_ROWS tile rows, so the work
            between two reads of the socket is bounded by a strip.  A grid
            shorter than one band is a single band covering all of it. */
-        UWORD rows = (UWORD)((fb_pass_ticks >= (ULONG)FB_BAND_WHEN)
-                             ? FB_BAND_ROWS : fb_enc.tiles_y);
+        /* The offload encodes on the card in ~3 ms/band, so the ~35 ms of
+           per-band host overhead (a mailbox round-trip and a WebSocket send
+           each) is the whole cost, and 12 of them per frame is what held the
+           drag to ~2.75 fps.  Send the WHOLE frame in one pass -- one card
+           call, one send -- when offloaded; deflate covers the larger message.
+           Banding stays for the 68k readback, whose per-band cost is real and
+           whose responsiveness the bands are for. */
+        UWORD rows;
+        if (fb_offload)
+        {
+            /* Aim each message at ~FB_OFFLOAD_BUDGET wire bytes, from the last
+               frame's bytes-per-tile-row.  Cheap frame -> whole in one send;
+               photo backdrop -> bounded chunks so the viewer keeps up. */
+            ULONG bpr = (fb_last_frame_bytes != 0UL)
+                        ? (fb_last_frame_bytes / (ULONG)fb_enc.tiles_y) : 0UL;
+            ULONG r   = (bpr != 0UL) ? (FB_OFFLOAD_BUDGET / (bpr ? bpr : 1UL))
+                                     : FB_OFFLOAD_DEFROWS;
+            if (r < 1UL) r = 1UL;
+            if (r > (ULONG)fb_enc.tiles_y) r = (ULONG)fb_enc.tiles_y;
+            rows = (UWORD)r;
+        }
+        else
+        {
+            rows = (UWORD)((fb_pass_ticks >= (ULONG)FB_BAND_WHEN)
+                           ? FB_BAND_ROWS : fb_enc.tiles_y);
+        }
         UWORD ty0;
         UWORD ty1;
         rfb_u32 was_dirty = fb_enc.st.tiles_dirty;
@@ -2874,9 +2907,14 @@ BOOL http_fb_slice(ULONG now)
 
     /* Screens and not messages, so f= keeps meaning what it meant before the
        frame was broken into bands.  Bytes are every band's. */
-    if (fb_band_last)
-        fb_frames++;
     fb_bytes += (ULONG)n;
+    fb_frame_bytes += (ULONG)n;
+    if (fb_band_last)
+    {
+        fb_frames++;
+        fb_last_frame_bytes = fb_frame_bytes;   /* feeds adaptive band sizing */
+        fb_frame_bytes = 0;
+    }
 
     if (++fb_since_stat >= (ULONG)FB_STAT_EVERY)
     {
