@@ -55,6 +55,9 @@ BOOL http_fb_session_geometry(UWORD *w, UWORD *h, UWORD *depth);
 VOID http_fb_stop(VOID);
 
 BOOL http_fb_wants_write(VOID);
+/* Microseconds the server may sleep before the console has work of its own;
+   0 = now.  The socket wakes it earlier. */
+ULONG http_fb_wait_micros(VOID);
 
 /* One pass each.  Each returns FALSE when the session is finished with. */
 BOOL http_fb_read(ULONG now);

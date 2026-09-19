@@ -9,6 +9,16 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd` sleeps between the web console's passes. With a viewer attached its
+  main loop woke every 2 ms whatever the console had to do -- 500
+  `WaitSelect()`s a second, each a timer request and a dispatch, 6-9% of an
+  A1200 + PiStorm32 (Emu68) looking at a still screen whose passes were
+  already half a second apart. The wait is now the console's own: 2 ms only
+  while a frame or a pass is in hand, otherwise until its next pass or
+  pointer look is due (a key, a click or a close still wakes it at once
+  through the socket). Measured with a viewer on a still screen: timer wake-
+  ups 500/s -> 30/s.
+
 - `anxwifipi.device` idles at 0.4% of an A1200 + PiStorm32 (Emu68), from 2%
   after the previous entry and 10% before it. Profiled at 1 kHz: a tick costs
   155-220 us whichever `timer.device` unit fires it -- 40% in timer.device,

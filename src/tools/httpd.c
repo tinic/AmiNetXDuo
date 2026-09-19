@@ -7009,6 +7009,7 @@ static VOID httpd_serve(LONG lsock)
         ULONG       i;
         ULONG       live = 0;
         ULONG       walking = 0;
+        ULONG       fb_micros = (ULONG)HTTPD_TICK_MICROS;   /* the console's ask */
         ULONG       now;
         ULONG       sigs;
 
@@ -7044,10 +7045,18 @@ static VOID httpd_serve(LONG lsock)
             }
             else if (c->state == CONN_FB)
             {
-                /* Both halves, counted as walking so the wait is the short
-                   one: a 250 ms tick would cap the console at four frames a
-                   second, and zero is a poll WaitSelect() never yields on. */
-                walking++;
+                /* Both halves.  The wait is the console's own: the short one
+                   while it has a frame or a pass in hand (a 250 ms tick would
+                   cap it at four frames a second), otherwise until its next
+                   pass or pointer look is due -- a still screen's passes are
+                   half a second apart and ticking every 2 ms between them
+                   was 8.6% of an A1200 + PiStorm32 (Emu68) for nothing. */
+                ULONG fbwait = http_fb_wait_micros();
+
+                if (fbwait == 0UL)
+                    walking++;
+                else if (fbwait < fb_micros)
+                    fb_micros = fbwait;
 
                 tool_fd_add(&readfds, c->sock);
 
@@ -7088,7 +7097,9 @@ static VOID httpd_serve(LONG lsock)
         /* A pending walk shortens the wait rather than removing it.  A
            zero timeout is a poll, which WaitSelect() answers without ever
            reaching Wait(), so the loop would never yield. */
-        tv.tv_micro = (walking > 0UL) ? HTTPD_WALK_MICROS : HTTPD_TICK_MICROS;
+        tv.tv_micro = (walking > 0UL) ? HTTPD_WALK_MICROS
+                    : (fb_micros < (ULONG)HTTPD_TICK_MICROS) ? fb_micros
+                    : HTTPD_TICK_MICROS;
 
         /* The terminal's pipe is a MsgPort and WaitSelect() knows nothing
            about DOS handles, so its signal goes into the same wait.

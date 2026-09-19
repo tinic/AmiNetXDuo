@@ -2501,6 +2501,48 @@ BOOL http_fb_wants_write(VOID)
                   fb_closing);
 }
 
+/*
+ * How long the server's WaitSelect() may sleep before the console has work of
+ * its own, in microseconds: 0 when it has some now (a frame draining, a word
+ * queued, a pass under way, a resync owed, a pass never made), otherwise the
+ * time to whichever comes first of the next pass (fb_next_tick) and the
+ * pointer's next look (fb_ptr_next).  The socket stays in the read set, so a
+ * key, a click or a close wakes the server at once regardless.  Without this
+ * the server ticked every 2 ms while a viewer was attached -- 500
+ * WaitSelect()s a second, 8.6% of an A1200 + PiStorm32 (Emu68) looking at a
+ * still screen whose passes were already half a second apart.
+ */
+ULONG http_fb_wait_micros(VOID)
+{
+    ULONG tick;
+    ULONG due;
+
+    if (!fb_live || fb_closing)
+        return 0;
+    if (fb_tx_sent < fb_tx_len || fb_ctl_at < fb_ctl_n)
+        return 0;
+    if (fb_want_geom || fb_want_pal || fb_want_stat || fb_want_rtg ||
+        fb_want_ptr || fb_resync || fb_resync_due || fb_input_left != 0)
+        return 0;
+    if (fb_pass_t0 != 0UL || fb_next_tick == 0UL)
+        return 0;
+
+    tick = fb_ticks();
+    if ((LONG)(fb_next_tick - tick) <= 0L)
+        return 0;
+    due = fb_next_tick - tick;
+
+    if (fb_ptr_next != 0UL)
+    {
+        if ((LONG)(fb_ptr_next - tick) <= 0L)
+            return 0;
+        if (fb_ptr_next - tick < due)
+            due = fb_ptr_next - tick;
+    }
+
+    return due * 20000UL;               /* fiftieths to microseconds */
+}
+
 BOOL http_fb_read(ULONG now)
 {
     /* Static for the reason the palette scratch is.  One connection is read
