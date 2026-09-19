@@ -123,9 +123,8 @@ CROSS_CONFIGS=(
     # options CMakePresets.json gives the build/release-minimal tree.
     "minimal:$("$ROOT/tools/preset-options.sh" minimal)"
     #
-    # The floor under the floor.  It is the minimal drawer plus the DHCP
-    # client and the seven options minimal leaves on.  A machine built this way
-    # is given a static address, and it RESOLVES NAMES.
+    # The floor under the floor.  It is the minimal drawer with DHCP, the
+    # classic resolver and raw sockets retained, while less-used APIs are off.
     #
     # WHAT IT TURNS OFF IS WHAT THE CORPUS DOES NOT CALL, 2026-09-09.  Every
     # option here is checked against docs/aminet-survey/lvo-usage.tsv, 833
@@ -138,8 +137,8 @@ CROSS_CONFIGS=(
     #                    RAWSOCKET   48 binaries, invisible to any LVO count
     #
     # The three ON rows were off until this change; `microcompat` existed to
-    # carry two of them and is now the same arm, so it is gone.  It does not
-    # ship a drawer yet, so tools/check-shipping-config.sh does not look at it.
+    # carry two of them and is now the same arm, so it is gone.  This preset is
+    # the micro drawer shipped in the archive and offered by the Installer.
     "micro:$("$ROOT/tools/preset-options.sh" micro)"
     # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
     # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled

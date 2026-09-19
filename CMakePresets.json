@@ -65,7 +65,7 @@
       "name": "micro",
       "inherits": "amiga",
       "displayName": "micro",
-      "description": "Libs/micro. Minimal, one interface, 68000 only.",
+      "description": "Libs/micro. Smallest profile, one interface; one binary for every 68k.",
       "cacheVariables": {
         "AMINETXDUO_ADDRALLOC": {
           "type": "BOOL",

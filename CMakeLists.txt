@@ -571,8 +571,8 @@ endif()
 # The floor build answers both with ENOSYS, the way AMINETXDUO_BPF answers its
 # five (src/bsdsocket/bpf.c:135).  The vectors stay in the table whatever the
 # build -- an LVO that moved would be an ABI break -- so this removes the
-# bodies and not the slots.  A drawer built this way does not install the tools
-# that call them.
+# bodies and not the slots.  The shared command set is still installed; tools
+# which require these private report vectors explain that the profile omits them.
 # RFC 3542 ancillary data: IP_PKTINFO, IP_RECVDSTADDR and the IPv6 half, the
 # control messages sendmsg() and recvmsg() carry beside the payload.
 #
@@ -600,7 +600,8 @@ endif()
 # is a flag on send() and recv() and an ioctl -- so this gates oob.c and the
 # three entry points transfer.c and socket.c reach it through.
 #
-# telnet is the classic caller and a floor drawer does not install one.
+# telnet is the classic caller.  The shared command set still installs it, but
+# a micro stack cannot send or receive TCP urgent data.
 #
 # bsd_tcp_urgent_notify() stays a real function and is still handed to
 # nx_tcp_socket_create() (socket.c:991, :1337); off, it is a no-op, so the

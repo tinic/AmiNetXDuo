@@ -100,12 +100,11 @@ case "$MINIMAL_BUILD" in /*) ;; *) MINIMAL_BUILD="$ROOT/$MINIMAL_BUILD" ;; esac
 WANT_MINIMAL=1
 [ -z "${AMINETXDUO_DIST_NO_MINIMAL:-}" ] || WANT_MINIMAL=0
 
-# micro is the floor: minimal again with the resolver iteration, the admin
-# vectors, OOB, cmsg, the route and address-allocation calls and NetX's error
-# checking compiled out as well.  IT IS PACKED AND NOT INSTALLED -- the
-# Installer does not offer it yet, and install/ARCHIVE-MANIFEST carries the row
-# that says so.  Shipping it in the archive is what lets somebody measure it,
-# and lets the next release offer it without a second download.
+# micro is the floor: minimal again with getaddrinfo/getnameinfo, the less-used
+# admin and status vectors, OOB, ancillary data, route and address-allocation
+# calls and NetX's error checking compiled out as well.  It retains DHCP, raw
+# sockets and the classic resolver.  The Installer offers it as the
+# third profile and installs this drawer when selected.
 MICRO_BUILD="${AMINETXDUO_BUILD_MICRO:-$BUILD-micro}"
 case "$MICRO_BUILD" in /*) ;; *) MICRO_BUILD="$ROOT/$MICRO_BUILD" ;; esac
 
