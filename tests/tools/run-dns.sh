@@ -202,10 +202,32 @@ fi
 
 case "$HOSTNAME_GOT" in
     __no_name__) ;;
-    *.*) fail "gethostname answered the qualified \"$HOSTNAME_GOT\"; the bare
-       label is what option 12 announces and what the mDNS label is cut from" ;;
-    *)   pass "and it is the bare label, not a qualified name" ;;
+    *.localdomain) pass "and it is qualified with the configured domain" ;;
+    *.*) fail "gethostname answered \"$HOSTNAME_GOT\", not a name in the
+       configured localdomain domain" ;;
+    *)   fail "gethostname answered the unqualified \"$HOSTNAME_GOT\" even
+       though name_resolution configures domain localdomain" ;;
 esac
+
+HOST_LABEL=${HOSTNAME_GOT%.localdomain}
+HOSTNAME_NO_DOMAIN=$(sed -n 's/^hostname no domain: rc 0 "\(.*\)"$/\1/p' "$REPORT" | head -1)
+HOSTNAME_SET_DOMAIN=$(sed -n 's/^hostname set domain: rc 0 "\(.*\)"$/\1/p' "$REPORT" | head -1)
+
+if [ "$HOSTNAME_GOT" != "__no_name__" ] &&
+   [ "$HOSTNAME_NO_DOMAIN" = "$HOST_LABEL" ]; then
+    pass "clearing the domain makes gethostname return the short label"
+else
+    fail "with no domain, gethostname answered \"$HOSTNAME_NO_DOMAIN\" instead
+       of the short label \"$HOST_LABEL\""
+fi
+
+if [ "$HOSTNAME_GOT" != "__no_name__" ] &&
+   [ "$HOSTNAME_SET_DOMAIN" = "$HOST_LABEL.$DOMAIN" ]; then
+    pass "setting domain $DOMAIN makes gethostname return the qualified name"
+else
+    fail "with domain $DOMAIN, gethostname answered \"$HOSTNAME_SET_DOMAIN\"
+       instead of \"$HOST_LABEL.$DOMAIN\""
+fi
 
 if grep -q "^hostname null: rc -1 errno 14$" "$REPORT"; then
     pass "gethostname(NULL) is -1 with EFAULT"
@@ -228,7 +250,7 @@ NLEN=${#HOSTNAME_GOT}
 if grep -Eq "^hostname $NLEN: rc 0 errno [-0-9]+ \"$HOSTNAME_GOT\" term no\$" "$REPORT"; then
     pass "the whole name in exactly its own length, and no terminator"
 else
-    fail "gethostname into $NLEN bytes did not give the bare name"
+    fail "gethostname into $NLEN bytes did not give the whole name"
     grep "^hostname $NLEN:" "$REPORT" >&2 || true
 fi
 

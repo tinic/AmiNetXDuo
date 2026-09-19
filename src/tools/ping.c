@@ -46,12 +46,12 @@ enum
 
 #define PING_DEFAULT_COUNT      4UL
 #define PING_DEFAULT_SIZE       56UL
-/* 65535 - 20 - 8, the most an IPv4 datagram can carry after its own and
-   ICMP's header, and what BSD ping takes.  It was 1400, which is less than
-   one frame: the classic MTU probe, -s 1472 (a full 1500-byte datagram) beside
-   -s 1473 (the first that fragments), could not be typed, and a card that
-   drops full-size frames -- genet.device 3.x did, and SMB2 froze on it until
-   MTU=1450 -- could only be found with somebody else's ping. */
+/* 65535 - 60 - 8: reserve the largest IPv4 header, then ICMP's header, as BSD
+   ping does.  It was 1400, which is less than one frame: the classic MTU
+   probe, -s 1472 (a full 1500-byte datagram) beside -s 1473 (the first that
+   fragments), could not be typed, and a card that drops full-size frames --
+   genet.device 3.x did, and SMB2 froze on it until MTU=1450 -- could only be
+   found with somebody else's ping. */
 #define PING_MAX_SIZE           65467UL
 #define PING_DEFAULT_INTERVAL   1UL         /* seconds                        */
 #define PING_REPLY_WAIT         5UL         /* seconds to wait for one reply  */
