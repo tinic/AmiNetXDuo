@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `ShowNetStatus` no longer says an interface's "configuration file was
+  changed after the network started" when nothing changed. The status record
+  carries the device name in 31 characters, and a system installation's
+  `Workbench:AmiNetXDuo/Devs/Networks/anxnet.device` is 48, so the cut copy
+  never matched the file and every drawer installation saw the NOTE on every
+  interface. The interface line now prints the file's full spelling.
+
 - `NetPrefs` runs on its own 16 KB stack when started from a Shell (a
   Shell gives a command 4,096 bytes; the editor's frames plus a requester or
   a GadTools refresh are more). Its boot checkbox uncomments an existing
