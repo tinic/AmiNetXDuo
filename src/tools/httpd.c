@@ -6997,8 +6997,74 @@ static VOID httpd_accept(LONG lsock)
                   0);
 }
 
+/*
+ * Why the server stopped, written where it can be read afterwards.  The server
+ * is started from S:User-Startup with its output on NIL:, so a tool_error()
+ * on the way out went nowhere, and "httpd was gone in the morning" had no
+ * cause to look at.  One line per exit, appended to SYS:AmiNetXDuo/httpd.log
+ * (the drawer the installer makes; a machine without it gets no note and no
+ * requester), with the Amiga clock.  Read it with Type.
+ */
+#define HTTPD_EXIT_LOG  "SYS:AmiNetXDuo/httpd.log"
+
+static VOID httpd_note_exit(const char *why, const char *detail)
+{
+    struct DateStamp ds;
+    BPTR             fh;
+    char             line[160];
+    ULONG            n = 0;
+    ULONG            v;
+    const char      *p;
+
+    {
+        BPTR drawer = Lock((CONST_STRPTR)"SYS:AmiNetXDuo", ACCESS_READ);
+
+        if (drawer == 0)
+            return;
+        UnLock(drawer);
+    }
+    fh = Open((CONST_STRPTR)HTTPD_EXIT_LOG, MODE_READWRITE);
+    if (fh == 0)
+        return;
+    (VOID)Seek(fh, 0, OFFSET_END);
+
+    (VOID)DateStamp(&ds);
+    /* day minute:second since the Amiga epoch, digits only: no printf here */
+    for (v = 1000000UL; v != 0; v /= 10)
+        if ((ULONG)ds.ds_Days >= v || v == 1)
+            line[n++] = (char)('0' + ((ULONG)ds.ds_Days / v) % 10);
+    line[n++] = ' ';
+    v = (ULONG)ds.ds_Minute / 60;
+    line[n++] = (char)('0' + v / 10); line[n++] = (char)('0' + v % 10);
+    line[n++] = ':';
+    v = (ULONG)ds.ds_Minute % 60;
+    line[n++] = (char)('0' + v / 10); line[n++] = (char)('0' + v % 10);
+    line[n++] = ':';
+    v = (ULONG)ds.ds_Tick / 50;
+    line[n++] = (char)('0' + v / 10); line[n++] = (char)('0' + v % 10);
+    line[n++] = ' ';
+    for (p = "httpd stopped: "; *p != '\0' && n < sizeof(line) - 2; p++)
+        line[n++] = *p;
+    for (p = why; *p != '\0' && n < sizeof(line) - 2; p++)
+        line[n++] = *p;
+    if (detail != NULL && detail[0] != '\0')
+    {
+        for (p = " ("; *p != '\0' && n < sizeof(line) - 2; p++)
+            line[n++] = *p;
+        for (p = detail; *p != '\0' && n < sizeof(line) - 2; p++)
+            line[n++] = *p;
+        if (n < sizeof(line) - 2)
+            line[n++] = ')';
+    }
+    line[n++] = '\n';
+    (VOID)Write(fh, line, (LONG)n);
+    (VOID)Close(fh);
+}
+
 static VOID httpd_serve(LONG lsock)
 {
+    ULONG select_failures = 0;
+
     for (;;)
     {
         ToolFdSet   readfds;
@@ -7016,6 +7082,7 @@ static VOID httpd_serve(LONG lsock)
         if (tool_break())
         {
             tool_fault(ERROR_BREAK);
+            httpd_note_exit("Ctrl-C or Break", NULL);
             return;
         }
 
@@ -7116,10 +7183,34 @@ static VOID httpd_serve(LONG lsock)
             if (err == TOOL_EINTR)
                 continue;
 
+            /*
+             * Not an exit on the first refusal.  A wait can fail for a
+             * socket the stack has taken back under a connection (a link
+             * that went away, a shutdown and restart of the interface);
+             * the connections are dropped so the next wait is over the
+             * listener alone, and only a wait that keeps failing with
+             * nothing left to drop ends the server -- with the reason in
+             * the log, which the old immediate return never left.
+             */
+            select_failures++;
+            if (select_failures <= 8)
+            {
+                for (i = 0; i < httpd_conns; i++)
+                {
+                    if (httpd_conn[i].state != CONN_FREE)
+                        httpd_close(&httpd_conn[i]);
+                }
+                Delay(25);
+                continue;
+            }
+
             tool_error("cannot wait for a connection: %s",
                        (LONG)tool_sock_errstr(err));
+            httpd_note_exit("the wait for a connection kept failing",
+                            tool_sock_errstr(err));
             return;
         }
+        select_failures = 0;
 
         now = httpd_now();
 

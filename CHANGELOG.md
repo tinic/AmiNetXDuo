@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd` appends why it exited, with the Amiga clock, to
+  `SYS:AmiNetXDuo/httpd.log` (its output is on `NIL:` when started from
+  `S:User-Startup`). A failed wait for a connection no longer ends the server
+  on the first failure: it drops its connections and waits again, up to eight
+  times a quarter second apart, and the ninth failure in a row ends it.
+
 - `ShowNetStatus` shows every interface the stack is running, not only the
   ones described in `DEVS:NetInterfaces`. `AddNetInterface` takes a file from
   anywhere, and an interface added from `RAM:` pinged and routed while
