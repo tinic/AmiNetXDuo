@@ -1921,6 +1921,19 @@
   figure has never been published for any Amiga board. A report of it
   is wanted.
 
+  @{b}Offloading the readback to a ZZ9000@{ub}
+
+  On an MNT ZZ9000 the readback and the encode can run on the card's own
+  ARM processor instead of the 68k, which is what turns a window drag
+  from a few frames a second into a smooth one. It needs a firmware for
+  the card that carries the console-encode service; httpd finds it and
+  uses it on its own, and falls back to the 68k readback when it is not
+  there, so nothing here depends on it. A fork of the ZZ9000 firmware
+  with that service -- with a ready-to-flash BOOT.bin under its Releases,
+  and how to flash it and put the old one back -- is at
+
+      https://github.com/tinic/zz9000-firmware
+
   @{b}One viewer at a time@{ub}
 
   There is one display, one keyboard and one mouse, so there is one

@@ -55,7 +55,10 @@ async function inflateFrame(u: Uint8Array): Promise<ArrayBuffer> {
      ends, and it is the reader loop below whose rejection we want to surface
      (and the caller catches).  Left unhandled these would be loose rejected
      promises. */
-  w.write(u.subarray(4)).catch(() => {});
+  /* subarray() is typed Uint8Array<ArrayBufferLike>, but write() wants a
+     BufferSource over a concrete ArrayBuffer; u came from a WebSocket binary
+     frame, whose buffer is a plain ArrayBuffer, so narrowing is sound. */
+  w.write(u.subarray(4) as Uint8Array<ArrayBuffer>).catch(() => {});
   w.close().catch(() => {});
   const r = ds.readable.getReader();
   const chunks: Uint8Array[] = [];
