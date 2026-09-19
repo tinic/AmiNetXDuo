@@ -68,10 +68,10 @@ if(AMINETXDUO_WIFIPI_LINK AND CMAKE_CROSSCOMPILING)
     # generated <aminetxduo/version.h>, the same line every other image says.
     target_compile_definitions(anxwifipi_device PRIVATE
         "WIFIPI_DEVICE_NAME=\"anxwifipi.device\""
-        "WIFIPI_TASK_UNIT=\"AmiNetXDuo wifi unit\""
-        "WIFIPI_TASK_POLLER=\"AmiNetXDuo wifi poller\""
-        "WIFIPI_TASK_SCANNER=\"AmiNetXDuo wifi scanner\""
-        "WIFIPI_TASK_RECEIVER=\"AmiNetXDuo wifi receiver\""
+        "WIFIPI_TASK_UNIT=\"AmiNetXDuo anxwifipi unit\""
+        "WIFIPI_TASK_POLLER=\"AmiNetXDuo anxwifipi poller\""
+        "WIFIPI_TASK_SCANNER=\"AmiNetXDuo anxwifipi scanner\""
+        "WIFIPI_TASK_RECEIVER=\"AmiNetXDuo anxwifipi receiver\""
         "WIFIPI_VERSION_HEADER=<aminetxduo/version.h>"
         WIFIPI_VERSION=1
         WIFIPI_REVISION=0)

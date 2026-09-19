@@ -2148,14 +2148,63 @@ static const ULONG ami_sana2_rx_types[AMI_SANA2_RX_READERS] =
 #endif
 };
 
-static const CHAR *const ami_sana2_rx_names[AMI_SANA2_RX_READERS] =
+static const CHAR *const ami_sana2_rx_roles[AMI_SANA2_RX_READERS] =
 {
-    "AmiNetXDuo rx ip",
-    "AmiNetXDuo rx arp"
+    "rx ip",
+    "rx arp"
 #ifdef AMINETXDUO_IPV6
-, "AmiNetXDuo rx ip6"
+, "rx ip6"
 #endif
 };
+
+/*
+ * "AmiNetXDuo anxgenet rx ip": the device the reader serves, without its path
+ * or ".device" and with ".<unit>" when the unit is not 0, then the role.  Three
+ * interfaces on one machine gave nine readers under three names, and a task
+ * list could not say which card any of them was reading.  Device before role,
+ * the way "anxgenet poll" and "anxwifipi receiver" are named, so a sorted list
+ * groups a card's tasks.
+ */
+static VOID ami_sana2_rx_name(AmiSana2Rx *rx, const CHAR *role)
+{
+    static const CHAR prefix[] = "AmiNetXDuo ";
+    const CHAR *base = rx->iface->device;
+    const CHAR *p;
+    CHAR       *out = rx->name;
+    CHAR       *end = rx->name + sizeof(rx->name) - 1;
+    ULONG       unit = rx->iface->unit;
+
+    for (p = base; *p != '\0'; p++)
+    {
+        if (*p == '/' || *p == ':')
+            base = p + 1;
+    }
+
+    for (p = prefix; *p != '\0' && out < end; p++)
+        *out++ = *p;
+
+    for (p = base; *p != '\0' && out < end; p++)
+    {
+        if (p[0] == '.' && p[1] == 'd' && p[2] == 'e' && p[3] == 'v' &&
+            p[4] == 'i' && p[5] == 'c' && p[6] == 'e' && p[7] == '\0')
+            break;
+        *out++ = *p;
+    }
+
+    if (unit != 0 && out + 3 < end)
+    {
+        *out++ = '.';
+        if (unit >= 10)
+            *out++ = (CHAR)('0' + (unit / 10) % 10);
+        *out++ = (CHAR)('0' + unit % 10);
+    }
+
+    if (out < end)
+        *out++ = ' ';
+    for (p = role; *p != '\0' && out < end; p++)
+        *out++ = *p;
+    *out = '\0';
+}
 
 /* ------------------------------------------------------------- read depth */
 
@@ -2493,7 +2542,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             return -1;
         }
 
-        txstatus = tx_thread_create(&rx->thread, (CHAR *)ami_sana2_rx_names[i],
+        ami_sana2_rx_name(rx, ami_sana2_rx_roles[i]);
+        txstatus = tx_thread_create(&rx->thread, rx->name,
                                     ami_sana2_rx_thread, (ULONG)rx,
                                     rx->stack, AMI_SANA2_RX_STACK_SIZE,
                                     AMI_SANA2_RX_PRIORITY,

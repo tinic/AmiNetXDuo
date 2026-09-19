@@ -588,6 +588,9 @@ typedef struct AmiSana2Rx
     AmiSana2If         *iface;
     ULONG               packet_type;
     UWORD               depth;
+    /* The task's name, "AmiNetXDuo <device> rx ip": ThreadX and Exec keep the
+       pointer, not a copy, so it lives as long as the reader does. */
+    char                name[48];
 
     /*
      * Slots NOT currently handed to the device.  ami_sana2_rx_post() sweeps

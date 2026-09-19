@@ -9,6 +9,17 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A task list names the card behind every task of the stack's. The readers
+  were `AmiNetXDuo rx ip`, `rx arp` and `rx ip6` for every interface alike --
+  nine readers under three names on a machine with three interfaces -- and
+  the drivers' own tasks used a short word (`genet poll`, `wifi receiver`)
+  the readers did not. Every one of them now carries the device it serves,
+  before the role: `AmiNetXDuo anxgenet rx ip`, `AmiNetXDuo anxgenet poll`,
+  `AmiNetXDuo anxwifipi receiver`, `AmiNetXDuo anxnet pcmcia`; a unit other
+  than 0 follows the device as `.1`, a third-party driver appears as it is
+  named (`AmiNetXDuo x-surf-100 rx ip`). A sorted task list groups a card's
+  tasks.
+
 - `anxwifipi.device` leaves a multicast group when the stack leaves it. The
   driver's `S2_DELMULTICASTADDRESS` handler compared the command against the
   add command (a copy of the add handler), so every single-address leave --
