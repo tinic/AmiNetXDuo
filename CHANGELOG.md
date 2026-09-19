@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A release whose version carries a pre-release identifier (`1.0.0-beta1`)
+  is published on GitHub as a pre-release, not as "Latest".
+
 ## 1.0.0-beta1
 
 - `NetPrefs` no longer hangs the machine after a Save made from a page other

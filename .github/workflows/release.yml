@@ -126,7 +126,12 @@ jobs:
             cat "$body"
           } > "$notes"
 
-          gh release create "$tag" \
+          # A pre-release identifier in the version (1.0.0-beta1) marks the
+          # GitHub release as one, so it is not offered as "Latest".
+          pre=()
+          [ -z "$(tools/version.sh --prerelease)" ] || pre=(--prerelease)
+
+          gh release create "$tag" "${pre[@]}" \
              --title "$(tools/version.sh --long)" \
              --notes-file "$notes" \
              build/candidate/*.lha

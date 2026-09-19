@@ -13,6 +13,7 @@
 #   tools/version.sh --build      1234              commit count, or empty
 #   tools/version.sh --long       AmiNetXDuo 0.1.0 (NetX Duo 6.5.1, ...)
 #   tools/version.sh --tag        v0.1.0            the release tag for it
+#   tools/version.sh --prerelease beta1             the identifier, or nothing
 #   tools/version.sh --env        KEY=VALUE lines, for $GITHUB_OUTPUT
 #   tools/version.sh --check H    H is a generated version.h; do we agree?
 #
@@ -105,6 +106,7 @@ build_count() {
 case "${1:---compound}" in
     --product)  printf '%s\n' "$product" ;;
     --tag)      printf 'v%s\n' "$product" ;;
+    --prerelease) printf '%s\n' "$prerelease" ;;
     --netxduo)  upstream; printf '%s\n' "$netxduo" ;;
     --threadx)  upstream; printf '%s\n' "$threadx" ;;
     --build)    printf '%s\n' "$(build_count)" ;;
@@ -120,6 +122,7 @@ case "${1:---compound}" in
                 printf 'AMINETXDUO_VERSION_LONG=AmiNetXDuo %s (NetX Duo %s, ThreadX %s)\n' \
                        "$product" "$netxduo" "$threadx"
                 printf 'AMINETXDUO_VERSION_TAG=v%s\n' "$product"
+                printf 'AMINETXDUO_VERSION_PRERELEASE=%s\n' "$prerelease"
                 printf 'AMINETXDUO_VERSION_BUILD=%s\n' "$(build_count)" ;;
     --check)
                 # The generated header and this script read the same three
