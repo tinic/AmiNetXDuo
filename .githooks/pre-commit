@@ -44,6 +44,24 @@ if [ -x "$ROOT/tools/check-changelog-entry.sh" ]; then
     fi
 fi
 
+# docs/aminet-survey/own-tools.tsv counts our tools' MENTIONS of each vector
+# (tools/aminet-survey/ourtools.py says why mentions), so a comment in
+# src/tools that names socket() moves it.  CI compares the committed table
+# with a regeneration and went red on the 0.28.9 release commit for exactly
+# that; a third of a second here says so before the commit exists.
+if git diff --cached --name-only | grep -qE '^src/(tools|config)/.*\.c$|^docs/aminet-survey/'; then
+    if [ -x "$ROOT/tools/aminet-survey/check-derived.sh" ] &&
+       ! "$ROOT/tools/aminet-survey/check-derived.sh" > /dev/null 2>&1; then
+        echo
+        echo "pre-commit: docs/aminet-survey's derived tables no longer match."
+        echo "Regenerate and stage them:"
+        echo
+        echo "  python3 tools/aminet-survey/ourtools.py docs/aminet-survey docs/aminet-survey/own-tools.tsv"
+        echo "  tools/aminet-survey/check-derived.sh   # names any other"
+        exit 1
+    fi
+fi
+
 [ -x "$ROOT/tools/check-changelog-prose.sh" ] || exit 0
 if ! "$ROOT/tools/check-changelog-prose.sh"; then
     echo
