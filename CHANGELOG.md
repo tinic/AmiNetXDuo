@@ -9,6 +9,18 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxwifipi.device` idles at 0.4% of an A1200 + PiStorm32 (Emu68), from 2%
+  after the previous entry and 10% before it. Profiled at 1 kHz: a tick costs
+  155-220 us whichever `timer.device` unit fires it -- 40% in timer.device,
+  22% in Exec's wake and dispatch, 20% the driver's own header read -- so
+  what is spent is the count. A frame in or out, or a write waiting for TX
+  credit, is followed by five 2 ms ticks (credits ride the next frame's
+  header; a slower tick there halved TX); for a second after an exchange the
+  tick is 10 ms; after that it rides the vertical-blank interrupt, every 40
+  ms. Measured: idle 0.42%, 2.4% for the second after an exchange; TCP 34 in
+  / 52-54 out Mbit/s; ping at 5 Hz 8-15 ms (up to 10 ms of tick on the first
+  frame after the poller's watch); at 1 Hz the chip's power save decides.
+
 - One receive task per interface, not three. A SANA-II device wants a
   CMD_READ per Ethernet type, so the IPv4, ARP and IPv6 reads are three rings;
   each ring had a task of its own, and every frame of every type serialised on
