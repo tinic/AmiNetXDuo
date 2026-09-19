@@ -73,6 +73,9 @@ BUDGETS=(
     # ten thousand 63 -> 537 Mbit/s out on the A1200.  -> 227,512: the DNS
     # cache dropped with the server that filled it (nxd_dns.c
     # _nx_dns_cache_drop), so a name does not resolve after NetShutdown.
+    # -> 227,696: the SACK tail fix retransmits the second lost tail segment
+    # when the first repair is ACKed, instead of waiting for the RTO with no
+    # further duplicate ACK possible.
     # -> 227,672: FILTER=EVERYTHING read (three values compared, the
     # promiscuous open flag carried to OpenDevice).
     "minimal:src/bsdsocket/bsdsocket.library:227800"

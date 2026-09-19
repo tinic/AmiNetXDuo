@@ -79,6 +79,10 @@
 (set D_ROOT "")
 (set S_TERM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Terminal") "Terminal"))
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
+(set S_SAMEFILE (if (> (strlen SRCDIR) 0)
+                    (tackon SRCDIR "InstallSameFile") "InstallSameFile"))
+(set S_NETPROBE (if (> (strlen SRCDIR) 0)
+                    (tackon SRCDIR "InstallNetProbe") "InstallNetProbe"))
 
 ; A DRAWER'S ICON IS NOT IN THE DRAWER, it is beside it -- Examples.info sits
 ; next to Examples/, not inside it.  Every copy below that installs a drawer
@@ -161,7 +165,8 @@
        "commands take that name:\n\n"
        "\tOnline eth0\n\tShowNetStatus INTERFACE eth0\n\n"
        "The documentation uses \"eth0\".  A name can have at most 15 "
-       "characters."))
+       "characters.  Use letters, digits, hyphens, underscores or full "
+       "stops; spaces and AmigaDOS path characters are not allowed."))
 
 (set H_MDNS
   (cat "mDNS makes this Amiga reachable by a .local name.  It also lets "
@@ -226,13 +231,15 @@
 (set H_KEEPOLD
   (cat "This machine already has an AmiNetXDuo or Roadshow style network "
        "configuration in DEVS:NetInterfaces.\n\n"
-       "Answer \"Keep them\" to update the software and leave the existing "
+       "Answer \"Keep it\" to update the software and leave the existing "
        "configuration alone.  That is the usual choice for an update to a "
-       "newer version.\n\n"
+       "newer version.  If S:Network-Startup already exists, it is kept too, "
+       "so the same interfaces continue to start at boot.\n\n"
        "Answer \"Set them up again\" to answer all the network questions "
        "again.  That rewrites the interface file, DEVS:Internet/routes and "
-       "DEVS:Internet/name_resolution.  Any manual changes in these files "
-       "are lost."))
+       "DEVS:Internet/name_resolution, and writes a new S:Network-Startup.  "
+       "The old startup file is saved as S:Network-Startup.old, but manual "
+       "changes in the three configuration files are lost."))
 
 (set H_STARTUP
   (cat "S:User-Startup is the file that the Amiga runs at every boot.  "
@@ -241,8 +248,10 @@
        "S:Network-Startup is written here too, and is the file to edit "
        "afterwards: it names the interface chosen on the last page, and says "
        "how to add a second card or start every definition in the drawer the "
-       "way Roadshow does.  An S:Network-Startup already on this disk is "
-       "renamed to S:Network-Startup.old rather than overwritten.\n\n"
+       "way Roadshow does.  When an existing network configuration is kept, "
+       "an existing S:Network-Startup is kept with it.  When the network is "
+       "set up again, the old file is renamed to S:Network-Startup.old rather "
+       "than overwritten.\n\n"
        "If the answer is no, no physical network interface starts by itself.  "
        "Type AddNetInterface by hand when you want one.  A network program "
        "which opens bsdsocket.library gets the built-in loopback, but no card "
@@ -302,19 +311,22 @@
        "Pi 4's own Wi-Fi, for the same machines (DEVICE=anxwifipi.device, "
        "UNIT=0; it needs the Wi-Fi firmware Emu68 puts in DEVS:Firmware and "
        "a supplicant such as Aminet's WirelessManager to join a network).\n\n"
-       "COPYING IT CHANGES NOTHING BY ITSELF.  Which driver this machine "
-       "opens is the DEVICE= line in DEVS:NetInterfaces, and this installer "
-       "writes that line with the driver that came with the card.  Nothing "
-       "reads anxnet.device until something names it.\n\n"
-       "Say yes and it is on the disk, current, ready to be tried.  To try "
-       "it, put this in the interface file:\n\n"
+       "COPYING THEM CHANGES NOTHING BY ITSELF.  Which driver this machine "
+       "opens is the DEVICE= line in DEVS:NetInterfaces.  On Emu68 the "
+       "installer reads the device tree and writes definitions for the "
+       "Raspberry Pi Ethernet and Wi-Fi devices it finds, using anxgenet and "
+       "anxwifipi.  On another machine it normally keeps the driver that came "
+       "with the card; if that driver is absent and anxnet supports the card, "
+       "it writes anxnet and its CARD= name instead.\n\n"
+       "Say yes and they are on the disk, current, ready to be tried.  To "
+       "try anxnet.device, put this in the interface file:\n\n"
        "\tDEVICE=DEVS:Networks/anxnet.device\n\tCARD=<the card>\n\n"
        "CheckNetDevice reports what it found on this machine, and the guide "
        "lists the cards and their CARD= names.\n\n"
-       "Say no on a machine that has no use for them, or to keep an "
-       "anxnet.device that is already there exactly as it is.\n\n"
-       "An existing one is renamed to .old rather than being deleted, so "
-       "the previous driver can be put back by hand."))
+       "Say no on a machine that has no use for them, or to keep the copies "
+       "already there exactly as they are.\n\n"
+       "An existing driver is renamed to .old rather than being deleted, so "
+       "the previous copy can be put back by hand."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -325,8 +337,8 @@
        "file, and is refused while it exists.\n\n"
        "If the answer is yes, the old file is renamed to bsdsocket.library."
        "old.  It is not deleted, so it can be restored by hand later.  If "
-       "the answer is no, the other stack stays in place and only the "
-       "commands are installed.  Those commands then do not work."))
+       "the answer is no, the other stack stays in place and the installer "
+       "stops before writing anything."))
 
 ; --------------------------------------------------------------------------
 ; Format strings.
@@ -341,8 +353,9 @@
 ; --------------------------------------------------------------------------
 
 (set F_KEEPOLD
-  (cat "This machine already has a network interface called \"%s\".\n\n"
-       "Keep this configuration, or configure the network again?"))
+  (cat "This machine already has network configuration, including an "
+       "interface called \"%s\".\n\n"
+       "Keep the existing configuration, or configure the network again?"))
 
 (set F_NODEV
   (cat "The installer cannot find \"%s\" in DEVS: or in DEVS:Networks.\n\n"
@@ -388,16 +401,23 @@
   (cat "It does not start by itself.  To start it:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
+(set F_START_KEPT
+  (cat "The existing S:Network-Startup is unchanged and still runs at boot.  "
+       "To start this interface now:\n\n"
+       "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
+
 (set F_HTTPD
   (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
        "manager and text editor at /files and a Shell at /shell.  Neither asks for a password.\n"))
 
 (set H_DOCDIR
-  (cat "The documentation, the example configuration files and the "
-       "installation log go into a drawer called AmiNetXDuo.\n\n"
-       "Select where to create that drawer.  Nothing in it is necessary for "
-       "the network.  The files that matter go to LIBS:, C: and DEVS:, so "
-       "any drawer is acceptable."))
+  (cat "A drawer called AmiNetXDuo holds the documentation, example "
+       "configuration files and installation log.\n\n"
+       "Select where to create it.  If the next page chooses an ordinary "
+       "system installation, the network software goes to LIBS:, C: and "
+       "DEVS: and this drawer holds only material for the user.  If the next "
+       "page chooses a self-contained installation, its Libs, C and Devs "
+       "drawers go here too."))
 
 ; ==========================================================================
 ;  Small helpers
@@ -410,6 +430,42 @@
 ; empty string, which is why nothing below ever tests one.
 
 (set P_DIGIT "(0|1|2|3|4|5|6|7|8|9)")
+(set P_NAMECHAR
+  "(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|0|1|2|3|4|5|6|7|8|9|-)")
+
+; --- P_name_validate -----------------------------------------------------
+;
+;   in  : name_in, name_interface (0 hostname, 1 interface name)
+;   out : name_ok
+;
+; Both names are written without quotes into configuration or a startup
+; command.  Host names follow the DNS label characters.  Interface names also
+; accept '_' and '.', both common in device-oriented names and safe to pass to
+; AmigaDOS unquoted.
+
+(procedure P_name_validate
+  (set name_len (strlen name_in))
+  (set name_max (if name_interface 15 63))
+  (set name_ok (if (AND (> name_len 0) (<= name_len name_max)) 1 0))
+  (set name_i 0)
+
+  (while (< name_i name_len)
+    (set name_c (substr name_in name_i 1))
+    (if (NOT (patmatch P_NAMECHAR name_c))
+        (if (AND name_interface
+                 (OR (patmatch "_" name_c) (patmatch "." name_c)))
+            ""
+            (set name_ok 0)))
+    (set name_i (+ name_i 1)))
+
+  ; A DNS label cannot begin or end with a hyphen.  Applying the same rule to
+  ; an interface keeps the generated filename and command unsurprising.
+  (if (> name_len 0)
+    (
+      (if (patmatch "-" (substr name_in 0 1)) (set name_ok 0))
+      (if (patmatch "-" (substr name_in (- name_len 1) 1)) (set name_ok 0))
+    ))
+)
 
 ; --- P_ip_store -----------------------------------------------------------
 ;
@@ -587,6 +643,11 @@
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
+(if (NOT (exists S_NETPROBE (noreq)))
+    (abort "This archive has no InstallNetProbe.\n\n"
+           "The download is incomplete, or was unpacked with a tool that "
+           "dropped a file beside the Installer.\n\n"
+           "Nothing was changed."))
 
 ; ==========================================================================
 ;  2.  What is already here?
@@ -608,14 +669,16 @@
 ; tools/sana2-stage.sh:29-41 IS THE AUTHORITY for board -> driver, and this
 ; list must agree with it.  The Installer language cannot read that file, so
 ; the two are kept apart by nothing but this note; sana2_driver_for() names the
-; same eight files in the same words, and a card added there needs a row here
+; same driver files in the same words, and a card added there needs a row here
 ; and an entry in the menu below.
 ;
-; The order is the menu's order, because the index found here IS the menu's
-; default.  Change one and change the other -- and the PCMCIA sub-question at
-; (= CARD 7) counts positions too.
+; The first seven entries are the menu's first seven entries.  The next three
+; all select the PCMCIA menu row, and PCM_DEFAULT selects its hidden subtype
+; question correctly even at NOVICE.  The final entry selects UAE.  Change
+; this mapping with the menu and the PCMCIA question below.
 (set DET_INDEX -1)
 (set DET_N     0)
+(set PCM_DEFAULT 0)
 
 (while (set DET_TRY (select DET_N
           "a2065.device"
@@ -626,6 +689,8 @@
           "x-surf.device"
           "x-surf-100.device"
           "cnet.device"
+          "etherlink3.device"
+          "prism2.device"
           "uaenet.device"
           ""))
   (
@@ -636,7 +701,16 @@
     (set DET_N (+ DET_N 1))
   ))
 
-(set CARD_DEFAULT (if (>= DET_INDEX 0) DET_INDEX 0))
+; DET_INDEX 0..6 maps directly.  7..9 are the three PCMCIA drivers and all
+; map to CARD 7.  10 is UAE, CARD 8.  This explicit translation is what lets
+; a Novice install take both hidden defaults without silently turning a 3C589
+; or Prism2 into a CNet card.
+(set CARD_DEFAULT
+  (if (< DET_INDEX 0) 0
+    (if (<= DET_INDEX 6) DET_INDEX
+      (if (<= DET_INDEX 9) 7 8))))
+(if (= DET_INDEX 8) (set PCM_DEFAULT 1))
+(if (= DET_INDEX 9) (set PCM_DEFAULT 2))
 
 
 ; ==========================================================================
@@ -647,6 +721,36 @@
   "AmiNetXDuo " VERSION_STR " -- a TCP/IP stack for AmigaOS.\n\n")
 
 (complete 0)
+
+; Emu68 publishes the Pi's device tree as an Exec resource.  Installer has
+; no resource primitive, so the tiny companion beside this script asks the
+; same read-only device-tree code our GENET driver uses.  It does not open a
+; SANA-II device, claim hardware, load Wi-Fi firmware or change the machine.
+;
+; Three yes/no calls keep the return values in AmigaDOS's conventional
+; RETURN_OK/RETURN_WARN range.  A missing or malformed resource simply means
+; "not detected" and falls through to the ordinary card page below.
+(set PROBE_CMD ("\"%s\" EMU68" S_NETPROBE))
+(set AUTO_EMU68
+  (if (= 0 (run PROBE_CMD
+                (prompt "Checking for Emu68")
+                (help "This reads Emu68's device tree.  It does not open or "
+                      "reset a network device.")
+                (safe))) 1 0))
+(set PROBE_CMD ("\"%s\" GENET" S_NETPROBE))
+(set AUTO_GENET
+  (if (= 0 (run PROBE_CMD
+                (prompt "Checking for the Raspberry Pi Ethernet device")
+                (help "This reads Emu68's device tree.  It does not open or "
+                      "reset the Ethernet device.")
+                (safe))) 1 0))
+(set PROBE_CMD ("\"%s\" WIFIPI" S_NETPROBE))
+(set AUTO_WIFIPI
+  (if (= 0 (run PROBE_CMD
+                (prompt "Checking for the Raspberry Pi Wi-Fi device")
+                (help "This reads Emu68's device tree.  It does not open the "
+                      "Wi-Fi device or load its firmware.")
+                (safe))) 1 0))
 
 ; ==========================================================================
 ;  4.  Questions.  All of them, before anything is written.
@@ -659,10 +763,9 @@
 ; to another").  Every binary now runs on every 68k, so that question has no
 ; answer left to get wrong and is gone.
 ;
-; What remains is a real choice between two different stacks: the full one, and
-; the minimal one with IPv6, .local name lookups, the packet filter, encrypted
-; connections and IPv4 multicast left out.  It holds 166 KB less RAM, which is
-; worth having on a 1 MB machine and worth nothing on a larger one.
+; What remains is a real choice between three feature profiles: full, minimal
+; and micro.  The reduced profiles trade features for memory on constrained
+; machines; the question below gives the exact differences.
 ;
 ; THE FIGURES ARE MEASURED, THEY GO STALE, AND THEY ARE RAM AND NOT FILES.
 ; This comment has already said 104 KB, 98 KB, 124 KB and 121 KB, each a build
@@ -679,7 +782,7 @@
 (set MINPICK
   (askchoice
     (prompt "Select the stack to install.\n\n")
-    (help "Both stacks run on every Amiga from a 68000 up.  One binary picks "
+    (help "All three stacks run on every Amiga from a 68000 up.  One binary picks "
           "the code for this processor when the library opens.  Nothing has "
           "to match the machine.  If the disk moves to another machine, "
           "nothing changes.\n\n"
@@ -749,12 +852,43 @@
 ; what install/test/installdrive.c relies on.
 (set DO_ANXNET
   (askbool
-    (prompt "Install anxnet.device, the network driver AmiNetXDuo builds?\n\n"
-            "It goes into DEVS:Networks and nothing uses it until an "
+    (prompt "Install the network drivers supplied by AmiNetXDuo?\n\n"
+            "They go into DEVS:Networks and nothing uses one until an "
             "interface file names it.")
     (help    H_ANXNET)
-    (choices "Yes, install it" "No, leave it out")
+    (choices "Yes, install them" "No, leave them out")
     (default 1)))
+
+(set AUTO_CONFIG
+  (if (AND DO_ANXNET (OR AUTO_GENET AUTO_WIFIPI)) 1 0))
+
+(if AUTO_CONFIG
+  (message
+    (if (AND AUTO_GENET AUTO_WIFIPI)
+        (cat "Emu68's Raspberry Pi Ethernet and Wi-Fi devices were found.\n\n"
+             "The installer will create interfaces named \"genet\" and "
+             "\"wifipi\", using anxgenet.device and anxwifipi.device.  "
+             "Only genet is selected to start at boot; Wi-Fi still needs "
+             "WirelessManager (or another supplicant) before it can join a "
+             "network.")
+        (if AUTO_GENET
+            (cat "Emu68's Raspberry Pi Ethernet device was found.\n\n"
+                 "The installer will create an interface named \"genet\", "
+                 "using anxgenet.device.")
+            (cat "Emu68's Raspberry Pi Wi-Fi device was found.\n\n"
+                 "The installer will create an interface named \"wifipi\", "
+                 "using anxwifipi.device.  Wi-Fi still needs WirelessManager "
+                 "(or another supplicant) before it can join a network.")))
+    (help H_ANXNET)))
+
+(if (AND AUTO_CONFIG (AND (= MINPICK 2) (AND AUTO_GENET AUTO_WIFIPI)))
+  (message
+    "Both interfaces will be installed, but the micro stack has room for one "
+    "live interface.  The boot file starts genet only.  To use genet and "
+    "wifipi at the same time, install the full or minimal stack."
+    (help "Micro is intentionally a one-interface build.  Keeping both "
+          "definition files on disk makes either device available without "
+          "reinstalling, but does not increase that run-time limit.")))
 
 ; --- where the drawer of documentation goes ------------------------------
 
@@ -834,8 +968,10 @@
 ; The one bsdsocket.library that is allowed in LIBS: is the drawer's own,
 ; which a machine that already has this layout carries there through its
 ; startup block -- last, so the name reaches it only when nothing earlier
-; has one.  Same bytes, not same name: a different AmiNetXDuo in SYS:Libs
-; has the drawer's name too, and is exactly the case above.
+; has one.  SAME OBJECT, not same bytes: a different AmiNetXDuo in SYS:Libs
+; can be byte-identical and is exactly the case above.  Installer has no
+; SameLock primitive, so InstallSameFile beside this script supplies that one
+; answer through dos.library before anything is written.
 ;
 ; BEFORE the makedirs: a refused run leaves no drawer behind.
 (if DRAWER_LAYOUT
@@ -852,8 +988,19 @@
     (set LIBS_BSD_IS_OWN 0)
     (if (AND (exists "LIBS:bsdsocket.library" (noreq))
              (exists OWN_BSD (noreq)))
-        (if (= (getsum "LIBS:bsdsocket.library") (getsum OWN_BSD))
-            (set LIBS_BSD_IS_OWN 1)))
+      (
+        (set SAMEFILE_CMD
+          ("\"%s\" \"LIBS:bsdsocket.library\" \"%s\""
+             S_SAMEFILE OWN_BSD))
+        (if (= 0
+               (run SAMEFILE_CMD
+                    (prompt "Checking which bsdsocket.library LIBS: reaches")
+                    (help "A private reinstall may continue only when the "
+                          "library found through LIBS: is the same file as "
+                          "the one already in this AmiNetXDuo drawer.")
+                    (safe)))
+            (set LIBS_BSD_IS_OWN 1))
+      ))
 
     (if (AND (exists "LIBS:bsdsocket.library" (noreq))
              (= LIBS_BSD_IS_OWN 0))
@@ -864,16 +1011,6 @@
         (abort (F_DRAWER_REFUSED LIBS_BSD_VER LIBS_BSD_REV))
       ))
 
-    (makedir D_ROOT (infos))
-    (makedir D_LIBS)
-    (makedir D_C)
-    (makedir D_DEVS)
-    ; textfile does not create an intermediate directory, so these exist
-    ; before anything writes into them: measured as "Can't open file in line
-    ; 1459" writing DEVS:NetInterfaces/eth0 into a drawer that had only Devs.
-    (makedir (tackon D_DEVS "Networks"))
-    (makedir (tackon D_DEVS "NetInterfaces"))
-    (makedir (tackon D_DEVS "Internet"))
   ))
 
 ; How a startup file names one of OUR commands.  C: reaches the drawer LAST,
@@ -892,6 +1029,8 @@
 (set D_UG   (tackon D_LIBS "usergroup.library"))
 (set D_TLS  (tackon D_LIBS "tls.library"))
 (set D_ANX  (tackon (tackon D_DEVS "Networks") "anxnet.device"))
+(set D_ANXGENET (tackon (tackon D_DEVS "Networks") "anxgenet.device"))
+(set D_ANXWIFIPI (tackon (tackon D_DEVS "Networks") "anxwifipi.device"))
 (set D_BSD_OLD (cat D_BSD ".old"))
 (set D_UG_OLD  (cat D_UG  ".old"))
 (set D_TLS_OLD (cat D_TLS ".old"))
@@ -919,6 +1058,24 @@
     (set OLD_BSD_VER (/ OLD_BSD_RAW 65536))
     (set OLD_BSD_REV (- OLD_BSD_RAW (* OLD_BSD_VER 65536)))
   ))
+
+; Resolve a stack conflict before asking how to configure this one.  A user
+; who elects to keep Roadshow, AmiTCP or Miami should not have to answer all
+; the card and address pages merely to reach an abort at their end.
+(set REPLACE_LIB 1)
+
+(if (AND OLD_BSD (= DRAWER_LAYOUT 0))
+    (set REPLACE_LIB
+      (askbool
+        (prompt (F_OLDLIB OLD_BSD_VER OLD_BSD_REV))
+        (help    H_REPLACELIB)
+        (choices "Replace it" "Leave it alone")
+        (default 1))))
+
+(if (= REPLACE_LIB 0)
+    (abort "LIBS:bsdsocket.library is unchanged, so AmiNetXDuo is not "
+           "installed.\n\n"
+           "Nothing was changed."))
 
 ; Configuration belongs to the same layout as the libraries and commands.
 (set OLD_IF "")
@@ -962,7 +1119,7 @@
       (askbool
         (prompt (F_KEEPOLD OLD_IF))
         (help H_KEEPOLD)
-        (choices "Keep them" "Set them up again")
+        (choices "Keep it" "Set them up again")
         (default 1))))
 
 ; Kept settings are not checked, and saying so is the only honest option.
@@ -985,6 +1142,9 @@
 ; --- the card ------------------------------------------------------------
 
 (set IFNAME  "eth0")
+(set SECOND_IF "eth1")
+(if (AND AUTO_CONFIG (AND AUTO_GENET AUTO_WIFIPI))
+    (set SECOND_IF "wifipi"))
 (set DEVUNIT 0)
 (set USE_CARD 0)
 (set CARD_KEY "")
@@ -993,6 +1153,24 @@
 
 (if (= KEEP_OLD 0)
   (
+    (if AUTO_CONFIG
+      (
+        ; GENET is the primary when both on-board devices exist: it can take
+        ; a DHCP lease immediately.  Wi-Fi needs a supplicant first, so its
+        ; definition is installed below but it is not the boot-selected one.
+        (if AUTO_GENET
+          (
+            (set IFNAME    "genet")
+            (set DEV_NAME  "anxgenet.device")
+            (set DEV_WRITE D_ANXGENET)
+          )
+          (
+            (set IFNAME    "wifipi")
+            (set DEV_NAME  "anxwifipi.device")
+            (set DEV_WRITE D_ANXWIFIPI)
+          ))
+      )
+      (
     (set CARD
       (askchoice
         (prompt "Which network card does this Amiga have?")
@@ -1075,7 +1253,7 @@
               "3Com 3C589"
               "Prism2 wireless"
               "Something else")
-            (default 0)))
+            (default PCM_DEFAULT)))
 
         (set DEV_NAME
           (select PCM
@@ -1149,12 +1327,16 @@
             (prompt "Type a name for this interface.")
             (help   H_IFNAME)
             (default "eth0")))
-          (set IF_OK (if (AND (> (strlen IFNAME) 0)
-                              (<= (strlen IFNAME) 15)) 1 0))
+          (set name_in IFNAME)
+          (set name_interface 1)
+          (P_name_validate)
+          (set IF_OK name_ok)
           (if (= IF_OK 0)
-              (message "An interface name must be between 1 and 15 "
-                       "characters long."
+              (message "An interface name must be 1 to 15 characters and "
+                       "contain only letters, digits, hyphens, underscores "
+                       "or full stops.  It cannot begin or end with a hyphen."
                        (help H_IFNAME))))
+      ))
       ))
 
     ; --- automatic or manual addressing --------------------------------
@@ -1164,13 +1346,16 @@
     ; this said MDNS=YES to everyone who clicked "No" and MDNS=NO to everyone
     ; who clicked "Yes"; only a NOVICE run, which takes the (default) and never
     ; draws the page, came out right.
-    (set WANTMDNS
-      (if (askbool
-            (prompt "Answer .local names on the network?")
-            (help    H_MDNS)
-            (choices "No" "Yes")
-            (default 1))
-          0 1))
+    ; Only the full profile carries mDNS.  Asking this on minimal or micro
+    ; offered a setting those stacks could never honor.
+    (if (= MINPICK 0)
+      (set WANTMDNS
+        (if (askbool
+              (prompt "Answer .local names on the network?")
+              (help    H_MDNS)
+              (choices "No" "Yes")
+              (default 1))
+            0 1)))
 
     (set USEDHCP
       (askbool
@@ -1225,28 +1410,24 @@
 (set HOSTNAME "amiga")
 
 (if (= KEEP_OLD 0)
-    (set HOSTNAME
-      (askstring
-        (prompt "Type the name of this Amiga on the network.")
-        (help   H_HOSTNAME)
-        (default "amiga"))))
-
-; --- replacing another stack's library -----------------------------------
-
-(set REPLACE_LIB 1)
-
-(if (AND OLD_BSD (= DRAWER_LAYOUT 0))
-    (set REPLACE_LIB
-      (askbool
-        (prompt (F_OLDLIB OLD_BSD_VER OLD_BSD_REV))
-        (help    H_REPLACELIB)
-        (choices "Replace it" "Leave it alone")
-        (default 1))))
-
-(if (= REPLACE_LIB 0)
-    (abort "LIBS:bsdsocket.library is unchanged, so AmiNetXDuo is not "
-           "installed.\n\n"
-           "Nothing was changed."))
+  (
+    (set HOST_OK 0)
+    (until HOST_OK
+      (set HOSTNAME
+        (askstring
+          (prompt "Type the name of this Amiga on the network.")
+          (help   H_HOSTNAME)
+          (default "amiga")))
+      (set name_in HOSTNAME)
+      (set name_interface 0)
+      (P_name_validate)
+      (set HOST_OK (if (= @user-level 0) 1 name_ok))
+      (if (= HOST_OK 0)
+          (message "A host name must be 1 to 63 characters and contain only "
+                   "letters, digits or hyphens.  It cannot begin or end with "
+                   "a hyphen."
+                   (help H_HOSTNAME))))
+  ))
 
 ; --- start the network at boot? ------------------------------------------
 
@@ -1312,6 +1493,22 @@
 ; ==========================================================================
 
 (set @default-dest DOCDIR)
+
+; The drawer paths were selected above, but are made only now, after the last
+; question.  Cancel from any question therefore leaves a new destination
+; untouched, which is the transaction model Commodore Installer users expect.
+; textfile does not create intermediate directories, so all three DEVS:
+; children must exist before the configuration phase reaches them.
+(if DRAWER_LAYOUT
+  (
+    (makedir D_ROOT (infos))
+    (makedir D_LIBS)
+    (makedir D_C)
+    (makedir D_DEVS)
+    (makedir (tackon D_DEVS "Networks"))
+    (makedir (tackon D_DEVS "NetInterfaces"))
+    (makedir (tackon D_DEVS "Internet"))
+  ))
 
 ; --- the libraries -------------------------------------------------------
 ;
@@ -1494,7 +1691,7 @@
 
 (if DO_ANXNET
   (
-    (working "Installing the network driver")
+    (working "Installing the network drivers")
 
     (makedir (tackon D_DEVS "Networks")
       (prompt "Creating DEVS:Networks, the drawer that SANA-II network "
@@ -1601,14 +1798,16 @@
 ; handshake completes in a minute or two and a resumed one in under a second --
 ; so every processor gets it and only the minimal stack leaves it out.
 (if (NOT (exists (tackon S_LIBS "tls.library") (noreq)))
-    ; Chosen, not imposed -- and worth restating, because what the minimal
+    ; Chosen, not imposed -- and worth restating, because what either reduced
     ; stack leaves out is easy to pick in one screen and be surprised by later.
     (message
-      "The minimal stack was chosen, so several things are not installed: "
+      "A reduced-memory stack was chosen, so several things are not installed: "
       "encrypted (https:) connections, IPv6, .local name lookups, the packet "
       "filter, IPv4 multicast, the ARexx host and the TCP: handler.\n\n"
       "The stack, the commands, ssh and ordinary http: work normally.  "
-      "Install again and choose Everything to add the rest."))
+      "The micro stack also supports only one interface and omits routing and "
+      "netstat-style query calls.  Install again and choose Everything to add "
+      "the rest."))
 
 (set @special-msg "")
 
@@ -1680,62 +1879,88 @@
 
 ; --- the interface file --------------------------------------------------
 
+(procedure P_write_interface
+  (textfile
+    (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
+    (help   "This file describes one network card.  It gives the driver "
+            "to open, and how the card gets its Internet address.  The "
+            "name of the file is the name of the interface.")
+    (dest   (tackon (tackon D_DEVS "NetInterfaces") IFNAME))
+    (append "; DEVS:NetInterfaces/" IFNAME " -- written by the AmiNetXDuo "
+            "installer.\n")
+    (append ";\n")
+    (append "; The name of this file is the name of the interface.  Use it\n")
+    (append "; with the network commands:\n")
+    (append ";\n")
+    (append ";     Online " IFNAME "\n")
+    (append ";     Offline " IFNAME "\n")
+    (append ";     ShowNetStatus INTERFACE " IFNAME "\n")
+    (append ";\n")
+    (append "; DEVICE     the SANA-II driver for the card.  A bare name is\n")
+    (append ";            looked up in DEVS:.  A path is used as given.\n")
+    (append "; UNIT       which card, when one driver has several.\n")
+    (append "; CONFIGURE  how the address is obtained:\n")
+    (append ";              DHCP   -- ask the network (the usual choice)\n")
+    (append ";              AUTO   -- self-assign 169.254.x.x with no DHCP\n")
+    (append ";              STATIC -- use the ADDRESS/NETMASK below\n")
+    (append ";              NONE   -- no IPv4 here, IPv6 carries this\n")
+    (append ";                        interface\n")
+    (append ";            Note this keyword is CONFIGURE, not IPTYPE.  In\n")
+    (append ";            Roadshow IPTYPE is the SANA-II packet type, a\n")
+    (append ";            number, and defaults to 2048.\n")
+    (append ";\n")
+    (append "; MDNS=  YES -- answer .local queries on this interface\n")
+    (append ";        NO  -- do not, which is the default when the\n")
+    (append ";               keyword is absent.  The responder costs\n")
+    (append ";               real time on a slow machine, even when\n")
+    (append ";               nothing asks it anything.\n")
+    (append ";\n")
+    (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")
+    (append "; AUTO, DHCP or STATIC), ADDRESS6 and GATEWAY6.  A build\n")
+    (append "; without IPv6 ignores them, so they are safe to leave in\n")
+    (append "; place.  AUTO follows the router, which is what an IPv6-only\n")
+    (append "; machine behind a managed router needs; see\n")
+    (append "; Examples/NetInterfaces/eth0-ipv6.\n")
+    (append ";\n")
+    (append "DEVICE=" DEV_WRITE "\n")
+    (append (if USE_CARD (cat "CARD=" CARD_KEY "\n") ""))
+    (append ("UNIT=%ld\n" DEVUNIT))
+    (append (if USEDHCP "CONFIGURE=DHCP\n" "CONFIGURE=STATIC\n"))
+    (append (if WANTMDNS "MDNS=YES\n" "MDNS=NO\n"))
+    (append (if USEDHCP
+                (cat ";ADDRESS=192.168.1.10\n;NETMASK=255.255.255.0\n")
+                (cat "ADDRESS=" IPADDR "\n" "NETMASK=" IPMASK "\n")))
+    (append ";CONFIGURE6=AUTO\n")
+    (safe))
+)
+
 (if (= KEEP_OLD 0)
   (
     (working "Writing the network configuration")
 
-    (textfile
-      (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
-      (help   "This file describes one network card.  It gives the driver "
-              "to open, and how the card gets its Internet address.  The "
-              "name of the file is the name of the interface.")
-      (dest   (tackon (tackon D_DEVS "NetInterfaces") IFNAME))
-      (append "; DEVS:NetInterfaces/" IFNAME " -- written by the AmiNetXDuo "
-              "installer.\n")
-      (append ";\n")
-      (append "; The name of this file is the name of the interface.  Use it\n")
-      (append "; with the network commands:\n")
-      (append ";\n")
-      (append ";     Online " IFNAME "\n")
-      (append ";     Offline " IFNAME "\n")
-      (append ";     ShowNetStatus INTERFACE " IFNAME "\n")
-      (append ";\n")
-      (append "; DEVICE     the SANA-II driver for the card.  A bare name is\n")
-      (append ";            looked up in DEVS:.  A path is used as given.\n")
-      (append "; UNIT       which card, when one driver has several.\n")
-      (append "; CONFIGURE  how the address is obtained:\n")
-      (append ";              DHCP   -- ask the network (the usual choice)\n")
-      (append ";              AUTO   -- self-assign 169.254.x.x with no DHCP\n")
-      (append ";              STATIC -- use the ADDRESS/NETMASK below\n")
-      (append ";              NONE   -- no IPv4 here, IPv6 carries this\n")
-      (append ";                        interface\n")
-      (append ";            Note this keyword is CONFIGURE, not IPTYPE.  In\n")
-      (append ";            Roadshow IPTYPE is the SANA-II packet type, a\n")
-      (append ";            number, and defaults to 2048.\n")
-      (append ";\n")
-      (append "; MDNS=  YES -- answer .local queries on this interface\n")
-      (append ";        NO  -- do not, which is the default when the\n")
-      (append ";               keyword is absent.  The responder costs\n")
-      (append ";               real time on a slow machine, even when\n")
-      (append ";               nothing asks it anything.\n")
-      (append ";\n")
-      (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")
-      (append "; AUTO, DHCP or STATIC), ADDRESS6 and GATEWAY6.  A build\n")
-      (append "; without IPv6 ignores them, so they are safe to leave in\n")
-      (append "; place.  AUTO follows the router, which is what an IPv6-only\n")
-      (append "; machine behind a managed router needs; see\n")
-      (append "; Examples/NetInterfaces/eth0-ipv6.\n")
-      (append ";\n")
-      (append "DEVICE=" DEV_WRITE "\n")
-      (append (if USE_CARD (cat "CARD=" CARD_KEY "\n") ""))
-      (append ("UNIT=%ld\n" DEVUNIT))
-      (append (if USEDHCP "CONFIGURE=DHCP\n" "CONFIGURE=STATIC\n"))
-      (append (if WANTMDNS "MDNS=YES\n" "MDNS=NO\n"))
-      (append (if USEDHCP
-                  (cat ";ADDRESS=192.168.1.10\n;NETMASK=255.255.255.0\n")
-                  (cat "ADDRESS=" IPADDR "\n" "NETMASK=" IPMASK "\n")))
-      (append ";CONFIGURE6=AUTO\n")
-      (safe))
+    (set PRIMARY_IF IFNAME)
+    (set PRIMARY_DHCP USEDHCP)
+    (P_write_interface)
+
+    ; A Pi with both on-board devices gets both definitions.  Keep IFNAME on
+    ; the primary afterwards: S:Network-Startup deliberately starts one named
+    ; interface, not every definition in the drawer.
+    (if (AND AUTO_CONFIG (AND AUTO_GENET AUTO_WIFIPI))
+      (
+        (set IFNAME    "wifipi")
+        (set DEV_NAME  "anxwifipi.device")
+        (set DEV_WRITE D_ANXWIFIPI)
+        (set DEVUNIT   0)
+        (set USE_CARD  0)
+        (set CARD_KEY  "")
+        ; A manually entered address belongs to the primary card only.  Giving
+        ; the same address to Wi-Fi would create a duplicate as soon as both
+        ; came online; let the secondary ask DHCP independently instead.
+        (set USEDHCP   1)
+        (P_write_interface)
+        (set IFNAME PRIMARY_IF)
+        (set USEDHCP PRIMARY_DHCP)
+      ))
 
     ; --- the default route ---------------------------------------------
 
@@ -1955,6 +2180,16 @@
 
 (set START_IF (if KEEP_OLD OLD_IF IFNAME))
 
+; KEEP CONFIGURATION MEANS KEEP ITS BOOT POLICY TOO.  S:Network-Startup is a
+; user-editable configuration file in both Roadshow and AmiTCP_NG.  Replacing
+; it during an ordinary software update changes which of several interfaces
+; comes online, even when the user explicitly asked us to keep the setup.  It
+; is generated only for a new/reconfigured setup, or when no file existed.
+(set KEEP_NETSTART 0)
+(if (AND DO_STARTUP KEEP_OLD
+         (exists "S:Network-Startup" (noreq)))
+    (set KEEP_NETSTART 1))
+
 ; One string, however many lines are in it.  (startup) replaces everything
 ; between its two markers, so the block is always written whole and there is
 ; no case where a second run leaves a line from the first one behind: an httpd
@@ -2063,7 +2298,7 @@
            "; assign so that this drawer's is the one that runs; to\n"
            "; AmiNetXDuo, DEVS: here means AmiNetXDuo:Devs.\n")))
 
-(if DO_STARTUP
+(if (AND DO_STARTUP (= KEEP_NETSTART 0))
   (
     (if (exists "S:Network-Startup" (noreq))
       (
@@ -2099,7 +2334,8 @@
       (append ";\n")
       (append "; To start another card as well, add a line for it:\n")
       (append ";\n")
-      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/eth1 QUIET\n")
+      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" SECOND_IF
+              " QUIET\n")
       (append ";\n")
       (append "; To start EVERY definition in the drawer, which is what\n")
       (append "; Roadshow does, use the pattern instead of a name:\n")
@@ -2139,7 +2375,9 @@
 ; ==========================================================================
 
 (if DO_STARTUP
-    (set FINAL_START (F_START_YES C_PREFIX START_IF))
+    (if KEEP_NETSTART
+        (set FINAL_START (F_START_KEPT C_PREFIX START_IF))
+        (set FINAL_START (F_START_YES C_PREFIX START_IF)))
     (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
 ; Said again on the last page, and deliberately.  The question that turned it

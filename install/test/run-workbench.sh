@@ -1124,22 +1124,30 @@ take_lock
 # drawer is added to LIBS: last, so that library would keep answering every
 # program and the drawer's would never run; the installer refuses instead of
 # installing a drawer that never runs (Install-AmiNetXDuo, F_DRAWER_REFUSED).
-# Refused means REFUSED: the library it found is byte for byte what it was,
-# no AmiNetXDuo drawer was created -- the check sits before the makedirs --
-# and S:User-Startup has none of our lines.  The Installer shows the abort
-# on a page of its own and goes away when it is answered, so installdrive
-# reports a completed run; the files are the verdict.  The foreign library
-# is then taken away and run 1 installs on the same disk.
+#
+# BOTH COPIES ARE THE ARCHIVE'S REAL LIBRARY and therefore byte-identical.  A
+# checksum comparison used to call the system copy the drawer's own and allow
+# the install, leaving the old system path in front after the drawer was
+# upgraded.  InstallSameFile has to distinguish the two objects, not their
+# contents.  Refused means REFUSED: both seeded files remain byte for byte
+# what they were, nothing else is added to the seeded drawer, and neither
+# startup file changes.  The foreign library and seed drawer are then taken
+# away and run 1 installs on the same disk.
 if [ "$DRAWER" = "1" ]; then
     echo
     echo "============================================================"
     echo "  0/2  a bsdsocket.library already in LIBS:, drawer refused"
     echo "============================================================"
 
-    printf 'foreign bsdsocket.library -- must not be moved\n' \
-        > "$HD/Libs/bsdsocket.library"
-    chmod 644 "$HD/Libs/bsdsocket.library"
+    mkdir -p "$HD/Libs" "$HD/AmiNetXDuo/Libs"
+    cp "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" \
+       "$HD/Libs/bsdsocket.library"
+    cp "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" \
+       "$HD/AmiNetXDuo/Libs/bsdsocket.library"
+    chmod 644 "$HD/Libs/bsdsocket.library" \
+              "$HD/AmiNetXDuo/Libs/bsdsocket.library"
     REFUSED_LIB_BEFORE=$(shasum "$HD/Libs/bsdsocket.library")
+    REFUSED_OWN_BEFORE=$(shasum "$HD/AmiNetXDuo/Libs/bsdsocket.library")
 
     startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt
@@ -1158,8 +1166,14 @@ Echo >DH0:.done "$RC"'
         echo "!! the refused drawer install changed LIBS:bsdsocket.library"
         refused_ok=0
     fi
-    if amiga_path AmiNetXDuo >/dev/null 2>&1; then
-        echo "!! the refused drawer install created the AmiNetXDuo drawer"
+    if [ "$REFUSED_OWN_BEFORE" != "$(shasum "$HD/AmiNetXDuo/Libs/bsdsocket.library" 2>/dev/null)" ]; then
+        echo "!! the refused drawer install changed its seeded drawer copy"
+        refused_ok=0
+    fi
+    if find "$HD/AmiNetXDuo" -type f \
+            ! -path "$HD/AmiNetXDuo/Libs/bsdsocket.library" \
+            -print -quit | grep -q .; then
+        echo "!! the refused drawer install added files to the seeded drawer"
         refused_ok=0
     fi
     if [ "$(startup_count 'AmiNetXDuo')" != "0" ]; then
@@ -1187,6 +1201,7 @@ Echo >DH0:.done "$RC"'
     fi
     echo "  ok      refused, nothing written"
 
+    rm -rf "$HD/AmiNetXDuo"
     rm -f "$HD/Libs/bsdsocket.library" "$HD/install-log.txt" \
           "$HD/install-console.txt" "$HD/installdrive.txt"
 fi
@@ -1309,6 +1324,26 @@ done
 check_file "${INST}Devs/NetInterfaces/eth0"
 check_file "${INST}Devs/Internet/name_resolution"
 check_file S/User-Startup
+
+# On a repeated install the harness appends this comment after run 1.  The
+# default answer on run 2 is "Keep it".  That must preserve the editable boot
+# policy in place; rotating it to .old and generating a new one silently
+# changes which interfaces an upgraded Roadshow/AmiTCP_NG machine starts.
+if [ "$DRIVE_RUNS" != "1" ]; then
+    NS_FILE=$(amiga_path S/Network-Startup 2>/dev/null || true)
+    NS_OLD=$(amiga_path S/Network-Startup.old 2>/dev/null || true)
+    if [ -z "$NS_FILE" ] ||
+       ! grep -q '^; user startup policy -- installer must preserve this' \
+           "$NS_FILE" 2>/dev/null; then
+        echo "!! repeated install did not preserve S:Network-Startup"
+        fail=1
+    elif [ -n "$NS_OLD" ]; then
+        echo "!! repeated install rotated the kept S:Network-Startup to .old"
+        fail=1
+    else
+        echo "  ok      repeated install kept S:Network-Startup verbatim"
+    fi
+fi
 
 # The self-contained contract, in one comparison: none of the system stack's
 # libraries, driver, configuration, or AmiTCP:db data moved by even one byte.
@@ -1722,7 +1757,7 @@ echo "installer_detects=$(printf '%s' "$INSTALLER_KNOWN_DRIVERS" | tr '\n' ',')"
 CARD_CONFIG=installer
 if [ "$CARD_SELECTED" = "no" ] && [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
     echo
-    echo "!! $SANA2_DRIVER IS one of the eight names Install-AmiNetXDuo:524-533"
+    echo "!! $SANA2_DRIVER IS on Install-AmiNetXDuo's detection list"
     echo "   detects, and the installer still wrote"
     echo "   DEVICE=${INSTALLER_DEVICE:-nothing}.  Detection is broken, or the"
     echo "   driver was not staged where the loop looks."
@@ -1734,8 +1769,8 @@ if [ "$CARD_SELECTED" = "no" ]; then
     echo "!! THE INSTALLER DID NOT SELECT THIS CARD."
     echo "   asked for $BOARD, whose driver is $SANA2_DRIVER, and the"
     echo "   installer wrote DEVICE=${INSTALLER_DEVICE:-nothing}."
-    echo "   Install-AmiNetXDuo:521-542 scans DEVS: and DEVS:Networks for a"
-    echo "   driver on a list of eight file names and makes the first hit the"
+    echo "   Install-AmiNetXDuo scans DEVS: and DEVS:Networks for a known"
+    echo "   driver and makes the first hit the"
     echo "   card page's default; installdrive.c cannot answer an askchoice"
     echo "   any other way.  A driver whose file name is not on that list"
     echo "   leaves CARD_DEFAULT at 0, which is the A2065."
@@ -1830,14 +1865,14 @@ if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     # THE DIAGNOSIS, NOT A HINT.  At NOVICE the script aborts outright when its
     # detection loop found nothing and there is no configuration to keep --
     # Install-AmiNetXDuo:633-641, "The installer found no network card driver
-    # in DEVS: or DEVS:Networks" -- and the loop only knows eight file names.
+    # in DEVS: or DEVS:Networks" -- and the loop knows a finite driver list.
     # A machine with this card and this driver therefore cannot install the
     # archive at the default user level at all, and that reads from the log as
     # an install that failed rather than as a script that refused.
     if [ "$LEVEL" = "NOVICE" ] && [ "$INSTALLER_KNOWS_DRIVER" = "no" ]; then
         echo
-        echo "   WHY: $SANA2_DRIVER is not one of the eight file names"
-        echo "   Install-AmiNetXDuo:524-533 detects, so DET_INDEX stayed -1,"
+        echo "   WHY: $SANA2_DRIVER is not on the Installer's detection list,"
+        echo "   so DET_INDEX stayed -1,"
         echo "   and with no existing configuration to keep the abort at"
         echo "   Install-AmiNetXDuo:633-641 fires before anything is written."
         echo "   At NOVICE there is no card page to answer instead.  A user"

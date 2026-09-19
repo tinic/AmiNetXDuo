@@ -58,6 +58,23 @@ version at the top when it merges.
   where the SYN seeds it at the ISN, wrong against zero once the high bit is
   set -- so the fixtures now seed what the SYN leaves.
 
+- The Installer detects Emu68 GENET and Wi-Fi devices and creates interfaces
+  using `anxgenet.device` and `anxwifipi.device`.
+
+- Reinstalling with “Keep it” preserves `S:Network-Startup`; Installer device
+  detection, validation, cancellation, and question ordering are corrected.
+
+- TCP SACK recovery retransmits a second loss at the tail without waiting for
+  its retransmission timeout.
+
+- DP8390 receive-overrun recovery no longer strands the next queued packet.
+
+- `anxwifipi.device` rearms fallback reception after control requests.
+
+- TLS packet-pool sizing rejects overflowing counts.
+
+- Browser console scheduling remains monotonic across wall-clock changes.
+
 ## 0.28.9
 
 - `httpd` sleeps between the web console's passes. With a viewer attached its

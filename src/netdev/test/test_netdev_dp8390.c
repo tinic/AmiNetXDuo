@@ -38,6 +38,7 @@
 
 #define PAGES 4
 #define REGS  16
+#define CHIP_ISR_REG 0x07u
 
 static UBYTE chip[PAGES][REGS];
 static UBYTE chip_page;
@@ -86,7 +87,15 @@ static void chip_put(const NetdevNic *n, UWORD reg, UBYTE val)
     }
 
     trace(chip_page, r, val, 0);
-    chip[chip_page][r] = val;
+    if (chip_page == 0 && r == CHIP_ISR_REG)
+    {
+        /* The real ISR is write-one-to-clear. */
+        chip[0][r] &= (UBYTE)~val;
+    }
+    else
+    {
+        chip[chip_page][r] = val;
+    }
 }
 
 static UBYTE chip_get(const NetdevNic *n, UWORD reg)
@@ -863,6 +872,44 @@ static void n_a_frame_that_crosses_a_page(void)
                (unsigned long)(100u + ED_PAGE_SIZE - sizeof(NetdevRing)));
 }
 
+/*
+ * PTX and OVW may be latched in the same interrupt.  The completed buffer
+ * must be accounted, but overwrite recovery stops the chip: the next queued
+ * buffer therefore has to start AFTER that recovery rather than immediately
+ * before it.
+ */
+static void o_overwrite_precedes_the_next_queued_transmit(void)
+{
+    static const UBYTE frame[64] = { 0 };
+    int stop, txp;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    (VOID)dp8390_tx(&nic, frame, sizeof(frame));
+    (VOID)dp8390_tx(&nic, frame, sizeof(frame));
+
+    /* No received frame is waiting, so overwrite recovery only has to bring
+       the ring and transmitter back to their prior positions. */
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip[0][ED_P0_ISR] = (UBYTE)(ED_ISR_PTX | ED_ISR_OVW);
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "the combined interrupt is handled");
+    expect_hex("the completed frame leaves one queued", nic.txb_inuse, 1);
+    expect_hex("the completion is counted", nic.tx_completed, 1);
+    expect_hex("the overwrite is counted", nic.overruns, 1);
+
+    stop = find_w_val(0, ED_P0_CR,
+                      (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    expect(stop >= 0, "overwrite recovery stops the chip");
+
+    txp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_TXP |
+                             ED_CR_STA), stop + 1);
+    expect(txp > stop,
+           "the next queued frame starts only after overwrite recovery");
+}
+
 int main(void)
 {
     a_init_follows_the_manual();
@@ -879,6 +926,7 @@ int main(void)
     l_a_corrupt_header_resets_rather_than_spins();
     m_an_overlong_frame_is_skipped_not_reset_on();
     n_a_frame_that_crosses_a_page();
+    o_overwrite_precedes_the_next_queued_transmit();
 
     if (failures != 0)
     {

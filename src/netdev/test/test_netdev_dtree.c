@@ -55,10 +55,11 @@ static const UBYTE genet_mac[] = { 0x98, 0xFE, 0x54, 0x2D, 0xA5, 0x1E };
 static const UBYTE mdio_reg[]  = { CELL(0xe14), CELL(8) };
 static const UBYTE phy_reg[]   = { CELL(1) };
 static const UBYTE decoy_reg[] = { CELL(0), CELL(0x7D000000), CELL(0), CELL(0x100) };
+static const UBYTE mmc_path[]   = "/soc/mmc@7e300000";
 
 #define STR(s) (const UBYTE *)(s), sizeof(s)
 
-static DtNode root, memory0, scb, genet, mdio, phy, soc, decoy;
+static DtNode root, memory0, scb, genet, mdio, phy, soc, decoy, aliases, mmc;
 
 static const Prop root_props[] =
 {
@@ -113,6 +114,16 @@ static const Prop soc_props[] =
     { "#size-cells",    one, 4 },
     { NULL, NULL, 0 }
 };
+static const Prop aliases_props[] =
+{
+    { "mmc", mmc_path, sizeof(mmc_path) },
+    { NULL, NULL, 0 }
+};
+static const Prop mmc_props[] =
+{
+    { "status", STR("okay") },
+    { NULL, NULL, 0 }
+};
 /* A second GENET node, disabled, and listed BEFORE the real one: the walk
    must pass it by. */
 static const Prop decoy_props[] =
@@ -123,8 +134,8 @@ static const Prop decoy_props[] =
     { NULL, NULL, 0 }
 };
 
-static DtNode *root_children[]  = { &soc, &memory0, &scb, NULL };
-static DtNode *soc_children[]   = { &decoy, NULL };
+static DtNode *root_children[]  = { &aliases, &soc, &memory0, &scb, NULL };
+static DtNode *soc_children[]   = { &decoy, &mmc, NULL };
 static DtNode *scb_children[]   = { &genet, NULL };
 static DtNode *genet_children[] = { &mdio, NULL };
 static DtNode *mdio_children[]  = { &phy, NULL };
@@ -140,6 +151,8 @@ static void build(void)
     phy     = (DtNode){ "ethernet-phy@1", &mdio, none, phy_props };
     soc     = (DtNode){ "soc", &root, soc_children, soc_props };
     decoy   = (DtNode){ "ethernet@7d000000", &soc, none, decoy_props };
+    aliases = (DtNode){ "aliases", &root, none, aliases_props };
+    mmc     = (DtNode){ "mmc@7e300000", &soc, none, mmc_props };
 }
 
 /* ------------------------------------------ the eleven, over that tree */
@@ -149,7 +162,13 @@ static int opens, closes;
 APTR dt_openkey(const char *name)
 {
     opens++;
-    return (strcmp(name, "/") == 0) ? (APTR)&root : NULL;
+    if (strcmp(name, "/") == 0)
+        return (APTR)&root;
+    if (strcmp(name, "/aliases") == 0)
+        return (APTR)&aliases;
+    if (strcmp(name, "/soc/mmc@7e300000") == 0)
+        return (APTR)&mmc;
+    return NULL;
 }
 
 VOID dt_closekey(APTR key)
@@ -222,6 +241,15 @@ int main(void)
 
     build();
 
+    expect_ulong("resource present", netdev_dtree_present(), 1);
+    expect_ulong("root model", netdev_dtree_root_compatible(
+                     "raspberrypi,4-model-b"), 1);
+    expect_ulong("root model absent", netdev_dtree_root_compatible(
+                     "raspberrypi,5-model-b"), 0);
+    expect_ulong("mmc alias", netdev_dtree_alias_present("mmc"), 1);
+    expect_ulong("missing alias", netdev_dtree_alias_present("wifi"), 0);
+    expect_ulong("discovery opens closed", (ULONG)(opens - closes), 0);
+
     /* The real node, through /scb's ranges, past the disabled decoy. */
     expect_ulong("find genet", netdev_dtree_find("brcm,bcm2711-genet-v5", &dt), 1);
     expect_ulong("base", dt.base, 0xF7580000UL);
@@ -245,6 +273,10 @@ int main(void)
 
     /* No devicetree.resource: not an Emu68, no unit. */
     resource_present = 0;
+    expect_ulong("no resource present", netdev_dtree_present(), 0);
+    expect_ulong("no resource root", netdev_dtree_root_compatible(
+                     "raspberrypi,4-model-b"), 0);
+    expect_ulong("no resource alias", netdev_dtree_alias_present("mmc"), 0);
     expect_ulong("no resource", netdev_dtree_find("brcm,bcm2711-genet-v5", &dt), 0);
 
     if (failures != 0)

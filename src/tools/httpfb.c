@@ -431,16 +431,37 @@ static VOID fb_refuse3(const char *a, ULONG v, const char *b)
 
 /* ---------------------------------------------------------------- the clock */
 
-/* Fiftieths, wrapping at midnight the way httpterm.c's does.  A wrap makes one
-   slice measurement wrong once a day, on a counter that is a mean over
-   hundreds of them. */
+/* Monotonic fiftieths derived from DateStamp.  Including ds_Days removes the
+   artificial midnight reset; accumulating only forward deltas also makes an
+   SNTP or manual backward correction cost one zero-length interval instead of
+   leaving a console waiting for the old wall clock to catch up.  Both the
+   wall value and the result may wrap naturally as ULONGs. */
 static ULONG fb_ticks(VOID)
 {
+    static ULONG last;
+    static ULONG ticks = 1UL;           /* 0 is a sentinel in the caller */
+    static UBYTE started;
     struct DateStamp ds;
+    ULONG            wall;
+    LONG             delta;
 
     (VOID)DateStamp(&ds);
+    wall = (ULONG)ds.ds_Days * 4320000UL +
+           (ULONG)ds.ds_Minute * 3000UL + (ULONG)ds.ds_Tick;
 
-    return (ULONG)ds.ds_Minute * 3000UL + (ULONG)ds.ds_Tick;
+    if (!started)
+    {
+        last    = wall;
+        started = 1;
+        return ticks;
+    }
+
+    delta = (LONG)(wall - last);
+    last  = wall;
+    if (delta > 0L)
+        ticks += (ULONG)delta;
+
+    return ticks;
 }
 
 /* ---------------------------------------------------------------- library -- */
@@ -2722,9 +2743,8 @@ BOOL http_fb_slice(ULONG now)
     {
         ULONG tick = fb_ticks();
 
-        /* A signed difference, so midnight is a wrap rather than a stall.  The
-           clock goes back to zero once a day and a plain `<` would stop
-           grabbing until the next day's ticks caught up. */
+        /* A signed difference on the continuous, modulo-ULONG clock makes its
+           eventual natural wrap harmless. */
         if (fb_next_tick != 0UL && (LONG)(tick - fb_next_tick) < 0L)
             return TRUE;
 
@@ -3080,11 +3100,9 @@ BOOL http_fb_write(ULONG now)
                Added to the end instead it was a flat 20 ms whatever the pass
                cost, which is a cheaper pass turning into a later frame.
 
-               As a remainder and not as an instant, because the clock goes
-               back to zero at midnight: a pass that straddles that has a start
-               later than its end, and a deadline built from it would be a day
-               away.  A wrap counts as nothing served, which costs one pass a
-               day an extra 20 ms. */
+               As a remainder and not as an instant, because the modulo-ULONG
+               clock eventually wraps: a pass that straddles that has a start
+               later than its end.  A wrap counts as nothing served. */
             if (fb_pass_t0 != 0UL && fb_input_left == 0)
             {
                 ULONG since = (done >= fb_pass_t0) ? (done - fb_pass_t0) : 0UL;

@@ -314,6 +314,67 @@ static APTR dt_find_compat(APTR key, const char *compat, UWORD depth)
 
 /* -------------------------------------------------------------- lookup -- */
 
+BOOL netdev_dtree_present(VOID)
+{
+    dt_base = OpenResource((CONST_STRPTR)"devicetree.resource");
+    return (BOOL)(dt_base != NULL);
+}
+
+BOOL netdev_dtree_root_compatible(const char *compat)
+{
+    APTR root;
+    BOOL found;
+
+    dt_base = OpenResource((CONST_STRPTR)"devicetree.resource");
+    if (dt_base == NULL)
+        return FALSE;
+    root = dt_openkey("/");
+    if (root == NULL)
+        return FALSE;
+    found = dt_stringlist_has(root, "compatible", compat);
+    dt_closekey(root);
+    return found;
+}
+
+BOOL netdev_dtree_alias_present(const char *alias)
+{
+    APTR        aliases;
+    APTR        target = NULL;
+    APTR        prop;
+    const char *path;
+    ULONG       len;
+    ULONG       n;
+    BOOL        found = FALSE;
+
+    dt_base = OpenResource((CONST_STRPTR)"devicetree.resource");
+    if (dt_base == NULL)
+        return FALSE;
+    aliases = dt_openkey("/aliases");
+    if (aliases == NULL)
+        return FALSE;
+
+    prop = dt_findprop(aliases, alias);
+    if (prop != NULL)
+    {
+        path = (const char *)dt_propvalue(prop);
+        len = dt_proplen(prop);
+        /* DT_OpenKey needs a complete string inside the property. */
+        for (n = 0; n < len && path[n] != 0; n++)
+            ;
+        if (n < len)
+        {
+            target = dt_openkey(path);
+            if (target != NULL)
+                found = (BOOL)!dt_stringlist_has(target, "status", "disabled");
+        }
+    }
+
+    if (target != NULL)
+        dt_closekey(target);
+    dt_closekey(aliases);
+    return found;
+}
+
 BOOL netdev_dtree_bus_addr(const char *bus, ULONG addr, ULONG *out)
 {
     APTR node;

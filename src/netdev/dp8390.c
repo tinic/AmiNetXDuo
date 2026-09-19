@@ -579,8 +579,23 @@ BOOL dp8390_intr(NetdevNic *nic)
          * One write clears every bit set here.  An AX88190 or AX88790 needs the
          * acknowledge retried until it takes; no such part is in the card table
          * and no retry loop is implemented.  See the note in ne2000.c.
-         */
+        */
         NIC_PUT(nic, ED_P0_ISR, isr);
+
+        /* Recover the receive ring before completing a transmit.  With PTX
+           and OVW asserted together, completing first starts the next queued
+           buffer and overwrite recovery immediately stops it again.  PTX
+           describes the buffer that already completed, so the recovery code
+           quite correctly does not resend -- and the newly started buffer is
+           then stranded.  Handling OVW first leaves no new transmit for the
+           stop to cut off; the completion below starts it after the chip and
+           receive ring are live again. */
+        if ((isr & ED_ISR_OVW) != 0)
+        {
+            nic->overruns++;
+            if (dp8390_overwrite(nic, isr))
+                return TRUE;            /* reset: the file is fresh */
+        }
 
         if ((isr & (ED_ISR_PTX | ED_ISR_TXE)) != 0 && nic->txb_inuse != 0)
         {
@@ -606,20 +621,12 @@ BOOL dp8390_intr(NetdevNic *nic)
                 dp8390_xmit(nic);
         }
 
-        if ((isr & (ED_ISR_PRX | ED_ISR_RXE | ED_ISR_OVW)) != 0)
+        if ((isr & ED_ISR_OVW) == 0 &&
+            (isr & (ED_ISR_PRX | ED_ISR_RXE)) != 0)
         {
-            if ((isr & ED_ISR_OVW) != 0)
-            {
-                nic->overruns++;
-                if (dp8390_overwrite(nic, isr))
-                    return TRUE;        /* reset: the file is fresh */
-            }
-            else
-            {
-                if ((isr & ED_ISR_RXE) != 0)
-                    nic->rx_errors++;
-                dp8390_rint(nic);
-            }
+            if ((isr & ED_ISR_RXE) != 0)
+                nic->rx_errors++;
+            dp8390_rint(nic);
         }
 
         NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);

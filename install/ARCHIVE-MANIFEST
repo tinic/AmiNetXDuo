@@ -74,6 +74,8 @@ AmiNetXDuo/AmiNetXDuo.info          | installed     | always    | (newname "AmiN
 AmiNetXDuo/Install-AmiNetXDuo       | not-installed | always    | The installer itself.  Nothing installs an installer.
 AmiNetXDuo/Install-AmiNetXDuo.info  | not-installed | always    | Its icon, whose default tool is Installer.  Same reason.
 AmiNetXDuo/Installer                | not-installed | always    | Commodore's Installer, bundled beside the script so a double-click works with nothing fetched first.  It belongs to the download, not to the machine.
+AmiNetXDuo/InstallSameFile          | not-installed | always    | The Installer's file-identity primitive.  It uses dos.library SameLock to distinguish this drawer's library from a byte-identical system copy, runs before anything is written, and has no use after installation.
+AmiNetXDuo/InstallNetProbe          | not-installed | always    | Read-only Emu68 device-tree discovery for the Installer.  It identifies the supported GENET and Wi-Fi nodes without opening either device, and has no use after installation.
 
 # ------------------------------------------------------------ the software --
 #

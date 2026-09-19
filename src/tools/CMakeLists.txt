@@ -221,6 +221,18 @@ endfunction()
 aminetxduo_add_tool(tool_addnetinterface AddNetInterface
     SOURCES addnetinterface.c ${TOOLS_DEVDIAG})
 
+# Used only by Install-AmiNetXDuo before it copies anything.  Commodore
+# Installer can compare bytes but cannot ask whether two paths are the same
+# object; dos.library can.  The archive keeps this beside the Installer and
+# does not copy it into C:.
+aminetxduo_add_tool(tool_installsamefile InstallSameFile
+    SOURCES installsamefile.c)
+
+# The other Installer-only primitive: identify Emu68's supported on-board
+# network devices from its device tree without opening either device.
+aminetxduo_add_tool(tool_installnetprobe InstallNetProbe
+    SOURCES installnetprobe.c ../netdev/netdev_dtree.c)
+
 # CheckNetConfig is config-only in the strictest sense there is: it never opens
 # bsdsocket.library at all.  That is not an omission, the machine that needs
 # checking is the one where the stack did not come up, so a checker that needed
@@ -940,4 +952,3 @@ foreach(_t IN LISTS _anxd_tool_targets)
     endif()
 endforeach()
 file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tools.manifest" CONTENT "${_anxd_tool_manifest}")
-

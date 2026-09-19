@@ -538,6 +538,41 @@ static void single_loss(void)
     h_check(h_sock.nx_tcp_socket_fast_recovery == NX_FALSE, "fast recovery left");
 }
 
+/*
+ * Two losses with the second one at the tail.  Once the retransmitted
+ * interior segment arrives, the cumulative acknowledgment consumes the SACK
+ * block for everything beyond it.  No block remains to describe the tail --
+ * but the sole outstanding segment is still the recovery point, and leaving
+ * it alone means waiting for the RTO.
+ */
+static void second_loss_at_the_tail(void)
+{
+    UINT i, before;
+
+    printf("two losses, the second at the tail\n");
+
+    h_fixture();
+    for (i = 0; i < 10; i++)
+    {
+        (VOID)h_send();
+    }
+
+    /* Segment 2 is lost; 3..8 arrive, while segment 9 is lost at the tail. */
+    (VOID)h_ack(2, 0, 0, 0, 0);
+    (VOID)h_ack(2, 3, 4, 0, 0);
+    (VOID)h_ack(2, 3, 5, 0, 0);
+    (VOID)h_ack(2, 3, 9, 0, 0);
+    h_check(h_resent(2) == 1, "the interior loss enters fast recovery");
+
+    /* Filling it advances through segment 8.  The tail is now the only byte
+       range outstanding and there is no SACK block left to report. */
+    before = h_datagrams;
+    (VOID)h_ack(9, 0, 0, 0, 0);
+    h_check_eq(h_datagrams - before, 1,
+               "the partial acknowledgment retransmits the sole tail segment");
+    h_check(h_resent(9) == 1, "the tail does not wait for the RTO");
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -547,6 +582,7 @@ int main(void)
     printf("RFC 6675 loss recovery, against a socket rather than a network\n");
 
     single_loss();
+    second_loss_at_the_tail();
     burst_hole();
 
     printf("%lu checks, %lu failures, %s\n",

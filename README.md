@@ -53,8 +53,10 @@ the Ariadne, the Ariadne II, the X-Surf, the X-Surf 100, NE2000-compatible
 PCMCIA cards and the 3C589. `anxgenet.device`, the same driver core with only
 the Raspberry Pi 4/CM4's own Ethernet in it, drives that port behind a
 PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). The installer
-offers to put both in `DEVS:Networks`; an interface file selects one with
-`DEVICE=`. `anxgenet.device` needs Emu68 1.1 alpha.1 or newer: that is the
+offers to put both in `DEVS:Networks`; on Emu68 it reads the device tree and
+creates definitions for the supported Ethernet and Wi-Fi devices it finds.
+An interface file selects one with `DEVICE=`. `anxgenet.device` needs Emu68
+1.1 alpha.1 or newer: that is the
 first release line that maps GENET's `/scb` range into the Amiga address space.
 Emu68 1.0.3 is not supported.
 
