@@ -9,6 +9,18 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `ShowNetStatus` shows every interface the stack is running, not only the
+  ones described in `DEVS:NetInterfaces`. `AddNetInterface` takes a file from
+  anywhere, and an interface added from `RAM:` pinged and routed while
+  `INTERFACES` left it out and `ShowNetStatus <name>` said there was no such
+  interface. Such an interface is listed after the drawer's own, marked
+  `(not in DEVS:NetInterfaces)`, and the named form works for it.
+
+- `iperf -n` moves exactly the bytes asked for. The socket is non-blocking and
+  a send can legitimately come back short when the window fills; a full-size
+  send after a short one overshot a 64 KB target to 103,660 bytes once in
+  five emulator runs. The last send is now the remainder.
+
 ## 0.28.9
 
 - `httpd` sleeps between the web console's passes. With a viewer attached its

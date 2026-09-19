@@ -609,6 +609,46 @@ static const char *default_router6(void)
     return NULL;
 }
 
+/*
+ * An interface the stack is running that no description in DEVS:NetInterfaces
+ * accounts for: AddNetInterface takes a file from anywhere (RAM:wifiN on the
+ * bench), and the tables below used to be built from the drawer alone, so
+ * such an interface pinged, routed and was invisible here -- INTERFACES did
+ * not list it and `ShowNetStatus wifiN` said there was no such interface.
+ */
+static BOOL live_described(const AmiConfig *cfg, const ToolSnapshot *snap,
+                           const ToolIfInfo *live)
+{
+    UWORD i;
+
+    for (i = 0; i < cfg->interface_count; i++)
+    {
+        if (tool_iface_live(snap, &cfg->interfaces[i]) == live)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* The description such an interface would have had: its name, and the device
+   and unit the stack has open.  Static: the struct is not small and a Shell
+   gives this command 4096 bytes of stack. */
+static const AmiIfConfig *live_as_config(const ToolIfInfo *live,
+                                         const ToolDhcpInfo *lease)
+{
+    static AmiIfConfig made;
+
+    made = (AmiIfConfig){ 0 };
+    tool_copy_string(made.name, sizeof(made.name), live->nx_name);
+    tool_copy_string(made.device, sizeof(made.device), live->nx_device);
+    made.unit = live->nx_unit;
+    /* The file is not here to read CONFIGURE= from; a lease says DHCP, and
+       without one the address is what the file gave, which is static. */
+    made.iptype = (lease != NULL) ? AMI_IPTYPE_DHCP : AMI_IPTYPE_STATIC;
+
+    return &made;
+}
+
 static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
                                 BOOL have_live, BOOL readable)
 {
@@ -621,7 +661,7 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
        defined (described in DEVS:NetInterfaces, not attached), ? (the
        running stack could not be read). */
 
-    if (cfg->interface_count == 0)
+    if (cfg->interface_count == 0 && !have_live)
     {
         tool_printf("(none configured)\n");
         return;
@@ -659,6 +699,29 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
         /* Indented under the line they belong to. A machine with no IPv6
            prints none and the table is unchanged. */
         list_addresses6(snap, live);
+    }
+
+    /* The ones running with no description in the drawer, after the drawer's
+       own, marked as such so the reader knows which file to look for. */
+    if (have_live)
+    {
+        for (i = 0; i < snap->iface_count && i < (UWORD)TOOL_MAX_IF; i++)
+        {
+            const ToolIfInfo *live = &snap->iface[i];
+
+            if (!live->attached || live->nx_name[0] == '\0' ||
+                live_described(cfg, snap, live))
+                continue;
+
+            address_text(live->address, addr, sizeof(addr));
+            tool_printf("%-15s %-8s %-8s %s  (not in DEVS:NetInterfaces)\n",
+                        (LONG)live->nx_name,
+                        (LONG)(!readable ? "?" :
+                               iface_online(live) ? "online" : "offline"),
+                        (LONG)(live->link_up ? "up" : "down"),
+                        (LONG)addr);
+            list_addresses6(snap, live);
+        }
     }
 }
 
@@ -1782,6 +1845,32 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                            iface_online(live), detailed,
                            stack_running, (BOOL)!elsewhere);
             shown++;
+        }
+
+        /* And the running interfaces the drawer does not describe, under
+           the description they would have had (live_as_config). */
+        if (have_live)
+        {
+            for (i = 0; i < snap.iface_count && i < (UWORD)TOOL_MAX_IF; i++)
+            {
+                const ToolIfInfo   *live  = &snap.iface[i];
+                const ToolDhcpInfo *lease = NULL;
+
+                if (!live->attached || live->nx_name[0] == '\0' ||
+                    live_described(cfg, &snap, live) ||
+                    !interface_selected(w->interface, live->nx_name))
+                    continue;
+
+                if (have_lease)
+                    lease = lease_for(&dhcp, live);
+
+                show_interface(live_as_config(live, lease), live, &snap,
+                               lease,
+                               have_lease6 ? &dhcp6 : NULL,
+                               iface_online(live), detailed,
+                               stack_running, (BOOL)!elsewhere);
+                shown++;
+            }
         }
 
         if (shown == 0 && detailed)
