@@ -713,26 +713,15 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         src_index = (UINT)chosen;
     }
 
+    /* 65,535 less the IP header is what BSD lets a raw sender hand over;
+       the rest is fragmented, here as there (nxd_ip_raw_packet_source_send()
+       passes NX_FRAGMENT_OKAY).  The cap used to be the link MTU, and
+       `ping -s 1473' was refused, never sent -- see bsd_udp_maxdgram(). */
     {
-        const NX_INTERFACE *source_interface = NX_NULL;
-        LONG                mtu;
         ULONG overhead = (dest.nxd_ip_version == NX_IP_VERSION_V6)
                              ? 40UL : 20UL;
 
-        if (source == BSD_SOURCE_INDEX)
-        {
-#ifdef AMINETXDUO_IPV6
-            if (dest.nxd_ip_version == NX_IP_VERSION_V6)
-                source_interface = ip->nx_ipv6_address[src_index]
-                                         .nxd_ipv6_address_attached;
-            else
-#endif
-                source_interface = &ip->nx_ip_interface[src_index];
-        }
-
-        mtu = bsd_route_mtu(ip, &dest, source_interface);
-
-        if (mtu >= 0 && handed->nx_packet_length + overhead > (ULONG)mtu)
+        if (handed->nx_packet_length + overhead > 65535UL)
         {
             nx_packet_release(handed);
             return bsd_fail(base, AMI_EMSGSIZE);

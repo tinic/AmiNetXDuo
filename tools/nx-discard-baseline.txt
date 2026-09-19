@@ -91,8 +91,6 @@
 2	src/bsdsocket/socket.c	nx_tcp_client_socket_unbind
 2	src/bsdsocket/socket.c	nx_tcp_server_socket_unlisten
 2	src/bsdsocket/socket.c	nx_udp_socket_port_get
-2	src/bsdsocket/transfer.c	tx_mutex_get
-2	src/bsdsocket/transfer.c	tx_mutex_put
 2	src/crypto68k/c68k_crt.c	_nx_crypto_huge_number_inverse_modulus_prime
 2	src/crypto68k/c68k_crt.c	_nx_crypto_huge_number_subtract
 2	src/crypto68k/c68k_p256.c	_nx_crypto_ec_fp_projective_multiple

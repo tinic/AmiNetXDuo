@@ -721,13 +721,21 @@ UINT _nxe_packet_data_extract_offset(NX_PACKET *packet_ptr, ULONG offset,
     return NX_SUCCESS;
 }
 
+/* The route resolves to a 1,500-byte Ethernet, so a send path that measured
+   a datagram against the link MTU again -- the cap t_datagram_size() retired
+   -- would refuse 1473 here and turn that case red. */
+static NX_INTERFACE h_ether = { .nx_interface_ip_mtu_size = 1500 };
+
 ULONG _nx_ip_route_find(NX_IP *ip_ptr, ULONG destination_address,
                         NX_INTERFACE **nx_ip_interface, ULONG *next_hop_address)
 {
     (VOID)ip_ptr;
     (VOID)destination_address;
-    (VOID)nx_ip_interface;
-    (VOID)next_hop_address;
+
+    if (nx_ip_interface != NULL)
+        *nx_ip_interface = &h_ether;
+    if (next_hop_address != NULL)
+        *next_hop_address = destination_address;
 
     return NX_SUCCESS;
 }
@@ -1214,6 +1222,54 @@ static void t_shutdown(void)
 }
 
 /*
+ * A datagram larger than the link goes out, fragmented by the stack; only one
+ * larger than the protocol allows is refused.  The cap used to be the egress
+ * MTU less the headers (1,472 on Ethernet), which refused what NFS over UDP
+ * sends on every write and what `ping -s 1473' sends on purpose, while
+ * nx_ip_fragment_enable() had been waiting for it since 19ab8d70.  Measured
+ * 2026-09-19 on the A1200 through a 1,400-byte hop before the change: 1472
+ * crossed, 1473 was "error 40" and never sent.
+ */
+static void t_datagram_size(void)
+{
+    static char        big[65508];
+    struct sockaddr_in to;
+
+    printf("transfer: a datagram larger than the link\n");
+
+    memset(&to, 0, sizeof(to));
+    to.sin_family      = AF_INET;
+    to.sin_port        = BSD_HTONS(2049);
+    to.sin_addr.s_addr = 0x0A000002UL;
+    memset(big, 'x', sizeof(big));
+
+    h_reset();
+    (VOID)h_udp(1);
+    CHECK(bsd_sendto(1, big, 1473, 0, (struct sockaddr *)&to, sizeof(to),
+                     &h_base) == 1473 && h.sends == 1,
+          "1473 bytes, one more than a full frame carries, are sent");
+
+    h_reset();
+    (VOID)h_udp(1);
+    CHECK(bsd_sendto(1, big, 8192, 0, (struct sockaddr *)&to, sizeof(to),
+                     &h_base) == 8192 && h.sends == 1,
+          "an 8 KB NFS block is sent");
+
+    h_reset();
+    (VOID)h_udp(1);
+    CHECK(bsd_sendto(1, big, 65507, 0, (struct sockaddr *)&to, sizeof(to),
+                     &h_base) == 65507 && h.sends == 1,
+          "65507 bytes, the most UDP over IPv4 carries, are sent");
+
+    h_reset();
+    (VOID)h_udp(1);
+    CHECK(bsd_sendto(1, big, 65508, 0, (struct sockaddr *)&to, sizeof(to),
+                     &h_base) == -1 &&
+          h.errno_value == AMI_EMSGSIZE && h.sends == 0 && h.allocs == 0,
+          "65508 is EMSGSIZE, and nothing was allocated for it");
+}
+
+/*
  * recvmsg()'s out parameters.  msg_flags is not an input and whatever the
  * caller left there must not survive; msg_controllen is value-result and a
  * failed call leaves nothing claimed in it.
@@ -1309,6 +1365,7 @@ int main(void)
     t_no_packet();
     t_dontwait();
     t_shutdown();
+    t_datagram_size();
     t_recvmsg_outputs();
     t_send_monitor();
 

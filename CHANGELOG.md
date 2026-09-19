@@ -9,6 +9,18 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A UDP datagram or a raw send larger than the link goes out, fragmented by
+  the stack, up to the 65,507 bytes BSD allows; only beyond that is
+  `EMSGSIZE`. The limit was the interface MTU less the headers -- 1,472 on
+  Ethernet -- so an NFS-over-UDP write of an 8 KB block, or `ping -s 1473`,
+  was refused and never sent, although the stack has fragmented on transmit
+  since 0.17. Measured on an A1200 through a 1,400-byte hop before and after
+  (`tests/tools/run-pmtu.sh`): 1472 crossed, 1473 was "error 40"; now 1473,
+  3000 and 8000 cross, 8000-byte UDP datagrams arrive whole at the far end,
+  TCP and a 20 MB fetch pass through the hop. Datagrams past about 24 KB
+  still fail on a card whose receive ring cannot hold their fragments at
+  wire speed (the A2065 holds 16 frames); that is the card's ceiling.
+
 - `gethostname()` returns a qualified name: a configured name with no dot
   -- DHCP option 12, `HOSTNAME` in `name_resolution`, the name derived from
   the card -- gets the domain in force appended (DHCP option 15, a router

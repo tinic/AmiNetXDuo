@@ -80,7 +80,9 @@ BUDGETS=(
     # -> 227,672: FILTER=EVERYTHING read (three values compared, the
     # promiscuous open flag carried to OpenDevice).  -> 227,804:
     # gethostname() qualifies a dotless name with the domain in force.
-    "minimal:src/bsdsocket/bsdsocket.library:227900"
+    # -> 227,572: the MTU-based datagram caps and bsd_route_mtu() gone, the
+    # stack fragments what BSD fragments.
+    "minimal:src/bsdsocket/bsdsocket.library:227700"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/wifipi/anxwifipi.device:56000"
