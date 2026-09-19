@@ -20,7 +20,7 @@
 # object came out.  `nm --size-sort` is useless here for the reason it is
 # useless everywhere on this target -- an AmigaOS object is a single hunk.
 #
-# ONLY THE TWO CONFIGURATIONS THAT SHIP are budgeted, the same two
+# ONLY THE THREE CONFIGURATIONS THAT SHIP are budgeted, the same three
 # tools/check-image-size.sh takes.  Coverage arms carry whatever their options
 # imply and holding them to a shipping number would only teach whoever hits it
 # to raise it.
@@ -60,6 +60,9 @@ ARM="${AMINETXDUO_RAM_ARM:-$(basename "$BUILD")}"
 BUDGETS=(
     "default:68608"
     "minimal:17408"
+    # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
+    # headroom to the next KiB boundary.
+    "micro:16384"
 )
 
 budget=""

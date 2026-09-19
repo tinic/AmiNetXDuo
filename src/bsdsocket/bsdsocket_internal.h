@@ -890,14 +890,6 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  * Every one of these must be called inside a bsd_nx_enter() bracket, except
  * bsd_raw_available() and bsd_raw_source(), which only read.
  */
-/*
- * The IP-layer MTU of the interface a datagram to `addr` would leave by, or -1
- * if the route does not resolve. Both send paths measure against it and refuse
- * an oversize datagram with EMSGSIZE rather than let transmit fragmentation
- */
-LONG       bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr,
-                         const NX_INTERFACE *source_interface);
-
 LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_raw_close(AmiSocket *sock);
 LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,

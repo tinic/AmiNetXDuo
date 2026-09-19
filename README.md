@@ -6,7 +6,7 @@ An IPv4+IPv6 TCP/IP stack for classic AmigaOS, with the network commands that go
 with it. It provides `bsdsocket.library`, the socket API that Amiga network
 software already speaks, on top of
 [Eclipse ThreadX NetX Duo](https://github.com/eclipse-threadx/netxduo). It
-drives existing SANA-II network cards, and ships a SANA-II driver of its own.
+drives existing SANA-II network cards, and ships three SANA-II drivers.
 
 > It gets a DHCP lease, configures itself by SLAAC, answers ARP and neighbour
 > discovery, and pings its gateway. It resolves DNS, moves TCP in both
@@ -39,21 +39,24 @@ The archive carries three stacks. The installer asks which one to put on.
 
 | Stack | Leaves out | RAM while up |
 |---|---|---|
-| Full | nothing | 426 KB |
-| Minimal | IPv6, `.local` lookups, the packet filter, HTTPS, IPv4 multicast, the ARexx host, `TCP:` | 256 KB |
-| Micro | all of that, and carries one interface and no route or address-allocation calls. DHCP works | 212 KB |
+| Full | nothing | 442 KB |
+| Minimal | IPv6, `.local` lookups, the packet filter, HTTPS, IPv4 multicast, the ARexx host, `TCP:` | 272 KB |
+| Micro | all of that, plus `getaddrinfo`/`getnameinfo`, ancillary data, out-of-band TCP and less-used administration and status calls; carries one interface and no route or address-allocation calls. DHCP, the classic resolver and raw sockets work | 227 KB |
 
 The installer offers these cards by name: A2065, Ariadne, Ariadne II,
 AmigaNet, LAN Rover, X-Surf, X-Surf 100, PCMCIA (`cnet.device`,
-`etherlink3.device` for the 3Com 3C589, or `prism2.device`) and `uaenet.device`
-for emulators. Any other driver name can be typed in.
+`etherlink3.device` for the 3Com 3C589, or `prism2.device`), ZZ9000
+(`ZZ9000Net.device`) and `uaenet.device` for emulators. Any other driver name
+can be typed in.
 
-`anxnet.device`, the SANA-II driver AmiNetXDuo builds itself, drives the A2065,
-the Ariadne, the Ariadne II, the X-Surf, the X-Surf 100, NE2000-compatible
-PCMCIA cards and the 3C589. `anxgenet.device`, the same driver core with only
+`anxnet.device`, the classic-card SANA-II driver AmiNetXDuo builds itself,
+drives the A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, X-Surf 100,
+X-Surf 500, NE2000-compatible PCMCIA cards, 3C589 and the two supported
+Megahertz/3Com LAN+modem cards. `anxgenet.device`, the same driver core with only
 the Raspberry Pi 4/CM4's own Ethernet in it, drives that port behind a
 PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). The installer
-offers to put both in `DEVS:Networks`; on Emu68 it reads the device tree and
+offers to put all three supplied drivers in `DEVS:Networks`; on Emu68 it reads
+the device tree and
 creates definitions for the supported Ethernet and Wi-Fi devices it finds.
 An interface file selects one with `DEVICE=`. `anxgenet.device` needs Emu68
 1.1 alpha.1 or newer: that is the
@@ -91,7 +94,7 @@ produced, and marks each TCP segment that continues the one before it. The
 stack skips its own checksum pass on a verified frame and hands TCP one
 segment where the wire carried up to sixteen, the receive side of a
 large-receive offload; it does the same for IPv6. A 1 Gbit/s GENET behind a
-PiStorm32 Lite receives 900 Mbit/s this way and sends 580 (iperf, 2026-09-19;
+PiStorm32 Lite receives 900 Mbit/s this way and sends 580 (iperf;
 142 and 65 before the offload). The two SANA-II
 extensions that carry it are published for any driver to implement,
 `Developer/include/aminetxduo/anxs2ext.h`. They are negotiated additions to
@@ -109,18 +112,19 @@ machine not in this table is not known to fail; it is not known.
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | GENET, `anxgenet.device` | 900 in / 580 out Mbit/s |
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | 3Com 3C589 PCMCIA, `anxnet.device` | 8.3 Mbit/s |
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | Broadcom 43455 Wi-Fi, `anxwifipi.device` | 34-36 in / 52-61 out Mbit/s, 5 GHz at -69 dBm |
-| A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 3.9 in / 3.0 out Mbit/s |
+| A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 3.8 in / 3.3-3.7 out Mbit/s |
+| A3000, 68030/25 | 3.9 | ZZ9000, `ZZ9000Net.device` 2.2 | 3.6 in / 3.5-3.7 out Mbit/s |
 | Amiberry, A1200 (68020) | 3.1 | A2065, `anxnet.device` | 4.8 in / 4.4 out Mbit/s |
 | Amiberry, A3000 (68030) | 3.1 | X-Surf 100 (Zorro III), `anxnet.device` | 30 in / 31 out Mbit/s |
 | Amiberry, A600 (68000) | 2.05 | NE2000 PCMCIA and `cnet.device` | boots, DHCP, transfers (CI) |
 | Amiberry, A500+ / A2000 (68000) | 2.04, 3.1 | A2065, Ariadne II | boots, DHCP, transfers (CI) |
 | Amiberry, 68060 | 3.1 | A2065 | builds and boots (CI arm) |
 
-Every CI run boots Kickstart 2.04, 2.05 and 3.1 guests on 68000 and 68020
-and runs DHCP, TCP and UDP transfers, `Online`/`Offline`, the installer and
-the card-eject path; the two real machines above run the release archive
-daily. Roadshow and AmiTCP_NG coexist on the same disk, selected at boot
-(`SYS:Stacks`).
+The separate emulator workflow boots Kickstart 2.04, 2.05 and 3.1 guests on
+68000 and 68020 and runs DHCP, TCP and UDP transfers, `Online`/`Offline`, the
+installer and the card-eject path. Release end-to-end testing consumes the
+exact candidate archive produced by CI rather than rebuilding it. Roadshow and
+AmiTCP_NG coexist on the same disk, selected at boot (`SYS:Stacks`).
 
 ## Installing
 
@@ -130,7 +134,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 | Question | Default |
 |---|---|
 | Which stack: Everything, Minimal, Micro | Everything |
-| Install `anxnet.device` | yes |
+| Install the three supplied network drivers | yes |
 | Where the `AmiNetXDuo` drawer of documentation and examples goes | any drawer; nothing in it is needed for the network |
 | Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer, added last to those assigns; refused if `LIBS:` already has a `bsdsocket.library` (Intermediate and Expert) | into the system |
 | Which card, and the interface name | the driver found in `DEVS:` |
@@ -156,6 +160,7 @@ the NDK does not declare and the CPU profiler.
 | | |
 |---|---|
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
+| `NetPrefs` | Workbench editor for interface definitions and boot policy; preserves comments and advanced keywords |
 | `AddNetInterface`, `RemoveNetInterface` | start an interface from its file, and take one out of the running network |
 | `Online`, `Offline` | put a started interface on the wire and take it off |
 | `ConfigureNetInterface` | change the address or MTU of a running interface, renew or release its DHCP lease, turn `.local` answering on |
@@ -174,12 +179,14 @@ the NDK does not declare and the CPU profiler.
 | `NetTrace` | the same file for a transfer it runs itself, with the throughput number beside it |
 | `traceroute`, `tftp`, `whois` | trace the path to a host, and small TFTP and WHOIS clients |
 | `CheckNetConfig` | read the configuration and report what is wrong with it |
-| `CheckNetDevice` | what `anxnet.device` found, card by card, and why any card was refused |
+| `CheckNetDevice` | what `anxnet.device` or `anxgenet.device` found and why a card was refused |
+| `NetDevStats` | every standard and driver-specific SANA-II counter for one unit |
 | `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `hostname` | the name of this machine, and where the name came from |
 
-The installer copies all of them into `C:`. Every command that resolves a name
+The installer copies all of them into `C:`; a system installation also places
+the `NetPrefs` program and icon in `SYS:Prefs`. Every command that resolves a name
 takes `-4` and `-6`.
 
 ## Files, a Shell and the display in a web browser
@@ -256,19 +263,25 @@ configuration file; for such a program the change is to resolve with
 `getaddrinfo()` and hand the result to `connect()`.
 
 `usergroup.library` reads an existing AmiTCP 4 `passwd` and `group` as they
-stand. `AmiTCP:` is assigned, so ixemul programs find what they open by path.
-NFS mounts with `ch_nfsc` authenticate. Up to four interfaces are online at
-once, and the first one named to `AddNetInterface` owns the default route.
+stand. AmiNetXDuo does not claim `AmiTCP:`; ixemul programs that use the literal
+`AmiTCP:libs/usergroup.library` path are satisfied by the already resident
+library, while an existing AmiTCP assign remains untouched. NFS mounts with
+`ch_nfsc` authenticate. The full, minimal and micro profiles carry four, two
+and one interface respectively, and the first one named to `AddNetInterface`
+owns the default route.
 
-The whole of AmiTCP's `socket_lib.fd` (45 vectors) is implemented. Of
+In the full profile, the whole of AmiTCP's `socket_lib.fd` (45 vectors) is
+implemented. Of
 Roadshow's 125, 21 answer `ENOSYS`: the tunables API (`ObtainRoadshowData`
 and friends), the IP filter/NAT API (`ipf_*`) and the kernel-memory API
 (`mbuf_*`); `SBTC_HAVE_*` reports each truthfully, and
 [`docs/GAPS.md`](docs/GAPS.md) lists every one with what a program loses.
 `crypt()` is a stub: a ported server that authenticates against `passwd`
-cannot. A survey of 6,627 Aminet archives
-([`docs/aminet-survey`](docs/aminet-survey)) found no caller of any of the
-21.
+cannot. A survey scanned 5,907 Aminet archives
+([`docs/aminet-survey`](docs/aminet-survey)); among the strictly attributed
+binaries it found no caller of any of the 21. Attribution covers 399 of the
+559 archives that contain a bsdsocket binary (71%), so that absence is strong
+evidence, not proof.
 
 ## Building from source
 
@@ -290,7 +303,7 @@ MIT, with these exceptions, each confined to the files it names:
 
 | What | Licence | Where |
 |---|---|---|
-| ThreadX and NetX Duo | MIT (Microsoft and the Eclipse ThreadX contributors). Both are maintained forks: `github.com/tinic/threadx` is four commits past upstream `44d7c95c` (hosted-port stack creation and overlap checks, and a pre-relinquish port hook); `github.com/tinic/netxduo` is an integrated line of patches past upstream `473d1928`, pinned by the submodule, with each defect's patch also on its own branch | `third_party/threadx`, `third_party/netxduo` |
+| ThreadX and NetX Duo | MIT (Microsoft and the Eclipse ThreadX contributors). Both are maintained forks, pinned by the submodules; [`docs/UPSTREAMING.md`](docs/UPSTREAMING.md) records their divergence and upstreaming plan | `third_party/threadx`, `third_party/netxduo` |
 | The NE2000 core of `anxnet.device` | BSD-2-Clause, adapted from NetBSD's `dp8390` driver | `src/netdev/dp8390.c`, `ne2000.c`, `ed.c`, `netdev_mcaf.c` |
 | `ssh` and `scp` | Dropbear's MIT-style licence | `third_party/dropbear`, `clients/dropbear` |
 | The `/files` text editor | CodeMirror 6 and its support packages, MIT | bundled into `src/tools/web/files.html`; notice in `src/tools/web/vendor/codemirror` |

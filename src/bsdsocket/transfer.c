@@ -351,52 +351,21 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     return sent;
 }
 
-LONG bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr,
-                   const NX_INTERFACE *source_interface)
+/*
+ * The most a UDP datagram can carry: 65,535 less the IP and UDP headers, which
+ * is what BSD sendto() allows and where it answers EMSGSIZE.  It used to be
+ * the egress interface's MTU less the headers -- 1,472 on Ethernet -- and a
+ * larger datagram was refused, on the argument that a sender asking for more
+ * than the link carries wants to be told.  It does not: NFS over UDP reads
+ * and writes in 8 KB blocks (ch_nfs, AmiNFSv3, the AmiTCP client), RPC
+ * replies run to 4 KB, and every BSD stack fragments them.  The stack has
+ * fragmented on transmit since nx_ip_fragment_enable() (19ab8d70); this is
+ * the last place that kept a datagram from reaching it.  Measured 2026-09-19
+ * on the A1200 through a 1,400-byte hop: -s 1472 crossed (the router
+ * fragmented it), -s 1473 and up were refused here, never sent.
+ */
+static LONG bsd_udp_maxdgram(const NXD_ADDRESS *addr)
 {
-    NX_INTERFACE *iface = NX_NULL;
-
-    if (ip == NULL || addr == NULL)
-        return -1;
-
-    if (source_interface != NX_NULL)
-        return (LONG)source_interface->nx_interface_ip_mtu_size;
-
-#ifdef AMINETXDUO_IPV6
-    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
-    {
-        NXD_IPV6_ADDRESS *source = NX_NULL;
-
-        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        if (_nxd_ipv6_interface_find(ip, (ULONG *)addr->nxd_ip_address.v6,
-                                     &source, NX_NULL) == NX_SUCCESS &&
-            source != NX_NULL)
-        {
-            iface = source->nxd_ipv6_address_attached;
-        }
-        tx_mutex_put(&ip->nx_ip_protection);
-    }
-    else
-#endif
-    {
-        ULONG next_hop = 0;
-
-        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        /* Judged by iface, which is NX_NULL going in and tested below. */
-        AMI_NX_BY_OUTPUT(_nx_ip_route_find(ip, addr->nxd_ip_address.v4, &iface, &next_hop));
-        tx_mutex_put(&ip->nx_ip_protection);
-    }
-
-    if (iface == NX_NULL)
-        return -1;
-
-    return (LONG)iface->nx_interface_ip_mtu_size;
-}
-
-static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr,
-                            const NX_INTERFACE *source_interface)
-{
-    LONG  mtu = bsd_route_mtu(ip, addr, source_interface);
     ULONG overhead;
 
 #ifdef AMINETXDUO_IPV6
@@ -404,12 +373,12 @@ static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr,
         overhead = (ULONG)NX_IPv6_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
     else
 #endif
+    {
+        (VOID)addr;
         overhead = (ULONG)NX_IPv4_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
+    }
 
-    if (mtu < 0 || (ULONG)mtu <= overhead)
-        return -1;
-
-    return (LONG)((ULONG)mtu - overhead);
+    return (LONG)(65535UL - overhead);
 }
 
 /*
@@ -651,7 +620,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     NX_PACKET      *packet = NX_NULL;
     BsdSourceKind   source;
     UINT            source_index = 0;
-    NX_INTERFACE   *source_interface = NX_NULL;
     LONG            maxdgram;
     ULONG           wait;
     LONG            filled;
@@ -697,38 +665,8 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
             return bsd_fail(base, AMI_ENETUNREACH);
     }
 
-    if (source == BSD_SOURCE_INDEX)
-    {
-#ifdef AMINETXDUO_IPV6
-        if (addr->nxd_ip_version == NX_IP_VERSION_V6)
-            source_interface = ip->nx_ipv6_address[source_index]
-                                     .nxd_ipv6_address_attached;
-        else
-#endif
-            source_interface = &ip->nx_ip_interface[source_index];
-    }
-
-#ifdef AMINETXDUO_MULTICAST
-    if ((src == NULL || !src->cs_Have) &&
-        addr->nxd_ip_version == NX_IP_VERSION_V4 &&
-        (addr->nxd_ip_address.v4 & 0xF0000000UL) == 0xE0000000UL &&
-        sock->as_McastIf >= 0)
-    {
-        source_interface = &ip->nx_ip_interface[sock->as_McastIf];
-    }
-#ifdef AMINETXDUO_IPV6
-    else if ((src == NULL || !src->cs_Have) &&
-             addr->nxd_ip_version == NX_IP_VERSION_V6 &&
-             (addr->nxd_ip_address.v6[0] & 0xFF000000UL) == 0xFF000000UL &&
-             sock->as_Mcast6If >= 0)
-    {
-        source_interface = &ip->nx_ip_interface[sock->as_Mcast6If];
-    }
-#endif
-#endif
-
-    maxdgram = bsd_udp_maxdgram(ip, addr, source_interface);
-    if (maxdgram >= 0 && len > maxdgram)
+    maxdgram = bsd_udp_maxdgram(addr);
+    if (len > maxdgram)
         return bsd_fail(base, AMI_EMSGSIZE);
 
     if ((sock->as_Flags & ASF_NXBOUND) == 0)

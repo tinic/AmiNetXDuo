@@ -5,7 +5,7 @@
 | allocate through AllocVec(), so the only thing they ever wanted from a C
 | runtime is a Process, a DOSBase and a call to main().
 |
-| What the toolchain crt0 costs, measured on the pinned toolchain over all 28
+| What the toolchain crt0 costs, measured on the pinned toolchain over all
 | shipped commands.  Its ____start walks an INIT_LIST whose entries are
 | __initlibraries and __initcpp.  __initlibraries opens every library named in
 | LIB_LIST, and to decide between OpenLibrary() and OpenResource() it asks
@@ -88,10 +88,10 @@ _____start:
         tst.l   a0@(pr_CLI)
         bne.s   .Lopendos
 
-| Workbench.  Nothing here has a GUI, so this path only has to take the
-| WBStartup message and reply to it, which is what lets Workbench unload the
-| command again.  main() is still called, sees argc == 0 and says through
-| tool_from_workbench() that this is a Shell command.
+| Workbench.  Hold the WBStartup message until main() returns, then reply to
+| it so Workbench can unload the command.  Shell-only tools reject argc == 0
+| through tool_from_workbench(); NetPrefs is a real Workbench program and
+| accepts the same message without needing a different crt0.
         lea     a0@(pr_MsgPort),a0
         movea.l a0,a2
         jsr     a6@(LVOWaitPort)

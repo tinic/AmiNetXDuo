@@ -71,7 +71,7 @@ LIBS=(bsdsocket usergroup)
 # byte for byte against the one packed here, so the two cannot drift apart
 # again in silence.
 DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
-CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
@@ -100,12 +100,11 @@ case "$MINIMAL_BUILD" in /*) ;; *) MINIMAL_BUILD="$ROOT/$MINIMAL_BUILD" ;; esac
 WANT_MINIMAL=1
 [ -z "${AMINETXDUO_DIST_NO_MINIMAL:-}" ] || WANT_MINIMAL=0
 
-# micro is the floor: minimal again with the resolver iteration, the admin
-# vectors, OOB, cmsg, the route and address-allocation calls and NetX's error
-# checking compiled out as well.  IT IS PACKED AND NOT INSTALLED -- the
-# Installer does not offer it yet, and install/ARCHIVE-MANIFEST carries the row
-# that says so.  Shipping it in the archive is what lets somebody measure it,
-# and lets the next release offer it without a second download.
+# micro is the floor: minimal again with getaddrinfo/getnameinfo, the less-used
+# admin and status vectors, OOB, ancillary data, route and address-allocation
+# calls and NetX's error checking compiled out as well.  It retains DHCP, raw
+# sockets and the classic resolver.  The Installer offers it as the
+# third profile and installs this drawer when selected.
 MICRO_BUILD="${AMINETXDUO_BUILD_MICRO:-$BUILD-micro}"
 case "$MICRO_BUILD" in /*) ;; *) MICRO_BUILD="$ROOT/$MICRO_BUILD" ;; esac
 
@@ -397,6 +396,7 @@ fi
 for cmd in "${CMDS[@]}"; do
     cp "$CMD_BUILD/src/tools/$cmd" "$TREE/C/"
 done
+cp "$INSTALL/NetPrefs.info" "$TREE/C/NetPrefs.info"
 chmod 755 "$TREE"/C/*
 
 # The ssh and scp clients, when they have been built.  Optional, because they

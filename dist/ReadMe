@@ -33,13 +33,16 @@ This machine needs:
      asks which one to put on:
 
         Stack     Leaves out                                    RAM while up
-        Full      nothing                                          426 KB
+        Full      nothing                                          442 KB
         Minimal   IPv6, .local lookups, the packet filter,
                   encryption, IPv4 multicast, the ARexx host,
-                  the TCP: handler                                 256 KB
-        Micro     all of that, and carries one interface and
-                  no route or address-allocation calls.  DHCP
-                  works                                            212 KB
+                  the TCP: handler                                 272 KB
+        Micro     all of that, plus getaddrinfo/getnameinfo,
+                  ancillary data, out-of-band TCP and less-used
+                  administration and status calls; carries one
+                  interface and no route or address-allocation
+                  calls.  DHCP, the classic resolver and raw
+                  sockets work                                    227 KB
 
      The stack sizes its packet buffers from what is left, so more memory
      means more buffers.  Encryption adds about 210 KB the first time it is
@@ -67,10 +70,10 @@ uses:
 Any other SANA-II driver works too.  The last menu entry of the installer
 takes the name of the driver.
 
-The archive also carries anxnet.device, the SANA-II driver AmiNetXDuo builds
-itself.  It drives the A2065, the Ariadne, the Ariadne II, the AmigaNet, the
-LAN Rover, the X-Surf, the X-Surf 100, NE2000-compatible PCMCIA cards and
-the 3C589.  See ANXNET.DEVICE below.
+The archive also carries three SANA-II drivers: anxnet.device for the classic
+cards above (and the X-Surf 500 and supported Megahertz/3Com LAN+modem cards),
+anxgenet.device for Raspberry Pi 4/CM4 Ethernet behind a PiStorm32, and
+anxwifipi.device for that machine's Wi-Fi.  See SUPPLIED DRIVERS below.
 
 
 INSTALLING
@@ -93,7 +96,7 @@ the current directory.)
 The installer asks, in this order:
 
      Which stack: Everything, Minimal or Micro   (Everything)
-     Install anxnet.device                        (yes)
+     Install the three supplied network drivers  (yes)
      Where the AmiNetXDuo drawer of documentation
        and examples goes                          (any drawer)
      Into the system, or into its own drawer      (into the system;
@@ -120,16 +123,18 @@ It puts
 
      bsdsocket.library, usergroup.library,
      tls.library                               into LIBS:
-     NetSetup, AddNetInterface, RemoveNetInterface,
+     NetSetup, NetPrefs, AddNetInterface, RemoveNetInterface,
      ConfigureNetInterface, Online, Offline,
      ShowNetStatus, ShowNetServices, GetNetStatus,
-     CheckNetConfig, CheckNetDevice, NetShutdown,
+     CheckNetConfig, CheckNetDevice, NetDevStats, NetShutdown,
      AddNetRoute, DeleteNetRoute, hostname,
      ping, netstat, host, nslookup, arp,
      fetch, nc, telnet, tftp, sntp, traceroute,
      whois, ssh, scp, scp-runner, httpd, iperf,
      NetCapture, NetTrace                      into C:
-     anxnet.device                             into DEVS:Networks
+     NetPrefs and its icon (system layout)     into SYS:Prefs
+     anxnet.device, anxgenet.device,
+       anxwifipi.device                        into DEVS:Networks
      the interface definition                  into DEVS:NetInterfaces
      the routing and name server files         into DEVS:Internet
      this file, the manual, the examples       into the selected drawer
@@ -239,18 +244,21 @@ number, the SANA-II packet type.  AmiNetXDuo accepts both, so such a file
 still works here, but it does not work on Roadshow.
 
 
-ANXNET.DEVICE
--------------
+SUPPLIED DRIVERS
+----------------
 
-Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver, which
-replaces the driver that came with the card.  The installer asks whether to
-put it in DEVS:Networks and offers yes.  Copying it changes nothing on its
-own, because nothing reads it until an interface file names it.  To use it,
-put DEVICE=anxnet.device in DEVS:NetInterfaces/<name>, and add a CARD= line
-when the probe has to be told which board it is.  CheckNetDevice reports
-what it found, card by card, and why any card was refused.  An anxnet.device
-already on the machine is renamed to anxnet.device.old rather than being
-overwritten.
+Devs/Networks holds three AmiNetXDuo SANA-II drivers.  anxnet.device supports
+twelve classic card definitions.  anxgenet.device supports the Raspberry Pi
+4/CM4 Ethernet behind a PiStorm32 running Emu68 1.1 alpha.1 or newer.
+anxwifipi.device supports the same machine's Wi-Fi and needs the Emu68
+firmware plus a supplicant such as WirelessManager before it can associate.
+
+The installer asks whether to put all three in DEVS:Networks and offers yes.
+Copying them changes nothing on its own: an interface file selects one with
+DEVICE=.  anxnet.device may also need a CARD= line when the probe has to be
+told which board it is.  CheckNetDevice reports what anxnet.device found and
+why a card was refused.  An existing supplied driver is renamed to .old
+rather than overwritten.
 
 
 USING SSH
@@ -319,10 +327,11 @@ UNINSTALLING
 
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
      Delete LIBS:tls.library
-     Delete C:NetSetup C:AddNetInterface C:RemoveNetInterface
+     Delete C:NetSetup C:NetPrefs C:AddNetInterface C:RemoveNetInterface
+     Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info
      Delete C:ConfigureNetInterface C:Online C:Offline
      Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
-     Delete C:CheckNetConfig C:CheckNetDevice C:NetShutdown
+     Delete C:CheckNetConfig C:CheckNetDevice C:NetDevStats C:NetShutdown
      Delete C:AddNetRoute C:DeleteNetRoute C:hostname
      Delete C:ping C:netstat C:host C:nslookup C:arp
      Delete C:fetch C:nc C:telnet C:tftp C:sntp C:traceroute
@@ -331,8 +340,9 @@ UNINSTALLING
      Delete DEVS:NetInterfaces/eth0
      Delete DEVS:Internet/routes DEVS:Internet/name_resolution
      Delete DEVS:Internet/hosts DEVS:Internet/certificates
-     Delete DEVS:Networks/anxnet.device
-     Delete DEVS:Networks/anxnet.device.old
+     Delete DEVS:Networks/anxnet.device DEVS:Networks/anxnet.device.old
+     Delete DEVS:Networks/anxgenet.device DEVS:Networks/anxgenet.device.old
+     Delete DEVS:Networks/anxwifipi.device DEVS:Networks/anxwifipi.device.old
      Delete S:Network-Startup S:Network-Startup.old
      Delete <the AmiNetXDuo drawer> ALL
 
@@ -353,9 +363,9 @@ It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS, moves
 TCP in both directions and listens for incoming connections.
 bsdsocket.library scores 142 of 142 on the bsdsocktest conformance suite.
 
-Everything above was measured on an emulated 68000, 68020 and 68030 under
-Kickstart 2.04 and 3.1, and on real hardware: an A1200 with a 3C589, and an
-A3000 with an X-Surf-100, where a user measured 795 KB/s.
+The automated emulator matrix covers Kickstart 2.04, 2.05 and 3.1 on 68000
+and 68020 configurations.  The project's README records the current tested
+configurations and measured performance.
 
 
 LICENCE
@@ -376,6 +386,8 @@ MIT, with these exceptions, each confined to the files it names:
      in substance, from the dated snapshot at third_party/cacert/cacert.pem
      in the source tree, itself a verbatim copy of https://curl.se/ca/
      cacert.pem.  MPL 2.0 is file-scoped, so nothing else here is affected.
+  *  anxwifipi.device is MPL 2.0, with ISC Broadcom/OpenBSD headers and an
+     Apache-2.0 register header identified in its NOTICE.
 
 No AmiTCP, AROSTCP, Miami or Roadshow code is used, copied or disassembled.
 Olaf Barthel's freely distributable Roadshow SDK headers and autodocs were

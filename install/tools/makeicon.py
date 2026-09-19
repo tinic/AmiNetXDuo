@@ -316,6 +316,25 @@ def document_icon():
     return c
 
 
+def prefs_icon():
+    """A network preferences panel: two sockets and three slider rows."""
+    c = Canvas(48, 26, GREY)
+    c.fill(2, 2, 45, 23, WHITE)
+    c.bevel(1, 1, 46, 24)
+    c.box(5, 5, 14, 12, BLACK)
+    c.fill(7, 7, 12, 10, BLUE)
+    c.box(33, 5, 42, 12, BLACK)
+    c.fill(35, 7, 40, 10, BLUE)
+    c.hline(15, 32, 8, BLACK)
+    c.hline(8, 39, 16, BLACK)
+    c.hline(8, 39, 20, BLACK)
+    c.fill(17, 15, 21, 17, BLUE)
+    c.box(17, 15, 21, 17, BLACK)
+    c.fill(29, 19, 33, 21, BLUE)
+    c.box(29, 19, 33, 21, BLACK)
+    return c
+
+
 # The stock Workbench 3.1 drawer, a bevelled front with a handle, for Docs
 # and Examples: a drawer that holds files should look like every other one.
 STOCK_DRAWER_ART = [
@@ -377,6 +396,10 @@ def main(argv):
         "Guide.info": diskobject(
             document_icon(), WBPROJECT,
             default_tool="SYS:Utilities/MultiView",
+            tooltypes=[],
+            stack=8192),
+        "NetPrefs.info": diskobject(
+            prefs_icon(), WBTOOL,
             tooltypes=[],
             stack=8192),
     }

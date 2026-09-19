@@ -1,5 +1,5 @@
 @database AmiNetXDuo.guide
-@$VER: AmiNetXDuo.guide 1.1 (11.9.2026)
+@$VER: AmiNetXDuo.guide 1.2 (18.9.2026)
 @author "The AmiNetXDuo project"
 @(c) "MIT licence"
 @width 76
@@ -78,9 +78,11 @@
   network driver interface. Any card with a SANA-II driver can be
   used. The A2065, the Ariadne, the X-Surf, the CNet, PCMCIA cards and
   uaenet under an emulator are examples. The driver normally comes
-  with the card. AmiNetXDuo also ships one SANA-II driver of its own,
-  anxnet.device. The Installer asks whether to put it in DEVS:Networks
-  and offers yes; nothing uses it until an interface file names it.
+  with the card. AmiNetXDuo also ships three SANA-II drivers:
+  anxnet.device for classic cards, anxgenet.device for Raspberry Pi 4/CM4
+  Ethernet behind a PiStorm32, and anxwifipi.device for that machine's
+  Wi-Fi. The Installer asks whether to put them in DEVS:Networks and offers
+  yes; nothing uses one until an interface file names it.
   See @{"CheckNetDevice" link CHECKNETDEVICE}.
 
 
@@ -90,14 +92,12 @@
   by SLAAC. It answers ARP and neighbour discovery, pings its gateway,
   resolves names and moves TCP in both directions. It scores 142 of
   142 on bsdsocktest, the conformance suite for bsdsocket.library
-  implementations. It has been tested under emulation on Kickstart
-  2.04 and 3.1 with a 68000, a 68020 and a 68030.
+  implementations. Its automated emulator matrix covers Kickstart
+  2.04, 2.05 and 3.1 on 68000 and 68020 configurations.
 
-  It has run on real hardware, an A3000 with an X-Surf-100. Most of
-  what is measured here was measured under emulation. It is not yet
-  something to trust with data that matters. Classic AmigaOS has no
-  memory protection. A network stack that goes wrong takes the machine
-  with it. Save work before experimenting.
+  It is not yet something to trust with data that matters. Classic AmigaOS
+  has no memory protection. A network stack that goes wrong takes the
+  machine with it. Save work before experimenting.
 
   See @{"Known limitations" link LIMITS} for the specific things that
   are missing or do not work yet.
@@ -134,14 +134,16 @@
   one. A resumed connection to the same site takes under a second.
 
   The archive holds three stacks, and the Installer asks which one to
-  put on. The full stack holds 426 KB of RAM while it is up. The
+  put on. The full stack holds 442 KB of RAM while it is up. The
   minimal stack leaves tls.library out along with IPv6, mDNS, the
   packet filter, IPv4 multicast, the ARexx host and the TCP: handler,
-  carries two interface slots rather than four, and holds 256 KB. The
-  micro stack leaves all of that out, carries one interface and no
-  route or address-allocation calls, and holds 212 KB; it is the one
-  for a 1 MB machine. DHCP is in every stack: a minimal or micro
-  machine still leases its address.
+  carries two interface slots rather than four, and holds 272 KB. The
+  micro stack also leaves out getaddrinfo/getnameinfo, ancillary data,
+  out-of-band TCP and less-used administration and status calls, carries
+  one interface and no route or address-allocation calls, and holds 227 KB;
+  it is the one for a 1 MB machine. DHCP, the classic resolver and raw sockets
+  are in every stack: a minimal or micro machine still leases its address and
+  can run ping or traceroute.
 
   @{b}A network card and its driver@{ub}
 
@@ -152,9 +154,11 @@
     o  the @{b}unit number@{ub}, which is 0 with only one card fitted
 
   The driver comes from the card's manufacturer or from Aminet.
-  AmiNetXDuo also ships one of its own, anxnet.device, which drives
-  thirteen cards; see @{"anxnet.device" link CHECKNETDEVICE}. Under an
-  emulator, uaenet.device or an emulated A2065 is the usual choice.
+  AmiNetXDuo also ships anxnet.device, which has twelve classic card
+  definitions, plus separate anxgenet.device and anxwifipi.device drivers
+  for supported PiStorm32 devices; see
+  @{"CheckNetDevice" link CHECKNETDEVICE}. Under an emulator,
+  uaenet.device or an emulated A2065 is the usual choice.
 
   @{b}A network@{ub}
 
@@ -221,11 +225,11 @@
   which LIBS: reaches through the block above on a machine that already
   has this layout: a reinstall into the same drawer goes ahead.
 
-  Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver.
-  Copy it to DEVS:Networks, which is what the Installer offers to do.
-  Nothing uses it until an interface file names it with
-  DEVICE=anxnet.device. The Libs/minimal and Libs/micro drawers hold
-  the same stack with the large options compiled out. Each is an
+  Devs/Networks holds AmiNetXDuo's three SANA-II drivers. Copy
+  anxnet.device, anxgenet.device and anxwifipi.device to DEVS:Networks,
+  which is what the Installer offers to do. Nothing uses one until an
+  interface file names it with DEVICE=. The Libs/minimal and Libs/micro
+  drawers hold the same stack with the large options compiled out. Each is an
   alternative to the top-level Libs, not an addition to it, and the
   Installer copies one of the three rather than all of them.
 
@@ -429,7 +433,7 @@
              sends the traffic through the fast card.
 
   @{b}IPREQUESTS@{ub}, @{b}ARPREQUESTS@{ub}
-             How many reads of that kind wait at the driver, 1 to 32.
+             How many reads of that kind wait at the driver, 1 to 128.
              Without them the stack sizes the queues from the wire
              speed and the memory it has, and that is the right
              answer on every card that was measured. The packet
@@ -976,12 +980,14 @@
 
   @{b}Stopping@{ub}
 
-  NetShutdown takes every interface down, closes the connections and
-  tells the programs holding sockets to stop; a later AddNetInterface
-  puts the machine back on the network. @{"Offline" link OFFLINE}
+  NetShutdown removes every interface, closes the connections and tells
+  the programs holding sockets to stop. It releases the stack's own library
+  reference; after every program closes bsdsocket.library, Exec can expunge
+  the library. A later AddNetInterface starts it again.
+  @{"Offline" link OFFLINE}
   takes one interface off the wire, which stops its traffic, and
-  @{"Online" link ONLINE} puts it back. The library itself stays in
-  memory; to unload it entirely, reboot.
+  @{"Online" link ONLINE} puts it back. An uncooperative program which keeps
+  the library open also keeps it resident.
 
   @{b}How much memory the network takes@{ub}
 
@@ -1024,7 +1030,7 @@
   interface that is not 0.0.0.0:
 
       Network stack:  running
-      Stack version:  bsdsocket.library 0.28.3 (AmiNetXDuo, ABI 4.10)
+      Stack version:  bsdsocket.library <version> (AmiNetXDuo, ABI 4.10)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
@@ -1093,7 +1099,8 @@
     @{"AddNetInterface " link ADDNETINTERFACE}  start the stack and bring an interface up
     @{"Online          " link ONLINE}  put an interface back on the network
     @{"Offline         " link OFFLINE}  take an interface off the network
-    NetSetup          write the configuration files
+    NetSetup          write the configuration files from a Shell
+    NetPrefs          edit interfaces and boot policy from Workbench
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
@@ -1107,7 +1114,8 @@
   @{b}Looking at what is happening@{ub}
 
     @{"ShowNetStatus   " link SHOWNETSTATUS}  the network as the stack sees it
-    @{"CheckNetDevice  " link CHECKNETDEVICE}  what anxnet.device found, card by card
+    @{"CheckNetDevice  " link CHECKNETDEVICE}  what anxnet/anxgenet found
+    NetDevStats       every standard and driver-specific SANA-II counter
     @{"netstat         " link NETSTAT}  interfaces, routes and connections
     GetNetStatus      the same, for a script to read
     ShowNetServices   what the other machines on this network offer
@@ -1455,7 +1463,7 @@
 
       1> ShowNetStatus
       Network stack:  running
-      Stack version:  bsdsocket.library 0.28.3 (AmiNetXDuo, ABI 4.10)
+      Stack version:  bsdsocket.library <version> (AmiNetXDuo, ABI 4.10)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
@@ -1776,28 +1784,28 @@
 
       CheckNetDevice DEVICE/K,NOLOAD/S,RAW/S
 
-  Reports what anxnet.device found on this machine.
+  Reports what anxnet.device or anxgenet.device found on this machine.
 
-  anxnet.device is one driver for thirteen cards. It finds the card
-  itself, so nothing needs configuring. CARD= in the interface file pins
+  anxnet.device is one driver for twelve classic card definitions. It finds
+  the card itself, so nothing needs configuring. CARD= in the interface file
+  pins
   it to one when a machine has more than one. Naming a card the driver
   does not know is reported as an error, with the list beside it. The
   names are:
 
       a2065      ariadne     ariadne2    hydra       lanrover
       xsurf      xsurf100    xsurf500    pcmcia      3c589
-      3ccfem556  3cxem556    genet
+      3ccfem556  3cxem556
 
-  genet is the Ethernet of a Raspberry Pi 4 or CM4 on a PiStorm32
-  running Emu68 1.1 alpha.1 or newer. Emu68 1.0.3 is not supported: it
+  anxgenet.device is the separate driver for the Ethernet of a Raspberry Pi
+  4 or CM4 on a PiStorm32 running Emu68 1.1 alpha.1 or newer. Emu68 1.0.3 is
+  not supported: it
   predates both the working RGMII pin setup and the /scb mapping the driver
-  consumes. The driver finds GENET through Emu68's
-  device tree and takes its interrupt through gic400.library; it is
-  probed after the PCMCIA slot, so a 3c589's UNIT=0 keeps its meaning
-  and CARD=genet is the way to name it. Measured on an A1200 with a
-  PiStorm32-lite: iperf 123 Mbit/s in, 65 out, SMB2 10 MB/s; the
-  genet.device 3.14 that comes with Emu68 gave 66, 29 and 5.8 on the
-  same machine.
+  consumes. The driver finds GENET through Emu68's device tree and takes its
+  interrupt through gic400.library.
+  Name it with DEVICE=anxgenet.device and UNIT=0; it does not use CARD=.
+  Measured on an A1200 with a PiStorm32 Lite: iperf 900 Mbit/s in and
+  580 out with receive offload (142 and 65 before it).
 
   pcmcia is any NE2000-compatible card in the slot of an A600 or A1200.
   3c589 is the 3Com EtherLink III, and has run on real hardware.
@@ -1857,8 +1865,8 @@
           Either nothing is decoding at that address, or what is there
           is not a DP8390
 
-  @{b}DEVICE@{ub}    The driver to ask about. Needed only if the driver has
-            been renamed. Default anxnet.device.
+  @{b}DEVICE@{ub}    The driver to ask about. Default anxnet.device; use
+            anxgenet.device for the Raspberry Pi Ethernet report.
   @{b}NOLOAD@{ub}    Do not load the driver to make it probe. Without this,
             a driver that has not run yet is loaded so that there is
             something to report.
@@ -2477,8 +2485,8 @@
 
   CONFIGURE6=OFF in DEVS:NetInterfaces/eth0 turns IPv6 off for that
   interface; take the line out, or set CONFIGURE6=AUTO, and bring the
-  interface up again. The minimal stack has no IPv6 compiled into it
-  at all, so on that one the answer is to install the full stack.
+  interface up again. The minimal and micro stacks have no IPv6 compiled
+  into them, so with either one the answer is to install the full stack.
 
   If both families are listed and a ping still cannot be sent, the
   interface has no usable address at all. See
@@ -2627,11 +2635,12 @@
 
     o  @{b}At most four specific IPv4 routes@{ub} can be kept in
        DEVS:Internet/routes or added with AddNetRoute.
-    o  @{b}At most four interfaces@{ub} are online at once, however many
-       interface files DEVS:NetInterfaces holds -- and it may hold as
-       many as you like. Definitions not named to AddNetInterface or
-       Online remain inert. A fifth AddNetInterface is refused with the
-       names of the four holding the slots; RemoveNetInterface frees one.
+    o  @{b}The full, minimal and micro profiles carry four, two and one
+       interface slots respectively,@{ub} however many interface files
+       DEVS:NetInterfaces holds -- and it may hold as many as you like.
+       Definitions not named to AddNetInterface or Online remain inert. An
+       AddNetInterface beyond the profile's limit is refused with the names
+       holding the slots; RemoveNetInterface frees one.
     o  @{b}Only Ethernet-style SANA-II drivers have been tested.@{ub} A
        point-to-point driver such as ppp.device or slip.device is not
        refused, but none has been tested, so a modem or DSL connection
@@ -2644,26 +2653,28 @@
 
   @{b}For software authors and porters@{ub}
 
-    o  @{b}Raw sockets and out-of-band data are in the full and minimal
-       stacks only.@{ub} In the micro stack, socket() with SOCK_RAW and
-       MSG_OOB answer ENOSYS. So do the route, address-allocation and
-       statistics calls there.
+    o  @{b}getaddrinfo/getnameinfo, ancillary data and out-of-band TCP are
+       in the full and minimal stacks only.@{ub} The micro stack retains the
+       classic resolver and raw sockets; route, address-allocation and
+       less-used administration and status calls are omitted there.
     o  bind() to a particular local address is enforced for TCP listeners and
        UDP delivery. An address this machine does not have is refused with
        EADDRNOTAVAIL.
     o  @{b}The RoadshowData calls@{ub} -- ObtainRoadshowData,
        ReleaseRoadshowData and ChangeRoadshowData -- return ENOSYS.
-       Every other Roadshow vector is implemented, including
+       In the full profile every other Roadshow vector is implemented,
+       including
        ObtainInterfaceList, QueryInterfaceTagList, AddRouteTagList and
        GetNetworkStatistics.
     o  @{b}The mbuf and ipf vectors return ENOSYS.@{ub} They are AmiTCP's own
-       buffer and packet-filter internals, which no shipped program
-       calls.
+       buffer and packet-filter internals. The Aminet corpus survey observed
+       no caller in its strictly attributed binaries; that is evidence, not
+       proof that none exists.
     o  @{b}AddDomainNameServer and RemoveDomainNameServer@{ub} take an IPv6
        literal as well as a dotted quad, so an address
        ObtainDomainNameServerList reports can be handed straight back to
        them. They used to refuse every IPv6 address the list printed.
-    o  sendmsg() and recvmsg() do work.
+    o  sendmsg() and recvmsg() work in the full and minimal profiles.
 
   @{b}TLS@{ub}
 
@@ -2671,8 +2682,8 @@
   when a URL asks for it. What remains is speed rather than absence. A
   @{b}first@{ub} handshake on a slow machine can outlast the far end's own
   timeout. The connection then fails and says so. The next attempt
-  usually succeeds, because the session is cached. The minimal stack
-  has no tls.library at all.
+  usually succeeds, because the session is cached. The minimal and micro
+  stacks have no tls.library at all.
 
   @{b}IPv6@{ub}
 
@@ -2680,11 +2691,6 @@
   sent, because there is none in this NetX Duo to send. Link-local
   groups (ff02::) work on any segment regardless. A wider scope is
   never reported to a router. See @{"IPv6" link IPV6}.
-
-  @{b}Generally@{ub}
-
-  Most of what is measured in this guide was measured under emulation.
-  See @{"What AmiNetXDuo is" link ABOUT}.
 
 @endnode
 
@@ -2706,10 +2712,11 @@
 
   @{b}Software that needs one particular stack@{ub}
 
-  A few programs go beyond bsdsocket.library and use something only
-  one stack offers. Those need that stack and do not run here. On
-  Aminet this is about one program in thirty, and almost all of them
-  are Miami's own control panels and monitors.
+  A few programs go beyond the portable socket API and use something only
+  one stack offers. Those need that stack and do not run here. The corpus
+  survey records which bsdsocket.library vectors could be attributed and
+  which were not observed; an unobserved call is evidence, not proof that no
+  program makes it.
 
   The ones that matter are the packet capture and low-level tools -- a
   sniffer or a port scanner that reads raw packets through Miami's
@@ -2755,8 +2762,8 @@
   @{"Checking the network" link CHECK}. If ping and host work, examine
   the program's own settings before the stack. Then check the list of
   things that genuinely are missing in
-  @{"Known limitations" link LIMITS}. A program that needs raw sockets
-  or TLS does not run, and no configuration changes that.
+  @{"Known limitations" link LIMITS}. A program that needs a facility omitted
+  by the installed profile does not run, and no configuration changes that.
 
   @{b}Programs that wait for AmiTCP@{ub}
 
@@ -2778,9 +2785,10 @@
       ADDRESS AMITCP 'KILL'             every interface off the network
       ADDRESS AMITCP 'QUERY HOSTNAME'   this machine's name
 
-  KILL is what stopnet sends. It does the same as running
-  @{"Offline" link OFFLINE} for each interface. It does not unload the
-  stack, which nothing can do short of a reboot.
+  KILL is what stopnet sends. It tells programs using sockets to stop, takes
+  every interface down and releases the stack's own library reference, like
+  NetShutdown. After every program closes bsdsocket.library, Exec can expunge
+  it; AddNetInterface starts it again.
 
   QUERY answers the names AmiTCP answered: the connection list, the
   routing table, the ICMP, IP, TCP and UDP counters by name, and the
@@ -2931,9 +2939,18 @@
   @{b}Not written to@{ub}
 
   Apart from that session cache, the stack writes none of these files.
-  NetSetup, the Installer and a text editor are what create them.
+  NetSetup, NetPrefs, the Installer and a text editor are what create them.
   Nothing here creates a drawer of its own or patches the operating
   system, and deleting the files above removes AmiNetXDuo completely.
+
+  NetPrefs is installed in SYS:Prefs by a system installation. It shows the
+  common interface fields, saves a definition, starts or stops it through
+  the same commands used from the Shell, and controls its line in
+  S:Network-Startup. It does not flatten a hand-edited file: comments and
+  keywords that are not shown in the window are retained. Remove parks the
+  definition under an ignored .disabled.info name rather than deleting it.
+  A wildcard AddNetInterface line starts every definition; NetPrefs reports
+  that policy and will not silently rewrite it merely to exclude one card.
 
   @{b}Drivers@{ub}
 
@@ -2941,10 +2958,12 @@
                                       comes from the card's
                                       manufacturer, not from this
                                       distribution
-      DEVS:Networks/anxnet.device     AmiNetXDuo's own SANA-II driver.
-                                      The Installer offers to put it
-                                      here, and nothing reads it until
-                                      an interface file names it
+      DEVS:Networks/anxnet.device     classic-card SANA-II driver
+      DEVS:Networks/anxgenet.device   PiStorm32 GENET SANA-II driver
+      DEVS:Networks/anxwifipi.device  PiStorm32 Wi-Fi SANA-II driver
+
+  The Installer offers to put all three here. Nothing reads one until an
+  interface file names it.
 
 @endnode
 

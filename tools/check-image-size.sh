@@ -12,9 +12,10 @@
 # argument for those bytes had been made and measured; what nobody did was
 # decide to spend them.
 #
-# ONLY THE TWO CONFIGURATIONS THAT SHIP ARE BUDGETED, and they are the two
+# ONLY THE THREE CONFIGURATIONS THAT SHIP ARE BUDGETED, and they are the three
 # tools/check-shipping-config.sh maps a drawer onto: `default` is the full
-# drawer, `minimal` is the minimal one.  Every other arm is coverage -- nolto
+# drawer, with `minimal` and `micro` named directly.  Every other arm is
+# coverage -- nolto
 # is 44 KB larger because that is what LTO is worth, census carries its side
 # table, log carries the sentences -- and holding coverage to a shipping budget
 # would only teach whoever hits it to raise the number.  The arm is the build
@@ -79,11 +80,23 @@ BUDGETS=(
     # -> 227,672: FILTER=EVERYTHING read (three values compared, the
     # promiscuous open flag carried to OpenDevice).  -> 227,804:
     # gethostname() qualifies a dotless name with the domain in force.
-    "minimal:src/bsdsocket/bsdsocket.library:227900"
+    # -> 227,572: the MTU-based datagram caps and bsd_route_mtu() gone, the
+    # stack fragments what BSD fragments.
+    "minimal:src/bsdsocket/bsdsocket.library:227700"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
+    # First budgeted as a shipping profile at 0.28.9: 181,012 bytes, with
+    # headroom to the next KiB boundary.  Drivers are built from the same
+    # sources as the other profiles and are kept here because this gate is
+    # also the assertion that every resident image in every shipped drawer
+    # has a budget.
+    "micro:src/bsdsocket/bsdsocket.library:181248"
+    "micro:src/netdev/anxnet.device:43000"
+    "micro:src/netdev/anxgenet.device:27500"
+    "micro:src/wifipi/anxwifipi.device:56000"
+    "micro:src/usergroup/usergroup.library:10000"
 )
 
 budgeted=0
