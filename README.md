@@ -208,6 +208,15 @@ already shares. `httpd -C` serves the machine's display at `/console`, chipset
 and RTG screens alike. The installer offers to start the volume server, file
 manager and Shell when the machine boots.
 
+On a Zorro III [MNT ZZ9000](https://mntre.com/zz9000/), `/console` can move both
+framebuffer readback and delta encoding from the 68k to the card's ARM processor.
+`httpd` detects the console-encode service automatically and falls back to its
+normal 68k path when the service is absent, so there is no setting to maintain.
+On the 25 MHz A3000 this raised a continuously dragged ZZ9000 Workbench from
+about 0.5 to about 10 frames per second. The required firmware, a ready-to-flash
+`BOOT.bin`, installation instructions and rollback instructions are in the
+[AmiNetXDuo ZZ9000 firmware fork](https://github.com/tinic/zz9000-firmware).
+
 ![A live AmigaDOS Shell in Chrome](docs/images/web-shell.png)
 
 ![A live Amiga Workbench display in Chrome](docs/images/web-console.png)
