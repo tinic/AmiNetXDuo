@@ -5,14 +5,18 @@
 #
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                 [-l NOVICE|AVERAGE|EXPERT] [-p CHOICE]
-#                                 [-N BOARD] [-t SECONDS] [-T SECONDS] [-k] [-H]
+#                                 [-N BOARD] [-t SECONDS] [-T SECONDS] [-k]
+#                                 [-H] [-S] [-D] [-g] [-R]
 #
 # -N names the card (tests/tools/cards.sh, default a2065); one whose FILE NAME
 # the installer's own list does not carry gets card_config=post-install, which
 # proves the stack drives the card, not that the installer can select it.
-# -p minimal DOES NOT WORK YET and fails rather than pretending.  -p and -H
-# need -l AVERAGE or EXPERT; -H also needs AMINETXDUO_PEER, a THIRD machine
-# (this host's frames do not come back round to its own pcap), or it exits 3.
+# -p selects a shipped profile.  -H tests the browser services; -S selects a
+# static address; -D selects the self-contained layout; -g reaches that layout
+# through the visible Installer page; -R repeats a system install in place.
+# Options which answer an Installer page need -l AVERAGE or EXPERT.  -H also
+# needs AMINETXDUO_PEER, a THIRD machine (this host's frames do not come back
+# round to its own pcap), or it exits 3.
 # -a takes an archive as given; without it a release-only defect cannot show.
 # Exit: 0 pass, 1 a failure under test, 2 an ingredient is missing (Workbench
 # 3.1 ADFs, Kickstart, Commodore's Installer, the card's driver, xdftool, lha
@@ -32,11 +36,12 @@ TERMINAL=0
 STATIC=0
 DRAWER=0
 DRAWER_GUI=0
+RERUN=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDg" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgR" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -50,9 +55,10 @@ while getopts "b:a:l:p:N:t:T:kHSDg" opt; do
         S) STATIC=1 ;;
         D) DRAWER=1 ;;
         g) DRAWER_GUI=1 ;;
+        R) RERUN=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
-                "[-t seconds] [-T seconds] [-k] [-H] [-S]" >&2
+                "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R]" >&2
            exit 2 ;;
     esac
 done
@@ -561,10 +567,21 @@ build_driver() {
 # One run proves the lines get written; two prove the block is rewritten and
 # not appended to, which is the property a user with an existing S:User-Startup
 # is relying on.
+#
+# The drawer arm must also install twice.  A single successful copy does not
+# exercise the installer's special "this is my own drawer" exception, its
+# backup policy, or replacement of the marked startup block -- all of which
+# are reached only when the selected drawer already contains AmiNetXDuo.
 YES_LABEL=""
 DRIVE_RUNS=1
 if [ "$TERMINAL" = "1" ]; then
     YES_LABEL="Yes, serve them"
+    DRIVE_RUNS=2
+fi
+if [ "$DRAWER" = "1" ]; then
+    DRIVE_RUNS=2
+fi
+if [ "$RERUN" = "1" ]; then
     DRIVE_RUNS=2
 fi
 
@@ -1190,7 +1207,10 @@ Echo >DH0:.done "$RC"'
     fi
     echo "drawer_refused=$([ "$refused_ok" = "1" ] && echo yes || echo no)" \
          "status=$REFUSED_STATUS"
-    if [ "$refused_ok" != "1" ] || [ "$REFUSED_STATUS" != "0" ]; then
+    # Installer's (abort ...) is intentionally RETURN_FAIL (20).  Requiring
+    # zero here made the expected refusal fail before the clean drawer and
+    # reinstall scenarios could run, so this gate had never exercised them.
+    if [ "$refused_ok" != "1" ] || [ "$REFUSED_STATUS" != "20" ]; then
         echo
         echo "!! the drawer layout must be refused beside an existing"
         echo "   LIBS:bsdsocket.library, and refused means nothing written."
@@ -1343,6 +1363,28 @@ if [ "$DRIVE_RUNS" != "1" ]; then
     else
         echo "  ok      repeated install kept S:Network-Startup verbatim"
     fi
+fi
+
+# Assert the generated command explicitly.  AddNetInterface now sends an exact
+# path straight to the config loader (only wildcards use MatchFirst), so this
+# documented DEVS: form must remain intact for both layouts.
+NS_FILE=${NS_FILE:-$(amiga_path S/Network-Startup 2>/dev/null || true)}
+if [ -z "$NS_FILE" ]; then
+    echo "!! the installer did not write S:Network-Startup"
+    fail=1
+elif [ "$DRAWER" = "1" ]; then
+    if grep -q '^AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/eth0 QUIET$' \
+        "$NS_FILE"; then
+        echo "  ok      drawer startup names its exact DEVS: path"
+    else
+        echo "!! drawer startup does not name the exact eth0 path"
+        fail=1
+    fi
+elif grep -q '^C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET$' "$NS_FILE"; then
+    echo "  ok      system startup names its exact DEVS: path"
+else
+    echo "!! system startup does not name the exact eth0 path"
+    fail=1
 fi
 
 # The self-contained contract, in one comparison: none of the system stack's

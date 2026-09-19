@@ -538,10 +538,15 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     LONG seen   = 0;
     LONG settle = 0;
 
-    /* Per run, not per program: on a two-run drive the askchoice page comes
-       up again, and taking its default the second time would install the
-       full stack over the minimal one this run asked for. */
-    picks_done = 0;
+    /* Per run, not per program: on a two-run drive every askchoice page comes
+       up again.  Leaving the match ordinal and "already picked" flag from run
+       one made run two take the default layout/profile, so the supposed
+       drawer reinstall silently became a system install. */
+    picks_done     = 0;
+    matches_seen   = 0;
+    picked_already = FALSE;
+    prev_was_match = FALSE;
+    this_is_match  = FALSE;
 
     say("installdrive: run %ld: starting the Installer\n", run_number);
 
