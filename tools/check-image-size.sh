@@ -73,7 +73,9 @@ BUDGETS=(
     # ten thousand 63 -> 537 Mbit/s out on the A1200.  -> 227,512: the DNS
     # cache dropped with the server that filled it (nxd_dns.c
     # _nx_dns_cache_drop), so a name does not resolve after NetShutdown.
-    "minimal:src/bsdsocket/bsdsocket.library:227600"
+    # -> 227,672: FILTER=EVERYTHING read (three values compared, the
+    # promiscuous open flag carried to OpenDevice).
+    "minimal:src/bsdsocket/bsdsocket.library:227800"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/wifipi/anxwifipi.device:56000"

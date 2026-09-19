@@ -1034,8 +1034,12 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = port;
 
-        status = ami_sana2_open_device(iface->device, iface->unit,
-                                       (struct IORequest *)&iface->templ);
+        /* FILTER=EVERYTHING: the card's own address filter off, every
+           frame on the wire delivered.  A driver that cannot is an open
+           failure, reported as one; the line is the user's to remove. */
+        status = ami_sana2_open_device_flags(
+            iface->device, iface->unit, (struct IORequest *)&iface->templ,
+            cfg->promiscuous ? (ULONG)SANA2OPF_PROM : 0UL);
 
         /* The template is never sent again, everything is cloned from it. */
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;

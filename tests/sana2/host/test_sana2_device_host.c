@@ -166,16 +166,25 @@ UINT tx_thread_sleep(ULONG ticks) { (VOID)ticks; return 0; }
 
 /* --------------------------------------------------------- the device I/O -- */
 
-LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
+static ULONG h_open_flags;      /* what the last open asked the driver for */
+
+LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
+                                 struct IORequest *req, ULONG flags)
 {
     (VOID)name;
     (VOID)unit;
 
+    h_open_flags   = flags;
     req->io_Device = (struct Device *)&h_dev;
     req->io_Unit   = (struct Unit *)&h_dev;
     req->io_Error  = 0;
 
     return 0;
+}
+
+LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
+{
+    return ami_sana2_open_device_flags(name, unit, req, 0UL);
 }
 
 /* Only the commands sana2_device.c issues; the rest are IOERR_NOCMD. */
@@ -824,6 +833,33 @@ static void case_request_counts(void)
         (VOID)ami_sana2_close(iface);
 }
 
+/* FILTER=EVERYTHING is SANA2OPF_PROM at OpenDevice(), and nothing else in
+   the file touches the flags. */
+static void case_filter_everything(void)
+{
+    AmiSana2If *iface;
+    LONG        err = 0;
+
+    printf("  FILTER=EVERYTHING opens the driver promiscuous\n");
+
+    h_config();
+    h_open_flags = 0xFFFFFFFFUL;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && h_open_flags == 0UL,
+            "an interface file without FILTER opens with no flags");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_config();
+    h_cfg.promiscuous = TRUE;
+    h_open_flags = 0xFFFFFFFFUL;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && h_open_flags == (ULONG)SANA2OPF_PROM,
+            "FILTER=EVERYTHING opens with SANA2OPF_PROM and only that");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+}
+
 int main(void)
 {
     printf("sana2 device: open, online, offline, close\n");
@@ -841,6 +877,7 @@ int main(void)
     case_stats_request();
     case_keeps_online();
     case_request_counts();
+    case_filter_everything();
 
     h_check(h_ports_made > 0, "reply ports were created");
     h_check(h_ports_live == 0, "every reply port was deleted");

@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `FILTER=EVERYTHING` in an interface file opens the driver promiscuous
+  (`SANA2OPF_PROM` at `OpenDevice()`), Roadshow's keyword with Roadshow's
+  meaning; `LOCAL` and `IPANDARP` are accepted and change nothing. It was
+  a note saying it did nothing. A driver whose multicast filter accepts a
+  join and delivers nothing -- three were found in the a1k.org multicast
+  study of September 2026 -- loses IPv6 neighbour discovery and `.local`
+  names silently, and this is the switch that gets them back.
+  `anxnet.device` honours the flag.
+
 - `httpd` appends why it exited, with the Amiga clock, to
   `SYS:AmiNetXDuo/httpd.log` (its output is on `NIL:` when started from
   `S:User-Startup`). A failed wait for a connection no longer ends the server

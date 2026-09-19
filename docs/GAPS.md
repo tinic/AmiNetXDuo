@@ -102,7 +102,7 @@ it.
 | `METRIC` | A route cost |
 | `LEASE` `DHCPUNICAST` | DHCP lease time and unicast renewal (`ID` we do read) |
 | `BROADCASTADDRESS` | A broadcast address other than the one the netmask implies |
-| `FILTER` `DEBUG` `ARPTYPE`/`HARDWARETYPE` `LINKSTATUSCOMMAND` | Packet filter, driver debug, ARP hardware type, link-change command |
+| `DEBUG` `ARPTYPE`/`HARDWARETYPE` `LINKSTATUSCOMMAND` | Driver debug, ARP hardware type, link-change command. `FILTER` is read: `EVERYTHING` opens the driver promiscuous (`SANA2OPF_PROM`), `LOCAL` and `IPANDARP` are what the reads ask for anyway |
 
 Roadshow's `ConfigureNetInterface` takes one keyword per interface-file key, so
 that list is also what it cannot be asked for at runtime.

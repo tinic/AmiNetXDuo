@@ -171,6 +171,11 @@ VOID ami_timer_close(VOID);
 struct IORequest;
 LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req);
 
+/* The same open with OpenDevice() flags: SANA2OPF_PROM for an interface file
+   that says FILTER=EVERYTHING.  The plain one above is this with 0. */
+LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
+                                 struct IORequest *req, ULONG flags);
+
 /* Called around every SANA-II OpenDevice. The netstack registers a pair that
    takes the AMITCP port down and puts it back; a command that has no netstack
    registers nothing and the open is unchanged. */

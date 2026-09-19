@@ -241,6 +241,20 @@ typedef struct AmiIfConfig {
     BOOL        mdns;
 
     /*
+     * FILTER=EVERYTHING in the interface file: open the driver promiscuous
+     * (SANA2OPF_PROM), so the card's own address filter is switched off and
+     * every frame on the wire reaches the stack.  Roadshow's keyword and
+     * Roadshow's meaning.  What it is for: a driver whose multicast filter
+     * accepts a join and then delivers nothing -- the 2026-09 a1k.org study
+     * found three (an older X-Surf-100 driver, plipbox, a Wi-Fi card) --
+     * loses IPv6 neighbour discovery and mDNS silently, and this is the
+     * one switch a user has.  Costs every foreign frame's copy on this CPU.
+     * LOCAL and IPANDARP, Roadshow's other two values, are the default here:
+     * the reads already ask for IP, ARP and IPv6 by type and nothing else.
+     */
+    BOOL        promiscuous;
+
+    /*
      * IPv6. These fields exist in both build configurations so that one config
      * file, and one AmiConfig, work whether or not the stack was built with
      * AMINETXDUO_IPV6, only the parser and the netstack act on them. In the

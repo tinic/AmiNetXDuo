@@ -63,5 +63,6 @@
 #define AMI_CFG_ADVICE_WRITEREQUESTS_IS_HOW              48
 #define AMI_CFG_ADVICE_RXBUFFER_IS_THE                   49
 #define AMI_CFG_ADVICE_PRIORITY_IS_A_SMALL                50
+#define AMI_CFG_ADVICE_FILTER_IS_LOCAL_IPANDARP          51
 
 #endif /* AMINETXDUO_CONFIG_ADVICE_H */
