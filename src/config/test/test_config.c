@@ -728,6 +728,37 @@ static void test_interface_roadshow(void)
     CHECK(iface.address == 0);
     CHECK(iface.up == TRUE);
     CHECK(iface.configured == TRUE);
+    CHECK(iface.promiscuous == FALSE);      /* filter=ipandarp */
+    free(buf);
+}
+
+/* Roadshow's FILTER: only EVERYTHING changes anything, and a value that is
+   none of the three is a warning that leaves the default. */
+static void test_interface_filter(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: FILTER\n");
+
+    buf = dup_text("device=x-surf-100.device\nfilter=everything\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.promiscuous == TRUE);
+    free(buf);
+
+    buf = dup_text("device=x-surf-100.device\nFILTER = Local\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.promiscuous == FALSE);
+    free(buf);
+
+    buf = dup_text("device=x-surf-100.device\nfilter=everything\nfilter=nonsense\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.promiscuous == FALSE);
+    free(buf);
+
+    buf = dup_text("device=x-surf-100.device\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.promiscuous == FALSE);
     free(buf);
 }
 
@@ -955,7 +986,8 @@ static void test_inert_keywords_are_notes(void)
     ami_config_set_reporter(collect, NULL);
     ami_cfg_problem_file("DEVS:NetInterfaces/genet");
 
-    /* The user's own file, and there is nothing wrong with it. */
+    /* The user's own file, and there is nothing wrong with it.  FILTER is
+       read now (test_interface_filter), so it is not among the notes. */
     buf = dup_text("device = a2065.device\n"    /* line 1 */
                    "unit = 0\n"                 /* line 2 */
                    "configure = dhcp\n"         /* line 3 */
@@ -968,13 +1000,13 @@ static void test_inert_keywords_are_notes(void)
     free(buf);
     ami_config_set_reporter(NULL, NULL);
 
-    CHECK(seen_count == 4);
-    CHECK(seen_mentions("filter"));
+    CHECK(seen_count == 3);
+    CHECK(!seen_mentions("filter"));
     CHECK(seen_mentions("lease"));
     CHECK(seen_mentions("copymode"));
     CHECK(seen_mentions("multicast"));
-    CHECK(seen[0].line == 4);
-    CHECK(seen[3].line == 7);
+    CHECK(seen[0].line == 5);
+    CHECK(seen[2].line == 7);
 
     /* And not one of them may reach an ordinary command. */
     for (i = 0; i < seen_count; i++)
@@ -2867,6 +2899,7 @@ int main(int argc, char **argv)
     test_interface_ipv6();
 #endif
     test_interface_roadshow();
+    test_interface_filter();
     test_interface_static();
     test_interface_amitcp_flavour();
     test_interface_errors();

@@ -622,6 +622,10 @@ static VOID p_domain_phase(struct Library *base, const char *host,
     p_set_domain(base, "");
     ok = p_get_domain(base, buffer, (LONG)sizeof(buffer));
     Printf((CONST_STRPTR)"domain cleared: rc %ld\n", ok);
+    buffer[0] = '\0';
+    ok = p_gethostname(base, buffer, (LONG)sizeof(buffer));
+    Printf((CONST_STRPTR)"hostname no domain: rc %ld \"%s\"\n",
+           ok, (LONG)buffer);
     p_lookup(base, host, "control");
 
     {
@@ -642,6 +646,10 @@ static VOID p_domain_phase(struct Library *base, const char *host,
     buffer[0] = '\0';
     ok = p_get_domain(base, buffer, (LONG)sizeof(buffer));
     Printf((CONST_STRPTR)"domain set: rc %ld \"%s\"\n", ok, (LONG)buffer);
+    buffer[0] = '\0';
+    ok = p_gethostname(base, buffer, (LONG)sizeof(buffer));
+    Printf((CONST_STRPTR)"hostname set domain: rc %ld \"%s\"\n",
+           ok, (LONG)buffer);
 
     p_lookup(base, host, "bare");
 

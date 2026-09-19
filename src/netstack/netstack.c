@@ -147,7 +147,7 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
     if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
         return AMI_NET_OK;
 
-    status = tx_amiga_adopt_thread(&caller->nc_Thread, (CHAR *)"aminetxduo caller",
+    status = tx_amiga_adopt_thread(&caller->nc_Thread, (CHAR *)"AmiNetXDuo caller",
                                    AMI_CALLER_PRIORITY);
     if (status != TX_SUCCESS)
     {
@@ -245,7 +245,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
     caller->nc_Task = me;
 
     status = tx_amiga_adopt_thread(&caller->nc_Thread,
-                                   (CHAR *)"aminetxduo caller",
+                                   (CHAR *)"AmiNetXDuo caller",
                                    AMI_CALLER_PRIORITY);
     if (status != TX_SUCCESS)
     {
@@ -312,7 +312,7 @@ LONG ami_netstack_try_enter_cached(AmiNetCaller *caller)
     caller->nc_Task = me;
 
     status = tx_amiga_adopt_thread(&caller->nc_Thread,
-                                   (CHAR *)"aminetxduo caller",
+                                   (CHAR *)"AmiNetXDuo caller",
                                    AMI_CALLER_PRIORITY);
     if (status != TX_SUCCESS)
     {
@@ -985,7 +985,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     }
 
     AMI_INFO("netstack: nx_ip_create");
-    status = nx_ip_create(&ns->ns_Ip, (CHAR *)"AmiNetXDuo", addr0, mask0,
+    status = nx_ip_create(&ns->ns_Ip, (CHAR *)"AmiNetXDuo ip", addr0, mask0,
                           &ns->ns_Pool, driver,
                           ns->ns_IpStack, (ULONG)AMI_IP_STACK_SIZE,
                           AMI_IP_THREAD_PRIORITY);

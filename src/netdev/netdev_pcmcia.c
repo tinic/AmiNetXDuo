@@ -611,7 +611,7 @@ static BOOL pc_worker_start(NetdevDevice *dev)
        next insertion, so this must not be a negative-priority task that a
        CPU-bound application can starve. */
     task->tc_Node.ln_Pri  = 0;
-    task->tc_Node.ln_Name = (char *)"anxnet pcmcia";
+    task->tc_Node.ln_Name = (char *)"AmiNetXDuo anxnet pcmcia";
     task->tc_SPLower      = pc_worker_stack;
     task->tc_SPUpper      = (APTR)((UBYTE *)pc_worker_stack +
                                    PC_WORKER_STACK_SIZE);

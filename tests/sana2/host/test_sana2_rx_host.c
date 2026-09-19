@@ -882,15 +882,19 @@ static void test_verified_skips_the_walk(void)
 #ifdef AMINETXDUO_GRO
 /* ---- the held run: VERIFIED frames and the CONTINUES chain ------------- */
 
-static UCHAR      buffer2[256];
-static NX_PACKET  pkt2;
-static AmiSana2Rx rxs;
+static UCHAR          buffer2[256];
+static NX_PACKET      pkt2;
+static AmiSana2Reader rds;
+static AmiSana2Rx     rxs;
 
 static void gro_init(UBYTE answered)
 {
     fixture_init();
+    memset(&rds, 0, sizeof(rds));
     memset(&rxs, 0, sizeof(rxs));
+    rds.iface          = &iface;
     rxs.iface          = &iface;
+    rxs.reader         = &rds;
     iface.rx_flags_ok  = answered;
     tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
     _nx_ip_input_thread = tx_thread_identify();
@@ -1020,11 +1024,11 @@ static void test_run_ends_on_a_frame_that_does_not_continue(void)
     h_went = TO_NOWHERE;
     tcp_frame_init(&pkt, buffer, 6, 40);
     (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
-    rxs.stop = TRUE;
+    rds.stop = TRUE;
     ami_sana2_gro_flush(&rxs);
     h_check(h_went == TO_RELEASED && h_releases == 1,
             "a flush under stop releases the run");
-    rxs.stop = FALSE;
+    rds.stop = FALSE;
     gro_done();
 }
 
@@ -1499,8 +1503,8 @@ static void test_block_only_on_an_empty_port(void)
         (UWORD)(AMI_SANA2_RX_RUN_MAX + 1),
         (UWORD)(AMI_SANA2_RX_RUN_MAX * 2)
     };
-    AmiSana2Rx rx;
-    unsigned   t, q;
+    AmiSana2Reader rx;
+    unsigned       t, q;
 
     memset(&rx, 0, sizeof rx);
     rx.port = &blk_port;
@@ -1527,9 +1531,9 @@ static void test_block_only_on_an_empty_port(void)
  */
 static UWORD blk_left_by_real_rule(void)
 {
-    AmiSana2Rx rx;
-    UWORD      queued = (UWORD)(AMI_SANA2_RX_RUN_MAX + 3);
-    UWORD      taken  = 0;
+    AmiSana2Reader rx;
+    UWORD          queued = (UWORD)(AMI_SANA2_RX_RUN_MAX + 3);
+    UWORD          taken  = 0;
 
     memset(&rx, 0, sizeof rx);
     rx.port = &blk_port;
@@ -1572,9 +1576,9 @@ static void test_a_burst_is_never_left_on_the_port(void)
             "the shipped rule takes the whole burst before it blocks");
 }
 
-VOID ami_sana2_rx_post_batch_host_test(AmiSana2Rx *rx);
+VOID ami_sana2_rx_post_batch_host_test(AmiSana2Reader *rx);
 
-static void h_batch_prepare(AmiSana2Rx *rx, AmiSana2If *iface,
+static void h_batch_prepare(AmiSana2Reader *rx, AmiSana2If *iface,
                             struct IOSana2Req req[3], HostBatchMode mode)
 {
     UWORD i;
@@ -1601,15 +1605,15 @@ static void h_batch_prepare(AmiSana2Rx *rx, AmiSana2If *iface,
     h_batch_waits = 0;
 }
 
-static BOOL h_batch_list_empty(const AmiSana2Rx *rx)
+static BOOL h_batch_list_empty(const AmiSana2Reader *rx)
 {
     return (BOOL)(rx->topost.lh_Head->ln_Succ == NULL);
 }
 
 static void test_batch_post_ownership(void)
 {
-    AmiSana2Rx rx;
-    AmiSana2If iface;
+    AmiSana2Reader rx;
+    AmiSana2If     iface;
     struct IOSana2Req req[3];
 
     h_batch_prepare(&rx, &iface, req, HOST_BATCH_ACCEPT_ALL);

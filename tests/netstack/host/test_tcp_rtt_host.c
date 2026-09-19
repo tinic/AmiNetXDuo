@@ -11,6 +11,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef H_ISN_RX
+#define H_ISN_RX        0x20000000UL
+#endif
+
 #ifndef NX_ENABLE_TCP_RTT_ESTIMATOR
 #error "this test is about NX_ENABLE_TCP_RTT_ESTIMATOR and needs it defined"
 #endif
@@ -249,7 +253,9 @@ static NX_PACKET      h_pkt[H_PACKETS];
 static UCHAR          h_pkt_buf[H_PACKETS][H_BUF];
 static UINT           h_pkt_next;
 
+#ifndef H_ISN
 #define H_ISN           0x10000000UL
+#endif
 
 static void h_fixture(void)
 {
@@ -282,7 +288,11 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_tx_slow_start_threshold = 65535;
     h_sock.nx_tcp_socket_tx_outstanding_bytes  = 0;
     h_sock.nx_tcp_socket_tx_sequence           = H_ISN;
-    h_sock.nx_tcp_socket_rx_sequence           = 0x20000000UL;
+    /* What the SYN leaves behind (nx_tcp_packet_send_syn.c): both
+       relative to the ISN, so a flight straddling 2^31 compares right. */
+    h_sock.nx_tcp_socket_tx_sequence_recover  = H_ISN - 1;
+    h_sock.nx_tcp_socket_previous_highest_ack = H_ISN - 1;
+    h_sock.nx_tcp_socket_rx_sequence           = H_ISN_RX;
 }
 
 /* One application send of H_SEG_BYTES, through the real output path. */

@@ -23,6 +23,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef H_ISN_RX
+#define H_ISN_RX        0x20000000UL
+#endif
+
 static ULONG h_now = 1000;
 
 ULONG _tx_time_get(VOID)
@@ -191,7 +195,9 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 #define H_MSS           1460UL
 #define H_BUF           1600
 #define H_PACKETS       512
+#ifndef H_ISN
 #define H_ISN           0x10000000UL
+#endif
 
 /* The capture: the peer's SYN-ACK window, its scale, and the window its
    acknowledgments grew to once the transfer ran. */
@@ -293,7 +299,7 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_connect_mss  = H_MSS;
     h_sock.nx_tcp_socket_connect_mss2 = H_MSS * H_MSS;
     h_sock.nx_tcp_socket_transmit_queue_maximum = H_PACKETS;
-    h_sock.nx_tcp_socket_rx_sequence  = 0x20000000UL;
+    h_sock.nx_tcp_socket_rx_sequence  = H_ISN_RX;
 
     /* What _nx_tcp_socket_packet_process leaves from the peer's options
        before it hands the SYN to the state handler. */
@@ -319,7 +325,7 @@ static void h_connect_client(void)
     memset(&hdr, 0, sizeof(hdr));
     memset(&pkt, 0, sizeof(pkt));
     hdr.nx_tcp_header_word_0         = (8080UL << NX_SHIFT_BY_16) | 40000UL;
-    hdr.nx_tcp_sequence_number       = 0x20000000UL - 1;
+    hdr.nx_tcp_sequence_number       = H_ISN_RX - 1;
     hdr.nx_tcp_acknowledgment_number = H_ISN;
     hdr.nx_tcp_header_word_3         = NX_TCP_HEADER_SIZE | NX_TCP_SYN_BIT |
                                        NX_TCP_ACK_BIT | H_SYN_WINDOW;
@@ -339,7 +345,7 @@ static void h_connect_server(void)
 
     memset(&hdr, 0, sizeof(hdr));
     hdr.nx_tcp_header_word_0         = (8080UL << NX_SHIFT_BY_16) | 40000UL;
-    hdr.nx_tcp_sequence_number       = 0x20000000UL;
+    hdr.nx_tcp_sequence_number       = H_ISN_RX;
     hdr.nx_tcp_acknowledgment_number = H_ISN;
     hdr.nx_tcp_header_word_3         = NX_TCP_HEADER_SIZE | NX_TCP_ACK_BIT |
                                        (H_SYN_WINDOW >> H_PEER_SHIFT);

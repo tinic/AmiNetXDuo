@@ -123,6 +123,9 @@ static const char *const ami_cfg_advice_text[] =
     "PRIORITY is a number from -128 to 127, 0 when left out.  When t"
     "wo interfaces could carry a packet -- two cards on one network,"
     " two default routers -- the higher one carries it.",
+    "FILTER is LOCAL, IPANDARP or EVERYTHING.  The first two are wha"
+    "t happens anyway.  EVERYTHING opens the driver promiscuous, for"
+    " a card whose multicast filter lets nothing through.",
 };
 
 const char *ami_cfg_advice(UWORD code)

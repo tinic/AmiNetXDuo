@@ -114,7 +114,9 @@ ULONG _nx_tcp_socket_window_update_step(NX_TCP_SOCKET *socket_ptr)
 #define H_POOL_TOTAL        368
 #define H_WINDOW            72128UL
 #define H_MSS               1460UL
+#ifndef H_ISN_RX
 #define H_ISN_RX            0x20000000UL
+#endif
 
 /* Enough backing packets to let the defect run past the pool without the test
    itself running out.  On the fixed build the queue caps long before this. */

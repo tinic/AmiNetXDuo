@@ -832,7 +832,7 @@ ULONG               blocks;
             return(NX_CRYPTO_PTR_ERROR);
         }
         ami_aes_set_iv(ctx, iv_ptr);
-        /* fallthrough */
+        __attribute__((fallthrough));
     case NX_CRYPTO_ENCRYPT_UPDATE:
         if ((input_length_in_byte & 15uL) != 0uL)
         {
@@ -848,7 +848,7 @@ ULONG               blocks;
             return(NX_CRYPTO_PTR_ERROR);
         }
         ami_aes_set_iv(ctx, iv_ptr);
-        /* fallthrough */
+        __attribute__((fallthrough));
     case NX_CRYPTO_DECRYPT_UPDATE:
         if ((input_length_in_byte & 15uL) != 0uL)
         {

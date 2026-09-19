@@ -115,6 +115,10 @@
 #define DRIVE_PICK_SKIP    0
 #endif
 
+#ifndef DRIVE_PAGE_PAUSE
+#define DRIVE_PAGE_PAUSE   0
+#endif
+
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 
 /*
@@ -635,6 +639,13 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
                         (LONG)target->GadgetID);
             }
 
+            /* Optional breathing room for the human visual-review run.  The
+               automated matrix leaves this at zero; a deliberately slow
+               build gives each Installer page time to be inspected or
+               captured before the driver advances it. */
+            if (DRIVE_PAGE_PAUSE > 0)
+                Delay(DRIVE_PAGE_PAUSE);
+
             click(window, target);
         }
         else if (window != NULL)
@@ -734,6 +745,32 @@ int main(void)
         {
             rc = RETURN_FAIL;
             break;
+        }
+
+        /*
+         * Make the second run prove that "Keep it" means preserve the
+         * user's S:Network-Startup, not merely save it under .old and write
+         * a replacement.  A comment is inert at the next boot and distinct
+         * from anything the Installer generates itself.
+         */
+        if (run_number == 1 && DRIVE_RUNS > 1)
+        {
+            static const char marker[] =
+                "; user startup policy -- installer must preserve this\n";
+            BPTR startup = Open((STRPTR)"S:Network-Startup", MODE_OLDFILE);
+
+            if (startup == 0 ||
+                Seek(startup, 0, OFFSET_END) < 0 ||
+                Write(startup, (APTR)marker, sizeof(marker) - 1) !=
+                    (LONG)(sizeof(marker) - 1))
+            {
+                say("installdrive: could not mark S:Network-Startup\n", 0);
+                if (startup != 0)
+                    Close(startup);
+                rc = RETURN_FAIL;
+                break;
+            }
+            Close(startup);
         }
     }
 

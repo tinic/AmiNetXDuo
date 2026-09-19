@@ -70,17 +70,32 @@ ULONG tls_packet_pool_count(ULONG record_bytes)
     ULONG cipher_bytes = (record_bytes > (ULONG)NX_SECURE_TLS_MAX_CIPHERTEXT_LENGTH_1_3)
                          ? record_bytes
                          : (ULONG)NX_SECURE_TLS_MAX_CIPHERTEXT_LENGTH_1_3;
-    ULONG cipher = (cipher_bytes + TLS_MIN_SEGMENT_FILL - 1UL) / TLS_MIN_SEGMENT_FILL;
+    ULONG cipher = cipher_bytes / TLS_MIN_SEGMENT_FILL;
     ULONG plain  = ((ULONG)NX_SECURE_TLS_MAX_PLAINTEXT_LENGTH + TLS_PACKET_PAYLOAD - 1UL)
                    / TLS_PACKET_PAYLOAD;
+
+    /* Division plus a remainder, not (bytes + fill - 1) / fill: the tag is a
+       public ULONG and that addition wraps for values at the top of its
+       range.  The resulting block count itself still fits comfortably. */
+    if (cipher_bytes % TLS_MIN_SEGMENT_FILL != 0UL)
+        cipher++;
 
     return cipher + plain + TLS_PACKET_SPARE;
 }
 
 ULONG tls_packet_pool_bytes(ULONG packets)
 {
-    return packets *
-           (TLS_PKT_ALIGN(sizeof(NX_PACKET)) + TLS_PKT_ALIGN(TLS_PACKET_PAYLOAD));
+    const ULONG stride = TLS_PKT_ALIGN(sizeof(NX_PACKET)) +
+                         TLS_PKT_ALIGN(TLS_PACKET_PAYLOAD);
+    const ULONG limit  = (ULONG)~(ULONG)0;
+
+    /* A saturated allocation is guaranteed to fail cleanly on this 32-bit
+       target.  Wrapping to a small allocation is not: pool_create() would
+       then initialise `packets` entries past its end. */
+    if (packets > limit / stride)
+        return limit;
+
+    return packets * stride;
 }
 
 /*
@@ -92,16 +107,21 @@ UINT tls_packet_pool_create(NX_PACKET_POOL *pool, VOID *memory, ULONG packets)
     UCHAR *cursor = (UCHAR *)memory;
     ULONG  header = TLS_PKT_ALIGN(sizeof(NX_PACKET));
     ULONG  payload = TLS_PKT_ALIGN(TLS_PACKET_PAYLOAD);
+    ULONG  bytes;
     ULONG  i;
 
     if (pool == NX_NULL || memory == NX_NULL || packets == 0)
         return NX_PTR_ERROR;
 
+    bytes = tls_packet_pool_bytes(packets);
+    if (bytes == (ULONG)~(ULONG)0)
+        return NX_SIZE_ERROR;
+
     tls_bzero(pool, sizeof(*pool));
 
     pool->nx_packet_pool_name         = (CHAR *)"tls.library";
     pool->nx_packet_pool_start        = (CHAR *)memory;
-    pool->nx_packet_pool_size         = tls_packet_pool_bytes(packets);
+    pool->nx_packet_pool_size         = bytes;
     pool->nx_packet_pool_payload_size = payload;
     pool->nx_packet_pool_total        = packets;
     pool->nx_packet_pool_available    = packets;

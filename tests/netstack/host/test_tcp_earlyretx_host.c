@@ -13,6 +13,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef H_ISN_RX
+#define H_ISN_RX        0x20000000UL
+#endif
+
 static ULONG h_now = 1000;
 
 ULONG _tx_time_get(VOID)
@@ -222,7 +226,9 @@ VOID _nx_tcp_socket_retransmit_queue_flush(NX_TCP_SOCKET *socket_ptr)
 #define H_SEG_BYTES     512
 #define H_BUF           1024
 #define H_PACKETS       8
+#ifndef H_ISN
 #define H_ISN           0x10000000UL
+#endif
 
 static NX_IP          h_ip;
 static NX_INTERFACE   h_iface;
@@ -262,7 +268,11 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_tx_slow_start_threshold = 65535;
     h_sock.nx_tcp_socket_tx_outstanding_bytes    = 0;
     h_sock.nx_tcp_socket_tx_sequence             = H_ISN;
-    h_sock.nx_tcp_socket_rx_sequence             = 0x20000000UL;
+    /* What the SYN leaves behind (nx_tcp_packet_send_syn.c): both
+       relative to the ISN, so a flight straddling 2^31 compares right. */
+    h_sock.nx_tcp_socket_tx_sequence_recover  = H_ISN - 1;
+    h_sock.nx_tcp_socket_previous_highest_ack = H_ISN - 1;
+    h_sock.nx_tcp_socket_rx_sequence             = H_ISN_RX;
 }
 
 static UINT h_send(void)

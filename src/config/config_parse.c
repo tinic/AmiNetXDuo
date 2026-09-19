@@ -36,6 +36,7 @@ typedef enum
     IF_KEY_CONFIGURE6,
     IF_KEY_MDNS,
     IF_KEY_DOWNGOESOFFLINE,
+    IF_KEY_FILTER,
     IF_KEY_REQUIRESINITDELAY,
     IF_KEY_HARDWAREADDRESS,
     IF_KEY_IPREQUESTS,
@@ -68,6 +69,7 @@ ami_if_keywords[] =
     { "iptype",             IF_KEY_IPTYPE    },
     { "state",              IF_KEY_STATE     },
     { "downgoesoffline",    IF_KEY_DOWNGOESOFFLINE   },
+    { "filter",             IF_KEY_FILTER            },
     { "requiresinitdelay",  IF_KEY_REQUIRESINITDELAY },
     { "hardwareaddress",    IF_KEY_HARDWAREADDRESS   },
     { "iprequests",         IF_KEY_IPREQUESTS        },
@@ -94,7 +96,6 @@ ami_if_keywords[] =
     { "multicast",          IF_KEY_IGNORED   },
     { "reportoffline",      IF_KEY_IGNORED   },
     { "copymode",           IF_KEY_IGNORED   },
-    { "filter",             IF_KEY_IGNORED   },
     { "alias",              IF_KEY_IGNORED   },
     { "destination",        IF_KEY_IGNORED   },
     { "destinationaddr",    IF_KEY_IGNORED   },
@@ -262,7 +263,6 @@ static const struct { const char *key; const char *why; } cfg_inert_keys[] =
     { "destination",       "point-to-point links are not supported" },
     { "destinationaddr",   "point-to-point links are not supported" },
     { "dhcpunicast",       "DHCP renewal is always broadcast here" },
-    { "filter",            "there is no packet filter to give rules to" },
     { "lease",             "the lease time asked for is the server's to choose" },
     { "linkstatuscommand", "nothing is run when the link changes" },
     { "metric",            "routes have no metric here, so interfaces cannot be ordered by one" },
@@ -853,6 +853,23 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MDNS",
                                      value, AMI_CFG_ADVICE_MDNS_IS_YES_OR);
                     out->mdns = FALSE;
+                }
+                break;
+
+            /* Roadshow's three values.  Only EVERYTHING changes anything:
+               LOCAL and IPANDARP describe what the reads already ask for. */
+            case IF_KEY_FILTER:
+                if (ami_cfg_stricmp(value, "everything") == 0)
+                    out->promiscuous = TRUE;
+                else if (ami_cfg_stricmp(value, "local") == 0 ||
+                         ami_cfg_stricmp(value, "ipandarp") == 0)
+                    out->promiscuous = FALSE;
+                else
+                {
+                    AMI_WARN("config: %s: bad FILTER '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "FILTER",
+                                     value, AMI_CFG_ADVICE_FILTER_IS_LOCAL_IPANDARP);
+                    out->promiscuous = FALSE;
                 }
                 break;
 

@@ -462,7 +462,7 @@ VOID ami_shutdown_notify(VOID)
 }
 
 static LONG ami_sana2_open_once(const char *name, ULONG unit,
-                                struct IORequest *req)
+                                struct IORequest *req, ULONG flags)
 {
     LONG status;
 
@@ -471,7 +471,7 @@ static LONG ami_sana2_open_once(const char *name, ULONG unit,
     if (ami_sana2_quiesce != NULL)
         ami_sana2_quiesce();
 
-    status = (LONG)(BYTE)OpenDevice((CONST_STRPTR)name, unit, req, 0);
+    status = (LONG)(BYTE)OpenDevice((CONST_STRPTR)name, unit, req, flags);
 
     if (ami_sana2_restore != NULL)
         ami_sana2_restore();
@@ -481,6 +481,12 @@ static LONG ami_sana2_open_once(const char *name, ULONG unit,
 
 LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
 {
+    return ami_sana2_open_device_flags(name, unit, req, 0UL);
+}
+
+LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
+                                 struct IORequest *req, ULONG flags)
+{
     char  path[sizeof(AMI_SANA2_DEVS_SUBDIR) + AMI_SANA2_NAME_MAX];
     LONG  status;
     ULONG i;
@@ -488,7 +494,7 @@ LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
     if (name == NULL || *name == '\0' || req == NULL)
         return -1;
 
-    status = ami_sana2_open_once(name, unit, req);
+    status = ami_sana2_open_once(name, unit, req, flags);
     if (status == 0)
         return 0;
 
@@ -512,5 +518,5 @@ LONG ami_sana2_open_device(const char *name, ULONG unit, struct IORequest *req)
     req->io_Device = NULL;
     req->io_Unit   = NULL;
 
-    return ami_sana2_open_once(path, unit, req);
+    return ami_sana2_open_once(path, unit, req, flags);
 }

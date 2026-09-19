@@ -337,9 +337,9 @@ int main(int argc, char **argv)
     /* ---- the child's hunk is freed now.  Who is still pointing into it? --- */
 
     check("no ThreadX tick Task outlived the child",
-          FindTask((STRPTR)"ThreadX tick") == NULL);
+          FindTask((STRPTR)"AmiNetXDuo tick") == NULL);
     check("no ThreadX scheduler Task outlived the child",
-          FindTask((STRPTR)"ThreadX") == NULL);
+          FindTask((STRPTR)"AmiNetXDuo kernel") == NULL);
 
     /*
      * The assertion this probe exists for.  Exec calls every one of these

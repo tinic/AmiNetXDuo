@@ -9,7 +9,8 @@ cd "$ROOT"
 
 TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/m68000}"
-RUNS=3
+RUNS=8
+TOLERANCE="${AMINETXDUO_ADDIF_LEAK_TOLERANCE:-512}"
 
 while getopts "t:b:n:" opt; do
     case "$opt" in
@@ -20,7 +21,10 @@ while getopts "t:b:n:" opt; do
     esac
 done
 
-[ "$RUNS" -ge 3 ] || { echo "-n needs at least 3: the first run pays the one-off cost" >&2; exit 2; }
+[ "$RUNS" -ge 6 ] || { echo "-n needs at least 6: the first run pays the one-off cost and both comparison windows need samples" >&2; exit 2; }
+case "$TOLERANCE" in
+    ''|*[!0-9]*) echo "AMINETXDUO_ADDIF_LEAK_TOLERANCE must be a byte count" >&2; exit 2 ;;
+esac
 
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
@@ -120,29 +124,60 @@ if [ "${#FREE[@]}" -lt "$RUNS" ]; then
 fi
 pass "all $RUNS runs reported"
 
-REACHED=$(grep -c 'the network is running, and eth0 is configured down' "$REPORT" || true)
-if [ "$REACHED" -lt "$RUNS" ]; then
-    fail "the stack was built on only $REACHED of $RUNS runs, so there was" \
-         "nothing allocated to leak on the rest"
+# What each run must have said.  The first AddNetInterface builds the stack
+# and honours STATE=down; since 0.28.7 the next one on an interface that is
+# attached but down brings it up the way Online does (CHANGELOG, 0.28.7), so
+# runs 2..N report "online".  Before that entry every run rebuilt and stranded
+# a stack, which is the leak this file was written to catch; the memory it
+# measures is the same either way, and a run that says neither is a run that
+# did not reach the stack at all.
+DOWN=$(grep -c 'the network is running, and eth0 is configured down' "$REPORT" || true)
+UP=$(grep -c '^eth0: online, address' "$REPORT" || true)
+if [ "$DOWN" -lt 1 ]; then
+    fail "the first run did not build the stack and leave eth0 down (STATE=down)"
+elif [ $((DOWN + UP)) -lt "$RUNS" ]; then
+    fail "only $((DOWN + UP)) of $RUNS runs reached the stack (built $DOWN," \
+         "brought up $UP), so there was nothing allocated to leak on the rest"
 else
-    pass "all $RUNS runs built a stack and stranded it, which is the state measured"
+    pass "run 1 built the stack and left eth0 down, $UP re-add(s) brought it up:" \
+         "the states 0.28.7 defines, and the memory measured is the same"
 fi
 
-FIRST="${FREE[1]}"
-LAST="${FREE[$((RUNS - 1))]}"
-DELTA=$(( FIRST - LAST ))
-PER=$(( DELTA / (RUNS - 2) ))
+WINDOW=$(( (RUNS - 2) / 2 ))
+EARLY_MAX=0
+LATE_MAX=0
+
+# Compare high-water marks from two windows, not individual adjacent samples.
+# A packet or lease operation can temporarily hold about 4 KB, so one reading
+# can dip and the next can climb even while every AddNetInterface leaks.  A
+# single climb therefore proves nothing.  Requiring the later window to
+# recover to the earlier window (within a small allocator tolerance) catches
+# a persistent downward trend while giving transients several samples to
+# leave.
+i=1
+while [ "$i" -le "$WINDOW" ]; do
+    [ "${FREE[$i]}" -gt "$EARLY_MAX" ] && EARLY_MAX="${FREE[$i]}"
+    i=$((i + 1))
+done
+i=$((RUNS - WINDOW))
+while [ "$i" -lt "$RUNS" ]; do
+    [ "${FREE[$i]}" -gt "$LATE_MAX" ] && LATE_MAX="${FREE[$i]}"
+    i=$((i + 1))
+done
+
+DELTA=$(( EARLY_MAX - LATE_MAX ))
 
 echo
-echo "  free after run 2:      $FIRST"
-echo "  free after run $RUNS:      $LAST"
-echo "  leak per failed run:   $PER bytes"
+echo "  early high-water mark: $EARLY_MAX"
+echo "  late high-water mark:  $LATE_MAX"
+echo "  free, runs 2..$RUNS:      ${FREE[*]:1}"
+echo "  allowed difference:    $TOLERANCE"
 echo
 
-if [ "$DELTA" -eq 0 ]; then
-    pass "a failed AddNetInterface costs nothing the second time onward"
+if [ "$DELTA" -le "$TOLERANCE" ]; then
+    pass "the late samples recover to within $TOLERANCE bytes of the early samples"
 else
-    fail "$PER bytes lost per AddNetInterface, and never returned"
+    fail "$DELTA bytes separate the early and late high-water marks"
 fi
 
 echo

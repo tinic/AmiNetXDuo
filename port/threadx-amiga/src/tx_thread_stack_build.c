@@ -47,7 +47,7 @@ CHAR        *name;
     name =  thread_ptr -> tx_thread_name;
     if (name == (CHAR *) 0)
     {
-        name =  "ThreadX thread";
+        name =  "AmiNetXDuo thread";
     }
 
     /* ---- adoption ------------------------------------------------------- */

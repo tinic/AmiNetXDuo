@@ -583,9 +583,66 @@ typedef struct AmiRxSum
     UBYTE   flags;      /* the device's ANXD_S2_RXF_* byte, 0 = none      */
 } AmiRxSum;
 
+/*
+ * THE READER: one task per interface, one reply port, three pipelines.
+ *
+ * A SANA-II device wants a CMD_READ per Ethernet type, so the IPv4, ARP and
+ * IPv6 reads are three rings (AmiSana2Rx below); nothing says three tasks.
+ * They were three, and every frame of every type serialised on the one
+ * nx_ip_protection mutex anyway, so the three tasks bought a machine with
+ * three interfaces nine tasks and 72 KB of stacks for no concurrency.  One
+ * task now waits on one port for all of them and the drain tells the rings
+ * apart by the slot the reply is.
+ */
+struct AmiSana2Rx;
+
+typedef struct AmiSana2Reader
+{
+    AmiSana2If         *iface;
+    /* The task's name, "AmiNetXDuo <device> rx": ThreadX and Exec keep the
+       pointer, not a copy, so it lives as long as the reader does. */
+    char                name[48];
+
+    TX_THREAD           thread;
+    TX_SEMAPHORE        ready;
+    TX_SEMAPHORE        exited;
+    APTR                stack;
+
+    struct Task        *task;
+    struct MsgPort     *port;
+    ULONG               wake_mask;
+
+    /* The TX reaping duty (see ami_sana2_tx_reap_bind()). */
+    BYTE                reap_sigbit;    /* -1 when none is held             */
+    ULONG               reap_mask;
+
+    volatile BOOL       started;    /* tx_thread_create succeeded          */
+    volatile BOOL       running;
+    volatile BOOL       stop;
+    volatile BOOL       failed;
+
+    /* Reads the device would not give back at teardown, over every ring.
+       Nonzero means slots, pinned packets and the reply port are still
+       reachable by the device and none of them can be freed. */
+    volatile UWORD      orphans;
+
+    /* ANXD_CMD_RX_POLL (aminetxduo/anxs2ext.h), sent once at the end of
+       every drain so a driver holding frames for the reads just re-posted
+       delivers them before the reader sleeps.  Replied on the port when a
+       device does not honour IOF_QUICK, and taken back at once. */
+    struct IOSana2Req   poll;
+    /* ANXD_CMD_READ_BATCH: the slots this drain armed, of every ring, and
+       the carrier that hands them over in one call. */
+    struct List         topost;
+    struct IOSana2Req   batch;
+    BOOL                batching;       /* inside a drain: arm, do not post  */
+} AmiSana2Reader;
+
+/* One ring of reads for one Ethernet type. */
 typedef struct AmiSana2Rx
 {
     AmiSana2If         *iface;
+    AmiSana2Reader     *reader;
     ULONG               packet_type;
     UWORD               depth;
 
@@ -599,28 +656,6 @@ typedef struct AmiSana2Rx
      * owner block in sana2_rx.c and tools/check-rx-posted.sh.
      */
     UWORD               unposted;
-
-    TX_THREAD           thread;
-    TX_SEMAPHORE        ready;
-    TX_SEMAPHORE        exited;
-    APTR                stack;
-
-    struct Task        *task;
-    struct MsgPort     *port;
-    ULONG               wake_mask;
-
-    /*
-     * Exactly one reader carries the TX reaping duty (see
-     * ami_sana2_tx_reap_bind()), and only that reader has a nonzero reap_mask.
-     */
-    BOOL                reap_tx;        /* this reader has the duty         */
-    BYTE                reap_sigbit;    /* -1 when none is held             */
-    ULONG               reap_mask;
-
-    volatile BOOL       started;    /* tx_thread_create succeeded          */
-    volatile BOOL       running;
-    volatile BOOL       stop;
-    volatile BOOL       failed;
 
 #ifdef AMINETXDUO_GRO
     /*
@@ -641,11 +676,6 @@ typedef struct AmiSana2Rx
     UWORD               gro_count;      /* frames in the held run           */
 #endif /* AMINETXDUO_GRO */
 
-    /* Reads the device would not give back at teardown. Nonzero means this
-       reader's slots, pinned packets and reply port are still reachable by the
-       device, so none of them can be freed, see ami_sana2_rx_teardown(). */
-    volatile UWORD      orphans;
-
 #ifdef AMINETXDUO_RXPROBE
     AmiRxProbe          probe;
 #endif
@@ -655,17 +685,6 @@ typedef struct AmiSana2Rx
        wire's and nobody else's memory. */
     AmiRxSlot          *slot;
     UWORD               slot_alloc;     /* how many `slot` holds             */
-
-    /* ANXD_CMD_RX_POLL (aminetxduo/anxs2ext.h), sent once at the end of
-       every drain so a driver holding frames for the reads just re-posted
-       delivers them before this reader sleeps.  Replied on rx->port when a
-       device does not honour IOF_QUICK, and taken back at once. */
-    struct IOSana2Req   poll;
-    /* ANXD_CMD_READ_BATCH: the slots this drain armed and has not yet handed
-       to the device, and the carrier that hands them over in one call. */
-    struct List         topost;
-    struct IOSana2Req   batch;
-    BOOL                batching;       /* inside a drain: arm, do not post  */
 } AmiSana2Rx;
 
 /* --------------------------------------------------------------- TX slots */
@@ -779,7 +798,7 @@ struct AmiSana2If
        Only the driver entry's enable/disable cases write it. */
     BOOL                admin_up;
     /* A status query wants the device-derived counters of now: it sets
-       stats_want and wakes reader 0 (ami_sana2_stats_request()), the reader
+       stats_want and wakes the reader (ami_sana2_stats_request()), the reader
        runs the two device commands and bumps stats_epoch.  Never on the
        query's own task: a Shell gives it 4096 bytes of stack. */
     volatile BOOL       stats_want;
@@ -823,7 +842,8 @@ struct AmiSana2If
     volatile ULONG      tx_lazy_last_send;
 #endif
 
-    /* RX readers, one per packet type. */
+    /* The reader task and its rings, one per packet type. */
+    AmiSana2Reader      reader;
     AmiSana2Rx          rx[AMI_SANA2_RX_READERS];
     BOOL                rx_running;
 
@@ -890,7 +910,7 @@ BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 #ifndef AMINETXDUO_GREEN_REALM
 /* Must the reader block?  The port decides; the batch count may not.  See the
    definition in sana2_rx.c, and tests/sana2/host for what holds it there. */
-BOOL ami_sana2_rx_should_block(const AmiSana2Rx *rx, UWORD taken);
+BOOL ami_sana2_rx_should_block(const AmiSana2Reader *rd, UWORD taken);
 #endif
 /*
  * `slot` is the request the frame arrived on, or NULL when there is none.  It
@@ -909,7 +929,7 @@ VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
 
 #ifdef AMINETXDUO_SANA2_RX_HOST_TEST
 /* The host harness's way into the static batch post (sana2_rx.c). */
-VOID ami_sana2_rx_post_batch_host_test(AmiSana2Rx *rx);
+VOID ami_sana2_rx_post_batch_host_test(AmiSana2Reader *rd);
 #endif
 
 /* sana2_tx.c */

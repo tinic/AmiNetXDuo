@@ -260,7 +260,10 @@ for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 # notices, so anything deliberately not shipped goes in NOT_SHIPPED below with
 # its reason.  ToolsSmoke, wbgrab and paysum are harness halves and El3Diag is
 # a bench instrument; none has a use on a user's machine.
-NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
+# InstallSameFile and InstallNetProbe do ship, but beside the Installer rather
+# than in C:; they are installer primitives, not user commands.  The other
+# names do not ship.
+NOT_SHIPPED=(InstallSameFile InstallNetProbe ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
 # What the build system says it builds (src/tools/CMakeLists.txt writes the
 # manifest), not what happens to lie in the directory: a reused build tree
@@ -470,6 +473,21 @@ cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 # works, nothing to fetch or install first.
 cp "$INSTALL/Installer" "$TREE/Installer"
 chmod 755 "$TREE/Installer"
+
+# Commodore Installer has no SameLock primitive.  This tiny companion answers
+# the one identity question the drawer layout must ask before touching any
+# file: is LIBS:bsdsocket.library the object already in this drawer, or merely
+# a byte-identical system copy?  It stays beside the Installer and is not
+# installed into C:.
+need "$CMD_BUILD/src/tools/InstallSameFile"
+cp "$CMD_BUILD/src/tools/InstallSameFile" "$TREE/InstallSameFile"
+chmod 755 "$TREE/InstallSameFile"
+
+# Read-only Emu68 device-tree discovery for the Installer.  Like the identity
+# helper above, it is implementation machinery rather than a Shell command.
+need "$CMD_BUILD/src/tools/InstallNetProbe"
+cp "$CMD_BUILD/src/tools/InstallNetProbe" "$TREE/InstallNetProbe"
+chmod 755 "$TREE/InstallNetProbe"
 
 cp -R "$INSTALL/devs/Internet/." "$TREE/Devs/Internet/"
 cp -R "$INSTALL/examples/."      "$TREE/Examples/"

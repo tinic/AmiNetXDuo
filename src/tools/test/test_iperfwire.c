@@ -265,6 +265,26 @@ static void test_add64(void)
     CHECK(hi == 1 && lo == 0);
 }
 
+static void test_send_cap(void)
+{
+    printf("exact final send\n");
+
+    CHECK(iperf_send_cap(0, 0, 0, 65536, 4096) == 4096);
+    CHECK(iperf_send_cap(0, 65000, 0, 65536, 4096) == 536);
+    CHECK(iperf_send_cap(0, 65536, 0, 65536, 4096) == 0);
+    CHECK(iperf_send_cap(0, 65537, 0, 65536, 4096) == 0);
+
+    /* The maximum accepted -n target is exactly 4 GB.  Immediately before
+       it the high halves differ; that is the boundary the old same-high-word
+       check missed and consequently overshot by almost a full buffer. */
+    CHECK(iperf_send_cap(0, 0xfffff000UL, 1, 0, 65536) == 4096);
+    CHECK(iperf_send_cap(0, 0xfffffffeUL, 1, 0, 65536) == 2);
+    CHECK(iperf_send_cap(1, 0, 1, 0, 65536) == 0);
+
+    /* More than one low word remains, so the ordinary buffer is unchanged. */
+    CHECK(iperf_send_cap(0, 0, 1, 1, 65536) == 65536);
+}
+
 /* ----------------------------------------------------------- formatting --- */
 
 static void test_format(void)
@@ -402,6 +422,7 @@ int main(void)
     test_report_real();
     test_rate();
     test_add64();
+    test_send_cap();
     test_format();
 
     printf("%d checks, %d failures\n", checks, failures);

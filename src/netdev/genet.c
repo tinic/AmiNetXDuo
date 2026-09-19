@@ -1923,7 +1923,7 @@ static VOID ge_poll_start(NetdevNic *nic)
     t = (struct Task *)c->poll_mem;
     t->tc_Node.ln_Type = NT_TASK;
     t->tc_Node.ln_Pri  = GE_POLL_PRI;
-    t->tc_Node.ln_Name = (char *)"anxgenet poll";
+    t->tc_Node.ln_Name = (char *)"AmiNetXDuo anxgenet poll";
     t->tc_SPLower      = (APTR)(t + 1);
     t->tc_SPUpper      = (APTR)((UBYTE *)(t + 1) + GE_POLL_STACK);
     t->tc_SPReg        = t->tc_SPUpper;

@@ -9,6 +9,205 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `gethostname()` returns a qualified name: a configured name with no dot
+  -- DHCP option 12, `HOSTNAME` in `name_resolution`, the name derived from
+  the card -- gets the domain in force appended (DHCP option 15, a router
+  advertisement's, `DOMAIN`, `SetDefaultDomainName()`). AmiTCP 4 answered so
+  after a lease; Roadshow answers `localhost` on a DHCP machine, and Fitz's
+  GUI client needed a workaround for it, since a service is identified by
+  the fully qualified host name. The short name alone when no domain is
+  known.
+
+- `ping SIZE` goes to 65467, from 1400. The classic MTU probe -- `-s 1472`,
+  a full 1500-byte datagram, beside `-s 1473`, the first that fragments --
+  could not be typed; a card that drops full-size frames (genet.device 3.x
+  did, and SMB2 froze on it until `MTU=1450`) could only be found with
+  another stack's ping. The buffers are sized to the request, so the
+  command's memory is unchanged for the usual 56.
+
+- `FILTER=EVERYTHING` in an interface file opens the driver promiscuous
+  (`SANA2OPF_PROM` at `OpenDevice()`), Roadshow's keyword with Roadshow's
+  meaning; `LOCAL` and `IPANDARP` are accepted and change nothing. It was
+  a note saying it did nothing. A driver whose multicast filter accepts a
+  join and delivers nothing -- three were found in the a1k.org multicast
+  study of September 2026 -- loses IPv6 neighbour discovery and `.local`
+  names silently, and this is the switch that gets them back.
+  `anxnet.device` honours the flag.
+
+- `httpd` appends why it exited, with the Amiga clock, to
+  `AmiNetXDuo:httpd.log`, following the Installer's assign when the drawer is
+  not on `SYS:` (its output is on `NIL:` when started from `S:User-Startup`).
+  A failed wait for a connection no longer ends the server
+  on the first failure: it drops its connections and waits again, up to eight
+  times a quarter second apart, and the ninth failure in a row ends it.
+
+- `ShowNetStatus` shows every interface the stack is running, not only the
+  ones described in `DEVS:NetInterfaces`. `AddNetInterface` takes a file from
+  anywhere, and an interface added from `RAM:` pinged and routed while
+  `INTERFACES` left it out and `ShowNetStatus <name>` said there was no such
+  interface. Such an interface is listed after the drawer's own, marked
+  `(not in DEVS:NetInterfaces)`, and the named form works for it.
+  Its detailed report labels an address configuration outside that drawer
+  as unknown.
+
+- `iperf -n` moves exactly the bytes asked for. The socket is non-blocking and
+  a send can legitimately come back short when the window fills; a full-size
+  send after a short one overshot a 64 KB target to 103,660 bytes once in
+  five emulator runs. The last send is now the remainder, including when the
+  accepted 4 GB maximum crosses the byte counter's 32-bit boundary.
+
+- A name resolved before `NetShutdown` no longer resolves after it. The
+  resolver's cache was consulted before the stack looked for a name server,
+  so `gethostbyname()` kept answering from the last lease for the rest of
+  each record's TTL with no interface on the machine, and a program that
+  decides "online" by resolving a name -- AreWeOnline, the tool behind
+  AmiTCP_NG's issue #4 -- read a shut-down machine as connected. Roadshow
+  refuses the lookup. The NetX Duo client now drops its cache whenever a
+  server is removed from it: a lease ending, an advertisement expiring, an
+  interface removed, a `RemoveDomainNameServer()` call. A renewal that keeps
+  its servers keeps its answers, and a gate holds the patch in the vendored
+  client across submodule bumps.
+
+- The eight TCP host tests run twice more, with the sequence numbers
+  straddling 2^31 and 2^32. Roadshow 1.15 wedges a sender whose send
+  sequence crosses 2^31 (`snd_una` stuck at 0x7fffffe6 on a 1.7 GB SMB2
+  upload, zz9000-firmware #29); nothing here had ever put a flight across
+  either edge. All sixteen arms pass. The first run of the 2^31 arm failed,
+  in the fixtures: a socket built without a SYN left `recover` at zero, which
+  the RFC 6582 check compares against modularly -- right on a connection,
+  where the SYN seeds it at the ISN, wrong against zero once the high bit is
+  set -- so the fixtures now seed what the SYN leaves.
+
+- The Installer detects Emu68 GENET and Wi-Fi devices and creates interfaces
+  using `anxgenet.device` and `anxwifipi.device`.
+
+- Reinstalling with “Keep it” preserves `S:Network-Startup`; Installer device
+  detection, validation, cancellation, and question ordering are corrected.
+
+- TCP SACK recovery retransmits a second loss at the tail without waiting for
+  its retransmission timeout.
+
+- DP8390 receive-overrun recovery no longer strands the next queued packet.
+
+- `anxwifipi.device` rearms fallback reception after control requests.
+
+- TLS packet-pool sizing rejects overflowing counts.
+
+- Browser console scheduling remains monotonic across wall-clock changes.
+
+## 0.28.9
+
+- `httpd` sleeps between the web console's passes. With a viewer attached its
+  main loop woke every 2 ms whatever the console had to do -- 500
+  `WaitSelect()`s a second, each a timer request and a dispatch, 6-9% of an
+  A1200 + PiStorm32 (Emu68) looking at a still screen whose passes were
+  already half a second apart. The wait is now the console's own: 2 ms only
+  while a frame or a pass is in hand, otherwise until its next pass or
+  pointer look is due (a key, a click or a close still wakes it at once
+  through the socket). Measured with a viewer on a still screen: timer wake-
+  ups 500/s -> 30/s.
+
+- `anxwifipi.device` idles at 0.4% of an A1200 + PiStorm32 (Emu68), from 2%
+  after the previous entry and 10% before it. Profiled at 1 kHz: a tick costs
+  155-220 us whichever `timer.device` unit fires it -- 40% in timer.device,
+  22% in Exec's wake and dispatch, 20% the driver's own header read -- so
+  what is spent is the count. A frame in or out, or a write waiting for TX
+  credit, is followed by five 2 ms ticks (credits ride the next frame's
+  header; a slower tick there halved TX); for a second after an exchange the
+  tick is 10 ms; after that it rides the vertical-blank interrupt, every 40
+  ms. Measured: idle 0.42%, 2.4% for the second after an exchange; TCP 34 in
+  / 52-54 out Mbit/s; ping at 5 Hz 8-15 ms (up to 10 ms of tick on the first
+  frame after the poller's watch); at 1 Hz the chip's power save decides.
+
+- One receive task per interface, not three. A SANA-II device wants a
+  CMD_READ per Ethernet type, so the IPv4, ARP and IPv6 reads are three rings;
+  each ring had a task of its own, and every frame of every type serialised on
+  the one IP lock anyway, so a machine with three interfaces ran nine reader
+  tasks and 72 KB of reader stacks for no concurrency. One task per interface
+  now waits on one reply port for all three rings, re-posts every ring's
+  reads in one `READ_BATCH` and polls the unit once per pass instead of three
+  times. `AmiNetXDuo anxgenet rx` in a task list; the A1200 with eth0, genet
+  and wifiN goes from 21 stack tasks to 15. Emulator A/B against the same
+  tree without it, interleaved: a2065 five rounds, receive 4.75 -> 4.79 and
+  send 4.34 -> 4.40 Mbit/s (means); X-Surf 100 Z3 two rounds, receive 21.7
+  and 28.4 -> 30.8 and 32.2, send 29.3 and 23.6 -> 30.4 and 31.1.
+
+- `anxwifipi.device` costs 2% of an idle A1200 + PiStorm32 (Emu68), not 10%.
+  Its receiver looked at the card every 2 ms, and on Emu68 a `timer.device`
+  MICROHZ tick is an emulated CIA and an emulated interrupt -- 179 us each,
+  9.8% of the machine with nothing on the air (sampled at 1 kHz over 30 s);
+  every broadcast the LAN made started the poller's 10 ms watch for another
+  0.8%. After two seconds with no frame for this station and nothing sent
+  the tick now slows to 20 ms; the first frame or write of the next exchange
+  brings the fast tick and the poller back for as long as it lasts, and the
+  LAN's broadcasts count as neither. Measured: receiver 9.8% -> 2.0%, poller
+  0.8% -> nil; ping from the LAN at 2 Hz and 5 Hz 6-7 ms as before, at 1 Hz
+  10-24 ms with outliers to 440 ms that the wake-up counter attributes to
+  the chip's power save, not the tick; TCP 34 in / 61 out Mbit/s, unchanged.
+
+- A task list names the card behind every task of the stack's. The readers
+  were `AmiNetXDuo rx ip`, `rx arp` and `rx ip6` for every interface alike --
+  nine readers under three names on a machine with three interfaces -- and
+  the drivers' own tasks used a short word (`genet poll`, `wifi receiver`)
+  the readers did not. Every one of them now carries the device it serves,
+  before the role: `AmiNetXDuo anxgenet rx`, `AmiNetXDuo anxgenet poll`,
+  `AmiNetXDuo anxwifipi receiver`, `AmiNetXDuo anxnet pcmcia`; a unit other
+  than 0 follows the device as `.1`, a third-party driver appears as it is
+  named (`AmiNetXDuo x-surf-100 rx`). A sorted task list groups a card's
+  tasks.
+
+- `anxwifipi.device` leaves a multicast group when the stack leaves it. The
+  driver's `S2_DELMULTICASTADDRESS` handler compared the command against the
+  add command (a copy of the add handler), so every single-address leave --
+  the form every stack sends -- built its lookup from the destination field a
+  leave does not fill and matched nothing: the group stayed in the firmware
+  filter and in the driver's range list until the next boot. Measured on an
+  A1200 + PiStorm32 (Emu68): join 239.1.2.3, leave, send 200 datagrams to the
+  group with nothing listening -- the driver counted 166 more frames, about
+  17 of them background traffic. The join itself works: 291 of 300 datagrams
+  in 30 s over Wi-Fi through the joined socket, 494 of 498 over
+  `anxgenet.device`. A multicast list the firmware refuses
+  (more groups than its filter holds) now falls back to accepting every
+  multicast frame with the driver's own range list narrowing it, as brcmfmac
+  does; before, the join succeeded in the driver and the frames never came up
+  the bus.
+
+- The web console (`httpd -C`) looks at a still screen twice a second, not
+  fifteen times. The idle after a pass that found nothing was a multiple of
+  the pass's own cost, which on a machine where a pass is cheap is no idle at
+  all: an A1200 + PiStorm32 (Emu68) reads and compares a 1024x768x8 VideoCore
+  screen in 13 ms, waited 52, and spent 14.6% of itself on a screen nobody was
+  drawing on (286 passes in 26 s, nothing found in any of them). The idle now
+  has a floor in time that doubles with every empty pass -- 60, 120, 240, 480
+  ms, then half a second -- and a pass that found only a tile or two (a shell's
+  cursor blinking, a clock's digit) keeps that ladder where it is instead of
+  starting it over. Anything the viewer types or clicks still ends the wait at
+  once and restarts the ladder at its short end. Measured on that machine:
+  14.6% -> 5.6% with windows being moved on the screen; a still screen costs
+  two passes a second, 2.6%. Scrolling text on a VideoCore screen is a
+  different bill: the profile shows 78% of the machine in rtg.library's own
+  software scroll, the console's share of a scroll is 13-20% per viewer at the
+  2-3 frames a second its share allows.
+
+- The web console draws the pointer on a graphics-card screen a pixel to a
+  pixel. It scaled it by the display database's sprite-to-pixel ratio, the
+  chipset's rule, and on a 1024x768 VideoCore screen under Picasso96 the arrow
+  came out five times too wide. A card draws the pointer 1:1, so the scale on
+  a chunky screen is 1.
+- Every task the stack runs is named `AmiNetXDuo <what>` in a task list
+  (Scout, Xoper, TaskE): `AmiNetXDuo kernel`, `tick`, `ip`, `rx ip`, `rx arp`,
+  `rx ip6`, `dhcp`, `dhcpv6`, `dhcpv6 work`, `autoip`, `mdns`, `stack`,
+  `address allocation`, `arexx`, `TCP: handler`, `TCP: session`, `proxy`,
+  `httpd terminal`, and the drivers' `genet poll`, `pcmcia`, `wifi unit`,
+  `wifi poller`, `wifi scanner`, `wifi receiver`. They were `ThreadX`,
+  `ThreadX tick`, `AmiNetXDuo`, `sana2 rx ip`, `NetX DHCP Client`, `mDNS
+  Thread`, `anxgenet poll`, `WiFiPi Poller` and so on, one convention per
+  source. The four NetX Duo addon names come from `NX_*_THREAD_NAME` in
+  `nx_user.h` (fork f2f19bf5); the four WiFiPi ones from `WIFIPI_TASK_*`
+  (fork c5920bd). The vertical-blank interrupt server is `AmiNetXDuo tick`
+  with its task; the drivers' card interrupt and reset servers keep their
+  device names.
+
 ## 0.28.8
 
 - TCP sends leave slow start on the first loss, not at the window the peer's

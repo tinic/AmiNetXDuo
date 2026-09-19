@@ -661,7 +661,7 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index,
     tags[0].ti_Tag  = NP_Entry;
     tags[0].ti_Data = (ULONG)bsd_aam_worker;
     tags[1].ti_Tag  = NP_Name;
-    tags[1].ti_Data = (ULONG)"bsdsocket address allocation";
+    tags[1].ti_Data = (ULONG)"AmiNetXDuo address allocation";
     tags[2].ti_Tag  = NP_StackSize;
     tags[2].ti_Data = BSD_AAM_STACK;
     tags[3].ti_Tag  = NP_Priority;

@@ -387,7 +387,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                            const ToolDhcpInfo *lease,
                            const ToolDhcp6 *lease6,
                            BOOL up, BOOL stats, BOOL stack_running,
-                           BOOL readable)
+                           BOOL readable, BOOL described)
 {
     char addr[AMI_CFG_NAME_LEN];
     char mask[16];
@@ -456,7 +456,12 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
          * An IPv6-only interface has no IPv4 address and never will; three
          * zero addresses read as a fault.
          */
-        if (live->address == 0UL &&
+        if (live->address == 0UL && !described)
+        {
+            tool_printf("  address     none; its configuration file is not "
+                        "in DEVS:NetInterfaces\n");
+        }
+        else if (live->address == 0UL &&
             !ami_config_iface_wants_ipv4(cfg))
         {
             tool_printf("  address     none, this interface carries no "
@@ -495,11 +500,14 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                     "file)\n", (LONG)addr, (LONG)mask);
     }
 
-    tool_printf("  configured  %s\n",
-                (LONG)(cfg->iptype == AMI_IPTYPE_DHCP      ? "DHCP" :
-                       cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local" :
-                       cfg->iptype == AMI_IPTYPE_NONE      ? "no IPv4"
-                                                           : "static"));
+    if (!described)
+        tool_printf("  configured  unknown (not in DEVS:NetInterfaces)\n");
+    else
+        tool_printf("  configured  %s\n",
+                    (LONG)(cfg->iptype == AMI_IPTYPE_DHCP      ? "DHCP" :
+                           cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local" :
+                           cfg->iptype == AMI_IPTYPE_NONE      ? "no IPv4"
+                                                               : "static"));
     /* Only when the file set one: 0 is every interface that did not, and the
        line would say nothing about which of them carries a shared subnet. */
     if (cfg->priority != 0)
@@ -509,7 +517,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
      * Printed only when there is something to say: the floor build always
      * reports OFF and would gain a line that means nothing there.
      */
-    if (cfg->ip6type != AMI_IP6TYPE_OFF)
+    if (described && cfg->ip6type != AMI_IP6TYPE_OFF)
         tool_printf("  configured6 %s\n",
                     (LONG)(cfg->ip6type == AMI_IP6TYPE_DHCP      ? "DHCPv6" :
                            cfg->ip6type == AMI_IP6TYPE_STATIC    ? "static" :
@@ -609,6 +617,41 @@ static const char *default_router6(void)
     return NULL;
 }
 
+/*
+ * An interface the stack is running that no description in DEVS:NetInterfaces
+ * accounts for: AddNetInterface takes a file from anywhere (RAM:wifiN on the
+ * bench), and the tables below used to be built from the drawer alone, so
+ * such an interface pinged, routed and was invisible here -- INTERFACES did
+ * not list it and `ShowNetStatus wifiN` said there was no such interface.
+ */
+static BOOL live_described(const AmiConfig *cfg, const ToolSnapshot *snap,
+                           const ToolIfInfo *live)
+{
+    UWORD i;
+
+    for (i = 0; i < cfg->interface_count; i++)
+    {
+        if (tool_iface_live(snap, &cfg->interfaces[i]) == live)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* The description such an interface would have had: its name, and the device
+   and unit the stack has open.  Static: the struct is not small and a Shell
+   gives this command 4096 bytes of stack. */
+static const AmiIfConfig *live_as_config(const ToolIfInfo *live)
+{
+    static AmiIfConfig made;
+
+    made = (AmiIfConfig){ 0 };
+    tool_copy_string(made.name, sizeof(made.name), live->nx_name);
+    tool_copy_string(made.device, sizeof(made.device), live->nx_device);
+    made.unit = live->nx_unit;
+    return &made;
+}
+
 static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
                                 BOOL have_live, BOOL readable)
 {
@@ -621,7 +664,7 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
        defined (described in DEVS:NetInterfaces, not attached), ? (the
        running stack could not be read). */
 
-    if (cfg->interface_count == 0)
+    if (cfg->interface_count == 0 && !have_live)
     {
         tool_printf("(none configured)\n");
         return;
@@ -659,6 +702,29 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
         /* Indented under the line they belong to. A machine with no IPv6
            prints none and the table is unchanged. */
         list_addresses6(snap, live);
+    }
+
+    /* The ones running with no description in the drawer, after the drawer's
+       own, marked as such so the reader knows which file to look for. */
+    if (have_live)
+    {
+        for (i = 0; i < snap->iface_count && i < (UWORD)TOOL_MAX_IF; i++)
+        {
+            const ToolIfInfo *live = &snap->iface[i];
+
+            if (!live->attached || live->nx_name[0] == '\0' ||
+                live_described(cfg, snap, live))
+                continue;
+
+            address_text(live->address, addr, sizeof(addr));
+            tool_printf("%-15s %-8s %-8s %s  (not in DEVS:NetInterfaces)\n",
+                        (LONG)live->nx_name,
+                        (LONG)(!readable ? "?" :
+                               iface_online(live) ? "online" : "offline"),
+                        (LONG)(live->link_up ? "up" : "down"),
+                        (LONG)addr);
+            list_addresses6(snap, live);
+        }
     }
 }
 
@@ -1780,8 +1846,34 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                            have_lease ? lease_for(&dhcp, live) : NULL,
                            have_lease6 ? &dhcp6 : NULL,
                            iface_online(live), detailed,
-                           stack_running, (BOOL)!elsewhere);
+                           stack_running, (BOOL)!elsewhere, TRUE);
             shown++;
+        }
+
+        /* And the running interfaces the drawer does not describe, under
+           the description they would have had (live_as_config). */
+        if (have_live)
+        {
+            for (i = 0; i < snap.iface_count && i < (UWORD)TOOL_MAX_IF; i++)
+            {
+                const ToolIfInfo   *live  = &snap.iface[i];
+                const ToolDhcpInfo *lease = NULL;
+
+                if (!live->attached || live->nx_name[0] == '\0' ||
+                    live_described(cfg, &snap, live) ||
+                    !interface_selected(w->interface, live->nx_name))
+                    continue;
+
+                if (have_lease)
+                    lease = lease_for(&dhcp, live);
+
+                show_interface(live_as_config(live), live, &snap,
+                               lease,
+                               have_lease6 ? &dhcp6 : NULL,
+                               iface_online(live), detailed,
+                               stack_running, (BOOL)!elsewhere, FALSE);
+                shown++;
+            }
         }
 
         if (shown == 0 && detailed)

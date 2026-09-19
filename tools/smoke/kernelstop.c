@@ -250,8 +250,8 @@ static int child_main(void)
         return RETURN_ERROR;
 
     check("kernel reports running", tx_amiga_kernel_running() == TX_TRUE);
-    check("the tick Task exists", FindTask((STRPTR)"ThreadX tick") != NULL);
-    check("the scheduler Task exists", FindTask((STRPTR)"ThreadX") != NULL);
+    check("the tick Task exists", FindTask((STRPTR)"AmiNetXDuo tick") != NULL);
+    check("the scheduler Task exists", FindTask((STRPTR)"AmiNetXDuo kernel") != NULL);
 
     status = tx_amiga_adopt_thread(&self, "kstop-main", 16);
     check("adopted the calling Process", status == TX_SUCCESS);
@@ -282,7 +282,7 @@ static int child_main(void)
           tx_amiga_kernel_running() == TX_TRUE);
     check("the kernel still works after the refusal", clock_ran(20));
     check("the tick Task survived the refusal",
-          FindTask((STRPTR)"ThreadX tick") != NULL);
+          FindTask((STRPTR)"AmiNetXDuo tick") != NULL);
 
     /* ---- now do it properly, still adopted ------------------------------- */
 
@@ -302,8 +302,8 @@ static int child_main(void)
           tx_amiga_kernel_running() != TX_TRUE);
 
     /* The two assertions the whole exercise is for. */
-    check("the tick Task is GONE", FindTask((STRPTR)"ThreadX tick") == NULL);
-    check("the scheduler Task is GONE", FindTask((STRPTR)"ThreadX") == NULL);
+    check("the tick Task is GONE", FindTask((STRPTR)"AmiNetXDuo tick") == NULL);
+    check("the scheduler Task is GONE", FindTask((STRPTR)"AmiNetXDuo kernel") == NULL);
 
     check("adoption is refused once the kernel is down",
           tx_amiga_adopt_thread(&self, "kstop-main", 16) == TX_NOT_DONE);
@@ -320,7 +320,7 @@ static int child_main(void)
         check("the restarted kernel reports running",
               tx_amiga_kernel_running() == TX_TRUE);
         check("the restarted tick Task exists",
-              FindTask((STRPTR)"ThreadX tick") != NULL);
+              FindTask((STRPTR)"AmiNetXDuo tick") != NULL);
 
         status = tx_amiga_adopt_thread(&self, "kstop-main-2", 16);
         check("adopted on the restarted kernel", status == TX_SUCCESS);
@@ -390,9 +390,9 @@ static int child_main(void)
         status = tx_amiga_kernel_stop();
         check("the restarted kernel stopped again", status == TX_SUCCESS);
         check("no tick Task after the second stop",
-              FindTask((STRPTR)"ThreadX tick") == NULL);
+              FindTask((STRPTR)"AmiNetXDuo tick") == NULL);
         check("no scheduler Task after the second stop",
-              FindTask((STRPTR)"ThreadX") == NULL);
+              FindTask((STRPTR)"AmiNetXDuo kernel") == NULL);
     }
 
     zombies = tx_amiga_zombie_tasks_live();
@@ -528,9 +528,9 @@ static int parent_main(void)
     /* ---- the child's hunk is now freed.  Is anything still pointing at it? */
 
     check("no ThreadX tick Task outlived the child",
-          FindTask((STRPTR)"ThreadX tick") == NULL);
+          FindTask((STRPTR)"AmiNetXDuo tick") == NULL);
     check("no ThreadX scheduler Task outlived the child",
-          FindTask((STRPTR)"ThreadX") == NULL);
+          FindTask((STRPTR)"AmiNetXDuo kernel") == NULL);
     check("no ThreadX System Timer Task outlived the child",
           FindTask((STRPTR)"System Timer Thread") == NULL);
 

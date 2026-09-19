@@ -740,7 +740,7 @@ LONG ami_sana2_multicast(AmiSana2If *iface, UWORD command,
 /*
  * Refresh the device-derived half of AmiSana2Stats: two device commands on
  * the calling task's stack.  Called from the IP thread (link-up, the driver's
- * count commands) and from reader 0 for a status query
+ * count commands) and from the reader for a status query
  * (ami_sana2_stats_request()) -- never from the query's own task.
  */
 VOID ami_sana2_refresh_stats(AmiSana2If *iface)
@@ -820,24 +820,24 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
  * two device commands.  Those do NOT run here: bsd_NetStackQuery() runs on the
  * caller's stack, a Shell gives a command 4096 bytes, ShowNetStatus's own path
  * measures 2664 and the query's with the commands in it measured 1788, and a
- * real A1200 that ran them there took 8000 000B a few minutes later.  Reader 0
- * runs them instead (sana2_rx.c) and bumps stats_epoch when done; the caller
+ * real A1200 that ran them there took 8000 000B a few minutes later.  The
+ * reader runs them instead (sana2_rx.c) and bumps stats_epoch when done; the caller
  * compares that against ami_sana2_stats_epoch() taken before asking.  FALSE
  * when there is no running reader to ask: the copy is then what it was.
  */
 BOOL ami_sana2_stats_request(AmiSana2If *iface)
 {
-    AmiSana2Rx *rx;
+    AmiSana2Reader *rd;
 
     if (iface == NULL || !iface->device_open)
         return FALSE;
 
-    rx = &iface->rx[0];
-    if (!rx->running || rx->stop || rx->task == NULL || rx->wake_mask == 0)
+    rd = &iface->reader;
+    if (!rd->running || rd->stop || rd->task == NULL || rd->wake_mask == 0)
         return FALSE;
 
     iface->stats_want = TRUE;
-    Signal(rx->task, rx->wake_mask);
+    Signal(rd->task, rd->wake_mask);
     return TRUE;
 }
 
@@ -1034,8 +1034,12 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = port;
 
-        status = ami_sana2_open_device(iface->device, iface->unit,
-                                       (struct IORequest *)&iface->templ);
+        /* FILTER=EVERYTHING: the card's own address filter off, every
+           frame on the wire delivered.  A driver that cannot is an open
+           failure, reported as one; the line is the user's to remove. */
+        status = ami_sana2_open_device_flags(
+            iface->device, iface->unit, (struct IORequest *)&iface->templ,
+            cfg->promiscuous ? (ULONG)SANA2OPF_PROM : 0UL);
 
         /* The template is never sent again, everything is cloned from it. */
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;

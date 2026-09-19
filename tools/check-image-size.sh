@@ -70,8 +70,16 @@ BUDGETS=(
     # on the write), A1200 sends 337 -> 462 Mbit/s with the page push it
     # made possible.  -> 227,148: RFC 6675 loss recovery in the fork (the
     # lost accounting, HighRxt, the walk on every duplicate): one drop in
-    # ten thousand 63 -> 537 Mbit/s out on the A1200.
-    "minimal:src/bsdsocket/bsdsocket.library:227500"
+    # ten thousand 63 -> 537 Mbit/s out on the A1200.  -> 227,512: the DNS
+    # cache dropped with the server that filled it (nxd_dns.c
+    # _nx_dns_cache_drop), so a name does not resolve after NetShutdown.
+    # -> 227,696: the SACK tail fix retransmits the second lost tail segment
+    # when the first repair is ACKed, instead of waiting for the RTO with no
+    # further duplicate ACK possible.
+    # -> 227,672: FILTER=EVERYTHING read (three values compared, the
+    # promiscuous open flag carried to OpenDevice).  -> 227,804:
+    # gethostname() qualifies a dotless name with the domain in force.
+    "minimal:src/bsdsocket/bsdsocket.library:227900"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/wifipi/anxwifipi.device:56000"

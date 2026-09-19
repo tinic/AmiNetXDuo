@@ -273,7 +273,10 @@ host_test_targets() { # builddir
 #      390 with test_tcp_slowstart: the RFC 5681 3.1 initial threshold at
 #      the real handshake handlers -- slow start reaches a 534 KB peer
 #      window in a dozen round trips, not three hundred
-HOST_TESTS_EXPECTED=390
+#      406 with the _seq31/_seq32 arms of the eight TCP host tests: the same
+#      scenarios with the sequence numbers straddling 2^31 and 2^32, where
+#      Roadshow 1.15 wedges a sender (zz9000-firmware #29)
+HOST_TESTS_EXPECTED=406
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -441,6 +444,18 @@ stage_host() {
     else
         cat "$BUILD/installer-txn.log"
         fail "tools/check-installer-transaction.sh"
+        return 1
+    fi
+
+    # A name server withdrawn from the NetX client takes the cache with it,
+    # at every removal site.  Text order, like the installer check above; the
+    # module is not in the host tier, so a unit test could not see it.
+    if tools/check-dns-cache-flush.sh > "$BUILD/dns-cache-flush.log" 2>&1; then
+        note "$(sed -n 's/^dns_cache_flush=/dns cache flush: /p' \
+              "$BUILD/dns-cache-flush.log" | head -1)"
+    else
+        cat "$BUILD/dns-cache-flush.log"
+        fail "tools/check-dns-cache-flush.sh"
         return 1
     fi
 

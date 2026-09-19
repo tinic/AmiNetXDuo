@@ -556,6 +556,21 @@ static VOID iperf_slice_send(IperfRun *run)
         LONG n;
         LONG len = (LONG)run->plan.buflen;
 
+        /* A byte target is met exactly, not overshot: the last send is the
+           remainder.  The socket is non-blocking and a send can come back
+           short when the window fills; a full-size send after a short one
+           took `-n 64` to 103,660 bytes once in five emulator runs, which
+           the harness reads as a stack that lost count. */
+        if (run->plan.kbytes != 0 && run->plan.dir != IPERF_UDP_TX)
+            len = (LONG)iperf_send_cap(run->res.bytes_hi,
+                                       run->res.bytes_lo,
+                                       run->want_bytes_hi,
+                                       run->want_bytes_lo,
+                                       (ULONG)len);
+
+        if (len == 0)
+            break;
+
         if (run->plan.dir == IPERF_UDP_TX)
         {
             run->seq++;

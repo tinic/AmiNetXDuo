@@ -767,7 +767,7 @@ static struct Process *bsd_netstack_spawn(BsdNetBoot *boot, BYTE sig)
     bsd_net_boot     = boot;
 
     tags[0].ti_Tag  = NP_Entry;     tags[0].ti_Data = (ULONG)bsd_netstack_boot_main;
-    tags[1].ti_Tag  = NP_Name;      tags[1].ti_Data = (ULONG)"bsdsocket stack";
+    tags[1].ti_Tag  = NP_Name;      tags[1].ti_Data = (ULONG)"AmiNetXDuo stack";
     tags[2].ti_Tag  = NP_StackSize; tags[2].ti_Data = BSD_STARTUP_STACK;
     tags[3].ti_Tag  = NP_Cli;       tags[3].ti_Data = (ULONG)FALSE;
     tags[4].ti_Tag  = TAG_DONE;     tags[4].ti_Data = 0;

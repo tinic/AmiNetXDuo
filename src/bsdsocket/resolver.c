@@ -382,7 +382,29 @@ int bsd_gethostname(register char *name     __asm("a0"),
 
     if (cfg != NULL && cfg->hostname[0] != '\0')
     {
-        bsd_hostname_out(name, (ULONG)namelen, cfg->hostname);
+        /* A name with no dot is qualified with the domain in force -- DHCP
+           option 15, a router advertisement's, DOMAIN in name_resolution,
+           SetDefaultDomainName() -- the way AmiTCP 4 answered after a lease
+           and AmiTCP_NG has since 4.1.6.  Roadshow answers "localhost" to a
+           DHCP machine here, and FitzCtrl (Fitz 1.2x, 2026-07) needed a
+           workaround for it: a service is identified by its fully qualified
+           host name.  The short name alone when no domain is known.
+           derived[] is free here: it is the reverse-lookup buffer below. */
+        const char *out = cfg->hostname;
+        ULONG       n;
+
+        /* cfg->hostname is AMI_CFG_NAME_LEN (64) at most; derived[] is 256. */
+        for (n = 0; out[n] != '\0' && out[n] != '.'; n++)
+            derived[n] = out[n];
+
+        derived[n] = '.';
+        if (out[n] == '\0' && n + 2 < sizeof(derived) &&
+            netstack_domain_name_get(&derived[n + 1],
+                                     (ULONG)(sizeof(derived) - (n + 1))) ==
+                AMI_NET_OK)
+            out = derived;
+
+        bsd_hostname_out(name, (ULONG)namelen, out);
         return 0;
     }
 

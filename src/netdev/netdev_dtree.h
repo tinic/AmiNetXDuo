@@ -34,6 +34,13 @@ typedef struct NetdevDtInfo
  */
 BOOL netdev_dtree_find(const char *compat, NetdevDtInfo *out);
 
+/* Small, read-only discovery primitives used by the Installer's Emu68
+ * probe.  They inspect the same tree as the driver without opening a SANA-II
+ * device or touching any peripheral registers. */
+BOOL netdev_dtree_present(VOID);
+BOOL netdev_dtree_root_compatible(const char *compat);
+BOOL netdev_dtree_alias_present(const char *alias);
+
 /*
  * A fixed address on the bus the node `bus` (a path, "/soc") gives its
  * children, translated to a 68k address.  For what the tree does not name:

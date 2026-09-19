@@ -74,6 +74,7 @@ static void test_count(void)
                     TLS_MIN_SEGMENT_FILL - 1UL) / TLS_MIN_SEGMENT_FILL;
     ULONG plain  = ((ULONG)NX_SECURE_TLS_MAX_PLAINTEXT_LENGTH +
                     TLS_PACKET_PAYLOAD - 1UL) / TLS_PACKET_PAYLOAD;
+    ULONG limit  = (ULONG)~(ULONG)0;
 
     printf("tls_packet: the block count holds a full record both ways\n");
 
@@ -99,6 +100,20 @@ static void test_count(void)
     CHECK(tls_packet_pool_count((ULONG)NX_SECURE_TLS_MAX_CIPHERTEXT_LENGTH_1_3
                                 + 4UL * TLS_PACKET_PAYLOAD) >
           tls_packet_pool_count(TLS_DEFAULT_RECORD_BUFFER));
+
+    /* TLSA_RecordBuffer is public and an ULONG.  Its largest value must not
+       wrap either ceil(record/fill) or the later bytes-for-packets product:
+       allocation then fails before pool_create can walk beyond a short block. */
+    CHECK(tls_packet_pool_count(limit) ==
+          limit / TLS_MIN_SEGMENT_FILL + 1UL + plain + TLS_PACKET_SPARE);
+    CHECK(tls_packet_pool_bytes(tls_packet_pool_count(limit)) == limit);
+    {
+        NX_PACKET_POOL pool;
+
+        CHECK(tls_packet_pool_create(&pool, (VOID *)1,
+                                     tls_packet_pool_count(limit)) ==
+              NX_SIZE_ERROR);
+    }
 }
 
 /* ------------------------------------------------------------- allocate --- */

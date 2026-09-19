@@ -46,7 +46,13 @@ enum
 
 #define PING_DEFAULT_COUNT      4UL
 #define PING_DEFAULT_SIZE       56UL
-#define PING_MAX_SIZE           1400UL
+/* 65535 - 60 - 8: reserve the largest IPv4 header, then ICMP's header, as BSD
+   ping does.  It was 1400, which is less than one frame: the classic MTU
+   probe, -s 1472 (a full 1500-byte datagram) beside -s 1473 (the first that
+   fragments), could not be typed, and a card that drops full-size frames --
+   genet.device 3.x did, and SMB2 froze on it until MTU=1450 -- could only be
+   found with somebody else's ping. */
+#define PING_MAX_SIZE           65467UL
 #define PING_DEFAULT_INTERVAL   1UL         /* seconds                        */
 #define PING_REPLY_WAIT         5UL         /* seconds to wait for one reply  */
 
@@ -58,8 +64,11 @@ enum
 
 /* Static rather than automatic: a Shell command gets the Shell's stack, 4 KB
    on a stock 3.1. */
-static UBYTE ping_probe[PING_MAX_SIZE + 8];
-static UBYTE ping_reply[2048];
+/* Sized to the SIZE asked for, once it is known (ping_buffers()): a static
+   PING_MAX_SIZE would be 128 KB of BSS for a command that usually sends 56. */
+static UBYTE *ping_probe;
+static UBYTE *ping_reply;
+static ULONG  ping_reply_size;
 
 static LONG arg_or(const LONG *args, int index, LONG fallback)
 {
@@ -98,6 +107,24 @@ static UWORD ping_checksum(const UBYTE *data, ULONG len)
         sum = (sum & 0xffffUL) + (sum >> 16);
 
     return (UWORD)(~sum & 0xffffUL);
+}
+
+/* The probe holds header + payload; the reply also the IPv4 header a raw
+   socket hands back (up to 60 bytes), with room to notice a longer one. */
+static BOOL ping_buffers(ULONG payload)
+{
+    ping_reply_size = 8UL + payload + 128UL;
+    ping_probe = AllocVec(8UL + payload, MEMF_ANY);
+    ping_reply = AllocVec(ping_reply_size, MEMF_ANY);
+    return (ping_probe != NULL && ping_reply != NULL) ? TRUE : FALSE;
+}
+
+static VOID ping_buffers_free(VOID)
+{
+    FreeVec(ping_probe);
+    FreeVec(ping_reply);
+    ping_probe = NULL;
+    ping_reply = NULL;
 }
 
 static ULONG ping_build(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
@@ -385,6 +412,16 @@ static int ping_main(int argc, char **argv)
      */
     ident = (UWORD)((((ULONG)FindTask(NULL)) >> 2) & 0xffffUL);
 
+    if (!ping_buffers(size))
+    {
+        ping_buffers_free();
+        tool_error("no memory for a %lu-byte probe", size);
+        (VOID)tool_sock_close(sb, sock);
+        CloseLibrary(sb);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+
     if (!quiet)
     {
         tool_printf("PING %s (%s): %lu data bytes\n",
@@ -489,7 +526,7 @@ static int ping_main(int argc, char **argv)
                 continue;
 
             n = tool_sock_recvfrom(sb, sock, ping_reply,
-                                   (LONG)sizeof(ping_reply), &from);
+                                   (LONG)ping_reply_size, &from);
             if (n <= 0)
                 continue;
 
@@ -563,6 +600,7 @@ static int ping_main(int argc, char **argv)
                     rtt_min, rtt_total / received, rtt_max);
     }
 
+    ping_buffers_free();
     if (sock >= 0)
         (VOID)tool_sock_close(sb, sock);
     CloseLibrary(sb);

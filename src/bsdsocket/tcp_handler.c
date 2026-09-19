@@ -753,7 +753,7 @@ static VOID tcp_ctrl_find(struct DosPacket *pkt)
     tags[0].ti_Tag  = NP_Entry;
     tags[0].ti_Data = (ULONG)tcp_session_main;
     tags[1].ti_Tag  = NP_Name;
-    tags[1].ti_Data = (ULONG)"TCP: session";
+    tags[1].ti_Data = (ULONG)"AmiNetXDuo TCP: session";
     tags[2].ti_Tag  = NP_StackSize;
     tags[2].ti_Data = TCP_SESSION_STACK;
     tags[3].ti_Tag  = NP_Priority;
@@ -1001,7 +1001,7 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
     tags[0].ti_Tag  = NP_Entry;
     tags[0].ti_Data = (ULONG)tcp_ctrl_main;
     tags[1].ti_Tag  = NP_Name;
-    tags[1].ti_Data = (ULONG)"TCP: handler";
+    tags[1].ti_Data = (ULONG)"AmiNetXDuo TCP: handler";
     tags[2].ti_Tag  = NP_StackSize;
     tags[2].ti_Data = TCP_CTRL_STACK;
     tags[3].ti_Tag  = NP_Priority;

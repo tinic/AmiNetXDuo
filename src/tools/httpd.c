@@ -6997,8 +6997,109 @@ static VOID httpd_accept(LONG lsock)
                   0);
 }
 
+/*
+ * Why the server stopped, written where it can be read afterwards.  The server
+ * is started from S:User-Startup with its output on NIL:, so a tool_error()
+ * on the way out went nowhere, and "httpd was gone in the morning" had no
+ * cause to look at.  One line per exit, appended to AmiNetXDuo:httpd.log (the
+ * drawer the installer assigns wherever the user put it), with the Amiga
+ * clock.  A manual launch without that assign falls back to the traditional
+ * SYS:AmiNetXDuo drawer.  A machine without either gets no note and no
+ * requester.  Read it with Type.
+ */
+#define HTTPD_EXIT_DRAWER          "AmiNetXDuo:"
+#define HTTPD_EXIT_LOG             "AmiNetXDuo:httpd.log"
+#define HTTPD_EXIT_FALLBACK_DRAWER "SYS:AmiNetXDuo"
+#define HTTPD_EXIT_FALLBACK_LOG    "SYS:AmiNetXDuo/httpd.log"
+
+static BPTR httpd_open_exit_log(VOID)
+{
+    struct Process *me = (struct Process *)FindTask(NULL);
+    APTR            saved = NULL;
+    BPTR            drawer;
+    BPTR            fh = 0;
+
+    /* Looking up an absent assign must not put a volume requester on an
+       unattended server's screen. */
+    if (me != NULL && me->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+    {
+        saved = me->pr_WindowPtr;
+        me->pr_WindowPtr = (APTR)-1L;
+    }
+
+    drawer = Lock((CONST_STRPTR)HTTPD_EXIT_DRAWER, ACCESS_READ);
+    if (drawer != 0)
+    {
+        UnLock(drawer);
+        fh = Open((CONST_STRPTR)HTTPD_EXIT_LOG, MODE_READWRITE);
+    }
+    else
+    {
+        drawer = Lock((CONST_STRPTR)HTTPD_EXIT_FALLBACK_DRAWER, ACCESS_READ);
+        if (drawer != 0)
+        {
+            UnLock(drawer);
+            fh = Open((CONST_STRPTR)HTTPD_EXIT_FALLBACK_LOG, MODE_READWRITE);
+        }
+    }
+
+    if (me != NULL && me->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+        me->pr_WindowPtr = saved;
+
+    return fh;
+}
+
+static VOID httpd_note_exit(const char *why, const char *detail)
+{
+    struct DateStamp ds;
+    BPTR             fh;
+    char             line[160];
+    ULONG            n = 0;
+    ULONG            v;
+    const char      *p;
+
+    fh = httpd_open_exit_log();
+    if (fh == 0)
+        return;
+    (VOID)Seek(fh, 0, OFFSET_END);
+
+    (VOID)DateStamp(&ds);
+    /* day minute:second since the Amiga epoch, digits only: no printf here */
+    for (v = 1000000UL; v != 0; v /= 10)
+        if ((ULONG)ds.ds_Days >= v || v == 1)
+            line[n++] = (char)('0' + ((ULONG)ds.ds_Days / v) % 10);
+    line[n++] = ' ';
+    v = (ULONG)ds.ds_Minute / 60;
+    line[n++] = (char)('0' + v / 10); line[n++] = (char)('0' + v % 10);
+    line[n++] = ':';
+    v = (ULONG)ds.ds_Minute % 60;
+    line[n++] = (char)('0' + v / 10); line[n++] = (char)('0' + v % 10);
+    line[n++] = ':';
+    v = (ULONG)ds.ds_Tick / 50;
+    line[n++] = (char)('0' + v / 10); line[n++] = (char)('0' + v % 10);
+    line[n++] = ' ';
+    for (p = "httpd stopped: "; *p != '\0' && n < sizeof(line) - 2; p++)
+        line[n++] = *p;
+    for (p = why; *p != '\0' && n < sizeof(line) - 2; p++)
+        line[n++] = *p;
+    if (detail != NULL && detail[0] != '\0')
+    {
+        for (p = " ("; *p != '\0' && n < sizeof(line) - 2; p++)
+            line[n++] = *p;
+        for (p = detail; *p != '\0' && n < sizeof(line) - 2; p++)
+            line[n++] = *p;
+        if (n < sizeof(line) - 2)
+            line[n++] = ')';
+    }
+    line[n++] = '\n';
+    (VOID)Write(fh, line, (LONG)n);
+    (VOID)Close(fh);
+}
+
 static VOID httpd_serve(LONG lsock)
 {
+    ULONG select_failures = 0;
+
     for (;;)
     {
         ToolFdSet   readfds;
@@ -7009,12 +7110,14 @@ static VOID httpd_serve(LONG lsock)
         ULONG       i;
         ULONG       live = 0;
         ULONG       walking = 0;
+        ULONG       fb_micros = (ULONG)HTTPD_TICK_MICROS;   /* the console's ask */
         ULONG       now;
         ULONG       sigs;
 
         if (tool_break())
         {
             tool_fault(ERROR_BREAK);
+            httpd_note_exit("Ctrl-C or Break", NULL);
             return;
         }
 
@@ -7044,10 +7147,18 @@ static VOID httpd_serve(LONG lsock)
             }
             else if (c->state == CONN_FB)
             {
-                /* Both halves, counted as walking so the wait is the short
-                   one: a 250 ms tick would cap the console at four frames a
-                   second, and zero is a poll WaitSelect() never yields on. */
-                walking++;
+                /* Both halves.  The wait is the console's own: the short one
+                   while it has a frame or a pass in hand (a 250 ms tick would
+                   cap it at four frames a second), otherwise until its next
+                   pass or pointer look is due -- a still screen's passes are
+                   half a second apart and ticking every 2 ms between them
+                   was 8.6% of an A1200 + PiStorm32 (Emu68) for nothing. */
+                ULONG fbwait = http_fb_wait_micros();
+
+                if (fbwait == 0UL)
+                    walking++;
+                else if (fbwait < fb_micros)
+                    fb_micros = fbwait;
 
                 tool_fd_add(&readfds, c->sock);
 
@@ -7088,7 +7199,9 @@ static VOID httpd_serve(LONG lsock)
         /* A pending walk shortens the wait rather than removing it.  A
            zero timeout is a poll, which WaitSelect() answers without ever
            reaching Wait(), so the loop would never yield. */
-        tv.tv_micro = (walking > 0UL) ? HTTPD_WALK_MICROS : HTTPD_TICK_MICROS;
+        tv.tv_micro = (walking > 0UL) ? HTTPD_WALK_MICROS
+                    : (fb_micros < (ULONG)HTTPD_TICK_MICROS) ? fb_micros
+                    : HTTPD_TICK_MICROS;
 
         /* The terminal's pipe is a MsgPort and WaitSelect() knows nothing
            about DOS handles, so its signal goes into the same wait.
@@ -7105,10 +7218,34 @@ static VOID httpd_serve(LONG lsock)
             if (err == TOOL_EINTR)
                 continue;
 
+            /*
+             * Not an exit on the first refusal.  A wait can fail for a
+             * socket the stack has taken back under a connection (a link
+             * that went away, a shutdown and restart of the interface);
+             * the connections are dropped so the next wait is over the
+             * listener alone, and only a wait that keeps failing with
+             * nothing left to drop ends the server -- with the reason in
+             * the log, which the old immediate return never left.
+             */
+            select_failures++;
+            if (select_failures <= 8)
+            {
+                for (i = 0; i < httpd_conns; i++)
+                {
+                    if (httpd_conn[i].state != CONN_FREE)
+                        httpd_close(&httpd_conn[i]);
+                }
+                Delay(25);
+                continue;
+            }
+
             tool_error("cannot wait for a connection: %s",
                        (LONG)tool_sock_errstr(err));
+            httpd_note_exit("the wait for a connection kept failing",
+                            tool_sock_errstr(err));
             return;
         }
+        select_failures = 0;
 
         now = httpd_now();
 

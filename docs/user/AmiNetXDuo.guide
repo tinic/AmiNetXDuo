@@ -399,6 +399,16 @@
              and using it, for a card that needs it. Roadshow names
              the original Ariadne. Default NO.
 
+  @{b}FILTER@{ub}     LOCAL, IPANDARP or EVERYTHING, as in Roadshow. The first
+             two are what happens anyway. EVERYTHING opens the driver
+             promiscuous: the card's own address filter is off and
+             every frame on the wire reaches the stack, which costs a
+             copy per foreign frame. For a driver whose multicast
+             filter accepts a join and then delivers nothing -- IPv6
+             neighbour discovery and .local names go quiet on such a
+             card. A driver that cannot open promiscuous refuses the
+             open; remove the line.
+
   @{b}NAMESERVER@{ub}, @{b}DOMAIN@{ub}
              Written here by AmiTCP_NG's installer. They are read as
              the last source after DEVS:Internet/name_resolution and
@@ -448,9 +458,9 @@
              received 2.8 Mbit/s.
 
   Interface files written for Roadshow usually carry other keywords:
-  COPYMODE, ALIAS, FILTER, METRIC, PRIORITY, LEASE, DHCPUNICAST,
-  LINKSTATUSCOMMAND, MULTICAST, POINTTOPOINT, DESTINATION and
-  BROADCASTADDRESS among them.
+  COPYMODE, ALIAS, METRIC, LEASE, DHCPUNICAST, LINKSTATUSCOMMAND,
+  MULTICAST, POINTTOPOINT, DESTINATION and BROADCASTADDRESS among
+  them.
   AmiNetXDuo recognises them and ignores them, so an existing Roadshow
   file can be used unchanged and produces no complaints. Anything it
   does @{b}not@{ub} recognise is reported as an unknown keyword by

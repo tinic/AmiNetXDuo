@@ -16,6 +16,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef H_ISN
+#define H_ISN           0x10000000UL
+#endif
+#ifndef H_ISN_RX
+#define H_ISN_RX        0x20000000UL
+#endif
+
 
 static ULONG h_now;
 
@@ -344,8 +351,8 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_tx_window_advertised = 8192;
     h_sock.nx_tcp_socket_tx_window_congestion = H_SEG_BYTES;
     h_sock.nx_tcp_socket_tx_outstanding_bytes = H_SEG_BYTES;
-    h_sock.nx_tcp_socket_tx_sequence = 0x10000000UL + H_SEG_BYTES;
-    h_sock.nx_tcp_socket_rx_sequence = 0x20000000UL;
+    h_sock.nx_tcp_socket_tx_sequence = H_ISN + H_SEG_BYTES;
+    h_sock.nx_tcp_socket_rx_sequence = H_ISN_RX;
 
     memset(&h_seg, 0, sizeof(h_seg));
     h_seg.nx_packet_data_start  = h_seg_buf;
