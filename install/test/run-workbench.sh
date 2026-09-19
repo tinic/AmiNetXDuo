@@ -114,11 +114,15 @@ case "$PICK" in
 # because the stack choice and the drawer layout are BOTH two-option pages, so
 # "the first page with two options" can only ever address the earlier one.
 # THE STACK PAGE HAS THREE OPTIONS SINCE micro JOINED IT, so its specs move
-# from "2:" to "3:" and micro is the third, gadget 4.  Two earlier pages also
-# carry three options, so the stack page is match 2.
-full)      PICK_SPEC="3:2:2" ;;
-minimal)   PICK_SPEC="3:3:2" ;;
-micro)     PICK_SPEC="3:4:2" ;;
+# from "2:" to "3:" and micro is the third, gadget 4.  The welcome page also
+# presents three option gadgets, so the stack page is match 1.  This used to
+# say match 2 after another three-choice page was removed: the driver then
+# waited for a page that never appeared and all reduced-profile tests quietly
+# installed the full stack.  The byte-for-byte profile assertion below caught
+# that vacuous pass as soon as these scenarios became a release gate.
+full)      PICK_SPEC="3:2:1" ;;
+minimal)   PICK_SPEC="3:3:1" ;;
+micro)     PICK_SPEC="3:4:1" ;;
 # The SECOND two-option askchoice is the drawer layout at
 # Install-AmiNetXDuo:770, "Into the system" / "Into its own drawer", so it is
 # skip 1 and gadget 3.  Reaching it needs FORCE_DRAWER to be 0, which means NOT
