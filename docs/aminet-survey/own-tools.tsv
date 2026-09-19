@@ -1,5 +1,5 @@
 offset	lvo	aminet_callers	our_tool_mentions
--30	socket	739	116
+-30	socket	739	117
 -36	bind	327	7
 -42	listen	249	19
 -48	accept	245	40
@@ -15,7 +15,7 @@ offset	lvo	aminet_callers	our_tool_mentions
 -108	getpeername	138	0
 -114	IoctlSocket	372	1
 -120	CloseSocket	755	3
--126	WaitSelect	474	18
+-126	WaitSelect	474	19
 -132	SetSocketSignals	27	0
 -138	getdtablesize	38	0
 -144	ObtainSocket	197	0
