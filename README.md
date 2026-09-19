@@ -208,6 +208,10 @@ already shares. `httpd -C` serves the machine's display at `/console`, chipset
 and RTG screens alike. The installer offers to start the volume server, file
 manager and Shell when the machine boots.
 
+![A live AmigaDOS Shell in Chrome](docs/images/web-shell.png)
+
+![A live Amiga Workbench display in Chrome](docs/images/web-console.png)
+
 The Shell is a real console, not a pipe. `Ed` and `More` work, and so do the
 cursor keys and the history. A program that asks how big the window is gets an
 answer. On an A1200 the prompt appears in 44 ms, and a press of Return shows
