@@ -873,6 +873,21 @@ static LONG tool_gai_try(struct Library *base, const char *host, LONG want,
     return rc;
 }
 
+BOOL tool_sock_have_addrinfo(struct Library *base)
+{
+    ToolAddr probe;
+
+    /* A vector can exist without an implementation.  The micro profile keeps
+       the ABI slot but deliberately stubs getaddrinfo(), so testing only the
+       library's negative size made every shipped client choose that stub and
+       lose the classic resolver that micro does provide.  A numeric literal
+       is local, deterministic, and asks no name server; a real getaddrinfo()
+       must be able to answer it. */
+    return (BOOL)(tool_sock_have_lvo(base, 0x330UL) &&
+                  tool_gai_try(base, "127.0.0.1", TOOL_AF_INET, TRUE,
+                               &probe) == 0);
+}
+
 BOOL tool_sock_family_absent(struct Library *base, const char *host, LONG want)
 {
     ToolAddr other;
@@ -927,7 +942,7 @@ BOOL tool_sock_resolve_list(struct Library *base, const char *host, LONG want,
         return FALSE;
     }
 
-    if (!tool_sock_have_lvo(base, 0x330UL))
+    if (!tool_sock_have_addrinfo(base))
     {
         /*
          * No getaddrinfo in this library's table.  A name can still be looked

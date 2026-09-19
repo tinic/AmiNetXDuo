@@ -139,8 +139,8 @@
   packet filter, IPv4 multicast, the ARexx host and the TCP: handler,
   carries two interface slots rather than four, and holds 272 KB. The
   micro stack also leaves out getaddrinfo/getnameinfo, ancillary data,
-  out-of-band TCP and less-used administration and status calls, carries
-  one interface and no route or address-allocation calls, and holds 227 KB;
+  out-of-band TCP and less-used administration calls, carries one interface
+  and no route or address-allocation calls, and holds 243 KB;
   it is the one for a 1 MB machine. DHCP, the classic resolver and raw sockets
   are in every stack: a minimal or micro machine still leases its address and
   can run ping or traceroute.
@@ -2669,7 +2669,8 @@
     o  @{b}getaddrinfo/getnameinfo, ancillary data and out-of-band TCP are
        in the full and minimal stacks only.@{ub} The micro stack retains the
        classic resolver and raw sockets; route, address-allocation and
-       less-used administration and status calls are omitted there.
+       less-used public administration calls are omitted there. Its private
+       status/control calls remain for the supplied interface tools.
     o  bind() to a particular local address is enforced for TCP listeners and
        UDP delivery. An address this machine does not have is refused with
        EADDRNOTAVAIL.

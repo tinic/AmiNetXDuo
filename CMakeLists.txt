@@ -730,6 +730,13 @@ endif()
 # GetNetworkStatistics() rides the same option: 4.4BSD's ipstat/tcpstat/
 # udpstat/icmpstat is a report too, and an option each would be two names for
 # one decision.
+#
+# Shipping profiles keep this on.  NetStackControl is not merely a report:
+# AddNetInterface, Online and Offline use its private interface operations to
+# change the persistent library task.  Disabling it in micro made the first
+# AddNetInterface fail with ENOSYS, so an installed micro machine booted with
+# no network even though S:Network-Startup was correct.  The option remains
+# useful for API-floor builds whose purpose is to exercise the stubs.
 option(AMINETXDUO_NETSTATUS
        "Build the live-stack reports: NetStackQuery/Control, GetNetworkStatistics" ON)
 if(AMINETXDUO_NETSTATUS)

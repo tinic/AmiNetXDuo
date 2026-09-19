@@ -245,9 +245,9 @@ ToolServEnt *tool_sock_getservbyname(struct Library *base, const char *name,
 
 /*
  * getaddrinfo() and friends, at the far end of the vector table (-0x324
- * upwards). Not every bsdsocket.library has them, so tool_sock_have_lvo()
- * below is asked first and the answer decides whether tool_sock_resolve()
- * uses them or falls back to gethostbyname().
+ * upwards). Not every bsdsocket.library has them, and a reduced profile may
+ * retain the ABI slot as a stub, so tool_sock_have_addrinfo() below probes the
+ * operation before tool_sock_resolve() chooses it over gethostbyname().
  */
 LONG  tool_sock_getaddrinfo(struct Library *base, const char *node,
                             const char *service, const ToolAddrInfo *hints,
@@ -262,6 +262,9 @@ char *tool_sock_ntop(struct Library *base, LONG af, const void *src,
  * stops short has (APTR)-1 there, and jumping to it is a guru.
  */
 BOOL  tool_sock_have_lvo(struct Library *base, ULONG lvo);
+
+/* TRUE when getaddrinfo is present and resolves an IPv4 numeric literal. */
+BOOL  tool_sock_have_addrinfo(struct Library *base);
 
 /* TRUE when this library will make an AF_INET6 socket. */
 BOOL  tool_sock_have_ipv6(struct Library *base);

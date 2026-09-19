@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The micro profile starts at boot again. It had compiled out the private
+  control calls used by `AddNetInterface`, `Online` and `Offline`, so a valid
+  `S:Network-Startup` could not bring up its configured card. Shipped clients
+  also distinguish an ABI-compatible `getaddrinfo()` stub from a working
+  implementation and fall back to the classic resolver; DNS therefore works
+  with the micro library. System and self-contained installs of all three
+  profiles, including reinstall beside a foreign stack, are now a mandatory
+  release gate rather than optional emulator runs.
+
 ## 1.0.0-beta2
 
 - The installer's "serve them at boot" answer starts `httpd` with the

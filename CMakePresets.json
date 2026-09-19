@@ -113,10 +113,6 @@
           "type": "BOOL",
           "value": "OFF"
         },
-        "AMINETXDUO_NETSTATUS": {
-          "type": "BOOL",
-          "value": "OFF"
-        },
         "AMINETXDUO_NXCACHE": {
           "type": "BOOL",
           "value": "OFF"

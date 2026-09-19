@@ -39,10 +39,10 @@ This machine needs:
                   the TCP: handler                                 272 KB
         Micro     all of that, plus getaddrinfo/getnameinfo,
                   ancillary data, out-of-band TCP and less-used
-                  administration and status calls; carries one
+                  administration calls; carries one
                   interface and no route or address-allocation
                   calls.  DHCP, the classic resolver and raw
-                  sockets work                                    227 KB
+                  sockets work                                    243 KB
 
      The stack sizes its packet buffers from what is left, so more memory
      means more buffers.  Encryption adds about 210 KB the first time it is

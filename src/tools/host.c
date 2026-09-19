@@ -117,7 +117,7 @@ int main(int argc, char **argv)
         else
             tool_error("no name for %s", (LONG)name);
     }
-    else if (tool_sock_have_lvo(sbase, 0x330UL))
+    else if (tool_sock_have_addrinfo(sbase))
     {
         hints.ai_flags     = 0;
         hints.ai_family    = family;

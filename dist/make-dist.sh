@@ -101,10 +101,11 @@ WANT_MINIMAL=1
 [ -z "${AMINETXDUO_DIST_NO_MINIMAL:-}" ] || WANT_MINIMAL=0
 
 # micro is the floor: minimal again with getaddrinfo/getnameinfo, the less-used
-# admin and status vectors, OOB, ancillary data, route and address-allocation
-# calls and NetX's error checking compiled out as well.  It retains DHCP, raw
-# sockets and the classic resolver.  The Installer offers it as the
-# third profile and installs this drawer when selected.
+# public administration vectors, OOB, ancillary data, route and
+# address-allocation calls and NetX's error checking compiled out as well.  It
+# retains the private status/control vectors used by the shipped interface
+# tools, plus DHCP, raw sockets and the classic resolver.  The Installer offers
+# it as the third profile and installs this drawer when selected.
 MICRO_BUILD="${AMINETXDUO_BUILD_MICRO:-$BUILD-micro}"
 case "$MICRO_BUILD" in /*) ;; *) MICRO_BUILD="$ROOT/$MICRO_BUILD" ;; esac
 

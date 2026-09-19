@@ -41,7 +41,7 @@ The archive carries three stacks. The installer asks which one to put on.
 |---|---|---|
 | Full | nothing | 442 KB |
 | Minimal | IPv6, `.local` lookups, the packet filter, HTTPS, IPv4 multicast, the ARexx host, `TCP:` | 272 KB |
-| Micro | all of that, plus `getaddrinfo`/`getnameinfo`, ancillary data, out-of-band TCP and less-used administration and status calls; carries one interface and no route or address-allocation calls. DHCP, the classic resolver and raw sockets work | 227 KB |
+| Micro | all of that, plus `getaddrinfo`/`getnameinfo`, ancillary data, out-of-band TCP and less-used administration calls; carries one interface and no route or address-allocation calls. DHCP, the classic resolver and raw sockets work | 243 KB |
 
 The installer offers these cards by name: A2065, Ariadne, Ariadne II,
 AmigaNet, LAN Rover, X-Surf, X-Surf 100, PCMCIA (`cnet.device`,

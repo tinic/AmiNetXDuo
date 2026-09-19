@@ -79,7 +79,7 @@ offset	idx	api	symbol	file	gate	default	minimal	micro
 -0x1ec	81	AbortInterfaceConfig	bsd_AbortInterfaceConfig	addralloc.c	ADDRALLOC	ok	ok	STUB
 -0x1f2	82	AddNetMonitorHookTagList	bsd_AddNetMonitorHookTagList	netmonitor.c	NETMONITOR	ok	ok	STUB
 -0x1f8	83	RemoveNetMonitorHook	bsd_RemoveNetMonitorHook	netmonitor.c	NETMONITOR	ok	ok	STUB
--0x1fe	84	GetNetworkStatistics	bsd_GetNetworkStatistics	netstats.c	NETSTATUS	ok	ok	STUB
+-0x1fe	84	GetNetworkStatistics	bsd_GetNetworkStatistics	netstats.c	NETSTATUS	ok	ok	ok
 -0x204	85	AddDomainNameServer	bsd_AddDomainNameServer	roadshow.c	NETADMIN	ok	ok	STUB
 -0x20a	86	RemoveDomainNameServer	bsd_RemoveDomainNameServer	roadshow.c	-	ok	ok	ok
 -0x210	87	ReleaseDomainNameServerList	bsd_ReleaseDomainNameServerList	roadshow.c	-	ok	ok	ok
@@ -139,8 +139,8 @@ offset	idx	api	symbol	file	gate	default	minimal	micro
 -0x354	141	reserved	bsd_enosys	errno.c	-	enosys	enosys	enosys
 -0x35a	142	reserved	bsd_enosys	errno.c	-	enosys	enosys	enosys
 -0x360	143	reserved	bsd_enosys	errno.c	-	enosys	enosys	enosys
--0x366	144	bsd_NetStackQuery	bsd_NetStackQuery	netstatus.c	NETSTATUS	ok	ok	STUB
--0x36c	145	bsd_NetStackControl	bsd_NetStackControl	netstatus.c	NETSTATUS	ok	ok	STUB
+-0x366	144	bsd_NetStackQuery	bsd_NetStackQuery	netstatus.c	NETSTATUS	ok	ok	ok
+-0x36c	145	bsd_NetStackControl	bsd_NetStackControl	netstatus.c	NETSTATUS	ok	ok	ok
 -0x372	146	if_nametoindex	bsd_if_nametoindex	interfaces.c	-	ok	ok	ok
 -0x378	147	if_indextoname	bsd_if_indextoname	interfaces.c	-	ok	ok	ok
 -0x37e	148	if_nameindex	bsd_if_nameindex	interfaces.c	-	ok	ok	ok
