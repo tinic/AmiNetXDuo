@@ -82,5 +82,23 @@ int main(void)
         check(!np_startup_line(line, sizeof(line) - 1,
           "eth0", &commented, &wildcard), "different interface ignored");
     }
+
+    check(np_interface_name_safe("genet0", 16), "simple interface name");
+    check(np_interface_name_safe("x-surf_100.0", 16),
+          "safe filename punctuation");
+    check(!np_interface_name_safe("", 16), "empty name rejected");
+    check(!np_interface_name_safe(".eth0", 16), "dot cannot start a name");
+    check(!np_interface_name_safe("-eth0", 16), "hyphen cannot start a name");
+    check(np_interface_name_safe("123456789012345", 16),
+          "name which fits is accepted");
+    check(!np_interface_name_safe("1234567890123456", 16),
+          "limit includes the terminator");
+    check(!np_interface_name_safe("eth*", 16), "wildcard rejected");
+    check(!np_interface_name_safe("eth?", 16), "pattern rejected");
+    check(!np_interface_name_safe("eth$foo", 16), "substitution rejected");
+    check(!np_interface_name_safe("eth`foo", 16), "backtick rejected");
+    check(!np_interface_name_safe("eth\"foo", 16), "quote rejected");
+    check(!np_interface_name_safe("eth>ram:x", 16), "redirection rejected");
+    check(!np_interface_name_safe("eth|foo", 16), "pipe rejected");
     return failures != 0;
 }

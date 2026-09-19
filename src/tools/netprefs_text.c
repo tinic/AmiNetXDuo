@@ -21,6 +21,26 @@ static int equal_nocase(const char *a, size_t alen, const char *b)
     return i == alen && b[i] == '\0';
 }
 
+int np_interface_name_safe(const char *name, size_t limit)
+{
+    size_t n = 0;
+
+    if (name == NULL || limit < 2) return 0;
+    while (name[n] != '\0')
+    {
+        char c = name[n++];
+        if (n == 1 && !((c >= 'a' && c <= 'z') ||
+                        (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9')))
+            return 0;
+        if (n >= limit ||
+            !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+            return 0;
+    }
+    return n != 0;
+}
+
 static long field_of_line(const char *line, size_t len,
                           NpTextField *fields, size_t count)
 {

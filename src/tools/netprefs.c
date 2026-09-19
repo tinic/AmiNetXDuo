@@ -42,6 +42,8 @@ struct Library       *GadToolsBase;
 #define NP_FILE_MAX        (256UL * 1024UL)
 #define NP_VALUE_LEN       160
 #define NP_SAVE_FIELDS     24
+/* Roadshow and the live status ABI expose at most 15 name characters. */
+#define NP_IFNAME_LEN      16
 
 enum
 {
@@ -154,7 +156,7 @@ typedef struct NetPrefs
     LONG           live_state;
 } NetPrefs;
 
-static NetPrefs np = { .live_state = NP_LIVE_UNKNOWN };
+static NetPrefs np = { .selected = -1, .live_state = NP_LIVE_UNKNOWN };
 static char np_address[16];
 static char np_netmask[16];
 static char np_gateway[16];
@@ -165,6 +167,7 @@ static char np_status[128];
 
 static VOID show_panel(ULONG which);
 static VOID select_panel(ULONG which);
+static LONG live_state_of(const char *name);
 
 static const STRPTR panel_labels[] =
 {
@@ -193,16 +196,7 @@ static ULONG text_len(const char *s)
 
 static BOOL sane_name(const char *s)
 {
-    ULONG n = 0;
-
-    while (s[n] != '\0')
-    {
-        char c = s[n++];
-        if (n >= AMI_CFG_NAME_LEN || c == '/' || c == ':' || c == ' ' ||
-            c == '\t' || c == '\r' || c == '\n' || c == '#' || c == ';')
-            return FALSE;
-    }
-    return (BOOL)(n != 0);
+    return np_interface_name_safe(s, NP_IFNAME_LEN) ? TRUE : FALSE;
 }
 
 static VOID decimal(ULONG value, char *out, ULONG outlen)
@@ -463,15 +457,19 @@ static BOOL line_command(const char *line, ULONG len, const char *name,
     return matched ? TRUE : FALSE;
 }
 
-static BOOL boot_state(const char *name, BOOL *by_wildcard)
+static BOOL query_boot_state(const char *name, BOOL *enabled,
+                             BOOL *by_wildcard, BOOL *by_exact)
 {
     ULONG len;
-    char *data = read_file("S:Network-Startup", &len, TRUE);
+    BOOL exists = tool_exists("S:Network-Startup");
+    char *data = read_file("S:Network-Startup", &len, (BOOL)!exists);
     ULONG at = 0;
     BOOL found = FALSE;
 
-    *by_wildcard = FALSE;
-    if (data == NULL) return FALSE;
+    *enabled = FALSE;
+    if (by_wildcard != NULL) *by_wildcard = FALSE;
+    if (by_exact != NULL) *by_exact = FALSE;
+    if (data == NULL) return (BOOL)!exists;
     while (at < len)
     {
         ULONG start = at;
@@ -482,11 +480,26 @@ static BOOL boot_state(const char *name, BOOL *by_wildcard)
             !commented)
         {
             found = TRUE;
-            if (wildcard) *by_wildcard = TRUE;
+            if (wildcard)
+            {
+                if (by_wildcard != NULL) *by_wildcard = TRUE;
+            }
+            else if (by_exact != NULL)
+                *by_exact = TRUE;
         }
     }
     ami_free(data);
-    return found;
+    *enabled = found;
+    return TRUE;
+}
+
+static BOOL boot_state(const char *name, BOOL *by_wildcard, BOOL *by_exact)
+{
+    BOOL enabled;
+
+    if (!query_boot_state(name, &enabled, by_wildcard, by_exact))
+        return FALSE;
+    return enabled;
 }
 
 static BOOL set_boot_state(const char *name, BOOL enabled, BOOL removing)
@@ -732,6 +745,8 @@ static VOID load_form(LONG index)
     if (index < 0 || (ULONG)index >= np.count) { clear_form(); return; }
     if (ami_config_load_interface(np.names[index], &cfg) != AMI_CFG_OK)
     {
+        set_attr(np.g_interface, GTLV_Selected,
+                 np.selected >= 0 ? (ULONG)np.selected : (ULONG)~0UL);
         requester("This interface definition could not be parsed.\n"
                   "Run CheckNetConfig for the exact line and reason.");
         return;
@@ -765,7 +780,7 @@ static VOID load_form(LONG index)
     set_attr(np.g_mdns, GTCB_Checked, (ULONG)cfg.mdns);
     set_attr(np.g_state, GTCB_Checked, (ULONG)cfg.up);
     set_attr(np.g_boot, GTCB_Checked,
-             (ULONG)boot_state(cfg.name, &wildcard));
+             (ULONG)boot_state(cfg.name, &wildcard, NULL));
     set_attr(np.g_priority, GTIN_Number, (ULONG)(LONG)cfg.priority);
     show_panel(NP_PANEL_DEVICE);
     set_attr(np.g_device, GTST_String, (ULONG)cfg.device);
@@ -859,8 +874,9 @@ static BOOL save_form(BOOL apply)
     if (!sane_name(name))
     {
         select_panel(NP_PANEL_GENERAL);
-        requester("The name must be 1-63 characters and cannot contain\n"
-                  "spaces, a slash, colon, semicolon or #.");
+        requester("Start the interface name with a letter or digit; then use\n"
+                  "only letters, digits, dot, underscore or hyphen. The\n"
+                  "maximum length is 15 characters.");
         return FALSE;
     }
     if (string_value(np.g_device)[0] == '\0')
@@ -1070,7 +1086,7 @@ static BOOL save_form(BOOL apply)
     }
     ami_free(patched);
 
-    old_boot = boot_state(name, &wildcard);
+    old_boot = boot_state(name, &wildcard, NULL);
     if (old_boot != checked(np.g_boot) &&
         !set_boot_state(name, checked(np.g_boot), FALSE))
     {
@@ -1105,11 +1121,60 @@ static BOOL save_form(BOOL apply)
     return TRUE;
 }
 
+static BOOL parked_path_for(const char *path, char *parked, ULONG parked_len)
+{
+    ULONG number;
+
+    tool_copy_string(parked, parked_len, path);
+    tool_copy_string(parked + text_len(parked), parked_len - text_len(parked),
+                     ".disabled.info");
+    if (!tool_exists(parked)) return TRUE;
+
+    for (number = 1; number < 1000; number++)
+    {
+        char digits[12];
+        tool_copy_string(parked, parked_len, path);
+        tool_copy_string(parked + text_len(parked),
+                         parked_len - text_len(parked), ".disabled.");
+        decimal(number, digits, sizeof(digits));
+        tool_copy_string(parked + text_len(parked),
+                         parked_len - text_len(parked), digits);
+        tool_copy_string(parked + text_len(parked),
+                         parked_len - text_len(parked), ".info");
+        if (!tool_exists(parked)) return TRUE;
+    }
+    return FALSE;
+}
+
+static VOID restore_live_interface(const char *name, LONG prior_state)
+{
+    LONG current;
+    const char *command = NULL;
+
+    if (run_command("AddNetInterface", name, TRUE) != 0)
+    {
+        requester("The definition was restored, but its live interface could\n"
+                  "not be restored. Run AddNetInterface from Shell.");
+        return;
+    }
+
+    current = live_state_of(name);
+    if (prior_state == NP_LIVE_ONLINE && current == NP_LIVE_OFFLINE)
+        command = "Online";
+    else if (prior_state == NP_LIVE_OFFLINE && current == NP_LIVE_ONLINE)
+        command = "Offline";
+    if (command != NULL && run_command(command, name, FALSE) != 0)
+        requester("The definition and interface were restored, but its prior\n"
+                  "online state could not be restored.");
+}
+
 static VOID remove_form(VOID)
 {
     char name[AMI_CFG_NAME_LEN], path[NP_PATH_LEN], parked[NP_PATH_LEN];
     char resolved[AMI_CFG_PATH_LEN];
-    BOOL wildcard;
+    BOOL boot_enabled, exact;
+    BOOL detached = FALSE;
+    LONG prior_state;
 
     tool_copy_string(name, sizeof(name), string_value(np.g_name));
     if (!sane_name(name)) return;
@@ -1122,24 +1187,61 @@ static VOID remove_form(VOID)
         requester("Save this interface before removing it.");
         return;
     }
+    if (!parked_path_for(path, parked, sizeof(parked)))
+    {
+        requester("There are too many parked backups for this interface.\n"
+                  "Move or remove an old .disabled.*.info file first.");
+        return;
+    }
     if (!confirm("Remove this interface definition?\n\n"
                  "It will be taken offline and parked as an ignored .info\n"
                  "backup, not deleted.", "Remove")) return;
-    if (boot_state(name, &wildcard) && !set_boot_state(name, FALSE, TRUE)) return;
-    (VOID)run_command("RemoveNetInterface", name, TRUE);
-    tool_copy_string(parked, sizeof(parked), path);
-    tool_copy_string(parked + text_len(parked),
-                     sizeof(parked) - text_len(parked), ".disabled.info");
-    (VOID)DeleteFile((CONST_STRPTR)parked);
+    if (!query_boot_state(name, &boot_enabled, NULL, &exact)) return;
+
+    prior_state = live_state_of(name);
+    if (prior_state == NP_LIVE_UNAVAILABLE ||
+        prior_state == NP_LIVE_UNKNOWN || prior_state == NP_LIVE_NOT_SAVED)
+    {
+        requester("The live interface state could not be checked, so nothing\n"
+                  "was changed. Try again after checking ShowNetStatus.");
+        return;
+    }
+    if (prior_state == NP_LIVE_ONLINE || prior_state == NP_LIVE_OFFLINE)
+    {
+        if (run_command("RemoveNetInterface", name, TRUE) != 0)
+        {
+            requester("The live interface could not be removed, so nothing\n"
+                      "was changed. Close its connections or run\n"
+                      "RemoveNetInterface from Shell for the exact reason.");
+            return;
+        }
+        detached = TRUE;
+    }
+
     if (!Rename((CONST_STRPTR)path, (CONST_STRPTR)parked))
     {
+        if (detached) restore_live_interface(name, prior_state);
         requester("The interface could not be parked; its definition was kept.");
+        return;
+    }
+
+    /* A wildcard is policy for the whole drawer and must remain untouched.
+       Only an active, exact line for this definition needs changing. */
+    if (boot_enabled && exact && !set_boot_state(name, FALSE, TRUE))
+    {
+        if (!Rename((CONST_STRPTR)parked, (CONST_STRPTR)path))
+        {
+            requester("The boot setting was not changed, but the definition\n"
+                      "could not be restored. Its parked .info backup is intact.");
+            return;
+        }
+        if (detached) restore_live_interface(name, prior_state);
         return;
     }
     scan_interfaces();
     set_attr(np.g_interface, GTLV_Selected, (ULONG)~0UL);
     clear_form();
-    set_status("Removed. The old definition remains beside the drawer as .disabled.info.");
+    set_status("Removed. The definition remains beside the drawer as a .disabled*.info backup.");
 }
 
 static LONG live_state_of(const char *name)

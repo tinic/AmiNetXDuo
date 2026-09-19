@@ -19,4 +19,7 @@ int np_text_patch(const char *old, size_t oldlen, NpTextField *fields,
 int np_startup_line(const char *line, size_t len, const char *name,
                     int *commented, int *wildcard);
 
+/* A name safe both as an interface filename and as an AmigaDOS argument. */
+int np_interface_name_safe(const char *name, size_t limit);
+
 #endif
