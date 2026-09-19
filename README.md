@@ -113,7 +113,7 @@ machine not in this table is not known to fail; it is not known.
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | 3Com 3C589 PCMCIA, `anxnet.device` | 8.3 Mbit/s |
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | Broadcom 43455 Wi-Fi, `anxwifipi.device` | 34-36 in / 52-61 out Mbit/s, 5 GHz at -69 dBm |
 | A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 3.8 in / 3.3-3.7 out Mbit/s |
-| A3000, 68030/25 | 3.9 | ZZ9000, `ZZ9000Net.device` | 3.5 in Mbit/s (send not measured: the X-Surf holds the default route) |
+| A3000, 68030/25 | 3.9 | ZZ9000, `ZZ9000Net.device` 2.2 | 3.6 in / 3.5-3.7 out Mbit/s |
 | Amiberry, A1200 (68020) | 3.1 | A2065, `anxnet.device` | 4.8 in / 4.4 out Mbit/s |
 | Amiberry, A3000 (68030) | 3.1 | X-Surf 100 (Zorro III), `anxnet.device` | 30 in / 31 out Mbit/s |
 | Amiberry, A600 (68000) | 2.05 | NE2000 PCMCIA and `cnet.device` | boots, DHCP, transfers (CI) |
