@@ -9,6 +9,14 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxwifipi.device` joins with WirelessManager 1.5 (Aminet's `prism2v2`),
+  the version the README points at. Every `S2_SETOPTIONS` used to restart
+  the join with whatever that one call said, and 1.5 makes a second call
+  after associating that names no network: the firmware was sent to an
+  empty SSID, the driver reported `ff:ff:ff:ff:ff:ff` as the access point,
+  and the handshake timed out. Only a call naming a network joins now, and
+  only the tags present change anything. WirelessManager 1.3 unchanged.
+
 - The micro profile starts configured interfaces at boot again; its private
   interface-control calls remain present.
 - Shipped clients detect the micro profile's `getaddrinfo()` stub and use its
