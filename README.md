@@ -76,17 +76,23 @@ commands; the interface file names the device as any other. On an A1200 +
 PiStorm32 Lite on a 5 GHz network at -69 dBm: 34-36 Mbit/s in, 52-61 out,
 6 ms round trips.
 
-**`anxwifipi.device` is experimental.** The card's interrupt line is shared
-with the SD card host, and the gic400.library in the Emu68 ROM takes one
-server per line, so the driver has no interrupt: a task at the lowest
-priority watches the card's status register while frames flow (it takes
-whatever CPU is idle during a transfer, and a CPU meter shows it), and a
-timer tick looks otherwise -- 0.4% of the machine idle, up to 20 ms on the
-first frame of an exchange after a quiet second. The interrupt path needs a
-gic400.library with shared lines (`github.com/tinic/emu68-gic400-library`,
-branch `shared-lines`) in the ROM; until then the driver is polled, and
-association, roaming and power-save behaviour have been exercised on one
-access point.
+**`anxwifipi.device` is experimental.** It needs nothing beyond Emu68: it
+polls. The card's interrupt line is shared with the SD card host, and the
+gic400.library in the Emu68 ROM takes one server per line, so the driver's
+offer of an interrupt server is refused and it runs without one: a task at
+the lowest priority watches the card's status register while frames flow
+(it takes whatever CPU is idle during a transfer, and a CPU meter shows it),
+and a timer tick looks otherwise -- 0.4% of the machine idle, up to 20 ms on
+the first frame of an exchange after a quiet second. An interrupt path would
+need a gic400.library that allows shared lines
+(`github.com/tinic/emu68-gic400-library`, branch `shared-lines`) built into
+the Emu68 ROM; a copy in `LIBS:` changes nothing. `NetDevStats
+anxwifipi.device` shows "card interrupt line (GIC)": 4 means refused and
+polling. WirelessManager 1.3 (the Emu68 image) and 1.5 (`prism2v2`) both
+join. One Wi-Fi driver per boot: `wifipi.device` and `anxwifipi.device`
+drive the same chip, and switching between them without a reboot hangs
+WirelessManager. Association, roaming and power-save behaviour have been
+exercised on one access point.
 
 **Receive offload (GRO).** `anxgenet.device` verifies every IPv4 and IPv6
 frame's header and TCP or UDP checksum itself, from the sum its copy already

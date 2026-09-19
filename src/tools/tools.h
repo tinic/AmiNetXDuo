@@ -227,6 +227,7 @@ VOID tool_explain_device_refused(const char *device, ULONG unit);
 VOID tool_probe_sana2_codes(LONG *error, LONG *wire);
 VOID tool_explain_no_interfaces(VOID);                /* nothing configured  */
 VOID tool_explain_dhcp(const char *name);             /* nobody answered     */
+VOID tool_explain_dhcp_waiting(const char *name, ULONG seconds); /* wait ran out */
 VOID tool_explain_resolve(const char *name, LONG err); /* a lookup failed    */
 VOID tool_explain_no_stack(VOID);                     /* nothing is running  */
 

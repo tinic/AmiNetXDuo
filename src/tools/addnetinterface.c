@@ -915,7 +915,7 @@ int main(int argc, char **argv)
                                 "has no address yet\n", (LONG)name);
 
                     if (ifc.iptype == AMI_IPTYPE_DHCP)
-                        tool_explain_dhcp(name);
+                        tool_explain_dhcp_waiting(name, timeout);
                 }
 
                 if (rc == RETURN_OK)
@@ -1051,7 +1051,7 @@ int main(int argc, char **argv)
                             (LONG)name);
 
                 if (ifc.iptype == AMI_IPTYPE_DHCP)
-                    tool_explain_dhcp(name);
+                    tool_explain_dhcp_waiting(name, timeout);
             }
             else
             {

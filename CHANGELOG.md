@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `AddNetInterface` no longer reports "no address from DHCP" when its wait
+  runs out while the DHCP client is still asking; it says how long it
+  waited, that the lease may still arrive, and how to wait longer. A GENET
+  interface whose lease came a moment later read as a failure.
+
 - `anxwifipi.device` joins with WirelessManager 1.5 (Aminet's `prism2v2`),
   the version the README points at. Every `S2_SETOPTIONS` used to restart
   the join with whatever that one call said, and 1.5 makes a second call

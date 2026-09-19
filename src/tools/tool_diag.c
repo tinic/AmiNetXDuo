@@ -504,6 +504,17 @@ VOID tool_explain_dhcp(const char *name)
     tool_printf("%s: %s: no address from DHCP\n", (LONG)tool_name, (LONG)name);
 }
 
+/* The wait ran out, not DHCP: the client keeps asking after the command has
+   returned.  Said as "no address from DHCP", an interface whose lease came
+   two seconds later was reported as a failure (anxgenet, EAB, beta2). */
+VOID tool_explain_dhcp_waiting(const char *name, ULONG seconds)
+{
+    tool_printf("%s: %s: no lease from DHCP within %lu seconds; it keeps "
+                "asking.\n", (LONG)tool_name, (LONG)name, (LONG)seconds);
+    tool_printf("  ShowNetStatus %s shows the address when it arrives; "
+                "TIMEOUT=%lu waits longer.\n", (LONG)name, (LONG)(seconds * 3UL));
+}
+
 VOID tool_explain_resolve(const char *name, LONG err)
 {
     const char *why;
