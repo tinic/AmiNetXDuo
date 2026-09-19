@@ -411,7 +411,7 @@ endif()
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
-                                          httprtg.c httpzz.c
+                                          httprtg.c
                                           toolsock.c toolbudget.c
                                           iperfcore.c iperfwire.c
                                           "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c"
@@ -512,11 +512,7 @@ add_dependencies(tool_httpd tool_httpd_files_page)
 # is exactly what the TLS build must NOT have.
 target_compile_definitions(tool_httpd PRIVATE NX_CRYPTO_STANDALONE_ENABLE)
 target_include_directories(tool_httpd PRIVATE
-    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc"
-    # ZZ9000 console offload: header-only structs and constants from the SDK
-    # submodule (data only -- httpzz.c hand-declares the library vectors).
-    "${CMAKE_SOURCE_DIR}/third_party/zz9000-sdk/include"
-    "${CMAKE_SOURCE_DIR}/third_party/zz9000-sdk/host/include")
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
 
 # One warning is silenced on the vendored SHA-1 and only on it.  Two lines of
 # it cast a pointer to ULONG to check its alignment, in the NX_CRYPTO_METHOD
