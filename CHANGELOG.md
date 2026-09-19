@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.28.9
+
 - `httpd` sleeps between the web console's passes. With a viewer attached its
   main loop woke every 2 ms whatever the console had to do -- 500
   `WaitSelect()`s a second, each a timer request and a dispatch, 6-9% of an
