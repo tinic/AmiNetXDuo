@@ -60,10 +60,20 @@ enum
     GID_STATUS,
     GID_SAVE,
     GID_APPLY,
-    GID_ONLINE,
-    GID_OFFLINE,
+    GID_LIVE_ACTION,
     GID_REMOVE,
     GID_CLOSE
+};
+
+enum
+{
+    NP_LIVE_UNKNOWN = -1,
+    NP_LIVE_NOT_SAVED,
+    NP_LIVE_STACK_STOPPED,
+    NP_LIVE_NOT_ADDED,
+    NP_LIVE_OFFLINE,
+    NP_LIVE_ONLINE,
+    NP_LIVE_UNAVAILABLE
 };
 
 typedef struct NetPrefs
@@ -87,13 +97,18 @@ typedef struct NetPrefs
     struct Gadget *g_boot;
     struct Gadget *g_priority;
     struct Gadget *g_status;
+    struct Gadget *g_live_status;
+    struct Gadget *g_live_action;
+    struct Gadget *g_hardware_title;
+    struct Gadget *g_addressing_title;
     char           names[NP_MAX_INTERFACES][TOOL_NAME_LEN];
     STRPTR         labels[NP_MAX_INTERFACES + 2];
     ULONG          count;
     LONG           selected;
+    LONG           live_state;
 } NetPrefs;
 
-static NetPrefs np;
+static NetPrefs np = { .live_state = NP_LIVE_UNKNOWN };
 static char np_address[16];
 static char np_netmask[16];
 static char np_gateway[16];
@@ -229,6 +244,23 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     tags[0].ti_Tag = tag; tags[0].ti_Data = value;
     tags[1].ti_Tag = TAG_DONE; tags[1].ti_Data = 0;
     GT_SetGadgetAttrsA(g, np.window, NULL, tags);
+}
+
+/* GadTools BUTTON_KIND has no public tag for replacing its caption.  Its
+ * GadgetText is an IntuiText owned by the gadget, however, and changing only
+ * IText to another permanent string is the traditional way to make a button
+ * contextual.  Refresh just this gadget so the rest of the window does not
+ * flicker during the live-state poll. */
+static VOID set_button_text(struct Gadget *g, const char *text)
+{
+    struct IntuiText *it;
+
+    if (g == NULL || g->GadgetText == NULL) return;
+    it = (struct IntuiText *)g->GadgetText;
+    if (it->IText == (STRPTR)text) return;
+    it->IText = (STRPTR)text;
+    it->LeftEdge = (WORD)(((LONG)g->Width - (LONG)IntuiTextLength(it)) / 2);
+    RefreshGList(g, np.window, NULL, 1);
 }
 
 static VOID set_static_fields(BOOL enabled)
@@ -804,6 +836,80 @@ static VOID remove_form(VOID)
     set_status("Removed. The old definition remains beside the drawer as .disabled.info.");
 }
 
+static LONG live_state_of(const char *name)
+{
+    NetStatusHeader    *answer;
+    NetStatusInterface *entries;
+    struct Library     *base;
+    ULONG               size;
+    LONG                count;
+    LONG                i;
+    LONG                state = NP_LIVE_NOT_ADDED;
+
+    if (!sane_name(name)) return NP_LIVE_NOT_SAVED;
+    if (!tool_stack_library_running()) return NP_LIVE_STACK_STOPPED;
+
+    base = tool_netstatus_open(TRUE);
+    if (base == NULL) return NP_LIVE_UNAVAILABLE;
+
+    size = sizeof(NetStatusHeader) +
+           (ULONG)NX_MAX_PHYSICAL_INTERFACES * sizeof(NetStatusInterface);
+    answer = (NetStatusHeader *)ami_alloc(size);
+    if (answer == NULL)
+    {
+        tool_netstatus_close(base);
+        return NP_LIVE_UNAVAILABLE;
+    }
+
+    count = tool_netstatus_query(base, NETSTATUS_INTERFACES, answer, size,
+                                 sizeof(NetStatusInterface));
+    if (count < 0)
+        state = NP_LIVE_UNAVAILABLE;
+    else
+    {
+        entries = (NetStatusInterface *)NETSTATUS_ENTRIES(answer);
+        for (i = 0;
+             i < count && i < (LONG)NX_MAX_PHYSICAL_INTERFACES;
+             i++)
+        {
+            if (!(entries[i].nsi_Flags & NETSTATUS_IF_NAMED) ||
+                tool_stricmp(entries[i].nsi_Name, name) != 0)
+                continue;
+            state = (entries[i].nsi_Flags & NETSTATUS_IF_LINKUP)
+                  ? NP_LIVE_ONLINE : NP_LIVE_OFFLINE;
+            break;
+        }
+    }
+
+    ami_free(answer);
+    tool_netstatus_close(base);
+    return state;
+}
+
+static VOID update_live_state(VOID)
+{
+    static const char *const status_text[] =
+    {
+        "Status: New", "Status: Stack off", "Status: Not added",
+        "Status: Offline", "Status: Online", "Status: Unknown"
+    };
+    static const char *const action_text[] =
+    {
+        "Online", "Online", "Online", "Online", "Offline", "Online"
+    };
+    LONG state;
+
+    if (np.window == NULL) return;
+    state = live_state_of(string_value(np.g_name));
+    if (state == np.live_state) return;
+
+    np.live_state = state;
+    set_attr(np.g_live_status, GTTX_Text, (ULONG)status_text[state]);
+    set_button_text(np.g_live_action, action_text[state]);
+    set_attr(np.g_live_action, GA_Disabled,
+             (ULONG)(state != NP_LIVE_OFFLINE && state != NP_LIVE_ONLINE));
+}
+
 static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
                                  UWORD id, WORD x, WORD y, WORD w, WORD h,
                                  const char *label, ULONG flags,
@@ -819,6 +925,34 @@ static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
     return CreateGadgetA(kind, previous, &ng, tags);
 }
 
+/* GadTools has no group-box gadget.  Draw complete recessed frames, then
+ * redraw padded text gadgets over their top edges.  That is the usual
+ * Workbench labelled-box treatment and keeps both bevel pens clear of the
+ * title glyphs.  The frames are window decoration, so redraw them after
+ * GadTools has refreshed its gadgets. */
+static VOID draw_layout(VOID)
+{
+    struct TagItem tags[3];
+
+    if (np.window == NULL) return;
+    tags[0].ti_Tag = GT_VisualInfo;
+    tags[0].ti_Data = (ULONG)np.visual;
+    tags[1].ti_Tag = GTBB_Recessed;
+    tags[1].ti_Data = TRUE;
+    tags[2].ti_Tag = TAG_DONE;
+    tags[2].ti_Data = 0;
+
+    DrawBevelBoxA(np.window->RPort, 8,   25, 614, 2,  tags);
+    DrawBevelBoxA(np.window->RPort, 8,   33, 288, 90, tags);
+    DrawBevelBoxA(np.window->RPort, 306, 33, 316, 90, tags);
+
+    /* Repainting the title gadgets after the frames masks the top bevel under
+       their full padded rectangles, instead of leaving a shine or shadow
+       touching the first and last letters. */
+    set_attr(np.g_hardware_title, GTTX_Text, (ULONG)"Hardware");
+    set_attr(np.g_addressing_title, GTTX_Text, (ULONG)"Addressing");
+}
+
 static BOOL make_window(VOID)
 {
     struct Gadget *context, *g;
@@ -829,7 +963,7 @@ static BOOL make_window(VOID)
     np.screen = LockPubScreen(NULL);
     if (np.screen == NULL) return FALSE;
     /* Fit the stock 640x200 NTSC Workbench as well as PAL and taller modes. */
-    if (np.screen->Width < 620 || np.screen->Height < 200) return FALSE;
+    if (np.screen->Width < 640 || np.screen->Height < 200) return FALSE;
     np.visual = GetVisualInfoA(np.screen, NULL);
     if (np.visual == NULL) return FALSE;
     context = CreateContext(&np.gadgets);
@@ -845,71 +979,81 @@ static BOOL make_window(VOID)
 } while (0)
 
     TAG1(GTCY_Labels, np.labels);
-    ADD(np.g_interface,CYCLE_KIND,GID_INTERFACE,86,5,164,15,"Interface",PLACETEXT_LEFT);
+    ADD(np.g_interface,CYCLE_KIND,GID_INTERFACE,86,5,156,15,"Interface",PLACETEXT_LEFT);
     TAG1(TAG_DONE, 0);
-    ADD(g,BUTTON_KIND,GID_NEW,260,5,58,15,"New",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_REMOVE,324,5,66,15,"Remove",PLACETEXT_IN);
+    ADD(g,BUTTON_KIND,GID_NEW,250,5,58,15,"New",PLACETEXT_IN);
+    ADD(g,BUTTON_KIND,GID_REMOVE,314,5,66,15,"Remove",PLACETEXT_IN);
     TAG1(GTCB_Checked, TRUE);
-    ADD(np.g_state,CHECKBOX_KIND,GID_STATE,414,6,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
+    ADD(np.g_state,CHECKBOX_KIND,GID_STATE,386,6,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
         "Start online",PLACETEXT_RIGHT);
     TAG1(GTCB_Checked, FALSE);
-    ADD(np.g_boot,CHECKBOX_KIND,GID_BOOT,528,6,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
+    ADD(np.g_boot,CHECKBOX_KIND,GID_BOOT,530,6,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
         "At boot",PLACETEXT_RIGHT);
 
     tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Hardware";
     tags[1].ti_Tag=GTTX_CopyText; tags[1].ti_Data=FALSE;
-    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(g,TEXT_KIND,0,18,23,58,10,NULL,0);
+    tags[2].ti_Tag=GTTX_Justification; tags[2].ti_Data=GTJ_CENTER;
+    tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
+    ADD(np.g_hardware_title,TEXT_KIND,0,12,29,76,10,NULL,0);
     tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Addressing";
     tags[1].ti_Tag=GTTX_CopyText; tags[1].ti_Data=FALSE;
-    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(g,TEXT_KIND,0,308,23,70,10,NULL,0);
+    tags[2].ti_Tag=GTTX_Justification; tags[2].ti_Data=GTJ_CENTER;
+    tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
+    ADD(np.g_addressing_title,TEXT_KIND,0,310,29,88,10,NULL,0);
 
     TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
-    ADD(np.g_name,STRING_KIND,GID_NAME,72,39,202,15,"Name",PLACETEXT_LEFT);
+    ADD(np.g_name,STRING_KIND,GID_NAME,72,40,212,15,"Name",PLACETEXT_LEFT);
     TAG1(GTST_MaxChars, AMI_CFG_PATH_LEN - 1);
-    ADD(np.g_device,STRING_KIND,GID_DEVICE,72,59,202,15,"Device",PLACETEXT_LEFT);
+    ADD(np.g_device,STRING_KIND,GID_DEVICE,72,60,212,15,"Device",PLACETEXT_LEFT);
     TAG1(GTIN_MaxChars, 3);
-    ADD(np.g_unit,INTEGER_KIND,GID_UNIT,72,79,38,15,"Unit",PLACETEXT_LEFT);
+    ADD(np.g_unit,INTEGER_KIND,GID_UNIT,72,80,38,15,"Unit",PLACETEXT_LEFT);
     TAG1(GTIN_MaxChars, 4);
-    ADD(np.g_priority,INTEGER_KIND,GID_PRIORITY,200,79,66,15,"Priority",PLACETEXT_LEFT);
+    ADD(np.g_priority,INTEGER_KIND,GID_PRIORITY,200,80,66,15,"Priority",PLACETEXT_LEFT);
     TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
-    ADD(np.g_card,STRING_KIND,GID_CARD,72,99,202,15,"Card",PLACETEXT_LEFT);
+    ADD(np.g_card,STRING_KIND,GID_CARD,72,100,212,15,"Card",PLACETEXT_LEFT);
 
     tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv4_labels;
     tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IPTYPE_DHCP;
     tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(np.g_ipv4,CYCLE_KIND,GID_IPV4,350,39,105,15,"IPv4",PLACETEXT_LEFT);
+    ADD(np.g_ipv4,CYCLE_KIND,GID_IPV4,376,40,124,15,"IPv4",PLACETEXT_LEFT);
     TAG1(GTCB_Checked, FALSE);
-    ADD(np.g_mdns,CHECKBOX_KIND,GID_MDNS,500,40,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
+    ADD(np.g_mdns,CHECKBOX_KIND,GID_MDNS,530,41,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
         "mDNS",PLACETEXT_RIGHT);
     TAG1(GTST_MaxChars, 15);
-    ADD(np.g_address,STRING_KIND,GID_ADDRESS,362,59,100,15,"Address",PLACETEXT_LEFT);
+    ADD(np.g_address,STRING_KIND,GID_ADDRESS,376,56,220,15,"Address",PLACETEXT_LEFT);
     TAG1(GTST_MaxChars, 15);
-    ADD(np.g_netmask,STRING_KIND,GID_NETMASK,512,59,68,15,"Mask",PLACETEXT_LEFT);
+    ADD(np.g_netmask,STRING_KIND,GID_NETMASK,376,72,220,15,"Mask",PLACETEXT_LEFT);
     TAG1(GTST_MaxChars, 15);
-    ADD(np.g_gateway,STRING_KIND,GID_GATEWAY,370,79,100,15,"Gateway",PLACETEXT_LEFT);
+    ADD(np.g_gateway,STRING_KIND,GID_GATEWAY,376,88,220,15,"Gateway",PLACETEXT_LEFT);
     tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv6_labels;
     tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IP6TYPE_AUTO;
     tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(np.g_ipv6,CYCLE_KIND,GID_IPV6,350,99,146,15,"IPv6",PLACETEXT_LEFT);
+    ADD(np.g_ipv6,CYCLE_KIND,GID_IPV6,376,104,220,15,"IPv6",PLACETEXT_LEFT);
 
     tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Loading definitions...";
     tags[1].ti_Tag=GTTX_Border; tags[1].ti_Data=TRUE;
     tags[2].ti_Tag=GTTX_CopyText; tags[2].ti_Data=FALSE;
     tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
-    ADD(np.g_status,TEXT_KIND,GID_STATUS,8,130,584,15,NULL,0);
+    ADD(np.g_status,TEXT_KIND,GID_STATUS,8,129,614,15,NULL,0);
     TAG1(TAG_DONE, 0);
     ADD(g,BUTTON_KIND,GID_SAVE,8,152,72,17,"Save",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_APPLY,88,152,100,17,"Save & Start",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_ONLINE,350,152,70,17,"Online",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_OFFLINE,428,152,70,17,"Offline",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_CLOSE,522,152,70,17,"Close",PLACETEXT_IN);
+    ADD(g,BUTTON_KIND,GID_APPLY,88,152,120,17,"Save & Start",PLACETEXT_IN);
+    tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Status: Unknown";
+    tags[1].ti_Tag=GTTX_Border; tags[1].ti_Data=TRUE;
+    tags[2].ti_Tag=GTTX_CopyText; tags[2].ti_Data=FALSE;
+    tags[3].ti_Tag=GTTX_Justification; tags[3].ti_Data=GTJ_CENTER;
+    tags[4].ti_Tag=TAG_DONE; tags[4].ti_Data=0;
+    ADD(np.g_live_status,TEXT_KIND,0,216,153,156,15,NULL,0);
+    TAG1(GA_Disabled, TRUE);
+    ADD(np.g_live_action,BUTTON_KIND,GID_LIVE_ACTION,380,152,120,17,
+        "Online",PLACETEXT_IN);
+    TAG1(TAG_DONE, 0);
+    ADD(g,BUTTON_KIND,GID_CLOSE,552,152,70,17,"Close",PLACETEXT_IN);
 
 #undef ADD
 #undef TAG1
 
-    width = 610;
+    width = 640;
     height = 190;
     win[0].ti_Tag=WA_Left; win[0].ti_Data=(np.screen->Width-width)/2;
     win[1].ti_Tag=WA_Top; win[1].ti_Data=(np.screen->Height-height)/2;
@@ -917,7 +1061,7 @@ static BOOL make_window(VOID)
     win[3].ti_Tag=WA_Height; win[3].ti_Data=height;
     win[4].ti_Tag=WA_Title; win[4].ti_Data=(ULONG)"AmiNetXDuo Network Preferences";
     win[5].ti_Tag=WA_IDCMP; win[5].ti_Data=IDCMP_CLOSEWINDOW|IDCMP_REFRESHWINDOW|
-        BUTTONIDCMP|CHECKBOXIDCMP|CYCLEIDCMP|STRINGIDCMP;
+        BUTTONIDCMP|CHECKBOXIDCMP|CYCLEIDCMP|STRINGIDCMP|IDCMP_INTUITICKS;
     win[6].ti_Tag=WA_Flags; win[6].ti_Data=WFLG_DRAGBAR|WFLG_DEPTHGADGET|
         WFLG_CLOSEGADGET|WFLG_ACTIVATE|WFLG_SMART_REFRESH|WFLG_GIMMEZEROZERO;
     win[7].ti_Tag=WA_Gadgets; win[7].ti_Data=(ULONG)np.gadgets;
@@ -926,11 +1070,8 @@ static BOOL make_window(VOID)
     win[10].ti_Tag=TAG_DONE; win[10].ti_Data=0;
     np.window = OpenWindowTagList(NULL, win);
     if (np.window == NULL) return FALSE;
-    tags[0].ti_Tag=GTBB_Recessed; tags[0].ti_Data=TRUE;
-    tags[1].ti_Tag=TAG_DONE; tags[1].ti_Data=0;
-    DrawBevelBoxA(np.window->RPort, 8, 28, 278, 94, tags);
-    DrawBevelBoxA(np.window->RPort, 298, 28, 294, 94, tags);
     GT_RefreshWindow(np.window, NULL);
+    draw_layout();
     return TRUE;
 }
 
@@ -949,6 +1090,7 @@ static VOID close_ui(VOID)
 static VOID event_loop(VOID)
 {
     BOOL done = FALSE;
+    UWORD ticks = 0;
 
     while (!done)
     {
@@ -967,6 +1109,19 @@ static VOID event_loop(VOID)
             {
                 GT_BeginRefresh(np.window);
                 GT_EndRefresh(np.window, TRUE);
+                GT_RefreshWindow(np.window, NULL);
+                draw_layout();
+            }
+            else if (cls == IDCMP_INTUITICKS)
+            {
+                /* IntuiTicks arrive roughly ten times a second.  A one-second
+                   poll keeps external Online/Offline commands visible without
+                   continually opening the status interface. */
+                if (++ticks >= 10)
+                {
+                    ticks = 0;
+                    update_live_state();
+                }
             }
             else if (cls == IDCMP_GADGETUP)
             {
@@ -983,20 +1138,23 @@ static VOID event_loop(VOID)
                         break;
                     case GID_SAVE: (VOID)save_form(FALSE); break;
                     case GID_APPLY: (VOID)save_form(TRUE); break;
-                    case GID_ONLINE:
-                        if (sane_name(name) && run_command("Online", name) == 0)
+                    case GID_LIVE_ACTION:
+                        update_live_state();
+                        if (np.live_state == NP_LIVE_OFFLINE &&
+                            run_command("Online", name) == 0)
                             set_status("Interface is online.");
-                        else requester("Online failed. Run it from Shell for details.");
-                        break;
-                    case GID_OFFLINE:
-                        if (sane_name(name) && run_command("Offline", name) == 0)
+                        else if (np.live_state == NP_LIVE_ONLINE &&
+                                 run_command("Offline", name) == 0)
                             set_status("Interface is offline.");
-                        else requester("Offline failed. Run it from Shell for details.");
+                        else if (np.live_state == NP_LIVE_OFFLINE ||
+                                 np.live_state == NP_LIVE_ONLINE)
+                            requester("The state change failed. Run Online or Offline from Shell for details.");
                         break;
                     case GID_REMOVE: remove_form(); break;
                     case GID_CLOSE: done = TRUE; break;
                     default: break;
                 }
+                update_live_state();
             }
         }
     }
@@ -1021,7 +1179,7 @@ int main(int argc, char **argv)
     if (!make_window())
     {
         requester("NetPrefs could not open its window. It needs a public\n"
-                  "Workbench screen at least 620 by 200 pixels and the\n"
+                  "Workbench screen at least 640 by 200 pixels and the\n"
                   "standard OS 2.04 Intuition, Graphics and GadTools libraries.");
         close_ui();
         CloseLibrary(GadToolsBase);
@@ -1035,6 +1193,8 @@ int main(int argc, char **argv)
         load_form(0);
     }
     else clear_form();
+    update_live_state();
+    draw_layout();
     event_loop();
     close_ui();
     CloseLibrary(GadToolsBase);
