@@ -2802,10 +2802,12 @@ BOOL http_fb_slice(ULONG now)
         /* The offload encodes on the card in ~3 ms/band, so the ~35 ms of
            per-band host overhead (a mailbox round-trip and a WebSocket send
            each) is the whole cost, and 12 of them per frame is what held the
-           drag to ~2.75 fps.  Send the WHOLE frame in one pass -- one card
-           call, one send -- when offloaded; deflate covers the larger message.
-           Banding stays for the 68k readback, whose per-band cost is real and
-           whose responsiveness the bands are for. */
+           drag to ~2.75 fps.  So the offload sizes each message to a wire-byte
+           budget instead: a cheap frame goes in one call and one send (~16 fps
+           on Workbench), a photo backdrop in a few bounded chunks so the viewer
+           keeps up; deflate covers the larger messages.  Banding stays for the
+           68k readback, whose per-band cost is real and whose responsiveness
+           the bands are for. */
         UWORD rows;
         if (fb_offload)
         {
@@ -3101,8 +3103,16 @@ BOOL http_fb_write(ULONG now)
                starting it over: on a screen with one blinking cursor the
                reset made every blink four quick passes and the still-screen
                rate 4.7 a second (7.7% of an Emu68 A1200) instead of two.
-               More than FB_QUIET_SMALL tiles is somebody drawing. */
-            if (fb_pass_found && fb_pass_tiles > (ULONG)FB_QUIET_SMALL)
+               More than FB_QUIET_SMALL tiles is somebody drawing.
+
+               The offload is exempt: the card holds the delta and encodes
+               every pass, so this end never sees fb_enc.st move and would read
+               every offloaded pass as still.  The still-screen backoff keys
+               off the host encoder's counters the offload bypasses; the card's
+               cadence is the duty cycle's (see FB_IDLE_DIVISOR) and not this. */
+            if (fb_offload)
+                fb_quiet = 0;
+            else if (fb_pass_found && fb_pass_tiles > (ULONG)FB_QUIET_SMALL)
                 fb_quiet = 0;
             else if (!fb_pass_found && fb_quiet < 255)
                 fb_quiet++;

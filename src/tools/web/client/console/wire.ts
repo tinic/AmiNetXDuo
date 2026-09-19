@@ -51,8 +51,12 @@ export function defaultEndpoint(): string {
 async function inflateFrame(u: Uint8Array): Promise<ArrayBuffer> {
   const ds = new DecompressionStream("deflate");
   const w = ds.writable.getWriter();
-  void w.write(u.subarray(4));
-  void w.close();
+  /* Swallow the writer side's own rejection: a malformed stream errors both
+     ends, and it is the reader loop below whose rejection we want to surface
+     (and the caller catches).  Left unhandled these would be loose rejected
+     promises. */
+  w.write(u.subarray(4)).catch(() => {});
+  w.close().catch(() => {});
   const r = ds.readable.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -73,11 +77,22 @@ async function inflateFrame(u: Uint8Array): Promise<ArrayBuffer> {
   return out.buffer;
 }
 
+/* How many binary frames may be waiting on the inflate/paint chain before the
+   viewer is judged to have fallen behind.  Small, so latency stays low and the
+   main thread returns to the event loop promptly -- which is what keeps the
+   socket drained (so the browser answers the server's liveness pings) and the
+   tab responsive under a heavy drag.  A dropped frame costs only a resync. */
+const FB_MAX_PENDING = 3;
+
 export class Wire {
   private ws: WebSocket | null = null;
   private readonly h: WireHandlers;
   /* Serialises async inflation so frames reach the decoder in wire order. */
   private q: Promise<void> = Promise.resolve();
+  /* Frames queued for inflation/paint but not yet delivered.  Bounds the work
+     the message handler leaves on the main thread: past FB_MAX_PENDING the
+     viewer is behind, so incoming frames are dropped rather than queued. */
+  private pending = 0;
 
   constructor(h: WireHandlers) {
     this.h = h;
@@ -118,19 +133,38 @@ export class Wire {
         return;
       }
       /* A binary frame may carry deflate-compressed ops (header flags bit 0).
-         Inflation is async (DecompressionStream), so every binary frame goes
-         through one promise chain to stay in wire order: a delta applied out
-         of order corrupts every frame after it. */
+         Inflation is async (DecompressionStream), so every binary frame -- raw
+         ones too -- goes through one promise chain to reach the decoder in wire
+         order: a delta applied out of order corrupts every frame after it.
+
+         The whole step is wrapped so this.q ALWAYS resolves.  If any frame's
+         inflation or onFrame() throws and the rejection is left on the chain,
+         every later frame's .then is skipped and the console freezes until the
+         page is reloaded -- so a bad frame is caught and dropped here, and the
+         next frame's seq gap makes the decoder ask for a full refresh. */
       const buf = e.data as ArrayBuffer;
+
+      /* Behind: the chain already holds FB_MAX_PENDING frames, so drop this one
+         instead of growing the queue.  Applying every stale frame under a heavy
+         drag on a slow link saturates the main thread -- the tab freezes and,
+         because the socket stops draining, the browser never answers the
+         server's ping and the connection is stale-closed.  Dropping keeps the
+         viewer live; the next frame decoded shows a seq gap and asks for a
+         refresh, which resyncs the picture. */
+      if (this.pending >= FB_MAX_PENDING) return;
+
       const u = new Uint8Array(buf);
-      if (u.length >= 4 && (u[1] & 0x01) !== 0) {
-        this.q = this.q
-          .then(() => inflateFrame(u))
-          .then((b) => this.h.onFrame(b))
-          .catch(() => { /* drop it; the next frame's seq gap forces a refresh */ });
-      } else {
-        this.q = this.q.then(() => { this.h.onFrame(buf); });
-      }
+      const deflated = u.length >= 4 && (u[1] & 0x01) !== 0;
+      this.pending++;
+      this.q = this.q.then(async () => {
+        try {
+          this.h.onFrame(deflated ? await inflateFrame(u) : buf);
+        } catch {
+          /* drop this frame; the seq gap on the next one forces a refresh */
+        } finally {
+          this.pending--;
+        }
+      });
     };
   }
 

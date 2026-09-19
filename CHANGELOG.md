@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The `/console` viewer stays live under a heavy drag on a slow link. A frame
+  it cannot decode is dropped and the next frame's sequence gap asks for a
+  fresh screen; the tab no longer freezes until a reload. When the viewer
+  falls behind, frames are dropped, not queued, and the connection is no
+  longer stale-closed mid-drag. A frame whose ops are deflated (the ZZ9000
+  console offload) is inflated with the browser's native `DecompressionStream`.
+
 - `gethostname()` returns a qualified name: a configured name with no dot
   -- DHCP option 12, `HOSTNAME` in `name_resolution`, the name derived from
   the card -- gets the domain in force appended (DHCP option 15, a router
