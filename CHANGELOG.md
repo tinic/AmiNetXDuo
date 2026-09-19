@@ -9,6 +9,22 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `gethostname()` returns a qualified name: a configured name with no dot
+  -- DHCP option 12, `HOSTNAME` in `name_resolution`, the name derived from
+  the card -- gets the domain in force appended (DHCP option 15, a router
+  advertisement's, `DOMAIN`, `SetDefaultDomainName()`). AmiTCP 4 answered so
+  after a lease; Roadshow answers `localhost` on a DHCP machine, and Fitz's
+  GUI client needed a workaround for it, since a service is identified by
+  the fully qualified host name. The short name alone when no domain is
+  known.
+
+- `ping SIZE` goes to 65467, from 1400. The classic MTU probe -- `-s 1472`,
+  a full 1500-byte datagram, beside `-s 1473`, the first that fragments --
+  could not be typed; a card that drops full-size frames (genet.device 3.x
+  did, and SMB2 froze on it until `MTU=1450`) could only be found with
+  another stack's ping. The buffers are sized to the request, so the
+  command's memory is unchanged for the usual 56.
+
 - `FILTER=EVERYTHING` in an interface file opens the driver promiscuous
   (`SANA2OPF_PROM` at `OpenDevice()`), Roadshow's keyword with Roadshow's
   meaning; `LOCAL` and `IPANDARP` are accepted and change nothing. It was

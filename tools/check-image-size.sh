@@ -77,8 +77,9 @@ BUDGETS=(
     # when the first repair is ACKed, instead of waiting for the RTO with no
     # further duplicate ACK possible.
     # -> 227,672: FILTER=EVERYTHING read (three values compared, the
-    # promiscuous open flag carried to OpenDevice).
-    "minimal:src/bsdsocket/bsdsocket.library:227800"
+    # promiscuous open flag carried to OpenDevice).  -> 227,804:
+    # gethostname() qualifies a dotless name with the domain in force.
+    "minimal:src/bsdsocket/bsdsocket.library:227900"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/wifipi/anxwifipi.device:56000"
