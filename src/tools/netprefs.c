@@ -16,6 +16,7 @@
 #include <exec/libraries.h>
 #include <exec/lists.h>
 #include <exec/memory.h>
+#include <dos/dostags.h>
 #include <graphics/gfxbase.h>
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
@@ -108,6 +109,7 @@ typedef struct NetPrefs
     struct Window *window;
     struct Gadget *gadgets;
     struct Gadget *panel_gadgets[NP_PANEL_COUNT];
+    LONG           panel_gadget_count[NP_PANEL_COUNT];
     APTR           visual;
     struct Gadget *g_interface;
     struct Gadget *g_panel;
@@ -138,6 +140,10 @@ typedef struct NetPrefs
     struct Gadget *g_writerequests;
     struct Gadget *g_status;
     struct Gadget *g_live_status;
+    struct Gadget *live_online_gadgets;
+    struct Gadget *live_offline_gadgets;
+    struct Gadget *g_live_online;
+    struct Gadget *g_live_offline;
     struct Gadget *g_live_action;
     struct List    interface_list;
     struct Node    interface_nodes[NP_MAX_INTERFACES];
@@ -296,23 +302,6 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     tags[0].ti_Tag = tag; tags[0].ti_Data = value;
     tags[1].ti_Tag = TAG_DONE; tags[1].ti_Data = 0;
     GT_SetGadgetAttrsA(g, np.window, NULL, tags);
-}
-
-/* GadTools BUTTON_KIND has no public tag for replacing its caption.  Its
- * GadgetText is an IntuiText owned by the gadget, however, and changing only
- * IText to another permanent string is the traditional way to make a button
- * contextual.  Refresh just this gadget so the rest of the window does not
- * flicker during the live-state poll. */
-static VOID set_button_text(struct Gadget *g, const char *text)
-{
-    struct IntuiText *it;
-
-    if (g == NULL || g->GadgetText == NULL) return;
-    it = (struct IntuiText *)g->GadgetText;
-    if (it->IText == (STRPTR)text) return;
-    it->IText = (STRPTR)text;
-    it->LeftEdge = (WORD)(((LONG)g->Width - (LONG)IntuiTextLength(it)) / 2);
-    RefreshGList(g, np.window, NULL, 1);
 }
 
 static VOID set_static_fields(BOOL enabled)
@@ -576,10 +565,13 @@ fail:
     return FALSE;
 }
 
-static LONG run_command(const char *command, const char *name)
+static LONG run_command(const char *command, const char *name, BOOL quiet)
 {
     char line[NP_PATH_LEN];
     const char *prefix;
+    BPTR input;
+    BPTR output;
+    LONG result;
 
     /* In a self-contained install C: deliberately searches the system first.
        Use the sibling commands, not a stale command belonging to another
@@ -595,8 +587,31 @@ static LONG run_command(const char *command, const char *name)
     tool_copy_string(line + text_len(line), sizeof(line) - text_len(line), command);
     tool_copy_string(line + text_len(line), sizeof(line) - text_len(line), " ");
     tool_copy_string(line + text_len(line), sizeof(line) - text_len(line), name);
-    tool_copy_string(line + text_len(line), sizeof(line) - text_len(line), " QUIET");
-    return SystemTagList((CONST_STRPTR)line, NULL);
+    if (quiet)
+        tool_copy_string(line + text_len(line), sizeof(line) - text_len(line),
+                         " QUIET");
+
+    /* A Preferences program must not borrow its launching Shell's streams:
+       doing so can pull that screen to the front, and Online/Offline have no
+       QUIET option.  SystemTagList owns and closes streams once it starts. */
+    input = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+    output = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    if (input == (BPTR)0 || output == (BPTR)0)
+    {
+        if (input != (BPTR)0) Close(input);
+        if (output != (BPTR)0) Close(output);
+        return -1;
+    }
+    result = SystemTags((CONST_STRPTR)line,
+                        SYS_Input, (ULONG)input,
+                        SYS_Output, (ULONG)output,
+                        TAG_DONE);
+    if (result == -1)
+    {
+        Close(input);
+        Close(output);
+    }
+    return result;
 }
 
 static VOID sort_names(VOID)
@@ -1076,8 +1091,8 @@ static BOOL save_form(BOOL apply)
 
     if (apply)
     {
-        if (existed) (VOID)run_command("RemoveNetInterface", name);
-        if (run_command("AddNetInterface", name) != 0)
+        if (existed) (VOID)run_command("RemoveNetInterface", name, TRUE);
+        if (run_command("AddNetInterface", name, TRUE) != 0)
         {
             requester("The definition was saved, but the interface did not start.\n"
                       "Run AddNetInterface from Shell to see the detailed reason.");
@@ -1111,7 +1126,7 @@ static VOID remove_form(VOID)
                  "It will be taken offline and parked as an ignored .info\n"
                  "backup, not deleted.", "Remove")) return;
     if (boot_state(name, &wildcard) && !set_boot_state(name, FALSE, TRUE)) return;
-    (VOID)run_command("RemoveNetInterface", name);
+    (VOID)run_command("RemoveNetInterface", name, TRUE);
     tool_copy_string(parked, sizeof(parked), path);
     tool_copy_string(parked + text_len(parked),
                      sizeof(parked) - text_len(parked), ".disabled.info");
@@ -1183,10 +1198,7 @@ static VOID update_live_state(VOID)
     {
         "New", "Stack off", "Not added", "Offline", "Online", "Unknown"
     };
-    static const char *const action_text[] =
-    {
-        "Online", "Online", "Online", "Online", "Offline", "Online"
-    };
+    struct Gadget *action;
     LONG state;
 
     if (np.window == NULL) return;
@@ -1195,9 +1207,20 @@ static VOID update_live_state(VOID)
 
     np.live_state = state;
     set_attr(np.g_live_status, GTTX_Text, (ULONG)status_text[state]);
-    set_button_text(np.g_live_action, action_text[state]);
-    set_attr(np.g_live_action, GA_Disabled,
+    action = state == NP_LIVE_ONLINE ? np.g_live_offline : np.g_live_online;
+    if (action != np.g_live_action)
+    {
+        if (np.g_live_action != NULL)
+        {
+            (VOID)RemoveGList(np.window, np.g_live_action, 1);
+            np.g_live_action->NextGadget = NULL;
+        }
+        np.g_live_action = action;
+        (VOID)AddGList(np.window, action, (UWORD)-1, 1, NULL);
+    }
+    set_attr(action, GA_Disabled,
              (ULONG)(state != NP_LIVE_OFFLINE && state != NP_LIVE_ONLINE));
+    RefreshGList(action, np.window, NULL, 1);
 }
 
 static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
@@ -1213,6 +1236,36 @@ static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
     ng.ng_GadgetID = id; ng.ng_Flags = flags;
     ng.ng_VisualInfo = np.visual; ng.ng_UserData = NULL;
     return CreateGadgetA(kind, previous, &ng, tags);
+}
+
+static LONG gadget_count(struct Gadget *g)
+{
+    LONG count = 0;
+
+    while (g != NULL)
+    {
+        count++;
+        g = g->NextGadget;
+    }
+    return count;
+}
+
+static VOID detach_panel(ULONG which)
+{
+    struct Gadget *tail;
+    LONG i;
+
+    if (np.window == NULL || which >= NP_PANEL_COUNT) return;
+    (VOID)RemoveGList(np.window, np.panel_gadgets[which],
+                     np.panel_gadget_count[which]);
+
+    /* The list is allocated and freed independently.  Restore that ownership
+       boundary even on Intuition versions which retain the old successor in
+       the removed tail's NextGadget link. */
+    tail = np.panel_gadgets[which];
+    for (i = 1; tail != NULL && i < np.panel_gadget_count[which]; i++)
+        tail = tail->NextGadget;
+    if (tail != NULL) tail->NextGadget = NULL;
 }
 
 /* GadTools has no page gadget.  The common controls and each page therefore
@@ -1272,15 +1325,17 @@ static VOID show_panel(ULONG which)
     if (np.window == NULL || which >= NP_PANEL_COUNT ||
         which == np.active_panel) return;
     if (np.active_panel < NP_PANEL_COUNT)
-        (VOID)RemoveGList(np.window, np.panel_gadgets[np.active_panel], -1);
+        detach_panel(np.active_panel);
 
     rp = np.window->RPort;
     SetAPen(rp, rp->BgPen);
     RectFill(rp, 164, 23, 623, 134);
     np.active_panel = which;
     draw_layout();
-    (VOID)AddGList(np.window, np.panel_gadgets[which], (UWORD)-1, -1, NULL);
-    RefreshGList(np.panel_gadgets[which], np.window, NULL, -1);
+    (VOID)AddGList(np.window, np.panel_gadgets[which], (UWORD)-1,
+                   np.panel_gadget_count[which], NULL);
+    RefreshGList(np.panel_gadgets[which], np.window, NULL,
+                 np.panel_gadget_count[which]);
 }
 
 static VOID select_panel(ULONG which)
@@ -1295,6 +1350,7 @@ static BOOL make_window(VOID)
     struct Gadget *context, *g;
     struct TagItem tags[5];
     struct TagItem win[12];
+    ULONG i;
     WORD width, height;
 
     np.screen = LockPubScreen(NULL);
@@ -1343,9 +1399,6 @@ static BOOL make_window(VOID)
     tags[3].ti_Tag=GTTX_Justification; tags[3].ti_Data=GTJ_CENTER;
     tags[4].ti_Tag=TAG_DONE; tags[4].ti_Data=0;
     ADD(np.g_live_status,TEXT_KIND,0,206,158,144,15,NULL,0);
-    TAG1(GA_Disabled, TRUE);
-    ADD(np.g_live_action,BUTTON_KIND,GID_LIVE_ACTION,358,157,90,17,
-        "Online",PLACETEXT_IN);
     TAG1(TAG_DONE, 0);
     ADD(g,BUTTON_KIND,GID_CLOSE,552,157,70,17,"Close",PLACETEXT_IN);
 
@@ -1442,6 +1495,25 @@ static BOOL make_window(VOID)
     ADD(np.g_writerequests,INTEGER_KIND,GID_WRITEREQUESTS,250,95,90,15,
         "Writes",PLACETEXT_LEFT);
 
+    for (i = 0; i < NP_PANEL_COUNT; i++)
+        np.panel_gadget_count[i] = gadget_count(np.panel_gadgets[i]);
+
+    /* BUTTON_KIND has no supported tag for changing its caption.  Keep the
+       two contextual actions as separate one-gadget lists and attach only
+       the one whose label describes the operation currently available. */
+    context = CreateContext(&np.live_online_gadgets);
+    if (context == NULL) return FALSE;
+    g = context;
+    TAG1(GA_Disabled, TRUE);
+    ADD(np.g_live_online,BUTTON_KIND,GID_LIVE_ACTION,358,157,90,17,
+        "Online",PLACETEXT_IN);
+    context = CreateContext(&np.live_offline_gadgets);
+    if (context == NULL) return FALSE;
+    g = context;
+    TAG1(GA_Disabled, TRUE);
+    ADD(np.g_live_offline,BUTTON_KIND,GID_LIVE_ACTION,358,157,90,17,
+        "Offline",PLACETEXT_IN);
+
 #undef ADD
 #undef TAG1
 
@@ -1471,6 +1543,13 @@ static BOOL make_window(VOID)
 
 static VOID close_ui(VOID)
 {
+    if (np.window != NULL && np.active_panel < NP_PANEL_COUNT)
+        detach_panel(np.active_panel);
+    if (np.window != NULL && np.g_live_action != NULL)
+    {
+        (VOID)RemoveGList(np.window, np.g_live_action, 1);
+        np.g_live_action->NextGadget = NULL;
+    }
     if (np.window != NULL) CloseWindow(np.window);
     np.window = NULL;
     if (np.gadgets != NULL) FreeGadgets(np.gadgets);
@@ -1483,6 +1562,11 @@ static VOID close_ui(VOID)
             np.panel_gadgets[i] = NULL;
         }
     }
+    if (np.live_online_gadgets != NULL) FreeGadgets(np.live_online_gadgets);
+    np.live_online_gadgets = NULL;
+    if (np.live_offline_gadgets != NULL) FreeGadgets(np.live_offline_gadgets);
+    np.live_offline_gadgets = NULL;
+    np.g_live_action = NULL;
     if (np.visual != NULL) FreeVisualInfo(np.visual);
     np.visual = NULL;
     if (np.screen != NULL) UnlockPubScreen(NULL, np.screen);
@@ -1551,10 +1635,10 @@ static VOID event_loop(VOID)
                     case GID_LIVE_ACTION:
                         update_live_state();
                         if (np.live_state == NP_LIVE_OFFLINE &&
-                            run_command("Online", name) == 0)
+                            run_command("Online", name, FALSE) == 0)
                             set_status("Interface is online.");
                         else if (np.live_state == NP_LIVE_ONLINE &&
-                                 run_command("Offline", name) == 0)
+                                 run_command("Offline", name, FALSE) == 0)
                             set_status("Interface is offline.");
                         else if (np.live_state == NP_LIVE_OFFLINE ||
                                  np.live_state == NP_LIVE_ONLINE)
