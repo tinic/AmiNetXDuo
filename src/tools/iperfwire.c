@@ -143,6 +143,34 @@ void iperf_add64(unsigned long *hi, unsigned long *lo, unsigned long add)
     *lo = sum;
 }
 
+unsigned long iperf_send_cap(unsigned long have_hi, unsigned long have_lo,
+                             unsigned long want_hi, unsigned long want_lo,
+                             unsigned long cap)
+{
+    unsigned long remain_hi;
+    unsigned long remain_lo;
+    unsigned long borrow;
+
+    have_hi = U32(have_hi);
+    have_lo = U32(have_lo);
+    want_hi = U32(want_hi);
+    want_lo = U32(want_lo);
+
+    if (have_hi > want_hi ||
+        (have_hi == want_hi && have_lo >= want_lo))
+        return 0;
+
+    /* want - have in two halves.  If the high half is non-zero, at least
+       2^32 bytes remain and every buffer this tool accepts fits. */
+    borrow    = (want_lo < have_lo) ? 1UL : 0UL;
+    remain_lo = U32(want_lo - have_lo);
+    remain_hi = U32(want_hi - have_hi - borrow);
+
+    if (remain_hi != 0 || remain_lo >= cap)
+        return cap;
+    return remain_lo;
+}
+
 const char *iperf_limits_check(unsigned long seconds, unsigned long kbytes,
                                unsigned long buflen, unsigned long port)
 {

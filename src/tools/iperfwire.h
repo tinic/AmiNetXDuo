@@ -152,6 +152,15 @@ void iperf_format_bytes(char *buf, unsigned long buflen,
 /* Add `add` to a 64-bit count held as two 32-bit halves. */
 void iperf_add64(unsigned long *hi, unsigned long *lo, unsigned long add);
 
+/*
+ * Limit one send to the bytes remaining before a 64-bit target.  The counts
+ * are two 32-bit halves even on a host where unsigned long is wider.  Returns
+ * zero when the target has already been met, otherwise at most `cap`.
+ */
+unsigned long iperf_send_cap(unsigned long have_hi, unsigned long have_lo,
+                             unsigned long want_hi, unsigned long want_lo,
+                             unsigned long cap);
+
 /* ---------------------------------------------------------------- limits - */
 
 /*

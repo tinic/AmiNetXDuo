@@ -50,8 +50,14 @@ fi
 # with a regeneration and went red on the 0.28.9 release commit for exactly
 # that; a third of a second here says so before the commit exists.
 if git diff --cached --name-only | grep -qE '^src/(tools|config)/.*\.c$|^docs/aminet-survey/'; then
-    if [ -x "$ROOT/tools/aminet-survey/check-derived.sh" ] &&
-       ! "$ROOT/tools/aminet-survey/check-derived.sh" > /dev/null 2>&1; then
+    # Validate the tree that will actually be committed.  Running the checker
+    # in $ROOT reads unstaged edits too, so a partially staged commit could
+    # pass against content it does not contain (or reject a consistent index).
+    STAGED_TREE=$(mktemp -d "${TMPDIR:-/tmp}/aminetxduo-index.XXXXXX")
+    trap 'rm -rf "$STAGED_TREE"' EXIT HUP INT TERM
+    git checkout-index --all --prefix="$STAGED_TREE/"
+    if [ -x "$STAGED_TREE/tools/aminet-survey/check-derived.sh" ] &&
+       ! "$STAGED_TREE/tools/aminet-survey/check-derived.sh" > /dev/null 2>&1; then
         echo
         echo "pre-commit: docs/aminet-survey's derived tables no longer match."
         echo "Regenerate and stage them:"
@@ -60,6 +66,8 @@ if git diff --cached --name-only | grep -qE '^src/(tools|config)/.*\.c$|^docs/am
         echo "  tools/aminet-survey/check-derived.sh   # names any other"
         exit 1
     fi
+    rm -rf "$STAGED_TREE"
+    trap - EXIT HUP INT TERM
 fi
 
 [ -x "$ROOT/tools/check-changelog-prose.sh" ] || exit 0

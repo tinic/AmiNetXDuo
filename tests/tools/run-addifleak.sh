@@ -9,7 +9,8 @@ cd "$ROOT"
 
 TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/m68000}"
-RUNS=6
+RUNS=8
+TOLERANCE="${AMINETXDUO_ADDIF_LEAK_TOLERANCE:-512}"
 
 while getopts "t:b:n:" opt; do
     case "$opt" in
@@ -20,7 +21,10 @@ while getopts "t:b:n:" opt; do
     esac
 done
 
-[ "$RUNS" -ge 3 ] || { echo "-n needs at least 3: the first run pays the one-off cost" >&2; exit 2; }
+[ "$RUNS" -ge 6 ] || { echo "-n needs at least 6: the first run pays the one-off cost and both comparison windows need samples" >&2; exit 2; }
+case "$TOLERANCE" in
+    ''|*[!0-9]*) echo "AMINETXDUO_ADDIF_LEAK_TOLERANCE must be a byte count" >&2; exit 2 ;;
+esac
 
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
@@ -139,40 +143,41 @@ else
          "the states 0.28.7 defines, and the memory measured is the same"
 fi
 
-FIRST="${FREE[1]}"
-LAST="${FREE[$((RUNS - 1))]}"
-DELTA=$(( FIRST - LAST ))
-PER=$(( DELTA / (RUNS - 2) ))
+WINDOW=$(( (RUNS - 2) / 2 ))
+EARLY_MAX=0
+LATE_MAX=0
 
-echo
-echo "  free after run 2:      $FIRST"
-echo "  free after run $RUNS:      $LAST"
-echo "  free, runs 2..$RUNS:      ${FREE[*]:1}"
-echo
-
-# A leak is monotonic: every AddNetInterface takes its bytes and none comes
-# back.  The stack's own transients are not -- a lease renewal, a neighbour
-# discovery or a reply in flight holds a 4 KB packet for a while and the
-# next reading has it back (259112 259112 255064 255592 259112 255104 on the
-# base tree, 2026-09-19, with nothing leaking) -- so a lower last reading is
-# a leak only when no reading between climbed back.  Six runs, not three,
-# so a transient has room to return inside the series.
-CLIMBED=0
+# Compare high-water marks from two windows, not individual adjacent samples.
+# A packet or lease operation can temporarily hold about 4 KB, so one reading
+# can dip and the next can climb even while every AddNetInterface leaks.  A
+# single climb therefore proves nothing.  Requiring the later window to
+# recover to the earlier window (within a small allocator tolerance) catches
+# a persistent downward trend while giving transients several samples to
+# leave.
 i=1
-while [ $((i + 1)) -lt "$RUNS" ]; do
-    if [ "${FREE[$((i + 1))]}" -gt "${FREE[$i]}" ]; then
-        CLIMBED=1
-    fi
+while [ "$i" -le "$WINDOW" ]; do
+    [ "${FREE[$i]}" -gt "$EARLY_MAX" ] && EARLY_MAX="${FREE[$i]}"
+    i=$((i + 1))
+done
+i=$((RUNS - WINDOW))
+while [ "$i" -lt "$RUNS" ]; do
+    [ "${FREE[$i]}" -gt "$LATE_MAX" ] && LATE_MAX="${FREE[$i]}"
     i=$((i + 1))
 done
 
-if [ "$DELTA" -le 0 ]; then
-    pass "a re-add costs nothing the second time onward"
-elif [ "$CLIMBED" -eq 1 ]; then
-    pass "free memory dipped $DELTA bytes and came back between runs: a" \
-         "transient of the stack's, not a leak"
+DELTA=$(( EARLY_MAX - LATE_MAX ))
+
+echo
+echo "  early high-water mark: $EARLY_MAX"
+echo "  late high-water mark:  $LATE_MAX"
+echo "  free, runs 2..$RUNS:      ${FREE[*]:1}"
+echo "  allowed difference:    $TOLERANCE"
+echo
+
+if [ "$DELTA" -le "$TOLERANCE" ]; then
+    pass "the late samples recover to within $TOLERANCE bytes of the early samples"
 else
-    fail "$PER bytes lost per AddNetInterface, and never returned"
+    fail "$DELTA bytes separate the early and late high-water marks"
 fi
 
 echo

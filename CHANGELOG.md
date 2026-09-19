@@ -35,8 +35,9 @@ version at the top when it merges.
   `anxnet.device` honours the flag.
 
 - `httpd` appends why it exited, with the Amiga clock, to
-  `SYS:AmiNetXDuo/httpd.log` (its output is on `NIL:` when started from
-  `S:User-Startup`). A failed wait for a connection no longer ends the server
+  `AmiNetXDuo:httpd.log`, following the Installer's assign when the drawer is
+  not on `SYS:` (its output is on `NIL:` when started from `S:User-Startup`).
+  A failed wait for a connection no longer ends the server
   on the first failure: it drops its connections and waits again, up to eight
   times a quarter second apart, and the ninth failure in a row ends it.
 
@@ -46,11 +47,14 @@ version at the top when it merges.
   `INTERFACES` left it out and `ShowNetStatus <name>` said there was no such
   interface. Such an interface is listed after the drawer's own, marked
   `(not in DEVS:NetInterfaces)`, and the named form works for it.
+  Its detailed report labels an address configuration outside that drawer
+  as unknown.
 
 - `iperf -n` moves exactly the bytes asked for. The socket is non-blocking and
   a send can legitimately come back short when the window fills; a full-size
   send after a short one overshot a 64 KB target to 103,660 bytes once in
-  five emulator runs. The last send is now the remainder.
+  five emulator runs. The last send is now the remainder, including when the
+  accepted 4 GB maximum crosses the byte counter's 32-bit boundary.
 
 - A name resolved before `NetShutdown` no longer resolves after it. The
   resolver's cache was consulted before the stack looked for a name server,

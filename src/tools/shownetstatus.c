@@ -387,7 +387,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                            const ToolDhcpInfo *lease,
                            const ToolDhcp6 *lease6,
                            BOOL up, BOOL stats, BOOL stack_running,
-                           BOOL readable)
+                           BOOL readable, BOOL described)
 {
     char addr[AMI_CFG_NAME_LEN];
     char mask[16];
@@ -456,7 +456,12 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
          * An IPv6-only interface has no IPv4 address and never will; three
          * zero addresses read as a fault.
          */
-        if (live->address == 0UL &&
+        if (live->address == 0UL && !described)
+        {
+            tool_printf("  address     none; its configuration file is not "
+                        "in DEVS:NetInterfaces\n");
+        }
+        else if (live->address == 0UL &&
             !ami_config_iface_wants_ipv4(cfg))
         {
             tool_printf("  address     none, this interface carries no "
@@ -495,11 +500,14 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                     "file)\n", (LONG)addr, (LONG)mask);
     }
 
-    tool_printf("  configured  %s\n",
-                (LONG)(cfg->iptype == AMI_IPTYPE_DHCP      ? "DHCP" :
-                       cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local" :
-                       cfg->iptype == AMI_IPTYPE_NONE      ? "no IPv4"
-                                                           : "static"));
+    if (!described)
+        tool_printf("  configured  unknown (not in DEVS:NetInterfaces)\n");
+    else
+        tool_printf("  configured  %s\n",
+                    (LONG)(cfg->iptype == AMI_IPTYPE_DHCP      ? "DHCP" :
+                           cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local" :
+                           cfg->iptype == AMI_IPTYPE_NONE      ? "no IPv4"
+                                                               : "static"));
     /* Only when the file set one: 0 is every interface that did not, and the
        line would say nothing about which of them carries a shared subnet. */
     if (cfg->priority != 0)
@@ -509,7 +517,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
      * Printed only when there is something to say: the floor build always
      * reports OFF and would gain a line that means nothing there.
      */
-    if (cfg->ip6type != AMI_IP6TYPE_OFF)
+    if (described && cfg->ip6type != AMI_IP6TYPE_OFF)
         tool_printf("  configured6 %s\n",
                     (LONG)(cfg->ip6type == AMI_IP6TYPE_DHCP      ? "DHCPv6" :
                            cfg->ip6type == AMI_IP6TYPE_STATIC    ? "static" :
@@ -633,8 +641,7 @@ static BOOL live_described(const AmiConfig *cfg, const ToolSnapshot *snap,
 /* The description such an interface would have had: its name, and the device
    and unit the stack has open.  Static: the struct is not small and a Shell
    gives this command 4096 bytes of stack. */
-static const AmiIfConfig *live_as_config(const ToolIfInfo *live,
-                                         const ToolDhcpInfo *lease)
+static const AmiIfConfig *live_as_config(const ToolIfInfo *live)
 {
     static AmiIfConfig made;
 
@@ -642,10 +649,6 @@ static const AmiIfConfig *live_as_config(const ToolIfInfo *live,
     tool_copy_string(made.name, sizeof(made.name), live->nx_name);
     tool_copy_string(made.device, sizeof(made.device), live->nx_device);
     made.unit = live->nx_unit;
-    /* The file is not here to read CONFIGURE= from; a lease says DHCP, and
-       without one the address is what the file gave, which is static. */
-    made.iptype = (lease != NULL) ? AMI_IPTYPE_DHCP : AMI_IPTYPE_STATIC;
-
     return &made;
 }
 
@@ -1843,7 +1846,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                            have_lease ? lease_for(&dhcp, live) : NULL,
                            have_lease6 ? &dhcp6 : NULL,
                            iface_online(live), detailed,
-                           stack_running, (BOOL)!elsewhere);
+                           stack_running, (BOOL)!elsewhere, TRUE);
             shown++;
         }
 
@@ -1864,11 +1867,11 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 if (have_lease)
                     lease = lease_for(&dhcp, live);
 
-                show_interface(live_as_config(live, lease), live, &snap,
+                show_interface(live_as_config(live), live, &snap,
                                lease,
                                have_lease6 ? &dhcp6 : NULL,
                                iface_online(live), detailed,
-                               stack_running, (BOOL)!elsewhere);
+                               stack_running, (BOOL)!elsewhere, FALSE);
                 shown++;
             }
         }

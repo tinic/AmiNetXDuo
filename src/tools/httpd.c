@@ -7001,11 +7001,53 @@ static VOID httpd_accept(LONG lsock)
  * Why the server stopped, written where it can be read afterwards.  The server
  * is started from S:User-Startup with its output on NIL:, so a tool_error()
  * on the way out went nowhere, and "httpd was gone in the morning" had no
- * cause to look at.  One line per exit, appended to SYS:AmiNetXDuo/httpd.log
- * (the drawer the installer makes; a machine without it gets no note and no
- * requester), with the Amiga clock.  Read it with Type.
+ * cause to look at.  One line per exit, appended to AmiNetXDuo:httpd.log (the
+ * drawer the installer assigns wherever the user put it), with the Amiga
+ * clock.  A manual launch without that assign falls back to the traditional
+ * SYS:AmiNetXDuo drawer.  A machine without either gets no note and no
+ * requester.  Read it with Type.
  */
-#define HTTPD_EXIT_LOG  "SYS:AmiNetXDuo/httpd.log"
+#define HTTPD_EXIT_DRAWER          "AmiNetXDuo:"
+#define HTTPD_EXIT_LOG             "AmiNetXDuo:httpd.log"
+#define HTTPD_EXIT_FALLBACK_DRAWER "SYS:AmiNetXDuo"
+#define HTTPD_EXIT_FALLBACK_LOG    "SYS:AmiNetXDuo/httpd.log"
+
+static BPTR httpd_open_exit_log(VOID)
+{
+    struct Process *me = (struct Process *)FindTask(NULL);
+    APTR            saved = NULL;
+    BPTR            drawer;
+    BPTR            fh = 0;
+
+    /* Looking up an absent assign must not put a volume requester on an
+       unattended server's screen. */
+    if (me != NULL && me->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+    {
+        saved = me->pr_WindowPtr;
+        me->pr_WindowPtr = (APTR)-1L;
+    }
+
+    drawer = Lock((CONST_STRPTR)HTTPD_EXIT_DRAWER, ACCESS_READ);
+    if (drawer != 0)
+    {
+        UnLock(drawer);
+        fh = Open((CONST_STRPTR)HTTPD_EXIT_LOG, MODE_READWRITE);
+    }
+    else
+    {
+        drawer = Lock((CONST_STRPTR)HTTPD_EXIT_FALLBACK_DRAWER, ACCESS_READ);
+        if (drawer != 0)
+        {
+            UnLock(drawer);
+            fh = Open((CONST_STRPTR)HTTPD_EXIT_FALLBACK_LOG, MODE_READWRITE);
+        }
+    }
+
+    if (me != NULL && me->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+        me->pr_WindowPtr = saved;
+
+    return fh;
+}
 
 static VOID httpd_note_exit(const char *why, const char *detail)
 {
@@ -7016,14 +7058,7 @@ static VOID httpd_note_exit(const char *why, const char *detail)
     ULONG            v;
     const char      *p;
 
-    {
-        BPTR drawer = Lock((CONST_STRPTR)"SYS:AmiNetXDuo", ACCESS_READ);
-
-        if (drawer == 0)
-            return;
-        UnLock(drawer);
-    }
-    fh = Open((CONST_STRPTR)HTTPD_EXIT_LOG, MODE_READWRITE);
+    fh = httpd_open_exit_log();
     if (fh == 0)
         return;
     (VOID)Seek(fh, 0, OFFSET_END);

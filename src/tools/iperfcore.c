@@ -561,11 +561,15 @@ static VOID iperf_slice_send(IperfRun *run)
            short when the window fills; a full-size send after a short one
            took `-n 64` to 103,660 bytes once in five emulator runs, which
            the harness reads as a stack that lost count. */
-        if (run->plan.kbytes != 0 && run->plan.dir != IPERF_UDP_TX &&
-            run->res.bytes_hi == run->want_bytes_hi &&
-            run->want_bytes_lo > run->res.bytes_lo &&
-            (ULONG)len > run->want_bytes_lo - run->res.bytes_lo)
-            len = (LONG)(run->want_bytes_lo - run->res.bytes_lo);
+        if (run->plan.kbytes != 0 && run->plan.dir != IPERF_UDP_TX)
+            len = (LONG)iperf_send_cap(run->res.bytes_hi,
+                                       run->res.bytes_lo,
+                                       run->want_bytes_hi,
+                                       run->want_bytes_lo,
+                                       (ULONG)len);
+
+        if (len == 0)
+            break;
 
         if (run->plan.dir == IPERF_UDP_TX)
         {
