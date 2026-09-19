@@ -875,7 +875,9 @@ static LONG tool_gai_try(struct Library *base, const char *host, LONG want,
 
 BOOL tool_sock_have_addrinfo(struct Library *base)
 {
-    ToolAddr probe;
+    ToolAddrInfo  hints;
+    ToolAddrInfo *list = NULL;
+    LONG          rc;
 
     /* A vector can exist without an implementation.  The micro profile keeps
        the ABI slot but deliberately stubs getaddrinfo(), so testing only the
@@ -883,9 +885,26 @@ BOOL tool_sock_have_addrinfo(struct Library *base)
        lose the classic resolver that micro does provide.  A numeric literal
        is local, deterministic, and asks no name server; a real getaddrinfo()
        must be able to answer it. */
-    return (BOOL)(tool_sock_have_lvo(base, 0x330UL) &&
-                  tool_gai_try(base, "127.0.0.1", TOOL_AF_INET, TRUE,
-                               &probe) == 0);
+    if (!tool_sock_have_lvo(base, 0x330UL))
+        return FALSE;
+
+    hints.ai_flags     = TOOL_AI_NUMERICHOST;
+    hints.ai_family    = TOOL_AF_INET;
+    hints.ai_socktype  = TOOL_SOCK_STREAM;
+    hints.ai_protocol  = 0;
+    hints.ai_addrlen   = 0;
+    hints.ai_addr      = NULL;
+    hints.ai_canonname = NULL;
+    hints.ai_next      = NULL;
+
+    /* Do not use tool_gai_try() here.  Its four-answer ToolAddrList is right
+       for resolution but needlessly deepens every client's stack for this
+       one-answer capability probe. */
+    rc = tool_sock_getaddrinfo(base, "127.0.0.1", NULL, &hints, &list);
+    if (list != NULL)
+        tool_sock_freeaddrinfo(base, list);
+
+    return (BOOL)(rc == 0 && list != NULL);
 }
 
 BOOL tool_sock_family_absent(struct Library *base, const char *host, LONG want)

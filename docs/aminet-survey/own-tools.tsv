@@ -117,7 +117,7 @@ offset	lvo	aminet_callers	our_tool_mentions
 -792	ipf_set_notify_mask	0	0
 -798	ipf_set_interrupt_mask	0	0
 -804	freeaddrinfo	0	2
--810	getaddrinfo	0	9
+-810	getaddrinfo	0	11
 -816	gai_strerror	0	0
 -822	getnameinfo	1	0
 -882	if_nametoindex	0	1

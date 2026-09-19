@@ -9,14 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
-- The micro profile starts at boot again. It had compiled out the private
-  control calls used by `AddNetInterface`, `Online` and `Offline`, so a valid
-  `S:Network-Startup` could not bring up its configured card. Shipped clients
-  also distinguish an ABI-compatible `getaddrinfo()` stub from a working
-  implementation and fall back to the classic resolver; DNS therefore works
-  with the micro library. System and self-contained installs of all three
-  profiles, including reinstall beside a foreign stack, are now a mandatory
-  release gate rather than optional emulator runs.
+- The micro profile starts configured interfaces at boot again; its private
+  interface-control calls remain present.
+- Shipped clients detect the micro profile's `getaddrinfo()` stub and use its
+  classic resolver, restoring DNS there.
+- The release gate covers system and self-contained installs of all three
+  profiles, reinstall beside a foreign stack, and browser services: 11
+  scenarios, with missing ingredients counted as failures.
 
 ## 1.0.0-beta2
 

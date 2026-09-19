@@ -65,9 +65,17 @@ while IFS= read -r line; do
     case "$line" in ''|'#'*) continue ;; esac
     case "$line" in *:*:*) ;; *) err "malformed_row:${line%% *}"; continue ;; esac
 
-    path=$(printf '%s' "$line" | cut -d: -f1 | tr -d '[:space:]')
-    runner=$(printf '%s' "$line" | cut -d: -f2 | sed 's/^ *//; s/ *$//')
-    note=$(printf '%s' "$line" | cut -d: -f3- | sed 's/^ *//; s/ *$//')
+    # Split the path at its first colon, then the runner at the documented
+    # " : " separator.  `cut -d: -f2` made the first real chained row
+    # (`chained:install/test/run-all.sh`) read merely `chained`, although the
+    # format above has advertised chained runners since the file was added.
+    path=${line%%:*}
+    rest=${line#*:}
+    runner=${rest%% : *}
+    note=${rest#* : }
+    path=$(printf '%s' "$path" | tr -d '[:space:]')
+    runner=$(printf '%s' "$runner" | sed 's/^ *//; s/ *$//')
+    note=$(printf '%s' "$note" | sed 's/^ *//; s/ *$//')
 
     # A wired runner carries its SCHEDULE: `<runner>@<when>`.  See WHEN A
     # WIRED ROW ACTUALLY RUNS below for why the runner alone is not the claim.

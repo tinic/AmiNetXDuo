@@ -87,12 +87,14 @@ BUDGETS=(
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
-    # First budgeted as a shipping profile at 0.28.9: 181,012 bytes, with
-    # headroom to the next KiB boundary.  Drivers are built from the same
-    # sources as the other profiles and are kept here because this gate is
-    # also the assertion that every resident image in every shipped drawer
-    # has a budget.
-    "micro:src/bsdsocket/bsdsocket.library:181248"
+    # First budgeted as a shipping profile at 0.28.9: 181,012 bytes.  Raised
+    # to 197,632 in beta2: the private status/control implementation is 16 KB
+    # and cannot be removed because AddNetInterface, Online and Offline use it.
+    # Headroom remains only to the next KiB boundary. Drivers are built from
+    # the same sources as the other profiles and are kept here because this
+    # gate is also the assertion that every resident image in every shipped
+    # drawer has a budget.
+    "micro:src/bsdsocket/bsdsocket.library:197632"
     "micro:src/netdev/anxnet.device:43000"
     "micro:src/netdev/anxgenet.device:27500"
     "micro:src/wifipi/anxwifipi.device:56000"

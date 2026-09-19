@@ -111,7 +111,7 @@ for scenario in "${SCENARIOS[@]}"; do
     esac
 
     AMINETXDUO_RUN_TAG="matrix-$scenario" \
-        "$HERE/run-workbench.sh" "${opts[@]}" "${ARGS[@]}"
+        "$ROOT/install/test/run-workbench.sh" "${opts[@]}" "${ARGS[@]}"
     rc=$?
     case "$rc" in
         # run-workbench.sh's own codes: 2 is "this box cannot run this test",
