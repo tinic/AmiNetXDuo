@@ -9,6 +9,17 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `AddNetInterface DEVS:NetInterfaces/<name>` -- the line the installer writes
+  into `S:Network-Startup` -- reaches a self-contained installation's drawer
+  on a machine whose system `Devs/NetInterfaces` still exists. It went
+  through a DOS pattern match that stopped at the first DEVS: member with
+  such a drawer, empty or not, and the machine booted with no network. Only a
+  wildcard is expanded now, in the drawer the loader reads.
+- The installer puts the `AmiNetXDuo` drawer under `SYS:` unless one is
+  already assigned, in which case that drawer is reinstalled. The Installer's
+  own default was `Work:` whenever that volume existed, and a reinstall of a
+  drawer installation was offered a second drawer and refused.
+
 - The GitHub release page leads with the archive link, then the downloads a
   machine may need (Emu68, WirelessManager, the ZZ9000 driver package), with
   the change list folded below. `dist/release-links.tsv` holds the links.

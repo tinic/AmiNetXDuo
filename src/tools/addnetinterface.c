@@ -179,23 +179,98 @@ static BOOL add_expanded_name(const char *path, ULONG *count)
     return TRUE;
 }
 
+/* A wildcard in the argument, by DOS's own reading of it.  The scratch
+ * ParsePatternNoCase() needs is 2n+2 bytes, from the pool, not the stack. */
+static BOOL argument_is_pattern(const char *argument)
+{
+    ULONG len = 0;
+    char *scratch;
+    LONG  kind;
+
+    while (argument[len] != '\0')
+        len++;
+
+    scratch = (char *)AllocVec(len * 2UL + 2UL, MEMF_PUBLIC);
+    if (scratch == NULL)
+        return FALSE;
+
+    kind = ParsePatternNoCase((STRPTR)argument, (STRPTR)scratch,
+                              (LONG)(len * 2UL + 2UL));
+    FreeVec(scratch);
+
+    return kind > 0;
+}
+
 /* Roadshow and AmiTCP_NG both ship a Network-Startup which explicitly passes
  * DEVS:NetInterfaces/~(#?.info). Opening the library remains inert; this is
- * the user-owned, command-line request to enumerate the drawer. */
+ * the user-owned, command-line request to enumerate the drawer.
+ *
+ * ONLY A WILDCARD IS EXPANDED.  MatchFirst() on a plain path locks the
+ * drawer part first, and through a DEVS: multi-assign that is the FIRST
+ * member with such a drawer: on a machine whose system Devs/NetInterfaces
+ * still exists, empty, a self-contained installation's
+ * DEVS:NetInterfaces/eth0 -- the line its own S:Network-Startup carries --
+ * was "no interface configuration matched", and the machine booted with no
+ * network (A3000, 2026-09-19).  A plain path goes to the loader as given;
+ * ami_config_load_interface() resolves DEVS: into the drawer there.  A
+ * pattern's drawer part is resolved the same way before it is walked, so
+ * DEVS:NetInterfaces/~(#?.info) enumerates the drawer that is read. */
 static BOOL expand_interface_argument(const char *argument, ULONG *count)
 {
     struct AnchorPath *anchor;
     LONG               err;
     BOOL               matched = FALSE;
     BOOL               ok = TRUE;
+    char              *pattern = NULL;
 
-    if (FilePart((STRPTR)argument) == (STRPTR)argument)
+    if (FilePart((STRPTR)argument) == (STRPTR)argument ||
+        !argument_is_pattern(argument))
         return add_expanded_name(argument, count);
+
+    {
+        const char *file = (const char *)FilePart((STRPTR)argument);
+        ULONG       dirlen = (ULONG)(file - argument);
+        char       *dir = (char *)AllocVec(ADDIF_MATCH_PATH * 2UL, MEMF_PUBLIC);
+        const char *where;
+
+        if (dir == NULL)
+        {
+            tool_error("out of memory expanding interface pattern");
+            return FALSE;
+        }
+        if (dirlen >= ADDIF_MATCH_PATH)
+            dirlen = ADDIF_MATCH_PATH - 1UL;
+        tool_copy_string(dir, dirlen + 1UL, argument);
+        /* The drawer without its trailing separator: that is what the
+           resolver locks; the separator goes back on below. */
+        if (dirlen > 0 && dir[dirlen - 1] == '/')
+            dir[dirlen - 1] = '\0';
+
+        where = ami_cfg_resolve(dir, dir + ADDIF_MATCH_PATH, ADDIF_MATCH_PATH);
+        if (where != dir)
+        {
+            pattern = dir;
+            tool_copy_string(pattern, ADDIF_MATCH_PATH, where);
+            if (!AddPart((STRPTR)pattern, (STRPTR)file, ADDIF_MATCH_PATH))
+            {
+                FreeVec(dir);
+                tool_error("interface pattern is too long");
+                return FALSE;
+            }
+            argument = pattern;
+        }
+        else
+        {
+            FreeVec(dir);
+        }
+    }
 
     anchor = (struct AnchorPath *)AllocVec(
         (ULONG)sizeof(*anchor) + ADDIF_MATCH_PATH, MEMF_PUBLIC | MEMF_CLEAR);
     if (anchor == NULL)
     {
+        if (pattern != NULL)
+            FreeVec(pattern);
         tool_error("out of memory expanding interface pattern");
         return FALSE;
     }
@@ -234,19 +309,22 @@ static BOOL expand_interface_argument(const char *argument, ULONG *count)
     MatchEnd(anchor);
     FreeVec(anchor);
 
-    if (!ok)
-        return FALSE;
-    if (!matched)
+    if (ok && !matched)
     {
         tool_error("no interface configuration matched \"%s\"",
                    (LONG)argument);
-        return FALSE;
+        ok = FALSE;
     }
-    if (err != 0 && err != ERROR_NO_MORE_ENTRIES)
+    else if (ok && err != 0 && err != ERROR_NO_MORE_ENTRIES)
     {
         tool_fault(err);
-        return FALSE;
+        ok = FALSE;
     }
+    /* After the messages: `argument` may be the resolved pattern. */
+    if (pattern != NULL)
+        FreeVec(pattern);
+    if (!ok)
+        return FALSE;
 
     return TRUE;
 }

@@ -893,6 +893,21 @@
           "reinstalling, but does not increase that run-time limit.")))
 
 ; --- where the drawer of documentation goes ------------------------------
+;
+; SYS: unless a self-contained installation is already assigned; then the
+; drawer that assign names, so a reinstall lands on the installation it
+; reinstalls.  Left to the Installer, @default-dest is Work: whenever that
+; volume exists: the stack went onto the A1200's data partition (2026-09-19),
+; and a reinstall of a drawer install offered a SECOND drawer, whose
+; bsdsocket.library was not the one LIBS: already reached through the first,
+; so the refusal below fired and no reinstall ever went through.
+(set @default-dest "SYS:")
+(set HAVE_DRAWER 0)
+(if (exists "AmiNetXDuo:Libs/bsdsocket.library" (noreq))
+  (
+    (set @default-dest (pathonly (expandpath "AmiNetXDuo:")))
+    (set HAVE_DRAWER 1)
+  ))
 
 (set DOCPARENT
   (askdir
@@ -937,7 +952,14 @@
 
 (if FORCE_DRAWER (set DRAWER_LAYOUT 1))
 
-(if (AND (= FORCE_DRAWER 0) (>= @user-level 1))
+; An installation that already lives in a drawer is reinstalled into that
+; drawer, not asked again: the layout question answered "into the system"
+; on top of one would leave the drawer's block in S:User-Startup adding a
+; second bsdsocket.library to LIBS:.  Leaving the drawer layout means
+; removing the drawer and its block first.
+(if HAVE_DRAWER (set DRAWER_LAYOUT 1))
+
+(if (AND (= FORCE_DRAWER 0) (AND (= HAVE_DRAWER 0) (>= @user-level 1)))
   (if (= 1 (askchoice
              (prompt "Where should the stack itself go?")
              (help (cat "Into the system is the ordinary answer: "
