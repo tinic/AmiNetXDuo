@@ -476,3 +476,23 @@ endif()
 # -DAMINETXDUO_PROFILER=ON only.  See prof/CMakeLists.txt for what it is and
 # how it is verified before anything it prints is believed.
 add_subdirectory(prof)
+
+# WbJitter: the CPU a Workbench-priority task waits for while the stack moves
+# data (AmiTCP_NG #9 is a Workbench frozen for the length of a transfer).  A
+# task at PRI asks for one tick with Delay(1) and reads the E-clock when it
+# gets back; a gap far past 20 ms is time Workbench would not have repainted.
+# No NetX Duo in it: the transfer it measures against is any other program.
+#
+#   cmake --build build/cm --parallel --target wbjitter
+#   copy build/cm/tests/perf/WbJitter to RAM: on the machine, then
+#   RAM:WbJitter SECS 30  (idle)  and again under iperf / a fetch.
+if(CMAKE_CROSSCOMPILING)
+    add_executable(wbjitter wbjitter.c)
+    target_link_libraries(wbjitter PRIVATE aminetxduo_common)
+    target_include_directories(wbjitter PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(wbjitter PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+    target_compile_options(wbjitter PRIVATE -Wall -Wextra)
+    set_target_properties(wbjitter PROPERTIES OUTPUT_NAME "WbJitter")
+endif()

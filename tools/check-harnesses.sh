@@ -156,6 +156,7 @@ say harnesses_wired "$wired"
 INSTRUMENTS="
 bracket_test        prices the ThreadX/Exec bracket; tests/bracket says whether it is correct
 cpucal              what the emulator charges for an instruction, which every other number here rests on
+wbjitter            the CPU a Workbench-priority task waits for during a transfer; a measured table in its header (the A3000: 51 ms at most)
 crypto68k_bench     a reference RSA-2048 private operation, minutes of it
 crypto68k_bulk      AES and SHA-256 instruction cost, 68020 only
 crypto68k_ec_bench  P-256 against reference elliptic curve operations
