@@ -62,15 +62,26 @@ Emu68 1.0.3 is not supported.
 on SDIO, behind a PiStorm32 running Emu68 (`DEVICE=anxwifipi.device`,
 `UNIT=0`). It is the MPL-2.0 fork of Michal Schulz's WiFiPi.device kept at
 `github.com/tinic/WiFiPi.device` (branch `gcc16`, submodule
-`third_party/wifipi`), built here with the tree's toolchain, and it carries a
-receiver that watches the card's line without an interrupt, the single-copy
-receive path above, and counters behind `S2_GETSPECIALSTATS`. It needs the
-Wi-Fi firmware Emu68 installs in `DEVS:Firmware`, and a supplicant to join a
-network -- WirelessManager from Aminet's `driver/net/prism2v2` reads
+`third_party/wifipi`), built here with the tree's toolchain, with the
+single-copy receive path above and counters behind `S2_GETSPECIALSTATS`. It
+needs the Wi-Fi firmware Emu68 installs in `DEVS:Firmware`, and a supplicant
+to join a network -- WirelessManager from Aminet's `driver/net/prism2v2` reads
 `ENVARC:Sys/Wireless.prefs` and associates through the SANA-II wireless
 commands; the interface file names the device as any other. On an A1200 +
-PiStorm32 Lite on a 5 GHz network at -71 dBm: 36 Mbit/s in, 57 out, 6 ms
-round trips.
+PiStorm32 Lite on a 5 GHz network at -69 dBm: 34-36 Mbit/s in, 52-61 out,
+6 ms round trips.
+
+**`anxwifipi.device` is experimental.** The card's interrupt line is shared
+with the SD card host, and the gic400.library in the Emu68 ROM takes one
+server per line, so the driver has no interrupt: a task at the lowest
+priority watches the card's status register while frames flow (it takes
+whatever CPU is idle during a transfer, and a CPU meter shows it), and a
+timer tick looks otherwise -- 0.4% of the machine idle, up to 20 ms on the
+first frame of an exchange after a quiet second. The interrupt path needs a
+gic400.library with shared lines (`github.com/tinic/emu68-gic400-library`,
+branch `shared-lines`) in the ROM; until then the driver is polled, and
+association, roaming and power-save behaviour have been exercised on one
+access point.
 
 **Receive offload (GRO).** `anxgenet.device` verifies every IPv4 and IPv6
 frame's header and TCP or UDP checksum itself, from the sum its copy already
@@ -78,12 +89,36 @@ produced, and marks each TCP segment that continues the one before it. The
 stack skips its own checksum pass on a verified frame and hands TCP one
 segment where the wire carried up to sixteen, the receive side of a
 large-receive offload; it does the same for IPv6. A 1 Gbit/s GENET behind a
-PiStorm32 receives 290 Mbit/s this way and sends 107, 142 and 65 without. The two SANA-II
+PiStorm32 Lite receives 900 Mbit/s this way and sends 580 (iperf, 2026-09-19;
+142 and 65 before the offload). The two SANA-II
 extensions that carry it are published for any driver to implement,
 `Developer/include/aminetxduo/anxs2ext.h`. They are negotiated additions to
 SANA-II, not a replacement network API: a driver may offer VERIFIED checksum
 results without implementing CONTINUES/GRO, and an ordinary SANA-II driver
 uses the unchanged receive path.
+
+### Measured on
+
+What the numbers in this file come from, and what CI boots. A card or a
+machine not in this table is not known to fail; it is not known.
+
+| Machine | Kickstart | Card and driver | Measured |
+|---|---|---|---|
+| A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | GENET, `anxgenet.device` | 900 in / 580 out Mbit/s |
+| A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | 3Com 3C589 PCMCIA, `anxnet.device` | 8.3 Mbit/s |
+| A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | Broadcom 43455 Wi-Fi, `anxwifipi.device` | 34-36 in / 52-61 out Mbit/s, 5 GHz at -69 dBm |
+| A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 3.9 in / 3.0 out Mbit/s |
+| Amiberry, A1200 (68020) | 3.1 | A2065, `anxnet.device` | 4.8 in / 4.4 out Mbit/s |
+| Amiberry, A3000 (68030) | 3.1 | X-Surf 100 (Zorro III), `anxnet.device` | 30 in / 31 out Mbit/s |
+| Amiberry, A600 (68000) | 2.05 | NE2000 PCMCIA and `cnet.device` | boots, DHCP, transfers (CI) |
+| Amiberry, A500+ / A2000 (68000) | 2.04, 3.1 | A2065, Ariadne II | boots, DHCP, transfers (CI) |
+| Amiberry, 68060 | 3.1 | A2065 | builds and boots (CI arm) |
+
+Every CI run boots Kickstart 2.04, 2.05 and 3.1 guests on 68000 and 68020
+and runs DHCP, TCP and UDP transfers, `Online`/`Offline`, the installer and
+the card-eject path; the two real machines above run the release archive
+daily. Roadshow and AmiTCP_NG coexist on the same disk, selected at boot
+(`SYS:Stacks`).
 
 ## Installing
 
@@ -222,6 +257,16 @@ configuration file; for such a program the change is to resolve with
 stand. `AmiTCP:` is assigned, so ixemul programs find what they open by path.
 NFS mounts with `ch_nfsc` authenticate. Up to four interfaces are online at
 once, and the first one named to `AddNetInterface` owns the default route.
+
+The whole of AmiTCP's `socket_lib.fd` (45 vectors) is implemented. Of
+Roadshow's 125, 21 answer `ENOSYS`: the tunables API (`ObtainRoadshowData`
+and friends), the IP filter/NAT API (`ipf_*`) and the kernel-memory API
+(`mbuf_*`); `SBTC_HAVE_*` reports each truthfully, and
+[`docs/GAPS.md`](docs/GAPS.md) lists every one with what a program loses.
+`crypt()` is a stub: a ported server that authenticates against `passwd`
+cannot. A survey of 6,627 Aminet archives
+([`docs/aminet-survey`](docs/aminet-survey)) found no caller of any of the
+21.
 
 ## Building from source
 
