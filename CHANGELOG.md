@@ -9,6 +9,19 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxwifipi.device` costs 2% of an idle A1200 + PiStorm32 (Emu68), not 10%.
+  Its receiver looked at the card every 2 ms, and on Emu68 a `timer.device`
+  MICROHZ tick is an emulated CIA and an emulated interrupt -- 179 us each,
+  9.8% of the machine with nothing on the air (sampled at 1 kHz over 30 s);
+  every broadcast the LAN made started the poller's 10 ms watch for another
+  0.8%. After two seconds with no frame for this station and nothing sent
+  the tick now slows to 20 ms; the first frame or write of the next exchange
+  brings the fast tick and the poller back for as long as it lasts, and the
+  LAN's broadcasts count as neither. Measured: receiver 9.8% -> 2.0%, poller
+  0.8% -> nil; ping from the LAN at 2 Hz and 5 Hz 6-7 ms as before, at 1 Hz
+  10-24 ms with outliers to 440 ms that the wake-up counter attributes to
+  the chip's power save, not the tick; TCP 34 in / 61 out Mbit/s, unchanged.
+
 - A task list names the card behind every task of the stack's. The readers
   were `AmiNetXDuo rx ip`, `rx arp` and `rx ip6` for every interface alike --
   nine readers under three names on a machine with three interfaces -- and
