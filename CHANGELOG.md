@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 1.0.0-beta1
+
 - `NetPrefs` no longer hangs the machine after a Save made from a page other
   than General. The Name gadget was disabled through GadTools while its page
   was detached, which drew it over the current page and left Intuition's

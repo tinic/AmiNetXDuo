@@ -6,7 +6,8 @@
 # applies the same pin check; the `version_scheme` host test diffs the two.
 #
 #   tools/version.sh              0.1.0+nx6.5.1     the compound version
-#   tools/version.sh --product    0.1.0             ours alone
+#   tools/version.sh --product    0.1.0             ours alone (1.0.0-beta1 while
+#                                                   a pre-release identifier is set)
 #   tools/version.sh --netxduo    6.5.1             what we are built on
 #   tools/version.sh --threadx    6.5.1
 #   tools/version.sh --build      1234              commit count, or empty
@@ -35,6 +36,19 @@ product=$(sed -n \
     's/^[[:space:]]*project([[:space:]]*AmiNetXDuo[[:space:]]\{1,\}VERSION[[:space:]]\{1,\}\([0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}\).*/\1/p' \
     "$CMAKELISTS" | head -1)
 [ -n "$product" ] || die "no project(AmiNetXDuo VERSION x.y.z ...) in $CMAKELISTS"
+
+# set(AMINETXDUO_VERSION_PRERELEASE "beta1")  -- beside project(), "" for a
+# release.  Appended with a hyphen, the rule cmake/AmiNetXDuoVersion.cmake
+# applies; the version_scheme test holds the two to it.
+prerelease=$(sed -n \
+    's/^[[:space:]]*set([[:space:]]*AMINETXDUO_VERSION_PRERELEASE[[:space:]]\{1,\}"\([^"]*\)").*/\1/p' \
+    "$CMAKELISTS" | head -1)
+if [ -n "$prerelease" ]; then
+    case "$prerelease" in
+        *[!0-9A-Za-z.]*) die "AMINETXDUO_VERSION_PRERELEASE \"$prerelease\" is not letters, digits and dots" ;;
+    esac
+    product="$product-$prerelease"
+fi
 
 # ------------------------------------------------------------- upstream -----
 
@@ -128,6 +142,7 @@ case "${1:---compound}" in
                     fi
                 }
                 expect AMINETXDUO_VERSION          "$product"
+                expect AMINETXDUO_VERSION_PRERELEASE "$prerelease"
                 expect AMINETXDUO_NETXDUO_VERSION  "$netxduo"
                 expect AMINETXDUO_THREADX_VERSION  "$threadx"
                 expect AMINETXDUO_VERSION_COMPOUND "$product+nx$netxduo"

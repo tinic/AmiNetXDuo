@@ -114,6 +114,20 @@ _aminetxduo_check_pin(THREADX "${AMINETXDUO_THREADX_VERSION}"
 
 set(AMINETXDUO_VERSION "${PROJECT_VERSION}")
 
+# The pre-release identifier from the root CMakeLists.txt, set beside
+# project() since project() takes numbers only.  Checked here so a typo does
+# not become an archive name; tools/version.sh applies the same rule.
+if(NOT DEFINED AMINETXDUO_VERSION_PRERELEASE)
+    set(AMINETXDUO_VERSION_PRERELEASE "")
+endif()
+if(NOT AMINETXDUO_VERSION_PRERELEASE STREQUAL "")
+    if(NOT AMINETXDUO_VERSION_PRERELEASE MATCHES "^[0-9A-Za-z.]+$")
+        message(FATAL_ERROR
+            "AMINETXDUO_VERSION_PRERELEASE \"${AMINETXDUO_VERSION_PRERELEASE}\" is not letters, digits and dots")
+    endif()
+    string(APPEND AMINETXDUO_VERSION "-${AMINETXDUO_VERSION_PRERELEASE}")
+endif()
+
 # Machine-facing: goes in filenames, artefact names and tags-adjacent places.
 # SemVer build metadata, so "0.1.0+nx6.5.1" sorts and compares as 0.1.0.
 set(AMINETXDUO_VERSION_COMPOUND

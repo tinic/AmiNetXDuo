@@ -23,6 +23,9 @@
 #define AMINETXDUO_VERSION_MAJOR    @PROJECT_VERSION_MAJOR@
 #define AMINETXDUO_VERSION_MINOR    @PROJECT_VERSION_MINOR@
 #define AMINETXDUO_VERSION_PATCH    @PROJECT_VERSION_PATCH@
+/* "beta1" while a pre-release, "" for a release; _VERSION carries it after a
+   hyphen ("1.0.0-beta1"), the three numbers above do not. */
+#define AMINETXDUO_VERSION_PRERELEASE "@AMINETXDUO_VERSION_PRERELEASE@"
 #define AMINETXDUO_VERSION          "@AMINETXDUO_VERSION@"
 
 /* What we are built on, read from third_party/, never typed in twice. */

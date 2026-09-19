@@ -4,10 +4,15 @@ cmake_minimum_required(VERSION 3.20)
 # tree spells one out: cmake/AmiNetXDuoVersion.cmake takes this number,
 # compounds it with the NetX Duo and ThreadX versions it reads out of
 # third_party/, and generates include/aminetxduo/version.h.  Release tags are
-# plain vX.Y.Z.
-#
-# 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.28.9 LANGUAGES C ASM)
+# plain vX.Y.Z, or vX.Y.Z-<pre-release> while the line below is set.
+project(AmiNetXDuo VERSION 1.0.0 LANGUAGES C ASM)
+
+# The pre-release identifier, appended to the version with a hyphen wherever
+# the version is a string: "1.0.0-beta1" in $VER:, in the archive name, in the
+# tag.  project() takes numbers only, so it lives here beside it; the numeric
+# MAJOR/MINOR/PATCH stay 1.0.0.  Letters, digits and dots, as SemVer allows.
+# Empty for a release.  tools/version.sh reads this line too.
+set(AMINETXDUO_VERSION_PRERELEASE "beta1")
 
 # CMake reloads the compiler recorded by the first configure after processing
 # the toolchain file.  A reused directory could therefore validate the newly
