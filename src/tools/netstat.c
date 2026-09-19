@@ -665,6 +665,7 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
                     (LONG)(info->sana2_online ? "online" : "offline"));
         tool_printf("  packets received  %10lu    packets sent      %10lu\n",
                     st->packets_received, st->packets_sent);
+        tool_printf("  multicast in      %10lu\n", st->rx_multicast);
         tool_printf("  receive errors    %10lu    transmit errors   %10lu\n",
                     st->rx_errors, st->tx_errors);
         tool_printf("  bad data          %10lu    overruns          %10lu\n",

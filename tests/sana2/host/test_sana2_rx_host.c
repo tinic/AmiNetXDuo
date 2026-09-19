@@ -558,6 +558,46 @@ static void test_header_strip(void)
     h_check(iface.stats.packets_received == 1, "and it is counted as received");
 }
 
+/*
+ * The group bit of the destination is what says a driver DELIVERS multicast:
+ * a join it accepted and never honoured (a1k 98301: X-Surf-100 <= 1.16,
+ * plipbox, Warp WLAN) leaves rx_multicast at zero beside a joined group.  A
+ * broadcast has the bit set too and is not a group frame.
+ */
+static void test_multicast_is_counted(void)
+{
+    static const struct
+    {
+        UCHAR       dst0, dst1;
+        ULONG       want;
+        const char *what;
+    } row[] = {
+        { 0x02, 0x41, 0, "a unicast destination is not multicast"       },
+        { 0xFF, 0xFF, 0, "the broadcast address is not multicast"       },
+        { 0x01, 0x00, 1, "an IPv4 group (01:00:5e) is counted"          },
+        { 0x33, 0x33, 1, "an IPv6 group (33:33) is counted"             },
+        { 0xFF, 0xFE, 1, "ff:fe:.. has the group bit and is not broadcast" },
+    };
+    ULONG i;
+
+    printf("sana2: group-addressed frames are counted, broadcasts are not\n");
+
+    for (i = 0; i < sizeof(row) / sizeof(row[0]); i++)
+    {
+        fixture_init();
+        frame_init(AMI_ETHERTYPE_IPV4, 40);
+        buffer[AMI_SANA2_RX_PAD + 0] = row[i].dst0;
+        buffer[AMI_SANA2_RX_PAD + 1] = row[i].dst1;
+
+        h_deliver();
+
+        h_check(h_went == TO_IP, "the frame reached the IP thread");
+        h_check(iface.stats.rx_multicast == row[i].want, row[i].what);
+        h_check(iface.stats.packets_received == 1,
+                "and it is counted as received either way");
+    }
+}
+
 static void test_payload_alignment(void)
 {
     printf("sana2: the payload lands on a longword boundary\n");
@@ -1674,6 +1714,7 @@ int main(void)
 {
     test_demux();
     test_header_strip();
+    test_multicast_is_counted();
     test_payload_alignment();
     test_runt();
     test_completion_length_consistency();

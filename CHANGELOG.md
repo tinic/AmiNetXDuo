@@ -9,6 +9,14 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `ShowNetStatus` and `netstat -i` print `multicast in`, the group-addressed
+  frames the driver delivered (broadcasts excluded). A driver that accepts a
+  multicast join and never passes the frames up -- X-Surf-100 firmware up to
+  1.16, plipbox and Warp WLAN were reported this way -- reads as a joined
+  group beside a zero here, where before mDNS, SSDP and IGMP just did not
+  answer and nothing said why; `FILTER=EVERYTHING` in the interface file is
+  the way round such a driver. The status record version is 16.
+
 - The `/console` viewer stays live under a heavy drag on a slow link. A frame
   it cannot decode is dropped and the next frame's sequence gap asks for a
   fresh screen; the tab no longer freezes until a reload. When the viewer

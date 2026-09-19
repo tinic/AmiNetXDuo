@@ -22,7 +22,7 @@ extern "C" {
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
    different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       15
+#define AMI_NETSTATUS_VERSION       16
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -198,6 +198,10 @@ typedef struct NetStatusInterface
     ULONG   nsi_ChipResets;
     ULONG   nsi_TxWedges;
     ULONG   nsi_DrvTxErrors;
+    /* Group-addressed frames the driver delivered, broadcasts excluded.  Zero
+       beside a joined group means the driver takes the join and drops the
+       frames (a1k thread 98301).  Version 16. */
+    ULONG   nsi_RxMulticast;
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */

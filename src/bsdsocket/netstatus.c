@@ -996,6 +996,7 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_ChipResets       = stats.chip_resets;
             out->nsi_TxWedges         = stats.tx_wedges;
             out->nsi_DrvTxErrors      = stats.drv_tx_errors;
+            out->nsi_RxMulticast      = stats.rx_multicast;
             out->nsi_AllocFailures    = stats.alloc_failures;
         }
 

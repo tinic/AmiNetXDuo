@@ -134,6 +134,13 @@ typedef struct AmiSana2Stats {
        as well. */
     ULONG   tx_queued;
     ULONG   tx_queue_full;
+    /* Frames whose destination had the group bit set and was not the
+       broadcast address: the one counter that says whether this driver
+       DELIVERS multicast.  The a1k study (thread 98301) found drivers that
+       accept S2_ADDMULTICASTADDRESS and never pass a group frame up (X-Surf-100
+       <= 1.16, plipbox, Warp WLAN); on those this stays at zero next to a
+       membership list that says joined. */
+    ULONG   rx_multicast;
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);

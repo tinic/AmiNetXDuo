@@ -192,6 +192,10 @@ static VOID show_counters(const char *name, const AmiSana2Stats *st)
     tool_printf("\nSANA-II counters for %s\n", (LONG)name);
     tool_printf("  packets received  %10lu    packets sent      %10lu\n",
                 st->packets_received, st->packets_sent);
+    /* Group frames the driver passed up.  Zero here with a group joined
+       (MULTICAST view) is a driver that takes the join and drops the frames;
+       FILTER=EVERYTHING in the interface file is the way round it. */
+    tool_printf("  multicast in      %10lu\n", st->rx_multicast);
     tool_printf("  bad data          %10lu    overruns          %10lu\n",
                 st->bad_data, st->overruns);
     tool_printf("  unknown types     %10lu    reconfigurations  %10lu\n",

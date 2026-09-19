@@ -174,6 +174,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             info->stats.chip_resets      = src->nsi_ChipResets;
             info->stats.tx_wedges        = src->nsi_TxWedges;
             info->stats.drv_tx_errors    = src->nsi_DrvTxErrors;
+            info->stats.rx_multicast     = src->nsi_RxMulticast;
             info->stats.alloc_failures   = src->nsi_AllocFailures;
         }
     }

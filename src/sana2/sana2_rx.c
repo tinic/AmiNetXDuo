@@ -459,6 +459,16 @@ static VOID ami_sana2_rx_dispatch(NX_IP *ip, NX_PACKET *packet, UINT type)
  * wire) end here, so the two modes must produce the same thing.  Input runs on
  * this thread, under the lock ami_sana2_rx_drain() is holding.
  */
+/* A group-addressed frame, the broadcast address excluded: the count
+   ShowNetStatus prints as `multicast in`.  Out of line on purpose, see the
+   call. */
+static VOID __attribute__((noinline))
+ami_sana2_rx_group(AmiSana2If *iface, const UCHAR *dst)
+{
+    if (dst[0] != 0xFFU || dst[1] != 0xFFU)
+        iface->stats.rx_multicast++;
+}
+
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
                           const AmiRxSum *sum)
 {
@@ -504,6 +514,15 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 #endif
 
     packet->nx_packet_address.nx_packet_interface_ptr = iface->interface_ptr;
+
+    /* The group bit, before the header goes: what says the driver delivers
+       multicast at all (AmiSana2Stats.rx_multicast).  One bit test on the
+       unicast frames a bulk receive is made of; the broadcast exclusion and
+       the count sit out of line, because written inline they cost this
+       function 42 instructions -- GCC stopped merging the two verify tails
+       -- against 9 for the test and a call. */
+    if ((packet->nx_packet_prepend_ptr[0] & 1U) != 0U)
+        ami_sana2_rx_group(iface, packet->nx_packet_prepend_ptr);
 
     /* Clean off the link header before handing the frame upwards. */
     packet->nx_packet_prepend_ptr += AMI_ETH_HEADER_SIZE;
