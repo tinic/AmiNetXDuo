@@ -9,6 +9,19 @@ version at the top when it merges.
 
 ## Unreleased
 
+- One receive task per interface, not three. A SANA-II device wants a
+  CMD_READ per Ethernet type, so the IPv4, ARP and IPv6 reads are three rings;
+  each ring had a task of its own, and every frame of every type serialised on
+  the one IP lock anyway, so a machine with three interfaces ran nine reader
+  tasks and 72 KB of reader stacks for no concurrency. One task per interface
+  now waits on one reply port for all three rings, re-posts every ring's
+  reads in one `READ_BATCH` and polls the unit once per pass instead of three
+  times. `AmiNetXDuo anxgenet rx` in a task list; the A1200 with eth0, genet
+  and wifiN goes from 21 stack tasks to 15. Emulator A/B against the same
+  tree without it, interleaved: a2065 five rounds, receive 4.75 -> 4.79 and
+  send 4.34 -> 4.40 Mbit/s (means); X-Surf 100 Z3 two rounds, receive 21.7
+  and 28.4 -> 30.8 and 32.2, send 29.3 and 23.6 -> 30.4 and 31.1.
+
 - `anxwifipi.device` costs 2% of an idle A1200 + PiStorm32 (Emu68), not 10%.
   Its receiver looked at the card every 2 ms, and on Emu68 a `timer.device`
   MICROHZ tick is an emulated CIA and an emulated interrupt -- 179 us each,
@@ -27,10 +40,10 @@ version at the top when it merges.
   nine readers under three names on a machine with three interfaces -- and
   the drivers' own tasks used a short word (`genet poll`, `wifi receiver`)
   the readers did not. Every one of them now carries the device it serves,
-  before the role: `AmiNetXDuo anxgenet rx ip`, `AmiNetXDuo anxgenet poll`,
+  before the role: `AmiNetXDuo anxgenet rx`, `AmiNetXDuo anxgenet poll`,
   `AmiNetXDuo anxwifipi receiver`, `AmiNetXDuo anxnet pcmcia`; a unit other
   than 0 follows the device as `.1`, a third-party driver appears as it is
-  named (`AmiNetXDuo x-surf-100 rx ip`). A sorted task list groups a card's
+  named (`AmiNetXDuo x-surf-100 rx`). A sorted task list groups a card's
   tasks.
 
 - `anxwifipi.device` leaves a multicast group when the stack leaves it. The

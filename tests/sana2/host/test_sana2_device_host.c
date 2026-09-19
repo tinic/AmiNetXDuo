@@ -724,10 +724,10 @@ static void case_stats_request(void)
     h_check(ami_sana2_stats_epoch(iface) == epoch, "and the epoch stands");
 
     memset(&fake_task, 0, sizeof(fake_task));
-    iface->rx[0].running   = TRUE;
-    iface->rx[0].stop      = FALSE;
-    iface->rx[0].task      = &fake_task;
-    iface->rx[0].wake_mask = 1UL << 20;
+    iface->reader.running   = TRUE;
+    iface->reader.stop      = FALSE;
+    iface->reader.task      = &fake_task;
+    iface->reader.wake_mask = 1UL << 20;
 
     h_check(ami_sana2_stats_request(iface) == TRUE,
             "with reader 0 running the request is accepted");
@@ -735,9 +735,9 @@ static void case_stats_request(void)
     h_check(ami_sana2_stats_epoch(iface) == epoch,
             "and the epoch has not moved: only the reader moves it");
 
-    iface->rx[0].running   = FALSE;
-    iface->rx[0].task      = NULL;
-    iface->rx[0].wake_mask = 0;
+    iface->reader.running   = FALSE;
+    iface->reader.task      = NULL;
+    iface->reader.wake_mask = 0;
     iface->stats_want      = FALSE;
 
     h_check(h_tear_down(iface), "the statistics-request interface closes");

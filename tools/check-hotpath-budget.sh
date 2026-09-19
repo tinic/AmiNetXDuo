@@ -77,11 +77,18 @@ TABLE = {
     # call sites, 70 instructions each; tools/check-hot-calls.sh is what
     # wants it that way), so its copies are counted here and it has no row
     # of its own.  A frame runs ONE copy.
-    "sana2_rx.c":       [("_ami_sana2_rx_thread",    720),    # 704, carries the
+    "sana2_rx.c":       [("_ami_sana2_rx_thread",    760),    # 750, carries the
                          ("_ami_sana2_rx_deliver",   115)],   #  inlined drain
                                                              #  loop, rx_complete,
                                                              #  post_slot and the
                                                              #  held run (gro)
+    # rx_thread 704 -> 750 with one reader per interface (three rings on one
+    # port): the per-PASS sweeps became loops over the rings -- the post
+    # sweep at the top of the loop, the held-run flush after the drain -- and
+    # the drain reads each reply's ring out of its slot.  Per pass and per
+    # reply's bookkeeping, not per frame's work: rx_complete, post_slot and
+    # deliver are what they were.  Emulator A/B a2065 five rounds +0.9%
+    # receive, X-Surf 100 two rounds above its base in both, 2026-09-19.
     # rx_deliver 95 -> 114 with the held run: the VERIFIED test that skips the
     # verifier (a flag test and a protocol byte, in place of a 220-instruction
     # walk on every frame a device verified) and the first-buffer length the

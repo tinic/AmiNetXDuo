@@ -1,7 +1,8 @@
 /*
- * AmiNetXDuo, SANA-II receive pipeline: one reader thread per packet type,
- * each keeping several CMD_READs in flight, because a SANA-II device drops any
- * frame that arrives with no matching read outstanding.
+ * AmiNetXDuo, SANA-II receive pipeline: one reader thread per interface over
+ * a ring of CMD_READs per packet type, several in flight in each, because a
+ * SANA-II device drops any frame that arrives with no matching read
+ * outstanding.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -352,24 +353,18 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
               (long)iface->stats.rx_errors);
 
     {
-        UWORD ri;
+        const UBYTE *st = (const UBYTE *)iface->reader.stack;
+        ULONG        used = 0;
 
-        for (ri = 0; ri < AMI_SANA2_RX_READERS; ri++)
+        if (st != NULL)
         {
-            const UBYTE *st = (const UBYTE *)iface->rx[ri].stack;
-            ULONG        used = 0;
-
-            if (st == NULL)
-                continue;
-
             /* The stack grows down, so the deepest byte touched is the first
                one from the low end that is no longer the pattern. */
             while (used < (ULONG)AMI_SANA2_RX_STACK_SIZE &&
                    st[used] == 0xA5)
                 used++;
 
-            AMI_ERROR("rxprobe stack: reader %ld used %ld of %ld, %ld spare",
-                      (long)ri,
+            AMI_ERROR("rxprobe stack: reader used %ld of %ld, %ld spare",
                       (long)((ULONG)AMI_SANA2_RX_STACK_SIZE - used),
                       (long)AMI_SANA2_RX_STACK_SIZE, (long)used);
         }
@@ -814,7 +809,7 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
     if (slot->posted)
         return TRUE;
 
-    if (rx->stop || !iface->online)
+    if (rx->reader->stop || !iface->online)
         return FALSE;
 
     if (slot->packet == NULL)
@@ -863,9 +858,10 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
 
     /*
      * BATCHED WHEN THE DEVICE TAKES A LIST.  Inside a drain, with a device
-     * that answered our tags, the armed request goes on rx->topost and the
-     * whole list is handed over in one ANXD_CMD_READ_BATCH at the end of
-     * the drain (ami_sana2_rx_drain): one trapped Disable() pair for the
+     * that answered our tags, the armed request goes on the reader's
+     * topost list and the whole list -- every ring's -- is handed over in
+     * one ANXD_CMD_READ_BATCH at the end of the drain
+     * (ami_sana2_rx_drain): one trapped Disable() pair for the
      * burst instead of one BeginIO() per frame, which on Emu68 is 5.5 us a
      * frame.  The device has the rest of its 128 posted reads meanwhile,
      * and holds a burst's tail for the reader if it must.  Outside a drain
@@ -875,9 +871,9 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
      * BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
      * SANA2IOF_RAW just set. Both lines it runs are above.
      */
-    if (rx->batching)
+    if (rx->reader->batching)
     {
-        AddTail(&rx->topost, &slot->req.ios2_Req.io_Message.mn_Node);
+        AddTail(&rx->reader->topost, &slot->req.ios2_Req.io_Message.mn_Node);
 #ifdef AMINETXDUO_RXPROBE
         rx->probe.posts++;
         rx->probe.live++;
@@ -912,28 +908,28 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
  * The drain's armed reads, to the device in one call; one by one if the
  * device turns the command down (once, and the flag remembers).
  */
-static VOID ami_sana2_rx_post_batch(AmiSana2Rx *rx)
+static VOID ami_sana2_rx_post_batch(AmiSana2Reader *rd)
 {
-    AmiSana2If *iface = rx->iface;
+    AmiSana2If *iface = rd->iface;
 
-    rx->batching = FALSE;
-    if (rx->topost.lh_Head->ln_Succ == NULL)
+    rd->batching = FALSE;
+    if (rd->topost.lh_Head->ln_Succ == NULL)
         return;
 
     if (iface->rx_batch_ok)
     {
-        rx->batch.ios2_Req.io_Flags = IOF_QUICK;
-        rx->batch.ios2_Req.io_Error = 0;
-        rx->batch.ios2_Data         = &rx->topost;
-        BeginIO((struct IORequest *)&rx->batch);
-        if ((rx->batch.ios2_Req.io_Flags & IOF_QUICK) == 0)
-            (VOID)WaitIO((struct IORequest *)&rx->batch);
+        rd->batch.ios2_Req.io_Flags = IOF_QUICK;
+        rd->batch.ios2_Req.io_Error = 0;
+        rd->batch.ios2_Data         = &rd->topost;
+        BeginIO((struct IORequest *)&rd->batch);
+        if ((rd->batch.ios2_Req.io_Flags & IOF_QUICK) == 0)
+            (VOID)WaitIO((struct IORequest *)&rd->batch);
 
         /* The list, not the carrier's error, says who owns the reads.  A
            device that accepted the command returns it empty.  Any requests
            left belong to us and must be posted individually, whether the
            rejection was IOERR_NOCMD, another error, or a partial take. */
-        if (rx->topost.lh_Head->ln_Succ == NULL)
+        if (rd->topost.lh_Head->ln_Succ == NULL)
             return;
         iface->rx_batch_ok = FALSE;     /* this device cannot take a batch */
     }
@@ -942,18 +938,18 @@ static VOID ami_sana2_rx_post_batch(AmiSana2Rx *rx)
         struct Node *n;
         struct Node *next;
 
-        for (n = rx->topost.lh_Head; (next = n->ln_Succ) != NULL; n = next)
+        for (n = rd->topost.lh_Head; (next = n->ln_Succ) != NULL; n = next)
             BeginIO((struct IORequest *)n);
-        NewList(&rx->topost);
+        NewList(&rd->topost);
     }
 }
 
 #ifdef AMINETXDUO_SANA2_RX_HOST_TEST
 /* The production helper is static; expose only its ownership transaction to
    the host harness.  No symbol or branch reaches a shipping image. */
-VOID ami_sana2_rx_post_batch_host_test(AmiSana2Rx *rx)
+VOID ami_sana2_rx_post_batch_host_test(AmiSana2Reader *rd)
 {
-    ami_sana2_rx_post_batch(rx);
+    ami_sana2_rx_post_batch(rd);
 }
 #endif
 
@@ -1180,7 +1176,7 @@ VOID ami_sana2_gro_flush(AmiSana2Rx *rx)
         }
     }
 
-    if (rx->stop)
+    if (rx->reader->stop)
     {
         /* Teardown: the run is dropped and there is nobody to tell. */
         AMI_NX_CLEANUP(nx_packet_release(head));
@@ -1463,20 +1459,24 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
  *
  * Errors and control frames count against it: they cost reader time too.
  */
-static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
+static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 {
-    NX_IP          *ip = rx->iface->ip;
+    AmiSana2If     *iface = rd->iface;
+    NX_IP          *ip = iface->ip;
     struct Message *msg;
     struct List     batch;
     struct Node    *node;
     struct Node    *next;
     TX_THREAD      *outer;
     UWORD           took = 0;
+    UWORD           r;
 
 #ifdef AMINETXDUO_RXPROBE
+    /* The pass-level figures (backlog, dry, baton) are the first ring's:
+       one task drains every ring in one pass now. */
     {
-        AmiRxProbe *pr      = &rx->probe;
-        UWORD       backlog = ami_rxprobe_backlog(rx->port);
+        AmiRxProbe *pr      = &iface->rx[0].probe;
+        UWORD       backlog = ami_rxprobe_backlog(rd->port);
         UWORD       avail;
 
         if (backlog > AMI_SANA2_RX_MAX_DEPTH)
@@ -1521,7 +1521,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
             }
         }
 
-        rx->iface->seq.avail = avail;
+        iface->seq.avail = avail;
     }
 #endif
 
@@ -1553,21 +1553,21 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
      * _nx_ip_driver_interface_direct_command(), which holds this same mutex
      * across the whole NX_LINK_DISABLE and then waits seconds for this thread
      * to put its "exited" semaphore.  A reader woken by that stop always
-     * reaches this line before it retests rx->stop, so waiting forever here IS
+     * reaches this line before it retests rd->stop, so waiting forever here IS
      * the deadlock: the reader waits for the mutex, the stopper waits for the
      * reader, and the interface comes back orphaned.  A stop is also the one
      * thing this run has nothing left to do for -- the loop below drops every
-     * message on rx->stop anyway -- so give the mutex up and let the loop end.
+     * message on rd->stop anyway -- so give the mutex up and let the loop end.
      */
     while (tx_mutex_get(&ip->nx_ip_protection,
                         AMI_SANA2_RX_LOCK_TICKS) != TX_SUCCESS)
     {
-        if (rx->stop)
+        if (rd->stop)
             return took;
     }
 
     /* Set while this was waiting: the same, minus the round trip below. */
-    if (rx->stop)
+    if (rd->stop)
     {
         tx_mutex_put(&ip->nx_ip_protection);
         return took;
@@ -1588,7 +1588,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
      * may stay set after the splice, which costs one empty wake at most.
      */
     {
-        struct List *pl = &rx->port->mp_MsgList;
+        struct List *pl = &rd->port->mp_MsgList;
 
         NewList(&batch);
         Disable();
@@ -1603,23 +1603,21 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
         Enable();
     }
 
-    /* Re-posts collect on rx->topost for one ANXD_CMD_READ_BATCH after the
-       walk, when the device takes one (ami_sana2_rx_post_slot). */
-    rx->batching = (BOOL)(rx->iface->rx_batch_ok != 0);
-    NewList(&rx->topost);
+    /* Re-posts of every ring collect on rd->topost for one
+       ANXD_CMD_READ_BATCH after the walk, when the device takes one
+       (ami_sana2_rx_post_slot). */
+    rd->batching = (BOOL)(iface->rx_batch_ok != 0);
+    NewList(&rd->topost);
 
     for (node = batch.lh_Head;
          took < budget && (next = node->ln_Succ) != NULL;
          node = next)
     {
         msg = (struct Message *)node;
-#ifdef AMINETXDUO_RXPROBE
-        if (rx->probe.live != 0)
-            rx->probe.live--;
-#endif
         /* The reply message is the slot: ios2_Req.io_Message is its first
-           member's first member. */
-        AmiRxSlot *slot = (AmiRxSlot *)msg;
+           member's first member.  The slot names its ring. */
+        AmiRxSlot  *slot = (AmiRxSlot *)msg;
+        AmiSana2Rx *rx   = slot->owner;
         /*
          * THE BYTE IS TESTED, THE SIGN EXTENSION IS NOT ON THIS PATH.  It was
          * `LONG err = (LONG)(BYTE)...` before the branch, and the drain loop
@@ -1630,10 +1628,14 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
          */
         UBYTE      raw  = slot->req.ios2_Req.io_Error;
 
+#ifdef AMINETXDUO_RXPROBE
+        if (rx->probe.live != 0)
+            rx->probe.live--;
+#endif
         ami_sana2_rx_mark(rx, slot, FALSE);
         took++;
 
-        if (rx->stop)
+        if (rd->stop)
             continue;
 
         if (raw == 0)
@@ -1659,20 +1661,20 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
              * an out-of-service device must be marked down here or the
              * interface stays up with every send failing.  `Online` recovers it.
              */
-            rx->iface->online = FALSE;
+            iface->online = FALSE;
 
-            if (rx->iface->interface_ptr != NULL)
-                rx->iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+            if (iface->interface_ptr != NULL)
+                iface->interface_ptr->nx_interface_link_up = NX_FALSE;
 
-            ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)rx->iface->index, 0UL);
+            ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
 
             AMI_WARN("sana2: %s went out of service. The link is marked down",
-                     rx->iface->device);
+                     iface->device);
         }
         else
         {
-            rx->iface->stats.rx_errors++;
-            rx->iface->stats.rx_err_io++;
+            iface->stats.rx_errors++;
+            iface->stats.rx_err_io++;
         }
     }
 
@@ -1682,7 +1684,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
        in code rather than assumed. */
     if (node->ln_Succ != NULL)
     {
-        struct List *pl      = &rx->port->mp_MsgList;
+        struct List *pl      = &rd->port->mp_MsgList;
         struct Node *last    = batch.lh_TailPred;
         struct Node *oldhead;
 
@@ -1697,12 +1699,15 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
 
     /* The reads this drain re-armed, back to the device in one call, before
        the run goes up: the device is fed first, the stack second. */
-    ami_sana2_rx_post_batch(rx);
+    ami_sana2_rx_post_batch(rd);
 
 #ifdef AMINETXDUO_GRO
-    /* Nothing is held past the drain that took it: the run ends with the
-       batch, under the same lock, before the machine is given back. */
-    ami_sana2_gro_flush(rx);
+    /* Nothing is held past the drain that took it: each ring's run ends with
+       the batch, under the same lock, before the machine is given back. */
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+        ami_sana2_gro_flush(&iface->rx[r]);
+#else
+    (VOID)r;
 #endif
 
     _nx_ip_input_thread = outer;
@@ -1718,9 +1723,9 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
  * port's signal, so the Wait() this answer sends the reader into returns at
  * once.
  */
-static BOOL ami_sana2_rx_queued(const AmiSana2Rx *rx)
+static BOOL ami_sana2_rx_queued(const AmiSana2Reader *rd)
 {
-    const struct List *list = &rx->port->mp_MsgList;
+    const struct List *list = &rd->port->mp_MsgList;
 
     return (BOOL)(list->lh_Head->ln_Succ != NULL);
 }
@@ -1740,11 +1745,11 @@ static BOOL ami_sana2_rx_queued(const AmiSana2Rx *rx)
  * It stays in the signature so this is the one place the question is asked,
  * and so a test can pin the answer against every batch count.
  */
-BOOL ami_sana2_rx_should_block(const AmiSana2Rx *rx, UWORD taken)
+BOOL ami_sana2_rx_should_block(const AmiSana2Reader *rd, UWORD taken)
 {
     (VOID)taken;
 
-    return (BOOL)(!ami_sana2_rx_queued(rx));
+    return (BOOL)(!ami_sana2_rx_queued(rd));
 }
 #endif
 
@@ -1752,10 +1757,10 @@ BOOL ami_sana2_rx_should_block(const AmiSana2Rx *rx, UWORD taken)
 
 /*
  * CMD_FLUSH: "abort and return all queued I/O requests for this unit."
- * Unit-wide rather than per-request, so it is tried second: it takes the other
- * reader's queued reads with it.
+ * Unit-wide rather than per-request, so it is tried second: it takes every
+ * ring's queued reads with it, and another opener's too.
  */
-static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
+static VOID ami_sana2_rx_flush(AmiSana2Reader *rd)
 {
     struct MsgPort   *port;
     struct IOSana2Req req;
@@ -1764,7 +1769,7 @@ static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
     if (port == NULL)
         return;
 
-    req = rx->iface->templ;
+    req = rd->iface->templ;
     req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
     req.ios2_Req.io_Message.mn_ReplyPort    = port;
     req.ios2_Req.io_Message.mn_Length       = (UWORD)sizeof(struct IOSana2Req);
@@ -1784,30 +1789,37 @@ static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
  * 40 ms, and return how many requests it still owns.  AbortIO() is only a
  * request: a2065.device 2.16 does not honour it on a queued CMD_READ.
  */
-static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
+static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
 {
     UWORD outstanding;
-    UWORD i;
+    UWORD r, i;
     UWORD t = 0;
 
     for (;;)
     {
         struct Message *msg;
 
-        while ((msg = GetMsg(rx->port)) != NULL)
+        while ((msg = GetMsg(rd->port)) != NULL)
         {
-            ami_sana2_rx_mark(rx, (AmiRxSlot *)msg, FALSE);
+            AmiRxSlot *slot = (AmiRxSlot *)msg;
+
+            ami_sana2_rx_mark(slot->owner, slot, FALSE);
 #ifdef AMINETXDUO_RXPROBE
-            if (rx->probe.live != 0)
-                rx->probe.live--;
+            if (slot->owner->probe.live != 0)
+                slot->owner->probe.live--;
 #endif
         }
 
         outstanding = 0;
-        for (i = 0; i < rx->depth; i++)
+        for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
         {
-            if (rx->slot[i].posted)
-                outstanding++;
+            const AmiSana2Rx *rx = &rd->iface->rx[r];
+
+            for (i = 0; i < rx->depth; i++)
+            {
+                if (rx->slot[i].posted)
+                    outstanding++;
+            }
         }
 
         if (outstanding == 0 || t >= tries)
@@ -1825,28 +1837,33 @@ static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
  * then CMD_FLUSH, then give up having freed nothing the device can still write
  * into.  Freeing the port, the packets or the interface corrupts memory.
  */
-static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
+static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
 {
     UWORD outstanding;
-    UWORD i;
+    UWORD r, i;
 
-    for (i = 0; i < rx->depth; i++)
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
     {
-        if (rx->slot[i].posted)
-            AbortIO((struct IORequest *)&rx->slot[i].req);
+        AmiSana2Rx *rx = &rd->iface->rx[r];
+
+        for (i = 0; i < rx->depth; i++)
+        {
+            if (rx->slot[i].posted)
+                AbortIO((struct IORequest *)&rx->slot[i].req);
+        }
     }
 
-    outstanding = ami_sana2_rx_reap(rx, AMI_SANA2_RX_REAP_TRIES);
+    outstanding = ami_sana2_rx_reap(rd, AMI_SANA2_RX_REAP_TRIES);
 
     if (outstanding != 0)
     {
         AMI_WARN("sana2: %ld read(s) survived AbortIO; trying CMD_FLUSH",
                  (long)outstanding);
-        ami_sana2_rx_flush(rx);
-        outstanding = ami_sana2_rx_reap(rx, AMI_SANA2_RX_REAP_TRIES);
+        ami_sana2_rx_flush(rd);
+        outstanding = ami_sana2_rx_reap(rd, AMI_SANA2_RX_REAP_TRIES);
     }
 
-    rx->orphans = outstanding;
+    rd->orphans = outstanding;
 
     if (outstanding != 0)
     {
@@ -1858,19 +1875,24 @@ static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
         return;
     }
 
-    for (i = 0; i < rx->depth; i++)
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
     {
-        if (rx->slot[i].packet != NULL)
+        AmiSana2Rx *rx = &rd->iface->rx[r];
+
+        for (i = 0; i < rx->depth; i++)
         {
-            nx_packet_release(rx->slot[i].packet);
-            rx->slot[i].packet = NULL;
+            if (rx->slot[i].packet != NULL)
+            {
+                nx_packet_release(rx->slot[i].packet);
+                rx->slot[i].packet = NULL;
+            }
         }
     }
 
-    if (rx->port != NULL)
+    if (rd->port != NULL)
     {
-        DeleteMsgPort(rx->port);
-        rx->port = NULL;
+        DeleteMsgPort(rd->port);
+        rd->port = NULL;
     }
 }
 
@@ -1878,40 +1900,39 @@ static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
 
 static VOID ami_sana2_rx_thread(ULONG argument)
 {
-    AmiSana2Rx *rx    = (AmiSana2Rx *)argument;
-    AmiSana2If *iface = rx->iface;
-    UWORD       i;
+    AmiSana2Reader *rd    = (AmiSana2Reader *)argument;
+    AmiSana2If     *iface = rd->iface;
+    UWORD           r, i;
 
-    rx->task = FindTask(NULL);
-    rx->port = CreateMsgPort();
+    rd->task = FindTask(NULL);
+    rd->port = CreateMsgPort();
 
-    if (rx->port == NULL)
+    if (rd->port == NULL)
     {
-        rx->failed = TRUE;
-        tx_semaphore_put(&rx->ready);
-        tx_semaphore_put(&rx->exited);
+        rd->failed = TRUE;
+        tx_semaphore_put(&rd->ready);
+        tx_semaphore_put(&rd->exited);
         return;
     }
 
-    rx->wake_mask = 1UL << rx->port->mp_SigBit;
+    rd->wake_mask = 1UL << rd->port->mp_SigBit;
 
     /*
-     * TX reaping duty.  One reader takes it, which gives the transmit ring a
-     * context that runs when nothing is being sent.  Not fatal if it fails: the
-     * interface falls back to reaping on the next transmit.
+     * TX reaping duty: the reader gives the transmit ring a context that
+     * runs when nothing is being sent.  Not fatal if it fails: the interface
+     * falls back to reaping on the next transmit.
      */
-    rx->reap_sigbit = -1;
-    rx->reap_mask   = 0;
+    rd->reap_sigbit = -1;
+    rd->reap_mask   = 0;
 
-    if (rx->reap_tx)
     {
         BYTE bit = AllocSignal(-1);
 
         if (bit >= 0)
         {
-            rx->reap_sigbit = bit;
-            rx->reap_mask   = 1UL << (ULONG)bit;
-            ami_sana2_tx_reap_bind(iface, rx->task, bit);
+            rd->reap_sigbit = bit;
+            rd->reap_mask   = 1UL << (ULONG)bit;
+            ami_sana2_tx_reap_bind(iface, rd->task, bit);
         }
         else
         {
@@ -1922,39 +1943,46 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 
     /*
      * Every request is a copy of the opened one, which carries io_Device,
-     * io_Unit and the device's own ios2_BufferManagement cookie.
+     * io_Unit and the device's own ios2_BufferManagement cookie.  Every
+     * ring's reads reply on the one port; the slot says which ring.
      */
-    for (i = 0; i < rx->depth; i++)
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
     {
-        rx->slot[i].req   = iface->templ;
-        rx->slot[i].owner = rx;
-        rx->slot[i].stats = &iface->stats;
-        rx->slot[i].req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-        rx->slot[i].req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-        rx->slot[i].req.ios2_Req.io_Message.mn_Length =
-            (UWORD)sizeof(struct IOSana2Req);
-        /* Invariants of the slot, so that the re-arm on the hot path does not
-           write them once a frame.  ami_sana2_rx_post_slot() names them. */
-        rx->slot[i].req.ios2_Req.io_Command = CMD_READ;
-        rx->slot[i].req.ios2_Data           = &rx->slot[i];
+        AmiSana2Rx *rx = &iface->rx[r];
+
+        for (i = 0; i < rx->depth; i++)
+        {
+            rx->slot[i].req   = iface->templ;
+            rx->slot[i].owner = rx;
+            rx->slot[i].stats = &iface->stats;
+            rx->slot[i].req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+            rx->slot[i].req.ios2_Req.io_Message.mn_ReplyPort    = rd->port;
+            rx->slot[i].req.ios2_Req.io_Message.mn_Length =
+                (UWORD)sizeof(struct IOSana2Req);
+            /* Invariants of the slot, so that the re-arm on the hot path does
+               not write them once a frame.  ami_sana2_rx_post_slot() names
+               them. */
+            rx->slot[i].req.ios2_Req.io_Command = CMD_READ;
+            rx->slot[i].req.ios2_Data           = &rx->slot[i];
+        }
+
+        ami_sana2_rx_mark_reset(rx);
     }
 
     /* The poll request: the opened request's device, unit and cookie, this
        reader's port, and the private command. */
-    rx->poll = iface->templ;
-    rx->poll.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    rx->poll.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-    rx->poll.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
-    rx->poll.ios2_Req.io_Command = ANXD_CMD_RX_POLL;
-    rx->batch = iface->templ;
-    rx->batch.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    rx->batch.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-    rx->batch.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
-    rx->batch.ios2_Req.io_Command = ANXD_CMD_READ_BATCH;
-    rx->batching = FALSE;
-    NewList(&rx->topost);
-
-    ami_sana2_rx_mark_reset(rx);
+    rd->poll = iface->templ;
+    rd->poll.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    rd->poll.ios2_Req.io_Message.mn_ReplyPort    = rd->port;
+    rd->poll.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
+    rd->poll.ios2_Req.io_Command = ANXD_CMD_RX_POLL;
+    rd->batch = iface->templ;
+    rd->batch.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    rd->batch.ios2_Req.io_Message.mn_ReplyPort    = rd->port;
+    rd->batch.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
+    rd->batch.ios2_Req.io_Command = ANXD_CMD_READ_BATCH;
+    rd->batching = FALSE;
+    NewList(&rd->topost);
 
 #ifdef AMINETXDUO_RXPROBE
     /* TimerBase is opened lazily. The probe's clock needs it before the first
@@ -1962,17 +1990,19 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     (VOID)ami_millis();
 #endif
 
-    rx->running = TRUE;
-    tx_semaphore_put(&rx->ready);
+    rd->running = TRUE;
+    tx_semaphore_put(&rd->ready);
 
-    while (!rx->stop)
+    while (!rd->stop)
     {
+        UWORD live = 0;
+
         /*
          * At the top of the loop, not after the Wait(): the pool-empty path
          * below continues without reaching a drain, and releasing finished
          * writes is what returns packets to the pool it is waiting for.
          */
-        if (rx->reap_mask != 0)
+        if (rd->reap_mask != 0)
         {
             /*
              * Reap here rather than ami_sana2_tx_defer(). Deferring sets the
@@ -1998,8 +2028,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * A status query asked for the device's counters of now
          * (ami_sana2_stats_request()).  The two device commands run here, on
          * a stack sized for device I/O, and the epoch tells the query they
-         * are done.  Every reader tests the flag; only reader 0 is woken for
-         * it, and the first to see it clears it.
+         * are done.
          */
         if (iface->stats_want)
         {
@@ -2008,7 +2037,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             iface->stats_epoch++;
         }
 
-        if (ami_sana2_rx_post(rx) == 0)
+        for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+            live += ami_sana2_rx_post(&iface->rx[r]);
+
+        if (live == 0)
         {
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
@@ -2026,7 +2058,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
            re-tests the port and the reap list on the next pass, and they are
            the authority whether this returned the signals, none of them, or
            refused outright. */
-        AMI_NX_EITHER_WAY(tx_amiga_green_wait(rx->wake_mask | rx->reap_mask));
+        AMI_NX_EITHER_WAY(tx_amiga_green_wait(rd->wake_mask | rd->reap_mask));
 #else
         /*
          * Block ONLY when there is nothing to take.  The bracket is a
@@ -2054,13 +2086,13 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * a ThreadX tick is 20 ms (NX_IP_PERIODIC_RATE 50), which is worse
          * than the monopoly it would prevent.
          */
-        if (ami_sana2_rx_should_block(rx, AMI_SANA2_RX_RUN_MAX))
+        if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
             ami_sana2_block_enter();
-            Wait(rx->wake_mask | rx->reap_mask);
+            Wait(rd->wake_mask | rd->reap_mask);
 #ifdef AMINETXDUO_RXPROBE
             {
-                AmiRxProbe *pr = &rx->probe;
+                AmiRxProbe *pr = &iface->rx[0].probe;
                 ULONG       t0 = ami_rxprobe_clock();
                 ULONG       dt;
 
@@ -2079,7 +2111,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         }
 #endif /* AMINETXDUO_GREEN_REALM */
 
-        (VOID)ami_sana2_rx_drain(rx, (UWORD)AMI_SANA2_RX_RUN_MAX);
+        (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 
         /*
          * THE POLL, AFTER THE DRAIN AND BEFORE THE SLEEP.  Every slot this
@@ -2090,26 +2122,27 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * blocking.  A driver that does not know the command says so once,
          * IOERR_NOCMD, and is not asked again.  Quick on our device; a
          * device that queues it instead replies here, and the reply is taken
-         * back before the drain can mistake it for a slot.
+         * back before the drain can mistake it for a slot.  Once per pass
+         * for the unit, not once per ring: the command is the unit's.
          */
-        if (iface->rx_poll_ok && !rx->stop)
+        if (iface->rx_poll_ok && !rd->stop)
         {
-            rx->poll.ios2_Req.io_Flags = IOF_QUICK;
-            rx->poll.ios2_Req.io_Error = 0;
-            BeginIO((struct IORequest *)&rx->poll);
-            if ((rx->poll.ios2_Req.io_Flags & IOF_QUICK) == 0)
-                (VOID)WaitIO((struct IORequest *)&rx->poll);
+            rd->poll.ios2_Req.io_Flags = IOF_QUICK;
+            rd->poll.ios2_Req.io_Error = 0;
+            BeginIO((struct IORequest *)&rd->poll);
+            if ((rd->poll.ios2_Req.io_Flags & IOF_QUICK) == 0)
+                (VOID)WaitIO((struct IORequest *)&rd->poll);
             /* Any refusal ends the polling: IOERR_NOCMD from a device that
                does not know the command, S2ERR_NOT_SUPPORTED from a unit
                that holds nothing for a late read and has nothing to say. */
-            if (rx->poll.ios2_Req.io_Error != 0)
+            if (rd->poll.ios2_Req.io_Error != 0)
                 iface->rx_poll_ok = FALSE;
         }
 
 #ifdef AMINETXDUO_RXPROBE
         /* Keep probe_dev_rx within a few hundred frames of the truth: the
            report runs from NetStat, which cannot issue a device command. */
-        if (rx->reap_tx && (rx->probe.drains & 31UL) == 0UL)
+        if ((iface->rx[0].probe.drains & 31UL) == 0UL)
             ami_sana2_refresh_stats(iface);
 #endif
     }
@@ -2119,22 +2152,22 @@ static VOID ami_sana2_rx_thread(ULONG argument)
      * returns no completion can signal this task, which makes freeing the
      * signal bit, and shortly the Task, safe.
      */
-    if (rx->reap_mask != 0)
+    if (rd->reap_mask != 0)
     {
         ami_sana2_tx_reap_unbind(iface);
-        rx->reap_mask = 0;
+        rd->reap_mask = 0;
     }
 
-    if (rx->reap_sigbit >= 0)
+    if (rd->reap_sigbit >= 0)
     {
-        FreeSignal(rx->reap_sigbit);
-        rx->reap_sigbit = -1;
+        FreeSignal(rd->reap_sigbit);
+        rd->reap_sigbit = -1;
     }
 
-    ami_sana2_rx_teardown(rx);
+    ami_sana2_rx_teardown(rd);
 
-    rx->running = FALSE;
-    tx_semaphore_put(&rx->exited);
+    rd->running = FALSE;
+    tx_semaphore_put(&rd->exited);
 }
 
 /* ------------------------------------------------------------ start / stop */
@@ -2148,31 +2181,23 @@ static const ULONG ami_sana2_rx_types[AMI_SANA2_RX_READERS] =
 #endif
 };
 
-static const CHAR *const ami_sana2_rx_roles[AMI_SANA2_RX_READERS] =
-{
-    "rx ip",
-    "rx arp"
-#ifdef AMINETXDUO_IPV6
-, "rx ip6"
-#endif
-};
-
 /*
- * "AmiNetXDuo anxgenet rx ip": the device the reader serves, without its path
- * or ".device" and with ".<unit>" when the unit is not 0, then the role.  Three
- * interfaces on one machine gave nine readers under three names, and a task
- * list could not say which card any of them was reading.  Device before role,
- * the way "anxgenet poll" and "anxwifipi receiver" are named, so a sorted list
- * groups a card's tasks.
+ * "AmiNetXDuo anxgenet rx": the device the reader serves, without its path
+ * or ".device" and with ".<unit>" when the unit is not 0.  Three interfaces
+ * on one machine once gave nine readers under three names, and a task list
+ * could not say which card any of them was reading.  Device before role,
+ * the way "anxgenet poll" and "anxwifipi receiver" are named, so a sorted
+ * list groups a card's tasks.
  */
-static VOID ami_sana2_rx_name(AmiSana2Rx *rx, const CHAR *role)
+static VOID ami_sana2_rx_name(AmiSana2Reader *rd)
 {
     static const CHAR prefix[] = "AmiNetXDuo ";
-    const CHAR *base = rx->iface->device;
+    static const CHAR role[]   = " rx";
+    const CHAR *base = rd->iface->device;
     const CHAR *p;
-    CHAR       *out = rx->name;
-    CHAR       *end = rx->name + sizeof(rx->name) - 1;
-    ULONG       unit = rx->iface->unit;
+    CHAR       *out = rd->name;
+    CHAR       *end = rd->name + sizeof(rd->name) - 1;
+    ULONG       unit = rd->iface->unit;
 
     for (p = base; *p != '\0'; p++)
     {
@@ -2199,8 +2224,6 @@ static VOID ami_sana2_rx_name(AmiSana2Rx *rx, const CHAR *role)
         *out++ = (CHAR)('0' + unit % 10);
     }
 
-    if (out < end)
-        *out++ = ' ';
     for (p = role; *p != '\0' && out < end; p++)
         *out++ = *p;
     *out = '\0';
@@ -2248,7 +2271,7 @@ static UWORD ami_sana2_rx_wire_depth(ULONG bps)
 }
 
 /*
- * What each reader gets: the smaller of what the wire asks for and what the
+ * What each ring gets: the smaller of what the wire asks for and what the
  * pool can spare.  Each outstanding read pins one NX_PACKET, so the budget is
  * over all readers together; the per-reader floors are never given up.
  */
@@ -2441,6 +2464,7 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         AmiSana2Rx *rx = &iface->rx[i];
 
         rx->iface       = iface;
+        rx->reader      = &iface->reader;
         rx->packet_type = ami_sana2_rx_types[i];
         if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
             rx->depth = depths.ipv4;
@@ -2448,27 +2472,11 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             rx->depth = depths.arp;
         else
             rx->depth = depths.ipv6;
-        rx->stop        = FALSE;
-        rx->failed      = FALSE;
-        rx->running     = FALSE;
-        rx->started     = FALSE;
-        rx->reap_sigbit = -1;
-        rx->reap_mask   = 0;
-        /* Stale from the previous run: ami_sana2_rx_stop() Signal()s this mask
-           at rx->task, and a reader that then fails to get a MsgPort is
-           signalled on a bit it does not hold. */
-        rx->wake_mask   = 0;
-        rx->orphans     = 0;
 #ifdef AMINETXDUO_GRO
         rx->gro_head    = NULL;
         rx->gro_tail    = NULL;
         rx->gro_count   = 0;
 #endif
-
-        /* The first reader carries the TX reaping duty. It is the IPv4 one,
-           the reader that always exists, but nothing depends on which: any
-           thread that blocks in exec Wait() serves. */
-        rx->reap_tx     = (i == 0) ? TRUE : FALSE;
 
         if (rx->depth > AMI_SANA2_RX_MAX_DEPTH)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
@@ -2495,8 +2503,25 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             }
             rx->slot_alloc = rx->depth;
         }
+    }
 
-        rx->stack = ami_sana2_alloc_stack((ULONG)AMI_SANA2_RX_STACK_SIZE);
+    {
+        AmiSana2Reader *rd = &iface->reader;
+
+        rd->iface       = iface;
+        rd->stop        = FALSE;
+        rd->failed      = FALSE;
+        rd->running     = FALSE;
+        rd->started     = FALSE;
+        rd->reap_sigbit = -1;
+        rd->reap_mask   = 0;
+        /* Stale from the previous run: ami_sana2_rx_stop() Signal()s this mask
+           at rd->task, and a reader that then fails to get a MsgPort is
+           signalled on a bit it does not hold. */
+        rd->wake_mask   = 0;
+        rd->orphans     = 0;
+
+        rd->stack = ami_sana2_alloc_stack((ULONG)AMI_SANA2_RX_STACK_SIZE);
 #ifdef AMINETXDUO_RXPROBE
         /*
          * Lay a pattern in before the thread exists, so the report below can
@@ -2507,15 +2532,15 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
          * static pass can see that call.  There is no MMU, so an overrun is
          * silent corruption somewhere unrelated.
          */
-        if (rx->stack != NULL)
+        if (rd->stack != NULL)
         {
             ULONG w;
 
             for (w = 0; w < (ULONG)AMI_SANA2_RX_STACK_SIZE; w++)
-                ((UBYTE *)rx->stack)[w] = 0xA5;
+                ((UBYTE *)rd->stack)[w] = 0xA5;
         }
 #endif
-        if (rx->stack == NULL)
+        if (rd->stack == NULL)
         {
             AMI_ERROR("sana2: no memory for reader stack");
             ami_sana2_rx_stop(iface);
@@ -2527,52 +2552,52 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
          * ami_alloc()ed AmiSana2If, so a `ready` left created while `exited`
          * failed stays on ThreadX's created list after the interface is freed.
          */
-        if (tx_semaphore_create(&rx->ready, (CHAR *)"s2rxrdy", 0) != TX_SUCCESS)
+        if (tx_semaphore_create(&rd->ready, (CHAR *)"s2rxrdy", 0) != TX_SUCCESS)
         {
             AMI_ERROR("sana2: cannot create reader semaphores");
             ami_sana2_rx_stop(iface);
             return -1;
         }
 
-        if (tx_semaphore_create(&rx->exited, (CHAR *)"s2rxend", 0) != TX_SUCCESS)
+        if (tx_semaphore_create(&rd->exited, (CHAR *)"s2rxend", 0) != TX_SUCCESS)
         {
             AMI_ERROR("sana2: cannot create reader semaphores");
-            tx_semaphore_delete(&rx->ready);
+            tx_semaphore_delete(&rd->ready);
             ami_sana2_rx_stop(iface);
             return -1;
         }
 
-        ami_sana2_rx_name(rx, ami_sana2_rx_roles[i]);
-        txstatus = tx_thread_create(&rx->thread, rx->name,
-                                    ami_sana2_rx_thread, (ULONG)rx,
-                                    rx->stack, AMI_SANA2_RX_STACK_SIZE,
+        ami_sana2_rx_name(rd);
+        txstatus = tx_thread_create(&rd->thread, rd->name,
+                                    ami_sana2_rx_thread, (ULONG)rd,
+                                    rd->stack, AMI_SANA2_RX_STACK_SIZE,
                                     AMI_SANA2_RX_PRIORITY,
                                     AMI_SANA2_RX_PRIORITY,
                                     TX_NO_TIME_SLICE, TX_AUTO_START);
         if (txstatus != TX_SUCCESS)
         {
-            AMI_ERROR("sana2: cannot create reader %ld (%ld), stack %lx",
-                      (long)i, (long)txstatus, (unsigned long)rx->stack);
-            tx_semaphore_delete(&rx->ready);
-            tx_semaphore_delete(&rx->exited);
+            AMI_ERROR("sana2: cannot create reader (%ld), stack %lx",
+                      (long)txstatus, (unsigned long)rd->stack);
+            tx_semaphore_delete(&rd->ready);
+            tx_semaphore_delete(&rd->exited);
             ami_sana2_rx_stop(iface);
             return -1;
         }
 
-        rx->started = TRUE;
+        rd->started = TRUE;
 
         /* Wait for the reader to own a MsgPort before posting anything. */
-        if (tx_semaphore_get(&rx->ready, NX_IP_PERIODIC_RATE) != TX_SUCCESS ||
-            rx->failed)
+        if (tx_semaphore_get(&rd->ready, NX_IP_PERIODIC_RATE) != TX_SUCCESS ||
+            rd->failed)
         {
-            AMI_ERROR("sana2: reader %ld failed to start", (long)i);
+            AMI_ERROR("sana2: reader failed to start");
             ami_sana2_rx_stop(iface);
             return -1;
         }
     }
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
-    /* The readers exist and the first carries the reaping duty, so the lazy
+    /* The reader exists and carries the reaping duty, so the lazy
        parking's safety net can go live. Not fatal if it cannot: parking
        stays disengaged and completions signal as shipped. */
     ami_sana2_tx_lazy_start(iface);
@@ -2584,11 +2609,11 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 
 VOID ami_sana2_rx_stop(AmiSana2If *iface)
 {
-    UWORD i;
-    ULONG zombies;
+    AmiSana2Reader *rd = &iface->reader;
+    ULONG           zombies;
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
-    /* Before the readers unwind: the timer defers into iface->ip and holds a
+    /* Before the reader unwinds: the timer defers into iface->ip and holds a
        pointer into this interface, so it goes first, and the port goes back
        to signalling for whatever completions the teardown still collects. */
     ami_sana2_tx_lazy_stop(iface);
@@ -2603,108 +2628,98 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
      * S2_OFFLINE (the only thing that returns queued reads on a device that
      * ignores AbortIO), then join.  Offline first orphans the reader.
      */
-    for (i = 0; i < AMI_SANA2_RX_READERS; i++)
+    if (rd->started)
     {
-        AmiSana2Rx *rx = &iface->rx[i];
-
-        if (!rx->started)
-            continue;
-
-        rx->stop = TRUE;
+        rd->stop = TRUE;
 
         /* Wake the reader out of Wait(). A signal on a bit the reader has
            already freed with its MsgPort is harmless. The Task stays alive
            until it has put the "exited" semaphore. */
-        if (rx->task != NULL && rx->wake_mask != 0)
-            Signal(rx->task, rx->wake_mask);
+        if (rd->task != NULL && rd->wake_mask != 0)
+            Signal(rd->task, rd->wake_mask);
     }
 
     (VOID)ami_sana2_offline(iface);
 
-    for (i = 0; i < AMI_SANA2_RX_READERS; i++)
+    if (rd->started)
     {
-        AmiSana2Rx *rx = &iface->rx[i];
-
-        if (rx->started)
+        if (tx_semaphore_get(&rd->exited,
+                             5 * NX_IP_PERIODIC_RATE) != TX_SUCCESS)
         {
-            if (tx_semaphore_get(&rx->exited,
-                                 5 * NX_IP_PERIODIC_RATE) != TX_SUCCESS)
-            {
-                /*
-                 * The thread is running on `rx->stack` and its control block is
-                 * live, so neither can be freed: a 4 KB leak is recoverable, a
-                 * thread that runs on freed memory is not.
-                 */
-                AMI_ERROR("sana2: reader %ld did not stop. Its stack leaks. A "
-                          "free here corrupts memory the reader runs on",
-                          (long)i);
-                iface->rx_orphaned = TRUE;
-                continue;
-            }
-
             /*
-             * ami_sana2_rx_teardown() kept the reply port because the device
-             * would not give every read back.  That port's mp_SigTask is this
-             * Task, so the Task must outlive it: no terminate, delete or free.
+             * The thread is running on `rd->stack` and its control block is
+             * live, so neither can be freed: a 4 KB leak is recoverable, a
+             * thread that runs on freed memory is not.
              */
-            if (rx->orphans != 0)
-            {
-                AMI_ERROR("sana2: reader %ld left %ld read(s) with the "
-                          "device. Its thread and stack leak. The reply "
-                          "port they "
-                          "will complete through signals that Task",
-                          (long)i, (long)rx->orphans);
-                iface->rx_orphaned = TRUE;
-                continue;
-            }
-
-            /*
-             * Give the thread time to run off the end of its entry function
-             * before the control block and stack go away.
-             */
-            tx_thread_sleep(5);
-
-            /* The total is monotonic.  The live gauge can stay unchanged if
-               an older zombie exits while this delete creates a new one,
-               which would make this code free the new zombie's live stack. */
-            zombies = tx_amiga_zombie_tasks();
-
-            tx_thread_terminate(&rx->thread);
-            tx_thread_delete(&rx->thread);
-
-            /*
-             * tx_thread_delete() gives up after two seconds, and a failure
-             * leaves a zombie running on rx->stack.  The monotonic zombie count
-             * is the signal; the live gauge can be cancelled by an older exit.
-             */
-            if (tx_amiga_zombie_tasks() != zombies)
-            {
-                AMI_ERROR("sana2: reader %ld cannot be removed. Its stack "
-                          "leaks. A free here corrupts memory the reader "
-                          "runs on",
-                          (long)i);
-                iface->rx_orphaned = TRUE;
-                continue;
-            }
-
-            tx_semaphore_delete(&rx->ready);
-            tx_semaphore_delete(&rx->exited);
+            AMI_ERROR("sana2: reader did not stop. Its stack leaks. A "
+                      "free here corrupts memory the reader runs on");
+            iface->rx_orphaned = TRUE;
+            iface->rx_running = FALSE;
+            return;
         }
 
         /*
-         * Outside the started gate: a reader whose semaphores or thread would
-         * not create has a stack and nothing else, and ami_sana2_rx_start()
-         * unwinds by calling this.
+         * ami_sana2_rx_teardown() kept the reply port because the device
+         * would not give every read back.  That port's mp_SigTask is this
+         * Task, so the Task must outlive it: no terminate, delete or free.
          */
-        if (rx->stack != NULL)
+        if (rd->orphans != 0)
         {
-            ami_free(rx->stack);
-            rx->stack = NULL;
+            AMI_ERROR("sana2: reader left %ld read(s) with the "
+                      "device. Its thread and stack leak. The reply "
+                      "port they will complete through signals that Task",
+                      (long)rd->orphans);
+            iface->rx_orphaned = TRUE;
+            iface->rx_running = FALSE;
+            return;
         }
 
-        rx->started = FALSE;
-        rx->task    = NULL;
+        /*
+         * Give the thread time to run off the end of its entry function
+         * before the control block and stack go away.
+         */
+        tx_thread_sleep(5);
+
+        /* The total is monotonic.  The live gauge can stay unchanged if
+           an older zombie exits while this delete creates a new one,
+           which would make this code free the new zombie's live stack. */
+        zombies = tx_amiga_zombie_tasks();
+
+        tx_thread_terminate(&rd->thread);
+        tx_thread_delete(&rd->thread);
+
+        /*
+         * tx_thread_delete() gives up after two seconds, and a failure
+         * leaves a zombie running on rd->stack.  The monotonic zombie count
+         * is the signal; the live gauge can be cancelled by an older exit.
+         */
+        if (tx_amiga_zombie_tasks() != zombies)
+        {
+            AMI_ERROR("sana2: reader cannot be removed. Its stack "
+                      "leaks. A free here corrupts memory the reader "
+                      "runs on");
+            iface->rx_orphaned = TRUE;
+            iface->rx_running = FALSE;
+            return;
+        }
+
+        tx_semaphore_delete(&rd->ready);
+        tx_semaphore_delete(&rd->exited);
     }
+
+    /*
+     * Outside the started gate: a reader whose semaphores or thread would
+     * not create has a stack and nothing else, and ami_sana2_rx_start()
+     * unwinds by calling this.
+     */
+    if (rd->stack != NULL)
+    {
+        ami_free(rd->stack);
+        rd->stack = NULL;
+    }
+
+    rd->started = FALSE;
+    rd->task    = NULL;
 
     iface->rx_running = FALSE;
 }
