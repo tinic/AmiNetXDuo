@@ -160,7 +160,7 @@ the NDK does not declare and the CPU profiler.
 | | |
 |---|---|
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
-| `NetPrefs` | Workbench editor for interface definitions and boot policy; preserves comments and advanced keywords |
+| `NetPrefs` | Workbench editor for interface, address, device and tuning settings; preserves comments and unknown keywords |
 | `AddNetInterface`, `RemoveNetInterface` | start an interface from its file, and take one out of the running network |
 | `Online`, `Offline` | put a started interface on the wire and take it off |
 | `ConfigureNetInterface` | change the address or MTU of a running interface, renew or release its DHCP lease, turn `.local` answering on |

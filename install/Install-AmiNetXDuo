@@ -1826,8 +1826,9 @@
   (prompt "Installing the network commands into C:")
   (help   "AddNetInterface, Online and Offline bring an interface up and "
           "take it down.  NetSetup writes an interface file from a Shell; "
-          "NetPrefs is its Workbench editor and preserves advanced fields "
-          "it does not show.  ConfigureNetInterface changes the address, netmask and "
+          "NetPrefs is its Workbench editor for interface, address, device and "
+          "tuning settings, and preserves unknown fields.  ConfigureNetInterface "
+          "changes the address, netmask and "
           "gateway of an interface that is already running, and releases or "
           "renews its DHCP lease.  hostname reports the name of this "
           "machine, reports which of the four places that can name it did "

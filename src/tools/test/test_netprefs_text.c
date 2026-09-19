@@ -40,6 +40,24 @@ int main(void)
     check(strstr(out, "CONFIGURE = DHCP\n") != NULL, "missing key appended");
 
     {
+        static const char two_old[] =
+            "ADDRESS6 = 2001:db8::1/64\n"
+            "ADDRESS6 = 2001:db8::2/64\n";
+        NpTextField two[] = {
+            { "ADDRESS6", "2001:db8::10/64", 0 },
+            { "ADDRESS6", "2001:db8::20/64", 0 }
+        };
+        len = 0;
+        check(np_text_patch(two_old, sizeof(two_old) - 1, two, 2,
+                            out, sizeof(out), &len), "two-value patch fits");
+        out[len] = '\0';
+        check(strcmp(out,
+                     "ADDRESS6 = 2001:db8::10/64\n"
+                     "ADDRESS6 = 2001:db8::20/64\n") == 0,
+              "two same-key values retain order");
+    }
+
+    {
         static const char line[] = "C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n";
         check(np_startup_line(line, sizeof(line) - 1,
           "eth0", &commented, &wildcard) && !commented && !wildcard,
