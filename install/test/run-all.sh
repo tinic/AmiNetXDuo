@@ -14,9 +14,22 @@
 #   EXPERT    the only level drawing the unit-number, interface-name and
 #             per-copy confirmation pages, and no other caller passes it
 #   STATIC    "no" to DHCP, the only way into P_ask_ip and P_ip_parse
-#   RERUN     installs three times; later passes must keep the configuration
+#   SYSTEM_RERUN    installs the system layout twice in place
+#   SYSTEM_MINIMAL  installs and boots the minimal profile
+#   SYSTEM_MICRO    installs and boots the micro profile
+#   DRAWER_FULL     refuses to disturb a foreign stack, then installs the
+#                   full profile in its own drawer twice
+#   DRAWER_MINIMAL  does the same with the minimal profile
+#   DRAWER_MICRO    does the same with the micro profile
+#   TERMINAL        opts into the browser services, reinstalls, and exercises
+#                   them from a second machine
 #
-# Runs are serialised by tools/amiberry-run.sh's lock -- about fifteen minutes.
+# AMINETXDUO_REQUIRE_ALL_SCENARIOS=1 makes any missing ingredient or peer a
+# failure.  The release e2e stage sets it: a release gate may not go green
+# after silently skipping a common installation.
+#
+# Runs are serialised by the emulator rig lock.  This is deliberately a long
+# release gate: every row starts with a fresh Workbench and reaches a verdict.
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -24,7 +37,12 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ARGS=("$@")
 
-SCENARIOS=(NOVICE AVERAGE EXPERT STATIC RERUN)
+SCENARIOS=(
+    NOVICE AVERAGE EXPERT STATIC
+    SYSTEM_RERUN SYSTEM_MINIMAL SYSTEM_MICRO
+    DRAWER_FULL DRAWER_MINIMAL DRAWER_MICRO
+    TERMINAL
+)
 declare -a RESULTS
 
 ROOT=$(cd "$HERE/../.." && pwd)
@@ -76,16 +94,24 @@ for scenario in "${SCENARIOS[@]}"; do
     echo "############################################################"
 
     # What each scenario becomes now that run-workbench.sh is the harness.
-    # STATIC and RERUN are not levels: RERUN is what -H already does, three
-    # installs over one another, and STATIC is -S, which answers the DHCP
-    # question no.  Both need a level where the questions are drawn at all.
+    # Every non-level row names the exact visible choice or existing-install
+    # path it owns.  Drawer rows install twice because the second pass is the
+    # reinstall of our own self-contained stack; they also begin with a
+    # foreign stack and prove that declining replacement writes nothing.
     case "$scenario" in
         NOVICE|AVERAGE|EXPERT) opts=(-l "$scenario") ;;
-        RERUN)                 opts=(-l AVERAGE -H) ;;
         STATIC)                opts=(-l AVERAGE -S) ;;
+        SYSTEM_RERUN)          opts=(-l AVERAGE -R) ;;
+        SYSTEM_MINIMAL)        opts=(-l AVERAGE -p minimal) ;;
+        SYSTEM_MICRO)          opts=(-l AVERAGE -p micro) ;;
+        DRAWER_FULL)           opts=(-l AVERAGE -D -g -p drawer) ;;
+        DRAWER_MINIMAL)        opts=(-l AVERAGE -D -p minimal) ;;
+        DRAWER_MICRO)          opts=(-l AVERAGE -D -p micro) ;;
+        TERMINAL)              opts=(-l AVERAGE -H) ;;
     esac
 
-    "$HERE/run-workbench.sh" "${opts[@]}" "${ARGS[@]}"
+    AMINETXDUO_RUN_TAG="matrix-$scenario" \
+        "$HERE/run-workbench.sh" "${opts[@]}" "${ARGS[@]}"
     rc=$?
     case "$rc" in
         # run-workbench.sh's own codes: 2 is "this box cannot run this test",
@@ -116,6 +142,11 @@ echo "scenarios_skipped=$skipped"
 if [ "$failures" != "0" ]; then
     echo "==> $failures check(s) failed"
     exit "$failures"
+fi
+if [ "${AMINETXDUO_REQUIRE_ALL_SCENARIOS:-0}" = "1" ] &&
+   [ "$skipped" != "0" ]; then
+    echo "==> RELEASE GATE INCOMPLETE: $skipped common scenario(s) skipped"
+    exit 1
 fi
 # Nothing failed AND nothing ran.  77 is what tools/ci-arm.sh renders as
 # SKIPPED and what the rest of the tree means by "no verdict in either

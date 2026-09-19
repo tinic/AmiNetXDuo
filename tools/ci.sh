@@ -1923,11 +1923,11 @@ stage_emulator() {
 
 # ------------------------------------------------------------ release e2e ----
 #
-# The one stage that tests the SHIPPED ARCHIVE rather than a build tree, on a
-# genuine Workbench 3.1, and then uses the machine the way its owner does:
-# WebDAV from another machine, `lha x` on the Amiga, a Shell through the
-# browser terminal.  A defect in what dist/make-dist.sh packs is invisible
-# everywhere else in this script.
+# The one stage that tests the SHIPPED ARCHIVE rather than a build tree.  It
+# runs the complete installer scenario matrix: all user levels, DHCP/static,
+# every shipped profile, system and self-contained reinstalls, coexistence
+# with a foreign stack, and browser services from a second machine.  A defect
+# in what dist/make-dist.sh packs is invisible everywhere else in this script.
 #
 # NOT in the default set, and not in `emulator` either.  It needs a licensed
 # Workbench 3.1 floppy set, Commodore's Installer, LhA from the asset store
@@ -1935,10 +1935,9 @@ stage_emulator() {
 # cannot, see install/test/run-workbench.sh.  Naming it runs it.
 #
 # The ingredient list is not repeated here.  run-workbench.sh already owns it
-# and exits 2 when something is missing, 3 when it could not talk to the
-# machine from anywhere else, and those two are different things: the first is
-# "this box cannot run this test", the second is "the test could not observe
-# what it exists to observe".  Neither is a pass.
+# and classifies missing ingredients and an unreachable peer per scenario.
+# AMINETXDUO_REQUIRE_ALL_SCENARIOS turns either kind of skip into a failed
+# release gate: every common installation must reach a verdict.
 stage_e2e() {
     hr "release end-to-end (tier 2, needs a licensed Workbench and a peer)"
 
@@ -1957,43 +1956,13 @@ stage_e2e() {
     fi
     note "archive: $archive"
 
-    "$ROOT/install/test/run-workbench.sh" -l AVERAGE -H -a "$archive" || rc=$?
+    AMINETXDUO_REQUIRE_ALL_SCENARIOS=1 \
+        "$ROOT/install/test/run-all.sh" -a "$archive" || rc=$?
 
     case "$rc" in
-        0) note "PASS  the shipped archive installs, boots, serves and unpacks" ;;
-        2) fail "release e2e: an ingredient is missing on this machine" ;;
-        3) fail "release e2e: no second machine could reach the Amiga" ;;
+        0) note "PASS  every common install, reinstall and profile scenario" ;;
+        77) fail "release e2e: no installer scenario reached a verdict" ;;
         *) fail "release e2e: exit $rc" ;;
-    esac
-    [ "$rc" = 0 ] || return "$rc"
-
-    #
-    # THE DRAWER CONTRACT HAD NO STAGE AT ALL.  run-workbench.sh -D stages a
-    # machine that already carries another TCP/IP stack and then checks that
-    # not one byte of its libraries, driver, configuration or AmiTCP:db moved
-    # (run-workbench.sh:1146-1303).  That is the strongest thing this tree
-    # asserts about coexisting with Roadshow or AmiTCP, and grepping this file
-    # for run-workbench.sh finds -H and nothing else: it has only ever been run
-    # by hand.  Same class as stage_rate being declared and never invoked.
-    #
-    # -g rather than plain -D, and the difference is the whole point.  -D
-    # plants S:AmiNetXDuo-drawer, Install-AmiNetXDuo:747 reads it into
-    # FORCE_DRAWER, and :769 asks the layout question ONLY when FORCE_DRAWER is
-    # 0 -- so the scripted route SKIPS the page a person actually answers.  -g
-    # omits the sentinel and answers the askchoice, which covers both the
-    # contract and the page.
-    #
-    # It reuses the archive and the ingredients already proven above, so the
-    # cost is one more boot, not another set of requirements.
-    note "drawer layout, answered through its own page"
-    "$ROOT/install/test/run-workbench.sh" -l AVERAGE -D -g -p drawer \
-        -a "$archive" || rc=$?
-
-    case "$rc" in
-        0) note "PASS  a self-contained install, chosen from the GUI page" ;;
-        2) fail "release e2e drawer: an ingredient is missing on this machine" ;;
-        3) fail "release e2e drawer: no second machine could reach the Amiga" ;;
-        *) fail "release e2e drawer: exit $rc" ;;
     esac
     return "$rc"
 }
