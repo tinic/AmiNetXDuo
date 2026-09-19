@@ -61,9 +61,13 @@ where() {
     echo "?"
 }
 
+# A here-string, not `printf | grep -q`: under `set -o pipefail` the pipe's
+# status is printf's whenever grep -q has already matched and gone, and on
+# macOS that EPIPE landed often enough to report ltoprobe -- wired in
+# emulator.yml since eaaff2ed -- as invoked by no workflow (run 35427465691).
 errors=0
 for s in $stages; do
-    if printf '%s\n' "$invoked" | grep -qx "$s"; then
+    if grep -qx "$s" <<< "$invoked"; then
         echo "stage_invoked=$s by=$(where "$s")"
         continue
     fi
