@@ -7,6 +7,7 @@
 #include "httpws.h"
 #include "httpfb.h"
 #include "httprtg.h"
+#include "httpzz.h"
 
 #include "aminetxduo/rfb_encode.h"
 #include "aminetxduo/rfb_words.h"
@@ -299,6 +300,16 @@ static ULONG           fb_gone_passes;
    the viewer so has been handed to the socket.  See fb_reboot(). */
 static UBYTE           fb_reset;
 
+/* Set once a session when the console screen is on a ZZ9000 with the encode
+   offload available: the card reads its own framebuffer and runs the RFB
+   encoder, so the host reads nothing back.  Cleared for the rest of a session
+   if a band ever fails to offload.  See httpzz.h. */
+static BOOL            fb_offload;
+
+/* Defined below fb_grab_frame(); forward-declared for the offload fallback,
+   which drops the host encoder's shadow so its first frame after taking over
+   is a full one. */
+static VOID fb_forget_shadow(VOID);
 
 /* ------------------------------------------------------------------ input -- */
 
@@ -1395,7 +1406,7 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
        encodes that copy.  A pass that read a band at a time goes the long way
        round, because its pixels are not in fb_stage yet.  The planar path has
        no copy at all and holds the screen for each band. */
-    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format) &&
+    if (!fb_offload && ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format) &&
         fb_stage_whole && !fb_band_hot)
     {
         const UBYTE *stage = fb_stage;
@@ -1425,6 +1436,14 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
            button is down and this server has one task. */
         if (pub && rc == FB_GRAB_OK && !*palette_moved)
             locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
+
+        /* On the ZZ9000 the card encodes its own framebuffer, so none of the
+           host readback below runs.  fb_examine() above already resolved the
+           geometry and palette, so a mode or colour change is still caught
+           here; only the pixels stay on the Zynq.  A chunky front screen is
+           taken to be the ZZ9000's: v1 targets the single-card A3000. */
+        if (rc == FB_GRAB_OK && !*palette_moved && fb_offload)
+            goto skip_readback;
 
         /* A card's screen is read only while a real lock is held: the fetch is
            a library call against the RastPort, and handing a driver one whose
@@ -1514,16 +1533,45 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         rc = FB_GRAB_VANISHED;
     }
 
+skip_readback:
     if (!pub)
         UnlockIBase(ilock);
 
     if (rc == FB_GRAB_OK && !*palette_moved)
     {
-        if (!locked)
+        if (!locked && !fb_offload)
             fb_torn++;
 
         WaitBlit();
-        *encoded = fb_encode_planes(planes, out, out_cap, ty0, ty1);
+        if (fb_offload)
+        {
+            /* The card holds the delta baseline and the sequence number; the
+               host encoder is untouched while the offload runs.  A band the
+               card could not encode -- or one wrapped in a wire codec the
+               viewer was not told to expect -- ends the offload for the rest
+               of the session: the host encoder takes over with a full frame
+               (its shadow dropped here) and the viewer's seq-gap recovery
+               bridges the one-frame discontinuity. */
+            UWORD codec = HTTPZZ_CODEC_NONE;
+
+            *encoded = httpzz_encode(ty0, ty1, out, out_cap, &codec);
+            if (*encoded < 0L || codec != HTTPZZ_CODEC_NONE)
+            {
+                /* The card could not encode this band.  Give the offload up
+                   for the session and treat this pass as an UNREADABLE one --
+                   NOT a negative *encoded, which the caller reads as an encoder
+                   failure and closes the socket on.  The next pass runs the
+                   host readback + encode; the viewer keeps its picture until
+                   then. */
+                fb_offload = FALSE;
+                fb_forget_shadow();
+                rc = FB_GRAB_UNREADABLE;
+            }
+        }
+        else
+        {
+            *encoded = fb_encode_planes(planes, out, out_cap, ty0, ty1);
+        }
         if (locked)
             ReleaseSemaphore(&sc->LayerInfo.Lock);
     }
@@ -1644,6 +1692,25 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     fb_geom = *g;
 
+    /* The ZZ9000 offload is all-or-nothing for a screen and decided here:
+       only a chunky (card) screen, and only when zz9k.library, the
+       framebuffer-surface capability and the 0x8200 service are all present.
+       The card's delta baseline is dropped so its first band is a full frame,
+       matching the zeroed shadow the host would otherwise have sent from. */
+    fb_offload = (BOOL)(RFB_FMT_IS_CHUNKY(g->format) && httpzz_available());
+    if (fb_offload)
+        /* The card encodes per band like the host, but the scroll probe on
+           band 0 costs ~19 ms/frame there and mostly misfires under a window
+           drag (a wrong COPYRECT on a mid-drag read leaves torn regions), so
+           the offload runs without it: plain tile deltas, which the viewer
+           decodes the same and which cost the card far less. */
+        httpzz_configure((UWORD)fb_rg.width, (UWORD)fb_rg.height,
+                         (UWORD)fb_rg.bytes_per_row, (UBYTE)fb_rg.depth,
+                         (UBYTE)fb_rg.tile_w, (UBYTE)fb_rg.tile_h,
+                         (UBYTE)fb_rg.format,
+                         (ULONG)(fb_flags & ~(rfb_u32)(RFB_F_COPYRECT |
+                                                       RFB_F_SCROLL_ADAPTIVE)));
+
     /* The shape is queued and the colours are not.  Zeroing the remembered
        palette is what makes the next grab report a change; queueing one here
        would send 3 << depth zeroes, which a viewer draws as a black screen. */
@@ -1659,6 +1726,12 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 static VOID fb_forget_shadow(VOID)
 {
     rfb_u16 seq;
+
+    /* A refresh forgets the card's baseline as well, so its next band is a
+       full frame from the same zero the viewer has just been returned to.
+       Skipped once the offload has been abandoned (fb_offload cleared first). */
+    if (fb_offload)
+        httpzz_reset();
 
     if (fb_shadow == NULL)
         return;
@@ -2346,6 +2419,11 @@ static VOID fb_reboot(VOID)
 
 VOID http_fb_stop(VOID)
 {
+    /* Free the card's shared buffer and close zz9k.library, if the offload
+       ever opened it.  Safe when it did not; the next session re-probes. */
+    fb_offload = FALSE;
+    httpzz_cleanup();
+
     if (!fb_live)
     {
         /* A start that failed half way frees its own buffers, but a shutdown
