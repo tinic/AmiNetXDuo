@@ -2965,6 +2965,10 @@
   the definition under an ignored .disabled.info name rather than deleting it.
   A wildcard AddNetInterface line starts every definition; NetPrefs reports
   that policy and will not silently rewrite it merely to exclude one card.
+  The window is laid out for the Workbench default font (topaz 8) on a
+  screen of at least 640 by 200 pixels; a larger screen font crowds its
+  labels. Save & Start and Online/Offline run the command to completion
+  with the busy pointer up, up to a minute with DHCP.
 
   @{b}Drivers@{ub}
 

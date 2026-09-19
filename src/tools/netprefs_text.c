@@ -41,6 +41,37 @@ int np_interface_name_safe(const char *name, size_t limit)
     return n != 0;
 }
 
+/*
+ * The keywords the parser reads as the GUI's keys (src/config/config_parse.c):
+ * a file that says IPADDRESS= is edited in place as ADDRESS, not left with a
+ * stale IPADDRESS beside a new ADDRESS.  Each row is the GUI key followed by
+ * its aliases, NULL-terminated.
+ */
+static const char *const np_key_aliases[][5] =
+{
+    { "ADDRESS",   "IPADDRESS",   NULL },
+    { "NETMASK",   "SUBNETMASK",  NULL },
+    { "CONFIGURE", "IPTYPE",      NULL },
+    { "PRIORITY",  "PRI",         NULL },
+    { "ADDRESS6",  "IPADDRESS6",  NULL },
+    { "CONFIGURE6","IPTYPE6",     NULL },
+    { NULL }
+};
+
+static int key_matches(const char *seen, size_t seen_len, const char *key)
+{
+    size_t r, a;
+
+    if (equal_nocase(seen, seen_len, key)) return 1;
+    for (r = 0; np_key_aliases[r][0] != NULL; r++)
+    {
+        if (!equal_nocase(key, np_len(key), np_key_aliases[r][0])) continue;
+        for (a = 1; np_key_aliases[r][a] != NULL; a++)
+            if (equal_nocase(seen, seen_len, np_key_aliases[r][a])) return 1;
+    }
+    return 0;
+}
+
 static long field_of_line(const char *line, size_t len,
                           NpTextField *fields, size_t count)
 {
@@ -58,7 +89,7 @@ static long field_of_line(const char *line, size_t len,
            line[end] != '\t' && line[end] != '\r' && line[end] != '\n') end++;
     for (i = 0; i < count; i++)
     {
-        if (!equal_nocase(line + begin, end - begin, fields[i].key))
+        if (!key_matches(line + begin, end - begin, fields[i].key))
             continue;
         if (first < 0) first = (long)i;
         if (!fields[i].seen) return (long)i;
@@ -120,6 +151,36 @@ int np_text_patch(const char *old, size_t oldlen, NpTextField *fields,
     return 1;
 }
 
+/* One Shell word: p at its first character, returns one past its last. */
+static size_t word_end(const char *line, size_t len, size_t p)
+{
+    while (p < len && line[p] != ' ' && line[p] != '\t' &&
+           line[p] != '\r' && line[p] != '\n') p++;
+    return p;
+}
+
+static size_t skip_blanks(const char *line, size_t len, size_t p)
+{
+    while (p < len && (line[p] == ' ' || line[p] == '\t')) p++;
+    return p;
+}
+
+/* A Shell redirection, ">file", ">>file", "<file", "*>file", with the file
+   either attached or the next word.  Returns one past it, or p unchanged. */
+static size_t skip_redirection(const char *line, size_t len, size_t p)
+{
+    size_t q = p;
+
+    if (q < len && line[q] == '*') q++;
+    if (q >= len || (line[q] != '>' && line[q] != '<')) return p;
+    while (q < len && (line[q] == '>' || line[q] == '<')) q++;
+    if (q < len && line[q] != ' ' && line[q] != '\t' &&
+        line[q] != '\r' && line[q] != '\n')
+        return word_end(line, len, q);
+    q = skip_blanks(line, len, q);
+    return word_end(line, len, q);
+}
+
 int np_startup_line(const char *line, size_t len, const char *name,
                     int *commented, int *wildcard)
 {
@@ -127,18 +188,30 @@ int np_startup_line(const char *line, size_t len, const char *name,
     const char *base;
     *commented = 0;
     *wildcard = 0;
-    while (p < len && (line[p] == ' ' || line[p] == '\t')) p++;
+    p = skip_blanks(line, len, 0);
     if (p < len && line[p] == ';')
     {
         *commented = 1;
-        p++;
-        while (p < len && (line[p] == ' ' || line[p] == '\t')) p++;
+        p = skip_blanks(line, len, p + 1);
     }
     if (p == len || line[p] == '#') return 0;
-    a = p;
-    while (p < len && line[p] != ' ' && line[p] != '\t' &&
-           line[p] != '\r' && line[p] != '\n') p++;
-    b = p;
+    /* The command word, past a leading "Run" and any redirections on either
+       side of it: "Run >NIL: C:AddNetInterface ..." and
+       "C:AddNetInterface >>SYS:boot.log DEVS:NetInterfaces/genet" are both
+       lines a machine here boots with. */
+    for (;;)
+    {
+        size_t q;
+
+        p = skip_blanks(line, len, p);
+        q = skip_redirection(line, len, p);
+        if (q != p) { p = q; continue; }
+        a = p;
+        b = word_end(line, len, p);
+        if (b == a) return 0;
+        if (equal_nocase(line + a, b - a, "Run")) { p = b; continue; }
+        break;
+    }
     base = line + a;
     while (a < b)
     {
@@ -147,11 +220,18 @@ int np_startup_line(const char *line, size_t len, const char *name,
     }
     if (!equal_nocase(base, (size_t)((line + b) - base), "AddNetInterface"))
         return 0;
-    while (p < len && (line[p] == ' ' || line[p] == '\t')) p++;
+    p = b;
+    for (;;)
+    {
+        size_t q;
+
+        p = skip_blanks(line, len, p);
+        q = skip_redirection(line, len, p);
+        if (q != p) { p = q; continue; }
+        break;
+    }
     a = p;
-    while (p < len && line[p] != ' ' && line[p] != '\t' &&
-           line[p] != '\r' && line[p] != '\n') p++;
-    b = p;
+    b = word_end(line, len, p);
     if (b == a) return 0;
     base = line + a;
     while (a < b)

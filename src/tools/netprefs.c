@@ -16,9 +16,11 @@
 #include <exec/libraries.h>
 #include <exec/lists.h>
 #include <exec/memory.h>
+#include <exec/tasks.h>
 #include <dos/dostags.h>
 #include <graphics/gfxbase.h>
 #include <intuition/intuition.h>
+#include <intuition/intuitionbase.h>
 #include <intuition/screens.h>
 #include <libraries/gadtools.h>
 #include <proto/dos.h>
@@ -539,6 +541,23 @@ static BOOL set_boot_state(const char *name, BOOL enabled, BOOL removing)
                 if (!enabled)
                     if (!append_bytes(out, len + extra, &used, "; ", 2)) goto fail;
             }
+            /* A line this tool (or a hand) commented out is the line to give
+               back, not a reason to append another: enable/disable cycles
+               used to leave one more "; C:AddNetInterface" each time. */
+            if (!wildcard && commented && enabled && !exact)
+            {
+                ULONG p = start;
+
+                exact = TRUE;
+                while (p < at && (old[p] == ' ' || old[p] == '\t')) p++;
+                if (p < at && old[p] == ';')
+                {
+                    p++;
+                    while (p < at && (old[p] == ' ' || old[p] == '\t')) p++;
+                }
+                if (!append_bytes(out, len + extra, &used, old + p, at - p)) goto fail;
+                continue;
+            }
         }
         if (!append_bytes(out, len + extra, &used, old + start, at - start)) goto fail;
     }
@@ -615,10 +634,16 @@ static LONG run_command(const char *command, const char *name, BOOL quiet)
         if (output != (BPTR)0) Close(output);
         return -1;
     }
+    /* The command runs to completion here -- AddNetInterface with DHCP can
+       take a minute -- so the window says so.  The busy pointer is V39. */
+    if (np.window != NULL && IntuitionBase->LibNode.lib_Version >= 39)
+        SetWindowPointer(np.window, WA_BusyPointer, TRUE, TAG_DONE);
     result = SystemTags((CONST_STRPTR)line,
                         SYS_Input, (ULONG)input,
                         SYS_Output, (ULONG)output,
                         TAG_DONE);
+    if (np.window != NULL && IntuitionBase->LibNode.lib_Version >= 39)
+        SetWindowPointer(np.window, WA_Pointer, 0, TAG_DONE);
     if (result == -1)
     {
         Close(input);
@@ -1705,7 +1730,7 @@ static VOID event_loop(VOID)
                 /* IntuiTicks arrive roughly ten times a second.  A one-second
                    poll keeps external Online/Offline commands visible without
                    continually opening the status interface. */
-                if (++ticks >= 10)
+                if (++ticks >= 50)
                 {
                     ticks = 0;
                     update_live_state();
@@ -1756,10 +1781,57 @@ static VOID event_loop(VOID)
     }
 }
 
+/*
+ * Intuition, GadTools and System() run on the caller's stack, and a Shell
+ * gives a command 4,096 bytes: this editor's own frames are 1,472 (the
+ * stack-frame gate) and an EasyRequest or a GadTools refresh on top of them
+ * is more than that, silently, without an MMU.  The icon asks for 8 KB; a
+ * Shell does not.  So the editor runs on its own 16 KB stack whenever the one
+ * it was given is smaller -- the same trampoline fetch uses (fetch.c).
+ * netprefs_trampoline() has no locals and no arguments and stays noinline:
+ * between the two StackSwap() calls a stack local of its own would read the
+ * wrong memory.
+ */
+#define NETPREFS_STACK_SIZE (16UL * 1024UL)
+
+static struct StackSwapStruct np_sss;
+static int                    np_result;
+
+static int netprefs_run(void);
+
+static __attribute__((noinline)) VOID netprefs_trampoline(VOID)
+{
+    StackSwap(&np_sss);
+    np_result = netprefs_run();
+    StackSwap(&np_sss);
+}
+
 int main(int argc, char **argv)
 {
+    struct Task *me = FindTask(NULL);
+    ULONG        have = (ULONG)me->tc_SPUpper - (ULONG)me->tc_SPLower;
+    APTR         stack;
+
     (VOID)argc;
     (VOID)argv;
+
+    if (have >= NETPREFS_STACK_SIZE)
+        return netprefs_run();
+
+    stack = AllocMem(NETPREFS_STACK_SIZE, MEMF_ANY);
+    if (stack == NULL)
+        return netprefs_run();          /* the small stack, as before */
+
+    np_sss.stk_Lower   = stack;
+    np_sss.stk_Upper   = (ULONG)stack + NETPREFS_STACK_SIZE;
+    np_sss.stk_Pointer = (APTR)((ULONG)stack + NETPREFS_STACK_SIZE);
+    netprefs_trampoline();
+    FreeMem(stack, NETPREFS_STACK_SIZE);
+    return np_result;
+}
+
+static int netprefs_run(void)
+{
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37);
     GadToolsBase = OpenLibrary("gadtools.library", 37);

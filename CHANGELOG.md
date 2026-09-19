@@ -9,6 +9,17 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `NetPrefs` runs on its own 16 KB stack when started from a Shell (a
+  Shell gives a command 4,096 bytes; the editor's frames plus a requester or
+  a GadTools refresh are more). Its boot checkbox uncomments an existing
+  `; C:AddNetInterface` line instead of appending another; its reader of
+  `S:Network-Startup` follows `Run`, `>NIL:` and `>>log` redirections to the
+  interface name: such a line counts as "at boot" and is not added a second
+  time. Alias keywords (`IPADDRESS`, `SUBNETMASK`, `PRI`,
+  `IPTYPE`, `IPADDRESS6`, `IPTYPE6`) are edited in place as the keys they
+  stand for. The busy pointer is up while `Save & Start`, `Online` or
+  `Offline` runs; the live-state poll is every 5 s, not every second.
+
 - `ShowNetStatus` and `netstat -i` print `multicast in`, the group-addressed
   frames the driver delivered (broadcasts excluded). A driver that accepts a
   multicast join and never passes the frames up -- X-Surf-100 firmware up to

@@ -82,6 +82,44 @@ int main(void)
         check(!np_startup_line(line, sizeof(line) - 1,
           "eth0", &commented, &wildcard), "different interface ignored");
     }
+    {
+        static const char line[] =
+            "Run >NIL: <NIL: C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n";
+        check(np_startup_line(line, sizeof(line) - 1,
+          "eth0", &commented, &wildcard) && !commented && !wildcard,
+          "Run with redirections before the command");
+    }
+    {
+        static const char line[] =
+            "C:AddNetInterface >>SYS:Unpacked/boot-genet.log DEVS:NetInterfaces/genet\n";
+        check(np_startup_line(line, sizeof(line) - 1,
+          "genet", &commented, &wildcard) && !commented && !wildcard,
+          "redirection between the command and the name");
+    }
+    {
+        static const char line[] =
+            "C:AddNetInterface >>SYS:boot.log DEVS:NetInterfaces/genet\n";
+        check(!np_startup_line(line, sizeof(line) - 1,
+          "boot.log", &commented, &wildcard),
+          "a redirection target is not the name");
+    }
+    {
+        static const char aliased[] =
+            "IPADDRESS=192.168.1.5\n"
+            "SUBNETMASK=255.255.255.0\n"
+            "PRI=3\n";
+        NpTextField af[] = {
+            { "ADDRESS", NULL, 0 },
+            { "NETMASK", NULL, 0 },
+            { "PRIORITY", "7", 0 }
+        };
+        len = 0;
+        check(np_text_patch(aliased, sizeof(aliased) - 1, af, 3,
+                            out, sizeof(out), &len), "alias patch fits");
+        out[len] = '\0';
+        check(strcmp(out, "PRIORITY = 7\n") == 0,
+              "aliases are the GUI's keys: removed and rewritten in place");
+    }
 
     check(np_interface_name_safe("genet0", 16), "simple interface name");
     check(np_interface_name_safe("x-surf_100.0", 16),
