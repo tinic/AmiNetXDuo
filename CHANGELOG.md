@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `NetPrefs` no longer hangs the machine after a Save made from a page other
+  than General. The Name gadget was disabled through GadTools while its page
+  was detached, which drew it over the current page and left Intuition's
+  gadget list inconsistent; the next page switches and a click froze the
+  A1200 (reproduced twice: New, Save from the Device page, cycle to General,
+  click a checkbox). Off its page only the gadget's flag changes now.
+
 - `ShowNetStatus` no longer says an interface's "configuration file was
   changed after the network started" when nothing changed. The status record
   carries the device name in 31 characters, and a system installation's

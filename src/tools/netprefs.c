@@ -300,6 +300,25 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     GT_SetGadgetAttrsA(g, np.window, NULL, tags);
 }
 
+/*
+ * The Name gadget lives on the General page.  GA_Disabled through GadTools
+ * refreshes the gadget into the window whether or not its page is attached:
+ * a Save made from the Device page drew the disabled Name gadget over that
+ * page's first line ("DeName"), and the page switches that followed hung the
+ * whole machine (A1200, 2026-09-19, twice, reproducibly: New, Save from the
+ * Device page, cycle to General, click a checkbox).  Off its page only the
+ * flag changes; the page's AddGList + RefreshGList draws it when it returns.
+ */
+static VOID set_name_locked(BOOL locked)
+{
+    if (np.active_panel == NP_PANEL_GENERAL)
+        set_attr(np.g_name, GA_Disabled, (ULONG)locked);
+    else if (locked)
+        np.g_name->Flags |= GFLG_DISABLED;
+    else
+        np.g_name->Flags &= (UWORD)~GFLG_DISABLED;
+}
+
 static VOID set_static_fields(BOOL enabled)
 {
     set_attr(np.g_address, GA_Disabled, (ULONG)!enabled);
@@ -704,7 +723,7 @@ static VOID clear_form(VOID)
     ULONG restore = np.active_panel;
 
     show_panel(NP_PANEL_GENERAL);
-    set_attr(np.g_name, GA_Disabled, FALSE);
+    set_name_locked(FALSE);
     set_attr(np.g_name, GTST_String, (ULONG)"");
     set_attr(np.g_id, GTST_String, (ULONG)"");
     set_attr(np.g_mdns, GTCB_Checked, FALSE);
@@ -800,7 +819,7 @@ static VOID load_form(LONG index)
 
     show_panel(NP_PANEL_GENERAL);
     set_attr(np.g_name, GTST_String, (ULONG)cfg.name);
-    set_attr(np.g_name, GA_Disabled, TRUE);
+    set_name_locked(TRUE);
     set_attr(np.g_id, GTST_String, (ULONG)cfg.id);
     set_attr(np.g_mdns, GTCB_Checked, (ULONG)cfg.mdns);
     set_attr(np.g_state, GTCB_Checked, (ULONG)cfg.up);
@@ -1125,7 +1144,7 @@ static BOOL save_form(BOOL apply)
         {
             np.selected = (LONG)i;
             set_attr(np.g_interface, GTLV_Selected, i);
-            set_attr(np.g_name, GA_Disabled, TRUE);
+            set_name_locked(TRUE);
             break;
         }
     }
