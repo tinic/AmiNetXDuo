@@ -41,6 +41,10 @@ CROSS_CONFIGS=(
     # them honest without a profile having to want them, which is what the
     # noXXX arms above are for.
     "nodhcp:-DAMINETXDUO_DHCP=OFF"
+    # Shipping profiles need the private interface-control operations in this
+    # block, but NETSTATUS remains a supported API-floor configuration.  It
+    # therefore needs its own compile arm now that micro correctly keeps it.
+    "nonetstatus:-DAMINETXDUO_NETSTATUS=OFF"
     # The floor drawer's answer to IGMP. mcast.c is the only caller of NetX
     # Duo's IGMP services, so this arm is what proves the rest of the tree
     # still builds and binds without it, bind() classifies a class D address
