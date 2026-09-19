@@ -71,7 +71,7 @@ LIBS=(bsdsocket usergroup)
 # byte for byte against the one packed here, so the two cannot drift apart
 # again in silence.
 DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
-CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
@@ -396,6 +396,7 @@ fi
 for cmd in "${CMDS[@]}"; do
     cp "$CMD_BUILD/src/tools/$cmd" "$TREE/C/"
 done
+cp "$INSTALL/NetPrefs.info" "$TREE/C/NetPrefs.info"
 chmod 755 "$TREE"/C/*
 
 # The ssh and scp clients, when they have been built.  Optional, because they

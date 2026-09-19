@@ -1099,7 +1099,8 @@
     @{"AddNetInterface " link ADDNETINTERFACE}  start the stack and bring an interface up
     @{"Online          " link ONLINE}  put an interface back on the network
     @{"Offline         " link OFFLINE}  take an interface off the network
-    NetSetup          write the configuration files
+    NetSetup          write the configuration files from a Shell
+    NetPrefs          edit interfaces and boot policy from Workbench
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
@@ -2938,9 +2939,18 @@
   @{b}Not written to@{ub}
 
   Apart from that session cache, the stack writes none of these files.
-  NetSetup, the Installer and a text editor are what create them.
+  NetSetup, NetPrefs, the Installer and a text editor are what create them.
   Nothing here creates a drawer of its own or patches the operating
   system, and deleting the files above removes AmiNetXDuo completely.
+
+  NetPrefs is installed in SYS:Prefs by a system installation. It shows the
+  common interface fields, saves a definition, starts or stops it through
+  the same commands used from the Shell, and controls its line in
+  S:Network-Startup. It does not flatten a hand-edited file: comments and
+  keywords that are not shown in the window are retained. Remove parks the
+  definition under an ignored .disabled.info name rather than deleting it.
+  A wildcard AddNetInterface line starts every definition; NetPrefs reports
+  that policy and will not silently rewrite it merely to exclude one card.
 
   @{b}Drivers@{ub}
 

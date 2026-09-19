@@ -123,7 +123,7 @@ It puts
 
      bsdsocket.library, usergroup.library,
      tls.library                               into LIBS:
-     NetSetup, AddNetInterface, RemoveNetInterface,
+     NetSetup, NetPrefs, AddNetInterface, RemoveNetInterface,
      ConfigureNetInterface, Online, Offline,
      ShowNetStatus, ShowNetServices, GetNetStatus,
      CheckNetConfig, CheckNetDevice, NetDevStats, NetShutdown,
@@ -132,6 +132,7 @@ It puts
      fetch, nc, telnet, tftp, sntp, traceroute,
      whois, ssh, scp, scp-runner, httpd, iperf,
      NetCapture, NetTrace                      into C:
+     NetPrefs and its icon (system layout)     into SYS:Prefs
      anxnet.device, anxgenet.device,
        anxwifipi.device                        into DEVS:Networks
      the interface definition                  into DEVS:NetInterfaces
@@ -326,7 +327,8 @@ UNINSTALLING
 
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
      Delete LIBS:tls.library
-     Delete C:NetSetup C:AddNetInterface C:RemoveNetInterface
+     Delete C:NetSetup C:NetPrefs C:AddNetInterface C:RemoveNetInterface
+     Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info
      Delete C:ConfigureNetInterface C:Online C:Offline
      Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
      Delete C:CheckNetConfig C:CheckNetDevice C:NetDevStats C:NetShutdown

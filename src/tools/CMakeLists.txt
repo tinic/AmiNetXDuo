@@ -266,6 +266,11 @@ aminetxduo_add_tool(tool_netdevstats NetDevStats
 # reads and then runs AddNetInterface, rather than starting a stack itself.
 aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 
+# Workbench counterpart to NetSetup.  It edits the same Roadshow-compatible
+# files, preserving fields it does not own, and invokes the existing commands
+# for live changes rather than growing a second stack-control path.
+aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c)
+
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
 # Config-only, they reach the live routing table through NetStackControl()
@@ -653,7 +658,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
-    tool_netsetup tool_online tool_offline tool_host tool_hostname
+    tool_netsetup tool_netprefs tool_online tool_offline tool_host tool_hostname
     tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
     tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
@@ -817,6 +822,17 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_toolbudget PRIVATE -Wall -Wextra)
     set_target_properties(test_toolbudget PROPERTIES C_STANDARD 11)
 
+    # NetPrefs edits files users also edit by hand.  The GUI owns a small set
+    # of keys, and this test proves every unknown line and comment survives;
+    # it also covers Roadshow's wildcard startup spelling.
+    add_executable(test_netprefs_text
+        test/test_netprefs_text.c
+        netprefs_text.c)
+    target_include_directories(test_netprefs_text PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netprefs_text PRIVATE -Wall -Wextra)
+    set_target_properties(test_netprefs_text PROPERTIES C_STANDARD 11)
+
     target_include_directories(test_fetchurl PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -925,6 +941,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME httpif_conditions COMMAND test_httpif)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
+    add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME iperf_wire_format COMMAND test_iperfwire)

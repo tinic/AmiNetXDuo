@@ -45,8 +45,9 @@ The archive carries three stacks. The installer asks which one to put on.
 
 The installer offers these cards by name: A2065, Ariadne, Ariadne II,
 AmigaNet, LAN Rover, X-Surf, X-Surf 100, PCMCIA (`cnet.device`,
-`etherlink3.device` for the 3Com 3C589, or `prism2.device`) and `uaenet.device`
-for emulators. Any other driver name can be typed in.
+`etherlink3.device` for the 3Com 3C589, or `prism2.device`), ZZ9000
+(`ZZ9000Net.device`) and `uaenet.device` for emulators. Any other driver name
+can be typed in.
 
 `anxnet.device`, the classic-card SANA-II driver AmiNetXDuo builds itself,
 drives the A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, X-Surf 100,
@@ -111,7 +112,8 @@ machine not in this table is not known to fail; it is not known.
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | GENET, `anxgenet.device` | 900 in / 580 out Mbit/s |
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | 3Com 3C589 PCMCIA, `anxnet.device` | 8.3 Mbit/s |
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | Broadcom 43455 Wi-Fi, `anxwifipi.device` | 34-36 in / 52-61 out Mbit/s, 5 GHz at -69 dBm |
-| A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 3.9 in / 3.0 out Mbit/s |
+| A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | fresh measurement pending |
+| A3000, 68030/25 | 3.9 | ZZ9000, `ZZ9000Net.device` | fresh measurement pending |
 | Amiberry, A1200 (68020) | 3.1 | A2065, `anxnet.device` | 4.8 in / 4.4 out Mbit/s |
 | Amiberry, A3000 (68030) | 3.1 | X-Surf 100 (Zorro III), `anxnet.device` | 30 in / 31 out Mbit/s |
 | Amiberry, A600 (68000) | 2.05 | NE2000 PCMCIA and `cnet.device` | boots, DHCP, transfers (CI) |
@@ -158,6 +160,7 @@ the NDK does not declare and the CPU profiler.
 | | |
 |---|---|
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
+| `NetPrefs` | Workbench editor for interface definitions and boot policy; preserves comments and advanced keywords |
 | `AddNetInterface`, `RemoveNetInterface` | start an interface from its file, and take one out of the running network |
 | `Online`, `Offline` | put a started interface on the wire and take it off |
 | `ConfigureNetInterface` | change the address or MTU of a running interface, renew or release its DHCP lease, turn `.local` answering on |
@@ -182,7 +185,8 @@ the NDK does not declare and the CPU profiler.
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `hostname` | the name of this machine, and where the name came from |
 
-The installer copies all of them into `C:`. Every command that resolves a name
+The installer copies all of them into `C:`; a system installation also places
+the `NetPrefs` program and icon in `SYS:Prefs`. Every command that resolves a name
 takes `-4` and `-6`.
 
 ## Files, a Shell and the display in a web browser

@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `NetPrefs` is a native Workbench editor for interface definitions. It adds,
+  edits, starts, stops and safely parks interfaces, and controls whether the
+  selected definition is named in `S:Network-Startup`. Saving replaces only
+  the fields shown in the window: comments, ordering and advanced Roadshow
+  keywords remain intact. A system installation puts its icon in `SYS:Prefs`;
+  a self-contained installation keeps it in the drawer's `C` directory.
+
 - A UDP datagram or a raw send larger than the link goes out, fragmented by
   the stack, up to the 65,507 bytes BSD allows; only beyond that is
   `EMSGSIZE`. The limit was the interface MTU less the headers -- 1,472 on
@@ -20,7 +27,6 @@ version at the top when it merges.
   TCP and a 20 MB fetch pass through the hop. Datagrams past about 24 KB
   still fail on a card whose receive ring cannot hold their fragments at
   wire speed (the A2065 holds 16 frames); that is the card's ceiling.
-
 - `gethostname()` returns a qualified name: a configured name with no dot
   -- DHCP option 12, `HOSTNAME` in `name_resolution`, the name derived from
   the card -- gets the domain in force appended (DHCP option 15, a router

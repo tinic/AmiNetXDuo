@@ -80,7 +80,8 @@ AmiNetXDuo/InstallNetProbe          | not-installed | always    | Read-only Emu6
 # ------------------------------------------------------------ the software --
 #
 # C/ IS ONE ROW ON PURPOSE.  The installer copies that drawer wholesale --
-# `(source S_C) (dest D_C) (all)` -- so a command that reaches the drawer is
+# `(source S_C) (dest D_C) (all) (infos)` -- so a command or its Workbench
+# icon that reaches the drawer is
 # installed by construction and a per-command row here would assert nothing.
 # Whether a command BELONGS in the drawer is a different question with its own
 # check one level up: dist/make-dist.sh walks the build's src/tools and refuses

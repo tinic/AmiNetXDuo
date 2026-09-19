@@ -1825,8 +1825,9 @@
 (copyfiles
   (prompt "Installing the network commands into C:")
   (help   "AddNetInterface, Online and Offline bring an interface up and "
-          "take it down.  NetSetup writes or edits the interface file "
-          "instead.  ConfigureNetInterface changes the address, netmask and "
+          "take it down.  NetSetup writes an interface file from a Shell; "
+          "NetPrefs is its Workbench editor and preserves advanced fields "
+          "it does not show.  ConfigureNetInterface changes the address, netmask and "
           "gateway of an interface that is already running, and releases or "
           "renews its DHCP lease.  hostname reports the name of this "
           "machine, reports which of the four places that can name it did "
@@ -1857,7 +1858,26 @@
   ; used to be (pattern "~(ssh.#?)"), keeping the per-CPU ssh.000/.020/.060 out
   ; of the wholesale copy; there is one ssh now and it comes with the rest.
   (all)
+  ; NetPrefs is the one command with a Workbench tool icon.  Without (infos)
+  ; the self-contained layout would copy the program but leave that icon in
+  ; the download, making the advertised Workbench editor invisible there.
+  (infos)
   (optional "force"))
+
+; A system installation also exposes the GUI where an Amiga user expects a
+; preferences editor.  The C: copy remains the canonical executable (and the
+; drawer installation remains genuinely self-contained); this small duplicate
+; means SYS:Prefs/NetPrefs can be launched directly from Workbench.
+(if (NOT DRAWER_LAYOUT)
+    (copyfiles
+      (prompt "Installing NetPrefs into SYS:Prefs")
+      (help   "NetPrefs edits the same DEVS:NetInterfaces files as NetSetup, "
+              "preserves comments and advanced keywords, and can apply a "
+              "saved definition through the normal network commands.")
+      (source (tackon S_C "NetPrefs"))
+      (dest   "SYS:Prefs")
+      (infos)
+      (optional "force")))
 
 ; ssh and scp went into C: with the copy above.  ssh used to need its own step and a
 ; pattern that kept ssh.000, ssh.020 and ssh.060 out of the wholesale copy,

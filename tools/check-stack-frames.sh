@@ -160,6 +160,7 @@ COMMAND_BUDGETS=(
     "El3Diag:192"
     "GetNetStatus:640"
     "NetCapture:1216"
+    "NetPrefs:1472"
     "NetSetup:1152"
     "NetShutdown:512"
     "NetTrace:1024"
