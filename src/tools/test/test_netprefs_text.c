@@ -120,6 +120,44 @@ int main(void)
         check(strcmp(out, "PRIORITY = 7\n") == 0,
               "aliases are the GUI's keys: removed and rewritten in place");
     }
+    {
+        static const char iptype[] =
+            "IPTYPE=2048\n"
+            "CONFIGURE=DHCP\n";
+        NpTextField mode[] = {
+            { "CONFIGURE", "AUTO", 0 }
+        };
+        len = 0;
+        check(np_text_patch(iptype, sizeof(iptype) - 1, mode, 1,
+                            out, sizeof(out), &len), "numeric IPTYPE patch fits");
+        out[len] = '\0';
+        check(strcmp(out, "IPTYPE=2048\nCONFIGURE = AUTO\n") == 0,
+              "numeric IPTYPE remains the SANA-II packet type");
+    }
+    {
+        static const char iptype[] = "IPTYPE=DHCP\n";
+        NpTextField mode[] = {
+            { "CONFIGURE", "STATIC", 0 }
+        };
+        len = 0;
+        check(np_text_patch(iptype, sizeof(iptype) - 1, mode, 1,
+                            out, sizeof(out), &len), "alphabetic IPTYPE patch fits");
+        out[len] = '\0';
+        check(strcmp(out, "CONFIGURE = STATIC\n") == 0,
+              "alphabetic IPTYPE is the address-mode alias");
+    }
+    {
+        static const char iptype[] = "IPTYPE=\"0x800\"\n";
+        NpTextField mode[] = {
+            { "CONFIGURE", "DHCP", 0 }
+        };
+        len = 0;
+        check(np_text_patch(iptype, sizeof(iptype) - 1, mode, 1,
+                            out, sizeof(out), &len), "quoted IPTYPE patch fits");
+        out[len] = '\0';
+        check(strcmp(out, "IPTYPE=\"0x800\"\nCONFIGURE = DHCP\n") == 0,
+              "quoted numeric IPTYPE remains the packet type");
+    }
 
     check(np_interface_name_safe("genet0", 16), "simple interface name");
     check(np_interface_name_safe("x-surf_100.0", 16),

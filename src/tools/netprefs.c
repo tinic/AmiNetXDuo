@@ -1727,7 +1727,7 @@ static VOID event_loop(VOID)
             }
             else if (cls == IDCMP_INTUITICKS)
             {
-                /* IntuiTicks arrive roughly ten times a second.  A one-second
+                /* IntuiTicks arrive roughly ten times a second.  A five-second
                    poll keeps external Online/Offline commands visible without
                    continually opening the status interface. */
                 if (++ticks >= 50)
@@ -1783,16 +1783,17 @@ static VOID event_loop(VOID)
 
 /*
  * Intuition, GadTools and System() run on the caller's stack, and a Shell
- * gives a command 4,096 bytes: this editor's own frames are 1,472 (the
- * stack-frame gate) and an EasyRequest or a GadTools refresh on top of them
- * is more than that, silently, without an MMU.  The icon asks for 8 KB; a
- * Shell does not.  So the editor runs on its own 16 KB stack whenever the one
- * it was given is smaller -- the same trampoline fetch uses (fetch.c).
+ * gives a command 4,096 bytes: the stack-frame gate sees the editor's own
+ * calls but not an EasyRequest or a GadTools refresh on top of them, silently,
+ * without an MMU.  The icon asks for 8 KB; a Shell does not.  Eight KB is
+ * already sufficient; below that the editor runs
+ * on its own 16 KB stack -- the same trampoline fetch uses (fetch.c).
  * netprefs_trampoline() has no locals and no arguments and stays noinline:
  * between the two StackSwap() calls a stack local of its own would read the
  * wrong memory.
  */
 #define NETPREFS_STACK_SIZE (16UL * 1024UL)
+#define NETPREFS_SAFE_STACK (8UL * 1024UL)
 
 static struct StackSwapStruct np_sss;
 static int                    np_result;
@@ -1815,12 +1816,15 @@ int main(int argc, char **argv)
     (VOID)argc;
     (VOID)argv;
 
-    if (have >= NETPREFS_STACK_SIZE)
+    if (have >= NETPREFS_SAFE_STACK)
         return netprefs_run();
 
     stack = AllocMem(NETPREFS_STACK_SIZE, MEMF_ANY);
     if (stack == NULL)
-        return netprefs_run();          /* the small stack, as before */
+    {
+        tool_error("not enough memory for NetPrefs' 16 KB working stack");
+        return RETURN_FAIL;
+    }
 
     np_sss.stk_Lower   = stack;
     np_sss.stk_Upper   = (ULONG)stack + NETPREFS_STACK_SIZE;

@@ -51,7 +51,6 @@ static const char *const np_key_aliases[][5] =
 {
     { "ADDRESS",   "IPADDRESS",   NULL },
     { "NETMASK",   "SUBNETMASK",  NULL },
-    { "CONFIGURE", "IPTYPE",      NULL },
     { "PRIORITY",  "PRI",         NULL },
     { "ADDRESS6",  "IPADDRESS6",  NULL },
     { "CONFIGURE6","IPTYPE6",     NULL },
@@ -72,10 +71,25 @@ static int key_matches(const char *seen, size_t seen_len, const char *key)
     return 0;
 }
 
+/* Numeric IPTYPE is the SANA-II packet type, not an address-mode alias.
+   Be conservative: anything beginning like a number remains byte-for-byte,
+   even if a later parser would reject the rest of the value. */
+static int iptype_is_address_mode(const char *line, size_t len, size_t value)
+{
+    while (value < len && (line[value] == ' ' || line[value] == '\t')) value++;
+    if (value < len && line[value] == '"')
+    {
+        value++;
+        while (value < len && (line[value] == ' ' || line[value] == '\t')) value++;
+    }
+    return value >= len || line[value] < '0' || line[value] > '9';
+}
+
 static long field_of_line(const char *line, size_t len,
                           NpTextField *fields, size_t count)
 {
-    size_t begin = 0, end, i;
+    size_t begin = 0, end, value, i;
+    int alphabetic_iptype;
     long first = -1;
     while (begin < len && (line[begin] == ' ' || line[begin] == '\t')) begin++;
     if (begin == len || line[begin] == '#' || line[begin] == ';') return -1;
@@ -84,12 +98,17 @@ static long field_of_line(const char *line, size_t len,
            line[end] != '\t' && line[end] != '\r' && line[end] != '\n') end++;
     while (end < len && (line[end] == ' ' || line[end] == '\t')) end++;
     if (end >= len || line[end] != '=') return -1;
+    value = end + 1;
     end = begin;
     while (end < len && line[end] != '=' && line[end] != ' ' &&
            line[end] != '\t' && line[end] != '\r' && line[end] != '\n') end++;
+    alphabetic_iptype = equal_nocase(line + begin, end - begin, "IPTYPE") &&
+                        iptype_is_address_mode(line, len, value);
     for (i = 0; i < count; i++)
     {
-        if (!key_matches(line + begin, end - begin, fields[i].key))
+        if (!key_matches(line + begin, end - begin, fields[i].key) &&
+            !(alphabetic_iptype &&
+              equal_nocase(fields[i].key, np_len(fields[i].key), "CONFIGURE")))
             continue;
         if (first < 0) first = (long)i;
         if (!fields[i].seen) return (long)i;

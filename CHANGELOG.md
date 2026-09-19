@@ -15,9 +15,10 @@ version at the top when it merges.
   `; C:AddNetInterface` line instead of appending another; its reader of
   `S:Network-Startup` follows `Run`, `>NIL:` and `>>log` redirections to the
   interface name: such a line counts as "at boot" and is not added a second
-  time. Alias keywords (`IPADDRESS`, `SUBNETMASK`, `PRI`,
+  time. Alias keywords (`IPADDRESS`, `SUBNETMASK`, `PRI`, alphabetic
   `IPTYPE`, `IPADDRESS6`, `IPTYPE6`) are edited in place as the keys they
-  stand for. The busy pointer is up while `Save & Start`, `Online` or
+  stand for; numeric `IPTYPE` remains the independent SANA-II packet type.
+  The busy pointer is up while `Save & Start`, `Online` or
   `Offline` runs; the live-state poll is every 5 s, not every second.
 
 - `ShowNetStatus` and `netstat -i` print `multicast in`, the group-addressed
