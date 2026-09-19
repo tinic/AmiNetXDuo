@@ -277,7 +277,9 @@
        "Finder, in Explorer and on Linux, with nothing installed at the far "
        "end.  With "
        "the browser pages on, httpd also answers at /files with a file "
-       "manager and text editor, and at /shell with an AmigaDOS Shell.\n\n"
+       "manager and text editor, at /shell with an AmigaDOS Shell, and at "
+       "/console with this Amiga's own display, chipset and RTG screens "
+       "alike.\n\n"
        "None of them has a password, and no setting adds one.  Anyone who "
        "can reach the port can read and write every mounted volume.  Anyone "
        "who can reach the port gets a Shell on this machine.  Behind a home router "
@@ -1490,10 +1492,11 @@
     ; relies on: the first button on a page IS that page's default.
     (set DO_HTTPD
       (if (askbool
-            (prompt "Serve every volume, and an AmigaDOS Shell in a web browser, "
+            (prompt "Serve every volume, an AmigaDOS Shell and this Amiga's "
+                    "display in a web browser, "
                     "when this Amiga boots?\n\n"
-                    "Neither has a password: whoever can reach the port gets "
-                    "both.")
+                    "None has a password: whoever can reach the port gets "
+                    "all three.")
             (help    H_HTTPD)
             (choices "No" "Yes, serve them")
             (default 1))
@@ -2313,7 +2316,7 @@
       ; a system httpd of any origin would be the one that ran.
       (set BOOT_CMD
         (cat BOOT_CMD
-             ("Run >NIL: <NIL: %shttpd PORT %ld -T -F\n" C_PREFIX HTTPD_PORT)))
+             ("Run >NIL: <NIL: %shttpd PORT %ld -T -F -C\n" C_PREFIX HTTPD_PORT)))
     ))
 
 ; Three cases, and (startup) covers all of them because it writes the block

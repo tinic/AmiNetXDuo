@@ -206,7 +206,7 @@ keeps the older restricted-share form and exposes only that drawer.
 `httpd -T` serves an AmigaDOS Shell at `/shell`, beside the volumes that it
 already shares. `httpd -C` serves the machine's display at `/console`, chipset
 and RTG screens alike. The installer offers to start the volume server, file
-manager and Shell when the machine boots.
+manager, Shell and display when the machine boots.
 
 On a Zorro III [MNT ZZ9000](https://mntre.com/zz9000/), `/console` can move both
 framebuffer readback and delta encoding from the 68k to the card's ARM processor.

@@ -11,6 +11,10 @@ version at the top when it merges.
 
 ## 1.0.0-beta2
 
+- The installer's "serve them at boot" answer starts `httpd` with the
+  display (`/console`) as well as the volumes, the file manager and the
+  Shell.
+
 - `AddNetInterface DEVS:NetInterfaces/<name>` -- the line the installer writes
   into `S:Network-Startup` -- reaches a self-contained installation's drawer
   on a machine whose system `Devs/NetInterfaces` still exists. It went
