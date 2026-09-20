@@ -1905,6 +1905,7 @@ static LONG genet_attach(NetdevNic *nic)
     }
     nic->core_mem  = mem;
     nic->core_size = GE_MEM_SIZE;
+    nic->bus_master = 1;
 
     c = (GenetCore *)(APTR)mem;
     nic->core = c;

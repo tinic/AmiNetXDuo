@@ -56,7 +56,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <exec/execbase.h>
+#include <exec/memory.h>
 #include <exec/types.h>
+#include <proto/exec.h>
 
 #include "netdev_nic.h"
 #include "n68k_iocopy.h"
@@ -71,6 +74,8 @@
 
 static BOOL zz_isr(NetdevNic *nic);
 static BOOL zz_tx_reclaim(NetdevNic *nic);
+
+extern struct ExecBase *SysBase;
 
 /* -------------------------------------------------------------- board ---- */
 
@@ -183,13 +188,7 @@ static const char *const zz_stat_names[] =
     NULL
 };
 
-/*
- * The core's own state.  Static rather than allocated: the shell frees and
- * detaches only a core that set core_mem, and core_mem also arms the
- * bus-master reset guard, which this card does not want.  Two, because the
- * table has two rows for the card (Zorro III and Zorro II records); a
- * machine has one ZZ9000, and the image is unloaded whole.
- */
+/* The core's own state, allocated with the unit and freed by the shell. */
 typedef struct ZzCore
 {
     UBYTE       after_isr;  /* set by the top half, cleared by the pass that
@@ -197,9 +196,6 @@ typedef struct ZzCore
     UBYTE       rx_meta;    /* firmware exposes REG_ZZ_ETH_RX_META          */
     UBYTE       int2;       /* ZZ9000.CFG routes the shared interrupt there */
 } ZzCore;
-
-static ZzCore zz_cores[2];
-static UWORD  zz_cores_used;
 
 #define ZZ(nic) ((ZzCore *)(nic)->core)
 
@@ -265,15 +261,20 @@ static VOID zz_write_mac(NetdevNic *nic)
 
 static LONG zz_attach(NetdevNic *nic)
 {
+    ZzCore *core;
     UBYTE ored = 0;
     UBYTE anded = 0xff;
     UWORD i;
 
-    nic->core = &zz_cores[zz_cores_used & 1u];
-    zz_cores_used++;
-    ZZ(nic)->after_isr = 0;
-    ZZ(nic)->rx_meta   = 0;
-    ZZ(nic)->int2      = 0;
+    core = (ZzCore *)AllocMem(sizeof(*core), MEMF_PUBLIC | MEMF_CLEAR);
+    if (core == NULL)
+    {
+        nic->diag_why = (UBYTE)ANXDIAG_WHY_NOMEM;
+        return -1;
+    }
+    nic->core_mem  = core;
+    nic->core_size = sizeof(*core);
+    nic->core      = core;
 
     /* Firmware 2.3 and later exposes the parsed ZZ9000.CFG.  Older firmware
        reads zero at this register group, so the normal INT6 fallback needs

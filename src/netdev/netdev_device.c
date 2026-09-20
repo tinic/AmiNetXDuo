@@ -1306,7 +1306,7 @@ LONG netdev_online(NetdevUnit *unit)
 
     /* A bus master into RAM must be stopped before any reboot: the hook
        goes in the first time one is running. */
-    if (unit->nu_Nic.core_mem != NULL)
+    if (unit->nu_Nic.bus_master)
         netdev_reset_guard(unit->nu_Dev);
 
     unit->nu_Online = 1;
@@ -1899,6 +1899,16 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 #if NETDEV_HAS_ZORRO
         netdev_cache_release(&unit->nu_Nic);
 #endif
+        if (unit->nu_Nic.ops->detach != NULL &&
+            unit->nu_Nic.core_mem != NULL)
+            unit->nu_Nic.ops->detach(&unit->nu_Nic);
+        if (unit->nu_Nic.core_mem != NULL)
+        {
+            FreeMem(unit->nu_Nic.core_mem, unit->nu_Nic.core_size);
+            unit->nu_Nic.core_mem = NULL;
+            unit->nu_Nic.core_size = 0;
+            unit->nu_Nic.core     = NULL;
+        }
         return FALSE;       /* the board did not answer as a DP8390 */
     }
     nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
@@ -2656,13 +2666,14 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
             d->nd_Units[i].nu_Nic.core_mem != NULL)
             d->nd_Units[i].nu_Nic.ops->detach(&d->nd_Units[i].nu_Nic);
 
-        /* A bus master's rings, allocated at attach.  After stop: the chip
-           has been told to let go of them. */
+        /* Memory owned by the core, after stop and its optional detach. */
         if (d->nd_Units[i].nu_Nic.core_mem != NULL)
         {
             FreeMem(d->nd_Units[i].nu_Nic.core_mem,
                     d->nd_Units[i].nu_Nic.core_size);
             d->nd_Units[i].nu_Nic.core_mem = NULL;
+            d->nd_Units[i].nu_Nic.core_size = 0;
+            d->nd_Units[i].nu_Nic.core     = NULL;
         }
     }
 

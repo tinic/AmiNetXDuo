@@ -57,7 +57,7 @@ static VOID rg_stop_all(VOID)
     {
         NetdevUnit *u = &d->nd_Units[i];
 
-        if (u->nu_Nic.core_mem != NULL && u->nu_Nic.running)
+        if (u->nu_Nic.bus_master && u->nu_Nic.running)
             u->nu_Nic.ops->stop(&u->nu_Nic);
     }
 }

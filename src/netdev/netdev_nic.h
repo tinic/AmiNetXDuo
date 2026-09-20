@@ -417,13 +417,14 @@ struct NetdevNic
     UBYTE               dt_phy;         /* MDIO address of the PHY, from the tree */
 
     /*
-     * Memory a core allocated for itself at attach -- a bus-master's rings and
-     * buffers -- and freed by the shell at expunge, since the ops table has no
-     * detach.  NULL for every core whose buffer is on the board.
+     * Memory a core allocated for itself at attach, freed by the shell after
+     * detach at expunge.  This is allocation ownership only: bus_master says
+     * independently whether the chip can keep writing RAM through a reboot.
      */
     APTR                core_mem;
     ULONG               core_size;
     APTR                core;           /* the core's own state inside it     */
+    UBYTE               bus_master;
 
     /*
      * Counters only this core has names for, appended to S2_GETSPECIALSTATS
