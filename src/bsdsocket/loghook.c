@@ -26,7 +26,7 @@
  */
 
 #include "bsdsocket_internal.h"
-#include "tx_amiga.h"
+#include "aminetxduo/exec_port.h"
 
 #include <proto/dos.h>
 #include <proto/exec.h>

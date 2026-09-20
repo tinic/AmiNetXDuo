@@ -9,6 +9,12 @@
 
 #include "tx_api.h"
 
+/* TX_TRUE only in ordinary Exec task context: not under Forbid(), not at
+   interrupt level, and not on the port's timer task (whose callbacks run with
+   scheduling forbidden).  Code about to call an application-owned hook can
+   use this without depending on ExecBase's private nest counters. */
+UINT tx_amiga_exec_task_context(VOID);
+
 /* Exec has no public operation that validates an arbitrary Task pointer.  The
    hosted services nevertheless need to retire registrations left by programs
    which exited without closing them.  Keep the necessary scheduler-list walk
