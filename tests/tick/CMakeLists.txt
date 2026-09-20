@@ -16,6 +16,7 @@ target_include_directories(test_tick_conv PRIVATE
     "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"          # tx_port.h, first
     "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim"     # exec/types.h
     "${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc"        # tx_amiga.h, ours
+    "${CMAKE_SOURCE_DIR}/include"                       # exec_port.h
     "${AMINETXDUO_THREADX}/common/inc")
 
 target_compile_definitions(test_tick_conv PRIVATE
