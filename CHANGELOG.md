@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Network-monitor hooks now run with scheduling enabled, are synchronized
+  against removal, and are retired automatically with the library base that
+  installed them.  BPF filtering and record copies no longer run under a
+  machine-wide `Forbid()`; packet taps skip observational capture when the
+  channel semaphore is busy rather than blocking an adopted network task.
+
 - The private receive-batch record now carries its own version and allocated
   size.  Drivers reject records whose cookie count exceeds that storage,
   instead of trusting a bounded count that could still walk past the caller's

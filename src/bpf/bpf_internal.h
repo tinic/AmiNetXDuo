@@ -125,20 +125,18 @@ VOID ami_bpf_zero_bytes(void *dst, ULONG len);
 /* ---------------------------------------------------------- platform hooks */
 
 /*
- * Guard the channel table. Forbid()/Permit() on the Amiga: the taps run on the
- * SANA-II reader threads and on whatever thread is inside nx_tcp_socket_send,
- * and the vectors run on application tasks, so the table is shared. Nothing
- * inside the bracket allocates, frees or blocks.
+ * Guard the channel table. Control paths may wait; packet taps must use the
+ * nonblocking form because an adopted ThreadX caller cannot sleep on Exec.
  */
 VOID ami_bpf_lock(VOID);
+BOOL ami_bpf_try_lock(VOID);
 VOID ami_bpf_unlock(VOID);
 
 /* Open whatever clock ami_bpf_now() reads. Called from ami_bpf_open(), outside
    the lock. A lazy open inside the lock blocks under Forbid(). */
 VOID ami_bpf_time_init(VOID);
 
-/* Wall-clock time for bh_tstamp, seconds and microseconds since 1970. Must not
-   block: ami_bpf_capture() calls it with the lock held. */
+/* Wall-clock time for bh_tstamp, seconds and microseconds since 1970. */
 VOID ami_bpf_now(ULONG *sec, ULONG *usec);
 
 /* The calling task, as an opaque token for ami_bpf_notify(). */

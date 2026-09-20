@@ -586,6 +586,8 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
 
     bsd_bpf_close_all(child);
 
+    bsd_netmon_drop_owner(child);
+
     /* A log hook this base installed dies with it. */
     bsd_log_hook_drop_owner(child);
 

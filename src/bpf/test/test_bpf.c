@@ -90,6 +90,12 @@ VOID ami_bpf_lock(VOID)
     }
 }
 
+BOOL ami_bpf_try_lock(VOID)
+{
+    ami_bpf_lock();
+    return TRUE;
+}
+
 /* The hook fires once, on the Nth unlock, and then clears itself. */
 static void (*stub_on_unlock)(void);
 static int    stub_unlock_after;
