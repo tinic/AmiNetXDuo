@@ -7,6 +7,7 @@
 set(NETSTACK_SOURCES
     netstack.c
     netstack_caller.c
+    netstack_claim.c
     netstack_port.c
     netstack_routes.c
     netstack_baton.c
