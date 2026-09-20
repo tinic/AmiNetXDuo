@@ -265,11 +265,9 @@ static const struct { const char *key; const char *why; } cfg_inert_keys[] =
     { "dhcpunicast",       "DHCP renewal is always broadcast here" },
     { "lease",             "the lease time asked for is the server's to choose" },
     { "linkstatuscommand", "nothing is run when the link changes" },
-    { "metric",            "routes have no metric here, so interfaces cannot be ordered by one" },
+    { "metric",            "routes have no metric here; PRIORITY= orders the interfaces" },
     { "multicast",         "multicast is asked for when something joins a group, not from here" },
     { "pointtopoint",      "point-to-point links are not supported" },
-    { "pri",               "routes have no metric here, so interfaces cannot be ordered by one" },
-    { "priority",          "routes have no metric here, so interfaces cannot be ordered by one" },
     { "reportoffline",     "an interface going offline is always reported" },
     { NULL, NULL }
 };

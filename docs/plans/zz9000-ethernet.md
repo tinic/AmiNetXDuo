@@ -1,6 +1,6 @@
 # ZZ9000 Ethernet: anxzz9000.device and the firmware fork
 
-State of 2026-09-20 08:20 UTC. Everything below was measured on the real
+State of 2026-09-20 09:00 UTC. Everything below was measured on the real
 A3000 (68030/25, OS 3.2, 12 MB motherboard RAM, ZZ9000 at $48000000 Zorro III,
 X-Surf 100 at $40000000 for the door) against a gigabit Linux peer on the
 same switch. Numbers are one run each unless said otherwise.
@@ -11,7 +11,7 @@ same switch. Numbers are one run each unless said otherwise.
 |---|---|
 | driver `anxzz9000.device` | AmiNetXDuo branch `zz9000`: `src/netdev/zz9000.c`, `NETDEV_ROSTER_ZZ9000`, card rows appended after `genet`, `n68k_copy_longs_sum`, shared `netdev_rx_continues()` in `netdev_verify.[ch]` |
 | firmware | github.com/tinic/zz9000-firmware branch `aminetxduo` (= codex's `console-encode-offload` + the commits below); built with Arm GNU 13.2.rel1 + bootgen (no docker, no Vivado on the rig) |
-| flashed on the A3000 | `Work:Attic/ZZ9000-console/BOOT-bd64d.bin` (also `BOOT-l2fix`, `-asynctx`, `-loopgap`, `-l2lean`, `-bd64`, `-bd64b`, `-bd64c`); codex's original `BOOT.bin` kept beside them |
+| flashed on the A3000 | `Work:Attic/ZZ9000-console/BOOT-mcast.bin` (also `BOOT-bd64d`, `BOOT-l2fix`, `-asynctx`, `-loopgap`, `-l2lean`, `-bd64`, `-bd64b`, `-bd64c`); codex's original `BOOT.bin` kept beside them |
 | boot config | unchanged: `DEVS:NetInterfaces/zz9000` still names MNT's `ZZ9000Net.device`; ours is installed beside at `AmiNetXDuo:Devs/Networks/anxzz9000.device` and brought up from `RAM:zz9k` for a test |
 
 ## The card as the 68k sees it (measured)
@@ -39,6 +39,7 @@ same switch. Numbers are one run each unless said otherwise.
 | 8 | **open**: with 15-frame runs NetX TCP drops ~9 merged heads per 12 s ("dropped on receipt", `nx_ip_tcp_receive_packets_dropped`), 25-30 retransmits; with runs of 2, zero | `netstat -s` tcp line; capture shows 1-5 segment holes right at the ack point, later data SACKed | not found. Suspects: `nx_tcp_socket_packet_process.c` window acceptance with `rx_window_current`, the merged head's length vs the window the ACK advertised, the fork's ramp/settle code |
 | 9 | **fixed**: an exact RX serial acknowledgement can be rejected when the ACP supplies a stale serial. The same presented frame then re-enters every 32-frame drain, which re-enables the level-six source and creates an unbounded INT6/software-interrupt storm; both interfaces and the whole machine appear frozen | forcing legacy ack `1` ran 120 s / 88.9 MB and crossed the 16-bit serial wrap, while the exact-ack variants froze at 1.12-42.5 MB; synchronous TX still froze at ~65 MB, excluding async TX. With the recovery below, the full async/CONTINUES build ran 150 s / 143 MB at 7.99 Mbit/s and both interfaces remained reachable. A test build then deliberately sent one wrong exact ack: the recovery counter became 1 and a 15 s follow-up transferred 15.3 MB at 8.21 Mbit/s, with zero device errors, overruns, serial gaps, retransmits, or checksum errors | when a nonzero serial repeats, the previous synchronous register write was necessarily rejected; do not deliver the duplicate, reset the GRO run, and use the firmware's reserved legacy ack `1` once to advance. Counter: `rejected serial acknowledgements recovered` |
 | 10 | **fixed**: the GEM already validates IPv4/TCP/UDP checksums, but the 68k repeated the whole payload sum while copying each frame | a 60 s receive soak transferred 55.3 MB at 7.66 Mbit/s: 53,620 frames used the GEM verdict, 81 were rechecked, with zero checksum, ring, serial, or GEM errors. Twenty deliberately checksum-less IPv4 UDP datagrams increased only the fallback counter by 20 | firmware exposes bit 15 (present) and descriptor bits 23..22 for the currently presented slot in read-only register 0xa6. The driver trusts only TCP/UDP verdicts after its published structural checks; options, fragments, padding, malformed lengths, checksum-less UDP, IPv6, and old firmware retain the exact software verifier |
+| 11 | **fixed**: the GEM ran with Xilinx' defaults, unicast + broadcast only -- no multicast frame ever reached the 68k, on any driver: no IPv6 neighbour discovery (solicited-node groups), no mDNS, no router advertisements | before: `ping6 <A3000 global>` from the peer: neighbour FAILED, `http 000`; the card had been answering IPv6 only for the peers whose ND cache still held it from a unicast exchange | fw `init_ethernet_buffers()`: `XEmacPs_SetOptions(MULTICAST)` + `HASHL`/`HASHH` = 0xFFFFFFFF (accept every group; the 68k filters). After the flash: ND REACHABLE, rtt 254-528 ms, `http 200` over the global address with MNT's driver as well as ours. Flashed as `BOOT-mcast.bin` |
 
 ## Numbers
 

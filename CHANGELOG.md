@@ -14,6 +14,9 @@ version at the top when it merges.
   gateway follow at once, the interface file is left as it is. `ShowNetStatus`
   prints the value in force and says when the file differs.
 
+- `CheckNetConfig` note for `METRIC=` names `PRIORITY=` as the keyword that
+  orders interfaces; two dead `PRIORITY`/`PRI` rows left the inert table.
+
 - `anxzz9000.device`, a SANA-II driver for the MNT ZZ9000's Ethernet on the
   card's existing firmware protocol: the frame is copied once, from the
   card's window straight into the reader's buffer with the checksum summed
