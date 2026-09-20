@@ -91,6 +91,24 @@ static void test_version_and_size_gate(void)
     answer = NULL;
     CHECK(netdev_take_extension(&ext, &op, &answer) && answer == &ext,
           "a larger compatible record is accepted by its known prefix");
+
+    /* ABI 2 has the same negotiation prefix.  Its RX_BATCH subrecord lacked
+       Version/Size; a v3 driver accepts the useful callbacks and features,
+       then safely refuses that old command record and the v2 reader falls
+       back to CMD_READ.  Rejecting the whole negotiation disables every fast
+       path during an in-place driver upgrade. */
+    ext.Version = ANXD_S2_ABI_VERSION_MIN;
+    ext.Size = (UWORD)sizeof(ext);
+    ext.Request = ANXD_S2F_ALL;
+    ext.RxDirect = rx_direct;
+    ext.RxFilled = rx_filled;
+    ext.TxFlags = tx_flags;
+    memset(&op, 0, sizeof(op));
+    answer = NULL;
+    CHECK(netdev_take_extension(&ext, &op, &answer) && answer == &ext &&
+          op.op_RxDirect == (APTR)rx_direct &&
+          op.op_TxFlags == (APTR)tx_flags,
+          "the ABI 2 negotiation prefix remains compatible");
 }
 
 static void test_receive_facts_need_the_receive_callbacks(void)

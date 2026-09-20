@@ -8,7 +8,8 @@ BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
     ULONG request;
 
     if (ext == NULL || op == NULL || answer == NULL ||
-        ext->Version != ANXD_S2_ABI_VERSION ||
+        ext->Version < ANXD_S2_ABI_VERSION_MIN ||
+        ext->Version > ANXD_S2_ABI_VERSION ||
         ext->Size < (UWORD)sizeof(*ext))
         return FALSE;
 

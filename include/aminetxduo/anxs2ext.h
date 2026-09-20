@@ -48,6 +48,7 @@ typedef UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
  * in-process driver interface, not a wire format.
  */
 #define ANXD_S2_EXTENSION       (0x80000000UL | 0x00414e58UL) /* TAG_USER|'ANX' */
+#define ANXD_S2_ABI_VERSION_MIN 2u
 #define ANXD_S2_ABI_VERSION     3u
 
 #define ANXD_S2F_RX_DIRECT      (1UL << 0)

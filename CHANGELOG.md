@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` now leaves its GIC interrupt handler after acknowledging
+  and masking the hardware.  Ring draining, cache maintenance, SANA-II buffer
+  callbacks, PHY access and watchdog recovery run in its service task with
+  scheduling enabled; only queue ownership transitions briefly mask
+  interrupts.  Online, offline and close are serialized with that task.
+
 - Network-monitor hooks now run with scheduling enabled, are synchronized
   against removal, and are retired automatically with the library base that
   installed them.  BPF filtering and record copies no longer run under a
@@ -18,7 +24,10 @@ version at the top when it merges.
 - The private receive-batch record now carries its own version and allocated
   size.  Drivers reject records whose cookie count exceeds that storage,
   instead of trusting a bounded count that could still walk past the caller's
-  allocation.
+  allocation.  A new driver still accepts the ABI 2 negotiation prefix used
+  by beta3: its old batch record is refused safely and falls back to ordinary
+  reads, while direct receive, polling, checksum and transmit hints remain
+  available during an in-place upgrade.
 
 - `anxgenet.device` cleans the freshly allocated receive ring before giving
   it to DMA, so dirty `MEMF_CLEAR` cache lines cannot be pushed over the

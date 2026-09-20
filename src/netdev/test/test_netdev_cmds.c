@@ -92,6 +92,7 @@ VOID Enable(VOID)
 }
 
 static int forbid_depth;
+static int semaphore_depth;
 
 VOID Forbid(VOID)
 {
@@ -107,6 +108,18 @@ VOID Permit(VOID)
         failures++;
         forbid_depth = 0;
     }
+}
+
+VOID ObtainSemaphore(struct SignalSemaphore *sem)
+{
+    (void)sem;
+    semaphore_depth++;
+}
+
+VOID ReleaseSemaphore(struct SignalSemaphore *sem)
+{
+    (void)sem;
+    semaphore_depth--;
 }
 
 /* The one thing the driver must not do: complete somebody else's IORequest
@@ -1533,16 +1546,16 @@ static void w_private_commands_are_in_an_nsd_vendor_block(void)
            "ANXD_CMD_TX_FLUSH is in an NSD third-party block");
 }
 
-/* ANXD_CMD_TX_FLUSH: the core's flush under Forbid(), quick, once the unit
+/* ANXD_CMD_TX_FLUSH: the core's flush under the service lock, quick, once the unit
    is online; S2ERR_NOT_SUPPORTED from a core that cannot hold a start; not
    run on an offline unit; in the supported-command list. */
 static int  tx_flush_calls;
-static int  tx_flush_forbid_depth;
+static int  tx_flush_lock_depth;
 static VOID y_tx_flush_core(NetdevNic *nic)
 {
     (void)nic;
     tx_flush_calls++;
-    tx_flush_forbid_depth = forbid_depth;
+    tx_flush_lock_depth = semaphore_depth;
 }
 
 static void y_tx_flush(void)
@@ -1567,8 +1580,8 @@ static void y_tx_flush(void)
     io.ios2_Req.io_Flags = IOF_QUICK;
     netdev_perform(&opener, &io);
     expect(tx_flush_calls == 1, "a flush runs the core's flush once");
-    expect(tx_flush_forbid_depth == 1, "under Forbid()");
-    expect(forbid_depth == 0, "and Permit()s again");
+    expect(tx_flush_lock_depth == 1, "under the service lock");
+    expect(semaphore_depth == 0, "and releases the service lock again");
     expect_u32("with no error", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
     expect((io.ios2_Req.io_Flags & IOF_QUICK) != 0, "and stays quick");
 
