@@ -166,6 +166,7 @@ const struct NetdevNicOps netdev_nic_ed;
 const struct NetdevNicOps netdev_nic_lance;
 const struct NetdevNicOps netdev_nic_el3;
 const struct NetdevNicOps netdev_nic_genet;
+const struct NetdevNicOps netdev_nic_zz9000;
 
 /*
  * Both live in netdev_device.c, which reads SysBase, Expansion and the PCMCIA

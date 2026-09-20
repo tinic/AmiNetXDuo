@@ -59,10 +59,17 @@ set(NETDEV_GENET_SOURCES
     netdev_dtree.c      # Emu68's device tree and its GIC, for the GENET row
     netdev_reset.c)     # a bus master is stopped before a warm reboot
 
+# anxzz9000.device: the MNT ZZ9000's Ethernet, the Zynq's GEM behind the
+# card's ARM firmware.  A Zorro board, so it takes the 68030 cache guard,
+# and none of the classic chip cores.
+set(NETDEV_ZZ9000_SOURCES
+    zz9000.c            # the register block and the two frame windows
+    netdev_cache.c)     # a 68030's data cache kept off a Zorro III board
+
 # NETDEV_SOURCES is everything, for the host tests and anything that wants
 # the one-image view.
 set(NETDEV_SOURCES ${NETDEV_CORE_SOURCES} ${NETDEV_CLASSIC_SOURCES}
-                   ${NETDEV_GENET_SOURCES})
+                   ${NETDEV_GENET_SOURCES} zz9000.c)
 
 # One SANA-II device image.  `target` is the CMake target, `name` the file
 # (and the Exec device name), `roster` the NETDEV_ROSTER_* define, and the
@@ -126,6 +133,8 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
                     NETDEV_ROSTER_CLASSIC ${NETDEV_CLASSIC_SOURCES})
     anxd_add_netdev(anxgenet_device anxgenet.device NETDEV_ROSTER_GENET
                     ${NETDEV_GENET_SOURCES})
+    anxd_add_netdev(anxzz9000_device anxzz9000.device NETDEV_ROSTER_ZZ9000
+                    ${NETDEV_ZZ9000_SOURCES})
 endif()
 
 if(NOT CMAKE_CROSSCOMPILING)

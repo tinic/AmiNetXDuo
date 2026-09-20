@@ -150,4 +150,23 @@ ULONG n68k_port_in_l_sum(void *to, const volatile void *port, ULONG longs)
     return sum;
 }
 
+ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs)
+{
+    ULONG                *d   = (ULONG *)to;
+    const volatile ULONG *s   = (const volatile ULONG *)from;
+    ULONG                 sum = 0;
+
+    while (longs-- != 0UL)
+    {
+        ULONG w = *s++;
+
+        *d++ = w;
+        sum += w;
+        if (sum < w)
+            sum++;
+    }
+
+    return sum;
+}
+
 #endif /* AMINETXDUO_NET68K_ASM */

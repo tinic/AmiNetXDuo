@@ -21,7 +21,7 @@
 #include "aminetxduo/anxnet.h"
 #include "netdev_cards.h"
 
-/* netdev_cards.c carries netdev_nic_ops_for(), which names all four chip cores.
+/* netdev_cards.c carries netdev_nic_ops_for(), which names every chip core.
    This test is about the card table, not the cores, so they are stood in for
    rather than linked, because every one of them reaches the hardware. */
 #include "netdev_nic.h"
@@ -30,6 +30,7 @@ const struct NetdevNicOps netdev_nic_ed;
 const struct NetdevNicOps netdev_nic_lance;
 const struct NetdevNicOps netdev_nic_el3;
 const struct NetdevNicOps netdev_nic_genet;
+const struct NetdevNicOps netdev_nic_zz9000;
 
 static int failures;
 

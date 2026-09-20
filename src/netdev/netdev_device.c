@@ -67,6 +67,8 @@ static char netdev_id[] =
     " (AmiNetXDuo, every card)\r\n";
 #elif NETDEV_HAS_CLASSIC
     " (AmiNetXDuo, NE2000/DP8390, LANCE, EtherLink III)\r\n";
+#elif NETDEV_HAS_ZZ9000
+    " (AmiNetXDuo, MNT ZZ9000 Ethernet)\r\n";
 #else
     " (AmiNetXDuo, Raspberry Pi 4 GENET behind Emu68)\r\n";
 #endif
@@ -1083,7 +1085,7 @@ VOID netdev_tx_pump(NetdevUnit *unit)
  * take the mask again only for the chip: the opener's CopyFrom is 135 us of the
  * 219 us a transmit spends here and must not run with interrupts off.
  */
-#if NETDEV_HAS_DTREE
+#if NETDEV_HAS_TX_TASK_LOCK
 static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io);
 #endif
 
@@ -1093,8 +1095,8 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     UWORD         total;
     LONG          rc;
 
-#if NETDEV_HAS_DTREE
-    /* Only the GENET core asks for this, and only anxgenet.device carries
+#if NETDEV_HAS_TX_TASK_LOCK
+    /* The GENET and ZZ9000 cores ask for this, and only their images carry
        it: anxnet.device's cores keep the arm below and its image its size. */
     if (unit->nu_Nic.tx_task_lock)
     {
@@ -1177,7 +1179,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
  * shares -- the rare path, a ring that is full.  On Emu68 the Disable()
  * pair this replaces was a 5.5 us trap per frame against a 0.4 us copy.
  */
-#if NETDEV_HAS_DTREE
+#if NETDEV_HAS_TX_TASK_LOCK
 static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
 {
     NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
@@ -1258,7 +1260,7 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
         netdev_reply(io, 0, 0);
     }
 }
-#endif /* NETDEV_HAS_DTREE */
+#endif /* NETDEV_HAS_TX_TASK_LOCK */
 
 /* ------------------------------------------------------------- the filter -- */
 
@@ -1453,7 +1455,22 @@ ULONG netdev_interrupt(NetdevUnit *unit)
  * slot is card.resource's and is bound elsewhere; a device-tree board is on
  * the Pi's GIC, behind gic400.library.  Every site that adds or removes the
  * server goes through here so the three cannot drift.
+ *
+ * Which of the two Zorro lines: every classic card INT2; the ZZ9000 INT6,
+ * which is what its FPGA drives for Ethernet, audio and the vertical blank
+ * alike (MNT's own driver serves INTB_EXTER).
  */
+static LONG netdev_int_line(const NetdevUnit *unit)
+{
+#if NETDEV_HAS_ZZ9000
+    if (unit->nu_Nic.card->chip == NETDEV_CHIP_ZZ9000)
+        return INTB_EXTER;
+#else
+    (VOID)unit;
+#endif
+    return INTB_PORTS;
+}
+
 static VOID netdev_int_add(NetdevUnit *unit)
 {
     if (netdev_pcmcia_is_unit(unit))
@@ -1465,7 +1482,7 @@ static VOID netdev_int_add(NetdevUnit *unit)
         return;
     }
 #endif
-    AddIntServer(INTB_PORTS, &unit->nu_Intr);
+    AddIntServer(netdev_int_line(unit), &unit->nu_Intr);
 }
 
 static VOID netdev_int_rem(NetdevUnit *unit)
@@ -1479,7 +1496,7 @@ static VOID netdev_int_rem(NetdevUnit *unit)
         return;
     }
 #endif
-    RemIntServer(INTB_PORTS, &unit->nu_Intr);
+    RemIntServer(netdev_int_line(unit), &unit->nu_Intr);
 }
 
 /*
@@ -1786,7 +1803,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
      * configured, so this runs before attach.  A refusal is not passed on to
      * attach, which would read a floating bus and file the wrong reason.
      */
-#if NETDEV_HAS_ZORRO
+#if NETDEV_HAS_CLASSIC
     if (!netdev_isapnp_configure(card, board))
     {
         nd_trace("anx: isapnp failed\r\n");

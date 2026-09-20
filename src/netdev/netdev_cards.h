@@ -30,6 +30,9 @@
 #define NETDEV_CHIP_EL3     3   /* 3Com EtherLink III: windowed, PIO FIFO     */
 #define NETDEV_CHIP_GENET   4   /* Broadcom GENET v5: the Pi 4's own MAC, bus
                                    master with descriptors in its registers  */
+#define NETDEV_CHIP_ZZ9000  5   /* MNT ZZ9000: the Zynq's GEM behind the card's
+                                   ARM firmware, a register block and two
+                                   frame windows on Zorro                    */
 
 /*
  * How the board reports that the interrupt was its own.  A Zorro INT2 is

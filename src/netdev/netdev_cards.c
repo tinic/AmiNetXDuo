@@ -173,13 +173,34 @@ const NetdevCard netdev_cards[] =
       NETDEV_CHIP_GENET, 1000000000UL, 0,       0,       0,       0,
       NETDEV_BUS_DTREE, 0, 0, 0, NULL, 0, NULL, "brcm,bcm2711-genet-v5" },
 #endif /* NETDEV_HAS_DTREE */
+
+#if NETDEV_HAS_ZZ9000
+    /*
+     * The MNT ZZ9000's Ethernet: the Zynq's GEM, driven by the card's ARM
+     * firmware, presented to the 68k as a register block and two frame
+     * windows in the board's first 64 KB (zz9000.c has the map).  The Zorro
+     * III record is product 4, the Zorro II one product 3; the same firmware
+     * behind both.  reg_off 0 and stride 2 describe the 16-bit register
+     * file for the bus record; the core reads it through its own accessor.
+     * bps is what the GEM negotiates on a gigabit switch; the Zorro bus
+     * delivers a small fraction of it, and the query reports the link.
+     * Appended after the GENET, like every row: the pin (index + 1) * 100
+     * and the ANXNET_CARD_NAMES position are published.
+     */
+    { "zz9000",    0x6d6e,     4, 0x0000,     2,      0,
+      NETDEV_CHIP_ZZ9000, 1000000000UL, 0,       0,       0,       0,
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+    { "zz9000z2",  0x6d6e,     3, 0x0000,     2,      0,
+      NETDEV_CHIP_ZZ9000, 1000000000UL, 0,       0,       0,       0,
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+#endif /* NETDEV_HAS_ZZ9000 */
 };
 
 const UWORD netdev_card_count =
     (UWORD)(sizeof(netdev_cards) / sizeof(netdev_cards[0]));
 
 /*
- * Chip family -> core.  Here rather than in any of the five cores, because a
+ * Chip family -> core.  Here rather than in any of the six cores, because a
  * core that names another cannot be built without it.  NULL for a family with
  * no core: the board is recognised and skipped rather than enumerated.
  */
@@ -198,6 +219,10 @@ const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
 #if NETDEV_HAS_DTREE
     if (chip == NETDEV_CHIP_GENET)
         return &netdev_nic_genet;
+#endif
+#if NETDEV_HAS_ZZ9000
+    if (chip == NETDEV_CHIP_ZZ9000)
+        return &netdev_nic_zz9000;
 #endif
 
     return NULL;

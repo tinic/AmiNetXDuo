@@ -9,6 +9,18 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxzz9000.device`, a SANA-II driver for the MNT ZZ9000's Ethernet on the
+  card's existing firmware protocol: the frame is copied once, from the
+  card's window straight into the reader's buffer with the checksum summed
+  on the way, and the interrupt is served on INT6 with no helper task. On
+  an A3000/030-25 it receives 4.6 Mbit/s where `ZZ9000Net.device` 2.2
+  receives 3.1 on the same firmware. `NetDevStats DEVICE anxzz9000.device`
+  shows the card's own counters, among them how often the ARM had a frame
+  the window did not yet show: on MNT firmware 1.6 and later the window is
+  read through the Zynq's L2 cache and a fresh frame's header can stay
+  hidden for milliseconds; the driver waits it out, and this project's
+  firmware fork (branch `aminetxduo`) removes the wait.
+
 - The Installer release gate adds cancellation and four corrupt-download
   refusal cases plus Novice refusal when no network card is detected. A bad
   static IPv4 address and invalid interface and host names must now be rejected

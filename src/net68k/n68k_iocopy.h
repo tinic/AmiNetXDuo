@@ -48,6 +48,11 @@ VOID n68k_port_out_w(volatile void *port, const void *from, ULONG blocks);
    Destination must be longword aligned. */
 ULONG n68k_port_in_l_sum(void *to, const volatile void *port, ULONG longs);
 
+/* Memory to memory with the sum, for a mapped buffer that advances (the
+   ZZ9000's receive window).  The SOURCE must be longword aligned: that is
+   the side on the slow bus.  The destination may be 2 mod 4. */
+ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs);
+
 #ifdef __cplusplus
 }
 #endif

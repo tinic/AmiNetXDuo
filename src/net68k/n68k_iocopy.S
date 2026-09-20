@@ -359,4 +359,72 @@ _n68k_port_in_l_sum:
         movem.l sp@+,d2-d5
         rts
 
+| ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs)
+|
+| n68k_copy_longs with the sum: a mapped buffer that ADVANCES -- the ZZ9000's
+| receive window is the card's DDR through the Zorro III bulk path -- read in
+| movem bursts and summed in n68k_port_in_l_sum()'s convention.  The source
+| must be longword aligned, because a 2 mod 4 longword read on Zorro III is
+| two word cycles where one would do, and that bus is the wall at 210 ns a
+| byte.  The destination may be 2 mod 4: the stores are single moves, which
+| every 68020+ realigns in hardware and fast RAM takes at a fraction of the
+| window's price.  The caller chooses which side is out of phase, and the
+| ZZ9000 core chooses the destination (zz9000.c).
+|
+| ADD sets X to the carry and ADDX with a zero source folds it back, as in
+| the port form; movem and move leave X alone.
+        .globl  _n68k_copy_longs_sum
+_n68k_copy_longs_sum:
+        movem.l d2-d7,sp@-
+        movea.l sp@(28),a0              | to
+        movea.l sp@(32),a1              | from
+        move.l  sp@(36),d0              | longwords
+        moveq   #0,d1                   | sum
+        moveq   #0,d7                   | ADDX source: add carry only
+
+        move.l  d0,d6
+        lsr.l   #2,d6                   | four-longword blocks
+        and.l   #3,d0                   | longwords after them
+        tst.l   d6
+        beq     .Lcls_rest
+.Lcls_block:
+#ifdef N68K_NO_MOVEM
+        .rept   4
+        move.l  a1@+,d2
+        move.l  d2,a0@+
+        add.l   d2,d1
+        addx.l  d7,d1
+        .endr
+#else
+        movem.l a1@+,d2-d5
+        move.l  d2,a0@+
+        add.l   d2,d1
+        addx.l  d7,d1
+        move.l  d3,a0@+
+        add.l   d3,d1
+        addx.l  d7,d1
+        move.l  d4,a0@+
+        add.l   d4,d1
+        addx.l  d7,d1
+        move.l  d5,a0@+
+        add.l   d5,d1
+        addx.l  d7,d1
+#endif
+        subq.l  #1,d6
+        bne     .Lcls_block
+.Lcls_rest:
+        tst.l   d0
+        beq     .Lcls_done
+.Lcls_one:
+        move.l  a1@+,d2
+        move.l  d2,a0@+
+        add.l   d2,d1
+        addx.l  d7,d1
+        subq.l  #1,d0
+        bne     .Lcls_one
+.Lcls_done:
+        move.l  d1,d0
+        movem.l sp@+,d2-d7
+        rts
+
 #endif /* AMINETXDUO_NET68K_ASM */
