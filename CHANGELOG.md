@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A newer `bsdsocket.library` works with the beta1--beta3 network commands
+  during an in-place update. The running interface priority now occupies a
+  byte that was already reserved in the version 16 status record instead of
+  growing the record and making the old boot-time `AddNetInterface` fail with
+  "the network did not say which interfaces it has".
+
 - GRO stream matching now lives in the stack's SANA-II receive layer. Every
   driver can coalesce verified contiguous IPv4 and IPv6 TCP segments; device
   checksum metadata only skips the verification walk. Drivers no longer keep

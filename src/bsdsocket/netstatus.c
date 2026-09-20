@@ -76,6 +76,18 @@ _Static_assert(NETSTATUS_TCP_LAST_ACK     == NX_TCP_LAST_ACK,      "TCP state AB
 
 /* The header is copied by hand below. Its size is part of the ABI. */
 _Static_assert(sizeof(NetStatusHeader) == 16, "NetStatusHeader ABI");
+/* Version 16 shipped this record at 192 bytes.  nsi_Priority deliberately
+   consumes one of its two alignment bytes: growing the tail made a new
+   library reject the boot command from beta1--beta3 before it could bring up
+   an interface. */
+_Static_assert(sizeof(NetStatusInterface) == 192,
+               "NetStatusInterface version 16 ABI");
+_Static_assert(__builtin_offsetof(NetStatusInterface, nsi_Priority) == 26,
+               "priority must stay in version 16 padding");
+_Static_assert(__builtin_offsetof(NetStatusInterface, nsi_Name) == 28,
+               "NetStatusInterface version 16 field offsets");
+_Static_assert(__builtin_offsetof(NetStatusInterface, nsi_RxMulticast) == 188,
+               "NetStatusInterface version 16 tail offset");
 
 #ifdef AMINETXDUO_MDNS
 /*

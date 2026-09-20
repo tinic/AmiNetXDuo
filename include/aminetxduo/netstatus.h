@@ -21,8 +21,11 @@ extern "C" {
 #define AMI_NETSTATUS_MAGIC         0x414E5351UL    /* 'ANSQ' */
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
-   different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       17
+   different shapes under one version number cannot be told apart.  Giving a
+   meaning to reserved padding does not change the shape and must not bump the
+   version: an old boot command still has to be able to start a newer library
+   during an in-place update. */
+#define AMI_NETSTATUS_VERSION       16
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -162,7 +165,12 @@ typedef struct NetStatusInterface
     ULONG   nsi_MTU;
     ULONG   nsi_Speed;                  /* bits/s; 0 when the driver has none */
     UBYTE   nsi_HwAddress[NETSTATUS_MAC_SIZE];
-    UBYTE   nsi_Pad[2];
+    /* The interface's PRIORITY as it runs, -128..127: the highest carries a
+       route two interfaces could, and picks the default gateway.  This uses
+       one byte of the alignment padding published in version 1, so version 16
+       tools and the record's size and later offsets remain compatible. */
+    BYTE    nsi_Priority;
+    UBYTE   nsi_Pad;
     char    nsi_Name[NETSTATUS_NAME_LEN];       /* "eth0", NUL-terminated    */
     char    nsi_Device[NETSTATUS_DEVICE_LEN];   /* "a2065.device"            */
     ULONG   nsi_Unit;
@@ -202,12 +210,6 @@ typedef struct NetStatusInterface
        beside a joined group means the driver takes the join and drops the
        frames (a1k thread 98301).  Version 16. */
     ULONG   nsi_RxMulticast;
-    /* The interface's PRIORITY as it runs, -128..127: the highest carries a
-       route two interfaces could, and picks the default gateway.  The file's
-       PRIORITY= at bring-up, or what ConfigureNetInterface set since.
-       Version 17. */
-    BYTE    nsi_Priority;
-    UBYTE   nsi_Pad2[3];
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */
