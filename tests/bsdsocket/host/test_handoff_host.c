@@ -28,13 +28,6 @@ static struct AmiSocketBase master_base;
 static struct AmiSocketBase source_base;
 static struct AmiSocketBase target_base;
 
-static VOID list_init(struct List *list)
-{
-    list->lh_Head = (struct Node *)&list->lh_Tail;
-    list->lh_Tail = NULL;
-    list->lh_TailPred = (struct Node *)&list->lh_Head;
-}
-
 VOID AddTail(struct List *list, struct Node *node)
 {
     node->ln_Succ = (struct Node *)&list->lh_Tail;

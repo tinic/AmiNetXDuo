@@ -278,7 +278,11 @@ host_test_targets() { # builddir
 #      callback ownership and fail-closed transmit-checksum negotiation
 #      409 with test_handoff: listener sockets follow the AmiTCP/Roadshow
 #      ReleaseSocket/ObtainSocket contract
-HOST_TESTS_EXPECTED=409
+#      410 with test_interface_claim: named slots remain stable while the
+#      runtime configuration facade claims and releases them
+#      411 with test_config_runtime: live hostname and interface definitions
+#      are applied through the isolated configuration facade
+HOST_TESTS_EXPECTED=411
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

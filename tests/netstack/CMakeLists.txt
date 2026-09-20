@@ -366,7 +366,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         host/test_tcp_rxflood_host.c
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_packet_process.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_data_check.c"
-        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c")
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c")
 
     target_compile_options(test_tcp_rxflood PRIVATE -UAMINETXDUO_IPV6)
 
