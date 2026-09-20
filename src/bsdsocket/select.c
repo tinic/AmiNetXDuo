@@ -19,6 +19,22 @@
 #define BSD_FD_WORD(fd)     ((ULONG)(fd) / BSD_FD_BITS)
 #define BSD_FD_MASK(fd)     (1UL << ((ULONG)(fd) % BSD_FD_BITS))
 
+/*
+ * WaitSelect() uses *signals as both the caller's input mask and the mask of
+ * caller signals it consumed.  An error does not undo Wait()/SetSignal(), so
+ * an early return after either call must still publish those bits.  Otherwise
+ * a signal arriving together with Ctrl-C, or immediately before ENETDOWN,
+ * disappears from both the task and the caller's result.
+ */
+static LONG bsd_waitselect_fail(struct AmiSocketBase *base, ULONG *signals,
+                                ULONG got_signals, LONG error)
+{
+    if (signals != NULL)
+        *signals = got_signals;
+
+    return bsd_fail(base, error);
+}
+
 VOID bsd_event_post(AmiSocket *sock, ULONG events)
 {
     struct AmiSocketBase *base;
@@ -836,7 +852,8 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         count = bsd_poll_sets(SocketBase, nfds, in_read, in_write, in_except,
                               ready);
         if (count < 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_waitselect_fail(SocketBase, signals, got_signals,
+                                       AMI_ENETDOWN);
 
         if (count > 0 || got_signals != 0)
             break;
@@ -922,14 +939,15 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         received = Wait(wait_mask);
 
+        got_signals |= received & user_mask;
+
         if ((received & break_mask) != 0)
         {
             Signal(SocketBase->sb_Task, received & break_mask);
 
-            return bsd_fail(SocketBase, AMI_EINTR);
+            return bsd_waitselect_fail(SocketBase, signals, got_signals,
+                                       AMI_EINTR);
         }
-
-        got_signals |= received & user_mask;
 
         if (timer_running && (received & SocketBase->sb_TimerSigMask) != 0)
         {
@@ -964,7 +982,8 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
                                   in_except, ready);
 
             if (count < 0)
-                return bsd_fail(SocketBase, AMI_ENETDOWN);
+                return bsd_waitselect_fail(SocketBase, signals, got_signals,
+                                           AMI_ENETDOWN);
 
             break;
         }

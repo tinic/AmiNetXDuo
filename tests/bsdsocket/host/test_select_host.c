@@ -70,6 +70,7 @@ static struct
        what a NetX Duo callback on the IP thread does to it.  Applied inside
        Wait(), because nothing else can change the fixture mid-call. */
     AmiSocket   *wait_establishes;
+    LONG         wait_nx_enter_result; /* value installed by the next Wait */
 
     ULONG        opens;             /* OpenDevice()                          */
     BYTE         open_result;
@@ -210,6 +211,9 @@ ULONG Wait(ULONG signalSet)
         h.wait_establishes->as_Nx.tcp.nx_tcp_socket_state = NX_TCP_ESTABLISHED;
         h.wait_establishes = NULL;
     }
+
+    if (h.wait_nx_enter_result != 0)
+        h.nx_enter_result = h.wait_nx_enter_result;
 
     return arrived;
 }
@@ -777,6 +781,44 @@ static void t_waitselect_signals(void)
           "and the break signal is reposted");
     CHECK(memcmp(&s, &before, sizeof(s)) == 0,
           "and the sets are untouched");
+
+    /* Wait() consumes every bit it returns.  A caller signal which arrives
+       in the same wakeup as the break must therefore still be returned in
+       *signals even though the function itself reports EINTR. */
+    h_reset();
+    (void)h_tcp(0, NX_TCP_SYN_SENT);
+    h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
+    h.wait_plan[0] = H_BREAK_SIG | H_USER_SIG;
+    h.wait_planned = 1;
+    signals = H_USER_SIG;
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, NULL, &signals, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_EINTR,
+          "a break and caller signal arriving together report EINTR");
+    CHECK(signals == H_USER_SIG,
+          "and the consumed caller signal is returned in the signal mask");
+    CHECK((h.signals & H_BREAK_SIG) != 0,
+          "and only the break signal is reposted");
+
+    /* The same contract applies if an event wakes the task and the stack is
+       gone by the readiness poll which follows it. */
+    h_reset();
+    (void)h_tcp(0, NX_TCP_SYN_SENT);
+    h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
+    h.wait_plan[0] = H_EVENT_SIG | H_USER_SIG;
+    h.wait_planned = 1;
+    h.wait_nx_enter_result = -1;
+    signals = H_USER_SIG;
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, NULL, &signals, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_ENETDOWN,
+          "a failed post-wakeup poll reports ENETDOWN");
+    CHECK(signals == H_USER_SIG,
+          "and preserves the caller signal consumed by that wakeup");
 
     h_reset();
     (void)h_tcp(0, NX_TCP_SYN_SENT);

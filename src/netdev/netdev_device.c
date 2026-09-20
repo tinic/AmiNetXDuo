@@ -2330,6 +2330,21 @@ static struct Device *netdev_open(
     BOOL          first_promisc;
     AnxdS2Extension *ext_answer = NULL;
 
+    /*
+     * Exec enters a device Open() under Forbid(), but any Wait() inside it
+     * permits task switching.  PCMCIA discovery can wait on nd_PcmciaLock,
+     * card.resource and the attach path, so the device must be held before
+     * any allocation or discovery starts.  Otherwise an Expunge() during
+     * that wait sees zero opens and frees the code under this call.
+     *
+     * Clear a pre-existing delayed expunge here, as the standard device
+     * skeleton does.  Do not clear it again at the successful return: an
+     * Expunge() which arrived while this Open() was blocked must survive
+     * until the matching Close().
+     */
+    dev->dd_Library.lib_OpenCnt++;
+    dev->dd_Library.lib_Flags &= (UBYTE)~LIBF_DELEXP;
+
     io->ios2_Req.io_Error = 0;
 
     op = AllocMem(sizeof(NetdevOpener), MEMF_PUBLIC | MEMF_CLEAR);
@@ -2341,6 +2356,7 @@ static struct Device *netdev_open(
         io->ios2_Req.io_Device = (struct Device *)-1;
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
         io->ios2_Req.io_Error  = IOERR_OPENFAIL;
+        dev->dd_Library.lib_OpenCnt--;
         return NULL;
     }
 
@@ -2364,6 +2380,7 @@ static struct Device *netdev_open(
         io->ios2_Req.io_Device = (struct Device *)-1;
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
         io->ios2_Req.io_Error  = IOERR_OPENFAIL;
+        dev->dd_Library.lib_OpenCnt--;
         return NULL;
     }
 
@@ -2418,6 +2435,7 @@ static struct Device *netdev_open(
         io->ios2_Req.io_Device = (struct Device *)-1;
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
         io->ios2_Req.io_Error  = IOERR_UNITBUSY;
+        dev->dd_Library.lib_OpenCnt--;
         return NULL;
     }
     if (op->op_Exclusive)
@@ -2450,9 +2468,6 @@ static struct Device *netdev_open(
     io->ios2_Req.io_Device = dev;
     io->ios2_Req.io_Unit   = &op->op_Unit;
     io->ios2_Req.io_Error  = 0;
-
-    dev->dd_Library.lib_OpenCnt++;
-    dev->dd_Library.lib_Flags &= (UBYTE)~LIBF_DELEXP;
 
     return dev;
 }
