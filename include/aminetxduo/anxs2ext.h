@@ -32,10 +32,20 @@ typedef UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
  *
  * The opener zeroes the record, writes VERSION, sizeof(record), Request and
  * the two receive callbacks, then supplies a pointer to it as ti_Data.  A
- * driver accepts only a version and size it understands and writes Accepted
- * as the intersection it can honour for the selected unit.  An ordinary
- * driver ignores the tag and leaves Accepted zero.  Future versions append
- * fields; neither side may read past Size.
+ * driver accepts only a version and prefix size it understands and writes
+ * Accepted as the intersection it can honour for the selected unit.  An
+ * ordinary driver ignores the tag and leaves Accepted zero.  Future versions
+ * append fields; neither side may read past Size.  Appending fields without
+ * changing the meaning of this prefix keeps VERSION unchanged.  VERSION
+ * changes only for an incompatible interpretation, which an older peer must
+ * ignore.
+ *
+ * The record, callback code and every object the callbacks inspect remain
+ * valid until CloseDevice().  Receive callbacks can run from the driver's
+ * interrupt/server/vertical-blank service context and must not block.  The
+ * transmit callback can also run while a queued write is advanced from such
+ * a context.  All fields are native big-endian m68k ABI values; this is an
+ * in-process driver interface, not a wire format.
  */
 #define ANXD_S2_EXTENSION       (0x80000000UL | 0x00414e58UL) /* TAG_USER|'ANX' */
 #define ANXD_S2_ABI_VERSION     2u
@@ -50,6 +60,16 @@ typedef UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
 #define ANXD_S2F_TX_QUICK       (1UL << 7)
 #define ANXD_S2F_RX_BATCH       (1UL << 8)
 #define ANXD_S2F_TX_MORE        (1UL << 9)
+#define ANXD_S2F_ALL            (ANXD_S2F_RX_DIRECT | \
+                                 ANXD_S2F_RX_LINK_HDR | \
+                                 ANXD_S2F_RX_VERIFIED | \
+                                 ANXD_S2F_TX_CSUM_TCP | \
+                                 ANXD_S2F_TX_CSUM_UDP | \
+                                 ANXD_S2F_RX_POLL | \
+                                 ANXD_S2F_RX_CAPACITY | \
+                                 ANXD_S2F_TX_QUICK | \
+                                 ANXD_S2F_RX_BATCH | \
+                                 ANXD_S2F_TX_MORE)
 
 typedef struct AnxdS2Extension
 {

@@ -95,6 +95,7 @@ typedef struct NetdevOpener
                                            opener's writes */
     APTR                op_RxFilled;
     APTR                op_TxFlags;     /* per-write ANXD_S2_TXF_* callback */
+    ULONG               op_Extensions;  /* ANXD_S2F_* accepted for this open */
 
     UBYTE               op_Raw;
     UBYTE               op_Promisc;
@@ -420,6 +421,7 @@ VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
                       const char **pin, AnxdS2Extension **ext_answer);
 BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
                            AnxdS2Extension **answer);
+ULONG netdev_extension_supported(NetdevOpener *op, const NetdevNic *nic);
 
 /* netdev_event.c */
 VOID netdev_event(NetdevUnit *unit, ULONG mask);

@@ -943,7 +943,9 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
 
         unit->nu_Nic.tx_csum = (UBYTE)(flags & op->op_TxCsum);
         /* A run in progress: a core with a flush may hold its start. */
-        unit->nu_Nic.tx_more = (UBYTE)((flags & ANXD_S2_TXF_MORE) != 0 &&
+        unit->nu_Nic.tx_more = (UBYTE)((op->op_Extensions &
+                                        ANXD_S2F_TX_MORE) != 0 &&
+                                       (flags & ANXD_S2_TXF_MORE) != 0 &&
                                        unit->nu_Nic.tx_flush != NULL);
     }
     rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
@@ -2279,6 +2281,14 @@ static struct Device *netdev_open(
         return NULL;
     }
 
+    /* These are properties of this open, not of the selected card.  Publish
+       them before extension negotiation: RX_BATCH is not valid for a raw
+       opener, and deciding that while op_Raw is still MEMF_CLEAR zero would
+       advertise a feature the command path necessarily refuses later. */
+    op->op_Raw       = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
+    op->op_Promisc   = (UBYTE)((flags & SANA2OPF_PROM) != 0);
+    op->op_Exclusive = (UBYTE)((flags & SANA2OPF_MINE) != 0);
+
     netdev_take_tags((const struct TagItem *)io->ios2_BufferManagement,
                      op, &pin, &ext_answer);
 
@@ -2304,49 +2314,16 @@ static struct Device *netdev_open(
     }
 
     /* Tag parsing precedes unit selection because CARD= is one of those tags.
-       Now that the core is known, publish only verdicts it can actually
-       produce.  A LANCE or mapped-buffer ED unit therefore answers zero;
-       direct-copy cores answer VERIFIED when they can establish it. */
-    op->op_RxFlags &= hw->nu_Nic.rx_flags_supported;
-    op->op_TxCsum &= hw->nu_Nic.tx_csum_supported;
+       Now that the core is known, publish only features this opener/unit pair
+       can actually use. */
     if (ext_answer != NULL)
     {
-        ULONG accepted = ANXD_S2F_TX_QUICK;
-
-        if (op->op_RxDirect != NULL && op->op_RxFilled != NULL)
-            accepted |= ANXD_S2F_RX_DIRECT;
-        if (op->op_RxLinkHdr)
-            accepted |= ANXD_S2F_RX_LINK_HDR;
-        /* What netdev_queue_batch() will take -- the direct pair with the
-           link header, from an opener that is neither raw nor filtering --
-           and only on a core whose passes carry bursts (NetdevNic
-           rx_batches): measured on the emulated A2065 and NE2000, one
-           frame per interrupt, the batch cost 25 % and 340 dropped frames
-           in ten seconds against plain reads. */
-        if (hw->nu_Nic.rx_batches && op->op_RxDirect != NULL &&
-            op->op_RxFilled != NULL && op->op_RxLinkHdr && !op->op_Raw &&
-            op->op_Filter == NULL)
-            accepted |= ANXD_S2F_RX_BATCH;
-        if (hw->nu_Nic.tx_flush != NULL && op->op_TxFlags != NULL)
-            accepted |= ANXD_S2F_TX_MORE;
-        if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
-            accepted |= ANXD_S2F_RX_VERIFIED;
-        if ((op->op_TxCsum & ANXD_S2_TXF_TCP) != 0)
-            accepted |= ANXD_S2F_TX_CSUM_TCP;
-        if ((op->op_TxCsum & ANXD_S2_TXF_UDP) != 0)
-            accepted |= ANXD_S2F_TX_CSUM_UDP;
-        if (hw->nu_Nic.rx_holds)
-            accepted |= ANXD_S2F_RX_POLL;
-        if (hw->nu_Nic.rx_capacity != 0)
-            accepted |= ANXD_S2F_RX_CAPACITY;
-
-        ext_answer->Accepted = accepted & ext_answer->Request;
+        op->op_Extensions =
+            netdev_extension_supported(op, &hw->nu_Nic) & ext_answer->Request;
+        ext_answer->Accepted = op->op_Extensions;
     }
 
     op->op_Hw        = hw;
-    op->op_Raw       = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
-    op->op_Promisc   = (UBYTE)((flags & SANA2OPF_PROM) != 0);
-    op->op_Exclusive = (UBYTE)((flags & SANA2OPF_MINE) != 0);
     nd_newlist(&op->op_Reads);
     nd_newlist(&op->op_Orphans);
     nd_newlist(&op->op_Events);
