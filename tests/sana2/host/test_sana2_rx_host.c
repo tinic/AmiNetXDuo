@@ -46,86 +46,12 @@ VOID Enable(VOID)  { }
 VOID Forbid(VOID)  { }
 VOID Permit(VOID)  { }
 
-typedef enum HostBatchMode
-{
-    HOST_BATCH_IDLE,
-    HOST_BATCH_ACCEPT_ALL,
-    HOST_BATCH_REJECT_NOCMD,
-    HOST_BATCH_REJECT_OTHER,
-    HOST_BATCH_ACCEPT_ONE
-} HostBatchMode;
-
-static HostBatchMode       h_batch_mode;
-static ULONG               h_batch_carriers;
-static ULONG               h_batch_single_posts;
-static ULONG               h_batch_waits;
-static struct IORequest   *h_batch_single[4];
-
-static struct Node *h_batch_take_head(struct List *list)
-{
-    struct Node *node = list->lh_Head;
-
-    if (node->ln_Succ == NULL)
-        return NULL;
-
-    list->lh_Head = node->ln_Succ;
-    node->ln_Succ->ln_Pred = (struct Node *)&list->lh_Head;
-    node->ln_Succ = NULL;
-    node->ln_Pred = NULL;
-    return node;
-}
-
 VOID SendIO(struct IORequest *req) { (VOID)req; }
-VOID BeginIO(struct IORequest *req)
-{
-    struct IOSana2Req *ios2 = (struct IOSana2Req *)req;
-
-    if (h_batch_mode == HOST_BATCH_IDLE)
-        return;
-
-    if (req->io_Command == ANXD_CMD_READ_BATCH)
-    {
-        struct List *list = (struct List *)ios2->ios2_Data;
-
-        h_batch_carriers++;
-        if (h_batch_mode == HOST_BATCH_ACCEPT_ALL)
-        {
-            while (h_batch_take_head(list) != NULL)
-                ;
-            req->io_Error = 0;
-        }
-        else if (h_batch_mode == HOST_BATCH_ACCEPT_ONE)
-        {
-            (VOID)h_batch_take_head(list);
-            req->io_Error = (BYTE)IOERR_ABORTED;
-        }
-        else if (h_batch_mode == HOST_BATCH_REJECT_NOCMD)
-        {
-            req->io_Error = (BYTE)IOERR_NOCMD;
-        }
-        else
-        {
-            /* Exercise the WaitIO branch as well as a non-NOCMD rejection. */
-            req->io_Flags &= (UBYTE)~IOF_QUICK;
-            req->io_Error = (BYTE)IOERR_ABORTED;
-        }
-        return;
-    }
-
-    if (req->io_Command == CMD_READ)
-    {
-        if (h_batch_single_posts <
-            (ULONG)(sizeof(h_batch_single) / sizeof(h_batch_single[0])))
-            h_batch_single[h_batch_single_posts] = req;
-        h_batch_single_posts++;
-    }
-}
+VOID BeginIO(struct IORequest *req) { (VOID)req; }
 LONG AbortIO(struct IORequest *req) { (VOID)req; return 0; }
 BYTE WaitIO(struct IORequest *req)
 {
     (VOID)req;
-    if (h_batch_mode != HOST_BATCH_IDLE)
-        h_batch_waits++;
     return 0;
 }
 struct Message *GetMsg(struct MsgPort *port) { (VOID)port; return NULL; }
@@ -1755,100 +1681,6 @@ static void test_a_burst_is_never_left_on_the_port(void)
             "the shipped rule takes the whole burst before it blocks");
 }
 
-VOID ami_sana2_rx_post_batch_host_test(AmiSana2Reader *rx);
-
-static void h_batch_prepare(AmiSana2Reader *rx, AmiSana2If *iface,
-                            struct IOSana2Req req[3], HostBatchMode mode)
-{
-    UWORD i;
-
-    memset(rx, 0, sizeof(*rx));
-    memset(iface, 0, sizeof(*iface));
-    memset(req, 0, 3 * sizeof(*req));
-    memset(h_batch_single, 0, sizeof(h_batch_single));
-
-    rx->iface = iface;
-    iface->rx_batch_ok = TRUE;
-    rx->batching = TRUE;
-    rx->batch.ios2_Req.io_Command = ANXD_CMD_READ_BATCH;
-    NewList(&rx->topost);
-    for (i = 0; i < 3; i++)
-    {
-        req[i].ios2_Req.io_Command = CMD_READ;
-        AddTail(&rx->topost, &req[i].ios2_Req.io_Message.mn_Node);
-    }
-
-    h_batch_mode = mode;
-    h_batch_carriers = 0;
-    h_batch_single_posts = 0;
-    h_batch_waits = 0;
-}
-
-static BOOL h_batch_list_empty(const AmiSana2Reader *rx)
-{
-    return (BOOL)(rx->topost.lh_Head->ln_Succ == NULL);
-}
-
-static void test_batch_post_ownership(void)
-{
-    AmiSana2Reader rx;
-    AmiSana2If     iface;
-    struct IOSana2Req req[3];
-
-    h_batch_prepare(&rx, &iface, req, HOST_BATCH_ACCEPT_ALL);
-    ami_sana2_rx_post_batch_host_test(&rx);
-    h_check(h_batch_carriers == 1,
-            "read batch is offered to a capable device once");
-    h_check(h_batch_single_posts == 0,
-            "an accepted read batch is not posted a second time");
-    h_check(h_batch_list_empty(&rx),
-            "an accepted read batch returns an empty ownership list");
-    h_check(iface.rx_batch_ok != FALSE,
-            "an accepted read batch keeps batching enabled");
-    h_check(rx.batching == FALSE,
-            "posting the read batch ends collection mode");
-
-    h_batch_prepare(&rx, &iface, req, HOST_BATCH_REJECT_NOCMD);
-    ami_sana2_rx_post_batch_host_test(&rx);
-    h_check(h_batch_carriers == 1,
-            "an old device sees one read-batch probe");
-    h_check(h_batch_single_posts == 3,
-            "an IOERR_NOCMD batch rejection posts every read individually");
-    h_check(h_batch_single[0] == (struct IORequest *)&req[0] &&
-            h_batch_single[1] == (struct IORequest *)&req[1] &&
-            h_batch_single[2] == (struct IORequest *)&req[2],
-            "batch rejection preserves read order");
-    h_check(h_batch_list_empty(&rx),
-            "individual fallback clears the ownership list");
-    h_check(iface.rx_batch_ok == FALSE,
-            "IOERR_NOCMD disables later batch attempts");
-
-    h_batch_prepare(&rx, &iface, req, HOST_BATCH_REJECT_OTHER);
-    ami_sana2_rx_post_batch_host_test(&rx);
-    h_check(h_batch_waits == 1,
-            "a non-quick batch completion is collected before fallback");
-    h_check(h_batch_single_posts == 3,
-            "a non-NOCMD rejection cannot strand the untouched reads");
-    h_check(h_batch_list_empty(&rx),
-            "a non-NOCMD rejection gives every read to BeginIO");
-    h_check(iface.rx_batch_ok == FALSE,
-            "any untouched rejected batch disables later attempts");
-
-    h_batch_prepare(&rx, &iface, req, HOST_BATCH_ACCEPT_ONE);
-    ami_sana2_rx_post_batch_host_test(&rx);
-    h_check(h_batch_single_posts == 2,
-            "a partial batch take posts only the reads still owned");
-    h_check(h_batch_single[0] == (struct IORequest *)&req[1] &&
-            h_batch_single[1] == (struct IORequest *)&req[2],
-            "partial fallback preserves the remaining read order");
-    h_check(h_batch_list_empty(&rx),
-            "partial fallback leaves no locally owned read behind");
-    h_check(iface.rx_batch_ok == FALSE,
-            "a partial batch take disables later batch attempts");
-
-    h_batch_mode = HOST_BATCH_IDLE;
-}
-
 int main(void)
 {
     test_demux();
@@ -1860,8 +1692,6 @@ int main(void)
     test_link_header_is_counted_either_way();
     test_block_only_on_an_empty_port();
     test_a_burst_is_never_left_on_the_port();
-    test_batch_post_ownership();
-
     test_plan_ladder();
     test_plan_degenerate_bps();
     test_plan_budget();

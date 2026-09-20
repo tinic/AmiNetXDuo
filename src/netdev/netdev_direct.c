@@ -118,7 +118,12 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     {
         /* Nobody has a read of this type posted.  If a direct-path opener
            has been reading it, its reader is behind rather than gone, and a
-           core with a ring may hold the frame for it. */
+           core with a ring may hold the frame for it.  Only do that while it
+           is the unit's sole opener.  Holding the head of a hardware ring for
+           one lagging private reader must never delay unrelated traffic for
+           a second SANA-II opener. */
+        if (unit->nu_Openers != 1)
+            return NULL;
         for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL;
              n = n->ln_Succ)
         {
@@ -225,102 +230,5 @@ VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags)
     }
     unit->nu_RxDirect++;
 
-    if (unit->nu_Nic.reply_batch)
-    {
-        /* Held for the pass's one reply (netdev_rx_flush_replies); a full
-           array flushes early, which cannot happen with a ring the size of
-           the array but costs nothing to say. */
-        if (unit->nu_PendingCount >= NETDEV_PENDING_MAX)
-            netdev_rx_flush_replies(unit);
-        io->ios2_Req.io_Error = 0;
-        io->ios2_WireError    = 0;
-        unit->nu_Pending[unit->nu_PendingCount++] = io;
-        return;
-    }
-
     netdev_reply(io, 0, 0);
-}
-
-/*
- * THE PASS'S ONE REPLY.  What ReplyMsg() does per message -- NT_REPLYMSG,
- * AddTail on the port's list under Disable(), Signal() the port's task --
- * done once per port for every request held: one Disable() pair and one
- * Signal() for a whole burst instead of one of each per frame.  Only a
- * PA_SIGNAL port is answered this way; any other action goes through
- * ReplyMsg() as before, so a port that wants a software interrupt or nothing
- * gets exactly that.  The direct pair's opener owns its port and the port
- * outlives every posted read (the reader reaps them before it goes), so
- * mp_SigTask is live.
- *
- * Interrupt context: Disable() nests inside the bottom half's own, and
- * Signal() is made for this.  The array is swept in port order, one pass per
- * distinct port -- three at most, one per reader, and nearly always one.
- */
-VOID netdev_rx_flush_replies(APTR arg)
-{
-    NetdevUnit *unit = (NetdevUnit *)arg;
-    UWORD       n    = unit->nu_PendingCount;
-    UWORD       i;
-
-    if (n == 0)
-        return;
-    unit->nu_PendingCount = 0;
-
-    for (i = 0; i < n; i++)
-    {
-        struct IOSana2Req *io   = unit->nu_Pending[i];
-        struct MsgPort    *port;
-        UWORD              j;
-
-        if (io == NULL)
-            continue;
-        port = io->ios2_Req.io_Message.mn_ReplyPort;
-        if (port == NULL || (port->mp_Flags & PF_ACTION) != PA_SIGNAL ||
-            port->mp_SigTask == NULL)
-        {
-            unit->nu_Pending[i] = NULL;
-            ReplyMsg(&io->ios2_Req.io_Message);
-            continue;
-        }
-
-        /*
-         * No Disable() of its own: every caller is already under one --
-         * netdev_soft() and netdev_tick() take it around the whole bottom
-         * half, ANXD_CMD_RX_POLL runs the core in the same masked context,
-         * and the classic server path is an interrupt whose only rival for
-         * the pending array, the blank, stands off on nu_InIsr.  The port's
-         * list is safe against the reader for the same reason: GetMsg() and
-         * Wait() hold Disable() themselves, so this never runs inside
-         * either.  On Emu68 a nested pair was 2.9 us per burst.
-         */
-        for (j = i; j < n; j++)
-        {
-            struct IOSana2Req *q = unit->nu_Pending[j];
-
-            if (q != NULL && q->ios2_Req.io_Message.mn_ReplyPort == port)
-            {
-                q->ios2_Req.io_Message.mn_Node.ln_Type = NT_REPLYMSG;
-                AddTail(&port->mp_MsgList, &q->ios2_Req.io_Message.mn_Node);
-                unit->nu_Pending[j] = NULL;
-            }
-        }
-
-        /*
-         * Signal() only when the reader is not already holding the bit:
-         * a reader that is behind has the signal from the last burst
-         * uncollected, and the messages are on its list either way -- it
-         * finds them on its next GetMsg() or when its Wait() returns at
-         * once.  Wait() clears the bit under Disable(), so the test cannot
-         * race it.  On Emu68 the call is an 11 us trap, most bursts of a
-         * bulk receive land while the reader is behind, and the reader
-         * cannot wake any sooner than it already will.
-         */
-        {
-            struct Task *task = (struct Task *)port->mp_SigTask;
-            ULONG        bit  = 1UL << port->mp_SigBit;
-
-            if ((task->tc_SigRecvd & bit) == 0)
-                Signal(task, bit);
-        }
-    }
 }

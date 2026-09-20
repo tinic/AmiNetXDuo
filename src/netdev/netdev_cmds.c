@@ -58,7 +58,7 @@ static UWORD netdev_supported[] =
     S2_ONEVENT, S2_READORPHAN, S2_ONLINE, S2_OFFLINE,
     S2_ADDMULTICASTADDRESSES, S2_DELMULTICASTADDRESSES,
     NSCMD_DEVICEQUERY,
-    ANXD_CMD_RX_POLL, ANXD_CMD_READ_BATCH, ANXD_CMD_RX_CAPACITY,
+    ANXD_CMD_RX_POLL, ANXD_CMD_RX_CAPACITY,
     0
 };
 
@@ -433,76 +433,6 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case S2_READORPHAN:
         netdev_queue_read(op, io, cmd);
         return;
-
-    case ANXD_CMD_READ_BATCH:
-    {
-        /*
-         * netdev_queue_read()'s CMD_READ arm for a whole list under one
-         * Disable(): the same three stores and AddHead per request, in list
-         * order, so the queue ends up exactly as N BeginIO()s would have
-         * left it.  The list is the opener's and comes back empty; an
-         * offline unit answers each request as the single form does.
-         */
-        struct List *l = (struct List *)io->ios2_Data;
-        struct Node *n;
-        struct Node *next;
-        BOOL         queued;
-
-        /* Only a core that holds frames for a late read (NetdevNic
-           rx_holds); for any other the opener's immediate re-post is the
-           right thing and this says so the standard way, list untouched. */
-        if (!unit->nu_Nic.rx_holds)
-        {
-            netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
-            return;
-        }
-
-        if (l == NULL || op->op_CopyTo == NULL)
-        {
-            netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
-            return;
-        }
-
-        Disable();
-        queued = unit->nu_Online ? TRUE : FALSE;
-        if (queued)
-        {
-            for (n = l->lh_Head; (next = n->ln_Succ) != NULL; n = next)
-            {
-                struct IOSana2Req *r = (struct IOSana2Req *)n;
-
-                r->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
-                n->ln_Type = NT_MESSAGE;
-                nd_addhead(&op->op_Reads, n);
-                netdev_note_read_type(op, r->ios2_PacketType);
-            }
-            l->lh_Head     = (struct Node *)&l->lh_Tail;
-            l->lh_Tail     = NULL;
-            l->lh_TailPred = (struct Node *)&l->lh_Head;
-        }
-        Enable();
-
-        if (!queued)
-        {
-            /* Off the list before each reply: a replied message belongs to
-               its port, not to the caller's list any more. */
-            n = l->lh_Head;
-            l->lh_Head     = (struct Node *)&l->lh_Tail;
-            l->lh_Tail     = NULL;
-            l->lh_TailPred = (struct Node *)&l->lh_Head;
-            for (; (next = n->ln_Succ) != NULL; n = next)
-            {
-                struct IOSana2Req *r = (struct IOSana2Req *)n;
-
-                n->ln_Succ = NULL;
-                n->ln_Pred = NULL;
-                r->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
-                netdev_reply(r, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            }
-        }
-        netdev_reply(io, 0, 0);
-        return;
-    }
 
     case ANXD_CMD_RX_CAPACITY:
         /* What the card holds from the wire with nobody draining it

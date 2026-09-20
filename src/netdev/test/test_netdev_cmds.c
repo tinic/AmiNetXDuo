@@ -842,7 +842,7 @@ static void j_the_advertised_list_is_the_real_one(void)
                  last_wire == (ULONG)S2WERR_GENERIC_ERROR), what);
     }
 
-    expect(n == 25, "the advertised list is the length this test read it at");
+    expect(n == 24, "the advertised list is the length this test read it at");
 }
 
 /* Anything else is what both IC drivers answer, and what a caller probes
@@ -1321,90 +1321,6 @@ static void r_abort_finds_each_list(void)
     balanced("the aborts left Disable balanced");
 }
 
-/* A dispatch with no opener at all is the detached-request case, and answers
-   the error Exec's own devices answer. */
-static int list_len(const struct List *l)
-{
-    const struct Node *n;
-    int                k = 0;
-
-    for (n = l->lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
-        k++;
-    return k;
-}
-
-/* ANXD_CMD_READ_BATCH: a list of prepared CMD_READs is queued in one call, in
-   order, and comes back empty; an offline unit answers each one. */
-static void u_read_batch(void)
-{
-    struct IOSana2Req carrier;
-    struct IOSana2Req r1, r2;
-    struct List       l;
-
-    reset();
-    req(&r1, CMD_READ);
-    req(&r2, CMD_READ);
-    r1.ios2_PacketType = 0x0800;
-    r2.ios2_PacketType = 0x86DD;
-    NewList(&l);
-    AddTail(&l, &r1.ios2_Req.io_Message.mn_Node);
-    AddTail(&l, &r2.ios2_Req.io_Message.mn_Node);
-    req(&carrier, ANXD_CMD_READ_BATCH);
-    carrier.ios2_Req.io_Flags = IOF_QUICK;
-    carrier.ios2_Data         = &l;
-    opener.op_ReadTypeCount   = 0;
-    opener.op_ReadTypeLast    = 0;
-
-    /* A core that cannot hold frames turns the batch down, list untouched:
-       its opener must post each read at once. */
-    unit.nu_Nic.rx_holds = 0;
-    netdev_perform(&opener, &carrier);
-    expect_u32("a core without a holding ring refuses the batch",
-               (unsigned long)(UBYTE)carrier.ios2_Req.io_Error, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
-    expect(list_len(&l) == 2, "and leaves the list to the opener");
-    expect(list_len(&opener.op_Reads) == 0, "queueing nothing");
-
-    unit.nu_Nic.rx_holds = 1;
-    req(&carrier, ANXD_CMD_READ_BATCH);
-    carrier.ios2_Req.io_Flags = IOF_QUICK;
-    carrier.ios2_Data         = &l;
-    netdev_perform(&opener, &carrier);
-
-    expect_u32("the batch is accepted", (unsigned long)(UBYTE)carrier.ios2_Req.io_Error, 0);
-    expect(l.lh_Head->ln_Succ == NULL, "and the list comes back empty");
-    expect(list_len(&opener.op_Reads) == 2, "both reads are queued");
-    expect(opener.op_Reads.lh_Head == &r2.ios2_Req.io_Message.mn_Node,
-           "the last of the list at the head, as two BeginIO()s would leave it");
-    expect((r1.ios2_Req.io_Flags & IOF_QUICK) == 0, "quick cleared on each");
-    expect(netdev_reads_type(&opener, 0x0800) && netdev_reads_type(&opener, 0x86DD),
-           "and both types noted");
-
-    /* Offline: each request answered, nothing queued. */
-    reset();
-    unit.nu_Nic.rx_holds = 1;
-    unit.nu_Online = 0;
-    req(&r1, CMD_READ);
-    NewList(&l);
-    AddTail(&l, &r1.ios2_Req.io_Message.mn_Node);
-    req(&carrier, ANXD_CMD_READ_BATCH);
-    carrier.ios2_Req.io_Flags = IOF_QUICK;
-    carrier.ios2_Data         = &l;
-    netdev_perform(&opener, &carrier);
-    expect(list_len(&opener.op_Reads) == 0, "an offline unit queues nothing from a batch");
-    expect_u32("and answers the read out of service",
-               (unsigned long)(UBYTE)r1.ios2_Req.io_Error, (unsigned long)(UBYTE)S2ERR_OUTOFSERVICE);
-    expect_u32("with the unit-offline wire error", r1.ios2_WireError, (unsigned long)S2WERR_UNIT_OFFLINE);
-    expect(l.lh_Head->ln_Succ == NULL, "and the list is emptied");
-
-    /* No list at all is a bad argument. */
-    reset();
-    unit.nu_Nic.rx_holds = 1;
-    req(&carrier, ANXD_CMD_READ_BATCH);
-    carrier.ios2_Data = NULL;
-    netdev_perform(&opener, &carrier);
-    expect_u32("a batch with no list", (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
-}
-
 /* ANXD_CMD_RX_POLL: runs the chip service only when a core is holding frames,
    answers quick either way, and is in the supported-command list. */
 static void t_rx_poll(void)
@@ -1559,8 +1475,6 @@ static void w_private_commands_are_in_an_nsd_vendor_block(void)
 {
     expect((ANXD_CMD_RX_POLL & 0xc000U) == 0x8000U,
            "ANXD_CMD_RX_POLL is in an NSD third-party block");
-    expect((ANXD_CMD_READ_BATCH & 0xc000U) == 0x8000U,
-           "ANXD_CMD_READ_BATCH is in an NSD third-party block");
     expect((ANXD_CMD_RX_CAPACITY & 0xc000U) == 0x8000U,
            "ANXD_CMD_RX_CAPACITY is in an NSD third-party block");
 }
@@ -1587,7 +1501,6 @@ int main(void)
     r_abort_finds_each_list();
     s_no_opener();
     t_rx_poll();
-    u_read_batch();
     v_rx_capacity();
     w_private_commands_are_in_an_nsd_vendor_block();
 

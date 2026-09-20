@@ -963,35 +963,32 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->buffer_tags[tag].ti_Tag  = S2_CopyFromBuff;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_from_buff;
     tag++;
-    /* The private direct-receive pair; aminetxduo/anxs2ext.h says what they
-       are and why the standard DMA pair is not this. */
-    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_DIRECT;
-    iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_rx_direct;
-    tag++;
-    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_FILLED;
-    iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_rx_filled;
-    tag++;
-    iface->link_hdr_ok              = FALSE;
-    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_LINK_HDR;
-    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->link_hdr_ok;
-    tag++;
+    /* One versioned record owns every optional stack/device fast-path fact.
+       A third-party driver ignores this one private tag and leaves Accepted
+       zero. */
+    iface->extension.Version  = ANXD_S2_ABI_VERSION;
+    iface->extension.Size     = (UWORD)sizeof(iface->extension);
+    iface->extension.Request  = ANXD_S2F_RX_DIRECT |
+                                ANXD_S2F_RX_LINK_HDR |
+                                ANXD_S2F_RX_POLL |
+                                ANXD_S2F_RX_CAPACITY |
+                                ANXD_S2F_TX_QUICK;
+    iface->extension.Accepted = 0;
+    iface->extension.RxDirect = ami_sana2_rx_direct;
+    iface->extension.RxFilled = ami_sana2_rx_filled;
 #ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
     /* Request only the device fact this build consumes.  GRO classification
        is deliberately stack-side, including for an ordinary SANA-II driver. */
-    iface->rx_flags_ok              = ANXD_S2_RXF_VERIFIED;
-    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_FLAGS;
-    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->rx_flags_ok;
-    tag++;
+    iface->extension.Request |= ANXD_S2F_RX_VERIFIED;
 #endif
-    iface->tx_csum_ok               = 0;
 #ifdef AMINETXDUO_RX_VERIFY
     /* The transport checksum by the card, TCP only: what the fused copy
        does in software otherwise, and the same reason it stops at TCP. */
-    iface->tx_csum_ok               = ANXD_S2_TXF_TCP | ANXD_S2_TXF_ASKED;
-    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_TX_CSUM;
-    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->tx_csum_ok;
-    tag++;
+    iface->extension.Request |= ANXD_S2F_TX_CSUM_TCP;
 #endif
+    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_EXTENSION;
+    iface->buffer_tags[tag].ti_Data = (ULONG)&iface->extension;
+    tag++;
 #if AMI_SANA2_OFFER_COPY16
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff16;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_to_buff;
@@ -1006,7 +1003,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
      */
     if (iface->card[0] != '\0')
     {
-        iface->buffer_tags[tag].ti_Tag  = S2_AnxCardType;
+        iface->buffer_tags[tag].ti_Tag  = ANXD_S2_CARD_TYPE;
         iface->buffer_tags[tag].ti_Data = (ULONG)iface->card;
         tag++;
     }
@@ -1043,22 +1040,29 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         DeleteMsgPort(port);
     }
 
-    /* ANXD_CMD_RX_POLL goes only to a device that answered our tags: a
-       third-party driver is owed IOERR_NOCMD for an unknown command by the
-       standard and not always by its author, and this stack's rule is that
-       such a driver is never handed anything it did not ask for.  The device
-       may still refuse it (an older anxnet.device), once. */
-    iface->rx_poll_ok  = (UBYTE)(status == 0 && iface->link_hdr_ok);
-    iface->rx_batch_ok = iface->rx_poll_ok;
+    iface->link_hdr_ok = (BOOL)((iface->extension.Accepted &
+                                 ANXD_S2F_RX_LINK_HDR) != 0);
+    iface->rx_flags_ok =
+        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_VERIFIED) != 0)
+                    ? ANXD_S2_RXF_VERIFIED : 0);
+    iface->rx_poll_ok =
+        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_POLL) != 0) ? 1 : 0);
     iface->hw_rx_bytes = 0;
-    /* Same door: IOF_QUICK on CMD_WRITE is Exec's contract, but only a driver
-       whose BeginIO() has been read is offered it (sana2_tx.c). */
-    iface->tx_quick_ok = iface->rx_poll_ok;
-    /* A device that does not know ANXD_S2_TX_CSUM left the preload alone,
-       ASKED still in it -- anxnet.device 0.28 answers every other tag and
-       would have been handed frames it never finishes. */
-    if (status != 0 || (iface->tx_csum_ok & ANXD_S2_TXF_ASKED) != 0)
-        iface->tx_csum_ok = 0;
+    iface->tx_quick_ok =
+        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_TX_QUICK) != 0) ? 1 : 0);
+    iface->tx_csum_ok = 0;
+    if ((iface->extension.Accepted & ANXD_S2F_TX_CSUM_TCP) != 0)
+        iface->tx_csum_ok |= ANXD_S2_TXF_TCP;
+    if ((iface->extension.Accepted & ANXD_S2F_TX_CSUM_UDP) != 0)
+        iface->tx_csum_ok |= ANXD_S2_TXF_UDP;
+    if (status != 0)
+    {
+        iface->link_hdr_ok = FALSE;
+        iface->rx_flags_ok = 0;
+        iface->rx_poll_ok  = 0;
+        iface->tx_quick_ok = 0;
+        iface->tx_csum_ok  = 0;
+    }
 
     if (status != 0)
     {
@@ -1103,7 +1107,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
      */
     if (cfg->rx_buffer != 0)
         iface->hw_rx_bytes = cfg->rx_buffer;
-    else if (iface->link_hdr_ok)
+    else if ((iface->extension.Accepted & ANXD_S2F_RX_CAPACITY) != 0)
     {
         struct IOSana2Req req = iface->templ;
 

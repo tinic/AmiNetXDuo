@@ -18,6 +18,7 @@ option(AMINETXDUO_NETDEV_LINK
 # it probes and which chip cores it links.
 set(NETDEV_CORE_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open
+    netdev_tags.c       # versioned private OpenDevice negotiation
     netdev_unit.c       # unit/opener helpers, host-testable
     netdev_io.c         # BeginIO/AbortIO field handling, host-testable
     netdev_direct.c     # claim/completion half of the single-copy RX path

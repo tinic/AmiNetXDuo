@@ -173,21 +173,6 @@ struct NetdevNic
     UBYTE               tx_csum;
     ULONG               rx_verified;   /* direct frames carrying VERIFIED */
     /*
-     * BATCHED REPLIES, for a core on a machine where an Exec call is a trap.
-     * A core that sets reply_batch has its claimed frames' CMD_READs held by
-     * the shell instead of replied one by one, and calls rx_flush at the end
-     * of each pass: the shell then puts every held request on its port under
-     * ONE Disable() and signals each port ONCE.  On Emu68 ReplyMsg() is
-     * about three trapped instructions (a Disable() and Signal()'s two SR
-     * writes), 11-16 us a frame at 5.5 us a pair -- a fifth of the CPU at
-     * 17,000 frames a second; batched over a burst it is that once.  Not
-     * set by the classic cores: on a real 68k the batching was measured a
-     * loss (netdev_device.c), and the emulator that measured it agrees.
-     */
-    UBYTE               reply_batch;
-    VOID              (*rx_flush)(APTR arg);
-
-    /*
      * A core whose transmit completions are found by reading the chip, not
      * by an interrupt (the GENET takes no TX interrupt), retires them here on
      * request: the shell asks before it calls the ring full and queues a
@@ -225,13 +210,10 @@ struct NetdevNic
     volatile UBYTE      tx_busy;
     /*
      * The core keeps received frames in its own ring while the opener has
-     * no read posted (NETDEV_CLAIM_BEHIND) -- so the opener may re-post its
-     * reads late, in one ANXD_CMD_READ_BATCH after its drain, and nothing is
-     * lost meanwhile.  A core without this has a card buffer of a few frames
-     * and needs every read back before the next frame lands: the shell
-     * answers READ_BATCH with IOERR_NOCMD for it and the opener posts each
-     * read the moment it has it, as it always did.  Measured on the
-     * emulated X-Surf 100: batched re-posts 24-26 Mbit/s, immediate 39-41.
+     * no read posted (NETDEV_CLAIM_BEHIND), so the opener can re-post the
+     * completed read and explicitly ask the core to resume before sleeping.
+     * A core without this receives each read back immediately, as an ordinary
+     * SANA-II device does.
      */
     /*
      * Bytes of received frames the card's own memory holds before it must

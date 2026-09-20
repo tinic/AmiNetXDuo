@@ -17,6 +17,7 @@
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/compat.h"
+#include "aminetxduo/anxs2ext.h"
 
 #include "sana2_device.h"
 
@@ -631,11 +632,6 @@ typedef struct AmiSana2Reader
        delivers them before the reader sleeps.  Replied on the port when a
        device does not honour IOF_QUICK, and taken back at once. */
     struct IOSana2Req   poll;
-    /* ANXD_CMD_READ_BATCH: the slots this drain armed, of every ring, and
-       the carrier that hands them over in one call. */
-    struct List         topost;
-    struct IOSana2Req   batch;
-    BOOL                batching;       /* inside a drain: arm, do not post  */
 } AmiSana2Reader;
 
 /* One ring of reads for one Ethernet type. */
@@ -733,22 +729,20 @@ struct AmiSana2If
     BOOL                device_open;
     char                device[AMI_CFG_PATH_LEN];
     ULONG               unit;
-    /* S2_AnxCardType points here, not at the caller's AmiIfConfig: the tag
+    /* ANXD_S2_CARD_TYPE points here, not at the caller's AmiIfConfig: the tag
        list is an input to OpenDevice and outlives the open. */
     char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[12];
-    BOOL                link_hdr_ok;    /* device answered ANXD_S2_RX_LINK_HDR */
-    UBYTE               rx_flags_ok;    /* ANXD_S2_RX_FLAGS: the bits the device
-                                           will set beyond SUMMED, 0 = none  */
+    AnxdS2Extension     extension;       /* one size/version negotiated record */
+    BOOL                link_hdr_ok;    /* negotiated ANXD_S2F_RX_LINK_HDR   */
+    UBYTE               rx_flags_ok;    /* negotiated RX_FILLED verdict bits */
     UBYTE               rx_poll_ok;     /* the device knows ANXD_CMD_RX_POLL;
                                            TRUE until it says IOERR_NOCMD    */
-    UBYTE               rx_batch_ok;    /* try ANXD_CMD_READ_BATCH while it
-                                           consumes every offered read      */
     UBYTE               tx_quick_ok;    /* CMD_WRITE goes out IOF_QUICK: an
                                            ANXD device (link_hdr_ok) honours
                                            it, a kept flag is a finished
                                            write with no reply to reap      */
-    UBYTE               tx_csum_ok;     /* ANXD_S2_TX_CSUM: the ANXD_S2_TXF_*
+    UBYTE               tx_csum_ok;     /* negotiated ANXD_S2_TXF_*
                                            checksums the device writes on the
                                            way out, 0 = none (sana2_tx.c)   */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */

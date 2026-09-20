@@ -193,9 +193,7 @@ typedef struct GenetCore
     UBYTE   phy;            /* MDIO address                                 */
     UBYTE   in_mdio;        /* a transaction is in flight, tick stays out   */
     UBYTE   cache;          /* cache maintenance around DMA is on           */
-    UBYTE   pageops;        /* cpushp a page at a time, not CacheClearE     */
-    UBYTE   cpush_direct;   /* ... called, not entered through Supervisor():
-                               the attach saw no privilege violation      */
+    UBYTE   pageops;        /* supervised cpushp pages, not CacheClearE     */
     UBYTE   phy_set;        /* the PHY's delays and negotiation were set up */
     UBYTE   pre_saved;      /* the two below were read before this driver
                                changed anything                            */
@@ -246,7 +244,7 @@ enum
     GE_ST_HELD_FRAMES,      /* frames left waiting, summed over those passes */
     GE_ST_TICK_RESUMES,     /* held passes resumed by the vertical blank     */
     GE_ST_TX_CSUM,          /* frames whose transport checksum the TBUF wrote */
-    GE_ST_CPUSH_DIRECT,     /* 1: page pushes are plain calls, 0: Supervisor() */
+    GE_ST_CPUSH_SUPERVISED, /* 1: page pushes enter through Supervisor()   */
     GE_ST_POLL_WAKES,       /* the poller woken by a transmit                */
     GE_ST_POLL_PASSES,      /* service passes it ran with frames waiting     */
     GE_ST_POLL_FRAMES,      /* frames those passes found in the ring         */
@@ -299,7 +297,7 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET frames left waiting in those passes",
     "GENET held passes resumed by the blank",
     "GENET transmit checksums by the chip",
-    "GENET page push without the trap (1)",
+    "GENET supervised page push (1)",
     "GENET poll wakes",
     "GENET poll passes",
     "GENET poll frames",
@@ -451,37 +449,16 @@ static BOOL ge_mii_write(NetdevNic *nic, UBYTE reg, UWORD val)
  * The GENET is only ever behind Emu68, which emulates a 68040, so the fall
  * back is for the one machine that lied about its CPU.
  *
- * AND THE TRAP IS MOST OF IT.  Measured again on 2026-09-17 (cpushbench):
- * Supervisor() with an RTE and nothing else 1.5 us, the page push behind it
- * 0.2, and Emu68 executes cpushp from user mode without a privilege
- * violation, 0.3 us for a dirtied page.  So the attach probes exactly that,
- * one page of its own memory with the task's trap handler catching the
- * violation a stricter emulator would raise, and a core that passed pushes
- * its pages with a plain call from then on; one that did not keeps the
- * Supervisor() entry.  On the transmit path that is a page push per frame,
- * 3.3 us of the 8.4 the driver spent on a frame.
+ * cpushp is privileged on a real 68040.  It therefore always enters through
+ * Exec's Supervisor(), even on Emu68 versions which currently execute the
+ * instruction from user mode.  Depending on that emulator behaviour made the
+ * driver invalid on a conforming 68040 and vulnerable to an Emu68 fix.
  */
 #define GE_PAGE         4096UL
 
 __asm__(
 "    .text\n"
 "    .arch 68040\n"
-/* a0 = first page, d0 = pages; whatever mode the caller is in, ends in RTS */
-"    .globl _ge_cpushp_pages\n"
-"_ge_cpushp_pages:\n"
-"1:  cpushp %dc,(%a0)\n"
-"    add.l #4096,%a0\n"
-"    subq.l #1,%d0\n"
-"    bne 1b\n"
-"    rts\n"
-/* The attach probe's trap handler: the trap number on top of the stack, the
-   exception frame under it.  Steps past the two-byte instruction. */
-"    .globl _ge_trap_skip\n"
-"_ge_trap_skip:\n"
-"    addq.l #4,%sp\n"
-"    addq.l #2,(2,%sp)\n"
-"    st _ge_trapped\n"
-"    rte\n"
 "    .globl _ge_sup_cpushp\n"
 "_ge_sup_cpushp:\n"
 "1:  cpushp %dc,(%a0)\n"
@@ -491,10 +468,6 @@ __asm__(
 "    rte\n"
 );
 extern VOID ge_sup_cpushp(VOID);
-extern VOID ge_cpushp_pages(register APTR page __asm("a0"),
-                            register ULONG pages __asm("d0"));
-extern VOID ge_trap_skip(VOID);
-UBYTE ge_trapped;
 
 /* Supervisor(): the routine runs in supervisor mode and ends in RTE. */
 static VOID ge_sup_pages(ULONG first, ULONG pages)
@@ -524,10 +497,7 @@ static VOID ge_cache(NetdevNic *nic, APTR addr, ULONG len)
         ULONG last  = ((ULONG)addr + len - 1UL) & ~(GE_PAGE - 1UL);
         ULONG pages = (last - first) / GE_PAGE + 1UL;
 
-        if (c->cpush_direct)
-            ge_cpushp_pages((APTR)first, pages);
-        else
-            ge_sup_pages(first, pages);
+        ge_sup_pages(first, pages);
         return;
     }
 
@@ -1400,13 +1370,6 @@ static BOOL ge_rxintr(NetdevNic *nic)
     }
 
     ge_wr(nic, GENET_RX_DMA_CONS_INDEX(GE_Q), c->rx_cidx);
-    /* The burst's completions, replied together (NetdevNic reply_batch). */
-    if (nic->rx_flush != NULL)
-    {
-        GE_P_START(pf);
-        nic->rx_flush(nic->rx_arg);
-        GE_P_ADD(nic, GE_ST_P_FLUSH_US, pf);
-    }
     return TRUE;
 }
 
@@ -1928,24 +1891,9 @@ static LONG genet_attach(NetdevNic *nic)
     c->tx_buf = c->rx_buf + (ULONG)GE_RX_RING * GE_BUFSZ;
     c->cache  = 1;
     c->pageops = (UBYTE)((SysBase->AttnFlags & AFF_68040) != 0);
-    c->cpush_direct = 0;
-    if (c->pageops)
-    {
-        /* One page push from here, user mode, with this task's trap handler
-           swapped for one that notes the violation and steps over it. */
-        struct Task *me  = FindTask(NULL);
-        APTR         old = me->tc_TrapCode;
-
-        ge_trapped      = 0;
-        me->tc_TrapCode = (APTR)ge_trap_skip;
-        ge_cpushp_pages((APTR)((ULONG)mem & ~(GE_PAGE - 1UL)), 1UL);
-        me->tc_TrapCode = old;
-        c->cpush_direct = (UBYTE)(ge_trapped == 0);
-    }
-    nic->core_stat[GE_ST_CPUSH_DIRECT] = c->cpush_direct;
+    nic->core_stat[GE_ST_CPUSH_SUPERVISED] = c->pageops;
     c->phy    = (nic->dt_phy != 0xff) ? nic->dt_phy : 1;
     nic->core_stat_names = ge_stat_names;
-    nic->reply_batch     = 1;           /* Emu68: an Exec call is a trap */
     nic->tx_reclaim      = ge_txintr;   /* no TX interrupt: retire on ask */
     nic->tx_short_build  = 1;           /* the copy is 0.4 us, the mask 5.5 */
     nic->tx_task_lock    = 1;           /* and Forbid() is 0.1: no interrupt produces */

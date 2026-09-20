@@ -169,7 +169,7 @@ typedef struct AmiIfConfig {
      * file covers a family of them: anxnet.device is opened for every
      * NE2000/DP8390 card, so UNIT alone only says "the Nth board in probe
      * order". Empty means the driver decides from UNIT, which is right on a
-     * machine with one card. The name goes to the driver as S2_AnxCardType and
+     * machine with one card. The name goes to the driver as ANXD_S2_CARD_TYPE and
      * a name the hardware does not match fails the open rather than binding to
      * a different board.
      */

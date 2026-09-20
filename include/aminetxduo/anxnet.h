@@ -10,15 +10,15 @@
 /* The same driver core with only the Pi 4's GENET in it (netdev_roster.h). */
 #define ANXGENET_DEVICE_NAME    "anxgenet.device"
 
-/* S2_Dummy is (TAG_USER + 0xB0000); Commodore used +1..+3, and +4/+5 are the
-   widely-deployed CopyToBuff16 pair, so this sits clear of both. */
-#define S2_AnxCardType          (TAG_USER + 0xB0000 + 0x40)
+/* Driver-private OpenDevice tag.  It has its own TAG_USER identity rather
+   than borrowing the S2_Dummy namespace used by SANA-II buffer hooks. */
+#define ANXD_S2_CARD_TYPE       (0x80000000UL | 0x00414e43UL) /* 'ANC' */
 
 /* unit = (card index + 1) * ANXNET_UNIT_PIN + instance */
 #define ANXNET_UNIT_PIN         100
 
 /*
- * Every name S2_AnxCardType accepts, and must stay in netdev_cards.c row
+ * Every name ANXD_S2_CARD_TYPE accepts, and must stay in netdev_cards.c row
  * order: the Nth entry is the card ANXNET_UNIT_PIN * (N + 1) names.
  */
 #define ANXNET_CARD_NAMES \

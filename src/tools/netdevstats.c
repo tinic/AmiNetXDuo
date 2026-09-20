@@ -107,7 +107,7 @@ int main(int argc, char **argv)
     tag++;
     if (card != NULL && *card != '\0')
     {
-        tags[tag].ti_Tag  = S2_AnxCardType;
+        tags[tag].ti_Tag  = ANXD_S2_CARD_TYPE;
         tags[tag].ti_Data = (ULONG)card;
         tag++;
     }

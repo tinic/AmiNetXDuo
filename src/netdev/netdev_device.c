@@ -1771,7 +1771,6 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Nic.rx_arg = unit;
     unit->nu_Nic.rx_claim   = netdev_rx_claim;
     unit->nu_Nic.rx_claimed = netdev_rx_claimed;
-    unit->nu_Nic.rx_flush   = netdev_rx_flush_replies;
     unit->nu_Nic.mc_table   = unit->nu_Mcast;
     unit->nu_Nic.mc_max     = NETDEV_MCAST_MAX;
 
@@ -2266,94 +2265,6 @@ static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
     ((VOID)(dev), (VOID)(unit), (VOID)(pin), (VOID)(why), (NetdevUnit *)NULL)
 #endif /* NETDEV_HAS_PCMCIA */
 
-/* ---------------------------------------------------------- the tag list -- */
-
-static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
-                             const char **pin, UBYTE **rx_flags_answer,
-                             UBYTE **tx_csum_answer)
-{
-    while (tags != NULL)
-    {
-        ULONG tag = tags->ti_Tag;
-
-        if (tag == TAG_DONE)
-            break;
-        if (tag == TAG_MORE)
-        {
-            tags = (const struct TagItem *)tags->ti_Data;
-            continue;
-        }
-        if (tag == TAG_IGNORE)
-        {
-            tags++;
-            continue;
-        }
-        if (tag == TAG_SKIP)
-        {
-            tags += 1 + (LONG)tags->ti_Data;
-            continue;
-        }
-
-        if (tag == ANXD_S2_RX_DIRECT || tag == ANXD_S2_RX_LINK_HDR ||
-            tag == ANXD_S2_RX_FILLED || tag == ANXD_S2_RX_FLAGS ||
-            tag == ANXD_S2_TX_CSUM)
-            op->op_Anxd = 1;            /* AmiNetXDuo's own shell is opening */
-
-        if (tag == S2_CopyToBuff)
-            op->op_CopyTo = (APTR)tags->ti_Data;
-        else if (tag == ANXD_S2_RX_DIRECT)
-            op->op_RxDirect = (APTR)tags->ti_Data;
-        else if (tag == ANXD_S2_RX_LINK_HDR)
-        {
-            /* Answering IS the acceptance: the opener reads this back to
-               decide whether it still has to synthesise the header. */
-            if (tags->ti_Data != 0)
-            {
-                op->op_RxLinkHdr        = TRUE;
-                *(BOOL *)tags->ti_Data  = TRUE;
-            }
-        }
-        else if (tag == ANXD_S2_RX_FILLED)
-            op->op_RxFilled = (APTR)tags->ti_Data;
-        else if (tag == ANXD_S2_RX_FLAGS)
-        {
-            /* Zero is the first published, output-only form and means all.
-               CONTINUES is legacy: stream classification is stack-side. */
-            if (tags->ti_Data != 0)
-            {
-                UBYTE supported = ANXD_S2_RXF_VERIFIED;
-                UBYTE wanted    = *(UBYTE *)tags->ti_Data;
-
-                if (wanted == 0)
-                    wanted = supported;
-                wanted &= supported;
-                op->op_RxFlags = wanted;
-                *(UBYTE *)tags->ti_Data = op->op_RxFlags;
-                *rx_flags_answer = (UBYTE *)tags->ti_Data;
-            }
-        }
-        else if (tag == ANXD_S2_TX_CSUM)
-        {
-            /* What the opener can prepare; the unit's core narrows it
-               below, once it is known, and the answer goes back. */
-            if (tags->ti_Data != 0)
-            {
-                op->op_TxCsum   = (UBYTE)(*(UBYTE *)tags->ti_Data &
-                                          (UBYTE)~ANXD_S2_TXF_ASKED);
-                *tx_csum_answer = (UBYTE *)tags->ti_Data;
-            }
-        }
-        else if (tag == S2_CopyFromBuff)
-            op->op_CopyFrom = (APTR)tags->ti_Data;
-        else if (tag == S2_PacketFilter)
-            op->op_Filter = (APTR)tags->ti_Data;
-        else if (tag == S2_AnxCardType)
-            *pin = (const char *)tags->ti_Data;
-
-        tags++;
-    }
-}
-
 /* ------------------------------------------------------------ device fns -- */
 
 static NetdevDevice *netdev_init(
@@ -2414,8 +2325,7 @@ static struct Device *netdev_open(
     const char   *why  = "no such board";
     BOOL          first_opener;
     BOOL          first_promisc;
-    UBYTE        *rx_flags_answer = NULL;
-    UBYTE        *tx_csum_answer  = NULL;
+    AnxdS2Extension *ext_answer = NULL;
 
     io->ios2_Req.io_Error = 0;
 
@@ -2432,8 +2342,7 @@ static struct Device *netdev_open(
     }
 
     netdev_take_tags((const struct TagItem *)io->ios2_BufferManagement,
-                     op, &pin, &rx_flags_answer,
-                     &tx_csum_answer);
+                     op, &pin, &ext_answer);
 
     nd_tracex("anx: open unit ", unit);
     hw = netdev_find_unit(d, unit, pin, &why);
@@ -2460,11 +2369,28 @@ static struct Device *netdev_open(
        produce.  A LANCE or mapped-buffer ED unit therefore answers zero;
        direct-copy cores answer VERIFIED when they can establish it. */
     op->op_RxFlags &= hw->nu_Nic.rx_flags_supported;
-    if (rx_flags_answer != NULL)
-        *rx_flags_answer = op->op_RxFlags;
     op->op_TxCsum &= hw->nu_Nic.tx_csum_supported;
-    if (tx_csum_answer != NULL)
-        *tx_csum_answer = op->op_TxCsum;
+    if (ext_answer != NULL)
+    {
+        ULONG accepted = ANXD_S2F_TX_QUICK;
+
+        if (op->op_RxDirect != NULL && op->op_RxFilled != NULL)
+            accepted |= ANXD_S2F_RX_DIRECT;
+        if (op->op_RxLinkHdr)
+            accepted |= ANXD_S2F_RX_LINK_HDR;
+        if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
+            accepted |= ANXD_S2F_RX_VERIFIED;
+        if ((op->op_TxCsum & ANXD_S2_TXF_TCP) != 0)
+            accepted |= ANXD_S2F_TX_CSUM_TCP;
+        if ((op->op_TxCsum & ANXD_S2_TXF_UDP) != 0)
+            accepted |= ANXD_S2F_TX_CSUM_UDP;
+        if (hw->nu_Nic.rx_holds)
+            accepted |= ANXD_S2F_RX_POLL;
+        if (hw->nu_Nic.rx_capacity != 0)
+            accepted |= ANXD_S2F_RX_CAPACITY;
+
+        ext_answer->Accepted = accepted & ext_answer->Request;
+    }
 
     op->op_Hw        = hw;
     op->op_Raw       = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
