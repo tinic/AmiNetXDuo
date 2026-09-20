@@ -285,21 +285,17 @@ UINT _nxe_tcp_socket_reuse_address_set(NX_TCP_SOCKET *socket_ptr, UINT reuse)
     return NX_SUCCESS;
 }
 
-UINT _nx_ip_route_find(NX_IP *ip_ptr, ULONG destination_address,
-                       NX_INTERFACE **nx_interface, ULONG *next_hop_address)
+BOOL netstack_ipv4_route(ULONG destination, LONG preferred_index,
+                         UWORD *index_out, ULONG *next_hop_out,
+                         ULONG *source_address_out)
 {
-    (VOID)ip_ptr; (VOID)destination_address;
-    (VOID)nx_interface; (VOID)next_hop_address;
-    return NX_NOT_SUCCESSFUL;
+    (VOID)destination;
+    (VOID)preferred_index;
+    (VOID)index_out;
+    (VOID)next_hop_out;
+    (VOID)source_address_out;
+    return FALSE;
 }
-
-UINT _txe_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
-{
-    (VOID)mutex_ptr; (VOID)wait_option;
-    return TX_SUCCESS;
-}
-
-UINT _txe_mutex_put(TX_MUTEX *mutex_ptr) { (VOID)mutex_ptr; return TX_SUCCESS; }
 
 static void t_timeouts(void)
 {
