@@ -1763,6 +1763,12 @@ static BOOL fb_take_buffers(const FbGeometry *g)
        matching the zeroed shadow the host would otherwise have sent from. */
     fb_offload = (BOOL)(RFB_FMT_IS_CHUNKY(g->format) && httpzz_available());
     if (fb_offload)
+    {
+        /* This is the observable proof that the firmware service, rather than
+           the transparent host fallback, owns the session.  Without it a
+           successful-looking /console cannot close the firmware activation
+           test: both paths deliberately put identical bytes on the wire. */
+        fb_say("ZZ9000 console encoder active");
         /* The card encodes per band like the host, but the scroll probe on
            band 0 costs ~19 ms/frame there and mostly misfires under a window
            drag (a wrong COPYRECT on a mid-drag read leaves torn regions), so
@@ -1774,6 +1780,7 @@ static BOOL fb_take_buffers(const FbGeometry *g)
                          (UBYTE)fb_rg.format,
                          (ULONG)(fb_flags & ~(rfb_u32)(RFB_F_COPYRECT |
                                                        RFB_F_SCROLL_ADAPTIVE)));
+    }
 
     /* The shape is queued and the colours are not.  Zeroing the remembered
        palette is what makes the next grab report a change; queueing one here
