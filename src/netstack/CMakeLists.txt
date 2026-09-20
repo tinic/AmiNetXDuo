@@ -14,6 +14,7 @@ set(NETSTACK_SOURCES
     netstack_baton.c
     netstack_client_pool.c
     netstack_gateway.c
+    netstack_gateway_apply.c
     netstack_pool.c
     netstack_pool_runtime.c
     netstack_memlist.c

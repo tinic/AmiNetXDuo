@@ -854,20 +854,6 @@ VOID ami_ns_dhcp_hostname_displace(AmiNsDhcpHostnameState *state)
     (VOID)state;
 }
 
-UWORD ami_ns_gateway_candidates(const AmiNsGatewayIface *iface, UWORD count,
-                                UWORD preferred, UWORD skip,
-                                AmiNsGatewayCandidate *out, UWORD max)
-{
-    (VOID)iface;
-    (VOID)count;
-    (VOID)preferred;
-    (VOID)skip;
-    (VOID)out;
-    (VOID)max;
-
-    return 0;
-}
-
 LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
 {
     (VOID)iface;
