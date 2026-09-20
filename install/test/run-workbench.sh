@@ -11,7 +11,7 @@
 #                                 [-e genet|wifi|both]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
-#                                 [-C] [-V]
+#                                 [-C] [-V] [-I]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -57,11 +57,12 @@ CANCEL_MODE=""
 MISSING_MODE=""
 NO_CARD=0
 INVALID_STATIC=0
+INVALID_NAMES=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:CV" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIq:x:f:e:c:m:CV" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -88,13 +89,14 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:CV" opt; do
         m) MISSING_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         C) NO_CARD=1; CONFIG_ONLY=1 ;;
         V) INVALID_STATIC=1; STATIC=1; CONFIG_ONLY=1 ;;
+        I) INVALID_NAMES=1; EXPERT_CUSTOM=1; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both]" \
-                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-V]" >&2
+                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-V] [-I]" >&2
            exit 2 ;;
     esac
 done
@@ -770,8 +772,18 @@ esac
 if [ "$EXPERT_CUSTOM" = "1" ]; then
     EXPECTED_IF=lan.1
     EXPECTED_HOST=devbox
-    ANSWER_LINES+=("1|STRING|eth0|$EXPECTED_IF")
-    ANSWER_LINES+=("1|STRING|amiga|$EXPECTED_HOST")
+    if [ "$INVALID_NAMES" = "1" ]; then
+        # Both validators redraw askstring with its original default.  The
+        # second action for each value is therefore reachable only after the
+        # deliberately invalid first value has been refused.
+        ANSWER_LINES+=("1|STRING|eth0|-bad")
+        ANSWER_LINES+=("1|STRING|eth0|$EXPECTED_IF")
+        ANSWER_LINES+=("1|STRING|amiga|bad name")
+        ANSWER_LINES+=("1|STRING|amiga|$EXPECTED_HOST")
+    else
+        ANSWER_LINES+=("1|STRING|eth0|$EXPECTED_IF")
+        ANSWER_LINES+=("1|STRING|amiga|$EXPECTED_HOST")
+    fi
 fi
 if [ "$RECONFIGURE" = "1" ]; then
     ANSWER_LINES+=("2|BOOL|Set them up again")

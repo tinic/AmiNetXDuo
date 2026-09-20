@@ -16,6 +16,7 @@
 #   STATIC    "no" to DHCP, the only way into P_ask_ip and P_ip_parse
 #   INVALID_STATIC enters an out-of-range address, requires the validation
 #                   page to repeat, then corrects it before files are written
+#   INVALID_NAMES does the same for the Expert interface and host-name fields
 #   NO_DRIVERS declines the three supplied device images and proves an
 #              existing vendor driver still boots unchanged
 #   NO_BOOT    installs without startup lines, then starts it manually
@@ -62,7 +63,8 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ARGS=("$@")
 
 SCENARIOS=(
-    NOVICE AVERAGE EXPERT STATIC INVALID_STATIC NO_DRIVERS NO_BOOT
+    NOVICE AVERAGE EXPERT STATIC INVALID_STATIC INVALID_NAMES
+    NO_DRIVERS NO_BOOT
     SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO
     FULL_MINIMAL MINIMAL_FULL FULL_MICRO MICRO_FULL
     DRAWER_FULL DRAWER_MINIMAL DRAWER_MICRO
@@ -133,6 +135,7 @@ for scenario in "${SCENARIOS[@]}"; do
         EXPERT)                opts=(-l EXPERT -E) ;;
         STATIC)                opts=(-l AVERAGE -S) ;;
         INVALID_STATIC)        opts=(-l AVERAGE -V) ;;
+        INVALID_NAMES)         opts=(-l EXPERT -I) ;;
         NO_DRIVERS)            opts=(-l AVERAGE -J) ;;
         NO_BOOT)               opts=(-l AVERAGE -B) ;;
         SYSTEM_RERUN)          opts=(-l AVERAGE -R) ;;
