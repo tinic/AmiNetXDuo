@@ -61,6 +61,13 @@ void http_path_up(char *path);
 
 int http_path_within(const char *prefix, const char *path);
 
+/* Turn a resolved AmigaDOS path back into the escaped href WebDAV reports.
+   `scratch` holds the unescaped URL so the caller controls the memory cost.
+   Returns the escaped length, or 0 when the path is outside root/does not fit. */
+unsigned long http_path_url(int volumes, const char *root, const char *path,
+                            char *scratch, unsigned long scratchlen,
+                            char *out, unsigned long outlen);
+
 unsigned long http_url_escape(const char *path, char *out, unsigned long outlen);
 
 /* &, < and > for XML text.  Same contract. */

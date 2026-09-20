@@ -1041,60 +1041,9 @@ static ULONG httpd_free_bytes(const char *path)
    its configured document-root prefix as before. */
 static const char *httpd_url_of(const char *path)
 {
-    ULONG used = 0;
-
-    if (httpd_volumes)
-    {
-        const char *colon = path;
-
-        while (*colon != '\0' && *colon != ':')
-            colon++;
-        if (*colon != ':' || colon == path)
-            return "/";
-
-        httpd_href_buf[0] = '\0';
-        (VOID)hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/");
-        while (path < colon)
-        {
-            char one[2];
-
-            one[0] = *path++;
-            one[1] = '\0';
-            if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, one))
-                return "/";
-        }
-        path++;                            /* the colon becomes a slash     */
-        if (*path != '\0' &&
-            !hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/"))
-            return "/";
-        if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, path))
-            return "/";
-
-        if (http_url_escape(httpd_href_buf, httpd_escape,
-                            sizeof(httpd_escape)) == 0UL)
-            return "/";
-        return httpd_escape;
-    }
-
-    {
-        ULONG rootlen = hs_len(httpd_root);
-
-        if (hs_nicmp(path, httpd_root, rootlen) != 0)
-            return "/";
-
-        path += rootlen;
-    }
-
-    httpd_href_buf[0] = '\0';
-
-    if (*path != '/')
-        (VOID)hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/");
-
-    if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, path))
-        return "/";
-
-    if (http_url_escape(httpd_href_buf, httpd_escape,
-                        sizeof(httpd_escape)) == 0UL)
+    if (http_path_url(httpd_volumes, httpd_root, path,
+                      httpd_href_buf, sizeof(httpd_href_buf),
+                      httpd_escape, sizeof(httpd_escape)) == 0UL)
         return "/";
 
     return httpd_escape;

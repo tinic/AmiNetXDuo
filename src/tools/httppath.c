@@ -512,6 +512,80 @@ int http_path_within(const char *prefix, const char *path)
                ? 1 : 0;
 }
 
+static int hp_append(char *out, unsigned long outlen, unsigned long *used,
+                     const char *text)
+{
+    unsigned long n = *used;
+
+    while (*text != '\0')
+    {
+        if (n + 1UL >= outlen)
+            return 0;
+        out[n++] = *text++;
+    }
+
+    out[n] = '\0';
+    *used = n;
+    return 1;
+}
+
+unsigned long http_path_url(int volumes, const char *root, const char *path,
+                            char *scratch, unsigned long scratchlen,
+                            char *out, unsigned long outlen)
+{
+    unsigned long used = 0;
+
+    if (root == 0 || path == 0 || scratch == 0 || scratchlen == 0UL ||
+        out == 0 || outlen == 0UL)
+        return 0;
+
+    scratch[0] = '\0';
+    out[0] = '\0';
+
+    if (volumes)
+    {
+        const char *colon = path;
+        const char *p;
+
+        while (*colon != '\0' && *colon != ':')
+            colon++;
+        if (*colon != ':' || colon == path)
+            return 0;
+
+        if (!hp_append(scratch, scratchlen, &used, "/"))
+            return 0;
+        for (p = path; p < colon; p++)
+        {
+            char one[2];
+
+            one[0] = *p;
+            one[1] = '\0';
+            if (!hp_append(scratch, scratchlen, &used, one))
+                return 0;
+        }
+
+        path = colon + 1;
+        if (*path != '\0' &&
+            !hp_append(scratch, scratchlen, &used, "/"))
+            return 0;
+    }
+    else
+    {
+        if (!http_path_within(root, path))
+            return 0;
+
+        path += hp_len(root);
+        if (*path != '/' &&
+            !hp_append(scratch, scratchlen, &used, "/"))
+            return 0;
+    }
+
+    if (!hp_append(scratch, scratchlen, &used, path))
+        return 0;
+
+    return http_url_escape(scratch, out, outlen);
+}
+
 /* -------------------------------------------------------------- escaping --- */
 
 unsigned long http_url_escape(const char *path, char *out, unsigned long outlen)

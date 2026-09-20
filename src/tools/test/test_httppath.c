@@ -71,6 +71,18 @@ static const char *volume_resolved(const char *target)
     return out.path;
 }
 
+static const char *url_of(int volumes, const char *root, const char *path)
+{
+    static char scratch[HTTP_URL_MAX + HTTP_NAME_MAX + 2];
+    static char out[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 3];
+
+    if (http_path_url(volumes, root, path, scratch, sizeof(scratch),
+                      out, sizeof(out)) == 0UL)
+        return NULL;
+
+    return out;
+}
+
 /* --------------------------------------------------------- what must work */
 
 static void test_ordinary(void)
@@ -776,6 +788,31 @@ static void test_within(void)
     CHECK(http_path_within("Work:Public/Docs", "Work:Public/Docs2") == 0);
 }
 
+static void test_path_url(void)
+{
+    char scratch[8];
+    char out[8];
+
+    printf("resolved paths become hrefs\n");
+
+    CHECK_STR(url_of(0, "Work:Public", "Work:Public"), "/");
+    CHECK_STR(url_of(0, "Work:Public", "Work:Public/Docs/a b"),
+              "/Docs/a%20b");
+    CHECK_STR(url_of(0, "work:public", "WORK:PUBLIC/x"), "/x");
+
+    CHECK_STR(url_of(1, "", "Work:"), "/Work");
+    CHECK_STR(url_of(1, "", "RAM DISK:T/a b"),
+              "/RAM%20DISK/T/a%20b");
+
+    /* A sibling whose name begins with the root is not below the root. */
+    CHECK(url_of(0, "Work:Public", "Work:Publicity/secret") == NULL);
+    CHECK(url_of(1, "", "not-a-volume") == NULL);
+
+    CHECK(http_path_url(0, "RAM:", "RAM:long-name", scratch,
+                        sizeof(scratch), out, sizeof(out)) == 0UL);
+    CHECK_STR(out, "");
+}
+
 /* ------------------------------------------------------------- escaping --- */
 
 static void test_escaping(void)
@@ -872,6 +909,7 @@ int main(void)
     test_join();
     test_up();
     test_within();
+    test_path_url();
     test_escaping();
     test_content_type();
 
