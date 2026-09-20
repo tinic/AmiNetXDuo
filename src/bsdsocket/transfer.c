@@ -220,6 +220,7 @@ typedef struct
 static UINT bsd_alloc_once(VOID *arg, ULONG wait)
 {
     BsdAllocArgs *a = (BsdAllocArgs *)arg;
+#ifdef AMINETXDUO_TX_RUN
     UINT          status;
 
     if (wait == NX_NO_WAIT || a->run == NULL)
@@ -230,6 +231,7 @@ static UINT bsd_alloc_once(VOID *arg, ULONG wait)
         return status;
 
     ami_sana2_tx_run_flush(a->run);
+#endif
     return nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, wait);
 }
 
@@ -243,6 +245,7 @@ typedef struct
 static UINT bsd_send_once(VOID *arg, ULONG wait)
 {
     BsdSendArgs *a = (BsdSendArgs *)arg;
+#ifdef AMINETXDUO_TX_RUN
     UINT         status;
 
     if (wait == NX_NO_WAIT || a->run == NULL)
@@ -255,6 +258,7 @@ static UINT bsd_send_once(VOID *arg, ULONG wait)
         return status;
 
     ami_sana2_tx_run_flush(a->run);
+#endif
     return nx_tcp_socket_send(a->tcp, a->packet, wait);
 }
 
@@ -262,10 +266,15 @@ static UINT bsd_send_once(VOID *arg, ULONG wait)
    the loopback interface has no AmiSana2If behind it. */
 static AmiSana2If *bsd_send_run_iface(const AmiSocket *sock)
 {
+#ifdef AMINETXDUO_TX_RUN
     NX_INTERFACE *nxif = sock->as_Nx.tcp.nx_tcp_socket_connect_interface;
 
     return (nxif != NX_NULL)
          ? (AmiSana2If *)nxif->nx_interface_additional_link_info : NULL;
+#else
+    (VOID)sock;
+    return NULL;
+#endif
 }
 
 /*

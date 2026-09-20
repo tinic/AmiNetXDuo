@@ -94,9 +94,16 @@ LONG ami_sana2_inject(AmiSana2If *iface, UWORD ether_type, const UBYTE *dst,
  * are harmless: only the first opener is the holder, and an interface
  * without the bit ignores all three.  Inside the ThreadX bracket only.
  */
+#ifdef AMINETXDUO_TX_RUN
 VOID ami_sana2_tx_run_begin(AmiSana2If *iface);
 VOID ami_sana2_tx_run_flush(AmiSana2If *iface);
 VOID ami_sana2_tx_run_end(AmiSana2If *iface);
+#else
+/* Built without runs (the micro profile): every write starts at once. */
+#define ami_sana2_tx_run_begin(iface)   ((VOID)(iface))
+#define ami_sana2_tx_run_flush(iface)   ((VOID)(iface))
+#define ami_sana2_tx_run_end(iface)     ((VOID)(iface))
+#endif
 
 /* Counters for GetNetworkStatistics()/netstat. */
 typedef struct AmiSana2Stats {

@@ -156,6 +156,7 @@
           "value": "OFF"
         },
         "AMINETXDUO_RX_BATCH": {"type": "BOOL", "value": "OFF"},
+        "AMINETXDUO_TX_RUN": {"type": "BOOL", "value": "OFF"},
         "AMINETXDUO_TLS": {
           "type": "BOOL",
           "value": "OFF"

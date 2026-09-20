@@ -50,11 +50,23 @@ static int h_quick_kept;
 
 /* ANXD_CMD_TX_FLUSH as the device answers it: counted apart from the writes,
    quick unless h_flush_queued, refused with h_flush_error. */
-static unsigned long h_flushes;
-static int           h_flush_queued;
-static BYTE          h_flush_error;
+static unsigned long     h_flushes;
+static int               h_flush_queued;   /* 1 = queued and replied at
+                                              once, 2 = queued, reply held
+                                              until h_flush_reply() */
+static BYTE              h_flush_error;
+static struct IORequest *h_flush_held;
 
 VOID ReplyMsg(struct Message *msg);
+
+static void h_flush_reply(void)
+{
+    if (h_flush_held != NULL)
+    {
+        ReplyMsg(&h_flush_held->io_Message);
+        h_flush_held = NULL;
+    }
+}
 
 VOID BeginIO(struct IORequest *req)
 {
@@ -65,7 +77,10 @@ VOID BeginIO(struct IORequest *req)
         if (h_flush_queued)
         {
             req->io_Flags &= (UBYTE)~IOF_QUICK;
-            ReplyMsg(&req->io_Message);
+            if (h_flush_queued == 2)
+                h_flush_held = req;
+            else
+                ReplyMsg(&req->io_Message);
         }
         return;
     }
@@ -135,6 +150,7 @@ static void h_reply(void)
 
 static ULONG h_sleeps;
 static ULONG h_reply_on_sleep;
+static ULONG h_flush_reply_on_sleep;
 
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
@@ -217,7 +233,10 @@ UINT _nxe_packet_release(NX_PACKET **packet_ptr_ptr)
 
 /* The current ThreadX thread, as the run bracket sees it: one for the sender
    under test, another for "some other thread". */
-static TX_THREAD h_thread_a, h_thread_b;
+static TX_THREAD h_thread_a;
+#ifdef AMINETXDUO_TX_RUN
+static TX_THREAD h_thread_b;
+#endif
 static TX_THREAD *h_current = &h_thread_a;
 
 TX_THREAD *_tx_thread_identify(VOID)
@@ -231,6 +250,8 @@ UINT _tx_thread_sleep(ULONG ticks)
     h_sleeps++;
     if (h_reply_on_sleep != 0 && h_sleeps == h_reply_on_sleep)
         h_reply();
+    if (h_flush_reply_on_sleep != 0 && h_sleeps == h_flush_reply_on_sleep)
+        h_flush_reply();
     return TX_SUCCESS;
 }
 
@@ -314,6 +335,8 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_flushes      = 0;
     h_flush_queued = 0;
     h_flush_error  = 0;
+    h_flush_held   = NULL;
+    h_flush_reply_on_sleep = 0;
     h_current      = &h_thread_a;
 }
 
@@ -815,6 +838,54 @@ static void test_drain_reaps_final_sleep(void)
     h_check(h_releases == 1, "and its packet was released");
 }
 
+#ifdef AMINETXDUO_TX_RUN
+/*
+ * A flush the device queued and has not answered when the interface goes
+ * down: the request and its reply port live in the interface, so the drain
+ * waits for the reply as it waits for a write's, and a reply that never
+ * comes leaves the interface orphaned rather than freed under the device.
+ */
+static void test_drain_waits_for_a_queued_flush(void)
+{
+    printf("sana2: transmit drain waits for a flush the device still holds\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_quick_ok = TRUE;
+    iface.tx_more_ok  = 1;
+    h_quick_kept      = 1;
+    h_flush_queued    = 2;
+    ami_sana2_tx_run_begin(&iface);
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    ami_sana2_tx_run_end(&iface);
+    h_check(iface.tx_flush_busy == 1 && h_flush_held != NULL,
+            "the flush is queued at the device with no reply yet");
+    h_check(iface.tx[0].busy == FALSE, "and no write is outstanding");
+
+    h_flush_reply_on_sleep = 3;
+    ami_sana2_tx_drain(&iface);
+    h_check(h_sleeps == 3, "the drain waited for the flush's reply");
+    h_check(iface.tx_flush_busy == 0, "which the reap collected");
+    h_check(iface.tx_orphaned == FALSE, "so nothing is orphaned");
+    h_check(h_releases == 1, "and the one write's packet was released once");
+
+    /* The same, never answered. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_quick_ok = TRUE;
+    iface.tx_more_ok  = 1;
+    h_quick_kept      = 1;
+    h_flush_queued    = 2;
+    ami_sana2_tx_run_begin(&iface);
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    ami_sana2_tx_run_end(&iface);
+    ami_sana2_tx_drain(&iface);
+    h_check(h_sleeps == 64, "a flush never answered is waited for to the deadline");
+    h_check(iface.tx_flush_busy == 1 && iface.tx_orphaned == TRUE,
+            "and leaves the interface orphaned, not freed under the device");
+}
+#endif /* AMINETXDUO_TX_RUN */
+
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
 /*
  * The parking, and the safety net that undoes it.  A send over a PA_SIGNAL
@@ -948,6 +1019,7 @@ static void test_quick_write_completes_inline(void)
             "until the reply is reaped");
 }
 
+#ifdef AMINETXDUO_TX_RUN
 /*
  * A run (ANXD_S2F_TX_MORE): the holder's writes carry ANXD_S2_TXF_MORE, any
  * other thread's do not, the end of the run and a flush inside it send one
@@ -1042,6 +1114,7 @@ static void test_run_flags_and_flushes(void)
     h_check(iface.tx[0].busy == FALSE && h_releases == 1,
             "which completed nothing it should not have");
 }
+#endif /* AMINETXDUO_TX_RUN */
 
 /* A full ring queues the write instead of sleeping a tick: the queue keeps
    the order, the completion that frees a slot launches the head, a full
@@ -1161,7 +1234,9 @@ int main(void)
 {
     frames_init();
     test_quick_write_completes_inline();
+#ifdef AMINETXDUO_TX_RUN
     test_run_flags_and_flushes();
+#endif
     test_full_ring_queues_in_order();
 
     test_pad_cooked_no_fusion();
@@ -1178,6 +1253,9 @@ int main(void)
     test_no_pad_when_long_enough();
     test_no_pad_off_ethernet();
     test_drain_reaps_final_sleep();
+#ifdef AMINETXDUO_TX_RUN
+    test_drain_waits_for_a_queued_flush();
+#endif
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     test_lazy_parks_and_unparks();
 #endif

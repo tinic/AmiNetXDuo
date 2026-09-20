@@ -926,8 +926,10 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
                                 ANXD_S2F_RX_POLL |
                                 ANXD_S2F_RX_CAPACITY |
                                 ANXD_S2F_TX_QUICK;
+#ifdef AMINETXDUO_TX_RUN
     if (ami_config_tx_run(1UL) != 0UL)
         iface->extension.Request |= ANXD_S2F_TX_MORE;
+#endif
 #ifdef AMINETXDUO_RX_BATCH
     if (ami_config_rx_batch(1UL) != 0UL)
         iface->extension.Request |= ANXD_S2F_RX_BATCH;
@@ -1011,9 +1013,11 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
        writes in front of each payload is the frame's whole identity, so a
        batch is only usable when that was accepted too (the device accepts
        the two together, but both are checked here rather than trusted). */
+#ifdef AMINETXDUO_RX_BATCH
     iface->rx_batch_ok =
         (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_BATCH) != 0 &&
                  iface->link_hdr_ok && !iface->raw_mode) ? 1 : 0);
+#endif
     iface->hw_rx_bytes = 0;
     iface->tx_quick_ok =
         (UBYTE)(((iface->extension.Accepted & ANXD_S2F_TX_QUICK) != 0) ? 1 : 0);
@@ -1022,17 +1026,23 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         iface->tx_csum_ok |= ANXD_S2_TXF_TCP;
     if ((iface->extension.Accepted & ANXD_S2F_TX_CSUM_UDP) != 0)
         iface->tx_csum_ok |= ANXD_S2_TXF_UDP;
+#ifdef AMINETXDUO_TX_RUN
     iface->tx_more_ok =
         (UBYTE)(((iface->extension.Accepted & ANXD_S2F_TX_MORE) != 0) ? 1 : 0);
+#endif
     if (status != 0)
     {
         iface->link_hdr_ok = FALSE;
         iface->rx_flags_ok = 0;
         iface->rx_poll_ok  = 0;
+#ifdef AMINETXDUO_RX_BATCH
         iface->rx_batch_ok = 0;
+#endif
         iface->tx_quick_ok = 0;
         iface->tx_csum_ok  = 0;
+#ifdef AMINETXDUO_TX_RUN
         iface->tx_more_ok  = 0;
+#endif
     }
 
     if (status != 0)

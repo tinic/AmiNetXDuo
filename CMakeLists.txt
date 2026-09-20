@@ -1482,6 +1482,18 @@ if(AMINETXDUO_RX_BATCH)
     add_compile_definitions(AMINETXDUO_RX_BATCH)
 endif()
 
+# Transmit runs: a send() of several segments brackets its writes so a
+# driver that negotiated ANXD_S2F_TX_MORE (anxgenet.device) starts them
+# together and the peer acknowledges pairs.  Measured 2026-09-20, A1200 +
+# PiStorm32, iperf out of the Amiga: 364-371 -> 412-430 Mbit/s.  Off in the
+# micro profile with the batch, for the same machines.
+option(AMINETXDUO_TX_RUN
+       "Transmit runs: a multi-segment send() leaves the wire together" ON)
+
+if(AMINETXDUO_TX_RUN)
+    add_compile_definitions(AMINETXDUO_TX_RUN)
+endif()
+
 # The four rxverify counters that fire on every received frame, inside the
 # protection hold.  Off by default; see src/net68k/net68k.h.  The error and
 # skip counters are unconditional and do not need this.

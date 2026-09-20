@@ -61,6 +61,7 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_pend_count = 0;
     iface->tx_kicking    = FALSE;
 
+#ifdef AMINETXDUO_TX_RUN
     /* The run flush: the opened request's device, unit and cookie, the
        write port for the reply a device that queues it would post, and the
        private command.  tx_more_ok is settled by the open (sana2_device.c). */
@@ -73,6 +74,7 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_holder     = NULL;
     iface->tx_held       = 0;
     iface->tx_flush_busy = 0;
+#endif
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     iface->tx_lazy_timer_up  = FALSE;
@@ -253,6 +255,7 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
     for (node = batch.lh_Head; (next = node->ln_Succ) != NULL; node = next)
     {
         msg = (struct Message *)node;
+#ifdef AMINETXDUO_TX_RUN
         /* The one request on this port that is not a write: the run flush a
            device chose to queue. */
         if (((struct IOSana2Req *)msg)->ios2_Req.io_Command ==
@@ -261,6 +264,7 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
             ami_sana2_tx_flush_replied(iface);
             continue;
         }
+#endif
         /* ios2_Req.io_Message is the first member of the first member of
            AmiTxSlot, so the reply message is the slot. */
         ami_sana2_tx_complete(iface, (AmiTxSlot *)msg);
@@ -453,13 +457,19 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
         if (iface->tx[i].busy)
             AbortIO((struct IORequest *)&iface->tx[i].req);
     }
+#ifdef AMINETXDUO_TX_RUN
     /* A run left open by a sender the interface went down under, and the
        one flush a queuing device may still hold. */
     iface->tx_holder = NULL;
     iface->tx_held   = 0;
     if (iface->tx_flush_busy)
         AbortIO((struct IORequest *)&iface->tx_flush_req);
+#endif
 
+    /* The flush request is the device's until its reply is reaped, exactly
+       as a write is: it lives in the interface and answers on tx_port, so
+       it is counted with the writes below and holds tx_orphaned the same
+       way.  AbortIO() may answer it later rather than now. */
     spins = 0;
     for (;;)
     {
@@ -471,6 +481,10 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
             if (iface->tx[i].busy)
                 busy++;
         }
+#ifdef AMINETXDUO_TX_RUN
+        if (iface->tx_flush_busy)
+            busy++;
+#endif
 
         if (busy == 0 || spins >= 64)
             break;
@@ -485,7 +499,7 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
 
     if (busy != 0)
     {
-        AMI_ERROR("sana2: %ld write(s) still owned by the device. The "
+        AMI_ERROR("sana2: %ld request(s) still owned by the device. The "
                   "interface leaks. A free here corrupts memory the "
                   "device writes into",
                   (long)busy);
@@ -717,6 +731,7 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
 }
 
 /* ----------------------------------------------------------- transmit runs */
+#ifdef AMINETXDUO_TX_RUN
 
 /*
  * The first opener is the holder; a second thread's bracket (another
@@ -789,6 +804,7 @@ VOID ami_sana2_tx_flush_replied(AmiSana2If *iface)
     iface->tx_flush_busy = 0;
     /* Stays off: a device that queued one would queue the next. */
 }
+#endif /* AMINETXDUO_TX_RUN */
 
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw)
@@ -959,6 +975,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
     slot->consumed   = 0;
     slot->total      = length;
     slot->tx_flags   = csum_hw ? ANXD_S2_TXF_TCP : 0;
+#ifdef AMINETXDUO_TX_RUN
     /* One of the holder's run: the device may wait for the next before it
        starts this one.  The holder's own thread only -- the kick that
        launches a queued write from the reader, or an acknowledgement the IP
@@ -968,6 +985,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
         slot->tx_flags |= ANXD_S2_TXF_MORE;
         iface->tx_held  = 1;
     }
+#endif
 
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
     slot->req.ios2_Req.io_Message.mn_ReplyPort    = &iface->tx_port;

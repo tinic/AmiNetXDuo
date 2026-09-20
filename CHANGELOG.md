@@ -34,7 +34,8 @@ version at the top when it merges.
   starts what is held; the stack sends it when the `send()` ends and before
   it waits for a window or a packet, and `anxgenet.device` also starts after
   eight held frames and on its tick. `NetDevStats` "GENET transmits held for
-  company" counts them. `SetEnv ANXDTXRUN 0` turns it off.
+  company" counts them. `SetEnv ANXDTXRUN 0` turns it off; build option
+  `AMINETXDUO_TX_RUN`, off in the micro profile with the batch.
 
 - GRO stream matching now lives in the stack's SANA-II receive layer. Every
   driver can coalesce verified contiguous IPv4 and IPv6 TCP segments; device

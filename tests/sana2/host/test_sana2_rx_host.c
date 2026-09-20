@@ -49,7 +49,17 @@ VOID Permit(VOID)  { }
 VOID SendIO(struct IORequest *req) { (VOID)req; }
 static struct IORequest *h_last_begun;
 VOID BeginIO(struct IORequest *req) { h_last_begun = req; }
-LONG AbortIO(struct IORequest *req) { (VOID)req; return 0; }
+
+/* What the teardown asked the device to give back, in order. */
+static struct IORequest *h_aborted[16];
+static unsigned          h_aborts;
+LONG AbortIO(struct IORequest *req)
+{
+    if (h_aborts < 16)
+        h_aborted[h_aborts] = req;
+    h_aborts++;
+    return 0;
+}
 BYTE WaitIO(struct IORequest *req)
 {
     (VOID)req;
@@ -1838,12 +1848,108 @@ static void test_batch_post_and_drain(void)
     h_check(!bt_slot[2].posted && !bt_slot[3].posted,
             "batch drain: its slots are given back for the reads to use");
 }
+
+/*
+ * Two batches out; the device refuses one while the other is still in its
+ * hands.  The refusal turns the rings back to reads, and the sibling's later
+ * answer must not put a batch back: its slots are plain slots from then on.
+ * And a teardown that comes while a batch is still out aborts the batch --
+ * whatever use_batch says -- and not the slot requests travelling in it,
+ * which the device never saw.
+ */
+static void test_batch_fallback_with_a_sibling_in_flight(void)
+{
+    AmiSana2Reader rd;
+    AmiSana2Rx    *rx = &iface.rx[0];
+    UWORD          i, took;
+
+    fixture_init();
+    memset(&rd, 0, sizeof(rd));
+    memset(bt_slot, 0, sizeof(bt_slot));
+    memset(bt_pkt, 0, sizeof(bt_pkt));
+    memset(bt_rec, 0, sizeof(bt_rec));
+    iface.online      = TRUE;
+    iface.link_hdr_ok = TRUE;
+    iface.rx_batch_ok = 1;
+    iface.rx_dst_off  = AMI_ETH_HEADER_SIZE;
+    rd.iface          = &iface;
+    rx->iface         = &iface;
+    rx->reader        = &rd;
+    rx->packet_type   = 0x0800;
+    rx->depth         = BT_SLOTS;
+    rx->slot          = bt_slot;
+    rx->unposted      = BT_SLOTS;
+    rx->use_batch     = 1;
+    rx->batch_slots   = BT_SLOTS;
+    for (i = 0; i < BT_SLOTS; i++)
+    {
+        bt_pkt[i].nx_packet_data_start = bt_buf[i];
+        bt_pkt[i].nx_packet_data_end   = bt_buf[i] + sizeof(bt_buf[i]);
+        bt_slot[i].owner  = rx;
+        bt_slot[i].stats  = &iface.stats;
+        bt_slot[i].packet = &bt_pkt[i];
+    }
+    for (i = 0; i < AMI_SANA2_RX_BATCHES; i++)
+    {
+        AmiRxBatch *bt = &rx->batch[i];
+
+        bt->owner = rx;
+        bt->first = (UWORD)(i * 2);
+        bt->count = 2;
+        bt->rec   = &bt_rec[i].b;
+        bt->req.ios2_Req.io_Command = ANXD_CMD_RX_BATCH;
+        bt->req.ios2_Data           = bt->rec;
+    }
+
+    h_check(ami_sana2_rx_post_batch(rx, &rx->batch[0]) == 2 &&
+            ami_sana2_rx_post_batch(rx, &rx->batch[1]) == 2,
+            "fallback: both batches are out");
+
+    /* The second comes back refused while the first is still out. */
+    rx->batch[1].rec->Filled = 0;
+    rx->batch[1].req.ios2_Req.io_Error = S2ERR_NOT_SUPPORTED;
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    took = ami_sana2_rx_drain_batch(&rd, &rx->batch[1]);
+    tx_mutex_put(&ip.nx_ip_protection);
+    h_check(took == 1 && rx->use_batch == 0 && rx->batch_slots == 0,
+            "fallback: the refusal turns the ring back to reads");
+    h_check(rx->batch[0].in_flight && bt_slot[0].posted && bt_slot[1].posted,
+            "fallback: the sibling is still the device's");
+
+    /* A teardown now: the batch in flight is aborted, the slots in it are
+       not, and the plain slots (none posted yet) are not either. */
+    h_aborts = 0;
+    ami_sana2_rx_abort_outstanding(&rd);
+    h_check(h_aborts == 1 &&
+            h_aborted[0] == (struct IORequest *)&rx->batch[0].req,
+            "fallback: teardown aborts the batch still out, and only that");
+
+    /* The sibling answers with a frame: settled and handed up, and NOT put
+       back as a batch -- the ring reads now. */
+    bt_device_fills(&rx->batch[0], 1, 46);
+    rx->batch[0].req.ios2_Req.io_Error = 0;
+    h_last_begun = NULL;
+    h_went = TO_NOWHERE;
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    took = ami_sana2_rx_drain_batch(&rd, &rx->batch[0]);
+#ifdef AMINETXDUO_GRO
+    ami_sana2_gro_flush(rx);
+#endif
+    tx_mutex_put(&ip.nx_ip_protection);
+    h_check(took == 1 && h_went == TO_IP, "fallback: the sibling's frame went up");
+    h_check(h_last_begun == NULL, "fallback: and no batch was posted again");
+    h_check(!rx->batch[0].in_flight && !bt_slot[0].posted && !bt_slot[1].posted,
+            "fallback: its slots are unposted plain slots now");
+    h_check(rx->unposted == BT_SLOTS,
+            "fallback: every slot waits for the read sweep");
+}
 #endif /* AMINETXDUO_RX_BATCH */
 
 int main(void)
 {
 #ifdef AMINETXDUO_RX_BATCH
     test_batch_post_and_drain();
+    test_batch_fallback_with_a_sibling_in_flight();
 #endif
     test_demux();
     test_header_strip();

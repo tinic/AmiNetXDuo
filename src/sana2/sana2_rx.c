@@ -912,6 +912,13 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
    are in flight afterwards. */
+/* The host harness's way into file-local batch and teardown steps. */
+#ifdef AMINETXDUO_SANA2_RX_HOST_TEST
+#define AMI_SANA2_BATCH_LINKAGE
+#else
+#define AMI_SANA2_BATCH_LINKAGE static
+#endif
+
 #ifdef AMINETXDUO_RX_BATCH
 /*
  * ANXD_CMD_RX_BATCH: one request for a run of slots.  Every slot of the
@@ -921,12 +928,6 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
  * goes to the device once.  Answers the count of slots handed over, 0 when
  * none could be, so the caller's "live" stays a slot count.
  */
-#ifdef AMINETXDUO_SANA2_RX_HOST_TEST
-#define AMI_SANA2_BATCH_LINKAGE
-#else
-#define AMI_SANA2_BATCH_LINKAGE static
-#endif
-
 AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch *bt)
 {
     AmiSana2If    *iface = rx->iface;
@@ -1059,7 +1060,12 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
     }
 #endif
 
-    for (i = rx->batch_slots; i < rx->depth; i++)
+#ifdef AMINETXDUO_RX_BATCH
+    i = rx->batch_slots;
+#else
+    i = 0;
+#endif
+    for (; i < rx->depth; i++)
     {
         if (ami_sana2_rx_post_slot(rx, &rx->slot[i]))
             live++;
@@ -1650,8 +1656,11 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
        the stack spends on these frames.  A partially filled batch answered
        at the end of a pass would otherwise keep its empty slots away from
        the wire for the whole hand-up. */
-    if (raw == 0 && !rd->stop)
+    if (raw == 0 && !rd->stop && rx->use_batch)
         (VOID)ami_sana2_rx_post_batch(rx, bt);
+    /* Otherwise the rings fell back to reads while this batch was out (a
+       refusal from its sibling): its slots are plain slots now, unposted,
+       and the sweep at the end of this pass posts them as CMD_READs. */
 
     for (i = 0; i < n; i++)
     {
@@ -2045,9 +2054,37 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
  * then CMD_FLUSH, then give up having freed nothing the device can still write
  * into.  Freeing the port, the packets or the interface corrupts memory.
  */
-static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
+#ifdef AMINETXDUO_RX_BATCH
+/* TRUE when slot i travels in a batch the device still holds: its own
+   request was never issued, so it is not a thing to AbortIO(). */
+static BOOL ami_sana2_rx_in_flight_batch(const AmiSana2Rx *rx, UWORD i)
 {
-    UWORD outstanding;
+    UWORD b;
+
+    for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
+    {
+        const AmiRxBatch *bt = &rx->batch[b];
+
+        if (bt->in_flight && i >= bt->first &&
+            i < (UWORD)(bt->first + bt->count))
+            return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
+/*
+ * AbortIO() for everything the device holds: the batches in flight --
+ * whatever use_batch says now, a ring that fell back to reads can still
+ * have one out -- and every posted slot that is not travelling in one of
+ * them.
+ */
+/* noinline: teardown runs once, and inlined into the reader's loop it is
+   counted against the loop's instruction ceiling
+   (tools/check-hotpath-budget.sh, _ami_sana2_rx_thread). */
+AMI_SANA2_BATCH_LINKAGE VOID __attribute__((noinline))
+ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd)
+{
     UWORD r, i;
 
     for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
@@ -2055,21 +2092,31 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
         AmiSana2Rx *rx = &rd->iface->rx[r];
 
 #ifdef AMINETXDUO_RX_BATCH
-        if (rx->use_batch)
+        for (i = 0; i < (UWORD)AMI_SANA2_RX_BATCHES; i++)
         {
-            for (i = 0; i < (UWORD)AMI_SANA2_RX_BATCHES; i++)
-            {
-                if (rx->batch[i].in_flight)
-                    AbortIO((struct IORequest *)&rx->batch[i].req);
-            }
+            if (rx->batch[i].in_flight)
+                AbortIO((struct IORequest *)&rx->batch[i].req);
         }
 #endif
-        for (i = rx->batch_slots; i < rx->depth; i++)
+        for (i = 0; i < rx->depth; i++)
         {
-            if (rx->slot[i].posted)
-                AbortIO((struct IORequest *)&rx->slot[i].req);
+            if (!rx->slot[i].posted)
+                continue;
+#ifdef AMINETXDUO_RX_BATCH
+            if (ami_sana2_rx_in_flight_batch(rx, i))
+                continue;
+#endif
+            AbortIO((struct IORequest *)&rx->slot[i].req);
         }
     }
+}
+
+static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
+{
+    UWORD outstanding;
+    UWORD r, i;
+
+    ami_sana2_rx_abort_outstanding(rd);
 
     outstanding = ami_sana2_rx_reap(rd, AMI_SANA2_RX_REAP_TRIES);
 
@@ -2235,9 +2282,6 @@ static VOID ami_sana2_rx_thread(ULONG argument)
                 bt->req.ios2_Data           = bt->rec;
             }
         }
-#else
-        rx->use_batch   = 0;
-        rx->batch_slots = 0;
 #endif
     }
 
@@ -2662,10 +2706,25 @@ static APTR ami_sana2_alloc_stack(ULONG size)
 }
 
 
+#ifdef AMINETXDUO_RX_BATCH
+static VOID ami_sana2_rx_free_batches(AmiSana2Rx *rx)
+{
+    UWORD b;
+
+    for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
+    {
+        if (rx->batch[b].rec != NULL)
+        {
+            ami_free(rx->batch[b].rec);
+            rx->batch[b].rec = NULL;
+        }
+    }
+}
+#endif
+
 VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
 {
     UWORD i;
-    UWORD b;
 
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
@@ -2677,14 +2736,9 @@ VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
             rx->slot       = NULL;
             rx->slot_alloc = 0;
         }
-        for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
-        {
-            if (rx->batch[b].rec != NULL)
-            {
-                ami_free(rx->batch[b].rec);
-                rx->batch[b].rec = NULL;
-            }
-        }
+#ifdef AMINETXDUO_RX_BATCH
+        ami_sana2_rx_free_batches(rx);
+#endif
     }
 }
 
@@ -2746,20 +2800,13 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
            reaped (ami_sana2_rx_teardown) or the restart was refused above. */
         if (rx->slot != NULL && rx->slot_alloc != rx->depth)
         {
-            UWORD b;
-
             ami_free(rx->slot);
             rx->slot       = NULL;
             rx->slot_alloc = 0;
+#ifdef AMINETXDUO_RX_BATCH
             /* The batch records are sized from the depth too. */
-            for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
-            {
-                if (rx->batch[b].rec != NULL)
-                {
-                    ami_free(rx->batch[b].rec);
-                    rx->batch[b].rec = NULL;
-                }
-            }
+            ami_sana2_rx_free_batches(rx);
+#endif
         }
         if (rx->slot == NULL)
         {

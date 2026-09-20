@@ -278,7 +278,11 @@ host_test_targets() { # builddir
 #      callback ownership and fail-closed transmit-checksum negotiation
 #      409 with test_handoff: listener sockets follow the AmiTCP/Roadshow
 #      ReleaseSocket/ObtainSocket contract
-HOST_TESTS_EXPECTED=409
+#      412 with test_interface_claim (c4976ede) and test_config_runtime
+#      (4f7b251b), and one the 409 tally had already missed: ctest -N counts
+#      412 on x86_64 for host and sanitize alike (2026-09-20, local and the
+#      runner), and the runner's list is the local list.
+HOST_TESTS_EXPECTED=412
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

@@ -1,6 +1,7 @@
 # GCC -fanalyzer findings that have been triaged and are not defects.
 # Regenerate with tools/analyze.sh --update.  See the script header.
 # count<TAB>file<TAB>warning<TAB>message
+1	port/threadx-amiga/src/tx_amiga_exec_wait.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	port/threadx-amiga/src/tx_thread_context_restore.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	port/threadx-amiga/src/tx_thread_context_save.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	port/threadx-amiga/src/tx_thread_schedule.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
@@ -30,7 +31,6 @@
 2	src/bsdsocket/socket.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '*addr.nxd_ip_address.v6[1]'
 2	src/crypto68k/c68k_div.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 3	src/crypto68k/c68k_mont.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
-4	port/threadx-amiga/src/tx_amiga_green.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 4	port/threadx-amiga/src/tx_initialize_low_level.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 4	src/crypto68k/c68k_powm.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 5	src/crypto68k/c68k_poly1305.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'

@@ -642,6 +642,7 @@ typedef struct AmiSana2Reader
  * the batch covers -- the slot itself, which is what RxDirect/RxFilled
  * receive for a CMD_READ too.
  */
+#ifdef AMINETXDUO_RX_BATCH
 #define AMI_SANA2_RX_BATCHES    2
 /* Slots per batch at most: the reader settles a batch's frames on its
    stack before it re-posts the batch, one AmiRxHandUp each. */
@@ -660,6 +661,7 @@ typedef struct AmiRxBatch
 _Static_assert(__builtin_offsetof(AmiRxBatch, owner) ==
                __builtin_offsetof(AmiRxSlot, owner),
                "a reply names its ring through the same member either way");
+#endif /* AMINETXDUO_RX_BATCH */
 
 typedef struct AmiSana2Rx
 {
@@ -667,6 +669,7 @@ typedef struct AmiSana2Rx
     AmiSana2Reader     *reader;
     ULONG               packet_type;
     UWORD               depth;
+#ifdef AMINETXDUO_RX_BATCH
     UBYTE               use_batch;      /* the ring's first batch_slots
                                            slots travel in batch[]; the rest
                                            are CMD_READs, the pool that
@@ -675,6 +678,7 @@ typedef struct AmiSana2Rx
     UBYTE               pad0;
     UWORD               batch_slots;    /* slots covered by the batches     */
     AmiRxBatch          batch[AMI_SANA2_RX_BATCHES];
+#endif
 
     /*
      * Slots NOT currently handed to the device.  ami_sana2_rx_post() sweeps
@@ -771,8 +775,10 @@ struct AmiSana2If
     AnxdS2Extension     extension;       /* one size/version negotiated record */
     BOOL                link_hdr_ok;    /* negotiated ANXD_S2F_RX_LINK_HDR   */
     UBYTE               rx_flags_ok;    /* negotiated RX_FILLED verdict bits */
+#ifdef AMINETXDUO_RX_BATCH
     UBYTE               rx_batch_ok;    /* ANXD_CMD_RX_BATCH accepted: the
                                            reader posts batches, not reads  */
+#endif
     UBYTE               rx_poll_ok;     /* the device knows ANXD_CMD_RX_POLL;
                                            TRUE until it says IOERR_NOCMD    */
     UBYTE               tx_quick_ok;    /* CMD_WRITE goes out IOF_QUICK: an
@@ -791,6 +797,7 @@ struct AmiSana2If
      * inside it send.  Another thread's write inside the bracket is a plain
      * write, and a driver starts whatever it holds for one of those.
      */
+#ifdef AMINETXDUO_TX_RUN
     UBYTE               tx_more_ok;     /* negotiated ANXD_S2F_TX_MORE       */
     UBYTE               tx_held;        /* a TXF_MORE write went out since
                                            the last flush                    */
@@ -800,6 +807,7 @@ struct AmiSana2If
     TX_THREAD          *tx_holder;      /* the run's opener, NULL outside    */
     struct IOSana2Req   tx_flush_req;   /* ANXD_CMD_TX_FLUSH, reply on
                                            tx_port, told apart by command    */
+#endif
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
@@ -931,9 +939,11 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register ULONG len  __asm("d0"));
 BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
 UBYTE ami_sana2_tx_flags(APTR ios2_data);
+#ifdef AMINETXDUO_TX_RUN
 /* The flush request came back on tx_port: the device queued it rather than
    finishing it inside BeginIO() (sana2_tx.c). */
 VOID  ami_sana2_tx_flush_replied(AmiSana2If *iface);
+#endif
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
                               register ULONG len __asm("d0"));
@@ -980,11 +990,14 @@ BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet,
 VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
 #endif
 
-#if defined(AMINETXDUO_SANA2_RX_HOST_TEST) && defined(AMINETXDUO_RX_BATCH)
-/* The host harness's way into the reader's batch post and drain
-   (sana2_rx.c), which are file-local in the library. */
+#ifdef AMINETXDUO_SANA2_RX_HOST_TEST
+/* The host harness's way into the reader's batch post and drain and the
+   teardown's abort sweep (sana2_rx.c), file-local in the library. */
+#ifdef AMINETXDUO_RX_BATCH
 UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch *bt);
 UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
+#endif
+VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 #endif
 
 /* sana2_tx.c */
