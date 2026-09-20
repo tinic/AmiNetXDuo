@@ -217,6 +217,7 @@ typedef struct NetdevUnit
     UWORD                       nu_RxKickWait;/* blanks toward an RX re-roll   */
     UWORD                       nu_RxKicks;   /* deaf-boot resets performed    */
     volatile UBYTE              nu_InIsr;     /* interrupt server on the chip  */
+    volatile UBYTE              nu_SoftMissed;/* soft IRQ met a task service   */
     ULONG                       nu_TxProgress;/* last completion the tick saw  */
 
     NetdevMcast                 nu_Mcast[NETDEV_MCAST_MAX];

@@ -143,12 +143,10 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * Linux arrived at as NAPI with deferred re-arm and busy polling, with the
  * idle task standing in for the timer.
  *
- * Only for AmiNetXDuo's own shell (NetdevNic anxd_openers).  Under Roadshow
- * 1.15 on the A1200, 2026-09-18, a session with the poller running lost the
- * machine twice a few minutes into a Fitz transfer (no ARP, no ping); the
- * same driver without the poller had served Roadshow's 691 MB SMB reads.
- * Roadshow's receive hooks, run from this task under Disable(), are the
- * difference that fits; a plain SANA-II opener gets the interrupt path.
+ * Only the idle receive polling is for AmiNetXDuo's own shell (NetdevNic
+ * anxd_openers).  The task also owns deferred PHY work for every opener.
+ * Receive hooks run from it with interrupts enabled; plain SANA-II openers
+ * still use the ordinary interrupt-driven receive path.
  *
  * A1200, 2026-09-17, on top of the 500 us timeout: Fitz read 26.5 -> 31.6
  * MB/s, iperf in 832 -> 910 Mbit/s, out 541 -> 564; in a 10 s receive run
@@ -195,6 +193,7 @@ typedef struct GenetCore
     UBYTE   cache;          /* cache maintenance around DMA is on           */
     UBYTE   pageops;        /* supervised cpushp pages, not CacheClearE     */
     UBYTE   phy_set;        /* the PHY's delays and negotiation were set up */
+    volatile UBYTE link_poll_due; /* poll task owes the PHY one look       */
     UBYTE   pre_saved;      /* the two below were read before this driver
                                changed anything                            */
     ULONG   pre_rgmii_oob;  /* EXT_RGMII_OOB_CTRL as the firmware left it   */
@@ -1577,7 +1576,7 @@ static BOOL genet_isr(NetdevNic *nic)
     return TRUE;
 }
 
-/* The bottom half, and the vertical blank's poll: under Disable(). */
+/* The interrupt bottom half and the task-context idle poll share this body. */
 static BOOL genet_intr_body(NetdevNic *nic);
 
 static BOOL genet_intr(NetdevNic *nic)
@@ -1603,7 +1602,10 @@ static BOOL genet_intr_body(NetdevNic *nic)
     mine = (BOOL)(stat != 0);
 
     if ((stat & (GE_IRQ_LINK_UP | GE_IRQ_LINK_DOWN)) != 0)
-        ge_link_poll(nic);
+    {
+        c->link_poll_due = 1;
+        ge_poll_wake(nic, c);
+    }
 
     /* Both rings are walked whether or not their bit was set: the vertical
        blank polls through here too, and a frame is a frame. */
@@ -1641,7 +1643,8 @@ static BOOL genet_tick(NetdevNic *nic)
     if (++c->blanks >= 50)
     {
         c->blanks = 0;
-        ge_link_poll(nic);
+        c->link_poll_due = 1;
+        ge_poll_wake(nic, c);
     }
 
     /* Frames held for a reader that was behind (ge_rxintr): the blank is the
@@ -1698,10 +1701,33 @@ static VOID ge_poll_task(VOID)
     for (;;)
     {
         ULONG last;
+        BOOL  link_due;
 
         c->poll_asleep = 1;
         (VOID)Wait(c->poll_sig);
+        c->poll_asleep = 0;
         nic->core_stat[GE_ST_POLL_WAKES]++;
+
+        Disable();
+        link_due = (BOOL)(c->link_poll_due != 0);
+        c->link_poll_due = 0;
+        Enable();
+        if (link_due)
+        {
+            /* Stop/offline is task context too.  Keep it from tearing the
+               MAC down halfway through an MDIO transaction, without masking
+               hardware interrupts for the transaction's millisecond wait. */
+            Forbid();
+            if (nic->running)
+                ge_link_poll(nic);
+            Permit();
+        }
+
+        /* Emulators need no idle RX poll clock, but the same task is still
+           the safe home for PHY work requested by the vertical blank. */
+        if (c->clock == NULL)
+            continue;
+
         last = ge_clock(c);
         while (nic->running && !nic->rx_behind && nic->anxd_openers != 0)
         {
@@ -1727,15 +1753,16 @@ static VOID ge_poll_task(VOID)
    or from the service pass under Disable(); Signal() is allowed from both. */
 static __inline__ VOID ge_poll_wake(NetdevNic *nic, GenetCore *c)
 {
-    if (c->poll_asleep && nic->anxd_openers != 0)
+    if (c->poll_task != NULL && c->poll_sig != 0 &&
+        (c->link_poll_due || (c->poll_asleep && nic->anxd_openers != 0)))
     {
         c->poll_asleep = 0;
         Signal(c->poll_task, c->poll_sig);
     }
 }
 
-/* At attach, from the opener's task.  Without the clock there is no poller,
-   and the unit is served as it was. */
+/* At attach, from the opener's task.  The task always exists for deferred
+   PHY work; a device-tree clock additionally enables idle receive polling. */
 static VOID ge_poll_start(NetdevNic *nic)
 {
     GenetCore   *c = GE(nic);
@@ -1745,9 +1772,8 @@ static VOID ge_poll_start(NetdevNic *nic)
     /* The SoC's system timer: 1 MHz, CLO at +4.  Emu68's tree has no node
        for it (netdev_dtree.h), so its bus address goes through /soc's ranges;
        the A1200's tree puts it at 0xF2003000. */
-    if (!netdev_dtree_bus_addr("/soc", 0x7e003000UL, &st))
-        return;
-    c->clock = (volatile ULONG *)(st + 4);
+    if (netdev_dtree_bus_addr("/soc", 0x7e003000UL, &st))
+        c->clock = (volatile ULONG *)(st + 4);
 
     c->poll_mem = AllocMem(sizeof(struct Task) + GE_POLL_STACK,
                            MEMF_PUBLIC | MEMF_CLEAR);
@@ -1926,6 +1952,7 @@ static LONG genet_attach(NetdevNic *nic)
     }
 
     nic->txb_cnt       = GE_TX_RING;
+    nic->init_task_context = 1;
     nic->tx_at         = genet_tx_at;
     nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
     nic->tx_csum_supported  = (UBYTE)(ANXD_S2_TXF_TCP | ANXD_S2_TXF_UDP);

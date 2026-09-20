@@ -143,7 +143,8 @@ struct NetdevNic
      * server and serviced later: it acknowledges and masks the source and
      * answers whether the interrupt was this board's, nothing more.  The
      * shell then raises a software interrupt that runs ops->intr under
-     * Disable(), the same way the vertical blank does.  NULL for a core whose
+     * Disable(), the same way the vertical blank does.  A core may also ask
+     * its own task to run ops->intr with nu_InIsr held.  NULL for a core whose
      * intr() is the server, which is every core on a Zorro or PCMCIA bus.
      */
     BOOL              (*isr)(NetdevNic *nic);
@@ -204,6 +205,13 @@ struct NetdevNic
      * the list) leaves this clear.
      */
     UBYTE               tx_task_lock;
+    /*
+     * Initialising this core may wait or call task-context-only code.  Most
+     * classic chips need init serialised with their interrupt server under
+     * Disable(); a bus-master whose source stays masked until init finishes
+     * can ask the shell to call it in the opener's task instead.
+     */
+    UBYTE               init_task_context;
     /* Set by netdev_tx_direct() for the whole of a task-level build and
        issue under tx_task_lock; the core's interrupt-side reclaim and the
        blank's pump stand off while it is set. */
