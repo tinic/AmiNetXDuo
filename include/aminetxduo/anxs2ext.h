@@ -48,7 +48,7 @@ typedef UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
  * in-process driver interface, not a wire format.
  */
 #define ANXD_S2_EXTENSION       (0x80000000UL | 0x00414e58UL) /* TAG_USER|'ANX' */
-#define ANXD_S2_ABI_VERSION     2u
+#define ANXD_S2_ABI_VERSION     3u
 
 #define ANXD_S2F_RX_DIRECT      (1UL << 0)
 #define ANXD_S2F_RX_LINK_HDR    (1UL << 1)
@@ -131,7 +131,8 @@ typedef struct AnxdS2Extension
  *
  * The request.  io_Command ANXD_CMD_RX_BATCH, ios2_PacketType the type it
  * accepts, ios2_Data a pointer to an AnxdS2RxBatch the opener owns, with
- * Count > 0 cookies and Filled 0.  Always queued (IOF_QUICK is cleared as
+ * Version ANXD_S2_RX_BATCH_VERSION, Size covering Count cookies, Count > 0
+ * and Filled 0.  Always queued (IOF_QUICK is cleared as
  * for CMD_READ), so it is answered on mn_ReplyPort like any read.  Each
  * cookie is what the opener's RxDirect/RxFilled pair receive as ios2_data
  * for that slot, exactly as they receive a CMD_READ's ios2_Data today; the
@@ -187,10 +188,14 @@ typedef struct AnxdS2Extension
 
 typedef struct AnxdS2RxBatch
 {
+    UWORD   Version;        /* ANXD_S2_RX_BATCH_VERSION                  */
+    UWORD   Size;           /* bytes allocated, including Cookie[]      */
     UWORD   Count;          /* cookies the opener supplies              */
     UWORD   Filled;         /* written by the driver: frames delivered  */
     APTR    Cookie[];       /* Count of them; RxDirect/RxFilled cookies */
 } AnxdS2RxBatch;
+
+#define ANXD_S2_RX_BATCH_VERSION  1u
 
 /* The size of a batch record holding n cookies. */
 #define ANXD_S2_RX_BATCH_SIZE(n) \

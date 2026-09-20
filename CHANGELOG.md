@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The private receive-batch record now carries its own version and allocated
+  size.  Drivers reject records whose cookie count exceeds that storage,
+  instead of trusting a bounded count that could still walk past the caller's
+  allocation.
+
 - `anxgenet.device` cleans the freshly allocated receive ring before giving
   it to DMA, so dirty `MEMF_CLEAR` cache lines cannot be pushed over the
   first frames when the ring is invalidated. Its transmit checksum path now

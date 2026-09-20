@@ -950,8 +950,10 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch
     if (n == 0)
         return 0;
 
-    rec->Count  = n;
-    rec->Filled = 0;
+    rec->Version = ANXD_S2_RX_BATCH_VERSION;
+    rec->Size    = (UWORD)ANXD_S2_RX_BATCH_SIZE(bt->count);
+    rec->Count   = n;
+    rec->Filled  = 0;
     for (i = 0; i < n; i++)
         ami_sana2_rx_mark(rx, (AmiRxSlot *)rec->Cookie[i], TRUE);
 

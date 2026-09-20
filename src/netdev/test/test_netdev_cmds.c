@@ -1673,6 +1673,8 @@ static void x_rx_batch(void)
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = TRUE;
     memset(&rec, 0, sizeof(rec));
+    rec.b.Version   = ANXD_S2_RX_BATCH_VERSION;
+    rec.b.Size      = (UWORD)sizeof(rec.bytes);
     rec.b.Count     = 2;
     rec.b.Filled    = 7;                 /* whatever the opener left there */
     rec.b.Cookie[0] = cookie_a;
@@ -1770,6 +1772,36 @@ static void x_rx_batch(void)
                (unsigned long)(UBYTE)last_err,
                (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
     rec.b.Count = 2;
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    rec.b.Size         = (UWORD)(ANXD_S2_RX_BATCH_SIZE(2) - 1);
+    netdev_perform(&opener, &io);
+    expect_u32("a short batch allocation is a bad argument",
+               (unsigned long)(UBYTE)last_err,
+               (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
+    rec.b.Size = (UWORD)sizeof(rec.bytes);
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    rec.b.Version      = 0;
+    netdev_perform(&opener, &io);
+    expect_u32("an unknown batch version is a bad argument",
+               (unsigned long)(UBYTE)last_err,
+               (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
+    rec.b.Version = ANXD_S2_RX_BATCH_VERSION;
 
     reset();
     unit.nu_Nic.rx_batches = 1;
