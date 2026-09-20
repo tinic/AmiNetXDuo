@@ -9,7 +9,6 @@
 
 #include <dos/dostags.h>
 #include <dos/dosasl.h>
-#include <exec/execbase.h>          /* task lists, for runner lifetime      */
 #include <exec/io.h>                /* struct IOStdReq, for ACTION_DISK_INFO */
 #include <devices/conunit.h>        /* struct ConUnit, so the size is readable */
 
@@ -123,6 +122,7 @@ typedef struct TermRunner
     LONG          rn_Rc;
     LONG          rn_Err;           /* IoErr(), when no shell would start   */
     volatile LONG rn_Done;
+    char          rn_Name[40];       /* stable, unique key for FindTask()   */
 } TermRunner;
 
 static TermRunner *term_runner;     /* the current session's record        */
@@ -140,6 +140,7 @@ static UBYTE      term_abandoned;
 static ULONG      term_stop_at;     /* fiftieths, when stopping began       */
 
 static LONG       term_err;
+static ULONG      term_runner_serial;
 
 static struct Task *term_shell_task;
 
@@ -1090,36 +1091,29 @@ static VOID term_runner_main(VOID)
     Signal(parent, SIGBREAKF_CTRL_E);
 }
 
-/* Whether Exec can still schedule this runner.  Must be called under Disable(),
-   not Forbid(): interrupts move tasks between the scheduler lists.  The pointer
-   is compared only, never dereferenced. */
-static BOOL term_task_on_list(struct List *list, struct Task *task)
+static VOID term_runner_make_name(TermRunner *r)
 {
-    struct Node *node;
+    static const char prefix[] = "AmiNetXDuo httpd terminal ";
+    static const char hex[] = "0123456789abcdef";
+    ULONG serial = ++term_runner_serial;
+    UWORD i;
 
-    for (node = list->lh_Head; node->ln_Succ != NULL; node = node->ln_Succ)
-    {
-        if ((struct Task *)node == task)
-            return TRUE;
-    }
-
-    return FALSE;
+    for (i = 0; i < sizeof(prefix) - 1; i++)
+        r->rn_Name[i] = prefix[i];
+    for (i = 0; i < 8; i++)
+        r->rn_Name[sizeof(prefix) - 1 + i] =
+            hex[(serial >> (28u - i * 4u)) & 15u];
+    r->rn_Name[sizeof(prefix) - 1 + 8] = '\0';
 }
 
-static BOOL term_task_alive(struct Task *task)
+/* FindTask() is Exec's public, internally synchronised scheduler lookup.  A
+   unique name lets us compare the returned pointer without walking ExecBase's
+   private TaskReady/TaskWait lists or dereferencing a task after it exits. */
+static BOOL term_runner_alive(const TermRunner *r)
 {
-    BOOL alive;
-
-    if (task == NULL)
+    if (r == NULL || r->rn_Task == NULL)
         return FALSE;
-
-    Disable();
-    alive = (SysBase->ThisTask == task ||
-             term_task_on_list(&SysBase->TaskReady, task) ||
-             term_task_on_list(&SysBase->TaskWait, task));
-    Enable();
-
-    return alive;
+    return (BOOL)(FindTask((CONST_STRPTR)r->rn_Name) == r->rn_Task);
 }
 
 static VOID term_runners_collect(VOID)
@@ -1131,7 +1125,7 @@ static VOID term_runners_collect(VOID)
         TermRunner *r = *link;
 
         if (r != term_runner && r->rn_Done != 0 &&
-            !term_task_alive(r->rn_Task))
+            !term_runner_alive(r))
         {
             *link = r->rn_Next;
             ami_free(r);
@@ -1151,7 +1145,7 @@ static ULONG term_runners_live(VOID)
     ULONG             n = 0;
 
     for (r = term_runners; r != NULL; r = r->rn_Next)
-        if (r->rn_Done == 0 || term_task_alive(r->rn_Task))
+        if (r->rn_Done == 0 || term_runner_alive(r))
             n++;
 
     return n;
@@ -1163,7 +1157,7 @@ static BOOL term_runners_done(VOID)
 
     for (r = term_runners; r != NULL; r = r->rn_Next)
     {
-        if (r->rn_Done == 0 || term_task_alive(r->rn_Task))
+        if (r->rn_Done == 0 || term_runner_alive(r))
             return FALSE;
     }
 
@@ -1356,9 +1350,10 @@ BOOL http_term_start(VOID)
     term_runner->rn_Rc     = 0;
     term_runner->rn_Err    = 0;
     term_runner->rn_Done   = 0;
+    term_runner_make_name(term_runner);
 
     tags[0].ti_Tag = NP_Entry;     tags[0].ti_Data = (ULONG)term_runner_main;
-    tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)"AmiNetXDuo httpd terminal";
+    tags[1].ti_Tag = NP_Name;      tags[1].ti_Data = (ULONG)term_runner->rn_Name;
     tags[2].ti_Tag = NP_StackSize; tags[2].ti_Data = TERM_RUNNER_STACK;
     tags[3].ti_Tag = NP_Cli;       tags[3].ti_Data = TRUE;
     tags[4].ti_Tag = TAG_END;      tags[4].ti_Data = 0;

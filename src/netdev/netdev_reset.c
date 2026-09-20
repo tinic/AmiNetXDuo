@@ -9,8 +9,9 @@
  * hooks stop every such unit's DMA before the reset goes ahead:
  *
  *   - ColdReboot(), which is what a program (this stack's own SyncReboot, the
- *     Emu68 reset guard's ancestor) calls: patched with SetFunction(), the
- *     way a reboot hook has to be on an exec without AddResetCallback().
+ *     Emu68 reset guard's ancestor) calls: patched with SetFunction().  The
+ *     public classic Exec V47 table still has no AddResetCallback(); the API
+ *     with that name is from OS4/AROS and cannot be called as a classic LVO.
  *   - the keyboard, Ctrl-Amiga-Amiga: keyboard.device's reset handler chain,
  *     which is the documented one.
  *
