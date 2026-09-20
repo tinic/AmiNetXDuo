@@ -372,7 +372,15 @@ static ULONG end_secs(VOID)
 
 #define END_MAX_CONNS       6
 #define END_MAX_HOGS        10
-#define END_MAX_WORKERS     (2 * END_MAX_CONNS + 2 * END_MAX_HOGS + 2)
+/* Loopback mode has one long-lived responder and, when churn is enabled,
+   one short-lived responder per connection.  The old 2 * END_MAX_CONNS
+   bound described only the first pair.  More importantly, the churn client
+   used to dial that same single-threaded responder while keeping its primary
+   connection open: the responder could not accept the second connection
+   until the first closed, and the client would not close the first until the
+   second transaction returned.  Every pair therefore deadlocked at exactly
+   es_Churn transactions. */
+#define END_MAX_WORKERS     (3 * END_MAX_CONNS + 2 * END_MAX_HOGS + 2)
 
 #define ROLE_DRIVER     0
 #define ROLE_RESPONDER  1
@@ -942,7 +950,7 @@ static VOID end_responder_body(EndWorker *w)
     (VOID)e_close(w->w_Base, ls);
 }
 
-static LONG end_dial(EndWorker *w)
+static LONG end_dial_to(EndWorker *w, UWORD conn, UWORD report)
 {
     EndAddr sa;
     LONG    s = end_new_socket(w);
@@ -953,7 +961,7 @@ static LONG end_dial(EndWorker *w)
     end_zero(&sa, sizeof(sa));
     sa.sin_len    = (UBYTE)sizeof(sa);
     sa.sin_family = E_AF_INET;
-    sa.sin_port   = (UWORD)(ES->es_Port + w->w_Conn);
+    sa.sin_port   = (UWORD)(ES->es_Port + conn);
     sa.sin_addr   = ES->es_Wire ? ES->es_Peer : 0x7F000001UL;
 
     w->w_CallStart    = end_ticks() | 1UL;
@@ -963,9 +971,12 @@ static LONG end_dial(EndWorker *w)
     if (e_connect(w->w_Base, s, &sa) < 0)
     {
         w->w_CallStart = 0UL;
-        w->w_Errors    = w->w_Errors + 1UL;
-        end_event(w, "connect", -1, e_errno(w->w_Base), 1,
-                  (ULONG)sa.sin_port);
+        if (report)
+        {
+            w->w_Errors = w->w_Errors + 1UL;
+            end_event(w, "connect", -1, e_errno(w->w_Base), 1,
+                      (ULONG)sa.sin_port);
+        }
         (VOID)e_close(w->w_Base, s);
         return -1;
     }
@@ -974,6 +985,11 @@ static LONG end_dial(EndWorker *w)
     w->w_Conns     = w->w_Conns + 1UL;
 
     return s;
+}
+
+static LONG end_dial(EndWorker *w)
+{
+    return end_dial_to(w, w->w_Conn, 1);
 }
 
 static LONG end_transact(EndWorker *w, LONG s, ULONG *out_off, UWORD blocking)
@@ -1108,7 +1124,15 @@ static VOID end_driver_body(EndWorker *w)
 
             if (ES->es_Churn != 0UL && (since % ES->es_Churn) == 0UL)
             {
-                LONG t = end_dial(w);
+                /* A loopback responder serves one accepted socket at a time.
+                   Dial the companion responder for the short-lived churn
+                   transaction; asking the primary responder to accept this
+                   while its primary socket remains open is a self-deadlock.
+                   A wire peer is independent and retains its original port. */
+                UWORD churn_conn = ES->es_Wire
+                                 ? w->w_Conn
+                                 : (UWORD)(ES->es_Conns + w->w_Conn);
+                LONG t = end_dial_to(w, churn_conn, 1);
 
                 if (t >= 0)
                 {
@@ -1123,6 +1147,22 @@ static VOID end_driver_body(EndWorker *w)
 
         end_say_bye(w, s);
         (VOID)e_close(w->w_Base, s);
+
+        /* The companion may be asleep in accept(), where es_Stop alone
+           cannot wake it.  Give it one final connection and BYE so it can
+           return from accept(), finish end_serve(), observe es_Stop and join
+           normally. */
+        if (ES->es_Stop && !ES->es_Wire && ES->es_Churn != 0UL)
+        {
+            LONG t = end_dial_to(w,
+                                 (UWORD)(ES->es_Conns + w->w_Conn), 0);
+
+            if (t >= 0)
+            {
+                end_say_bye(w, t);
+                (VOID)e_close(w->w_Base, t);
+            }
+        }
     }
 }
 
@@ -2249,6 +2289,22 @@ int main(void)
                 d->w_Conn = (UWORD)i;
                 d->w_Seed = ES->es_Seed + 0x2545F491UL + i * 104729UL;
                 end_worker_buf(d, ES->es_MaxIo);
+            }
+        }
+
+        /* The churn transaction is concurrent with the driver's persistent
+           connection, so it needs a responder of its own in loopback mode.
+           Reuse ROLE_RESPONDER: only the port index differs. */
+        if (!ES->es_Wire && ES->es_Churn != 0UL)
+        {
+            for (i = 0; i < (ULONG)ES->es_Conns; i++)
+            {
+                EndWorker *r = &ES->es_W[n++];
+
+                r->w_Role = ROLE_RESPONDER;
+                r->w_Conn = (UWORD)(ES->es_Conns + i);
+                r->w_Seed = ES->es_Seed + 0x6D2B79F5UL + i * 65537UL;
+                end_worker_buf(r, ES->es_MaxIo);
             }
         }
     }
