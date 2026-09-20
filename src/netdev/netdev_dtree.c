@@ -582,12 +582,26 @@ static ULONG gic_rem(ULONG irq, struct Interrupt *is)
     return r;
 }
 #else
-static ULONG gic_add(ULONG irq, struct Interrupt *is) { (VOID)irq; (VOID)is; return 0; }
-static ULONG gic_rem(ULONG irq, struct Interrupt *is) { (VOID)irq; (VOID)is; return 0; }
+LONG netdev_dtree_test_gic_add_result;
+LONG netdev_dtree_test_gic_rem_result;
+static ULONG gic_add(ULONG irq, struct Interrupt *is)
+{
+    (VOID)irq;
+    (VOID)is;
+    return (ULONG)netdev_dtree_test_gic_add_result;
+}
+static ULONG gic_rem(ULONG irq, struct Interrupt *is)
+{
+    (VOID)irq;
+    (VOID)is;
+    return (ULONG)netdev_dtree_test_gic_rem_result;
+}
 #endif
 
 BOOL netdev_dtree_int_add(ULONG irq, struct Interrupt *is)
 {
+    BOOL opened = FALSE;
+
     if (irq == 0)
         return FALSE;
 
@@ -596,23 +610,41 @@ BOOL netdev_dtree_int_add(ULONG irq, struct Interrupt *is)
         gic_base = OpenLibrary((CONST_STRPTR)"gic400.library", 0);
         if (gic_base == NULL)
             return FALSE;
+        opened = TRUE;
     }
 
-    gic_add(irq, is);
+    /* AddIntServerEx returns 0 on success and a negative GIC400_ERR_* on
+       failure.  Opening the library only proves the controller exists: the
+       line can still be invalid or already owned by another driver. */
+    if ((LONG)gic_add(irq, is) != 0)
+    {
+        if (opened && gic_users == 0)
+        {
+            CloseLibrary(gic_base);
+            gic_base = NULL;
+        }
+        return FALSE;
+    }
+
     gic_users++;
     return TRUE;
 }
 
-VOID netdev_dtree_int_rem(ULONG irq, struct Interrupt *is)
+BOOL netdev_dtree_int_rem(ULONG irq, struct Interrupt *is)
 {
     if (gic_base == NULL || irq == 0)
-        return;
+        return FALSE;
 
-    gic_rem(irq, is);
+    /* A failed removal must not unload the library or let the device containing
+       `is` expunge.  The caller keeps both resident and may retry later. */
+    if ((LONG)gic_rem(irq, is) != 0)
+        return FALSE;
 
     if (gic_users != 0 && --gic_users == 0)
     {
         CloseLibrary(gic_base);
         gic_base = NULL;
     }
+
+    return TRUE;
 }

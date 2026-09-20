@@ -65,6 +65,6 @@ BOOL netdev_dtree_ram_covers(ULONG addr, ULONG len);
  * gets.
  */
 BOOL netdev_dtree_int_add(ULONG irq, struct Interrupt *is);
-VOID netdev_dtree_int_rem(ULONG irq, struct Interrupt *is);
+BOOL netdev_dtree_int_rem(ULONG irq, struct Interrupt *is);
 
 #endif /* AMINETXDUO_NETDEV_DTREE_H */

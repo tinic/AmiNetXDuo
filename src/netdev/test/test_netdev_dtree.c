@@ -207,6 +207,11 @@ const char  *dt_keyname(APTR key)    { return ((DtNode *)key)->name; }
 
 /* Exec, as much of it as netdev_dtree.c reaches. */
 static int resource_present = 1;
+static int library_present;
+static int library_opens;
+static int library_closes;
+extern LONG netdev_dtree_test_gic_add_result;
+extern LONG netdev_dtree_test_gic_rem_result;
 APTR OpenResource(const UBYTE *name)
 {
     (void)name;
@@ -214,10 +219,16 @@ APTR OpenResource(const UBYTE *name)
 }
 struct Library *OpenLibrary(const UBYTE *name, ULONG ver)
 {
-    (void)name; (void)ver;
-    return NULL;
+    (void)name;
+    (void)ver;
+    library_opens++;
+    return library_present ? (struct Library *)(APTR)&root : NULL;
 }
-VOID CloseLibrary(struct Library *lib) { (void)lib; }
+VOID CloseLibrary(struct Library *lib)
+{
+    (void)lib;
+    library_closes++;
+}
 
 /* ---------------------------------------------------------------- tests */
 
@@ -238,6 +249,8 @@ static void expect_ulong(const char *what, ULONG got, ULONG want)
 int main(void)
 {
     NetdevDtInfo dt;
+    struct Interrupt intr_a = { 0 };
+    struct Interrupt intr_b = { 0 };
 
     build();
 
@@ -278,6 +291,44 @@ int main(void)
                      "raspberrypi,4-model-b"), 0);
     expect_ulong("no resource alias", netdev_dtree_alias_present("mmc"), 0);
     expect_ulong("no resource", netdev_dtree_find("brcm,bcm2711-genet-v5", &dt), 0);
+
+    /* Opening gic400.library is not registration.  AddIntServerEx can still
+       refuse an invalid or already-owned line, and the driver must then leave
+       the MAC source masked and use its polling fallback. */
+    library_present = 0;
+    expect_ulong("GIC absent is refused",
+                 netdev_dtree_int_add(189, &intr_a), 0);
+
+    library_present = 1;
+    netdev_dtree_test_gic_add_result = -5;
+    expect_ulong("GIC registration refusal is returned",
+                 netdev_dtree_int_add(189, &intr_a), 0);
+    expect_ulong("failed first registration releases library",
+                 (ULONG)library_closes, 1);
+
+    netdev_dtree_test_gic_add_result = 0;
+    expect_ulong("GIC registration succeeds",
+                 netdev_dtree_int_add(189, &intr_a), 1);
+    expect_ulong("a second GIC registration succeeds",
+                 netdev_dtree_int_add(190, &intr_b), 1);
+    expect_ulong("shared library opened once for successful users",
+                 (ULONG)library_opens, 3);
+
+    netdev_dtree_test_gic_rem_result = -6;
+    expect_ulong("failed GIC removal is returned",
+                 netdev_dtree_int_rem(189, &intr_a), 0);
+    expect_ulong("failed removal retains library",
+                 (ULONG)library_closes, 1);
+
+    netdev_dtree_test_gic_rem_result = 0;
+    expect_ulong("GIC removal succeeds",
+                 netdev_dtree_int_rem(189, &intr_a), 1);
+    expect_ulong("one remaining user retains library",
+                 (ULONG)library_closes, 1);
+    expect_ulong("last GIC removal succeeds",
+                 netdev_dtree_int_rem(190, &intr_b), 1);
+    expect_ulong("last successful removal closes library",
+                 (ULONG)library_closes, 2);
 
     if (failures != 0)
     {

@@ -416,8 +416,12 @@ struct NetdevNic
      * NETDEV_BUS_DTREE: what the device tree said about the board, filled by
      * the probe before attach() runs.  dt_irq is the interrupt controller's
      * own number (a GIC SPI is its number plus 32), 0 when the tree named none.
+     * dt_irq_live says AddIntServerEx accepted this unit's server.  They are
+     * separate so a failed first open can fall back to polling and a later
+     * open can retry registration without rediscovering the device tree.
      */
     ULONG               dt_irq;
+    UBYTE               dt_irq_live;
     UBYTE               dt_mac[NETDEV_ADDR_LEN] __attribute__((aligned(2)));
     UBYTE               dt_mac_ok;      /* the tree carried local-mac-address */
     UBYTE               dt_phy;         /* MDIO address of the PHY, from the tree */

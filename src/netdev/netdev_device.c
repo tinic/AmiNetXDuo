@@ -1466,25 +1466,33 @@ static VOID netdev_int_add(NetdevUnit *unit)
 #if NETDEV_HAS_DTREE
     if (unit->nu_Nic.card->bus == NETDEV_BUS_DTREE)
     {
-        (VOID)netdev_dtree_int_add(unit->nu_Nic.dt_irq, &unit->nu_Intr);
+        unit->nu_Nic.dt_irq_live = (UBYTE)
+            (netdev_dtree_int_add(unit->nu_Nic.dt_irq, &unit->nu_Intr)
+             ? 1 : 0);
         return;
     }
 #endif
     AddIntServer(netdev_int_line(unit), &unit->nu_Intr);
 }
 
-static VOID netdev_int_rem(NetdevUnit *unit)
+static BOOL netdev_int_rem(NetdevUnit *unit)
 {
     if (netdev_pcmcia_is_unit(unit))
-        return;
+        return TRUE;
 #if NETDEV_HAS_DTREE
     if (unit->nu_Nic.card->bus == NETDEV_BUS_DTREE)
     {
-        netdev_dtree_int_rem(unit->nu_Nic.dt_irq, &unit->nu_Intr);
-        return;
+        if (unit->nu_Nic.dt_irq_live)
+        {
+            if (!netdev_dtree_int_rem(unit->nu_Nic.dt_irq, &unit->nu_Intr))
+                return FALSE;
+            unit->nu_Nic.dt_irq_live = 0;
+        }
+        return TRUE;
     }
 #endif
     RemIntServer(netdev_int_line(unit), &unit->nu_Intr);
+    return TRUE;
 }
 
 /*
@@ -2458,9 +2466,14 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
             netdev_release_unit(hw);
             if (hw->nu_IntrAdded)
             {
-                netdev_int_rem(hw);
-                RemIntServer(INTB_VERTB, &hw->nu_Tick);
-                hw->nu_IntrAdded = 0;
+                /* If the GIC refuses removal, its vector still points into
+                   this device.  Keep the device and its unit resident rather
+                   than permit a later expunge to turn that into freed code. */
+                if (netdev_int_rem(hw))
+                {
+                    RemIntServer(INTB_VERTB, &hw->nu_Tick);
+                    hw->nu_IntrAdded = 0;
+                }
             }
         }
 
@@ -2492,6 +2505,23 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
         return (BPTR)0;
     }
 
+    /* Remove every external vector before dismantling any other lifetime
+       guard.  RemIntServerEx can report failure; in that case this device is
+       still an interrupt target and therefore cannot be unloaded safely. */
+    for (i = 0; i < d->nd_UnitCount; i++)
+    {
+        if (d->nd_Units[i].nu_IntrAdded)
+        {
+            if (!netdev_int_rem(&d->nd_Units[i]))
+            {
+                dev->dd_Library.lib_Flags |= LIBF_DELEXP;
+                return (BPTR)0;
+            }
+            RemIntServer(INTB_VERTB, &d->nd_Units[i].nu_Tick);
+            d->nd_Units[i].nu_IntrAdded = 0;
+        }
+    }
+
     /* The reboot hook comes out first, and if it cannot -- somebody patched
        the vector after us -- the device stays, hook and all, rather than
        leave a jump into freed memory in exec's table. */
@@ -2503,12 +2533,6 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
 
     for (i = 0; i < d->nd_UnitCount; i++)
     {
-        if (d->nd_Units[i].nu_IntrAdded)
-        {
-            netdev_int_rem(&d->nd_Units[i]);
-            RemIntServer(INTB_VERTB, &d->nd_Units[i].nu_Tick);
-            d->nd_Units[i].nu_IntrAdded = 0;
-        }
         Disable();
         if (!netdev_pcmcia_is_unit(&d->nd_Units[i]) ||
             d->nd_Units[i].nu_Nic.running)

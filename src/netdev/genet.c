@@ -916,7 +916,7 @@ static LONG genet_init(NetdevNic *nic)
        source stays masked and the vertical blank is the whole service. */
     ge_wr(nic, GENET_INTRL2_CPU_SET_MASK, 0xffffffffUL);
     ge_wr(nic, GENET_INTRL2_CPU_CLEAR, 0xffffffffUL);
-    if (nic->dt_irq != 0)
+    if (nic->dt_irq_live)
         ge_wr(nic, GENET_INTRL2_CPU_CLEAR_MASK, GE_IRQ_WANTED);
 
     c->irq_pending = 0;
