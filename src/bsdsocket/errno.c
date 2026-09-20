@@ -816,8 +816,10 @@ LONG bsd_SocketBaseTagList(register struct TagItem *tags __asm("a0"),
 
         if (tag == TAG_SKIP)
         {
-            item += 1 + (LONG)item->ti_Data;
-            index += 1 + (LONG)item->ti_Data;
+            LONG skip = 1 + (LONG)item->ti_Data;
+
+            item  += skip;
+            index += skip;
             continue;
         }
 

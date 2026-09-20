@@ -25,6 +25,8 @@ version at the top when it merges.
 
 - `CheckNetConfig` note for `METRIC=` names `PRIORITY=` as the keyword that
   orders interfaces; two dead `PRIORITY`/`PRI` rows left the inert table.
+- `SocketBaseTagList()` returns the right 1-based index for a failing tag
+  after a `TAG_SKIP`; the skip count was read from the item skipped to.
 
 - `anxzz9000.device`, a SANA-II driver for the MNT ZZ9000's Ethernet on the
   card's existing firmware protocol: the frame is copied once, from the
