@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `ANXD_CMD_RX_BATCH`: one IORequest carries a burst of received frames
+  (`AnxdS2RxBatch`, negotiated as `ANXD_S2F_RX_BATCH` on the versioned
+  extension record). The device answers it once per service pass, or when
+  full; the stack posts two batches per packet type instead of one CMD_READ
+  per frame, and falls back to CMD_READs on a driver that does not know it.
+  Exec's request contract only: no port or task internals touched.
+
 - GRO stream matching now lives in the stack's SANA-II receive layer. Every
   driver can coalesce verified contiguous IPv4 and IPv6 TCP segments; device
   checksum metadata only skips the verification walk. Drivers no longer keep

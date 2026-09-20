@@ -905,6 +905,58 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
    are in flight afterwards. */
+/*
+ * ANXD_CMD_RX_BATCH: one request for a run of slots.  Every slot of the
+ * batch that can be armed becomes a cookie; one without a packet is left
+ * out of this posting and is tried again when the batch comes back.  The
+ * slots are marked posted, the record's Filled cleared, and the request
+ * goes to the device once.  Answers the count of slots handed over, 0 when
+ * none could be, so the caller's "live" stays a slot count.
+ */
+#ifdef AMINETXDUO_SANA2_RX_HOST_TEST
+#define AMI_SANA2_BATCH_LINKAGE
+#else
+#define AMI_SANA2_BATCH_LINKAGE static
+#endif
+
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch *bt)
+{
+    AmiSana2If    *iface = rx->iface;
+    AnxdS2RxBatch *rec   = bt->rec;
+    UWORD          n     = 0;
+    UWORD          i;
+
+    if (bt->in_flight)
+        return bt->count;
+    if (rx->reader->stop || !iface->online)
+        return 0;
+
+    for (i = 0; i < bt->count; i++)
+    {
+        AmiRxSlot *slot = &rx->slot[bt->first + i];
+
+        if (ami_sana2_rx_post_slot(rx, slot))
+            rec->Cookie[n++] = slot;
+    }
+    if (n == 0)
+        return 0;
+
+    rec->Count  = n;
+    rec->Filled = 0;
+    for (i = 0; i < n; i++)
+        ami_sana2_rx_mark(rx, (AmiRxSlot *)rec->Cookie[i], TRUE);
+
+    bt->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    bt->req.ios2_Req.io_Flags   = 0;
+    bt->req.ios2_Req.io_Error   = 0;
+    bt->req.ios2_WireError      = 0;
+    bt->req.ios2_PacketType     = rx->packet_type;
+    bt->req.ios2_DataLength     = 0;
+    bt->in_flight               = TRUE;
+    BeginIO((struct IORequest *)&bt->req);
+    return n;
+}
+
 static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 {
     UWORD i;
@@ -989,6 +1041,13 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 #ifdef AMINETXDUO_RXPROBE
     rx->probe.sweep_run++;
 #endif
+
+    if (rx->use_batch)
+    {
+        for (i = 0; i < (UWORD)AMI_SANA2_RX_BATCHES; i++)
+            live += ami_sana2_rx_post_batch(rx, &rx->batch[i]);
+        return live;
+    }
 
     for (i = 0; i < rx->depth; i++)
     {
@@ -1535,6 +1594,77 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
  *
  * Errors and control frames count against it: they cost reader time too.
  */
+/*
+ * One ANXD_CMD_RX_BATCH reply.  Cookie[0..Filled) are frames, delivered in
+ * order through the same completion a CMD_READ takes (which in batch mode
+ * re-arms the slot without posting it); every slot of the batch is then
+ * ours again, and the next post sweep hands the batch back.  An error is
+ * read as for a CMD_READ, with one addition: a device that answers
+ * IOERR_NOCMD, S2ERR_NOT_SUPPORTED or S2ERR_BAD_ARGUMENT does not take
+ * batches, and the rings fall back to reads from the next sweep on.
+ */
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
+                                                     AmiRxBatch *bt)
+{
+    AmiSana2If    *iface  = rd->iface;
+    AmiSana2Rx    *rx     = bt->owner;
+    AnxdS2RxBatch *rec    = bt->rec;
+    UBYTE          raw    = bt->req.ios2_Req.io_Error;
+    UWORD          filled = rec->Filled;
+    UWORD          i;
+
+    bt->in_flight = FALSE;
+    if (filled > rec->Count)
+        filled = rec->Count;
+
+    for (i = 0; i < filled; i++)
+    {
+        AmiRxSlot *slot = (AmiRxSlot *)rec->Cookie[i];
+
+        ami_sana2_rx_mark(rx, slot, FALSE);
+        if (!rd->stop)
+            ami_sana2_rx_complete(rx, slot);
+    }
+    for (i = filled; i < rec->Count; i++)
+        ami_sana2_rx_mark(rx, (AmiRxSlot *)rec->Cookie[i], FALSE);
+
+    if (raw == 0 || rd->stop)
+        return (UWORD)(filled != 0 ? filled : 1);
+
+#ifdef AMINETXDUO_GRO
+    ami_sana2_gro_flush(rx);
+#endif
+    if ((LONG)(BYTE)raw == (LONG)IOERR_ABORTED)
+    {
+        /* Asked for here, so nothing to count. */
+    }
+    else if ((LONG)(BYTE)raw == (LONG)S2ERR_OUTOFSERVICE)
+    {
+        iface->online = FALSE;
+        if (iface->interface_ptr != NULL)
+            iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+        ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
+        AMI_WARN("sana2: %s went out of service. The link is marked down",
+                 iface->device);
+    }
+    else if ((LONG)(BYTE)raw == (LONG)IOERR_NOCMD ||
+             (LONG)(BYTE)raw == (LONG)S2ERR_NOT_SUPPORTED ||
+             (LONG)(BYTE)raw == (LONG)S2ERR_BAD_ARGUMENT)
+    {
+        UWORD r;
+
+        iface->rx_batch_ok = 0;
+        for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+            iface->rx[r].use_batch = 0;
+    }
+    else
+    {
+        iface->stats.rx_errors++;
+        iface->stats.rx_err_io++;
+    }
+    return (UWORD)(filled != 0 ? filled : 1);
+}
+
 static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 {
     AmiSana2If     *iface = rd->iface;
@@ -1667,6 +1797,16 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
          * negative Exec codes, which is what it is for.
          */
         UBYTE      raw  = slot->req.ios2_Req.io_Error;
+
+        /* A batch reply: its frames are complete whatever io_Error says,
+           so they are delivered first; the error then means what it means
+           for a read, and a device that does not take batches at all turns
+           the rings back to CMD_READs. */
+        if (slot->req.ios2_Req.io_Command == ANXD_CMD_RX_BATCH)
+        {
+            took += ami_sana2_rx_drain_batch(rd, (AmiRxBatch *)msg);
+            continue;
+        }
 
 #ifdef AMINETXDUO_RXPROBE
         if (rx->probe.live != 0)
@@ -1817,6 +1957,17 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
         {
             AmiRxSlot *slot = (AmiRxSlot *)msg;
 
+            if (slot->req.ios2_Req.io_Command == ANXD_CMD_RX_BATCH)
+            {
+                AmiRxBatch *bt = (AmiRxBatch *)msg;
+                UWORD       k;
+
+                bt->in_flight = FALSE;
+                for (k = 0; k < bt->rec->Count; k++)
+                    ami_sana2_rx_mark(bt->owner,
+                                      (AmiRxSlot *)bt->rec->Cookie[k], FALSE);
+                continue;
+            }
             ami_sana2_rx_mark(slot->owner, slot, FALSE);
 #ifdef AMINETXDUO_RXPROBE
             if (slot->owner->probe.live != 0)
@@ -1860,6 +2011,15 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
     {
         AmiSana2Rx *rx = &rd->iface->rx[r];
 
+        if (rx->use_batch)
+        {
+            for (i = 0; i < (UWORD)AMI_SANA2_RX_BATCHES; i++)
+            {
+                if (rx->batch[i].in_flight)
+                    AbortIO((struct IORequest *)&rx->batch[i].req);
+            }
+            continue;
+        }
         for (i = 0; i < rx->depth; i++)
         {
             if (rx->slot[i].posted)
@@ -1981,6 +2141,43 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         }
 
         ami_sana2_rx_mark_reset(rx);
+
+        /* ANXD_CMD_RX_BATCH: the ring's slots split over two batches, each
+           one request on this port.  A ring that cannot get its records
+           posts CMD_READs as before. */
+        rx->use_batch = 0;
+        if (iface->rx_batch_ok && rx->depth >= (UWORD)AMI_SANA2_RX_BATCHES)
+        {
+            UWORD per = (UWORD)(rx->depth / AMI_SANA2_RX_BATCHES);
+            UWORD b;
+
+            rx->use_batch = 1;
+            for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
+            {
+                AmiRxBatch *bt = &rx->batch[b];
+
+                bt->owner     = rx;
+                bt->first     = (UWORD)(b * per);
+                bt->count     = (b + 1 == AMI_SANA2_RX_BATCHES)
+                                    ? (UWORD)(rx->depth - bt->first) : per;
+                bt->in_flight = FALSE;
+                if (bt->rec == NULL)
+                    bt->rec = (AnxdS2RxBatch *)ami_alloc(
+                        (ULONG)ANXD_S2_RX_BATCH_SIZE(bt->count));
+                if (bt->rec == NULL)
+                {
+                    rx->use_batch = 0;
+                    break;
+                }
+                bt->req = iface->templ;
+                bt->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+                bt->req.ios2_Req.io_Message.mn_ReplyPort    = rd->port;
+                bt->req.ios2_Req.io_Message.mn_Length =
+                    (UWORD)sizeof(struct IOSana2Req);
+                bt->req.ios2_Req.io_Command = ANXD_CMD_RX_BATCH;
+                bt->req.ios2_Data           = bt->rec;
+            }
+        }
     }
 
     /* The poll request: the opened request's device, unit and cookie, this
@@ -2407,6 +2604,7 @@ static APTR ami_sana2_alloc_stack(ULONG size)
 VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
 {
     UWORD i;
+    UWORD b;
 
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
@@ -2417,6 +2615,14 @@ VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
             ami_free(rx->slot);
             rx->slot       = NULL;
             rx->slot_alloc = 0;
+        }
+        for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
+        {
+            if (rx->batch[b].rec != NULL)
+            {
+                ami_free(rx->batch[b].rec);
+                rx->batch[b].rec = NULL;
+            }
         }
     }
 }
@@ -2479,9 +2685,20 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
            reaped (ami_sana2_rx_teardown) or the restart was refused above. */
         if (rx->slot != NULL && rx->slot_alloc != rx->depth)
         {
+            UWORD b;
+
             ami_free(rx->slot);
             rx->slot       = NULL;
             rx->slot_alloc = 0;
+            /* The batch records are sized from the depth too. */
+            for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
+            {
+                if (rx->batch[b].rec != NULL)
+                {
+                    ami_free(rx->batch[b].rec);
+                    rx->batch[b].rec = NULL;
+                }
+            }
         }
         if (rx->slot == NULL)
         {

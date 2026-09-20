@@ -138,6 +138,13 @@ VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire)
         ReplyMsg(&io->ios2_Req.io_Message);
 }
 
+/* The shell calls the opener's S2_CopyToBuff through a register shim; the
+   host test's hook is a plain C function. */
+BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
+{
+    return ((BOOL (*)(APTR, APTR, ULONG))fn)(to, from, len);
+}
+
 /* --------------------------------------------------------------- fixture */
 
 static NetdevUnit unit;
@@ -476,8 +483,261 @@ static void test_broadcast_metadata(void)
     netdev_rx_claimed(&unit, token, 0, 0);
 }
 
+/* ---------------------------------------------------- ANXD_CMD_RX_BATCH -- */
+
+/* Each cookie is its own slot with its own buffer, the way the stack's
+   AmiRxSlot is; RxDirect returns the slot's payload area and RxFilled
+   records what it was told.  A copy hook fills a slot from a staged frame. */
+#define BATCH_SLOTS 4
+typedef struct BatchSlot
+{
+    UBYTE area[NETDEV_HDR_LEN + NETDEV_MTU];
+    ULONG filled_len;
+    ULONG filled_sum;
+    UBYTE filled_flags;
+    int   filled_calls;
+    int   armed;
+} BatchSlot;
+
+static BatchSlot batch_slot[BATCH_SLOTS];
+static union
+{
+    AnxdS2RxBatch b;
+    UBYTE         bytes[sizeof(AnxdS2RxBatch) + BATCH_SLOTS * sizeof(APTR)];
+} batch_rec;
+static struct IOSana2Req batch_req;
+static int batch_direct_calls;
+static int batch_copy_calls;
+
+static UBYTE *batch_rx_direct(APTR data, ULONG len)
+{
+    BatchSlot *sl = (BatchSlot *)data;
+
+    batch_direct_calls++;
+    if (!sl->armed || len > NETDEV_MTU)
+        return NULL;
+    return sl->area + NETDEV_HDR_LEN;
+}
+
+static VOID batch_rx_filled(APTR data, ULONG len, ULONG sum, UBYTE flags)
+{
+    BatchSlot *sl = (BatchSlot *)data;
+
+    sl->filled_calls++;
+    sl->filled_len   = len;
+    sl->filled_sum   = sum;
+    sl->filled_flags = flags;
+}
+
+static BOOL batch_copy_to(APTR to, APTR from, ULONG len)
+{
+    BatchSlot *sl = (BatchSlot *)to;
+
+    batch_copy_calls++;
+    if (!sl->armed)
+        return FALSE;
+    memcpy(sl->area + NETDEV_HDR_LEN, from, len);
+    return TRUE;
+}
+
+static void queue_batch(NetdevOpener *op, ULONG type, UWORD count)
+{
+    unsigned i;
+
+    memset(&batch_req, 0, sizeof(batch_req));
+    memset(&batch_rec, 0, sizeof(batch_rec));
+    memset(batch_slot, 0, sizeof(batch_slot));
+    for (i = 0; i < BATCH_SLOTS; i++)
+    {
+        batch_slot[i].armed = 1;
+        batch_rec.b.Cookie[i] = &batch_slot[i];
+    }
+    batch_rec.b.Count = count;
+    batch_req.ios2_Req.io_Command = ANXD_CMD_RX_BATCH;
+    batch_req.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    batch_req.ios2_BufferManagement = op;
+    batch_req.ios2_PacketType = type;
+    batch_req.ios2_Data = &batch_rec.b;
+    op->op_RxDirect  = (APTR)batch_rx_direct;
+    op->op_RxFilled  = (APTR)batch_rx_filled;
+    op->op_CopyTo    = (APTR)batch_copy_to;
+    op->op_RxLinkHdr = TRUE;
+    AddHead(&op->op_Reads, &batch_req.ios2_Req.io_Message.mn_Node);
+    netdev_note_read_type(op, type);   /* as netdev_queue_batch() does */
+    batch_direct_calls = batch_copy_calls = 0;
+}
+
+/* A pass of three frames into a batch of four: every frame goes to the next
+   cookie with its header in front, the request stays queued and unanswered
+   until the pass ends, and then it is answered exactly once. */
+static void test_batch_fills_in_order_and_replies_at_pass_end(void)
+{
+    UBYTE  hdr[NETDEV_HDR_LEN];
+    APTR   token = NULL;
+    UBYTE  wanted = 0xff;
+    UBYTE *dst;
+    unsigned i;
+
+    reset_fixture();
+    unit.nu_Openers = 1;
+    make_header(hdr, 0x0800);
+    queue_batch(&opener_a, 0x0800, BATCH_SLOTS);
+    opener_a.op_RxFlags = ANXD_S2_RXF_VERIFIED;
+
+    for (i = 0; i < 3; i++)
+    {
+        dst = netdev_rx_claim(&unit, hdr, 60 + i, &token, &wanted);
+        expect_ptr("batch: claim lands in the next cookie", dst,
+                   batch_slot[i].area + NETDEV_HDR_LEN);
+        expect_ptr("batch: the token is the batch request", token, &batch_req);
+        expect_u32("batch: wanted is the opener's flags", wanted,
+                   ANXD_S2_RXF_VERIFIED);
+        expect_mem("batch: link header in front of the payload",
+                   batch_slot[i].area, hdr, NETDEV_HDR_LEN);
+        netdev_rx_claimed(&unit, token, 0x1234 + i,
+                          ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
+        expect_u32("batch: RxFilled once for the slot",
+                   (unsigned long)batch_slot[i].filled_calls, 1);
+        expect_u32("batch: RxFilled got the payload length",
+                   batch_slot[i].filled_len, 60 + i - NETDEV_HDR_LEN);
+        expect_u32("batch: RxFilled got the sum", batch_slot[i].filled_sum,
+                   0x1234 + i);
+        expect_u32("batch: Filled counts", batch_rec.b.Filled, i + 1);
+        expect_u32("batch: no reply before the pass ends",
+                   (unsigned long)replies, 0);
+        expect_u32("batch: still queued", list_count(&opener_a.op_Reads), 1);
+    }
+    expect_u32("batch: one pending batch", unit.nu_BatchPending, 1);
+    expect_u32("batch: verified frames counted", unit.nu_Nic.rx_verified, 3);
+    expect_u32("batch: packets counted", unit.nu_Stats.PacketsReceived, 3);
+
+    netdev_batch_flush(&unit);
+    expect_u32("flush: one reply for the pass", (unsigned long)replies, 1);
+    expect_u32("flush: the batch left the queue",
+               list_count(&opener_a.op_Reads), 0);
+    expect_u32("flush: io_Error 0", (unsigned long)(UBYTE)batch_req.ios2_Req.io_Error, 0);
+    expect_u32("flush: Filled as delivered", batch_rec.b.Filled, 3);
+    expect_u32("flush: nothing pending", unit.nu_BatchPending, 0);
+
+    /* A second flush with nothing pending replies nothing. */
+    netdev_batch_flush(&unit);
+    expect_u32("flush: idempotent", (unsigned long)replies, 1);
+}
+
+/* A batch that fills up is answered at once, mid-pass. */
+static void test_batch_full_replies_immediately(void)
+{
+    UBYTE hdr[NETDEV_HDR_LEN];
+    APTR  token = NULL;
+    unsigned i;
+
+    reset_fixture();
+    unit.nu_Openers = 1;
+    make_header(hdr, 0x0800);
+    queue_batch(&opener_a, 0x0800, 2);
+
+    for (i = 0; i < 2; i++)
+    {
+        UBYTE *dst = netdev_rx_claim(&unit, hdr, 60, &token, NULL);
+        expect_ptr("full: claimed", dst, batch_slot[i].area + NETDEV_HDR_LEN);
+        netdev_rx_claimed(&unit, token, 0, ANXD_S2_RXF_SUMMED);
+    }
+    expect_u32("full: replied when Count was reached", (unsigned long)replies, 1);
+    expect_u32("full: left the queue", list_count(&opener_a.op_Reads), 0);
+    expect_u32("full: nothing pending", unit.nu_BatchPending, 0);
+
+    /* With no read left, a further frame of the type is "the reader is
+       behind" for a sole opener, as with CMD_READs. */
+    token = NULL;
+    expect_ptr("full: no destination without a read",
+               netdev_rx_claim(&unit, hdr, 60, &token, NULL), NULL);
+    expect_ptr("full: the core may hold the frame", token,
+               NETDEV_CLAIM_BEHIND);
+}
+
+/* A cookie whose slot has no buffer declines the claim and the frame falls to
+   the staging path, which fails the same way; the batch keeps its place. */
+static void test_batch_declines_without_a_buffer(void)
+{
+    UBYTE hdr[NETDEV_HDR_LEN];
+    APTR  token = NULL;
+
+    reset_fixture();
+    unit.nu_Openers = 1;
+    make_header(hdr, 0x0800);
+    queue_batch(&opener_a, 0x0800, BATCH_SLOTS);
+    batch_slot[0].armed = 0;
+
+    expect_ptr("unarmed: declined", netdev_rx_claim(&unit, hdr, 60, &token, NULL),
+               NULL);
+    expect_u32("unarmed: still queued", list_count(&opener_a.op_Reads), 1);
+    expect_u32("unarmed: Filled untouched", batch_rec.b.Filled, 0);
+    expect_u32("unarmed: staging fails too",
+               (unsigned long)netdev_batch_stage(&unit, &opener_a, &batch_req,
+                                                 hdr, 60),
+               (unsigned long)NETDEV_RX_FAILED);
+    expect_u32("unarmed: no reply", (unsigned long)replies, 0);
+}
+
+/* The staging copy: the frame lands in the next cookie through the copy
+   hook with its header in front, RxFilled reports it without SUMMED, and the
+   pass-end reply follows as for a direct fill. */
+static void test_batch_stage_copies_with_header(void)
+{
+    UBYTE frame[NETDEV_HDR_LEN + 46];
+    unsigned i;
+
+    reset_fixture();
+    unit.nu_Openers = 1;
+    make_header(frame, 0x0800);
+    for (i = 0; i < 46; i++)
+        frame[NETDEV_HDR_LEN + i] = (UBYTE)(0x40 + i);
+    queue_batch(&opener_a, 0x0800, BATCH_SLOTS);
+
+    expect_u32("stage: taken",
+               (unsigned long)netdev_batch_stage(&unit, &opener_a, &batch_req,
+                                                 frame, sizeof(frame)),
+               (unsigned long)NETDEV_RX_TAKEN);
+    expect_u32("stage: copy hook used", (unsigned long)batch_copy_calls, 1);
+    expect_mem("stage: header and payload in place", batch_slot[0].area, frame,
+               sizeof(frame));
+    expect_u32("stage: RxFilled reported the payload",
+               batch_slot[0].filled_len, 46);
+    expect_u32("stage: not SUMMED", (unsigned long)batch_slot[0].filled_flags, 0);
+    expect_u32("stage: Filled", batch_rec.b.Filled, 1);
+    expect_u32("stage: pending", unit.nu_BatchPending, 1);
+    netdev_batch_flush(&unit);
+    expect_u32("stage: one reply", (unsigned long)replies, 1);
+}
+
+/* Two openers reading the type: the batch is one taker, the CMD_READ another,
+   so the direct path declines for both, exactly as two CMD_READs would. */
+static void test_batch_counts_as_one_taker(void)
+{
+    UBYTE hdr[NETDEV_HDR_LEN];
+    APTR  token = NULL;
+
+    reset_fixture();
+    unit.nu_Openers = 2;
+    make_header(hdr, 0x0800);
+    queue_batch(&opener_a, 0x0800, BATCH_SLOTS);
+    queue_read(&opener_b, &read_b, 0x0800);
+
+    expect_ptr("two takers: declined", netdev_rx_claim(&unit, hdr, 60, &token, NULL),
+               NULL);
+    expect_ptr("two takers: no hold", token, NULL);
+    expect_u32("two takers: batch untouched", batch_rec.b.Filled, 0);
+    expect_u32("two takers: both still queued",
+               list_count(&opener_a.op_Reads) + list_count(&opener_b.op_Reads), 2);
+}
+
 int main(void)
 {
+    test_batch_fills_in_order_and_replies_at_pass_end();
+    test_batch_full_replies_immediately();
+    test_batch_declines_without_a_buffer();
+    test_batch_stage_copies_with_header();
+    test_batch_counts_as_one_taker();
     test_claim_complete();
     test_link_header();
     test_raw_request_restored();

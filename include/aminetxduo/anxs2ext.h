@@ -43,6 +43,7 @@ typedef UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
 #define ANXD_S2F_RX_POLL        (1UL << 5)
 #define ANXD_S2F_RX_CAPACITY    (1UL << 6)
 #define ANXD_S2F_TX_QUICK       (1UL << 7)
+#define ANXD_S2F_RX_BATCH       (1UL << 8)
 
 typedef struct AnxdS2Extension
 {
@@ -91,5 +92,61 @@ typedef struct AnxdS2Extension
  * a 13 KB ring was 42 overruns and 42 chip resets in ten seconds and
  * 2.8 Mbit/s. */
 #define ANXD_CMD_RX_CAPACITY    0x8192
+
+/* ANXD_CMD_RX_BATCH: many frames for one IORequest.
+ *
+ * What it is for.  A CMD_READ carries one frame, so at a gigabit every
+ * frame is a ReplyMsg() and a Signal() from the driver, then a GetMsg() and
+ * a BeginIO() from the reader: four Exec calls of list work per 1.5 KB, on
+ * the receive path, with the driver's own pass still masked around the
+ * first two.  This command makes the unit of I/O the driver's pass instead
+ * of the frame, with nothing but the ordinary Exec request contract: one
+ * queued IORequest, one ReplyMsg() when it is answered.
+ *
+ * The request.  io_Command ANXD_CMD_RX_BATCH, ios2_PacketType the type it
+ * accepts, ios2_Data a pointer to an AnxdS2RxBatch the opener owns, with
+ * Count > 0 cookies and Filled 0.  Always queued (IOF_QUICK is cleared as
+ * for CMD_READ), so it is answered on mn_ReplyPort like any read.  Each
+ * cookie is what the opener's RxDirect/RxFilled pair receive as ios2_data
+ * for that slot, exactly as they receive a CMD_READ's ios2_Data today; the
+ * opener therefore needs ANXD_S2F_RX_DIRECT and ANXD_S2F_RX_LINK_HDR
+ * accepted, because a batch has no per-frame ios2_SrcAddr/DstAddr/
+ * PacketType: the 14-byte link header written in front of each payload is
+ * the frame's whole identity.  The driver fills Cookie[0], Cookie[1], ...
+ * in arrival order, one RxDirect() then one RxFilled() per frame, and
+ * writes Filled.  A frame the direct path cannot take (a second opener's
+ * read of the same type, a core without a direct claim) is copied into
+ * the slot through the opener's S2_CopyToBuff instead, then reported by
+ * RxFilled() without ANXD_S2_RXF_SUMMED.  An opener with a filter hook, or
+ * a raw one, is refused (S2ERR_NOT_SUPPORTED): neither has a request to
+ * judge or fill.
+ *
+ * When it is answered.  The driver replies the request with io_Error 0 the
+ * moment Filled reaches Count, and otherwise at the end of the service pass
+ * (interrupt, poll or blank) that filled the first slot: no frame waits in
+ * a batch for a later pass, and a pass that took a burst of N frames costs
+ * one reply.  A batch with Filled 0 is not answered until a frame comes.
+ * AbortIO(), CMD_FLUSH and CloseDevice() answer it IOERR_ABORTED and the
+ * unit going offline S2ERR_OUTOFSERVICE, each with Filled as it stood:
+ * those frames are complete and delivered.
+ *
+ * Posting.  Two batches per type keep the driver fed while the reader is
+ * working through one; a batch counts as one posted read of its type for
+ * "who takes this type", so a second opener's CMD_READ of the same type
+ * still turns the direct path off for both, as it does today.  A driver
+ * that does not know the command answers IOERR_NOCMD; an opener that did
+ * not get ANXD_S2F_RX_BATCH accepted posts CMD_READs as before. */
+#define ANXD_CMD_RX_BATCH       0x8193
+
+typedef struct AnxdS2RxBatch
+{
+    UWORD   Count;          /* cookies the opener supplies              */
+    UWORD   Filled;         /* written by the driver: frames delivered  */
+    APTR    Cookie[];       /* Count of them; RxDirect/RxFilled cookies */
+} AnxdS2RxBatch;
+
+/* The size of a batch record holding n cookies. */
+#define ANXD_S2_RX_BATCH_SIZE(n) \
+    (sizeof(AnxdS2RxBatch) + (n) * sizeof(APTR))
 
 #endif /* AMINETXDUO_ANXS2EXT_H */

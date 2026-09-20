@@ -925,7 +925,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
                                 ANXD_S2F_RX_LINK_HDR |
                                 ANXD_S2F_RX_POLL |
                                 ANXD_S2F_RX_CAPACITY |
-                                ANXD_S2F_TX_QUICK;
+                                ANXD_S2F_TX_QUICK |
+                                ANXD_S2F_RX_BATCH;
     iface->extension.Accepted = 0;
     iface->extension.RxDirect = ami_sana2_rx_direct;
     iface->extension.RxFilled = ami_sana2_rx_filled;
@@ -1001,6 +1002,13 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
                     ? ANXD_S2_RXF_VERIFIED : 0);
     iface->rx_poll_ok =
         (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_POLL) != 0) ? 1 : 0);
+    /* Batches carry no per-frame request fields: the link header the device
+       writes in front of each payload is the frame's whole identity, so a
+       batch is only usable when that was accepted too (the device accepts
+       the two together, but both are checked here rather than trusted). */
+    iface->rx_batch_ok =
+        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_BATCH) != 0 &&
+                 iface->link_hdr_ok && !iface->raw_mode) ? 1 : 0);
     iface->hw_rx_bytes = 0;
     iface->tx_quick_ok =
         (UBYTE)(((iface->extension.Accepted & ANXD_S2F_TX_QUICK) != 0) ? 1 : 0);
@@ -1014,6 +1022,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         iface->link_hdr_ok = FALSE;
         iface->rx_flags_ok = 0;
         iface->rx_poll_ok  = 0;
+        iface->rx_batch_ok = 0;
         iface->tx_quick_ok = 0;
         iface->tx_csum_ok  = 0;
     }

@@ -47,7 +47,8 @@ VOID Forbid(VOID)  { }
 VOID Permit(VOID)  { }
 
 VOID SendIO(struct IORequest *req) { (VOID)req; }
-VOID BeginIO(struct IORequest *req) { (VOID)req; }
+static struct IORequest *h_last_begun;
+VOID BeginIO(struct IORequest *req) { h_last_begun = req; }
 LONG AbortIO(struct IORequest *req) { (VOID)req; return 0; }
 BYTE WaitIO(struct IORequest *req)
 {
@@ -1680,8 +1681,166 @@ static void test_a_burst_is_never_left_on_the_port(void)
             "the shipped rule takes the whole burst before it blocks");
 }
 
+/* ---------------------------------------------------- ANXD_CMD_RX_BATCH -- */
+
+/*
+ * The batch reader against a modelled device: one ring of four slots in two
+ * batches.  Posting a batch arms its slots, marks them posted and hands the
+ * device ONE request whose cookies are the slots; the device fills the first
+ * two the way anxnet.device does (RxDirect's destination, the link header in
+ * front, RxFilled's length) and answers; the drain delivers both frames,
+ * gives every slot back and re-arms nothing it cannot (the pool here is
+ * empty, so a delivered slot has no packet and the next posting leaves it
+ * out).  A device that refuses the command turns the ring back to reads.
+ */
+#define BT_SLOTS 4
+static UCHAR      bt_buf[BT_SLOTS][256];
+static NX_PACKET  bt_pkt[BT_SLOTS];
+static AmiRxSlot  bt_slot[BT_SLOTS];
+static union
+{
+    AnxdS2RxBatch b;
+    UBYTE         bytes[sizeof(AnxdS2RxBatch) + 2 * sizeof(APTR)];
+} bt_rec[AMI_SANA2_RX_BATCHES];
+
+static void bt_device_fills(AmiRxBatch *bt, UWORD frames, ULONG payload)
+{
+    UWORD i;
+
+    for (i = 0; i < frames; i++)
+    {
+        AmiRxSlot *sl  = (AmiRxSlot *)bt->rec->Cookie[i];
+        UCHAR     *eth = sl->dst - AMI_ETH_HEADER_SIZE;
+        ULONG      k;
+
+        for (k = 0; k < AMI_ETH_ADDR_SIZE; k++)
+        {
+            eth[k]                     = 0xFF;
+            eth[AMI_ETH_ADDR_SIZE + k] = (UCHAR)(0x10 + k);
+        }
+        eth[12] = 0x08;
+        eth[13] = 0x00;
+        for (k = 0; k < payload; k++)
+            sl->dst[k] = (UCHAR)(0x40 + k);
+        /* What ami_sana2_rx_filled() records for a direct fill. */
+        sl->copied      = payload;
+        sl->hdr_written = TRUE;
+#ifdef AMINETXDUO_RX_VERIFY
+        sl->summed  = FALSE;
+        sl->rxflags = 0;
+#endif
+    }
+    bt->rec->Filled = frames;
+}
+
+static void test_batch_post_and_drain(void)
+{
+    AmiSana2Reader rd;
+    AmiSana2Rx    *rx = &iface.rx[0];
+    UWORD          i, n, took;
+
+    fixture_init();
+    memset(&rd, 0, sizeof(rd));
+    memset(bt_slot, 0, sizeof(bt_slot));
+    memset(bt_pkt, 0, sizeof(bt_pkt));
+    memset(bt_rec, 0, sizeof(bt_rec));
+    iface.online      = TRUE;
+    iface.link_hdr_ok = TRUE;
+    iface.rx_batch_ok = 1;
+    iface.rx_dst_off  = AMI_ETH_HEADER_SIZE;    /* cooked: header then payload */
+    rd.iface          = &iface;
+    rx->iface         = &iface;
+    rx->reader        = &rd;
+    rx->packet_type   = 0x0800;
+    rx->depth         = BT_SLOTS;
+    rx->slot          = bt_slot;
+    rx->unposted      = BT_SLOTS;
+    rx->use_batch     = 1;
+    for (i = 0; i < BT_SLOTS; i++)
+    {
+        bt_pkt[i].nx_packet_data_start = bt_buf[i];
+        bt_pkt[i].nx_packet_data_end   = bt_buf[i] + sizeof(bt_buf[i]);
+        bt_slot[i].owner  = rx;
+        bt_slot[i].stats  = &iface.stats;
+        bt_slot[i].packet = &bt_pkt[i];
+    }
+    for (i = 0; i < AMI_SANA2_RX_BATCHES; i++)
+    {
+        AmiRxBatch *bt = &rx->batch[i];
+
+        bt->owner = rx;
+        bt->first = (UWORD)(i * 2);
+        bt->count = 2;
+        bt->rec   = &bt_rec[i].b;
+        bt->req.ios2_Req.io_Command = ANXD_CMD_RX_BATCH;
+        bt->req.ios2_Data           = bt->rec;
+    }
+
+    h_last_begun = NULL;
+    n = ami_sana2_rx_post_batch(rx, &rx->batch[0]);
+    h_check(n == 2, "batch post: both slots handed over");
+    h_check(h_last_begun == (struct IORequest *)&rx->batch[0].req,
+            "batch post: one BeginIO, the batch's own request");
+    h_check(bt_rec[0].b.Count == 2 && bt_rec[0].b.Filled == 0,
+            "batch post: Count is the armed slots, Filled cleared");
+    h_check(bt_rec[0].b.Cookie[0] == &bt_slot[0] &&
+            bt_rec[0].b.Cookie[1] == &bt_slot[1],
+            "batch post: the cookies are the slots, in order");
+    h_check(bt_slot[0].posted && bt_slot[1].posted && !bt_slot[2].posted,
+            "batch post: its slots are posted, the other batch's are not");
+    h_check(rx->unposted == 2, "batch post: the unposted count follows");
+    h_check(rx->batch[0].in_flight, "batch post: in flight");
+    h_check(bt_slot[0].dst == bt_buf[0] + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE,
+            "batch post: the slot was armed");
+    h_check(ami_sana2_rx_post_batch(rx, &rx->batch[0]) == 2,
+            "batch post: a batch in flight is not posted twice");
+
+    bt_device_fills(&rx->batch[0], 2, 46);
+    rx->batch[0].req.ios2_Req.io_Error = 0;
+    h_went = TO_NOWHERE;
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    took = ami_sana2_rx_drain_batch(&rd, &rx->batch[0]);
+#ifdef AMINETXDUO_GRO
+    ami_sana2_gro_flush(rx);
+#endif
+    tx_mutex_put(&ip.nx_ip_protection);
+    h_check(took == 2, "batch drain: two frames counted against the budget");
+    h_check(h_went == TO_IP, "batch drain: the frames went up as IP");
+    h_check(h_seen_length == 46,
+            "batch drain: the header the device wrote was stripped for IP");
+    h_check(!rx->batch[0].in_flight, "batch drain: the batch is ours again");
+    h_check(!bt_slot[0].posted && !bt_slot[1].posted && rx->unposted == 4,
+            "batch drain: every slot of the batch is unposted");
+    h_check(bt_slot[0].packet == NULL && bt_slot[1].packet == NULL,
+            "batch drain: the delivered packets belong to NetX Duo now");
+    h_check(bt_slot[2].packet == &bt_pkt[2],
+            "batch drain: the other batch's slots keep their packets");
+
+    /* The pool is empty here, so the two delivered slots cannot be re-armed:
+       the next posting of this batch carries no cookie and is not sent. */
+    h_last_begun = NULL;
+    h_check(ami_sana2_rx_post_batch(rx, &rx->batch[0]) == 0 &&
+            h_last_begun == NULL,
+            "batch post: nothing armed, nothing posted");
+
+    /* A device that does not take the command: the ring goes back to reads. */
+    h_check(ami_sana2_rx_post_batch(rx, &rx->batch[1]) == 2,
+            "batch post: the second batch posts");
+    rx->batch[1].rec->Filled = 0;
+    rx->batch[1].req.ios2_Req.io_Error = IOERR_NOCMD;
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    took = ami_sana2_rx_drain_batch(&rd, &rx->batch[1]);
+    tx_mutex_put(&ip.nx_ip_protection);
+    h_check(took == 1, "batch drain: an empty answer still counts one");
+    h_check(rx->use_batch == 0 && iface.rx_batch_ok == 0,
+            "batch drain: IOERR_NOCMD turns the rings back to CMD_READs");
+    h_check(!bt_slot[2].posted && !bt_slot[3].posted,
+            "batch drain: its slots are given back for the reads to use");
+}
+
 int main(void)
 {
+    test_batch_post_and_drain();
     test_demux();
     test_header_strip();
     test_multicast_is_counted();
