@@ -13,6 +13,7 @@
 #include "httpdate.h"
 #include "httpfs.h"
 #include "httpstr.h"
+#include "httpvol.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
 
@@ -973,113 +974,12 @@ static struct InfoData      *httpd_info;
    list while this server is waiting for a client to read. */
 static BOOL httpd_volume_at(UWORD wanted, char *out, ULONG outlen)
 {
-    struct DosList *dl;
-    UWORD           seen = 0;
-    BOOL            found = FALSE;
-
-    if (outlen == 0UL)
-        return FALSE;
-    out[0] = '\0';
-
-    dl = LockDosList(LDF_VOLUMES | LDF_READ);
-    if (dl == NULL)
-        return FALSE;
-
-    while ((dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
-    {
-        const UBYTE *bstr;
-        ULONG        len;
-        ULONG        i;
-
-        /* A remembered but unmounted volume has no handler.  Listing it can
-           only provoke an insert-volume requester when the client enters it. */
-        if (dl->dol_Task == NULL || dl->dol_Name == (BSTR)0)
-            continue;
-
-        if (seen++ != wanted)
-            continue;
-
-        bstr = (const UBYTE *)BADDR(dl->dol_Name);
-        len  = (ULONG)bstr[0];
-        if (len == 0UL || len + 1UL > outlen)
-            break;
-
-        for (i = 0; i < len; i++)
-            out[i] = (char)bstr[i + 1UL];
-        out[len] = '\0';
-        found = TRUE;
-        break;
-    }
-
-    UnLockDosList(LDF_VOLUMES | LDF_READ);
-    return found;
-}
-
-/*
- * NOINLINE, and it is the same stack decision as the in-place rewrite in
- * http_path_resolve_volumes().  This carries a 112-byte name buffer, and
- * httpd_resolve_path() reaches it on one branch and http_path_resolve() on
- * another.  Inlined, the buffer sits in httpd_resolve_path()'s frame for the
- * whole of the other call, so the two costs add rather than alternate.  A real
- * call confines it to the branch that uses it, and httpd's deepest path -- the
- * If: header's resolver ladder, measured by tools/check-stack-frames.sh --
- * keeps the room a 4096-byte Shell stack has to give it.
- */
-static __attribute__((noinline)) BOOL httpd_volume_mounted(const char *path)
-{
-    struct DosList *dl;
-    char            name[HTTP_NAME_MAX];
-    ULONG           n = 0;
-    BOOL            found = FALSE;
-
-    while (path[n] != '\0' && path[n] != ':')
-    {
-        if (n + 1UL >= sizeof(name))
-            return FALSE;
-        name[n] = path[n];
-        n++;
-    }
-    if (n == 0UL || path[n] != ':')
-        return FALSE;
-    name[n] = '\0';
-
-    dl = LockDosList(LDF_VOLUMES | LDF_READ);
-    if (dl == NULL)
-        return FALSE;
-
-    while ((dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
-    {
-        const UBYTE *bstr;
-
-        if (dl->dol_Task == NULL || dl->dol_Name == (BSTR)0)
-            continue;
-
-        bstr = (const UBYTE *)BADDR(dl->dol_Name);
-        if ((ULONG)bstr[0] == n &&
-            hs_nicmp((const char *)&bstr[1], name, n) == 0)
-        {
-            found = TRUE;
-            break;
-        }
-    }
-
-    UnLockDosList(LDF_VOLUMES | LDF_READ);
-    return found;
+    return http_vol_at(wanted, out, outlen);
 }
 
 static HttpPathResult httpd_resolve_path(const char *target, HttpPath *out)
 {
-    HttpPathResult why;
-
-    if (!httpd_volumes)
-        return http_path_resolve(httpd_root, target, out);
-
-    why = http_path_resolve_volumes(target, out);
-    if (why == HTTP_PATH_OK && out->segments > 0 &&
-        !httpd_volume_mounted(out->path))
-        return HTTP_PATH_NOT_VOLUME;
-
-    return why;
+    return http_vol_resolve(httpd_volumes, httpd_root, target, out);
 }
 
 /* The state machine speaks in server terms; this narrow adapter is the only

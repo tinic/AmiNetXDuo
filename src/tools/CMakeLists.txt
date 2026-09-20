@@ -404,10 +404,10 @@ endif()
 # on a host.  One decides which file a request reaches, the second whether it
 # may write to it, the third where one request ends and the next begins, the
 # fourth who may write to a name somebody else has locked.
-# httpfs.c is the AmigaDOS-facing WebDAV policy.  It is separate for the same
-# ownership reason even though its Lock/Examine calls make its tests guest-side:
-# it receives the server's shared scratch objects instead of owning hidden
-# process state.
+# httpfs.c and httpvol.c are the AmigaDOS-facing WebDAV policy.  They are
+# separate for the same ownership reason even though their DOS calls make their
+# tests guest-side: httpfs receives the server's shared scratch objects instead
+# of owning hidden process state, and httpvol never carries a DosList lock out.
 #
 # httpws.c and httpsha1.c are the WebSocket half, and they are split from each
 # other for the reason the four above are split from httpd.c: httpws.c has to
@@ -429,7 +429,7 @@ endif()
 # CyberGraphX, kept out of httpfb.c so that the chipset path has no library
 # call and no card-shaped branch in it.  It is where the readback routes are
 # timed, which is the measurement the whole RTG design turns on.
-aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c httpstr.c httppath.c httpif.c
+aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c httpstr.c httpvol.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
                                           httprtg.c httpzz.c
