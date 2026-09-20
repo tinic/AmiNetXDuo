@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 1.0.0-beta3
+
 - `AddNetInterface` no longer reports "no address from DHCP" when its wait
   runs out while the DHCP client is still asking; it says how long it
   waited, that the lease may still arrive, and how to wait longer. A GENET
