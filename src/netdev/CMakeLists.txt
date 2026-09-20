@@ -18,6 +18,7 @@ option(AMINETXDUO_NETDEV_LINK
 # it probes and which chip cores it links.
 set(NETDEV_CORE_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open
+    netdev_hooks.c      # m68k SANA-II callback register trampolines
     netdev_tags.c       # OpenDevice tag traversal
     netdev_extension.c  # versioned private negotiation
     netdev_unit.c       # unit/opener helpers, host-testable
@@ -35,6 +36,7 @@ set(NETDEV_CORE_SOURCES
     netdev_diag.c       # the probe record, published for CheckNetDevice
     netdev_mcaf.c       # the multicast hash, host-testable
     netdev_macgen.c     # the derived station address, host-testable
+    netdev_fingerprint.c # stable machine/card input to that address
     "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
     "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
 

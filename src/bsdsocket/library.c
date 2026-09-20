@@ -15,12 +15,11 @@
 #include "netmonitor.h"
 
 #include "aminetxduo/config.h"
+#include "aminetxduo/exec_port.h"
 #include "aminetxduo/version.h"
 #include "aminetxduo/events.h"
 
 #include "net68k.h"          /* n68k_cpu_select() */
-#include "tx_amiga.h"
-
 #include <stddef.h>
 
 #include <dos/dostags.h>

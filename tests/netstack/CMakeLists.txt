@@ -713,9 +713,15 @@ if(NOT CMAKE_CROSSCOMPILING)
     # already answered.
     set(NETSTACK_HOST_TU
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_caller.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_claim.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_lock.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_port.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_routes.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_client_pool.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool_runtime.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
         host/netstack_host_env.c)
 
     set(NETSTACK_HOST_INCLUDES
@@ -785,5 +791,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_config_routes PRIVATE ${NETSTACK_HOST_OPTIONS})
 
     add_test(NAME config_routes COMMAND test_config_routes)
+
+    # A live interface slot remains stable while sockets and BPF users carry a
+    # claim, and the counter must neither wrap nor underflow.
+    add_executable(test_interface_claim
+        host/test_claim_host.c ${NETSTACK_HOST_TU})
+
+    target_include_directories(test_interface_claim PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_interface_claim PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_interface_claim PRIVATE ${NETSTACK_HOST_OPTIONS})
+
+    add_test(NAME interface_claim COMMAND test_interface_claim)
 
 endif()

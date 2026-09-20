@@ -30,8 +30,6 @@
 #include <dos/dosextens.h>
 #include <libraries/configvars.h>
 #include <hardware/intbits.h>
-#include <utility/hooks.h>      /* S2_PacketFilter is a standard Hook */
-
 #include <proto/exec.h>
 #include <proto/expansion.h>
 #include <proto/dos.h>
@@ -627,59 +625,6 @@ static VOID nd_newlist(struct List *l)
     l->lh_TailPred = (struct Node *)&l->lh_Head;
 }
 
-
-/*
- * The buffer-management hooks are m68k register-convention (a0 = to, a1 = from,
- * d0 = len).  A `register ... __asm()` function-pointer typedef miscompiles
- * here: GCC loads the pointer into a0, destroying the first argument.
- */
-BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
-{
-    register APTR  _a2 __asm("a2") = fn;
-    register APTR  _a0 __asm("a0") = to;
-    register APTR  _a1 __asm("a1") = from;
-    register ULONG _d0 __asm("d0") = len;
-    register LONG  _d1 __asm("d1");
-    register LONG  res __asm("d0");
-
-    if (fn == NULL)
-        return FALSE;
-
-    __asm __volatile ("jsr a2@"
-                      : "=r" (res), "=r" (_a0), "=r" (_a1), "=r" (_d1)
-                      : "r" (_a2), "0" (_d0), "1" (_a0), "2" (_a1)
-                      : "cc", "memory");
-
-    return (BOOL)(res != 0);
-}
-
-/*
- * A standard utility.library Hook: a0 = the hook, a2 = the object, a1 = the
- * message, result in d0.  Written out because no function-pointer typedef can
- * express three pinned address registers.  h_Entry, not h_SubEntry.
- */
-BOOL netdev_hook_call(APTR hook, APTR object, APTR message)
-{
-    register APTR _a3 __asm("a3");
-    register APTR _a0 __asm("a0") = hook;
-    register APTR _a2 __asm("a2") = object;
-    register APTR _a1 __asm("a1") = message;
-    register LONG _d1 __asm("d1");
-    register LONG res __asm("d0");
-
-    if (hook == NULL)
-        return TRUE;
-
-    _a3 = (APTR)((struct Hook *)hook)->h_Entry;
-
-    __asm __volatile ("jsr a3@"
-                      : "=r" (res), "=r" (_a0), "=r" (_a1), "=r" (_a2),
-                        "=r" (_d1)
-                      : "r" (_a3), "1" (_a0), "2" (_a1), "3" (_a2)
-                      : "cc", "memory");
-
-    return (BOOL)(res != 0);
-}
 
 /*
  * Nothing may be printed from Open(): exec calls a device's Open vector under
@@ -1723,79 +1668,6 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
         netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX | S2EVENT_HARDWARE);
 
     return 0;
-}
-
-/* --------------------------------------------------- machine fingerprint -- */
-
-/*
- * A card whose address PROM reads all-zero or all-ones needs a derived address.
- * The requirement is not uniqueness but "the same on every boot of this machine,
- * and different from the next machine wherever the two machines differ".
- */
-static VOID nd_fp_put(UBYTE *buf, UWORD max, UWORD *n, ULONG v, UBYTE bytes)
-{
-    UBYTE i;
-
-    for (i = 0; i < bytes; i++)
-    {
-        if (*n >= max)
-            return;
-        buf[(*n)++] = (UBYTE)(v >> ((bytes - 1u - i) * 8u));
-    }
-}
-
-UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt)
-{
-    UWORD n = 0;
-    UWORD i;
-
-    nd_fp_put(buf, max, &n, salt, 4);
-
-    if (SysBase != NULL)
-    {
-        struct MemHeader *mh;
-
-        nd_fp_put(buf, max, &n, (ULONG)SysBase->AttnFlags, 2);
-        nd_fp_put(buf, max, &n, (ULONG)SysBase->LibNode.lib_Version, 2);
-        nd_fp_put(buf, max, &n, (ULONG)SysBase->LibNode.lib_Revision, 2);
-        nd_fp_put(buf, max, &n, SysBase->ex_EClockFrequency, 4);
-        nd_fp_put(buf, max, &n, (ULONG)SysBase->MaxLocMem, 4);
-
-        /* Forbid(), not Disable(): the list is only rearranged by AddMemList
-           and by a task, and this runs at probe time where a Disable() would
-           be the heavier of the two for no gain. */
-        Forbid();
-        i = 0;
-        for (mh = (struct MemHeader *)SysBase->MemList.lh_Head;
-             mh->mh_Node.ln_Succ != NULL && i < 4; i++)
-        {
-            nd_fp_put(buf, max, &n, (ULONG)mh->mh_Attributes, 2);
-            nd_fp_put(buf, max, &n, (ULONG)(APTR)mh->mh_Lower, 4);
-            nd_fp_put(buf, max, &n, (ULONG)(APTR)mh->mh_Upper, 4);
-            mh = (struct MemHeader *)mh->mh_Node.ln_Succ;
-        }
-        Permit();
-    }
-
-    if (ExpansionBase != NULL)
-    {
-        struct ConfigDev *cd = NULL;
-
-        i = 0;
-        while ((cd = FindConfigDev(cd, -1, -1)) != NULL && i < 4)
-        {
-            nd_fp_put(buf, max, &n, (ULONG)cd->cd_Rom.er_Manufacturer, 2);
-            nd_fp_put(buf, max, &n, (ULONG)cd->cd_Rom.er_Product, 1);
-            nd_fp_put(buf, max, &n, cd->cd_Rom.er_SerialNumber, 4);
-            i++;
-        }
-    }
-
-    n = (UWORD)(n + netdev_pcmcia_fingerprint(buf + n, (UWORD)(max - n)));
-
-    nd_tracex("anx: fp bytes ", (ULONG)n);
-
-    return n;
 }
 
 /* ----------------------------------------------------------------- probe -- */

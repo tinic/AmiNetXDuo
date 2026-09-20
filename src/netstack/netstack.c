@@ -20,8 +20,6 @@
 #include "aminetxduo/random.h"
 
 #include <exec/memory.h>
-#include <exec/ports.h>
-#include <exec/semaphores.h>
 #include <proto/exec.h>
 
 /*
@@ -43,8 +41,6 @@ __attribute__((weak)) VOID tx_application_define(VOID *first_unused_memory)
 }
 #pragma GCC diagnostic pop
 
-static struct SignalSemaphore   ami_ns_lock;
-static volatile BOOL            ami_ns_lock_ready;
 static AmiNetStack             *ami_ns;
 static BOOL                     ami_ns_system_initialised;
 static BOOL                     ami_ns_kernel_started;
@@ -53,326 +49,9 @@ static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
                                      const char *reason);
 static VOID ami_ns_gateway_name_primary(AmiNetStack *ns, UWORD index);
 
-static VOID ami_ns_lock_init(VOID)
-{
-    Forbid();
-    if (!ami_ns_lock_ready)
-    {
-        InitSemaphore(&ami_ns_lock);
-        ami_ns_lock_ready = TRUE;
-    }
-    Permit();
-}
-
 AmiNetStack *ami_netstack_raw(VOID)
 {
     return ami_ns;
-}
-
-#ifdef AMINETXDUO_AREXX
-
-static VOID ami_ns_port_create(VOID)
-{
-    ami_netstack_rexx_start();
-}
-
-static VOID ami_ns_port_delete(VOID)
-{
-    ami_netstack_rexx_stop();
-}
-
-#else /* !AMINETXDUO_AREXX */
-
-static char            ami_ns_port_name[] = "AMITCP";
-static struct MsgPort *ami_ns_bare_port;
-
-static VOID ami_ns_port_create(VOID)
-{
-    struct MsgPort *port;
-
-    if (ami_ns_bare_port != NULL)
-        return;
-
-    port = CreateMsgPort();
-    if (port == NULL)
-    {
-        AMI_WARN("AMITCP: no public port. WaitForPort will not return");
-        return;
-    }
-
-    port->mp_Node.ln_Name = ami_ns_port_name;
-    port->mp_Node.ln_Pri  = 0;
-
-    Forbid();
-    if (FindPort((CONST_STRPTR)ami_ns_port_name) != NULL)
-    {
-        Permit();
-        DeleteMsgPort(port);
-        AMI_WARN("AMITCP: a port of that name already exists. "
-                 "Ours is not added");
-        return;
-    }
-    AddPort(port);
-    ami_ns_bare_port = port;
-    Permit();
-}
-
-static VOID ami_ns_port_delete(VOID)
-{
-    struct Message *msg;
-
-    if (ami_ns_bare_port == NULL)
-        return;
-
-    RemPort(ami_ns_bare_port);
-
-    while ((msg = GetMsg(ami_ns_bare_port)) != NULL)
-        ReplyMsg(msg);
-
-    DeleteMsgPort(ami_ns_bare_port);
-    ami_ns_bare_port = NULL;
-}
-
-#endif /* AMINETXDUO_AREXX */
-
-LONG ami_netstack_enter(AmiNetCaller *caller)
-{
-    UINT status;
-
-    caller->nc_Adopted = FALSE;
-
-    if (tx_amiga_kernel_running() != TX_TRUE)
-        return AMI_NET_ERR_STATE;
-
-    if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
-        return AMI_NET_OK;
-
-    status = tx_amiga_adopt_thread(&caller->nc_Thread, (CHAR *)"AmiNetXDuo caller",
-                                   AMI_CALLER_PRIORITY);
-    if (status != TX_SUCCESS)
-    {
-        AMI_ERROR("netstack: cannot adopt calling task (%ld)", (long)status);
-        return AMI_NET_ERR_KERNEL;
-    }
-
-    caller->nc_Adopted = TRUE;
-
-    return AMI_NET_OK;
-}
-
-VOID ami_netstack_leave(AmiNetCaller *caller)
-{
-    netstack_pool_mark_low();
-
-    if (caller->nc_Adopted)
-    {
-        AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
-        caller->nc_Adopted = FALSE;
-    }
-}
-
-AmiNetCaller *ami_netstack_enter_alloc(VOID)
-{
-    AmiNetCaller *caller = (AmiNetCaller *)AllocMem(sizeof(AmiNetCaller),
-                                                    MEMF_PUBLIC | MEMF_CLEAR);
-
-    if (caller == NULL)
-        return NULL;
-
-    AMI_CENSUS_ADD(caller, sizeof(AmiNetCaller));
-
-    if (ami_netstack_enter(caller) != AMI_NET_OK)
-    {
-        AMI_CENSUS_DROP(caller);
-        FreeMem(caller, sizeof(AmiNetCaller));
-        return NULL;
-    }
-
-    return caller;
-}
-
-VOID ami_netstack_leave_free(AmiNetCaller *caller)
-{
-    if (caller == NULL)
-        return;
-
-    ami_netstack_leave(caller);
-    AMI_CENSUS_DROP(caller);
-    FreeMem(caller, sizeof(AmiNetCaller));
-}
-
-LONG ami_netstack_enter_cached(AmiNetCaller *caller)
-{
-    struct Task *me;
-    UINT         status;
-
-    caller->nc_Adopted = FALSE;
-
-    if (tx_amiga_kernel_running() != TX_TRUE)
-        return AMI_NET_ERR_STATE;
-
-    if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
-        return AMI_NET_OK;                  /* nested */
-
-    me = FindTask(NULL);
-
-    if (caller->nc_Live && caller->nc_Task == me)
-    {
-        if (tx_amiga_adopt_resume(&caller->nc_Thread) == TX_SUCCESS)
-        {
-            caller->nc_Adopted = TRUE;
-            return AMI_NET_OK;
-        }
-
-        if (tx_amiga_orphan_thread(&caller->nc_Thread) != TX_SUCCESS)
-            AMI_NX_CLEANUP(tx_amiga_discard_thread(&caller->nc_Thread));
-        caller->nc_Live = FALSE;
-        caller->nc_Task = NULL;
-    }
-
-    if (caller->nc_Live)
-    {
-        AMI_ERROR("netstack: bracket used from a second task");
-        return AMI_NET_ERR_STATE;
-    }
-
-    /*
-     * Publish the owner before adoption: a foreign RemTask() can run as soon as
-     * tx_amiga_adopt_thread()'s Forbid() is released.  A failed adoption clears
-     * the provisional record below.
-     */
-    caller->nc_Live = TRUE;
-    caller->nc_Task = me;
-
-    status = tx_amiga_adopt_thread(&caller->nc_Thread,
-                                   (CHAR *)"AmiNetXDuo caller",
-                                   AMI_CALLER_PRIORITY);
-    if (status != TX_SUCCESS)
-    {
-        caller->nc_Live = FALSE;
-        caller->nc_Task = NULL;
-        AMI_ERROR("netstack: cannot adopt calling task (%ld)", (long)status);
-        return AMI_NET_ERR_KERNEL;
-    }
-
-    caller->nc_Adopted = TRUE;
-
-    return AMI_NET_OK;
-}
-
-
-VOID ami_netstack_leave_cached(AmiNetCaller *caller)
-{
-    netstack_pool_mark_low();           /* see ami_netstack_leave() */
-
-    if (!caller->nc_Adopted)
-        return;
-
-    caller->nc_Adopted = FALSE;
-
-    if (caller->nc_Live && caller->nc_Task == FindTask(NULL))
-    {
-        if (tx_amiga_adopt_suspend(&caller->nc_Thread) == TX_SUCCESS)
-            return;
-
-        caller->nc_Live = FALSE;
-        caller->nc_Task = NULL;
-    }
-
-    AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
-}
-
-VOID ami_netstack_release(AmiNetCaller *caller)
-{
-    struct Task *me;
-    UINT         status;
-
-    if (caller == NULL || !caller->nc_Live)
-        return;
-
-    me = FindTask(NULL);
-
-    /*
-     * Release is a teardown call and must not be reached from inside a bracket,
-     * so drop the baton the ordinary way first.
-     */
-    if (caller->nc_Adopted && caller->nc_Task == me)
-    {
-        caller->nc_Adopted = FALSE;
-        AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
-        caller->nc_Live = FALSE;
-        caller->nc_Task = NULL;
-        return;
-    }
-
-    if (caller->nc_Task == me)
-    {
-        if (tx_amiga_adopt_resume(&caller->nc_Thread) == TX_SUCCESS)
-            AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
-        else
-            AMI_NX_CLEANUP(tx_amiga_discard_thread(&caller->nc_Thread));
-    }
-    else
-    {
-        (VOID)ami_netstack_baton_abandon(&caller->nc_Thread);
-        status = tx_amiga_discard_thread(&caller->nc_Thread);
-        if (status != TX_SUCCESS && status != TX_THREAD_ERROR)
-        {
-            AMI_WARN("netstack: cannot discard dead task's ThreadX context "
-                     "(%ld)", (LONG)status);
-        }
-    }
-
-    caller->nc_Adopted = FALSE;
-    caller->nc_Live = FALSE;
-    caller->nc_Task = NULL;
-}
-
-static ULONG ami_ns_packet_stride(VOID)
-{
-    ULONG stride;
-
-    stride = (ULONG)AMI_POOL_PAYLOAD + (ULONG)sizeof(NX_PACKET) +
-             (ULONG)NX_PACKET_ALIGNMENT;
-
-    return (stride + 3UL) & ~3UL;
-}
-
-/* The bytes the pool is sized from: the fastest memory class's
-   (netstack_memlist.c, pool.h says why), else what AvailMem() says. */
-static ULONG ami_ns_pool_avail(VOID)
-{
-    LONG  pri[AMI_NS_POOL_HEADERS];
-    ULONG free[AMI_NS_POOL_HEADERS];
-    ULONG n     = ami_ns_fast_headers(pri, free, (ULONG)AMI_NS_POOL_HEADERS);
-    ULONG avail = ami_ns_pool_avail_of(pri, free, n);
-
-    return (avail != 0UL) ? avail : AvailMem(MEMF_PUBLIC);
-}
-
-static ULONG ami_ns_pool_packets(VOID)
-{
-    ULONG avail;
-    ULONG divisor;
-    ULONG packets;
-
-    avail = ami_ns_pool_avail();
-
-    divisor = ami_config_pool_divisor((ULONG)AMI_POOL_MEM_DIVISOR);
-
-    /* The arithmetic is in netstack_pool.c, where the host tier can drive it
-       over every machine size: test_pool_window_host.c. */
-    packets = ami_ns_pool_packets_for(avail, divisor, ami_ns_packet_stride());
-
-    /* Told outright: ENV:ANXDPOOLPACKETS (config.h says for which machine). */
-    if (ami_config_pool_packets() != 0UL)
-        packets = ami_config_pool_packets();
-
-    AMI_INFO("netstack: %lu bytes free / %lu, pool = %lu x %lu",
-             (unsigned long)avail, (unsigned long)divisor,
-             (unsigned long)packets, (unsigned long)AMI_POOL_PAYLOAD);
-
-    return packets;
 }
 
 /*
@@ -2245,21 +1924,19 @@ static LONG ami_ns_startup(BOOL loopback_only)
 {
     LONG status;
 
-    ami_ns_lock_init();
-
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
 
     if (ami_ns != NULL)
     {
         ami_ns->ns_Refs++;
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return AMI_NET_OK;
     }
 
     status = ami_ns_kernel_stop_locked();
     if (status != AMI_NET_OK)
     {
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return status;
     }
 
@@ -2270,7 +1947,7 @@ static LONG ami_ns_startup(BOOL loopback_only)
         ami_ns->ns_Refs = 1;
     }
 
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return status;
 }
@@ -2292,15 +1969,13 @@ VOID netstack_shutdown(VOID)
     AmiNetCaller  caller;
     AmiNetStack  *ns;
 
-    ami_ns_lock_init();
-
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
 
     ns = ami_ns;
     if (ns == NULL)
     {
         (VOID)ami_ns_kernel_stop_locked();
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return;
     }
 
@@ -2309,7 +1984,7 @@ VOID netstack_shutdown(VOID)
 
     if (ns->ns_Refs > 0)
     {
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return;
     }
 
@@ -2345,25 +2020,23 @@ VOID netstack_shutdown(VOID)
      */
     (VOID)ami_ns_kernel_stop_locked();
 
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 }
 
 BOOL netstack_can_unload(VOID)
 {
     BOOL safe;
 
-    ami_ns_lock_init();
-
     /*
      * Attempt, not Obtain: bsd_lib_expunge() runs under Forbid() and must not
      * Wait().  A contended lock means "cannot prove it is safe", which is the
      * direction to fail in.
      */
-    if (!AttemptSemaphore(&ami_ns_lock))
+    if (!ami_ns_lock_attempt())
         return FALSE;
 
     safe = (ami_ns == NULL && !ami_ns_kernel_started) ? TRUE : FALSE;
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return safe;
 }
@@ -2740,8 +2413,6 @@ static UWORD ami_ns_interface_users(AmiNetStack *ns, UWORD index)
     return users;
 }
 
-static BOOL ami_ns_same_name(const char *a, const char *b);
-
 /* The next hop this slot knows: the lease's option 3 while it is bound, else
    what the file named, else the machine-wide one. */
 static ULONG ami_ns_gateway_of(AmiNetStack *ns, UWORD index)
@@ -3059,10 +2730,9 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
 {
     LONG rc;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
     rc = ami_ns_interface_remove_locked(index, force);
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return rc;
 }
@@ -3081,8 +2751,7 @@ LONG netstack_interface_remove_named(const char *name, BOOL force)
     if (name == NULL)
         return AMI_NET_ERR_CONFIG;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
 
     ns = ami_ns;
     if (ns == NULL || !ns->ns_IpCreated)
@@ -3105,7 +2774,7 @@ LONG netstack_interface_remove_named(const char *name, BOOL force)
     }
 
 out:
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
     return rc;
 }
 
@@ -3565,139 +3234,6 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
 #endif /* AMINETXDUO_DHCP */
 
 /*
- * Interface names come from file names in DEVS:NetInterfaces and AmigaDOS
- * file names are case-insensitive, so "ETH0" and "eth0" are one interface.
- */
-static BOOL ami_ns_same_name(const char *a, const char *b)
-{
-    ULONG i;
-
-    for (i = 0; ; i++)
-    {
-        char ca = a[i];
-        char cb = b[i];
-
-        if (ca >= 'A' && ca <= 'Z')
-            ca = (char)(ca + ('a' - 'A'));
-        if (cb >= 'A' && cb <= 'Z')
-            cb = (char)(cb + ('a' - 'A'));
-
-        if (ca != cb)
-            return FALSE;
-        if (ca == '\0')
-            return TRUE;
-    }
-}
-
-/*
- * Turn a name into a stable numeric interface slot.  Once the count is raised
- * the slot cannot be detached and reused until the matching release.
- */
-LONG netstack_interface_claim(const char *name, UWORD *index_out)
-{
-    AmiNetStack *ns;
-    LONG         rc = AMI_NET_ERR_STATE;
-    UWORD        i;
-
-    if (name == NULL || name[0] == '\0' || index_out == NULL)
-        return AMI_NET_ERR_CONFIG;
-
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
-
-    ns = ami_ns;
-    if (ns != NULL && ns->ns_IpCreated)
-    {
-        for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
-        {
-            UWORD cfg_index;
-
-            if (ns->ns_Iface[i] == NULL)
-                continue;
-
-            cfg_index = ns->ns_IfaceCfg[i];
-            if (cfg_index >= (UWORD)AMI_CFG_MAX_ATTACHED ||
-                !ns->ns_Config.interfaces[cfg_index].configured ||
-                !ami_ns_same_name(ns->ns_Config.interfaces[cfg_index].name,
-                                  name))
-                continue;
-
-            if (ns->ns_IfaceClaims[i] == (UWORD)-1)
-            {
-                rc = AMI_NET_ERR_BUSY;
-                break;
-            }
-
-            ns->ns_IfaceClaims[i]++;
-            *index_out = i;
-            rc = AMI_NET_OK;
-            break;
-        }
-    }
-
-    ReleaseSemaphore(&ami_ns_lock);
-    return rc;
-}
-
-#ifdef AMINETXDUO_BPF
-/*
- * The BPF table treats its SANA-II pointer as an opaque cookie.  Resolve and
- * claim it under ami_ns_lock: once the count is raised, RemoveInterface()
- * cannot detach or free the allocation until release.
- */
-LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out)
-{
-    AmiNetStack *ns;
-    LONG         rc = AMI_NET_ERR_STATE;
-    UWORD        i;
-
-    if (cookie == NULL || index_out == NULL)
-        return AMI_NET_ERR_CONFIG;
-
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
-
-    ns = ami_ns;
-    if (ns != NULL && ns->ns_IpCreated)
-    {
-        for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
-        {
-            if ((APTR)ns->ns_Iface[i] != cookie)
-                continue;
-
-            if (ns->ns_IfaceClaims[i] == (UWORD)-1)
-                rc = AMI_NET_ERR_BUSY;
-            else
-            {
-                ns->ns_IfaceClaims[i]++;
-                *index_out = i;
-                rc = AMI_NET_OK;
-            }
-            break;
-        }
-    }
-
-    ReleaseSemaphore(&ami_ns_lock);
-    return rc;
-}
-#endif
-
-VOID netstack_interface_release(UWORD index)
-{
-    AmiNetStack *ns;
-
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
-
-    ns = ami_ns;
-    if (ns != NULL && index < (UWORD)AMI_CFG_MAX_ATTACHED &&
-        ns->ns_IfaceClaims[index] != 0)
-        ns->ns_IfaceClaims[index]--;
-
-    ReleaseSemaphore(&ami_ns_lock);
-}
-
-/*
  * Predict the slot a new interface will land in -- the same first-free scan
  * nx_ip_interface_attach() does -- because ami_sana2_attach() must record the
  * (NX_IP, index) binding before the attach calls the driver.
@@ -4056,10 +3592,9 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 {
     LONG rc;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
     rc = ami_ns_interface_add_locked(cfg, index_out, TRUE, NULL);
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return rc;
 }
@@ -4238,10 +3773,9 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
 {
     LONG rc;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
     rc = ami_ns_interface_start_locked(cfg, index_out, TRUE);
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return rc;
 }

@@ -126,6 +126,19 @@ UINT _tx_event_flags_delete(TX_EVENT_FLAGS_GROUP *group_ptr)
     return TX_SUCCESS;
 }
 
+UINT _tx_event_flags_get(TX_EVENT_FLAGS_GROUP *group_ptr,
+                         ULONG requested_flags, UINT get_option,
+                         ULONG *actual_flags_ptr, ULONG wait_option)
+{
+    (VOID)group_ptr;
+    (VOID)requested_flags;
+    (VOID)get_option;
+    (VOID)wait_option;
+    if (actual_flags_ptr != TX_NULL)
+        *actual_flags_ptr = 0;
+    return TX_SUCCESS;
+}
+
 UINT _tx_timer_create(TX_TIMER *timer_ptr, CHAR *name_ptr,
                       VOID (*expiration_function)(ULONG input),
                       ULONG expiration_input, ULONG initial_ticks,

@@ -11,6 +11,10 @@
 #include "httpterm.h"
 #include "httpfb.h"
 #include "httpdate.h"
+#include "httpfs.h"
+#include "httpstr.h"
+#include "httpvol.h"
+#include "httprequest.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
 
@@ -473,109 +477,6 @@ static char   httpd_files_gz[HTTP_PATH_MAX];
    http_fb_available() is still true. */
 static HttpConn *httpd_fb_owner;
 static struct Library *httpd_sb = NULL;
-
-/* --------------------------------------------------------------- the small */
-
-static ULONG hs_len(const char *s)
-{
-    ULONG n = 0;
-
-    while (s[n] != '\0')
-        n++;
-
-    return n;
-}
-
-/* Bounded append, in the shape src/tools/fetch.c builds its request with: one
-   `ok = ok && ...` chain, and a single overflow fails the whole thing. */
-static BOOL hs_append(char *dst, ULONG dstlen, ULONG *used, const char *src)
-{
-    ULONG n = *used;
-
-    while (*src != '\0')
-    {
-        if (n + 1UL >= dstlen)
-            return FALSE;
-        dst[n++] = *src++;
-    }
-
-    dst[n] = '\0';
-    *used  = n;
-
-    return TRUE;
-}
-
-static BOOL hs_append_num(char *dst, ULONG dstlen, ULONG *used, ULONG value)
-{
-    char  text[12];
-    ULONG n = 0;
-
-    if (value == 0UL)
-    {
-        text[n++] = '0';
-    }
-    else
-    {
-        char  rev[12];
-        ULONG r = 0;
-
-        while (value > 0UL && r < sizeof(rev))
-        {
-            rev[r++] = (char)('0' + (value % 10UL));
-            value /= 10UL;
-        }
-        while (r > 0UL)
-            text[n++] = rev[--r];
-    }
-
-    text[n] = '\0';
-
-    return hs_append(dst, dstlen, used, text);
-}
-
-/* Case-insensitive compare of `n` characters, so a header name matches
-   however the client capitalised it. */
-static int hs_nicmp(const char *a, const char *b, ULONG n)
-{
-    ULONG i;
-
-    for (i = 0; i < n; i++)
-    {
-        int ca = (unsigned char)a[i];
-        int cb = (unsigned char)b[i];
-
-        if (ca >= 'A' && ca <= 'Z') ca += 32;
-        if (cb >= 'A' && cb <= 'Z') cb += 32;
-
-        if (ca != cb || ca == 0)
-            return ca - cb;
-    }
-
-    return 0;
-}
-
-static BOOL hs_equal(const char *a, const char *b)
-{
-    ULONG n = hs_len(b);
-
-    return (hs_len(a) == n && hs_nicmp(a, b, n) == 0) ? TRUE : FALSE;
-}
-
-static VOID hs_copy(char *dst, ULONG dstlen, const char *src)
-{
-    ULONG n = 0;
-
-    if (dstlen == 0UL)
-        return;
-
-    while (src[n] != '\0' && n + 1UL < dstlen)
-    {
-        dst[n] = src[n];
-        n++;
-    }
-
-    dst[n] = '\0';
-}
 
 /* ------------------------------------------------------------------- log --- */
 
@@ -1074,333 +975,66 @@ static struct InfoData      *httpd_info;
    list while this server is waiting for a client to read. */
 static BOOL httpd_volume_at(UWORD wanted, char *out, ULONG outlen)
 {
-    struct DosList *dl;
-    UWORD           seen = 0;
-    BOOL            found = FALSE;
-
-    if (outlen == 0UL)
-        return FALSE;
-    out[0] = '\0';
-
-    dl = LockDosList(LDF_VOLUMES | LDF_READ);
-    if (dl == NULL)
-        return FALSE;
-
-    while ((dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
-    {
-        const UBYTE *bstr;
-        ULONG        len;
-        ULONG        i;
-
-        /* A remembered but unmounted volume has no handler.  Listing it can
-           only provoke an insert-volume requester when the client enters it. */
-        if (dl->dol_Task == NULL || dl->dol_Name == (BSTR)0)
-            continue;
-
-        if (seen++ != wanted)
-            continue;
-
-        bstr = (const UBYTE *)BADDR(dl->dol_Name);
-        len  = (ULONG)bstr[0];
-        if (len == 0UL || len + 1UL > outlen)
-            break;
-
-        for (i = 0; i < len; i++)
-            out[i] = (char)bstr[i + 1UL];
-        out[len] = '\0';
-        found = TRUE;
-        break;
-    }
-
-    UnLockDosList(LDF_VOLUMES | LDF_READ);
-    return found;
-}
-
-/*
- * NOINLINE, and it is the same stack decision as the in-place rewrite in
- * http_path_resolve_volumes().  This carries a 112-byte name buffer, and
- * httpd_resolve_path() reaches it on one branch and http_path_resolve() on
- * another.  Inlined, the buffer sits in httpd_resolve_path()'s frame for the
- * whole of the other call, so the two costs add rather than alternate.  A real
- * call confines it to the branch that uses it, and httpd's deepest path -- the
- * If: header's resolver ladder, measured by tools/check-stack-frames.sh --
- * keeps the room a 4096-byte Shell stack has to give it.
- */
-static __attribute__((noinline)) BOOL httpd_volume_mounted(const char *path)
-{
-    struct DosList *dl;
-    char            name[HTTP_NAME_MAX];
-    ULONG           n = 0;
-    BOOL            found = FALSE;
-
-    while (path[n] != '\0' && path[n] != ':')
-    {
-        if (n + 1UL >= sizeof(name))
-            return FALSE;
-        name[n] = path[n];
-        n++;
-    }
-    if (n == 0UL || path[n] != ':')
-        return FALSE;
-    name[n] = '\0';
-
-    dl = LockDosList(LDF_VOLUMES | LDF_READ);
-    if (dl == NULL)
-        return FALSE;
-
-    while ((dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
-    {
-        const UBYTE *bstr;
-
-        if (dl->dol_Task == NULL || dl->dol_Name == (BSTR)0)
-            continue;
-
-        bstr = (const UBYTE *)BADDR(dl->dol_Name);
-        if ((ULONG)bstr[0] == n &&
-            hs_nicmp((const char *)&bstr[1], name, n) == 0)
-        {
-            found = TRUE;
-            break;
-        }
-    }
-
-    UnLockDosList(LDF_VOLUMES | LDF_READ);
-    return found;
+    return http_vol_at(wanted, out, outlen);
 }
 
 static HttpPathResult httpd_resolve_path(const char *target, HttpPath *out)
 {
-    HttpPathResult why;
-
-    if (!httpd_volumes)
-        return http_path_resolve(httpd_root, target, out);
-
-    why = http_path_resolve_volumes(target, out);
-    if (why == HTTP_PATH_OK && out->segments > 0 &&
-        !httpd_volume_mounted(out->path))
-        return HTTP_PATH_NOT_VOLUME;
-
-    return why;
+    return http_vol_resolve(httpd_volumes, httpd_root, target, out);
 }
 
-/* An AmigaDOS error as an HTTP status.  One table, so every write method gives
-   the same answer to the same failure. */
+/* The state machine speaks in server terms; this narrow adapter is the only
+   place its single-task scratch objects enter the filesystem-policy module. */
 static ULONG httpd_dos_status(LONG err)
 {
-    switch (err)
-    {
-        case ERROR_OBJECT_NOT_FOUND:
-        case ERROR_DIR_NOT_FOUND:           return 409;
-        case ERROR_OBJECT_EXISTS:           return 405;
-        case ERROR_DIRECTORY_NOT_EMPTY:
-        case ERROR_OBJECT_IN_USE:           return 409;
-        case ERROR_DISK_FULL:               return 507;
-        /* A name the filesystem will not carry, too long for OFS, or a
-           character it reserves.  Refused rather than truncated into a name
-           that would collide with a file already there. */
-        case ERROR_INVALID_COMPONENT_NAME:
-        case ERROR_BAD_STREAM_NAME:         return 400;
-        default:                            return 403;
-    }
+    return http_fs_status(err);
 }
 
-/* The drawer a path lives in: "Work:Public/a/b" is "Work:Public/a" and
-   "RAM:foo" is "RAM:".  FALSE when there is no separator at all, which is a
-   path that names a device and has no parent here. */
 static BOOL httpd_parent(const char *path, char *out, ULONG outlen)
 {
-    ULONG n = hs_len(path);
-    ULONG cut = 0;
-    ULONG i;
-    BOOL  found = FALSE;
-
-    for (i = 0; i < n; i++)
-    {
-        if (path[i] == '/')
-        {
-            cut   = i;              /* the separator is dropped            */
-            found = TRUE;
-        }
-        else if (path[i] == ':')
-        {
-            cut   = i + 1UL;        /* the colon belongs to the device     */
-            found = TRUE;
-        }
-    }
-
-    if (!found || cut + 1UL >= outlen)
-        return FALSE;
-
-    for (i = 0; i < cut; i++)
-        out[i] = path[i];
-    out[cut] = '\0';
-
-    return TRUE;
+    return http_fs_parent(path, out, outlen);
 }
 
-/* TRUE when something is at `path` under a different name to the one asked
-   for: the filesystem truncated the name and answered success, so the request
-   would land on somebody else's file. */
 static BOOL httpd_name_differs(const struct FileInfoBlock *fib,
                                const char *name)
 {
-    if (name[0] == '\0')
-        return FALSE;               /* the root: no name was asked for     */
-
-    return hs_equal((const char *)fib->fib_FileName, name) ? FALSE : TRUE;
+    return http_fs_name_differs(fib, name);
 }
 
 static BOOL httpd_name_cut(const char *path, const char *name)
 {
-    BPTR lock;
-    BOOL cut = FALSE;
-
-    if (httpd_fib2 == NULL || name[0] == '\0')
-        return FALSE;
-
-    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    if (lock == (BPTR)0)
-        return FALSE;               /* nothing there: nothing to collide   */
-
-    if (Examine(lock, httpd_fib2))
-        cut = httpd_name_differs(httpd_fib2, name);
-
-    UnLock(lock);
-
-    return cut;
+    return http_fs_name_cut(httpd_fib2, path, name);
 }
 
-/* TRUE when creating something called `name` at `path` would leave it under a
-   different name, asked by doing it.  Only ever called with nothing at `path`:
-   MODE_NEWFILE would truncate a file that was. */
 static BOOL httpd_name_survives(const char *path, const char *name)
 {
-    BPTR probe;
-    BOOL cut;
-
-    if (name[0] == '\0')
-        return TRUE;
-
-    probe = Open((CONST_STRPTR)path, MODE_NEWFILE);
-    if (probe == (BPTR)0)
-        return TRUE;                /* the operation itself will say why   */
-
-    (VOID)Close(probe);
-
-    cut = httpd_name_cut(path, name);
-
-    (VOID)DeleteFile((CONST_STRPTR)path);
-
-    return cut ? FALSE : TRUE;
+    return http_fs_name_survives(httpd_fib2, path, name);
 }
 
-/* A directory entry that stands for something somewhere else.  ST_LINKFILE is
-   deliberately not here: a hard link to a file is one file, and copying it
-   copies bytes rather than walking anywhere. */
 static BOOL httpd_entry_is_link(LONG type)
 {
-    return (type == ST_SOFTLINK || type == ST_LINKDIR) ? TRUE : FALSE;
+    return http_fs_entry_is_link(type);
 }
 
-/* The entity tag: the size and the three DateStamp fields, which between them
-   are everything a FileInfoBlock knows that changes when the bytes do.
-   Collections have none. */
 static VOID httpd_etag(ULONG size, const struct DateStamp *ds,
                        char *out, ULONG outlen)
 {
-    ULONG used = 0;
-    BOOL  ok;
-
-    out[0] = '\0';
-
-    ok = hs_append(out, outlen, &used, "\"");
-    ok = ok && hs_append_num(out, outlen, &used, size);
-    ok = ok && hs_append(out, outlen, &used, "-");
-    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Days);
-    ok = ok && hs_append(out, outlen, &used, "-");
-    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Minute);
-    ok = ok && hs_append(out, outlen, &used, "-");
-    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Tick);
-    ok = ok && hs_append(out, outlen, &used, "\"");
-
-    if (!ok)
-        out[0] = '\0';
+    http_fs_etag(size, ds, out, outlen);
 }
 
-/* The same, for a path nothing has looked at yet.  "" when there is nothing
-   there, or when it is a drawer. */
 static VOID httpd_etag_of(const char *path, char *out, ULONG outlen)
 {
-    BPTR lock;
-
-    out[0] = '\0';
-
-    if (httpd_fib2 == NULL)
-        return;
-
-    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    if (lock == (BPTR)0)
-        return;
-
-    if (Examine(lock, httpd_fib2) && httpd_fib2->fib_DirEntryType <= 0)
-        httpd_etag((ULONG)httpd_fib2->fib_Size, &httpd_fib2->fib_Date,
-                   out, outlen);
-
-    UnLock(lock);
+    http_fs_etag_of(httpd_fib2, path, out, outlen);
 }
 
-/* 1 a drawer, 0 a file, -1 nothing there. */
 static LONG httpd_kind(const char *path)
 {
-    BPTR lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    LONG kind = 0;
-
-    if (lock == (BPTR)0)
-        return -1;
-
-    if (httpd_fib2 != NULL && Examine(lock, httpd_fib2) &&
-        httpd_fib2->fib_DirEntryType > 0)
-        kind = 1;
-
-    UnLock(lock);
-
-    return kind;
+    return http_fs_kind(httpd_fib2, path);
 }
 
-/* Free bytes on the volume `path` is on, or 0 when it cannot be told. */
 static ULONG httpd_free_bytes(const char *path)
 {
-    BPTR  lock;
-    ULONG blocks;
-    ULONG per;
-
-    if (httpd_info == NULL)
-        return 0;
-
-    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    if (lock == (BPTR)0)
-        return 0;
-
-    if (!Info(lock, httpd_info))
-    {
-        UnLock(lock);
-        return 0;
-    }
-    UnLock(lock);
-
-    if (httpd_info->id_NumBlocks <= httpd_info->id_NumBlocksUsed ||
-        httpd_info->id_BytesPerBlock <= 0)
-        return 0;
-
-    blocks = (ULONG)(httpd_info->id_NumBlocks - httpd_info->id_NumBlocksUsed);
-    per    = (ULONG)httpd_info->id_BytesPerBlock;
-
-    /* Saturate rather than wrap.  More than anybody is about to ask for is the
-       only answer a big volume needs to give. */
-    if (blocks > 0xffffffffUL / per)
-        return 0xffffffffUL;
-
-    return blocks * per;
+    return http_fs_free_bytes(httpd_info, path);
 }
 
 /* The URL a walked path corresponds to, escaped for an href.  In volume mode
@@ -1408,60 +1042,9 @@ static ULONG httpd_free_bytes(const char *path)
    its configured document-root prefix as before. */
 static const char *httpd_url_of(const char *path)
 {
-    ULONG used = 0;
-
-    if (httpd_volumes)
-    {
-        const char *colon = path;
-
-        while (*colon != '\0' && *colon != ':')
-            colon++;
-        if (*colon != ':' || colon == path)
-            return "/";
-
-        httpd_href_buf[0] = '\0';
-        (VOID)hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/");
-        while (path < colon)
-        {
-            char one[2];
-
-            one[0] = *path++;
-            one[1] = '\0';
-            if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, one))
-                return "/";
-        }
-        path++;                            /* the colon becomes a slash     */
-        if (*path != '\0' &&
-            !hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/"))
-            return "/";
-        if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, path))
-            return "/";
-
-        if (http_url_escape(httpd_href_buf, httpd_escape,
-                            sizeof(httpd_escape)) == 0UL)
-            return "/";
-        return httpd_escape;
-    }
-
-    {
-        ULONG rootlen = hs_len(httpd_root);
-
-        if (hs_nicmp(path, httpd_root, rootlen) != 0)
-            return "/";
-
-        path += rootlen;
-    }
-
-    httpd_href_buf[0] = '\0';
-
-    if (*path != '/')
-        (VOID)hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/");
-
-    if (!hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, path))
-        return "/";
-
-    if (http_url_escape(httpd_href_buf, httpd_escape,
-                        sizeof(httpd_escape)) == 0UL)
+    if (http_path_url(httpd_volumes, httpd_root, path,
+                      httpd_href_buf, sizeof(httpd_href_buf),
+                      httpd_escape, sizeof(httpd_escape)) == 0UL)
         return "/";
 
     return httpd_escape;
@@ -4213,78 +3796,6 @@ static VOID httpd_do_mkcol(HttpConn *c)
     httpd_empty(c, 201);
 }
 
-/* COPY and MOVE carry the other end in a header, so the Destination goes
-   through http_path_resolve() exactly as the request target did.  One trusted
-   any less is a way out of the document root that only writes. */
-/* The authority of an absolute-form URL, or NULL when there is none. */
-static const char *httpd_authority(const char *url, ULONG *len)
-{
-    ULONG i;
-
-    *len = 0;
-
-    for (i = 0; i < 8UL && url[i] != '\0'; i++)
-    {
-        if (url[i] == ':')
-            break;
-
-        if (!((url[i] >= 'a' && url[i] <= 'z') ||
-              (url[i] >= 'A' && url[i] <= 'Z')))
-            return NULL;
-    }
-
-    if (i == 0UL || url[i] != ':' || url[i + 1] != '/' || url[i + 2] != '/')
-        return NULL;
-
-    url += i + 3;
-
-    while (url[*len] != '\0' && url[*len] != '/')
-        (*len)++;
-
-    return url;
-}
-
-/* Does the Destination name this server?  The host is compared and the port is
-   not.  TRUE when there is no authority to compare, and TRUE when the client
-   sent no Host: an HTTP/1.0 client need not send one. */
-static ULONG httpd_hostlen(const char *s, ULONG len)
-{
-    ULONG i = 0;
-
-    /* An IPv6 literal is bracketed and full of colons, so the one that ends
-       the host is the one after the ']'. */
-    if (len > 0UL && s[0] == '[')
-    {
-        while (i < len && s[i] != ']')
-            i++;
-
-        return (i < len) ? i + 1UL : len;
-    }
-
-    while (i < len && s[i] != ':')
-        i++;
-
-    return i;
-}
-
-static BOOL httpd_dest_is_local(const HttpConn *c)
-{
-    ULONG       dlen;
-    ULONG       hlen;
-    const char *dest = httpd_authority(c->dest_url, &dlen);
-
-    if (dest == NULL || c->host[0] == '\0')
-        return TRUE;
-
-    dlen = httpd_hostlen(dest, dlen);
-    hlen = httpd_hostlen(c->host, hs_len(c->host));
-
-    if (dlen != hlen || dlen == 0UL)
-        return FALSE;
-
-    return (hs_nicmp(dest, c->host, dlen) == 0) ? TRUE : FALSE;
-}
-
 static BOOL httpd_resolve_dest(HttpConn *c)
 {
     HttpPathResult why;
@@ -4298,7 +3809,7 @@ static BOOL httpd_resolve_dest(HttpConn *c)
     /* http_path_resolve() throws the authority away, which is right for the
        request target but would make a COPY to another host land on this one.
        RFC 4918 9.8.4: this server does not copy between hosts. */
-    if (!httpd_dest_is_local(c))
+    if (!http_path_destination_is_local(c->dest_url, c->host))
     {
         httpd_error(c, 502, "that destination is on another server");
         return FALSE;
@@ -4403,7 +3914,8 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     /* With nothing at the destination the check above says nothing, and the
        destination is created shortened.  PUT and MKCOL undo that afterwards;
        a copied tree is too much to undo, so it is asked before the walk. */
-    if (dst_kind < 0 && !httpd_name_survives(c->dest.path, c->dest.name))
+    if (dst_kind < 0 &&
+        !httpd_name_survives(c->dest.path, c->dest.name))
     {
         httpd_error(c, 400,
                     "that name is longer than this filesystem keeps");
@@ -4806,29 +4318,6 @@ static const HttpMethod *httpd_lookup(const char *name)
     return NULL;
 }
 
-/* The one query parameter the two interactive endpoints act on. */
-static BOOL httpd_query_take(const char *target, ULONG question)
-{
-    ULONG i = question + 1UL;
-
-    while (target[i] != '\0')
-    {
-        ULONG start = i;
-
-        while (target[i] != '\0' && target[i] != '&')
-            i++;
-
-        if (i - start == 6UL &&
-            hs_nicmp(&target[start], "take=1", 6) == 0)
-            return TRUE;
-
-        if (target[i] == '&')
-            i++;
-    }
-
-    return FALSE;
-}
-
 /* --------------------------------------------------------------- parsing --- */
 
 /* "bytes=0-1023", "bytes=1024-", "bytes=-512".  One range only: a multipart
@@ -4849,124 +4338,6 @@ static BOOL httpd_parse_range(HttpConn *c, const char *value)
     c->range_to   = to;
 
     return TRUE;
-}
-
-/* The tokens inside an If:, which is a different question from whether the
-   header holds; RFC 4918 10.4.1 asks both.  httpif.c evaluates the conditions.
-   Two tokens is as many as a request needs: a MOVE with both ends locked. */
-static VOID httpd_parse_if(HttpConn *c, const char *value)
-{
-    ULONG n = 0;
-
-    while (*value != '\0' && n < 2UL)
-    {
-        if (*value == '<')
-        {
-            const char *start = ++value;
-            ULONG       len   = 0;
-
-            while (*value != '\0' && *value != '>')
-            {
-                value++;
-                len++;
-            }
-
-            /* A tagged list names a URL the same way, so only the ones that
-               look like a token are taken. */
-            if (hs_nicmp(start, "opaquelocktoken:", 16) == 0 &&
-                len + 1UL < (ULONG)HTTPD_TOKEN_MAX)
-            {
-                ULONG k;
-
-                for (k = 0; k < len; k++)
-                    c->iftoken[n][k] = start[k];
-                c->iftoken[n][len] = '\0';
-                n++;
-            }
-
-            if (*value == '>')
-                value++;
-        }
-        else
-        {
-            value++;
-        }
-    }
-}
-
-/* "Second-3600", or "Infinite".  What is granted is capped here whatever was
-   asked for, and the answer says what it was. */
-static ULONG httpd_parse_timeout(const char *value)
-{
-    while (*value == ' ')
-        value++;
-
-    if (hs_nicmp(value, "infinite", 8) == 0)
-        return HTTPD_LOCK_CAP;
-
-    if (hs_nicmp(value, "second-", 7) == 0)
-    {
-        ULONG secs = 0;
-
-        value += 7;
-        while (*value >= '0' && *value <= '9')
-            secs = (secs * 10UL) + (ULONG)(*value++ - '0');
-
-        return secs;
-    }
-
-    return 0;
-}
-
-/* Does this Accept-Encoding offer gzip?  RFC 7231 5.3.4: a quality of 0 refuses
-   the coding outright rather than ranking it low.  `*` is deliberately not
-   honoured: the plain page always works. */
-static BOOL httpd_offers_gzip(const char *v)
-{
-    while (*v != '\0')
-    {
-        BOOL is_gzip;
-        BOOL refused = FALSE;
-
-        while (*v == ' ' || *v == '\t' || *v == ',')
-            v++;
-
-        is_gzip = (hs_nicmp(v, "gzip", 4) == 0 &&
-                   (v[4] == '\0' || v[4] == ',' || v[4] == ';' ||
-                    v[4] == ' '  || v[4] == '\t')) ? TRUE : FALSE;
-
-        /* To the end of this coding, reading any q= on the way past.  A
-           quality of zero is a refusal and 0.000 is still zero, so what is
-           looked for is a nonzero digit after the point. */
-        while (*v != '\0' && *v != ',')
-        {
-            if (*v == ';')
-            {
-                const char *q = v + 1;
-
-                while (*q == ' ' || *q == '\t')
-                    q++;
-
-                if ((*q == 'q' || *q == 'Q') && q[1] == '=')
-                {
-                    BOOL zero = TRUE;
-
-                    for (q += 2; *q != '\0' && *q != ',' && *q != ';'; q++)
-                        if (*q >= '1' && *q <= '9')
-                            zero = FALSE;
-
-                    if (zero)
-                        refused = TRUE;
-                }
-            }
-            v++;
-        }
-
-        if (is_gzip)
-            return refused ? FALSE : TRUE;
-    }
-
-    return FALSE;
 }
 
 /* The request head, from the first byte to the blank line.  FALSE when it has
@@ -5248,7 +4619,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             /* Read for the terminal's and the console's pages and nothing
                else.  A cut list can have lost the coding that was refused,
                so it is read as no offer at all. */
-            c->gzip_ok = (!cut && httpd_offers_gzip(httpd_value)) ? 1 : 0;
+            c->gzip_ok = (!cut && http_request_accepts_gzip(httpd_value))
+                             ? 1 : 0;
         }
         else if (hs_equal(name, "If-None-Match"))
         {
@@ -5329,7 +4701,10 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             }
 
             hs_copy(c->ifhdr, sizeof(c->ifhdr), httpd_value);
-            httpd_parse_if(c, httpd_value);
+            (VOID)http_request_lock_tokens(
+                httpd_value, &c->iftoken[0][0],
+                (ULONG)sizeof(c->iftoken[0]),
+                (ULONG)(sizeof(c->iftoken) / sizeof(c->iftoken[0])));
         }
         else if (hs_equal(name, "Lock-Token"))
         {
@@ -5359,7 +4734,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Timeout"))
         {
-            c->lock_secs = httpd_parse_timeout(httpd_value);
+            c->lock_secs = http_request_timeout(httpd_value, HTTPD_LOCK_CAP);
         }
     }
 
@@ -5445,7 +4820,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
                Looked for anywhere in the string, because no other parameter
                is read. */
             if (httpd_target[n] == '?')
-                c->ws_take = httpd_query_take(httpd_target, n) ? 1 : 0;
+                c->ws_take = http_request_query_take(httpd_target) ? 1 : 0;
 
             return TRUE;
         }
@@ -5469,7 +4844,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             c->path.name[0] = '\0';
 
             if (httpd_target[n] == '?')
-                c->ws_take = httpd_query_take(httpd_target, n) ? 1 : 0;
+                c->ws_take = http_request_query_take(httpd_target) ? 1 : 0;
 
             return TRUE;
         }

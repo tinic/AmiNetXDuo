@@ -110,6 +110,18 @@ static union
     struct { NetStatusHeader hdr; NetStatusAddress6 e[CNI_MAX_ADDRS6]; } addr6;
 } cni_v6;
 
+/* Every operation is synchronous and this command has one task.  Keeping the
+   control block here stops main()'s frame and control()'s frame being charged
+   together against the Shell's 4 KB stack. */
+static NetStatusControl cni_control;
+
+/* ReadArgs storage and the two parse/format temporaries also outlive no call,
+   but making them static keeps the long option parser from taxing every later
+   control path through main(). */
+static LONG  args[ARG_COUNT];
+static ULONG cni_gateway6[4];
+static char  cni_text[16];
+
 static BOOL same_name(const char *a, const char *b)
 {
     while (*a != '\0' && *b != '\0')
@@ -302,21 +314,40 @@ static BOOL mask_is_contiguous(ULONG mask)
 static LONG control(struct Library *base, ULONG op, LONG index, ULONG dest,
                     ULONG mask, ULONG gw, ULONG flags, LONG *err)
 {
-    NetStatusControl ctl;
-    ULONG            w;
+    ULONG w;
 
-    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
-        ((ULONG *)&ctl)[w] = 0;
+    for (w = 0; w < (ULONG)(sizeof(cni_control) / sizeof(ULONG)); w++)
+        ((ULONG *)&cni_control)[w] = 0;
 
-    ctl.nsc_Magic       = AMI_NETSTATUS_MAGIC;
-    ctl.nsc_Version     = (UWORD)AMI_NETSTATUS_VERSION;
-    ctl.nsc_Index       = (UWORD)index;
-    ctl.nsc_Destination = dest;
-    ctl.nsc_NetMask     = mask;
-    ctl.nsc_Gateway     = gw;
-    ctl.nsc_Flags       = flags;
+    cni_control.nsc_Magic       = AMI_NETSTATUS_MAGIC;
+    cni_control.nsc_Version     = (UWORD)AMI_NETSTATUS_VERSION;
+    cni_control.nsc_Index       = (UWORD)index;
+    cni_control.nsc_Destination = dest;
+    cni_control.nsc_NetMask     = mask;
+    cni_control.nsc_Gateway     = gw;
+    cni_control.nsc_Flags       = flags;
 
-    return tool_netstatus_control(base, op, &ctl, err);
+    return tool_netstatus_control(base, op, &cni_control, err);
+}
+
+/* Keep this operation's control block off main()'s frame.  main also calls
+   control(), and putting both blocks there makes their mutually exclusive
+   paths consume stack at the same time. */
+static LONG control_priority(struct Library *base, LONG index, LONG priority,
+                             LONG *err)
+{
+    ULONG w;
+
+    for (w = 0; w < (ULONG)(sizeof(cni_control) / sizeof(ULONG)); w++)
+        ((ULONG *)&cni_control)[w] = 0;
+
+    cni_control.nsc_Magic    = AMI_NETSTATUS_MAGIC;
+    cni_control.nsc_Version  = (UWORD)AMI_NETSTATUS_VERSION;
+    cni_control.nsc_Index    = (UWORD)index;
+    cni_control.nsc_Priority = priority;
+
+    return tool_netstatus_control(base, NETCTRL_INTERFACE_PRIORITY,
+                                  &cni_control, err);
 }
 
 
@@ -545,7 +576,6 @@ static VOID say_addresses6(struct Library *base, LONG index, const char *name)
 
 int main(int argc, char **argv)
 {
-    LONG             args[ARG_COUNT];
     struct RDArgs   *rda;
     struct Library  *base;
     const char      *name;
@@ -555,7 +585,6 @@ int main(int argc, char **argv)
     BOOL             have_address = FALSE;
     BOOL             have_netmask = FALSE;
     BOOL             have_gateway = FALSE;
-    ULONG            gateway6[4]  = { 0, 0, 0, 0 };
     BOOL             have_gateway6 = FALSE;
     BOOL             clear_gateway6 = FALSE;
     BOOL             have_mdns    = FALSE;
@@ -571,7 +600,6 @@ int main(int argc, char **argv)
     LONG             state        = 0;
     LONG             index;
     LONG             err = 0;
-    char             text[16];
     const NetStatusInterface *row;
 
     (VOID)argv;
@@ -599,6 +627,10 @@ int main(int argc, char **argv)
     args[ARG_UP]        = 0;
     args[ARG_DOWN]      = 0;
     args[ARG_PRIORITY]  = 0;
+    cni_gateway6[0] = 0;
+    cni_gateway6[1] = 0;
+    cni_gateway6[2] = 0;
+    cni_gateway6[3] = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
@@ -655,9 +687,9 @@ int main(int argc, char **argv)
 
     if (have_netmask && !mask_is_contiguous(netmask))
     {
-        ami_config_format_ip(netmask, text, sizeof(text));
+        ami_config_format_ip(netmask, cni_text, sizeof(cni_text));
         tool_error("%s is not a netmask: the ones must come first",
-                   (LONG)text);
+                   (LONG)cni_text);
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -723,7 +755,7 @@ int main(int argc, char **argv)
         {
             clear_gateway6 = TRUE;
         }
-        else if (!tool_parse_ip6(g, gateway6))
+        else if (!tool_parse_ip6(g, cni_gateway6))
         {
             tool_error("\"%s\" is not an IPv6 address. GATEWAY6 NONE clears "
                        "it", (LONG)g);
@@ -1012,13 +1044,13 @@ int main(int argc, char **argv)
             const NetStatusDhcp *d = dhcp_row(base, index);
             char                 server[16];
 
-            ami_config_format_ip(row->nsi_Address, text, sizeof(text));
+            ami_config_format_ip(row->nsi_Address, cni_text, sizeof(cni_text));
             ami_config_format_ip((d != NULL) ? d->nsd_Server : 0UL,
                                  server, sizeof(server));
 
             say("%s: %s %s, from %s\n", (LONG)name,
                 (LONG)(renewing ? "lease renewed," : "lease taken,"),
-                (LONG)text, (LONG)server);
+                (LONG)cni_text, (LONG)server);
         }
     }
 
@@ -1034,14 +1066,14 @@ int main(int argc, char **argv)
         {
             if (err == CNI_EADDRNOTAVAIL)
             {
-                ami_config_format_ip(address, text, sizeof(text));
-                tool_error("%s did not take %s", (LONG)name, (LONG)text);
+                ami_config_format_ip(address, cni_text, sizeof(cni_text));
+                tool_error("%s did not take %s", (LONG)name, (LONG)cni_text);
             }
             else if (err == CNI_EINVAL && have_gateway && gateway != 0)
             {
-                ami_config_format_ip(gateway, text, sizeof(text));
+                ami_config_format_ip(gateway, cni_text, sizeof(cni_text));
                 tool_error("%s is not on any of this machine's own subnets, "
-                           "so nothing here can reach it", (LONG)text);
+                           "so nothing here can reach it", (LONG)cni_text);
             }
             else
             {
@@ -1058,9 +1090,9 @@ int main(int argc, char **argv)
         {
             char maskbuf[16];
 
-            ami_config_format_ip(row->nsi_Address, text, sizeof(text));
+            ami_config_format_ip(row->nsi_Address, cni_text, sizeof(cni_text));
             ami_config_format_ip(row->nsi_NetMask, maskbuf, sizeof(maskbuf));
-            say("%s: %s netmask %s\n", (LONG)name, (LONG)text, (LONG)maskbuf);
+            say("%s: %s netmask %s\n", (LONG)name, (LONG)cni_text, (LONG)maskbuf);
         }
 
         if (have_gateway)
@@ -1071,8 +1103,8 @@ int main(int argc, char **argv)
             }
             else
             {
-                ami_config_format_ip(gateway, text, sizeof(text));
-                say("%s: the default gateway is %s\n", (LONG)name, (LONG)text);
+                ami_config_format_ip(gateway, cni_text, sizeof(cni_text));
+                say("%s: the default gateway is %s\n", (LONG)name, (LONG)cni_text);
             }
         }
     }
@@ -1088,7 +1120,7 @@ int main(int argc, char **argv)
         BOOL  already6;
         char  gwtext[CNI_IP6_STRLEN];
 
-        tool_format_ip6(gateway6, gwtext, sizeof(gwtext));
+        tool_format_ip6(cni_gateway6, gwtext, sizeof(gwtext));
 
         if (!stack_has_ipv6(base))
         {
@@ -1102,11 +1134,11 @@ int main(int argc, char **argv)
         /* Asked for what it already has: keep it rather than remove and
            re-add, which would drop the route for the moment in between. */
         already6 = (BOOL)(!clear_gateway6 &&
-                          has_router6(base, index, gateway6));
+                          has_router6(base, index, cni_gateway6));
 
         /* Every router on this interface except the one being asked for.
            GATEWAY6 NONE keeps none. */
-        if (!drop_routers6(base, index, clear_gateway6 ? NULL : gateway6,
+        if (!drop_routers6(base, index, clear_gateway6 ? NULL : cni_gateway6,
                            &dropped, &err))
         {
             tool_error("%s: the IPv6 default router was not removed",
@@ -1131,7 +1163,7 @@ int main(int argc, char **argv)
         }
         else
         {
-            if (control6(base, NETCTRL_ROUTE6_ADD, index, gateway6, &err) != 0)
+            if (control6(base, NETCTRL_ROUTE6_ADD, index, cni_gateway6, &err) != 0)
             {
                 if (err == CNI_ENOSYS)
                     tool_error("this bsdsocket.library was built without "
@@ -1249,18 +1281,7 @@ int main(int argc, char **argv)
      */
     if (have_priority)
     {
-        NetStatusControl ctl;
-        ULONG            w;
-
-        for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
-            ((ULONG *)&ctl)[w] = 0;
-        ctl.nsc_Magic    = AMI_NETSTATUS_MAGIC;
-        ctl.nsc_Version  = (UWORD)AMI_NETSTATUS_VERSION;
-        ctl.nsc_Index    = (UWORD)index;
-        ctl.nsc_Priority = priority;
-
-        if (tool_netstatus_control(base, NETCTRL_INTERFACE_PRIORITY, &ctl,
-                                   &err) != 0)
+        if (control_priority(base, index, priority, &err) != 0)
         {
             if (err == CNI_ENXIO)
                 tool_error("%s is no longer attached", (LONG)name);

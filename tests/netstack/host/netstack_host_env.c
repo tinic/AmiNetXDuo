@@ -916,6 +916,22 @@ TX_THREAD *_tx_thread_identify(VOID)
     return TX_NULL;
 }
 
+/* netstack_ipv4_route() owns the IP protection mutex around the private route
+   walker.  These harnesses are single-threaded; preserving success is enough
+   while the real walker below still exercises interface selection. */
+UINT _txe_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
+{
+    (VOID)mutex_ptr;
+    (VOID)wait_option;
+    return TX_SUCCESS;
+}
+
+UINT _txe_mutex_put(TX_MUTEX *mutex_ptr)
+{
+    (VOID)mutex_ptr;
+    return TX_SUCCESS;
+}
+
 UINT _nx_mld_enable(NX_IP *ip_ptr)
 {
     (VOID)ip_ptr;

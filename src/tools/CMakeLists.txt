@@ -396,14 +396,18 @@ endif()
 # connections open at once, `nc -l` takes one caller and exits, so it is
 # also the only coverage of accept() being called twice on a live listener.
 #
-# httppath.c, httpif.c, httpframe.c and httplock.c are sources of their own
-# rather than part of httpd.c because they are the parts that must not be
-# wrong, and
-# splitting them is what lets the host tests below compile them: httpd.c
+# httpstr.c, httppath.c, httprequest.c, httpif.c, httpframe.c and httplock.c are sources of
+# their own rather than part of httpd.c because they are the parts that must
+# not be wrong, and splitting them is what lets the host tests below compile
+# them: httpd.c
 # includes tools.h, which reaches tx_api.h and proto/dos.h, and neither builds
 # on a host.  One decides which file a request reaches, the second whether it
 # may write to it, the third where one request ends and the next begins, the
 # fourth who may write to a name somebody else has locked.
+# httpfs.c and httpvol.c are the AmigaDOS-facing WebDAV policy.  They are
+# separate for the same ownership reason even though their DOS calls make their
+# tests guest-side: httpfs receives the server's shared scratch objects instead
+# of owning hidden process state, and httpvol never carries a DosList lock out.
 #
 # httpws.c and httpsha1.c are the WebSocket half, and they are split from each
 # other for the reason the four above are split from httpd.c: httpws.c has to
@@ -425,7 +429,7 @@ endif()
 # CyberGraphX, kept out of httpfb.c so that the chipset path has no library
 # call and no card-shaped branch in it.  It is where the readback routes are
 # timed, which is the measurement the whole RTG design turns on.
-aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httppath.c httpif.c
+aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c httpstr.c httpvol.c httppath.c httprequest.c httpif.c
                                           httpframe.c httplock.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
                                           httprtg.c httpzz.c
@@ -745,6 +749,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httpif PRIVATE -Wall -Wextra)
     set_target_properties(test_httpif PROPERTIES C_STANDARD 11)
 
+    add_executable(test_httprequest
+        test/test_httprequest.c
+        httprequest.c)
+
+    target_include_directories(test_httprequest PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_httprequest PRIVATE -Wall -Wextra)
+    set_target_properties(test_httprequest PROPERTIES C_STANDARD 11)
+
     # The ReadArgs templates of every command, against the enums that index
     # them, against what the code does with each slot, and against the guide
     # that ships them to the user.  Parses the sources rather than compiling
@@ -938,6 +952,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     include(CTest)
     add_test(NAME httpws_rfc6455 COMMAND test_httpws)
     add_test(NAME httppath_escapes COMMAND test_httppath)
+    add_test(NAME httprequest_values COMMAND test_httprequest)
     add_test(NAME httpif_conditions COMMAND test_httpif)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)

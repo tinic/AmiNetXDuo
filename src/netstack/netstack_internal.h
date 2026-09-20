@@ -178,6 +178,19 @@ UINT ami_ns_client_pool_create(AmiNsClientPoolBlock **owner,
                                CHAR *name, ULONG payload, ULONG memory_bytes);
 VOID ami_ns_client_pool_delete(AmiNsClientPoolBlock **owner);
 
+/* Runtime pool inputs and override policy.  The pure sizing arithmetic stays
+   in netstack_pool.c and is public through <aminetxduo/pool.h>. */
+ULONG ami_ns_packet_stride(VOID);
+ULONG ami_ns_pool_packets(VOID);
+
+/* The singleton's lifecycle/interface lock.  Files outside netstack.c never
+   see the semaphore itself, so its initialization remains one operation. */
+VOID ami_ns_lock_obtain(VOID);
+BOOL ami_ns_lock_attempt(VOID);
+VOID ami_ns_lock_release(VOID);
+
+BOOL ami_ns_same_name(const char *a, const char *b);
+
 struct AmiNetStack
 {
     ULONG               ns_Refs;
@@ -521,10 +534,13 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
 
 /* ------------------------------------------------------------ AMITCP port,
  *
- * netstack_rexx.c, the AMITCP public port and the ARexx host servicing it.
- * Without AMINETXDUO_AREXX there is no host and netstack.c opens the port on
- * its own, so `WaitForPort AMITCP` still returns and a script still blocks.
+ * netstack_port.c owns the AMITCP public port.  With ARexx it delegates to the
+ * host in netstack_rexx.c; without ARexx it publishes a bare port so
+ * `WaitForPort AMITCP` still returns and a script still blocks.
  */
+VOID ami_ns_port_create(VOID);
+VOID ami_ns_port_delete(VOID);
+
 #ifdef AMINETXDUO_AREXX
 VOID ami_netstack_rexx_start(VOID);
 VOID ami_netstack_rexx_stop(VOID);
