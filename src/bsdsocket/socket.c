@@ -2036,19 +2036,12 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
 
         if (!bound)
         {
-            NXD_IPV6_ADDRESS *chosen = NX_NULL;
-            UINT              status;
+            LONG required = (zoned != NX_NULL)
+                                ? (LONG)zoned->nx_interface_index : -1L;
 
-            tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-            status = _nxd_ipv6_interface_find(ip,
-                                               (ULONG *)dest->nxd_ip_address.v6,
-                                               &chosen, zoned);
-            tx_mutex_put(&ip->nx_ip_protection);
-
-            if (status != NX_SUCCESS || chosen == NX_NULL)
+            if (!netstack_ipv6_source_find(dest->nxd_ip_address.v6,
+                                           required, NULL, index))
                 return BSD_SOURCE_REFUSE;
-
-            *index = (UINT)chosen->nxd_ipv6_address_index;
             return BSD_SOURCE_INDEX;
         }
 
@@ -2364,21 +2357,15 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
 #ifdef AMINETXDUO_IPV6
     if (addr->nxd_ip_version == NX_IP_VERSION_V6)
     {
-        NXD_ADDRESS       dest   = *addr;   /* the lookup takes it non-const */
-        NXD_IPV6_ADDRESS *chosen = NX_NULL;
         NX_INTERFACE     *nxif   =
             ip->nx_ipv6_address[*index].nxd_ipv6_address_attached;
-        UINT              status;
 
         if (nxif == NX_NULL)
             return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
 
-        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        status = _nxd_ipv6_interface_find(ip, dest.nxd_ip_address.v6,
-                                          &chosen, nxif);
-        tx_mutex_put(&ip->nx_ip_protection);
-
-        if (status != NX_SUCCESS)
+        if (!netstack_ipv6_source_find(addr->nxd_ip_address.v6,
+                                       (LONG)nxif->nx_interface_index,
+                                       NULL, index))
             return bsd_fail(SocketBase, AMI_ENETUNREACH);
     }
 #endif

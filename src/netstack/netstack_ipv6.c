@@ -772,9 +772,9 @@ UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
     return status;
 }
 
-/* The caller holds the ThreadX bracket. */
-static BOOL ami_ns6_source_for(const ULONG dest[4], LONG interface_index,
-                               ULONG addr_out[4])
+/* Keep NetX's private RFC 6724 selector behind the netstack boundary. */
+BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
+                               ULONG addr_out[4], UINT *address_index_out)
 {
     AmiNetStack      *ns = ami_netstack_raw();
     NXD_IPV6_ADDRESS *source = NX_NULL;
@@ -783,7 +783,8 @@ static BOOL ami_ns6_source_for(const ULONG dest[4], LONG interface_index,
     UINT              status;
 
     if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled ||
-        dest == NULL || addr_out == NULL || interface_index < -1 ||
+        dest == NULL || (addr_out == NULL && address_index_out == NULL) ||
+        interface_index < -1 ||
         interface_index >= (LONG)NX_MAX_IP_INTERFACES)
         return FALSE;
 
@@ -805,10 +806,15 @@ static BOOL ami_ns6_source_for(const ULONG dest[4], LONG interface_index,
     status = _nxd_ipv6_interface_find(&ns->ns_Ip, scratch, &source, nxif);
     if (status == NX_SUCCESS && source != NX_NULL)
     {
-        addr_out[0] = source->nxd_ipv6_address[0];
-        addr_out[1] = source->nxd_ipv6_address[1];
-        addr_out[2] = source->nxd_ipv6_address[2];
-        addr_out[3] = source->nxd_ipv6_address[3];
+        if (addr_out != NULL)
+        {
+            addr_out[0] = source->nxd_ipv6_address[0];
+            addr_out[1] = source->nxd_ipv6_address[1];
+            addr_out[2] = source->nxd_ipv6_address[2];
+            addr_out[3] = source->nxd_ipv6_address[3];
+        }
+        if (address_index_out != NULL)
+            *address_index_out = (UINT)source->nxd_ipv6_address_index;
     }
 
     tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
@@ -825,7 +831,7 @@ BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
     if (caller == NULL)
         return FALSE;
 
-    found = ami_ns6_source_for(dest, interface_index, addr_out);
+    found = netstack_ipv6_source_find(dest, interface_index, addr_out, NULL);
 
     ami_netstack_leave_free(caller);
     return found;

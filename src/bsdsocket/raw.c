@@ -526,16 +526,13 @@ static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
             break;
 
         case BSD_SOURCE_ROUTE:
-            tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-            status = _nxd_ipv6_interface_find(ip, dest->nxd_ip_address.v6,
-                                              &source, NX_NULL);
-            tx_mutex_put(&ip->nx_ip_protection);
-
-            if (status != NX_SUCCESS || source == NX_NULL)
+            if (!netstack_ipv6_source_find(dest->nxd_ip_address.v6, -1L,
+                                           NULL, &src_index))
             {
                 nx_packet_release(packet);
                 return bsd_fail(base, AMI_ENETUNREACH);
             }
+            source = &ip->nx_ipv6_address[src_index];
             break;
 
         case BSD_SOURCE_UNREACH:

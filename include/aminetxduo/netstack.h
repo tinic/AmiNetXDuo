@@ -265,9 +265,14 @@ BOOL netstack_ipv6_address_origin(UWORD interface_index, UWORD slot,
    gets a link-local whether or not a router has ever spoken to it. */
 BOOL netstack_ipv6_have_global(VOID);
 
-/* The best source address for talking to `dest`.  interface_index is a
-   zero-based NetX interface, or -1 to let the route choose.  FALSE when that
-   interface has no usable (non-tentative) address of the right scope. */
+/* Select the best source for talking to `dest`.  interface_index is a
+   zero-based NetX interface, or -1 to let the route choose.  The find form
+   requires a ThreadX bracket and can return either the address or its NetX
+   address-table index; outputs are optional.  The convenience form brackets
+   itself and returns the address.  FALSE means no usable, non-tentative
+   address of the right scope exists. */
+BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
+                               ULONG addr_out[4], UINT *address_index_out);
 BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
                               ULONG addr_out[4]);
 
