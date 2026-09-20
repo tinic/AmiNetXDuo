@@ -904,11 +904,9 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface);
 ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 
-#ifndef AMINETXDUO_GREEN_REALM
 /* Must the reader block?  The port decides; the batch count may not.  See the
    definition in sana2_rx.c, and tests/sana2/host for what holds it there. */
 BOOL ami_sana2_rx_should_block(const AmiSana2Reader *rd, UWORD taken);
-#endif
 /*
  * `slot` is the request the frame arrived on, or NULL when there is none.  It
  * carries the sum the copy hook computed, so the check below does not walk the
@@ -950,21 +948,5 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
    (once, behind their guard) BEFORE ours are defined, or a TU that includes it
    later has ours silently replaced -- the NDK path is -isystem, so the
    redefinition never even warns. */
-#ifdef AMINETXDUO_GREEN_REALM
-#include <proto/exec.h>
-BYTE ami_green_checked_waitio(struct IORequest *request);
-struct Message *ami_green_checked_waitport(struct MsgPort *port);
-
-#undef WaitIO
-#define WaitIO(request) ami_green_checked_waitio(request)
-#undef WaitPort
-#define WaitPort(port) ami_green_checked_waitport(port)
-
-#ifdef AMINETXDUO_RXPROBE
-ULONG ami_green_checked_wait(ULONG sigmask);
-#undef Wait
-#define Wait(sigmask) ami_green_checked_wait(sigmask)
-#endif
-#endif
 
 #endif /* AMINETXDUO_SANA2_INTERNAL_H */

@@ -93,12 +93,6 @@ VOID          ami_netstack_leave_free(AmiNetCaller *caller);
 LONG ami_netstack_enter_cached(AmiNetCaller *caller);
 VOID ami_netstack_leave_cached(AmiNetCaller *caller);
 
-#ifdef AMINETXDUO_GREEN_REALM
-/* Enter only if the baton is immediately takeable.  AMI_NET_OK leaves the
- * bracket open exactly as ami_netstack_enter_cached() would (leave with
- * ami_netstack_leave_cached()); AMI_NET_ERR_BUSY means nothing happened. */
-LONG ami_netstack_try_enter_cached(AmiNetCaller *caller);
-#endif
 VOID ami_netstack_release(AmiNetCaller *caller);
 
 /* Bracket counters, kept in memory because a freeze in here leaves no log.

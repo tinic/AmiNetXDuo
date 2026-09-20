@@ -14,12 +14,6 @@
  */
 #include "tx_api.h"
 #include "nx_api.h"
-#ifdef AMINETXDUO_GREEN_REALM
-/* TX_AMIGA_GATE, embedded per opener below.  Guarded so the host tier's
-   shim builds, which have no port header and no green realm, do not need
-   one. */
-#include "tx_amiga.h"
-#endif
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -282,12 +276,6 @@ struct AmiSocketBase
     BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
 
-#ifdef AMINETXDUO_GREEN_REALM
-    TX_AMIGA_GATE           sb_NxGate;
-    BOOL                    sb_NxGated;
-    BOOL                    sb_NxGateDead;
-    BOOL                    sb_NxSweepSeen;
-#endif
 
 #ifdef AMINETXDUO_NXCENSUS
     ULONG                   sb_NxCount;     /* brackets actually taken       */
@@ -659,29 +647,10 @@ VOID  bsd_nx_leave(struct AmiSocketBase *base);
    See netx_call.c for what is cached and why. */
 VOID  bsd_nx_release(struct AmiSocketBase *base);
 
-#ifdef AMINETXDUO_GREEN_REALM
-BYTE ami_green_checked_waitio(struct IORequest *request);
-struct Message *ami_green_checked_waitport(struct MsgPort *port);
-
-#undef WaitIO
-#define WaitIO(request) ami_green_checked_waitio(request)
-#undef WaitPort
-#define WaitPort(port) ami_green_checked_waitport(port)
-
-#ifdef AMINETXDUO_RXPROBE
-ULONG ami_green_checked_wait(ULONG sigmask);
-#undef Wait                     /* the NDK's inline macro, replaced whole */
-#define Wait(sigmask) ami_green_checked_wait(sigmask)
-#endif
-#endif
 
 /*
  * The break bits pending for this base's owner, observed without consuming.
  */
-#ifdef AMINETXDUO_GREEN_REALM
-ULONG bsd_break_signals(struct AmiSocketBase *base);
-BOOL  bsd_nx_orphan(struct AmiSocketBase *base);
-#else
 static __inline ULONG bsd_break_signals(struct AmiSocketBase *base)
 {
     (VOID)base;
@@ -693,7 +662,6 @@ static __inline BOOL bsd_nx_orphan(struct AmiSocketBase *base)
     (VOID)base;
     return TRUE;
 }
-#endif
 
 struct AmiSocketBase *bsd_lib_open(register ULONG version __asm("d0"),
                                    register struct AmiSocketBase *SocketBase __asm("a6"));

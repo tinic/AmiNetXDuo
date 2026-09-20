@@ -1684,21 +1684,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                 }
             }
 #endif
-            {
-                TX_AMIGA_GREEN_STATS gs;
-
-                tx_amiga_green_stats(&gs);
-                out->nrb_GreenSwitches  = gs.gs_switches;
-                out->nrb_GreenExternal  = gs.gs_external;
-                out->nrb_GreenIdleWaits = gs.gs_idle_waits;
-                out->nrb_GreenWaitFast  = gs.gs_wait_fast;
-                out->nrb_GreenWaitSlow  = gs.gs_wait_slow;
-                out->nrb_GreenStray     = gs.gs_stray_wait;
-                out->nrb_GateCalls      = gs.gs_gate_calls;
-                out->nrb_GateFallback   = gs.gs_gate_fallback;
-                out->nrb_RealmSigBits   = gs.gs_realm_sigbits;
-                out->nrb_GateFast       = gs.gs_gate_fast;
-            }
+            /* Retired green-realm fields remain zero from ns_writer_next()
+               so the published record keeps its ABI. */
         }
         ns_writer_finish(&w);
         return (LONG)hdr->nsh_Count;

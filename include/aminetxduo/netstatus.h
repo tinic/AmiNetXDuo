@@ -850,24 +850,20 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Defer;      /* deliver -> IP thread pickup       */
     NetStatusBudgetLeg  nrb_Demux;      /* pickup -> the segment's socket    */
     NetStatusBudgetLeg  nrb_State;      /* socket entry -> receive notify    */
-    /* The green realm's scheduling census (AMINETXDUO_GREEN_REALM builds; all
-       zero from a baton build).  Appended at the end, so offsets hold. */
+    /* Retired green-realm census.  Kept as zeroed ABI padding so existing
+       NetStatus builds retain every later offset. */
     ULONG               nrb_GreenSwitches;
     ULONG               nrb_GreenExternal;
     ULONG               nrb_GreenIdleWaits;
     ULONG               nrb_GreenWaitFast;
     ULONG               nrb_GreenWaitSlow;
-    ULONG               nrb_GreenStray;     /* MUST be zero; a nonzero count
-                                               is an unconverted Exec block
-                                               inside the realm              */
-    /* The request gate: brackets migrated into the realm against brackets
-       that fell back to the adopted-baton path.  Appended, offsets hold. */
+    ULONG               nrb_GreenStray;
+    /* Retired request-gate counters, retained for ABI stability. */
     ULONG               nrb_GateCalls;
     ULONG               nrb_GateFallback;
-    /* Exec signal bits allocated on the realm Task, of its 16 allocatable. */
+    /* Retired realm signal count, retained for ABI stability. */
     ULONG               nrb_RealmSigBits;
-    /* Brackets that took an idle realm's baton directly; with nrb_GateCalls
-       and nrb_GateFallback these partition the brackets.  Offsets hold. */
+    /* Retired gate fast-path count, retained for ABI stability. */
     ULONG               nrb_GateFast;
     /* The transmit half of a received segment: its socket entry to the driver
        call carrying the ACK.  With nrb_Reap/Stuff/Post it prices the whole TX

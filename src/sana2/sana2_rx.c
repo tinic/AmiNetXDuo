@@ -1732,7 +1732,6 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
     return took;
 }
 
-#ifndef AMINETXDUO_GREEN_REALM
 /*
  * Is a completion already queued?  One pointer read of the port's list, and a
  * miss costs nothing that matters: a reply landing right after it sets the
@@ -1767,7 +1766,6 @@ BOOL ami_sana2_rx_should_block(const AmiSana2Reader *rd, UWORD taken)
 
     return (BOOL)(!ami_sana2_rx_queued(rd));
 }
-#endif
 
 /* --------------------------------------------------------------- shutdown */
 
@@ -2056,18 +2054,6 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             continue;
         }
 
-#ifdef AMINETXDUO_GREEN_REALM
-        /*
-         * The reader is a green thread: only IT sleeps, while the realm keeps
-         * running the IP thread.  There is no baton bracket on this path, so
-         * the probe's baton leg reads zero here by design.
-         */
-        /* EITHER WAY: the mask that comes back is not read.  The loop
-           re-tests the port and the reap list on the next pass, and they are
-           the authority whether this returned the signals, none of them, or
-           refused outright. */
-        AMI_NX_EITHER_WAY(tx_amiga_green_wait(rd->wake_mask | rd->reap_mask));
-#else
         /*
          * Block ONLY when there is nothing to take.  The bracket is a
          * Forbid(), a ThreadX suspend, a dispatch and the reverse of all
@@ -2117,7 +2103,6 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             ami_sana2_block_leave();
 #endif
         }
-#endif /* AMINETXDUO_GREEN_REALM */
 
         (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 

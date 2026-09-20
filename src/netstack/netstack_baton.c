@@ -241,23 +241,6 @@ VOID ami_netstack_baton_release(VOID)
         return;
     }
 
-#ifdef AMINETXDUO_GREEN_REALM
-    if ((thread->tx_thread_amiga_flags & TX_AMIGA_THREAD_GREEN) != 0U)
-    {
-        /*
-         * Green code must sleep in tx_amiga_green_wait(), never around an Exec
-         * Wait(): suspending it here would strand its context, because the
-         * bracket's Wait() runs on the REALM Task.  This counter must be zero.
-         */
-        tx_amiga_green_stray_wait_note();
-        Permit();
-        AMI_WARN("green realm: baton bracket entered from green thread '%s'. "
-                 "An unconverted Exec-blocking site is still in the realm",
-                 (thread->tx_thread_name != TX_NULL) ? thread->tx_thread_name
-                                                     : (CHAR *)"?");
-        return;
-    }
-#endif
 
     if (slot == NULL)
         slot = ami_baton_claim(me);

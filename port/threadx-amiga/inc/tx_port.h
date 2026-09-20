@@ -360,10 +360,6 @@ void    _tx_amiga_thread_completed(void);
    relinquishing green thread must deliver latched signals and owed ticks BEFORE
    the generic code inspects the ready lists.  Baton builds keep the stock hook. */
 
-#ifdef AMINETXDUO_GREEN_REALM
-void    _tx_amiga_relinquish_prepare(void);
-#define TX_THREAD_RELINQUISH_PORT_PREPARE             _tx_amiga_relinquish_prepare();
-#endif
 
 
 /* Start the periodic tick task once the kernel is initialised but before the

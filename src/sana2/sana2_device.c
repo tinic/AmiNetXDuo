@@ -136,31 +136,11 @@ VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
 
 /*
  * Complete one submitted IORequest without blocking the machine underneath the
- * stack.  From an ordinary Exec context: DoIO() inside the baton bracket.  From
- * a GREEN context: SendIO() plus tx_amiga_green_wait(), because a DoIO() would
- * put the realm Task itself to sleep with every green thread's work on it.  A
- * CheckIO() loop rather than one wait: a latched stale port signal is only a
- * hint that the port has something.
+ * stack.  DoIO() runs inside the baton bracket so its Exec wait does not hold
+ * the hosted ThreadX scheduler.
  */
 LONG ami_sana2_do_io(struct IORequest *req)
 {
-#ifdef AMINETXDUO_GREEN_REALM
-    if (tx_amiga_green_active())
-    {
-        SendIO(req);
-        while (CheckIO(req) == NULL)
-        {
-            /* EITHER WAY: the mask that comes back is not the answer.  A green
-           wait returns whatever signals arrived, zero if it refused, and the
-           CheckIO() the loop re-tests is the authority in every case -- a
-           spurious or empty return simply goes round again. */
-            AMI_NX_EITHER_WAY(tx_amiga_green_wait(
-                1UL << req->io_Message.mn_ReplyPort->mp_SigBit));
-        }
-        (VOID)WaitIO(req);
-        return (LONG)(BYTE)req->io_Error;
-    }
-#endif
 
     /* DoIO() blocks in exec Wait(), so the same baton rule as the readers
        applies. */
@@ -402,19 +382,6 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
     BeginIO((struct IORequest *)&req);
     AbortIO((struct IORequest *)&req);
 
-#ifdef AMINETXDUO_GREEN_REALM
-    /* The interface can be opened by a green NetX thread.  AbortIO() only
-       requests cancellation; a driver may return the request later, and a
-       direct WaitIO() in that window would park the entire realm. */
-    while (CheckIO((struct IORequest *)&req) == NULL)
-    {
-        /* EITHER WAY: the mask that comes back is not the answer.  A green
-           wait returns whatever signals arrived, zero if it refused, and the
-           CheckIO() the loop re-tests is the authority in every case -- a
-           spurious or empty return simply goes round again. */
-        AMI_NX_EITHER_WAY(tx_amiga_green_wait(1UL << port->mp_SigBit));
-    }
-#endif
     WaitIO((struct IORequest *)&req);
 
     err = (LONG)(BYTE)req.ios2_Req.io_Error;

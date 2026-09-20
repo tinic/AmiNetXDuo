@@ -1049,20 +1049,8 @@ UINT                 armed;
         _tx_amiga_vblank_int.is_Code         =  (VOID (*)()) _tx_amiga_vblank_entry;
 
         AddIntServer((ULONG) INTB_VERTB, &_tx_amiga_vblank_int);
-#ifdef AMINETXDUO_GREEN_REALM
-        /* The tick merge: the server signals the REALM -- its own scheduler signal,
-           so no bit of the realm's 32 is spent -- and the realm services the tick
-           in passing.  This task keeps only the once-a-second watchdog.  */
-        Forbid();
-        _tx_amiga_vblank_task       =  (struct Task *) _tx_amiga_scheduler_task;
-        _tx_amiga_vblank_sigmask    =  _tx_amiga_scheduler_signal;
-        _tx_amiga_tick_run.tr_realm =  (UINT) TX_TRUE;
-        Permit();
-        wake_sig =  port_sig;           /* the watchdog is all we wake for  */
-#else
         _tx_amiga_vblank_task =  (struct Task *) _tx_amiga_timer_task;
         wake_sig =  _tx_amiga_vblank_sigmask;
-#endif
         vb_mode  =  TX_TRUE;
         arm_secs =  1UL;        /* watchdog only; VERTB is the tick */
         arm_micro =  0UL;

@@ -354,106 +354,6 @@ struct Task *me;
 }
 
 
-#ifdef AMINETXDUO_GREEN_REALM
-
-/* The free-baton fast path of the request gate: resume the cached thread ONLY if
-   that takes the baton immediately, and otherwise back the resume out entirely,
-   both under one Forbid(), so a decline posts no Signal and leaves no trace.  */
-UINT tx_amiga_adopt_try_resume(TX_THREAD *thread_ptr)
-{
-
-struct Task *me;
-UINT         taken;
-
-
-    if (thread_ptr == TX_NULL)
-    {
-        return(TX_PTR_ERROR);
-    }
-    if (_tx_amiga_kernel_up == TX_FALSE)
-    {
-        return(TX_NOT_DONE);
-    }
-
-    me =  FindTask((STRPTR) 0);
-
-    Forbid();
-
-    if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
-        (thread_ptr -> tx_thread_amiga_task != (VOID *) me) ||
-        (thread_ptr -> tx_thread_id != TX_THREAD_ID) ||
-        (thread_ptr -> tx_thread_state != TX_SUSPENDED) ||
-        ((thread_ptr -> tx_thread_amiga_flags &
-          (TX_AMIGA_THREAD_DIE | TX_AMIGA_THREAD_ORPHANED)) != 0U))
-    {
-        Permit();
-        return(TX_CALLER_ERROR);
-    }
-
-    /* A cheap refusal before touching the lists: somebody holds the baton, or
-       something already ready outranks us.  */
-    if ((_tx_thread_current_ptr != TX_NULL) ||
-        (_tx_thread_execute_ptr != TX_NULL) ||
-        (_tx_thread_system_state != ((ULONG) 0)))
-    {
-        Permit();
-        return(TX_NOT_DONE);
-    }
-
-    _tx_thread_system_state++;
-
-    AMI_NX_ONLY_SUCCESS(_tx_thread_resume(thread_ptr));
-
-    /* The adopt fast-path condition, minus the system_state term (ours is
-       the only raise, and it comes back down either way).  */
-    taken =  ((_tx_thread_current_ptr == TX_NULL) &&
-              (_tx_thread_execute_ptr == thread_ptr))
-             ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
-
-    if (taken == ((UINT) TX_FALSE))
-    {
-
-        /* The resume surfaced somebody who outranks us.  Put the thread back;
-           execute_ptr is recomputed by the suspend under this same Forbid().  */
-        AMI_NX_ONLY_SUCCESS(_tx_thread_suspend(thread_ptr));
-        _tx_thread_system_state--;
-        Permit();
-        return(TX_NOT_DONE);
-    }
-
-    _tx_thread_system_state--;
-
-    _tx_thread_current_ptr =  thread_ptr;
-    thread_ptr -> tx_thread_run_count++;
-    _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
-    ami_budget_hold_start();
-
-    Permit();
-
-    return(TX_SUCCESS);
-}
-
-
-/* Whether the baton is immediately takeable, for the policy decision before a
-   first-ever adoption.  A hint, not a lock: the answer can be stale, and both
-   outcomes remain correct.  Only the try-resume above is the atomic form.  */
-UINT tx_amiga_baton_free(VOID)
-{
-
-UINT    answer;
-
-
-    Forbid();
-    answer =  ((_tx_thread_current_ptr == TX_NULL) &&
-               (_tx_thread_execute_ptr == TX_NULL) &&
-               (_tx_thread_system_state == ((ULONG) 0)))
-              ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
-    Permit();
-
-    return(answer);
-}
-
-#endif /* AMINETXDUO_GREEN_REALM */
 
 
 UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
@@ -681,4 +581,12 @@ UINT         result =  (UINT) TX_FALSE;
     Permit();
 
     return(result);
+}
+
+
+/* The port has no per-thread termination side table. */
+VOID _tx_amiga_thread_terminated(TX_THREAD *thread_ptr)
+{
+
+    (VOID) thread_ptr;
 }

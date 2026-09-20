@@ -270,19 +270,11 @@ static VOID bsd_task_sweep(VOID)
         if (child->sb_Task == NULL || bsd_task_alive(child->sb_Task))
             continue;
 
-#ifdef AMINETXDUO_GREEN_REALM
-        if (!child->sb_NxSweepSeen)
-        {
-            child->sb_NxSweepSeen = TRUE;
-#endif
         bsd_latched_tasks++;
         AMI_WARN("bsdsocket: task %lx exited without closing the library. "
                  "Its base will no longer be signalled (%lu so far)",
                  (unsigned long)child->sb_Task,
                  (unsigned long)bsd_latched_tasks);
-#ifdef AMINETXDUO_GREEN_REALM
-        }
-#endif
 
         child->sb_NxNest = 0;
         ami_netstack_release(&child->sb_NxCaller);

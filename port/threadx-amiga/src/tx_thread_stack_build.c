@@ -17,17 +17,13 @@
 #include "tx_amiga_internal.h"
 
 
-#ifndef AMINETXDUO_GREEN_REALM
 static VOID _tx_amiga_thread_entry(VOID);
-#endif
 
 
 VOID _tx_thread_stack_build(TX_THREAD *thread_ptr, VOID (*function_ptr)(VOID))
 {
 
-#ifndef AMINETXDUO_GREEN_REALM
 struct Task *task;
-#endif
 CHAR        *name;
 
 
@@ -69,35 +65,6 @@ CHAR        *name;
 
     /* ---- ThreadX-created thread ----------------------------------------- */
 
-#ifdef AMINETXDUO_GREEN_REALM
-
-    /* A request-gate proxy: green identity, but NO initial frame.  A frame laid at
-       stack_end here would scribble on the top of the owning Task's live stack,
-       which is what the "stack" of a gate proxy is.  */
-
-    if (_tx_amiga_gate_bind_pending != 0U)
-    {
-        thread_ptr -> tx_thread_amiga_task       =  _tx_amiga_scheduler_task;
-        thread_ptr -> tx_thread_amiga_run_signal =  _tx_amiga_scheduler_signal;
-        thread_ptr -> tx_thread_amiga_flags      =  TX_AMIGA_THREAD_GREEN;
-        (VOID) name;
-        return;
-    }
-
-    /* Green realm: no Exec Task.  tx_thread_amiga_task points at the realm Task so
-       every "is the caller the baton holder" test answers correctly while this
-       context runs; the run signal is the scheduler's, so a stray poke wakes it. */
-
-    thread_ptr -> tx_thread_amiga_task       =  _tx_amiga_scheduler_task;
-    thread_ptr -> tx_thread_amiga_run_signal =  _tx_amiga_scheduler_signal;
-    thread_ptr -> tx_thread_amiga_flags      =  TX_AMIGA_THREAD_GREEN;
-
-    _tx_green_stack_build(thread_ptr);
-
-    (VOID) name;
-    return;
-
-#else /* !AMINETXDUO_GREEN_REALM */
 
     /* SIGF_SINGLE is the run signal for tasks we create: permanently allocated by
        Exec and private to the task, so there is no window between AddTask() and the
@@ -113,11 +80,9 @@ CHAR        *name;
 
     thread_ptr -> tx_thread_amiga_task =  (VOID *) task;
 
-#endif /* AMINETXDUO_GREEN_REALM */
 }
 
 
-#ifndef AMINETXDUO_GREEN_REALM
 /* Entry point of every Exec Task that backs a ThreadX thread.  The TX_THREAD comes
    out of the task's own control block, which tc_UserData identifies and which is
    set up before AddTask().  */
@@ -158,4 +123,3 @@ struct _tx_amiga_ctrl   *ctrl;
 
     _tx_amiga_task_destroy(ctrl);                    /* never returns */
 }
-#endif /* !AMINETXDUO_GREEN_REALM */

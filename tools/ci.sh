@@ -182,14 +182,6 @@ CROSS_CONFIGS=(
     # resizes a structure, so unlike nosack/norxverify they do not each need
     # their own tree to be compiled honestly.
     "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=OFF"
-    # GREEN_REALM replaces the thread model wholesale and shares an arm with
-    # nothing.  IT BUILDS THE TESTS, and stage_emulator runs them: the option
-    # turns every Exec handoff into a stack switch inside one task, on a
-    # machine with no MMU where an over-run stack is a silent overwrite and
-    # not a fault.  While TESTS=OFF rode here the arm proved only that the
-    # realm compiles, and not one line of it had ever been executed under a
-    # load by anything in this file.
-    "green:-DAMINETXDUO_GREEN_REALM=ON"
 )
 
 # WHAT THE HOST STAGES BUILD IS NOT WRITTEN DOWN HERE ANY MORE.
