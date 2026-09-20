@@ -1470,6 +1470,30 @@ if(AMINETXDUO_GRO)
     add_compile_definitions(AMINETXDUO_GRO)
 endif()
 
+# ANXD_CMD_RX_BATCH: the reader posts one request per burst of received
+# frames instead of one CMD_READ per frame, on a driver that delivers bursts
+# (anxgenet.device; the classic cores refuse it).  Measured 2026-09-20, A1200
+# + PiStorm32, iperf into the Amiga: 399 -> 805 Mbit/s.  Off in the micro
+# profile, whose machines have no such card.
+option(AMINETXDUO_RX_BATCH
+       "Receive in batches: one IORequest per burst on a bursting driver" ON)
+
+if(AMINETXDUO_RX_BATCH)
+    add_compile_definitions(AMINETXDUO_RX_BATCH)
+endif()
+
+# Transmit runs: a send() of several segments brackets its writes so a
+# driver that negotiated ANXD_S2F_TX_MORE (anxgenet.device) starts them
+# together and the peer acknowledges pairs.  Measured 2026-09-20, A1200 +
+# PiStorm32, iperf out of the Amiga: 364-371 -> 412-430 Mbit/s.  Off in the
+# micro profile with the batch, for the same machines.
+option(AMINETXDUO_TX_RUN
+       "Transmit runs: a multi-segment send() leaves the wire together" ON)
+
+if(AMINETXDUO_TX_RUN)
+    add_compile_definitions(AMINETXDUO_TX_RUN)
+endif()
+
 # The four rxverify counters that fire on every received frame, inside the
 # protection hold.  Off by default; see src/net68k/net68k.h.  The error and
 # skip counters are unconditional and do not need this.

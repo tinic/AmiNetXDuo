@@ -193,8 +193,24 @@ typedef struct
    in bsdsocket_window.h, with the derivation that reads them. */
 #include "bsdsocket_window.h"
 
-#define BSD_TCP_RX_MSS_REF      1460
-#define BSD_TCP_RX_QUEUE_SLACK  4
+/*
+ * The receive queue's cap in PACKETS, from the window in bytes.  NetX Duo
+ * (nx_tcp_socket_state_data_check.c, NX_ENABLE_LOW_WATERMARK) does not
+ * advertise a smaller window when the queue nears the cap: it DROPS the
+ * next in-order segment and sends a zero window, and the sender only learns
+ * of the loss by retransmitting.  So the cap must never be reached by data
+ * the window itself admitted.  A window of W bytes holds at most W / MSS
+ * full segments -- but the peer's segments are MSS minus its options (1448
+ * with timestamps), a run may end in a short segment, and the coalescer
+ * hands up chains that count as one packet each, so the count is never
+ * above W / 1448 + 1 in practice.  The reference is the smallest segment a
+ * window filled with real data is made of, and the slack covers the tail.
+ * Measured 2026-09-20 on the A1200 with a 262 KB window: at 1460 + 4 the
+ * cap was 183 packets against 181 segments of 1448 -- 405 retransmissions
+ * in ten seconds, each one a dropped in-order segment and a zero window.
+ */
+#define BSD_TCP_RX_MSS_REF      1200
+#define BSD_TCP_RX_QUEUE_SLACK  16
 
 /* The UDP receive queue, in datagrams. bsd_udp_queue_max() in socket.c derives
    the per-socket default from the pool between these two. options.c bounds a

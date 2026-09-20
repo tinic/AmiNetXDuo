@@ -1011,6 +1011,12 @@
 
       SetEnv ANXDPOOLPACKETS 512      the pool outright, 16 to 4096
       SetEnv ANXDPOOLDIV 32           the share of that memory, 4 to 64
+      SetEnv ANXDRXBATCH 0            receive one frame per request again,
+                                      instead of a burst per request on a
+                                      driver that delivers bursts (anxgenet)
+      SetEnv ANXDTXRUN 0              start every transmit at once, instead
+                                      of letting a send() of several
+                                      segments leave the wire together
 
   A mistyped value is ignored.
 

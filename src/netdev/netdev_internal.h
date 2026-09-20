@@ -185,6 +185,18 @@ static inline VOID nd_list_addtail(struct List *l, struct Node *n)
     l->lh_TailPred = n;
 }
 
+/* Exec's Insert(node, after), without the call: the per-frame re-post of a
+   CMD_READ goes behind the batches at the head of the read list. */
+static inline VOID nd_insert_after(struct Node *n, struct Node *after)
+{
+    struct Node *succ = after->ln_Succ;
+
+    n->ln_Succ     = succ;
+    n->ln_Pred     = after;
+    succ->ln_Pred  = n;
+    after->ln_Succ = n;
+}
+
 typedef struct NetdevUnit
 {
     /* First by design: Exec and SANA-II callers receive this shared Unit. */
@@ -235,7 +247,9 @@ typedef struct NetdevUnit
      * read from interrupt context.  netdev_event.c owns it.
      */
     UWORD                       nu_EventMask;
-    UWORD                       nu_Pad3;
+    UWORD                       nu_BatchPending; /* ANXD_CMD_RX_BATCH requests
+                                                   holding frames for the
+                                                   pass-end reply           */
 
     struct Sana2DeviceStats     nu_Stats;
 
@@ -383,6 +397,20 @@ static inline struct IOSana2Req *netdev_take(struct List *list, ULONG type)
 UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                        APTR *token, UBYTE *wanted);
 VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags);
+
+/* ANXD_CMD_RX_BATCH (aminetxduo/anxs2ext.h): one queued request, many
+   frames.  A batch sits in op_Reads like a CMD_READ of its type; the claim
+   fills its next cookie and it stays queued until it is full or the pass
+   that filled it ends.  netdev_direct.c. */
+static inline BOOL netdev_is_batch(const struct IOSana2Req *io)
+{
+    return (BOOL)(io->ios2_Req.io_Command == ANXD_CMD_RX_BATCH);
+}
+NetdevRxResult netdev_batch_stage(NetdevUnit *unit, NetdevOpener *op,
+                                  struct IOSana2Req *io, const UBYTE *frame,
+                                  UWORD len);
+VOID netdev_batch_flush(NetdevUnit *unit);
+VOID netdev_queue_batch(NetdevOpener *op, struct IOSana2Req *io);
 
 /* Every request that stops being quick and enters a list must be prepared the
    same way, whether it goes at the head or tail. */

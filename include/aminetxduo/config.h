@@ -518,6 +518,19 @@ ULONG ami_config_pool_divisor(ULONG fallback);
 ULONG ami_config_pool_packets(VOID);
 
 /*
+ * ENV:ANXDRXBATCH 0 leaves ANXD_CMD_RX_BATCH unrequested, so the reader
+ * posts one CMD_READ per frame as before: the A/B for the batch on a machine
+ * without rebuilding.  Anything else, or no variable, is the shipped
+ * behaviour, `fallback`.
+ */
+ULONG ami_config_rx_batch(ULONG fallback);
+
+/* ENV:ANXDTXRUN 0 leaves ANXD_S2F_TX_MORE unrequested, so every write starts
+   the hardware at once: the A/B for transmit runs (sana2.h,
+   ami_sana2_tx_run_begin).  Anything else, or no variable, is `fallback`. */
+ULONG ami_config_tx_run(ULONG fallback);
+
+/*
  * How loud the serial diagnostic is, AMI_LOG_ERROR..AMI_LOG_TRACE.
  *
  * `fallback` unless ENV:ANXDLOGLEVEL holds a single digit 0 to 4.  The

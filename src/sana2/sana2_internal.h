@@ -634,12 +634,51 @@ typedef struct AmiSana2Reader
 } AmiSana2Reader;
 
 /* One ring of reads for one Ethernet type. */
+/*
+ * ANXD_CMD_RX_BATCH (aminetxduo/anxs2ext.h): one request that carries a run
+ * of the ring's slots.  Its first two members are laid out as AmiRxSlot's,
+ * so a reply taken off the port names its ring the same way whichever kind
+ * it is; io_Command tells them apart.  The record holds one cookie per slot
+ * the batch covers -- the slot itself, which is what RxDirect/RxFilled
+ * receive for a CMD_READ too.
+ */
+#ifdef AMINETXDUO_RX_BATCH
+#define AMI_SANA2_RX_BATCHES    2
+/* Slots per batch at most: the reader settles a batch's frames on its
+   stack before it re-posts the batch, one AmiRxHandUp each. */
+#define AMI_SANA2_RX_BATCH_MAX  32
+
+typedef struct AmiRxBatch
+{
+    struct IOSana2Req   req;
+    struct AmiSana2Rx  *owner;
+    UWORD               first;      /* its first slot in rx->slot[]        */
+    UWORD               count;      /* slots it covers                     */
+    BOOL                in_flight;  /* handed to the device                */
+    AnxdS2RxBatch      *rec;        /* ami_alloc'd, count cookies          */
+} AmiRxBatch;
+
+_Static_assert(__builtin_offsetof(AmiRxBatch, owner) ==
+               __builtin_offsetof(AmiRxSlot, owner),
+               "a reply names its ring through the same member either way");
+#endif /* AMINETXDUO_RX_BATCH */
+
 typedef struct AmiSana2Rx
 {
     AmiSana2If         *iface;
     AmiSana2Reader     *reader;
     ULONG               packet_type;
     UWORD               depth;
+#ifdef AMINETXDUO_RX_BATCH
+    UBYTE               use_batch;      /* the ring's first batch_slots
+                                           slots travel in batch[]; the rest
+                                           are CMD_READs, the pool that
+                                           takes over while both batches
+                                           are with the reader             */
+    UBYTE               pad0;
+    UWORD               batch_slots;    /* slots covered by the batches     */
+    AmiRxBatch          batch[AMI_SANA2_RX_BATCHES];
+#endif
 
     /*
      * Slots NOT currently handed to the device.  ami_sana2_rx_post() sweeps
@@ -736,6 +775,10 @@ struct AmiSana2If
     AnxdS2Extension     extension;       /* one size/version negotiated record */
     BOOL                link_hdr_ok;    /* negotiated ANXD_S2F_RX_LINK_HDR   */
     UBYTE               rx_flags_ok;    /* negotiated RX_FILLED verdict bits */
+#ifdef AMINETXDUO_RX_BATCH
+    UBYTE               rx_batch_ok;    /* ANXD_CMD_RX_BATCH accepted: the
+                                           reader posts batches, not reads  */
+#endif
     UBYTE               rx_poll_ok;     /* the device knows ANXD_CMD_RX_POLL;
                                            TRUE until it says IOERR_NOCMD    */
     UBYTE               tx_quick_ok;    /* CMD_WRITE goes out IOF_QUICK: an
@@ -745,6 +788,26 @@ struct AmiSana2If
     UBYTE               tx_csum_ok;     /* negotiated ANXD_S2_TXF_*
                                            checksums the device writes on the
                                            way out, 0 = none (sana2_tx.c)   */
+    /*
+     * TRANSMIT RUNS (ANXD_S2F_TX_MORE, anxs2ext.h).  A sender that brackets
+     * a run of writes with ami_sana2_tx_run_begin()/_end() is tx_holder for
+     * its length; a write the holder's own thread launches inside it carries
+     * ANXD_S2_TXF_MORE and the device may hold the start until the run's
+     * flush (ANXD_CMD_TX_FLUSH), which the end of the bracket and every wait
+     * inside it send.  Another thread's write inside the bracket is a plain
+     * write, and a driver starts whatever it holds for one of those.
+     */
+#ifdef AMINETXDUO_TX_RUN
+    UBYTE               tx_more_ok;     /* negotiated ANXD_S2F_TX_MORE       */
+    UBYTE               tx_held;        /* a TXF_MORE write went out since
+                                           the last flush                    */
+    UBYTE               tx_flush_busy;  /* the flush request is queued at
+                                           the device (never with ours: the
+                                           command is quick)                 */
+    TX_THREAD          *tx_holder;      /* the run's opener, NULL outside    */
+    struct IOSana2Req   tx_flush_req;   /* ANXD_CMD_TX_FLUSH, reply on
+                                           tx_port, told apart by command    */
+#endif
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
@@ -876,6 +939,11 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register ULONG len  __asm("d0"));
 BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
 UBYTE ami_sana2_tx_flags(APTR ios2_data);
+#ifdef AMINETXDUO_TX_RUN
+/* The flush request came back on tx_port: the device queued it rather than
+   finishing it inside BeginIO() (sana2_tx.c). */
+VOID  ami_sana2_tx_flush_replied(AmiSana2If *iface);
+#endif
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
                               register ULONG len __asm("d0"));
@@ -923,8 +991,13 @@ VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
 #endif
 
 #ifdef AMINETXDUO_SANA2_RX_HOST_TEST
-/* The host harness's way into the static batch post (sana2_rx.c). */
-VOID ami_sana2_rx_post_batch_host_test(AmiSana2Reader *rd);
+/* The host harness's way into the reader's batch post and drain and the
+   teardown's abort sweep (sana2_rx.c), file-local in the library. */
+#ifdef AMINETXDUO_RX_BATCH
+UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch *bt);
+UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
+#endif
+VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 #endif
 
 /* sana2_tx.c */

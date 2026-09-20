@@ -9,6 +9,33 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `ANXD_CMD_RX_BATCH`: one IORequest carries a burst of received frames
+  (`AnxdS2RxBatch`, negotiated as `ANXD_S2F_RX_BATCH` on the versioned
+  extension record). The device answers it once per service pass, or when
+  full; the stack posts two batches of 32 per packet type ahead of its
+  CMD_READs, re-posts a batch before delivering its frames, and falls back
+  to CMD_READs on a driver that does not know it. Offered by
+  `anxgenet.device` only; the classic cores deliver one frame per interrupt
+  and refuse it. Exec's request contract only. `SetEnv ANXDRXBATCH 0`
+  turns it off. Build option `AMINETXDUO_RX_BATCH`, off in the micro
+  profile.
+- `anxgenet.device` serves at most 32 frames per masked pass and reads the
+  GENET's RBUF overflow count into `NetDevStats`. A1200 + PiStorm32, iperf
+  into the Amiga from a 1 Gbit peer: 399 Mbit/s on main `027a62c8`, 805 with
+  the batch and the pass budget (896-905 on 1.0.0-beta3).
+- The TCP receive queue's packet cap is sized from a 1200-byte segment with
+  16 of slack, and NetX Duo counts a segment it drops at that cap in
+  `netstat -s` "dropped on receipt".
+- Transmit runs: a `send()` of more than one segment brackets its writes
+  (`ANXD_S2_TXF_MORE` on the per-write flags, negotiated as
+  `ANXD_S2F_TX_MORE`), and a driver that took the bit holds each frame's
+  start for the next so the run leaves the wire back to back and the peer
+  acknowledges pairs instead of every segment. `ANXD_CMD_TX_FLUSH` (quick)
+  starts what is held; the stack sends it when the `send()` ends and before
+  it waits for a window or a packet, and `anxgenet.device` also starts after
+  eight held frames and on its tick. `NetDevStats` "GENET transmits held for
+  company" counts them. `SetEnv ANXDTXRUN 0` turns it off; build option
+  `AMINETXDUO_TX_RUN`, off in the micro profile with the batch.
 - A newer `bsdsocket.library` works with the beta1--beta3 network commands
   during an in-place update. The running interface priority now occupies a
   byte that was already reserved in the version 16 status record instead of

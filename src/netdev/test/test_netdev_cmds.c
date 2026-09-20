@@ -91,6 +91,24 @@ VOID Enable(VOID)
     }
 }
 
+static int forbid_depth;
+
+VOID Forbid(VOID)
+{
+    forbid_depth++;
+}
+
+VOID Permit(VOID)
+{
+    forbid_depth--;
+    if (forbid_depth < 0)
+    {
+        printf("FAIL Permit() without a matching Forbid()\n");
+        failures++;
+        forbid_depth = 0;
+    }
+}
+
 /* The one thing the driver must not do: complete somebody else's IORequest
    while it is still on the list it was taken from.  Remove() nulls ln_Succ,
    so a reply from a node still linked is caught here. */
@@ -843,7 +861,7 @@ static void j_the_advertised_list_is_the_real_one(void)
                  last_wire == (ULONG)S2WERR_GENERIC_ERROR), what);
     }
 
-    expect(n == 24, "the advertised list is the length this test read it at");
+    expect(n == 26, "the advertised list is the length this test read it at");
 }
 
 /* Anything else is what both IC drivers answer, and what a caller probes
@@ -1506,6 +1524,261 @@ static void w_private_commands_are_in_an_nsd_vendor_block(void)
            "ANXD_CMD_RX_POLL is in an NSD third-party block");
     expect((ANXD_CMD_RX_CAPACITY & 0xc000U) == 0x8000U,
            "ANXD_CMD_RX_CAPACITY is in an NSD third-party block");
+    expect((ANXD_CMD_RX_BATCH & 0xc000U) == 0x8000U,
+           "ANXD_CMD_RX_BATCH is in an NSD third-party block");
+    expect((ANXD_CMD_TX_FLUSH & 0xc000U) == 0x8000U,
+           "ANXD_CMD_TX_FLUSH is in an NSD third-party block");
+}
+
+/* ANXD_CMD_TX_FLUSH: the core's flush under Forbid(), quick, once the unit
+   is online; S2ERR_NOT_SUPPORTED from a core that cannot hold a start; not
+   run on an offline unit; in the supported-command list. */
+static int  tx_flush_calls;
+static int  tx_flush_forbid_depth;
+static VOID y_tx_flush_core(NetdevNic *nic)
+{
+    (void)nic;
+    tx_flush_calls++;
+    tx_flush_forbid_depth = forbid_depth;
+}
+
+static void y_tx_flush(void)
+{
+    struct IOSana2Req io;
+    UWORD            *cmds;
+    int               listed = 0;
+
+    reset();
+    unit.nu_Nic.tx_flush = NULL;
+    req(&io, ANXD_CMD_TX_FLUSH);
+    io.ios2_Req.io_Flags = IOF_QUICK;
+    netdev_perform(&opener, &io);
+    expect_u32("a core that cannot hold a start declines the flush",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error,
+               (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+
+    reset();
+    unit.nu_Nic.tx_flush = y_tx_flush_core;
+    tx_flush_calls = 0;
+    req(&io, ANXD_CMD_TX_FLUSH);
+    io.ios2_Req.io_Flags = IOF_QUICK;
+    netdev_perform(&opener, &io);
+    expect(tx_flush_calls == 1, "a flush runs the core's flush once");
+    expect(tx_flush_forbid_depth == 1, "under Forbid()");
+    expect(forbid_depth == 0, "and Permit()s again");
+    expect_u32("with no error", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+    expect((io.ios2_Req.io_Flags & IOF_QUICK) != 0, "and stays quick");
+
+    reset();
+    unit.nu_Nic.tx_flush = y_tx_flush_core;
+    unit.nu_Online       = 0;
+    tx_flush_calls = 0;
+    req(&io, ANXD_CMD_TX_FLUSH);
+    netdev_perform(&opener, &io);
+    expect(tx_flush_calls == 0, "an offline unit's core is not flushed");
+    expect_u32("and the command still answers 0",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+
+    reset();
+    {
+        struct IOStdReq std;
+        struct
+        {
+            ULONG  DevQueryFormat;
+            ULONG  SizeAvailable;
+            UWORD  DeviceType;
+            UWORD  DeviceSubType;
+            UWORD *SupportedCommands;
+        } answer;
+
+        memset(&std, 0, sizeof(std));
+        memset(&answer, 0, sizeof(answer));
+        std.io_Command = NSCMD_DEVICEQUERY;
+        std.io_Data    = &answer;
+        std.io_Length  = sizeof(answer);
+        netdev_perform(&opener, (struct IOSana2Req *)&std);
+        for (cmds = answer.SupportedCommands; cmds != NULL && *cmds != 0; cmds++)
+            if (*cmds == ANXD_CMD_TX_FLUSH)
+                listed = 1;
+    }
+    expect(listed, "ANXD_CMD_TX_FLUSH is in the supported-command list");
+}
+
+static UBYTE *x_direct(APTR data, ULONG len) { (void)data; (void)len; return NULL; }
+static VOID   x_filled(APTR data, ULONG len, ULONG sum, UBYTE flags)
+{ (void)data; (void)len; (void)sum; (void)flags; }
+
+/* ANXD_CMD_RX_BATCH: queued at the head of the reads with Filled cleared and
+   its type noted, so the claim finds it and a later frame of the type with no
+   read left counts as "the reader is behind"; refused for an opener the
+   batch cannot serve, for an empty record, and when the unit is offline;
+   answered by CMD_FLUSH like a read; in the supported-command list. */
+static void x_rx_batch(void)
+{
+    struct IOSana2Req io;
+    union
+    {
+        AnxdS2RxBatch b;
+        UBYTE         bytes[sizeof(AnxdS2RxBatch) + 2 * sizeof(APTR)];
+    } rec;
+    APTR   cookie_a = &io;
+    APTR   cookie_b = &rec;
+    UWORD *cmds;
+    int    listed = 0;
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    memset(&rec, 0, sizeof(rec));
+    rec.b.Count     = 2;
+    rec.b.Filled    = 7;                 /* whatever the opener left there */
+    rec.b.Cookie[0] = cookie_a;
+    rec.b.Cookie[1] = cookie_b;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_Req.io_Flags   = IOF_QUICK;
+    io.ios2_PacketType     = 0x0800;
+    io.ios2_Data           = &rec.b;
+    netdev_perform(&opener, &io);
+    expect(opener.op_Reads.lh_Head == &io.ios2_Req.io_Message.mn_Node,
+           "a batch is queued at the head of the reads");
+    expect(replies == 0, "and not answered");
+    expect((io.ios2_Req.io_Flags & IOF_QUICK) == 0, "and is never quick");
+    expect(rec.b.Filled == 0, "with Filled cleared");
+    expect(netdev_reads_type(&opener, 0x0800), "and its type noted");
+    expect(netdev_is_batch(&io), "netdev_is_batch() knows it by command");
+    {
+        struct IOSana2Req rd1, rd2;
+
+        req(&rd1, CMD_READ);
+        rd1.ios2_PacketType = 0x0800;
+        rd1.ios2_Data       = &rd1;
+        netdev_perform(&opener, &rd1);
+        req(&rd2, CMD_READ);
+        rd2.ios2_PacketType = 0x0800;
+        rd2.ios2_Data       = &rd2;
+        netdev_perform(&opener, &rd2);
+        expect(opener.op_Reads.lh_Head == &io.ios2_Req.io_Message.mn_Node,
+               "a CMD_READ posted later leaves the batch at the head");
+        expect(opener.op_Reads.lh_Head->ln_Succ == &rd2.ios2_Req.io_Message.mn_Node &&
+               rd2.ios2_Req.io_Message.mn_Node.ln_Succ == &rd1.ios2_Req.io_Message.mn_Node,
+               "and the reads keep newest-first order behind it");
+    }
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    rec.b.Count        = 2;
+    netdev_perform(&opener, &io);
+    expect_u32("an opener without the direct pair is refused",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+    expect(opener.op_Reads.lh_Head->ln_Succ == NULL, "and nothing is queued");
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = FALSE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    netdev_perform(&opener, &io);
+    expect_u32("without the link header it is refused",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    opener.op_Raw       = 1;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    netdev_perform(&opener, &io);
+    expect_u32("a raw opener is refused",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    rec.b.Count        = 0;
+    netdev_perform(&opener, &io);
+    expect_u32("an empty record is a bad argument",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
+    rec.b.Count = 2;
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = NULL;
+    netdev_perform(&opener, &io);
+    expect_u32("no record is a null pointer",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
+    expect_u32("said so", last_wire, (unsigned long)S2WERR_NULL_POINTER);
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    unit.nu_Online      = 0;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    netdev_perform(&opener, &io);
+    expect_u32("an offline unit refuses a batch as it refuses a read",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_OUTOFSERVICE);
+
+    reset();
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    netdev_perform(&opener, &io);
+    expect_u32("a core that delivers one frame per pass refuses batches",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    {
+        struct IOStdReq std;
+        struct
+        {
+            ULONG  DevQueryFormat;
+            ULONG  SizeAvailable;
+            UWORD  DeviceType;
+            UWORD  DeviceSubType;
+            UWORD *SupportedCommands;
+        } answer;
+
+        reset();
+    unit.nu_Nic.rx_batches = 1;
+        memset(&std, 0, sizeof(std));
+        memset(&answer, 0, sizeof(answer));
+        std.io_Command = NSCMD_DEVICEQUERY;
+        std.io_Data    = &answer;
+        std.io_Length  = sizeof(answer);
+        netdev_perform(&opener, (struct IOSana2Req *)&std);
+        for (cmds = answer.SupportedCommands; cmds != NULL && *cmds != 0; cmds++)
+            if (*cmds == ANXD_CMD_RX_BATCH)
+                listed = 1;
+    }
+    expect(listed, "ANXD_CMD_RX_BATCH is in the supported-command list");
 }
 
 int main(void)
@@ -1532,6 +1805,8 @@ int main(void)
     t_rx_poll();
     v_rx_capacity();
     w_private_commands_are_in_an_nsd_vendor_block();
+    x_rx_batch();
+    y_tx_flush();
 
     if (failures != 0)
     {

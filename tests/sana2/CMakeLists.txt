@@ -160,6 +160,12 @@ if(AMINETXDUO_RX_VERIFY)
         target_compile_definitions(test_sana2_rx PRIVATE AMINETXDUO_GRO)
     endif()
 endif()
+if(AMINETXDUO_RX_BATCH)
+    target_compile_definitions(test_sana2_rx PRIVATE AMINETXDUO_RX_BATCH)
+endif()
+if(AMINETXDUO_TX_RUN)
+    target_compile_definitions(test_sana2_tx PRIVATE AMINETXDUO_TX_RUN)
+endif()
 
 add_test(NAME sana2_rx COMMAND test_sana2_rx)
 

@@ -146,6 +146,38 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
 
     /* Already located above; netdev_take() would walk to the same node. */
     io = cand_io;
+
+    /*
+     * A batch: the frame goes to its next cookie and the request stays
+     * queued -- it is answered when full (netdev_batch_filled) or when the
+     * pass that filled it ends (netdev_batch_flush).  No raw or filter case
+     * to consider: netdev_queue_batch() refused those openers, and the link
+     * header is always written because the batch has no per-frame request
+     * fields to carry the addresses.
+     */
+    if (netdev_is_batch(io))
+    {
+        AnxdS2RxBatch *b = (AnxdS2RxBatch *)io->ios2_Data;
+
+        dst = ((AnxdS2RxDirect)cand->op_RxDirect)(b->Cookie[b->Filled], plen);
+        if (dst == NULL)
+            return NULL;
+        {
+            UBYTE *lh = dst - NETDEV_HDR_LEN;
+            UWORD  i;
+
+            for (i = 0; i < NETDEV_HDR_LEN; i++)
+                lh[i] = hdr[i];
+        }
+        /* The one per-frame field a batch request does carry, from the
+           claim to its completion: the payload length RxFilled() reports. */
+        io->ios2_DataLength = plen;
+        *token = io;
+        if (wanted != NULL)
+            *wanted = cand->op_RxFlags;
+        return dst;
+    }
+
     nd_remove(&io->ios2_Req.io_Message.mn_Node);
 
     /* RAW is also a per-request flag.  The direct destination starts after
@@ -204,13 +236,131 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     return dst;
 }
 
+/*
+ * A frame landed in a batch's next cookie.  Count it; a full batch is
+ * answered here and now, a partial one when the pass ends.  Called with the
+ * frame's bytes already in place, from the direct completion below or from
+ * the staging copy (netdev_batch_stage).
+ */
+static VOID netdev_batch_filled(NetdevUnit *unit, NetdevOpener *op,
+                                struct IOSana2Req *io, UWORD len,
+                                ULONG sum, UBYTE flags)
+{
+    AnxdS2RxBatch *b  = (AnxdS2RxBatch *)io->ios2_Data;
+    NetdevTrack   *tr = netdev_track_find(op, io->ios2_PacketType);
+
+    ((AnxdS2RxFilled)op->op_RxFilled)(b->Cookie[b->Filled], len, sum,
+                                      (UBYTE)(flags & (ANXD_S2_RXF_SUMMED |
+                                                       op->op_RxFlags)));
+    if ((flags & op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
+        unit->nu_Nic.rx_verified++;
+
+    unit->nu_Stats.PacketsReceived++;
+    if (tr != NULL)
+    {
+        tr->st.PacketsReceived++;
+        tr->st.BytesReceived += (ULONG)len + NETDEV_HDR_LEN;
+    }
+    unit->nu_RxDirect++;
+
+    if (b->Filled == 0)
+        unit->nu_BatchPending++;
+    b->Filled++;
+    if (b->Filled >= b->Count)
+    {
+        nd_remove(&io->ios2_Req.io_Message.mn_Node);
+        if (unit->nu_BatchPending != 0)
+            unit->nu_BatchPending--;
+        netdev_reply(io, 0, 0);
+    }
+}
+
+/*
+ * The staging path's way into a batch: a frame the direct claim declined
+ * (a second opener also reads the type, or the core has no claim at all)
+ * is copied into the batch's next cookie by the opener's own CopyToBuff
+ * hook, the link header is written in front of it, and RxFilled() reports
+ * the frame the way the direct path does -- without SUMMED, so the opener
+ * verifies it in software.  The batch keeps its place in op_Reads.
+ */
+NetdevRxResult netdev_batch_stage(NetdevUnit *unit, NetdevOpener *op,
+                                  struct IOSana2Req *io, const UBYTE *frame,
+                                  UWORD len)
+{
+    AnxdS2RxBatch *b    = (AnxdS2RxBatch *)io->ios2_Data;
+    APTR           cookie = b->Cookie[b->Filled];
+    UWORD          plen = (UWORD)(len - NETDEV_HDR_LEN);
+    UBYTE         *dst;
+    UWORD          i;
+
+    dst = ((AnxdS2RxDirect)op->op_RxDirect)(cookie, plen);
+    if (dst == NULL)
+        return NETDEV_RX_FAILED;
+    if (!netdev_copy_call(op->op_CopyTo, cookie, (APTR)(frame + NETDEV_HDR_LEN),
+                          plen))
+        return NETDEV_RX_FAILED;
+    for (i = 0; i < NETDEV_HDR_LEN; i++)
+        dst[(LONG)i - NETDEV_HDR_LEN] = frame[i];
+    netdev_batch_filled(unit, op, io, plen, 0, 0);
+    return NETDEV_RX_TAKEN;
+}
+
+/*
+ * THE PASS'S ONE REPLY.  Every batch that took a frame during this pass and
+ * is still queued -- not full -- is answered now, so a burst of N frames is
+ * one ReplyMsg() per batch that held any of them and no frame waits for a
+ * later pass.  nu_BatchPending is the number of such batches, kept by
+ * netdev_batch_filled(); a batch aborted while pending leaves the count one
+ * high until this scan finds nothing and resets it, which costs one walk of
+ * the read lists and nothing else.  Same masked context as the pass.
+ */
+VOID netdev_batch_flush(NetdevUnit *unit)
+{
+    struct Node *n;
+
+    if (unit->nu_BatchPending == 0)
+        return;
+
+    for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    {
+        NetdevOpener *op = (NetdevOpener *)n;
+        struct Node  *r  = op->op_Reads.lh_Head;
+
+        while (r->ln_Succ != NULL)
+        {
+            struct IOSana2Req *io   = (struct IOSana2Req *)r;
+            struct Node       *next = r->ln_Succ;
+
+            if (netdev_is_batch(io) &&
+                ((AnxdS2RxBatch *)io->ios2_Data)->Filled != 0)
+            {
+                nd_remove(r);
+                netdev_reply(io, 0, 0);
+            }
+            r = next;
+        }
+    }
+    unit->nu_BatchPending = 0;
+}
+
 VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags)
 {
     NetdevUnit        *unit = (NetdevUnit *)arg;
     struct IOSana2Req *io   = (struct IOSana2Req *)token;
     NetdevOpener      *op   = NETDEV_IO_OPENER(io);
-    NetdevTrack       *tr   = netdev_track_find(op, io->ios2_PacketType);
-    UWORD              len  = (UWORD)(io->ios2_DataLength + NETDEV_HDR_LEN);
+    NetdevTrack       *tr;
+    UWORD              len;
+
+    if (netdev_is_batch(io))
+    {
+        /* The claim left the payload length in ios2_DataLength. */
+        netdev_batch_filled(unit, op, io, (UWORD)io->ios2_DataLength, sum,
+                            flags);
+        return;
+    }
+
+    tr  = netdev_track_find(op, io->ios2_PacketType);
+    len = (UWORD)(io->ios2_DataLength + NETDEV_HDR_LEN);
 
     /* Only the bits this opener asked for, beyond the one every opener has
        always understood (aminetxduo/anxs2ext.h). */

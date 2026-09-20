@@ -34,6 +34,7 @@
 #include "bsdsocket_vectors.h"
 #include "udp_queue.h"
 #include "netmonitor.h"
+#include "aminetxduo/sana2.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -255,6 +256,29 @@ NX_PACKET_POOL *netstack_pool(VOID)
 {
     return h.no_pool ? NULL : &h_pool;
 }
+
+#ifdef AMINETXDUO_TX_RUN
+/* The transmit run (sana2.h): the sockets here have no connect interface,
+   so transfer.c hands these NULL and never flushes.  Counted, not modelled. */
+static ULONG h_runs_begun, h_runs_ended;
+
+VOID ami_sana2_tx_run_begin(AmiSana2If *iface)
+{
+    (VOID)iface;
+    h_runs_begun++;
+}
+
+VOID ami_sana2_tx_run_flush(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
+VOID ami_sana2_tx_run_end(AmiSana2If *iface)
+{
+    (VOID)iface;
+    h_runs_ended++;
+}
+#endif
 
 BOOL bsd_netmon_have(LONG type)
 {

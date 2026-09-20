@@ -56,6 +56,11 @@
 #define  GENET_IRQ_TXDMA_DONE           (1UL << 16)
 #define  GENET_IRQ_RXDMA_DONE           (1UL << 13)
 #define GENET_RBUF_CTRL                 0x300
+/* Frames the RBUF dropped for want of a descriptor or FIFO room: the
+   hardware's running count (GENET v3+ offset 0x80 in the RBUF block; the
+   bcmgenet driver's rbuf_ovflow_cnt).  Read on the tick into a core stat,
+   because a ring that fills between two passes drops silently otherwise. */
+#define GENET_RBUF_OVFL_CNT             0x380
 #define  GENET_RBUF_BAD_DIS             (1UL << 2)
 #define  GENET_RBUF_ALIGN_2B            (1UL << 1)
 #define  GENET_RBUF_64B_EN              (1UL << 0)

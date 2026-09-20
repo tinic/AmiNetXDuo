@@ -61,6 +61,21 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_pend_count = 0;
     iface->tx_kicking    = FALSE;
 
+#ifdef AMINETXDUO_TX_RUN
+    /* The run flush: the opened request's device, unit and cookie, the
+       write port for the reply a device that queues it would post, and the
+       private command.  tx_more_ok is settled by the open (sana2_device.c). */
+    iface->tx_flush_req = iface->templ;
+    iface->tx_flush_req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    iface->tx_flush_req.ios2_Req.io_Message.mn_ReplyPort    = &iface->tx_port;
+    iface->tx_flush_req.ios2_Req.io_Message.mn_Length =
+        (UWORD)sizeof(struct IOSana2Req);
+    iface->tx_flush_req.ios2_Req.io_Command = ANXD_CMD_TX_FLUSH;
+    iface->tx_holder     = NULL;
+    iface->tx_held       = 0;
+    iface->tx_flush_busy = 0;
+#endif
+
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     iface->tx_lazy_timer_up  = FALSE;
     iface->tx_lazy_parked    = FALSE;
@@ -240,6 +255,16 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
     for (node = batch.lh_Head; (next = node->ln_Succ) != NULL; node = next)
     {
         msg = (struct Message *)node;
+#ifdef AMINETXDUO_TX_RUN
+        /* The one request on this port that is not a write: the run flush a
+           device chose to queue. */
+        if (((struct IOSana2Req *)msg)->ios2_Req.io_Command ==
+            ANXD_CMD_TX_FLUSH)
+        {
+            ami_sana2_tx_flush_replied(iface);
+            continue;
+        }
+#endif
         /* ios2_Req.io_Message is the first member of the first member of
            AmiTxSlot, so the reply message is the slot. */
         ami_sana2_tx_complete(iface, (AmiTxSlot *)msg);
@@ -432,7 +457,19 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
         if (iface->tx[i].busy)
             AbortIO((struct IORequest *)&iface->tx[i].req);
     }
+#ifdef AMINETXDUO_TX_RUN
+    /* A run left open by a sender the interface went down under, and the
+       one flush a queuing device may still hold. */
+    iface->tx_holder = NULL;
+    iface->tx_held   = 0;
+    if (iface->tx_flush_busy)
+        AbortIO((struct IORequest *)&iface->tx_flush_req);
+#endif
 
+    /* The flush request is the device's until its reply is reaped, exactly
+       as a write is: it lives in the interface and answers on tx_port, so
+       it is counted with the writes below and holds tx_orphaned the same
+       way.  AbortIO() may answer it later rather than now. */
     spins = 0;
     for (;;)
     {
@@ -444,6 +481,10 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
             if (iface->tx[i].busy)
                 busy++;
         }
+#ifdef AMINETXDUO_TX_RUN
+        if (iface->tx_flush_busy)
+            busy++;
+#endif
 
         if (busy == 0 || spins >= 64)
             break;
@@ -458,7 +499,7 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
 
     if (busy != 0)
     {
-        AMI_ERROR("sana2: %ld write(s) still owned by the device. The "
+        AMI_ERROR("sana2: %ld request(s) still owned by the device. The "
                   "interface leaks. A free here corrupts memory the "
                   "device writes into",
                   (long)busy);
@@ -689,6 +730,82 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
     }
 }
 
+/* ----------------------------------------------------------- transmit runs */
+#ifdef AMINETXDUO_TX_RUN
+
+/*
+ * The first opener is the holder; a second thread's bracket (another
+ * program sending on the same interface) is a no-op, and its writes start
+ * whatever the holder has waiting, which is no worse than today.  Forbid()
+ * and not a ThreadX object: the test is two loads in the common case, and
+ * the ThreadX bracket the callers hold is not a lock between threads.
+ */
+VOID ami_sana2_tx_run_begin(AmiSana2If *iface)
+{
+    TX_THREAD *me;
+
+    if (iface == NULL || !iface->tx_more_ok)
+        return;
+
+    me = tx_thread_identify();
+    if (me == NULL)
+        return;
+
+    Forbid();
+    if (iface->tx_holder == NULL)
+        iface->tx_holder = me;
+    Permit();
+}
+
+/*
+ * Start what the run has left with the device.  The command is quick by
+ * contract (anxs2ext.h); a device that queues it instead gets one and no
+ * more: the reply is collected by the reap, and until then, and after a
+ * refusal, runs are off for the interface.  A write of another thread may
+ * already have started the held frames; the command is then a register
+ * write that finds nothing, cheaper than knowing.
+ */
+VOID ami_sana2_tx_run_flush(AmiSana2If *iface)
+{
+    if (iface == NULL || iface->tx_holder != tx_thread_identify() ||
+        !iface->tx_held)
+        return;
+
+    iface->tx_held = 0;
+    if (iface->tx_flush_busy || !iface->online)
+        return;
+
+    iface->tx_flush_req.ios2_Req.io_Flags = IOF_QUICK;
+    iface->tx_flush_req.ios2_Req.io_Error = 0;
+    BeginIO((struct IORequest *)&iface->tx_flush_req);
+    if ((iface->tx_flush_req.ios2_Req.io_Flags & IOF_QUICK) == 0)
+    {
+        iface->tx_flush_busy = 1;
+        iface->tx_more_ok    = 0;
+    }
+    else if (iface->tx_flush_req.ios2_Req.io_Error != 0)
+    {
+        iface->tx_more_ok = 0;
+    }
+}
+
+VOID ami_sana2_tx_run_end(AmiSana2If *iface)
+{
+    if (iface == NULL || iface->tx_holder == NULL ||
+        iface->tx_holder != tx_thread_identify())
+        return;
+
+    ami_sana2_tx_run_flush(iface);
+    iface->tx_holder = NULL;
+}
+
+VOID ami_sana2_tx_flush_replied(AmiSana2If *iface)
+{
+    iface->tx_flush_busy = 0;
+    /* Stays off: a device that queued one would queue the next. */
+}
+#endif /* AMINETXDUO_TX_RUN */
+
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw)
 {
@@ -858,6 +975,17 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
     slot->consumed   = 0;
     slot->total      = length;
     slot->tx_flags   = csum_hw ? ANXD_S2_TXF_TCP : 0;
+#ifdef AMINETXDUO_TX_RUN
+    /* One of the holder's run: the device may wait for the next before it
+       starts this one.  The holder's own thread only -- the kick that
+       launches a queued write from the reader, or an acknowledgement the IP
+       thread sends meanwhile, is a plain write and starts what is held. */
+    if (iface->tx_holder != NULL && iface->tx_holder == tx_thread_identify())
+    {
+        slot->tx_flags |= ANXD_S2_TXF_MORE;
+        iface->tx_held  = 1;
+    }
+#endif
 
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
     slot->req.ios2_Req.io_Message.mn_ReplyPort    = &iface->tx_port;

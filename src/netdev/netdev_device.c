@@ -744,15 +744,23 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         io = netdev_take(&op->op_Reads, type);
         if (io != NULL)
         {
+            NetdevRxResult r;
 #ifdef NETDEV_TIME
             ULONG          th = nd_now();
-            NetdevRxResult r  = netdev_hand_over(op, io, frame, len, type,
-                                                 flags);
+#endif
 
+            /* A batch is taken from, not taken: netdev_take() unlinked it
+               like any read of the type, so it goes straight back to the
+               head and the frame lands in its next cookie. */
+            if (netdev_is_batch(io))
+            {
+                AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+                r = netdev_batch_stage(unit, op, io, frame, len);
+            }
+            else
+                r = netdev_hand_over(op, io, frame, len, type, flags);
+#ifdef NETDEV_TIME
             nd_t_hand += nd_since_at(th, &nd_n_wrap_hand);
-#else
-            NetdevRxResult r = netdev_hand_over(op, io, frame, len, type,
-                                                flags);
 #endif
 
             if (r == NETDEV_RX_REJECTED)
@@ -928,9 +936,16 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
        load from the opener-owned request cookie and is safe when a queued
        write advances from interrupt context. */
     unit->nu_Nic.tx_csum = 0;
+    unit->nu_Nic.tx_more = 0;
     if (op->op_TxFlags != NULL)
-        unit->nu_Nic.tx_csum =
-            ((AnxdS2TxFlags)op->op_TxFlags)(io->ios2_Data) & op->op_TxCsum;
+    {
+        UBYTE flags = ((AnxdS2TxFlags)op->op_TxFlags)(io->ios2_Data);
+
+        unit->nu_Nic.tx_csum = (UBYTE)(flags & op->op_TxCsum);
+        /* A run in progress: a core with a flush may hold its start. */
+        unit->nu_Nic.tx_more = (UBYTE)((flags & ANXD_S2_TXF_MORE) != 0 &&
+                                       unit->nu_Nic.tx_flush != NULL);
+    }
     rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;
@@ -1378,6 +1393,7 @@ static ULONG netdev_interrupt_do(NetdevUnit *unit, BOOL task_context)
         }
         nd_regs_isr += netdev_time_regs - r0;
         nd_n_int++;
+        netdev_batch_flush(unit);
         if (!mine)
             return 0;
 
@@ -1393,8 +1409,16 @@ static ULONG netdev_interrupt_do(NetdevUnit *unit, BOOL task_context)
             nd_time_report();
     }
 #else
-    if (!unit->nu_Nic.ops->intr(&unit->nu_Nic))
-        return 0;
+    {
+        BOOL mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
+
+        /* Every batch that took a frame in this pass is answered before the
+           pass gives the machine back: one reply per burst, from the same
+           masked context the core delivered in. */
+        netdev_batch_flush(unit);
+        if (!mine)
+            return 0;
+    }
 
     if (task_context)
         Disable();
@@ -2334,6 +2358,18 @@ static struct Device *netdev_open(
             accepted |= ANXD_S2F_RX_DIRECT;
         if (op->op_RxLinkHdr)
             accepted |= ANXD_S2F_RX_LINK_HDR;
+        /* What netdev_queue_batch() will take -- the direct pair with the
+           link header, from an opener that is neither raw nor filtering --
+           and only on a core whose passes carry bursts (NetdevNic
+           rx_batches): measured on the emulated A2065 and NE2000, one
+           frame per interrupt, the batch cost 25 % and 340 dropped frames
+           in ten seconds against plain reads. */
+        if (hw->nu_Nic.rx_batches && op->op_RxDirect != NULL &&
+            op->op_RxFilled != NULL && op->op_RxLinkHdr && !op->op_Raw &&
+            op->op_Filter == NULL)
+            accepted |= ANXD_S2F_RX_BATCH;
+        if (hw->nu_Nic.tx_flush != NULL && op->op_TxFlags != NULL)
+            accepted |= ANXD_S2F_TX_MORE;
         if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
             accepted |= ANXD_S2F_RX_VERIFIED;
         if ((op->op_TxCsum & ANXD_S2_TXF_TCP) != 0)

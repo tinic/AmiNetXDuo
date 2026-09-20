@@ -278,19 +278,20 @@ host_test_targets() { # builddir
 #      callback ownership and fail-closed transmit-checksum negotiation
 #      409 with test_handoff: listener sockets follow the AmiTCP/Roadshow
 #      ReleaseSocket/ObtainSocket contract
-#      410 with test_interface_claim: named slots remain stable while the
-#      runtime configuration facade claims and releases them
-#      411 with test_config_runtime: live hostname and interface definitions
-#      are applied through the isolated configuration facade
-HOST_TESTS_EXPECTED=411
+#      412 with test_interface_claim (c4976ede) and test_config_runtime
+#      (4f7b251b), and one the 409 tally had already missed: ctest -N counts
+#      412 on x86_64 for host and sanitize alike (2026-09-20, local and the
+#      runner), and the runner's list is the local list.
+HOST_TESTS_EXPECTED=412
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
-    # test_sockopt, test_neighbour, test_dhcp6 and test_usergroup_hold, all
-    # x86_64-only for the reason in tests/bsdsocket/CMakeLists.txt: elsewhere
-    # the host's LONG is eight bytes and no structure in them has the target's
-    # shape.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 9)) ;;
+    # test_sockopt, test_neighbour, test_dhcp6, test_usergroup_hold and
+    # test_handoff (8ff3cc92), all x86_64-only for the reason in
+    # tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is eight bytes
+    # and no structure in them has the target's shape.  darwin-arm64 registers
+    # 402 of the 412 (2026-09-20).
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 10)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against

@@ -58,7 +58,8 @@ static UWORD netdev_supported[] =
     S2_ONEVENT, S2_READORPHAN, S2_ONLINE, S2_OFFLINE,
     S2_ADDMULTICASTADDRESSES, S2_DELMULTICASTADDRESSES,
     NSCMD_DEVICEQUERY,
-    ANXD_CMD_RX_POLL, ANXD_CMD_RX_CAPACITY,
+    ANXD_CMD_RX_POLL, ANXD_CMD_RX_CAPACITY, ANXD_CMD_RX_BATCH,
+    ANXD_CMD_TX_FLUSH,
     0
 };
 
@@ -354,7 +355,23 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
         /* Once a frame, inside a Disable(): see netdev_internal.h. */
         if (cmd == CMD_READ)
         {
-            nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            /* Newest first, as always -- but behind any batch at the head:
+               a batch is the opener's preferred read of its type, and its
+               plain CMD_READs are the pool that takes over while both
+               batches are with the reader.  At most two batches lead. */
+            struct Node *after = NULL;
+            struct Node *n     = op->op_Reads.lh_Head;
+
+            while (n->ln_Succ != NULL &&
+                   netdev_is_batch((const struct IOSana2Req *)n))
+            {
+                after = n;
+                n     = n->ln_Succ;
+            }
+            if (after == NULL)
+                nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            else
+                nd_insert_after(&io->ios2_Req.io_Message.mn_Node, after);
             netdev_note_read_type(op, io->ios2_PacketType);
         }
         else
@@ -366,6 +383,59 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
     if (!queued)
         netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
     return;
+}
+
+/*
+ * ANXD_CMD_RX_BATCH (aminetxduo/anxs2ext.h).  Queued at the head of the
+ * opener's reads like a CMD_READ, so the claim and the staging hand-over
+ * find it where they look for a read of its type.  Refused for an opener
+ * the batch cannot serve: one without the direct pair or the link header
+ * (the batch carries no per-frame addresses), a raw opener (the direct
+ * destination starts after the header) or one with a filter hook (which
+ * wants a request to judge by).  The batch record itself: at least one
+ * cookie, and Filled starts at zero whatever the opener left there.
+ */
+VOID netdev_queue_batch(NetdevOpener *op, struct IOSana2Req *io)
+{
+    NetdevUnit    *unit = op->op_Hw;
+    AnxdS2RxBatch *b    = (AnxdS2RxBatch *)io->ios2_Data;
+    BOOL           queued;
+
+    if (b == NULL || op->op_CopyTo == NULL)
+    {
+        netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
+        return;
+    }
+    if (b->Count == 0)
+    {
+        netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_GENERIC_ERROR);
+        return;
+    }
+    if (!unit->nu_Nic.rx_batches ||
+        op->op_RxDirect == NULL || op->op_RxFilled == NULL ||
+        !op->op_RxLinkHdr || op->op_Raw || op->op_Filter != NULL ||
+        (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
+    {
+        netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
+        return;
+    }
+
+    b->Filled = 0;
+    io->ios2_DataLength = 0;
+    io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
+    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+
+    Disable();
+    queued = unit->nu_Online ? TRUE : FALSE;
+    if (queued)
+    {
+        nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        netdev_note_read_type(op, io->ios2_PacketType);
+    }
+    Enable();
+
+    if (!queued)
+        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
 }
 
 /* ------------------------------------------------------------- the table -- */
@@ -724,6 +794,29 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case CMD_READ:
     case S2_READORPHAN:
         netdev_queue_read(op, io, cmd);
+        return;
+
+    case ANXD_CMD_RX_BATCH:
+        netdev_queue_batch(op, io);
+        return;
+
+    case ANXD_CMD_TX_FLUSH:
+        /* Start what a run of ANXD_S2_TXF_MORE writes left unstarted.  The
+           core's kick is a register write; Forbid() keeps it clear of a
+           task mid-transmit under the tx task lock, and an interrupt's
+           own kick writes the same index.  Quick, nothing to wait for. */
+        if (unit->nu_Nic.tx_flush == NULL)
+        {
+            netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
+            return;
+        }
+        if (unit->nu_Online)
+        {
+            Forbid();
+            unit->nu_Nic.tx_flush(&unit->nu_Nic);
+            Permit();
+        }
+        netdev_reply(io, 0, 0);
         return;
 
     case ANXD_CMD_RX_CAPACITY:
