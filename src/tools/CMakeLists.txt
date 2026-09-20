@@ -425,7 +425,7 @@ endif()
 # CyberGraphX, kept out of httpfb.c so that the chipset path has no library
 # call and no card-shaped branch in it.  It is where the readback routes are
 # timed, which is the measurement the whole RTG design turns on.
-aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
+aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
                                           httprtg.c httpzz.c

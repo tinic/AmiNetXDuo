@@ -10,16 +10,11 @@
 #include "httpws.h"
 #include "httpterm.h"
 #include "httpfb.h"
+#include "httpdate.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
 
-#include <libraries/locale.h>
-#include <proto/locale.h>
-
 const char *const tool_name = "httpd";
-
-/* proto/locale.h's inlines require this symbol. */
-struct LocaleBase *LocaleBase;
 
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("httpd");
@@ -154,9 +149,6 @@ static const char *const httpd_files_places[] = {
    walk wants the processor, but not zero, which WaitSelect() reads as a poll
    and answers without yielding at all. */
 #define HTTPD_WALK_MICROS    2000
-
-/* 1978-01-01 to 1970-01-01, the same constant src/tlslib/tls_time.c uses. */
-#define HTTPD_AMIGA_EPOCH  252460800UL
 
 /* ------------------------------------------------------------- terminal --- */
 
@@ -480,7 +472,6 @@ static char   httpd_files_gz[HTTP_PATH_MAX];
    fb_owner: the 101 goes out a pass before the session starts, and in between
    http_fb_available() is still true. */
 static HttpConn *httpd_fb_owner;
-static LONG   httpd_gmt_west = 0;       /* minutes west of GMT, from locale */
 static struct Library *httpd_sb = NULL;
 
 /* --------------------------------------------------------------- the small */
@@ -584,196 +575,6 @@ static VOID hs_copy(char *dst, ULONG dstlen, const char *src)
     }
 
     dst[n] = '\0';
-}
-
-/* ------------------------------------------------------------------ time --- */
-
-/* AmigaOS keeps local time and HTTP dates are GMT.  locale.library is V38, so
-   a 2.04 machine has none and the dates are then local time labelled GMT. */
-static VOID httpd_read_gmt_offset(VOID)
-{
-    struct Locale *locale;
-
-    httpd_gmt_west = 0;
-
-    LocaleBase = (struct LocaleBase *)
-                 OpenLibrary((CONST_STRPTR)"locale.library", 38UL);
-    if (LocaleBase == NULL)
-        return;
-
-    locale = OpenLocale(NULL);          /* NULL: the current preferences */
-    if (locale != NULL)
-    {
-        httpd_gmt_west = (LONG)locale->loc_GMTOffset;
-        CloseLocale(locale);
-    }
-
-    CloseLibrary((struct Library *)LocaleBase);
-    LocaleBase = NULL;
-}
-
-/* A DateStamp as seconds since 1970, in GMT. */
-static ULONG httpd_stamp_secs(const struct DateStamp *ds)
-{
-    ULONG secs;
-
-    if (ds->ds_Days < 0 || ds->ds_Minute < 0 || ds->ds_Tick < 0)
-        return HTTPD_AMIGA_EPOCH;
-
-    secs  = (ULONG)ds->ds_Days * 86400UL;
-    secs += (ULONG)ds->ds_Minute * 60UL;
-    secs += (ULONG)ds->ds_Tick / (ULONG)TICKS_PER_SECOND;
-    secs += HTTPD_AMIGA_EPOCH;
-
-    /* loc_GMTOffset is minutes west, so GMT is later than local time here. */
-    if (httpd_gmt_west > 0)
-        secs += (ULONG)httpd_gmt_west * 60UL;
-    else if (httpd_gmt_west < 0)
-    {
-        ULONG east = (ULONG)(-httpd_gmt_west) * 60UL;
-
-        secs = (secs > east) ? (secs - east) : 0UL;
-    }
-
-    return secs;
-}
-
-/* Seconds of local time since the Amiga epoch.  It can step backwards if the
-   clock is set, which the caller handles by treating any backwards step as the
-   present moment rather than as an expiry. */
-static ULONG httpd_now(VOID)
-{
-    struct DateStamp ds;
-
-    /* DateStamp() has no failure result and fills through this pointer. */
-    ds.ds_Days   = 0;
-    ds.ds_Minute = 0;
-    ds.ds_Tick   = 0;
-    (VOID)DateStamp(&ds);
-
-    return (ULONG)ds.ds_Days * 86400UL + (ULONG)ds.ds_Minute * 60UL +
-           (ULONG)ds.ds_Tick / (ULONG)TICKS_PER_SECOND;
-}
-
-/* Seconds since 1970 to a calendar date.  An HTTP date must not be localised,
-   so DateToStr() cannot answer this. */
-static VOID httpd_civil(ULONG secs, LONG *y, LONG *mo, LONG *d,
-                        LONG *h, LONG *mi, LONG *s, LONG *dow)
-{
-    static const LONG mdays[12] =
-        { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-
-    ULONG days = secs / 86400UL;
-    ULONG rem  = secs % 86400UL;
-    LONG  year = 1970;
-    LONG  month = 0;
-
-    *h  = (LONG)(rem / 3600UL);
-    *mi = (LONG)((rem % 3600UL) / 60UL);
-    *s  = (LONG)(rem % 60UL);
-
-    /* 1970-01-01 was a Thursday. */
-    *dow = (LONG)((days + 4UL) % 7UL);
-
-    for (;;)
-    {
-        ULONG len = ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)
-                        ? 366UL : 365UL;
-
-        if (days < len)
-            break;
-
-        days -= len;
-        year++;
-    }
-
-    for (month = 0; month < 12; month++)
-    {
-        ULONG len = (ULONG)mdays[month];
-
-        if (month == 1 &&
-            ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0))
-            len = 29UL;
-
-        if (days < len)
-            break;
-
-        days -= len;
-    }
-
-    *y  = year;
-    *mo = month + 1;
-    *d  = (LONG)days + 1;
-}
-
-static VOID httpd_two(char *out, LONG value)
-{
-    out[0] = (char)('0' + ((value / 10) % 10));
-    out[1] = (char)('0' + (value % 10));
-}
-
-/* "Sun, 06 Nov 1994 08:49:37 GMT", RFC 1123, and not the machine's locale. */
-static VOID httpd_rfc1123(ULONG secs, char *out)
-{
-    static const char *const dows[7] =
-        { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
-    static const char *const months[12] =
-        { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-
-    LONG y, mo, d, h, mi, s, dow;
-    ULONG n = 0;
-
-    httpd_civil(secs, &y, &mo, &d, &h, &mi, &s, &dow);
-
-    out[n++] = dows[dow][0];
-    out[n++] = dows[dow][1];
-    out[n++] = dows[dow][2];
-    out[n++] = ',';
-    out[n++] = ' ';
-    httpd_two(&out[n], d);          n += 2;
-    out[n++] = ' ';
-    out[n++] = months[mo - 1][0];
-    out[n++] = months[mo - 1][1];
-    out[n++] = months[mo - 1][2];
-    out[n++] = ' ';
-    httpd_two(&out[n], y / 100);    n += 2;
-    httpd_two(&out[n], y % 100);    n += 2;
-    out[n++] = ' ';
-    httpd_two(&out[n], h);          n += 2;
-    out[n++] = ':';
-    httpd_two(&out[n], mi);         n += 2;
-    out[n++] = ':';
-    httpd_two(&out[n], s);          n += 2;
-    out[n++] = ' ';
-    out[n++] = 'G';
-    out[n++] = 'M';
-    out[n++] = 'T';
-    out[n]   = '\0';
-}
-
-/* "1994-11-06T08:49:37Z", ISO 8601, which is what creationdate takes. */
-static VOID httpd_iso8601(ULONG secs, char *out)
-{
-    LONG y, mo, d, h, mi, s, dow;
-    ULONG n = 0;
-
-    httpd_civil(secs, &y, &mo, &d, &h, &mi, &s, &dow);
-
-    httpd_two(&out[n], y / 100);    n += 2;
-    httpd_two(&out[n], y % 100);    n += 2;
-    out[n++] = '-';
-    httpd_two(&out[n], mo);         n += 2;
-    out[n++] = '-';
-    httpd_two(&out[n], d);          n += 2;
-    out[n++] = 'T';
-    httpd_two(&out[n], h);          n += 2;
-    out[n++] = ':';
-    httpd_two(&out[n], mi);         n += 2;
-    out[n++] = ':';
-    httpd_two(&out[n], s);          n += 2;
-    out[n++] = 'Z';
-    out[n]   = '\0';
 }
 
 /* ------------------------------------------------------------------- log --- */
@@ -2381,146 +2182,6 @@ static VOID httpd_walk_slice(HttpConn *c)
 
     if (c->walk == WALK_DONE)
         httpd_walk_end(c);
-}
-
-/* ------------------------------------------------------------------ dates --- */
-
-static BOOL httpd_leap(LONG year)
-{
-    return ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)
-               ? TRUE : FALSE;
-}
-
-/* The inverse of httpd_civil(), for the timestamps a client sends back. */
-static ULONG httpd_days_from_civil(LONG y, LONG mo, LONG d)
-{
-    static const ULONG cum[12] =
-        { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-
-    ULONG days = 0;
-    LONG  year;
-
-    for (year = 1970; year < y; year++)
-        days += httpd_leap(year) ? 366UL : 365UL;
-
-    days += cum[mo - 1];
-
-    if (mo > 2 && httpd_leap(y))
-        days++;
-
-    return days + (ULONG)(d - 1);
-}
-
-static LONG httpd_month(const char *name)
-{
-    static const char *const months[12] =
-        { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    LONG i;
-
-    for (i = 0; i < 12; i++)
-    {
-        if (hs_nicmp(name, months[i], 3) == 0)
-            return i + 1;
-    }
-
-    return 0;
-}
-
-static ULONG httpd_digits(const char **p, ULONG count)
-{
-    const char *s = *p;
-    ULONG value = 0;
-    ULONG i;
-
-    for (i = 0; i < count && s[i] >= '0' && s[i] <= '9'; i++)
-        value = (value * 10UL) + (ULONG)(s[i] - '0');
-
-    *p = s + i;
-
-    return value;
-}
-
-/* "Tue, 05 Aug 2025 12:00:00 GMT" back to a DateStamp in local time, which is
-   what SetFileDate() takes. */
-static BOOL httpd_parse_rfc1123(const char *text, struct DateStamp *ds)
-{
-    LONG  day;
-    LONG  month;
-    LONG  year;
-    ULONG h;
-    ULONG mi;
-    ULONG s;
-    ULONG secs;
-
-    while (*text == ' ')
-        text++;
-
-    /* The day name is optional here: "05 Aug 2025 ..." is what some clients
-       send and nothing downstream reads the name anyway. */
-    if (text[0] != '\0' && text[1] != '\0' && text[2] != '\0' &&
-        text[3] == ',')
-        text += 4;
-
-    while (*text == ' ')
-        text++;
-
-    day = (LONG)httpd_digits(&text, 2);
-    while (*text == ' ' || *text == '-')
-        text++;
-
-    month = httpd_month(text);
-    if (month == 0 || day < 1 || day > 31)
-        return FALSE;
-
-    text += 3;
-    while (*text == ' ' || *text == '-')
-        text++;
-
-    year = (LONG)httpd_digits(&text, 4);
-    if (year < 1978 || year > 2100)
-        return FALSE;
-
-    while (*text == ' ')
-        text++;
-
-    h = httpd_digits(&text, 2);
-    if (*text == ':') text++;
-    mi = httpd_digits(&text, 2);
-    if (*text == ':') text++;
-    s = httpd_digits(&text, 2);
-
-    if (h > 23UL || mi > 59UL || s > 60UL)
-        return FALSE;
-
-    secs = httpd_days_from_civil(year, month, day) * 86400UL;
-    secs += (h * 3600UL) + (mi * 60UL) + s;
-
-    /* The stamp is GMT and a DateStamp is local, so this undoes exactly what
-       httpd_stamp_secs() does on the way out. */
-    if (httpd_gmt_west > 0)
-    {
-        ULONG west = (ULONG)httpd_gmt_west * 60UL;
-
-        if (secs < west)
-            return FALSE;
-        secs -= west;
-    }
-    else if (httpd_gmt_west < 0)
-    {
-        secs += (ULONG)(-httpd_gmt_west) * 60UL;
-    }
-
-    if (secs < HTTPD_AMIGA_EPOCH)
-        return FALSE;
-
-    secs -= HTTPD_AMIGA_EPOCH;
-
-    ds->ds_Days   = (LONG)(secs / 86400UL);
-    ds->ds_Minute = (LONG)((secs % 86400UL) / 60UL);
-    ds->ds_Tick   = (LONG)((secs % 60UL) * (ULONG)TICKS_PER_SECOND);
-
-    return TRUE;
 }
 
 /* --------------------------------------------------------------- locking --- */
