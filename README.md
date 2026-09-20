@@ -108,8 +108,9 @@ where the wire carried up to sixteen. A driver's negotiated VERIFIED checksum
 result avoids the verification walk, but is not required: GRO is the same
 stack-side path for every SANA-II driver. A 1 Gbit/s GENET behind a PiStorm32
 Lite receives 900 Mbit/s this way and sends 580 (iperf; 142 and 65 before the
-receive and transmit offloads). The optional direct-placement, checksum,
-batching and ring-capacity extensions are published in
+receive and transmit offloads). Those GENET figures use the negotiated
+AmiNetXDuo extension path. The optional direct-placement, checksum, held-ring
+handoff and ring-capacity extensions are published in
 `Developer/include/aminetxduo/anxs2ext.h`; they are negotiated additions to
 SANA-II, not a replacement network API.
 
@@ -120,7 +121,7 @@ machine not in this table is not known to fail; it is not known.
 
 | Machine | Kickstart | Card and driver | Measured |
 |---|---|---|---|
-| A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | GENET, `anxgenet.device` | 900 in / 580 out Mbit/s |
+| A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | GENET, `anxgenet.device` (AmiNetXDuo extension path) | 900 in / 580 out Mbit/s |
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | 3Com 3C589 PCMCIA, `anxnet.device` | 8.3 Mbit/s |
 | A1200 + PiStorm32 Lite, Emu68 1.1 | 3.1 | Broadcom 43455 Wi-Fi, `anxwifipi.device` | 34-36 in / 52-61 out Mbit/s, 5 GHz at -69 dBm |
 | A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 3.8 in / 3.3-3.7 out Mbit/s |

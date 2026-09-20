@@ -9,7 +9,7 @@ same switch. Numbers are one run each unless said otherwise.
 
 | what | where |
 |---|---|
-| driver `anxzz9000.device` | independent MIT implementation on AmiNetXDuo branch `zz9000` (not derived from GPL `ZZ9000Net.device`): `src/netdev/zz9000.c`, `NETDEV_ROSTER_ZZ9000`, card rows appended after `genet`, `n68k_copy_longs_sum`, shared `netdev_rx_continues()` in `netdev_verify.[ch]` |
+| driver `anxzz9000.device` | independent MIT implementation (not derived from GPL `ZZ9000Net.device`): `src/netdev/zz9000.c`, `NETDEV_ROSTER_ZZ9000`, card rows appended after `genet`, `n68k_copy_longs_sum`; GRO classification now lives in the stack's ordinary SANA-II receive path |
 | firmware | github.com/tinic/zz9000-firmware branch `aminetxduo` (= codex's `console-encode-offload` + the commits below); built with Arm GNU 13.2.rel1 + bootgen (no docker, no Vivado on the rig) |
 | flashed on the A3000 | `BOOT-txcsum-mcast.bin` (multicast receive plus register 0xa6 = 0xc000: RX metadata and TX checksum insertion present); earlier candidates remain under `Work:Attic/ZZ9000-console/` |
 | boot config | unchanged: `DEVS:NetInterfaces/zz9000` still names MNT's `ZZ9000Net.device`; ours is installed beside at `AmiNetXDuo:Devs/Networks/anxzz9000.device` and brought up from `RAM:zz9k` for a test |
@@ -70,6 +70,9 @@ transfer, bsdsocket.library 34 % of busy, the device 16 % (the window copy
 under Disable: 490 us a frame at 1.3 us a longword), one 32-frame drain =
 19.7 ms with interrupts off.
 
+The CONTINUES rows above are measurements of the retired driver-side GRO
+prototype. Current builds classify and coalesce runs in the stack.
+
 ## What codex proposed and where it stands
 
 | proposal | status |
@@ -97,7 +100,7 @@ shares that mains.
 | 2 stage | over the .175 web shell (`AMISH_TAKE=1 python3 ~/tools/anxd-webshell.py 192.168.1.175 80`, one command per line on stdin): `fetch http://192.168.1.184:8766/srv/<f> TO RAM:<f>`; a driver goes on with `Copy RAM:anxzz9000.device AmiNetXDuo:Devs/Networks/anxzz9000.device` (only our file; MNT's is never touched); `Echo >RAM:zz9k "DEVICE=AmiNetXDuo:Devs/Networks/anxzz9000.device*NUNIT=0*NCONFIGURE=DHCP*NMDNS=NO*NPRIORITY=0"` |
 | 3 switch | over the .147 ssh door, one script, no `fetch` in it (the X-Surf goes deaf after downloads and the script then blocks with both addresses dark): `FailAt 21` / `RemoveNetInterface zz9000 FORCE` / `AddNetInterface RAM:zz9k TIMEOUT=40` / `Stack 65536` / `iperf -s -t 30 -q` / `NetDevStats DEVICE anxzz9000.device`. A new driver binary on a running unit: `RemoveNetInterface zz9k FORCE` / `Avail FLUSH >NIL:` / `Copy RAM:anxzz9000.device AmiNetXDuo:Devs/Networks/anxzz9000.device` / `AddNetInterface RAM:zz9k TIMEOUT=40` |
 | 4 measure | from the rig: `iperf -c 192.168.1.175 -t 12`; three `ss -tin \| grep -A1 192.168.1.175:5001` snapshots for `rwnd_limited`, `snd_wnd`, `cwnd`, `rtt`, `retrans`; a capture needs root (`sudo tcpdump -ni eth0 -w x.pcap host 192.168.1.175 and port 5001`) and the retransmit analysis is a 20-line python over `tcpdump -nr` (loss run lengths, burst positions of lost originals). On the Amiga: `NetDevStats DEVICE anxzz9000.device`, `netstat -s` (tcp "dropped on receipt", interface "receive errors: checksum"), `RAM:zzreg 8c` (rx status), `8e` (dropped<<8 \| pause frames), `ac`/`ae` (GEM RX FIFO overruns, error interrupts), `a8` then `aa` (longest service-loop pass, its tag) |
-| 5 read counters | on the fixed firmware "passes after a top half, empty" and "header appeared on spin / never appeared" must stay 0 -- a rise says stale headers again; "top halves: Ethernet pending" is bursts, not frames; "serial gaps" = the ARM's ring overflowed; "frames marked CONTINUES" / "runs" gives the run length; the shell's "Direct receive fills" should equal packets received |
+| 5 read counters | on the fixed firmware "passes after a top half, empty" and "header appeared on spin / never appeared" must stay 0 -- a rise says stale headers again; "top halves: Ethernet pending" is bursts, not frames; "serial gaps" = the ARM's ring overflowed; the shell's "Direct receive fills" should equal packets received |
 | 6 flash | `Copy RAM:BOOT-<tag>.bin RAM:BOOT.bin` then `ZZFwUpdate RAM:BOOT.bin` (the name must be BOOT.bin; keep a copy in `Work:Attic/ZZ9000-console/`), then a POWER CYCLE: HA `switch.wemo_switch_shop` off 30 s, on (a shorter hold is ignored; verify the A1200 goes dark); both machines are back in ~45 s; a warm `SyncReboot` does not reload the card and DOES bring its 256 MB Z3 RAM online (`Avail`), which changes where the packet pool lands |
 | 7 profile | `RAM:Profile RATE=1000 SAMPLES=30000 OUT=RAM:x.prof AmiNetXDuo:C/iperf SERVER PORT 5002 TIME 25` from the web shell with `AMISH_QUIET=45` (the ssh door hangs it); the module table prints at the end; `tools/profiler/profreport.py --allow-unresolved --allow-stale x.prof` for tasks and gaps. A sample after a Disable() section lands on the instruction after Enable(): device time in `netdev_soft` is the drain |
 | 8 hang | both doors dark and `ss -tin` frozen = the machine, not the link: power cycle, note MB-at-hang and the arm, one arm per soak; MNT's driver on the same firmware is the control (60 s clean) |
