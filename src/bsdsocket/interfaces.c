@@ -185,7 +185,7 @@ typedef struct BsdIfList
 struct List *bsd_ObtainInterfaceList(
     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP     *ip = netstack_ip();
+    NX_IP     *ip = bsd_stack_ip(SocketBase);
     BsdIfList *out;
     UINT       i;
 
@@ -330,7 +330,7 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
                                register struct TagItem *tags __asm("a1"),
                                register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP          *ip = netstack_ip();
+    NX_IP          *ip = bsd_stack_ip(SocketBase);
     struct TagItem *cursor;
     struct TagItem *item;
     BsdIfInfo       info;
@@ -580,7 +580,7 @@ LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
                         BOOL have_address, ULONG address,
                         BOOL have_netmask, ULONG netmask)
 {
-    NX_IP        *ip = netstack_ip();
+    NX_IP        *ip = bsd_stack_ip(SocketBase);
     NX_INTERFACE *nxif;
     UINT          status;
 
@@ -717,7 +717,7 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
     if (bsd_strlen((const char *)name) >= (ULONG)BSD_IFNAME_SIZE)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
-    if (netstack_ip() == NULL)
+    if (bsd_stack_ip(SocketBase) == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
     rc = netstack_interface_claim((const char *)name, &index);
@@ -728,7 +728,7 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
         return bsd_fail(SocketBase, AMI_ENXIO);
     }
 
-    ip = netstack_ip();
+    ip = bsd_stack_ip(SocketBase);
 
     if (tags == NULL)
         goto out;
@@ -944,7 +944,7 @@ LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
                              register struct TagItem *tags __asm("a2"),
                              register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP       *ip = netstack_ip();
+    NX_IP       *ip = bsd_stack_ip(SocketBase);
     AmiIfConfig  cfg;
     UWORD        index = 0;
     LONG         rc;
@@ -1047,7 +1047,7 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
         return 0;
     }
 
-    if (netstack_ip() == NULL)
+    if (bsd_stack_ip(SocketBase) == NULL)
     {
         (VOID)bsd_fail(SocketBase, AMI_ENETDOWN);
         return 0;
@@ -1133,7 +1133,7 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
     if (argp == NULL)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
-    ip = netstack_ip();
+    ip = bsd_stack_ip(SocketBase);
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
@@ -1234,7 +1234,7 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
 ULONG bsd_if_nametoindex(register const char *ifname __asm("a0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(SocketBase);
     LONG   index;
 
     (VOID)SocketBase;
@@ -1260,7 +1260,7 @@ char *bsd_if_indextoname(register ULONG ifindex __asm("d0"),
                          register char *ifname __asm("a0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(SocketBase);
 
     if (ifname == NULL)
     {
@@ -1307,7 +1307,7 @@ typedef struct BsdIfNameIndex
 struct if_nameindex *bsd_if_nameindex(register struct AmiSocketBase *SocketBase
                                           __asm("a6"))
 {
-    NX_IP          *ip = netstack_ip();
+    NX_IP          *ip = bsd_stack_ip(SocketBase);
     BsdIfNameIndex *out;
     UWORD           used = 0;
     UINT            i;

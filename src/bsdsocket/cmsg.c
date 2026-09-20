@@ -260,7 +260,7 @@ static VOID bsd_cmsg_build_v4(AmiSocket *sock, NX_IP *ip, NX_PACKET *packet,
 
 VOID bsd_cmsg_build(AmiSocket *sock, NX_PACKET *packet, struct msghdr *msg)
 {
-    NX_IP     *ip = netstack_ip();
+    NX_IP     *ip = bsd_stack_ip(sock->as_Owner);
     BsdCmsgOut out;
 
     if (msg == NULL)

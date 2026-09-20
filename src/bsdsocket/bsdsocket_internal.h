@@ -270,6 +270,8 @@ struct AmiSocketBase
     struct MinList          sb_Children;
     ULONG                   sb_StackRefs;   /* openers and explicit holds    */
     ULONG                   sb_TransientStackRefs; /* async workers, no base */
+    NX_IP                  *sb_StackIp;     /* valid while master refs != 0 */
+    NX_PACKET_POOL         *sb_StackPool;   /* same lifetime as sb_StackIp   */
 
     BOOL                    sb_StackHeld;
 
@@ -374,6 +376,34 @@ struct AmiSocketBase
        the profiler scans for it rather than being told an offset. */
     struct BsdProfSegTag    sb_ProfSegTag;
 };
+
+/* A library base is the lifetime token for the shared NX_IP.  Resolve through
+   the master on every use: child copies intentionally carry no ownership
+   fields, while the master's first open publishes the pointer and its last
+   reference clears it before teardown. */
+static inline NX_IP *bsd_stack_ip(const struct AmiSocketBase *base)
+{
+    const struct AmiSocketBase *master;
+
+    if (base == NULL)
+        return NULL;
+    master = (base->sb_Master != NULL) ? base->sb_Master : base;
+    if (master->sb_StackRefs == 0)
+        return NULL;
+    return master->sb_StackIp;
+}
+
+static inline NX_PACKET_POOL *bsd_stack_pool(const struct AmiSocketBase *base)
+{
+    const struct AmiSocketBase *master;
+
+    if (base == NULL)
+        return NULL;
+    master = (base->sb_Master != NULL) ? base->sb_Master : base;
+    if (master->sb_StackRefs == 0)
+        return NULL;
+    return master->sb_StackPool;
+}
 
 #define ASF_TCP         (1UL <<  0)
 #define ASF_UDP         (1UL <<  1)
@@ -788,7 +818,7 @@ VOID       bsd_close_all(struct AmiSocketBase *base);
 VOID       bsd_bpf_close_all(struct AmiSocketBase *base);
 
 /* socket.c, the receive window this machine can afford right now. */
-ULONG      ami_bsd_tcp_window(VOID);
+ULONG      ami_bsd_tcp_window(struct AmiSocketBase *base);
 VOID       bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms);
 
 /* handoff.c, cross-base descriptor transfer. The registry lives in the master
@@ -905,9 +935,9 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
 LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                        LONG optname, APTR optval, socklen_t *optlen);
 BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname);
-LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
-                             ULONG *saved);
-VOID bsd_mcast6_finish_send(ULONG saved);
+LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
+                             const NXD_ADDRESS *addr, ULONG *saved);
+VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved);
 #endif
 #endif
 

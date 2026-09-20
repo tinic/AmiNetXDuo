@@ -39,6 +39,7 @@ static BOOL            h_stats_removed;
 static ULONG           h_epoch_after_remove;
 static ULONG           h_delay_calls;
 static struct Task      h_query_task;
+static struct AmiSocketBase h_base;
 
 #define H_SANA ((AmiSana2If *)(void *)&h_sana_storage)
 
@@ -56,6 +57,7 @@ static VOID hh_addr(ULONG *dst, ULONG last)
 
 static VOID h_reset(VOID)
 {
+    memset(&h_base, 0, sizeof(h_base));
     memset(&h_ip, 0, sizeof(h_ip));
 
     h_if0 = &h_ip.nx_ip_interface[0];
@@ -63,6 +65,8 @@ static VOID h_reset(VOID)
 
     h_if0->nx_interface_valid = NX_TRUE;
     h_if1->nx_interface_valid = NX_TRUE;
+    h_base.sb_StackRefs = 1;
+    h_base.sb_StackIp   = &h_ip;
 
     h_ipv6_on            = TRUE;
     h_stats_active       = FALSE;
@@ -118,7 +122,7 @@ static LONG h_query_what(ULONG what)
     h_hdr->nsh_Version = AMI_NETSTATUS_VERSION;
 
     return bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, what,
-                             h_buffer, (ULONG)sizeof(h_buffer), NULL);
+                             h_buffer, (ULONG)sizeof(h_buffer), &h_base);
 }
 
 static LONG h_query(VOID)

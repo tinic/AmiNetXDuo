@@ -101,7 +101,7 @@ static struct
     LONG        nx_enter_result;
     ULONG       nx_enters, nx_leaves;
 
-    BOOL        no_pool;            /* netstack_pool() answers NULL          */
+    BOOL        no_pool;            /* legacy stub state, see no-pool case   */
 
     ULONG       mss;
 
@@ -149,6 +149,9 @@ static void h_reset(void)
 
     h.mss           = 536;
     h.append_status = NX_SUCCESS;
+    h_base.sb_StackRefs = 1;
+    h_base.sb_StackIp   = &h_ip;
+    h_base.sb_StackPool = &h_pool;
 }
 
 static AmiSocket *h_tcp(LONG fd)
@@ -1162,6 +1165,7 @@ static void t_no_packet(void)
     h_reset();
     (VOID)h_tcp(0);
     h.no_pool = TRUE;
+    h_base.sb_StackPool = NULL;
 
     CHECK(bsd_send(0, buf, 8, 0, &h_base) == -1 &&
           h.errno_value == AMI_ENETDOWN,

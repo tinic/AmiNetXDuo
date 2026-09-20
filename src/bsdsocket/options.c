@@ -962,7 +962,7 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
  */
 static BOOL bsd_v4_source_for(AmiSocket *sock, ULONG *addr_out)
 {
-    NX_IP        *ip       = netstack_ip();
+    NX_IP        *ip       = bsd_stack_ip(sock->as_Owner);
     NX_INTERFACE *nxif     = NX_NULL;
     ULONG         peer;
 

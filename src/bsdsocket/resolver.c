@@ -336,9 +336,9 @@ static VOID bsd_hostname_out(char *dst, ULONG size, const char *src)
 }
 
 /* "the first interface that is online" (autodoc NOTES). */
-static ULONG bsd_first_online_address(VOID)
+static ULONG bsd_first_online_address(struct AmiSocketBase *base)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(base);
     UINT   i;
 
     if (ip == NULL)
@@ -409,7 +409,7 @@ int bsd_gethostname(register char *name     __asm("a0"),
     }
 
     derived[0] = '\0';
-    address    = bsd_first_online_address();
+    address    = bsd_first_online_address(SocketBase);
 
     if (address != 0 &&
         netstack_resolve_reverse(address, derived, sizeof(derived),
@@ -427,9 +427,7 @@ int bsd_gethostname(register char *name     __asm("a0"),
 
 long bsd_gethostid(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP *ip = netstack_ip();
-
-    (VOID)SocketBase;
+    NX_IP *ip = bsd_stack_ip(SocketBase);
 
     if (ip == NULL)
         return 0;

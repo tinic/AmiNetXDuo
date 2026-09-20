@@ -65,9 +65,9 @@ static VOID bsd_tcp_send_fin(AmiSocket *sock)
     tx_mutex_put(&ip->nx_ip_protection);
 }
 
-static ULONG bsd_udp_queue_max(VOID)
+static ULONG bsd_udp_queue_max(struct AmiSocketBase *base)
 {
-    NX_PACKET_POOL *pool = netstack_pool();
+    NX_PACKET_POOL *pool = bsd_stack_pool(base);
     ULONG           queue;
 
     if (pool == NULL)
@@ -112,11 +112,11 @@ static ULONG bsd_tcp_consumer_count(NX_IP *ip)
     return live;
 }
 
-ULONG ami_bsd_tcp_window(VOID)
+ULONG ami_bsd_tcp_window(struct AmiSocketBase *base)
 {
     static ULONG    last_budget = 0;
-    NX_PACKET_POOL *pool = netstack_pool();
-    NX_IP          *ip   = netstack_ip();
+    NX_PACKET_POOL *pool = bsd_stack_pool(base);
+    NX_IP          *ip   = bsd_stack_ip(base);
     ULONG           budget;
     ULONG           cap;
 
@@ -151,11 +151,12 @@ ULONG ami_bsd_tcp_window(VOID)
  * it; the socket's advertised window stays at what it was created with until
  * bsd_tcp_window_grow() decides otherwise.
  */
-static VOID bsd_tcp_window_maximum(NX_TCP_SOCKET *tcp)
+static VOID bsd_tcp_window_maximum(struct AmiSocketBase *base,
+                                   NX_TCP_SOCKET *tcp)
 {
 #ifdef NX_ENABLE_TCP_WINDOW_SCALING
-    NX_PACKET_POOL *pool = netstack_pool();
-    NX_IP          *ip   = netstack_ip();
+    NX_PACKET_POOL *pool = bsd_stack_pool(base);
+    NX_IP          *ip   = bsd_stack_ip(base);
 
     if (pool == NULL || ip == NULL)
         return;                         /* create left it at the window */
@@ -169,6 +170,7 @@ static VOID bsd_tcp_window_maximum(NX_TCP_SOCKET *tcp)
 #else
     /* Without the scale option there is no field and nothing to grow to:
        sixteen bits is the ceiling and the socket was created at it. */
+    (VOID)base;
     (VOID)tcp;
 #endif
 }
@@ -285,9 +287,10 @@ static VOID bsd_tcp_rx_queue_cap(NX_TCP_SOCKET *tcp)
  * completion instead of sleeping a tick (sana2_internal.h,
  * AMI_SANA2_TX_PEND).  See nx_user.h.
  */
-static VOID bsd_tcp_tx_queue_default(NX_TCP_SOCKET *tcp)
+static VOID bsd_tcp_tx_queue_default(struct AmiSocketBase *base,
+                                     NX_TCP_SOCKET *tcp)
 {
-    NX_PACKET_POOL *pool  = netstack_pool();
+    NX_PACKET_POOL *pool  = bsd_stack_pool(base);
     ULONG           depth = BSD_TCP_TX_QUEUE_MIN;
 
     if (pool != NULL)
@@ -869,7 +872,7 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
 
     if ((sock->as_Flags & ASF_LISTENING) != 0)
     {
-        NX_IP     *ip = netstack_ip();
+        NX_IP     *ip = bsd_stack_ip(base);
         AmiSocket *p;
 
         for (p = sock->as_Incoming; p != NULL; p = p->as_IncomingNext)
@@ -1090,7 +1093,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
                 register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     AmiSocket *sock;
-    NX_IP     *ip = netstack_ip();
+    NX_IP     *ip = bsd_stack_ip(SocketBase);
     UINT       status;
     LONG       fd;
 
@@ -1149,16 +1152,17 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     {
         status = nx_tcp_socket_create(ip, &sock->as_Nx.tcp, bsd_tcp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                      NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
+                                      NX_IP_TIME_TO_LIVE,
+                                      ami_bsd_tcp_window(SocketBase),
                                       bsd_tcp_urgent_notify,
                                       bsd_tcp_disconnect_callback);
         if (status == NX_SUCCESS)
         {
             bsd_tcp_seed_isn(&sock->as_Nx.tcp);
             bsd_tcp_keepalive_default(&sock->as_Nx.tcp);
-            bsd_tcp_window_maximum(&sock->as_Nx.tcp);
+            bsd_tcp_window_maximum(SocketBase, &sock->as_Nx.tcp);
             bsd_tcp_rx_queue_cap(&sock->as_Nx.tcp);
-            bsd_tcp_tx_queue_default(&sock->as_Nx.tcp);
+            bsd_tcp_tx_queue_default(SocketBase, &sock->as_Nx.tcp);
         }
     }
     else
@@ -1166,7 +1170,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         status = nx_udp_socket_create(ip, &sock->as_Nx.udp, bsd_udp_name,
                                       NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                       NX_IP_TIME_TO_LIVE,
-                                      bsd_udp_queue_max());
+                                      bsd_udp_queue_max(SocketBase));
     }
 
     if (status != NX_SUCCESS)
@@ -1239,9 +1243,10 @@ static BOOL bsd_addr_is_multicast(const NXD_ADDRESS *addr)
 }
 #endif
 
-static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr, ULONG scope)
+static BsdBindKind bsd_bind_kind(struct AmiSocketBase *base,
+                                 const NXD_ADDRESS *addr, ULONG scope)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(base);
 #ifdef AMINETXDUO_IPV6
     const NX_INTERFACE *zoned = NX_NULL;
 #endif
@@ -1372,7 +1377,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
 
     if (bsd_nx_enter(SocketBase) != 0)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
-    kind = bsd_bind_kind(&addr, scope);
+    kind = bsd_bind_kind(SocketBase, &addr, scope);
     bsd_nx_leave(SocketBase);
 
     switch (kind)
@@ -1483,7 +1488,7 @@ static VOID bsd_listen_unlink(AmiSocket *sock, AmiSocket *victim)
  */
 static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
 {
-    NX_IP     *ip = netstack_ip();
+    NX_IP     *ip = bsd_stack_ip(base);
     AmiSocket *spare;
     UINT       status;
 
@@ -1497,7 +1502,8 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
 
     status = nx_tcp_socket_create(ip, &spare->as_Nx.tcp, bsd_tcp_name,
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                  NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
+                                  NX_IP_TIME_TO_LIVE,
+                                  ami_bsd_tcp_window(base),
                                   bsd_tcp_urgent_notify,
                                   bsd_tcp_disconnect_callback);
     if (status != NX_SUCCESS)
@@ -1507,9 +1513,9 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
     }
 
     bsd_tcp_seed_isn(&spare->as_Nx.tcp);
-    bsd_tcp_tx_queue_default(&spare->as_Nx.tcp);
+    bsd_tcp_tx_queue_default(base, &spare->as_Nx.tcp);
     bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
-    bsd_tcp_window_maximum(&spare->as_Nx.tcp);
+    bsd_tcp_window_maximum(base, &spare->as_Nx.tcp);
     bsd_tcp_rx_queue_cap(&spare->as_Nx.tcp);
 
     spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
@@ -1592,7 +1598,7 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
 static VOID bsd_listen_return(struct AmiSocketBase *base, AmiSocket *sock,
                               AmiSocket *incoming)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(base);
     UINT   status = NX_NOT_SUCCESSFUL;
 
     if (ip != NULL)
@@ -1628,7 +1634,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
 {
     AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
     AmiSocket *incoming;
-    NX_IP     *ip = netstack_ip();
+    NX_IP     *ip = bsd_stack_ip(SocketBase);
     UINT       status;
 
     if (sock == NULL)
@@ -1667,16 +1673,17 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
 
     status = nx_tcp_socket_create(ip, &incoming->as_Nx.tcp, bsd_tcp_name,
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                                  NX_IP_TIME_TO_LIVE, ami_bsd_tcp_window(),
+                                  NX_IP_TIME_TO_LIVE,
+                                  ami_bsd_tcp_window(SocketBase),
                                   bsd_tcp_urgent_notify,
                                   bsd_tcp_disconnect_callback);
     if (status == NX_SUCCESS)
     {
         bsd_tcp_seed_isn(&incoming->as_Nx.tcp);
         bsd_tcp_keepalive_default(&incoming->as_Nx.tcp);
-        bsd_tcp_window_maximum(&incoming->as_Nx.tcp);
+        bsd_tcp_window_maximum(SocketBase, &incoming->as_Nx.tcp);
         bsd_tcp_rx_queue_cap(&incoming->as_Nx.tcp);
-        bsd_tcp_tx_queue_default(&incoming->as_Nx.tcp);
+        bsd_tcp_tx_queue_default(SocketBase, &incoming->as_Nx.tcp);
     }
     if (status != NX_SUCCESS)
     {
@@ -1862,7 +1869,7 @@ static UINT bsd_connect_once(VOID *arg, ULONG wait)
 BOOL bsd_bind_wants_interface(const AmiSocket *listener,
                               const NX_INTERFACE *nxif)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(listener->as_Owner);
 
 #ifdef AMINETXDUO_IPV6
     if (listener->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V6 &&
@@ -1970,7 +1977,7 @@ static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
 BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
                                 ULONG scope, UINT *index)
 {
-    NX_IP             *ip    = netstack_ip();
+    NX_IP             *ip    = bsd_stack_ip(sock->as_Owner);
     const NXD_ADDRESS *local = &sock->as_LocalAddr;
     BOOL               bound;
     UINT               i;
@@ -2120,7 +2127,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 {
     AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
     AmiSocket  *incoming;
-    NX_IP      *ip = netstack_ip();
+    NX_IP      *ip = bsd_stack_ip(SocketBase);
     NXD_ADDRESS peer;
     ULONG       peer_port = 0;
     UINT        status;
@@ -2329,7 +2336,7 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
                                  AmiSocket *sock, const NXD_ADDRESS *addr,
                                  ULONG scope, UINT *index, BOOL *pinned)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(SocketBase);
 
     *index  = 0;
     *pinned = FALSE;

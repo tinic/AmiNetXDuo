@@ -35,6 +35,7 @@ static NX_IP *h_ip_ptr = &h_ip;
 
 static VOID h_machine_reset(VOID)
 {
+    memset(&h_base, 0, sizeof(h_base));
     memset(&h_ip, 0, sizeof(h_ip));
 
     h_ip.nx_ip_interface[0].nx_interface_valid           = NX_TRUE;
@@ -48,6 +49,8 @@ static VOID h_machine_reset(VOID)
     h_ip.nx_ip_interface[1].nx_interface_ip_network      = IF1_ADDR & IF1_MASK;
 
     h_ip_ptr = &h_ip;
+    h_base.sb_StackRefs = 1;
+    h_base.sb_StackIp   = &h_ip;
 }
 
 static NX_INTERFACE *h_iface_for(NX_IP *ip, ULONG next_hop)
@@ -461,6 +464,7 @@ static VOID t_refusals(VOID)
 
     /* No stack at all. */
     h_ip_ptr = NULL;
+    h_base.sb_StackIp = NULL;
     t[0].ti_Tag  = RTA_Destination;
     t[0].ti_Data = (uintptr_t)"192.168.66.0";
     t[1].ti_Tag  = RTA_Gateway;
@@ -470,6 +474,7 @@ static VOID t_refusals(VOID)
     CHECK(rc == -1 && h_errno_last == AMI_ENETDOWN,
           "with no stack it is ENETDOWN, not EINVAL");
     h_ip_ptr = &h_ip;
+    h_base.sb_StackIp = &h_ip;
 }
 
 static VOID t_absent(VOID)

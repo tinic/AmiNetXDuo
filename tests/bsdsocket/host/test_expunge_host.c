@@ -45,6 +45,8 @@ static struct Task       h_task;
 /* The block the base lives in, allocated the way bsd_lib_init() does it. */
 static UBYTE                *h_block;
 static struct AmiSocketBase *h_base;
+static NX_IP                  h_stack_ip;
+static NX_PACKET_POOL         h_stack_pool;
 
 /* The list Exec keeps the library on, so Remove() has something real to do
    and "still in the list" is a question with an answer. */
@@ -241,6 +243,9 @@ VOID Remove(struct Node *node)
 }
 
 VOID netstack_shutdown(VOID)        { h.shutdown_calls++; }
+NX_IP *netstack_ip(VOID)            { return &h_stack_ip; }
+NX_PACKET_POOL *netstack_pool(VOID) { return &h_stack_pool; }
+VOID bsd_netmon_drop_owner(struct AmiSocketBase *owner) { (VOID)owner; }
 
 /* bsd_task_sweep() discards a dead opener's ThreadX registration through
    this. Nothing here adopts, so there is never one to discard; the stub
@@ -540,7 +545,15 @@ static VOID t_transient_stack_reference(VOID)
     printf("a transient worker stack reference\n");
 
     h_machine_reset(TRUE);
+    h_base->sb_StackIp   = &h_stack_ip;
+    h_base->sb_StackPool = &h_stack_pool;
+    CHECK(bsd_stack_ip(h_base) == NULL && bsd_stack_pool(h_base) == NULL,
+          "published pointers without a reference cannot be acquired");
+
     h_base->sb_StackRefs = 1;       /* the launching opener */
+    CHECK(bsd_stack_ip(h_base) == &h_stack_ip &&
+              bsd_stack_pool(h_base) == &h_stack_pool,
+          "the opener reference leases both published NetX objects");
 
     rc = bsd_stack_transient_hold(h_base);
     CHECK(rc != 0, "an API opener without a network is not a stack reference");
@@ -575,6 +588,8 @@ static VOID t_transient_stack_reference(VOID)
           "the last transient count also reaches zero");
     CHECK(h.shutdown_calls == 1,
           "the last worker release shuts the netstack down");
+    CHECK(h_base->sb_StackIp == NULL && h_base->sb_StackPool == NULL,
+          "and retires both published NetX pointers before shutdown");
     CHECK(h.can_unload_calls == 1,
           "and records whether teardown made the segment unloadable");
 

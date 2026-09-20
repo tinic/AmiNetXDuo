@@ -318,6 +318,8 @@ static struct AmiSocketBase *bsd_lib_init(
     bsd_new_list(&base->sb_Children);
     base->sb_StackRefs          = 0;
     base->sb_TransientStackRefs = 0;
+    base->sb_StackIp            = NULL;
+    base->sb_StackPool          = NULL;
     base->sb_StackHeld          = FALSE;
     bsd_handoff_init(base);
     bsd_log_hook_init();
@@ -515,6 +517,8 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     bsd_bzero(&child->sb_Handoffs, sizeof(child->sb_Handoffs));
     child->sb_StackRefs          = 0;
     child->sb_TransientStackRefs = 0;
+    child->sb_StackIp            = NULL;
+    child->sb_StackPool          = NULL;
     child->sb_StackHeld          = FALSE;
     child->sb_NextHandoffId      = 0;
 
@@ -774,6 +778,16 @@ static LONG bsd_netstack_bringup(VOID)
     return bsd_netstack_run(&boot, "startup");
 }
 
+/* The master base owns netstack_startup_loopback()'s reference.  Retire the
+   raw pointer before giving that reference back so no library call can obtain
+   an NX_IP whose storage teardown is about to reclaim.  Caller holds sb_Lock. */
+static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
+{
+    master->sb_StackIp   = NULL;
+    master->sb_StackPool = NULL;
+    netstack_shutdown();
+}
+
 /*
  * Attach one interface.  3484 bytes, which is what AddNetInterface enters
  * through NETCTRL_INTERFACE_ADD, and it has NO caller-stack fallback on
@@ -912,6 +926,17 @@ struct AmiSocketBase *bsd_lib_open(
             master->sb_Lib.lib_OpenCnt--;
             return NULL;
         }
+        master->sb_StackIp = netstack_ip();
+        master->sb_StackPool = netstack_pool();
+        if (master->sb_StackIp == NULL || master->sb_StackPool == NULL)
+        {
+            bsd_netstack_shutdown_owned(master);
+            ReleaseSemaphore(&master->sb_Lock);
+            AMI_ERROR("bsdsocket: startup returned incomplete NetX state");
+            Forbid();
+            master->sb_Lib.lib_OpenCnt--;
+            return NULL;
+        }
     }
     master->sb_StackRefs++;
 
@@ -922,7 +947,7 @@ struct AmiSocketBase *bsd_lib_open(
     {
         ObtainSemaphore(&master->sb_Lock);
         if (--master->sb_StackRefs == 0)
-            netstack_shutdown();
+            bsd_netstack_shutdown_owned(master);
         ReleaseSemaphore(&master->sb_Lock);
 
         Forbid();
@@ -965,7 +990,7 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         ObtainSemaphore(&master->sb_Lock);
         if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
         {
-            netstack_shutdown();
+            bsd_netstack_shutdown_owned(master);
             unload_is_safe = netstack_can_unload();
         }
         ReleaseSemaphore(&master->sb_Lock);
@@ -1034,7 +1059,7 @@ VOID bsd_stack_transient_release(struct AmiSocketBase *base)
         master->sb_TransientStackRefs--;
         if (--master->sb_StackRefs == 0)
         {
-            netstack_shutdown();
+            bsd_netstack_shutdown_owned(master);
             unload_is_safe = netstack_can_unload();
         }
     }

@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `bsdsocket.library` now binds NetX IP and packet-pool access to the opener
+  reference that keeps those objects alive, and retires both before shutdown.
+
 - `anxgenet.device` now leaves its GIC interrupt handler after acknowledging
   and masking the hardware.  Ring draining, cache maintenance, SANA-II buffer
   callbacks, PHY access and watchdog recovery run in its service task with
@@ -19,7 +22,7 @@ version at the top when it merges.
   against removal, and are retired automatically with the library base that
   installed them.  BPF filtering and record copies no longer run under a
   machine-wide `Forbid()`; packet taps skip observational capture when the
-  channel semaphore is busy rather than blocking an adopted network task.
+  channel semaphore is busy without blocking an adopted network task.
 
 - The private receive-batch record now carries its own version and allocated
   size.  Drivers reject records whose cookie count exceeds that storage,

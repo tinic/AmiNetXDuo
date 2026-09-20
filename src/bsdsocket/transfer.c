@@ -294,7 +294,7 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
                              BsdIovCursor *cur, LONG len, LONG flags,
                              AmiSana2If *run)
 {
-    NX_PACKET_POOL *pool = netstack_pool();
+    NX_PACKET_POOL *pool = bsd_stack_pool(base);
     ULONG           mss  = 0;
     LONG            sent = 0;
     ULONG           wait;
@@ -685,8 +685,8 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          const NXD_ADDRESS *addr, UINT port, ULONG scope,
                          const BsdCmsgSource *src)
 {
-    NX_PACKET_POOL *pool   = netstack_pool();
-    NX_IP          *ip     = netstack_ip();
+    NX_PACKET_POOL *pool   = bsd_stack_pool(base);
+    NX_IP          *ip     = bsd_stack_ip(base);
     NX_PACKET      *packet = NX_NULL;
     BsdSourceKind   source;
     UINT            source_index = 0;
@@ -752,7 +752,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 #ifdef AMINETXDUO_MULTICAST
     mcast_if = bsd_mcast_prepare_send(sock, addr);
 #ifdef AMINETXDUO_IPV6
-    mcast6_src = bsd_mcast6_prepare_send(sock, addr, &mcast6_hops);
+    mcast6_src = bsd_mcast6_prepare_send(base, sock, addr, &mcast6_hops);
 
     /*
      * IPV6_MULTICAST_HOPS is 0 for this group: RFC 3493 5.2 makes that "this
@@ -760,7 +760,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      */
     if (mcast6_src == BSD_MCAST6_NO_LINK)
     {
-        bsd_mcast6_finish_send(mcast6_hops);
+        bsd_mcast6_finish_send(base, mcast6_hops);
         return len;
     }
 #endif
@@ -778,7 +778,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     if (status != NX_SUCCESS)
     {
 #if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
-        bsd_mcast6_finish_send(mcast6_hops);
+        bsd_mcast6_finish_send(base, mcast6_hops);
 #endif
         return bsd_fail(base, bsd_wait_errno(wait, status));
     }
@@ -792,7 +792,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     {
         nx_packet_release(packet);
 #if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
-        bsd_mcast6_finish_send(mcast6_hops);
+        bsd_mcast6_finish_send(base, mcast6_hops);
 #endif
         return bsd_fail(base, AMI_ENOBUFS);
     }
@@ -835,7 +835,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
 #if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
-    bsd_mcast6_finish_send(mcast6_hops);
+    bsd_mcast6_finish_send(base, mcast6_hops);
 #endif
 
     if (status != NX_SUCCESS)
@@ -858,7 +858,7 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          const NXD_ADDRESS *addr, ULONG scope,
                          const BsdCmsgSource *src)
 {
-    NX_PACKET_POOL *pool   = netstack_pool();
+    NX_PACKET_POOL *pool   = bsd_stack_pool(base);
     NX_PACKET      *packet = NX_NULL;
     ULONG           wait;
     LONG            filled;
