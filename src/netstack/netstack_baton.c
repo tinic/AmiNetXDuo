@@ -8,25 +8,12 @@
 
 #include "netstack_internal.h"
 
-#include "tx_thread.h"
-#include "tx_timer.h"
 #include "tx_amiga.h"
 
-#include "aminetxduo/budget.h"
 #include "aminetxduo/health.h"
 
 #include <exec/tasks.h>
 #include <proto/exec.h>
-
-/* Port internals (port/threadx-amiga/src/). Not in tx_amiga.h because they are
-   not application API, but a blocking bracket needs them. */
-extern VOID _tx_amiga_wake_scheduler(VOID);
-extern UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr);
-
-/* Dispatch the ready thread from this Task instead of waking the scheduler
-   Task to do it.  Core lock held, baton already released.  TX_TRUE means it
-   did not dispatch and the scheduler must be poked once the lock is dropped. */
-extern UINT _tx_amiga_dispatch_or_wake(VOID);
 
 /*
  * One entry per Exec Task currently inside a release/acquire bracket.  The
@@ -209,13 +196,12 @@ VOID ami_netstack_baton_reset(VOID)
 }
 
 /*
- * _tx_thread_system_state must be raised only under an unbroken Forbid(), and
- * nothing under tx_thread_suspend()/resume() may Wait() while it is raised.
- * Sampled before this bracket raises anything; non-zero is the defect itself.
+ * The port's scheduler state must be zero before a wait bracket begins.
+ * Sampled before the port raises anything; non-zero is the defect itself.
  */
 static VOID ami_baton_observe_state(VOID)
 {
-    ULONG state = (ULONG)_tx_thread_system_state;
+    ULONG state = tx_amiga_exec_wait_system_state_locked();
 
     if (state > ami_baton_stats.bs_StateMax)
         ami_baton_stats.bs_StateMax = state;
@@ -232,6 +218,8 @@ VOID ami_netstack_baton_release(VOID)
     TX_THREAD     *thread;
     AmiBatonSlot  *slot;
     UINT           wake;
+    UINT           moved;
+    UINT           status;
 
     Forbid();
 
@@ -243,7 +231,7 @@ VOID ami_netstack_baton_release(VOID)
         return;
     }
 
-    thread = _tx_thread_current_ptr;
+    thread = tx_amiga_exec_wait_current_locked();
 
     if (thread == TX_NULL || thread->tx_thread_amiga_task != (VOID *)me)
     {
@@ -293,28 +281,22 @@ VOID ami_netstack_baton_release(VOID)
     slot->bs_Thread  = thread;
     slot->bs_Nesting = 1;
 
-    /* Interrupt context: _tx_thread_system_suspend() must not switch, because
-       this Task is about to leave ThreadX entirely. */
-    _tx_thread_system_state++;
-    /* Off the ready list.  With the system state raised this returns here
-       rather than ending in _tx_thread_system_return().  The Forbid() is held
-       across it, see the note above ami_baton_observe_state(). */
-    /* REQUIRED.  The baton is handed on by suspending this thread; one that
-       will not suspend keeps running with the baton released. */
-    if (tx_thread_suspend(thread) != TX_SUCCESS)
-        AMI_ERROR("netstack: a thread would not suspend to release the baton");
-
-    if (_tx_thread_current_ptr == thread)
+    /* The port owns the ready-list and baton globals.  This call is the one
+       narrow boundary for suspending without dispatching through Exec; the
+       surrounding Forbid() keeps it atomic with the slot published above. */
+    status = tx_amiga_exec_wait_release_locked(thread, &wake, &moved);
+    if (status != TX_SUCCESS)
     {
-        /* The hold that ends here ends at a driver bracket: the holder is
-           about to Wait() on an IORequest outside ThreadX entirely. */
-        ami_budget_hold_end((APTR)thread, thread->tx_thread_name,
-                            (ULONG)thread->tx_thread_state,
-                            AMI_HOLD_SITE_BRACKET);
-        _tx_thread_current_ptr = TX_NULL;
-        _tx_timer_time_slice   = (ULONG)0;
+        slot->bs_Task    = NULL;
+        slot->bs_Thread  = NULL;
+        slot->bs_Nesting = 0;
+        if (ami_baton_stats.bs_Live > 0)
+            ami_baton_stats.bs_Live--;
+        Permit();
+        AMI_ERROR("netstack: a thread would not suspend to release the baton");
+        return;
     }
-    else
+    if (moved != TX_FALSE)
     {
         /* The baton belongs to another thread, so it stays pointing at a thread
            just suspended and the scheduler has nobody to dispatch. If this is
@@ -322,19 +304,10 @@ VOID ami_netstack_baton_release(VOID)
         ami_baton_stats.bs_BatonMoved++;
     }
 
-    _tx_thread_system_state--;
-
-    /*
-     * Another thread can run now.  Dispatch it from here: this Task is about
-     * to block in exec Wait(), so waking the scheduler Task is two Exec
-     * context switches for nothing.  Under the Forbid(), where it is valid.
-     */
-    wake =  _tx_amiga_dispatch_or_wake();
-
     Permit();
 
     if (wake == (UINT) TX_TRUE)
-        _tx_amiga_wake_scheduler();
+        tx_amiga_exec_wait_wake();
 }
 
 VOID ami_netstack_baton_acquire(VOID)
@@ -343,6 +316,7 @@ VOID ami_netstack_baton_acquire(VOID)
     TX_THREAD     *thread;
     AmiBatonSlot  *slot;
     UINT           wake;
+    UINT           status;
 
     Forbid();
 
@@ -372,30 +346,24 @@ VOID ami_netstack_baton_acquire(VOID)
 
     ami_baton_observe_state();
 
-    _tx_thread_system_state++;
     if (ami_baton_stats.bs_Live > 0)
         ami_baton_stats.bs_Live--;
     ami_baton_stats.bs_Transitions++;
 
-    /* Held across the resume, same rule as release(). */
-    /* REQUIRED.  A resume that does not happen is a thread that never runs
-       again, which is the whole of what the baton is for. */
-    if (tx_thread_resume(thread) != TX_SUCCESS)
+    /* Held across the resume, same rule as release().  The port owns the
+       scheduler state that keeps this from dispatching mid-transaction. */
+    status = tx_amiga_exec_wait_resume_locked(thread, &wake);
+    if (status != TX_SUCCESS)
+    {
+        Permit();
         AMI_ERROR("netstack: a thread waiting for the baton was not resumed");
-
-    _tx_thread_system_state--;
-
-    /*
-     * Hand the baton over from here rather than waking the scheduler Task: the
-     * park below then usually finds its run signal already set and returns
-     * without blocking.  Under the Forbid(), where the answer is valid.
-     */
-    wake =  _tx_amiga_dispatch_or_wake();
+        return;
+    }
 
     Permit();
 
     if (wake == (UINT) TX_TRUE)
-        _tx_amiga_wake_scheduler();
+        tx_amiga_exec_wait_wake();
 
     /*
      * OPTIONAL.  Park answers TX_FALSE when the Task was marked to die while
@@ -405,8 +373,7 @@ VOID ami_netstack_baton_acquire(VOID)
      * the resume has happened -- so this says what was lost rather than
      * pretending to recover.
      */
-    if (_tx_amiga_thread_park(thread) == (UINT)TX_FALSE)
+    if (tx_amiga_exec_wait_park(thread) == (UINT)TX_FALSE)
         AMI_ERROR("netstack: a task waiting for the baton was orphaned; "
                   "it continues without one");
 }
-

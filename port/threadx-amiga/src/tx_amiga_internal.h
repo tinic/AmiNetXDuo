@@ -170,6 +170,11 @@ static __inline UINT _tx_amiga_wake_needed(UINT dispatched)
    under it, which must then unwind; for a port-created Task it never returns.  */
 UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr);
 
+/* Hand the released baton directly to the next thread where possible.
+   Call with Forbid() held and no current baton owner.  TX_TRUE means the
+   scheduler task must be woken after Permit(). */
+UINT _tx_amiga_dispatch_or_wake(VOID);
+
 
 /* Destroy the calling Exec Task (one the port created).  Never returns.  Touches
    only the task's own control block, so it is safe even for a task the reaper had

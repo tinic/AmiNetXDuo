@@ -454,9 +454,9 @@ void _tx_thread_reset_port_completion(TX_THREAD *thread_ptr, UINT tx_saved_postu
 }
 
 
-/* _tx_amiga_dispatch_inline() for callers outside this directory (the netstack's
-   release/acquire bracket).  The core lock is held and the baton already released;
-   TX_TRUE means the caller must _tx_amiga_wake_scheduler() once it drops the lock. */
+/* _tx_amiga_dispatch_inline() for the Exec-wait boundary.  The core lock is
+   held and the baton already released; TX_TRUE means the caller must wake the
+   scheduler task once it drops the lock. */
 UINT _tx_amiga_dispatch_or_wake(VOID)
 {
 

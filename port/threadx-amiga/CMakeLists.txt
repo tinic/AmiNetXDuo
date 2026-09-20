@@ -16,6 +16,7 @@ add_library(threadx_port STATIC
     src/tx_thread_interrupt_control.c
     src/tx_timer_interrupt.c
     src/tx_amiga_adopt.c
+    src/tx_amiga_exec_wait.c
     src/tx_amiga_green.c)
 
 # The green realm's m68k context switch.  The .S is #ifdef'd end to end on

@@ -168,6 +168,26 @@ TX_THREAD *tx_amiga_adopted_thread(VOID);
    port is not the same question as "is _tx_thread_system_state zero".  */
 UINT    tx_amiga_caller_is_thread(VOID);
 
+/* A ThreadX thread sometimes has to block in Exec (Wait/WaitIO) without
+   keeping the single hosted scheduler baton.  These calls are the port
+   boundary for that transaction; application code must use the higher-level
+   netstack bracket instead.
+
+   The *_locked calls require one surrounding Forbid().  They remove/resume
+   `thread_ptr` on the ThreadX ready list without dispatching through Exec and
+   return the ordinary ThreadX status.  *wake is TX_TRUE when the caller must
+   invoke tx_amiga_exec_wait_wake() after Permit(); *moved is TX_TRUE when the
+   thread being released was no longer the current baton holder.  Park is
+   called after the resume-side Permit() and returns TX_FALSE only when an
+   adopted task was orphaned while it slept. */
+ULONG   tx_amiga_exec_wait_system_state_locked(VOID);
+TX_THREAD *tx_amiga_exec_wait_current_locked(VOID);
+UINT    tx_amiga_exec_wait_release_locked(TX_THREAD *thread_ptr,
+                                           UINT *wake, UINT *moved);
+UINT    tx_amiga_exec_wait_resume_locked(TX_THREAD *thread_ptr, UINT *wake);
+VOID    tx_amiga_exec_wait_wake(VOID);
+UINT    tx_amiga_exec_wait_park(TX_THREAD *thread_ptr);
+
 /* TX_TRUE if [start, start+size) overlaps the stack of a thread ThreadX still has
    on its created list, which tx_thread_create() refuses with TX_PTR_ERROR.
    Ranges that merely meet at an endpoint count.  */
@@ -313,8 +333,4 @@ UINT    tx_amiga_gate_orphan(TX_AMIGA_GATE *gate);
    for exactly that reason already. */
 VOID    _tx_timer_interrupt(VOID);
 
-/* For callers outside this directory -- the netstack's release/acquire
-   bracket.  TX_TRUE means the caller must _tx_amiga_wake_scheduler() once it
-   drops the core lock. */
-UINT    _tx_amiga_dispatch_or_wake(VOID);
 #endif /* TX_AMIGA_H */
