@@ -11,7 +11,7 @@
 #                                 [-e genet|wifi|both]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
-#                                 [-C]
+#                                 [-C] [-V]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -56,11 +56,12 @@ CONFIG_ONLY=0
 CANCEL_MODE=""
 MISSING_MODE=""
 NO_CARD=0
+INVALID_STATIC=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:C" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:CV" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -86,13 +87,14 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:C" opt; do
         c) CANCEL_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         m) MISSING_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         C) NO_CARD=1; CONFIG_ONLY=1 ;;
+        V) INVALID_STATIC=1; STATIC=1; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both]" \
-                "[-c drivers] [-m core|driver|probe|minimal] [-C]" >&2
+                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-V]" >&2
            exit 2 ;;
     esac
 done
@@ -794,6 +796,15 @@ if [ "$STATIC" = "1" ]; then
     for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
         ANSWER_LINES+=("$answer_run|BOOL|No, I will type them")
     done
+fi
+if [ "$INVALID_STATIC" = "1" ]; then
+    # The first replacement must be rejected by P_ip_parse.  askstring redraws
+    # the repeated page with its original default rather than the rejected
+    # text; consuming both actions with that same unique address default
+    # therefore proves the Installer stayed on the question before accepting
+    # the correction.  The later address prompts use different defaults.
+    ANSWER_LINES+=("1|STRING|192.168.1.10|999.1.1.1")
+    ANSWER_LINES+=("1|STRING|192.168.1.10|192.168.1.10")
 fi
 if [ "$TERMINAL" = "1" ]; then
     for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
@@ -2630,9 +2641,15 @@ fi
 # network device.  Stop after the complete destination/startup audit; booting
 # anxgenet/anxwifipi in Amiberry would only test that absent hardware fails.
 if [ "$CONFIG_ONLY" = "1" ]; then
+    _result_board=$BOARD
+    _result_driver=$SANA2_DRIVER
+    if [ -n "$EMU68_FIXTURE" ]; then
+        _result_board=emu68-fixture
+        _result_driver=$EXPECTED_AUTO_DEVICE
+    fi
     echo
-    echo "workbench_e2e=PASS board=emu68-fixture model=$MODEL" \
-         "driver=$EXPECTED_AUTO_DEVICE card_config=$CARD_CONFIG" \
+    echo "workbench_e2e=PASS board=$_result_board model=$MODEL" \
+         "driver=$_result_driver card_config=$CARD_CONFIG" \
          "stack=$STACK_INSTALLED boot_status=not-run"
     exit 0
 fi

@@ -10,8 +10,9 @@ version at the top when it merges.
 ## Unreleased
 
 - The Installer release gate adds cancellation and four corrupt-download
-  refusal cases plus Novice refusal when no network card is detected, bringing
-  the matrix to 35 scenarios. Existing-stack fixtures also cover stale `.old`
+  refusal cases plus Novice refusal when no network card is detected. A bad
+  static IPv4 address must now be rejected and corrected, bringing the matrix
+  to 36 scenarios. Existing-stack fixtures also cover stale `.old`
   backups, interrupted `.new` staging files, and a populated second `Work:`
   volume that must not become the destination.
 
