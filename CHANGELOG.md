@@ -19,7 +19,13 @@ version at the top when it merges.
   the window did not yet show: on MNT firmware 1.6 and later the window is
   read through the Zynq's L2 cache and a fresh frame's header can stay
   hidden for milliseconds; the driver waits it out, and this project's
-  firmware fork (branch `aminetxduo`) removes the wait.
+  firmware fork (branch `aminetxduo`) removes the wait. On that fork the
+  driver also sends without stalling the bus (four transmit slots, a
+  completion count at +0x8a instead of a wait for the wire), tells the
+  stack the card holds 56 frames, not 32, and marks in-order TCP
+  segments CONTINUES so the stack chains them -- 1 acknowledgment per 20
+  segments instead of 1 per 1.2. Findings, numbers and the two open defects
+  are in `docs/plans/zz9000-ethernet.md`.
 
 - The Installer release gate adds cancellation and four corrupt-download
   refusal cases plus Novice refusal when no network card is detected. A bad

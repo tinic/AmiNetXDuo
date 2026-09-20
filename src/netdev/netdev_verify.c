@@ -164,3 +164,46 @@ VOID netdev_rx_segment6(const UBYTE *ip, NetdevRxSegment *seg)
         nd_tcp_key(ip + 40, nd_be16(ip + 4), seg);
     }
 }
+
+UBYTE netdev_rx_continues(NetdevRxGro *g, const NetdevRxSegment *seg,
+                          UBYTE verified, UBYTE max)
+{
+    BOOL candidate = (BOOL)(verified != 0 && seg->tcp != 0 &&
+                            seg->data != 0 &&
+                            (seg->flags == 0x10 || seg->flags == 0x18));
+    UBYTE i;
+
+    if (!candidate)
+    {
+        g->live = 0;
+        return 0;
+    }
+
+    if (g->live && g->run < max &&
+        g->words == seg->words && g->ports == seg->ports &&
+        g->seq == seg->seq && g->ack == seg->ack &&
+        g->win == seg->win)
+    {
+        for (i = 0; i < seg->words; i++)
+            if (g->addr[i] != seg->addr[i])
+                break;
+        if (i == seg->words)
+        {
+            g->seq = seg->seq + seg->data;
+            g->run++;
+            return ANXD_S2_RXF_CONTINUES;
+        }
+    }
+
+    for (i = 0; i < seg->words; i++)
+        g->addr[i] = seg->addr[i];
+    g->words = seg->words;
+    g->ports = seg->ports;
+    g->seq   = seg->seq + seg->data;
+    g->ack   = seg->ack;
+    g->win   = seg->win;
+    g->flags = seg->flags;
+    g->live  = 1;
+    g->run   = 1;
+    return 0;
+}

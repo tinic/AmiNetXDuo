@@ -37,10 +37,16 @@
  * do it; measured on the A3000 that task alone was 23% of the CPU at
  * 3.5 Mbit/s.
  *
- * Transmit is one frame at a time by construction: the ARM services the
- * window writes and the length write in the order they arrive, and sends
- * when it reaches the length.  So a write never overtakes a send and the
- * shell's single transmit buffer is free again the moment tx() returns.
+ * Transmit, on MNT's firmware, is one frame at a time by construction: the
+ * ARM services the window writes and the length write in the order they
+ * arrive, and does not answer the length write's bus cycle until the GEM
+ * has sent -- 100 us to 1 ms with the CPU stalled, 16% of an A3000 at
+ * 4.6 Mbit/s of receive, all of it ACKs.  This project's firmware
+ * (tinic/zz9000-firmware, branch aminetxduo) adds an asynchronous send:
+ * bit 15 of the length word names one of the four 2 KB slots of the TX
+ * window in bits 12..11 and gets the bus back at once, and +0x8a counts the
+ * frames finished (bit 15 set says the firmware has the path; MNT's reads
+ * the register as 0).  The core takes whichever it finds at attach.
  *
  * The interrupt is INT6 (INTB_EXTER), which is what the card raises; the
  * server only masks and acknowledges at the card and the drain runs in the
@@ -64,6 +70,7 @@
 #include <aminetxduo/anxdiag.h>
 
 static BOOL zz_isr(NetdevNic *nic);
+static BOOL zz_tx_reclaim(NetdevNic *nic);
 
 /* -------------------------------------------------------------- board ---- */
 
@@ -75,18 +82,41 @@ static BOOL zz_isr(NetdevNic *nic);
 #define ZZ_REG_MAC_LO       0x0088UL
 #define ZZ_REG_RX_STATUS    0x008cUL
 
+#define ZZ_REG_TX_STATUS    0x008aUL    /* the fork's firmware, else reads 0 */
+
 #define ZZ_RX_WINDOW        0x2000UL
 #define ZZ_RX_PAD           4           /* UWORD length, UWORD serial */
 #define ZZ_TX_WINDOW        0x8000UL
-#define ZZ_TX_WINDOW_LEN    2048
+#define ZZ_TX_WINDOW_LEN    2048        /* one slot; the window holds four */
+#define ZZ_TX_SLOTS         4
+
+/* The length word of an asynchronous send, and the status register. */
+#define ZZ_TX_ASYNC         0x8000u
+#define ZZ_TX_SLOT_SHIFT    11
+#define ZZ_TX_LEN_MASK      0x07ffu
+#define ZZ_TXS_PRESENT      0x8000u
+#define ZZ_TXS_COUNT        0x7fffu
 
 #define ZZ_INT_ETH          0x0001      /* enable, and "pending" on a read */
 #define ZZ_INT_ETH_ACK      (8 | 16)    /* what MNT's driver writes to clear */
 
-/* Slots in the ARM's receive ring (firmware ethernet.h FRAME_MAX_BACKLOG);
-   MNT's release firmware has 32, this project's fork 128.  The smaller
-   number is what the opener's window arithmetic is told. */
-#define ZZ_ARM_RING_FRAMES  32UL
+/*
+ * Frames the ARM holds before it loses one, what the opener's window
+ * arithmetic is told (ANXD_CMD_RX_CAPACITY).  MNT's release firmware: a
+ * 32-slot ring and 32 receive descriptors.  This project's fork: 128 slots,
+ * 64 descriptors armed, and no more armed once 120 are pending (ethernet.c
+ * ETH_BACKLOG_HIGH_WATERMARK), so 56 may sit queued for the 68k before the
+ * card pauses the wire -- and a pause is not felt in time by a gigabit
+ * sender behind a switch.  What the number buys: a sender on the same
+ * switch puts the whole window on the wire back to back, and every frame
+ * of that burst past the armed descriptors is lost in the GEM with nothing
+ * counting it; with 32 armed and a 47 KB window, frames 33-35 of every
+ * burst went missing (25 retransmissions in ten seconds; 275 with the
+ * window sized to the whole ring).  Sized to what is taken without a pause
+ * and without the ARM's help, the window fits.
+ */
+#define ZZ_ARM_RING_FRAMES_MNT  32UL
+#define ZZ_ARM_RING_FRAMES_FORK 56UL
 
 /* How long zz_intr waits for a header the ARM has counted but the L2 cache
    still hides, measured against the beam (netdev_clock.h). */
@@ -106,8 +136,8 @@ enum
     ZZ_ST_UNWANTED,     /* group frames the hash did not take                */
     ZZ_ST_TXERR,        /* the ARM's transmit result was not 0               */
     ZZ_ST_ISR,          /* top halves that found the Ethernet bit            */
-    ZZ_ST_ISR_READY,    /* top halves: the ARM said frames were waiting      */
-    ZZ_ST_ISR_NONE,     /* top halves: the ARM said none were                */
+    ZZ_ST_CONTINUES,    /* frames marked CONTINUES (netdev_verify.h)         */
+    ZZ_ST_RUNS,         /* runs of two or more the mark made                 */
     ZZ_ST_SOFT_EMPTY,   /* passes after a top half that found no frame       */
     ZZ_ST_POLL_WORK,    /* passes with no top half before them that found one */
     ZZ_ST_BURST_MAX,    /* most frames one pass took                         */
@@ -115,7 +145,6 @@ enum
     ZZ_ST_LATE_READS,   /* most window reads it took to appear               */
     ZZ_ST_LATE_MISS,    /* empty passes where it never did within the budget */
     ZZ_ST_EMPTY,        /* service passes that found no frame                */
-    ZZ_ST_EMPTY_RXS,    /* the receive status word at the last empty pass    */
     ZZ_ST_COUNT
 };
 
@@ -127,8 +156,8 @@ static const char *const zz_stat_names[] =
     "group frames not wanted",
     "transmit results not 0",
     "top halves: Ethernet pending",
-    "top halves: ARM had frames ready",
-    "top halves: ARM had none ready",
+    "frames marked CONTINUES",
+    "runs the mark made",
     "passes after a top half, empty",
     "polled passes that found frames",
     "most frames in one pass",
@@ -136,13 +165,32 @@ static const char *const zz_stat_names[] =
     "most window reads until it appeared",
     "empty pass, header never appeared",
     "service passes with no frame",
-    "receive status at last empty pass",
     NULL
 };
 
-/* Set by the top half, cleared by the pass that follows it: which context
-   a pass ran in, for the counters above. */
-static UBYTE zz_after_isr;
+/*
+ * The core's own state.  Static rather than allocated: the shell frees and
+ * detaches only a core that set core_mem, and core_mem also arms the
+ * bus-master reset guard, which this card does not want.  Two, because the
+ * table has two rows for the card (Zorro III and Zorro II records); a
+ * machine has one ZZ9000, and the image is unloaded whole.
+ */
+typedef struct ZzCore
+{
+    NetdevRxGro gro;        /* the CONTINUES key, netdev_verify.h           */
+    UBYTE       after_isr;  /* set by the top half, cleared by the pass that
+                               follows it: which context a pass ran in     */
+    UBYTE       pad;
+} ZzCore;
+
+static ZzCore zz_cores[2];
+static UWORD  zz_cores_used;
+
+#define ZZ(nic) ((ZzCore *)(nic)->core)
+
+/* Frames the mark may chain before it starts a new run: what the opener
+   holds at most (src/sana2 AMI_SANA2_GRO_MAX). */
+#define ZZ_GRO_MAX      16
 
 static volatile UWORD *zz_reg(NetdevNic *nic, ULONG off)
 {
@@ -205,6 +253,11 @@ static LONG zz_attach(NetdevNic *nic)
     UBYTE anded = 0xff;
     UWORD i;
 
+    nic->core = &zz_cores[zz_cores_used & 1u];
+    zz_cores_used++;
+    ZZ(nic)->gro.live  = 0;
+    ZZ(nic)->after_isr = 0;
+
     /*
      * The station address the firmware programmed into the GEM: the card's
      * own from its configuration, or what a driver wrote before us.  Blank
@@ -236,9 +289,25 @@ static LONG zz_attach(NetdevNic *nic)
         nic->mac_source = (UBYTE)ANXDIAG_MAC_PROM;
     }
 
-    /* One frame in flight, see the head of the file.  No ring and no
-       packet buffer to describe: the window has no address of its own. */
-    nic->txb_cnt   = 1;
+    /*
+     * How many frames may be in flight: one on MNT's firmware, whose length
+     * write returns with the frame sent; the four window slots on the
+     * fork's, which counts completions in the status register.  No ring
+     * and no packet buffer to describe: the window has no address of its
+     * own.
+     */
+    {
+        UWORD txs  = zz_get(nic, ZZ_REG_TX_STATUS);
+        BOOL  fork = (BOOL)((txs & ZZ_TXS_PRESENT) != 0);
+
+        nic->txb_cnt = fork ? ZZ_TX_SLOTS : 1;
+        nic->tx_done = (UWORD)(txs & ZZ_TXS_COUNT);
+        nic->tx_next = 0;
+        /* What the ARM holds for us before it drops (or, on the fork,
+           pauses the wire). */
+        nic->rx_capacity = (fork ? ZZ_ARM_RING_FRAMES_FORK
+                                 : ZZ_ARM_RING_FRAMES_MNT) * (1500UL + 14UL);
+    }
     nic->txb_inuse = 0;
     nic->read_hdr  = NULL;
     nic->ring_copy = NULL;
@@ -247,15 +316,14 @@ static LONG zz_attach(NetdevNic *nic)
     nic->tx_at     = NULL;
     nic->write_buf = NULL;
     nic->core_stat_names = zz_stat_names;
-    nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
+    nic->rx_flags_supported = (UBYTE)(ANXD_S2_RXF_VERIFIED |
+                                      ANXD_S2_RXF_CONTINUES);
     nic->isr = zz_isr;
+    nic->tx_reclaim = zz_tx_reclaim;    /* completions are counted, not delivered */
     /* tx() holds the bus for the ARM's whole send (see it): under Forbid(),
        with interrupts on, never under the shell's Disable().  Nothing on
        the interrupt side transmits, so the lock is sound. */
     nic->tx_task_lock = 1;
-
-    /* What the ARM holds for us before it sends a pause frame and drops. */
-    nic->rx_capacity = ZZ_ARM_RING_FRAMES * (1500UL + 14UL);
 
     /* The interrupt is quiet until init(). */
     zz_put(nic, ZZ_REG_INT, 0);
@@ -268,7 +336,10 @@ static LONG zz_init(NetdevNic *nic)
 {
     zz_write_mac(nic);
     nic->core_stat[ZZ_ST_SERIAL] = 0;
+    ZZ(nic)->gro.live = 0;
     nic->txb_inuse = 0;
+    nic->tx_next   = 0;
+    nic->tx_done   = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
     nic->running   = TRUE;
     zz_put(nic, ZZ_REG_INT, ZZ_INT_ETH);
     return 0;
@@ -289,9 +360,11 @@ static VOID zz_setfilter(NetdevNic *nic)
 
 static VOID zz_reset(NetdevNic *nic)
 {
-    /* Nothing wedges on this side: one frame per length write, no ring of
-       our own.  The contract is txb_inuse cleared and a known state. */
+    /* Nothing wedges on this side, but a frame the ARM lost would leave a
+       slot counted in flight for ever: take the count as it stands and
+       start again, which is the contract -- txb_inuse cleared. */
     nic->txb_inuse = 0;
+    nic->tx_done   = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
     if (nic->running)
         zz_put(nic, ZZ_REG_INT, ZZ_INT_ETH);
 }
@@ -442,23 +515,66 @@ static BOOL zz_rint(NetdevNic *nic)
 
         if (dst != NULL)
         {
-            UWORD plen = (UWORD)(len - NETDEV_HDR_LEN);
-            ULONG sum  = zz_copy_payload_sum(dst, frame + NETDEV_HDR_LEN, plen);
+            UWORD plen  = (UWORD)(len - NETDEV_HDR_LEN);
+            ULONG sum   = zz_copy_payload_sum(dst, frame + NETDEV_HDR_LEN, plen);
+            UBYTE flags = ANXD_S2_RXF_SUMMED;
+            ZzCore *c   = ZZ(nic);
 
-            if ((wanted & ANXD_S2_RXF_VERIFIED) != 0)
-                wanted = netdev_rx_verify(dst, plen, sum);
+            /*
+             * The verdict, then the mark: a verified TCP segment that is the
+             * next of the stream the previous one belonged to is chained by
+             * the opener onto that one, and TCP sees the run once
+             * (netdev_verify.h netdev_rx_continues).  On this machine the
+             * stack's per-segment work, not the copy, is what the clock
+             * goes to.
+             */
+            if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
+                buf[12] == 0x08 && buf[13] == 0x00)
+            {
+                NetdevRxSegment seg;
+                UBYTE v = netdev_rx_verify4(dst, plen, sum);
+
+                if (v != 0)
+                    netdev_rx_segment4(dst, &seg);
+                flags |= v;
+                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
+                    flags |= netdev_rx_continues(&c->gro, &seg, v, ZZ_GRO_MAX);
+                else
+                    c->gro.live = 0;
+            }
+            else if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
+                     buf[12] == 0x86 && buf[13] == 0xdd)
+            {
+                NetdevRxSegment seg;
+                UBYTE v = netdev_rx_verify6(dst, plen, sum);
+
+                if (v != 0)
+                    netdev_rx_segment6(dst, &seg);
+                flags |= v;
+                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
+                    flags |= netdev_rx_continues(&c->gro, &seg, v, ZZ_GRO_MAX);
+                else
+                    c->gro.live = 0;
+            }
             else
-                wanted = 0;
+                c->gro.live = 0;
+
+            if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
+            {
+                nic->core_stat[ZZ_ST_CONTINUES]++;
+                if (c->gro.run == 2)
+                    nic->core_stat[ZZ_ST_RUNS]++;
+            }
 
             zz_put(nic, ZZ_REG_RX_ACK, serial);
             nic->rx_packets++;
-            nic->rx_claimed(nic->rx_arg, token, sum,
-                            (UBYTE)(ANXD_S2_RXF_SUMMED | wanted));
+            nic->rx_claimed(nic->rx_arg, token, sum, flags);
             return TRUE;
         }
 
         zz_copy_frame(buf + NETDEV_HDR_LEN, frame + NETDEV_HDR_LEN,
                       (UWORD)(len - NETDEV_HDR_LEN));
+        ZZ(nic)->gro.live = 0;      /* a frame between: the run is over */
         zz_put(nic, ZZ_REG_RX_ACK, serial);
         nic->rx_packets++;
         nic->rx(nic->rx_arg, buf, len);
@@ -484,11 +600,7 @@ static BOOL zz_isr(NetdevNic *nic)
     if ((status & ZZ_INT_ETH) == 0)
         return FALSE;
     nic->core_stat[ZZ_ST_ISR]++;
-    if (ZZ_RX_READY(zz_get(nic, ZZ_REG_RX_STATUS)) != 0)
-        nic->core_stat[ZZ_ST_ISR_READY]++;
-    else
-        nic->core_stat[ZZ_ST_ISR_NONE]++;
-    zz_after_isr = 1;
+    ZZ(nic)->after_isr = 1;
 
     /* Mask, then acknowledge.  A write with bit 3 clear is the enable word
        and bit 0 of it is Ethernet; nothing else of the status goes back,
@@ -521,8 +633,7 @@ static BOOL zz_intr(NetdevNic *nic)
         UWORD rxs = zz_get(nic, ZZ_REG_RX_STATUS);
 
         nic->core_stat[ZZ_ST_EMPTY]++;
-        nic->core_stat[ZZ_ST_EMPTY_RXS] = rxs;
-        if (zz_after_isr)
+        if (ZZ(nic)->after_isr)
         {
             nic->core_stat[ZZ_ST_SOFT_EMPTY]++;
             /*
@@ -576,9 +687,9 @@ static BOOL zz_intr(NetdevNic *nic)
             }
         }
     }
-    else if (!zz_after_isr)
+    else if (!ZZ(nic)->after_isr)
         nic->core_stat[ZZ_ST_POLL_WORK]++;
-    zz_after_isr = 0;
+    ZZ(nic)->after_isr = 0;
 
     zz_put(nic, ZZ_REG_INT, ZZ_INT_ETH);
     return work;
@@ -586,20 +697,16 @@ static BOOL zz_intr(NetdevNic *nic)
 
 /* ------------------------------------------------------------- transmit -- */
 
-static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
+/* Into slot `slot` of the window: the staging buffer is longword aligned and
+   so is every slot. */
+static VOID zz_tx_fill(NetdevNic *nic, UWORD slot, const UBYTE *frame,
+                       UWORD len)
 {
-    volatile UBYTE *win = nic->board + ZZ_TX_WINDOW;
-    UWORD bulk;
+    volatile UBYTE *win = nic->board + ZZ_TX_WINDOW +
+                          (ULONG)slot * ZZ_TX_WINDOW_LEN;
+    UWORD bulk = (UWORD)(len & (UWORD)~3u);
     UWORD i;
-    UWORD result;
 
-    if (!nic->running)
-        return DP8390_TX_OFFLINE;
-    if (len > ZZ_TX_WINDOW_LEN)
-        return DP8390_TX_FAILED;
-
-    /* The staging buffer is longword aligned and the window is too. */
-    bulk = (UWORD)(len & (UWORD)~3u);
     if (bulk != 0)
         n68k_copy_longs(win, frame, (ULONG)(bulk >> 2));
     for (i = bulk; i + 2 <= len; i += 2)
@@ -608,25 +715,91 @@ static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     if (i < len)
         *(volatile UWORD *)(volatile void *)(win + i) =
             (UWORD)((UWORD)frame[i] << 8);
+}
 
-    /*
-     * The length write is the send.  The ARM services it in its loop and
-     * does not answer the bus cycle until the GEM has taken the frame
-     * (ethernet.c: ethernet_send_frame waits on FramesTx), so when this
-     * store completes the frame is on the wire and the window is free:
-     * txb_inuse never goes to 1 here.  The result register then reads what
-     * the send returned; 0 is success.
-     */
-    zz_put(nic, ZZ_REG_TX, len);
-    result = zz_get(nic, ZZ_REG_TX);
+/*
+ * The fork's firmware: frames finished since the last look, sent or
+ * dropped, retire that many slots.  Asked by the shell when the ring looks
+ * full, and once a blank by zz_tick while anything is in flight.  TRUE when
+ * a slot came free, which is the shell's cue to pump its queue.
+ */
+static BOOL zz_tx_reclaim(NetdevNic *nic)
+{
+    UWORD now;
+    UWORD n;
 
-    nic->tx_completed++;
-    if (result != 0)
-    {
-        nic->core_stat[ZZ_ST_TXERR]++;
-        nic->tx_errors++;
+    if (nic->txb_inuse == 0)
+        return FALSE;
+
+    now = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
+    n   = (UWORD)((now - nic->tx_done) & ZZ_TXS_COUNT);
+    nic->tx_done = now;
+    if (n > nic->txb_inuse)
+        n = nic->txb_inuse;
+    nic->txb_inuse   = (UWORD)(nic->txb_inuse - n);
+    nic->tx_completed += n;
+    return (BOOL)(n != 0);
+}
+
+/* Once a blank, under Disable().  A task inside tx() under Forbid() owns
+   the counters until it clears tx_busy (NetdevNic tx_task_lock), so the
+   blank stands off while it is set. */
+static BOOL zz_tick(NetdevNic *nic)
+{
+    if (!nic->running || nic->txb_cnt == 1 || nic->tx_busy)
+        return FALSE;
+    return zz_tx_reclaim(nic);
+}
+
+static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
+{
+    UWORD slot;
+
+    if (!nic->running)
+        return DP8390_TX_OFFLINE;
+    if (len > ZZ_TX_LEN_MASK)
         return DP8390_TX_FAILED;
+
+    if (nic->txb_cnt == 1)
+    {
+        UWORD result;
+
+        zz_tx_fill(nic, 0, frame, len);
+
+        /*
+         * MNT's firmware: the length write is the send, and the ARM does
+         * not answer the bus cycle until the GEM has taken the frame
+         * (ethernet.c: ethernet_send_frame waits on FramesTx), so when
+         * this store completes the frame is on the wire and the window is
+         * free: txb_inuse never goes to 1.  The result register then reads
+         * what the send returned; 0 is success.
+         */
+        zz_put(nic, ZZ_REG_TX, len);
+        result = zz_get(nic, ZZ_REG_TX);
+
+        nic->tx_completed++;
+        if (result != 0)
+        {
+            nic->core_stat[ZZ_ST_TXERR]++;
+            nic->tx_errors++;
+            return DP8390_TX_FAILED;
+        }
+        nic->tx_packets++;
+        return 0;
     }
+
+    /* The fork's firmware: four slots, the bus back at once. */
+    if (nic->txb_inuse >= nic->txb_cnt && !zz_tx_reclaim(nic))
+        return DP8390_TX_BUSY;
+    if (nic->txb_inuse >= nic->txb_cnt)
+        return DP8390_TX_BUSY;
+
+    slot = (UWORD)(nic->tx_next & (ZZ_TX_SLOTS - 1));
+    zz_tx_fill(nic, slot, frame, len);
+    zz_put(nic, ZZ_REG_TX,
+           (UWORD)(ZZ_TX_ASYNC | (UWORD)(slot << ZZ_TX_SLOT_SHIFT) | len));
+    nic->tx_next++;
+    nic->txb_inuse++;
     nic->tx_packets++;
     return 0;
 }
@@ -678,7 +851,7 @@ const struct NetdevNicOps netdev_nic_zz9000 =
     zz_setfilter,
     zz_intr,
     zz_reset,
-    NULL,           /* tick: the ARM raises an interrupt for everything */
+    zz_tick,        /* transmit completions are counted, once a blank */
     zz_coherent,
     NULL            /* detach: nothing was started */
 };

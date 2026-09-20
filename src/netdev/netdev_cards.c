@@ -182,16 +182,20 @@ const NetdevCard netdev_cards[] =
      * III record is product 4, the Zorro II one product 3; the same firmware
      * behind both.  reg_off 0 and stride 2 describe the 16-bit register
      * file for the bus record; the core reads it through its own accessor.
-     * bps is what the GEM negotiates on a gigabit switch; the Zorro bus
-     * delivers a small fraction of it, and the query reports the link.
+     * bps is 100 Mbit/s, what MNT's own driver reports: the GEM negotiates
+     * a gigabit, but the stack reads a gigabit link with a slow handshake
+     * as a long path and lets the window outgrow the card's ring
+     * (bsdsocket_window.h, ami_bsd_tcp_window_burst_bound), and this
+     * machine's handshake is slow because this machine is.  Measured: a
+     * 396 KB window put 275 retransmissions into ten seconds.
      * Appended after the GENET, like every row: the pin (index + 1) * 100
      * and the ANXNET_CARD_NAMES position are published.
      */
     { "zz9000",    0x6d6e,     4, 0x0000,     2,      0,
-      NETDEV_CHIP_ZZ9000, 1000000000UL, 0,       0,       0,       0,
+      NETDEV_CHIP_ZZ9000, 100000000UL, 0,       0,       0,       0,
       NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
     { "zz9000z2",  0x6d6e,     3, 0x0000,     2,      0,
-      NETDEV_CHIP_ZZ9000, 1000000000UL, 0,       0,       0,       0,
+      NETDEV_CHIP_ZZ9000, 100000000UL, 0,       0,       0,       0,
       NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
 #endif /* NETDEV_HAS_ZZ9000 */
 };
