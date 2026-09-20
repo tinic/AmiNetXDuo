@@ -18,6 +18,7 @@ option(AMINETXDUO_NETDEV_LINK
 # it probes and which chip cores it links.
 set(NETDEV_CORE_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open
+    netdev_hooks.c      # m68k SANA-II callback register trampolines
     netdev_tags.c       # OpenDevice tag traversal
     netdev_extension.c  # versioned private negotiation
     netdev_unit.c       # unit/opener helpers, host-testable

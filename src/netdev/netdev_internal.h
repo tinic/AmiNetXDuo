@@ -317,6 +317,7 @@ typedef enum
 
 /* netdev_device.c */
 VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);
+/* netdev_hooks.c: the register ABI at the SANA-II callback boundary. */
 BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 /* A standard utility.library Hook: a0 = hook, a2 = object, a1 = message. */
 BOOL netdev_hook_call(APTR hook, APTR object, APTR message);
