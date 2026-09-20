@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` cleans the freshly allocated receive ring before giving
+  it to DMA, so dirty `MEMF_CLEAR` cache lines cannot be pushed over the
+  first frames when the ring is invalidated. Its transmit checksum path now
+  validates the complete Ethernet/IPv4/TCP or UDP shape before programming
+  hardware offsets. Oversized private receive batches are refused at the
+  published 32-cookie limit instead of walking an unbounded opener record.
+
 - `ANXD_CMD_RX_BATCH`: one IORequest carries a burst of received frames
   (`AnxdS2RxBatch`, negotiated as `ANXD_S2F_RX_BATCH` on the versioned
   extension record). The device answers it once per service pass, or when

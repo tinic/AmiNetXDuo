@@ -646,7 +646,7 @@ typedef struct AmiSana2Reader
 #define AMI_SANA2_RX_BATCHES    2
 /* Slots per batch at most: the reader settles a batch's frames on its
    stack before it re-posts the batch, one AmiRxHandUp each. */
-#define AMI_SANA2_RX_BATCH_MAX  32
+#define AMI_SANA2_RX_BATCH_MAX  ANXD_S2_RX_BATCH_MAX
 
 typedef struct AmiRxBatch
 {

@@ -406,7 +406,7 @@ VOID netdev_queue_batch(NetdevOpener *op, struct IOSana2Req *io)
         netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
         return;
     }
-    if (b->Count == 0)
+    if (b->Count == 0 || b->Count > ANXD_S2_RX_BATCH_MAX)
     {
         netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_GENERIC_ERROR);
         return;

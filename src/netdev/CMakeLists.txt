@@ -133,9 +133,11 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     # DEVICE=anxtest.device loads it while the shipped one stays resident.
     set(AMINETXDUO_ANXNET_NAME "anxnet.device" CACHE STRING
         "File and Exec device name of the classic-card SANA-II image")
+    set(AMINETXDUO_ANXGENET_NAME "anxgenet.device" CACHE STRING
+        "File and Exec device name of the PiStorm GENET SANA-II image")
     anxd_add_netdev(anxnet_device   ${AMINETXDUO_ANXNET_NAME}
                     NETDEV_ROSTER_CLASSIC ${NETDEV_CLASSIC_SOURCES})
-    anxd_add_netdev(anxgenet_device anxgenet.device NETDEV_ROSTER_GENET
+    anxd_add_netdev(anxgenet_device ${AMINETXDUO_ANXGENET_NAME} NETDEV_ROSTER_GENET
                     ${NETDEV_GENET_SOURCES})
     anxd_add_netdev(anxzz9000_device anxzz9000.device NETDEV_ROSTER_ZZ9000
                     ${NETDEV_ZZ9000_SOURCES})

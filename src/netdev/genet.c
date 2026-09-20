@@ -812,6 +812,14 @@ static VOID ge_init_rings(NetdevNic *nic)
     c->rx_cidx  = 0;
     c->rx_clean = 0;
     nic->rx_behind = 0;
+
+    /* DMA OWNERSHIP STARTS HERE, BEFORE THE ENGINE.  AllocMem(MEMF_CLEAR)
+       wrote these pages through the CPU and may have left dirty cache lines.
+       Invalidating for the first received burst only after the MAC wrote it
+       can then push those old zeroes over the DMA result.  Clean the entire
+       ring once while the stopped MAC owns none of it; later receive passes
+       invalidate only buffers the MAC has completed. */
+    ge_cache(nic, c->rx_buf, (ULONG)GE_RX_RING * GE_BUFSZ);
     for (i = 0; i < GE_RX_RING; i++)
     {
         ge_wr(nic, GENET_RX_DESC_ADDRESS_LO(i),
@@ -1540,14 +1548,18 @@ static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
     info = 0;
     if (nic->tx_csum != 0)
     {
-        ULONG start = (ULONG)NETDEV_HDR_LEN + ((ULONG)(buf[14] & 0x0F) << 2);
-        UBYTE proto = buf[23];
+        UWORD offset;
+        UBYTE flag = netdev_tx_csum4(buf, len, nic->tx_csum, &offset);
 
-        if (proto == 6 && (nic->tx_csum & ANXD_S2_TXF_TCP) != 0)
-            info = (start << GENET_TX_CSUM_START_SHIFT) | (start + 16UL);
-        else if (proto == 17 && (nic->tx_csum & ANXD_S2_TXF_UDP) != 0)
-            info = (start << GENET_TX_CSUM_START_SHIFT) | (start + 6UL) |
-                   GENET_TX_CSUM_UDP;
+        if (flag != 0)
+        {
+            ULONG start = (ULONG)NETDEV_HDR_LEN +
+                          ((ULONG)(buf[14] & 0x0Fu) << 2);
+
+            info = (start << GENET_TX_CSUM_START_SHIFT) | (ULONG)offset;
+            if (flag == ANXD_S2_TXF_UDP)
+                info |= GENET_TX_CSUM_UDP;
+        }
         if (info != 0)
         {
             info   |= GENET_TX_CSUM_LEN_VALID;

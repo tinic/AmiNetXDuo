@@ -1714,6 +1714,20 @@ static void x_rx_batch(void)
     netdev_perform(&opener, &io);
     expect_u32("an empty record is a bad argument",
                (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    rec.b.Count        = ANXD_S2_RX_BATCH_MAX + 1;
+    netdev_perform(&opener, &io);
+    expect_u32("an oversized record is a bad argument",
+               (unsigned long)(UBYTE)last_err,
+               (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
     rec.b.Count = 2;
 
     reset();

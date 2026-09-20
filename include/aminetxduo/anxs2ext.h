@@ -144,6 +144,11 @@ typedef struct AnxdS2Extension
  * not get ANXD_S2F_RX_BATCH accepted posts CMD_READs as before. */
 #define ANXD_CMD_RX_BATCH       0x8193
 
+/* The largest record a conforming driver has to accept.  A bounded public
+ * limit keeps a corrupt or third-party opener from making the driver walk an
+ * unbounded cookie array at interrupt level. */
+#define ANXD_S2_RX_BATCH_MAX    32u
+
 /* ANXD_CMD_TX_FLUSH: "start whatever you are holding for me".
  *
  * Why it exists.  A sender that produces one segment every 30 us onto a
