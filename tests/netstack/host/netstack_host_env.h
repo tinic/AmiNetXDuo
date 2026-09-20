@@ -67,6 +67,12 @@ typedef struct NetStackHostEnv
     BOOL    sana2_open_fails;
     LONG    sana2_open_error;
 
+    /* ---- live configuration API --------------------------------------- */
+
+    BOOL    hostname_offer_accept; /* ami_config_hostname_offer() result   */
+    ULONG   hostname_offers;
+    ULONG   hostname_displaces;    /* DHCP's previous offer was displaced */
+
     /* ---- NetX Duo ------------------------------------------------------ */
 
     UINT    ip_create_status;

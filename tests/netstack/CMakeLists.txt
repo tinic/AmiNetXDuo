@@ -719,6 +719,9 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_port.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_routes.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_client_pool.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_config_runtime.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway_apply.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool_runtime.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
@@ -802,5 +805,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_interface_claim PRIVATE ${NETSTACK_HOST_OPTIONS})
 
     add_test(NAME interface_claim COMMAND test_interface_claim)
+
+    # The runtime configuration facade maps NetX slots back to their source
+    # definitions and serialises hostname changes with the DHCP client.
+    add_executable(test_config_runtime
+        host/test_config_runtime_host.c ${NETSTACK_HOST_TU})
+
+    target_include_directories(test_config_runtime PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_config_runtime PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_config_runtime PRIVATE ${NETSTACK_HOST_OPTIONS})
+
+    add_test(NAME config_runtime COMMAND test_config_runtime)
 
 endif()

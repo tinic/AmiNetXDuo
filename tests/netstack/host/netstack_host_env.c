@@ -696,11 +696,18 @@ BOOL ami_config_hostname_from_hwaddr(const UBYTE *hw, ULONG hwlen, char *out, UL
 
 BOOL ami_config_hostname_offer(AmiConfig *cfg, UWORD source, const char *name)
 {
-    (VOID)cfg;
-    (VOID)source;
-    (VOID)name;
+    ULONG i;
 
-    return FALSE;
+    nsh.hostname_offers++;
+    if (!nsh.hostname_offer_accept || cfg == NULL || name == NULL)
+        return FALSE;
+
+    for (i = 0; i + 1UL < (ULONG)sizeof(cfg->hostname) && name[i] != '\0'; i++)
+        cfg->hostname[i] = name[i];
+    cfg->hostname[i] = '\0';
+    cfg->hostname_source = source;
+
+    return TRUE;
 }
 
 /* The fallback, not zero: ami_ns_pool_packets() divides free memory by it,
@@ -854,28 +861,24 @@ VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index)
 
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 {
-    (VOID)dst;
-    (VOID)src;
-    (VOID)size;
+    ULONG i = 0;
+
+    if (dst == NULL || size == 0UL)
+        return;
+
+    if (src != NULL)
+        while (i + 1UL < size && src[i] != '\0')
+        {
+            dst[i] = src[i];
+            i++;
+        }
+    dst[i] = '\0';
 }
 
 VOID ami_ns_dhcp_hostname_displace(AmiNsDhcpHostnameState *state)
 {
     (VOID)state;
-}
-
-UWORD ami_ns_gateway_candidates(const AmiNsGatewayIface *iface, UWORD count,
-                                UWORD preferred, UWORD skip,
-                                AmiNsGatewayCandidate *out, UWORD max)
-{
-    (VOID)iface;
-    (VOID)count;
-    (VOID)preferred;
-    (VOID)skip;
-    (VOID)out;
-    (VOID)max;
-
-    return 0;
+    nsh.hostname_displaces++;
 }
 
 LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)

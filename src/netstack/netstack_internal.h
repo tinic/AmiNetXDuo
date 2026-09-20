@@ -191,6 +191,11 @@ VOID ami_ns_lock_release(VOID);
 
 BOOL ami_ns_same_name(const char *a, const char *b);
 
+/* Apply the deterministic default-gateway policy to the live NetX instance.
+   Callers already hold the ThreadX/DHCP context required by the operation. */
+VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
+                              const char *reason);
+
 struct AmiNetStack
 {
     ULONG               ns_Refs;
