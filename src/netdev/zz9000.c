@@ -145,6 +145,7 @@ enum
     ZZ_ST_LATE_READS,   /* most window reads it took to appear               */
     ZZ_ST_LATE_MISS,    /* empty passes where it never did within the budget */
     ZZ_ST_EMPTY,        /* service passes that found no frame                */
+    ZZ_ST_ACK_RECOVER,  /* rejected serial handshake recovered compatibly    */
     ZZ_ST_COUNT
 };
 
@@ -165,6 +166,7 @@ static const char *const zz_stat_names[] =
     "most window reads until it appeared",
     "empty pass, header never appeared",
     "service passes with no frame",
+    "rejected serial acknowledgements recovered",
     NULL
 };
 
@@ -482,6 +484,29 @@ static BOOL zz_rint(NetdevNic *nic)
 
     if (serial == 0)
         return FALSE;                   /* nothing presented */
+
+    /*
+     * A register write does not return to the 68k until the ARM has handled
+     * it and selected the next receive slot.  Seeing the same non-zero serial
+     * twice therefore means the exact acknowledgement from the preceding
+     * pass was rejected; it cannot be the next frame.  This happens when the
+     * ACP serves a stale serial from L2 despite the firmware's invalidate.
+     *
+     * Re-copying it forever is fatal: every pass re-enables the level-six
+     * source while the same frame remains pending, producing an INT6/software
+     * interrupt storm that leaves the whole machine apparently frozen.  The
+     * firmware deliberately reserves acknowledgement value 1 as its legacy
+     * bare-advance operation.  Use it only for this proven rejection, without
+     * delivering the frame a second time.  This is a bounded compatibility
+     * recovery for every handshake-capable firmware revision.
+     */
+    if (last != 0 && serial == last)
+    {
+        nic->core_stat[ZZ_ST_ACK_RECOVER]++;
+        ZZ(nic)->gro.live = 0;          /* an unseen frame is being discarded */
+        zz_put(nic, ZZ_REG_RX_ACK, 1);
+        return TRUE;
+    }
 
     /* The generator skips 0 and 1, so the successor of 0xffff is 2. */
     if (last != 0)
