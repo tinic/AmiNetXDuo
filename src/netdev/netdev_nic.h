@@ -37,11 +37,10 @@
 
 /* Room for a core's own special-statistics records. */
 #ifdef GE_PROBE_ST
-#define NETDEV_CORE_STATS   43      /* + the GENET probe's thirteen RX, four TX */
+#define NETDEV_CORE_STATS   40      /* + the GENET probe's thirteen RX, four TX */
 #else
-#define NETDEV_CORE_STATS   26      /* the GENET's 24: pass budget, RBUF
-                                       overflow and held-start counters,
-                                       2026-09-20 */
+#define NETDEV_CORE_STATS   23      /* the GENET's 23: the poller's three
+                                       counters left with it, 2026-09-20 */
 #endif
 
 /*
@@ -117,12 +116,6 @@ struct NetdevNicOps
     VOID  (*detach)(NetdevNic *nic);
 };
 
-/*
- * A core's own task asks for a service pass: the masked context the
- * interrupt server, the software interrupt and the vertical blank give the
- * core, excluded from all three, from a task.
- */
-VOID netdev_nic_poll(NetdevNic *nic);
 
 #if NETDEV_HAS_ZZ9000
 /* Current firmware can route the card's shared interrupt to INT2 through

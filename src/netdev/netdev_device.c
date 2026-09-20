@@ -1359,7 +1359,7 @@ VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event)
 
 /* ------------------------------------------------------ interrupt server -- */
 
-static ULONG netdev_interrupt_do(NetdevUnit *unit, BOOL task_context)
+static ULONG netdev_interrupt_do(NetdevUnit *unit)
 {
     /*
      * Only the chip's own ISR is tested.  Reading it costs two bus cycles and
@@ -1398,11 +1398,7 @@ static ULONG netdev_interrupt_do(NetdevUnit *unit, BOOL task_context)
             return 0;
 
         t0 = nd_now();
-        if (task_context)
-            Disable();
         netdev_tx_pump(unit);
-        if (task_context)
-            Enable();
         nd_t_tx += nd_since(t0);
 
         if (nd_n_frame >= 512)
@@ -1420,11 +1416,7 @@ static ULONG netdev_interrupt_do(NetdevUnit *unit, BOOL task_context)
             return 0;
     }
 
-    if (task_context)
-        Disable();
     netdev_tx_pump(unit);
-    if (task_context)
-        Enable();
 #endif
 
     if (watched != 0)
@@ -1442,7 +1434,7 @@ static ULONG netdev_interrupt_do(NetdevUnit *unit, BOOL task_context)
 
 ULONG netdev_interrupt(NetdevUnit *unit)
 {
-    return netdev_interrupt_do(unit, FALSE);
+    return netdev_interrupt_do(unit);
 }
 
 /*
@@ -1503,6 +1495,10 @@ static VOID netdev_int_rem(NetdevUnit *unit)
  */
 static ULONG netdev_soft(register NetdevUnit *unit __asm("a1"))
 {
+    /* Every service pass runs under Disable() (the server, the blank, the
+       opener's ANXD_CMD_RX_POLL), so nothing can hold nu_InIsr when a
+       software interrupt gets to run; the test is the same guard the
+       others keep, not a case. */
     Disable();
     if (unit->nu_InIsr == 0)
     {
@@ -1514,54 +1510,9 @@ static ULONG netdev_soft(register NetdevUnit *unit __asm("a1"))
         }
         unit->nu_InIsr = 0;
     }
-    else
-    {
-        /* A task-context GENET pass owns the rings.  The hardware top half
-           has already masked its source, so remember to raise this bottom
-           half once the task gives the rings back. */
-        unit->nu_SoftMissed = 1;
-    }
     Enable();
 
     return 0;
-}
-
-VOID netdev_nic_poll(NetdevNic *nic)
-{
-    NetdevUnit *unit = (NetdevUnit *)((UBYTE *)nic -
-                                      offsetof(NetdevUnit, nu_Nic));
-    BOOL run = FALSE;
-    BOOL replay;
-
-    /* Claim the core with the shortest possible interrupt mask.  Forbid()
-       then keeps another task out while leaving hardware interrupts alive;
-       opener receive hooks therefore run in task context as advertised. */
-    Disable();
-    if (unit->nu_InIsr == 0 && unit->nu_Online)
-    {
-        unit->nu_InIsr = 1;
-        run = TRUE;
-    }
-    Enable();
-
-    if (!run)
-        return;
-
-    Forbid();
-    (VOID)netdev_interrupt_do(unit, TRUE);
-
-    Disable();
-    unit->nu_InIsr = 0;
-    replay = (BOOL)(unit->nu_SoftMissed != 0);
-    unit->nu_SoftMissed = 0;
-    Enable();
-
-    /* A top half that fired during the pass masked the GENET source and its
-       first Cause() found nu_InIsr set.  Replay exactly that missed bottom
-       half after releasing the rings; never leave the source masked. */
-    if (replay && nic->isr != NULL)
-        Cause(&unit->nu_Soft);
-    Permit();
 }
 
 static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
