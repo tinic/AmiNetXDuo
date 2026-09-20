@@ -580,20 +580,14 @@ static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
  * interface before the route is looked up, so on a machine with two interfaces
  * every unbound raw datagram left by the first one whatever the route said.
  */
-static LONG bsd_raw_route_index(NX_IP *ip, ULONG dest)
+static LONG bsd_raw_route_index(ULONG dest)
 {
-    NX_INTERFACE *nxif     = NX_NULL;
-    ULONG         next_hop = 0UL;
-    UINT          status;
+    UWORD index;
 
-    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-    status = _nx_ip_route_find(ip, dest, &nxif, &next_hop);
-    tx_mutex_put(&ip->nx_ip_protection);
-
-    if (status != NX_SUCCESS || nxif == NX_NULL)
+    if (!netstack_ipv4_route(dest, -1L, &index, NULL, NULL))
         return -1;
 
-    return (LONG)(nxif - &ip->nx_ip_interface[0]);
+    return (LONG)index;
 }
 
 LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
@@ -701,7 +695,7 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
 
     if (source != BSD_SOURCE_INDEX && dest.nxd_ip_version == NX_IP_VERSION_V4)
     {
-        LONG chosen = bsd_raw_route_index(ip, dest.nxd_ip_address.v4);
+        LONG chosen = bsd_raw_route_index(dest.nxd_ip_address.v4);
 
         if (chosen < 0)
         {

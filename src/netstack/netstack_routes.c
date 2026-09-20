@@ -84,3 +84,66 @@ VOID netstack_config_route_deleted(ULONG destination, ULONG netmask)
        decision from an entry NetX removes with an interface. */
     ami_ns_config_route_state(destination, netmask, 2U);
 }
+
+/*
+ * Keep the private NetX route walker on the netstack side of the boundary.
+ * There is no public NetX API which returns both the selected interface and
+ * next hop.  BSD callers need both, but do not need an NX_INTERFACE pointer.
+ */
+BOOL netstack_ipv4_route(ULONG destination, LONG preferred_index,
+                         UWORD *index_out, ULONG *next_hop_out,
+                         ULONG *source_address_out)
+{
+    AmiNetStack  *ns = netstack_get();
+    NX_INTERFACE *nxif;
+    ULONG         next_hop = 0UL;
+    ULONG         source = 0UL;
+    UINT          status;
+    UWORD         index;
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        preferred_index < -1L ||
+        preferred_index >= (LONG)NX_MAX_IP_INTERFACES)
+        return FALSE;
+
+    nxif = (preferred_index >= 0L)
+               ? &ns->ns_Ip.nx_ip_interface[preferred_index]
+               : NX_NULL;
+
+    tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+    status = _nx_ip_route_find(&ns->ns_Ip, destination, &nxif, &next_hop);
+
+    if (status != NX_SUCCESS || nxif == NX_NULL)
+    {
+        tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+        return FALSE;
+    }
+
+    /* Do not derive an index by subtracting an unchecked pointer.  NetX's
+       private routine currently returns an entry from this array, but this
+       boundary should fail closed if that contract ever changes. */
+    for (index = 0U; index < (UWORD)NX_MAX_IP_INTERFACES; index++)
+    {
+        if (nxif == &ns->ns_Ip.nx_ip_interface[index])
+            break;
+    }
+
+    if (index == (UWORD)NX_MAX_IP_INTERFACES ||
+        nxif->nx_interface_valid == 0U)
+    {
+        tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+        return FALSE;
+    }
+
+    source = nxif->nx_interface_ip_address;
+    tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+
+    if (index_out != NULL)
+        *index_out = index;
+    if (next_hop_out != NULL)
+        *next_hop_out = next_hop;
+    if (source_address_out != NULL)
+        *source_address_out = source;
+
+    return TRUE;
+}

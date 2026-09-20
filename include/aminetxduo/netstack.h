@@ -188,6 +188,14 @@ VOID    netstack_gateway_override_clear(VOID);
 VOID    netstack_config_route_added(ULONG destination, ULONG netmask);
 VOID    netstack_config_route_deleted(ULONG destination, ULONG netmask);
 
+/* Resolve one IPv4 destination through the live route table.  A negative
+   preferred_index lets the table choose; a non-negative value requires the
+   route to use that NetX interface.  The caller must hold a ThreadX bracket.
+   Outputs are optional and are written only on success. */
+BOOL    netstack_ipv4_route(ULONG destination, LONG preferred_index,
+                            UWORD *index_out, ULONG *next_hop_out,
+                            ULONG *source_address_out);
+
 /* ------------------------------------------- DHCP on one interface --------
    One NX_DHCP for the machine, because there is one UDP port 68.  Not one
    blocking call: the caller holds the deadline and polls

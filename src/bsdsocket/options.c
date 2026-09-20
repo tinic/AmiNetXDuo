@@ -964,7 +964,6 @@ static BOOL bsd_v4_source_for(AmiSocket *sock, ULONG *addr_out)
 {
     NX_IP        *ip       = netstack_ip();
     NX_INTERFACE *nxif     = NX_NULL;
-    ULONG         next_hop = 0;
     ULONG         peer;
 
     if (ip == NULL)
@@ -988,11 +987,8 @@ static BOOL bsd_v4_source_for(AmiSocket *sock, ULONG *addr_out)
         if (peer == 0)
             return FALSE;
 
-        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        /* Judged by nxif: NX_NULL going in, and the validity test below
-           rejects anything route_find left that is not a usable interface. */
-        AMI_NX_BY_OUTPUT(_nx_ip_route_find(ip, peer, &nxif, &next_hop));
-        tx_mutex_put(&ip->nx_ip_protection);
+        return (netstack_ipv4_route(peer, -1L, NULL, NULL, addr_out) &&
+                *addr_out != 0UL) ? TRUE : FALSE;
     }
 
     if (nxif == NX_NULL || nxif->nx_interface_valid == 0 ||

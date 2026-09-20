@@ -2109,16 +2109,11 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
     }
 
     {
-        NX_INTERFACE *nxif     = &ip->nx_ip_interface[*index];
         ULONG         next_hop = 0;
 
-        tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-        /* Judged by next_hop, which route_find zeroes before it can fail, and
-           by nxif still pointing at the interface the caller asked for. */
-        AMI_NX_BY_OUTPUT(_nx_ip_route_find(ip, dest->nxd_ip_address.v4, &nxif, &next_hop));
-        tx_mutex_put(&ip->nx_ip_protection);
-
-        if (nxif != &ip->nx_ip_interface[*index] || next_hop == 0)
+        if (!netstack_ipv4_route(dest->nxd_ip_address.v4, (LONG)*index,
+                                 NULL, &next_hop, NULL) ||
+            next_hop == 0UL)
             return BSD_SOURCE_UNREACH;
     }
 
