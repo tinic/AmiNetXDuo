@@ -27,8 +27,14 @@ version at the top when it merges.
 - Shipped clients detect the micro profile's `getaddrinfo()` stub and use its
   classic resolver, restoring DNS there.
 - The release gate covers system and self-contained installs of all three
-  profiles, reinstall beside a foreign stack, and browser services: 11
-  scenarios, with missing ingredients counted as failures.
+  profiles, profile changes, Roadshow and AmiTCP_NG replacement/refusal,
+  deterministic Emu68 Ethernet/Wi-Fi auto-detection outcomes, declining the
+  supplied drivers, reconfiguration, manual startup and browser services: 29
+  scenarios, with missing ingredients counted as failures. Installer answers
+  are scripted per page and every requested answer must be consumed.
+- Changing a full installation to the minimal or micro profile moves the old
+  `tls.library` to `tls.library.old`. It no longer leaves that incompatible
+  half of the full stack live beside the reduced `bsdsocket.library`.
 
 ## 1.0.0-beta2
 

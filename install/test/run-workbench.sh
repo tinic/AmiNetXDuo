@@ -6,7 +6,11 @@
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                 [-l NOVICE|AVERAGE|EXPERT] [-p CHOICE]
 #                                 [-N BOARD] [-t SECONDS] [-T SECONDS] [-k]
-#                                 [-H] [-S] [-D] [-g] [-R]
+#                                 [-H] [-S] [-D] [-g] [-R] [-U] [-E] [-J] [-B]
+#                                 [-q ANSWERS] [-x PROFILE-TRANSITION]
+#                                 [-e genet|wifi|both]
+#                                 [-f roadshow-leave|roadshow-replace|
+#                                     amitcpng-leave|amitcpng-replace]
 #
 # -N names the card (tests/tools/cards.sh, default a2065); one whose FILE NAME
 # the installer's own list does not carry gets card_config=post-install, which
@@ -37,11 +41,20 @@ STATIC=0
 DRAWER=0
 DRAWER_GUI=0
 RERUN=0
+RECONFIGURE=0
+EXPERT_CUSTOM=0
+NO_DRIVERS=0
+NO_BOOT=0
+ANSWER_FILE=""
+TRANSITION=""
+FOREIGN_MODE=""
+EMU68_FIXTURE=""
+CONFIG_ONLY=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgR" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -56,21 +69,28 @@ while getopts "b:a:l:p:N:t:T:kHSDgR" opt; do
         D) DRAWER=1 ;;
         g) DRAWER_GUI=1 ;;
         R) RERUN=1 ;;
+        U) RECONFIGURE=1 ;;
+        E) EXPERT_CUSTOM=1 ;;
+        J) NO_DRIVERS=1 ;;
+        B) NO_BOOT=1 ;;
+        q) ANSWER_FILE="$OPTARG" ;;
+        x) TRANSITION="$OPTARG" ;;
+        f) FOREIGN_MODE="$OPTARG" ;;
+        e) EMU68_FIXTURE="$OPTARG"; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
-                "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R]" >&2
+                "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
+                "[-J] [-B]" \
+                "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
+                "[-f existing-stack-mode] [-e genet|wifi|both]" >&2
            exit 2 ;;
     esac
 done
 
-# -S and -H both drive a yes/no page, and installdrive.c carries ONE label.
-# Asking for both would silently answer only one of the two questions and pass
-# every check that does not look for the other.
-if [ "$STATIC" = "1" ] && [ "$TERMINAL" = "1" ]; then
-    echo "-S and -H both answer a yes/no question and installdrive.c can be" >&2
-    echo "given only one label per build.  Run them as two scenarios." >&2
-    exit 2
-fi
+# More than one non-default answer is intentional now.  installdrive consumes
+# an ordered run-time answer file and fails if any requested page was not
+# reached; -S and -H together exercise that contract rather than being a
+# combination the harness has to forbid.
 
 # -H needs a level where the questions are drawn at all.  At NOVICE every
 # ask... returns its default without showing anything, so a run that asked for
@@ -92,6 +112,26 @@ if [ "$STATIC" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
     echo "-S needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
     echo "questions, so the DHCP one cannot be answered no and P_ask_ip takes" >&2
     echo "its default without validating it." >&2
+    exit 2
+fi
+
+if { [ "$NO_DRIVERS" = "1" ] || [ "$NO_BOOT" = "1" ]; } &&
+   [ "$LEVEL" = "NOVICE" ]; then
+    echo "-J and -B need -l AVERAGE or -l EXPERT: Novice draws neither" >&2
+    echo "question, so the requested non-default answer cannot be selected." >&2
+    exit 2
+fi
+if [ "$RECONFIGURE" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
+    echo "-U needs -l AVERAGE or -l EXPERT" >&2
+    exit 2
+fi
+if [ "$EXPERT_CUSTOM" = "1" ] && [ "$LEVEL" != "EXPERT" ]; then
+    echo "-E needs -l EXPERT: unit and interface name are Expert-only pages" >&2
+    exit 2
+fi
+if [ "$NO_BOOT" = "1" ] && [ "$TERMINAL" = "1" ]; then
+    echo "-B and -H conflict: httpd-at-boot is not asked when boot networking" >&2
+    echo "is disabled." >&2
     exit 2
 fi
 
@@ -145,6 +185,46 @@ if [ -n "$PICK" ] && [ "$LEVEL" = "NOVICE" ]; then
     echo "be installed instead." >&2
     exit 2
 fi
+if [ -n "$TRANSITION" ]; then
+    [ "$LEVEL" != "NOVICE" ] || {
+        echo "-x needs -l AVERAGE or -l EXPERT" >&2
+        exit 2
+    }
+    [ -z "$PICK" ] || {
+        echo "-x supplies its own per-run profile choices; do not combine it with -p" >&2
+        exit 2
+    }
+    case "$TRANSITION" in
+        full-minimal|minimal-full|full-micro|micro-full) ;;
+        *) echo "unknown profile transition: $TRANSITION" >&2; exit 2 ;;
+    esac
+fi
+if [ -n "$FOREIGN_MODE" ]; then
+    [ "$LEVEL" != "NOVICE" ] || {
+        echo "-f needs -l AVERAGE or -l EXPERT so replacement can be chosen" >&2
+        exit 2
+    }
+    case "$FOREIGN_MODE" in
+        roadshow-leave|roadshow-replace|amitcpng-leave|amitcpng-replace) ;;
+        *) echo "unknown existing-stack mode: $FOREIGN_MODE" >&2; exit 2 ;;
+    esac
+    [ "$DRAWER" = "0" ] && [ -z "$TRANSITION" ] || {
+        echo "-f is a system-layout fixture and cannot be combined with -D or -x" >&2
+        exit 2
+    }
+fi
+if [ -n "$EMU68_FIXTURE" ]; then
+    case "$EMU68_FIXTURE" in
+        genet|wifi|both) ;;
+        *) echo "unknown Emu68 fixture: $EMU68_FIXTURE" >&2; exit 2 ;;
+    esac
+    [ "$DRAWER" = "0" ] && [ "$PICK" != "drawer" ] &&
+    [ "$NO_DRIVERS" = "0" ] && [ "$EXPERT_CUSTOM" = "0" ] &&
+    [ -z "$TRANSITION" ] && [ -z "$FOREIGN_MODE" ] || {
+        echo "-e cannot be combined with a drawer, driver-decline, custom-name, transition or foreign-stack scenario" >&2
+        exit 2
+    }
+fi
 
 case "$LEVEL" in
     NOVICE|AVERAGE|EXPERT) ;;
@@ -157,6 +237,14 @@ case "$ARCHIVE" in
     ""|/*) ;;
     *)     ARCHIVE="$PWD/$ARCHIVE" ;;
 esac
+case "$ANSWER_FILE" in
+    ""|/*) ;;
+    *)     ANSWER_FILE="$PWD/$ANSWER_FILE" ;;
+esac
+[ -z "$ANSWER_FILE" ] || [ -f "$ANSWER_FILE" ] || {
+    echo "no such answer file: $ANSWER_FILE" >&2
+    exit 2
+}
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 # ------------------------------------------------------------------- the card --
@@ -579,13 +667,18 @@ build_driver() {
 YES_LABEL=""
 DRIVE_RUNS=1
 if [ "$TERMINAL" = "1" ]; then
-    YES_LABEL="Yes, serve them"
     DRIVE_RUNS=2
 fi
 if [ "$DRAWER" = "1" ]; then
     DRIVE_RUNS=2
 fi
 if [ "$RERUN" = "1" ]; then
+    DRIVE_RUNS=2
+fi
+if [ "$RECONFIGURE" = "1" ]; then
+    DRIVE_RUNS=2
+fi
+if [ -n "$TRANSITION" ]; then
     DRIVE_RUNS=2
 fi
 
@@ -604,9 +697,57 @@ fi
 # so clicking Proceed accepts them and the install completes.  What this run
 # measures is the branch, the four prompts being drawn, and CONFIGURE=STATIC
 # with those four values reaching DEVS:.
-if [ "$STATIC" = "1" ]; then
-    YES_LABEL="No, I will type them"
+ANSWER_LINES=()
+EXPECTED_IF=eth0
+EXPECTED_HOST=amiga
+EXPECTED_SECOND_IF=""
+EXPECTED_AUTO_DEVICE=""
+EXPECTED_SECOND_DEVICE=""
+case "$EMU68_FIXTURE" in
+    genet) EXPECTED_IF=genet; EXPECTED_AUTO_DEVICE=anxgenet.device ;;
+    wifi)  EXPECTED_IF=wifipi; EXPECTED_AUTO_DEVICE=anxwifipi.device ;;
+    both)  EXPECTED_IF=genet; EXPECTED_SECOND_IF=wifipi
+           EXPECTED_AUTO_DEVICE=anxgenet.device
+           EXPECTED_SECOND_DEVICE=anxwifipi.device ;;
+esac
+if [ "$EXPERT_CUSTOM" = "1" ]; then
+    EXPECTED_IF=lan.1
+    EXPECTED_HOST=devbox
+    ANSWER_LINES+=("1|STRING|eth0|$EXPECTED_IF")
+    ANSWER_LINES+=("1|STRING|amiga|$EXPECTED_HOST")
 fi
+if [ "$RECONFIGURE" = "1" ]; then
+    ANSWER_LINES+=("2|BOOL|Set them up again")
+fi
+case "$FOREIGN_MODE" in
+    *-leave) ANSWER_LINES+=("1|BOOL|Leave it alone") ;;
+esac
+if [ "$NO_DRIVERS" = "1" ]; then
+    for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
+        ANSWER_LINES+=("$answer_run|BOOL|No, leave them out")
+    done
+fi
+if [ "$NO_BOOT" = "1" ]; then
+    for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
+        ANSWER_LINES+=("$answer_run|BOOL|No, I will do it")
+    done
+fi
+if [ "$STATIC" = "1" ]; then
+    for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
+        ANSWER_LINES+=("$answer_run|BOOL|No, I will type them")
+    done
+fi
+if [ "$TERMINAL" = "1" ]; then
+    for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
+        ANSWER_LINES+=("$answer_run|BOOL|Yes, serve them")
+    done
+fi
+case "$TRANSITION" in
+    full-minimal) ANSWER_LINES+=("2|CHOICE|3|3|1") ;;
+    minimal-full) ANSWER_LINES+=("1|CHOICE|3|3|1") ;;
+    full-micro)   ANSWER_LINES+=("2|CHOICE|3|4|1") ;;
+    micro-full)   ANSWER_LINES+=("1|CHOICE|3|4|1") ;;
+esac
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
 DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
@@ -615,6 +756,19 @@ build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 rm -rf "$HD"
 mkdir -p "$HD"
 cp -R "$WB/." "$HD/"
+
+# The answer program is data on the guest disk, not another compile-time mode
+# of installdrive.  This permits several non-default answers in one run and a
+# different set on the second install.  External rows are useful for focused
+# scenarios; the flags above add their own answers to the same strict file.
+if [ -n "$ANSWER_FILE" ] || [ "${#ANSWER_LINES[@]}" -ne 0 ]; then
+    : > "$HD/install-scenario.txt"
+    [ -z "$ANSWER_FILE" ] || cat "$ANSWER_FILE" >> "$HD/install-scenario.txt"
+    if [ "${#ANSWER_LINES[@]}" -ne 0 ]; then
+        printf '%s\n' "${ANSWER_LINES[@]}" >> "$HD/install-scenario.txt"
+    fi
+    chmod 644 "$HD/install-scenario.txt"
+fi
 # THE DRIVER, WHERE A USER WOULD HAVE PUT IT, and before the Installer runs.
 #
 # This is the only lever this harness has on the card question.  The script's
@@ -691,13 +845,15 @@ if [ "$DRAWER" = "1" ]; then
         ForeignAmiTCP/db/ch_nfstab
     )
 fi
+case "$FOREIGN_MODE" in
+    amitcpng-*) FOREIGN_LINES+=("Assign AmiTCP: DH0:ForeignAmiTCP") ;;
+esac
 mkdir -p "$HD/S"
 printf '%s\n' "${FOREIGN_LINES[@]}" > "$HD/S/User-Startup"
 chmod 644 "$HD/S/User-Startup"
 
-# -D: the scripted drawer layout.  The Installer's radio pages cannot be driven
-# from outside (install/test/installdrive.c records what was tried), so the
-# marker file is how the drawer path is reachable by a test at all.
+# -D: the scripted drawer layout.  The marker remains the unattended path;
+# -g leaves it out and has installdrive select the visible radio option.
 # In the drawer layout the installed tree is one level down, so every
 # guest-relative path a check resolves has to start there. S:User-Startup is
 # NOT prefixed: it stays in S: whichever layout was chosen, which is the whole
@@ -740,6 +896,35 @@ amiga_path() {
 }
 
 user_startup() { amiga_path S/User-Startup 2>/dev/null || true; }
+
+# A refusal or cancellation promises "Nothing was changed."  Checking a few
+# famous files is not that promise: a newly created command, an unexpected
+# backup or a protection-bit change is still a mutation.  This manifest covers
+# every product destination and both startup files, with content and host mode.
+product_manifest() {
+    local root file rel mode sum
+    for root in Libs C Devs Prefs AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
+                S/User-Startup S/Network-Startup S/Network-Startup.old \
+                S/AmiNetXDuo-drawer; do
+        [ -e "$HD/$root" ] || continue
+        if [ -d "$HD/$root" ]; then
+            while IFS= read -r -d '' file; do
+                rel=${file#"$HD/"}
+                mode=$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file")
+                if [ -f "$file" ]; then
+                    sum=$(shasum "$file" | cut -d' ' -f1)
+                    printf 'F\t%s\t%s\t%s\n' "$mode" "$sum" "$rel"
+                else
+                    printf 'D\t%s\t-\t%s\n' "$mode" "$rel"
+                fi
+            done < <(find "$HD/$root" -print0)
+        else
+            mode=$(stat -f '%Lp' "$HD/$root" 2>/dev/null || stat -c '%a' "$HD/$root")
+            sum=$(shasum "$HD/$root" | cut -d' ' -f1)
+            printf 'F\t%s\t%s\t%s\n' "$mode" "$sum" "$root"
+        fi
+    done | LC_ALL=C sort
+}
 
 foreign_intact() {
     local f line
@@ -816,6 +1001,82 @@ mkdir -p "$HD/Unpacked"
 }
 cp "$INSTALLER" "$HD/Unpacked/AmiNetXDuo/Installer"
 chmod -R a+rx "$HD/Unpacked"
+
+# Amiberry does not expose an Emu68 device tree.  Replace only the throw-away
+# archive's probe with a deterministic executable so the real Installer runs
+# all three auto-detection outcomes.  The shipping InstallNetProbe is neither
+# modified nor claimed to have seen hardware by this scenario.
+if [ -n "$EMU68_FIXTURE" ]; then
+    _fixture_genet=0
+    _fixture_wifi=0
+    case "$EMU68_FIXTURE" in
+        genet) _fixture_genet=1 ;;
+        wifi)  _fixture_wifi=1 ;;
+        both)  _fixture_genet=1; _fixture_wifi=1 ;;
+    esac
+    _fixture_bin="$ROOT/build/install-netprobe-fixture-$TAG"
+    "$GCC" -O2 -m68000 -Wall -Wextra -I"$NDK" \
+        -DFIXTURE_GENET="$_fixture_genet" -DFIXTURE_WIFI="$_fixture_wifi" \
+        -o "$_fixture_bin" "$ROOT/install/test/netprobe-fixture.c" || exit 2
+    cp "$_fixture_bin" "$HD/Unpacked/AmiNetXDuo/InstallNetProbe"
+    chmod 755 "$HD/Unpacked/AmiNetXDuo/InstallNetProbe"
+    echo "==> Emu68 fixture: $EMU68_FIXTURE"
+fi
+
+# Named existing-stack fixtures.  They contain the pieces the Installer can
+# actually observe: a live socket library, an interface definition, editable
+# Internet databases, boot policy and (for AmiTCP_NG) an AmiTCP: tree and
+# assign.  The foreign binaries are represented by copies of valid versioned
+# libraries from the candidate archive; what matters here is object identity,
+# backup policy and preservation, not executing somebody else's copyrighted
+# stack in the gate.
+FOREIGN_TREE_BEFORE=""
+FOREIGN_CONFIG_BEFORE=""
+FOREIGN_OLD_BSD_SUM=""
+FOREIGN_OLD_UG_SUM=""
+FOREIGN_OLD_TLS_SUM=""
+FOREIGN_CONFIG_FILES=()
+if [ -n "$FOREIGN_MODE" ]; then
+    mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" "$HD/S"
+    cp "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" "$HD/Libs/bsdsocket.library"
+    cp "$HD/Unpacked/AmiNetXDuo/Libs/usergroup.library" "$HD/Libs/usergroup.library"
+    cp "$HD/Unpacked/AmiNetXDuo/Libs/tls.library" "$HD/Libs/tls.library"
+    printf '; existing stack interface -- preserve byte for byte\nDEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
+        > "$HD/Devs/NetInterfaces/eth0"
+    printf '; existing stack route policy -- preserve byte for byte\n;DEFAULT=10.0.0.1\n' \
+        > "$HD/Devs/Internet/routes"
+    printf '; existing stack resolver policy -- preserve byte for byte\nhostname foreign-amiga\n' \
+        > "$HD/Devs/Internet/name_resolution"
+    for db in hosts protocols services networks; do
+        printf '# existing stack %s -- preserve byte for byte\n' "$db" \
+            > "$HD/Devs/Internet/$db"
+    done
+    printf '; existing stack boot policy -- preserve byte for byte\nC:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n' \
+        > "$HD/S/Network-Startup"
+    FOREIGN_CONFIG_FILES=(
+        Devs/NetInterfaces/eth0 Devs/Internet/routes
+        Devs/Internet/name_resolution Devs/Internet/hosts
+        Devs/Internet/protocols Devs/Internet/services Devs/Internet/networks
+        S/Network-Startup
+    )
+    case "$FOREIGN_MODE" in
+        amitcpng-*)
+            mkdir -p "$HD/ForeignAmiTCP/db"
+            printf 'existing AmiTCP_NG nfs table -- preserve byte for byte\n' \
+                > "$HD/ForeignAmiTCP/db/ch_nfstab"
+            FOREIGN_CONFIG_FILES+=(ForeignAmiTCP/db/ch_nfstab)
+            ;;
+    esac
+    chmod 644 "$HD/Libs/bsdsocket.library" "$HD/Libs/usergroup.library" \
+        "$HD/Libs/tls.library" \
+        "${FOREIGN_CONFIG_FILES[@]/#/$HD/}"
+    FOREIGN_OLD_BSD_SUM=$(shasum "$HD/Libs/bsdsocket.library" | cut -d' ' -f1)
+    FOREIGN_OLD_UG_SUM=$(shasum "$HD/Libs/usergroup.library" | cut -d' ' -f1)
+    FOREIGN_OLD_TLS_SUM=$(shasum "$HD/Libs/tls.library" | cut -d' ' -f1)
+    FOREIGN_CONFIG_BEFORE=$(
+        for f in "${FOREIGN_CONFIG_FILES[@]}"; do shasum "$HD/$f"; done
+    )
+fi
 
 # LhA 2.15, from the asset store, and NOT from this repository: it is
 # third-party and licensed, so it is staged onto the test drive here and goes
@@ -1169,6 +1430,7 @@ if [ "$DRAWER" = "1" ]; then
               "$HD/AmiNetXDuo/Libs/bsdsocket.library"
     REFUSED_LIB_BEFORE=$(shasum "$HD/Libs/bsdsocket.library")
     REFUSED_OWN_BEFORE=$(shasum "$HD/AmiNetXDuo/Libs/bsdsocket.library")
+    REFUSED_TREE_BEFORE=$(product_manifest)
 
     startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt
@@ -1183,6 +1445,13 @@ Echo >DH0:.done "$RC"'
     echo
 
     refused_ok=1
+    REFUSED_TREE_AFTER=$(product_manifest)
+    if [ "$REFUSED_TREE_AFTER" != "$REFUSED_TREE_BEFORE" ]; then
+        echo "!! the refused install changed the destination tree"
+        diff -u <(printf '%s\n' "$REFUSED_TREE_BEFORE") \
+                <(printf '%s\n' "$REFUSED_TREE_AFTER") || true
+        refused_ok=0
+    fi
     if [ "$REFUSED_LIB_BEFORE" != "$(shasum "$HD/Libs/bsdsocket.library" 2>/dev/null)" ]; then
         echo "!! the refused drawer install changed LIBS:bsdsocket.library"
         refused_ok=0
@@ -1211,9 +1480,9 @@ Echo >DH0:.done "$RC"'
     fi
     echo "drawer_refused=$([ "$refused_ok" = "1" ] && echo yes || echo no)" \
          "status=$REFUSED_STATUS"
-    # Installer's (abort ...) is intentionally RETURN_FAIL (20).  Requiring
-    # zero here made the expected refusal fail before the clean drawer and
-    # reinstall scenarios could run, so this gate had never exercised them.
+    # This refusal reaches Installer's abort before the answer driver enters
+    # its ordinary page loop, and RETURN_FAIL is observable here.  Keep the
+    # exact zero-diff oracle as the stronger assertion about the destination.
     if [ "$refused_ok" != "1" ] || [ "$REFUSED_STATUS" != "20" ]; then
         echo
         echo "!! the drawer layout must be refused beside an existing"
@@ -1237,6 +1506,10 @@ echo "============================================================"
 echo "  1/2  Workbench 3.1 boots, then installs the archive ($LEVEL)"
 echo "============================================================"
 
+if [ -n "$FOREIGN_MODE" ]; then
+    FOREIGN_TREE_BEFORE=$(product_manifest)
+fi
+
 startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt
 Echo >DH0:.done "$RC"'
@@ -1250,6 +1523,36 @@ cat "$HD/installdrive.txt" 2>/dev/null || echo "(none)"
 echo
 echo "---- Installer log ----"
 cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
+
+case "$FOREIGN_MODE" in
+*-leave)
+    FOREIGN_TREE_AFTER=$(product_manifest)
+    leave_ok=1
+    if [ "$FOREIGN_TREE_AFTER" != "$FOREIGN_TREE_BEFORE" ]; then
+        echo "!! declining replacement changed the installed system"
+        diff -u <(printf '%s\n' "$FOREIGN_TREE_BEFORE") \
+                <(printf '%s\n' "$FOREIGN_TREE_AFTER") || true
+        leave_ok=0
+    fi
+    # installdrive is the process Startup-Sequence waits for; Commodore's
+    # Installer was launched asynchronously, so its intentional abort status
+    # is not the driver's status.  The consumed action plus an exact zero diff
+    # is the observable refusal.  Requiring 20 here confuses child and driver.
+    if [ "$INSTALL_STATUS" != "0" ]; then
+        echo "!! the answer driver failed with status $INSTALL_STATUS"
+        leave_ok=0
+    fi
+    if [ "$leave_ok" = "1" ]; then
+        echo "  ok      $FOREIGN_MODE refused with a byte-exact destination tree"
+        echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "card_config=existing stack=unchanged boot_status=not-run"
+        exit 0
+    fi
+    echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+         "card_config=existing stack=changed boot_status=install-$INSTALL_STATUS"
+    exit 1
+    ;;
+esac
 
 # ------------------------------------------- what a real Workbench now has --
 
@@ -1337,6 +1640,11 @@ micro)        WANT_STACK=micro ;;
 # takes its own default and that default is the full stack.
 drawer)       WANT_STACK=full ;;
 esac
+case "$TRANSITION" in
+    full-minimal) WANT_STACK=minimal ;;
+    full-micro)   WANT_STACK=micro ;;
+    minimal-full|micro-full) WANT_STACK=full ;;
+esac
 if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
     fail=1
@@ -1345,7 +1653,23 @@ for cmd in AddNetInterface Online Offline ShowNetStatus \
            ping netstat host fetch; do
     check_file "${INST}C/$cmd"
 done
-check_file "${INST}Devs/NetInterfaces/eth0"
+check_file "${INST}Devs/NetInterfaces/$EXPECTED_IF"
+if [ -n "$EXPECTED_SECOND_IF" ]; then
+    check_file "${INST}Devs/NetInterfaces/$EXPECTED_SECOND_IF"
+    _second_real=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_SECOND_IF" 2>/dev/null || true)
+    _second_device=$(sed -n 's/^DEVICE=//p' "$_second_real" 2>/dev/null | head -1 |
+                     tr -d '\r' | sed 's/[[:space:]]*$//')
+    case "$_second_device" in
+        "$EXPECTED_SECOND_DEVICE"|"DEVS:Networks/$EXPECTED_SECOND_DEVICE") ;;
+        *) echo "!! $EXPECTED_SECOND_IF uses ${_second_device:-no device}; wanted $EXPECTED_SECOND_DEVICE"
+           fail=1 ;;
+    esac
+fi
+if [ -n "$EMU68_FIXTURE" ] &&
+   amiga_path "${INST}Devs/NetInterfaces/eth0" >/dev/null 2>&1; then
+    echo "!! Emu68 auto-detection also left a spurious eth0 definition"
+    fail=1
+fi
 check_file "${INST}Devs/Internet/name_resolution"
 check_file S/User-Startup
 
@@ -1356,16 +1680,30 @@ check_file S/User-Startup
 if [ "$DRIVE_RUNS" != "1" ]; then
     NS_FILE=$(amiga_path S/Network-Startup 2>/dev/null || true)
     NS_OLD=$(amiga_path S/Network-Startup.old 2>/dev/null || true)
-    if [ -z "$NS_FILE" ] ||
-       ! grep -q '^; user startup policy -- installer must preserve this' \
-           "$NS_FILE" 2>/dev/null; then
-        echo "!! repeated install did not preserve S:Network-Startup"
-        fail=1
-    elif [ -n "$NS_OLD" ]; then
-        echo "!! repeated install rotated the kept S:Network-Startup to .old"
-        fail=1
+    if [ "$RECONFIGURE" = "1" ]; then
+        if [ -z "$NS_FILE" ] ||
+           grep -q '^; user startup policy -- installer must preserve this' \
+               "$NS_FILE" 2>/dev/null ||
+           [ -z "$NS_OLD" ] ||
+           ! grep -q '^; user startup policy -- installer must preserve this' \
+               "$NS_OLD" 2>/dev/null; then
+            echo "!! reconfigure did not replace S:Network-Startup and keep .old"
+            fail=1
+        else
+            echo "  ok      reconfigure replaced startup and preserved its .old"
+        fi
     else
-        echo "  ok      repeated install kept S:Network-Startup verbatim"
+        if [ -z "$NS_FILE" ] ||
+           ! grep -q '^; user startup policy -- installer must preserve this' \
+               "$NS_FILE" 2>/dev/null; then
+            echo "!! repeated install did not preserve S:Network-Startup"
+            fail=1
+        elif [ -n "$NS_OLD" ]; then
+            echo "!! repeated install rotated the kept S:Network-Startup to .old"
+            fail=1
+        else
+            echo "  ok      repeated install kept S:Network-Startup verbatim"
+        fi
     fi
 fi
 
@@ -1373,22 +1711,41 @@ fi
 # path straight to the config loader (only wildcards use MatchFirst), so this
 # documented DEVS: form must remain intact for both layouts.
 NS_FILE=${NS_FILE:-$(amiga_path S/Network-Startup 2>/dev/null || true)}
-if [ -z "$NS_FILE" ]; then
+if [ "$NO_BOOT" = "1" ]; then
+    if [ -n "$NS_FILE" ]; then
+        echo "!! boot-disabled fresh install wrote S:Network-Startup"
+        fail=1
+    elif [ "$(startup_count 'Execute S:Network-Startup')" != "0" ]; then
+        echo "!! boot-disabled install still executes S:Network-Startup"
+        fail=1
+    else
+        echo "  ok      boot-disabled install wrote no startup command"
+    fi
+elif [ -z "$NS_FILE" ]; then
     echo "!! the installer did not write S:Network-Startup"
     fail=1
 elif [ "$DRAWER" = "1" ]; then
-    if grep -q '^AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/eth0 QUIET$' \
+    if grep -q "^AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$" \
         "$NS_FILE"; then
         echo "  ok      drawer startup names its exact DEVS: path"
     else
-        echo "!! drawer startup does not name the exact eth0 path"
+        echo "!! drawer startup does not name the exact $EXPECTED_IF path"
         fail=1
     fi
-elif grep -q '^C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET$' "$NS_FILE"; then
+elif grep -q "^C:AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$" "$NS_FILE"; then
     echo "  ok      system startup names its exact DEVS: path"
 else
-    echo "!! system startup does not name the exact eth0 path"
+    echo "!! system startup does not name the exact $EXPECTED_IF path"
     fail=1
+fi
+if [ -n "$EXPECTED_SECOND_IF" ] && [ -n "$NS_FILE" ]; then
+    if grep -q "^C:AddNetInterface DEVS:NetInterfaces/$EXPECTED_SECOND_IF QUIET$" \
+        "$NS_FILE"; then
+        echo "!! Emu68 secondary interface $EXPECTED_SECOND_IF starts at boot"
+        fail=1
+    else
+        echo "  ok      Emu68 secondary interface installed but not auto-started"
+    fi
 fi
 
 # The self-contained contract, in one comparison: none of the system stack's
@@ -1419,6 +1776,42 @@ if [ "$DRAWER" = "1" ]; then
     done
 fi
 
+case "$FOREIGN_MODE" in
+*-replace)
+    FOREIGN_CONFIG_AFTER=$(
+        for f in "${FOREIGN_CONFIG_FILES[@]}"; do
+            shasum "$HD/$f" 2>/dev/null || echo "MISSING $f"
+        done
+    )
+    if [ "$FOREIGN_CONFIG_AFTER" != "$FOREIGN_CONFIG_BEFORE" ]; then
+        echo "!! replacing $FOREIGN_MODE changed the kept configuration"
+        diff -u <(printf '%s\n' "$FOREIGN_CONFIG_BEFORE") \
+                <(printf '%s\n' "$FOREIGN_CONFIG_AFTER") || true
+        fail=1
+    else
+        echo "  ok      $FOREIGN_MODE kept configuration and boot policy verbatim"
+    fi
+    for spec in \
+        "bsdsocket.library:$FOREIGN_OLD_BSD_SUM" \
+        "usergroup.library:$FOREIGN_OLD_UG_SUM" \
+        "tls.library:$FOREIGN_OLD_TLS_SUM"; do
+        _name=${spec%%:*}; _sum=${spec#*:}
+        _old=$(amiga_path "Libs/$_name.old" 2>/dev/null || true)
+        if [ -z "$_old" ] || [ ! -f "$_old" ] ||
+           [ "$(shasum "$_old" | cut -d' ' -f1)" != "$_sum" ]; then
+            echo "!! replacing $FOREIGN_MODE did not preserve $_name as .old"
+            fail=1
+        else
+            echo "  ok      previous $_name preserved as .old"
+        fi
+    done
+    if amiga_path S/Network-Startup.old >/dev/null 2>&1; then
+        echo "!! kept foreign S:Network-Startup was rotated to .old"
+        fail=1
+    fi
+    ;;
+esac
+
 # ---------------------------------------- anxnet.device, into DEVS:Networks --
 #
 # THE ASSERTION THIS FILE EXISTS FOR, and the one whose absence let the archive
@@ -1430,6 +1823,44 @@ ANXNET_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxnet.device"
 ANXNET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxnet.device" 2>/dev/null || true)
 ANXNET_OLD=$(amiga_path "${INST}Devs/Networks/anxnet.device.old" 2>/dev/null || true)
 
+if [ "$NO_DRIVERS" = "1" ]; then
+    # Declining the supplied drivers means precisely that: no new driver, no
+    # backup, and an existing file remains byte-for-byte what it was.  The
+    # selected vendor driver still boots the stack below.
+    for supplied in anxnet.device anxgenet.device anxwifipi.device; do
+        [ -f "$HD/Unpacked/AmiNetXDuo/Devs/Networks/$supplied" ] || {
+            echo "!! archive is missing $supplied; omission cannot be tested"
+            fail=1
+        }
+    done
+    if [ -n "$STALE_DEVICE" ]; then
+        if [ -f "$STALE_DEVICE" ] &&
+           [ "$(shasum "$STALE_DEVICE" | cut -d' ' -f1)" = "$STALE_SUM" ]; then
+            echo "  ok      declining drivers preserved the existing anxnet.device"
+        else
+            echo "!! declining drivers changed the existing anxnet.device"
+            fail=1
+        fi
+    elif [ -n "$ANXNET_INSTALLED" ]; then
+        echo "!! declining drivers installed anxnet.device on a clean machine"
+        fail=1
+    else
+        echo "  ok      declining drivers left a clean DEVS:Networks untouched"
+    fi
+    for supplied in anxgenet.device anxwifipi.device; do
+        if amiga_path "${INST}Devs/Networks/$supplied" >/dev/null 2>&1; then
+            echo "!! declining drivers installed $supplied"
+            fail=1
+        fi
+    done
+    if [ -n "$ANXNET_OLD" ]; then
+        echo "!! declining drivers created anxnet.device.old"
+        fail=1
+    fi
+    ANXGENET_INSTALLED=""
+    ANXWIFIPI_INSTALLED=""
+    echo "supplied_drivers=declined"
+else
 if [ ! -f "$ANXNET_ARCHIVE" ]; then
     echo "  MISSING Devs/Networks/anxnet.device IN THE ARCHIVE"
     echo "!! the archive itself carries no driver, so what the installer did"
@@ -1589,6 +2020,7 @@ else
         echo "  ok      anxnet.device.old is present after $DRIVE_RUNS installs"
     fi
 fi
+fi
 
 # -------------------------------------------------- the drawers have icons --
 #
@@ -1669,11 +2101,51 @@ for f in Libs/tls.library Devs/Internet/certificates; do
     fi
 done
 
+if [ "$TRANSITION" = "full-minimal" ] || [ "$TRANSITION" = "full-micro" ]; then
+    _tls_live=$(amiga_path "${INST}Libs/tls.library" 2>/dev/null || true)
+    _tls_old=$(amiga_path "${INST}Libs/tls.library.old" 2>/dev/null || true)
+    _tls_source="$HD/Unpacked/AmiNetXDuo/Libs/tls.library"
+    if [ -n "$_tls_live" ]; then
+        echo "!! $TRANSITION left tls.library live beside the reduced stack"
+        fail=1
+    elif [ -z "$_tls_old" ] || [ ! -f "$_tls_old" ] ||
+         [ "$(shasum "$_tls_old" | cut -d' ' -f1)" != \
+           "$(shasum "$_tls_source" | cut -d' ' -f1)" ]; then
+        echo "!! $TRANSITION did not preserve the former TLS library as .old"
+        fail=1
+    else
+        echo "  ok      $TRANSITION removed the live TLS half and kept .old"
+    fi
+elif [ "$TRANSITION" = "minimal-full" ] || [ "$TRANSITION" = "micro-full" ]; then
+    _tls_live=$(amiga_path "${INST}Libs/tls.library" 2>/dev/null || true)
+    _tls_source="$HD/Unpacked/AmiNetXDuo/Libs/tls.library"
+    if [ -z "$_tls_live" ] || [ ! -f "$_tls_live" ] ||
+       [ "$(shasum "$_tls_live" | cut -d' ' -f1)" != \
+         "$(shasum "$_tls_source" | cut -d' ' -f1)" ]; then
+        echo "!! $TRANSITION did not install the matching TLS library"
+        fail=1
+    else
+        echo "  ok      $TRANSITION installed the matching TLS library"
+    fi
+fi
+
 echo
 echo "---- S:User-Startup ----"
 cat "$(amiga_path S/User-Startup 2>/dev/null)" 2>/dev/null || echo "(none)"
-echo "---- DEVS:NetInterfaces/eth0 ----"
-cat "$(amiga_path "${INST}Devs/NetInterfaces/eth0" 2>/dev/null)" 2>/dev/null || echo "(none)"
+echo "---- DEVS:NetInterfaces/$EXPECTED_IF ----"
+cat "$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null)" 2>/dev/null || echo "(none)"
+
+if [ "$EXPERT_CUSTOM" = "1" ]; then
+    _custom_if=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
+    _custom_res=$(amiga_path "${INST}Devs/Internet/name_resolution" 2>/dev/null || true)
+    if [ -z "$_custom_if" ] || [ -z "$_custom_res" ] ||
+         ! grep -q "^hostname $EXPECTED_HOST$" "$_custom_res" 2>/dev/null; then
+        echo "!! Expert custom hostname did not reach name_resolution"
+        fail=1
+    else
+        echo "  ok      Expert custom interface and hostname were written"
+    fi
+fi
 
 # ---------------------------------------- did the STATIC branch run? ------
 #
@@ -1684,7 +2156,7 @@ cat "$(amiga_path "${INST}Devs/NetInterfaces/eth0" 2>/dev/null)" 2>/dev/null || 
 # scenario was reported as a permanent SKIP to avoid, and it would come back
 # the first time the question's wording changed.
 if [ "$STATIC" = "1" ]; then
-    _if=$(amiga_path "${INST}Devs/NetInterfaces/eth0" 2>/dev/null || true)
+    _if=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
     _res=$(amiga_path "${INST}Devs/Internet/name_resolution" 2>/dev/null || true)
     # The router goes in DEVS:Internet/routes as DEFAULT=, not in the
     # interface file as GATEWAY=: Install-AmiNetXDuo:1244-1255 writes it
@@ -1713,7 +2185,7 @@ if [ "$STATIC" = "1" ]; then
         echo "static_branch=NOT-TAKEN"
         echo "!! -S asked for the static branch and the installer wrote"
         echo "   CONFIGURE=${STATIC_CONFIGURE:-nothing}.  installdrive.c matches"
-        echo "   the SECOND button of a yes/no page against DRIVE_YES_LABEL;"
+        echo "   the requested button label from install-scenario.txt;"
         echo "   if Install-AmiNetXDuo's DHCP question was reworded, that"
         echo "   string in run-workbench.sh is what has to follow it."
         fail=1
@@ -1753,16 +2225,23 @@ fi
 # worth having and is not the same claim.  card_config says which it is and
 # the two are never one line.
 INSTALLER_DEVICE=""
-IFACE_FILE=$(amiga_path "${INST}Devs/NetInterfaces/eth0" 2>/dev/null || true)
+IFACE_FILE=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
 if [ -n "$IFACE_FILE" ] && [ -f "$IFACE_FILE" ]; then
     INSTALLER_DEVICE=$(sed -n 's/^DEVICE=//p' "$IFACE_FILE" | head -1 |
                        tr -d '\r' | sed 's/[[:space:]]*$//')
 fi
 
 CARD_SELECTED=no
-case "$INSTALLER_DEVICE" in
-    "$SANA2_DRIVER"|"DEVS:Networks/$SANA2_DRIVER") CARD_SELECTED=yes ;;
-esac
+if [ -n "$EXPECTED_AUTO_DEVICE" ]; then
+    case "$INSTALLER_DEVICE" in
+        "$EXPECTED_AUTO_DEVICE"|"DEVS:Networks/$EXPECTED_AUTO_DEVICE")
+            CARD_SELECTED=yes ;;
+    esac
+else
+    case "$INSTALLER_DEVICE" in
+        "$SANA2_DRIVER"|"DEVS:Networks/$SANA2_DRIVER") CARD_SELECTED=yes ;;
+    esac
+fi
 
 # THE FILE NAMES THE SCRIPT LOOKS FOR, READ OUT OF THE SCRIPT THAT RAN.  A
 # driver on that list that was NOT selected is a regression and reddens this
@@ -1801,7 +2280,11 @@ fi
 echo "installer_detects=$(printf '%s' "$INSTALLER_KNOWN_DRIVERS" | tr '\n' ',')"
 
 CARD_CONFIG=installer
-if [ "$CARD_SELECTED" = "no" ] && [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
+if [ -n "$EMU68_FIXTURE" ]; then
+    CARD_CONFIG=installer-auto
+fi
+if [ "$CARD_SELECTED" = "no" ] && [ -z "$EMU68_FIXTURE" ] &&
+   [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
     echo
     echo "!! $SANA2_DRIVER IS on Install-AmiNetXDuo's detection list"
     echo "   detects, and the installer still wrote"
@@ -1809,7 +2292,12 @@ if [ "$CARD_SELECTED" = "no" ] && [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
     echo "   driver was not staged where the loop looks."
     fail=1
 fi
-if [ "$CARD_SELECTED" = "no" ]; then
+if [ "$CARD_SELECTED" = "no" ] && [ -n "$EMU68_FIXTURE" ]; then
+    echo
+    echo "!! Emu68 $EMU68_FIXTURE auto-detection wrote"
+    echo "   DEVICE=${INSTALLER_DEVICE:-nothing}; wanted $EXPECTED_AUTO_DEVICE"
+    fail=1
+elif [ "$CARD_SELECTED" = "no" ]; then
     CARD_CONFIG=post-install
     echo
     echo "!! THE INSTALLER DID NOT SELECT THIS CARD."
@@ -1823,12 +2311,12 @@ if [ "$CARD_SELECTED" = "no" ]; then
     echo "   The interface file is rewritten now, so what follows measures"
     echo "   whether THE STACK drives $BOARD -- not whether the installer"
     echo "   can select it, which this run has just shown it cannot."
-    if [ -f "$HD/Devs/NetInterfaces/eth0" ]; then
+    if [ -f "$HD/Devs/NetInterfaces/$EXPECTED_IF" ]; then
         sana2_stage_interface "$BOARD" "$HD/Devs"
-        echo "---- DEVS:NetInterfaces/eth0, after the rewrite ----"
-        cat "$HD/Devs/NetInterfaces/eth0"
+        echo "---- DEVS:NetInterfaces/$EXPECTED_IF, after the rewrite ----"
+        cat "$HD/Devs/NetInterfaces/$EXPECTED_IF"
     else
-        echo "!! there is no $HD/Devs/NetInterfaces/eth0 to rewrite"
+        echo "!! there is no $HD/Devs/NetInterfaces/$EXPECTED_IF to rewrite"
         fail=1
     fi
 fi
@@ -1877,6 +2365,9 @@ if [ "$DRAWER" = "1" ]; then
     WANT_SELECTOR=3
     WANT_AMITCP=1                 # the foreign line, never one of ours
 fi
+case "$FOREIGN_MODE" in
+    amitcpng-*) WANT_AMITCP=1 ;;
+esac
 if [ "$SELECT_LINES" != "$WANT_SELECTOR" ]; then
     echo "!! startup has $SELECT_LINES ADD assign line(s), want $WANT_SELECTOR"
     fail=1
@@ -1931,6 +2422,17 @@ if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
          "card_config=$CARD_CONFIG installer_card_selected=$CARD_SELECTED" \
          "stack=$STACK_INSTALLED boot_status=install-$INSTALL_STATUS"
     exit 1
+fi
+
+# The synthetic probe proves the installer's decisions, not an emulated
+# network device.  Stop after the complete destination/startup audit; booting
+# anxgenet/anxwifipi in Amiberry would only test that absent hardware fails.
+if [ "$CONFIG_ONLY" = "1" ]; then
+    echo
+    echo "workbench_e2e=PASS board=emu68-fixture model=$MODEL" \
+         "driver=$EXPECTED_AUTO_DEVICE card_config=$CARD_CONFIG" \
+         "stack=$STACK_INSTALLED boot_status=not-run"
+    exit 0
 fi
 
 # ------------------------------------------------------------------ run 2 ---
@@ -2015,6 +2517,17 @@ https_steps() {
 }
 HTTPS_STEPS=$(https_steps)
 
+MANUAL_START=""
+if [ "$NO_BOOT" = "1" ]; then
+    # This scenario proves both halves of the choice: the boot stays offline,
+    # then the documented command can start the freshly installed stack.
+    if [ "$DRAWER" = "1" ]; then
+        MANUAL_START="AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET"
+    else
+        MANUAL_START="C:AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET"
+    fi
+fi
+
 # An ordinary Shell script, doing ordinary things, with every command's return
 # code written down beside its output.  `Stack 200000` is the Shell's internal
 # stack command.  It is NOT needed any more, clients/compat/amiga_argv.c
@@ -2026,8 +2539,9 @@ cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; by AmiNetXDuo, it is what a user would type.
 FailAt 9999
 Stack 200000
+$MANUAL_START
 
-Echo >DH0:usercheck.txt "=== 1. the network, as S:User-Startup brought it up"
+Echo >DH0:usercheck.txt "=== 1. the installed network"
 C:Wait 5
 C:ShowNetStatus >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT network rc=\$RC"
@@ -2450,6 +2964,10 @@ if [ "$TERMINAL" = "1" ]; then
     build_driver "$ROOT/build/installdrive-$TAG-$LEVEL-no" 1 "" "$PICK_SPEC"
     cp "$ROOT/build/installdrive-$TAG-$LEVEL-no" "$HD/C/installdrive"
     chmod 755 "$HD/C/installdrive"
+    # Runs in a new process, whose run number starts at one again.  The first
+    # two installs' answer file deliberately says yes for run one, so leaving
+    # it in place here would opt in again instead of testing removal.
+    rm -f "$HD/install-scenario.txt"
 
     startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt

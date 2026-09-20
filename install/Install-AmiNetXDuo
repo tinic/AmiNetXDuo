@@ -946,9 +946,9 @@
 ; forces the startup block on rather than leaving a drawer nothing can reach.
 ; A SCRIPTED INSTALL asks nobody.  S:AmiNetXDuo-drawer existing means the
 ; drawer layout, chosen before the installer starts, at every user level --
-; which is also the only way the drawer path can be tested, because the
-; Installer's radio pages cannot be driven from outside (see
-; install/test/installdrive.c).
+; It remains useful for an unattended caller that chooses the layout before
+; starting Installer.  The release harness drives the visible radio page and
+; separately covers this sentinel path.
 (set FORCE_DRAWER (exists "S:AmiNetXDuo-drawer" (noreq)))
 (set DRAWER_LAYOUT 0)
 
@@ -1817,6 +1817,28 @@
                 (prompt "Putting the new tls.library in place")
                 (help H_REPLACELIB))
       ))
+  ))
+
+; A PROFILE CHANGE HAS TO REMOVE THE OTHER HALF OF THE OLD PAIR.  Installing
+; minimal or micro over a full installation used to replace bsdsocket.library
+; and leave the old tls.library at its live name.  The two libraries share a
+; private interface and the combination is explicitly unsupported above; it
+; also made a reduced install continue to advertise TLS.  Keep the previous
+; file recoverable under .old, exactly as a replacement does, but take it out
+; of the library search path selected by the new profile.
+(if (AND (NOT (exists (tackon S_LIBS "tls.library") (noreq))) OLD_TLS)
+  (
+    (if (exists D_TLS_OLD (noreq))
+        (delete D_TLS_OLD
+                (prompt "Removing the previous tls.library.old")
+                (help @copyfiles-help)
+                (optional "force" "nofail")))
+    (rename D_TLS D_TLS_OLD
+            (prompt "Moving tls.library aside for the reduced stack")
+            (help "The minimal and micro stacks do not provide TLS.  The old "
+                  "tls.library is kept as tls.library.old, but cannot remain "
+                  "live beside a bsdsocket.library with a different private "
+                  "interface."))
   ))
 
 ; THE ONLY WAY TO END UP WITHOUT ENCRYPTION IS TO HAVE ASKED FOR IT.  It used

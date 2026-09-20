@@ -12,17 +12,33 @@
 #   NOVICE    no questions at all; every default has to be right on its own
 #   AVERAGE   the normal questions, all answered with the default
 #   EXPERT    the only level drawing the unit-number, interface-name and
-#             per-copy confirmation pages, and no other caller passes it
+#             per-copy confirmation pages; it enters non-default values
 #   STATIC    "no" to DHCP, the only way into P_ask_ip and P_ip_parse
+#   NO_DRIVERS declines the three supplied device images and proves an
+#              existing vendor driver still boots unchanged
+#   NO_BOOT    installs without startup lines, then starts it manually
 #   SYSTEM_RERUN    installs the system layout twice in place
+#   SYSTEM_RECONFIGURE installs twice and takes "Set them up again", proving
+#                   replacement plus the S:Network-Startup.old recovery path
 #   SYSTEM_MINIMAL  installs and boots the minimal profile
 #   SYSTEM_MICRO    installs and boots the micro profile
+#   FULL_MINIMAL / MINIMAL_FULL / FULL_MICRO / MICRO_FULL exercise upgrades
+#                   between profiles, including the private TLS pairing
 #   DRAWER_FULL     refuses to disturb a foreign stack, then installs the
 #                   full profile in its own drawer twice
 #   DRAWER_MINIMAL  does the same with the minimal profile
 #   DRAWER_MICRO    does the same with the micro profile
+#   DRAWER_FULL_MINIMAL / DRAWER_MICRO_FULL cover the same profile edges
+#                   without ever touching system libraries or configuration
+#   ROADSHOW_* / AMITCPNG_* seed named existing-stack layouts, then either
+#                   decline with a zero-diff oracle or replace while keeping
+#                   editable configuration and the AmiTCP: assignment
+#   EMU68_* inject deterministic device-tree results and prove the Installer
+#                   creates genet/wifipi definitions and starts only Ethernet
 #   TERMINAL        opts into the browser services, reinstalls, and exercises
 #                   them from a second machine
+#   STATIC_NO_DRIVERS proves two non-default questions can be answered in one
+#                   run while the existing vendor driver supplies the card
 #
 # AMINETXDUO_REQUIRE_ALL_SCENARIOS=1 makes any missing ingredient or peer a
 # failure.  The release e2e stage sets it: a release gate may not go green
@@ -38,10 +54,14 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ARGS=("$@")
 
 SCENARIOS=(
-    NOVICE AVERAGE EXPERT STATIC
-    SYSTEM_RERUN SYSTEM_MINIMAL SYSTEM_MICRO
+    NOVICE AVERAGE EXPERT STATIC NO_DRIVERS NO_BOOT
+    SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO
+    FULL_MINIMAL MINIMAL_FULL FULL_MICRO MICRO_FULL
     DRAWER_FULL DRAWER_MINIMAL DRAWER_MICRO
-    TERMINAL
+    DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
+    ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
+    EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
+    TERMINAL STATIC_NO_DRIVERS
 )
 declare -a RESULTS
 
@@ -99,15 +119,34 @@ for scenario in "${SCENARIOS[@]}"; do
     # reinstall of our own self-contained stack; they also begin with a
     # foreign stack and prove that declining replacement writes nothing.
     case "$scenario" in
-        NOVICE|AVERAGE|EXPERT) opts=(-l "$scenario") ;;
+        NOVICE|AVERAGE)        opts=(-l "$scenario") ;;
+        EXPERT)                opts=(-l EXPERT -E) ;;
         STATIC)                opts=(-l AVERAGE -S) ;;
+        NO_DRIVERS)            opts=(-l AVERAGE -J) ;;
+        NO_BOOT)               opts=(-l AVERAGE -B) ;;
         SYSTEM_RERUN)          opts=(-l AVERAGE -R) ;;
+        SYSTEM_RECONFIGURE)    opts=(-l AVERAGE -U) ;;
         SYSTEM_MINIMAL)        opts=(-l AVERAGE -p minimal) ;;
         SYSTEM_MICRO)          opts=(-l AVERAGE -p micro) ;;
+        FULL_MINIMAL)          opts=(-l AVERAGE -x full-minimal) ;;
+        MINIMAL_FULL)          opts=(-l AVERAGE -x minimal-full) ;;
+        FULL_MICRO)            opts=(-l AVERAGE -x full-micro) ;;
+        MICRO_FULL)            opts=(-l AVERAGE -x micro-full) ;;
         DRAWER_FULL)           opts=(-l AVERAGE -D -g -p drawer) ;;
         DRAWER_MINIMAL)        opts=(-l AVERAGE -D -p minimal) ;;
         DRAWER_MICRO)          opts=(-l AVERAGE -D -p micro) ;;
+        DRAWER_FULL_MINIMAL)   opts=(-l AVERAGE -D -x full-minimal) ;;
+        DRAWER_MICRO_FULL)     opts=(-l AVERAGE -D -x micro-full) ;;
+        ROADSHOW_LEAVE)        opts=(-l AVERAGE -f roadshow-leave) ;;
+        ROADSHOW_REPLACE)      opts=(-l AVERAGE -f roadshow-replace) ;;
+        AMITCPNG_LEAVE)        opts=(-l AVERAGE -f amitcpng-leave) ;;
+        AMITCPNG_REPLACE)      opts=(-l AVERAGE -f amitcpng-replace) ;;
+        EMU68_GENET)           opts=(-l AVERAGE -e genet) ;;
+        EMU68_WIFI)            opts=(-l AVERAGE -e wifi) ;;
+        EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;
+        EMU68_BOTH_MICRO)      opts=(-l AVERAGE -e both -p micro) ;;
         TERMINAL)              opts=(-l AVERAGE -H) ;;
+        STATIC_NO_DRIVERS)     opts=(-l AVERAGE -S -J) ;;
     esac
 
     AMINETXDUO_RUN_TAG="matrix-$scenario" \

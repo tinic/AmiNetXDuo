@@ -73,6 +73,7 @@ tests for both:
 ```sh
 install/test/run-workbench.sh -l AVERAGE -a build/dist/AmiNetXDuo-<version>.lha
 install/test/run-workbench.sh -l AVERAGE -H -a <archive>   # the terminal arm
+install/test/run-all.sh -a <archive>                       # release matrix
 ```
 
 This is what `tools/ci.sh e2e` runs, and what `.github/workflows/emulator.yml`
@@ -92,6 +93,26 @@ adds a second machine. It then checks four more things:
 
 `AMINETXDUO_PEER` names that machine and has no default. The host that runs the
 emulator cannot be it. Without a peer the run exits 3 rather than passing.
+
+The in-guest driver also accepts `-q` answer files staged by
+`run-workbench.sh`. Each non-comment line names one required action:
+
+```
+1|BOOL|No, leave them out
+1|CHOICE|3|3|1
+1|STRING|eth0|lan.1
+```
+
+The fields are Installer run number, action, and its operands. `CHOICE` uses
+option count, gadget id and the zero-based ordinal among matching pages. Every
+action must be consumed or the run fails. This is what lets the release matrix
+test several non-default answers together and select different profiles on a
+reinstall without silently falling back to Installer defaults.
+
+The Emu68 rows replace `InstallNetProbe` only inside the throw-away test drive
+with `install/test/netprobe-fixture.c`. This lets Amiberry exercise the
+Installer's Ethernet-only, Wi-Fi-only and dual-device decisions; it does not
+stand in for the separate tests of the real probe and drivers on Emu68.
 
 Ingredients, none of which are ours to ship:
 

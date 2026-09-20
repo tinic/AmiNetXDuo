@@ -25,6 +25,9 @@
 #include <proto/dos.h>
 #include <proto/intuition.h>
 
+#include <stdlib.h>
+#include <string.h>
+
 /*
  * Gadget IDs, from the Installer's own window.h and the GadgetDef tables in
  * window.c.  Most pages carry a Proceed button with ID 90, but not all:
@@ -118,6 +121,52 @@
 #ifndef DRIVE_PAGE_PAUSE
 #define DRIVE_PAGE_PAUSE   0
 #endif
+
+/*
+ * Optional run-time answers, staged by run-workbench.sh as:
+ *
+ *   <run>|BOOL|<button-label substring>
+ *   <run>|CHOICE|<number of options>|<gadget id>|<matching-page ordinal>
+ *   <run>|STRING|<current value>|<replacement value>
+ *
+ * Unlike the historical DRIVE_YES_LABEL/DRIVE_PICK_* switches, this can
+ * answer more than one non-default question in one installation and can give
+ * different answers on successive installs.  The file is deliberately
+ * optional so old callers remain useful.  Every loaded action must be used;
+ * a renamed, skipped or unreachable page therefore fails instead of silently
+ * taking a default and producing a vacuous green test.
+ */
+#ifndef DRIVE_SCENARIO
+#define DRIVE_SCENARIO "DH0:install-scenario.txt"
+#endif
+
+#define MAX_ACTIONS       64
+#define ACTION_TEXT       128
+
+enum ActionType
+{
+    ACTION_BOOL = 1,
+    ACTION_CHOICE,
+    ACTION_STRING
+};
+
+struct DriveAction
+{
+    LONG  run;
+    UBYTE type;
+    UBYTE used;
+    LONG  first;
+    LONG  second;
+    LONG  third;
+    char  match[ACTION_TEXT];
+    char  value[ACTION_TEXT];
+};
+
+static struct DriveAction actions[MAX_ACTIONS];
+static LONG               action_count;
+static LONG               active_run;
+static LONG               pending_action = -1;
+static struct Gadget     *pending_string;
 
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 
@@ -230,6 +279,196 @@ static BOOL label_matches(struct Gadget *gad, const char *want)
     return FALSE;
 }
 
+static VOID copy_text(char *dest, const char *source, LONG size)
+{
+    LONG n = 0;
+
+    if (size <= 0)
+        return;
+    while (source[n] != '\0' && n + 1 < size)
+    {
+        dest[n] = source[n];
+        n++;
+    }
+    dest[n] = '\0';
+}
+
+static char *next_field(char **at)
+{
+    char *field;
+    char *end;
+
+    if (*at == NULL)
+        return NULL;
+    field = *at;
+    end = field;
+    while (*end != '\0' && *end != '|')
+        end++;
+    if (*end == '|')
+    {
+        *end = '\0';
+        *at = end + 1;
+    }
+    else
+        *at = NULL;
+    return field;
+}
+
+static BOOL load_actions(VOID)
+{
+    BPTR file;
+    char line[512];
+    LONG number = 0;
+
+    file = Open((STRPTR)DRIVE_SCENARIO, MODE_OLDFILE);
+    if (file == 0)
+    {
+        say("installdrive: no run-time answer file; using compiled defaults\n", 0);
+        return TRUE;
+    }
+
+    while (FGets(file, (STRPTR)line, sizeof(line)) != NULL)
+    {
+        char *at = line;
+        char *run_text;
+        char *kind;
+        struct DriveAction *action;
+        char *p;
+
+        number++;
+        for (p = line; *p != '\0'; p++)
+            if (*p == '\r' || *p == '\n')
+            {
+                *p = '\0';
+                break;
+            }
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+        if (action_count >= MAX_ACTIONS)
+        {
+            say("installdrive: too many actions at line %ld\n", number);
+            Close(file);
+            return FALSE;
+        }
+
+        run_text = next_field(&at);
+        kind = next_field(&at);
+        if (run_text == NULL || kind == NULL || at == NULL)
+        {
+            say("installdrive: malformed action at line %ld\n", number);
+            Close(file);
+            return FALSE;
+        }
+
+        action = &actions[action_count];
+        action->run = atol(run_text);
+        if (action->run < 1)
+        {
+            say("installdrive: invalid run at action line %ld\n", number);
+            Close(file);
+            return FALSE;
+        }
+
+        if (strcmp(kind, "BOOL") == 0)
+        {
+            action->type = ACTION_BOOL;
+            copy_text(action->match, at, sizeof(action->match));
+        }
+        else if (strcmp(kind, "CHOICE") == 0)
+        {
+            char *options = next_field(&at);
+            char *id = next_field(&at);
+            char *ordinal = next_field(&at);
+
+            if (options == NULL || id == NULL || ordinal == NULL)
+            {
+                say("installdrive: malformed CHOICE at line %ld\n", number);
+                Close(file);
+                return FALSE;
+            }
+            action->type = ACTION_CHOICE;
+            action->first = atol(options);
+            action->second = atol(id);
+            action->third = atol(ordinal);
+        }
+        else if (strcmp(kind, "STRING") == 0)
+        {
+            char *match = next_field(&at);
+            char *value = next_field(&at);
+
+            if (match == NULL || value == NULL)
+            {
+                say("installdrive: malformed STRING at line %ld\n", number);
+                Close(file);
+                return FALSE;
+            }
+            action->type = ACTION_STRING;
+            copy_text(action->match, match, sizeof(action->match));
+            copy_text(action->value, value, sizeof(action->value));
+        }
+        else
+        {
+            say("installdrive: unknown action at line %ld\n", number);
+            Close(file);
+            return FALSE;
+        }
+        action_count++;
+    }
+    Close(file);
+    say("installdrive: loaded %ld scripted action(s)\n", action_count);
+    return TRUE;
+}
+
+static LONG matching_bool_action(struct Gadget *head)
+{
+    LONG i;
+
+    for (i = 0; i < action_count; i++)
+    {
+        struct Gadget *gad;
+
+        if (actions[i].used || actions[i].run != active_run ||
+            actions[i].type != ACTION_BOOL)
+            continue;
+        for (gad = head; gad != NULL; gad = gad->NextGadget)
+            if (label_matches(gad, actions[i].match))
+                return i;
+    }
+    return -1;
+}
+
+static LONG matching_choice_action(LONG options, LONG ordinal)
+{
+    LONG i;
+
+    for (i = 0; i < action_count; i++)
+        if (!actions[i].used && actions[i].run == active_run &&
+            actions[i].type == ACTION_CHOICE &&
+            actions[i].first == options && actions[i].third == ordinal)
+            return i;
+    return -1;
+}
+
+static LONG matching_string_action(struct Gadget *gad)
+{
+    struct StringInfo *info;
+    LONG i;
+
+    if (gad == NULL || (gad->GadgetType & GTYP_GTYPEMASK) != GTYP_STRGADGET ||
+        gad->SpecialInfo == NULL)
+        return -1;
+    info = (struct StringInfo *)gad->SpecialInfo;
+    if (info->Buffer == NULL)
+        return -1;
+
+    for (i = 0; i < action_count; i++)
+        if (!actions[i].used && actions[i].run == active_run &&
+            actions[i].type == ACTION_STRING &&
+            strcmp((const char *)info->Buffer, actions[i].match) == 0)
+            return i;
+    return -1;
+}
+
 /*
  * Look for a window carrying an Installer page.  Intuition's window list is
  * only stable under LockIBase(), so this copies out the two pointers it
@@ -264,6 +503,8 @@ static BOOL picked_already;
  */
 static BOOL prev_was_match;
 static BOOL this_is_match;
+static LONG option_pages[32];
+static LONG previous_options;
 
 static struct Window *find_installer_window(struct Gadget **click_out)
 {
@@ -274,6 +515,8 @@ static struct Window *find_installer_window(struct Gadget **click_out)
 
     pick_is_target = FALSE;
     this_is_match  = FALSE;
+    pending_action = -1;
+    pending_string = NULL;
 
     ilock = LockIBase(0);
 
@@ -293,6 +536,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             struct Gadget *no      = NULL;
             struct Gadget *single  = NULL;
             struct Gadget *pick    = NULL;
+            struct Gadget *string  = NULL;
             LONG           options = 0;
             BOOL           is_page = FALSE;
 
@@ -307,6 +551,9 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 case SINGLE_ID:   single  = gad; no = gad;       break;
                 default: break;
                 }
+
+                if ((gad->GadgetType & GTYP_GTYPEMASK) == GTYP_STRGADGET)
+                    string = gad;
 
                 /*
                  * The page's own gadgets: numbered from 1 up, below
@@ -329,14 +576,45 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             choice = proceed;
             if (choice == NULL && yes != NULL)
             {
+                LONG action = matching_bool_action(window->FirstGadget);
+
                 /* a yes/no page: ID 2 is the first (choices) string */
                 yesno_pages++;
                 choice = yes;
-                if (no != NULL && label_matches(no, DRIVE_YES_LABEL))
+                if (action >= 0)
+                {
+                    struct Gadget *candidate;
+
+                    for (candidate = window->FirstGadget;
+                         candidate != NULL;
+                         candidate = candidate->NextGadget)
+                        if (label_matches(candidate, actions[action].match))
+                        {
+                            choice = candidate;
+                            pending_action = action;
+                            break;
+                        }
+                }
+                else if (no != NULL && label_matches(no, DRIVE_YES_LABEL))
                     choice = no;
             }
             if (choice == NULL)
                 choice = single;
+
+            /* A string page is identified by its current value.  This is
+               considerably more stable than a page number: "eth0", "amiga"
+               and an address say what is being changed, and a default change
+               correctly forces the scenario to be reviewed. */
+            if (proceed != NULL && string != NULL)
+            {
+                LONG action = matching_string_action(string);
+
+                if (action >= 0)
+                {
+                    pending_action = action;
+                    pending_string = string;
+                }
+            }
 
             /*
              * The chosen option goes first and Proceed follows on the next
@@ -372,6 +650,38 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 }
                 this_is_match = TRUE;
             }
+
+
+            /* Run-time CHOICE actions use the same measured page ordinal as
+               the compiled compatibility path above, but there can be many
+               of them and they can differ between Installer runs. */
+            if (proceed != NULL && options > 0 && options < 32 &&
+                previous_options != options)
+            {
+                LONG ordinal = option_pages[options]++;
+                LONG action = matching_choice_action(options, ordinal);
+
+                if (action >= 0)
+                {
+                    struct Gadget *candidate;
+
+                    for (candidate = window->FirstGadget;
+                         candidate != NULL;
+                         candidate = candidate->NextGadget)
+                        if (candidate->GadgetID == actions[action].second &&
+                            candidate->GadgetID > 0 &&
+                            candidate->GadgetID < 87 &&
+                            button_text(candidate) == NULL)
+                        {
+                            choice = candidate;
+                            pick_is_target = TRUE;
+                            pending_action = action;
+                            picks_done++;
+                            break;
+                        }
+                }
+            }
+            previous_options = options;
             break;
         }
     }
@@ -379,9 +689,61 @@ static struct Window *find_installer_window(struct Gadget **click_out)
     UnlockIBase(ilock);
 
     prev_was_match = this_is_match;
+    if (found == NULL)
+        previous_options = 0;
 
     *click_out = choice;
     return found;
+}
+
+static BOOL set_string_value(struct Window *window, struct Gadget *target,
+                             const char *value)
+{
+    struct Gadget *head = window->FirstGadget;
+    struct StringInfo *info;
+    UWORD removed;
+    LONG n;
+
+    if (head == NULL || target == NULL || target->SpecialInfo == NULL)
+        return FALSE;
+    info = (struct StringInfo *)target->SpecialInfo;
+    if (info->Buffer == NULL || info->MaxChars < 1)
+        return FALSE;
+
+    removed = RemoveGList(window, head, -1);
+    if (removed == (UWORD)~0)
+        return FALSE;
+
+    n = 0;
+    while (value[n] != '\0' && n + 1 < info->MaxChars)
+    {
+        info->Buffer[n] = value[n];
+        n++;
+    }
+    info->Buffer[n] = '\0';
+    info->NumChars = (WORD)n;
+    info->BufferPos = (WORD)n;
+    info->DispPos = 0;
+    if ((target->Activation & GACT_LONGINT) != 0)
+        info->LongInt = atol((const char *)info->Buffer);
+
+    AddGList(window, head, -1, -1, NULL);
+    RefreshGList(head, window, NULL, -1);
+    return TRUE;
+}
+
+static BOOL actions_complete(LONG run)
+{
+    LONG i;
+    BOOL ok = TRUE;
+
+    for (i = 0; i < action_count; i++)
+        if (actions[i].run == run && !actions[i].used)
+        {
+            say("installdrive: UNUSED scripted action %ld\n", i + 1);
+            ok = FALSE;
+        }
+    return ok;
 }
 
 /*
@@ -547,6 +909,9 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     picked_already = FALSE;
     prev_was_match = FALSE;
     this_is_match  = FALSE;
+    previous_options = 0;
+    memset(option_pages, 0, sizeof(option_pages));
+    active_run = run_number;
 
     say("installdrive: run %ld: starting the Installer\n", run_number);
 
@@ -637,11 +1002,31 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
             if (pick_is_target)
             {
                 if (select_option(window, target))
+                {
                     say("installdrive:   option %ld selected\n",
                         (LONG)target->GadgetID);
+                    if (pending_action >= 0)
+                        actions[pending_action].used = TRUE;
+                }
                 else
+                {
                     say("installdrive:   option %ld could NOT be selected\n",
                         (LONG)target->GadgetID);
+                    return FALSE;
+                }
+            }
+            else if (pending_string != NULL && pending_action >= 0)
+            {
+                if (!set_string_value(window, pending_string,
+                                      actions[pending_action].value))
+                {
+                    say("installdrive:   string action %ld failed\n",
+                        pending_action + 1);
+                    return FALSE;
+                }
+                actions[pending_action].used = TRUE;
+                say("installdrive:   applied string action %ld\n",
+                    pending_action + 1);
             }
 
             /* Optional breathing room for the human visual-review run.  The
@@ -651,7 +1036,11 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
             if (DRIVE_PAGE_PAUSE > 0)
                 Delay(DRIVE_PAGE_PAUSE);
 
-            click(window, target);
+            if (!click(window, target))
+                return FALSE;
+            if (pending_action >= 0 && !pick_is_target &&
+                pending_string == NULL)
+                actions[pending_action].used = TRUE;
         }
         else if (window != NULL)
         {
@@ -685,7 +1074,7 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     }
 
     say("installdrive: run %ld finished and closed down\n", run_number);
-    return TRUE;
+    return actions_complete(run_number);
 }
 
 int main(void)
@@ -706,6 +1095,9 @@ int main(void)
         say("installdrive: no message port\n", 0);
         goto done;
     }
+
+    if (!load_actions())
+        goto done;
 
     /*
      * The Installer draws on the default public screen, which is the
@@ -777,6 +1169,18 @@ int main(void)
             }
             Close(startup);
         }
+    }
+
+    if (rc == RETURN_OK)
+    {
+        LONG i;
+
+        for (i = 0; i < action_count; i++)
+            if (!actions[i].used)
+            {
+                say("installdrive: action %ld was never consumed\n", i + 1);
+                rc = RETURN_FAIL;
+            }
     }
 
     say("installdrive: %ld pages driven in total\n", clicks);
