@@ -92,6 +92,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         "${CMAKE_SOURCE_DIR}/src/net68k"        # net68k.h, n68k_cpu_select()
         "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_BINARY_DIR}/include"           # generated version.h
+        "${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc"
         "${AMINETXDUO_THREADX}/common/inc"
         "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
         "${AMINETXDUO_NETXDUO}/common/inc"
