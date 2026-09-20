@@ -806,4 +806,15 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME interface_claim COMMAND test_interface_claim)
 
+    # The runtime configuration facade maps NetX slots back to their source
+    # definitions and serialises hostname changes with the DHCP client.
+    add_executable(test_config_runtime
+        host/test_config_runtime_host.c ${NETSTACK_HOST_TU})
+
+    target_include_directories(test_config_runtime PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_config_runtime PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_config_runtime PRIVATE ${NETSTACK_HOST_OPTIONS})
+
+    add_test(NAME config_runtime COMMAND test_config_runtime)
+
 endif()
