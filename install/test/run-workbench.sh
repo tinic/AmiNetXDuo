@@ -11,7 +11,7 @@
 #                                 [-e genet|wifi|both]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
-#                                 [-C] [-M] [-V] [-I]
+#                                 [-C] [-M] [-V] [-I] [-z]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -57,13 +57,14 @@ CANCEL_MODE=""
 MISSING_MODE=""
 NO_CARD=0
 MANUAL_CARD=0
+STALE_PI_DRIVERS=0
 INVALID_STATIC=0
 INVALID_NAMES=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CV" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVz" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -92,13 +93,14 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CV" opt; do
         M) MANUAL_CARD=1; CONFIG_ONLY=1 ;;
         V) INVALID_STATIC=1; STATIC=1; CONFIG_ONLY=1 ;;
         I) INVALID_NAMES=1; EXPERT_CUSTOM=1; CONFIG_ONLY=1 ;;
+        z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both]" \
-                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I]" >&2
+                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z]" >&2
            exit 2 ;;
     esac
 done
@@ -274,10 +276,6 @@ if [ "$NO_CARD" = 1 ]; then
     }
 fi
 if [ "$MANUAL_CARD" = 1 ]; then
-    [ "$LEVEL" != NOVICE ] || {
-        echo "-M needs AVERAGE or EXPERT so the card page is visible" >&2
-        exit 2
-    }
     [ -z "$CANCEL_MODE" ] && [ -z "$MISSING_MODE" ] &&
     [ -z "$FOREIGN_MODE" ] && [ -z "$EMU68_FIXTURE" ] &&
     [ "$DRAWER" = 0 ] && [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
@@ -718,6 +716,8 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 build_driver() {
     local out="$1" runs="$2" label="$3" pick="${4:-}"
     local opts=0 gid=0 skip=0
+    local page_pause="${AMINETXDUO_INSTALL_PAGE_PAUSE:-0}"
+    local pause_options="${AMINETXDUO_INSTALL_PAUSE_OPTIONS:-0}"
     if [ -n "$pick" ]; then
         # <options>:<id>[:<skip>].  `${pick##*:}` took the LAST field as the
         # id, which is the skip once there are three, so the fields are cut
@@ -730,7 +730,8 @@ build_driver() {
     "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
            -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
            -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" \
-           -DDRIVE_PICK_SKIP="$skip" -I"$NDK" \
+           -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
+           -DDRIVE_PAUSE_OPTIONS="$pause_options" -I"$NDK" \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -791,28 +792,14 @@ case "$EMU68_FIXTURE" in
            EXPECTED_SECOND_DEVICE=anxwifipi.device ;;
 esac
 if [ "$MANUAL_CARD" = "1" ]; then
-    # Gadget ids begin at 2 and follow the ten choices in the Installer's
-    # card page.  Keep this explicit: a menu reorder must make the scenario
-    # fail for review instead of silently choosing another board.
-    case "$BOARD" in
-        a2065)                  _manual_card_id=2 ;;
-        ariadne)                _manual_card_id=3 ;;
-        ariadne2)               _manual_card_id=4 ;;
-        hydra)                  _manual_card_id=5 ;;
-        eb920)                  _manual_card_id=6 ;;
-        xsurf)                  _manual_card_id=7 ;;
-        xsurf100z2|xsurf100z3)  _manual_card_id=8 ;;
-        ne2000_pcmcia)          _manual_card_id=9 ;;
-        *) echo "-M has no Installer card-page mapping for $BOARD" >&2; exit 2 ;;
-    esac
+    # No vendor driver is staged.  The real board is still present in
+    # Amiberry, so this is the hardware-discovery path and must not click the
+    # page by hand: doing that would turn a prechecked askoptions entry off and
+    # let the test manufacture the answer it is supposed to measure.
     MANUAL_CARD_KEY=$(anxnet_card_for "$BOARD")
     [ -n "$MANUAL_CARD_KEY" ] || {
         echo "-M needs a board supported by anxnet.device" >&2; exit 2
     }
-    ANSWER_LINES+=("1|CHOICE|10|$_manual_card_id|0")
-    if [ "$BOARD" = ne2000_pcmcia ]; then
-        ANSWER_LINES+=("1|CHOICE|4|2|0")
-    fi
 fi
 if [ "$EXPERT_CUSTOM" = "1" ]; then
     EXPECTED_IF=lan.1
@@ -902,12 +889,11 @@ if [ -n "$ANSWER_FILE" ] || [ "${#ANSWER_LINES[@]}" -ne 0 ]; then
 fi
 # THE DRIVER, WHERE A USER WOULD HAVE PUT IT, and before the Installer runs.
 #
-# This is the only lever this harness has on the card question.  The script's
-# detection loop looks for a driver it knows in DEVS: and DEVS:Networks and
-# makes it the card page's default; installdrive.c clicks Proceed, which takes
-# that default.  So a driver whose file name the script recognises is selected,
-# and one whose name it does not know is not -- measured after the install
-# below rather than assumed here.
+# This is the fallback lever on the card question.  The Installer now probes
+# the guest's real Zorro/PCMCIA hardware first and only uses known files in
+# DEVS: and DEVS:Networks where hardware cannot be enumerated or no hardware
+# probe answered.  installdrive.c clicks Proceed, and the assertions below
+# measure which default won rather than assuming either signal did.
 #
 # tools/sana2-stage.sh decides where it goes: DEVS: for the A2065, which is
 # where Commodore's own tests put it, and DEVS:Networks for a third-party
@@ -928,8 +914,10 @@ if [ "$MANUAL_CARD" = 0 ]; then
         }
     fi
 fi
-if [ "$NO_CARD" = 1 ] || [ "$MANUAL_CARD" = 1 ]; then
+if [ "$NO_CARD" = 1 ]; then
     echo "==> no-card fixture: no known SANA-II driver in DEVS:"
+elif [ "$MANUAL_CARD" = 1 ]; then
+    echo "==> hardware-only fixture: no vendor SANA-II driver in DEVS:"
 fi
 cp "$DRIVER" "$HD/C/installdrive"
 if [ "$NO_CARD" = 0 ] && [ "$MANUAL_CARD" = 0 ]; then
@@ -1048,6 +1036,18 @@ user_startup() { amiga_path S/User-Startup 2>/dev/null || true; }
 # famous files is not that promise: a newly created command, an unexpected
 # backup or a protection-bit change is still a mutation.  This manifest covers
 # every product destination and both startup files, with content and host mode.
+file_mode() {
+    # GNU stat uses -c for a file format and reserves -f for filesystem
+    # statistics; BSD/macOS stat uses -f for the file format.  Trying BSD's
+    # spelling first on Linux succeeds while printing free blocks and inodes,
+    # which made any new Installer log look like every product file changed.
+    if stat -c '%a' "$1" >/dev/null 2>&1; then
+        stat -c '%a' "$1"
+    else
+        stat -f '%Lp' "$1"
+    fi
+}
+
 product_manifest() {
     local root file rel mode sum
     {
@@ -1059,7 +1059,7 @@ product_manifest() {
         if [ -d "$HD/$root" ]; then
             while IFS= read -r -d '' file; do
                 rel=${file#"$HD/"}
-                mode=$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file")
+                mode=$(file_mode "$file")
                 if [ -f "$file" ]; then
                     sum=$(shasum "$file" | cut -d' ' -f1)
                     printf 'F\t%s\t%s\t%s\n' "$mode" "$sum" "$rel"
@@ -1068,7 +1068,7 @@ product_manifest() {
                 fi
             done < <(find "$HD/$root" -print0)
         else
-            mode=$(stat -f '%Lp' "$HD/$root" 2>/dev/null || stat -c '%a' "$HD/$root")
+            mode=$(file_mode "$HD/$root")
             sum=$(shasum "$HD/$root" | cut -d' ' -f1)
             printf 'F\t%s\t%s\t%s\n' "$mode" "$sum" "$root"
         fi
@@ -1076,7 +1076,7 @@ product_manifest() {
     if [ -d "$WORK" ]; then
         while IFS= read -r -d '' file; do
             rel=${file#"$WORK/"}
-            mode=$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file")
+            mode=$(file_mode "$file")
             if [ -f "$file" ]; then
                 sum=$(shasum "$file" | cut -d' ' -f1)
                 printf 'F\t%s\t%s\tWork/%s\n' "$mode" "$sum" "$rel"
@@ -1163,6 +1163,21 @@ mkdir -p "$HD/Unpacked"
 }
 cp "$INSTALLER" "$HD/Unpacked/AmiNetXDuo/Installer"
 chmod -R a+rx "$HD/Unpacked"
+
+# A previous AmiNetXDuo install leaves both Pi drivers on every machine.  They
+# are payload, not proof of Pi hardware.  Seed precisely that state while the
+# explicit no-card fixture is active: Novice must still refuse without writing
+# anything.  This keeps a later edit from quietly putting either shipped file
+# back into the Installer's driver-fallback list.
+if [ "$STALE_PI_DRIVERS" = 1 ]; then
+    mkdir -p "$HD/Devs/Networks"
+    cp "$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxgenet.device" \
+       "$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxwifipi.device" \
+       "$HD/Devs/Networks/"
+    chmod 755 "$HD/Devs/Networks/anxgenet.device" \
+              "$HD/Devs/Networks/anxwifipi.device"
+    echo "==> stale-install fixture: shipped Pi drivers, no Pi hardware"
+fi
 
 # Corrupt only the throw-away unpacked copy.  Each target reaches a distinct
 # Installer preflight: the mandatory full library, one of the three supplied
@@ -1396,11 +1411,17 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-# The headless switch.  Amiberry links SDL2 with no driver of its own, so
-# without this it asks for a video device, finds a stale DISPLAY from an ssh
-# X11 forward that failed, and aborts in about a second -- which reads as a
-# guest that never booted.  DISPLAY is cleared for the same reason: a stale one
-# is worse than none.  tools/amiberry-run.sh does exactly this.
+# CI is headless by default.  AMINETXDUO_EMU_VISIBLE=1 is deliberately narrow:
+# it exposes the guest display for a human visual-review run while retaining
+# the generated, isolated .uae file.  Launching Amiberry's GUI instead would
+# load whatever profile the host last used, which is neither reproducible nor
+# necessarily bootable.  A visible caller must also provide a working SDL
+# video driver/display (for example SDL_VIDEODRIVER=x11 over trusted X11
+# forwarding).
+EMU_HEADLESS=true
+if [ "${AMINETXDUO_EMU_VISIBLE:-0}" = "1" ]; then
+    EMU_HEADLESS=false
+fi
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 [ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
@@ -1438,7 +1459,7 @@ boot() {
     cat > "$cfg" <<EOF
 config_description=AmiNetXDuo $TAG $name
 use_gui=no
-headless=true
+headless=$EMU_HEADLESS
 quickstart=$MODEL,0
 kickstart_rom_file=$KICKSTART
 fastmem_size=$(emu_board_fastmem "$BOARD" 8)
@@ -1448,6 +1469,12 @@ uaehf0=dir,rw,DH0:DH0:$HD,0
 uaehf1=dir,rw,Work:Work:$WORK,0
 serial_port=tcp://127.0.0.1:$port/wait
 EOF
+    # GLX over X11 forwarding is commonly unavailable (including XQuartz).
+    # The SDL renderer is sufficient for Installer visual review and keeps a
+    # visible run from aborting while it tries to create an OpenGL context.
+    if [ "$EMU_HEADLESS" = "false" ]; then
+        echo "gfx_api=sdl" >> "$cfg"
+    fi
     if [ "$net" = "net" ]; then
         # tools/emu-board.sh, shared with tools/amiberry-run.sh.  These keys
         # lived here as two literal a2065 lines, which is what made this gate
@@ -1719,7 +1746,18 @@ if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
     ZERO_DIFF_BEFORE=$(product_manifest)
 fi
 
-boot install "$INSTALL_TIMEOUT"
+# A hardware-only discovery run has deliberately staged no driver file, so
+# the board itself is the only honest input to InstallNetProbe.  Historically
+# the harness added emulated hardware only to the later network boot; -M then
+# claimed to test hardware discovery with no card in the machine and left the
+# Installer spinning on its "select at least one" page.  Ordinary scenarios
+# keep their old driver-file fallback, and the explicit no-card fixture still
+# boots with no board.
+INSTALL_CARD=""
+if [ "$MANUAL_CARD" = 1 ]; then
+    INSTALL_CARD=net
+fi
+boot install "$INSTALL_TIMEOUT" "$INSTALL_CARD"
 INSTALL_STATUS=$BOOT_STATUS
 
 echo
@@ -1752,6 +1790,7 @@ if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
         _reason=${CANCEL_MODE:+cancel-$CANCEL_MODE}
         _reason=${_reason:-missing-$MISSING_MODE}
         [ "$NO_CARD" = 0 ] || _reason=no-card-novice-refusal
+        [ "$STALE_PI_DRIVERS" = 0 ] || _reason=stale-pi-driver-refusal
         echo "  ok      $_reason left the destination byte-exact"
         echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
              "card_config=not-written stack=unchanged boot_status=not-run"
@@ -2490,12 +2529,10 @@ fi
 
 # ------------------------------------- did the INSTALLER pick the card? ------
 #
-# THE MEASUREMENT, not a workaround.  The card page's default is whichever
-# driver the script's detection loop found in DEVS: or DEVS:Networks, and
-# installdrive.c takes the default of every page, so a driver the script
-# recognises IS selected and one it does not is not.  Which of the two happened
-# decides what this run is allowed to claim, so it is read off the file the
-# installer wrote rather than inferred.
+# THE MEASUREMENT, not a workaround.  The card page's defaults come from the
+# hardware probe first and known driver files only as a fallback.
+# installdrive.c takes those defaults, so what happened is read from the file
+# the installer wrote rather than inferred from either input.
 #
 # When the installer got it wrong the interface file is rewritten here, before
 # the power cycle, and the run goes on -- per-card coverage of the stack is
@@ -2539,8 +2576,8 @@ fi
 # defect this measures.  It is taken from the unpacked archive rather than from
 # the tree, so what is asserted about is the script a user runs.
 INSTALLER_KNOWN_DRIVERS=$(awk '
-    /\(set DET_INDEX/     { on = 1; next }
-    /\(set CARD_DEFAULT/  { exit }
+    /^\(while \(set DET_TRY/ { on = 1; next }
+    /^; =+/                    { if (on) exit }
     on {
         line = $0
         while (match(line, /"[A-Za-z0-9_.-]+\.device"/)) {
@@ -2568,7 +2605,7 @@ CARD_CONFIG=installer
 if [ -n "$EMU68_FIXTURE" ]; then
     CARD_CONFIG=installer-auto
 elif [ "$MANUAL_CARD" = "1" ]; then
-    CARD_CONFIG=installer-manual
+    CARD_CONFIG=installer-hardware
 fi
 if [ "$CARD_SELECTED" = "no" ] && [ -z "$EMU68_FIXTURE" ] &&
    [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
@@ -2590,11 +2627,10 @@ elif [ "$CARD_SELECTED" = "no" ]; then
     echo "!! THE INSTALLER DID NOT SELECT THIS CARD."
     echo "   asked for $BOARD, whose driver is $SANA2_DRIVER, and the"
     echo "   installer wrote DEVICE=${INSTALLER_DEVICE:-nothing}."
-    echo "   Install-AmiNetXDuo scans DEVS: and DEVS:Networks for a known"
-    echo "   driver and makes the first hit the"
-    echo "   card page's default; installdrive.c cannot answer an askchoice"
-    echo "   any other way.  A driver whose file name is not on that list"
-    echo "   leaves CARD_DEFAULT at 0, which is the A2065."
+    echo "   Install-AmiNetXDuo scans DEVS: and DEVS:Networks for known"
+    echo "   drivers and checks every matching hardware family on its"
+    echo "   askoptions page.  A driver whose file name is not on that list"
+    echo "   cannot be selected by the file fallback."
     echo "   The interface file is rewritten now, so what follows measures"
     echo "   whether THE STACK drives $BOARD -- not whether the installer"
     echo "   can select it, which this run has just shown it cannot."
@@ -2688,16 +2724,15 @@ if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo "   the drive is left at $HD"
 
     # THE DIAGNOSIS, NOT A HINT.  At NOVICE the script aborts outright when its
-    # detection loop found nothing and there is no configuration to keep --
-    # Install-AmiNetXDuo:633-641, "The installer found no network card driver
-    # in DEVS: or DEVS:Networks" -- and the loop knows a finite driver list.
+    # detection found neither hardware nor a known driver and there is no
+    # configuration to keep.  The fallback still knows a finite driver list.
     # A machine with this card and this driver therefore cannot install the
     # archive at the default user level at all, and that reads from the log as
     # an install that failed rather than as a script that refused.
     if [ "$LEVEL" = "NOVICE" ] && [ "$INSTALLER_KNOWS_DRIVER" = "no" ]; then
         echo
         echo "   WHY: $SANA2_DRIVER is not on the Installer's detection list,"
-        echo "   so DET_INDEX stayed -1,"
+        echo "   so CARD_DEFAULT stayed zero,"
         echo "   and with no existing configuration to keep the abort at"
         echo "   Install-AmiNetXDuo:633-641 fires before anything is written."
         echo "   At NOVICE there is no card page to answer instead.  A user"

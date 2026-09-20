@@ -17,7 +17,8 @@
 ;    * At NOVICE level every ask... function returns its (default) WITHOUT
 ;      showing anything, and (message ...) prints nothing.  So novice mode
 ;      only works if every default is independently correct -- which is why
-;      the card is auto-detected from DEVS: and the address mode defaults to
+;      the card is auto-detected from the machine's read-only hardware lists,
+;      with installed drivers as a fallback, and the address mode defaults to
 ;      DHCP.  It is also why no validation loop may depend on a (message):
 ;      each one is unconditionally satisfied at user level 0, or it would
 ;      spin forever with no window on screen.
@@ -110,24 +111,19 @@
 (set H_CARD
   (cat "AmiNetXDuo reaches the network card through a SANA-II driver.  The "
        "driver is a file whose name ends in \".device\".\n\n"
-       "Each choice, and the driver it needs:\n\n"
-       "  A2065        a2065.device\n"
-       "  Ariadne      ariadne.device\n"
-       "  Ariadne II   ariadne_ii.device\n"
-       "  AmigaNet     hydra.device\n"
-       "  LAN Rover    eb920.device\n"
-       "  X-Surf       x-surf.device\n"
-       "  X-Surf 100   x-surf-100.device\n"
-       "  PCMCIA       asked next\n"
-       "  UAE          uaenet.device\n\n"
+       "Select every network device in this Amiga.  Several choices are "
+       "allowed.  The highest-priority selected wired device is started at "
+       "boot; the other definitions remain ready for Online <name>.\n\n"
+       "Zorro cards and Emu68 devices found in hardware are checked already. "
+       "Installed drivers are used only as a fallback.  Check or clear any "
+       "entry before proceeding.\n\n"
        "The AmigaNet is Hydra Systems' card and its driver is hydra.device; "
        "the LAN Rover is ASDG's and its driver is eb920.device.  The board "
        "and the file are not named the same thing.\n\n"
-       "The UAE driver is in the emulator, not on disk.  It cannot be "
-       "detected, so select it directly.\n\n"
-       "Select the card that this machine has.  If a driver was found in "
-       "DEVS:, the matching entry is already selected.  That entry is "
-       "almost always correct.\n\n"
+       "PCMCIA is asked on the next page because one slot accepts several "
+       "unrelated cards.  X-Surf 500 has no Autoconfig identity, and external "
+       "SCSI, USB and parallel adapters have no enumerable network identity; "
+       "their installed driver is therefore the detection signal.\n\n"
        "For a card that is not listed, select the last entry.  The "
        "installer then asks for the file name of the driver, for example "
        "\"myCard.device\".  The driver comes with the card.  This installer "
@@ -576,6 +572,64 @@
           )))
 )
 
+; CARD_INDEX is the position in the askoptions page below.  One table assigns
+; every property used later, so adding or moving a visible choice cannot leave
+; the driver, CARD= value and secondary interface name disagreeing in three
+; separate lists.
+(procedure P_card_fields
+  (set DEV_NAME
+    (select CARD_INDEX
+      "anxgenet.device" "ZZ9000Net.device" "x-surf-100.device"
+      "x-surf-500.device" "a2065.device" "ariadne.device"
+      "ariadne_ii.device" "hydra.device" "eb920.device"
+      "x-surf.device" "cnet.device" "anxwifipi.device"
+      "uaenet.device" CUSTOM_DEV))
+  (set CARD_KEY
+    (select CARD_INDEX
+      "" "" "xsurf100" "xsurf500" "a2065" "ariadne" "ariadne2"
+      "hydra" "lanrover" "xsurf" "pcmcia" "" "" ""))
+  (set DEFAULT_IF
+    (select CARD_INDEX
+      "genet" "zz9000" "xsurf100" "xsurf500" "a2065" "ariadne"
+      "ariadne2" "amiganet" "lanrover" "xsurf" "pcmcia" "wifipi"
+      "uaenet" "netother"))
+
+  (if (= CARD_INDEX 10)
+    (
+      (set DEV_NAME
+        (select PCM "cnet.device" "etherlink3.device" "etherlink3.device"
+                    "etherlink3.device" "prism2.device" PCM_OTHER_DEV))
+      (set CARD_KEY
+        (select PCM "pcmcia" "3c589" "3ccfem556" "3cxem556" "" ""))
+    ))
+)
+
+; Resolve the driver without opening it.  A vendor driver already installed
+; still wins; when it is absent and the selected board is in anxnet's table,
+; the supplied driver and its explicit CARD= key are used instead.
+(procedure P_prepare_card
+  (set DEVUNIT  0)
+  (set USE_CARD 0)
+  (P_card_fields)
+
+  (set dev_name DEV_NAME)
+  (P_dev_path)
+  (set DEV_WRITE dev_write)
+
+  (if (AND (= CARD_INDEX 0) DO_ANXNET)
+    (set DEV_WRITE D_ANXGENET)
+    (if (AND (= CARD_INDEX 11) DO_ANXNET)
+      (set DEV_WRITE D_ANXWIFIPI)
+      (if (= dev_present 0)
+        (if (AND DO_ANXNET (> (strlen CARD_KEY) 0))
+          (
+            (set DEV_WRITE D_ANX)
+            (set USE_CARD 1)
+          )
+          (if WARN_DRIVER
+            (message (F_NODEV DEV_NAME) (help H_CARD)))))))
+)
+
 ; ==========================================================================
 ;  1.  Is this machine capable of running it at all?
 ; ==========================================================================
@@ -656,64 +710,53 @@
 ;  2.  What is already here?
 ; ==========================================================================
 
-; --- which driver is on this machine already? ----------------------------
-;
-; This is what makes NOVICE mode work: with no questions asked, the card is
-; whichever known driver is actually installed.  The list is in the same
-; order as the menu below, so its index is the menu's default.
-
-; THE FILE NAMES THE DRIVERS ACTUALLY SHIP UNDER.  This list held
-; ariadne2.device, amiganet.device, xsurf.device and xsurf100.device, and had
-; no entry at all for the Hydra or the LAN Rover -- so five of the nine cards
-; this project supports could not be detected, and at NOVICE the abort below
-; fired instead: a user with an Ariadne II, an AmigaNet, a LAN Rover, an X-Surf
-; or an X-Surf 100 could not install the archive at the default user level.
-;
-; tools/sana2-stage.sh:29-41 IS THE AUTHORITY for board -> driver, and this
-; list must agree with it.  The Installer language cannot read that file, so
-; the two are kept apart by nothing but this note; sana2_driver_for() names the
-; same driver files in the same words, and a card added there needs a row here
-; and an entry in the menu below.
-;
-; The first seven entries are the menu's first seven entries.  The next three
-; all select the PCMCIA menu row, and PCM_DEFAULT selects its hidden subtype
-; question correctly even at NOVICE.  The final entry selects UAE.  Change
-; this mapping with the menu and the PCMCIA question below.
-(set DET_INDEX -1)
+; Driver files are only a fallback.  A file says that a driver was installed
+; at some point, not that its card is in this machine today.  InstallNetProbe
+; adds the Zorro boards expansion.library actually enumerated and the Emu68
+; devices its tree actually names.  ORing rather than remembering the first
+; result is deliberate: the selection page and the configuration both support
+; several cards in one Amiga.
+(set DRIVER_DEFAULT 0)
+(set CARD_DEFAULT   0)
 (set DET_N     0)
 (set PCM_DEFAULT 0)
 
+; Do not put anxgenet.device or anxwifipi.device in this file fallback.  This
+; installer places both in DEVS:Networks on every machine, so their presence
+; says only that AmiNetXDuo was installed before.  The Emu68 probe below is
+; the authoritative signal for the corresponding hardware.
 (while (set DET_TRY (select DET_N
+          "ZZ9000Net.device"
+          "x-surf-100.device"
+          "x-surf-500.device"
           "a2065.device"
           "ariadne.device"
           "ariadne_ii.device"
           "hydra.device"
           "eb920.device"
           "x-surf.device"
-          "x-surf-100.device"
           "cnet.device"
+          "uaenet.device"
           "etherlink3.device"
           "prism2.device"
-          "uaenet.device"
           ""))
   (
-    (if (< DET_INDEX 0)
-        (if (OR (exists (cat "DEVS:" DET_TRY) (noreq))
-                (exists (cat "DEVS:Networks/" DET_TRY) (noreq)))
-            (set DET_INDEX DET_N)))
+    (if (> (strlen DET_TRY) 0)
+      (if (OR (exists (cat "DEVS:" DET_TRY) (noreq))
+              (exists (cat "DEVS:Networks/" DET_TRY) (noreq)))
+        (set DRIVER_DEFAULT
+          (bitor DRIVER_DEFAULT
+            (select DET_N 2 4 8 16 32 64 128 256 512 1024 4096
+                          1024 1024)))))
     (set DET_N (+ DET_N 1))
   ))
 
-; DET_INDEX 0..6 maps directly.  7..9 are the three PCMCIA drivers and all
-; map to CARD 7.  10 is UAE, CARD 8.  This explicit translation is what lets
-; a Novice install take both hidden defaults without silently turning a 3C589
-; or Prism2 into a CNet card.
-(set CARD_DEFAULT
-  (if (< DET_INDEX 0) 0
-    (if (<= DET_INDEX 6) DET_INDEX
-      (if (<= DET_INDEX 9) 7 8))))
-(if (= DET_INDEX 8) (set PCM_DEFAULT 1))
-(if (= DET_INDEX 9) (set PCM_DEFAULT 2))
+(if (OR (exists "DEVS:etherlink3.device" (noreq))
+        (exists "DEVS:Networks/etherlink3.device" (noreq)))
+    (set PCM_DEFAULT 1))
+(if (OR (exists "DEVS:prism2.device" (noreq))
+        (exists "DEVS:Networks/prism2.device" (noreq)))
+    (set PCM_DEFAULT 4))
 
 
 ; ==========================================================================
@@ -754,6 +797,54 @@
                 (help "This reads Emu68's device tree.  It does not open the "
                       "Wi-Fi device or load its firmware.")
                 (safe))) 1 0))
+
+; Zorro Autoconfig is the classic machine's device tree.  These calls inspect
+; the ConfigDev list expansion.library already built at boot; they do not open
+; a SANA-II driver or touch a board register.  The bit positions are the
+; askoptions choices below.
+(set PROBE_N 0)
+(while (set PROBE_CARD (select PROBE_N
+          "xsurf100" "a2065" "ariadne" "ariadne2" "hydra" "lanrover"
+          "xsurf" "zz9000" ""))
+  (
+    (set PROBE_CMD ("\"%s\" CARD %s" S_NETPROBE PROBE_CARD))
+    (if (= 0 (run PROBE_CMD (quiet) (safe)))
+      (set CARD_DEFAULT
+        (bitor CARD_DEFAULT
+          (select PROBE_N 4 16 32 64 128 256 512 2))))
+    (set PROBE_N (+ PROBE_N 1))
+  ))
+
+; A PC Card has no ConfigDev.  InstallNetProbe briefly asks card.resource for
+; an available slot and reads only FUNCID/MANFID tuples; an active owner is
+; never displaced.  A standard LAN FUNCID selects the family, while the three
+; EtherLink III identities also select the exact subtype page default.
+(set PROBE_CMD ("\"%s\" CARD pcmcia" S_NETPROBE))
+(if (= 0 (run PROBE_CMD (quiet) (safe)))
+  (set CARD_DEFAULT (bitor CARD_DEFAULT 1024)))
+(set PROBE_N 0)
+(while (set PROBE_CARD
+         (select PROBE_N "3c589" "3ccfem556" "3cxem556" ""))
+  (
+    (set PROBE_CMD ("\"%s\" CARD %s" S_NETPROBE PROBE_CARD))
+    (if (= 0 (run PROBE_CMD (quiet) (safe)))
+      (set PCM_DEFAULT (+ PROBE_N 1)))
+    (set PROBE_N (+ PROBE_N 1))
+  ))
+(set PROBE_CMD ("\"%s\" CARD uae" S_NETPROBE))
+(if (= 0 (run PROBE_CMD (quiet) (safe)))
+  (set CARD_DEFAULT (bitor CARD_DEFAULT 4096)))
+(if AUTO_GENET  (set CARD_DEFAULT (bitor CARD_DEFAULT 1)))
+(if AUTO_WIFIPI (set CARD_DEFAULT (bitor CARD_DEFAULT 2048)))
+
+; If hardware was enumerated, do not also preselect stale Zorro driver files.
+; Preserve only the devices that have no safe hardware identity to inspect.
+; With no hardware result at all, retain the complete driver-file fallback so
+; Novice mode and pre-Autoconfig/third-party adapters continue to work.
+(if (> CARD_DEFAULT 0)
+  (set CARD_DEFAULT
+    (bitor CARD_DEFAULT (bitand DRIVER_DEFAULT 5128)))
+  (set CARD_DEFAULT DRIVER_DEFAULT))
 
 ; ==========================================================================
 ;  4.  Questions.  All of them, before anything is written.
@@ -862,37 +953,6 @@
     (help    H_ANXNET)
     (choices "Yes, install them" "No, leave them out")
     (default 1)))
-
-(set AUTO_CONFIG
-  (if (AND DO_ANXNET (OR AUTO_GENET AUTO_WIFIPI)) 1 0))
-
-(if AUTO_CONFIG
-  (message
-    (if (AND AUTO_GENET AUTO_WIFIPI)
-        (cat "Emu68's Raspberry Pi Ethernet and Wi-Fi devices were found.\n\n"
-             "The installer will create interfaces named \"genet\" and "
-             "\"wifipi\", using anxgenet.device and anxwifipi.device.  "
-             "Only genet is selected to start at boot; Wi-Fi still needs "
-             "WirelessManager (or another supplicant) before it can join a "
-             "network.")
-        (if AUTO_GENET
-            (cat "Emu68's Raspberry Pi Ethernet device was found.\n\n"
-                 "The installer will create an interface named \"genet\", "
-                 "using anxgenet.device.")
-            (cat "Emu68's Raspberry Pi Wi-Fi device was found.\n\n"
-                 "The installer will create an interface named \"wifipi\", "
-                 "using anxwifipi.device.  Wi-Fi still needs WirelessManager "
-                 "(or another supplicant) before it can join a network.")))
-    (help H_ANXNET)))
-
-(if (AND AUTO_CONFIG (AND (= MINPICK 2) (AND AUTO_GENET AUTO_WIFIPI)))
-  (message
-    "Both interfaces will be installed, but the micro stack has room for one "
-    "live interface.  The boot file starts genet only.  To use genet and "
-    "wifipi at the same time, install the full or minimal stack."
-    (help "Micro is intentionally a one-interface build.  Keeping both "
-          "definition files on disk makes either device available without "
-          "reinstalling, but does not increase that run-time limit.")))
 
 ; --- where the drawer of documentation goes ------------------------------
 ;
@@ -1127,13 +1187,12 @@
 ; Here, @user-level is what the user picked, so a novice who wants the card
 ; question can simply pick another level on the page they have just seen.
 
-(if (AND (= @user-level 0) (AND (< DET_INDEX 0) (= HAVE_OLD 0)))
-    (abort "The installer found no network card driver in DEVS: or "
-           "DEVS:Networks.  In Novice mode it cannot ask which card is "
-           "installed.\n\n"
-           "Copy the .device driver for the card into DEVS: first.  As an "
-           "alternative, start this installer again and choose "
-           "\"Intermediate User\", which shows a list of cards.\n\n"
+(if (AND (= @user-level 0) (AND (= CARD_DEFAULT 0) (= HAVE_OLD 0)))
+    (abort "The installer found no network card and no installed network "
+           "driver.  In Novice mode it cannot ask which cards this Amiga "
+           "has.\n\n"
+           "Start this installer again and choose \"Intermediate User\", "
+           "which shows the complete card list.\n\n"
            "Nothing was changed."))
 
 ; --- keep or replace an existing configuration ---------------------------
@@ -1168,107 +1227,157 @@
 ; --- the card ------------------------------------------------------------
 
 (set IFNAME  "eth0")
-(set SECOND_IF "eth1")
-(if (AND AUTO_CONFIG (AND AUTO_GENET AUTO_WIFIPI))
-    (set SECOND_IF "wifipi"))
 (set DEVUNIT 0)
 (set USE_CARD 0)
 (set CARD_KEY "")
 (set USEDHCP 1)
 (set WANTMDNS 0)
+(set CUSTOM_DEV "mycard.device")
+(set PCM_OTHER_DEV "mycard.device")
+(set PCM 0)
 
 (if (= KEEP_OLD 0)
   (
-    (if AUTO_CONFIG
-      (
-        ; GENET is the primary when both on-board devices exist: it can take
-        ; a DHCP lease immediately.  Wi-Fi needs a supplicant first, so its
-        ; definition is installed below but it is not the boot-selected one.
-        (if AUTO_GENET
-          (
-            (set IFNAME    "genet")
-            (set DEV_NAME  "anxgenet.device")
-            (set DEV_WRITE D_ANXGENET)
-          )
-          (
-            (set IFNAME    "wifipi")
-            (set DEV_NAME  "anxwifipi.device")
-            (set DEV_WRITE D_ANXWIFIPI)
-          ))
-      )
-      (
-    (set CARD
-      (askchoice
-        (prompt "Which network card does this Amiga have?")
+    ; Ten families fit Installer 2.17's standard page.  Fourteen individual
+    ; boards do not: layout_box_gads() silently created zero checkboxes in a
+    ; real Workbench run.  The three families with variants get compact
+    ; follow-up checkmark pages, so no capability is lost and several variants
+    ; can still coexist in one machine.
+    (set CATEGORY_DEFAULT 0)
+    (if (> (bitand CARD_DEFAULT 2049) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 1)))
+    (if (> (bitand CARD_DEFAULT 2) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 2)))
+    (if (> (bitand CARD_DEFAULT 16) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 4)))
+    (if (> (bitand CARD_DEFAULT 96) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 8)))
+    (if (> (bitand CARD_DEFAULT 128) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 16)))
+    (if (> (bitand CARD_DEFAULT 256) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 32)))
+    (if (> (bitand CARD_DEFAULT 524) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 64)))
+    (if (> (bitand CARD_DEFAULT 1024) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 128)))
+    (if (> (bitand CARD_DEFAULT 4096) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 256)))
+    (if (> (bitand CARD_DEFAULT 8192) 0)
+      (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 512)))
+
+    (set CATEGORY_MASK 0)
+    (until (> CATEGORY_MASK 0)
+      (set CATEGORY_MASK
+      (askoptions
+        (prompt "Which network devices does this Amiga have?")
         (help   H_CARD)
-        ; Short labels are not a style choice.  The Installer lays a radio
-        ; page out into whatever room is left after the prompt and the
-        ; buttons, and when the choices do not fit it silently creates
-        ; fewer gadgets than there are choices -- after which
-        ; default_radio() marks a gadget that is not there, final_radio()
-        ; finds nothing selected, and the whole installation dies on
-        ; "askchoice: No choices selected".  Two columns of four fit; the
-        ; full product names do not.  Keep every label under about 20
-        ; characters and put the detail in the help text.
-        ; THE LABEL IS THE BOARD, THE VALUE IS THE FILE, and they are not the
-        ; same word.  Hydra Systems sell the AmigaNet and ship hydra.device;
-        ; ASDG sell the LAN Rover and ship eb920.device.  A user reads the
-        ; board on the page and the installer has to find the file on the
-        ; disk, so the two lists below are paired by position and by nothing
-        ; else -- see the detection loop above, which is the third list that
-        ; has to agree.
         (choices
+          "Raspberry Pi"
+          "ZZ9000"
           "A2065"
           "Ariadne"
-          "Ariadne II"
           "AmigaNet"
           "LAN Rover"
           "X-Surf"
-          "X-Surf 100"
           "PCMCIA"
           "UAE"
-          "Other")
-        (default CARD_DEFAULT)))
+          "Other driver")
+        (default CATEGORY_DEFAULT)))
+      (if (= CATEGORY_MASK 0)
+        (message "Select at least one network device."
+                 (help H_CARD))))
 
-    (set DEV_NAME
-      (select CARD
-        "a2065.device"
-        "ariadne.device"
-        "ariadne_ii.device"
-        "hydra.device"
-        "eb920.device"
-        "x-surf.device"
-        "x-surf-100.device"
-        "cnet.device"
-        "uaenet.device"
-        ""))
+    (set CARD_MASK 0)
 
-    ; The CARD= name for the same board, which is what anxnet.device binds
-    ; by.  A FOURTH list paired by position with the two above, and with
-    ; ANXNET_CARD_NAMES in include/aminetxduo/anxnet.h.  Empty means anxnet
-    ; has no row for it: UAE is not a board, and "Other" is a name typed by
-    ; hand that this script cannot map.
-    (set CARD_KEY
-      (select CARD
-        "a2065"
-        "ariadne"
-        "ariadne2"
-        "hydra"
-        "lanrover"
-        "xsurf"
-        "xsurf100"
-        "pcmcia"
-        ""
-        ""))
+    (if (> (bitand CATEGORY_MASK 1) 0)
+      (
+        (set PI_DEFAULT 0)
+        (if (> (bitand CARD_DEFAULT 1) 0)
+          (set PI_DEFAULT (bitor PI_DEFAULT 1)))
+        (if (> (bitand CARD_DEFAULT 2048) 0)
+          (set PI_DEFAULT (bitor PI_DEFAULT 2)))
+        (if (= PI_DEFAULT 0) (set PI_DEFAULT 1))
+        (set PI_MASK 0)
+        (until (> PI_MASK 0)
+          (set PI_MASK
+            (askoptions
+              (prompt "Which Raspberry Pi network devices are present?")
+              (help H_CARD)
+              (choices "GENET Ethernet" "Pi Wi-Fi")
+              (default PI_DEFAULT))))
+        (if (> (bitand PI_MASK 1) 0)
+          (set CARD_MASK (bitor CARD_MASK 1)))
+        (if (> (bitand PI_MASK 2) 0)
+          (set CARD_MASK (bitor CARD_MASK 2048)))
+      ))
 
-    ; PCMCIA: one more question, because the slot takes several kinds of card.
-    ;
-    ; SEVEN, NOT SIX.  This is an index into the (choices) above and it moved
-    ; when "LAN Rover" was added.  A literal position is the one thing in this
-    ; page that cannot be read back out of the list it indexes, so it is the
-    ; one that goes stale silently: at 6 it asked the PCMCIA question of
-    ; somebody who had selected "X-Surf".
-    (if (= CARD 7)
+    (if (> (bitand CATEGORY_MASK 2) 0)
+      (set CARD_MASK (bitor CARD_MASK 2)))
+    (if (> (bitand CATEGORY_MASK 4) 0)
+      (set CARD_MASK (bitor CARD_MASK 16)))
+
+    (if (> (bitand CATEGORY_MASK 8) 0)
+      (
+        (set ARIADNE_DEFAULT 0)
+        (if (> (bitand CARD_DEFAULT 32) 0)
+          (set ARIADNE_DEFAULT (bitor ARIADNE_DEFAULT 1)))
+        (if (> (bitand CARD_DEFAULT 64) 0)
+          (set ARIADNE_DEFAULT (bitor ARIADNE_DEFAULT 2)))
+        (if (= ARIADNE_DEFAULT 0) (set ARIADNE_DEFAULT 1))
+        (set ARIADNE_MASK 0)
+        (until (> ARIADNE_MASK 0)
+          (set ARIADNE_MASK
+            (askoptions
+              (prompt "Which Ariadne cards are present?")
+              (help H_CARD)
+              (choices "Ariadne" "Ariadne II")
+              (default ARIADNE_DEFAULT))))
+        (if (> (bitand ARIADNE_MASK 1) 0)
+          (set CARD_MASK (bitor CARD_MASK 32)))
+        (if (> (bitand ARIADNE_MASK 2) 0)
+          (set CARD_MASK (bitor CARD_MASK 64)))
+      ))
+
+    (if (> (bitand CATEGORY_MASK 16) 0)
+      (set CARD_MASK (bitor CARD_MASK 128)))
+    (if (> (bitand CATEGORY_MASK 32) 0)
+      (set CARD_MASK (bitor CARD_MASK 256)))
+
+    (if (> (bitand CATEGORY_MASK 64) 0)
+      (
+        (set XSURF_DEFAULT 0)
+        (if (> (bitand CARD_DEFAULT 512) 0)
+          (set XSURF_DEFAULT (bitor XSURF_DEFAULT 1)))
+        (if (> (bitand CARD_DEFAULT 4) 0)
+          (set XSURF_DEFAULT (bitor XSURF_DEFAULT 2)))
+        (if (> (bitand CARD_DEFAULT 8) 0)
+          (set XSURF_DEFAULT (bitor XSURF_DEFAULT 4)))
+        (if (= XSURF_DEFAULT 0) (set XSURF_DEFAULT 1))
+        (set XSURF_MASK 0)
+        (until (> XSURF_MASK 0)
+          (set XSURF_MASK
+            (askoptions
+              (prompt "Which X-Surf cards are present?")
+              (help H_CARD)
+              (choices "X-Surf" "X-Surf 100" "X-Surf 500")
+              (default XSURF_DEFAULT))))
+        (if (> (bitand XSURF_MASK 1) 0)
+          (set CARD_MASK (bitor CARD_MASK 512)))
+        (if (> (bitand XSURF_MASK 2) 0)
+          (set CARD_MASK (bitor CARD_MASK 4)))
+        (if (> (bitand XSURF_MASK 4) 0)
+          (set CARD_MASK (bitor CARD_MASK 8)))
+      ))
+
+    (if (> (bitand CATEGORY_MASK 128) 0)
+      (set CARD_MASK (bitor CARD_MASK 1024)))
+    (if (> (bitand CATEGORY_MASK 256) 0)
+      (set CARD_MASK (bitor CARD_MASK 4096)))
+    (if (> (bitand CATEGORY_MASK 512) 0)
+      (set CARD_MASK (bitor CARD_MASK 8192)))
+
+    ; PCMCIA is one physical slot, so its family remains a single-choice page.
+    (if (> (bitand CARD_MASK 1024) 0)
       (
         (set PCM
           (askchoice
@@ -1277,64 +1386,64 @@
             (choices
               "NE2000 or CNet"
               "3Com 3C589"
+              "3Com 3CCFEM556"
+              "3Com 3CXEM556"
               "Prism2 wireless"
               "Something else")
             (default PCM_DEFAULT)))
-
-        (set DEV_NAME
-          (select PCM
-            "cnet.device"
-            "etherlink3.device"
-            "prism2.device"
-            ""))
-
-        ; anxnet's rows for the slot: the NE2000 kinds are "pcmcia" and the
-        ; 3C589 is its own row.  Prism2 is wireless and anxnet has no row.
-        (set CARD_KEY
-          (select PCM
-            "pcmcia"
-            "3c589"
-            ""
-            ""))
+        (if (= PCM 5)
+          (set PCM_OTHER_DEV
+            (askstring
+              (prompt "Type the PCMCIA card's driver file name.")
+              (help H_OTHERDEV)
+              (default "mycard.device"))))
       ))
 
-    ; "not in this list", or "something else" above: ask for the name
-    (if (= (strlen DEV_NAME) 0)
-      (
-        (set DEV_OK 0)
-        (until DEV_OK
-          (set DEV_NAME (askstring
+    (if (> (bitand CARD_MASK 8192) 0)
+      (set CUSTOM_DEV
+        (askstring
             (prompt "Type the file name of the card driver.  The name ends "
                     "in \".device\".")
             (help   H_OTHERDEV)
-            (default "mycard.device")))
-          (set DEV_OK (if (= @user-level 0) 1
-                        (if (> (strlen DEV_NAME) 0) 1 0))))
-        (set CARD_KEY "")
+            (default "mycard.device"))))
+
+    ; The page order is also the deterministic primary order: on-board GENET,
+    ; then the fastest wired expansion cards, the older wired cards, PCMCIA,
+    ; Wi-Fi and emulator-only devices.  Nothing is opened merely to choose it.
+    (set PRIMARY_INDEX 0)
+    (until (> (bitand CARD_MASK (shiftleft 1 PRIMARY_INDEX)) 0)
+      (set PRIMARY_INDEX (+ PRIMARY_INDEX 1)))
+
+    (set WARN_DRIVER 1)
+    (set CARD_INDEX 0)
+    (while (< CARD_INDEX 14)
+      (
+        (if (> (bitand CARD_MASK (shiftleft 1 CARD_INDEX)) 0)
+          (P_prepare_card))
+        (set CARD_INDEX (+ CARD_INDEX 1))
       ))
 
-    (set dev_name DEV_NAME)
-    (P_dev_path)
-    (set DEV_WRITE dev_write)
+    ; The pass above already reported every missing vendor/custom driver.
+    ; Preparing the primary again is state setup, not a second warning page.
+    (set WARN_DRIVER 0)
+    (set CARD_INDEX PRIMARY_INDEX)
+    (P_prepare_card)
+    (if (= CARD_INDEX 0)
+      (set IFNAME "genet")
+      (if (= CARD_INDEX 11)
+        (set IFNAME "wifipi")
+        (set IFNAME "eth0")))
 
-    ; The vendor driver is missing, but anxnet.device is going on this
-    ; machine and has a row for this board, so name ours and tell it which
-    ; card with CARD=.  That is the pairing H_ANXNET describes, and until
-    ; now nothing in this script ever wrote it: the DEVICE= line always
-    ; named the vendor file, so a machine with no vendor driver was given a
-    ; configuration that could not come up and a page saying so.
-    ;
-    ; A PRESENT VENDOR DRIVER STILL WINS.  Someone who has Commodore's
-    ; a2065.device in DEVS: chose it by putting it there, and an installer
-    ; is the wrong place to overrule that.
-    (if (= dev_present 0)
-      (if (AND DO_ANXNET (> (strlen CARD_KEY) 0))
-        (
-          (set DEV_WRITE D_ANX)
-          (set USE_CARD  1)
-        )
-        (message (F_NODEV DEV_NAME)
-                 (help H_CARD))))
+    (if (AND (= MINPICK 2)
+             (> (bitand CARD_MASK
+                        (bitnot (shiftleft 1 PRIMARY_INDEX))) 0))
+      (message
+        "Every selected interface will be installed, but the micro stack can "
+        "bring only one online at a time.  The highest-priority device is the "
+        "one started at boot."
+        (help "Micro is intentionally a one-interface build.  Definition "
+              "files for the other cards remain available without another "
+              "installation.")))
 
     ; --- unit and interface name: only an expert is asked ---------------
 
@@ -1362,7 +1471,6 @@
                        "contain only letters, digits, hyphens, underscores "
                        "or full stops.  It cannot begin or end with a hyphen."
                        (help H_IFNAME))))
-      ))
       ))
 
     ; --- automatic or manual addressing --------------------------------
@@ -2016,25 +2124,28 @@
     (set PRIMARY_DHCP USEDHCP)
     (P_write_interface)
 
-    ; A Pi with both on-board devices gets both definitions.  Keep IFNAME on
-    ; the primary afterwards: S:Network-Startup deliberately starts one named
-    ; interface, not every definition in the drawer.
-    (if (AND AUTO_CONFIG (AND AUTO_GENET AUTO_WIFIPI))
+    ; Write every other checked device as a DHCP definition, but leave IFNAME
+    ; on the deterministic primary afterwards: S:Network-Startup deliberately
+    ; starts one named interface, never every file in the drawer.  A static
+    ; address entered above belongs to the primary only; copying it would put
+    ; duplicate addresses on the wire as soon as both cards came online.
+    (set WARN_DRIVER 0)
+    (set CARD_INDEX 0)
+    (while (< CARD_INDEX 14)
       (
-        (set IFNAME    "wifipi")
-        (set DEV_NAME  "anxwifipi.device")
-        (set DEV_WRITE D_ANXWIFIPI)
-        (set DEVUNIT   0)
-        (set USE_CARD  0)
-        (set CARD_KEY  "")
-        ; A manually entered address belongs to the primary card only.  Giving
-        ; the same address to Wi-Fi would create a duplicate as soon as both
-        ; came online; let the secondary ask DHCP independently instead.
-        (set USEDHCP   1)
-        (P_write_interface)
-        (set IFNAME PRIMARY_IF)
-        (set USEDHCP PRIMARY_DHCP)
+        (if (AND (<> CARD_INDEX PRIMARY_INDEX)
+                 (> (bitand CARD_MASK (shiftleft 1 CARD_INDEX)) 0))
+          (
+            (P_prepare_card)
+            (set IFNAME DEFAULT_IF)
+            (set USEDHCP 1)
+            (set WANTMDNS 0)
+            (P_write_interface)
+          ))
+        (set CARD_INDEX (+ CARD_INDEX 1))
       ))
+    (set IFNAME PRIMARY_IF)
+    (set USEDHCP PRIMARY_DHCP)
 
     ; --- the default route ---------------------------------------------
 
@@ -2408,8 +2519,8 @@
       (append ";\n")
       (append "; To start another card as well, add a line for it:\n")
       (append ";\n")
-      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" SECOND_IF
-              " QUIET\n")
+      (append ";     " C_PREFIX
+              "AddNetInterface DEVS:NetInterfaces/<name> QUIET\n")
       (append ";\n")
       (append "; To start EVERY definition in the drawer, which is what\n")
       (append "; Roadshow does, use the pattern instead of a name:\n")

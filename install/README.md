@@ -44,11 +44,13 @@ Three properties of the tool shape the whole script.
 
 **At NOVICE level every `ask...` returns its `(default)` without drawing
 anything, and `(message ...)` prints nothing.** Novice mode therefore works only
-if every default is independently correct. That is why the network card is
-auto-detected from known drivers in `DEVS:` and `DEVS:Networks`, and why the
-address mode defaults to DHCP. It is also why no validation loop can depend on a
-`(message)` to make progress. At level 0 that loop spins forever behind a blank
-screen. Each loop is satisfied unconditionally when `@user-level` is 0.
+if every default is independently correct. That is why network devices are
+auto-detected from Emu68's device tree, Zorro Autoconfig, PCMCIA identity
+tuples and UAE's resident device, with known drivers in `DEVS:` and
+`DEVS:Networks` only as a fallback. The address mode defaults to DHCP. It is
+also why no validation loop can depend on a `(message)` to make progress. At
+level 0 that loop spins forever behind a blank screen. Each loop is satisfied
+unconditionally when `@user-level` is 0.
 
 **`(startup)` replaces the `;BEGIN AmiNetXDuo` .. `;END AmiNetXDuo` block in
 `S:User-Startup` and leaves every other application's lines alone.** That is
@@ -67,6 +69,9 @@ tests for both:
   `default_radio()` then marks one that does not exist. The installation dies on
   "askchoice: No choices selected" with no hint that the labels were too long.
   Keep radio labels under 22 characters and put the detail in the help text.
+  Installer 2.17 has also been measured creating no gadgets at all for 14
+  `askoptions` entries; the network-device page therefore uses ten two-column
+  family checkmarks and short follow-up pages for family variants.
 
 ## Testing
 
@@ -116,7 +121,9 @@ without silently falling back to Installer defaults.
 The Emu68 rows replace `InstallNetProbe` only inside the throw-away test drive
 with `install/test/netprobe-fixture.c`. This lets Amiberry exercise the
 Installer's Ethernet-only, Wi-Fi-only and dual-device decisions; it does not
-stand in for the separate tests of the real probe and drivers on Emu68.
+stand in for tests of the real probe. The real helper is also run under
+Amiberry against emulated Zorro and PCMCIA hardware, so its expansion.library
+and card.resource paths are exercised rather than inferred from source.
 
 Ingredients, none of which are ours to ship:
 

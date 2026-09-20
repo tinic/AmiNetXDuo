@@ -39,9 +39,11 @@ MAX_STRING = 512
 # The Installer's window is 56 characters wide and sixteen text rows tall
 # (window.c calc_window_size), and layout_box_gads() silently creates FEWER
 # gadgets than there are choices when they do not fit, which the install then
-# dies on as "askchoice: No choices selected".  Both limits are empirical, and
-# ten was reached only after a real Installer 2.17 run laid out ten option
-# gadgets.  If a page dies that way, merge entries rather than raise these.
+# dies on as "askchoice: No choices selected".  Both limits are empirical.
+# Ten short controls have been verified in Installer 2.17 at the standard
+# 640-pixel screen.  Fourteen did not fit: layout_box_gads() silently created
+# zero gadgets.  Split a larger set across family pages rather than raising
+# this guard; label width remains the independent horizontal limit below.
 MAX_CHOICES = 10
 MAX_CHOICE_LEN = 22
 

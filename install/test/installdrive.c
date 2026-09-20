@@ -121,6 +121,9 @@
 #ifndef DRIVE_PAGE_PAUSE
 #define DRIVE_PAGE_PAUSE   0
 #endif
+#ifndef DRIVE_PAUSE_OPTIONS
+#define DRIVE_PAUSE_OPTIONS 0
+#endif
 
 /*
  * Optional run-time answers, staged by run-workbench.sh as:
@@ -530,6 +533,7 @@ static BOOL prev_was_match;
 static BOOL this_is_match;
 static LONG option_pages[32];
 static LONG previous_options;
+static LONG current_options;
 
 static struct Window *find_installer_window(struct Gadget **click_out)
 {
@@ -540,6 +544,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
 
     pick_is_target = FALSE;
     this_is_match  = FALSE;
+    current_options = 0;
     pending_action = -1;
     pending_string = NULL;
 
@@ -599,6 +604,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 continue;
 
             found  = window;
+            current_options = options;
             choice = proceed;
             if (choice == NULL && yes != NULL)
             {
@@ -1074,7 +1080,9 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
                automated matrix leaves this at zero; a deliberately slow
                build gives each Installer page time to be inspected or
                captured before the driver advances it. */
-            if (DRIVE_PAGE_PAUSE > 0)
+            if (DRIVE_PAGE_PAUSE > 0 &&
+                (DRIVE_PAUSE_OPTIONS == 0 ||
+                 current_options == DRIVE_PAUSE_OPTIONS))
                 Delay(DRIVE_PAGE_PAUSE);
 
             if (!click(window, target))
