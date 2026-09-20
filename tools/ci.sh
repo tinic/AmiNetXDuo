@@ -286,11 +286,12 @@ HOST_TESTS_EXPECTED=412
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
-    # test_sockopt, test_neighbour, test_dhcp6 and test_usergroup_hold, all
-    # x86_64-only for the reason in tests/bsdsocket/CMakeLists.txt: elsewhere
-    # the host's LONG is eight bytes and no structure in them has the target's
-    # shape.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 9)) ;;
+    # test_sockopt, test_neighbour, test_dhcp6, test_usergroup_hold and
+    # test_handoff (8ff3cc92), all x86_64-only for the reason in
+    # tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is eight bytes
+    # and no structure in them has the target's shape.  darwin-arm64 registers
+    # 402 of the 412 (2026-09-20).
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 10)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
