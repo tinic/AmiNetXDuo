@@ -72,6 +72,14 @@ ULONG netdev_clock_us_per_line(VOID);
  */
 ULONG netdev_clock_lines_per_field(VOID);
 
+/*
+ * Turn a duration into an iteration floor using this machine's measured CPU
+ * work per raster line.  `fallback` is used only when no moving beam exists.
+ * This keeps a caller's bus access in every iteration without baking one
+ * CPU's reads-per-microsecond ratio into the driver.
+ */
+ULONG netdev_clock_floor_spins(ULONG us, ULONG fallback);
+
 #if defined(NETDEV_CLOCK_TEST)
 /*
  * Test-only hooks: forget the measurement, and read the field length the

@@ -182,6 +182,8 @@ int main(void)
 {
     ULONG lines;
     ULONG iters;
+    ULONG reference_floor;
+    ULONG accelerated_floor;
 
     /* -------------------------------------------------------------------- */
     printf("-- the line is priced from the field it was measured in\n");
@@ -221,6 +223,27 @@ int main(void)
     expect("the field is the same behind an accelerator",
            netdev_clock_test_field(), 313);
     expect("and so is the price of a line", netdev_clock_us_per_line(), 63);
+
+    /* pc_settle()'s iteration floor comes from this measurement too.  It
+       rises with CPU speed, instead of assuming every CPU performs four
+       attribute reads per microsecond. */
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    reference_floor = netdev_clock_floor_spins(GAYLE_HOLD_US, 17);
+    expect("measured floor, reference",
+           reference_floor,
+           netdev_clock_spins_per_line() *
+               ((GAYLE_HOLD_US + 62u) / 63u));
+    machine(ACCELERATED_TICKS_PER_LINE, 313);
+    accelerated_floor = netdev_clock_floor_spins(GAYLE_HOLD_US, 17);
+    expect("measured floor, accelerated",
+           accelerated_floor,
+           netdev_clock_spins_per_line() *
+               ((GAYLE_HOLD_US + 62u) / 63u));
+    expect_at_least("faster CPU gets a larger measured floor",
+                    accelerated_floor, reference_floor + 1u);
+    machine_no_beam();
+    expect("no beam keeps the caller fallback",
+           netdev_clock_floor_spins(GAYLE_HOLD_US, 17), 17);
 
     /* -------------------------------------------------------------------- */
     printf("\n-- the defect: the old loop on the two machines\n");

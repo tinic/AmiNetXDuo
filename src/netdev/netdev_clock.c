@@ -213,6 +213,25 @@ ULONG netdev_clock_lines_per_field(VOID)
     return ndc_field_lines;
 }
 
+ULONG netdev_clock_floor_spins(ULONG us, ULONG fallback)
+{
+    ULONG lines;
+
+    if (ndc_state == 0)
+        ndc_measure();
+
+    if (ndc_state != 1 || ndc_spins_line == 0u || ndc_us_line == 0u)
+        return fallback;
+
+    lines = us / ndc_us_line;
+    if (us % ndc_us_line != 0u)
+        lines++;
+    if (lines > 0xffffffffUL / ndc_spins_line)
+        return 0xffffffffUL;
+
+    return lines * ndc_spins_line;
+}
+
 #if defined(NETDEV_CLOCK_TEST)
 /* Forget the measurement, so that one test process can drive several
    machines past this file.  Nothing in the driver calls it and nothing in

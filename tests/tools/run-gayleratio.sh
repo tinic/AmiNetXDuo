@@ -209,18 +209,13 @@ run_arm() { # arm cpu extra nominal
            "$claimed" "$rc" "$(( $(date +%s) - started ))" "$LOGDIR/$arm.log" \
            | tee -a "$RESULTS"
 
-    # DID THE BEAM DECIDE ANYTHING?  netdev_wait_begin() takes the caller's own
-    # count as an unconditional floor and pc_settle() passes us * 4, so the
-    # clock only shortens a wait once a line holds more than us_per_line * 4
-    # spins.  Below that the wait is the old counted loop with a measurement
-    # running beside it, whatever the code path says.
+    # pc_settle() derives its unconditional floor from this same measurement:
+    # measured spins per line times the number of lines in the requested
+    # duration.  Print the 300 ms hold's value so a fast-CPU arm proves that
+    # the floor changed with it rather than hiding a fixed reads/us guess.
     if [ -n "$spins" ] && [ -n "$us" ]; then
-        if [ "$spins" -gt "$((us * 4))" ]; then
-            echo "  gayleratio_timed_path_binds=yes (over $((us * 4)))"
-        else
-            echo "  gayleratio_timed_path_binds=no (floor is $((us * 4)) spins\
- a line; the caller's count is the whole wait)"
-        fi
+        hold_lines=$(( (300000 + us - 1) / us ))
+        echo "  gayleratio_settle_floor=$((spins * hold_lines)) source=measured_beam"
     fi
 
     COUNT=$((COUNT + 1))
