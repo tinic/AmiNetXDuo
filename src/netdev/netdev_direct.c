@@ -208,7 +208,7 @@ VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags)
 {
     NetdevUnit        *unit = (NetdevUnit *)arg;
     struct IOSana2Req *io   = (struct IOSana2Req *)token;
-    NetdevOpener      *op   = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    NetdevOpener      *op   = NETDEV_IO_OPENER(io);
     NetdevTrack       *tr   = netdev_track_find(op, io->ios2_PacketType);
     UWORD              len  = (UWORD)(io->ios2_DataLength + NETDEV_HDR_LEN);
 

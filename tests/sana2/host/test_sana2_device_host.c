@@ -167,16 +167,15 @@ UINT tx_thread_sleep(ULONG ticks) { (VOID)ticks; return 0; }
 /* --------------------------------------------------------- the device I/O -- */
 
 static ULONG h_open_flags;      /* what the last open asked the driver for */
+static UBYTE h_units[2];        /* distinct shared io_Unit identities */
 
 LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
                                  struct IORequest *req, ULONG flags)
 {
     (VOID)name;
-    (VOID)unit;
-
     h_open_flags   = flags;
     req->io_Device = (struct Device *)&h_dev;
-    req->io_Unit   = (struct Unit *)&h_dev;
+    req->io_Unit   = (struct Unit *)&h_units[unit];
     req->io_Error  = 0;
 
     return 0;

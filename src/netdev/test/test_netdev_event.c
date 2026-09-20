@@ -206,7 +206,8 @@ static void reset_fixture(void)
 static void wait_for(NetdevOpener *op, struct IOSana2Req *io, ULONG mask)
 {
     memset(io, 0, sizeof(*io));
-    io->ios2_Req.io_Unit  = &op->op_Unit;
+    io->ios2_Req.io_Unit  = &unit.nu_ExecUnit;
+    io->ios2_BufferManagement = op;
     io->ios2_Req.io_Flags = IOF_QUICK;      /* as a caller's DoIO() leaves it */
     io->ios2_WireError    = mask;
     netdev_event_wait(&unit, io);
@@ -284,7 +285,8 @@ static void test_current_state(void)
     printf("\n-- current ONLINE/OFFLINE state\n");
     reset_fixture();
     memset(&io, 0, sizeof(io));
-    io.ios2_Req.io_Unit = &opener_a.op_Unit;
+    io.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    io.ios2_BufferManagement = &opener_a;
     io.ios2_WireError   = S2EVENT_OFFLINE;
 
     netdev_event_wait(&unit, &io);
@@ -297,7 +299,8 @@ static void test_current_state(void)
     reset_fixture();
     unit.nu_Online = 1;
     memset(&io, 0, sizeof(io));
-    io.ios2_Req.io_Unit = &opener_a.op_Unit;
+    io.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    io.ios2_BufferManagement = &opener_a;
     io.ios2_WireError   = S2EVENT_ONLINE | S2EVENT_TX;
 
     netdev_event_wait(&unit, &io);
@@ -440,7 +443,8 @@ static void test_payload(void)
     printf("\n-- what the filter is shown\n");
     reset_fixture();
     memset(&io, 0, sizeof(io));
-    io.ios2_Req.io_Unit = &opener_a.op_Unit;
+    io.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    io.ios2_BufferManagement = &opener_a;
 
     p = netdev_payload(&opener_a, &io, frame, 64, &plen);
     expect_ptr("cooked: past the 14-byte header", p, frame + NETDEV_HDR_LEN);
@@ -499,7 +503,8 @@ static void test_filter(void)
     printf("\n-- the S2_PacketFilter hook\n");
     reset_fixture();
     memset(&io, 0, sizeof(io));
-    io.ios2_Req.io_Unit = &opener_a.op_Unit;
+    io.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    io.ios2_BufferManagement = &opener_a;
 
     expect_int("no hook installed: accepted",
                netdev_filter_ok(&opener_a, &io, frame), 1);

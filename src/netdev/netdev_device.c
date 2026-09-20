@@ -1060,7 +1060,7 @@ VOID netdev_tx_pump(NetdevUnit *unit)
             return;
 
         io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
-        op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+        op = NETDEV_IO_OPENER(io);
 
         total = netdev_tx_timed_build(unit, io, op);
         if (total == 0)
@@ -1094,7 +1094,7 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io);
 
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
 {
-    NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    NetdevOpener *op = NETDEV_IO_OPENER(io);
     UWORD         total;
     LONG          rc;
 
@@ -1185,7 +1185,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
 #if NETDEV_HAS_TX_TASK_LOCK
 static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
 {
-    NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    NetdevOpener *op = NETDEV_IO_OPENER(io);
     UWORD         total;
     LONG          rc;
     BOOL          queued = FALSE;
@@ -1877,7 +1877,7 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 
     nd_newlist(&unit->nu_OpenerList);
     nd_newlist(&unit->nu_Writes);
-    unit->nu_Unit = dev->nd_UnitCount;
+    unit->nu_ExecUnit.unit_flags = 0;
 
     unit->nu_Intr.is_Node.ln_Type = NT_INTERRUPT;
     unit->nu_Intr.is_Node.ln_Pri  = 10;
@@ -2416,7 +2416,6 @@ static struct Device *netdev_open(
     op->op_Raw       = (UBYTE)((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
     op->op_Promisc   = (UBYTE)((flags & SANA2OPF_PROM) != 0);
     op->op_Exclusive = (UBYTE)((flags & SANA2OPF_MINE) != 0);
-    op->op_Unit.unit_flags = 0;
     nd_newlist(&op->op_Reads);
     nd_newlist(&op->op_Orphans);
     nd_newlist(&op->op_Events);
@@ -2444,6 +2443,7 @@ static struct Device *netdev_open(
     /* Counted here and not after Enable(): the test above reads it, so an
        increment outside the bracket is the same race one line further down. */
     first_opener  = (BOOL)(hw->nu_Openers++ == 0);
+    hw->nu_ExecUnit.unit_OpenCnt++;
     if (op->op_Anxd)
         hw->nu_Nic.anxd_openers++;
     first_promisc = (BOOL)(op->op_Promisc && hw->nu_Promisc++ == 0);
@@ -2466,7 +2466,8 @@ static struct Device *netdev_open(
 
     nd_trace("anx: open ok\r\n");
     io->ios2_Req.io_Device = dev;
-    io->ios2_Req.io_Unit   = &op->op_Unit;
+    io->ios2_Req.io_Unit   = &hw->nu_ExecUnit;
+    io->ios2_BufferManagement = op;
     io->ios2_Req.io_Error  = 0;
 
     return dev;
@@ -2476,13 +2477,15 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
                          register struct IOSana2Req *io  __asm("a1"))
 {
     NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
-                        io->ios2_Req.io_Unit != (struct Unit *)-1)
-                       ? NETDEV_OPENER(io->ios2_Req.io_Unit) : NULL;
+                        io->ios2_Req.io_Unit != (struct Unit *)-1 &&
+                        io->ios2_BufferManagement != NULL)
+                       ? NETDEV_IO_OPENER(io) : NULL;
     NetdevUnit   *hw;
     BPTR          seg = (BPTR)0;
 
     io->ios2_Req.io_Device = (struct Device *)-1;
     io->ios2_Req.io_Unit   = (struct Unit *)-1;
+    io->ios2_BufferManagement = NULL;
 
     if (op != NULL)
     {
@@ -2537,6 +2540,9 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
                 hw->nu_IntrAdded = 0;
             }
         }
+
+        if (hw->nu_ExecUnit.unit_OpenCnt != 0)
+            hw->nu_ExecUnit.unit_OpenCnt--;
 
         FreeMem(op, sizeof(NetdevOpener));
     }

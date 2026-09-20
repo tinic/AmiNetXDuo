@@ -415,9 +415,12 @@ static void g_drop_writes_takes_only_one_openers(void)
     memset(&a2, 0, sizeof(a2));
     memset(&b1, 0, sizeof(b1));
 
-    a1.ios2_Req.io_Unit = (struct Unit *)&op_a.op_Unit;
-    a2.ios2_Req.io_Unit = (struct Unit *)&op_a.op_Unit;
-    b1.ios2_Req.io_Unit = (struct Unit *)&op_b.op_Unit;
+    a1.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    a2.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    b1.ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    a1.ios2_BufferManagement = &op_a;
+    a2.ios2_BufferManagement = &op_a;
+    b1.ios2_BufferManagement = &op_b;
 
     AddTail(&unit.nu_Writes, &a1.ios2_Req.io_Message.mn_Node);
     AddTail(&unit.nu_Writes, &b1.ios2_Req.io_Message.mn_Node);

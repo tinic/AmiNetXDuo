@@ -62,7 +62,7 @@ VOID netdev_event_rescan(NetdevUnit *unit)
  */
 VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io)
 {
-    NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    NetdevOpener *op = NETDEV_IO_OPENER(io);
     ULONG         now;
 
     Disable();

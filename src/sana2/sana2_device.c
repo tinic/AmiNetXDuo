@@ -432,42 +432,27 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
 /*
  * S2_ONLINE and S2_OFFLINE are UNIT commands: every opener of a unit shares one
  * wire, so two interfaces on one unit must online it once and offline it on the
- * last one out.  Keyed on (device, unit, card) because that is the whole of
- * what OpenDevice() was given -- io_Unit is per-OPENER in anxnet.device and
- * cannot identify the board.  Two spellings of one board (plain unit 0 and
- * CARD= unit 0) therefore count apart, which is only today's behaviour.
+ * last one out.  SANA-II makes io_Unit the identity of that shared hardware
+ * unit, including when two differently spelled opens select the same board.
  */
 typedef struct AmiSana2Unit
 {
-    char  device[AMI_CFG_PATH_LEN];
-    char  card[AMI_CFG_NAME_LEN];
-    ULONG unit;
-    UWORD users;
+    struct Unit *unit;
+    UWORD        users;
 } AmiSana2Unit;
 
 static AmiSana2Unit ami_sana2_units[AMI_CFG_MAX_ATTACHED];
 
-static BOOL ami_str_same(const char *a, const char *b)
-{
-    ULONG i = 0;
-
-    while (a[i] != '\0' && a[i] == b[i])
-        i++;
-
-    return (a[i] == b[i]) ? TRUE : FALSE;
-}
-
 static AmiSana2Unit *ami_sana2_unit_slot(const AmiSana2If *iface, BOOL create)
 {
+    struct Unit *identity = iface->templ.ios2_Req.io_Unit;
     UWORD i;
 
     for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
     {
         AmiSana2Unit *u = &ami_sana2_units[i];
 
-        if (u->users != 0 && u->unit == iface->unit
-            && ami_str_same(u->device, iface->device)
-            && ami_str_same(u->card, iface->card))
+        if (u->users != 0 && u->unit == identity)
             return u;
     }
 
@@ -480,9 +465,7 @@ static AmiSana2Unit *ami_sana2_unit_slot(const AmiSana2If *iface, BOOL create)
 
         if (u->users == 0)
         {
-            ami_str_copy(u->device, iface->device, (ULONG)sizeof(u->device));
-            ami_str_copy(u->card, iface->card, (ULONG)sizeof(u->card));
-            u->unit = iface->unit;
+            u->unit = identity;
             return u;
         }
     }
@@ -525,6 +508,9 @@ static BOOL ami_sana2_unit_leave(AmiSana2If *iface)
         return TRUE;
 
     u->users--;
+
+    if (u->users == 0)
+        u->unit = NULL;
 
     return (u->users == 0) ? TRUE : FALSE;
 }

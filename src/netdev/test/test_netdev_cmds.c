@@ -306,7 +306,8 @@ static void req(struct IOSana2Req *io, UWORD cmd)
 {
     memset(io, 0, sizeof(*io));
     io->ios2_Req.io_Command = cmd;
-    io->ios2_Req.io_Unit    = (struct Unit *)&opener.op_Unit;
+    io->ios2_Req.io_Unit    = &unit.nu_ExecUnit;
+    io->ios2_BufferManagement = &opener;
 }
 
 static void balanced(const char *what)

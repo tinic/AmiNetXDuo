@@ -83,7 +83,7 @@ VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
         struct IOSana2Req *io   = (struct IOSana2Req *)n;
         struct Node       *next = n->ln_Succ;
 
-        if (NETDEV_OPENER(io->ios2_Req.io_Unit) == op)
+        if (NETDEV_IO_OPENER(io) == op)
         {
             Remove(n);
             netdev_reply(io, IOERR_ABORTED, 0);

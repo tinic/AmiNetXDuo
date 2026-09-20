@@ -75,15 +75,13 @@ typedef struct NetdevTrack
 } NetdevTrack;
 
 /*
- * One per OpenDevice().  io_Unit points at the opener, so every request arrives
- * already attached to the opener that made it: the CMD_READ queue, the copy
- * hooks and the RAW flag are per opener, which is the whole of what SANA-II
- * means by an opener.
+ * One per OpenDevice().  SANA-II reserves ios2_BufferManagement for this
+ * per-open cookie: Open() consumes the caller's tag list and replaces it with
+ * this pointer.  io_Unit remains the actual shared hardware unit.
  */
 typedef struct NetdevOpener
 {
     struct MinNode      op_Node;
-    struct Unit         op_Unit;
     struct NetdevUnit  *op_Hw;
 
     APTR                op_CopyTo;
@@ -189,9 +187,10 @@ static inline VOID nd_list_addtail(struct List *l, struct Node *n)
 
 typedef struct NetdevUnit
 {
+    /* First by design: Exec and SANA-II callers receive this shared Unit. */
+    struct Unit                  nu_ExecUnit;
     NetdevNic                   nu_Nic;
     struct NetdevDevice        *nu_Dev;
-    UWORD                       nu_Unit;
     UWORD                       nu_Openers;
 
     UBYTE                       nu_Configured;
@@ -297,12 +296,11 @@ typedef struct NetdevDevice
 } NetdevDevice;
 
 /*
- * io_Unit points at the embedded struct Unit, not at the opener, so a caller
- * or a tool that treats io_Unit as a struct Unit * is not being lied to.  The
- * opener is recovered from it here.
+ * Open() replaces the buffer-management tag list with the per-open cookie,
+ * which every request copied from that IORequest carries.  io_Unit is the
+ * shared NetdevUnit's first member and never doubles as private state.
  */
-#define NETDEV_OPENER(u) \
-    ((NetdevOpener *)(void *)((UBYTE *)(u) - offsetof(NetdevOpener, op_Unit)))
+#define NETDEV_IO_OPENER(io) ((NetdevOpener *)(io)->ios2_BufferManagement)
 
 /*
  * What one opener did with one received frame.  REJECTED is not a failure and

@@ -219,7 +219,8 @@ static void reset_fixture(void)
 
 static void queue_read(NetdevOpener *op, struct IOSana2Req *io, ULONG type)
 {
-    io->ios2_Req.io_Unit = &op->op_Unit;
+    io->ios2_Req.io_Unit = &unit.nu_ExecUnit;
+    io->ios2_BufferManagement = op;
     io->ios2_PacketType = type;
     io->ios2_Data = &data_cookie;
     AddTail(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);

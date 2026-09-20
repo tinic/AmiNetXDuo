@@ -125,6 +125,7 @@ BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
 /* ------------------------------------------------------------ the caller -- */
 
 static NetdevOpener opener;
+static NetdevUnit unit;
 static struct Device fake_device;
 
 /*
@@ -139,7 +140,8 @@ static void fill(struct IOSana2Req *io, ULONG command, ULONG wire_error,
 
     io->ios2_Req.io_Command = (UWORD)command;
     io->ios2_Req.io_Error   = (BYTE)0x5a;
-    io->ios2_Req.io_Unit    = attached ? &opener.op_Unit : NULL;
+    io->ios2_Req.io_Unit    = attached ? &unit.nu_ExecUnit : NULL;
+    io->ios2_BufferManagement = attached ? &opener : NULL;
     io->ios2_WireError      = wire_error;
 }
 
@@ -270,11 +272,10 @@ static void d_beginio_touches_nothing_else(void)
 
 
 /*
- * io_Unit is what carries the opener, and BeginIO is reached before OpenDevice
- * has set one on a request the caller built by hand.  NULL and -1 both mean
- * "no opener", and the field work still has to happen: the dispatcher is what
- * turns that into IOERR_OPENFAIL, and it cannot do so on a request whose
- * io_Error it was never allowed to see.
+ * io_Unit and the buffer-management cookie are installed by OpenDevice.
+ * NULL and -1 units both mean "no opener", and the field work still has to
+ * happen: the dispatcher is what turns that into IOERR_OPENFAIL, and it
+ * cannot do so on a request whose io_Error it was never allowed to see.
  */
 static void e_an_unattached_request_still_dispatches(void)
 {
@@ -300,17 +301,26 @@ static void e_an_unattached_request_still_dispatches(void)
 }
 
 
-/* An attached request reaches the dispatcher as its own opener, not as some
-   other slot in the unit: NETDEV_OPENER() has to invert io_Unit exactly. */
+/* Two openers share io_Unit, so the buffer-management cookie must select the
+   one which submitted this request. */
 static void f_the_opener_round_trips(void)
 {
     struct IOSana2Req io;
+    NetdevOpener other;
 
     seen_perform = 0;
     seen_op      = NULL;
     fill(&io, CMD_READ, 0UL, 1);
     netdev_begin_io(&fake_device, &io);
-    expect(seen_op == &opener, "io_Unit resolved back to its own opener");
+    expect(seen_op == &opener,
+           "the buffer-management cookie resolved to its own opener");
+
+    memset(&other, 0, sizeof(other));
+    io.ios2_BufferManagement = &other;
+    seen_op = NULL;
+    netdev_begin_io(&fake_device, &io);
+    expect(seen_op == &other,
+           "the same io_Unit can dispatch a second opener's request");
 }
 
 

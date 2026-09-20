@@ -17,8 +17,9 @@ VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
                      register struct IOSana2Req *io  NETDEV_REG_A1)
 {
     NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
-                        io->ios2_Req.io_Unit != (struct Unit *)-1)
-                       ? NETDEV_OPENER(io->ios2_Req.io_Unit) : NULL;
+                        io->ios2_Req.io_Unit != (struct Unit *)-1 &&
+                        io->ios2_BufferManagement != NULL)
+                       ? NETDEV_IO_OPENER(io) : NULL;
 
     (VOID)dev;
 
@@ -93,8 +94,9 @@ LONG netdev_abort_io(register struct Device     *dev NETDEV_REG_A6,
                      register struct IOSana2Req *io  NETDEV_REG_A1)
 {
     NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
-                        io->ios2_Req.io_Unit != (struct Unit *)-1)
-                       ? NETDEV_OPENER(io->ios2_Req.io_Unit) : NULL;
+                        io->ios2_Req.io_Unit != (struct Unit *)-1 &&
+                        io->ios2_BufferManagement != NULL)
+                       ? NETDEV_IO_OPENER(io) : NULL;
 
     (VOID)dev;
 
