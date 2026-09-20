@@ -404,7 +404,7 @@ static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
 }
 
 /*
- * The card finishes the TCP checksum (ANXD_S2_TX_CSUM): a cooked IPv4 TCP
+ * The card finishes the negotiated TCP checksum: a cooked IPv4 TCP
  * segment that is not a fragment, its TCP header whole in the first buffer
  * and its checksum field the zero NetX Duo left for the interface, gets the
  * pseudo-header sum written there, folded and not complemented, and the
@@ -534,7 +534,7 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
 /* ---- the private direct-receive pair, aminetxduo/anxs2ext.h ---------- */
 
 /*
- * ANXD_S2_RX_DIRECT.  The device asks where this CMD_READ's payload would land.
+ * RxDirect.  The device asks where this CMD_READ's payload would land.
  * A slot that cannot answer safely declines and the device takes the staging
  * path.  Interrupt level, copybuff.doc constraints.
  */
@@ -551,11 +551,11 @@ UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
 }
 
 /*
- * ANXD_S2_RX_FILLED.  The device wrote the payload itself, straight off the
+ * RxFilled.  The device wrote the payload itself, straight off the
  * hardware.  `flags` is the ANXD_S2_RXF_* byte: SUMMED says `sum` is the
  * longword ones-complement running sum the verifier expects (without it the
  * verifier walks the frame); VERIFIED is kept whole for the
- * reader, which only sees them from a device that answered ANXD_S2_RX_FLAGS.
+ * reader, which only sees them from a device that accepted RX_VERIFIED.
  */
 VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE flags)
 {

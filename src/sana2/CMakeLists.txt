@@ -3,6 +3,7 @@ add_library(aminetxduo_sana2 STATIC
     sana2_copy.c
     sana2_rx.c
     sana2_tx.c
+    sana2_txmeta.c
     sana2_driver.c)
 
 target_include_directories(aminetxduo_sana2

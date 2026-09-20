@@ -167,7 +167,7 @@ struct NetdevNic
     UBYTE               rx_flags_supported;
     /* ANXD_S2_TXF_* checksums this core's chip can write on the way out, and
        the shell's request for the frame ops->tx is being handed: the
-       negotiated bits of an opener whose write carries ANXD_S2IOF_L4_CSUM,
+       negotiated bits returned by the opener's per-write extension callback,
        else zero. */
     UBYTE               tx_csum_supported;
     UBYTE               tx_csum;

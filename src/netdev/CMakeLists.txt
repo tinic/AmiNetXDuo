@@ -18,7 +18,8 @@ option(AMINETXDUO_NETDEV_LINK
 # it probes and which chip cores it links.
 set(NETDEV_CORE_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open
-    netdev_tags.c       # versioned private OpenDevice negotiation
+    netdev_tags.c       # OpenDevice tag traversal
+    netdev_extension.c  # versioned private negotiation
     netdev_unit.c       # unit/opener helpers, host-testable
     netdev_io.c         # BeginIO/AbortIO field handling, host-testable
     netdev_direct.c     # claim/completion half of the single-copy RX path
@@ -642,6 +643,26 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_direct PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_direct COMMAND test_netdev_direct)
+
+    # The private ABI is one size/version-gated TAG_USER record.  Keep its
+    # parser host-visible so a field addition cannot silently make an old or
+    # truncated record look valid, and so TX checksum negotiation cannot
+    # regress to an unowned io_Flags bit.
+    add_executable(test_netdev_extension
+        test/test_netdev_extension.c
+        netdev_extension.c)
+
+    target_include_directories(test_netdev_extension PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_extension PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_extension COMMAND test_netdev_extension)
 
     add_executable(test_netdev_verify
         test/test_netdev_verify.c

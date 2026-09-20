@@ -92,10 +92,11 @@ typedef struct NetdevOpener
     APTR                op_RxDirect;    /* aminetxduo/anxs2ext.h, or NULL */
     BOOL                op_RxLinkHdr;   /* write the link header before dst */
     UBYTE               op_RxFlags;     /* ANXD_S2_RXF_* bits beyond SUMMED the
-                                           opener asked for (ANXD_S2_RX_FLAGS) */
+                                           opener asked for */
     UBYTE               op_TxCsum;      /* ANXD_S2_TXF_* bits agreed for this
-                                           opener's flagged writes (ANXD_S2_TX_CSUM) */
+                                           opener's writes */
     APTR                op_RxFilled;
+    APTR                op_TxFlags;     /* per-write ANXD_S2_TXF_* callback */
     UBYTE               op_Anxd;        /* passed any ANXD_S2_* tag at open  */
 
     UBYTE               op_Raw;
@@ -391,6 +392,8 @@ VOID netdev_queue_head(struct List *list, struct IOSana2Req *io);
 /* netdev_tags.c */
 VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
                       const char **pin, AnxdS2Extension **ext_answer);
+BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
+                           AnxdS2Extension **answer);
 
 /* netdev_event.c */
 VOID netdev_event(NetdevUnit *unit, ULONG mask);

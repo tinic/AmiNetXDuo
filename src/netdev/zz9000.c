@@ -781,7 +781,7 @@ static VOID zz_tx_fill(NetdevNic *nic, UWORD slot, const UBYTE *frame,
 }
 
 /* The GEM's full checksum engine wants zero, rather than the pseudo-header
- * sum in ANXD_S2IOF_L4_CSUM's field.  Change only the card-window copy: the
+ * sum the stack placed in the transport field.  Change only the card-window copy: the
  * stack may retain and retransmit its packet after this write. */
 static VOID zz_tx_checksum(NetdevNic *nic, UWORD slot, const UBYTE *frame,
                            UWORD len)

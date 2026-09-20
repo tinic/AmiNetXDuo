@@ -433,9 +433,9 @@ static void test_pad_cooked_with_fusion(void)
 }
 
 /*
- * ANXD_S2_TX_CSUM: a device that finishes the TCP checksum gets the
- * pseudo-header sum in the field, folded and not complemented, the write
- * flagged, and the plain copy; the fusion is not run.  10.0.0.1 -> 10.0.0.2,
+ * A device that negotiated transmit checksums gets the pseudo-header sum in
+ * the field, folded and not complemented, per-write metadata through the
+ * extension callback, and the plain copy; the fusion is not run.  10.0.0.1 -> 10.0.0.2,
  * TCP, twenty bytes: 0x0a01 + 0x0a02 + 6 + 20 = 0x141d.
  */
 static void test_chip_checksum_flags_the_write(void)
@@ -451,8 +451,11 @@ static void test_chip_checksum_flags_the_write(void)
     h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV4, 0xBC24,
                               0x11EF103A) == NX_SUCCESS,
             "the write is posted");
-    h_check((sent_req()->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) != 0,
-            "and carries the checksum flag");
+    h_check(ami_sana2_tx_flags(sent_req()->ios2_Data) == ANXD_S2_TXF_TCP,
+            "and its extension metadata asks for a TCP checksum");
+    h_check((sent_req()->ios2_Req.io_Flags &
+             ~(IOF_QUICK | SANA2IOF_RAW)) == 0,
+            "without borrowing an unassigned io_Flags bit");
     h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
             "cooked, as the device's header offsets assume");
     h_check((pkt.nx_packet_interface_capability_flag &
@@ -489,8 +492,8 @@ static void test_chip_checksum_needs_the_tag(void)
     h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV4, 0xBC24,
                               0x11EF103A) == NX_SUCCESS,
             "the write is posted");
-    h_check((sent_req()->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) == 0,
-            "and is not flagged");
+    h_check(ami_sana2_tx_flags(sent_req()->ios2_Data) == 0,
+            "and has no checksum metadata");
     h_check((pkt.nx_packet_interface_capability_flag &
              NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0,
             "the checksum is still the copy's to fill");
@@ -522,8 +525,8 @@ static void test_chip_checksum_raw_takes_the_stack(void)
                               0x11EF103A) == NX_SUCCESS,
             "the write is posted");
     h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) != 0, "raw");
-    h_check((sent_req()->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) == 0,
-            "and not flagged");
+    h_check(ami_sana2_tx_flags(sent_req()->ios2_Data) == 0,
+            "and has no checksum metadata");
     h_check((pkt.nx_packet_interface_capability_flag &
              NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
             "the stack's walk answered for the checksum before the header went on");

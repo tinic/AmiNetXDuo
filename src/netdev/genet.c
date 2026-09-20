@@ -1481,9 +1481,9 @@ static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
     }
 
     /*
-     * The transport checksum, by the TBUF: the opener that asked for it
-     * (ANXD_S2_TX_CSUM, the flag on this write) has put the pseudo-header
-     * sum in the field, and the header offsets are in the frame itself.
+     * The transport checksum, by the TBUF: the opener's negotiated per-write
+     * metadata has put the pseudo-header sum in the field, and the header
+     * offsets are in the frame itself.
      * Anything else gets a zero word, which the block ignores.
      */
     status = GENET_TX_DESC_STATUS_SOP | GENET_TX_DESC_STATUS_EOP |

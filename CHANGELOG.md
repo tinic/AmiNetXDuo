@@ -14,9 +14,16 @@ version at the top when it merges.
   checksum metadata only skips the verification walk. Drivers no longer keep
   flow state or emit `CONTINUES`, and a legacy hint is ignored.
 
-- The private `RX_POLL`, `READ_BATCH` and `RX_CAPACITY` commands moved from
-  NSD's OS-reserved `$4000-$7FFF` range to the third-party `$8000-$BFFF`
-  range. A host regression asserts the allocation class.
+- The private `RX_POLL` and `RX_CAPACITY` commands moved from NSD's
+  OS-reserved `$4000-$7FFF` range to the third-party `$8000-$BFFF` range.
+  `READ_BATCH`, manual reply-port list manipulation and signal-state peeking
+  are gone; reads and completions use Exec's ordinary `BeginIO`, `GetMsg` and
+  `ReplyMsg` interfaces.
+
+- The optional SANA-II fast paths now negotiate through one versioned
+  AmiNetXDuo `TAG_USER` record. They no longer allocate tags in Commodore's
+  `S2_Dummy` block, and per-write checksum metadata no longer borrows an
+  unassigned `io_Flags` bit. Invalid versions and short records fail closed.
 
 - `ConfigureNetInterface <if> PRIORITY <n>` sets a running interface's
   priority (-128..127) without a reboot: the route lookup and the default

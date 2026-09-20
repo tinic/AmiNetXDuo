@@ -71,6 +71,7 @@ add_test(NAME sana2_copy COMMAND test_sana2_copy)
 add_executable(test_sana2_tx
     host/test_sana2_tx_host.c
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_tx.c"
+    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_txmeta.c"
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_copy.c")
 
 target_compile_options(test_sana2_tx PRIVATE
@@ -214,7 +215,8 @@ add_test(NAME sana2_driver COMMAND test_sana2_driver)
 # S2_OFFLINE.  sana2_copy.c is not linked: only its hooks' addresses are used.
 add_executable(test_sana2_device
     host/test_sana2_device_host.c
-    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_device.c")
+    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_device.c"
+    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_txmeta.c")
 
 target_compile_options(test_sana2_device PRIVATE
     -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_regargs.h")

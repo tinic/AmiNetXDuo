@@ -39,34 +39,8 @@ VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
         if (tag == S2_CopyToBuff)
             op->op_CopyTo = (APTR)tags->ti_Data;
         else if (tag == ANXD_S2_EXTENSION && tags->ti_Data != 0)
-        {
-            AnxdS2Extension *ext = (AnxdS2Extension *)tags->ti_Data;
-
-            if (ext->Version == ANXD_S2_ABI_VERSION &&
-                ext->Size >= (UWORD)sizeof(*ext))
-            {
-                ULONG request = ext->Request;
-
-                ext->Accepted = 0;
-                op->op_Anxd = 1;
-                *ext_answer = ext;
-
-                if ((request & ANXD_S2F_RX_DIRECT) != 0 &&
-                    ext->RxDirect != NULL && ext->RxFilled != NULL)
-                {
-                    op->op_RxDirect = (APTR)ext->RxDirect;
-                    op->op_RxFilled = (APTR)ext->RxFilled;
-                    op->op_RxLinkHdr =
-                        (UBYTE)((request & ANXD_S2F_RX_LINK_HDR) != 0);
-                }
-                if ((request & ANXD_S2F_RX_VERIFIED) != 0)
-                    op->op_RxFlags = ANXD_S2_RXF_VERIFIED;
-                if ((request & ANXD_S2F_TX_CSUM_TCP) != 0)
-                    op->op_TxCsum |= ANXD_S2_TXF_TCP;
-                if ((request & ANXD_S2F_TX_CSUM_UDP) != 0)
-                    op->op_TxCsum |= ANXD_S2_TXF_UDP;
-            }
-        }
+            (VOID)netdev_take_extension(
+                (AnxdS2Extension *)tags->ti_Data, op, ext_answer);
         else if (tag == S2_CopyFromBuff)
             op->op_CopyFrom = (APTR)tags->ti_Data;
         else if (tag == S2_PacketFilter)

@@ -824,7 +824,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
     }
 
     /*
-     * The transport checksum by the card (ANXD_S2_TX_CSUM): the pseudo-header
+     * The transport checksum by the card: the pseudo-header
      * sum goes into the field now, the copy hook then copies the segment as
      * it is, and the write carries the flag.  Before the pad, whose zero
      * bytes add nothing to a ones-complement sum either way; after the raw
@@ -857,6 +857,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
     slot->cursor_off = 0;
     slot->consumed   = 0;
     slot->total      = length;
+    slot->tx_flags   = csum_hw ? ANXD_S2_TXF_TCP : 0;
 
     slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
     slot->req.ios2_Req.io_Message.mn_ReplyPort    = &iface->tx_port;
@@ -872,8 +873,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
      * for, so it does not get the offer.
      */
     slot->req.ios2_Req.io_Flags   = (UBYTE)((raw_write ? SANA2IOF_RAW : 0) |
-                                            (iface->tx_quick_ok ? IOF_QUICK : 0) |
-                                            (csum_hw ? ANXD_S2IOF_L4_CSUM : 0));
+                                            (iface->tx_quick_ok ? IOF_QUICK : 0));
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
     slot->req.ios2_PacketType     = (ULONG)ether_type;

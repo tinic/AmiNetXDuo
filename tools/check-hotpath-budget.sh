@@ -93,10 +93,9 @@ TABLE = {
     # verifier (a flag test and a protocol byte, in place of a 220-instruction
     # walk on every frame a device verified) and the first-buffer length the
     # tap takes on a chain.  rx_thread fell 573 -> 545 in the same change,
-    # then 545 -> 704 with the one-Disable port splice, the batched re-post
-    # (ANXD_CMD_READ_BATCH) and the poll: all three run ONCE PER DRAIN, not
-    # per frame, and they are what took the A1200 from 202 to 270 Mbit/s by
-    # removing two trapped Exec calls from every frame.
+    # then 545 -> 704 in the former batched-port experiment.  That shortcut
+    # was removed: message ports and task signal state stay behind Exec's
+    # GetMsg/ReplyMsg interface.  The remaining poll runs once per drain.
     # The SANA-II copy hook: called once a frame BY THE DEVICE, so its entry
     # guards are load-bearing rather than paranoia -- a third-party driver can
     # hand it anything, and `len > slot->capacity` is a bounds check on a

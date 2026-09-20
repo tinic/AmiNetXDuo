@@ -976,6 +976,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->extension.Accepted = 0;
     iface->extension.RxDirect = ami_sana2_rx_direct;
     iface->extension.RxFilled = ami_sana2_rx_filled;
+    iface->extension.TxFlags  = ami_sana2_tx_flags;
 #ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
     /* Request only the device fact this build consumes.  GRO classification
        is deliberately stack-side, including for an ordinary SANA-II driver. */

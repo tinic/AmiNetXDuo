@@ -700,6 +700,7 @@ typedef struct AmiTxSlot
     ULONG               total;
     UWORD               hdr_len;    /* Ethernet bytes prepended in raw mode*/
     UWORD               pad_len;    /* zero bytes appended to reach 60     */
+    UBYTE               tx_flags;   /* per-write ANXD_S2_TXF_* metadata    */
     volatile BOOL       busy;
 
 #ifdef AMINETXDUO_RXPROBE
@@ -875,6 +876,7 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
                             register ULONG len  __asm("d0"));
 BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
+UBYTE ami_sana2_tx_flags(APTR ios2_data);
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
                               register ULONG len __asm("d0"));

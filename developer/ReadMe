@@ -180,24 +180,25 @@ For SANA-II driver authors: the receive extensions
 
 <aminetxduo/anxs2ext.h> is the other direction: not what a program asks the
 library, but what the library asks a DRIVER, through the buffer-management
-tag list it passes to OpenDevice().  A driver that does not know a tag
-ignores it and everything works as SANA-II always did; one that answers
-gets a faster receive path.  Tags and function-pointer types only, no
-vectors, no library to open.
+tag list it passes to OpenDevice().  There is one AmiNetXDuo-owned TAG_USER
+whose value points at a size/version-gated record.  A driver that does not
+know it ignores it and everything works as SANA-II always did; one that
+answers publishes the exact intersection it supports.  Function-pointer
+types only, no vectors and no library to open.
 
-    ANXD_S2_RX_DIRECT / ANXD_S2_RX_FILLED
+    RxDirect / RxFilled, ANXD_S2F_RX_DIRECT
         the direct receive pair.  Before copying a frame, the driver asks
         where the payload of a posted CMD_READ should land and writes it
         there itself; RX_FILLED then reports the length, the running
         ones-complement sum the copy produced, and a flag byte.  One copy
         instead of two, and the checksum for free.
 
-    ANXD_S2_RX_LINK_HDR
+    ANXD_S2F_RX_LINK_HDR
         the driver writes the fourteen-byte Ethernet header in front of the
         payload, instead of the opener rebuilding it from ios2_SrcAddr,
         ios2_DstAddr and ios2_PacketType.
 
-    ANXD_S2_RX_FLAGS
+    ANXD_S2F_RX_VERIFIED
         a driver may set VERIFIED in RX_FILLED's flag byte after checking the
         IPv4 or IPv6 header and TCP or UDP checksum, so the stack skips its
         own pass.  GRO itself is stack-side: it derives contiguous TCP runs
@@ -212,20 +213,20 @@ vectors, no library to open.
         command instead of dropping it.  A driver that does not know the
         command answers IOERR_NOCMD and is not asked again.
 
-    ANXD_CMD_READ_BATCH
-        many CMD_READs in one call: ios2_Data is an Exec List of prepared
-        read requests, queued in order under one interrupt-disable.  A
-        driver that does not know it answers IOERR_NOCMD with the list
-        untouched, and the opener posts them one by one from then on.
-
     ANXD_CMD_RX_CAPACITY
         reports how many bytes of received frames the card can retain while
         its reader is behind, so the stack can bound the advertised TCP
-        window to what the device can absorb.  These three commands occupy
+        window to what the device can absorb.  Both commands occupy
         NSD's $8000-$BFFF third-party range.
 
-Both shipped devices implement the direct pair, link-header handoff and read
-batch. anxgenet.device produces VERIFIED and can retain a burst tail for
+    TxFlags, ANXD_S2F_TX_CSUM_TCP / ANXD_S2F_TX_CSUM_UDP
+        the driver asks the opener for ANXD_S2_TXF_* metadata for one
+        CMD_WRITE.  The callback is a load-only interrupt-safe operation.
+        This keeps request-specific metadata out of io_Flags and avoids a
+        shared-record race when several writes are in flight.
+
+Both shipped devices implement the direct pair and link-header handoff.
+anxgenet.device produces VERIFIED and can retain a burst tail for
 RX_POLL. anxnet.device produces VERIFIED on EL3 and on
 word/long NE2000 direct drains; mapped, byte-wide and fallback reads leave
 verification to the stack. The header is the contract, and the shipped drivers

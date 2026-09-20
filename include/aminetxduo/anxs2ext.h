@@ -14,11 +14,10 @@
 #define ANXD_S2_TXF_TCP         0x01
 #define ANXD_S2_TXF_UDP         0x02
 
-#define ANXD_S2IOF_L4_CSUM      0x10
-
 typedef UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,
                                  UBYTE flags);
+typedef UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
 
 /*
  * ONE VERSIONED NEGOTIATION TAG.
@@ -35,7 +34,7 @@ typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,
  * fields; neither side may read past Size.
  */
 #define ANXD_S2_EXTENSION       (0x80000000UL | 0x00414e58UL) /* TAG_USER|'ANX' */
-#define ANXD_S2_ABI_VERSION     1u
+#define ANXD_S2_ABI_VERSION     2u
 
 #define ANXD_S2F_RX_DIRECT      (1UL << 0)
 #define ANXD_S2F_RX_LINK_HDR    (1UL << 1)
@@ -54,6 +53,11 @@ typedef struct AnxdS2Extension
     ULONG           Accepted;
     AnxdS2RxDirect  RxDirect;
     AnxdS2RxFilled  RxFilled;
+    /* Called for a negotiated CMD_WRITE, possibly from interrupt context.
+       It may only inspect ios2_Data and returns ANXD_S2_TXF_* for that one
+       request.  Per-write metadata therefore never occupies io_Flags, whose
+       unassigned bits belong to the SANA-II/Exec request ABI. */
+    AnxdS2TxFlags   TxFlags;
 } AnxdS2Extension;
 
 /* ANXD_CMD_RX_POLL: "hand over what you are holding for my reads".

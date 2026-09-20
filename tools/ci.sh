@@ -282,7 +282,9 @@ host_test_targets() { # builddir
 #      407: the tally above lands one under a clean host configure -- ctest -N
 #      counts 407, all passing (verified 2026-09-19 on x86_64); a universal
 #      netstack arm the seq-arm accounting missed, corrected here
-HOST_TESTS_EXPECTED=407
+#      408 with test_netdev_extension: the private record's version/size gate,
+#      callback ownership and fail-closed transmit-checksum negotiation
+HOST_TESTS_EXPECTED=408
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

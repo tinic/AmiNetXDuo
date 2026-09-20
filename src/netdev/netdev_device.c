@@ -978,11 +978,14 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
     NetdevTrack *tr;
     LONG         rc;
 
-    /* The opener's flagged write asks the chip for the transport checksum,
-       within what the two agreed at open; every other write asks nothing. */
-    unit->nu_Nic.tx_csum =
-        ((io->ios2_Req.io_Flags & ANXD_S2IOF_L4_CSUM) != 0) ? op->op_TxCsum
-                                                            : 0;
+    /* Per-write metadata comes through the versioned extension, never through
+       an unassigned bit in Exec/SANA-II's io_Flags.  The callback is a plain
+       load from the opener-owned request cookie and is safe when a queued
+       write advances from interrupt context. */
+    unit->nu_Nic.tx_csum = 0;
+    if (op->op_TxFlags != NULL)
+        unit->nu_Nic.tx_csum =
+            ((AnxdS2TxFlags)op->op_TxFlags)(io->ios2_Data) & op->op_TxCsum;
     rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;

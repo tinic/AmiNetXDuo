@@ -20,7 +20,7 @@ UBYTE netdev_rx_verify(const UBYTE *ip, UWORD plen, ULONG sum);
  * that promise makes but without recomputing either checksum. */
 UBYTE netdev_rx_trust4(const UBYTE *ip, UWORD plen, UBYTE verdict);
 
-/* Validate the full Ethernet/IPv4 frame promised by ANXD_S2IOF_L4_CSUM and
+/* Validate the full Ethernet/IPv4 frame selected for negotiated TX checksum and
  * return the byte offset of the TCP or UDP checksum which a full-offload
  * device must clear before transmission. */
 UBYTE netdev_tx_csum4(const UBYTE *frame, UWORD len, UBYTE supported,

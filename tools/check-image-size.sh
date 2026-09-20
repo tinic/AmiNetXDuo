@@ -50,8 +50,8 @@ BUDGETS=(
     # EL3 and word/long NE2000 direct paths, 2026-09-15.
     "default:src/netdev/anxnet.device:43000"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
-    # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 with
-    # the held pass, the batched replies, the reset on stop and their
+    # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
+    # the former batched-reply experiment, plus the held pass and reset
     # counters -- 142 -> 270 Mbit/s between them, 2026-09-15.  26,828 with
     # the idle poller (its task, the clock through /soc, three counters):
     # Fitz read 26.5 -> 31.6 MB/s, iperf in 832 -> 910, 2026-09-17.
@@ -70,8 +70,8 @@ BUDGETS=(
     # sends 180 -> 275 Mbit/s on the LAN, 12 -> 198 over 26 ms), the 1 MB
     # long-path window, and DEVS: redirected only to what exists.
     # -> 226,788 the same day: the transport checksum written by the card
-    # (ANXD_S2_TX_CSUM: the tag, the pseudo-header sum at launch, the flag
-    # on the write), A1200 sends 337 -> 462 Mbit/s with the page push it
+    # (negotiated TX checksum: the record, pseudo-header sum at launch and
+    # per-write metadata callback), A1200 sends 337 -> 462 Mbit/s with the page push it
     # made possible.  -> 227,148: RFC 6675 loss recovery in the fork (the
     # lost accounting, HighRxt, the walk on every duplicate): one drop in
     # ten thousand 63 -> 537 Mbit/s out on the A1200.  -> 227,512: the DNS
@@ -84,8 +84,9 @@ BUDGETS=(
     # promiscuous open flag carried to OpenDevice).  -> 227,804:
     # gethostname() qualifies a dotless name with the domain in force.
     # -> 227,572: the MTU-based datagram caps and bsd_route_mtu() gone, the
-    # stack fragments what BSD fragments.
-    "minimal:src/bsdsocket/bsdsocket.library:227700"
+    # stack fragments what BSD fragments.  -> 227,916: the versioned transmit
+    # metadata callback keeps private state out of SANA-II's io_Flags.
+    "minimal:src/bsdsocket/bsdsocket.library:228000"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
     "minimal:src/netdev/anxzz9000.device:23000"
