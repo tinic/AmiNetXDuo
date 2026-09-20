@@ -719,6 +719,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_port.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_routes.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_client_pool.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_config_runtime.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway_apply.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
