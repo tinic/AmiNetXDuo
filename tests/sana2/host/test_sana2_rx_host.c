@@ -1025,15 +1025,14 @@ static void test_continuing_frame_is_chained(void)
     gro_done();
 }
 
-static void test_stack_gro_uses_headers_not_the_legacy_hint(void)
+static void test_stack_gro_uses_headers(void)
 {
     AmiRxSum head = h_flagged(ANXD_S2_RXF_VERIFIED);
-    AmiRxSum next = h_flagged(ANXD_S2_RXF_VERIFIED |
-                              ANXD_S2_RXF_CONTINUES);
+    AmiRxSum next = h_flagged(ANXD_S2_RXF_VERIFIED);
 
-    printf("sana2: GRO trusts the wire key, not the legacy driver hint\n");
+    printf("sana2: GRO derives its stream key from the wire headers\n");
 
-    /* A lying legacy hint cannot join a segment with a sequence hole. */
+    /* A sequence hole cannot join two otherwise matching segments. */
     gro_init();
     tcp_frame_init(&pkt, buffer, 6, 40);
     tcp_frame_init(&pkt2, buffer2, 6, 30);
@@ -1044,7 +1043,7 @@ static void test_stack_gro_uses_headers_not_the_legacy_hint(void)
     h_check(h_went == TO_IP && h_seen_length == 80,
             "after the old head was delivered alone");
     h_check(rxs.gro_head == &pkt2 && rxs.gro_count == 1,
-            "and the legacy CONTINUES bit did not join it");
+            "and the sequence hole did not join it");
     ami_sana2_gro_flush(&rxs);
     gro_done();
 
@@ -1712,7 +1711,7 @@ int main(void)
 #ifdef AMINETXDUO_GRO
     test_held_frame_goes_up_on_flush();
     test_continuing_frame_is_chained();
-    test_stack_gro_uses_headers_not_the_legacy_hint();
+    test_stack_gro_uses_headers();
     test_stack_gro_ipv6();
     test_run_ends_on_a_frame_that_does_not_continue();
     test_run_is_capped();

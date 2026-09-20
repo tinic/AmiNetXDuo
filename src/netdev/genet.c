@@ -235,8 +235,6 @@ enum
     GE_ST_TXCONS0,          /* TX consumer index read back after init      */
     GE_ST_INTS,             /* interrupt status words seen non-zero        */
     GE_ST_VERIFIED,         /* frames delivered with their checksums checked */
-    GE_ST_CONTINUES,        /* legacy counter; GRO classification moved up  */
-    GE_ST_RUNS,             /* legacy counter; GRO classification moved up  */
     GE_ST_BURST_MAX,        /* the most frames one burst held               */
     GE_ST_UNCLAIMED,        /* frames nobody had a read posted for: dropped */
     GE_ST_HELD,             /* passes cut short with frames left in the ring
@@ -289,8 +287,6 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET TX consumer after init",
     "GENET interrupts with status",
     "GENET frames verified in the driver",
-    "GENET frames marked as continuing",
-    "GENET runs of continuing frames",
     "GENET largest burst",
     "GENET frames with no read posted",
     "GENET passes held for a reader behind",

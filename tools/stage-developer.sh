@@ -48,8 +48,7 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #   anxs2ext.h the SANA-II extensions a DRIVER may implement: the direct
 #              receive pair (RX_DIRECT / RX_FILLED), the link-header tag and
 #              the RX_FLAGS tag with the VERIFIED checksum verdict.  GRO is
-#              stack-side; CONTINUES is a reserved legacy bit.  Tags and
-#              typedefs only, no vectors;
+#              stack-side.  Tags and typedefs only, no vectors;
 #              published so any SANA-II driver can offer them, not just ours.
 PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h tlslib.h anxs2ext.h)
 

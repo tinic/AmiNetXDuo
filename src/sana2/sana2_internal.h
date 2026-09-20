@@ -553,8 +553,7 @@ typedef struct AmiRxSlot
      */
     ULONG               sum;
     BOOL                summed;
-    /* The whole ANXD_S2_RXF_* byte the device handed RX_FILLED.  VERIFIED is
-       consumed; CONTINUES is a legacy bit which stack-side GRO ignores. */
+    /* The whole ANXD_S2_RXF_* byte the device handed RX_FILLED. */
     UBYTE               rxflags;
 #endif
     BOOL                posted;

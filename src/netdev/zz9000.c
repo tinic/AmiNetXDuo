@@ -147,8 +147,6 @@ enum
     ZZ_ST_UNWANTED,     /* group frames the hash did not take                */
     ZZ_ST_TXERR,        /* the ARM's transmit result was not 0               */
     ZZ_ST_ISR,          /* top halves that found the Ethernet bit            */
-    ZZ_ST_CONTINUES,    /* legacy counter; GRO classification moved up       */
-    ZZ_ST_RUNS,         /* legacy counter; GRO classification moved up       */
     ZZ_ST_SOFT_EMPTY,   /* passes after a top half that found no frame       */
     ZZ_ST_POLL_WORK,    /* passes with no top half before them that found one */
     ZZ_ST_BURST_MAX,    /* most frames one pass took                         */
@@ -171,8 +169,6 @@ static const char *const zz_stat_names[] =
     "group frames not wanted",
     "transmit results not 0",
     "top halves: Ethernet pending",
-    "frames marked CONTINUES",
-    "runs the mark made",
     "passes after a top half, empty",
     "polled passes that found frames",
     "most frames in one pass",

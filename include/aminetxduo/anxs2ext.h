@@ -9,7 +9,6 @@
 
 #define ANXD_S2_RXF_SUMMED      0x01
 #define ANXD_S2_RXF_VERIFIED    0x02
-#define ANXD_S2_RXF_CONTINUES   0x04    /* legacy; GRO is stack-side */
 
 #define ANXD_S2_TXF_TCP         0x01
 #define ANXD_S2_TXF_UDP         0x02
