@@ -881,6 +881,19 @@ struct AmiSocketBase *bsd_lib_open(
 
     master->sb_Lib.lib_OpenCnt++;
 
+    /*
+     * Exec calls a library's Open vector with task switching forbidden while
+     * it owns LibList.  Everything below the reference increment can block:
+     * the semaphore may be held, netdb loading does DOS I/O, loopback startup
+     * launches and waits for a Process, and the optional TCP: handler does the
+     * same.  The open count now pins this resident even after LibList is made
+     * mutable, so release Exec's outer Forbid for that work and restore it on
+     * every return path.  A caller which entered OpenLibrary() under another
+     * Forbid remains forbidden, as nesting semantics require; we neither can
+     * nor should unwind a critical section owned by the caller.
+     */
+    Permit();
+
     ObtainSemaphore(&master->sb_Lock);
 
     (VOID)ami_netdb_load();
@@ -892,8 +905,9 @@ struct AmiSocketBase *bsd_lib_open(
         if (bsd_netstack_bringup() != AMI_NET_OK)
         {
             ReleaseSemaphore(&master->sb_Lock);
-            master->sb_Lib.lib_OpenCnt--;
             AMI_ERROR("bsdsocket: loopback startup failed");
+            Forbid();
+            master->sb_Lib.lib_OpenCnt--;
             return NULL;
         }
     }
@@ -909,6 +923,7 @@ struct AmiSocketBase *bsd_lib_open(
             netstack_shutdown();
         ReleaseSemaphore(&master->sb_Lock);
 
+        Forbid();
         master->sb_Lib.lib_OpenCnt--;
         return NULL;
     }
@@ -919,6 +934,7 @@ struct AmiSocketBase *bsd_lib_open(
     (VOID)master;
 #endif
 
+    Forbid();
     return child;
 }
 
