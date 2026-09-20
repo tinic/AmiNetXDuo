@@ -1826,7 +1826,8 @@ if(CMAKE_CROSSCOMPILING)
     # the profiler and the trust store always come from the full build.
     add_custom_target(release_libraries)
     add_dependencies(release_libraries
-        bsdsocket_library usergroup_library anxnet_device anxgenet_device)
+        bsdsocket_library usergroup_library anxnet_device anxgenet_device
+        anxzz9000_device)
     if(TARGET anxwifipi_device)
         add_dependencies(release_libraries anxwifipi_device)
     endif()
