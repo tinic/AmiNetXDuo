@@ -115,7 +115,7 @@ for var, new_var, old_var, newname_rx, name in WATCH:
 # DO_ANXNET yes.  A device added to dist/make-dist.sh's DEVICES without a
 # call here would ship and never install, which is the silence this whole
 # gate exists for.
-for name in ("anxnet.device", "anxgenet.device", "anxwifipi.device"):
+for name in ("anxnet.device", "anxgenet.device", "anxzz9000.device", "anxwifipi.device"):
     setline = first(r'\(set\s+dev_file\s+"%s"\)' % re.escape(name))
     call    = first_between(r'\(P_install_device\)', setline, setline + 12) if setline else 0
     print("installer_txn file=%-18s via=P_install_device set=%-4s call=%s"

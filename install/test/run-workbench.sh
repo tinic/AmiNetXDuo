@@ -1252,7 +1252,7 @@ if [ -n "$FOREIGN_MODE" ]; then
         printf 'incomplete staging file from an interrupted install: %s\n' "$_lib" \
             > "$HD/Libs/$_lib.new"
     done
-    for _driver in anxnet.device anxgenet.device anxwifipi.device; do
+    for _driver in anxnet.device anxgenet.device anxzz9000.device anxwifipi.device; do
         printf 'incomplete staging file from an interrupted install: %s\n' \
             "$_driver" > "$HD/Devs/Networks/$_driver.new"
     done
@@ -2104,7 +2104,7 @@ case "$FOREIGN_MODE" in
             echo "  ok      stale $_name.new removed"
         fi
     done
-    for _name in anxnet.device anxgenet.device anxwifipi.device; do
+    for _name in anxnet.device anxgenet.device anxzz9000.device anxwifipi.device; do
         if amiga_path "Devs/Networks/$_name.new" >/dev/null 2>&1; then
             echo "!! replacing $FOREIGN_MODE left stale $_name.new live"
             fail=1
@@ -2134,7 +2134,7 @@ if [ "$NO_DRIVERS" = "1" ]; then
     # Declining the supplied drivers means precisely that: no new driver, no
     # backup, and an existing file remains byte-for-byte what it was.  The
     # selected vendor driver still boots the stack below.
-    for supplied in anxnet.device anxgenet.device anxwifipi.device; do
+    for supplied in anxnet.device anxgenet.device anxzz9000.device anxwifipi.device; do
         [ -f "$HD/Unpacked/AmiNetXDuo/Devs/Networks/$supplied" ] || {
             echo "!! archive is missing $supplied; omission cannot be tested"
             fail=1
@@ -2154,7 +2154,7 @@ if [ "$NO_DRIVERS" = "1" ]; then
     else
         echo "  ok      declining drivers left a clean DEVS:Networks untouched"
     fi
-    for supplied in anxgenet.device anxwifipi.device; do
+    for supplied in anxgenet.device anxzz9000.device anxwifipi.device; do
         if amiga_path "${INST}Devs/Networks/$supplied" >/dev/null 2>&1; then
             echo "!! declining drivers installed $supplied"
             fail=1
@@ -2165,6 +2165,7 @@ if [ "$NO_DRIVERS" = "1" ]; then
         fail=1
     fi
     ANXGENET_INSTALLED=""
+    ANXZZ9000_INSTALLED=""
     ANXWIFIPI_INSTALLED=""
     echo "supplied_drivers=declined"
 else
@@ -2234,7 +2235,37 @@ else
     fi
 fi
 
-# The third driver image, anxwifipi.device, likewise.
+# The third driver image, anxzz9000.device, likewise.
+ANXZZ9000_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxzz9000.device"
+ANXZZ9000_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxzz9000.device" 2>/dev/null || true)
+
+if [ ! -f "$ANXZZ9000_ARCHIVE" ]; then
+    echo "  MISSING Devs/Networks/anxzz9000.device IN THE ARCHIVE"
+    echo "!! dist/make-dist.sh's DEVICES list carries netdev/anxzz9000; the archive"
+    echo "   this ran from has no such file."
+    fail=1
+elif [ -z "$ANXZZ9000_INSTALLED" ] || [ ! -f "$ANXZZ9000_INSTALLED" ]; then
+    echo "  MISSING DEVS:Networks/anxzz9000.device"
+    echo "!! THE INSTALLER DID NOT INSTALL THE ZZ9000 DRIVER.  P_install_device"
+    echo "   in Install-AmiNetXDuo is called once per image; the anxzz9000 call"
+    echo "   did not land a file."
+    fail=1
+else
+    _anz_want=$(shasum "$ANXZZ9000_ARCHIVE"   | cut -d' ' -f1)
+    _anz_got=$(shasum  "$ANXZZ9000_INSTALLED" | cut -d' ' -f1)
+    _anz_bytes=$(wc -c < "$ANXZZ9000_INSTALLED" | tr -d ' ')
+    if [ "$_anz_want" = "$_anz_got" ]; then
+        printf '  ok      %-32s %s bytes\n' \
+               "Devs/Networks/anxzz9000.device" "$_anz_bytes"
+    else
+        printf '  WRONG   %-32s %s bytes\n' \
+               "Devs/Networks/anxzz9000.device" "$_anz_bytes"
+        echo "!! DEVS:Networks/anxzz9000.device is not the driver in the archive."
+        fail=1
+    fi
+fi
+
+# The fourth driver image, anxwifipi.device, likewise.
 ANXWIFIPI_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxwifipi.device"
 ANXWIFIPI_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxwifipi.device" 2>/dev/null || true)
 
@@ -2268,6 +2299,7 @@ echo "devs_networks_before=$DEVS_NETWORKS_BEFORE"
 echo "anxnet_installed=$([ -n "$ANXNET_INSTALLED" ] && echo yes || echo no)"
 echo "anxnet_backup=$([ -n "$ANXNET_OLD" ] && echo yes || echo no)"
 echo "anxgenet_installed=$([ -n "$ANXGENET_INSTALLED" ] && echo yes || echo no)"
+echo "anxzz9000_installed=$([ -n "$ANXZZ9000_INSTALLED" ] && echo yes || echo no)"
 echo "anxwifipi_installed=$([ -n "$ANXWIFIPI_INSTALLED" ] && echo yes || echo no)"
 
 if [ "$DRAWER" = "1" ]; then

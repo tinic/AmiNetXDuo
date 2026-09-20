@@ -70,7 +70,7 @@ LIBS=(bsdsocket usergroup)
 # every reinstall; install/test/run-workbench.sh now asserts the installed copy
 # byte for byte against the one packed here, so the two cannot drift apart
 # again in silence.
-DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
+DEVICES=(netdev/anxnet netdev/anxgenet netdev/anxzz9000 wifipi/anxwifipi)
 CMDS=(AddNetInterface NetSetup NetPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp

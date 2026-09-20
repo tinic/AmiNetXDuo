@@ -54,10 +54,18 @@ drives the A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, X-Surf 100,
 X-Surf 500, NE2000-compatible PCMCIA cards, 3C589 and the two supported
 Megahertz/3Com LAN+modem cards. `anxgenet.device`, the same driver core with only
 the Raspberry Pi 4/CM4's own Ethernet in it, drives that port behind a
-PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). The installer
-offers to put all three supplied drivers in `DEVS:Networks`; on Emu68 it reads
+PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). `anxzz9000.device`
+is the same core for the MNT ZZ9000's Ethernet (`DEVICE=anxzz9000.device`,
+`UNIT=0`): one copy from the card's window into the reader's buffer with the
+checksum summed on the way, INT6 served without a helper task, and on the
+firmware fork at `github.com/tinic/zz9000-firmware` (branch `aminetxduo`) a
+transmit that does not stall the bus; an A3000/030 receives 8.0 Mbit/s against
+3.1 with `ZZ9000Net.device` 2.2 (`docs/plans/zz9000-ethernet.md` has the
+measurements and what the fork changes in the card's firmware). The installer
+offers to put all four supplied drivers in `DEVS:Networks`; on Emu68 it reads
 the device tree and
-creates definitions for the supported Ethernet and Wi-Fi devices it finds.
+creates definitions for the supported Ethernet and Wi-Fi devices it finds, and
+on a ZZ9000 without MNT's driver it names `anxzz9000.device`.
 An interface file selects one with `DEVICE=`. `anxgenet.device` needs [Emu68](https://github.com/michalsc/Emu68/releases)
 1.1 alpha.1 or newer: that is the
 first release line that maps GENET's `/scb` range into the Amiga address space.

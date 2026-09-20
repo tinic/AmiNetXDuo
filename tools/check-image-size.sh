@@ -56,6 +56,9 @@ BUDGETS=(
     # the idle poller (its task, the clock through /soc, three counters):
     # Fitz read 26.5 -> 31.6 MB/s, iperf in 832 -> 910, 2026-09-17.
     "default:src/netdev/anxgenet.device:27500"
+    # 20,744 at the first image with async TX, CONTINUES and the ack
+    # recovery, 2026-09-20; the window copy and the fused sum are the core.
+    "default:src/netdev/anxzz9000.device:23000"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -85,6 +88,7 @@ BUDGETS=(
     "minimal:src/bsdsocket/bsdsocket.library:227700"
     "minimal:src/netdev/anxnet.device:43000"
     "minimal:src/netdev/anxgenet.device:27500"
+    "minimal:src/netdev/anxzz9000.device:23000"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
     # First budgeted as a shipping profile at 0.28.9: 181,012 bytes.  Raised
@@ -97,6 +101,7 @@ BUDGETS=(
     "micro:src/bsdsocket/bsdsocket.library:197632"
     "micro:src/netdev/anxnet.device:43000"
     "micro:src/netdev/anxgenet.device:27500"
+    "micro:src/netdev/anxzz9000.device:23000"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10000"
 )
