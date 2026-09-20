@@ -240,7 +240,7 @@ static ULONG tls_certificate_callback(NX_SECURE_TLS_SESSION *session,
     if (conn->tc_HostNameLength == 0)
         return NX_SECURE_X509_CERTIFICATE_DNS_MISMATCH;
 
-    status = _nx_secure_x509_common_name_dns_check(certificate,
+    status = nx_secure_x509_common_name_dns_check(certificate,
                                                    conn->tc_HostName,
                                                    conn->tc_HostNameLength);
     if (status != NX_SUCCESS)
@@ -303,12 +303,12 @@ static VOID tls_conn_delete_session(TLSConnection *conn)
 {
     if (tls_conn_enter(conn) == 0)
     {
-        AMI_NX_CLEANUP(_nx_secure_tls_session_delete(&conn->tc_Session));
+        AMI_NX_CLEANUP(nx_secure_tls_session_delete(&conn->tc_Session));
         tls_conn_leave(conn);
     }
     else
     {
-        AMI_NX_CLEANUP(_nx_secure_tls_session_delete(&conn->tc_Session));
+        AMI_NX_CLEANUP(nx_secure_tls_session_delete(&conn->tc_Session));
     }
 }
 
@@ -365,7 +365,7 @@ struct TLSConnection *tls_TLSOpenA(
     if (!TLSBase->tb_CryptoReady)
     {
         /*
-         * _nx_secure_tls_initialize() IS WHAT CREATES _nx_secure_tls_protection,
+         * nx_secure_tls_initialize() IS WHAT CREATES _nx_secure_tls_protection,
          * and nothing else does: nx_secure documents it as the application's
          * call, and the only other tx_mutex_create() in the tree is the
          * per-session transmit mutex.  Without it tls_conn_enter() below takes
@@ -375,7 +375,7 @@ struct TLSConnection *tls_TLSOpenA(
          * function also resets the process-wide session list, which is empty
          * only before the first session exists.
          */
-        _nx_secure_tls_initialize();
+        nx_secure_tls_initialize();
 
         /* Idempotent, not re-entrant: hence the semaphore. */
         (VOID)ami_tls_crypto_initialize();
@@ -571,7 +571,7 @@ struct TLSConnection *tls_TLSOpenA(
 
     /* ---- buffers -------------------------------------------------------- */
 
-    status = _nx_secure_tls_metadata_size_calculate(&ami_crypto_tls_ciphers_ecc,
+    status = nx_secure_tls_metadata_size_calculate(&ami_crypto_tls_ciphers_ecc,
                                                      &metadata_size);
     if (status != NX_SUCCESS || metadata_size == 0)
     {
@@ -610,7 +610,7 @@ struct TLSConnection *tls_TLSOpenA(
         goto fail;
     }
 
-    status = _nx_secure_tls_session_create(&conn->tc_Session,
+    status = nx_secure_tls_session_create(&conn->tc_Session,
                                             &ami_crypto_tls_ciphers_ecc,
                                             (VOID *)conn->tc_Metadata,
                                             conn->tc_MetadataSize);
@@ -621,12 +621,12 @@ struct TLSConnection *tls_TLSOpenA(
         goto fail;
     }
 
-    /* _nx_secure_tls_ecc_initialize() writes both the session's list and the
+    /* nx_secure_tls_ecc_initialize() writes both the session's list and the
        process-wide X.509 list, so it gets the complete set; the session's own
        offer is narrowed below. */
     /* REQUIRED.  A session with no curve list offers none, and the handshake
        fails later with an error that says nothing about this. */
-    status = _nx_secure_tls_ecc_initialize(&conn->tc_Session,
+    status = nx_secure_tls_ecc_initialize(&conn->tc_Session,
                                          ami_crypto_ecc_supported_groups,
                                          (USHORT)ami_crypto_ecc_supported_groups_size,
                                          ami_crypto_ecc_curves);
@@ -650,7 +650,7 @@ struct TLSConnection *tls_TLSOpenA(
 
     /* REQUIRED.  Without the record buffer the session has nowhere to
        assemble a record. */
-    status = _nx_secure_tls_session_packet_buffer_set(&conn->tc_Session,
+    status = nx_secure_tls_session_packet_buffer_set(&conn->tc_Session,
                                                     conn->tc_RecordBuffer,
                                                     conn->tc_RecordBufferSize);
     if (status != NX_SUCCESS)
@@ -664,7 +664,7 @@ struct TLSConnection *tls_TLSOpenA(
     {
         /* REQUIRED.  These are the slots the peer's chain is parsed into;
            short of them the certificate cannot be checked at all. */
-        status = _nx_secure_tls_remote_certificate_allocate(
+        status = nx_secure_tls_remote_certificate_allocate(
                   &conn->tc_Session, &conn->tc_Remote[i],
                   &conn->tc_RemoteDer[i * TLS_REMOTE_DER_MAX],
                   TLS_REMOTE_DER_MAX);
@@ -681,7 +681,7 @@ struct TLSConnection *tls_TLSOpenA(
         /* REQUIRED.  A server with more than one certificate picks by SNI;
            without it this connection gets whichever one is default, and the
            name check then fails for a reason that is not the real one. */
-        status = _nx_secure_tls_session_sni_extension_set(&conn->tc_Session,
+        status = nx_secure_tls_session_sni_extension_set(&conn->tc_Session,
                                                         &conn->tc_Sni);
         if (status != NX_SUCCESS)
         {
@@ -718,7 +718,7 @@ struct TLSConnection *tls_TLSOpenA(
        own "do not check validity dates". */
     /* REQUIRED.  This is where certificate validity dates are read from; a
        session without it checks them against nothing. */
-    status = _nx_secure_tls_session_time_function_set(&conn->tc_Session,
+    status = nx_secure_tls_session_time_function_set(&conn->tc_Session,
                                                     tls_time_now);
     if (status != NX_SUCCESS)
     {
@@ -736,7 +736,7 @@ struct TLSConnection *tls_TLSOpenA(
         /* REQUIRED, and the most consequential of these: this callback IS
            the certificate check.  A session that lost it completes a
            handshake against a certificate nothing looked at. */
-        status = _nx_secure_tls_session_certificate_callback_set(
+        status = nx_secure_tls_session_certificate_callback_set(
                   &conn->tc_Session, tls_certificate_callback);
         if (status != NX_SUCCESS)
         {
@@ -769,7 +769,7 @@ struct TLSConnection *tls_TLSOpenA(
      * long as TLSA_Timeout allows, and nx_secure drops the protection mutex
      * around every one of those waits itself.
      */
-    status = _nx_secure_tls_session_start(&conn->tc_Session,
+    status = nx_secure_tls_session_start(&conn->tc_Session,
                                            tls_transport_socket(&conn->tc_Transport),
                                            conn->tc_Timeout);
 
@@ -837,18 +837,18 @@ VOID tls_TLSClose(register struct TLSConnection *conn    TLSLIB_REG("a0"),
             conn->tc_Pending = NX_NULL;
         }
 
-        AMI_NX_CLEANUP(_nx_secure_tls_session_end(&conn->tc_Session,
+        AMI_NX_CLEANUP(nx_secure_tls_session_end(&conn->tc_Session,
                                           5UL * NX_IP_PERIODIC_RATE));
 
         /* Under the same lock as the end above: session_delete() edits
            NetX Secure's global list, and the two must be one step. */
-        AMI_NX_CLEANUP(_nx_secure_tls_session_delete(&conn->tc_Session));
+        AMI_NX_CLEANUP(nx_secure_tls_session_delete(&conn->tc_Session));
 
         tls_conn_leave(conn);
     }
     else
     {
-        AMI_NX_CLEANUP(_nx_secure_tls_session_delete(&conn->tc_Session));
+        AMI_NX_CLEANUP(nx_secure_tls_session_delete(&conn->tc_Session));
     }
 
     /* The descriptor is not closed: it stays the caller's. */
@@ -886,7 +886,7 @@ LONG tls_TLSRead(register struct TLSConnection *conn    TLSLIB_REG("a0"),
 
         /* No outer lock: this blocks on the network for TLSA_Timeout, and
            nx_secure drops the protection mutex around that wait itself. */
-        status = _nx_secure_tls_session_receive(&conn->tc_Session, &packet,
+        status = nx_secure_tls_session_receive(&conn->tc_Session, &packet,
                                                  conn->tc_Timeout);
 
         tls_trace("[resume] session_receive -> %ld packet %lx state %ld",
@@ -995,7 +995,7 @@ LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
             chunk = TLS_WRITE_CHUNK;
 
         packet = NX_NULL;
-        status = _nx_secure_tls_packet_allocate(&conn->tc_Session, pool,
+        status = nx_secure_tls_packet_allocate(&conn->tc_Session, pool,
                                                  &packet, conn->tc_Timeout);
         if (status != NX_SUCCESS || packet == NX_NULL)
             break;
@@ -1008,7 +1008,7 @@ LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
             break;
         }
 
-        status = _nx_secure_tls_session_send(&conn->tc_Session, packet,
+        status = nx_secure_tls_session_send(&conn->tc_Session, packet,
                                               conn->tc_Timeout);
         if (status != NX_SUCCESS)
         {

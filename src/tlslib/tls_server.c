@@ -7,7 +7,7 @@
  * nothing could reach.  This is the door: two DER files off disk, an
  * NX_SECURE_X509_CERT built from them, and that certificate added to the
  * session as the local one.  tls_conn.c does the rest by handing the transport
- * `server` and letting _nx_secure_tls_session_start() take the other branch.
+ * `server` and letting nx_secure_tls_session_start() take the other branch.
  *
  * DER AND NOT PEM, and one certificate and not a chain.  A PEM reader is
  * base64 plus a line parser plus a multi-certificate walk, in a library on a
@@ -132,7 +132,7 @@ LONG tls_server_identity(TLSConnection *conn, CONST_STRPTR cert_path,
      * tc_LocalDer, which lives as long as the connection does.  That is the
      * same arrangement tls_store.c uses for a root.
      */
-    status = _nx_secure_x509_certificate_initialize(&conn->tc_LocalCert,
+    status = nx_secure_x509_certificate_initialize(&conn->tc_LocalCert,
                                                      conn->tc_LocalDer,
                                                      (USHORT)conn->tc_LocalDerLength,
                                                      NX_NULL, 0,
@@ -181,7 +181,7 @@ LONG tls_server_identity(TLSConnection *conn, CONST_STRPTR cert_path,
          * into -- every status in it was discarded for that reason -- so the
          * only honest report is the return value.)
          */
-        if (_nx_secure_tls_session_protocol_version_override(
+        if (nx_secure_tls_session_protocol_version_override(
                 &conn->tc_Session, NX_SECURE_TLS_VERSION_TLS_1_2)
                     != NX_SUCCESS)
             return TLS_ERR_INTERNAL;

@@ -31,7 +31,13 @@
 #include "nx_api.h"
 #include "nx_packet.h"          /* the four _nx_packet_* this library defines */
 #include "nx_tcp.h"             /* and the two _nx_tcp_socket_* it defines    */
-#include "nx_secure_tls.h"
+
+/* tls.library validates its public handles and arguments before reaching
+   NetX Secure.  Keep the previous core-call cost while using the vendor's
+   published API spellings; in this translation boundary those macros resolve
+   to the unchecked implementations we used to name directly. */
+#define NX_SECURE_DISABLE_ERROR_CHECKING
+#include "nx_secure_tls_api.h"
 #include "nx_secure_x509.h"
 
 #include <exec/types.h>

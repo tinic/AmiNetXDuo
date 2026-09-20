@@ -452,7 +452,7 @@ static VOID tls_store_supply(TLSConnection *conn,
          * this connection owns until TLSClose(), which is the lifetime
          * nx_secure needs -- the parsed certificate points into it.
          */
-        status = _nx_secure_x509_certificate_initialize(
+        status = nx_secure_x509_certificate_initialize(
                      &conn->tc_Root[i],
                      &conn->tc_RootDer[i * TLS_ROOT_DER_MAX],
                      (USHORT)length, NX_NULL, 0, NX_NULL, 0,
