@@ -28,6 +28,11 @@ UBYTE netdev_rx_verify4(const UBYTE *ip, UWORD plen, ULONG sum);
 UBYTE netdev_rx_verify6(const UBYTE *ip, UWORD plen, ULONG sum);
 UBYTE netdev_rx_verify(const UBYTE *ip, UWORD plen, ULONG sum);
 
+/* Turn a GEM-style hardware verdict (2 = IP+TCP, 3 = IP+UDP) into the
+ * published VERIFIED promise, after checking the structural restrictions
+ * that promise makes but without recomputing either checksum. */
+UBYTE netdev_rx_trust4(const UBYTE *ip, UWORD plen, UBYTE verdict);
+
 /* Build the GRO key after verification.  Keeping this separate lets a driver
    which only wants a verdict link no stream-tracking code at all. */
 VOID netdev_rx_segment4(const UBYTE *ip, NetdevRxSegment *seg);

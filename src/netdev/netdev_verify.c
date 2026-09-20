@@ -93,6 +93,40 @@ UBYTE netdev_rx_verify4(const UBYTE *ip, UWORD plen, ULONG sum)
     return ANXD_S2_RXF_VERIFIED;
 }
 
+UBYTE netdev_rx_trust4(const UBYTE *ip, UWORD plen, UBYTE verdict)
+{
+    UWORD total;
+    UWORD tlen;
+    UBYTE proto;
+
+    if (ip == NULL || ip[0] != 0x45)
+        return 0;                       /* not IPv4, or IP options */
+    total = nd_be16(ip + 2);
+    if (total != plen || total < 20)
+        return 0;                       /* padded, truncated, or short */
+    if ((ip[6] & 0x3f) != 0 || ip[7] != 0)
+        return 0;                       /* MF, or a fragment offset */
+
+    proto = ip[9];
+    if ((verdict == 2 && proto != 6) ||
+        (verdict == 3 && proto != 17) ||
+        (verdict != 2 && verdict != 3))
+        return 0;
+
+    tlen = (UWORD)(total - 20);
+    if (proto == 17)
+    {
+        if (tlen < 8 || nd_be16(ip + 24) != tlen)
+            return 0;
+        if (nd_be16(ip + 26) == 0)      /* IPv4 UDP checksum absent */
+            return 0;
+    }
+    else if (tlen < 20)
+        return 0;
+
+    return ANXD_S2_RXF_VERIFIED;
+}
+
 UBYTE netdev_rx_verify6(const UBYTE *ip, UWORD plen, ULONG sum)
 {
     UWORD tlen;

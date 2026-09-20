@@ -81,6 +81,7 @@ static BOOL zz_tx_reclaim(NetdevNic *nic);
 #define ZZ_REG_MAC_MID      0x0086UL
 #define ZZ_REG_MAC_LO       0x0088UL
 #define ZZ_REG_RX_STATUS    0x008cUL
+#define ZZ_REG_RX_META      0x00a6UL    /* fork: current GEM RX verdict */
 
 #define ZZ_REG_TX_STATUS    0x008aUL    /* the fork's firmware, else reads 0 */
 
@@ -96,6 +97,11 @@ static BOOL zz_tx_reclaim(NetdevNic *nic);
 #define ZZ_TX_LEN_MASK      0x07ffu
 #define ZZ_TXS_PRESENT      0x8000u
 #define ZZ_TXS_COUNT        0x7fffu
+
+#define ZZ_RXM_PRESENT      0x8000u
+#define ZZ_RXM_MASK         0x0003u
+#define ZZ_RXM_TCP          2u
+#define ZZ_RXM_UDP          3u
 
 #define ZZ_INT_ETH          0x0001      /* enable, and "pending" on a read */
 #define ZZ_INT_ETH_ACK      (8 | 16)    /* what MNT's driver writes to clear */
@@ -146,6 +152,8 @@ enum
     ZZ_ST_LATE_MISS,    /* empty passes where it never did within the budget */
     ZZ_ST_EMPTY,        /* service passes that found no frame                */
     ZZ_ST_ACK_RECOVER,  /* rejected serial handshake recovered compatibly    */
+    ZZ_ST_HW_VERIFIED,  /* frames certified by the GEM descriptor             */
+    ZZ_ST_HW_FALLBACK,  /* GEM verdict outside the published RX contract      */
     ZZ_ST_COUNT
 };
 
@@ -167,6 +175,8 @@ static const char *const zz_stat_names[] =
     "empty pass, header never appeared",
     "service passes with no frame",
     "rejected serial acknowledgements recovered",
+    "frames verified by GEM hardware",
+    "GEM verdicts checked again in software",
     NULL
 };
 
@@ -182,7 +192,7 @@ typedef struct ZzCore
     NetdevRxGro gro;        /* the CONTINUES key, netdev_verify.h           */
     UBYTE       after_isr;  /* set by the top half, cleared by the pass that
                                follows it: which context a pass ran in     */
-    UBYTE       pad;
+    UBYTE       rx_meta;    /* firmware exposes REG_ZZ_ETH_RX_META          */
 } ZzCore;
 
 static ZzCore zz_cores[2];
@@ -259,6 +269,7 @@ static LONG zz_attach(NetdevNic *nic)
     zz_cores_used++;
     ZZ(nic)->gro.live  = 0;
     ZZ(nic)->after_isr = 0;
+    ZZ(nic)->rx_meta   = 0;
 
     /*
      * The station address the firmware programmed into the GEM: the card's
@@ -301,6 +312,7 @@ static LONG zz_attach(NetdevNic *nic)
     {
         UWORD txs  = zz_get(nic, ZZ_REG_TX_STATUS);
         BOOL  fork = (BOOL)((txs & ZZ_TXS_PRESENT) != 0);
+        UWORD rxm  = zz_get(nic, ZZ_REG_RX_META);
 
         nic->txb_cnt = fork ? ZZ_TX_SLOTS : 1;
         nic->tx_done = (UWORD)(txs & ZZ_TXS_COUNT);
@@ -309,6 +321,7 @@ static LONG zz_attach(NetdevNic *nic)
            pauses the wire). */
         nic->rx_capacity = (fork ? ZZ_ARM_RING_FRAMES_FORK
                                  : ZZ_ARM_RING_FRAMES_MNT) * (1500UL + 14UL);
+        ZZ(nic)->rx_meta = (UBYTE)((rxm & ZZ_RXM_PRESENT) != 0);
     }
     nic->txb_inuse = 0;
     nic->read_hdr  = NULL;
@@ -540,10 +553,50 @@ static BOOL zz_rint(NetdevNic *nic)
 
         if (dst != NULL)
         {
-            UWORD plen  = (UWORD)(len - NETDEV_HDR_LEN);
-            ULONG sum   = zz_copy_payload_sum(dst, frame + NETDEV_HDR_LEN, plen);
-            UBYTE flags = ANXD_S2_RXF_SUMMED;
-            ZzCore *c   = ZZ(nic);
+            UWORD  plen   = (UWORD)(len - NETDEV_HDR_LEN);
+            ULONG  sum    = 0;
+            UBYTE  flags  = 0;
+            UBYTE  v      = 0;
+            UBYTE  hw     = 0;
+            BOOL   copied = FALSE;
+            ZzCore *c     = ZZ(nic);
+
+            if (c->rx_meta)
+            {
+                UWORD rxm = zz_get(nic, ZZ_REG_RX_META);
+
+                if ((rxm & ZZ_RXM_PRESENT) != 0)
+                    hw = (UBYTE)(rxm & ZZ_RXM_MASK);
+            }
+
+            /* The GEM has already read every byte and discards a frame whose
+             * IPv4 or transport checksum fails.  Its descriptor codes 2 and
+             * 3 certify TCP and UDP respectively.  Copy without the 68k's
+             * ADD/ADDX per longword, then check only the structural promises
+             * ANXD_S2_RXF_VERIFIED makes.  The uncommon mismatch (options,
+             * padding, or malformed length) is copied again with a sum so the
+             * established software path remains the exact fallback. */
+            if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
+                buf[12] == 0x08 && buf[13] == 0x00 &&
+                (hw == ZZ_RXM_TCP || hw == ZZ_RXM_UDP))
+            {
+                zz_copy_frame(dst, frame + NETDEV_HDR_LEN, plen);
+                copied = TRUE;
+                v = netdev_rx_trust4(dst, plen, hw);
+                if (v != 0)
+                {
+                    flags = v;
+                    nic->core_stat[ZZ_ST_HW_VERIFIED]++;
+                }
+                else
+                    nic->core_stat[ZZ_ST_HW_FALLBACK]++;
+            }
+
+            if (v == 0)
+            {
+                sum = zz_copy_payload_sum(dst, frame + NETDEV_HDR_LEN, plen);
+                flags = ANXD_S2_RXF_SUMMED;
+            }
 
             /*
              * The verdict, then the mark: a verified TCP segment that is the
@@ -557,7 +610,9 @@ static BOOL zz_rint(NetdevNic *nic)
                 buf[12] == 0x08 && buf[13] == 0x00)
             {
                 NetdevRxSegment seg;
-                UBYTE v = netdev_rx_verify4(dst, plen, sum);
+
+                if (!copied || v == 0)
+                    v = netdev_rx_verify4(dst, plen, sum);
 
                 if (v != 0)
                     netdev_rx_segment4(dst, &seg);
@@ -571,7 +626,8 @@ static BOOL zz_rint(NetdevNic *nic)
                      buf[12] == 0x86 && buf[13] == 0xdd)
             {
                 NetdevRxSegment seg;
-                UBYTE v = netdev_rx_verify6(dst, plen, sum);
+
+                v = netdev_rx_verify6(dst, plen, sum);
 
                 if (v != 0)
                     netdev_rx_segment6(dst, &seg);
