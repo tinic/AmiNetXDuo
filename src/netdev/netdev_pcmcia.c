@@ -218,10 +218,9 @@ static VOID pc_settle(ULONG us)
 
     /* The floor is this CPU's measured work per raster line, not the old
        four-reads-per-microsecond guess.  The fallback matters only on a
-       machine with a PCMCIA slot but no moving Amiga beam, and it is the
-       floor netdev_wait_begin() takes -- the beam is the duration. */
+       machine with a PCMCIA slot but no moving Amiga beam. */
     fallback = (us <= 0x3fffffffUL) ? us * 4u : 0xffffffffUL;
-    spins    = netdev_clock_floor_spins(us, fallback);
+    spins = netdev_clock_floor_spins(us, fallback);
     netdev_wait_begin(&w, us, spins);
 
     do
