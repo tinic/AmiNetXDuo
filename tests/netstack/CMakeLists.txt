@@ -715,6 +715,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_caller.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_claim.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_lock.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_port.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_routes.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_client_pool.c"

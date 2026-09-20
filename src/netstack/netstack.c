@@ -20,7 +20,6 @@
 #include "aminetxduo/random.h"
 
 #include <exec/memory.h>
-#include <exec/semaphores.h>
 #include <proto/exec.h>
 
 /*
@@ -42,8 +41,6 @@ __attribute__((weak)) VOID tx_application_define(VOID *first_unused_memory)
 }
 #pragma GCC diagnostic pop
 
-static struct SignalSemaphore   ami_ns_lock;
-static volatile BOOL            ami_ns_lock_ready;
 static AmiNetStack             *ami_ns;
 static BOOL                     ami_ns_system_initialised;
 static BOOL                     ami_ns_kernel_started;
@@ -51,28 +48,6 @@ static BOOL                     ami_ns_kernel_started;
 static VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
                                      const char *reason);
 static VOID ami_ns_gateway_name_primary(AmiNetStack *ns, UWORD index);
-
-static VOID ami_ns_lock_init(VOID)
-{
-    Forbid();
-    if (!ami_ns_lock_ready)
-    {
-        InitSemaphore(&ami_ns_lock);
-        ami_ns_lock_ready = TRUE;
-    }
-    Permit();
-}
-
-VOID ami_ns_lock_obtain(VOID)
-{
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
-}
-
-VOID ami_ns_lock_release(VOID)
-{
-    ReleaseSemaphore(&ami_ns_lock);
-}
 
 AmiNetStack *ami_netstack_raw(VOID)
 {
@@ -1949,21 +1924,19 @@ static LONG ami_ns_startup(BOOL loopback_only)
 {
     LONG status;
 
-    ami_ns_lock_init();
-
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
 
     if (ami_ns != NULL)
     {
         ami_ns->ns_Refs++;
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return AMI_NET_OK;
     }
 
     status = ami_ns_kernel_stop_locked();
     if (status != AMI_NET_OK)
     {
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return status;
     }
 
@@ -1974,7 +1947,7 @@ static LONG ami_ns_startup(BOOL loopback_only)
         ami_ns->ns_Refs = 1;
     }
 
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return status;
 }
@@ -1996,15 +1969,13 @@ VOID netstack_shutdown(VOID)
     AmiNetCaller  caller;
     AmiNetStack  *ns;
 
-    ami_ns_lock_init();
-
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
 
     ns = ami_ns;
     if (ns == NULL)
     {
         (VOID)ami_ns_kernel_stop_locked();
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return;
     }
 
@@ -2013,7 +1984,7 @@ VOID netstack_shutdown(VOID)
 
     if (ns->ns_Refs > 0)
     {
-        ReleaseSemaphore(&ami_ns_lock);
+        ami_ns_lock_release();
         return;
     }
 
@@ -2049,25 +2020,23 @@ VOID netstack_shutdown(VOID)
      */
     (VOID)ami_ns_kernel_stop_locked();
 
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 }
 
 BOOL netstack_can_unload(VOID)
 {
     BOOL safe;
 
-    ami_ns_lock_init();
-
     /*
      * Attempt, not Obtain: bsd_lib_expunge() runs under Forbid() and must not
      * Wait().  A contended lock means "cannot prove it is safe", which is the
      * direction to fail in.
      */
-    if (!AttemptSemaphore(&ami_ns_lock))
+    if (!ami_ns_lock_attempt())
         return FALSE;
 
     safe = (ami_ns == NULL && !ami_ns_kernel_started) ? TRUE : FALSE;
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return safe;
 }
@@ -2761,10 +2730,9 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
 {
     LONG rc;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
     rc = ami_ns_interface_remove_locked(index, force);
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return rc;
 }
@@ -2783,8 +2751,7 @@ LONG netstack_interface_remove_named(const char *name, BOOL force)
     if (name == NULL)
         return AMI_NET_ERR_CONFIG;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
 
     ns = ami_ns;
     if (ns == NULL || !ns->ns_IpCreated)
@@ -2807,7 +2774,7 @@ LONG netstack_interface_remove_named(const char *name, BOOL force)
     }
 
 out:
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
     return rc;
 }
 
@@ -3625,10 +3592,9 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 {
     LONG rc;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
     rc = ami_ns_interface_add_locked(cfg, index_out, TRUE, NULL);
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return rc;
 }
@@ -3807,10 +3773,9 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
 {
     LONG rc;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    ami_ns_lock_obtain();
     rc = ami_ns_interface_start_locked(cfg, index_out, TRUE);
-    ReleaseSemaphore(&ami_ns_lock);
+    ami_ns_lock_release();
 
     return rc;
 }

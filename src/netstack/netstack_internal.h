@@ -186,6 +186,7 @@ ULONG ami_ns_pool_packets(VOID);
 /* The singleton's lifecycle/interface lock.  Files outside netstack.c never
    see the semaphore itself, so its initialization remains one operation. */
 VOID ami_ns_lock_obtain(VOID);
+BOOL ami_ns_lock_attempt(VOID);
 VOID ami_ns_lock_release(VOID);
 
 BOOL ami_ns_same_name(const char *a, const char *b);
