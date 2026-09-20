@@ -778,38 +778,23 @@ APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out)
     return base;
 }
 
-/* The insertion callback already owns the handle.  Reuse the same CIS and COR
-   path without trying OwnCard() a second time.  keep_handle leaves us queued
-   after a foreign or failed replacement so the next insertion is observed. */
-static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
+static BOOL pc_read_identity(struct CardHandle *handle, UWORD *manf_out,
+                             UWORD *prod_out, UBYTE *funcid_out,
+                             BOOL keep_handle)
 {
-    struct CardHandle *handle = &pc_handle;
-    const NetdevCard  *card;
-    UWORD              manf = 0;
-    UWORD              prod = 0;
-    /* Zeroed for the analyzer: CopyTuple() fills it through inline asm.  The
-       returned tuple length, not these zeroes, decides which bytes are real. */
-    UBYTE            buf[PC_TUPLE_BUF] = { 0 };
-    volatile UBYTE  *attr;
-    ULONG            cfg_base;
-    UBYTE            index;
-    UWORD            reg_off;
-    ULONG            regs;
-    APTR             board;
-    UWORD            tuple_len;
-    UWORD            ci = ANXDIAG_NOCARD;
-    UBYTE            funcid = (UBYTE)CIS_FUNC_LAN;
+    UBYTE buf[PC_TUPLE_BUF] = { 0 };
+    UWORD tuple_len;
+    UWORD ci = ANXDIAG_NOCARD;
+    UWORD manf = 0;
+    UWORD prod = 0;
+    UBYTE funcid = (UBYTE)CIS_FUNC_LAN;
 
-    /* A second claim -- a card taken out and another put in -- must not read
-       the first card's CIS. */
+    /* A replacement must not inherit the first card's saved CIS or address. */
     pc_cis_len      = 0;
     pc_have_node_id = FALSE;
 
-    /*
-     * CISTPL_FUNCID is optional and real cards ship without it: absent means
-     * assume LAN adapter, present must be 6.  CISTPL_CONFIG and
-     * CISTPL_CFTABLE_ENTRY carry values that cannot be guessed: required.
-     */
+    /* FUNCID is optional; when present it must describe LAN or a container
+       whose per-function chains can contain LAN. */
     if (!pc_cis_read(handle, CISTPL_FUNCID, buf, &tuple_len))
     {
         pc_trace("pc: no funcid, assume lan ", 0);
@@ -821,38 +806,29 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
         {
             netdev_diag_note(ANXDIAG_PC_NOTLAN, ci, ANXDIAG_ABSENT);
             pc_reject_owned(keep_handle);
-            return NULL;
+            return FALSE;
         }
         funcid = buf[2];
         pc_trace("pc: funcid ", (ULONG)funcid);
         netdev_diag_note(ANXDIAG_PC_FUNCID, ci, (ULONG)funcid);
-        /*
-         * CIS_FUNC_MULTI is not "this is not a LAN card".  It is what a
-         * multifunction card states in the shared chain, and the real function
-         * codes are one per chain in the chains CISTPL_LONGLINK_MFC names --
-         * so the answer to "is there a LAN adapter here" is the walk below and
-         * not this tuple.
-         */
-        if (funcid != (UBYTE)CIS_FUNC_LAN && funcid != (UBYTE)CIS_FUNC_MULTI)
+        if (funcid != (UBYTE)CIS_FUNC_LAN &&
+            funcid != (UBYTE)CIS_FUNC_MULTI)
         {
             netdev_diag_note(ANXDIAG_PC_NOTLAN, ci, (ULONG)funcid);
             pc_reject_owned(keep_handle);
-            return NULL;
+            return FALSE;
         }
     }
 
-    /* A MANFID that is present but truncated is not an absent identity:
-       accepting it as one could select the generic NE2000 row for another
-       chip. */
+    /* A truncated MANFID is corrupt, not the same as no identity tuple. */
     if (pc_cis_read(handle, CISTPL_MANFID, buf, &tuple_len))
     {
         if (tuple_len < 4u)
         {
             netdev_diag_note(ANXDIAG_PC_MANFID, ci, ANXDIAG_ABSENT);
             pc_reject_owned(keep_handle);
-            return NULL;
+            return FALSE;
         }
-        /* Little-endian words, which is how every tuple carries a number. */
         manf = (UWORD)(((UWORD)buf[3] << 8) | (UWORD)buf[2]);
         prod = (UWORD)(((UWORD)buf[5] << 8) | (UWORD)buf[4]);
         pc_trace("pc: manfid ", (ULONG)manf);
@@ -860,9 +836,8 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
                          ((ULONG)manf << 16) | (ULONG)prod);
     }
     else
-    {
         netdev_diag_note(ANXDIAG_PC_MANFID, ci, ANXDIAG_ABSENT);
-    }
+
     (VOID)pc_cis_read(handle, CISTPL_VERS_1, buf, NULL);
 
     if (pc_cis_read(handle, CISTPL_FUNCE, buf, &tuple_len))
@@ -888,9 +863,147 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
         }
     }
     else
-    {
         netdev_diag_note(ANXDIAG_PC_FUNCE, ci, ANXDIAG_ABSENT);
+
+    *manf_out   = manf;
+    *prod_out   = prod;
+    *funcid_out = funcid;
+    return TRUE;
+}
+
+static APTR pc_enable_owned(const NetdevCard **card_out, UWORD manf, UWORD prod,
+                            ULONG cfg_base, UBYTE index, BOOL keep_handle)
+{
+    const NetdevCard *card;
+    volatile UBYTE   *attr;
+    UWORD             reg_off;
+    ULONG             regs;
+    APTR              board;
+    UWORD             ci = ANXDIAG_NOCARD;
+
+    card = netdev_card_by_cis(manf, prod);
+    if (card == NULL)
+    {
+        netdev_diag_note(ANXDIAG_PC_NOROW, ci,
+                         ((ULONG)manf << 16) | (ULONG)prod);
+        pc_reject_owned(keep_handle);
+        return NULL;
     }
+    ci = netdev_diag_card(card);
+    netdev_diag_note(ANXDIAG_PC_CARD, ci, (ULONG)ci);
+
+    /* The row's register offset is a fallback.  When the CIS names an I/O
+       base and enough decoded lines, shift the board so every derived
+       register address follows the measured placement. */
+    reg_off = card->reg_off;
+    if (pc_have_pick)
+        reg_off = netdev_cis_io_off(&pc_pick, card->reg_off);
+    regs  = (ULONG)card->base + (ULONG)reg_off;
+    board = (APTR)(ULONG)((ULONG)card->base +
+                          (ULONG)reg_off - (ULONG)card->reg_off);
+    netdev_diag_note(ANXDIAG_PC_IOOFF, ci, (ULONG)reg_off);
+
+    /* Select I/O mode and remove write protection before writing the COR. */
+    {
+        UBYTE got = pc_misc_control(&pc_handle,
+                                    CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO);
+
+        pc_trace("pc: iomode ", (ULONG)got);
+        netdev_diag_note(ANXDIAG_PC_IOMODE, ci,
+                         (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
+        netdev_diag_note(ANXDIAG_PC_MISC, ci, (ULONG)got);
+    }
+
+    {
+        UBYTE cor    = pc_mfc ? netdev_cis_mfc_cor(&pc_fn) : index;
+        UWORD rounds = 0;
+
+        pc_used = 1;
+        attr = pc_config_reg(cfg_base, CIS_REG_COR);
+        *attr = cor;
+        pc_trace("pc: cor ", (ULONG)(APTR)attr);
+        netdev_diag_note(ANXDIAG_PC_COR, ci, (ULONG)(APTR)attr);
+        netdev_diag_note(ANXDIAG_PC_CORVAL, ci, (ULONG)cor);
+
+        /* Multifunction cards also need the fixed Gayle I/O placement in
+           their per-function decode registers. */
+        if (pc_mfc && netdev_cis_has_iobase(&pc_fn))
+        {
+            *pc_config_reg(cfg_base, CIS_REG_IOBASE_0) =
+                (UBYTE)(reg_off & 0xffu);
+            *pc_config_reg(cfg_base, CIS_REG_IOBASE_1) = (UBYTE)(reg_off >> 8);
+            if ((pc_fn.cfg_mask & (UWORD)(1u << CIS_REG_IOSIZE)) != 0)
+                *pc_config_reg(cfg_base, CIS_REG_IOSIZE) =
+                    netdev_cis_mfc_iosize(&pc_fn);
+            netdev_diag_note(ANXDIAG_PC_MFCIOBASE, ci, (ULONG)reg_off);
+        }
+
+        if (!pc_chip_settles(card, regs, &rounds))
+        {
+            netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
+            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
+
+            /* Some cards/documentation express TPCC_RADR in doubled
+               attribute-memory units.  Retry there only after the direct
+               address failed to wake the chip. */
+            attr = (volatile UBYTE *)(ULONG)
+                       (PC_ATTR_BASE +
+                        (((cfg_base + PC_COR_OFF) * PC_ATTR_STRIDE) &
+                         (PC_ATTR_SIZE - 1UL)));
+            *attr = cor;
+            pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
+            netdev_diag_note(ANXDIAG_PC_COR2, ci, (ULONG)(APTR)attr);
+
+            if (!pc_chip_settles(card, regs, &rounds))
+            {
+                pc_trace("pc: chip silent ", 0);
+                netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
+                netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
+                netdev_diag_note(ANXDIAG_PC_SILENT, ci, regs);
+                pc_reject_owned(keep_handle);
+                return NULL;
+            }
+            netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
+            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
+        }
+        else
+        {
+            netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
+            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
+        }
+    }
+
+    /* OwnCard() already enabled BSY/IRQ.  A second CardMiscControl() call
+       would mask its argument to WR|DIGAUDIO and erase the I/O-mode write. */
+    pc_trace("pc: status irq v ", (ULONG)CardResource->lib_Version);
+    netdev_diag_note(ANXDIAG_PC_IRQMODE, ci,
+                     (ULONG)CardResource->lib_Version);
+    pc_trace("pc: claimed ", (ULONG)board);
+    netdev_diag_note(ANXDIAG_PC_CLAIMED, ci, regs);
+
+    *card_out = card;
+    return board;
+}
+
+/* The insertion callback already owns the handle.  Reuse the same CIS and COR
+   path without trying OwnCard() a second time.  keep_handle leaves us queued
+   after a foreign or failed replacement so the next insertion is observed. */
+static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
+{
+    struct CardHandle *handle = &pc_handle;
+    UWORD              manf = 0;
+    UWORD              prod = 0;
+    /* Zeroed for the analyzer: CopyTuple() fills it through inline asm.  The
+       returned tuple length, not these zeroes, decides which bytes are real. */
+    UBYTE            buf[PC_TUPLE_BUF] = { 0 };
+    ULONG            cfg_base;
+    UBYTE            index;
+    UWORD            tuple_len;
+    UWORD            ci = ANXDIAG_NOCARD;
+    UBYTE            funcid;
+
+    if (!pc_read_identity(handle, &manf, &prod, &funcid, keep_handle))
+        return NULL;
 
     /*
      * A multifunction card's per-function CIS chains hang off
@@ -1112,146 +1225,7 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
     pc_trace("pc: index ", (ULONG)index);
     netdev_diag_note(ANXDIAG_PC_INDEX, ci, (ULONG)index);
 
-    card = netdev_card_by_cis(manf, prod);
-    if (card == NULL)
-    {
-        netdev_diag_note(ANXDIAG_PC_NOROW, ci,
-                         ((ULONG)manf << 16) | (ULONG)prod);
-        pc_reject_owned(keep_handle);
-        return NULL;            /* no PCMCIA row at all: nothing to drive it */
-    }
-    ci = netdev_diag_card(card);
-    netdev_diag_note(ANXDIAG_PC_CARD, ci, (ULONG)ci);
-
-    /*
-     * The row's reg_off is an assumption and the CIS is the measurement.  They
-     * agree for every card that leaves its placement to the host, which is
-     * what five decoded address lines means; they do not for a card that names
-     * its own base and decodes enough lines to mean it.  Gayle fixes the Amiga
-     * address, so `board` is moved by the difference instead: netdev_add_unit()
-     * builds every register address off board + reg_off, the odd-byte window
-     * included, and one shift moves them all.
-     */
-    reg_off = card->reg_off;
-    if (pc_have_pick)
-        reg_off = netdev_cis_io_off(&pc_pick, card->reg_off);
-    regs  = (ULONG)card->base + (ULONG)reg_off;
-    board = (APTR)(ULONG)((ULONG)card->base +
-                          (ULONG)reg_off - (ULONG)card->reg_off);
-    netdev_diag_note(ANXDIAG_PC_IOOFF, ci, (ULONG)reg_off);
-
-    /*
-     * The socket comes up as a memory socket, so both bits must be set before
-     * anything is written to attribute memory.  Without CARD_DISABLEF_WP the
-     * socket stays write-protected and swallows the COR write with no error;
-     * CARD_ENABLEF_DIGAUDIO is what configures the socket for the I/O
-     * interface.
-     */
-    {
-        UBYTE got = pc_misc_control(handle,
-                                    CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO);
-
-        pc_trace("pc: iomode ", (ULONG)got);
-        netdev_diag_note(ANXDIAG_PC_IOMODE, ci,
-                         (ULONG)(CARD_DISABLEF_WP | CARD_ENABLEF_DIGAUDIO));
-        /* The autodoc: a bit cleared in the return is a bit this machine does
-           not support.  A socket that answers without CARD_DISABLEF_WP will
-           swallow the COR write with no error anywhere. */
-        netdev_diag_note(ANXDIAG_PC_MISC, ci, (ULONG)got);
-    }
-
-    /*
-     * CopyTuple() has already undone attribute memory's byte-per-word doubling
-     * for the bytes it handed back, so TPCC_RADR is added to 0xA00000 as-is.
-     * The doubled address is a fallback, reached only when the undoubled write
-     * failed to bring a chip up.
-     */
-    {
-        /*
-         * A single-function card takes the configuration index in the COR and
-         * nothing else.  A MULTIFUNCTION CARD DOES NOT: bits 2..0 of its COR
-         * are function enable, address decode and interrupt enable, so only
-         * bits 5..3 of the index survive and the three control bits go in
-         * underneath it.  Writing the plain index to one leaves the function
-         * disabled and decoding nothing, which is a card that answers at no
-         * address rather than a card that answers at the wrong one.
-         */
-        UBYTE cor    = pc_mfc ? netdev_cis_mfc_cor(&pc_fn) : index;
-        UWORD rounds = 0;
-
-        pc_used = 1;
-        attr = pc_config_reg(cfg_base, CIS_REG_COR);
-        *attr = cor;
-        pc_trace("pc: cor ", (ULONG)(APTR)attr);
-        netdev_diag_note(ANXDIAG_PC_COR, ci, (ULONG)(APTR)attr);
-        netdev_diag_note(ANXDIAG_PC_CORVAL, ci, (ULONG)cor);
-
-        /*
-         * And a multifunction card is told where to decode rather than
-         * assuming it, which is the one thing that makes such a card usable
-         * here at all: Gayle fixes the Amiga address, the card row fixes the
-         * offset inside it, and COR_ADDR_DECODE above makes the card use what
-         * these two registers say instead of the base its own CIS named.
-         * Written after the COR, which is the order Linux uses.
-         */
-        if (pc_mfc && netdev_cis_has_iobase(&pc_fn))
-        {
-            *pc_config_reg(cfg_base, CIS_REG_IOBASE_0) = (UBYTE)(reg_off & 0xffu);
-            *pc_config_reg(cfg_base, CIS_REG_IOBASE_1) = (UBYTE)(reg_off >> 8);
-            if ((pc_fn.cfg_mask & (UWORD)(1u << CIS_REG_IOSIZE)) != 0)
-                *pc_config_reg(cfg_base, CIS_REG_IOSIZE) =
-                    netdev_cis_mfc_iosize(&pc_fn);
-            netdev_diag_note(ANXDIAG_PC_MFCIOBASE, ci, (ULONG)reg_off);
-        }
-
-        if (!pc_chip_settles(card, regs, &rounds))
-        {
-            netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
-            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
-
-            attr = (volatile UBYTE *)(ULONG)
-                       (PC_ATTR_BASE +
-                        (((cfg_base + PC_COR_OFF) * PC_ATTR_STRIDE) &
-                         (PC_ATTR_SIZE - 1UL)));
-            *attr = cor;
-            pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
-            netdev_diag_note(ANXDIAG_PC_COR2, ci, (ULONG)(APTR)attr);
-
-            if (!pc_chip_settles(card, regs, &rounds))
-            {
-                pc_trace("pc: chip silent ", 0);
-                netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
-                netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
-                netdev_diag_note(ANXDIAG_PC_SILENT, ci, regs);
-                pc_reject_owned(keep_handle);
-                return NULL;
-            }
-            netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
-            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
-        }
-        else
-        {
-            netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
-            netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
-        }
-    }
-
-    /*
-     * No second CardMiscControl() call: it masks its argument with
-     * WR|DIGAUDIO (0x0a) and writes the result out, so an interrupt-bit call
-     * would write zero over the I/O-mode call above.  OwnCard()'s
-     * ResetGayleRegs() has already enabled BSY/IRQ on V37 and V39 alike.
-     */
-    pc_trace("pc: status irq v ", (ULONG)CardResource->lib_Version);
-    netdev_diag_note(ANXDIAG_PC_IRQMODE, ci,
-                     (ULONG)CardResource->lib_Version);
-
-    pc_trace("pc: claimed ", (ULONG)board);
-    netdev_diag_note(ANXDIAG_PC_CLAIMED, ci, regs);
-
-    *card_out = card;
-
-    return board;
+    return pc_enable_owned(card_out, manf, prod, cfg_base, index, keep_handle);
 }
 
 VOID netdev_pcmcia_release(VOID)
