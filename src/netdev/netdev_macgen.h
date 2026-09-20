@@ -36,9 +36,9 @@ BOOL netdev_mac_usable(const UBYTE *mac);
 VOID netdev_mac_derive(const UBYTE *fp, UWORD len, UBYTE *mac);
 
 /*
- * The fingerprint itself.  In netdev_device.c rather than here because it reads
- * ExecBase and the autoconfig board list.  `salt` is the caller's card-specific
- * part.  Returns the number of bytes written.
+ * The fingerprint itself.  netdev_fingerprint.c reads ExecBase and the
+ * autoconfig board list; `salt` is the caller's card-specific part.  Returns
+ * the number of bytes written.
  */
 UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt);
 

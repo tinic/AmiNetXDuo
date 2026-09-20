@@ -35,6 +35,7 @@ set(NETDEV_CORE_SOURCES
     netdev_diag.c       # the probe record, published for CheckNetDevice
     netdev_mcaf.c       # the multicast hash, host-testable
     netdev_macgen.c     # the derived station address, host-testable
+    netdev_fingerprint.c # stable machine/card input to that address
     "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
     "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
 
