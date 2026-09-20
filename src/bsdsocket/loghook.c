@@ -26,15 +26,11 @@
  */
 
 #include "bsdsocket_internal.h"
+#include "tx_amiga.h"
 
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <sys/syslog.h>
-
-/* library.c owns these; the port's tick task is tx_port.h's, declared here
-   as there so the host test can compile this file against Linux ThreadX. */
-extern struct ExecBase *SysBase;
-extern VOID            *_tx_amiga_timer_task;
 
 typedef LONG (*BsdLogHookFn)(register struct Hook *hook __asm("a0"),
                              register APTR reserved __asm("a2"),
@@ -87,16 +83,7 @@ VOID bsd_log_hook_drop_owner(struct AmiSocketBase *base)
 
 static BOOL bsd_log_hook_context_ok(VOID)
 {
-    struct ExecBase *sys = SysBase;
-
-    if (sys == NULL)
-        return FALSE;
-    if (sys->TDNestCnt >= 0 || sys->IDNestCnt >= 0)
-        return FALSE;
-    if ((VOID *)sys->ThisTask == _tx_amiga_timer_task)
-        return FALSE;
-
-    return TRUE;
+    return (tx_amiga_exec_task_context() != TX_FALSE) ? TRUE : FALSE;
 }
 
 VOID bsd_log_hook_deliver(LONG priority, STRPTR tag, ULONG id,
@@ -127,8 +114,7 @@ VOID bsd_log_hook_deliver(LONG priority, STRPTR tag, ULONG id,
     lhm.lhm_Date.ds_Tick   = 0;
     /* DateStamp() is dos.library; a Process, which every syslog() caller is.
        The stack's own threads are Tasks and get no date. */
-    if (DOSBase != NULL &&
-        SysBase->ThisTask->tc_Node.ln_Type == NT_PROCESS)
+    if (DOSBase != NULL && FindTask(NULL)->tc_Node.ln_Type == NT_PROCESS)
         DateStamp(&lhm.lhm_Date);
     lhm.lhm_Tag     = tag;
     lhm.lhm_ID      = id;

@@ -159,6 +159,12 @@ TX_THREAD *tx_amiga_adopted_thread(VOID);
    port is not the same question as "is _tx_thread_system_state zero".  */
 UINT    tx_amiga_caller_is_thread(VOID);
 
+/* TX_TRUE only in ordinary Exec task context: not under Forbid(), not at
+   interrupt level, and not on the port's timer task (whose callbacks run with
+   scheduling forbidden).  Code about to call an application-owned hook can
+   use this without depending on ExecBase's private nest counters. */
+UINT    tx_amiga_exec_task_context(VOID);
+
 /* A ThreadX thread sometimes has to block in Exec (Wait/WaitIO) without
    keeping the single hosted scheduler baton.  These calls are the port
    boundary for that transaction; application code must use the higher-level

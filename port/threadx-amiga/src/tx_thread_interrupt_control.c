@@ -68,6 +68,24 @@ VOID _tx_thread_interrupt_restore(UINT previous_posture)
 }
 
 
+/* Keep Exec's private scheduling fields inside the port which implements
+   their semantics.  In particular, a ThreadX timer callback is an Exec Task
+   but still cannot call an application hook: the timer task runs its wheel
+   under Forbid(). */
+UINT tx_amiga_exec_task_context(VOID)
+{
+
+    if ((SysBase == (struct ExecBase *) 0) ||
+        (SysBase -> TDNestCnt >= 0) || (SysBase -> IDNestCnt >= 0) ||
+        ((VOID *) SysBase -> ThisTask == _tx_amiga_timer_task))
+    {
+        return(TX_FALSE);
+    }
+
+    return(TX_TRUE);
+}
+
+
 /* tx_interrupt_control(), the application-visible service.  It may be called
    unbalanced, so it changes the nesting by at most one level and reports the old
    posture: TX_INT_ENABLE inside N nested Forbid()s drops one level, not all N.  */

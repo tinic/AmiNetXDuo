@@ -44,6 +44,20 @@ static struct AmiSocketBase h_base_b;
 VOID Forbid(VOID) { h_exec.TDNestCnt++; }
 VOID Permit(VOID) { h_exec.TDNestCnt--; }
 
+struct Task *FindTask(const char *name)
+{
+    (VOID)name;
+    return h_exec.ThisTask;
+}
+
+UINT tx_amiga_exec_task_context(VOID)
+{
+    return (SysBase != NULL && SysBase->TDNestCnt < 0 &&
+            SysBase->IDNestCnt < 0 &&
+            (VOID *)SysBase->ThisTask != _tx_amiga_timer_task)
+               ? TX_TRUE : TX_FALSE;
+}
+
 static unsigned long h_stamps;
 
 VOID DateStamp(struct DateStamp *ds)
