@@ -11,6 +11,7 @@
 #                                 [-e genet|wifi|both]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
+#                                 [-C]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -54,11 +55,12 @@ EMU68_FIXTURE=""
 CONFIG_ONLY=0
 CANCEL_MODE=""
 MISSING_MODE=""
+NO_CARD=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:C" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -83,13 +85,14 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:" opt; do
         e) EMU68_FIXTURE="$OPTARG"; CONFIG_ONLY=1 ;;
         c) CANCEL_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         m) MISSING_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
+        C) NO_CARD=1; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both]" \
-                "[-c drivers] [-m core|driver|probe|minimal]" >&2
+                "[-c drivers] [-m core|driver|probe|minimal] [-C]" >&2
            exit 2 ;;
     esac
 done
@@ -252,6 +255,18 @@ if { [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; } &&
     echo "cancellation/corrupt-archive scenarios cannot be combined with another fixture" >&2
     exit 2
 fi
+if [ "$NO_CARD" = 1 ]; then
+    [ "$LEVEL" = NOVICE ] || {
+        echo "-C is the Novice no-detected-card refusal scenario" >&2
+        exit 2
+    }
+    [ -z "$CANCEL_MODE" ] && [ -z "$MISSING_MODE" ] &&
+    [ -z "$FOREIGN_MODE" ] && [ -z "$EMU68_FIXTURE" ] &&
+    [ "$DRAWER" = 0 ] && [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] || {
+        echo "-C cannot be combined with another installer fixture" >&2
+        exit 2
+    }
+fi
 if [ -n "$EMU68_FIXTURE" ]; then
     case "$EMU68_FIXTURE" in
         genet|wifi|both) ;;
@@ -318,6 +333,7 @@ NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}
 
 TAG="${AMINETXDUO_RUN_TAG:-wb31}"
 HD="$ROOT/build/testhd-$TAG"
+WORK="$ROOT/build/testwork-$TAG"
 
 # ------------------------------------------------------------ ingredients --
 
@@ -796,8 +812,13 @@ DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 
 rm -rf "$HD"
-mkdir -p "$HD"
+rm -rf "$WORK"
+mkdir -p "$HD" "$WORK/OtherData"
 cp -R "$WB/." "$HD/"
+printf 'foreign Work: content -- installer must not move or replace this\n' \
+    > "$WORK/OtherData/keep.txt"
+chmod 644 "$WORK/OtherData/keep.txt"
+WORK_BEFORE=$(shasum "$WORK/OtherData/keep.txt")
 
 # The answer program is data on the guest disk, not another compile-time mode
 # of installdrive.  This permits several non-default answers in one run and a
@@ -829,8 +850,17 @@ STAGED_AT="$HD/Devs${SANA2_DIR:+/$SANA2_DIR}/$SANA2_DRIVER"
     echo "!! $SANA2_DRIVER was not staged onto the test drive" >&2
     exit 2
 }
+if [ "$NO_CARD" = 1 ]; then
+    rm -f "$STAGED_AT"
+    [ ! -e "$STAGED_AT" ] || {
+        echo "!! no-card fixture could not remove $STAGED_AT" >&2
+        exit 2
+    }
+    echo "==> no-card fixture: no known SANA-II driver in DEVS:"
+fi
 cp "$DRIVER" "$HD/C/installdrive"
-chmod 755 "$STAGED_AT" "$HD/C/installdrive"
+[ "$NO_CARD" = 1 ] || chmod 755 "$STAGED_AT"
+chmod 755 "$HD/C/installdrive"
 
 # SOMEBODY ELSE'S S:User-Startup, written before the installer ever runs.
 #
@@ -945,6 +975,7 @@ user_startup() { amiga_path S/User-Startup 2>/dev/null || true; }
 # every product destination and both startup files, with content and host mode.
 product_manifest() {
     local root file rel mode sum
+    {
     for root in Libs C Devs Prefs AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
                 S/Startup-Sequence S/User-Startup \
                 S/Network-Startup S/Network-Startup.old \
@@ -966,7 +997,20 @@ product_manifest() {
             sum=$(shasum "$HD/$root" | cut -d' ' -f1)
             printf 'F\t%s\t%s\t%s\n' "$mode" "$sum" "$root"
         fi
-    done | LC_ALL=C sort
+    done
+    if [ -d "$WORK" ]; then
+        while IFS= read -r -d '' file; do
+            rel=${file#"$WORK/"}
+            mode=$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file")
+            if [ -f "$file" ]; then
+                sum=$(shasum "$file" | cut -d' ' -f1)
+                printf 'F\t%s\t%s\tWork/%s\n' "$mode" "$sum" "$rel"
+            else
+                printf 'D\t%s\t-\tWork/%s\n' "$mode" "$rel"
+            fi
+        done < <(find "$WORK" -print0)
+    fi
+    } | LC_ALL=C sort
 }
 
 foreign_intact() {
@@ -1326,6 +1370,7 @@ fastmem_size=$(emu_board_fastmem "$BOARD" 8)
 floppy0type=-1
 nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
+uaehf1=dir,rw,Work:Work:$WORK,0
 serial_port=tcp://127.0.0.1:$port/wait
 EOF
     if [ "$net" = "net" ]; then
@@ -1511,11 +1556,11 @@ if [ "$DRAWER" = "1" ]; then
               "$HD/AmiNetXDuo/Libs/bsdsocket.library"
     REFUSED_LIB_BEFORE=$(shasum "$HD/Libs/bsdsocket.library")
     REFUSED_OWN_BEFORE=$(shasum "$HD/AmiNetXDuo/Libs/bsdsocket.library")
-    REFUSED_TREE_BEFORE=$(product_manifest)
 
     startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt
 Echo >DH0:.done "$RC"'
+    REFUSED_TREE_BEFORE=$(product_manifest)
 
     boot refused "$INSTALL_TIMEOUT"
     REFUSED_STATUS=$BOOT_STATUS
@@ -1587,17 +1632,17 @@ echo "============================================================"
 echo "  1/2  Workbench 3.1 boots, then installs the archive ($LEVEL)"
 echo "============================================================"
 
+startup_with 'FailAt 9999
+C:installdrive >DH0:install-console.txt
+Echo >DH0:.done "$RC"'
+
 if [ -n "$FOREIGN_MODE" ]; then
     FOREIGN_TREE_BEFORE=$(product_manifest)
 fi
 ZERO_DIFF_BEFORE=""
-if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; then
+if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
     ZERO_DIFF_BEFORE=$(product_manifest)
 fi
-
-startup_with 'FailAt 9999
-C:installdrive >DH0:install-console.txt
-Echo >DH0:.done "$RC"'
 
 boot install "$INSTALL_TIMEOUT"
 INSTALL_STATUS=$BOOT_STATUS
@@ -1609,7 +1654,7 @@ echo
 echo "---- Installer log ----"
 cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
 
-if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; then
+if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
     ZERO_DIFF_AFTER=$(product_manifest)
     zero_ok=1
     if [ "$ZERO_DIFF_AFTER" != "$ZERO_DIFF_BEFORE" ]; then
@@ -1631,6 +1676,7 @@ if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; then
     if [ "$zero_ok" = 1 ]; then
         _reason=${CANCEL_MODE:+cancel-$CANCEL_MODE}
         _reason=${_reason:-missing-$MISSING_MODE}
+        [ "$NO_CARD" = 0 ] || _reason=no-card-novice-refusal
         echo "  ok      $_reason left the destination byte-exact"
         echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
              "card_config=not-written stack=unchanged boot_status=not-run"
@@ -1679,6 +1725,20 @@ echo "  what the installer put on a real Workbench"
 echo "============================================================"
 
 fail=0
+
+# A populated second volume is present in every scenario because Installer's
+# own default otherwise preferred Work:.  AmiNetXDuo must still land under
+# SYS:, and content that was already on Work: must remain untouched.
+if [ "$WORK_BEFORE" != "$(shasum "$WORK/OtherData/keep.txt" 2>/dev/null)" ]; then
+    echo "!! installation changed pre-existing Work: content"
+    fail=1
+elif find "$WORK" -maxdepth 1 -mindepth 1 -type d -iname AmiNetXDuo \
+        -print -quit | grep -q .; then
+    echo "!! Installer put the AmiNetXDuo drawer on Work: instead of SYS:"
+    fail=1
+else
+    echo "  ok      populated Work: volume unchanged; destination stayed SYS:"
+fi
 
 check_file() {
     local real

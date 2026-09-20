@@ -80,7 +80,8 @@ This is what `tools/ci.sh e2e` runs, and what `.github/workflows/emulator.yml`
 calls in the release job. It stages a bare machine with a real Workbench 3.1,
 runs the real Installer on the unpacked release archive, and power-cycles. The
 stock Startup-Sequence must then reach `S:User-Startup` and bring the network up
-on its own.
+on its own. Every scenario also mounts a populated `Work:` volume and checks
+that the installer's destination remains `SYS:` without changing its contents.
 
 `-l` is `NOVICE`, `AVERAGE` or `EXPERT`. `-H` makes the run three installs and
 adds a second machine. It then checks four more things:

@@ -39,6 +39,8 @@
 #                   exact zero-diff destination
 #   MISSING_* corrupt the throw-away archive at four distinct preflights and
 #                   require refusal before the destination changes
+#   NO_CARD         proves a Novice install with no detected driver refuses
+#                   without writing anything
 #   TERMINAL        opts into the browser services, reinstalls, and exercises
 #                   them from a second machine
 #   STATIC_NO_DRIVERS proves two non-default questions can be answered in one
@@ -66,6 +68,7 @@ SCENARIOS=(
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
+    NO_CARD
     TERMINAL STATIC_NO_DRIVERS
 )
 declare -a RESULTS
@@ -155,6 +158,7 @@ for scenario in "${SCENARIOS[@]}"; do
         MISSING_DRIVER)        opts=(-l AVERAGE -m driver) ;;
         MISSING_PROBE)         opts=(-l AVERAGE -m probe) ;;
         MISSING_MINIMAL)       opts=(-l AVERAGE -m minimal) ;;
+        NO_CARD)               opts=(-l NOVICE -C) ;;
         TERMINAL)              opts=(-l AVERAGE -H) ;;
         STATIC_NO_DRIVERS)     opts=(-l AVERAGE -S -J) ;;
     esac
