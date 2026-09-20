@@ -273,6 +273,20 @@ jobs:
           'tests/clients/build.sh &&
           tests/clients/run-clients.sh -b build/ci/default'
 
+      # Sustained loopback traffic, connection churn and deliberate packet-
+      # pool pressure.  This is deliberately bounded to one minute: the
+      # former self-deadlock happened at transaction 20, while the manual
+      # multi-hour form remains available for release soak testing.
+      - name: Socket churn under packet-pool pressure
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "socket churn under packet-pool pressure"
+          -r AMINETXDUO_A2065 -- sh -c
+          'tests/endurance/build.sh &&
+          AMINETXDUO_RUN_TAG=ci-endurance
+          tests/endurance/run-endurance.sh -t 60 -c 4 -s 10
+          -T ci-endurance -b build/ci/default'
+
       # One binary for every 68k means the compiler runtime picks its MULU.L
       # and DIVU.L paths from AttnFlags at run time, and a green run on one
       # machine says nothing about the others.  Five boots, no NIC and no peer,
