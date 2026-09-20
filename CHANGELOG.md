@@ -12,8 +12,9 @@ version at the top when it merges.
 - The Installer release gate adds cancellation and four corrupt-download
   refusal cases plus Novice refusal when no network card is detected. A bad
   static IPv4 address and invalid interface and host names must now be rejected
-  and corrected, bringing the matrix to 37 scenarios. Existing-stack fixtures
-  also cover stale `.old`
+  and corrected. Manual card selection without a vendor driver must produce a
+  usable `anxnet.device` configuration, bringing the matrix to 38 scenarios.
+  Existing-stack fixtures also cover stale `.old`
   backups, interrupted `.new` staging files, and a populated second `Work:`
   volume that must not become the destination.
 

@@ -11,7 +11,7 @@
 #                                 [-e genet|wifi|both]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
-#                                 [-C] [-V] [-I]
+#                                 [-C] [-M] [-V] [-I]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -56,13 +56,14 @@ CONFIG_ONLY=0
 CANCEL_MODE=""
 MISSING_MODE=""
 NO_CARD=0
+MANUAL_CARD=0
 INVALID_STATIC=0
 INVALID_NAMES=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIq:x:f:e:c:m:CV" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CV" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -88,6 +89,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIq:x:f:e:c:m:CV" opt; do
         c) CANCEL_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         m) MISSING_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         C) NO_CARD=1; CONFIG_ONLY=1 ;;
+        M) MANUAL_CARD=1; CONFIG_ONLY=1 ;;
         V) INVALID_STATIC=1; STATIC=1; CONFIG_ONLY=1 ;;
         I) INVALID_NAMES=1; EXPERT_CUSTOM=1; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
@@ -96,7 +98,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIq:x:f:e:c:m:CV" opt; do
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both]" \
-                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-V] [-I]" >&2
+                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I]" >&2
            exit 2 ;;
     esac
 done
@@ -271,6 +273,19 @@ if [ "$NO_CARD" = 1 ]; then
         exit 2
     }
 fi
+if [ "$MANUAL_CARD" = 1 ]; then
+    [ "$LEVEL" != NOVICE ] || {
+        echo "-M needs AVERAGE or EXPERT so the card page is visible" >&2
+        exit 2
+    }
+    [ -z "$CANCEL_MODE" ] && [ -z "$MISSING_MODE" ] &&
+    [ -z "$FOREIGN_MODE" ] && [ -z "$EMU68_FIXTURE" ] &&
+    [ "$DRAWER" = 0 ] && [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
+    [ "$NO_CARD" = 0 ] || {
+        echo "-M cannot be combined with another installer fixture" >&2
+        exit 2
+    }
+fi
 if [ -n "$EMU68_FIXTURE" ]; then
     case "$EMU68_FIXTURE" in
         genet|wifi|both) ;;
@@ -397,19 +412,24 @@ DRIVER_PATH="${AMINETXDUO_SANA2_DRIVER:-$SANA2_SEL_PATH}"
 # at a time, after saying it had found the file two lines earlier.
 AMINETXDUO_SANA2_DRIVER="$DRIVER_PATH"
 export AMINETXDUO_SANA2_DRIVER
+_sana2_names "$BOARD"
 
-# A MISSING DRIVER IS AN INGREDIENT, NOT A FAILURE.  The card would be in the
+# A MISSING DRIVER IS AN INGREDIENT, NOT A FAILURE, except in the manual-card
+# scenario whose entire purpose is to install our matching driver without it.
+# Ordinarily the card would be in the
 # machine with nothing able to open it, and the run would go red for a file
 # this host has never had rather than for anything in the product.  Exit 2 is
 # what this script already uses for that, and the sweep above it reports it as
 # a skip.
-[ -n "$DRIVER_PATH" ] && [ -f "$DRIVER_PATH" ] || {
-    echo "No $DRIVER_NAME for -N $BOARD on this host." >&2
-    echo "Put one in \$HOME/amiga-assets/devs, or name it:" >&2
-    echo "  AMINETXDUO_SANA2_DRIVER=<path>  AMINETXDUO_SANA2_STORE=<dir>" >&2
-    echo "Most of these cannot be fetched; docs/RESEARCH.md 77 has the licences." >&2
-    exit 2
-}
+if [ "$MANUAL_CARD" = 0 ]; then
+    [ -n "$DRIVER_PATH" ] && [ -f "$DRIVER_PATH" ] || {
+        echo "No $DRIVER_NAME for -N $BOARD on this host." >&2
+        echo "Put one in \$HOME/amiga-assets/devs, or name it:" >&2
+        echo "  AMINETXDUO_SANA2_DRIVER=<path>  AMINETXDUO_SANA2_STORE=<dir>" >&2
+        echo "Most of these cannot be fetched; docs/RESEARCH.md 77 has the licences." >&2
+        exit 2
+    }
+fi
 
 # THE ROM AND THE MODEL ARE A PAIR, and the wrong half of it is a silent
 # failure: an A1200 booted on a CD32 ROM is not an A1200.  So the candidates
@@ -762,6 +782,7 @@ EXPECTED_HOST=amiga
 EXPECTED_SECOND_IF=""
 EXPECTED_AUTO_DEVICE=""
 EXPECTED_SECOND_DEVICE=""
+MANUAL_CARD_KEY=""
 case "$EMU68_FIXTURE" in
     genet) EXPECTED_IF=genet; EXPECTED_AUTO_DEVICE=anxgenet.device ;;
     wifi)  EXPECTED_IF=wifipi; EXPECTED_AUTO_DEVICE=anxwifipi.device ;;
@@ -769,6 +790,30 @@ case "$EMU68_FIXTURE" in
            EXPECTED_AUTO_DEVICE=anxgenet.device
            EXPECTED_SECOND_DEVICE=anxwifipi.device ;;
 esac
+if [ "$MANUAL_CARD" = "1" ]; then
+    # Gadget ids begin at 2 and follow the ten choices in the Installer's
+    # card page.  Keep this explicit: a menu reorder must make the scenario
+    # fail for review instead of silently choosing another board.
+    case "$BOARD" in
+        a2065)                  _manual_card_id=2 ;;
+        ariadne)                _manual_card_id=3 ;;
+        ariadne2)               _manual_card_id=4 ;;
+        hydra)                  _manual_card_id=5 ;;
+        eb920)                  _manual_card_id=6 ;;
+        xsurf)                  _manual_card_id=7 ;;
+        xsurf100z2|xsurf100z3)  _manual_card_id=8 ;;
+        ne2000_pcmcia)          _manual_card_id=9 ;;
+        *) echo "-M has no Installer card-page mapping for $BOARD" >&2; exit 2 ;;
+    esac
+    MANUAL_CARD_KEY=$(anxnet_card_for "$BOARD")
+    [ -n "$MANUAL_CARD_KEY" ] || {
+        echo "-M needs a board supported by anxnet.device" >&2; exit 2
+    }
+    ANSWER_LINES+=("1|CHOICE|10|$_manual_card_id|0")
+    if [ "$BOARD" = ne2000_pcmcia ]; then
+        ANSWER_LINES+=("1|CHOICE|4|2|0")
+    fi
+fi
 if [ "$EXPERT_CUSTOM" = "1" ]; then
     EXPECTED_IF=lan.1
     EXPECTED_HOST=devbox
@@ -867,22 +912,29 @@ fi
 # tools/sana2-stage.sh decides where it goes: DEVS: for the A2065, which is
 # where Commodore's own tests put it, and DEVS:Networks for a third-party
 # driver, which is where one is really installed.
-sana2_stage_driver "$BOARD" "$HD/Devs"
-STAGED_AT="$HD/Devs${SANA2_DIR:+/$SANA2_DIR}/$SANA2_DRIVER"
-[ -f "$STAGED_AT" ] || {
-    echo "!! $SANA2_DRIVER was not staged onto the test drive" >&2
-    exit 2
-}
-if [ "$NO_CARD" = 1 ]; then
-    rm -f "$STAGED_AT"
-    [ ! -e "$STAGED_AT" ] || {
-        echo "!! no-card fixture could not remove $STAGED_AT" >&2
+STAGED_AT=""
+if [ "$MANUAL_CARD" = 0 ]; then
+    sana2_stage_driver "$BOARD" "$HD/Devs"
+    STAGED_AT="$HD/Devs${SANA2_DIR:+/$SANA2_DIR}/$SANA2_DRIVER"
+    [ -f "$STAGED_AT" ] || {
+        echo "!! $SANA2_DRIVER was not staged onto the test drive" >&2
         exit 2
     }
+    if [ "$NO_CARD" = 1 ]; then
+        rm -f "$STAGED_AT"
+        [ ! -e "$STAGED_AT" ] || {
+            echo "!! no-card fixture could not remove $STAGED_AT" >&2
+            exit 2
+        }
+    fi
+fi
+if [ "$NO_CARD" = 1 ] || [ "$MANUAL_CARD" = 1 ]; then
     echo "==> no-card fixture: no known SANA-II driver in DEVS:"
 fi
 cp "$DRIVER" "$HD/C/installdrive"
-[ "$NO_CARD" = 1 ] || chmod 755 "$STAGED_AT"
+if [ "$NO_CARD" = 0 ] && [ "$MANUAL_CARD" = 0 ]; then
+    chmod 755 "$STAGED_AT"
+fi
 chmod 755 "$HD/C/installdrive"
 
 # SOMEBODY ELSE'S S:User-Startup, written before the installer ever runs.
@@ -2457,7 +2509,15 @@ if [ -n "$IFACE_FILE" ] && [ -f "$IFACE_FILE" ]; then
 fi
 
 CARD_SELECTED=no
-if [ -n "$EXPECTED_AUTO_DEVICE" ]; then
+MANUAL_ACTUAL_CARD=""
+if [ "$MANUAL_CARD" = "1" ]; then
+    MANUAL_ACTUAL_CARD=$(sed -n 's/^CARD=//p' "$IFACE_FILE" 2>/dev/null |
+                         head -1 | tr -d '\r' | sed 's/[[:space:]]*$//')
+    case "$INSTALLER_DEVICE" in
+        anxnet.device|*/anxnet.device)
+            [ "$MANUAL_ACTUAL_CARD" = "$MANUAL_CARD_KEY" ] && CARD_SELECTED=yes ;;
+    esac
+elif [ -n "$EXPECTED_AUTO_DEVICE" ]; then
     case "$INSTALLER_DEVICE" in
         "$EXPECTED_AUTO_DEVICE"|"DEVS:Networks/$EXPECTED_AUTO_DEVICE")
             CARD_SELECTED=yes ;;
@@ -2507,6 +2567,8 @@ echo "installer_detects=$(printf '%s' "$INSTALLER_KNOWN_DRIVERS" | tr '\n' ',')"
 CARD_CONFIG=installer
 if [ -n "$EMU68_FIXTURE" ]; then
     CARD_CONFIG=installer-auto
+elif [ "$MANUAL_CARD" = "1" ]; then
+    CARD_CONFIG=installer-manual
 fi
 if [ "$CARD_SELECTED" = "no" ] && [ -z "$EMU68_FIXTURE" ] &&
    [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
@@ -2554,6 +2616,7 @@ echo "installer_device=${INSTALLER_DEVICE:-none}"
 echo "installer_knows_driver=$INSTALLER_KNOWS_DRIVER"
 echo "installer_card_selected=$CARD_SELECTED"
 echo "card_config=$CARD_CONFIG"
+[ "$MANUAL_CARD" = 0 ] || echo "installer_card_key=${MANUAL_ACTUAL_CARD:-none}"
 
 # Machine-readable, one key per line, so nothing downstream has to read prose.
 TERM_LINES=0
@@ -2658,6 +2721,8 @@ if [ "$CONFIG_ONLY" = "1" ]; then
     if [ -n "$EMU68_FIXTURE" ]; then
         _result_board=emu68-fixture
         _result_driver=$EXPECTED_AUTO_DEVICE
+    elif [ "$MANUAL_CARD" = "1" ]; then
+        _result_driver=anxnet.device
     fi
     echo
     echo "workbench_e2e=PASS board=$_result_board model=$MODEL" \

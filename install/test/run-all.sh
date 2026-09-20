@@ -44,6 +44,8 @@
 #                   require refusal before the destination changes
 #   NO_CARD         proves a Novice install with no detected driver refuses
 #                   without writing anything
+#   MANUAL_XSURF100 proves a user can select a supported board when no vendor
+#                   driver is present and receive the anxnet DEVICE/CARD pair
 #   TERMINAL        opts into the browser services, reinstalls, and exercises
 #                   them from a second machine
 #   STATIC_NO_DRIVERS proves two non-default questions can be answered in one
@@ -72,7 +74,7 @@ SCENARIOS=(
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
-    NO_CARD
+    NO_CARD MANUAL_XSURF100
     TERMINAL STATIC_NO_DRIVERS
 )
 declare -a RESULTS
@@ -165,6 +167,7 @@ for scenario in "${SCENARIOS[@]}"; do
         MISSING_PROBE)         opts=(-l AVERAGE -m probe) ;;
         MISSING_MINIMAL)       opts=(-l AVERAGE -m minimal) ;;
         NO_CARD)               opts=(-l NOVICE -C) ;;
+        MANUAL_XSURF100)       opts=(-l AVERAGE -M -N xsurf100z2) ;;
         TERMINAL)              opts=(-l AVERAGE -H) ;;
         STATIC_NO_DRIVERS)     opts=(-l AVERAGE -S -J) ;;
     esac
