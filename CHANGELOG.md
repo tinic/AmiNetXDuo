@@ -36,6 +36,11 @@ version at the top when it merges.
   eight held frames and on its tick. `NetDevStats` "GENET transmits held for
   company" counts them. `SetEnv ANXDTXRUN 0` turns it off; build option
   `AMINETXDUO_TX_RUN`, off in the micro profile with the batch.
+- A newer `bsdsocket.library` works with the beta1--beta3 network commands
+  during an in-place update. The running interface priority now occupies a
+  byte that was already reserved in the version 16 status record instead of
+  growing the record and making the old boot-time `AddNetInterface` fail with
+  "the network did not say which interfaces it has".
 
 - GRO stream matching now lives in the stack's SANA-II receive layer. Every
   driver can coalesce verified contiguous IPv4 and IPv6 TCP segments; device
