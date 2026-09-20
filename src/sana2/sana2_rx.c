@@ -844,6 +844,13 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
 
     ami_sana2_rx_arm(iface, slot);
 
+#ifdef AMINETXDUO_RX_BATCH
+    /* A slot a batch covers is armed here and travels in its batch's one
+       request (ami_sana2_rx_post_batch); nothing is posted per slot. */
+    if ((UWORD)(slot - rx->slot) < rx->batch_slots)
+        return TRUE;
+#endif
+
     /*
      * FIVE STORES, NOT NINE.  Only what the round trip actually disturbs is
      * written back here; the rest is established once, where the slot is built
@@ -905,6 +912,7 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_rx_post_slot(
 
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
    are in flight afterwards. */
+#ifdef AMINETXDUO_RX_BATCH
 /*
  * ANXD_CMD_RX_BATCH: one request for a run of slots.  Every slot of the
  * batch that can be armed becomes a cookie; one without a packet is left
@@ -956,6 +964,7 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch
     BeginIO((struct IORequest *)&bt->req);
     return n;
 }
+#endif /* AMINETXDUO_RX_BATCH */
 
 static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 {
@@ -1042,14 +1051,15 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
     rx->probe.sweep_run++;
 #endif
 
+#ifdef AMINETXDUO_RX_BATCH
     if (rx->use_batch)
     {
         for (i = 0; i < (UWORD)AMI_SANA2_RX_BATCHES; i++)
             live += ami_sana2_rx_post_batch(rx, &rx->batch[i]);
-        return live;
     }
+#endif
 
-    for (i = 0; i < rx->depth; i++)
+    for (i = rx->batch_slots; i < rx->depth; i++)
     {
         if (ami_sana2_rx_post_slot(rx, &rx->slot[i]))
             live++;
@@ -1420,48 +1430,53 @@ BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet, AmiRxSum *sum)
 }
 #endif /* AMINETXDUO_GRO */
 
-static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
+/*
+ * A frame settled in its slot's packet and detached from the slot: what the
+ * hand-up needs once the slot has been re-armed.  Kept apart from the
+ * delivery so a batch can settle every frame it brought, re-post the whole
+ * batch with one BeginIO(), and only then deliver -- the re-post-before-
+ * deliver rule the per-slot path has always kept, applied to the burst.
+ */
+typedef struct AmiRxHandUp
+{
+    NX_PACKET  *packet;         /* NULL: a length error broke the run here */
+    AmiRxSum    sum;
+    ULONG       length;
+} AmiRxHandUp;
+
+/*
+ * Settle the frame in the slot: the length the device reported against what
+ * the hook took, the link header when the device did not write it, the
+ * packet's length fields.  On success the packet is the caller's (the slot
+ * forgets it) and *up describes it.  On a length error the packet stays in
+ * the slot for the re-arm, the error is counted, and FALSE comes back.
+ */
+static BOOL ami_sana2_rx_settle(AmiSana2Rx *rx, AmiRxSlot *slot,
+                                AmiRxHandUp *up)
 {
     AmiSana2If *iface  = rx->iface;
     NX_PACKET  *packet = slot->packet;
     ULONG       length = slot->req.ios2_DataLength;
-    AmiRxSum    sum;
     UCHAR      *eth;
 
-    if (packet == NULL)
-        return;
-
-    /* ios2_DataLength is the documented answer. Fall back to what the copy
-       hook took, for devices that fill only one of the two, but never extend
-       the packet past the bytes the hook initialized. */
+    /* The device reports the frame length in the request; the copy hook
+       recorded what it took.  ami_sana2_rx_resolve_length() reconciles the
+       two, trusting the smaller for devices that fill only one of them,
+       and never extends the packet past the bytes the hook initialized. */
     if (!ami_sana2_rx_resolve_length(slot, &length))
     {
-        /* Keep the packet: rearming is cheaper than a pool round trip. */
         iface->stats.rx_errors++;
         iface->stats.rx_err_length++;
-        (VOID)ami_sana2_rx_post_slot(rx, slot);
-#ifdef AMINETXDUO_GRO
-        ami_sana2_gro_flush(rx);    /* the device's previous frame was this */
-#endif
-        return;
+        return FALSE;
     }
 
-    /*
-     * THE FOURTEEN BYTES USED TO TRAVEL A LONG WAY FOR WHAT THEY ARE.  The
-     * device lifted both addresses out of the frame into ios2_SrcAddr and
-     * ios2_DstAddr, and this rebuilt them into the packet and added the type:
-     * four six-byte moves and a word, per frame, for bytes the device was
-     * holding when it started.  ANXD_S2_RX_LINK_HDR asks it to write the
-     * header where the payload's fourteen leading bytes belong instead, and
-     * slot->hdr_written says it did.
-     *
-     * A driver that does not know the tag never sets it, so the synthesis
-     * below is still the answer for every other SANA-II device.
-     */
+    /* Cooked mode: the device gave the addresses in the request and the
+       payload after the header slot; synthesise the header there -- unless
+       the device wrote it itself (ANXD_S2F_RX_LINK_HDR), which
+       slot->hdr_written says it did. */
     if (!iface->raw_mode && !slot->hdr_written)
     {
         eth = packet->nx_packet_prepend_ptr;
-
         if (iface->addr_bytes == AMI_ETH_ADDR_SIZE)
         {
             if ((slot->req.ios2_Req.io_Flags & SANA2IOF_BCAST) != 0)
@@ -1475,110 +1490,102 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
             {
                 ami_sana2_addr6(&eth[0], slot->req.ios2_DstAddr);
             }
-
             ami_sana2_addr6(&eth[6], slot->req.ios2_SrcAddr);
         }
         else
         {
             UWORD i;
-
-            /* No address field on this wire: keep the shape, zero the bytes. */
             for (i = 0; i < 12; i++)
                 eth[i] = 0;
         }
-
         eth[12] = (UCHAR)(slot->req.ios2_PacketType >> 8);
         eth[13] = (UCHAR)(slot->req.ios2_PacketType);
     }
 
-    /*
-     * OUTSIDE THE SYNTHESIS, AND 1bbb3803 LEFT IT INSIDE.  The fourteen bytes
-     * are in front of the payload in cooked mode whether this function wrote
-     * them or the device did; the length is a fact about the PACKET, not about
-     * who filled it in.  Narrowing the guard to `&& !slot->hdr_written` took
-     * the addition with it, so a device that answers ANXD_S2_RX_LINK_HDR
-     * delivered every frame FOURTEEN BYTES SHORT: ami_sana2_rx_deliver() reads
-     * the type at prepend_ptr[12], then advances prepend_ptr by fourteen and
-     * subtracts fourteen from a length that never had them.
-     *
-     * NOT REACHED ON THE RIG, WHICH IS WHY IT SURVIVED THE DAY.  hdr_written
-     * is set only from ami_sana2_rx_filled(), which is the DIRECT path, and
-     * the a2065 does not use it -- lance.c hands up a whole frame out of board
-     * SRAM and never claims (lance.c:296).  dp8390 and el3 do claim
-     * (dp8390.c:366, el3.c:693), so this was every frame on an ne2000, an
-     * X-Surf or an Ariadne II.
-     */
+    /* The fourteen bytes are in front of the payload in cooked mode whether
+       this function wrote them or the device did; the length is a fact
+       about the PACKET, not about who filled it in (1bbb3803 had it inside
+       the synthesis and delivered every direct-path frame short). */
     length = ami_sana2_rx_frame_length(iface, length);
-
     packet->nx_packet_length     = length;
     packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + length;
 
-    /*
-     * Frame arrival time is the only thing this machine knows that is not in
-     * its own boot image; see the arrival section of src/common/ami_random.c.
-     *
-     * THE WIRE PROFILE'S `_sha256_k 0.7%` IS NOT THIS CALL, and the arithmetic
-     * says so without a rig.  ami_random.c batches 16 arrivals and credits 8
-     * bits (ARRIVAL_BATCH, ARRIVAL_BITS_KEPT), and arrival_done latches at 64
-     * bits (AMI_RANDOM_ARRIVAL_MAX_BITS) -- so the pool is mixed EIGHT times,
-     * inside the first 128 frames, and every arrival after that returns on the
-     * first line.  A ten second transfer is about 4,300 frames, so this path
-     * hashes for under 3% of them and eight SHA-256 mixes cannot be 0.7% of a
-     * profile.  Those samples are a symbol that did not resolve, landing on
-     * the nearest one below it -- a constant table.  Do not spend an
-     * AMINETXDUO_LOG build chasing it; the counter that would confirm the
-     * latch is an AMI_INFO and none of the 514 measurement logs on the rig
-     * carry it.
-     */
     ami_random_arrival();
 
-    /* Everything the delivery needs out of the slot, before the slot is
-       re-armed under it. */
-    sum.copied = slot->copied;
+    /* The copy hook's accumulator, lifted out before the slot is re-armed
+       under it. */
+    up->sum.copied = slot->copied;
 #ifdef AMINETXDUO_RX_VERIFY
-    sum.sum    = slot->sum;
-    sum.summed = slot->summed;
-    sum.flags  = slot->rxflags;
+    up->sum.sum    = slot->sum;
+    up->sum.summed = slot->summed;
+    up->sum.flags  = slot->rxflags;
 #else
-    sum.sum    = 0;
-    sum.summed = FALSE;
-    sum.flags  = 0;
+    up->sum.sum    = 0;
+    up->sum.summed = FALSE;
+    up->sum.flags  = 0;
 #endif
-
+    up->packet = packet;
+    up->length = length;
     slot->packet = NULL;     /* ownership passes to NetX Duo */
+    return TRUE;
+}
 
-    /* Back on the wire before the frame goes upstream, not after. */
-    (VOID)ami_sana2_rx_post_slot(rx, slot);
+/* The tap, the coalescer, the stack: everything after the slot is back
+   with the device. */
+static VOID ami_sana2_rx_hand_up(AmiSana2Rx *rx, AmiRxHandUp *up)
+{
+    AmiSana2If *iface  = rx->iface;
+    NX_PACKET  *packet = up->packet;
 
 #if defined(AMINETXDUO_BPF) || defined(AMINETXDUO_RXPROBE)
-    /* Observe every original wire frame after replacing its read slot, but
-       while the frame is still contiguous and before GRO can strip
-       continuation headers or rewrite the head length.  Capturing at final
-       delivery would expose only the coalesced head and lose the rest. */
+    /* Tap the frame as the device delivered it, while it is still
+       contiguous and before GRO can strip continuation headers or rewrite
+       the head length. */
 #ifdef AMINETXDUO_BPF
-    ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr, length);
+    ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr, up->length);
 #endif
 #ifdef AMINETXDUO_RXPROBE
-    ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr, length);
+    ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr,
+                              up->length);
 #endif
 #endif
 
 #ifdef AMINETXDUO_GRO
-    /* Held, or chained behind the held head: the run goes up together. */
-    if (ami_sana2_gro_take(rx, packet, &sum))
+    if (ami_sana2_gro_take(rx, packet, &up->sum))
         return;
 #endif
 
 #ifdef AMINETXDUO_RXPROBE
     {
         ULONG t0 = ami_budget_clock();
-
-        ami_sana2_rx_deliver(iface, packet, &sum);
+        ami_sana2_rx_deliver(iface, packet, &up->sum);
         ami_budget_drain(ami_budget_clock() - t0);
     }
 #else
-    ami_sana2_rx_deliver(iface, packet, &sum);
+    ami_sana2_rx_deliver(iface, packet, &up->sum);
 #endif
+}
+
+static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
+{
+    AmiRxHandUp up;
+
+    if (slot->packet == NULL)
+        return;
+
+    if (!ami_sana2_rx_settle(rx, slot, &up))
+    {
+        (VOID)ami_sana2_rx_post_slot(rx, slot);
+#ifdef AMINETXDUO_GRO
+        ami_sana2_gro_flush(rx);    /* the device's previous frame was this */
+#endif
+        return;
+    }
+
+    /* Re-post before delivering: the slot is the device's again before the
+       stack sees the frame. */
+    (VOID)ami_sana2_rx_post_slot(rx, slot);
+    ami_sana2_rx_hand_up(rx, &up);
 }
 
 /*
@@ -1594,6 +1601,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
  *
  * Errors and control frames count against it: they cost reader time too.
  */
+#ifdef AMINETXDUO_RX_BATCH
 /*
  * One ANXD_CMD_RX_BATCH reply.  Cookie[0..Filled) are frames, delivered in
  * order through the same completion a CMD_READ takes (which in batch mode
@@ -1613,20 +1621,47 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
     UWORD          filled = rec->Filled;
     UWORD          i;
 
+    AmiRxHandUp    ups[AMI_SANA2_RX_BATCH_MAX];
+    UWORD          n = 0;
+
     bt->in_flight = FALSE;
     if (filled > rec->Count)
         filled = rec->Count;
 
+    /* Settle every frame the batch brought and take its packet; the slots
+       are ours again, filled or not. */
     for (i = 0; i < filled; i++)
     {
         AmiRxSlot *slot = (AmiRxSlot *)rec->Cookie[i];
 
         ami_sana2_rx_mark(rx, slot, FALSE);
-        if (!rd->stop)
-            ami_sana2_rx_complete(rx, slot);
+        if (rd->stop || slot->packet == NULL || n >= AMI_SANA2_RX_BATCH_MAX)
+            continue;
+        if (!ami_sana2_rx_settle(rx, slot, &ups[n]))
+            ups[n].packet = NULL;   /* a break in the run, flushed below */
+        n++;
     }
     for (i = filled; i < rec->Count; i++)
         ami_sana2_rx_mark(rx, (AmiRxSlot *)rec->Cookie[i], FALSE);
+
+    /* THE BATCH GOES BACK BEFORE ANY FRAME GOES UP: one BeginIO() re-arms
+       every slot (fresh packets for the ones just taken) and hands the
+       device the whole batch again, so the ring loses nothing to the time
+       the stack spends on these frames.  A partially filled batch answered
+       at the end of a pass would otherwise keep its empty slots away from
+       the wire for the whole hand-up. */
+    if (raw == 0 && !rd->stop)
+        (VOID)ami_sana2_rx_post_batch(rx, bt);
+
+    for (i = 0; i < n; i++)
+    {
+        if (ups[i].packet != NULL)
+            ami_sana2_rx_hand_up(rx, &ups[i]);
+#ifdef AMINETXDUO_GRO
+        else
+            ami_sana2_gro_flush(rx);
+#endif
+    }
 
     if (raw == 0 || rd->stop)
         return (UWORD)(filled != 0 ? filled : 1);
@@ -1655,7 +1690,10 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
 
         iface->rx_batch_ok = 0;
         for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
-            iface->rx[r].use_batch = 0;
+        {
+            iface->rx[r].use_batch   = 0;
+            iface->rx[r].batch_slots = 0;
+        }
     }
     else
     {
@@ -1664,6 +1702,7 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
     }
     return (UWORD)(filled != 0 ? filled : 1);
 }
+#endif /* AMINETXDUO_RX_BATCH */
 
 static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 {
@@ -1802,11 +1841,13 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
            so they are delivered first; the error then means what it means
            for a read, and a device that does not take batches at all turns
            the rings back to CMD_READs. */
+#ifdef AMINETXDUO_RX_BATCH
         if (slot->req.ios2_Req.io_Command == ANXD_CMD_RX_BATCH)
         {
             took += ami_sana2_rx_drain_batch(rd, (AmiRxBatch *)msg);
             continue;
         }
+#endif
 
 #ifdef AMINETXDUO_RXPROBE
         if (rx->probe.live != 0)
@@ -1957,6 +1998,7 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
         {
             AmiRxSlot *slot = (AmiRxSlot *)msg;
 
+#ifdef AMINETXDUO_RX_BATCH
             if (slot->req.ios2_Req.io_Command == ANXD_CMD_RX_BATCH)
             {
                 AmiRxBatch *bt = (AmiRxBatch *)msg;
@@ -1968,6 +2010,7 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
                                       (AmiRxSlot *)bt->rec->Cookie[k], FALSE);
                 continue;
             }
+#endif
             ami_sana2_rx_mark(slot->owner, slot, FALSE);
 #ifdef AMINETXDUO_RXPROBE
             if (slot->owner->probe.live != 0)
@@ -2011,6 +2054,7 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
     {
         AmiSana2Rx *rx = &rd->iface->rx[r];
 
+#ifdef AMINETXDUO_RX_BATCH
         if (rx->use_batch)
         {
             for (i = 0; i < (UWORD)AMI_SANA2_RX_BATCHES; i++)
@@ -2018,9 +2062,9 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
                 if (rx->batch[i].in_flight)
                     AbortIO((struct IORequest *)&rx->batch[i].req);
             }
-            continue;
         }
-        for (i = 0; i < rx->depth; i++)
+#endif
+        for (i = rx->batch_slots; i < rx->depth; i++)
         {
             if (rx->slot[i].posted)
                 AbortIO((struct IORequest *)&rx->slot[i].req);
@@ -2145,28 +2189,41 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         /* ANXD_CMD_RX_BATCH: the ring's slots split over two batches, each
            one request on this port.  A ring that cannot get its records
            posts CMD_READs as before. */
-        rx->use_batch = 0;
-        if (iface->rx_batch_ok && rx->depth >= (UWORD)AMI_SANA2_RX_BATCHES)
+#ifdef AMINETXDUO_RX_BATCH
+        /* Half the ring travels in the two batches, the other half stays
+           CMD_READs: a batch is answered at the end of every pass that
+           filled it, so a card that raises one interrupt per frame would
+           otherwise spend a whole batch on each frame and have nothing
+           posted while the reader turns them round.  The reads are the
+           pool that covers that gap, as they always did; the device keeps
+           them behind the batches. */
+        rx->use_batch   = 0;
+        rx->batch_slots = 0;
+        if (iface->rx_batch_ok && rx->depth >= 2U * AMI_SANA2_RX_BATCHES)
         {
-            UWORD per = (UWORD)(rx->depth / AMI_SANA2_RX_BATCHES);
+            UWORD per = (UWORD)(rx->depth / (2U * AMI_SANA2_RX_BATCHES));
             UWORD b;
 
-            rx->use_batch = 1;
+            if (per > (UWORD)AMI_SANA2_RX_BATCH_MAX)
+                per = (UWORD)AMI_SANA2_RX_BATCH_MAX;
+
+            rx->use_batch   = 1;
+            rx->batch_slots = (UWORD)(per * AMI_SANA2_RX_BATCHES);
             for (b = 0; b < (UWORD)AMI_SANA2_RX_BATCHES; b++)
             {
                 AmiRxBatch *bt = &rx->batch[b];
 
                 bt->owner     = rx;
                 bt->first     = (UWORD)(b * per);
-                bt->count     = (b + 1 == AMI_SANA2_RX_BATCHES)
-                                    ? (UWORD)(rx->depth - bt->first) : per;
+                bt->count     = per;
                 bt->in_flight = FALSE;
                 if (bt->rec == NULL)
                     bt->rec = (AnxdS2RxBatch *)ami_alloc(
                         (ULONG)ANXD_S2_RX_BATCH_SIZE(bt->count));
                 if (bt->rec == NULL)
                 {
-                    rx->use_batch = 0;
+                    rx->use_batch   = 0;
+                    rx->batch_slots = 0;
                     break;
                 }
                 bt->req = iface->templ;
@@ -2178,6 +2235,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
                 bt->req.ios2_Data           = bt->rec;
             }
         }
+#else
+        rx->use_batch   = 0;
+        rx->batch_slots = 0;
+#endif
     }
 
     /* The poll request: the opened request's device, unit and cookie, this

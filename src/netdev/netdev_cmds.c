@@ -354,7 +354,23 @@ VOID netdev_queue_read(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
         /* Once a frame, inside a Disable(): see netdev_internal.h. */
         if (cmd == CMD_READ)
         {
-            nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            /* Newest first, as always -- but behind any batch at the head:
+               a batch is the opener's preferred read of its type, and its
+               plain CMD_READs are the pool that takes over while both
+               batches are with the reader.  At most two batches lead. */
+            struct Node *after = NULL;
+            struct Node *n     = op->op_Reads.lh_Head;
+
+            while (n->ln_Succ != NULL &&
+                   netdev_is_batch((const struct IOSana2Req *)n))
+            {
+                after = n;
+                n     = n->ln_Succ;
+            }
+            if (after == NULL)
+                nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            else
+                nd_insert_after(&io->ios2_Req.io_Message.mn_Node, after);
             netdev_note_read_type(op, io->ios2_PacketType);
         }
         else
@@ -394,7 +410,8 @@ VOID netdev_queue_batch(NetdevOpener *op, struct IOSana2Req *io)
         netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_GENERIC_ERROR);
         return;
     }
-    if (op->op_RxDirect == NULL || op->op_RxFilled == NULL ||
+    if (!unit->nu_Nic.rx_batches ||
+        op->op_RxDirect == NULL || op->op_RxFilled == NULL ||
         !op->op_RxLinkHdr || op->op_Raw || op->op_Filter != NULL ||
         (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
     {

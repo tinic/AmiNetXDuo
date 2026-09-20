@@ -161,6 +161,7 @@ VOID ami_free(APTR ptr) { free(ptr); }
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
 VOID ami_random_arrival(VOID) { }
+ULONG ami_config_rx_batch(ULONG fallback) { return fallback; }
 
 UINT tx_thread_sleep(ULONG ticks) { (VOID)ticks; return 0; }
 

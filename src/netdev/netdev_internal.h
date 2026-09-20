@@ -185,6 +185,18 @@ static inline VOID nd_list_addtail(struct List *l, struct Node *n)
     l->lh_TailPred = n;
 }
 
+/* Exec's Insert(node, after), without the call: the per-frame re-post of a
+   CMD_READ goes behind the batches at the head of the read list. */
+static inline VOID nd_insert_after(struct Node *n, struct Node *after)
+{
+    struct Node *succ = after->ln_Succ;
+
+    n->ln_Succ     = succ;
+    n->ln_Pred     = after;
+    succ->ln_Pred  = n;
+    after->ln_Succ = n;
+}
+
 typedef struct NetdevUnit
 {
     /* First by design: Exec and SANA-II callers receive this shared Unit. */

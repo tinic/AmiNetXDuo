@@ -63,6 +63,31 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * and received 598-600 Mbit/s against 589-602 with 128, so 128 stays.
  */
 #define GE_RX_RING      128
+/*
+ * THE MASKED PASS HAS A LENGTH.  A pass drains the ring under Disable(),
+ * and a full ring is up to 128 frames at ~60 us each -- the profile showed
+ * 4.4 ms spans with interrupts off, during which no acknowledgement leaves
+ * the machine, the sender's RTT reads 1.6 ms against 0.3 on the wire and it
+ * sits window-limited.  The pass stops after this many frames; what is
+ * left waits for the next interrupt, the reader's ANXD_CMD_RX_POLL after
+ * its drain (rx_behind is set, as for a held pass) or the idle poller,
+ * none of which is more than a burst away.
+ *
+ * The number is the opener's batch (sana2_rx.c: two batches of 32 in front
+ * of 64 plain reads): one pass fills one batch and costs one reply.  A1200
+ * + PiStorm32, iperf RX from a 1 Gbit peer, 2026-09-20, three runs each:
+ *
+ *     pass budget   batch     RX Mbit/s
+ *     none          32        688 / 688 / 687
+ *     16            32        714 / 707 / 715
+ *     32            32        805 / 799 / 812
+ *     64            64, no
+ *                   read pool  66 / 199 / 167   (both batches out, held
+ *                                                frames wait for a poll)
+ */
+#ifndef GE_RX_PASS_MAX
+#define GE_RX_PASS_MAX  32
+#endif
 #define GE_TX_RING      32
 #define GE_BUFSZ        2048
 #define GE_ALIGN        4096        /* a page: the cache op works in pages */
@@ -240,6 +265,8 @@ enum
                                for a reader that was behind (no frame lost) */
     GE_ST_HELD_FRAMES,      /* frames left waiting, summed over those passes */
     GE_ST_TICK_RESUMES,     /* held passes resumed by the vertical blank     */
+    GE_ST_PASS_CUT,         /* passes stopped at GE_RX_PASS_MAX with frames left */
+    GE_ST_RBUF_OVFL,        /* the RBUF's own overflow count, sampled each second */
     GE_ST_TX_CSUM,          /* frames whose transport checksum the TBUF wrote */
     GE_ST_CPUSH_SUPERVISED, /* 1: page pushes enter through Supervisor()   */
     GE_ST_POLL_WAKES,       /* the poller woken by a transmit                */
@@ -291,6 +318,8 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET passes held for a reader behind",
     "GENET frames left waiting in those passes",
     "GENET held passes resumed by the blank",
+    "GENET passes cut at the frame budget",
+    "GENET RBUF overflows (frames the chip dropped)",
     "GENET transmit checksums by the chip",
     "GENET supervised page push (1)",
     "GENET poll wakes",
@@ -1306,6 +1335,13 @@ static BOOL ge_rxintr(NetdevNic *nic)
     {
         UWORD  idx    = (UWORD)(c->rx_cidx & (GE_RX_RING - 1));
         GE_P_START(pd);
+
+        if (n >= (UWORD)GE_RX_PASS_MAX)
+        {
+            nic->rx_behind = 1;
+            nic->core_stat[GE_ST_PASS_CUT]++;
+            break;
+        }
         UBYTE *buf    = c->rx_buf + (ULONG)idx * GE_BUFSZ;
         /* The descriptor's status word, from the status block the RBUF
            wrote in front of the frame: memory the cache op above just
@@ -1644,6 +1680,7 @@ static BOOL genet_tick(NetdevNic *nic)
     {
         c->blanks = 0;
         c->link_poll_due = 1;
+        nic->core_stat[GE_ST_RBUF_OVFL] = ge_rd(nic, GENET_RBUF_OVFL_CNT);
         ge_poll_wake(nic, c);
     }
 
@@ -1921,6 +1958,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->tx_short_build  = 1;           /* the copy is 0.4 us, the mask 5.5 */
     nic->tx_task_lock    = 1;           /* and Forbid() is 0.1: no interrupt produces */
     nic->rx_holds        = 1;           /* the ring keeps frames for a late read */
+    nic->rx_batches      = 1;           /* a pass drains a burst: one reply each */
     /* A frame takes a whole buffer whatever its size, so what the ring holds
        is GE_RX_RING full frames, not GE_RX_RING * GE_BUFSZ bytes of them: the
        opener's page arithmetic (bsdsocket_window.h, ami_bsd_tcp_window_fit)

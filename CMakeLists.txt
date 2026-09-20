@@ -1470,6 +1470,18 @@ if(AMINETXDUO_GRO)
     add_compile_definitions(AMINETXDUO_GRO)
 endif()
 
+# ANXD_CMD_RX_BATCH: the reader posts one request per burst of received
+# frames instead of one CMD_READ per frame, on a driver that delivers bursts
+# (anxgenet.device; the classic cores refuse it).  Measured 2026-09-20, A1200
+# + PiStorm32, iperf into the Amiga: 399 -> 805 Mbit/s.  Off in the micro
+# profile, whose machines have no such card.
+option(AMINETXDUO_RX_BATCH
+       "Receive in batches: one IORequest per burst on a bursting driver" ON)
+
+if(AMINETXDUO_RX_BATCH)
+    add_compile_definitions(AMINETXDUO_RX_BATCH)
+endif()
+
 # The four rxverify counters that fire on every received frame, inside the
 # protection hold.  Off by default; see src/net68k/net68k.h.  The error and
 # skip counters are unconditional and do not need this.

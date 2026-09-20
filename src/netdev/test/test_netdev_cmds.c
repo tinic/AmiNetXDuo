@@ -1533,6 +1533,7 @@ static void x_rx_batch(void)
     int    listed = 0;
 
     reset();
+    unit.nu_Nic.rx_batches = 1;
     opener.op_RxDirect  = (APTR)x_direct;
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = TRUE;
@@ -1553,8 +1554,26 @@ static void x_rx_batch(void)
     expect(rec.b.Filled == 0, "with Filled cleared");
     expect(netdev_reads_type(&opener, 0x0800), "and its type noted");
     expect(netdev_is_batch(&io), "netdev_is_batch() knows it by command");
+    {
+        struct IOSana2Req rd1, rd2;
+
+        req(&rd1, CMD_READ);
+        rd1.ios2_PacketType = 0x0800;
+        rd1.ios2_Data       = &rd1;
+        netdev_perform(&opener, &rd1);
+        req(&rd2, CMD_READ);
+        rd2.ios2_PacketType = 0x0800;
+        rd2.ios2_Data       = &rd2;
+        netdev_perform(&opener, &rd2);
+        expect(opener.op_Reads.lh_Head == &io.ios2_Req.io_Message.mn_Node,
+               "a CMD_READ posted later leaves the batch at the head");
+        expect(opener.op_Reads.lh_Head->ln_Succ == &rd2.ios2_Req.io_Message.mn_Node &&
+               rd2.ios2_Req.io_Message.mn_Node.ln_Succ == &rd1.ios2_Req.io_Message.mn_Node,
+               "and the reads keep newest-first order behind it");
+    }
 
     reset();
+    unit.nu_Nic.rx_batches = 1;
     req(&io, ANXD_CMD_RX_BATCH);
     io.ios2_PacketType = 0x0800;
     io.ios2_Data       = &rec.b;
@@ -1565,6 +1584,7 @@ static void x_rx_batch(void)
     expect(opener.op_Reads.lh_Head->ln_Succ == NULL, "and nothing is queued");
 
     reset();
+    unit.nu_Nic.rx_batches = 1;
     opener.op_RxDirect  = (APTR)x_direct;
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = FALSE;
@@ -1576,6 +1596,7 @@ static void x_rx_batch(void)
                (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
 
     reset();
+    unit.nu_Nic.rx_batches = 1;
     opener.op_RxDirect  = (APTR)x_direct;
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = TRUE;
@@ -1588,6 +1609,7 @@ static void x_rx_batch(void)
                (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
 
     reset();
+    unit.nu_Nic.rx_batches = 1;
     opener.op_RxDirect  = (APTR)x_direct;
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = TRUE;
@@ -1601,6 +1623,7 @@ static void x_rx_batch(void)
     rec.b.Count = 2;
 
     reset();
+    unit.nu_Nic.rx_batches = 1;
     opener.op_RxDirect  = (APTR)x_direct;
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = TRUE;
@@ -1613,6 +1636,7 @@ static void x_rx_batch(void)
     expect_u32("said so", last_wire, (unsigned long)S2WERR_NULL_POINTER);
 
     reset();
+    unit.nu_Nic.rx_batches = 1;
     opener.op_RxDirect  = (APTR)x_direct;
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = TRUE;
@@ -1632,15 +1656,11 @@ static void x_rx_batch(void)
     io.ios2_PacketType = 0x0800;
     io.ios2_Data       = &rec.b;
     netdev_perform(&opener, &io);
-    {
-        struct IOSana2Req flush;
-        req(&flush, CMD_FLUSH);
-        netdev_perform(&opener, &flush);
-    }
-    expect_u32("CMD_FLUSH answers a queued batch IOERR_ABORTED",
-               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_ABORTED);
-    expect(opener.op_Reads.lh_Head->ln_Succ == NULL, "and unlinks it");
+    expect_u32("a core that delivers one frame per pass refuses batches",
+               (unsigned long)(UBYTE)last_err, (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
 
+    reset();
+    unit.nu_Nic.rx_batches = 1;
     {
         struct IOStdReq std;
         struct
@@ -1653,6 +1673,7 @@ static void x_rx_batch(void)
         } answer;
 
         reset();
+    unit.nu_Nic.rx_batches = 1;
         memset(&std, 0, sizeof(std));
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;

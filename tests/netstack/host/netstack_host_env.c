@@ -716,6 +716,11 @@ ULONG ami_config_pool_packets(VOID)
     return 0UL;
 }
 
+ULONG ami_config_rx_batch(ULONG fallback)
+{
+    return fallback;
+}
+
 BOOL ami_config_reserve(AmiConfig *cfg, UWORD want)
 {
     AmiIfConfig *grown;

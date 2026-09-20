@@ -488,6 +488,11 @@ ULONG ami_config_pool_packets(VOID)
                           (ULONG)AMI_POOL_MAX_PACKETS, 0UL);
 }
 
+ULONG ami_config_rx_batch(ULONG fallback)
+{
+    return cfg_env_number("ENV:ANXDRXBATCH", 0UL, 1UL, fallback);
+}
+
 /*
  * The diagnostic dial: a single digit 0..4 in ENV:ANXDLOGLEVEL.  Anything else
  * is the fallback, silently -- a mistyped variable must not be the reason a

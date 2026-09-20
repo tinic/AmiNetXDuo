@@ -925,8 +925,11 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
                                 ANXD_S2F_RX_LINK_HDR |
                                 ANXD_S2F_RX_POLL |
                                 ANXD_S2F_RX_CAPACITY |
-                                ANXD_S2F_TX_QUICK |
-                                ANXD_S2F_RX_BATCH;
+                                ANXD_S2F_TX_QUICK;
+#ifdef AMINETXDUO_RX_BATCH
+    if (ami_config_rx_batch(1UL) != 0UL)
+        iface->extension.Request |= ANXD_S2F_RX_BATCH;
+#endif
     iface->extension.Accepted = 0;
     iface->extension.RxDirect = ami_sana2_rx_direct;
     iface->extension.RxFilled = ami_sana2_rx_filled;

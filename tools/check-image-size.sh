@@ -45,17 +45,25 @@ ARM="${AMINETXDUO_IMAGE_ARM:-$(basename "$BUILD")}"
 # is 361,428 in the full drawer and 233,928 in the minimal one, both with
 # AMINETXDUO_LOG off, which is where they belong.
 BUDGETS=(
-    "default:src/bsdsocket/bsdsocket.library:354000"
+    # 355,508 with ANXD_CMD_RX_BATCH (the batch reader: post, drain, the
+    # settle/hand-up split) -- A1200 iperf RX 399 -> 805 Mbit/s, 2026-09-20.
+    "default:src/bsdsocket/bsdsocket.library:357000"
     # 41,412 after stateless receive-checksum verification was added to the
-    # EL3 and word/long NE2000 direct paths, 2026-09-15.
-    "default:src/netdev/anxnet.device:43000"
+    # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
+    # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
+    # pass-end flush, the command), which the classic cores refuse and so
+    # never pay for at run time, 2026-09-20.
+    "default:src/netdev/anxnet.device:44500"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
     # counters -- 142 -> 270 Mbit/s between them, 2026-09-15.  26,828 with
     # the idle poller (its task, the clock through /soc, three counters):
-    # Fitz read 26.5 -> 31.6 MB/s, iperf in 832 -> 910, 2026-09-17.
-    "default:src/netdev/anxgenet.device:27500"
+    # Fitz read 26.5 -> 31.6 MB/s, iperf in 832 -> 910, 2026-09-17.  27,428
+    # with the batch shell, the pass budget and the RBUF overflow counter
+    # after the batched reply and the driver-side GRO left: 399 -> 805
+    # Mbit/s against main 027a62c8, 2026-09-20.
+    "default:src/netdev/anxgenet.device:28500"
     # 20,744 at the first image with async TX, the old CONTINUES mark and ack
     # recovery, 2026-09-20; the window copy and the fused sum are the core.
     "default:src/netdev/anxzz9000.device:23000"
@@ -86,9 +94,10 @@ BUDGETS=(
     # -> 227,572: the MTU-based datagram caps and bsd_route_mtu() gone, the
     # stack fragments what BSD fragments.  -> 227,916: the versioned transmit
     # metadata callback keeps private state out of SANA-II's io_Flags.
-    "minimal:src/bsdsocket/bsdsocket.library:228000"
-    "minimal:src/netdev/anxnet.device:43000"
-    "minimal:src/netdev/anxgenet.device:27500"
+    # 229,560 with the batch reader, 2026-09-20 (see the default row).
+    "minimal:src/bsdsocket/bsdsocket.library:231000"
+    "minimal:src/netdev/anxnet.device:44500"
+    "minimal:src/netdev/anxgenet.device:28500"
     "minimal:src/netdev/anxzz9000.device:23000"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
@@ -100,8 +109,8 @@ BUDGETS=(
     # gate is also the assertion that every resident image in every shipped
     # drawer has a budget.
     "micro:src/bsdsocket/bsdsocket.library:197632"
-    "micro:src/netdev/anxnet.device:43000"
-    "micro:src/netdev/anxgenet.device:27500"
+    "micro:src/netdev/anxnet.device:44500"
+    "micro:src/netdev/anxgenet.device:28500"
     "micro:src/netdev/anxzz9000.device:23000"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10000"

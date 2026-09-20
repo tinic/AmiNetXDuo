@@ -231,6 +231,12 @@ struct NetdevNic
      */
     ULONG               rx_capacity;
     UBYTE               rx_holds;
+    /* The core delivers bursts -- many frames in one service pass -- so
+       ANXD_CMD_RX_BATCH is worth offering: one reply per pass instead of
+       one per frame.  A core that raises an interrupt per frame gains
+       nothing from a batch and loses a pool of posted reads to it, so it
+       leaves this 0 and its openers keep CMD_READs. */
+    UBYTE               rx_batches;
 
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an

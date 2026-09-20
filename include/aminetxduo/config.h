@@ -518,6 +518,14 @@ ULONG ami_config_pool_divisor(ULONG fallback);
 ULONG ami_config_pool_packets(VOID);
 
 /*
+ * ENV:ANXDRXBATCH 0 leaves ANXD_CMD_RX_BATCH unrequested, so the reader
+ * posts one CMD_READ per frame as before: the A/B for the batch on a machine
+ * without rebuilding.  Anything else, or no variable, is the shipped
+ * behaviour, `fallback`.
+ */
+ULONG ami_config_rx_batch(ULONG fallback);
+
+/*
  * How loud the serial diagnostic is, AMI_LOG_ERROR..AMI_LOG_TRACE.
  *
  * `fallback` unless ENV:ANXDLOGLEVEL holds a single digit 0 to 4.  The

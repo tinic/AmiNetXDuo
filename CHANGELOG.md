@@ -12,9 +12,20 @@ version at the top when it merges.
 - `ANXD_CMD_RX_BATCH`: one IORequest carries a burst of received frames
   (`AnxdS2RxBatch`, negotiated as `ANXD_S2F_RX_BATCH` on the versioned
   extension record). The device answers it once per service pass, or when
-  full; the stack posts two batches per packet type instead of one CMD_READ
-  per frame, and falls back to CMD_READs on a driver that does not know it.
-  Exec's request contract only: no port or task internals touched.
+  full; the stack posts two batches of 32 per packet type ahead of its
+  CMD_READs, re-posts a batch before delivering its frames, and falls back
+  to CMD_READs on a driver that does not know it. Offered by
+  `anxgenet.device` only; the classic cores deliver one frame per interrupt
+  and refuse it. Exec's request contract only. `SetEnv ANXDRXBATCH 0`
+  turns it off. Build option `AMINETXDUO_RX_BATCH`, off in the micro
+  profile.
+- `anxgenet.device` serves at most 32 frames per masked pass and reads the
+  GENET's RBUF overflow count into `NetDevStats`. A1200 + PiStorm32, iperf
+  into the Amiga from a 1 Gbit peer: 399 Mbit/s on main `027a62c8`, 805 with
+  the batch and the pass budget (896-905 on 1.0.0-beta3).
+- The TCP receive queue's packet cap is sized from a 1200-byte segment with
+  16 of slack, and NetX Duo counts a segment it drops at that cap in
+  `netstat -s` "dropped on receipt".
 
 - GRO stream matching now lives in the stack's SANA-II receive layer. Every
   driver can coalesce verified contiguous IPv4 and IPv6 TCP segments; device

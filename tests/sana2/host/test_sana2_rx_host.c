@@ -1681,6 +1681,7 @@ static void test_a_burst_is_never_left_on_the_port(void)
             "the shipped rule takes the whole burst before it blocks");
 }
 
+#ifdef AMINETXDUO_RX_BATCH
 /* ---------------------------------------------------- ANXD_CMD_RX_BATCH -- */
 
 /*
@@ -1837,10 +1838,13 @@ static void test_batch_post_and_drain(void)
     h_check(!bt_slot[2].posted && !bt_slot[3].posted,
             "batch drain: its slots are given back for the reads to use");
 }
+#endif /* AMINETXDUO_RX_BATCH */
 
 int main(void)
 {
+#ifdef AMINETXDUO_RX_BATCH
     test_batch_post_and_drain();
+#endif
     test_demux();
     test_header_strip();
     test_multicast_is_counted();

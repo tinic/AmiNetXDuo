@@ -643,6 +643,9 @@ typedef struct AmiSana2Reader
  * receive for a CMD_READ too.
  */
 #define AMI_SANA2_RX_BATCHES    2
+/* Slots per batch at most: the reader settles a batch's frames on its
+   stack before it re-posts the batch, one AmiRxHandUp each. */
+#define AMI_SANA2_RX_BATCH_MAX  32
 
 typedef struct AmiRxBatch
 {
@@ -664,9 +667,13 @@ typedef struct AmiSana2Rx
     AmiSana2Reader     *reader;
     ULONG               packet_type;
     UWORD               depth;
-    UBYTE               use_batch;      /* slots travel in batch[], not as
-                                           CMD_READs                        */
+    UBYTE               use_batch;      /* the ring's first batch_slots
+                                           slots travel in batch[]; the rest
+                                           are CMD_READs, the pool that
+                                           takes over while both batches
+                                           are with the reader             */
     UBYTE               pad0;
+    UWORD               batch_slots;    /* slots covered by the batches     */
     AmiRxBatch          batch[AMI_SANA2_RX_BATCHES];
 
     /*
@@ -952,7 +959,7 @@ BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet,
 VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
 #endif
 
-#ifdef AMINETXDUO_SANA2_RX_HOST_TEST
+#if defined(AMINETXDUO_SANA2_RX_HOST_TEST) && defined(AMINETXDUO_RX_BATCH)
 /* The host harness's way into the reader's batch post and drain
    (sana2_rx.c), which are file-local in the library. */
 UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch *bt);

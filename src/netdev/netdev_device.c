@@ -2479,10 +2479,15 @@ static struct Device *netdev_open(
             accepted |= ANXD_S2F_RX_DIRECT;
         if (op->op_RxLinkHdr)
             accepted |= ANXD_S2F_RX_LINK_HDR;
-        /* What netdev_queue_batch() will take: the direct pair with the
-           link header, from an opener that is neither raw nor filtering. */
-        if (op->op_RxDirect != NULL && op->op_RxFilled != NULL &&
-            op->op_RxLinkHdr && !op->op_Raw && op->op_Filter == NULL)
+        /* What netdev_queue_batch() will take -- the direct pair with the
+           link header, from an opener that is neither raw nor filtering --
+           and only on a core whose passes carry bursts (NetdevNic
+           rx_batches): measured on the emulated A2065 and NE2000, one
+           frame per interrupt, the batch cost 25 % and 340 dropped frames
+           in ten seconds against plain reads. */
+        if (hw->nu_Nic.rx_batches && op->op_RxDirect != NULL &&
+            op->op_RxFilled != NULL && op->op_RxLinkHdr && !op->op_Raw &&
+            op->op_Filter == NULL)
             accepted |= ANXD_S2F_RX_BATCH;
         if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
             accepted |= ANXD_S2F_RX_VERIFIED;
