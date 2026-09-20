@@ -171,6 +171,10 @@ static void test_ipv4(void)
     expect("valid IPv4/TCP is verified",
            netdev_rx_verify4(ip, len, packet_sum(ip, len)) ==
                ANXD_S2_RXF_VERIFIED);
+    expect("GEM TCP verdict certifies a structurally valid packet",
+           netdev_rx_trust4(ip, len, 2) == ANXD_S2_RXF_VERIFIED);
+    expect("GEM UDP verdict cannot certify TCP",
+           netdev_rx_trust4(ip, len, 3) == 0);
     netdev_rx_segment4(ip, &seg);
     expect("IPv4 stream key keeps addresses",
            seg.addr[0] == 0xc0000201UL && seg.addr[1] == 0xc6336402UL);
@@ -191,18 +195,28 @@ static void test_ipv4(void)
     ip[0] = 0x46;
     expect("IPv4 options are refused",
            netdev_rx_verify4(ip, len, packet_sum(ip, len)) == 0);
+    expect("hardware verdict still refuses IPv4 options",
+           netdev_rx_trust4(ip, len, 2) == 0);
     len = make_ipv4_tcp(ip);
     ip[6] |= 0x20;
     expect("IPv4 fragments are refused",
            netdev_rx_verify4(ip, len, packet_sum(ip, len)) == 0);
+    expect("hardware verdict still refuses fragments",
+           netdev_rx_trust4(ip, len, 2) == 0);
     len = make_ipv4_tcp(ip);
     expect("Ethernet padding beyond IPv4 total length is refused",
            netdev_rx_verify4(ip, (UWORD)(len + 4), packet_sum(ip, len)) == 0);
+    expect("hardware verdict still refuses Ethernet padding",
+           netdev_rx_trust4(ip, (UWORD)(len + 4), 2) == 0);
 
     len = make_ipv4_udp(ip);
     expect("valid IPv4/UDP is verified",
            netdev_rx_verify(ip, len, packet_sum(ip, len)) ==
                ANXD_S2_RXF_VERIFIED);
+    expect("GEM UDP verdict certifies a structurally valid packet",
+           netdev_rx_trust4(ip, len, 3) == ANXD_S2_RXF_VERIFIED);
+    expect("IP-only GEM verdict is not enough",
+           netdev_rx_trust4(ip, len, 1) == 0);
 
     /* The hardware sum pads an odd final byte in the low address/high-order
        half of its word.  Keep that case in the contract: many small UDP
@@ -224,6 +238,8 @@ static void test_ipv4(void)
     ip[27] = 0;
     expect("IPv4 UDP without a checksum is not certified",
            netdev_rx_verify(ip, len, packet_sum(ip, len)) == 0);
+    expect("hardware verdict cannot certify absent UDP checksum",
+           netdev_rx_trust4(ip, len, 3) == 0);
 }
 
 static void test_ipv6(void)

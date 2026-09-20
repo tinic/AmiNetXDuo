@@ -1,6 +1,6 @@
 # ZZ9000 Ethernet: anxzz9000.device and the firmware fork
 
-State of 2026-09-20 07:32 UTC. Everything below was measured on the real
+State of 2026-09-20 08:20 UTC. Everything below was measured on the real
 A3000 (68030/25, OS 3.2, 12 MB motherboard RAM, ZZ9000 at $48000000 Zorro III,
 X-Surf 100 at $40000000 for the door) against a gigabit Linux peer on the
 same switch. Numbers are one run each unless said otherwise.
@@ -38,6 +38,7 @@ same switch. Numbers are one run each unless said otherwise.
 | 7 | `ge_continues`' flag-byte key breaks every run at Linux's PSH (every ~5th segment): runs of 2 | 8,435 segments cost 431 ACKs; runs 2.1 | shared `netdev_rx_continues()` drops PSH from the key: runs of 15, 1 ACK per 20 segments |
 | 8 | **open**: with 15-frame runs NetX TCP drops ~9 merged heads per 12 s ("dropped on receipt", `nx_ip_tcp_receive_packets_dropped`), 25-30 retransmits; with runs of 2, zero | `netstat -s` tcp line; capture shows 1-5 segment holes right at the ack point, later data SACKed | not found. Suspects: `nx_tcp_socket_packet_process.c` window acceptance with `rx_window_current`, the merged head's length vs the window the ACK advertised, the fork's ramp/settle code |
 | 9 | **fixed**: an exact RX serial acknowledgement can be rejected when the ACP supplies a stale serial. The same presented frame then re-enters every 32-frame drain, which re-enables the level-six source and creates an unbounded INT6/software-interrupt storm; both interfaces and the whole machine appear frozen | forcing legacy ack `1` ran 120 s / 88.9 MB and crossed the 16-bit serial wrap, while the exact-ack variants froze at 1.12-42.5 MB; synchronous TX still froze at ~65 MB, excluding async TX. With the recovery below, the full async/CONTINUES build ran 150 s / 143 MB at 7.99 Mbit/s and both interfaces remained reachable. A test build then deliberately sent one wrong exact ack: the recovery counter became 1 and a 15 s follow-up transferred 15.3 MB at 8.21 Mbit/s, with zero device errors, overruns, serial gaps, retransmits, or checksum errors | when a nonzero serial repeats, the previous synchronous register write was necessarily rejected; do not deliver the duplicate, reset the GRO run, and use the firmware's reserved legacy ack `1` once to advance. Counter: `rejected serial acknowledgements recovered` |
+| 10 | **fixed**: the GEM already validates IPv4/TCP/UDP checksums, but the 68k repeated the whole payload sum while copying each frame | a 60 s receive soak transferred 55.3 MB at 7.66 Mbit/s: 53,620 frames used the GEM verdict, 81 were rechecked, with zero checksum, ring, serial, or GEM errors. Twenty deliberately checksum-less IPv4 UDP datagrams increased only the fallback counter by 20 | firmware exposes bit 15 (present) and descriptor bits 23..22 for the currently presented slot in read-only register 0xa6. The driver trusts only TCP/UDP verdicts after its published structural checks; options, fragments, padding, malformed lengths, checksum-less UDP, IPv6, and old firmware retain the exact software verifier |
 
 ## Numbers
 
@@ -52,6 +53,7 @@ same switch. Numbers are one run each unless said otherwise.
 | pool 2048, window 396 KB, 32 RX BDs | 3.7 | 275 | - |
 | 64 RX BDs, fit 56 frames, runs of 2 | 7.7 | 2 | 0.05 |
 | runs of 15 | 8.0 | 25-30 | 0.05 |
+| + GEM RX checksum verdict | 7.66 (60 s) | 0 | 0.05 |
 | httpd 3.8 MB download (TX) | 381 KB/s (disk-bound; X-Surf iComp 327) | | |
 
 Profile at 4.7 Mbit/s (Profile, audio-channel sampler): idle ~30 % of the
@@ -65,7 +67,7 @@ under Disable: 490 us a frame at 1.3 us a longword), one 32-frame drain =
 |---|---|
 | per-window ARCACHE=0000 in mntzorro.v (RX window non-cacheable, framebuffer stays 0xF) | agreed, the clean fix; needs a bitstream (Vivado, not on the rig). The firmware invalidation becomes the old-bitstream path; the firmware should read a REG3 capability bit and skip it |
 | direct MMIO -> final copy | done |
-| GEM checksum verdict in the slot header | not done; the GEM's RX_CHKSUM is on by default, BD status bits 23:22; needs an opt-in (a write to 0x8a) so `ZZ9000Net.device`'s unmasked length read keeps working |
+| GEM checksum verdict | done without changing the slot ABI: read-only register 0xa6 returns bit 15 present plus BD status bits 23..22 for the current slot. MNT's driver is unchanged and was exercised after flashing; an AmiNetXDuo driver on old firmware sees zero and keeps the software path |
 | driver-side CONTINUES | done; see #7-#9 |
 | READ_BATCH / RX_POLL / batched replies | `rx_holds` possible with the 128-slot ring; batched replies were measured a loss on a real 68k |
 | drain several slots per wakeup | done (up to 32; bursts of 32 seen) |
@@ -101,4 +103,4 @@ shares that mains.
 3. `RAM:zz9k`: `DEVICE=AmiNetXDuo:Devs/Networks/anxzz9000.device`, `UNIT=0`, `CONFIGURE=DHCP`, `MDNS=NO`, `PRIORITY=0`.
 4. Measure: `iperf -s -t 30 -q` on the Amiga, `iperf -c 192.168.1.175 -t 12` here, `ss -tin` for rwnd_limited/retrans, `NetDevStats DEVICE anxzz9000.device`, `netstat -s`, card registers with `RAM:zzreg 8a|8c|8e|ac|a8`.
 5. Firmware: `ZZFwUpdate RAM:BOOT.bin` (the file must be named BOOT.bin), then a power cycle -- a warm reboot does not reload the card, and a warm reboot brings the card's 256 MB Z3 RAM online while a cold one does not (`Avail`), which moves where the pool lands.
-6. Registers added by the fork: 0x8a TX status, 0xa8/0xaa longest service-loop pass and its tag, 0xac/0xae GEM RX FIFO overruns and error interrupts.
+6. Registers added by the fork: 0x8a TX status, 0xa6 current RX checksum metadata, 0xa8/0xaa longest service-loop pass and its tag, 0xac/0xae GEM RX FIFO overruns and error interrupts.
