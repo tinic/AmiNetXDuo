@@ -1,0 +1,146 @@
+/*
+ * Small, portable HTTP request-value policies used by httpd.
+ *
+ * Includes nothing beyond its own contract so the host tier can exercise the
+ * exact code the m68k server runs.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "httprequest.h"
+
+static int hr_lower(int c)
+{
+    return (c >= 'A' && c <= 'Z') ? c + 32 : c;
+}
+
+static int hr_nicmp(const char *a, const char *b, unsigned long n)
+{
+    while (n-- != 0UL)
+    {
+        int ca = hr_lower((unsigned char)*a++);
+        int cb = hr_lower((unsigned char)*b++);
+
+        if (ca != cb)
+            return ca - cb;
+        if (ca == '\0')
+            return 0;
+    }
+
+    return 0;
+}
+
+int http_request_query_take(const char *target)
+{
+    unsigned long i = 0;
+
+    if (target == 0)
+        return 0;
+
+    while (target[i] != '\0' && target[i] != '?')
+        i++;
+
+    if (target[i] != '?')
+        return 0;
+
+    i++;
+    while (target[i] != '\0')
+    {
+        unsigned long start = i;
+
+        while (target[i] != '\0' && target[i] != '&')
+            i++;
+
+        if (i - start == 6UL &&
+            hr_nicmp(&target[start], "take=1", 6UL) == 0)
+            return 1;
+
+        if (target[i] == '&')
+            i++;
+    }
+
+    return 0;
+}
+
+unsigned long http_request_timeout(const char *value, unsigned long cap)
+{
+    unsigned long secs = 0;
+
+    if (value == 0)
+        return 0;
+
+    while (*value == ' ' || *value == '\t')
+        value++;
+
+    if (hr_nicmp(value, "infinite", 8UL) == 0)
+        return cap;
+
+    if (hr_nicmp(value, "second-", 7UL) != 0)
+        return 0;
+
+    value += 7;
+    while (*value >= '0' && *value <= '9')
+    {
+        unsigned long digit = (unsigned long)(*value++ - '0');
+
+        /* The caller caps the grant anyway.  Saturating here means a long
+           hostile field cannot wrap into a short, apparently valid lease. */
+        if (secs > cap / 10UL ||
+            (secs == cap / 10UL && digit > cap % 10UL))
+            return cap;
+
+        secs = secs * 10UL + digit;
+    }
+
+    return secs;
+}
+
+int http_request_accepts_gzip(const char *v)
+{
+    if (v == 0)
+        return 0;
+
+    while (*v != '\0')
+    {
+        int is_gzip;
+        int refused = 0;
+
+        while (*v == ' ' || *v == '\t' || *v == ',')
+            v++;
+
+        is_gzip = (hr_nicmp(v, "gzip", 4UL) == 0 &&
+                   (v[4] == '\0' || v[4] == ',' || v[4] == ';' ||
+                    v[4] == ' '  || v[4] == '\t'));
+
+        /* To the end of this coding, reading any q= on the way past.  A
+           quality of zero is a refusal and 0.000 is still zero. */
+        while (*v != '\0' && *v != ',')
+        {
+            if (*v == ';')
+            {
+                const char *q = v + 1;
+
+                while (*q == ' ' || *q == '\t')
+                    q++;
+
+                if ((*q == 'q' || *q == 'Q') && q[1] == '=')
+                {
+                    int zero = 1;
+
+                    for (q += 2; *q != '\0' && *q != ',' && *q != ';'; q++)
+                        if (*q >= '1' && *q <= '9')
+                            zero = 0;
+
+                    if (zero)
+                        refused = 1;
+                }
+            }
+            v++;
+        }
+
+        if (is_gzip)
+            return refused ? 0 : 1;
+    }
+
+    return 0;
+}

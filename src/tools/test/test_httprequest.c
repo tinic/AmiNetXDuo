@@ -1,0 +1,76 @@
+/* Tests for the portable request-value policy used by httpd.
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "httprequest.h"
+
+#include <stdio.h>
+
+static int checks;
+static int failures;
+
+#define CHECK(cond)                                                          \
+    do {                                                                     \
+        checks++;                                                            \
+        if (!(cond)) {                                                       \
+            failures++;                                                      \
+            printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);         \
+        }                                                                    \
+    } while (0)
+
+static void test_query(void)
+{
+    printf("interactive query\n");
+
+    CHECK(http_request_query_take("/shell?take=1"));
+    CHECK(http_request_query_take("/shell?a=0&take=1&b=2"));
+    CHECK(http_request_query_take("/shell?TAKE=1"));
+    CHECK(!http_request_query_take("/shell"));
+    CHECK(!http_request_query_take("/shell?take=0"));
+    CHECK(!http_request_query_take("/shell?retake=1"));
+    CHECK(!http_request_query_take("/shell?take=10"));
+    CHECK(!http_request_query_take(NULL));
+}
+
+static void test_timeout(void)
+{
+    printf("WebDAV Timeout\n");
+
+    CHECK(http_request_timeout("Infinite", 3600UL) == 3600UL);
+    CHECK(http_request_timeout(" infinite", 3600UL) == 3600UL);
+    CHECK(http_request_timeout("Second-1", 3600UL) == 1UL);
+    CHECK(http_request_timeout("Second-3600", 3600UL) == 3600UL);
+    CHECK(http_request_timeout("Second-3601", 3600UL) == 3600UL);
+    CHECK(http_request_timeout("Second-00012", 3600UL) == 12UL);
+    CHECK(http_request_timeout("Second-999999999999999999999999999",
+                               3600UL) == 3600UL);
+    CHECK(http_request_timeout("Second-", 3600UL) == 0UL);
+    CHECK(http_request_timeout("junk", 3600UL) == 0UL);
+    CHECK(http_request_timeout(NULL, 3600UL) == 0UL);
+}
+
+static void test_gzip(void)
+{
+    printf("Accept-Encoding\n");
+
+    CHECK(http_request_accepts_gzip("gzip"));
+    CHECK(http_request_accepts_gzip("GZip"));
+    CHECK(http_request_accepts_gzip("deflate, gzip;q=1.0, *;q=0.5"));
+    CHECK(http_request_accepts_gzip("gzip;q=0.001"));
+    CHECK(!http_request_accepts_gzip("gzip;q=0"));
+    CHECK(!http_request_accepts_gzip("gzip;q=0.000"));
+    CHECK(!http_request_accepts_gzip("br, deflate"));
+    CHECK(!http_request_accepts_gzip("gzip-more"));
+    CHECK(!http_request_accepts_gzip("*"));
+    CHECK(!http_request_accepts_gzip(NULL));
+}
+
+int main(void)
+{
+    test_query();
+    test_timeout();
+    test_gzip();
+
+    printf("\n%d checks, %d failure(s)\n", checks, failures);
+    return failures == 0 ? 0 : 1;
+}

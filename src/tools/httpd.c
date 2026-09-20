@@ -14,6 +14,7 @@
 #include "httpfs.h"
 #include "httpstr.h"
 #include "httpvol.h"
+#include "httprequest.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
 
@@ -4317,29 +4318,6 @@ static const HttpMethod *httpd_lookup(const char *name)
     return NULL;
 }
 
-/* The one query parameter the two interactive endpoints act on. */
-static BOOL httpd_query_take(const char *target, ULONG question)
-{
-    ULONG i = question + 1UL;
-
-    while (target[i] != '\0')
-    {
-        ULONG start = i;
-
-        while (target[i] != '\0' && target[i] != '&')
-            i++;
-
-        if (i - start == 6UL &&
-            hs_nicmp(&target[start], "take=1", 6) == 0)
-            return TRUE;
-
-        if (target[i] == '&')
-            i++;
-    }
-
-    return FALSE;
-}
-
 /* --------------------------------------------------------------- parsing --- */
 
 /* "bytes=0-1023", "bytes=1024-", "bytes=-512".  One range only: a multipart
@@ -4403,81 +4381,6 @@ static VOID httpd_parse_if(HttpConn *c, const char *value)
             value++;
         }
     }
-}
-
-/* "Second-3600", or "Infinite".  What is granted is capped here whatever was
-   asked for, and the answer says what it was. */
-static ULONG httpd_parse_timeout(const char *value)
-{
-    while (*value == ' ')
-        value++;
-
-    if (hs_nicmp(value, "infinite", 8) == 0)
-        return HTTPD_LOCK_CAP;
-
-    if (hs_nicmp(value, "second-", 7) == 0)
-    {
-        ULONG secs = 0;
-
-        value += 7;
-        while (*value >= '0' && *value <= '9')
-            secs = (secs * 10UL) + (ULONG)(*value++ - '0');
-
-        return secs;
-    }
-
-    return 0;
-}
-
-/* Does this Accept-Encoding offer gzip?  RFC 7231 5.3.4: a quality of 0 refuses
-   the coding outright rather than ranking it low.  `*` is deliberately not
-   honoured: the plain page always works. */
-static BOOL httpd_offers_gzip(const char *v)
-{
-    while (*v != '\0')
-    {
-        BOOL is_gzip;
-        BOOL refused = FALSE;
-
-        while (*v == ' ' || *v == '\t' || *v == ',')
-            v++;
-
-        is_gzip = (hs_nicmp(v, "gzip", 4) == 0 &&
-                   (v[4] == '\0' || v[4] == ',' || v[4] == ';' ||
-                    v[4] == ' '  || v[4] == '\t')) ? TRUE : FALSE;
-
-        /* To the end of this coding, reading any q= on the way past.  A
-           quality of zero is a refusal and 0.000 is still zero, so what is
-           looked for is a nonzero digit after the point. */
-        while (*v != '\0' && *v != ',')
-        {
-            if (*v == ';')
-            {
-                const char *q = v + 1;
-
-                while (*q == ' ' || *q == '\t')
-                    q++;
-
-                if ((*q == 'q' || *q == 'Q') && q[1] == '=')
-                {
-                    BOOL zero = TRUE;
-
-                    for (q += 2; *q != '\0' && *q != ',' && *q != ';'; q++)
-                        if (*q >= '1' && *q <= '9')
-                            zero = FALSE;
-
-                    if (zero)
-                        refused = TRUE;
-                }
-            }
-            v++;
-        }
-
-        if (is_gzip)
-            return refused ? FALSE : TRUE;
-    }
-
-    return FALSE;
 }
 
 /* The request head, from the first byte to the blank line.  FALSE when it has
@@ -4759,7 +4662,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             /* Read for the terminal's and the console's pages and nothing
                else.  A cut list can have lost the coding that was refused,
                so it is read as no offer at all. */
-            c->gzip_ok = (!cut && httpd_offers_gzip(httpd_value)) ? 1 : 0;
+            c->gzip_ok = (!cut && http_request_accepts_gzip(httpd_value))
+                             ? 1 : 0;
         }
         else if (hs_equal(name, "If-None-Match"))
         {
@@ -4870,7 +4774,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Timeout"))
         {
-            c->lock_secs = httpd_parse_timeout(httpd_value);
+            c->lock_secs = http_request_timeout(httpd_value, HTTPD_LOCK_CAP);
         }
     }
 
@@ -4956,7 +4860,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
                Looked for anywhere in the string, because no other parameter
                is read. */
             if (httpd_target[n] == '?')
-                c->ws_take = httpd_query_take(httpd_target, n) ? 1 : 0;
+                c->ws_take = http_request_query_take(httpd_target) ? 1 : 0;
 
             return TRUE;
         }
@@ -4980,7 +4884,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             c->path.name[0] = '\0';
 
             if (httpd_target[n] == '?')
-                c->ws_take = httpd_query_take(httpd_target, n) ? 1 : 0;
+                c->ws_take = http_request_query_take(httpd_target) ? 1 : 0;
 
             return TRUE;
         }
