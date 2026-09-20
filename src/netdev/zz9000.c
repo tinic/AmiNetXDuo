@@ -48,10 +48,10 @@
  * frames finished (bit 15 set says the firmware has the path; MNT's reads
  * the register as 0).  The core takes whichever it finds at attach.
  *
- * The interrupt is INT6 (INTB_EXTER), which is what the card raises; the
- * server only masks and acknowledges at the card and the drain runs in the
- * shell's software interrupt, so a burst of 32 frames is not copied at
- * level 6.
+ * The interrupt is INT6 (INTB_EXTER) by default, or INT2 (INTB_PORTS) when
+ * current firmware reports `int2 = on` in ZZ9000.CFG.  The server only masks
+ * and acknowledges at the card and the drain runs in the shell's software
+ * interrupt, so a burst of 32 frames is not copied at hardware level.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -82,6 +82,8 @@ static BOOL zz_tx_reclaim(NetdevNic *nic);
 #define ZZ_REG_MAC_LO       0x0088UL
 #define ZZ_REG_RX_STATUS    0x008cUL
 #define ZZ_REG_RX_META      0x00a6UL    /* fork: current GEM RX verdict */
+#define ZZ_REG_CONFIG_KEY   0x00e8UL
+#define ZZ_REG_CONFIG_PRESENT 0x00eaUL
 
 #define ZZ_REG_TX_STATUS    0x008aUL    /* the fork's firmware, else reads 0 */
 
@@ -99,9 +101,12 @@ static BOOL zz_tx_reclaim(NetdevNic *nic);
 #define ZZ_TXS_COUNT        0x7fffu
 
 #define ZZ_RXM_PRESENT      0x8000u
+#define ZZ_RXM_TX_CSUM      0x4000u
 #define ZZ_RXM_MASK         0x0003u
 #define ZZ_RXM_TCP          2u
 #define ZZ_RXM_UDP          3u
+
+#define ZZ_CFG_KEY_INT2     5u
 
 #define ZZ_INT_ETH          0x0001      /* enable, and "pending" on a read */
 #define ZZ_INT_ETH_ACK      (8 | 16)    /* what MNT's driver writes to clear */
@@ -154,6 +159,7 @@ enum
     ZZ_ST_ACK_RECOVER,  /* rejected serial handshake recovered compatibly    */
     ZZ_ST_HW_VERIFIED,  /* frames certified by the GEM descriptor             */
     ZZ_ST_HW_FALLBACK,  /* GEM verdict outside the published RX contract      */
+    ZZ_ST_TX_CSUM,      /* frames whose transport checksum the GEM inserted    */
     ZZ_ST_COUNT
 };
 
@@ -177,6 +183,7 @@ static const char *const zz_stat_names[] =
     "rejected serial acknowledgements recovered",
     "frames verified by GEM hardware",
     "GEM verdicts checked again in software",
+    "GEM transmit checksums inserted",
     NULL
 };
 
@@ -193,6 +200,7 @@ typedef struct ZzCore
     UBYTE       after_isr;  /* set by the top half, cleared by the pass that
                                follows it: which context a pass ran in     */
     UBYTE       rx_meta;    /* firmware exposes REG_ZZ_ETH_RX_META          */
+    UBYTE       int2;       /* ZZ9000.CFG routes the shared interrupt there */
 } ZzCore;
 
 static ZzCore zz_cores[2];
@@ -217,6 +225,11 @@ static UWORD zz_get(NetdevNic *nic, ULONG off)
 static VOID zz_put(NetdevNic *nic, ULONG off, UWORD val)
 {
     *zz_reg(nic, off) = val;
+}
+
+BOOL netdev_zz9000_uses_int2(const NetdevNic *nic)
+{
+    return (BOOL)(ZZ(nic)->int2 != 0);
 }
 
 /* ----------------------------------------------------------- station ---- */
@@ -270,6 +283,16 @@ static LONG zz_attach(NetdevNic *nic)
     ZZ(nic)->gro.live  = 0;
     ZZ(nic)->after_isr = 0;
     ZZ(nic)->rx_meta   = 0;
+    ZZ(nic)->int2      = 0;
+
+    /* Firmware 2.3 and later exposes the parsed ZZ9000.CFG.  Older firmware
+       reads zero at this register group, so the normal INT6 fallback needs
+       no version test.  Match the vendor driver's current routing choice:
+       the value must be true and the key must have been present. */
+    zz_put(nic, ZZ_REG_CONFIG_KEY, ZZ_CFG_KEY_INT2);
+    if (zz_get(nic, ZZ_REG_CONFIG_KEY) != 0 &&
+        zz_get(nic, ZZ_REG_CONFIG_PRESENT) != 0)
+        ZZ(nic)->int2 = 1;
 
     /*
      * The station address the firmware programmed into the GEM: the card's
@@ -322,6 +345,8 @@ static LONG zz_attach(NetdevNic *nic)
         nic->rx_capacity = (fork ? ZZ_ARM_RING_FRAMES_FORK
                                  : ZZ_ARM_RING_FRAMES_MNT) * (1500UL + 14UL);
         ZZ(nic)->rx_meta = (UBYTE)((rxm & ZZ_RXM_PRESENT) != 0);
+        nic->tx_csum_supported = (UBYTE)(((rxm & ZZ_RXM_TX_CSUM) != 0)
+                               ? (ANXD_S2_TXF_TCP | ANXD_S2_TXF_UDP) : 0);
     }
     nic->txb_inuse = 0;
     nic->read_hdr  = NULL;
@@ -798,6 +823,25 @@ static VOID zz_tx_fill(NetdevNic *nic, UWORD slot, const UBYTE *frame,
             (UWORD)((UWORD)frame[i] << 8);
 }
 
+/* The GEM's full checksum engine wants zero, rather than the pseudo-header
+ * sum in ANXD_S2IOF_L4_CSUM's field.  Change only the card-window copy: the
+ * stack may retain and retransmit its packet after this write. */
+static VOID zz_tx_checksum(NetdevNic *nic, UWORD slot, const UBYTE *frame,
+                           UWORD len)
+{
+    UWORD offset;
+
+    if (nic->tx_csum != 0 &&
+        netdev_tx_csum4(frame, len, nic->tx_csum, &offset) != 0)
+    {
+        volatile UBYTE *win = nic->board + ZZ_TX_WINDOW +
+                              (ULONG)slot * ZZ_TX_WINDOW_LEN;
+
+        *(volatile UWORD *)(volatile void *)(win + offset) = 0;
+        nic->core_stat[ZZ_ST_TX_CSUM]++;
+    }
+}
+
 /*
  * The fork's firmware: frames finished since the last look, sent or
  * dropped, retire that many slots.  Asked by the shell when the ring looks
@@ -846,6 +890,7 @@ static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
         UWORD result;
 
         zz_tx_fill(nic, 0, frame, len);
+        zz_tx_checksum(nic, 0, frame, len);
 
         /*
          * MNT's firmware: the length write is the send, and the ARM does
@@ -877,6 +922,7 @@ static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
 
     slot = (UWORD)(nic->tx_next & (ZZ_TX_SLOTS - 1));
     zz_tx_fill(nic, slot, frame, len);
+    zz_tx_checksum(nic, slot, frame, len);
     zz_put(nic, ZZ_REG_TX,
            (UWORD)(ZZ_TX_ASYNC | (UWORD)(slot << ZZ_TX_SLOT_SHIFT) | len));
     nic->tx_next++;

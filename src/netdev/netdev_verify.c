@@ -127,6 +127,60 @@ UBYTE netdev_rx_trust4(const UBYTE *ip, UWORD plen, UBYTE verdict)
     return ANXD_S2_RXF_VERIFIED;
 }
 
+UBYTE netdev_tx_csum4(const UBYTE *frame, UWORD len, UBYTE supported,
+                      UWORD *checksum_offset)
+{
+    const UBYTE *ip;
+    UWORD plen;
+    UWORD ihl;
+    UWORD total;
+    UWORD tlen;
+    UWORD offset;
+    UBYTE flag;
+
+    if (frame == NULL || checksum_offset == NULL || len < 14 + 20 ||
+        frame[12] != 0x08 || frame[13] != 0x00)
+        return 0;
+
+    ip   = frame + 14;
+    plen = (UWORD)(len - 14);
+    if ((ip[0] & 0xf0u) != 0x40u)
+        return 0;
+    ihl = (UWORD)((ip[0] & 0x0fu) << 2);
+    if (ihl < 20 || ihl > plen)
+        return 0;
+    total = nd_be16(ip + 2);
+    if (total < ihl || total > plen)
+        return 0;
+    if ((ip[6] & 0x3fu) != 0 || ip[7] != 0)
+        return 0;
+
+    tlen = (UWORD)(total - ihl);
+    if (ip[9] == 6)
+    {
+        if ((supported & ANXD_S2_TXF_TCP) == 0 || tlen < 20 ||
+            (ip[ihl + 12] >> 4) < 5)
+            return 0;
+        offset = (UWORD)(14 + ihl + 16);
+        flag = ANXD_S2_TXF_TCP;
+    }
+    else if (ip[9] == 17)
+    {
+        if ((supported & ANXD_S2_TXF_UDP) == 0 || tlen < 8 ||
+            nd_be16(ip + ihl + 4) != tlen)
+            return 0;
+        offset = (UWORD)(14 + ihl + 6);
+        flag = ANXD_S2_TXF_UDP;
+    }
+    else
+        return 0;
+
+    if ((UWORD)(offset + 2) > (UWORD)(14 + total))
+        return 0;
+    *checksum_offset = offset;
+    return flag;
+}
+
 UBYTE netdev_rx_verify6(const UBYTE *ip, UWORD plen, ULONG sum)
 {
     UWORD tlen;

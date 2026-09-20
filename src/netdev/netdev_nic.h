@@ -122,6 +122,12 @@ struct NetdevNicOps
  */
 VOID netdev_nic_poll(NetdevNic *nic);
 
+#if NETDEV_HAS_ZZ9000
+/* Current firmware can route the card's shared interrupt to INT2 through
+   ZZ9000.CFG.  Only the ZZ9000 core knows that firmware selection. */
+BOOL netdev_zz9000_uses_int2(const NetdevNic *nic);
+#endif
+
 struct NetdevNic
 {
     NetdevBus           bus;

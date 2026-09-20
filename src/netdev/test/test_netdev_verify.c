@@ -275,10 +275,47 @@ static void test_ipv6(void)
            netdev_rx_verify6(ip, (UWORD)(len + 2), packet_sum(ip, len)) == 0);
 }
 
+static void test_tx_checksum(void)
+{
+    UBYTE frame[96];
+    UBYTE *ip = frame + 14;
+    UWORD len;
+    UWORD offset = 0xffffu;
+
+    memset(frame, 0, sizeof(frame));
+    frame[12] = 0x08;
+    frame[13] = 0x00;
+    len = (UWORD)(14 + make_ipv4_tcp(ip));
+    expect("TX TCP checksum field is located after Ethernet and IPv4",
+           netdev_tx_csum4(frame, len, ANXD_S2_TXF_TCP, &offset) ==
+               ANXD_S2_TXF_TCP && offset == 50);
+    expect("TX TCP offload is not used unless it was negotiated",
+           netdev_tx_csum4(frame, len, ANXD_S2_TXF_UDP, &offset) == 0);
+
+    len = (UWORD)(14 + make_ipv4_udp(ip));
+    expect("TX UDP checksum field is located from the parsed IHL",
+           netdev_tx_csum4(frame, len, ANXD_S2_TXF_UDP, &offset) ==
+               ANXD_S2_TXF_UDP && offset == 40);
+    expect("Ethernet padding is accepted on transmit",
+           netdev_tx_csum4(frame, 60, ANXD_S2_TXF_UDP, &offset) ==
+               ANXD_S2_TXF_UDP);
+
+    len = (UWORD)(14 + make_ipv4_tcp(ip));
+    ip[6] = 0x20;
+    expect("TX fragments are refused", netdev_tx_csum4(
+               frame, len, ANXD_S2_TXF_TCP, &offset) == 0);
+    len = (UWORD)(14 + make_ipv4_tcp(ip));
+    frame[12] = 0x86;
+    frame[13] = 0xdd;
+    expect("TX IPv6 is not mistaken for GEM IPv4 full offload",
+           netdev_tx_csum4(frame, len, ANXD_S2_TXF_TCP, &offset) == 0);
+}
+
 int main(void)
 {
     test_ipv4();
     test_ipv6();
+    test_tx_checksum();
     printf("%d checks, %d failures, %s\n", checks, failures,
            failures == 0 ? "PASS" : "FAIL");
     return failures == 0 ? 0 : 1;

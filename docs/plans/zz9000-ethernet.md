@@ -1,6 +1,6 @@
 # ZZ9000 Ethernet: anxzz9000.device and the firmware fork
 
-State of 2026-09-20 09:00 UTC. Everything below was measured on the real
+State of 2026-09-20 09:10 UTC. Everything below was measured on the real
 A3000 (68030/25, OS 3.2, 12 MB motherboard RAM, ZZ9000 at $48000000 Zorro III,
 X-Surf 100 at $40000000 for the door) against a gigabit Linux peer on the
 same switch. Numbers are one run each unless said otherwise.
@@ -9,9 +9,9 @@ same switch. Numbers are one run each unless said otherwise.
 
 | what | where |
 |---|---|
-| driver `anxzz9000.device` | AmiNetXDuo branch `zz9000`: `src/netdev/zz9000.c`, `NETDEV_ROSTER_ZZ9000`, card rows appended after `genet`, `n68k_copy_longs_sum`, shared `netdev_rx_continues()` in `netdev_verify.[ch]` |
+| driver `anxzz9000.device` | independent MIT implementation on AmiNetXDuo branch `zz9000` (not derived from GPL `ZZ9000Net.device`): `src/netdev/zz9000.c`, `NETDEV_ROSTER_ZZ9000`, card rows appended after `genet`, `n68k_copy_longs_sum`, shared `netdev_rx_continues()` in `netdev_verify.[ch]` |
 | firmware | github.com/tinic/zz9000-firmware branch `aminetxduo` (= codex's `console-encode-offload` + the commits below); built with Arm GNU 13.2.rel1 + bootgen (no docker, no Vivado on the rig) |
-| flashed on the A3000 | `Work:Attic/ZZ9000-console/BOOT-mcast.bin` (also `BOOT-bd64d`, `BOOT-l2fix`, `-asynctx`, `-loopgap`, `-l2lean`, `-bd64`, `-bd64b`, `-bd64c`); codex's original `BOOT.bin` kept beside them |
+| flashed on the A3000 | `BOOT-txcsum-mcast.bin` (multicast receive plus register 0xa6 = 0xc000: RX metadata and TX checksum insertion present); earlier candidates remain under `Work:Attic/ZZ9000-console/` |
 | boot config | unchanged: `DEVS:NetInterfaces/zz9000` still names MNT's `ZZ9000Net.device`; ours is installed beside at `AmiNetXDuo:Devs/Networks/anxzz9000.device` and brought up from `RAM:zz9k` for a test |
 
 ## The card as the 68k sees it (measured)
@@ -40,13 +40,16 @@ same switch. Numbers are one run each unless said otherwise.
 | 9 | **fixed**: an exact RX serial acknowledgement can be rejected when the ACP supplies a stale serial. The same presented frame then re-enters every 32-frame drain, which re-enables the level-six source and creates an unbounded INT6/software-interrupt storm; both interfaces and the whole machine appear frozen | forcing legacy ack `1` ran 120 s / 88.9 MB and crossed the 16-bit serial wrap, while the exact-ack variants froze at 1.12-42.5 MB; synchronous TX still froze at ~65 MB, excluding async TX. With the recovery below, the full async/CONTINUES build ran 150 s / 143 MB at 7.99 Mbit/s and both interfaces remained reachable. A test build then deliberately sent one wrong exact ack: the recovery counter became 1 and a 15 s follow-up transferred 15.3 MB at 8.21 Mbit/s, with zero device errors, overruns, serial gaps, retransmits, or checksum errors | when a nonzero serial repeats, the previous synchronous register write was necessarily rejected; do not deliver the duplicate, reset the GRO run, and use the firmware's reserved legacy ack `1` once to advance. Counter: `rejected serial acknowledgements recovered` |
 | 10 | **fixed**: the GEM already validates IPv4/TCP/UDP checksums, but the 68k repeated the whole payload sum while copying each frame | a 60 s receive soak transferred 55.3 MB at 7.66 Mbit/s: 53,620 frames used the GEM verdict, 81 were rechecked, with zero checksum, ring, serial, or GEM errors. Twenty deliberately checksum-less IPv4 UDP datagrams increased only the fallback counter by 20 | firmware exposes bit 15 (present) and descriptor bits 23..22 for the currently presented slot in read-only register 0xa6. The driver trusts only TCP/UDP verdicts after its published structural checks; options, fragments, padding, malformed lengths, checksum-less UDP, IPv6, and old firmware retain the exact software verifier |
 | 11 | **fixed**: the GEM ran with Xilinx' defaults, unicast + broadcast only -- no multicast frame ever reached the 68k, on any driver: no IPv6 neighbour discovery (solicited-node groups), no mDNS, no router advertisements | before: `ping6 <A3000 global>` from the peer: neighbour FAILED, `http 000`; the card had been answering IPv6 only for the peers whose ND cache still held it from a unicast exchange | fw `init_ethernet_buffers()`: `XEmacPs_SetOptions(MULTICAST)` + `HASHL`/`HASHH` = 0xFFFFFFFF (accept every group; the 68k filters). After the flash: ND REACHABLE, rtt 254-528 ms, `http 200` over the global address with MNT's driver as well as ours. Flashed as `BOOT-mcast.bin` |
+| 12 | **fixed**: the GEM's full TX checksum insertion was enabled, but the stack still walked every TCP payload on the 68030 and the driver did not tell the GEM which writes could use it | matched three-run A/B on the same boot and firmware: software checksum 4.48/4.32/4.55 Mbit/s (mean 4.45), GEM insertion 4.65/4.64/4.63 Mbit/s (mean 4.64, +4.3%). The offload runs inserted 24,558 checksums with no new retransmits, bad packets, checksum errors, or device errors; a separate 60 s run sustained 4.60 Mbit/s | firmware register 0xa6 bit 14 positively reports that GEM full TX checksum insertion is enabled. The driver negotiates TCP/UDP only when that bit is present, validates the Ethernet/IPv4/transport headers, and zeroes the transport checksum only in the copied card-window frame. The retained NetX packet is never changed, so retry and fallback remain safe; old firmware retains software checksums |
+| 13 | **fixed**: the vendor 2.8 RC driver follows `int2 = on` in ZZ9000.CFG; ours had assumed INT6 unconditionally | source audit against v2.8.0-rc3; the current card reports the key absent and continues on INT6 | query firmware config key 5 at attach and register the Exec server on INT2 only when both its value and presence word are nonzero; pre-2.3 firmware reads zero and retains INT6 |
+| 14 | the official 2.8 RC3 driver is not a safe code base for this firmware unchanged: after its first 20.8 s / 10.5 MB receive control both A3000 interfaces stopped answering and required a cold cycle | 4.23 Mbit/s before the hard hang; no post-failure counters were reachable. The updated `anxzz9000.device` immediately followed with 30.4 s / 28.0 MB at 7.72 Mbit/s, both doors still live, zero retransmits, checksum, ring, serial, or device errors | keep the independent bounded serial-ack recovery; upstream the protocol and fixes in reviewable pieces rather than replacing this core with the GPL driver |
 
 ## Numbers
 
 | configuration | TCP RX | retrans / 9 s | ACKs per segment |
 |---|---|---|---|
 | ZZ9000Net.device 2.2, MNT-derived fw | 3.1 Mbit/s | - | - |
-| ZZ9000Net.device 2.2, fw bd64d | 4.19 (60 s) | - | - |
+| ZZ9000Net.device 2.8 RC3, fork fw | 4.23 (20 s; then hard hang) | 0 before hang | - |
 | anxzz9000, fw l2fix, sync TX | 4.6 | - | 0.85 |
 | + async TX | 4.9 | 0 | 0.85 |
 | + CONTINUES (runs of 2) | 4.8 | 0 | 0.85 |
@@ -56,6 +59,11 @@ same switch. Numbers are one run each unless said otherwise.
 | runs of 15 | 8.0 | 25-30 | 0.05 |
 | + GEM RX checksum verdict | 7.66 (60 s) | 0 | 0.05 |
 | httpd 3.8 MB download (TX) | 381 KB/s (disk-bound; X-Surf iComp 327) | | |
+
+For TCP transmit, a matched three-run test improved from 4.45 Mbit/s mean
+with software checksums to 4.64 Mbit/s with GEM insertion (+4.3%). This is a
+CPU saving rather than a new data-movement path; the Zorro writes remain the
+dominant cost.
 
 Profile at 4.7 Mbit/s (Profile, audio-channel sampler): idle ~30 % of the
 transfer, bsdsocket.library 34 % of busy, the device 16 % (the window copy
@@ -68,7 +76,7 @@ under Disable: 490 us a frame at 1.3 us a longword), one 32-frame drain =
 |---|---|
 | per-window ARCACHE=0000 in mntzorro.v (RX window non-cacheable, framebuffer stays 0xF) | agreed, the clean fix; needs a bitstream (Vivado, not on the rig). The firmware invalidation becomes the old-bitstream path; the firmware should read a REG3 capability bit and skip it |
 | direct MMIO -> final copy | done |
-| GEM checksum verdict | done without changing the slot ABI: read-only register 0xa6 returns bit 15 present plus BD status bits 23..22 for the current slot. MNT's driver is unchanged and was exercised after flashing; an AmiNetXDuo driver on old firmware sees zero and keeps the software path |
+| GEM checksum offload | RX and TX done without changing the slot ABI: read-only register 0xa6 returns bit 15 RX metadata present, bit 14 TX full-checksum insertion enabled, and BD status bits 23..22 for the current RX slot. MNT's driver is unchanged and was exercised after flashing; an AmiNetXDuo driver on old firmware sees zero and keeps both software paths |
 | driver-side CONTINUES | done; see #7-#9 |
 | READ_BATCH / RX_POLL / batched replies | `rx_holds` possible with the 128-slot ring; batched replies were measured a loss on a real 68k |
 | drain several slots per wakeup | done (up to 32; bursts of 32 seen) |
@@ -104,4 +112,7 @@ shares that mains.
 3. `RAM:zz9k`: `DEVICE=AmiNetXDuo:Devs/Networks/anxzz9000.device`, `UNIT=0`, `CONFIGURE=DHCP`, `MDNS=NO`, `PRIORITY=0`.
 4. Measure: `iperf -s -t 30 -q` on the Amiga, `iperf -c 192.168.1.175 -t 12` here, `ss -tin` for rwnd_limited/retrans, `NetDevStats DEVICE anxzz9000.device`, `netstat -s`, card registers with `RAM:zzreg 8a|8c|8e|ac|a8`.
 5. Firmware: `ZZFwUpdate RAM:BOOT.bin` (the file must be named BOOT.bin), then a power cycle -- a warm reboot does not reload the card, and a warm reboot brings the card's 256 MB Z3 RAM online while a cold one does not (`Avail`), which moves where the pool lands.
-6. Registers added by the fork: 0x8a TX status, 0xa6 current RX checksum metadata, 0xa8/0xaa longest service-loop pass and its tag, 0xac/0xae GEM RX FIFO overruns and error interrupts.
+6. Registers added by the fork: 0x8a TX status; 0xa6 checksum capabilities
+   (bit 15 RX metadata, bit 14 TX insertion) and current RX verdict in bits
+   1..0; 0xa8/0xaa longest service-loop pass and its tag; 0xac/0xae GEM RX
+   FIFO overruns and error interrupts.

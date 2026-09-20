@@ -1456,15 +1456,16 @@ ULONG netdev_interrupt(NetdevUnit *unit)
  * the Pi's GIC, behind gic400.library.  Every site that adds or removes the
  * server goes through here so the three cannot drift.
  *
- * Which of the two Zorro lines: every classic card INT2; the ZZ9000 INT6,
- * which is what its FPGA drives for Ethernet, audio and the vertical blank
- * alike (MNT's own driver serves INTB_EXTER).
+ * Which of the two Zorro lines: every classic card INT2.  The ZZ9000 uses
+ * INT6 by default, but current firmware can route the shared card interrupt
+ * to INT2 through `int2 = on` in ZZ9000.CFG.
  */
 static LONG netdev_int_line(const NetdevUnit *unit)
 {
 #if NETDEV_HAS_ZZ9000
     if (unit->nu_Nic.card->chip == NETDEV_CHIP_ZZ9000)
-        return INTB_EXTER;
+        return netdev_zz9000_uses_int2(&unit->nu_Nic) ? INTB_PORTS
+                                                       : INTB_EXTER;
 #else
     (VOID)unit;
 #endif
