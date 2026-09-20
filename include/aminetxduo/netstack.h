@@ -139,6 +139,9 @@ BOOL netstack_iface_mdns(UWORD nx_index);
    10.1 goodbye.  AMI_NET_ERR_STATE/NOMEM/KERNEL, and AMI_NET_ERR_NODEV in a
    build without AMINETXDUO_MDNS. */
 LONG netstack_iface_mdns_set(UWORD nx_index, BOOL enable);
+/* The interface's PRIORITY (-128..127) while it runs: the route lookup and
+   the default gateway follow it at once.  AMI_NET_ERR_CONFIG out of range. */
+LONG netstack_interface_priority_set(UWORD index, LONG priority);
 
 /* The configuration of the interface at that NX index.  NOT
    cfg->interfaces[nx_index]: that subscript is the configuration order. */

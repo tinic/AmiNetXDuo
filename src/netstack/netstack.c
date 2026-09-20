@@ -2711,6 +2711,37 @@ static VOID ami_ns_release_dhcpv6(UWORD index)
 #endif
 }
 
+/*
+ * PRIORITY at run time (ConfigureNetInterface PRIORITY=): the same field the
+ * interface file's PRIORITY= sets at bring-up -- NetX's route lookup reads
+ * it on every packet two interfaces could carry, so that half needs nothing
+ * more -- and the default gateway chosen again with the new order, which is
+ * the other place the number decides anything.  Stored in the running
+ * configuration too, so a NetSetup written afterwards keeps it.
+ */
+LONG netstack_interface_priority_set(UWORD index, LONG priority)
+{
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller *caller;
+
+    if (ns == NULL || !ns->ns_IpCreated || index >= ns->ns_IfaceCount ||
+        ns->ns_Iface[index] == NULL)
+        return AMI_NET_ERR_STATE;
+    if (priority < -128L || priority > 127L)
+        return AMI_NET_ERR_CONFIG;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_KERNEL;
+
+    ns->ns_Config.interfaces[index].priority        = (BYTE)priority;
+    ns->ns_Ip.nx_ip_interface[index].nx_interface_priority = (INT)priority;
+    ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE, "priority change");
+
+    ami_netstack_leave_free(caller);
+    return AMI_NET_OK;
+}
+
 LONG netstack_interface_down(UWORD index)
 {
     ami_ns_release_dhcpv6(index);

@@ -959,6 +959,7 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
         out->nsi_Address = nxif->nx_interface_ip_address;
         out->nsi_NetMask = nxif->nx_interface_ip_network_mask;
         out->nsi_MTU     = nxif->nx_interface_ip_mtu_size;
+        out->nsi_Priority = (BYTE)nxif->nx_interface_priority;
 
         ns_mac_from_words(nxif->nx_interface_physical_address_msw,
                           nxif->nx_interface_physical_address_lsw,
@@ -2152,6 +2153,25 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         case NETCTRL_STACK_RELEASE:
             return (bsd_stack_unhold(SocketBase) == 0)
                        ? 0 : bsd_fail(SocketBase, AMI_EBUSY);
+
+        case NETCTRL_INTERFACE_PRIORITY:
+        {
+            LONG st;
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+            if (ctl->nsc_Priority < -128L || ctl->nsc_Priority > 127L)
+                return bsd_fail(SocketBase, AMI_EINVAL);
+
+            st = netstack_interface_priority_set(ctl->nsc_Index,
+                                                 ctl->nsc_Priority);
+            if (st == AMI_NET_OK)
+                return 0;
+            if (st == AMI_NET_ERR_CONFIG)
+                return bsd_fail(SocketBase, AMI_EINVAL);
+            return bsd_fail(SocketBase,
+                            (st == AMI_NET_ERR_KERNEL) ? AMI_EIO : AMI_ENXIO);
+        }
 
         case NETCTRL_INTERFACE_MDNS:
         {

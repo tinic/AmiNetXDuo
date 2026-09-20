@@ -432,7 +432,10 @@
              on. PRI is accepted for it, as in Roadshow. On an A1200
              with a PCMCIA card as eth0 and a PiStorm32's own
              Ethernet as genet, PRIORITY=5 in genet's file is what
-             sends the traffic through the fast card.
+             sends the traffic through the fast card. On a running
+             interface, ConfigureNetInterface genet PRIORITY 5 sets
+             it until the next boot; ShowNetStatus prints the value
+             in force.
 
   @{b}IPREQUESTS@{ub}, @{b}ARPREQUESTS@{ub}
              How many reads of that kind wait at the driver, 1 to 128.

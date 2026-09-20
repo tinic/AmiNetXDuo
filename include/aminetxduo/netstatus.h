@@ -22,7 +22,7 @@ extern "C" {
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
    different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       16
+#define AMI_NETSTATUS_VERSION       17
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -202,6 +202,12 @@ typedef struct NetStatusInterface
        beside a joined group means the driver takes the join and drops the
        frames (a1k thread 98301).  Version 16. */
     ULONG   nsi_RxMulticast;
+    /* The interface's PRIORITY as it runs, -128..127: the highest carries a
+       route two interfaces could, and picks the default gateway.  The file's
+       PRIORITY= at bring-up, or what ConfigureNetInterface set since.
+       Version 17. */
+    BYTE    nsi_Priority;
+    UBYTE   nsi_Pad2[3];
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */
@@ -954,6 +960,11 @@ typedef struct NetStatusRxBudget
 #define NETCTRL_STACK_NOTIFY    25  /* out: nsc_Count                        */
 #define NETCTRL_STACK_RELEASE   26  /*,                                     */
 
+/* nsc_Priority, -128..127, applied as given (0 is a value, the default).
+   The route lookup and the default gateway follow at once; the interface
+   file is not rewritten.  EINVAL out of range, ENXIO for no such interface. */
+#define NETCTRL_INTERFACE_PRIORITY 27 /* nsc_Index, nsc_Priority               */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
 /* Which of NETCTRL_INTERFACE_CONFIGURE's three fields were given at all. */
@@ -984,7 +995,10 @@ typedef struct NetStatusControl
     /* out: how many the operation acted on; NETCTRL_STACK_NOTIFY's number of
        programs signalled. */
     ULONG   nsc_Count;
-    ULONG   nsc_Reserved[2];
+    /* NETCTRL_INTERFACE_PRIORITY.  Was the first of two reserved words, which
+       every caller zeroed, so the shape and the version hold. */
+    LONG    nsc_Priority;
+    ULONG   nsc_Reserved;
     /* A host name, for NETCTRL_HOSTNAME_SET.  Its own field because nsc_Name
        is 24 bytes, the width of a DNS-SD service type, and a host name is up
        to 63 (RFC 1123 2.1). */

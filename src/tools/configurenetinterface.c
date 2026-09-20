@@ -19,7 +19,7 @@ static const char version_tag[] __attribute__((used)) =
 #define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,GATEWAY/K,"     \
                     "ADDRESS6/K,GATEWAY6/K,MDNS/K,CONFIGURE/K,CONFIGURE6/K," \
                     "RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N,MTU/K/N,"          \
-                    "ONLINE/S,OFFLINE/S,UP/S,DOWN/S"
+                    "ONLINE/S,OFFLINE/S,UP/S,DOWN/S,PRIORITY/K/N"
 
 enum
 {
@@ -40,8 +40,13 @@ enum
     ARG_OFFLINE,
     ARG_UP,
     ARG_DOWN,
+    ARG_PRIORITY,
     ARG_COUNT
 };
+
+/* PRIORITY= is a signed byte in the interface file (config.h) and here. */
+#define CNI_PRIORITY_MIN    (-128)
+#define CNI_PRIORITY_MAX    127
 
 #define CNI_DHCP_TIMEOUT    60
 #define CNI_DHCP_TIMEOUT_MIN 10
@@ -559,6 +564,8 @@ int main(int argc, char **argv)
     BOOL             want_release = FALSE;
     ULONG            timeout      = CNI_DHCP_TIMEOUT;
     BOOL             have_mtu     = FALSE;
+    BOOL             have_priority = FALSE;
+    LONG             priority     = 0;
     ULONG            mtu          = 0;
     BOOL             have_state   = FALSE;
     LONG             state        = 0;
@@ -591,6 +598,7 @@ int main(int argc, char **argv)
     args[ARG_OFFLINE]   = 0;
     args[ARG_UP]        = 0;
     args[ARG_DOWN]      = 0;
+    args[ARG_PRIORITY]  = 0;
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
@@ -600,7 +608,7 @@ int main(int argc, char **argv)
                    "[GATEWAY <g>|NONE] [ADDRESS6 <a>] [GATEWAY6 <g>|NONE] "
                    "[MDNS YES|NO] [CONFIGURE DHCP] [CONFIGURE6 <mode>] "
                    "[RELEASE] [TIMEOUT <secs>] [MTU <bytes>] "
-                   "[ONLINE|OFFLINE|UP|DOWN]",
+                   "[ONLINE|OFFLINE|UP|DOWN] [PRIORITY <n>]",
                    "Change what a running interface is addressed with.");
         return RETURN_ERROR;
     }
@@ -848,12 +856,30 @@ int main(int argc, char **argv)
         mtu      = (ULONG)bytes;
     }
 
+    /* The same range the interface file's PRIORITY= takes; the highest
+       carries a route two interfaces could and picks the default gateway.
+       0 is a value here: it puts an interface back to none. */
+    if (args[ARG_PRIORITY] != 0)
+    {
+        priority = *(LONG *)args[ARG_PRIORITY];
+        if (priority < CNI_PRIORITY_MIN || priority > CNI_PRIORITY_MAX)
+        {
+            tool_error("PRIORITY is %ld to %ld, not %ld",
+                       (LONG)CNI_PRIORITY_MIN, (LONG)CNI_PRIORITY_MAX,
+                       priority);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+        have_priority = TRUE;
+    }
+
     if (!have_address && !have_netmask && !have_gateway && !have_gateway6 &&
-        !have_mdns && !want_dhcp && !want_release && !have_mtu && !have_state)
+        !have_mdns && !want_dhcp && !want_release && !have_mtu && !have_state &&
+        !have_priority)
     {
         tool_error("nothing to change: give ADDRESS, NETMASK, GATEWAY, "
-                   "GATEWAY6, MDNS, MTU, CONFIGURE, RELEASE, or one of "
-                   "ONLINE, OFFLINE, UP and DOWN");
+                   "GATEWAY6, MDNS, MTU, PRIORITY, CONFIGURE, RELEASE, or one "
+                   "of ONLINE, OFFLINE, UP and DOWN");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -1213,6 +1239,46 @@ int main(int argc, char **argv)
 
         if (late_state)
             say("%s: %s\n", (LONG)name, (LONG)state_word(state));
+    }
+
+    /*
+     * The priority, after everything that could have changed which
+     * interfaces carry an address: the library picks the default gateway
+     * again from the new order the moment it is set, so what it chooses
+     * sees the addresses above.
+     */
+    if (have_priority)
+    {
+        NetStatusControl ctl;
+        ULONG            w;
+
+        for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+            ((ULONG *)&ctl)[w] = 0;
+        ctl.nsc_Magic    = AMI_NETSTATUS_MAGIC;
+        ctl.nsc_Version  = (UWORD)AMI_NETSTATUS_VERSION;
+        ctl.nsc_Index    = (UWORD)index;
+        ctl.nsc_Priority = priority;
+
+        if (tool_netstatus_control(base, NETCTRL_INTERFACE_PRIORITY, &ctl,
+                                   &err) != 0)
+        {
+            if (err == CNI_ENXIO)
+                tool_error("%s is no longer attached", (LONG)name);
+            else if (err == CNI_ENOSYS)
+                tool_error("this bsdsocket.library predates PRIORITY on a "
+                           "running interface; put PRIORITY=%ld in its "
+                           "interface file instead", priority);
+            else
+                tool_error("%s: PRIORITY %ld was refused", (LONG)name,
+                           priority);
+
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        say("%s: priority %ld; the interface file still says what it said, "
+            "so the next boot does not\n", (LONG)name, priority);
     }
 
     /* Said last, so it is the line left on the screen. */

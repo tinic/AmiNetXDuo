@@ -375,6 +375,8 @@ const char *netstack_mdns_hostname(VOID)
 { h_unreachable("netstack_mdns_hostname"); return NULL; }
 LONG netstack_iface_mdns_set(UWORD i, BOOL on)
 { (VOID)i; (VOID)on; h_unreachable("netstack_iface_mdns_set"); return -1; }
+LONG netstack_interface_priority_set(UWORD i, LONG p)
+{ (VOID)i; (VOID)p; h_unreachable("netstack_interface_priority_set"); return -1; }
 LONG netstack_mdns_browse_start(const char *t)
 { (VOID)t; h_unreachable("netstack_mdns_browse_start"); return -1; }
 LONG netstack_mdns_browse_stop(const char *t)

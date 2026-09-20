@@ -540,9 +540,18 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                            cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local" :
                            cfg->iptype == AMI_IPTYPE_NONE      ? "no IPv4"
                                                                : "static"));
-    /* Only when the file set one: 0 is every interface that did not, and the
-       line would say nothing about which of them carries a shared subnet. */
-    if (cfg->priority != 0)
+    /* Only when one is set: 0 is every interface that has none, and the
+       line would say nothing about which of them carries a shared subnet.
+       The running value when the interface is up -- ConfigureNetInterface
+       PRIORITY changes it without touching the file -- else the file's. */
+    if (live != NULL)
+    {
+        if (live->priority != 0 || cfg->priority != 0)
+            tool_printf("  priority    %ld%s\n", live->priority,
+                        (LONG)((live->priority != cfg->priority)
+                                   ? "  (the file says otherwise)" : ""));
+    }
+    else if (cfg->priority != 0)
         tool_printf("  priority    %ld\n", (LONG)cfg->priority);
 
     /*

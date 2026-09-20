@@ -136,6 +136,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         info->address  = src->nsi_Address;
         info->netmask  = src->nsi_NetMask;
         info->mtu      = src->nsi_MTU;
+        info->priority = (LONG)src->nsi_Priority;
 
         for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
             info->mac[j] = src->nsi_HwAddress[j];

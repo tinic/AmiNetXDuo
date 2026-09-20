@@ -41,6 +41,7 @@ typedef struct ToolIfInfo
     ULONG           address;         /* host byte order                      */
     ULONG           netmask;
     ULONG           mtu;
+    LONG            priority;        /* as it runs; the file's, or set since */
     UBYTE           mac[AMI_ETH_ADDR_SIZE];
     char            nx_name[NETSTATUS_NAME_LEN];
     /*
