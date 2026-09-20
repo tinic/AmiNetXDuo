@@ -3795,78 +3795,6 @@ static VOID httpd_do_mkcol(HttpConn *c)
     httpd_empty(c, 201);
 }
 
-/* COPY and MOVE carry the other end in a header, so the Destination goes
-   through http_path_resolve() exactly as the request target did.  One trusted
-   any less is a way out of the document root that only writes. */
-/* The authority of an absolute-form URL, or NULL when there is none. */
-static const char *httpd_authority(const char *url, ULONG *len)
-{
-    ULONG i;
-
-    *len = 0;
-
-    for (i = 0; i < 8UL && url[i] != '\0'; i++)
-    {
-        if (url[i] == ':')
-            break;
-
-        if (!((url[i] >= 'a' && url[i] <= 'z') ||
-              (url[i] >= 'A' && url[i] <= 'Z')))
-            return NULL;
-    }
-
-    if (i == 0UL || url[i] != ':' || url[i + 1] != '/' || url[i + 2] != '/')
-        return NULL;
-
-    url += i + 3;
-
-    while (url[*len] != '\0' && url[*len] != '/')
-        (*len)++;
-
-    return url;
-}
-
-/* Does the Destination name this server?  The host is compared and the port is
-   not.  TRUE when there is no authority to compare, and TRUE when the client
-   sent no Host: an HTTP/1.0 client need not send one. */
-static ULONG httpd_hostlen(const char *s, ULONG len)
-{
-    ULONG i = 0;
-
-    /* An IPv6 literal is bracketed and full of colons, so the one that ends
-       the host is the one after the ']'. */
-    if (len > 0UL && s[0] == '[')
-    {
-        while (i < len && s[i] != ']')
-            i++;
-
-        return (i < len) ? i + 1UL : len;
-    }
-
-    while (i < len && s[i] != ':')
-        i++;
-
-    return i;
-}
-
-static BOOL httpd_dest_is_local(const HttpConn *c)
-{
-    ULONG       dlen;
-    ULONG       hlen;
-    const char *dest = httpd_authority(c->dest_url, &dlen);
-
-    if (dest == NULL || c->host[0] == '\0')
-        return TRUE;
-
-    dlen = httpd_hostlen(dest, dlen);
-    hlen = httpd_hostlen(c->host, hs_len(c->host));
-
-    if (dlen != hlen || dlen == 0UL)
-        return FALSE;
-
-    return (hs_nicmp(dest, c->host, dlen) == 0) ? TRUE : FALSE;
-}
-
 static BOOL httpd_resolve_dest(HttpConn *c)
 {
     HttpPathResult why;
@@ -3880,7 +3808,7 @@ static BOOL httpd_resolve_dest(HttpConn *c)
     /* http_path_resolve() throws the authority away, which is right for the
        request target but would make a COPY to another host land on this one.
        RFC 4918 9.8.4: this server does not copy between hosts. */
-    if (!httpd_dest_is_local(c))
+    if (!http_path_destination_is_local(c->dest_url, c->host))
     {
         httpd_error(c, 502, "that destination is on another server");
         return FALSE;

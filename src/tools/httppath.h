@@ -46,6 +46,11 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
    Whether that volume is mounted is deliberately left to the AmigaOS caller. */
 HttpPathResult http_path_resolve_volumes(const char *target, HttpPath *out);
 
+/* COPY and MOVE carry their destination in a header.  A relative target has
+   no authority and is local; an absolute one must name the request's Host.
+   Ports are deliberately ignored, matching WebDAV clients behind a proxy. */
+int http_path_destination_is_local(const char *url, const char *host);
+
 /* A sentence for the log.  Never NULL. */
 const char *http_path_error(HttpPathResult why);
 

@@ -415,6 +415,35 @@ static void test_destination_forms(void)
     CHECK(p.segments == 0);
 }
 
+static void test_destination_hosts(void)
+{
+    printf("the Destination authority\n");
+
+    /* Origin-form destinations and HTTP/1.0 requests with no Host are local. */
+    CHECK(http_path_destination_is_local("/Docs/new.txt", "amiga.local"));
+    CHECK(http_path_destination_is_local("http://amiga.local/Docs/new.txt",
+                                         ""));
+
+    CHECK(http_path_destination_is_local("http://amiga.local/Docs/new.txt",
+                                         "amiga.local"));
+    CHECK(http_path_destination_is_local("http://AMIGA.Local:8080/x",
+                                         "amiga.local:80"));
+    CHECK(http_path_destination_is_local("http://[fe80::1]:8080/x",
+                                         "[fe80::1]:80"));
+
+    CHECK(!http_path_destination_is_local("http://other.local/x",
+                                          "amiga.local"));
+    CHECK(!http_path_destination_is_local("http://amiga.local.evil/x",
+                                          "amiga.local"));
+    CHECK(!http_path_destination_is_local("http://amiga.local/x",
+                                          "amiga.local.evil"));
+    CHECK(!http_path_destination_is_local("http:///x", "amiga.local"));
+    CHECK(!http_path_destination_is_local("http://[fe80::2]/x",
+                                          "[fe80::1]"));
+    CHECK(!http_path_destination_is_local(NULL, "amiga.local"));
+    CHECK(!http_path_destination_is_local("/x", NULL));
+}
+
 /*
  * What every walk and every join downstream assumes about a resolved path. A
  * path that ended in a separator would make the join produce "a//b".
@@ -902,6 +931,7 @@ int main(void)
     test_fields();
     test_root_is_identifiable();
     test_destination_forms();
+    test_destination_hosts();
     test_resolved_shape();
     test_long_name_refused();
     test_root_trimmed();

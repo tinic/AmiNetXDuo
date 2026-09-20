@@ -57,6 +57,55 @@ static int hp_unreserved(int c)
 
 /* ------------------------------------------------------------- resolving --- */
 
+/* The authority of an absolute-form URL, or 0 when there is none. */
+static const char *hp_authority(const char *url, unsigned long *len)
+{
+    unsigned long i;
+
+    *len = 0;
+
+    for (i = 0; i < 8UL && url[i] != '\0'; i++)
+    {
+        if (url[i] == ':')
+            break;
+
+        if (!((url[i] >= 'a' && url[i] <= 'z') ||
+              (url[i] >= 'A' && url[i] <= 'Z')))
+            return 0;
+    }
+
+    if (i == 0UL || url[i] != ':' || url[i + 1] != '/' ||
+        url[i + 2] != '/')
+        return 0;
+
+    url += i + 3;
+
+    while (url[*len] != '\0' && url[*len] != '/')
+        (*len)++;
+
+    return url;
+}
+
+/* Length of the host portion of an authority or Host field, without its
+   optional port.  An IPv6 literal's interior colons are protected by []. */
+static unsigned long hp_hostlen(const char *s, unsigned long len)
+{
+    unsigned long i = 0;
+
+    if (len > 0UL && s[0] == '[')
+    {
+        while (i < len && s[i] != ']')
+            i++;
+
+        return (i < len) ? i + 1UL : len;
+    }
+
+    while (i < len && s[i] != ':')
+        i++;
+
+    return i;
+}
+
 /*
  * Step past the scheme and authority of an absolute-form target.  RFC 7230
  * says a server must accept it, and a client behind a proxy configuration
@@ -65,26 +114,43 @@ static int hp_unreserved(int c)
  */
 static const char *hp_skip_authority(const char *target)
 {
-    const char *p = target;
-    unsigned long i;
+    unsigned long len;
+    const char   *p = hp_authority(target, &len);
 
-    for (i = 0; i < 8UL && p[i] != '\0'; i++)
-    {
-        if (p[i] == ':')
-            break;
-        if (!((p[i] >= 'a' && p[i] <= 'z') || (p[i] >= 'A' && p[i] <= 'Z')))
-            return target;
-    }
-
-    if (i == 0UL || p[i] != ':' || p[i + 1] != '/' || p[i + 2] != '/')
+    if (p == 0)
         return target;
 
-    p += i + 3;
-
-    while (*p != '\0' && *p != '/')
-        p++;
+    p += len;
 
     return (*p == '/') ? p : "/";
+}
+
+int http_path_destination_is_local(const char *url, const char *host)
+{
+    const char   *authority;
+    unsigned long alen;
+    unsigned long hlen;
+    unsigned long i;
+
+    if (url == 0 || host == 0)
+        return 0;
+
+    authority = hp_authority(url, &alen);
+    if (authority == 0 || host[0] == '\0')
+        return 1;
+
+    alen = hp_hostlen(authority, alen);
+    hlen = hp_hostlen(host, hp_len(host));
+
+    if (alen == 0UL || alen != hlen)
+        return 0;
+
+    for (i = 0; i < alen; i++)
+        if (hp_lower((unsigned char)authority[i]) !=
+            hp_lower((unsigned char)host[i]))
+            return 0;
+
+    return 1;
 }
 
 /*
