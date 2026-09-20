@@ -4340,49 +4340,6 @@ static BOOL httpd_parse_range(HttpConn *c, const char *value)
     return TRUE;
 }
 
-/* The tokens inside an If:, which is a different question from whether the
-   header holds; RFC 4918 10.4.1 asks both.  httpif.c evaluates the conditions.
-   Two tokens is as many as a request needs: a MOVE with both ends locked. */
-static VOID httpd_parse_if(HttpConn *c, const char *value)
-{
-    ULONG n = 0;
-
-    while (*value != '\0' && n < 2UL)
-    {
-        if (*value == '<')
-        {
-            const char *start = ++value;
-            ULONG       len   = 0;
-
-            while (*value != '\0' && *value != '>')
-            {
-                value++;
-                len++;
-            }
-
-            /* A tagged list names a URL the same way, so only the ones that
-               look like a token are taken. */
-            if (hs_nicmp(start, "opaquelocktoken:", 16) == 0 &&
-                len + 1UL < (ULONG)HTTPD_TOKEN_MAX)
-            {
-                ULONG k;
-
-                for (k = 0; k < len; k++)
-                    c->iftoken[n][k] = start[k];
-                c->iftoken[n][len] = '\0';
-                n++;
-            }
-
-            if (*value == '>')
-                value++;
-        }
-        else
-        {
-            value++;
-        }
-    }
-}
-
 /* The request head, from the first byte to the blank line.  FALSE when it has
    already answered.  Everything a header can say that this server acts on is
    picked out here, in one pass over the buffer. */
@@ -4744,7 +4701,10 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             }
 
             hs_copy(c->ifhdr, sizeof(c->ifhdr), httpd_value);
-            httpd_parse_if(c, httpd_value);
+            (VOID)http_request_lock_tokens(
+                httpd_value, &c->iftoken[0][0],
+                (ULONG)sizeof(c->iftoken[0]),
+                (ULONG)(sizeof(c->iftoken) / sizeof(c->iftoken[0])));
         }
         else if (hs_equal(name, "Lock-Token"))
         {

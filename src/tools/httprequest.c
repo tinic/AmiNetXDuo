@@ -144,3 +144,54 @@ int http_request_accepts_gzip(const char *v)
 
     return 0;
 }
+
+unsigned long http_request_lock_tokens(const char *value, char *out,
+                                       unsigned long stride,
+                                       unsigned long count)
+{
+    unsigned long n = 0;
+    unsigned long i;
+
+    if (value == 0 || out == 0 || stride == 0UL || count == 0UL)
+        return 0;
+
+    for (i = 0; i < count; i++)
+        out[i * stride] = '\0';
+
+    while (*value != '\0' && n < count)
+    {
+        if (*value == '<')
+        {
+            const char   *start = ++value;
+            unsigned long len = 0;
+
+            while (*value != '\0' && *value != '>')
+            {
+                value++;
+                len++;
+            }
+
+            /* A tagged list names a URL the same way, so only values with
+               the opaque-token scheme are credentials. */
+            if (hr_nicmp(start, "opaquelocktoken:", 16UL) == 0 &&
+                len < stride)
+            {
+                char *slot = out + n * stride;
+
+                for (i = 0; i < len; i++)
+                    slot[i] = start[i];
+                slot[len] = '\0';
+                n++;
+            }
+
+            if (*value == '>')
+                value++;
+        }
+        else
+        {
+            value++;
+        }
+    }
+
+    return n;
+}

@@ -5,6 +5,7 @@
 #include "httprequest.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int checks;
 static int failures;
@@ -65,11 +66,48 @@ static void test_gzip(void)
     CHECK(!http_request_accepts_gzip(NULL));
 }
 
+static void test_lock_tokens(void)
+{
+    char token[2][32];
+    char long_one[48];
+    unsigned long n;
+
+    printf("WebDAV If tokens\n");
+
+    n = http_request_lock_tokens(
+        "(<opaquelocktoken:first>) (<opaquelocktoken:second>)",
+        &token[0][0], sizeof(token[0]), 2UL);
+    CHECK(n == 2UL);
+    CHECK(strcmp(token[0], "opaquelocktoken:first") == 0);
+    CHECK(strcmp(token[1], "opaquelocktoken:second") == 0);
+
+    n = http_request_lock_tokens(
+        "<http://amiga.local/file> (<opaquelocktoken:one>)",
+        &token[0][0], sizeof(token[0]), 2UL);
+    CHECK(n == 1UL);
+    CHECK(strcmp(token[0], "opaquelocktoken:one") == 0);
+    CHECK(token[1][0] == '\0');
+
+    memset(long_one, 'x', sizeof(long_one));
+    memcpy(long_one, "<opaquelocktoken:", 17);
+    long_one[sizeof(long_one) - 2] = '>';
+    long_one[sizeof(long_one) - 1] = '\0';
+    CHECK(http_request_lock_tokens(long_one, &token[0][0],
+                                   sizeof(token[0]), 2UL) == 0UL);
+    CHECK(token[0][0] == '\0' && token[1][0] == '\0');
+
+    CHECK(http_request_lock_tokens(NULL, &token[0][0],
+                                   sizeof(token[0]), 2UL) == 0UL);
+    CHECK(http_request_lock_tokens("<opaquelocktoken:x>", NULL,
+                                   sizeof(token[0]), 2UL) == 0UL);
+}
+
 int main(void)
 {
     test_query();
     test_timeout();
     test_gzip();
+    test_lock_tokens();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;

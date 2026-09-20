@@ -16,4 +16,10 @@ unsigned long http_request_timeout(const char *value, unsigned long cap);
 /* Whether an Accept-Encoding list offers gzip at a non-zero quality. */
 int http_request_accepts_gzip(const char *value);
 
+/* Extract opaque lock tokens from an If: value into `count` fixed-width
+   records.  Returns the number written; every record is NUL-terminated. */
+unsigned long http_request_lock_tokens(const char *value, char *out,
+                                       unsigned long stride,
+                                       unsigned long count);
+
 #endif /* AMINETXDUO_HTTPREQUEST_H */
