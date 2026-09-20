@@ -234,14 +234,6 @@ LONG bsd_ReleaseSocket(register LONG sock_fd __asm("d0"),
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
-    /*
-     * A listening descriptor owns a socket parked on the port and a listen
-     * request registered against this NX_IP. Neither survives a handover to
-     * another base, so a release of one is refused.
-     */
-    if ((sock->as_Flags & ASF_LISTENING) != 0)
-        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
-
     result = bsd_handoff_park(SocketBase, sock, id, sock_fd);
     if (result < 0)
         return result;
@@ -258,9 +250,6 @@ LONG bsd_ReleaseCopyOfSocket(register LONG sock_fd __asm("d0"),
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
-
-    if ((sock->as_Flags & ASF_LISTENING) != 0)
-        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
     bsd_socket_retain(sock);
 

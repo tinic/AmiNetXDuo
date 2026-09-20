@@ -76,6 +76,23 @@ static VOID cmd_zero(UBYTE *p, ULONG n)
         *p++ = 0;
 }
 
+/* Ethernet station addresses are individual and non-zero.  A locally
+   administered address is valid; multicast/broadcast and the all-zero
+   placeholder are not addresses a SANA-II unit can be configured with. */
+static BOOL cmd_station_address_valid(const UBYTE *address)
+{
+    UWORD i;
+    UBYTE any = 0;
+
+    if ((address[0] & 1U) != 0)
+        return FALSE;
+
+    for (i = 0; i < NETDEV_ADDR_LEN; i++)
+        any |= address[i];
+
+    return (BOOL)(any != 0);
+}
+
 static BOOL cmd_dequeue(struct List *list, struct IOSana2Req *io)
 {
     struct Node *n;
@@ -535,6 +552,11 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
                than being refused and left believing its own was taken. */
             cmd_bytes(io->ios2_SrcAddr, unit->nu_Nic.mac, NETDEV_ADDR_LEN);
             netdev_reply(io, S2ERR_BAD_STATE, S2WERR_IS_CONFIGURED);
+            return;
+        }
+        if (!cmd_station_address_valid(io->ios2_SrcAddr))
+        {
+            netdev_reply(io, S2ERR_BAD_ADDRESS, S2WERR_SRC_ADDRESS);
             return;
         }
         cmd_bytes(unit->nu_Nic.mac, io->ios2_SrcAddr, NETDEV_ADDR_LEN);

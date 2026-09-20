@@ -113,6 +113,30 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME expunge_refusal COMMAND test_expunge)
 
+    # handoff.c, including listeners.  AmiTCP and Roadshow allow a listening
+    # descriptor through ReleaseSocket()/ReleaseCopyOfSocket(); refusing it
+    # was an observable compatibility gap and was not required by NetX Duo's
+    # listen representation (the listener and its parked sockets survive).
+    add_executable(test_handoff host/test_handoff_host.c
+                               "${CMAKE_SOURCE_DIR}/src/bsdsocket/handoff.c")
+
+    target_include_directories(test_handoff PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_handoff PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+    target_compile_definitions(test_handoff PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE UNIQUE_ID=-1)
+
+    add_test(NAME socket_handoff COMMAND test_handoff)
+
     # select.c, the readiness predicates and WaitSelect()'s return.
     #
     # WHY THIS ONE IS ON THE PUSH GATE.  Two regressions have shipped from

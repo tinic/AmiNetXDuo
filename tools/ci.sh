@@ -284,7 +284,9 @@ host_test_targets() { # builddir
 #      netstack arm the seq-arm accounting missed, corrected here
 #      408 with test_netdev_extension: the private record's version/size gate,
 #      callback ownership and fail-closed transmit-checksum negotiation
-HOST_TESTS_EXPECTED=408
+#      409 with test_handoff: listener sockets follow the AmiTCP/Roadshow
+#      ReleaseSocket/ObtainSocket contract
+HOST_TESTS_EXPECTED=409
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

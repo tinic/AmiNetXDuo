@@ -1119,7 +1119,35 @@ static void p_configure_and_online(void)
 {
     static const UBYTE want[6] = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x07 };
     static const UBYTE other[6] = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x08 };
+    static const UBYTE multicast[6] = { 0x01, 0x00, 0x5e, 0x01, 0x02, 0x03 };
+    static const UBYTE zero[6] = { 0, 0, 0, 0, 0, 0 };
     struct IOSana2Req  io;
+
+    /* A station address must be an individual, non-zero Ethernet address.
+       Rejecting it must not configure or start the unit. */
+    reset();
+    unit.nu_Configured = 0;
+    unit.nu_Online     = 0;
+
+    req(&io, S2_CONFIGINTERFACE);
+    memcpy(io.ios2_SrcAddr, multicast, 6);
+    netdev_perform(&opener, &io);
+    expect_u32("a multicast station address",
+               (unsigned long)(UBYTE)last_err,
+               (unsigned long)(UBYTE)S2ERR_BAD_ADDRESS);
+    expect_u32("names the source address", last_wire,
+               (unsigned long)S2WERR_SRC_ADDRESS);
+    expect(unit.nu_Configured == 0 && online_calls == 0,
+           "and leaves the interface untouched");
+
+    req(&io, S2_CONFIGINTERFACE);
+    memcpy(io.ios2_SrcAddr, zero, 6);
+    netdev_perform(&opener, &io);
+    expect_u32("an all-zero station address",
+               (unsigned long)(UBYTE)last_err,
+               (unsigned long)(UBYTE)S2ERR_BAD_ADDRESS);
+    expect(unit.nu_Configured == 0 && online_calls == 0,
+           "and also leaves the interface untouched");
 
     /* A first configure takes the caller's address and brings the unit up. */
     reset();
