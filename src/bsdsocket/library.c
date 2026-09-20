@@ -19,10 +19,10 @@
 #include "aminetxduo/events.h"
 
 #include "net68k.h"          /* n68k_cpu_select() */
+#include "tx_amiga.h"
 
 #include <stddef.h>
 
-#include <exec/execbase.h>   /* ThisTask, TaskReady, TaskWait: bsd_task_alive */
 #include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -180,41 +180,6 @@ static VOID bsd_new_list(struct MinList *list)
  */
 static struct AmiSocketBase *bsd_master_base;
 
-/* Is this pointer still one of Exec's tasks?  The running one, plus the two
-   scheduler lists, is the whole set.  Disable() and not Forbid(): an interrupt
-   moves a task between TaskWait and TaskReady, so Forbid() does not make the
-   walk safe. */
-static BOOL bsd_task_on_list(struct List *list, struct Task *task)
-{
-    struct Node *node;
-
-    for (node = list->lh_Head; node->ln_Succ != NULL; node = node->ln_Succ)
-    {
-        if ((struct Task *)node == task)
-            return TRUE;
-    }
-
-    return FALSE;
-}
-
-/* Never inside Disable(): the caller can free memory on the answer, and
-   FreeMem() must not be called with interrupts off. */
-static BOOL bsd_task_alive(struct Task *task)
-{
-    BOOL alive;
-
-    if (task == NULL)
-        return FALSE;
-
-    Disable();
-    alive = (SysBase->ThisTask == task ||
-             bsd_task_on_list(&SysBase->TaskReady, task) ||
-             bsd_task_on_list(&SysBase->TaskWait, task));
-    Enable();
-
-    return alive;
-}
-
 static ULONG bsd_dead_task_signals;
 
 /*
@@ -222,18 +187,7 @@ static ULONG bsd_dead_task_signals;
  */
 static VOID bsd_signal_if_alive(struct Task *task, ULONG mask)
 {
-    BOOL alive;
-
-    Disable();
-
-    alive = (SysBase->ThisTask == task ||
-             bsd_task_on_list(&SysBase->TaskReady, task) ||
-             bsd_task_on_list(&SysBase->TaskWait, task));
-
-    if (alive)
-        Signal(task, mask);
-
-    Enable();
+    BOOL alive = (tx_amiga_exec_task_signal(task, mask) != TX_FALSE);
 
     if (!alive && bsd_dead_task_signals++ == 0UL)
     {
@@ -267,7 +221,8 @@ static VOID bsd_task_sweep(VOID)
             (struct AmiSocketBase *)((UBYTE *)node -
                                      offsetof(struct AmiSocketBase, sb_Node));
 
-        if (child->sb_Task == NULL || bsd_task_alive(child->sb_Task))
+        if (child->sb_Task == NULL ||
+            tx_amiga_exec_task_alive(child->sb_Task) != TX_FALSE)
             continue;
 
         bsd_latched_tasks++;
@@ -439,7 +394,7 @@ static VOID bsd_dead_ring_reap(VOID)
         if (bsd_dead_block[i] == NULL)
             continue;
 
-        if (bsd_task_alive(bsd_dead_owner[i]))
+        if (tx_amiga_exec_task_alive(bsd_dead_owner[i]) != TX_FALSE)
             continue;
 
         AMI_CENSUS_DROP(bsd_dead_block[i]);
@@ -1314,7 +1269,8 @@ LONG bsd_openers_list(struct AmiSocketBase *base, NetStatusOpener *out,
             if (child == base)
                 o->nso_Flags |= NETSTATUS_OPENER_SELF;
 
-            if (child->sb_Task == NULL || !bsd_task_alive(child->sb_Task))
+            if (child->sb_Task == NULL ||
+                tx_amiga_exec_task_alive(child->sb_Task) == TX_FALSE)
                 o->nso_Flags |= NETSTATUS_OPENER_GONE;
             else
                 bsd_opener_name(child->sb_Task, o->nso_Name,

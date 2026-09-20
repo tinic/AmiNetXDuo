@@ -241,6 +241,21 @@ VOID netstack_shutdown(VOID)        { h.shutdown_calls++; }
    exists because library.c is compiled whole. */
 VOID ami_netstack_release(AmiNetCaller *caller) { (VOID)caller; }
 
+/* The shipping implementation lives in the Exec port.  This harness never
+   leaves a child base behind, so neither helper is reached. */
+UINT tx_amiga_exec_task_alive(VOID *task)
+{
+    (VOID)task;
+    return TX_FALSE;
+}
+
+UINT tx_amiga_exec_task_signal(VOID *task, ULONG mask)
+{
+    (VOID)task;
+    (VOID)mask;
+    return TX_FALSE;
+}
+
 /* Harmless, and reached by bsd_lib_close() on the way past. */
 VOID ObtainSemaphore(struct SignalSemaphore *s)  { (VOID)s; }
 VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; }

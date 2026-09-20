@@ -165,6 +165,15 @@ UINT    tx_amiga_caller_is_thread(VOID);
    use this without depending on ExecBase's private nest counters. */
 UINT    tx_amiga_exec_task_context(VOID);
 
+/* Exec has no public operation that validates an arbitrary Task pointer.  The
+   hosted services nevertheless need to retire registrations left by programs
+   which exited without closing them.  Keep the necessary scheduler-list walk
+   in the Exec port rather than teaching each service ExecBase's private
+   layout.  The signal operation makes validation and Signal() one atomic
+   transaction; a separate alive check followed by Signal() would race exit. */
+UINT    tx_amiga_exec_task_alive(VOID *task);
+UINT    tx_amiga_exec_task_signal(VOID *task, ULONG sigmask);
+
 /* A ThreadX thread sometimes has to block in Exec (Wait/WaitIO) without
    keeping the single hosted scheduler baton.  These calls are the port
    boundary for that transaction; application code must use the higher-level

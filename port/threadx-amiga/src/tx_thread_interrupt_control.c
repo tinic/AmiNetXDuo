@@ -86,6 +86,78 @@ UINT tx_amiga_exec_task_context(VOID)
 }
 
 
+/* Is task on one of Exec's scheduler lists?  Caller holds Disable(), because
+   an interrupt can move a task between TaskWait and TaskReady even while
+   scheduling is forbidden. */
+static UINT tx_amiga_task_on_list(struct List *list, struct Task *task)
+{
+struct Node *node;
+
+    for (node = list -> lh_Head; node -> ln_Succ != (struct Node *) 0;
+         node = node -> ln_Succ)
+    {
+        if ((struct Task *) node == task)
+        {
+            return(TX_TRUE);
+        }
+    }
+
+    return(TX_FALSE);
+}
+
+
+static UINT tx_amiga_task_alive_locked(struct Task *task)
+{
+    if ((task != (struct Task *) 0) &&
+        ((SysBase -> ThisTask == task) ||
+         tx_amiga_task_on_list(&SysBase -> TaskReady, task) ||
+         tx_amiga_task_on_list(&SysBase -> TaskWait, task)))
+    {
+        return(TX_TRUE);
+    }
+
+    return(TX_FALSE);
+}
+
+
+UINT tx_amiga_exec_task_alive(VOID *task)
+{
+UINT alive;
+
+    if (SysBase == (struct ExecBase *) 0)
+    {
+        return(TX_FALSE);
+    }
+
+    Disable();
+    alive =  tx_amiga_task_alive_locked((struct Task *) task);
+    Enable();
+
+    return(alive);
+}
+
+
+UINT tx_amiga_exec_task_signal(VOID *task, ULONG sigmask)
+{
+UINT alive;
+
+    if (SysBase == (struct ExecBase *) 0)
+    {
+        return(TX_FALSE);
+    }
+
+    Disable();
+    alive =  tx_amiga_task_alive_locked((struct Task *) task);
+    if ((alive != TX_FALSE) && (sigmask != 0UL))
+    {
+        Signal((struct Task *) task, sigmask);
+    }
+    Enable();
+
+    return(alive);
+}
+
+
 /* tx_interrupt_control(), the application-visible service.  It may be called
    unbalanced, so it changes the nesting by at most one level and reports the old
    posture: TX_INT_ENABLE inside N nested Forbid()s drops one level, not all N.  */
