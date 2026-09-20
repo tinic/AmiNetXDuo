@@ -476,8 +476,8 @@ VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID));
    which is the one figure that cannot be read back later. */
 VOID netstack_pool_mark_low(VOID);
 
-/* Wipe the slot table. Only valid once ThreadX has stopped.  netstack_baton.c
-   says what it is for. */
+/* Reset the live-bracket diagnostic. Only valid once ThreadX has stopped.
+   netstack_baton.c says what it is for. */
 VOID ami_netstack_baton_reset(VOID);
 
 #ifdef AMINETXDUO_BPF

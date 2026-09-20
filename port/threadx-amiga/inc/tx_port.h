@@ -268,6 +268,7 @@ char   *execbase;
                                                 VOID  *tx_thread_amiga_signal_owner; \
                                                 ULONG  tx_thread_amiga_run_signal; \
                                                 UINT   tx_thread_amiga_suspension_type; \
+                                                UINT   tx_thread_amiga_exec_wait_nesting; \
                                                 UINT   tx_thread_amiga_flags;
 
 #define TX_THREAD_EXTENSION_1                   VOID  *tx_thread_extension_ptr;

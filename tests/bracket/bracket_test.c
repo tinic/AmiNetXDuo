@@ -45,7 +45,7 @@ extern TX_THREAD *_tx_thread_current_ptr;
 #endif
 
 #ifndef BT_BATON_TASKS
-#define BT_BATON_TASKS  3           /* baton phase: as many as a SANA-II iface */
+#define BT_BATON_TASKS  20          /* proves there is no sixteen-task ceiling */
 #endif
 #ifndef BT_BATON_TICKS
 #define BT_BATON_TICKS  250         /* how long the baton phase runs, in ticks */
@@ -525,6 +525,10 @@ static VOID bt_baton_entry(VOID)
 
     while (bt_phase_stop == 0U)
     {
+        /* The storage belongs to this TX_THREAD, not to a global task table:
+           a nested Exec wait extends the same bracket and only the matching
+           outer acquire resumes it. */
+        ami_netstack_baton_release();
         ami_netstack_baton_release();
 
         /* Where the reader's Wait() for a packet goes. Nothing here may touch
@@ -532,6 +536,9 @@ static VOID bt_baton_entry(VOID)
         if (tx_amiga_caller_is_thread() != (UINT)TX_FALSE)
             bt->bt_Failures++;
 
+        ami_netstack_baton_acquire();
+        if (tx_amiga_caller_is_thread() != (UINT)TX_FALSE)
+            bt->bt_Failures++;
         ami_netstack_baton_acquire();
 
         if (tx_amiga_adopted_thread() != &bt->bt_Thread)
@@ -881,7 +888,7 @@ int main(int argc, char **argv)
         if (bt_wait_dead(&bt_dead_holding, "baton-holding Task to exit"))
         {
             bt_discard_dead(&bt_dead_holding, FALSE,
-                            "holding death has no release slot");
+                            "holding death has no released bracket");
         }
     }
 
@@ -895,7 +902,7 @@ int main(int argc, char **argv)
         if (bt_wait_dead(&bt_dead_dormant, "dormant Task to exit"))
         {
             bt_discard_dead(&bt_dead_dormant, FALSE,
-                            "dormant death has no release slot");
+                            "dormant death has no released bracket");
         }
     }
 
@@ -912,17 +919,17 @@ int main(int argc, char **argv)
                          "released-baton Task to exit"))
         {
             t_check(ami_baton_stats.bs_Live == live_before + 1UL,
-                    "released death left one live baton slot",
+                    "released death left one live baton bracket",
                     (LONG)ami_baton_stats.bs_Live);
             t_check(ami_netstack_baton_abandon(&bt_dead_dormant.bt_Thread)
                     == FALSE,
-                    "another TX_THREAD cannot inherit the dead Task's slot",
+                    "another TX_THREAD cannot inherit the dead Task's bracket",
                     0);
             t_check(ami_baton_stats.bs_Live == live_before + 1UL,
                     "a wrong-identity abandon leaves the live count alone",
                     (LONG)ami_baton_stats.bs_Live);
             bt_discard_dead(&bt_dead_released, TRUE,
-                            "released death owned one baton slot");
+                            "released death owned one baton bracket");
             t_check(ami_baton_stats.bs_Live == live_before,
                     "abandon returned the baton live count",
                     (LONG)ami_baton_stats.bs_Live);
@@ -967,7 +974,7 @@ int main(int argc, char **argv)
                 RemTask(bt_dead_event.bt_Task);
                 bt_dead_event.bt_Task = NULL;
                 bt_discard_dead(&bt_dead_event, FALSE,
-                                "ThreadX wait has no release slot");
+                                "ThreadX wait has no released bracket");
                 t_check(bt_dead_flags.tx_event_flags_group_suspended_count == 0UL,
                         "discard unlinked the event suspension",
                         (LONG)bt_dead_flags.tx_event_flags_group_suspended_count);
@@ -981,7 +988,7 @@ int main(int argc, char **argv)
                 {
                     bt_dead_event.bt_Task = NULL;
                     bt_discard_dead(&bt_dead_event, FALSE,
-                                    "woken event victim has no release slot");
+                                    "woken event victim has no released bracket");
                 }
             }
         }
@@ -1069,7 +1076,10 @@ int main(int argc, char **argv)
             "no bracket found the interrupt state already raised",
             (LONG)ami_baton_stats.bs_StateShared);
 
-    t_check(ami_baton_stats.bs_Full == 0UL, "the baton table never filled",
+    t_check(ami_baton_stats.bs_LiveMax > 16UL,
+            "more than sixteen released Tasks coexist",
+            (LONG)ami_baton_stats.bs_LiveMax);
+    t_check(ami_baton_stats.bs_Full == 0UL, "no fixed baton table remains",
             (LONG)ami_baton_stats.bs_Full);
     t_check(ami_baton_stats.bs_BatonMoved == 0UL,
             "release() always found the baton was ours",

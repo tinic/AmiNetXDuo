@@ -30,6 +30,7 @@ CHAR        *name;
     (VOID) function_ptr;
 
     thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
+    thread_ptr -> tx_thread_amiga_exec_wait_nesting =  ((UINT) 0);
     thread_ptr -> tx_thread_amiga_flags           =  ((UINT) 0);
     thread_ptr -> tx_thread_amiga_task            =  (VOID *) 0;
     thread_ptr -> tx_thread_amiga_signal_owner    =  (VOID *) 0;

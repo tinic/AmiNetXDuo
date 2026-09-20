@@ -102,7 +102,7 @@ typedef struct AmiBatonStats
 {
     ULONG bs_Live;
     ULONG bs_LiveMax;
-    ULONG bs_Full;
+    ULONG bs_Full;          /* ABI: always zero since per-TX_THREAD state */
     ULONG bs_Transitions;
     ULONG bs_StateMax;
     ULONG bs_BatonMoved;

@@ -174,6 +174,7 @@ UINT    tx_amiga_caller_is_thread(VOID);
    adopted task was orphaned while it slept. */
 ULONG   tx_amiga_exec_wait_system_state_locked(VOID);
 TX_THREAD *tx_amiga_exec_wait_current_locked(VOID);
+TX_THREAD *tx_amiga_exec_wait_owner_locked(VOID);
 UINT    tx_amiga_exec_wait_release_locked(TX_THREAD *thread_ptr,
                                            UINT *wake, UINT *moved);
 UINT    tx_amiga_exec_wait_resume_locked(TX_THREAD *thread_ptr, UINT *wake);

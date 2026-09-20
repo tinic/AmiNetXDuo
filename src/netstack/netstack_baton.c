@@ -15,22 +15,6 @@
 #include <exec/tasks.h>
 #include <proto/exec.h>
 
-/*
- * One entry per Exec Task currently inside a release/acquire bracket.  The
- * hooks take no argument, so the thread pointer is stored in a table keyed by
- * struct Task *.
- */
-#define AMI_BATON_SLOTS     16
-
-typedef struct AmiBatonSlot
-{
-    struct Task *bs_Task;
-    TX_THREAD   *bs_Thread;
-    ULONG        bs_Nesting;
-} AmiBatonSlot;
-
-static AmiBatonSlot ami_baton_slot[AMI_BATON_SLOTS];
-
 /* Fields in aminetxduo/netstack.h. Touched only under the Forbid() the callers
    already hold. */
 AmiBatonStats ami_baton_stats;
@@ -94,69 +78,29 @@ VOID ami_netstack_health_unpublish(VOID)
     Permit();
 }
 
-/* Callers hold Forbid() around both of these. */
-static AmiBatonSlot *ami_baton_find(struct Task *task)
-{
-    UWORD i;
-
-    for (i = 0; i < AMI_BATON_SLOTS; i++)
-    {
-        if (ami_baton_slot[i].bs_Task == task)
-            return &ami_baton_slot[i];
-    }
-
-    return NULL;
-}
-
-static AmiBatonSlot *ami_baton_claim(struct Task *task)
-{
-    UWORD i;
-
-    for (i = 0; i < AMI_BATON_SLOTS; i++)
-    {
-        if (ami_baton_slot[i].bs_Task == NULL)
-        {
-            ami_baton_slot[i].bs_Task    = task;
-            ami_baton_slot[i].bs_Thread  = NULL;
-            ami_baton_slot[i].bs_Nesting = 0;
-            return &ami_baton_slot[i];
-        }
-    }
-
-    return NULL;
-}
-
 /*
  * Forget a release/acquire bracket whose Exec Task cannot return.  The
- * TX_THREAD is the identity, not bs_Task: Exec can reuse a freed Task address.
- * The caller must follow this with tx_amiga_discard_thread().
+ * bracket belongs to the TX_THREAD itself, so deleting that thread also
+ * deletes its identity; no recycled Exec Task address can inherit it.  The
+ * caller must follow this with tx_amiga_discard_thread().
  */
 BOOL ami_netstack_baton_abandon(TX_THREAD *thread)
 {
-    BOOL  found = FALSE;
-    UWORD i;
+    BOOL found = FALSE;
 
     if (thread == TX_NULL)
         return FALSE;
 
     Forbid();
 
-    for (i = 0; i < AMI_BATON_SLOTS; i++)
+    if (thread->tx_thread_amiga_exec_wait_nesting != 0U)
     {
-        AmiBatonSlot *slot = &ami_baton_slot[i];
-
-        if (slot->bs_Thread != thread)
-            continue;
-
-        slot->bs_Task    = NULL;
-        slot->bs_Thread  = NULL;
-        slot->bs_Nesting = 0;
+        thread->tx_thread_amiga_exec_wait_nesting = 0U;
 
         if (ami_baton_stats.bs_Live > 0)
             ami_baton_stats.bs_Live--;
 
         found = TRUE;
-        break;
     }
 
     Permit();
@@ -166,32 +110,20 @@ BOOL ami_netstack_baton_abandon(TX_THREAD *thread)
 
 /*
  * Called once tx_amiga_kernel_stop() has reported success, so no bracket can
- * be open and no thread exists to be tracked.  The table is a file static and
- * outlives the stack, and every bs_Thread in it points into a freed NX_IP.
+ * be open and no TX_THREAD carrying bracket state still exists.  Only the
+ * diagnostic live count outlives the kernel now.
  */
 VOID ami_netstack_baton_reset(VOID)
 {
-    UWORD i;
-    UWORD held = 0;
+    ULONG held;
 
     Forbid();
-
-    for (i = 0; i < AMI_BATON_SLOTS; i++)
-    {
-        if (ami_baton_slot[i].bs_Task != NULL)
-            held++;
-
-        ami_baton_slot[i].bs_Task    = NULL;
-        ami_baton_slot[i].bs_Thread  = NULL;
-        ami_baton_slot[i].bs_Nesting = 0;
-    }
-
+    held = ami_baton_stats.bs_Live;
     ami_baton_stats.bs_Live = 0;
-
     Permit();
 
     if (held != 0)
-        AMI_WARN("netstack: %ld baton slot(s) still held at shutdown. A task "
+        AMI_WARN("netstack: %ld baton bracket(s) still held at shutdown. A task "
                  "died inside a release/acquire bracket", (LONG)held);
 }
 
@@ -216,43 +148,27 @@ VOID ami_netstack_baton_release(VOID)
 {
     struct Task   *me = FindTask(NULL);
     TX_THREAD     *thread;
-    AmiBatonSlot  *slot;
     UINT           wake;
     UINT           moved;
     UINT           status;
 
     Forbid();
 
-    slot = ami_baton_find(me);
-    if (slot != NULL && slot->bs_Nesting > 0)
+    thread = tx_amiga_exec_wait_owner_locked();
+    if (thread != TX_NULL &&
+        thread->tx_thread_amiga_exec_wait_nesting != 0U)
     {
-        slot->bs_Nesting++;
+        thread->tx_thread_amiga_exec_wait_nesting++;
         Permit();
         return;
     }
 
-    thread = tx_amiga_exec_wait_current_locked();
-
-    if (thread == TX_NULL || thread->tx_thread_amiga_task != (VOID *)me)
+    if (thread == TX_NULL || thread != tx_amiga_exec_wait_current_locked() ||
+        thread->tx_thread_amiga_task != (VOID *)me)
     {
         /* Not the baton holder: either a plain Exec Task or a thread that has
            already yielded.  Blocking is safe as it is. */
         Permit();
-        return;
-    }
-
-
-    if (slot == NULL)
-        slot = ami_baton_claim(me);
-
-    if (slot == NULL)
-    {
-        ami_baton_stats.bs_Full++;
-        Permit();
-        AMI_WARN("netstack: baton table full. '%s' will block and hold "
-                 "the baton",
-                 (thread->tx_thread_name != TX_NULL) ? thread->tx_thread_name
-                                                     : (CHAR *)"?");
         return;
     }
 
@@ -261,8 +177,7 @@ VOID ami_netstack_baton_release(VOID)
         ami_baton_stats.bs_LiveMax = ami_baton_stats.bs_Live;
     ami_baton_observe_state();
 
-    slot->bs_Thread  = thread;
-    slot->bs_Nesting = 1;
+    thread->tx_thread_amiga_exec_wait_nesting = 1U;
 
     /* The port owns the ready-list and baton globals.  This call is the one
        narrow boundary for suspending without dispatching through Exec; the
@@ -270,9 +185,7 @@ VOID ami_netstack_baton_release(VOID)
     status = tx_amiga_exec_wait_release_locked(thread, &wake, &moved);
     if (status != TX_SUCCESS)
     {
-        slot->bs_Task    = NULL;
-        slot->bs_Thread  = NULL;
-        slot->bs_Nesting = 0;
+        thread->tx_thread_amiga_exec_wait_nesting = 0U;
         if (ami_baton_stats.bs_Live > 0)
             ami_baton_stats.bs_Live--;
         Permit();
@@ -295,33 +208,22 @@ VOID ami_netstack_baton_release(VOID)
 
 VOID ami_netstack_baton_acquire(VOID)
 {
-    struct Task   *me = FindTask(NULL);
     TX_THREAD     *thread;
-    AmiBatonSlot  *slot;
     UINT           wake;
     UINT           status;
 
     Forbid();
 
-    slot = ami_baton_find(me);
-    if (slot == NULL || slot->bs_Nesting == 0)
+    thread = tx_amiga_exec_wait_owner_locked();
+    if (thread == TX_NULL ||
+        thread->tx_thread_amiga_exec_wait_nesting == 0U)
     {
         Permit();
         return;
     }
 
-    slot->bs_Nesting--;
-    if (slot->bs_Nesting > 0)
-    {
-        Permit();
-        return;
-    }
-
-    thread          = slot->bs_Thread;
-    slot->bs_Thread = NULL;
-    slot->bs_Task   = NULL;
-
-    if (thread == TX_NULL)
+    thread->tx_thread_amiga_exec_wait_nesting--;
+    if (thread->tx_thread_amiga_exec_wait_nesting != 0U)
     {
         Permit();
         return;

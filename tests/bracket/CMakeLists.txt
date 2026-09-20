@@ -43,7 +43,7 @@ set(BRACKET_ROUNDS  "200" CACHE STRING "Adopt/orphan cycles per worker")
 
 # The baton phase runs on wall-clock time, so its axis is seconds, not rounds:
 # the probe samples 500 times a second and a longer phase is more samples.
-set(BRACKET_BATON_TASKS "3"   CACHE STRING "Tasks in the release/acquire phase")
+set(BRACKET_BATON_TASKS "20"  CACHE STRING "Tasks in the release/acquire phase")
 set(BRACKET_BATON_TICKS "250" CACHE STRING "Ticks the release/acquire phase runs")
 
 target_compile_definitions(bracket_invariants PRIVATE
