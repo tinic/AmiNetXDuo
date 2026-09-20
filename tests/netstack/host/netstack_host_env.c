@@ -721,6 +721,11 @@ ULONG ami_config_rx_batch(ULONG fallback)
     return fallback;
 }
 
+ULONG ami_config_tx_run(ULONG fallback)
+{
+    return fallback;
+}
+
 BOOL ami_config_reserve(AmiConfig *cfg, UWORD want)
 {
     AmiIfConfig *grown;

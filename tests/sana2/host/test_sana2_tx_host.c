@@ -48,8 +48,27 @@ VOID SendIO(struct IORequest *req)
    path (finishes inside BeginIO, keeps the flag, posts nothing). */
 static int h_quick_kept;
 
+/* ANXD_CMD_TX_FLUSH as the device answers it: counted apart from the writes,
+   quick unless h_flush_queued, refused with h_flush_error. */
+static unsigned long h_flushes;
+static int           h_flush_queued;
+static BYTE          h_flush_error;
+
+VOID ReplyMsg(struct Message *msg);
+
 VOID BeginIO(struct IORequest *req)
 {
+    if (req->io_Command == ANXD_CMD_TX_FLUSH)
+    {
+        h_flushes++;
+        req->io_Error = h_flush_error;
+        if (h_flush_queued)
+        {
+            req->io_Flags &= (UBYTE)~IOF_QUICK;
+            ReplyMsg(&req->io_Message);
+        }
+        return;
+    }
     h_sent = req;
     h_sends++;
     if (!h_quick_kept)
@@ -196,6 +215,16 @@ UINT _nxe_packet_release(NX_PACKET **packet_ptr_ptr)
     return NX_SUCCESS;
 }
 
+/* The current ThreadX thread, as the run bracket sees it: one for the sender
+   under test, another for "some other thread". */
+static TX_THREAD h_thread_a, h_thread_b;
+static TX_THREAD *h_current = &h_thread_a;
+
+TX_THREAD *_tx_thread_identify(VOID)
+{
+    return h_current;
+}
+
 UINT _tx_thread_sleep(ULONG ticks)
 {
     (VOID)ticks;
@@ -282,6 +311,10 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_sleeps   = 0;
     h_reply_on_sleep = 0;
     h_quick_kept = 0;
+    h_flushes      = 0;
+    h_flush_queued = 0;
+    h_flush_error  = 0;
+    h_current      = &h_thread_a;
 }
 
 static void packet_init(const UCHAR *body, ULONG len)
@@ -915,6 +948,101 @@ static void test_quick_write_completes_inline(void)
             "until the reply is reaped");
 }
 
+/*
+ * A run (ANXD_S2F_TX_MORE): the holder's writes carry ANXD_S2_TXF_MORE, any
+ * other thread's do not, the end of the run and a flush inside it send one
+ * ANXD_CMD_TX_FLUSH each and only when something was held, and a device that
+ * refuses or queues the command turns runs off.
+ */
+static void test_run_flags_and_flushes(void)
+{
+    printf("sana2: a run flags the holder's writes and flushes at its end\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_quick_ok = TRUE;
+    iface.tx_more_ok  = 1;
+    h_quick_kept      = 1;
+
+    /* Outside a run: a plain write. */
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    h_check((ami_sana2_tx_flags(sent_req()->ios2_Data) & ANXD_S2_TXF_MORE) == 0,
+            "outside a run a write is not one of a run");
+    ami_sana2_tx_run_flush(&iface);
+    ami_sana2_tx_run_end(&iface);
+    h_check(h_flushes == 0, "and flush and end outside a run send nothing");
+
+    ami_sana2_tx_run_begin(&iface);
+    h_check(iface.tx_holder == &h_thread_a, "begin makes the caller the holder");
+    ami_sana2_tx_run_flush(&iface);
+    h_check(h_flushes == 0, "a flush with nothing held sends nothing");
+
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    h_check((ami_sana2_tx_flags(sent_req()->ios2_Data) & ANXD_S2_TXF_MORE) != 0,
+            "the holder's write is one of a run");
+    h_check(iface.tx_held == 1, "and is noted as held");
+
+    /* Another thread sends while the run is open. */
+    h_current = &h_thread_b;
+    ami_sana2_tx_run_begin(&iface);
+    h_check(iface.tx_holder == &h_thread_a,
+            "a second thread's begin does not take the run over");
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    h_check((ami_sana2_tx_flags(sent_req()->ios2_Data) & ANXD_S2_TXF_MORE) == 0,
+            "and its write is a plain one");
+    ami_sana2_tx_run_end(&iface);
+    h_check(iface.tx_holder == &h_thread_a && h_flushes == 0,
+            "and its end neither closes the run nor flushes it");
+    h_current = &h_thread_a;
+
+    ami_sana2_tx_run_flush(&iface);
+    h_check(h_flushes == 1, "the holder's flush sends the command");
+    h_check(iface.tx_held == 0, "and clears held");
+    h_check(iface.tx_flush_req.ios2_Req.io_Flags == IOF_QUICK,
+            "a quick one, kept by the device");
+    ami_sana2_tx_run_flush(&iface);
+    h_check(h_flushes == 1, "a second flush with nothing new sends nothing");
+
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    ami_sana2_tx_run_end(&iface);
+    h_check(h_flushes == 2, "the end of the run flushes what came after");
+    h_check(iface.tx_holder == NULL, "and hands the run back");
+    h_check(iface.tx_more_ok == 1, "runs stay on");
+
+    /* A device that refuses the command: runs go off, nothing else changes. */
+    ami_sana2_tx_run_begin(&iface);
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    h_flush_error = IOERR_NOCMD;
+    ami_sana2_tx_run_end(&iface);
+    h_check(h_flushes == 3 && iface.tx_more_ok == 0,
+            "a refused flush turns runs off");
+    h_flush_error = 0;
+    ami_sana2_tx_run_begin(&iface);
+    h_check(iface.tx_holder == NULL, "and the next begin is a no-op");
+
+    /* A device that queues it: one is outstanding until the reap sees the
+       reply, and runs are off for good. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_quick_ok = TRUE;
+    iface.tx_more_ok  = 1;
+    h_quick_kept      = 1;
+    h_flush_queued    = 1;
+    ami_sana2_tx_run_begin(&iface);
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF, 0xFFFFFFFF);
+    ami_sana2_tx_run_end(&iface);
+    h_check(h_flushes == 1 && iface.tx_flush_busy == 1 && iface.tx_more_ok == 0,
+            "a queued flush is outstanding and turns runs off");
+    ami_sana2_tx_reap(&iface);
+    h_check(iface.tx_flush_busy == 0, "its reply is told from a write by the reap");
+    h_check(iface.tx[0].busy == FALSE && h_releases == 1,
+            "which completed nothing it should not have");
+}
+
 /* A full ring queues the write instead of sleeping a tick: the queue keeps
    the order, the completion that frees a slot launches the head, a full
    queue is the one drop left, and an interface going down releases what
@@ -1033,6 +1161,7 @@ int main(void)
 {
     frames_init();
     test_quick_write_completes_inline();
+    test_run_flags_and_flushes();
     test_full_ring_queues_in_order();
 
     test_pad_cooked_no_fusion();

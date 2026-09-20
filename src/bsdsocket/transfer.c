@@ -8,6 +8,7 @@
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/nxstatus.h"
 #include "aminetxduo/budget.h"
+#include "aminetxduo/sana2.h"
 #include "netmonitor.h"
 #include "packet_extract.h"
 #include "udp_queue.h"
@@ -197,16 +198,38 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
     return (LONG)done;
 }
 
+/*
+ * THE RUN.  A send() of more than one segment is a run of writes on the
+ * connection's interface (ami_sana2_tx_run_begin, sana2.h): the driver may
+ * hold each frame's start for the next, so the run leaves the wire back to
+ * back and the peer acknowledges pairs rather than every segment -- each
+ * acknowledgement is a frame through this machine's receive path, and the
+ * sender's own CPU is what a gigabit transmit runs out of.  The two places
+ * this thread can wait inside the run therefore flush it first: a frame the
+ * driver is holding is what the awaited window, or the awaited packet, is
+ * waiting on.  Both try without waiting first, which is the same one call
+ * in the case that does not wait, and flush only on the way into a wait.
+ */
 typedef struct
 {
     NX_PACKET_POOL *pool;
     NX_PACKET      **packet;
+    AmiSana2If     *run;
 } BsdAllocArgs;
 
 static UINT bsd_alloc_once(VOID *arg, ULONG wait)
 {
     BsdAllocArgs *a = (BsdAllocArgs *)arg;
+    UINT          status;
 
+    if (wait == NX_NO_WAIT || a->run == NULL)
+        return nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, wait);
+
+    status = nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, NX_NO_WAIT);
+    if (status != NX_NO_PACKET)
+        return status;
+
+    ami_sana2_tx_run_flush(a->run);
     return nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, wait);
 }
 
@@ -214,13 +237,35 @@ typedef struct
 {
     NX_TCP_SOCKET *tcp;
     NX_PACKET     *packet;
+    AmiSana2If    *run;
 } BsdSendArgs;
 
 static UINT bsd_send_once(VOID *arg, ULONG wait)
 {
     BsdSendArgs *a = (BsdSendArgs *)arg;
+    UINT         status;
 
+    if (wait == NX_NO_WAIT || a->run == NULL)
+        return nx_tcp_socket_send(a->tcp, a->packet, wait);
+
+    /* The two verdicts a wait can change; the send is not all-or-nothing,
+       and what a refused call put on the wire is already off the packet. */
+    status = nx_tcp_socket_send(a->tcp, a->packet, NX_NO_WAIT);
+    if (status != NX_WINDOW_OVERFLOW && status != NX_TX_QUEUE_DEPTH)
+        return status;
+
+    ami_sana2_tx_run_flush(a->run);
     return nx_tcp_socket_send(a->tcp, a->packet, wait);
+}
+
+/* The interface the connection sends on; NULL for one that has none yet, and
+   the loopback interface has no AmiSana2If behind it. */
+static AmiSana2If *bsd_send_run_iface(const AmiSocket *sock)
+{
+    NX_INTERFACE *nxif = sock->as_Nx.tcp.nx_tcp_socket_connect_interface;
+
+    return (nxif != NX_NULL)
+         ? (AmiSana2If *)nxif->nx_interface_additional_link_info : NULL;
 }
 
 /*
@@ -236,8 +281,9 @@ static LONG bsd_send_consumed(NX_PACKET *packet, LONG filled)
     return filled - left;
 }
 
-static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
-                         BsdIovCursor *cur, LONG len, LONG flags)
+static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
+                             BsdIovCursor *cur, LONG len, LONG flags,
+                             AmiSana2If *run)
 {
     NX_PACKET_POOL *pool = netstack_pool();
     ULONG           mss  = 0;
@@ -276,6 +322,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
             aargs.pool   = pool;
             aargs.packet = &packet;
+            aargs.run    = run;
 
             status = bsd_wait_sliced(base, wait, bsd_alloc_once, &aargs,
                                      &aborted);
@@ -305,6 +352,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
             sargs.tcp    = &sock->as_Nx.tcp;
             sargs.packet = packet;
+            sargs.run    = run;
 
             status = bsd_wait_sliced(base, wait, bsd_send_once, &sargs,
                                      &aborted);
@@ -349,6 +397,19 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, bsd_wait_errno(wait, why));
 
     return sent;
+}
+
+static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
+                         BsdIovCursor *cur, LONG len, LONG flags)
+{
+    AmiSana2If *run = bsd_send_run_iface(sock);
+    LONG        result;
+
+    ami_sana2_tx_run_begin(run);
+    result = bsd_send_tcp_run(base, sock, cur, len, flags, run);
+    ami_sana2_tx_run_end(run);
+
+    return result;
 }
 
 /*

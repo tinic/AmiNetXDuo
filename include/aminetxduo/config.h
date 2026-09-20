@@ -525,6 +525,11 @@ ULONG ami_config_pool_packets(VOID);
  */
 ULONG ami_config_rx_batch(ULONG fallback);
 
+/* ENV:ANXDTXRUN 0 leaves ANXD_S2F_TX_MORE unrequested, so every write starts
+   the hardware at once: the A/B for transmit runs (sana2.h,
+   ami_sana2_tx_run_begin).  Anything else, or no variable, is `fallback`. */
+ULONG ami_config_tx_run(ULONG fallback);
+
 /*
  * How loud the serial diagnostic is, AMI_LOG_ERROR..AMI_LOG_TRACE.
  *

@@ -59,6 +59,7 @@ static UWORD netdev_supported[] =
     S2_ADDMULTICASTADDRESSES, S2_DELMULTICASTADDRESSES,
     NSCMD_DEVICEQUERY,
     ANXD_CMD_RX_POLL, ANXD_CMD_RX_CAPACITY, ANXD_CMD_RX_BATCH,
+    ANXD_CMD_TX_FLUSH,
     0
 };
 
@@ -797,6 +798,25 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 
     case ANXD_CMD_RX_BATCH:
         netdev_queue_batch(op, io);
+        return;
+
+    case ANXD_CMD_TX_FLUSH:
+        /* Start what a run of ANXD_S2_TXF_MORE writes left unstarted.  The
+           core's kick is a register write; Forbid() keeps it clear of a
+           task mid-transmit under the tx task lock, and an interrupt's
+           own kick writes the same index.  Quick, nothing to wait for. */
+        if (unit->nu_Nic.tx_flush == NULL)
+        {
+            netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
+            return;
+        }
+        if (unit->nu_Online)
+        {
+            Forbid();
+            unit->nu_Nic.tx_flush(&unit->nu_Nic);
+            Permit();
+        }
+        netdev_reply(io, 0, 0);
         return;
 
     case ANXD_CMD_RX_CAPACITY:

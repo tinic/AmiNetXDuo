@@ -84,6 +84,20 @@ BOOL        ami_sana2_admin_up(const AmiSana2If *iface);
 LONG ami_sana2_inject(AmiSana2If *iface, UWORD ether_type, const UBYTE *dst,
                       const UBYTE *payload, ULONG len);
 
+/*
+ * A run of frames from one thread (ANXD_S2F_TX_MORE, anxs2ext.h).  Between
+ * begin and end, writes the calling ThreadX thread issues on `iface` are
+ * flagged as one of a run and a driver that negotiated the bit may hold
+ * their start so they leave the wire together; end starts them, and so does
+ * flush, which the sender calls before it waits for anything those frames
+ * could be the answer to (a window, a packet).  Nested and foreign brackets
+ * are harmless: only the first opener is the holder, and an interface
+ * without the bit ignores all three.  Inside the ThreadX bracket only.
+ */
+VOID ami_sana2_tx_run_begin(AmiSana2If *iface);
+VOID ami_sana2_tx_run_flush(AmiSana2If *iface);
+VOID ami_sana2_tx_run_end(AmiSana2If *iface);
+
 /* Counters for GetNetworkStatistics()/netstat. */
 typedef struct AmiSana2Stats {
     ULONG   packets_received;

@@ -91,6 +91,24 @@ VOID Enable(VOID)
     }
 }
 
+static int forbid_depth;
+
+VOID Forbid(VOID)
+{
+    forbid_depth++;
+}
+
+VOID Permit(VOID)
+{
+    forbid_depth--;
+    if (forbid_depth < 0)
+    {
+        printf("FAIL Permit() without a matching Forbid()\n");
+        failures++;
+        forbid_depth = 0;
+    }
+}
+
 /* The one thing the driver must not do: complete somebody else's IORequest
    while it is still on the list it was taken from.  Remove() nulls ln_Succ,
    so a reply from a node still linked is caught here. */
@@ -843,7 +861,7 @@ static void j_the_advertised_list_is_the_real_one(void)
                  last_wire == (ULONG)S2WERR_GENERIC_ERROR), what);
     }
 
-    expect(n == 25, "the advertised list is the length this test read it at");
+    expect(n == 26, "the advertised list is the length this test read it at");
 }
 
 /* Anything else is what both IC drivers answer, and what a caller probes
@@ -1508,6 +1526,82 @@ static void w_private_commands_are_in_an_nsd_vendor_block(void)
            "ANXD_CMD_RX_CAPACITY is in an NSD third-party block");
     expect((ANXD_CMD_RX_BATCH & 0xc000U) == 0x8000U,
            "ANXD_CMD_RX_BATCH is in an NSD third-party block");
+    expect((ANXD_CMD_TX_FLUSH & 0xc000U) == 0x8000U,
+           "ANXD_CMD_TX_FLUSH is in an NSD third-party block");
+}
+
+/* ANXD_CMD_TX_FLUSH: the core's flush under Forbid(), quick, once the unit
+   is online; S2ERR_NOT_SUPPORTED from a core that cannot hold a start; not
+   run on an offline unit; in the supported-command list. */
+static int  tx_flush_calls;
+static int  tx_flush_forbid_depth;
+static VOID y_tx_flush_core(NetdevNic *nic)
+{
+    (void)nic;
+    tx_flush_calls++;
+    tx_flush_forbid_depth = forbid_depth;
+}
+
+static void y_tx_flush(void)
+{
+    struct IOSana2Req io;
+    UWORD            *cmds;
+    int               listed = 0;
+
+    reset();
+    unit.nu_Nic.tx_flush = NULL;
+    req(&io, ANXD_CMD_TX_FLUSH);
+    io.ios2_Req.io_Flags = IOF_QUICK;
+    netdev_perform(&opener, &io);
+    expect_u32("a core that cannot hold a start declines the flush",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error,
+               (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+
+    reset();
+    unit.nu_Nic.tx_flush = y_tx_flush_core;
+    tx_flush_calls = 0;
+    req(&io, ANXD_CMD_TX_FLUSH);
+    io.ios2_Req.io_Flags = IOF_QUICK;
+    netdev_perform(&opener, &io);
+    expect(tx_flush_calls == 1, "a flush runs the core's flush once");
+    expect(tx_flush_forbid_depth == 1, "under Forbid()");
+    expect(forbid_depth == 0, "and Permit()s again");
+    expect_u32("with no error", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+    expect((io.ios2_Req.io_Flags & IOF_QUICK) != 0, "and stays quick");
+
+    reset();
+    unit.nu_Nic.tx_flush = y_tx_flush_core;
+    unit.nu_Online       = 0;
+    tx_flush_calls = 0;
+    req(&io, ANXD_CMD_TX_FLUSH);
+    netdev_perform(&opener, &io);
+    expect(tx_flush_calls == 0, "an offline unit's core is not flushed");
+    expect_u32("and the command still answers 0",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+
+    reset();
+    {
+        struct IOStdReq std;
+        struct
+        {
+            ULONG  DevQueryFormat;
+            ULONG  SizeAvailable;
+            UWORD  DeviceType;
+            UWORD  DeviceSubType;
+            UWORD *SupportedCommands;
+        } answer;
+
+        memset(&std, 0, sizeof(std));
+        memset(&answer, 0, sizeof(answer));
+        std.io_Command = NSCMD_DEVICEQUERY;
+        std.io_Data    = &answer;
+        std.io_Length  = sizeof(answer);
+        netdev_perform(&opener, (struct IOSana2Req *)&std);
+        for (cmds = answer.SupportedCommands; cmds != NULL && *cmds != 0; cmds++)
+            if (*cmds == ANXD_CMD_TX_FLUSH)
+                listed = 1;
+    }
+    expect(listed, "ANXD_CMD_TX_FLUSH is in the supported-command list");
 }
 
 static UBYTE *x_direct(APTR data, ULONG len) { (void)data; (void)len; return NULL; }
@@ -1712,6 +1806,7 @@ int main(void)
     v_rx_capacity();
     w_private_commands_are_in_an_nsd_vendor_block();
     x_rx_batch();
+    y_tx_flush();
 
     if (failures != 0)
     {

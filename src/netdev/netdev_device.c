@@ -936,9 +936,16 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
        load from the opener-owned request cookie and is safe when a queued
        write advances from interrupt context. */
     unit->nu_Nic.tx_csum = 0;
+    unit->nu_Nic.tx_more = 0;
     if (op->op_TxFlags != NULL)
-        unit->nu_Nic.tx_csum =
-            ((AnxdS2TxFlags)op->op_TxFlags)(io->ios2_Data) & op->op_TxCsum;
+    {
+        UBYTE flags = ((AnxdS2TxFlags)op->op_TxFlags)(io->ios2_Data);
+
+        unit->nu_Nic.tx_csum = (UBYTE)(flags & op->op_TxCsum);
+        /* A run in progress: a core with a flush may hold its start. */
+        unit->nu_Nic.tx_more = (UBYTE)((flags & ANXD_S2_TXF_MORE) != 0 &&
+                                       unit->nu_Nic.tx_flush != NULL);
+    }
     rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;
@@ -2361,6 +2368,8 @@ static struct Device *netdev_open(
             op->op_RxFilled != NULL && op->op_RxLinkHdr && !op->op_Raw &&
             op->op_Filter == NULL)
             accepted |= ANXD_S2F_RX_BATCH;
+        if (hw->nu_Nic.tx_flush != NULL && op->op_TxFlags != NULL)
+            accepted |= ANXD_S2F_TX_MORE;
         if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
             accepted |= ANXD_S2F_RX_VERIFIED;
         if ((op->op_TxCsum & ANXD_S2_TXF_TCP) != 0)

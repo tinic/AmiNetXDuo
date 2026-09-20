@@ -26,6 +26,15 @@ version at the top when it merges.
 - The TCP receive queue's packet cap is sized from a 1200-byte segment with
   16 of slack, and NetX Duo counts a segment it drops at that cap in
   `netstat -s` "dropped on receipt".
+- Transmit runs: a `send()` of more than one segment brackets its writes
+  (`ANXD_S2_TXF_MORE` on the per-write flags, negotiated as
+  `ANXD_S2F_TX_MORE`), and a driver that took the bit holds each frame's
+  start for the next so the run leaves the wire back to back and the peer
+  acknowledges pairs instead of every segment. `ANXD_CMD_TX_FLUSH` (quick)
+  starts what is held; the stack sends it when the `send()` ends and before
+  it waits for a window or a packet, and `anxgenet.device` also starts after
+  eight held frames and on its tick. `NetDevStats` "GENET transmits held for
+  company" counts them. `SetEnv ANXDTXRUN 0` turns it off.
 
 - GRO stream matching now lives in the stack's SANA-II receive layer. Every
   driver can coalesce verified contiguous IPv4 and IPv6 TCP segments; device

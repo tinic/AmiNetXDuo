@@ -37,9 +37,11 @@
 
 /* Room for a core's own special-statistics records. */
 #ifdef GE_PROBE_ST
-#define NETDEV_CORE_STATS   40      /* + the GENET probe's thirteen RX, four TX */
+#define NETDEV_CORE_STATS   43      /* + the GENET probe's thirteen RX, four TX */
 #else
-#define NETDEV_CORE_STATS   23
+#define NETDEV_CORE_STATS   26      /* the GENET's 24: pass budget, RBUF
+                                       overflow and held-start counters,
+                                       2026-09-20 */
 #endif
 
 /*
@@ -237,6 +239,11 @@ struct NetdevNic
        nothing from a batch and loses a pool of posted reads to it, so it
        leaves this 0 and its openers keep CMD_READs. */
     UBYTE               rx_batches;
+    /* The opener's write is one of a run (ANXD_S2_TXF_MORE, from the shell
+       per write): a core may hold the hardware start for company.  Meaning
+       only on a core that sets tx_flush, the start it holds back. */
+    UBYTE               tx_more;
+    VOID              (*tx_flush)(struct NetdevNic *nic);
 
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an

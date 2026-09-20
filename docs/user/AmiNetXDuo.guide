@@ -1014,6 +1014,9 @@
       SetEnv ANXDRXBATCH 0            receive one frame per request again,
                                       instead of a burst per request on a
                                       driver that delivers bursts (anxgenet)
+      SetEnv ANXDTXRUN 0              start every transmit at once, instead
+                                      of letting a send() of several
+                                      segments leave the wire together
 
   A mistyped value is ignored.
 

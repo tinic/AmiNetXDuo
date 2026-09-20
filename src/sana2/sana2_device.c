@@ -926,6 +926,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
                                 ANXD_S2F_RX_POLL |
                                 ANXD_S2F_RX_CAPACITY |
                                 ANXD_S2F_TX_QUICK;
+    if (ami_config_tx_run(1UL) != 0UL)
+        iface->extension.Request |= ANXD_S2F_TX_MORE;
 #ifdef AMINETXDUO_RX_BATCH
     if (ami_config_rx_batch(1UL) != 0UL)
         iface->extension.Request |= ANXD_S2F_RX_BATCH;
@@ -1020,6 +1022,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         iface->tx_csum_ok |= ANXD_S2_TXF_TCP;
     if ((iface->extension.Accepted & ANXD_S2F_TX_CSUM_UDP) != 0)
         iface->tx_csum_ok |= ANXD_S2_TXF_UDP;
+    iface->tx_more_ok =
+        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_TX_MORE) != 0) ? 1 : 0);
     if (status != 0)
     {
         iface->link_hdr_ok = FALSE;
@@ -1028,6 +1032,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         iface->rx_batch_ok = 0;
         iface->tx_quick_ok = 0;
         iface->tx_csum_ok  = 0;
+        iface->tx_more_ok  = 0;
     }
 
     if (status != 0)

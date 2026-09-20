@@ -782,6 +782,24 @@ struct AmiSana2If
     UBYTE               tx_csum_ok;     /* negotiated ANXD_S2_TXF_*
                                            checksums the device writes on the
                                            way out, 0 = none (sana2_tx.c)   */
+    /*
+     * TRANSMIT RUNS (ANXD_S2F_TX_MORE, anxs2ext.h).  A sender that brackets
+     * a run of writes with ami_sana2_tx_run_begin()/_end() is tx_holder for
+     * its length; a write the holder's own thread launches inside it carries
+     * ANXD_S2_TXF_MORE and the device may hold the start until the run's
+     * flush (ANXD_CMD_TX_FLUSH), which the end of the bracket and every wait
+     * inside it send.  Another thread's write inside the bracket is a plain
+     * write, and a driver starts whatever it holds for one of those.
+     */
+    UBYTE               tx_more_ok;     /* negotiated ANXD_S2F_TX_MORE       */
+    UBYTE               tx_held;        /* a TXF_MORE write went out since
+                                           the last flush                    */
+    UBYTE               tx_flush_busy;  /* the flush request is queued at
+                                           the device (never with ours: the
+                                           command is quick)                 */
+    TX_THREAD          *tx_holder;      /* the run's opener, NULL outside    */
+    struct IOSana2Req   tx_flush_req;   /* ANXD_CMD_TX_FLUSH, reply on
+                                           tx_port, told apart by command    */
     ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
@@ -913,6 +931,9 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register ULONG len  __asm("d0"));
 BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
 UBYTE ami_sana2_tx_flags(APTR ios2_data);
+/* The flush request came back on tx_port: the device queued it rather than
+   finishing it inside BeginIO() (sana2_tx.c). */
+VOID  ami_sana2_tx_flush_replied(AmiSana2If *iface);
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
                               register ULONG len __asm("d0"));

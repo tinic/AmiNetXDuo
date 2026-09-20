@@ -5,7 +5,7 @@ offset	lvo	aminet_callers	our_tool_mentions
 -48	accept	245	40
 -54	connect	600	21
 -60	sendto	217	1
--66	send	758	85
+-66	send	758	84
 -72	recvfrom	198	2
 -78	recv	696	17
 -84	shutdown	198	8

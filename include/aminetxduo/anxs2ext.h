@@ -12,6 +12,11 @@
 
 #define ANXD_S2_TXF_TCP         0x01
 #define ANXD_S2_TXF_UDP         0x02
+/* This write is one of a run the opener is sending back to back: the driver
+   may hold the hardware's start until the run ends (ANXD_CMD_TX_FLUSH), a
+   few more frames arrive, or its own backstop, so the frames leave the
+   wire together.  Negotiated as ANXD_S2F_TX_MORE. */
+#define ANXD_S2_TXF_MORE        0x40
 
 typedef UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,
@@ -44,6 +49,7 @@ typedef UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
 #define ANXD_S2F_RX_CAPACITY    (1UL << 6)
 #define ANXD_S2F_TX_QUICK       (1UL << 7)
 #define ANXD_S2F_RX_BATCH       (1UL << 8)
+#define ANXD_S2F_TX_MORE        (1UL << 9)
 
 typedef struct AnxdS2Extension
 {
@@ -137,6 +143,22 @@ typedef struct AnxdS2Extension
  * that does not know the command answers IOERR_NOCMD; an opener that did
  * not get ANXD_S2F_RX_BATCH accepted posts CMD_READs as before. */
 #define ANXD_CMD_RX_BATCH       0x8193
+
+/* ANXD_CMD_TX_FLUSH: "start whatever you are holding for me".
+ *
+ * Why it exists.  A sender that produces one segment every 30 us onto a
+ * wire that carries one in 12 hands the far end one lone segment at a
+ * time, and Linux acknowledges a lone segment at once: measured 285,713
+ * acknowledgements for 287,834 segments, each one a frame through this
+ * machine's receive path.  Two segments arriving together draw one.  So a
+ * write flagged ANXD_S2_TXF_MORE lets the driver defer the hardware start,
+ * and the opener sends this command when its run is over -- at the end of
+ * the send() call, before it could wait for anything.  The driver also
+ * starts on its own once a few writes are pending and, as a backstop, on
+ * its next tick.  Quick, no arguments, io_Error 0; IOERR_NOCMD from a
+ * driver that does not know it, S2ERR_NOT_SUPPORTED from a unit that
+ * cannot hold a start. */
+#define ANXD_CMD_TX_FLUSH       0x8194
 
 typedef struct AnxdS2RxBatch
 {
