@@ -11,6 +11,7 @@
 #include "httpterm.h"
 #include "httpfb.h"
 #include "httpdate.h"
+#include "httpfs.h"
 #include "httpstr.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
@@ -1081,224 +1082,58 @@ static HttpPathResult httpd_resolve_path(const char *target, HttpPath *out)
     return why;
 }
 
-/* An AmigaDOS error as an HTTP status.  One table, so every write method gives
-   the same answer to the same failure. */
+/* The state machine speaks in server terms; this narrow adapter is the only
+   place its single-task scratch objects enter the filesystem-policy module. */
 static ULONG httpd_dos_status(LONG err)
 {
-    switch (err)
-    {
-        case ERROR_OBJECT_NOT_FOUND:
-        case ERROR_DIR_NOT_FOUND:           return 409;
-        case ERROR_OBJECT_EXISTS:           return 405;
-        case ERROR_DIRECTORY_NOT_EMPTY:
-        case ERROR_OBJECT_IN_USE:           return 409;
-        case ERROR_DISK_FULL:               return 507;
-        /* A name the filesystem will not carry, too long for OFS, or a
-           character it reserves.  Refused rather than truncated into a name
-           that would collide with a file already there. */
-        case ERROR_INVALID_COMPONENT_NAME:
-        case ERROR_BAD_STREAM_NAME:         return 400;
-        default:                            return 403;
-    }
+    return http_fs_status(err);
 }
 
-/* The drawer a path lives in: "Work:Public/a/b" is "Work:Public/a" and
-   "RAM:foo" is "RAM:".  FALSE when there is no separator at all, which is a
-   path that names a device and has no parent here. */
 static BOOL httpd_parent(const char *path, char *out, ULONG outlen)
 {
-    ULONG n = hs_len(path);
-    ULONG cut = 0;
-    ULONG i;
-    BOOL  found = FALSE;
-
-    for (i = 0; i < n; i++)
-    {
-        if (path[i] == '/')
-        {
-            cut   = i;              /* the separator is dropped            */
-            found = TRUE;
-        }
-        else if (path[i] == ':')
-        {
-            cut   = i + 1UL;        /* the colon belongs to the device     */
-            found = TRUE;
-        }
-    }
-
-    if (!found || cut + 1UL >= outlen)
-        return FALSE;
-
-    for (i = 0; i < cut; i++)
-        out[i] = path[i];
-    out[cut] = '\0';
-
-    return TRUE;
+    return http_fs_parent(path, out, outlen);
 }
 
-/* TRUE when something is at `path` under a different name to the one asked
-   for: the filesystem truncated the name and answered success, so the request
-   would land on somebody else's file. */
 static BOOL httpd_name_differs(const struct FileInfoBlock *fib,
                                const char *name)
 {
-    if (name[0] == '\0')
-        return FALSE;               /* the root: no name was asked for     */
-
-    return hs_equal((const char *)fib->fib_FileName, name) ? FALSE : TRUE;
+    return http_fs_name_differs(fib, name);
 }
 
 static BOOL httpd_name_cut(const char *path, const char *name)
 {
-    BPTR lock;
-    BOOL cut = FALSE;
-
-    if (httpd_fib2 == NULL || name[0] == '\0')
-        return FALSE;
-
-    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    if (lock == (BPTR)0)
-        return FALSE;               /* nothing there: nothing to collide   */
-
-    if (Examine(lock, httpd_fib2))
-        cut = httpd_name_differs(httpd_fib2, name);
-
-    UnLock(lock);
-
-    return cut;
+    return http_fs_name_cut(httpd_fib2, path, name);
 }
 
-/* TRUE when creating something called `name` at `path` would leave it under a
-   different name, asked by doing it.  Only ever called with nothing at `path`:
-   MODE_NEWFILE would truncate a file that was. */
 static BOOL httpd_name_survives(const char *path, const char *name)
 {
-    BPTR probe;
-    BOOL cut;
-
-    if (name[0] == '\0')
-        return TRUE;
-
-    probe = Open((CONST_STRPTR)path, MODE_NEWFILE);
-    if (probe == (BPTR)0)
-        return TRUE;                /* the operation itself will say why   */
-
-    (VOID)Close(probe);
-
-    cut = httpd_name_cut(path, name);
-
-    (VOID)DeleteFile((CONST_STRPTR)path);
-
-    return cut ? FALSE : TRUE;
+    return http_fs_name_survives(httpd_fib2, path, name);
 }
 
-/* A directory entry that stands for something somewhere else.  ST_LINKFILE is
-   deliberately not here: a hard link to a file is one file, and copying it
-   copies bytes rather than walking anywhere. */
 static BOOL httpd_entry_is_link(LONG type)
 {
-    return (type == ST_SOFTLINK || type == ST_LINKDIR) ? TRUE : FALSE;
+    return http_fs_entry_is_link(type);
 }
 
-/* The entity tag: the size and the three DateStamp fields, which between them
-   are everything a FileInfoBlock knows that changes when the bytes do.
-   Collections have none. */
 static VOID httpd_etag(ULONG size, const struct DateStamp *ds,
                        char *out, ULONG outlen)
 {
-    ULONG used = 0;
-    BOOL  ok;
-
-    out[0] = '\0';
-
-    ok = hs_append(out, outlen, &used, "\"");
-    ok = ok && hs_append_num(out, outlen, &used, size);
-    ok = ok && hs_append(out, outlen, &used, "-");
-    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Days);
-    ok = ok && hs_append(out, outlen, &used, "-");
-    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Minute);
-    ok = ok && hs_append(out, outlen, &used, "-");
-    ok = ok && hs_append_num(out, outlen, &used, (ULONG)ds->ds_Tick);
-    ok = ok && hs_append(out, outlen, &used, "\"");
-
-    if (!ok)
-        out[0] = '\0';
+    http_fs_etag(size, ds, out, outlen);
 }
 
-/* The same, for a path nothing has looked at yet.  "" when there is nothing
-   there, or when it is a drawer. */
 static VOID httpd_etag_of(const char *path, char *out, ULONG outlen)
 {
-    BPTR lock;
-
-    out[0] = '\0';
-
-    if (httpd_fib2 == NULL)
-        return;
-
-    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    if (lock == (BPTR)0)
-        return;
-
-    if (Examine(lock, httpd_fib2) && httpd_fib2->fib_DirEntryType <= 0)
-        httpd_etag((ULONG)httpd_fib2->fib_Size, &httpd_fib2->fib_Date,
-                   out, outlen);
-
-    UnLock(lock);
+    http_fs_etag_of(httpd_fib2, path, out, outlen);
 }
 
-/* 1 a drawer, 0 a file, -1 nothing there. */
 static LONG httpd_kind(const char *path)
 {
-    BPTR lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    LONG kind = 0;
-
-    if (lock == (BPTR)0)
-        return -1;
-
-    if (httpd_fib2 != NULL && Examine(lock, httpd_fib2) &&
-        httpd_fib2->fib_DirEntryType > 0)
-        kind = 1;
-
-    UnLock(lock);
-
-    return kind;
+    return http_fs_kind(httpd_fib2, path);
 }
 
-/* Free bytes on the volume `path` is on, or 0 when it cannot be told. */
 static ULONG httpd_free_bytes(const char *path)
 {
-    BPTR  lock;
-    ULONG blocks;
-    ULONG per;
-
-    if (httpd_info == NULL)
-        return 0;
-
-    lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-    if (lock == (BPTR)0)
-        return 0;
-
-    if (!Info(lock, httpd_info))
-    {
-        UnLock(lock);
-        return 0;
-    }
-    UnLock(lock);
-
-    if (httpd_info->id_NumBlocks <= httpd_info->id_NumBlocksUsed ||
-        httpd_info->id_BytesPerBlock <= 0)
-        return 0;
-
-    blocks = (ULONG)(httpd_info->id_NumBlocks - httpd_info->id_NumBlocksUsed);
-    per    = (ULONG)httpd_info->id_BytesPerBlock;
-
-    /* Saturate rather than wrap.  More than anybody is about to ask for is the
-       only answer a big volume needs to give. */
-    if (blocks > 0xffffffffUL / per)
-        return 0xffffffffUL;
-
-    return blocks * per;
+    return http_fs_free_bytes(httpd_info, path);
 }
 
 /* The URL a walked path corresponds to, escaped for an href.  In volume mode
@@ -4301,7 +4136,8 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     /* With nothing at the destination the check above says nothing, and the
        destination is created shortened.  PUT and MKCOL undo that afterwards;
        a copied tree is too much to undo, so it is asked before the walk. */
-    if (dst_kind < 0 && !httpd_name_survives(c->dest.path, c->dest.name))
+    if (dst_kind < 0 &&
+        !httpd_name_survives(c->dest.path, c->dest.name))
     {
         httpd_error(c, 400,
                     "that name is longer than this filesystem keeps");

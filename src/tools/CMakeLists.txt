@@ -396,14 +396,18 @@ endif()
 # connections open at once, `nc -l` takes one caller and exits, so it is
 # also the only coverage of accept() being called twice on a live listener.
 #
-# httpstr.c, httppath.c, httpif.c, httpframe.c and httplock.c are sources of their own
-# rather than part of httpd.c because they are the parts that must not be
-# wrong, and
-# splitting them is what lets the host tests below compile them: httpd.c
+# httpstr.c, httppath.c, httpif.c, httpframe.c and httplock.c are sources of
+# their own rather than part of httpd.c because they are the parts that must
+# not be wrong, and splitting them is what lets the host tests below compile
+# them: httpd.c
 # includes tools.h, which reaches tx_api.h and proto/dos.h, and neither builds
 # on a host.  One decides which file a request reaches, the second whether it
 # may write to it, the third where one request ends and the next begins, the
 # fourth who may write to a name somebody else has locked.
+# httpfs.c is the AmigaDOS-facing WebDAV policy.  It is separate for the same
+# ownership reason even though its Lock/Examine calls make its tests guest-side:
+# it receives the server's shared scratch objects instead of owning hidden
+# process state.
 #
 # httpws.c and httpsha1.c are the WebSocket half, and they are split from each
 # other for the reason the four above are split from httpd.c: httpws.c has to
@@ -425,7 +429,7 @@ endif()
 # CyberGraphX, kept out of httpfb.c so that the chipset path has no library
 # call and no card-shaped branch in it.  It is where the readback routes are
 # timed, which is the measurement the whole RTG design turns on.
-aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpstr.c httppath.c httpif.c
+aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c httpstr.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
                                           httprtg.c httpzz.c
