@@ -7,6 +7,7 @@
 set(NETSTACK_SOURCES
     netstack.c
     netstack_caller.c
+    netstack_port.c
     netstack_routes.c
     netstack_baton.c
     netstack_client_pool.c
@@ -26,7 +27,7 @@ list(APPEND NETSTACK_SOURCES
 
 list(APPEND NETSTACK_SOURCES netstack_dhcp_hostname.c)
 
-# The ARexx host.  Without it netstack.c opens the AMITCP port itself, so the
+# The ARexx host.  Without it netstack_port.c opens a bare AMITCP port, so the
 # floor build pays for neither the variable table nor the process behind it.
 if(AMINETXDUO_AREXX)
     list(APPEND NETSTACK_SOURCES netstack_rexx.c netstack_rexx_vars.c)
