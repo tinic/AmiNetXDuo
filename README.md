@@ -102,19 +102,16 @@ drive the same chip, and switching between them without a reboot hangs
 WirelessManager. Association, roaming and power-save behaviour have been
 exercised on one access point.
 
-**Receive offload (GRO).** `anxgenet.device` verifies every IPv4 and IPv6
-frame's header and TCP or UDP checksum itself, from the sum its copy already
-produced, and marks each TCP segment that continues the one before it. The
-stack skips its own checksum pass on a verified frame and hands TCP one
-segment where the wire carried up to sixteen, the receive side of a
-large-receive offload; it does the same for IPv6. A 1 Gbit/s GENET behind a
-PiStorm32 Lite receives 900 Mbit/s this way and sends 580 (iperf;
-142 and 65 before the offload). The two SANA-II
-extensions that carry it are published for any driver to implement,
-`Developer/include/aminetxduo/anxs2ext.h`. They are negotiated additions to
-SANA-II, not a replacement network API: a driver may offer VERIFIED checksum
-results without implementing CONTINUES/GRO, and an ordinary SANA-II driver
-uses the unchanged receive path.
+**Receive offload (GRO).** The stack verifies and matches contiguous IPv4 and
+IPv6 TCP segments after an ordinary SANA-II read, then hands TCP one segment
+where the wire carried up to sixteen. A driver's negotiated VERIFIED checksum
+result avoids the verification walk, but is not required: GRO is the same
+stack-side path for every SANA-II driver. A 1 Gbit/s GENET behind a PiStorm32
+Lite receives 900 Mbit/s this way and sends 580 (iperf; 142 and 65 before the
+receive and transmit offloads). The optional direct-placement, checksum,
+batching and ring-capacity extensions are published in
+`Developer/include/aminetxduo/anxs2ext.h`; they are negotiated additions to
+SANA-II, not a replacement network API.
 
 ### Measured on
 

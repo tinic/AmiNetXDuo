@@ -1553,6 +1553,18 @@ static void s_no_opener(void)
                (unsigned long)S2WERR_GENERIC_ERROR);
 }
 
+/* NSD reserves $4000-$7fff and $c000-$ffff for the OS team.  Keep the
+   extension in a third-party block even if its individual numbers move. */
+static void w_private_commands_are_in_an_nsd_vendor_block(void)
+{
+    expect((ANXD_CMD_RX_POLL & 0xc000U) == 0x8000U,
+           "ANXD_CMD_RX_POLL is in an NSD third-party block");
+    expect((ANXD_CMD_READ_BATCH & 0xc000U) == 0x8000U,
+           "ANXD_CMD_READ_BATCH is in an NSD third-party block");
+    expect((ANXD_CMD_RX_CAPACITY & 0xc000U) == 0x8000U,
+           "ANXD_CMD_RX_CAPACITY is in an NSD third-party block");
+}
+
 int main(void)
 {
     a_multicast_group_bit();
@@ -1577,6 +1589,7 @@ int main(void)
     t_rx_poll();
     u_read_batch();
     v_rx_capacity();
+    w_private_commands_are_in_an_nsd_vendor_block();
 
     if (failures != 0)
     {

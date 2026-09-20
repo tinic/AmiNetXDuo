@@ -52,7 +52,8 @@
  * low bit, so a device and an opener that know only the boolean still agree:
  * a device that sets SUMMED alone is the device there was, and an opener that
  * tests `!= 0` sees the same thing it saw, because the two new bits are only
- * ever set by a device that was told it may.
+ * ever set by a device that was told it may.  New openers request VERIFIED
+ * only; CONTINUES remains numbered so an old driver and stack fail soft.
  *
  * VERIFIED   the device checked this frame itself: the IPv4 header checksum
  *            and the TCP or UDP checksum, from the sum its copy already
@@ -60,30 +61,24 @@
  *            its own walk and mark the packet's checksums as done.  Never set
  *            on a frame with Ethernet padding past the IP total length, an
  *            IP header with options, a fragment, or a UDP checksum of zero.
- * CONTINUES  this frame's TCP payload is the next bytes of the SAME stream as
- *            the frame the device delivered immediately before it: same
- *            addresses and ports, the previous segment's end is this one's
- *            sequence number, the same acknowledgment, window and flags
- *            (ACK, or ACK+PSH), no TCP options, both VERIFIED.  An opener may
- *            chain the two into one segment -- the receive side of what a
- *            large-receive-offload does -- and hand the stack one packet
- *            where the wire carried several.  It is a hint about the bytes,
- *            not an instruction: an opener that has already delivered the
- *            previous frame delivers this one whole, and nothing is lost.
+ * CONTINUES  reserved for compatibility with the first published extension.
+ *            AmiNetXDuo no longer asks a device to classify TCP runs: its
+ *            SANA-II receive layer derives them from verified frames, so GRO
+ *            works with an ordinary driver as well.
  *
  * ANXD_S2_RX_FLAGS, in the buffer-management list, is how an opener says it
- * understands the two.  ti_Data IS A POINTER TO A UBYTE.  The opener may
+ * understands these verdict bits.  ti_Data IS A POINTER TO A UBYTE.  The opener may
  * preload the flags it wants; the device replaces them with the intersection
  * it accepted and sets only those from then on.  A zero input retains the
  * first published contract and asks for every flag the device supports, so an
- * older opener and a newer device still agree.  CONTINUES requires VERIFIED;
- * an opener may request VERIFIED alone.  Without the tag a device sets SUMMED
- * alone, whatever it could have said. */
+ * older opener and a newer device still agree.  New openers request VERIFIED
+ * alone.  Without the tag a device sets SUMMED alone, whatever it could have
+ * said. */
 #define ANXD_S2_RX_FLAGS        (0x80000000UL + 0xB0000UL + 0x4184UL)
 
 #define ANXD_S2_RXF_SUMMED      0x01
 #define ANXD_S2_RXF_VERIFIED    0x02
-#define ANXD_S2_RXF_CONTINUES   0x04
+#define ANXD_S2_RXF_CONTINUES   0x04    /* legacy; GRO is stack-side */
 
 /* THE TRANSPORT CHECKSUM, WRITTEN BY THE CARD ON THE WAY OUT.
  * ti_Data IS A POINTER TO A UBYTE, preloaded by the opener with the
@@ -122,9 +117,9 @@
  * to wait for), no arguments, io_Error 0; a driver that does not know it
  * answers IOERR_NOCMD like any other unknown command, a unit whose card
  * cannot hold a frame for a late read answers S2ERR_NOT_SUPPORTED, and on
- * either the opener stops sending it.  The number is in the same private
- * range as the tags above. */
-#define ANXD_CMD_RX_POLL        0x4190
+ * either the opener stops sending it.  Private commands use the NSD
+ * third-party block ($8000-$BFFF); $4000-$7FFF is reserved for the OS team. */
+#define ANXD_CMD_RX_POLL        0x8190
 
 /* ANXD_CMD_READ_BATCH: many CMD_READs in one call.
  *
@@ -140,7 +135,7 @@
  * S2ERR_OUTOFSERVICE the way it answers a CMD_READ.  On Emu68 a BeginIO() is
  * a trapped Disable() pair, 5.5 us; a reader re-posting a burst of reads
  * pays it once with this. */
-#define ANXD_CMD_READ_BATCH     0x4191
+#define ANXD_CMD_READ_BATCH     0x8191
 
 /* ANXD_CMD_RX_CAPACITY: "how much can your hardware hold from the wire?"
  *
@@ -157,7 +152,7 @@
  * A3000 (25 MHz 68030) with an X-Surf 100: a 100,352-byte window against
  * a 13 KB ring was 42 overruns and 42 chip resets in ten seconds and
  * 2.8 Mbit/s. */
-#define ANXD_CMD_RX_CAPACITY    0x4192
+#define ANXD_CMD_RX_CAPACITY    0x8192
 
 typedef UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len, ULONG sum,

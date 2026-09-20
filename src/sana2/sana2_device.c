@@ -976,12 +976,9 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->buffer_tags[tag].ti_Data = (ULONG)&iface->link_hdr_ok;
     tag++;
 #ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
-    /* Request only what this build consumes.  VERIFIED is independently
-       useful; CONTINUES is stateful and belongs to the optional GRO layer. */
+    /* Request only the device fact this build consumes.  GRO classification
+       is deliberately stack-side, including for an ordinary SANA-II driver. */
     iface->rx_flags_ok              = ANXD_S2_RXF_VERIFIED;
-#ifdef AMINETXDUO_GRO
-    iface->rx_flags_ok             |= ANXD_S2_RXF_CONTINUES;
-#endif
     iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_FLAGS;
     iface->buffer_tags[tag].ti_Data = (ULONG)&iface->rx_flags_ok;
     tag++;

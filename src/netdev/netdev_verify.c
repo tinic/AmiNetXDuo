@@ -18,30 +18,11 @@ static UWORD nd_be16(const UBYTE *p)
 #endif
 }
 
-static ULONG nd_be32(const UBYTE *p)
-{
-    return ((ULONG)nd_be16(p) << 16) | nd_be16(p + 2);
-}
-
 static UWORD nd_fold16(ULONG acc)
 {
     acc = (acc & 0xffffUL) + (acc >> 16);
     acc = (acc & 0xffffUL) + (acc >> 16);
     return (UWORD)acc;
-}
-
-static VOID nd_tcp_key(const UBYTE *tcp, UWORD tlen, NetdevRxSegment *seg)
-{
-    if (seg == NULL)
-        return;
-
-    seg->ports = nd_be32(tcp);
-    seg->seq   = nd_be32(tcp + 4);
-    seg->ack   = nd_be32(tcp + 8);
-    seg->flags = tcp[13];
-    seg->win   = nd_be16(tcp + 14);
-    seg->data  = (UWORD)(tlen - 20);
-    seg->tcp   = (UBYTE)(((tcp[12] >> 4) == 5) ? 1 : 0);
 }
 
 UBYTE netdev_rx_verify4(const UBYTE *ip, UWORD plen, ULONG sum)
@@ -224,74 +205,5 @@ UBYTE netdev_rx_verify(const UBYTE *ip, UWORD plen, ULONG sum)
         return netdev_rx_verify4(ip, plen, sum);
     if ((ip[0] >> 4) == 6)
         return netdev_rx_verify6(ip, plen, sum);
-    return 0;
-}
-
-VOID netdev_rx_segment4(const UBYTE *ip, NetdevRxSegment *seg)
-{
-    seg->tcp = 0;
-    if (ip[9] == 6)
-    {
-        seg->addr[0] = nd_be32(ip + 12);
-        seg->addr[1] = nd_be32(ip + 16);
-        seg->words   = 2;
-        nd_tcp_key(ip + 20, (UWORD)(nd_be16(ip + 2) - 20), seg);
-    }
-}
-
-VOID netdev_rx_segment6(const UBYTE *ip, NetdevRxSegment *seg)
-{
-    UWORD i;
-
-    seg->tcp = 0;
-    if (ip[6] == 6)
-    {
-        for (i = 0; i < 8; i++)
-            seg->addr[i] = nd_be32(ip + 8 + 4 * i);
-        seg->words = 8;
-        nd_tcp_key(ip + 40, nd_be16(ip + 4), seg);
-    }
-}
-
-UBYTE netdev_rx_continues(NetdevRxGro *g, const NetdevRxSegment *seg,
-                          UBYTE verified, UBYTE max)
-{
-    BOOL candidate = (BOOL)(verified != 0 && seg->tcp != 0 &&
-                            seg->data != 0 &&
-                            (seg->flags == 0x10 || seg->flags == 0x18));
-    UBYTE i;
-
-    if (!candidate)
-    {
-        g->live = 0;
-        return 0;
-    }
-
-    if (g->live && g->run < max &&
-        g->words == seg->words && g->ports == seg->ports &&
-        g->seq == seg->seq && g->ack == seg->ack &&
-        g->win == seg->win)
-    {
-        for (i = 0; i < seg->words; i++)
-            if (g->addr[i] != seg->addr[i])
-                break;
-        if (i == seg->words)
-        {
-            g->seq = seg->seq + seg->data;
-            g->run++;
-            return ANXD_S2_RXF_CONTINUES;
-        }
-    }
-
-    for (i = 0; i < seg->words; i++)
-        g->addr[i] = seg->addr[i];
-    g->words = seg->words;
-    g->ports = seg->ports;
-    g->seq   = seg->seq + seg->data;
-    g->ack   = seg->ack;
-    g->win   = seg->win;
-    g->flags = seg->flags;
-    g->live  = 1;
-    g->run   = 1;
     return 0;
 }

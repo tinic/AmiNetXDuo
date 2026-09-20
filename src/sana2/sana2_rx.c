@@ -571,7 +571,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
              * by the header checksum, which is why the IPv4 bit must come
              * from here and not from a walk.
              */
-#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
+#if defined(AMINETXDUO_RX_CHECKSUM_OFFLOAD) || defined(AMINETXDUO_GRO)
             if ((sum != NULL) &&
                 ((sum->flags & ANXD_S2_RXF_VERIFIED) != 0))
             {
@@ -646,7 +646,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 
             /* VERIFIED, as for IPv4: the device's word, the next header
                byte saying which transport it is about. */
-#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
+#if defined(AMINETXDUO_RX_CHECKSUM_OFFLOAD) || defined(AMINETXDUO_GRO)
             if ((sum != NULL) &&
                 ((sum->flags & ANXD_S2_RXF_VERIFIED) != 0))
                 caps = (packet->nx_packet_prepend_ptr[6] == 6U)
@@ -1158,9 +1158,9 @@ BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length)
  * chain now holds and the TCP header is already right -- every frame in the
  * run repeated its acknowledgment, window and flags and the sequence number
  * is the head's.  The header checksum is now stale, and ami_sana2_rx_deliver()
- * reports the run VERIFIED so the stack takes the IPv4 bit from the device's
- * verdict rather than from the header.  A one-frame hold is the frame as it
- * arrived.
+ * reports the run VERIFIED so the stack takes the IPv4 bit from the verdict
+ * established for each original frame rather than from the rewritten header.
+ * A one-frame hold is the frame as it arrived.
  *
  * Under a stop the run is dropped, not delivered: the stopper holds the IP
  * mutex this reader would deliver under, and a frame lost at shutdown is a
@@ -1217,90 +1217,216 @@ VOID ami_sana2_gro_flush(AmiSana2Rx *rx)
 /*
  * HOLD IT, CHAIN IT, OR LET IT GO.  TRUE when this function took the packet.
  *
- * The device marks a frame CONTINUES against the frame it delivered just
- * before, whatever that was, so the head this chains onto must be that frame
- * and nothing older: every frame that is not chained flushes whatever is held
- * before it is dealt with, and the two error arms that never reach here flush
- * too.  A CONTINUES frame that finds nothing held -- the head was not one this
- * side would hold, or an error came between -- is simply the start of a run.
- *
- * What is held is any VERIFIED TCP frame from a device that answered the tag
- * with CONTINUES: the device only marks a frame against a verified TCP one,
- * so holding every such frame is what makes the next mark always find its
- * head, and the hold costs no latency because the drain that took it flushes
- * it before it gives the machine back.
+ * The receive layer, not the driver, decides whether this frame continues the
+ * held stream.  Every mismatch flushes the head before the new frame is dealt
+ * with, and the two error arms that never reach here flush too.  Holding the
+ * first eligible frame costs no latency because the drain flushes it before
+ * it gives the machine back.
  *
  * Fifty-four bytes are stepped over on a chained IPv4 frame, seventy-four on
  * IPv6: Ethernet, an IP header with no options or extensions and a TCP
- * header with no options, which is what the mark promises; the device does
- * not mark a frame it could not see through.  Which of the two, the head
- * says: a run never changes family, the mark being a same-stream mark.
+ * header with no options, which ami_sana2_gro_key() validates before a frame
+ * can enter a run.
  */
 #define AMI_SANA2_GRO_SKIP4 (AMI_ETH_HEADER_SIZE + 20UL + 20UL)
 #define AMI_SANA2_GRO_SKIP6 (AMI_ETH_HEADER_SIZE + 40UL + 20UL)
 
-/* The transport protocol byte of a frame at its link header: IPv4's
-   protocol, IPv6's next header, 0 for anything else. */
-static UBYTE ami_sana2_gro_proto(const UCHAR *eth)
+typedef struct AmiSana2GroKey
 {
-    if (eth[12] == 0x08U && eth[13] == 0x00U)
-        return eth[AMI_ETH_HEADER_SIZE + 9];
-    if (eth[12] == 0x86U && eth[13] == 0xDDU)
-        return eth[AMI_ETH_HEADER_SIZE + 6];
-    return 0;
+    ULONG addr[8];
+    ULONG ports;
+    ULONG seq;
+    ULONG ack;
+    UWORD win;
+    UWORD data;
+    ULONG skip;
+    UBYTE words;
+    UBYTE version;
+} AmiSana2GroKey;
+
+static UWORD ami_sana2_gro_be16(const UCHAR *p)
+{
+    return (UWORD)(((UWORD)p[0] << 8) | p[1]);
 }
 
-BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet,
-                        const AmiRxSum *sum)
+static ULONG ami_sana2_gro_be32(const UCHAR *p)
 {
-    UBYTE flags = sum->flags;
+    return ((ULONG)ami_sana2_gro_be16(p) << 16) |
+           ami_sana2_gro_be16(p + 2);
+}
 
-    if ((flags & ANXD_S2_RXF_CONTINUES) != 0 && rx->gro_head != NULL)
+/*
+ * Make the continuation key from an ORIGINAL wire frame.  GRO deliberately
+ * accepts only the shape whose headers it can remove without changing TCP
+ * semantics: fixed IPv4/IPv6 and TCP headers, no fragmentation, some data,
+ * and ACK with optional PSH.  Everything else takes the ordinary path.
+ */
+static BOOL ami_sana2_gro_key(const NX_PACKET *packet, AmiSana2GroKey *key)
+{
+    const UCHAR *eth = packet->nx_packet_prepend_ptr;
+    const UCHAR *ip;
+    const UCHAR *tcp;
+    ULONG        frame = packet->nx_packet_length;
+    ULONG        total;
+    ULONG        tlen;
+    UBYTE        i;
+
+    if (frame < AMI_SANA2_GRO_SKIP4)
+        return FALSE;
+
+    ip = eth + AMI_ETH_HEADER_SIZE;
+    if (eth[12] == 0x08U && eth[13] == 0x00U)
+    {
+        if (ip[0] != 0x45U || ip[9] != 6U ||
+            (ip[6] & 0x3fU) != 0U || ip[7] != 0U)
+            return FALSE;
+        total = ami_sana2_gro_be16(ip + 2);
+        if (total < 40UL || total != frame - AMI_ETH_HEADER_SIZE)
+            return FALSE;
+        tcp = ip + 20;
+        tlen = total - 20UL;
+        key->words   = 2;
+        key->version = 4;
+        key->skip    = AMI_SANA2_GRO_SKIP4;
+        key->addr[0] = ami_sana2_gro_be32(ip + 12);
+        key->addr[1] = ami_sana2_gro_be32(ip + 16);
+    }
+    else if (eth[12] == 0x86U && eth[13] == 0xddU)
+    {
+        if (frame < AMI_SANA2_GRO_SKIP6 || (ip[0] >> 4) != 6U || ip[6] != 6U)
+            return FALSE;
+        tlen = ami_sana2_gro_be16(ip + 4);
+        if (tlen < 20UL || tlen + 40UL != frame - AMI_ETH_HEADER_SIZE)
+            return FALSE;
+        tcp = ip + 40;
+        key->words   = 8;
+        key->version = 6;
+        key->skip    = AMI_SANA2_GRO_SKIP6;
+        for (i = 0; i < 8; i++)
+            key->addr[i] = ami_sana2_gro_be32(ip + 8 + (ULONG)i * 4UL);
+    }
+    else
+        return FALSE;
+
+    if ((tcp[12] >> 4) != 5U || (tcp[13] != 0x10U && tcp[13] != 0x18U))
+        return FALSE;
+    key->data = (UWORD)(tlen - 20UL);
+    if (key->data == 0)
+        return FALSE;
+
+    key->ports = ami_sana2_gro_be32(tcp);
+    key->seq   = ami_sana2_gro_be32(tcp + 4);
+    key->ack   = ami_sana2_gro_be32(tcp + 8);
+    key->win   = ami_sana2_gro_be16(tcp + 14);
+    return TRUE;
+}
+
+/*
+ * A device may have supplied VERIFIED, but it is only an optimisation.  A
+ * normal SANA-II driver reaches the same answer from the sum CopyToBuff made
+ * while copying (or, as a last resort, the ordinary verifier walk).  Present
+ * the packet exactly as ami_sana2_rx_deliver() does while checking it, then
+ * put the Ethernet view back for the GRO chain.
+ */
+static BOOL ami_sana2_gro_verify(NX_PACKET *packet, AmiRxSum *sum,
+                                 UBYTE version)
+{
+    UCHAR *saved_prepend;
+    ULONG  saved_length;
+    ULONG  caps;
+    ULONG  need;
+    UINT   drop = NX_FALSE;
+
+    if ((sum->flags & ANXD_S2_RXF_VERIFIED) != 0)
+        return TRUE;
+
+    saved_prepend = packet->nx_packet_prepend_ptr;
+    saved_length  = packet->nx_packet_length;
+    packet->nx_packet_prepend_ptr += AMI_ETH_HEADER_SIZE;
+    packet->nx_packet_length      -= AMI_ETH_HEADER_SIZE;
+
+    if (sum->summed != FALSE)
+        caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied, &drop);
+    else
+        caps = n68k_rx_verify(packet, &drop);
+
+    packet->nx_packet_prepend_ptr = saved_prepend;
+    packet->nx_packet_length      = saved_length;
+
+    need = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
+    if (version == 4U)
+        need |= NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM;
+    if (drop != NX_FALSE || (caps & need) != need)
+        return FALSE;
+
+    /* Internal fact now, regardless of whether it came from the device or
+       the stack verifier.  The aggregate's rewritten IP header is no longer
+       checksum-valid, so final delivery must publish the verified result. */
+    sum->flags |= ANXD_S2_RXF_VERIFIED;
+    return TRUE;
+}
+
+BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet, AmiRxSum *sum)
+{
+    AmiSana2GroKey key;
+    UBYTE          i;
+    BOOL           continues = FALSE;
+
+    if (!ami_sana2_gro_key(packet, &key) ||
+        !ami_sana2_gro_verify(packet, sum, key.version))
+    {
+        ami_sana2_gro_flush(rx);
+        return FALSE;
+    }
+
+    if (rx->gro_head != NULL && rx->gro_words == key.words &&
+        rx->gro_ports == key.ports && rx->gro_next == key.seq &&
+        rx->gro_ack == key.ack && rx->gro_win == key.win)
+    {
+        continues = TRUE;
+        for (i = 0; i < key.words; i++)
+            if (rx->gro_addr[i] != key.addr[i])
+            {
+                continues = FALSE;
+                break;
+            }
+    }
+
+    if (continues)
     {
         NX_PACKET *head = rx->gro_head;
-        ULONG      skip = ((head->nx_packet_prepend_ptr[AMI_ETH_HEADER_SIZE]
-                            >> 4) == 6U)
-                              ? AMI_SANA2_GRO_SKIP6 : AMI_SANA2_GRO_SKIP4;
-        ULONG      data;
 
-        if (packet->nx_packet_length <= skip)
-            goto not_continuing;
-
-        data = packet->nx_packet_length - skip;
-        packet->nx_packet_prepend_ptr += skip;
-        packet->nx_packet_length       = data;
+        packet->nx_packet_prepend_ptr += key.skip;
+        packet->nx_packet_length       = key.data;
         packet->nx_packet_next         = NX_NULL;
 
         rx->gro_tail->nx_packet_next = packet;
         rx->gro_tail                 = packet;
         head->nx_packet_last         = packet;
-        head->nx_packet_length      += data;
+        head->nx_packet_length      += key.data;
+        rx->gro_next                 = key.seq + key.data;
 
         if (++rx->gro_count >= AMI_SANA2_GRO_MAX)
             ami_sana2_gro_flush(rx);
-
         return TRUE;
     }
 
-not_continuing:
     ami_sana2_gro_flush(rx);
 
-    /* TCP only: the device never continues anything else, so holding a
-       verified UDP datagram would only delay it to the end of the drain. */
-    if ((flags & ANXD_S2_RXF_VERIFIED) != 0 &&
-        (rx->iface->rx_flags_ok & ANXD_S2_RXF_CONTINUES) != 0 &&
-        ami_sana2_gro_proto(packet->nx_packet_prepend_ptr) == 6U)
-    {
-        packet->nx_packet_next = NX_NULL;
-        packet->nx_packet_last = NX_NULL;
-        rx->gro_head  = packet;
-        rx->gro_tail  = packet;
-        rx->gro_sum   = *sum;
-        rx->gro_count = 1;
-        return TRUE;
-    }
-
-    return FALSE;
+    packet->nx_packet_next = NX_NULL;
+    packet->nx_packet_last = NX_NULL;
+    rx->gro_head  = packet;
+    rx->gro_tail  = packet;
+    rx->gro_sum   = *sum;
+    rx->gro_count = 1;
+    rx->gro_words = key.words;
+    rx->gro_ports = key.ports;
+    rx->gro_next  = key.seq + key.data;
+    rx->gro_ack   = key.ack;
+    rx->gro_win   = key.win;
+    for (i = 0; i < key.words; i++)
+        rx->gro_addr[i] = key.addr[i];
+    return TRUE;
 }
 #endif /* AMINETXDUO_GRO */
 
@@ -1664,8 +1790,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
         }
 
 #ifdef AMINETXDUO_GRO
-        /* A failed read was still the device's previous frame: the run the
-           reader holds is not what the next CONTINUES will mean. */
+        /* A failed read breaks wire order: flush the run held before it. */
         ami_sana2_gro_flush(rx);
 #endif
 

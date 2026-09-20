@@ -554,7 +554,7 @@ UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
  * ANXD_S2_RX_FILLED.  The device wrote the payload itself, straight off the
  * hardware.  `flags` is the ANXD_S2_RXF_* byte: SUMMED says `sum` is the
  * longword ones-complement running sum the verifier expects (without it the
- * verifier walks the frame); VERIFIED and CONTINUES are kept whole for the
+ * verifier walks the frame); VERIFIED is kept whole for the
  * reader, which only sees them from a device that answered ANXD_S2_RX_FLAGS.
  */
 VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE flags)

@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- GRO stream matching now lives in the stack's SANA-II receive layer. Every
+  driver can coalesce verified contiguous IPv4 and IPv6 TCP segments; device
+  checksum metadata only skips the verification walk. Drivers no longer keep
+  flow state or emit `CONTINUES`, and a legacy hint is ignored.
+
+- The private `RX_POLL`, `READ_BATCH` and `RX_CAPACITY` commands moved from
+  NSD's OS-reserved `$4000-$7FFF` range to the third-party `$8000-$BFFF`
+  range. A host regression asserts the allocation class.
+
 - `ConfigureNetInterface <if> PRIORITY <n>` sets a running interface's
   priority (-128..127) without a reboot: the route lookup and the default
   gateway follow at once, the interface file is left as it is. `ShowNetStatus`
@@ -30,9 +39,8 @@ version at the top when it merges.
   firmware fork (branch `aminetxduo`) removes the wait. On that fork the
   driver also sends without stalling the bus (four transmit slots, a
   completion count at +0x8a instead of a wait for the wire), tells the
-  stack the card holds 56 frames, not 32, and marks in-order TCP
-  segments CONTINUES so the stack chains them -- 1 acknowledgment per 20
-  segments instead of 1 per 1.2. The archive carries it as the fourth
+  stack the card holds 56 frames, not 32. Stack-side GRO reduces this to
+  1 acknowledgment per 20 segments instead of 1 per 1.2. The archive carries it as the fourth
   driver; the Installer names it for a ZZ9000 that has no `ZZ9000Net.device`.
   Findings, numbers and the open defect are in `docs/plans/zz9000-ethernet.md`.
 

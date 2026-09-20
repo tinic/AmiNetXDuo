@@ -822,8 +822,8 @@ static void test_verify_uses_the_carried_sum(void)
 
 #endif /* AMINETXDUO_RX_VERIFY */
 
-#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
-/* ---- negotiated device verdicts, then the optional held run ------------ */
+#if defined(AMINETXDUO_RX_CHECKSUM_OFFLOAD) || defined(AMINETXDUO_GRO)
+/* ---- negotiated verdicts and the optional stack-side held run ----------- */
 
 /*
  * The reader's take/flush pair on a fake reader: the packets are the two
@@ -836,6 +836,7 @@ static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
 {
     UCHAR *base = buf + AMI_SANA2_RX_PAD;
     UCHAR *ip   = base + AMI_ETH_HEADER_SIZE;
+    UCHAR *tcp  = ip + 20;
     ULONG  total = 40UL + payload;
     ULONG  i;
 
@@ -848,6 +849,15 @@ static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
     ip[2]    = (UCHAR)(total >> 8);
     ip[3]    = (UCHAR)total;
     ip[9]    = proto;
+    ip[12]   = 192; ip[13] = 0; ip[14] = 2; ip[15] = 1;
+    ip[16]   = 198; ip[17] = 51; ip[18] = 100; ip[19] = 2;
+    tcp[0]   = 0x04; tcp[1] = 0xd2;
+    tcp[2]   = 0x10; tcp[3] = 0xe1;
+    tcp[6]   = 0x03; tcp[7] = 0xe8;       /* sequence 1000 */
+    tcp[10]  = 0x01; tcp[11] = 0xf4;      /* acknowledgment 500 */
+    tcp[12]  = 0x50;
+    tcp[13]  = 0x10;
+    tcp[14]  = 0x10;
     for (i = 0; i < payload; i++)
         ip[40 + i] = (UCHAR)(0x40 + i);
 
@@ -856,6 +866,59 @@ static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
     p->nx_packet_prepend_ptr = base;
     p->nx_packet_append_ptr  = ip + total;
     p->nx_packet_length      = AMI_ETH_HEADER_SIZE + total;
+}
+
+static void tcp_frame_seq(UCHAR *buf, ULONG seq)
+{
+    UCHAR *tcp = buf + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE + 20;
+
+    tcp[4] = (UCHAR)(seq >> 24);
+    tcp[5] = (UCHAR)(seq >> 16);
+    tcp[6] = (UCHAR)(seq >> 8);
+    tcp[7] = (UCHAR)seq;
+}
+
+static void tcp6_frame_init(NX_PACKET *p, UCHAR *buf, ULONG payload)
+{
+    UCHAR *base = buf + AMI_SANA2_RX_PAD;
+    UCHAR *ip   = base + AMI_ETH_HEADER_SIZE;
+    UCHAR *tcp  = ip + 40;
+    ULONG  plen = 20UL + payload;
+    ULONG  i;
+
+    memset(buf, 0, 256);
+    memset(p, 0, sizeof(*p));
+    base[12] = 0x86;
+    base[13] = 0xdd;
+    ip[0] = 0x60;
+    ip[4] = (UCHAR)(plen >> 8);
+    ip[5] = (UCHAR)plen;
+    ip[6] = 6;
+    for (i = 0; i < 32; i++)
+        ip[8 + i] = (UCHAR)(i + 1);
+    tcp[0] = 0x04; tcp[1] = 0xd2;
+    tcp[2] = 0x10; tcp[3] = 0xe1;
+    tcp[6] = 0x03; tcp[7] = 0xe8;
+    tcp[10] = 0x01; tcp[11] = 0xf4;
+    tcp[12] = 0x50;
+    tcp[13] = 0x10;
+    tcp[14] = 0x10;
+
+    p->nx_packet_data_start  = buf;
+    p->nx_packet_data_end    = buf + 256;
+    p->nx_packet_prepend_ptr = base;
+    p->nx_packet_append_ptr  = tcp + 20 + payload;
+    p->nx_packet_length      = AMI_ETH_HEADER_SIZE + 40UL + plen;
+}
+
+static void tcp6_frame_seq(UCHAR *buf, ULONG seq)
+{
+    UCHAR *tcp = buf + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE + 40;
+
+    tcp[4] = (UCHAR)(seq >> 24);
+    tcp[5] = (UCHAR)(seq >> 16);
+    tcp[6] = (UCHAR)(seq >> 8);
+    tcp[7] = (UCHAR)seq;
 }
 
 static AmiRxSum h_flagged(UBYTE flags)
@@ -869,6 +932,7 @@ static AmiRxSum h_flagged(UBYTE flags)
     return sum;
 }
 
+#ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
 static void test_verified_skips_the_walk(void)
 {
     printf("sana2: a VERIFIED frame is not walked and claims by protocol\n");
@@ -918,16 +982,17 @@ static void test_verified_skips_the_walk(void)
     }
     h_check(h_verify_sums == 1, "a merely summed frame still goes through the verifier");
 }
+#endif /* AMINETXDUO_RX_CHECKSUM_OFFLOAD */
 
 #ifdef AMINETXDUO_GRO
-/* ---- the held run: VERIFIED frames and the CONTINUES chain ------------- */
+/* ---- the held run: stack-side continuation matching -------------------- */
 
 static UCHAR          buffer2[256];
 static NX_PACKET      pkt2;
 static AmiSana2Reader rds;
 static AmiSana2Rx     rxs;
 
-static void gro_init(UBYTE answered)
+static void gro_init(void)
 {
     fixture_init();
     memset(&rds, 0, sizeof(rds));
@@ -935,7 +1000,6 @@ static void gro_init(UBYTE answered)
     rds.iface          = &iface;
     rxs.iface          = &iface;
     rxs.reader         = &rds;
-    iface.rx_flags_ok  = answered;
     tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
     _nx_ip_input_thread = tx_thread_identify();
 }
@@ -952,7 +1016,7 @@ static void test_held_frame_goes_up_on_flush(void)
 
     printf("sana2: a verified frame is held and goes up whole on the flush\n");
 
-    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    gro_init();
     tcp_frame_init(&pkt, buffer, 6, 40);
 
     h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == TRUE, "the reader takes it");
@@ -971,33 +1035,39 @@ static void test_held_frame_goes_up_on_flush(void)
     h_check(rxs.gro_head == NX_NULL, "and nothing is held after");
 
     /* A verified UDP datagram is not held: nothing will continue it. */
-    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    gro_init();
     tcp_frame_init(&pkt, buffer, 17, 40);
     h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == FALSE,
             "a verified UDP datagram is left to the caller");
     h_check(rxs.gro_head == NX_NULL, "and not held");
 
-    /* A device that never answered the tag: verified frames are not held. */
-    gro_init(0);
+    /* A normal SANA-II driver gets the same result from CopyToBuff's sum. */
+    gro_init();
     tcp_frame_init(&pkt, buffer, 6, 40);
-    h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == FALSE,
-            "without CONTINUES on offer nothing is held");
-    h_check(h_went == TO_NOWHERE && rxs.gro_head == NX_NULL,
-            "and the caller delivers the frame itself");
+    sum = h_flagged(ANXD_S2_RXF_SUMMED);
+    sum.summed = TRUE;
+    sum.copied = 80;
+    h_verify_caps = NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
+                    NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
+    h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == TRUE,
+            "an ordinary driver's TCP frame is held");
+    h_check(h_verify_sums == 1 && rxs.gro_head == &pkt,
+            "after the stack verifies its carried sum");
+    ami_sana2_gro_flush(&rxs);
     gro_done();
 }
 
 static void test_continuing_frame_is_chained(void)
 {
     AmiRxSum head = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
-    AmiRxSum next = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED |
-                              ANXD_S2_RXF_CONTINUES);
+    AmiRxSum next = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
 
-    printf("sana2: a CONTINUES frame is chained behind the head, headers off\n");
+    printf("sana2: the stack chains the next TCP segment, headers off\n");
 
-    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    gro_init();
     tcp_frame_init(&pkt,  buffer,  6, 40);
     tcp_frame_init(&pkt2, buffer2, 6, 30);
+    tcp_frame_seq(buffer2, 1040);
 
     h_check(ami_sana2_gro_take(&rxs, &pkt, &head) == TRUE, "the head is held");
     h_check(ami_sana2_gro_take(&rxs, &pkt2, &next) == TRUE, "the next is taken");
@@ -1029,16 +1099,85 @@ static void test_continuing_frame_is_chained(void)
     gro_done();
 }
 
+static void test_stack_gro_uses_headers_not_the_legacy_hint(void)
+{
+    AmiRxSum head = h_flagged(ANXD_S2_RXF_VERIFIED);
+    AmiRxSum next = h_flagged(ANXD_S2_RXF_VERIFIED |
+                              ANXD_S2_RXF_CONTINUES);
+
+    printf("sana2: GRO trusts the wire key, not the legacy driver hint\n");
+
+    /* A lying legacy hint cannot join a segment with a sequence hole. */
+    gro_init();
+    tcp_frame_init(&pkt, buffer, 6, 40);
+    tcp_frame_init(&pkt2, buffer2, 6, 30);
+    tcp_frame_seq(buffer2, 1041);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
+    h_check(ami_sana2_gro_take(&rxs, &pkt2, &next) == TRUE,
+            "the mismatching frame starts its own held run");
+    h_check(h_went == TO_IP && h_seen_length == 80,
+            "after the old head was delivered alone");
+    h_check(rxs.gro_head == &pkt2 && rxs.gro_count == 1,
+            "and the legacy CONTINUES bit did not join it");
+    ami_sana2_gro_flush(&rxs);
+    gro_done();
+
+    /* PSH is not a stream boundary: Linux commonly sets it every few MSS. */
+    gro_init();
+    tcp_frame_init(&pkt, buffer, 6, 40);
+    tcp_frame_init(&pkt2, buffer2, 6, 30);
+    tcp_frame_seq(buffer2, 1040);
+    buffer2[AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE + 20 + 13] = 0x18;
+    (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt2, &head);
+    h_check(rxs.gro_count == 2, "ACK and ACK+PSH remain one run");
+    ami_sana2_gro_flush(&rxs);
+    gro_done();
+
+    /* Sequence arithmetic is modulo 2^32. */
+    gro_init();
+    tcp_frame_init(&pkt, buffer, 6, 32);
+    tcp_frame_seq(buffer, 0xfffffff0UL);
+    tcp_frame_init(&pkt2, buffer2, 6, 16);
+    tcp_frame_seq(buffer2, 0x00000010UL);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt2, &head);
+    h_check(rxs.gro_count == 2, "a run continues across sequence wrap");
+    ami_sana2_gro_flush(&rxs);
+    gro_done();
+}
+
+static void test_stack_gro_ipv6(void)
+{
+    AmiRxSum sum = h_flagged(ANXD_S2_RXF_VERIFIED);
+
+    printf("sana2: fixed-header IPv6 TCP is coalesced in the stack\n");
+
+    gro_init();
+    tcp6_frame_init(&pkt, buffer, 40);
+    tcp6_frame_init(&pkt2, buffer2, 30);
+    tcp6_frame_seq(buffer2, 1040);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt, &sum);
+    (VOID)ami_sana2_gro_take(&rxs, &pkt2, &sum);
+    h_check(rxs.gro_count == 2, "two contiguous IPv6 segments form a run");
+    ami_sana2_gro_flush(&rxs);
+    h_check(h_went == TO_IP && h_seen_length == 130,
+            "the IPv6 run is delivered with both payloads");
+    h_check(buffer[AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE + 4] == 0 &&
+            buffer[AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE + 5] == 90,
+            "and its IPv6 payload length is rewritten");
+    gro_done();
+}
+
 static void test_run_ends_on_a_frame_that_does_not_continue(void)
 {
     AmiRxSum head  = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
     AmiRxSum plain = h_flagged(ANXD_S2_RXF_SUMMED);
-    AmiRxSum cont  = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED |
-                               ANXD_S2_RXF_CONTINUES);
+    AmiRxSum cont  = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
 
     printf("sana2: a frame that does not continue the run flushes it first\n");
 
-    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    gro_init();
     tcp_frame_init(&pkt,  buffer,  6, 40);
     tcp_frame_init(&pkt2, buffer2, 6, 30);
 
@@ -1049,11 +1188,11 @@ static void test_run_ends_on_a_frame_that_does_not_continue(void)
             "but the held head went up ahead of it, alone");
     h_check(rxs.gro_head == NX_NULL, "and nothing is held");
 
-    /* CONTINUES with nothing held: the start of a run, not a chain. */
+    /* An eligible frame with nothing held starts a new run. */
     h_went = TO_NOWHERE;
     tcp_frame_init(&pkt2, buffer2, 6, 30);
     h_check(ami_sana2_gro_take(&rxs, &pkt2, &cont) == TRUE,
-            "a CONTINUES frame with no head is held as one");
+            "an eligible frame with no head is held as one");
     h_check(rxs.gro_head == &pkt2 && rxs.gro_count == 1 &&
             pkt2.nx_packet_prepend_ptr == buffer2 + AMI_SANA2_RX_PAD,
             "whole, headers on");
@@ -1075,21 +1214,21 @@ static void test_run_ends_on_a_frame_that_does_not_continue(void)
 static void test_run_is_capped(void)
 {
     AmiRxSum head = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
-    AmiRxSum cont = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED |
-                              ANXD_S2_RXF_CONTINUES);
+    AmiRxSum cont = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
     static NX_PACKET  many[AMI_SANA2_GRO_MAX];
     static UCHAR      bufs[AMI_SANA2_GRO_MAX][256];
     UWORD i;
 
     printf("sana2: a run of AMI_SANA2_GRO_MAX frames goes up without a flush\n");
 
-    gro_init(ANXD_S2_RXF_VERIFIED | ANXD_S2_RXF_CONTINUES);
+    gro_init();
     tcp_frame_init(&pkt, buffer, 6, 10);
     (VOID)ami_sana2_gro_take(&rxs, &pkt, &head);
 
     for (i = 1; i < AMI_SANA2_GRO_MAX; i++)
     {
         tcp_frame_init(&many[i], bufs[i], 6, 10);
+        tcp_frame_seq(bufs[i], 1000UL + (ULONG)i * 10UL);
         h_check(ami_sana2_gro_take(&rxs, &many[i], &cont) == TRUE,
                 "each continuing frame is taken");
         if (i + 1 < AMI_SANA2_GRO_MAX)
@@ -1106,7 +1245,7 @@ static void test_run_is_capped(void)
 }
 
 #endif /* AMINETXDUO_GRO */
-#endif /* AMINETXDUO_RX_CHECKSUM_OFFLOAD */
+#endif /* AMINETXDUO_RX_CHECKSUM_OFFLOAD || AMINETXDUO_GRO */
 
 /* Enough packets that the budget never binds: the ladder alone decides. */
 #define PLAN_BIG_POOL   512UL
@@ -1743,6 +1882,8 @@ int main(void)
 #ifdef AMINETXDUO_GRO
     test_held_frame_goes_up_on_flush();
     test_continuing_frame_is_chained();
+    test_stack_gro_uses_headers_not_the_legacy_hint();
+    test_stack_gro_ipv6();
     test_run_ends_on_a_frame_that_does_not_continue();
     test_run_is_capped();
 #endif

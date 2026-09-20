@@ -49,14 +49,14 @@ BUDGETS=(
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.
     "default:src/netdev/anxnet.device:43000"
-    # 21,724 at the split; 23,032 with the receive offload (IPv4 and IPv6
-    # verification, the CONTINUES mark and its four counters); 24,440 with
+    # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
+    # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 with
     # the held pass, the batched replies, the reset on stop and their
     # counters -- 142 -> 270 Mbit/s between them, 2026-09-15.  26,828 with
     # the idle poller (its task, the clock through /soc, three counters):
     # Fitz read 26.5 -> 31.6 MB/s, iperf in 832 -> 910, 2026-09-17.
     "default:src/netdev/anxgenet.device:27500"
-    # 20,744 at the first image with async TX, CONTINUES and the ack
+    # 20,744 at the first image with async TX, the old CONTINUES mark and ack
     # recovery, 2026-09-20; the window copy and the fused sum are the core.
     "default:src/netdev/anxzz9000.device:23000"
     "default:src/wifipi/anxwifipi.device:56000"

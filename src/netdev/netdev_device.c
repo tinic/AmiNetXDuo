@@ -2318,19 +2318,15 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
         else if (tag == ANXD_S2_RX_FLAGS)
         {
             /* Zero is the first published, output-only form and means all.
-               A newer opener may request VERIFIED without the stateful
-               CONTINUES capability. */
+               CONTINUES is legacy: stream classification is stack-side. */
             if (tags->ti_Data != 0)
             {
-                UBYTE supported = (UBYTE)(ANXD_S2_RXF_VERIFIED |
-                                          ANXD_S2_RXF_CONTINUES);
+                UBYTE supported = ANXD_S2_RXF_VERIFIED;
                 UBYTE wanted    = *(UBYTE *)tags->ti_Data;
 
                 if (wanted == 0)
                     wanted = supported;
                 wanted &= supported;
-                if ((wanted & ANXD_S2_RXF_VERIFIED) == 0)
-                    wanted &= (UBYTE)~ANXD_S2_RXF_CONTINUES;
                 op->op_RxFlags = wanted;
                 *(UBYTE *)tags->ti_Data = op->op_RxFlags;
                 *rx_flags_answer = (UBYTE *)tags->ti_Data;
@@ -2461,11 +2457,9 @@ static struct Device *netdev_open(
 
     /* Tag parsing precedes unit selection because CARD= is one of those tags.
        Now that the core is known, publish only verdicts it can actually
-       produce.  A LANCE or mapped-buffer ED unit therefore answers zero; an
-       NE2000 or EL3 answers VERIFIED; GENET also answers CONTINUES. */
+       produce.  A LANCE or mapped-buffer ED unit therefore answers zero;
+       direct-copy cores answer VERIFIED when they can establish it. */
     op->op_RxFlags &= hw->nu_Nic.rx_flags_supported;
-    if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) == 0)
-        op->op_RxFlags &= (UBYTE)~ANXD_S2_RXF_CONTINUES;
     if (rx_flags_answer != NULL)
         *rx_flags_answer = op->op_RxFlags;
     op->op_TxCsum &= hw->nu_Nic.tx_csum_supported;

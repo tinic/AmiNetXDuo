@@ -165,9 +165,6 @@ static void test_ipv4(void)
 {
     UBYTE ip[64];
     UWORD len = make_ipv4_tcp(ip);
-    NetdevRxSegment seg;
-
-    memset(&seg, 0, sizeof(seg));
     expect("valid IPv4/TCP is verified",
            netdev_rx_verify4(ip, len, packet_sum(ip, len)) ==
                ANXD_S2_RXF_VERIFIED);
@@ -175,15 +172,6 @@ static void test_ipv4(void)
            netdev_rx_trust4(ip, len, 2) == ANXD_S2_RXF_VERIFIED);
     expect("GEM UDP verdict cannot certify TCP",
            netdev_rx_trust4(ip, len, 3) == 0);
-    netdev_rx_segment4(ip, &seg);
-    expect("IPv4 stream key keeps addresses",
-           seg.addr[0] == 0xc0000201UL && seg.addr[1] == 0xc6336402UL);
-    expect("IPv4 stream key keeps ports", seg.ports == 0x04d210e1UL);
-    expect("IPv4 stream key keeps sequence and acknowledgment",
-           seg.seq == 0x01020304UL && seg.ack == 0x11223344UL);
-    expect("IPv4 stream key describes an option-free data segment",
-           seg.tcp != 0 && seg.data == 4 && seg.flags == 0x10 &&
-           seg.win == 4096);
     expect("version dispatcher accepts IPv4",
            netdev_rx_verify(ip, len, packet_sum(ip, len)) ==
                ANXD_S2_RXF_VERIFIED);
@@ -246,19 +234,9 @@ static void test_ipv6(void)
 {
     UBYTE ip[80];
     UWORD len = make_ipv6_tcp(ip);
-    NetdevRxSegment seg;
-
-    memset(&seg, 0, sizeof(seg));
     expect("valid IPv6/TCP is verified",
            netdev_rx_verify6(ip, len, packet_sum(ip, len)) ==
                ANXD_S2_RXF_VERIFIED);
-    netdev_rx_segment6(ip, &seg);
-    expect("IPv6 stream key keeps all address words",
-           seg.words == 8 && seg.addr[0] == 0x00010203UL &&
-           seg.addr[7] == 0x8c8d8e8fUL);
-    expect("IPv6 stream key keeps TCP fields",
-           seg.ports == 0x00161770UL && seg.seq == 0x55667788UL &&
-           seg.ack == 0x99aabbccUL && seg.data == 4 && seg.flags == 0x18);
     expect("version dispatcher accepts IPv6",
            netdev_rx_verify(ip, len, packet_sum(ip, len)) ==
                ANXD_S2_RXF_VERIFIED);

@@ -1489,18 +1489,19 @@ if(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
     add_compile_definitions(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
 endif()
 
-# GRO is the second, stateful capability: a driver that negotiated VERIFIED
-# may also mark TCP segments that continue the previous one.  The SANA-II glue
-# chains them into one delivery of up to AMI_SANA2_GRO_MAX frames.  Measured
+# GRO is stack-side.  The SANA-II glue verifies each eligible TCP frame from
+# the sum its ordinary CopyToBuff hook already made, matches stream headers,
+# and chains up to AMI_SANA2_GRO_MAX frames.  A negotiated hardware/device
+# verdict skips the verification work but is not required.  Measured
 # 2026-09-15, A1200 + PiStorm32, anxgenet.device, iperf into the Amiga:
-# 142 -> 186 Mbit/s.  Any driver that does not negotiate it is unchanged.
+# 142 -> 186 Mbit/s.
 option(AMINETXDUO_GRO
-       "Receive offload: chain driver-marked continuing TCP segments" ON)
+       "Receive offload: coalesce contiguous TCP segments in SANA-II" ON)
 
-if(AMINETXDUO_GRO AND NOT AMINETXDUO_RX_CHECKSUM_OFFLOAD)
+if(AMINETXDUO_GRO AND NOT AMINETXDUO_RX_VERIFY)
     # Not an error: the norxverify CI arm turns the verify path off alone,
-    # and a build that cannot accept VERIFIED cannot safely chain frames.
-    message(STATUS "AMINETXDUO_GRO is off: it needs AMINETXDUO_RX_CHECKSUM_OFFLOAD")
+    # and a build that cannot verify every original cannot safely chain them.
+    message(STATUS "AMINETXDUO_GRO is off: it needs AMINETXDUO_RX_VERIFY")
     set(AMINETXDUO_GRO OFF)
 endif()
 if(AMINETXDUO_GRO)

@@ -147,8 +147,8 @@ enum
     ZZ_ST_UNWANTED,     /* group frames the hash did not take                */
     ZZ_ST_TXERR,        /* the ARM's transmit result was not 0               */
     ZZ_ST_ISR,          /* top halves that found the Ethernet bit            */
-    ZZ_ST_CONTINUES,    /* frames marked CONTINUES (netdev_verify.h)         */
-    ZZ_ST_RUNS,         /* runs of two or more the mark made                 */
+    ZZ_ST_CONTINUES,    /* legacy counter; GRO classification moved up       */
+    ZZ_ST_RUNS,         /* legacy counter; GRO classification moved up       */
     ZZ_ST_SOFT_EMPTY,   /* passes after a top half that found no frame       */
     ZZ_ST_POLL_WORK,    /* passes with no top half before them that found one */
     ZZ_ST_BURST_MAX,    /* most frames one pass took                         */
@@ -196,7 +196,6 @@ static const char *const zz_stat_names[] =
  */
 typedef struct ZzCore
 {
-    NetdevRxGro gro;        /* the CONTINUES key, netdev_verify.h           */
     UBYTE       after_isr;  /* set by the top half, cleared by the pass that
                                follows it: which context a pass ran in     */
     UBYTE       rx_meta;    /* firmware exposes REG_ZZ_ETH_RX_META          */
@@ -207,10 +206,6 @@ static ZzCore zz_cores[2];
 static UWORD  zz_cores_used;
 
 #define ZZ(nic) ((ZzCore *)(nic)->core)
-
-/* Frames the mark may chain before it starts a new run: what the opener
-   holds at most (src/sana2 AMI_SANA2_GRO_MAX). */
-#define ZZ_GRO_MAX      16
 
 static volatile UWORD *zz_reg(NetdevNic *nic, ULONG off)
 {
@@ -280,7 +275,6 @@ static LONG zz_attach(NetdevNic *nic)
 
     nic->core = &zz_cores[zz_cores_used & 1u];
     zz_cores_used++;
-    ZZ(nic)->gro.live  = 0;
     ZZ(nic)->after_isr = 0;
     ZZ(nic)->rx_meta   = 0;
     ZZ(nic)->int2      = 0;
@@ -356,8 +350,7 @@ static LONG zz_attach(NetdevNic *nic)
     nic->tx_at     = NULL;
     nic->write_buf = NULL;
     nic->core_stat_names = zz_stat_names;
-    nic->rx_flags_supported = (UBYTE)(ANXD_S2_RXF_VERIFIED |
-                                      ANXD_S2_RXF_CONTINUES);
+    nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
     nic->isr = zz_isr;
     nic->tx_reclaim = zz_tx_reclaim;    /* completions are counted, not delivered */
     /* tx() holds the bus for the ARM's whole send (see it): under Forbid(),
@@ -376,7 +369,6 @@ static LONG zz_init(NetdevNic *nic)
 {
     zz_write_mac(nic);
     nic->core_stat[ZZ_ST_SERIAL] = 0;
-    ZZ(nic)->gro.live = 0;
     nic->txb_inuse = 0;
     nic->tx_next   = 0;
     nic->tx_done   = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
@@ -541,7 +533,6 @@ static BOOL zz_rint(NetdevNic *nic)
     if (last != 0 && serial == last)
     {
         nic->core_stat[ZZ_ST_ACK_RECOVER]++;
-        ZZ(nic)->gro.live = 0;          /* an unseen frame is being discarded */
         zz_put(nic, ZZ_REG_RX_ACK, 1);
         return TRUE;
     }
@@ -623,53 +614,20 @@ static BOOL zz_rint(NetdevNic *nic)
                 flags = ANXD_S2_RXF_SUMMED;
             }
 
-            /*
-             * The verdict, then the mark: a verified TCP segment that is the
-             * next of the stream the previous one belonged to is chained by
-             * the opener onto that one, and TCP sees the run once
-             * (netdev_verify.h netdev_rx_continues).  On this machine the
-             * stack's per-segment work, not the copy, is what the clock
-             * goes to.
-             */
+            /* Publish the verdict only.  Stream matching and GRO now live in
+               the SANA-II receive layer, outside this masked device pass. */
             if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
                 buf[12] == 0x08 && buf[13] == 0x00)
             {
-                NetdevRxSegment seg;
-
                 if (!copied || v == 0)
                     v = netdev_rx_verify4(dst, plen, sum);
-
-                if (v != 0)
-                    netdev_rx_segment4(dst, &seg);
                 flags |= v;
-                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
-                    flags |= netdev_rx_continues(&c->gro, &seg, v, ZZ_GRO_MAX);
-                else
-                    c->gro.live = 0;
             }
             else if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
                      buf[12] == 0x86 && buf[13] == 0xdd)
             {
-                NetdevRxSegment seg;
-
                 v = netdev_rx_verify6(dst, plen, sum);
-
-                if (v != 0)
-                    netdev_rx_segment6(dst, &seg);
                 flags |= v;
-                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
-                    flags |= netdev_rx_continues(&c->gro, &seg, v, ZZ_GRO_MAX);
-                else
-                    c->gro.live = 0;
-            }
-            else
-                c->gro.live = 0;
-
-            if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
-            {
-                nic->core_stat[ZZ_ST_CONTINUES]++;
-                if (c->gro.run == 2)
-                    nic->core_stat[ZZ_ST_RUNS]++;
             }
 
             zz_put(nic, ZZ_REG_RX_ACK, serial);
@@ -680,7 +638,6 @@ static BOOL zz_rint(NetdevNic *nic)
 
         zz_copy_frame(buf + NETDEV_HDR_LEN, frame + NETDEV_HDR_LEN,
                       (UWORD)(len - NETDEV_HDR_LEN));
-        ZZ(nic)->gro.live = 0;      /* a frame between: the run is over */
         zz_put(nic, ZZ_REG_RX_ACK, serial);
         nic->rx_packets++;
         nic->rx(nic->rx_arg, buf, len);

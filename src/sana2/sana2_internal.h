@@ -237,8 +237,8 @@
 #if defined(AMINETXDUO_RX_CHECKSUM_OFFLOAD) && !defined(AMINETXDUO_RX_VERIFY)
 #error "AMINETXDUO_RX_CHECKSUM_OFFLOAD needs AMINETXDUO_RX_VERIFY"
 #endif
-#if defined(AMINETXDUO_GRO) && !defined(AMINETXDUO_RX_CHECKSUM_OFFLOAD)
-#error "AMINETXDUO_GRO needs AMINETXDUO_RX_CHECKSUM_OFFLOAD"
+#if defined(AMINETXDUO_GRO) && !defined(AMINETXDUO_RX_VERIFY)
+#error "AMINETXDUO_GRO needs AMINETXDUO_RX_VERIFY"
 #endif
 
 #ifndef AMI_SANA2_RX_RUN_MAX
@@ -552,8 +552,8 @@ typedef struct AmiRxSlot
      */
     ULONG               sum;
     BOOL                summed;
-    /* The whole ANXD_S2_RXF_* byte the device handed RX_FILLED, for the
-       VERIFIED and CONTINUES bits (aminetxduo/anxs2ext.h). */
+    /* The whole ANXD_S2_RXF_* byte the device handed RX_FILLED.  VERIFIED is
+       consumed; CONTINUES is a legacy bit which stack-side GRO ignores. */
     UBYTE               rxflags;
 #endif
     BOOL                posted;
@@ -659,21 +659,23 @@ typedef struct AmiSana2Rx
 
 #ifdef AMINETXDUO_GRO
     /*
-     * THE HELD HEAD.  A verified TCP segment the device may be about to
-     * continue (ANXD_S2_RXF_CONTINUES, aminetxduo/anxs2ext.h) waits here
-     * instead of going to the stack at once; each continuing frame is chained
-     * behind it with its own headers skipped, and the whole run goes up as
-     * ONE segment when a frame that does not continue it arrives, when the
-     * run is AMI_SANA2_GRO_MAX long, or when the drain that started it ends
-     * -- so nothing waits past one pass of the reader.  The stack then pays
-     * its per-segment work once for the run: the receive side of what a
-     * large-receive offload does, with the device deciding the runs and this
-     * side only holding the chain.
+     * THE HELD HEAD.  The receive layer parses verified TCP frames itself;
+     * an ordinary SANA-II driver therefore gets the same GRO as an in-tree
+     * driver.  Each contiguous frame is chained behind this one with its own
+     * headers skipped, and the run goes up as ONE segment on a mismatch, at
+     * AMI_SANA2_GRO_MAX, or when this drain ends.  Nothing waits past one pass
+     * of the reader.
      */
     NX_PACKET          *gro_head;
     NX_PACKET          *gro_tail;
     AmiRxSum            gro_sum;
     UWORD               gro_count;      /* frames in the held run           */
+    ULONG               gro_addr[8];    /* source then destination           */
+    ULONG               gro_ports;      /* source port << 16 | destination  */
+    ULONG               gro_next;       /* next in-order TCP sequence        */
+    ULONG               gro_ack;
+    UWORD               gro_win;
+    UBYTE               gro_words;      /* address words: IPv4 2, IPv6 8    */
 #endif /* AMINETXDUO_GRO */
 
 #ifdef AMINETXDUO_RXPROBE
@@ -923,7 +925,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 /* The held run (sana2_rx.c): extern only so the host test can drive the
    chaining without a reader; the reader is their one caller on the machine. */
 BOOL ami_sana2_gro_take(AmiSana2Rx *rx, NX_PACKET *packet,
-                        const AmiRxSum *sum);
+                        AmiRxSum *sum);
 VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
 #endif
 

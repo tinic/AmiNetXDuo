@@ -203,24 +203,6 @@ typedef struct GenetCore
     ULONG   irq_pending;    /* status the top half took, for the bottom half */
     ULONG   phyid;
 
-    /*
-     * The stream the previous delivered frame belonged to, for the CONTINUES
-     * mark (aminetxduo/anxs2ext.h): the four-tuple, the sequence number the
-     * next in-order segment must carry, and the acknowledgment, window and
-     * flags it must repeat.  Valid while gro_live; cleared at the end of every
-     * burst, because the opener flushes what it holds at the end of its own
-     * drain and a mark across bursts would only ever be a false one.
-     */
-    ULONG   gro_addr[8];    /* source, destination: two words for IPv4,
-                               eight for IPv6                               */
-    ULONG   gro_ports;      /* source port << 16 | destination port         */
-    ULONG   gro_seq;        /* the next in-order sequence number            */
-    ULONG   gro_ack;
-    UWORD   gro_win;
-    UBYTE   gro_flags;      /* the TCP flag byte: ACK, or ACK|PSH           */
-    UBYTE   gro_live;
-    UBYTE   gro_run;        /* frames marked in this run, against GE_GRO_MAX */
-    UBYTE   gro_words;      /* address words that make the key: 2 or 8      */
     UBYTE   held_blanks;    /* blanks the head of the ring has been held for */
     UBYTE   drop_held;      /* the next unclaimable head frame is dropped    */
 
@@ -232,14 +214,6 @@ typedef struct GenetCore
     volatile ULONG *clock;          /* the Pi's system timer, 1 MHz, from the
                                        device tree; little-endian            */
 } GenetCore;
-
-/*
- * How many segments an opener is asked to chain into one.  Sixteen full
- * segments is 23 KB, which the stack's window (256 KB on a long path, 64 KB
- * on this LAN) holds several times over; the mark is a hint and the opener
- * has its own cap.
- */
-#define GE_GRO_MAX      16
 
 /* Blanks a unicast frame may wait at the head of the ring for its reader to
    post a read before it is dropped: five is 100 ms, ten thousand frames at
@@ -263,9 +237,8 @@ enum
     GE_ST_TXCONS0,          /* TX consumer index read back after init      */
     GE_ST_INTS,             /* interrupt status words seen non-zero        */
     GE_ST_VERIFIED,         /* frames delivered with their checksums checked */
-    GE_ST_CONTINUES,        /* frames marked as continuing the previous one */
-    GE_ST_RUNS,             /* runs of two or more frames (continues/runs
-                               is the mean number of frames a run saved) */
+    GE_ST_CONTINUES,        /* legacy counter; GRO classification moved up  */
+    GE_ST_RUNS,             /* legacy counter; GRO classification moved up  */
     GE_ST_BURST_MAX,        /* the most frames one burst held               */
     GE_ST_UNCLAIMED,        /* frames nobody had a read posted for: dropped */
     GE_ST_HELD,             /* passes cut short with frames left in the ring
@@ -289,7 +262,7 @@ enum
     GE_ST_P_FRAMES,         /* frames ge_deliver was given                  */
     GE_ST_P_CLAIM_US,       /* the claim into the shell and the opener       */
     GE_ST_P_COPY_US,        /* the fused copy and sum                        */
-    GE_ST_P_VERIFY_US,      /* verify, segment parse, the CONTINUES mark     */
+    GE_ST_P_VERIFY_US,      /* checksum verification                         */
     GE_ST_P_CLAIMED_US,     /* rx_claimed: the completion into the opener    */
     GE_ST_P_HWSUM_A,        /* RXCHK checksum == the software sum, as read   */
     GE_ST_P_HWSUM_B,        /* ... == the software sum, halves swapped       */
@@ -1150,72 +1123,10 @@ static VOID genet_reset(NetdevNic *nic)
  * not the datagram's); a protocol other than TCP or UDP; a UDP checksum of
  * zero, which means "none".
  *
- * The stateless half is shared with the classic direct paths now.  GENET adds
- * only the stream key and state which make CONTINUES possible.
+ * The verifier is shared with the classic direct paths.  Stream matching is
+ * now performed by the SANA-II receive layer, outside this driver's masked
+ * service path, so an ordinary driver gets the same GRO behaviour.
  */
-typedef NetdevRxSegment GeSegment;
-
-/*
- * THE CONTINUES MARK.  A verified TCP segment with no options, carrying data,
- * whose flags are ACK or ACK+PSH, is the next of the same stream as the
- * previous one when the four-tuple, the acknowledgment, the window and the
- * flags repeat and its sequence number is where the previous one ended.
- * Anything else starts a new run (a TCP segment) or ends the run (anything
- * else): the opener holds at most one head, and a frame that is not the next
- * of that stream makes it deliver the head, so a mark across it would be a
- * lie.
- */
-static UBYTE ge_continues(GenetCore *c, const GeSegment *seg, UBYTE verified)
-{
-    BOOL candidate = (BOOL)(verified != 0 && seg->tcp != 0 &&
-                            seg->data != 0 &&
-                            (seg->flags == 0x10 || seg->flags == 0x18));
-
-    if (!candidate)
-    {
-        c->gro_live = 0;
-        return 0;
-    }
-
-    if (c->gro_live &&
-        c->gro_run < GE_GRO_MAX &&
-        c->gro_words == seg->words &&
-        c->gro_ports == seg->ports &&
-        c->gro_seq   == seg->seq &&
-        c->gro_ack   == seg->ack &&
-        c->gro_win   == seg->win &&
-        c->gro_flags == seg->flags)
-    {
-        UBYTE i;
-
-        for (i = 0; i < seg->words; i++)
-            if (c->gro_addr[i] != seg->addr[i])
-                break;
-        if (i == seg->words)
-        {
-            c->gro_seq = seg->seq + seg->data;
-            c->gro_run++;
-            return ANXD_S2_RXF_CONTINUES;
-        }
-    }
-
-    {
-        UBYTE i;
-
-        for (i = 0; i < seg->words; i++)
-            c->gro_addr[i] = seg->addr[i];
-    }
-    c->gro_words   = seg->words;
-    c->gro_ports   = seg->ports;
-    c->gro_seq     = seg->seq + seg->data;
-    c->gro_ack     = seg->ack;
-    c->gro_win     = seg->win;
-    c->gro_flags   = seg->flags;
-    c->gro_live    = 1;
-    c->gro_run     = 1;
-    return 0;
-}
-
 /* FALSE when the frame was left in the ring: the opener that reads this type
    has no read posted right now (NETDEV_CLAIM_BEHIND), and holding the frame
    until it does is what a 128-deep ring is for.  TRUE otherwise, whether the
@@ -1314,59 +1225,26 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
         }
 #endif
         {
-            GenetCore *c     = GE(nic);
-            UBYTE      flags = ANXD_S2_RXF_SUMMED;
+            UBYTE flags = ANXD_S2_RXF_SUMMED;
             GE_P_START(p3);
 
             if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
                 frame[12] == 0x08 && frame[13] == 0x00)
             {
-                GeSegment seg;
-                UBYTE     v = netdev_rx_verify4(src, plen, sum);
-
-                if (v != 0)
-                    netdev_rx_segment4(src, &seg);
+                UBYTE v = netdev_rx_verify4(src, plen, sum);
 
                 if (v != 0)
                     nic->core_stat[GE_ST_VERIFIED]++;
                 flags |= v;
-                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
-                    flags |= ge_continues(c, &seg, v);
-                else
-                    c->gro_live = 0;
-                if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
-                {
-                    nic->core_stat[GE_ST_CONTINUES]++;
-                    if (c->gro_run == 2)
-                        nic->core_stat[GE_ST_RUNS]++;
-                }
             }
             else if ((wanted & ANXD_S2_RXF_VERIFIED) != 0 &&
                      frame[12] == 0x86 && frame[13] == 0xdd)
             {
-                GeSegment seg;
-                UBYTE     v = netdev_rx_verify6(src, plen, sum);
-
-                if (v != 0)
-                    netdev_rx_segment6(src, &seg);
+                UBYTE v = netdev_rx_verify6(src, plen, sum);
 
                 if (v != 0)
                     nic->core_stat[GE_ST_VERIFIED]++;
                 flags |= v;
-                if ((wanted & ANXD_S2_RXF_CONTINUES) != 0)
-                    flags |= ge_continues(c, &seg, v);
-                else
-                    c->gro_live = 0;
-                if ((flags & ANXD_S2_RXF_CONTINUES) != 0)
-                {
-                    nic->core_stat[GE_ST_CONTINUES]++;
-                    if (c->gro_run == 2)
-                        nic->core_stat[GE_ST_RUNS]++;
-                }
-            }
-            else
-            {
-                c->gro_live = 0;
             }
 
             GE_P_ADD(nic, GE_ST_P_VERIFY_US, p3);
@@ -1379,9 +1257,7 @@ static BOOL ge_deliver(NetdevNic *nic, const UBYTE *frame, UWORD len)
         return TRUE;
     }
 
-    /* Handed up where it lies, like the LANCE: no staging copy.  Not a
-       frame the opener will chain, so the run ends here. */
-    GE(nic)->gro_live = 0;
+    /* Handed up where it lies, like the LANCE. */
     nic->core_stat[GE_ST_UNCLAIMED]++;
     if (nic->rx != NULL)
         nic->rx(nic->rx_arg, frame, len);
@@ -1524,8 +1400,6 @@ static BOOL ge_rxintr(NetdevNic *nic)
     }
 
     ge_wr(nic, GENET_RX_DMA_CONS_INDEX(GE_Q), c->rx_cidx);
-    c->gro_live = 0;                    /* a run does not span bursts */
-
     /* The burst's completions, replied together (NetdevNic reply_batch). */
     if (nic->rx_flush != NULL)
     {
@@ -2109,8 +1983,7 @@ static LONG genet_attach(NetdevNic *nic)
 
     nic->txb_cnt       = GE_TX_RING;
     nic->tx_at         = genet_tx_at;
-    nic->rx_flags_supported = (UBYTE)(ANXD_S2_RXF_VERIFIED |
-                                      ANXD_S2_RXF_CONTINUES);
+    nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
     nic->tx_csum_supported  = (UBYTE)(ANXD_S2_TXF_TCP | ANXD_S2_TXF_UDP);
     nic->ring_copy_sum = NULL;
     nic->frame_at      = NULL;

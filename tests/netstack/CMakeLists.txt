@@ -364,6 +364,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # with NX_ENABLE_LOW_WATERMARK off, passes with it on and the cap sized.
     add_executable(test_tcp_rxflood
         host/test_tcp_rxflood_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_packet_process.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_data_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c")
 
