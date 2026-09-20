@@ -95,7 +95,6 @@ typedef struct NetdevOpener
                                            opener's writes */
     APTR                op_RxFilled;
     APTR                op_TxFlags;     /* per-write ANXD_S2_TXF_* callback */
-    UBYTE               op_Anxd;        /* passed any ANXD_S2_* tag at open  */
 
     UBYTE               op_Raw;
     UBYTE               op_Promisc;

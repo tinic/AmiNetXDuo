@@ -2375,8 +2375,6 @@ static struct Device *netdev_open(
        increment outside the bracket is the same race one line further down. */
     first_opener  = (BOOL)(hw->nu_Openers++ == 0);
     hw->nu_ExecUnit.unit_OpenCnt++;
-    if (op->op_Anxd)
-        hw->nu_Nic.anxd_openers++;
     first_promisc = (BOOL)(op->op_Promisc && hw->nu_Promisc++ == 0);
     Enable();
 
@@ -2426,8 +2424,6 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
 
         Disable();
         Remove((struct Node *)&op->op_Node);
-        if (op->op_Anxd && hw->nu_Nic.anxd_openers != 0)
-            hw->nu_Nic.anxd_openers--;
         Enable();
 
         while ((q = netdev_take(&op->op_Reads, ~0UL)) != NULL)

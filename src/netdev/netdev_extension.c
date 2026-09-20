@@ -14,7 +14,6 @@ BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
 
     request = ext->Request;
     ext->Accepted = 0;
-    op->op_Anxd = 1;
     *answer = ext;
 
     if ((request & ANXD_S2F_RX_DIRECT) != 0 &&

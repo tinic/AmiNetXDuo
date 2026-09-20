@@ -49,7 +49,7 @@ static void test_valid_record(void)
           "valid record is recognized");
     CHECK(answer == &ext && ext.Accepted == 0,
           "valid record is returned with a clean answer");
-    CHECK(op.op_Anxd && op.op_RxDirect == (APTR)rx_direct &&
+    CHECK(op.op_RxDirect == (APTR)rx_direct &&
           op.op_RxFilled == (APTR)rx_filled && op.op_RxLinkHdr,
           "receive callbacks and link-header request are accepted");
     CHECK(op.op_TxFlags == (APTR)tx_flags &&
@@ -70,7 +70,7 @@ static void test_version_and_size_gate(void)
     memset(&op, 0, sizeof(op));
     answer = NULL;
     CHECK(!netdev_take_extension(&ext, &op, &answer) &&
-          !op.op_Anxd && answer == NULL && ext.Accepted == 0x12345678UL,
+          answer == NULL && ext.Accepted == 0x12345678UL,
           "unknown version is untouched and ignored");
 
     ext.Version = ANXD_S2_ABI_VERSION;
@@ -78,7 +78,7 @@ static void test_version_and_size_gate(void)
     memset(&op, 0, sizeof(op));
     answer = NULL;
     CHECK(!netdev_take_extension(&ext, &op, &answer) &&
-          !op.op_Anxd && answer == NULL && ext.Accepted == 0x12345678UL,
+          answer == NULL && ext.Accepted == 0x12345678UL,
           "short record is untouched and ignored");
 }
 

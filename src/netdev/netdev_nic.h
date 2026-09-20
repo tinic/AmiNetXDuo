@@ -39,8 +39,7 @@
 #ifdef GE_PROBE_ST
 #define NETDEV_CORE_STATS   40      /* + the GENET probe's thirteen RX, four TX */
 #else
-#define NETDEV_CORE_STATS   23      /* the GENET's 23: the poller's three
-                                       counters left with it, 2026-09-20 */
+#define NETDEV_CORE_STATS   23      /* the GENET's shipping counter set */
 #endif
 
 /*
@@ -250,15 +249,6 @@ struct NetdevNic
        posted read (NETDEV_CLAIM_BEHIND); cleared by the pass that drains
        them.  The shell's ANXD_CMD_RX_POLL runs the core when it is set. */
     UBYTE               rx_behind;
-    /*
-     * Openers that passed an ANXD_S2_* tag at OpenDevice(): AmiNetXDuo's own
-     * shell.  A core's optional machinery that only pays off for that shell
-     * (the GENET idle poller) runs while this is non-zero and stays out of a
-     * plain SANA-II session (Roadshow, AmiTCP), which gets the interrupt
-     * path alone.  Maintained by the shell under Disable().
-     */
-    UWORD               anxd_openers;
-
     /*
      * The unit's exact multicast table, for a core that filters on addresses
      * rather than a hash (the GENET has 17 exact slots and no hash).  Set by
