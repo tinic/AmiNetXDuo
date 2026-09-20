@@ -424,6 +424,281 @@ VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
     netdev_tx_direct(unit, io);
 }
 
+static VOID cmd_device_query(NetdevUnit *unit, struct IOSana2Req *io)
+{
+    struct Sana2DeviceQuery *q =
+        (struct Sana2DeviceQuery *)io->ios2_StatData;
+    struct Sana2DeviceQuery answer;
+    ULONG want;
+
+    if (q == NULL)
+    {
+        netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
+        return;
+    }
+
+    want = sizeof(struct Sana2DeviceQuery);
+    if (q->SizeAvailable < want)
+        want = q->SizeAvailable;
+
+    /* SizeAvailable is the caller saying how much room there is.  Fill a
+       local answer and copy only that much, so an older structure cannot be
+       overrun before SizeSupplied reports its smaller size. */
+    answer.SizeAvailable  = q->SizeAvailable;
+    answer.SizeSupplied   = want;
+    answer.DevQueryFormat = 0;
+    answer.DeviceLevel    = 0;
+    answer.AddrFieldSize  = 48;
+    answer.MTU            = NETDEV_MTU;
+    answer.BPS            = unit->nu_Nic.card->bps;
+    answer.HardwareType   = S2WireType_Ethernet;
+
+    cmd_bytes((UBYTE *)q, (const UBYTE *)&answer, want);
+    netdev_reply(io, 0, 0);
+}
+
+static VOID cmd_flush(NetdevOpener *op, struct IOSana2Req *io)
+{
+    NetdevUnit *unit = op->op_Hw;
+    struct IOSana2Req *queued;
+
+    Disable();
+    while ((queued = (struct IOSana2Req *)RemHead(&op->op_Reads)) != NULL)
+        netdev_reply(queued, IOERR_ABORTED, 0);
+    while ((queued = (struct IOSana2Req *)RemHead(&op->op_Orphans)) != NULL)
+        netdev_reply(queued, IOERR_ABORTED, 0);
+    while ((queued = (struct IOSana2Req *)RemHead(&op->op_Events)) != NULL)
+        netdev_reply(queued, IOERR_ABORTED, 0);
+    Enable();
+
+    /* Other openers may still have waits of their own. */
+    netdev_event_rescan(unit);
+
+    /* Writes are queued on the unit, not the opener. */
+    netdev_drop_writes(unit, op);
+    netdev_reply(io, 0, 0);
+}
+
+static VOID cmd_multicast_address(NetdevUnit *unit,
+                                  struct IOSana2Req *io, BOOL add)
+{
+    BOOL applied;
+
+    if ((io->ios2_SrcAddr[0] & 1) == 0)
+    {
+        netdev_reply(io, S2ERR_BAD_ADDRESS, S2WERR_BAD_MULTICAST);
+        return;
+    }
+
+    /* BeginIO is callable from unrelated tasks.  Keep the exact table and
+       the hash programmed from it in one serialized transaction. */
+    Disable();
+    if (add)
+    {
+        applied = netdev_mcast_add(unit->nu_Mcast, io->ios2_SrcAddr);
+        if (!applied)
+            unit->nu_McastFull++;
+    }
+    else
+        applied = netdev_mcast_del(unit->nu_Mcast, io->ios2_SrcAddr);
+    if (applied)
+        netdev_rebuild_filter(unit);
+    Enable();
+
+    if (applied)
+        netdev_reply(io, 0, 0);
+    else if (add)
+        netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_MULTICAST_FULL);
+    else
+        netdev_reply(io, S2ERR_BAD_STATE, S2WERR_BAD_MULTICAST);
+}
+
+static VOID cmd_multicast_range(NetdevUnit *unit,
+                                struct IOSana2Req *io, BOOL add)
+{
+    ULONG count;
+    BOOL wide;
+    BOOL applied = TRUE;
+
+    if ((io->ios2_SrcAddr[0] & 1) == 0)
+    {
+        netdev_reply(io, S2ERR_BAD_ADDRESS, S2WERR_BAD_MULTICAST);
+        return;
+    }
+
+    wide = netdev_mcast_range_wide(io->ios2_SrcAddr, io->ios2_DstAddr,
+                                   &count);
+    Disable();
+    if (wide)
+    {
+        if (add)
+        {
+            if (unit->nu_AllMulti == 0xffffu)
+                applied = FALSE;
+            else
+                unit->nu_AllMulti++;
+        }
+        else if (unit->nu_AllMulti != 0)
+            unit->nu_AllMulti--;
+        else
+            applied = FALSE;
+    }
+    else
+        applied = netdev_mcast_range_apply(unit->nu_Mcast,
+                                           io->ios2_SrcAddr, count, add);
+
+    if (!applied && add)
+        unit->nu_McastFull++;
+    if (applied)
+        netdev_rebuild_filter(unit);
+    Enable();
+
+    if (applied)
+        netdev_reply(io, 0, 0);
+    else if (add)
+        netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_MULTICAST_FULL);
+    else
+        netdev_reply(io, S2ERR_BAD_STATE, S2WERR_BAD_MULTICAST);
+}
+
+static VOID cmd_track_type(NetdevOpener *op, struct IOSana2Req *io)
+{
+    UWORD i;
+    LONG free_slot = -1;
+
+    for (i = 0; i < NETDEV_TRACK_MAX; i++)
+    {
+        if (op->op_Track[i].used)
+        {
+            if (op->op_Track[i].type == io->ios2_PacketType)
+            {
+                netdev_reply(io, S2ERR_BAD_STATE, S2WERR_ALREADY_TRACKED);
+                return;
+            }
+        }
+        else if (free_slot < 0)
+            free_slot = i;
+    }
+
+    if (free_slot < 0)
+    {
+        netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_GENERIC_ERROR);
+        return;
+    }
+
+    /* The interrupt server walks this array on every frame. */
+    Disable();
+    cmd_zero((UBYTE *)&op->op_Track[free_slot],
+             sizeof(op->op_Track[free_slot]));
+    op->op_Track[free_slot].type = io->ios2_PacketType;
+    op->op_Track[free_slot].used = 1;
+    if ((UWORD)(free_slot + 1) > op->op_TrackHigh)
+        op->op_TrackHigh = (UWORD)(free_slot + 1);
+    Enable();
+    netdev_reply(io, 0, 0);
+}
+
+static VOID cmd_untrack_type(NetdevOpener *op, struct IOSana2Req *io)
+{
+    UWORD i;
+
+    for (i = 0; i < NETDEV_TRACK_MAX; i++)
+    {
+        if (op->op_Track[i].used &&
+            op->op_Track[i].type == io->ios2_PacketType)
+        {
+            Disable();
+            op->op_Track[i].used = 0;
+            while (op->op_TrackHigh != 0 &&
+                   !op->op_Track[op->op_TrackHigh - 1].used)
+                op->op_TrackHigh--;
+            Enable();
+            netdev_reply(io, 0, 0);
+            return;
+        }
+    }
+
+    netdev_reply(io, S2ERR_BAD_STATE, S2WERR_NOT_TRACKED);
+}
+
+static VOID cmd_type_stats(NetdevOpener *op, struct IOSana2Req *io)
+{
+    UWORD i;
+
+    if (io->ios2_StatData == NULL)
+    {
+        netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
+        return;
+    }
+
+    for (i = 0; i < NETDEV_TRACK_MAX; i++)
+    {
+        if (op->op_Track[i].used &&
+            op->op_Track[i].type == io->ios2_PacketType)
+        {
+            cmd_bytes((UBYTE *)io->ios2_StatData,
+                      (const UBYTE *)&op->op_Track[i].st,
+                      sizeof(struct Sana2PacketTypeStats));
+            netdev_reply(io, 0, 0);
+            return;
+        }
+    }
+
+    netdev_reply(io, S2ERR_BAD_STATE, S2WERR_NOT_TRACKED);
+}
+
+static VOID cmd_global_stats(NetdevUnit *unit, struct IOSana2Req *io)
+{
+    if (io->ios2_StatData == NULL)
+    {
+        netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
+        return;
+    }
+
+    /* These chip counters have one owner instead of a shadow that can
+       disagree.  LastStart remains zero because this device does not open
+       timer.device to manufacture a timeval. */
+    unit->nu_Stats.Overruns = unit->nu_Nic.overruns;
+    unit->nu_Stats.BadData  = unit->nu_Nic.rx_errors;
+    cmd_bytes((UBYTE *)io->ios2_StatData, (const UBYTE *)&unit->nu_Stats,
+              sizeof(struct Sana2DeviceStats));
+    netdev_reply(io, 0, 0);
+}
+
+static VOID cmd_nsd_query(struct IOSana2Req *io)
+{
+    struct IOStdReq      *std = (struct IOStdReq *)io;
+    struct NetdevNSQuery *q   = (struct NetdevNSQuery *)std->io_Data;
+
+    /* io_Actual aliases ios2_WireError on m68k, so the SANA-II reply helper
+       cannot answer this IOStdReq without destroying the byte count. */
+#ifdef __mc68000__
+    _Static_assert(offsetof(struct IOStdReq, io_Actual) ==
+                   offsetof(struct IOSana2Req, ios2_WireError),
+                   "NSCMD_DEVICEQUERY io_Actual alias changed");
+#endif
+
+    if (q == NULL || std->io_Length < 16)
+    {
+        std->io_Actual = 0;
+        std->io_Error  = IOERR_BADLENGTH;
+        if ((std->io_Flags & IOF_QUICK) == 0)
+            ReplyMsg(&std->io_Message);
+        return;
+    }
+
+    q->DevQueryFormat    = 0;
+    q->SizeAvailable     = sizeof(struct NetdevNSQuery);
+    q->DeviceType        = NSDEVTYPE_SANA2;
+    q->DeviceSubType     = 0;
+    q->SupportedCommands = netdev_supported;
+
+    std->io_Actual = sizeof(struct NetdevNSQuery);
+    std->io_Error  = 0;
+    if ((std->io_Flags & IOF_QUICK) == 0)
+        ReplyMsg(&std->io_Message);
+}
+
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 {
     NetdevUnit *unit;
@@ -499,43 +774,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         return;
 
     case S2_DEVICEQUERY:
-    {
-        struct Sana2DeviceQuery *q =
-            (struct Sana2DeviceQuery *)io->ios2_StatData;
-        struct Sana2DeviceQuery answer;
-        ULONG want;
-
-        if (q == NULL)
-        {
-            netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
-            return;
-        }
-
-        want = sizeof(struct Sana2DeviceQuery);
-        if (q->SizeAvailable < want)
-            want = q->SizeAvailable;
-
-        /*
-         * Filled here and copied, rather than written through the caller's
-         * pointer: SizeAvailable is the caller saying how much room there is,
-         * and a caller built against an older Sana2DeviceQuery has less than
-         * this structure.  Writing every field and then reporting a smaller
-         * SizeSupplied overruns exactly the caller that was careful.
-         */
-        answer.SizeAvailable  = q->SizeAvailable;
-        answer.SizeSupplied   = want;
-        answer.DevQueryFormat = 0;
-        answer.DeviceLevel    = 0;
-        answer.AddrFieldSize  = 48;
-        answer.MTU            = NETDEV_MTU;
-        answer.BPS            = unit->nu_Nic.card->bps;
-        answer.HardwareType   = S2WireType_Ethernet;
-
-        cmd_bytes((UBYTE *)q, (const UBYTE *)&answer, want);
-
-        netdev_reply(io, 0, 0);
+        cmd_device_query(unit, io);
         return;
-    }
 
     case S2_GETSTATIONADDRESS:
         cmd_zero(io->ios2_SrcAddr, SANA2_MAX_ADDR_BYTES);
@@ -594,238 +834,35 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         return;
 
     case CMD_FLUSH:
-    {
-        struct IOSana2Req *q;
-
-        Disable();
-        while ((q = (struct IOSana2Req *)RemHead(&op->op_Reads)) != NULL)
-            netdev_reply(q, IOERR_ABORTED, 0);
-        while ((q = (struct IOSana2Req *)RemHead(&op->op_Orphans)) != NULL)
-            netdev_reply(q, IOERR_ABORTED, 0);
-        while ((q = (struct IOSana2Req *)RemHead(&op->op_Events)) != NULL)
-            netdev_reply(q, IOERR_ABORTED, 0);
-        Enable();
-
-        /* Recomputed rather than cleared: the other openers' waits are still
-           on their own lists.  A stale bit only costs a walk that finds
-           nothing, so the order here is not load-bearing. */
-        netdev_event_rescan(unit);
-
-        /* And the writes, which are queued on the unit rather than the
-           opener.  A caller flushes so that teardown is safe, and one of its
-           own requests still live in the driver is what the flush prevents. */
-        netdev_drop_writes(unit, op);
-
-        netdev_reply(io, 0, 0);
+        cmd_flush(op, io);
         return;
-    }
 
     case S2_ADDMULTICASTADDRESS:
     case S2_DELMULTICASTADDRESS:
-    {
-        BOOL add = (BOOL)(cmd == S2_ADDMULTICASTADDRESS);
-        BOOL applied;
-
-        /*
-         * Bit 0 of the first octet is the Ethernet group bit.  A unicast
-         * address is not a multicast group and is refused.
-         */
-        if ((io->ios2_SrcAddr[0] & 1) == 0)
-        {
-            netdev_reply(io, S2ERR_BAD_ADDRESS, S2WERR_BAD_MULTICAST);
-            return;
-        }
-
-        /* BeginIO is callable from unrelated tasks.  Keep the exact table and
-           the hash programmed from it in one serialized transaction. */
-        Disable();
-        if (add)
-        {
-            applied = netdev_mcast_add(unit->nu_Mcast, io->ios2_SrcAddr);
-            if (!applied)
-                unit->nu_McastFull++;
-        }
-        else
-        {
-            applied = netdev_mcast_del(unit->nu_Mcast, io->ios2_SrcAddr);
-        }
-        if (applied)
-            netdev_rebuild_filter(unit);
-        Enable();
-
-        if (applied)
-            netdev_reply(io, 0, 0);
-        else if (add)
-            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_MULTICAST_FULL);
-        else
-            netdev_reply(io, S2ERR_BAD_STATE, S2WERR_BAD_MULTICAST);
+        cmd_multicast_address(unit, io,
+                              (BOOL)(cmd == S2_ADDMULTICASTADDRESS));
         return;
-    }
 
     case S2_ADDMULTICASTADDRESSES:
     case S2_DELMULTICASTADDRESSES:
-    {
-        BOOL  add  = (BOOL)(cmd == S2_ADDMULTICASTADDRESSES);
-        ULONG count;
-        BOOL  wide;
-        BOOL  applied = TRUE;
-
-        if ((io->ios2_SrcAddr[0] & 1) == 0)
-        {
-            netdev_reply(io, S2ERR_BAD_ADDRESS, S2WERR_BAD_MULTICAST);
-            return;
-        }
-
-        wide = netdev_mcast_range_wide(io->ios2_SrcAddr, io->ios2_DstAddr,
-                                       &count);
-        Disable();
-        if (wide)
-        {
-            if (add)
-            {
-                /* A successful join must own a reference. */
-                if (unit->nu_AllMulti == 0xffffu)
-                    applied = FALSE;
-                else
-                    unit->nu_AllMulti++;
-            }
-            else if (unit->nu_AllMulti != 0)
-                unit->nu_AllMulti--;
-            else
-                applied = FALSE;
-        }
-        else
-        {
-            applied = netdev_mcast_range_apply(unit->nu_Mcast,
-                                               io->ios2_SrcAddr, count, add);
-        }
-
-        if (!applied && add)
-            unit->nu_McastFull++;
-
-        if (applied)
-            netdev_rebuild_filter(unit);
-        Enable();
-
-        if (applied)
-            netdev_reply(io, 0, 0);
-        else if (add)
-            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_MULTICAST_FULL);
-        else
-            netdev_reply(io, S2ERR_BAD_STATE, S2WERR_BAD_MULTICAST);
+        cmd_multicast_range(unit, io,
+                            (BOOL)(cmd == S2_ADDMULTICASTADDRESSES));
         return;
-    }
 
     case S2_TRACKTYPE:
-    {
-        UWORD i;
-        LONG  free_slot = -1;
-
-        for (i = 0; i < NETDEV_TRACK_MAX; i++)
-        {
-            if (op->op_Track[i].used)
-            {
-                if (op->op_Track[i].type == io->ios2_PacketType)
-                {
-                    netdev_reply(io, S2ERR_BAD_STATE, S2WERR_ALREADY_TRACKED);
-                    return;
-                }
-            }
-            else if (free_slot < 0)
-            {
-                free_slot = i;
-            }
-        }
-
-        if (free_slot < 0)
-        {
-            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_GENERIC_ERROR);
-            return;
-        }
-
-        /* The interrupt server walks this array on every frame. */
-        Disable();
-        cmd_zero((UBYTE *)&op->op_Track[free_slot],
-                 sizeof(op->op_Track[free_slot]));
-        op->op_Track[free_slot].type = io->ios2_PacketType;
-        op->op_Track[free_slot].used = 1;
-        if ((UWORD)(free_slot + 1) > op->op_TrackHigh)
-            op->op_TrackHigh = (UWORD)(free_slot + 1);
-        Enable();
-        netdev_reply(io, 0, 0);
+        cmd_track_type(op, io);
         return;
-    }
 
     case S2_UNTRACKTYPE:
-    {
-        UWORD i;
-
-        for (i = 0; i < NETDEV_TRACK_MAX; i++)
-        {
-            if (op->op_Track[i].used &&
-                op->op_Track[i].type == io->ios2_PacketType)
-            {
-                Disable();
-                op->op_Track[i].used = 0;
-                while (op->op_TrackHigh != 0 &&
-                       !op->op_Track[op->op_TrackHigh - 1].used)
-                    op->op_TrackHigh--;
-                Enable();
-                netdev_reply(io, 0, 0);
-                return;
-            }
-        }
-
-        netdev_reply(io, S2ERR_BAD_STATE, S2WERR_NOT_TRACKED);
+        cmd_untrack_type(op, io);
         return;
-    }
 
     case S2_GETTYPESTATS:
-    {
-        UWORD i;
-
-        if (io->ios2_StatData == NULL)
-        {
-            netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
-            return;
-        }
-
-        for (i = 0; i < NETDEV_TRACK_MAX; i++)
-        {
-            if (op->op_Track[i].used &&
-                op->op_Track[i].type == io->ios2_PacketType)
-            {
-                cmd_bytes((UBYTE *)io->ios2_StatData,
-                          (const UBYTE *)&op->op_Track[i].st,
-                          sizeof(struct Sana2PacketTypeStats));
-                netdev_reply(io, 0, 0);
-                return;
-            }
-        }
-
-        netdev_reply(io, S2ERR_BAD_STATE, S2WERR_NOT_TRACKED);
+        cmd_type_stats(op, io);
         return;
-    }
 
     case S2_GETGLOBALSTATS:
-        if (io->ios2_StatData == NULL)
-        {
-            netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
-            return;
-        }
-        /* Filled from the chip core rather than kept twice: two counters for
-           one event that disagree cost an hour in the field. */
-        unit->nu_Stats.Overruns = unit->nu_Nic.overruns;
-        unit->nu_Stats.BadData  = unit->nu_Nic.rx_errors;
-        /*
-         * LastStart stays zero, and that is a gap rather than a value.  It
-         * wants a timeval, and timer.device is not open in this device.  It is
-         * stated here so that the zero is not read as an interface that
-         * started at the epoch.
-         */
-        cmd_bytes((UBYTE *)io->ios2_StatData, (const UBYTE *)&unit->nu_Stats,
-                  sizeof(struct Sana2DeviceStats));
-        netdev_reply(io, 0, 0);
+        cmd_global_stats(unit, io);
         return;
 
     case S2_GETSPECIALSTATS:
@@ -864,54 +901,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     }
 
     case NSCMD_DEVICEQUERY:
-    {
-        /*
-         * The new-style query is asked with an IOStdReq, not an IOSana2Req,
-         * and io_Actual lands where ios2_WireError does -- so netdev_reply()
-         * would overwrite the answer.  This one replies by hand.
-         */
-        /*
-         * MEASURED, not assumed.  On m68k both land at offset 32, and the
-         * host shim that src/netdev/test/test_netdev_cmds.c builds against
-         * puts them at 68 and 72 -- so the host test pins the behaviour this
-         * alias would break and CANNOT reproduce the alias itself.  Asserted
-         * here, where the layout is the target's, because the whole reason
-         * this case replies by hand is that they are the same four bytes.
-         */
-#ifdef __mc68000__
-        _Static_assert(offsetof(struct IOStdReq, io_Actual) ==
-                       offsetof(struct IOSana2Req, ios2_WireError),
-                       "NSCMD_DEVICEQUERY replies by hand because io_Actual "
-                       "and ios2_WireError are the same four bytes");
-#endif
-
-        struct IOStdReq      *std = (struct IOStdReq *)io;
-        struct NetdevNSQuery *q   = (struct NetdevNSQuery *)std->io_Data;
-
-        if (q == NULL || std->io_Length < 16)
-        {
-            /* This is an IOStdReq, so ios2_WireError is io_Actual.  The SANA
-               reply helper would turn this error into a bogus nonzero byte
-               count in the caller's request. */
-            std->io_Actual = 0;
-            std->io_Error  = IOERR_BADLENGTH;
-            if ((std->io_Flags & IOF_QUICK) == 0)
-                ReplyMsg(&std->io_Message);
-            return;
-        }
-
-        q->DevQueryFormat    = 0;
-        q->SizeAvailable     = sizeof(struct NetdevNSQuery);
-        q->DeviceType        = NSDEVTYPE_SANA2;
-        q->DeviceSubType     = 0;
-        q->SupportedCommands = netdev_supported;
-
-        std->io_Actual = sizeof(struct NetdevNSQuery);
-        std->io_Error  = 0;
-        if ((std->io_Flags & IOF_QUICK) == 0)
-            ReplyMsg(&std->io_Message);
+        cmd_nsd_query(io);
         return;
-    }
 
     default:
         /* What both IC drivers answer, and what a caller probes with. */
