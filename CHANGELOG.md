@@ -43,6 +43,14 @@ version at the top when it merges.
   eight held frames and on its tick. `NetDevStats` "GENET transmits held for
   company" counts them. `SetEnv ANXDTXRUN 0` turns it off; build option
   `AMINETXDUO_TX_RUN`, off in the micro profile with the batch.
+- `anxgenet.device` no longer runs a polling task on the receive path.
+  The task at priority -128 that read the ring for 500 us after every frame
+  gave a request/response read 11-14 % and cost 8 % of a stream in, 30 % of
+  a stream out and 10 % of the same protocol's writes (A1200, one boot:
+  iperf 813/420 -> 862-882/541-557 Mbit/s, Fitz 64 MB 32 KB 27.5/31.2 ->
+  30.5/27.5 write/read). One 500 us receive timeout, the interrupt and the
+  vertical blank remain; the task that is left only looks at the PHY when
+  asked. `NetDevStats` loses the three poll counters.
 - A newer `bsdsocket.library` works with the beta1--beta3 network commands
   during an in-place update. The running interface priority now occupies a
   byte that was already reserved in the version 16 status record instead of

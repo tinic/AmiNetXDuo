@@ -70,8 +70,8 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * the machine, the sender's RTT reads 1.6 ms against 0.3 on the wire and it
  * sits window-limited.  The pass stops after this many frames; what is
  * left waits for the next interrupt, the reader's ANXD_CMD_RX_POLL after
- * its drain (rx_behind is set, as for a held pass) or the idle poller,
- * none of which is more than a burst away.
+ * its drain (rx_behind is set, as for a held pass) or the blank, none of
+ * which is more than a burst away.
  *
  * The number is the opener's batch (sana2_rx.c: two batches of 32 in front
  * of 64 plain reads): one pass fills one batch and costs one reply.  A1200
@@ -146,6 +146,29 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  * Below 500 us the stream side falls away (at 98 us the sender is paced to
  * one frame per interrupt); above it every exchange waits.  500 us: a lone
  * frame waits at most that long, a stream keeps the threshold.
+ *
+ * WHAT WAS TRIED AND REMOVED, 2026-09-17 to 2026-09-20: a task at priority
+ * -128 that read the producer index for 500 us after every frame and ran
+ * the service pass itself, so a reply was delivered the moment it landed
+ * ("the poller").  It was measured against this constant alone on the same
+ * boot (A1200 + PiStorm32, batches and transmit runs on, 2026-09-20):
+ *
+ *                       poller     500 us alone   328 us alone   98 us alone
+ *     iperf RX Mbit/s   813-816    880-882        755            428
+ *     iperf TX Mbit/s   412-430    541-544        500-506        359-367
+ *     Fitz 32 KB w/r    27.5/31.2  30.4/27.8      26.7/26.6      23.8/25.0
+ *     Fitz 128 KB w/r   32.8/34.0  35.5/29.4      32.8/28.1      29.6/26.5
+ *     ping RTT ms       0.87       0.90           0.70           0.45
+ *
+ * The poller bought 11-14 % on a request/response read and cost 8 % of a
+ * stream in, 30 % of a stream out and 10 % of the same protocol's writes:
+ * its passes ran under Forbid() in the gaps the sender needed.  A shorter
+ * timeout in its place bought nothing but the ping (the chip's timeout
+ * counts from the first waiting frame, not the last, so a reply is chopped
+ * into several interrupts), and a timeout switched per blank between short
+ * and long could not tell a fast exchange from a throttled stream by any
+ * count the interrupt path can see.  So: one timeout, no task on the
+ * receive path, the vertical blank as the backstop.
  */
 #ifndef GE_RX_COALESCE_FRAMES
 #define GE_RX_COALESCE_FRAMES   32
@@ -154,44 +177,11 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define GE_RX_COALESCE_TICKS    61      /* 500 us */
 #endif
 
-/*
- * The interrupt is the backstop; delivery when the CPU is free is a poll.
- *
- * Whatever the timeout above says, one policy serves two wires: a stream
- * wants frames batched, a lone reply wants delivering now, and the chip
- * cannot tell one from the other (it has no timer that restarts per frame,
- * and its other rings are steered by static filters).  So a task at the
- * lowest priority reads the producer index -- a plain load, the registers
- * are mapped straight through on Emu68 -- for GE_POLL_GRACE_US after a
- * frame last came or went, and runs the service pass itself the moment a
- * frame is there, with no interrupt taken.  It runs only when no other task
- * wants the CPU: a machine waiting on a reply is idle and sees the reply
- * within microseconds of its last byte; a machine busy receiving a stream
- * leaves the poller its gaps, and the interrupt delivers as before when the
- * gaps do not come.  A CPU-bound task above it starves it into exactly the
- * behaviour above.  It sleeps the moment the ring holds frames for a reader
- * that is behind: that reader needs the CPU more, and if anything ever put
- * the poller above it, spinning here would be what kept it behind.  What
- * Linux arrived at as NAPI with deferred re-arm and busy polling, with the
- * idle task standing in for the timer.
- *
- * Only the idle receive polling is for AmiNetXDuo's own shell (NetdevNic
- * anxd_openers).  The task also owns deferred PHY work for every opener.
- * Receive hooks run from it with interrupts enabled; plain SANA-II openers
- * still use the ordinary interrupt-driven receive path.
- *
- * A1200, 2026-09-17, on top of the 500 us timeout: Fitz read 26.5 -> 31.6
- * MB/s, iperf in 832 -> 910 Mbit/s, out 541 -> 564; in a 10 s receive run
- * 512k of 1.05M frames were delivered by the poller with no interrupt.
- */
-#ifndef GE_POLL_GRACE_US
-#define GE_POLL_GRACE_US        500
-#endif
-#define GE_POLL_STACK           32768   /* the service pass and the opener's
-                                           receive hooks run on it: 275 bytes
-                                           under AmiNetXDuo's own hooks, and
-                                           another stack's hooks are unknown  */
-#define GE_POLL_PRI             (-128)
+/* The task that owes the PHY a look when the blank or a link interrupt
+   asks: an MDIO transaction waits a millisecond, which is task work.  It
+   sleeps otherwise. */
+#define GE_LINK_STACK           8192
+#define GE_LINK_PRI             0
 
 /* The chip shifts every received frame two bytes into its buffer
    (GENET_RBUF_ALIGN_2B), which puts the IP header on a longword. */
@@ -225,7 +215,7 @@ typedef struct GenetCore
     UBYTE   cache;          /* cache maintenance around DMA is on           */
     UBYTE   pageops;        /* supervised cpushp pages, not CacheClearE     */
     UBYTE   phy_set;        /* the PHY's delays and negotiation were set up */
-    volatile UBYTE link_poll_due; /* poll task owes the PHY one look       */
+    volatile UBYTE link_poll_due; /* the link task owes the PHY one look   */
     UBYTE   pre_saved;      /* the two below were read before this driver
                                changed anything                            */
     ULONG   pre_rgmii_oob;  /* EXT_RGMII_OOB_CTRL as the firmware left it   */
@@ -235,13 +225,10 @@ typedef struct GenetCore
     UBYTE   held_blanks;    /* blanks the head of the ring has been held for */
     UBYTE   drop_held;      /* the next unclaimable head frame is dropped    */
 
-    /* The poller (GE_POLL_GRACE_US above). */
-    struct Task    *poll_task;      /* NULL: none (no clock, or no memory)   */
-    APTR            poll_mem;       /* its Task and stack, one allocation    */
-    ULONG           poll_sig;       /* the wake signal, allocated by itself  */
-    volatile UBYTE  poll_asleep;    /* in Wait(): the next transmit wakes it */
-    volatile ULONG *clock;          /* the Pi's system timer, 1 MHz, from the
-                                       device tree; little-endian            */
+    /* The link task (GE_LINK_STACK above). */
+    struct Task    *link_task;      /* NULL: no memory for it                */
+    APTR            link_mem;       /* its Task and stack, one allocation    */
+    ULONG           link_sig;       /* the wake signal, allocated by itself  */
 } GenetCore;
 
 /* Blanks a unicast frame may wait at the head of the ring for its reader to
@@ -277,9 +264,6 @@ enum
     GE_ST_TX_HELD,          /* writes whose start waited for company (TXF_MORE) */
     GE_ST_TX_CSUM,          /* frames whose transport checksum the TBUF wrote */
     GE_ST_CPUSH_SUPERVISED, /* 1: page pushes enter through Supervisor()   */
-    GE_ST_POLL_WAKES,       /* the poller woken by a transmit                */
-    GE_ST_POLL_PASSES,      /* service passes it ran with frames waiting     */
-    GE_ST_POLL_FRAMES,      /* frames those passes found in the ring         */
 #ifdef GE_PROBE_ST
     /* The bottom half timed on the Pi's system timer (bus 0x7E003000, 68k
        0xF8003000 through Emu68's /scb mapping, 1 MHz, a 10 ns read):
@@ -331,9 +315,6 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET transmits held for company",
     "GENET transmit checksums by the chip",
     "GENET supervised page push (1)",
-    "GENET poll wakes",
-    "GENET poll passes",
-    "GENET poll frames",
 #ifdef GE_PROBE_ST
     "PROBE genet_intr us",
     "PROBE cache op us",
@@ -370,7 +351,7 @@ static __inline__ ULONG ge_st_us(VOID)
 
 static LONG genet_init(NetdevNic *nic);
 static VOID genet_stop(NetdevNic *nic);
-static __inline__ VOID ge_poll_wake(NetdevNic *nic, GenetCore *c);
+static __inline__ VOID ge_link_wake(GenetCore *c);
 static VOID ge_dma_stop(NetdevNic *nic);
 static VOID genet_setfilter(NetdevNic *nic);
 
@@ -1490,8 +1471,6 @@ static LONG genet_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     GE_P_START(pt);
     LONG rc = genet_tx_body(nic, frame, len);
     GE_P_ADD(nic, GE_ST_P_TX_US, pt);
-    if (GE(nic)->poll_task != NULL)
-        ge_poll_wake(nic, GE(nic));
     return rc;
 }
 
@@ -1648,7 +1627,7 @@ static BOOL genet_isr(NetdevNic *nic)
     return TRUE;
 }
 
-/* The interrupt bottom half and the task-context idle poll share this body. */
+/* The interrupt bottom half and the vertical blank's walk share this body. */
 static BOOL genet_intr_body(NetdevNic *nic);
 
 static BOOL genet_intr(NetdevNic *nic)
@@ -1676,18 +1655,13 @@ static BOOL genet_intr_body(NetdevNic *nic)
     if ((stat & (GE_IRQ_LINK_UP | GE_IRQ_LINK_DOWN)) != 0)
     {
         c->link_poll_due = 1;
-        ge_poll_wake(nic, c);
+        ge_link_wake(c);
     }
 
     /* Both rings are walked whether or not their bit was set: the vertical
        blank polls through here too, and a frame is a frame. */
     if (ge_rxintr(nic))
-    {
         mine = TRUE;
-        /* Frames came: more may follow.  The poller takes them from here. */
-        if (c->poll_task != NULL)
-            ge_poll_wake(nic, c);
-    }
     /* Not while a task is mid-transmit: it reclaims for itself
        (tx_task_lock).  */
     if (!nic->tx_busy && ge_txintr(nic))
@@ -1717,7 +1691,7 @@ static BOOL genet_tick(NetdevNic *nic)
         c->blanks = 0;
         c->link_poll_due = 1;
         nic->core_stat[GE_ST_RBUF_OVFL] = ge_rd(nic, GENET_RBUF_OVFL_CNT);
-        ge_poll_wake(nic, c);
+        ge_link_wake(c);
     }
 
     /* The backstop for a run whose flush never came (the sender was taken
@@ -1750,23 +1724,10 @@ static BOOL genet_tick(NetdevNic *nic)
     return (BOOL)(!nic->tx_busy && nic->txb_inuse != 0 && ge_txintr(nic));
 }
 
-/* -------------------------------------------------------------- poller --- */
+/* ----------------------------------------------------------- link task --- */
 
-static __inline__ ULONG ge_clock(const GenetCore *c)
-{
-    return __builtin_bswap32(*c->clock);
-}
-
-/*
- * The task.  Asleep until a transmit wakes it (genet_tx); then, until
- * GE_POLL_GRACE_US pass with nothing new in the ring, it runs the service
- * pass whenever the producer index has moved.  Back to sleep as soon as the
- * ring holds frames for a reader that is behind: nothing changes until that
- * reader re-posts, it asks for its own pass then (ANXD_CMD_RX_POLL), and
- * the next frame in or out wakes this task again.  Nothing is held between
- * passes, so the detach may RemTask() it wherever it stands.
- */
-static VOID ge_poll_task(VOID)
+/* Asleep until the blank or a link interrupt says the PHY is owed a look. */
+static VOID ge_link_task(VOID)
 {
     struct Task *me  = FindTask(NULL);
     NetdevNic   *nic = (NetdevNic *)me->tc_UserData;
@@ -1776,17 +1737,13 @@ static VOID ge_poll_task(VOID)
     if (sig < 0)
         for (;;)
             (VOID)Wait(0);              /* until the detach takes it away */
-    c->poll_sig = 1UL << sig;
+    c->link_sig = 1UL << sig;
 
     for (;;)
     {
-        ULONG last;
-        BOOL  link_due;
+        BOOL link_due;
 
-        c->poll_asleep = 1;
-        (VOID)Wait(c->poll_sig);
-        c->poll_asleep = 0;
-        nic->core_stat[GE_ST_POLL_WAKES]++;
+        (VOID)Wait(c->link_sig);
 
         Disable();
         link_due = (BOOL)(c->link_poll_due != 0);
@@ -1802,82 +1759,46 @@ static VOID ge_poll_task(VOID)
                 ge_link_poll(nic);
             Permit();
         }
-
-        /* Emulators need no idle RX poll clock, but the same task is still
-           the safe home for PHY work requested by the vertical blank. */
-        if (c->clock == NULL)
-            continue;
-
-        last = ge_clock(c);
-        while (nic->running && !nic->rx_behind && nic->anxd_openers != 0)
-        {
-            UWORD pidx = (UWORD)(ge_rd(nic, GENET_RX_DMA_PROD_INDEX(GE_Q)) &
-                                 0xffffu);
-
-            if (pidx != c->rx_cidx)
-            {
-                nic->core_stat[GE_ST_POLL_PASSES]++;
-                nic->core_stat[GE_ST_POLL_FRAMES] += (UWORD)(pidx - c->rx_cidx);
-                netdev_nic_poll(nic);
-                last = ge_clock(c);
-            }
-            else if (ge_clock(c) - last > GE_POLL_GRACE_US)
-            {
-                break;
-            }
-        }
     }
 }
 
-/* A frame came or went: more may follow.  From genet_tx under its lock,
-   or from the service pass under Disable(); Signal() is allowed from both. */
-static __inline__ VOID ge_poll_wake(NetdevNic *nic, GenetCore *c)
+/* From the blank or the service pass under Disable(); Signal() is allowed
+   from both, and a signal already pending is one signal. */
+static __inline__ VOID ge_link_wake(GenetCore *c)
 {
-    if (c->poll_task != NULL && c->poll_sig != 0 &&
-        (c->link_poll_due || (c->poll_asleep && nic->anxd_openers != 0)))
-    {
-        c->poll_asleep = 0;
-        Signal(c->poll_task, c->poll_sig);
-    }
+    if (c->link_task != NULL && c->link_sig != 0)
+        Signal(c->link_task, c->link_sig);
 }
 
-/* At attach, from the opener's task.  The task always exists for deferred
-   PHY work; a device-tree clock additionally enables idle receive polling. */
-static VOID ge_poll_start(NetdevNic *nic)
+/* At attach, from the opener's task. */
+static VOID ge_link_start(NetdevNic *nic)
 {
     GenetCore   *c = GE(nic);
-    ULONG        st;
     struct Task *t;
 
-    /* The SoC's system timer: 1 MHz, CLO at +4.  Emu68's tree has no node
-       for it (netdev_dtree.h), so its bus address goes through /soc's ranges;
-       the A1200's tree puts it at 0xF2003000. */
-    if (netdev_dtree_bus_addr("/soc", 0x7e003000UL, &st))
-        c->clock = (volatile ULONG *)(st + 4);
-
-    c->poll_mem = AllocMem(sizeof(struct Task) + GE_POLL_STACK,
+    c->link_mem = AllocMem(sizeof(struct Task) + GE_LINK_STACK,
                            MEMF_PUBLIC | MEMF_CLEAR);
-    if (c->poll_mem == NULL)
+    if (c->link_mem == NULL)
         return;
-    t = (struct Task *)c->poll_mem;
+    t = (struct Task *)c->link_mem;
     t->tc_Node.ln_Type = NT_TASK;
-    t->tc_Node.ln_Pri  = GE_POLL_PRI;
-    t->tc_Node.ln_Name = (char *)"AmiNetXDuo anxgenet poll";
+    t->tc_Node.ln_Pri  = GE_LINK_PRI;
+    t->tc_Node.ln_Name = (char *)"AmiNetXDuo anxgenet link";
     t->tc_SPLower      = (APTR)(t + 1);
-    t->tc_SPUpper      = (APTR)((UBYTE *)(t + 1) + GE_POLL_STACK);
+    t->tc_SPUpper      = (APTR)((UBYTE *)(t + 1) + GE_LINK_STACK);
     t->tc_SPReg        = t->tc_SPUpper;
     t->tc_UserData     = nic;
     /* An empty list: nothing for RemTask() to free. */
     t->tc_MemEntry.lh_Head     = (struct Node *)&t->tc_MemEntry.lh_Tail;
     t->tc_MemEntry.lh_Tail     = NULL;
     t->tc_MemEntry.lh_TailPred = (struct Node *)&t->tc_MemEntry.lh_Head;
-    if (AddTask(t, (APTR)ge_poll_task, NULL) == NULL)
+    if (AddTask(t, (APTR)ge_link_task, NULL) == NULL)
     {
-        FreeMem(c->poll_mem, sizeof(struct Task) + GE_POLL_STACK);
-        c->poll_mem = NULL;
+        FreeMem(c->link_mem, sizeof(struct Task) + GE_LINK_STACK);
+        c->link_mem = NULL;
         return;
     }
-    c->poll_task = t;
+    c->link_task = t;
 }
 
 static VOID genet_detach(NetdevNic *nic)
@@ -1887,15 +1808,15 @@ static VOID genet_detach(NetdevNic *nic)
     APTR         mem;
 
     Forbid();
-    t   = c->poll_task;
-    mem = c->poll_mem;
-    c->poll_task = NULL;
-    c->poll_mem  = NULL;
+    t   = c->link_task;
+    mem = c->link_mem;
+    c->link_task = NULL;
+    c->link_mem  = NULL;
     if (t != NULL)
         RemTask(t);
     Permit();
     if (mem != NULL)
-        FreeMem(mem, sizeof(struct Task) + GE_POLL_STACK);
+        FreeMem(mem, sizeof(struct Task) + GE_LINK_STACK);
 }
 
 /* -------------------------------------------------------------- attach --- */
@@ -2044,7 +1965,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->read_hdr      = NULL;
     nic->ring_copy     = NULL;
 
-    ge_poll_start(nic);
+    ge_link_start(nic);
 
     GE_TRACE("ge: attached rev ", rev);
     return 0;

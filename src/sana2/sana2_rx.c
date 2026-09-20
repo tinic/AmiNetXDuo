@@ -2481,7 +2481,7 @@ static const ULONG ami_sana2_rx_types[AMI_SANA2_RX_READERS] =
  * or ".device" and with ".<unit>" when the unit is not 0.  Three interfaces
  * on one machine once gave nine readers under three names, and a task list
  * could not say which card any of them was reading.  Device before role,
- * the way "anxgenet poll" and "anxwifipi receiver" are named, so a sorted
+ * the way "anxgenet link" and "anxwifipi receiver" are named, so a sorted
  * list groups a card's tasks.
  */
 static VOID ami_sana2_rx_name(AmiSana2Reader *rd)
