@@ -2058,52 +2058,6 @@ NX_PACKET_POOL *netstack_pool(VOID)
     return (ns != NULL && ns->ns_PoolMemory != NULL) ? &ns->ns_Pool : NULL;
 }
 
-/*
- * Plain loads of the NetX Duo counters, with no baton taken: a diagnostic that
- * blocks on the stack it describes is useless.  ms_PoolLow is a running
- * minimum, so it is sampled on the way out of each stack operation.
- */
-VOID netstack_pool_mark_low(VOID)
-{
-    NX_PACKET_POOL *pool = netstack_pool();
-    AmiMemStats    *m;
-    ULONG           now;
-
-    if (pool == NULL)
-        return;
-
-    m   = ami_mem_stats();
-    now = pool->nx_packet_pool_available;
-
-    if (m->ms_PoolTotal == 0UL || now < m->ms_PoolLow)
-        m->ms_PoolLow = now;
-}
-
-VOID netstack_pool_sample(VOID)
-{
-    NX_PACKET_POOL *pool = netstack_pool();
-    AmiMemStats    *m;
-    ULONG           now;
-
-    if (pool == NULL)
-        return;
-
-    m   = ami_mem_stats();
-    now = pool->nx_packet_pool_available;
-
-    if (m->ms_PoolTotal == 0UL)
-        m->ms_PoolLow = now;
-    else if (now < m->ms_PoolLow)
-        m->ms_PoolLow = now;
-
-    m->ms_PoolTotal      = pool->nx_packet_pool_total;
-    m->ms_PoolFree       = now;
-    m->ms_PoolPayload    = pool->nx_packet_pool_payload_size;
-    m->ms_PoolEmpty      = pool->nx_packet_pool_empty_requests;
-    m->ms_PoolWaited     = pool->nx_packet_pool_empty_suspensions;
-    m->ms_PoolBadRelease = pool->nx_packet_pool_invalid_releases;
-}
-
 const AmiIfConfig *netstack_iface_config(UWORD nx_index)
 {
     const AmiNetStack *ns = ami_netstack_raw();
