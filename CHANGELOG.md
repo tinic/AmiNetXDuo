@@ -57,6 +57,8 @@ version at the top when it merges.
   AmiNetXDuo `TAG_USER` record. They no longer allocate tags in Commodore's
   `S2_Dummy` block, and per-write checksum metadata no longer borrows an
   unassigned `io_Flags` bit. Invalid versions and short records fail closed.
+  These SANA-II and NSD architecture corrections follow a detailed external
+  code review by Rondoval on the English Amiga Board.
 
 - `ConfigureNetInterface <if> PRIORITY <n>` sets a running interface's
   priority (-128..127) without a reboot: the route lookup and the default

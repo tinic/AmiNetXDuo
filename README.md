@@ -314,6 +314,14 @@ evidence, not proof.
 the test suites, continuous integration, the measurement method and the CPU
 profiler.
 
+## Acknowledgements
+
+Thanks to [Rondoval](https://eab.abime.net/member.php?u=84835) for a detailed
+external review of the SANA-II extension design. His criticism prompted the
+move of GRO into the stack, relocation of private commands out of the
+NSD-reserved range, and replacement of borrowed SANA-II fields with a
+versioned private extension record.
+
 ## Licence
 
 AmiNetXDuo is an independent implementation of a published ABI. No

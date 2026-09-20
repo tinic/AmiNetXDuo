@@ -3027,6 +3027,12 @@
   are the work of their own authors and are not part of this
   distribution.
 
+  Thanks to Rondoval on the English Amiga Board for a detailed external
+  review of the SANA-II extension design. His criticism prompted the move
+  of GRO into the stack, relocation of private commands out of the
+  NSD-reserved range, and replacement of borrowed SANA-II fields with a
+  versioned private extension record.
+
   @{b}Reporting problems@{ub}
 
   A useful report states which Amiga and which Kickstart, which network
