@@ -183,6 +183,8 @@ set(_fuzz_nx_src
     "${AMINETXDUO_NETXDUO}/common/src/nx_udp_bind_cleanup.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_udp_free_port_find.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_udp_packet_receive.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_packet_info_extract.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_packet_info_extract.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_udp_receive_cleanup.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_cleanup.c"
