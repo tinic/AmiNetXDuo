@@ -718,6 +718,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_routes.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_client_pool.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool_runtime.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
         host/netstack_host_env.c)
 

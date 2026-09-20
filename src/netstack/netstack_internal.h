@@ -178,6 +178,11 @@ UINT ami_ns_client_pool_create(AmiNsClientPoolBlock **owner,
                                CHAR *name, ULONG payload, ULONG memory_bytes);
 VOID ami_ns_client_pool_delete(AmiNsClientPoolBlock **owner);
 
+/* Runtime pool inputs and override policy.  The pure sizing arithmetic stays
+   in netstack_pool.c and is public through <aminetxduo/pool.h>. */
+ULONG ami_ns_packet_stride(VOID);
+ULONG ami_ns_pool_packets(VOID);
+
 struct AmiNetStack
 {
     ULONG               ns_Refs;

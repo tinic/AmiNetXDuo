@@ -13,6 +13,7 @@ set(NETSTACK_SOURCES
     netstack_client_pool.c
     netstack_gateway.c
     netstack_pool.c
+    netstack_pool_runtime.c
     netstack_memlist.c
     netstack_retry.c)
 
