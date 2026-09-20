@@ -101,13 +101,16 @@ The in-guest driver also accepts `-q` answer files staged by
 1|BOOL|No, leave them out
 1|CHOICE|3|3|1
 1|STRING|eth0|lan.1
+1|ABORT|Yes, install them
 ```
 
 The fields are Installer run number, action, and its operands. `CHOICE` uses
-option count, gadget id and the zero-based ordinal among matching pages. Every
-action must be consumed or the run fails. This is what lets the release matrix
-test several non-default answers together and select different profiles on a
-reinstall without silently falling back to Installer defaults.
+option count, gadget id and the zero-based ordinal among matching pages.
+`ABORT` identifies the page by one of its button labels and clicks Installer's
+real Abort gadget. Every action must be consumed or the run fails. This is what
+lets the release matrix test several non-default answers together, prove a
+cancellation writes nothing, and select different profiles on a reinstall
+without silently falling back to Installer defaults.
 
 The Emu68 rows replace `InstallNetProbe` only inside the throw-away test drive
 with `install/test/netprobe-fixture.c`. This lets Amiberry exercise the

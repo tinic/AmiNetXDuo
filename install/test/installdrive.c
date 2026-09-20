@@ -128,6 +128,7 @@
  *   <run>|BOOL|<button-label substring>
  *   <run>|CHOICE|<number of options>|<gadget id>|<matching-page ordinal>
  *   <run>|STRING|<current value>|<replacement value>
+ *   <run>|ABORT|<button-label substring identifying the page>
  *
  * Unlike the historical DRIVE_YES_LABEL/DRIVE_PICK_* switches, this can
  * answer more than one non-default question in one installation and can give
@@ -147,7 +148,8 @@ enum ActionType
 {
     ACTION_BOOL = 1,
     ACTION_CHOICE,
-    ACTION_STRING
+    ACTION_STRING,
+    ACTION_ABORT
 };
 
 struct DriveAction
@@ -406,6 +408,11 @@ static BOOL load_actions(VOID)
             copy_text(action->match, match, sizeof(action->match));
             copy_text(action->value, value, sizeof(action->value));
         }
+        else if (strcmp(kind, "ABORT") == 0)
+        {
+            action->type = ACTION_ABORT;
+            copy_text(action->match, at, sizeof(action->match));
+        }
         else
         {
             say("installdrive: unknown action at line %ld\n", number);
@@ -429,6 +436,24 @@ static LONG matching_bool_action(struct Gadget *head)
 
         if (actions[i].used || actions[i].run != active_run ||
             actions[i].type != ACTION_BOOL)
+            continue;
+        for (gad = head; gad != NULL; gad = gad->NextGadget)
+            if (label_matches(gad, actions[i].match))
+                return i;
+    }
+    return -1;
+}
+
+static LONG matching_abort_action(struct Gadget *head)
+{
+    LONG i;
+
+    for (i = 0; i < action_count; i++)
+    {
+        struct Gadget *gad;
+
+        if (actions[i].used || actions[i].run != active_run ||
+            actions[i].type != ACTION_ABORT)
             continue;
         for (gad = head; gad != NULL; gad = gad->NextGadget)
             if (label_matches(gad, actions[i].match))
@@ -532,6 +557,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
         {
             struct Gadget *gad;
             struct Gadget *proceed = NULL;
+            struct Gadget *abort   = NULL;
             struct Gadget *yes     = NULL;
             struct Gadget *no      = NULL;
             struct Gadget *single  = NULL;
@@ -545,7 +571,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 switch (gad->GadgetID)
                 {
                 case PROCEED_ID:  proceed = gad; is_page = TRUE; break;
-                case ABORT_ID:                   is_page = TRUE; break;
+                case ABORT_ID:    abort   = gad; is_page = TRUE; break;
                 case HELP_ID:                    is_page = TRUE; break;
                 case YESNO_FIRST: yes     = gad;                 break;
                 case SINGLE_ID:   single  = gad; no = gad;       break;
@@ -600,6 +626,21 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             }
             if (choice == NULL)
                 choice = single;
+
+            /* Identify the page by one of its own labels, then use the real
+               Installer Abort gadget.  A page reorder or rewording leaves the
+               action unused and fails the scenario rather than cancelling at
+               some unrelated point. */
+            if (abort != NULL)
+            {
+                LONG action = matching_abort_action(window->FirstGadget);
+
+                if (action >= 0)
+                {
+                    choice = abort;
+                    pending_action = action;
+                }
+            }
 
             /* A string page is identified by its current value.  This is
                considerably more stable than a page number: "eth0", "amiga"

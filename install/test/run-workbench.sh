@@ -9,6 +9,8 @@
 #                                 [-H] [-S] [-D] [-g] [-R] [-U] [-E] [-J] [-B]
 #                                 [-q ANSWERS] [-x PROFILE-TRANSITION]
 #                                 [-e genet|wifi|both]
+#                                 [-c drivers]
+#                                 [-m core|driver|probe|minimal]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -50,11 +52,13 @@ TRANSITION=""
 FOREIGN_MODE=""
 EMU68_FIXTURE=""
 CONFIG_ONLY=0
+CANCEL_MODE=""
+MISSING_MODE=""
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:c:m:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -77,12 +81,15 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBq:x:f:e:" opt; do
         x) TRANSITION="$OPTARG" ;;
         f) FOREIGN_MODE="$OPTARG" ;;
         e) EMU68_FIXTURE="$OPTARG"; CONFIG_ONLY=1 ;;
+        c) CANCEL_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
+        m) MISSING_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
-                "[-f existing-stack-mode] [-e genet|wifi|both]" >&2
+                "[-f existing-stack-mode] [-e genet|wifi|both]" \
+                "[-c drivers] [-m core|driver|probe|minimal]" >&2
            exit 2 ;;
     esac
 done
@@ -133,6 +140,21 @@ if [ "$NO_BOOT" = "1" ] && [ "$TERMINAL" = "1" ]; then
     echo "-B and -H conflict: httpd-at-boot is not asked when boot networking" >&2
     echo "is disabled." >&2
     exit 2
+fi
+
+# The selected-profile corruption case has to select that profile through the
+# real page, so normalise it before PICK_SPEC is derived below.
+if [ -n "$MISSING_MODE" ]; then
+    case "$MISSING_MODE" in
+        core|driver|probe|minimal) ;;
+        *) echo "unknown missing component: $MISSING_MODE" >&2; exit 2 ;;
+    esac
+    if [ "$MISSING_MODE" = minimal ]; then
+        [ -z "$PICK" ] || [ "$PICK" = minimal ] || {
+            echo "-m minimal conflicts with -p $PICK" >&2; exit 2
+        }
+        PICK=minimal
+    fi
 fi
 
 # -p takes a name, not a gadget number: the number is this file's business.
@@ -212,6 +234,23 @@ if [ -n "$FOREIGN_MODE" ]; then
         echo "-f is a system-layout fixture and cannot be combined with -D or -x" >&2
         exit 2
     }
+fi
+if [ -n "$CANCEL_MODE" ]; then
+    [ "$CANCEL_MODE" = drivers ] || {
+        echo "unknown cancellation point: $CANCEL_MODE" >&2; exit 2
+    }
+    [ "$LEVEL" != NOVICE ] || {
+        echo "-c needs AVERAGE or EXPERT so the named page is visible" >&2
+        exit 2
+    }
+fi
+if { [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; } &&
+   { [ "$DRAWER" != 0 ] || [ -n "$TRANSITION" ] || [ -n "$FOREIGN_MODE" ] ||
+     [ -n "$EMU68_FIXTURE" ] || [ "$RERUN" != 0 ] || [ "$RECONFIGURE" != 0 ] ||
+     [ "$STATIC" != 0 ] || [ "$NO_DRIVERS" != 0 ] || [ "$NO_BOOT" != 0 ] ||
+     [ "$TERMINAL" != 0 ] || [ "$EXPERT_CUSTOM" != 0 ]; }; then
+    echo "cancellation/corrupt-archive scenarios cannot be combined with another fixture" >&2
+    exit 2
 fi
 if [ -n "$EMU68_FIXTURE" ]; then
     case "$EMU68_FIXTURE" in
@@ -722,6 +761,9 @@ fi
 case "$FOREIGN_MODE" in
     *-leave) ANSWER_LINES+=("1|BOOL|Leave it alone") ;;
 esac
+case "$CANCEL_MODE" in
+    drivers) ANSWER_LINES+=("1|ABORT|Yes, install them") ;;
+esac
 if [ "$NO_DRIVERS" = "1" ]; then
     for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
         ANSWER_LINES+=("$answer_run|BOOL|No, leave them out")
@@ -904,7 +946,8 @@ user_startup() { amiga_path S/User-Startup 2>/dev/null || true; }
 product_manifest() {
     local root file rel mode sum
     for root in Libs C Devs Prefs AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
-                S/User-Startup S/Network-Startup S/Network-Startup.old \
+                S/Startup-Sequence S/User-Startup \
+                S/Network-Startup S/Network-Startup.old \
                 S/AmiNetXDuo-drawer; do
         [ -e "$HD/$root" ] || continue
         if [ -d "$HD/$root" ]; then
@@ -1002,6 +1045,29 @@ mkdir -p "$HD/Unpacked"
 cp "$INSTALLER" "$HD/Unpacked/AmiNetXDuo/Installer"
 chmod -R a+rx "$HD/Unpacked"
 
+# Corrupt only the throw-away unpacked copy.  Each target reaches a distinct
+# Installer preflight: the mandatory full library, one of the three supplied
+# drivers, the device-tree probe, or the profile selected on the visible page.
+MISSING_TARGET=""
+case "$MISSING_MODE" in
+    core)    MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" ;;
+    driver)  MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxgenet.device" ;;
+    probe)   MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/InstallNetProbe" ;;
+    minimal) MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library" ;;
+esac
+if [ -n "$MISSING_MODE" ]; then
+    [ -f "$MISSING_TARGET" ] || {
+        echo "!! candidate archive already lacks the $MISSING_MODE fixture target" >&2
+        exit 1
+    }
+    rm -f "$MISSING_TARGET"
+    [ ! -e "$MISSING_TARGET" ] || {
+        echo "!! could not remove corrupt-archive fixture target $MISSING_TARGET" >&2
+        exit 2
+    }
+    echo "==> corrupt-archive fixture: missing $MISSING_MODE"
+fi
+
 # Amiberry does not expose an Emu68 device tree.  Replace only the throw-away
 # archive's probe with a deterministic executable so the real Installer runs
 # all three auto-detection outcomes.  The shipping InstallNetProbe is neither
@@ -1037,10 +1103,25 @@ FOREIGN_OLD_UG_SUM=""
 FOREIGN_OLD_TLS_SUM=""
 FOREIGN_CONFIG_FILES=()
 if [ -n "$FOREIGN_MODE" ]; then
-    mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" "$HD/S"
+    mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
+             "$HD/Devs/Networks" "$HD/S"
     cp "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" "$HD/Libs/bsdsocket.library"
     cp "$HD/Unpacked/AmiNetXDuo/Libs/usergroup.library" "$HD/Libs/usergroup.library"
     cp "$HD/Unpacked/AmiNetXDuo/Libs/tls.library" "$HD/Libs/tls.library"
+    # Simulate a previously interrupted/older replacement too.  Declining
+    # replacement must preserve these byte-for-byte; accepting it must discard
+    # every stale .new and replace every stale .old with the live library that
+    # was active before this run.
+    for _lib in bsdsocket.library usergroup.library tls.library; do
+        printf 'stale backup from an older install: %s\n' "$_lib" \
+            > "$HD/Libs/$_lib.old"
+        printf 'incomplete staging file from an interrupted install: %s\n' "$_lib" \
+            > "$HD/Libs/$_lib.new"
+    done
+    for _driver in anxnet.device anxgenet.device anxwifipi.device; do
+        printf 'incomplete staging file from an interrupted install: %s\n' \
+            "$_driver" > "$HD/Devs/Networks/$_driver.new"
+    done
     printf '; existing stack interface -- preserve byte for byte\nDEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
         > "$HD/Devs/NetInterfaces/eth0"
     printf '; existing stack route policy -- preserve byte for byte\n;DEFAULT=10.0.0.1\n' \
@@ -1509,6 +1590,10 @@ echo "============================================================"
 if [ -n "$FOREIGN_MODE" ]; then
     FOREIGN_TREE_BEFORE=$(product_manifest)
 fi
+ZERO_DIFF_BEFORE=""
+if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; then
+    ZERO_DIFF_BEFORE=$(product_manifest)
+fi
 
 startup_with 'FailAt 9999
 C:installdrive >DH0:install-console.txt
@@ -1523,6 +1608,38 @@ cat "$HD/installdrive.txt" 2>/dev/null || echo "(none)"
 echo
 echo "---- Installer log ----"
 cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
+
+if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; then
+    ZERO_DIFF_AFTER=$(product_manifest)
+    zero_ok=1
+    if [ "$ZERO_DIFF_AFTER" != "$ZERO_DIFF_BEFORE" ]; then
+        echo "!! refused/cancelled install changed the destination tree"
+        diff -u <(printf '%s\n' "$ZERO_DIFF_BEFORE") \
+                <(printf '%s\n' "$ZERO_DIFF_AFTER") || true
+        zero_ok=0
+    fi
+    if [ "$INSTALL_STATUS" != 0 ]; then
+        echo "!! refusal/cancellation driver returned $INSTALL_STATUS, not 0"
+        zero_ok=0
+    fi
+    if [ -n "$CANCEL_MODE" ] &&
+       grep -Eq 'UNUSED scripted action|action [0-9]+ was never consumed' \
+           "$HD/installdrive.txt" 2>/dev/null; then
+        echo "!! the requested Abort action was never consumed"
+        zero_ok=0
+    fi
+    if [ "$zero_ok" = 1 ]; then
+        _reason=${CANCEL_MODE:+cancel-$CANCEL_MODE}
+        _reason=${_reason:-missing-$MISSING_MODE}
+        echo "  ok      $_reason left the destination byte-exact"
+        echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "card_config=not-written stack=unchanged boot_status=not-run"
+        exit 0
+    fi
+    echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+         "card_config=unexpected-write stack=unknown boot_status=install-$INSTALL_STATUS"
+    exit 1
+fi
 
 case "$FOREIGN_MODE" in
 *-leave)
@@ -1805,6 +1922,22 @@ case "$FOREIGN_MODE" in
             echo "  ok      previous $_name preserved as .old"
         fi
     done
+    for _name in bsdsocket.library usergroup.library tls.library; do
+        if amiga_path "Libs/$_name.new" >/dev/null 2>&1; then
+            echo "!! replacing $FOREIGN_MODE left stale $_name.new live"
+            fail=1
+        else
+            echo "  ok      stale $_name.new removed"
+        fi
+    done
+    for _name in anxnet.device anxgenet.device anxwifipi.device; do
+        if amiga_path "Devs/Networks/$_name.new" >/dev/null 2>&1; then
+            echo "!! replacing $FOREIGN_MODE left stale $_name.new live"
+            fail=1
+        else
+            echo "  ok      stale $_name.new removed"
+        fi
+    done
     if amiga_path S/Network-Startup.old >/dev/null 2>&1; then
         echo "!! kept foreign S:Network-Startup was rotated to .old"
         fail=1
@@ -1977,6 +2110,15 @@ if [ "$DRAWER" = "1" ]; then
         fail=1
     else
         echo "  ok      driver backup stayed inside the selected layout"
+    fi
+elif [ -n "$FOREIGN_MODE" ]; then
+    # This fixture contributed only stale .new files, never a live driver.
+    # Removing those and installing fresh copies must not invent .old files.
+    if [ -n "$ANXNET_OLD" ]; then
+        echo "!! interrupted-staging fixture created an anxnet.device.old"
+        fail=1
+    else
+        echo "  ok      stale driver staging files made no false backup"
     fi
 elif [ "$DEVS_NETWORKS_BEFORE" = "absent" ]; then
     # The stock-Workbench half: there was no drawer, so the installer's own

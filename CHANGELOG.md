@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The Installer release gate adds cancellation and four corrupt-download
+  refusal cases, bringing the matrix to 34 scenarios. Existing-stack fixtures
+  also cover stale `.old` backups and interrupted `.new` staging files.
+
 ## 1.0.0-beta3
 
 - `AddNetInterface` no longer reports "no address from DHCP" when its wait
