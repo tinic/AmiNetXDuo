@@ -121,6 +121,10 @@ jobs:
       # user@host that the run-workbench harnesses ssh to.
       AMINETXDUO_RATE_IFACE: ${{ vars.AMINETXDUO_RATE_IFACE }}
       AMINETXDUO_RATE_PEER: ${{ vars.AMINETXDUO_RATE_PEER }}
+      # tests/tools/run-console.sh: another machine on the bridged segment
+      # fetches the console image.  The emulator host cannot reach its own
+      # pcap guest through the same physical interface.
+      AMINETXDUO_CONSOLE_CLIENT: ${{ vars.AMINETXDUO_CONSOLE_CLIENT }}
       # install/test/run-smbmount.sh: smb2-handler and filesysbox, neither ours.
       AMINETXDUO_SMB2FS: ${{ vars.AMINETXDUO_SMB2FS }}
       AMINETXDUO_FILESYSBOX: ${{ vars.AMINETXDUO_FILESYSBOX }}
@@ -629,8 +633,19 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
           tools/ci-arm.sh -n "Throughput against the recorded baseline"
-          -r AMINETXDUO_A2065 -r AMINETXDUO_RATE_IFACE -r AMINETXDUO_RATE_PEER
+          -R AMINETXDUO_A2065 -R AMINETXDUO_RATE_IFACE -R AMINETXDUO_RATE_PEER
           -- tools/ci.sh rate
+
+      # Five screen families: aligned and odd-width AGA, aligned and odd-width
+      # OCS, and an odd-width RTG screen.  stage_console already gives missing
+      # local ingredients a distinct skip verdict; ci-arm records whether the
+      # remote client needed to make the assertion was configured at all.
+      - name: Browser console screen formats
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Browser console screen formats"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_CONSOLE_CLIENT
+          -- tools/ci.sh console
 
       # SMB, WHICH HAD NO COVERAGE AT ALL.
       #

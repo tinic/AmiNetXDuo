@@ -16,16 +16,19 @@ set -uo pipefail
 
 NAME=""
 declare -a REQUIRED=()
+declare -a MANDATORY=()
 declare -a SKIPCODES=()
 NOTE=""
 
 usage() {
     cat >&2 <<'EOF'
-usage: tools/ci-arm.sh -n NAME [-r VAR]... [-s CODE]... [-m NOTE] -- CMD [ARG]...
+usage: tools/ci-arm.sh -n NAME [-r VAR]... [-R VAR]... [-s CODE]... [-m NOTE] -- CMD [ARG]...
 
   -n NAME   what this arm is called, in the run summary
   -r VAR    an environment variable that must be non-empty for it to run;
             repeatable, and the FIRST empty one is the reason it skipped
+  -R VAR    a variable required by a mandatory gate; unlike -r, an empty
+            value FAILS the arm instead of turning an unrun gate green
   -s CODE   an exit code that means the command DID NOT TEST what this arm
             names.  The row says SKIPPED and this exits 0; it is not a pass
   -m NOTE   extra text for the summary row
@@ -37,6 +40,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -n) NAME="$2"; shift 2 ;;
         -r) REQUIRED+=("$2"); shift 2 ;;
+        -R) MANDATORY+=("$2"); shift 2 ;;
         -s) SKIPCODES+=("$2"); shift 2 ;;
         -m) NOTE="$2"; shift 2 ;;
         --) shift; break ;;
@@ -74,6 +78,18 @@ row() {   # row <status> <detail>
 # Escaping for a markdown table cell: a path with a pipe in it would otherwise
 # split the row into two columns.
 cell() { printf '%s' "$1" | sed 's/|/\\|/g'; }
+
+if [ "${#MANDATORY[@]}" -gt 0 ]; then
+    for var in "${MANDATORY[@]}"; do
+        [ -n "${!var:-}" ] && continue
+        printf 'arm="%s" status=fail reason="%s is not set"\n' "$NAME" "$var"
+        printf '::error::%s cannot run: %s is not set on this runner. This is' \
+               "$NAME" "$var"
+        printf ' a mandatory gate, not optional coverage.\n'
+        row '**FAIL**' "required variable \`$(cell "$var")\` is not set"
+        exit 1
+    done
+fi
 
 if [ "${#REQUIRED[@]}" -gt 0 ]; then
     for var in "${REQUIRED[@]}"; do
