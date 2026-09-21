@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` registers its GIC interrupt again. The call into
+  `gic400.library` handed the compiler a wrong return value, the driver
+  (which honours the answer since the previous change) never unmasked the
+  GENET, and the vertical blank was the whole receive service: 24 Mbit/s in,
+  ping 3-16 ms on the A1200. Ping 0.9 ms again.
+
 - `bsdsocket.library` now binds NetX IP and packet-pool access to the opener
   reference that keeps those objects alive, and retires both before shutdown.
 
