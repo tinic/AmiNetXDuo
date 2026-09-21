@@ -802,9 +802,10 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
     return 0;
 }
 
-LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
-                             ULONG *saved)
+LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
+                             const NXD_ADDRESS *addr, ULONG *saved)
 {
+    (VOID)base;
     (VOID)sock;
     (VOID)addr;
 
@@ -813,8 +814,9 @@ LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
     return 0;
 }
 
-VOID bsd_mcast6_finish_send(ULONG saved)
+VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved)
 {
+    (VOID)base;
     (VOID)saved;
 }
 
