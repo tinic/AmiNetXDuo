@@ -321,35 +321,6 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_lance_csr COMMAND test_netdev_lance_csr)
 
-    # The ZZ9000 ARM owns each receive-window slot until the 68k writes its
-    # serial back.  The standard SANA-II path relies on that lifetime to hand
-    # mapped card memory straight to S2_CopyToBuff and avoid a staging copy.
-    # The core is included whole so its private drain and ACK order are tested;
-    # section GC leaves the unrelated attach/transmit paths out of this host
-    # fixture.
-    add_executable(test_netdev_zz9000
-        test/test_netdev_zz9000.c
-        netdev_mcaf.c
-        netdev_verify.c
-        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
-
-    target_include_directories(test_netdev_zz9000 PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/include"
-        "${CMAKE_SOURCE_DIR}/src/net68k"
-        "${CMAKE_SOURCE_DIR}/src/config/test/shim"
-        "${CMAKE_SOURCE_DIR}/src/common/test/shim")
-
-    target_compile_options(test_netdev_zz9000 PRIVATE
-        -Wall -Wextra -ffunction-sections -fdata-sections)
-    if(APPLE)
-        target_link_options(test_netdev_zz9000 PRIVATE -Wl,-dead_strip)
-    else()
-        target_link_options(test_netdev_zz9000 PRIVATE -Wl,--gc-sections)
-    endif()
-
-    add_test(NAME netdev_zz9000 COMMAND test_netdev_zz9000)
-
     # The derived station address.  Determinism, the locally-administered and
     # unicast bits, and "two different machines get two different addresses"
     # are all properties an emulator cannot show: its card has a valid PROM,

@@ -31,14 +31,11 @@
  * CopyMemQuick on an A3000/030-25, the same as the framebuffer -- while the
  * register block is served by the ARM one access at a time (1.1-1.3 MB/s).
  * A frame is therefore copied from the window straight into the opener's
- * buffer: through the direct claim when the opener negotiated it, or by
- * handing the stable window to the ordinary synchronous S2_CopyToBuff
- * callback.  The latter needs no private extension and avoids staging the
- * payload in this driver before the stack copies it again.  The ARM slot is
- * acknowledged only after that callback returns, so it cannot be reused
- * while the opener reads it.  MNT's ZZ9000Net.device copies every frame
- * twice (window -> its buffer -> the stack) and runs a task to do it;
- * measured on the A3000 that task alone was 23% of the CPU at 3.5 Mbit/s.
+ * buffer with the fused sum, and touched in the register block exactly twice:
+ * the serial in and the acknowledge out.  MNT's ZZ9000Net.device copies
+ * every frame twice (window -> its buffer -> the stack) and runs a task to
+ * do it; measured on the A3000 that task alone was 23% of the CPU at
+ * 3.5 Mbit/s.
  *
  * Transmit, on MNT's firmware, is one frame at a time by construction: the
  * ARM services the window writes and the length write in the order they
@@ -636,17 +633,11 @@ static BOOL zz_rint(NetdevNic *nic)
             return TRUE;
         }
 
-        /*
-         * rx() completes every ordinary S2_CopyToBuff callback before it
-         * returns.  Give it the card window itself rather than first copying
-         * the payload to rxbuf: mapped-buffer cores already use this contract.
-         * Keep the slot owned until all openers, filters and orphan reads have
-         * finished with it; acknowledging first would let the ARM overwrite
-         * their source.
-         */
-        nic->rx(nic->rx_arg, (const UBYTE *)(const void *)frame, len);
+        zz_copy_frame(buf + NETDEV_HDR_LEN, frame + NETDEV_HDR_LEN,
+                      (UWORD)(len - NETDEV_HDR_LEN));
         zz_put(nic, ZZ_REG_RX_ACK, serial);
         nic->rx_packets++;
+        nic->rx(nic->rx_arg, buf, len);
         return TRUE;
     }
 
