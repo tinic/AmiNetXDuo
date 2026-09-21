@@ -11,9 +11,14 @@
 #                                 [-e genet|wifi|both]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
-#                                 [-C] [-M] [-V] [-I] [-z]
+#                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
+#
+# -W unpacks the archive under "DH0:My Downloads" -- a source drawer with a
+# space in its name, the way a download folder has one -- so every path the
+# Installer derives from the source and every command it runs with one
+# carries the space.  The install itself is the ordinary one.
 #
 # -N names the card (tests/tools/cards.sh, default a2065); one whose FILE NAME
 # the installer's own list does not carry gets card_config=post-install, which
@@ -51,6 +56,7 @@ NO_BOOT=0
 ANSWER_FILE=""
 TRANSITION=""
 FOREIGN_MODE=""
+SPACES=0
 EMU68_FIXTURE=""
 CONFIG_ONLY=0
 CANCEL_MODE=""
@@ -64,7 +70,7 @@ INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVz" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzW" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -94,6 +100,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVz" opt; do
         V) INVALID_STATIC=1; STATIC=1; CONFIG_ONLY=1 ;;
         I) INVALID_NAMES=1; EXPERT_CUSTOM=1; CONFIG_ONLY=1 ;;
         z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
+        W) SPACES=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
@@ -302,7 +309,7 @@ case "$LEVEL" in
     *) echo "unknown user level: $LEVEL" >&2; exit 2 ;;
 esac
 
-# The unpack below runs from inside DH0:Unpacked, so a relative -a would be
+# The unpack below runs from inside the unpack drawer, so a relative -a would be
 # resolved against the wrong directory and read as a missing archive.
 case "$ARCHIVE" in
     ""|/*) ;;
@@ -350,6 +357,14 @@ NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}
 
 TAG="${AMINETXDUO_RUN_TAG:-wb31}"
 HD="$ROOT/build/testhd-$TAG"
+# Where the archive is unpacked on the Amiga disk.  -W puts it under a drawer
+# whose name has a space, the way a download folder does, so every path the
+# Installer builds from the source drawer, and every shell command it runs
+# with one, is exercised with the space in it.
+UNPACK="$HD/Unpacked"; UNPACK_AMIGA="DH0:Unpacked"
+if [ "$SPACES" = "1" ]; then
+    UNPACK="$HD/My Downloads"; UNPACK_AMIGA="DH0:My Downloads"
+fi
 WORK="$ROOT/build/testwork-$TAG"
 
 # ------------------------------------------------------------ ingredients --
@@ -731,7 +746,8 @@ build_driver() {
            -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
            -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" \
            -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
-           -DDRIVE_PAUSE_OPTIONS="$pause_options" -I"$NDK" \
+           -DDRIVE_PAUSE_OPTIONS="$pause_options" \
+           -DDRIVE_ARCHIVE_DRAWER="\"$UNPACK_AMIGA/AmiNetXDuo\"" -I"$NDK" \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -1152,24 +1168,24 @@ fi
 
 # The download, where a download would be: its own drawer, not the one the
 # installer is going to create.
-mkdir -p "$HD/Unpacked"
-( cd "$HD/Unpacked" && lha -xfq "$ARCHIVE" ) >/dev/null 2>&1 || \
-( cd "$HD/Unpacked" && lha xf "$ARCHIVE" ) >/dev/null 2>&1 || {
+mkdir -p "$UNPACK"
+( cd "$UNPACK" && lha -xfq "$ARCHIVE" ) >/dev/null 2>&1 || \
+( cd "$UNPACK" && lha xf "$ARCHIVE" ) >/dev/null 2>&1 || {
     echo "could not unpack $ARCHIVE" >&2; exit 2; }
 # The drivers this archive supplies; anxzz9000.device only from a build
 # configured -DAMINETXDUO_ZZ9000=ON (CMakeLists.txt), and every check below
 # that walks the supplied drivers walks this list.
 SUPPLIED_DRIVERS="anxnet.device anxgenet.device anxwifipi.device"
-[ -f "$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxzz9000.device" ] &&
+[ -f "$UNPACK/AmiNetXDuo/Devs/Networks/anxzz9000.device" ] &&
     SUPPLIED_DRIVERS="anxnet.device anxgenet.device anxzz9000.device anxwifipi.device"
 
-[ -d "$HD/Unpacked/AmiNetXDuo" ] || {
+[ -d "$UNPACK/AmiNetXDuo" ] || {
     echo "the archive did not unpack to an AmiNetXDuo drawer" >&2
-    ls -la "$HD/Unpacked" >&2
+    ls -la "$UNPACK" >&2
     exit 2
 }
-cp "$INSTALLER" "$HD/Unpacked/AmiNetXDuo/Installer"
-chmod -R a+rx "$HD/Unpacked"
+cp "$INSTALLER" "$UNPACK/AmiNetXDuo/Installer"
+chmod -R a+rx "$UNPACK"
 
 # A previous AmiNetXDuo install leaves both Pi drivers on every machine.  They
 # are payload, not proof of Pi hardware.  Seed precisely that state while the
@@ -1178,8 +1194,8 @@ chmod -R a+rx "$HD/Unpacked"
 # back into the Installer's driver-fallback list.
 if [ "$STALE_PI_DRIVERS" = 1 ]; then
     mkdir -p "$HD/Devs/Networks"
-    cp "$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxgenet.device" \
-       "$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxwifipi.device" \
+    cp "$UNPACK/AmiNetXDuo/Devs/Networks/anxgenet.device" \
+       "$UNPACK/AmiNetXDuo/Devs/Networks/anxwifipi.device" \
        "$HD/Devs/Networks/"
     chmod 755 "$HD/Devs/Networks/anxgenet.device" \
               "$HD/Devs/Networks/anxwifipi.device"
@@ -1191,10 +1207,10 @@ fi
 # drivers, the device-tree probe, or the profile selected on the visible page.
 MISSING_TARGET=""
 case "$MISSING_MODE" in
-    core)    MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" ;;
-    driver)  MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxgenet.device" ;;
-    probe)   MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/InstallNetProbe" ;;
-    minimal) MISSING_TARGET="$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library" ;;
+    core)    MISSING_TARGET="$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" ;;
+    driver)  MISSING_TARGET="$UNPACK/AmiNetXDuo/Devs/Networks/anxgenet.device" ;;
+    probe)   MISSING_TARGET="$UNPACK/AmiNetXDuo/InstallNetProbe" ;;
+    minimal) MISSING_TARGET="$UNPACK/AmiNetXDuo/Libs/minimal/bsdsocket.library" ;;
 esac
 if [ -n "$MISSING_MODE" ]; then
     [ -f "$MISSING_TARGET" ] || {
@@ -1225,8 +1241,8 @@ if [ -n "$EMU68_FIXTURE" ]; then
     "$GCC" -O2 -m68000 -Wall -Wextra -I"$NDK" \
         -DFIXTURE_GENET="$_fixture_genet" -DFIXTURE_WIFI="$_fixture_wifi" \
         -o "$_fixture_bin" "$ROOT/install/test/netprobe-fixture.c" || exit 2
-    cp "$_fixture_bin" "$HD/Unpacked/AmiNetXDuo/InstallNetProbe"
-    chmod 755 "$HD/Unpacked/AmiNetXDuo/InstallNetProbe"
+    cp "$_fixture_bin" "$UNPACK/AmiNetXDuo/InstallNetProbe"
+    chmod 755 "$UNPACK/AmiNetXDuo/InstallNetProbe"
     echo "==> Emu68 fixture: $EMU68_FIXTURE"
 fi
 
@@ -1246,9 +1262,9 @@ FOREIGN_CONFIG_FILES=()
 if [ -n "$FOREIGN_MODE" ]; then
     mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
              "$HD/Devs/Networks" "$HD/S"
-    cp "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" "$HD/Libs/bsdsocket.library"
-    cp "$HD/Unpacked/AmiNetXDuo/Libs/usergroup.library" "$HD/Libs/usergroup.library"
-    cp "$HD/Unpacked/AmiNetXDuo/Libs/tls.library" "$HD/Libs/tls.library"
+    cp "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" "$HD/Libs/bsdsocket.library"
+    cp "$UNPACK/AmiNetXDuo/Libs/usergroup.library" "$HD/Libs/usergroup.library"
+    cp "$UNPACK/AmiNetXDuo/Libs/tls.library" "$HD/Libs/tls.library"
     # Simulate a previously interrupted/older replacement too.  Declining
     # replacement must preserve these byte-for-byte; accepting it must discard
     # every stale .new and replace every stale .old with the live library that
@@ -1333,14 +1349,14 @@ echo "==> the archive holds:"
 for f in Libs/bsdsocket.library Libs/usergroup.library \
          Libs/tls.library Devs/Internet/certificates \
          C/fetch C/ssh C/scp C/scp-runner; do
-    if [ -f "$HD/Unpacked/AmiNetXDuo/$f" ]; then
+    if [ -f "$UNPACK/AmiNetXDuo/$f" ]; then
         printf '      %-36s %s bytes\n' "$f" \
-               "$(wc -c < "$HD/Unpacked/AmiNetXDuo/$f" | tr -d ' ')"
+               "$(wc -c < "$UNPACK/AmiNetXDuo/$f" | tr -d ' ')"
     else
         printf '      %-36s ABSENT\n' "$f"
     fi
 done
-if [ ! -f "$HD/Unpacked/AmiNetXDuo/Libs/tls.library" ]; then
+if [ ! -f "$UNPACK/AmiNetXDuo/Libs/tls.library" ]; then
     echo "!! This archive has NO tls.library, so the https: check cannot pass"
     echo "!! and its failure will say nothing about the product.  Build the"
     echo "!! archive from a tree configured with -DAMINETXDUO_TLS=ON."
@@ -1657,9 +1673,9 @@ if [ "$DRAWER" = "1" ]; then
     echo "============================================================"
 
     mkdir -p "$HD/Libs" "$HD/AmiNetXDuo/Libs"
-    cp "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" \
+    cp "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" \
        "$HD/Libs/bsdsocket.library"
-    cp "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" \
+    cp "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" \
        "$HD/AmiNetXDuo/Libs/bsdsocket.library"
     chmod 644 "$HD/Libs/bsdsocket.library" \
               "$HD/AmiNetXDuo/Libs/bsdsocket.library"
@@ -1901,9 +1917,9 @@ _bytes_of() { # path -> its size, or nothing
 
 if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     _stack_bytes=$(_bytes_of "$_stack_real")
-    _full_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library")
-    _min_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library")
-    _micro_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/micro/bsdsocket.library")
+    _full_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library")
+    _min_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/minimal/bsdsocket.library")
+    _micro_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/micro/bsdsocket.library")
 
     # AMBIGUITY IS REPORTED, NOT RESOLVED.  Three assignments in a row let the
     # LAST match win, so an archive whose drawers hold the same library named
@@ -2133,7 +2149,7 @@ esac
 # that name is there": the bytes, against the copy in the archive that was just
 # installed from, because a stale driver of the right name in the right drawer
 # is the exact failure being gated against and it passes every weaker check.
-ANXNET_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxnet.device"
+ANXNET_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxnet.device"
 ANXNET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxnet.device" 2>/dev/null || true)
 ANXNET_OLD=$(amiga_path "${INST}Devs/Networks/anxnet.device.old" 2>/dev/null || true)
 
@@ -2142,7 +2158,7 @@ if [ "$NO_DRIVERS" = "1" ]; then
     # backup, and an existing file remains byte-for-byte what it was.  The
     # selected vendor driver still boots the stack below.
     for supplied in anxnet.device anxgenet.device anxwifipi.device; do
-        [ -f "$HD/Unpacked/AmiNetXDuo/Devs/Networks/$supplied" ] || {
+        [ -f "$UNPACK/AmiNetXDuo/Devs/Networks/$supplied" ] || {
             echo "!! archive is missing $supplied; omission cannot be tested"
             fail=1
         }
@@ -2213,7 +2229,7 @@ fi
 # The second driver image, anxgenet.device, goes through the same procedure
 # in the installer and is asserted the same way: the archive's bytes, in
 # DEVS:Networks, whatever was there before.
-ANXGENET_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxgenet.device"
+ANXGENET_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxgenet.device"
 ANXGENET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxgenet.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXGENET_ARCHIVE" ]; then
@@ -2245,7 +2261,7 @@ fi
 # The third driver image, anxzz9000.device, likewise -- when the archive
 # carries it.  It ships only from a build configured -DAMINETXDUO_ZZ9000=ON
 # (CMakeLists.txt); an archive without it must leave no such file behind.
-ANXZZ9000_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxzz9000.device"
+ANXZZ9000_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxzz9000.device"
 ANXZZ9000_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxzz9000.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXZZ9000_ARCHIVE" ]; then
@@ -2277,7 +2293,7 @@ else
 fi
 
 # The fourth driver image, anxwifipi.device, likewise.
-ANXWIFIPI_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxwifipi.device"
+ANXWIFIPI_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxwifipi.device"
 ANXWIFIPI_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxwifipi.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXWIFIPI_ARCHIVE" ]; then
@@ -2395,7 +2411,7 @@ fi
 # DOCDIR is SYS:AmiNetXDuo on this run and DOCPARENT is the volume root, which
 # is where the drawer's own icon goes.
 _icon_check() { # archive-relative-path  installed-relative-path
-    local arch="$HD/Unpacked/AmiNetXDuo/$1" got want bytes
+    local arch="$UNPACK/AmiNetXDuo/$1" got want bytes
     local real
     real=$(amiga_path "$2" 2>/dev/null || true)
     if [ ! -f "$arch" ]; then
@@ -2432,7 +2448,7 @@ _icon_check AmiNetXDuo.info  AmiNetXDuo.info
 _icon_check Examples.info    AmiNetXDuo/Examples.info
 _icon_check Terminal.info    AmiNetXDuo/Terminal.info
 
-if [ -f "$HD/Unpacked/AmiNetXDuo/Docs.info" ]; then
+if [ -f "$UNPACK/AmiNetXDuo/Docs.info" ]; then
     echo "  --      Docs.info: packed, not installed by decision (no Docs"
     echo "          drawer is created; see install/ARCHIVE-MANIFEST)"
 fi
@@ -2463,7 +2479,7 @@ done
 if [ "$TRANSITION" = "full-minimal" ] || [ "$TRANSITION" = "full-micro" ]; then
     _tls_live=$(amiga_path "${INST}Libs/tls.library" 2>/dev/null || true)
     _tls_old=$(amiga_path "${INST}Libs/tls.library.old" 2>/dev/null || true)
-    _tls_source="$HD/Unpacked/AmiNetXDuo/Libs/tls.library"
+    _tls_source="$UNPACK/AmiNetXDuo/Libs/tls.library"
     if [ -n "$_tls_live" ]; then
         echo "!! $TRANSITION left tls.library live beside the reduced stack"
         fail=1
@@ -2477,7 +2493,7 @@ if [ "$TRANSITION" = "full-minimal" ] || [ "$TRANSITION" = "full-micro" ]; then
     fi
 elif [ "$TRANSITION" = "minimal-full" ] || [ "$TRANSITION" = "micro-full" ]; then
     _tls_live=$(amiga_path "${INST}Libs/tls.library" 2>/dev/null || true)
-    _tls_source="$HD/Unpacked/AmiNetXDuo/Libs/tls.library"
+    _tls_source="$UNPACK/AmiNetXDuo/Libs/tls.library"
     if [ -z "$_tls_live" ] || [ ! -f "$_tls_live" ] ||
        [ "$(shasum "$_tls_live" | cut -d' ' -f1)" != \
          "$(shasum "$_tls_source" | cut -d' ' -f1)" ]; then
@@ -2628,7 +2644,7 @@ INSTALLER_KNOWN_DRIVERS=$(awk '
             line = substr(line, RSTART + RLENGTH)
         }
     }
-' "$HD/Unpacked/AmiNetXDuo/Install-AmiNetXDuo" 2>/dev/null)
+' "$UNPACK/AmiNetXDuo/Install-AmiNetXDuo" 2>/dev/null)
 
 INSTALLER_KNOWS_DRIVER=no
 for _known in $INSTALLER_KNOWN_DRIVERS; do
@@ -3275,7 +3291,7 @@ if [ "$TERMINAL" = "1" ]; then
         # truncated unpack cannot produce them by accident.
         unpack_ok=1
         for rel in AmiNetXDuo/Terminal/shell.html AmiNetXDuo/ReadMe; do
-            here="$HD/Unpacked/$rel"
+            here="$UNPACK/$rel"
             there="$HD/DavOut/Unpack/$rel"
             [ -f "$here" ] || continue
             cmp -s "$here" "$there" || unpack_ok=0

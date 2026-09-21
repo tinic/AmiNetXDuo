@@ -53,7 +53,11 @@
  * volume on a machine with no Work: partition) and the source drawer must
  * not be the destination drawer.
  */
+#ifdef DRIVE_ARCHIVE_DRAWER
+#define ARCHIVE_DRAWER  DRIVE_ARCHIVE_DRAWER   /* the harness's -W: a path with a space */
+#else
 #define ARCHIVE_DRAWER  "DH0:Unpacked/AmiNetXDuo"
+#endif
 
 /*
  * Set at compile time so that the same program can drive a novice, average
