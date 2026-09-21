@@ -1776,7 +1776,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         return (LONG)hdr->nsh_Count;
     }
 
-    ip = netstack_ip();
+    ip = bsd_stack_ip(SocketBase);
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
@@ -2011,7 +2011,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
 
         case NETCTRL_INTERFACE_CONFIGURE:
         {
-            NX_IP *cip = netstack_ip();
+            NX_IP *cip = bsd_stack_ip(SocketBase);
             LONG   rc2;
 
             if (cip == NULL)
@@ -2224,7 +2224,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             break;
     }
 
-    ip = netstack_ip();
+    ip = bsd_stack_ip(SocketBase);
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 

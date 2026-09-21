@@ -92,6 +92,7 @@ VOID Enable(VOID)
 }
 
 static int forbid_depth;
+static int semaphore_depth;
 
 VOID Forbid(VOID)
 {
@@ -107,6 +108,18 @@ VOID Permit(VOID)
         failures++;
         forbid_depth = 0;
     }
+}
+
+VOID ObtainSemaphore(struct SignalSemaphore *sem)
+{
+    (void)sem;
+    semaphore_depth++;
+}
+
+VOID ReleaseSemaphore(struct SignalSemaphore *sem)
+{
+    (void)sem;
+    semaphore_depth--;
 }
 
 /* The one thing the driver must not do: complete somebody else's IORequest
@@ -303,6 +316,9 @@ static void reset(void)
        so a non-NULL pair is what "this opener is usable" means. */
     opener.op_CopyTo   = (APTR)&opener;
     opener.op_CopyFrom = (APTR)&opener;
+    /* Private-command tests model an opener which completed negotiation.
+       z_unnegotiated_extensions_are_inert() clears this explicitly. */
+    opener.op_Extensions = ANXD_S2F_ALL;
 
     unit.nu_Online     = 1;
     unit.nu_Configured = 1;
@@ -1530,16 +1546,16 @@ static void w_private_commands_are_in_an_nsd_vendor_block(void)
            "ANXD_CMD_TX_FLUSH is in an NSD third-party block");
 }
 
-/* ANXD_CMD_TX_FLUSH: the core's flush under Forbid(), quick, once the unit
+/* ANXD_CMD_TX_FLUSH: the core's flush under the service lock, quick, once the unit
    is online; S2ERR_NOT_SUPPORTED from a core that cannot hold a start; not
    run on an offline unit; in the supported-command list. */
 static int  tx_flush_calls;
-static int  tx_flush_forbid_depth;
+static int  tx_flush_lock_depth;
 static VOID y_tx_flush_core(NetdevNic *nic)
 {
     (void)nic;
     tx_flush_calls++;
-    tx_flush_forbid_depth = forbid_depth;
+    tx_flush_lock_depth = semaphore_depth;
 }
 
 static void y_tx_flush(void)
@@ -1564,8 +1580,8 @@ static void y_tx_flush(void)
     io.ios2_Req.io_Flags = IOF_QUICK;
     netdev_perform(&opener, &io);
     expect(tx_flush_calls == 1, "a flush runs the core's flush once");
-    expect(tx_flush_forbid_depth == 1, "under Forbid()");
-    expect(forbid_depth == 0, "and Permit()s again");
+    expect(tx_flush_lock_depth == 1, "under the service lock");
+    expect(semaphore_depth == 0, "and releases the service lock again");
     expect_u32("with no error", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
     expect((io.ios2_Req.io_Flags & IOF_QUICK) != 0, "and stays quick");
 
@@ -1604,6 +1620,44 @@ static void y_tx_flush(void)
     expect(listed, "ANXD_CMD_TX_FLUSH is in the supported-command list");
 }
 
+/* Command numbers in NSD's third-party range are not globally owned.  A
+   different opener can use the same number for something unrelated, so the
+   driver must not act on ours until that opener negotiated the matching bit. */
+static void z_unnegotiated_extensions_are_inert(void)
+{
+    static const UWORD commands[] = {
+        ANXD_CMD_RX_POLL, ANXD_CMD_RX_CAPACITY,
+        ANXD_CMD_RX_BATCH, ANXD_CMD_TX_FLUSH
+    };
+    struct IOSana2Req io;
+    UWORD i;
+
+    for (i = 0; i < (UWORD)(sizeof(commands) / sizeof(commands[0])); i++)
+    {
+        reset();
+        opener.op_Extensions = 0;
+        unit.nu_Nic.rx_holds = 1;
+        unit.nu_Nic.rx_batches = 1;
+        unit.nu_Nic.rx_capacity = 8192;
+        unit.nu_Nic.tx_flush = y_tx_flush_core;
+        tx_flush_calls = 0;
+        interrupt_calls = 0;
+
+        req(&io, commands[i]);
+        io.ios2_DataLength = 0x12345678UL;
+        netdev_perform(&opener, &io);
+
+        expect_u32("an unnegotiated private command is refused",
+                   (unsigned long)(UBYTE)last_err,
+                   (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+        expect(tx_flush_calls == 0 && interrupt_calls == 0,
+               "and has no hardware-side effect");
+        if (commands[i] == ANXD_CMD_RX_CAPACITY)
+            expect_u32("and does not disclose a capacity result",
+                       (unsigned long)io.ios2_DataLength, 0x12345678UL);
+    }
+}
+
 static UBYTE *x_direct(APTR data, ULONG len) { (void)data; (void)len; return NULL; }
 static VOID   x_filled(APTR data, ULONG len, ULONG sum, UBYTE flags)
 { (void)data; (void)len; (void)sum; (void)flags; }
@@ -1632,6 +1686,8 @@ static void x_rx_batch(void)
     opener.op_RxFilled  = (APTR)x_filled;
     opener.op_RxLinkHdr = TRUE;
     memset(&rec, 0, sizeof(rec));
+    rec.b.Version   = ANXD_S2_RX_BATCH_VERSION;
+    rec.b.Size      = (UWORD)sizeof(rec.bytes);
     rec.b.Count     = 2;
     rec.b.Filled    = 7;                 /* whatever the opener left there */
     rec.b.Cookie[0] = cookie_a;
@@ -1737,6 +1793,36 @@ static void x_rx_batch(void)
     opener.op_RxLinkHdr = TRUE;
     req(&io, ANXD_CMD_RX_BATCH);
     io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    rec.b.Size         = (UWORD)(ANXD_S2_RX_BATCH_SIZE(2) - 1);
+    netdev_perform(&opener, &io);
+    expect_u32("a short batch allocation is a bad argument",
+               (unsigned long)(UBYTE)last_err,
+               (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
+    rec.b.Size = (UWORD)sizeof(rec.bytes);
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
+    io.ios2_Data       = &rec.b;
+    rec.b.Version      = 0;
+    netdev_perform(&opener, &io);
+    expect_u32("an unknown batch version is a bad argument",
+               (unsigned long)(UBYTE)last_err,
+               (unsigned long)(UBYTE)S2ERR_BAD_ARGUMENT);
+    rec.b.Version = ANXD_S2_RX_BATCH_VERSION;
+
+    reset();
+    unit.nu_Nic.rx_batches = 1;
+    opener.op_RxDirect  = (APTR)x_direct;
+    opener.op_RxFilled  = (APTR)x_filled;
+    opener.op_RxLinkHdr = TRUE;
+    req(&io, ANXD_CMD_RX_BATCH);
+    io.ios2_PacketType = 0x0800;
     io.ios2_Data       = NULL;
     netdev_perform(&opener, &io);
     expect_u32("no record is a null pointer",
@@ -1821,6 +1907,7 @@ int main(void)
     w_private_commands_are_in_an_nsd_vendor_block();
     x_rx_batch();
     y_tx_flush();
+    z_unnegotiated_extensions_are_inert();
 
     if (failures != 0)
     {

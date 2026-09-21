@@ -58,12 +58,14 @@
    rather than derived from the buses since the ZZ9000 image has the Zorro
    probe and none of them.  The GENET core rides with the tree. */
 
-/* The task-level transmit under Forbid() (NetdevNic.tx_task_lock): asked
-   for by the GENET, whose Disable() is a 5.5 us trap on Emu68, and by the
-   ZZ9000, whose transmit stalls the bus until the ARM has sent the frame
-   and must not do that with interrupts off.  The classic image keeps the
-   one arm and its size. */
+/* The task-level transmit guarded by NetdevNic.tx_busy and the unit service
+   semaphore (NetdevNic.tx_task_lock): asked for by the GENET, whose Disable()
+   is a 5.5 us trap on Emu68, and by the ZZ9000, whose transmit stalls the bus
+   until the ARM has sent the frame and must not do that with interrupts off.
+   The classic image keeps the one arm and its size. */
 #define NETDEV_HAS_TX_TASK_LOCK (NETDEV_HAS_DTREE || NETDEV_HAS_ZZ9000)
+#define NETDEV_HAS_SERVICE_TASK NETDEV_HAS_DTREE
+#define NETDEV_HAS_SERVICE_LOCK NETDEV_HAS_TX_TASK_LOCK
 
 #ifndef NETDEV_DEVICE_NAME
 #define NETDEV_DEVICE_NAME  ANXNET_DEVICE_NAME

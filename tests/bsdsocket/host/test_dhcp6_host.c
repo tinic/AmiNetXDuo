@@ -39,6 +39,7 @@ static unsigned long h_failures;
     } while (0)
 
 static NX_IP  h_ip;
+static struct AmiSocketBase h_base;
 static BOOL   h_ipv6_on = TRUE;
 
 /* The interface the staged DHCPv6 client runs on, and the one with no IPv4. */
@@ -61,9 +62,12 @@ static BOOL   h_v4_stop_release;
 
 static VOID h_reset(VOID)
 {
+    memset(&h_base, 0, sizeof(h_base));
     memset(&h_ip, 0, sizeof(h_ip));
     h_ip.nx_ip_interface[0].nx_interface_valid = NX_TRUE;
     h_ip.nx_ip_interface[1].nx_interface_valid = NX_TRUE;
+    h_base.sb_StackRefs = 1;
+    h_base.sb_StackIp   = &h_ip;
 
     h_ipv6_on          = TRUE;
     h_v4_state         = AMI_DHCP_IDLE;
@@ -104,7 +108,7 @@ static LONG h_query6(VOID)
     h_hdr->nsh_Version = AMI_NETSTATUS_VERSION;
 
     return bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_DHCP6,
-                             h_buffer, (ULONG)sizeof(h_buffer), NULL);
+                             h_buffer, (ULONG)sizeof(h_buffer), &h_base);
 }
 
 static LONG h_release(UWORD index)
@@ -119,7 +123,7 @@ static LONG h_release(UWORD index)
     h_error = 0;
 
     return bsd_NetStackControl(AMI_NETSTATUS_MAGIC, NETCTRL_DHCP_RELEASE,
-                               &ctl, (ULONG)sizeof(ctl), NULL);
+                               &ctl, (ULONG)sizeof(ctl), &h_base);
 }
 
 /* The three netstack entry points the two paths under test reach.  Every
@@ -530,7 +534,7 @@ static VOID t_health_reports_the_tick_catchups(VOID)
     hdr->nsh_Version = AMI_NETSTATUS_VERSION;
 
     rc = bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_HEALTH,
-                           h_buffer, (ULONG)sizeof(h_buffer), NULL);
+                           h_buffer, (ULONG)sizeof(h_buffer), &h_base);
 
     CHECK(rc == 1, "NETSTATUS_HEALTH answers one record");
     CHECK(hdr->nsh_EntrySize == (UWORD)sizeof(NetStatusHealth),

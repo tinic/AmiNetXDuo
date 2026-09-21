@@ -136,12 +136,12 @@ struct NetdevNic
      * The top half, for a core whose interrupt must be quietened in the
      * server and serviced later: it acknowledges and masks the source and
      * answers whether the interrupt was this board's, nothing more.  The
-     * shell then raises a software interrupt that runs ops->intr under
-     * Disable(), the same way the vertical blank does.  A core may also ask
-     * its own task to run ops->intr with nu_InIsr held.  NULL for a core whose
-     * intr() is the server, which is every core on a Zorro or PCMCIA bus.
+     * shell then asks wake() to schedule ops->intr in task context.  NULL for
+     * a core whose intr() is the server, which is every core on a Zorro or
+     * PCMCIA bus.
      */
     BOOL              (*isr)(NetdevNic *nic);
+    VOID              (*wake)(NetdevNic *nic);
 
     /*
      * The direct-receive path.  rx_claim asks, from the frame's first

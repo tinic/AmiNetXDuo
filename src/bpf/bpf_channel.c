@@ -469,7 +469,8 @@ VOID ami_bpf_capture(APTR cookie, const AmiBpfView *view)
         if (!ch->open || ch->store == NULL)
             continue;
 
-        ami_bpf_lock();
+        if (!ami_bpf_try_lock())
+            continue;
 
         /* Resolve the opaque interface identity under the registry lock. A
            pointer obtained before this lock can name a detached table row

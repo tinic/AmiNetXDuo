@@ -45,6 +45,8 @@ static struct Task       h_task;
 /* The block the base lives in, allocated the way bsd_lib_init() does it. */
 static UBYTE                *h_block;
 static struct AmiSocketBase *h_base;
+static NX_IP                  h_stack_ip;
+static NX_PACKET_POOL         h_stack_pool;
 
 /* The list Exec keeps the library on, so Remove() has something real to do
    and "still in the list" is a question with an answer. */
@@ -81,6 +83,8 @@ static struct
     BYTE    alloc_signal_result;
     LONG    free_signal_calls;
     LONG    create_proc_calls;
+    LONG    forbid_depth;
+    LONG    blocking_under_forbid;
 } h;
 
 static VOID h_machine_reset(BOOL can_unload)
@@ -196,7 +200,11 @@ VOID bsd_timer_teardown(struct AmiSocketBase *base) { (VOID)base; }
 /* bsd_lib_open() calls this on every open, to hold usergroup.library resident
    for ixemul clients.  Nothing here depends on it, and the real one only opens
    a library, so it is a no-op rather than an h_unreachable(). */
-VOID bsd_usergroup_open(VOID)       { }
+VOID bsd_usergroup_open(VOID)
+{
+    if (h.forbid_depth > 0)
+        h.blocking_under_forbid++;
+}
 
 VOID ami_set_address_change_hook(VOID (*hook)(VOID))
 {
@@ -235,6 +243,9 @@ VOID Remove(struct Node *node)
 }
 
 VOID netstack_shutdown(VOID)        { h.shutdown_calls++; }
+NX_IP *netstack_ip(VOID)            { return &h_stack_ip; }
+NX_PACKET_POOL *netstack_pool(VOID) { return &h_stack_pool; }
+VOID bsd_netmon_drop_owner(struct AmiSocketBase *owner) { (VOID)owner; }
 
 /* bsd_task_sweep() discards a dead opener's ThreadX registration through
    this. Nothing here adopts, so there is never one to discard; the stub
@@ -257,12 +268,17 @@ UINT tx_amiga_exec_task_signal(VOID *task, ULONG mask)
 }
 
 /* Harmless, and reached by bsd_lib_close() on the way past. */
-VOID ObtainSemaphore(struct SignalSemaphore *s)  { (VOID)s; }
+VOID ObtainSemaphore(struct SignalSemaphore *s)
+{
+    (VOID)s;
+    if (h.forbid_depth > 0)
+        h.blocking_under_forbid++;
+}
 VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; }
 ULONG AttemptSemaphore(struct SignalSemaphore *s) { (VOID)s; return 1UL; }
 VOID InitSemaphore(struct SignalSemaphore *s)    { (VOID)s; }
-VOID Forbid(VOID)                                { }
-VOID Permit(VOID)                                { }
+VOID Forbid(VOID)                                { h.forbid_depth++; }
+VOID Permit(VOID)                                { h.forbid_depth--; }
 VOID Disable(VOID)                               { }
 VOID Enable(VOID)                                { }
 
@@ -296,17 +312,36 @@ VOID AddTail(struct List *l, struct Node *n) { (VOID)l; (VOID)n; h_unreachable("
 struct Task *FindTask(const char *n) { (VOID)n; return &h_task; }
 VOID Signal(struct Task *t, ULONG s) { (VOID)t; (VOID)s; h_unreachable("Signal"); }
 ULONG Wait(ULONG s) { (VOID)s; h_unreachable("Wait"); return 0UL; }
-BYTE AllocSignal(LONG n) { (VOID)n; h.alloc_signal_calls++; return h.alloc_signal_result; }
+BYTE AllocSignal(LONG n)
+{
+    (VOID)n;
+    h.alloc_signal_calls++;
+    if (h.forbid_depth > 0)
+        h.blocking_under_forbid++;
+    return h.alloc_signal_result;
+}
 VOID FreeSignal(LONG n) { (VOID)n; h.free_signal_calls++; }
 VOID CloseDevice(struct IORequest *io) { (VOID)io; h_unreachable("CloseDevice"); }
-struct Process *CreateNewProc(const struct TagItem *t) { (VOID)t; h.create_proc_calls++; return NULL; }
+struct Process *CreateNewProc(const struct TagItem *t)
+{
+    (VOID)t;
+    h.create_proc_calls++;
+    if (h.forbid_depth > 0)
+        h.blocking_under_forbid++;
+    return NULL;
+}
 
 /* Not h_unreachable(): AMI_WARN is on paths this test drives, and it is
    compiled into every build now rather than out of the default one. */
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 VOID ami_free(APTR p) { (VOID)p; h_unreachable("ami_free"); }
 VOID ami_mem_open_delta(LONG d) { (VOID)d; h_unreachable("ami_mem_open_delta"); }
-LONG ami_netdb_load(VOID) { return 0; }
+LONG ami_netdb_load(VOID)
+{
+    if (h.forbid_depth > 0)
+        h.blocking_under_forbid++;
+    return 0;
+}
 BYTE ami_signal_alloc(VOID) { h_unreachable("ami_signal_alloc"); return -1; }
 VOID ami_signal_free(BYTE s) { (VOID)s; h_unreachable("ami_signal_free"); }
 VOID bsd_bpf_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_bpf_close_all"); }
@@ -510,7 +545,15 @@ static VOID t_transient_stack_reference(VOID)
     printf("a transient worker stack reference\n");
 
     h_machine_reset(TRUE);
+    h_base->sb_StackIp   = &h_stack_ip;
+    h_base->sb_StackPool = &h_stack_pool;
+    CHECK(bsd_stack_ip(h_base) == NULL && bsd_stack_pool(h_base) == NULL,
+          "published pointers without a reference cannot be acquired");
+
     h_base->sb_StackRefs = 1;       /* the launching opener */
+    CHECK(bsd_stack_ip(h_base) == &h_stack_ip &&
+              bsd_stack_pool(h_base) == &h_stack_pool,
+          "the opener reference leases both published NetX objects");
 
     rc = bsd_stack_transient_hold(h_base);
     CHECK(rc != 0, "an API opener without a network is not a stack reference");
@@ -545,6 +588,8 @@ static VOID t_transient_stack_reference(VOID)
           "the last transient count also reaches zero");
     CHECK(h.shutdown_calls == 1,
           "the last worker release shuts the netstack down");
+    CHECK(h_base->sb_StackIp == NULL && h_base->sb_StackPool == NULL,
+          "and retires both published NetX pointers before shutdown");
     CHECK(h.can_unload_calls == 1,
           "and records whether teardown made the segment unloadable");
 
@@ -560,6 +605,7 @@ static VOID t_loopback_startup_failure_ownership(VOID)
     h_machine_reset(TRUE);
     h.startup_result = AMI_NET_ERR_CONFIG;
     h.alloc_signal_result = (BYTE)-1;
+    h.forbid_depth = 1;            /* Exec's library-list critical section */
 
     opened = bsd_lib_open(4UL, h_base);
 
@@ -578,10 +624,15 @@ static VOID t_loopback_startup_failure_ownership(VOID)
           "failed startup returned the library open count");
     CHECK(h_base->sb_StackRefs == 0,
           "failed startup created no opener stack reference");
+    CHECK(h.blocking_under_forbid == 0,
+          "no blocking open work ran inside Exec's Forbid");
+    CHECK(h.forbid_depth == 1,
+          "the failed open restored Exec's Forbid nesting");
 
     h_machine_reset(TRUE);
     h.startup_result = AMI_NET_ERR_CONFIG;
     h.alloc_signal_result = 5;
+    h.forbid_depth = 1;
 
     opened = bsd_lib_open(4UL, h_base);
 
@@ -593,6 +644,10 @@ static VOID t_loopback_startup_failure_ownership(VOID)
     CHECK(h.shutdown_calls == 0, "with nothing to release");
     CHECK(h_base->sb_Lib.lib_OpenCnt == 0,
           "the second failed startup returned the open count");
+    CHECK(h.blocking_under_forbid == 0,
+          "process creation also ran with task switching enabled");
+    CHECK(h.forbid_depth == 1,
+          "the process failure restored Exec's Forbid nesting");
 }
 
 int main(void)

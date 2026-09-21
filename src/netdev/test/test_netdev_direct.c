@@ -552,6 +552,8 @@ static void queue_batch(NetdevOpener *op, ULONG type, UWORD count)
         batch_slot[i].armed = 1;
         batch_rec.b.Cookie[i] = &batch_slot[i];
     }
+    batch_rec.b.Version = ANXD_S2_RX_BATCH_VERSION;
+    batch_rec.b.Size = (UWORD)sizeof(batch_rec.bytes);
     batch_rec.b.Count = count;
     batch_req.ios2_Req.io_Command = ANXD_CMD_RX_BATCH;
     batch_req.ios2_Req.io_Unit = &unit.nu_ExecUnit;

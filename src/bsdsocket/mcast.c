@@ -98,7 +98,7 @@ static BsdMcastEntry *bsd_mcast_free_row(VOID)
 static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
                            const struct ip_mreq *mreq)
 {
-    NX_IP         *ip = netstack_ip();
+    NX_IP         *ip = bsd_stack_ip(base);
     BsdMcastEntry *row;
     ULONG          group;
     LONG           iface;
@@ -170,7 +170,7 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
 static LONG bsd_mcast_leave(struct AmiSocketBase *base, AmiSocket *sock,
                             const struct ip_mreq *mreq)
 {
-    NX_IP         *ip = netstack_ip();
+    NX_IP         *ip = bsd_stack_ip(base);
     BsdMcastEntry *row;
     ULONG          group;
     LONG           iface;
@@ -210,7 +210,7 @@ static VOID bsd_mcast6_close(NX_IP *ip, AmiSocket *sock);
 
 VOID bsd_mcast_close(AmiSocket *sock)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(sock->as_Owner);
     UINT   i;
 
     for (i = 0; i < BSD_MCAST_MEMBERSHIPS; i++)
@@ -333,7 +333,7 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
         case IP_MULTICAST_IF:
         {
             struct in_addr in;
-            NX_IP         *ip = netstack_ip();
+            NX_IP         *ip = bsd_stack_ip(base);
             LONG           iface;
 
             if (optval == NULL)
@@ -385,7 +385,7 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
         case IP_MULTICAST_IF:
         {
             struct in_addr in;
-            NX_IP         *ip = netstack_ip();
+            NX_IP         *ip = bsd_stack_ip(base);
 
             if (optval == NULL || optlen == NULL)
                 return bsd_fail(base, AMI_EFAULT);
@@ -555,7 +555,7 @@ static BsdMcast6Entry *bsd_mcast6_free_row(VOID)
 static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
                             const struct ipv6_mreq *mreq)
 {
-    NX_IP          *ip = netstack_ip();
+    NX_IP          *ip = bsd_stack_ip(base);
     BsdMcast6Entry *row;
     NXD_ADDRESS     group;
     LONG            iface;
@@ -622,7 +622,7 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
 static LONG bsd_mcast6_leave(struct AmiSocketBase *base, AmiSocket *sock,
                              const struct ipv6_mreq *mreq)
 {
-    NX_IP          *ip = netstack_ip();
+    NX_IP          *ip = bsd_stack_ip(base);
     BsdMcast6Entry *row;
     NXD_ADDRESS     group;
     LONG            iface;
@@ -685,10 +685,10 @@ static VOID bsd_mcast6_close(NX_IP *ip, AmiSocket *sock)
     }
 }
 
-LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
-                             ULONG *saved)
+LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
+                             const NXD_ADDRESS *addr, ULONG *saved)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(base);
     LONG   iface;
 
     *saved = 0UL;
@@ -715,9 +715,9 @@ LONG bsd_mcast6_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr,
     return bsd_mcast6_source_index(ip, (UINT)iface);
 }
 
-VOID bsd_mcast6_finish_send(ULONG saved)
+VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(base);
 
     if (saved != 0UL && ip != NULL)
         ip->nx_ipv6_hop_limit = saved;
@@ -844,7 +844,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
         case AMI_IPV6_MULTICAST_IF_BSD:
         case AMI_IPV6_MULTICAST_IF_LINUX:
         {
-            NX_IP *ip = netstack_ip();
+            NX_IP *ip = bsd_stack_ip(base);
             LONG   iface;
 
             if (bsd_mcast6_get_int(base, optval, optlen, &value) != 0)

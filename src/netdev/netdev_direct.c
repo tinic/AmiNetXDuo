@@ -65,8 +65,8 @@ static struct IOSana2Req *netdev_peek_take(struct List *list, ULONG type)
 }
 
 /*
- * The direct-receive claim, from the core's interrupt context, with only the
- * frame header in hand.  Success means the payload's destination is returned
+ * The direct-receive claim, from the core's serialized service context, with
+ * only the frame header in hand.  Success means the payload's destination is returned
  * and the CMD_READ is off its queue with its address fields already filled;
  * the core then drains the hardware straight into the answer and finishes
  * with netdev_rx_claimed().  A claim cannot be cancelled after that point:
@@ -101,6 +101,10 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     type = *(const UWORD *)(CONST_APTR)(hdr + 12);
     plen = (UWORD)(frame_len - NETDEV_HDR_LEN);
 
+    /* BeginIO and AbortIO change these queues from arbitrary tasks.  The
+       service lock keeps the opener objects alive; this short mask makes the
+       select-and-unlink one transaction without covering a callback or copy. */
+    Disable();
     for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
     {
         NetdevOpener      *op  = (NetdevOpener *)n;
@@ -109,7 +113,10 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
         if (hit == NULL)
             continue;
         if (cand != NULL)
+        {
+            Enable();
             return NULL;        /* two takers: everyone gets the staging copy */
+        }
         cand    = op;
         cand_io = hit;
     }
@@ -123,7 +130,10 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
            one lagging private reader must never delay unrelated traffic for
            a second SANA-II opener. */
         if (unit->nu_Openers != 1)
+        {
+            Enable();
             return NULL;
+        }
         for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL;
              n = n->ln_Succ)
         {
@@ -137,15 +147,27 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
                 break;
             }
         }
+        Enable();
         return NULL;
     }
-    if (cand->op_RxDirect == NULL || cand->op_RxFilled == NULL)
-        return NULL;
-    if (cand->op_Filter != NULL)
-        return NULL;
-
-    /* Already located above; netdev_take() would walk to the same node. */
     io = cand_io;
+    nd_remove(&io->ios2_Req.io_Message.mn_Node);
+    Enable();
+
+    if (cand->op_RxDirect == NULL || cand->op_RxFilled == NULL)
+    {
+        Disable();
+        nd_addhead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        Enable();
+        return NULL;
+    }
+    if (cand->op_Filter != NULL)
+    {
+        Disable();
+        nd_addhead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        Enable();
+        return NULL;
+    }
 
     /*
      * A batch: the frame goes to its next cookie and the request stays
@@ -161,7 +183,12 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
 
         dst = ((AnxdS2RxDirect)cand->op_RxDirect)(b->Cookie[b->Filled], plen);
         if (dst == NULL)
+        {
+            Disable();
+            nd_addhead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+            Enable();
             return NULL;
+        }
         {
             UBYTE *lh = dst - NETDEV_HDR_LEN;
             UWORD  i;
@@ -178,22 +205,24 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
         return dst;
     }
 
-    nd_remove(&io->ios2_Req.io_Message.mn_Node);
-
     /* RAW is also a per-request flag.  The direct destination starts after
        the Ethernet header, so accepting this request would omit fourteen
        bytes and report the payload length where SANA-II promises the whole
        frame.  Put it back for the ordinary hand-over immediately below. */
     if (netdev_io_is_raw(cand, io))
     {
+        Disable();
         nd_addhead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        Enable();
         return NULL;
     }
 
     dst = ((AnxdS2RxDirect)cand->op_RxDirect)(io->ios2_Data, plen);
     if (dst == NULL)
     {
+        Disable();
         AddHead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        Enable();
         return NULL;
     }
 
@@ -268,10 +297,15 @@ static VOID netdev_batch_filled(NetdevUnit *unit, NetdevOpener *op,
     b->Filled++;
     if (b->Filled >= b->Count)
     {
-        nd_remove(&io->ios2_Req.io_Message.mn_Node);
         if (unit->nu_BatchPending != 0)
             unit->nu_BatchPending--;
         netdev_reply(io, 0, 0);
+    }
+    else
+    {
+        Disable();
+        nd_addhead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        Enable();
     }
 }
 
@@ -312,35 +346,45 @@ NetdevRxResult netdev_batch_stage(NetdevUnit *unit, NetdevOpener *op,
  * later pass.  nu_BatchPending is the number of such batches, kept by
  * netdev_batch_filled(); a batch aborted while pending leaves the count one
  * high until this scan finds nothing and resets it, which costs one walk of
- * the read lists and nothing else.  Same masked context as the pass.
+ * the read lists and nothing else.  Each unlink is masked; replies are not.
  */
 VOID netdev_batch_flush(NetdevUnit *unit)
 {
-    struct Node *n;
-
-    if (unit->nu_BatchPending == 0)
-        return;
-
-    for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    while (unit->nu_BatchPending != 0)
     {
-        NetdevOpener *op = (NetdevOpener *)n;
-        struct Node  *r  = op->op_Reads.lh_Head;
+        struct IOSana2Req *found = NULL;
+        struct Node       *n;
 
-        while (r->ln_Succ != NULL)
+        Disable();
+        for (n = unit->nu_OpenerList.lh_Head;
+             n->ln_Succ != NULL && found == NULL; n = n->ln_Succ)
         {
-            struct IOSana2Req *io   = (struct IOSana2Req *)r;
-            struct Node       *next = r->ln_Succ;
+            NetdevOpener *op = (NetdevOpener *)n;
+            struct Node  *r;
 
-            if (netdev_is_batch(io) &&
-                ((AnxdS2RxBatch *)io->ios2_Data)->Filled != 0)
+            for (r = op->op_Reads.lh_Head; r->ln_Succ != NULL;
+                 r = r->ln_Succ)
             {
-                nd_remove(r);
-                netdev_reply(io, 0, 0);
+                struct IOSana2Req *io = (struct IOSana2Req *)r;
+
+                if (netdev_is_batch(io) &&
+                    ((AnxdS2RxBatch *)io->ios2_Data)->Filled != 0)
+                {
+                    nd_remove(r);
+                    found = io;
+                    break;
+                }
             }
-            r = next;
         }
+        if (found != NULL && unit->nu_BatchPending != 0)
+            unit->nu_BatchPending--;
+        else if (found == NULL)
+            unit->nu_BatchPending = 0;
+        Enable();
+
+        if (found != NULL)
+            netdev_reply(found, 0, 0);
     }
-    unit->nu_BatchPending = 0;
 }
 
 VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE flags)

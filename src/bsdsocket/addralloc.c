@@ -122,7 +122,7 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
         bsd_strlen((const char *)interface_name) >= (ULONG)BSD_IFNAME_SIZE)
         return CAAME_Invalid_interface_name;
 
-    ip = netstack_ip();
+    ip = bsd_stack_ip(SocketBase);
     if (ip == NULL || bsd_if_index_of(ip, (const char *)interface_name) < 0)
         return CAAME_Interface_not_found;
 
@@ -730,7 +730,7 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
         return;
     }
 
-    ip = netstack_ip();
+    ip = bsd_stack_ip(SocketBase);
     nxif = &ip->nx_ip_interface[index];
 
     if (nxif->nx_interface_address_mapping_needed == 0 ||

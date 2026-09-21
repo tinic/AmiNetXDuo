@@ -284,7 +284,7 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
                               register LONG size __asm("d2"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP       *ip = netstack_ip();
+    NX_IP       *ip = bsd_stack_ip(SocketBase);
     BsdNetStat   fixed;
     BsdPcdWriter writer;
     ULONG        need;

@@ -169,7 +169,7 @@ static LONG bsd_route_parse_tags(struct AmiSocketBase *SocketBase,
 LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP      *ip = netstack_ip();
+    NX_IP      *ip = bsd_stack_ip(SocketBase);
     BsdRouteReq req;
     UINT        status;
 
@@ -231,7 +231,7 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
 LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
                             register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP      *ip = netstack_ip();
+    NX_IP      *ip = bsd_stack_ip(SocketBase);
     BsdRouteReq req;
     UINT        status;
 
@@ -347,7 +347,7 @@ static NX_IP_ROUTING_ENTRY *bsd_route_find(NX_IP *ip, ULONG dest, ULONG mask)
 LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
                             register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP      *ip = netstack_ip();
+    NX_IP      *ip = bsd_stack_ip(SocketBase);
     BsdRouteReq req;
     UINT        status;
 
@@ -742,7 +742,7 @@ struct rt_msghdr *bsd_GetRouteInfo(register LONG address_family __asm("d0"),
                                    register LONG flags __asm("d1"),
                                    register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP         *ip = netstack_ip();
+    NX_IP         *ip = bsd_stack_ip(SocketBase);
     BsdRouteTable *table;
     UWORD          used;
 

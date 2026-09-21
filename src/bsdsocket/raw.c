@@ -36,9 +36,9 @@
 static AmiSocket *bsd_raw_list;
 static ULONG      bsd_raw_installed;
 
-static ULONG bsd_raw_queue_max(VOID)
+static ULONG bsd_raw_queue_max(struct AmiSocketBase *base)
 {
-    NX_PACKET_POOL *pool = netstack_pool();
+    NX_PACKET_POOL *pool = bsd_stack_pool(base);
     ULONG           queue;
 
     if (pool == NULL)
@@ -257,7 +257,7 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
         hdr_len = behind;
     }
 
-    pool = netstack_pool();
+    pool = packet_ptr->nx_packet_pool_owner;
     if (pool == NULL)
         return NX_NOT_SUCCESSFUL;
 
@@ -334,7 +334,7 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
 
 LONG bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(base);
     UINT   status;
 
     if (ip == NULL)
@@ -345,7 +345,7 @@ LONG bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock)
         return bsd_fail(base, AMI_ENOBUFS);
 
     sock->as_RawSemOk = TRUE;
-    sock->as_RawMax   = bsd_raw_queue_max();
+    sock->as_RawMax   = bsd_raw_queue_max(base);
 
     tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
 
@@ -386,7 +386,7 @@ LONG bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock)
 
 VOID bsd_raw_close(AmiSocket *sock)
 {
-    NX_IP      *ip = netstack_ip();
+    NX_IP      *ip = bsd_stack_ip(sock->as_Owner);
     AmiSocket **link;
 
     if ((sock->as_Flags & ASF_RAW) == 0)
@@ -591,7 +591,7 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                          NX_PACKET *packet, const NXD_ADDRESS *addr,
                          ULONG scope, const BsdCmsgSource *src)
 {
-    NX_IP        *ip     = netstack_ip();
+    NX_IP        *ip     = bsd_stack_ip(base);
     NX_PACKET    *handed = packet;
     NXD_ADDRESS   dest   = *addr;
     BsdSourceKind source;
@@ -744,7 +744,7 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
 
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why)
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(sock->as_Owner);
 
     if (why != NULL)
         *why = NX_NO_PACKET;

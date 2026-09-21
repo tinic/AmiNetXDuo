@@ -220,7 +220,7 @@ static UINT bsd_udp_icmp_error_notify(NX_UDP_SOCKET *socket_ptr, UINT error_code
  */
 static VOID bsd_listen_refill(AmiSocket *listener)
 {
-    NX_IP     *ip = netstack_ip();
+    NX_IP     *ip = bsd_stack_ip(listener->as_Owner);
     AmiSocket *p;
 
     if (ip == NULL || (listener->as_Flags & ASF_RELISTENING) != 0)

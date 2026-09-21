@@ -578,7 +578,7 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
             if (bsd_nx_enter(base) != 0)
                 return FALSE;
 
-            ip = netstack_ip();
+            ip = bsd_stack_ip(base);
             if (ip != NULL)
                 nx_status = nx_ip_info_get(
                     ip, &sent, &sent_bytes, &received, &received_bytes,
@@ -643,7 +643,7 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
                         status |= SBSYSSTAT_Resolver;
 
                     {
-                        NX_IP *ip = netstack_ip();
+                        NX_IP *ip = bsd_stack_ip(base);
                         ULONG  gateway = 0UL;
 
                         if (ip != NULL &&

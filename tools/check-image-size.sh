@@ -63,10 +63,16 @@ BUDGETS=(
     # with the batch shell, the pass budget and the RBUF overflow counter
     # after the batched reply and the driver-side GRO left: 399 -> 805
     # Mbit/s against main 027a62c8, 2026-09-20.
-    "default:src/netdev/anxgenet.device:28500"
+    # 28,740 after the GIC top half was reduced to acknowledge/mask/signal and
+    # the ring, callbacks, PHY and watchdog moved into a schedulable service
+    # task.  The extra ownership and lifecycle serialization buy bounded
+    # interrupt latency rather than another data-path feature, 2026-09-20.
+    "default:src/netdev/anxgenet.device:29000"
     # 20,744 at the first image with async TX, the old CONTINUES mark and ack
     # recovery, 2026-09-20; the window copy and the fused sum are the core.
-    "default:src/netdev/anxzz9000.device:23000"
+    # 23,676 after task-owned TX stopped holding Forbid across opener copy
+    # callbacks and lifecycle serialization covered close/offline, 2026-09-20.
+    "default:src/netdev/anxzz9000.device:24000"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -97,8 +103,8 @@ BUDGETS=(
     # 229,560 with the batch reader, 2026-09-20 (see the default row).
     "minimal:src/bsdsocket/bsdsocket.library:231000"
     "minimal:src/netdev/anxnet.device:44500"
-    "minimal:src/netdev/anxgenet.device:28500"
-    "minimal:src/netdev/anxzz9000.device:23000"
+    "minimal:src/netdev/anxgenet.device:29000"
+    "minimal:src/netdev/anxzz9000.device:24000"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
     # First budgeted as a shipping profile at 0.28.9: 181,012 bytes.  Raised
@@ -110,8 +116,8 @@ BUDGETS=(
     # drawer has a budget.
     "micro:src/bsdsocket/bsdsocket.library:197632"
     "micro:src/netdev/anxnet.device:44500"
-    "micro:src/netdev/anxgenet.device:28500"
-    "micro:src/netdev/anxzz9000.device:23000"
+    "micro:src/netdev/anxgenet.device:29000"
+    "micro:src/netdev/anxzz9000.device:24000"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10000"
 )

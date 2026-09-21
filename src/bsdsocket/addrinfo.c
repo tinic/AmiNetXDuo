@@ -107,7 +107,7 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG *socktype,
  * RFC 4007 §11's <zone_id>, as an interface index. "SHOULD support at least
  * numerical indices ... MAY support other kinds of non-null strings", so both
  */
-static ULONG bsd_gai_zone_index(const char *zone)
+static ULONG bsd_gai_zone_index(struct AmiSocketBase *base, const char *zone)
 {
     ULONG value  = 0;
     BOOL  digits = TRUE;
@@ -137,7 +137,7 @@ static ULONG bsd_gai_zone_index(const char *zone)
         return value;
 
     {
-        LONG index = bsd_if_index_of(netstack_ip(), zone);
+        LONG index = bsd_if_index_of(bsd_stack_ip(base), zone);
 
         return (index < 0) ? 0UL : (ULONG)(index + 1);
     }
@@ -402,7 +402,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
             if (family == AF_INET)
                 return EAI_ADDRFAMILY;
 
-            scope = bsd_gai_zone_index(zone);
+            scope = bsd_gai_zone_index(SocketBase, zone);
             if (zone[0] != '\0' && scope == 0)
                 return EAI_NONAME;
 
@@ -712,7 +712,8 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                 if ((flags & (ULONG)NI_WITHSCOPEID) != 0 && scope != 0 &&
                     (addr.nxd_ip_address.v6[0] & 0xFFC00000UL) == 0xFE800000UL)
                 {
-                    (VOID)bsd_if_name_by_index(netstack_ip(), scope, zone,
+                    (VOID)bsd_if_name_by_index(bsd_stack_ip(SocketBase), scope,
+                                               zone,
                                                sizeof(zone));
                 }
 

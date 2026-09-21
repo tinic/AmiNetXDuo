@@ -401,12 +401,20 @@ VOID netdev_queue_batch(NetdevOpener *op, struct IOSana2Req *io)
     AnxdS2RxBatch *b    = (AnxdS2RxBatch *)io->ios2_Data;
     BOOL           queued;
 
+    if ((op->op_Extensions & ANXD_S2F_RX_BATCH) == 0)
+    {
+        netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
+        return;
+    }
     if (b == NULL || op->op_CopyTo == NULL)
     {
         netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_NULL_POINTER);
         return;
     }
-    if (b->Count == 0 || b->Count > ANXD_S2_RX_BATCH_MAX)
+    if (b->Version != ANXD_S2_RX_BATCH_VERSION ||
+        b->Size < (UWORD)sizeof(*b) ||
+        b->Count == 0 || b->Count > ANXD_S2_RX_BATCH_MAX ||
+        (ULONG)b->Size < (ULONG)ANXD_S2_RX_BATCH_SIZE(b->Count))
     {
         netdev_reply(io, S2ERR_BAD_ARGUMENT, S2WERR_GENERIC_ERROR);
         return;
@@ -802,26 +810,29 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 
     case ANXD_CMD_TX_FLUSH:
         /* Start what a run of ANXD_S2_TXF_MORE writes left unstarted.  The
-           core's kick is a register write; Forbid() keeps it clear of a
-           task mid-transmit under the tx task lock, and an interrupt's
-           own kick writes the same index.  Quick, nothing to wait for. */
-        if (unit->nu_Nic.tx_flush == NULL)
+           core's kick is a register write.  The service lock keeps it clear
+           of a task-owned transmit ring.  Quick, nothing to wait for. */
+        if ((op->op_Extensions & ANXD_S2F_TX_MORE) == 0 ||
+            unit->nu_Nic.tx_flush == NULL)
         {
             netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
             return;
         }
+        NETDEV_SERVICE_OBTAIN(unit);
         if (unit->nu_Online)
-        {
-            Forbid();
             unit->nu_Nic.tx_flush(&unit->nu_Nic);
-            Permit();
-        }
+        NETDEV_SERVICE_RELEASE(unit);
         netdev_reply(io, 0, 0);
         return;
 
     case ANXD_CMD_RX_CAPACITY:
         /* What the card holds from the wire with nobody draining it
            (aminetxduo/anxs2ext.h): the core said at attach. */
+        if ((op->op_Extensions & ANXD_S2F_RX_CAPACITY) == 0)
+        {
+            netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
+            return;
+        }
         io->ios2_DataLength = unit->nu_Nic.rx_capacity;
         netdev_reply(io, 0, 0);
         return;
@@ -831,15 +842,16 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          * The opener has re-posted its reads and is about to sleep: if a
          * core left frames in its ring for want of one
          * (NETDEV_CLAIM_BEHIND), deliver them now rather than at the next
-         * interrupt or blank.  The same masked context the server and the
-         * blank give the core; nu_InIsr keeps the three apart.  Quick, and
-         * answered with nothing: the frames arrive as the CMD_READs.
+         * interrupt or blank.  A deferred core wakes its service task; a
+         * classic core keeps the existing masked pass.  Quick, and answered
+         * with nothing: the frames arrive as the CMD_READs.
          */
         /* A poll only means something to a core that holds frames for a
            late read (NetdevNic rx_holds); every other unit says so once and
            the opener stops asking -- on a 68030 a device call per drain is
            measurable, and there would be nothing at the end of it. */
-        if (!unit->nu_Nic.rx_holds)
+        if ((op->op_Extensions & ANXD_S2F_RX_POLL) == 0 ||
+            !unit->nu_Nic.rx_holds)
         {
             netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
             return;
@@ -848,14 +860,19 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         if (unit->nu_Nic.rx_behind && unit->nu_Online)
         {
             unit->nu_RxPollsHeld++;
-            Disable();
-            if (unit->nu_InIsr == 0)
+            if (unit->nu_Nic.isr != NULL && unit->nu_Nic.wake != NULL)
+                unit->nu_Nic.wake(&unit->nu_Nic);
+            else
             {
-                unit->nu_InIsr = 1;
-                (VOID)netdev_interrupt(unit);
-                unit->nu_InIsr = 0;
+                Disable();
+                if (unit->nu_InIsr == 0)
+                {
+                    unit->nu_InIsr = 1;
+                    (VOID)netdev_interrupt(unit);
+                    unit->nu_InIsr = 0;
+                }
+                Enable();
             }
-            Enable();
         }
         netdev_reply(io, 0, 0);
         return;

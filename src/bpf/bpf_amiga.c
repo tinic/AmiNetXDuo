@@ -15,24 +15,42 @@
 #include <proto/timer.h>
 
 /*
- * Forbid()/Permit(), not Disable()/Enable(). The taps run on the SANA-II
- * reader threads and on whatever thread is inside nx_tcp_socket_send, and the
- * vectors run on application tasks, so the channel table is shared. Nothing
- * here runs at interrupt level, and long Disable() regions break serial,
- * floppy and audio (docs/RESEARCH.md 6.2).
- *
- * The longest bracket is ami_bpf_capture(), which copies the captured prefix
- * of a frame inside it, bounded by the snap length. The copy-out in
- * bpf_read(), which can be a whole 32 KB buffer, happens outside the bracket.
+ * A real semaphore, not a machine-wide Forbid().  Control calls may wait for
+ * one another without stopping unrelated tasks.  Packet taps use Attempt and
+ * skip capture on contention: they can run from an adopted ThreadX caller,
+ * where an Exec Wait() would stop the network scheduler which must release
+ * the lock.  Capture is observational, so dropping that record is the only
+ * safe backpressure policy.
  */
-VOID ami_bpf_lock(VOID)
+static struct SignalSemaphore ami_bpf_sem;
+static BOOL                   ami_bpf_sem_ready;
+
+static VOID ami_bpf_lock_init(VOID)
 {
     Forbid();
+    if (!ami_bpf_sem_ready)
+    {
+        InitSemaphore(&ami_bpf_sem);
+        ami_bpf_sem_ready = TRUE;
+    }
+    Permit();
+}
+
+VOID ami_bpf_lock(VOID)
+{
+    ami_bpf_lock_init();
+    ObtainSemaphore(&ami_bpf_sem);
+}
+
+BOOL ami_bpf_try_lock(VOID)
+{
+    ami_bpf_lock_init();
+    return AttemptSemaphore(&ami_bpf_sem) ? TRUE : FALSE;
 }
 
 VOID ami_bpf_unlock(VOID)
 {
-    Permit();
+    ReleaseSemaphore(&ami_bpf_sem);
 }
 
 APTR ami_bpf_current_task(VOID)
@@ -76,7 +94,7 @@ ULONG ami_bpf_signals_set(ULONG mask)
  * TimerBase is opened by src/common/compat.c for its EClock millisecond
  * counter, and ami_bpf_time_init() forces that open from ami_bpf_open(). It
  * must happen there and not here: ami_bpf_capture() calls ami_bpf_now() with
- * the channel lock, a Forbid(), held, and ami_millis() reaches
+ * the channel lock held, and ami_millis() reaches
  * OpenDevice("timer.device") on the first call. Here that runs on a SANA-II
  * reader thread with task switching off, once per captured frame for as long
  * as the open keeps failing.

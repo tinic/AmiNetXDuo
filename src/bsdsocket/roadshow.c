@@ -284,7 +284,7 @@ VOID bsd_ReleaseDomainNameServerList(register struct List *list __asm("a0"),
 LONG bsd_In_LocalAddr(register in_addr_t address __asm("d0"),
                       register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP *ip = netstack_ip();
+    NX_IP *ip = bsd_stack_ip(SocketBase);
     ULONG  addr = BSD_NTOHL((ULONG)address);
     UINT   i;
 

@@ -39,4 +39,8 @@ STRPTR bsd_netmon_caller(struct AmiSocketBase *base);
  */
 BOOL bsd_netmon_busy(VOID);
 
+/* Stop every callback installed by a library base before that base and the
+   caller's Hook storage disappear. */
+VOID bsd_netmon_drop_owner(struct AmiSocketBase *owner);
+
 #endif /* AMINETXDUO_BSDSOCKET_NETMONITOR_H */

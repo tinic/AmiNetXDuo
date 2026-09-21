@@ -102,10 +102,10 @@ TABLE = {
     # buffer, not a nicety.  Guarded because it is per-frame and was the only
     # one on that path with no ceiling.
     "sana2_copy.c":     [("_ami_sana2_copy_to_buff",  91)],   # 81
-    "netdev_device.c":  [("_netdev_rx",              170),    # 155; 170 with the
-                                                             #  batch test on the
-                                                             #  staging hand-over,
-                                                             #  2026-09-20
+    "netdev_device.c":  [("_netdev_rx",              182),    # 155; 170 with the
+                                                             #  batch test, 182 with
+                                                             #  short Disable pairs
+                                                             #  around shared queues
                          ("_netdev_tx_direct",       125),    # 118, the ACK path:
                                                              #  98 -> 118 with the
                                                              #  reclaim-on-ask and
@@ -130,10 +130,10 @@ TABLE = {
     # on the data-ACK ramp's limit, so a 256 KB receive window (the WAN case
     # of bsdsocket_window.h) does not acknowledge every 128 KB.  Four
     # instructions per segment, bought on purpose.
-    "nx_tcp_socket_state_data_check.c":  [("__nx_tcp_socket_state_data_check",  475)],  # 429; 475 counts
+    "nx_tcp_socket_state_data_check.c":  [("__nx_tcp_socket_state_data_check",  483)],  # 429; 483 counts
                                                                                         # the queue-cap drop
-                                                                                        # (two sites, off the
-                                                                                        # in-order path)
+                                                                                        # in the current default
+                                                                                        # arm (off the in-order path)
     "nx_tcp_packet_process.c":           [("__nx_tcp_packet_process",           546)],  # 502
     "nx_tcp_socket_packet_process.c":    [("__nx_tcp_socket_packet_process",    515)],  # 474
     "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   604)],  # 556

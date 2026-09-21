@@ -87,6 +87,9 @@ if(AMINETXDUO_WIFIPI_LINK AND CMAKE_CROSSCOMPILING)
     target_compile_options(anxwifipi_device PRIVATE
         -m68020 -mtune=68040 -fno-optimize-sibling-calls
         -Os -Wall -Wextra -Werror -fomit-frame-pointer
+        # sdio.c deliberately uses Duff's device for the FIFO copy.  GCC 16's
+        # strict CI warning level does not accept its trailing annotations.
+        -Wno-implicit-fallthrough
         -ffreestanding -fno-builtin -fno-tree-loop-distribute-patterns)
     # -Wl,-u,_RomTag: nothing in the image references the ROMTag (exec finds it
     # by scanning), so under -flto it is a link root or it is gone.  The

@@ -135,7 +135,7 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte,
 {
     NX_TCP_SOCKET  *tcp    = &sock->as_Nx.tcp;
     NX_IP          *ip     = tcp->nx_tcp_socket_ip_ptr;
-    NX_PACKET_POOL *pool   = netstack_pool();
+    NX_PACKET_POOL *pool   = bsd_stack_pool(base);
     NX_PACKET      *packet = NX_NULL;
     UINT          (*saved_filter)(VOID *, UINT) = NX_NULL;
     BOOL            armed  = FALSE;
