@@ -1494,6 +1494,15 @@ if(AMINETXDUO_TX_RUN)
     add_compile_definitions(AMINETXDUO_TX_RUN)
 endif()
 
+# anxzz9000.device, the MNT ZZ9000's Ethernet on the fork's firmware, is
+# built by every configuration (its code and tests stay compiled) but goes
+# into the release payload and the archive only when this is ON.  It is OFF
+# while the A3000 still freezes under a long receive on it (2026-09-20,
+# docs/plans/zz9000-ethernet.md); the Installer treats the file as optional
+# and never resolves a ZZ9000 to it when the archive does not carry it.
+option(AMINETXDUO_ZZ9000
+       "Ship anxzz9000.device in the release archive" OFF)
+
 # The four rxverify counters that fire on every received frame, inside the
 # protection hold.  Off by default; see src/net68k/net68k.h.  The error and
 # skip counters are unconditional and do not need this.
@@ -1813,8 +1822,10 @@ if(CMAKE_CROSSCOMPILING)
     # the profiler and the trust store always come from the full build.
     add_custom_target(release_libraries)
     add_dependencies(release_libraries
-        bsdsocket_library usergroup_library anxnet_device anxgenet_device
-        anxzz9000_device)
+        bsdsocket_library usergroup_library anxnet_device anxgenet_device)
+    if(AMINETXDUO_ZZ9000)
+        add_dependencies(release_libraries anxzz9000_device)
+    endif()
     if(TARGET anxwifipi_device)
         add_dependencies(release_libraries anxwifipi_device)
     endif()

@@ -1156,6 +1156,13 @@ mkdir -p "$HD/Unpacked"
 ( cd "$HD/Unpacked" && lha -xfq "$ARCHIVE" ) >/dev/null 2>&1 || \
 ( cd "$HD/Unpacked" && lha xf "$ARCHIVE" ) >/dev/null 2>&1 || {
     echo "could not unpack $ARCHIVE" >&2; exit 2; }
+# The drivers this archive supplies; anxzz9000.device only from a build
+# configured -DAMINETXDUO_ZZ9000=ON (CMakeLists.txt), and every check below
+# that walks the supplied drivers walks this list.
+SUPPLIED_DRIVERS="anxnet.device anxgenet.device anxwifipi.device"
+[ -f "$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxzz9000.device" ] &&
+    SUPPLIED_DRIVERS="anxnet.device anxgenet.device anxzz9000.device anxwifipi.device"
+
 [ -d "$HD/Unpacked/AmiNetXDuo" ] || {
     echo "the archive did not unpack to an AmiNetXDuo drawer" >&2
     ls -la "$HD/Unpacked" >&2
@@ -1252,7 +1259,7 @@ if [ -n "$FOREIGN_MODE" ]; then
         printf 'incomplete staging file from an interrupted install: %s\n' "$_lib" \
             > "$HD/Libs/$_lib.new"
     done
-    for _driver in anxnet.device anxgenet.device anxzz9000.device anxwifipi.device; do
+    for _driver in $SUPPLIED_DRIVERS; do
         printf 'incomplete staging file from an interrupted install: %s\n' \
             "$_driver" > "$HD/Devs/Networks/$_driver.new"
     done
@@ -2104,7 +2111,7 @@ case "$FOREIGN_MODE" in
             echo "  ok      stale $_name.new removed"
         fi
     done
-    for _name in anxnet.device anxgenet.device anxzz9000.device anxwifipi.device; do
+    for _name in $SUPPLIED_DRIVERS; do
         if amiga_path "Devs/Networks/$_name.new" >/dev/null 2>&1; then
             echo "!! replacing $FOREIGN_MODE left stale $_name.new live"
             fail=1
@@ -2134,7 +2141,7 @@ if [ "$NO_DRIVERS" = "1" ]; then
     # Declining the supplied drivers means precisely that: no new driver, no
     # backup, and an existing file remains byte-for-byte what it was.  The
     # selected vendor driver still boots the stack below.
-    for supplied in anxnet.device anxgenet.device anxzz9000.device anxwifipi.device; do
+    for supplied in anxnet.device anxgenet.device anxwifipi.device; do
         [ -f "$HD/Unpacked/AmiNetXDuo/Devs/Networks/$supplied" ] || {
             echo "!! archive is missing $supplied; omission cannot be tested"
             fail=1
@@ -2235,15 +2242,19 @@ else
     fi
 fi
 
-# The third driver image, anxzz9000.device, likewise.
+# The third driver image, anxzz9000.device, likewise -- when the archive
+# carries it.  It ships only from a build configured -DAMINETXDUO_ZZ9000=ON
+# (CMakeLists.txt); an archive without it must leave no such file behind.
 ANXZZ9000_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxzz9000.device"
 ANXZZ9000_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxzz9000.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXZZ9000_ARCHIVE" ]; then
-    echo "  MISSING Devs/Networks/anxzz9000.device IN THE ARCHIVE"
-    echo "!! dist/make-dist.sh's DEVICES list carries netdev/anxzz9000; the archive"
-    echo "   this ran from has no such file."
-    fail=1
+    if [ -n "$ANXZZ9000_INSTALLED" ] && [ -f "$ANXZZ9000_INSTALLED" ]; then
+        echo "!! THE ARCHIVE CARRIES NO anxzz9000.device, YET ONE WAS INSTALLED"
+        fail=1
+    else
+        echo "  ok      anxzz9000.device not in this archive (AMINETXDUO_ZZ9000 off), none installed"
+    fi
 elif [ -z "$ANXZZ9000_INSTALLED" ] || [ ! -f "$ANXZZ9000_INSTALLED" ]; then
     echo "  MISSING DEVS:Networks/anxzz9000.device"
     echo "!! THE INSTALLER DID NOT INSTALL THE ZZ9000 DRIVER.  P_install_device"

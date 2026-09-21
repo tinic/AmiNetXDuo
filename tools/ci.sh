@@ -93,6 +93,7 @@ CROSS_CONFIGS=(
     # leak nobody wrote a test for, and an instrument that stops building is
     # the one nobody notices.
     "census:-DAMINETXDUO_ALLOCCENSUS=ON"
+    "zz9000:-DAMINETXDUO_ZZ9000=ON"
     # ONE PER-CPU ARM, and only one.  There used to be three -- m68000, m68040
     # and m68060 -- because the archive shipped a library per CPU and each had
     # to compile; that is over, one build serves every 68k and chooses its

@@ -81,7 +81,8 @@
   with the card. AmiNetXDuo also ships four SANA-II drivers:
   anxnet.device for classic cards, anxgenet.device for Raspberry Pi 4/CM4
   Ethernet behind a PiStorm32, anxwifipi.device for that machine's Wi-Fi,
-  and anxzz9000.device for the MNT ZZ9000's Ethernet. The Installer asks
+  and anxzz9000.device for the MNT ZZ9000's Ethernet (not in the release
+  archive yet; built with AMINETXDUO_ZZ9000=ON). The Installer asks
   whether to put them in DEVS:Networks and offers yes; nothing uses one
   until an interface file names it.
   See @{"CheckNetDevice" link CHECKNETDEVICE}.
@@ -226,9 +227,9 @@
   which LIBS: reaches through the block above on a machine that already
   has this layout: a reinstall into the same drawer goes ahead.
 
-  Devs/Networks holds AmiNetXDuo's four SANA-II drivers. Copy
-  anxnet.device, anxgenet.device, anxzz9000.device and anxwifipi.device
-  to DEVS:Networks,
+  Devs/Networks holds AmiNetXDuo's SANA-II drivers. Copy anxnet.device,
+  anxgenet.device and anxwifipi.device (and anxzz9000.device, from an
+  archive built to carry it) to DEVS:Networks,
   which is what the Installer offers to do. Nothing uses one until an
   interface file names it with DEVICE=. The Libs/minimal and Libs/micro
   drawers hold the same stack with the large options compiled out. Each is an
@@ -2991,6 +2992,7 @@
       DEVS:Networks/anxnet.device     classic-card SANA-II driver
       DEVS:Networks/anxgenet.device   PiStorm32 GENET SANA-II driver
       DEVS:Networks/anxzz9000.device  MNT ZZ9000 Ethernet SANA-II driver
+                                      (archives built AMINETXDUO_ZZ9000=ON)
       DEVS:Networks/anxwifipi.device  PiStorm32 Wi-Fi SANA-II driver
 
   The Installer offers to put all four here. Nothing reads one until an
