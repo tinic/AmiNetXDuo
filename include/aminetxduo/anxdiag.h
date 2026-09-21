@@ -91,6 +91,9 @@ extern "C" {
 #define ANXDIAG_GENET_IRQ      93   /* the GIC interrupt number, 0 = none    */
 #define ANXDIAG_GENET_PHY      94   /* PHY ID registers 2:3, ffffffff = no
                                        answer on the MDIO bus                 */
+#define ANXDIAG_GENET_GIC      96   /* the GIC-400 distributor's 68k window,
+                                       0 = not found or not a GIC-400: the
+                                       dead-line workaround is off          */
 #define ANXDIAG_NE_NODEID_PORT 97   /* AX88796: node ID bytes 0..3, through
                                        the 16-bit port (ne2000.c says why)   */
 #define ANXDIAG_CACHE_GUARD    98   /* a Zorro III board on a 68030: how the
