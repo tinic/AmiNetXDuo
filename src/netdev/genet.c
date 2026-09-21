@@ -224,6 +224,10 @@ typedef struct GenetCore
 
     UBYTE   held_blanks;    /* blanks the head of the ring has been held for */
     UBYTE   drop_held;      /* the next unclaimable head frame is dropped    */
+    UBYTE   gic_silent;     /* blanks with frames pending and no interrupt   */
+    UBYTE   gic_pad;
+    ULONG   gic_ints_seen;  /* GE_ST_INTS at the last blank                  */
+    ULONG   gicd;           /* GIC-400 distributor, 68k address, 0 = none    */
 
     /* The link task (GE_LINK_STACK above). */
     struct Task    *link_task;      /* NULL: no memory for it                */
@@ -236,6 +240,38 @@ typedef struct GenetCore
    this wire's rate, and a reader that has not run in that time is not going
    to. */
 #define GE_HOLD_BLANKS  5
+
+/*
+ * WORKAROUND: THE GIC LINE CAN BE FOUND DEAD.  A GIC-400 SPI that is left
+ * active (acknowledged and never ended) or pending across a warm reboot is
+ * not signalled again however often the GENET asserts it.  Seen once,
+ * 2026-09-20/21 on the A1200: after one reboot every build saw RXDMA_DONE
+ * pending and unmasked at the chip and not one interrupt at the CPU, across
+ * four further warm reboots, until the SoC itself was reset.  The most
+ * likely path there was a stale registration from an earlier instance
+ * taking the line (netdev_dtree.c's wrapper defect, since fixed); three
+ * deliberate warm reboots mid-stream with the fixed wrapper did not
+ * reproduce it, so what remains is a hardware state, not a known trigger.
+ *
+ * The state belongs to the interrupt controller, and the right place to
+ * clear it is the library that owns the controller when it enables a line;
+ * until every machine runs one that does, this driver clears the two bits
+ * of its own line -- pending and active, nothing else -- at init before it
+ * unmasks, and from the blank when frames sit pending and unmasked with no
+ * interrupt arriving for GE_GIC_SILENT_BLANKS blanks (the deaf fallback in
+ * netdev_tick services the ring every ten blanks meanwhile).  The
+ * distributor is found through the device tree and believed only when
+ * GICD_IIDR names a GIC-400.  Counted in NetDevStats, both the clears and
+ * the silent blanks, so a machine that needed it says so.
+ */
+#define GICD_IIDR           0x008
+#define GICD_ISENABLER      0x100
+#define GICD_ICPENDR        0x280
+#define GICD_ISACTIVER      0x300
+#define GICD_ICACTIVER      0x380
+#define GICD_IIDR_GIC400    0x0200043BUL    /* ProductID 0x020, ARM      */
+#define GICD_IIDR_MASK      0xFF000FFFUL
+#define GE_GIC_SILENT_BLANKS 3              /* pending, unmasked, unheard */
 
 #define GE(nic)         ((GenetCore *)(nic)->core)
 
@@ -264,6 +300,10 @@ enum
     GE_ST_TX_HELD,          /* writes whose start waited for company (TXF_MORE) */
     GE_ST_TX_CSUM,          /* frames whose transport checksum the TBUF wrote */
     GE_ST_CPUSH_SUPERVISED, /* 1: page pushes enter through Supervisor()   */
+    GE_ST_GIC_CLEARED,      /* the line's pending/active state cleared at the
+                               distributor: at init, or by the blank        */
+    GE_ST_GIC_SILENT,       /* blanks that found frames pending, unmasked and
+                               no interrupt (the line was dead)             */
 #ifdef GE_PROBE_ST
     /* The bottom half timed on the Pi's system timer (bus 0x7E003000, 68k
        0xF8003000 through Emu68's /scb mapping, 1 MHz, a 10 ns read):
@@ -315,6 +355,8 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET transmits held for company",
     "GENET transmit checksums by the chip",
     "GENET supervised page push (1)",
+    "GENET GIC line cleared (init or revived)",
+    "GENET blanks with frames pending, no interrupt",
 #ifdef GE_PROBE_ST
     "PROBE genet_intr us",
     "PROBE cache op us",
@@ -369,6 +411,33 @@ static inline ULONG ge_rd(NetdevNic *nic, ULONG off)
 static inline VOID ge_wr(NetdevNic *nic, ULONG off, ULONG v)
 {
     *(volatile ULONG *)(nic->board + off) = __builtin_bswap32(v);
+}
+
+/* The GIC-400 distributor's registers, little-endian like the SoC's. */
+static inline ULONG gicd_rd(const GenetCore *c, ULONG off)
+{
+    return __builtin_bswap32(*(const volatile ULONG *)(c->gicd + off));
+}
+
+static inline VOID gicd_wr(const GenetCore *c, ULONG off, ULONG v)
+{
+    *(volatile ULONG *)(c->gicd + off) = __builtin_bswap32(v);
+}
+
+/* WORKAROUND (the comment above GICD_IIDR): clear the line's pending and
+   active state at the distributor.  Nothing else of the GIC's is touched:
+   enable, priority and target stay the library's. */
+static VOID ge_gic_clear(NetdevNic *nic)
+{
+    GenetCore *c   = GE(nic);
+    ULONG      n   = (nic->dt_irq >> 5) << 2;
+    ULONG      bit = 1UL << (nic->dt_irq & 31UL);
+
+    if (c->gicd == 0 || nic->dt_irq == 0)
+        return;
+    gicd_wr(c, GICD_ICPENDR + n, bit);
+    gicd_wr(c, GICD_ICACTIVER + n, bit);
+    nic->core_stat[GE_ST_GIC_CLEARED]++;
 }
 
 /*
@@ -917,7 +986,15 @@ static LONG genet_init(NetdevNic *nic)
     ge_wr(nic, GENET_INTRL2_CPU_SET_MASK, 0xffffffffUL);
     ge_wr(nic, GENET_INTRL2_CPU_CLEAR, 0xffffffffUL);
     if (nic->dt_irq_live)
+    {
+        /* WORKAROUND (the comment above GICD_IIDR): whatever an earlier
+           instance or boot left of the line's state goes before the first
+           frame can assert it. */
+        ge_gic_clear(nic);
         ge_wr(nic, GENET_INTRL2_CPU_CLEAR_MASK, GE_IRQ_WANTED);
+    }
+    c->gic_silent    = 0;
+    c->gic_ints_seen = nic->core_stat[GE_ST_INTS];
 
     c->irq_pending = 0;
     nic->running = TRUE;
@@ -1694,6 +1771,37 @@ static BOOL genet_tick(NetdevNic *nic)
         ge_link_wake(c);
     }
 
+    /* WORKAROUND, the line watchdog (the comment above GICD_IIDR): frames
+       pending and unmasked at the chip, and no interrupt counted since the
+       last blank, GE_GIC_SILENT_BLANKS blanks running -- the line is not
+       being delivered.  Clear its pending/active state and count; the deaf
+       fallback in netdev_tick is what services the ring meanwhile. */
+    if (nic->dt_irq_live && c->gicd != 0)
+    {
+        ULONG ints = nic->core_stat[GE_ST_INTS];
+
+        if (ints != c->gic_ints_seen)
+        {
+            c->gic_ints_seen = ints;
+            c->gic_silent    = 0;
+        }
+        else if ((ge_rd(nic, GENET_INTRL2_CPU_STAT) &
+                  ~ge_rd(nic, GENET_INTRL2_CPU_STAT_MASK) &
+                  GENET_IRQ_RXDMA_DONE) != 0)
+        {
+            nic->core_stat[GE_ST_GIC_SILENT]++;
+            if (++c->gic_silent >= (UBYTE)GE_GIC_SILENT_BLANKS)
+            {
+                c->gic_silent = 0;
+                ge_gic_clear(nic);
+            }
+        }
+        else
+        {
+            c->gic_silent = 0;
+        }
+    }
+
     /* The backstop for a run whose flush never came (the sender was taken
        off the CPU mid-run): nothing waits longer than a blank.  Descriptors
        are written before tx_pidx advances, so a kick from here starts only
@@ -1940,6 +2048,21 @@ static LONG genet_attach(NetdevNic *nic)
                      (ULONG)c->rx_buf);
     netdev_diag_note(ANXDIAG_GENET_IRQ, netdev_diag_card(nic->card),
                      nic->dt_irq);
+
+    /* The GIC-400 distributor, for ge_gic_clear: the tree's node, believed
+       only when its IIDR names the part. */
+    c->gicd = 0;
+    {
+        NetdevDtInfo gic;
+
+        if (netdev_dtree_find("arm,gic-400", &gic) && gic.base != 0)
+        {
+            c->gicd = gic.base;
+            if ((gicd_rd(c, GICD_IIDR) & GICD_IIDR_MASK) != GICD_IIDR_GIC400)
+                c->gicd = 0;
+        }
+    }
+    netdev_diag_note(ANXDIAG_GENET_GIC, netdev_diag_card(nic->card), c->gicd);
 
     /* The PHY, identified and nothing more: two MDIO reads, which disturb
        nothing.  Its delays and negotiation are set up when the unit goes

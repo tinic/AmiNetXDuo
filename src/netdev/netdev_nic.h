@@ -37,9 +37,9 @@
 
 /* Room for a core's own special-statistics records. */
 #ifdef GE_PROBE_ST
-#define NETDEV_CORE_STATS   40      /* + the GENET probe's thirteen RX, four TX */
+#define NETDEV_CORE_STATS   42      /* + the GENET probe's thirteen RX, four TX */
 #else
-#define NETDEV_CORE_STATS   23      /* the GENET's shipping counter set */
+#define NETDEV_CORE_STATS   25      /* the GENET's shipping counter set, two GIC line counters 2026-09-21 */
 #endif
 
 /*

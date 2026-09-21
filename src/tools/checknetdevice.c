@@ -310,6 +310,15 @@ static VOID cnd_step(const AnxDiagStep *st)
             say("  GIC interrupt %lu (SPI %lu), through gic400.library.\n",
                 v, v - 32UL);
         return;
+    case ANXDIAG_GENET_GIC:
+        if (v == 0)
+            say("  No GIC-400 distributor in the tree: the workaround that\n"
+                "  clears a line found dead is off; a cold start clears one.\n");
+        else
+            say("  GIC-400 distributor at $%08lx: workaround on -- the line's\n"
+                "  pending/active state is cleared at start and whenever frames\n"
+                "  wait with no interrupt (NetDevStats counts both).\n", v);
+        return;
     case ANXDIAG_NE_NODEID_PORT:
         say("  AX88796 node ID, first four bytes, through the 16-bit port:\n"
             "  $%08lx.\n", v);

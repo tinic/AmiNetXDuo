@@ -9,6 +9,16 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Workaround in `anxgenet.device` for a GIC line found dead: a Raspberry Pi
+  interrupt line left pending or active across a warm reboot is never
+  delivered again, and the machine then receives through the vertical
+  blank alone (seen once, 15-40 Mbit/s, ping 7-16 ms, until a cold start).
+  The driver now clears its own line's pending and active state at start
+  and whenever frames wait unmasked with no interrupt for three blanks;
+  `NetDevStats` counts both and `CheckNetDevice` shows whether the
+  distributor was found. The proper home for this is the interrupt
+  library; the workaround goes when it does it.
+
 - `anxgenet.device` serves its ring from the software interrupt again, as
   every other core does; the service task that took it over for a day is
   gone. A1200: iperf in 375 -> 869-883 Mbit/s, out 231 -> 532; the first
