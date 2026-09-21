@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` serves its ring from the software interrupt again, as
+  every other core does; the service task that took it over for a day is
+  gone. A1200: iperf in 375 -> 869-883 Mbit/s, out 231 -> 532; the first
+  transfer after a boot no longer stalls at 15 Mbit/s.
+
 - `anxgenet.device` registers its GIC interrupt again. The call into
   `gic400.library` handed the compiler a wrong return value, the driver
   (which honours the answer since the previous change) never unmasked the
@@ -17,12 +22,6 @@ version at the top when it merges.
 
 - `bsdsocket.library` now binds NetX IP and packet-pool access to the opener
   reference that keeps those objects alive, and retires both before shutdown.
-
-- `anxgenet.device` now leaves its GIC interrupt handler after acknowledging
-  and masking the hardware.  Ring draining, cache maintenance, SANA-II buffer
-  callbacks, PHY access and watchdog recovery run in its service task with
-  scheduling enabled; only queue ownership transitions briefly mask
-  interrupts.  Online, offline and close are serialized with that task.
 
 - Network-monitor hooks now run with scheduling enabled, are synchronized
   against removal, and are retired automatically with the library base that
@@ -33,10 +32,7 @@ version at the top when it merges.
 - The private receive-batch record now carries its own version and allocated
   size.  Drivers reject records whose cookie count exceeds that storage,
   instead of trusting a bounded count that could still walk past the caller's
-  allocation.  A new driver still accepts the ABI 2 negotiation prefix used
-  by beta3: its old batch record is refused safely and falls back to ordinary
-  reads, while direct receive, polling, checksum and transmit hints remain
-  available during an in-place upgrade.
+  allocation.
 
 - `anxgenet.device` cleans the freshly allocated receive ring before giving
   it to DMA, so dirty `MEMF_CLEAR` cache lines cannot be pushed over the

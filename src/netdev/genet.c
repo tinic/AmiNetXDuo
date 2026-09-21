@@ -38,12 +38,7 @@
 #include <exec/execbase.h>
 #include <exec/memory.h>
 #include <exec/tasks.h>
-#include <dos/dos.h>
 #include <proto/exec.h>
-
-extern VOID netdev_service_task(APTR arg);
-extern VOID netdev_service_lock(APTR arg);
-extern VOID netdev_service_unlock(APTR arg);
 
 extern struct ExecBase *SysBase;
 
@@ -69,10 +64,11 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
  */
 #define GE_RX_RING      128
 /*
- * THE TASK PASS HAS A LENGTH.  The old software-interrupt bottom half showed
- * 4.4 ms spans with interrupts off.  The ring now drains in a dedicated Exec
- * task with only request-list transitions masked, but a bounded pass still
- * keeps other ready tasks responsive.  The pass stops after this many frames; what is
+ * THE MASKED PASS HAS A LENGTH.  A pass drains the ring under Disable(),
+ * and a full ring is up to 128 frames at ~60 us each -- the profile showed
+ * 4.4 ms spans with interrupts off, during which no acknowledgement leaves
+ * the machine, the sender's RTT reads 1.6 ms against 0.3 on the wire and it
+ * sits window-limited.  The pass stops after this many frames; what is
  * left waits for the next interrupt, the reader's ANXD_CMD_RX_POLL after
  * its drain (rx_behind is set, as for a held pass) or the blank, none of
  * which is more than a burst away.
@@ -185,12 +181,7 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
    asks: an MDIO transaction waits a millisecond, which is task work.  It
    sleeps otherwise. */
 #define GE_LINK_STACK           8192
-/* A signalled data-path bottom half must preempt an ordinary priority-zero
-   application.  At priority zero a CPU-bound sender kept the task ready but
-   undispatched until its timeslice ended, reducing the VBlank fallback from
-   58 to 23 Mbit/s.  The task drains a bounded pass and immediately Wait()s;
-   priority 5 is below the stack clock (20) and does not make it a poller. */
-#define GE_LINK_PRI             5
+#define GE_LINK_PRI             0
 
 /* The chip shifts every received frame two bytes into its buffer
    (GENET_RBUF_ALIGN_2B), which puts the IP header on a longword. */
@@ -225,7 +216,6 @@ typedef struct GenetCore
     UBYTE   pageops;        /* supervised cpushp pages, not CacheClearE     */
     UBYTE   phy_set;        /* the PHY's delays and negotiation were set up */
     volatile UBYTE link_poll_due; /* the link task owes the PHY one look   */
-    volatile UBYTE service_due;   /* the top half owes a schedulable drain */
     UBYTE   pre_saved;      /* the two below were read before this driver
                                changed anything                            */
     ULONG   pre_rgmii_oob;  /* EXT_RGMII_OOB_CTRL as the firmware left it   */
@@ -1606,8 +1596,8 @@ static BOOL ge_txintr(NetdevNic *nic)
     }
 
     /* The in-use count is the two indices' difference, never a shared
-       read-modify-write: the task advances tx_pidx while it owns tx_busy,
-       this advances tx_cidx from the serialized service context. */
+       read-modify-write: the task advances tx_pidx under Forbid()
+       (tx_task_lock), this advances tx_cidx from either context. */
     nic->txb_inuse = (UWORD)(c->tx_pidx - c->tx_cidx);
 
     return (BOOL)(n != 0);
@@ -1619,7 +1609,7 @@ static BOOL ge_txintr(NetdevNic *nic)
  * The top half, on the GIC: acknowledge what is pending and MASK it, so the
  * line is quiet until the bottom half has drained the rings, and nothing in
  * here can storm.  The reference driver's server does the same and hands the
- * rest to the core's dedicated service task; this driver does the same.
+ * rest to a task; here it is a software interrupt.
  */
 static BOOL genet_isr(NetdevNic *nic)
 {
@@ -1658,13 +1648,8 @@ static BOOL genet_intr_body(NetdevNic *nic)
     if (!nic->running)
         return FALSE;
 
-    /* The hardware top half can add a new cause while this task is draining.
-       Take only the pending word atomically; a later cause leaves the task's
-       signal set and remains for its next pass. */
-    Disable();
     stat = c->irq_pending;
     c->irq_pending = 0;
-    Enable();
     mine = (BOOL)(stat != 0);
 
     if ((stat & (GE_IRQ_LINK_UP | GE_IRQ_LINK_DOWN)) != 0)
@@ -1747,56 +1732,46 @@ static VOID ge_link_task(VOID)
     struct Task *me  = FindTask(NULL);
     NetdevNic   *nic = (NetdevNic *)me->tc_UserData;
     GenetCore   *c   = GE(nic);
+    BYTE         sig = AllocSignal(-1);
+
+    if (sig < 0)
+        for (;;)
+            (VOID)Wait(0);              /* until the detach takes it away */
+    c->link_sig = 1UL << sig;
 
     for (;;)
     {
         BOOL link_due;
-        BOOL service_due;
 
         (VOID)Wait(c->link_sig);
 
         Disable();
         link_due = (BOOL)(c->link_poll_due != 0);
-        service_due = (BOOL)(c->service_due != 0);
         c->link_poll_due = 0;
-        c->service_due = 0;
         Enable();
-        if (service_due)
-            netdev_service_task(nic->rx_arg);
         if (link_due)
         {
             /* Stop/offline is task context too.  Keep it from tearing the
                MAC down halfway through an MDIO transaction, without masking
                hardware interrupts for the transaction's millisecond wait. */
-            netdev_service_lock(nic->rx_arg);
+            Forbid();
             if (nic->running)
                 ge_link_poll(nic);
-            netdev_service_unlock(nic->rx_arg);
+            Permit();
         }
     }
 }
 
-/* From the blank, interrupt top half or service task.  Signal() is allowed
-   from each, and a signal already pending is one signal. */
+/* From the blank or the service pass under Disable(); Signal() is allowed
+   from both, and a signal already pending is one signal. */
 static __inline__ VOID ge_link_wake(GenetCore *c)
 {
     if (c->link_task != NULL && c->link_sig != 0)
         Signal(c->link_task, c->link_sig);
 }
 
-/* From the minimal hardware interrupt or vertical blank.  The same task owns
-   PHY work and the data-path bottom half, so neither can overlap stop/detach
-   or one another. */
-static VOID ge_service_wake(NetdevNic *nic)
-{
-    GenetCore *c = GE(nic);
-
-    c->service_due = 1;
-    ge_link_wake(c);
-}
-
 /* At attach, from the opener's task. */
-static BOOL ge_link_start(NetdevNic *nic)
+static VOID ge_link_start(NetdevNic *nic)
 {
     GenetCore   *c = GE(nic);
     struct Task *t;
@@ -1804,7 +1779,7 @@ static BOOL ge_link_start(NetdevNic *nic)
     c->link_mem = AllocMem(sizeof(struct Task) + GE_LINK_STACK,
                            MEMF_PUBLIC | MEMF_CLEAR);
     if (c->link_mem == NULL)
-        return FALSE;
+        return;
     t = (struct Task *)c->link_mem;
     t->tc_Node.ln_Type = NT_TASK;
     t->tc_Node.ln_Pri  = GE_LINK_PRI;
@@ -1813,10 +1788,6 @@ static BOOL ge_link_start(NetdevNic *nic)
     t->tc_SPUpper      = (APTR)((UBYTE *)(t + 1) + GE_LINK_STACK);
     t->tc_SPReg        = t->tc_SPUpper;
     t->tc_UserData     = nic;
-    /* This is a private Task and allocates no signals.  Publishing the bit
-       before AddTask closes the attach/open race: the first interrupt can
-       leave a wake pending even if the task has not reached Wait() yet. */
-    c->link_sig = SIGBREAKF_CTRL_F;
     /* An empty list: nothing for RemTask() to free. */
     t->tc_MemEntry.lh_Head     = (struct Node *)&t->tc_MemEntry.lh_Tail;
     t->tc_MemEntry.lh_Tail     = NULL;
@@ -1825,11 +1796,9 @@ static BOOL ge_link_start(NetdevNic *nic)
     {
         FreeMem(c->link_mem, sizeof(struct Task) + GE_LINK_STACK);
         c->link_mem = NULL;
-        c->link_sig = 0;
-        return FALSE;
+        return;
     }
     c->link_task = t;
-    return TRUE;
 }
 
 static VOID genet_detach(NetdevNic *nic)
@@ -1951,7 +1920,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->core_stat_names = ge_stat_names;
     nic->tx_reclaim      = ge_txintr;   /* no TX interrupt: retire on ask */
     nic->tx_short_build  = 1;           /* the copy is 0.4 us, the mask 5.5 */
-    nic->tx_task_lock    = 1;           /* task-owned ring: no interrupt produces */
+    nic->tx_task_lock    = 1;           /* and Forbid() is 0.1: no interrupt produces */
     nic->rx_holds        = 1;           /* the ring keeps frames for a late read */
     nic->rx_batches      = 1;           /* a pass drains a burst: one reply each */
     nic->tx_flush        = ge_tx_flush;  /* runs may hold their start           */
@@ -1961,7 +1930,6 @@ static LONG genet_attach(NetdevNic *nic)
        would count a third more full-size segments than there are buffers. */
     nic->rx_capacity     = (ULONG)GE_RX_RING * (1500UL + 14UL);
     nic->isr = genet_isr;
-    nic->wake = ge_service_wake;
 #ifdef NETDEV_GENET_POLL_ONLY
     /* A bring-up arm: no server at all, the vertical blank is the whole of
        the service.  genet_isr stays referenced so the arm compiles. */
@@ -1997,11 +1965,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->read_hdr      = NULL;
     nic->ring_copy     = NULL;
 
-    if (!ge_link_start(nic))
-    {
-        nic->diag_why = (UBYTE)ANXDIAG_WHY_NOMEM;
-        return -1;
-    }
+    ge_link_start(nic);
 
     GE_TRACE("ge: attached rev ", rev);
     return 0;

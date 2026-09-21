@@ -35,8 +35,6 @@ VOID         Signal(struct Task *task, ULONG mask);
 VOID         Forbid(VOID);
 VOID         Permit(VOID);
 VOID         InitSemaphore(struct SignalSemaphore *sem);
-VOID         ObtainSemaphore(struct SignalSemaphore *sem);
-VOID         ReleaseSemaphore(struct SignalSemaphore *sem);
 VOID         AddSemaphore(struct SignalSemaphore *sem);
 VOID         RemSemaphore(struct SignalSemaphore *sem);
 struct SignalSemaphore *FindSemaphore(STRPTR name);
