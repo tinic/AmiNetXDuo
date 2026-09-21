@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 1.0.0-beta4
+
 - `anxgenet.device` leaves its receive interrupt masked after a service
   pass that stopped at a frame whose reader had no read posted, and arms it
   again from the pass that gets past that frame. Unmasked, the chip raised
@@ -16,16 +18,21 @@ version at the top when it merges.
   bottom halves ran the same empty pass with every cycle of the machine for
   1.6-2.1 s at a time -- the reader it waited for never scheduled, the
   sender starved inside its transmit lock. A1200, iperf out, 120 s runs:
-  every run had such stalls, one in three ended in a chip reset, and each
-  run cost 130-450 TCP retransmissions; with the line held: no stalls, 0
-  retransmissions, 397 Mbit/s. `NetDevStats` counts "receive line masked
-  for a reader behind".
+  every run had such stalls and one in three ended in a chip reset; with
+  the line held: no stalls, 397-412 Mbit/s. `NetDevStats` counts "receive
+  line masked for a reader behind".
+
 - The transmit watchdog no longer counts a vertical blank on which a task
   holds the transmit ring (`anxgenet.device`, `anxzz9000.device`): the
   core's completion reclaim stands off while it does, so no progress could
   have been recorded. The stall above was read as a wedged transmitter and
   the watchdog reset a chip whose ring was already empty, PHY included,
   which ended the transfer.
+
+- `anxgenet.device` on the A1200 (PiStorm32, 1 Gbit peers): iperf 800-880
+  Mbit/s in, 375-557 out depending on the peer, ping 0.9 ms (1.0.0-beta3:
+  896-905 in, 231 out; 1.0.0-beta3 on 60 s runs, this on 120-300 s).  The receive path has no polling task any more;
+  the vertical blank is only the backstop.
 
 - Workaround in `anxgenet.device` for a GIC line found dead: a Raspberry Pi
   interrupt line left pending or active across a warm reboot is never
@@ -37,30 +44,8 @@ version at the top when it merges.
   distributor was found. The proper home for this is the interrupt
   library; the workaround goes when it does it.
 
-- `anxgenet.device` serves its ring from the software interrupt again, as
-  every other core does; the service task that took it over for a day is
-  gone. A1200: iperf in 375 -> 869-883 Mbit/s, out 231 -> 532; the first
-  transfer after a boot no longer stalls at 15 Mbit/s.
-
-- `anxgenet.device` registers its GIC interrupt again. The call into
-  `gic400.library` handed the compiler a wrong return value, the driver
-  (which honours the answer since the previous change) never unmasked the
-  GENET, and the vertical blank was the whole receive service: 24 Mbit/s in,
-  ping 3-16 ms on the A1200. Ping 0.9 ms again.
-
 - `bsdsocket.library` now binds NetX IP and packet-pool access to the opener
   reference that keeps those objects alive, and retires both before shutdown.
-
-- Network-monitor hooks now run with scheduling enabled, are synchronized
-  against removal, and are retired automatically with the library base that
-  installed them.  BPF filtering and record copies no longer run under a
-  machine-wide `Forbid()`; packet taps skip observational capture when the
-  channel semaphore is busy without blocking an adopted network task.
-
-- The private receive-batch record now carries its own version and allocated
-  size.  Drivers reject records whose cookie count exceeds that storage,
-  instead of trusting a bounded count that could still walk past the caller's
-  allocation.
 
 - `anxgenet.device` cleans the freshly allocated receive ring before giving
   it to DMA, so dirty `MEMF_CLEAR` cache lines cannot be pushed over the
@@ -79,13 +64,16 @@ version at the top when it merges.
   and refuse it. Exec's request contract only. `SetEnv ANXDRXBATCH 0`
   turns it off. Build option `AMINETXDUO_RX_BATCH`, off in the micro
   profile.
+
 - `anxgenet.device` serves at most 32 frames per masked pass and reads the
   GENET's RBUF overflow count into `NetDevStats`. A1200 + PiStorm32, iperf
   into the Amiga from a 1 Gbit peer: 399 Mbit/s on main `027a62c8`, 805 with
   the batch and the pass budget (896-905 on 1.0.0-beta3).
+
 - The TCP receive queue's packet cap is sized from a 1200-byte segment with
   16 of slack, and NetX Duo counts a segment it drops at that cap in
   `netstat -s` "dropped on receipt".
+
 - Transmit runs: a `send()` of more than one segment brackets its writes
   (`ANXD_S2_TXF_MORE` on the per-write flags, negotiated as
   `ANXD_S2F_TX_MORE`), and a driver that took the bit holds each frame's
@@ -96,6 +84,7 @@ version at the top when it merges.
   eight held frames and on its tick. `NetDevStats` "GENET transmits held for
   company" counts them. `SetEnv ANXDTXRUN 0` turns it off; build option
   `AMINETXDUO_TX_RUN`, off in the micro profile with the batch.
+
 - `anxgenet.device` no longer runs a polling task on the receive path.
   The task at priority -128 that read the ring for 500 us after every frame
   gave a request/response read 11-14 % and cost 8 % of a stream in, 30 % of
@@ -104,6 +93,7 @@ version at the top when it merges.
   30.5/27.5 write/read). One 500 us receive timeout, the interrupt and the
   vertical blank remain; the task that is left only looks at the PHY when
   asked. `NetDevStats` loses the three poll counters.
+
 - A newer `bsdsocket.library` works with the beta1--beta3 network commands
   during an in-place update. The running interface priority now occupies a
   byte that was already reserved in the version 16 status record instead of
@@ -135,6 +125,7 @@ version at the top when it merges.
 
 - `CheckNetConfig` note for `METRIC=` names `PRIORITY=` as the keyword that
   orders interfaces; two dead `PRIORITY`/`PRI` rows left the inert table.
+
 - `SocketBaseTagList()` returns the right 1-based index for a failing tag
   after a `TAG_SKIP`; the skip count was read from the item skipped to.
 
