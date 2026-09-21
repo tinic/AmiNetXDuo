@@ -224,6 +224,9 @@ typedef struct GenetCore
 
     UBYTE   held_blanks;    /* blanks the head of the ring has been held for */
     UBYTE   drop_held;      /* the next unclaimable head frame is dropped    */
+    UBYTE   rx_held;        /* the last pass stopped at a frame whose reader
+                               is behind (not a budget cut)                   */
+    UBYTE   rx_line_held;   /* RXDMA_DONE left masked for that reader        */
     UBYTE   gic_silent;     /* blanks with frames pending and no interrupt   */
     UBYTE   gic_pad;
     ULONG   gic_ints_seen;  /* GE_ST_INTS at the last blank                  */
@@ -304,6 +307,8 @@ enum
                                distributor: at init, or by the blank        */
     GE_ST_GIC_SILENT,       /* blanks that found frames pending, unmasked and
                                no interrupt (the line was dead)             */
+    GE_ST_LINE_HELD,        /* passes that left RXDMA_DONE masked because the
+                               reader was behind (ge_rx_line)                 */
 #ifdef GE_PROBE_ST
     /* The bottom half timed on the Pi's system timer (bus 0x7E003000, 68k
        0xF8003000 through Emu68's /scb mapping, 1 MHz, a 10 ns read):
@@ -357,6 +362,7 @@ static const char *const ge_stat_names[GE_ST_COUNT + 1] =
     "GENET supervised page push (1)",
     "GENET GIC line cleared (init or revived)",
     "GENET blanks with frames pending, no interrupt",
+    "GENET receive line masked for a reader behind",
 #ifdef GE_PROBE_ST
     "PROBE genet_intr us",
     "PROBE cache op us",
@@ -861,7 +867,9 @@ static VOID ge_init_rings(NetdevNic *nic)
     /* Receive: every descriptor points at its own buffer for good. */
     c->rx_cidx  = 0;
     c->rx_clean = 0;
-    nic->rx_behind = 0;
+    nic->rx_behind  = 0;
+    c->rx_held      = 0;
+    c->rx_line_held = 0;
 
     /* DMA OWNERSHIP STARTS HERE, BEFORE THE ENGINE.  AllocMem(MEMF_CLEAR)
        wrote these pages through the CPU and may have left dirty cache lines.
@@ -1356,7 +1364,10 @@ static BOOL ge_rxintr(NetdevNic *nic)
     UWORD      n;
 
     if (total == 0)
+    {
+        c->rx_held = 0;         /* nothing in the ring is nothing held */
         return FALSE;
+    }
     if (total > GE_RX_RING)
         total = GE_RX_RING;     /* cannot happen: the chip stops on a full ring */
 
@@ -1405,6 +1416,7 @@ static BOOL ge_rxintr(NetdevNic *nic)
     }
 
     nic->rx_behind = 0;
+    c->rx_held     = 0;
 
     for (n = 0; n < total; n++)
     {
@@ -1459,6 +1471,7 @@ static BOOL ge_rxintr(NetdevNic *nic)
              * frames and 632 retransmissions in one ten-second transfer.
              */
             nic->rx_behind = 1;
+            c->rx_held     = 1;
             nic->core_stat[GE_ST_HELD]++;
             nic->core_stat[GE_ST_HELD_FRAMES] += (ULONG)(total - n);
             break;
@@ -1716,6 +1729,45 @@ static BOOL genet_intr(NetdevNic *nic)
     return r;
 }
 
+/*
+ * THE RECEIVE LINE STAYS MASKED WHILE A READER IS BEHIND.  A pass that stops
+ * at a frame whose reader has no read posted (ge_deliver, NETDEV_CLAIM_BEHIND)
+ * has consumed nothing, and the chip's count of completed buffers is still
+ * over its threshold: unmasked, RXDMA_DONE is asserted again the moment the
+ * mask clears, the top half runs, the bottom half runs the same empty pass,
+ * and round it goes with the machine's every cycle -- measured on the A1200,
+ * 2026-09-21, during iperf out: 1.6-2.1 s at a time with every vertical
+ * blank finding the software interrupt at its Enable(), the reader it was
+ * waiting for never scheduled, the sender starved inside its transmit lock
+ * long enough for the watchdog to reset a working chip.  So the line is left
+ * masked after such a pass; the blank resumes the held pass (genet_tick),
+ * the opener's ANXD_CMD_RX_POLL does once it has re-posted, and the pass
+ * that gets past the head frame arms the line again.  A pass cut at the
+ * frame budget is not this case: it consumed its budget and the next
+ * interrupt is the next pass.
+ */
+static VOID ge_rx_line(NetdevNic *nic, ULONG rearm)
+{
+    GenetCore *c = GE(nic);
+
+    if (c->rx_held)
+    {
+        if ((rearm & GENET_IRQ_RXDMA_DONE) != 0)
+        {
+            rearm &= ~GENET_IRQ_RXDMA_DONE;
+            c->rx_line_held = 1;
+            nic->core_stat[GE_ST_LINE_HELD]++;
+        }
+    }
+    else if (c->rx_line_held)
+    {
+        c->rx_line_held = 0;
+        rearm |= GENET_IRQ_RXDMA_DONE;
+    }
+    if (rearm != 0)
+        ge_wr(nic, GENET_INTRL2_CPU_CLEAR_MASK, rearm);
+}
+
 static BOOL genet_intr_body(NetdevNic *nic)
 {
     GenetCore *c = GE(nic);
@@ -1744,9 +1796,9 @@ static BOOL genet_intr_body(NetdevNic *nic)
     if (!nic->tx_busy && ge_txintr(nic))
         mine = TRUE;
 
-    /* Re-arm what the top half masked, now that the rings are drained. */
-    if (stat != 0)
-        ge_wr(nic, GENET_INTRL2_CPU_CLEAR_MASK, stat & GE_IRQ_WANTED);
+    /* Re-arm what the top half masked, now that the rings are drained --
+       the receive line only when its reader is not behind (ge_rx_line). */
+    ge_rx_line(nic, stat & GE_IRQ_WANTED);
 
     return mine;
 }
@@ -1821,6 +1873,7 @@ static BOOL genet_tick(NetdevNic *nic)
             c->drop_held   = 1;         /* ge_deliver lets the head go */
         }
         (VOID)ge_rxintr(nic);
+        ge_rx_line(nic, 0);             /* the line back once the head moved */
     }
     else
     {
