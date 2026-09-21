@@ -77,7 +77,7 @@ prototype. Current builds classify and coalesce runs in the stack.
 
 | proposal | status |
 |---|---|
-| per-window ARCACHE=0000 in mntzorro.v (RX window non-cacheable, framebuffer stays 0xF) | agreed, the clean fix; needs a bitstream (Vivado, not on the rig). The firmware invalidation becomes the old-bitstream path; the firmware should read a REG3 capability bit and skip it |
+| per-window ARCACHE=0011 in mntzorro.v (RX window normal/non-allocating, framebuffer stays 0xF) | agreed, the clean fix; needs a bitstream (Vivado, not on the rig). Both allocation hints are clear, while bit 1 preserves the Zynq interconnect's modifiable/upsizing path; 0000 would unnecessarily make each read non-modifiable. The firmware invalidation remains the old-bitstream path, gated off only when a REG3 capability bit says the new policy is present |
 | direct MMIO -> final copy | done |
 | GEM checksum offload | RX and TX done without changing the slot ABI: read-only register 0xa6 returns bit 15 RX metadata present, bit 14 TX full-checksum insertion enabled, and BD status bits 23..22 for the current RX slot. MNT's driver is unchanged and was exercised after flashing; an AmiNetXDuo driver on old firmware sees zero and keeps both software paths |
 | stack-side GRO | done; the SANA-II receive layer classifies ordinary verified frames, and NetX window-edge acceptance is fixed and regression-tested; see #7-#9 |
