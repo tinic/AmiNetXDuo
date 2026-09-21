@@ -283,7 +283,9 @@ host_test_targets() { # builddir
 #      (4f7b251b), and one the 409 tally had already missed: ctest -N counts
 #      412 on x86_64 for host and sanitize alike (2026-09-20, local and the
 #      runner), and the runner's list is the local list.
-HOST_TESTS_EXPECTED=412
+#      413 with test_netdev_zz9000: the mapped receive window remains owned
+#      until the ordinary synchronous S2_CopyToBuff callback returns.
+HOST_TESTS_EXPECTED=413
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
