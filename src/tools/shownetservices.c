@@ -469,18 +469,22 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (!mdns_enabled_somewhere(base))
-    {
-        tool_error("mDNS is not enabled on any interface. Add MDNS=YES to "
-                   "the interface file in DEVS:NetInterfaces, then restart "
-                   "the stack");
-        tool_netstatus_close(base);
-        FreeArgs(rda);
-        return RETURN_WARN;
-    }
-
     if (browse_start(base, type, &err) < 0)
     {
+        /* NETSTATUS_IF_MDNS means the responder has reached announcing or
+           valid, not merely that MDNS=YES configured it.  Immediately after
+           AddNetInterface the query engine is already usable while that bit
+           is still clear; checking it before browse_start made the command
+           refuse precisely during that normal probing window. */
+        if (!mdns_enabled_somewhere(base))
+        {
+            tool_error("mDNS is not enabled on any interface. Add MDNS=YES "
+                       "to the interface file in DEVS:NetInterfaces, then "
+                       "restart the stack");
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_WARN;
+        }
         tool_error("cannot ask the network: %s", (LONG)tool_net_error(err));
         tool_netstatus_close(base);
         FreeArgs(rda);
