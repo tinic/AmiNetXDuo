@@ -161,7 +161,7 @@ if [ "$RUNNER" = amiberry ]; then
 else
     echo "==> booting $MODEL with the A2065 on SLIRP"
     # shellcheck disable=SC2086
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
         "$STAGE/libs" $STAGED
 fi

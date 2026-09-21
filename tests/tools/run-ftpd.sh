@@ -70,12 +70,12 @@ case "$IFACE" in
     slirp|slirp_inbound|none)
         echo "ftpd=skipped reason=backend_refused:$IFACE" >&2
         echo "Bridged only: the client has to reach the guest's own address." >&2
-        exit 2 ;;
+        exit 77 ;;
 esac
 
 [ -n "$PEER" ] || {
     echo "ftpd=skipped reason=no_peer set=AMINETXDUO_PEER" >&2
-    exit 2
+    exit 77
 }
 
 ASSETS="${AMINETXDUO_ASSETS:-$HOME/amiga-assets}"
@@ -88,11 +88,11 @@ UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 
 for f in "$INETD" "$FTPD" "$SERVICES" "$TOOLS/ToolsSmoke" \
          "$TOOLS/AddNetInterface" "$TOOLS/ShowNetStatus" "$BSD" "$UG"; do
-    [ -f "$f" ] || { echo "ftpd=skipped reason=missing file=$f" >&2; exit 2; }
+    [ -f "$f" ] || { echo "ftpd=skipped reason=missing file=$f" >&2; exit 77; }
 done
 
 ssh -o BatchMode=yes -o ConnectTimeout=10 "$PEER" 'command -v curl >/dev/null' || {
-    echo "ftpd=skipped reason=peer_has_no_curl peer=$PEER" >&2; exit 2; }
+    echo "ftpd=skipped reason=peer_has_no_curl peer=$PEER" >&2; exit 77; }
 
 . "$ROOT/tools/sana2-stage.sh"
 . "$ROOT/tools/amiga-startup-libs.sh"
@@ -108,7 +108,7 @@ if [ -z "$A2065" ]; then
 fi
 if [ "$BOARD" = a2065 ] && { [ -z "$A2065" ] || [ ! -f "$A2065" ]; }; then
     echo "ftpd=skipped reason=no_a2065 set=AMINETXDUO_A2065" >&2
-    exit 2
+    exit 77
 fi
 
 STAGE="$ROOT/build/ftpd-stage"
@@ -139,7 +139,7 @@ for c in Assign Wait; do
     else
         echo "ftpd=skipped reason=missing_command cmd=$c" >&2
         echo "Put it in $ASSETS/c; it comes off the Workbench 3.1 disks." >&2
-        exit 2
+        exit 77
     fi
 done
 cp "$UG" "$STAGE/at/libs/usergroup.library"
@@ -153,7 +153,7 @@ MISSING=$(printf '%s\n' "$MISSING" | grep -v 'multiuser' | grep -v '^$' || true)
 if [ -n "$MISSING" ]; then
     echo "ftpd=skipped reason=missing_startup_libs" >&2
     printf '%s\n' "$MISSING" >&2
-    exit 2
+    exit 77
 fi
 
 # THE ACCOUNT.  AmiTCP's own db/passwd is pipe separated because Amiga paths

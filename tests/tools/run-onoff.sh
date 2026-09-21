@@ -142,7 +142,7 @@ if [ "$RUNNER" = "amiberry" ]; then
         "$STAGE/netstat" "$STAGE/ping"
 else
     echo "==> booting $MODEL with the A2065 on SLIRP"
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
         "$STAGE/AddNetInterface" "$STAGE/Online" "$STAGE/Offline" \
         "$STAGE/netstat" "$STAGE/ping"

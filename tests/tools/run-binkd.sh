@@ -64,14 +64,14 @@ case "$IFACE" in
     slirp|slirp_inbound|none)
         echo "binkd=skipped reason=backend_refused:$IFACE" >&2
         echo "Bridged only: the peer has to reach the guest's own address." >&2
-        exit 2 ;;
+        exit 77 ;;
 esac
 
 if [ -z "$PEER" ]; then
     echo "binkd=skipped reason=no_peer set=AMINETXDUO_PEER" >&2
     echo "A bridged guest cannot be reached from the machine running the" >&2
     echo "emulator.  -P <user@host> names a third machine with binkd(8)." >&2
-    exit 2
+    exit 77
 fi
 
 ASSETS="${AMINETXDUO_ASSETS:-$HOME/amiga-assets}"
@@ -80,14 +80,14 @@ TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$BINKD" "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$BSD"; do
-    [ -f "$f" ] || { echo "binkd=skipped reason=missing file=$f" >&2; exit 2; }
+    [ -f "$f" ] || { echo "binkd=skipped reason=missing file=$f" >&2; exit 77; }
 done
 
 if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$PEER" 'command -v binkd >/dev/null || [ -x /usr/sbin/binkd ]'; then
     echo "binkd=skipped reason=peer_has_no_binkd peer=$PEER" >&2
     echo "apt-get install binkd on the peer; it packages the same" >&2
     echo "1.1a-115 the Amiga binary is built from." >&2
-    exit 2
+    exit 77
 fi
 
 . "$ROOT/tools/sana2-stage.sh"
@@ -103,7 +103,7 @@ if [ -z "$A2065" ]; then
 fi
 if [ "$BOARD" = a2065 ] && { [ -z "$A2065" ] || [ ! -f "$A2065" ]; }; then
     echo "binkd=skipped reason=no_a2065 set=AMINETXDUO_A2065" >&2
-    exit 2
+    exit 77
 fi
 
 # The peer's address on the segment the guest is bridged onto.  Asking the
@@ -112,7 +112,7 @@ fi
 PEER_IP=$(ssh -o BatchMode=yes "$PEER" "ip -4 -br addr show scope global | awk '{print \$3}' | cut -d/ -f1 | head -1")
 case "$PEER_IP" in
     [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
-    *) echo "binkd=skipped reason=peer_address_unknown got='$PEER_IP'" >&2; exit 2 ;;
+    *) echo "binkd=skipped reason=peer_address_unknown got='$PEER_IP'" >&2; exit 77 ;;
 esac
 echo "==> peer $PEER is $PEER_IP, binkd on port $PORT"
 
@@ -162,7 +162,7 @@ CFG
         tail -5 ~/$PDIR/log/srv.log >&2 2>/dev/null
         exit 1
     }
-" || { echo "binkd=skipped reason=peer_setup_failed" >&2; exit 2; }
+" || { echo "binkd=skipped reason=peer_setup_failed" >&2; exit 77; }
 
 peer_cleanup() {
     ssh -o BatchMode=yes "$PEER" "
@@ -192,7 +192,7 @@ if [ -n "$MISSING" ]; then
     printf '%s\n' "$MISSING" >&2
     echo "Put them in $ASSETS/libs.  locale.library comes off the Workbench" >&2
     echo "3.1 disks; the maths pair is in the asset store under nglibs." >&2
-    exit 2
+    exit 77
 fi
 
 [ "$BOARD" = a2065 ] && cp "$A2065" "$STAGE/devs/a2065.device"

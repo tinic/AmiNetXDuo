@@ -2513,7 +2513,7 @@ stage_bridged() {
     # tap device it makes itself and it asks amiberry-run.sh for `-B none`.
     local entry hname hpath hargs hwhy rest
     for entry in \
-"udpdrill|tests/udpdrill/run-udpdrill.sh| |the UDP receive path, the bind-address filter, and the largest datagram a route takes (108 checks, floor 108)" \
+"udpdrill|tests/udpdrill/run-udpdrill.sh| |the UDP receive path, the bind-address filter, and the largest datagram a route takes (111 checks, floor 111)" \
 "leak|tests/leak/run-leak.sh|-B @|the refused-connect leak, seven arms of thirty-two socket lifecycles" \
 "concurrent|tests/concurrent/run-concurrent.sh|-B @|eight applications, each with its own library open (25 checks)" \
 "stack|tests/stack/run-stack.sh|-B @|the API called from the stack a Shell command has, which on a machine with no MMU is a silent overwrite (16 checks, floor 12)" \

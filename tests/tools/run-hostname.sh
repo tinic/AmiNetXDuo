@@ -97,7 +97,7 @@ boot() {
     echo "==> booting $MODEL with the A2065 on SLIRP ($tag)"
     set +e
     AMINETXDUO_RUN_TAG="$tag" \
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "${extras[@]}"
     rc=$?
     set -e
@@ -243,7 +243,7 @@ says "SYS:ShowNetStatus" 3 "Host name: +newbeast(\.[^ ]*)? \(from ENV:HOSTNAME\)
 
 QOUT=$(block "SYS:hostname QUIET" 1 | grep -v '^----- rc ' |
        grep -v '^[[:space:]]*$' || true)
-if [ "$QOUT" = "newbeast" ]; then
+if [ "$QOUT" = "newbeast.localdomain" ]; then
     pass "QUIET prints the name and nothing else, which is what a script wants"
 else
     fail "QUIET printed more than the name"

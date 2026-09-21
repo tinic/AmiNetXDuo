@@ -511,6 +511,7 @@ ULONG        stamp;
 ULONG        len;
 ULONG        got = 0;
 ULONG        i;
+UWORD        ipfrag;
 
     while ((len = tap_tx_get(scratch, (ULONG)sizeof(scratch), &stamp)) != 0)
     {
@@ -527,16 +528,31 @@ ULONG        i;
         if (got != 0UL || rd16(&scratch[12]) != ETYPE_IP)
             continue;
 
-        if (len < ETH_HDR + 28UL || scratch[ETH_HDR + 9] != 17)
+        if (len < ETH_HDR + 20UL || scratch[ETH_HDR + 9] != 17)
             continue;
 
-        if (rd32(&scratch[ETH_HDR + 16]) != PEER_IP ||
-            rd16(&scratch[ETH_HDR + 20]) != (UWORD)LOCAL_PORT)
+        if (rd32(&scratch[ETH_HDR + 16]) != PEER_IP)
+            continue;
+
+        /* Only fragment zero carries the UDP header and its source port.
+           Later fragments still belong to this datagram and must remain
+           visible to the MTU case below. */
+        ipfrag = rd16(&scratch[ETH_HDR + 6]);
+        if ((ipfrag & 0x1FFFU) == 0U &&
+            (len < ETH_HDR + 28UL ||
+             rd16(&scratch[ETH_HDR + 20]) != (UWORD)LOCAL_PORT))
             continue;
 
         got = (len > max) ? max : len;
         for (i = 0; i < got; i++)
             out[i] = scratch[i];
+
+        /* Leave later frames in the tap ring.  A datagram larger than the
+           interface MTU is more than one frame now that transmit
+           fragmentation is allowed; the caller must be able to inspect each
+           fragment rather than having this helper silently drain all but the
+           first. */
+        break;
     }
 
     return(got);
@@ -1074,6 +1090,7 @@ static UBYTE frame[TAP_FRAME_MAX];
 LONG         fd;
 SockAddrIn   a;
 ULONG        len;
+ULONG        frag;
 
     fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
@@ -1104,16 +1121,32 @@ ULONG        len;
     (VOID)t_check((BOOL)(len == (ULONG)(ETH_HDR + 20 + 8 + 1472)),
                   "and one whole frame carried it", (LONG)len);
 
-    {
-        LONG n = bsd_send(fd, big, 1473, 0);
+    /* The first byte over one Ethernet frame used to be refused here.  BSD
+       sends it and lets IP fragment it; NFS-over-UDP depends on the same
+       path for its 8 KB blocks. */
+    (VOID)t_check((BOOL)(bsd_send(fd, big, 1473, 0) == 1473),
+                  "send(1473) is accepted for fragmentation", bsd_Errno());
 
-        (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EMSGSIZE),
-                      "send(1473) is EMSGSIZE", (n < 0) ? bsd_Errno() : n);
-    }
+    len = t_wait_tx(frame, (ULONG)sizeof(frame), 2000UL);
+    frag = (len >= ETH_HDR + 20UL) ? (ULONG)rd16(&frame[ETH_HDR + 6]) : 0UL;
+    (VOID)t_check((BOOL)(len == (ULONG)(ETH_HDR + 1500) &&
+                              (frag & 0x3FFFUL) == 0x2000UL),
+                  "the first fragment fills the interface MTU and has MF",
+                  (LONG)len);
+
+    len = t_wait_tx(frame, (ULONG)sizeof(frame), 2000UL);
+    frag = (len >= ETH_HDR + 20UL) ? (ULONG)rd16(&frame[ETH_HDR + 6]) : 0UL;
+    /* Ethernet pads the short tail frame to its 60-byte minimum; the IPv4
+       total length, not the wire frame length, says it carries one byte. */
+    (VOID)t_check((BOOL)(len >= (ULONG)(ETH_HDR + 20 + 1) &&
+                              rd16(&frame[ETH_HDR + 2]) == 21U &&
+                              (frag & 0x3FFFUL) == 185UL),
+                  "the second fragment carries the remaining byte",
+                  (LONG)len);
 
     len = t_wait_tx(frame, (ULONG)sizeof(frame), 300UL);
     (VOID)t_check((BOOL)(len == 0UL),
-                  "and the refused datagram reached no wire", (LONG)len);
+                  "and there is no third fragment", (LONG)len);
 
     t_addr(&a, LOOPBACK_IP, (UWORD)PEER_PORT);
     {

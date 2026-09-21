@@ -131,7 +131,7 @@ HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 STARTED=$(date +%s)
 echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/RemoveNetInterface" \
     "$STAGE/ConfigureNetInterface" "$STAGE/ShowNetStatus" "$STAGE/host"

@@ -260,16 +260,26 @@ class Server:
             i = cookie
             emitted = 0
             body = b""
-            while i < len(names) and len(body) < max(256, count - 128):
+            # `count` is the maximum encoded dirlist the client has room for,
+            # not a hint.  The old max(256, count - 128) could return more
+            # than a small Amiga client requested; ch_nfsc then correctly
+            # rejected the overlong XDR reply as ERROR_BAD_TEMPLATE even
+            # though opening and reading a named file still worked.
+            while i < len(names):
                 nm = names[i].encode("latin-1", "replace")
+                entry = (struct.pack(">I", 1) + struct.pack(">I", i + 1)
+                         + xdr_str(nm) + struct.pack(">I", i + 1))
+                # Two XDR booleans still follow: the null next-entry link and
+                # eof.  Never claim an entry that does not fit beside them.
+                if len(body) + len(entry) + 8 > count:
+                    break
+                body += entry
                 i += 1
-                body += (struct.pack(">I", 1) + struct.pack(">I", i)
-                         + xdr_str(nm) + struct.pack(">I", i))
                 emitted += 1
             body += struct.pack(">I", 0)                     # no more entries
             body += struct.pack(">I", 1 if i >= len(names) else 0)   # eof
-            self.log("readdir_cookie=%d emitted=%d eof=%d"
-                     % (cookie, emitted, 1 if i >= len(names) else 0))
+            self.log("readdir_cookie=%d count=%d emitted=%d eof=%d"
+                     % (cookie, count, emitted, 1 if i >= len(names) else 0))
             return out + body
 
         if proc == 17:                                  # STATFS
