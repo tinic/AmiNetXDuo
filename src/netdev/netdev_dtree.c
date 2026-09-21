@@ -554,31 +554,50 @@ static struct Library *gic_base;
 static UWORD           gic_users;
 
 #ifndef NETDEV_DTREE_TEST
+/*
+ * gic400.library's AddIntServerEx (LVO -30: d0 irq, d1 priority, d2 edge,
+ * a1 the Interrupt, a6 the base) and RemIntServerEx (LVO -36: d0, a1, a6),
+ * each answering 0 in d0 on success and a negative GIC400_ERR_* otherwise.
+ *
+ * EXPLICIT MOVES, AND d0 STORED FROM INSIDE THE asm.  The previous form
+ * bound the operands to local register variables ("register ULONG r
+ * __asm("d0")") and let the compiler read the result; under LTO the value
+ * the caller then compared was not what the library had returned.  On the
+ * A1200 (gic400.library 1.4) every registration read as failed, the driver
+ * (which honours the answer since fa9e00d8) left the GENET source masked,
+ * and the vertical blank was the whole receive service: 24 Mbit/s in,
+ * ping 3-16 ms.  Measured 2026-09-21: the same call through this wrapper
+ * answers 0, the line is unmasked, interrupts flow, ping 0.9 ms.
+ */
 static ULONG gic_add(ULONG irq, struct Interrupt *is)
 {
-    register ULONG            d0 __asm("d0") = irq;
-    register ULONG            d1 __asm("d1") = 0;       /* priority       */
-    register ULONG            d2 __asm("d2") = 0;       /* level, not edge */
-    register struct Interrupt *a1 __asm("a1") = is;
-    register struct Library  *a6 __asm("a6") = gic_base;
-    register ULONG            r  __asm("d0");
+    ULONG r;
 
-    __asm volatile ("jsr a6@(-30:W)"
-                    : "=r" (r) : "r" (a6), "0" (d0), "r" (d1), "r" (d2), "r" (a1)
-                    : "cc", "memory", "a0");
+    __asm volatile ("move.l %1,%%d0\n\t"
+                    "moveq #0,%%d1\n\t"         /* priority          */
+                    "moveq #0,%%d2\n\t"         /* level, not edge   */
+                    "move.l %2,%%a1\n\t"
+                    "move.l %3,%%a6\n\t"
+                    "jsr %%a6@(-30:W)\n\t"
+                    "move.l %%d0,%0"
+                    : "=m" (r)
+                    : "g" (irq), "g" (is), "g" (gic_base)
+                    : "d0", "d1", "d2", "a0", "a1", "a6", "cc", "memory");
     return r;
 }
 
 static ULONG gic_rem(ULONG irq, struct Interrupt *is)
 {
-    register ULONG            d0 __asm("d0") = irq;
-    register struct Interrupt *a1 __asm("a1") = is;
-    register struct Library  *a6 __asm("a6") = gic_base;
-    register ULONG            r  __asm("d0");
+    ULONG r;
 
-    __asm volatile ("jsr a6@(-36:W)"
-                    : "=r" (r) : "r" (a6), "0" (d0), "r" (a1)
-                    : "cc", "memory", "d1", "a0");
+    __asm volatile ("move.l %1,%%d0\n\t"
+                    "move.l %2,%%a1\n\t"
+                    "move.l %3,%%a6\n\t"
+                    "jsr %%a6@(-36:W)\n\t"
+                    "move.l %%d0,%0"
+                    : "=m" (r)
+                    : "g" (irq), "g" (is), "g" (gic_base)
+                    : "d0", "d1", "a0", "a1", "a6", "cc", "memory");
     return r;
 }
 #else
