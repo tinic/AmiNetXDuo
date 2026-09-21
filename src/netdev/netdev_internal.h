@@ -22,14 +22,6 @@
 #include "aminetxduo/anxs2ext.h"
 #include "netdev_roster.h"
 
-#if NETDEV_HAS_SERVICE_LOCK
-#define NETDEV_SERVICE_OBTAIN(unit) ObtainSemaphore(&(unit)->nu_ServiceLock)
-#define NETDEV_SERVICE_RELEASE(unit) ReleaseSemaphore(&(unit)->nu_ServiceLock)
-#else
-#define NETDEV_SERVICE_OBTAIN(unit) ((VOID)(unit))
-#define NETDEV_SERVICE_RELEASE(unit) ((VOID)(unit))
-#endif
-
 /*
  * Exec's AddHead() and Remove() are a jsr through the library base and back
  * to do four stores.  Both of these run ONCE PER RECEIVED FRAME -- the
@@ -223,8 +215,7 @@ typedef struct NetdevUnit
 
     struct Interrupt            nu_Intr;      /* INT2, the card               */
     struct Interrupt            nu_Tick;      /* INT3 vertical blank, watchdog */
-    struct SignalSemaphore      nu_ServiceLock; /* task-context core service    */
-    volatile UBYTE              nu_ServiceTick; /* blank owes task-context work */
+    struct Interrupt            nu_Soft;      /* the bottom half, nic->isr cores */
     UBYTE                       nu_TxBuilding; /* a task owns nu_TxBuf         */
     UBYTE                      *nu_TxAt;      /* where the frame was built    */
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
@@ -531,11 +522,6 @@ VOID netdev_pcmcia_cancel_resume(const NetdevUnit *unit);
 /* The status-change callback uses the same core service as a Zorro INT2
    server, but card.resource owns the PCMCIA interrupt latch. */
 ULONG netdev_interrupt(NetdevUnit *unit);
-#if NETDEV_HAS_SERVICE_TASK
-VOID  netdev_service_task(APTR arg);
-VOID  netdev_service_lock(APTR arg);
-VOID  netdev_service_unlock(APTR arg);
-#endif
 #if NETDEV_HAS_PCMCIA
 /* Card removal has no hardware left to stop.  Drain the software side only. */
 VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event);

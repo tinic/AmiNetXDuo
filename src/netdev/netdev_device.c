@@ -71,22 +71,6 @@ static char netdev_id[] =
     " (AmiNetXDuo, Raspberry Pi 4 GENET behind Emu68)\r\n";
 #endif
 
-#if NETDEV_HAS_TX_TASK_LOCK
-static VOID netdev_tx_pump_task(NetdevUnit *unit);
-#endif
-
-static VOID netdev_tx_service_pump(NetdevUnit *unit)
-{
-#if NETDEV_HAS_TX_TASK_LOCK
-    if (unit->nu_Nic.tx_task_lock)
-    {
-        netdev_tx_pump_task(unit);
-        return;
-    }
-#endif
-    netdev_tx_pump(unit);
-}
-
 static struct Device *netdev_open(
     register struct Device     *dev   __asm("a6"),
     register struct IOSana2Req *io    __asm("a1"),
@@ -757,9 +741,7 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
         struct IOSana2Req *io;
         NetdevTrack       *tr;
         tr = netdev_track_find(op, type);
-        Disable();
         io = netdev_take(&op->op_Reads, type);
-        Enable();
         if (io != NULL)
         {
             NetdevRxResult r;
@@ -772,6 +754,7 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
                head and the frame lands in its next cookie. */
             if (netdev_is_batch(io))
             {
+                AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
                 r = netdev_batch_stage(unit, op, io, frame, len);
             }
             else
@@ -787,9 +770,7 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
                  * off the queue to be filled in, so it goes back at the head.
                  * Not counted as a drop: the opener asked for it.
                  */
-                Disable();
                 AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
-                Enable();
             }
             else
             {
@@ -825,11 +806,7 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
              n = n->ln_Succ)
         {
             NetdevOpener      *op = (NetdevOpener *)n;
-            struct IOSana2Req *io;
-
-            Disable();
-            io = netdev_take(&op->op_Orphans, ~0UL);
-            Enable();
+            struct IOSana2Req *io = netdev_take(&op->op_Orphans, ~0UL);
 
             if (io != NULL)
             {
@@ -838,10 +815,8 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 
                 if (r == NETDEV_RX_REJECTED)
                 {
-                    Disable();
                     AddHead(&op->op_Orphans,
                             &io->ios2_Req.io_Message.mn_Node);
-                    Enable();
                     continue;   /* try the next opener's orphan reader */
                 }
                 if (r == NETDEV_RX_FAILED)
@@ -1025,8 +1000,8 @@ static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
  */
 VOID netdev_tx_pump(NetdevUnit *unit)
 {
-    /* A task owns the transmit ring (tx_task_lock): it pumps for itself when
-       it is done, and nothing here may touch the ring now. */
+    /* A task is mid-transmit under Forbid() (tx_task_lock): it pumps for
+       itself when it is done, and nothing here may touch the ring now. */
     if (unit->nu_Nic.tx_busy)
         return;
 
@@ -1069,67 +1044,6 @@ VOID netdev_tx_pump(NetdevUnit *unit)
         netdev_reply(io, 0, 0);
     }
 }
-
-#if NETDEV_HAS_TX_TASK_LOCK
-/* A schedulable service task's queue pump.  tx_busy is the ownership token:
- * BeginIO may run while a CopyFrom callback yields, but it only appends its
- * request and leaves this task as the sole ring producer. */
-static VOID netdev_tx_pump_task(NetdevUnit *unit)
-{
-    Disable();
-    if (unit->nu_Nic.tx_busy)
-    {
-        Enable();
-        return;
-    }
-    unit->nu_Nic.tx_busy = 1;
-    Enable();
-
-    if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
-        unit->nu_Nic.tx_reclaim != NULL)
-        (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
-
-    while (unit->nu_Nic.txb_inuse < unit->nu_Nic.txb_cnt)
-    {
-        struct IOSana2Req *io;
-        NetdevOpener      *op;
-        UWORD              total;
-        LONG               rc;
-
-        Disable();
-        io = unit->nu_TxBuilding
-                 ? NULL
-                 : (struct IOSana2Req *)RemHead(&unit->nu_Writes);
-        Enable();
-        if (io == NULL)
-            break;
-
-        op = NETDEV_IO_OPENER(io);
-        total = netdev_tx_timed_build(unit, io, op);
-        if (total == 0)
-            continue;
-        rc = netdev_tx_timed_issue(unit, io, op, total);
-        if (rc == DP8390_TX_BUSY)
-        {
-            Disable();
-            netdev_queue_head(&unit->nu_Writes, io);
-            Enable();
-            break;
-        }
-        if (rc != 0)
-        {
-            netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
-            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
-        }
-        else
-            netdev_reply(io, 0, 0);
-    }
-
-    Disable();
-    unit->nu_Nic.tx_busy = 0;
-    Enable();
-}
-#endif
 
 /*
  * From BeginIO at task level.  Claim nu_TxBuf under the mask, frame outside it,
@@ -1224,11 +1138,11 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
 
 /*
  * The same write for a core whose interrupt never produces (tx_task_lock):
- * tx_busy is claimed under a short Disable() and keeps every other producer
- * off the ring for the whole build and issue.  The service semaphore keeps
- * offline/close from retiring the opener while its callback is running; the
- * callback itself remains fully schedulable.  On Emu68 the long Disable()
- * section this replaces was a 5.5 us trap per frame against a 0.4 us copy.
+ * Forbid() keeps other tasks out, tx_busy keeps the interrupt's reclaim and
+ * the blank's pump off the ring for the whole of the build and the issue,
+ * and Disable() is taken only around the unit's write list, which the pump
+ * shares -- the rare path, a ring that is full.  On Emu68 the Disable()
+ * pair this replaces was a 5.5 us trap per frame against a 0.4 us copy.
  */
 #if NETDEV_HAS_TX_TASK_LOCK
 static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
@@ -1238,24 +1152,16 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
     LONG          rc;
     BOOL          queued = FALSE;
 
-    NETDEV_SERVICE_OBTAIN(unit);
-    Disable();
+    Forbid();
+    unit->nu_Nic.tx_busy = 1;
+
     if (!unit->nu_Online || !unit->nu_Nic.running)
     {
-        Enable();
-        NETDEV_SERVICE_RELEASE(unit);
+        unit->nu_Nic.tx_busy = 0;
+        Permit();
         netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
         return;
     }
-    if (unit->nu_Nic.tx_busy)
-    {
-        netdev_queue_tail(&unit->nu_Writes, io);
-        Enable();
-        NETDEV_SERVICE_RELEASE(unit);
-        return;
-    }
-    unit->nu_Nic.tx_busy = 1;
-    Enable();
 
     /* A full-looking ring is asked about first: the reclaim is this task's
        now, the interrupt's stands off. */
@@ -1271,9 +1177,9 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
         Disable();
         netdev_queue_tail(&unit->nu_Writes, io);
         unit->nu_Nic.tx_busy = 0;
+        netdev_tx_pump(unit);
         Enable();
-        netdev_tx_pump_task(unit);
-        NETDEV_SERVICE_RELEASE(unit);
+        Permit();
         return;
     }
 
@@ -1296,14 +1202,16 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
         queued = TRUE;
     }
     unit->nu_TxBuilding = 0;
-    Disable();
     unit->nu_Nic.tx_busy = 0;
-    Enable();
 
     /* Anything the blank queued while this task held the ring. */
     if (!IsListEmpty(&unit->nu_Writes))
-        netdev_tx_pump_task(unit);
-    NETDEV_SERVICE_RELEASE(unit);
+    {
+        Disable();
+        netdev_tx_pump(unit);
+        Enable();
+    }
+    Permit();
 
     if (queued)
         return;
@@ -1328,12 +1236,9 @@ LONG netdev_online(NetdevUnit *unit)
 {
     LONG rc;
 
-    NETDEV_SERVICE_OBTAIN(unit);
-
     if (!netdev_pcmcia_available(unit))
     {
         netdev_event(unit, S2EVENT_ERROR | S2EVENT_HARDWARE);
-        NETDEV_SERVICE_RELEASE(unit);
         return -1;
     }
 
@@ -1356,7 +1261,6 @@ LONG netdev_online(NetdevUnit *unit)
         /* The chip would not start.  cnet.device fires
            S2EVENT_ERROR|S2EVENT_HARDWARE from init_card and init_nic for this. */
         netdev_event(unit, S2EVENT_ERROR | S2EVENT_HARDWARE);
-        NETDEV_SERVICE_RELEASE(unit);
         return rc;
     }
 
@@ -1375,7 +1279,6 @@ LONG netdev_online(NetdevUnit *unit)
     netdev_tx_pump(unit);
     Enable();
 
-    NETDEV_SERVICE_RELEASE(unit);
     return 0;
 }
 
@@ -1410,7 +1313,6 @@ static VOID netdev_set_offline(NetdevUnit *unit, ULONG event, BOOL stop)
 {
     struct Node *n;
 
-    NETDEV_SERVICE_OBTAIN(unit);
     Disable();
     /* The removal callback clears running before a task can close the unit.
        In that state a PCMCIA stop is an access to an empty socket. */
@@ -1437,7 +1339,6 @@ static VOID netdev_set_offline(NetdevUnit *unit, ULONG event, BOOL stop)
         netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
     }
     Enable();
-    NETDEV_SERVICE_RELEASE(unit);
 
     if (event != 0)
         netdev_event(unit, event);
@@ -1499,7 +1400,7 @@ static ULONG netdev_interrupt_do(NetdevUnit *unit)
             return 0;
 
         t0 = nd_now();
-        netdev_tx_service_pump(unit);
+        netdev_tx_pump(unit);
         nd_t_tx += nd_since(t0);
 
         if (nd_n_frame >= 512)
@@ -1510,13 +1411,14 @@ static ULONG netdev_interrupt_do(NetdevUnit *unit)
         BOOL mine = unit->nu_Nic.ops->intr(&unit->nu_Nic);
 
         /* Every batch that took a frame in this pass is answered before the
-           pass gives the machine back: one reply per burst. */
+           pass gives the machine back: one reply per burst, from the same
+           masked context the core delivered in. */
         netdev_batch_flush(unit);
         if (!mine)
             return 0;
     }
 
-    netdev_tx_service_pump(unit);
+    netdev_tx_pump(unit);
 #endif
 
     if (watched != 0)
@@ -1536,34 +1438,6 @@ ULONG netdev_interrupt(NetdevUnit *unit)
 {
     return netdev_interrupt_do(unit);
 }
-
-#if NETDEV_HAS_SERVICE_TASK
-static VOID netdev_service_tick(NetdevUnit *unit)
-{
-    BOOL wedged = FALSE;
-
-    if (netdev_tx_watchdog_tick(&unit->nu_TxStall, &unit->nu_TxProgress,
-                                (BOOL)(unit->nu_Online &&
-                                       unit->nu_Nic.running),
-                                unit->nu_Nic.txb_inuse,
-                                unit->nu_Nic.tx_completed))
-    {
-        unit->nu_TxWedges++;
-        unit->nu_Nic.tx_errors++;
-        if (unit->nu_Nic.ops->reset != NULL)
-            unit->nu_Nic.ops->reset(&unit->nu_Nic);
-        netdev_tx_service_pump(unit);
-        wedged = TRUE;
-    }
-
-    if (unit->nu_Online && unit->nu_Nic.ops->tick != NULL &&
-        unit->nu_Nic.ops->tick(&unit->nu_Nic))
-        netdev_tx_service_pump(unit);
-
-    if (wedged)
-        netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX | S2EVENT_HARDWARE);
-}
-#endif
 
 /*
  * Where a unit's interrupt comes from.  A Zorro board shares INT2; the PCMCIA
@@ -1623,57 +1497,33 @@ static BOOL netdev_int_rem(NetdevUnit *unit)
     return TRUE;
 }
 
-/* The schedulable bottom half for a core with a minimal top half.  The core's
- * own task calls this after wake().  nu_ServiceLock keeps CloseDevice and
- * other lifecycle work from retiring an opener while its callbacks run;
- * request-list transitions take their own short Disable() regions. */
-#if NETDEV_HAS_SERVICE_TASK
-VOID netdev_service_task(APTR arg)
+/*
+ * The bottom half of a two-part interrupt: an Exec software interrupt, raised
+ * by the server below for a core with a top half.  Under Disable(), because
+ * the service is written for the masked context the server and the vertical
+ * blank both provide.
+ */
+static ULONG netdev_soft(register NetdevUnit *unit __asm("a1"))
 {
-    NetdevUnit *unit = (NetdevUnit *)arg;
-    BOOL tick;
-
-    if (unit == NULL)
-        return;
-
-    ObtainSemaphore(&unit->nu_ServiceLock);
+    /* Every service pass runs under Disable() (the server, the blank, the
+       opener's ANXD_CMD_RX_POLL), so nothing can hold nu_InIsr when a
+       software interrupt gets to run; the test is the same guard the
+       others keep, not a case. */
     Disable();
     if (unit->nu_InIsr == 0)
     {
         unit->nu_InIsr = 1;
-        tick = (BOOL)(unit->nu_ServiceTick != 0);
-        unit->nu_ServiceTick = 0;
-        Enable();
-
         if (netdev_interrupt(unit) != 0)
         {
             unit->nu_IntSeen++;
             unit->nu_IntSilent = 0;
         }
-
-        /* The blank only schedules this work for a deferred core.  Run its
-           tick with scheduling enabled; PHY waits, DMA cache maintenance and
-           receive callbacks are task work. */
-        if (tick)
-            netdev_service_tick(unit);
-
-        Disable();
         unit->nu_InIsr = 0;
     }
     Enable();
-    ReleaseSemaphore(&unit->nu_ServiceLock);
-}
 
-VOID netdev_service_lock(APTR arg)
-{
-    ObtainSemaphore(&((NetdevUnit *)arg)->nu_ServiceLock);
+    return 0;
 }
-
-VOID netdev_service_unlock(APTR arg)
-{
-    ReleaseSemaphore(&((NetdevUnit *)arg)->nu_ServiceLock);
-}
-#endif
 
 static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 {
@@ -1682,18 +1532,15 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
     /* A core with a top half: quieten the source, and let the software
        interrupt do the work where a cache operation and a long ring walk
        are welcome. */
-#if NETDEV_HAS_SERVICE_TASK
     if (unit->nu_Nic.isr != NULL)
     {
         if (!unit->nu_Nic.isr(&unit->nu_Nic))
             return 0;
         unit->nu_IntSeen++;
         unit->nu_IntSilent = 0;
-        if (unit->nu_Nic.wake != NULL)
-            unit->nu_Nic.wake(&unit->nu_Nic);
+        Cause(&unit->nu_Soft);
         return 1;
     }
-#endif
 
     unit->nu_InIsr = 1;
     mine = netdev_interrupt(unit);
@@ -1718,24 +1565,6 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
     BOOL wedged = FALSE;
 
     Disable();
-
-    /* A core with a top half owns a schedulable service task.  The vertical
-       blank records one tick and wakes it; no DMA walk, cache operation,
-       callback or PHY transaction happens in the interrupt. */
-#if NETDEV_HAS_SERVICE_TASK
-    if (unit->nu_Nic.isr != NULL && unit->nu_Nic.wake != NULL)
-    {
-        if (unit->nu_Online)
-        {
-            if (unit->nu_IntSilent < 0xffffu)
-                unit->nu_IntSilent++;
-            unit->nu_ServiceTick = 1;
-            unit->nu_Nic.wake(&unit->nu_Nic);
-        }
-        Enable();
-        return 0;
-    }
-#endif
 
     if (unit->nu_InIsr == 0 &&
         netdev_tx_watchdog_tick(&unit->nu_TxStall, &unit->nu_TxProgress,
@@ -1824,9 +1653,6 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 
     unit = &dev->nd_Units[dev->nd_UnitCount];
     nd_zero((UBYTE *)unit, sizeof(*unit));
-#if NETDEV_HAS_SERVICE_LOCK
-    InitSemaphore(&unit->nu_ServiceLock);
-#endif
 
     /* What the device tree said, for a core found through one.  Before
        attach, which is what reads it. */
@@ -1985,6 +1811,12 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Tick.is_Node.ln_Name = netdev_name;
     unit->nu_Tick.is_Data     = unit;
     unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick;
+
+    unit->nu_Soft.is_Node.ln_Type = NT_INTERRUPT;
+    unit->nu_Soft.is_Node.ln_Pri  = 16;
+    unit->nu_Soft.is_Node.ln_Name = netdev_name;
+    unit->nu_Soft.is_Data     = unit;
+    unit->nu_Soft.is_Code     = (VOID (*)())netdev_soft;
 
     dev->nd_UnitCount++;
 
@@ -2501,13 +2333,11 @@ static struct Device *netdev_open(
      * Disable(): split apart, two opens both read nu_Openers == 0 and both take
      * the unit exclusively.
      */
-    NETDEV_SERVICE_OBTAIN(hw);
     Disable();
     if (hw->nu_Exclusive ||
         (op->op_Exclusive && hw->nu_Openers != 0))
     {
         Enable();
-        NETDEV_SERVICE_RELEASE(hw);
         FreeMem(op, sizeof(NetdevOpener));
         io->ios2_Req.io_Device = (struct Device *)-1;
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
@@ -2539,7 +2369,6 @@ static struct Device *netdev_open(
         AddIntServer(INTB_VERTB, &hw->nu_Tick);
         hw->nu_IntrAdded = 1;
     }
-    NETDEV_SERVICE_RELEASE(hw);
 
     nd_trace("anx: open ok\r\n");
     io->ios2_Req.io_Device = dev;
@@ -2570,7 +2399,6 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
 
         hw = op->op_Hw;
 
-        NETDEV_SERVICE_OBTAIN(hw);
         Disable();
         Remove((struct Node *)&op->op_Node);
         Enable();
@@ -2626,7 +2454,6 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
             hw->nu_ExecUnit.unit_OpenCnt--;
 
         FreeMem(op, sizeof(NetdevOpener));
-        NETDEV_SERVICE_RELEASE(hw);
     }
 
     if (dev->dd_Library.lib_OpenCnt != 0)
