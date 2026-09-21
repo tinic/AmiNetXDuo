@@ -57,6 +57,7 @@ extern TX_THREAD *_tx_thread_current_ptr;
 #define BT_PROBE_MICRO  2000UL      /* probe period; 500 samples a second      */
 
 #define BT_SIG_GO       SIGF_SINGLE
+#define BT_SIG_ACQUIRE  SIGBREAKF_CTRL_E
 
 /* ------------------------------------------------------------- the reporting -- */
 
@@ -451,6 +452,7 @@ static volatile ULONG bt_probe_samples;
 static volatile ULONG bt_probe_shared;
 static volatile ULONG bt_probe_worst;
 static volatile UWORD bt_phase_stop;
+static volatile UWORD bt_baton_released;
 
 static BtTask bt_probe;
 static BtTask bt_baton[BT_BATON_TASKS];
@@ -530,6 +532,17 @@ static VOID bt_baton_entry(VOID)
            outer acquire resumes it. */
         ami_netstack_baton_release();
         ami_netstack_baton_release();
+
+        /* Make the capacity proof independent of CPU speed.  Every Task
+           reaches the released state once before any of them reacquires;
+           after that barrier the timed contention phase runs unchanged. */
+        if (rounds == 0)
+        {
+            Forbid();
+            bt_baton_released++;
+            Permit();
+            Wait(BT_SIG_ACQUIRE);
+        }
 
         /* Where the reader's Wait() for a packet goes. Nothing here may touch
            ThreadX: the bracket has taken this Task off the ready list. */
@@ -1002,6 +1015,7 @@ int main(int argc, char **argv)
 
     SetSignal(0, BT_SIG_GO);
     bt_phase_stop = 0U;
+    bt_baton_released = 0U;
     spawned       = 0;
 
     bt_probe.bt_Parent = me;
@@ -1019,6 +1033,24 @@ int main(int argc, char **argv)
     for (i = 0; i < BT_BATON_TASKS; i++)
         if (bt_baton[i].bt_Task != NULL)
             Signal(bt_baton[i].bt_Task, BT_SIG_GO);
+
+    {
+        ULONG waited = 0UL;
+
+        while (bt_baton_released < spawned && waited < (ULONG)(30 * 50))
+        {
+            Delay(1);
+            waited++;
+        }
+
+        t_check(bt_baton_released == spawned,
+                "every baton Task reached the released barrier",
+                (LONG)bt_baton_released);
+    }
+
+    for (i = 0; i < BT_BATON_TASKS; i++)
+        if (bt_baton[i].bt_Task != NULL)
+            Signal(bt_baton[i].bt_Task, BT_SIG_ACQUIRE);
 
     Delay(BT_BATON_TICKS);
     bt_phase_stop = 1U;
