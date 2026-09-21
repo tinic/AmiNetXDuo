@@ -623,9 +623,11 @@
     (set DEV_WRITE D_ANXGENET)
     (if (AND (= CARD_INDEX 11) DO_ANXNET)
       (set DEV_WRITE D_ANXWIFIPI)
-      (if (AND (= CARD_INDEX 1) (= dev_present 0) DO_ANXNET)
-        ; MNT's ZZ9000Net.device is absent: the supplied driver for the
-        ; card, its own image, no CARD= key -- it drives nothing else.
+      (if (AND (= CARD_INDEX 1) (= dev_present 0) DO_ANXNET HAVE_ANXZZ9000)
+        ; MNT's ZZ9000Net.device is absent and this archive carries the
+        ; supplied driver for the card: its own image, no CARD= key -- it
+        ; drives nothing else.  An archive without it falls through to the
+        ; missing-driver warning below, like any other card.
         (set DEV_WRITE D_ANXZZ9000)
         (if (= dev_present 0)
           (if (AND DO_ANXNET (> (strlen CARD_KEY) 0))
@@ -708,11 +710,10 @@
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
-(if (NOT (exists S_ANXZZ9000 (noreq)))
-    (abort "This archive has no Devs/Networks/anxzz9000.device.\n\n"
-           "The download is incomplete, or was unpacked with a tool that "
-           "dropped the subdrawers.\n\n"
-           "Nothing was changed."))
+; anxzz9000.device is optional: an archive built without
+; -DAMINETXDUO_ZZ9000=ON does not carry it (CMakeLists.txt), and a ZZ9000
+; is then driven only by MNT's own ZZ9000Net.device.
+(set HAVE_ANXZZ9000 (if (exists S_ANXZZ9000 (noreq)) 1 0))
 (if (NOT (exists S_NETPROBE (noreq)))
     (abort "This archive has no InstallNetProbe.\n\n"
            "The download is incomplete, or was unpacked with a tool that "
@@ -1869,14 +1870,17 @@
                          "Nothing uses it until an interface file names it."))
     (P_install_device)
 
-    (set dev_file   "anxzz9000.device")
-    (set dev_source S_ANXZZ9000)
-    (set dev_prompt (cat "Installing anxzz9000.device into DEVS:Networks\n\n"
-                         "The same driver with only the MNT ZZ9000's Ethernet "
-                         "in it, for a machine that has the card and not MNT's "
-                         "ZZ9000Net.device.  Nothing uses it until an "
-                         "interface file names it."))
-    (P_install_device)
+    (if HAVE_ANXZZ9000
+      (
+        (set dev_file   "anxzz9000.device")
+        (set dev_source S_ANXZZ9000)
+        (set dev_prompt (cat "Installing anxzz9000.device into DEVS:Networks\n\n"
+                             "The same driver with only the MNT ZZ9000's Ethernet "
+                             "in it, for a machine that has the card and not MNT's "
+                             "ZZ9000Net.device.  Nothing uses it until an "
+                             "interface file names it."))
+        (P_install_device)
+      ))
 
     (set dev_file   "anxwifipi.device")
     (set dev_source S_ANXWIFIPI)

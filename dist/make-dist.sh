@@ -70,7 +70,12 @@ LIBS=(bsdsocket usergroup)
 # every reinstall; install/test/run-workbench.sh now asserts the installed copy
 # byte for byte against the one packed here, so the two cannot drift apart
 # again in silence.
-DEVICES=(netdev/anxnet netdev/anxgenet netdev/anxzz9000 wifipi/anxwifipi)
+DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
+# anxzz9000.device ships only from a build configured -DAMINETXDUO_ZZ9000=ON
+# (CMakeLists.txt says why it is off); the Installer treats it as optional.
+if grep -q '^AMINETXDUO_ZZ9000:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
+    DEVICES+=(netdev/anxzz9000)
+fi
 CMDS=(AddNetInterface NetSetup NetPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp

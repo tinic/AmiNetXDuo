@@ -61,11 +61,13 @@ checksum summed on the way, INT6 served without a helper task, and on the
 firmware fork at `github.com/tinic/zz9000-firmware` (branch `aminetxduo`) a
 transmit that does not stall the bus; an A3000/030 receives 8.0 Mbit/s against
 3.1 with `ZZ9000Net.device` 2.2 (`docs/plans/zz9000-ethernet.md` has the
-measurements and what the fork changes in the card's firmware). The installer
-offers to put all four supplied drivers in `DEVS:Networks`; on Emu68 it reads
-the device tree and
+measurements and what the fork changes in the card's firmware). It is not in
+the release archive yet (the A3000 still freezes under a long receive on it;
+build with `-DAMINETXDUO_ZZ9000=ON` to ship it). The installer offers to put
+the supplied drivers in `DEVS:Networks`; on Emu68 it reads the device tree and
 creates definitions for the supported Ethernet and Wi-Fi devices it finds, and
-on a ZZ9000 without MNT's driver it names `anxzz9000.device`.
+on a ZZ9000 without MNT's driver it names `anxzz9000.device` when the archive
+carries it.
 An interface file selects one with `DEVICE=`. `anxgenet.device` needs [Emu68](https://github.com/michalsc/Emu68/releases)
 1.1 alpha.1 or newer: that is the
 first release line that maps GENET's `/scb` range into the Amiga address space.
