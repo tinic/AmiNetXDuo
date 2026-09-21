@@ -9,6 +9,24 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxgenet.device` leaves its receive interrupt masked after a service
+  pass that stopped at a frame whose reader had no read posted, and arms it
+  again from the pass that gets past that frame. Unmasked, the chip raised
+  the line again at once (nothing had been consumed), and the top and
+  bottom halves ran the same empty pass with every cycle of the machine for
+  1.6-2.1 s at a time -- the reader it waited for never scheduled, the
+  sender starved inside its transmit lock. A1200, iperf out, 120 s runs:
+  every run had such stalls, one in three ended in a chip reset, and each
+  run cost 130-450 TCP retransmissions; with the line held: no stalls, 0
+  retransmissions, 397 Mbit/s. `NetDevStats` counts "receive line masked
+  for a reader behind".
+- The transmit watchdog no longer counts a vertical blank on which a task
+  holds the transmit ring (`anxgenet.device`, `anxzz9000.device`): the
+  core's completion reclaim stands off while it does, so no progress could
+  have been recorded. The stall above was read as a wedged transmitter and
+  the watchdog reset a chip whose ring was already empty, PHY included,
+  which ended the transfer.
+
 - Workaround in `anxgenet.device` for a GIC line found dead: a Raspberry Pi
   interrupt line left pending or active across a warm reboot is never
   delivered again, and the machine then receives through the vertical

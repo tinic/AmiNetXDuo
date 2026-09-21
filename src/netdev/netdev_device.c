@@ -1566,7 +1566,14 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 
     Disable();
 
-    if (unit->nu_InIsr == 0 &&
+    /* A task mid-transmit under the tx task lock (tx_busy) keeps the core's
+       reclaim off the ring, so no completion can be recorded while it holds
+       it: such a blank says nothing about the chip and is not counted.
+       2026-09-21, A1200: a sender kept off the CPU for 2.4 s inside that
+       window had this reset a GENET whose ring the chip had long emptied
+       (chip producer == consumer, 22 unreclaimed), PHY included, and the
+       transfer died with it -- one TX run in three. */
+    if (unit->nu_InIsr == 0 && !unit->nu_Nic.tx_busy &&
         netdev_tx_watchdog_tick(&unit->nu_TxStall, &unit->nu_TxProgress,
                                (BOOL)(unit->nu_Online &&
                                       (!netdev_pcmcia_is_unit(unit) ||

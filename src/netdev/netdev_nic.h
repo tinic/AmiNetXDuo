@@ -39,7 +39,7 @@
 #ifdef GE_PROBE_ST
 #define NETDEV_CORE_STATS   42      /* + the GENET probe's thirteen RX, four TX */
 #else
-#define NETDEV_CORE_STATS   25      /* the GENET's shipping counter set, two GIC line counters 2026-09-21 */
+#define NETDEV_CORE_STATS   26      /* the GENET's shipping counter set, two GIC line counters and the held receive line 2026-09-21 */
 #endif
 
 /*
