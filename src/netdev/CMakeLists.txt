@@ -61,6 +61,8 @@ set(NETDEV_CLASSIC_SOURCES
 # them have no Pi in them.
 set(NETDEV_GENET_SOURCES
     genet.c             # Broadcom GENET v5: the Pi 4's MAC behind a PiStorm32
+    genet_phy.c         # what the PHY's registers mean, host-testable
+    genet_words.c       # what attach, init and the filter decide, host-testable
     netdev_dtree.c      # Emu68's device tree and its GIC, for the GENET row
     netdev_reset.c)     # a bus master is stopped before a warm reboot
 
@@ -506,6 +508,50 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_trace PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_trace COMMAND test_netdev_trace)
+
+    # The GENET core's decisions, split out of genet.c on the same rule: a
+    # file with no register access, no cache operation and no Exec call in
+    # it can run here, and genet.c cannot.  genet_ring.h is header-only
+    # because its sums run on every burst and every frame of the receive
+    # and transmit passes; genet_phy.c is the link poll's reading of the
+    # PHY; genet_words.c is what attach, init and the filter decide.
+    add_executable(test_netdev_genet_ring
+        test/test_netdev_genet_ring.c)
+
+    target_include_directories(test_netdev_genet_ring PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_genet_ring PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_genet_ring COMMAND test_netdev_genet_ring)
+
+    add_executable(test_netdev_genet_phy
+        test/test_netdev_genet_phy.c
+        genet_phy.c)
+
+    target_include_directories(test_netdev_genet_phy PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_genet_phy PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_genet_phy COMMAND test_netdev_genet_phy)
+
+    add_executable(test_netdev_genet_words
+        test/test_netdev_genet_words.c
+        genet_words.c)
+
+    target_include_directories(test_netdev_genet_words PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_genet_words PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_genet_words COMMAND test_netdev_genet_words)
 
     # The probe record and the semaphore it is published on -- the ONLY channel
     # by which a machine nobody here has can report what the probe decided.

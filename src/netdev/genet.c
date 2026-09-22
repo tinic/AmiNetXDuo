@@ -29,6 +29,9 @@
 #include "netdev_mcast.h"
 #include "netdev_dtree.h"
 #include "genetreg.h"
+#include "genet_ring.h"
+#include "genet_phy.h"
+#include "genet_words.h"
 #include "dp8390.h"     /* the DP8390_TX_* return codes are the shared contract */
 #include "n68k_iocopy.h"
 #include "netdev_clock.h"
@@ -263,16 +266,10 @@ typedef struct GenetCore
  * interrupt arriving for GE_GIC_SILENT_BLANKS blanks (the deaf fallback in
  * netdev_tick services the ring every ten blanks meanwhile).  The
  * distributor is found through the device tree and believed only when
- * GICD_IIDR names a GIC-400.  Counted in NetDevStats, both the clears and
- * the silent blanks, so a machine that needed it says so.
+ * GICD_IIDR names a GIC-400 (the GICD_* registers: genet_words.h).  Counted
+ * in NetDevStats, both the clears and the silent blanks, so a machine that
+ * needed it says so.
  */
-#define GICD_IIDR           0x008
-#define GICD_ISENABLER      0x100
-#define GICD_ICPENDR        0x280
-#define GICD_ISACTIVER      0x300
-#define GICD_ICACTIVER      0x380
-#define GICD_IIDR_GIC400    0x0200043BUL    /* ProductID 0x020, ARM      */
-#define GICD_IIDR_MASK      0xFF000FFFUL
 #define GE_GIC_SILENT_BLANKS 3              /* pending, unmasked, unheard */
 
 #define GE(nic)         ((GenetCore *)(nic)->core)
@@ -429,14 +426,14 @@ static inline VOID gicd_wr(const GenetCore *c, ULONG off, ULONG v)
     *(volatile ULONG *)(c->gicd + off) = __builtin_bswap32(v);
 }
 
-/* WORKAROUND (the comment above GICD_IIDR): clear the line's pending and
-   active state at the distributor.  Nothing else of the GIC's is touched:
-   enable, priority and target stay the library's. */
+/* WORKAROUND (the comment above GE_GIC_SILENT_BLANKS): clear the line's
+   pending and active state at the distributor.  Nothing else of the GIC's is
+   touched: enable, priority and target stay the library's. */
 static VOID ge_gic_clear(NetdevNic *nic)
 {
     GenetCore *c   = GE(nic);
-    ULONG      n   = (nic->dt_irq >> 5) << 2;
-    ULONG      bit = 1UL << (nic->dt_irq & 31UL);
+    ULONG      n   = genet_gicd_bank_offset(nic->dt_irq);
+    ULONG      bit = genet_gicd_bit(nic->dt_irq);
 
     if (c->gicd == 0 || nic->dt_irq == 0)
         return;
@@ -542,8 +539,6 @@ static BOOL ge_mii_write(NetdevNic *nic, UBYTE reg, UWORD val)
  * instruction from user mode.  Depending on that emulator behaviour made the
  * driver invalid on a conforming 68040 and vulnerable to an Emu68 fix.
  */
-#define GE_PAGE         4096UL
-
 __asm__(
 "    .text\n"
 "    .arch 68040\n"
@@ -581,11 +576,8 @@ static VOID ge_cache(NetdevNic *nic, APTR addr, ULONG len)
 
     if (c->pageops)
     {
-        ULONG first = (ULONG)addr & ~(GE_PAGE - 1UL);
-        ULONG last  = ((ULONG)addr + len - 1UL) & ~(GE_PAGE - 1UL);
-        ULONG pages = (last - first) / GE_PAGE + 1UL;
-
-        ge_sup_pages(first, pages);
+        ge_sup_pages(genet_page_first((ULONG)addr),
+                     genet_page_count((ULONG)addr, len));
         return;
     }
 
@@ -599,23 +591,17 @@ static VOID ge_apply_link(NetdevNic *nic, UBYTE speed)
     ULONG v;
 
     v = ge_rd(nic, GENET_EXT_RGMII_OOB_CTRL);
-    v &= ~GENET_EXT_RGMII_OOB_OOB_DISABLE;
-    v |= GENET_EXT_RGMII_OOB_RGMII_LINK | GENET_EXT_RGMII_OOB_RGMII_MODE_EN;
-    /* rgmii-rxid: the PHY supplies the receive delay and the MAC keeps its
-       internal transmit one, so the ID-mode-disable bit stays clear. */
-    v &= ~GENET_EXT_RGMII_OOB_ID_MODE_DISABLE;
-    ge_wr(nic, GENET_EXT_RGMII_OOB_CTRL, v);
+    ge_wr(nic, GENET_EXT_RGMII_OOB_CTRL, genet_rgmii_oob_word(v));
 
     v = ge_rd(nic, GENET_UMAC_CMD);
-    v = (v & ~GENET_UMAC_CMD_SPEED_MASK) | speed;
-    ge_wr(nic, GENET_UMAC_CMD, v);
+    ge_wr(nic, GENET_UMAC_CMD, genet_umac_cmd_speed(v, speed));
 }
 
 /*
  * Ask the PHY.  BMSR's link bit is latched low, so a first read after a drop
  * reports the drop and a second the present state; the second is what counts.
- * The negotiated speed comes from the Broadcom auxiliary status register,
- * which says what was resolved without decoding both sides' advertisements.
+ * The negotiated speed comes from the Broadcom auxiliary status register
+ * (genet_phy_speed).
  */
 static VOID ge_link_poll(NetdevNic *nic)
 {
@@ -631,30 +617,14 @@ static VOID ge_link_poll(NetdevNic *nic)
     bmsr = ge_mii_read(nic, MII_BMSR);
     if (bmsr >= 0 && (bmsr & BMSR_LINK) == 0)
         bmsr = ge_mii_read(nic, MII_BMSR);
-    up = (UBYTE)(bmsr >= 0 && (bmsr & BMSR_LINK) != 0);
+    up = (UBYTE)genet_phy_link_up(bmsr);
 
     if (up)
     {
         LONG aux = ge_mii_read(nic, BRGPHY_MII_AUXSTS);
 
         if (aux >= 0)
-        {
-            switch (aux & BRGPHY_AUXSTS_AN_RES)
-            {
-            case BRGPHY_RES_1000FD:
-            case BRGPHY_RES_1000HD:
-                speed = GENET_UMAC_CMD_SPEED_1000;
-                break;
-            case BRGPHY_RES_100FD:
-            case BRGPHY_RES_100T4:
-            case BRGPHY_RES_100HD:
-                speed = GENET_UMAC_CMD_SPEED_100;
-                break;
-            default:
-                speed = GENET_UMAC_CMD_SPEED_10;
-                break;
-            }
-        }
+            speed = genet_phy_speed(aux);
     }
 
     if (up != c->link || (up && speed != c->speed))
@@ -662,7 +632,7 @@ static VOID ge_link_poll(NetdevNic *nic)
         GE_TRACE("ge: link ", ((ULONG)up << 8) | speed);
         c->link  = up;
         c->speed = speed;
-        nic->core_stat[GE_ST_LINK] = up ? (ULONG)(speed >> 2) + 1UL : 0UL;
+        nic->core_stat[GE_ST_LINK] = genet_link_stat(up, speed);
         if (up)
             ge_apply_link(nic, speed);
     }
@@ -670,47 +640,26 @@ static VOID ge_link_poll(NetdevNic *nic)
     c->in_mdio = 0;
 }
 
-/*
- * The BCM54213PE's RGMII delays, once, at attach: the receive clock skew on
- * (the tree says rgmii-rxid), the transmit clock delay off.  Both live behind
- * shadow registers reached through AUXCTL (0x18) and register 0x1c: select
- * the shadow, read, mask the data bits, write with the write-enable bit.
- */
-#define BCM54_AUXCTL            0x18
-#define  BCM54_AUXCTL_SHD_MISC  0x0007
-#define  BCM54_AUXCTL_MISC_RD   (BCM54_AUXCTL_SHD_MISC << 12)
-#define  BCM54_AUXCTL_MISC_WREN 0x8000
-#define  BCM54_AUXCTL_MISC_DATA 0x7ff8
-#define  BCM54_AUXCTL_MISC_RXSKEW 0x0200
-#define BCM54_SHD1C             0x1c
-#define  BCM54_SHD1C_CLKCTRL    (0x03 << 10)
-#define  BCM54_SHD1C_WREN       0x8000
-#define  BCM54_SHD1C_DATA       0x03ff
-#define  BCM54_SHD1C_GTXCLK     0x0200
-
+/* The BCM54213PE's RGMII delays, once, at init: select each shadow, read,
+   write back the word genet_phy.h composes (the receive clock skew on, the
+   transmit clock delay off). */
 static VOID ge_phy_delays(NetdevNic *nic)
 {
     LONG v;
 
-    if (!ge_mii_write(nic, BCM54_AUXCTL,
-                      BCM54_AUXCTL_SHD_MISC | BCM54_AUXCTL_MISC_RD))
+    if (!ge_mii_write(nic, BCM54_AUXCTL, GENET_PHY_AUXCTL_MISC_SELECT))
         return;
     v = ge_mii_read(nic, BCM54_AUXCTL);
     if (v < 0)
         return;
-    v = (v & BCM54_AUXCTL_MISC_DATA) | BCM54_AUXCTL_MISC_RXSKEW;
-    (VOID)ge_mii_write(nic, BCM54_AUXCTL,
-                       (UWORD)(BCM54_AUXCTL_MISC_WREN |
-                               BCM54_AUXCTL_SHD_MISC | v));
+    (VOID)ge_mii_write(nic, BCM54_AUXCTL, genet_phy_auxctl_misc(v));
 
-    if (!ge_mii_write(nic, BCM54_SHD1C, BCM54_SHD1C_CLKCTRL))
+    if (!ge_mii_write(nic, BCM54_SHD1C, GENET_PHY_SHD1C_CLKCTRL_SELECT))
         return;
     v = ge_mii_read(nic, BCM54_SHD1C);
     if (v < 0)
         return;
-    v = (v & BCM54_SHD1C_DATA) & ~BCM54_SHD1C_GTXCLK;
-    (VOID)ge_mii_write(nic, BCM54_SHD1C,
-                       (UWORD)(BCM54_SHD1C_WREN | BCM54_SHD1C_CLKCTRL | v));
+    (VOID)ge_mii_write(nic, BCM54_SHD1C, genet_phy_shd1c_clkctrl(v));
 }
 
 /* --------------------------------------------------------------- reset --- */
@@ -773,9 +722,9 @@ static VOID ge_reset(NetdevNic *nic)
 /*
  * The UniMAC filters on up to 17 exact addresses and has no hash and no
  * all-multicast mode.  Slot 0 is broadcast, slot 1 our own address, and the
- * unit's exact multicast table follows; a table that does not fit, a range
- * too wide for it, or an opener that asked for everything all turn the
- * filter off.
+ * unit's exact multicast table follows (genet_mdf_fits); a table that does
+ * not fit, a range too wide for it, or an opener that asked for everything
+ * all turn the filter off.
  */
 static VOID ge_mdf_set(NetdevNic *nic, UWORD slot, const UBYTE *ea)
 {
@@ -794,16 +743,9 @@ static VOID genet_setfilter(NetdevNic *nic)
     UWORD i;
     BOOL  all  = (BOOL)(nic->promisc || nic->all_multi);
 
-    if (!all && nic->mc_table != NULL)
-    {
-        UWORD n = 2;
-
-        for (i = 0; i < nic->mc_max; i++)
-            if (nic->mc_table[i].refs != 0)
-                n++;
-        if (n > GENET_MAX_MDF_FILTER)
-            all = TRUE;
-    }
+    if (!all && nic->mc_table != NULL &&
+        !genet_mdf_fits(nic->mc_table, nic->mc_max))
+        all = TRUE;
 
     if (all)
     {
@@ -821,11 +763,8 @@ static VOID genet_setfilter(NetdevNic *nic)
                 ge_mdf_set(nic, slot++, nic->mc_table[i].addr);
     }
 
-    /* Slot k is enabled by bit (16 - k): the top `slot` bits of 17. */
     ge_wr(nic, GENET_UMAC_CMD, cmd & ~GENET_UMAC_CMD_PROMISC);
-    ge_wr(nic, GENET_UMAC_MDF_CTRL,
-          ((1UL << GENET_MAX_MDF_FILTER) - 1UL) &
-          ~((1UL << (GENET_MAX_MDF_FILTER - slot)) - 1UL));
+    ge_wr(nic, GENET_UMAC_MDF_CTRL, genet_mdf_ctrl_word(slot));
 }
 
 /* --------------------------------------------------------------- rings --- */
@@ -846,11 +785,10 @@ static VOID ge_init_rings(NetdevNic *nic)
     ge_wr(nic, GENET_TX_DMA_CONS_INDEX(GE_Q), 0);
     ge_wr(nic, GENET_TX_DMA_PROD_INDEX(GE_Q), 0);
     ge_wr(nic, GENET_TX_DMA_RING_BUF_SIZE(GE_Q),
-          ((ULONG)GE_TX_RING << 16) | GE_BUFSZ);
+          genet_ring_size_word(GE_TX_RING, GE_BUFSZ));
     ge_wr(nic, GENET_TX_DMA_START_ADDR_LO(GE_Q), 0);
     ge_wr(nic, GENET_TX_DMA_START_ADDR_HI(GE_Q), 0);
-    ge_wr(nic, GENET_TX_DMA_END_ADDR_LO(GE_Q),
-          GE_TX_RING * GENET_DMA_DESC_SIZE / 4 - 1);
+    ge_wr(nic, GENET_TX_DMA_END_ADDR_LO(GE_Q), genet_ring_end_word(GE_TX_RING));
     ge_wr(nic, GENET_TX_DMA_END_ADDR_HI(GE_Q), 0);
     ge_wr(nic, GENET_TX_DMA_FLOW_PERIOD(GE_Q), 0);
     ge_wr(nic, GENET_TX_DMA_WRITE_PTR_LO(GE_Q), 0);
@@ -891,15 +829,13 @@ static VOID ge_init_rings(NetdevNic *nic)
     ge_wr(nic, GENET_RX_DMA_PROD_INDEX(GE_Q), 0);
     ge_wr(nic, GENET_RX_DMA_CONS_INDEX(GE_Q), 0);
     ge_wr(nic, GENET_RX_DMA_RING_BUF_SIZE(GE_Q),
-          ((ULONG)GE_RX_RING << 16) | GE_BUFSZ);
+          genet_ring_size_word(GE_RX_RING, GE_BUFSZ));
     ge_wr(nic, GENET_RX_DMA_START_ADDR_LO(GE_Q), 0);
     ge_wr(nic, GENET_RX_DMA_START_ADDR_HI(GE_Q), 0);
-    ge_wr(nic, GENET_RX_DMA_END_ADDR_LO(GE_Q),
-          GE_RX_RING * GENET_DMA_DESC_SIZE / 4 - 1);
+    ge_wr(nic, GENET_RX_DMA_END_ADDR_LO(GE_Q), genet_ring_end_word(GE_RX_RING));
     ge_wr(nic, GENET_RX_DMA_END_ADDR_HI(GE_Q), 0);
-    /* Pause the wire at 5 free buffers, resume at a sixteenth of the ring. */
     ge_wr(nic, GENET_RX_DMA_XON_XOFF_THRES(GE_Q),
-          (5UL << 16) | (GE_RX_RING >> 4));
+          genet_ring_xon_xoff_word(GE_RX_RING));
     ge_wr(nic, GENET_RX_DMA_READ_PTR_LO(GE_Q), 0);
     ge_wr(nic, GENET_RX_DMA_READ_PTR_HI(GE_Q), 0);
     /*
@@ -910,7 +846,7 @@ static VOID ge_init_rings(NetdevNic *nic)
     ge_wr(nic, GENET_RX_DMA_MBUF_DONE_THRES(GE_Q), GE_RX_COALESCE_FRAMES);
     v = ge_rd(nic, GENET_RX_DMA_RING_TIMEOUT(GE_Q));
     ge_wr(nic, GENET_RX_DMA_RING_TIMEOUT(GE_Q),
-          (v & ~GENET_DMA_RING_TIMEOUT_MASK) | GE_RX_COALESCE_TICKS);
+          genet_ring_timeout_word(v, GE_RX_COALESCE_TICKS));
     ge_wr(nic, GENET_RX_DMA_RING_CFG, 1UL << GE_Q);
     v = ge_rd(nic, GENET_RX_DMA_CTRL);
     ge_wr(nic, GENET_RX_DMA_CTRL,
@@ -968,8 +904,7 @@ static LONG genet_init(NetdevNic *nic)
            costs two to three seconds of no link, which is a DHCP timeout
            on a fast machine.  One that has not is told to start. */
         bmsr = ge_mii_read(nic, MII_BMSR);
-        if (bmsr < 0 ||
-            (bmsr & (BMSR_LINK | BMSR_ACOMP)) != (BMSR_LINK | BMSR_ACOMP))
+        if (!genet_phy_negotiated(bmsr))
             (VOID)ge_mii_write(nic, MII_BMCR, BMCR_AUTOEN | BMCR_STARTNEG);
         c->phy_set = 1;
     }
@@ -994,9 +929,9 @@ static LONG genet_init(NetdevNic *nic)
     ge_wr(nic, GENET_INTRL2_CPU_CLEAR, 0xffffffffUL);
     if (nic->dt_irq_live)
     {
-        /* WORKAROUND (the comment above GICD_IIDR): whatever an earlier
-           instance or boot left of the line's state goes before the first
-           frame can assert it. */
+        /* WORKAROUND (the comment above GE_GIC_SILENT_BLANKS): whatever an
+           earlier instance or boot left of the line's state goes before the
+           first frame can assert it. */
         ge_gic_clear(nic);
         ge_wr(nic, GENET_INTRL2_CPU_CLEAR_MASK, GE_IRQ_WANTED);
     }
@@ -1386,16 +1321,12 @@ static BOOL ge_rxintr(NetdevNic *nic)
      * the whole backlog again on every poll.
      */
     {
-        UWORD done  = (UWORD)(c->rx_clean - c->rx_cidx);
-        UWORD fresh;
+        UWORD fresh = genet_ring_fresh(total, c->rx_cidx, c->rx_clean);
 
-        if (done > total)
-            done = 0;               /* cannot happen; start over if it does */
-        fresh = (UWORD)(total - done);
         if (fresh != 0)
         {
-            UWORD first = (UWORD)(c->rx_clean & (GE_RX_RING - 1));
-            UWORD room  = (UWORD)(GE_RX_RING - first);
+            UWORD first = genet_ring_slot(c->rx_clean, GE_RX_RING);
+            UWORD room  = genet_ring_room(c->rx_clean, GE_RX_RING);
             GE_P_START(pc);
 
             if (fresh <= room)
@@ -1419,7 +1350,7 @@ static BOOL ge_rxintr(NetdevNic *nic)
 
     for (n = 0; n < total; n++)
     {
-        UWORD  idx    = (UWORD)(c->rx_cidx & (GE_RX_RING - 1));
+        UWORD  idx    = genet_ring_slot(c->rx_cidx, GE_RX_RING);
         GE_P_START(pd);
 
         if (n >= (UWORD)GE_RX_PASS_MAX)
@@ -1515,8 +1446,8 @@ static VOID ge_tx_kick(NetdevNic *nic)
 
     /* The frames written since the last kick, one range or two. */
     n     = (UWORD)(c->tx_pidx - c->tx_kicked);
-    first = (UWORD)(c->tx_kicked & (GE_TX_RING - 1));
-    room  = (UWORD)(GE_TX_RING - first);
+    first = genet_ring_slot(c->tx_kicked, GE_TX_RING);
+    room  = genet_ring_room(c->tx_kicked, GE_TX_RING);
     {
         GE_P_START(pk);
         if (n <= room)
@@ -1547,7 +1478,7 @@ static UBYTE *genet_tx_at(NetdevNic *nic)
 
     if (nic->txb_inuse >= GE_TX_RING)
         return NULL;
-    return c->tx_buf + (ULONG)(c->tx_pidx & (GE_TX_RING - 1)) * GE_BUFSZ +
+    return c->tx_buf + (ULONG)genet_ring_slot(c->tx_pidx, GE_TX_RING) * GE_BUFSZ +
            GE_TX_HEAD;
 }
 
@@ -1586,7 +1517,7 @@ static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
     if (len < NETDEV_FRAME_MIN)
         len = NETDEV_FRAME_MIN;
 
-    idx  = (UWORD)(c->tx_pidx & (GE_TX_RING - 1));
+    idx  = genet_ring_slot(c->tx_pidx, GE_TX_RING);
     slot = c->tx_buf + (ULONG)idx * GE_BUFSZ;
     buf  = slot + GE_TX_HEAD;
 
@@ -1610,9 +1541,7 @@ static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
      * offsets are in the frame itself.
      * Anything else gets a zero word, which the block ignores.
      */
-    status = GENET_TX_DESC_STATUS_SOP | GENET_TX_DESC_STATUS_EOP |
-             GENET_TX_DESC_STATUS_CRC | GENET_TX_DESC_STATUS_QTAG |
-             GENET_TX_DESC_STATUS_BUFLEN(len + GENET_TX_STATUS64_LEN);
+    status = genet_tx_desc_status(len);
     info = 0;
     if (nic->tx_csum != 0)
     {
@@ -1620,14 +1549,7 @@ static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
         UBYTE flag = netdev_tx_csum4(buf, len, nic->tx_csum, &offset);
 
         if (flag != 0)
-        {
-            ULONG start = (ULONG)NETDEV_HDR_LEN +
-                          ((ULONG)(buf[14] & 0x0Fu) << 2);
-
-            info = (start << GENET_TX_CSUM_START_SHIFT) | (ULONG)offset;
-            if (flag == ANXD_S2_TXF_UDP)
-                info |= GENET_TX_CSUM_UDP;
-        }
+            info = genet_tx_csum_info(buf[14], offset, flag);
         if (info != 0)
         {
             info   |= GENET_TX_CSUM_LEN_VALID;
@@ -1743,26 +1665,15 @@ static BOOL genet_intr(NetdevNic *nic)
  * the opener's ANXD_CMD_RX_POLL does once it has re-posted, and the pass
  * that gets past the head frame arms the line again.  A pass cut at the
  * frame budget is not this case: it consumed its budget and the next
- * interrupt is the next pass.
+ * interrupt is the next pass.  The decision is genet_rx_line_rearm
+ * (genet_ring.h); the mask write is here.
  */
 static VOID ge_rx_line(NetdevNic *nic, ULONG rearm)
 {
     GenetCore *c = GE(nic);
 
-    if (c->rx_held)
-    {
-        if ((rearm & GENET_IRQ_RXDMA_DONE) != 0)
-        {
-            rearm &= ~GENET_IRQ_RXDMA_DONE;
-            c->rx_line_held = 1;
-            nic->core_stat[GE_ST_LINE_HELD]++;
-        }
-    }
-    else if (c->rx_line_held)
-    {
-        c->rx_line_held = 0;
-        rearm |= GENET_IRQ_RXDMA_DONE;
-    }
+    rearm = genet_rx_line_rearm(c->rx_held, &c->rx_line_held, rearm,
+                                &nic->core_stat[GE_ST_LINE_HELD]);
     if (rearm != 0)
         ge_wr(nic, GENET_INTRL2_CPU_CLEAR_MASK, rearm);
 }
@@ -1822,9 +1733,9 @@ static BOOL genet_tick(NetdevNic *nic)
         ge_link_wake(c);
     }
 
-    /* WORKAROUND, the line watchdog (the comment above GICD_IIDR): frames
-       pending and unmasked at the chip, and no interrupt counted since the
-       last blank, GE_GIC_SILENT_BLANKS blanks running -- the line is not
+    /* WORKAROUND, the line watchdog (the comment above GE_GIC_SILENT_BLANKS):
+       frames pending and unmasked at the chip, and no interrupt counted since
+       the last blank, GE_GIC_SILENT_BLANKS blanks running -- the line is not
        being delivered.  Clear its pending/active state and count; the deaf
        fallback in netdev_tick is what services the ring meanwhile. */
     if (nic->dt_irq_live && c->gicd != 0)
@@ -1993,13 +1904,7 @@ static LONG genet_attach(NetdevNic *nic)
     UWORD      i;
 
     rev = ge_rd(nic, GENET_SYS_REV_CTRL);
-    maj = GENET_SYS_REV_MAJOR(rev);
-    /* The reference driver's reading of the field: 0 means 1, and 5 and 6
-       both mean 5. */
-    if (maj == 0)
-        maj = 1;
-    else if (maj == 5 || maj == 6)
-        maj--;
+    maj = genet_rev_major(rev);
     netdev_diag_note(ANXDIAG_GENET_REV, netdev_diag_card(nic->card), rev);
     /* Whether the engine is still running from before the reboot: the
        reset guard's proof, read before anything here touches it. */
@@ -2110,7 +2015,7 @@ static LONG genet_attach(NetdevNic *nic)
         if (netdev_dtree_find("arm,gic-400", &gic) && gic.base != 0)
         {
             c->gicd = gic.base;
-            if ((gicd_rd(c, GICD_IIDR) & GICD_IIDR_MASK) != GICD_IIDR_GIC400)
+            if (!genet_gicd_is_gic400(gicd_rd(c, GICD_IIDR)))
                 c->gicd = 0;
         }
     }
@@ -2123,9 +2028,7 @@ static LONG genet_attach(NetdevNic *nic)
         LONG id1 = ge_mii_read(nic, MII_PHYIDR1);
         LONG id2 = ge_mii_read(nic, MII_PHYIDR2);
 
-        c->phyid = (id1 < 0 || id2 < 0)
-                 ? 0xffffffffUL
-                 : (((ULONG)id1 << 16) | (ULONG)id2);
+        c->phyid = genet_phyid(id1, id2);
         netdev_diag_note(ANXDIAG_GENET_PHY, netdev_diag_card(nic->card),
                          c->phyid);
     }

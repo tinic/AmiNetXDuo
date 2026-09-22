@@ -290,7 +290,10 @@ host_test_targets() { # builddir
 #      netstack.c on the same rule
 #      419 with test_netdev_lookup and test_netdev_trace: which unit an
 #      Open() names, and the beam clock's sums, split out of netdev_device.c
-HOST_TESTS_EXPECTED=419
+#      422 with test_netdev_genet_ring, test_netdev_genet_phy and
+#      test_netdev_genet_words: the ring sums, the PHY decisions and the
+#      register words, split out of genet.c
+HOST_TESTS_EXPECTED=422
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
