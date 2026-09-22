@@ -102,12 +102,41 @@ static void test_lock_tokens(void)
                                    sizeof(token[0]), 2UL) == 0UL);
 }
 
+static void test_iperf_segments(void)
+{
+    unsigned long v4 = 0;
+
+    printf("iperf path segments\n");
+
+    CHECK(http_request_decimal("10", 2UL) == 10L);
+    CHECK(http_request_decimal("007", 3UL) == 7L);
+    CHECK(http_request_decimal("999999999", 9UL) == 999999999L);
+    CHECK(http_request_decimal("10/tcp", 2UL) == 10L);    /* len bounds it */
+    CHECK(http_request_decimal("", 0UL) == -1L);
+    CHECK(http_request_decimal("1000000000", 10UL) == -1L);
+    CHECK(http_request_decimal("1x", 2UL) == -1L);
+    CHECK(http_request_decimal("-1", 2UL) == -1L);
+
+    CHECK(http_request_dotted("192.168.1.88", &v4) && v4 == 0xC0A80158UL);
+    CHECK(http_request_dotted("0.0.0.0", &v4) && v4 == 0UL);
+    CHECK(http_request_dotted("255.255.255.255", &v4) && v4 == 0xFFFFFFFFUL);
+    CHECK(!http_request_dotted("256.1.1.1", &v4));
+    CHECK(!http_request_dotted("1.2.3", &v4));
+    CHECK(!http_request_dotted("1.2.3.4.5", &v4));
+    CHECK(!http_request_dotted("1.2.3.4:5001", &v4));
+    CHECK(!http_request_dotted("1..3.4", &v4));
+    CHECK(!http_request_dotted("1234.1.1.1", &v4));
+    CHECK(!http_request_dotted("amiga.local", &v4));
+    CHECK(!http_request_dotted("", &v4));
+}
+
 int main(void)
 {
     test_query();
     test_timeout();
     test_gzip();
     test_lock_tokens();
+    test_iperf_segments();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;

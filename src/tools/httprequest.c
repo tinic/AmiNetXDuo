@@ -195,3 +195,59 @@ unsigned long http_request_lock_tokens(const char *value, char *out,
 
     return n;
 }
+
+/* One decimal path segment, or -1.  The iperf endpoint's seconds. */
+long http_request_decimal(const char *s, unsigned long len)
+{
+    unsigned long i;
+    unsigned long v = 0;
+
+    if (len == 0 || len > 9)
+        return -1;
+
+    for (i = 0; i < len; i++)
+    {
+        if (s[i] < '0' || s[i] > '9')
+            return -1;
+        v = v * 10UL + (unsigned long)(s[i] - '0');
+    }
+
+    return (long)v;
+}
+
+/* A dotted quad, and nothing else.  The iperf endpoint's peer. */
+int http_request_dotted(const char *s, unsigned long *out)
+{
+    unsigned long addr = 0;
+    unsigned long i;
+
+    for (i = 0; i < 4; i++)
+    {
+        unsigned long v = 0;
+        unsigned long d = 0;
+
+        while (*s >= '0' && *s <= '9' && d < 3)
+        {
+            v = v * 10UL + (unsigned long)(*s++ - '0');
+            d++;
+        }
+
+        if (d == 0 || v > 255UL)
+            return 0;
+
+        addr = (addr << 8) | v;
+
+        if (i < 3)
+        {
+            if (*s != '.')
+                return 0;
+            s++;
+        }
+    }
+
+    if (*s != '\0')
+        return 0;
+
+    *out = addr;
+    return 1;
+}

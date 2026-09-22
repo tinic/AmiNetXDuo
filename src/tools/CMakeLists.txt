@@ -404,6 +404,10 @@ endif()
 # on a host.  One decides which file a request reaches, the second whether it
 # may write to it, the third where one request ends and the next begins, the
 # fourth who may write to a name somebody else has locked.
+# httphead.c is the pass over the request head that fills in what every one of
+# those is asked about, and the status a head is refused with; httpxml.c is
+# the skimmer that decides what a PROPFIND, PROPPATCH or LOCK body asked for.
+# Both were in httpd.c and are split out on the same rule.
 # httpfs.c and httpvol.c are the AmigaDOS-facing WebDAV policy.  They are
 # separate for the same ownership reason even though their DOS calls make their
 # tests guest-side: httpfs receives the server's shared scratch objects instead
@@ -430,7 +434,8 @@ endif()
 # call and no card-shaped branch in it.  It is where the readback routes are
 # timed, which is the measurement the whole RTG design turns on.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c httpstr.c httpvol.c httppath.c httprequest.c httpif.c
-                                          httpframe.c httplock.c httpws.c
+                                          httpframe.c httplock.c httphead.c
+                                          httpxml.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
                                           httprtg.c httpzz.c
                                           toolsock.c toolbudget.c
@@ -818,6 +823,29 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httplock PRIVATE -Wall -Wextra)
     set_target_properties(test_httplock PROPERTIES C_STANDARD 11)
 
+    add_executable(test_httphead
+        test/test_httphead.c
+        httphead.c
+        httpframe.c
+        httprequest.c)
+
+    target_include_directories(test_httphead PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_httphead PRIVATE -Wall -Wextra)
+    set_target_properties(test_httphead PROPERTIES C_STANDARD 11)
+
+    add_executable(test_httpxml
+        test/test_httpxml.c
+        httpxml.c
+        httppath.c)
+
+    target_include_directories(test_httpxml PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_httpxml PRIVATE -Wall -Wextra)
+    set_target_properties(test_httpxml PROPERTIES C_STANDARD 11)
+
     add_executable(test_fetchurl
         test/test_fetchurl.c
         fetchurl.c)
@@ -959,6 +987,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
+    add_test(NAME httphead_request_heads COMMAND test_httphead)
+    add_test(NAME httpxml_skimmer COMMAND test_httpxml)
     add_test(NAME iperf_wire_format COMMAND test_iperfwire)
     add_test(NAME toolpcap_file_format COMMAND test_toolpcap)
     add_test(NAME bpffilter_programs COMMAND test_bpffilter)

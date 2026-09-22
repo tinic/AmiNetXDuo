@@ -22,4 +22,10 @@ unsigned long http_request_lock_tokens(const char *value, char *out,
                                        unsigned long stride,
                                        unsigned long count);
 
+/* One decimal path segment of at most nine digits, or -1. */
+long http_request_decimal(const char *s, unsigned long len);
+
+/* A dotted quad, and nothing else.  Nonzero when `out` was filled. */
+int http_request_dotted(const char *s, unsigned long *out);
+
 #endif /* AMINETXDUO_HTTPREQUEST_H */
