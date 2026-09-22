@@ -67,6 +67,16 @@ POOL_MIN=16
 # buys ~1,400 packets, a 275 KB budget; 128 MB sits on the clamp, 800 KB).
 TCP_WINDOW_CEILING=100352
 
+# The pool is sized from the FASTEST Fast RAM class alone and not from what
+# AvailMem() says (include/aminetxduo/pool.h, since 2026-09-17), and
+# quickstart=A3000 carries 8 MB of motherboard 32-bit RAM at priority 30 --
+# ahead of a Zorro III card's 20.  Left in place that 8 MB IS the fastest
+# class, so both accel arms measured it and came out at the lab-a1200 figure
+# (301 packets) however much Zorro III memory stood behind them.  Take it away
+# and the card is the machine's fast memory, which is the machine an arm named
+# for an accelerated Amiga is asking for.
+BIG_MACHINE_EXTRA=a3000mem_size=0
+
 clamp_arm() { # name model cpu fastmem z3mem poolexpect
     local name="$1" model="$2" cpu="$3" fast="$4" z3="$5" expect="${6:-band}"
     local tag="matrix-clamp-$name" out win queue
@@ -81,6 +91,8 @@ clamp_arm() { # name model cpu fastmem z3mem poolexpect
         export AMINETXDUO_RUN_TAG="$tag"
         export AMINETXDUO_FASTMEM="$fast"
         export AMINETXDUO_Z3MEM="$z3"
+        [ "$z3" = 0 ] || export AMINETXDUO_AMIBERRY_EXTRA=\
+"${AMINETXDUO_AMIBERRY_EXTRA:+$AMINETXDUO_AMIBERRY_EXTRA;}$BIG_MACHINE_EXTRA"
         "$ROOT/tests/sockopt/run-sockopt.sh" \
             -m "$model" -c "$cpu" -t "$TIMEOUT" -b "$BUILD"
     ) > "$ROOT/build/bigmem-clamps-$name.log" 2>&1
@@ -123,6 +135,8 @@ run_arm() { # name model cpu fastmem z3mem poolexpect
         export AMINETXDUO_RUN_TAG="$tag"
         export AMINETXDUO_FASTMEM="$fast"
         export AMINETXDUO_Z3MEM="$z3"
+        [ "$z3" = 0 ] || export AMINETXDUO_AMIBERRY_EXTRA=\
+"${AMINETXDUO_AMIBERRY_EXTRA:+$AMINETXDUO_AMIBERRY_EXTRA;}$BIG_MACHINE_EXTRA"
         "$ROOT/tests/netstack/run-amiberry.sh" \
             -N "$BOARD" -m "$model" -c "$cpu" -B "$BACKEND" \
             -t "$TIMEOUT" -b "$BUILD"
@@ -221,8 +235,11 @@ echo "    figure came out SMALLER than 32 MB's, which is the avail/divisor/" >&2
 echo "    stride overflow this arm exists for: src/netstack/netstack.c:541." >&2
 echo >&2
 echo "  pool_saturation=FAIL, 32m not above the 8 MB arm  the Zorro III" >&2
-echo "    memory never reached the guest.  It maps on an A3000 and on" >&2
-echo "    neither an A1200 nor an A4000 (measured); check that the run" >&2
+echo "    memory never reached the guest, or it reached it and was not the" >&2
+echo "    fastest class: a 32m that lands on the 8 MB arm's exact figure is" >&2
+echo "    the second, and $BIG_MACHINE_EXTRA is what keeps the A3000's" >&2
+echo "    motherboard RAM from outranking the card.  It maps on an A3000 and" >&2
+echo "    on neither an A1200 nor an A4000 (measured); check that the run" >&2
 echo "    really booted an A3000 with AMINETXDUO_KICKSTART_A3000." >&2
 echo >&2
 echo "  ceiling_bound=0 on a saturated arm  the pool is big enough for the" >&2
