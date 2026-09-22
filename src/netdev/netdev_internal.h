@@ -306,6 +306,15 @@ typedef struct NetdevDevice
      */
     struct SignalSemaphore nd_PcmciaLock;
 
+    /*
+     * OpenDevice() enters Open under Forbid, but a PCMCIA claim or a contended
+     * semaphore Waits and lets another task enter the device before the first
+     * one resumes.  Serialize the task-level first/last-opener transaction:
+     * cache lease, opener publication, interrupt-server lifetime and stop.
+     * Interrupt-facing lists still use Disable() separately.
+     */
+    struct SignalSemaphore nd_LifecycleLock;
+
     NetdevUnit          nd_Units[NETDEV_MAX_UNITS];
 } NetdevDevice;
 

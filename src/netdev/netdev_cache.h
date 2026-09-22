@@ -20,8 +20,14 @@
  * the board, which is what the vendor asks for and costs everything else on
  * the machine a little.
  *
- * Applied only when the core's coherence probe says it is needed, and
- * proven by the same probe afterwards; netdev_cache_release() undoes it.
+ * A 68030 core with a coherence probe always establishes its own guard.  A
+ * coherent-as-found answer may come from somebody else's TT/MMU mapping or
+ * disabled cache, and that protection can disappear before Open().  The
+ * attach probe holds the guard only while attach touches the board.  The
+ * first Open() reacquires it and the last Close() releases it after the
+ * hardware and interrupt servers are stopped.  TT and data-cache ownership
+ * is CPU-global, so two units share a guard instead of restoring it out from
+ * under one another.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -33,7 +39,7 @@
 
 struct NetdevNic;
 
-#define NETDEV_CACHE_NONE       0   /* coherent as found, or not a 68030   */
+#define NETDEV_CACHE_NONE       0   /* no probe, or not a 68030             */
 #define NETDEV_CACHE_TT0        1   /* TT0 marks the board's block          */
 #define NETDEV_CACHE_TT1        2   /* TT1 does                             */
 #define NETDEV_CACHE_DCACHE     3   /* the data cache is off while held     */
@@ -55,10 +61,13 @@ struct NetdevNic;
  */
 ULONG netdev_cache_tt_value(ULONG board, ULONG size, ULONG *lo, ULONG *hi);
 
-/* Before attach.  Returns and records the NETDEV_CACHE_* it settled on. */
+/* Before attach.  Records board/size and returns the active guard. */
 UBYTE netdev_cache_guard(struct NetdevNic *nic, ULONG board, ULONG size);
 
-/* At expunge, or after an attach that failed anyway. */
+/* First Open(): reacquire the guard selected by the attach probe. */
+UBYTE netdev_cache_acquire(struct NetdevNic *nic);
+
+/* After attach, last Close(), or an attach that failed.  Idempotent. */
 VOID  netdev_cache_release(struct NetdevNic *nic);
 
 #endif /* AMINETXDUO_NETDEV_CACHE_H */

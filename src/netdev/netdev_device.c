@@ -1772,6 +1772,13 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
         }
         return FALSE;       /* the board did not answer as a DP8390 */
     }
+#if NETDEV_HAS_ZORRO
+    /* Probe/attach was the only reason to touch the board while no client has
+       it open.  Do not leave a 68030's whole data cache disabled merely
+       because anxnet.device is resident; first Open() reacquires the recorded
+       strategy before interrupts or another register access. */
+    netdev_cache_release(&unit->nu_Nic);
+#endif
     nd_tracex("anx: mac ", ((ULONG)unit->nu_Nic.factory[2] << 24) |
                    ((ULONG)unit->nu_Nic.factory[3] << 16) |
                    ((ULONG)unit->nu_Nic.factory[4] << 8) |
@@ -2095,6 +2102,7 @@ static NetdevDevice *netdev_init(
     netdev_prof_segtag(base, seglist);
     base->nd_UnitCount = 0;
     InitSemaphore(&base->nd_PcmciaLock);
+    InitSemaphore(&base->nd_LifecycleLock);
 
     base->nd_Device.dd_Library.lib_Node.ln_Type = NT_DEVICE;
     base->nd_Device.dd_Library.lib_Node.ln_Name = netdev_name;
@@ -2142,6 +2150,9 @@ static struct Device *netdev_open(
     const char   *why  = "no such board";
     BOOL          first_opener;
     BOOL          first_promisc;
+#if NETDEV_HAS_ZORRO
+    BOOL          cache_acquired = FALSE;
+#endif
     AnxdS2Extension *ext_answer = NULL;
 
     /*
@@ -2159,6 +2170,12 @@ static struct Device *netdev_open(
     dev->dd_Library.lib_OpenCnt++;
     dev->dd_Library.lib_Flags &= (UBYTE)~LIBF_DELEXP;
 
+    /* Forbid is restored when a task resumes from Wait(); it does not stop a
+       second task entering while this one is asleep.  Keep one task-level
+       transaction across discovery, cache acquisition and opener/vector
+       publication.  Hardware probes remain outside Disable(). */
+    ObtainSemaphore(&d->nd_LifecycleLock);
+
     io->ios2_Req.io_Error = 0;
 
     op = AllocMem(sizeof(NetdevOpener), MEMF_PUBLIC | MEMF_CLEAR);
@@ -2171,6 +2188,7 @@ static struct Device *netdev_open(
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
         io->ios2_Req.io_Error  = IOERR_OPENFAIL;
         dev->dd_Library.lib_OpenCnt--;
+        ReleaseSemaphore(&d->nd_LifecycleLock);
         return NULL;
     }
 
@@ -2203,6 +2221,7 @@ static struct Device *netdev_open(
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
         io->ios2_Req.io_Error  = IOERR_OPENFAIL;
         dev->dd_Library.lib_OpenCnt--;
+        ReleaseSemaphore(&d->nd_LifecycleLock);
         return NULL;
     }
 
@@ -2221,6 +2240,30 @@ static struct Device *netdev_open(
     nd_newlist(&op->op_Orphans);
     nd_newlist(&op->op_Events);
 
+#if NETDEV_HAS_ZORRO
+    /* The lifecycle semaphore serializes this check with last Close.  Acquire
+       before publishing the first opener and, critically, before installing
+       interrupt servers.  NONE is valid for coherent hardware; FAILED is
+       not. */
+    first_opener = (BOOL)(hw->nu_Openers == 0);
+    if (first_opener)
+    {
+        UBYTE cache = netdev_cache_acquire(&hw->nu_Nic);
+
+        if (cache == NETDEV_CACHE_FAILED)
+        {
+            FreeMem(op, sizeof(NetdevOpener));
+            io->ios2_Req.io_Device = (struct Device *)-1;
+            io->ios2_Req.io_Unit   = (struct Unit *)-1;
+            io->ios2_Req.io_Error  = IOERR_OPENFAIL;
+            dev->dd_Library.lib_OpenCnt--;
+            ReleaseSemaphore(&d->nd_LifecycleLock);
+            return NULL;
+        }
+        cache_acquired = (BOOL)(hw->nu_Nic.cache_guard != NETDEV_CACHE_NONE);
+    }
+#endif
+
     /*
      * SANA2OPF_MINE is exclusive access.  Tested, claimed and joined under one
      * Disable(): split apart, two opens both read nu_Openers == 0 and both take
@@ -2231,11 +2274,16 @@ static struct Device *netdev_open(
         (op->op_Exclusive && hw->nu_Openers != 0))
     {
         Enable();
+#if NETDEV_HAS_ZORRO
+        if (cache_acquired)
+            netdev_cache_release(&hw->nu_Nic);
+#endif
         FreeMem(op, sizeof(NetdevOpener));
         io->ios2_Req.io_Device = (struct Device *)-1;
         io->ios2_Req.io_Unit   = (struct Unit *)-1;
         io->ios2_Req.io_Error  = IOERR_UNITBUSY;
         dev->dd_Library.lib_OpenCnt--;
+        ReleaseSemaphore(&d->nd_LifecycleLock);
         return NULL;
     }
     if (op->op_Exclusive)
@@ -2269,18 +2317,26 @@ static struct Device *netdev_open(
     io->ios2_BufferManagement = op;
     io->ios2_Req.io_Error  = 0;
 
+    ReleaseSemaphore(&d->nd_LifecycleLock);
     return dev;
 }
 
 static BPTR netdev_close(register struct Device     *dev __asm("a6"),
                          register struct IOSana2Req *io  __asm("a1"))
 {
+    NetdevDevice *d = (NetdevDevice *)dev;
     NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
                         io->ios2_Req.io_Unit != (struct Unit *)-1 &&
                         io->ios2_BufferManagement != NULL)
                        ? NETDEV_IO_OPENER(io) : NULL;
     NetdevUnit   *hw;
     BPTR          seg = (BPTR)0;
+    BOOL          delayed;
+
+    /* Pairs with Open's publication.  In particular, no first Open can race
+       a last Close between stop/remove/release, and cache lease refcounts are
+       mutated by only one device task at a time. */
+    ObtainSemaphore(&d->nd_LifecycleLock);
 
     io->ios2_Req.io_Device = (struct Device *)-1;
     io->ios2_Req.io_Unit   = (struct Unit *)-1;
@@ -2329,6 +2385,14 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
         {
             if (hw->nu_Online)
                 netdev_offline(hw, S2EVENT_OFFLINE);
+            else if (hw->nu_Nic.running)
+            {
+                /* A failed/partial Online may have started the core without
+                   publishing nu_Online.  Stop it while its guard is held. */
+                Disable();
+                hw->nu_Nic.ops->stop(&hw->nu_Nic);
+                Enable();
+            }
             netdev_release_unit(hw);
             if (hw->nu_IntrAdded)
             {
@@ -2341,6 +2405,13 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
                     hw->nu_IntrAdded = 0;
                 }
             }
+#if NETDEV_HAS_ZORRO
+            /* A failed interrupt removal leaves a live vector which may still
+               touch the card.  Keep the CPU lease until a later expunge can
+               remove it; otherwise the unit is fully quiescent. */
+            if (!hw->nu_IntrAdded)
+                netdev_cache_release(&hw->nu_Nic);
+#endif
         }
 
         if (hw->nu_ExecUnit.unit_OpenCnt != 0)
@@ -2352,8 +2423,11 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
     if (dev->dd_Library.lib_OpenCnt != 0)
         dev->dd_Library.lib_OpenCnt--;
 
-    if (dev->dd_Library.lib_OpenCnt == 0 &&
-        (dev->dd_Library.lib_Flags & LIBF_DELEXP) != 0)
+    delayed = (BOOL)(dev->dd_Library.lib_OpenCnt == 0 &&
+                     (dev->dd_Library.lib_Flags & LIBF_DELEXP) != 0);
+    ReleaseSemaphore(&d->nd_LifecycleLock);
+
+    if (delayed)
         seg = netdev_expunge(dev);
 
     return seg;
@@ -2365,9 +2439,12 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
     BPTR          seg;
     UWORD         i;
 
+    ObtainSemaphore(&d->nd_LifecycleLock);
+
     if (dev->dd_Library.lib_OpenCnt != 0)
     {
         dev->dd_Library.lib_Flags |= LIBF_DELEXP;
+        ReleaseSemaphore(&d->nd_LifecycleLock);
         return (BPTR)0;
     }
 
@@ -2381,6 +2458,7 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
             if (!netdev_int_rem(&d->nd_Units[i]))
             {
                 dev->dd_Library.lib_Flags |= LIBF_DELEXP;
+                ReleaseSemaphore(&d->nd_LifecycleLock);
                 return (BPTR)0;
             }
             RemIntServer(INTB_VERTB, &d->nd_Units[i].nu_Tick);
@@ -2394,20 +2472,35 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
     if (!netdev_reset_guard_remove())
     {
         dev->dd_Library.lib_Flags |= LIBF_DELEXP;
+        ReleaseSemaphore(&d->nd_LifecycleLock);
         return (BPTR)0;
     }
 
     for (i = 0; i < d->nd_UnitCount; i++)
     {
-        Disable();
-        if (!netdev_pcmcia_is_unit(&d->nd_Units[i]) ||
-            d->nd_Units[i].nu_Nic.running)
-            d->nd_Units[i].nu_Nic.ops->stop(&d->nd_Units[i].nu_Nic);
-        Enable();
+        NetdevNic *nic = &d->nd_Units[i].nu_Nic;
+
+        /* Normally the last Close already stopped the core and released its
+           cache lease.  The expunge path is a retry/fallback, not permission
+           to issue an unguarded stop to every board. */
+        if (nic->running)
+        {
+#if NETDEV_HAS_ZORRO
+            if (netdev_cache_acquire(nic) == NETDEV_CACHE_FAILED)
+            {
+                dev->dd_Library.lib_Flags |= LIBF_DELEXP;
+                ReleaseSemaphore(&d->nd_LifecycleLock);
+                return (BPTR)0;
+            }
+#endif
+            Disable();
+            nic->ops->stop(nic);
+            Enable();
+        }
 
 #if NETDEV_HAS_ZORRO
         /* After stop, which was the last register access. */
-        netdev_cache_release(&d->nd_Units[i].nu_Nic);
+        netdev_cache_release(nic);
 #endif
 
         /* A core's task, before the memory it runs on goes. */
@@ -2449,6 +2542,11 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
     }
 
     seg = d->nd_SegList;
+
+    /* A successful expunge has no open (or waiting-to-close) client.  Drop
+       the semaphore before its containing base is freed.  Exec still has the
+       caller Forbid()den, so no new Open runs between this and Remove(). */
+    ReleaseSemaphore(&d->nd_LifecycleLock);
 
     Remove(&dev->dd_Library.lib_Node);
     FreeMem((UBYTE *)dev - dev->dd_Library.lib_NegSize,

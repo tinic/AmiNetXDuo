@@ -277,11 +277,16 @@ struct NetdevNic
     ULONG               serial;     /* the board's autoconfig serial number */
     UWORD               txb_inuse;
 
-    /* netdev_cache.c: how the 68030's data cache is kept off this board,
-       NETDEV_CACHE_*, and what to put back when it is let go. */
+    /* netdev_cache.c: cache_mode is what the attach probe selected;
+       cache_guard is the currently held CPU-global lease.  The board size is
+       retained so first Open() can reacquire without keeping the whole
+       machine's data cache disabled while the device is merely resident. */
     UBYTE               cache_guard;
+    UBYTE               cache_mode;
     UBYTE               cache_why;      /* NETDEV_CACHE_WHY_* */
-    ULONG               cache_saved;
+    UBYTE               cache_pad;
+    ULONG               cache_board;
+    ULONG               cache_board_size;
 
     /*
      * Hardware transmit completions, successful or not.  Unlike tx_packets this
