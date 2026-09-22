@@ -2606,14 +2606,14 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
     UCHAR buffer[128];
     UINT  size = (UINT)sizeof(buffer);
 
-    out[0] = '\0';
-
+    /* A failed retrieve hands the decoder no bytes; it writes the empty
+       string, and it is the one place that checks out and outlen. */
     if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
                                                option, buffer,
                                                &size) != NX_SUCCESS)
-        return;
+        size = 0;
 
-    ami_ns_dhcp_text_decode(buffer, size, out, outlen);
+    ami_ns_dhcp_text_decode(size ? buffer : NULL, size, out, outlen);
 }
 
 LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
