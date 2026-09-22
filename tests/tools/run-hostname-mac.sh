@@ -147,8 +147,13 @@ check() {
     cat "$report"
     echo "=============================================================="
 
-    if grep -qx "$want" "$report"; then
-        echo "guest_${tag}_hostname=$want"
+    # `hostname` prints the name the machine answers to, and once a domain is
+    # in force that is the qualified form -- DHCP hands out localdomain here,
+    # so the line reads amiga-490001.localdomain.  What this arm is measuring
+    # is the name, so the domain after it is accepted and reported.
+    if grep -qxE "$want(\.[A-Za-z0-9.-]+)?" "$report"; then
+        echo "guest_${tag}_hostname=$(grep -xE "$want(\.[A-Za-z0-9.-]+)?" \
+                                        "$report" | head -1)"
     else
         echo "guest_${tag}_hostname=MISSING"
         fail "guest $tag: \`hostname\` did not print $want"
@@ -190,8 +195,11 @@ REPORT_B=$(boot b "$MAC_B" "$WANT_B") || FAILED=1
 [ -n "${REPORT_A:-}" ] && check a "$WANT_A" "$REPORT_A"
 [ -n "${REPORT_B:-}" ] && check b "$WANT_B" "$REPORT_B"
 
-GOT_A=$(grep -oE '^amiga-[0-9a-f]{6}$' "${REPORT_A:-/dev/null}" | head -1 || true)
-GOT_B=$(grep -oE '^amiga-[0-9a-f]{6}$' "${REPORT_B:-/dev/null}" | head -1 || true)
+# The name, with the domain `hostname` qualifies it with cut back off.
+GOT_A=$(grep -oE '^amiga-[0-9a-f]{6}(\.|$)' "${REPORT_A:-/dev/null}" |
+        sed 's/\.$//' | head -1 || true)
+GOT_B=$(grep -oE '^amiga-[0-9a-f]{6}(\.|$)' "${REPORT_B:-/dev/null}" |
+        sed 's/\.$//' | head -1 || true)
 
 echo
 echo "got_a=${GOT_A:-NONE}"
