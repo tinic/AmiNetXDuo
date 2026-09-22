@@ -22,6 +22,7 @@
 #include "netstack_host_env.h"
 
 #include "aminetxduo/netstack.h"
+#include "netstack_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -314,6 +315,49 @@ static void t_private_packet_pool_allocation_fails(void)
     h_down();
 }
 
+/* ami_ns_dhcp_text(), the wrapper over the option retrieve and the decoder:
+   text arrives, a failed retrieve is the empty string, and the two smallest
+   rooms are not written past. */
+static void t_option_text(void)
+{
+    static const UCHAR amiga[5] = { 'a', 'm', 'i', 'g', 'a' };
+    AmiNetStack *ns;
+    char out[8];
+
+    printf("dhcp restart: option text through the wrapper\n");
+    h_up_static();
+    ns = netstack_get();
+    CHECK(ns != NULL, "the stack singleton is there");
+    if (ns == NULL)
+        return;
+
+    memcpy(nsh.dhcp_option, amiga, sizeof(amiga));
+    nsh.dhcp_option_len = 5;
+    memset(out, 'x', sizeof(out));
+    ami_ns_dhcp_text(ns, 0, NX_DHCP_OPTION_HOST_NAME, out, sizeof(out));
+    CHECK(strcmp(out, "amiga") == 0, "a retrieved option comes out as text");
+    CHECK(nsh.dhcp_option_retrieves == 1, "one retrieve");
+
+    nsh.dhcp_option_status = NX_DHCP_PARSE_ERROR;
+    memset(out, 'x', sizeof(out));
+    ami_ns_dhcp_text(ns, 0, NX_DHCP_OPTION_HOST_NAME, out, sizeof(out));
+    CHECK(out[0] == '\0' && out[1] == 'x', "a failed retrieve is the empty string");
+
+    nsh.dhcp_option_status = NX_SUCCESS;
+    memset(out, 'x', sizeof(out));
+    ami_ns_dhcp_text(ns, 0, NX_DHCP_OPTION_HOST_NAME, out, 1UL);
+    CHECK(out[0] == '\0' && out[1] == 'x', "outlen 1 holds the terminator alone");
+
+    memset(out, 'x', sizeof(out));
+    ami_ns_dhcp_text(ns, 0, NX_DHCP_OPTION_HOST_NAME, out, 0UL);
+    CHECK(out[0] == 'x', "outlen 0 writes nothing");
+
+    ami_ns_dhcp_text(ns, 0, NX_DHCP_OPTION_HOST_NAME, NULL, 8UL);
+    CHECK(nsh.dhcp_option_retrieves == 5, "a NULL out still returns, without a write");
+
+    h_down();
+}
+
 int main(void)
 {
     printf("netstack DHCP restart host checks\n\n");
@@ -328,6 +372,7 @@ int main(void)
     t_create_fails();
     t_private_packet_pool();
     t_private_packet_pool_allocation_fails();
+    t_option_text();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

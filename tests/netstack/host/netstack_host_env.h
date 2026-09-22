@@ -50,6 +50,13 @@ typedef struct NetStackHostEnv
     char    dhcp_trace[32];
     ULONG   dhcp_trace_len;
 
+    /* nx_dhcp_interface_user_option_retrieve(): the status it answers and,
+       on NX_SUCCESS, the option bytes it hands back (none is a 0-byte option). */
+    UINT    dhcp_option_status;
+    UCHAR   dhcp_option[16];
+    UINT    dhcp_option_len;
+    ULONG   dhcp_option_retrieves;
+
     UINT    dhcp_create_status;
     ULONG   packet_pool_creates;
     ULONG   packet_pool_deletes;

@@ -50,6 +50,7 @@ VOID nsh_reset(VOID)
     nsh.dhcp_start_status   = NX_SUCCESS;
     nsh.dhcp_restart_status = NX_SUCCESS;
     nsh.dhcp_create_status  = NX_SUCCESS;
+    nsh.dhcp_option_status  = NX_SUCCESS;
     nsh.ip_create_status    = NX_SUCCESS;
     nsh.static_route_status = NX_SUCCESS;
     nsh.cfg_interfaces      = 1;
@@ -1053,13 +1054,23 @@ UINT _nxe_dhcp_interface_state_change_notify(NX_DHCP *dhcp_ptr, VOID (*dhcp_inte
 
 UINT _nxe_dhcp_interface_user_option_retrieve(NX_DHCP *dhcp_ptr, UINT iface_index, UINT option_request, UCHAR *destination_ptr, UINT *destination_size)
 {
+    UINT n;
+
     (VOID)dhcp_ptr;
     (VOID)iface_index;
     (VOID)option_request;
-    (VOID)destination_ptr;
-    (VOID)destination_size;
 
-    return TX_SUCCESS;
+    nsh.dhcp_option_retrieves++;
+    if (nsh.dhcp_option_status != NX_SUCCESS)
+        return nsh.dhcp_option_status;
+
+    n = nsh.dhcp_option_len;
+    if (n > *destination_size)
+        n = *destination_size;
+    memcpy(destination_ptr, nsh.dhcp_option, n);
+    *destination_size = n;
+
+    return NX_SUCCESS;
 }
 
 UINT _nxe_dhcp_start(NX_DHCP *dhcp_ptr)
