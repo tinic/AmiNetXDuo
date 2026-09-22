@@ -45,6 +45,8 @@ machine, handed every `syslog()` an application makes, as a
 `struct LogHookMessage` with the tag, the task and a `DateStamp`. This is
 what Roadshow's `NetLogViewer` installs. The stack's own lines reach it only
 in a build with `AMINETXDUO_LOG`: a shipping library carries no sentences.
+The hook runs synchronously and must not wait, delay or take a blocking
+semaphore: a stack-originated call owns the hosted ThreadX baton until return.
 `SBTC_LOG_FILE_NAME` reads as no file and refuses a set with `ENOSYS`: no
 task in the stack may do DOS file I/O, so a log file would need one.
 

@@ -18,6 +18,16 @@ cmake --build build --parallel
 | Options | `CMakeLists.txt` | each carries the comment saying why it exists and what turning it off changes; `cmake -LAH -S . -B build` lists them with defaults |
 | `AMINETXDUO_CPU` | `cmake/toolchain-m68k-amigaos.cmake:287` | the one option that is not on/off. `any` (default) builds one binary for every 68k: `-m68000` codegen with `src/net68k`'s inner loops assembled per class and chosen from `AttnFlags` by `n68k_cpu_select()` (`src/net68k/n68k_cpu.c`), called from `bsd_lib_init()` (`src/bsdsocket/library.c:338`), verified by `tests/perf/n68kmv`. `68000`, `68020`, `68040`, `68060` pin it |
 
+The hosted ThreadX scheduler is cooperative between service boundaries: one
+Exec Task owns the stack baton until a ThreadX block/yield or an explicit Exec
+wait bracket.  Library callers are adopted only for a stack call, so ordinary
+application `Wait()`/`Delay()` after return cannot hold it; internal unbracketed
+waits and blocking callbacks can stall every stack thread.  Its hot critical
+pair deliberately uses the classic NDK `FORBID` operation and matching Permit
+tail; this classic-m68k ABI is not a portable AROS/MorphOS/OS4 interface.
+Detached native Tasks self-destroy if they later wake; only the historical
+zombie count is monotonic.  VBlank wakes the clock; `ReadEClock()` measures it and `timer.device` guards it.
+
 ## `tools/ci.sh` — everything CI runs
 
 `.github/workflows/ci.yml` and `emulator.yml` call this script. Bare

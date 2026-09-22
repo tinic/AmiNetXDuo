@@ -64,7 +64,8 @@
 |   pessimisation there and must not be enabled for a 68060 build.  Seen
 |   elsewhere too: AmiSSL shipped the same finding in 4.4 ("disabled m68k asm
 |   replacement as it's slower"), and Roberto Ragusa's 1998 PGP 68060 patch got
-|   2x by removing MULU.L.  This project's floor is 68020 (docs/RESEARCH.md 9).
+|   2x by removing MULU.L.  This assembly variant starts at 68020; the default
+|   all-CPU build also carries a 68000-capable variant and selects at runtime.
 |
 | Register rules (m68k-amigaos, stack calling convention)
 |

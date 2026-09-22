@@ -155,9 +155,11 @@ extern ULONG    _tx_amiga_sched_count[TX_AMIGA_SC_MAX];
 UINT   _tx_thread_interrupt_disable(void);
 VOID   _tx_thread_interrupt_restore(UINT previous_posture);
 
-/* Expanded at the call site, as the ThreadX porting model expects.  Exec is reached
-   by offset, not by <exec/execbase.h>, which would drag exec/types.h in ahead of
-   the typedefs above; the offsets are asserted in tx_thread_interrupt_control.c. */
+/* Expanded at the call site, as the ThreadX porting model expects.  This is the
+   deliberate classic-m68k ABI boundary documented in docs/DEVELOPMENT.md,
+   not a portable Exec implementation.  Exec is reached by offset, not by
+   <exec/execbase.h>, which would drag exec/types.h in ahead of the typedefs
+   above; the offsets are asserted in tx_thread_interrupt_control.c. */
 
 #define TX_AMIGA_OFF_TDNESTCNT      0x0127                  /* BYTE  */
 #define TX_AMIGA_OFF_ATTNRESCHED    0x012A                  /* UWORD */

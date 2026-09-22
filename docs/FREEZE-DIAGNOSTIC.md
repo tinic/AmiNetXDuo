@@ -40,8 +40,7 @@ started.
 | `N clipped, N lost` | times the clock fell so far behind that the arrears were thrown away, and how many ticks that cost | above zero: something held the machine |
 | `timer wheel N ticks late, worst N` | how far behind the ThreadX timer wheel ran | a worst well above 1 |
 | `worst stall N ms, service N us` | the longest gap between two clock ticks, and how long the clock's own work took on the wakeup before it | stall in the hundreds of ms with service in the hundreds of us: a priority-20 task went undispatched that long, so something else held the machine. Stall and service close together: the clock overran its own period, and that one is ours |
-| `baton: N transitions, N at once at the peak` | times a stack thread stepped aside to wait on the network card, and the most waiting at once. The table holds 16. The rate matters, not the total: it rises with packets, not bytes, which is why many small files are harder on the machine than one bulk transfer of the same size | — |
-| `baton: N table full` | — | above zero: a thread waited on the card while holding the lock the whole stack runs under, and everything else queued behind an event that may never come |
+| `baton: N transitions, N at once at the peak` | times a stack thread stepped aside for an Exec wait, and the greatest number of live wait brackets. The rate rises with packets, not bytes, so many small files are harder than one bulk transfer | a live count which never returns to zero after traffic stops |
 | `baton: N moved` | — | above zero: the stack suspended a thread and left itself with nothing to dispatch |
 | `baton: state max N` | 0 or 1 is normal | — |
 

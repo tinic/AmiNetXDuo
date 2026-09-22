@@ -1469,7 +1469,36 @@ static BOOL netdev_int_rem(NetdevUnit *unit)
  * the service is written for the masked context the server and the vertical
  * blank both provide.
  */
-static ULONG netdev_soft(register NetdevUnit *unit __asm("a1"))
+/* Exec interrupt chains consume the Z flag, not the C return value.  A C
+   function often happens to leave Z matching d0, but that is not an ABI: one
+   old top-half path returned nonzero after incrementing a counter, so the
+   counter's wrap could leave Z set and make Exec continue the chain.  Keep
+   the C bodies ordinary and make the last flag-setting instruction explicit. */
+__asm__(
+"       .text\n"
+"       .align  2\n"
+"       .globl  _netdev_soft_entry\n"
+"_netdev_soft_entry:\n"
+"       jsr     _netdev_soft_c\n"
+"       moveq   #0,%d0\n"
+"       rts\n"
+"       .globl  _netdev_server_entry\n"
+"_netdev_server_entry:\n"
+"       jsr     _netdev_server_c\n"
+"       tst.l   %d0\n"
+"       rts\n"
+"       .globl  _netdev_tick_entry\n"
+"_netdev_tick_entry:\n"
+"       jsr     _netdev_tick_c\n"
+"       moveq   #0,%d0\n"
+"       rts\n");
+
+extern VOID netdev_soft_entry(VOID);
+extern VOID netdev_server_entry(VOID);
+extern VOID netdev_tick_entry(VOID);
+
+ULONG netdev_soft_c(register NetdevUnit *unit __asm("a1")) __attribute__((used));
+ULONG netdev_soft_c(register NetdevUnit *unit __asm("a1"))
 {
     /* Every service pass runs under Disable() (the server, the blank, the
        opener's ANXD_CMD_RX_POLL), so nothing can hold nu_InIsr when a
@@ -1491,7 +1520,8 @@ static ULONG netdev_soft(register NetdevUnit *unit __asm("a1"))
     return 0;
 }
 
-static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
+ULONG netdev_server_c(register NetdevUnit *unit __asm("a1")) __attribute__((used));
+ULONG netdev_server_c(register NetdevUnit *unit __asm("a1"))
 {
     ULONG mine;
 
@@ -1526,7 +1556,8 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
  * through ops->reset and never a named core, since this tick is armed for every
  * unit.  Disable(): INT3 can preempt the card's own INT2 server.
  */
-static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
+ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1")) __attribute__((used));
+ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1"))
 {
     BOOL wedged = FALSE;
 
@@ -1777,19 +1808,19 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Intr.is_Node.ln_Pri  = 10;
     unit->nu_Intr.is_Node.ln_Name = netdev_name;
     unit->nu_Intr.is_Data     = unit;
-    unit->nu_Intr.is_Code     = (VOID (*)())netdev_server;
+    unit->nu_Intr.is_Code     = (VOID (*)())netdev_server_entry;
 
     unit->nu_Tick.is_Node.ln_Type = NT_INTERRUPT;
     unit->nu_Tick.is_Node.ln_Pri  = 0;
     unit->nu_Tick.is_Node.ln_Name = netdev_name;
     unit->nu_Tick.is_Data     = unit;
-    unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick;
+    unit->nu_Tick.is_Code     = (VOID (*)())netdev_tick_entry;
 
     unit->nu_Soft.is_Node.ln_Type = NT_INTERRUPT;
     unit->nu_Soft.is_Node.ln_Pri  = 16;
     unit->nu_Soft.is_Node.ln_Name = netdev_name;
     unit->nu_Soft.is_Data     = unit;
-    unit->nu_Soft.is_Code     = (VOID (*)())netdev_soft;
+    unit->nu_Soft.is_Code     = (VOID (*)())netdev_soft_entry;
 
     dev->nd_UnitCount++;
 

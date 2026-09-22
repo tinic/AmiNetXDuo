@@ -74,10 +74,17 @@ VOID _tx_thread_interrupt_restore(UINT previous_posture)
    under Forbid(). */
 UINT tx_amiga_exec_task_context(VOID)
 {
+struct Task *task;
 
-    if ((SysBase == (struct ExecBase *) 0) ||
-        (SysBase -> TDNestCnt >= 0) || (SysBase -> IDNestCnt >= 0) ||
-        ((VOID *) SysBase -> ThisTask == _tx_amiga_timer_task))
+
+    if (SysBase == (struct ExecBase *) 0)
+    {
+        return(TX_FALSE);
+    }
+
+    task =  FindTask((STRPTR) 0);
+    if ((SysBase -> TDNestCnt >= 0) || (SysBase -> IDNestCnt >= 0) ||
+        ((VOID *) task == _tx_amiga_timer_task))
     {
         return(TX_FALSE);
     }
@@ -109,7 +116,7 @@ struct Node *node;
 static UINT tx_amiga_task_alive_locked(struct Task *task)
 {
     if ((task != (struct Task *) 0) &&
-        ((SysBase -> ThisTask == task) ||
+        ((FindTask((STRPTR) 0) == task) ||
          tx_amiga_task_on_list(&SysBase -> TaskReady, task) ||
          tx_amiga_task_on_list(&SysBase -> TaskWait, task)))
     {
@@ -169,11 +176,13 @@ UINT    old_posture;
 
     old_posture =  _tx_amiga_forbidden();
 
-    if (new_posture == ((UINT) TX_INT_DISABLE))
+    if ((new_posture == ((UINT) TX_INT_DISABLE)) &&
+        (old_posture == ((UINT) TX_INT_ENABLE)))
     {
         Forbid();
     }
-    else if (old_posture == ((UINT) TX_INT_DISABLE))
+    else if ((new_posture == ((UINT) TX_INT_ENABLE)) &&
+             (old_posture == ((UINT) TX_INT_DISABLE)))
     {
         Permit();
     }

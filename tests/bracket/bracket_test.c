@@ -19,6 +19,7 @@
 #include <exec/tasks.h>
 #include <exec/lists.h>
 #include <exec/io.h>
+#include <exec/execbase.h>
 #include <dos/dos.h>
 #include <devices/timer.h>
 
@@ -34,6 +35,7 @@ VOID ami_netstack_baton_acquire(VOID);
 BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
 extern volatile ULONG _tx_thread_system_state;
 extern TX_THREAD *_tx_thread_current_ptr;
+extern struct ExecBase *SysBase;
 
 /* --------------------------------------------------------------- the shape -- */
 
@@ -605,6 +607,62 @@ static VOID bt_reap(BtTask *bt)
     }
 }
 
+/* tx_interrupt_control() sets a posture, it does not add a nesting level when
+   the requested posture is already in force.  The old implementation called
+   Forbid() for DISABLE unconditionally, so the ordinary save/restore idiom
+   leaked two levels when its caller was already forbidden.  This test reads
+   the classic Exec counter deliberately: that is the state the public API is
+   required to leave unchanged, and a scheduling probe would have to Wait()
+   under a deliberately broken Forbid() to observe the same defect. */
+static VOID bt_test_interrupt_control_idempotent(VOID)
+{
+    BYTE before;
+    BYTE after_set;
+    BYTE after_restore;
+    BYTE enabled_before;
+    BYTE enabled_after_set;
+    BYTE enabled_after_repeat;
+    BYTE enabled_after_restore;
+    UINT old;
+    UINT repeated;
+
+    t_log("bracket: interrupt posture is idempotent\n", 0, 0);
+
+    Forbid();
+    before = SysBase->TDNestCnt;
+    old = tx_interrupt_control(TX_INT_DISABLE);
+    after_set = SysBase->TDNestCnt;
+    (VOID)tx_interrupt_control(old);
+    after_restore = SysBase->TDNestCnt;
+    Permit();
+
+    t_check(old == TX_INT_DISABLE,
+            "DISABLE reports an already-disabled posture", (LONG)old);
+    t_check(after_set == before,
+            "setting the current posture adds no nesting", (LONG)after_set);
+    t_check(after_restore == before,
+            "restoring that posture adds no nesting", (LONG)after_restore);
+
+    enabled_before = SysBase->TDNestCnt;
+    old = tx_interrupt_control(TX_INT_DISABLE);
+    enabled_after_set = SysBase->TDNestCnt;
+    repeated = tx_interrupt_control(TX_INT_DISABLE);
+    enabled_after_repeat = SysBase->TDNestCnt;
+    (VOID)tx_interrupt_control(old);
+    enabled_after_restore = SysBase->TDNestCnt;
+
+    t_check(old == TX_INT_ENABLE,
+            "DISABLE reports an enabled posture", (LONG)old);
+    t_check(repeated == TX_INT_DISABLE,
+            "repeated DISABLE reports a disabled posture", (LONG)repeated);
+    t_check(enabled_after_set == (BYTE)(enabled_before + 1),
+            "DISABLE adds exactly one nesting level", (LONG)enabled_after_set);
+    t_check(enabled_after_repeat == enabled_after_set,
+            "repeated DISABLE adds no nesting", (LONG)enabled_after_repeat);
+    t_check(enabled_after_restore == enabled_before,
+            "ENABLE restores the original nesting", (LONG)enabled_after_restore);
+}
+
 /* The target's stack is only safe to release once the live-zombie count is back
    at its baseline.  Built only where it is called: this case exhausts a native
    thread's handshake signals and a green thread has none. */
@@ -786,6 +844,8 @@ int main(int argc, char **argv)
 
     t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
             "an unadopted Task is not the baton holder", 0);
+
+    bt_test_interrupt_control_idempotent();
 
     /* Green threads have no native Exec task to become a reaper zombie; this
        case specifically exhausts the native thread's handshake signals. */
