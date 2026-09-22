@@ -40,14 +40,16 @@
 #define STACK_BYTES     4096
 
 static TX_THREAD    worker[WORKERS];
-static TX_THREAD    self;
+static TX_THREAD   *self;   /* a slot of the port's adoption pool */
+static ULONG    self_gen;
 static APTR         worker_stack[WORKERS];
 static TX_SEMAPHORE never;
 static ULONG        ran[WORKERS];
 static LONG         checks, failures;
 
 /* wait-abort phase */
-static TX_THREAD        victim_thread;
+static TX_THREAD       *victim_thread;   /* a slot of the port's adoption pool */
+static ULONG        victim_thread_gen;
 static volatile ULONG   victim_ready;
 static volatile ULONG   victim_done;
 static volatile ULONG   victim_gone;
@@ -137,7 +139,7 @@ static struct Task *spawn_task(const char *name, VOID (*entry)(VOID),
  */
 static VOID victim_entry(VOID)
 {
-    if (tx_amiga_adopt_thread(&victim_thread, "victim", 12) != TX_SUCCESS)
+    if (tx_amiga_adopt_thread(&victim_thread, &victim_thread_gen, "victim", 12, (UINT)TX_FALSE) != TX_SUCCESS)
     {
         victim_adopted = 0;
         victim_ready   = 1;
@@ -153,7 +155,7 @@ static VOID victim_entry(VOID)
     victim_status = tx_semaphore_get(&never, TX_WAIT_FOREVER);
     victim_done   = 1;
 
-    (VOID)tx_amiga_orphan_thread(&victim_thread);
+    (VOID)tx_amiga_orphan_thread(victim_thread, victim_thread_gen);
 
     victim_gone = 1;
     Forbid();
@@ -201,7 +203,7 @@ int main(void)
     if (status != TX_SUCCESS)
         goto done;
 
-    status = tx_amiga_adopt_thread(&self, "lifecycle-main", 16);
+    status = tx_amiga_adopt_thread(&self, &self_gen, "lifecycle-main", 16, (UINT)TX_FALSE);
     check("adopted the calling task", status == TX_SUCCESS);
 
     for (round = 0; round < ROUNDS; round++)
@@ -265,8 +267,8 @@ int main(void)
         AMI_ERROR("=== round %ld phase c (adopt churn)", (LONG)round);
 
         /* (c) adopt/orphan churn. */
-        (VOID)tx_amiga_orphan_thread(&self);
-        (VOID)tx_amiga_adopt_thread(&self, "lifecycle-main", 16);
+        (VOID)tx_amiga_orphan_thread(self, self_gen);
+        (VOID)tx_amiga_adopt_thread(&self, &self_gen, "lifecycle-main", 16, (UINT)TX_FALSE);
     }
 
     check("survived the lifecycle rounds", TRUE);
@@ -302,7 +304,7 @@ int main(void)
                be, or the abort would race the suspend and prove nothing. */
             for (spin = 0; spin < 400; spin++)
             {
-                if (tx_thread_info_get(&victim_thread, &nm, &st, &rc, &pr, &th,
+                if (tx_thread_info_get(victim_thread, &nm, &st, &rc, &pr, &th,
                                        &sl, &nt, &ns) != TX_SUCCESS)
                     break;
                 if (st == TX_SEMAPHORE_SUSP)
@@ -312,7 +314,7 @@ int main(void)
             check("phase d: victim suspended on the semaphore",
                   st == TX_SEMAPHORE_SUSP);
 
-            status = tx_thread_wait_abort(&victim_thread);
+            status = tx_thread_wait_abort(victim_thread);
             check("phase d: tx_thread_wait_abort accepted", status == TX_SUCCESS);
 
             for (spin = 0; spin < 400 && victim_done == 0; spin++)
@@ -330,7 +332,7 @@ int main(void)
             ami_free(vstack);
     }
 
-    (VOID)tx_amiga_orphan_thread(&self);
+    (VOID)tx_amiga_orphan_thread(self, self_gen);
 
     /* ---------------------------------------------------------------- (e) */
     /* tx_thread_delete() of a thread that is blocked in Exec, not on its    */
@@ -378,10 +380,10 @@ int main(void)
 
         /* The rest of ThreadX must still work: the baton has to have been
            recovered from the zombie. */
-        status = tx_amiga_adopt_thread(&self, "lifecycle-main", 16);
+        status = tx_amiga_adopt_thread(&self, &self_gen, "lifecycle-main", 16, (UINT)TX_FALSE);
         check("phase e: ThreadX still alive (re-adopted)", status == TX_SUCCESS);
         (VOID)tx_thread_sleep(5);
-        (VOID)tx_amiga_orphan_thread(&self);
+        (VOID)tx_amiga_orphan_thread(self, self_gen);
 
         /* Now let the zombie go, and check it destroys itself cleanly. */
         stuck_release = 1;

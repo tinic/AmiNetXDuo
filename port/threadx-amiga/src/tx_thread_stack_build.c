@@ -35,6 +35,7 @@ CHAR        *name;
     thread_ptr -> tx_thread_amiga_task            =  (VOID *) 0;
     thread_ptr -> tx_thread_amiga_signal_owner    =  (VOID *) 0;
     thread_ptr -> tx_thread_amiga_run_signal      =  0UL;
+    thread_ptr -> tx_thread_amiga_task_stamp      =  0UL;
 
     /* Give the generic code a plausible stack pointer.  Nothing in this port
        dereferences it (stack checking is unavailable, see tx_port.h).  */
@@ -58,6 +59,7 @@ CHAR        *name;
         thread_ptr -> tx_thread_amiga_signal_owner =  _tx_amiga_adopt_task;
         thread_ptr -> tx_thread_amiga_run_signal   =  _tx_amiga_adopt_signal;
         thread_ptr -> tx_thread_amiga_flags        =  TX_AMIGA_THREAD_ADOPTED;
+        thread_ptr -> tx_thread_amiga_task_stamp   =  _tx_amiga_task_stamp((struct Task *) _tx_amiga_adopt_task);
 
         _tx_amiga_adopt_task   =  (VOID *) 0;
         _tx_amiga_adopt_signal =  0UL;

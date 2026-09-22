@@ -71,7 +71,13 @@ AmiNetStack   *netstack_get(VOID);
    block on anything but ThreadX: an exec Wait() there stops the whole stack. */
 typedef struct AmiNetCaller
 {
-    TX_THREAD    nc_Thread;
+    /* A slot of the port's adoption pool, NOT storage of ours: an AmiNetCaller
+       can live on the caller's own stack, and a Task removed while adopted
+       frees that stack while the port still has to reach its TX_THREAD.  The
+       pair is a handle; nc_Gen is what stops a recycled slot being torn down
+       under the caller it now belongs to. */
+    TX_THREAD   *nc_Thread;
+    ULONG        nc_Gen;
     BOOL         nc_Adopted;    /* inside a bracket right now                */
     BOOL         nc_Live;       /* cached thread exists, or adoption started */
     struct Task *nc_Task;       /* whose it is; only that task may use it    */
@@ -80,9 +86,10 @@ typedef struct AmiNetCaller
 LONG ami_netstack_enter(AmiNetCaller *caller);
 VOID ami_netstack_leave(AmiNetCaller *caller);
 
-/* The same pair with the AmiNetCaller allocated: a TX_THREAD is ~230 bytes and
-   these run on the caller's stack, which is 4 KB in a Shell with no guard page.
-   NULL when the kernel is not running or memory is short. */
+/* The same pair with the AmiNetCaller allocated.  The TX_THREAD itself is the
+   port's now, so this is no longer about size; it is for callers that have to
+   hand the record on.  NULL when the kernel is not running or memory is
+   short. */
 AmiNetCaller *ami_netstack_enter_alloc(VOID);
 VOID          ami_netstack_leave_free(AmiNetCaller *caller);
 
@@ -107,6 +114,7 @@ typedef struct AmiBatonStats
     ULONG bs_StateMax;
     ULONG bs_BatonMoved;
     ULONG bs_StateShared;
+    ULONG bs_Reclaimed;     /* holders removed by Exec while holding, discarded */
 } AmiBatonStats;
 
 extern AmiBatonStats ami_baton_stats;

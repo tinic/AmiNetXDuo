@@ -189,6 +189,11 @@ VOID ami_ns_lock_obtain(VOID);
 BOOL ami_ns_lock_attempt(VOID);
 VOID ami_ns_lock_release(VOID);
 
+/* TRUE when the calling Task holds ami_ns_lock.  The adoption pool keeps one
+   slot for such a caller, because it must never park; netstack_lock.c has the
+   proof that one is enough. */
+BOOL ami_ns_lock_held_by_me(VOID);
+
 BOOL ami_ns_same_name(const char *a, const char *b);
 
 /* Apply the deterministic default-gateway policy to the live NetX instance.
@@ -456,6 +461,10 @@ VOID ami_netstack_mark(const char *event);
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
+
+/* From the tick, before the locked sweep: discard the baton holder if its Exec
+   Task is gone.  TRUE when one was.  netstack_baton.c. */
+BOOL ami_netstack_baton_reclaim_dead(VOID);
 
 /*
  * The public anchor for the baton counters and for the tick task counters,

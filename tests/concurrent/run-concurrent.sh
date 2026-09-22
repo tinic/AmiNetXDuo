@@ -31,8 +31,9 @@ BUILD="build/ci/default"
 # the run dies with no WEDGED line naming the application that stopped.
 BOOT_SECS=90
 DEADLINE_SECS="${CONCURRENT_DEADLINE:-60}"
+KILL_SECS=30
 MARGIN_SECS=30
-TIMEOUT=$(( BOOT_SECS + 2 * DEADLINE_SECS + MARGIN_SECS ))
+TIMEOUT=$(( BOOT_SECS + 2 * DEADLINE_SECS + KILL_SECS + MARGIN_SECS ))
 
 # BRIDGED, NEVER SLIRP.  -B names the host NIC the guest bridges onto, and
 # tools/amiberry-run.sh defaults to slirp when nobody says.  Nothing here puts

@@ -57,7 +57,8 @@ static LONG checks, failures;
 
 /* ---- the child's ThreadX objects ---------------------------------------- */
 
-static TX_THREAD        self;
+static TX_THREAD       *self;   /* a slot of the port's adoption pool */
+static ULONG        self_gen;
 static TX_THREAD        worker[WORKERS];
 static APTR             worker_stack[WORKERS];
 static TX_SEMAPHORE     ping;
@@ -253,7 +254,7 @@ static int child_main(void)
     check("the tick Task exists", FindTask((STRPTR)"AmiNetXDuo tick") != NULL);
     check("the scheduler Task exists", FindTask((STRPTR)"AmiNetXDuo kernel") != NULL);
 
-    status = tx_amiga_adopt_thread(&self, "kstop-main", 16);
+    status = tx_amiga_adopt_thread(&self, &self_gen, "kstop-main", 16, (UINT)TX_FALSE);
     check("adopted the calling Process", status == TX_SUCCESS);
 
     work_start();
@@ -277,7 +278,7 @@ static int child_main(void)
     status = tx_amiga_kernel_stop();
     check("stop refuses while application threads exist (TX_THREAD_ERROR)",
           status == TX_THREAD_ERROR);
-    check("the refusal left us adopted", tx_amiga_adopted_thread() == &self);
+    check("the refusal left us adopted", tx_amiga_adopted_thread() == self);
     check("the refusal left the kernel running",
           tx_amiga_kernel_running() == TX_TRUE);
     check("the kernel still works after the refusal", clock_ran(20));
@@ -306,7 +307,7 @@ static int child_main(void)
     check("the scheduler Task is GONE", FindTask((STRPTR)"AmiNetXDuo kernel") == NULL);
 
     check("adoption is refused once the kernel is down",
-          tx_amiga_adopt_thread(&self, "kstop-main", 16) == TX_NOT_DONE);
+          tx_amiga_adopt_thread(&self, &self_gen, "kstop-main", 16, (UINT)TX_FALSE) == TX_NOT_DONE);
     check("stop is idempotent", tx_amiga_kernel_stop() == TX_SUCCESS);
 
     /* ---- lifetime 2: restart -------------------------------------------- */
@@ -322,7 +323,7 @@ static int child_main(void)
         check("the restarted tick Task exists",
               FindTask((STRPTR)"AmiNetXDuo tick") != NULL);
 
-        status = tx_amiga_adopt_thread(&self, "kstop-main-2", 16);
+        status = tx_amiga_adopt_thread(&self, &self_gen, "kstop-main-2", 16, (UINT)TX_FALSE);
         check("adopted on the restarted kernel", status == TX_SUCCESS);
 
         work_start();
@@ -330,7 +331,7 @@ static int child_main(void)
         checkv("the restarted application timer fired", beats > 0, (LONG)beats);
         work_stop();
 
-        (VOID)tx_amiga_orphan_thread(&self);
+        (VOID)tx_amiga_orphan_thread(self, self_gen);
 
         /* ---- the zombie contract ---------------------------------------- */
 

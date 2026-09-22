@@ -236,7 +236,8 @@ struct TagItem  tags[5];
 }
 
 
-static TX_THREAD    t_main_thread;
+static TX_THREAD   *t_main_thread;   /* a slot of the port's adoption pool */
+static ULONG    t_main_thread_gen;
 
 #define T_SEC(n)    ((ULONG) (n) * (ULONG) NX_IP_PERIODIC_RATE)
 
@@ -1110,7 +1111,7 @@ UINT    status;
                  0UL))
         return;
 
-    status =  tx_amiga_adopt_thread(&t_main_thread, "dhcp3927", 16);
+    status =  tx_amiga_adopt_thread(&t_main_thread, &t_main_thread_gen, "dhcp3927", 16, (UINT)TX_FALSE);
     if (!t_check((UINT) (status == TX_SUCCESS), "adopted this Exec Task",
                  (ULONG) status))
         return;
@@ -1159,7 +1160,7 @@ UINT    status;
         t_phase_g();
     }
 
-    (VOID) tx_amiga_orphan_thread(&t_main_thread);
+    (VOID) tx_amiga_orphan_thread(t_main_thread, t_main_thread_gen);
 }
 
 

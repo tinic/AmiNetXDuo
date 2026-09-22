@@ -118,7 +118,8 @@ static VOID t_finding(const char *what, UINT yes)
 #define T_PING_TIMEOUT      (5UL * (ULONG)NX_IP_PERIODIC_RATE)
 #define T_RA_WAIT_TICKS     (20UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-static TX_THREAD    t_main_thread;
+static TX_THREAD   *t_main_thread;   /* a slot of the port's adoption pool */
+static ULONG    t_main_thread_gen;
 static const char   t_ping_data[] = "AmiNetXDuo";
 
 static VOID t_log_addr6(const char *label, const ULONG a[4])
@@ -362,7 +363,7 @@ UWORD            slot;
         return;
     }
 
-    status =  tx_amiga_adopt_thread(&t_main_thread, "ipv6 link test", 16);
+    status =  tx_amiga_adopt_thread(&t_main_thread, &t_main_thread_gen, "ipv6 link test", 16, (UINT)TX_FALSE);
     if (!t_check((UINT)(status == TX_SUCCESS), "adopted this Exec Task",
                  (ULONG)status))
     {
@@ -476,7 +477,7 @@ UWORD            slot;
 
     t_readd();
 
-    (VOID)tx_amiga_orphan_thread(&t_main_thread);
+    (VOID)tx_amiga_orphan_thread(t_main_thread, t_main_thread_gen);
 }
 
 int main(void)

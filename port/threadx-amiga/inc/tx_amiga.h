@@ -131,27 +131,78 @@ static __inline ULONG tx_amiga_eclock_us(ULONG ec, ULONG eclock_per_ms)
 /* Thread adoption                                                           */
 /* ------------------------------------------------------------------------ */
 
-/* Adopt the calling Exec Task as a TX_THREAD.  Returns holding the ThreadX baton;
-   until orphaned the Task must not block on anything but ThreadX.  thread_ptr is
-   initialised here, not by tx_thread_create(), and must outlive the adoption.  */
-UINT    tx_amiga_adopt_thread(TX_THREAD *thread_ptr, CHAR *name, UINT priority);
+/* Adopt the calling Exec Task as a TX_THREAD.  Returns holding the ThreadX
+   baton; until orphaned the Task must not block on anything but ThreadX.
 
-/* Release the baton, deregister the TX_THREAD and free the Exec signal.  Must be
-   called by the same Task that adopted, and only while it holds the baton.
-   Returns TX_SUCCESS, TX_THREAD_ERROR or TX_CALLER_ERROR.  */
-UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
+   THE TX_THREAD IS THE PORT'S, NOT THE CALLER'S.  It comes from a fixed pool
+   (tx_amiga_pool.c), and what the caller keeps is a HANDLE: *thread_ptr plus
+   the *generation that went with it.  Both must be given back to every other
+   call below, and a handle whose slot has since been recycled is refused with
+   TX_THREAD_ERROR rather than acted on.  Caller-owned storage is not an option:
+   a Task RemTask()ed while adopted frees its own stack, and the recovery has to
+   read the TX_THREAD after that.
+
+   `reserved` is TX_TRUE only for a caller that MUST NOT PARK -- in this tree,
+   one holding ami_ns_lock.  Only such a caller may have the pool's reserved
+   tail; tx_amiga_pool.c says why one slot is provably enough.
+
+   Waits, holding nothing, when every slot this caller may have is taken.
+   TX_NO_MEMORY means no Exec signal was free, or more Tasks were already
+   waiting than the port tracks; TX_NOT_DONE means the kernel is not running,
+   including a kernel that stopped while the caller waited.  */
+UINT    tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
+                              CHAR *name, UINT priority, UINT reserved);
+
+/* Release the baton, deregister the TX_THREAD, free the Exec signal and give
+   the pool slot back.  Must be called by the same Task that adopted, and only
+   while it holds the baton.  TX_SUCCESS, TX_THREAD_ERROR (stale handle) or
+   TX_CALLER_ERROR.  */
+UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation);
 
 /* Bracket for a cached adoption: resume takes the baton, suspend gives it back,
-   and the "never block outside ThreadX" rule applies between them.  Both must be
-   called by the Task that adopted; anything else gets TX_CALLER_ERROR.  */
-UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr);
-UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr);
+   and the "never block outside ThreadX" rule applies between them.  The slot is
+   kept across the pair.  Both must be called by the Task that adopted; anything
+   else gets TX_CALLER_ERROR, and a stale handle TX_THREAD_ERROR.  */
+UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation);
+UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation);
 
 
-/* Deregister a thread adopted by some other Task.  The Exec signal is NOT
-   recovered -- only its owner may FreeSignal() it -- so prefer
-   tx_amiga_orphan_thread() whenever the caller is the owner.  */
-UINT    tx_amiga_discard_thread(TX_THREAD *thread_ptr);
+/* Deregister a thread adopted by some other Task and give its slot back.  The
+   Exec signal is NOT recovered -- only its owner may FreeSignal() it -- so
+   prefer tx_amiga_orphan_thread() whenever the caller is the owner.  */
+UINT    tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation);
+
+/* The pool.  tx_amiga_adopt_generation() answers 0 for anything that is not a
+   live slot, including a pointer that is not the port's at all, and reads no
+   memory outside the pool to decide; call it under Forbid(), which is also what
+   keeps the answer true for the length of the caller's next call.  */
+ULONG   tx_amiga_adopt_slots(VOID);
+ULONG   tx_amiga_adopt_reserve(VOID);
+ULONG   tx_amiga_adopt_slots_free(VOID);
+
+/* Give back every slot whose claimer was removed between taking it and
+   creating the TX_THREAD in it -- the one dead-adopter residue the baton
+   reclaim cannot see, because there is no thread to ask about.  Called from
+   the stack's second tick; takes its own Forbid().  How many it has ever freed
+   is _tx_amiga_adopt_unpublished_freed.  */
+VOID    tx_amiga_adopt_sweep_unpublished(VOID);
+
+/* FOR THE PORT'S OWN HARNESS: leave exactly that residue.  */
+UINT    tx_amiga_adopt_claim_orphan(VOID);
+ULONG   tx_amiga_adopt_generation(TX_THREAD *thread_ptr);
+UINT    tx_amiga_adopt_handle_valid(TX_THREAD *thread_ptr, ULONG generation);
+
+/* Adoptions that had to wait for a slot, the high-water slot count, and the
+   times a caller was refused because the waiter table was full.  */
+extern ULONG _tx_amiga_adopt_parks;
+extern ULONG _tx_amiga_adopt_waiting;   /* waiting right now                  */
+extern ULONG _tx_amiga_adopt_peak;
+extern ULONG _tx_amiga_adopt_waiter_full;
+extern ULONG _tx_amiga_adopt_unpublished_freed;
+
+/* Times tx_amiga_discard_thread() found a discarded baton holder had left the
+   core's preemption lockout raised and cleared it.  */
+extern ULONG _tx_amiga_discard_preempt_resets;
 
 /* The TX_THREAD the calling Exec Task was adopted as, or TX_NULL.  */
 TX_THREAD *tx_amiga_adopted_thread(VOID);

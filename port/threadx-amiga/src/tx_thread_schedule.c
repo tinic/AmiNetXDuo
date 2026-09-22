@@ -65,7 +65,7 @@ TX_THREAD   *thread_ptr;
 
         /* Pass the baton on.  */
         TX_AMIGA_COUNT(TX_AMIGA_SC_SCHED_DISPATCH);
-        _tx_thread_current_ptr =  thread_ptr;
+        ami_baton_note(thread_ptr);
         thread_ptr -> tx_thread_run_count++;
         _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
 
@@ -312,7 +312,7 @@ UINT                     wake;
             ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
                                 (ULONG) thread_ptr -> tx_thread_state,
                                 AMI_HOLD_SITE_REAP);
-            _tx_thread_current_ptr =  TX_NULL;
+            ami_baton_note(TX_NULL);
             _tx_timer_time_slice   =  ((ULONG) 0);
             wake =  TX_TRUE;
         }

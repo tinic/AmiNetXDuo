@@ -256,7 +256,8 @@ static NX_TCP_SOCKET    p_client;
 static NX_TCP_SOCKET    p_server;
 
 static TX_THREAD        p_srv_thread;
-static TX_THREAD        p_main_thread;
+static TX_THREAD       *p_main_thread;   /* a slot of the port's adoption pool */
+static ULONG        p_main_thread_gen;
 static TX_SEMAPHORE     p_srv_ready;
 static TX_SEMAPHORE     p_srv_gotall;
 static TX_SEMAPHORE     p_srv_done;
@@ -1318,7 +1319,7 @@ ULONG   actual;
         return(20);
     }
 
-    status = tx_amiga_adopt_thread(&p_main_thread, "perf client", 16);
+    status = tx_amiga_adopt_thread(&p_main_thread, &p_main_thread_gen, "perf client", 16, (UINT)TX_FALSE);
     if (!p_check((UINT)(status == TX_SUCCESS), "adopted this Exec Task", status))
     {
         p_flush();
@@ -1401,7 +1402,7 @@ ULONG   actual;
        ThreadX thread to run on. */
     p_shutdown();
 
-    (VOID)tx_amiga_orphan_thread(&p_main_thread);
+    (VOID)tx_amiga_orphan_thread(p_main_thread, p_main_thread_gen);
 
     /*
      * The kernel comes down before the program does.  tx_amiga_kernel_start()

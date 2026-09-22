@@ -248,32 +248,78 @@ VOID ami_netstack_baton_reset(VOID)
     nsh.baton_resets++;
 }
 
-UINT tx_amiga_adopt_thread(TX_THREAD *thread_ptr, CHAR *name, UINT priority)
+/* One stand-in slot, handed out with a fresh generation each time: enough for
+   the host tests, which never have two adoptions live at once, and enough to
+   make a stale handle read stale. */
+static TX_THREAD nsh_pool_slot;
+static ULONG     nsh_pool_generation;
+static ULONG     nsh_pool_busy;
+
+UINT tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
+                           CHAR *name, UINT priority, UINT reserved)
 {
-    (VOID)thread_ptr;
     (VOID)name;
     (VOID)priority;
+    (VOID)reserved;
 
-    return nsh.tx_adopt_status;
-}
+    *thread_ptr = TX_NULL;
+    *generation = 0UL;
 
-UINT tx_amiga_orphan_thread(TX_THREAD *thread_ptr)
-{
-    (VOID)thread_ptr;
+    if (nsh.tx_adopt_status != TX_SUCCESS)
+        return nsh.tx_adopt_status;
 
-    return TX_SUCCESS;
-}
-
-UINT tx_amiga_adopt_resume(TX_THREAD *thread_ptr)
-{
-    (VOID)thread_ptr;
+    nsh_pool_generation++;
+    nsh_pool_busy = 1UL;
+    *thread_ptr = &nsh_pool_slot;
+    *generation = nsh_pool_generation;
 
     return TX_SUCCESS;
 }
 
-UINT tx_amiga_adopt_suspend(TX_THREAD *thread_ptr)
+ULONG tx_amiga_adopt_slots(VOID)   { return 1UL; }
+ULONG tx_amiga_adopt_reserve(VOID) { return 0UL; }
+ULONG tx_amiga_adopt_slots_free(VOID) { return nsh_pool_busy == 0UL ? 1UL : 0UL; }
+VOID  tx_amiga_adopt_sweep_unpublished(VOID) { }
+UINT  tx_amiga_adopt_claim_orphan(VOID) { return (UINT)TX_FALSE; }
+
+ULONG tx_amiga_adopt_generation(TX_THREAD *thread_ptr)
 {
-    (VOID)thread_ptr;
+    if (thread_ptr != &nsh_pool_slot || nsh_pool_busy == 0UL)
+        return 0UL;
+
+    return nsh_pool_generation;
+}
+
+UINT tx_amiga_adopt_handle_valid(TX_THREAD *thread_ptr, ULONG generation)
+{
+    if (generation == 0UL)
+        return (UINT)TX_FALSE;
+
+    return (tx_amiga_adopt_generation(thread_ptr) == generation)
+           ? (UINT)TX_TRUE : (UINT)TX_FALSE;
+}
+
+UINT tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation)
+{
+    if (tx_amiga_adopt_handle_valid(thread_ptr, generation) == (UINT)TX_FALSE)
+        return TX_THREAD_ERROR;
+
+    nsh_pool_busy = 0UL;
+    return TX_SUCCESS;
+}
+
+UINT tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation)
+{
+    if (tx_amiga_adopt_handle_valid(thread_ptr, generation) == (UINT)TX_FALSE)
+        return TX_THREAD_ERROR;
+
+    return TX_SUCCESS;
+}
+
+UINT tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation)
+{
+    if (tx_amiga_adopt_handle_valid(thread_ptr, generation) == (UINT)TX_FALSE)
+        return TX_THREAD_ERROR;
 
     return TX_SUCCESS;
 }
@@ -290,10 +336,12 @@ UINT tx_amiga_baton_free(VOID)
     return TX_TRUE;
 }
 
-UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
+UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation)
 {
-    (VOID)thread_ptr;
+    if (tx_amiga_adopt_handle_valid(thread_ptr, generation) == (UINT)TX_FALSE)
+        return TX_THREAD_ERROR;
 
+    nsh_pool_busy = 0UL;
     return TX_SUCCESS;
 }
 
@@ -770,6 +818,11 @@ BOOL ami_netstack_baton_abandon(TX_THREAD *thread)
 VOID ami_netstack_baton_acquire(VOID)
 {
 
+}
+
+BOOL ami_netstack_baton_reclaim_dead(VOID)
+{
+    return FALSE;
 }
 
 VOID ami_netstack_baton_release(VOID)

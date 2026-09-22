@@ -48,7 +48,8 @@ static NX_IP            t_ip1;
 static NX_TCP_SOCKET    t_client;
 static NX_TCP_SOCKET    t_server;
 static TX_THREAD        t_srv_thread;
-static TX_THREAD        t_main_thread;
+static TX_THREAD       *t_main_thread;   /* a slot of the port's adoption pool */
+static ULONG        t_main_thread_gen;
 static TX_SEMAPHORE     t_srv_ready;
 static TX_SEMAPHORE     t_srv_gotall;
 static TX_SEMAPHORE     t_srv_done;
@@ -407,10 +408,10 @@ UINT status;
         return(20);
     }
 
-    status = tx_amiga_adopt_thread(&t_main_thread, "prof client", 16);
+    status = tx_amiga_adopt_thread(&t_main_thread, &t_main_thread_gen, "prof client", 16, (UINT)TX_FALSE);
     if (status != TX_SUCCESS)
     {
-        prof_log("FATAL: tx_amiga_adopt_thread() = %ld", (long)status);
+        prof_log("FATAL: tx_amiga_adopt_thread(, (UINT)TX_FALSE) = %ld", (long)status);
         return(20);
     }
 
@@ -423,7 +424,7 @@ UINT status;
        ThreadX thread to run on. */
     t_shutdown();
 
-    (VOID)tx_amiga_orphan_thread(&t_main_thread);
+    (VOID)tx_amiga_orphan_thread(t_main_thread, t_main_thread_gen);
 
     t_shut_ok(tx_amiga_kernel_stop(), "ThreadX kernel stop");
 

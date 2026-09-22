@@ -184,20 +184,25 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     return id;
 }
 
+/* Is anything parked?  bsd_lib_close() reads this without sb_Lock, to decide
+   whether a bracket is worth taking before it obtains the semaphore. */
+BOOL bsd_handoff_pending(struct AmiSocketBase *master)
+{
+    return master->sb_Handoffs.mlh_Head != NULL &&
+           master->sb_Handoffs.mlh_Head->mln_Succ != NULL;
+}
+
 /*
  * Release everything still parked. Called from bsd_lib_close() when the last
  * opener goes away. At that point no base exists that can obtain them, and the
+ * caller owns sb_Lock and, when `bracketed`, the ThreadX bracket as well.
  */
-VOID bsd_handoff_flush(struct AmiSocketBase *base)
+VOID bsd_handoff_flush(struct AmiSocketBase *base, BOOL bracketed)
 {
     struct AmiSocketBase *master = bsd_master_of(base);
-    BOOL                  bracketed;
 
-    if (master->sb_Handoffs.mlh_Head == NULL ||
-        master->sb_Handoffs.mlh_Head->mln_Succ == NULL)
+    if (!bsd_handoff_pending(master))
         return;                                 /* empty, nothing to do */
-
-    bracketed = (bsd_nx_enter(base) == 0);
 
     for (;;)
     {
@@ -219,9 +224,6 @@ VOID bsd_handoff_flush(struct AmiSocketBase *base)
 
         ami_free(entry);
     }
-
-    if (bracketed)
-        bsd_nx_leave(base);
 }
 
 LONG bsd_ReleaseSocket(register LONG sock_fd __asm("d0"),

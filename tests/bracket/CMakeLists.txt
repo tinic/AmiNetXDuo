@@ -43,6 +43,10 @@ set(BRACKET_ROUNDS  "200" CACHE STRING "Adopt/orphan cycles per worker")
 
 # The baton phase runs on wall-clock time, so its axis is seconds, not rounds:
 # the probe samples 500 times a second and a longer phase is more samples.
+# Clamped at run time to the port's adoption pool: every one of these holds
+# its adoption for the whole phase, and the phase has a barrier all of them
+# must reach.  bt_test_pool_exhaustion() is where the pool's ceiling is the
+# subject rather than the obstacle.
 set(BRACKET_BATON_TASKS "20"  CACHE STRING "Tasks in the release/acquire phase")
 set(BRACKET_BATON_TICKS "250" CACHE STRING "Ticks the release/acquire phase runs")
 

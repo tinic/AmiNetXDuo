@@ -126,7 +126,8 @@ static NX_TCP_SOCKET    t_client_socket;
 static NX_TCP_SOCKET    t_server_socket;
 
 static TX_THREAD        t_server_thread;
-static TX_THREAD        t_main_thread;
+static TX_THREAD       *t_main_thread;   /* a slot of the port's adoption pool */
+static ULONG        t_main_thread_gen;
 static TX_SEMAPHORE     t_server_done;
 
 static ULONG            t_pool_memory[(T_PACKET_COUNT * (T_PACKET_PAYLOAD + T_PACKET_OVERHEAD)) / sizeof(ULONG)];
@@ -405,14 +406,14 @@ UINT    status;
     }
     t_log("kernel: scheduler running");
 
-    status =  tx_amiga_adopt_thread(&t_main_thread, "test client", 16);
+    status =  tx_amiga_adopt_thread(&t_main_thread, &t_main_thread_gen, "test client", 16, (UINT)TX_FALSE);
     if (!T_TX_OK(status, "main: adopted this Exec Task"))
     {
         t_flush();
         return(20);
     }
 
-    (VOID) t_check((UINT) (tx_thread_identify() == &t_main_thread),
+    (VOID) t_check((UINT) (tx_thread_identify() == t_main_thread),
                    "main: tx_thread_identify() is us", 0);
 
     (VOID) t_client_run();
@@ -421,7 +422,7 @@ UINT    status;
        ThreadX thread to run on. */
     t_shutdown();
 
-    status =  tx_amiga_orphan_thread(&t_main_thread);
+    status =  tx_amiga_orphan_thread(t_main_thread, t_main_thread_gen);
     (VOID) T_TX_OK(status, "main: orphaned this Exec Task");
 
     status =  tx_amiga_kernel_stop();

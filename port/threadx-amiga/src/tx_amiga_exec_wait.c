@@ -67,7 +67,7 @@ UINT tx_amiga_exec_wait_release_locked(TX_THREAD *thread_ptr,
             ami_budget_hold_end((APTR)thread_ptr, thread_ptr->tx_thread_name,
                                 (ULONG)thread_ptr->tx_thread_state,
                                 AMI_HOLD_SITE_BRACKET);
-            _tx_thread_current_ptr = TX_NULL;
+            ami_baton_note(TX_NULL);
             _tx_timer_time_slice   = (ULONG)0;
         }
         else

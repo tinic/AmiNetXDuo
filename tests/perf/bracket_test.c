@@ -193,7 +193,8 @@ static NX_TCP_SOCKET    b_client;
 static NX_TCP_SOCKET    b_server;
 
 static TX_THREAD        b_srv_thread;
-static TX_THREAD        b_caller;       /* the adopted TX_THREAD under test */
+static TX_THREAD       *b_caller;   /* a slot of the port's adoption pool */
+static ULONG        b_caller_gen;       /* the adopted TX_THREAD under test */
 static TX_SEMAPHORE     b_srv_ready;
 static TX_SEMAPHORE     b_srv_accepted;
 static TX_SEMAPHORE     b_srv_go;
@@ -229,23 +230,23 @@ static UINT b_enter(VOID)
     b_brackets++;
 
     if (b_cache_live != 0U &&
-        tx_amiga_adopt_resume(&b_caller) == TX_SUCCESS)
+        tx_amiga_adopt_resume(b_caller, b_caller_gen) == TX_SUCCESS)
     {
         return(TX_SUCCESS);
     }
 
-    return(tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16));
+    return(tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE));
 }
 
 static VOID b_leave(VOID)
 {
     if (b_cache_live != 0U &&
-        tx_amiga_adopt_suspend(&b_caller) == TX_SUCCESS)
+        tx_amiga_adopt_suspend(b_caller, b_caller_gen) == TX_SUCCESS)
     {
         return;
     }
 
-    (VOID)tx_amiga_orphan_thread(&b_caller);
+    (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
 }
 
 
@@ -261,14 +262,14 @@ UINT    status;
     for (i = 0UL; i < reps; i++)
     {
         t0     = b_now();
-        status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+        status = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE);
         t1     = b_now();
         if (status != TX_SUCCESS)
         {
             (VOID)b_check(0U, "adopt during micro benchmark", status);
             return;
         }
-        (VOID)tx_amiga_orphan_thread(&b_caller);
+        (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
         t2 = b_now();
 
         adopt  += b_elapsed(t0, t1);
@@ -309,7 +310,7 @@ UINT    status;
           (LONG)(b_us_x100(ticks, reps) / 100UL),
           (LONG)(b_us_x100(ticks, reps) % 100UL));
 
-    status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+    status = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE);
     if (b_check((UINT)(status == TX_SUCCESS), "adopt for nested measurement",
                 status))
     {
@@ -323,29 +324,29 @@ UINT    status;
               (LONG)(b_us_x100(ticks, reps * 10UL) / 100UL),
               (LONG)(b_us_x100(ticks, reps * 10UL) % 100UL));
 
-        (VOID)tx_amiga_orphan_thread(&b_caller);
+        (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
     }
 
-    status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+    status = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE);
     if (b_check((UINT)(status == TX_SUCCESS), "adopt for cached measurement",
                 status))
     {
         adopt  = 0UL;
         orphan = 0UL;
 
-        (VOID)tx_amiga_adopt_suspend(&b_caller);
+        (VOID)tx_amiga_adopt_suspend(b_caller, b_caller_gen);
 
         for (i = 0UL; i < reps; i++)
         {
             t0     = b_now();
-            status = tx_amiga_adopt_resume(&b_caller);
+            status = tx_amiga_adopt_resume(b_caller, b_caller_gen);
             t1     = b_now();
             if (status != TX_SUCCESS)
             {
                 (VOID)b_check(0U, "resume during micro benchmark", status);
                 break;
             }
-            (VOID)tx_amiga_adopt_suspend(&b_caller);
+            (VOID)tx_amiga_adopt_suspend(b_caller, b_caller_gen);
             t2 = b_now();
 
             adopt  += b_elapsed(t0, t1);
@@ -362,8 +363,8 @@ UINT    status;
               (LONG)(b_us_x100(orphan, reps) / 100UL),
               (LONG)(b_us_x100(orphan, reps) % 100UL));
 
-        (VOID)tx_amiga_adopt_resume(&b_caller);
-        (VOID)tx_amiga_orphan_thread(&b_caller);
+        (VOID)tx_amiga_adopt_resume(b_caller, b_caller_gen);
+        (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
     }
 
     t0 = b_now();
@@ -645,13 +646,13 @@ UINT    status;
 
     if (b_arm_is_cached(arm))
     {
-        status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+        status = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE);
         if (!b_check((UINT)(status == TX_SUCCESS), "adopt for cached arm",
                      status))
         {
             return;
         }
-        (VOID)tx_amiga_adopt_suspend(&b_caller);
+        (VOID)tx_amiga_adopt_suspend(b_caller, b_caller_gen);
         b_cache_live = 1U;
     }
 
@@ -664,8 +665,8 @@ UINT    status;
     if (b_arm_is_cached(arm))
     {
         b_cache_live = 0U;
-        (VOID)tx_amiga_adopt_resume(&b_caller);
-        (VOID)tx_amiga_orphan_thread(&b_caller);
+        (VOID)tx_amiga_adopt_resume(b_caller, b_caller_gen);
+        (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
     }
 
     (VOID)b_check((UINT)(b_srv_sent == B_XFER_BYTES), "sender sent every byte",
@@ -763,7 +764,7 @@ UINT    status;
 UINT    adopted;
 
 
-    status  = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+    status  = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE);
     adopted = b_check((UINT)(status == TX_SUCCESS), "adopt for shutdown",
                       status);
 
@@ -824,7 +825,7 @@ ULONG   i;
     b_log("E-Clock %ld Hz, %ld ns/tick, measurement bracket %ld ticks",
           (LONG)b_rate, (LONG)b_tick_ns, (LONG)b_bracket);
 
-    status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+    status = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE);
     if (!b_check((UINT)(status == TX_SUCCESS), "first adoption", status))
     {
         b_flush();
@@ -836,12 +837,12 @@ ULONG   i;
     status = nx_ip_status_check(&b_ip2, NX_IP_INITIALIZE_DONE, &actual,
                                 10UL * NX_IP_PERIODIC_RATE);
     (VOID)b_check((UINT)(status == NX_SUCCESS), "ip2 initialised", status);
-    (VOID)tx_amiga_orphan_thread(&b_caller);
+    (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
 
     b_log("");
     b_log("-- 256 KB over loopback, drained by an Exec Task ---------------");
 
-    status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
+    status = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller", 16, (UINT)TX_FALSE);
     if (b_check((UINT)(status == TX_SUCCESS), "adopt for setup", status))
     {
         (VOID)tx_semaphore_put(&b_srv_ready);
@@ -855,7 +856,7 @@ ULONG   i;
                                    30UL * NX_IP_PERIODIC_RATE);
         }
 
-        (VOID)tx_amiga_orphan_thread(&b_caller);
+        (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
 
         if (status != 0U && b_srv_up != 0U)
         {
@@ -868,15 +869,15 @@ ULONG   i;
                 b_run_arm(b_read_sizes[i], B_ARM_ONCE);
             }
 
-            status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller",
-                                           16);
+            status = tx_amiga_adopt_thread(&b_caller, &b_caller_gen, (CHAR *)"bracket caller",
+                                           16, (UINT)TX_FALSE);
             if (status == TX_SUCCESS)
             {
                 (VOID)nx_tcp_socket_disconnect(&b_client,
                                                2UL * NX_IP_PERIODIC_RATE);
                 (VOID)nx_tcp_client_socket_unbind(&b_client);
                 (VOID)nx_tcp_socket_delete(&b_client);
-                (VOID)tx_amiga_orphan_thread(&b_caller);
+                (VOID)tx_amiga_orphan_thread(b_caller, b_caller_gen);
             }
         }
     }

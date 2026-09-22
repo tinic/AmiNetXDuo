@@ -10,6 +10,11 @@
 
 #include "tx_amiga.h"
 
+/* The port's live baton-holder word (port/threadx-amiga/src/tx_amiga_internal.h).
+   Declared here rather than pulled in from that private header, which wants
+   TX_SOURCE_CODE. */
+extern VOID *_tx_amiga_baton_holder_task;
+
 #include "aminetxduo/health.h"
 
 #include <exec/tasks.h>
@@ -49,6 +54,9 @@ VOID ami_netstack_health_publish(VOID)
     ami_health_mark.hm_Tick    = (APTR)tx_amiga_tick_stats_live();
     ami_health_mark.hm_Baton   = (APTR)&ami_baton_stats;
     ami_health_mark.hm_Mem     = (APTR)ami_mem_stats();
+    ami_health_mark.hm_Holder  = (APTR)&_tx_amiga_baton_holder_task;
+    /* hm_SbLock is bsdsocket's and is set by
+       ami_netstack_health_set_sblock(); it must survive this initialisation. */
 
     InitSemaphore(&ami_health_mark.hm_Semaphore);
     ami_health_mark.hm_Semaphore.ss_Link.ln_Name = ami_health_name;
@@ -62,6 +70,18 @@ VOID ami_netstack_health_publish(VOID)
         AddSemaphore(&ami_health_mark.hm_Semaphore);
         ami_health_up = TRUE;
     }
+    Permit();
+}
+
+/*
+ * bsdsocket hands its master lock to the mark so a diagnostic reader can see
+ * who owns it.  Set once, when the master base is built; cleared with it.  The
+ * mark may not be published yet, so the value is kept either way.
+ */
+VOID ami_netstack_health_set_sblock(APTR sem)
+{
+    Forbid();
+    ami_health_mark.hm_SbLock = sem;
     Permit();
 }
 
@@ -107,6 +127,60 @@ BOOL ami_netstack_baton_abandon(TX_THREAD *thread)
 
     return found;
 }
+
+/*
+ * The lock-free half of dead-task recovery, from the tick.  A Task removed by
+ * Exec while it held the baton never gives it back, and the locked sweep that
+ * would notice needs sb_Lock, which a caller waiting for that baton may hold.
+ * So the holder is checked here first, and if its Task is gone the TX_THREAD is
+ * discarded, which takes the baton back.  Only the TX_THREAD is touched: the
+ * caller record and the library base belong to the sweep.
+ *
+ * Runs on the tick task inside Forbid() with the interrupt state raised, and
+ * tx_amiga_discard_thread() is built for that context.
+ */
+BOOL ami_netstack_baton_reclaim_dead(VOID)
+{
+    TX_THREAD *holder;
+    ULONG      generation;
+    UINT       status;
+
+    Forbid();
+
+    holder = tx_amiga_exec_wait_current_locked();
+    if (holder == TX_NULL || tx_amiga_adopted_task_dead(holder) == TX_FALSE)
+    {
+        Permit();
+        return FALSE;
+    }
+
+    /* The holder's own handle, read from the pool rather than from any caller
+       record: the AmiNetCaller that adopted this thread may be on the dead
+       Task's stack, which Exec has already freed. */
+    generation = tx_amiga_adopt_generation(holder);
+
+    /* A holder has no released bracket, so this is a no-op; it keeps the
+       abandon-before-discard order every other discard follows. */
+    (VOID)ami_netstack_baton_abandon(holder);
+    status = tx_amiga_discard_thread(holder, generation);
+
+    /* Counted on the teardown, not on the diagnosis: a discard that did not
+       report TX_SUCCESS took no baton back and left nothing to count. */
+    if (status == TX_SUCCESS)
+        ami_baton_stats.bs_Reclaimed++;
+
+    Permit();
+
+    if (status != TX_SUCCESS)
+    {
+        AMI_WARN("netstack: dead baton holder was not discarded (%ld)",
+                 (LONG)status);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 
 /*
  * Called once tx_amiga_kernel_stop() has reported success, so no bracket can

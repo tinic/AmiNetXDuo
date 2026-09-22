@@ -24,4 +24,11 @@ UINT tx_amiga_exec_task_context(VOID);
 UINT tx_amiga_exec_task_alive(VOID *task);
 UINT tx_amiga_exec_task_signal(VOID *task, ULONG sigmask);
 
+/* TX_TRUE only when an adopted thread's Exec Task is POSITIVELY gone: it is on
+   neither of Exec's scheduler lists, or it no longer owns the run-signal bit
+   the adopting Task allocated.  Everything else, including a recycled address
+   the port cannot tell apart, answers TX_FALSE: a wrong answer here can only
+   ever be "alive".  The caller holds Forbid(). */
+UINT tx_amiga_adopted_task_dead(TX_THREAD *thread_ptr);
+
 #endif /* AMINETXDUO_EXEC_PORT_H */

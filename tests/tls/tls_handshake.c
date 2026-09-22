@@ -222,7 +222,8 @@ static UCHAR                    h_remote_cert_buffer[2048];
 static UCHAR                    h_remote_issuer_buffer[2048];
 
 static TX_THREAD                h_server_thread;
-static TX_THREAD                h_main_thread;
+static TX_THREAD               *h_main_thread;   /* a slot of the port's adoption pool */
+static ULONG                h_main_thread_gen;
 static TX_SEMAPHORE             h_server_done;
 
 /*
@@ -835,7 +836,7 @@ UINT    status;
         return(20);
     }
 
-    status =  tx_amiga_adopt_thread(&h_main_thread, "tls client", 16);
+    status =  tx_amiga_adopt_thread(&h_main_thread, &h_main_thread_gen, "tls client", 16, (UINT)TX_FALSE);
     if (!H_TX_OK(status, "main: adopted this Exec Task"))
     {
         h_flush();
@@ -852,7 +853,7 @@ UINT    status;
        ThreadX thread to run on. */
     h_shutdown();
 
-    (VOID) tx_amiga_orphan_thread(&h_main_thread);
+    (VOID) tx_amiga_orphan_thread(h_main_thread, h_main_thread_gen);
 
     /*
      * The kernel comes down before the program does: tx_amiga_kernel_start()

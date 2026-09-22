@@ -1052,7 +1052,8 @@ int main(void)
 {
 
 UINT        status;
-TX_THREAD   main_thread;
+TX_THREAD  *main_thread;   /* a slot of the port's adoption pool */
+ULONG   main_thread_gen;
 
 
     t_log("AmiNetXDuo, milestone 7: mbuf_* and bpf_* on real 68k");
@@ -1079,10 +1080,10 @@ TX_THREAD   main_thread;
         return (20);
     }
 
-    status =  tx_amiga_adopt_thread(&main_thread, "mbuf/bpf test", 16);
+    status =  tx_amiga_adopt_thread(&main_thread, &main_thread_gen, "mbuf/bpf test", 16, (UINT)TX_FALSE);
     if (status != TX_SUCCESS)
     {
-        t_log("FATAL: tx_amiga_adopt_thread() = %ld", (ULONG) status);
+        t_log("FATAL: tx_amiga_adopt_thread(, (UINT)TX_FALSE) = %ld", (ULONG) status);
         t_log("");
         t_log("%ld checks, %ld failures, FAIL", t_checks, t_failures + 1);
         return (20);
@@ -1097,7 +1098,7 @@ TX_THREAD   main_thread;
         CHECK(nx_packet_pool_delete(&t_pool) == NX_SUCCESS,
               "packet pool deleted");
 
-    (VOID) tx_amiga_orphan_thread(&main_thread);
+    (VOID) tx_amiga_orphan_thread(main_thread, main_thread_gen);
 
     CHECK(tx_amiga_kernel_stop() == TX_SUCCESS, "ThreadX kernel stopped");
 

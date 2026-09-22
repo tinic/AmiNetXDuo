@@ -16,6 +16,8 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
     UINT status;
 
     caller->nc_Adopted = FALSE;
+    caller->nc_Thread  = TX_NULL;
+    caller->nc_Gen     = 0UL;
 
     if (tx_amiga_kernel_running() != TX_TRUE)
         return AMI_NET_ERR_STATE;
@@ -23,9 +25,15 @@ LONG ami_netstack_enter(AmiNetCaller *caller)
     if (tx_amiga_caller_is_thread() != (UINT)TX_FALSE)
         return AMI_NET_OK;
 
-    status = tx_amiga_adopt_thread(&caller->nc_Thread,
+    /* The pool's reserved slot is for a caller that must not park, and in this
+       tree that is exactly one: a Task inside ami_ns_lock.  Asked here rather
+       than passed in by each call site, so no site can forget and none of it
+       depends on whether the bracket is cached. */
+    status = tx_amiga_adopt_thread(&caller->nc_Thread, &caller->nc_Gen,
                                    (CHAR *)"AmiNetXDuo caller",
-                                   AMI_CALLER_PRIORITY);
+                                   AMI_CALLER_PRIORITY,
+                                   ami_ns_lock_held_by_me() ? (UINT)TX_TRUE
+                                                            : (UINT)TX_FALSE);
     if (status != TX_SUCCESS)
     {
         AMI_ERROR("netstack: cannot adopt calling task (%ld)", (long)status);
@@ -42,8 +50,10 @@ VOID ami_netstack_leave(AmiNetCaller *caller)
 
     if (caller->nc_Adopted)
     {
-        AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
+        AMI_NX_CLEANUP(tx_amiga_orphan_thread(caller->nc_Thread, caller->nc_Gen));
         caller->nc_Adopted = FALSE;
+        caller->nc_Thread  = TX_NULL;
+        caller->nc_Gen     = 0UL;
     }
 }
 
@@ -94,16 +104,21 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
 
     if (caller->nc_Live && caller->nc_Task == me)
     {
-        if (tx_amiga_adopt_resume(&caller->nc_Thread) == TX_SUCCESS)
+        if (tx_amiga_adopt_resume(caller->nc_Thread, caller->nc_Gen) == TX_SUCCESS)
         {
             caller->nc_Adopted = TRUE;
             return AMI_NET_OK;
         }
 
-        if (tx_amiga_orphan_thread(&caller->nc_Thread) != TX_SUCCESS)
-            AMI_NX_CLEANUP(tx_amiga_discard_thread(&caller->nc_Thread));
-        caller->nc_Live = FALSE;
-        caller->nc_Task = NULL;
+        /* Either way the handle is finished with. Both calls check the
+           generation themselves, so a slot recycled under us is refused rather
+           than torn down; the fresh adoption below is then the recovery. */
+        if (tx_amiga_orphan_thread(caller->nc_Thread, caller->nc_Gen) != TX_SUCCESS)
+            AMI_NX_CLEANUP(tx_amiga_discard_thread(caller->nc_Thread, caller->nc_Gen));
+        caller->nc_Live   = FALSE;
+        caller->nc_Task   = NULL;
+        caller->nc_Thread = TX_NULL;
+        caller->nc_Gen    = 0UL;
     }
 
     if (caller->nc_Live)
@@ -117,9 +132,13 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
     caller->nc_Live = TRUE;
     caller->nc_Task = me;
 
-    status = tx_amiga_adopt_thread(&caller->nc_Thread,
+    /* Same question as ami_netstack_enter(): the reserve follows who holds
+       ami_ns_lock, not whether the bracket is cached. */
+    status = tx_amiga_adopt_thread(&caller->nc_Thread, &caller->nc_Gen,
                                    (CHAR *)"AmiNetXDuo caller",
-                                   AMI_CALLER_PRIORITY);
+                                   AMI_CALLER_PRIORITY,
+                                   ami_ns_lock_held_by_me() ? (UINT)TX_TRUE
+                                                            : (UINT)TX_FALSE);
     if (status != TX_SUCCESS)
     {
         caller->nc_Live = FALSE;
@@ -143,14 +162,16 @@ VOID ami_netstack_leave_cached(AmiNetCaller *caller)
 
     if (caller->nc_Live && caller->nc_Task == FindTask(NULL))
     {
-        if (tx_amiga_adopt_suspend(&caller->nc_Thread) == TX_SUCCESS)
+        if (tx_amiga_adopt_suspend(caller->nc_Thread, caller->nc_Gen) == TX_SUCCESS)
             return;
 
         caller->nc_Live = FALSE;
         caller->nc_Task = NULL;
     }
 
-    AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
+    AMI_NX_CLEANUP(tx_amiga_orphan_thread(caller->nc_Thread, caller->nc_Gen));
+    caller->nc_Thread = TX_NULL;
+    caller->nc_Gen    = 0UL;
 }
 
 VOID ami_netstack_release(AmiNetCaller *caller)
@@ -168,23 +189,44 @@ VOID ami_netstack_release(AmiNetCaller *caller)
     if (caller->nc_Adopted && caller->nc_Task == me)
     {
         caller->nc_Adopted = FALSE;
-        AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
-        caller->nc_Live = FALSE;
-        caller->nc_Task = NULL;
+        AMI_NX_CLEANUP(tx_amiga_orphan_thread(caller->nc_Thread, caller->nc_Gen));
+        caller->nc_Live   = FALSE;
+        caller->nc_Task   = NULL;
+        caller->nc_Thread = TX_NULL;
+        caller->nc_Gen    = 0UL;
         return;
     }
 
     if (caller->nc_Task == me)
     {
-        if (tx_amiga_adopt_resume(&caller->nc_Thread) == TX_SUCCESS)
-            AMI_NX_CLEANUP(tx_amiga_orphan_thread(&caller->nc_Thread));
+        if (tx_amiga_adopt_resume(caller->nc_Thread, caller->nc_Gen) == TX_SUCCESS)
+            AMI_NX_CLEANUP(tx_amiga_orphan_thread(caller->nc_Thread, caller->nc_Gen));
         else
-            AMI_NX_CLEANUP(tx_amiga_discard_thread(&caller->nc_Thread));
+            AMI_NX_CLEANUP(tx_amiga_discard_thread(caller->nc_Thread, caller->nc_Gen));
     }
     else
     {
-        (VOID)ami_netstack_baton_abandon(&caller->nc_Thread);
-        status = tx_amiga_discard_thread(&caller->nc_Thread);
+        /*
+         * The sweep's path: the Task this record belongs to is gone. Its
+         * TX_THREAD may already have been reclaimed from the tick and the slot
+         * handed to somebody else, so the handle is checked and everything that
+         * touches the TX_THREAD happens inside ONE Forbid(): a slot is only
+         * ever released under Forbid(), so it cannot be recycled between the
+         * check and the discard.
+         */
+        Forbid();
+        if (tx_amiga_adopt_handle_valid(caller->nc_Thread, caller->nc_Gen)
+            != (UINT)TX_FALSE)
+        {
+            (VOID)ami_netstack_baton_abandon(caller->nc_Thread);
+            status = tx_amiga_discard_thread(caller->nc_Thread, caller->nc_Gen);
+        }
+        else
+        {
+            status = TX_SUCCESS;        /* already reclaimed; nothing to do */
+        }
+        Permit();
+
         if (status != TX_SUCCESS && status != TX_THREAD_ERROR)
         {
             AMI_WARN("netstack: cannot discard dead task's ThreadX context "
@@ -193,6 +235,8 @@ VOID ami_netstack_release(AmiNetCaller *caller)
     }
 
     caller->nc_Adopted = FALSE;
-    caller->nc_Live = FALSE;
-    caller->nc_Task = NULL;
+    caller->nc_Live    = FALSE;
+    caller->nc_Task    = NULL;
+    caller->nc_Thread  = TX_NULL;
+    caller->nc_Gen     = 0UL;
 }

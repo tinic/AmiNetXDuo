@@ -346,7 +346,9 @@ BYTE ami_signal_alloc(VOID) { h_unreachable("ami_signal_alloc"); return -1; }
 VOID ami_signal_free(BYTE s) { (VOID)s; h_unreachable("ami_signal_free"); }
 VOID bsd_bpf_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_bpf_close_all"); }
 VOID bsd_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_close_all"); }
-VOID bsd_handoff_flush(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_handoff_flush"); }
+VOID bsd_handoff_flush(struct AmiSocketBase *b, BOOL bracketed)
+{ (VOID)b; (VOID)bracketed; h_unreachable("bsd_handoff_flush"); }
+BOOL bsd_handoff_pending(struct AmiSocketBase *m) { (VOID)m; return FALSE; }
 VOID bsd_handoff_init(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_handoff_init"); }
 VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_release"); }
 BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }

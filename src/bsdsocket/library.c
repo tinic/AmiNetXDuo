@@ -18,6 +18,7 @@
 #include "aminetxduo/exec_port.h"
 #include "aminetxduo/version.h"
 #include "aminetxduo/events.h"
+#include "aminetxduo/health.h"
 
 #include "net68k.h"          /* n68k_cpu_select() */
 #include <stddef.h>
@@ -317,6 +318,11 @@ static struct AmiSocketBase *bsd_lib_init(
     base->sb_Lib.lib_IdString     = bsd_lib_id;
 
     InitSemaphore(&base->sb_Lock);
+    /* Published so a diagnostic reader can see who owns it: a Task removed
+       while owning this wedges the library in a way the baton reclaim neither
+       can nor should address, and tests/concurrent has to keep out of that
+       case to say anything about the reclaim. */
+    ami_netstack_health_set_sblock((APTR)&base->sb_Lock);
     bsd_new_list(&base->sb_Children);
     base->sb_StackRefs          = 0;
     base->sb_TransientStackRefs = 0;
@@ -979,13 +985,38 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
 
     if (base->sb_Master != NULL)
     {
+        BOOL bracketed = FALSE;
+
         master = base->sb_Master;
+
+        /*
+         * The bracket is taken OUTSIDE sb_Lock, and UNCONDITIONALLY.
+         *
+         * Outside, because adopting can wait for a free adoption slot
+         * (include/aminetxduo/netstack.h) and every close that would free one
+         * needs this same semaphore, so parking here holding it is a cycle.
+         *
+         * Unconditionally, because the alternative was a peek: decide from the
+         * handoff list whether a bracket is worth taking, then take it, then
+         * lock and flush. The list is mutable storage another base's
+         * ReleaseSocket() adds to, so reading it outside the lock is a
+         * use-after-free against a concurrent flush; and reading it inside the
+         * lock still leaves a window in which a handoff published after the
+         * peek is drained UNBRACKETED, which abandons the socket instead of
+         * releasing it. There is no window if there is no peek. This is the
+         * last opener's close; one adoption on that path costs nothing, and
+         * bsd_handoff_flush() is a no-op when the list is empty.
+         */
+        bracketed = (bsd_nx_enter(base) == 0);
 
         ObtainSemaphore(&master->sb_Lock);
         if (master->sb_StackRefs >= master->sb_TransientStackRefs &&
             master->sb_StackRefs - master->sb_TransientStackRefs <= 1)
-            bsd_handoff_flush(base);
+            bsd_handoff_flush(base, bracketed);
         ReleaseSemaphore(&master->sb_Lock);
+
+        if (bracketed)
+            bsd_nx_leave(base);
 
         bsd_child_destroy(base);
 
@@ -1408,6 +1439,10 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     bsd_master_base = NULL;
 
     ami_event_unpublish();
+
+    /* Committed: the mark must stop pointing into a base that is about to be
+       freed. */
+    ami_netstack_health_set_sblock(NULL);
 
     seglist = base->sb_SegList;
     neg     = base->sb_Lib.lib_NegSize;

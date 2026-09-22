@@ -273,7 +273,11 @@ char   *execbase;
                                                 UINT   tx_thread_amiga_exec_wait_nesting; \
                                                 UINT   tx_thread_amiga_flags;
 
-#define TX_THREAD_EXTENSION_1                   VOID  *tx_thread_extension_ptr;
+/* _tx_amiga_task_stamp() of the adopted Exec Task, taken at adoption and at
+   every cached re-entry; 0 when not stamped.  A dead holder's address can be
+   reused by a new Task before the reclaim sees it; the stamp tells the two
+   apart.  See tx_amiga_adopted_task_dead().  */
+#define TX_THREAD_EXTENSION_1                   ULONG  tx_thread_amiga_task_stamp;
 #define TX_THREAD_EXTENSION_2
 #define TX_THREAD_EXTENSION_3
 
@@ -494,6 +498,22 @@ VOID    _tx_amiga_wake_scheduler(VOID);
 
 /* Give a thread the baton, or park the caller.  Internal to the port.  */
 VOID    _tx_amiga_signal_task(VOID *task, ULONG sigmask);
+
+/* The adoption slot pool (tx_amiga_pool.c).  Declared here, beside the other
+   port-internal VOID helpers, because that is the header the port's own
+   declarations live in; the slot type stays opaque.  */
+struct _tx_amiga_adopt_slot;
+VOID    _tx_amiga_slot_release_locked(struct _tx_amiga_adopt_slot *slot);
+VOID    _tx_amiga_slot_publish_locked(struct _tx_amiga_adopt_slot *slot);
+
+/* Signal every Task waiting for a slot.  Forbid() held.  `final` is the
+   shutdown pass: it drops the stamp test and empties the table, so an entry the
+   ordinary pass retained on a mismatch is still woken when no release will ever
+   come again.  tx_amiga_pool.c says why each of those is what it is.  */
+VOID    _tx_amiga_adopt_wake_scan(UINT final);
+VOID    _tx_amiga_adopt_wake_waiters_locked(VOID);
+VOID    _tx_amiga_adopt_wake_waiters(VOID);
+VOID    _tx_amiga_adopt_wake_waiters_final(VOID);
 
 
 /* Define the version ID of ThreadX.  */

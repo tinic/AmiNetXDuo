@@ -26,13 +26,21 @@ UINT    tx_amiga_kernel_start(VOID);
 UINT    tx_amiga_kernel_running(VOID);
 UINT    tx_amiga_kernel_stop(VOID);
 
-UINT    tx_amiga_adopt_thread(TX_THREAD *thread_ptr, CHAR *name, UINT priority);
-UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
-UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr);
-UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr);
+UINT    tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
+                              CHAR *name, UINT priority, UINT reserved);
+UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation);
+UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation);
+UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_try_resume(TX_THREAD *thread_ptr);
 UINT    tx_amiga_baton_free(VOID);
-UINT    tx_amiga_discard_thread(TX_THREAD *thread_ptr);
+UINT    tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation);
+ULONG   tx_amiga_adopt_slots(VOID);
+ULONG   tx_amiga_adopt_reserve(VOID);
+ULONG   tx_amiga_adopt_slots_free(VOID);
+VOID    tx_amiga_adopt_sweep_unpublished(VOID);
+UINT    tx_amiga_adopt_claim_orphan(VOID);
+ULONG   tx_amiga_adopt_generation(TX_THREAD *thread_ptr);
+UINT    tx_amiga_adopt_handle_valid(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_caller_is_thread(VOID);
 
 #endif /* AMINETXDUO_NETSTACK_HOST_TX_AMIGA_H */

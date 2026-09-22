@@ -7,6 +7,7 @@
 #include <stdarg.h>
 
 #include <exec/types.h>
+#include <exec/semaphores.h>
 #include <exec/memory.h>
 #include <exec/tasks.h>
 #include <dos/dos.h>
@@ -15,6 +16,9 @@
 #include <proto/exec.h>
 #include <inline/macros.h>
 #include <proto/dos.h>
+
+#include "aminetxduo/health.h"
+#include "aminetxduo/netstatus.h"
 
 #ifndef CT_PAIRS
 #define CT_PAIRS        4               /* 4 servers + 4 clients == 8 bases  */
@@ -32,7 +36,8 @@
 #define CT_DEADLINE_SECS  60
 #endif
 #define CT_BOOT_SECS      90
-#define CT_BUDGET_SECS    (CT_BOOT_SECS + 2 * CT_DEADLINE_SECS + 30)
+#define CT_KILL_SECS      30            /* the removed-task phase, bounded   */
+#define CT_BUDGET_SECS    (CT_BOOT_SECS + 2 * CT_DEADLINE_SECS + CT_KILL_SECS + 30)
 
 #define CT_TIMEOUT_TICKS  (CT_DEADLINE_SECS * 50)   /* 50 ticks/s            */
 #define CT_POLL_TICKS     10
@@ -204,6 +209,25 @@ static LONG c_close(struct Library *base, LONG s)
                       : "=r" (res), "=r" (_clob_d1)
                       : "r" (a6), "r" (d0)
                       : "a0", "a1", "cc", "memory");
+    return res;
+}
+
+static LONG c_netstackcontrol(struct Library *base, ULONG op, APTR arg,
+                              ULONG size)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register ULONG           d0  __asm("d0") = AMI_NETSTATUS_MAGIC;
+    register ULONG           d1  __asm("d1") = op;
+    register APTR            a0  __asm("a0") = arg;
+    register ULONG           d2  __asm("d2") = size;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-876:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
+                      : "a1", "cc", "memory");
     return res;
 }
 
@@ -614,6 +638,458 @@ static struct Process *ct_spawn(CtApp *a, const char *name)
     return p;
 }
 
+/* ------------------------------------- a Task removed inside a vector -- */
+
+/*
+ * An application removed by Exec while inside a socket call holds the ThreadX
+ * baton for ever.  The library's one recovery, the 1 Hz task sweep, needs
+ * sb_Lock, and the link jobs hold sb_Lock while a launched Process waits for
+ * that baton: every program then hangs.  The fix reclaims the baton from the
+ * tick, before the sweep, without the lock.
+ *
+ * Roles.  V loops socket()/CloseSocket() until it is removed.  W has the
+ * library open and calls socket() once when told.  L has the library open and
+ * takes the interface down when told, which is the sb_Lock holder that parks.
+ * O opens the library while L holds the lock.
+ *
+ * Whether the removal landed inside the bracket is read from bs_Reclaimed,
+ * not from how long W took: the reclaim runs at 1 Hz, and L's own job holds
+ * the IP mutex for a few hundred ms, so W's time says nothing.  A miss is
+ * W, L and O all back with the counter unchanged, and the attempt is
+ * repeated.  A hit is the counter moved, with all three back inside 3 s; a
+ * hit on a library without the reclaim is all three stalled past 3 s, which
+ * is the defect.
+ */
+#define CK_VICTIM   1
+#define CK_WAITER   2
+#define CK_LINK     3
+#define CK_OPENER   4
+
+#define CK_ATTEMPTS 12
+#define CK_FIX_TICKS   150              /* 3 s for everything to come back  */
+#define CK_ARM_TICKS   250              /* 5 s to catch V holding the baton */
+
+/* AmiBatonStats.bs_Reclaimed is the eighth ULONG (aminetxduo/netstack.h),
+   read through the health mark: that header wants ThreadX's, which this
+   harness must not include. */
+#define CK_BS_RECLAIMED 7
+
+typedef struct CtKill
+{
+    UWORD           ck_Role;
+    UWORD           ck_Index;           /* CK_LINK: the interface           */
+    volatile UWORD  ck_Opened;          /* library open, waiting for go     */
+    volatile UWORD  ck_Returned;        /* the one call under test returned */
+    volatile UWORD  ck_Done;
+    volatile ULONG  ck_Loops;
+    volatile LONG   ck_Result;
+    volatile LONG   ck_Errno;
+    struct Process *ck_Proc;
+} CtKill;
+
+static VOID ct_kill_entry(VOID)
+{
+    struct Process *me = (struct Process *)FindTask((STRPTR)0);
+    struct Library *base;
+    CtKill         *k;
+
+    Wait(SIGF_SINGLE);
+    k = (CtKill *)me->pr_Task.tc_UserData;
+    if (k == NULL)
+        return;
+
+    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (base == NULL)
+    {
+        k->ck_Result = -1;
+        k->ck_Returned = 1U;
+        k->ck_Done = 1U;
+        return;
+    }
+    k->ck_Opened = 1U;
+
+    switch (k->ck_Role)
+    {
+        case CK_VICTIM:
+            for (;;)
+            {
+                LONG s = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+
+                if (s < 0)
+                {
+                    k->ck_Result = -1;
+                    k->ck_Errno  = c_errno(base);
+                    break;
+                }
+                (VOID)c_close(base, s);
+                k->ck_Loops++;
+            }
+            break;
+
+        case CK_WAITER:
+            Wait(SIGF_SINGLE);
+            k->ck_Result = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+            if (k->ck_Result < 0)
+                k->ck_Errno = c_errno(base);
+            k->ck_Returned = 1U;
+            if (k->ck_Result >= 0)
+                (VOID)c_close(base, k->ck_Result);
+            break;
+
+        case CK_LINK:
+        {
+            NetStatusControl ctl;
+            UBYTE *p = (UBYTE *)&ctl;
+            ULONG  i;
+
+            for (i = 0; i < sizeof(ctl); i++)
+                p[i] = 0;
+            ctl.nsc_Magic   = AMI_NETSTATUS_MAGIC;
+            ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+            ctl.nsc_Index   = k->ck_Index;
+
+            Wait(SIGF_SINGLE);
+            k->ck_Result = c_netstackcontrol(base, NETCTRL_INTERFACE_DOWN,
+                                             (APTR)&ctl, (ULONG)sizeof(ctl));
+            if (k->ck_Result != 0)
+                k->ck_Errno = c_errno(base);
+            k->ck_Returned = 1U;
+            break;
+        }
+
+        default:
+            k->ck_Returned = 1U;        /* the open was the call            */
+            break;
+    }
+
+    CloseLibrary(base);
+    k->ck_Done = 1U;
+}
+
+static struct Process *ct_kill_spawn(CtKill *k, UWORD role, const char *name,
+                                     BYTE pri)
+{
+    struct Process *p;
+
+    k->ck_Role     = role;
+    k->ck_Opened   = 0U;
+    k->ck_Returned = 0U;
+    k->ck_Done     = 0U;
+    k->ck_Loops    = 0UL;
+    k->ck_Result   = 0;
+    k->ck_Errno    = 0;
+    k->ck_Proc     = NULL;
+
+    Forbid();
+    p = CreateNewProcTags(NP_Entry,     (ULONG)ct_kill_entry,
+                          NP_Name,      (ULONG)name,
+                          NP_Priority,  (ULONG)(LONG)pri,
+                          NP_StackSize, CT_STACK,
+                          NP_Cli,       (ULONG)FALSE,
+                          TAG_DONE);
+    if (p != NULL)
+        p->pr_Task.tc_UserData = (APTR)k;
+    Permit();
+
+    if (p != NULL)
+    {
+        k->ck_Proc = p;
+        Signal(&p->pr_Task, SIGF_SINGLE);
+    }
+    return p;
+}
+
+/* Ticks until *flag is set, or -1 past the deadline. */
+static LONG ct_ticks_until(volatile UWORD *flag, ULONG deadline)
+{
+    ULONG waited = 0UL;
+
+    while (*flag == 0U)
+    {
+        if (waited >= deadline)
+            return -1;
+        Delay(1);
+        waited++;
+    }
+    return (LONG)waited;
+}
+
+/*
+ * ARM THE KILL, THEN KILL, INSIDE ONE Forbid().
+ *
+ * The removal only proves anything if V holds the baton at the instant it
+ * happens: a victim removed anywhere else leaves nothing for the reclaim to
+ * find.  The old code removed V after a loop count and missed the bracket
+ * about one run in four, and the harness then reported the miss as a reclaim
+ * failure.
+ *
+ * hm_Holder is the port's live baton-holder word.  A thread that holds the
+ * baton has necessarily been published, so reading V's address there confirms
+ * both halves of that much at once.
+ *
+ * AND V MUST OWN NO BSDSOCKET LOCK.  A Task removed while owning sb_Lock wedges
+ * the library for the rest of the boot, and no baton reclaim can or should
+ * undo that -- it is a different defect.  Removing V there would make this test
+ * report that defect as this one, so hm_SbLock's ss_Owner is part of the
+ * precondition rather than part of the result.  Exec's own field, no bsdsocket
+ * layout needed.
+ *
+ * Read and RemTask() happen under the same Forbid(), so neither can change in
+ * between.
+ *
+ * TRUE only if V was removed while holding the baton and owning no lock.
+ * FALSE means the precondition was never met inside the bound, which is an
+ * UNMET PRECONDITION and not a result about the reclaim at all.
+ */
+static BOOL ct_kill_when_holding(CtKill *victim, ULONG bound_ticks,
+                                 ULONG *waited_out)
+{
+    const AmiHealthMark    *mark;
+    VOID * const           *holder = NULL;
+    struct SignalSemaphore *sblock = NULL;
+    struct Task            *target = &victim->ck_Proc->pr_Task;
+    ULONG                   waited = 0UL;
+    BOOL                    armed  = FALSE;
+
+    Forbid();
+    mark = (const AmiHealthMark *)FindSemaphore((STRPTR)AMI_HEALTH_NAME);
+    if (mark != NULL &&
+        mark->hm_Magic   == AMI_HEALTH_MAGIC &&
+        mark->hm_Version == (UWORD)AMI_HEALTH_VERSION)
+    {
+        holder = (VOID * const *)mark->hm_Holder;
+        sblock = (struct SignalSemaphore *)mark->hm_SbLock;
+    }
+    Permit();
+
+    if (holder == NULL)
+    {
+        *waited_out = 0UL;
+        return FALSE;
+    }
+
+    for (waited = 0UL; waited < bound_ticks; waited++)
+    {
+        Forbid();
+        if (victim->ck_Done == 0U && *holder == (VOID *)target &&
+            (sblock == NULL || sblock->ss_Owner != target))
+        {
+            RemTask(target);
+            armed = TRUE;
+        }
+        Permit();
+
+        if (armed)
+            break;
+
+        Delay(1);
+    }
+
+    *waited_out = waited;
+    return armed;
+}
+
+static BOOL ct_health_reclaimed(ULONG *out)
+{
+    const AmiHealthMark *mark;
+    ULONG                value = 0UL;
+    BOOL                 ok    = FALSE;
+
+    Forbid();
+    mark = (const AmiHealthMark *)FindSemaphore((STRPTR)AMI_HEALTH_NAME);
+    if (mark != NULL &&
+        mark->hm_Magic   == AMI_HEALTH_MAGIC &&
+        mark->hm_Version == (UWORD)AMI_HEALTH_VERSION &&
+        mark->hm_Baton   != NULL)
+    {
+        value = ((const ULONG *)mark->hm_Baton)[CK_BS_RECLAIMED];
+        ok    = TRUE;
+    }
+    Permit();
+
+    *out = value;
+    return ok;
+}
+
+static VOID ct_interface_up(struct Library *base)
+{
+    NetStatusControl ctl;
+    UBYTE *p = (UBYTE *)&ctl;
+    ULONG  i;
+
+    for (i = 0; i < sizeof(ctl); i++)
+        p[i] = 0;
+    ctl.nsc_Magic   = AMI_NETSTATUS_MAGIC;
+    ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+    ctl.nsc_Index   = 0;
+    (VOID)c_netstackcontrol(base, NETCTRL_INTERFACE_UP, (APTR)&ctl,
+                            (ULONG)sizeof(ctl));
+}
+
+static CtKill ck_victim;
+static CtKill ck_waiter;
+static CtKill ck_link;
+static CtKill ck_opener;
+
+static VOID ct_kill_phase(struct Library *base)
+{
+    ULONG  reclaimed_before = 0UL;
+    ULONG  reclaimed_now    = 0UL;
+    UWORD  attempt;
+    BOOL   hit     = FALSE;
+    BOOL   stalled = FALSE;
+    BOOL   armed   = FALSE;
+    ULONG  arm_ticks = 0UL;
+    LONG   w_ticks = -1;
+    LONG   l_ticks = -1;
+    LONG   o_ticks = -1;
+
+    ct_log("concurrent: removing an application inside a socket call\n");
+    ct_trace("kill: start");
+
+    ct_check(ct_health_reclaimed(&reclaimed_before),
+             "the health mark is published", 0);
+    /* A baseline, not a zero: the counter is the library's and anything
+       earlier in this run is entitled to have moved it. */
+    ct_log("concurrent: kill_reclaimed_before=%ld\n", (LONG)reclaimed_before);
+
+    for (attempt = 1; attempt <= CK_ATTEMPTS && !hit && !stalled; attempt++)
+    {
+        /* W and L open first and wait, so the calls under test are the only
+           thing between the removal and the stall. */
+        ck_link.ck_Index = 0;
+        if (ct_kill_spawn(&ck_waiter, CK_WAITER, "anxd-kill-W", 0) == NULL ||
+            ct_kill_spawn(&ck_link, CK_LINK, "anxd-kill-L", 0) == NULL)
+        {
+            ct_check(0, "spawned W and L", (LONG)attempt);
+            return;
+        }
+        if (ct_ticks_until(&ck_waiter.ck_Opened, 250UL) < 0 ||
+            ct_ticks_until(&ck_link.ck_Opened, 250UL) < 0)
+        {
+            ct_check(0, "W and L opened the library", (LONG)attempt);
+            return;
+        }
+
+        /* V below this Process, so a Delay() here returns on top of it
+           wherever it happens to be inside its loop. */
+        if (ct_kill_spawn(&ck_victim, CK_VICTIM, "anxd-kill-V", -1) == NULL)
+        {
+            ct_check(0, "spawned V", (LONG)attempt);
+            return;
+        }
+        if (ct_ticks_until(&ck_victim.ck_Opened, 250UL) < 0)
+        {
+            ct_check(0, "V opened the library", (LONG)attempt);
+            return;
+        }
+        /* Removed only once V is the baton holder; see ct_kill_when_holding().
+           An attempt that cannot arm is not an attempt at the reclaim. */
+        armed = ct_kill_when_holding(&ck_victim, CK_ARM_TICKS, &arm_ticks);
+        if (!armed)
+        {
+            ct_trace("kill: attempt %ld UNMET PRECONDITION, V never held the "
+                     "baton in %ld ticks (loops %ld)", (LONG)attempt,
+                     (LONG)arm_ticks, (LONG)ck_victim.ck_Loops);
+            (VOID)ct_ticks_until(&ck_waiter.ck_Done, 250UL);
+            (VOID)ct_ticks_until(&ck_link.ck_Done, 250UL);
+            break;
+        }
+        ct_trace("kill: attempt %ld removed V HOLDING the baton after %ld "
+                 "arm ticks (loops %ld)", (LONG)attempt, (LONG)arm_ticks,
+                 (LONG)ck_victim.ck_Loops);
+
+        /* L first: it takes sb_Lock and launches the Process that parks
+           behind a dead holder.  Then W's socket(), then O's open, which
+           blocks on sb_Lock until L is done. */
+        Signal(&ck_link.ck_Proc->pr_Task, SIGF_SINGLE);
+        Signal(&ck_waiter.ck_Proc->pr_Task, SIGF_SINGLE);
+        if (ct_kill_spawn(&ck_opener, CK_OPENER, "anxd-kill-O", 0) == NULL)
+        {
+            ct_check(0, "spawned O", (LONG)attempt);
+            return;
+        }
+
+        w_ticks = ct_ticks_until(&ck_waiter.ck_Returned, CK_FIX_TICKS);
+        l_ticks = ct_ticks_until(&ck_link.ck_Returned, CK_FIX_TICKS);
+        o_ticks = ct_ticks_until(&ck_opener.ck_Opened, CK_FIX_TICKS);
+        (VOID)ct_health_reclaimed(&reclaimed_now);
+
+        if (w_ticks < 0 || l_ticks < 0 || o_ticks < 0)
+        {
+            stalled = TRUE;
+            ct_log("concurrent: kill attempt %ld stalled W, L and O past 3 s\n",
+                   (LONG)attempt);
+            ct_trace("kill: attempt %ld stalled w=%ld l=%ld o=%ld reclaimed=%ld",
+                     (LONG)attempt, w_ticks, l_ticks, o_ticks,
+                     (LONG)reclaimed_now);
+            break;
+        }
+
+        if (reclaimed_now != reclaimed_before)
+        {
+            hit = TRUE;
+            ct_log("concurrent: kill attempt %ld hit the bracket\n",
+                   (LONG)attempt);
+            ct_trace("kill: attempt %ld hit, w=%ld l=%ld o=%ld reclaimed=%ld",
+                     (LONG)attempt, w_ticks, l_ticks, o_ticks,
+                     (LONG)reclaimed_now);
+            break;
+        }
+
+        ct_trace("kill: attempt %ld missed the bracket, w=%ld l=%ld o=%ld",
+                 (LONG)attempt, w_ticks, l_ticks, o_ticks);
+        (VOID)ct_ticks_until(&ck_waiter.ck_Done, 250UL);
+        (VOID)ct_ticks_until(&ck_link.ck_Done, 250UL);
+        (VOID)ct_ticks_until(&ck_opener.ck_Done, 250UL);
+        ct_interface_up(base);          /* back up for the next attempt */
+    }
+
+    /* A DISTINCT RESULT.  "V never held the baton" says nothing about the
+       reclaim, so it is never reported as one failing. */
+    if (!armed)
+    {
+        ct_check(0, "UNMET PRECONDITION: V never held the baton to be removed "
+                 "from", (LONG)arm_ticks);
+        ct_log("concurrent: kill_precondition=unmet kill_arm_ticks=%ld\n",
+               (LONG)arm_ticks);
+        return;
+    }
+
+    ct_check(hit || stalled, "a removal landed inside the bracket",
+             (LONG)CK_ATTEMPTS);
+    if (!hit && !stalled)
+        return;
+
+    ct_check(w_ticks >= 0, "W's socket() returned within 3 s", w_ticks);
+    ct_check(w_ticks >= 0 && ck_waiter.ck_Result >= 0,
+             "W's socket() succeeded", ck_waiter.ck_Errno);
+    ct_check(l_ticks >= 0, "L's interface down returned within 3 s", l_ticks);
+    ct_check(l_ticks >= 0 && ck_link.ck_Result == 0,
+             "L's interface down succeeded", ck_link.ck_Errno);
+    ct_check(o_ticks >= 0, "a fresh OpenLibrary() succeeded within 3 s",
+             o_ticks);
+    ct_check(reclaimed_now == reclaimed_before + 1UL,
+             "exactly one baton was reclaimed",
+             (LONG)(reclaimed_now - reclaimed_before));
+
+    /* kill_reclaimed is the DELTA over the pre-kill snapshot, which is what
+       the check above asserts; the absolute counter is the library's and
+       anything earlier in the run is entitled to have moved it. */
+    ct_log("concurrent: kill_w_ticks=%ld kill_l_ticks=%ld kill_o_ticks=%ld "
+           "kill_reclaimed=%ld\n", w_ticks, l_ticks, o_ticks,
+           (LONG)(reclaimed_now - reclaimed_before));
+    ct_log("concurrent: kill_precondition=met kill_arm_ticks=%ld\n",
+           (LONG)arm_ticks);
+
+    if (hit)
+    {
+        (VOID)ct_ticks_until(&ck_waiter.ck_Done, 250UL);
+        (VOID)ct_ticks_until(&ck_link.ck_Done, 250UL);
+        (VOID)ct_ticks_until(&ck_opener.ck_Done, 250UL);
+    }
+}
+
 static VOID ct_main_body(VOID)
 {
     struct Library *base;
@@ -761,6 +1237,8 @@ static VOID ct_main_body(VOID)
             ct_check(a->ca_Bytes == CT_BYTES, "client echoed every byte",
                      (LONG)a->ca_Bytes);
     }
+
+    ct_kill_phase(base);
 
     ct_log("%ld checks, %ld failures, %s\n",
            (LONG)ct_checks, (LONG)ct_failures,

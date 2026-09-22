@@ -53,6 +53,10 @@ VOID           *_tx_amiga_kernel_memory       = (VOID *) 0;
 ULONG           _tx_amiga_kernel_memory_size  = 0UL;
 
 volatile UINT   _tx_amiga_kernel_up           = TX_FALSE;
+
+/* The live baton holder, as an Exec Task address; tx_amiga_internal.h says what
+   it is for and what it costs.  */
+VOID           *_tx_amiga_baton_holder_task  = (VOID *) 0;
 volatile UINT   _tx_amiga_kernel_stopping     = TX_FALSE;
 volatile UINT   _tx_amiga_timer_stop          = TX_FALSE;
 volatile ULONG  _tx_amiga_zombies             = 0UL;
@@ -1511,6 +1515,16 @@ UINT         status;
 
     Permit();
 
+    /* A Task parked waiting for a pool slot is waiting for a kernel that is no
+       longer going to give it one.  Wake it so it re-reads the flag above and
+       unwinds; nothing frees a slot from here on, so nothing else would.  The
+       FINAL pass, which also wakes an entry the ordinary pass retained on a
+       stamp mismatch and then empties the table.  */
+    if (status == TX_SUCCESS)
+    {
+        _tx_amiga_adopt_wake_waiters_final();
+    }
+
     if (status != TX_SUCCESS)
     {
 
@@ -1535,12 +1549,21 @@ UINT         status;
        above this line is allowed to refuse and leave it adopted.  */
     if (adopted != TX_NULL)
     {
-        /* CLEANUP.  Its refusals are TX_CALLER_ERROR for a thread that is not
-           this Task's and TX_PTR_ERROR for a null one, and `adopted\' came out
-           of this Task's own adoption check above, so neither applies.  Past
+        ULONG   adopted_gen;
+
+        /* The handle is read back out of the pool: `adopted' is this Task's own
+           adoption, so nothing else can release the slot under us.
+
+           CLEANUP.  The orphan's refusals are TX_CALLER_ERROR for a thread that
+           is not this Task's and TX_PTR_ERROR for a null one, and `adopted' came
+           out of this Task's own adoption check above, so neither applies.  Past
            this line the kernel is coming down whatever it answers: there is
            nothing left to refuse on behalf of. */
-        AMI_NX_CLEANUP(tx_amiga_orphan_thread(adopted));
+        Forbid();
+        adopted_gen =  tx_amiga_adopt_generation(adopted);
+        Permit();
+
+        AMI_NX_CLEANUP(tx_amiga_orphan_thread(adopted, adopted_gen));
     }
 
     /* ---- 1. the tick ----------------------------------------------------- */

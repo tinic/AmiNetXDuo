@@ -16,6 +16,7 @@ add_library(threadx_port STATIC
     src/tx_thread_interrupt_control.c
     src/tx_timer_interrupt.c
     src/tx_amiga_adopt.c
+    src/tx_amiga_pool.c
     src/tx_amiga_exec_wait.c)
 
 target_include_directories(threadx_port

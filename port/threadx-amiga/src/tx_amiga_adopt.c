@@ -108,21 +108,28 @@ ULONG        count;
 }
 
 
-UINT tx_amiga_adopt_thread(TX_THREAD *thread_ptr, CHAR *name, UINT priority)
+UINT tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
+                           CHAR *name, UINT priority, UINT reserved)
 {
 
-struct Task *me;
-BYTE         sig;
-ULONG        sigmask;
-UINT         status;
-ULONG        stack_size;
-VOID        *stack_start;
+struct _tx_amiga_adopt_slot *slot;
+TX_THREAD                   *thread;
+struct Task                 *me;
+BYTE                         sig;
+ULONG                        sigmask;
+UINT                         status;
+ULONG                        stack_size;
+VOID                        *stack_start;
 
 
-    if (thread_ptr == TX_NULL)
+    if ((thread_ptr == (TX_THREAD **) 0) || (generation == (ULONG *) 0))
     {
         return(TX_PTR_ERROR);
     }
+
+    *thread_ptr =  TX_NULL;
+    *generation =  0UL;
+
     if (priority >= ((UINT) TX_MAX_PRIORITIES))
     {
         return(TX_PRIORITY_ERROR);
@@ -144,6 +151,20 @@ VOID        *stack_start;
     }
     sigmask =  1UL << ((ULONG) sig);
 
+    /* The TX_THREAD is the port's, never the caller's: tx_amiga_pool.c says
+       why.  This waits when every slot is taken, and it waits holding nothing.  */
+    slot =  _tx_amiga_slot_claim_or_park(me, reserved);
+    if (slot == (struct _tx_amiga_adopt_slot *) 0)
+    {
+        FreeSignal(sig);
+
+        /* The wait ends without a slot for one of two reasons: the kernel went
+           away under us, or more Tasks were already waiting than the port
+           tracks.  */
+        return((_tx_amiga_kernel_up == TX_FALSE) ? TX_NOT_DONE : TX_NO_MEMORY);
+    }
+    thread =  &slot -> as_thread;
+
     /* Describe the Task's real stack to ThreadX.  Nothing writes to it:
        TX_DISABLE_STACK_FILLING is set and stack checking is unavailable.  */
     stack_start =  (VOID *) me -> tc_SPLower;
@@ -151,13 +172,25 @@ VOID        *stack_start;
 
     Forbid();
 
+    /* RECHECKED HERE, not only at the claim.  The claim and this create are
+       different Forbid()s, and tx_amiga_kernel_stop() commits in between by
+       clearing _tx_amiga_kernel_up: a create past that point would add a thread
+       to a kernel that has already counted them and started its teardown.  */
+    if ((_tx_amiga_kernel_up == TX_FALSE) || (_tx_amiga_kernel_stopping != TX_FALSE))
+    {
+        _tx_amiga_slot_release_locked(slot);
+        Permit();
+        FreeSignal(sig);
+        return(TX_NOT_DONE);
+    }
+
     /* Interrupt context for the duration of create + auto-start resume.  */
     _tx_thread_system_state++;
 
     _tx_amiga_adopt_task   =  (VOID *) me;
     _tx_amiga_adopt_signal =  sigmask;
 
-    status =  _tx_thread_create(thread_ptr, name, _tx_amiga_adopted_entry, 0UL,
+    status =  _tx_thread_create(thread, name, _tx_amiga_adopted_entry, 0UL,
                                 stack_start, stack_size,
                                 priority, priority,
                                 TX_NO_TIME_SLICE, TX_AUTO_START);
@@ -169,21 +202,30 @@ VOID        *stack_start;
 
     if (status != TX_SUCCESS)
     {
+        _tx_amiga_slot_release_locked(slot);
         Permit();
         FreeSignal(sig);
         return(status);
     }
 
+    *thread_ptr =  thread;
+    *generation =  slot -> as_generation;
+
+    /* Published inside the create's own Forbid: from this instant the slot is
+       accounted for by the TX_THREAD in it, and the claim record that the
+       unpublished sweep looks at goes away.  */
+    _tx_amiga_slot_publish_locked(slot);
+
     /* Fast path: the baton is free and we are the chosen thread, so take it here
        instead of round-tripping through the scheduler task.  */
     if ((_tx_thread_current_ptr == TX_NULL) &&
-        (_tx_thread_execute_ptr == thread_ptr) &&
+        (_tx_thread_execute_ptr == thread) &&
         (_tx_thread_system_state == ((ULONG) 0)))
     {
 
-        _tx_thread_current_ptr =  thread_ptr;
-        thread_ptr -> tx_thread_run_count++;
-        _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
+        ami_baton_note(thread);
+        thread -> tx_thread_run_count++;
+        _tx_timer_time_slice =  thread -> tx_thread_time_slice;
         ami_budget_hold_start();
         Permit();
         return(TX_SUCCESS);
@@ -205,8 +247,13 @@ VOID        *stack_start;
        control block, and an adopted Task never has one -- so this costs a
        compare against a reaper that grows a second path.  The teardown is that
        reaper's, not ours: it owns the TX_THREAD and the handshake signal.  */
-    if (_tx_amiga_thread_park(thread_ptr) == ((UINT) TX_FALSE))
+    if (_tx_amiga_thread_park(thread) == ((UINT) TX_FALSE))
     {
+        Forbid();
+        _tx_amiga_slot_release_locked(slot);
+        Permit();
+        *thread_ptr =  TX_NULL;
+        *generation =  0UL;
         return(TX_NOT_DONE);
     }
 
@@ -217,7 +264,7 @@ VOID        *stack_start;
 /* Release the baton and go dormant, keeping the TX_THREAD.  The baton is dropped
    first, so the suspend has nothing to switch away from, and system_state is raised
    so nothing switches on behalf of a Task that is no longer a thread.  */
-UINT tx_amiga_adopt_suspend(TX_THREAD *thread_ptr)
+UINT tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation)
 {
 
 struct Task *me;
@@ -233,6 +280,13 @@ UINT         wake;
     me =  FindTask((STRPTR) 0);
 
     Forbid();
+
+    /* A handle whose slot has been recycled names somebody else's adoption.  */
+    if (_tx_amiga_slot_held(thread_ptr, generation) == (struct _tx_amiga_adopt_slot *) 0)
+    {
+        Permit();
+        return(TX_THREAD_ERROR);
+    }
 
     if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
         (thread_ptr -> tx_thread_amiga_task != (VOID *) me) ||
@@ -250,7 +304,7 @@ UINT         wake;
         ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
                             (ULONG) thread_ptr -> tx_thread_state,
                             AMI_HOLD_SITE_SUSPEND);
-        _tx_thread_current_ptr =  TX_NULL;
+        ami_baton_note(TX_NULL);
         _tx_timer_time_slice   =  ((ULONG) 0);
     }
 
@@ -287,7 +341,7 @@ UINT         wake;
 
 /* Come back out of dormancy and acquire the baton.  Same fast-path-or-park tail
    as tx_amiga_adopt_thread(); only the registration is skipped.  */
-UINT tx_amiga_adopt_resume(TX_THREAD *thread_ptr)
+UINT tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation)
 {
 
 struct Task *me;
@@ -306,6 +360,12 @@ struct Task *me;
 
     Forbid();
 
+    if (_tx_amiga_slot_held(thread_ptr, generation) == (struct _tx_amiga_adopt_slot *) 0)
+    {
+        Permit();
+        return(TX_THREAD_ERROR);
+    }
+
     if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
         (thread_ptr -> tx_thread_amiga_task != (VOID *) me) ||
         (thread_ptr -> tx_thread_id != TX_THREAD_ID) ||
@@ -316,6 +376,11 @@ struct Task *me;
         Permit();
         return(TX_CALLER_ERROR);
     }
+
+    /* The Task is alive and ours here.  Its stack bounds may have moved since
+       the last entry (StackSwap between calls), and the dead-holder check
+       compares against this.  */
+    thread_ptr -> tx_thread_amiga_task_stamp =  _tx_amiga_task_stamp(me);
 
     _tx_thread_system_state++;
 
@@ -330,7 +395,7 @@ struct Task *me;
         (_tx_thread_system_state == ((ULONG) 0)))
     {
 
-        _tx_thread_current_ptr =  thread_ptr;
+        ami_baton_note(thread_ptr);
         thread_ptr -> tx_thread_run_count++;
         _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
         ami_budget_hold_start();
@@ -356,12 +421,17 @@ struct Task *me;
 
 
 
-UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
+/* Times a discarded holder left _tx_thread_preempt_disable raised.  */
+ULONG _tx_amiga_discard_preempt_resets;
+
+
+UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation)
 {
 
-struct Task *me;
-ULONG        sigmask;
-BYTE         sig;
+struct _tx_amiga_adopt_slot *slot;
+struct Task                 *me;
+ULONG                        sigmask;
+BYTE                         sig;
 
 
     if (thread_ptr == TX_NULL)
@@ -373,22 +443,44 @@ BYTE         sig;
 
     Forbid();
 
-    if ((thread_ptr -> tx_thread_id != TX_THREAD_ID) ||
-        ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U))
+    slot =  _tx_amiga_slot_held(thread_ptr, generation);
+    if (slot == (struct _tx_amiga_adopt_slot *) 0)
     {
+        /* Stale: the slot was recycled after this handle was taken, so the
+           TX_THREAD in it is somebody else's and there is nothing to do.  */
         Permit();
         return(TX_THREAD_ERROR);
     }
 
-    /* Somebody else's Task must not be left as the baton holder.  Should be
-       unreachable, but a stale baton stops the whole stack.  */
+    if ((thread_ptr -> tx_thread_id != TX_THREAD_ID) ||
+        ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U))
+    {
+        /* Already torn down, by the reaper or by an earlier discard.  The slot
+           is still ours by generation, so give it back rather than leak it.  */
+        _tx_amiga_slot_release_locked(slot);
+        Permit();
+        return(TX_SUCCESS);
+    }
+
+    /* The holder itself: ami_netstack_baton_reclaim_dead() discards a Task that
+       was removed while it held the baton.  Take the baton back here, or a stale
+       holder stops the whole stack.  A Task removed mid-service can also leave
+       the core's preemption lockout raised; nobody else is inside the core when
+       a foreign caller finds the holder dead, so the count is that Task's.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
         ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
                             (ULONG) thread_ptr -> tx_thread_state,
                             AMI_HOLD_SITE_DISCARD);
-        _tx_thread_current_ptr =  TX_NULL;
+        ami_baton_note(TX_NULL);
         _tx_timer_time_slice   =  ((ULONG) 0);
+
+        if ((_tx_thread_preempt_disable != ((UINT) 0)) &&
+            (thread_ptr -> tx_thread_amiga_task != (VOID *) me))
+        {
+            _tx_thread_preempt_disable =  ((UINT) 0);
+            _tx_amiga_discard_preempt_resets++;
+        }
     }
 
     _tx_thread_system_state++;
@@ -412,6 +504,11 @@ BYTE         sig;
         thread_ptr -> tx_thread_amiga_run_signal   =  0UL;
     }
 
+    /* AFTER the teardown, never before: until the terminate and the delete have
+       run, this TX_THREAD is still on ThreadX's lists and a fresh adopter given
+       the slot would create over it.  */
+    _tx_amiga_slot_release_locked(slot);
+
     Permit();
 
     if (sigmask != 0UL)
@@ -430,13 +527,14 @@ BYTE         sig;
 }
 
 
-UINT tx_amiga_orphan_thread(TX_THREAD *thread_ptr)
+UINT tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation)
 {
 
-struct Task *me;
-ULONG        sigmask;
-BYTE         sig;
-UINT         wake;
+struct _tx_amiga_adopt_slot *slot;
+struct Task                 *me;
+ULONG                        sigmask;
+BYTE                         sig;
+UINT                         wake;
 
 
     if (thread_ptr == TX_NULL)
@@ -447,6 +545,13 @@ UINT         wake;
     me =  FindTask((STRPTR) 0);
 
     Forbid();
+
+    slot =  _tx_amiga_slot_held(thread_ptr, generation);
+    if (slot == (struct _tx_amiga_adopt_slot *) 0)
+    {
+        Permit();
+        return(TX_THREAD_ERROR);
+    }
 
     if ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U)
     {
@@ -471,6 +576,7 @@ UINT         wake;
         thread_ptr -> tx_thread_amiga_task         =  (VOID *) 0;
         thread_ptr -> tx_thread_amiga_signal_owner =  (VOID *) 0;
         thread_ptr -> tx_thread_amiga_run_signal   =  0UL;
+        _tx_amiga_slot_release_locked(slot);
         Permit();
 
         SetSignal(0UL, sigmask);
@@ -494,7 +600,7 @@ UINT         wake;
         ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
                             (ULONG) thread_ptr -> tx_thread_state,
                             AMI_HOLD_SITE_ORPHAN);
-        _tx_thread_current_ptr =  TX_NULL;
+        ami_baton_note(TX_NULL);
         _tx_timer_time_slice   =  ((ULONG) 0);
     }
 
@@ -511,6 +617,9 @@ UINT         wake;
        stops a second orphan of the same TX_THREAD from freeing it again.  */
     thread_ptr -> tx_thread_amiga_signal_owner =  (VOID *) 0;
     thread_ptr -> tx_thread_amiga_run_signal   =  0UL;
+
+    /* AFTER the teardown; see tx_amiga_discard_thread().  */
+    _tx_amiga_slot_release_locked(slot);
 
     wake =  (_tx_amiga_dispatch_inline() == ((UINT) TX_FALSE)) &&
             (_tx_thread_execute_ptr != TX_NULL)

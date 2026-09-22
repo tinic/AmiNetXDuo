@@ -53,6 +53,68 @@ struct _tx_amiga_ctrl
 };
 
 
+/* THE LIVE BATON HOLDER, as an Exec Task address, or 0 when the baton is free.
+   Written wherever _tx_thread_current_ptr is, which is why every one of those
+   sites goes through ami_baton_note() rather than assigning directly.
+
+   It exists so a harness OUTSIDE this program can see the precondition it has
+   to arm on -- "the victim holds the baton right now" -- and remove the victim
+   inside the same Forbid() that observed it.  Before this, the concurrent
+   reclaim test removed its victim after a loop count and missed the bracket
+   about one run in four.  tests/concurrent reaches it through the health mark's
+   hm_Holder.
+
+   A thread that is current is PUBLISHED by construction: publication happens
+   inside the create's own Forbid(), before the thread can be dispatched or take
+   the baton on the fast path.  So this one word carries both conditions.
+
+   It costs one load and one store per baton handover, on the scheduler path and
+   not on the packet path.  */
+extern VOID *_tx_amiga_baton_holder_task;
+
+
+/* An identity for a Task that survives its address being recycled, never 0.
+   tx_thread_interrupt_control.c owns the Task layout it reads.  */
+ULONG _tx_amiga_task_stamp(struct Task *task);
+
+
+/* Is `task` on one of Exec's scheduler lists, or is it us?  Caller holds
+   Disable(): an interrupt moves a task between TaskWait and TaskReady even
+   while scheduling is forbidden.  NOTHING inside the struct is read, so this is
+   the one question that may be asked about a Task that may already be freed.
+   tx_thread_interrupt_control.c.  */
+UINT tx_amiga_task_alive_locked(struct Task *task);
+
+
+/* ---------------------------------------------- the adoption slot pool ---
+   tx_amiga_pool.c.  The port owns the TX_THREAD of every adopted Exec Task;
+   that file's head says why, and the public handle calls are in tx_amiga.h.  */
+
+struct _tx_amiga_adopt_slot
+{
+    TX_THREAD       as_thread;          /* MUST BE FIRST: a TX_THREAD * IS a slot */
+    ULONG           as_generation;      /* 0 while free, never reused while busy  */
+    UINT            as_busy;
+    /* Who took the slot, and whether the TX_THREAD in it exists yet.  A claim
+       and the _tx_thread_create() that fills it are not one atom: the claimer
+       has to leave Forbid() in between.  A Task removed in that window would
+       leak a busy slot for ever, so the claimer is recorded here and the tick's
+       sweep gives the slot back.  Cleared the moment the slot is published.  */
+    struct Task    *as_claimer;
+    UINT            as_published;
+};
+
+/* Claim: Forbid() held, 0 when the pool is full.  Park: Forbid() NOT held, it
+   waits, and 0 means the waiter table was full or the kernel went away.  */
+struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_locked(UINT reserved);
+struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT reserved);
+
+/* The slot behind a handle that still names this adoption, or 0.  Forbid()
+   held.  _tx_amiga_slot_release_locked() and the waiter wakes are declared in
+   tx_port.h, with the port's other VOID helpers.  */
+struct _tx_amiga_adopt_slot *_tx_amiga_slot_held(TX_THREAD *thread_ptr, ULONG generation);
+
+
 /* Create an Exec Task on a caller-supplied stack.  The MemList is a SEPARATE
    allocation: RemTask() hands it to FreeEntry(), which frees both the entries it
    describes and the MemList itself.  The stack is not owned by the task.  */
@@ -77,6 +139,18 @@ struct _tx_amiga_ctrl   *ctrl;
     }
     return((struct _tx_amiga_ctrl *) 0);
 }
+
+/* The ONE writer of _tx_thread_current_ptr in this port.  Every baton handover
+   goes through it so the mirror above cannot drift from the pointer it
+   mirrors.  Caller holds the core lock, as it did for the bare assignment.  */
+static __inline VOID ami_baton_note(TX_THREAD *thread_ptr)
+{
+    _tx_thread_current_ptr      =  thread_ptr;
+    _tx_amiga_baton_holder_task =  (thread_ptr != TX_NULL)
+                                   ? thread_ptr -> tx_thread_amiga_task
+                                   : (VOID *) 0;
+}
+
 
 /* Signal helper that tolerates a NULL task pointer.  */
 static __inline VOID _tx_amiga_signal(APTR task, ULONG sigmask)
@@ -118,7 +192,7 @@ TX_THREAD   *thread_ptr;
     }
 
 
-    _tx_thread_current_ptr =  thread_ptr;
+    ami_baton_note(thread_ptr);
     thread_ptr -> tx_thread_run_count++;
     _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
 

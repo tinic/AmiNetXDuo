@@ -143,7 +143,7 @@ enum
     V_SLEEP_STATUS,         /* unexpected status from tx_thread_sleep()       */
     V_TICK_BACK,            /* tx_time_get() went backwards                   */
     V_PRIO_INHERIT,         /* holder not boosted above a waiting thread      */
-    V_ADOPT,                /* tx_amiga_adopt_thread() failed                 */
+    V_ADOPT,                /* tx_amiga_adopt_thread(, (UINT)TX_FALSE) failed                 */
     V_ORPHAN,               /* tx_amiga_orphan_thread() failed                */
     V_ADOPTED_LOOKUP,       /* tx_amiga_adopted_thread() disagrees            */
     V_BATON_AFTER_ORPHAN,   /* orphaned thread still holds the baton          */
@@ -165,7 +165,7 @@ static const char *const s_viol_name[V_COUNT] =
     "sleep: no unexpected service status",
     "tick: never went backwards",
     "priority: holder always outranked its waiters (inheritance)",
-    "adopt: tx_amiga_adopt_thread() never failed",
+    "adopt: tx_amiga_adopt_thread(, (UINT)TX_FALSE) never failed",
     "orphan: tx_amiga_orphan_thread() never failed",
     "adopt: tx_amiga_adopted_thread() always agreed",
     "orphan: baton never left with an orphaned thread",
@@ -341,7 +341,12 @@ struct Process  *proc;
 
 struct s_worker
 {
-    TX_THREAD       thread;
+    /* Adopted workers get a pool slot; S_KIND_TX workers are created into
+       s_created below and point at it, so the rest of the file has one
+       spelling for "this worker's TX_THREAD". */
+    TX_THREAD      *thread;
+    ULONG           generation;
+    TX_THREAD       s_created;
     const char     *name;
     ULONG           index;
     UINT            kind;
@@ -363,7 +368,8 @@ struct s_worker
 
 struct s_churner
 {
-    TX_THREAD       thread;
+    TX_THREAD      *thread;         /* a slot of the port's adoption pool     */
+    ULONG           generation;
     const char     *name;
     ULONG           index;
     UINT            priority;
@@ -407,7 +413,8 @@ static TX_SEMAPHORE         s_never;         /* nobody ever puts this          *
 static TX_SEMAPHORE         s_probe_sem;
 static TX_EVENT_FLAGS_GROUP s_flags;
 
-static TX_THREAD            s_main_thread;   /* main(), adopted                */
+static TX_THREAD           *s_main_thread;   /* a slot of the port's adoption pool */
+static ULONG            s_main_thread_gen;   /* main(), adopted                */
 static TX_THREAD            s_probe_thread;
 static TX_THREAD            s_pt_thread;
 static TX_THREAD            s_pt_victim;
@@ -675,7 +682,7 @@ UINT    status;
     s_abort_done    =  1UL;
     Permit();
 
-    if (tx_thread_identify() != &w -> thread)
+    if (tx_thread_identify() != w -> thread)
     {
         s_viol_hit(V_IDENTITY);
     }
@@ -702,7 +709,7 @@ ULONG       actual;
         }
 
         me =  tx_thread_identify();
-        if (me != &w -> thread)
+        if (me != w -> thread)
         {
             s_viol_hit(V_IDENTITY);
         }
@@ -711,7 +718,7 @@ ULONG       actual;
             s_viol_hit(V_IDENTITY_TASK);
         }
 
-        if (S_CURRENT != &w -> thread)
+        if (S_CURRENT != w -> thread)
         {
             s_viol_hit(V_CURRENT);
         }
@@ -726,7 +733,7 @@ ULONG       actual;
         status =  tx_mutex_get(&s_mutex, S_MUTEX_WAIT);
         if (status == TX_SUCCESS)
         {
-            s_critical_section(&w -> thread, w -> iters, w -> hold_over_sleep,
+            s_critical_section(w -> thread, w -> iters, w -> hold_over_sleep,
                                &w -> inherit_seen);
             if (tx_mutex_put(&s_mutex) != TX_SUCCESS)
             {
@@ -774,7 +781,7 @@ UINT    status;
 ULONG   live;
 
 
-    status =  tx_amiga_adopt_thread(&w -> thread, (CHAR *) w -> name, w -> priority);
+    status =  tx_amiga_adopt_thread(&w -> thread, &w -> generation, (CHAR *) w -> name, w -> priority, (UINT)TX_FALSE);
     if (status != TX_SUCCESS)
     {
         s_viol_hit(V_ADOPT);
@@ -794,19 +801,19 @@ ULONG   live;
     w -> started =  1UL;
     Permit();
 
-    if (tx_amiga_adopted_thread() != &w -> thread)
+    if (tx_amiga_adopted_thread() != w -> thread)
     {
         s_viol_hit(V_ADOPTED_LOOKUP);
     }
 
     s_worker_body(w);
 
-    status =  tx_amiga_orphan_thread(&w -> thread);
+    status =  tx_amiga_orphan_thread(w -> thread, w -> generation);
     if (status != TX_SUCCESS)
     {
         s_viol_hit(V_ORPHAN);
     }
-    if (S_CURRENT == &w -> thread)
+    if (S_CURRENT == w -> thread)
     {
         s_viol_hit(V_BATON_AFTER_ORPHAN);
     }
@@ -920,7 +927,7 @@ ULONG   us;
         Permit();
 
         t0 =  s_eclock();
-        status =  tx_amiga_adopt_thread(&c -> thread, (CHAR *) c -> name, c -> priority);
+        status =  tx_amiga_adopt_thread(&c -> thread, &c -> generation, (CHAR *) c -> name, c -> priority, (UINT)TX_FALSE);
         us =  s_us(s_eclock() - t0);
 
         if (status != TX_SUCCESS)
@@ -951,37 +958,37 @@ ULONG   us;
         }
         Permit();
 
-        if (tx_thread_identify() != &c -> thread)
+        if (tx_thread_identify() != c -> thread)
         {
             s_viol_hit(V_IDENTITY);
         }
-        if (tx_amiga_adopted_thread() != &c -> thread)
+        if (tx_amiga_adopted_thread() != c -> thread)
         {
             s_viol_hit(V_ADOPTED_LOOKUP);
         }
-        if (S_CURRENT != &c -> thread)
+        if (S_CURRENT != c -> thread)
         {
             s_viol_hit(V_CURRENT);
         }
-        if (c -> thread.tx_thread_amiga_task != (VOID *) FindTask((STRPTR) 0))
+        if (c -> thread -> tx_thread_amiga_task != (VOID *) FindTask((STRPTR) 0))
         {
             s_viol_hit(V_IDENTITY_TASK);
         }
 
         if (tx_mutex_get(&s_mutex, S_MUTEX_WAIT) == TX_SUCCESS)
         {
-            s_critical_section(&c -> thread, c -> cycles, 0U, &c -> inherit_seen);
+            s_critical_section(c -> thread, c -> cycles, 0U, &c -> inherit_seen);
             (VOID) tx_mutex_put(&s_mutex);
         }
 
         (VOID) tx_thread_sleep(1UL);
 
-        status =  tx_amiga_orphan_thread(&c -> thread);
+        status =  tx_amiga_orphan_thread(c -> thread, c -> generation);
         if (status != TX_SUCCESS)
         {
             s_viol_hit(V_ORPHAN);
         }
-        if (S_CURRENT == &c -> thread)
+        if (S_CURRENT == c -> thread)
         {
             s_viol_hit(V_BATON_AFTER_ORPHAN);
         }
@@ -1331,7 +1338,8 @@ ULONG   i;
             continue;
         }
 
-        status =  tx_thread_create(&s_worker[i].thread, (CHAR *) s_worker_cfg[i].name,
+        s_worker[i].thread =  &s_worker[i].s_created;
+        status =  tx_thread_create(s_worker[i].thread, (CHAR *) s_worker_cfg[i].name,
                                    s_worker_tx_entry, i,
                                    (VOID *) s_worker_stack[i], S_WORKER_STACK,
                                    s_worker_cfg[i].priority, s_worker_cfg[i].priority,
@@ -1374,7 +1382,7 @@ ULONG            i;
     if (!S_CHECK(s_abort_ready != 0UL, "wait-abort: victim reached the suspension", i))
     {
         S_ERR("wait-abort: victim %s iters %ld state %ld; branch taken %ld times, status %ld, done %ld",
-              w -> name, w -> iters, (ULONG) w -> thread.tx_thread_state,
+              w -> name, w -> iters, (ULONG) w -> thread -> tx_thread_state,
               s_abort_seen, (ULONG) s_abort_status, s_abort_done);
         return;
     }
@@ -1384,7 +1392,7 @@ ULONG            i;
     state =  0U;
     for (i = 0UL; i < 200UL; i++)
     {
-        if (tx_thread_info_get(&w -> thread, &name, &state, &runs, &pri, &thr,
+        if (tx_thread_info_get(w -> thread, &name, &state, &runs, &pri, &thr,
                                &slice, &nt, &ns) != TX_SUCCESS)
         {
             break;
@@ -1398,7 +1406,7 @@ ULONG            i;
     (VOID) S_CHECK(state == TX_SEMAPHORE_SUSP,
                    "wait-abort: adopted thread suspended inside ThreadX", state);
 
-    status =  tx_thread_wait_abort(&w -> thread);
+    status =  tx_thread_wait_abort(w -> thread);
     (VOID) S_TX_OK(status, "wait-abort: tx_thread_wait_abort accepted");
 
     for (i = 0UL; (i < 200UL) && (s_abort_done == 0UL); i++)
@@ -1425,7 +1433,7 @@ ULONG            i;
 
     S_LOG("phase: suspend/resume on adopted %s", w -> name);
 
-    status =  tx_thread_suspend(&w -> thread);
+    status =  tx_thread_suspend(w -> thread);
     (VOID) S_TX_OK(status, "suspend: tx_thread_suspend on an adopted thread");
 
     (VOID) tx_thread_sleep(S_TPS * 5UL);
@@ -1436,7 +1444,7 @@ ULONG            i;
 
     (VOID) S_CHECK(a == b, "suspend: the suspended adopted thread made no progress", b - a);
 
-    status =  tx_thread_resume(&w -> thread);
+    status =  tx_thread_resume(w -> thread);
     (VOID) S_TX_OK(status, "suspend: tx_thread_resume on an adopted thread");
 
     for (i = 0UL; (i < 250UL) && (w -> iters <= b); i++)      /* up to 10 s */
@@ -1766,7 +1774,7 @@ struct EClockVal ev;
         }
     }
 
-    status =  tx_amiga_adopt_thread(&s_main_thread, "soak coordinator", 9U);
+    status =  tx_amiga_adopt_thread(&s_main_thread, &s_main_thread_gen, "soak coordinator", 9U, (UINT)TX_FALSE);
     if (!S_TX_OK(status, "main: adopted this AmigaDOS Process"))
     {
         return(20);
@@ -1778,9 +1786,9 @@ struct EClockVal ev;
     s_adopted_peak =  s_adopted_live;
     Permit();
 
-    (VOID) S_CHECK(tx_thread_identify() == &s_main_thread,
+    (VOID) S_CHECK(tx_thread_identify() == s_main_thread,
                    "main: tx_thread_identify() is us", 0);
-    (VOID) S_CHECK(S_CURRENT == &s_main_thread,
+    (VOID) S_CHECK(S_CURRENT == s_main_thread,
                    "main: we hold the baton after adoption", (ULONG) S_CURRENT);
 
     Forbid();
@@ -1819,11 +1827,11 @@ struct EClockVal ev;
             }
 
 
-            if (tx_thread_identify() != &s_main_thread)
+            if (tx_thread_identify() != s_main_thread)
             {
                 s_viol_hit(V_IDENTITY);
             }
-            if (S_CURRENT != &s_main_thread)
+            if (S_CURRENT != s_main_thread)
             {
                 s_viol_hit(V_CURRENT);
             }
@@ -1870,7 +1878,7 @@ struct EClockVal ev;
             {
                 S_ERR("teardown: %s did not finish (iters %ld)",
                       s_worker[i].name, s_worker[i].iters);
-                (VOID) tx_thread_wait_abort(&s_worker[i].thread);
+                (VOID) tx_thread_wait_abort(s_worker[i].thread);
             }
         }
         for (i = 0UL; i < (ULONG) S_CHURNERS; i++)
@@ -1990,8 +1998,8 @@ struct EClockVal ev;
         victims[0] =  &s_probe_thread;
         victims[1] =  &s_pt_thread;
         victims[2] =  &s_pt_victim;
-        victims[3] =  &s_worker[4].thread;
-        victims[4] =  &s_worker[5].thread;
+        victims[3] =  s_worker[4].thread;
+        victims[4] =  s_worker[5].thread;
 
         for (v = 0UL; v < 5UL; v++)
         {
@@ -2002,7 +2010,7 @@ struct EClockVal ev;
     }
 #endif
 
-    status =  tx_amiga_orphan_thread(&s_main_thread);
+    status =  tx_amiga_orphan_thread(s_main_thread, s_main_thread_gen);
     (VOID) S_TX_OK(status, "main: orphaned this Process");
     (VOID) S_CHECK(tx_amiga_adopted_thread() == TX_NULL,
                    "main: no longer a ThreadX thread", 0);

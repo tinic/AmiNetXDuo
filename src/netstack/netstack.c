@@ -65,6 +65,14 @@ AmiNetStack *ami_netstack_raw(VOID)
 static VOID ami_ns_second_expired(ULONG id)
 {
     (VOID)id;
+    /* First, and lock-free: the sweep behind ami_second_notify() needs
+       sb_Lock, which a caller stalled behind a dead holder may be holding. */
+    (VOID)ami_netstack_baton_reclaim_dead();
+
+    /* The other half: a Task removed between taking an adoption slot and
+       creating the TX_THREAD in it leaves a busy slot with no thread, so the
+       reclaim above has nothing to ask about. */
+    tx_amiga_adopt_sweep_unpublished();
     ami_second_notify();
 }
 

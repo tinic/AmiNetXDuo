@@ -134,7 +134,8 @@ static NX_UDP_SOCKET    t_client_udp;
 static NX_UDP_SOCKET    t_server_udp;
 
 static TX_THREAD        t_server_thread;
-static TX_THREAD        t_main_thread;
+static TX_THREAD       *t_main_thread;   /* a slot of the port's adoption pool */
+static ULONG        t_main_thread_gen;
 static TX_SEMAPHORE     t_server_done;
 static TX_SEMAPHORE     t_server_ready;
 
@@ -698,7 +699,7 @@ UINT    status;
     }
     t_log("kernel: scheduler running");
 
-    status =  tx_amiga_adopt_thread(&t_main_thread, "ipv6 client", 16);
+    status =  tx_amiga_adopt_thread(&t_main_thread, &t_main_thread_gen, "ipv6 client", 16, (UINT)TX_FALSE);
     if (!T_TX_OK(status, "main: adopted this Exec Task"))
     {
         t_flush();
@@ -711,7 +712,7 @@ UINT    status;
        ThreadX thread to run on. */
     t_shutdown();
 
-    status =  tx_amiga_orphan_thread(&t_main_thread);
+    status =  tx_amiga_orphan_thread(t_main_thread, t_main_thread_gen);
     (VOID)T_TX_OK(status, "main: orphaned this Exec Task");
 
     status =  tx_amiga_kernel_stop();

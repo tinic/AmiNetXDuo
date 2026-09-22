@@ -834,7 +834,8 @@ VOID       bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms);
  * base. bsd_handoff_flush() runs from bsd_lib_close() when the last opener
  * goes, because nothing can obtain a parked socket after that. */
 VOID  bsd_handoff_init(struct AmiSocketBase *master);
-VOID  bsd_handoff_flush(struct AmiSocketBase *base);
+BOOL  bsd_handoff_pending(struct AmiSocketBase *master);
+VOID  bsd_handoff_flush(struct AmiSocketBase *base, BOOL bracketed);
 
 /* socket.c, sockaddr helpers.
  */
