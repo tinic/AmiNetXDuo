@@ -490,6 +490,12 @@ static ULONG zz_copy_payload_sum(UBYTE *dst, const volatile UBYTE *src,
    last byte comes out of a word: the far side takes no byte access. */
 static VOID zz_copy_payload(UBYTE *dst, const volatile UBYTE *src, UWORD len)
 {
+    /* The peel below is right only while the payload sits 2 mod 4 in the
+       slot; a wider slot header would put the bulk back out of phase
+       without any test noticing. */
+    _Static_assert((ZZ_RX_PAD + NETDEV_HDR_LEN) % 4 == 2,
+                   "ZZ9000 payload must begin 2 mod 4 in the receive slot");
+
     UWORD done = 0;
 
     if (len >= 2)
