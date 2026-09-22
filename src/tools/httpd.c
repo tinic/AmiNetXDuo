@@ -16,6 +16,7 @@
 #include "httpvol.h"
 #include "httprequest.h"
 #include "httphead.h"
+#include "httpstatus.h"
 #include "httpxml.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
@@ -502,43 +503,6 @@ static VOID httpd_trace_head(const HttpConn *c, const UBYTE *head, ULONG len)
 
 /* ------------------------------------------------------------- responding --- */
 
-static const char *httpd_reason(ULONG status)
-{
-    switch (status)
-    {
-        case 100: return "Continue";
-        /* The upgrade writes its own status line, so this is for the log. */
-        case 101: return "Switching Protocols";
-        case 200: return "OK";
-        case 201: return "Created";
-        case 204: return "No Content";
-        case 206: return "Partial Content";
-        case 207: return "Multi-Status";
-        case 301: return "Moved Permanently";
-        case 400: return "Bad Request";
-        case 403: return "Forbidden";
-        case 404: return "Not Found";
-        case 405: return "Method Not Allowed";
-        case 408: return "Request Timeout";
-        case 409: return "Conflict";
-        case 411: return "Length Required";
-        case 412: return "Precondition Failed";
-        case 413: return "Payload Too Large";
-        case 414: return "URI Too Long";
-        case 415: return "Unsupported Media Type";
-        case 416: return "Range Not Satisfiable";
-        case 417: return "Expectation Failed";
-        case 423: return "Locked";
-        case 424: return "Failed Dependency";
-        case 431: return "Request Header Fields Too Large";
-        case 500: return "Internal Server Error";
-        case 501: return "Not Implemented";
-        case 503: return "Service Unavailable";
-        case 507: return "Insufficient Storage";
-        default:  return "Unknown";
-    }
-}
-
 static VOID httpd_out(HttpConn *c, const char *text)
 {
     ULONG used = c->out_len;
@@ -585,7 +549,7 @@ static VOID httpd_begin(HttpConn *c, ULONG status)
     httpd_out(c, "HTTP/1.1 ");
     httpd_out_num(c, status);
     httpd_out(c, " ");
-    httpd_out(c, httpd_reason(status));
+    httpd_out(c, http_status_reason(status));
     httpd_out(c, "\r\nDate: ");
     httpd_out(c, date);
     httpd_out(c, "\r\nServer: AmiNetXDuo-httpd/" AMINETXDUO_VERSION "\r\n");
@@ -699,7 +663,7 @@ static VOID httpd_error(HttpConn *c, ULONG status, const char *detail)
     ok = ok && hs_append_num(httpd_page, sizeof(httpd_page), &used, status);
     ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, " ");
     ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
-                         httpd_reason(status));
+                         http_status_reason(status));
     ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used, "</h1><p>");
     ok = ok && hs_append(httpd_page, sizeof(httpd_page), &used,
                          (detail != NULL) ? detail : "");
@@ -989,7 +953,7 @@ static VOID httpd_walk_failed(HttpConn *c, const char *path, ULONG status)
     ok = ok && hs_append_num(c->fail_xml, sizeof(c->fail_xml), &used, status);
     ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used, " ");
     ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
-                         httpd_reason(status));
+                         http_status_reason(status));
     ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
                          "</D:status></D:response>\n");
 
@@ -4130,7 +4094,7 @@ static VOID httpd_log_status(HttpConn *c)
 {
     if (httpd_verbose || httpd_trace)
         httpd_log(c, "> %lu %s", (LONG)c->status,
-                  (LONG)httpd_reason(c->status));
+                  (LONG)http_status_reason(c->status));
 }
 
 /* The state a condition in an If: is asking about.  `tag` is a Resource-Tag out

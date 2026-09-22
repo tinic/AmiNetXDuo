@@ -293,7 +293,9 @@ host_test_targets() { # builddir
 #      422 with test_netdev_genet_ring, test_netdev_genet_phy and
 #      test_netdev_genet_words: the ring sums, the PHY decisions and the
 #      register words, split out of genet.c
-HOST_TESTS_EXPECTED=422
+#      423 with test_httpstatus: the status-code to reason-phrase table,
+#      split out of httpd.c on the same rule
+HOST_TESTS_EXPECTED=423
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
