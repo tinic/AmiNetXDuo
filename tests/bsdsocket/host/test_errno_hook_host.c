@@ -54,6 +54,7 @@ struct ExecBase *SysBase;
 static struct Task          h_task;
 static struct AmiSocketBase h_base;
 static struct Hook          h_hook;
+static struct Hook          h_hook2;       /* the replacement, case 11 */
 static LONG                 h_mirror;      /* SBTC_ERRNOLONGPTR */
 
 #define H_LOG   16
@@ -80,6 +81,13 @@ static struct
     HCall   calls[H_LOG];
     ULONG   ncalls;
 
+    /* t_uninstall_during_flush() and t_replace_during_flush(): what the
+       hook does to sb_ErrorHook on its errno call. */
+    BOOL    uninstall;
+    struct Hook *replace_with;
+    ULONG   second_calls;       /* calls that reached h_hook2_fn        */
+    ULONG   poisoned_calls;     /* calls that reached the poisoned entry */
+
     /* The re-entering hook, t_reentry(). */
     BOOL    reenter;
     LONG    reenter_status;     /* SocketBaseTagList() result inside   */
@@ -92,6 +100,7 @@ static VOID h_reset(VOID)
     memset(&h, 0, sizeof(h));
     memset(&h_base, 0, sizeof(h_base));
     memset(&h_hook, 0, sizeof(h_hook));
+    memset(&h_hook2, 0, sizeof(h_hook2));
     h_mirror = 0;
 
     h_base.sb_Task      = &h_task;
@@ -217,6 +226,15 @@ static LONG t_vector_fail(struct AmiSocketBase *base, LONG code)
 
 /* ------------------------------------------------------------ the hook -- */
 
+typedef union HostHookEntry
+{
+    ULONG (*raw)(VOID);
+    LONG  (*fn)(struct Hook *hook, APTR reserved, struct ErrorHookMsg *ehm);
+} HostHookEntry;
+
+static LONG h_poison_fn(struct Hook *hook, APTR reserved,
+                        struct ErrorHookMsg *ehm);
+
 static LONG h_hook_fn(struct Hook *hook, APTR reserved,
                       struct ErrorHookMsg *ehm)
 {
@@ -237,6 +255,25 @@ static LONG h_hook_fn(struct Hook *hook, APTR reserved,
         c->mirror_seen = h_mirror;
     }
     h.ncalls++;
+
+    /* t_uninstall_during_flush() / t_replace_during_flush(): the hook takes
+       itself out, or puts another in, on the errno call.  Through the base
+       field: SocketBaseTagList(SBTM_SETVAL(SBTC_ERROR_HOOK)) stores the
+       pointer through a ULONG slot and cannot carry one on this host (see
+       the header).  The store the tag makes is this one. */
+    if ((h.uninstall || h.replace_with != NULL) &&
+        ehm->ehm_Action == EHMA_Set_errno)
+    {
+        HostHookEntry poison;
+
+        h_base.sb_ErrorHook = h.replace_with;   /* NULL for the uninstall */
+        h.uninstall         = FALSE;
+        h.replace_with      = NULL;
+
+        /* The freed Hook, reused: a stale call lands in h_poison_fn. */
+        poison.fn     = h_poison_fn;
+        hook->h_Entry = poison.raw;
+    }
 
     /* t_reentry(): the hook itself is a bsdsocket caller.  Once only, or the
        inner vector's own errno would bring it straight back here. */
@@ -259,11 +296,40 @@ static LONG h_hook_fn(struct Hook *hook, APTR reserved,
     return 0;
 }
 
-typedef union HostHookEntry
+/* The replacement hook: counts, and logs like the first. */
+static LONG h_hook2_fn(struct Hook *hook, APTR reserved,
+                       struct ErrorHookMsg *ehm)
 {
-    ULONG (*raw)(VOID);
-    LONG  (*fn)(struct Hook *hook, APTR reserved, struct ErrorHookMsg *ehm);
-} HostHookEntry;
+    (VOID)hook;
+    (VOID)reserved;
+
+    h.second_calls++;
+    if (h.ncalls < H_LOG)
+    {
+        h.calls[h.ncalls].action     = ehm->ehm_Action;
+        h.calls[h.ncalls].code       = ehm->ehm_Code;
+        h.calls[h.ncalls].size       = ehm->ehm_Size;
+        h.calls[h.ncalls].baton_held = h.baton_held;
+        h.calls[h.ncalls].nest       = h_base.sb_NxNest;
+    }
+    h.ncalls++;
+
+    return 0;
+}
+
+/* What a freed struct Hook's h_Entry is made to point at: a call through a
+   stale pointer lands here and is counted rather than crashing. */
+static LONG h_poison_fn(struct Hook *hook, APTR reserved,
+                        struct ErrorHookMsg *ehm)
+{
+    (VOID)hook;
+    (VOID)reserved;
+    (VOID)ehm;
+
+    h.poisoned_calls++;
+
+    return 0;
+}
 
 static VOID h_install(VOID)
 {
@@ -575,6 +641,81 @@ static VOID t_task_not_named(VOID)
     CHECK(h_base.sb_NxCaller.nc_Task == NULL, "nc_Task was never written");
 }
 
+/*
+ * (10) A hook that uninstalls itself on the errno call, with h_errno still to
+ * deliver.  The flush must not call through the pointer it read before the
+ * first call: the caller may have freed that struct Hook by then.  The hook
+ * poisons its own h_Entry as it uninstalls -- what a freed and reused Hook
+ * would look like -- so a call through the stale pointer is counted.
+ */
+static VOID t_uninstall_during_flush(VOID)
+{
+    printf("errno hook: the hook uninstalls itself mid-flush\n");
+
+    h_reset();
+    h_install();
+    h.ncalls    = 0;
+    h.uninstall = TRUE;
+
+    CHECK(bsd_nx_enter(&h_base) == 0, "entered");
+    (VOID)bsd_fail(&h_base, AMI_ETIMEDOUT);
+    bsd_set_herrno(&h_base, HOST_NOT_FOUND);
+    CHECK(h_base.sb_ErrPending == 0x03, "both pending");
+
+    bsd_nx_leave(&h_base);
+
+    CHECK(h.ncalls == 1, "one call reached the hook");
+    CHECK(h_call_is(0, EHMA_Set_errno, AMI_ETIMEDOUT), "the errno call");
+    CHECK(h_base.sb_ErrorHook == NULL, "which uninstalled the hook");
+    CHECK(h.poisoned_calls == 0, "the h_errno call did not go through the "
+          "old pointer");
+    CHECK(h_base.sb_ErrPending == 0, "nothing is left pending");
+    CHECK(h_base.sb_HErrno == HOST_NOT_FOUND, "h_errno itself was set");
+
+    /* And the base is quiet afterwards: no hook, no calls. */
+    (VOID)bsd_fail(&h_base, AMI_EBADF);
+    CHECK(h.ncalls == 1 && h.poisoned_calls == 0, "and stays uninstalled");
+}
+
+/*
+ * (11) A hook that replaces itself on the errno call: the h_errno call goes
+ * to the new hook, not the old.
+ */
+static VOID t_replace_during_flush(VOID)
+{
+    HostHookEntry e;
+
+    printf("errno hook: the hook replaces itself mid-flush\n");
+
+    h_reset();
+    h_install();
+    h.ncalls = 0;
+
+    e.fn = h_hook2_fn;
+    h_hook2.h_Entry = e.raw;
+    h.replace_with  = &h_hook2;
+
+    CHECK(bsd_nx_enter(&h_base) == 0, "entered");
+    (VOID)bsd_fail(&h_base, AMI_ECONNREFUSED);
+    bsd_set_herrno(&h_base, TRY_AGAIN);
+
+    bsd_nx_leave(&h_base);
+
+    CHECK(h.ncalls == 2, "two calls in all");
+    CHECK(h_call_is(0, EHMA_Set_errno, AMI_ECONNREFUSED),
+          "the errno call went to the first hook");
+    CHECK(h.second_calls == 1 && h_call_is(1, EHMA_Set_h_errno, TRY_AGAIN),
+          "the h_errno call went to its replacement");
+    CHECK(h.poisoned_calls == 0, "and not through the old pointer");
+    CHECK(h_base.sb_ErrorHook == &h_hook2, "which stays installed");
+
+    /* The old hook's entry was poisoned as it was replaced; a later change
+       reaches only the new one. */
+    (VOID)bsd_fail(&h_base, AMI_EBADF);
+    CHECK(h.second_calls == 2 && h.poisoned_calls == 0,
+          "a later change reaches the new hook only");
+}
+
 int main(void)
 {
 #if AMINETXDUO_NXCACHE
@@ -592,6 +733,8 @@ int main(void)
     t_release_drops();
     t_no_hook();
     t_task_not_named();
+    t_uninstall_during_flush();
+    t_replace_during_flush();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

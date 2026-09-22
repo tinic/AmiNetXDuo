@@ -49,10 +49,18 @@ typedef union BsdErrorHookEntry
 #define BSD_ERRPEND_ERRNO   0x01
 #define BSD_ERRPEND_HERRNO  0x02
 
-static VOID bsd_error_hook_call(struct Hook *hook, ULONG action, LONG code)
+/* One call, through the hook installed at this moment.  Read off the base
+   here and not by the caller: the previous call may have uninstalled or
+   replaced the hook through SocketBaseTagList(), and freed the old one. */
+static VOID bsd_error_hook_call(struct AmiSocketBase *base, ULONG action,
+                                LONG code)
 {
+    struct Hook        *hook = base->sb_ErrorHook;
     struct ErrorHookMsg ehm;
     BsdErrorHookEntry   entry;
+
+    if (hook == NULL || hook->h_Entry == NULL)
+        return;
 
     ehm.ehm_Size   = (ULONG)sizeof(ehm);
     ehm.ehm_Action = action;
@@ -86,27 +94,23 @@ static VOID bsd_error_hook(struct AmiSocketBase *base, ULONG action, LONG code)
         return;
     }
 
-    bsd_error_hook_call(hook, action, code);
+    bsd_error_hook_call(base, action, code);
 }
 
 VOID bsd_error_hook_flush(struct AmiSocketBase *base)
 {
-    struct Hook *hook    = base->sb_ErrorHook;
-    UBYTE        pending = base->sb_ErrPending;
-    LONG         code    = base->sb_ErrPendingCode;
-    LONG         hcode   = base->sb_HErrPendingCode;
+    UBYTE pending = base->sb_ErrPending;
+    LONG  code    = base->sb_ErrPendingCode;
+    LONG  hcode   = base->sb_HErrPendingCode;
 
     /* Cleared before the calls: a hook that re-enters a vector must not see
        its own pending state. */
     base->sb_ErrPending = 0;
 
-    if (pending == 0 || hook == NULL || hook->h_Entry == NULL)
-        return;
-
     if (pending & BSD_ERRPEND_ERRNO)
-        bsd_error_hook_call(hook, EHMA_Set_errno, code);
+        bsd_error_hook_call(base, EHMA_Set_errno, code);
     if (pending & BSD_ERRPEND_HERRNO)
-        bsd_error_hook_call(hook, EHMA_Set_h_errno, hcode);
+        bsd_error_hook_call(base, EHMA_Set_h_errno, hcode);
 }
 
 VOID bsd_set_errno(struct AmiSocketBase *base, LONG code)
