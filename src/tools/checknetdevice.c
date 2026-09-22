@@ -327,14 +327,15 @@ static VOID cnd_step(const AnxDiagStep *st)
         {
             static const char *const how[] =
             {
-                "coherent as found, nothing done",
+                "not used (CPU is not a 68030 or no coherence "
+                "probe is available)",
                 "TT0 marks the board's block cache-inhibited",
                 "TT1 marks the board's block cache-inhibited",
                 "the data cache is OFF while the driver holds the board",
                 "NOTHING made it coherent; attach will say what it saw"
             };
 
-            say("  Zorro III board on a 68030, data cache: %s.\n",
+            say("  Zorro III cache guard: %s.\n",
                 (LONG)((v < 5UL) ? how[v] : "?"));
         }
         return;
