@@ -295,7 +295,9 @@ host_test_targets() { # builddir
 #      register words, split out of genet.c
 #      423 with test_httpstatus: the status-code to reason-phrase table,
 #      split out of httpd.c on the same rule
-HOST_TESTS_EXPECTED=423
+#      424 with test_httpiperf: the /iperf URI decode (directions, seconds,
+#      dotted peer), split out of httpd.c on the same rule
+HOST_TESTS_EXPECTED=424
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

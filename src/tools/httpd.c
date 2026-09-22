@@ -17,6 +17,7 @@
 #include "httprequest.h"
 #include "httphead.h"
 #include "httpstatus.h"
+#include "httpiperf.h"
 #include "httpxml.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
@@ -4311,17 +4312,13 @@ static VOID httpd_iperf_answer(HttpConn *c, const IperfResult *res)
    the connection over. */
 static BOOL httpd_iperf_hook(HttpConn *c)
 {
-    const char *u = c->path.url;
-    const char *dir;
-    const char *secs;
-    const char *host;
-    ULONG       dirlen;
-    ULONG       secslen;
-    LONG        n;
-    IperfPlan   plan;
-    const char *why;
+    const char     *u = c->path.url;
+    HttpiperfParsed ip;
+    IperfPlan       plan;
+    const char     *why;
 
-    if (!hs_equal(u, "/iperf") && hs_nicmp(u, "/iperf/", 7) != 0)
+    httpiperf_parse(u, &ip);
+    if (ip.kind == HTTPIPERF_NONE)
         return FALSE;
 
     /* GET and HEAD only.  Anything else is a client that found the name by
@@ -4332,52 +4329,22 @@ static BOOL httpd_iperf_hook(HttpConn *c)
         return TRUE;
     }
 
-    if (hs_equal(u, "/iperf") || hs_equal(u, "/iperf/"))
+    if (ip.kind == HTTPIPERF_PAGE)
     {
         httpd_begin(c, 200);
         httpd_body_text(c, "text/html; charset=utf-8", httpd_iperf_page);
         return TRUE;
     }
 
-    dir = u + 7;
-    for (dirlen = 0; dir[dirlen] != '\0' && dir[dirlen] != '/'; dirlen++)
-        ;
-
-    secs = (dir[dirlen] == '/') ? dir + dirlen + 1 : NULL;
-    if (secs == NULL)
+    if (ip.kind == HTTPIPERF_ERR)
     {
-        httpd_error(c, 400, "say how many seconds: /iperf/<direction>/<seconds>");
+        httpd_error(c, ip.status, ip.reason);
         return TRUE;
     }
-
-    for (secslen = 0; secs[secslen] != '\0' && secs[secslen] != '/'; secslen++)
-        ;
-
-    host = (secs[secslen] == '/') ? secs + secslen + 1 : NULL;
 
     iperf_plan_init(&plan);
-
-    if (dirlen == 6 && hs_nicmp(dir, "tcp-tx", 6) == 0)
-        plan.dir = IPERF_TCP_TX;
-    else if (dirlen == 6 && hs_nicmp(dir, "tcp-rx", 6) == 0)
-        plan.dir = IPERF_TCP_RX;
-    else if (dirlen == 6 && hs_nicmp(dir, "udp-tx", 6) == 0)
-        plan.dir = IPERF_UDP_TX;
-    else if (dirlen == 6 && hs_nicmp(dir, "udp-rx", 6) == 0)
-        plan.dir = IPERF_UDP_RX;
-    else
-    {
-        httpd_error(c, 404, "the directions are tcp-tx, tcp-rx, udp-tx, udp-rx");
-        return TRUE;
-    }
-
-    n = http_request_decimal(secs, secslen);
-    if (n < 1)
-    {
-        httpd_error(c, 400, "a run needs a whole number of seconds");
-        return TRUE;
-    }
-    plan.seconds = (ULONG)n;
+    plan.dir     = (UBYTE)ip.dir;
+    plan.seconds = ip.seconds;
 
     plan.buflen = (plan.dir == IPERF_UDP_TX || plan.dir == IPERF_UDP_RX)
                       ? (ULONG)IPERF_UDP_DEFAULT : HTTPD_IPERF_TCP_LEN;
@@ -4397,18 +4364,11 @@ static BOOL httpd_iperf_hook(HttpConn *c)
     if (plan.dir == IPERF_TCP_TX || plan.dir == IPERF_UDP_TX)
     {
         ULONG v4;
+        ULONG st = httpiperf_peer(ip.peer, &v4, &why);
 
-        if (host == NULL || host[0] == '\0')
+        if (st != 200)
         {
-            httpd_error(c, 400, "a sending direction needs a peer: "
-                                "/iperf/tcp-tx/<seconds>/<host>");
-            return TRUE;
-        }
-
-        if (!http_request_dotted(host, &v4))
-        {
-            httpd_error(c, 400, "the peer must be a dotted address, not a "
-                                "name: nothing here can wait on a resolver");
+            httpd_error(c, st, why);
             return TRUE;
         }
 

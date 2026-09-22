@@ -435,6 +435,7 @@ endif()
 # timed, which is the measurement the whole RTG design turns on.
 aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c httpstr.c httpvol.c httppath.c httprequest.c httpif.c
                                           httpframe.c httplock.c httphead.c httpstatus.c
+                                          httpiperf.c
                                           httpxml.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
                                           httprtg.c httpzz.c
@@ -845,6 +846,17 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_httpstatus PRIVATE -Wall -Wextra)
     set_target_properties(test_httpstatus PROPERTIES C_STANDARD 11)
 
+    add_executable(test_httpiperf
+        test/test_httpiperf.c
+        httpiperf.c
+        httprequest.c)
+
+    target_include_directories(test_httpiperf PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_httpiperf PRIVATE -Wall -Wextra)
+    set_target_properties(test_httpiperf PROPERTIES C_STANDARD 11)
+
     add_executable(test_httpxml
         test/test_httpxml.c
         httpxml.c
@@ -999,6 +1011,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME httphead_request_heads COMMAND test_httphead)
     add_test(NAME httpstatus_reasons COMMAND test_httpstatus)
+    add_test(NAME iperf_path_decode COMMAND test_httpiperf)
     add_test(NAME httpxml_skimmer COMMAND test_httpxml)
     add_test(NAME iperf_wire_format COMMAND test_iperfwire)
     add_test(NAME toolpcap_file_format COMMAND test_toolpcap)
