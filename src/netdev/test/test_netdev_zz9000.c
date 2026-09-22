@@ -20,6 +20,7 @@
 #include <exec/types.h>
 
 #include "netdev_nic.h"
+#include "netdev_clock.h"
 
 #ifndef MEMF_PUBLIC
 #define MEMF_PUBLIC (1UL << 0)
@@ -69,6 +70,22 @@ ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs)
         sum += w;
     }
     return sum;
+}
+
+/* zz_intr()'s bounded wait for a header the ARM has counted.  No case
+   here drives it -- the fixture exercises the copies, not the stale
+   header spin -- but zz9000.c references it, and until the sanitize arm
+   linked without dead-stripping, nothing said so.  One spin, then done. */
+VOID netdev_wait_begin(NetdevWait *w, ULONG us, ULONG spins)
+{
+    (VOID)us;
+    (VOID)spins;
+    w->nw_Spins = 1;
+}
+
+BOOL netdev_wait_done(NetdevWait *w)
+{
+    return (BOOL)(w->nw_Spins-- == 0);
 }
 
 #include "zz9000.c"
@@ -159,19 +176,19 @@ static VOID payload_copy_every_length(VOID)
                 if (out.b[i] != 0xee)
                     guards_ok = 0;
 
-            sprintf(what, "len %u dst %u mod 4: bytes", len, (unsigned)phase);
+            snprintf(what, sizeof(what), "len %u dst %u mod 4: bytes", len, (unsigned)phase);
             expect(bytes_ok, what);
-            sprintf(what, "len %u dst %u mod 4: guards", len, (unsigned)phase);
+            snprintf(what, sizeof(what), "len %u dst %u mod 4: guards", len, (unsigned)phase);
             expect(guards_ok, what);
-            sprintf(what, "len %u dst %u mod 4: bulk source aligned", len,
+            snprintf(what, sizeof(what), "len %u dst %u mod 4: bulk source aligned", len,
                     (unsigned)phase);
             expect(bulk_misaligned == 0, what);
 
             /* The bulk carries exactly the longwords between the first word
                and the tail, and is not called for fewer than four. */
-            sprintf(what, "len %u: bulk longwords", len);
+            snprintf(what, sizeof(what), "len %u: bulk longwords", len);
             expect(bulk_longs == (len >= 2 ? (ULONG)((len - 2) >> 2) : 0), what);
-            sprintf(what, "len %u: bulk calls", len);
+            snprintf(what, sizeof(what), "len %u: bulk calls", len);
             expect(bulk_calls == (len >= 6 ? 1UL : 0UL), what);
         }
     }

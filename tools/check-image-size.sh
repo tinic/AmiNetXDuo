@@ -47,13 +47,20 @@ ARM="${AMINETXDUO_IMAGE_ARM:-$(basename "$BUILD")}"
 BUDGETS=(
     # 355,508 with ANXD_CMD_RX_BATCH (the batch reader: post, drain, the
     # settle/hand-up split) -- A1200 iperf RX 399 -> 805 Mbit/s, 2026-09-20.
-    "default:src/bsdsocket/bsdsocket.library:357000"
+    # 357,160 with SBTC_ERROR_HOOK called from the outer
+    # bsd_nx_leave() and the hook re-read off the base before each
+    # deferred call (b1706f18, f5576e57), 2026-09-22.
+    "default:src/bsdsocket/bsdsocket.library:359000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
     # pass-end flush, the command), which the classic cores refuse and so
     # never pay for at run time, 2026-09-20.
-    "default:src/netdev/anxnet.device:44500"
+    # 44,860 after the 68030 cache guards were scoped to active units
+    # (a3292227): the per-unit push/invalidate record, its lookup and the
+    # device-side arm/disarm.  A guard that flushed for every unit on a
+    # machine with one card paid for cards that were not there, 2026-09-22.
+    "default:src/netdev/anxnet.device:46000"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
@@ -101,8 +108,9 @@ BUDGETS=(
     # stack fragments what BSD fragments.  -> 227,916: the versioned transmit
     # metadata callback keeps private state out of SANA-II's io_Flags.
     # 229,560 with the batch reader, 2026-09-20 (see the default row).
-    "minimal:src/bsdsocket/bsdsocket.library:231000"
-    "minimal:src/netdev/anxnet.device:44500"
+    # 231,324 with the SBTC_ERROR_HOOK move, 2026-09-22.
+    "minimal:src/bsdsocket/bsdsocket.library:233000"
+    "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
     "minimal:src/netdev/anxzz9000.device:24000"
     "minimal:src/wifipi/anxwifipi.device:56000"
@@ -115,7 +123,7 @@ BUDGETS=(
     # gate is also the assertion that every resident image in every shipped
     # drawer has a budget.
     "micro:src/bsdsocket/bsdsocket.library:197632"
-    "micro:src/netdev/anxnet.device:44500"
+    "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
     "micro:src/netdev/anxzz9000.device:24000"
     "micro:src/wifipi/anxwifipi.device:56000"
