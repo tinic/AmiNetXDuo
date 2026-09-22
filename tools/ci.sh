@@ -288,7 +288,9 @@ host_test_targets() { # builddir
 #      417 with test_slot, test_iptype and test_dhcp_wire: interface slot
 #      placement, the IPTYPE scans and the DHCPv4 option bytes, split out of
 #      netstack.c on the same rule
-HOST_TESTS_EXPECTED=417
+#      419 with test_netdev_lookup and test_netdev_trace: which unit an
+#      Open() names, and the beam clock's sums, split out of netdev_device.c
+HOST_TESTS_EXPECTED=419
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

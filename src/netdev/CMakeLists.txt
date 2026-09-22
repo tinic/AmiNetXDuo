@@ -22,6 +22,7 @@ set(NETDEV_CORE_SOURCES
     netdev_tags.c       # OpenDevice tag traversal
     netdev_extension.c  # versioned private negotiation
     netdev_unit.c       # unit/opener helpers, host-testable
+    netdev_lookup.c     # which unit an Open() names, host-testable
     netdev_io.c         # BeginIO/AbortIO field handling, host-testable
     netdev_direct.c     # claim/completion half of the single-copy RX path
     netdev_verify.c     # stateless IPv4/IPv6 checksum verdict
@@ -466,6 +467,45 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_unit PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_unit COMMAND test_netdev_unit)
+
+    # Which unit an OpenDevice() names: a position in the probe order, or a
+    # card pin by number or by CARD= name, and whether a request that named
+    # none of the probed units could be the PCMCIA slot.  Split out of
+    # netdev_device.c the way netdev_unit.c was, so a roster built here can
+    # stand in for the Expansion walk.  netdev_cards.c is linked for real:
+    # the pin's hundreds index its rows, and that order is published.
+    add_executable(test_netdev_lookup
+        test/test_netdev_lookup.c
+        netdev_lookup.c
+        netdev_cards.c)
+
+    target_include_directories(test_netdev_lookup PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_lookup PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_lookup COMMAND test_netdev_lookup)
+
+    # The sums under the NETDEV_TIME beam clock and the serial hex trace.
+    # netdev_trace.h is header-only because its callers read the custom chips
+    # and are bracketed around every frame of an instrumented build; the
+    # arithmetic is what has been wrong twice, and it needs no chip.
+    add_executable(test_netdev_trace
+        test/test_netdev_trace.c)
+
+    target_include_directories(test_netdev_trace PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_trace PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_trace COMMAND test_netdev_trace)
 
     # The probe record and the semaphore it is published on -- the ONLY channel
     # by which a machine nobody here has can report what the probe decided.

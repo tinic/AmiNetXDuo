@@ -137,6 +137,45 @@ int main(void)
         }
     }
 
+    /* The autoconfig match.  Every Zorro row answers to its own record and
+       to nothing else, and er_Product is a byte: the row's prodid is
+       compared as one, so the 3c589's 0x0589 is not 0x89 here. */
+    for (i = 0; i < (int)netdev_card_count; i++)
+    {
+        const NetdevCard *card = &netdev_cards[i];
+        char              label[64];
+
+        if (card->bus != NETDEV_BUS_ZORRO)
+            continue;
+
+        snprintf(label, sizeof(label), "netdev_card_by_zorro(%s)", card->name);
+        expect_int(label, netdev_card_by_zorro(card->manid,
+                                               (UBYTE)card->prodid) == card, 1);
+    }
+    expect_int("netdev_card_by_zorro(xsurf100)",
+               netdev_card_by_zorro(4626, 100) == netdev_card_by_name("xsurf100"),
+               1);
+    expect_int("netdev_card_by_zorro(xsurf)",
+               netdev_card_by_zorro(4626, 23) == netdev_card_by_name("xsurf"), 1);
+    expect_int("netdev_card_by_zorro(ariadne2)",
+               netdev_card_by_zorro(2167, 202) == netdev_card_by_name("ariadne2"),
+               1);
+    expect_int("netdev_card_by_zorro(ariadne)",
+               netdev_card_by_zorro(2167, 201) == netdev_card_by_name("ariadne"),
+               1);
+    expect_int("netdev_card_by_zorro(a2065)",
+               netdev_card_by_zorro(514, 112) == netdev_card_by_name("a2065"), 1);
+    /* The same manufacturer with another product, an unknown one, and the
+       PCMCIA rows' MANFIDs, which are not autoconfig records. */
+    expect_int("netdev_card_by_zorro(4626, 24)",
+               netdev_card_by_zorro(4626, 24) == NULL, 1);
+    expect_int("netdev_card_by_zorro(1, 1)",
+               netdev_card_by_zorro(1, 1) == NULL, 1);
+    expect_int("netdev_card_by_zorro(0, 0) is not the pcmcia row",
+               netdev_card_by_zorro(0, 0) == NULL, 1);
+    expect_int("netdev_card_by_zorro(0x0101, 0x89) is not the 3c589",
+               netdev_card_by_zorro(0x0101, 0x89) == NULL, 1);
+
     if (failures != 0)
     {
         printf("netdev_cards: %d failures\n", failures);

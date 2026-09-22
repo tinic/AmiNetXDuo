@@ -530,6 +530,21 @@ BOOL netdev_pcmcia_reattach(NetdevUnit *unit, const NetdevCard *card, APTR base)
 #endif
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
+/* netdev_unit.c: what the last Close() undoes on a unit. */
+VOID netdev_release_unit(NetdevUnit *unit);
+/*
+ * netdev_lookup.c: which unit a unit number and a CARD= pin name, and
+ * whether a request that named none could be the PCMCIA slot.  *why is set
+ * on a NULL return; *wanted is the pinned PCMCIA row, or NULL when the
+ * request is by position.
+ */
+NetdevUnit *netdev_find_unit(NetdevDevice *dev, ULONG unit,
+                             const char *pin_name, const char **why);
+#if NETDEV_HAS_PCMCIA
+BOOL netdev_request_is_pcmcia(NetdevDevice *dev, ULONG unit,
+                              const char *pin_name,
+                              const NetdevCard **wanted);
+#endif
 LONG netdev_online(NetdevUnit *unit);
 VOID netdev_offline(NetdevUnit *unit, ULONG event);
 

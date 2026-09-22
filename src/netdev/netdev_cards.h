@@ -156,4 +156,11 @@ BOOL netdev_isapnp_configure(const NetdevCard *card, APTR board);
  */
 const NetdevCard *netdev_card_by_cis(UWORD manf, UWORD prod);
 
+/*
+ * Which Zorro row drives the board whose autoconfig record says (manid,
+ * prodid).  er_Product is a byte, so a row's prodid is compared as one.
+ * Only NETDEV_BUS_ZORRO rows are looked at; NULL when none matches.
+ */
+const NetdevCard *netdev_card_by_zorro(UWORD manid, UBYTE prodid);
+
 #endif /* AMINETXDUO_NETDEV_CARDS_H */

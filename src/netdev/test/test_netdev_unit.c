@@ -460,6 +460,79 @@ static void g_drop_writes_takes_only_one_openers(void)
            "and the queue is empty");
 }
 
+/* ====================================================== the last Close() = */
+
+/*
+ * The unit outlives its openers, so the last Close() undoes what any of them
+ * did to it: the group table, the accept-all and promiscuous latches, the
+ * exclusive claim, the configured flag and the operating address, which goes
+ * back to what the card answered at attach.  What it must NOT touch is also
+ * asserted: the card, the core and the online state are the probe's and the
+ * next Open()'s business.
+ */
+static void h_release_unit_undoes_every_opener_change(void)
+{
+    static const UBYTE ipv6_ns[6]  = { 0x33, 0x33, 0xff, 0x12, 0x34, 0x56 };
+    static const UBYTE ipv4_mc[6]  = { 0x01, 0x00, 0x5e, 0x00, 0x00, 0x01 };
+    static const UBYTE factory[6]  = { 0x00, 0x80, 0x10, 0x12, 0x34, 0x56 };
+    static const UBYTE operating[6] = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 };
+    UWORD i;
+
+    reset();
+    join(ipv6_ns, 0);
+    join(ipv4_mc, 3);
+    unit.nu_Mcast[3].refs = 7;
+    unit.nu_Mcast[NETDEV_MCAST_MAX - 1].refs = 2;
+    unit.nu_Mcast[NETDEV_MCAST_MAX - 1].addr[0] = 0x01;
+    unit.nu_AllMulti    = 2;
+    unit.nu_Promisc     = 1;
+    unit.nu_Exclusive   = 1;
+    unit.nu_Nic.promisc = TRUE;
+    unit.nu_Configured  = 1;
+    unit.nu_Online      = 1;
+    unit.nu_Openers     = 0;
+    memcpy(unit.nu_Nic.factory, factory, sizeof(factory));
+    memcpy(unit.nu_Nic.mac, operating, sizeof(operating));
+    memset(unit.nu_Nic.mar, 0xa5, sizeof(unit.nu_Nic.mar));
+
+    netdev_release_unit(&unit);
+
+    for (i = 0; i < NETDEV_MCAST_MAX; i++)
+    {
+        if (unit.nu_Mcast[i].refs != 0 || unit.nu_Mcast[i].addr[0] != 0)
+        {
+            printf("FAIL group slot %u still held (refs %u, addr[0] %02x)\n",
+                   (unsigned)i, (unsigned)unit.nu_Mcast[i].refs,
+                   (unsigned)unit.nu_Mcast[i].addr[0]);
+            failures++;
+        }
+    }
+    checks++;
+    expect_u32("accept-all-multicast latch", unit.nu_AllMulti, 0);
+    expect_u32("promiscuous count", unit.nu_Promisc, 0);
+    expect_u32("exclusive claim", unit.nu_Exclusive, 0);
+    expect_u32("the core's promisc flag", (unsigned long)unit.nu_Nic.promisc,
+               FALSE);
+    expect_u32("configured flag", unit.nu_Configured, 0);
+    expect(memcmp(unit.nu_Nic.mac, factory, sizeof(factory)) == 0,
+           "the operating address is the factory one again");
+    expect(memcmp(unit.nu_Nic.factory, factory, sizeof(factory)) == 0,
+           "and the factory address is untouched");
+    expect(mar_is_zero(unit.nu_Nic.mar), "the unit's hash is cleared");
+
+    /* Not the shell's to undo here. */
+    expect_u32("the online state is left alone", unit.nu_Online, 1);
+    expect(unit.nu_Nic.ops == &t_ops, "the core is left alone");
+    expect_u32("the chip is not reprogrammed by the release itself",
+               (unsigned long)setfilter_calls, 0);
+    expect_u32("Disable balanced", (unsigned long)disable_depth, 0);
+
+    /* A second release of a clean unit changes nothing. */
+    netdev_release_unit(&unit);
+    expect(memcmp(unit.nu_Nic.mac, factory, sizeof(factory)) == 0,
+           "a release of a released unit is a no-op");
+}
+
 int main(void)
 {
     a_no_groups_is_an_empty_hash();
@@ -469,6 +542,7 @@ int main(void)
     e_the_whole_table_is_hashed();
     f_reply();
     g_drop_writes_takes_only_one_openers();
+    h_release_unit_undoes_every_opener_change();
 
     if (failures != 0)
     {

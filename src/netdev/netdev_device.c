@@ -11,6 +11,7 @@
 #include "aminetxduo/anxs2ext.h"
 #include "netdev_watchdog.h"
 #include "netdev_macgen.h"
+#include "netdev_trace.h"
 #include "dp8390.h"
 #include "netdev_dtree.h"
 #if NETDEV_HAS_ZORRO
@@ -157,16 +158,10 @@ static VOID nd_trace(const char *s)
 
 static VOID nd_tracex(const char *tag, ULONG v)
 {
-    static const char hex[] = "0123456789abcdef";
     char buf[12];
-    int  i;
 
     nd_trace(tag);
-    for (i = 0; i < 8; i++)
-        buf[i] = hex[(v >> ((7 - i) * 4)) & 0xf];
-    buf[8] = '\r';
-    buf[9] = '\n';
-    buf[10] = '\0';
+    netdev_trace_hex8(buf, v);
     nd_trace(buf);
 }
 
@@ -224,9 +219,8 @@ VOID netdev_trace_val(const char *tag, ULONG v)
 /* The eight-bit wrap this clock used to rely on.  nd_now() now returns the
    full nine-bit vpos and nd_since() learns the field height, so nothing tests
    against a fixed range any more; kept out of the build rather than kept
-   around to be believed. */
-#define ND_UNIT_NUM     227UL           /* a unit is 227/256 colour clocks */
-#define ND_UNIT_DEN     256UL
+   around to be believed.  The unit scale is NETDEV_BEAM_UNIT_NUM/DEN in
+   netdev_trace.h, with the rest of the clock's arithmetic. */
 
 /*
  * NINE BITS OF VPOS, NOT EIGHT, AND A FIELD SIZE THIS LEARNS FOR ITSELF.
@@ -261,10 +255,8 @@ VOID netdev_trace_val(const char *tag, ULONG v)
  * differ and an interlaced mode alternates -- so it is LEARNED: the largest
  * value ever returned, plus one, is the wrap, and it is correct from the first
  * field onwards.  Before that, a span is only dropped if the pre-calibration
- * guess is short, which the initial ND_FIELD_MIN prevents.
+ * guess is short, which the initial NETDEV_BEAM_FIELD_MIN prevents.
  */
-#define ND_FIELD_MIN    (262UL * 256UL)     /* NTSC, the smaller of the two */
-
 static ULONG nd_field_top;                  /* largest value seen, self-taught */
 
 static ULONG nd_now(VOID)
@@ -284,7 +276,7 @@ static ULONG nd_now(VOID)
     }
     while (hi0 != hi1);
 
-    v = (((ULONG)hi0 << 8) | (ULONG)(vh >> 8)) << 8 | (ULONG)(vh & 0xff);
+    v = netdev_beam_pack(hi0, vh);
 
     if (v > nd_field_top)
         nd_field_top = v;
@@ -367,11 +359,9 @@ static ULONG nd_t_isr_max;
 
 static ULONG nd_since_at(ULONG t0, ULONG *drops)
 {
-    ULONG t1 = nd_now();
-    ULONG wrap;
-
-    if (t1 >= t0)
-        return t1 - t0;
+    ULONG t1 = nd_now();        /* before nd_field_top is read: it may raise it */
+    ULONG d;
+    BOOL  wrapped;
 
     /*
      * ONE DISCONTINUITY, SO NO GUESSING.  A backwards step is the end of the
@@ -379,15 +369,15 @@ static ULONG nd_since_at(ULONG t0, ULONG *drops)
      * clock has returned -- learned within the first field, floored at NTSC's
      * so a span taken before that is not credited with a short one.
      */
-    wrap = nd_field_top + 1UL;
-    if (wrap < ND_FIELD_MIN)
-        wrap = ND_FIELD_MIN;
+    d = netdev_beam_since(t0, t1, nd_field_top, &wrapped);
+    if (wrapped)
+    {
+        nd_n_wrap++;                        /* counted: it is a repaired span */
+        if (drops != NULL)
+            (*drops)++;
+    }
 
-    nd_n_wrap++;                            /* counted: it is a repaired span */
-    if (drops != NULL)
-        (*drops)++;
-
-    return wrap + t1 - t0;
+    return d;
 }
 
 static ULONG nd_since(ULONG t0)
@@ -567,8 +557,8 @@ static VOID nd_time_report(VOID)
     nd_tracex("t maxisr ", nd_t_isr_max);
     nd_tracex("t fldtop ", nd_field_top);
     /* The scale, so a reader does not take a beam unit for a colour clock. */
-    nd_tracex("t unitnum", ND_UNIT_NUM);
-    nd_tracex("t unitden", ND_UNIT_DEN);
+    nd_tracex("t unitnum", NETDEV_BEAM_UNIT_NUM);
+    nd_tracex("t unitden", NETDEV_BEAM_UNIT_DEN);
     netdev_time_rdc = netdev_time_null = 0;
     netdev_time_rx = netdev_time_tx = 0;
     nd_t_isr = nd_t_copy = nd_t_up = nd_t_tx = nd_t_hook = 0;
@@ -1283,31 +1273,7 @@ LONG netdev_online(NetdevUnit *unit)
 }
 
 
-/*
- * The unit outlives every opener, so anything an opener changed about it must
- * be undone when the last one goes: the accept-all-multicast latch, the 32-slot
- * multicast table, and the configured flag.
- */
-static VOID netdev_release_unit(NetdevUnit *unit)
-{
-    UWORD i;
-
-    for (i = 0; i < NETDEV_MCAST_MAX; i++)
-    {
-        unit->nu_Mcast[i].refs = 0;
-        unit->nu_Mcast[i].addr[0] = 0;
-    }
-    unit->nu_AllMulti  = 0;
-    unit->nu_Promisc   = 0;
-    unit->nu_Exclusive = 0;
-    unit->nu_Nic.promisc = FALSE;
-
-    unit->nu_Configured = 0;
-    for (i = 0; i < NETDEV_ADDR_LEN; i++)
-        unit->nu_Nic.mac[i] = unit->nu_Nic.factory[i];
-
-    netdev_mar_clear(unit->nu_Nic.mar);
-}
+/* netdev_release_unit(), what the last Close() undoes, is netdev_unit.c. */
 
 static VOID netdev_set_offline(NetdevUnit *unit, ULONG event, BOOL stop)
 {
@@ -1868,26 +1834,12 @@ static VOID netdev_probe_zorro(NetdevDevice *dev)
      */
     while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
     {
-        const NetdevCard *card = NULL;
-        UWORD             i;
+        const NetdevCard *card;
 
         boards++;
 
-        for (i = 0; i < netdev_card_count; i++)
-        {
-            /* A PCMCIA row's manid/prodid are its CIS MANFID, not an
-               autoconfig record, so it must never match a board here. */
-            if (netdev_cards[i].bus != NETDEV_BUS_ZORRO)
-                continue;
-
-            if (cd->cd_Rom.er_Manufacturer == netdev_cards[i].manid &&
-                cd->cd_Rom.er_Product == (UBYTE)netdev_cards[i].prodid)
-            {
-                card = &netdev_cards[i];
-                break;
-            }
-        }
-
+        card = netdev_card_by_zorro(cd->cd_Rom.er_Manufacturer,
+                                    cd->cd_Rom.er_Product);
         if (card == NULL)
         {
             /* Recorded, because "boards on this bus, none of them known" is a
@@ -2047,107 +1999,10 @@ static VOID netdev_probe(NetdevDevice *dev)
 
 /* ------------------------------------------------------------ unit lookup - */
 
-/*
- * A unit below ANXNET_UNIT_PIN is a position in the probe order.  At or above
- * it, the number names a card type: (index + 1) * 100 + instance.
- */
-static NetdevUnit *netdev_find_unit(NetdevDevice *dev, ULONG unit,
-                                    const char *pin_name, const char **why)
-{
-    const NetdevCard *want = NULL;
-    UWORD             instance = 0;
-    UWORD             seen = 0;
-    UWORD             i;
+/* netdev_find_unit() and netdev_request_is_pcmcia() are netdev_lookup.c: the
+   decision of which unit a request names, without the slot claim below. */
 
-    if (pin_name != NULL)
-    {
-        want = netdev_card_by_name(pin_name);
-        if (want == NULL)
-        {
-            *why = "no such card type";
-            return NULL;
-        }
-        instance = (UWORD)unit;
-        if (unit >= ANXNET_UNIT_PIN)
-            instance = (UWORD)(unit % ANXNET_UNIT_PIN);
-    }
-    else if (unit >= ANXNET_UNIT_PIN)
-    {
-        ULONG idx = (unit / ANXNET_UNIT_PIN) - 1;
-
-        /* Range-checked as a ULONG: truncating first wraps a huge unit
-           number onto a valid card index, which is the one thing a pin
-           must never do. */
-        if (idx >= (ULONG)netdev_card_count)
-        {
-            *why = "no such card type";
-            return NULL;
-        }
-        want     = &netdev_cards[idx];
-        instance = (UWORD)(unit % ANXNET_UNIT_PIN);
-    }
-    else
-    {
-        if (unit >= dev->nd_UnitCount)
-        {
-            *why = "no such board";
-            return NULL;
-        }
-        return &dev->nd_Units[unit];
-    }
-
-    for (i = 0; i < dev->nd_UnitCount; i++)
-    {
-        if (dev->nd_Units[i].nu_Nic.card == want)
-        {
-            if (seen == instance)
-                return &dev->nd_Units[i];
-            seen++;
-        }
-    }
-
-    *why = "the pinned card is not in this machine";
-    return NULL;
-}
-
-/*
- * Device initialization cannot leave an IFAVAILABLE handle queued for an empty
- * slot, so a card inserted after the romtag probe needs one task-context retry.
- * PCMCIA is deliberately last in probe order.
- */
 #if NETDEV_HAS_PCMCIA
-static BOOL netdev_request_is_pcmcia(NetdevDevice *dev, ULONG unit,
-                                     const char *pin_name,
-                                     const NetdevCard **wanted)
-{
-    const NetdevCard *card = NULL;
-
-    *wanted = NULL;
-    if (pin_name != NULL)
-    {
-        card = netdev_card_by_name(pin_name);
-        if (card == NULL || card->bus != NETDEV_BUS_PCMCIA)
-            return FALSE;
-        *wanted = card;
-        return TRUE;
-    }
-
-    if (unit >= ANXNET_UNIT_PIN)
-    {
-        ULONG idx = (unit / ANXNET_UNIT_PIN) - 1;
-
-        if (idx >= (ULONG)netdev_card_count)
-            return FALSE;
-        card = &netdev_cards[idx];
-        if (card->bus != NETDEV_BUS_PCMCIA)
-            return FALSE;
-        *wanted = card;
-        return TRUE;
-    }
-
-    return (BOOL)(unit == (ULONG)dev->nd_UnitCount);
-}
-
 static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
                                           const char *pin_name,
                                           const char **why)

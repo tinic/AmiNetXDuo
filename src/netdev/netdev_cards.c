@@ -257,6 +257,25 @@ const NetdevCard *netdev_card_by_cis(UWORD manf, UWORD prod)
     return fallback;
 }
 
+const NetdevCard *netdev_card_by_zorro(UWORD manid, UBYTE prodid)
+{
+    UWORD i;
+
+    for (i = 0; i < netdev_card_count; i++)
+    {
+        /* A PCMCIA row's manid/prodid are its CIS MANFID, not an
+           autoconfig record, so it must never match a board here. */
+        if (netdev_cards[i].bus != NETDEV_BUS_ZORRO)
+            continue;
+
+        if (netdev_cards[i].manid == manid &&
+            (UBYTE)netdev_cards[i].prodid == prodid)
+            return &netdev_cards[i];
+    }
+
+    return NULL;
+}
+
 static int card_streq(const char *a, const char *b)
 {
     while (*a != '\0' && *b != '\0')

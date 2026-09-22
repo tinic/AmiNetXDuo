@@ -68,6 +68,32 @@ VOID netdev_rebuild_filter(NetdevUnit *unit)
 }
 
 /*
+ * The unit outlives every opener, so anything an opener changed about it must
+ * be undone when the last one goes: the accept-all-multicast latch, the 32-slot
+ * multicast table, and the configured flag.
+ */
+VOID netdev_release_unit(NetdevUnit *unit)
+{
+    UWORD i;
+
+    for (i = 0; i < NETDEV_MCAST_MAX; i++)
+    {
+        unit->nu_Mcast[i].refs = 0;
+        unit->nu_Mcast[i].addr[0] = 0;
+    }
+    unit->nu_AllMulti  = 0;
+    unit->nu_Promisc   = 0;
+    unit->nu_Exclusive = 0;
+    unit->nu_Nic.promisc = FALSE;
+
+    unit->nu_Configured = 0;
+    for (i = 0; i < NETDEV_ADDR_LEN; i++)
+        unit->nu_Nic.mac[i] = unit->nu_Nic.factory[i];
+
+    netdev_mar_clear(unit->nu_Nic.mar);
+}
+
+/*
  * Take one opener's CMD_WRITEs off the unit's queue.  Disable(), because the
  * interrupt server walks the same list and AddTail() on it is Disable()d too --
  * that is the only arbitration this driver has.
