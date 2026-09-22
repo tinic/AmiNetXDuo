@@ -481,7 +481,44 @@ static ULONG zz_copy_payload_sum(UBYTE *dst, const volatile UBYTE *src,
     return sum;
 }
 
-/* A plain copy of a header-and-all frame into the staging buffer. */
+/* The payload without the sum, for a frame the GEM has already verified.
+   The phase rule above applies unchanged: the payload sits 2 mod 4 in the
+   window, so the first word goes over alone and the bulk reads longword
+   aligned, with the destination taking the misalignment.  Handing the
+   payload to zz_copy_frame instead read every longword 2 mod 4 off the
+   Zorro bus, two word cycles each, for the whole of the fast path.  A lone
+   last byte comes out of a word: the far side takes no byte access. */
+static VOID zz_copy_payload(UBYTE *dst, const volatile UBYTE *src, UWORD len)
+{
+    UWORD done = 0;
+
+    if (len >= 2)
+    {
+        *(UWORD *)(APTR)dst =
+            *(const volatile UWORD *)(const volatile void *)src;
+        done = 2;
+    }
+    {
+        ULONG longs = (ULONG)((len - done) >> 2);
+        if (longs != 0)
+        {
+            n68k_copy_longs(dst + done, src + done, longs);
+            done = (UWORD)(done + (longs << 2));
+        }
+    }
+    if (done + 2 <= len)
+    {
+        *(UWORD *)(APTR)(dst + done) =
+            *(const volatile UWORD *)(const volatile void *)(src + done);
+        done = (UWORD)(done + 2);
+    }
+    if (done < len)
+        dst[done] = (UBYTE)(*(const volatile UWORD *)(const volatile void *)
+                            (src + done) >> 8);
+}
+
+/* A plain copy of the header: the frame itself is longword aligned in the
+   window, so from its first byte both sides are in phase. */
 static VOID zz_copy_frame(UBYTE *dst, const volatile UBYTE *src, UWORD len)
 {
     UWORD bulk = (UWORD)(len & (UWORD)~3u);
@@ -593,7 +630,7 @@ static BOOL zz_rint(NetdevNic *nic)
                 buf[12] == 0x08 && buf[13] == 0x00 &&
                 (hw == ZZ_RXM_TCP || hw == ZZ_RXM_UDP))
             {
-                zz_copy_frame(dst, frame + NETDEV_HDR_LEN, plen);
+                zz_copy_payload(dst, frame + NETDEV_HDR_LEN, plen);
                 copied = TRUE;
                 v = netdev_rx_trust4(dst, plen, hw);
                 if (v != 0)
@@ -633,8 +670,8 @@ static BOOL zz_rint(NetdevNic *nic)
             return TRUE;
         }
 
-        zz_copy_frame(buf + NETDEV_HDR_LEN, frame + NETDEV_HDR_LEN,
-                      (UWORD)(len - NETDEV_HDR_LEN));
+        zz_copy_payload(buf + NETDEV_HDR_LEN, frame + NETDEV_HDR_LEN,
+                        (UWORD)(len - NETDEV_HDR_LEN));
         zz_put(nic, ZZ_REG_RX_ACK, serial);
         nic->rx_packets++;
         nic->rx(nic->rx_arg, buf, len);

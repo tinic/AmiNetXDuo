@@ -779,6 +779,33 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_watchdog COMMAND test_netdev_watchdog)
 
+    # anxzz9000.device's receive copies.  The payload sits 2 mod 4 in the
+    # card's window and a 2 mod 4 longword read is two Zorro cycles, so every
+    # payload copy must peel one word and read the bulk aligned; the core is
+    # included whole with the two bulk routines replaced by recording ones,
+    # and section GC leaves the attach and transmit paths out of the fixture.
+    add_executable(test_netdev_zz9000
+        test/test_netdev_zz9000.c
+        netdev_mcaf.c
+        netdev_verify.c)
+
+    target_include_directories(test_netdev_zz9000 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"
+        "${CMAKE_SOURCE_DIR}/src/common/test/shim")
+
+    target_compile_options(test_netdev_zz9000 PRIVATE
+        -Wall -Wextra -ffunction-sections -fdata-sections)
+    if(APPLE)
+        target_link_options(test_netdev_zz9000 PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_netdev_zz9000 PRIVATE -Wl,--gc-sections)
+    endif()
+
+    add_test(NAME netdev_zz9000 COMMAND test_netdev_zz9000)
+
     # The delay that is measured rather than counted.  NETDEV_CLOCK_TEST swaps
     # the chip read for a beam this test drives, which is the only way to run
     # one binary as a 14 MHz 68020 and as an accelerator and compare what the
