@@ -43,7 +43,6 @@
 extern struct ExecBase *SysBase;
 
 #ifdef NETDEV_TRACE
-extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define GE_TRACE(t, v)  netdev_trace_val((t), (ULONG)(v))
 #else
 #define GE_TRACE(t, v)  ((VOID)0)

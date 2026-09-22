@@ -79,7 +79,6 @@
 #define AX88796_FCR_HWPC_RESET  0x07
 
 #ifdef NETDEV_TRACE
-extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define NE_TRACE(t, v)  netdev_trace_val((t), (ULONG)(v))
 #else
 #define NE_TRACE(t, v)  ((VOID)0)

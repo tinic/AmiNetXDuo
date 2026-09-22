@@ -31,7 +31,6 @@
 #include <aminetxduo/anxdiag.h>
 
 #ifdef NETDEV_TRACE
-extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define EL_TRACE(t, v)  netdev_trace_val((t), (ULONG)(v))
 #else
 #define EL_TRACE(t, v)  ((VOID)0)

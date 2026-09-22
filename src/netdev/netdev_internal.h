@@ -573,4 +573,11 @@ VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
 LONG netdev_abort_io(register struct Device     *dev NETDEV_REG_A6,
                      register struct IOSana2Req *io  NETDEV_REG_A1);
 
+/* The per-command serial trace line, netdev_device.c; a real function only
+   in a NETDEV_TRACE build, and netdev_cmds.c calls it under the same #ifdef.
+   The prototype is here so -Wmissing-prototypes is satisfied at the
+   definition.  netdev_trace_val, which the chip cores call, is in
+   netdev_nic.h. */
+VOID netdev_trace_cmd(UWORD c);
+
 #endif /* AMINETXDUO_NETDEV_INTERNAL_H */

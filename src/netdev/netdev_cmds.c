@@ -791,10 +791,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     unit = op->op_Hw;
 
 #ifdef NETDEV_TRACE
-    {
-        extern VOID netdev_trace_cmd(UWORD c);
-        netdev_trace_cmd(cmd);
-    }
+    netdev_trace_cmd(cmd);
 #endif
 
     switch (cmd)

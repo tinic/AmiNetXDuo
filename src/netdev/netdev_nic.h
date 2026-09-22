@@ -503,4 +503,9 @@ LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len);
 BOOL lance_intr(NetdevNic *nic);
 LONG lance_attach(NetdevNic *nic);
 
+/* One tagged value on the serial trace, netdev_device.c.  A real function in
+   a NETDEV_TRACE or NETDEV_TIME build and absent otherwise; the chip cores
+   call it only under their own *_TRACE macros, which the same defines gate. */
+VOID netdev_trace_val(const char *tag, ULONG v);
+
 #endif /* AMINETXDUO_NETDEV_NIC_H */
