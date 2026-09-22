@@ -133,9 +133,18 @@ static const struct NetdevNicOps m_ops_mute =
 
 static NetdevNic m_nic;
 
+/* m_reset() cannot see how long its array is, and one call passed a count of
+   four for three answers -- reading a BOOL past the end of a const global.
+   Only the sanitizer saw it, months after it landed.  Every caller goes
+   through the macro now, so the count is the array's. */
+#define M_RESET(a) m_reset((a), (int)(sizeof(a) / sizeof((a)[0])))
+
 static void m_reset(const BOOL *answers, int n)
 {
     int i;
+
+    if (n > (int)(sizeof(m_answers) / sizeof(m_answers[0])))
+        n = (int)(sizeof(m_answers) / sizeof(m_answers[0]));
 
     memset(&m_nic, 0, sizeof(m_nic));
     m_nic.ops = &m_ops_asking;
@@ -202,7 +211,7 @@ static void b_coherent_as_found(void)
     static const BOOL yes[] = { TRUE, TRUE };
     UBYTE r;
 
-    m_reset(yes, 2);
+    M_RESET(yes);
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_TT0 && m_nic.cache_mode == NETDEV_CACHE_TT0,
             "coherent-as-found still gets a private conservative guard");
@@ -216,13 +225,13 @@ static void c_not_a_030(void)
     static const BOOL no[] = { FALSE };
     UBYTE r;
 
-    m_reset(no, 1);
+    M_RESET(no);
     m_is_030 = FALSE;
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_NONE && m_asked == 0,
             "a 68040 is not even probed");
 
-    m_reset(no, 1);
+    M_RESET(no);
     m_nic.ops = &m_ops_mute;
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_NONE && m_tt_writes == 0,
@@ -234,7 +243,7 @@ static void d_tt0_takes_it(void)
     static const BOOL then_yes[] = { FALSE, TRUE };
     UBYTE r;
 
-    m_reset(then_yes, 2);
+    M_RESET(then_yes);
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_TT0, "TT0 free: TT0 marks the block");
     t_check(m_tt_writes == 1 && m_last_which == 0 &&
@@ -259,7 +268,7 @@ static void e_tt0_is_taken(void)
     static const BOOL then_yes[] = { FALSE, TRUE };
     UBYTE r;
 
-    m_reset(then_yes, 2);
+    M_RESET(then_yes);
     m_tt[0] = 0x0000ff00UL | 0x8000UL;      /* somebody's, enabled */
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_TT1, "TT0 in use: TT1 marks the block");
@@ -277,7 +286,7 @@ static void f_both_taken(void)
     static const BOOL then_yes[] = { FALSE, TRUE };
     UBYTE r;
 
-    m_reset(then_yes, 2);
+    M_RESET(then_yes);
     m_tt[0] = 0x8000UL;
     m_tt[1] = 0x8000UL;
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
@@ -300,7 +309,7 @@ static void g_ram_in_the_block(void)
     static const BOOL then_yes[] = { FALSE, TRUE };
     UBYTE r;
 
-    m_reset(then_yes, 2);
+    M_RESET(then_yes);
     m_ram_in = TRUE;
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_DCACHE && m_tt_writes == 0,
@@ -312,7 +321,7 @@ static void h_tt_did_not_help(void)
     static const BOOL no_no_yes[] = { FALSE, FALSE, TRUE };
     UBYTE r;
 
-    m_reset(no_no_yes, 3);
+    M_RESET(no_no_yes);
     m_tt[1] = 0x8000UL;                     /* only TT0 is free */
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_DCACHE,
@@ -328,7 +337,7 @@ static void i_nothing_helps(void)
     static const BOOL no[] = { FALSE };
     UBYTE r;
 
-    m_reset(no, 1);
+    M_RESET(no);
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
     t_check(r == NETDEV_CACHE_FAILED, "still stale with the cache off: FAILED");
     t_check(m_tt[0] == 0UL && m_tt[1] == 0UL, "both registers back to free");
@@ -349,7 +358,7 @@ static void j_cache_was_already_off(void)
     static const BOOL then_yes[] = { FALSE, TRUE };
     UBYTE r;
 
-    m_reset(then_yes, 2);
+    M_RESET(then_yes);
     m_tt[0] = 0x8000UL;
     m_tt[1] = 0x8000UL;
     m_cacr  = 0UL;                          /* somebody ran with it off */
@@ -361,7 +370,7 @@ static void j_cache_was_already_off(void)
             (m_cacr & CACR_ED) == 0,
             "an unchanged originally-off cache stays off without a write");
 
-    m_reset(then_yes, 2);
+    M_RESET(then_yes);
     m_tt[0] = m_tt[1] = TT_E;
     m_cacr = 0;
     r = netdev_cache_guard(&m_nic, BOARD, SIZE);
@@ -378,7 +387,7 @@ static void k_attach_open_close_lifecycle(void)
 {
     static const BOOL answers[] = { FALSE, TRUE, TRUE };
 
-    m_reset(answers, 4);
+    M_RESET(answers);
     t_check(netdev_cache_guard(&m_nic, BOARD, SIZE) == NETDEV_CACHE_TT0,
             "attach acquires TT0");
     t_check(m_nic.cache_board == BOARD && m_nic.cache_board_size == SIZE,
@@ -404,7 +413,7 @@ static void l_two_units_share_tt(void)
     static const BOOL answers[] = { FALSE, TRUE, TRUE };
     NetdevNic a, b;
 
-    m_reset(answers, 3);
+    M_RESET(answers);
     memset(&a, 0, sizeof(a));
     memset(&b, 0, sizeof(b));
     a.ops = b.ops = &m_ops_asking;
@@ -429,7 +438,7 @@ static void m_nonoverlap_uses_other_tt(void)
     static const BOOL answers[] = { FALSE, TRUE, FALSE, TRUE };
     NetdevNic a, b;
 
-    m_reset(answers, 4);
+    M_RESET(answers);
     memset(&a, 0, sizeof(a));
     memset(&b, 0, sizeof(b));
     a.ops = b.ops = &m_ops_asking;
@@ -451,7 +460,7 @@ static void n_two_units_share_dcache(void)
     static const BOOL answers[] = { FALSE, TRUE, TRUE };
     NetdevNic a, b;
 
-    m_reset(answers, 3);
+    M_RESET(answers);
     memset(&a, 0, sizeof(a));
     memset(&b, 0, sizeof(b));
     a.ops = b.ops = &m_ops_asking;
@@ -478,7 +487,7 @@ static void o_external_tt_changes_are_not_clobbered(void)
     static const BOOL never[] = { FALSE, FALSE, FALSE, FALSE };
     const ULONG external = 0x7f008507UL;
 
-    m_reset(then_yes, 2);
+    M_RESET(then_yes);
     t_check(netdev_cache_guard(&m_nic, BOARD, SIZE) == NETDEV_CACHE_TT0,
             "external-change test owns TT0");
     m_tt[0] = external;
@@ -486,7 +495,7 @@ static void o_external_tt_changes_are_not_clobbered(void)
     t_check(m_tt[0] == external,
             "final release does not overwrite an externally changed TT0");
 
-    m_reset(never, 4);
+    M_RESET(never);
     m_tt[1] = TT_E;                  /* leave TT0 as the only trial rung */
     m_mutate_on_ask = 1;             /* the probe after installing TT0 */
     m_mutate_which = 0;
@@ -501,7 +510,7 @@ static void p_dcache_attach_open_close_lifecycle(void)
 {
     static const BOOL answers[] = { FALSE, TRUE, TRUE };
 
-    m_reset(answers, 3);
+    M_RESET(answers);
     m_tt[0] = m_tt[1] = TT_E;
     t_check(netdev_cache_guard(&m_nic, BOARD, SIZE) == NETDEV_CACHE_DCACHE,
             "attach selects the global-cache fallback");
@@ -522,7 +531,7 @@ static void q_borrow_does_not_replace_preference(void)
     static const BOOL answers[] = { FALSE, TRUE, FALSE, TRUE, TRUE, TRUE };
     NetdevNic a, b;
 
-    m_reset(answers, 6);
+    M_RESET(answers);
     memset(&a, 0, sizeof(a));
     memset(&b, 0, sizeof(b));
     a.ops = b.ops = &m_ops_asking;
@@ -554,7 +563,7 @@ static void r_external_protection_can_disappear_before_open(void)
 {
     static const BOOL yes[] = { TRUE, TRUE, TRUE };
 
-    m_reset(yes, 3);
+    M_RESET(yes);
     m_cacr = 0;                    /* external utility supplied coherence */
     t_check(netdev_cache_guard(&m_nic, BOARD, SIZE) == NETDEV_CACHE_TT0,
             "attach classifies coherent-as-found conservatively as TT0");
