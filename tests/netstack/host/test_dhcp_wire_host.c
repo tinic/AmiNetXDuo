@@ -180,6 +180,16 @@ static void h_case_text(void)
     memset(out, 'x', sizeof(out));
     ami_ns_dhcp_text_decode(NULL, 5U, out, sizeof(out));
     h_check(out[0] == '\0', "no buffer is an empty string");
+
+    /* The two smallest rooms: one byte holds only the terminator, none
+       holds nothing and must not be written. */
+    memset(out, 'x', sizeof(out));
+    ami_ns_dhcp_text_decode(amiga, 5U, out, 1UL);
+    h_check(out[0] == '\0' && out[1] == 'x', "outlen 1 is the empty string alone");
+
+    memset(out, 'x', sizeof(out));
+    ami_ns_dhcp_text_decode(amiga, 5U, out, 0UL);
+    h_check(out[0] == 'x', "outlen 0 writes nothing");
 }
 
 
