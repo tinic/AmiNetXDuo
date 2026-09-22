@@ -421,6 +421,18 @@ endif()
 target_compile_options(test_evpost PRIVATE -Wall -Wextra)
 set_target_properties(test_evpost PROPERTIES OUTPUT_NAME "EvPost")
 
+# SelfCause asks the ROM one question the netdev bottom half depends on: a
+# software interrupt that Cause()s itself from inside its handler runs again
+# (count 2), or the Cause() is lost (count 1).  exec.library only; the control
+# is two Cause() on a pending interrupt, which the documentation says queue
+# once.  tests/tools/run-selfcause.sh boots it on every Kickstart the lab has.
+add_executable(test_selfcause selfcause.c)
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_selfcause PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_selfcause PRIVATE -Wall -Wextra)
+set_target_properties(test_selfcause PROPERTIES OUTPUT_NAME "SelfCause")
+
 # ShutProbe asks what a shutdown does to the programs using the network: two
 # holder processes, one blocked inside the library in WaitSelect() and one
 # waiting on its own signals outside it, then the command, then the grace

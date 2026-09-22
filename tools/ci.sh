@@ -2395,6 +2395,26 @@ the PCMCIA card claimed at every rate and the measurement rose with it" ;;
            bad=$((bad + 1)) ;;
     esac
 
+    # ONE QUESTION FOR THE ROM, on every Kickstart the lab has.  The netdev
+    # bottom half is a software interrupt that may Cause() itself from inside
+    # its handler, and the driver assumes exec queues that and runs it again.
+    # No card and no network: exec and dos only, so it belongs beside the
+    # machine arms and not in `bridged`.  The two 2.x ROMs are the same ones
+    # run-kick2x.sh boots; a missing required ROM is exit 2 with the file
+    # named in the harness's own table.
+    rc=0
+    "$ROOT/tests/tools/run-selfcause.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  a self-Cause()d software interrupt runs twice and a\
+ pending one is queued once, on V37 and V40 exec alike" ;;
+        2) skip "selfcause: a required Kickstart is not on this machine, or\
+ the rig refused it -- build/selfcause-results.txt names the file" ;;
+        *) fail "selfcause: on some Kickstart a software interrupt that\
+ Cause()s itself does NOT run again, or a pending one ran twice -- the table\
+ above says which ROM, and netdev_soft's design rests on the answer"
+           bad=$((bad + 1)) ;;
+    esac
+
     # THE TWO THAT ARE EXPECTED RED.  Reported by name and counted as
     # failures, because a known defect that stops being counted stops being
     # fixed -- and this is a stage a person names deliberately, so it cannot
