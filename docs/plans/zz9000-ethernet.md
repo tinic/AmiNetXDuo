@@ -43,6 +43,7 @@ same switch. Numbers are one run each unless said otherwise.
 | 12 | **fixed**: the GEM's full TX checksum insertion was enabled, but the stack still walked every TCP payload on the 68030 and the driver did not tell the GEM which writes could use it | matched three-run A/B on the same boot and firmware: software checksum 4.48/4.32/4.55 Mbit/s (mean 4.45), GEM insertion 4.65/4.64/4.63 Mbit/s (mean 4.64, +4.3%). The offload runs inserted 24,558 checksums with no new retransmits, bad packets, checksum errors, or device errors; a separate 60 s run sustained 4.60 Mbit/s | firmware register 0xa6 bit 14 positively reports that GEM full TX checksum insertion is enabled. The driver negotiates TCP/UDP only when that bit is present, validates the Ethernet/IPv4/transport headers, and zeroes the transport checksum only in the copied card-window frame. The retained NetX packet is never changed, so retry and fallback remain safe; old firmware retains software checksums |
 | 13 | **fixed**: the vendor 2.8 RC driver follows `int2 = on` in ZZ9000.CFG; ours had assumed INT6 unconditionally | source audit against v2.8.0-rc3; the current card reports the key absent and continues on INT6 | query firmware config key 5 at attach and register the Exec server on INT2 only when both its value and presence word are nonzero; pre-2.3 firmware reads zero and retains INT6 |
 | 14 | the official 2.8 RC3 driver is not a safe code base for this firmware unchanged: after its first 20.8 s / 10.5 MB receive control both A3000 interfaces stopped answering and required a cold cycle | 4.23 Mbit/s before the hard hang; no post-failure counters were reachable. The updated `anxzz9000.device` immediately followed with 30.4 s / 28.0 MB at 7.72 Mbit/s, both doors still live, zero retransmits, checksum, ring, serial, or device errors | keep the independent bounded serial-ack recovery; upstream the protocol and fixes in reviewable pieces rather than replacing this core with the GPL driver |
+| 15 | **fixed** (fd7af15e): the payload sits 2 mod 4 in the receive slot, and the hardware-checksum fast path and the staging copy handed that source to the plain longword copy, so every longword came off Zorro III in two word cycles; the summed path had always peeled one word first | probe on the A3000, 2026-09-21: window longword reads 1934 ns aligned against 2554 ns at 2 mod 4 (+32 %). Same-boot ABABABAB, 12 s RX, 4 legs per arm: median 5.675 -> 6.055 Mbit/s (+6.7 %), 4 of 4 pairs, ranges overlap -- suggestive at n=4 | `zz_copy_payload()` in `src/netdev/zz9000.c`, the summed copy without the sum, at both sites; `test_netdev_zz9000` proves every bulk source 0 mod 4 |
 
 ## Numbers
 
@@ -58,6 +59,10 @@ same switch. Numbers are one run each unless said otherwise.
 | 64 RX BDs, fit 56 frames, runs of 2 | 7.7 | 2 | 0.05 |
 | runs of 15 | 8.0 | 25-30 | 0.05 |
 | + GEM RX checksum verdict | 7.66 (60 s) | 0 | 0.05 |
+| 2026-09-21, baseline bitstream (ARCACHE 0xF), no L2 invalidate in fw, MNT ZZ9000Net.device, 12 s | 4.35 / 4.41 / 4.50 / 4.51, median 4.455 | 111/55/55/71 | - |
+| same, RX window ARCACHE=0011 | 4.11 / 4.12 / 4.12 / 3.88, median 4.115 (-8.3 %, ranges disjoint) | 60/67/98/48 | - |
+| same boot and firmware, anxzz9000 fefd05ca (payload copy 2 mod 4 off the window), legs 1/3/5/7 of ABABABAB | 5.73 / 6.02 / 5.62 / 4.82, median 5.675 | - | - |
+| same, anxzz9000 fd7af15e (window read longword aligned), legs 2/4/6/8 | 5.86 / 5.97 / 6.14 / 6.63, median 6.055 (+6.7 %, won 4 of 4 pairs, ranges overlap: suggestive, n=4) | - | - |
 | httpd 3.8 MB download (TX) | 381 KB/s (disk-bound; X-Surf iComp 327) | | |
 
 For TCP transmit, a matched three-run test improved from 4.45 Mbit/s mean
@@ -77,7 +82,7 @@ prototype. Current builds classify and coalesce runs in the stack.
 
 | proposal | status |
 |---|---|
-| per-window ARCACHE=0011 in mntzorro.v (RX window normal/non-allocating, framebuffer stays 0xF) | agreed, the clean fix; needs a bitstream (Vivado, not on the rig). Both allocation hints are clear, while bit 1 preserves the Zynq interconnect's modifiable/upsizing path; 0000 would unnecessarily make each read non-modifiable. The firmware invalidation remains the old-bitstream path, gated off only when REG3 bit 12 says the new policy is present -- the bit is advertised by the new bitstream alone (agreed with codex-amiga and zz9k-fpga on AgentNet 2026-09-21; zz9k-fpga owns the bitstream and the A3000 flashing, codex-amiga the firmware contract) |
+| per-window ARCACHE=0011 in mntzorro.v (RX window normal/non-allocating, framebuffer stays 0xF) | **rejected in the tested configuration** (2026-09-21, zz9k-fpga's bitstream, codex-amiga's verdict): on MNT's driver, with neither firmware performing an L2 invalidate, 0x3 read 8.3 % slower than 0xF with disjoint ranges (table above). The stale-serial problem it was meant to fix is handled by the driver's bounded serial-ack recovery; REG3 bit 12 stays reserved for it should a firmware that skips invalidation ever need it |
 | direct MMIO -> final copy | done |
 | GEM checksum offload | RX and TX done without changing the slot ABI: read-only register 0xa6 returns bit 15 RX metadata present, bit 14 TX full-checksum insertion enabled, and BD status bits 23..22 for the current RX slot. MNT's driver is unchanged and was exercised after flashing; an AmiNetXDuo driver on old firmware sees zero and keeps both software paths |
 | stack-side GRO | done; the SANA-II receive layer classifies ordinary verified frames, and NetX window-edge acceptance is fixed and regression-tested; see #7-#9 |
