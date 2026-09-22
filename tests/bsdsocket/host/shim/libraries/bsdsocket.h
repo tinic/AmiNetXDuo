@@ -90,4 +90,98 @@ struct LogHookMessage
     STRPTR           lhm_Message;
 };
 
+/*
+ * SocketBaseTagList()'s vocabulary, for errno.c.  NDK 3.2
+ * netinclude/libraries/bsdsocket.h:70-97 (the tag macros), 100-260 (the
+ * codes) and 1250-1268 (the SBTC_ERROR_HOOK message); the meanings are in
+ * doc/bsdsocket.doc under SocketBaseTagList.  The codes are the wire of the
+ * tag list and the message's member order is ABI.
+ */
+#define SBTF_VAL                0x0000  /* ti_Data is the value              */
+#define SBTF_REF                0x8000  /* ti_Data points at the value       */
+#define SBTB_CODE               1
+#define SBTS_CODE               0x3FFF
+#define SBTM_CODE(td)           (((td) >> SBTB_CODE) & SBTS_CODE)
+#define SBTF_GET                0
+#define SBTF_SET                1
+#define SBTM_GETREF(code) \
+    (TAG_USER | SBTF_REF | (((code) & SBTS_CODE) << SBTB_CODE) | SBTF_GET)
+#define SBTM_GETVAL(code) \
+    (TAG_USER | SBTF_VAL | (((code) & SBTS_CODE) << SBTB_CODE) | SBTF_GET)
+#define SBTM_SETREF(code) \
+    (TAG_USER | SBTF_REF | (((code) & SBTS_CODE) << SBTB_CODE) | SBTF_SET)
+#define SBTM_SETVAL(code) \
+    (TAG_USER | SBTF_VAL | (((code) & SBTS_CODE) << SBTB_CODE) | SBTF_SET)
+
+#define SBTC_BREAKMASK                      1
+#define SBTC_SIGIOMASK                      2
+#define SBTC_SIGURGMASK                     3
+#define SBTC_SIGEVENTMASK                   4
+#define SBTC_ERRNO                          6
+#define SBTC_HERRNO                         7
+#define SBTC_DTABLESIZE                     8
+#define SBTC_FDCALLBACK                     9
+#define SBTC_LOGSTAT                        10
+#define SBTC_LOGTAGPTR                      11
+#define SBTC_LOGFACILITY                    12
+#define SBTC_LOGMASK                        13
+#define SBTC_ERRNOSTRPTR                    14
+#define SBTC_HERRNOSTRPTR                   15
+#define SBTC_IOERRNOSTRPTR                  16
+#define SBTC_S2ERRNOSTRPTR                  17
+#define SBTC_S2WERRNOSTRPTR                 18
+#define SBTC_ERRNOBYTEPTR                   21
+#define SBTC_ERRNOWORDPTR                   22
+#define SBTC_ERRNOLONGPTR                   24
+#define SBTC_HERRNOLONGPTR                  25
+#define SBTC_RELEASESTRPTR                  29
+#define SBTC_NUM_PACKET_FILTER_CHANNELS     40
+#define SBTC_HAVE_ROUTING_API               41
+#define SBTC_UDP_CHECKSUM                   42
+#define SBTC_IP_FORWARDING                  43
+#define SBTC_IP_DEFAULT_TTL                 44
+#define SBTC_ICMP_MASK_REPLY                45
+#define SBTC_ICMP_SEND_REDIRECTS            46
+#define SBTC_HAVE_INTERFACE_API             47
+#define SBTC_ICMP_PROCESS_ECHO              48
+#define SBTC_ICMP_PROCESS_TSTAMP            49
+#define SBTC_HAVE_MONITORING_API            50
+#define SBTC_CAN_SHARE_LIBRARY_BASES        51
+#define SBTC_LOG_FILE_NAME                  52
+#define SBTC_HAVE_STATUS_API                53
+#define SBTC_HAVE_DNS_API                   54
+#define SBTC_LOG_HOOK                       55
+#define SBTC_SYSTEM_STATUS                  56
+#define SBTC_SIG_ADDRESS_CHANGE_MASK        57
+#define SBTC_IPF_API_VERSION                58
+#define SBTC_HAVE_LOCAL_DATABASE_API        59
+#define SBTC_HAVE_ADDRESS_CONVERSION_API    60
+#define SBTC_HAVE_KERNEL_MEMORY_API         61
+#define SBTC_IP_FILTER_HOOK                 62
+#define SBTC_HAVE_SERVER_API                63
+#define SBTC_GET_BYTES_RECEIVED             64
+#define SBTC_GET_BYTES_SENT                 65
+#define SBTC_IDN_DEFAULT_CHARACTER_SET      66
+#define SBTC_HAVE_ROADSHOWDATA_API          67
+#define SBTC_ERROR_HOOK                     68
+#define SBTC_HAVE_GETHOSTADDR_R_API         69
+
+/* What SBTC_SYSTEM_STATUS reports.  NDK 3.2 netinclude/libraries/bsdsocket.h:281-294. */
+#define SBSYSSTAT_Interfaces        (1L<<0)
+#define SBSYSSTAT_PTP_Interfaces    (1L<<1)
+#define SBSYSSTAT_BCast_Interfaces  (1L<<2)
+#define SBSYSSTAT_Resolver          (1L<<3)
+#define SBSYSSTAT_Routes            (1L<<4)
+#define SBSYSSTAT_DefaultRoute      (1L<<5)
+
+struct ErrorHookMsg
+{
+    ULONG   ehm_Size;       /* >= 12 */
+    ULONG   ehm_Action;
+    LONG    ehm_Code;
+};
+
+#define EHMA_Set_errno          1
+#define EHMA_Set_h_errno        2
+
 #endif

@@ -88,6 +88,7 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 #endif
 
     base->sb_NxNest = 1;
+    base->sb_NxTask = FindTask(NULL);
 
     return 0;
 }
@@ -117,6 +118,13 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
 #ifdef AMINETXDUO_NXCENSUS
     base->sb_NxLeaveTicks += bsd_nx_eclock() - t0;
 #endif
+
+    /* The errno hook calls the bracket held back, now that a blocking hook
+       stalls nothing but this task. */
+    if (base->sb_ErrPending)
+        bsd_error_hook_flush(base);
+
+    base->sb_NxTask = NULL;
 }
 
 /*
@@ -139,7 +147,9 @@ VOID bsd_nx_release(struct AmiSocketBase *base)
              (long)(base->sb_NxWorst / 709UL));
 #endif
 
-    base->sb_NxNest = 0;
+    base->sb_NxNest     = 0;
+    base->sb_NxTask     = NULL;
+    base->sb_ErrPending = 0;    /* dropped, not delivered: no bracket to leave */
 
     ami_netstack_release(&base->sb_NxCaller);
 }

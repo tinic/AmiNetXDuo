@@ -230,7 +230,9 @@ static VOID bsd_task_sweep(VOID)
                  (unsigned long)child->sb_Task,
                  (unsigned long)bsd_latched_tasks);
 
-        child->sb_NxNest = 0;
+        child->sb_NxNest     = 0;
+        child->sb_NxTask     = NULL;
+        child->sb_ErrPending = 0;   /* its task is gone: nobody to call */
         ami_netstack_release(&child->sb_NxCaller);
 
         if (!bsd_nx_orphan(child))
@@ -524,6 +526,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
 
     bsd_bzero(&child->sb_NxCaller, sizeof(child->sb_NxCaller));
     child->sb_NxNest = 0;
+    child->sb_NxTask = NULL;
 
     child->sb_Table     = NULL;
     child->sb_TableSize = 0;
@@ -552,6 +555,9 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_LogMask     = 0xFF;
     child->sb_FDCallback  = NULL;
     child->sb_ErrorHook   = NULL;
+    child->sb_ErrPending  = 0;
+    child->sb_ErrPendingCode  = 0;
+    child->sb_HErrPendingCode = 0;
 
     child->sb_TimerOpen    = FALSE;
     child->sb_TimerSignal  = -1;

@@ -299,7 +299,10 @@ host_test_targets() { # builddir
 #      dotted peer), split out of httpd.c on the same rule
 #      425 with test_netdev_zz9000: the receive copies read the card window
 #      longword aligned, on both paths
-HOST_TESTS_EXPECTED=425
+#      427 with test_errno_hook and test_errno_hook_nocache: SBTC_ERROR_HOOK
+#      runs from the outer bsd_nx_leave(), never inside the bracket, over
+#      the cached bracket and the plain one
+HOST_TESTS_EXPECTED=427
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

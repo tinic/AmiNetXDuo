@@ -12,7 +12,8 @@
 #ifndef AMINETXDUO_BSD_TEST_UTILITY_TAGITEM_H
 #define AMINETXDUO_BSD_TEST_UTILITY_TAGITEM_H
 #include <stdint.h>
-struct TagItem { ULONG ti_Tag; uintptr_t ti_Data; };
+typedef ULONG Tag;
+struct TagItem { Tag ti_Tag; uintptr_t ti_Data; };
 #define TAG_DONE   0UL
 #define TAG_END    0UL
 #define TAG_IGNORE 1UL

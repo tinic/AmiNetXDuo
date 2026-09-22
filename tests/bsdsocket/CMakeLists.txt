@@ -387,6 +387,59 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME loghook_contexts COMMAND test_loghook)
 
+    # errno.c and netx_call.c, both as shipped: when SBTC_ERROR_HOOK runs.  A
+    # change made inside the bsd_nx_enter() bracket is delivered from the outer
+    # bsd_nx_leave(), on the caller's task, with the bracket given back.  The
+    # ThreadX bracket underneath is the test's, with a flag the hook reads.
+    #
+    # Twice: netx_call.c takes the cached bracket by default and the plain one
+    # under AMINETXDUO_NXCACHE=0, which the pathswap arm ships, and the plain
+    # one never writes nc_Task.  Both must defer.
+    #
+    # The two -Wno flags are for errno.c's SocketBaseTagList(), which stores
+    # pointers through ULONG tag slots -- the target's width, not this host's.
+    # The test does not drive those tags (the hook goes in through the base
+    # field, the mirror through SetErrnoPtr()); transfer.c is left out for the
+    # same reason, its iovec assertions hold only at 32 bits.
+    #
+    # AMI_BPF_REPLICA: errno.c reads AMI_BPF_MAX_CHANNELS off aminetxduo/bpf.h,
+    # whose real half includes the host's <net/if.h>.
+    set(BSD_ERRNO_HOOK_SOURCES host/test_errno_hook_host.c
+                               "${CMAKE_SOURCE_DIR}/src/bsdsocket/errno.c"
+                               "${CMAKE_SOURCE_DIR}/src/bsdsocket/netx_call.c")
+    set(BSD_ERRNO_HOOK_INCLUDES
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_BINARY_DIR}/include"           # generated version.h
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+    set(BSD_ERRNO_HOOK_OPTIONS
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast)
+    set(BSD_ERRNO_HOOK_DEFINES
+        AMI_BPF_REPLICA
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    # Two literal add_executable() lines, not a loop: tools/check-harnesses.sh
+    # reads the target names off the text.
+    add_executable(test_errno_hook ${BSD_ERRNO_HOOK_SOURCES})
+    target_include_directories(test_errno_hook PRIVATE ${BSD_ERRNO_HOOK_INCLUDES})
+    target_compile_options(test_errno_hook PRIVATE ${BSD_ERRNO_HOOK_OPTIONS})
+    target_compile_definitions(test_errno_hook PRIVATE ${BSD_ERRNO_HOOK_DEFINES})
+
+    add_executable(test_errno_hook_nocache ${BSD_ERRNO_HOOK_SOURCES})
+    target_include_directories(test_errno_hook_nocache PRIVATE ${BSD_ERRNO_HOOK_INCLUDES})
+    target_compile_options(test_errno_hook_nocache PRIVATE ${BSD_ERRNO_HOOK_OPTIONS})
+    target_compile_definitions(test_errno_hook_nocache PRIVATE ${BSD_ERRNO_HOOK_DEFINES}
+        AMINETXDUO_NXCACHE=0)
+
+    add_test(NAME errno_hook_deferral         COMMAND test_errno_hook)
+    add_test(NAME errno_hook_deferral_nocache COMMAND test_errno_hook_nocache)
+
     # transfer.c's connected-UDP readiness and FIONREAD paths inspect packets
     # before nx_udp_socket_receive() removes the UDP header.  netstats.c also
     # reads UDP queue payloads and TCP's distinct sent-list accounting.  This

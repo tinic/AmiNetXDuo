@@ -293,6 +293,7 @@ struct AmiSocketBase
     BsdFdSets               sb_SelIn;
     BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
+    struct Task            *sb_NxTask;      /* who holds it; NULL == outside */
 
 
 #ifdef AMINETXDUO_NXCENSUS
@@ -341,9 +342,14 @@ struct AmiSocketBase
     LONG                  (*sb_FDCallback)(register LONG fd     __asm("d0"),
                                            register LONG action __asm("d1"));
 
-    /* SBTC_ERROR_HOOK: called on every errno/h_errno change. */
+    /* SBTC_ERROR_HOOK: called on every errno/h_errno change.  A change made
+       inside the bsd_nx_enter() bracket is recorded here and the hook runs
+       from the outer bsd_nx_leave(), see errno.c. */
     struct Hook            *sb_ErrorHook;
+    LONG                    sb_ErrPendingCode;
+    LONG                    sb_HErrPendingCode;
 
+    UBYTE                   sb_ErrPending;      /* bit 0 errno, bit 1 h_errno */
     BYTE                    sb_EventSignal;
     ULONG                   sb_EventSigMask;
 
@@ -762,6 +768,9 @@ ULONG bsd_open_count(struct AmiSocketBase *base);
 
 VOID  bsd_set_errno(struct AmiSocketBase *base, LONG code);
 VOID  bsd_set_herrno(struct AmiSocketBase *base, LONG code);
+/* Deliver the SBTC_ERROR_HOOK calls a bracket held back.  Called from the
+   outer bsd_nx_leave() in netx_call.c. */
+VOID  bsd_error_hook_flush(struct AmiSocketBase *base);
 const char *bsd_errno_string(LONG code);
 LONG  bsd_errno_from_nx(UINT status);
 /* The same, for a status from a call that was given `wait`, see errno.c. */

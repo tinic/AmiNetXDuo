@@ -25,6 +25,16 @@
  * on the context of the caller." The register shape is the autodoc's:
  * error = hookfunc(hook, reserved, ehm) in A0, A2, A1, reserved NULL.
  *
+ * Most changes happen inside the bsd_nx_enter() bracket, where every stack
+ * thread is parked and a hook that blocks stalls all traffic.  So a change
+ * made inside the bracket is recorded on the base and the hook runs from the
+ * outer bsd_nx_leave(): on the task that set errno, after that task has left
+ * the bracket, before the vector returns.  sb_Errno and the mirror already
+ * hold the code by then.  Several changes to one variable inside one bracket
+ * make one call, with the last code.  The hook may block and may call
+ * bsdsocket; the recommended hook is still synchronous and does not block --
+ * store the code, or Signal()/PutMsg() a task.  A change made outside any
+ * bracket calls the hook at once.
  */
 typedef LONG (*BsdErrorHookFn)(register struct Hook *hook __asm("a0"),
                                register APTR reserved __asm("a2"),
@@ -36,14 +46,13 @@ typedef union BsdErrorHookEntry
     BsdErrorHookFn   behe_Fn;
 } BsdErrorHookEntry;
 
-static VOID bsd_error_hook(struct AmiSocketBase *base, ULONG action, LONG code)
+#define BSD_ERRPEND_ERRNO   0x01
+#define BSD_ERRPEND_HERRNO  0x02
+
+static VOID bsd_error_hook_call(struct Hook *hook, ULONG action, LONG code)
 {
-    struct Hook        *hook = base->sb_ErrorHook;
     struct ErrorHookMsg ehm;
     BsdErrorHookEntry   entry;
-
-    if (hook == NULL || hook->h_Entry == NULL)
-        return;
 
     ehm.ehm_Size   = (ULONG)sizeof(ehm);
     ehm.ehm_Action = action;
@@ -53,32 +62,79 @@ static VOID bsd_error_hook(struct AmiSocketBase *base, ULONG action, LONG code)
     (VOID)entry.behe_Fn(hook, NULL, &ehm);
 }
 
+static VOID bsd_error_hook(struct AmiSocketBase *base, ULONG action, LONG code)
+{
+    struct Hook *hook = base->sb_ErrorHook;
+
+    if (hook == NULL || hook->h_Entry == NULL)
+        return;
+
+    /* Inside the bracket, on the task that holds it: record, and let the
+       outer bsd_nx_leave() make the call. */
+    if (base->sb_NxNest > 0 && base->sb_NxTask == FindTask(NULL))
+    {
+        if (action == EHMA_Set_errno)
+        {
+            base->sb_ErrPendingCode = code;
+            base->sb_ErrPending    |= BSD_ERRPEND_ERRNO;
+        }
+        else
+        {
+            base->sb_HErrPendingCode = code;
+            base->sb_ErrPending     |= BSD_ERRPEND_HERRNO;
+        }
+        return;
+    }
+
+    bsd_error_hook_call(hook, action, code);
+}
+
+VOID bsd_error_hook_flush(struct AmiSocketBase *base)
+{
+    struct Hook *hook    = base->sb_ErrorHook;
+    UBYTE        pending = base->sb_ErrPending;
+    LONG         code    = base->sb_ErrPendingCode;
+    LONG         hcode   = base->sb_HErrPendingCode;
+
+    /* Cleared before the calls: a hook that re-enters a vector must not see
+       its own pending state. */
+    base->sb_ErrPending = 0;
+
+    if (pending == 0 || hook == NULL || hook->h_Entry == NULL)
+        return;
+
+    if (pending & BSD_ERRPEND_ERRNO)
+        bsd_error_hook_call(hook, EHMA_Set_errno, code);
+    if (pending & BSD_ERRPEND_HERRNO)
+        bsd_error_hook_call(hook, EHMA_Set_h_errno, hcode);
+}
+
 VOID bsd_set_errno(struct AmiSocketBase *base, LONG code)
 {
     base->sb_Errno = code;
 
-    bsd_error_hook(base, EHMA_Set_errno, code);
-
-    if (base->sb_ErrnoPtr == NULL)
-        return;
-
-    switch (base->sb_ErrnoSize)
+    if (base->sb_ErrnoPtr != NULL)
     {
-        case 1:  *(BYTE *)base->sb_ErrnoPtr = (BYTE)code;  break;
-        case 2:  *(WORD *)base->sb_ErrnoPtr = (WORD)code;  break;
-        case 4:  *(LONG *)base->sb_ErrnoPtr = code;        break;
-        default: break;
+        switch (base->sb_ErrnoSize)
+        {
+            case 1:  *(BYTE *)base->sb_ErrnoPtr = (BYTE)code;  break;
+            case 2:  *(WORD *)base->sb_ErrnoPtr = (WORD)code;  break;
+            case 4:  *(LONG *)base->sb_ErrnoPtr = code;        break;
+            default: break;
+        }
     }
+
+    bsd_error_hook(base, EHMA_Set_errno, code);
 }
 
 VOID bsd_set_herrno(struct AmiSocketBase *base, LONG code)
 {
     base->sb_HErrno = code;
 
-    bsd_error_hook(base, EHMA_Set_h_errno, code);
-
     if (base->sb_HErrnoPtr != NULL)
         *base->sb_HErrnoPtr = code;
+
+    bsd_error_hook(base, EHMA_Set_h_errno, code);
 }
 
 LONG bsd_fail(struct AmiSocketBase *base, LONG code)
