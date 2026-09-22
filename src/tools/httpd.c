@@ -4068,6 +4068,29 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
     }
 
+    /* /iperf is an application address like the three above, not a file:
+       resolved against the volume list (the default, no ROOT) its first
+       segment named no volume and every measurement was refused with 403
+       before httpd_iperf_hook() saw it.  It carried the same bytes the hook
+       parses, so they go through as they are, up to any query. */
+    if (hs_nicmp(httpd_target, "/iperf", 6) == 0 &&
+        (httpd_target[6] == '\0' || httpd_target[6] == '/' ||
+         httpd_target[6] == '?'))
+    {
+        ULONG n = 0;
+
+        while (httpd_target[n] != '\0' && httpd_target[n] != '?' &&
+               n < sizeof(c->path.url) - 1)
+        {
+            c->path.url[n] = httpd_target[n];
+            n++;
+        }
+        c->path.url[n]  = '\0';
+        c->path.path[0] = '\0';
+        c->path.name[0] = '\0';
+        return TRUE;
+    }
+
     why = httpd_resolve_path(httpd_target, &c->path);
     if (why != HTTP_PATH_OK)
     {
