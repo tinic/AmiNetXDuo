@@ -36,7 +36,8 @@ ULONG genet_rev_major(ULONG rev);
 BOOL  genet_mdf_fits(const NetdevMcast *table, UWORD max);
 
 /* UMAC_MDF_CTRL with the first `slots` slots enabled: slot k is enabled by
-   bit (GENET_MAX_MDF_FILTER - 1 - k). */
+   bit (GENET_MAX_MDF_FILTER - 1 - k).  `slots` is 0..GENET_MAX_MDF_FILTER,
+   which genet_mdf_fits() guarantees; more would shift by a negative count. */
 ULONG genet_mdf_ctrl_word(UWORD slots);
 
 /* ------------------------------------------------------------------ GIC --- */

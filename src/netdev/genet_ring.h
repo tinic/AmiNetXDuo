@@ -71,7 +71,9 @@ static inline ULONG genet_ring_timeout_word(ULONG v, ULONG ticks)
     return (v & ~GENET_DMA_RING_TIMEOUT_MASK) | ticks;
 }
 
-/* The pages a range touches, for the supervised cpushp loop. */
+/* The pages a range touches, for the supervised cpushp loop.  `len` is at
+   least 1 and addr + len does not wrap: a zero length or a range past the
+   top of the address space reads one page too few or underflows. */
 #define GENET_PAGE          4096UL
 
 static inline ULONG genet_page_first(ULONG addr)
