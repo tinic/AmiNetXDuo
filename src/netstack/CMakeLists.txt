@@ -3,11 +3,18 @@
 # This is what ties the four other components together: it owns the ThreadX
 # kernel, the packet pool, the NX_IP instance, the SANA-II interfaces, the DHCP
 # and AutoIP clients and the DNS resolver.
+#
+# netstack_slot.c is which slot a new interface takes and which one yields to
+# it; netstack_iptype.c is what the IPTYPE lines add up to, and which slot the
+# link-local fallback serves.  Both were in netstack.c and are out on the rule
+# netstack_gateway.c follows: a file with no NetX Duo call in it can be run by
+# a host test, and netstack.c cannot.
 
 set(NETSTACK_SOURCES
     netstack.c
     netstack_caller.c
     netstack_claim.c
+    netstack_iptype.c
     netstack_lock.c
     netstack_port.c
     netstack_routes.c
@@ -19,7 +26,8 @@ set(NETSTACK_SOURCES
     netstack_pool.c
     netstack_pool_runtime.c
     netstack_memlist.c
-    netstack_retry.c)
+    netstack_retry.c
+    netstack_slot.c)
 
 # The resolver.  netstack_dns_status.c and the lease/domain/handoff helpers
 # have no caller but netstack_dns.c, so they come with it.
@@ -31,6 +39,13 @@ list(APPEND NETSTACK_SOURCES
     netstack_dns_status.c)
 
 list(APPEND NETSTACK_SOURCES netstack_dhcp_hostname.c)
+
+# The option 61 this stack sends, the address lists and text it reads out of a
+# lease, and the names of the client's states.  Only the DHCP build has a
+# caller, so only it compiles the file.
+if(AMINETXDUO_DHCP)
+    list(APPEND NETSTACK_SOURCES netstack_dhcp_wire.c)
+endif()
 
 # The ARexx host.  Without it netstack_port.c opens a bare AMITCP port, so the
 # floor build pays for neither the variable table nor the process behind it.

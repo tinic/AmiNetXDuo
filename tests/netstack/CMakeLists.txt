@@ -663,6 +663,74 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dhcp_hostname COMMAND test_dhcp_hostname)
 
+    # Which slot a new interface takes -- the first-free scan that has to
+    # agree with nx_ip_interface_attach() -- and which boot-found slot yields
+    # to an interface somebody named when the table is full.  Split out of
+    # netstack.c so the full-table case can be put in front of it here; the
+    # lab has one card per machine and never reaches it.
+    add_executable(test_slot
+        host/test_slot_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_slot.c")
+
+    target_include_directories(test_slot PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_slot PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME slot COMMAND test_slot)
+
+    # What the IPTYPE lines add up to: whether the bring-up starts DHCP, waits
+    # for an address at all, and which slot the RFC 3927 fallback serves.
+    # config_parse.c comes along for ami_config_iface_wants_ipv4(), the one
+    # rule the scans share with the parser, and the three files it links to.
+    add_executable(test_iptype
+        host/test_iptype_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_iptype.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_parse.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_text.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_text6.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c")
+
+    target_include_directories(test_iptype PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/config"
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_iptype PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME iptype COMMAND test_iptype)
+
+    # The DHCPv4 bytes at the client boundary: option 61 pinned byte by byte,
+    # the address-list and text readers a lease goes through, and the state
+    # name and class tables.  Same include recipe as test_dns_status: the
+    # file names AMI_DHCP_* from <aminetxduo/netstack.h>, which pulls in the
+    # ThreadX and NetX Duo headers, and nothing of theirs is linked.
+    add_executable(test_dhcp_wire
+        host/test_dhcp_wire_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dhcp_wire.c")
+
+    target_compile_options(test_dhcp_wire PRIVATE -UAMINETXDUO_IPV6
+        -Wall -Wextra -Werror)
+
+    target_include_directories(test_dhcp_wire PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"      # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dhcp_wire PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME dhcp_wire COMMAND test_dhcp_wire)
+
     # The RFC 8106 callbacks run on the IP thread, while a caller task absorbs
     # their state before entering the DNS client.  Permit() in this harness
     # injects a second advertisement exactly after the snapshot, proving that
@@ -721,10 +789,13 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_routes.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_client_pool.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_config_runtime.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dhcp_wire.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway_apply.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_iptype.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool_runtime.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_slot.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
         host/netstack_host_env.c)
 

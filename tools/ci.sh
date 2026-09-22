@@ -285,7 +285,10 @@ host_test_targets() { # builddir
 #      runner), and the runner's list is the local list.
 #      414 with test_httphead and test_httpxml: the request-head pass and
 #      the WebDAV XML skimmer, split out of httpd.c so they can be run here
-HOST_TESTS_EXPECTED=414
+#      417 with test_slot, test_iptype and test_dhcp_wire: interface slot
+#      placement, the IPTYPE scans and the DHCPv4 option bytes, split out of
+#      netstack.c on the same rule
+HOST_TESTS_EXPECTED=417
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,

@@ -5,6 +5,11 @@
  */
 
 #include "netstack_internal.h"
+#include "netstack_iptype.h"
+#include "netstack_slot.h"
+#ifdef AMINETXDUO_DHCP
+#include "netstack_dhcp_wire.h"
+#endif
 #include "aminetxduo/nxstatus.h"
 
 #include "aminetxduo/netstatus.h"
@@ -831,64 +836,25 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     return AMI_NET_OK;
 }
 
+/* The configured interfaces as netstack_iptype.c sees them. */
 static BOOL ami_ns_wants(const AmiNetStack *ns, AmiIpType type)
 {
-    UWORD i;
-
-    for (i = 0; i < ns->ns_IfaceCount; i++)
-    {
-        if (ns->ns_Config.interfaces[i].iptype == type)
-            return TRUE;
-    }
-
-    return FALSE;
+    return ami_ns_iptype_any(ns->ns_Config.interfaces, ns->ns_IfaceCount, type);
 }
 
 static BOOL ami_ns_wants_ipv4(const AmiNetStack *ns)
 {
-    UWORD i;
-
-    for (i = 0; i < ns->ns_IfaceCount; i++)
-    {
-        if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
-            return TRUE;
-    }
-
-    return FALSE;
+    return ami_ns_iptype_any_ipv4(ns->ns_Config.interfaces, ns->ns_IfaceCount);
 }
 
 static LONG ami_ns_autoip_select(AmiNetStack *ns, LONG requested_interface)
 {
     UINT  status;
-    UWORD i;
+    LONG  i;
 
-    if (requested_interface >= 0)
-    {
-        if ((ULONG)requested_interface >= (ULONG)ns->ns_IfaceCount ||
-            !ami_config_iface_wants_ipv4(
-                &ns->ns_Config.interfaces[requested_interface]))
-            return AMI_NET_ERR_CONFIG;
-
-        i = (UWORD)requested_interface;
-    }
-    else
-    {
-        for (i = 0; i < ns->ns_IfaceCount; i++)
-        {
-            if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
-                break;
-        }
-        if (i == ns->ns_IfaceCount)
-        {
-            for (i = 0; i < ns->ns_IfaceCount; i++)
-            {
-                if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
-                    break;
-            }
-        }
-    }
-
-    if (i == ns->ns_IfaceCount)
+    i = ami_ns_iptype_autoip_slot(ns->ns_Config.interfaces, ns->ns_IfaceCount,
+                                  requested_interface);
+    if (i < 0)
         return AMI_NET_ERR_CONFIG;
 
     status = nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
@@ -992,12 +958,6 @@ static LONG ami_ns_start_autoip(AmiNetStack *ns, LONG requested_interface)
  * Exec-only and legal from any Task, and nothing here blocks.
  */
 
-static BOOL ami_ns_is_linklocal(ULONG addr)
-{
-    return (addr >= IP_ADDRESS(169, 254, 0, 0) &&
-            addr <= IP_ADDRESS(169, 254, 255, 255)) ? TRUE : FALSE;
-}
-
 static VOID ami_ns_log_address(const char *what, UWORD index, ULONG addr)
 {
     AMI_INFO("netstack: interface %ld %s %lu.%lu.%lu.%lu",
@@ -1097,7 +1057,7 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             AMI_WARN("netstack: interface %ld no longer has an address",
                      (long)i);
         }
-        else if (ami_ns_is_linklocal(addr))
+        else if (ami_ns_iptype_linklocal(addr))
             ami_ns_log_address("has the link-local address", i, addr);
         else
             ami_ns_log_address("address is now", i, addr);
@@ -1112,7 +1072,7 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
          */
         if (ns->ns_AutoIpRunning &&
             (UINT)i == ns->ns_AutoIp.nx_ip_interface_index &&
-            addr != 0UL && !ami_ns_is_linklocal(addr) &&
+            addr != 0UL && !ami_ns_iptype_linklocal(addr) &&
             tx_thread_identify() != &ns->ns_AutoIp.nx_auto_ip_thread)
         {
             /* OPTIONAL.  A link-local hunt that will not stop costs ARP
@@ -1136,21 +1096,6 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
 }
 
 #ifdef AMINETXDUO_DHCP
-static const char *ami_ns_dhcp_state_name(UCHAR state)
-{
-    static const char *const names[] = {
-        "dhcp-notstarted", "dhcp-boot",       "dhcp-init",
-        "dhcp-selecting",  "dhcp-requesting", "dhcp-bound",
-        "dhcp-renewing",   "dhcp-rebinding",  "dhcp-forcerenew",
-        "dhcp-probing"
-    };
-
-    if ((UINT)state >= (UINT)(sizeof(names) / sizeof(names[0])))
-        return "dhcp-other";
-
-    return names[state];
-}
-
 static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
                                       UCHAR new_state)
 {
@@ -1313,20 +1258,24 @@ static VOID ami_ns_dhcp_discover_now(NX_DHCP *dhcp)
 
 /*
  * DHCP option 61, the client identifier, in the RFC 2132 9.14 form: hardware
- * type 0x01 then the six MAC bytes.  Returning anything but NX_TRUE makes
- * NetX Duo drop the whole message, so a short buffer costs only the option.
+ * type 0x01 then the six MAC bytes; netstack_dhcp_wire.c lays it out.
+ * Returning anything but NX_TRUE makes NetX Duo drop the whole message, so a
+ * short buffer costs only the option.
  */
+_Static_assert(AMI_DHCP_OPTION_CLIENT_ID == NX_DHCP_OPTION_CLIENT_ID,
+               "DHCP option 61");
+_Static_assert(AMI_DHCP_CLIENT_ID_SIZE == NX_DHCP_OPTION_CLIENT_ID_SIZE,
+               "DHCP option 61");
+
 static UINT ami_ns_dhcp_client_id(NX_DHCP *dhcp_ptr, UINT iface_index,
                                   UINT message_type, UCHAR *option_ptr,
                                   UINT *option_length)
 {
     NX_INTERFACE *nxif;
-    ULONG         msw, lsw;
 
     (VOID)message_type;
 
-    if (*option_length < (NX_DHCP_OPTION_CLIENT_ID_SIZE + 2) ||
-        dhcp_ptr->nx_dhcp_ip_ptr == NX_NULL ||
+    if (dhcp_ptr->nx_dhcp_ip_ptr == NX_NULL ||
         iface_index >= NX_MAX_PHYSICAL_INTERFACES)
     {
         *option_length = 0;
@@ -1334,20 +1283,11 @@ static UINT ami_ns_dhcp_client_id(NX_DHCP *dhcp_ptr, UINT iface_index,
     }
 
     nxif = &dhcp_ptr->nx_dhcp_ip_ptr->nx_ip_interface[iface_index];
-    msw  = nxif->nx_interface_physical_address_msw;
-    lsw  = nxif->nx_interface_physical_address_lsw;
 
-    option_ptr[0] = NX_DHCP_OPTION_CLIENT_ID;
-    option_ptr[1] = NX_DHCP_OPTION_CLIENT_ID_SIZE;
-    option_ptr[2] = 0x01;                       /* RFC 1700 hardware type */
-    option_ptr[3] = (UCHAR)(msw >> 8);
-    option_ptr[4] = (UCHAR)(msw);
-    option_ptr[5] = (UCHAR)(lsw >> 24);
-    option_ptr[6] = (UCHAR)(lsw >> 16);
-    option_ptr[7] = (UCHAR)(lsw >> 8);
-    option_ptr[8] = (UCHAR)(lsw);
-
-    *option_length = NX_DHCP_OPTION_CLIENT_ID_SIZE + 2;
+    *option_length = ami_ns_dhcp_client_id_build(
+                         nxif->nx_interface_physical_address_msw,
+                         nxif->nx_interface_physical_address_lsw,
+                         option_ptr, *option_length);
 
     return NX_TRUE;
 }
@@ -2641,50 +2581,22 @@ LONG netstack_interface_dhcp_state(UWORD index)
     if (!ns->ns_DhcpCreated)
         return AMI_DHCP_IDLE;
 
-    switch (ns->ns_DhcpState[index])
-    {
-        case NX_DHCP_STATE_NOT_STARTED:
-            return AMI_DHCP_IDLE;
-
-        case NX_DHCP_STATE_BOUND:
-        case NX_DHCP_STATE_RENEWING:
-        case NX_DHCP_STATE_REBINDING:
-            return AMI_DHCP_BOUND;
-
-        default:
-            return AMI_DHCP_WORKING;
-    }
+    return ami_ns_dhcp_state_class(ns->ns_DhcpState[index]);
 }
 
+/* One list-of-addresses option from the lease of one interface. */
 static UWORD ami_ns_dhcp_addr_list(AmiNetStack *ns, UWORD index, UINT option,
                                    ULONG *out, UWORD max)
 {
     UCHAR buffer[AMI_DHCP_MAX_ADDRS * 4];
     UINT  size = (UINT)sizeof(buffer);
-    UWORD count = 0;
-    UWORD i;
 
     if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
                                                option, buffer,
                                                &size) != NX_SUCCESS)
         return 0;
 
-    for (i = 0; (ULONG)(i + 1) * 4UL <= (ULONG)size && count < max; i++)
-    {
-        ULONG addr = ((ULONG)buffer[i * 4] << 24) |
-                     ((ULONG)buffer[i * 4 + 1] << 16) |
-                     ((ULONG)buffer[i * 4 + 2] << 8) |
-                      (ULONG)buffer[i * 4 + 3];
-
-        /*
-         * "A router address of 0 should be ignored", and the same for the
-         * other two lists.
-         */
-        if (addr != 0)
-            out[count++] = addr;
-    }
-
-    return count;
+    return ami_ns_dhcp_addr_list_decode(buffer, size, out, max);
 }
 
 /* One DHCP option that is text.  Not NUL-terminated on the wire. */
@@ -2693,7 +2605,6 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
 {
     UCHAR buffer[128];
     UINT  size = (UINT)sizeof(buffer);
-    ULONG n;
 
     out[0] = '\0';
 
@@ -2702,14 +2613,7 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
                                                &size) != NX_SUCCESS)
         return;
 
-    n = (ULONG)size;
-    if (n >= outlen)
-        n = outlen - 1;
-
-    for (outlen = 0; outlen < n; outlen++)
-        out[outlen] = (char)buffer[outlen];
-
-    out[n] = '\0';
+    ami_ns_dhcp_text_decode(buffer, size, out, outlen);
 }
 
 LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
@@ -2930,23 +2834,41 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
 #endif /* AMINETXDUO_DHCP */
 
 /*
+ * The interface tables as netstack_slot.c sees them.  Only the slots NetX Duo
+ * has are read from ns_Ip; the scan for a vacant one stops there too.
+ */
+static VOID ami_ns_slot_table(const AmiNetStack *ns,
+                              AmiNsSlot slot[AMI_CFG_MAX_ATTACHED])
+{
+    UWORD i;
+
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
+    {
+        slot[i].attached = (i < (UWORD)NX_MAX_PHYSICAL_INTERFACES &&
+                            ns->ns_Ip.nx_ip_interface[i].nx_interface_valid
+                                != 0) ? TRUE : FALSE;
+        slot[i].held     = (ns->ns_Iface[i] != NULL) ? TRUE : FALSE;
+        slot[i].wanted   = ns->ns_IfaceWanted[i];
+        slot[i].claims   = ns->ns_IfaceClaims[i];
+    }
+}
+
+/*
  * Predict the slot a new interface will land in -- the same first-free scan
  * nx_ip_interface_attach() does -- because ami_sana2_attach() must record the
  * (NX_IP, index) binding before the attach calls the driver.
  */
 static LONG ami_ns_vacant_interface_slot(AmiNetStack *ns)
 {
-    UWORD i;
+    AmiNsSlot slot[AMI_CFG_MAX_ATTACHED];
+    UWORD     count = (UWORD)AMI_CFG_MAX_ATTACHED;
 
-    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES &&
-                i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
-    {
-        if (ns->ns_Ip.nx_ip_interface[i].nx_interface_valid == 0 &&
-            ns->ns_Iface[i] == NULL && ns->ns_IfaceClaims[i] == 0)
-            return (LONG)i;
-    }
+    if (count > (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+        count = (UWORD)NX_MAX_PHYSICAL_INTERFACES;
 
-    return -1;
+    ami_ns_slot_table(ns, slot);
+
+    return ami_ns_slot_vacant(slot, count);
 }
 
 /*
@@ -2956,16 +2878,11 @@ static LONG ami_ns_vacant_interface_slot(AmiNetStack *ns)
  */
 static LONG ami_ns_yield_candidate(AmiNetStack *ns)
 {
-    LONG i;
+    AmiNsSlot slot[AMI_CFG_MAX_ATTACHED];
 
-    for (i = (LONG)AMI_CFG_MAX_ATTACHED - 1; i >= 0; i--)
-    {
-        if (ns->ns_Iface[i] != NULL && !ns->ns_IfaceWanted[i] &&
-            ns->ns_IfaceClaims[i] == 0)
-            return i;
-    }
+    ami_ns_slot_table(ns, slot);
 
-    return -1;
+    return ami_ns_slot_yield_candidate(slot, (UWORD)AMI_CFG_MAX_ATTACHED);
 }
 
 /*
