@@ -1,6 +1,6 @@
 # ZZ9000 Ethernet: anxzz9000.device and the firmware fork
 
-State of 2026-09-20 09:10 UTC. Everything below was measured on the real
+The original measurements below began on 2026-09-20. They were made on the real
 A3000 (68030/25, OS 3.2, 12 MB motherboard RAM, ZZ9000 at $48000000 Zorro III,
 X-Surf 100 at $40000000 for the door) against a gigabit Linux peer on the
 same switch. Numbers are one run each unless said otherwise.
@@ -11,8 +11,40 @@ same switch. Numbers are one run each unless said otherwise.
 |---|---|
 | driver `anxzz9000.device` | independent MIT implementation (not derived from GPL `ZZ9000Net.device`): `src/netdev/zz9000.c`, `NETDEV_ROSTER_ZZ9000`, card rows appended after `genet`, `n68k_copy_longs_sum`; GRO classification now lives in the stack's ordinary SANA-II receive path |
 | firmware | github.com/tinic/zz9000-firmware branch `aminetxduo` (= codex's `console-encode-offload` + the commits below); built with Arm GNU 13.2.rel1 + bootgen (no docker, no Vivado on the rig) |
-| flashed on the A3000 | `BOOT-txcsum-mcast.bin` (multicast receive plus register 0xa6 = 0xc000: RX metadata and TX checksum insertion present); earlier candidates remain under `Work:Attic/ZZ9000-console/` |
+| flashed on the A3000 | `BOOT-gem-txcsum.bin` from firmware `aminetxduo` commit `e29e143` (GEM INCR16 plus the earlier RX fixes and TX capability advertisement); earlier candidates remain under `Work:Attic/ZZ9000-console/` |
 | boot config | unchanged: `DEVS:NetInterfaces/zz9000` still names MNT's `ZZ9000Net.device`; ours is installed beside at `AmiNetXDuo:Devs/Networks/anxzz9000.device` and brought up from `RAM:zz9k` for a test |
+
+## Consolidated RX build, 2026-09-23
+
+The retained RX features were tested together without adding the rejected
+ARCACHE=0x3 bitstream, standard-path direct-window callback, or shifted-source
+staging experiments. Firmware `aminetxduo` commit `e29e143` produced
+`BOOT-gem-txcsum.bin` (SHA-256
+`19102bf453f8d3c605a7ffcf56fbb15ca61f845f34c82710302892e40903b451`);
+its FSBL and FPGA partitions match the prior `BOOT-mcast.bin` image. A clean
+Release build of AmiNetXDuo `main` commit `b7e9fed0` produced
+`anxzz9000.device` (MD5 `0ac7554017933fd47024c1d25a78ef0c`). The
+`netdev_zz9000`, `netdev_verify`, and `netdev_extension` host tests passed.
+Both artifacts are backed up under `Work:Attic/ZZ9000-console/`; the previous
+installed driver is backed up there as `anxzz9000-pre-consolidated.device`.
+
+With the card's 256 MB RAM mapped, the combined pair received TCP at 8.57
+Mbit/s over 12 seconds, 8.38 Mbit/s over 60 seconds (60.6 MB), and 8.43
+Mbit/s over 150 seconds (152 MB). The long run crossed the 16-bit receive
+serial wrap; its final device counters showed zero bad data, overruns, serial
+gaps, rejected-ACK recoveries, and watchdog resets. The GEM verdict verified
+161,737 frames, with 45 software fallbacks; stack checksum errors stayed at
+zero. Both A3000 HTTP doors answered during and after the run, and the ZZ9000
+global IPv6 HTTP door answered too. These runs exercise the combined build,
+not an isolated A/B estimate for any single RX optimization.
+
+For an application-level RX check, `ConfigureNetInterface zz9k PRIORITY 30`
+temporarily put ZZ9000 above X-Surf (`eth0` priority 20). `fetch` downloaded
+a 16 MiB uncompressed HTTP fixture to `RAM:` in 28 seconds by the Amiga's
+one-second `Date` clock, about 4.8 Mbit/s. The server log confirmed the GET
+source was ZZ9000's `192.168.1.161`, not X-Surf's address; the file size was
+16,777,216 bytes. `zz9k` priority was restored to 0 afterward. The boot
+configuration remains MNT's driver, so a reboot returns to it.
 
 ## The card as the 68k sees it (measured)
 
