@@ -558,19 +558,25 @@ static LONG bsd_send_tcp_cork(struct AmiSocketBase *base, AmiSocket *sock,
 
     wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
-    if ((flags & MSG_OOB) != 0 || !bsd_cork_corkable(sock))
-    {
-        if (bsd_cork_drain(base, sock, wait, run) != 0)
-            return -1;
-        return bsd_send_tcp_run(base, sock, cur, len, flags, run);
-    }
-
     rc = bsd_cork_claim(base, sock, wait, &pkt);
     if (rc != 0)
     {
         if (rc == AMI_EAGAIN)
             sock->as_TxWait = 1;
         return bsd_fail(base, rc);
+    }
+
+    /* Asked with the claim held, so no task sharing the socket can turn
+       TCP_NODELAY 1 between the answer and an append: a claim can wait, and
+       another task's setsockopt() runs while it does.  Not corkable, the
+       segment only drains -- nothing is ever appended to it again. */
+    if ((flags & MSG_OOB) != 0 || !bsd_cork_corkable(sock))
+    {
+        if (bsd_cork_unclaim(sock, pkt, BSD_CORKF_TICK))
+            bsd_tcp_send_fin(sock);
+        if (bsd_cork_drain(base, sock, wait, run) != 0)
+            return -1;
+        return bsd_send_tcp_run(base, sock, cur, len, flags, run);
     }
 
     /* Judged by mss: zero is the fallback below. */
@@ -714,7 +720,11 @@ static BOOL bsd_cork_fast_append(AmiSocket *sock, BsdIovCursor *cur, LONG len)
     Forbid();
     pkt   = sock->as_CorkPkt;
     state = sock->as_Nx.tcp.nx_tcp_socket_state;
-    if (sock->as_CorkState != BSD_CORK_IDLE || pkt == NULL ||
+    /* Every flag again, under the Forbid() that makes the answer hold: the
+       unlocked look above is only the cheap way out.  A task sharing the
+       socket may have set TCP_NODELAY 1 since, leaving a segment to drain. */
+    if ((sock->as_CorkFlags & BSD_CORKF_ON) == 0 ||
+        sock->as_CorkState != BSD_CORK_IDLE || pkt == NULL ||
         (sock->as_CorkFlags & BSD_CORKF_STALLED) != 0 ||
         (ULONG)len >= bsd_cork_room(sock) ||     /* filling it sends it */
         (sock->as_Flags & (ASF_CONNECTED | ASF_EOF | ASF_WRSHUT)) !=

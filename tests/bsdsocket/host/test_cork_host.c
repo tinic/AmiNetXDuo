@@ -234,7 +234,21 @@ static void h_pass(void)
 
 /* ---------------------------------------------------------------- Exec -- */
 
-VOID Forbid(VOID) { h.forbid++; }
+/* Runs once, at the next Forbid(): another actor slipping in between an
+   unlocked look and the lock that should have covered it. */
+static void (*h_forbid_hook)(void);
+
+VOID Forbid(VOID)
+{
+    if (h_forbid_hook != NULL)
+    {
+        void (*fn)(void) = h_forbid_hook;
+
+        h_forbid_hook = NULL;
+        fn();
+    }
+    h.forbid++;
+}
 VOID Permit(VOID) { h.forbid--; }
 
 static void h_safe(void)
@@ -1669,6 +1683,61 @@ static void t_fast_kick(void)
 }
 #endif
 
+/* B, sharing the socket, sets TCP_NODELAY 1; its push gets NX_NO_PACKET,
+   so a segment stays pending on the tick with the cork off. */
+static void h_b_nodelay_off(void)
+{
+    struct Task *was = h.me;
+
+    h.me = &h_other;
+    (VOID)bsd_cork_set(&h_base, &h_sock[0], FALSE);
+    h.me = was;
+}
+
+static void t_nodelay_race(void)
+{
+    AmiSocket *s;
+    ULONG      enters;
+
+    printf("cork: TCP_NODELAY 1 from a task sharing the socket\n");
+
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 10, 0);
+
+    h.send_plan[0] = NX_NO_PACKET;          /* B's push                    */
+    h.send_plan[1] = NX_SUCCESS;
+    h.send_planned = 2;
+
+    enters        = h.nx_enters;
+    h_forbid_hook = h_b_nodelay_off;
+    CHECK(h_send(0, 10, 5, 0) == 5, "A's write is taken");
+    CHECK((s->as_CorkFlags & BSD_CORKF_ON) == 0, "B turned the cork off");
+#ifdef AMINETXDUO_TCP_CORK_FASTPATH
+    CHECK(h.nx_enters == enters + 1,
+          "the fast path saw it under Forbid() and took the bracket");
+#else
+    (VOID)enters;
+#endif
+    CHECK(s->as_CorkPkt == NULL, "nothing is appended to the leftover segment");
+    CHECK(h.sends == 3 && h_wire_is(0, 15),
+          "it drains first, then the write goes: in order, each byte once");
+
+    /* The slow path the same way: B's NODELAY 1 lands while A's claim waits
+       for the IP pass. */
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 10, 0);
+    h.send_plan[0] = NX_NO_PACKET;
+    h.send_plan[1] = NX_SUCCESS;
+    h.send_planned = 2;
+    (VOID)bsd_cork_set(&h_base, s, FALSE);  /* B: a segment stays pending */
+    CHECK(h_pending(s) == 10, "the push left the segment on the tick");
+    CHECK(h_send(0, 10, 5, 0) == 5 && s->as_CorkPkt == NULL &&
+          h_wire_is(0, 15),
+          "after TCP_NODELAY 1 a write only drains what is left, then goes");
+}
+
 static void t_loopback(void)
 {
     AmiSocket *s;
@@ -1739,6 +1808,7 @@ int main(void)
 #ifdef AMINETXDUO_TCP_CORK_FASTPATH
     t_fast_kick();
 #endif
+    t_nodelay_race();
     t_loopback();
     t_nodelay_off();
 
