@@ -65,6 +65,16 @@ same switch. Numbers are one run each unless said otherwise.
 | same, anxzz9000 fd7af15e (window read longword aligned), legs 2/4/6/8 | 5.86 / 5.97 / 6.14 / 6.63, median 6.055 (+6.7 %, won 4 of 4 pairs, ranges overlap: suggestive, n=4) | - | - |
 | httpd 3.8 MB download (TX) | 381 KB/s (disk-bound; X-Surf iComp 327) | | |
 
+2026-09-23 smoke check of `ed8cd4f8` on the A3000: after a warm reboot
+restored the 256 MB Zorro RAM mapping, a 12 s RX run through
+`anxzz9000.device` transferred 10.3 MB at 6.56 Mbit/s. Both the ZZ9000 and
+X-Surf doors stayed reachable; serial gaps, watchdog resets, TX errors, and
+receive errors remained zero. This is not a comparable performance run: the
+driver saw no GEM checksum metadata and counted 669 empty-header spins that
+never found a frame (242 did find one), unlike the fixed-firmware runs above.
+The boot configuration was left untouched, and a warm reboot restored MNT's
+`ZZ9000Net.device` with both doors and the Zorro RAM mapping healthy.
+
 For TCP transmit, a matched three-run test improved from 4.45 Mbit/s mean
 with software checksums to 4.64 Mbit/s with GEM insertion (+4.3%). This is a
 CPU saving rather than a new data-movement path; the Zorro writes remain the
@@ -89,6 +99,7 @@ prototype. Current builds classify and coalesce runs in the stack.
 | READ_BATCH / RX_POLL / batched replies | `rx_holds` possible with the 128-slot ring; batched replies were measured a loss on a real 68k |
 | drain several slots per wakeup | done (up to 32; bursts of 32 seen) |
 | receive buffers in ZZ9000 fast RAM, GEM DMA into them | not primary: saves the fast-RAM copy (143 ns/B) but keeps the Zorro read (213 ns/B), and the same L2/ACP exposure |
+| true TX watchdog recovery | pending firmware protocol: the driver now preserves outstanding TX window ownership on a watchdog callback, since that callback does not stop the GEM DMA. A truly stuck descriptor cannot safely be declared free without a firmware abort/quiesce operation and completion-count resynchronisation; `zz_reset()` intentionally leaves that ring busy rather than overwrite a frame still owned by DMA |
 
 ## Procedure: driving a driver or firmware candidate on the A3000
 
