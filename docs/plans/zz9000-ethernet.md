@@ -156,6 +156,10 @@ does not make that assumption.
 | 13 | **fixed**: the vendor 2.8 RC driver follows `int2 = on` in ZZ9000.CFG; ours had assumed INT6 unconditionally | source audit against v2.8.0-rc3; the current card reports the key absent and continues on INT6 | query firmware config key 5 at attach and register the Exec server on INT2 only when both its value and presence word are nonzero; pre-2.3 firmware reads zero and retains INT6 |
 | 14 | the official 2.8 RC3 driver is not a safe code base for this firmware unchanged: after its first 20.8 s / 10.5 MB receive control both A3000 interfaces stopped answering and required a cold cycle | 4.23 Mbit/s before the hard hang; no post-failure counters were reachable. The updated `anxzz9000.device` immediately followed with 30.4 s / 28.0 MB at 7.72 Mbit/s, both doors still live, zero retransmits, checksum, ring, serial, or device errors | keep the independent bounded serial-ack recovery; upstream the protocol and fixes in reviewable pieces rather than replacing this core with the GPL driver |
 | 15 | **fixed** (fd7af15e): the payload sits 2 mod 4 in the receive slot, and the hardware-checksum fast path and the staging copy handed that source to the plain longword copy, so every longword came off Zorro III in two word cycles; the summed path had always peeled one word first | probe on the A3000, 2026-09-21: window longword reads 1934 ns aligned against 2554 ns at 2 mod 4 (+32 %). Same-boot ABABABAB, 12 s RX, 4 legs per arm: median 5.675 -> 6.055 Mbit/s (+6.7 %), 4 of 4 pairs, ranges overlap -- suggestive at n=4 | `zz_copy_payload()` in `src/netdev/zz9000.c`, the summed copy without the sum, at both sites; `test_netdev_zz9000` proves every bulk source 0 mod 4 |
+| 16 | **rejected TX experiment**: a negotiated single-packet source pointer removed the stack-to-driver staging copy, but it did not improve unprofiled TCP transmit. The IP source starts 0 mod 4 while its position after the 14-byte Ethernet header in the card window is 2 mod 4. Aligning one side misaligns the other; shifting aligned source longwords into aligned card writes costs more CPU. | Same A3000, firmware and 25 s client-to-peer iperf from the ZZ9000 address, 2026-09-23: direct copy with aligned card writes 4.62 Mbit/s (9,999/9,999 sends used it), source-aligned/card-misaligned 4.47, register shift-and-join 3.60; previously measured GEM-checksum path 4.64. The direct-copy profile moved time out of the stack copy and into the card copy; idle was 1.4%. Both doors and 256 MB mapping stayed up; zero TX errors, resets or overruns. | All new callback, driver, and copy-kernel code removed. Do not revisit a two-copy elimination on its own; the bus-phase mismatch cancels it. |
+| 17 | **rejected TX experiment**: using the existing `ANXD_S2F_TX_MORE` run contract in the ZZ9000 driver held segments, but the peer still sent about the same number of return frames and the flush work reduced throughput. | Same 25 s iperf: 4.39 Mbit/s from 9,638 transmitted frames, 8,663 held for a run, 3,971 kicks. Ethernet interrupt entries fell to 4,169 from about 10,140 in the direct-copy control, but 9,681 received frames remained; no TX errors, resets or overruns. | Driver change removed. No new firmware or API was needed, but fewer interrupt entries alone did not pay for the per-run flush. |
+| 18 | **rejected as a TX lever**: expanding the four GEM/window transmit slots would avoid status reads when the ring looks full, but the current four slots do not actually make the sender wait. | A driver-only diagnostic on the A3000 counted 1,210 full-ring checks during 5,426 UDP sends; all 1,210 found a completed slot immediately, zero found the ring still full. UDP throughput was 5.32 Mbit/s, zero lost at the peer. | The diagnostic counters were removed. Do not widen the firmware ring merely to cure an unobserved stall. |
+| 19 | **TX cost bound**: protocol ACK processing is not the only limiting factor; most of the cost is common to TCP and UDP and a substantial part is per packet. | On the same A3000/ZZ9000 path, unpaced UDP at 1470 bytes sent 5.29 and 5.32 Mbit/s in separate 12 s runs (zero loss), versus the recorded 4.64 Mbit/s TCP run. A new 512-byte UDP run sent 2.55 Mbit/s (zero loss). Those rates imply roughly 2.21 ms per 1470-byte datagram and 1.61 ms per 512-byte datagram; a two-point fit is about 1.28 ms fixed plus 0.63 us per payload byte. This is an estimate, not a cycle attribution. | A 16-slot ring or one fewer RAM-to-RAM copy cannot plausibly supply the missing ~0.74 ms per 1470-byte packet needed for 8 Mbit/s. A larger architectural change must reduce per-packet host work while preserving normal 1500-byte wire frames. |
 
 ## Numbers
 
@@ -192,10 +196,35 @@ with software checksums to 4.64 Mbit/s with GEM insertion (+4.3%). This is a
 CPU saving rather than a new data-movement path; the Zorro writes remain the
 dominant cost.
 
-Profile at 4.7 Mbit/s (Profile, audio-channel sampler): idle ~30 % of the
-transfer, bsdsocket.library 34 % of busy, the device 16 % (the window copy
-under Disable: 490 us a frame at 1.3 us a longword), one 32-frame drain =
-19.7 ms with interrupts off.
+An older profile at 4.7 Mbit/s (Profile, audio-channel sampler) had idle ~30 %
+of the transfer, bsdsocket.library 34 % of busy, the device 16 % (about
+490 us per frame in the window copy), and one 32-frame receive drain took
+19.7 ms with interrupts off. The 2026-09-23 profile on the current bounded
+drain and checksum-offload build is a different regime: 1.0 % idle over a
+25 s TX run, 15.7 % time unsampled under masks, about 10 % in the driver's
+longword card copy and about 16 % in one stack memory-copy loop. The
+direct-copy trial reduced that stack copy but raised the card-copy share,
+with no unprofiled throughput gain. Profiles: `Archives/zz9000/profiles/
+2026-09-23-a3000-zz-tx.prof` and `2026-09-23-a3000-zz-txdirect.prof`.
+The 12 s UDP profile is `2026-09-23-a3000-zz-udptx.prof` in the same archive:
+1.0% idle, 65% of sampled PCs in `bsdsocket.library`, 19% in the device.
+It reinforces that the sender is CPU-bound, but its unsampled gaps cannot be
+assigned to one function from the LTO binary alone. A non-LTO diagnostic
+library profile (`2026-09-23-a3000-zz-tx-nolto.prof`) named the byte-copy
+routine as the largest resolved TCP-send leaf (20.6% of samples); that build
+ran slower and is not a throughput comparison.
+
+The ZZ9000's 256 MB Fast RAM is at Amiga `$50000000` on this A3000 and at
+ARM DDR `$20000000..$2fffffff` in the current bitstream. It is almost entirely
+free while the network runs (`Avail` reports a 268,435,424-byte largest free
+block), so the stack's packet pool is evidently in the A3000's 12 MB local
+Fast RAM. The FPGA ties `ZORRO_NBRN` inactive (`mntzorro.v`), so
+the card cannot bus-master ordinary packet memory. A driver-owned buffer in
+ZZ Fast RAM would still require the same 68k-to-Zorro copy as the existing TX
+window; it is not zero-copy. A temporary memory-copy benchmark reset the A3000
+before writing a result, so it supplies **no** speed evidence and was discarded.
+The one-shot boot guard restored the verified stack and driver. Do not cite
+that probe as a measurement or re-run it while the interface is online.
 
 The CONTINUES rows above are measurements of the retired driver-side GRO
 prototype. Current builds classify and coalesce runs in the stack.
