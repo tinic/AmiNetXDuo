@@ -75,6 +75,7 @@
 
 static BOOL zz_isr(NetdevNic *nic);
 static BOOL zz_tx_reclaim(NetdevNic *nic);
+static UBYTE *zz_tx_at(NetdevNic *nic);
 
 extern struct ExecBase *SysBase;
 
@@ -101,6 +102,7 @@ extern struct ExecBase *SysBase;
 
 /* The length word of an asynchronous send, and the status register. */
 #define ZZ_TX_ASYNC         0x8000u
+#define ZZ_TX_OFFSET2       0x4000u
 #define ZZ_TX_SLOT_SHIFT    11
 #define ZZ_TX_LEN_MASK      0x07ffu
 #define ZZ_TXS_PRESENT      0x8000u
@@ -108,6 +110,7 @@ extern struct ExecBase *SysBase;
 
 #define ZZ_RXM_PRESENT      0x8000u
 #define ZZ_RXM_TX_CSUM      0x4000u
+#define ZZ_RXM_TX_OFFSET2   0x2000u
 #define ZZ_RXM_MASK         0x0003u
 #define ZZ_RXM_TCP          2u
 #define ZZ_RXM_UDP          3u
@@ -163,7 +166,8 @@ enum
     ZZ_ST_ACK_RECOVER,  /* rejected serial handshake recovered compatibly    */
     ZZ_ST_HW_VERIFIED,  /* frames certified by the GEM descriptor             */
     ZZ_ST_HW_FALLBACK,  /* GEM verdict outside the published RX contract      */
-    ZZ_ST_TX_CSUM,      /* frames whose transport checksum the GEM inserted    */
+    ZZ_ST_TX_CSUM,      /* transport checksum fields zeroed by the 68k */
+    ZZ_ST_TX_DIRECT,    /* frames sent from the shifted card window           */
     ZZ_ST_COUNT
 };
 
@@ -185,7 +189,8 @@ static const char *const zz_stat_names[] =
     "rejected serial acknowledgements recovered",
     "frames verified by GEM hardware",
     "GEM verdicts checked again in software",
-    "GEM transmit checksums inserted",
+    "transport checksums prepared by 68k",
+    "shifted direct transmit frames",
     NULL
 };
 
@@ -196,9 +201,24 @@ typedef struct ZzCore
                                follows it: which context a pass ran in     */
     UBYTE       rx_meta;    /* firmware exposes REG_ZZ_ETH_RX_META          */
     UBYTE       int2;       /* ZZ9000.CFG routes the shared interrupt there */
+    UBYTE       tx_offset2; /* firmware DMA can start two bytes into a slot */
 } ZzCore;
 
 #define ZZ(nic) ((ZzCore *)(nic)->core)
+
+/* On the opt-in firmware the GEM can DMA from slot+2.  The 14-byte Ethernet
+ * header then ends at slot+16, so a normal SANA-II CopyFromBuff writes the IP
+ * payload from an aligned source to an aligned card address.  A full ring
+ * declines the direct path; netdev_tx_build() uses its RAM staging buffer. */
+static UBYTE *zz_tx_at(NetdevNic *nic)
+{
+    if (!ZZ(nic)->tx_offset2 || nic->txb_inuse >= nic->txb_cnt)
+        return NULL;
+
+    return (UBYTE *)(nic->board + ZZ_TX_WINDOW +
+                     (ULONG)(nic->tx_next & (ZZ_TX_SLOTS - 1)) *
+                     ZZ_TX_WINDOW_LEN + 2UL);
+}
 
 static volatile UWORD *zz_reg(NetdevNic *nic, ULONG off)
 {
@@ -337,6 +357,8 @@ static LONG zz_attach(NetdevNic *nic)
         nic->rx_capacity = (fork ? ZZ_ARM_RING_FRAMES_FORK
                                  : ZZ_ARM_RING_FRAMES_MNT) * (1500UL + 14UL);
         ZZ(nic)->rx_meta = (UBYTE)((rxm & ZZ_RXM_PRESENT) != 0);
+        ZZ(nic)->tx_offset2 = (UBYTE)(fork &&
+                                     (rxm & ZZ_RXM_TX_OFFSET2) != 0);
         nic->tx_csum_supported = (UBYTE)(((rxm & ZZ_RXM_TX_CSUM) != 0)
                                ? (ANXD_S2_TXF_TCP | ANXD_S2_TXF_UDP) : 0);
     }
@@ -345,7 +367,7 @@ static LONG zz_attach(NetdevNic *nic)
     nic->ring_copy = NULL;
     nic->ring_copy_sum = NULL;
     nic->frame_at  = NULL;
-    nic->tx_at     = NULL;
+    nic->tx_at     = zz_tx_at;
     nic->write_buf = NULL;
     nic->core_stat_names = zz_stat_names;
     nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
@@ -940,10 +962,26 @@ static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
         return DP8390_TX_BUSY;
 
     slot = (UWORD)(nic->tx_next & (ZZ_TX_SLOTS - 1));
-    zz_tx_fill(nic, slot, frame, len);
-    zz_tx_checksum(nic, slot, frame, len);
-    zz_put(nic, ZZ_REG_TX,
-           (UWORD)(ZZ_TX_ASYNC | (UWORD)(slot << ZZ_TX_SLOT_SHIFT) | len));
+    {
+        const UBYTE *direct = (const UBYTE *)(nic->board + ZZ_TX_WINDOW +
+                               (ULONG)slot * ZZ_TX_WINDOW_LEN + 2UL);
+        BOOL offset2 = (BOOL)(ZZ(nic)->tx_offset2 && frame == direct &&
+                              len <= ZZ_TX_WINDOW_LEN - 2);
+
+        if (!offset2)
+        {
+            zz_tx_fill(nic, slot, frame, len);
+            zz_tx_checksum(nic, slot, frame, len);
+        }
+        /* Shifted frames are inspected and prepared by the ARM before GEM
+         * DMA.  Reading their headers back over Zorro here would erase the
+         * benefit of placing the IP payload on an aligned card address. */
+        zz_put(nic, ZZ_REG_TX,
+               (UWORD)(ZZ_TX_ASYNC | (offset2 ? ZZ_TX_OFFSET2 : 0) |
+                       (UWORD)(slot << ZZ_TX_SLOT_SHIFT) | len));
+        if (offset2)
+            nic->core_stat[ZZ_ST_TX_DIRECT]++;
+    }
     nic->tx_next++;
     nic->txb_inuse++;
     nic->tx_packets++;

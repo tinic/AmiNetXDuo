@@ -507,6 +507,90 @@ static VOID tx_counter_reclaim(VOID)
     expect(nic.txb_inuse == 1, "TX count: later send stays in flight");
 }
 
+static VOID tx_offset2_negotiation(VOID)
+{
+    UBYTE frame[64];
+    UBYTE *direct;
+    UWORD command;
+
+    fresh_unit();
+    nic.running = TRUE;
+    nic.txb_cnt = ZZ_TX_SLOTS;
+    expect(zz_tx_at(&nic) == NULL,
+           "TX offset2: old firmware keeps the staging path");
+
+    core.tx_offset2 = 1;
+    direct = zz_tx_at(&nic);
+    expect(direct == board.bytes + ZZ_TX_WINDOW + 2,
+           "TX offset2: direct frame starts two bytes into slot 0");
+    memset(direct, 0x5a, sizeof(frame));
+    bulk_reset();
+    expect(zz_tx(&nic, direct, sizeof(frame)) == 0,
+           "TX offset2: direct frame is accepted");
+    command = *(UWORD *)(void *)(board.bytes + ZZ_REG_TX);
+    expect((command & (ZZ_TX_ASYNC | ZZ_TX_OFFSET2 | ZZ_TX_LEN_MASK)) ==
+           (ZZ_TX_ASYNC | ZZ_TX_OFFSET2 | sizeof(frame)),
+           "TX offset2: command selects shifted DMA source");
+    expect(bulk_calls == 0, "TX offset2: no staging-to-window copy");
+    expect(nic.core_stat[ZZ_ST_TX_DIRECT] == 1,
+           "TX offset2: direct frame is observable in device statistics");
+    expect(zz_tx_at(&nic) == board.bytes + ZZ_TX_WINDOW +
+                            ZZ_TX_WINDOW_LEN + 2,
+           "TX offset2: next slot is selected");
+
+    memset(frame, 0x3c, sizeof(frame));
+    bulk_reset();
+    expect(zz_tx(&nic, frame, sizeof(frame)) == 0,
+           "TX offset2: staged request is accepted");
+    command = *(UWORD *)(void *)(board.bytes + ZZ_REG_TX);
+    expect((command & ZZ_TX_OFFSET2) == 0,
+           "TX offset2: staged request uses the legacy slot origin");
+    expect(bulk_calls != 0, "TX offset2: staged request copies normally");
+    expect(nic.core_stat[ZZ_ST_TX_DIRECT] == 1,
+           "TX offset2: staged frame does not increment direct count");
+
+    nic.txb_inuse = ZZ_TX_SLOTS;
+    expect(zz_tx_at(&nic) == NULL,
+           "TX offset2: a full ring does not expose an owned slot");
+}
+
+static VOID tx_offset2_checksum_owner(VOID)
+{
+    UBYTE *direct;
+    UBYTE frame[60];
+
+    fresh_unit();
+    nic.running = TRUE;
+    nic.txb_cnt = ZZ_TX_SLOTS;
+    nic.tx_csum = ANXD_S2_TXF_TCP;
+    core.tx_offset2 = 1;
+    direct = zz_tx_at(&nic);
+    memset(direct, 0, sizeof(frame));
+    direct[12] = 0x08;          /* Ethernet IPv4 */
+    direct[14] = 0x45;          /* IPv4, 20-byte header */
+    direct[17] = 40;            /* 20 IP + 20 TCP */
+    direct[23] = 6;             /* TCP */
+    direct[46] = 0x50;          /* TCP data offset = 5 */
+    direct[50] = 0x12;
+    direct[51] = 0x34;
+    memcpy(frame, direct, sizeof(frame));
+
+    expect(zz_tx(&nic, direct, sizeof(frame)) == 0,
+           "TX checksum: shifted frame accepted");
+    expect(direct[50] == 0x12 && direct[51] == 0x34,
+           "TX checksum: driver leaves shifted checksum for ARM preparation");
+    expect(nic.core_stat[ZZ_ST_TX_CSUM] == 0,
+           "TX checksum: shifted frame has no 68k checksum preparation");
+
+    expect(zz_tx(&nic, frame, sizeof(frame)) == 0,
+           "TX checksum: staged frame accepted");
+    expect(board.bytes[ZZ_TX_WINDOW + ZZ_TX_WINDOW_LEN + 50] == 0 &&
+           board.bytes[ZZ_TX_WINDOW + ZZ_TX_WINDOW_LEN + 51] == 0,
+           "TX checksum: staged frame keeps the driver zeroing path");
+    expect(nic.core_stat[ZZ_ST_TX_CSUM] == 1,
+           "TX checksum: count only fields actually prepared by the 68k");
+}
+
 int main(void)
 {
     payload_copy_every_length();
@@ -517,6 +601,8 @@ int main(void)
     receive_pass_is_bounded();
     reset_preserves_live_tx_slots();
     tx_counter_reclaim();
+    tx_offset2_negotiation();
+    tx_offset2_checksum_owner();
 
     printf("%s: zz9000 payload alignment, %lu checks, %d failure%s\n",
            failures == 0 ? "PASS" : "FAIL", (unsigned long)checks, failures,
