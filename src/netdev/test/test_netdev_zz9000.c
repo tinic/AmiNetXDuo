@@ -417,6 +417,77 @@ static VOID stale_serial_recovery(VOID)
            "stale at wrap: legacy acknowledge written");
 }
 
+/* Reset is called by the VBlank watchdog, not by the ARM firmware.  Its
+   register write cannot cancel GEM DMA from a still-busy TX window slot. */
+static VOID reset_preserves_live_tx_slots(VOID)
+{
+    UBYTE frame[60];
+    ULONG i;
+
+    fresh_unit();
+    memset(frame, 0x3c, sizeof(frame));
+    memset(board.bytes + ZZ_TX_WINDOW, 0xa5, ZZ_TX_WINDOW_LEN);
+    nic.running = TRUE;
+    nic.txb_cnt = ZZ_TX_SLOTS;
+    nic.txb_inuse = ZZ_TX_SLOTS;
+    nic.tx_next = ZZ_TX_SLOTS;         /* slot 0 is the oldest in flight */
+    nic.tx_done = 100;
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 100);
+
+    zz_reset(&nic);
+    expect(nic.txb_inuse == ZZ_TX_SLOTS,
+           "reset: outstanding DMA slots are not declared free");
+    expect(nic.tx_done == 100, "reset: completion baseline is not lost");
+    expect(zz_tx(&nic, frame, sizeof(frame)) == DP8390_TX_BUSY,
+           "reset: no send over an outstanding DMA slot");
+    for (i = 0; i < ZZ_TX_WINDOW_LEN; i++)
+        if (board.bytes[ZZ_TX_WINDOW + i] != 0xa5)
+            break;
+    expect(i == ZZ_TX_WINDOW_LEN, "reset: oldest TX window is unchanged");
+
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 101);
+    expect(zz_tx_reclaim(&nic), "reset: a real firmware completion retires a slot");
+    expect(nic.txb_inuse == ZZ_TX_SLOTS - 1,
+           "reset: only the completed slot is free");
+    expect(zz_tx(&nic, frame, sizeof(frame)) == 0,
+           "reset: send resumes after that completion");
+    expect(nic.tx_next == ZZ_TX_SLOTS + 1,
+           "reset: slot cursor continues from its original origin");
+    expect(nic.txb_inuse == ZZ_TX_SLOTS,
+           "reset: replacement frame is counted in flight");
+}
+
+/* The firmware's completion count has its own 15-bit origin.  It counts a
+   dropped submission too, and tx_next is only a window-slot cursor. */
+static VOID tx_counter_reclaim(VOID)
+{
+    fresh_unit();
+    nic.txb_inuse = 4;
+    nic.tx_done = 0x7ffe;
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 1);
+    expect(zz_tx_reclaim(&nic), "TX count: three completions cross wrap");
+    expect(nic.txb_inuse == 1, "TX count: one slot remains in flight");
+    expect(nic.tx_done == 1, "TX count: wrapped firmware count retained");
+    expect(nic.tx_completed == 3, "TX count: three frames completed");
+
+    fresh_unit();
+    nic.txb_inuse = 2;
+    nic.tx_done = 100;
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 104);
+    expect(zz_tx_reclaim(&nic), "TX count: surplus firmware completions seen");
+    expect(nic.txb_inuse == 0, "TX count: retire no more than are in flight");
+    expect(nic.tx_completed == 2, "TX count: completed accounting is clamped");
+    expect(nic.tx_done == 104, "TX count: raw firmware baseline resynchronised");
+    nic.txb_inuse = 1;
+    expect(!zz_tx_reclaim(&nic),
+           "TX count: surplus completions cannot retire a later send");
+    expect(nic.txb_inuse == 1, "TX count: later send stays in flight");
+}
+
 int main(void)
 {
     payload_copy_every_length();
@@ -424,6 +495,8 @@ int main(void)
     summed_claim_path_still_aligned();
     staging_path_reads_aligned();
     stale_serial_recovery();
+    reset_preserves_live_tx_slots();
+    tx_counter_reclaim();
 
     printf("%s: zz9000 payload alignment, %lu checks, %d failure%s\n",
            failures == 0 ? "PASS" : "FAIL", (unsigned long)checks, failures,

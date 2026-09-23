@@ -389,11 +389,15 @@ static VOID zz_setfilter(NetdevNic *nic)
 
 static VOID zz_reset(NetdevNic *nic)
 {
-    /* Nothing wedges on this side, but a frame the ARM lost would leave a
-       slot counted in flight for ever: take the count as it stands and
-       start again, which is the contract -- txb_inuse cleared. */
-    nic->txb_inuse = 0;
-    nic->tx_done   = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
+    /* This is a watchdog callback, not a firmware/GEM reset.  The ARM may
+       still own every queued DMA descriptor and read its TX window later.
+       Declaring those slots free would let the next send overwrite a frame
+       in flight.  Retire only completions the firmware has reported; a real
+       hard stall remains busy until the firmware supplies an abort command. */
+    if (nic->txb_inuse != 0)
+        (VOID)zz_tx_reclaim(nic);
+    else
+        nic->tx_done = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
     if (nic->running)
         zz_put(nic, ZZ_REG_INT, ZZ_INT_ETH);
 }
