@@ -516,11 +516,11 @@ static VOID tx_offset2_negotiation(VOID)
     fresh_unit();
     nic.running = TRUE;
     nic.txb_cnt = ZZ_TX_SLOTS;
-    expect(zz_tx_at(&nic) == NULL,
+    expect(nic.tx_at == NULL,
            "TX offset2: old firmware keeps the staging path");
 
-    core.tx_offset2 = 1;
-    direct = zz_tx_at(&nic);
+    nic.tx_at = zz_tx_at;
+    direct = nic.tx_at(&nic);
     expect(direct == board.bytes + ZZ_TX_WINDOW + 2,
            "TX offset2: direct frame starts two bytes into slot 0");
     memset(direct, 0x5a, sizeof(frame));
@@ -534,7 +534,7 @@ static VOID tx_offset2_negotiation(VOID)
     expect(bulk_calls == 0, "TX offset2: no staging-to-window copy");
     expect(nic.core_stat[ZZ_ST_TX_DIRECT] == 1,
            "TX offset2: direct frame is observable in device statistics");
-    expect(zz_tx_at(&nic) == board.bytes + ZZ_TX_WINDOW +
+    expect(nic.tx_at(&nic) == board.bytes + ZZ_TX_WINDOW +
                             ZZ_TX_WINDOW_LEN + 2,
            "TX offset2: next slot is selected");
 
@@ -550,7 +550,7 @@ static VOID tx_offset2_negotiation(VOID)
            "TX offset2: staged frame does not increment direct count");
 
     nic.txb_inuse = ZZ_TX_SLOTS;
-    expect(zz_tx_at(&nic) == NULL,
+    expect(nic.tx_at(&nic) == NULL,
            "TX offset2: a full ring does not expose an owned slot");
 }
 
@@ -563,8 +563,8 @@ static VOID tx_offset2_checksum_owner(VOID)
     nic.running = TRUE;
     nic.txb_cnt = ZZ_TX_SLOTS;
     nic.tx_csum = ANXD_S2_TXF_TCP;
-    core.tx_offset2 = 1;
-    direct = zz_tx_at(&nic);
+    nic.tx_at = zz_tx_at;
+    direct = nic.tx_at(&nic);
     memset(direct, 0, sizeof(frame));
     direct[12] = 0x08;          /* Ethernet IPv4 */
     direct[14] = 0x45;          /* IPv4, 20-byte header */

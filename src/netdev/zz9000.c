@@ -201,7 +201,6 @@ typedef struct ZzCore
                                follows it: which context a pass ran in     */
     UBYTE       rx_meta;    /* firmware exposes REG_ZZ_ETH_RX_META          */
     UBYTE       int2;       /* ZZ9000.CFG routes the shared interrupt there */
-    UBYTE       tx_offset2; /* firmware DMA can start two bytes into a slot */
 } ZzCore;
 
 #define ZZ(nic) ((ZzCore *)(nic)->core)
@@ -212,7 +211,7 @@ typedef struct ZzCore
  * declines the direct path; netdev_tx_build() uses its RAM staging buffer. */
 static UBYTE *zz_tx_at(NetdevNic *nic)
 {
-    if (!ZZ(nic)->tx_offset2 || nic->txb_inuse >= nic->txb_cnt)
+    if (nic->txb_inuse >= nic->txb_cnt)
         return NULL;
 
     return (UBYTE *)(nic->board + ZZ_TX_WINDOW +
@@ -357,8 +356,8 @@ static LONG zz_attach(NetdevNic *nic)
         nic->rx_capacity = (fork ? ZZ_ARM_RING_FRAMES_FORK
                                  : ZZ_ARM_RING_FRAMES_MNT) * (1500UL + 14UL);
         ZZ(nic)->rx_meta = (UBYTE)((rxm & ZZ_RXM_PRESENT) != 0);
-        ZZ(nic)->tx_offset2 = (UBYTE)(fork &&
-                                     (rxm & ZZ_RXM_TX_OFFSET2) != 0);
+        nic->tx_at = (fork && (rxm & ZZ_RXM_TX_OFFSET2) != 0)
+                   ? zz_tx_at : NULL;
         nic->tx_csum_supported = (UBYTE)(((rxm & ZZ_RXM_TX_CSUM) != 0)
                                ? (ANXD_S2_TXF_TCP | ANXD_S2_TXF_UDP) : 0);
     }
@@ -367,7 +366,6 @@ static LONG zz_attach(NetdevNic *nic)
     nic->ring_copy = NULL;
     nic->ring_copy_sum = NULL;
     nic->frame_at  = NULL;
-    nic->tx_at     = zz_tx_at;
     nic->write_buf = NULL;
     nic->core_stat_names = zz_stat_names;
     nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
@@ -965,7 +963,7 @@ static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     {
         const UBYTE *direct = (const UBYTE *)(nic->board + ZZ_TX_WINDOW +
                                (ULONG)slot * ZZ_TX_WINDOW_LEN + 2UL);
-        BOOL offset2 = (BOOL)(ZZ(nic)->tx_offset2 && frame == direct &&
+        BOOL offset2 = (BOOL)(nic->tx_at != NULL && frame == direct &&
                               len <= ZZ_TX_WINDOW_LEN - 2);
 
         if (!offset2)
