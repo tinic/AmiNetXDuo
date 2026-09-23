@@ -269,7 +269,8 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 # Workbench counterpart to NetSetup.  It edits the same Roadshow-compatible
 # files, preserving fields it does not own, and invokes the existing commands
 # for live changes rather than growing a second stack-control path.
-aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c)
+aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
+    netprefs_layout.c)
 
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
@@ -897,6 +898,17 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netprefs_text PRIVATE -Wall -Wextra)
     set_target_properties(test_netprefs_text PROPERTIES C_STANDARD 11)
 
+    # NetPrefs lays itself out from the gadget font's metrics.  Every page at
+    # topaz 8, 11, a proportional 13 and a wide 15 keeps labels off borders
+    # and gadgets apart; a font too wide for 640 reports that it does not fit.
+    add_executable(test_netprefs_layout
+        test/test_netprefs_layout.c
+        netprefs_layout.c)
+    target_include_directories(test_netprefs_layout PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netprefs_layout PRIVATE -Wall -Wextra)
+    set_target_properties(test_netprefs_layout PROPERTIES C_STANDARD 11)
+
     target_include_directories(test_fetchurl PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -1007,6 +1019,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
+    add_test(NAME netprefs_font_layout COMMAND test_netprefs_layout)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME httphead_request_heads COMMAND test_httphead)

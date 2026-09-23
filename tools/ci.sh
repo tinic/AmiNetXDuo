@@ -304,7 +304,9 @@ host_test_targets() { # builddir
 #      the cached bracket and the plain one
 #      428 with test_sana2_open_policy (c9a6ea09): only X-Surf drivers hide
 #      the AMITCP port during OpenDevice, in every shipping profile
-HOST_TESTS_EXPECTED=428
+#      429 with test_netprefs_layout: NetPrefs geometry from font metrics,
+#      split out of netprefs.c
+HOST_TESTS_EXPECTED=429
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
