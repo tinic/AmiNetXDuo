@@ -8,6 +8,7 @@
  */
 
 #include "aminetxduo/compat.h"
+#include "sana2_open_policy.h"
 
 #include <exec/execbase.h>
 #include <exec/semaphores.h>
@@ -462,18 +463,19 @@ VOID ami_shutdown_notify(VOID)
 }
 
 static LONG ami_sana2_open_once(const char *name, ULONG unit,
-                                struct IORequest *req, ULONG flags)
+                                struct IORequest *req, ULONG flags,
+                                int guard_amitcp)
 {
     LONG status;
 
-    /* If an iComp driver finds the AMITCP port here, it bypasses the copy
-       callbacks. See ami_ns_port_suspend(). */
-    if (ami_sana2_quiesce != NULL)
+    /* Only X-Surf's private AmiTCP path bypasses our SANA-II copy callbacks.
+       Other devices must see the public port throughout their open. */
+    if (guard_amitcp && ami_sana2_quiesce != NULL)
         ami_sana2_quiesce();
 
     status = (LONG)(BYTE)OpenDevice((CONST_STRPTR)name, unit, req, flags);
 
-    if (ami_sana2_restore != NULL)
+    if (guard_amitcp && ami_sana2_restore != NULL)
         ami_sana2_restore();
 
     return status;
@@ -490,11 +492,13 @@ LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
     char  path[sizeof(AMI_SANA2_DEVS_SUBDIR) + AMI_SANA2_NAME_MAX];
     LONG  status;
     ULONG i;
+    int   guard_amitcp;
 
     if (name == NULL || *name == '\0' || req == NULL)
         return -1;
 
-    status = ami_sana2_open_once(name, unit, req, flags);
+    guard_amitcp = ami_sana2_needs_amitcp_guard(name);
+    status = ami_sana2_open_once(name, unit, req, flags, guard_amitcp);
     if (status == 0)
         return 0;
 
@@ -518,5 +522,5 @@ LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
     req->io_Device = NULL;
     req->io_Unit   = NULL;
 
-    return ami_sana2_open_once(path, unit, req, flags);
+    return ami_sana2_open_once(path, unit, req, flags, guard_amitcp);
 }

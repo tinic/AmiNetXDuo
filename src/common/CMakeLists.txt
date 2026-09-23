@@ -24,6 +24,11 @@ target_compile_definitions(aminetxduo_common
 # and ami_millis_quick(), all three stubbed in the test, and tool_events.c
 # needs nothing -- so the sources under test are the sources that ship.
 if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test_sana2_open_policy test/test_sana2_open_policy.c)
+    target_compile_options(test_sana2_open_policy PRIVATE -Wall -Wextra)
+    include(CTest)
+    add_test(NAME sana2_open_policy COMMAND test_sana2_open_policy)
+
     add_executable(test_events
         test/test_events.c
         events.c

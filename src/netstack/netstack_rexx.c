@@ -64,6 +64,7 @@ typedef struct AmiRexxBoot
 } AmiRexxBoot;
 
 static struct MsgPort  *ami_rx_port;        /* the AMITCP port itself       */
+static ULONG            ami_rx_port_suspensions;
 static struct Process  *ami_rx_proc;
 static AmiRexxBoot     *ami_rx_boot;
 
@@ -339,6 +340,7 @@ static VOID ami_rx_main(VOID)
                declines to RemPort() a port that is on the Exec list while the
                global is still NULL. */
             ami_rx_port = port;
+            ami_rx_port_suspensions = 0;
             Permit();
         }
     }
@@ -383,8 +385,10 @@ static VOID ami_rx_main(VOID)
      * whatever arrived in the meantime.
      */
     Forbid();
-    RemPort(port);
+    if (ami_rx_port_suspensions == 0)
+        RemPort(port);
     ami_rx_port = NULL;
+    ami_rx_port_suspensions = 0;
     Permit();
 
     ami_rx_drain(port, TRUE);
@@ -513,14 +517,15 @@ VOID ami_netstack_rexx_stop(VOID)
 }
 
 /*
- * The iComp SANA-II drivers change behaviour when they find the AMITCP port,
- * so it is hidden across every SANA-II OpenDevice.  RemPort() only unlinks the
- * name: a queued message is still serviced and a PutMsg() still arrives.
+ * The iComp X-Surf drivers change behaviour when they find the AMITCP port,
+ * so the compat layer hides it only across their OpenDevice calls. RemPort()
+ * only unlinks the name: queued messages are still serviced. The depth keeps
+ * overlapping opens from republishing the name too soon.
  */
 VOID ami_netstack_rexx_suspend(VOID)
 {
     Forbid();
-    if (ami_rx_port != NULL)
+    if (ami_rx_port != NULL && ami_rx_port_suspensions++ == 0)
         RemPort(ami_rx_port);
     Permit();
 }
@@ -528,7 +533,8 @@ VOID ami_netstack_rexx_suspend(VOID)
 VOID ami_netstack_rexx_resume(VOID)
 {
     Forbid();
-    if (ami_rx_port != NULL)
+    if (ami_rx_port != NULL && ami_rx_port_suspensions != 0 &&
+        --ami_rx_port_suspensions == 0)
         AddPort(ami_rx_port);
     Permit();
 }

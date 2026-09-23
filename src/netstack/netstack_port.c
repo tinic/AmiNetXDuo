@@ -69,12 +69,11 @@ VOID ami_ns_port_create(VOID)
     Permit();
 }
 
-/* iComp's x-surf devices enable their AmiTCP optimization if AMITCP is
- * visible during OpenDevice, bypassing the SANA-II copy hooks we supply.
- * The port must be hidden in the minimal and micro builds too, even though
- * they do not include the ARexx host. OpenDevice may wait, so only the list
- * operations run under Forbid. The depth keeps concurrent opens from
- * republishing the port before the last one completes. */
+/* The compat layer calls these only for X-Surf-family OpenDevice calls.
+ * This bare-port implementation covers minimal and micro builds, which do
+ * not include the ARexx host. OpenDevice may wait, so only the list operations
+ * run under Forbid. The depth keeps concurrent opens from republishing the
+ * port before the last one completes. */
 VOID ami_ns_port_suspend(VOID)
 {
     Forbid();

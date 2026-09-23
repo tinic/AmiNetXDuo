@@ -126,9 +126,11 @@ BUDGETS=(
     # gate is also the assertion that every resident image in every shipped
     # drawer has a budget.
     # +184 bytes in beta5 for hiding and restoring the bare AMITCP port around
-    # SANA-II OpenDevice; without it the vendor X-Surf driver selects its
+    # vendor X-Surf OpenDevice; without it the driver selects its
     # incompatible private AmiTCP copy path and sends no packets.
-    "micro:src/bsdsocket/bsdsocket.library:197888"
+    # 198,048 measured with the X-Surf-only name check, which leaves AMITCP
+    # visible to every other SANA-II driver (2026-09-23).
+    "micro:src/bsdsocket/bsdsocket.library:198656"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
     "micro:src/netdev/anxzz9000.device:24128"
