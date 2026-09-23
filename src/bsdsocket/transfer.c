@@ -706,6 +706,7 @@ static BOOL bsd_cork_fast_append(AmiSocket *sock, BsdIovCursor *cur, LONG len)
 {
     NX_PACKET *pkt;
     UINT       state;
+    BOOL       kick;
 
     if ((sock->as_CorkFlags & BSD_CORKF_ON) == 0 || len <= 0)
         return FALSE;
@@ -714,6 +715,7 @@ static BOOL bsd_cork_fast_append(AmiSocket *sock, BsdIovCursor *cur, LONG len)
     pkt   = sock->as_CorkPkt;
     state = sock->as_Nx.tcp.nx_tcp_socket_state;
     if (sock->as_CorkState != BSD_CORK_IDLE || pkt == NULL ||
+        (sock->as_CorkFlags & BSD_CORKF_STALLED) != 0 ||
         (ULONG)len >= bsd_cork_room(sock) ||     /* filling it sends it */
         (sock->as_Flags & (ASF_CONNECTED | ASF_EOF | ASF_WRSHUT)) !=
             ASF_CONNECTED ||
@@ -733,7 +735,15 @@ static BOOL bsd_cork_fast_append(AmiSocket *sock, BsdIovCursor *cur, LONG len)
     pkt->nx_packet_append_ptr += len;
     pkt->nx_packet_length     += (ULONG)len;
     sock->as_CorkState         = BSD_CORK_IDLE;
+    kick                       = ((sock->as_CorkFlags & BSD_CORKF_KICK) != 0)
+                                     ? TRUE : FALSE;
+    sock->as_CorkFlags        &= (UBYTE)~BSD_CORKF_KICK;
     Permit();
+
+    /* A window notify that arrived mid-copy found APPEND and left KICK: it
+       woke nothing, so the pass is woken here. */
+    if (kick)
+        bsd_cork_wake(sock);
 
     return TRUE;
 }

@@ -645,24 +645,27 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     # builds is an option nothing notices breaking.  Twice, because the append
     # fast path (AMINETXDUO_TCP_CORK_FASTPATH) changes which actor makes the
     # second write, and each build asserts its own answer.
-    foreach(cork_arm IN ITEMS cork cork_fast)
-        add_executable(test_${cork_arm} host/test_cork_host.c
-                                   "${CMAKE_SOURCE_DIR}/src/bsdsocket/transfer.c"
-                                   "${CMAKE_SOURCE_DIR}/src/bsdsocket/select.c"
-                                   "${CMAKE_SOURCE_DIR}/src/bsdsocket/cork.c")
+    add_executable(test_cork host/test_cork_host.c
+                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/transfer.c"
+                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/select.c"
+                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/cork.c")
+    add_executable(test_cork_fast host/test_cork_host.c
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/transfer.c"
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/select.c"
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/cork.c")
 
-        target_include_directories(test_${cork_arm} PRIVATE
-            ${BSD_HOST32_INCLUDES})
+    target_include_directories(test_cork PRIVATE ${BSD_HOST32_INCLUDES})
+    target_include_directories(test_cork_fast PRIVATE ${BSD_HOST32_INCLUDES})
 
-        target_compile_options(test_${cork_arm} PRIVATE
-            -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+    target_compile_options(test_cork PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+    target_compile_options(test_cork_fast PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
 
-        target_compile_definitions(test_${cork_arm} PRIVATE
-            ${BSD_HOST32_DEFINES} AMINETXDUO_TCP_CORK)
-    endforeach()
-
+    target_compile_definitions(test_cork PRIVATE
+        ${BSD_HOST32_DEFINES} AMINETXDUO_TCP_CORK)
     target_compile_definitions(test_cork_fast PRIVATE
-        AMINETXDUO_TCP_CORK_FASTPATH)
+        ${BSD_HOST32_DEFINES} AMINETXDUO_TCP_CORK AMINETXDUO_TCP_CORK_FASTPATH)
 
     add_test(NAME cork_small_writes COMMAND test_cork)
     add_test(NAME cork_small_writes_fastpath COMMAND test_cork_fast)

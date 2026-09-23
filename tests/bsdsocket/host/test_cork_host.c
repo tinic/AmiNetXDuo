@@ -136,6 +136,10 @@ static struct
     VOID       (*window_notify)(NX_TCP_SOCKET *);
 
     BOOL         copy_runs_pass;    /* the next bsd_bcopy() runs I mid-copy  */
+    AmiSocket   *copy_runs_notify;  /* ...or R's window notify for this one  */
+    BOOL         mutex_busy;        /* I holds nx_ip_protection: gets time out */
+    BOOL         mutex_breaks;      /* the first busy get raises Ctrl-C      */
+    ULONG        mutex_wait_max;
     ULONG        copies;
 
     ULONG        rx_queue;          /* receive stub: packets it can hand out */
@@ -294,6 +298,14 @@ VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
         h_pass();
     }
 
+    if (h.copy_runs_notify != NULL)
+    {
+        AmiSocket *s = h.copy_runs_notify;
+
+        h.copy_runs_notify = NULL;
+        h.window_notify(&s->as_Nx.tcp);
+    }
+
     memcpy(dst, src, size);
 }
 
@@ -377,6 +389,20 @@ UINT _txe_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
     if (mutex_ptr == &h_ip.nx_ip_protection)
     {
         h.mutex_gets++;
+        if (wait_option > h.mutex_wait_max)
+            h.mutex_wait_max = wait_option;
+
+        /* The pass is still running: a bounded get times out. */
+        if (h.mutex_busy)
+        {
+            h.ticks += wait_option;
+            if (h.mutex_breaks)
+            {
+                h.mutex_breaks = FALSE;
+                h.signals |= H_BREAK_SIG;
+            }
+            return TX_NOT_AVAILABLE;
+        }
 
         /* The barrier's get returns once the pass that held it has ended. */
         if (h.mutex_finishes != NULL)
@@ -1557,6 +1583,92 @@ static void t_abort_while_owned(void)
     CHECK(s->as_CorkPkt == NULL && h.releases == 1, "then released");
 }
 
+static void t_claim_vs_pass(void)
+{
+    AmiSocket *s;
+
+    printf("cork: a write that finds the IP thread's pass on the segment\n");
+
+    /* Non-blocking: EAGAIN at once, no wait on the pass at all. */
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 30, 0);
+    s->as_CorkState = BSD_CORK_FLUSH;
+    s->as_CorkOwner = BSD_CORK_OWNER_IP;
+    h.mutex_busy    = TRUE;
+    h.mutex_gets    = 0;
+
+    CHECK(h_send(0, 30, 5, MSG_DONTWAIT) == -1 &&
+          h_base.sb_Errno == AMI_EAGAIN,
+          "a non-blocking write is EAGAIN");
+    CHECK(h.mutex_gets == 0, "without taking nx_ip_protection even once");
+    CHECK(s->as_TxWait == 1, "and asks for FD_WRITE");
+
+    /* SO_SNDTIMEO: the barrier is sliced and runs out. */
+    s->as_SndTimeout = 20;
+    CHECK(h_send(0, 30, 5, 0) == -1 && h_base.sb_Errno == AMI_EAGAIN,
+          "SO_SNDTIMEO: EAGAIN when the pass outlasts it");
+    CHECK(h.mutex_gets >= 2 && h.mutex_wait_max <= 10,
+          "in bounded slices, never TX_WAIT_FOREVER");
+
+    /* Ctrl-C while it waits. */
+    s->as_SndTimeout = 0;
+    h.mutex_breaks   = TRUE;
+    CHECK(h_send(0, 30, 5, 0) == -1 && h_base.sb_Errno == AMI_EINTR,
+          "the break ends the wait with EINTR");
+    CHECK(h.mutex_wait_max <= 10, "still a slice at a time");
+    CHECK(h.sends == 0 && h_pending(s) == 30, "and nothing moved");
+
+    /* The pass ends: the write goes behind what it left. */
+    h.signals        = 0;
+    h.mutex_busy     = FALSE;
+    h.mutex_finishes = s;
+    CHECK(h_send(0, 30, 5, 0) == 5 && h_pending(s) == 35,
+          "once the pass is over the write is appended");
+}
+
+#ifdef AMINETXDUO_TCP_CORK_FASTPATH
+static void t_fast_kick(void)
+{
+    AmiSocket *s;
+    ULONG      enters;
+
+    printf("cork: the window notify during a fast-path copy\n");
+
+    /* R's notify lands while F is copying: it finds APPEND, not STALLED, and
+       leaves KICK.  F's completion must wake the pass. */
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 10, 0);
+    h.events = 0;
+    h.copy_runs_notify = s;
+    CHECK(h_send(0, 10, 20, 0) == 20, "the fast path takes the write");
+    CHECK((s->as_CorkFlags & BSD_CORKF_KICK) == 0 &&
+          (h.events & NX_IP_CORK_EVENT) != 0,
+          "and consumes the KICK the notify left, waking the pass");
+    h_pass();
+    CHECK(h_wire_is(0, 30), "which sends it all");
+
+    /* A STALLED segment is not appended to outside the bracket. */
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 10, 0);
+    h.send_plan[0] = NX_WINDOW_OVERFLOW;
+    h.send_planned = 1;
+    h_pass();
+    CHECK((s->as_CorkFlags & BSD_CORKF_STALLED) != 0 &&
+          (s->as_CorkFlags & BSD_CORKF_TICK) == 0 && !h.timer_live,
+          "stalled, off the tick");
+    enters = h.nx_enters;
+    CHECK(h_send(0, 10, 5, 0) == 5 && h.nx_enters == enters + 1,
+          "the fast path declines a STALLED segment");
+    h.window_notify(&s->as_Nx.tcp);
+    h.send_planned = 0;
+    h_pass();
+    CHECK(h_wire_is(0, 15), "and the notify still gets it all out");
+}
+#endif
+
 static void t_loopback(void)
 {
     AmiSocket *s;
@@ -1623,6 +1735,10 @@ int main(void)
     t_disconnect();
     t_teardown();
     t_abort_while_owned();
+    t_claim_vs_pass();
+#ifdef AMINETXDUO_TCP_CORK_FASTPATH
+    t_fast_kick();
+#endif
     t_loopback();
     t_nodelay_off();
 

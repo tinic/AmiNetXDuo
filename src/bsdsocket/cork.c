@@ -312,7 +312,11 @@ ULONG bsd_cork_room(const AmiSocket *sock)
     return (tail < room) ? tail : room;
 }
 
-/* The barrier (see the header): returns once I's pass is over. */
+/* A barrier slice, in ticks: bsd_wait_sliced()'s BSD_BREAK_SLICE_TICKS. */
+#define BSD_CORK_SLICE  10UL
+
+/* The barrier (see the header): returns once I's pass is over.  Unbounded,
+   for the teardown paths that must not leave before it is. */
 static VOID bsd_cork_barrier(VOID)
 {
     NX_IP *ip = bsd_cork_ip;
@@ -334,13 +338,16 @@ static VOID bsd_cork_barrier(VOID)
 LONG bsd_cork_claim(struct AmiSocketBase *base, AmiSocket *sock, ULONG wait,
                     NX_PACKET **pkt)
 {
-    APTR me = (APTR)FindTask(NULL);
+    APTR  me        = (APTR)FindTask(NULL);
+    ULONG remaining = wait;
 
     *pkt = NULL;
 
     for (;;)
     {
-        BOOL ip_owned, mine;
+        BOOL  ip_owned, mine;
+        ULONG slice, started;
+        NX_IP *ip;
 
         Forbid();
         if (sock->as_CorkState == BSD_CORK_IDLE)
@@ -361,26 +368,49 @@ LONG bsd_cork_claim(struct AmiSocketBase *base, AmiSocket *sock, ULONG wait,
                     sock->as_CorkOwner == me) ? TRUE : FALSE;
         Permit();
 
-        if (ip_owned && bsd_cork_ip != NULL)
-        {
-            bsd_cork_barrier();
-            continue;
-        }
-
         /* This task's own claim, taken again: a path that nests two.  Waiting
            for itself would never end. */
         if (mine)
             return AMI_EINVAL;
 
+        /* Before any barrier: a caller that may not wait does not wait for
+           the IP thread's pass either, however short it usually is -- the
+           pass can be inside a third-party driver's BeginIO(). */
         if (wait == NX_NO_WAIT)
             return AMI_EAGAIN;
 
         if (base != NULL && (bsd_break_signals(base) & base->sb_BreakMask) != 0)
             return AMI_EINTR;
 
-        /* F copying, or B inside a send of its own.  Either is short or has a
-           NetX Duo wait of its own under it; a tick gives it the machine. */
-        AMI_NX_ONLY_SUCCESS(tx_thread_sleep(1));
+        if (wait != NX_WAIT_FOREVER && remaining == 0)
+            return AMI_EAGAIN;
+
+        /* The barrier, bounded: a slice at a time, so SO_SNDTIMEO and the
+           break mask are looked at between slices as bsd_wait_sliced() looks
+           at them.  F copying, or B inside a send of its own, gets a tick. */
+        slice = (wait == NX_WAIT_FOREVER || remaining > BSD_CORK_SLICE)
+                    ? BSD_CORK_SLICE : remaining;
+        started = tx_time_get();
+        ip      = bsd_cork_ip;
+
+        if (ip_owned && ip != NULL)
+        {
+            if (tx_mutex_get(&ip->nx_ip_protection, slice) == TX_SUCCESS)
+                AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
+        }
+        else
+        {
+            AMI_NX_ONLY_SUCCESS(tx_thread_sleep(1));
+        }
+
+        if (wait != NX_WAIT_FOREVER)
+        {
+            ULONG spent = tx_time_get() - started;
+
+            if (spent == 0)
+                spent = 1;
+            remaining = (spent >= remaining) ? 0 : remaining - spent;
+        }
     }
 }
 
