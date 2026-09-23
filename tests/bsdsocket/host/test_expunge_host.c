@@ -197,6 +197,13 @@ VOID bsd_runtime_close(VOID)        { h.runtime_close_calls++; }
    timer.device; the base under test never armed one. */
 VOID bsd_timer_teardown(struct AmiSocketBase *base) { (VOID)base; }
 
+#ifdef AMINETXDUO_TCP_CORK
+/* The cork's timer comes and goes with the stack (library.c); cork.c is
+   test_cork's. */
+VOID bsd_cork_start(NX_IP *ip) { (VOID)ip; }
+VOID bsd_cork_stop(VOID)       { }
+#endif
+
 /* bsd_lib_open() calls this on every open, to hold usergroup.library resident
    for ixemul clients.  Nothing here depends on it, and the real one only opens
    a library, so it is a no-op rather than an h_unreachable(). */

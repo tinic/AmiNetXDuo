@@ -69,6 +69,12 @@ if(AMINETXDUO_MULTICAST)
     list(APPEND BSDSOCKET_SOURCES mcast.c)
 endif()
 
+# cork.c is the small-write cork behind setsockopt(TCP_NODELAY, 0).  Off, it is
+# not compiled and TCP_NODELAY=0 is EINVAL, as it always was.
+if(AMINETXDUO_TCP_CORK)
+    list(APPEND BSDSOCKET_SOURCES cork.c)
+endif()
+
 add_library(aminetxduo_bsdsocket STATIC ${BSDSOCKET_SOURCES})
 
 target_include_directories(aminetxduo_bsdsocket PUBLIC

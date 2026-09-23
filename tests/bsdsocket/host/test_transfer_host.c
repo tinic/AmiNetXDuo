@@ -488,6 +488,39 @@ VOID bsd_bzero(APTR p, ULONG size)
     memset(p, 0, (size_t)size);
 }
 
+#ifdef AMINETXDUO_TCP_CORK
+/* The cork's entry points transfer.c calls.  cork.c is test_cork's
+   (test_cork_host.c, which compiles this same transfer.c against it); no
+   socket here turns it on, so none of these is reached. */
+static void h_cork_unreachable(const char *what)
+{
+    printf("  FAIL unreachable call: %s\n", what);
+    h_failures++;
+    abort();
+}
+
+BOOL  bsd_cork_corkable(const AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_cork_corkable"); return FALSE; }
+LONG  bsd_cork_claim(struct AmiSocketBase *base, AmiSocket *sock, ULONG wait,
+                     NX_PACKET **pkt)
+{ (VOID)base; (VOID)sock; (VOID)wait; (VOID)pkt;
+  h_cork_unreachable("bsd_cork_claim"); return 0; }
+BOOL  bsd_cork_unclaim(AmiSocket *sock, NX_PACKET *pkt, ULONG why)
+{ (VOID)sock; (VOID)pkt; (VOID)why;
+  h_cork_unreachable("bsd_cork_unclaim"); return FALSE; }
+ULONG bsd_cork_settle(AmiSocket *sock, NX_PACKET **pkt, UINT status)
+{ (VOID)sock; (VOID)pkt; (VOID)status;
+  h_cork_unreachable("bsd_cork_settle"); return 0; }
+VOID  bsd_cork_push(struct AmiSocketBase *base, AmiSocket *sock)
+{ (VOID)base; (VOID)sock; h_cork_unreachable("bsd_cork_push"); }
+ULONG bsd_cork_room(const AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_cork_room"); return 0; }
+VOID  bsd_tcp_send_fin(AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_tcp_send_fin"); }
+VOID  bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
+{ (VOID)src; (VOID)dst; (VOID)size; h_cork_unreachable("bsd_bcopy"); }
+#endif
+
 /* ------------------------------------------------------------ NetX Duo -- */
 
 static HPacket *h_from_nx(NX_PACKET *p)

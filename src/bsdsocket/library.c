@@ -789,6 +789,11 @@ static LONG bsd_netstack_bringup(VOID)
    an NX_IP whose storage teardown is about to reclaim.  Caller holds sb_Lock. */
 static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
 {
+#ifdef AMINETXDUO_TCP_CORK
+    /* The cork's timer and IP handler go before the IP instance does: a tick
+       or a queued event must never reach a deleted timer or a freed NX_IP. */
+    bsd_cork_stop();
+#endif
     master->sb_StackIp   = NULL;
     master->sb_StackPool = NULL;
     netstack_shutdown();
@@ -943,6 +948,12 @@ struct AmiSocketBase *bsd_lib_open(
             master->sb_Lib.lib_OpenCnt--;
             return NULL;
         }
+#ifdef AMINETXDUO_TCP_CORK
+        /* The stack's first reference: one cork timer for its lifetime,
+           deleted by bsd_netstack_shutdown_owned() before the stack goes.  A
+           timer that cannot be made leaves TCP_NODELAY=0 answering ENOBUFS. */
+        bsd_cork_start(master->sb_StackIp);
+#endif
     }
     master->sb_StackRefs++;
 

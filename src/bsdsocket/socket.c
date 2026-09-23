@@ -29,7 +29,10 @@ static char bsd_udp_name[] = "AmiNetXDuo UDP";
  * shutdown(SHUT_WR).  Call with the ThreadX scheduler lock held (bsd_nx_enter);
  * takes the IP protection mutex, as _nx_tcp_packet_send_fin() requires.
  */
-static VOID bsd_tcp_send_fin(AmiSocket *sock)
+#ifndef AMINETXDUO_TCP_CORK
+static
+#endif
+VOID bsd_tcp_send_fin(AmiSocket *sock)
 {
     NX_TCP_SOCKET *tcp = &sock->as_Nx.tcp;
     NX_IP         *ip  = tcp->nx_tcp_socket_ip_ptr;
@@ -710,6 +713,9 @@ static BOOL bsd_tcp_close_start(AmiSocket *sock)
     /* RFC 1122 4.2.2.13: unread data turns a close into an abort. */
     if (sock->as_RxPending != NULL || tcp->nx_tcp_socket_receive_queue_count != 0)
     {
+#ifdef AMINETXDUO_TCP_CORK
+        bsd_cork_drop(sock);
+#endif
         bsd_tcp_abort(tcp);
         return TRUE;
     }
@@ -717,17 +723,39 @@ static BOOL bsd_tcp_close_start(AmiSocket *sock)
     /* SO_LINGER, l_linger == 0: the documented abortive close. */
     if (sock->as_LingerOn != 0 && sock->as_LingerTime == 0)
     {
+#ifdef AMINETXDUO_TCP_CORK
+        bsd_cork_drop(sock);
+#endif
         bsd_tcp_abort(tcp);
         return TRUE;
     }
 
     if (sock->as_LingerOn != 0)
     {
-        if (nx_tcp_socket_disconnect(tcp, (ULONG)sock->as_LingerTime *
-                                              NX_IP_PERIODIC_RATE)
-            != NX_NOT_CONNECTED)
+        ULONG linger = (ULONG)sock->as_LingerTime * NX_IP_PERIODIC_RATE;
+
+#ifdef AMINETXDUO_TCP_CORK
+        /* What is corked gets the linger time first, and the disconnect what
+           is left of it.  Still held when the time is up: an abort, as a
+           linger that expires with data unsent is. */
+        if (!bsd_cork_close_linger(sock, linger, &linger))
+        {
+            bsd_tcp_abort(tcp);
+            return TRUE;
+        }
+#endif
+        if (nx_tcp_socket_disconnect(tcp, linger) != NX_NOT_CONNECTED)
             return TRUE;
     }
+#ifdef AMINETXDUO_TCP_CORK
+    /* The FIN goes behind what is corked: parked with it deferred, and the
+       pass that sends the segment's last byte sends the FIN after it. */
+    else if (bsd_cork_close_graceful(sock))
+    {
+        bsd_closing_park(sock);
+        return FALSE;
+    }
+#endif
     else
     {
         bsd_tcp_send_fin(sock);
@@ -766,6 +794,14 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
         if (!bsd_tcp_close_start(sock))
             return FALSE;
     }
+
+#ifdef AMINETXDUO_TCP_CORK
+    /* Off the armed list and the segment released before the socket can be
+       freed: no pass and no tick reaches it after this.  The sweep's deadline,
+       the drain and CloseLibrary all come through here. */
+    if ((sock->as_Flags & (ASF_TCP | ASF_RAW)) == ASF_TCP)
+        bsd_cork_drop(sock);
+#endif
 
     if (sock->as_RxPending != NULL)
     {
@@ -2666,6 +2702,10 @@ LONG bsd_shutdown(register LONG sock_fd __asm("d0"),
             if (bsd_nx_enter(SocketBase) != 0)
                 return bsd_fail(SocketBase, AMI_ENETDOWN);
 
+#ifdef AMINETXDUO_TCP_CORK
+            /* Behind what is corked, if the window will not take it now. */
+            if (!bsd_cork_shut_write(sock))
+#endif
             bsd_tcp_send_fin(sock);
 
             bsd_nx_leave(SocketBase);

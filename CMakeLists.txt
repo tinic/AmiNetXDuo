@@ -1494,6 +1494,28 @@ if(AMINETXDUO_TX_RUN)
     add_compile_definitions(AMINETXDUO_TX_RUN)
 endif()
 
+# Opt-in per-socket small-write cork: setsockopt(TCP_NODELAY, 0) holds
+# sub-segment writes on the socket for up to a tick and sends them as one
+# segment (src/bsdsocket/cork.c).  A layout change to NX_IP and AmiSocket, so
+# whole-tree.  OFF: none of it is compiled and TCP_NODELAY=0 stays EINVAL.
+option(AMINETXDUO_TCP_CORK
+       "Per-socket small-write cork behind setsockopt(TCP_NODELAY, 0)" OFF)
+
+if(AMINETXDUO_TCP_CORK)
+    add_compile_definitions(AMINETXDUO_TCP_CORK)
+endif()
+
+# The cork's append fast path: a write that fits the pending segment is copied
+# without entering the ThreadX bracket.  The bracket is ~4% of a small write's
+# CPU; the coalescing is the rest, so this stays off until it is measured.
+option(AMINETXDUO_TCP_CORK_FASTPATH
+       "Cork appends outside the ThreadX bracket (needs AMINETXDUO_TCP_CORK)"
+       OFF)
+
+if(AMINETXDUO_TCP_CORK AND AMINETXDUO_TCP_CORK_FASTPATH)
+    add_compile_definitions(AMINETXDUO_TCP_CORK_FASTPATH)
+endif()
+
 # anxzz9000.device, the MNT ZZ9000's Ethernet on the fork's firmware, is
 # built by every configuration (its code and tests stay compiled) but goes
 # into the release payload and the archive only when this is ON.  It is OFF
