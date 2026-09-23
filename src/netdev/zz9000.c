@@ -557,24 +557,33 @@ static BOOL zz_rint(NetdevNic *nic)
 
     /*
      * A register write does not return to the 68k until the ARM has handled
-     * it and selected the next receive slot.  Seeing the same non-zero serial
-     * twice therefore means the exact acknowledgement from the preceding
-     * pass was rejected; it cannot be the next frame.  This happens when the
-     * ACP serves a stale serial from L2 despite the firmware's invalidate.
+     * it and selected the next receive slot.  Seeing the same or an older
+     * non-zero serial therefore means the window is stale; it cannot be the
+     * next frame.  This happens when the ACP serves a stale serial from L2
+     * despite the firmware's invalidate.  The generator uses
+     * the circular range 2..0xffff, so compare forward distance on that
+     * ring rather than comparing the numeric values across wraparound.
      *
      * Re-copying it forever is fatal: every pass re-enables the level-six
      * source while the same frame remains pending, producing an INT6/software
      * interrupt storm that leaves the whole machine apparently frozen.  The
      * firmware deliberately reserves acknowledgement value 1 as its legacy
-     * bare-advance operation.  Use it only for this proven rejection, without
+     * bare-advance operation.  Use it only for a repeat or older serial, without
      * delivering the frame a second time.  This is a bounded compatibility
      * recovery for every handshake-capable firmware revision.
      */
-    if (last != 0 && serial == last)
+    if (last != 0)
     {
-        nic->core_stat[ZZ_ST_ACK_RECOVER]++;
-        zz_put(nic, ZZ_REG_RX_ACK, 1);
-        return TRUE;
+        ULONG forward = (serial >= last)
+                      ? (ULONG)(serial - last)
+                      : 65534UL - (ULONG)last + (ULONG)serial;
+
+        if (forward == 0 || forward > 32767UL)
+        {
+            nic->core_stat[ZZ_ST_ACK_RECOVER]++;
+            zz_put(nic, ZZ_REG_RX_ACK, 1);
+            return TRUE;
+        }
     }
 
     /* The generator skips 0 and 1, so the successor of 0xffff is 2. */

@@ -342,12 +342,88 @@ static VOID staging_path_reads_aligned(VOID)
     expect(bulk_calls == 2, "staging: header bulk and payload bulk");
 }
 
+/* The ARM's serial skips 0 and 1.  A stale window can present a frame that
+   the driver acknowledged before the most recent one, not just an exact
+   repeat of the last serial.  Never deliver it or move the watermark back. */
+static VOID present_serial(UWORD serial)
+{
+    UWORD *slot = (UWORD *)(void *)(board.bytes + ZZ_RX_WINDOW);
+    UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD;
+
+    memset(frame, 0, NETDEV_HDR_LEN + 40);
+    memset(frame, 0xff, 6);             /* broadcast passes zz_rx_wanted */
+    slot[0] = NETDEV_HDR_LEN + 40;
+    slot[1] = serial;
+}
+
+static VOID stale_serial_recovery(VOID)
+{
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0x42;
+    present_serial(0x42);
+    expect(zz_rint(&nic), "repeat serial: pass acknowledges the slot");
+    expect(received_len == 0, "repeat serial: frame not delivered twice");
+    expect(nic.core_stat[ZZ_ST_ACK_RECOVER] == 1,
+           "repeat serial: legacy advance still used");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 1,
+           "repeat serial: legacy acknowledge written");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0x42;
+    present_serial(0x40);
+    expect(zz_rint(&nic), "stale serial: pass acknowledges the slot");
+    expect(received_len == 0, "stale serial: frame not delivered twice");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 0x42,
+           "stale serial: watermark does not rewind");
+    expect(nic.core_stat[ZZ_ST_ACK_RECOVER] == 1,
+           "stale serial: legacy advance used once");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 1,
+           "stale serial: legacy acknowledge written");
+    expect(nic.core_stat[ZZ_ST_GAPS] == 0,
+           "stale serial: no forward ring gap recorded");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0x42;
+    present_serial(0x45);
+    expect(zz_rint(&nic), "forward gap: pass acknowledges the slot");
+    expect(received_len != 0, "forward gap: new frame delivered");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 0x45,
+           "forward gap: watermark advances");
+    expect(nic.core_stat[ZZ_ST_GAPS] == 1,
+           "forward gap: missing serials recorded");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 0x45,
+           "forward gap: exact serial acknowledged");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0xffff;
+    present_serial(2);
+    expect(zz_rint(&nic), "wrapped successor: pass acknowledges the slot");
+    expect(received_len != 0, "wrapped successor: new frame delivered");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 2,
+           "wrapped successor: watermark advances");
+    expect(nic.core_stat[ZZ_ST_GAPS] == 0,
+           "wrapped successor: no ring gap recorded");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 2,
+           "wrapped successor: exact serial acknowledged");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 2;
+    present_serial(0xffff);
+    expect(zz_rint(&nic), "stale at wrap: pass acknowledges the slot");
+    expect(received_len == 0, "stale at wrap: old frame not delivered");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 2,
+           "stale at wrap: watermark does not rewind");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 1,
+           "stale at wrap: legacy acknowledge written");
+}
+
 int main(void)
 {
     payload_copy_every_length();
     verified_claim_path_reads_aligned();
     summed_claim_path_still_aligned();
     staging_path_reads_aligned();
+    stale_serial_recovery();
 
     printf("%s: zz9000 payload alignment, %lu checks, %d failure%s\n",
            failures == 0 ? "PASS" : "FAIL", (unsigned long)checks, failures,
