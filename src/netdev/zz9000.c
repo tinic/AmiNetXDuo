@@ -51,7 +51,8 @@
  * The interrupt is INT6 (INTB_EXTER) by default, or INT2 (INTB_PORTS) when
  * current firmware reports `int2 = on` in ZZ9000.CFG.  The server only masks
  * and acknowledges at the card and the drain runs in the shell's software
- * interrupt, so a burst of 32 frames is not copied at hardware level.
+ * interrupt, so a burst is not copied at hardware level.  The software
+ * interrupt bounds each pass to eight frames before re-arming the card.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -704,6 +705,14 @@ static BOOL zz_rint(NetdevNic *nic)
 
 /* --------------------------------------------------------- interrupt ---- */
 
+/* The software interrupt runs with Exec interrupts disabled.  A full
+ * 32-frame pass can hide entire video frames from a level-4 sampler on a
+ * 25 MHz 68030.
+ * Keep the ZZ9000 pass short; after we re-arm its source, the firmware
+ * asserts it again while receive backlog remains.  Other devices keep
+ * their own drain budgets. */
+#define ZZ_RX_DRAIN_MAX 8
+
 /*
  * The top half, at INT6: was it ours, and quieten it.  Masking the card's
  * enable bit is what MNT's server does too; re-armed at the end of the
@@ -736,7 +745,7 @@ static BOOL zz_intr(NetdevNic *nic)
     if (!nic->running)
         return FALSE;
 
-    for (n = 0; n < NETDEV_DRAIN_MAX; n++)
+    for (n = 0; n < ZZ_RX_DRAIN_MAX; n++)
     {
         if (!zz_rint(nic))
             break;
@@ -791,7 +800,7 @@ static BOOL zz_intr(NetdevNic *nic)
                     nic->core_stat[ZZ_ST_LATE_HIT]++;
                     if (reads > nic->core_stat[ZZ_ST_LATE_READS])
                         nic->core_stat[ZZ_ST_LATE_READS] = reads;
-                    for (n = 0; n < NETDEV_DRAIN_MAX; n++)
+                    for (n = 0; n < ZZ_RX_DRAIN_MAX; n++)
                     {
                         if (!zz_rint(nic))
                             break;

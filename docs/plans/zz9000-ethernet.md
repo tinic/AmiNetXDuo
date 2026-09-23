@@ -88,12 +88,43 @@ packet a pointer into today's single presented RX window is unsafe: the ACK
 reuses that window before TCP or the application releases the packet. A true
 loaned-buffer design would need firmware slot ownership, stable mapped slots,
 cache coherency, and a packet-release handshake; it is a different protocol,
-not a one-line extension. The next useful experiment is to shorten or move
-the driver drain out of its long interrupt-masked section, with the same
-firmware and a fresh profile; test a ZZ9000 batch-completion negotiation only
-after that. The earlier X-Surf batch-*repost* and poll regression (39-41 to
+not a one-line extension. The bounded-drain experiment below is the first
+step. Test a ZZ9000 batch-completion negotiation only after it. The earlier
+X-Surf batch-*repost* and poll regression (39-41 to
 24-26 Mbit/s in emulation) involved a different mechanism; it is a warning
 to measure batching per device, not evidence that ZZ9000 RX_BATCH will lose.
+
+### Eight-frame masked-pass limit
+
+The next driver candidate limited `zz_intr()` to eight frames per pass, down
+from the shared 32-frame budget. The card is re-armed after each pass; the
+firmware reasserts its interrupt while RX backlog remains. This changes no
+firmware protocol or SANA-II contract. The host test bounds the pass, and a
+clean GCC 16.2 cross-build was loaded on the A3000 with the same firmware and
+stack library as above. The new unit's `most frames in one pass` counter was
+eight, confirming that the candidate, not the earlier resident driver, ran.
+
+The level-4 profile at 500 Hz found no whole-video-frame discrepancy (1650
+frames by the sample clock, 1648 by vertical blank); the earlier 32-frame
+profile missed 277 complete frames. The raw files are in
+`~/Archives/zz9000/profiles/2026-09-23-a3000-zz-rx*.prof`. A 25-second plain
+receive run reached 8.19 Mbit/s, and a 120-second run reached 8.32 Mbit/s
+over 120 MB, across the 16-bit RX serial wrap. The latter is close to the
+earlier 8.38/8.43 Mbit/s long runs; this is not evidence of a throughput gain.
+The candidate's profiled run was 8.05 Mbit/s versus 8.30 Mbit/s previously.
+Its cumulative counters after the soak and a 16 MiB HTTP fetch showed zero
+bad data, overruns, serial gaps, rejected acknowledgements, or resets. The
+HTTP fetch sourced from the ZZ9000 lease and took 29 seconds by `Date`, versus
+28 seconds for the earlier build; both figures are one-second resolution.
+
+This removes the observed frame-scale *continuous* mask, not the total cost
+of card-window copying. The candidate profile still estimated 36.8% of its
+run unsampled, and its duration includes more pre-transfer waiting than the
+earlier profile. Do not compare that percentage directly with the earlier
+32.9% floor: the earlier sample clock lost whole frames and undercounted its
+own masked time. A future design to enable interrupts inside the copy needs
+an explicit Exec reentrancy and lifecycle proof; this bounded-pass change
+does not make that assumption.
 
 ## The card as the 68k sees it (measured)
 
@@ -194,10 +225,10 @@ shares that mains.
 | 0 state | both doors answer (`curl -m 4 http://<X-Surf door>/` and `http://<ZZ9000 door>/`; the addresses are DHCP leases and move -- 2026-09-21 they were .101 and .161); `ShowNetStatus` shows which driver holds `zz9000`; `RAM:zzreg c0` = firmware 0x0208, `RAM:zzreg 8a` bit 15 = the fork's async TX is flashed. **The 256 MB Zorro RAM must be mapped**: `Avail` shows about 273 MB free with a 256 MB largest block. A boot that shows ~12 MB fast and a few hundred KB free (the RTG framebuffer then sits in system RAM) invalidates every number taken on it; `C:Reboot` remapped it on 2026-09-21 |
 | 1 build driver | main checkout: `cmake --build build/release --target anxzz9000_device`; copy `build/release/src/netdev/anxzz9000.device` into a directory a plain `python3 -m http.server 8766` serves (the rig, 192.168.1.184) |
 | 1 build firmware | `~/zz9000-firmware` branch `aminetxduo`: `PATH=~/.cache/zz9000/arm-gnu-toolchain/bin:$PATH BOOTGEN=~/.cache/zz9000/bootgen/bootgen ./build_firmware.sh && ./build_bootimage.sh --output bootimage_work/BOOT-<tag>.bin` (Arm GNU 13.2.rel1 + bootgen from github.com/Xilinx/bootgen; 3 min; the linker's 1 MB low-section ASSERT is the size gate) |
-| 2 stage | over the .175 web shell (`AMISH_TAKE=1 python3 ~/tools/anxd-webshell.py 192.168.1.175 80`, one command per line on stdin): `fetch http://192.168.1.184:8766/srv/<f> TO RAM:<f>`; a driver goes on with `Copy RAM:anxzz9000.device AmiNetXDuo:Devs/Networks/anxzz9000.device` (only our file; MNT's is never touched); `Echo >RAM:zz9k "DEVICE=AmiNetXDuo:Devs/Networks/anxzz9000.device*NUNIT=0*NCONFIGURE=DHCP*NMDNS=NO*NPRIORITY=0"` |
-| 3 switch | drive the Amiga through the httpd web shell (`/shell`, row 2) on either door -- the control path does not have to be the interface under test, the data target does (2026-09-21: shell on the X-Surf lease, iperf to the ZZ9000 lease); the X-Surf ssh door is recovery only, for when httpd stops answering. To put our driver on the card: `RemoveNetInterface zz9000 FORCE` / `AddNetInterface RAM:zz9k TIMEOUT=40` / `NetDevStats DEVICE anxzz9000.device`. A new driver binary on a running unit: `RemoveNetInterface zz9k FORCE` / `Avail FLUSH >NIL:` / `Copy RAM:anxzz9000.device AmiNetXDuo:Devs/Networks/anxzz9000.device` / `AddNetInterface RAM:zz9k TIMEOUT=40`. Traffic is pinned to the ZZ9000 by addressing the ZZ9000 interface's lease; the X-Surf stays up. **`Avail` after every swap, not only at row 0**: on 2026-09-22 the 256 MB Zorro RAM vanished inside a swap step (mapped 273 MB free before `RemoveNetInterface zz9000 FORCE` / `Avail FLUSH` / `Copy` / `AddNetInterface RAM:zz9k`, 6.7 MB free at the first snapshot after it, before any traffic) and a 60 s soak was measured on the crippled machine; the previous night's swaps without `Avail FLUSH` kept the RAM, so the flush expunging MNT's driver is the suspect, unproven. A measurement taken with the RAM unmapped is void; `C:Reboot` remaps it |
+| 2 stage | over the .175 web shell (`AMISH_TAKE=1 python3 ~/tools/anxd-webshell.py 192.168.1.175 80`, one command per line on stdin): `fetch http://192.168.1.184:8766/srv/<f> TO RAM:<f>`. Check `Assign AmiNetXDuo:` before using that shorthand: on 2026-09-23 it was absent although the installed file was at `Workbench:AmiNetXDuo/Devs/Networks/anxzz9000.device`, so `Copy ... AmiNetXDuo:...` failed and the old resident driver returned online. Use the explicit `Workbench:` path for both `Copy` and the temporary interface file; MNT's device is never touched. |
+| 3 switch | drive the Amiga through the httpd web shell (`/shell`, row 2) on either door -- the control path does not have to be the interface under test, the data target does (2026-09-21: shell on the X-Surf lease, iperf to the ZZ9000 lease); the X-Surf ssh door is recovery only, for when httpd stops answering. To put our driver on the card: `RemoveNetInterface zz9000 FORCE` / `AddNetInterface RAM:zz9k TIMEOUT=40` / `NetDevStats DEVICE anxzz9000.device`. A new driver binary on a running unit: `RemoveNetInterface zz9k FORCE` / `Copy RAM:anxzz9000.device Workbench:AmiNetXDuo/Devs/Networks/anxzz9000.device` / `Avail FLUSH` / `Avail` / `AddNetInterface RAM:zz9k TIMEOUT=40`; check the unit counters reset so the new binary actually loaded. Traffic is pinned to the ZZ9000 by addressing the ZZ9000 interface's lease; the X-Surf stays up. **`Avail` after every swap, not only at row 0**: on 2026-09-22 the 256 MB Zorro RAM vanished inside a swap step (mapped 273 MB free before `RemoveNetInterface zz9000 FORCE` / `Avail FLUSH` / `Copy` / `AddNetInterface RAM:zz9k`, 6.7 MB free at the first snapshot after it, before any traffic) and a 60 s soak was measured on the crippled machine; the previous night's swaps without `Avail FLUSH` kept the RAM, so the flush expunging MNT's driver is the suspect, unproven. A measurement taken with the RAM unmapped is void; `C:Reboot` remaps it |
 | 4 measure | one fresh server per run, and never probe the port first: a connect to 5001 (a `/dev/tcp` check, `nc -z`) IS the client, the server takes it as a 1-byte run and exits, and the real client is refused. The control that works: from the web shell on the ZZ9000 door a plain `iperf -s -t 30 -q` (no `-w`, no `-l`, no `Stack`), then the rig's plain `iperf -c <ZZ9000 door> -t 12`. httpd also serves `/iperf/tcp-rx/<seconds>` (`src/tools/httpd.c`, `httpd_iperf_hook`), the same measurement without a Shell; builds before the fix that recognises `/iperf` as an application address answered 403 in volume mode, and it does not replace the recipe above until a build with that fix has answered on this bench. Confirmed 2026-09-21 on the ARCACHE firmware: 4.11 / 4.12 / 4.12 / 3.88 Mbit/s over four runs, peer retrans 60/67/98/48. Three `ss -tin \| grep -A1 <ZZ9000 door>:5001` snapshots on the rig for `rwnd_limited`, `snd_wnd`, `cwnd`, `rtt`, `retrans`; a capture needs root (`sudo tcpdump -ni eth0 -w x.pcap host <door> and port 5001`) and the retransmit analysis is a 20-line python over `tcpdump -nr`. On the Amiga: `NetDevStats DEVICE anxzz9000.device`, `netstat -s` (tcp "dropped on receipt", interface "receive errors: checksum"), `RAM:zzreg 8c` (rx status), `8e` (dropped<<8 \| pause frames), `ac`/`ae` (GEM RX FIFO overruns, error interrupts), `a8` then `aa` (longest service-loop pass, its tag). A `fetch` from the Amiga proves nothing about the ZZ9000 unless httpd's access log on the rig shows the request came from the ZZ9000 lease: on 2026-09-21 it came from the X-Surf |
-| 5 read counters | on the fixed firmware "passes after a top half, empty" and "header appeared on spin / never appeared" must stay 0 -- a rise says stale headers again; "top halves: Ethernet pending" is bursts, not frames; "serial gaps" = the ARM's ring overflowed; the shell's "Direct receive fills" should equal packets received |
+| 5 read counters | on the fixed firmware "header appeared on spin / never appeared" should stay 0; a few empty passes after a top half are possible, but a continuing rise under load warrants investigation. "Top halves: Ethernet pending" counts service passes, not frames; "serial gaps" = the ARM's ring overflowed. "Direct receive fills" should be close to packets received, excluding unwanted and non-direct frames. |
 | 6 flash | `Copy RAM:BOOT-<tag>.bin RAM:BOOT.bin` then `ZZFwUpdate RAM:BOOT.bin` (the name must be BOOT.bin; keep a copy in `Work:Attic/ZZ9000-console/`), then a POWER CYCLE: HA `switch.wemo_switch_shop` off 30 s, on (a shorter hold is ignored; verify the A1200 goes dark); both machines are back in ~45 s; a warm `SyncReboot` does not reload the card and DOES bring its 256 MB Z3 RAM online (`Avail`), which changes where the packet pool lands |
 | 7 profile | `RAM:Profile RATE=1000 SAMPLES=30000 OUT=RAM:x.prof AmiNetXDuo:C/iperf SERVER PORT 5002 TIME 25` from the web shell with `AMISH_QUIET=45` (the ssh door hangs it); the module table prints at the end; `tools/profiler/profreport.py --allow-unresolved --allow-stale x.prof` for tasks and gaps. A sample after a Disable() section lands on the instruction after Enable(): device time in `netdev_soft` is the drain |
 | 8 hang | both doors dark and `ss -tin` frozen = the machine, not the link: power cycle, note MB-at-hang and the arm, one arm per soak; MNT's driver on the same firmware is the control (60 s clean) |
@@ -209,7 +240,7 @@ shares that mains.
 2. Switch over the .147 ssh door, never with a `fetch` in the same script
    (the X-Surf goes deaf after downloads; `Offline eth0`/`Online eth0` revives it):
    `FailAt 21` / `RemoveNetInterface zz9000 FORCE` / `AddNetInterface RAM:zz9k TIMEOUT=40`.
-3. `RAM:zz9k`: `DEVICE=AmiNetXDuo:Devs/Networks/anxzz9000.device`, `UNIT=0`, `CONFIGURE=DHCP`, `MDNS=NO`, `PRIORITY=0`.
+3. `RAM:zz9k`: `DEVICE=Workbench:AmiNetXDuo/Devs/Networks/anxzz9000.device`, `UNIT=0`, `CONFIGURE=DHCP`, `MDNS=NO`, `PRIORITY=0`. An `AmiNetXDuo:` assign cannot be assumed on this boot.
 4. Measure: `iperf -s -t 30 -q` on the Amiga, `iperf -c 192.168.1.175 -t 12` here, `ss -tin` for rwnd_limited/retrans, `NetDevStats DEVICE anxzz9000.device`, `netstat -s`, card registers with `RAM:zzreg 8a|8c|8e|ac|a8`.
 5. Firmware: `ZZFwUpdate RAM:BOOT.bin` (the file must be named BOOT.bin), then a power cycle -- a warm reboot does not reload the card, and a warm reboot brings the card's 256 MB Z3 RAM online while a cold one does not (`Avail`), which moves where the pool lands.
 6. Registers added by the fork: 0x8a TX status; 0xa6 checksum capabilities

@@ -417,6 +417,25 @@ static VOID stale_serial_recovery(VOID)
            "stale at wrap: legacy acknowledge written");
 }
 
+/* A stuck/stale presented serial is deliberately left in this host window.
+ * The firmware would advance it on the recovery ack; here it proves that a
+ * single masked software-interrupt pass stops after the specified number of
+ * acknowledged slots. */
+static VOID receive_pass_is_bounded(VOID)
+{
+    fresh_unit();
+    nic.running = TRUE;
+    present_serial(0x42);
+
+    expect(zz_intr(&nic), "drain: pending receive counted as work");
+    expect(nic.core_stat[ZZ_ST_BURST_MAX] == ZZ_RX_DRAIN_MAX,
+           "drain: one pass stops at the ZZ9000 budget");
+    expect(nic.rx_packets == 1,
+           "drain: repeated serial is not delivered twice");
+    expect(nic.core_stat[ZZ_ST_ACK_RECOVER] == ZZ_RX_DRAIN_MAX - 1,
+           "drain: repeated serial is recovered only within the pass");
+}
+
 /* Reset is called by the VBlank watchdog, not by the ARM firmware.  Its
    register write cannot cancel GEM DMA from a still-busy TX window slot. */
 static VOID reset_preserves_live_tx_slots(VOID)
@@ -495,6 +514,7 @@ int main(void)
     summed_claim_path_still_aligned();
     staging_path_reads_aligned();
     stale_serial_recovery();
+    receive_pass_is_bounded();
     reset_preserves_live_tx_slots();
     tx_counter_reclaim();
 
