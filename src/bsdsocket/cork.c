@@ -648,10 +648,11 @@ static BOOL bsd_cork_fin_behind(AmiSocket *sock, ULONG extra)
     return FALSE;
 }
 
-/* shutdown(SHUT_WR). */
+/* shutdown(SHUT_WR).  The deferred FIN keeps the tick as well as the
+   window notify: a FIN nobody sends is a connection nobody closes. */
 BOOL bsd_cork_shut_write(AmiSocket *sock)
 {
-    return bsd_cork_fin_behind(sock, 0);
+    return bsd_cork_fin_behind(sock, BSD_CORKF_TICK);
 }
 
 /* CloseSocket() without SO_LINGER.  The socket is parked next, and a parked

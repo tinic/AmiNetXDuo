@@ -1296,6 +1296,8 @@ static void t_shut_write(void)
     CHECK(bsd_cork_shut_write(s) == TRUE, "the FIN is deferred");
     CHECK(h.fins == 0 && (s->as_CorkFlags & BSD_CORKF_FIN) != 0,
           "not sent, flagged behind the segment");
+    CHECK((s->as_CorkFlags & BSD_CORKF_TICK) != 0 && h.timer_live,
+          "and on the tick, not only the window notify");
 
     h.send_planned = 0;
     h.window_notify(&s->as_Nx.tcp);
