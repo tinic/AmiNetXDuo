@@ -46,6 +46,55 @@ source was ZZ9000's `192.168.1.161`, not X-Surf's address; the file size was
 16,777,216 bytes. `zz9k` priority was restored to 0 afterward. The boot
 configuration remains MNT's driver, so a reboot returns to it.
 
+## A3000 receive profile, 2026-09-23
+
+The 25 MHz 68030 was profiled with the same firmware and `anxzz9000.device`
+as above, the card's 256 MB Zorro RAM mapped, and the installed beta4
+`bsdsocket.library` (`66960e8`). The receive hot-path files in that library
+have not changed between beta4 and the main revision above. The sampler's
+`profspin` containment and proportionality check passed on this machine
+(0 failures). The profile used audio channel 3 at 500 Hz around
+`iperf SERVER PORT 5002 TIME 30`; a Linux peer sent for 25 seconds. The Amiga
+received 25.38 MB in 25.64 seconds, or 8.30 Mbit/s, close to the unprofiled
+8.43 Mbit/s long run. All 9,889 collected samples were saved.
+
+This is **not** a simple flat CPU percentage chart. The level-4 sampler cannot
+interrupt the driver's `Disable()`-protected receive drain. The Amiga-side
+report estimated 44.4% of the 28-second command unsampled; the host report's
+timestamp reconstruction found at least 32.9%, with a longest gap of 19.78
+ms. One half-second interval ran at less than half the requested sample rate,
+so the exact masked share is uncertain. The exact installed driver matched
+the clean-build MD5 above, and disassembly places 978 samples at its
+`Enable()` return instruction (`+$4d26`), immediately after a masked pass.
+Treat those as evidence of time hidden in the drain, not time spent executing
+that two-byte instruction.
+
+Of the samples the profiler *could* take, at least 1,635 (16.5%) landed in
+the eight repeated `movem` instructions of the installed library's `memcpy`
+loop (`+$4ff0a` through `+$4ff30`); adjacent instructions add more. The
+ordinary BSD `recv()` path copies from a NetX packet into the caller's buffer
+through this routine. The profiled program itself accounted for about 1% of
+samples. After the run, cumulative device counters reported 30,905 direct
+receive fills out of 31,043 received packets (99.6%); thus the normal
+SANA-II path already copies the card window straight into the NetX packet,
+without a second driver staging copy. The counters also contained three
+oversize/bad-data frames since interface start, which cannot be assigned to
+this particular profile. Both HTTP doors still answered.
+
+The remaining bulk copies are therefore (1) card window to NetX packet,
+inside the masked driver pass, and (2) NetX packet to an application's buffer
+at `recv()`. A new SANA-II buffer hook cannot remove copy (2), and handing a
+packet a pointer into today's single presented RX window is unsafe: the ACK
+reuses that window before TCP or the application releases the packet. A true
+loaned-buffer design would need firmware slot ownership, stable mapped slots,
+cache coherency, and a packet-release handshake; it is a different protocol,
+not a one-line extension. The next useful experiment is to shorten or move
+the driver drain out of its long interrupt-masked section, with the same
+firmware and a fresh profile; test a ZZ9000 batch-completion negotiation only
+after that. The earlier X-Surf batch-*repost* and poll regression (39-41 to
+24-26 Mbit/s in emulation) involved a different mechanism; it is a warning
+to measure batching per device, not evidence that ZZ9000 RX_BATCH will lose.
+
 ## The card as the 68k sees it (measured)
 
 | item | value |
