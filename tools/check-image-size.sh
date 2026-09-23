@@ -79,7 +79,10 @@ BUDGETS=(
     # recovery, 2026-09-20; the window copy and the fused sum are the core.
     # 23,676 after task-owned TX stopped holding Forbid across opener copy
     # callbacks and lifecycle serialization covered close/offline, 2026-09-20.
-    "default:src/netdev/anxzz9000.device:24000"
+    # 24,008-24,016 in the beta5 clean builds: the driver did not change in
+    # this fix, but all shipping profiles now sit just over the old 24,000
+    # boundary.  The next 128-byte boundary records the actual image cost.
+    "default:src/netdev/anxzz9000.device:24128"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -112,7 +115,7 @@ BUDGETS=(
     "minimal:src/bsdsocket/bsdsocket.library:233000"
     "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
-    "minimal:src/netdev/anxzz9000.device:24000"
+    "minimal:src/netdev/anxzz9000.device:24128"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
     # First budgeted as a shipping profile at 0.28.9: 181,012 bytes.  Raised
@@ -122,10 +125,13 @@ BUDGETS=(
     # the same sources as the other profiles and are kept here because this
     # gate is also the assertion that every resident image in every shipped
     # drawer has a budget.
-    "micro:src/bsdsocket/bsdsocket.library:197632"
+    # +184 bytes in beta5 for hiding and restoring the bare AMITCP port around
+    # SANA-II OpenDevice; without it the vendor X-Surf driver selects its
+    # incompatible private AmiTCP copy path and sends no packets.
+    "micro:src/bsdsocket/bsdsocket.library:197888"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
-    "micro:src/netdev/anxzz9000.device:24000"
+    "micro:src/netdev/anxzz9000.device:24128"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10000"
 )
