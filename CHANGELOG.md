@@ -9,6 +9,14 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 1.0.0-beta5
+
+- The minimal and micro profiles now hide their public `AMITCP` port while
+  opening a SANA-II device, just as the full profile already did. The
+  X-Surf 100 vendor driver changes behavior when it sees that port; in the
+  reduced profiles it sent no packets, breaking both DHCP and static
+  configurations.
+
 ## 1.0.0-beta4
 
 - `anxgenet.device` leaves its receive interrupt masked after a service

@@ -545,6 +545,9 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
  */
 VOID ami_ns_port_create(VOID);
 VOID ami_ns_port_delete(VOID);
+/* Hide AMITCP across SANA-II OpenDevice for iComp driver's copy callbacks. */
+VOID ami_ns_port_suspend(VOID);
+VOID ami_ns_port_resume(VOID);
 
 #ifdef AMINETXDUO_AREXX
 VOID ami_netstack_rexx_start(VOID);

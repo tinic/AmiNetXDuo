@@ -1841,10 +1841,7 @@ static LONG ami_ns_bring_up(BOOL loopback_only)
     ami_netstack_baton_set_sampler(netstack_pool_mark_low);
     netstack_pool_sample();
     ami_netstack_health_publish();
-#ifdef AMINETXDUO_AREXX
-    ami_sana2_set_open_hooks(ami_netstack_rexx_suspend,
-                             ami_netstack_rexx_resume);
-#endif
+    ami_sana2_set_open_hooks(ami_ns_port_suspend, ami_ns_port_resume);
 
     if (status != AMI_NET_OK)
     {
