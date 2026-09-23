@@ -52,6 +52,7 @@ typedef struct HostDevice
 } HostDevice;
 
 static HostDevice h_dev;
+static UBYTE h_other_device;     /* distinct io_Device, same numeric unit */
 
 static UWORD h_last_event;
 static ULONG h_events;
@@ -169,15 +170,16 @@ UINT tx_thread_sleep(ULONG ticks) { (VOID)ticks; return 0; }
 /* --------------------------------------------------------- the device I/O -- */
 
 static ULONG h_open_flags;      /* what the last open asked the driver for */
-static UBYTE h_units[2];        /* distinct shared io_Unit identities */
+static UBYTE h_units[2];        /* unit 0 is NULL, as plipbox reports it */
 
 LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
                                  struct IORequest *req, ULONG flags)
 {
-    (VOID)name;
     h_open_flags   = flags;
-    req->io_Device = (struct Device *)&h_dev;
-    req->io_Unit   = (struct Unit *)&h_units[unit];
+    req->io_Device = (strcmp(name, "other.device") == 0)
+                         ? (struct Device *)&h_other_device
+                         : (struct Device *)&h_dev;
+    req->io_Unit   = (unit == 0) ? NULL : (struct Unit *)&h_units[unit];
     req->io_Error  = 0;
 
     return 0;
@@ -395,12 +397,13 @@ static void h_config(void)
 
 /* One opener of the fake unit, with no reads stocked: the shared-unit cases
    count commands, and reads_held is a device-wide number with no opener in it. */
-static AmiSana2If *h_bring_up_unit(ULONG unit)
+static AmiSana2If *h_bring_up_device(const char *device, ULONG unit)
 {
     AmiSana2If *iface;
     LONG        err = 0;
 
     h_config();
+    strcpy(h_cfg.device, device);
     h_cfg.unit = unit;
 
     iface = ami_sana2_open(&h_cfg, &err);
@@ -414,6 +417,11 @@ static AmiSana2If *h_bring_up_unit(ULONG unit)
     }
 
     return iface;
+}
+
+static AmiSana2If *h_bring_up_unit(ULONG unit)
+{
+    return h_bring_up_device("test.device", unit);
 }
 
 static AmiSana2If *h_bring_up(void)
@@ -687,6 +695,36 @@ static void case_distinct_units(void)
     h_check(h_dev.offline_cmds == 2, "and so does the other");
 }
 
+/* Different devices may both report io_Unit == NULL for numeric unit 0.
+   Neither device may suppress the other's S2_ONLINE or S2_OFFLINE. */
+static void case_distinct_devices_same_unit(void)
+{
+    AmiSana2If *a;
+    AmiSana2If *b;
+
+    h_device_reset();
+
+    a = h_bring_up_device("test.device", 0);
+    b = h_bring_up_device("other.device", 0);
+    h_check(a != NULL && b != NULL,
+            "two devices with the same unit identity opened");
+    if (a == NULL || b == NULL)
+    {
+        if (a != NULL) (VOID)h_tear_down(a);
+        if (b != NULL) (VOID)h_tear_down(b);
+        return;
+    }
+
+    h_check(h_dev.online_cmds == 2,
+            "each device received its own S2_ONLINE");
+    h_check(h_tear_down(a), "the first device closes");
+    h_check(h_dev.offline_cmds == 1,
+            "the first device received S2_OFFLINE despite the second");
+    h_check(h_tear_down(b), "the second device closes");
+    h_check(h_dev.offline_cmds == 2,
+            "the second device also received S2_OFFLINE");
+}
+
 /* 10. anxnet.device recovery evidence must cross the SANA-II boundary. */
 static void case_special_recovery_stats(void)
 {
@@ -874,6 +912,7 @@ int main(void)
     case_offline_refused();
     case_shared_unit();
     case_distinct_units();
+    case_distinct_devices_same_unit();
     case_special_recovery_stats();
     case_stats_request();
     case_keeps_online();

@@ -399,11 +399,14 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
 /*
  * S2_ONLINE and S2_OFFLINE are UNIT commands: every opener of a unit shares one
  * wire, so two interfaces on one unit must online it once and offline it on the
- * last one out.  SANA-II makes io_Unit the identity of that shared hardware
- * unit, including when two differently spelled opens select the same board.
+ * last one out.  io_Unit is only meaningful within io_Device: some drivers
+ * (including plipbox.device) return the numeric unit as a pointer, so every
+ * unit 0 is NULL across otherwise unrelated devices.  The pair still merges
+ * differently spelled opens of the same loaded device and hardware unit.
  */
 typedef struct AmiSana2Unit
 {
+    struct Device *device;
     struct Unit *unit;
     UWORD        users;
 } AmiSana2Unit;
@@ -412,6 +415,7 @@ static AmiSana2Unit ami_sana2_units[AMI_CFG_MAX_ATTACHED];
 
 static AmiSana2Unit *ami_sana2_unit_slot(const AmiSana2If *iface, BOOL create)
 {
+    struct Device *device = iface->templ.ios2_Req.io_Device;
     struct Unit *identity = iface->templ.ios2_Req.io_Unit;
     UWORD i;
 
@@ -419,7 +423,7 @@ static AmiSana2Unit *ami_sana2_unit_slot(const AmiSana2If *iface, BOOL create)
     {
         AmiSana2Unit *u = &ami_sana2_units[i];
 
-        if (u->users != 0 && u->unit == identity)
+        if (u->users != 0 && u->device == device && u->unit == identity)
             return u;
     }
 
@@ -432,6 +436,7 @@ static AmiSana2Unit *ami_sana2_unit_slot(const AmiSana2If *iface, BOOL create)
 
         if (u->users == 0)
         {
+            u->device = device;
             u->unit = identity;
             return u;
         }
@@ -477,7 +482,10 @@ static BOOL ami_sana2_unit_leave(AmiSana2If *iface)
     u->users--;
 
     if (u->users == 0)
+    {
+        u->device = NULL;
         u->unit = NULL;
+    }
 
     return (u->users == 0) ? TRUE : FALSE;
 }
