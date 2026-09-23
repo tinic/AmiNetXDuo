@@ -302,7 +302,9 @@ host_test_targets() { # builddir
 #      427 with test_errno_hook and test_errno_hook_nocache: SBTC_ERROR_HOOK
 #      runs from the outer bsd_nx_leave(), never inside the bracket, over
 #      the cached bracket and the plain one
-HOST_TESTS_EXPECTED=427
+#      428 with test_sana2_open_policy (c9a6ea09): only X-Surf drivers hide
+#      the AMITCP port during OpenDevice, in every shipping profile
+HOST_TESTS_EXPECTED=428
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
