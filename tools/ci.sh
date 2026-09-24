@@ -317,9 +317,12 @@ host_test_targets() { # builddir
 #      TCP_NODELAY 0 through options.c with AMINETXDUO_TCP_CORK
 #      433 with test_expunge_cork: the stack kept, not torn down, while the
 #      cork's IP pass is in flight
-#      434 with test_pool_stride: NetX's own nx_packet_pool_create() carves
+#      434 with test_netdev_dp8390_wait: the overwrite stop delay driven
+#      through the real netdev_clock.c, over the timed, untimed and stalled
+#      beam shapes
+#      435 with test_pool_stride: NetX's own nx_packet_pool_create() carves
 #      exactly the planned pool, 4096 on the clamp and not 4106
-HOST_TESTS_EXPECTED=434
+HOST_TESTS_EXPECTED=435
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

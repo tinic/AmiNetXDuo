@@ -476,22 +476,34 @@ rx_done:;
 
 /*
  * The ring overflowed: the receiver got ahead of the drain and stopped.
- * This is the DP8390's documented recovery (National AN-874, the sequence
- * NetBSD's dp8390_intr runs), and what it does NOT do is throw the ring
- * away.  The reset this replaced discarded every frame already received and
- * every transmit still queued, and on a machine whose ring overflows once a
- * burst -- an A3000 (25 MHz 68030) with an X-Surf 100, 42 overwrites in ten
- * seconds -- each one was a TCP retransmit timeout: 2.8 Mbit/s on a 100
- * Mbit link.
+ * This is the DP8390's documented recovery (National AN-874).  It does NOT
+ * throw the ring away, unlike the full reset that NetBSD's dp8390_intr runs
+ * on OVW and that an earlier revision of this file ran.  That reset discarded
+ * every frame already received and every transmit still queued, and on a
+ * machine whose ring overflows once a burst -- an A3000 (25 MHz 68030) with
+ * an X-Surf 100, 42 overwrites in ten seconds -- each one was a TCP
+ * retransmit timeout: 2.8 Mbit/s on a 100 Mbit link.
  *
- * Stop the chip and wait for it (ISR.RST, at most DP8390_STOP_WAIT_US, which
- * is longer than the frame that may be in progress); note whether a
- * transmit was cut off (in flight and neither PTX nor TXE reported); clear
- * the remote byte count; loop the transmitter back so nothing goes out
- * while the ring is drained; start; drain; acknowledge OVW; take the
- * loopback off; resend the cut-off frame.  The caller holds the interrupt
- * context, and the wait is the one price -- the same one dp8390_halt()
- * pays, and paid only on an overwrite.
+ * Stop the chip and wait the documented minimum stop delay -- a full
+ * transmit time plus guard, at least 1.6 ms (DP8390_OVW_STOP_WAIT_US), per
+ * the DP8390D datasheet -- not ISR.RST: the overflow sets RST on the
+ * reference core, and RST reports "reset state entered", not "transmitter
+ * drained", so polling it would exit at once and skip the wait.  The wait is
+ * bounded and unconditional whatever RST says: timed by the beam clock, with
+ * the measured work per line as the spin floor so beam and floor end together,
+ * and the DP8390_OVW_STOP_SPINS bus-cycle fallback only when the beam is down.
+ *
+ * The cut-off transmit is decided from the hardware, not the interrupt
+ * snapshot: CR.TXP read before the stop says a frame was in flight, and the
+ * caller's snapshot (already acknowledged by dp8390_intr) plus a fresh
+ * post-stop ISR read say whether it completed.  Resend only when the frame
+ * was in flight and neither read saw a PTX or TXE; a completion latched in
+ * the stop window is left for the caller's loop to account.  Then clear the
+ * remote byte count; loop the transmitter back so nothing goes out while the
+ * ring is drained; start; drain; acknowledge OVW; take the loopback off;
+ * resend the cut-off frame.  The caller holds the interrupt context, and the
+ * wait is the price, paid only on an overwrite: unlike dp8390_halt(), which
+ * exits early on ISR.RST at 1.5 ms, this wait is unconditional at 1.6 ms.
  *
  * TRUE when the drain found the ring pointers corrupt and reset the chip
  * itself: nothing below the caller's loop is valid then.
@@ -500,19 +512,36 @@ static BOOL dp8390_overwrite(NetdevNic *nic, UBYTE isr)
 {
     NetdevWait w;
     BOOL       resend;
+    UBYTE      was_txing;
+    UBYTE      after;
     ULONG      before = nic->resets;
 
+    /* Was a frame actually in flight?  Read the transmitter bit before the
+       stop, as Linux lib8390.c does; txb_inuse is a software shadow that can
+       disagree with the chip. */
+    was_txing = NIC_GET(nic, ED_P0_CR) & ED_CR_TXP;
+
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
-    netdev_wait_begin(&w, DP8390_STOP_WAIT_US, DP8390_HALT_SPINS);
+    netdev_wait_begin(&w, DP8390_OVW_STOP_WAIT_US,
+                      netdev_clock_floor_spins(DP8390_OVW_STOP_WAIT_US,
+                                               DP8390_OVW_STOP_SPINS));
     do
     {
-        if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) != 0)
-            break;
+        dp_pause(nic, 1);
     }
     while (!netdev_wait_done(&w));
 
+    /* Resend only a frame that software still owns (txb_inuse), that was in
+       flight (TXP), and that completed neither before the interrupt (the
+       snapshot, already acknowledged by dp8390_intr) nor during the stop (the
+       fresh read).  txb_inuse is a second guard against a stale high TXP
+       sending an unowned frame.  A PTX or TXE latched in the stop window is
+       left set for the caller's loop to account, not acknowledged here. */
+    after  = NIC_GET(nic, ED_P0_ISR);
     resend = (BOOL)(nic->txb_inuse != 0 &&
-                    (isr & (ED_ISR_PTX | ED_ISR_TXE)) == 0);
+                    was_txing != 0 &&
+                    (isr   & (ED_ISR_PTX | ED_ISR_TXE)) == 0 &&
+                    (after & (ED_ISR_PTX | ED_ISR_TXE)) == 0);
 
     NIC_PUT(nic, ED_P0_RBCR0, 0);
     NIC_PUT(nic, ED_P0_RBCR1, 0);
