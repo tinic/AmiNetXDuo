@@ -1037,6 +1037,8 @@ VOID ami_sana2_tx_lazy_start(AmiSana2If *iface);
 VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface);
 #endif
 VOID ami_sana2_tx_drain(AmiSana2If *iface);
+/* Reap, then the requests the device still holds (sana2_tx.c). */
+UWORD ami_sana2_tx_collect(AmiSana2If *iface);
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw);
 

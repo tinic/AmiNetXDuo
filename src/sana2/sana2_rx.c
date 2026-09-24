@@ -2953,10 +2953,58 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
     return 0;
 }
 
+/*
+ * Delete a joined reader's thread and free what it ran on; ami_sana2_rx_stop()
+ * and ami_sana2_rx_reclaim() both end here.  FALSE when ThreadX refused the
+ * delete or it left a zombie on rd->stack: nothing is freed then.  A reader
+ * that never started has a stack and nothing else, which
+ * ami_sana2_rx_start() unwinds through this too.
+ */
+static BOOL ami_sana2_rx_retire(AmiSana2Reader *rd)
+{
+    ULONG zombies;
+
+    if (rd->started)
+    {
+        /* The total is monotonic.  The live gauge can stay unchanged if an
+           older zombie exits while this delete creates a new one, which would
+           make this code free the new zombie's live stack. */
+        zombies = tx_amiga_zombie_tasks();
+
+        AMI_NX_CLEANUP(tx_thread_terminate(&rd->thread));
+        if (tx_thread_delete(&rd->thread) != TX_SUCCESS)
+            return FALSE;
+
+        /* tx_thread_delete() gives up after two seconds, and a failure
+           leaves a zombie running on rd->stack. */
+        if (tx_amiga_zombie_tasks() != zombies)
+        {
+            AMI_ERROR("sana2: reader cannot be removed. Its stack "
+                      "leaks. A free here corrupts memory the reader "
+                      "runs on");
+            rd->zombie = TRUE;
+            return FALSE;
+        }
+
+        AMI_NX_CLEANUP(tx_semaphore_delete(&rd->ready));
+        AMI_NX_CLEANUP(tx_semaphore_delete(&rd->exited));
+        rd->started = FALSE;
+    }
+
+    if (rd->stack != NULL)
+    {
+        ami_free(rd->stack);
+        rd->stack = NULL;
+    }
+
+    rd->task = NULL;
+
+    return TRUE;
+}
+
 VOID ami_sana2_rx_stop(AmiSana2If *iface)
 {
     AmiSana2Reader *rd = &iface->reader;
-    ULONG           zombies;
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     /* Before the reader unwinds: the timer defers into iface->ip and holds a
@@ -3027,48 +3075,10 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
          * before the control block and stack go away.
          */
         tx_thread_sleep(5);
-
-        /* The total is monotonic.  The live gauge can stay unchanged if
-           an older zombie exits while this delete creates a new one,
-           which would make this code free the new zombie's live stack. */
-        zombies = tx_amiga_zombie_tasks();
-
-        tx_thread_terminate(&rd->thread);
-        tx_thread_delete(&rd->thread);
-
-        /*
-         * tx_thread_delete() gives up after two seconds, and a failure
-         * leaves a zombie running on rd->stack.  The monotonic zombie count
-         * is the signal; the live gauge can be cancelled by an older exit.
-         */
-        if (tx_amiga_zombie_tasks() != zombies)
-        {
-            AMI_ERROR("sana2: reader cannot be removed. Its stack "
-                      "leaks. A free here corrupts memory the reader "
-                      "runs on");
-            rd->zombie = TRUE;
-            iface->rx_orphaned = TRUE;
-            iface->rx_running = FALSE;
-            return;
-        }
-
-        tx_semaphore_delete(&rd->ready);
-        tx_semaphore_delete(&rd->exited);
     }
 
-    /*
-     * Outside the started gate: a reader whose semaphores or thread would
-     * not create has a stack and nothing else, and ami_sana2_rx_start()
-     * unwinds by calling this.
-     */
-    if (rd->stack != NULL)
-    {
-        ami_free(rd->stack);
-        rd->stack = NULL;
-    }
-
-    rd->started = FALSE;
-    rd->task    = NULL;
+    if (!ami_sana2_rx_retire(rd))
+        iface->rx_orphaned = TRUE;
 
     iface->rx_running = FALSE;
 }
@@ -3094,7 +3104,6 @@ BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets)
 {
     AmiSana2Reader *rd = &iface->reader;
     UWORD           r, i;
-    ULONG           zombies;
 
     if (!iface->rx_orphaned)
         return TRUE;
@@ -3154,38 +3163,10 @@ BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets)
         rd->port = NULL;
     }
 
-    if (rd->started)
-    {
-        zombies = tx_amiga_zombie_tasks();
+    /* A refused delete or a zombie frees nothing and holds. */
+    if (!ami_sana2_rx_retire(rd))
+        return FALSE;
 
-        AMI_NX_CLEANUP(tx_thread_terminate(&rd->thread));
-
-        /* A refusal (a caller outside any bracket, say) deleted nothing, so
-           nothing below may be freed either: the next sweep asks again. */
-        if (tx_thread_delete(&rd->thread) != TX_SUCCESS)
-            return FALSE;
-
-        if (tx_amiga_zombie_tasks() != zombies)
-        {
-            AMI_ERROR("sana2: reader cannot be removed. Its stack "
-                      "leaks. A free here corrupts memory the reader "
-                      "runs on");
-            rd->zombie = TRUE;
-            return FALSE;
-        }
-
-        AMI_NX_CLEANUP(tx_semaphore_delete(&rd->ready));
-        AMI_NX_CLEANUP(tx_semaphore_delete(&rd->exited));
-        rd->started = FALSE;
-    }
-
-    if (rd->stack != NULL)
-    {
-        ami_free(rd->stack);
-        rd->stack = NULL;
-    }
-
-    rd->task           = NULL;
     rd->orphans        = 0;
     iface->rx_orphaned = FALSE;
 

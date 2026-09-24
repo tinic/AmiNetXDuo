@@ -386,6 +386,20 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
         iface->tx[i].busy = FALSE;
 }
 
+UWORD ami_sana2_tx_collect(AmiSana2If *iface)
+{
+    UWORD busy = 0;
+    int   i;
+
+    ami_sana2_tx_reap(iface);
+    for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
+    {
+        if (iface->tx[i].busy)
+            busy++;
+    }
+    return busy;
+}
+
 /* sana2_rx.c's, whose own holds test_sana2_rx drives: here only the verdict. */
 BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets)
 {

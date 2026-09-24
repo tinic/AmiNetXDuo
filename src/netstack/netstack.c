@@ -308,12 +308,8 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
         ns->ns_Iface[opened] = ami_sana2_open(cfg, &status);
         if (ns->ns_Iface[opened] == NULL)
         {
-            /* AMI_NET_ERR_RETAINED is not an open that failed: the unit
-               still holds an earlier interface's requests. */
-            if (status == AMI_NET_ERR_RETAINED)
-                ami_event(NETEVENT_IFACE_RETAINED, opened,
-                          ami_sana2_retained_holds(cfg->device, cfg->unit));
-            else
+            /* AMI_NET_ERR_RETAINED: recorded by src/sana2 already. */
+            if (status != AMI_NET_ERR_RETAINED)
                 ami_event((status == AMI_NET_ERR_DEVBAD)
                               ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
                           opened, (ULONG)status);
@@ -3019,7 +3015,6 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     LONG          victim;
     LONG          err = AMI_NET_OK;
     UINT          status;
-    ULONG         held;
     UWORD         i;
 
     if (stood_down != NULL)
@@ -3056,22 +3051,6 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         }
     }
 
-    /*
-     * The same device and unit, still holding an earlier interface's requests
-     * after the sweep above: not opened again under them.  A different device
-     * is not held back, and may take the slot the retained one left.
-     */
-    held = ami_sana2_retained_holds(cfg->device, cfg->unit);
-    if (held != 0)
-    {
-        ami_event(NETEVENT_IFACE_RETAINED, NETEVENT_NOINDEX, held);
-        AMI_WARN("netstack: %s unit %lu still holds requests from an "
-                 "interface removed earlier. It is not opened again until "
-                 "it gives them back",
-                 cfg->device, (unsigned long)cfg->unit);
-        return AMI_NET_ERR_RETAINED;
-    }
-
     slot   = ami_ns_vacant_interface_slot(ns);
     victim = (slot < 0 && wanted) ? ami_ns_yield_candidate(ns) : -1;
 
@@ -3092,9 +3071,12 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     iface = ami_sana2_open(&open_cfg, &err);
     if (iface == NULL)
     {
-        ami_event((err == AMI_NET_ERR_DEVBAD)
-                      ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
-                  NETEVENT_NOINDEX, (ULONG)err);
+        /* AMI_NET_ERR_RETAINED was recorded by src/sana2, with what is held;
+           it is no open that failed. */
+        if (err != AMI_NET_ERR_RETAINED)
+            ami_event((err == AMI_NET_ERR_DEVBAD)
+                          ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
+                      NETEVENT_NOINDEX, (ULONG)err);
         AMI_ERROR("netstack: interface \'%s\' did not start: %s unit %lu %s",
                   open_cfg.name, open_cfg.device,
                   (unsigned long)open_cfg.unit,

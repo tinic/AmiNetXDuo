@@ -888,12 +888,18 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     }
 
     /* A unit that still holds an earlier interface's requests is not opened
-       again under them: see ami_sana2_retained_sweep(). */
-    if (ami_sana2_retained_holds(cfg->device, cfg->unit) != 0)
+       again under them (ami_sana2_retained_sweep()).  The one place that
+       refuses it, for the add and the bring-up alike. */
     {
-        if (err != NULL)
-            *err = AMI_NET_ERR_RETAINED;
-        return NULL;
+        ULONG held = ami_sana2_retained_holds(cfg->device, cfg->unit);
+
+        if (held != 0)
+        {
+            ami_event(NETEVENT_IFACE_RETAINED, NETEVENT_NOINDEX, held);
+            if (err != NULL)
+                *err = AMI_NET_ERR_RETAINED;
+            return NULL;
+        }
     }
 
     iface = (AmiSana2If *)ami_alloc((ULONG)sizeof(AmiSana2If));
@@ -1219,6 +1225,18 @@ static ULONG ami_sana2_held(const AmiSana2If *iface)
            (iface->tx_orphaned ? NETEVENT_HELD_TX : 0UL);
 }
 
+/* Neither NetX Duo's slot nor the (NX_IP, index) binding reaches it after
+   this; the slot is left alone if another interface has it now. */
+static VOID ami_sana2_detach(AmiSana2If *iface)
+{
+    if (iface->interface_ptr != NULL &&
+        iface->interface_ptr->nx_interface_additional_link_info ==
+            (VOID *)iface)
+        iface->interface_ptr->nx_interface_additional_link_info = NULL;
+
+    ami_sana2_unbind(iface);
+}
+
 static VOID ami_sana2_retain(AmiSana2If *iface)
 {
     /* The one code that settles this on its own: which interface, and which
@@ -1229,11 +1247,7 @@ static VOID ami_sana2_retain(AmiSana2If *iface)
               "requests inside it");
 
     /* It has left the network: no NetX Duo slot may reach it any more. */
-    if (iface->interface_ptr != NULL &&
-        iface->interface_ptr->nx_interface_additional_link_info ==
-            (VOID *)iface)
-        iface->interface_ptr->nx_interface_additional_link_info = NULL;
-    ami_sana2_unbind(iface);
+    ami_sana2_detach(iface);
 
     iface->retained      = TRUE;
     iface->retained_next = ami_sana2_retained;
@@ -1251,13 +1265,7 @@ static VOID ami_sana2_release(AmiSana2If *iface)
         iface->device_open = FALSE;
     }
 
-    if (iface->interface_ptr != NULL &&
-        iface->interface_ptr->nx_interface_additional_link_info ==
-            (VOID *)iface)
-        iface->interface_ptr->nx_interface_additional_link_info = NULL;
-
-    /* Drop the (NX_IP, index) -> iface binding before the memory goes away. */
-    ami_sana2_unbind(iface);
+    ami_sana2_detach(iface);
 
     ami_sana2_rx_free_slots(iface);
     ami_free(iface);
@@ -1352,23 +1360,11 @@ UWORD ami_sana2_retained_sweep(BOOL release_packets)
 
     while ((iface = *link) != NULL)
     {
-        UWORD busy = 0;
-        UWORD i;
-        BOOL  rx_clear;
+        BOOL rx_clear;
 
         /* Collected, not asked for: no AbortIO(), no sleep.  A write's packet
            goes back to the pool it came from. */
-        ami_sana2_tx_reap(iface);
-        for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
-        {
-            if (iface->tx[i].busy)
-                busy++;
-        }
-#ifdef AMINETXDUO_TX_RUN
-        if (iface->tx_flush_busy)
-            busy++;
-#endif
-        iface->tx_orphaned = (busy != 0) ? TRUE : FALSE;
+        iface->tx_orphaned = (ami_sana2_tx_collect(iface) != 0) ? TRUE : FALSE;
 
         rx_clear = ami_sana2_rx_reclaim(iface, release_packets);
 

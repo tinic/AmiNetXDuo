@@ -143,14 +143,14 @@ static void t_add_same_unit_refused(void)
           "removed with a read and a write held");
     nsh.sana2_close_held = 0;
 
-    opens    = nsh.sana2_opens;
+    opens    = nsh.sana2_device_opens;
     sweeps   = nsh.sweeps;
     attaches = nsh.iface_attaches;
     h_iface(&cfg, "eth", "a2065.device", 0);
     CHECK(netstack_interface_start(&cfg, &index) == AMI_NET_ERR_RETAINED,
           "the same device and unit is refused with AMI_NET_ERR_RETAINED");
     CHECK(nsh.sweeps > sweeps, "the add swept the list first");
-    CHECK(nsh.sana2_opens == opens, "and never asked for OpenDevice()");
+    CHECK(nsh.sana2_device_opens == opens, "and OpenDevice() was never called");
     CHECK(nsh.iface_attaches == attaches, "and attached nothing");
     CHECK(nsh.last_event == NETEVENT_IFACE_RETAINED &&
           nsh.last_event_index == NETEVENT_NOINDEX &&

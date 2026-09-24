@@ -582,6 +582,16 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         return NULL;
     }
 
+    /* The contract: a unit on the retained list is refused, and recorded,
+       before OpenDevice(). */
+    if (ami_sana2_retained_holds(cfg->device, cfg->unit) != 0)
+    {
+        ami_event(NETEVENT_IFACE_RETAINED, NETEVENT_NOINDEX,
+                  ami_sana2_retained_holds(cfg->device, cfg->unit));
+        *err = AMI_NET_ERR_RETAINED;
+        return NULL;
+    }
+
     for (i = 0; i < (UWORD)NSH_SANA2_IFACES; i++)
     {
         NshSana2If *m = &nsh.sana2[i];
