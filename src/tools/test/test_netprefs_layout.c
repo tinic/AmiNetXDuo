@@ -112,6 +112,12 @@ static void verify(const Fake *f, const NpLayout *l)
                   !overlap(&l->bevel, &l->box[NP_L_PANEL]),
                   f->name, "frame crosses a common gadget", i, 0);
     }
+
+    check(l->box[NP_L_DEVICE].x + l->box[NP_L_DEVICE].w + 8 <=
+          l->box[NP_L_DEVICE_BROWSE].x,
+          f->name, "device and browse button need a gap", 0, 0);
+    check(l->box[NP_L_DEVICE].y == l->box[NP_L_DEVICE_BROWSE].y,
+          f->name, "device and browse button are not aligned", 0, 0);
 }
 
 int main(void)
