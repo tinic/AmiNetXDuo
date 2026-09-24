@@ -877,6 +877,19 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME expunge_joint COMMAND test_expunge_joint)
 
+    # An interface whose SANA-II device keeps requests in it: the removal says
+    # AMI_NET_ERR_RETAINED, the held unit is not reopened, the pool is kept
+    # and netstack_can_unload() waits for the last hold.  src/sana2's retained
+    # list is modelled by the environment; the real one is test_sana2_device.
+    add_executable(test_iface_retain
+        host/test_iface_retain_host.c ${NETSTACK_HOST_TU})
+
+    target_include_directories(test_iface_retain PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_iface_retain PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_iface_retain PRIVATE ${NETSTACK_HOST_OPTIONS})
+
+    add_test(NAME iface_retain COMMAND test_iface_retain)
+
     # netstack_interface_dhcp_start()'s re-arm.  NX_DHCP_ALREADY_STARTED never
     # arises in the arm the lab can run, so stop-and-start-again was never
     # exercised; here the DHCP client answers it on demand.

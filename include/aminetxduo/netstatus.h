@@ -746,6 +746,7 @@ typedef struct NetStatusOpener
 #define NETEVENT_EXP_TCP        3   /* the TCP: handler is alive             */
 #define NETEVENT_EXP_ADDRALLOC  4   /* an address allocation is running      */
 #define NETEVENT_EXP_NETMON     5   /* a monitoring hook is installed        */
+#define NETEVENT_EXP_RETAINED   6   /* a device still holds requests         */
 
 /* --- what the stack cannot tell anyone ---------------------------------- */
 /*

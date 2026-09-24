@@ -1057,7 +1057,9 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
        reusable, and a SANA-II driver needs more than a Shell's stack. */
     rc = bsd_stack_interface_remove_named(SocketBase, (const char *)name,
                                           (force != 0) ? TRUE : FALSE);
-    if (rc == AMI_NET_OK)
+    /* RETAINED is removed too: the device stays open, the interface is
+       gone, and a Roadshow caller has no word for the difference. */
+    if (rc == AMI_NET_OK || rc == AMI_NET_ERR_RETAINED)
         return 1;
 
     if (rc == AMI_NET_ERR_NONAME)
