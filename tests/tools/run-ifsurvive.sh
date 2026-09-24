@@ -2,7 +2,8 @@
 #
 # REMOVE ONE INTERFACE, THEN USE THE OTHER ONE.
 #
-#   tests/tools/run-ifsurvive.sh [-b builddir] [-t seconds]
+#   tests/tools/run-ifsurvive.sh [-b builddir] [-t seconds] [-B iface]
+#                                [-a address] [-g gateway]
 #
 # Two interfaces on a2065.device UNIT=0 -- the shipping rig config, which
 # run-ifslots.sh already stages four of.  Traffic goes out over A (an ARP/ping
@@ -22,6 +23,10 @@
 #             destination catches it.  A is therefore the DHCP interface and is
 #             added SECOND: NetX installs the gateway at bind.
 #
+# BRIDGED.  -B names the host NIC (default $AMINETXDUO_AMIBERRY_BACKEND, else
+# ens18).  B's static address is claimed from the rig's free range the way
+# run-events.sh claims one, or pinned with -a; -g is the segment's router.
+#
 # Exit: 0 pass, 1 a claim failed, 2 the rig did not produce something to read.
 #
 # SPDX-License-Identifier: MIT
@@ -38,24 +43,38 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD=a2065
 TIMEOUT=300
 MIN_CHECKS=13
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+ADDRESS=
+GATEWAY="${AMINETXDUO_IFSURVIVE_GATEWAY:-192.168.1.1}"
 
 # A resolution that comes back at all but takes longer than this is the user's
 # symptom: the sibling did not fail, it stalled.
 STALL_MS="${AMINETXDUO_IFSURVIVE_STALL_MS:-8000}"
 
-# Off-link by construction: it is not in SLIRP's 10.0.2.0/24, so reaching it
-# needs the gateway the removed interface installed.
+# Off-link by construction: it is not on the bridged segment, so reaching it
+# needs a gateway.
 OFFLINK="${AMINETXDUO_IFSURVIVE_OFFLINK:-8.8.8.8}"
 
-while getopts "b:t:N:" opt; do
+while getopts "b:t:N:B:a:g:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
-        *) echo "usage: $0 [-b builddir] [-t seconds] [-N board]" >&2
+        B) IFACE="$OPTARG" ;;
+        a) ADDRESS="$OPTARG" ;;
+        g) GATEWAY="$OPTARG" ;;
+        *) echo "usage: $0 [-b builddir] [-t seconds] [-N board] [-B iface]\
+ [-a address] [-g gateway]" >&2
            exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound)
+        echo "run-ifsurvive.sh runs bridged: -B names the host NIC the guest\
+ bridges onto" >&2
+        exit 2 ;;
+esac
 
 if [ "$BOARD" != a2065 ]; then
     echo "run-ifsurvive.sh stages a2065.device in both interface files: the\
@@ -87,6 +106,18 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "No a2065.device found.  Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
+# shellcheck source=../../tools/emu-rig-lock.sh
+. "$ROOT/tools/emu-rig-lock.sh"
+if [ -z "$ADDRESS" ]; then
+    rig_claim_address "${AMINETXDUO_RIG_ADDR_PREFIX:-192.168.1}" \
+                      "${AMINETXDUO_RIG_ADDR_FIRST:-200}" \
+                      "${AMINETXDUO_RIG_ADDR_LAST:-254}" \
+                      "run-ifsurvive in $ROOT" || {
+        echo "no free guest address; pass -a <addr> to pin one" >&2; exit 2; }
+    ADDRESS="$RIG_ADDRESS"
+fi
+echo "guest_address=$ADDRESS gateway=$GATEWAY iface=$IFACE"
+
 # ------------------------------------------------------------- the stage ---
 
 STAGE="$ROOT/build/ifsurvive-stage"
@@ -99,8 +130,8 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 # machine's gateway, which is what makes the detach path's clear observable.
 # B carries a GATEWAY line of its own: the hand-off has nothing to hand over
 # otherwise, and an interface with no gateway is not a candidate for one.
-printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=10.0.2.16\nNETMASK=255.255.255.0\nGATEWAY=10.0.2.2\n' \
-    > "$STAGE/devs/NetInterfaces/aeth0"
+printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=%s\nNETMASK=255.255.255.0\nGATEWAY=%s\n' \
+    "$ADDRESS" "$GATEWAY" > "$STAGE/devs/NetInterfaces/aeth0"
 printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
     > "$STAGE/devs/NetInterfaces/zeth1"
 
@@ -109,7 +140,7 @@ printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
     echo "SYS:AddNetInterface zeth1"
     echo "SYS:netstat -i"
     echo "SYS:ShowNetStatus"
-    echo "SYS:ping 10.0.2.2 -c 3 -t 20"
+    echo "SYS:ping $GATEWAY -c 3 -t 20"
     echo "SYS:ping $OFFLINK -c 3 -t 20"
     echo "SYS:nslookup example.com $OFFLINK"
     echo "SYS:nslookup www.example.com $OFFLINK"
@@ -117,7 +148,7 @@ printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
     echo "SYS:RemoveNetInterface zeth1"
     echo "SYS:netstat -i"
     echo "SYS:ShowNetStatus"
-    echo "SYS:ping 10.0.2.2 -c 3 -t 20"
+    echo "SYS:ping $GATEWAY -c 3 -t 20"
     echo "SYS:ping $OFFLINK -c 3 -t 20"
     echo "SYS:nslookup example.net $OFFLINK"
     echo "SYS:RemoveNetInterface aeth0"
@@ -134,7 +165,7 @@ rm -f "$REPORT"
 
 (
     export AMINETXDUO_RUN_TAG="$TAG"
-    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -m A1200 -t "$TIMEOUT" \
+    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m A1200 -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/devs" "$STAGE/libs" \
         "$TOOLS/AddNetInterface" "$TOOLS/RemoveNetInterface" \
         "$TOOLS/ShowNetStatus" "$TOOLS/netstat" "$TOOLS/ping" \
@@ -199,14 +230,39 @@ ms_of() { # block text -> the ms ToolsSmoke charged the command
     sed -n 's/^----- rc [-0-9]*, \([0-9]*\) ms.*/\1/p' | head -1
 }
 
+# At least one reply, read from ping's count.  Not the loss percentage: "100%
+# packet loss" ends in "0% packet loss".
 replied() { # block text
-    printf '%s\n' "$1" |
-    grep -qE "0(\.0)?% packet loss|[1-9][0-9]* (packets )?received"
+    printf '%s\n' "$1" | awk '
+        / packets transmitted, / {
+            s = $0; sub(/.* packets transmitted, */, "", s)
+            if (s ~ /^[1-9][0-9]* (packets )?received/) ok = 1
+        }
+        END { exit !ok }'
 }
 
-resolved() { # block text
+# nslookup's answer header for THIS name, an address record under it, rc 0 and
+# no error line.  Not any dotted quad: "8.8.8.8 did not answer" has one.
+resolved() { # block text, name
+    printf '%s\n' "$1" | awk -v n="$2" '
+        index($0, n " from ") == 1 { hdr = 1 }
+        hdr && /^  address +[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { rec = 1 }
+        /^----- rc 0,/ { rc0 = 1 }
+        /^nslookup: / { err = 1 }
+        END { exit !(hdr && rec && rc0 && !err) }'
+}
+
+# The IPv4 address on <name>'s own netstat -i line, if it is a usable one:
+# not empty, not 0.0.0.0, not link-local.
+netstat_addr() { # netstat text, name
+    printf '%s\n' "$1" | awk -v n="$2" '$1 == n { print $3; exit }' |
+    grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' |
+    grep -vE '^(0\.0\.0\.0|169\.254\.)'
+}
+
+lease_router() { # ShowNetStatus text -> the router the DHCP lease named
     printf '%s\n' "$1" |
-    grep -qE "^(Name|Address(es)?)[: ]|has address|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
+    awk '$1 == "it" && $2 == "offered" && $3 == "router" { print $4; exit }'
 }
 
 gateway_of() { # ShowNetStatus text -> the default route, or empty
@@ -214,7 +270,7 @@ gateway_of() { # ShowNetStatus text -> the default route, or empty
     sed -n 's/^Default route:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -1
 }
 
-ONLINK="SYS:ping 10.0.2.2 -c 3 -t 20"
+ONLINK="SYS:ping $GATEWAY -c 3 -t 20"
 OFFPING="SYS:ping $OFFLINK -c 3 -t 20"
 
 before=$(block "SYS:netstat -i" 1)
@@ -228,13 +284,28 @@ if printf '%s\n' "$before" | grep -qE "^zeth1[[:space:]]"; then
 else
     fail "zeth1 never came up, so there is nothing to remove"
 fi
-if printf '%s\n' "$before" | grep -qE "^zeth1[[:space:]].*10\.0\.2\.15"; then
-    pass "and zeth1, added second, took the DHCP lease 10.0.2.15"
+lease1=$(netstat_addr "$before" zeth1)
+if [ -n "$lease1" ] && [ "$lease1" != "$ADDRESS" ]; then
+    pass "and zeth1, added second, took a DHCP lease: $lease1"
 else
     fail "zeth1 has no DHCP address, so it did not install the gateway"
 fi
 
-gw1=$(gateway_of "$(block "SYS:ShowNetStatus" 1)")
+# The on-link target was written before boot.  The lease says what the
+# segment's router really is; a different one means -g is wrong for this rig,
+# and nothing on-link below would be decided.
+status1=$(block "SYS:ShowNetStatus" 1)
+router=$(lease_router "$status1")
+if [ -n "$router" ] && [ "$router" != "$GATEWAY" ]; then
+    rig "zeth1's lease names router $router, but aeth0 was given $GATEWAY:\
+ pass -g $router"
+    verdict_kv "name=ifsurvive" "verdict=SKIP" "reason=gateway_mismatch" \
+               "checks=0" "failures=0" "min_checks=$MIN_CHECKS" \
+               "run_rc=$RUN_RC" "transcript=$REPORT"
+    exit 2
+fi
+
+gw1=$(gateway_of "$status1")
 if [ -n "$gw1" ] && [ "$gw1" != 0.0.0.0 ]; then
     pass "the machine has a default route while both are up: $gw1"
 else
@@ -247,23 +318,22 @@ else
     fail "no on-link ping replies while both interfaces are up"
 fi
 
-# THE OFF-LINK LEG'S PRECONDITIONS.  A rig with no route off SLIRP cannot
+# THE OFF-LINK LEG'S PRECONDITIONS.  A rig with no route off the segment cannot
 # decide these in either direction, and a claim that cannot be evaluated here
 # is not a claim that failed.
 offping_up=0
 replied "$(block "$OFFPING" 1)" && offping_up=1
 dns_up=0
-for q in "SYS:nslookup example.com $OFFLINK" \
-         "SYS:nslookup www.example.com $OFFLINK" \
-         "SYS:nslookup example.org $OFFLINK"; do
-    resolved "$(block "$q" 1)" && dns_up=$((dns_up + 1))
+for q in example.com www.example.com example.org; do
+    resolved "$(block "SYS:nslookup $q $OFFLINK" 1)" "$q" &&
+        dns_up=$((dns_up + 1))
 done
 if [ "$dns_up" -gt 0 ]; then
     pass "$dns_up of 3 names resolved through $OFFLINK -- OFF-LINK, so the\
  gateway carried them -- before zeth1 was removed"
 else
     rig "nothing resolved through $OFFLINK with both interfaces up: this rig\
- has no route off SLIRP, so the off-link half is not decided here"
+ has no route off the segment, so the off-link half is not decided here"
 fi
 [ "$offping_up" = 1 ] ||
     rig "no off-link ICMP with both up either; only the resolver probes the\
@@ -288,7 +358,7 @@ if printf '%s\n' "$after" | grep -qE "^aeth0[[:space:]]"; then
 else
     fail "aeth0 went with zeth1: removing one interface took its sibling"
 fi
-if printf '%s\n' "$after" | grep -qE "^aeth0[[:space:]].*10\.0\.2\.16"; then
+if [ "$(netstat_addr "$after" aeth0)" = "$ADDRESS" ]; then
     pass "and still carries its own address"
 else
     fail "aeth0 lost its address when zeth1 was removed"
@@ -338,7 +408,7 @@ if [ "$dns_up" -gt 0 ]; then
     lookup2_ms=$(ms_of "$lookup2")
     echo "  the surviving interface's resolution took ${lookup2_ms:-?} ms\
  (stall threshold $STALL_MS ms)"
-    if resolved "$lookup2"; then
+    if resolved "$lookup2" example.net; then
         pass "a name still resolves over aeth0 through the off-link server"
         if [ -n "$lookup2_ms" ] && [ "$lookup2_ms" -gt "$STALL_MS" ]; then
             fail "but it took ${lookup2_ms} ms, over the ${STALL_MS} ms stall\

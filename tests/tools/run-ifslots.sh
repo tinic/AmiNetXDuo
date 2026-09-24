@@ -7,6 +7,9 @@ set -uo pipefail
 
 # WHICH interfaces come up is what this harness measures, so nothing may
 # bring the drawer up behind it.
+#
+# BRIDGED.  -B names the host NIC (default $AMINETXDUO_AMIBERRY_BACKEND, else
+# ens18); -g is the segment's router, which the DHCP rounds ping.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT" || exit 2
@@ -15,17 +18,29 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD=a2065
 TIMEOUT=300
 ROUNDS="named pattern elsewhere typo latefail identity"
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+GATEWAY="${AMINETXDUO_IFSLOTS_GATEWAY:-192.168.1.1}"
 
-while getopts "b:t:N:r:" opt; do
+while getopts "b:t:N:r:B:g:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         N) BOARD="$OPTARG" ;;
         r) ROUNDS="${OPTARG//,/ }" ;;
-        *) echo "usage: $0 [-b builddir] [-t seconds] [-N board]\
- [-r named|pattern|elsewhere|typo|latefail|identity]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        g) GATEWAY="$OPTARG" ;;
+        *) echo "usage: $0 [-b builddir] [-t seconds] [-N board] [-B iface]\
+ [-g gateway] [-r named|pattern|elsewhere|typo|latefail|identity]" >&2
+           exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound)
+        echo "run-ifslots.sh runs bridged: -B names the host NIC the guest\
+ bridges onto" >&2
+        exit 2 ;;
+esac
 
 if [ "$BOARD" != a2065 ]; then
     echo "run-ifslots.sh stages a2065.device in every interface file, so\
@@ -88,7 +103,7 @@ boot() { # tag stagedir [extra...]  -> sets REPORT
 
     (
         export AMINETXDUO_RUN_TAG="$tag"
-        "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -m A1200 -t "$TIMEOUT" \
+        "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m A1200 -t "$TIMEOUT" \
             "$TOOLS/ToolsSmoke" "$stage/devs" "$stage/libs" \
             "$TOOLS/AddNetInterface" "$TOOLS/RemoveNetInterface" \
             "$TOOLS/ShowNetStatus" "$TOOLS/CheckNetConfig" \
@@ -133,9 +148,33 @@ block() { # command n
         on { print }'
 }
 
+# At least one reply, read from ping's count.  Not the loss percentage: "100%
+# packet loss" ends in "0% packet loss".
+replied() { # block text
+    printf '%s\n' "$1" | awk '
+        / packets transmitted, / {
+            s = $0; sub(/.* packets transmitted, */, "", s)
+            if (s ~ /^[1-9][0-9]* (packets )?received/) ok = 1
+        }
+        END { exit !ok }'
+}
+
+# The IPv4 address on <name>'s own netstat -i line, if it is a usable one:
+# not empty, not 0.0.0.0, not link-local.
+netstat_addr() { # netstat text, name
+    printf '%s\n' "$1" | awk -v n="$2" '$1 == n { print $3; exit }' |
+    grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' |
+    grep -vE '^(0\.0\.0\.0|169\.254\.)'
+}
+
+lease_router() { # ShowNetStatus text -> the router the DHCP lease named
+    printf '%s\n' "$1" |
+    awk '$1 == "it" && $2 == "offered" && $3 == "router" { print $4; exit }'
+}
+
 round_named() {
     local stage="$ROOT/build/ifslots-stage-named"
-    local first third many second_meth n i rc
+    local first third many second_meth n i rc lease router
 
     echo
     echo "=============================================================="
@@ -163,7 +202,8 @@ round_named() {
         echo "SYS:CheckNetConfig"
         echo "SYS:AddNetInterface zeth4"
         echo "SYS:netstat -i"
-        echo "SYS:ping 10.0.2.2 -c 2 -t 20"
+        echo "SYS:ping $GATEWAY -c 2 -t 20"
+        echo "SYS:ShowNetStatus zeth4"
         echo "SYS:AddNetInterface aeth0"
         echo "SYS:AddNetInterface beth1"
         echo "SYS:AddNetInterface meth2"
@@ -248,15 +288,20 @@ round_named() {
         fail "netstat -i does not show zeth4 as a live interface"
         ok3=0
     fi
-    if block "SYS:netstat -i" 1 | grep -qE "^zeth4[[:space:]].*10\.0\.2\.15"
-    then
-        pass "and it took the SLIRP lease 10.0.2.15"
+    lease=$(netstat_addr "$(block "SYS:netstat -i" 1)" zeth4)
+    if [ -n "$lease" ]; then
+        pass "and it took a DHCP lease: $lease"
     else
         fail "zeth4 has no address"
         ok3=0
     fi
-    if block "SYS:ping 10.0.2.2 -c 2 -t 20" 1 |
-       grep -qE "0(\.0)?% packet loss|[12] (packets )?received"; then
+    # The ping target was written before boot; the lease says what the
+    # segment's router really is.  A different one is -g, not the stack.
+    router=$(lease_router "$(block "SYS:ShowNetStatus zeth4" 1)")
+    if [ -n "$router" ] && [ "$router" != "$GATEWAY" ]; then
+        rig "zeth4's lease names router $router, but $GATEWAY was pinged:\
+ pass -g $router"
+    elif replied "$(block "SYS:ping $GATEWAY -c 2 -t 20" 1)"; then
         pass "and the gateway answers over it"
     else
         fail "no ping replies over zeth4"
@@ -755,7 +800,7 @@ round_identity() {
     else
         pass "and does not report a live interface called aeth0"
     fi
-    if printf '%s\n' "$ifaces" | grep -qE "^zeth3[[:space:]].*10\.0\.2\.15"; then
+    if [ -n "$(netstat_addr "$ifaces" zeth3)" ]; then
         pass "and the lease is on zeth3's line"
     else
         fail "zeth3 has no address in netstat -i"

@@ -206,6 +206,10 @@ static void test_value_names(void)
     check_str(tool_event_value_name(NETEVENT_EXPUNGE_DECLINED,
                                     NETEVENT_EXP_NETMON),
               "a monitoring hook is installed", "the netmon decline");
+    check_str(tool_event_value_name(NETEVENT_EXPUNGE_DECLINED,
+                                    NETEVENT_EXP_RETAINED),
+              "a SANA-II device still holds requests",
+              "the retained-interface decline");
 
     /* A value the table does not know, on a code whose values are named:
        nothing rather than a wrong name. */

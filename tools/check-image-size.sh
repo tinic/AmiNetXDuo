@@ -104,7 +104,9 @@ BUDGETS=(
     # metadata callback keeps private state out of SANA-II's io_Flags.
     # 229,560 with the batch reader, 2026-09-20 (see the default row).
     # 231,324 with the SBTC_ERROR_HOOK move, 2026-09-22.
-    "minimal:src/bsdsocket/bsdsocket.library:233000"
+    # 233,024 with the retained SANA-II interface (a device that keeps
+    # requests after close is held, not dropped), 2026-09-24.
+    "minimal:src/bsdsocket/bsdsocket.library:234000"
     "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
     "minimal:src/wifipi/anxwifipi.device:56000"
@@ -118,7 +120,8 @@ BUDGETS=(
     # incompatible private AmiTCP copy path and sends no packets.
     # 198,048 measured with the X-Surf-only name check, which leaves AMITCP
     # visible to every other SANA-II driver (2026-09-23).
-    "micro:src/bsdsocket/bsdsocket.library:198656"
+    # 199,224 with the retained SANA-II interface, 2026-09-24.
+    "micro:src/bsdsocket/bsdsocket.library:200000"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
     "micro:src/wifipi/anxwifipi.device:56000"
