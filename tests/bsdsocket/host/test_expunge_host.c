@@ -6,6 +6,7 @@
  */
 
 #include "bsdsocket_internal.h"
+#include "aminetxduo/events.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +57,7 @@ static struct
 {
     LONG    can_unload_calls;
     BOOL    can_unload_answer;
+    UWORD   retained_answer;        /* netstack_retained_count()          */
 
     LONG    tcp_alive_calls;
     BOOL    tcp_alive_answer;
@@ -177,6 +179,12 @@ BOOL netstack_can_unload(VOID)
     if (h_model_refs)
         return (h_ns_refs == 0) ? TRUE : FALSE;
     return h.can_unload_answer;
+}
+
+/* Asked only on a refusal, to name its reason in the event ring. */
+UWORD netstack_retained_count(VOID)
+{
+    return h.retained_answer;
 }
 
 BOOL bsd_tcp_handler_alive(VOID)
@@ -435,6 +443,31 @@ static VOID t_refusal_declines(VOID)
 
     h_report("refused", r == NULL, (h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
              r == H_SEGLIST, h_teardown_ran());
+}
+
+/* A SANA-II device still holding requests is its own reason, not ThreadX. */
+static VOID t_refusal_names_a_retained_device(VOID)
+{
+    static NetStatusEvent ev[256];      /* more than the ring holds */
+    ULONG          held = 0;
+    ULONG          n;
+    ULONG          i;
+    BOOL           seen = FALSE;
+
+    printf("a refusal over a retained SANA-II interface\n");
+
+    h_machine_reset(FALSE);
+    h.retained_answer = 1;
+
+    CHECK(bsd_lib_expunge(h_base) == NULL, "expunge declined");
+
+    n = ami_event_snapshot(ev, 256, &held);
+    for (i = 0; i < n && i < 256; i++)
+    {
+        if (ev[i].nse_Code == NETEVENT_EXPUNGE_DECLINED)
+            seen = (ev[i].nse_Value == NETEVENT_EXP_RETAINED) ? TRUE : FALSE;
+    }
+    CHECK(seen, "and the event ring says a device still holds requests");
 }
 
 static VOID t_refusal_clears(VOID)
@@ -757,6 +790,7 @@ int main(void)
 
     t_refusal_declines();
     t_refusal_clears();
+    t_refusal_names_a_retained_device();
     t_open_count_comes_first();
     t_other_refusals();
     t_last_close_retries();

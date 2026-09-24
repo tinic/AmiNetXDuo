@@ -568,12 +568,10 @@ VOID ami_config_free(AmiConfig *cfg)
 }
 
 /* A cookie, never dereferenced: netstack.c only ever hands it back to
-   src/sana2, which is stubbed here as well. */
-static UBYTE nsh_iface_cookie[4][1];
-
+   src/sana2, which is stubbed here as well.  Its NshSana2If is the model. */
 AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 {
-    static UWORD n;
+    UWORD i;
 
     nsh.opened_cfg = *cfg;
     nsh.sana2_opens++;
@@ -584,20 +582,130 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         return NULL;
     }
 
-    (VOID)cfg;
-    *err = AMI_NET_OK;
+    for (i = 0; i < (UWORD)NSH_SANA2_IFACES; i++)
+    {
+        NshSana2If *m = &nsh.sana2[i];
 
-    if (n >= 4)
-        n = 0;
+        if (m->state != NSH_IF_FREE)
+            continue;
 
-    return (AmiSana2If *)&nsh_iface_cookie[n++][0];
+        memset(m, 0, sizeof(*m));
+        m->state = NSH_IF_OPEN;
+        strncpy(m->device, cfg->device, sizeof(m->device) - 1);
+        m->unit  = cfg->unit;
+        nsh.sana2_device_opens++;
+        *err = AMI_NET_OK;
+
+        return (AmiSana2If *)m;
+    }
+
+    *err = AMI_NET_ERR_NOMEM;
+    return NULL;
 }
 
+NshSana2If *nsh_sana2_of(const AmiSana2If *iface)
+{
+    NshSana2If *m = (NshSana2If *)iface;
+
+    if (m < &nsh.sana2[0] || m >= &nsh.sana2[NSH_SANA2_IFACES])
+        return NULL;
+
+    return m;
+}
+
+UWORD nsh_retained(VOID)
+{
+    UWORD i;
+    UWORD n = 0;
+
+    for (i = 0; i < (UWORD)NSH_SANA2_IFACES; i++)
+    {
+        if (nsh.sana2[i].state == NSH_IF_RETAINED)
+            n++;
+    }
+
+    return n;
+}
+
+static VOID nsh_sana2_release(NshSana2If *m)
+{
+    m->device_closes++;
+    m->frees++;
+    nsh.sana2_device_closes++;
+    m->state = NSH_IF_FREE;
+}
+
+/* The shipping contract (include/aminetxduo/sana2.h): FALSE puts it on the
+   retained list, and a close of one already there is FALSE and nothing. */
 BOOL ami_sana2_close(AmiSana2If *iface)
 {
-    (VOID)iface;
+    NshSana2If *m = nsh_sana2_of(iface);
 
+    nsh.sana2_closes++;
+
+    if (m == NULL)
+        return TRUE;
+
+    if (m->state == NSH_IF_RETAINED)
+        return FALSE;
+
+    if (m->state != NSH_IF_OPEN)
+    {
+        nsh.sana2_close_twice++;
+        return TRUE;
+    }
+
+    if (nsh.sana2_close_held != 0 || nsh.sana2_close_join)
+    {
+        m->state        = NSH_IF_RETAINED;
+        m->held         = nsh.sana2_close_held;
+        m->join_pending = nsh.sana2_close_join;
+        ami_event(NETEVENT_IFACE_RETAINED, 0, m->held);
+        return FALSE;
+    }
+
+    nsh_sana2_release(m);
     return TRUE;
+}
+
+UWORD ami_sana2_retained_count(VOID)
+{
+    return nsh_retained();
+}
+
+ULONG ami_sana2_retained_holds(const char *device, ULONG unit)
+{
+    UWORD i;
+
+    for (i = 0; i < (UWORD)NSH_SANA2_IFACES; i++)
+    {
+        const NshSana2If *m = &nsh.sana2[i];
+
+        if (m->state == NSH_IF_RETAINED && m->unit == unit &&
+            strcmp(m->device, device) == 0)
+            return (m->held != 0) ? m->held : NETEVENT_HELD_RX;
+    }
+
+    return 0;
+}
+
+/* An entry goes once the device holds nothing AND the reader is joined. */
+UWORD ami_sana2_retained_sweep(BOOL release_packets)
+{
+    UWORD i;
+
+    (VOID)release_packets;
+    nsh.sweeps++;
+
+    for (i = 0; i < (UWORD)NSH_SANA2_IFACES; i++)
+    {
+        NshSana2If *m = &nsh.sana2[i];
+
+        if (m->state == NSH_IF_RETAINED && m->held == 0 && !m->join_pending)
+            nsh_sana2_release(m);
+    }
+
+    return nsh_retained();
 }
 
 VOID ami_sana2_get_mac(const AmiSana2If *iface, UCHAR mac[AMI_ETH_ADDR_SIZE])
@@ -612,7 +720,7 @@ BOOL ami_sana2_orphaned(const AmiSana2If *iface)
 {
     (VOID)iface;
 
-    return FALSE;
+    return nsh.sana2_orphaned;
 }
 
 AmiMemStats *ami_mem_stats(VOID)
@@ -755,9 +863,15 @@ BOOL ami_config_reserve(AmiConfig *cfg, UWORD want)
 
 VOID ami_event(UWORD code, UWORD index, ULONG value)
 {
-    (VOID)code;
-    (VOID)index;
-    (VOID)value;
+    nsh.events++;
+    nsh.last_event       = code;
+    nsh.last_event_index = index;
+    nsh.last_event_value = value;
+
+    if (code == NETEVENT_IFACE_RETAINED)
+        nsh.iface_retained_events++;
+    if (code == NETEVENT_STACK_RETAINED)
+        nsh.stack_retained_events++;
 }
 
 BOOL ami_netstack_baton_abandon(TX_THREAD *thread)

@@ -609,8 +609,15 @@ typedef struct AmiSana2Reader
     APTR                stack;
 
     struct Task        *task;
-    struct MsgPort     *port;
+    struct MsgPort     *port;       /* &port_mem while the reader has one  */
     ULONG               wake_mask;
+
+    /* The reply port itself, here and not CreateMsgPort()'s: a port the
+       device still answers on outlives the reader, and whoever reclaims it
+       later (ami_sana2_rx_reclaim()) is another task.  DeleteMsgPort() would
+       FreeSignal() that task's bit, and how CreateMsgPort() allocated is not
+       documented.  Its signal is the reader's, freed only by the reader. */
+    struct MsgPort      port_mem;
 
     /* The TX reaping duty (see ami_sana2_tx_reap_bind()). */
     BYTE                reap_sigbit;    /* -1 when none is held             */
@@ -620,6 +627,12 @@ typedef struct AmiSana2Reader
     volatile BOOL       running;
     volatile BOOL       stop;
     volatile BOOL       failed;
+    /* `exited` has been taken: the thread no longer runs this module's code,
+       though it is not deleted while `orphans` is nonzero. */
+    BOOL                joined;
+    /* tx_thread_delete() left a Task running on `stack` and this control
+       block.  Nothing of the interface can ever be freed. */
+    BOOL                zombie;
 
     /* Reads the device would not give back at teardown, over every ring.
        Nonzero means slots, pinned packets and the reply port are still
@@ -872,6 +885,8 @@ struct AmiSana2If
     NX_IP              *ip;
     UINT                index;
     NX_INTERFACE       *interface_ptr;
+    /* The owning pool: every packet a slot pins came from here, and the
+       retained sweep gives them back here, not to a later stack's pool. */
     NX_PACKET_POOL     *pool;
 
     /* TX ring. The reply port raises a signal on the reader that carries the
@@ -915,6 +930,11 @@ struct AmiSana2If
        device holding a CMD_WRITE. Those requests and their reply port are
        inside this allocation too. Cleared by a later drain that succeeds. */
     BOOL                tx_orphaned;
+
+    /* On the retained list (sana2_device.c): ami_sana2_close() refused, and
+       the sweep owns the interface from then on. */
+    BOOL                retained;
+    struct AmiSana2If  *retained_next;
 
     AmiSana2Stats       stats;
 
@@ -969,6 +989,9 @@ VOID ami_sana2_unbind(AmiSana2If *iface);
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
+/* The retained sweep's receive half: never waits.  TRUE when neither the
+   device nor the reader thread can touch the interface any more. */
+BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets);
 ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 

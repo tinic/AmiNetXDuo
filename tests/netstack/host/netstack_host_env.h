@@ -19,6 +19,29 @@
 
 #include "netstack_internal.h"
 
+/*
+ * One interface as src/sana2 would hold it, and its place on the retained
+ * list, which these stubs model: a close that is steered to fail puts it
+ * there, and ami_sana2_retained_sweep() closes and frees it once the test says
+ * the device gave everything back.
+ */
+#define NSH_SANA2_IFACES    8
+
+#define NSH_IF_FREE         0
+#define NSH_IF_OPEN         1       /* opened, with the netstack            */
+#define NSH_IF_RETAINED     2       /* close refused, on the retained list  */
+
+typedef struct NshSana2If
+{
+    UWORD   state;                  /* NSH_IF_*                              */
+    char    device[AMI_CFG_PATH_LEN];
+    ULONG   unit;
+    ULONG   held;                   /* NETEVENT_HELD_*; the test clears it   */
+    BOOL    join_pending;           /* the reader not joined, requests or no */
+    ULONG   device_closes;          /* CloseDevice() on this one             */
+    ULONG   frees;                  /* its memory given back                 */
+} NshSana2If;
+
 typedef struct NetStackHostEnv
 {
     /* ---- ThreadX, the half the expunge refusal turns on ---------------- */
@@ -74,6 +97,28 @@ typedef struct NetStackHostEnv
     BOOL    sana2_open_fails;
     LONG    sana2_open_error;
 
+    /* ---- SANA-II close, and the retained list ------------------------- */
+
+    ULONG   sana2_close_held;       /* the next closes retain with this,
+                                       NETEVENT_HELD_*; 0 closes            */
+    BOOL    sana2_close_join;       /* ... and leave the reader unjoined     */
+    BOOL    sana2_orphaned;         /* ami_sana2_orphaned(), the RX preflight*/
+    ULONG   sana2_closes;           /* ami_sana2_close() calls               */
+    ULONG   sana2_close_twice;      /* a close of one already closed         */
+    ULONG   sana2_device_opens;     /* OpenDevice() that succeeded           */
+    ULONG   sana2_device_closes;    /* CloseDevice(), close or sweep         */
+    ULONG   sweeps;                 /* ami_sana2_retained_sweep() calls      */
+    NshSana2If sana2[NSH_SANA2_IFACES];
+
+    /* ---- the event ring ------------------------------------------------ */
+
+    ULONG   events;
+    UWORD   last_event;
+    UWORD   last_event_index;
+    ULONG   last_event_value;
+    ULONG   iface_retained_events;
+    ULONG   stack_retained_events;
+
     /* ---- live configuration API --------------------------------------- */
 
     BOOL    hostname_offer_accept; /* ami_config_hostname_offer() result   */
@@ -113,5 +158,11 @@ int nsh_dhcp_trace_is(const char *want);
 
 /* Forget the trace so far; bring-up writes into it too. */
 VOID nsh_trace_clear(VOID);
+
+/* The modelled interface the netstack holds as `iface`, or NULL. */
+NshSana2If *nsh_sana2_of(const AmiSana2If *iface);
+
+/* Retained entries on the modelled list. */
+UWORD nsh_retained(VOID);
 
 #endif /* AMINETXDUO_NETSTACK_HOST_ENV_H */

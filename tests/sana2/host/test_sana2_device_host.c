@@ -49,6 +49,15 @@ typedef struct HostDevice
     LONG    offline_error;
 
     int     closes;         /* CloseDevice() calls */
+    int     opens;          /* OpenDevice() calls */
+
+    /* The rest of the interface the device can hold, for the retained list. */
+    int     writes_held;        /* CMD_WRITEs it owns right now */
+    BOOL    reader_running;     /* the reader has not exited, requests or no */
+    int     tx_reaps;
+    int     rx_reclaims;
+    int     packets_released;   /* the read slots' packets, back to the pool */
+    int     slot_frees;         /* the watched interface's read slots freed */
 } HostDevice;
 
 static HostDevice h_dev;
@@ -157,7 +166,17 @@ APTR ami_alloc_flags(ULONG size, ULONG memf)
     return calloc(1, (size_t)size);
 }
 
-VOID ami_free(APTR ptr) { free(ptr); }
+/* The one allocation a case is watching: a retained interface must not be
+   freed while its device holds requests, and then exactly once. */
+static APTR h_free_watch;
+static int  h_free_watched;
+
+VOID ami_free(APTR ptr)
+{
+    if (ptr != NULL && ptr == h_free_watch)
+        h_free_watched++;
+    free(ptr);
+}
 
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
@@ -181,6 +200,7 @@ LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
                          : (struct Device *)&h_dev;
     req->io_Unit   = (unit == 0) ? NULL : (struct Unit *)&h_units[unit];
     req->io_Error  = 0;
+    h_dev.opens++;
 
     return 0;
 }
@@ -321,10 +341,12 @@ LONG AbortIO(struct IORequest *req)
 
 /* --------------------------------------------- the rest of the sana2 shim -- */
 
-/* No reader ever started here, so there are no slot arrays to give back. */
+/* No reader ever started here, so there are no slot arrays to give back;
+   when they would go is still counted, for the watched interface. */
 VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
 {
-    (VOID)iface;
+    if (iface != NULL && (APTR)iface == h_free_watch)
+        h_dev.slot_frees++;
 }
 
 /* The real one's middle phase, which is the only one without a ThreadX thread
@@ -339,12 +361,48 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
         h_dev.flush_cmds++;
     }
 
-    iface->rx_orphaned = (h_dev.reads_held > 0) ? TRUE : FALSE;
+    iface->rx_orphaned = (h_dev.reads_held > 0 || h_dev.reader_running)
+                             ? TRUE : FALSE;
     iface->rx_running  = FALSE;
 }
 
+/* The real one's shape: every write the device has is a busy slot. */
+VOID ami_sana2_tx_drain(AmiSana2If *iface)
+{
+    int i;
+
+    for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
+        iface->tx[i].busy = (i < h_dev.writes_held) ? TRUE : FALSE;
+    iface->tx_orphaned = (h_dev.writes_held > 0) ? TRUE : FALSE;
+}
+
+/* Collects the writes the device has given back since: no AbortIO(). */
+VOID ami_sana2_tx_reap(AmiSana2If *iface)
+{
+    int i;
+
+    h_dev.tx_reaps++;
+    for (i = h_dev.writes_held; i < AMI_SANA2_TX_SLOTS; i++)
+        iface->tx[i].busy = FALSE;
+}
+
+/* sana2_rx.c's, whose own holds test_sana2_rx drives: here only the verdict. */
+BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets)
+{
+    h_dev.rx_reclaims++;
+
+    if (!iface->rx_orphaned)
+        return TRUE;
+    if (h_dev.reads_held > 0 || h_dev.reader_running)
+        return FALSE;
+
+    if (release_packets)
+        h_dev.packets_released++;
+    iface->rx_orphaned = FALSE;
+    return TRUE;
+}
+
 VOID ami_sana2_tx_init(AmiSana2If *iface) { (VOID)iface; }
-VOID ami_sana2_tx_drain(AmiSana2If *iface) { iface->tx_orphaned = FALSE; }
 VOID ami_sana2_unbind(AmiSana2If *iface) { (VOID)iface; }
 
 /* Addresses only: the tag list carries them and only a device calls one. */
@@ -597,8 +655,243 @@ static void case_device_keeps_everything(void)
     h_check(!closed, "a device that keeps its reads is not closed");
     h_check(h_dev.closes == 0, "CloseDevice() was NOT called");
     h_check(h_retained_events == 1, "NETEVENT_IFACE_RETAINED was recorded");
+    h_check(ami_sana2_retained_count() == 1,
+            "and the interface is on the retained list");
 
     h_retained_iface = iface;
+
+    /* It gives them back after all: the sweep closes it, once. */
+    h_dev.keeps_everything = FALSE;
+    h_dev.reads_held       = 0;
+    h_check(ami_sana2_retained_sweep(TRUE) == 0, "the sweep empties the list");
+    h_check(h_dev.closes == 1, "and CloseDevice() came from the sweep");
+    h_retained_iface = NULL;
+}
+
+/* ------------------------------------------------ the retained list -- */
+
+/* Open test.device unit 0 with `reads`, `writes` and a reader still running
+   as the device will hold them at the close, and watch its memory. */
+static AmiSana2If *h_retain(int reads, int writes, BOOL running)
+{
+    AmiSana2If *iface;
+
+    h_device_reset();
+    h_dev.keeps_everything = TRUE;
+
+    iface = h_bring_up_unit(0);
+    if (iface == NULL)
+        return NULL;
+
+    h_dev.reads_held     = reads;
+    h_dev.writes_held    = writes;
+    h_dev.reader_running = running;
+
+    h_free_watch   = iface;
+    h_free_watched = 0;
+
+    return iface;
+}
+
+/* What a case leaves must be what it found: an empty list. */
+static void h_retain_done(void)
+{
+    h_dev.reads_held     = 0;
+    h_dev.writes_held    = 0;
+    h_dev.reader_running = FALSE;
+    (VOID)ami_sana2_retained_sweep(TRUE);
+    h_free_watch = NULL;
+}
+
+/* A CMD_WRITE kept past the drain, and nothing else. */
+static void case_retain_tx_only(void)
+{
+    AmiSana2If *iface;
+    int         reaps;
+
+    printf("  a write the device keeps\n");
+    iface = h_retain(0, 2, FALSE);
+    h_check(iface != NULL, "tx-only: the interface opened");
+    if (iface == NULL)
+        return;
+
+    h_check(!ami_sana2_close(iface), "tx-only: the close is refused");
+    h_check(h_dev.closes == 0, "tx-only: no CloseDevice() under a held write");
+    h_check(h_free_watched == 0, "tx-only: the interface is not freed");
+    h_check(ami_sana2_retained_count() == 1, "tx-only: it is retained");
+    h_check(ami_sana2_retained_holds("test.device", 0) == NETEVENT_HELD_TX,
+            "tx-only: and held on the write side only");
+
+    reaps = h_dev.tx_reaps;
+    h_check(ami_sana2_retained_sweep(TRUE) == 1 &&
+            ami_sana2_retained_sweep(TRUE) == 1,
+            "tx-only: sweeps while the write is out keep it");
+    h_check(h_dev.tx_reaps == reaps + 2 && h_dev.aborts == 0,
+            "tx-only: each sweep collects, none asks the device again");
+    h_check(h_dev.closes == 0 && h_free_watched == 0 && h_dev.slot_frees == 0,
+            "tx-only: still not closed; the interface and its slots not freed");
+
+    h_dev.writes_held = 1;
+    h_check(ami_sana2_retained_sweep(TRUE) == 1,
+            "tx-only: one of two back is still a hold");
+
+    h_dev.writes_held = 0;
+    h_check(ami_sana2_retained_sweep(TRUE) == 0,
+            "tx-only: the last write back empties the list");
+    h_check(h_dev.closes == 1, "tx-only: CloseDevice() exactly once");
+    h_check(h_free_watched == 1 && h_dev.slot_frees == 1,
+            "tx-only: the interface and its slots freed exactly once");
+
+    h_check(ami_sana2_retained_sweep(TRUE) == 0 && h_dev.closes == 1,
+            "tx-only: a sweep of nothing does nothing");
+    h_check(h_dev.opens == h_dev.closes,
+            "tx-only: one CloseDevice() for the one OpenDevice()");
+    h_retain_done();
+}
+
+/* Reads kept past S2_OFFLINE, and a repeated close. */
+static void case_retain_rx_only(void)
+{
+    AmiSana2If *iface;
+    ULONG       events;
+
+    printf("  reads the device keeps, closed twice\n");
+    iface = h_retain(H_READS, 0, FALSE);
+    h_check(iface != NULL, "rx-only: the interface opened");
+    if (iface == NULL)
+        return;
+
+    h_check(!ami_sana2_close(iface), "rx-only: the close is refused");
+    h_check(ami_sana2_retained_holds("DEVS:Networks/TEST.device", 0) ==
+                NETEVENT_HELD_RX,
+            "rx-only: held on the read side, found by basename and any case");
+    events = h_retained_events;
+
+    h_check(!ami_sana2_close(iface), "rx-only: a second close is refused too");
+    h_check(ami_sana2_retained_count() == 1, "rx-only: and not linked twice");
+    h_check(h_retained_events == events && h_dev.offline_cmds == 1,
+            "rx-only: nor torn down twice");
+    h_check(h_dev.closes == 0 && h_free_watched == 0 && h_dev.slot_frees == 0,
+            "rx-only: no CloseDevice(), no free of the interface or its slots");
+
+    h_dev.reads_held = 0;
+    h_check(ami_sana2_retained_sweep(TRUE) == 0,
+            "rx-only: the reads back, the sweep releases it");
+    h_check(h_dev.packets_released == 1,
+            "rx-only: the slots' packets went back");
+    h_check(h_dev.closes == 1 && h_free_watched == 1 && h_dev.slot_frees == 1,
+            "rx-only: closed once, and it and its slots freed once");
+    h_retain_done();
+}
+
+/* Both sides, given back one at a time. */
+static void case_retain_mixed(void)
+{
+    AmiSana2If *iface;
+
+    printf("  a read and a write kept\n");
+    iface = h_retain(H_READS, 1, FALSE);
+    h_check(iface != NULL, "mixed: the interface opened");
+    if (iface == NULL)
+        return;
+
+    h_check(!ami_sana2_close(iface), "mixed: the close is refused");
+    h_check(ami_sana2_retained_holds("test.device", 0) ==
+                (NETEVENT_HELD_RX | NETEVENT_HELD_TX),
+            "mixed: held on both sides");
+
+    h_dev.reads_held = 0;
+    h_check(ami_sana2_retained_sweep(TRUE) == 1,
+            "mixed: the reads back, the write still holds it");
+    h_check(ami_sana2_retained_holds("test.device", 0) == NETEVENT_HELD_TX,
+            "mixed: and it is held on the write side alone now");
+    h_check(h_dev.closes == 0 && h_free_watched == 0,
+            "mixed: not closed, not freed");
+
+    h_dev.writes_held = 0;
+    h_check(ami_sana2_retained_sweep(TRUE) == 0 && h_dev.closes == 1 &&
+            h_free_watched == 1,
+            "mixed: the write back, closed and freed once");
+    h_retain_done();
+}
+
+/* No request out, and the reader not yet joined: still a hold. */
+static void case_retain_reader_join(void)
+{
+    AmiSana2If *iface;
+
+    printf("  a reader not yet joined, nothing at the device\n");
+    iface = h_retain(0, 0, TRUE);
+    h_check(iface != NULL, "join: the interface opened");
+    if (iface == NULL)
+        return;
+
+    h_check(!ami_sana2_close(iface), "join: the close is refused");
+    h_check(ami_sana2_retained_sweep(TRUE) == 1,
+            "join: zero requests and the reader running is a hold");
+    h_check(h_dev.closes == 0 && h_free_watched == 0,
+            "join: not closed, not freed");
+
+    h_dev.reader_running = FALSE;
+    h_check(ami_sana2_retained_sweep(TRUE) == 0 && h_dev.closes == 1 &&
+            h_free_watched == 1,
+            "join: joined, closed and freed once");
+    h_retain_done();
+}
+
+/* The same device and unit is not opened under a retained one; another is. */
+static void case_retain_blocks_reopen(void)
+{
+    AmiSana2If *iface;
+    AmiSana2If *other;
+    LONG        err = 0;
+    int         opens;
+
+    printf("  opening a unit that is still held\n");
+    iface = h_retain(0, 1, FALSE);
+    h_check(iface != NULL, "reopen: the interface opened");
+    if (iface == NULL)
+        return;
+    h_check(!ami_sana2_close(iface), "reopen: the close is refused");
+
+    opens = h_dev.opens;
+    h_config();
+    strcpy(h_cfg.device, "DEVS:Networks/Test.device");
+    h_check(ami_sana2_open(&h_cfg, &err) == NULL &&
+                err == AMI_NET_ERR_RETAINED,
+            "reopen: the held unit is refused with AMI_NET_ERR_RETAINED");
+    h_check(h_dev.opens == opens, "reopen: and OpenDevice() was never called");
+
+    /* The fake device's holds are device-wide: these two give theirs back. */
+    h_dev.keeps_everything = FALSE;
+    h_dev.writes_held      = 0;
+
+    h_config();
+    h_cfg.unit = 1;
+    other = ami_sana2_open(&h_cfg, &err);
+    h_check(other != NULL, "reopen: another unit of that device opens");
+    if (other != NULL)
+        h_check(ami_sana2_close(other), "reopen: and closes");
+
+    h_config();
+    strcpy(h_cfg.device, "other.device");
+    other = ami_sana2_open(&h_cfg, &err);
+    h_check(other != NULL, "reopen: another device on unit 0 opens");
+    if (other != NULL)
+        h_check(ami_sana2_close(other), "reopen: and closes");
+
+    h_check(ami_sana2_retained_holds("test.device", 0) != 0,
+            "reopen: the first is still held");
+    (VOID)ami_sana2_retained_sweep(TRUE);
+    h_config();
+    other = ami_sana2_open(&h_cfg, &err);
+    h_check(other != NULL, "reopen: once released, the unit opens again");
+    if (other != NULL)
+        h_check(ami_sana2_close(other), "reopen: and closes");
+
+    h_check(h_dev.opens == h_dev.closes,
+            "reopen: one CloseDevice() per OpenDevice(), none under a hold");
+    h_retain_done();
 }
 
 /* 7. A refused S2_OFFLINE still counts as told. */
@@ -909,6 +1202,11 @@ int main(void)
     case_never_online();
     case_online_rearms();
     case_device_keeps_everything();
+    case_retain_tx_only();
+    case_retain_rx_only();
+    case_retain_mixed();
+    case_retain_reader_join();
+    case_retain_blocks_reopen();
     case_offline_refused();
     case_shared_unit();
     case_distinct_units();
@@ -919,6 +1217,7 @@ int main(void)
     case_request_counts();
     case_filter_everything();
 
+    h_check(ami_sana2_retained_count() == 0, "nothing is left retained");
     h_check(h_ports_made > 0, "reply ports were created");
     h_check(h_ports_live == 0, "every reply port was deleted");
 

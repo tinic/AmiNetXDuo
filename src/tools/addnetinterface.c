@@ -523,6 +523,11 @@ static VOID explain_add_failure(struct Library *base, LONG err,
             explain_no_slot(base, name);
             break;
 
+        case EBUSY:
+            tool_printf("  %s unit %lu still holds requests from an interface "
+                        "removed earlier.\n", (LONG)ifc->device, ifc->unit);
+            break;
+
         case ENOBUFS:
             advise_out_of_memory(AvailMem(MEMF_PUBLIC));
             break;

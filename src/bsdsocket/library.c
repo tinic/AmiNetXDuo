@@ -1416,7 +1416,8 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     if (!netstack_can_unload())
     {
         ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
-                  NETEVENT_EXP_KERNEL);
+                  (netstack_retained_count() != 0) ? NETEVENT_EXP_RETAINED
+                                                   : NETEVENT_EXP_KERNEL);
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }

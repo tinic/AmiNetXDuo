@@ -1963,6 +1963,33 @@ BOOL ami_sana2_rx_should_block(const AmiSana2Reader *rd, UWORD taken)
 /* --------------------------------------------------------------- shutdown */
 
 /*
+ * The reader's reply port, in rd->port_mem (see sana2_internal.h), with a
+ * signal of the reader's own.  noinline, both: they run once a reader, and
+ * inlined they would count against its loop's instruction ceiling
+ * (tools/check-hotpath-budget.sh).
+ */
+static BOOL __attribute__((noinline)) ami_sana2_rx_port_open(AmiSana2Reader *rd)
+{
+    BYTE bit = AllocSignal(-1);
+
+    if (bit < 0)
+        return FALSE;
+
+    ami_sana2_port_init(&rd->port_mem, rd->task, bit, PA_SIGNAL);
+    rd->port = &rd->port_mem;
+
+    return TRUE;
+}
+
+/* On the reader, and only once the device holds nothing on the port: the
+   signal is freed from the task that owns it. */
+static VOID __attribute__((noinline)) ami_sana2_rx_port_close(AmiSana2Reader *rd)
+{
+    FreeSignal((LONG)rd->port->mp_SigBit);
+    rd->port = NULL;
+}
+
+/*
  * CMD_FLUSH: "abort and return all queued I/O requests for this unit."
  * Unit-wide rather than per-request, so it is tried second: it takes every
  * ring's queued reads with it, and another opener's too.
@@ -2158,10 +2185,7 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
     }
 
     if (rd->port != NULL)
-    {
-        DeleteMsgPort(rd->port);
-        rd->port = NULL;
-    }
+        ami_sana2_rx_port_close(rd);
 }
 
 /* ----------------------------------------------------------- reader thread */
@@ -2173,9 +2197,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     UWORD           r, i;
 
     rd->task = FindTask(NULL);
-    rd->port = CreateMsgPort();
 
-    if (rd->port == NULL)
+    if (!ami_sana2_rx_port_open(rd))
     {
         rd->failed = TRUE;
         tx_semaphore_put(&rd->ready);
@@ -2841,6 +2864,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
            signalled on a bit it does not hold. */
         rd->wake_mask   = 0;
         rd->orphans     = 0;
+        rd->joined      = FALSE;
+        rd->zombie      = FALSE;
 
         rd->stack = ami_sana2_alloc_stack((ULONG)AMI_SANA2_RX_STACK_SIZE);
 #ifdef AMINETXDUO_RXPROBE
@@ -2979,6 +3004,8 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             return;
         }
 
+        rd->joined = TRUE;
+
         /*
          * ami_sana2_rx_teardown() kept the reply port because the device
          * would not give every read back.  That port's mp_SigTask is this
@@ -3019,6 +3046,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             AMI_ERROR("sana2: reader cannot be removed. Its stack "
                       "leaks. A free here corrupts memory the reader "
                       "runs on");
+            rd->zombie = TRUE;
             iface->rx_orphaned = TRUE;
             iface->rx_running = FALSE;
             return;
@@ -3043,4 +3071,117 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
     rd->task    = NULL;
 
     iface->rx_running = FALSE;
+}
+
+/*
+ * The receive half of the retained sweep (sana2_device.c), for an interface
+ * ami_sana2_rx_stop() left orphaned.  NEVER WAITS: the reader's exit is taken
+ * with TX_NO_WAIT and the device's replies with ami_sana2_rx_reap(rd, 0),
+ * which reaches its break before its only sleep.  Anything not yet back is a
+ * hold, and the next sweep asks again.
+ *
+ * A reader that has not been joined is a hold however few reads it has out:
+ * its thread still runs on rd->stack and this control block.  So is one that
+ * has put `exited` and not yet run off the end of its entry function.
+ *
+ * Once nothing is out: the slots' packets go back to the interface's own pool
+ * (iface->pool, never another stack's), the port stops signalling, and then
+ * the thread is deleted -- its Task owns the port's signal, so the port is
+ * never Signal()led at a Task that is gone.  The port is part of the
+ * interface; nothing here frees a signal.
+ */
+BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets)
+{
+    AmiSana2Reader *rd = &iface->reader;
+    UWORD           r, i;
+    ULONG           zombies;
+
+    if (!iface->rx_orphaned)
+        return TRUE;
+
+    if (rd->zombie)
+        return FALSE;
+
+    if (rd->started && !rd->joined)
+    {
+        if (tx_semaphore_get(&rd->exited, TX_NO_WAIT) != TX_SUCCESS)
+            return FALSE;
+        rd->joined = TRUE;
+    }
+
+    /* The reader's teardown kept the port only when reads stayed out. */
+    if (rd->port != NULL)
+    {
+        rd->orphans = ami_sana2_rx_reap(rd, 0);
+        if (rd->orphans != 0)
+            return FALSE;
+    }
+
+    if (rd->started &&
+        rd->thread.tx_thread_state != TX_COMPLETED &&
+        rd->thread.tx_thread_state != TX_TERMINATED)
+        return FALSE;
+
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+    {
+        AmiSana2Rx *rx = &iface->rx[r];
+
+        for (i = 0; i < rx->depth; i++)
+        {
+            NX_PACKET *packet = rx->slot[i].packet;
+
+            if (packet == NULL)
+                continue;
+
+            rx->slot[i].packet = NULL;
+            if (release_packets && packet->nx_packet_pool_owner == iface->pool)
+                AMI_NX_CLEANUP(nx_packet_release(packet));
+        }
+    }
+
+    if (rd->port != NULL)
+    {
+        Disable();
+        rd->port->mp_Flags   = PA_IGNORE;
+        rd->port->mp_SigTask = NULL;
+        Enable();
+        rd->port = NULL;
+    }
+
+    if (rd->started)
+    {
+        zombies = tx_amiga_zombie_tasks();
+
+        AMI_NX_CLEANUP(tx_thread_terminate(&rd->thread));
+
+        /* A refusal (a caller outside any bracket, say) deleted nothing, so
+           nothing below may be freed either: the next sweep asks again. */
+        if (tx_thread_delete(&rd->thread) != TX_SUCCESS)
+            return FALSE;
+
+        if (tx_amiga_zombie_tasks() != zombies)
+        {
+            AMI_ERROR("sana2: reader cannot be removed. Its stack "
+                      "leaks. A free here corrupts memory the reader "
+                      "runs on");
+            rd->zombie = TRUE;
+            return FALSE;
+        }
+
+        AMI_NX_CLEANUP(tx_semaphore_delete(&rd->ready));
+        AMI_NX_CLEANUP(tx_semaphore_delete(&rd->exited));
+        rd->started = FALSE;
+    }
+
+    if (rd->stack != NULL)
+    {
+        ami_free(rd->stack);
+        rd->stack = NULL;
+    }
+
+    rd->task           = NULL;
+    rd->orphans        = 0;
+    iface->rx_orphaned = FALSE;
+
+    return TRUE;
 }

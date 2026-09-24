@@ -65,7 +65,26 @@ BYTE WaitIO(struct IORequest *req)
     (VOID)req;
     return 0;
 }
-struct Message *GetMsg(struct MsgPort *port) { (VOID)port; return NULL; }
+/* Off except in the reclaim test: there the device's replies are real
+   messages on the reader's port, and the reap takes them off. */
+static BOOL h_getmsg_real;
+
+struct Message *GetMsg(struct MsgPort *port)
+{
+    struct Node *n;
+
+    if (!h_getmsg_real || port == NULL)
+        return NULL;
+
+    n = port->mp_MsgList.lh_Head;
+    if (n->ln_Succ == NULL)
+        return NULL;
+
+    n->ln_Pred->ln_Succ = n->ln_Succ;
+    n->ln_Succ->ln_Pred = n->ln_Pred;
+
+    return (struct Message *)n;
+}
 VOID ReplyMsg(struct Message *msg) { (VOID)msg; }
 
 VOID NewList(struct List *list)
@@ -85,19 +104,37 @@ VOID AddTail(struct List *list, struct Node *node)
 
 struct Node *RemHead(struct List *list) { (VOID)list; return NULL; }
 
+/* Counted: the reader's port is its own now, and nothing in sana2_rx.c may
+   delete a port or free a signal on a task that does not own it. */
+static int h_port_deletes;
+static int h_signal_frees;
+
 struct MsgPort *CreateMsgPort(VOID) { return NULL; }
-VOID  DeleteMsgPort(struct MsgPort *port) { (VOID)port; }
+VOID  DeleteMsgPort(struct MsgPort *port) { (VOID)port; h_port_deletes++; }
 LONG  DoIO(struct IORequest *req) { (VOID)req; return 0; }
 struct Task *FindTask(STRPTR name) { (VOID)name; return NULL; }
 BYTE  AllocSignal(LONG num) { (VOID)num; return -1; }
-VOID  FreeSignal(LONG num) { (VOID)num; }
+VOID  FreeSignal(LONG num) { (VOID)num; h_signal_frees++; }
 ULONG Wait(ULONG mask) { return mask; }
 VOID  Signal(struct Task *task, ULONG mask) { (VOID)task; (VOID)mask; }
 VOID  CloseDevice(struct IORequest *req) { (VOID)req; }
 
 APTR ami_alloc_flags(ULONG size, ULONG memf) { (VOID)size; (VOID)memf; return NULL; }
 APTR ami_alloc(ULONG size) { (VOID)size; return NULL; }
-VOID ami_free(APTR ptr) { (VOID)ptr; }
+/* Frees of the one allocation a test is watching. */
+static APTR h_free_watch;
+static int  h_free_watched;
+VOID ami_free(APTR ptr) { if (ptr != NULL && ptr == h_free_watch) h_free_watched++; }
+
+/* sana2_device.c's, which this binary does not link. */
+VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
+                         UBYTE flags)
+{
+    port->mp_Flags   = flags;
+    port->mp_SigBit  = (UBYTE)sigbit;
+    port->mp_SigTask = task;
+    NewList(&port->mp_MsgList);
+}
 
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
@@ -113,9 +150,14 @@ UINT tx_amiga_stack_in_use(APTR base, ULONG size)
 /* No port here, so no Exec Task ever outlives its TX_THREAD: the monotonic
    count the teardown reads to decide whether freeing a reader stack is safe
    is always zero, which is the answer that lets it free. */
+static ULONG h_zombies;
+static BOOL  h_zombie_on_delete;   /* the next delete leaves a zombie */
+static int   h_thread_deletes;
+static UINT  h_delete_status = TX_SUCCESS;
+
 ULONG tx_amiga_zombie_tasks(VOID)
 {
-    return 0;
+    return h_zombies;
 }
 
 UINT _txe_thread_create(TX_THREAD *p, CHAR *n, VOID (*e)(ULONG), ULONG i,
@@ -127,7 +169,16 @@ UINT _txe_thread_create(TX_THREAD *p, CHAR *n, VOID (*e)(ULONG), ULONG i,
     return TX_SUCCESS;
 }
 
-UINT _txe_thread_delete(TX_THREAD *p) { (VOID)p; return TX_SUCCESS; }
+UINT _txe_thread_delete(TX_THREAD *p)
+{
+    (VOID)p;
+    h_thread_deletes++;
+    if (h_delete_status != TX_SUCCESS)
+        return h_delete_status;
+    if (h_zombie_on_delete)
+        h_zombies++;
+    return TX_SUCCESS;
+}
 UINT _txe_thread_terminate(TX_THREAD *p) { (VOID)p; return TX_SUCCESS; }
 UINT _tx_thread_sleep(ULONG t) { (VOID)t; return TX_SUCCESS; }
 
@@ -137,7 +188,15 @@ UINT _txe_semaphore_create(TX_SEMAPHORE *s, CHAR *n, ULONG c, UINT size)
     return TX_SUCCESS;
 }
 UINT _txe_semaphore_delete(TX_SEMAPHORE *s) { (VOID)s; return TX_SUCCESS; }
-UINT _txe_semaphore_get(TX_SEMAPHORE *s, ULONG w) { (VOID)s; (VOID)w; return TX_SUCCESS; }
+/* What a get answers: TX_NO_INSTANCE is a reader that has not exited. */
+static UINT  h_sem_get_status = TX_SUCCESS;
+static ULONG h_sem_get_wait;
+UINT _txe_semaphore_get(TX_SEMAPHORE *s, ULONG w)
+{
+    (VOID)s;
+    h_sem_get_wait = w;
+    return h_sem_get_status;
+}
 UINT _txe_semaphore_put(TX_SEMAPHORE *s) { (VOID)s; return TX_SUCCESS; }
 
 typedef enum { TO_NOWHERE, TO_IP, TO_ARP, TO_RARP, TO_RELEASED } Destination;
@@ -228,12 +287,13 @@ VOID _nx_rarp_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 }
 
 static int h_releases;
+static NX_PACKET_POOL *h_release_pool;  /* the pool the last one went back to */
 
 UINT _nxe_packet_release(NX_PACKET **packet_ptr_ptr)
 {
     h_releases++;
     h_went = TO_RELEASED;
-    (VOID)packet_ptr_ptr;
+    h_release_pool = (*packet_ptr_ptr)->nx_packet_pool_owner;
     return NX_SUCCESS;
 }
 
@@ -1945,6 +2005,171 @@ static void test_batch_fallback_with_a_sibling_in_flight(void)
 }
 #endif /* AMINETXDUO_RX_BATCH */
 
+
+/* ------------------------------------------------ the retained sweep's RX -- */
+
+/*
+ * ami_sana2_rx_reclaim(), for an interface the teardown left orphaned: every
+ * hold the sweep must honour, then the release, in the one order that never
+ * lets the device or the reader reach freed memory.
+ */
+static AmiSana2If  rc_iface;
+static AmiRxSlot   rc_slot[2];
+static NX_PACKET   rc_pkt[2];
+static NX_PACKET_POOL rc_owner;     /* the interface's own pool */
+static NX_PACKET_POOL rc_other;     /* a later stack's */
+static struct Task rc_task;
+static UBYTE       rc_stack[16];
+
+static void rc_fixture(void)
+{
+    AmiSana2Reader *rd = &rc_iface.reader;
+    AmiSana2Rx     *rx = &rc_iface.rx[0];
+
+    memset(&rc_iface, 0, sizeof(rc_iface));
+    memset(rc_slot, 0, sizeof(rc_slot));
+    memset(rc_pkt, 0, sizeof(rc_pkt));
+
+    rc_iface.pool        = &rc_owner;
+    rc_iface.rx_orphaned = TRUE;
+
+    rx->iface    = &rc_iface;
+    rx->slot     = rc_slot;
+    rx->depth    = 2;
+    rx->unposted = 1;
+
+    rc_pkt[0].nx_packet_pool_owner = &rc_owner;
+    rc_pkt[1].nx_packet_pool_owner = &rc_other;
+    rc_slot[0].owner  = rx;
+    rc_slot[0].packet = &rc_pkt[0];
+    rc_slot[0].posted = TRUE;          /* still at the device */
+    rc_slot[0].req.ios2_Req.io_Command = CMD_READ;
+    rc_slot[1].owner  = rx;
+    rc_slot[1].packet = &rc_pkt[1];
+
+    rd->iface   = &rc_iface;
+    rd->task    = &rc_task;
+    rd->started = TRUE;
+    rd->stack   = rc_stack;
+    rd->orphans = 1;
+    ami_sana2_port_init(&rd->port_mem, &rc_task, 20, PA_SIGNAL);
+    rd->port = &rd->port_mem;
+    rd->thread.tx_thread_state = TX_SUSPENDED;
+
+    h_getmsg_real      = TRUE;
+    h_free_watch       = rc_stack;
+    h_free_watched     = 0;
+    h_thread_deletes   = 0;
+    h_zombie_on_delete = FALSE;
+    h_port_deletes     = 0;
+    h_signal_frees     = 0;
+    h_releases         = 0;
+    h_release_pool     = NULL;
+}
+
+static void test_reclaim_holds_then_releases(void)
+{
+    AmiSana2Reader *rd = &rc_iface.reader;
+
+    printf("  the retained sweep's receive half\n");
+    rc_fixture();
+
+    /* The reader has not exited. */
+    h_sem_get_status = TX_NO_INSTANCE;
+    h_check(!ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "reclaim: a reader that has not exited is a hold");
+    h_check(h_sem_get_wait == TX_NO_WAIT, "reclaim: its exit is not waited for");
+    h_check(!rd->joined && h_thread_deletes == 0 && h_free_watched == 0 &&
+            h_releases == 0,
+            "reclaim: and nothing of it was touched");
+
+    /* Exited, the read still at the device. */
+    h_sem_get_status = TX_SUCCESS;
+    h_check(!ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "reclaim: a read the device still has is a hold");
+    h_check(rd->joined, "reclaim: the exit was taken");
+    h_check(rd->orphans == 1 && rd->port == &rd->port_mem &&
+            rd->port->mp_Flags == PA_SIGNAL,
+            "reclaim: the port stands, still signalling the reader");
+    h_check(h_thread_deletes == 0 && h_free_watched == 0 && h_releases == 0,
+            "reclaim: no thread deleted, no stack or packet freed");
+
+    /* The device answers, and the reader is between its put and its return. */
+    AddTail(&rd->port->mp_MsgList, &rc_slot[0].req.ios2_Req.io_Message.mn_Node);
+    h_sem_get_status = TX_NO_INSTANCE;      /* taken once; not asked again */
+    h_check(!ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "reclaim: a thread that has not run off its entry is a hold");
+    h_check(rd->orphans == 0 && !rc_slot[0].posted,
+            "reclaim: though the read came back");
+    h_check(h_thread_deletes == 0 && h_free_watched == 0 && h_releases == 0,
+            "reclaim: and still nothing is deleted or freed");
+
+    rd->thread.tx_thread_state = TX_COMPLETED;
+    h_delete_status = TX_CALLER_ERROR;
+    h_check(!ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "reclaim: a delete ThreadX refuses is a hold");
+    h_check(h_free_watched == 0 && rd->started,
+            "reclaim: and the stack the thread may still own is kept");
+    h_delete_status  = TX_SUCCESS;
+    h_thread_deletes = 0;
+
+    h_check(ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "reclaim: nothing out and the reader gone, the receive side is free");
+    h_check(h_releases == 1 && h_release_pool == &rc_owner,
+            "reclaim: the slot packet went back to the interface's own pool");
+    h_check(rc_slot[0].packet == NULL && rc_slot[1].packet == NULL,
+            "reclaim: and neither slot still points at a packet");
+    h_check(rd->port_mem.mp_Flags == PA_IGNORE &&
+            rd->port_mem.mp_SigTask == NULL && rd->port == NULL,
+            "reclaim: the port signals nobody before the Task goes");
+    h_check(h_port_deletes == 0 && h_signal_frees == 0,
+            "reclaim: no DeleteMsgPort(), no FreeSignal() off the reader");
+    h_check(h_thread_deletes == 1, "reclaim: the thread was deleted once");
+    h_check(h_free_watched == 1 && rd->stack == NULL,
+            "reclaim: its stack freed once");
+    h_check(!rc_iface.rx_orphaned && !rd->started,
+            "reclaim: and the interface is no longer orphaned");
+
+    h_check(ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "reclaim: again, nothing to do");
+    h_check(h_thread_deletes == 1 && h_free_watched == 1 && h_releases == 1,
+            "reclaim: and nothing is deleted, freed or released twice");
+
+    h_getmsg_real    = FALSE;
+    h_sem_get_status = TX_SUCCESS;
+    h_free_watch     = NULL;
+}
+
+static void test_reclaim_zombie_and_dropped_packets(void)
+{
+    AmiSana2Reader *rd = &rc_iface.reader;
+
+    printf("  a reader that will not be deleted, and packets left out\n");
+    rc_fixture();
+
+    rc_slot[0].posted = FALSE;
+    rd->orphans       = 0;
+    rd->joined        = TRUE;
+    rd->thread.tx_thread_state = TX_COMPLETED;
+    h_zombie_on_delete = TRUE;
+
+    h_check(!ami_sana2_rx_reclaim(&rc_iface, FALSE),
+            "zombie: a delete that leaves a Task running is a hold");
+    h_check(rd->zombie && rc_iface.rx_orphaned,
+            "zombie: and it is one for good");
+    h_check(h_free_watched == 0, "zombie: the stack it runs on is kept");
+    h_check(h_releases == 0 && rc_slot[0].packet == NULL,
+            "zombie: release_packets FALSE drops the pointers, releases none");
+
+    h_check(!ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "zombie: asked again, still held");
+    h_check(h_thread_deletes == 1, "zombie: and not deleted a second time");
+
+    h_getmsg_real      = FALSE;
+    h_zombie_on_delete = FALSE;
+    h_free_watch       = NULL;
+}
+
 int main(void)
 {
 #ifdef AMINETXDUO_RX_BATCH
@@ -1968,6 +2193,8 @@ int main(void)
     test_plan_arp_is_flat();
     test_plan_asked();
     test_plan_shares_one_pool();
+    test_reclaim_holds_then_releases();
+    test_reclaim_zombie_and_dropped_packets();
 
 #ifdef AMINETXDUO_RX_VERIFY
     test_verify_publishes_only_what_it_checked();
