@@ -1267,6 +1267,22 @@
 
       eth0: the network is running, and eth0 is configured down
 
+  RemoveNetInterface takes an interface off the network even when its
+  device does not return every request at once. The device then stays
+  open, the command reports
+
+      eth0 was removed. Its device still holds requests and stays open
+
+  and returns WARN (5). The stack releases the device when it returns
+  the requests; until then bsdsocket.library stays in memory. An
+  AddNetInterface for the same device and unit in that state is
+  refused before the device is opened again, and names the unit:
+
+      a2065.device unit 0 still holds requests from an interface
+      removed earlier.
+
+  A different device or unit can take the freed slot at once.
+
   Run @{"ShowNetStatus" link SHOWNETSTATUS} for the whole picture.
 
   @{b}Errors@{ub}
