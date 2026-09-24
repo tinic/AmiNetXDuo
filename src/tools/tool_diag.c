@@ -1281,9 +1281,12 @@ struct Library *tool_netstatus_open(BOOL quiet)
  * into the resident's segment; a base with any other IdString came from
  * elsewhere, and a stack whose port went away meanwhile is not the one
  * asked about; either is closed again and reported as not open.  The
- * window between the two is a NetShutdown plus an expunge landing in it,
- * which loads a copy from LIBS: whose open starts loopback only and is
- * closed at once; no driver is opened by it.
+ * window between the two has two cases.  A NetShutdown finishing in it
+ * gives a loopback-only start that the caller's close takes down again.  A
+ * NetShutdown plus an expunge in it makes OpenLibrary() load
+ * bsdsocket.library from LIBS: -- which may be another stack's, Roadshow's
+ * for one -- and run that library's init and open before the IdString
+ * check closes it.  Neither opens a driver of ours.
  */
 struct Library *tool_netstatus_open_resident(VOID)
 {
