@@ -2,10 +2,11 @@
  * CreateAmiNetXDuoStatusReport, a support snapshot for a bug report.
  *
  * PASSIVE, AND THAT IS THE CONTRACT.  It opens no device, loads no driver,
- * starts no stack and sends nothing.  Opening the resident bsdsocket.library
- * still runs that library's per-opener setup, which reads the netdb files and
- * can load usergroup.library from LIBS:.  A NetShutdown that completes
- * between the check and the open gives a loopback-only start (tool_diag.c).
+ * sends nothing, and starts no stack except in the NetShutdown race below.
+ * Opening the resident bsdsocket.library still runs its per-opener setup,
+ * which reads the netdb files and can load usergroup.library from LIBS:.
+ * A NetShutdown that completes between the check and the open gives a
+ * loopback-only start (tool_diag.c).
  * What it reads:
  *
  *   Exec's own lists      FindName() on LibList and DeviceList, FindPort(),
