@@ -100,9 +100,9 @@ jobs:
       # bridge is not ens18: this one name means two things.  Every harness
       # that wants a NIC reads it as `${...:-ens18}`, but tools/amiberry-run.sh
       # reads it as the BACKEND, `${...:-slirp}`, so a value here moves every
-      # arm that does not explicitly override it onto the bridge.  Nominal
-      # SLIRP arms with literal 10.0.2.x assertions must force `slirp`, as
-      # run-ifdhcp does, rather than inherit this value.
+      # arm that does not explicitly override it onto the bridge.  Harnesses
+      # run bridged only: each passes its NIC to amiberry-run.sh with -B
+      # (default ens18) and refuses `slirp`.
       AMINETXDUO_AMIBERRY_BACKEND: ${{ vars.AMINETXDUO_AMIBERRY_BACKEND }}
       # tests/tools/run-tcphandler.sh: Commodore's own `type` and `copy`, which
       # are the whole point of that harness and are not ours to ship.
