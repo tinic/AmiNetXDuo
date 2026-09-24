@@ -2,7 +2,7 @@
 
 Decision snapshot from the 2026-09-24 project-wide review. This is a ranking of
 possible work, not a list of known defects; the latter belongs in
-[BACKLOG.md](BACKLOG.md). Priority reflects user value, evidence and scope, not
+[BACKLOG.md](../BACKLOG.md). Priority reflects user value, evidence and scope, not
 an instruction to start every row. The status-report tool is the current
 user-selected project.
 
