@@ -9,6 +9,18 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxnet.device` on the X-Surf 100 no longer exits its receive-overrun
+  recovery the instant the overflow sets ISR.RST (the DP8390D raises RST on
+  overflow itself), which skipped the 1.6 ms stop delay a frame still in
+  flight needs to drain. It now waits the documented minimum stop delay
+  unconditionally (timed by the beam clock with a measured per-line floor, or
+  by a bus-cycle fallback when that clock is down) and decides whether to
+  resend a cut-off transmit from the hardware's own state: a frame in flight
+  with no completion is resent once,
+  one that completed or errored during the stop is left for the normal
+  completion path, and a stale "transmitting" bit with no queued buffer is
+  never sent.
+
 ## 1.0.0-beta5
 
 - The minimal and micro profiles now hide their public `AMITCP` port while
