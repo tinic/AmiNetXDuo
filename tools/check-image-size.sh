@@ -75,18 +75,6 @@ BUDGETS=(
     # task.  The extra ownership and lifecycle serialization buy bounded
     # interrupt latency rather than another data-path feature, 2026-09-20.
     "default:src/netdev/anxgenet.device:29000"
-    # 20,744 at the first image with async TX, the old CONTINUES mark and ack
-    # recovery, 2026-09-20; the window copy and the fused sum are the core.
-    # 23,676 after task-owned TX stopped holding Forbid across opener copy
-    # callbacks and lifecycle serialization covered close/offline, 2026-09-20.
-    # 24,008-24,016 in the beta5 clean builds: the driver did not change in
-    # this fix, but all shipping profiles now sit just over the old 24,000
-    # boundary.  The next 128-byte boundary records the actual image cost.
-    # 24,172-24,184 across the shipping profiles with negotiated shifted TX
-    # slots (2026-09-23).  The driver can place an aligned IP payload directly
-    # in the card window when matching firmware advertises the capability.
-    # The fast-path counter remains available; old firmware uses staged TX.
-    "default:src/netdev/anxzz9000.device:24256"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -119,16 +107,12 @@ BUDGETS=(
     "minimal:src/bsdsocket/bsdsocket.library:233000"
     "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
-    "minimal:src/netdev/anxzz9000.device:24256"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
     # First budgeted as a shipping profile at 0.28.9: 181,012 bytes.  Raised
     # to 197,632 in beta2: the private status/control implementation is 16 KB
     # and cannot be removed because AddNetInterface, Online and Offline use it.
-    # Headroom remains only to the next KiB boundary. Drivers are built from
-    # the same sources as the other profiles and are kept here because this
-    # gate is also the assertion that every resident image in every shipped
-    # drawer has a budget.
+    # Headroom remains only to the next KiB boundary.
     # +184 bytes in beta5 for hiding and restoring the bare AMITCP port around
     # vendor X-Surf OpenDevice; without it the driver selects its
     # incompatible private AmiTCP copy path and sends no packets.
@@ -137,7 +121,6 @@ BUDGETS=(
     "micro:src/bsdsocket/bsdsocket.library:198656"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
-    "micro:src/netdev/anxzz9000.device:24256"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10000"
 )
