@@ -9,6 +9,7 @@ version at the top when it merges.
 
 ## Unreleased
 
+- New command `CreateAmiNetXDuoStatusReport` writes a support report to `T:AmiNetXDuoStatusReport.txt`.
 - `anxnet.device` on the X-Surf 100 no longer exits its receive-overrun
   recovery the instant the overflow sets ISR.RST (the DP8390D raises RST on
   overflow itself), which skipped the 1.6 ms stop delay a frame still in
