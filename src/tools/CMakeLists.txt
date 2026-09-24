@@ -246,7 +246,18 @@ aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
 # came up, so it must not need a running stack -- and it must not need an open
 # unit either, which is the whole point of the record.
 aminetxduo_add_tool(tool_checknetdevice CheckNetDevice
-    SOURCES checknetdevice.c)
+    SOURCES checknetdevice.c tool_passive.c)
+
+# CreateAmiNetXDuoStatusReport: a key=value snapshot for a bug report.
+# Passive by contract -- no device opened, no driver loaded, no stack started
+# -- which test_statusreport asserts on the sources and
+# cmake/check-passive-command.cmake on the linked command.  src/config is on
+# its path for the tokenizer the stack parses interface files with, so the
+# allowlist sees the keys the parser sees.
+aminetxduo_add_tool(tool_statusreport CreateAmiNetXDuoStatusReport
+    SOURCES statusreport.c statusreport_text.c tool_passive.c)
+target_include_directories(tool_statusreport PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/config")
 
 # El3Diag dumps the live registers of a 3c589 in the PCMCIA slot: active
 # transceiver, the card's own link-beat detect, and the receive FIFO status.
@@ -606,7 +617,7 @@ aminetxduo_add_tool(tool_shownetservices ShowNetServices
 # reason: it is a table of sentences, and the only command that prints one
 # should be the only command that carries them.
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
-    SOURCES shownetstatus.c tool_events.c ${TOOLS_DEVDIAG})
+    SOURCES shownetstatus.c tool_events.c tool_passive.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
 # ping is config-only now, and that is the fix rather than a tidy-up: it used
 # to link its own ThreadX and NetX Duo and call nx_icmp_ping() on an NX_IP that
@@ -665,7 +676,7 @@ endif()
 add_custom_target(tools ALL)
 add_dependencies(tools
     tool_addnetinterface tool_installsamefile tool_installnetprobe
-    tool_checknetconfig tool_checknetdevice tool_netdevstats
+    tool_checknetconfig tool_checknetdevice tool_statusreport tool_netdevstats
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
@@ -1011,6 +1022,25 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_bpffilter PRIVATE -Wall -Wextra)
     set_target_properties(test_bpffilter PROPERTIES C_STANDARD 11)
 
+    # CreateAmiNetXDuoStatusReport's allowlist, run against an interface file
+    # full of secrets and addresses, through the configuration layer's own
+    # tokenizer; and its sources, read for any call that opens something.
+    add_executable(test_statusreport
+        test/test_statusreport.c
+        statusreport_text.c
+        "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
+
+    target_include_directories(test_statusreport PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_definitions(test_statusreport PRIVATE
+        AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_compile_options(test_statusreport PRIVATE -Wall -Wextra)
+    set_target_properties(test_statusreport PROPERTIES C_STANDARD 11)
+
     include(CTest)
     add_test(NAME httpws_rfc6455 COMMAND test_httpws)
     add_test(NAME httppath_escapes COMMAND test_httppath)
@@ -1036,6 +1066,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME tools_arg_docs      COMMAND test_argtemplates docs)
     add_test(NAME tools_refusals      COMMAND test_refusals)
     add_test(NAME httpterm_gate       COMMAND test_httpterm)
+    add_test(NAME statusreport_allowlist COMMAND test_statusreport allowlist)
+    add_test(NAME statusreport_passive   COMMAND test_statusreport passive)
 endif()
 
 # The commands this configuration builds, one file name per line, for

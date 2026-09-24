@@ -1127,6 +1127,9 @@
 
     @{"ShowNetStatus   " link SHOWNETSTATUS}  the network as the stack sees it
     @{"CheckNetDevice  " link CHECKNETDEVICE}  what anxnet/anxgenet found
+    @{"CreateAmiNetXDuoStatusReport" link STATUSREPORT}
+                      the machine, the stack and the drivers, for a
+                      bug report
     NetDevStats       every standard and driver-specific SANA-II counter
     @{"netstat         " link NETSTAT}  interfaces, routes and connections
     GetNetStatus      the same, for a script to read
@@ -1806,7 +1809,7 @@
 @node CHECKNETDEVICE "CheckNetDevice"
 @toc COMMANDS
 @prev HOST
-@next CONSOLE
+@next STATUSREPORT
 
                           @{b}CheckNetDevice@{ub}
 
@@ -1913,9 +1916,92 @@
 @endnode
 
 
-@node CONSOLE "The screen in a browser"
+@node STATUSREPORT "CreateAmiNetXDuoStatusReport"
 @toc COMMANDS
 @prev CHECKNETDEVICE
+@next CONSOLE
+
+                  @{b}CreateAmiNetXDuoStatusReport@{ub}
+
+      CreateAmiNetXDuoStatusReport TO/K,NOFILE/S,ADDRESSES/S
+
+  Writes a report of this machine, the stack and the drivers, for a
+  bug report. The report goes to the Shell window and to
+  T:AmiNetXDuoStatusReport.txt.
+
+  Every line is key=value. The first part of the key names where the
+  value comes from:
+
+      report.*   this command and the options it was given
+      system.*   Kickstart, Workbench, processor, FPU, free memory
+      library.*  bsdsocket.library, usergroup.library, tls.library
+      stack.*    whether the stack runs, and its totals
+      live.*     each interface of the running stack, with its counters
+      dhcp.*     the lease state of each interface
+      stats.*    the IP, TCP, UDP, ICMP and ARP counters
+      health.*   the stack's timer, memory and buffer counters
+      config.*   each file in DEVS:NetInterfaces
+      device.*   each anx driver in memory and each driver an interface
+                 names; for anxnet.device and anxgenet.device also the
+                 probe record that CheckNetDevice reads
+      event.*    the stack's recent events, as ShowNetStatus EVENTS
+                 lists them
+
+  The command opens no device, loads no driver and does not start the
+  stack. A value that it cannot read without doing one of those is
+  printed as "unavailable". With the stack stopped, that is every
+  stack, live, dhcp, stats and health value. The library does not
+  publish its profile or its build, so stack.profile and stack.build
+  are always "unavailable". Counters are totals since the stack
+  started.
+
+  From an interface file only these keywords are printed: DEVICE,
+  CARD, UNIT, CONFIGURE, IPTYPE, CONFIGURE6, STATE, MTU, MDNS,
+  PRIORITY, FILTER, DOWNGOESOFFLINE, REQUIRESINITDELAY, IPREQUESTS,
+  ARPREQUESTS, WRITEREQUESTS and RXBUFFER. config.<name>.omitted is the
+  number of other keywords in the file. A value that does not have the
+  form of its keyword is printed as "invalid".
+
+  Addresses, station addresses and host names are printed only with
+  ADDRESSES: ADDRESS, NETMASK, GATEWAY, ADDRESS6, GATEWAY6,
+  HARDWAREADDRESS, NAMESERVER, ID and DOMAIN from the files, and the
+  addresses, leases, gateway and host name of the running stack.
+  Without it, a probe-record step that holds station-address bytes
+  shows "withheld" as its value.
+
+      1> CreateAmiNetXDuoStatusReport
+      report.command=CreateAmiNetXDuoStatusReport
+      report.version=1.0.0-beta5
+      report.build=b7d95ec
+      report.addresses=no
+      report.file=T:AmiNetXDuoStatusReport.txt
+      system.exec=40.10
+      system.kickstart=40.68
+      system.workbench=40.1
+      system.cpu=68030
+      system.fpu=68882
+      ...
+      config.eth0.device=DEVS:Networks/anxnet.device
+      config.eth0.unit=0
+      config.eth0.configure=dhcp
+      config.eth0.omitted=0
+      ...
+      report.end=complete
+
+  @{b}TO@{ub}         The file to write. Default
+             T:AmiNetXDuoStatusReport.txt.
+  @{b}NOFILE@{ub}     Write to the Shell window only.
+  @{b}ADDRESSES@{ub}  Include addresses, station addresses and host names.
+
+  It returns 0 when the report is complete, 5 when Ctrl-C stopped it,
+  and 10 when the file could not be written.
+
+@endnode
+
+
+@node CONSOLE "The screen in a browser"
+@toc COMMANDS
+@prev STATUSREPORT
 @next TROUBLE
 
                      @{b}The screen in a browser@{ub}
@@ -2594,6 +2680,9 @@
        @{"Reading the debug log" link LOGGING}. The last events before a
        crash are the most useful part of a bug report.
     o  If a Guru appears, record the numbers.
+    o  After the reboot, run
+       @{"CreateAmiNetXDuoStatusReport" link STATUSREPORT} and attach
+       T:AmiNetXDuoStatusReport.txt to the report.
 
   @{b}Things that are known to cause trouble@{ub}
 

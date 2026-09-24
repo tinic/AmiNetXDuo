@@ -1264,6 +1264,56 @@ struct Library *tool_netstatus_open(BOOL quiet)
     return base;
 }
 
+/*
+ * The strict form, for a command that may not change anything by asking.
+ *
+ * tool_netstatus_open() goes through tool_open_library(), which tries
+ * PROGDIR:/Libs first and can load a library from disk.  This one opens
+ * only the bsdsocket.library already in Exec's list, and only when the
+ * AMITCP port says its stack is up: FindName() and OpenLibrary() run under
+ * one Forbid(), so the open cannot fall through to LIBS: and load a copy,
+ * and bsd_lib_open() with the stack up takes a reference rather than
+ * bringing it up.  The one window left is a NetShutdown finishing between
+ * the port check and the open, which costs a loopback-only start that this
+ * caller's close takes down again; no driver is opened by it.
+ */
+struct Library *tool_netstatus_open_resident(VOID)
+{
+    struct Library *lib;
+    struct Library *base = NULL;
+
+    Forbid();
+
+    lib = (struct Library *)FindName(&SysBase->LibList,
+                                     (CONST_STRPTR)"bsdsocket.library");
+
+    if (lib != NULL &&
+        FindPort((CONST_STRPTR)"AMITCP") != NULL &&
+        tool_stack_is_ours(lib) &&
+        lib->lib_Version >= 4 &&
+        lib->lib_Revision >= (UWORD)AMI_NETSTATUS_MIN_REVISION)
+    {
+        base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    }
+
+    Permit();
+
+    return base;
+}
+
+LONG tool_stack_hostname(struct Library *base, char *name, ULONG len)
+{
+    LONG rc;
+
+    if (base == NULL || name == NULL || len == 0UL)
+        return -1;
+
+    rc = tool_call_gethostname(base, name, len);
+    name[len - 1] = '\0';
+
+    return rc;
+}
+
 VOID tool_netstatus_close(struct Library *base)
 {
     if (base != NULL)

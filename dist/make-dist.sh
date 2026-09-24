@@ -81,7 +81,8 @@ CMDS=(AddNetInterface NetSetup NetPrefs Online Offline ShowNetStatus ShowNetServ
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
       iperf
-      CheckNetConfig CheckNetDevice GetNetStatus NetShutdown RemoveNetInterface
+      CheckNetConfig CheckNetDevice CreateAmiNetXDuoStatusReport
+      GetNetStatus NetShutdown RemoveNetInterface
       ConfigureNetInterface
       AddNetRoute DeleteNetRoute
       NetDevStats)

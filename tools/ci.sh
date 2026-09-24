@@ -326,7 +326,9 @@ host_test_targets() { # builddir
 #      exactly the planned pool, 4096 on the clamp and not 4106
 #      438 with tcp_mss_peek and tcp_mss_peek_timestamps: the MSS read without
 #      the IP mutex is the answer nx_tcp_socket_mss_get() gives, in every state
-HOST_TESTS_EXPECTED=438
+#      440 with statusreport_allowlist and statusreport_passive: the status
+#      report prints no secret, no address without ADDRESSES, and opens nothing
+HOST_TESTS_EXPECTED=440
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

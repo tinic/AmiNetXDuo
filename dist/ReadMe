@@ -127,6 +127,7 @@ It puts
      ConfigureNetInterface, Online, Offline,
      ShowNetStatus, ShowNetServices, GetNetStatus,
      CheckNetConfig, CheckNetDevice, NetDevStats, NetShutdown,
+     CreateAmiNetXDuoStatusReport,
      AddNetRoute, DeleteNetRoute, hostname,
      ping, netstat, host, nslookup, arp,
      fetch, nc, telnet, tftp, sntp, traceroute,
@@ -332,6 +333,7 @@ UNINSTALLING
      Delete C:ConfigureNetInterface C:Online C:Offline
      Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
      Delete C:CheckNetConfig C:CheckNetDevice C:NetDevStats C:NetShutdown
+     Delete C:CreateAmiNetXDuoStatusReport
      Delete C:AddNetRoute C:DeleteNetRoute C:hostname
      Delete C:ping C:netstat C:host C:nslookup C:arp
      Delete C:fetch C:nc C:telnet C:tftp C:sntp C:traceroute
