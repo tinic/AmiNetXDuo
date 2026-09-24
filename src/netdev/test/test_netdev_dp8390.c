@@ -43,6 +43,18 @@
 static UBYTE chip[PAGES][REGS];
 static UBYTE chip_page;
 
+#define CR_STP_BIT 0x01u  /* ED_CR_STP, before dp8390reg.h is included */
+#define CR_TXP_BIT 0x04u  /* ED_CR_TXP */
+
+/* CR.TXP's live read-back: set when a transmit is commanded, cleared when the
+   chip is stopped.  A byte array cannot express a bit hardware clears on its
+   own, so it is tracked beside the banked registers. */
+static UBYTE chip_txing;
+
+/* Test hook: a completion bit (ED_ISR_PTX / ED_ISR_TXE) latched the instant a
+   STOP is written -- a frame finishing in the snapshot..stop window.  0 = no. */
+static UBYTE hook_complete_at_stop;
+
 #define TRACE_MAX 512
 static struct { UBYTE page; UBYTE reg; UBYTE val; UBYTE read; } tr[TRACE_MAX];
 static unsigned tr_n;
@@ -82,6 +94,14 @@ static void chip_put(const NetdevNic *n, UWORD reg, UBYTE val)
     {
         chip_cr   = val;
         chip_page = (UBYTE)((val >> 6) & 0x03u);
+        if ((val & CR_TXP_BIT) != 0)
+            chip_txing = 1;
+        if ((val & CR_STP_BIT) != 0)
+        {
+            chip_txing = 0;
+            if (hook_complete_at_stop != 0)
+                chip[0][CHIP_ISR_REG] |= hook_complete_at_stop;
+        }
         trace(chip_page, r, val, 0);
         return;
     }
@@ -101,7 +121,9 @@ static void chip_put(const NetdevNic *n, UWORD reg, UBYTE val)
 static UBYTE chip_get(const NetdevNic *n, UWORD reg)
 {
     UBYTE r = (UBYTE)(reg & 0x0fu);
-    UBYTE v = (r == 0) ? chip_cr : chip[chip_page][r];
+    UBYTE v = (r == 0)
+              ? (UBYTE)(chip_cr | (chip_txing ? CR_TXP_BIT : 0))
+              : chip[chip_page][r];
 
     (VOID)n;
 
@@ -115,20 +137,35 @@ static UBYTE chip_get(const NetdevNic *n, UWORD reg)
 
 /* ------------------------------------------------------------- the deps -- */
 
-static ULONG waits;
+static ULONG waits;          /* waits begun */
+static ULONG wait_iters;     /* iterations a wait runs before it is done */
+static ULONG last_wait_us;   /* the us argument of the last wait */
+static ULONG last_wait_spins;/* the spin-floor argument of the last wait */
+static ULONG last_floor_fb;  /* the fallback handed to floor_spins */
+
+/* The mock has no beam: the measured floor is unavailable, so floor_spins
+   answers with the fallback the driver passed, as netdev_clock.c does when
+   the clock is down. */
+ULONG netdev_clock_floor_spins(ULONG us, ULONG fallback)
+{
+    (VOID)us;
+    last_floor_fb = fallback;
+    return fallback;
+}
 
 VOID netdev_wait_begin(NetdevWait *w, ULONG us, ULONG spins)
 {
-    (VOID)us;
-    (VOID)spins;
-    w->nw_Spins = 0;
+    last_wait_us   = us;
+    last_wait_spins = spins;
+    w->nw_Spins    = wait_iters;
     waits++;
 }
 
 BOOL netdev_wait_done(NetdevWait *w)
 {
-    (VOID)w;
-    return TRUE;
+    if (w->nw_Spins != 0u)
+        w->nw_Spins--;
+    return w->nw_Spins == 0u;
 }
 
 #include "dp8390.c"
@@ -184,6 +221,33 @@ static int find_w_val(UBYTE page, UBYTE reg, UBYTE val, int from)
     }
 
     return -1;
+}
+
+/* The number of writes with any bit of `mask` set to (page, reg), from `from`. */
+static int count_w_bit(UBYTE page, UBYTE reg, UBYTE mask, int from)
+{
+    int i, n = 0;
+
+    for (i = from; i < (int)tr_n; i++)
+        if (!tr[i].read && tr[i].page == page && tr[i].reg == reg &&
+            (tr[i].val & mask) != 0)
+            n++;
+
+    return n;
+}
+
+/* The number of reads of (page, reg) in the index range [from, to). */
+static int count_reads(UBYTE page, UBYTE reg, int from, int to)
+{
+    int i, n = 0;
+
+    if (to > (int)tr_n)
+        to = (int)tr_n;
+    for (i = from; i < to; i++)
+        if (tr[i].read && tr[i].page == page && tr[i].reg == reg)
+            n++;
+
+    return n;
 }
 
 /* ------------------------------------------------------------ the fixture */
@@ -262,6 +326,12 @@ static void reset(void)
     chip_page = 0;
     tr_n      = 0;
     waits     = 0;
+    chip_txing = 0;
+    hook_complete_at_stop = 0;
+    wait_iters = 1;
+    last_wait_us = 0;
+    last_wait_spins = 0;
+    last_floor_fb = 0;
     ring_copies = 0;
     frames_up = 0;
 
@@ -910,6 +980,244 @@ static void o_overwrite_precedes_the_next_queued_transmit(void)
            "the next queued frame starts only after overwrite recovery");
 }
 
+/* =========================================================== overwrite === */
+
+/*
+ * The overrun recovery waits a fixed 1.6 ms rather than polling RST, because
+ * the DP8390D sets RST on overflow itself: a poll would exit immediately.  A
+ * pre-set RST (here OVW|RST) must not shorten the wait.
+ */
+static void p_overwrite_waits_the_full_stop_delay(void)
+{
+    int stp, rbcr0, reads;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+
+    wait_iters = 3;
+    chip[0][ED_P0_ISR] = (UBYTE)(ED_ISR_OVW | ED_ISR_RST);
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "overwrite with RST pre-set is handled");
+    expect_hex("the wait asks for the 1.6 ms overrun bound",
+               last_wait_us, (unsigned long)DP8390_OVW_STOP_WAIT_US);
+    expect_hex("the driver sizes the floor fallback for 1.6 ms",
+               last_floor_fb, (unsigned long)DP8390_OVW_STOP_SPINS);
+    expect_hex("and the floor it hands the wait is floor_spins' answer",
+               last_wait_spins, last_floor_fb);
+
+    stp   = find_w_val(0, ED_P0_CR,
+                       (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    rbcr0 = find_w(0, ED_P0_RBCR0, stp);
+    reads = count_reads(0, ED_P0_CR, stp, rbcr0);
+    expect_hex("the wait runs its full floor despite RST being set",
+               (unsigned long)reads, (unsigned long)wait_iters);
+}
+
+/*
+ * With the transmitter idle (CR.TXP clear) an overflow must not resend
+ * anything: there is no frame to cut off.
+ */
+static void q_idle_transmitter_is_not_resent(void)
+{
+    int stp, txp;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip[0][ED_P0_ISR] = ED_ISR_OVW;
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "an idle-transmitter overwrite is handled");
+    expect_hex("the overwrite is counted", nic.overruns, 1);
+
+    stp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    txp = count_w_bit(0, ED_P0_CR, ED_CR_TXP, stp + 1);
+    expect_hex("nothing in flight, so nothing is resent", (unsigned long)txp, 0);
+}
+
+/*
+ * A frame in flight with no completion is the one the stop cuts off: resend it
+ * exactly once.
+ */
+static void r_a_cut_off_frame_is_resent_once(void)
+{
+    static const UBYTE frame[64] = { 0 };
+    int stp, txp;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    (VOID)dp8390_tx(&nic, frame, sizeof(frame));
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip[0][ED_P0_ISR] = ED_ISR_OVW;
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "the cut-off overwrite is handled");
+    expect_hex("the overwrite is counted", nic.overruns, 1);
+    expect_hex("the cut-off frame stays in flight", nic.txb_inuse, 1);
+
+    stp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    txp = count_w_bit(0, ED_P0_CR, ED_CR_TXP, stp + 1);
+    expect_hex("a frame in flight with no completion is resent once",
+               (unsigned long)txp, 1);
+}
+
+/*
+ * A frame that completed before the interrupt has its PTX in the snapshot; the
+ * recovery must not resend it.
+ */
+static void s_completed_before_is_not_resent(void)
+{
+    static const UBYTE frame[64] = { 0 };
+    int stp, txp;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    (VOID)dp8390_tx(&nic, frame, sizeof(frame));
+    chip_txing = 0;                     /* completion clears CR.TXP */
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip[0][ED_P0_ISR] = (UBYTE)(ED_ISR_PTX | ED_ISR_OVW);
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "a completed-frame overwrite is handled");
+    expect_hex("the completion is counted", nic.tx_completed, 1);
+    expect_hex("the completed frame is gone", nic.txb_inuse, 0);
+
+    stp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    txp = count_w_bit(0, ED_P0_CR, ED_CR_TXP, stp + 1);
+    expect_hex("a frame completed before the interrupt is not resent",
+               (unsigned long)txp, 0);
+}
+
+/*
+ * A frame that errored before the interrupt has its TXE in the snapshot; the
+ * recovery must not resend it.
+ */
+static void t_errored_before_is_not_resent(void)
+{
+    static const UBYTE frame[64] = { 0 };
+    int stp, txp;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    (VOID)dp8390_tx(&nic, frame, sizeof(frame));
+    chip_txing = 0;                     /* the abort clears CR.TXP */
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip[0][ED_P0_ISR] = (UBYTE)(ED_ISR_TXE | ED_ISR_OVW);
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "an errored-frame overwrite is handled");
+    expect_hex("the error is counted", nic.tx_errors, 1);
+    expect_hex("the errored frame is gone", nic.txb_inuse, 0);
+
+    stp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    txp = count_w_bit(0, ED_P0_CR, ED_CR_TXP, stp + 1);
+    expect_hex("a frame that errored before the interrupt is not resent",
+               (unsigned long)txp, 0);
+}
+
+/*
+ * The race this fix closes: the frame completes in the snapshot..stop window,
+ * so its PTX is not in the snapshot but IS in the post-stop read.  No resend,
+ * and the outer loop accounts the completion exactly once.  Recovery acks OVW
+ * only, leaving the new PTX set.
+ */
+static void u_completion_in_the_stop_window_is_not_resent(void)
+{
+    static const UBYTE frame[64] = { 0 };
+    int stp, isr_w, txp;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    (VOID)dp8390_tx(&nic, frame, sizeof(frame));
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip[0][ED_P0_ISR] = ED_ISR_OVW;    /* snapshot: no completion */
+    hook_complete_at_stop = ED_ISR_PTX; /* it finishes at the stop */
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "a stop-window completion is handled");
+    expect_hex("the completion is accounted exactly once", nic.tx_completed, 1);
+    expect_hex("the completed frame is gone", nic.txb_inuse, 0);
+
+    stp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    txp = count_w_bit(0, ED_P0_CR, ED_CR_TXP, stp + 1);
+    expect_hex("a frame that finished at the stop is not resent",
+               (unsigned long)txp, 0);
+
+    isr_w = find_w(0, ED_P0_ISR, stp);
+    expect(isr_w >= 0, "recovery acknowledges the overflow");
+    expect_hex("and acknowledges OVW alone",
+               (unsigned long)tr[isr_w].val, (unsigned long)ED_ISR_OVW);
+}
+
+/*
+ * The same race with an error in the window: TXE appears only post-stop.
+ */
+static void v_error_in_the_stop_window_is_not_resent(void)
+{
+    static const UBYTE frame[64] = { 0 };
+    int stp, isr_w, txp;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    (VOID)dp8390_tx(&nic, frame, sizeof(frame));
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip[0][ED_P0_ISR] = ED_ISR_OVW;    /* snapshot: no error */
+    hook_complete_at_stop = ED_ISR_TXE; /* it errors at the stop */
+    tr_n = 0;
+
+    expect(dp8390_intr(&nic) == TRUE, "a stop-window error is handled");
+    expect_hex("the error is accounted exactly once", nic.tx_errors, 1);
+    expect_hex("the errored frame is gone", nic.txb_inuse, 0);
+
+    stp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    txp = count_w_bit(0, ED_P0_CR, ED_CR_TXP, stp + 1);
+    expect_hex("a frame that errored at the stop is not resent",
+               (unsigned long)txp, 0);
+
+    isr_w = find_w(0, ED_P0_ISR, stp);
+    expect(isr_w >= 0, "recovery acknowledges the overflow");
+    expect_hex("and acknowledges OVW alone",
+               (unsigned long)tr[isr_w].val, (unsigned long)ED_ISR_OVW);
+}
+
+/*
+ * A stale high TXP with no owned buffer (software decremented txb_inuse but
+ * the chip still reads transmitting) must not send an unowned frame: the
+ * software guard gates the resend the hardware test alone would pass.
+ */
+static void w_a_stale_txp_with_no_owned_buffer_is_not_resent(void)
+{
+    int stp, txp;
+    UWORD next_before;
+
+    reset();
+    (VOID)dp8390_init(&nic);
+    chip[1][ED_P1_CURR] = (UBYTE)nic.next_packet;
+    chip_txing = 1;                 /* TXP reads high though nothing is queued */
+    chip[0][ED_P0_ISR] = ED_ISR_OVW;
+    tr_n = 0;
+    next_before = nic.txb_next_tx;
+
+    expect(dp8390_intr(&nic) == TRUE, "a stale-TXP overwrite is handled");
+    expect_hex("no buffer was owned, so none is sent", nic.txb_inuse, 0);
+    expect_hex("and the next-transmit pointer is untouched",
+               nic.txb_next_tx, next_before);
+
+    stp = find_w_val(0, ED_P0_CR,
+                     (UBYTE)(nic.cr_proto | ED_CR_PAGE_0 | ED_CR_STP), 0);
+    txp = count_w_bit(0, ED_P0_CR, ED_CR_TXP, stp + 1);
+    expect_hex("a stale high TXP with no owned buffer is not resent",
+               (unsigned long)txp, 0);
+}
+
 int main(void)
 {
     a_init_follows_the_manual();
@@ -927,6 +1235,14 @@ int main(void)
     m_an_overlong_frame_is_skipped_not_reset_on();
     n_a_frame_that_crosses_a_page();
     o_overwrite_precedes_the_next_queued_transmit();
+    p_overwrite_waits_the_full_stop_delay();
+    q_idle_transmitter_is_not_resent();
+    r_a_cut_off_frame_is_resent_once();
+    s_completed_before_is_not_resent();
+    t_errored_before_is_not_resent();
+    u_completion_in_the_stop_window_is_not_resent();
+    v_error_in_the_stop_window_is_not_resent();
+    w_a_stale_txp_with_no_owned_buffer_is_not_resent();
 
     if (failures != 0)
     {
