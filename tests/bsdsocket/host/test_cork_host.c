@@ -1105,8 +1105,7 @@ static void t_mss_peek(void)
 {
     AmiSocket *s;
 
-    printf("cork: the baton holder reads the MSS without the mutex
-");
+    printf("cork: the baton holder reads the MSS without the mutex\n");
 
     h_reset();
     s = h_tcp(0);

@@ -1131,8 +1131,7 @@ static void t_mss_peek_guard(void)
     unsigned         i;
 
     printf("transfer: the MSS is read without the mutex only by the baton "
-           "holder
-");
+           "holder\n");
 
     memset(buf, 'x', sizeof(buf));
 
