@@ -161,12 +161,21 @@ static LONG h_teardown_ran(VOID)
             h.remove_calls != 0) ? 1 : 0;
 }
 
+/* With h_model_refs the netstack's own reference count is modelled:
+   every bring-up adds one, every shutdown takes one, and it can unload only
+   at zero -- the rule ami_ns_startup()/netstack_shutdown()/
+   netstack_can_unload() keep (netstack.c). */
+static BOOL  h_model_refs;
+static ULONG h_ns_refs;
+
 /*
  * Reached, and expected.
  */
 BOOL netstack_can_unload(VOID)
 {
     h.can_unload_calls++;
+    if (h_model_refs)
+        return (h_ns_refs == 0) ? TRUE : FALSE;
     return h.can_unload_answer;
 }
 
@@ -252,7 +261,13 @@ VOID Remove(struct Node *node)
     node->ln_Succ->ln_Pred = node->ln_Pred;
 }
 
-VOID netstack_shutdown(VOID)        { h.shutdown_calls++; }
+
+VOID netstack_shutdown(VOID)
+{
+    h.shutdown_calls++;
+    if (h_model_refs && h_ns_refs > 0)
+        h_ns_refs--;
+}
 NX_IP *netstack_ip(VOID)            { return &h_stack_ip; }
 NX_PACKET_POOL *netstack_pool(VOID) { return &h_stack_pool; }
 VOID bsd_netmon_drop_owner(struct AmiSocketBase *owner) { (VOID)owner; }
@@ -607,48 +622,78 @@ static VOID t_transient_stack_reference(VOID)
 }
 
 #ifdef AMINETXDUO_TCP_CORK
+/* One open/close cycle of the stack: a bring-up takes a netstack reference
+   (bsd_lib_open(), netstack.c:1864), and the last library reference going
+   runs bsd_netstack_shutdown_owned() with the cork's pass busy or not. */
+static VOID h_cork_cycle(BOOL busy)
+{
+    h_ns_refs++;
+    h_base->sb_StackIp            = &h_stack_ip;
+    h_base->sb_StackPool          = &h_stack_pool;
+    h_base->sb_StackRefs          = 1;
+    h_base->sb_TransientStackRefs = 1;
+    h_cork_busy = busy;
+    bsd_stack_transient_release(h_base);
+}
+
 /*
  * The stack's last reference goes while the cork's IP pass is still inside a
  * send (cork.c, bsd_cork_stop() answering FALSE): the netstack is kept, not
- * torn down under it, and the reference is given back by the next shutdown.
+ * torn down under it, and every reference kept that way is given back, once
+ * each, by the first shutdown that finds no pass.
  */
 static VOID t_cork_pass_keeps_stack(VOID)
 {
     printf("the stack's last reference with a cork pass in flight\n");
 
-    h_machine_reset(TRUE);
-    h.stack_running = TRUE;
-    h_base->sb_StackIp   = &h_stack_ip;
-    h_base->sb_StackPool = &h_stack_pool;
-    h_base->sb_StackRefs = 1;
-    CHECK(bsd_stack_transient_hold(h_base) == 0, "a worker reference");
-    h_base->sb_StackRefs = 1;             /* the worker's is the last one */
-    h_base->sb_TransientStackRefs = 1;
-
-    h_cork_busy  = TRUE;
+    /* One refused cycle, then one that succeeds. */
+    h_machine_reset(FALSE);
+    h_model_refs = TRUE;
+    h_ns_refs    = 0;
     h_cork_stops = 0;
-    bsd_stack_transient_release(h_base);
+
+    h_cork_cycle(TRUE);
     CHECK(h_cork_stops == 1, "the cork is stopped first");
-    CHECK(h.shutdown_calls == 0,
+    CHECK(h.shutdown_calls == 0 && h_ns_refs == 1,
           "a pass in flight: the netstack is not torn down under it");
     CHECK(h_base->sb_StackIp == NULL && h_base->sb_StackPool == NULL,
           "though no library call can reach it any more");
+    CHECK(h.can_unload_calls == 1 && netstack_can_unload() == FALSE,
+          "and the library cannot be unloaded while it is kept");
 
-    /* The next time the stack goes, with no pass: both references. */
-    h_cork_busy = FALSE;
-    h_base->sb_StackIp   = &h_stack_ip;
-    h_base->sb_StackPool = &h_stack_pool;
-    h_base->sb_StackRefs = 1;
-    h_base->sb_TransientStackRefs = 1;
-    bsd_stack_transient_release(h_base);
-    CHECK(h.shutdown_calls == 2,
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 2 && h_ns_refs == 0,
           "the next shutdown gives back the kept reference and its own");
+    CHECK(netstack_can_unload() == TRUE, "and then the library can go");
 
-    h_base->sb_StackRefs = 1;
-    h_base->sb_TransientStackRefs = 1;
-    h_base->sb_StackIp   = &h_stack_ip;
-    bsd_stack_transient_release(h_base);
-    CHECK(h.shutdown_calls == 3, "and after that, one each time again");
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 3 && h_ns_refs == 0,
+          "after that, one each time again");
+
+    /* Two refused cycles, reopened in between, then one that succeeds. */
+    h_machine_reset(FALSE);
+    h_model_refs = TRUE;
+    h_ns_refs    = 0;
+
+    h_cork_cycle(TRUE);
+    h_cork_cycle(TRUE);
+    CHECK(h.shutdown_calls == 0 && h_ns_refs == 2,
+          "two refused shutdowns keep two references");
+    CHECK(netstack_can_unload() == FALSE, "the library stays resident");
+
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 3,
+          "the first clean shutdown calls netstack_shutdown() exactly three "
+          "times: two kept references and its own");
+    CHECK(h_ns_refs == 0, "every reference given back, none twice");
+    CHECK(netstack_can_unload() == TRUE, "and the library can unload");
+
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 4 && h_ns_refs == 0,
+          "nothing left owed: the next one is its own alone");
+
+    h_model_refs = FALSE;
+    h_cork_busy  = FALSE;
 }
 #endif
 

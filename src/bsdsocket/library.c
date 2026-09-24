@@ -788,11 +788,23 @@ static LONG bsd_netstack_bringup(VOID)
    raw pointer before giving that reference back so no library call can obtain
    an NX_IP whose storage teardown is about to reclaim.  Caller holds sb_Lock. */
 #ifdef AMINETXDUO_TCP_CORK
-/* A netstack reference kept because the cork's pass was still in flight when
-   the stack was to go (cork.c, bsd_cork_stop()).  Given back by the next
-   shutdown that finds none; until then the stack, its pool and its NX_IP stay
-   up and netstack_can_unload() keeps the library resident.  sb_Lock. */
-static BOOL bsd_stack_retained;
+/*
+ * Netstack references kept because the cork's pass was still in flight when
+ * the stack was to go (cork.c, bsd_cork_stop()).  A count, not a flag: every
+ * shutdown that finds a pass keeps the reference it would have given back,
+ * and a reopen in between takes a new one (ami_ns_startup(), netstack.c:1864,
+ * adds to the running stack), so two refused shutdowns owe two.
+ *
+ * INVARIANT: the netstack holds exactly bsd_stack_retained references on our
+ * behalf beyond the one the current sb_StackRefs cycle took.  Only the two
+ * lines below change it, both under sb_Lock: +1 on a refused shutdown, and
+ * back to 0 on the first shutdown that finds no pass, which calls
+ * netstack_shutdown() that many times and once more for its own.  Until
+ * then the stack stays up and netstack_can_unload() keeps the library
+ * resident.  Saturating: a count at its ceiling keeps the one reference
+ * without counting it, which leaks it rather than giving back one too many.
+ */
+static ULONG bsd_stack_retained;
 #endif
 
 static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
@@ -809,15 +821,17 @@ static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
 #ifdef AMINETXDUO_TCP_CORK
     if (!quiet)
     {
-        bsd_stack_retained = TRUE;
+        if (bsd_stack_retained != 0xFFFFFFFFUL)
+            bsd_stack_retained++;
         AMI_WARN("bsdsocket: the IP thread is still inside a send; the stack "
                  "is kept up rather than freed under it");
         return;
     }
-    if (bsd_stack_retained)
+    /* The references earlier stops kept, each given back once. */
+    while (bsd_stack_retained != 0)
     {
-        bsd_stack_retained = FALSE;
-        netstack_shutdown();        /* the reference a previous stop kept */
+        bsd_stack_retained--;
+        netstack_shutdown();
     }
 #endif
     netstack_shutdown();
