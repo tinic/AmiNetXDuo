@@ -99,6 +99,19 @@ class SectionAttributionTests(unittest.TestCase):
         self.assertEqual(rows[0][0], ".text")
         self.assertIsNone(rows[0][1])
 
+    def test_an_unmatched_section_names_the_module_alone(self):
+        """A named section nothing in the object matches must not spread the
+        object's symbols across its address -- that is the collision the
+        filter exists to prevent -- it names the contribution by module
+        alone."""
+        p = os.path.join(self.tmp, "unmatched.map")
+        with open(p, "w") as fh:
+            fh.write(" .text.baz\n"
+                     "                0x0000000000003000       0x40 single.o\n")
+        rows = prof.build_symbol_table("nm", p, self.objdir)[".text"]
+        self.assertEqual({a for a, _n, _m in rows}, {0x3000})
+        self.assertEqual({n for _a, n, _m in rows}, {"[single.o]"})
+
 
 if __name__ == "__main__":
     unittest.main()

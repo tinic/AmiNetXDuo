@@ -521,9 +521,7 @@ def build_symbol_table(nm, mapfile, objdir, unresolved=None):
         # that symbol alone.  Without it every symbol of the object lands at
         # every address the object contributed to -- nm reports each at offset
         # 0 of its own section, and the offsets are not comparable across
-        # sections.  Fall back to the whole list when nothing matches, so an
-        # unexpected section name degrades to the old behaviour rather than
-        # dropping the contribution.
+        # sections.
         # The assembler's leading underscore is on the nm name and not on the
         # section name: ld writes ".text._nx_tcp_socket_state_data_check" for
         # a symbol nm calls "__nx_tcp_socket_state_data_check".  Both spellings
@@ -533,8 +531,15 @@ def build_symbol_table(nm, mapfile, objdir, unresolved=None):
             exact = [t for t in syms
                      if t[2] == only or t[2] == "_" + only
                      or "_" + t[2] == only]
-            if exact:
-                syms = exact
+            if not exact:
+                # A named section nothing matches must not fall back to the
+                # whole object: that would put every symbol of the object at
+                # this one address, the very collision the filter exists to
+                # prevent, on a future toolchain that renames a section.  Name
+                # the contribution by module alone and place no symbols.
+                table[section].append((addr, "[%s]" % module, module))
+                continue
+            syms = exact
 
         for value, stype, name in syms:
             if SEC_OF_TYPE.get(stype) != section:
