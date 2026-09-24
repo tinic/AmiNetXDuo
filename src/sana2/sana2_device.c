@@ -887,6 +887,21 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         return NULL;
     }
 
+    /* A unit that still holds an earlier interface's requests is not opened
+       again under them (ami_sana2_retained_sweep()).  The one place that
+       refuses it, for the add and the bring-up alike. */
+    {
+        ULONG held = ami_sana2_retained_holds(cfg->device, cfg->unit);
+
+        if (held != 0)
+        {
+            ami_event(NETEVENT_IFACE_RETAINED, NETEVENT_NOINDEX, held);
+            if (err != NULL)
+                *err = AMI_NET_ERR_RETAINED;
+            return NULL;
+        }
+    }
+
     iface = (AmiSana2If *)ami_alloc((ULONG)sizeof(AmiSana2If));
     if (iface == NULL)
     {
@@ -1192,10 +1207,79 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     return iface;
 }
 
+/* ------------------------------------------------------- retained list */
+
+/*
+ * Interfaces a device would not give back.  ami_sana2_close() puts one here
+ * and from then on this module owns it: the caller has dropped the pointer,
+ * and ami_sana2_retained_sweep() closes and frees it once nothing is held.
+ * Changed only under ami_ns_lock, which every caller of close and of the
+ * sweep holds, so a close and a sweep never meet halfway through a link.
+ */
+static AmiSana2If *ami_sana2_retained;
+static UWORD       ami_sana2_retained_n;
+
+static ULONG ami_sana2_held(const AmiSana2If *iface)
+{
+    return (iface->rx_orphaned ? NETEVENT_HELD_RX : 0UL) |
+           (iface->tx_orphaned ? NETEVENT_HELD_TX : 0UL);
+}
+
+/* Neither NetX Duo's slot nor the (NX_IP, index) binding reaches it after
+   this; the slot is left alone if another interface has it now. */
+static VOID ami_sana2_detach(AmiSana2If *iface)
+{
+    if (iface->interface_ptr != NULL &&
+        iface->interface_ptr->nx_interface_additional_link_info ==
+            (VOID *)iface)
+        iface->interface_ptr->nx_interface_additional_link_info = NULL;
+
+    ami_sana2_unbind(iface);
+}
+
+static VOID ami_sana2_retain(AmiSana2If *iface)
+{
+    /* The one code that settles this on its own: which interface, and which
+       side of it the device would not give back. */
+    ami_event(NETEVENT_IFACE_RETAINED, (UWORD)iface->index,
+              ami_sana2_held(iface));
+    AMI_ERROR("sana2: leaking the interface, the device still holds "
+              "requests inside it");
+
+    /* It has left the network: no NetX Duo slot may reach it any more. */
+    ami_sana2_detach(iface);
+
+    iface->retained      = TRUE;
+    iface->retained_next = ami_sana2_retained;
+    ami_sana2_retained   = iface;
+    ami_sana2_retained_n++;
+}
+
+/* Everything the device could reach is back: give the unit back once. */
+static VOID ami_sana2_release(AmiSana2If *iface)
+{
+    if (iface->device_open)
+    {
+        iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;
+        CloseDevice((struct IORequest *)&iface->templ);
+        iface->device_open = FALSE;
+    }
+
+    ami_sana2_detach(iface);
+
+    ami_sana2_rx_free_slots(iface);
+    ami_free(iface);
+}
+
 BOOL ami_sana2_close(AmiSana2If *iface)
 {
     if (iface == NULL)
         return TRUE;
+
+    /* Already the sweep's: no second teardown, no second link, and above all
+       no CloseDevice() under requests the device still holds. */
+    if (iface->retained)
+        return FALSE;
 
     /* ami_sana2_rx_stop() takes the wire offline itself, and does so first:
        S2_OFFLINE is what returns the readers' queued CMD_READs on a device that
@@ -1204,49 +1288,98 @@ BOOL ami_sana2_close(AmiSana2If *iface)
     ami_sana2_tx_drain(iface);
 
     if (iface->device_open)
-    {
         ami_sana2_offline(iface);
 
-        /*
-         * A device that still owns one of these requests must not be closed and
-         * this memory must not be freed: the request points into this
-         * allocation and into a reply port inside it.  That is true of a queued
-         * CMD_WRITE as much as a CMD_READ -- tx_port and the tx ring are fields
-         * of AmiSana2If.
-         */
-        if (iface->rx_orphaned || iface->tx_orphaned)
-        {
-            /* The one code that settles this on its own: which interface, and
-               which side of it the device would not give back. */
-            ami_event(NETEVENT_IFACE_RETAINED, (UWORD)iface->index,
-                      (iface->rx_orphaned ? NETEVENT_HELD_RX : 0UL) |
-                      (iface->tx_orphaned ? NETEVENT_HELD_TX : 0UL));
-            AMI_ERROR("sana2: leaking the interface, the device still holds "
-                      "requests inside it");
-            return FALSE;
-        }
-
-        iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;
-        CloseDevice((struct IORequest *)&iface->templ);
-        iface->device_open = FALSE;
-    }
-
+    /*
+     * A device that still owns one of these requests must not be closed and
+     * this memory must not be freed: the request points into this allocation
+     * and into a reply port inside it.  That is true of a queued CMD_WRITE as
+     * much as a CMD_READ -- tx_port and the tx ring are fields of AmiSana2If.
+     */
     if (iface->rx_orphaned || iface->tx_orphaned)
     {
-        AMI_ERROR("sana2: leaking the interface, requests unreclaimed");
+        ami_sana2_retain(iface);
         return FALSE;
     }
 
-    if (iface->interface_ptr != NULL)
-        iface->interface_ptr->nx_interface_additional_link_info = NULL;
-
-    /* Drop the (NX_IP, index) -> iface binding before the memory goes away. */
-    ami_sana2_unbind(iface);
-
-    ami_sana2_rx_free_slots(iface);
-    ami_free(iface);
+    ami_sana2_release(iface);
 
     return TRUE;
+}
+
+UWORD ami_sana2_retained_count(VOID)
+{
+    return ami_sana2_retained_n;
+}
+
+/* The file name without its path: DEVS:Networks/x.device and x.device are
+   one driver. */
+static const char *ami_sana2_basename(const char *device)
+{
+    const char *base = device;
+    const char *p;
+
+    for (p = device; *p != '\0'; p++)
+    {
+        if (*p == '/' || *p == ':')
+            base = p + 1;
+    }
+
+    return base;
+}
+
+ULONG ami_sana2_retained_holds(const char *device, ULONG unit)
+{
+    const AmiSana2If *iface;
+    const char       *base;
+
+    if (device == NULL)
+        return 0;
+
+    base = ami_sana2_basename(device);
+
+    for (iface = ami_sana2_retained; iface != NULL;
+         iface = iface->retained_next)
+    {
+        if (iface->unit == unit &&
+            ami_str_iequal(ami_sana2_basename(iface->device), base))
+        {
+            ULONG held = ami_sana2_held(iface);
+
+            return (held != 0) ? held : NETEVENT_HELD_RX;
+        }
+    }
+
+    return 0;
+}
+
+UWORD ami_sana2_retained_sweep(BOOL release_packets)
+{
+    AmiSana2If **link = &ami_sana2_retained;
+    AmiSana2If  *iface;
+
+    while ((iface = *link) != NULL)
+    {
+        BOOL rx_clear;
+
+        /* Collected, not asked for: no AbortIO(), no sleep.  A write's packet
+           goes back to the pool it came from. */
+        iface->tx_orphaned = (ami_sana2_tx_collect(iface) != 0) ? TRUE : FALSE;
+
+        rx_clear = ami_sana2_rx_reclaim(iface, release_packets);
+
+        if (!rx_clear || iface->tx_orphaned)
+        {
+            link = &iface->retained_next;
+            continue;
+        }
+
+        *link = iface->retained_next;
+        ami_sana2_retained_n--;
+        ami_sana2_release(iface);
+    }
+
+    return ami_sana2_retained_n;
 }
 
 /* ------------------------------------------------------------- accessors */
@@ -1313,18 +1446,12 @@ ULONG ami_sana2_known_rx_bytes(const char *device)
         { "etherlink3.device", 5UL * 1024UL },
     };
     const char *base;
-    const char *p;
     UWORD       i;
 
     if (device == NULL)
         return 0;
 
-    base = device;
-    for (p = device; *p != '\0'; p++)
-    {
-        if (*p == '/' || *p == ':')
-            base = p + 1;
-    }
+    base = ami_sana2_basename(device);
 
     for (i = 0; i < (UWORD)(sizeof(known) / sizeof(known[0])); i++)
     {

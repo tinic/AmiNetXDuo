@@ -7,6 +7,10 @@
 
 #include "tools.h"
 
+/* The library's 4.4BSD number: removed, with the device kept open holding
+   requests (AMI_NET_ERR_RETAINED).  Down all the same. */
+#define NSD_EINPROGRESS     36
+
 const char *const tool_name = "NetShutdown";
 
 static const char version_tag[] __attribute__((used)) =
@@ -323,7 +327,7 @@ int main(int argc, char **argv)
         ctl.nsc_Flags = NETCTRL_F_FORCE;
 
         if (tool_netstatus_control(base, NETCTRL_INTERFACE_REMOVE, &ctl,
-                                   &err) != 0)
+                                   &err) != 0 && err != NSD_EINPROGRESS)
         {
             tool_error("%s did not go down", (LONG)name);
             failed++;
