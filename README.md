@@ -195,6 +195,7 @@ the NDK does not declare and the CPU profiler.
 | `CheckNetConfig` | read the configuration and report what is wrong with it |
 | `CheckNetDevice` | what `anxnet.device` or `anxgenet.device` found and why a card was refused |
 | `NetDevStats` | every standard and driver-specific SANA-II counter for one unit |
+| `CreateAmiNetXDuoStatusReport` | versions, settings and counters in one file to attach to a bug report |
 | `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `hostname` | the name of this machine, and where the name came from |
