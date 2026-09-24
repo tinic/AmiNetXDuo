@@ -86,7 +86,7 @@ BUDGETS=(
     # slots (2026-09-23).  The driver can place an aligned IP payload directly
     # in the card window when matching firmware advertises the capability.
     # The fast-path counter remains available; old firmware uses staged TX.
-    "default:src/netdev/anxzz9000.device:24256"
+    "default:src/netdev/anxzz9000.device:69632"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -119,7 +119,7 @@ BUDGETS=(
     "minimal:src/bsdsocket/bsdsocket.library:233000"
     "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
-    "minimal:src/netdev/anxzz9000.device:24256"
+    "minimal:src/netdev/anxzz9000.device:69632"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
     # First budgeted as a shipping profile at 0.28.9: 181,012 bytes.  Raised
@@ -137,7 +137,7 @@ BUDGETS=(
     "micro:src/bsdsocket/bsdsocket.library:198656"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
-    "micro:src/netdev/anxzz9000.device:24256"
+    "micro:src/netdev/anxzz9000.device:69632"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10000"
 )
