@@ -177,12 +177,16 @@ CROSS_CONFIGS=(
     # probe both read what TCP_RTT measures, so RTT=OFF with either of the
     # other two ON is not a configuration to defend.  All three off together
     # is, and it is the only side `default` does not compile.
-    "tcpextra:-DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF"
+    # The cork's append fast path compiles here, with the cork, so both of
+    # the cork's sides have an arm and the fast path is never the only one.
+    "tcpextra:-DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF -DAMINETXDUO_TCP_CORK=ON -DAMINETXDUO_TCP_CORK_FASTPATH=ON"
     # Six datapath alternates.  Each SWAPS an implementation -- a checksum, a
     # completion path, a collect policy, an -O2 file list -- and none of them
     # resizes a structure, so unlike nosack/norxverify they do not each need
-    # their own tree to be compiled honestly.
-    "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=OFF"
+    # their own tree to be compiled honestly.  The small-write cork rides here
+    # too: it grows NX_IP and AmiSocket, but for every translation unit at
+    # once, so an arm of its own would prove nothing this one does not.
+    "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=OFF -DAMINETXDUO_TCP_CORK=ON"
 )
 
 # WHAT THE HOST STAGES BUILD IS NOT WRITTEN DOWN HERE ANY MORE.
@@ -308,16 +312,21 @@ host_test_targets() { # builddir
 #      split out of netprefs.c
 #      430 with test_profreport: profreport.py maps .text.<name> sections to
 #      their function under -ffunction-sections
-HOST_TESTS_EXPECTED=430
+#      432 with test_tcp_cork_send and test_sockopt_cork: the cork's
+#      NX_NO_WAIT send from the IP thread at the real send path, and
+#      TCP_NODELAY 0 through options.c with AMINETXDUO_TCP_CORK
+#      433 with test_expunge_cork: the stack kept, not torn down, while the
+#      cork's IP pass is in flight
+HOST_TESTS_EXPECTED=433
 case "$(uname -m)" in
     x86_64|amd64) ;;
-    # test_inet, test_route, test_expunge, test_select, test_rxdirect,
-    # test_sockopt, test_neighbour, test_dhcp6, test_usergroup_hold and
-    # test_handoff (8ff3cc92), all x86_64-only for the reason in
-    # tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is eight bytes
-    # and no structure in them has the target's shape.  darwin-arm64 registers
-    # 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 10)) ;;
+    # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
+    # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
+    # test_usergroup_hold and test_handoff (8ff3cc92), all x86_64-only for the
+    # reason in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is
+    # eight bytes and no structure in them has the target's shape.
+    # darwin-arm64 registers 402 of the 412 (2026-09-20).
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 12)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
@@ -1010,15 +1019,17 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
 # outside the host tier until 2026-08-27, both for the same reason: they are
 # the ones whose pointer round trips through 32-bit slots are load-bearing.
 HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto test_tls_x509
-                     test_tcp_handler test_transfer)
-HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$'
+                     test_tcp_handler test_transfer test_cork test_cork_fast)
+HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$|^cork_small_writes(_fastpath)?$'
 # 7 until fuzz_tls_crypto_sweep was split into four streams to get under the
 # ten-second budget; 10 then, 13 once fuzz_mdns_sweep followed it at 9.31 s of
 # that budget, and 21 when four streams each turned out to still be 8.14 s on
 # the runner and became eight.  BOTH live inside the 32-bit-only block in
 # tests/fuzz/CMakeLists.txt, so neither split moves HOST_TESTS_EXPECTED --
 # which is how the first attempt at this failed, locally and not on a runner.
-HOST32_TESTS_EXPECTED=21
+# 23 with cork_small_writes and its _fastpath arm: cork.c with transfer.c
+# around it, whose ABI asserts make it 32-bit, as test_transfer is.
+HOST32_TESTS_EXPECTED=23
 
 stage_host32() {
     hr "host tests (32-bit: mDNS, TLS crypto, X.509, TCP:, transfer)"

@@ -787,10 +787,53 @@ static LONG bsd_netstack_bringup(VOID)
 /* The master base owns netstack_startup_loopback()'s reference.  Retire the
    raw pointer before giving that reference back so no library call can obtain
    an NX_IP whose storage teardown is about to reclaim.  Caller holds sb_Lock. */
+#ifdef AMINETXDUO_TCP_CORK
+/*
+ * Netstack references kept because the cork's pass was still in flight when
+ * the stack was to go (cork.c, bsd_cork_stop()).  A count, not a flag: every
+ * shutdown that finds a pass keeps the reference it would have given back,
+ * and a reopen in between takes a new one (ami_ns_startup(), netstack.c:1864,
+ * adds to the running stack), so two refused shutdowns owe two.
+ *
+ * INVARIANT: the netstack holds exactly bsd_stack_retained references on our
+ * behalf beyond the one the current sb_StackRefs cycle took.  Only the two
+ * lines below change it, both under sb_Lock: +1 on a refused shutdown, and
+ * back to 0 on the first shutdown that finds no pass, which calls
+ * netstack_shutdown() that many times and once more for its own.  Until
+ * then the stack stays up and netstack_can_unload() keeps the library
+ * resident.  Saturating: a count at its ceiling keeps the one reference
+ * without counting it, which leaks it rather than giving back one too many.
+ */
+static ULONG bsd_stack_retained;
+#endif
+
 static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
 {
+#ifdef AMINETXDUO_TCP_CORK
+    /* The cork's timer and IP handler go before the IP instance does: a tick
+       or a queued event must never reach a deleted timer or a freed NX_IP.
+       And a pass still running keeps the IP instance, its pool and the socket
+       it is sending on: the teardown is skipped, not raced. */
+    BOOL quiet = bsd_cork_stop();
+#endif
     master->sb_StackIp   = NULL;
     master->sb_StackPool = NULL;
+#ifdef AMINETXDUO_TCP_CORK
+    if (!quiet)
+    {
+        if (bsd_stack_retained != 0xFFFFFFFFUL)
+            bsd_stack_retained++;
+        AMI_WARN("bsdsocket: the IP thread is still inside a send; the stack "
+                 "is kept up rather than freed under it");
+        return;
+    }
+    /* The references earlier stops kept, each given back once. */
+    while (bsd_stack_retained != 0)
+    {
+        bsd_stack_retained--;
+        netstack_shutdown();
+    }
+#endif
     netstack_shutdown();
 }
 
@@ -943,6 +986,12 @@ struct AmiSocketBase *bsd_lib_open(
             master->sb_Lib.lib_OpenCnt--;
             return NULL;
         }
+#ifdef AMINETXDUO_TCP_CORK
+        /* The stack's first reference: one cork timer for its lifetime,
+           deleted by bsd_netstack_shutdown_owned() before the stack goes.  A
+           timer that cannot be made leaves TCP_NODELAY=0 answering ENOBUFS. */
+        bsd_cork_start(master->sb_StackIp);
+#endif
     }
     master->sb_StackRefs++;
 

@@ -408,6 +408,355 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
     return sent;
 }
 
+#ifdef AMINETXDUO_TCP_CORK
+/*
+ * THE CORKED SEND (cork.c has the actors and the rules).  Everything here runs
+ * inside the bracket, on a socket this task has claimed: FLUSH(this task), the
+ * pending segment detached into a local, the armed list without it.
+ */
+
+/* Copy `bytes` from the cursor to `dst`.  The one copy a corked write makes;
+   the fast path and the bracketed path both come through here. */
+static VOID bsd_cork_copy_to(UBYTE *dst, BsdIovCursor *cur, ULONG bytes)
+{
+    while (bytes > 0)
+    {
+        UBYTE *src   = NULL;
+        ULONG  chunk = bsd_iov_chunk(cur, &src);
+
+        if (chunk == 0)
+            break;
+        if (chunk > bytes)
+            chunk = bytes;
+
+        bsd_bcopy(src, dst, chunk);
+        bsd_iov_advance(cur, chunk);
+        dst   += chunk;
+        bytes -= chunk;
+    }
+}
+
+static VOID bsd_cork_append(NX_PACKET *pkt, BsdIovCursor *cur, ULONG bytes)
+{
+    bsd_cork_copy_to(pkt->nx_packet_append_ptr, cur, bytes);
+    pkt->nx_packet_append_ptr += bytes;
+    pkt->nx_packet_length     += bytes;
+}
+
+/* Room left in a detached segment of `cap` payload bytes. */
+static ULONG bsd_cork_room_of(const NX_PACKET *pkt, ULONG cap)
+{
+    ULONG room, tail;
+
+    if (pkt->nx_packet_length >= cap)
+        return 0;
+
+    room = cap - pkt->nx_packet_length;
+    tail = (ULONG)(pkt->nx_packet_data_end - pkt->nx_packet_append_ptr);
+
+    return (tail < room) ? tail : room;
+}
+
+/* Send a claimed segment, waiting as a send waits: the sliced wait, so
+   SO_SNDTIMEO and the break mask behave as they do uncorked.  Returns the
+   flag the remainder waits on, 0 when it is gone. */
+static ULONG bsd_cork_flush_wait(struct AmiSocketBase *base, AmiSocket *sock,
+                                 NX_PACKET **pkt, ULONG wait, AmiSana2If *run,
+                                 UINT *status, BOOL *aborted)
+{
+    BsdSendArgs sargs;
+
+    sargs.tcp    = &sock->as_Nx.tcp;
+    sargs.packet = *pkt;
+    sargs.run    = run;
+
+    *status = bsd_wait_sliced(base, wait, bsd_send_once, &sargs, aborted);
+    if (*aborted)
+        return BSD_CORKF_STALLED;
+
+    return bsd_cork_settle(sock, pkt, *status);
+}
+
+/* SO_ERROR a pass left behind, reported by the next send, once. */
+static LONG bsd_cork_so_error(struct AmiSocketBase *base, AmiSocket *sock)
+{
+    LONG code = sock->as_SoError;
+
+    sock->as_SoError = 0;
+
+    return bsd_fail(base, code);
+}
+
+/*
+ * Everything pending goes before anything is sent around it: MSG_OOB, a
+ * socket that stopped corking, a connection the cork does not apply to.  0,
+ * or -1 with errno set when some of it is still held.
+ */
+static LONG bsd_cork_drain(struct AmiSocketBase *base, AmiSocket *sock,
+                           ULONG wait, AmiSana2If *run)
+{
+    NX_PACKET *pkt     = NULL;
+    ULONG      why     = 0;
+    UINT       status  = NX_SUCCESS;
+    BOOL       aborted = FALSE;
+    LONG       rc;
+
+    rc = bsd_cork_claim(base, sock, wait, &pkt);
+    if (rc != 0)
+    {
+        if (rc == AMI_EAGAIN)
+            sock->as_TxWait = 1;
+        return bsd_fail(base, rc);
+    }
+
+    if (pkt != NULL)
+        why = bsd_cork_flush_wait(base, sock, &pkt, wait, run, &status,
+                                  &aborted);
+
+    if (pkt != NULL && wait == NX_NO_WAIT)
+        sock->as_TxWait = 1;
+
+    if (bsd_cork_unclaim(sock, pkt, why))
+        bsd_tcp_send_fin(sock);
+
+    if (pkt != NULL)
+        return bsd_fail(base, aborted ? AMI_EINTR
+                                      : bsd_wait_errno(wait, status));
+
+    if (sock->as_SoError != 0)
+        return bsd_cork_so_error(base, sock);
+
+    return 0;
+}
+
+static LONG bsd_send_tcp_cork(struct AmiSocketBase *base, AmiSocket *sock,
+                              BsdIovCursor *cur, LONG len, LONG flags,
+                              AmiSana2If *run)
+{
+    NX_PACKET_POOL *pool    = bsd_stack_pool(base);
+    NX_PACKET      *pkt     = NULL;
+    ULONG           mss     = 0;
+    ULONG           why     = 0;
+    ULONG           wait;
+    LONG            taken   = 0;
+    LONG            rest;
+    LONG            rc;
+    UINT            status  = NX_SUCCESS;
+    BOOL            aborted = FALSE;
+
+    if (pool == NULL)
+        return bsd_fail(base, AMI_ENETDOWN);
+
+    if ((sock->as_Flags & ASF_CONNECTED) == 0)
+        return bsd_fail(base, AMI_ENOTCONN);
+
+    if ((sock->as_Flags & ASF_WRSHUT) != 0)
+        return bsd_fail(base, AMI_EPIPE);
+
+    if (sock->as_SoError != 0)
+        return bsd_cork_so_error(base, sock);
+
+    wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
+
+    rc = bsd_cork_claim(base, sock, wait, &pkt);
+    if (rc != 0)
+    {
+        if (rc == AMI_EAGAIN)
+            sock->as_TxWait = 1;
+        return bsd_fail(base, rc);
+    }
+
+    /* Asked with the claim held, so no task sharing the socket can turn
+       TCP_NODELAY 1 between the answer and an append: a claim can wait, and
+       another task's setsockopt() runs while it does.  Not corkable, the
+       segment only drains -- nothing is ever appended to it again. */
+    if ((flags & MSG_OOB) != 0 || !bsd_cork_corkable(sock))
+    {
+        if (bsd_cork_unclaim(sock, pkt, BSD_CORKF_TICK))
+            bsd_tcp_send_fin(sock);
+        if (bsd_cork_drain(base, sock, wait, run) != 0)
+            return -1;
+        return bsd_send_tcp_run(base, sock, cur, len, flags, run);
+    }
+
+    /* Judged by mss: zero is the fallback below. */
+    AMI_NX_BY_OUTPUT(nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss));
+    if (mss == 0)
+        mss = BSD_DEFAULT_MSS;
+
+    /* One pass, never a second: every branch leaves the loop. */
+    while (taken < len)
+    {
+        ULONG left = (ULONG)(len - taken);
+        ULONG room;
+
+        if (pkt == NULL)
+        {
+            BsdAllocArgs aargs;
+            ULONG        cap;
+
+            /* A segment's worth or more has nothing to wait for. */
+            if (left >= mss)
+                break;
+
+            aargs.pool   = pool;
+            aargs.packet = &pkt;
+            aargs.run    = run;
+
+            status = bsd_wait_sliced(base, wait, bsd_alloc_once, &aargs,
+                                     &aborted);
+            if (aborted || status != NX_SUCCESS)
+            {
+                pkt = NULL;
+                break;
+            }
+
+            cap = (ULONG)(pkt->nx_packet_data_end - pkt->nx_packet_append_ptr);
+            if (cap > mss)
+                cap = mss;
+            sock->as_CorkCap = cap;
+
+            if (left >= cap)
+            {
+                AMI_NX_CLEANUP(nx_packet_release(pkt));
+                pkt = NULL;
+                break;
+            }
+        }
+
+        room = bsd_cork_room_of(pkt, sock->as_CorkCap);
+
+        if (left <= room)
+        {
+            bsd_cork_append(pkt, cur, left);
+            taken += (LONG)left;
+
+            /* Full: it goes now.  What the window refuses stays pending,
+               already credited. */
+            if (pkt->nx_packet_length >= sock->as_CorkCap)
+            {
+                status = nx_tcp_socket_send(&sock->as_Nx.tcp, pkt, NX_NO_WAIT);
+                why    = bsd_cork_settle(sock, &pkt, status);
+            }
+            else
+                why = BSD_CORKF_TICK;
+            break;
+        }
+
+        /* It does not fit: what is pending goes first, so the bytes keep
+           their order. */
+        why = bsd_cork_flush_wait(base, sock, &pkt, wait, run, &status,
+                                  &aborted);
+        if (pkt != NULL)
+        {
+            if (wait == NX_NO_WAIT && !aborted)
+            {
+                ULONG n;
+
+                sock->as_TxWait = 1;
+
+                room = bsd_cork_room_of(pkt, sock->as_CorkCap);
+                n    = (left < room) ? left : room;
+                if (n > 0)
+                {
+                    bsd_cork_append(pkt, cur, n);
+                    taken += (LONG)n;
+                }
+            }
+            break;
+        }
+
+        /* Gone: the write itself takes the uncorked path below. */
+        why = 0;
+        break;
+    }
+
+    if (bsd_cork_unclaim(sock, pkt, why))
+        bsd_tcp_send_fin(sock);
+
+    if (taken == len)
+        return taken;
+
+    /* Stopped with a remainder held: the window, the timeout, the break. */
+    if (pkt != NULL)
+    {
+        if (taken > 0)
+            return taken;
+        return bsd_fail(base, aborted ? AMI_EINTR
+                                      : bsd_wait_errno(wait, status));
+    }
+
+    if (aborted)
+        return (taken > 0) ? taken : bsd_fail(base, AMI_EINTR);
+
+    if (sock->as_SoError != 0)
+        return (taken > 0) ? taken : bsd_cork_so_error(base, sock);
+
+    /* Nothing pending: the rest takes the uncorked path. */
+    rest = bsd_send_tcp_run(base, sock, cur, len - taken, flags, run);
+    if (rest < 0)
+        return (taken > 0) ? taken : -1;
+
+    return taken + rest;
+}
+
+#ifdef AMINETXDUO_TCP_CORK_FASTPATH
+/*
+ * F: a write that fits the pending segment, copied without the bracket.  It
+ * never allocates, arms, sets errno or waits: anything it cannot do alone it
+ * declines, and the caller takes the bracketed path.  APPEND keeps I and every
+ * A off the segment while the bytes move; the pointer and length are advanced
+ * under Forbid() with the state going back to IDLE.
+ */
+static BOOL bsd_cork_fast_append(AmiSocket *sock, BsdIovCursor *cur, LONG len)
+{
+    NX_PACKET *pkt;
+    UINT       state;
+
+    if ((sock->as_CorkFlags & BSD_CORKF_ON) == 0 || len <= 0)
+        return FALSE;
+
+    Forbid();
+    pkt   = sock->as_CorkPkt;
+    state = sock->as_Nx.tcp.nx_tcp_socket_state;
+    /* Every flag again, under the Forbid() that makes the answer hold: the
+       unlocked look above is only the cheap way out.  A task sharing the
+       socket may have set TCP_NODELAY 1 since, leaving a segment to drain. */
+    if ((sock->as_CorkFlags & BSD_CORKF_ON) == 0 ||
+        sock->as_CorkState != BSD_CORK_IDLE || pkt == NULL ||
+        (sock->as_CorkFlags & BSD_CORKF_STALLED) != 0 ||
+        (ULONG)len >= bsd_cork_room(sock) ||     /* filling it sends it */
+        (sock->as_Flags & (ASF_CONNECTED | ASF_EOF | ASF_WRSHUT)) !=
+            ASF_CONNECTED ||
+        (state != NX_TCP_ESTABLISHED && state != NX_TCP_CLOSE_WAIT) ||
+        sock->as_Nx.tcp.nx_tcp_socket_transmit_suspended_count != 0 ||
+        sock->as_SoError != 0)
+    {
+        Permit();
+        return FALSE;
+    }
+    sock->as_CorkState = BSD_CORK_APPEND;
+    Permit();
+
+    bsd_cork_copy_to(pkt->nx_packet_append_ptr, cur, (ULONG)len);
+
+    Forbid();
+    pkt->nx_packet_append_ptr += len;
+    pkt->nx_packet_length     += (ULONG)len;
+    sock->as_CorkState         = BSD_CORK_IDLE;
+    Permit();
+
+    /* A window notify that arrived mid-copy found APPEND and left KICK: it
+       woke nothing.  Not an event from here -- this task is outside the
+       bracket -- but the tick, which the arm starts under Forbid(). */
+    if ((sock->as_CorkFlags & BSD_CORKF_KICK) != 0)
+        bsd_cork_kick_tick(sock);
+
+    return TRUE;
+}
+#endif /* AMINETXDUO_TCP_CORK_FASTPATH */
+#endif /* AMINETXDUO_TCP_CORK */
+
 static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags)
 {
@@ -415,6 +764,12 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     LONG        result;
 
     ami_sana2_tx_run_begin(run);
+#ifdef AMINETXDUO_TCP_CORK
+    if ((sock->as_CorkFlags & BSD_CORKF_ON) != 0 || sock->as_CorkPkt != NULL ||
+        sock->as_CorkState != BSD_CORK_IDLE)
+        result = bsd_send_tcp_cork(base, sock, cur, len, flags, run);
+    else
+#endif
     result = bsd_send_tcp_run(base, sock, cur, len, flags, run);
     ami_sana2_tx_run_end(run);
 
@@ -1114,6 +1469,13 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     if ((sock->as_Flags & ASF_RDSHUT) != 0)
         return 0;
 
+#ifdef AMINETXDUO_TCP_CORK
+    /* A corked segment the pass had to drop left SO_ERROR; a reader is told
+       as a writer is, once. */
+    if ((sock->as_CorkFlags & BSD_CORKF_ON) != 0 && sock->as_SoError != 0)
+        return bsd_cork_so_error(base, sock);
+#endif
+
     while (copied < len)
     {
         ULONG  length, avail, want, moved, chunk;
@@ -1126,6 +1488,15 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
             ULONG now = (first || (flags & MSG_WAITALL) != 0) ? wait
                                                               : NX_NO_WAIT;
+
+#ifdef AMINETXDUO_TCP_CORK
+            /* About to wait for the peer, with nothing queued to read: what
+               this socket is holding may be what the peer is waiting for. */
+            if (now != NX_NO_WAIT && sock->as_CorkPkt != NULL &&
+                sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count == 0 &&
+                bsd_nx_need(base, held))
+                bsd_cork_push(base, sock);
+#endif
 
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
             if (now == NX_WAIT_FOREVER && copied == 0 && len > 0 &&
@@ -1506,6 +1877,12 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
 
     bsd_iov_init(&cur, iov, iovcnt);
 
+#ifdef AMINETXDUO_TCP_CORK_FASTPATH
+    if ((sock->as_Flags & (ASF_TCP | ASF_RAW)) == ASF_TCP &&
+        (flags & MSG_OOB) == 0 && bsd_cork_fast_append(sock, &cur, len))
+        return len;
+#endif
+
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
 
@@ -1642,6 +2019,21 @@ static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
 
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
+
+#ifdef AMINETXDUO_TCP_CORK
+    /* The urgent byte is sent around the queue, so what is corked goes
+       first, however long that takes, and nothing after it is corked. */
+    if (sock->as_CorkPkt != NULL || sock->as_CorkState != BSD_CORK_IDLE)
+    {
+        if (bsd_cork_drain(base, sock,
+                           bsd_wait_option(sock, sock->as_SndTimeout, flags),
+                           bsd_send_run_iface(sock)) != 0)
+        {
+            bsd_nx_leave(base);
+            return -1;
+        }
+    }
+#endif
 
     if (len > 1)
     {

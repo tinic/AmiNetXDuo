@@ -161,12 +161,21 @@ static LONG h_teardown_ran(VOID)
             h.remove_calls != 0) ? 1 : 0;
 }
 
+/* With h_model_refs the netstack's own reference count is modelled:
+   every bring-up adds one, every shutdown takes one, and it can unload only
+   at zero -- the rule ami_ns_startup()/netstack_shutdown()/
+   netstack_can_unload() keep (netstack.c). */
+static BOOL  h_model_refs;
+static ULONG h_ns_refs;
+
 /*
  * Reached, and expected.
  */
 BOOL netstack_can_unload(VOID)
 {
     h.can_unload_calls++;
+    if (h_model_refs)
+        return (h_ns_refs == 0) ? TRUE : FALSE;
     return h.can_unload_answer;
 }
 
@@ -196,6 +205,16 @@ VOID bsd_runtime_close(VOID)        { h.runtime_close_calls++; }
 /* select.c takes WaitSelect()'s timer request back before the base closes
    timer.device; the base under test never armed one. */
 VOID bsd_timer_teardown(struct AmiSocketBase *base) { (VOID)base; }
+
+#ifdef AMINETXDUO_TCP_CORK
+/* The cork's timer comes and goes with the stack (library.c); cork.c is
+   test_cork's. */
+static BOOL  h_cork_busy;         /* bsd_cork_stop(): a pass in flight */
+static ULONG h_cork_stops;
+
+VOID bsd_cork_start(NX_IP *ip) { (VOID)ip; }
+BOOL bsd_cork_stop(VOID)       { h_cork_stops++; return !h_cork_busy; }
+#endif
 
 /* bsd_lib_open() calls this on every open, to hold usergroup.library resident
    for ixemul clients.  Nothing here depends on it, and the real one only opens
@@ -242,7 +261,13 @@ VOID Remove(struct Node *node)
     node->ln_Succ->ln_Pred = node->ln_Pred;
 }
 
-VOID netstack_shutdown(VOID)        { h.shutdown_calls++; }
+
+VOID netstack_shutdown(VOID)
+{
+    h.shutdown_calls++;
+    if (h_model_refs && h_ns_refs > 0)
+        h_ns_refs--;
+}
 NX_IP *netstack_ip(VOID)            { return &h_stack_ip; }
 NX_PACKET_POOL *netstack_pool(VOID) { return &h_stack_pool; }
 VOID bsd_netmon_drop_owner(struct AmiSocketBase *owner) { (VOID)owner; }
@@ -596,6 +621,82 @@ static VOID t_transient_stack_reference(VOID)
     h_report("transient", 0, 0, 0, h_teardown_ran());
 }
 
+#ifdef AMINETXDUO_TCP_CORK
+/* One open/close cycle of the stack: a bring-up takes a netstack reference
+   (bsd_lib_open(), netstack.c:1864), and the last library reference going
+   runs bsd_netstack_shutdown_owned() with the cork's pass busy or not. */
+static VOID h_cork_cycle(BOOL busy)
+{
+    h_ns_refs++;
+    h_base->sb_StackIp            = &h_stack_ip;
+    h_base->sb_StackPool          = &h_stack_pool;
+    h_base->sb_StackRefs          = 1;
+    h_base->sb_TransientStackRefs = 1;
+    h_cork_busy = busy;
+    bsd_stack_transient_release(h_base);
+}
+
+/*
+ * The stack's last reference goes while the cork's IP pass is still inside a
+ * send (cork.c, bsd_cork_stop() answering FALSE): the netstack is kept, not
+ * torn down under it, and every reference kept that way is given back, once
+ * each, by the first shutdown that finds no pass.
+ */
+static VOID t_cork_pass_keeps_stack(VOID)
+{
+    printf("the stack's last reference with a cork pass in flight\n");
+
+    /* One refused cycle, then one that succeeds. */
+    h_machine_reset(FALSE);
+    h_model_refs = TRUE;
+    h_ns_refs    = 0;
+    h_cork_stops = 0;
+
+    h_cork_cycle(TRUE);
+    CHECK(h_cork_stops == 1, "the cork is stopped first");
+    CHECK(h.shutdown_calls == 0 && h_ns_refs == 1,
+          "a pass in flight: the netstack is not torn down under it");
+    CHECK(h_base->sb_StackIp == NULL && h_base->sb_StackPool == NULL,
+          "though no library call can reach it any more");
+    CHECK(h.can_unload_calls == 1 && netstack_can_unload() == FALSE,
+          "and the library cannot be unloaded while it is kept");
+
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 2 && h_ns_refs == 0,
+          "the next shutdown gives back the kept reference and its own");
+    CHECK(netstack_can_unload() == TRUE, "and then the library can go");
+
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 3 && h_ns_refs == 0,
+          "after that, one each time again");
+
+    /* Two refused cycles, reopened in between, then one that succeeds. */
+    h_machine_reset(FALSE);
+    h_model_refs = TRUE;
+    h_ns_refs    = 0;
+
+    h_cork_cycle(TRUE);
+    h_cork_cycle(TRUE);
+    CHECK(h.shutdown_calls == 0 && h_ns_refs == 2,
+          "two refused shutdowns keep two references");
+    CHECK(netstack_can_unload() == FALSE, "the library stays resident");
+
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 3,
+          "the first clean shutdown calls netstack_shutdown() exactly three "
+          "times: two kept references and its own");
+    CHECK(h_ns_refs == 0, "every reference given back, none twice");
+    CHECK(netstack_can_unload() == TRUE, "and the library can unload");
+
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 4 && h_ns_refs == 0,
+          "nothing left owed: the next one is its own alone");
+
+    h_model_refs = FALSE;
+    h_cork_busy  = FALSE;
+}
+#endif
+
 static VOID t_loopback_startup_failure_ownership(VOID)
 {
     struct AmiSocketBase *opened;
@@ -661,6 +762,9 @@ int main(void)
     t_last_close_retries();
     t_transient_stack_reference();
     t_loopback_startup_failure_ownership();
+#ifdef AMINETXDUO_TCP_CORK
+    t_cork_pass_keeps_stack();
+#endif
     printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
 }

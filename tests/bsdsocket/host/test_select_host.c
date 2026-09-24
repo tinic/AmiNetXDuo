@@ -291,6 +291,17 @@ VOID  bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
 { (VOID)tcp; (VOID)rtt_ms; }
 ULONG ami_millis(VOID) { return 0UL; }
 
+#ifdef AMINETXDUO_TCP_CORK
+/* The cork's hooks in select.c.  cork.c and its interplay with select.c are
+   test_cork's (tests/bsdsocket/host/test_cork_host.c); no socket here holds a
+   corked segment, so none of these is reached. */
+VOID  bsd_cork_window_open(AmiSocket *sock) { (VOID)sock; h_unreachable("bsd_cork_window_open"); }
+VOID  bsd_cork_wake(AmiSocket *sock) { (VOID)sock; h_unreachable("bsd_cork_wake"); }
+ULONG bsd_cork_room(const AmiSocket *sock) { (VOID)sock; h_unreachable("bsd_cork_room"); return 0; }
+VOID  bsd_cork_push(struct AmiSocketBase *base, AmiSocket *sock)
+{ (VOID)base; (VOID)sock; h_unreachable("bsd_cork_push"); }
+#endif
+
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
                        UINT src_port, ULONG src_scope)
 {

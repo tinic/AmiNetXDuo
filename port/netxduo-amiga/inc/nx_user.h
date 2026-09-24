@@ -255,6 +255,17 @@ ULONG _nx_amiga_handshake_millis(VOID);
 #define NX_ENABLE_IP_PACKET_FILTER
 
 
+/* ------------------------------------------------------------ cork ------ */
+
+/* setsockopt(TCP_NODELAY, 0): small writes wait up to a tick on the socket
+   and leave as one segment (src/bsdsocket/cork.c).  NX_IP grows the handler
+   the IP thread dispatches NX_IP_CORK_EVENT to, so the CMake option defines
+   AMINETXDUO_TCP_CORK for every translation unit, never for one. */
+#ifdef AMINETXDUO_TCP_CORK
+#define NX_ENABLE_IP_CORK_EVENT
+#endif
+
+
 /* ------------------------------------------------------------------- IP --- */
 
 #ifdef AMINETXDUO_IP_ID_RANDOMIZATION

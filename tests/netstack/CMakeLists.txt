@@ -419,6 +419,39 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_sws COMMAND test_tcp_sws)
 
+    # The send the small-write cork makes from the IP thread's pass
+    # (src/bsdsocket/cork.c): NX_NO_WAIT with nx_ip_protection already held.
+    # Against the real send path: it never suspends, never lets the pass's
+    # hold go, and trims a refused segment exactly as bsd_send_consumed()
+    # counts it.
+    add_executable(test_tcp_cork_send
+        host/test_tcp_cork_send_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_send_control.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_transmit_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c")
+
+    target_compile_options(test_tcp_cork_send PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_cork_send PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_cork_send PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_cork_send COMMAND test_tcp_cork_send)
+
     # The two receiver-side acknowledgment holes that left a sender in persist
     # backoff, both fixed in 0.25.3 as submodule commits with no test in this
     # tree: an unanswered window probe (tinic/netxduo bfedf066) and a sub-MSS
