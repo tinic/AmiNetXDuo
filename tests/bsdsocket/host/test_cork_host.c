@@ -39,6 +39,9 @@
 #include "aminetxduo/sana2.h"
 #include "nx_ip.h"
 
+#include <proto/dos.h>
+
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,6 +125,10 @@ static struct
 
     ULONG        mutex_gets, mutex_puts;
     LONG         enter_result;      /* ami_netstack_enter()'s answer         */
+    UINT         deactivate_result, delete_result;
+    ULONG        delays;
+    void       (*send_hook)(void);  /* runs inside the next NetX send        */
+    BOOL         sleep_jumps;       /* the next tx_thread_sleep() longjmps    */
     ULONG        enters, leaves;
     AmiSocket   *mutex_finishes;    /* the pass "ends" when the barrier runs */
 
@@ -154,7 +161,13 @@ static void h_reset(void)
 {
     unsigned i;
 
-    /* The cork's statics outlive a test: take it down, as the stack would. */
+    /* The cork's statics outlive a test: take it down, as the stack would,
+       with every ThreadX answer back to success. */
+    h.enter_result      = AMI_NET_OK;
+    h.deactivate_result = TX_SUCCESS;
+    h.delete_result     = TX_SUCCESS;
+    h.send_hook         = NULL;
+    h.sleep_jumps       = FALSE;
     bsd_cork_stop();
 
     memset(&h, 0, sizeof(h));
@@ -171,6 +184,7 @@ static void h_reset(void)
         h_data[i] = (UBYTE)(i * 7 + 1);
 
     h.me  = &h_task;
+    h_task.tc_Node.ln_Type = NT_PROCESS;
     h.mss = 100;
 
     h_base.sb_StackRefs    = 1;
@@ -331,9 +345,23 @@ VOID bsd_bzero(APTR p, ULONG size) { memset(p, 0, size); }
 
 ULONG _tx_time_get(VOID) { return h.ticks; }
 
+static jmp_buf h_sleep_jmp;
+
+LONG Delay(ULONG ticks)
+{
+    h.delays++;
+    h.ticks += ticks;
+    return 0;
+}
+
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
     h.sleeps++;
+    if (h.sleep_jumps)
+    {
+        h.sleep_jumps = FALSE;
+        longjmp(h_sleep_jmp, 1);
+    }
     h.ticks += timer_ticks;
 
     /* The other actor gets the machine and finishes. */
@@ -374,6 +402,8 @@ UINT _txe_timer_activate(TX_TIMER *timer_ptr)
 UINT _txe_timer_deactivate(TX_TIMER *timer_ptr)
 {
     (VOID)timer_ptr;
+    if (h.deactivate_result != TX_SUCCESS)
+        return h.deactivate_result;
     if (h.timer_live)
         h.deactivates++;
     h.timer_live = FALSE;
@@ -385,7 +415,7 @@ UINT _txe_timer_delete(TX_TIMER *timer_ptr)
     (VOID)timer_ptr;
     CHECK(!h.timer_live, "deleted only once deactivated");
     h.deletes++;
-    return TX_SUCCESS;
+    return h.delete_result;
 }
 
 UINT _txe_event_flags_set(TX_EVENT_FLAGS_GROUP *group_ptr, ULONG flags_to_set,
@@ -563,6 +593,14 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
 
     (VOID)socket_ptr;
     h_safe();
+
+    if (h.send_hook != NULL)
+    {
+        void (*fn)(void) = h.send_hook;
+
+        h.send_hook = NULL;
+        fn();
+    }
 
     status = h_plan(h.send_plan, h.send_planned, h.sends);
     take   = (h.sends < H_PLAN) ? h.send_take[h.sends] : 0;
@@ -1630,6 +1668,113 @@ static void t_stop_refused(void)
     CHECK(h.enters == h.leaves + 1, "and a refused bracket is not left");
 }
 
+static void t_stop_timer_refusals(void)
+{
+    printf("cork: a timer that will not go\n");
+
+    /* tx_timer_delete() refuses (TX_CALLER_ERROR): the timer stays ours,
+       deactivated, and T fires into nothing. */
+    h_reset();
+    (VOID)h_tcp(0);
+    (VOID)h_send(0, 0, 30, 0);
+    h.delete_result = TX_CALLER_ERROR;
+    bsd_cork_stop();
+    CHECK(h.deletes == 1 && !h.timer_live, "deactivated, the delete refused");
+    CHECK(h_ip.nx_ip_cork_handler == NX_NULL, "the handler cleared");
+    h.events = 0;
+    bsd_cork_tick((ULONG)&h_ip);
+    CHECK(h.events == 0, "a tick after the stop reaches no NX_IP");
+
+    h.delete_result = TX_SUCCESS;
+    h.timer_creates = 0;
+    bsd_cork_start(&h_ip);
+    CHECK(h.timer_creates == 0 && bsd_cork_running(),
+          "the next start reuses the timer it still owns");
+    bsd_cork_tick((ULONG)&h_ip);
+    CHECK((h.events & NX_IP_CORK_EVENT) != 0, "which ticks again");
+    bsd_cork_stop();
+    CHECK(h.deletes == 2, "and the next stop deletes it");
+
+    /* tx_timer_deactivate() refuses: not deleted while it may run, and cut
+       off all the same. */
+    h_reset();
+    (VOID)h_tcp(0);
+    (VOID)h_send(0, 0, 30, 0);
+    h.deactivate_result = TX_CALLER_ERROR;
+    bsd_cork_stop();
+    CHECK(h.deletes == 0, "a timer that would not stop is not deleted");
+    h.events = 0;
+    bsd_cork_tick((ULONG)&h_ip);
+    CHECK(h.events == 0, "and its ticks reach nothing");
+
+    /* Still ours and still running: the next start ticks on it, and the next
+       stop that can retires it. */
+    h.deactivate_result = TX_SUCCESS;
+    h.timer_creates     = 0;
+    bsd_cork_start(&h_ip);
+    CHECK(h.timer_creates == 0, "the next start takes it back");
+    bsd_cork_stop();
+    CHECK(h.deletes == 1 && !h.timer_live, "and the next stop deletes it");
+}
+
+/* Inside the pass's own send: the stack goes down with the bracket refused,
+   then a close drops the socket the pass is sending. */
+static AmiSocket *h_mid;
+static BOOL       h_mid_drop_waited;
+
+static void h_stop_mid_pass(void)
+{
+    ULONG releases = h.releases;
+
+    h.enter_result = AMI_NET_ERR_KERNEL;
+    bsd_cork_stop();
+
+    CHECK(h.delays == 250, "the stop waited for the pass, bounded, by Delay()");
+    CHECK(h_ip.nx_ip_cork_handler == NX_NULL && h.deletes == 1,
+          "handler cleared and timer deleted before anything is reclaimed");
+    CHECK(h_mid->as_CorkState == BSD_CORK_FLUSH &&
+          h_mid->as_CorkOwner == BSD_CORK_OWNER_IP,
+          "the socket the pass is sending stays the pass's");
+    CHECK(h.releases == releases, "and no packet was released under it");
+
+    if (setjmp(h_sleep_jmp) == 0)
+    {
+        h.sleep_jumps = TRUE;
+        bsd_cork_drop(h_mid);
+        CHECK(FALSE, "a drop took a segment the pass still holds");
+    }
+    h_mid_drop_waited = TRUE;
+    CHECK(h_mid->as_CorkState == BSD_CORK_FLUSH && h.releases == releases,
+          "a drop waits for the pass instead of stealing its FLUSH");
+}
+
+static void t_stop_during_pass(void)
+{
+    printf("cork: the stack going down while a pass is in its send\n");
+
+    h_reset();
+    h_mid = h_tcp(0);
+    (VOID)h_send(0, 0, 30, 0);
+    h_mid_drop_waited = FALSE;
+    h.send_hook = h_stop_mid_pass;
+    h_pass();
+    CHECK(h_mid_drop_waited, "the stop and the drop ran inside the send");
+    CHECK(h_mid->as_CorkState == BSD_CORK_IDLE && h_mid->as_CorkPkt == NULL &&
+          h_wire_is(0, 30), "the pass finished its send and handed it back");
+    CHECK(!h.timer_live && h.activates == 1,
+          "and did not start a stopped cork's timer again");
+    bsd_cork_drop(h_mid);
+    CHECK(h.releases == 0, "the drop afterwards has nothing left to release");
+
+    /* A refused stop with no pass running does not wait at all. */
+    h_reset();
+    (VOID)h_tcp(0);
+    h.enter_result = AMI_NET_ERR_KERNEL;
+    bsd_cork_stop();
+    CHECK(h.delays == 0, "no pass in flight, no wait");
+    h.enter_result = AMI_NET_OK;
+}
+
 static void t_abort_while_owned(void)
 {
     AmiSocket *s;
@@ -1717,11 +1862,14 @@ static void t_fast_kick(void)
     s = h_tcp(0);
     (VOID)h_send(0, 0, 10, 0);
     h.events = 0;
+    h.event_sets = 0;
     h.copy_runs_notify = s;
     CHECK(h_send(0, 10, 20, 0) == 20, "the fast path takes the write");
     CHECK((s->as_CorkFlags & BSD_CORKF_KICK) == 0 &&
-          (h.events & NX_IP_CORK_EVENT) != 0,
-          "and consumes the KICK the notify left, waking the pass");
+          (s->as_CorkFlags & BSD_CORKF_TICK) != 0 && h_linked(s) &&
+          h.timer_live && h.event_sets == 0,
+          "and turns the KICK the notify left into the tick, setting no "
+          "event from outside the bracket");
     h_pass();
     CHECK(h_wire_is(0, 30), "which sends it all");
 
@@ -1866,6 +2014,8 @@ int main(void)
     t_disconnect();
     t_teardown();
     t_stop_refused();
+    t_stop_timer_refusals();
+    t_stop_during_pass();
     t_abort_while_owned();
     t_claim_vs_pass();
 #ifdef AMINETXDUO_TCP_CORK_FASTPATH

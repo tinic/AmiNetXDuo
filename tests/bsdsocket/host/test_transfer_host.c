@@ -520,12 +520,12 @@ VOID  bsd_tcp_send_fin(AmiSocket *sock)
 VOID  bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
 { (VOID)src; (VOID)dst; (VOID)size; h_cork_unreachable("bsd_bcopy"); }
 #ifdef AMINETXDUO_TCP_CORK_FASTPATH
-/* The fast path's lock and wake: it declines before either on a socket that
+/* The fast path's lock and tick: it declines before either on a socket that
    never turned the cork on. */
 VOID  Forbid(VOID) { h_cork_unreachable("Forbid"); }
 VOID  Permit(VOID) { h_cork_unreachable("Permit"); }
-VOID  bsd_cork_wake(AmiSocket *sock)
-{ (VOID)sock; h_cork_unreachable("bsd_cork_wake"); }
+VOID  bsd_cork_kick_tick(AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_cork_kick_tick"); }
 #endif
 #endif
 

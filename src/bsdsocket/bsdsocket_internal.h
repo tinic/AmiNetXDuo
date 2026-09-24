@@ -1014,6 +1014,7 @@ BOOL  bsd_cork_close_linger(AmiSocket *sock, ULONG ticks, ULONG *left);
 VOID  bsd_cork_drop(AmiSocket *sock);
 VOID  bsd_cork_window_open(AmiSocket *sock);
 VOID  bsd_cork_wake(AmiSocket *sock);
+VOID  bsd_cork_kick_tick(AmiSocket *sock);
 ULONG bsd_cork_room(const AmiSocket *sock);
 
 /* socket.c's FIN, which the pass sends once the segment ahead of it is gone.

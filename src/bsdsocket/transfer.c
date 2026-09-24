@@ -712,7 +712,6 @@ static BOOL bsd_cork_fast_append(AmiSocket *sock, BsdIovCursor *cur, LONG len)
 {
     NX_PACKET *pkt;
     UINT       state;
-    BOOL       kick;
 
     if ((sock->as_CorkFlags & BSD_CORKF_ON) == 0 || len <= 0)
         return FALSE;
@@ -745,15 +744,13 @@ static BOOL bsd_cork_fast_append(AmiSocket *sock, BsdIovCursor *cur, LONG len)
     pkt->nx_packet_append_ptr += len;
     pkt->nx_packet_length     += (ULONG)len;
     sock->as_CorkState         = BSD_CORK_IDLE;
-    kick                       = ((sock->as_CorkFlags & BSD_CORKF_KICK) != 0)
-                                     ? TRUE : FALSE;
-    sock->as_CorkFlags        &= (UBYTE)~BSD_CORKF_KICK;
     Permit();
 
     /* A window notify that arrived mid-copy found APPEND and left KICK: it
-       woke nothing, so the pass is woken here. */
-    if (kick)
-        bsd_cork_wake(sock);
+       woke nothing.  Not an event from here -- this task is outside the
+       bracket -- but the tick, which the arm starts under Forbid(). */
+    if ((sock->as_CorkFlags & BSD_CORKF_KICK) != 0)
+        bsd_cork_kick_tick(sock);
 
     return TRUE;
 }
