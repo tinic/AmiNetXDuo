@@ -3102,6 +3102,12 @@ BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets)
     if (rd->zombie)
         return FALSE;
 
+    /* A reader thread wants ThreadX to join and delete it.  With the kernel
+       stopped there is none (the stop refuses while one exists); should one
+       be seen anyway, it is a hold rather than a call into a dead kernel. */
+    if (rd->started && tx_amiga_kernel_running() != (UINT)TX_TRUE)
+        return FALSE;
+
     if (rd->started && !rd->joined)
     {
         if (tx_semaphore_get(&rd->exited, TX_NO_WAIT) != TX_SUCCESS)

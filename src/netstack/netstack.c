@@ -1645,9 +1645,11 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 /*
  * Give src/sana2 a chance to close and free the interfaces a device kept
  * requests in (ami_sana2_retained_sweep()).  Under ami_ns_lock; in a bracket
- * when ThreadX runs, because joining a reader is a ThreadX call.  When it does
- * not run there is no reader thread left to join, only replies to collect.
- * Not from the one-second timer: it closes devices.
+ * while ThreadX runs, because joining a reader is a ThreadX call.  A bracket
+ * that cannot be had defers the sweep: nothing is released, and the next sweep
+ * point asks again.  Unbracketed only with the kernel stopped, when no reader
+ * thread can be left (the stop refuses while one exists) and the sweep only
+ * collects replies.  Not from the one-second timer: it closes devices.
  */
 static VOID ami_ns_retained_sweep_locked(VOID)
 {
@@ -1656,15 +1658,17 @@ static VOID ami_ns_retained_sweep_locked(VOID)
     if (ami_sana2_retained_count() == 0)
         return;
 
-    if (ami_ns_kernel_started && ami_netstack_enter(&caller) == AMI_NET_OK)
+    if (!ami_ns_kernel_started)
     {
         (VOID)ami_sana2_retained_sweep(TRUE);
-        ami_netstack_leave(&caller);
+        return;
     }
-    else
-    {
-        (VOID)ami_sana2_retained_sweep(TRUE);
-    }
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return;
+
+    (VOID)ami_sana2_retained_sweep(TRUE);
+    ami_netstack_leave(&caller);
 }
 
 /*
@@ -1968,7 +1972,8 @@ VOID netstack_shutdown(VOID)
     }
     else
     {
-        (VOID)ami_sana2_retained_sweep(TRUE);
+        /* No bracket: the sweep waits for a later sweep point, where the
+           kernel is either stopped or can be entered. */
         ami_ns_destroy(ns);
     }
 

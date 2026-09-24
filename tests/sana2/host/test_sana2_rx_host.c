@@ -155,6 +155,13 @@ static BOOL  h_zombie_on_delete;   /* the next delete leaves a zombie */
 static int   h_thread_deletes;
 static UINT  h_delete_status = TX_SUCCESS;
 
+/* The kernel's state, for the reclaim: a stopped kernel is never called. */
+static UINT h_kernel_running = TX_TRUE;
+UINT tx_amiga_kernel_running(VOID)
+{
+    return h_kernel_running;
+}
+
 ULONG tx_amiga_zombie_tasks(VOID)
 {
     return h_zombies;
@@ -2073,6 +2080,16 @@ static void test_reclaim_holds_then_releases(void)
 
     printf("  the retained sweep's receive half\n");
     rc_fixture();
+
+    /* A reader thread with the kernel stopped: a hold, and no ThreadX call. */
+    h_kernel_running = TX_FALSE;
+    h_sem_get_wait   = 0xFFFFFFFFUL;
+    h_check(!ami_sana2_rx_reclaim(&rc_iface, TRUE),
+            "reclaim: a reader thread with the kernel stopped is a hold");
+    h_check(h_sem_get_wait == 0xFFFFFFFFUL && !rd->joined &&
+            h_thread_deletes == 0 && h_free_watched == 0 && h_releases == 0,
+            "reclaim: and ThreadX was not called, nothing was freed");
+    h_kernel_running = TX_TRUE;
 
     /* The reader has not exited. */
     h_sem_get_status = TX_NO_INSTANCE;

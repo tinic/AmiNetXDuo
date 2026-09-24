@@ -289,6 +289,84 @@ static void t_new_stack_over_a_held_one(void)
     h_teardown();
 }
 
+/*
+ * The kernel is running and the bracket cannot be had: no sweep at all, since
+ * joining a reader is a ThreadX call.  Nothing is released, and a later sweep
+ * point that can enter releases it.
+ */
+static void t_no_bracket_defers_the_sweep(void)
+{
+    NshSana2If *m = &nsh.sana2[0];
+    ULONG       sweeps;
+
+    printf("retain: a sweep point that cannot enter ThreadX\n");
+
+    CHECK(h_up_with("a2065.device", 0), "the interface is up in slot 0");
+    nsh.sana2_close_held = NETEVENT_HELD_TX;
+    CHECK(netstack_interface_remove(0, TRUE) == AMI_NET_ERR_RETAINED,
+          "removed with a write held");
+    nsh.sana2_close_held = 0;
+    m->held = 0;                        /* the device has given it back */
+
+    sweeps = nsh.sweeps;
+    nsh.tx_adopt_status = TX_NOT_DONE;
+    CHECK(netstack_interface_remove(0, TRUE) == AMI_NET_ERR_STATE,
+          "a removal that cannot enter ThreadX");
+    CHECK(nsh.sweeps == sweeps, "did not sweep without a bracket");
+    CHECK(m->state == NSH_IF_RETAINED && m->device_closes == 0 &&
+          m->frees == 0 && nsh_retained() == 1,
+          "nothing released, closed or freed; the count is unchanged");
+
+    nsh.tx_adopt_status = TX_SUCCESS;
+    (VOID)netstack_interface_remove(0, TRUE);
+    CHECK(nsh.sweeps == sweeps + 1 && m->state == NSH_IF_FREE &&
+          m->device_closes == 1 && m->frees == 1,
+          "the next sweep point that can enter releases it, once");
+
+    h_teardown();
+}
+
+/* The same at shutdown: the stack goes down without the sweep, and the next
+   shutdown, with the kernel stopped, collects it. */
+static void t_shutdown_without_a_bracket(void)
+{
+    NshSana2If *m = &nsh.sana2[0];
+    ULONG       sweeps;
+
+    printf("retain: shutdown that cannot enter ThreadX\n");
+
+    CHECK(h_up_with("a2065.device", 0), "the interface is up in slot 0");
+    nsh.sana2_close_held = NETEVENT_HELD_TX;
+    CHECK(netstack_interface_remove(0, TRUE) == AMI_NET_ERR_RETAINED,
+          "removed with a write held");
+    nsh.sana2_close_held = 0;
+    m->held = 0;
+
+    sweeps = nsh.sweeps;
+    nsh.tx_adopt_status = TX_NOT_DONE;
+    nsh.tx_stop_status  = TX_NOT_DONE;      /* the kernel stays running */
+    h_bury(netstack_get());
+    netstack_shutdown();
+    CHECK(nsh.sweeps == sweeps, "shutdown did not sweep without a bracket");
+    CHECK(m->state == NSH_IF_RETAINED && m->frees == 0 &&
+          m->device_closes == 0 && nsh.packet_pool_deletes == 0,
+          "the interface and the pool are kept");
+    CHECK(netstack_can_unload() == FALSE, "and the library stays");
+
+    netstack_shutdown();
+    CHECK(nsh.sweeps == sweeps && m->state == NSH_IF_RETAINED,
+          "again, kernel running and no bracket: still deferred");
+
+    nsh.tx_adopt_status = TX_SUCCESS;
+    nsh.tx_stop_status  = TX_SUCCESS;
+    netstack_shutdown();
+    CHECK(m->state == NSH_IF_FREE && m->device_closes == 1 && m->frees == 1,
+          "once the bracket can be had, released exactly once");
+    CHECK(netstack_can_unload() == TRUE, "and the library may go");
+
+    h_teardown();
+}
+
 int main(void)
 {
     t_remove_keeps_a_held_write();
@@ -296,6 +374,8 @@ int main(void)
     t_read_preflight_refuses();
     t_shutdown_holds_the_unload();
     t_new_stack_over_a_held_one();
+    t_no_bracket_defers_the_sweep();
+    t_shutdown_without_a_bracket();
 
     printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
            (h_failures == 0) ? "PASS" : "FAIL");
