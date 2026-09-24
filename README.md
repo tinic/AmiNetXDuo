@@ -316,7 +316,7 @@ evidence, not proof.
 the test suites, continuous integration, the measurement method and the CPU
 profiler.
 
-The [project-priority matrix](docs/PROJECT-PRIORITIES.md) records the current
+The [project-priority matrix](docs/plans/PROJECT-PRIORITIES.md) records the current
 support, compatibility and release-safety priorities separately from the
 known-defect [backlog](docs/BACKLOG.md).
 
