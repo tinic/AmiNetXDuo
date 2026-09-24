@@ -56,6 +56,8 @@ def parse_auth_unix(body):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=0)
+    ap.add_argument("--bind-address", default="127.0.0.1",
+                    help="IPv4 address to listen on; defaults to loopback")
     ap.add_argument("--seconds", type=float, default=120.0)
     ap.add_argument("--content", default="AmiNetXDuo NFS payload, 0123456789\n")
     ap.add_argument("--expect-uid", type=int, default=None)
@@ -66,7 +68,7 @@ def main():
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("0.0.0.0", args.port))
+    s.bind((args.bind_address, args.port))
     port = s.getsockname()[1]
     print("nfspeer_port=%d" % port, flush=True)
     print("nfspeer_content_len=%d" % len(content), flush=True)

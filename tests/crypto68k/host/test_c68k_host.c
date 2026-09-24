@@ -24,9 +24,9 @@ static c68k_limb    t_hn_scratch[T_HN_SCRATCH];
 static c68k_limb    t_ref_result[T_MAX_LIMBS * 2 + 8];
 static c68k_limb    t_tmp[T_MAX_LIMBS * 2 + 8];
 
-static VOID t_karatsuba(VOID);
-static VOID t_bulk(VOID);
-static VOID t_division(VOID);
+static void t_karatsuba(void);
+static void t_bulk(void);
+static void t_division(void);
 static void t_addsub(void);
 
 static unsigned long    t_failures;
@@ -740,7 +740,7 @@ c68k_limb           got;
     printf("   4000 trials plus the n=0 pair, %u mismatch(es)\n", mismatch);
 }
 
-static VOID t_division(VOID)
+static void t_division(void)
 {
 
 static c68k_limb    d_u[T_MAX_LIMBS * 2 + 8];
@@ -834,7 +834,7 @@ NX_CRYPTO_HUGE_NUMBER u_hn, m_hn;
 }
 
 
-static VOID t_karatsuba(VOID)
+static void t_karatsuba(void)
 {
 
 static const UINT   widths[] = { 16u, 31u, 32u, 48u, 63u, 64u };
@@ -1288,7 +1288,7 @@ static void t_bulk_chacha(void)
     }
 }
 
-static VOID t_bulk(VOID)
+static void t_bulk(void)
 {
     unsigned v;
 
