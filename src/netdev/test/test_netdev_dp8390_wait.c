@@ -213,20 +213,19 @@ static void reset_chip(void)
 /* ------------------------------------------------------------ the arms ---- */
 
 #define REFERENCE_TICKS_PER_LINE     256u
-#define ACCELERATED_TICKS_PER_LINE   25600u
+#define SLOW_TICKS_PER_LINE          32u
 #define OVW_LINES   ((DP8390_OVW_STOP_WAIT_US + 62u) / 63u)  /* ceil(1600/63) */
 
 static void timed_wait_uses_the_measured_floor(void)
 {
     ULONG spins_line;
     ULONG floor_ref;
-    ULONG floor_acc;
     ULONG start;
     ULONG lines;
     BOOL  rc;
 
     /* Beam up: the floor is priced from the measured per-line work, not the
-       6400 fallback, and it scales with the CPU. */
+       6400 fallback. */
     machine(REFERENCE_TICKS_PER_LINE, 313);
     spins_line = netdev_clock_spins_per_line();
     floor_ref  = netdev_clock_floor_spins(DP8390_OVW_STOP_WAIT_US,
@@ -235,16 +234,10 @@ static void timed_wait_uses_the_measured_floor(void)
                floor_ref, spins_line * OVW_LINES);
     expect(floor_ref != DP8390_OVW_STOP_SPINS, "not the fixed 6400 fallback");
 
-    machine(ACCELERATED_TICKS_PER_LINE, 313);
-    floor_acc = netdev_clock_floor_spins(DP8390_OVW_STOP_WAIT_US,
-                                         DP8390_OVW_STOP_SPINS);
-    expect_hex("and it scales with the CPU, accelerated",
-               floor_acc, netdev_clock_spins_per_line() * OVW_LINES);
-    expect_at_least("a faster CPU fills the same 1.6 ms with more reads",
-                    floor_acc, floor_ref + 1u);
-
     /* Drive the overwrite and watch the beam: it is ~1.6 ms of beam time, not
-       the fallback's iteration count. */
+       the fallback's iteration count.  A lower bound is all a beam-line count
+       can assert here, and it cannot tell the measured floor from the 6400
+       fallback on this machine -- both are about 26 lines. */
     machine(REFERENCE_TICKS_PER_LINE, 313);
     (VOID)netdev_clock_us_per_line();   /* measure before the clock starts */
     reset_chip();
@@ -254,6 +247,23 @@ static void timed_wait_uses_the_measured_floor(void)
     expect(rc == FALSE, "a timed overwrite completes without a reset");
     expect_at_least("and the wait spans the 1.6 ms beam bound",
                     lines, DP8390_OVW_STOP_WAIT_US / 63u);
+
+    /*
+     * THE OVER-SPIN GATE the lower bound cannot give.  On a slow bus -- 32
+     * reads to the line, the A3000's end of the range -- the measured floor
+     * is 26 * 32 = 832 reads and the wait is ~32 lines; a reverted fixed 6400
+     * floor runs 6400 reads and ~250 lines.  The upper bound names which
+     * floor the wait used, where the reference machine cannot tell them
+     * apart.
+     */
+    machine(SLOW_TICKS_PER_LINE, 313);
+    (VOID)netdev_clock_us_per_line();
+    reset_chip();
+    start = mach_lines();
+    rc = dp8390_overwrite(&nic, ED_ISR_OVW);
+    lines = mach_lines() - start;
+    expect(rc == FALSE, "a slow-bus overwrite completes without a reset");
+    expect(lines <= 3u * OVW_LINES, "and the wait is not over-spun");
 }
 
 static void untimed_wait_runs_the_fallback(void)
