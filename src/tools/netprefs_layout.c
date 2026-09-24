@@ -75,6 +75,7 @@ const char *const np_action_labels[] = { "Online", "Offline", 0 };
 
 enum { K_FILL, K_INT, K_CYCLE_IPV4, K_CYCLE_IPV6, K_CHECK, K_TEXT, K_ICON };
 enum { AT_FIELD, AT_PANEL, AT_NEXT, AT_RIGHT };
+enum { DEVICE_ICON_PAD = 4, DEVICE_ICON_GAP = 3 };
 
 /* One gadget on a page row.  AT_FIELD: the shared field column; AT_PANEL:
    the page's left edge; AT_NEXT: after the previous cell; AT_RIGHT: flush
@@ -174,7 +175,7 @@ static int cell_w(const Metrics *m, const NpCell *c)
                               2 * BUTTON_PAD;
     case K_CHECK:      return m->cb_w;
     case K_TEXT:       return label_w(m, c->item);
-    case K_ICON:       return m->gh + 8;
+    case K_ICON:       return m->gh + DEVICE_ICON_PAD;
     default:           return m->field_min;
     }
 }
@@ -246,7 +247,7 @@ static int place_row(const Metrics *m, NpLayout *l, int page, int row,
             int cell_right = right;
 
             if (c->item == NP_L_DEVICE)
-                cell_right -= m->gh + 8 + CELL_GAP;
+                cell_right -= m->gh + DEVICE_ICON_PAD + DEVICE_ICON_GAP;
             need = max_i(need, x + w);
             w = max_i(w, cell_right - x);
         }

@@ -132,7 +132,6 @@ typedef struct NetPrefs
     struct Gadget *g_device;
     struct Gadget *g_device_browse;
     APTR           browse_frame;
-    APTR           browse_icon;
     struct DrawInfo *browse_draw_info;
     struct Gadget *g_unit;
     struct Gadget *g_card;
@@ -1492,6 +1491,44 @@ static VOID detach_panel(ULONG which)
     if (tail != NULL) tail->NextGadget = NULL;
 }
 
+/* A compact file glyph drawn with the screen's own text pen.  The OS 3.1
+ * machine has no button.gadget/BAG_POPFILE, so keep the picker self-contained
+ * and palette-aware rather than depending on a class file or a fixed bitmap. */
+static VOID draw_device_browse_icon(VOID)
+{
+    const NpBox *b = &np.layout.box[NP_L_DEVICE_BROWSE];
+    struct RastPort *rp;
+    BYTE old_fg, old_mode;
+    WORD x, y;
+
+    if (np.window == NULL || np.g_device_browse == NULL ||
+        np.browse_draw_info == NULL || np.active_panel != NP_PANEL_DEVICE)
+        return;
+
+    rp = np.window->RPort;
+    old_fg = rp->FgPen;
+    old_mode = rp->DrawMode;
+    x = (WORD)(b->x + (b->w - 12) / 2);
+    y = (WORD)(b->y + (b->h - 11) / 2);
+    SetAPen(rp, np.browse_draw_info->dri_Pens[TEXTPEN]);
+    SetDrMd(rp, JAM1);
+    Move(rp, x, y);
+    Draw(rp, x + 7, y);
+    Draw(rp, x + 11, y + 4);
+    Draw(rp, x + 11, y + 10);
+    Draw(rp, x, y + 10);
+    Draw(rp, x, y);
+    Move(rp, x + 7, y);
+    Draw(rp, x + 7, y + 4);
+    Draw(rp, x + 11, y + 4);
+    Move(rp, x + 2, y + 6);
+    Draw(rp, x + 9, y + 6);
+    Move(rp, x + 2, y + 8);
+    Draw(rp, x + 8, y + 8);
+    SetAPen(rp, (ULONG)(UBYTE)old_fg);
+    SetDrMd(rp, (ULONG)(UBYTE)old_mode);
+}
+
 /* GadTools has no page gadget.  The common controls and each page therefore
  * have separate gadget lists; show_panel() removes one list and attaches the
  * next.  The recessed panel and separator are window decoration and must be
@@ -1549,6 +1586,7 @@ static VOID draw_layout(VOID)
     SetBPen(rp, (ULONG)(UBYTE)old_bg);
     SetDrMd(rp, (ULONG)(UBYTE)old_mode);
     SetFont(rp, old_font);
+    draw_device_browse_icon();
 }
 
 static VOID show_panel(ULONG which)
@@ -1575,6 +1613,7 @@ static VOID show_panel(ULONG which)
     {
         (VOID)AddGList(np.window, np.g_device_browse, (UWORD)-1, 1, NULL);
         RefreshGList(np.g_device_browse, np.window, NULL, 1);
+        draw_device_browse_icon();
     }
 }
 
@@ -1627,12 +1666,11 @@ static BOOL layout_in(struct TextAttr *ta)
     return TRUE;
 }
 
-/* ROM BOOPSI classes supply the icon and its button frame on Kickstart 2+
- * without a ReAction class or any image file installed on the user's disk. */
+/* A ROM BOOPSI class supplies the button frame on Kickstart 2+. */
 static VOID make_device_browse(VOID)
 {
     const NpBox *b = &np.layout.box[NP_L_DEVICE_BROWSE];
-    struct TagItem frame[4], icon[4], button[10];
+    struct TagItem frame[4], button[9];
 
     np.browse_draw_info = GetScreenDrawInfo(np.screen);
     if (np.browse_draw_info == NULL) return;
@@ -1644,14 +1682,6 @@ static VOID make_device_browse(VOID)
     np.browse_frame = NewObjectA(NULL, FRAMEICLASS, frame);
     if (np.browse_frame == NULL) return;
 
-    icon[0].ti_Tag = SYSIA_Which;    icon[0].ti_Data = DOWNIMAGE;
-    icon[1].ti_Tag = SYSIA_DrawInfo;
-    icon[1].ti_Data = (ULONG)np.browse_draw_info;
-    icon[2].ti_Tag = SYSIA_Size;     icon[2].ti_Data = SYSISIZE_MEDRES;
-    icon[3].ti_Tag = TAG_DONE;       icon[3].ti_Data = 0;
-    np.browse_icon = NewObjectA(NULL, SYSICLASS, icon);
-    if (np.browse_icon == NULL) return;
-
     button[0].ti_Tag = GA_Left;       button[0].ti_Data = (ULONG)b->x;
     button[1].ti_Tag = GA_Top;        button[1].ti_Data = (ULONG)b->y;
     button[2].ti_Tag = GA_Width;      button[2].ti_Data = (ULONG)b->w;
@@ -1660,11 +1690,9 @@ static VOID make_device_browse(VOID)
     button[5].ti_Tag = GA_RelVerify;  button[5].ti_Data = TRUE;
     button[6].ti_Tag = GA_Image;
     button[6].ti_Data = (ULONG)np.browse_frame;
-    button[7].ti_Tag = GA_LabelImage;
-    button[7].ti_Data = (ULONG)np.browse_icon;
-    button[8].ti_Tag = GA_DrawInfo;
-    button[8].ti_Data = (ULONG)np.browse_draw_info;
-    button[9].ti_Tag = TAG_DONE;     button[9].ti_Data = 0;
+    button[7].ti_Tag = GA_DrawInfo;
+    button[7].ti_Data = (ULONG)np.browse_draw_info;
+    button[8].ti_Tag = TAG_DONE;     button[8].ti_Data = 0;
     np.g_device_browse = (struct Gadget *)NewObjectA(NULL, FRBUTTONCLASS,
                                                       button);
 }
@@ -1889,8 +1917,6 @@ static VOID close_ui(VOID)
     np.live_offline_gadgets = NULL;
     if (np.g_device_browse != NULL) DisposeObject(np.g_device_browse);
     np.g_device_browse = NULL;
-    if (np.browse_icon != NULL) DisposeObject(np.browse_icon);
-    np.browse_icon = NULL;
     if (np.browse_frame != NULL) DisposeObject(np.browse_frame);
     np.browse_frame = NULL;
     if (np.browse_draw_info != NULL)
@@ -1963,7 +1989,11 @@ static VOID event_loop(VOID)
                     case GID_IPV6:
                         set_static6_fields((BOOL)(code == AMI_IP6TYPE_STATIC));
                         break;
-                    case GID_DEVICE_BROWSE: browse_device(); break;
+                    case GID_DEVICE_BROWSE:
+                        draw_device_browse_icon();
+                        browse_device();
+                        draw_device_browse_icon();
+                        break;
                     case GID_SAVE: (VOID)save_form(FALSE); break;
                     case GID_APPLY: (VOID)save_form(TRUE); break;
                     case GID_LIVE_ACTION:

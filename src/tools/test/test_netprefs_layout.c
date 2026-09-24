@@ -113,7 +113,7 @@ static void verify(const Fake *f, const NpLayout *l)
                   f->name, "frame crosses a common gadget", i, 0);
     }
 
-    check(l->box[NP_L_DEVICE].x + l->box[NP_L_DEVICE].w + 8 <=
+    check(l->box[NP_L_DEVICE].x + l->box[NP_L_DEVICE].w + 3 <=
           l->box[NP_L_DEVICE_BROWSE].x,
           f->name, "device and browse button need a gap", 0, 0);
     check(l->box[NP_L_DEVICE].y == l->box[NP_L_DEVICE_BROWSE].y,
