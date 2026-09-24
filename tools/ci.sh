@@ -324,7 +324,9 @@ host_test_targets() { # builddir
 #      requests is AMI_NET_ERR_RETAINED, and the unload waits for the last hold
 #      436 with test_pool_stride: NetX's own nx_packet_pool_create() carves
 #      exactly the planned pool, 4096 on the clamp and not 4106
-HOST_TESTS_EXPECTED=436
+#      438 with tcp_mss_peek and tcp_mss_peek_timestamps: the MSS read without
+#      the IP mutex is the answer nx_tcp_socket_mss_get() gives, in every state
+HOST_TESTS_EXPECTED=438
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

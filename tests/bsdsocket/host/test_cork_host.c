@@ -103,6 +103,7 @@ static struct
     ULONG        nx_enters, nx_leaves;
 
     ULONG        mss;
+    ULONG        mss_gets;          /* locked nx_tcp_socket_mss_get() calls */
 
     UINT         alloc_plan[H_PLAN];
     unsigned     alloc_planned, allocs;
@@ -569,10 +570,15 @@ UINT _nxe_packet_release(NX_PACKET **packet_ptr_ptr)
     return NX_SUCCESS;
 }
 
+/* The running ThreadX thread, which transfer.c compares against its own
+   adopted caller before reading the MSS without the IP mutex. */
+TX_THREAD *_tx_thread_current_ptr;
+
 UINT _nxe_tcp_socket_mss_get(NX_TCP_SOCKET *socket_ptr, ULONG *mss)
 {
     (VOID)socket_ptr;
     h_safe();
+    h.mss_gets++;
     *mss = h.mss;
     return NX_SUCCESS;
 }
@@ -1087,6 +1093,47 @@ static void t_mss_fill(void)
     CHECK(h.sends == 1 && h_wire_is(0, 100),
           "and the hundred go as one segment, now");
     CHECK(s->as_CorkPkt == NULL, "nothing pending");
+}
+
+/*
+ * The cork path sizes by the same MSS as the uncorked one, and the baton
+ * holder reads it without the IP mutex there too.  The locked call answers
+ * 50 and the socket's fields 100: sixty then forty fill ONE segment only when
+ * the fields sized it.
+ */
+static void t_mss_peek(void)
+{
+    AmiSocket *s;
+
+    printf("cork: the baton holder reads the MSS without the mutex
+");
+
+    h_reset();
+    s = h_tcp(0);
+    h.mss = 50;
+    s->as_Nx.tcp.nx_tcp_socket_state       = NX_TCP_ESTABLISHED;
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss = 100;
+    h_base.sb_NxCaller.nc_Adopted = TRUE;
+    _tx_thread_current_ptr = &h_base.sb_NxCaller.nc_Thread;
+
+    CHECK(h_send(0, 0, 60, 0) == 60 && h_send(0, 60, 40, 0) == 40, "sixty, forty");
+    CHECK(h.sends == 1 && h_wire_is(0, 100),
+          "one segment of a hundred: the socket's fields sized it");
+    CHECK(h.mss_gets == 0, "and no locked MSS call was made");
+
+    /* Another thread running: the locked call, which answers 50. */
+    h_reset();
+    s = h_tcp(0);
+    h.mss = 50;
+    s->as_Nx.tcp.nx_tcp_socket_state       = NX_TCP_ESTABLISHED;
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss = 100;
+    h_base.sb_NxCaller.nc_Adopted = TRUE;
+    _tx_thread_current_ptr = NULL;
+
+    CHECK(h_send(0, 0, 60, 0) == 60, "sixty");
+    CHECK(h.mss_gets >= 1, "not the running thread: the locked call");
+    CHECK(h.sends == 2 && h_wire_is(0, 60),
+          "and sixty is over its fifty, so it goes uncorked");
 }
 
 static void t_larger_than_room(void)
@@ -2046,6 +2093,7 @@ int main(void)
     t_sub_mss();
     t_tick();
     t_mss_fill();
+    t_mss_peek();
     t_larger_than_room();
     t_window_stall();
     t_no_packet();

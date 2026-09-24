@@ -305,6 +305,12 @@ struct AmiSocketBase
     ULONG                   sb_NxWorst;     /* the worst one, E-Clock ticks  */
 #endif
 
+#ifdef AMINETXDUO_SCHEDCOUNT
+    ULONG                   sb_ScTcpSends;  /* bsd_send_tcp() calls          */
+    ULONG                   sb_ScMssPeek;   /* MSS read without the IP mutex */
+    ULONG                   sb_ScMssLocked; /* and through the mutex         */
+#endif
+
     struct AmiSocket      **sb_Table;       /* descriptor table              */
     LONG                    sb_TableSize;
 

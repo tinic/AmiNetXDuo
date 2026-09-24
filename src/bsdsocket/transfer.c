@@ -16,6 +16,7 @@
 #include "nx_ip.h"
 #include "nx_tcp.h"
 #include "nx_ipv4.h"
+#include "tx_thread.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
 #include "../ipv6/ipv6_srcsel.h"
@@ -290,6 +291,42 @@ static LONG bsd_send_consumed(NX_PACKET *packet, LONG filled)
     return filled - left;
 }
 
+/*
+ * The MSS a send sizes its segments by; 0 leaves the caller's fallback.
+ *
+ * Inside this base's own adopted bracket the calling task IS the running
+ * TX_THREAD and holds the baton, so nothing else can move the socket and the
+ * IP mutex nx_tcp_socket_mss_get() takes buys nothing: the same answer comes
+ * from _nx_tcp_socket_mss_compute() with no ThreadX call.  Any other caller
+ * -- not adopted, or already a ThreadX thread -- takes the locked call.
+ *
+ * TCP/IP offload would move the connection into the driver, where the socket
+ * fields the compute reads are not the answer.
+ */
+#if defined(NX_ENABLE_TCPIP_OFFLOAD)
+#error "bsd_send_mss_get() assumes NX_ENABLE_TCPIP_OFFLOAD is off"
+#endif
+
+static VOID bsd_send_mss_get(struct AmiSocketBase *base, AmiSocket *sock,
+                             ULONG *mss)
+{
+    if (base->sb_NxCaller.nc_Adopted &&
+        _tx_thread_current_ptr == &base->sb_NxCaller.nc_Thread)
+    {
+        *mss = _nx_tcp_socket_mss_compute(&sock->as_Nx.tcp);
+#ifdef AMINETXDUO_SCHEDCOUNT
+        base->sb_ScMssPeek++;
+#endif
+        return;
+    }
+
+#ifdef AMINETXDUO_SCHEDCOUNT
+    base->sb_ScMssLocked++;
+#endif
+    /* Judged by mss: zero is the caller's fallback. */
+    AMI_NX_BY_OUTPUT(nx_tcp_socket_mss_get(&sock->as_Nx.tcp, mss));
+}
+
 static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
                              BsdIovCursor *cur, LONG len, LONG flags,
                              AmiSana2If *run)
@@ -309,7 +346,7 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
     if ((sock->as_Flags & ASF_WRSHUT) != 0)
         return bsd_fail(base, AMI_EPIPE);
 
-    nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
+    bsd_send_mss_get(base, sock, &mss);
     if (mss == 0)
         mss = BSD_DEFAULT_MSS;
 
@@ -579,8 +616,7 @@ static LONG bsd_send_tcp_cork(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_send_tcp_run(base, sock, cur, len, flags, run);
     }
 
-    /* Judged by mss: zero is the fallback below. */
-    AMI_NX_BY_OUTPUT(nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss));
+    bsd_send_mss_get(base, sock, &mss);
     if (mss == 0)
         mss = BSD_DEFAULT_MSS;
 
@@ -763,6 +799,9 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     AmiSana2If *run = bsd_send_run_iface(sock);
     LONG        result;
 
+#ifdef AMINETXDUO_SCHEDCOUNT
+    base->sb_ScTcpSends++;
+#endif
     ami_sana2_tx_run_begin(run);
 #ifdef AMINETXDUO_TCP_CORK
     if ((sock->as_CorkFlags & BSD_CORKF_ON) != 0 || sock->as_CorkPkt != NULL ||

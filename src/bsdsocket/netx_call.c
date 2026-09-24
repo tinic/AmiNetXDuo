@@ -147,6 +147,17 @@ VOID bsd_nx_release(struct AmiSocketBase *base)
              (long)(base->sb_NxWorst / 709UL));
 #endif
 
+#ifdef AMINETXDUO_SCHEDCOUNT
+    /* The mutex counts are the whole stack's since boot, so the reports of
+       two openers either side of a run bracket it. */
+    AMI_INFO("bsdsocket: schedcount: %ld tcp sends, mss %ld peeked %ld locked;"
+             " stack mutex get %ld put %ld",
+             (long)base->sb_ScTcpSends, (long)base->sb_ScMssPeek,
+             (long)base->sb_ScMssLocked,
+             (long)_tx_amiga_sched_count[TX_AMIGA_SC_MUTEX_GET],
+             (long)_tx_amiga_sched_count[TX_AMIGA_SC_MUTEX_PUT]);
+#endif
+
     base->sb_NxNest     = 0;
     base->sb_NxTask     = NULL;
     base->sb_ErrPending = 0;    /* dropped, not delivered: no bracket to leave */
