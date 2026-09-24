@@ -332,6 +332,17 @@ struct Library *tool_netstatus_open(BOOL quiet);
 VOID            tool_netstatus_close(struct Library *base);
 
 /*
+ * The same, for a command that must change nothing by asking: only the
+ * bsdsocket.library already resident, only ours, only with its stack up.
+ * Never loads the library and never starts the stack.  tool_diag.c says what
+ * it does and does not rule out.
+ */
+struct Library *tool_netstatus_open_resident(VOID);
+
+/* gethostname() through an open base.  0, or -1. */
+LONG tool_stack_hostname(struct Library *base, char *name, ULONG len);
+
+/*
  * An IPv6 address, four host-order ULONGs, in RFC 5952 text, and the same
  * text back to four ULONGs.  Both answer the same on a library with IPv6 and
  * one without: they convert text, and whether the machine can reach the

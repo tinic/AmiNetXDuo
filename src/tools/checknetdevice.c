@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "tools.h"
+#include "tool_passive.h"
 
 #include <exec/execbase.h>
 #include <exec/memory.h>
@@ -33,75 +33,21 @@ enum
 
 /* ------------------------------------------------------------ the record --
  *
- * Read under Forbid() and copied whole: the driver removes the semaphore under
- * Forbid() before the memory can be freed. The semaphore is never obtained --
- * a diagnostic must not block on the driver that can be the broken thing.
+ * tool_anxdiag_read() copies it whole under Forbid().  The semaphore is never
+ * obtained -- a diagnostic must not block on the driver that can be the
+ * broken thing.
  */
 static AnxDiagMark cnd_mark;
 
-/* The semaphore the driver publishes under: its own name plus the suffix,
-   so anxnet.device and anxgenet.device each have a record and DEVICE <name>
-   picks one.  A path ("DEVS:Networks/anxgenet.device") is reduced to the
-   name, which is what Exec calls the device.  Built once, before Forbid(). */
-static char cnd_sem_name[64];
 static const char *cnd_device = ANXNET_DEVICE_NAME;   /* what the messages name */
 
-static const char *cnd_sem_name_for(const char *device)
-{
-    const char *base = device;
-    const char *p;
-    ULONG       n    = 0;
-
-    for (p = device; *p != '\0'; p++)
-    {
-        if (*p == '/' || *p == ':')
-            base = p + 1;
-    }
-    for (p = base; *p != '\0' && n < sizeof(cnd_sem_name) - 1; p++)
-        cnd_sem_name[n++] = *p;
-    for (p = ANXDIAG_NAME_SUFFIX; *p != '\0' && n < sizeof(cnd_sem_name) - 1; p++)
-        cnd_sem_name[n++] = *p;
-    cnd_sem_name[n] = '\0';
-
-    return cnd_sem_name;
-}
-
-#define CND_BAD_VERSION     1
-#define CND_ABSENT          2
-#define CND_OK              0
+#define CND_OK              TOOL_PASSIVE_OK
+#define CND_ABSENT          TOOL_PASSIVE_ABSENT
+#define CND_BAD_VERSION     TOOL_PASSIVE_BAD_VERSION
 
 static UWORD cnd_read(const char *device)
 {
-    const AnxDiagMark *mark;
-    UWORD              status = CND_ABSENT;
-    const char        *name   = cnd_sem_name_for(device);
-
-    Forbid();
-
-    /* (STRPTR): NDK 3.9 declares FindSemaphore(STRPTR), 3.2 CONST_STRPTR. */
-    mark = (const AnxDiagMark *)FindSemaphore((STRPTR)name);
-
-    if (mark != NULL && mark->ad_Magic == ANXDIAG_MAGIC)
-    {
-        if (mark->ad_Version == (UWORD)ANXDIAG_VERSION &&
-            mark->ad_Size    == (UWORD)sizeof(AnxDiagMark))
-        {
-            cnd_mark = *mark;
-            status   = CND_OK;
-        }
-        else
-        {
-            /* Keep the two fields the message needs and nothing else: the
-               shapes disagree, so no other field can be believed. */
-            cnd_mark.ad_Version = mark->ad_Version;
-            cnd_mark.ad_Size    = mark->ad_Size;
-            status = CND_BAD_VERSION;
-        }
-    }
-
-    Permit();
-
-    return status;
+    return tool_anxdiag_read(device, &cnd_mark);
 }
 
 /* ------------------------------------------------------------- the names -- */

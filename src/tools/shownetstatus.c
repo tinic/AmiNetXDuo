@@ -8,6 +8,7 @@
 
 #include "tools_nx.h"
 #include "tool_events.h"
+#include "tool_passive.h"
 
 #include "aminetxduo/events.h"
 
@@ -1560,8 +1561,8 @@ static VOID show_users(BOOL stack_running)
 /* ------------------------------------------------------------------ events,
  *
  * Read through the published mark, NOT NetStackQuery(): OpenLibrary() would
- * call netstack_startup() and restart the network. Copied whole under Forbid();
- * the semaphore is never obtained. Static: 32 rows exceed a Shell stack.
+ * call netstack_startup() and restart the network. tool_events_read() copies
+ * it whole under Forbid(). Static: 32 rows exceed a Shell stack.
  */
 static struct
 {
@@ -1571,62 +1572,13 @@ static struct
 
 #define SNS_EVENT_ROWS  (sizeof(sns_events.e) / sizeof(sns_events.e[0]))
 
-#define SNS_EV_OK           0
-#define SNS_EV_ABSENT       1
-#define SNS_EV_BAD_VERSION  2
+#define SNS_EV_BAD_VERSION  TOOL_PASSIVE_BAD_VERSION
 
 /* Oldest first, into sns_events.e. How many were copied, or -1 and *status. */
 static LONG sns_events_read(UWORD *status)
 {
-    const AmiEventMark   *mark;
-    const NetStatusEvent *ring;
-    LONG                  copied = 0;
-
-    *status = SNS_EV_ABSENT;
-
-    Forbid();
-
-    /* (STRPTR): NDK 3.9 declares FindSemaphore(STRPTR), 3.2 CONST_STRPTR. */
-    mark = (const AmiEventMark *)FindSemaphore((STRPTR)AMI_EVENTS_NAME);
-
-    if (mark != NULL && mark->em_Magic == AMI_EVENTS_MAGIC)
-    {
-        /*
-         * The header's shape and one entry's, and not the whole object's size:
-         * the ring's length is a build option.
-         */
-        if (mark->em_Version   == (UWORD)AMI_EVENTS_VERSION &&
-            mark->em_Size      == (UWORD)sizeof(AmiEventMark) &&
-            mark->em_EntrySize == (UWORD)sizeof(NetStatusEvent))
-        {
-            ULONG entries = (ULONG)mark->em_Entries;
-            ULONG have;
-            ULONG first;
-            ULONG i;
-
-            sns_events.mark = *mark;
-            ring            = AMI_EVENTS_RING(mark);
-
-            have  = (mark->em_Seq < entries) ? mark->em_Seq : entries;
-            first = (mark->em_Seq <= entries) ? 0UL : mark->em_Next;
-
-            for (i = 0; i < have && copied < (LONG)SNS_EVENT_ROWS; i++)
-            {
-                sns_events.e[copied] = ring[(first + i) % entries];
-                copied++;
-            }
-
-            *status = SNS_EV_OK;
-        }
-        else
-        {
-            *status = SNS_EV_BAD_VERSION;
-        }
-    }
-
-    Permit();
-
-    return (*status == SNS_EV_OK) ? copied : -1;
+    return tool_events_read(&sns_events.mark, sns_events.e,
+                            (ULONG)SNS_EVENT_ROWS, status);
 }
 
 static VOID show_events(VOID)
