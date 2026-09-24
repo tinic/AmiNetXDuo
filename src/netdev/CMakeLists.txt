@@ -611,6 +611,31 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_dp8390 COMMAND test_netdev_dp8390)
 
+    # The overwrite stop delay, against the REAL clock.  test_netdev_dp8390
+    # stubs netdev_wait_* and floor_spins, so it proves dp8390_overwrite()'s
+    # arguments and nothing about the wait it links.  This links netdev_clock.c
+    # (NETDEV_CLOCK_TEST supplies a beam the test drives) and runs the
+    # overwrite's 1.6 ms through the three beam shapes: timed (measured floor),
+    # untimed (fallback), and stalled (cap).
+    add_executable(test_netdev_dp8390_wait
+        test/test_netdev_dp8390_wait.c
+        netdev_clock.c
+        netdev_verify.c)
+
+    target_include_directories(test_netdev_dp8390_wait PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_definitions(test_netdev_dp8390_wait PRIVATE NETDEV_CLOCK_TEST=1)
+    target_compile_options(test_netdev_dp8390_wait PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_dp8390_wait COMMAND test_netdev_dp8390_wait)
+
     # The ISA Plug and Play sequence in front of an X-Surf's RTL8019AS, the
     # last file in this directory a host could compile and nothing did.
     #
