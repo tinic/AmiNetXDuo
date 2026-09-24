@@ -306,7 +306,9 @@ host_test_targets() { # builddir
 #      the AMITCP port during OpenDevice, in every shipping profile
 #      429 with test_netprefs_layout: NetPrefs geometry from font metrics,
 #      split out of netprefs.c
-HOST_TESTS_EXPECTED=429
+#      430 with test_profreport: profreport.py maps .text.<name> sections to
+#      their function under -ffunction-sections
+HOST_TESTS_EXPECTED=430
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
