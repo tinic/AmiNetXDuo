@@ -787,15 +787,39 @@ static LONG bsd_netstack_bringup(VOID)
 /* The master base owns netstack_startup_loopback()'s reference.  Retire the
    raw pointer before giving that reference back so no library call can obtain
    an NX_IP whose storage teardown is about to reclaim.  Caller holds sb_Lock. */
+#ifdef AMINETXDUO_TCP_CORK
+/* A netstack reference kept because the cork's pass was still in flight when
+   the stack was to go (cork.c, bsd_cork_stop()).  Given back by the next
+   shutdown that finds none; until then the stack, its pool and its NX_IP stay
+   up and netstack_can_unload() keeps the library resident.  sb_Lock. */
+static BOOL bsd_stack_retained;
+#endif
+
 static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
 {
 #ifdef AMINETXDUO_TCP_CORK
     /* The cork's timer and IP handler go before the IP instance does: a tick
-       or a queued event must never reach a deleted timer or a freed NX_IP. */
-    bsd_cork_stop();
+       or a queued event must never reach a deleted timer or a freed NX_IP.
+       And a pass still running keeps the IP instance, its pool and the socket
+       it is sending on: the teardown is skipped, not raced. */
+    BOOL quiet = bsd_cork_stop();
 #endif
     master->sb_StackIp   = NULL;
     master->sb_StackPool = NULL;
+#ifdef AMINETXDUO_TCP_CORK
+    if (!quiet)
+    {
+        bsd_stack_retained = TRUE;
+        AMI_WARN("bsdsocket: the IP thread is still inside a send; the stack "
+                 "is kept up rather than freed under it");
+        return;
+    }
+    if (bsd_stack_retained)
+    {
+        bsd_stack_retained = FALSE;
+        netstack_shutdown();        /* the reference a previous stop kept */
+    }
+#endif
     netstack_shutdown();
 }
 

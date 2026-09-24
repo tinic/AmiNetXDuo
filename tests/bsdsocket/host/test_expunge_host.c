@@ -200,8 +200,11 @@ VOID bsd_timer_teardown(struct AmiSocketBase *base) { (VOID)base; }
 #ifdef AMINETXDUO_TCP_CORK
 /* The cork's timer comes and goes with the stack (library.c); cork.c is
    test_cork's. */
+static BOOL  h_cork_busy;         /* bsd_cork_stop(): a pass in flight */
+static ULONG h_cork_stops;
+
 VOID bsd_cork_start(NX_IP *ip) { (VOID)ip; }
-VOID bsd_cork_stop(VOID)       { }
+BOOL bsd_cork_stop(VOID)       { h_cork_stops++; return !h_cork_busy; }
 #endif
 
 /* bsd_lib_open() calls this on every open, to hold usergroup.library resident
@@ -603,6 +606,52 @@ static VOID t_transient_stack_reference(VOID)
     h_report("transient", 0, 0, 0, h_teardown_ran());
 }
 
+#ifdef AMINETXDUO_TCP_CORK
+/*
+ * The stack's last reference goes while the cork's IP pass is still inside a
+ * send (cork.c, bsd_cork_stop() answering FALSE): the netstack is kept, not
+ * torn down under it, and the reference is given back by the next shutdown.
+ */
+static VOID t_cork_pass_keeps_stack(VOID)
+{
+    printf("the stack's last reference with a cork pass in flight\n");
+
+    h_machine_reset(TRUE);
+    h.stack_running = TRUE;
+    h_base->sb_StackIp   = &h_stack_ip;
+    h_base->sb_StackPool = &h_stack_pool;
+    h_base->sb_StackRefs = 1;
+    CHECK(bsd_stack_transient_hold(h_base) == 0, "a worker reference");
+    h_base->sb_StackRefs = 1;             /* the worker's is the last one */
+    h_base->sb_TransientStackRefs = 1;
+
+    h_cork_busy  = TRUE;
+    h_cork_stops = 0;
+    bsd_stack_transient_release(h_base);
+    CHECK(h_cork_stops == 1, "the cork is stopped first");
+    CHECK(h.shutdown_calls == 0,
+          "a pass in flight: the netstack is not torn down under it");
+    CHECK(h_base->sb_StackIp == NULL && h_base->sb_StackPool == NULL,
+          "though no library call can reach it any more");
+
+    /* The next time the stack goes, with no pass: both references. */
+    h_cork_busy = FALSE;
+    h_base->sb_StackIp   = &h_stack_ip;
+    h_base->sb_StackPool = &h_stack_pool;
+    h_base->sb_StackRefs = 1;
+    h_base->sb_TransientStackRefs = 1;
+    bsd_stack_transient_release(h_base);
+    CHECK(h.shutdown_calls == 2,
+          "the next shutdown gives back the kept reference and its own");
+
+    h_base->sb_StackRefs = 1;
+    h_base->sb_TransientStackRefs = 1;
+    h_base->sb_StackIp   = &h_stack_ip;
+    bsd_stack_transient_release(h_base);
+    CHECK(h.shutdown_calls == 3, "and after that, one each time again");
+}
+#endif
+
 static VOID t_loopback_startup_failure_ownership(VOID)
 {
     struct AmiSocketBase *opened;
@@ -668,6 +717,9 @@ int main(void)
     t_last_close_retries();
     t_transient_stack_reference();
     t_loopback_startup_failure_ownership();
+#ifdef AMINETXDUO_TCP_CORK
+    t_cork_pass_keeps_stack();
+#endif
     printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
 }

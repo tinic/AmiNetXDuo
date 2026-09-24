@@ -113,6 +113,20 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME expunge_refusal COMMAND test_expunge)
 
+    # The same library.c with AMINETXDUO_TCP_CORK: the stack's teardown is
+    # skipped, and the reference kept, while the cork's IP pass is in flight.
+    add_executable(test_expunge_cork host/test_expunge_host.c
+                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/library.c"
+                                     "${CMAKE_SOURCE_DIR}/src/common/events.c")
+    get_target_property(_expunge_inc test_expunge INCLUDE_DIRECTORIES)
+    target_include_directories(test_expunge_cork PRIVATE ${_expunge_inc})
+    target_compile_options(test_expunge_cork PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
+    target_compile_definitions(test_expunge_cork PRIVATE AMINETXDUO_TCPDEVICE
+        AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING} AMINETXDUO_TCP_CORK)
+    add_test(NAME expunge_refusal_cork COMMAND test_expunge_cork)
+
     # handoff.c, including listeners.  AmiTCP and Roadshow allow a listening
     # descriptor through ReleaseSocket()/ReleaseCopyOfSocket(); refusing it
     # was an observable compatibility gap and was not required by NetX Duo's

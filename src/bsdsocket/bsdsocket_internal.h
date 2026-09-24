@@ -997,7 +997,7 @@ VOID  bsd_timer_teardown(struct AmiSocketBase *base);
 #define BSD_CORK_OWNER_IP   ((APTR)1UL)
 
 VOID  bsd_cork_start(NX_IP *ip);
-VOID  bsd_cork_stop(VOID);
+BOOL  bsd_cork_stop(VOID);    /* FALSE: a pass is still in flight */
 BOOL  bsd_cork_running(VOID);
 VOID  bsd_cork_ip_pass(NX_IP *ip);
 VOID  bsd_cork_tick(ULONG ip_arg);

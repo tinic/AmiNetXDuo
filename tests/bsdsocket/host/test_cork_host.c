@@ -1722,14 +1722,26 @@ static void t_stop_timer_refusals(void)
 static AmiSocket *h_mid;
 static BOOL       h_mid_drop_waited;
 
+static BOOL h_mid_task;             /* the stopping caller is a plain Task */
+
 static void h_stop_mid_pass(void)
 {
     ULONG releases = h.releases;
+    BOOL  quiet;
 
     h.enter_result = AMI_NET_ERR_KERNEL;
-    bsd_cork_stop();
+    if (h_mid_task)
+        h_task.tc_Node.ln_Type = NT_TASK;
+    quiet = bsd_cork_stop();
+    h_task.tc_Node.ln_Type = NT_PROCESS;
 
-    CHECK(h.delays == 250, "the stop waited for the pass, bounded, by Delay()");
+    CHECK(!quiet, "the stop answers that a pass is still in flight, so the "
+                  "caller keeps the stack, its pool and its NX_IP");
+    if (h_mid_task)
+        CHECK(h.delays == 0, "a plain Task cannot sleep, and does not try");
+    else
+        CHECK(h.delays == 250,
+              "a Process waited for the pass, bounded, by Delay()");
     CHECK(h_ip.nx_ip_cork_handler == NX_NULL && h.deletes == 1,
           "handler cleared and timer deleted before anything is reclaimed");
     CHECK(h_mid->as_CorkState == BSD_CORK_FLUSH &&
@@ -1750,7 +1762,13 @@ static void h_stop_mid_pass(void)
 
 static void t_stop_during_pass(void)
 {
-    printf("cork: the stack going down while a pass is in its send\n");
+    int round;
+
+    for (round = 0; round < 2; round++)
+    {
+    h_mid_task = (round == 1) ? TRUE : FALSE;
+    printf("cork: the stack going down while a pass is in its send (%s)\n",
+           h_mid_task ? "a plain Task" : "a Process, the wait runs out");
 
     h_reset();
     h_mid = h_tcp(0);
@@ -1765,13 +1783,18 @@ static void t_stop_during_pass(void)
           "and did not start a stopped cork's timer again");
     bsd_cork_drop(h_mid);
     CHECK(h.releases == 0, "the drop afterwards has nothing left to release");
+    }
+    h_mid_task = FALSE;
 
-    /* A refused stop with no pass running does not wait at all. */
+    /* A refused stop with no pass running does not wait at all, and says the
+       stack may go. */
     h_reset();
     (VOID)h_tcp(0);
     h.enter_result = AMI_NET_ERR_KERNEL;
-    bsd_cork_stop();
-    CHECK(h.delays == 0, "no pass in flight, no wait");
+    CHECK(bsd_cork_stop() == TRUE && h.delays == 0,
+          "no pass in flight: no wait, and the teardown may proceed");
+    h_reset();
+    CHECK(bsd_cork_stop() == TRUE, "nor with the bracket held");
     h.enter_result = AMI_NET_OK;
 }
 

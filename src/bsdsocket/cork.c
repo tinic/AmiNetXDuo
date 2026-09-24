@@ -238,9 +238,30 @@ VOID bsd_cork_start(NX_IP *ip)
  *                       adoption just failed on.  The wait is bounded; past
  *                       it, or on a Task, nothing a pass still holds is
  *                       touched (a FLUSH(IP) socket stays the pass's, and its
- *                       drop waits for it), and the IP thread paused in a
- *                       driver is ami_ns_destroy()'s to deal with, as it is
- *                       with the cork compiled out.
+ *                       drop waits for it), and FALSE is returned.
+ *
+ * FALSE MEANS THE STACK MUST NOT BE TORN DOWN, and library.c does not tear
+ * it down: bsd_netstack_shutdown_owned() keeps the netstack reference and the
+ * stack with it, and gives it back on the next shutdown that finds no pass.
+ * The teardown would not wait for the pass on its own.  With a bracket it
+ * would: ami_ns_destroy() (src/netstack/netstack.c:71) calls nx_ip_delete()
+ * (netstack.c:206) before it closes an interface (:214) or deletes the packet
+ * pool (:252), and nx_ip_delete() takes nx_ip_protection TX_WAIT_FOREVER
+ * before anything else (third_party/netxduo/common/src/nx_ip_delete.c:104) --
+ * the mutex the IP thread holds for its whole event pass -- and only then
+ * terminates the IP thread (:242) and deletes the mutex (:245).  But the
+ * bracket is what this stop was refused, and netstack_shutdown() asks the
+ * same task for the same one (netstack.c:1939); refused, it calls
+ * ami_ns_destroy() regardless (netstack.c:1946), where that mutex get has no
+ * thread to suspend.  The sockets are not the teardown's: they go only
+ * through bsd_cork_drop(), which waits for the pass.
+ *
+ * WORST CASE: a pass that never comes back -- a driver's BeginIO() that never
+ * returns -- keeps the stack's memory and its tasks for the rest of the
+ * session, and netstack_can_unload() keeps the library resident.  A bounded
+ * retention, the same answer ami_ns_destroy() gives a SANA-II device that
+ * will not hand its requests back (netstack.c:241).  Shutdown itself never
+ * waits longer than the five seconds.
  *
  * Every branch cuts T off first (bsd_cork_tick_ip), so a timer that will not
  * deactivate or delete is harmless, and keeps it: a timer whose delete failed
@@ -249,14 +270,15 @@ VOID bsd_cork_start(NX_IP *ip)
  */
 #define BSD_CORK_STOP_WAIT  250L    /* Delay() ticks, five seconds */
 
-VOID bsd_cork_stop(VOID)
+BOOL bsd_cork_stop(VOID)
 {
     NX_IP     *ip = bsd_cork_ip;
     AmiSocket *list, *sock, *next;
     LONG       entered;
+    BOOL       quiet;
 
     if (ip == NULL)
-        return;
+        return TRUE;
 
     entered = ami_netstack_enter(&bsd_cork_caller);
 
@@ -344,6 +366,14 @@ VOID bsd_cork_stop(VOID)
         AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
         ami_netstack_leave(&bsd_cork_caller);
     }
+
+    /* Read once more, now that nothing can start one: a pass the wait did
+       not see out still has the NX_IP, its pool and a socket in hand. */
+    Forbid();
+    quiet = (bsd_cork_passes == 0) ? TRUE : FALSE;
+    Permit();
+
+    return quiet;
 }
 
 /* ---------------------------------------------------------- ownership -- */
