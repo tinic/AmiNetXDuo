@@ -47,6 +47,7 @@ const NpItem np_items[NP_L_COUNT] =
     [NP_L_ADDRESS6_2]    = { "Address 2",       NP_PLACE_LEFT,  NP_PAGE_IPV6 },
     [NP_L_GATEWAY6]      = { "Gateway",         NP_PLACE_LEFT,  NP_PAGE_IPV6 },
     [NP_L_DEVICE]        = { "Device",          NP_PLACE_LEFT,  NP_PAGE_DEVICE },
+    [NP_L_DEVICE_BROWSE] = { 0,                 NP_PLACE_NONE,  NP_PAGE_DEVICE },
     [NP_L_UNIT]          = { "Unit",            NP_PLACE_LEFT,  NP_PAGE_DEVICE },
     [NP_L_CARD]          = { "Card",            NP_PLACE_LEFT,  NP_PAGE_DEVICE },
     [NP_L_HWADDRESS]     = { "MAC",             NP_PLACE_LEFT,  NP_PAGE_DEVICE },
@@ -72,8 +73,9 @@ const char *const np_live_labels[] =
     { "New", "Stack off", "Not added", "Offline", "Online", "Unknown", 0 };
 const char *const np_action_labels[] = { "Online", "Offline", 0 };
 
-enum { K_FILL, K_INT, K_CYCLE_IPV4, K_CYCLE_IPV6, K_CHECK, K_TEXT };
+enum { K_FILL, K_INT, K_CYCLE_IPV4, K_CYCLE_IPV6, K_CHECK, K_TEXT, K_ICON };
 enum { AT_FIELD, AT_PANEL, AT_NEXT, AT_RIGHT };
+enum { DEVICE_ICON_PAD = 4, DEVICE_ICON_GAP = 3 };
 
 /* One gadget on a page row.  AT_FIELD: the shared field column; AT_PANEL:
    the page's left edge; AT_NEXT: after the previous cell; AT_RIGHT: flush
@@ -103,6 +105,7 @@ static const NpCell cells[] =
     { NP_L_GATEWAY6,      3, K_FILL,       0,  AT_FIELD },
 
     { NP_L_DEVICE,        0, K_FILL,       0,  AT_FIELD },
+    { NP_L_DEVICE_BROWSE, 0, K_ICON,       0,  AT_RIGHT },
     { NP_L_UNIT,          1, K_INT,        3,  AT_FIELD },
     { NP_L_CARD,          1, K_FILL,       0,  AT_NEXT  },
     { NP_L_HWADDRESS,     2, K_FILL,       0,  AT_FIELD },
@@ -172,6 +175,7 @@ static int cell_w(const Metrics *m, const NpCell *c)
                               2 * BUTTON_PAD;
     case K_CHECK:      return m->cb_w;
     case K_TEXT:       return label_w(m, c->item);
+    case K_ICON:       return m->gh + DEVICE_ICON_PAD;
     default:           return m->field_min;
     }
 }
@@ -240,8 +244,12 @@ static int place_row(const Metrics *m, NpLayout *l, int page, int row,
         }
         if (c->kind == K_FILL)
         {
+            int cell_right = right;
+
+            if (c->item == NP_L_DEVICE)
+                cell_right -= m->gh + DEVICE_ICON_PAD + DEVICE_ICON_GAP;
             need = max_i(need, x + w);
-            w = max_i(w, right - x);
+            w = max_i(w, cell_right - x);
         }
         else if (c->at != AT_RIGHT)
             need = max_i(need, x + w + trail);

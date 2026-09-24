@@ -30,6 +30,7 @@ enum
     NP_L_ADDRESS6_2,
     NP_L_GATEWAY6,
     NP_L_DEVICE,
+    NP_L_DEVICE_BROWSE,
     NP_L_UNIT,
     NP_L_CARD,
     NP_L_HWADDRESS,

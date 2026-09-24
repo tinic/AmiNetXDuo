@@ -24,8 +24,13 @@
 #include <graphics/text.h>
 #include <intuition/intuition.h>
 #include <intuition/intuitionbase.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+#include <intuition/imageclass.h>
 #include <intuition/screens.h>
+#include <libraries/asl.h>
 #include <libraries/gadtools.h>
+#include <proto/asl.h>
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <proto/gadtools.h>
@@ -41,6 +46,7 @@ static const char version_tag[] __attribute__((used)) =
 struct IntuitionBase *IntuitionBase;
 struct GfxBase       *GfxBase;
 struct Library       *GadToolsBase;
+struct Library       *AslBase;
 
 #define NP_MAX_INTERFACES  32
 #define NP_PATH_LEN        192
@@ -58,6 +64,7 @@ enum
     GID_NAME,
     GID_ID,
     GID_DEVICE,
+    GID_DEVICE_BROWSE,
     GID_UNIT,
     GID_CARD,
     GID_HWADDRESS,
@@ -123,6 +130,9 @@ typedef struct NetPrefs
     struct Gadget *g_name;
     struct Gadget *g_id;
     struct Gadget *g_device;
+    struct Gadget *g_device_browse;
+    APTR           browse_frame;
+    struct DrawInfo *browse_draw_info;
     struct Gadget *g_unit;
     struct Gadget *g_card;
     struct Gadget *g_hwaddress;
@@ -286,6 +296,74 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     tags[0].ti_Tag = tag; tags[0].ti_Data = value;
     tags[1].ti_Tag = TAG_DONE; tags[1].ti_Data = 0;
     GT_SetGadgetAttrsA(g, np.window, NULL, tags);
+}
+
+/* Keep the editable DEVICE field.  The requester only supplies another way
+ * to fill it, and cancellation must not disturb unsaved edits. */
+static VOID browse_device(VOID)
+{
+    const char *current = string_value(np.g_device);
+    const char *file = (const char *)FilePart(current);
+    char drawer[AMI_CFG_PATH_LEN];
+    char selected[AMI_CFG_PATH_LEN];
+    struct TagItem tags[7];
+    struct FileRequester *req;
+    ULONG prefix = (ULONG)(file - current);
+
+    if (prefix >= sizeof(drawer))
+    {
+        requester("The current device path is too long for the requester.");
+        return;
+    }
+    if (prefix != 0)
+    {
+        CopyMem((APTR)current, drawer, prefix);
+        drawer[prefix] = '\0';
+    }
+    else
+        tool_copy_string(drawer, sizeof(drawer), "DEVS:Networks");
+
+    AslBase = OpenLibrary("asl.library", 37);
+    if (AslBase == NULL)
+    {
+        requester("asl.library is needed to browse for a device.");
+        return;
+    }
+    tags[0].ti_Tag = ASLFR_Window;         tags[0].ti_Data = (ULONG)np.window;
+    tags[1].ti_Tag = ASLFR_SleepWindow;    tags[1].ti_Data = TRUE;
+    tags[2].ti_Tag = ASLFR_TitleText;
+    tags[2].ti_Data = (ULONG)"Select a SANA-II device";
+    tags[3].ti_Tag = ASLFR_InitialDrawer;  tags[3].ti_Data = (ULONG)drawer;
+    tags[4].ti_Tag = ASLFR_InitialFile;    tags[4].ti_Data = (ULONG)file;
+    tags[5].ti_Tag = ASLFR_RejectIcons;    tags[5].ti_Data = TRUE;
+    tags[6].ti_Tag = TAG_DONE;             tags[6].ti_Data = 0;
+
+    req = (struct FileRequester *)AllocAslRequest(ASL_FileRequest, tags);
+    if (req == NULL)
+        requester("The file requester could not be opened.");
+    else
+    {
+        if (AslRequest(req, NULL) && req->fr_File != NULL &&
+            req->fr_File[0] != '\0')
+        {
+            const char *chosen_drawer = req->fr_Drawer != NULL
+                                      ? (const char *)req->fr_Drawer : "";
+            if (text_len(chosen_drawer) >= sizeof(selected) ||
+                text_len((const char *)req->fr_File) >= sizeof(selected))
+                requester("The selected device path is too long.");
+            else
+            {
+                tool_copy_string(selected, sizeof(selected), chosen_drawer);
+                if (!AddPart(selected, req->fr_File, sizeof(selected)))
+                    requester("The selected device path is too long.");
+                else
+                    set_attr(np.g_device, GTST_String, (ULONG)selected);
+            }
+        }
+        FreeAslRequest(req);
+    }
+    CloseLibrary(AslBase);
+    AslBase = NULL;
 }
 
 /*
@@ -1396,6 +1474,11 @@ static VOID detach_panel(ULONG which)
     LONG i;
 
     if (np.window == NULL || which >= NP_PANEL_COUNT) return;
+    if (which == NP_PANEL_DEVICE && np.g_device_browse != NULL)
+    {
+        (VOID)RemoveGList(np.window, np.g_device_browse, 1);
+        np.g_device_browse->NextGadget = NULL;
+    }
     (VOID)RemoveGList(np.window, np.panel_gadgets[which],
                      np.panel_gadget_count[which]);
 
@@ -1406,6 +1489,44 @@ static VOID detach_panel(ULONG which)
     for (i = 1; tail != NULL && i < np.panel_gadget_count[which]; i++)
         tail = tail->NextGadget;
     if (tail != NULL) tail->NextGadget = NULL;
+}
+
+/* A compact file glyph drawn with the screen's own text pen.  The OS 3.1
+ * machine has no button.gadget/BAG_POPFILE, so keep the picker self-contained
+ * and palette-aware rather than depending on a class file or a fixed bitmap. */
+static VOID draw_device_browse_icon(VOID)
+{
+    const NpBox *b = &np.layout.box[NP_L_DEVICE_BROWSE];
+    struct RastPort *rp;
+    BYTE old_fg, old_mode;
+    WORD x, y;
+
+    if (np.window == NULL || np.g_device_browse == NULL ||
+        np.browse_draw_info == NULL || np.active_panel != NP_PANEL_DEVICE)
+        return;
+
+    rp = np.window->RPort;
+    old_fg = rp->FgPen;
+    old_mode = rp->DrawMode;
+    x = (WORD)(b->x + (b->w - 12) / 2);
+    y = (WORD)(b->y + (b->h - 11) / 2);
+    SetAPen(rp, np.browse_draw_info->dri_Pens[TEXTPEN]);
+    SetDrMd(rp, JAM1);
+    Move(rp, x, y);
+    Draw(rp, x + 7, y);
+    Draw(rp, x + 11, y + 4);
+    Draw(rp, x + 11, y + 10);
+    Draw(rp, x, y + 10);
+    Draw(rp, x, y);
+    Move(rp, x + 7, y);
+    Draw(rp, x + 7, y + 4);
+    Draw(rp, x + 11, y + 4);
+    Move(rp, x + 2, y + 6);
+    Draw(rp, x + 9, y + 6);
+    Move(rp, x + 2, y + 8);
+    Draw(rp, x + 8, y + 8);
+    SetAPen(rp, (ULONG)(UBYTE)old_fg);
+    SetDrMd(rp, (ULONG)(UBYTE)old_mode);
 }
 
 /* GadTools has no page gadget.  The common controls and each page therefore
@@ -1465,6 +1586,7 @@ static VOID draw_layout(VOID)
     SetBPen(rp, (ULONG)(UBYTE)old_bg);
     SetDrMd(rp, (ULONG)(UBYTE)old_mode);
     SetFont(rp, old_font);
+    draw_device_browse_icon();
 }
 
 static VOID show_panel(ULONG which)
@@ -1487,6 +1609,12 @@ static VOID show_panel(ULONG which)
                    np.panel_gadget_count[which], NULL);
     RefreshGList(np.panel_gadgets[which], np.window, NULL,
                  np.panel_gadget_count[which]);
+    if (which == NP_PANEL_DEVICE && np.g_device_browse != NULL)
+    {
+        (VOID)AddGList(np.window, np.g_device_browse, (UWORD)-1, 1, NULL);
+        RefreshGList(np.g_device_browse, np.window, NULL, 1);
+        draw_device_browse_icon();
+    }
 }
 
 static VOID select_panel(ULONG which)
@@ -1538,6 +1666,37 @@ static BOOL layout_in(struct TextAttr *ta)
     return TRUE;
 }
 
+/* A ROM BOOPSI class supplies the button frame on Kickstart 2+. */
+static VOID make_device_browse(VOID)
+{
+    const NpBox *b = &np.layout.box[NP_L_DEVICE_BROWSE];
+    struct TagItem frame[4], button[9];
+
+    np.browse_draw_info = GetScreenDrawInfo(np.screen);
+    if (np.browse_draw_info == NULL) return;
+
+    frame[0].ti_Tag = IA_FrameType; frame[0].ti_Data = FRAME_BUTTON;
+    frame[1].ti_Tag = IA_Width;     frame[1].ti_Data = (ULONG)b->w;
+    frame[2].ti_Tag = IA_Height;    frame[2].ti_Data = (ULONG)b->h;
+    frame[3].ti_Tag = TAG_DONE;     frame[3].ti_Data = 0;
+    np.browse_frame = NewObjectA(NULL, FRAMEICLASS, frame);
+    if (np.browse_frame == NULL) return;
+
+    button[0].ti_Tag = GA_Left;       button[0].ti_Data = (ULONG)b->x;
+    button[1].ti_Tag = GA_Top;        button[1].ti_Data = (ULONG)b->y;
+    button[2].ti_Tag = GA_Width;      button[2].ti_Data = (ULONG)b->w;
+    button[3].ti_Tag = GA_Height;     button[3].ti_Data = (ULONG)b->h;
+    button[4].ti_Tag = GA_ID;         button[4].ti_Data = GID_DEVICE_BROWSE;
+    button[5].ti_Tag = GA_RelVerify;  button[5].ti_Data = TRUE;
+    button[6].ti_Tag = GA_Image;
+    button[6].ti_Data = (ULONG)np.browse_frame;
+    button[7].ti_Tag = GA_DrawInfo;
+    button[7].ti_Data = (ULONG)np.browse_draw_info;
+    button[8].ti_Tag = TAG_DONE;     button[8].ti_Data = 0;
+    np.g_device_browse = (struct Gadget *)NewObjectA(NULL, FRBUTTONCLASS,
+                                                      button);
+}
+
 static BOOL make_window(VOID)
 {
     const NpLayout *lay = &np.layout;
@@ -1552,6 +1711,7 @@ static BOOL make_window(VOID)
     /* A font too large for the screen falls back to topaz 8, which fits the
        stock 640x200 NTSC Workbench. */
     if (!layout_in(np.screen->Font) && !layout_in(&topaz8)) return FALSE;
+    make_device_browse();
     np.visual = GetVisualInfoA(np.screen, NULL);
     if (np.visual == NULL) return FALSE;
     context = CreateContext(&np.gadgets);
@@ -1755,6 +1915,13 @@ static VOID close_ui(VOID)
     np.live_online_gadgets = NULL;
     if (np.live_offline_gadgets != NULL) FreeGadgets(np.live_offline_gadgets);
     np.live_offline_gadgets = NULL;
+    if (np.g_device_browse != NULL) DisposeObject(np.g_device_browse);
+    np.g_device_browse = NULL;
+    if (np.browse_frame != NULL) DisposeObject(np.browse_frame);
+    np.browse_frame = NULL;
+    if (np.browse_draw_info != NULL)
+        FreeScreenDrawInfo(np.screen, np.browse_draw_info);
+    np.browse_draw_info = NULL;
     np.g_live_action = NULL;
     if (np.visual != NULL) FreeVisualInfo(np.visual);
     np.visual = NULL;
@@ -1821,6 +1988,11 @@ static VOID event_loop(VOID)
                         break;
                     case GID_IPV6:
                         set_static6_fields((BOOL)(code == AMI_IP6TYPE_STATIC));
+                        break;
+                    case GID_DEVICE_BROWSE:
+                        draw_device_browse_icon();
+                        browse_device();
+                        draw_device_browse_icon();
                         break;
                     case GID_SAVE: (VOID)save_form(FALSE); break;
                     case GID_APPLY: (VOID)save_form(TRUE); break;
