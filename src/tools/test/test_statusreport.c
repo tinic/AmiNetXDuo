@@ -426,15 +426,70 @@ static void check_passive(void)
         CHECK(uses(body, "OpenLibrary") == 1, "one OpenLibrary(), by name");
         CHECK(uses(body, "tool_open_library") == 0,
               "never the PROGDIR:-first opener");
-        CHECK(uses(body, "FindName") == 1 && uses(body, "FindPort") == 1 &&
+        CHECK(uses(body, "FindName") == 1 && uses(body, "FindPort") >= 1 &&
               uses(body, "tool_stack_is_ours") == 1,
               "resident, running, and ours, before it opens");
+        /* bsd_lib_open() blocks and releases only Exec's own Forbid(), so
+           an open inside the caller's would wait with switching forbidden. */
         CHECK(forbid != NULL && open != NULL && permit != NULL &&
-              forbid < open && open < permit,
-              "the open is inside the Forbid() the lookup ran under");
+              forbid < permit && permit < open,
+              "the lookup runs under Forbid(), the open after Permit()");
+        CHECK(uses(body, "lib_IdString") >= 2 && uses(body, "CloseLibrary") == 1,
+              "a base that is not the resident's is closed again");
         free(body);
     }
     free(code);
+}
+
+/* ------------------------------------------------------------- the tee --- */
+
+typedef struct FakeHandle
+{
+    char buf[512];
+    int  fail_after;            /* -1: never fails                          */
+    int  calls;
+} FakeHandle;
+
+static LONG fake_put(APTR handle, const char *line)
+{
+    FakeHandle *h = (FakeHandle *)handle;
+
+    if (h->fail_after >= 0 && h->calls++ >= h->fail_after)
+        return -1;
+    if (strlen(h->buf) + strlen(line) < sizeof(h->buf))
+        strcat(h->buf, line);
+    return 0;
+}
+
+static void check_tee(void)
+{
+    FakeHandle console = { "", -1, 0 };
+    FakeHandle file    = { "", 1, 0 };     /* the second line fails */
+    SrTee      t;
+    SrOut      o;
+
+    t.put = fake_put; t.console = &console; t.file = &file;
+    t.file_failed = FALSE;
+    o.write = sr_tee_write; o.user = &t; o.addresses = FALSE; o.lines = 0;
+
+    sr_str(&o, "a", "1");
+    CHECK(!t.file_failed, "a line that went out is not a failure");
+    sr_str(&o, "b", "2");
+    sr_str(&o, "c", "3");
+
+    CHECK(t.file_failed, "a file line that did not go out is kept");
+    CHECK(strcmp(console.buf, "a=1\nb=2\nc=3\n") == 0,
+          "the console still gets every line, got '%s'", console.buf);
+    CHECK(strcmp(file.buf, "a=1\n") == 0,
+          "the file stops at the failure, got '%s'", file.buf);
+    CHECK(file.calls == 2, "no write to the file after it failed (%d)",
+          file.calls);
+
+    console.buf[0] = '\0';
+    t.file = NULL; t.file_failed = FALSE;
+    sr_str(&o, "d", "4");
+    CHECK(!t.file_failed && strcmp(console.buf, "d=4\n") == 0,
+          "NOFILE: the console alone, and never a failure");
 }
 
 /* ------------------------------------------------------------------ main --- */
@@ -447,6 +502,7 @@ int main(int argc, char **argv)
         check_allowlist();
         check_lines();
         check_decoding();
+        check_tee();
     }
     if (group == NULL || strcmp(group, "passive") == 0)
         check_passive();

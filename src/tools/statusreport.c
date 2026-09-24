@@ -62,15 +62,19 @@ extern struct ExecBase *SysBase;
 
 /* ---------------------------------------------------------------- output --- */
 
-static BPTR sr_file;
+static BPTR  sr_console;
+static BPTR  sr_file;
+static LONG  sr_file_error;
+static SrTee sr_tee;
 
-static VOID sr_write(APTR user, const char *line)
+/* An SrPut: `handle` points at one of the two BPTRs above. */
+static LONG sr_put(APTR handle, const char *line)
 {
-    (VOID)user;
-
-    FPuts(Output(), (CONST_STRPTR)line);
-    if (sr_file != 0)
-        FPuts(sr_file, (CONST_STRPTR)line);
+    if (FPuts(*(BPTR *)handle, (CONST_STRPTR)line) == 0)
+        return 0;
+    if (handle == (APTR)&sr_file && sr_file_error == 0)
+        sr_file_error = IoErr();
+    return -1;
 }
 
 static SrOut sr_out;
@@ -892,8 +896,15 @@ int main(int argc, char **argv)
         }
     }
 
-    sr_out.write     = sr_write;
-    sr_out.user      = NULL;
+    sr_console          = Output();
+    sr_file_error       = 0;
+    sr_tee.put          = sr_put;
+    sr_tee.console      = (APTR)&sr_console;
+    sr_tee.file         = (sr_file != 0) ? (APTR)&sr_file : NULL;
+    sr_tee.file_failed  = FALSE;
+
+    sr_out.write     = sr_tee_write;
+    sr_out.user      = (APTR)&sr_tee;
     sr_out.addresses = (BOOL)(args[ARG_ADDRESSES] != 0);
     sr_out.lines     = 0;
 
@@ -933,12 +944,19 @@ int main(int argc, char **argv)
 
     if (sr_file != 0)
     {
-        if (!Close(sr_file) && rc == RETURN_OK)
+        /* Close() flushes, so a full disk can show up only here. */
+        BOOL closed = (BOOL)Close(sr_file);
+
+        sr_file = 0;
+        if (!closed && sr_file_error == 0)
+            sr_file_error = IoErr();
+        if (sr_tee.file_failed || !closed)
         {
-            tool_error("%s could not be written", (LONG)path);
+            tool_error("%s is incomplete", (LONG)path);
+            if (sr_file_error != 0)
+                tool_fault(sr_file_error);
             rc = RETURN_ERROR;
         }
-        sr_file = 0;
     }
 
     FreeArgs(rda);

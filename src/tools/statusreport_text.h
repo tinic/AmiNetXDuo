@@ -38,6 +38,24 @@ typedef struct SrOut
     ULONG   lines;              /* written so far                            */
 } SrOut;
 
+/*
+ * The console and the file, one line to each.  `put` answers 0 when the line
+ * went out.  The first file line that does not stops the file and is kept in
+ * file_failed; the console still gets every line.
+ */
+typedef LONG (*SrPut)(APTR handle, const char *line);
+
+typedef struct SrTee
+{
+    SrPut   put;
+    APTR    console;
+    APTR    file;               /* NULL: no file                            */
+    BOOL    file_failed;
+} SrTee;
+
+/* An SrWrite; `user` is the SrTee. */
+VOID sr_tee_write(APTR user, const char *line);
+
 /* ------------------------------------------------------------ one line --- */
 
 /* NULL is SR_UNAVAILABLE.  Control characters in `value` become '?'. */

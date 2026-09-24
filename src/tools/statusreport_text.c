@@ -190,6 +190,15 @@ VOID sr_yesno(SrOut *o, const char *key, BOOL value)
     sr_emit(o, key, value ? "yes" : "no");
 }
 
+VOID sr_tee_write(APTR user, const char *line)
+{
+    SrTee *t = (SrTee *)user;
+
+    (VOID)t->put(t->console, line);
+    if (t->file != NULL && !t->file_failed && t->put(t->file, line) != 0)
+        t->file_failed = TRUE;
+}
+
 VOID sr_version(SrOut *o, const char *key, ULONG version, ULONG revision)
 {
     char  buf[24];

@@ -1268,19 +1268,29 @@ struct Library *tool_netstatus_open(BOOL quiet)
  * The strict form, for a command that may not change anything by asking.
  *
  * tool_netstatus_open() goes through tool_open_library(), which tries
- * PROGDIR:/Libs first and can load a library from disk.  This one opens
- * only the bsdsocket.library already in Exec's list, and only when the
- * AMITCP port says its stack is up: FindName() and OpenLibrary() run under
- * one Forbid(), so the open cannot fall through to LIBS: and load a copy,
- * and bsd_lib_open() with the stack up takes a reference rather than
- * bringing it up.  The one window left is a NetShutdown finishing between
- * the port check and the open, which costs a loopback-only start that this
- * caller's close takes down again; no driver is opened by it.
+ * PROGDIR:/Libs first and can load a library from disk.  This one opens only
+ * the bsdsocket.library already in Exec's list, and only when the AMITCP port
+ * says its stack is up, so bsd_lib_open() takes a reference rather than
+ * bringing the stack up.
+ *
+ * The lookup runs under Forbid() and the open does NOT: bsd_lib_open()
+ * obtains a semaphore, reads the netdb files and can wait for a Process
+ * (src/bsdsocket/library.c:937-967), and it releases only Exec's own Forbid,
+ * never a caller's.  The open returns a per-opener child, a copy of the
+ * master (library.c bsd_child_create), so the child's lib_IdString points
+ * into the resident's segment; a base with any other IdString came from
+ * elsewhere, and a stack whose port went away meanwhile is not the one
+ * asked about; either is closed again and reported as not open.  The
+ * window between the two is a NetShutdown plus an expunge landing in it,
+ * which loads a copy from LIBS: whose open starts loopback only and is
+ * closed at once; no driver is opened by it.
  */
 struct Library *tool_netstatus_open_resident(VOID)
 {
     struct Library *lib;
-    struct Library *base = NULL;
+    struct Library *base;
+    STRPTR          id = NULL;
+    BOOL            up;
 
     Forbid();
 
@@ -1292,11 +1302,27 @@ struct Library *tool_netstatus_open_resident(VOID)
         tool_stack_is_ours(lib) &&
         lib->lib_Version >= 4 &&
         lib->lib_Revision >= (UWORD)AMI_NETSTATUS_MIN_REVISION)
-    {
-        base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
-    }
+        id = (STRPTR)lib->lib_IdString;
 
     Permit();
+
+    /* `lib` is not read past the Permit(): it may be gone by then. */
+    if (id == NULL)
+        return NULL;
+
+    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (base == NULL)
+        return NULL;
+
+    Forbid();
+    up = (BOOL)(FindPort((CONST_STRPTR)"AMITCP") != NULL);
+    Permit();
+
+    if ((STRPTR)base->lib_IdString != id || !up)
+    {
+        CloseLibrary(base);
+        base = NULL;
+    }
 
     return base;
 }
