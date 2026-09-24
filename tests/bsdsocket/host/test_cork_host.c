@@ -121,6 +121,8 @@ static struct
     BOOL         timer_live;
 
     ULONG        mutex_gets, mutex_puts;
+    LONG         enter_result;      /* ami_netstack_enter()'s answer         */
+    ULONG        enters, leaves;
     AmiSocket   *mutex_finishes;    /* the pass "ends" when the barrier runs */
 
     ULONG        sleeps;
@@ -436,10 +438,21 @@ UINT _txe_mutex_put(TX_MUTEX *mutex_ptr)
     return TX_SUCCESS;
 }
 
-static AmiNetCaller h_caller;
+/* The bracket start and stop take.  A heap caller is no longer used, so an
+   allocation failure is not a path; what is left is the kernel refusing
+   (h.enter_result), and whether the timer still goes then. */
+LONG ami_netstack_enter(AmiNetCaller *caller)
+{
+    (VOID)caller;
+    h.enters++;
+    return h.enter_result;
+}
 
-AmiNetCaller *ami_netstack_enter_alloc(VOID) { return &h_caller; }
-VOID ami_netstack_leave_free(AmiNetCaller *caller) { (VOID)caller; }
+VOID ami_netstack_leave(AmiNetCaller *caller)
+{
+    (VOID)caller;
+    h.leaves++;
+}
 
 /* ----------------------------------------------------------- NetX Duo -- */
 
@@ -1568,6 +1581,55 @@ static void t_teardown(void)
     CHECK(h.releases == 1, "and a drop afterwards is a no-op");
 }
 
+static void t_stop_refused(void)
+{
+    AmiSocket *s;
+
+    printf("cork: the stack going down when the bracket is refused\n");
+
+    /* The kernel still running but the bracket refused (adoption failed):
+       the timer goes anyway, before the NX_IP can be reclaimed. */
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 30, 0);
+    CHECK(h.timer_live, "a live tick");
+    h.enter_result = AMI_NET_ERR_KERNEL;
+    bsd_cork_stop();
+    CHECK(!h.timer_live && h.deactivates == 1 && h.deletes == 1,
+          "refused bracket, kernel live: the timer is deactivated and deleted");
+    CHECK(h_ip.nx_ip_cork_handler == NX_NULL, "and the handler cleared");
+    CHECK(h.mutex_gets == 0 && h.releases == 0,
+          "with no NetX Duo call made outside a bracket");
+    CHECK(s->as_CorkPkt == NULL && !h_linked(s),
+          "the segment is forgotten with its pool, and the socket unlinked");
+    bsd_cork_drop(s);
+    CHECK(h.releases == 0, "so a later drop releases nothing into a dead pool");
+    CHECK(bsd_cork_set(&h_base, s, TRUE) == AMI_ENOBUFS, "and the cork is off");
+
+    /* The kernel already stopped: nothing can fire, and there is no timer
+       list to take it off. */
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 30, 0);
+    h.enter_result = AMI_NET_ERR_STATE;
+    bsd_cork_stop();
+    CHECK(h.deletes == 0 && h.mutex_gets == 0,
+          "kernel stopped: no ThreadX call at all");
+    CHECK(h_ip.nx_ip_cork_handler == NX_NULL && !h_linked(s),
+          "the handler cleared and the list emptied all the same");
+
+    /* A start the bracket refuses leaves no timer and no handler. */
+    h_reset();
+    bsd_cork_stop();
+    h.timer_creates = 0;
+    h.enter_result  = AMI_NET_ERR_KERNEL;
+    bsd_cork_start(&h_ip);
+    CHECK(h.timer_creates == 0 && h_ip.nx_ip_cork_handler == NX_NULL &&
+          !bsd_cork_running(), "a refused start: no timer, no handler");
+    h.enter_result = AMI_NET_OK;
+    CHECK(h.enters == h.leaves + 1, "and a refused bracket is not left");
+}
+
 static void t_abort_while_owned(void)
 {
     AmiSocket *s;
@@ -1803,6 +1865,7 @@ int main(void)
     t_select();
     t_disconnect();
     t_teardown();
+    t_stop_refused();
     t_abort_while_owned();
     t_claim_vs_pass();
 #ifdef AMINETXDUO_TCP_CORK_FASTPATH

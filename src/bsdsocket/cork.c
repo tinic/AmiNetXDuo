@@ -164,16 +164,22 @@ static VOID bsd_cork_tick_settle_locked(VOID)
 
 /* ----------------------------------------------------------- lifetime -- */
 
+/*
+ * The ThreadX bracket start and stop run in.  Static, not allocated and not
+ * on the stack: a TX_THREAD is ~230 bytes, a Shell command's stack is 4 KB,
+ * and an allocation that can fail cannot stand between a live timer and the
+ * NX_IP it points at.  Both callers hold the master base's sb_Lock
+ * (library.c), so it is never in use twice.
+ */
+static AmiNetCaller bsd_cork_caller;
+
 VOID bsd_cork_start(NX_IP *ip)
 {
-    AmiNetCaller *caller;
-
     if (ip == NULL || bsd_cork_ip != NULL)
         return;
 
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
-        return;
+    if (ami_netstack_enter(&bsd_cork_caller) != AMI_NET_OK)
+        return;                     /* no cork: TCP_NODELAY 0 is ENOBUFS */
 
     if (!bsd_cork_timer_made)
         bsd_cork_timer_made =
@@ -189,49 +195,42 @@ VOID bsd_cork_start(NX_IP *ip)
         Permit();
     }
 
-    ami_netstack_leave_free(caller);
+    ami_netstack_leave(&bsd_cork_caller);
 }
 
+/*
+ * Before netstack_shutdown() reclaims the NX_IP: the timer deactivated and
+ * deleted, the handler cleared, the armed list emptied.  Every branch does the
+ * first two; what differs is whether a pass can still be running.
+ */
 VOID bsd_cork_stop(VOID)
 {
-    AmiNetCaller *caller;
-    NX_IP        *ip = bsd_cork_ip;
-    AmiSocket    *list, *sock, *next;
+    NX_IP     *ip = bsd_cork_ip;
+    AmiSocket *list, *sock, *next;
+    LONG       entered;
 
     if (ip == NULL)
         return;
 
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
-    {
-        /* No kernel to enter is no kernel to run a tick or a pass either;
-           forget both so the next stack starts clean. */
-        Forbid();
-        ip->nx_ip_cork_handler = NX_NULL;
-        bsd_cork_ip            = NULL;
-        bsd_cork_timer_made    = FALSE;
-        bsd_cork_timer_live    = FALSE;
-        for (sock = bsd_cork_armed; sock != NULL; sock = next)
-        {
-            next = sock->as_CorkNext;
-            sock->as_CorkNext   = NULL;
-            sock->as_CorkFlags &= (UBYTE)~BSD_CORKF_LINKED;
-        }
-        bsd_cork_armed         = NULL;
-        Permit();
-        return;
-    }
+    entered = ami_netstack_enter(&bsd_cork_caller);
 
-    /* The timer first, so no new event is set; then the handler, under the
-       mutex, so no pass is running while it goes.  A bit already set finds
-       NX_NULL. */
-    if (bsd_cork_timer_made)
+    /* The timer first, so no new event is set.  AMI_NET_ERR_STATE is the one
+       answer that means the kernel is not running, and then no tick can fire
+       and no timer list is there to take it off.  Any other refusal leaves
+       the kernel running: the calls are TX_DISABLE (Forbid()) sections that
+       need no thread of their own, so the timer goes regardless. */
+    if (bsd_cork_timer_made && entered != AMI_NET_ERR_STATE)
     {
         AMI_NX_CLEANUP(tx_timer_deactivate(&bsd_cork_timer));
         AMI_NX_CLEANUP(tx_timer_delete(&bsd_cork_timer));
     }
 
-    AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER));
+    /* The handler under the mutex when the bracket supplies one, so no pass
+       is running while it goes.  Without it, cleared under Forbid(): a pass
+       already dispatched finishes on sockets that are not freed until their
+       own drop, and one not yet dispatched finds NX_NULL. */
+    if (entered == AMI_NET_OK)
+        AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER));
 
     Forbid();
     ip->nx_ip_cork_handler = NX_NULL;
@@ -243,6 +242,26 @@ VOID bsd_cork_stop(VOID)
     for (sock = list; sock != NULL; sock = sock->as_CorkNext)
         sock->as_CorkFlags &= (UBYTE)~BSD_CORKF_LINKED;
     Permit();
+
+    if (entered != AMI_NET_OK)
+    {
+        /* No bracket, no NetX Duo: the packets go with the pool, and are
+           forgotten here so no later drop releases one into a pool that is
+           gone. */
+        for (sock = list; sock != NULL; sock = next)
+        {
+            next = sock->as_CorkNext;
+            sock->as_CorkNext = NULL;
+
+            Forbid();
+            if (sock->as_CorkState == BSD_CORK_IDLE)
+                sock->as_CorkPkt = NULL;
+            sock->as_CorkFlags &= (UBYTE)~(BSD_CORKF_STALLED | BSD_CORKF_TICK |
+                                           BSD_CORKF_FIN | BSD_CORKF_KICK);
+            Permit();
+        }
+        return;
+    }
 
     /* Whatever is still on the list belongs to a parked or leaked socket the
        stack teardown is about to take the connection of.  Its packets go back
@@ -268,7 +287,7 @@ VOID bsd_cork_stop(VOID)
 
     AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
 
-    ami_netstack_leave_free(caller);
+    ami_netstack_leave(&bsd_cork_caller);
 }
 
 /* ---------------------------------------------------------- ownership -- */
