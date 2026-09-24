@@ -17,6 +17,17 @@
    frame already in progress before ISR.RST is raised; leave measured margin. */
 #define DP8390_STOP_WAIT_US  1500u
 
+/* Overrun recovery waits for a frame in flight to finish; the DP8390D
+   datasheet says wait at least 1.6 ms.  RST cannot be the done signal -- the
+   overflow itself sets it on the reference core -- so this is unconditional. */
+#define DP8390_OVW_STOP_WAIT_US  1600u
+
+/* The overwrite wait's floor, the four-reads-per-microsecond fallback that
+   netdev_clock_floor_spins() uses only when the beam clock is down; with the
+   beam it returns the measured work per line instead.  Sized for 1.6 ms,
+   unlike halt's 900 which was sized for its 1.5 ms RST poll. */
+#define DP8390_OVW_STOP_SPINS  (DP8390_OVW_STOP_WAIT_US * 4u)
+
 VOID  dp8390_config(NetdevNic *nic);
 LONG  dp8390_init(NetdevNic *nic);
 VOID  dp8390_halt(NetdevNic *nic);
