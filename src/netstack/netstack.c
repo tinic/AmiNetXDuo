@@ -71,7 +71,6 @@ static VOID ami_ns_second_expired(ULONG id)
 static VOID ami_ns_destroy(AmiNetStack *ns)
 {
     UWORD i;
-    UWORD requests_retained = 0;
 
     if (ns == NULL)
         return;
@@ -207,41 +206,31 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         ns->ns_IpCreated = FALSE;
     }
 
+    /*
+     * A close that answers FALSE has put the interface on src/sana2's retained
+     * list, which owns it from here: the slot is emptied either way.
+     */
     for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ns->ns_Iface[i] != NULL)
         {
-            if (ami_sana2_close(ns->ns_Iface[i]))
-            {
-                ns->ns_Iface[i] = NULL;
-            }
-            else
-            {
-                requests_retained++;
-            }
+            (VOID)ami_sana2_close(ns->ns_Iface[i]);
+            ns->ns_Iface[i] = NULL;
         }
     }
 
-    /*
-     * One past the highest slot still occupied, which is what the number means
-     * everywhere that walks ns_Iface[].  A retained interface keeps its slot.
-     */
     ns->ns_IfaceCount = 0;
-    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
-    {
-        if (ns->ns_Iface[i] != NULL)
-            ns->ns_IfaceCount = (UWORD)(i + 1);
-    }
 
     /*
      * An orphaned SANA-II request still points into ns_PoolMemory and can still
-     * reach ns_Pool, so once ami_sana2_close() retains an interface the whole
-     * allocation set is retained with it.  A bounded leak is the only safe result.
+     * reach ns_Pool, so while anything is retained -- by this stack, or by one
+     * before it whose pool this one cannot tell apart -- the whole allocation
+     * set is retained with it.  A bounded leak is the only safe result.
      */
-    if (requests_retained)
+    if (ami_sana2_retained_count() != 0)
     {
         ami_event(NETEVENT_STACK_RETAINED, NETEVENT_NOINDEX,
-                  (ULONG)requests_retained);
+                  (ULONG)ami_sana2_retained_count());
         AMI_ERROR("netstack: retaining packet pool and stack memory because "
                   "a SANA-II device still owns requests into them");
         return;
@@ -319,9 +308,11 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
         ns->ns_Iface[opened] = ami_sana2_open(cfg, &status);
         if (ns->ns_Iface[opened] == NULL)
         {
-            ami_event((status == AMI_NET_ERR_DEVBAD)
-                          ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
-                      opened, (ULONG)status);
+            /* AMI_NET_ERR_RETAINED: recorded by src/sana2 already. */
+            if (status != AMI_NET_ERR_RETAINED)
+                ami_event((status == AMI_NET_ERR_DEVBAD)
+                              ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
+                          opened, (ULONG)status);
 
             if (status == AMI_NET_ERR_DEVBAD)
             {
@@ -423,12 +414,10 @@ static BOOL ami_ns_drop_iface(AmiNetStack *ns, UWORD slot)
     if (iface == NULL)
         return TRUE;
 
-    if (!ami_sana2_close(iface))
-        return FALSE;
-
+    /* FALSE left it on src/sana2's retained list, which owns it now. */
     ns->ns_Iface[slot] = NULL;
 
-    return TRUE;
+    return ami_sana2_close(iface);
 }
 #endif /* AMI_CFG_MAX_ATTACHED > 1 */
 
@@ -1650,6 +1639,35 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 }
 
 /*
+ * Give src/sana2 a chance to close and free the interfaces a device kept
+ * requests in (ami_sana2_retained_sweep()).  Under ami_ns_lock; in a bracket
+ * while ThreadX runs, because joining a reader is a ThreadX call.  A bracket
+ * that cannot be had defers the sweep: nothing is released, and the next sweep
+ * point asks again.  Unbracketed only with the kernel stopped, when no reader
+ * thread can be left (the stop refuses while one exists) and the sweep only
+ * collects replies.  Not from the one-second timer: it closes devices.
+ */
+static VOID ami_ns_retained_sweep_locked(VOID)
+{
+    AmiNetCaller caller;
+
+    if (ami_sana2_retained_count() == 0)
+        return;
+
+    if (!ami_ns_kernel_started)
+    {
+        (VOID)ami_sana2_retained_sweep(TRUE);
+        return;
+    }
+
+    if (ami_netstack_enter(&caller) != AMI_NET_OK)
+        return;
+
+    (VOID)ami_sana2_retained_sweep(TRUE);
+    ami_netstack_leave(&caller);
+}
+
+/*
  * Called with ami_ns_lock held.  A failed stop may leave one of the port's
  * Exec Tasks running on code or data in this hunk, so that fact is kept
  * separate from ami_ns and a later call can retry.
@@ -1868,6 +1886,9 @@ static LONG ami_ns_startup(BOOL loopback_only)
         return AMI_NET_OK;
     }
 
+    /* A retained reader thread would refuse the stop below. */
+    ami_ns_retained_sweep_locked();
+
     status = ami_ns_kernel_stop_locked();
     if (status != AMI_NET_OK)
     {
@@ -1909,6 +1930,9 @@ VOID netstack_shutdown(VOID)
     ns = ami_ns;
     if (ns == NULL)
     {
+        /* A second shutdown is also how a retained interface is asked again
+           with no stack up. */
+        ami_ns_retained_sweep_locked();
         (VOID)ami_ns_kernel_stop_locked();
         ami_ns_lock_release();
         return;
@@ -1938,11 +1962,14 @@ VOID netstack_shutdown(VOID)
      */
     if (ami_netstack_enter(&caller) == AMI_NET_OK)
     {
+        (VOID)ami_sana2_retained_sweep(TRUE);
         ami_ns_destroy(ns);
         ami_netstack_leave(&caller);
     }
     else
     {
+        /* No bracket: the sweep waits for a later sweep point, where the
+           kernel is either stopped or can be entered. */
         ami_ns_destroy(ns);
     }
 
@@ -1970,10 +1997,18 @@ BOOL netstack_can_unload(VOID)
     if (!ami_ns_lock_attempt())
         return FALSE;
 
-    safe = (ami_ns == NULL && !ami_ns_kernel_started) ? TRUE : FALSE;
+    /* A retained interface's device can still call S2_CopyFromBuff and
+       S2_CopyToBuff, which are in this hunk. */
+    safe = (ami_ns == NULL && !ami_ns_kernel_started &&
+            ami_sana2_retained_count() == 0) ? TRUE : FALSE;
     ami_ns_lock_release();
 
     return safe;
+}
+
+UWORD netstack_retained_count(VOID)
+{
+    return ami_sana2_retained_count();
 }
 
 AmiNetStack *netstack_get(VOID)
@@ -2202,6 +2237,9 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     UWORD         users;
     UINT          status;
     BOOL          autoip_removed = FALSE;
+    BOOL          retained;
+
+    ami_ns_retained_sweep_locked();
 
     if (ns == NULL || !ns->ns_IpCreated ||
         index >= (UWORD)AMI_CFG_MAX_ATTACHED || ns->ns_Iface[index] == NULL)
@@ -2319,9 +2357,12 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 
     /*
      * CloseDevice() and the reply-port teardown are Exec I/O, so they happen
-     * outside the bracket.
+     * outside the bracket.  FALSE: a write the device kept past the detach
+     * (the preflight above sees only the reads).  The interface has left the
+     * network all the same, so the slot is cleared below; src/sana2 keeps the
+     * interface and closes it once the device gives the requests back.
      */
-    ami_sana2_close(iface);
+    retained = !ami_sana2_close(iface);
 
     /*
      * EVERY per-slot field, not the two this used to clear.  The slot is
@@ -2356,7 +2397,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 
     AMI_INFO("netstack: interface %ld removed", (long)index);
 
-    return AMI_NET_OK;
+    return retained ? AMI_NET_ERR_RETAINED : AMI_NET_OK;
 }
 
 LONG netstack_interface_remove(UWORD index, BOOL force)
@@ -2981,6 +3022,8 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
     victim_cfg.name[0] = '\0';
 
+    ami_ns_retained_sweep_locked();
+
     if (ns == NULL || !ns->ns_IpCreated || cfg == NULL)
         return AMI_NET_ERR_STATE;
 
@@ -3028,14 +3071,18 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     iface = ami_sana2_open(&open_cfg, &err);
     if (iface == NULL)
     {
-        ami_event((err == AMI_NET_ERR_DEVBAD)
-                      ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
-                  NETEVENT_NOINDEX, (ULONG)err);
+        /* AMI_NET_ERR_RETAINED was recorded by src/sana2, with what is held;
+           it is no open that failed. */
+        if (err != AMI_NET_ERR_RETAINED)
+            ami_event((err == AMI_NET_ERR_DEVBAD)
+                          ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
+                      NETEVENT_NOINDEX, (ULONG)err);
         AMI_ERROR("netstack: interface \'%s\' did not start: %s unit %lu %s",
                   open_cfg.name, open_cfg.device,
                   (unsigned long)open_cfg.unit,
-                  (err == AMI_NET_ERR_DEVBAD) ? "refused a SANA-II command"
-                                              : "did not answer");
+                  (err == AMI_NET_ERR_DEVBAD)   ? "refused a SANA-II command" :
+                  (err == AMI_NET_ERR_RETAINED) ? "still holds requests"
+                                                : "did not answer");
         return (err != AMI_NET_OK) ? err : AMI_NET_ERR_NODEV;
     }
 

@@ -28,6 +28,10 @@ static const char version_tag[] __attribute__((used)) =
 
 #define TEMPLATE    "INTERFACE/M/A,FORCE/S,QUIET/S"
 
+/* The library's 4.4BSD number, not the C library's: removed, and the device
+   stays open holding requests (AMI_NET_ERR_RETAINED). */
+#define RNI_EINPROGRESS     36
+
 enum
 {
     ARG_INTERFACE = 0,
@@ -114,6 +118,7 @@ int main(int argc, char **argv)
     STRPTR          *names;
     BOOL             force;
     LONG             removed = 0;
+    LONG             retained = 0;
     LONG             failed  = 0;
     LONG             n;
 
@@ -195,6 +200,16 @@ int main(int argc, char **argv)
         if (tool_netstatus_control(base, NETCTRL_INTERFACE_REMOVE, &ctl,
                                    &err) != 0)
         {
+            if (err == RNI_EINPROGRESS)
+            {
+                /* Out of the network; the device kept requests, so it stays
+                   open until it gives them back. */
+                tool_error("%s was removed. Its device still holds requests "
+                           "and stays open", (LONG)name);
+                retained++;
+                continue;
+            }
+
             if (err == EBUSY)
             {
                 tool_error("%s still has connections open. FORCE removes it "
@@ -217,7 +232,7 @@ int main(int argc, char **argv)
     FreeArgs(rda);
 
     if (failed > 0)
-        return (removed > 0) ? RETURN_WARN : RETURN_FAIL;
+        return (removed > 0 || retained > 0) ? RETURN_WARN : RETURN_FAIL;
 
-    return RETURN_OK;
+    return (retained > 0) ? RETURN_WARN : RETURN_OK;
 }

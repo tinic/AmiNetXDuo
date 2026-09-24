@@ -238,6 +238,7 @@ const char *tool_net_error(LONG err)
         case AMI_NET_ERR_BUSY:      return "the interface is still in use";
         case AMI_NET_ERR_ABORTED:   return "the caller asked to be let go";
         case AMI_NET_ERR_NOSLOT:    return "every interface slot is taken";
+        case AMI_NET_ERR_RETAINED:  return "the SANA-II device still holds requests";
         default:                    return "unknown error";
     }
 }
@@ -276,6 +277,7 @@ const char *tool_code_net(LONG err)
         case AMI_NET_ERR_DEVBAD:    return "AMI_NET_ERR_DEVBAD";
         case AMI_NET_ERR_ABORTED:   return "AMI_NET_ERR_ABORTED";
         case AMI_NET_ERR_NOSLOT:    return "AMI_NET_ERR_NOSLOT";
+        case AMI_NET_ERR_RETAINED:  return "AMI_NET_ERR_RETAINED";
         default:                    return "AMI_NET_ERR_?";
     }
 }
@@ -298,6 +300,7 @@ const char *tool_code_errno(LONG err)
         case 22:    return "EINVAL";
         case 16:    return "EBUSY";
         case 28:    return "ENOSPC";
+        case 36:    return "EINPROGRESS";
         case 55:    return "ENOBUFS";
         case 78:    return "ENOSYS";
         default:    return "errno";

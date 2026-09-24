@@ -1965,6 +1965,11 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             if (err == AMI_NET_OK)
                 return 0;
 
+            /* Removed, and its device kept requests: it stays open until
+               they come back (AMI_NET_ERR_RETAINED). */
+            if (err == AMI_NET_ERR_RETAINED)
+                return bsd_fail(SocketBase, AMI_EINPROGRESS);
+
             return bsd_fail(SocketBase,
                             (err == AMI_NET_ERR_BUSY) ? AMI_EBUSY : AMI_ENXIO);
         }
@@ -2005,6 +2010,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 case AMI_NET_ERR_NOMEM:  return bsd_fail(SocketBase, AMI_ENOBUFS);
                 case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
                 case AMI_NET_ERR_NOSLOT: return bsd_fail(SocketBase, AMI_ENOSPC);
+                case AMI_NET_ERR_RETAINED: return bsd_fail(SocketBase, AMI_EBUSY);
                 default:                 return bsd_fail(SocketBase, AMI_ENXIO);
             }
         }

@@ -52,10 +52,35 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req);
  * *err to an AMI_NET_ERR_* code.
  */
 AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err);
-/* TRUE when the allocation was released. FALSE means a device still owns a
-   request inside it, so the caller must retain every packet pool that request
-   can still reach. */
+/*
+ * TRUE when the allocation was released.  FALSE means a device still owns a
+ * request inside it: the interface is now on the retained list and belongs to
+ * this module, which closes and frees it from ami_sana2_retained_sweep() once
+ * the device gives everything back.  The caller forgets the pointer either
+ * way, and must retain every packet pool that request can still reach.  A
+ * close of an interface already retained is FALSE and does nothing.
+ *
+ * Callers hold ami_ns_lock: the list is changed only under it.
+ */
 BOOL        ami_sana2_close(AmiSana2If *iface);
+
+/* Interfaces on the retained list.  A read of one word: safe under Forbid(). */
+UWORD       ami_sana2_retained_count(VOID);
+
+/* NETEVENT_HELD_* for a retained interface on this device (compared by
+   basename, ignoring case) and unit, 0 when there is none.  ami_sana2_open()
+   refuses such a pair with AMI_NET_ERR_RETAINED before OpenDevice(). */
+ULONG       ami_sana2_retained_holds(const char *device, ULONG unit);
+
+/*
+ * Collect whatever the devices have given back since, without waiting, and
+ * CloseDevice() and free every interface nothing holds any more.  Under
+ * ami_ns_lock, and in a ThreadX bracket when the kernel runs: the receive side
+ * joins and deletes a reader thread.  release_packets FALSE leaves the read
+ * slots' packets out of their pool, for a caller about to delete that pool
+ * whole.  Returns what is still retained.
+ */
+UWORD       ami_sana2_retained_sweep(BOOL release_packets);
 
 /* Register with an NX_IP as interface `index`. Sets additional_link_info. */
 LONG        ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index);

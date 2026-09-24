@@ -320,7 +320,9 @@ host_test_targets() { # builddir
 #      434 with test_netdev_dp8390_wait: the overwrite stop delay driven
 #      through the real netdev_clock.c, over the timed, untimed and stalled
 #      beam shapes
-HOST_TESTS_EXPECTED=434
+#      435 with test_iface_retain: a removal whose SANA-II device keeps
+#      requests is AMI_NET_ERR_RETAINED, and the unload waits for the last hold
+HOST_TESTS_EXPECTED=435
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

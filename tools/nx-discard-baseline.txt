@@ -55,8 +55,6 @@
 1	src/sana2/sana2_driver.c	nx_ip_interface_mtu_set
 1	src/sana2/sana2_driver.c	nx_ip_interface_physical_address_set
 1	src/sana2/sana2_driver.c	nx_packet_transmit_release
-1	src/sana2/sana2_rx.c	tx_thread_delete
-1	src/sana2/sana2_rx.c	tx_thread_terminate
 1	src/sana2/sana2_tx.c	nx_packet_release
 1	src/sana2/sana2_tx.c	tx_thread_sleep
 1	src/sana2/sana2_tx.c	tx_timer_deactivate
@@ -96,6 +94,7 @@
 3	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_timer_park
 3	src/bsdsocket/raw.c	tx_semaphore_delete
 3	src/netstack/netstack_routes.c	tx_mutex_put
+3	src/sana2/sana2_rx.c	tx_semaphore_delete
 3	src/sana2/sana2_rx.c	tx_thread_sleep
 3	src/tools/tool_nx.c	nx_query_failed
 4	src/bsdsocket/raw.c	tx_mutex_get
@@ -107,7 +106,6 @@
 5	src/bsdsocket/socket.c	nx_tcp_server_socket_unaccept
 5	src/crypto68k/c68k_crt.c	_nx_crypto_huge_number_modulus
 5	src/sana2/sana2_rx.c	nx_packet_release
-5	src/sana2/sana2_rx.c	tx_semaphore_delete
 6	src/bsdsocket/raw.c	tx_mutex_put
 6	src/bsdsocket/socket.c	nx_tcp_socket_disconnect
 6	src/crypto68k/c68k_powm.c	_nx_crypto_huge_number_adjust_size
