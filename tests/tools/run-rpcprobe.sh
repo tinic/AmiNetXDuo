@@ -173,7 +173,7 @@ scp -q "$ROOT/tests/tools/rpcpeer.py" "$PEERHOST:$RTMP.py" || {
 
 PEER_LIFE=$((TIMEOUT + 60))
 ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
-    "timeout $((PEER_LIFE + 30)) python3 $RTMP.py --port $PORT \
+    "timeout $((PEER_LIFE + 30)) python3 $RTMP.py --bind-address $PEERADDR --port $PORT \
      --seconds $PEER_LIFE" > "$OUT/peer.out" 2> "$OUT/peer.err" &
 PEER_PID=$!
 

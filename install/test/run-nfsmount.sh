@@ -326,6 +326,7 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
 
 ssh -o BatchMode=yes -o ConnectTimeout=10 -n "$PEERHOST" \
     "nohup timeout $((TIMEOUT + 120)) python3 $RSRV --root $RROOT \
+         --bind-address $PEERADDR \
          --export $EXPORT_NAME --seconds $((TIMEOUT + 60)) \
          > $RLOG 2>&1 & echo \$! > $RPID" >/dev/null 2>&1 || {
     echo "!! cannot start the server on $PEERHOST" >&2; exit 2; }

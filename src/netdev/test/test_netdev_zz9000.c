@@ -156,7 +156,7 @@ static VOID payload_copy_every_length(VOID)
         {
             const volatile UBYTE *src = win.b + 2;      /* 2 mod 4 */
             UBYTE *dst = out.b + 4 + phase;
-            UWORD i;
+            size_t i;
             int   bytes_ok;
             int   guards_ok = 1;
             char  what[96];
@@ -169,10 +169,10 @@ static VOID payload_copy_every_length(VOID)
             zz_copy_payload(dst, src, len);
 
             bytes_ok = same_bytes(dst, (const UBYTE *)src, len);
-            for (i = 0; i < 4 + phase; i++)
+            for (i = 0; i < 4u + phase; i++)
                 if (out.b[i] != 0xee)
                     guards_ok = 0;
-            for (i = (UWORD)(4 + phase + len); i < sizeof(out.b); i++)
+            for (i = 4 + phase + len; i < sizeof(out.b); i++)
                 if (out.b[i] != 0xee)
                     guards_ok = 0;
 
