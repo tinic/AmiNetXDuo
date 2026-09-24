@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Count DHCP DISCOVERs in a pcap, so a harness can grade the wire.
 
-Prints frames=, dhcp= and discover= so a caller can tell a capture that
-caught nothing from one that caught an exchange with no DISCOVER in it.
+Prints frames=, dhcp=, discover= and foreign= so a caller can tell a
+capture that caught nothing from one that caught an exchange with no
+DISCOVER in it.  -c MAC counts only DISCOVERs whose client hardware address
+is MAC; the rest are foreign=, other clients on a shared segment.
 -v lists every DHCP message type found instead.
 
 SPDX-License-Identifier: MIT
@@ -39,7 +41,7 @@ def frames(blob):
 
 
 def message_type(link, frame):
-    """The DHCP option-53 value in this frame, or None."""
+    """(option-53 value, chaddr) for this frame, or None."""
     if link != 1 or len(frame) < 14 or frame[12:14] != b"\x08\x00":
         return None
     ip = frame[14:]
@@ -55,6 +57,7 @@ def message_type(link, frame):
     boot = udp[8:]
     if len(boot) < 240 or boot[236:240] != b"\x63\x82\x53\x63":
         return None
+    chaddr = bytes(boot[28:34])
     opt = 240
     while opt < len(boot):
         code = boot[opt]
@@ -67,16 +70,43 @@ def message_type(link, frame):
             return None
         length = boot[opt + 1]
         if code == 53 and length >= 1 and opt + 2 < len(boot):
-            return boot[opt + 2]
+            return boot[opt + 2], chaddr
         opt += 2 + length
     return None
 
 
+def parse_mac(text):
+    """bytes for aa:bb:cc:dd:ee:ff, or None."""
+    parts = text.split(":")
+    if len(parts) != 6:
+        return None
+    try:
+        raw = bytes(int(p, 16) for p in parts)
+    except ValueError:
+        return None
+    if any(len(p) != 2 for p in parts):
+        return None
+    return raw
+
+
 def main(argv):
-    verbose = "-v" in argv
-    paths = [a for a in argv[1:] if a != "-v"]
-    if not paths:
-        print("usage: dhcpwire.py [-v] <file.pcap>", file=sys.stderr)
+    verbose = False
+    mine = None
+    paths = []
+    args = argv[1:]
+    while args:
+        arg = args.pop(0)
+        if arg == "-v":
+            verbose = True
+        elif arg == "-c" and args:
+            mine = parse_mac(args.pop(0))
+            if mine is None:
+                print("dhcpwire.py: -c wants aa:bb:cc:dd:ee:ff", file=sys.stderr)
+                return 2
+        else:
+            paths.append(arg)
+    if len(paths) != 1:
+        print("usage: dhcpwire.py [-v] [-c MAC] <file.pcap>", file=sys.stderr)
         return 2
 
     with open(paths[0], "rb") as handle:
@@ -86,19 +116,26 @@ def main(argv):
     total = 0
     for link, frame in frames(blob):
         total += 1
-        kind = message_type(link, frame)
-        if kind is not None:
-            seen.append(kind)
+        found = message_type(link, frame)
+        if found is not None:
+            seen.append(found)
+
+    def ours(chaddr):
+        return mine is None or chaddr == mine
 
     if verbose:
         if not seen:
             print("no DHCP message in the capture at all")
-        for i, kind in enumerate(seen):
-            print("%d: %s" % (i + 1, NAMES.get(kind, "type %d" % kind)))
+        for i, (kind, chaddr) in enumerate(seen):
+            print("%d: %s %s%s" % (i + 1, NAMES.get(kind, "type %d" % kind),
+                                   ":".join("%02x" % b for b in chaddr),
+                                   "" if ours(chaddr) else " (foreign)"))
         return 0
 
-    print("frames=%d dhcp=%d discover=%d"
-          % (total, len(seen), sum(1 for kind in seen if kind == DISCOVER)))
+    discovers = [chaddr for kind, chaddr in seen if kind == DISCOVER]
+    print("frames=%d dhcp=%d discover=%d foreign=%d"
+          % (total, len(seen), sum(1 for c in discovers if ours(c)),
+             sum(1 for c in discovers if not ours(c))))
     return 0
 
 
