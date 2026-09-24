@@ -42,6 +42,16 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME perf_prof_report
                  COMMAND "${Python3_EXECUTABLE}"
                          "${CMAKE_CURRENT_SOURCE_DIR}/test_prof_report.py")
+
+        # profreport.py, the tree's own copy of the same parser, had the bug
+        # again as a collapse (base_section) instead of a bare-name match:
+        # it mapped .text.<name> to .text before the suffix could name the
+        # function, so every symbol of an object landed at every address the
+        # object contributed to.  Two .text.<fn> sections, both nm values
+        # zero, is the smallest case that shows it.
+        add_test(NAME perf_profreport
+                 COMMAND "${Python3_EXECUTABLE}"
+                         "${CMAKE_CURRENT_SOURCE_DIR}/test_profreport.py")
     endif()
 endif()
 
