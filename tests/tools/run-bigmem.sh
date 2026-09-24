@@ -52,9 +52,13 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 RESULTS="$ROOT/build/bigmem-results.txt"
 : > "$RESULTS"
 
-# AMI_POOL_MAX_PACKETS, plus the slack the bring-up report rounds by.  4096
-# since 2026-09-15; it was 512, which a 32 MB machine already reached.
-POOL_CEILING=4104
+# AMI_POOL_MAX_PACKETS, exactly.  4096 since 2026-09-15; it was 512, which a
+# 32 MB machine already reached.  The report is NetX's own count, and the pool
+# bytes are sized so NetX carves the planned count and no more (pool.h
+# ami_ns_pool_bytes_for, tests/netstack/host/test_pool_stride_host.c).  The
+# old "+8 slack" was a per-packet over-reservation that grew with the clamp:
+# +1 at 512, +10 at 4096.
+POOL_CEILING=4096
 POOL_MIN=16
 
 # The window ceiling, written out rather than derived, for the same reason
@@ -201,7 +205,7 @@ if [ "$SKIPPED_BIG" = 0 ]; then
     # 128 MB is past the clamp and sits on it; 32 MB is under the clamp and
     # scales, so the two must DIFFER and be ordered, where they used to be
     # equal.  A 128 MB pool below 4096 means the clamp is not what it says.
-    if [ "$p128" -lt 4090 ] || [ "$p128" -gt "$POOL_CEILING" ]; then
+    if [ "$p128" -ne "$POOL_CEILING" ]; then
         echo "pool_saturation=FAIL 128m=$p128 is not on the clamp (4096)" \
              >> "$RESULTS"
         FAILED=$((FAILED + 1))

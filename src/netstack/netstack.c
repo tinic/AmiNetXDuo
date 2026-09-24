@@ -1757,7 +1757,9 @@ static LONG ami_ns_bring_up(BOOL loopback_only)
         ami_ns_name_after_card(ns);
 
     ns->ns_PoolPackets = ami_ns_pool_packets();
-    ns->ns_PoolBytes   = ns->ns_PoolPackets * ami_ns_packet_stride();
+    ns->ns_PoolBytes   = ami_ns_pool_bytes_for(ns->ns_PoolPackets,
+                                               ami_ns_packet_stride(),
+                                               (ULONG)NX_PACKET_ALIGNMENT);
 
     ns->ns_PoolMemory = ami_alloc_flags(ns->ns_PoolBytes, MEMF_PUBLIC | MEMF_CLEAR);
     ns->ns_IpStack    = ami_alloc_flags((ULONG)AMI_IP_STACK_SIZE, MEMF_PUBLIC | MEMF_CLEAR);

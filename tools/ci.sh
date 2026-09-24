@@ -322,7 +322,9 @@ host_test_targets() { # builddir
 #      beam shapes
 #      435 with test_iface_retain: a removal whose SANA-II device keeps
 #      requests is AMI_NET_ERR_RETAINED, and the unload waits for the last hold
-HOST_TESTS_EXPECTED=435
+#      436 with test_pool_stride: NetX's own nx_packet_pool_create() carves
+#      exactly the planned pool, 4096 on the clamp and not 4106
+HOST_TESTS_EXPECTED=436
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

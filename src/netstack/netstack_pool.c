@@ -41,6 +41,24 @@ ULONG ami_ns_pool_packets_for(ULONG avail, ULONG divisor, ULONG stride)
     return packets;
 }
 
+ULONG ami_ns_packet_size_for(ULONG header, ULONG payload, ULONG align)
+{
+    if (align == 0UL)
+        align = 1UL;
+
+    header = ((header + align - 1UL) / align) * align;
+
+    return ((header + payload + align - 1UL) / align) * align;
+}
+
+ULONG ami_ns_pool_bytes_for(ULONG packets, ULONG stride, ULONG align)
+{
+    if (align == 0UL)
+        align = 1UL;
+
+    return packets * stride + (align - 1UL);
+}
+
 ULONG ami_ns_pool_avail_of(const LONG *pri, const ULONG *free, ULONG n)
 {
     ULONG i;

@@ -20,6 +20,11 @@ version at the top when it merges.
   one that completed or errored during the stop is left for the normal
   completion path, and a stale "transmitting" bit with no queued buffer is
   never sent.
+- The packet pool now holds exactly the number of packets it is sized for.
+  Each packet was reserving 4 bytes that the network stack does not use, so
+  the pool came out slightly larger than planned. On a machine big enough to
+  reach the 4096-packet limit it held 4106 and used about 16 KB more memory
+  than intended.
 
 ## 1.0.0-beta5
 
