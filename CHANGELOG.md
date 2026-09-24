@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The packet pool now holds exactly the number of packets it is sized for.
+  Each packet was reserving 4 bytes that the network stack does not use, so
+  the pool came out slightly larger than planned. On a machine big enough to
+  reach the 4096-packet limit it held 4106 and used about 16 KB more memory
+  than intended.
+
 ## 1.0.0-beta5
 
 - The minimal and micro profiles now hide their public `AMITCP` port while

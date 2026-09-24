@@ -555,6 +555,32 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME pool_window COMMAND test_pool_window)
 
+    # The pool NetX actually carves is the pool that was planned.  Links the
+    # real nx_packet_pool_create(), because the count that failed run-bigmem.sh
+    # (4106 on a 4096 clamp) is NetX's own, not the planning arithmetic's.
+    add_executable(test_pool_stride
+        host/test_pool_stride_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c")
+
+    target_compile_options(test_pool_stride PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_pool_stride PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"      # exec/types.h
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_definitions(test_pool_stride PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME pool_stride COMMAND test_pool_stride)
+
     # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
     # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are
