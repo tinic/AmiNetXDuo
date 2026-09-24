@@ -91,13 +91,13 @@ static VOID bus_rdata_long(const NetdevBus *bus, UBYTE *dst, UWORD len)
 
 static VOID bus_wdata_long(const NetdevBus *bus, const UBYTE *src, UWORD len)
 {
-    volatile ULONG *port = (volatile ULONG *)bus->wide;
+    volatile ULONG *port = (volatile ULONG *)bus->wide_write;
     const ULONG    *in   = (const ULONG *)(const void *)src;
     UWORD           i    = (UWORD)(len & (UWORD)~31u);
 
     if (i != 0)
     {
-        BUS_OUT_L(bus->wide, in, (ULONG)(i >> 5));
+        BUS_OUT_L(bus->wide_write, in, (ULONG)(i >> 5));
         in += (i >> 2);
     }
 
@@ -120,6 +120,7 @@ static VOID bus_wdata_long(const NetdevBus *bus, const UBYTE *src, UWORD len)
 static BOOL bus_long_ok(const NetdevBus *bus, const void *p, UWORD len)
 {
     return (BOOL)(bus->dmode == NETDEV_DMODE_LONG && bus->wide != NULL &&
+                  bus->wide_write != NULL &&
                   BUS_ALIGN(p, 3) == 0 && len >= 4);
 }
 
@@ -388,6 +389,7 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
     bus->nic    = (volatile UBYTE *)base;
     bus->asic   = (volatile UBYTE *)base + 16u * stride;
     bus->wide   = (volatile UBYTE *)wide;
+    bus->wide_write = (volatile UBYTE *)wide;
     bus->odd    = NULL;
     bus->regmap = NULL;         /* netdev_bus_split() for the ones that need it */
     bus->stride = stride;
@@ -396,4 +398,9 @@ VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide)
     bus->getodd = 0;            /* ne2000_detect() turns it on if it is needed */
     bus->ops    = &netdev_bus_generic;
     bus_fill_at(bus);
+}
+
+VOID netdev_bus_wide_write(NetdevBus *bus, APTR wide_write)
+{
+    bus->wide_write = (volatile UBYTE *)wide_write;
 }

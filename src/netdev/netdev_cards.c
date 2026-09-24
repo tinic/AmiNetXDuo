@@ -51,11 +51,12 @@ const NetdevCard netdev_cards[] =
 {
     /* name        manid prodid reg_off stride wide_off
        chip                bps         ax  mem_off mem_size prom_off
-       bus               base      odd_off  swap  regmap  oui  pnp */
+       bus               base      odd_off  swap  regmap  oui  pnp compat
+       wide_write_off (0 = same as wide_off) */
 #if NETDEV_HAS_CLASSIC
     { "xsurf100",  4626,   100, 0x0800,     4, 0x8880,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL, 0x8c80 },
 
     /*
      * reg_off is the one place the register base is written down.  The chip
@@ -65,19 +66,19 @@ const NetdevCard netdev_cards[] =
      */
     { "xsurf",     4626,    23, 0x8600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, &xsurf_pnp, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, &xsurf_pnp, NULL, 0 },
 
     { "ariadne2",  2167,   202, 0x0600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL, 0 },
 
     { "hydra",     2121,     1, 0xffe1,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,       0,  0x4000,  0xffc0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL, 0 },
 
     { "lanrover",  1023,   254, 0x0001,     2,      0,
       NETDEV_CHIP_ED,      10000000UL, 0,  0x8000,  0x8000,  0x0100,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL, 0 },
 
     /*
      * The two LANCE boards.  Registers are RDP then RAP, a word apart, and the
@@ -86,11 +87,11 @@ const NetdevCard netdev_cards[] =
      */
     { "a2065",      514,   112, 0x4000,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080, NULL, NULL, 0 },
 
     { "ariadne",   2167,   201, 0x0370,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060, NULL, NULL, 0 },
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
@@ -99,7 +100,7 @@ const NetdevCard netdev_cards[] =
      */
     { "pcmcia",       0,     0, 0x0300,     1,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL, 0 },
     /*
      * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B at a fixed
      * $EE0000 with no autoconfig record, so it is probed rather than found and
@@ -116,7 +117,7 @@ const NetdevCard netdev_cards[] =
      */
     { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
-      NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0, NULL, NULL },
+      NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0, NULL, NULL, 0 },
 
     /*
      * The 3Com EtherLink III PCMCIA card, a 3C589 of any revision.  manid/prodid
@@ -128,7 +129,7 @@ const NetdevCard netdev_cards[] =
      */
     { "3c589",   0x0101, 0x0589, 0x0300,     1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL, 0 },
 
     /*
      * The two Megahertz/3Com LAN+modem combo cards the CIS walk reaches.
@@ -152,10 +153,10 @@ const NetdevCard netdev_cards[] =
      */
     { "3ccfem556", 0x0101, 0x0556, 0x0300,   1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL, 0 },
     { "3cxem556",  0x0101, 0x0035, 0x0300,   1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL, 0 },
 
 #endif /* NETDEV_HAS_CLASSIC */
 
@@ -171,7 +172,7 @@ const NetdevCard netdev_cards[] =
      */
     { "genet",        0,     0, 0x0000,     4,      0,
       NETDEV_CHIP_GENET, 1000000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_DTREE, 0, 0, 0, NULL, 0, NULL, "brcm,bcm2711-genet-v5" },
+      NETDEV_BUS_DTREE, 0, 0, 0, NULL, 0, NULL, "brcm,bcm2711-genet-v5", 0 },
 #endif /* NETDEV_HAS_DTREE */
 
 #if NETDEV_HAS_ZZ9000
@@ -193,10 +194,10 @@ const NetdevCard netdev_cards[] =
      */
     { "zz9000",    0x6d6e,     4, 0x0000,     2,      0,
       NETDEV_CHIP_ZZ9000, 100000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL, 0 },
     { "zz9000z2",  0x6d6e,     3, 0x0000,     2,      0,
       NETDEV_CHIP_ZZ9000, 100000000UL, 0,       0,       0,       0,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL, 0 },
 #endif /* NETDEV_HAS_ZZ9000 */
 };
 

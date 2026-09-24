@@ -38,6 +38,7 @@
 static struct { unsigned char width; unsigned long value; } wire[WIRE_MAX];
 static unsigned wire_n;
 static int      wire_over;      /* the recorder itself ran out of room */
+static const volatile void *wire_long_port;
 
 static void wire_put(unsigned char width, unsigned long value)
 {
@@ -61,13 +62,13 @@ static void wire_put(unsigned char width, unsigned long value)
    address, but the shipped code declares it and -Wextra is on. */
 #define BUS_PUT8(p, v)   ((void)(p), wire_put(1, (unsigned long)(UBYTE)(v)))
 #define BUS_PUT16(p, v)  ((void)(p), wire_put(2, (unsigned long)(UWORD)(v)))
-#define BUS_PUT32(p, v)  ((void)(p), wire_put(4, (unsigned long)(v)))
+#define BUS_PUT32(p, v)  (wire_long_port = (p), wire_put(4, (unsigned long)(v)))
 
 #define BUS_OUT_L(port, from, blocks)                                        \
     do {                                                                     \
         const ULONG *_p = (const ULONG *)(const void *)(from);               \
         unsigned long _n = (unsigned long)(blocks) * 8ul, _k;                \
-        (void)(port);                                                        \
+        wire_long_port = (port);                                             \
         for (_k = 0; _k < _n; _k++) wire_put(4, (unsigned long)_p[_k]);      \
     } while (0)
 
@@ -100,6 +101,7 @@ static void ok(const char *what, int cond)
    handed to the bus, and the recorder is what observes the traffic. */
 static union { UWORD w[32]; UBYTE b[64]; } regs;
 static union { ULONG l;     UBYTE b[4];  } wide;
+static union { ULONG l;     UBYTE b[4];  } wide_tx;
 
 /* A source arena with room for an odd start, and a known filling. */
 static union { ULONG l[512]; UBYTE b[2048]; } arena;
@@ -423,6 +425,28 @@ static void test_long_refuses_short(void)
        wire[1].value == (unsigned long)((unsigned)arena.b[2] << 8));
 }
 
+static void test_split_long_window(void)
+{
+    NetdevBus bus;
+
+    arena_fill();
+    netdev_bus_setup(&bus, regs.b, 2, wide.b);
+    netdev_bus_wide_write(&bus, wide_tx.b);
+    bus.dmode = NETDEV_DMODE_LONG;
+
+    wire_long_port = NULL;
+    netdev_bus_wdata(&bus, arena.b, 4);
+    ok("scalar LONG write uses the separate TX window",
+       wire_long_port == wide_tx.b);
+
+    wire_long_port = NULL;
+    netdev_bus_wdata(&bus, arena.b, 32);
+    ok("batched LONG write uses the separate TX window",
+       wire_long_port == wide_tx.b);
+
+    ok("split write leaves the RX window unchanged", bus.wide == wide.b);
+}
+
 int main(void)
 {
     test_byte_port();
@@ -431,6 +455,7 @@ int main(void)
     test_long_refusals();
     test_odd_tail_contract();
     test_long_refuses_short();
+    test_split_long_window();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
     return failures == 0 ? 0 : 1;

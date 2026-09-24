@@ -638,17 +638,18 @@ static BOOL ne2000_detect(NetdevNic *nic)
 static VOID ne2000_probe_wide(NetdevNic *nic)
 {
     /*
-     * Both buffers must be ULONG arrays: netdev_bus.c refuses the 32-bit path
-     * for a buffer that is not 4-aligned and silently falls back to 16-bit
-     * moves, so a misaligned probe promotes the mode on no evidence.
+     * The m68k ABI only promises word-aligned ULONG arrays.  Round pointers
+     * into one extra ULONG of storage so both probe legs really exercise the
+     * longword windows; otherwise netdev_bus.c silently uses 16-bit moves and
+     * the probe can promote LONG without ever touching either window.
      */
-    ULONG  outbuf[NETDEV_BUS_PROBE_LEN / 4];
-    ULONG  inbuf[NETDEV_BUS_PROBE_LEN / 4];
-    UBYTE *out = (UBYTE *)outbuf;
-    UBYTE *back = (UBYTE *)inbuf;
+    ULONG  outbuf[NETDEV_BUS_PROBE_LEN / 4 + 1];
+    ULONG  inbuf[NETDEV_BUS_PROBE_LEN / 4 + 1];
+    UBYTE *out = (UBYTE *)(((unsigned long)(void *)outbuf + 3ul) & ~3ul);
+    UBYTE *back = (UBYTE *)(((unsigned long)(void *)inbuf + 3ul) & ~3ul);
     UWORD  i;
 
-    if (nic->bus.wide == NULL)
+    if (nic->bus.wide == NULL || nic->bus.wide_write == NULL)
         return;
 
     /* Leg 1: written narrow, read wide. */

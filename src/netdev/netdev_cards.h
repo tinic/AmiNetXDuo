@@ -85,7 +85,7 @@ typedef struct NetdevCard
     UWORD       prodid;
     ULONG       reg_off;        /* register file, offset from the board base */
     UWORD       stride;         /* bytes between consecutive register indices */
-    ULONG       wide_off;       /* 32-bit mirrored data window, 0 = none      */
+    ULONG       wide_off;       /* 32-bit read data window, 0 = none          */
     UBYTE       chip;           /* NETDEV_CHIP_*                              */
     ULONG       bps;            /* S2_DEVICEQUERY line rate                   */
     UBYTE       ax88796;        /* station address at AX88796_NODEID_OFFSET   */
@@ -129,6 +129,7 @@ typedef struct NetdevCard
      * every row that is found some other way.
      */
     const char *compat;
+    ULONG       wide_write_off; /* 32-bit write window, 0 = same as wide_off */
 } NetdevCard;
 
 extern const NetdevCard netdev_cards[];
