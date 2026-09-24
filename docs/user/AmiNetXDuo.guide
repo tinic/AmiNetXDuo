@@ -1948,7 +1948,9 @@
                  lists them
 
   The command opens no device, loads no driver and does not start the
-  stack. A value that it cannot read without doing one of those is
+  stack. Opening a running bsdsocket.library reads the netdb files and
+  can load usergroup.library from LIBS: when it is not in memory. A
+  value that it cannot read without doing one of those is
   printed as "unavailable". With the stack stopped, that is every
   stack, live, dhcp, stats and health value. The library does not
   publish its profile or its build, so stack.profile and stack.build
