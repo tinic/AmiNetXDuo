@@ -434,6 +434,11 @@ VOID ami_bpf_detach_interface(APTR cookie);
  * packet (raw mode) or must be synthesised (cooked mode, the default).
  */
 
+/* Channels bound to an interface.  The taps test it first, and the per-frame
+   callers test it before the call, so "nobody is capturing" costs a load and
+   a compare, not a call with seven arguments. */
+extern volatile UWORD ami_bpf_bound_channels;
+
 VOID ami_bpf_tap_rx(APTR cookie, const UBYTE *frame, ULONG len);
 
 #ifdef NX_API_H

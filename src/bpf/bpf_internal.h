@@ -91,13 +91,6 @@ typedef struct AmiBpfChan
    attachments and bpf_channel.c binds channels to its entries. */
 extern AmiBpfIf   ami_bpf_iface[AMI_BPF_MAX_IFACES];
 
-/*
- * Number of channels currently bound to an interface. The taps read this
- * before anything else so that the common "nobody is capturing" case costs a
- * load, a compare and a return.
- */
-extern volatile UWORD ami_bpf_bound_channels;
-
 /* ------------------------------------------------------- shared internals */
 
 /* bpf_channel.c */

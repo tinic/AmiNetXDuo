@@ -963,8 +963,9 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
      * the packet or the tap synthesises them.  Nothing is written into the
      * packet, which is often a segment handed back for retransmission.
      */
-    ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
-                   dst_msw, dst_lsw, iface->mac);
+    if (ami_bpf_bound_channels != 0)
+        ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
+                       dst_msw, dst_lsw, iface->mac);
 #endif
 
     length = packet->nx_packet_length;

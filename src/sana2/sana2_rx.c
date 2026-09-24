@@ -1550,7 +1550,8 @@ static VOID ami_sana2_rx_hand_up(AmiSana2Rx *rx, AmiRxHandUp *up)
        contiguous and before GRO can strip continuation headers or rewrite
        the head length. */
 #ifdef AMINETXDUO_BPF
-    ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr, up->length);
+    if (ami_bpf_bound_channels != 0)
+        ami_bpf_tap_rx(iface, packet->nx_packet_prepend_ptr, up->length);
 #endif
 #ifdef AMINETXDUO_RXPROBE
     ami_sana2_rxprobe_deliver(iface, packet->nx_packet_prepend_ptr,
