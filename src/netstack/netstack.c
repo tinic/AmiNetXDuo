@@ -3080,8 +3080,9 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         AMI_ERROR("netstack: interface \'%s\' did not start: %s unit %lu %s",
                   open_cfg.name, open_cfg.device,
                   (unsigned long)open_cfg.unit,
-                  (err == AMI_NET_ERR_DEVBAD) ? "refused a SANA-II command"
-                                              : "did not answer");
+                  (err == AMI_NET_ERR_DEVBAD)   ? "refused a SANA-II command" :
+                  (err == AMI_NET_ERR_RETAINED) ? "still holds requests"
+                                                : "did not answer");
         return (err != AMI_NET_OK) ? err : AMI_NET_ERR_NODEV;
     }
 
