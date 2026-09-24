@@ -77,7 +77,6 @@
 #include "nx_tcp.h"
 
 #include <proto/exec.h>
-#include <proto/dos.h>
 
 /* Everything below is Forbid()-guarded: the armed list, the timer's state,
    and which IP instance the handler is installed on. */
@@ -92,9 +91,9 @@ static BOOL       bsd_cork_timer_live;
    deleted fires into nothing rather than into a reclaimed NX_IP. */
 static NX_IP     *bsd_cork_tick_ip;
 
-/* Passes in flight: I's bsd_cork_ip_pass() between its entry and its return,
-   counted under Forbid().  bsd_cork_stop() waits for zero. */
-static ULONG      bsd_cork_passes;
+/* The NX_IP a refused stop left unproven: no bracket, so no proof that the
+   IP thread was outside its pass.  The next stop proves it or refuses again. */
+static NX_IP     *bsd_cork_unproven;
 
 BOOL bsd_cork_running(VOID)
 {
@@ -203,6 +202,11 @@ VOID bsd_cork_start(NX_IP *ip)
     /* A timer an earlier stop could not delete is still ours: reused. */
     if (bsd_cork_timer_made)
     {
+        /* The proof a refused stop owes is this start's stop's to give: the
+           same NX_IP (the stack was kept), and that stop takes its mutex. */
+        if (bsd_cork_unproven == ip)
+            bsd_cork_unproven = NULL;
+
         Forbid();
         ip->nx_ip_cork_handler = bsd_cork_ip_pass;
         bsd_cork_ip            = ip;
@@ -227,58 +231,83 @@ VOID bsd_cork_start(NX_IP *ip)
  *                       runs, and there is no timer list to call into.
  *
  *   anything else       the kernel runs but would not adopt this task (no
- *                       free signal, most likely).  This task is plain Exec:
- *                       it cannot wait on a ThreadX object, but the timer
- *                       calls are TX_DISABLE sections -- Forbid() here -- and
- *                       need no thread of their own, and bsd_cork_passes is
- *                       plain memory.  So it waits for the pass count to reach
- *                       zero with Delay(), which lets the IP thread's Exec
- *                       task run -- a Process only; a Task cannot sleep
- *                       without a signal of its own, which is the resource the
- *                       adoption just failed on.  The wait is bounded; past
- *                       it, or on a Task, nothing a pass still holds is
- *                       touched (a FLUSH(IP) socket stays the pass's, and its
- *                       drop waits for it), and FALSE is returned.
+ *                       free signal, most likely).  The timer calls are
+ *                       TX_DISABLE sections -- Forbid() here -- and need no
+ *                       thread, so T is cut off and the timer goes.  But
+ *                       nothing this task can do proves the IP thread is
+ *                       outside its pass: it cannot take nx_ip_protection,
+ *                       and the IP thread may already have read a non-NULL
+ *                       nx_ip_cork_handler and be about to call it
+ *                       (nx_ip_thread_entry.c) -- no counter the pass keeps
+ *                       itself can see a call that has not started.  So the
+ *                       answer is FALSE, always, and only IDLE segments are
+ *                       touched: a FLUSH(IP) socket stays the pass's, and its
+ *                       drop waits for it.
  *
  * FALSE MEANS THE STACK MUST NOT BE TORN DOWN, and library.c does not tear
- * it down: bsd_netstack_shutdown_owned() keeps the netstack reference and the
- * stack with it, and gives it back on the next shutdown that finds no pass.
- * The teardown would not wait for the pass on its own.  With a bracket it
- * would: ami_ns_destroy() (src/netstack/netstack.c:71) calls nx_ip_delete()
- * (netstack.c:206) before it closes an interface (:214) or deletes the packet
- * pool (:252), and nx_ip_delete() takes nx_ip_protection TX_WAIT_FOREVER
- * before anything else (third_party/netxduo/common/src/nx_ip_delete.c:104) --
- * the mutex the IP thread holds for its whole event pass -- and only then
- * terminates the IP thread (:242) and deletes the mutex (:245).  But the
- * bracket is what this stop was refused, and netstack_shutdown() asks the
- * same task for the same one (netstack.c:1939); refused, it calls
- * ami_ns_destroy() regardless (netstack.c:1946), where that mutex get has no
- * thread to suspend.  The sockets are not the teardown's: they go only
+ * it down: bsd_netstack_shutdown_owned() keeps the netstack reference (a
+ * count, one per refusal) and the stack with it.  The teardown would not wait
+ * for the pass on its own.  With a bracket it would: ami_ns_destroy()
+ * (src/netstack/netstack.c:71) calls nx_ip_delete() (netstack.c:206) before
+ * it closes an interface (:214) or deletes the packet pool (:252), and
+ * nx_ip_delete() takes nx_ip_protection TX_WAIT_FOREVER before anything else
+ * (third_party/netxduo/common/src/nx_ip_delete.c:104) -- the mutex the IP
+ * thread holds for its whole event pass -- and only then terminates the IP
+ * thread (:242) and deletes the mutex (:245).  But the bracket is what this
+ * stop was refused, and netstack_shutdown() asks the same task for the same
+ * one (netstack.c:1939); refused, it calls ami_ns_destroy() regardless
+ * (netstack.c:1946), where that mutex get has no thread to suspend and its
+ * result is not looked at.  The sockets are not the teardown's: they go only
  * through bsd_cork_drop(), which waits for the pass.
  *
- * WORST CASE: a pass that never comes back -- a driver's BeginIO() that never
- * returns -- keeps the stack's memory and its tasks for the rest of the
- * session, and netstack_can_unload() keeps the library resident.  A bounded
- * retention, the same answer ami_ns_destroy() gives a SANA-II device that
- * will not hand its requests back (netstack.c:241).  Shutdown itself never
- * waits longer than the five seconds.
+ * A LATER STOP MUST PROVE IT, not assume it.  The refused NX_IP is kept in
+ * bsd_cork_unproven, and a stop with nothing started (bsd_cork_ip NULL) that
+ * finds one takes the bracket and nx_ip_protection on it before answering
+ * TRUE; refused again, FALSE again.  A start on the same NX_IP -- the stack
+ * kept, a reopen -- hands the proof to that start's own stop.
+ *
+ * WORST CASE: no stop ever gets the bracket, or a pass never comes back --
+ * a driver's BeginIO() that never returns.  The stack's memory and tasks are
+ * kept for the session and netstack_can_unload() keeps the library resident:
+ * a bounded retention, the answer ami_ns_destroy() itself gives a SANA-II
+ * device that will not hand its requests back (netstack.c:241).  Shutdown
+ * never waits for it.
  *
  * Every branch cuts T off first (bsd_cork_tick_ip), so a timer that will not
  * deactivate or delete is harmless, and keeps it: a timer whose delete failed
  * stays ours (bsd_cork_timer_made), is reused by the next start and deleted by
  * the next stop that can.
  */
-#define BSD_CORK_STOP_WAIT  250L    /* Delay() ticks, five seconds */
-
 BOOL bsd_cork_stop(VOID)
 {
     NX_IP     *ip = bsd_cork_ip;
     AmiSocket *list, *sock, *next;
     LONG       entered;
-    BOOL       quiet;
 
     if (ip == NULL)
+    {
+        NX_IP *unproven = bsd_cork_unproven;
+
+        if (unproven == NULL)
+            return TRUE;
+
+        entered = ami_netstack_enter(&bsd_cork_caller);
+        if (entered == AMI_NET_ERR_STATE)
+        {
+            bsd_cork_unproven = NULL;       /* no kernel, no pass */
+            return TRUE;
+        }
+        if (entered != AMI_NET_OK)
+            return FALSE;
+
+        /* The pass that was maybe running: over once this is held. */
+        AMI_NX_ONLY_SUCCESS(tx_mutex_get(&unproven->nx_ip_protection,
+                                         TX_WAIT_FOREVER));
+        AMI_NX_ONLY_SUCCESS(tx_mutex_put(&unproven->nx_ip_protection));
+        ami_netstack_leave(&bsd_cork_caller);
+        bsd_cork_unproven = NULL;
         return TRUE;
+    }
 
     entered = ami_netstack_enter(&bsd_cork_caller);
 
@@ -315,20 +344,6 @@ BOOL bsd_cork_stop(VOID)
     ip->nx_ip_cork_handler = NX_NULL;
     bsd_cork_ip            = NULL;
     Permit();
-
-    /* And none still running.  With the mutex held there is none; without
-       it, wait as the header says. */
-    if (entered != AMI_NET_OK && entered != AMI_NET_ERR_STATE &&
-        FindTask(NULL)->tc_Node.ln_Type == NT_PROCESS)
-    {
-        LONG waited = 0;
-
-        while (bsd_cork_passes != 0 && waited < BSD_CORK_STOP_WAIT)
-        {
-            Delay(1);
-            waited++;
-        }
-    }
 
     Forbid();
     list           = bsd_cork_armed;
@@ -367,13 +382,16 @@ BOOL bsd_cork_stop(VOID)
         ami_netstack_leave(&bsd_cork_caller);
     }
 
-    /* Read once more, now that nothing can start one: a pass the wait did
-       not see out still has the NX_IP, its pool and a socket in hand. */
-    Forbid();
-    quiet = (bsd_cork_passes == 0) ? TRUE : FALSE;
-    Permit();
+    /* Proven with the mutex, or no kernel to run a pass: the teardown may
+       go.  Refused while the kernel runs: it may not (see above). */
+    if (entered == AMI_NET_OK || entered == AMI_NET_ERR_STATE)
+    {
+        bsd_cork_unproven = NULL;
+        return TRUE;
+    }
 
-    return quiet;
+    bsd_cork_unproven = ip;
+    return FALSE;
 }
 
 /* ---------------------------------------------------------- ownership -- */
@@ -655,15 +673,14 @@ VOID bsd_cork_ip_pass(NX_IP *ip)
 
     /* Take the list.  An IDLE socket with somewhere to go becomes FLUSH(IP);
        one being appended to is looked at again next tick; a STALLED one waits
-       for its window.  Counted in bsd_cork_passes, in the same Forbid() that
-       sees whether the cork has been stopped since the dispatch. */
+       for its window.  A pass dispatched before a stop and run after it
+       finds bsd_cork_ip NULL and touches nothing. */
     Forbid();
     if (bsd_cork_ip == NULL)
     {
         Permit();
         return;
     }
-    bsd_cork_passes++;
     list           = bsd_cork_armed;
     bsd_cork_armed = NULL;
 
@@ -710,7 +727,6 @@ VOID bsd_cork_ip_pass(NX_IP *ip)
 
     Forbid();
     bsd_cork_tick_settle_locked();
-    bsd_cork_passes--;
     Permit();
 }
 

@@ -347,6 +347,7 @@ ULONG _tx_time_get(VOID) { return h.ticks; }
 
 static jmp_buf h_sleep_jmp;
 
+/* The stop no longer sleeps; linking this is what would say it does. */
 LONG Delay(ULONG ticks)
 {
     h.delays++;
@@ -1632,7 +1633,7 @@ static void t_stop_refused(void)
     (VOID)h_send(0, 0, 30, 0);
     CHECK(h.timer_live, "a live tick");
     h.enter_result = AMI_NET_ERR_KERNEL;
-    bsd_cork_stop();
+    CHECK(bsd_cork_stop() == FALSE, "and says the stack must be kept");
     CHECK(!h.timer_live && h.deactivates == 1 && h.deletes == 1,
           "refused bracket, kernel live: the timer is deactivated and deleted");
     CHECK(h_ip.nx_ip_cork_handler == NX_NULL, "and the handler cleared");
@@ -1722,26 +1723,14 @@ static void t_stop_timer_refusals(void)
 static AmiSocket *h_mid;
 static BOOL       h_mid_drop_waited;
 
-static BOOL h_mid_task;             /* the stopping caller is a plain Task */
-
 static void h_stop_mid_pass(void)
 {
     ULONG releases = h.releases;
-    BOOL  quiet;
 
     h.enter_result = AMI_NET_ERR_KERNEL;
-    if (h_mid_task)
-        h_task.tc_Node.ln_Type = NT_TASK;
-    quiet = bsd_cork_stop();
-    h_task.tc_Node.ln_Type = NT_PROCESS;
-
-    CHECK(!quiet, "the stop answers that a pass is still in flight, so the "
-                  "caller keeps the stack, its pool and its NX_IP");
-    if (h_mid_task)
-        CHECK(h.delays == 0, "a plain Task cannot sleep, and does not try");
-    else
-        CHECK(h.delays == 250,
-              "a Process waited for the pass, bounded, by Delay()");
+    CHECK(bsd_cork_stop() == FALSE,
+          "refused while the kernel runs: the stack must be kept");
+    CHECK(h.delays == 0, "and the stop does not wait for anything");
     CHECK(h_ip.nx_ip_cork_handler == NX_NULL && h.deletes == 1,
           "handler cleared and timer deleted before anything is reclaimed");
     CHECK(h_mid->as_CorkState == BSD_CORK_FLUSH &&
@@ -1762,13 +1751,11 @@ static void h_stop_mid_pass(void)
 
 static void t_stop_during_pass(void)
 {
-    int round;
+    AmiSocket *s;
+    VOID     (*latched)(NX_IP *);
+    ULONG      gets;
 
-    for (round = 0; round < 2; round++)
-    {
-    h_mid_task = (round == 1) ? TRUE : FALSE;
-    printf("cork: the stack going down while a pass is in its send (%s)\n",
-           h_mid_task ? "a plain Task" : "a Process, the wait runs out");
+    printf("cork: the stack going down while a pass is in its send\n");
 
     h_reset();
     h_mid = h_tcp(0);
@@ -1783,19 +1770,58 @@ static void t_stop_during_pass(void)
           "and did not start a stopped cork's timer again");
     bsd_cork_drop(h_mid);
     CHECK(h.releases == 0, "the drop afterwards has nothing left to release");
-    }
-    h_mid_task = FALSE;
 
-    /* A refused stop with no pass running does not wait at all, and says the
-       stack may go. */
+    printf("cork: the IP thread has read the handler but not yet run it\n");
+
+    /* No pass running, none counted: the IP thread has only latched the
+       handler (nx_ip_thread_entry.c reads it, then calls it).  A refused stop
+       cannot see that, so it refuses the teardown anyway. */
+    h_reset();
+    s = h_tcp(0);
+    (VOID)h_send(0, 0, 30, 0);
+    latched = h_ip.nx_ip_cork_handler;
+    h.enter_result = AMI_NET_ERR_KERNEL;
+    CHECK(bsd_cork_stop() == FALSE,
+          "refused with nothing visibly running: still FALSE, stack kept");
+    CHECK(s->as_CorkPkt == NULL && h.releases == 0,
+          "the IDLE segment is forgotten, never released without a bracket");
+
+    /* The latched call lands after the stop: it touches nothing. */
+    latched(&h_ip);
+    CHECK(h.sends == 0 && s->as_CorkState == BSD_CORK_IDLE,
+          "the late call finds the cork stopped and returns");
+
+    /* The kept stack's next shutdown: still refused -- still FALSE. */
+    CHECK(bsd_cork_stop() == FALSE,
+          "a later stop without the bracket cannot prove it either");
+
+    /* With the bracket, it takes nx_ip_protection on that NX_IP first. */
+    h.enter_result = AMI_NET_OK;
+    gets = h.mutex_gets;
+    CHECK(bsd_cork_stop() == TRUE && h.mutex_gets == gets + 1,
+          "a stop with the bracket proves it on the mutex, then says TRUE");
+    CHECK(bsd_cork_stop() == TRUE && h.mutex_gets == gets + 1,
+          "and owes nothing after that");
+
+    /* A reopen on the kept stack hands the proof to its own stop. */
     h_reset();
     (VOID)h_tcp(0);
     h.enter_result = AMI_NET_ERR_KERNEL;
-    CHECK(bsd_cork_stop() == TRUE && h.delays == 0,
-          "no pass in flight: no wait, and the teardown may proceed");
-    h_reset();
-    CHECK(bsd_cork_stop() == TRUE, "nor with the bracket held");
+    CHECK(bsd_cork_stop() == FALSE, "refused");
     h.enter_result = AMI_NET_OK;
+    bsd_cork_start(&h_ip);
+    gets = h.mutex_gets;
+    CHECK(bsd_cork_stop() == TRUE && h.mutex_gets == gets + 1,
+          "the reopened cork's stop takes the mutex, and that is the proof");
+
+    /* The kernel stopped: no pass can run, TRUE without a bracket. */
+    h_reset();
+    (VOID)h_tcp(0);
+    h.enter_result = AMI_NET_ERR_STATE;
+    CHECK(bsd_cork_stop() == TRUE, "no kernel, no pass: TRUE");
+    h.enter_result = AMI_NET_OK;
+    h_reset();
+    CHECK(bsd_cork_stop() == TRUE, "and with the bracket held, TRUE");
 }
 
 static void t_abort_while_owned(void)
