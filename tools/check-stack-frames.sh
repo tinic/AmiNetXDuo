@@ -156,6 +156,7 @@ COMMAND_BUDGETS=(
     "CheckNetConfig:1984"
     "CheckNetDevice:512"
     "ConfigureNetInterface:704"
+    "CreateAmiNetXDuoStatusReport:576"
     "DeleteNetRoute:896"
     "El3Diag:192"
     "GetNetStatus:640"
