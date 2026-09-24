@@ -22,8 +22,15 @@
 
 #include "aminetxduo/pool.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+/* What the HOST needs an NX_PACKET aligned to.  NetX aligns to
+   NX_PACKET_ALIGNMENT, four here; a 64-bit host's NX_PACKET holds pointers
+   and needs eight, so a start NetX rounds to 4 mod 8 is undefined behaviour
+   on the host (the sanitizer stage caught it) and legal on the m68k. */
+#define H_ALIGNOF(t) offsetof(struct { char c; t m; }, m)
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -101,10 +108,25 @@ static void netx_carves_exactly_the_planned_count(void)
     char  what[96];
     int   i;
     ULONG mis;
+    ULONG align  = (ULONG)NX_PACKET_ALIGNMENT;
+    ULONG host   = (ULONG)H_ALIGNOF(NX_PACKET);
+    ULONG stride = ami_ns_packet_size_for((ULONG)sizeof(NX_PACKET),
+                                          (ULONG)AMI_POOL_PAYLOAD, align);
 
+    /* Every packet after the first sits a whole stride on; if the stride
+       were not a multiple of the host's alignment, they could not be run. */
+    h_check_eq("the host stride keeps NX_PACKET aligned", stride % host, 0);
+    if (stride % host != 0)
+        return;
+
+    /* Starts NetX rounds onto a host-aligned address: 0, and those it rounds
+       up past a few lost bytes, which the align - 1 of the pool bytes pays. */
     for (i = 0; i < H_PLANNED_N; i++)
-        for (mis = 0; mis < (ULONG)NX_PACKET_ALIGNMENT; mis++)
+        for (mis = 0; mis < align + host; mis++)
         {
+            if ((((mis + align - 1UL) / align) * align) % host != 0UL)
+                continue;
+
             snprintf(what, sizeof(what), "NetX count, planned %lu, start +%lu",
                      (unsigned long)h_planned[i], (unsigned long)mis);
             h_check_eq(what, h_netx_count(h_planned[i], mis), h_planned[i]);
