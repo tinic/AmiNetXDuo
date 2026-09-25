@@ -611,6 +611,7 @@ typedef struct AmiSocket
     LONG                    as_McastTtl;
     LONG                    as_McastLoop;
     LONG                    as_McastIf;
+    ULONG                   as_McastIfEpoch;
 
 #ifdef AMINETXDUO_IPV6
     /*
@@ -619,6 +620,7 @@ typedef struct AmiSocket
      */
     LONG                    as_Mcast6Hops;
     LONG                    as_Mcast6If;
+    ULONG                   as_Mcast6IfEpoch;
 #endif
 #endif
 

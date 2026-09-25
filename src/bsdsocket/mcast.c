@@ -16,6 +16,7 @@ typedef struct BsdMcastEntry
     AmiSocket  *bm_Sock;        /* NULL: free row                           */
     ULONG       bm_Group;
     UINT        bm_Iface;       /* NetX interface index                     */
+    ULONG       bm_Epoch;       /* detach generation of that slot           */
 } BsdMcastEntry;
 
 /*
@@ -26,6 +27,31 @@ typedef struct BsdMcastEntry
  * raw.c's registry rests on.
  */
 static BsdMcastEntry bsd_mcast_table[BSD_MCAST_MEMBERSHIPS];
+
+/* A saved IP_MULTICAST_IF is an interface identity, not a permanent numeric
+   slot preference.  If that slot was detached, use routing until the caller
+   explicitly selects an interface again.  Call within a NetX bracket. */
+static LONG bsd_mcast_preference(LONG *iface, ULONG epoch)
+{
+    if (*iface >= 0 &&
+        netstack_interface_epoch((UWORD)*iface) != epoch)
+        *iface = -1;
+
+    return *iface;
+}
+
+/* NetX drops the actual join on interface detach.  Do not let a BSD row
+   outlive that join: after slot reuse, Close() could otherwise leave another
+   socket's group, and re-join on this socket would appear duplicated.  All
+   callers are in a bsd_nx_enter() bracket. */
+static BOOL bsd_mcast_row_live(BsdMcastEntry *e)
+{
+    if (e->bm_Sock != NULL &&
+        e->bm_Epoch != netstack_interface_epoch((UWORD)e->bm_Iface))
+        e->bm_Sock = NULL;
+
+    return e->bm_Sock != NULL;
+}
 
 static BOOL bsd_mcast_is_group(ULONG addr)
 {
@@ -75,7 +101,8 @@ static BsdMcastEntry *bsd_mcast_find(const AmiSocket *sock, ULONG group,
     {
         BsdMcastEntry *e = &bsd_mcast_table[i];
 
-        if (e->bm_Sock == sock && e->bm_Group == group && e->bm_Iface == iface)
+        if (bsd_mcast_row_live(e) && e->bm_Sock == sock &&
+            e->bm_Group == group && e->bm_Iface == iface)
             return e;
     }
 
@@ -88,7 +115,7 @@ static BsdMcastEntry *bsd_mcast_free_row(VOID)
 
     for (i = 0; i < BSD_MCAST_MEMBERSHIPS; i++)
     {
-        if (bsd_mcast_table[i].bm_Sock == NULL)
+        if (!bsd_mcast_row_live(&bsd_mcast_table[i]))
             return &bsd_mcast_table[i];
     }
 
@@ -111,12 +138,15 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
     if (!bsd_mcast_is_group(group))
         return bsd_fail(base, AMI_EINVAL);
 
-    iface = bsd_mcast_iface_of(ip, BSD_NTOHL(mreq->imr_interface.s_addr));
-    if (iface < 0)
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
+
+    iface = bsd_mcast_iface_of(ip, BSD_NTOHL(mreq->imr_interface.s_addr));
+    if (iface < 0)
+    {
+        bsd_nx_leave(base);
+        return bsd_fail(base, AMI_EADDRNOTAVAIL);
+    }
 
     if (bsd_mcast_find(sock, group, (UINT)iface) != NULL)
     {
@@ -137,6 +167,7 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
     row->bm_Sock  = sock;
     row->bm_Group = group;
     row->bm_Iface = (UINT)iface;
+    row->bm_Epoch = netstack_interface_epoch((UWORD)iface);
 
     status = nx_igmp_multicast_interface_join(ip, group, (UINT)iface);
 
@@ -172,12 +203,15 @@ static LONG bsd_mcast_leave(struct AmiSocketBase *base, AmiSocket *sock,
     if (!bsd_mcast_is_group(group))
         return bsd_fail(base, AMI_EINVAL);
 
-    iface = bsd_mcast_iface_of(ip, BSD_NTOHL(mreq->imr_interface.s_addr));
-    if (iface < 0)
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
+
+    iface = bsd_mcast_iface_of(ip, BSD_NTOHL(mreq->imr_interface.s_addr));
+    if (iface < 0)
+    {
+        bsd_nx_leave(base);
+        return bsd_fail(base, AMI_EADDRNOTAVAIL);
+    }
 
     row = bsd_mcast_find(sock, group, (UINT)iface);
     if (row == NULL)
@@ -207,7 +241,7 @@ VOID bsd_mcast_close(AmiSocket *sock)
     {
         BsdMcastEntry *e = &bsd_mcast_table[i];
 
-        if (e->bm_Sock != sock)
+        if (!bsd_mcast_row_live(e) || e->bm_Sock != sock)
             continue;
 
         if (ip != NULL)
@@ -232,7 +266,8 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 
     sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)sock->as_McastTtl;
 
-    return sock->as_McastIf;
+    return bsd_mcast_preference(&sock->as_McastIf,
+                                sock->as_McastIfEpoch);
 }
 
 /* NetX snapshots a *global* loopback setting when a group is first joined,
@@ -384,14 +419,21 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             if (in.s_addr == 0UL)
             {
                 sock->as_McastIf = -1;
+                sock->as_McastIfEpoch = 0;
                 return 0;
             }
 
+            if (bsd_nx_enter(base) != 0)
+                return bsd_fail(base, AMI_ENETDOWN);
             iface = bsd_mcast_iface_of(ip, BSD_NTOHL(in.s_addr));
+            if (iface >= 0)
+            {
+                sock->as_McastIf = iface;
+                sock->as_McastIfEpoch = netstack_interface_epoch((UWORD)iface);
+            }
+            bsd_nx_leave(base);
             if (iface < 0)
                 return bsd_fail(base, AMI_EADDRNOTAVAIL);
-
-            sock->as_McastIf = iface;
             return 0;
         }
 
@@ -431,11 +473,17 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, AMI_EINVAL);
 
             in.s_addr = 0UL;
-            if (sock->as_McastIf >= 0 && ip != NULL)
+            if (bsd_nx_enter(base) != 0)
+                return bsd_fail(base, AMI_ENETDOWN);
+            if (bsd_mcast_preference(&sock->as_McastIf,
+                                      sock->as_McastIfEpoch) >= 0 &&
+                ip != NULL &&
+                ip->nx_ip_interface[sock->as_McastIf].nx_interface_valid != 0)
             {
                 in.s_addr = BSD_HTONL(
                     ip->nx_ip_interface[sock->as_McastIf].nx_interface_ip_address);
             }
+            bsd_nx_leave(base);
 
             bsd_bcopy(&in, optval, sizeof in);
             *optlen = (socklen_t)sizeof(struct in_addr);
@@ -468,9 +516,19 @@ typedef struct BsdMcast6Entry
     AmiSocket  *bm_Sock;            /* NULL: free row                       */
     ULONG       bm_Group[4];
     UINT        bm_Iface;           /* NetX interface index                 */
+    ULONG       bm_Epoch;           /* detach generation of that slot       */
 } BsdMcast6Entry;
 
 static BsdMcast6Entry bsd_mcast6_table[BSD_MCAST6_MEMBERSHIPS];
+
+static BOOL bsd_mcast6_row_live(BsdMcast6Entry *e)
+{
+    if (e->bm_Sock != NULL &&
+        e->bm_Epoch != netstack_interface_epoch((UWORD)e->bm_Iface))
+        e->bm_Sock = NULL;
+
+    return e->bm_Sock != NULL;
+}
 
 static BOOL bsd_mcast6_is_group(const ULONG group[4])
 {
@@ -569,7 +627,8 @@ static BsdMcast6Entry *bsd_mcast6_find(const AmiSocket *sock,
     {
         BsdMcast6Entry *e = &bsd_mcast6_table[i];
 
-        if (e->bm_Sock == sock && e->bm_Iface == iface &&
+        if (bsd_mcast6_row_live(e) && e->bm_Sock == sock &&
+            e->bm_Iface == iface &&
             bsd_mcast6_same(e->bm_Group, group))
             return e;
     }
@@ -583,7 +642,7 @@ static BsdMcast6Entry *bsd_mcast6_free_row(VOID)
 
     for (i = 0; i < BSD_MCAST6_MEMBERSHIPS; i++)
     {
-        if (bsd_mcast6_table[i].bm_Sock == NULL)
+        if (!bsd_mcast6_row_live(&bsd_mcast6_table[i]))
             return &bsd_mcast6_table[i];
     }
 
@@ -608,12 +667,15 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
     if (!bsd_mcast6_is_group(group.nxd_ip_address.v6))
         return bsd_fail(base, AMI_EINVAL);
 
-    iface = bsd_mcast6_iface_of(ip, mreq->ipv6mr_interface);
-    if (iface < 0)
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
+
+    iface = bsd_mcast6_iface_of(ip, mreq->ipv6mr_interface);
+    if (iface < 0)
+    {
+        bsd_nx_leave(base);
+        return bsd_fail(base, AMI_EADDRNOTAVAIL);
+    }
 
     if (bsd_mcast6_find(sock, group.nxd_ip_address.v6, (UINT)iface) != NULL)
     {
@@ -635,6 +697,7 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
     row->bm_Group[2] = group.nxd_ip_address.v6[2];
     row->bm_Group[3] = group.nxd_ip_address.v6[3];
     row->bm_Iface = (UINT)iface;
+    row->bm_Epoch = netstack_interface_epoch((UWORD)iface);
 
     status = nxd_ipv6_multicast_interface_join(ip, &group, (UINT)iface);
 
@@ -674,12 +737,15 @@ static LONG bsd_mcast6_leave(struct AmiSocketBase *base, AmiSocket *sock,
     if (!bsd_mcast6_is_group(group.nxd_ip_address.v6))
         return bsd_fail(base, AMI_EINVAL);
 
-    iface = bsd_mcast6_iface_of(ip, mreq->ipv6mr_interface);
-    if (iface < 0)
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
+
+    iface = bsd_mcast6_iface_of(ip, mreq->ipv6mr_interface);
+    if (iface < 0)
+    {
+        bsd_nx_leave(base);
+        return bsd_fail(base, AMI_EADDRNOTAVAIL);
+    }
 
     row = bsd_mcast6_find(sock, group.nxd_ip_address.v6, (UINT)iface);
     if (row == NULL)
@@ -705,7 +771,7 @@ static VOID bsd_mcast6_close(NX_IP *ip, AmiSocket *sock)
         BsdMcast6Entry *e = &bsd_mcast6_table[i];
         NXD_ADDRESS     group;
 
-        if (e->bm_Sock != sock)
+        if (!bsd_mcast6_row_live(e) || e->bm_Sock != sock)
             continue;
 
         if (ip != NULL)
@@ -746,7 +812,8 @@ LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
     *saved = ip->nx_ipv6_hop_limit;
     ip->nx_ipv6_hop_limit = (ULONG)sock->as_Mcast6Hops;
 
-    iface = sock->as_Mcast6If;
+    iface = bsd_mcast_preference(&sock->as_Mcast6If,
+                                  sock->as_Mcast6IfEpoch);
     if (iface < 0)
         return -1;
 
@@ -891,16 +958,24 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             if (value == 0)
             {
                 sock->as_Mcast6If = -1;
+                sock->as_Mcast6IfEpoch = 0;
                 return 0;
             }
             if (value < 0)
                 return bsd_fail(base, AMI_EINVAL);
 
+            if (bsd_nx_enter(base) != 0)
+                return bsd_fail(base, AMI_ENETDOWN);
             iface = bsd_mcast6_iface_of(ip, (ULONG)value);
+            if (iface >= 0)
+            {
+                sock->as_Mcast6If = iface;
+                sock->as_Mcast6IfEpoch =
+                    netstack_interface_epoch((UWORD)iface);
+            }
+            bsd_nx_leave(base);
             if (iface < 0)
                 return bsd_fail(base, AMI_ENXIO);
-
-            sock->as_Mcast6If = iface;
             return 0;
         }
 
@@ -938,12 +1013,21 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
     {
         case AMI_IPV6_MULTICAST_IF_BSD:
         case AMI_IPV6_MULTICAST_IF_LINUX:
+        {
+            LONG iface;
+
             /* Back in the caller's numbering, one higher, and 0 for "the
                route decides". */
+            if (bsd_nx_enter(base) != 0)
+                return bsd_fail(base, AMI_ENETDOWN);
+            iface = bsd_mcast_preference(&sock->as_Mcast6If,
+                                          sock->as_Mcast6IfEpoch);
+            bsd_nx_leave(base);
             return bsd_mcast6_put_int(base, optval, optlen,
-                                      (sock->as_Mcast6If < 0)
+                                      (iface < 0)
                                           ? 0
-                                          : sock->as_Mcast6If + 1);
+                                          : iface + 1);
+        }
 
         case AMI_IPV6_MULTICAST_HOPS_BSD:
         case AMI_IPV6_MULTICAST_HOPS_LINUX:
