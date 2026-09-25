@@ -5,8 +5,7 @@ file-scope object keeps its value until the segment is unloaded, so the next
 unrelated program sees what the last one left. Per-opener state belongs on the
 child base (`src/bsdsocket/bsdsocket_internal.h`,
 `src/usergroup/usergroup_internal.h`); `tls.library` hands every opener the same
-base (`src/tlslib/tls_library.c:8`), so nothing in `src/tls` or `src/tlslib` can
-be per-opener.
+base (`src/tlslib/tls_library.c:8`), so nothing in `src/tls` or `src/tlslib` can be per-opener.
 
 Writable file-scope state, and what serialises it. `static const` is omitted.
 
@@ -37,6 +36,7 @@ Writable file-scope state, and what serialises it. `static const` is omitted.
 | `src/netstack/netstack_rexx.c:113` `ami_rx_gone`, `:114` `ami_rx_stopper`, `:115` `ami_rx_stop_sig` | `Forbid()`, taken together with the `Signal()` | |
 | `src/sana2/sana2_device.c:22` `ami_raw_allowed` | none | `ami_sana2_set_raw_allowed()` (`include/aminetxduo/sana2.h`) has no caller in the tree, so this is a compile-time default and the missing guard is unreachable. Whether framing policy is per-machine or per-opener is not settled by the code |
 | `src/sana2/sana2_device.c:31` `ami_block_enter`, `:32` `ami_block_leave` | none locally; installed before `tx_amiga_kernel_start()` and cleared after `ami_ns_destroy()`, both under `ami_ns_lock` | |
+| `src/sana2/sana2_device.c:1219` `ami_sana2_retained`, `:1220` `ami_sana2_retained_n` | `ami_ns_lock`: every close and sweep caller holds it (convention, not asserted) | `netstack_can_unload()` reads the count under `ami_ns_lock_attempt()` (`src/netstack/netstack.c:1997`); only the expunge's event-code choice (`src/bsdsocket/library.c:1419`) reads it lock-free under `Forbid()`, one word |
 | `src/sana2/sana2_driver.c:41` `ami_sana2_bindings[]` | `Forbid()` on attach and unbind | `ami_sana2_lookup()` reads it lock-free from the IP thread and is correct by store order only: attach writes `iface` last, unbind clears it first. Reordering those lines breaks it silently |
 | `src/bpf/bpf_channel.c:40` `ami_bpf_chan[]` | `ami_bpf_lock()` (`Forbid()`) | Owner is the child base, and `bsd_child_destroy()` closes them, so capture channels die with their opener. One program can still exhaust the pool and every other opener gets `EBUSY` |
 | `src/bpf/bpf_channel.c:41` `ami_bpf_bound_channels` | the lock on every update; read lock-free as a fast gate and re-validated per channel under the lock | |

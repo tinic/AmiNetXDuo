@@ -9,6 +9,10 @@
 /* The interactive endpoints' one query switch. */
 int http_request_query_take(const char *target);
 
+/* /shell's bounded slot selector: 0 if absent, 1 for session=1, -1 for a
+   malformed, repeated or out-of-range session value. */
+int http_request_query_session(const char *target);
+
 /* Parse Infinite or Second-N without ever overflowing; values above cap are
    returned as cap.  Zero means no usable timeout was present. */
 unsigned long http_request_timeout(const char *value, unsigned long cap);

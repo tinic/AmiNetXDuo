@@ -51,7 +51,8 @@
  * The interrupt is INT6 (INTB_EXTER) by default, or INT2 (INTB_PORTS) when
  * current firmware reports `int2 = on` in ZZ9000.CFG.  The server only masks
  * and acknowledges at the card and the drain runs in the shell's software
- * interrupt, so a burst of 32 frames is not copied at hardware level.
+ * interrupt, so a burst is not copied at hardware level.  The software
+ * interrupt bounds each pass to eight frames before re-arming the card.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -74,6 +75,7 @@
 
 static BOOL zz_isr(NetdevNic *nic);
 static BOOL zz_tx_reclaim(NetdevNic *nic);
+static UBYTE *zz_tx_at(NetdevNic *nic);
 
 extern struct ExecBase *SysBase;
 
@@ -100,6 +102,7 @@ extern struct ExecBase *SysBase;
 
 /* The length word of an asynchronous send, and the status register. */
 #define ZZ_TX_ASYNC         0x8000u
+#define ZZ_TX_OFFSET2       0x4000u
 #define ZZ_TX_SLOT_SHIFT    11
 #define ZZ_TX_LEN_MASK      0x07ffu
 #define ZZ_TXS_PRESENT      0x8000u
@@ -107,6 +110,7 @@ extern struct ExecBase *SysBase;
 
 #define ZZ_RXM_PRESENT      0x8000u
 #define ZZ_RXM_TX_CSUM      0x4000u
+#define ZZ_RXM_TX_OFFSET2   0x2000u
 #define ZZ_RXM_MASK         0x0003u
 #define ZZ_RXM_TCP          2u
 #define ZZ_RXM_UDP          3u
@@ -162,7 +166,8 @@ enum
     ZZ_ST_ACK_RECOVER,  /* rejected serial handshake recovered compatibly    */
     ZZ_ST_HW_VERIFIED,  /* frames certified by the GEM descriptor             */
     ZZ_ST_HW_FALLBACK,  /* GEM verdict outside the published RX contract      */
-    ZZ_ST_TX_CSUM,      /* frames whose transport checksum the GEM inserted    */
+    ZZ_ST_TX_CSUM,      /* transport checksum fields zeroed by the 68k */
+    ZZ_ST_TX_DIRECT,    /* frames sent from the shifted card window           */
     ZZ_ST_COUNT
 };
 
@@ -184,7 +189,8 @@ static const char *const zz_stat_names[] =
     "rejected serial acknowledgements recovered",
     "frames verified by GEM hardware",
     "GEM verdicts checked again in software",
-    "GEM transmit checksums inserted",
+    "transport checksums prepared by 68k",
+    "shifted direct transmit frames",
     NULL
 };
 
@@ -198,6 +204,20 @@ typedef struct ZzCore
 } ZzCore;
 
 #define ZZ(nic) ((ZzCore *)(nic)->core)
+
+/* On the opt-in firmware the GEM can DMA from slot+2.  The 14-byte Ethernet
+ * header then ends at slot+16, so a normal SANA-II CopyFromBuff writes the IP
+ * payload from an aligned source to an aligned card address.  A full ring
+ * declines the direct path; netdev_tx_build() uses its RAM staging buffer. */
+static UBYTE *zz_tx_at(NetdevNic *nic)
+{
+    if (nic->txb_inuse >= nic->txb_cnt)
+        return NULL;
+
+    return (UBYTE *)(nic->board + ZZ_TX_WINDOW +
+                     (ULONG)(nic->tx_next & (ZZ_TX_SLOTS - 1)) *
+                     ZZ_TX_WINDOW_LEN + 2UL);
+}
 
 static volatile UWORD *zz_reg(NetdevNic *nic, ULONG off)
 {
@@ -336,6 +356,8 @@ static LONG zz_attach(NetdevNic *nic)
         nic->rx_capacity = (fork ? ZZ_ARM_RING_FRAMES_FORK
                                  : ZZ_ARM_RING_FRAMES_MNT) * (1500UL + 14UL);
         ZZ(nic)->rx_meta = (UBYTE)((rxm & ZZ_RXM_PRESENT) != 0);
+        nic->tx_at = (fork && (rxm & ZZ_RXM_TX_OFFSET2) != 0)
+                   ? zz_tx_at : NULL;
         nic->tx_csum_supported = (UBYTE)(((rxm & ZZ_RXM_TX_CSUM) != 0)
                                ? (ANXD_S2_TXF_TCP | ANXD_S2_TXF_UDP) : 0);
     }
@@ -344,7 +366,6 @@ static LONG zz_attach(NetdevNic *nic)
     nic->ring_copy = NULL;
     nic->ring_copy_sum = NULL;
     nic->frame_at  = NULL;
-    nic->tx_at     = NULL;
     nic->write_buf = NULL;
     nic->core_stat_names = zz_stat_names;
     nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
@@ -389,11 +410,15 @@ static VOID zz_setfilter(NetdevNic *nic)
 
 static VOID zz_reset(NetdevNic *nic)
 {
-    /* Nothing wedges on this side, but a frame the ARM lost would leave a
-       slot counted in flight for ever: take the count as it stands and
-       start again, which is the contract -- txb_inuse cleared. */
-    nic->txb_inuse = 0;
-    nic->tx_done   = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
+    /* This is a watchdog callback, not a firmware/GEM reset.  The ARM may
+       still own every queued DMA descriptor and read its TX window later.
+       Declaring those slots free would let the next send overwrite a frame
+       in flight.  Retire only completions the firmware has reported; a real
+       hard stall remains busy until the firmware supplies an abort command. */
+    if (nic->txb_inuse != 0)
+        (VOID)zz_tx_reclaim(nic);
+    else
+        nic->tx_done = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
     if (nic->running)
         zz_put(nic, ZZ_REG_INT, ZZ_INT_ETH);
 }
@@ -557,24 +582,33 @@ static BOOL zz_rint(NetdevNic *nic)
 
     /*
      * A register write does not return to the 68k until the ARM has handled
-     * it and selected the next receive slot.  Seeing the same non-zero serial
-     * twice therefore means the exact acknowledgement from the preceding
-     * pass was rejected; it cannot be the next frame.  This happens when the
-     * ACP serves a stale serial from L2 despite the firmware's invalidate.
+     * it and selected the next receive slot.  Seeing the same or an older
+     * non-zero serial therefore means the window is stale; it cannot be the
+     * next frame.  This happens when the ACP serves a stale serial from L2
+     * despite the firmware's invalidate.  The generator uses
+     * the circular range 2..0xffff, so compare forward distance on that
+     * ring rather than comparing the numeric values across wraparound.
      *
      * Re-copying it forever is fatal: every pass re-enables the level-six
      * source while the same frame remains pending, producing an INT6/software
      * interrupt storm that leaves the whole machine apparently frozen.  The
      * firmware deliberately reserves acknowledgement value 1 as its legacy
-     * bare-advance operation.  Use it only for this proven rejection, without
+     * bare-advance operation.  Use it only for a repeat or older serial, without
      * delivering the frame a second time.  This is a bounded compatibility
      * recovery for every handshake-capable firmware revision.
      */
-    if (last != 0 && serial == last)
+    if (last != 0)
     {
-        nic->core_stat[ZZ_ST_ACK_RECOVER]++;
-        zz_put(nic, ZZ_REG_RX_ACK, 1);
-        return TRUE;
+        ULONG forward = (serial >= last)
+                      ? (ULONG)(serial - last)
+                      : 65534UL - (ULONG)last + (ULONG)serial;
+
+        if (forward == 0 || forward > 32767UL)
+        {
+            nic->core_stat[ZZ_ST_ACK_RECOVER]++;
+            zz_put(nic, ZZ_REG_RX_ACK, 1);
+            return TRUE;
+        }
     }
 
     /* The generator skips 0 and 1, so the successor of 0xffff is 2. */
@@ -691,6 +725,14 @@ static BOOL zz_rint(NetdevNic *nic)
 
 /* --------------------------------------------------------- interrupt ---- */
 
+/* The software interrupt runs with Exec interrupts disabled.  A full
+ * 32-frame pass can hide entire video frames from a level-4 sampler on a
+ * 25 MHz 68030.
+ * Keep the ZZ9000 pass short; after we re-arm its source, the firmware
+ * asserts it again while receive backlog remains.  Other devices keep
+ * their own drain budgets. */
+#define ZZ_RX_DRAIN_MAX 8
+
 /*
  * The top half, at INT6: was it ours, and quieten it.  Masking the card's
  * enable bit is what MNT's server does too; re-armed at the end of the
@@ -723,7 +765,7 @@ static BOOL zz_intr(NetdevNic *nic)
     if (!nic->running)
         return FALSE;
 
-    for (n = 0; n < NETDEV_DRAIN_MAX; n++)
+    for (n = 0; n < ZZ_RX_DRAIN_MAX; n++)
     {
         if (!zz_rint(nic))
             break;
@@ -778,7 +820,7 @@ static BOOL zz_intr(NetdevNic *nic)
                     nic->core_stat[ZZ_ST_LATE_HIT]++;
                     if (reads > nic->core_stat[ZZ_ST_LATE_READS])
                         nic->core_stat[ZZ_ST_LATE_READS] = reads;
-                    for (n = 0; n < NETDEV_DRAIN_MAX; n++)
+                    for (n = 0; n < ZZ_RX_DRAIN_MAX; n++)
                     {
                         if (!zz_rint(nic))
                             break;
@@ -918,10 +960,26 @@ static LONG zz_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
         return DP8390_TX_BUSY;
 
     slot = (UWORD)(nic->tx_next & (ZZ_TX_SLOTS - 1));
-    zz_tx_fill(nic, slot, frame, len);
-    zz_tx_checksum(nic, slot, frame, len);
-    zz_put(nic, ZZ_REG_TX,
-           (UWORD)(ZZ_TX_ASYNC | (UWORD)(slot << ZZ_TX_SLOT_SHIFT) | len));
+    {
+        const UBYTE *direct = (const UBYTE *)(nic->board + ZZ_TX_WINDOW +
+                               (ULONG)slot * ZZ_TX_WINDOW_LEN + 2UL);
+        BOOL offset2 = (BOOL)(nic->tx_at != NULL && frame == direct &&
+                              len <= ZZ_TX_WINDOW_LEN - 2);
+
+        if (!offset2)
+        {
+            zz_tx_fill(nic, slot, frame, len);
+            zz_tx_checksum(nic, slot, frame, len);
+        }
+        /* Shifted frames are inspected and prepared by the ARM before GEM
+         * DMA.  Reading their headers back over Zorro here would erase the
+         * benefit of placing the IP payload on an aligned card address. */
+        zz_put(nic, ZZ_REG_TX,
+               (UWORD)(ZZ_TX_ASYNC | (offset2 ? ZZ_TX_OFFSET2 : 0) |
+                       (UWORD)(slot << ZZ_TX_SLOT_SHIFT) | len));
+        if (offset2)
+            nic->core_stat[ZZ_ST_TX_DIRECT]++;
+    }
     nic->tx_next++;
     nic->txb_inuse++;
     nic->tx_packets++;

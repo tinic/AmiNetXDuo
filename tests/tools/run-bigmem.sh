@@ -52,9 +52,13 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 RESULTS="$ROOT/build/bigmem-results.txt"
 : > "$RESULTS"
 
-# AMI_POOL_MAX_PACKETS, plus the slack the bring-up report rounds by.  4096
-# since 2026-09-15; it was 512, which a 32 MB machine already reached.
-POOL_CEILING=4104
+# AMI_POOL_MAX_PACKETS, exactly.  4096 since 2026-09-15; it was 512, which a
+# 32 MB machine already reached.  The report is NetX's own count, and the pool
+# bytes are sized so NetX carves the planned count and no more (pool.h
+# ami_ns_pool_bytes_for, tests/netstack/host/test_pool_stride_host.c).  The
+# old "+8 slack" was a per-packet over-reservation that grew with the clamp:
+# +1 at 512, +10 at 4096.
+POOL_CEILING=4096
 POOL_MIN=16
 
 # The window ceiling, written out rather than derived, for the same reason
@@ -66,6 +70,16 @@ POOL_MIN=16
 # one machine where it MUST bind: both accel arms have budgets past it (32 MB
 # buys ~1,400 packets, a 275 KB budget; 128 MB sits on the clamp, 800 KB).
 TCP_WINDOW_CEILING=100352
+
+# The pool is sized from the FASTEST Fast RAM class alone and not from what
+# AvailMem() says (include/aminetxduo/pool.h, since 2026-09-17), and
+# quickstart=A3000 carries 8 MB of motherboard 32-bit RAM at priority 30 --
+# ahead of a Zorro III card's 20.  Left in place that 8 MB IS the fastest
+# class, so both accel arms measured it and came out at the lab-a1200 figure
+# (301 packets) however much Zorro III memory stood behind them.  Take it away
+# and the card is the machine's fast memory, which is the machine an arm named
+# for an accelerated Amiga is asking for.
+BIG_MACHINE_EXTRA=a3000mem_size=0
 
 clamp_arm() { # name model cpu fastmem z3mem poolexpect
     local name="$1" model="$2" cpu="$3" fast="$4" z3="$5" expect="${6:-band}"
@@ -81,6 +95,8 @@ clamp_arm() { # name model cpu fastmem z3mem poolexpect
         export AMINETXDUO_RUN_TAG="$tag"
         export AMINETXDUO_FASTMEM="$fast"
         export AMINETXDUO_Z3MEM="$z3"
+        [ "$z3" = 0 ] || export AMINETXDUO_AMIBERRY_EXTRA=\
+"${AMINETXDUO_AMIBERRY_EXTRA:+$AMINETXDUO_AMIBERRY_EXTRA;}$BIG_MACHINE_EXTRA"
         "$ROOT/tests/sockopt/run-sockopt.sh" \
             -m "$model" -c "$cpu" -t "$TIMEOUT" -b "$BUILD"
     ) > "$ROOT/build/bigmem-clamps-$name.log" 2>&1
@@ -123,6 +139,8 @@ run_arm() { # name model cpu fastmem z3mem poolexpect
         export AMINETXDUO_RUN_TAG="$tag"
         export AMINETXDUO_FASTMEM="$fast"
         export AMINETXDUO_Z3MEM="$z3"
+        [ "$z3" = 0 ] || export AMINETXDUO_AMIBERRY_EXTRA=\
+"${AMINETXDUO_AMIBERRY_EXTRA:+$AMINETXDUO_AMIBERRY_EXTRA;}$BIG_MACHINE_EXTRA"
         "$ROOT/tests/netstack/run-amiberry.sh" \
             -N "$BOARD" -m "$model" -c "$cpu" -B "$BACKEND" \
             -t "$TIMEOUT" -b "$BUILD"
@@ -187,7 +205,7 @@ if [ "$SKIPPED_BIG" = 0 ]; then
     # 128 MB is past the clamp and sits on it; 32 MB is under the clamp and
     # scales, so the two must DIFFER and be ordered, where they used to be
     # equal.  A 128 MB pool below 4096 means the clamp is not what it says.
-    if [ "$p128" -lt 4090 ] || [ "$p128" -gt "$POOL_CEILING" ]; then
+    if [ "$p128" -ne "$POOL_CEILING" ]; then
         echo "pool_saturation=FAIL 128m=$p128 is not on the clamp (4096)" \
              >> "$RESULTS"
         FAILED=$((FAILED + 1))
@@ -221,8 +239,11 @@ echo "    figure came out SMALLER than 32 MB's, which is the avail/divisor/" >&2
 echo "    stride overflow this arm exists for: src/netstack/netstack.c:541." >&2
 echo >&2
 echo "  pool_saturation=FAIL, 32m not above the 8 MB arm  the Zorro III" >&2
-echo "    memory never reached the guest.  It maps on an A3000 and on" >&2
-echo "    neither an A1200 nor an A4000 (measured); check that the run" >&2
+echo "    memory never reached the guest, or it reached it and was not the" >&2
+echo "    fastest class: a 32m that lands on the 8 MB arm's exact figure is" >&2
+echo "    the second, and $BIG_MACHINE_EXTRA is what keeps the A3000's" >&2
+echo "    motherboard RAM from outranking the card.  It maps on an A3000 and" >&2
+echo "    on neither an A1200 nor an A4000 (measured); check that the run" >&2
 echo "    really booted an A3000 with AMINETXDUO_KICKSTART_A3000." >&2
 echo >&2
 echo "  ceiling_bound=0 on a saturated arm  the pool is big enough for the" >&2

@@ -1,6 +1,5 @@
 # Backlog
-What is outstanding. Nothing else — finished work leaves a commit message and a
-comment beside the code, not an entry here.
+What is outstanding. Nothing else — finished work leaves a commit message and a comment beside the code, not an entry here.
 **HARD CAP: 250 LINES.** Over it, delete rows. Never relocate them; git has it.
 **ONE LINE PER ROW.** What is wrong and where. Not how it was found.
 | Item | Why it is open | Cite |
@@ -11,3 +10,4 @@ comment beside the code, not an entry here.
 | The 3c589 RX FIFO-hold fix has no wire number | `run-hwcard.sh -a overruns` reads `netstat -s` either side of a 4 MB receive; the effect is the difference between two runs with the two libraries at the same load, on the real A1200 | `tests/tools/run-hwcard.sh`, `src/netdev/test/test_netdev_el3.c:35` |
 | Cryptographic entropy on classic Amiga hardware is deliberately best-effort, not a release priority | the SHA-256 DRBG mixes conservative internal and frame-arrival timing sources, but the platform has no trustworthy hardware RNG; SSH/TLS remain usable rather than refusing first use, and long-lived SSH keys should be generated on a modern machine | `src/common/ami_random.c`, `README.md` |
 | Source cohesion: `httpd.c` still carries protocol dispatch, the WebDAV tree walk and the three browser applications in one file | the host-testable policy left all four monoliths on 2026-09-21 (e7d8748c, a7fd0c90, bf39e8b7, e30f61a0); what remains in `netstack.c`, `netdev_device.c` and `genet.c` is lifecycle and hardware sequencing that the split rule says to leave, while httpd's walk, PUT/COPY/MOVE and the terminal/console/files pages are DOS-bound but separable as guest-tested files | `src/tools/httpd.c` |
+| Explicit small-write batching (`TCP_NOPUSH`, BSD value 0x04) is deferred | the compiled-out cork gave 4.2x on 1-byte streams but +11% request/response RTT; the RTT-tuned variant lost the gain. An explicit option would add about 5.7 KB per library with no existing caller, so the cork remains disabled pending a concrete client | `src/bsdsocket/cork.c`, `src/bsdsocket/options.c` |

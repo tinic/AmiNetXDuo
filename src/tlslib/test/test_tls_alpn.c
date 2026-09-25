@@ -322,7 +322,6 @@ static void test_get_alpn_vector(void)
 
     /* Exactly big enough, and one byte short.  Short is refused, because half
        a protocol name is a different protocol. */
-    memset(buffer, 0x5A, sizeof(buffer));
     CHECK(tls_TLSGetALPN(&conn, buffer, 3, NULL) == 2);
     CHECK(tls_TLSGetALPN(&conn, buffer, 2, NULL) == -1);
 

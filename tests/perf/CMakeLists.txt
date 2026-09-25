@@ -42,6 +42,23 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME perf_prof_report
                  COMMAND "${Python3_EXECUTABLE}"
                          "${CMAKE_CURRENT_SOURCE_DIR}/test_prof_report.py")
+
+        # profreport.py, the tree's own copy of the same parser, had the bug
+        # again as a collapse (base_section) instead of a bare-name match:
+        # it mapped .text.<name> to .text before the suffix could name the
+        # function, so every symbol of an object landed at every address the
+        # object contributed to.  Two .text.<fn> sections, both nm values
+        # zero, is the smallest case that shows it.
+        add_test(NAME perf_profreport
+                 COMMAND "${Python3_EXECUTABLE}"
+                         "${CMAKE_CURRENT_SOURCE_DIR}/test_profreport.py")
+
+        # The Roadshow RX-gap verdict (gap / no material gap / inconclusive,
+        # docs/plans/roadshow-rx-gap.md) on synthetic boots, and the peer
+        # sender's loopback selftest.
+        add_test(NAME perf_rsgap
+                 COMMAND "${Python3_EXECUTABLE}"
+                         "${CMAKE_CURRENT_SOURCE_DIR}/test_rsgap.py")
     endif()
 endif()
 
@@ -186,6 +203,29 @@ if(CMAKE_CROSSCOMPILING)
         target_include_directories(fitzbench PRIVATE "${AMIGA_NDK_INCLUDE}")
     endif()
 
+endif()
+
+
+# ------------------------------------------------------ Roadshow RX gap --
+#
+# docs/plans/roadshow-rx-gap.md.  RsGapRx is the one receive client both arms
+# run: plain bsdsocket.library by name, nothing of ours linked, so LIBS:
+# decides the stack.  RsGapBoot is the stack-neutral selector, watchdog and
+# recorder.  tests/perf/run-rsgap.sh stages and drives both.
+#
+#   cmake --build build/cm --parallel --target rsgaprx rsgapboot
+
+if(CMAKE_CROSSCOMPILING)
+    add_executable(rsgaprx rsgaprx.c)
+    set_target_properties(rsgaprx PROPERTIES OUTPUT_NAME "RsGapRx")
+    add_executable(rsgapboot rsgapboot.c)
+    set_target_properties(rsgapboot PROPERTIES OUTPUT_NAME "RsGapBoot")
+    foreach(rsgaptool rsgaprx rsgapboot)
+        target_compile_options(${rsgaptool} PRIVATE -Wall -Wextra)
+        if(AMIGA_NDK_INCLUDE)
+            target_include_directories(${rsgaptool} PRIVATE "${AMIGA_NDK_INCLUDE}")
+        endif()
+    endforeach()
 endif()
 
 

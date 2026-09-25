@@ -113,6 +113,20 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME expunge_refusal COMMAND test_expunge)
 
+    # The same library.c with AMINETXDUO_TCP_CORK: the stack's teardown is
+    # skipped, and the reference kept, while the cork's IP pass is in flight.
+    add_executable(test_expunge_cork host/test_expunge_host.c
+                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/library.c"
+                                     "${CMAKE_SOURCE_DIR}/src/common/events.c")
+    get_target_property(_expunge_inc test_expunge INCLUDE_DIRECTORIES)
+    target_include_directories(test_expunge_cork PRIVATE ${_expunge_inc})
+    target_compile_options(test_expunge_cork PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
+    target_compile_definitions(test_expunge_cork PRIVATE AMINETXDUO_TCPDEVICE
+        AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING} AMINETXDUO_TCP_CORK)
+    add_test(NAME expunge_refusal_cork COMMAND test_expunge_cork)
+
     # handoff.c, including listeners.  AmiTCP and Roadshow allow a listening
     # descriptor through ReleaseSocket()/ReleaseCopyOfSocket(); refusing it
     # was an observable compatibility gap and was not required by NetX Duo's
@@ -223,6 +237,30 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_compile_definitions(test_sockopt PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
 
     add_test(NAME socket_options COMMAND test_sockopt)
+
+    # The same options.c with AMINETXDUO_TCP_CORK, so TCP_NODELAY's corked
+    # half -- 0 turns the small-write cork on, getsockopt reads it back -- is
+    # compiled and checked whatever the option says, rxdirect's reason below.
+    add_executable(test_sockopt_cork host/test_sockopt_host.c
+                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c")
+
+    target_include_directories(test_sockopt_cork PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_sockopt_cork PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_sockopt_cork PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_TCP_CORK)
+
+    add_test(NAME socket_options_cork COMMAND test_sockopt_cork)
 
     # netstatus.c, for NETSTATUS_NEIGHBOURS, the one flag `arp` prints from
     # it, and the interface-statistics wait. The router flag came from a NetX
@@ -613,4 +651,36 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_compile_definitions(test_transfer PRIVATE ${BSD_HOST32_DEFINES})
 
     add_test(NAME transfer_scatter_gather COMMAND test_transfer)
+
+    # cork.c, the small-write cork behind setsockopt(TCP_NODELAY, 0), with
+    # transfer.c and select.c around it: the send and receive paths that feed
+    # it and the notify and WaitSelect() that wake it.  Built whatever
+    # AMINETXDUO_TCP_CORK says, for rxdirect's reason above: an option nothing
+    # builds is an option nothing notices breaking.  Twice, because the append
+    # fast path (AMINETXDUO_TCP_CORK_FASTPATH) changes which actor makes the
+    # second write, and each build asserts its own answer.
+    add_executable(test_cork host/test_cork_host.c
+                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/transfer.c"
+                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/select.c"
+                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/cork.c")
+    add_executable(test_cork_fast host/test_cork_host.c
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/transfer.c"
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/select.c"
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/cork.c")
+
+    target_include_directories(test_cork PRIVATE ${BSD_HOST32_INCLUDES})
+    target_include_directories(test_cork_fast PRIVATE ${BSD_HOST32_INCLUDES})
+
+    target_compile_options(test_cork PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+    target_compile_options(test_cork_fast PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_cork PRIVATE
+        ${BSD_HOST32_DEFINES} AMINETXDUO_TCP_CORK)
+    target_compile_definitions(test_cork_fast PRIVATE
+        ${BSD_HOST32_DEFINES} AMINETXDUO_TCP_CORK AMINETXDUO_TCP_CORK_FASTPATH)
+
+    add_test(NAME cork_small_writes COMMAND test_cork)
+    add_test(NAME cork_small_writes_fastpath COMMAND test_cork_fast)
 endif()

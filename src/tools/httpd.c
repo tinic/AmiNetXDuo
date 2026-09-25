@@ -113,6 +113,7 @@ static const char *const httpd_files_places[] = {
 #define HTTPD_TIMEOUT_DEF     30UL  /* seconds of no progress               */
 
 #define HTTPD_WS_IDLE_DEF     10UL  /* seconds before a quiet viewer loses it */
+#define HTTPD_TERM_KEEP      300UL /* detached Shell's reconnect window      */
 #define HTTPD_BACKLOG          8
 
 #define HTTPD_WALK_MAX     20000UL
@@ -348,6 +349,7 @@ struct HttpConn
     UBYTE   fb_owner;               /* this connection holds the console   */
     UBYTE   ws_owner;               /* this connection holds the Shell     */
     UBYTE   ws_take;                /* ?take=1: claim it from whoever has  */
+    UBYTE   ws_slot;                /* ?session=0/1, default 0             */
 
     /* Everything after the 101 is httpterm.c's, and this is the whole of what
        that costs a connection here. */
@@ -389,6 +391,7 @@ static BOOL   httpd_volumes = FALSE;
 static ULONG  httpd_conns   = HTTPD_CONN_DEFAULT;
 static ULONG  httpd_timeout = HTTPD_TIMEOUT_DEF;
 static ULONG  httpd_ws_idle = HTTPD_WS_IDLE_DEF;
+static ULONG  httpd_term_detached[HTTP_TERM_SLOTS];
 static BOOL   httpd_verbose = FALSE;
 static BOOL   httpd_trace   = FALSE;
 /* The HTML file -T resolved to, and "" when -T was not given.  One string
@@ -411,6 +414,28 @@ static char   httpd_files_gz[HTTP_PATH_MAX];
    http_fb_available() is still true. */
 static HttpConn *httpd_fb_owner;
 static struct Library *httpd_sb = NULL;
+
+static VOID httpd_term_expire(ULONG now)
+{
+    UWORD slot;
+
+    for (slot = 0; slot < HTTP_TERM_SLOTS; slot++)
+    {
+        ULONG since = httpd_term_detached[slot];
+
+        if (since != 0UL && now < since)
+        {
+            httpd_term_detached[slot] = now; /* the Amiga clock stepped back */
+            continue;
+        }
+        if (since != 0UL && now - since >= HTTPD_TERM_KEEP)
+        {
+            (VOID)http_term_select(slot);
+            http_term_stop();
+            httpd_term_detached[slot] = 0;
+        }
+    }
+}
 
 /* ------------------------------------------------------------------- log --- */
 
@@ -730,12 +755,11 @@ static VOID httpd_close(HttpConn *c)
     httpd_put_abandon(c);
     httpd_iperf_release(c);
 
-    /* The browser has gone, so the Shell it was typing into has nobody.
-       Ending it here is what lets the next visitor start one.  A Shell with no
-       reader would otherwise hold the one session until it noticed. */
+    /* Keep the Shell briefly so this slot can be reattached after a browser
+       reload or dropped connection. The event loop expires detached slots. */
     if (c->ws_owner)
     {
-        http_term_stop();
+        httpd_term_detached[c->ws_slot] = httpd_now();
         c->ws_owner = 0;
     }
 
@@ -829,6 +853,7 @@ static VOID httpd_reset(HttpConn *c)
     c->is_volumes_root = 0;
     c->volume_index    = 0;
     c->ws_take       = 0;
+    c->ws_slot       = 0;
     /* Not ws_owner: a connection that holds the Shell never comes back through
        here, it is in CONN_WS until it closes.  Clearing it would say the Shell
        is free while this connection is still typing into it. */
@@ -2555,6 +2580,32 @@ static VOID httpd_do_get(HttpConn *c)
             ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                                  "</h1>\n");
 
+            /* Root-only discovery for a client that reads HTML as text.  The
+               optional lines describe only services actually enabled here. */
+            if (ok && c->path.segments == 0)
+            {
+                ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                    "<!-- AmiNetXDuo HTTP: GET/PUT paths; OPTIONS/PROPFIND WebDAV. "
+                    "Mounted volumes appear as /Volume/file. No authentication.\n");
+                if (ok && httpd_files_page[0] != '\0')
+                    ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                        "GET /files: browser file manager.\n");
+                if (ok && httpd_term_page[0] != '\0')
+                    ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                        "GET /shell: browser Shell; WS /shell: binary Latin-1 I/O, "
+                        "text break/eof. Send Echo \"TOKEN RC=$RC\" after a command "
+                        "to delimit output and return code. ?session=0|1 "
+                        "selects a Shell (default 0); reconnect within 5 min.\n");
+                if (ok && httpd_console_page[0] != '\0')
+                    ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                        "GET /console: browser display; WS /console: binary "
+                        "screen deltas, text m X Y BUTTONS / kd RAW QUAL / "
+                        "ku RAW QUAL / refresh. One session.\n");
+                if (ok)
+                    ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
+                                   "-->\n");
+            }
+
             if (ok)
                 httpd_emit_chunk(c, used);
         }
@@ -2809,7 +2860,8 @@ static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
     {
         HttpConn *h = &httpd_conn[i];
 
-        if (h == asking || h->state == CONN_FREE || !h->ws_owner)
+        if (h == asking || h->state == CONN_FREE || !h->ws_owner ||
+            h->ws_slot != asking->ws_slot)
             continue;
 
         if (!asking->ws_take &&
@@ -2821,7 +2873,9 @@ static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
                       (LONG)(asking->ws_take ? "asked for" : "stopped answering"),
                       0);
 
-        http_term_sock_evict(&h->ws, HTTP_WS_CLOSE_GOING);
+        /* A 101 still in CONN_SEND has not initialized its WebSocket state. */
+        if (h->state == CONN_WS)
+            http_term_sock_evict(&h->ws, HTTP_WS_CLOSE_GOING);
         httpd_close(h);
         return TRUE;
     }
@@ -2836,6 +2890,13 @@ static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
 static VOID httpd_do_terminal(HttpConn *c)
 {
     char accept[HTTPD_WS_ACC_MAX];
+    BOOL started = FALSE;
+
+    if (c->ws_slot >= HTTP_TERM_SLOTS)
+    {
+        httpd_error(c, 400, "session must be 0 or 1");
+        return;
+    }
 
     /* The page and the socket share an address, so the verb has to be the one
        both of them use. */
@@ -2882,24 +2943,57 @@ static VOID httpd_do_terminal(HttpConn *c)
         return;
     }
 
-    if (!http_term_available())
+    (VOID)http_term_select(c->ws_slot);
+    if (!http_term_init())
     {
-        /* One Shell at a time.  See httpterm.h.  503 rather than 409: it is a
-           resource this server has one of, and a client that waits and asks
-           again is doing the right thing. */
-        BOOL took = httpd_term_reclaim(c, httpd_now());
-
-        httpd_begin(c, 503);
-        httpd_header(c, "Retry-After", took ? "1" : "5");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
-                        took ? "The terminal is released. Ask again.\r\n"
-                             : "Somebody else has the terminal.\r\n");
+        httpd_error(c, 503, "the terminal slot could not be initialized");
         return;
     }
 
-    if (!http_term_start())
+    /* Ownership belongs to this slot only. A closed socket leaves its Shell
+       alive for HTTPD_TERM_KEEP seconds; the next socket attaches to it. */
+    if (!http_term_available() &&
+        httpd_term_reclaim(c, httpd_now()))
     {
-        httpd_error(c, 503, "the terminal's Shell did not start");
+        httpd_begin(c, 503);
+        httpd_header(c, "Retry-After", "1");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "The terminal is released. Ask again.\r\n");
+        return;
+    }
+
+    /* A live owner may not be displaced without ?take=1. */
+    {
+        ULONG i;
+        for (i = 0; i < httpd_conns; i++)
+            if (&httpd_conn[i] != c && httpd_conn[i].ws_owner &&
+                httpd_conn[i].ws_slot == c->ws_slot)
+            {
+                httpd_begin(c, 503);
+                httpd_header(c, "Retry-After", "5");
+                httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                                "Somebody else has the terminal.\r\n");
+                return;
+            }
+    }
+
+    if (http_term_running())
+        http_term_reattach();
+    else if (http_term_available())
+    {
+        if (!http_term_start())
+        {
+            httpd_error(c, 503, "the terminal's Shell did not start");
+            return;
+        }
+        started = TRUE;
+    }
+    else
+    {
+        httpd_begin(c, 503);
+        httpd_header(c, "Retry-After", "1");
+        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                        "The previous Shell is stopping. Ask again.\r\n");
         return;
     }
 
@@ -2919,12 +3013,14 @@ static VOID httpd_do_terminal(HttpConn *c)
 
     if (c->overflow)
     {
-        http_term_stop();
+        if (started)
+            http_term_stop();
         httpd_error(c, 500, "the answer did not fit");
         return;
     }
 
     c->ws_owner  = 1;
+    httpd_term_detached[c->ws_slot] = 0;
     c->head.keepalive = 0;               /* there is no next request on this one */
     c->producer  = PROD_NONE;
 
@@ -4019,7 +4115,12 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
                Looked for anywhere in the string, because no other parameter
                is read. */
             if (httpd_target[n] == '?')
+            {
+                int slot = http_request_query_session(httpd_target);
+
+                c->ws_slot = (slot < 0) ? HTTP_TERM_SLOTS : (UBYTE)slot;
                 c->ws_take = http_request_query_take(httpd_target) ? 1 : 0;
+            }
 
             return TRUE;
         }
@@ -4671,6 +4772,16 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
     httpd_drop_head(c, headlen);
     left = c->in_len;
 
+    /* Application addresses are not DAV files. Refuse their write verbs
+       before a method's begin() tries to open the empty filesystem path. */
+    if ((c->is_term || c->is_console || c->is_files) &&
+        c->method->id != HTTPD_M_GET && c->method->id != HTTPD_M_HEAD)
+    {
+        httpd_dispatch(c);
+        httpd_refuse_drain(c);
+        return;
+    }
+
     /* Nothing reaches the sink until the method has said it can take it, so
        a PUT that cannot be started is refused before the client sends the
        file. */
@@ -5013,6 +5124,7 @@ static BOOL httpd_writable(HttpConn *c)
         if (c->ws_owner && c->state == CONN_SEND)
         {
             c->state = CONN_WS;
+            (VOID)http_term_select(c->ws_slot);
 
             /* out[] is handed over: from here httpterm.c frames into it,
                and nothing in this file writes to it again until the
@@ -5288,7 +5400,8 @@ static VOID httpd_serve(LONG lsock)
         /* Answer whatever the Shell asked for since the last pass, so the
            frames built below carry what it printed rather than what it had
            printed a pass ago. */
-        http_term_service();
+        http_term_service_all();
+        httpd_term_expire(httpd_now());
 
         tool_fd_zero(&readfds);
         tool_fd_zero(&writefds);
@@ -5333,6 +5446,7 @@ static VOID httpd_serve(LONG lsock)
             {
                 /* The one state that wants both halves: a terminal reads
                    and writes at once. */
+                (VOID)http_term_select(c->ws_slot);
                 if (http_term_sock_wants_read(&c->ws))
                     tool_fd_add(&readfds, c->sock);
 
@@ -5415,7 +5529,7 @@ static VOID httpd_serve(LONG lsock)
 
         /* Again after the wait: the signal above is what woke the loop, and it
            says a packet is on the port now. */
-        http_term_service();
+        http_term_service_all();
 
         /* And whatever the log could not say while a button was down. */
         httpd_log_resume();
@@ -5492,6 +5606,7 @@ static VOID httpd_serve(LONG lsock)
             {
                 /* Both halves, in that order.  Reading first is what lets
                    a Ctrl-C typed while a command is printing get through. */
+                (VOID)http_term_select(c->ws_slot);
                 if (ready > 0 && tool_fd_isset(&readfds, c->sock))
                     keep = http_term_sock_read(&c->ws, now);
 

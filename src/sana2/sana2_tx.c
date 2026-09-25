@@ -424,6 +424,28 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
  * may decline; slot->req and its reply port live inside AmiSana2If, so
  * tx_orphaned stops ami_sana2_close() from freeing it.
  */
+/* Reap, then count what the device still holds: every busy write slot and
+   the queued run flush.  The drain below and the retained sweep. */
+UWORD ami_sana2_tx_collect(AmiSana2If *iface)
+{
+    UWORD i;
+    UWORD busy = 0;
+
+    ami_sana2_tx_reap(iface);
+
+    for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
+    {
+        if (iface->tx[i].busy)
+            busy++;
+    }
+#ifdef AMINETXDUO_TX_RUN
+    if (iface->tx_flush_busy)
+        busy++;
+#endif
+
+    return busy;
+}
+
 VOID ami_sana2_tx_drain(AmiSana2If *iface)
 {
     UWORD i;
@@ -473,18 +495,7 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
     spins = 0;
     for (;;)
     {
-        ami_sana2_tx_reap(iface);
-
-        busy = 0;
-        for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
-        {
-            if (iface->tx[i].busy)
-                busy++;
-        }
-#ifdef AMINETXDUO_TX_RUN
-        if (iface->tx_flush_busy)
-            busy++;
-#endif
+        busy = ami_sana2_tx_collect(iface);
 
         if (busy == 0 || spins >= 64)
             break;
@@ -963,8 +974,9 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
      * the packet or the tap synthesises them.  Nothing is written into the
      * packet, which is often a segment handed back for retransmission.
      */
-    ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
-                   dst_msw, dst_lsw, iface->mac);
+    if (ami_bpf_bound_channels != 0)
+        ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
+                       dst_msw, dst_lsw, iface->mac);
 #endif
 
     length = packet->nx_packet_length;

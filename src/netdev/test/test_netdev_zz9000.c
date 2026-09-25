@@ -20,6 +20,7 @@
 #include <exec/types.h>
 
 #include "netdev_nic.h"
+#include "netdev_clock.h"
 
 #ifndef MEMF_PUBLIC
 #define MEMF_PUBLIC (1UL << 0)
@@ -69,6 +70,22 @@ ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs)
         sum += w;
     }
     return sum;
+}
+
+/* zz_intr()'s bounded wait for a header the ARM has counted.  No case
+   here drives it -- the fixture exercises the copies, not the stale
+   header spin -- but zz9000.c references it, and until the sanitize arm
+   linked without dead-stripping, nothing said so.  One spin, then done. */
+VOID netdev_wait_begin(NetdevWait *w, ULONG us, ULONG spins)
+{
+    (VOID)us;
+    (VOID)spins;
+    w->nw_Spins = 1;
+}
+
+BOOL netdev_wait_done(NetdevWait *w)
+{
+    return (BOOL)(w->nw_Spins-- == 0);
 }
 
 #include "zz9000.c"
@@ -139,7 +156,7 @@ static VOID payload_copy_every_length(VOID)
         {
             const volatile UBYTE *src = win.b + 2;      /* 2 mod 4 */
             UBYTE *dst = out.b + 4 + phase;
-            UWORD i;
+            size_t i;
             int   bytes_ok;
             int   guards_ok = 1;
             char  what[96];
@@ -152,26 +169,26 @@ static VOID payload_copy_every_length(VOID)
             zz_copy_payload(dst, src, len);
 
             bytes_ok = same_bytes(dst, (const UBYTE *)src, len);
-            for (i = 0; i < 4 + phase; i++)
+            for (i = 0; i < 4u + phase; i++)
                 if (out.b[i] != 0xee)
                     guards_ok = 0;
-            for (i = (UWORD)(4 + phase + len); i < sizeof(out.b); i++)
+            for (i = 4 + phase + len; i < sizeof(out.b); i++)
                 if (out.b[i] != 0xee)
                     guards_ok = 0;
 
-            sprintf(what, "len %u dst %u mod 4: bytes", len, (unsigned)phase);
+            snprintf(what, sizeof(what), "len %u dst %u mod 4: bytes", len, (unsigned)phase);
             expect(bytes_ok, what);
-            sprintf(what, "len %u dst %u mod 4: guards", len, (unsigned)phase);
+            snprintf(what, sizeof(what), "len %u dst %u mod 4: guards", len, (unsigned)phase);
             expect(guards_ok, what);
-            sprintf(what, "len %u dst %u mod 4: bulk source aligned", len,
+            snprintf(what, sizeof(what), "len %u dst %u mod 4: bulk source aligned", len,
                     (unsigned)phase);
             expect(bulk_misaligned == 0, what);
 
             /* The bulk carries exactly the longwords between the first word
                and the tail, and is not called for fewer than four. */
-            sprintf(what, "len %u: bulk longwords", len);
+            snprintf(what, sizeof(what), "len %u: bulk longwords", len);
             expect(bulk_longs == (len >= 2 ? (ULONG)((len - 2) >> 2) : 0), what);
-            sprintf(what, "len %u: bulk calls", len);
+            snprintf(what, sizeof(what), "len %u: bulk calls", len);
             expect(bulk_calls == (len >= 6 ? 1UL : 0UL), what);
         }
     }
@@ -325,12 +342,267 @@ static VOID staging_path_reads_aligned(VOID)
     expect(bulk_calls == 2, "staging: header bulk and payload bulk");
 }
 
+/* The ARM's serial skips 0 and 1.  A stale window can present a frame that
+   the driver acknowledged before the most recent one, not just an exact
+   repeat of the last serial.  Never deliver it or move the watermark back. */
+static VOID present_serial(UWORD serial)
+{
+    UWORD *slot = (UWORD *)(void *)(board.bytes + ZZ_RX_WINDOW);
+    UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD;
+
+    memset(frame, 0, NETDEV_HDR_LEN + 40);
+    memset(frame, 0xff, 6);             /* broadcast passes zz_rx_wanted */
+    slot[0] = NETDEV_HDR_LEN + 40;
+    slot[1] = serial;
+}
+
+static VOID stale_serial_recovery(VOID)
+{
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0x42;
+    present_serial(0x42);
+    expect(zz_rint(&nic), "repeat serial: pass acknowledges the slot");
+    expect(received_len == 0, "repeat serial: frame not delivered twice");
+    expect(nic.core_stat[ZZ_ST_ACK_RECOVER] == 1,
+           "repeat serial: legacy advance still used");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 1,
+           "repeat serial: legacy acknowledge written");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0x42;
+    present_serial(0x40);
+    expect(zz_rint(&nic), "stale serial: pass acknowledges the slot");
+    expect(received_len == 0, "stale serial: frame not delivered twice");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 0x42,
+           "stale serial: watermark does not rewind");
+    expect(nic.core_stat[ZZ_ST_ACK_RECOVER] == 1,
+           "stale serial: legacy advance used once");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 1,
+           "stale serial: legacy acknowledge written");
+    expect(nic.core_stat[ZZ_ST_GAPS] == 0,
+           "stale serial: no forward ring gap recorded");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0x42;
+    present_serial(0x45);
+    expect(zz_rint(&nic), "forward gap: pass acknowledges the slot");
+    expect(received_len != 0, "forward gap: new frame delivered");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 0x45,
+           "forward gap: watermark advances");
+    expect(nic.core_stat[ZZ_ST_GAPS] == 1,
+           "forward gap: missing serials recorded");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 0x45,
+           "forward gap: exact serial acknowledged");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 0xffff;
+    present_serial(2);
+    expect(zz_rint(&nic), "wrapped successor: pass acknowledges the slot");
+    expect(received_len != 0, "wrapped successor: new frame delivered");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 2,
+           "wrapped successor: watermark advances");
+    expect(nic.core_stat[ZZ_ST_GAPS] == 0,
+           "wrapped successor: no ring gap recorded");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 2,
+           "wrapped successor: exact serial acknowledged");
+
+    fresh_unit();
+    nic.core_stat[ZZ_ST_SERIAL] = 2;
+    present_serial(0xffff);
+    expect(zz_rint(&nic), "stale at wrap: pass acknowledges the slot");
+    expect(received_len == 0, "stale at wrap: old frame not delivered");
+    expect(nic.core_stat[ZZ_ST_SERIAL] == 2,
+           "stale at wrap: watermark does not rewind");
+    expect(*(UWORD *)(void *)(board.bytes + ZZ_REG_RX_ACK) == 1,
+           "stale at wrap: legacy acknowledge written");
+}
+
+/* A stuck/stale presented serial is deliberately left in this host window.
+ * The firmware would advance it on the recovery ack; here it proves that a
+ * single masked software-interrupt pass stops after the specified number of
+ * acknowledged slots. */
+static VOID receive_pass_is_bounded(VOID)
+{
+    fresh_unit();
+    nic.running = TRUE;
+    present_serial(0x42);
+
+    expect(zz_intr(&nic), "drain: pending receive counted as work");
+    expect(nic.core_stat[ZZ_ST_BURST_MAX] == ZZ_RX_DRAIN_MAX,
+           "drain: one pass stops at the ZZ9000 budget");
+    expect(nic.rx_packets == 1,
+           "drain: repeated serial is not delivered twice");
+    expect(nic.core_stat[ZZ_ST_ACK_RECOVER] == ZZ_RX_DRAIN_MAX - 1,
+           "drain: repeated serial is recovered only within the pass");
+}
+
+/* Reset is called by the VBlank watchdog, not by the ARM firmware.  Its
+   register write cannot cancel GEM DMA from a still-busy TX window slot. */
+static VOID reset_preserves_live_tx_slots(VOID)
+{
+    UBYTE frame[60];
+    ULONG i;
+
+    fresh_unit();
+    memset(frame, 0x3c, sizeof(frame));
+    memset(board.bytes + ZZ_TX_WINDOW, 0xa5, ZZ_TX_WINDOW_LEN);
+    nic.running = TRUE;
+    nic.txb_cnt = ZZ_TX_SLOTS;
+    nic.txb_inuse = ZZ_TX_SLOTS;
+    nic.tx_next = ZZ_TX_SLOTS;         /* slot 0 is the oldest in flight */
+    nic.tx_done = 100;
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 100);
+
+    zz_reset(&nic);
+    expect(nic.txb_inuse == ZZ_TX_SLOTS,
+           "reset: outstanding DMA slots are not declared free");
+    expect(nic.tx_done == 100, "reset: completion baseline is not lost");
+    expect(zz_tx(&nic, frame, sizeof(frame)) == DP8390_TX_BUSY,
+           "reset: no send over an outstanding DMA slot");
+    for (i = 0; i < ZZ_TX_WINDOW_LEN; i++)
+        if (board.bytes[ZZ_TX_WINDOW + i] != 0xa5)
+            break;
+    expect(i == ZZ_TX_WINDOW_LEN, "reset: oldest TX window is unchanged");
+
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 101);
+    expect(zz_tx_reclaim(&nic), "reset: a real firmware completion retires a slot");
+    expect(nic.txb_inuse == ZZ_TX_SLOTS - 1,
+           "reset: only the completed slot is free");
+    expect(zz_tx(&nic, frame, sizeof(frame)) == 0,
+           "reset: send resumes after that completion");
+    expect(nic.tx_next == ZZ_TX_SLOTS + 1,
+           "reset: slot cursor continues from its original origin");
+    expect(nic.txb_inuse == ZZ_TX_SLOTS,
+           "reset: replacement frame is counted in flight");
+}
+
+/* The firmware's completion count has its own 15-bit origin.  It counts a
+   dropped submission too, and tx_next is only a window-slot cursor. */
+static VOID tx_counter_reclaim(VOID)
+{
+    fresh_unit();
+    nic.txb_inuse = 4;
+    nic.tx_done = 0x7ffe;
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 1);
+    expect(zz_tx_reclaim(&nic), "TX count: three completions cross wrap");
+    expect(nic.txb_inuse == 1, "TX count: one slot remains in flight");
+    expect(nic.tx_done == 1, "TX count: wrapped firmware count retained");
+    expect(nic.tx_completed == 3, "TX count: three frames completed");
+
+    fresh_unit();
+    nic.txb_inuse = 2;
+    nic.tx_done = 100;
+    *(UWORD *)(void *)(board.bytes + ZZ_REG_TX_STATUS) =
+        (UWORD)(ZZ_TXS_PRESENT | 104);
+    expect(zz_tx_reclaim(&nic), "TX count: surplus firmware completions seen");
+    expect(nic.txb_inuse == 0, "TX count: retire no more than are in flight");
+    expect(nic.tx_completed == 2, "TX count: completed accounting is clamped");
+    expect(nic.tx_done == 104, "TX count: raw firmware baseline resynchronised");
+    nic.txb_inuse = 1;
+    expect(!zz_tx_reclaim(&nic),
+           "TX count: surplus completions cannot retire a later send");
+    expect(nic.txb_inuse == 1, "TX count: later send stays in flight");
+}
+
+static VOID tx_offset2_negotiation(VOID)
+{
+    UBYTE frame[64];
+    UBYTE *direct;
+    UWORD command;
+
+    fresh_unit();
+    nic.running = TRUE;
+    nic.txb_cnt = ZZ_TX_SLOTS;
+    expect(nic.tx_at == NULL,
+           "TX offset2: old firmware keeps the staging path");
+
+    nic.tx_at = zz_tx_at;
+    direct = nic.tx_at(&nic);
+    expect(direct == board.bytes + ZZ_TX_WINDOW + 2,
+           "TX offset2: direct frame starts two bytes into slot 0");
+    memset(direct, 0x5a, sizeof(frame));
+    bulk_reset();
+    expect(zz_tx(&nic, direct, sizeof(frame)) == 0,
+           "TX offset2: direct frame is accepted");
+    command = *(UWORD *)(void *)(board.bytes + ZZ_REG_TX);
+    expect((command & (ZZ_TX_ASYNC | ZZ_TX_OFFSET2 | ZZ_TX_LEN_MASK)) ==
+           (ZZ_TX_ASYNC | ZZ_TX_OFFSET2 | sizeof(frame)),
+           "TX offset2: command selects shifted DMA source");
+    expect(bulk_calls == 0, "TX offset2: no staging-to-window copy");
+    expect(nic.core_stat[ZZ_ST_TX_DIRECT] == 1,
+           "TX offset2: direct frame is observable in device statistics");
+    expect(nic.tx_at(&nic) == board.bytes + ZZ_TX_WINDOW +
+                            ZZ_TX_WINDOW_LEN + 2,
+           "TX offset2: next slot is selected");
+
+    memset(frame, 0x3c, sizeof(frame));
+    bulk_reset();
+    expect(zz_tx(&nic, frame, sizeof(frame)) == 0,
+           "TX offset2: staged request is accepted");
+    command = *(UWORD *)(void *)(board.bytes + ZZ_REG_TX);
+    expect((command & ZZ_TX_OFFSET2) == 0,
+           "TX offset2: staged request uses the legacy slot origin");
+    expect(bulk_calls != 0, "TX offset2: staged request copies normally");
+    expect(nic.core_stat[ZZ_ST_TX_DIRECT] == 1,
+           "TX offset2: staged frame does not increment direct count");
+
+    nic.txb_inuse = ZZ_TX_SLOTS;
+    expect(nic.tx_at(&nic) == NULL,
+           "TX offset2: a full ring does not expose an owned slot");
+}
+
+static VOID tx_offset2_checksum_owner(VOID)
+{
+    UBYTE *direct;
+    UBYTE frame[60];
+
+    fresh_unit();
+    nic.running = TRUE;
+    nic.txb_cnt = ZZ_TX_SLOTS;
+    nic.tx_csum = ANXD_S2_TXF_TCP;
+    nic.tx_at = zz_tx_at;
+    direct = nic.tx_at(&nic);
+    memset(direct, 0, sizeof(frame));
+    direct[12] = 0x08;          /* Ethernet IPv4 */
+    direct[14] = 0x45;          /* IPv4, 20-byte header */
+    direct[17] = 40;            /* 20 IP + 20 TCP */
+    direct[23] = 6;             /* TCP */
+    direct[46] = 0x50;          /* TCP data offset = 5 */
+    direct[50] = 0x12;
+    direct[51] = 0x34;
+    memcpy(frame, direct, sizeof(frame));
+
+    expect(zz_tx(&nic, direct, sizeof(frame)) == 0,
+           "TX checksum: shifted frame accepted");
+    expect(direct[50] == 0x12 && direct[51] == 0x34,
+           "TX checksum: driver leaves shifted checksum for ARM preparation");
+    expect(nic.core_stat[ZZ_ST_TX_CSUM] == 0,
+           "TX checksum: shifted frame has no 68k checksum preparation");
+
+    expect(zz_tx(&nic, frame, sizeof(frame)) == 0,
+           "TX checksum: staged frame accepted");
+    expect(board.bytes[ZZ_TX_WINDOW + ZZ_TX_WINDOW_LEN + 50] == 0 &&
+           board.bytes[ZZ_TX_WINDOW + ZZ_TX_WINDOW_LEN + 51] == 0,
+           "TX checksum: staged frame keeps the driver zeroing path");
+    expect(nic.core_stat[ZZ_ST_TX_CSUM] == 1,
+           "TX checksum: count only fields actually prepared by the 68k");
+}
+
 int main(void)
 {
     payload_copy_every_length();
     verified_claim_path_reads_aligned();
     summed_claim_path_still_aligned();
     staging_path_reads_aligned();
+    stale_serial_recovery();
+    receive_pass_is_bounded();
+    reset_preserves_live_tx_slots();
+    tx_counter_reclaim();
+    tx_offset2_negotiation();
+    tx_offset2_checksum_owner();
 
     printf("%s: zz9000 payload alignment, %lu checks, %d failure%s\n",
            failures == 0 ? "PASS" : "FAIL", (unsigned long)checks, failures,

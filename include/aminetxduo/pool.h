@@ -64,6 +64,20 @@
 ULONG ami_ns_pool_packets_for(ULONG avail, ULONG divisor, ULONG stride);
 
 /*
+ * One packet as nx_packet_pool_create() lays it out: the header rounded up to
+ * `align`, then header plus payload rounded up to `align`.  No per-packet
+ * slack: a stride with `align` more per packet made NetX carve more packets
+ * than were planned, 4106 where the clamp said 4096 (run-bigmem.sh).
+ */
+ULONG ami_ns_packet_size_for(ULONG header, ULONG payload, ULONG align);
+
+/*
+ * The bytes that make nx_packet_pool_create() carve exactly `packets` packets
+ * of `stride`: the packets, plus align - 1 once for the start it rounds up.
+ */
+ULONG ami_ns_pool_bytes_for(ULONG packets, ULONG stride, ULONG align);
+
+/*
  * The free bytes the pool is sized from: those of the FASTEST memory class,
  * which is every Fast RAM header at the highest priority Exec holds one at,
  * summed.  `pri[i]` and `free[i]` describe the Fast RAM headers, n of them;

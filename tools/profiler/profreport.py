@@ -362,35 +362,33 @@ SEC_OF_TYPE = {"t": ".text", "T": ".text", "w": ".text", "W": ".text",
                "d": ".data", "D": ".data", "g": ".data", "G": ".data",
                "b": ".bss", "B": ".bss"}
 
-MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss)(?:\.[^\s]+)?)\s+"
+# ".text.foo" as well as ".text": -ffunction-sections is on for parts of this
+# tree, and ld names each contribution after the function.  The suffix is the
+# answer to the collision below, so it is captured now rather than discarded:
+# under -ffunction-sections one object contributes SEVERAL .text sections at
+# several output addresses, and nm reports every one of its symbols at offset
+# 0 -- of its OWN section.  Adding `addr + 0` for each symbol at each
+# contribution therefore puts every symbol of the object at every one of its
+# addresses.  ld already wrote which function each contribution is:
+# ".text._nx_tcp_socket_state_data_check" is not a hint, it is the name.
+# group(2) keeps it.
+MAP_SEC = re.compile(r"^\s(\.(?:text|data|bss))((?:\.\S+)?)\s+"
                      r"0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
-MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss)(?:\.[^\s]+)?)\s*$")
+MAP_SEC_SPLIT = re.compile(r"^\s(\.(?:text|data|bss))((?:\.\S+)?)\s*$")
 MAP_SEC_TAIL = re.compile(r"^\s+0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(\S.*?)\s*$")
 
 
-def base_section(name):
-    """`.text.foo` -> `.text`, and the same for .data and .bss.
-
-    THE TREE COMPILES -ffunction-sections, so nearly every function lands in a
-    section of its own and the linker map records the contribution under that
-    name.  The two patterns above used to match only the bare `.text`, so none
-    of those lines were seen at all: this map has 791 of them against 517
-    plain ones, and the symbol table stopped dead at the address where the
-    `*(.text*)` catch-all begins.
-
-    Everything above that point -- 155 KB, most of NetX Duo -- was then
-    credited to the last symbol below it, which happened to be a twenty-byte
-    libc strlen.  It duly appeared to hold 27% of a file transfer, in seven
-    unrelated tasks at once.
-    """
-    for base in (".text", ".data", ".bss"):
-        if name == base or name.startswith(base + "."):
-            return base
-    return name
-
-
 def parse_map(path):
-    """[(section, out_addr, size, object)] for every input contribution."""
+    """[(section, only, out_addr, size, object)] for every input contribution.
+
+    `only`, when not None, is the single symbol name this contribution holds,
+    taken from the ".text.<name>" section name ld emitted for it.  Under
+    -ffunction-sections one object contributes several .text sections at
+    several output addresses, and nm reports every one of its symbols at
+    offset 0 of its own section.  Without `only`, adding `addr + 0` for each
+    symbol at each contribution puts every symbol of the object at every one
+    of its addresses, and the report hands out whichever name sorts last.
+    """
     out = []
     pending = None
     with open(path, "r", errors="replace") as fh:
@@ -398,18 +396,19 @@ def parse_map(path):
             if pending is not None:
                 m = MAP_SEC_TAIL.match(line)
                 if m:
-                    out.append((base_section(pending), int(m.group(1), 16),
+                    out.append((pending[0], pending[1], int(m.group(1), 16),
                                 int(m.group(2), 16), m.group(3)))
                 pending = None
                 continue
             m = MAP_SEC.match(line)
             if m:
-                out.append((base_section(m.group(1)), int(m.group(2), 16),
-                            int(m.group(3), 16), m.group(4)))
+                out.append((m.group(1), m.group(2)[1:] or None,
+                            int(m.group(3), 16), int(m.group(4), 16),
+                            m.group(5)))
                 continue
             m = MAP_SEC_SPLIT.match(line)
             if m:
-                pending = m.group(1)
+                pending = (m.group(1), m.group(2)[1:] or None)
     return out
 
 
@@ -488,7 +487,7 @@ def build_symbol_table(nm, mapfile, objdir, unresolved=None):
     cache = {}
     table = defaultdict(list)          # section -> [(addr, name, module)]
 
-    for section, addr, size, obj in contributions:
+    for section, only, addr, size, obj in contributions:
         if size == 0:
             continue
 
@@ -518,7 +517,31 @@ def build_symbol_table(nm, mapfile, objdir, unresolved=None):
         if m:
             module = "%s(%s)" % (os.path.basename(spec), member)
 
-        for value, stype, name in cache[key]:
+        # The section name says which function this contribution is, so take
+        # that symbol alone.  Without it every symbol of the object lands at
+        # every address the object contributed to -- nm reports each at offset
+        # 0 of its own section, and the offsets are not comparable across
+        # sections.
+        # The assembler's leading underscore is on the nm name and not on the
+        # section name: ld writes ".text._nx_tcp_socket_state_data_check" for
+        # a symbol nm calls "__nx_tcp_socket_state_data_check".  Both spellings
+        # are accepted so this works either way round.
+        syms = cache[key]
+        if only is not None:
+            exact = [t for t in syms
+                     if t[2] == only or t[2] == "_" + only
+                     or "_" + t[2] == only]
+            if not exact:
+                # A named section nothing matches must not fall back to the
+                # whole object: that would put every symbol of the object at
+                # this one address, the very collision the filter exists to
+                # prevent, on a future toolchain that renames a section.  Name
+                # the contribution by module alone and place no symbols.
+                table[section].append((addr, "[%s]" % module, module))
+                continue
+            syms = exact
+
+        for value, stype, name in syms:
             if SEC_OF_TYPE.get(stype) != section:
                 continue
             if value > size:

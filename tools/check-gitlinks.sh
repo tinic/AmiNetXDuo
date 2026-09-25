@@ -3,6 +3,7 @@
 # Every recorded submodule commit must be an object a fresh clone can fetch.
 #
 #   tools/check-gitlinks.sh [commit]
+#   AMINETXDUO_GITLINKS_REQUIRE_FULL=1 tools/check-gitlinks.sh [commit]
 #
 # Nothing validates a gitlink at the moment it is written, so five things can be
 # wrong and all five are checked: the working tree is stale (`git submodule
@@ -11,6 +12,9 @@
 # branch .gitmodules names nor on a tag (asked only of a submodule with history
 # to answer with); and the bump went backwards, so that pin silently reverts
 # every fix merged in between.
+# The CI full-history gate sets REQUIRE_FULL: missing submodules, shallow
+# histories, and missing tracking refs are errors instead of skipped ancestry
+# checks. Ordinary local checks remain usable from shallow clones.
 #
 # Existence and reachability are also swept over every gitlink ever recorded,
 # because a pin can rot after it is written: deleting a topic branch on the
@@ -25,6 +29,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 COMMIT="${1:-HEAD}"
+REQUIRE_FULL="${AMINETXDUO_GITLINKS_REQUIRE_FULL:-0}"
+case "$REQUIRE_FULL" in
+    0|1) ;;
+    *) echo "gitlinks=invalid REQUIRE_FULL=$REQUIRE_FULL" >&2; exit 2 ;;
+esac
 
 # Pins that are already published and cannot be repaired without rewriting
 # tags v0.25.0, v0.25.1 and v0.25.2.  Each line is
@@ -99,6 +108,10 @@ for name in $names; do
     gitdir="$(sub_gitdir "$path" "$name")"
     if [ -z "$gitdir" ]; then
         uninitialised=$((uninitialised + 1))
+        if [ "$REQUIRE_FULL" = 1 ]; then
+            echo "gitlink_$path=UNINITIALISED recorded=$oid"
+            rc=1
+        fi
         continue
     fi
     checked=$((checked + 1))
@@ -131,6 +144,12 @@ for name in $names; do
     fi
 
     shallow="$(git --git-dir="$gitdir" rev-parse --is-shallow-repository)"
+    if [ "$shallow" = true ] && [ "$REQUIRE_FULL" = 1 ]; then
+        echo "gitlink_$path=SHALLOW_UNCHECKED recorded=$oid"
+        echo "  fetch full submodule history before checking the pin" >&2
+        rc=1
+        continue
+    fi
 
     if [ "$shallow" = "false" ] &&
        ! grep -qx "$oid" "$(reachable_file "$gitdir")"; then
@@ -153,7 +172,12 @@ for name in $names; do
     if [ -n "$tag" ]; then
         echo "gitlink_$path=ok pin=tag:$tag oid=$oid"
     elif [ -z "$ref" ]; then
-        echo "gitlink_$path=ok pin=no_tracking_ref oid=$oid"
+        if [ "$REQUIRE_FULL" = 1 ]; then
+            echo "gitlink_$path=NO_TRACKING_REF recorded=$oid"
+            rc=1
+        else
+            echo "gitlink_$path=ok pin=no_tracking_ref oid=$oid"
+        fi
     elif [ "$shallow" = "true" ]; then
         # A SHALLOW SUBMODULE HAS NO CHAIN TO BE ON.  actions/checkout takes
         # every submodule with `--depth=1 --no-tags`, which leaves one commit
@@ -167,8 +191,8 @@ for name in $names; do
         # job in every workflow died on it before compiling a line.
         #
         # The history is not there to be checked, so this says so rather than
-        # convicting on it.  A full clone -- a developer's, and the sweep
-        # below -- still does the real check.
+        # convicting on it. The dedicated full-history CI job does the real
+        # check and fails if a shallow submodule reaches it.
         echo "gitlink_$path=ok pin=shallow_unchecked oid=$oid"
     elif git --git-dir="$gitdir" rev-list --first-parent "$ref" | grep -qx "$oid"; then
         echo "gitlink_$path=ok pin=${ref#refs/remotes/} oid=$oid"
@@ -195,6 +219,10 @@ for name in $names; do
 done
 
 if [ "$checked" = 0 ]; then
+    if [ "$REQUIRE_FULL" = 1 ]; then
+        echo "gitlinks=FAILED reason=no_submodule_initialised commit=$COMMIT"
+        exit 1
+    fi
     echo "gitlinks=skipped reason=no_submodule_initialised commit=$COMMIT"
     exit 2
 fi

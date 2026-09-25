@@ -419,6 +419,39 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_sws COMMAND test_tcp_sws)
 
+    # The send the small-write cork makes from the IP thread's pass
+    # (src/bsdsocket/cork.c): NX_NO_WAIT with nx_ip_protection already held.
+    # Against the real send path: it never suspends, never lets the pass's
+    # hold go, and trims a refused segment exactly as bsd_send_consumed()
+    # counts it.
+    add_executable(test_tcp_cork_send
+        host/test_tcp_cork_send_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_send_control.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_transmit_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c")
+
+    target_compile_options(test_tcp_cork_send PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_cork_send PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_cork_send PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_cork_send COMMAND test_tcp_cork_send)
+
     # The two receiver-side acknowledgment holes that left a sender in persist
     # backoff, both fixed in 0.25.3 as submodule commits with no test in this
     # tree: an unanswered window probe (tinic/netxduo bfedf066) and a sub-MSS
@@ -521,6 +554,32 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_pool_window PRIVATE -Wall -Wextra -Werror)
 
     add_test(NAME pool_window COMMAND test_pool_window)
+
+    # The pool NetX actually carves is the pool that was planned.  Links the
+    # real nx_packet_pool_create(), because the count that failed run-bigmem.sh
+    # (4106 on a 4096 clamp) is NetX's own, not the planning arithmetic's.
+    add_executable(test_pool_stride
+        host/test_pool_stride_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c")
+
+    target_compile_options(test_pool_stride PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_pool_stride PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"      # exec/types.h
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_definitions(test_pool_stride PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME pool_stride COMMAND test_pool_stride)
 
     # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
@@ -843,6 +902,19 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_expunge_joint PRIVATE ${NETSTACK_HOST_OPTIONS})
 
     add_test(NAME expunge_joint COMMAND test_expunge_joint)
+
+    # An interface whose SANA-II device keeps requests in it: the removal says
+    # AMI_NET_ERR_RETAINED, the held unit is not reopened, the pool is kept
+    # and netstack_can_unload() waits for the last hold.  src/sana2's retained
+    # list is modelled by the environment; the real one is test_sana2_device.
+    add_executable(test_iface_retain
+        host/test_iface_retain_host.c ${NETSTACK_HOST_TU})
+
+    target_include_directories(test_iface_retain PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_iface_retain PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_iface_retain PRIVATE ${NETSTACK_HOST_OPTIONS})
+
+    add_test(NAME iface_retain COMMAND test_iface_retain)
 
     # netstack_interface_dhcp_start()'s re-arm.  NX_DHCP_ALREADY_STARTED never
     # arises in the arm the lab can run, so stop-and-start-again was never

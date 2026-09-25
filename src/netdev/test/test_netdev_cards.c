@@ -90,6 +90,10 @@ int main(void)
     expect_int("netdev_card_by_name(XSURF100)",
                netdev_card_by_name("XSURF100") == netdev_card_by_name("xsurf100"),
                1);
+    expect_int("xsurf100 longword RX window",
+               (int)netdev_card_by_name("xsurf100")->wide_off, 0x8880);
+    expect_int("xsurf100 longword TX window",
+               (int)netdev_card_by_name("xsurf100")->wide_write_off, 0x8c80);
     expect_int("netdev_card_by_name(AriadneII)",
                netdev_card_by_name("Ariadne2") == netdev_card_by_name("ariadne2"),
                1);

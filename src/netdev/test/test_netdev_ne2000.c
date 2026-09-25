@@ -597,11 +597,22 @@ static void test_wide_probe(void)
     ok("no wide window: the mode is left alone",
        nic.bus.dmode == NETDEV_DMODE_WORD);
 
+    /* A read-only long window cannot prove that writes use the long path. */
+    board_contiguous(&nic, &netdev_cards[0]);
+    chip_begin(0, 0);
+    nic.bus.wide = wide_window;
+    nic.bus.wide_write = NULL;
+    nic.bus.dmode = NETDEV_DMODE_WORD;
+    ne2000_probe_wide(&nic);
+    ok("no wide write window: the mode is left alone",
+       nic.bus.dmode == NETDEV_DMODE_WORD);
+
     /* A window that mirrors the narrow one in both directions is promoted. */
     board_contiguous(&nic, &netdev_cards[0]);
     chip_begin(0, 0);
     mock_wide_fault = WIDE_OK;
     nic.bus.wide  = wide_window;
+    nic.bus.wide_write = wide_window;
     nic.bus.dmode = NETDEV_DMODE_WORD;
     ne2000_probe_wide(&nic);
     ok("a window that mirrors both ways is promoted to LONG",
@@ -616,6 +627,7 @@ static void test_wide_probe(void)
     chip_begin(0, 0);
     mock_wide_fault = WIDE_READ_BAD;
     nic.bus.wide  = wide_window;
+    nic.bus.wide_write = wide_window;
     nic.bus.dmode = NETDEV_DMODE_WORD;
     ne2000_probe_wide(&nic);
     ok("a window that reads back wrong is refused, not promoted",
@@ -630,6 +642,7 @@ static void test_wide_probe(void)
     chip_begin(0, 0);
     mock_wide_fault = WIDE_WRITE_BAD;
     nic.bus.wide  = wide_window;
+    nic.bus.wide_write = wide_window;
     nic.bus.dmode = NETDEV_DMODE_WORD;
     ne2000_probe_wide(&nic);
     ok("a window that stores wrong is refused even though leg 1 passed",

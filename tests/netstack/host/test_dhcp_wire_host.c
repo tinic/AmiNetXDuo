@@ -61,7 +61,6 @@ static void h_case_client_id_bytes(void)
 
     /* A MAC with every byte distinct and the high bit set, so a sign or a
        shift mistake would show. */
-    memset(option, 0, sizeof(option));
     n = ami_ns_dhcp_client_id_build(0x0000FEDCUL, 0xBA987654UL, option, 16U);
     h_check(n == 9U && option[3] == 0xFE && option[4] == 0xDC &&
             option[5] == 0xBA && option[6] == 0x98 && option[7] == 0x76 &&

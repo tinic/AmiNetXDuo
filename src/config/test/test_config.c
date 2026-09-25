@@ -2138,6 +2138,34 @@ static void test_gateway(void)
     free(buf);
     CHECK(gw == 0);
 
+    /* A bare GATEWAY line in the routes file is the default route, as it is
+       in default_gateway.  It stopped being one when specific routes arrived,
+       and nothing said so: the configuration simply had no default. */
+    memset(&cfg, 0, sizeof(cfg));
+    buf = dup_text("# DEVS:Internet/routes\n"
+                   "GATEWAY = 10.99.0.1\n");
+    ami_cfg_parse_routes(buf, &cfg);
+    free(buf);
+    CHECK_IP(cfg.default_gateway, 10, 99, 0, 1);
+    CHECK(cfg.static_route_count == 0);
+
+    /* VIA is not that word: with no destination it is half a specific route,
+       and half a route is not a default. */
+    memset(&cfg, 0, sizeof(cfg));
+    buf = dup_text("VIA = 10.99.0.1\n");
+    ami_cfg_parse_routes(buf, &cfg);
+    free(buf);
+    CHECK(cfg.default_gateway == 0);
+    CHECK(cfg.static_route_count == 0);
+
+    /* DEFAULT still wins over a bare GATEWAY later in the same file. */
+    memset(&cfg, 0, sizeof(cfg));
+    buf = dup_text("DEFAULT = 192.168.1.1\n"
+                   "GATEWAY = 10.99.0.1\n");
+    ami_cfg_parse_routes(buf, &cfg);
+    free(buf);
+    CHECK_IP(cfg.default_gateway, 192, 168, 1, 1);
+
     /* The same file loaded as the real configuration keeps every specific
        route, applies the command's HOSTDST/NETDST defaults, canonicalises a
        CIDR destination, and lets a later duplicate replace its gateway. */

@@ -29,6 +29,7 @@
 #define TERM_STOP_PASSES    20
 
 #define TERM_ABANDON_TICKS  250     /* of 1/50 s                            */
+#define TERM_SEQ_MAX        24      /* a runaway parameter list is not a sequence */
 
 typedef struct TermPipe
 {
@@ -46,25 +47,8 @@ typedef struct TermPipe
     UBYTE             closed;       /* this side is finished with it        */
 } TermPipe;
 
-static TermPipe term_in;            /* what the person types                */
-static TermPipe term_out;           /* what the Shell prints                */
-
 static ULONG ring_used(const TermPipe *p) { return p->count; }
 static ULONG ring_free(const TermPipe *p) { return p->size - p->count; }
-
-static UBYTE term_raw;              /* the handler is in RAW mode           */
-static UBYTE term_mode_pending;     /* and the page has not been told yet   */
-
-static UWORD term_cols = 80;
-static UWORD term_rows = 25;
-
-static UBYTE term_in_urgent;
-
-static ULONG term_st_writes;        /* ACTION_WRITE packets answered        */
-static ULONG term_st_wbytes;        /* bytes taken from them                */
-static ULONG term_st_frames;        /* binary frames handed to the socket   */
-static ULONG term_st_fbytes;        /* payload bytes in them                */
-static UBYTE term_st_pending;       /* a `stats` reply is owed to the page  */
 
 static ULONG ring_put(TermPipe *p, const UBYTE *src, ULONG n)
 {
@@ -125,31 +109,92 @@ typedef struct TermRunner
     char          rn_Name[40];       /* stable, unique key for FindTask()   */
 } TermRunner;
 
-static TermRunner *term_runner;     /* the current session's record        */
 static TermRunner *term_runners;    /* including abandoned live runners    */
-static UBYTE      term_active;      /* a Shell has been started             */
-static UBYTE      term_reaped;      /* and its exit code has been collected */
-static UBYTE      term_stopping;    /* it has been asked to go              */
-static UBYTE      term_trace;       /* say what the Shell is doing          */
-static UWORD      term_traced;      /* how many packets have been reported  */
-static UBYTE      term_said_rc;     /* Execute()'s answer has been printed   */
-static UWORD      term_stop_passes;
-static LONG       term_rc = -1;
-
-static UBYTE      term_abandoned;
-static ULONG      term_stop_at;     /* fiftieths, when stopping began       */
-
-static LONG       term_err;
 static ULONG      term_runner_serial;
 
-static struct Task *term_shell_task;
+/* All state touched by the event-loop task belongs to the selected slot.
+   Only the runner list and serial are shared; a runner uses its own record
+   after startup and never reads term_current. */
+typedef struct TermSession
+{
+    TermPipe in, out;
+    UBYTE raw, mode_pending, in_urgent;
+    UWORD cols, rows;
+    ULONG st_writes, st_wbytes, st_frames, st_fbytes;
+    UBYTE st_pending;
+    TermRunner *runner;
+    UBYTE active, reaped, stopping;
+    UWORD traced, stop_passes;
+    UBYTE said_rc, abandoned;
+    LONG rc, err;
+    ULONG stop_at;
+    struct Task *shell_task;
+    struct MsgPort *break_port, *port;
+    struct IOStdReq ioreq;
+    struct ConUnit conunit;
+    UWORD gen;
+    UBYTE seq[TERM_SEQ_MAX], seq_n, seq_esc, want_resize;
+    struct DosPacket *wait_pkt;
+    ULONG wait_from, wait_until;
+    char comp_word[1280];
+    UBYTE comp_pending;
+} TermSession;
 
-static struct MsgPort *term_break_port;
+static TermSession term_sessions[HTTP_TERM_SLOTS];
+static TermSession *term_current = &term_sessions[0];
+static UBYTE term_trace;
+
+BOOL http_term_select(UWORD slot)
+{
+    if (slot >= HTTP_TERM_SLOTS)
+        return FALSE;
+
+    term_current = &term_sessions[slot];
+    return TRUE;
+}
+
+#define term_in           (term_current->in)
+#define term_out          (term_current->out)
+#define term_raw          (term_current->raw)
+#define term_mode_pending (term_current->mode_pending)
+#define term_cols         (term_current->cols)
+#define term_rows         (term_current->rows)
+#define term_in_urgent    (term_current->in_urgent)
+#define term_st_writes    (term_current->st_writes)
+#define term_st_wbytes    (term_current->st_wbytes)
+#define term_st_frames    (term_current->st_frames)
+#define term_st_fbytes    (term_current->st_fbytes)
+#define term_st_pending   (term_current->st_pending)
+#define term_runner       (term_current->runner)
+#define term_active       (term_current->active)
+#define term_reaped       (term_current->reaped)
+#define term_stopping     (term_current->stopping)
+#define term_traced       (term_current->traced)
+#define term_said_rc      (term_current->said_rc)
+#define term_stop_passes  (term_current->stop_passes)
+#define term_rc           (term_current->rc)
+#define term_abandoned    (term_current->abandoned)
+#define term_stop_at      (term_current->stop_at)
+#define term_err          (term_current->err)
+#define term_shell_task   (term_current->shell_task)
+#define term_break_port   (term_current->break_port)
+#define term_ioreq        (term_current->ioreq)
+#define term_conunit      (term_current->conunit)
+#define term_port         (term_current->port)
+#define term_gen          (term_current->gen)
+#define term_seq          (term_current->seq)
+#define term_seq_n        (term_current->seq_n)
+#define term_seq_esc      (term_current->seq_esc)
+#define term_want_resize  (term_current->want_resize)
+#define term_wait_pkt     (term_current->wait_pkt)
+#define term_wait_from    (term_current->wait_from)
+#define term_wait_until   (term_current->wait_until)
+#define term_comp_word    (term_current->comp_word)
+#define term_comp_pending (term_current->comp_pending)
 
 #define TERM_DISK_CON     0x434F4E00L     /* 'CON\0' */
 #define TERM_DISK_RAWCON  0x52415700L     /* 'RAW\0' */
 
-static struct IOStdReq term_ioreq;
 
 /* ACTION_DISK_INFO hands back term_ioreq, whose io_Unit a console client
    (Dropbear's ssh, C:More) reads as a ConUnit for cu_XMax/cu_YMax -- the
@@ -157,7 +202,6 @@ static struct IOStdReq term_ioreq;
    The pointer is stable and cached by the client, so a later resize is seen
    by keeping the fields current (term_sync_conunit, called on every size
    change), not by handing back a new unit. */
-static struct ConUnit term_conunit;
 
 static void term_sync_conunit(void)
 {
@@ -166,12 +210,10 @@ static void term_sync_conunit(void)
     term_ioreq.io_Unit   = (struct Unit *)&term_conunit;
 }
 
-static struct MsgPort *term_port;
 
 /* TERM_ID_IN, TERM_ID_OUT and TERM_ID_CON: httpterm_owner.h, beside the
    decision of which ring a packet on each of them means. */
 
-static UWORD term_gen = 1;
 
 static LONG term_handle_arg(LONG id)
 {
@@ -257,13 +299,6 @@ static BOOL term_packet_current(const struct DosPacket *pkt)
     return ok ? TRUE : FALSE;
 }
 
-#define TERM_SEQ_MAX    24      /* a runaway parameter list is not a sequence */
-
-static UBYTE term_seq[TERM_SEQ_MAX];
-static UBYTE term_seq_n;                /* 0 when not inside a sequence      */
-static UBYTE term_seq_esc;              /* it began with ESC and wants a '[' */
-
-static UBYTE term_want_resize;
 
 static BOOL term_has_line(const TermPipe *p)
 {
@@ -608,9 +643,6 @@ static VOID term_retry(TermPipe *p)
     term_reply(pkt, n, 0);
 }
 
-static struct DosPacket *term_wait_pkt;
-static ULONG             term_wait_from;   /* fiftieths, see term_ticks()   */
-static ULONG             term_wait_until;
 
 static ULONG term_ticks(VOID)
 {
@@ -1002,12 +1034,30 @@ VOID http_term_service(VOID)
     term_wait_service();
 }
 
+VOID http_term_service_all(VOID)
+{
+    TermSession *saved = term_current;
+    UWORD i;
+
+    for (i = 0; i < HTTP_TERM_SLOTS; i++)
+    {
+        term_current = &term_sessions[i];
+        if (term_port != NULL)
+            http_term_service();
+    }
+    term_current = saved;
+}
+
 ULONG http_term_sigmask(VOID)
 {
-    if (term_port == NULL)
-        return 0;
+    ULONG mask = 0;
+    UWORD i;
 
-    return 1UL << (ULONG)term_port->mp_SigBit;
+    for (i = 0; i < HTTP_TERM_SLOTS; i++)
+        if (term_sessions[i].port != NULL)
+            mask |= 1UL << (ULONG)term_sessions[i].port->mp_SigBit;
+
+    return mask;
 }
 
 static BPTR term_handle(TermPipe *p, LONG id, BOOL shell_reads)
@@ -1124,7 +1174,14 @@ static VOID term_runners_collect(VOID)
     {
         TermRunner *r = *link;
 
-        if (r != term_runner && r->rn_Done != 0 &&
+        UWORD i;
+        BOOL current = FALSE;
+
+        for (i = 0; i < HTTP_TERM_SLOTS; i++)
+            if (r == term_sessions[i].runner)
+                current = TRUE;
+
+        if (!current && r->rn_Done != 0 &&
             !term_runner_alive(r))
         {
             *link = r->rn_Next;
@@ -1168,6 +1225,11 @@ BOOL http_term_init(VOID)
 {
     if (term_port != NULL)
         return TRUE;
+
+    term_gen = 1;
+    term_rc = -1;
+    term_cols = 80;
+    term_rows = 25;
 
     term_in.buf  = (UBYTE *)ami_alloc(TERM_IN_BUF);
     term_out.buf = (UBYTE *)ami_alloc(TERM_OUT_BUF);
@@ -1401,6 +1463,12 @@ BOOL http_term_start(VOID)
     return TRUE;
 }
 
+VOID http_term_reattach(VOID)
+{
+    if (term_active)
+        term_mode_pending = 1;
+}
+
 BOOL http_term_raw(VOID)
 {
     return term_raw ? TRUE : FALSE;
@@ -1589,42 +1657,51 @@ VOID http_term_shutdown(VOID)
 {
     LONG waited = 0;
     BOOL warned = FALSE;
+    UWORD i;
+    TermSession *saved = term_current;
 
-    if (term_port == NULL)
-        return;
-
-    if (term_active)
+    for (i = 0; i < HTTP_TERM_SLOTS; i++)
     {
-        http_term_stop();
+        term_current = &term_sessions[i];
+        if (term_port != NULL && term_active)
+            http_term_stop();
+    }
 
+    for (;;)
+    {
+        BOOL pending = FALSE;
 
-
-        while (!term_reaped)
+        http_term_service_all();
+        for (i = 0; i < HTTP_TERM_SLOTS; i++)
         {
             UBYTE scratch[256];
 
-            http_term_service();
-
+            term_current = &term_sessions[i];
+            if (term_port == NULL || !term_active)
+                continue;
             while (http_term_read(scratch, (LONG)sizeof(scratch)) > 0)
                 ;
-
-            Delay(1);
-            waited++;
-
-            if (!warned && waited >= TERM_STOP_WARN_TICKS)
-            {
-                warned = TRUE;
-                tool_error("the terminal's Shell is still running; waiting "
-                           "because its runner still uses httpd's code");
-            }
+            if (!term_reaped)
+                pending = TRUE;
+            else
+                term_active = 0;
         }
 
-        term_active = 0;
+        if (!pending)
+            break;
+        Delay(1);
+        waited++;
+        if (!warned && waited >= TERM_STOP_WARN_TICKS)
+        {
+            warned = TRUE;
+            tool_error("a terminal Shell is still running; waiting because "
+                       "its runner still uses httpd's code");
+        }
     }
 
     while (!term_runners_done())
     {
-        http_term_service();
+        http_term_service_all();
         Delay(1);
         waited++;
 
@@ -1643,15 +1720,19 @@ VOID http_term_shutdown(VOID)
         ami_free(term_runners);
         term_runners = next;
     }
-    term_runner = NULL;
-
-    DeleteMsgPort(term_port);
-    term_port = NULL;
-
-    ami_free(term_in.buf);
-    ami_free(term_out.buf);
-    term_in.buf  = NULL;
-    term_out.buf = NULL;
+    for (i = 0; i < HTTP_TERM_SLOTS; i++)
+    {
+        term_current = &term_sessions[i];
+        term_runner = NULL;
+        if (term_port != NULL)
+            DeleteMsgPort(term_port);
+        term_port = NULL;
+        ami_free(term_in.buf);
+        ami_free(term_out.buf);
+        term_in.buf  = NULL;
+        term_out.buf = NULL;
+    }
+    term_current = saved;
 }
 
 static VOID sock_control(HttpTermSock *t, HttpWsEvent ev,
@@ -1733,8 +1814,6 @@ static const char *sock_number(const char *s, UWORD *out)
 /* ------------------------------------------------------- tab completion --- */
 
 /* The `comp <remainder>` answer, peeked and taken like the mode word. */
-static char  term_comp_word[1280];  /* "comp " + the name list */
-static UBYTE term_comp_pending;
 
 const char *http_term_comp_word(VOID)
 {

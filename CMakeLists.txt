@@ -12,7 +12,7 @@ project(AmiNetXDuo VERSION 1.0.0 LANGUAGES C ASM)
 # tag.  project() takes numbers only, so it lives here beside it; the numeric
 # MAJOR/MINOR/PATCH stay 1.0.0.  Letters, digits and dots, as SemVer allows.
 # Empty for a release.  tools/version.sh reads this line too.
-set(AMINETXDUO_VERSION_PRERELEASE "beta4")
+set(AMINETXDUO_VERSION_PRERELEASE "beta5")
 
 # CMake reloads the compiler recorded by the first configure after processing
 # the toolchain file.  A reused directory could therefore validate the newly
@@ -1492,6 +1492,28 @@ option(AMINETXDUO_TX_RUN
 
 if(AMINETXDUO_TX_RUN)
     add_compile_definitions(AMINETXDUO_TX_RUN)
+endif()
+
+# Opt-in per-socket small-write cork: setsockopt(TCP_NODELAY, 0) holds
+# sub-segment writes on the socket for up to a tick and sends them as one
+# segment (src/bsdsocket/cork.c).  A layout change to NX_IP and AmiSocket, so
+# whole-tree.  OFF: none of it is compiled and TCP_NODELAY=0 stays EINVAL.
+option(AMINETXDUO_TCP_CORK
+       "Per-socket small-write cork behind setsockopt(TCP_NODELAY, 0)" OFF)
+
+if(AMINETXDUO_TCP_CORK)
+    add_compile_definitions(AMINETXDUO_TCP_CORK)
+endif()
+
+# The cork's append fast path: a write that fits the pending segment is copied
+# without entering the ThreadX bracket.  The bracket is ~4% of a small write's
+# CPU; the coalescing is the rest, so this stays off until it is measured.
+option(AMINETXDUO_TCP_CORK_FASTPATH
+       "Cork appends outside the ThreadX bracket (needs AMINETXDUO_TCP_CORK)"
+       OFF)
+
+if(AMINETXDUO_TCP_CORK AND AMINETXDUO_TCP_CORK_FASTPATH)
+    add_compile_definitions(AMINETXDUO_TCP_CORK_FASTPATH)
 endif()
 
 # anxzz9000.device, the MNT ZZ9000's Ethernet on the fork's firmware, is

@@ -17,12 +17,9 @@
 
 ULONG ami_ns_packet_stride(VOID)
 {
-    ULONG stride;
-
-    stride = (ULONG)AMI_POOL_PAYLOAD + (ULONG)sizeof(NX_PACKET) +
-             (ULONG)NX_PACKET_ALIGNMENT;
-
-    return (stride + 3UL) & ~3UL;
+    return ami_ns_packet_size_for((ULONG)sizeof(NX_PACKET),
+                                  (ULONG)AMI_POOL_PAYLOAD,
+                                  (ULONG)NX_PACKET_ALIGNMENT);
 }
 
 /* The bytes the pool is sized from: the fastest memory class's

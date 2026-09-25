@@ -31,6 +31,14 @@ static void test_query(void)
     CHECK(!http_request_query_take("/shell?retake=1"));
     CHECK(!http_request_query_take("/shell?take=10"));
     CHECK(!http_request_query_take(NULL));
+    CHECK(http_request_query_session("/shell") == 0);
+    CHECK(http_request_query_session("/shell?session=0") == 0);
+    CHECK(http_request_query_session("/shell?take=1&session=1") == 1);
+    CHECK(http_request_query_session("/shell?session=1&take=1") == 1);
+    CHECK(http_request_query_session("/shell?session=2") == -1);
+    CHECK(http_request_query_session("/shell?session=01") == -1);
+    CHECK(http_request_query_session("/shell?session=1&session=0") == -1);
+    CHECK(http_request_query_session("/shell?session") == -1);
 }
 
 static void test_timeout(void)

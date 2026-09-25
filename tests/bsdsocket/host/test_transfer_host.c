@@ -104,6 +104,7 @@ static struct
     BOOL        no_pool;            /* legacy stub state, see no-pool case   */
 
     ULONG       mss;
+    ULONG       mss_gets;           /* locked nx_tcp_socket_mss_get() calls  */
 
     /* nx_packet_allocate(): one status per call, then the last one repeats. */
     UINT        alloc_plan[H_PLAN];
@@ -488,6 +489,47 @@ VOID bsd_bzero(APTR p, ULONG size)
     memset(p, 0, (size_t)size);
 }
 
+#ifdef AMINETXDUO_TCP_CORK
+/* The cork's entry points transfer.c calls.  cork.c is test_cork's
+   (test_cork_host.c, which compiles this same transfer.c against it); no
+   socket here turns it on, so none of these is reached. */
+static void h_cork_unreachable(const char *what)
+{
+    printf("  FAIL unreachable call: %s\n", what);
+    h_failures++;
+    abort();
+}
+
+BOOL  bsd_cork_corkable(const AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_cork_corkable"); return FALSE; }
+LONG  bsd_cork_claim(struct AmiSocketBase *base, AmiSocket *sock, ULONG wait,
+                     NX_PACKET **pkt)
+{ (VOID)base; (VOID)sock; (VOID)wait; (VOID)pkt;
+  h_cork_unreachable("bsd_cork_claim"); return 0; }
+BOOL  bsd_cork_unclaim(AmiSocket *sock, NX_PACKET *pkt, ULONG why)
+{ (VOID)sock; (VOID)pkt; (VOID)why;
+  h_cork_unreachable("bsd_cork_unclaim"); return FALSE; }
+ULONG bsd_cork_settle(AmiSocket *sock, NX_PACKET **pkt, UINT status)
+{ (VOID)sock; (VOID)pkt; (VOID)status;
+  h_cork_unreachable("bsd_cork_settle"); return 0; }
+VOID  bsd_cork_push(struct AmiSocketBase *base, AmiSocket *sock)
+{ (VOID)base; (VOID)sock; h_cork_unreachable("bsd_cork_push"); }
+ULONG bsd_cork_room(const AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_cork_room"); return 0; }
+VOID  bsd_tcp_send_fin(AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_tcp_send_fin"); }
+VOID  bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
+{ (VOID)src; (VOID)dst; (VOID)size; h_cork_unreachable("bsd_bcopy"); }
+#ifdef AMINETXDUO_TCP_CORK_FASTPATH
+/* The fast path's lock and tick: it declines before either on a socket that
+   never turned the cork on. */
+VOID  Forbid(VOID) { h_cork_unreachable("Forbid"); }
+VOID  Permit(VOID) { h_cork_unreachable("Permit"); }
+VOID  bsd_cork_kick_tick(AmiSocket *sock)
+{ (VOID)sock; h_cork_unreachable("bsd_cork_kick_tick"); }
+#endif
+#endif
+
 /* ------------------------------------------------------------ NetX Duo -- */
 
 static HPacket *h_from_nx(NX_PACKET *p)
@@ -594,10 +636,15 @@ UINT _nxe_packet_release(NX_PACKET **packet_ptr_ptr)
     return NX_SUCCESS;
 }
 
+/* The running ThreadX thread, which transfer.c compares against its own
+   adopted caller before reading the MSS without the IP mutex. */
+TX_THREAD *_tx_thread_current_ptr;
+
 UINT _nxe_tcp_socket_mss_get(NX_TCP_SOCKET *socket_ptr, ULONG *mss)
 {
     (VOID)socket_ptr;
 
+    h.mss_gets++;
     *mss = h.mss;
 
     return NX_SUCCESS;
@@ -1059,6 +1106,73 @@ static void t_mss_segmentation(void)
 }
 
 /*
+ * The MSS without the IP mutex: only when this base's own adopted bracket is
+ * the running ThreadX thread.  The locked call answers 10 and the socket's own
+ * fields answer 6, so the segment count says which one sized the send.
+ */
+static void t_mss_peek_guard(void)
+{
+    static const struct
+    {
+        BOOL        adopted;
+        int         current;        /* 0 NULL, 1 the caller's, 2 another */
+        BOOL        peek;
+        const char *what;
+    } cases[] =
+    {
+        { FALSE, 1, FALSE, "not adopted: the locked call" },
+        { FALSE, 0, FALSE, "not adopted, no thread: the locked call" },
+        { TRUE,  0, FALSE, "adopted, no running thread: the locked call" },
+        { TRUE,  2, FALSE, "adopted, another thread running: the locked call" },
+        { TRUE,  1, TRUE,  "adopted and running: the fields, no mutex" },
+    };
+    static TX_THREAD other;
+    char             buf[24];
+    unsigned         i;
+
+    printf("transfer: the MSS is read without the mutex only by the baton "
+           "holder\n");
+
+    memset(buf, 'x', sizeof(buf));
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        AmiSocket *s;
+
+        h_reset();
+        s = h_tcp(0);
+        h.mss = 10;
+        s->as_Nx.tcp.nx_tcp_socket_state       = NX_TCP_ESTABLISHED;
+        s->as_Nx.tcp.nx_tcp_socket_connect_mss = 6;
+
+        h_base.sb_NxCaller.nc_Adopted = cases[i].adopted;
+        _tx_thread_current_ptr =
+            (cases[i].current == 1) ? &h_base.sb_NxCaller.nc_Thread :
+            (cases[i].current == 2) ? &other : NULL;
+
+        CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24, cases[i].what);
+        if (cases[i].peek)
+            CHECK(h.mss_gets == 0 && h.sends == 4,
+                  "  sized by the socket's fields, and no mutex was taken");
+        else
+            CHECK(h.mss_gets == 1 && h.sends == 3,
+                  "  sized by nx_tcp_socket_mss_get(), called once");
+    }
+
+    /* The fields before ESTABLISHED: the configured MSS, else 1460. */
+    h_reset();
+    (VOID)h_tcp(0);
+    h_sock[0].as_Nx.tcp.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+    h_sock[0].as_Nx.tcp.nx_tcp_socket_mss   = 5;
+    h_base.sb_NxCaller.nc_Adopted = TRUE;
+    _tx_thread_current_ptr = &h_base.sb_NxCaller.nc_Thread;
+    CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24 && h.sends == 5 &&
+          h.mss_gets == 0, "before ESTABLISHED the configured MSS sizes it");
+
+    _tx_thread_current_ptr = NULL;
+}
+
+/*
  * WHERE 10411a41 WAS.  A send that is cut short after some of it reached the
  * wire must report the bytes that went, not -1.  Reporting the failure loses
  * the caller's place in its own buffer and it resends what the peer already
@@ -1391,6 +1505,7 @@ int main(void)
     t_iov_total();
     t_iov_coalesce();
     t_mss_segmentation();
+    t_mss_peek_guard();
     t_short_write_is_credited();
     t_no_packet();
     t_dontwait();

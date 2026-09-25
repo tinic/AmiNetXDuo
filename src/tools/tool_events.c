@@ -140,6 +140,8 @@ static const char *tool_event_expunge(ULONG value)
         return "an address allocation is still running";
     case NETEVENT_EXP_NETMON:
         return "a monitoring hook is installed";
+    case NETEVENT_EXP_RETAINED:
+        return "a SANA-II device still holds requests";
     default:
         break;
     }

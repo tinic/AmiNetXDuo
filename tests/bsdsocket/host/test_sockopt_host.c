@@ -113,6 +113,27 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 
 VOID bsd_nx_leave(struct AmiSocketBase *base) { (VOID)base; h.nx_leaves++; }
 
+#ifdef AMINETXDUO_TCP_CORK
+/* cork.c is test_cork's.  What options.c owes it is the call, inside the
+   bracket, with the sense of the value inverted: 0 turns the cork on.  The
+   stub keeps the flag the way cork.c does, so getsockopt reads it back. */
+static ULONG h_cork_sets;
+static LONG  h_cork_result;
+
+LONG bsd_cork_set(struct AmiSocketBase *base, AmiSocket *sock, BOOL on)
+{
+    (VOID)base;
+    h_cork_sets++;
+    if (h_cork_result != 0)
+        return h_cork_result;
+    if (on)
+        sock->as_CorkFlags |= BSD_CORKF_ON;
+    else
+        sock->as_CorkFlags &= (UBYTE)~BSD_CORKF_ON;
+    return 0;
+}
+#endif
+
 LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
                      LONG optname, APTR optval, socklen_t *optlen, BOOL set)
 {
@@ -612,6 +633,63 @@ static void t_refusals(void)
           "an unknown level is ENOPROTOOPT");
 }
 
+/*
+ * TCP_NODELAY.  Built without AMINETXDUO_TCP_CORK there is no hold in the
+ * stack to turn on, so 0 is EINVAL and 1 is what it always reads.  With it, 0
+ * turns on the small-write cork (cork.c) and the option reads back as set.
+ */
+static void t_nodelay(void)
+{
+    LONG      value;
+    socklen_t len;
+    LONG      rc;
+
+    printf("options.c: TCP_NODELAY\n");
+
+    h_reset();
+#ifdef AMINETXDUO_TCP_CORK
+    h_cork_sets = 0;
+#endif
+    (VOID)h_tcp(0);
+    value = 1;
+    rc = bsd_setsockopt(0, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0, "TCP_NODELAY 1 is accepted");
+
+    value = 0;
+    rc = bsd_setsockopt(0, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value),
+                        &h_base);
+#ifndef AMINETXDUO_TCP_CORK
+    CHECK(rc == -1 && h_base.sb_Errno == AMI_EINVAL,
+          "TCP_NODELAY 0 is EINVAL: there is no hold to turn on");
+    value = 0; len = (socklen_t)sizeof(value);
+    rc = bsd_getsockopt(0, IPPROTO_TCP, TCP_NODELAY, &value, &len, &h_base);
+    CHECK(rc == 0 && value == 1, "and it still reads 1");
+#else
+    CHECK(rc == 0 && h_cork_sets == 2, "TCP_NODELAY 0 turns the cork on");
+    CHECK(h.nx_enters == h.nx_leaves && h.nx_enters == 2,
+          "inside the bracket, each time");
+    value = 1; len = (socklen_t)sizeof(value);
+    rc = bsd_getsockopt(0, IPPROTO_TCP, TCP_NODELAY, &value, &len, &h_base);
+    CHECK(rc == 0 && value == 0, "and it reads back 0");
+
+    value = 1;
+    rc = bsd_setsockopt(0, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value),
+                        &h_base);
+    value = 0; len = (socklen_t)sizeof(value);
+    rc = bsd_getsockopt(0, IPPROTO_TCP, TCP_NODELAY, &value, &len, &h_base);
+    CHECK(rc == 0 && value == 1, "1 turns it off, and reads back 1");
+
+    h_cork_result = AMI_ENOBUFS;
+    value = 0;
+    rc = bsd_setsockopt(0, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == -1 && h_base.sb_Errno == AMI_ENOBUFS,
+          "a cork that cannot run says so");
+    h_cork_result = 0;
+#endif
+}
+
 static void t_user_timeout(void)
 {
     AmiSocket *s;
@@ -707,6 +785,7 @@ int main(void)
     t_flags();
     t_refusals();
     t_user_timeout();
+    t_nodelay();
     t_ioctls();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);

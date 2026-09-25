@@ -195,6 +195,7 @@ the NDK does not declare and the CPU profiler.
 | `CheckNetConfig` | read the configuration and report what is wrong with it |
 | `CheckNetDevice` | what `anxnet.device` or `anxgenet.device` found and why a card was refused |
 | `NetDevStats` | every standard and driver-specific SANA-II counter for one unit |
+| `CreateAmiNetXDuoStatusReport` | versions, settings and counters in one file to attach to a bug report |
 | `AddNetRoute`, `DeleteNetRoute` | where packets go that are not for this network |
 | `GetNetStatus`, `NetShutdown` | status for scripts, and a clean shutdown |
 | `hostname` | the name of this machine, and where the name came from |
@@ -242,6 +243,10 @@ the output about 23 ms later.
 
 **There is no password.** Anyone who can reach the port gets the Shell, the
 display and every mounted volume.
+
+For automation, the [host-side remote-control tool](docs/user/remote-control.md)
+turns a Shell command into JSON output with an exit code and timeout, transfers
+files through WebDAV, and captures or controls the display with PNG feedback.
 
 ## Finding the machine by name
 
@@ -315,6 +320,10 @@ evidence, not proof.
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the build, its options,
 the test suites, continuous integration, the measurement method and the CPU
 profiler.
+
+The [project-priority matrix](docs/plans/PROJECT-PRIORITIES.md) records the current
+support, compatibility and release-safety priorities separately from the
+known-defect [backlog](docs/BACKLOG.md).
 
 ## Acknowledgements
 

@@ -19,8 +19,8 @@ struct NetdevBus;
 
 /*
  * How the auto-advancing data port is driven.  This is measured, not
- * configured: netdev_bus_probe_wide() writes through the wide window and reads
- * back through the narrow one, and only a match promotes the mode.
+ * configured: ne2000_probe_wide() checks both longword directions against the
+ * narrow port, and only a match promotes the mode.
  */
 #define NETDEV_DMODE_BYTE   0       /* 8-bit port, NE1000-style              */
 #define NETDEV_DMODE_WORD   1       /* 16-bit port at the ASIC data register */
@@ -43,7 +43,8 @@ struct NetdevBus
 {
     volatile UBYTE *nic;        /* register file, index 0 */
     volatile UBYTE *asic;       /* nic + 16 * stride, unless overridden */
-    volatile UBYTE *wide;       /* 32-bit mirrored data window, or NULL */
+    volatile UBYTE *wide;       /* 32-bit read data window, or NULL */
+    volatile UBYTE *wide_write; /* write window; defaults to wide */
 
     /*
      * The odd-register window, or NULL when the register file is contiguous.
@@ -95,6 +96,9 @@ extern const struct NetdevBusOps netdev_bus_generic;
 
 /* base is the board's register window, and stride is 1, 2 or 4. */
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide);
+
+/* Call after setup when the board has separate 32-bit read/write windows. */
+VOID netdev_bus_wide_write(NetdevBus *bus, APTR wide_write);
 
 /*
  * The fused drain.  netdev_bus_rdata_sum() moves exactly `len` bytes off the

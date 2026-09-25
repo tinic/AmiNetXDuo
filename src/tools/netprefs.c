@@ -11,6 +11,7 @@
 
 #include "tools.h"
 #include "netprefs_text.h"
+#include "netprefs_layout.h"
 #include "aminetxduo/version.h"
 
 #include <exec/libraries.h>
@@ -19,10 +20,17 @@
 #include <exec/tasks.h>
 #include <dos/dostags.h>
 #include <graphics/gfxbase.h>
+#include <graphics/rastport.h>
+#include <graphics/text.h>
 #include <intuition/intuition.h>
 #include <intuition/intuitionbase.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+#include <intuition/imageclass.h>
 #include <intuition/screens.h>
+#include <libraries/asl.h>
 #include <libraries/gadtools.h>
+#include <proto/asl.h>
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <proto/gadtools.h>
@@ -38,6 +46,7 @@ static const char version_tag[] __attribute__((used)) =
 struct IntuitionBase *IntuitionBase;
 struct GfxBase       *GfxBase;
 struct Library       *GadToolsBase;
+struct Library       *AslBase;
 
 #define NP_MAX_INTERFACES  32
 #define NP_PATH_LEN        192
@@ -55,6 +64,7 @@ enum
     GID_NAME,
     GID_ID,
     GID_DEVICE,
+    GID_DEVICE_BROWSE,
     GID_UNIT,
     GID_CARD,
     GID_HWADDRESS,
@@ -120,6 +130,9 @@ typedef struct NetPrefs
     struct Gadget *g_name;
     struct Gadget *g_id;
     struct Gadget *g_device;
+    struct Gadget *g_device_browse;
+    APTR           browse_frame;
+    struct DrawInfo *browse_draw_info;
     struct Gadget *g_unit;
     struct Gadget *g_card;
     struct Gadget *g_hwaddress;
@@ -156,6 +169,9 @@ typedef struct NetPrefs
     LONG           selected;
     ULONG          active_panel;
     LONG           live_state;
+    struct TextAttr *text_attr;     /* gadget font: the screen's or topaz 8 */
+    struct TextFont *font;          /* the same, open, for Text() */
+    NpLayout       layout;
 } NetPrefs;
 
 static NetPrefs np = { .selected = -1, .live_state = NP_LIVE_UNKNOWN };
@@ -170,24 +186,6 @@ static char np_status[128];
 static VOID show_panel(ULONG which);
 static VOID select_panel(ULONG which);
 static LONG live_state_of(const char *name);
-
-static const STRPTR panel_labels[] =
-{
-    (STRPTR)"General", (STRPTR)"IPv4", (STRPTR)"IPv6",
-    (STRPTR)"Device", (STRPTR)"Tuning", NULL
-};
-
-static const STRPTR ipv4_labels[] =
-{
-    (STRPTR)"Static", (STRPTR)"DHCP", (STRPTR)"Link-local",
-    (STRPTR)"Off", NULL
-};
-
-static const STRPTR ipv6_labels[] =
-{
-    (STRPTR)"Off", (STRPTR)"Link-local", (STRPTR)"Automatic",
-    (STRPTR)"Static", (STRPTR)"DHCPv6", NULL
-};
 
 static ULONG text_len(const char *s)
 {
@@ -298,6 +296,74 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     tags[0].ti_Tag = tag; tags[0].ti_Data = value;
     tags[1].ti_Tag = TAG_DONE; tags[1].ti_Data = 0;
     GT_SetGadgetAttrsA(g, np.window, NULL, tags);
+}
+
+/* Keep the editable DEVICE field.  The requester only supplies another way
+ * to fill it, and cancellation must not disturb unsaved edits. */
+static VOID browse_device(VOID)
+{
+    const char *current = string_value(np.g_device);
+    const char *file = (const char *)FilePart(current);
+    char drawer[AMI_CFG_PATH_LEN];
+    char selected[AMI_CFG_PATH_LEN];
+    struct TagItem tags[7];
+    struct FileRequester *req;
+    ULONG prefix = (ULONG)(file - current);
+
+    if (prefix >= sizeof(drawer))
+    {
+        requester("The current device path is too long for the requester.");
+        return;
+    }
+    if (prefix != 0)
+    {
+        CopyMem((APTR)current, drawer, prefix);
+        drawer[prefix] = '\0';
+    }
+    else
+        tool_copy_string(drawer, sizeof(drawer), "DEVS:Networks");
+
+    AslBase = OpenLibrary("asl.library", 37);
+    if (AslBase == NULL)
+    {
+        requester("asl.library is needed to browse for a device.");
+        return;
+    }
+    tags[0].ti_Tag = ASLFR_Window;         tags[0].ti_Data = (ULONG)np.window;
+    tags[1].ti_Tag = ASLFR_SleepWindow;    tags[1].ti_Data = TRUE;
+    tags[2].ti_Tag = ASLFR_TitleText;
+    tags[2].ti_Data = (ULONG)"Select a SANA-II device";
+    tags[3].ti_Tag = ASLFR_InitialDrawer;  tags[3].ti_Data = (ULONG)drawer;
+    tags[4].ti_Tag = ASLFR_InitialFile;    tags[4].ti_Data = (ULONG)file;
+    tags[5].ti_Tag = ASLFR_RejectIcons;    tags[5].ti_Data = TRUE;
+    tags[6].ti_Tag = TAG_DONE;             tags[6].ti_Data = 0;
+
+    req = (struct FileRequester *)AllocAslRequest(ASL_FileRequest, tags);
+    if (req == NULL)
+        requester("The file requester could not be opened.");
+    else
+    {
+        if (AslRequest(req, NULL) && req->fr_File != NULL &&
+            req->fr_File[0] != '\0')
+        {
+            const char *chosen_drawer = req->fr_Drawer != NULL
+                                      ? (const char *)req->fr_Drawer : "";
+            if (text_len(chosen_drawer) >= sizeof(selected) ||
+                text_len((const char *)req->fr_File) >= sizeof(selected))
+                requester("The selected device path is too long.");
+            else
+            {
+                tool_copy_string(selected, sizeof(selected), chosen_drawer);
+                if (!AddPart(selected, req->fr_File, sizeof(selected)))
+                    requester("The selected device path is too long.");
+                else
+                    set_attr(np.g_device, GTST_String, (ULONG)selected);
+            }
+        }
+        FreeAslRequest(req);
+    }
+    CloseLibrary(AslBase);
+    AslBase = NULL;
 }
 
 /*
@@ -1285,7 +1351,7 @@ static VOID remove_form(VOID)
     scan_interfaces();
     set_attr(np.g_interface, GTLV_Selected, (ULONG)~0UL);
     clear_form();
-    set_status("Removed. The definition remains beside the drawer as a .disabled*.info backup.");
+    set_status("Removed. A .disabled backup stays beside the drawer.");
 }
 
 static LONG live_state_of(const char *name)
@@ -1340,10 +1406,6 @@ static LONG live_state_of(const char *name)
 
 static VOID update_live_state(VOID)
 {
-    static const char *const status_text[] =
-    {
-        "New", "Stack off", "Not added", "Offline", "Online", "Unknown"
-    };
     struct Gadget *action;
     LONG state;
 
@@ -1352,7 +1414,7 @@ static VOID update_live_state(VOID)
     if (state == np.live_state) return;
 
     np.live_state = state;
-    set_attr(np.g_live_status, GTTX_Text, (ULONG)status_text[state]);
+    set_attr(np.g_live_status, GTTX_Text, (ULONG)np_live_labels[state]);
     action = state == NP_LIVE_ONLINE ? np.g_live_offline : np.g_live_online;
     if (action != np.g_live_action)
     {
@@ -1369,6 +1431,16 @@ static VOID update_live_state(VOID)
     RefreshGList(action, np.window, NULL, 1);
 }
 
+/* GadTools label placement for each NP_PLACE_*. */
+static const ULONG place_flags[] =
+{
+    [NP_PLACE_NONE]  = 0,
+    [NP_PLACE_LEFT]  = PLACETEXT_LEFT,
+    [NP_PLACE_RIGHT] = PLACETEXT_RIGHT,
+    [NP_PLACE_ABOVE] = PLACETEXT_ABOVE,
+    [NP_PLACE_IN]    = PLACETEXT_IN
+};
+
 static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
                                  UWORD id, WORD x, WORD y, WORD w, WORD h,
                                  const char *label, ULONG flags,
@@ -1378,7 +1450,7 @@ static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
     ng.ng_LeftEdge = x; ng.ng_TopEdge = y;
     ng.ng_Width = w; ng.ng_Height = h;
     ng.ng_GadgetText = (STRPTR)label;
-    ng.ng_TextAttr = np.screen->Font;
+    ng.ng_TextAttr = np.text_attr;
     ng.ng_GadgetID = id; ng.ng_Flags = flags;
     ng.ng_VisualInfo = np.visual; ng.ng_UserData = NULL;
     return CreateGadgetA(kind, previous, &ng, tags);
@@ -1402,6 +1474,11 @@ static VOID detach_panel(ULONG which)
     LONG i;
 
     if (np.window == NULL || which >= NP_PANEL_COUNT) return;
+    if (which == NP_PANEL_DEVICE && np.g_device_browse != NULL)
+    {
+        (VOID)RemoveGList(np.window, np.g_device_browse, 1);
+        np.g_device_browse->NextGadget = NULL;
+    }
     (VOID)RemoveGList(np.window, np.panel_gadgets[which],
                      np.panel_gadget_count[which]);
 
@@ -1414,14 +1491,54 @@ static VOID detach_panel(ULONG which)
     if (tail != NULL) tail->NextGadget = NULL;
 }
 
+/* A compact file glyph drawn with the screen's own text pen.  The OS 3.1
+ * machine has no button.gadget/BAG_POPFILE, so keep the picker self-contained
+ * and palette-aware rather than depending on a class file or a fixed bitmap. */
+static VOID draw_device_browse_icon(VOID)
+{
+    const NpBox *b = &np.layout.box[NP_L_DEVICE_BROWSE];
+    struct RastPort *rp;
+    BYTE old_fg, old_mode;
+    WORD x, y;
+
+    if (np.window == NULL || np.g_device_browse == NULL ||
+        np.browse_draw_info == NULL || np.active_panel != NP_PANEL_DEVICE)
+        return;
+
+    rp = np.window->RPort;
+    old_fg = rp->FgPen;
+    old_mode = rp->DrawMode;
+    x = (WORD)(b->x + (b->w - 12) / 2);
+    y = (WORD)(b->y + (b->h - 11) / 2);
+    SetAPen(rp, np.browse_draw_info->dri_Pens[TEXTPEN]);
+    SetDrMd(rp, JAM1);
+    Move(rp, x, y);
+    Draw(rp, x + 7, y);
+    Draw(rp, x + 11, y + 4);
+    Draw(rp, x + 11, y + 10);
+    Draw(rp, x, y + 10);
+    Draw(rp, x, y);
+    Move(rp, x + 7, y);
+    Draw(rp, x + 7, y + 4);
+    Draw(rp, x + 11, y + 4);
+    Move(rp, x + 2, y + 6);
+    Draw(rp, x + 9, y + 6);
+    Move(rp, x + 2, y + 8);
+    Draw(rp, x + 8, y + 8);
+    SetAPen(rp, (ULONG)(UBYTE)old_fg);
+    SetDrMd(rp, (ULONG)(UBYTE)old_mode);
+}
+
 /* GadTools has no page gadget.  The common controls and each page therefore
  * have separate gadget lists; show_panel() removes one list and attaches the
  * next.  The recessed panel and separator are window decoration and must be
  * restored after Intuition refreshes the window. */
 static VOID draw_layout(VOID)
 {
+    const NpLayout *lay = &np.layout;
     struct DrawInfo *dri;
     struct RastPort *rp;
+    struct TextFont *old_font;
     struct TagItem tags[3];
     BYTE old_fg, old_bg, old_mode;
 
@@ -1430,6 +1547,7 @@ static VOID draw_layout(VOID)
     old_fg = rp->FgPen;
     old_bg = rp->BgPen;
     old_mode = rp->DrawMode;
+    old_font = rp->Font;
     tags[0].ti_Tag = GT_VisualInfo;
     tags[0].ti_Data = (ULONG)np.visual;
     tags[1].ti_Tag = GTBB_Recessed;
@@ -1437,7 +1555,8 @@ static VOID draw_layout(VOID)
     tags[2].ti_Tag = TAG_DONE;
     tags[2].ti_Data = 0;
 
-    DrawBevelBoxA(rp, 166, 25, 456, 108, tags);
+    DrawBevelBoxA(rp, lay->bevel.x, lay->bevel.y, lay->bevel.w,
+                  lay->bevel.h, tags);
 
     /* A two-pixel shadow/shine pair is a proper recessed separator.  A
        two-pixel bevel box collapses to one visible edge on classic GadTools. */
@@ -1445,23 +1564,29 @@ static VOID draw_layout(VOID)
     if (dri != NULL)
     {
         SetAPen(rp, dri->dri_Pens[SHADOWPEN]);
-        Move(rp, 156, 5);
-        Draw(rp, 156, 152);
+        Move(rp, lay->sep_x, lay->sep_top);
+        Draw(rp, lay->sep_x, lay->sep_bottom);
         SetAPen(rp, dri->dri_Pens[SHINEPEN]);
-        Move(rp, 157, 5);
-        Draw(rp, 157, 152);
+        Move(rp, lay->sep_x + 1, lay->sep_top);
+        Draw(rp, lay->sep_x + 1, lay->sep_bottom);
         if (np.active_panel == NP_PANEL_TUNING)
         {
+            const char *note = np_items[NP_L_NOTE].label;
+
             SetAPen(rp, dri->dri_Pens[TEXTPEN]);
             SetDrMd(rp, JAM1);
-            Move(rp, 430, 106);
-            Text(rp, (CONST_STRPTR)"0 = automatic", 13);
+            SetFont(rp, np.font);
+            Move(rp, lay->box[NP_L_NOTE].x,
+                 lay->box[NP_L_NOTE].y + np.font->tf_Baseline);
+            Text(rp, (CONST_STRPTR)note, text_len(note));
         }
         FreeScreenDrawInfo(np.screen, dri);
     }
     SetAPen(rp, (ULONG)(UBYTE)old_fg);
     SetBPen(rp, (ULONG)(UBYTE)old_bg);
     SetDrMd(rp, (ULONG)(UBYTE)old_mode);
+    SetFont(rp, old_font);
+    draw_device_browse_icon();
 }
 
 static VOID show_panel(ULONG which)
@@ -1475,13 +1600,21 @@ static VOID show_panel(ULONG which)
 
     rp = np.window->RPort;
     SetAPen(rp, rp->BgPen);
-    RectFill(rp, 164, 23, 623, 134);
+    RectFill(rp, np.layout.bevel.x, np.layout.bevel.y,
+             np.layout.bevel.x + np.layout.bevel.w - 1,
+             np.layout.bevel.y + np.layout.bevel.h - 1);
     np.active_panel = which;
     draw_layout();
     (VOID)AddGList(np.window, np.panel_gadgets[which], (UWORD)-1,
                    np.panel_gadget_count[which], NULL);
     RefreshGList(np.panel_gadgets[which], np.window, NULL,
                  np.panel_gadget_count[which]);
+    if (which == NP_PANEL_DEVICE && np.g_device_browse != NULL)
+    {
+        (VOID)AddGList(np.window, np.g_device_browse, (UWORD)-1, 1, NULL);
+        RefreshGList(np.g_device_browse, np.window, NULL, 1);
+        draw_device_browse_icon();
+    }
 }
 
 static VOID select_panel(ULONG which)
@@ -1491,8 +1624,82 @@ static VOID select_panel(ULONG which)
     show_panel(which);
 }
 
+static struct TextAttr topaz8 =
+{
+    (STRPTR)"topaz.font", 8, FS_NORMAL, FPF_ROMFONT
+};
+
+static int measure_text(void *ctx, const char *text, int len)
+{
+    return (int)TextLength((struct RastPort *)ctx, (CONST_STRPTR)text,
+                           (ULONG)len);
+}
+
+/* Lays the window out in ta.  On success the font stays open in np.font. */
+static BOOL layout_in(struct TextAttr *ta)
+{
+    struct Screen *s = np.screen;
+    struct TextFont *font;
+    struct RastPort rp;
+    NpFont metrics;
+    int max_w, max_h;
+
+    font = OpenFont(ta);
+    if (font == NULL) return FALSE;
+    InitRastPort(&rp);
+    SetFont(&rp, font);
+    metrics.height = font->tf_YSize;
+    metrics.baseline = font->tf_Baseline;
+    metrics.measure = measure_text;
+    metrics.ctx = &rp;
+
+    /* The title bar is in the screen font whatever the gadgets use. */
+    max_w = s->Width - s->WBorLeft - s->WBorRight;
+    max_h = s->Height - s->WBorTop - s->Font->ta_YSize - 1 - s->WBorBottom;
+    if (!np_layout(&metrics, max_w, max_h, &np.layout))
+    {
+        CloseFont(font);
+        return FALSE;
+    }
+    np.font = font;
+    np.text_attr = ta;
+    return TRUE;
+}
+
+/* A ROM BOOPSI class supplies the button frame on Kickstart 2+. */
+static VOID make_device_browse(VOID)
+{
+    const NpBox *b = &np.layout.box[NP_L_DEVICE_BROWSE];
+    struct TagItem frame[4], button[9];
+
+    np.browse_draw_info = GetScreenDrawInfo(np.screen);
+    if (np.browse_draw_info == NULL) return;
+
+    frame[0].ti_Tag = IA_FrameType; frame[0].ti_Data = FRAME_BUTTON;
+    frame[1].ti_Tag = IA_Width;     frame[1].ti_Data = (ULONG)b->w;
+    frame[2].ti_Tag = IA_Height;    frame[2].ti_Data = (ULONG)b->h;
+    frame[3].ti_Tag = TAG_DONE;     frame[3].ti_Data = 0;
+    np.browse_frame = NewObjectA(NULL, FRAMEICLASS, frame);
+    if (np.browse_frame == NULL) return;
+
+    button[0].ti_Tag = GA_Left;       button[0].ti_Data = (ULONG)b->x;
+    button[1].ti_Tag = GA_Top;        button[1].ti_Data = (ULONG)b->y;
+    button[2].ti_Tag = GA_Width;      button[2].ti_Data = (ULONG)b->w;
+    button[3].ti_Tag = GA_Height;     button[3].ti_Data = (ULONG)b->h;
+    button[4].ti_Tag = GA_ID;         button[4].ti_Data = GID_DEVICE_BROWSE;
+    button[5].ti_Tag = GA_RelVerify;  button[5].ti_Data = TRUE;
+    button[6].ti_Tag = GA_Image;
+    button[6].ti_Data = (ULONG)np.browse_frame;
+    button[7].ti_Tag = GA_DrawInfo;
+    button[7].ti_Data = (ULONG)np.browse_draw_info;
+    button[8].ti_Tag = TAG_DONE;     button[8].ti_Data = 0;
+    np.g_device_browse = (struct Gadget *)NewObjectA(NULL, FRBUTTONCLASS,
+                                                      button);
+}
+
 static BOOL make_window(VOID)
 {
+    const NpLayout *lay = &np.layout;
     struct Gadget *context, *g;
     struct TagItem tags[5];
     struct TagItem win[12];
@@ -1501,8 +1708,10 @@ static BOOL make_window(VOID)
 
     np.screen = LockPubScreen(NULL);
     if (np.screen == NULL) return FALSE;
-    /* Fit the stock 640x200 NTSC Workbench as well as PAL and taller modes. */
-    if (np.screen->Width < 640 || np.screen->Height < 200) return FALSE;
+    /* A font too large for the screen falls back to topaz 8, which fits the
+       stock 640x200 NTSC Workbench. */
+    if (!layout_in(np.screen->Font) && !layout_in(&topaz8)) return FALSE;
+    make_device_browse();
     np.visual = GetVisualInfoA(np.screen, NULL);
     if (np.visual == NULL) return FALSE;
     context = CreateContext(&np.gadgets);
@@ -1511,135 +1720,123 @@ static BOOL make_window(VOID)
 
 #define TAG1(a,b) do { tags[0].ti_Tag=(a); tags[0].ti_Data=(ULONG)(b); \
     tags[1].ti_Tag=TAG_DONE; tags[1].ti_Data=0; } while (0)
-#define ADD(var,kind,id,x,y,w,h,label,flags) do { \
-    (var)=add_gadget((kind),g,(id),(x),(y),(w),(h),(label),(flags),tags); \
+#define CHECK(b) do { tags[0].ti_Tag=GTCB_Checked; tags[0].ti_Data=(b); \
+    tags[1].ti_Tag=GTCB_Scaled; tags[1].ti_Data=TRUE; \
+    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0; } while (0)
+#define TEXTBOX(t,j) do { tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)(t); \
+    tags[1].ti_Tag=GTTX_Border; tags[1].ti_Data=TRUE; \
+    tags[2].ti_Tag=GTTX_Clipped; tags[2].ti_Data=TRUE; \
+    tags[3].ti_Tag=GTTX_Justification; tags[3].ti_Data=(j); \
+    tags[4].ti_Tag=TAG_DONE; tags[4].ti_Data=0; } while (0)
+#define CYCLE(labels,active) do { \
+    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)(labels); \
+    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=(active); \
+    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0; } while (0)
+/* Geometry and label both come from the layout's item table. */
+#define ADD(var,kind,id,item,label) do { \
+    const NpBox *b_ = &lay->box[item]; \
+    (var)=add_gadget((kind),g,(id),(WORD)b_->x,(WORD)b_->y,(WORD)b_->w, \
+                     (WORD)b_->h,(label),place_flags[np_items[item].place], \
+                     tags); \
     if ((var)==NULL) { return FALSE; } \
     g=(var); \
 } while (0)
+#define ITEM(var,kind,id,item) ADD(var,kind,id,item,np_items[item].label)
 
     tags[0].ti_Tag=GTLV_Labels; tags[0].ti_Data=(ULONG)&np.interface_list;
     tags[1].ti_Tag=GTLV_Selected;
     tags[1].ti_Data=np.count != 0 ? 0 : (ULONG)~0UL;
     tags[2].ti_Tag=GTLV_ScrollWidth; tags[2].ti_Data=16;
     tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
-    ADD(np.g_interface,LISTVIEW_KIND,GID_INTERFACE,8,20,142,112,
-        "Interfaces",PLACETEXT_ABOVE);
+    ITEM(np.g_interface,LISTVIEW_KIND,GID_INTERFACE,NP_L_INTERFACE);
     TAG1(TAG_DONE, 0);
-    ADD(g,BUTTON_KIND,GID_NEW,8,137,66,15,"New",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_REMOVE,82,137,68,15,"Remove",PLACETEXT_IN);
-    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)panel_labels;
-    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=NP_PANEL_GENERAL;
-    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(np.g_panel,CYCLE_KIND,GID_PANEL,236,5,170,15,"Settings",PLACETEXT_LEFT);
-    tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Loading definitions...";
-    tags[1].ti_Tag=GTTX_Border; tags[1].ti_Data=TRUE;
-    tags[2].ti_Tag=GTTX_CopyText; tags[2].ti_Data=FALSE;
-    tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
-    ADD(np.g_status,TEXT_KIND,GID_STATUS,166,137,456,15,NULL,0);
+    ITEM(g,BUTTON_KIND,GID_NEW,NP_L_NEW);
+    ITEM(g,BUTTON_KIND,GID_REMOVE,NP_L_REMOVE);
+    CYCLE(np_panel_labels, NP_PANEL_GENERAL);
+    ITEM(np.g_panel,CYCLE_KIND,GID_PANEL,NP_L_PANEL);
+    TEXTBOX("Loading definitions...", GTJ_LEFT);
+    ITEM(np.g_status,TEXT_KIND,GID_STATUS,NP_L_STATUS);
     TAG1(TAG_DONE, 0);
-    ADD(g,BUTTON_KIND,GID_SAVE,8,157,66,17,"Save",PLACETEXT_IN);
-    ADD(g,BUTTON_KIND,GID_APPLY,82,157,116,17,"Save & Start",PLACETEXT_IN);
-    tags[0].ti_Tag=GTTX_Text; tags[0].ti_Data=(ULONG)"Unknown";
-    tags[1].ti_Tag=GTTX_Border; tags[1].ti_Data=TRUE;
-    tags[2].ti_Tag=GTTX_CopyText; tags[2].ti_Data=FALSE;
-    tags[3].ti_Tag=GTTX_Justification; tags[3].ti_Data=GTJ_CENTER;
-    tags[4].ti_Tag=TAG_DONE; tags[4].ti_Data=0;
-    ADD(np.g_live_status,TEXT_KIND,0,206,158,144,15,NULL,0);
+    ITEM(g,BUTTON_KIND,GID_SAVE,NP_L_SAVE);
+    ITEM(g,BUTTON_KIND,GID_APPLY,NP_L_APPLY);
+    TEXTBOX(np_live_labels[NP_LIVE_UNAVAILABLE], GTJ_CENTER);
+    ITEM(np.g_live_status,TEXT_KIND,0,NP_L_LIVE_STATUS);
     TAG1(TAG_DONE, 0);
-    ADD(g,BUTTON_KIND,GID_CLOSE,552,157,70,17,"Close",PLACETEXT_IN);
+    ITEM(g,BUTTON_KIND,GID_CLOSE,NP_L_CLOSE);
 
     /* General page. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_GENERAL]);
     if (context == NULL) return FALSE;
     g = context;
     TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
-    ADD(np.g_name,STRING_KIND,GID_NAME,250,37,350,15,"Name",PLACETEXT_LEFT);
+    ITEM(np.g_name,STRING_KIND,GID_NAME,NP_L_NAME);
     TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
-    ADD(np.g_id,STRING_KIND,GID_ID,250,59,350,15,"ID",PLACETEXT_LEFT);
+    ITEM(np.g_id,STRING_KIND,GID_ID,NP_L_ID);
     TAG1(GTIN_MaxChars, 4);
-    ADD(np.g_priority,INTEGER_KIND,GID_PRIORITY,250,81,70,15,
-        "Priority",PLACETEXT_LEFT);
-    TAG1(GTCB_Checked, TRUE);
-    ADD(np.g_state,CHECKBOX_KIND,GID_STATE,350,83,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
-        "Start online",PLACETEXT_RIGHT);
-    TAG1(GTCB_Checked, FALSE);
-    ADD(np.g_boot,CHECKBOX_KIND,GID_BOOT,500,83,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
-        "At boot",PLACETEXT_RIGHT);
-    ADD(np.g_mdns,CHECKBOX_KIND,GID_MDNS,250,107,CHECKBOX_WIDTH,CHECKBOX_HEIGHT,
-        "mDNS",PLACETEXT_RIGHT);
+    ITEM(np.g_priority,INTEGER_KIND,GID_PRIORITY,NP_L_PRIORITY);
+    CHECK(TRUE);
+    ITEM(np.g_state,CHECKBOX_KIND,GID_STATE,NP_L_STATE);
+    CHECK(FALSE);
+    ITEM(np.g_boot,CHECKBOX_KIND,GID_BOOT,NP_L_BOOT);
+    ITEM(np.g_mdns,CHECKBOX_KIND,GID_MDNS,NP_L_MDNS);
 
     /* IPv4 page. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_IPV4]);
     if (context == NULL) return FALSE;
     g = context;
-    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv4_labels;
-    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IPTYPE_DHCP;
-    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(np.g_ipv4,CYCLE_KIND,GID_IPV4,250,37,180,15,"Mode",PLACETEXT_LEFT);
+    CYCLE(np_ipv4_labels, AMI_IPTYPE_DHCP);
+    ITEM(np.g_ipv4,CYCLE_KIND,GID_IPV4,NP_L_IPV4);
     TAG1(GTST_MaxChars, 15);
-    ADD(np.g_address,STRING_KIND,GID_ADDRESS,250,59,350,15,"Address",PLACETEXT_LEFT);
+    ITEM(np.g_address,STRING_KIND,GID_ADDRESS,NP_L_ADDRESS);
     TAG1(GTST_MaxChars, 15);
-    ADD(np.g_netmask,STRING_KIND,GID_NETMASK,250,81,350,15,"Netmask",PLACETEXT_LEFT);
+    ITEM(np.g_netmask,STRING_KIND,GID_NETMASK,NP_L_NETMASK);
     TAG1(GTST_MaxChars, 15);
-    ADD(np.g_gateway,STRING_KIND,GID_GATEWAY,250,103,350,15,"Gateway",PLACETEXT_LEFT);
+    ITEM(np.g_gateway,STRING_KIND,GID_GATEWAY,NP_L_GATEWAY);
 
     /* IPv6 page. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_IPV6]);
     if (context == NULL) return FALSE;
     g = context;
-    tags[0].ti_Tag=GTCY_Labels; tags[0].ti_Data=(ULONG)ipv6_labels;
-    tags[1].ti_Tag=GTCY_Active; tags[1].ti_Data=AMI_IP6TYPE_AUTO;
-    tags[2].ti_Tag=TAG_DONE; tags[2].ti_Data=0;
-    ADD(np.g_ipv6,CYCLE_KIND,GID_IPV6,250,37,180,15,"Mode",PLACETEXT_LEFT);
+    CYCLE(np_ipv6_labels, AMI_IP6TYPE_AUTO);
+    ITEM(np.g_ipv6,CYCLE_KIND,GID_IPV6,NP_L_IPV6);
     TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN + 3);
-    ADD(np.g_address6[0],STRING_KIND,GID_ADDRESS6_1,250,59,350,15,
-        "Address 1",PLACETEXT_LEFT);
+    ITEM(np.g_address6[0],STRING_KIND,GID_ADDRESS6_1,NP_L_ADDRESS6_1);
     TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN + 3);
-    ADD(np.g_address6[1],STRING_KIND,GID_ADDRESS6_2,250,81,350,15,
-        "Address 2",PLACETEXT_LEFT);
+    ITEM(np.g_address6[1],STRING_KIND,GID_ADDRESS6_2,NP_L_ADDRESS6_2);
     TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN - 1);
-    ADD(np.g_gateway6,STRING_KIND,GID_GATEWAY6,250,103,350,15,
-        "Gateway",PLACETEXT_LEFT);
+    ITEM(np.g_gateway6,STRING_KIND,GID_GATEWAY6,NP_L_GATEWAY6);
 
     /* Device page. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_DEVICE]);
     if (context == NULL) return FALSE;
     g = context;
     TAG1(GTST_MaxChars, AMI_CFG_PATH_LEN - 1);
-    ADD(np.g_device,STRING_KIND,GID_DEVICE,250,37,350,15,"Device",PLACETEXT_LEFT);
+    ITEM(np.g_device,STRING_KIND,GID_DEVICE,NP_L_DEVICE);
     TAG1(GTIN_MaxChars, 3);
-    ADD(np.g_unit,INTEGER_KIND,GID_UNIT,250,59,60,15,"Unit",PLACETEXT_LEFT);
+    ITEM(np.g_unit,INTEGER_KIND,GID_UNIT,NP_L_UNIT);
     TAG1(GTST_MaxChars, AMI_CFG_NAME_LEN - 1);
-    ADD(np.g_card,STRING_KIND,GID_CARD,390,59,210,15,"Card",PLACETEXT_LEFT);
+    ITEM(np.g_card,STRING_KIND,GID_CARD,NP_L_CARD);
     TAG1(GTST_MaxChars, 17);
-    ADD(np.g_hwaddress,STRING_KIND,GID_HWADDRESS,250,81,350,15,
-        "MAC",PLACETEXT_LEFT);
-    TAG1(GTCB_Checked, FALSE);
-    ADD(np.g_down_offline,CHECKBOX_KIND,GID_DOWN_OFFLINE,178,107,
-        CHECKBOX_WIDTH,CHECKBOX_HEIGHT,"Offline on down",PLACETEXT_RIGHT);
-    ADD(np.g_init_delay,CHECKBOX_KIND,GID_INIT_DELAY,342,107,
-        CHECKBOX_WIDTH,CHECKBOX_HEIGHT,"Init delay",PLACETEXT_RIGHT);
-    ADD(np.g_promiscuous,CHECKBOX_KIND,GID_PROMISCUOUS,478,107,
-        CHECKBOX_WIDTH,CHECKBOX_HEIGHT,"Promiscuous",PLACETEXT_RIGHT);
+    ITEM(np.g_hwaddress,STRING_KIND,GID_HWADDRESS,NP_L_HWADDRESS);
+    CHECK(FALSE);
+    ITEM(np.g_down_offline,CHECKBOX_KIND,GID_DOWN_OFFLINE,NP_L_DOWN_OFFLINE);
+    ITEM(np.g_init_delay,CHECKBOX_KIND,GID_INIT_DELAY,NP_L_INIT_DELAY);
+    ITEM(np.g_promiscuous,CHECKBOX_KIND,GID_PROMISCUOUS,NP_L_PROMISCUOUS);
 
     /* Tuning page. Zero means automatic for every value. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_TUNING]);
     if (context == NULL) return FALSE;
     g = context;
     TAG1(GTIN_MaxChars, 6);
-    ADD(np.g_mtu,INTEGER_KIND,GID_MTU,250,37,90,15,"MTU",PLACETEXT_LEFT);
+    ITEM(np.g_mtu,INTEGER_KIND,GID_MTU,NP_L_MTU);
     TAG1(GTIN_MaxChars, 10);
-    ADD(np.g_rxbuffer,INTEGER_KIND,GID_RXBUFFER,500,37,100,15,
-        "RX buffer",PLACETEXT_LEFT);
+    ITEM(np.g_rxbuffer,INTEGER_KIND,GID_RXBUFFER,NP_L_RXBUFFER);
     TAG1(GTIN_MaxChars, 3);
-    ADD(np.g_iprequests,INTEGER_KIND,GID_IPREQUESTS,250,66,90,15,
-        "IP reads",PLACETEXT_LEFT);
+    ITEM(np.g_iprequests,INTEGER_KIND,GID_IPREQUESTS,NP_L_IPREQUESTS);
     TAG1(GTIN_MaxChars, 3);
-    ADD(np.g_arprequests,INTEGER_KIND,GID_ARPREQUESTS,500,66,100,15,
-        "ARP reads",PLACETEXT_LEFT);
+    ITEM(np.g_arprequests,INTEGER_KIND,GID_ARPREQUESTS,NP_L_ARPREQUESTS);
     TAG1(GTIN_MaxChars, 3);
-    ADD(np.g_writerequests,INTEGER_KIND,GID_WRITEREQUESTS,250,95,90,15,
-        "Writes",PLACETEXT_LEFT);
+    ITEM(np.g_writerequests,INTEGER_KIND,GID_WRITEREQUESTS,NP_L_WRITEREQUESTS);
 
     for (i = 0; i < NP_PANEL_COUNT; i++)
         np.panel_gadget_count[i] = gadget_count(np.panel_gadgets[i]);
@@ -1651,24 +1848,30 @@ static BOOL make_window(VOID)
     if (context == NULL) return FALSE;
     g = context;
     TAG1(GA_Disabled, TRUE);
-    ADD(np.g_live_online,BUTTON_KIND,GID_LIVE_ACTION,358,157,90,17,
-        "Online",PLACETEXT_IN);
+    ADD(np.g_live_online,BUTTON_KIND,GID_LIVE_ACTION,NP_L_LIVE_ACTION,
+        np_action_labels[0]);
     context = CreateContext(&np.live_offline_gadgets);
     if (context == NULL) return FALSE;
     g = context;
     TAG1(GA_Disabled, TRUE);
-    ADD(np.g_live_offline,BUTTON_KIND,GID_LIVE_ACTION,358,157,90,17,
-        "Offline",PLACETEXT_IN);
+    ADD(np.g_live_offline,BUTTON_KIND,GID_LIVE_ACTION,NP_L_LIVE_ACTION,
+        np_action_labels[1]);
 
+#undef ITEM
 #undef ADD
+#undef CYCLE
+#undef TEXTBOX
+#undef CHECK
 #undef TAG1
 
-    width = 640;
-    height = 190;
+    /* Inner size, so a taller title bar does not eat the layout. */
+    width = (WORD)(lay->inner_w + np.screen->WBorLeft + np.screen->WBorRight);
+    height = (WORD)(lay->inner_h + np.screen->WBorTop +
+                    np.screen->Font->ta_YSize + 1 + np.screen->WBorBottom);
     win[0].ti_Tag=WA_Left; win[0].ti_Data=(np.screen->Width-width)/2;
     win[1].ti_Tag=WA_Top; win[1].ti_Data=(np.screen->Height-height)/2;
-    win[2].ti_Tag=WA_Width; win[2].ti_Data=width;
-    win[3].ti_Tag=WA_Height; win[3].ti_Data=height;
+    win[2].ti_Tag=WA_InnerWidth; win[2].ti_Data=lay->inner_w;
+    win[3].ti_Tag=WA_InnerHeight; win[3].ti_Data=lay->inner_h;
     win[4].ti_Tag=WA_Title; win[4].ti_Data=(ULONG)"AmiNetXDuo Network Preferences";
     win[5].ti_Tag=WA_IDCMP; win[5].ti_Data=IDCMP_CLOSEWINDOW|IDCMP_REFRESHWINDOW|
         BUTTONIDCMP|CHECKBOXIDCMP|CYCLEIDCMP|STRINGIDCMP|LISTVIEWIDCMP|
@@ -1712,9 +1915,19 @@ static VOID close_ui(VOID)
     np.live_online_gadgets = NULL;
     if (np.live_offline_gadgets != NULL) FreeGadgets(np.live_offline_gadgets);
     np.live_offline_gadgets = NULL;
+    if (np.g_device_browse != NULL) DisposeObject(np.g_device_browse);
+    np.g_device_browse = NULL;
+    if (np.browse_frame != NULL) DisposeObject(np.browse_frame);
+    np.browse_frame = NULL;
+    if (np.browse_draw_info != NULL)
+        FreeScreenDrawInfo(np.screen, np.browse_draw_info);
+    np.browse_draw_info = NULL;
     np.g_live_action = NULL;
     if (np.visual != NULL) FreeVisualInfo(np.visual);
     np.visual = NULL;
+    if (np.font != NULL) CloseFont(np.font);
+    np.font = NULL;
+    np.text_attr = NULL;
     if (np.screen != NULL) UnlockPubScreen(NULL, np.screen);
     np.screen = NULL;
 }
@@ -1775,6 +1988,11 @@ static VOID event_loop(VOID)
                         break;
                     case GID_IPV6:
                         set_static6_fields((BOOL)(code == AMI_IP6TYPE_STATIC));
+                        break;
+                    case GID_DEVICE_BROWSE:
+                        draw_device_browse_icon();
+                        browse_device();
+                        draw_device_browse_icon();
                         break;
                     case GID_SAVE: (VOID)save_form(FALSE); break;
                     case GID_APPLY: (VOID)save_form(TRUE); break;

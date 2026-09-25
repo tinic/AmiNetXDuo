@@ -985,15 +985,15 @@ class WsConn(Conn):
         return text, control
 
 
-def ws_wait_free(seconds=20.0):
-    """Wait for the terminal to come back, and say how long it took.
+def ws_wait_free(seconds=20.0, path=TERM):
+    """Wait for a socket to reattach to its Shell slot, and say how long.
 
     Slept-for rather than measured is how a release that takes twenty seconds
     passes as one that takes two: the number is the point, so it is returned
     and printed rather than hidden in a sleep."""
     began = time.time()
     while time.time() - began < seconds:
-        c = WsConn()
+        c = WsConn(path=path)
         status = c.status
         c.close()
         if status == 101:
@@ -1096,6 +1096,13 @@ def test_ws_page():
         check(a[1].get("cache-control") == "no-cache",
               "and Cache-Control is still no-cache (got %r)"
               % a[1].get("cache-control"))
+
+    selected = once(req("GET", TERM + "?session=1"))
+    check(selected is not None and selected[0] == 200,
+          "GET /shell?session=1 serves the same browser page")
+    invalid = once(req("GET", TERM + "?session=2"))
+    check(invalid is not None and invalid[0] == 400,
+          "an invalid session number is refused")
 
     a = once(req("PUT", TERM, body="x"))
     check(a is not None and a[0] == 405,
@@ -1316,7 +1323,7 @@ def test_ws_shell():
     check(c.closed(), "and the server lets go of the socket")
     c.close()
     check(ws_wait_free() is not None,
-          "and the Shell is free again after a clean close")
+          "and the Shell slot accepts a reconnect after a clean close")
 
     commands = b"".join(
         ("Echo PIPE%03d\n" % i).encode("ascii") for i in range(48))
@@ -1328,7 +1335,7 @@ def test_ws_shell():
           % said[-120:])
     c.close()
     check(ws_wait_free() is not None,
-          "and the pipelined session gives the Shell back")
+          "and the pipelined session frees its socket")
 
 
 def test_ws_child_reads():
@@ -1360,10 +1367,6 @@ def test_ws_child_reads():
         c.close()
         return
 
-    banner, _ = c.gather(WS_WAIT, want=">")
-    check(b">" in banner,
-          "the Shell prints a prompt (got %r)" % banner[-80:])
-
     c.send(ws_frame(0x2, 'Ask "CHILDREAD? "\n'))
     said, _ = c.gather(WS_WAIT, want="CHILDREAD?")
     check(b"CHILDREAD?" in said,
@@ -1387,30 +1390,74 @@ def test_ws_child_reads():
 
     c.close()
     check(ws_wait_free() is not None,
-          "and the session is given back cleanly")
+          "and the session accepts a reconnect cleanly")
 
 
-def test_ws_one_session():
-    """One Shell at a time, and the second asker is told so rather than
-    getting a second Shell or a hung socket."""
-    print("one session at a time")
+def test_ws_slots():
+    """Two isolated Shells, one socket owner each, and state across reconnect."""
+    print("two reconnectable Shell slots")
 
     first = WsConn()
-    check(first.status == 101, "the first upgrade succeeds")
-    first.gather(WS_WAIT, want=">")
+    check(first.status == 101, "slot 0 upgrades")
 
-    second = WsConn()
-    check(second.status == 503,
-          "the second is 503, not %s" % second.status)
-    second.close()
+    other = WsConn(path="/shell?session=1")
+    check(other.status == 101, "slot 1 upgrades while slot 0 is held")
+
+    busy0 = WsConn()
+    check(busy0.status == 503, "another slot 0 owner is refused")
+    busy0.close()
+    busy1 = WsConn(path="/shell?session=1")
+    check(busy1.status == 503, "another slot 1 owner is refused")
+    busy1.close()
+
+    first.send(ws_frame(0x2, "Set AXDSLOT SLOT-ZERO\nEcho SLOT0SET\n"))
+    said, _ = first.gather(WS_WAIT, want="SLOT0SET")
+    check(b"SLOT0SET" in said, "slot 0 finished setting its variable")
+    other.send(ws_frame(0x2, "Set AXDSLOT SLOT-ONE\nEcho SLOT1SET\n"))
+    said, _ = other.gather(WS_WAIT, want="SLOT1SET")
+    check(b"SLOT1SET" in said, "slot 1 finished setting its variable")
 
     first.close()
+    other.close()
 
-    took = ws_wait_free()
-    check(took is not None,
-          "closing the first frees it again, within %.0fs" % WS_WAIT)
-    if took is not None:
-        print("  (the Shell came back in %.1fs)" % took)
+    check(ws_wait_free(path="/shell?session=1") is not None,
+          "slot 1 accepts a reconnect")
+    first = WsConn()
+    other = WsConn(path="/shell?session=1")
+    check(first.status == 101 and other.status == 101,
+          "both slots can reconnect simultaneously")
+    if first.status == 101:
+        first.send(ws_frame(0x2, "Echo $AXDSLOT\n"))
+        said, _ = first.gather(WS_WAIT, want="SLOT-ZERO")
+        check(b"SLOT-ZERO" in said, "slot 0 kept its Shell variable")
+    if other.status == 101:
+        other.send(ws_frame(0x2, "Echo $AXDSLOT\n"))
+        said, _ = other.gather(WS_WAIT, want="SLOT-ONE")
+        check(b"SLOT-ONE" in said, "slot 1 kept its separate Shell variable")
+
+    takeover = WsConn(path="/shell?session=1&take=1")
+    check(takeover.status == 503,
+          "taking slot 1 releases only its current socket for a retry")
+    takeover.close()
+    if first.status == 101:
+        first.send(ws_frame(0x2, "Echo SLOT0SURVIVED\n"))
+        said, _ = first.gather(WS_WAIT, want="SLOT0SURVIVED")
+        check(b"SLOT0SURVIVED" in said,
+              "taking slot 1 leaves slot 0 connected and responsive")
+    other.close()
+    other = WsConn(path="/shell?session=1")
+    check(other.status == 101, "slot 1 accepts the takeover retry")
+    if other.status == 101:
+        other.send(ws_frame(0x2, "Echo $AXDSLOT\n"))
+        said, _ = other.gather(WS_WAIT, want="SLOT-ONE")
+        check(b"SLOT-ONE" in said,
+              "the taken-over slot 1 keeps its Shell state")
+    first.close()
+    other.close()
+
+    invalid = WsConn(path="/shell?session=2")
+    check(invalid.status == 400, "out-of-range slot is 400")
+    invalid.close()
 
 
 def test_ws_unmasked():
@@ -1420,7 +1467,6 @@ def test_ws_unmasked():
 
     c = WsConn()
     check(c.status == 101, "upgraded")
-    c.gather(WS_WAIT, want=">")
 
     c.send(ws_frame(0x2, "Echo NEVER\n", masked=False))
 
@@ -1511,7 +1557,7 @@ def main():
             test_term_etag()
             test_ws_handshake()
             test_ws_refusals()
-            test_ws_one_session()
+            test_ws_slots()
             test_ws_unmasked()
             test_term_no_gz()
             print("\n%d checks, %d failure(s)" % (checks, len(failures)))
@@ -1543,7 +1589,7 @@ def main():
             test_term_etag()
             test_ws_handshake()
             test_ws_refusals()
-            test_ws_one_session()
+            test_ws_slots()
             test_ws_unmasked()
             test_term_no_gz()
         if WANT_FILES:

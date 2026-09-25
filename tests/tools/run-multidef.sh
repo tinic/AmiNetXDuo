@@ -247,7 +247,12 @@ run_compat_round() {
     local report="$hd/tools.txt"
     local rc bad=0 kw
 
-    local COMPAT_KEYWORDS="iprequests writerequests copymode multicast"
+    # IPREQUESTS and WRITEREQUESTS were on this list until af493eb5 made
+    # them set the queue depths.  A keyword that is acted on must not be
+    # filed under "read and does nothing", so they moved to LIVE_KEYWORDS
+    # below and the assertion turned around.
+    local COMPAT_KEYWORDS="copymode multicast"
+    local LIVE_KEYWORDS="iprequests writerequests"
 
     local LECTURE='is read and does nothing|harmless and can stay|iprequests|writerequests|copymode|multicast'
 
@@ -360,6 +365,15 @@ EOF
         else
             echo "  FAIL CheckNetConfig no longer reports $kw"
             bad=$((bad + 1))
+        fi
+    done
+
+    for kw in $LIVE_KEYWORDS; do
+        if cblock "SYS:CheckNetConfig" | grep -qi "$kw is read and does nothing"; then
+            echo "  FAIL CheckNetConfig files $kw as inert, and it is acted on"
+            bad=$((bad + 1))
+        else
+            echo "  ok   CheckNetConfig does not call $kw inert"
         fi
     done
 

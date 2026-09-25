@@ -4,6 +4,12 @@
 #
 #   tests/tools/run-wbgrab.sh [-b BUILDDIR] [-m MODEL] [-t SECONDS]
 #                             [-o OUTDIR] [-s SEQUENCE]... [-d DEPTH]
+#                             [-f FONT/SIZE]
+#
+# -f sets the Workbench screen font through ENVARC:Sys/font.prefs, e.g.
+# helvetica.font/13.  -s netprefs grabs NetPrefs on each of its pages as
+# netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
+# window's box for cropping.
 #
 # SPDX-License-Identifier: MIT
 
@@ -17,9 +23,10 @@ MODEL="${AMINETXDUO_EMU_MODEL:-A1200}"
 TIMEOUT=180
 OUTDIR="$ROOT/build/wbgrab-out"
 DEPTH=""
+FONT=""
 SEQUENCES=()
 
-while getopts "b:m:t:o:s:d:" opt; do
+while getopts "b:m:t:o:s:d:f:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
@@ -27,7 +34,8 @@ while getopts "b:m:t:o:s:d:" opt; do
         o) OUTDIR="$OPTARG" ;;
         d) DEPTH="$OPTARG" ;;
         s) SEQUENCES+=("$OPTARG") ;;
-        *) sed -n '3,6p' "$0" >&2; exit 2 ;;
+        f) FONT="$OPTARG" ;;
+        *) sed -n '3,12p' "$0" >&2; exit 2 ;;
     esac
 done
 
@@ -41,6 +49,23 @@ WBGRAB="$BUILD/src/tools/wbgrab"
     say hint "cmake --build $BUILD --parallel --target tool_wbgrab"
     exit 2
 }
+
+NETPREFS="$BUILD/src/tools/NetPrefs"
+WINCLICK="$BUILD/tests/tools/WinClick"
+for seq in "${SEQUENCES[@]}"; do
+    [ "$seq" = netprefs ] || continue
+    [ -x "$NETPREFS" ] && [ -x "$WINCLICK" ] || {
+        say error "no NetPrefs or WinClick under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netprefs test_winclick"
+        exit 2
+    }
+done
+
+case "$FONT" in
+    "") ;;
+    */[0-9]*) ;;
+    *) say error "-f wants FONT/SIZE, e.g. helvetica.font/13"; exit 2 ;;
+esac
 
 # ------------------------------------------------------------- the machine --
 
@@ -107,8 +132,45 @@ EOF
 
     chmod 644 "$HD/S/scroller" "$HD/S/winclose" "$HD/S/windower"
 
+    if [ -x "$NETPREFS" ] && [ -x "$WINCLICK" ]; then
+        cp "$NETPREFS" "$HD/C/NetPrefs"
+        cp "$WINCLICK" "$HD/C/WinClick"
+        chmod 755 "$HD/C/NetPrefs" "$HD/C/WinClick"
+        # One definition, so the form has text in it.
+        mkdir -p "$HD/Devs/NetInterfaces"
+        printf '%s\n' "DEVICE=DEVS:Networks/a2065.device" "UNIT=0" \
+            "CONFIGURE=DHCP" "MTU=1500" > "$HD/Devs/NetInterfaces/ETH0"
+    fi
+
     [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
+    [ -n "$FONT" ] && font_prefs "$HD" "${FONT%/*}" "${FONT##*/}"
     return 0
+}
+
+# The screen font alone: GadTools windows take theirs from the screen.
+font_prefs() {
+    mkdir -p "$1/Prefs/Env-Archive/Sys"
+    python3 - "$1/Prefs/Env-Archive/Sys/font.prefs" "$2" "$3" <<'EOF'
+import struct, sys
+
+path, name, size = sys.argv[1], sys.argv[2], int(sys.argv[3])
+FP_SCREENFONT = 2
+# FPF_ROMFONT for topaz 8, else FPF_DISKFONT | FPF_DESIGNED.
+flags = 0x01 if (name, size) == ("topaz.font", 8) else 0x42
+
+def chunk(tag, payload):
+    out = tag + struct.pack(">L", len(payload)) + payload
+    return out + (b"\0" if len(payload) & 1 else b"")
+
+# struct FontPrefs: reserved[3], reserved2, type, front, back, drawmode, pad,
+# TextAttr (name pointer, ysize, style, flags), name[128].
+font = struct.pack(">3L HH BBBx L HBB", 0, 0, 0, 0, FP_SCREENFONT,
+                   1, 0, 1, 0, size, 0, flags)
+font += name.encode("latin-1").ljust(128, b"\0")
+body = b"PREF" + chunk(b"PRHD", bytes(6)) + chunk(b"FONT", font)
+with open(path, "wb") as fh:
+    fh.write(b"FORM" + struct.pack(">L", len(body)) + body)
+EOF
 }
 
 startup_with() {
@@ -144,6 +206,31 @@ C:Wait 6
 NewShell CON:0/11/640/190/Scroll FROM S:scroller
 C:Wait 3
 C:wbgrab FRAMES 100 DELAY 2 TO DH0:scroll.pfs >DH0:scroll.txt
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netprefs)
+        # TIMES 0 only reports the window's box; each later call cycles
+        # the page gadget (GID_PANEL) once.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:NetPrefs
+C:Wait 4
+C:WinClick "AmiNetXDuo Network" 2 TIMES 0 >DH0:netprefs.txt
+C:wbgrab TO DH0:netprefs.pfs >>DH0:netprefs.txt
+C:WinClick "AmiNetXDuo Network" 2 >NIL:
+C:Wait 1
+C:wbgrab TO DH0:netprefs-1.pfs >NIL:
+C:WinClick "AmiNetXDuo Network" 2 >NIL:
+C:Wait 1
+C:wbgrab TO DH0:netprefs-2.pfs >NIL:
+C:WinClick "AmiNetXDuo Network" 2 >NIL:
+C:Wait 1
+C:wbgrab TO DH0:netprefs-3.pfs >NIL:
+C:WinClick "AmiNetXDuo Network" 2 >NIL:
+C:Wait 1
+C:wbgrab TO DH0:netprefs-4.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;
@@ -256,6 +343,12 @@ for seq in "${SEQUENCES[@]}"; do
     if [ -f "$HD/$seq.pfs" ]; then
         cp "$HD/$seq.pfs" "$OUTDIR/$seq.pfs"
         say "${seq}_pfs_bytes" "$(wc -c < "$OUTDIR/$seq.pfs" | tr -d ' ')"
+        for extra in "$HD/$seq"-*.pfs; do
+            [ -f "$extra" ] || continue
+            cp "$extra" "$OUTDIR/"
+            say "$(basename "$extra" .pfs | tr '-' '_')_pfs_bytes" \
+                "$(wc -c < "$extra" | tr -d ' ')"
+        done
     else
         say "${seq}_pfs" "MISSING"
         FAILED=1

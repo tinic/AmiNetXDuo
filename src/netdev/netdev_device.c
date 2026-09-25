@@ -1698,6 +1698,9 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
              card->wide_off != 0
                  ? (APTR)((UBYTE *)board + card->wide_off)
                  : NULL);
+    if (card->wide_write_off != 0)
+        netdev_bus_wide_write(&unit->nu_Nic.bus,
+                              (APTR)((UBYTE *)board + card->wide_write_off));
 
     /* A register file split across two windows, which is Gayle's PCMCIA I/O
        and nothing else in the table. */
@@ -1847,6 +1850,9 @@ BOOL netdev_pcmcia_reattach(NetdevUnit *unit, const NetdevCard *card, APTR board
                      (APTR)((UBYTE *)board + card->reg_off), card->stride,
                      card->wide_off != 0
                          ? (APTR)((UBYTE *)board + card->wide_off) : NULL);
+    if (card->wide_write_off != 0)
+        netdev_bus_wide_write(&unit->nu_Nic.bus,
+                              (APTR)((UBYTE *)board + card->wide_write_off));
     if (card->odd_off != 0)
         netdev_bus_split(&unit->nu_Nic.bus,
                          (APTR)((UBYTE *)board + card->odd_off + card->reg_off));

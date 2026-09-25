@@ -253,7 +253,8 @@ typedef struct NetdevUnit
     struct Sana2DeviceStats     nu_Stats;
 
     /* Frames are staged here on the way out, 4-aligned for the long window. */
-    ULONG                       nu_TxBuf[(NETDEV_FRAME_MAX + 7) / 4];
+    ULONG                       nu_TxBuf[(NETDEV_FRAME_MAX + 7) / 4]
+                                __attribute__((aligned(4)));
 } NetdevUnit;
 
 /*

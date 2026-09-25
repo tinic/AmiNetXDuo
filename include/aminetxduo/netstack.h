@@ -48,6 +48,12 @@ typedef struct AmiNetStack AmiNetStack;
    running and full, where AMI_NET_ERR_STATE says it is not running. */
 #define AMI_NET_ERR_NOSLOT    (-12)
 
+/* A SANA-II device kept requests written into an interface.  From a removal:
+   the interface is gone from the network and its device stays open until the
+   device gives them back.  From an add: that device and unit is still held so,
+   and was not opened. */
+#define AMI_NET_ERR_RETAINED  (-13)
+
 /* Bring the stack up from every configured interface: the directly-linked
    diagnostic entry point.  Idempotent and reference-counted. */
 LONG netstack_startup(VOID);
@@ -59,8 +65,12 @@ LONG netstack_startup_loopback(VOID);
 /* Drop a reference. The stack goes down when the count reaches zero. */
 VOID netstack_shutdown(VOID);
 
-/* TRUE only when no stack or ThreadX Task can still execute this hunk. */
+/* TRUE only when no stack or ThreadX Task can still execute this hunk, and no
+   device holds a request that can call back into it. */
 BOOL netstack_can_unload(VOID);
+
+/* Interfaces whose device kept requests in them, see ami_sana2_close(). */
+UWORD netstack_retained_count(VOID);
 
 /* The singleton, or NULL if the stack is not up. */
 AmiNetStack   *netstack_get(VOID);

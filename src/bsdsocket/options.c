@@ -445,8 +445,24 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
+#ifdef AMINETXDUO_TCP_CORK
+                /* 0 turns on the small-write cork (cork.c), which is the
+                   hold TCP_NODELAY names; 1 pushes what it holds and turns
+                   it off. */
+                {
+                    LONG rc;
+
+                    if (bsd_nx_enter(SocketBase) != 0)
+                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    rc = bsd_cork_set(SocketBase, sock, (BOOL)(value == 0));
+                    bsd_nx_leave(SocketBase);
+                    if (rc != 0)
+                        return bsd_fail(SocketBase, rc);
+                }
+#else
                 if (value == 0)
                     return bsd_fail(SocketBase, AMI_EINVAL);
+#endif
                 return 0;
 
             case TCP_MAXSEG:
@@ -737,7 +753,13 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
             case TCP_NODELAY:
                 if ((sock->as_Flags & ASF_TCP) == 0)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
+#ifdef AMINETXDUO_TCP_CORK
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                                        ((sock->as_CorkFlags &
+                                          BSD_CORKF_ON) != 0) ? 0 : 1);
+#else
                 return bsd_opt_get_long(SocketBase, optval, optlen, 1);
+#endif
 
             case TCP_MAXSEG:
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) != ASF_TCP)

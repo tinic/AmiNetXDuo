@@ -95,6 +95,16 @@ VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
 
     sock->as_Flags |= ASF_EOF;
 
+#ifdef AMINETXDUO_TCP_CORK
+    /* A reset leaves a corked segment nowhere to go: the pass that finds the
+       connection gone drops it.  A FIN leaves CLOSE_WAIT, which still sends. */
+    if (sock->as_CorkPkt != NULL)
+    {
+        bsd_cork_window_open(sock);
+        bsd_cork_wake(sock);
+    }
+#endif
+
     /* A closed connection is readable (it returns 0) and writable (EPIPE). */
     bsd_event_post(sock, FD_CLOSE | FD_READ | FD_WRITE);
 }
@@ -165,6 +175,15 @@ static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
     }
 
     sock->as_Flags |= ASF_EOF;
+
+#ifdef AMINETXDUO_TCP_CORK
+    if (sock->as_CorkPkt != NULL)
+    {
+        bsd_cork_window_open(sock);
+        bsd_cork_wake(sock);
+    }
+#endif
+
     bsd_event_post(sock, FD_CLOSE | FD_READ | FD_WRITE);
 }
 
@@ -180,6 +199,14 @@ static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
 static VOID bsd_tcp_window_notify(NX_TCP_SOCKET *socket_ptr)
 {
     AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
+
+#ifdef AMINETXDUO_TCP_CORK
+    /* A corked segment the window stalled.  Woken, never sent from here:
+       cork.c, bsd_cork_window_open(). */
+    if (sock != NULL && ((sock->as_CorkFlags & BSD_CORKF_STALLED) != 0 ||
+                         sock->as_CorkState != BSD_CORK_IDLE))
+        bsd_cork_window_open(sock);
+#endif
 
     if (sock == NULL || sock->as_TxWait == 0)
         return;
@@ -480,6 +507,21 @@ BOOL bsd_writable(AmiSocket *sock)
        between the look and the caller's Wait() then still posts FD_WRITE
        (bsd_tcp_window_notify).  A queue with room takes the request back. */
     sock->as_TxWait = 1;
+#ifdef AMINETXDUO_TCP_CORK
+    /* A corked segment with room takes the next write; one without it is a
+       segment the queue has to take first. */
+    if (sock->as_CorkPkt != NULL)
+    {
+        if (bsd_cork_room(sock) > 0 ||
+            sock->as_Nx.tcp.nx_tcp_socket_transmit_sent_count + 1UL <
+            sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum)
+        {
+            sock->as_TxWait = 0;
+            return TRUE;
+        }
+        return FALSE;
+    }
+#endif
     if (sock->as_Nx.tcp.nx_tcp_socket_transmit_sent_count <
         sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum)
     {
@@ -703,6 +745,13 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
             out->read[word] |= mask;
             count++;
         }
+#ifdef AMINETXDUO_TCP_CORK
+        /* Waiting to read with a write held: the peer may be waiting for it. */
+        else if (want_read && sock->as_CorkPkt != NULL)
+        {
+            bsd_cork_push(base, sock);
+        }
+#endif
 
         if (want_write && bsd_writable(sock))
         {

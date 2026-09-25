@@ -123,7 +123,8 @@ export class Wire {
    * the terminal was served from is the address the socket goes to, so there
    * is nothing to configure and nothing to get wrong when the lease changes.
    *
-   * `take` appends ?take=1, which is the server's word for "give me the
+   * Carry the page's session number into the upgraded socket. `take=1` is
+   * the server's word for "give me the
    * terminal even though somebody has it".  A query parameter rather than a
    * header because a browser cannot put a header on a WebSocket handshake,
    * and rather than a subprotocol because a subprotocol has to be echoed in
@@ -133,8 +134,13 @@ export class Wire {
     if (this.ws !== null && this.ws.readyState <= WebSocket.OPEN) return;
 
     const scheme = location.protocol === "https:" ? "wss://" : "ws://";
-    const ws = new WebSocket(scheme + location.host + location.pathname +
-                             (take ? "?take=1" : ""));
+    const query = new URLSearchParams();
+    const session = new URLSearchParams(location.search).get("session");
+    if (session !== null) query.set("session", session);
+    if (take) query.set("take", "1");
+    const encoded = query.toString();
+    const suffix = encoded ? "?" + encoded : "";
+    const ws = new WebSocket(scheme + location.host + location.pathname + suffix);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
@@ -168,9 +174,9 @@ export class Wire {
      * status behind a refused upgrade is not exposed to script at all.  So
      * the two are told apart here, by whether onopen ever ran.
      *
-     * Worth the four lines because the server's one refusal a working client
-     * can provoke is "somebody else has the Shell" -- it takes one session at
-     * a time -- and "closed (1006)" sends that person looking at the network.
+     * Worth the four lines because a working client can be refused when
+     * somebody else owns its selected Shell slot, and "closed (1006)" would
+     * send that person looking at the network.
      */
     ws.onclose = (e: CloseEvent) => {
       this.ws = null;

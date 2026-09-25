@@ -9,6 +9,36 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd` now has two independent, reconnectable Shell slots. `/shell` remains
+  slot 0; `/shell?session=1` gives automation its own Shell. A disconnected
+  slot keeps its working state for five minutes, and a live socket still has
+  one owner unless explicitly taken over.
+- New command `CreateAmiNetXDuoStatusReport` writes a support report to `T:AmiNetXDuoStatusReport.txt`.
+- `anxnet.device` on the X-Surf 100 no longer exits its receive-overrun
+  recovery the instant the overflow sets ISR.RST (the DP8390D raises RST on
+  overflow itself), which skipped the 1.6 ms stop delay a frame still in
+  flight needs to drain. It now waits the documented minimum stop delay
+  unconditionally (timed by the beam clock with a measured per-line floor, or
+  by a bus-cycle fallback when that clock is down) and decides whether to
+  resend a cut-off transmit from the hardware's own state: a frame in flight
+  with no completion is resent once,
+  one that completed or errored during the stop is left for the normal
+  completion path, and a stale "transmitting" bit with no queued buffer is
+  never sent.
+- The packet pool now holds exactly the number of packets it is sized for.
+  Each packet was reserving 4 bytes that the network stack does not use, so
+  the pool came out slightly larger than planned. On a machine big enough to
+  reach the 4096-packet limit it held 4106 and used about 16 KB more memory
+  than intended.
+
+## 1.0.0-beta5
+
+- The minimal and micro profiles now hide their public `AMITCP` port while
+  opening a SANA-II device, just as the full profile already did. The
+  X-Surf 100 vendor driver changes behavior when it sees that port; in the
+  reduced profiles it sent no packets, breaking both DHCP and static
+  configurations.
+
 ## 1.0.0-beta4
 
 - `anxgenet.device` leaves its receive interrupt masked after a service

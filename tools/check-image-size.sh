@@ -47,13 +47,20 @@ ARM="${AMINETXDUO_IMAGE_ARM:-$(basename "$BUILD")}"
 BUDGETS=(
     # 355,508 with ANXD_CMD_RX_BATCH (the batch reader: post, drain, the
     # settle/hand-up split) -- A1200 iperf RX 399 -> 805 Mbit/s, 2026-09-20.
-    "default:src/bsdsocket/bsdsocket.library:357000"
+    # 357,160 with SBTC_ERROR_HOOK called from the outer
+    # bsd_nx_leave() and the hook re-read off the base before each
+    # deferred call (b1706f18, f5576e57), 2026-09-22.
+    "default:src/bsdsocket/bsdsocket.library:359000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
     # pass-end flush, the command), which the classic cores refuse and so
     # never pay for at run time, 2026-09-20.
-    "default:src/netdev/anxnet.device:44500"
+    # 44,860 after the 68030 cache guards were scoped to active units
+    # (a3292227): the per-unit push/invalidate record, its lookup and the
+    # device-side arm/disarm.  A guard that flushed for every unit on a
+    # machine with one card paid for cards that were not there, 2026-09-22.
+    "default:src/netdev/anxnet.device:46000"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
@@ -68,11 +75,6 @@ BUDGETS=(
     # task.  The extra ownership and lifecycle serialization buy bounded
     # interrupt latency rather than another data-path feature, 2026-09-20.
     "default:src/netdev/anxgenet.device:29000"
-    # 20,744 at the first image with async TX, the old CONTINUES mark and ack
-    # recovery, 2026-09-20; the window copy and the fused sum are the core.
-    # 23,676 after task-owned TX stopped holding Forbid across opener copy
-    # callbacks and lifecycle serialization covered close/offline, 2026-09-20.
-    "default:src/netdev/anxzz9000.device:24000"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -101,23 +103,27 @@ BUDGETS=(
     # stack fragments what BSD fragments.  -> 227,916: the versioned transmit
     # metadata callback keeps private state out of SANA-II's io_Flags.
     # 229,560 with the batch reader, 2026-09-20 (see the default row).
-    "minimal:src/bsdsocket/bsdsocket.library:231000"
-    "minimal:src/netdev/anxnet.device:44500"
+    # 231,324 with the SBTC_ERROR_HOOK move, 2026-09-22.
+    # 233,024 with the retained SANA-II interface (a device that keeps
+    # requests after close is held, not dropped), 2026-09-24.
+    "minimal:src/bsdsocket/bsdsocket.library:234000"
+    "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
-    "minimal:src/netdev/anxzz9000.device:24000"
     "minimal:src/wifipi/anxwifipi.device:56000"
     "minimal:src/usergroup/usergroup.library:10000"
     # First budgeted as a shipping profile at 0.28.9: 181,012 bytes.  Raised
     # to 197,632 in beta2: the private status/control implementation is 16 KB
     # and cannot be removed because AddNetInterface, Online and Offline use it.
-    # Headroom remains only to the next KiB boundary. Drivers are built from
-    # the same sources as the other profiles and are kept here because this
-    # gate is also the assertion that every resident image in every shipped
-    # drawer has a budget.
-    "micro:src/bsdsocket/bsdsocket.library:197632"
-    "micro:src/netdev/anxnet.device:44500"
+    # Headroom remains only to the next KiB boundary.
+    # +184 bytes in beta5 for hiding and restoring the bare AMITCP port around
+    # vendor X-Surf OpenDevice; without it the driver selects its
+    # incompatible private AmiTCP copy path and sends no packets.
+    # 198,048 measured with the X-Surf-only name check, which leaves AMITCP
+    # visible to every other SANA-II driver (2026-09-23).
+    # 199,224 with the retained SANA-II interface, 2026-09-24.
+    "micro:src/bsdsocket/bsdsocket.library:200000"
+    "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
-    "micro:src/netdev/anxzz9000.device:24000"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10000"
 )

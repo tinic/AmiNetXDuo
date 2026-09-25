@@ -1720,6 +1720,7 @@ static VOID cfg_parse_routes(char *buf, ULONG *default_out, AmiConfig *cfg)
         ULONG destination = 0;
         ULONG netmask     = 0;
         BOOL  have_gw    = FALSE;
+        BOOL  gw_spelled = FALSE;
         BOOL  have_dst   = FALSE;
         BOOL  valid_dst  = TRUE;
         BOOL  is_default = FALSE;
@@ -1741,6 +1742,8 @@ static VOID cfg_parse_routes(char *buf, ULONG *default_out, AmiConfig *cfg)
                 if (ami_config_parse_ip(value, &gateway) && gateway != 0UL)
                 {
                     have_gw = TRUE;
+                    if (ami_cfg_stricmp(key, "gateway") == 0)
+                        gw_spelled = TRUE;
                 }
                 else
                 {
@@ -1835,10 +1838,31 @@ static VOID cfg_parse_routes(char *buf, ULONG *default_out, AmiConfig *cfg)
             continue;
         }
 
-        /* default_gateway has no DEFAULT keyword: its bare GATEWAY is the
-           default route.  In Roadshow's routes file it is not. */
-        if (cfg == NULL && have_gw && *default_out == 0UL)
-            *default_out = gateway;
+        /*
+         * A bare GATEWAY with no destination is the default route.  That is
+         * the whole of DEVS:Internet/default_gateway, and it reads the same
+         * way in DEVS:Internet/routes: the line says where everything else
+         * goes and there is nothing else it could mean.  Both files were
+         * parsed by this function until the routes file grew specific routes
+         * of its own, and the line stopped counting there -- silently, with
+         * no finding, so a configuration written that way lost its default
+         * route and CheckNetConfig said only that there was not one.
+         *
+         * VIA is not the same word.  VIA with no destination is a specific
+         * route someone did not finish, so it gets the finding that the
+         * missing half of the pair already gets.
+         */
+        if (have_gw && gw_spelled)
+        {
+            if (*default_out == 0UL)
+                *default_out = gateway;
+            continue;
+        }
+
+        if (have_gw)
+            ami_cfg_problem(lineno, AMI_CFG_PROBLEM_ERROR,
+                            "the route has a VIA gateway but no destination",
+                            AMI_CFG_ADVICE_A_ROUTES_FILE_HOLDS);
     }
 }
 

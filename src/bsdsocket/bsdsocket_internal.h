@@ -305,6 +305,12 @@ struct AmiSocketBase
     ULONG                   sb_NxWorst;     /* the worst one, E-Clock ticks  */
 #endif
 
+#ifdef AMINETXDUO_SCHEDCOUNT
+    ULONG                   sb_ScTcpSends;  /* bsd_send_tcp() calls          */
+    ULONG                   sb_ScMssPeek;   /* MSS read without the IP mutex */
+    ULONG                   sb_ScMssLocked; /* and through the mutex         */
+#endif
+
     struct AmiSocket      **sb_Table;       /* descriptor table              */
     LONG                    sb_TableSize;
 
@@ -662,6 +668,21 @@ typedef struct AmiSocket
        lands between the look and the sleep still posts.  See select.c. */
     UBYTE                   as_TxWait;
 
+#ifdef AMINETXDUO_TCP_CORK
+    /*
+     * The small-write cork (cork.c).  as_CorkState, as_CorkFlags, as_CorkPkt,
+     * as_CorkOwner and as_CorkNext change only under Forbid(); the bytes are
+     * copied, and NetX Duo is called, outside it, by whoever the state names.
+     * cork.c's header has the actors and the rules.
+     */
+    NX_PACKET              *as_CorkPkt;     /* pending segment, <= as_CorkCap */
+    struct AmiSocket       *as_CorkNext;    /* armed-list link                */
+    APTR                    as_CorkOwner;   /* FLUSH: BSD_CORK_OWNER_IP/task  */
+    ULONG                   as_CorkCap;     /* payload the segment may reach  */
+    UBYTE                   as_CorkState;   /* BSD_CORK_*                     */
+    UBYTE                   as_CorkFlags;   /* BSD_CORKF_*                    */
+#endif
+
     /*
      * Orderly-close list. CloseSocket() sends a FIN and returns, so the
      * connection outlives the descriptor and usually the base as well. socket.c
@@ -965,6 +986,48 @@ BOOL  bsd_exception(AmiSocket *sock);
 /* select.c: WaitSelect()'s timer request stays out at timer.device between
    waits; the base's teardown takes it back before closing the device. */
 VOID  bsd_timer_teardown(struct AmiSocketBase *base);
+
+#ifdef AMINETXDUO_TCP_CORK
+/* cork.c, the small-write cork behind setsockopt(TCP_NODELAY, 0). */
+#define BSD_CORK_IDLE       0   /* nobody is touching the pending segment   */
+#define BSD_CORK_APPEND     1   /* the fast path is copying into it         */
+#define BSD_CORK_FLUSH      2   /* as_CorkOwner has it detached             */
+
+#define BSD_CORKF_ON        (1U << 0)   /* TCP_NODELAY is 0                 */
+#define BSD_CORKF_STALLED   (1U << 1)   /* window/queue full: notify wakes  */
+#define BSD_CORKF_FIN       (1U << 2)   /* a FIN waits behind the segment   */
+#define BSD_CORKF_TICK      (1U << 3)   /* the timer must look at it        */
+#define BSD_CORKF_LINKED    (1U << 4)   /* on the armed list                */
+#define BSD_CORKF_KICK      (1U << 5)   /* window opened while owned        */
+
+/* as_CorkOwner of a segment the IP thread's pass has detached. */
+#define BSD_CORK_OWNER_IP   ((APTR)1UL)
+
+VOID  bsd_cork_start(NX_IP *ip);
+BOOL  bsd_cork_stop(VOID);    /* FALSE: a pass is still in flight */
+BOOL  bsd_cork_running(VOID);
+VOID  bsd_cork_ip_pass(NX_IP *ip);
+VOID  bsd_cork_tick(ULONG ip_arg);
+BOOL  bsd_cork_corkable(const AmiSocket *sock);
+LONG  bsd_cork_claim(struct AmiSocketBase *base, AmiSocket *sock, ULONG wait,
+                     NX_PACKET **pkt);
+BOOL  bsd_cork_unclaim(AmiSocket *sock, NX_PACKET *pkt, ULONG why);
+ULONG bsd_cork_settle(AmiSocket *sock, NX_PACKET **pkt, UINT status);
+VOID  bsd_cork_push(struct AmiSocketBase *base, AmiSocket *sock);
+LONG  bsd_cork_set(struct AmiSocketBase *base, AmiSocket *sock, BOOL on);
+BOOL  bsd_cork_shut_write(AmiSocket *sock);
+BOOL  bsd_cork_close_graceful(AmiSocket *sock);
+BOOL  bsd_cork_close_linger(AmiSocket *sock, ULONG ticks, ULONG *left);
+VOID  bsd_cork_drop(AmiSocket *sock);
+VOID  bsd_cork_window_open(AmiSocket *sock);
+VOID  bsd_cork_wake(AmiSocket *sock);
+VOID  bsd_cork_kick_tick(AmiSocket *sock);
+ULONG bsd_cork_room(const AmiSocket *sock);
+
+/* socket.c's FIN, which the pass sends once the segment ahead of it is gone.
+   Takes nx_ip_protection itself, and nests inside a holder of it. */
+VOID  bsd_tcp_send_fin(AmiSocket *sock);
+#endif
 
 /* Wait option for a blocking call, in ThreadX ticks. */
 /* A NetX Duo call narrowed to (wait timeout) -> status, so bsd_wait_sliced()

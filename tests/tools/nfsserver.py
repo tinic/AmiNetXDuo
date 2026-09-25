@@ -326,13 +326,15 @@ def main():
     ap.add_argument("--root", required=True, help="directory to serve")
     ap.add_argument("--export", default="/export", help="the exported path name")
     ap.add_argument("--port", type=int, default=0)
+    ap.add_argument("--bind-address", default="127.0.0.1",
+                    help="IPv4 address to listen on; defaults to loopback")
     ap.add_argument("--seconds", type=float, default=300.0)
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("0.0.0.0", args.port))
+    s.bind((args.bind_address, args.port))
     port = s.getsockname()[1]
 
     srv = Server(args.root, args.export, args.quiet)

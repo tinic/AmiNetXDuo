@@ -8,6 +8,7 @@
     "build": "node build.mjs",
     "build:files": "node build-files.mjs",
     "check": "node build.mjs --check",
+    "test:remote": "node --test remote-control.test.mjs",
     "typecheck": "tsc -p ../../src/tools/web/tsconfig.json --noEmit"
   },
   "devDependencies": {
