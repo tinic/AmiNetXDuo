@@ -213,6 +213,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         host/test_udp_share_host.c
         "${AMINETXDUO_NETXDUO}/common/src/nx_udp_packet_receive.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_bind.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_unbind.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_copy.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_append.c"

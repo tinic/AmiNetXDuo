@@ -51,6 +51,11 @@ TX_THREAD *_tx_thread_current_ptr;
 volatile ULONG _tx_thread_preempt_disable;
 ULONG _tx_thread_system_state;
 
+/* Set by the suspended-receiver regression (test 1); makes the resume stub
+   below simulate the resumed thread taking the packet and its memory being
+   reused.  */
+static int h_suspended_receiver_consumes;
+
 VOID _tx_thread_system_suspend(TX_THREAD *thread_ptr)
 {
     (void)thread_ptr;
@@ -58,7 +63,25 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread_ptr)
 
 VOID _tx_thread_system_resume(TX_THREAD *thread_ptr)
 {
-    (void)thread_ptr;
+NX_PACKET **slot;
+
+    /* Test 1: when the suspended-receiver regression is armed, the resumed
+       thread takes the packet the primary delivery just handed it and its
+       memory is reused.  Scribble the fields the fan-out reads so a fan-out
+       that runs after this resume can no longer see a multicast datagram.  */
+    if (h_suspended_receiver_consumes)
+    {
+        slot =  (NX_PACKET **)thread_ptr -> tx_thread_additional_suspend_info;
+        if ((slot) && (*slot))
+        {
+            (*slot) -> nx_packet_ip_version =  0;
+            (*slot) -> nx_packet_ip_header  =  NX_NULL;
+        }
+    }
+}
+
+VOID _tx_thread_system_preempt_check(VOID)
+{
 }
 
 UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
@@ -124,6 +147,22 @@ static NX_UDP_SOCKET  h_socket_c;   /* non-sharing */
 static UCHAR          h_packet_bytes[64];
 static NX_PACKET      h_packet;
 
+/* The overflow regression needs a second, distinct packet buffer so the
+   oldest entry it drops keeps a destination that differs from the datagram
+   that triggers the overflow.  */
+static UCHAR          h_fill_bytes[64];
+static NX_PACKET      h_fill_packet;
+
+/* The suspended receiver of the first regression, and the slot the primary
+   delivery writes the handed-off packet into.  */
+static TX_THREAD      h_thread;
+static NX_PACKET     *h_received_slot;
+
+/* Set by the synchronous receive callbacks of the second and fourth
+   regressions.  */
+static int            h_primary_callback_consumed;
+static int            h_sibling_callback_closed;
+
 /* The port-table bucket a 5353 bind lands in. */
 static UINT h_index(void)
 {
@@ -141,23 +180,24 @@ static void h_socket_arm(NX_UDP_SOCKET *socket_ptr)
     socket_ptr -> nx_udp_socket_queue_maximum = 4;
 }
 
-/* Build one IPv4/UDP datagram whose destination is `dest_ip` (host order) and
-   whose UDP destination port is H_PORT. */
-static void h_packet_arm(ULONG dest_ip)
+/* Build one IPv4/UDP datagram into an arbitrary packet struct + buffer whose
+   destination is `dest_ip` (host order) and whose UDP destination port is
+   H_PORT. */
+static void h_packet_arm_to(NX_PACKET *packet_ptr, UCHAR *bytes, ULONG dest_ip)
 {
     NX_IPV4_HEADER *ipv4;
     NX_UDP_HEADER  *udp;
     ULONG           payload;
 
-    memset(h_packet_bytes, 0, sizeof(h_packet_bytes));
+    memset(bytes, 0, 64);
 
-    ipv4 = (NX_IPV4_HEADER *)(VOID *)h_packet_bytes;
+    ipv4 = (NX_IPV4_HEADER *)(VOID *)bytes;
     /* Only the destination address is read by the dispatch path; the rest of
        the IPv4 header is not inspected here. */
     ipv4 -> nx_ip_header_destination_ip  = dest_ip;
 
     /* NX_IPV4_HEADER is 20 bytes; the UDP header follows it. */
-    udp = (NX_UDP_HEADER *)(VOID *)(h_packet_bytes + sizeof(NX_IPV4_HEADER));
+    udp = (NX_UDP_HEADER *)(VOID *)(bytes + sizeof(NX_IPV4_HEADER));
     /* The UDP header is still in wire order here: _nx_udp_packet_receive does
        the in-place NX_CHANGE_ULONG_ENDIAN itself.  Store word 0 as the raw
        network bytes -- destination-port bytes at offsets 2 and 3, which on a
@@ -169,15 +209,55 @@ static void h_packet_arm(ULONG dest_ip)
 
     payload = 0x11223344UL;
 
-    memset(&h_packet, 0, sizeof(h_packet));
-    h_packet.nx_packet_data_start    = h_packet_bytes;
-    h_packet.nx_packet_ip_header     = h_packet_bytes;
-    h_packet.nx_packet_prepend_ptr   = h_packet_bytes + sizeof(NX_IPV4_HEADER);
-    h_packet.nx_packet_append_ptr    = h_packet_bytes + sizeof(NX_IPV4_HEADER)
-                                       + sizeof(NX_UDP_HEADER) + sizeof(payload);
-    h_packet.nx_packet_length        = sizeof(NX_UDP_HEADER) + sizeof(payload);
-    h_packet.nx_packet_pool_owner    = &h_pool;
-    h_packet.nx_packet_ip_version    = NX_IP_VERSION_V4;
+    memset(packet_ptr, 0, sizeof(*packet_ptr));
+    packet_ptr -> nx_packet_data_start    = bytes;
+    packet_ptr -> nx_packet_ip_header     = bytes;
+    packet_ptr -> nx_packet_prepend_ptr   = bytes + sizeof(NX_IPV4_HEADER);
+    packet_ptr -> nx_packet_append_ptr    = bytes + sizeof(NX_IPV4_HEADER)
+                                             + sizeof(NX_UDP_HEADER) + sizeof(payload);
+    packet_ptr -> nx_packet_length        = sizeof(NX_UDP_HEADER) + sizeof(payload);
+    packet_ptr -> nx_packet_pool_owner    = &h_pool;
+    packet_ptr -> nx_packet_ip_version    = NX_IP_VERSION_V4;
+}
+
+/* Build one IPv4/UDP datagram into the shared h_packet. */
+static void h_packet_arm(ULONG dest_ip)
+{
+    h_packet_arm_to(&h_packet, h_packet_bytes, dest_ip);
+}
+
+
+/* Test 2: the primary socket's receive callback consumes the queued datagram
+   synchronously.  The fixed dispatch has already cloned packet_ptr by the time
+   this runs; under the pre-fix order it runs first, and the scribble below
+   (standing in for the freed packet's memory being reused) makes the late
+   fan-out see a non-multicast datagram.  */
+static void h_primary_callback_consume(NX_UDP_SOCKET *socket_ptr)
+{
+NX_PACKET *p;
+
+    h_primary_callback_consumed = 1;
+
+    p =  socket_ptr -> nx_udp_socket_receive_head;
+    if (p)
+    {
+        socket_ptr -> nx_udp_socket_receive_head =  NX_NULL;
+        socket_ptr -> nx_udp_socket_receive_tail =  NX_NULL;
+        socket_ptr -> nx_udp_socket_receive_count =  0;
+
+        p -> nx_packet_ip_version =  0;
+        p -> nx_packet_ip_header  =  NX_NULL;
+    }
+}
+
+/* Test 4: the sibling's receive callback closes its own socket.  The fixed
+   walk captures the sibling's bound_next before delivering, so it stops
+   cleanly; the pre-fix walk follows the closed socket's now-NULL bound_next
+   and dereferences NULL.  */
+static void h_sibling_callback_close(NX_UDP_SOCKET *socket_ptr)
+{
+    h_sibling_callback_closed = 1;
+    (VOID)_nx_udp_socket_unbind(socket_ptr);
 }
 
 
@@ -281,6 +361,122 @@ int main(void)
 
     h_check(h_socket_a.nx_udp_socket_receive_count == 1,
             "multicast to a lone socket is delivered once, no fan-out");
+
+    /* ---- regression 1: a suspended receiver owns the packet ------------- */
+
+    /* The primary has a waiting receiver, so the primary delivery resumes it
+       (handing over packet_ptr) instead of queueing.  The resumed receiver
+       takes the packet; the fan-out must have cloned it to B first.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 1: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 1: B co-binds");
+
+    memset(&h_thread, 0, sizeof(h_thread));
+    h_thread.tx_thread_suspended_next = &h_thread;
+    h_thread.tx_thread_suspended_previous = &h_thread;
+    h_thread.tx_thread_additional_suspend_info = &h_received_slot;
+    h_received_slot = NX_NULL;
+    h_socket_a.nx_udp_socket_receive_suspension_list = &h_thread;
+    h_socket_a.nx_udp_socket_receive_suspended_count = 1;
+
+    h_suspended_receiver_consumes = 1;
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+    h_suspended_receiver_consumes = 0;
+
+    h_check(h_received_slot == &h_packet,
+            "regression 1: the primary handed the original to the waiter");
+    h_check(h_socket_a.nx_udp_socket_receive_suspended_count == 0,
+            "regression 1: the waiter came off the suspension list");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 1,
+            "regression 1: the sibling still got a clone");
+
+    /* ---- regression 2: the receive callback consumes synchronously ------- */
+
+    /* A's receive callback dequeues and "frees" the datagram the moment it is
+       queued.  The fan-out must have cloned packet_ptr before that ran.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_a.nx_udp_receive_callback = h_primary_callback_consume;
+    h_primary_callback_consumed = 0;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 2: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 2: B co-binds");
+
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_primary_callback_consumed == 1,
+            "regression 2: the callback consumed the queued datagram");
+    h_check(h_socket_a.nx_udp_socket_receive_count == 0,
+            "regression 2: the primary queue was drained");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 1,
+            "regression 2: the sibling still got a clone");
+
+    /* ---- regression 3: queue overflow reassigns packet_ptr ------------- */
+
+    /* Fill A's queue to its maximum with a unicast datagram, then deliver a
+       multicast one.  The overflow drops the oldest (the unicast) and, in the
+       pre-fix code, reassigns packet_ptr to it, so the late fan-out reads a
+       unicast and skips the sibling.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_a.nx_udp_socket_queue_maximum = 1;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 3: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 3: B co-binds");
+
+    h_packet_arm_to(&h_fill_packet, h_fill_bytes, 0x0A000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_fill_packet);
+
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "regression 3: the primary holds the newest datagram");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 1,
+            "regression 3: the sibling still got a clone of the multicast");
+
+    /* ---- regression 4: the sibling callback closes its socket ------------ */
+
+    /* B's receive callback unbinds B.  The fixed walk captures B's bound_next
+       before delivering, so it stops cleanly; the pre-fix walk follows the
+       closed socket's now-NULL bound_next and faults.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_receive_callback = h_sibling_callback_close;
+    h_sibling_callback_closed = 0;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 4: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 4: B co-binds");
+
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_sibling_callback_closed == 1,
+            "regression 4: the sibling callback ran");
+    h_check(h_socket_b.nx_udp_socket_bound_next == NX_NULL,
+            "regression 4: the sibling unbound itself");
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "regression 4: the primary still holds its datagram");
 
     if (h_failures == 0)
     {
