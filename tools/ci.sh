@@ -342,17 +342,18 @@ host_test_targets() { # builddir
 #      entries, a lone IPv6 address delete drops its own (#50)
 #      456 with syncache_detach_gap/_driver/_late/_v6late: a SYN taken during
 #      or after a detach or address delete records nothing (#50)
-HOST_TESTS_EXPECTED=456
+#      457 with mcast_slot_epoch: BSD rows expire when a NetX slot is detached
+HOST_TESTS_EXPECTED=457
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
     # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
-    # test_ifdevices, test_usergroup_hold and test_handoff (8ff3cc92), all
-    # x86_64-only for the
+    # test_ifdevices, test_usergroup_hold, test_handoff (8ff3cc92), and
+    # test_mcast_epoch, all x86_64-only for the
     # reason in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is
     # eight bytes and no structure in them has the target's shape.
     # darwin-arm64 registers 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 13)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 14)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
