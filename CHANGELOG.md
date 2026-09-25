@@ -16,7 +16,10 @@ version at the top when it merges.
   need. A request shorter than an `IOSana2Req` can also open the device for
   that query, and Open, Close, BeginIO and AbortIO no longer read or write past
   the end of such a request; any other command in one is refused with
-  `IOERR_NOCMD`.
+  `IOERR_NOCMD`. The query is also answered in the form mcastfilter sends:
+  the opened `IOSana2Req` with the buffer in `ios2_Data` and its size in
+  `ios2_DataLength`, so mcastfilter no longer reports these drivers as
+  "not a NewStyle device".
 - `httpd` now has two independent, reconnectable Shell slots. `/shell` remains
   slot 0; `/shell?session=1` gives automation its own Shell. A disconnected
   slot keeps its working state for five minutes, and a live socket still has

@@ -34,7 +34,7 @@ VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
     if (io->ios2_Req.io_Command == NSCMD_DEVICEQUERY)
     {
         io->ios2_Req.io_Error = 0;
-        netdev_nsd_query((struct IOStdReq *)io);
+        netdev_nsd_query(io);
         return;
     }
 

@@ -119,11 +119,11 @@ static int              seen_query;
 static struct IOStdReq *seen_query_req;
 static BYTE             seen_query_error;
 
-VOID netdev_nsd_query(struct IOStdReq *std)
+VOID netdev_nsd_query(struct IOSana2Req *io)
 {
     seen_query++;
-    seen_query_req   = std;
-    seen_query_error = std->io_Error;
+    seen_query_req   = (struct IOStdReq *)io;
+    seen_query_error = io->ios2_Req.io_Error;
 }
 
 /* A short request with any other command is answered in BeginIO itself. */

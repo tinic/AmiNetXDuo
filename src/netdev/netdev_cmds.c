@@ -743,9 +743,11 @@ static VOID cmd_global_stats(NetdevUnit *unit, struct IOSana2Req *io)
     netdev_reply(io, 0, 0);
 }
 
-VOID netdev_nsd_query(struct IOStdReq *std)
+VOID netdev_nsd_query(struct IOSana2Req *io)
 {
-    struct NetdevNSQuery *q = (struct NetdevNSQuery *)std->io_Data;
+    struct IOStdReq      *std  = (struct IOStdReq *)io;
+    struct NetdevNSQuery *q    = (struct NetdevNSQuery *)std->io_Data;
+    BOOL                  sana = FALSE;
 
     /* io_Actual aliases ios2_WireError on m68k, so the SANA-II reply helper
        cannot answer this IOStdReq without destroying the byte count. */
@@ -755,13 +757,34 @@ VOID netdev_nsd_query(struct IOStdReq *std)
                    "NSCMD_DEVICEQUERY io_Actual alias changed");
 #endif
 
-    if (q == NULL || std->io_Length < 16)
+    /*
+     * TWO FORMS.  The NewStyle one: io_Data/io_Length of an IOStdReq.  And
+     * the one mcastfilter 1.20 sends: its opened IOSana2Req, buffer in
+     * ios2_Data and size in ios2_DataLength -- where io_Data/io_Length are
+     * ios2_SrcAddr/ios2_PacketType, zero, and the query came back
+     * IOERR_BADLENGTH, "not a NewStyle device".  The IOStdReq form wins when
+     * it names a buffer.  The SANA-II fields are read only from a request that
+     * SAYS it is full-size: mn_Length 0 could be a hand-built 48-byte
+     * IOStdReq, and offsets 72 and 76 are past its end.
+     */
+    /* The size written, not a literal 16: that is the m68k layout, and the
+       host's is wider, so a 16-byte check there let a 24-byte answer out. */
+    if (q == NULL || std->io_Length < sizeof(struct NetdevNSQuery))
     {
-        std->io_Actual = 0;
-        std->io_Error  = IOERR_BADLENGTH;
-        if ((std->io_Flags & IOF_QUICK) == 0)
-            ReplyMsg(&std->io_Message);
-        return;
+        if (NETDEV_IO_IS_FULL(io) && io->ios2_Data != NULL &&
+            io->ios2_DataLength >= sizeof(struct NetdevNSQuery))
+        {
+            q    = (struct NetdevNSQuery *)io->ios2_Data;
+            sana = TRUE;
+        }
+        else
+        {
+            std->io_Actual = 0;
+            std->io_Error  = IOERR_BADLENGTH;
+            if ((std->io_Flags & IOF_QUICK) == 0)
+                ReplyMsg(&std->io_Message);
+            return;
+        }
     }
 
     q->DevQueryFormat    = 0;
@@ -770,8 +793,16 @@ VOID netdev_nsd_query(struct IOStdReq *std)
     q->DeviceSubType     = 0;
     q->SupportedCommands = netdev_supported;
 
-    std->io_Actual = sizeof(struct NetdevNSQuery);
-    std->io_Error  = 0;
+    /* The byte count goes where the form keeps it.  In the SANA-II form the
+       aliased word is ios2_WireError, and a successful command has none. */
+    if (sana)
+    {
+        io->ios2_DataLength = sizeof(struct NetdevNSQuery);
+        io->ios2_WireError  = 0;
+    }
+    else
+        std->io_Actual = sizeof(struct NetdevNSQuery);
+    std->io_Error = 0;
     if ((std->io_Flags & IOF_QUICK) == 0)
         ReplyMsg(&std->io_Message);
 }
@@ -1005,7 +1036,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     }
 
     case NSCMD_DEVICEQUERY:
-        netdev_nsd_query((struct IOStdReq *)io);
+        netdev_nsd_query(io);
         return;
 
     default:

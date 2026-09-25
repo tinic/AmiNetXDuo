@@ -338,6 +338,11 @@ typedef struct NetdevDevice
     ((io)->ios2_Req.io_Message.mn_Length != 0 && \
      (io)->ios2_Req.io_Message.mn_Length < sizeof(struct IOSana2Req))
 
+/* And one that says it is at least an IOSana2Req, which mn_Length 0 does not:
+   only such a request may have its SANA-II data fields read on a guess. */
+#define NETDEV_IO_IS_FULL(io) \
+    ((io)->ios2_Req.io_Message.mn_Length >= sizeof(struct IOSana2Req))
+
 #ifndef NSCMD_DEVICEQUERY
 #define NSCMD_DEVICEQUERY           0x4000
 #endif
@@ -577,9 +582,11 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event);
 /* netdev_cmds.c */
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
 
-/* NSCMD_DEVICEQUERY.  Reads and writes IOStdReq fields only, needs no opener,
-   and is what BeginIO calls before it looks at anything SANA-II. */
-VOID netdev_nsd_query(struct IOStdReq *std);
+/* NSCMD_DEVICEQUERY.  Needs no opener, and is what BeginIO calls before it
+   looks at anything SANA-II.  Answers the IOStdReq form (io_Data/io_Length)
+   and, in a request that says it is full-size, the SANA-II form mcastfilter
+   sends (ios2_Data/ios2_DataLength). */
+VOID netdev_nsd_query(struct IOSana2Req *io);
 /* The two bulk commands, reachable without the generic dispatch. */
 VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 /* The CMD_READ / S2_READORPHAN half of it, reachable without the dispatch. */
