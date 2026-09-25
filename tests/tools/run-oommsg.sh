@@ -154,9 +154,16 @@ if [ "$LOGSTATE" != on ]; then
 elif ! serial_log_have "$SERIAL" "$BUILD" "the stack's own refusal"; then
     fail "the stack's own refusal was NOT CHECKED: the serial log is empty"
 elif grep -qi "netstack_startup failed" "$SERIAL"; then
-    pass "the stack refused for the reason the text describes"
+    pass "the stack loaded and refused for the reason the text describes"
+elif ! grep -qE "^\[(ERR |WARN|INFO|DBG |TRC )" "$SERIAL"; then
+    # #55: LoadSeg of the library itself fails on 512K, so nothing of the
+    # stack ever runs and there is no refusal to log.  The memory wording
+    # above is what names it; here only "the stack said nothing" is checked:
+    # no ami_log line at all (ami_diag.c, "[ERR ]".."[TRC ]").
+    pass "the library never loaded: the stack wrote nothing"
 else
-    fail "the serial log has no netstack_startup failure, the run failed elsewhere"
+    fail "the stack wrote to the serial log but not netstack_startup failed,\
+ so it started and failed elsewhere"
     tail -20 "$SERIAL" | sed 's/^/       /' >&2
 fi
 
