@@ -387,29 +387,6 @@ static const ToolDhcpInfo *lease_for(const ToolDhcp *dhcp,
     return NULL;
 }
 
-/*
- * nsi_Device is NETSTATUS_DEVICE_LEN bytes and the library fills it from ITS
- * copy of the interface file (netstatus.c, ns_config_for), so what arrives is
- * the file's own device name cut at 31 characters -- and a system
- * installation's Workbench:AmiNetXDuo/Devs/Networks/anxnet.device is 48.
- * Compared whole against the tool's full parse of the same file, that printed
- * the "changed after the network started" NOTE on every ShowNetStatus of a
- * drawer installation (the A3000, 2026-09-19).  A copy that fills the field
- * and is the file's prefix is the same name.
- */
-static BOOL device_matches(const char *file, const char *live)
-{
-    ULONG n = 0;
-
-    while (live[n] != '\0')
-        n++;
-
-    if (n == (ULONG)NETSTATUS_DEVICE_LEN - 1)
-        return (BOOL)(tool_stricmp_n(file, live, n) == 0);
-
-    return (BOOL)(tool_stricmp(file, live) == 0);
-}
-
 static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                            const ToolSnapshot *snap,
                            const ToolDhcpInfo *lease,
@@ -430,7 +407,8 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     if (live != NULL && live->nx_device[0] != '\0')
     {
         BOOL same = (BOOL)(cfg->device[0] == '\0' ||
-                           device_matches(cfg->device, live->nx_device));
+                           tool_device_matches(cfg->device, live->nx_device,
+                                               live->nx_device_whole));
 
         /* The file's spelling when the two agree: the record's copy may be
            cut, the file's never is. */

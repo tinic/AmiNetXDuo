@@ -88,6 +88,10 @@ _Static_assert(__builtin_offsetof(NetStatusInterface, nsi_Name) == 28,
                "NetStatusInterface version 16 field offsets");
 _Static_assert(__builtin_offsetof(NetStatusInterface, nsi_RxMulticast) == 188,
                "NetStatusInterface version 16 tail offset");
+/* nsd_Device holds cfg->device whole. */
+_Static_assert(NETSTATUS_FILE_LEN == AMI_CFG_PATH_LEN, "device path width");
+_Static_assert(sizeof(NetStatusIfDevice) == 4 + NETSTATUS_FILE_LEN,
+               "NetStatusIfDevice ABI");
 
 #ifdef AMINETXDUO_MDNS
 /*
@@ -1502,6 +1506,31 @@ static const char *ns_service_type(const NetStatusControl *ctl,
     return (i == 0) ? NULL : buf;
 }
 #endif /* AMINETXDUO_MDNS */
+/* The same slots as ns_fill_interfaces(), with the device path uncut. */
+static VOID ns_fill_ifdevices(NX_IP *ip, NsWriter *w)
+{
+    UINT i;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        NetStatusIfDevice *out = (NetStatusIfDevice *)ns_writer_next(w);
+        const AmiIfConfig *cfg;
+
+        if (out == NULL)
+            continue;
+
+        out->nsd_Index = (UWORD)i;
+
+        if (ip->nx_ip_interface[i].nx_interface_valid == 0)
+            continue;
+
+        cfg = ns_config_for(i);
+        if (cfg != NULL)
+            ns_copy_name(out->nsd_Device, sizeof(out->nsd_Device),
+                         cfg->device);
+    }
+}
+
 
 /*
  * The header check, done before anything is written, so a caller that landed
@@ -1545,6 +1574,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_SYSTEM:      need = sizeof(NetStatusSystem);  break;
         case NETSTATUS_STATS:       need = sizeof(NetStatusStats);   break;
         case NETSTATUS_INTERFACES:  need = 0;                        break;
+        case NETSTATUS_IFDEVICES:   need = 0;                        break;
         case NETSTATUS_ARP:         need = 0;                        break;
         case NETSTATUS_MULTICAST:   need = 0;                        break;
         case NETSTATUS_ROUTES:      need = 0;                        break;
@@ -1812,6 +1842,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_init(&w, hdr, size, NETSTATUS_INTERFACES,
                            sizeof(NetStatusInterface));
             ns_fill_interfaces(ip, &w);
+            ns_writer_finish(&w);
+            break;
+
+        case NETSTATUS_IFDEVICES:
+            ns_writer_init(&w, hdr, size, NETSTATUS_IFDEVICES,
+                           sizeof(NetStatusIfDevice));
+            ns_fill_ifdevices(ip, &w);
             ns_writer_finish(&w);
             break;
 

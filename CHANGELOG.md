@@ -24,6 +24,20 @@ version at the top when it merges.
   allocation, set `mn_Length` to that of an `IOStdReq`. A request with
   `mn_Length` 0 is a full `IOSana2Req`, as before; a shorter request must state
   its length.
+- `anxnet.device` 1.0.0-beta5 no longer reboots a 68030 machine the moment it
+  loads when its Zorro III card gets the transparent-translation cache guard
+  (an A3000 with an X-Surf 100 took a Line-F dead-end alert in `ramlib`). The
+  first TT0/TT1 write entered Supervisor() in a way that overwrote the calling
+  function's frame pointer, and its return jumped into the card window. The
+  call now saves and restores that register itself, and the build fails if any
+  linked image clobbers its frame pointer this way again. `anxgenet.device`
+  had the same call pattern around its 68040 cache flush and gets the same
+  fix; its current build was not affected.
+- `anxwifipi.device` opened with a plain `IOStdReq` for `NSCMD_DEVICEQUERY` now
+  gets a valid unit; before, the query and the close wrote into low memory.
+  The query is answered in the `IOStdReq` form for a short request and in the
+  `ios2_Data` form for a full `IOSana2Req`, checks the buffer size first, and
+  reports 16 bytes, not 20.
 - `httpd` now has two independent, reconnectable Shell slots. `/shell` remains
   slot 0; `/shell?session=1` gives automation its own Shell. A disconnected
   slot keeps its working state for five minutes, and a live socket still has

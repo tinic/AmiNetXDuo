@@ -1734,6 +1734,28 @@ if(NOT CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
+# No local register variable on a5 in our sources.  a5 is the frame pointer;
+# GCC does not support a register variable on it in a framed function, and
+# after LTO inlined one into a `link a5` caller the epilogue returned through
+# the clobbered register (beta5 anxnet.device, netdev_cache.c; genet.c had the
+# same pin).  Enter Supervisor() through an out-of-line stub that saves a5.
+# cmake/check-a5-frame.cmake catches the codegen; this catches the source.
+file(GLOB_RECURSE _a5_sources LIST_DIRECTORIES false
+     "${CMAKE_SOURCE_DIR}/src/*.c" "${CMAKE_SOURCE_DIR}/src/*.h"
+     "${CMAKE_SOURCE_DIR}/tests/*.c" "${CMAKE_SOURCE_DIR}/tests/*.h"
+     "${CMAKE_SOURCE_DIR}/tools/*.c" "${CMAKE_SOURCE_DIR}/tools/*.h")
+set(_a5_bad "")
+foreach(_f IN LISTS _a5_sources)
+    file(STRINGS "${_f}" _hits REGEX "register[^;]*__asm(__)?[ \t]*\\([ \t]*\"a5\"[ \t]*\\)")
+    if(_hits)
+        list(APPEND _a5_bad "${_f}")
+    endif()
+endforeach()
+if(_a5_bad)
+    list(JOIN _a5_bad "\n  " _a5_msg)
+    message(FATAL_ERROR "register variable pinned to a5 (the frame pointer):\n  ${_a5_msg}")
+endif()
+
 # Every linked AmigaOS image is checked for the mis-resolved 32-bit PC-relative
 # branch this toolchain emits from a cross-section tail call.  It is a POST_BUILD
 # check because the wrong address exists only in the linked image, the object
@@ -1755,6 +1777,15 @@ function(aminetxduo_check_pcrel target)
                 "-DOBJDUMP=${CMAKE_OBJDUMP}"
                 "-DNM=${CMAKE_NM}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-pcrel-branches.cmake"
+        VERBATIM)
+    # And for a write to a5 inside a function framed with `link a5`: the
+    # A3000 Line-F reboot of beta5's anxnet.device.  See cmake/check-a5-frame.cmake.
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DBINARY=$<TARGET_FILE:${target}>"
+                "-DMAPFILE=$<TARGET_FILE:${target}>.map"
+                "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-a5-frame.cmake"
         VERBATIM)
 endfunction()
 

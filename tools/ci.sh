@@ -333,16 +333,32 @@ host_test_targets() { # builddir
 #      waiter and clears a recycled address without a Signal
 #      443 with adopt_pool_sweep: an unpublished slot whose claimer's address
 #      now holds another Task is freed; a live claimer's is kept
-HOST_TESTS_EXPECTED=443
+#      444 with test_romtag: rt_Name read from a driver file without loading it
+#      446 with netstatus_ifdevices and tool_ifdev: the device path whole
+#      through NETSTATUS_IFDEVICES, nsi_Device from a library without it
+#      450 with syncache_detach_v4/_v4reuse/_v6/_v6accept: a SYN-cache entry
+#      on a detached interface (#50)
+#      452 with syncache_detach_keep/_v6delete: detach keeps other interfaces'
+#      entries, a lone IPv6 address delete drops its own (#50)
+#      456 with syncache_detach_gap/_driver/_late/_v6late: a SYN taken during
+#      or after a detach or address delete records nothing (#50)
+#      457 with mcast_slot_epoch: BSD rows expire when a NetX slot is detached
+#      458 with mcast_sender_loop: sender-side multicast loopback is per socket
+#      459 with libfit_decision: a bsdsocket.library that cannot load is named
+#      as memory from the free figure before the open (#55)
+#      460 with toolchain_a5_frame_gate: cmake/check-a5-frame.cmake's
+#      verdicts on the beta5 clobber and on an exg pair (#58)
+HOST_TESTS_EXPECTED=460
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
     # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
-    # test_usergroup_hold and test_handoff (8ff3cc92), all x86_64-only for the
+    # test_ifdevices, test_usergroup_hold, test_handoff (8ff3cc92), and
+    # test_mcast_loop and test_mcast_epoch, all x86_64-only for the
     # reason in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is
     # eight bytes and no structure in them has the target's shape.
     # darwin-arm64 registers 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 12)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 15)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
@@ -402,6 +418,17 @@ hr()   { printf '\n\033[1m======== %s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 fail() { FAILED+=("$1"); printf '\033[31m!! FAILED: %s\033[0m\n' "$1" >&2; }
 skip() { SKIPPED+=("$1"); printf '\033[33m-- SKIPPED: %s\033[0m\n' "$1" >&2; }
+
+# A skip for an input the lab supplies (~/amiga-assets/env.sh).  On the lab
+# rig (AMINETXDUO_LAB_RIG=1, set by emulator.yml) a missing one is a broken
+# rig, not an absent ingredient, so it fails; returns 1 when it did (#56).
+lab_skip() {
+    if [ "${AMINETXDUO_LAB_RIG:-}" = 1 ]; then
+        fail "$* [AMINETXDUO_LAB_RIG=1: the lab supplies this, so it is required]"
+        return 1
+    fi
+    skip "$*"
+}
 
 # ------------------------------------------------------------ submodules ----
 
@@ -1772,8 +1799,8 @@ stage_ltoprobe() {
     local dir="$BUILD/ltoprobe" rc=0
 
     if [ -z "${AMINETXDUO_KICKSTART:-}" ]; then
-        skip "lto probe: no AMINETXDUO_KICKSTART, so the P-256 paths in a real\
- tls.library link are unproven on this runner"
+        lab_skip "lto probe: no AMINETXDUO_KICKSTART, so the P-256 paths in a real\
+ tls.library link are unproven on this runner" || return 1
         return "$NOTHING"
     fi
     export AMINETXDUO_KICKSTART
@@ -2357,9 +2384,9 @@ stage_matrix() {
     local rc=0 bad=0
 
     if [ -z "${AMINETXDUO_KICKSTART:-}" ]; then
-        skip "machine matrix: no AMINETXDUO_KICKSTART, so no arm can boot." \
+        lab_skip "machine matrix: no AMINETXDUO_KICKSTART, so no arm can boot." \
              "CPU speed, interface count, refusal wording and memory size are" \
-             "all unproven on this runner."
+             "all unproven on this runner." || return 1
         return "$NOTHING"
     fi
 
@@ -2539,9 +2566,9 @@ the PCMCIA card claimed at every rate and the measurement rose with it" ;;
     # boot an A2000 and a mismatch is a black screen, not a test result.
     rc=0
     if [ -z "${AMINETXDUO_KICKSTART_A2000:-}" ]; then
-        skip "oommsg: AMINETXDUO_KICKSTART_A2000 is not set, so nothing here\
+        lab_skip "oommsg: AMINETXDUO_KICKSTART_A2000 is not set, so nothing here\
  boots Kickstart 2.04 and what a 512 KB machine is told when bring-up runs out\
- of memory is unproven"
+ of memory is unproven" || bad=$((bad + 1))
     else
         "$ROOT/tests/tools/run-oommsg.sh" -b "$BUILD/default" || rc=$?
         case "$rc" in
@@ -2652,8 +2679,8 @@ stage_bridged() {
     printf '\n-- the bring-up on Kickstart 2.04 and 2.05\n'
     rc=0
     if [ -z "${AMINETXDUO_KICKSTART_A2000:-}${AMINETXDUO_KICKSTART_V204:-}" ]; then
-        skip "kick2x: no Kickstart 2.04 configured, so the romtag under a V37\
- exec and card.resource V37 stay unproven"
+        lab_skip "kick2x: no Kickstart 2.04 configured, so the romtag under a V37\
+ exec and card.resource V37 stay unproven" || bad=1
     else
         AMINETXDUO_RUN_TAG=ci-kick2x "$ROOT/tests/tools/run-kick2x.sh" \
             -b "$BUILD/default" \
@@ -3047,9 +3074,13 @@ stage_rate() {
     # green.  Five-round medians for one tree reproduce to about half a per
     # cent across sittings (tests/perf/rate-baseline.txt), so 12% is many
     # times the noise and still catches anything worth catching.
-    out=$(AMINETXDUO_BUILD="$BUILD/cm" AMINETXDUO_RATE_ROUNDS=5 \
-          AMINETXDUO_RATE_TOLERANCE=12 tools/check-rate.sh 2>&1)
-    rc=$?
+    #
+    # $BUILD/default: the configuration the Emulator tier builds, and the one
+    # the baseline was measured on (Release, default options -- see
+    # tests/perf/run-rate-ab.sh).  There is no `cm` configuration here.
+    rc=0
+    out=$(AMINETXDUO_BUILD="$BUILD/default" AMINETXDUO_RATE_ROUNDS=5 \
+          AMINETXDUO_RATE_TOLERANCE=12 tools/check-rate.sh 2>&1) || rc=$?
 
     if printf '%s' "$out" | grep -q '^rate=skipped'; then
         skip "rate: $(printf '%s' "$out" | sed -n 's/^rate=skipped reason=//p')." \
@@ -3059,10 +3090,14 @@ stage_rate() {
     fi
 
     printf '%s\n' "$out"
-    if [ "$rc" != 0 ]; then
-        fail "a direction is below its recorded rate"
-        return 1
-    fi
+    case "$rc" in
+        0) ;;
+        1) fail "rate: a direction is below its recorded rate"
+           return 1 ;;
+        *) fail "rate: evaluation incomplete, not a regression --\
+ $(printf '%s' "$out" | sed -n 's/^rate=error //p' | head -1)"
+           return 1 ;;
+    esac
     note "$(printf '%s' "$out" | sed -n 's/^rate=PASS /throughput: /p')"
     return 0
 }

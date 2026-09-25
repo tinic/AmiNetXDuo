@@ -179,7 +179,11 @@ ULONG tool_list_dir(const char *path, char names[][TOOL_NAME_LEN], ULONG max,
 ULONG             tool_scan_devices(VOID);
 const ToolDevice *tool_scan_device(ULONG index);
 
-/* Which of the usual drawers holds `device`, or NULL if it is nowhere. */
+/*
+ * Which of the usual drawers holds `device`, TOOL_WHERE_PATH when it is a
+ * path that exists, "already in memory", or NULL if it is nowhere.
+ */
+#define TOOL_WHERE_PATH     "at that path"
 const char *tool_device_where(const char *device);
 
 /*
@@ -363,6 +367,18 @@ BOOL tool_parse_ip6(const char *text, ULONG out[4]);
  */
 LONG tool_netstatus_query(struct Library *base, ULONG what,
                           APTR buffer, ULONG size, ULONG entry_size);
+
+/*
+ * tool_ifdev.c.  tool_netstatus_devices() asks NETSTATUS_IFDEVICES once, for
+ * every interface; tool_if_device() then copies interface `e`'s device path
+ * into dst: whole when the library answered for that slot (TRUE), else
+ * nsi_Device (FALSE: a library that predates the selector, or a slot with no
+ * path).  tool_device_matches() compares a file's DEVICE= with that path:
+ * exactly when it came whole, else a 31-character copy matches its prefix.
+ */
+VOID tool_netstatus_devices(struct Library *base);
+BOOL tool_if_device(char *dst, ULONG dstlen, const NetStatusInterface *e);
+BOOL tool_device_matches(const char *file, const char *live, BOOL whole);
 
 /*
  * The DHCP state of one live interface, from NETSTATUS_DHCP.  The return is
