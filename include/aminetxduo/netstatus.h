@@ -212,6 +212,20 @@ typedef struct NetStatusInterface
     ULONG   nsi_RxMulticast;
 } NetStatusInterface;
 
+/*
+ * NetStatusIfDevice[], one per NETSTATUS_INTERFACES slot: the device path
+ * whole, where nsi_Device holds its first 31 characters.  A library without
+ * this selector answers EINVAL; the caller keeps nsi_Device.
+ */
+#define NETSTATUS_IFDEVICES     22
+
+typedef struct NetStatusIfDevice
+{
+    UWORD   nsd_Index;                  /* nsi_Index                         */
+    UWORD   nsd_Pad;
+    char    nsd_Device[NETSTATUS_FILE_LEN];     /* empty when unconfigured   */
+} NetStatusIfDevice;
+
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */
 
 /* One entry per IPv6 address per interface, in NetX Duo's own order.  An
