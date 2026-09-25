@@ -137,6 +137,8 @@ DOOR_PORT=$((PORT + 1))
 STALL_S=$(( WD + 90 ))
 
 GUEST_FILES="RSGAPARM:libs/bsdsocket.library RSGAPARM:libs/usergroup.library RSGAPARM:C/AddNetInterface DEVS:x-surf-100.device DEVS:NetInterfaces/eth0 C:RsGapRx C:RsGapBoot S:Startup-Sequence"
+# The door boot also runs httpd, so it hashes it too.
+DOOR_FILES="$GUEST_FILES RSGAPARM:C/httpd"
 
 # ---------------------------------------------------------------- fragment --
 fragment() { # emulator(0|1)
@@ -146,7 +148,7 @@ fragment() { # emulator(0|1)
     echo "If WARN"
     echo "  Run >NIL: C:RsGapBoot WATCHDOG SECS=$WD CANCELFILE=SYS:rsgap/wd-cancel"
     echo "  RSGAPARM:C/AddNetInterface eth0 >>SYS:rsgap/cur.log"
-    echo "  C:RsGapBoot RECORD FILES $GUEST_FILES >>SYS:rsgap/cur.kv"
+    echo "  C:RsGapBoot RECORD FILES $DOOR_FILES >>SYS:rsgap/cur.kv"
     echo "  C:RsGapRx HOST=$PEER_ADDR PORT=$DOOR_PORT BYTES=4096 TO=RAM:rsgap-door.dat TAG=door >>SYS:rsgap/cur.kv"
     echo "  Run >NIL: RSGAPARM:C/httpd SYS:rsgap PORT $HTTPPORT"
     [ "$1" = 0 ] || echo "  C:RsGapBoot HOLD SECS=20 >>SYS:rsgap/cur.kv"
@@ -228,21 +230,23 @@ echo "rsgap_plan tag=$TAG schedule=$SCHED boots=$NBOOTS transfers=$XFERS bytes=$
 
 # ------------------------------------------------ hashes, before any boot --
 IMAGES="$OUT/images.kv"
-img() { # arm guestpath hostfile
-    printf 'rsgap_image arm=%s guest=%s md5=%s size=%s host=%s\n' "$1" "$2" \
-        "$(md5sum "$3" | cut -c1-32)" "$(stat -c %s "$3")" "$3"
+# Each entry is required of every boot of that arm (R, A, *) and mode
+# (measure, door, *); rsgap_collect.py rejects a boot missing any of them.
+img() { # arm mode guestpath hostfile
+    printf 'rsgap_image arm=%s mode=%s guest=%s md5=%s size=%s host=%s\n' \
+        "$1" "$2" "$3" "$(md5sum "$4" | cut -c1-32)" "$(stat -c %s "$4")" "$4"
 }
 {
     for a in R A; do
-        img "$a" RSGAPARM:libs/bsdsocket.library "$STAGE/rsgap/arm/$a/libs/bsdsocket.library"
-        img "$a" RSGAPARM:libs/usergroup.library "$STAGE/rsgap/arm/$a/libs/usergroup.library"
-        img "$a" RSGAPARM:C/AddNetInterface "$STAGE/rsgap/arm/$a/C/AddNetInterface"
+        img "$a" '*' RSGAPARM:libs/bsdsocket.library "$STAGE/rsgap/arm/$a/libs/bsdsocket.library"
+        img "$a" '*' RSGAPARM:libs/usergroup.library "$STAGE/rsgap/arm/$a/libs/usergroup.library"
+        img "$a" '*' RSGAPARM:C/AddNetInterface "$STAGE/rsgap/arm/$a/C/AddNetInterface"
     done
-    img A RSGAPARM:C/httpd "$STAGE/rsgap/arm/A/C/httpd"
-    img '*' DEVS:x-surf-100.device "$STAGE/devs/x-surf-100.device"
-    img '*' DEVS:NetInterfaces/eth0 "$STAGE/devs/NetInterfaces/eth0"
-    img '*' C:RsGapRx "$STAGE/c/RsGapRx"
-    img '*' C:RsGapBoot "$STAGE/c/RsGapBoot"
+    img A door RSGAPARM:C/httpd "$STAGE/rsgap/arm/A/C/httpd"
+    img '*' '*' DEVS:x-surf-100.device "$STAGE/devs/x-surf-100.device"
+    img '*' '*' DEVS:NetInterfaces/eth0 "$STAGE/devs/NetInterfaces/eth0"
+    img '*' '*' C:RsGapRx "$STAGE/c/RsGapRx"
+    img '*' '*' C:RsGapBoot "$STAGE/c/RsGapBoot"
 } > "$IMAGES"
 cat "$IMAGES"
 
@@ -363,7 +367,7 @@ done
 [ -f "$OUT/results/cur.kv" ] || cp "$OUT/hd-rsgap/cur.kv" "$OUT/results/" 2>/dev/null
 [ -f "$OUT/results/cur.wd" ] || cp "$OUT/hd-rsgap/cur.wd" "$OUT/results/" 2>/dev/null
 # The guest hashed S:Startup-Sequence as booted; the host's copy is the same file.
-img '*' S:Startup-Sequence "$HD/s/Startup-Sequence" >> "$IMAGES" 2>/dev/null
+img '*' '*' S:Startup-Sequence "$HD/s/Startup-Sequence" >> "$IMAGES" 2>/dev/null
 
 python3 "$ROOT/tests/perf/rsgap_collect.py" --results "$OUT/results" \
     --images "$IMAGES" --peer-log "$OUT/peer.log" --door "$DOOR" \

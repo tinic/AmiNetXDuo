@@ -7,17 +7,32 @@
 
 DIR holds what the guest wrote to SYS:rsgap: boot-<n>.kv/.wd per finished boot
 and cur.kv/.wd for the last one (the door boot).  FILE lists the host-side md5
-of every staged image as `rsgap_image arm=R guest=<guest path> md5=<hex>`.
+of every staged image as `rsgap_image arm=R mode=M guest=<guest path> md5=<hex>`,
+arm R, A or *, mode measure, door or *.  A boot's required set is every entry
+matching its arm and mode; its RECORD must hash each of them exactly once with
+that md5 and nothing else, or hash_match=0.
+
+A measure boot is valid only with the selector consumed, neither the stack nor
+the driver loaded before SELECT, one stack of the selected arm, every hash
+matching, every transfer complete and seen by the peer, and no watchdog.  A
+door boot is valid with the selector absent, nothing preloaded, AmiNetXDuo
+alone and every hash matching.
+
+Measurement boots are paired by schedule position, (1,2), (3,4), ...; pair=K
+names the pair, pair=- a boot outside any complete pair (the fault boot, its
+partner, an odd last boot).  Validity never moves a boot to another pair.
 
 Emits, in boot order:
 
   rsgap_boot boot=N arm=R mode=measure selector_consumed=1 stack=R
-             one_stack=1 hash_match=1 xfers=4 ok=4 peer_match=1 wd_fired=0
-             next_arm=A kbps=... mean_kbps=... valid=1
+             one_stack=1 hash_match=1 hashes_expected=8 ... pos=1 pair=1
+             xfers=4 ok=4 peer_match=1 wd_fired=0 next_arm=A kbps=...
+             mean_kbps=... valid=1
   rsgap_recovery boot=N wd_fired=1 elapsed_s=E bound_s=S within_bound=1
              next_boot=N+1 next_arm=A next_selector=absent door=up
-  rsgap_door boot=N arm=A ... door=up cancel_confirmed=1
-  rsgap_run boots=N measure=M door=D expected_ok=1
+  rsgap_door boot=N arm=A ... door=up cancel_confirmed=1 valid=1
+  rsgap_run boots=N measure=M door=D scheduled=S pairs_scheduled=P
+            missing_pos=- expected_ok=1
 
 Exit 0 when the session did exactly what the schedule asked for (every
 unfaulted measurement boot valid, the fault boot recovered by the watchdog,
@@ -77,13 +92,25 @@ def read_boot(path_kv, path_wd):
 
 
 def load_images(path):
-    imgs = {}
+    """[(arm, mode, guest, md5)] in file order."""
+    imgs = []
     with open(path) as fh:
         for line in fh:
             if line.startswith("rsgap_image "):
                 kv = kv_of(line)
-                imgs[(kv["arm"], kv["guest"])] = kv["md5"]
+                if not all(k in kv for k in ("arm", "mode", "guest", "md5")):
+                    sys.exit("rsgap_collect: bad image line: " + line.strip())
+                imgs.append((kv["arm"], kv["mode"], kv["guest"], kv["md5"]))
     return imgs
+
+
+def required_hashes(imgs, arm, mode):
+    """guest path -> md5 for one boot's arm and mode."""
+    req = {}
+    for iarm, imode, guest, md5 in imgs:
+        if iarm in (arm, "*") and imode in (mode, "*"):
+            req[guest] = md5
+    return req
 
 
 def load_peer(path):
@@ -121,18 +148,35 @@ def stack_seen(b):
     return "A" if a else "R" if r else "none"
 
 
-def hash_match(b, arm, imgs):
-    bad = 0
-    seen = 0
+def hash_match(b, arm, mode, imgs):
+    """Every required hash exactly once and right, nothing else.
+    Returns (match, counts) with counts in output order."""
+    req = required_hashes(imgs, arm, mode)
+    count = {}
+    bad = unexpected = 0
     for m in b["md5"]:
-        guest = m["file"]
-        want = imgs.get((arm, guest)) or imgs.get(("*", guest))
-        if want is None:
+        guest = m.get("file", "")
+        if guest not in req:
+            unexpected += 1
             continue
-        seen += 1
-        if m["md5"] != want:
+        count[guest] = count.get(guest, 0) + 1
+        if m.get("md5") != req[guest]:
             bad += 1
-    return 1 if seen > 0 and bad == 0 else 0, seen, bad
+    missing = sum(1 for g in req if g not in count)
+    dup = sum(c - 1 for c in count.values())
+    ok = int(bool(req) and not (missing or dup or unexpected or bad))
+    return ok, (("hashes_expected", len(req)), ("hashes_seen", len(b["md5"])),
+                ("hash_missing", missing), ("hash_dup", dup),
+                ("hash_unexpected", unexpected), ("hash_bad", bad))
+
+
+def pair_of(pos, scheduled, fault_boot):
+    """Pair id of schedule position pos (1-based), or None when its pair is
+    incomplete by design."""
+    mate = pos + 1 if pos % 2 else pos - 1
+    if mate > scheduled or fault_boot in (pos, mate):
+        return None
+    return (pos - 1) // 2 + 1
 
 
 def main():
@@ -186,7 +230,9 @@ def main():
         cancelled = [w for w in b["wd"] if w.get("state") == "cancelled"]
         seen = stack_seen(b)
         one = 1 if seen == arm else 0
-        hm, hseen, hbad = hash_match(b, arm, imgs)
+        hm, hcounts = hash_match(b, arm, mode, imgs)
+        pre_ok = (sel.get("bsdsocket_preloaded") == "0" and
+                  sel.get("driver_preloaded") == "0")
         xs = b["xfers"]
         data = [x for x in xs if x.get("tag") != "door"]
         good = [x for x in data if x.get("result") == "ok"]
@@ -203,7 +249,7 @@ def main():
                   "bsdsocket_preloaded=%s driver_preloaded=%s stack=%s "
                   "one_stack=%d stacklib_id=%s driver_version=%s cpu=%s "
                   "attnflags=%s cachecontrol=%s z3_boards=%d hash_match=%d "
-                  "hashes=%d hash_bad=%d"
+                  "%s"
                   % (n, arm, mode, sel.get("selector", "?"), consumed,
                      sel.get("bsdsocket_preloaded", "?"),
                      sel.get("driver_preloaded", "?"), seen, one,
@@ -213,16 +259,19 @@ def main():
                      b.get("sys", {}).get("attnflags", "-"),
                      b.get("sys", {}).get("cachecontrol", "-"),
                      sum(1 for x in b["boards"] if x.get("zorro") == "3"),
-                     hm, hseen, hbad))
+                     hm, " ".join("%s=%d" % kv for kv in hcounts)))
         if mode == "measure":
             measure_seen += 1
             faulted = a.fault_boot and measure_seen == a.fault_boot
             valid = int(len(good) == a.transfers and one and hm and pm and
+                        consumed == "1" and pre_ok and
                         not fired and all(int(x["rx_bytes"]) == a.bytes
                                           for x in good))
-            print("rsgap_boot %s xfers=%d ok=%d peer_match=%d wd_fired=%d "
-                  "next_arm=%s kbps=%s mean_kbps=%.2f valid=%d"
-                  % (common, len(data), len(good), pm, 1 if fired else 0, nxt,
+            pair = pair_of(measure_seen, len(expect), a.fault_boot)
+            print("rsgap_boot %s pos=%d pair=%s xfers=%d ok=%d peer_match=%d "
+                  "wd_fired=%d next_arm=%s kbps=%s mean_kbps=%.2f valid=%d"
+                  % (common, measure_seen, pair or "-", len(data), len(good),
+                     pm, 1 if fired else 0, nxt,
                      ",".join("%.2f" % k for k in kbps) or "-", mean, valid))
             want_arm = expect[measure_seen - 1] if measure_seen <= len(expect) \
                 else None
@@ -253,10 +302,12 @@ def main():
             door_seen += 1
             dx = [x for x in xs if x.get("tag") == "door"]
             dpc = take_peer(peer, dx[0].get("local"), "door") if dx else None
+            dvalid = int(sel.get("selector") == "absent" and consumed == "0" and
+                         pre_ok and one == 1 and hm == 1)
             print("rsgap_door %s door_rx=%s door_peer_match=%d wd_fired=%d "
                   "wd_cancelled=%d wd_cancel_via=%s wd_cancel_elapsed_s=%s "
                   "door=%s door_http=%s door_fetch=%s cancel_put=%s "
-                  "cancel_confirmed=%s"
+                  "cancel_confirmed=%s valid=%d"
                   % (common, dx[0].get("result", "-") if dx else "none",
                      1 if dpc and dpc.get("bytes") == dx[0].get("rx_bytes")
                      else 0,
@@ -265,16 +316,20 @@ def main():
                      cancelled[0].get("elapsed_s", "-") if cancelled else "-",
                      door.get("door", "down"), door.get("door_http", "-"),
                      door.get("door_fetch", "-"), door.get("cancel_put", "-"),
-                     door.get("cancel_confirmed", "0")))
+                     door.get("cancel_confirmed", "0"), dvalid))
             if i != len(boots) - 1 or door.get("door") != "up" or \
-               door.get("cancel_confirmed") != "1" or one != 1:
+               door.get("cancel_confirmed") != "1" or not dvalid:
                 ok_all = False
 
     if measure_seen != len(expect) or door_seen != 1:
         ok_all = False
+    npairs = sum(1 for p in range(1, len(expect) + 1, 2)
+                 if pair_of(p, len(expect), a.fault_boot))
+    missing = list(range(measure_seen + 1, len(expect) + 1))
     print("rsgap_run boots=%d measure=%d door=%d scheduled=%d fault_boot=%d "
-          "expected_ok=%d" % (len(boots), measure_seen, door_seen, len(expect),
-                              a.fault_boot, 1 if ok_all else 0))
+          "pairs_scheduled=%d missing_pos=%s expected_ok=%d"
+          % (len(boots), measure_seen, door_seen, len(expect), a.fault_boot,
+             npairs, ",".join(map(str, missing)) or "-", 1 if ok_all else 0))
     return 0 if ok_all else 1
 
 
