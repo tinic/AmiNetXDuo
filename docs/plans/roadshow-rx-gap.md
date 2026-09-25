@@ -11,11 +11,12 @@ answer one question before any mechanism is named or any change is made:
 
 One post: EAB thread 123359, [post 1810965](https://eab.abime.net/showpost.php?p=1810965)
 (26 Aug 2026). Method, from [post 1806771](https://eab.abime.net/showpost.php?p=1806771),
-an earlier build cited for the method only: Fitz 1.21 (Aminet), a 10^7-byte
-file, a Linux file server, kb = 1000 bytes. Machine, inferred from the
-poster's standing rig (posts 1807384 and 1807759), since post 1810965 names
-none: an A3000 with a CyberStorm MkII 68060 and an X-Surf 100. The row in
-[BACKLOG.md](../BACKLOG.md) records the read figures.
+an earlier build cited for the method only: Fitz 1.21 (Aminet), a file the
+post gives as "10e7 bytes" (read literally, 100,000,000 bytes), a Linux file
+server, kb = 1000 bytes. Machine, inferred from the poster's standing rig
+(posts 1807384 and 1807759), since post 1810965 names none: an A3000 with a
+CyberStorm MkII 68060 and an X-Surf 100. The row in [BACKLOG.md](../BACKLOG.md)
+records the read figures.
 
 | Stack and driver | Read, server to `RAM:` (kb/s) | Write, `RAM:` to server (kb/s) |
 |---|---|---|
@@ -60,7 +61,7 @@ say where.
 | Order | alternate R/A/A/R across boots, so neither arm always runs first after power-on |
 | Direction | server to Amiga only (receive), written to `RAM:` so no disk is involved. A fixed-length TCP stream from a peer server that sends from memory, 12 s or 16 MB |
 | Client | **one** binary for both arms (hash recorded): plain `bsdsocket.library` socket/connect/recv into a `RAM:` file, fixed read size, timed by `timer.device`. No stack-specific tags. Peer-side byte count and timing kept as a cross-check |
-| Workload cross-check | Fitz 1.21 copying the 10^7-byte file server to `RAM:`, the original method, one transfer per boot beside the client's four. Without it, "not reproduced" could mean only a different workload |
+| Workload cross-check | Fitz 1.21 copying the "10e7 bytes" file (100,000,000 bytes) from the server to `RAM:`, the original method, one transfer per boot beside the client's four. Without it, "not reproduced" could mean only a different workload |
 | Recorded per boot | md5 of the stack library, the driver, the client and the Startup files; `AttnFlags`; `CacheControl` read-back; Z2/Z3 mode; FAST RAM map; link speed and duplex; the peer's kernel and NIC offloads; wall clock |
 | Null control first | 3 A/A boots and 3 R/R boots measure this machine's between-boot spread before any R/A claim |
 | Sample size | 20 boots per arm, 4 transfers per boot, paired R/A boot by boot: the design that resolved +1.34% on the emulator (CHANGELOG). The null boots check that 20 is enough on this machine and raise it if not |
