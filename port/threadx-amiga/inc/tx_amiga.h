@@ -182,7 +182,9 @@ ULONG   tx_amiga_adopt_slots_free(VOID);
 
 /* Give back every slot whose claimer was removed between taking it and
    creating the TX_THREAD in it -- the one dead-adopter residue the baton
-   reclaim cannot see, because there is no thread to ask about.  Called from
+   reclaim cannot see, because there is no thread to ask about.  Removed means
+   off Exec's lists, or its address now holding a Task with another
+   _tx_amiga_task_stamp() than the one recorded at the claim.  Called from
    the stack's second tick; takes its own Forbid().  How many it has ever freed
    is _tx_amiga_adopt_unpublished_freed.  */
 VOID    tx_amiga_adopt_sweep_unpublished(VOID);

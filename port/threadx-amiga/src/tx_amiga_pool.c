@@ -392,8 +392,9 @@ struct _tx_amiga_adopt_slot     *found;
        busy slot has no owner.  The claimer has to leave Forbid() before the
        create, and a RemTask() in that window would otherwise leak the slot;
        tx_amiga_adopt_sweep_unpublished() is what gives it back.  */
-    found -> as_claimer    =  FindTask((STRPTR) 0);
-    found -> as_published  =  (UINT) TX_FALSE;
+    found -> as_claimer     =  FindTask((STRPTR) 0);
+    found -> as_claim_stamp =  _tx_amiga_task_stamp(found -> as_claimer);
+    found -> as_published   =  (UINT) TX_FALSE;
 
     used++;
     if (used > _tx_amiga_adopt_peak)
@@ -416,10 +417,11 @@ VOID _tx_amiga_slot_release_locked(struct _tx_amiga_adopt_slot *slot)
         return;
     }
 
-    slot -> as_generation =  0UL;
-    slot -> as_busy       =  (UINT) 0;
-    slot -> as_claimer    =  (struct Task *) 0;
-    slot -> as_published  =  (UINT) TX_FALSE;
+    slot -> as_generation  =  0UL;
+    slot -> as_busy        =  (UINT) 0;
+    slot -> as_claimer     =  (struct Task *) 0;
+    slot -> as_claim_stamp =  0UL;
+    slot -> as_published   =  (UINT) TX_FALSE;
 
     _tx_amiga_adopt_wake_waiters_locked();
 }
@@ -436,8 +438,9 @@ VOID _tx_amiga_slot_publish_locked(struct _tx_amiga_adopt_slot *slot)
         return;
     }
 
-    slot -> as_published =  (UINT) TX_TRUE;
-    slot -> as_claimer   =  (struct Task *) 0;
+    slot -> as_published   =  (UINT) TX_TRUE;
+    slot -> as_claimer     =  (struct Task *) 0;
+    slot -> as_claim_stamp =  0UL;
 }
 
 
@@ -450,9 +453,19 @@ VOID _tx_amiga_slot_publish_locked(struct _tx_amiga_adopt_slot *slot)
    TX_THREAD is on ThreadX's lists, so the corpse is dispatched, becomes the
    baton holder and is reclaimed from the tick like any other.
 
+   THE CLAIMER IS THE ADDRESS AND THE STAMP.  Between the claim and the
+   publish the claimer is inside tx_amiga_adopt_thread(), so its stack bounds,
+   name pointer and UniqueID cannot move: a Task at that address with another
+   stamp is not the claimer, whose slot is freed as if the address were empty.
+   The address alone kept such a slot for as long as the recycling Task lived,
+   across a kernel restart too, since the pool is BSS.  A claimer that is alive
+   with its own stamp -- stalled between the claim and the create -- is never
+   touched.
+
    Runs from the tick.  Takes its own Forbid(); the liveness test is the one
-   question that may be asked about storage Exec may already have freed.  How
-   many it has ever freed is _tx_amiga_adopt_unpublished_freed.  */
+   question that may be asked about storage Exec may already have freed, so the
+   stamp is read only after it has answered "still there", under the same
+   Disable().  How many it has ever freed is _tx_amiga_adopt_unpublished_freed.  */
 VOID tx_amiga_adopt_sweep_unpublished(VOID)
 {
 
@@ -477,7 +490,8 @@ struct Task     *claimer;
         }
 
         Disable();
-        if (tx_amiga_task_alive_locked(claimer) != ((UINT) TX_FALSE))
+        if ((tx_amiga_task_alive_locked(claimer) != ((UINT) TX_FALSE)) &&
+            (_tx_amiga_task_stamp(claimer) == _tx_amiga_adopt_pool[i].as_claim_stamp))
         {
             Enable();
             continue;

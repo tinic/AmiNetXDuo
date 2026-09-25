@@ -99,8 +99,12 @@ struct _tx_amiga_adopt_slot
        and the _tx_thread_create() that fills it are not one atom: the claimer
        has to leave Forbid() in between.  A Task removed in that window would
        leak a busy slot for ever, so the claimer is recorded here and the tick's
-       sweep gives the slot back.  Cleared the moment the slot is published.  */
+       sweep gives the slot back.  Cleared the moment the slot is published.
+       as_claim_stamp is _tx_amiga_task_stamp() of the claimer, taken from its
+       own context at the claim: the address alone is not the claimer once
+       Exec has recycled it.  */
     struct Task    *as_claimer;
+    ULONG           as_claim_stamp;
     UINT            as_published;
 };
 

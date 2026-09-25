@@ -10,6 +10,9 @@
  *
  *   wake   _tx_amiga_adopt_wake_scan(): the final pass signals a stamp match
  *          and clears a stamp mismatch WITHOUT signalling it
+ *   sweep  tx_amiga_adopt_sweep_unpublished(): an unpublished slot is kept
+ *          while its claimer is alive with the stamp it claimed with, and freed
+ *          when that address is dead or holds a different Task
  */
 
 #include "tx_amiga_pool.c"
@@ -246,15 +249,105 @@ static void test_wake(void)
 }
 
 
+/* --------------------------------------------------- unpublished sweep --- */
+
+/* A slot claimed by fake_task[i], never published. */
+static struct _tx_amiga_adopt_slot *claim_as(int i)
+{
+    struct _tx_amiga_adopt_slot *slot;
+
+    fake_current = &fake_task[i];
+    Forbid();
+    slot = _tx_amiga_slot_claim_locked((UINT) TX_FALSE);
+    Permit();
+    fake_current = (struct Task *) 0;           /* the sweep is the tick's */
+    return slot;
+}
+
+static void test_sweep(void)
+{
+    struct _tx_amiga_adopt_slot *slot;
+
+    /* The claimer is alive and unchanged -- stalled between the claim and
+       the create, say.  Never taken. */
+    reset();
+    (void) fake_spawn(0, 0, fake_name_a);
+    slot = claim_as(0);
+    expect("claimed a slot", slot != (struct _tx_amiga_adopt_slot *) 0, 1UL);
+    if (slot == (struct _tx_amiga_adopt_slot *) 0)
+        return;
+    tx_amiga_adopt_sweep_unpublished();
+    tx_amiga_adopt_sweep_unpublished();
+    expect("live claimer: slot retained", slot->as_busy, 1UL);
+    expect("live claimer: freed", _tx_amiga_adopt_unpublished_freed, 0UL);
+
+    /* The claimer is gone and nothing is at its address. */
+    reset();
+    (void) fake_spawn(0, 0, fake_name_a);
+    slot = claim_as(0);
+    fake_alive[0] = 0;
+    tx_amiga_adopt_sweep_unpublished();
+    expect("removed claimer: slot freed", slot->as_busy, 0UL);
+    expect("removed claimer: freed", _tx_amiga_adopt_unpublished_freed, 1UL);
+
+    /* The claimer is gone and a long-lived Task now sits at its address. */
+    reset();
+    (void) fake_spawn(0, 0, fake_name_a);
+    slot = claim_as(0);
+    (void) fake_recycle(0, 0UL);
+    tx_amiga_adopt_sweep_unpublished();
+    expect("recycled claimer address: slot freed", slot->as_busy, 0UL);
+    expect("recycled claimer address: freed",
+           _tx_amiga_adopt_unpublished_freed, 1UL);
+
+    /* The same, with the kernel stopped and started in between: the pool is
+       BSS and outlives the kernel, so the slot must still come back. */
+    reset();
+    (void) fake_spawn(0, 0, fake_name_a);
+    slot = claim_as(0);
+    _tx_amiga_kernel_up = TX_FALSE;
+    (void) fake_recycle(0, 0UL);
+    _tx_amiga_kernel_up = TX_TRUE;
+    tx_amiga_adopt_sweep_unpublished();
+    expect("recycled across a restart: slot freed", slot->as_busy, 0UL);
+
+    /* Two claims, one each: only the recycled one goes. */
+    reset();
+    (void) fake_spawn(0, 0, fake_name_a);
+    (void) fake_spawn(1, 0, fake_name_a);
+    slot = claim_as(0);
+    {
+        struct _tx_amiga_adopt_slot *kept = claim_as(1);
+
+        (void) fake_recycle(0, 0UL);
+        tx_amiga_adopt_sweep_unpublished();
+        expect("one of each: recycled one freed", slot->as_busy, 0UL);
+        expect("one of each: live one kept", kept->as_busy, 1UL);
+        expect("one of each: freed", _tx_amiga_adopt_unpublished_freed, 1UL);
+    }
+
+    /* A published slot is the baton reclaim's, never the sweep's. */
+    reset();
+    (void) fake_spawn(0, 0, fake_name_a);
+    slot = claim_as(0);
+    _tx_amiga_slot_publish_locked(slot);
+    (void) fake_recycle(0, 0UL);
+    tx_amiga_adopt_sweep_unpublished();
+    expect("published: slot kept", slot->as_busy, 1UL);
+}
+
+
 int main(int argc, char **argv)
 {
     const char *which = (argc > 1) ? argv[1] : "";
 
     if (strcmp(which, "wake") == 0)
         test_wake();
+    else if (strcmp(which, "sweep") == 0)
+        test_sweep();
     else
     {
-        printf("usage: %s wake\n", argv[0]);
+        printf("usage: %s wake|sweep\n", argv[0]);
         return 2;
     }
 

@@ -331,7 +331,9 @@ host_test_targets() { # builddir
 #      441 with perf_rsgap: the Roadshow RX-gap verdict and its peer sender
 #      442 with adopt_pool_wake: the pool's shutdown wake signals a parked
 #      waiter and clears a recycled address without a Signal
-HOST_TESTS_EXPECTED=442
+#      443 with adopt_pool_sweep: an unpublished slot whose claimer's address
+#      now holds another Task is freed; a live claimer's is kept
+HOST_TESTS_EXPECTED=443
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
