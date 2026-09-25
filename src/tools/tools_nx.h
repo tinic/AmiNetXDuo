@@ -50,6 +50,7 @@ typedef struct ToolIfInfo
      * empty string is a fact, not a failure.
      */
     char            nx_device[NETSTATUS_FILE_LEN];
+    BOOL            nx_device_whole;    /* from NETSTATUS_IFDEVICES */
     ULONG           nx_unit;
     /* From the SANA-II shim, when the interface has one attached. */
     BOOL            have_sana2;

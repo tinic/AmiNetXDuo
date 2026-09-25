@@ -61,6 +61,28 @@ VOID tool_copy_string(char *dst, ULONG dstlen, const char *src)
     dst[i] = '\0';
 }
 
+int tool_stricmp_n(const char *a, const char *b, ULONG n)
+{
+    ULONG i;
+
+    for (i = 0; i < n; i++)
+    {
+        int ca = (a[i] >= 'A' && a[i] <= 'Z') ? a[i] + 32 : a[i];
+        int cb = (b[i] >= 'A' && b[i] <= 'Z') ? b[i] + 32 : b[i];
+
+        if (ca != cb)
+            return ca - cb;
+        if (ca == '\0')
+            return 0;
+    }
+    return 0;
+}
+
+int tool_stricmp(const char *a, const char *b)
+{
+    return tool_stricmp_n(a, b, 0xFFFFFFFFUL);
+}
+
 static VOID stage(UWORD at, UWORD index, const char *device)
 {
     memset(&q_e[at], 0, sizeof(q_e[at]));
@@ -159,12 +181,56 @@ static VOID unterminated_fields_are_bounded(VOID)
           "nsi_Device is read to its own field and no further");
 }
 
+/*
+ * A path that is exactly 31 characters and arrived whole is not a cut copy:
+ * a longer DEVICE= that starts with it is another driver (codex-amiga's
+ * review of 31c39ce4).  From an old library the same 31 characters may be
+ * the cut, and the prefix rule stands.
+ */
+static VOID exact_match_when_whole(VOID)
+{
+    static const char p31[]  = "Work:Devs/Networks/abcdefgh.dev";
+    static const char p35[]  = "Work:Devs/Networks/abcdefgh.device";
+    NetStatusInterface e;
+    char               out[NETSTATUS_FILE_LEN];
+    BOOL               whole;
+
+    CHECK(strlen(p31) == NETSTATUS_DEVICE_LEN - 1, "the fixture is 31 long");
+
+    q_rc = 1; q_count = 1;
+    stage(0, 0, p31);
+    tool_netstatus_devices(NULL);
+    live(&e, 0, p31);
+    whole = tool_if_device(out, sizeof(out), &e);
+    CHECK(whole, "a slot the library answered is whole");
+    CHECK(!tool_device_matches(p35, out, whole),
+          "a whole 31-character path is not a longer file's prefix");
+    CHECK(tool_device_matches("WORK:devs/networks/ABCDEFGH.dev", out, whole),
+          "a whole path still matches without regard to case");
+
+    q_rc = -1;
+    tool_netstatus_devices(NULL);
+    live(&e, 0, p35);
+    whole = tool_if_device(out, sizeof(out), &e);
+    CHECK(!whole, "an old library's nsi_Device is not whole");
+    CHECK(tool_device_matches(p35, out, whole),
+          "an old library's 31-character copy matches the file it was cut from");
+    CHECK(!tool_device_matches("Work:Devs/Networks/abcdefgX.device", out, whole),
+          "and not a file that differs inside those 31");
+
+    live(&e, 0, "a2065.device");
+    whole = tool_if_device(out, sizeof(out), &e);
+    CHECK(!tool_device_matches("a2065.device.old", out, whole),
+          "a short copy is compared exactly");
+}
+
 int main(void)
 {
     whole_path_wins();
     old_library_keeps_nsi_device();
     empty_or_foreign_slot_falls_back();
     unterminated_fields_are_bounded();
+    exact_match_when_whole();
 
     printf("tool_ifdev failures=%d\n", failures);
     return failures == 0 ? 0 : 1;

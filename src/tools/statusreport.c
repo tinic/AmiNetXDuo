@@ -428,7 +428,7 @@ static VOID sr_live(struct Library *base)
             char   prefix[NETSTATUS_NAME_LEN + 8];
 
             tool_copy_string(name, sizeof(name), e->nsi_Name);
-            tool_if_device(device, sizeof(device), e);
+            (VOID)tool_if_device(device, sizeof(device), e);
 
             if (name[0] != '\0')
                 sr_key_part(part, sizeof(part), name);
