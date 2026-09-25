@@ -141,6 +141,11 @@ UINT _nx_igmp_multicast_interface_leave_internal(NX_IP *ip_ptr, ULONG group, UIN
 VOID _nx_tcp_socket_connection_reset(NX_TCP_SOCKET *socket_ptr)        { (void) socket_ptr; }
 #ifdef FEATURE_NX_IPV6
 VOID _nx_nd_cache_interface_entries_delete(NX_IP *ip_ptr, UINT index)  { (void) ip_ptr; (void) index; }
+UINT _nx_ipv6_multicast_leave(NX_IP *ip_ptr, ULONG *group, NX_INTERFACE *if_ptr)
+{
+    (void) ip_ptr; (void) group; (void) if_ptr;
+    return NX_SUCCESS;
+}
 VOID _nx_invalidate_destination_entry(NX_IP *ip_ptr, ULONG *next_hop)  { (void) ip_ptr; (void) next_hop; }
 #endif
 
@@ -191,6 +196,11 @@ static NX_PACKET     rig_rx_packet;
 
 static ULONG peer4 = 0xc0a80105UL;                  /* 192.168.1.5  */
 static ULONG local4 = 0xc0a80158UL;                 /* 192.168.1.88 */
+static ULONG peer4_other = 0x0a000005UL;            /* 10.0.0.5, on interface 0 */
+static ULONG local4_other = 0x0a000001UL;           /* 10.0.0.1 */
+
+/* The interface the next rig_syn/rig_ack arrives on: K, or 0 for "other".  */
+static UINT rig_if = K;
 #ifdef FEATURE_NX_IPV6
 static ULONG peer6[4]  = { 0x20010db8UL, 0, 0, 0x5UL };
 static ULONG local6[4] = { 0x20010db8UL, 0, 0, 0x88UL };
@@ -249,6 +259,7 @@ static void rig_reset(void)
     rig_socket.nx_tcp_socket_rx_window_default = 8192;
 
     host_now = 100000;
+    rig_if = K;
     sends_v4 = handed_v4 = sends_v6 = asserts = 0;
     last_v4_if = last_v6_if = NX_NULL;
 
@@ -265,8 +276,11 @@ static void rig_packet(ULONG version)
         return;
     }
 #endif
-    rig_rx_packet.nx_packet_address.nx_packet_interface_ptr = &rig_ip.nx_ip_interface[K];
+    rig_rx_packet.nx_packet_address.nx_packet_interface_ptr = &rig_ip.nx_ip_interface[rig_if];
 }
+
+#define RIG_PEER4  ((rig_if == K) ? &peer4 : &peer4_other)
+#define RIG_LOCAL4 ((rig_if == K) ? &local4 : &local4_other)
 
 static void rig_syn(ULONG version, ULONG irs)
 {
@@ -286,8 +300,8 @@ static void rig_syn(ULONG version, ULONG irs)
         return;
     }
 #endif
-    _nx_tcp_syncache_syn_received(&rig_ip, &rig_listen, &rig_rx_packet, &h, &peer4, &local4,
-                                  40000, &rig_ip.nx_ip_interface[K], 1460, 2,
+    _nx_tcp_syncache_syn_received(&rig_ip, &rig_listen, &rig_rx_packet, &h, RIG_PEER4, RIG_LOCAL4,
+                                  40000, &rig_ip.nx_ip_interface[rig_if], 1460, 2,
                                   NX_TRUE, NX_TRUE, 777);
 }
 
@@ -310,9 +324,51 @@ static void rig_ack(ULONG version, ULONG irs, ULONG iss)
         return;
     }
 #endif
-    (void) _nx_tcp_syncache_ack_received(&rig_ip, &rig_listen, &rig_rx_packet, &h, &peer4,
-                                         &local4, 40000, &rig_ip.nx_ip_interface[K],
+    (void) _nx_tcp_syncache_ack_received(&rig_ip, &rig_listen, &rig_rx_packet, &h, RIG_PEER4,
+                                         RIG_LOCAL4, 40000, &rig_ip.nx_ip_interface[rig_if],
                                          NX_TRUE, 888);
+}
+
+/* The cache's bookkeeping after a flush: the two counters say what is live,
+   and the age, accept, hash and free lists all agree with them.  */
+static void rig_cache_check(ULONG live_age, ULONG live_accept)
+{
+    NX_TCP_SYNCACHE       *c = &rig_ip.nx_ip_tcp_syncache;
+    NX_TCP_SYNCACHE_ENTRY *e;
+    ULONG                  n_age = 0, n_accept = 0, n_hash = 0, n_free = 0;
+    UINT                   b;
+
+    for (e = c -> nx_tcp_syncache_age_head; e; e = e -> nx_tcp_syncache_age_next)
+    {
+        n_age++;
+    }
+    for (e = c -> nx_tcp_syncache_accept_head; e; e = e -> nx_tcp_syncache_age_next)
+    {
+        n_accept++;
+    }
+    for (b = 0; b < NX_TCP_SYNCACHE_BUCKETS; b++)
+    {
+        for (e = c -> nx_tcp_syncache_hash[b]; e; e = e -> nx_tcp_syncache_hash_next)
+        {
+            n_hash++;
+        }
+    }
+    for (e = c -> nx_tcp_syncache_free; e; e = e -> nx_tcp_syncache_hash_next)
+    {
+        n_free++;
+    }
+
+    printf("     cache: count %lu accept %lu; lists age %lu accept %lu hash %lu free %lu\n",
+           (unsigned long) c -> nx_tcp_syncache_count,
+           (unsigned long) c -> nx_tcp_syncache_accept_count,
+           (unsigned long) n_age, (unsigned long) n_accept,
+           (unsigned long) n_hash, (unsigned long) n_free);
+    ok("the entry count is what survives", c -> nx_tcp_syncache_count == live_age && n_age == live_age);
+    ok("the accept count is what survives",
+       c -> nx_tcp_syncache_accept_count == live_accept && n_accept == live_accept);
+    ok("the hash chains hold exactly the live entries", n_hash == live_age + live_accept);
+    ok("every other entry is back on the free list",
+       n_free == NX_TCP_SYNCACHE_SIZE - live_age - live_accept);
 }
 
 /* One tick of the IP thread's periodic pass, with the assert unwinding here. */
@@ -363,6 +419,7 @@ static void case_v6_retry(void)
        sends_v6 == 1 && last_v6_if == &rig_ip.nx_ip_interface[K]);
 
     rig_detach();
+    rig_cache_check(0, 0);
     rig_run_out();
 
     ok("no NX_ASSERT once the interface is gone", asserts == 0);
@@ -385,13 +442,81 @@ static void case_v6_accept(void)
        rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_accept_count == 1);
 
     rig_detach();
+    rig_cache_check(0, 0);
     rig_run_out();
 
     ok("no NX_ASSERT once the interface is gone", asserts == 0);
     ok("and no RST is sent for a queued handshake on a detached interface",
        sends_v6 == 0);
 }
+
+/* A lone nxd_ipv6_address_delete with a live IPv6 entry on it, and an IPv4
+   entry on the same interface: the IPv6 one goes, sending nothing; the IPv4
+   one stays and is still retried through K.  */
+static void case_v6_delete(void)
+{
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    rig_syn(NX_IP_VERSION_V6, 0x5000);
+    rig_syn(NX_IP_VERSION_V4, 0x5100);
+    ok("both SYNs are cached", rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_count == 2);
+
+    ok("the IPv6 address is deleted", _nxd_ipv6_address_delete(&rig_ip, 0) == NX_SUCCESS);
+    ok("which zeroes it", rig_ip.nx_ipv6_address[0].nxd_ipv6_address_attached == NX_NULL);
+    rig_cache_check(1, 0);
+    ok("and the survivor is the IPv4 entry on K",
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_age_head -> nx_tcp_syncache_peer_ip.nxd_ip_version
+           == NX_IP_VERSION_V4);
+    sends_v4 = handed_v4 = sends_v6 = 0;
+    last_v4_if = last_v6_if = NX_NULL;
+
+    rig_run_out();
+
+    ok("no NX_ASSERT once the address is gone", asserts == 0);
+    ok("no SYN-ACK is sent for the deleted address", sends_v6 == 0);
+    ok("the IPv4 SYN-ACK is still retried through K",
+       sends_v4 > 0 && last_v4_if == &rig_ip.nx_ip_interface[K]);
+}
 #endif
+
+/* Detach must not over-flush: a half-open and a queued handshake on
+   interface 0 survive K's detach, and the half-open one is still retried
+   through interface 0.  */
+static void case_keep_other(void)
+{
+    ULONG iss;
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
+
+    rig_if = 0;
+    rig_syn(NX_IP_VERSION_V4, 0x6000);
+    iss = rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_age_head -> nx_tcp_syncache_iss;
+    rig_ack(NX_IP_VERSION_V4, 0x6000, iss);         /* queued on 0 */
+    ok("a handshake on interface 0 is queued for accept",
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_accept_count == 1);
+    peer4_other++;                                  /* another peer on 0 */
+    rig_syn(NX_IP_VERSION_V4, 0x6200);
+    peer4_other--;
+
+    rig_if = K;
+    rig_syn(NX_IP_VERSION_V4, 0x6300);              /* half-open on K */
+    ok("two half-open, one queued",
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_count == 2 &&
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_accept_count == 1);
+
+    rig_detach();
+    rig_cache_check(1, 1);
+    ok("the survivors are both on interface 0",
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_age_head -> nx_tcp_syncache_interface
+           == &rig_ip.nx_ip_interface[0] &&
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_accept_head -> nx_tcp_syncache_interface
+           == &rig_ip.nx_ip_interface[0]);
+
+    rig_tick();
+    ok("the half-open one on 0 is still retried, through 0",
+       sends_v4 == 1 && last_v4_if == &rig_ip.nx_ip_interface[0] && asserts == 0);
+}
 
 /* SYN on K, SYN-ACK lost, K detached.  Detached and left empty, the retry's
    route lookup fails and the shipped IPv4 send drops it for want of a next
@@ -410,6 +535,7 @@ static void case_v4_retry(int reuse)
        sends_v4 == 1 && last_v4_if == &rig_ip.nx_ip_interface[K]);
 
     rig_detach();
+    rig_cache_check(0, 0);
 
     if (reuse)
     {
@@ -462,10 +588,18 @@ int main(int argc, char **argv)
     {
         case_v6_accept();
     }
+    else if (strcmp(which, "v6delete") == 0)
+    {
+        case_v6_delete();
+    }
 #endif
+    else if (strcmp(which, "keep") == 0)
+    {
+        case_keep_other();
+    }
     else
     {
-        printf("usage: test_syncache_detach v4|v4reuse|v6|v6accept\n");
+        printf("usage: test_syncache_detach v4|v4reuse|v6|v6accept|v6delete|keep\n");
         return 2;
     }
 

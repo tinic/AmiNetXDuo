@@ -58,10 +58,10 @@ add_test(NAME syncache_cache  COMMAND test_syncache cache)
 # is force-included so NX_ASSERT_FAIL unwinds to the test instead of sleeping
 # forever as nx_api.h has it on the target.
 #
-# The arms assert the correct behaviour.  v4 (slot left empty) passes today:
-# the retry has no route and the IPv4 send drops it.  The other three are red
-# against the shipped code and carry WILL_FAIL until #50 is fixed; the fix
-# removes it here.
+# The arms assert the correct behaviour: detach and a lone IPv6 address
+# delete drop the entries that point at what they zero, send nothing for
+# them, leave the cache's lists and counters consistent, and keep entries on
+# every other interface (keep).
 set(_nxs "${AMINETXDUO_NETXDUO}/common/src")
 add_executable(test_syncache_detach
     host/test_syncache_detach_host.c
@@ -73,7 +73,9 @@ add_executable(test_syncache_detach
     "${_nxs}/nx_tcp_packet_send_control.c"
     "${_nxs}/nx_tcp_timestamp_option_get.c")
 if(AMINETXDUO_IPV6)
-    target_sources(test_syncache_detach PRIVATE "${_nxs}/nx_ipv6_packet_send.c")
+    target_sources(test_syncache_detach PRIVATE
+        "${_nxs}/nx_ipv6_packet_send.c"
+        "${_nxs}/nxd_ipv6_address_delete.c")
 endif()
 
 target_include_directories(test_syncache_detach PRIVATE
@@ -93,12 +95,11 @@ target_compile_options(test_syncache_detach PRIVATE -Wall -Wextra
     -include "${CMAKE_CURRENT_SOURCE_DIR}/host/host_nx_assert.h")
 set_target_properties(test_syncache_detach PROPERTIES C_STANDARD 11)
 
-set(_detach_cases syncache_detach_v4reuse)
 add_test(NAME syncache_detach_v4      COMMAND test_syncache_detach v4)
 add_test(NAME syncache_detach_v4reuse COMMAND test_syncache_detach v4reuse)
+add_test(NAME syncache_detach_keep    COMMAND test_syncache_detach keep)
 if(AMINETXDUO_IPV6)
     add_test(NAME syncache_detach_v6       COMMAND test_syncache_detach v6)
     add_test(NAME syncache_detach_v6accept COMMAND test_syncache_detach v6accept)
-    list(APPEND _detach_cases syncache_detach_v6 syncache_detach_v6accept)
+    add_test(NAME syncache_detach_v6delete COMMAND test_syncache_detach v6delete)
 endif()
-set_tests_properties(${_detach_cases} PROPERTIES WILL_FAIL TRUE)

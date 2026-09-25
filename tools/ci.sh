@@ -337,8 +337,10 @@ host_test_targets() { # builddir
 #      446 with netstatus_ifdevices and tool_ifdev: the device path whole
 #      through NETSTATUS_IFDEVICES, nsi_Device from a library without it
 #      450 with syncache_detach_v4/_v4reuse/_v6/_v6accept: a SYN-cache entry
-#      on a detached interface (#50); three carry WILL_FAIL until it is fixed
-HOST_TESTS_EXPECTED=450
+#      on a detached interface (#50)
+#      452 with syncache_detach_keep/_v6delete: detach keeps other interfaces'
+#      entries, a lone IPv6 address delete drops its own (#50)
+HOST_TESTS_EXPECTED=452
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
