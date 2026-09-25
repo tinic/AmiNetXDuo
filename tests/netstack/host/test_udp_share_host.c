@@ -163,6 +163,11 @@ static NX_PACKET     *h_received_slot;
 static int            h_primary_callback_consumed;
 static int            h_sibling_callback_closed;
 
+/* Test 5: the sibling's receive callback closes a *different* socket that is
+   still pending in the walk.  */
+static NX_UDP_SOCKET *h_sibling_to_close;
+static int            h_sibling_callback_closed_other;
+
 /* The port-table bucket a 5353 bind lands in. */
 static UINT h_index(void)
 {
@@ -258,6 +263,18 @@ static void h_sibling_callback_close(NX_UDP_SOCKET *socket_ptr)
 {
     h_sibling_callback_closed = 1;
     (VOID)_nx_udp_socket_unbind(socket_ptr);
+}
+
+/* Test 5: the sibling's receive callback closes a *different* socket that is
+   still pending in the walk.  Capture-next alone is not enough here: the
+   captured successor is the very node the callback unlinked, so a walk that
+   blindly follows it dereferences the removed node's now-NULL bound_next and
+   faults.  The fixed walk re-reads the survivor's successor instead.  */
+static void h_sibling_callback_close_other(NX_UDP_SOCKET *socket_ptr)
+{
+    (void)socket_ptr;
+    h_sibling_callback_closed_other = 1;
+    (VOID)_nx_udp_socket_unbind(h_sibling_to_close);
 }
 
 
@@ -477,6 +494,43 @@ int main(void)
             "regression 4: the sibling unbound itself");
     h_check(h_socket_a.nx_udp_socket_receive_count == 1,
             "regression 4: the primary still holds its datagram");
+
+    /* ---- regression 5: the sibling callback closes a different sibling ----- */
+
+    /* Three sharers, so the walk visits B then C.  B's receive callback
+       unbinds C.  The fixed walk re-reads B's re-linked successor (A) and
+       stops cleanly; capture-next alone would follow C's now-NULL bound_next
+       and fault.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_arm(&h_socket_c);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_c.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_receive_callback = h_sibling_callback_close_other;
+    h_sibling_to_close = &h_socket_c;
+    h_sibling_callback_closed_other = 0;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 5: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 5: B co-binds");
+    h_check(_nx_udp_socket_bind(&h_socket_c, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 5: C co-binds");
+
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_sibling_callback_closed_other == 1,
+            "regression 5: the sibling callback ran and closed C");
+    h_check(h_socket_c.nx_udp_socket_bound_next == NX_NULL,
+            "regression 5: C was unbound");
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "regression 5: the primary still holds its datagram");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 1,
+            "regression 5: B got its clone before closing C");
+    h_check(h_socket_c.nx_udp_socket_receive_count == 0,
+            "regression 5: C (closed) got no clone");
 
     if (h_failures == 0)
     {
