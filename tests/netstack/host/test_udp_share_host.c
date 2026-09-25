@@ -56,6 +56,10 @@ ULONG _tx_thread_system_state;
    reused.  */
 static int h_suspended_receiver_consumes;
 
+/* Counted by the _tx_mutex_get stub so the dispatch-path regressions can prove
+   the deferred notify phase is skipped when no sibling notification is owed.  */
+static unsigned long h_mutex_get_count;
+
 VOID _tx_thread_system_suspend(TX_THREAD *thread_ptr)
 {
     (void)thread_ptr;
@@ -87,6 +91,7 @@ VOID _tx_thread_system_preempt_check(VOID)
 UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 {
     (void)mutex_ptr; (void)wait_option;
+    h_mutex_get_count++;
     return TX_SUCCESS;
 }
 
@@ -793,6 +798,45 @@ int main(void)
             "regression 10: the primary kept its datagram");
     h_check(h_socket_b.nx_udp_socket_receive_count == 1,
             "regression 10: B got its clone before rebinding C");
+
+    /* ---- regression 11: unicast skips the deferred notify phase ----------- */
+
+    /* The deferred notify walk (re-acquire the protection mutex and scan the
+       bound list) must run only when the fan-out actually enqueued a sibling
+       notification.  A unicast datagram has no fan-out, so it must keep the
+       single acquire/release of the pre-sharing hot path; a multicast to a
+       callback-bearing sibling must re-acquire exactly once.  A current thread
+       is faked so the dispatch takes the mutex at all (the guard skips it for
+       an ISR), and each acquisition is counted.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_receive_callback = h_sibling_callback_mark;
+    h_sibling_callback_invoked = 0;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 11: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 11: B co-binds");
+
+    _tx_thread_current_ptr = &h_thread;
+
+    h_mutex_get_count = 0;
+    h_packet_arm(0x0A000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+    h_check(h_mutex_get_count == 1,
+            "regression 11: unicast keeps the single acquire (no deferred walk)");
+
+    h_mutex_get_count = 0;
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+    h_check(h_mutex_get_count == 2,
+            "regression 11: multicast with a callback re-acquires exactly once");
+    h_check(h_sibling_callback_invoked == 1,
+            "regression 11: the sibling callback ran");
+
+    _tx_thread_current_ptr = NX_NULL;
 
     if (h_failures == 0)
     {
