@@ -28,25 +28,31 @@
 # Both disassembly syntaxes are accepted (Motorola `movea.l d0,a5`, MIT
 # `moveal %d0,%a5` / `%fp`), for the reason check-pcrel-branches.cmake gives.
 #
-# Inputs: BINARY, MAPFILE, OBJDUMP.
+# Inputs: BINARY, MAPFILE, OBJDUMP; or DISASM, a listing, for the ctest cases.
 #
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
 
-if(NOT EXISTS "${BINARY}")
-    message(FATAL_ERROR "check-a5-frame: no such file: ${BINARY}")
-endif()
-if(NOT OBJDUMP)
-    # A gate that cannot read the image must not pass it.
-    message(FATAL_ERROR "check-a5-frame: no objdump, cannot check ${BINARY}")
-endif()
-
-execute_process(COMMAND "${OBJDUMP}" -d "${BINARY}"
-                OUTPUT_VARIABLE dis_out ERROR_VARIABLE dis_err
-                RESULT_VARIABLE dis_rc)
-if(NOT dis_rc EQUAL 0)
-    message(FATAL_ERROR "check-a5-frame: objdump failed on ${BINARY}:\n${dis_err}")
+if(DISASM)
+    # A disassembly listing instead of an image: the ctest fixtures
+    # (tests/toolchain/check_a5_frame_cases.cmake).
+    file(READ "${DISASM}" dis_out)
+    set(BINARY "${DISASM}")
+else()
+    if(NOT EXISTS "${BINARY}")
+        message(FATAL_ERROR "check-a5-frame: no such file: ${BINARY}")
+    endif()
+    if(NOT OBJDUMP)
+        # A gate that cannot read the image must not pass it.
+        message(FATAL_ERROR "check-a5-frame: no objdump, cannot check ${BINARY}")
+    endif()
+    execute_process(COMMAND "${OBJDUMP}" -d "${BINARY}"
+                    OUTPUT_VARIABLE dis_out ERROR_VARIABLE dis_err
+                    RESULT_VARIABLE dis_rc)
+    if(NOT dis_rc EQUAL 0)
+        message(FATAL_ERROR "check-a5-frame: objdump failed on ${BINARY}:\n${dis_err}")
+    endif()
 endif()
 
 # Function entries from the map, same reading as check-pcrel-branches.cmake.
@@ -104,6 +110,7 @@ string(REPLACE "\n" ";" dis_lines "${dis_out}")
 set(framed 0)
 set(frame_at "")
 set(pending "")      # the last a5 write in this frame, not yet superseded
+set(pending_exg "")  # the register a5 was exchanged with, if that is the write
 set(bad "")
 foreach(line IN LISTS dis_lines)
     # "    380a:\t2a40           \tmovea.l d0,a5"
@@ -144,6 +151,20 @@ foreach(line IN LISTS dis_lines)
     if(mnem MATCHES "^(cmp|tst|btst|chk)")
         continue()
     endif()
+    # exg is a swap, not a write: `exg d7,a5; jsr -30(a6); exg d7,a5` is the
+    # NDK's own Supervisor() inline, and the second exg puts the frame back.
+    if(mnem MATCHES "^exg" AND ops_n MATCHES "(^|,)(a5|fp)(,|$)")
+        string(REGEX REPLACE "(^|,)(a5|fp)(,|$)" "" other "${ops_n}")
+        string(STRIP "${other}" other)
+        if(pending_exg STREQUAL other)
+            set(pending "")
+            set(pending_exg "")
+        else()
+            set(pending "0x${addr_hex}: ${mnem} ${ops} swaps a5 out")
+            set(pending_exg "${other}")
+        endif()
+        continue()
+    endif()
     # Destination = the operand after the last comma outside parentheses.
     string(REGEX REPLACE "\\([^)]*\\)" "" flat "${ops_n}")
     string(REGEX REPLACE "@[^,]*" "" flat "${flat}")
@@ -159,6 +180,7 @@ foreach(line IN LISTS dis_lines)
             set(pending "")
         else()
             set(pending "0x${addr_hex}: ${mnem} ${ops} overwrites a5")
+            set(pending_exg "")
         endif()
     endif()
 endforeach()

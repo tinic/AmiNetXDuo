@@ -342,7 +342,9 @@ host_test_targets() { # builddir
 #      entries, a lone IPv6 address delete drops its own (#50)
 #      456 with syncache_detach_gap/_driver/_late/_v6late: a SYN taken during
 #      or after a detach or address delete records nothing (#50)
-HOST_TESTS_EXPECTED=456
+#      457 with toolchain_a5_frame_gate: cmake/check-a5-frame.cmake's
+#      verdicts on the beta5 clobber and on an exg pair (#58)
+HOST_TESTS_EXPECTED=457
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
