@@ -291,6 +291,7 @@ BSD_SCRATCH;
     return(res);
 }
 
+#ifdef AMINETXDUO_MULTICAST   /* used only by the #38 sharing arms */
 static LONG bsd_sendto(LONG fd, APTR buf, LONG len, LONG flags,
                        APTR to, LONG tolen)
 {
@@ -335,6 +336,7 @@ register LONG _s_a0 __asm("a0");
                       : "cc", "memory");
     return(res);
 }
+#endif /* AMINETXDUO_MULTICAST */
 
 
 /* --------------------------------------------------------------- helpers -- */
