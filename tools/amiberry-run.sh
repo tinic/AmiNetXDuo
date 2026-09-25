@@ -471,12 +471,25 @@ STACK_BYTES="${AMINETXDUO_GUEST_STACK:-8192}"
 # emulator there is nothing in the bytes to say so.  That is not a hypothetical
 # -- it is what happened on 2026-08-25, and the arms that read a foreign
 # transcript reported findings about a guest they never booted.
+#
+# AMINETXDUO_AMIBERRY_STARTUP names a file of AmigaDOS lines that REPLACES the
+# executable's line, inlined rather than Execute'd because this drive has no
+# C:Execute.  tests/perf/run-rsgap.sh boots its per-boot fragment this way: a
+# guest that reboots itself runs the fragment again, and it ends the run by
+# falling through to the .done line.
+GUEST_LINE="$EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt"
+if [ -n "${AMINETXDUO_AMIBERRY_STARTUP:-}" ]; then
+    [ -f "$AMINETXDUO_AMIBERRY_STARTUP" ] || {
+        echo "AMINETXDUO_AMIBERRY_STARTUP=$AMINETXDUO_AMIBERRY_STARTUP does not exist" >&2
+        exit 2; }
+    GUEST_LINE=$(cat "$AMINETXDUO_AMIBERRY_STARTUP")
+fi
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
 c:envsetup $RUNTOKEN
 stack $STACK_BYTES
 $AUTOIF
-$EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt
+$GUEST_LINE
 echo >DH0:.done "\$RC"
 EOF
 
