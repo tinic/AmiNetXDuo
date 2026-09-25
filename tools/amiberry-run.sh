@@ -256,7 +256,7 @@ board_mac() { # index
     if [ "$1" = 0 ]; then
         printf '%s\n' "$MAC"
     else
-        emu_mac_for_tag "$TAG#$1"
+        emu_mac_for_tag "$MACTAG#$1"
     fi
 }
 
@@ -351,7 +351,13 @@ RUNTOKEN="$(printf '%s-%s-%s' "$$" "$PORT" "$(date +%s)")"
 # deliberately and one of them wants a reservation to hold across runs.
 # shellcheck source=emu-mac.sh
 . "$ROOT/tools/emu-mac.sh"
-MAC="${AMINETXDUO_AMIBERRY_MAC:-$(emu_mac_for_tag "$TAG")}"
+#
+# AMINETXDUO_MAC_TAG derives the address from another tag than the run's own.
+# A matrix harness sets one per script: its cases run one after another, each
+# under its own run tag for the logs, and a MAC per case put 50+ addresses on
+# the lab LAN per CI run and drained the router's 2 h DHCP pool.
+MACTAG="${AMINETXDUO_MAC_TAG:-$TAG}"
+MAC="${AMINETXDUO_AMIBERRY_MAC:-$(emu_mac_for_tag "$MACTAG")}"
 
 # EXCEPT ON THE ONE BOARD WHERE THE EMULATOR THROWS THE MAC AWAY.  Amiberry
 # instantiates the PCMCIA NE2000 with no autoconfig record at all

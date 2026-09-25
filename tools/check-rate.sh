@@ -23,12 +23,16 @@
 # "a SLIRP guest cannot be called in to" -- and the receive direction is the
 # whole point, so this needs a bridged interface and a peer that can call in.
 #
+# EXIT CODES: 0 pass, skipped or updated; 1 a direction is below its floor
+# (rate=SLOWER); 2 the rate was not evaluated -- usage, or a rate=error line
+# naming the rig, artefact or baseline problem.
+#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT" || exit 1
+cd "$ROOT" || exit 2
 
 BASELINE="tests/perf/rate-baseline.txt"
 
@@ -58,7 +62,7 @@ if [ -z "$IFACE" ] || [ -z "$PEER" ]; then
     exit 0
 fi
 
-[ -r "$BASELINE" ] || { echo "rate=error reason=no_baseline file=$BASELINE" >&2; exit 1; }
+[ -r "$BASELINE" ] || { echo "rate=error reason=no_baseline file=$BASELINE" >&2; exit 2; }
 
 # REFUSE TO MEASURE A TREE THE BUILD DID NOT FINISH.
 #
@@ -76,7 +80,7 @@ fi
 _stale=""
 for _art in "$BUILD/src/bsdsocket/bsdsocket.library" \
             "$BUILD/src/netdev/anxnet.device"; do
-    [ -e "$_art" ] || { echo "rate=error reason=missing_artefact file=$_art" >&2; exit 1; }
+    [ -e "$_art" ] || { echo "rate=error reason=missing_artefact file=$_art" >&2; exit 2; }
     _newer=$(find src port include third_party/netxduo/common/src \
                   -name '*.[ch]' -newer "$_art" -print -quit 2>/dev/null || true)
     [ -n "$_newer" ] && _stale="$_stale $_art(newer: $_newer)"
@@ -87,7 +91,7 @@ if [ -n "$_stale" ]; then
     echo "  A source file is newer than the binary about to be measured, so" >&2
     echo "  that binary is from an earlier build.  Rebuild and check the exit" >&2
     echo "  code before measuring." >&2
-    exit 1
+    exit 2
 fi
 
 # ------------------------------------------------------------------ measure --
@@ -123,7 +127,7 @@ if [ "${STALE:-0}" != "0" ] && [ "${AMINETXDUO_RATE_ALLOW_STALE:-0}" = "0" ]; th
     echo "  amiberry, then serial-timestamp.py, and re-check with ps." >&2
     echo "  AMINETXDUO_RATE_ALLOW_STALE=1 overrides, for a rig that really is" >&2
     echo "  running two isolated guests." >&2
-    exit 1
+    exit 2
 fi
 
 TMP=$(mktemp -d)
@@ -150,11 +154,11 @@ while [ "$r" -le "$ROUNDS" ]; do
             > "$TMP/round$r.log" 2>&1; then
         echo "rate=error reason=harness_failed round=$r" >&2
         tail -20 "$TMP/round$r.log" >&2
-        exit 1
+        exit 2
     fi
     for dir in tcp-rx tcp-tx; do
         v=$(round_rate "$dir" "$TMP/round$r.log")
-        [ -n "$v" ] || { echo "rate=error reason=no_${dir}_line round=$r" >&2; exit 1; }
+        [ -n "$v" ] || { echo "rate=error reason=no_${dir}_line round=$r" >&2; exit 2; }
         samples[$dir]="${samples[$dir]} $v"
         echo "rate_sample dir=$dir round=$r bits_per_sec=$v"
     done
@@ -184,12 +188,13 @@ if [ "$UPDATE" = 1 ]; then
 fi
 
 rc=0
+err=0
 for dir in tcp-rx tcp-tx; do
     got=$(median "${samples[$dir]}")
     want=$(sed -n "s/^$dir  *\([0-9]*\).*/\1/p" "$BASELINE" | head -1)
     if [ -z "$want" ]; then
         echo "rate=error reason=no_baseline_for dir=$dir" >&2
-        rc=1
+        err=1
         continue
     fi
     floor=$(( want * (100 - TOLERANCE) / 100 ))
@@ -206,5 +211,7 @@ for dir in tcp-rx tcp-tx; do
     fi
 done
 
+# A regression outranks a missing baseline line: it is a verdict.
+[ "$rc" = 0 ] && [ "$err" = 1 ] && rc=2
 [ "$rc" = 0 ] && echo "rate=PASS rounds=$ROUNDS tolerance=${TOLERANCE}%"
 exit "$rc"

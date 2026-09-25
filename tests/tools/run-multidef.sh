@@ -93,6 +93,11 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "No a2065.device found.  Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
+# ONE MAC FOR EVERY CASE.  The cases boot one after another, each under its
+# own run tag for the logs; the address comes from this tag instead, so a run
+# takes one DHCP lease rather than one per case (tools/amiberry-run.sh).
+export AMINETXDUO_MAC_TAG="${AMINETXDUO_MAC_TAG:-matrix-multidef}"
+
 RESULTS="$ROOT/build/multidef-results.txt"
 : > "$RESULTS"
 
