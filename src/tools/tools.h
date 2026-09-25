@@ -179,7 +179,11 @@ ULONG tool_list_dir(const char *path, char names[][TOOL_NAME_LEN], ULONG max,
 ULONG             tool_scan_devices(VOID);
 const ToolDevice *tool_scan_device(ULONG index);
 
-/* Which of the usual drawers holds `device`, or NULL if it is nowhere. */
+/*
+ * Which of the usual drawers holds `device`, TOOL_WHERE_PATH when it is a
+ * path that exists, "already in memory", or NULL if it is nowhere.
+ */
+#define TOOL_WHERE_PATH     "at that path"
 const char *tool_device_where(const char *device);
 
 /*

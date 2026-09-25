@@ -333,7 +333,8 @@ host_test_targets() { # builddir
 #      waiter and clears a recycled address without a Signal
 #      443 with adopt_pool_sweep: an unpublished slot whose claimer's address
 #      now holds another Task is freed; a live claimer's is kept
-HOST_TESTS_EXPECTED=443
+#      444 with test_romtag: rt_Name read from a driver file without loading it
+HOST_TESTS_EXPECTED=444
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

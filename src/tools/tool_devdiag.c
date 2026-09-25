@@ -11,6 +11,7 @@
 #include <exec/memory.h>
 
 #include "sana2_device.h"
+#include "romtag.h"
 
 #include "aminetxduo/compat.h"
 
@@ -149,6 +150,39 @@ VOID tool_explain_device_refused(const char *device, ULONG unit)
                 error, wire);
 }
 
+/*
+ * The name the driver file at `path` gives itself, read from its RomTag. FALSE
+ * when the file cannot be read or has none.
+ */
+static BOOL diag_file_romtag(const char *path, char *name, ULONG namelen)
+{
+    BPTR   fh;
+    LONG   size;
+    UBYTE *buf;
+    BOOL   ok = FALSE;
+
+    fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    if (fh == (BPTR)0)
+        return FALSE;
+
+    (VOID)Seek(fh, 0, OFFSET_END);
+    size = Seek(fh, 0, OFFSET_BEGINNING);
+
+    if (size > 0 && (ULONG)size <= ROMTAG_FILE_MAX)
+    {
+        buf = (UBYTE *)ami_alloc((ULONG)size);
+        if (buf != NULL)
+        {
+            if (Read(fh, buf, size) == size)
+                ok = romtag_name(buf, (ULONG)size, name, namelen);
+            ami_free(buf);
+        }
+    }
+
+    Close(fh);
+    return ok;
+}
+
 VOID tool_explain_device(const char *device, ULONG unit, const char *card)
 {
     const char *where = tool_device_where(device);
@@ -217,6 +251,36 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
 
     tool_printf("  %s is installed (%s) but unit %lu did not open.\n",
                 (LONG)device, (LONG)where, unit);
+
+    /*
+     * exec keeps a loaded driver under the name inside the file, and finds it
+     * again by the last part of the name it was asked for. A copy saved under
+     * another name loads, and then is not found, so the open fails.
+     */
+    {
+        static char path[TOOL_NAME_LEN * 2];   /* static: Online's stack budget */
+        static char inner[TOOL_NAME_LEN];
+        const char *file = tool_basename(device);
+
+        path[0] = '\0';
+        if (tool_stricmp(where, TOOL_WHERE_PATH) == 0)
+            tool_copy_string(path, sizeof(path), device);
+        else if (tool_stricmp(where, "already in memory") != 0)
+            tool_join_path(path, sizeof(path), where, device);
+
+        if (path[0] != '\0' &&
+            diag_file_romtag(path, inner, sizeof(inner)) &&
+            tool_stricmp(inner, file) != 0)
+        {
+            tool_printf("  The file %s names itself %s inside. AmigaOS opens "
+                        "a driver by that name, so a copy saved as %s does "
+                        "not open.\n", (LONG)file, (LONG)inner, (LONG)file);
+            tool_printf("  Rename the file %s, in a directory of its own if "
+                        "another %s is installed.\n", (LONG)inner,
+                        (LONG)inner);
+            return;
+        }
+    }
 
     if (unit != 0 && tool_device_probe(device, 0, card) == 0)
     {

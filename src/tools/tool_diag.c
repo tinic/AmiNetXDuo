@@ -218,21 +218,34 @@ BOOL diag_is_resident(const char *device)
 
 const char *tool_device_where(const char *device)
 {
-    int dir;
+    const char *file;
+    int         dir;
 
     if (device == NULL || *device == '\0')
         return NULL;
 
-    for (dir = 0; diag_device_dirs[dir] != NULL; dir++)
-    {
-        char path[TOOL_NAME_LEN * 2];
+    /* DEVICE= may name the file in full; OpenDevice() takes that path as it
+       stands, and exec matches what is in memory by its last part only. */
+    file = tool_basename(device);
 
-        tool_join_path(path, sizeof(path), diag_device_dirs[dir], device);
-        if (tool_exists(path))
-            return diag_device_dirs[dir];
+    if (file != device)
+    {
+        if (tool_exists(device))
+            return TOOL_WHERE_PATH;
+    }
+    else
+    {
+        for (dir = 0; diag_device_dirs[dir] != NULL; dir++)
+        {
+            char path[TOOL_NAME_LEN * 2];
+
+            tool_join_path(path, sizeof(path), diag_device_dirs[dir], device);
+            if (tool_exists(path))
+                return diag_device_dirs[dir];
+        }
     }
 
-    if (diag_is_resident(device))
+    if (diag_is_resident(file))
         return "already in memory";
 
     return NULL;

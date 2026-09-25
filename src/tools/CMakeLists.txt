@@ -29,7 +29,7 @@ endif()
 # SANA-II driver table and the card-diagnostic prose, which only the commands
 # that configure an interface can reach.  See the head of that file for why
 # --gc-sections cannot remove it from the ones that cannot.
-set(TOOLS_DEVDIAG tool_devdiag.c)
+set(TOOLS_DEVDIAG tool_devdiag.c romtag.c)
 
 
 set(TOOLS_WARNINGS -Wall -Wextra)
@@ -1041,7 +1041,17 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_statusreport PRIVATE -Wall -Wextra)
     set_target_properties(test_statusreport PROPERTIES C_STANDARD 11)
 
+    # The name a driver file gives itself, which AddNetInterface compares with
+    # the file name when an open fails.
+    add_executable(test_romtag test/test_romtag.c romtag.c)
+    target_include_directories(test_romtag PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+    target_compile_options(test_romtag PRIVATE -Wall -Wextra)
+    set_target_properties(test_romtag PROPERTIES C_STANDARD 11)
+
     include(CTest)
+    add_test(NAME romtag_name COMMAND test_romtag)
     add_test(NAME httpws_rfc6455 COMMAND test_httpws)
     add_test(NAME httppath_escapes COMMAND test_httppath)
     add_test(NAME httprequest_values COMMAND test_httprequest)
