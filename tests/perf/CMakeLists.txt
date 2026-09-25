@@ -52,6 +52,13 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME perf_profreport
                  COMMAND "${Python3_EXECUTABLE}"
                          "${CMAKE_CURRENT_SOURCE_DIR}/test_profreport.py")
+
+        # The Roadshow RX-gap verdict (gap / no material gap / inconclusive,
+        # docs/plans/roadshow-rx-gap.md) on synthetic boots, and the peer
+        # sender's loopback selftest.
+        add_test(NAME perf_rsgap
+                 COMMAND "${Python3_EXECUTABLE}"
+                         "${CMAKE_CURRENT_SOURCE_DIR}/test_rsgap.py")
     endif()
 endif()
 
@@ -196,6 +203,29 @@ if(CMAKE_CROSSCOMPILING)
         target_include_directories(fitzbench PRIVATE "${AMIGA_NDK_INCLUDE}")
     endif()
 
+endif()
+
+
+# ------------------------------------------------------ Roadshow RX gap --
+#
+# docs/plans/roadshow-rx-gap.md.  RsGapRx is the one receive client both arms
+# run: plain bsdsocket.library by name, nothing of ours linked, so LIBS:
+# decides the stack.  RsGapBoot is the stack-neutral selector, watchdog and
+# recorder.  tests/perf/run-rsgap.sh stages and drives both.
+#
+#   cmake --build build/cm --parallel --target rsgaprx rsgapboot
+
+if(CMAKE_CROSSCOMPILING)
+    add_executable(rsgaprx rsgaprx.c)
+    set_target_properties(rsgaprx PROPERTIES OUTPUT_NAME "RsGapRx")
+    add_executable(rsgapboot rsgapboot.c)
+    set_target_properties(rsgapboot PROPERTIES OUTPUT_NAME "RsGapBoot")
+    foreach(rsgaptool rsgaprx rsgapboot)
+        target_compile_options(${rsgaptool} PRIVATE -Wall -Wextra)
+        if(AMIGA_NDK_INCLUDE)
+            target_include_directories(${rsgaptool} PRIVATE "${AMIGA_NDK_INCLUDE}")
+        endif()
+    endforeach()
 endif()
 
 

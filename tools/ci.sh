@@ -328,7 +328,8 @@ host_test_targets() { # builddir
 #      the IP mutex is the answer nx_tcp_socket_mss_get() gives, in every state
 #      440 with statusreport_allowlist and statusreport_passive: the status
 #      report prints no secret, no address without ADDRESSES, and opens nothing
-HOST_TESTS_EXPECTED=440
+#      441 with perf_rsgap: the Roadshow RX-gap verdict and its peer sender
+HOST_TESTS_EXPECTED=441
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
