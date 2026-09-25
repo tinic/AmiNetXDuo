@@ -55,8 +55,9 @@ say where.
 | Control | Rule |
 |---|---|
 | Arms | **R**: Roadshow 1.15. **A**: AmiNetXDuo at a pinned release. Both use one `x-surf-100.device` file (hash recorded). No third arm until R vs A is settled |
-| Arm selection | one stack per **boot**, chosen by a selector file read by `S:Startup-Sequence` before any network start. The controller writes the selector over the door, then `C:Reboot`. A disk-loaded driver does not survive the reset, so Init runs fresh every boot. Stacks never share a boot, and no ENV toggle or teardown is involved. No power cycle: the shop switch also cuts the A1200 |
-| Rollback | selector back to AmiNetXDuo, then one boot, then verify the image hashes |
+| Arm selection | one stack per **boot**, chosen by a **one-shot** selector file that `S:Startup-Sequence` reads and deletes before any network start; with no selector, the machine boots AmiNetXDuo. The controller writes the selector over the door, then `C:Reboot`. A disk-loaded driver does not survive the reset, so Init runs fresh every boot. Stacks never share a boot, and no ENV toggle or teardown is involved. No power cycle: the shop switch also cuts the A1200 |
+| Rollback | needs no network: the selector is gone after one boot, and a **local watchdog**, started before the stack, runs `C:Reboot` after a fixed bound unless the boot's script completes. A Roadshow boot that loses its door therefore returns to AmiNetXDuo on its own. Then verify the image hashes |
+| Before any hardware GO | the emulator proves recovery: one deliberately failed Roadshow boot, the watchdog firing within its bound, the next boot coming up as AmiNetXDuo with its door working |
 | Unit | the **boot**. 4 receive transfers per boot, averaged into one value. Position within a boot is worth about 1% (`tests/perf/run-rate-ab.sh`) |
 | Order | alternate R/A/A/R across boots, so neither arm always runs first after power-on |
 | Direction | server to Amiga only (receive), written to `RAM:` so no disk is involved. A fixed-length TCP stream from a peer server that sends from memory, 12 s or 16 MB |
@@ -74,9 +75,9 @@ A result there answers whether a same-driver gap exists on this A3000, not
 what the 68060 number is. A 68060 reproduction waits for a 68060 card or for
 the reporter's own runs. The emulator cannot price this: Amiberry services
 a longword read as two `ne2000_wget` calls, which reverses the order. It is
-for dry-running the selector, logging and client only. A 68030
-also pays more than a 68060 for the misaligned copy (H3), so a gap on the lab
-A3000 may be larger than the reported one.
+for dry-running the selector, logging, watchdog and client only. Hypothesis,
+unmeasured on a real 68060: a 68030 pays more than a 68060 for the misaligned
+copy (H3), so a gap on the lab A3000 could be larger than the reported one.
 
 ## Measurements that separate mechanisms
 
@@ -84,13 +85,14 @@ Run only after a gap is reproduced. Each is passive or uses the same binary in
 both arms. The driver (1.16, disassembly in the evidence lane) looks up only
 `S2_CopyToBuff`, `S2_CopyFromBuff` and `S2_PacketFilter`, so our CopyToBuff16
 and extension tags go unused and every stack gets plain CopyToBuff. It reads each whole
-frame into a static buffer and copies from frame + 14, always 2 mod 4. That is
-two copies a packet, the same path for any stack.
+frame into a static buffer and, on the cooked path, copies from frame + 14,
+always 2 mod 4. That is two copies a packet, the same path for any stack. The
+raw path's source phase is not established.
 
 | Hypothesis | Discriminating measurement | Reads as |
 |---|---|---|
 | H1: no current gap | the A/B above | a "no material gap" verdict; an inconclusive one leaves H1 open |
-| H2: receive policy (ACKs, window) | server-side pcap per arm: ACKs per data segment, advertised window, gaps, retransmits | Roadshow over the vendor driver beat our own direct driver, which skips a copy, and it writes 18% slower: both point here rather than at the copy |
+| H2: receive policy (ACKs, window) | server-side pcap per arm: ACKs per data segment, advertised window, gaps, retransmits | a difference in ACK spacing or window between the arms on the **same** driver. The cross-driver comparison (Roadshow over the vendor driver beating our own direct driver) motivates H2 but cannot isolate it, since the two driver paths differ in more than the copy |
 | H3: copy phase | a `(from & 3, to & 3)` histogram and sampled EClock time in our CopyToBuff | our destination is 0 mod 4 against a 2 mod 4 source (`sana2_rx.c:719`; +30-37% of the copy on a 68020, `sana2_copy.c:60-110`). Roadshow's destination phase and the 68060 cost are unknown |
 | H4: read starvation | outstanding-read low-water mark and zero-read count, plus the driver's own drop count (unit + 302) through its statistics | frames lost with no read posted show up only as TCP retransmits |
 | H5: task priority | stack and driver task priorities per arm, from the status report and `Status` | a difference in who preempts whom during a burst |
