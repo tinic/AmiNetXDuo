@@ -331,17 +331,19 @@ typedef struct NetdevDevice
  * callers send a plain IOStdReq, 48 bytes, often one copied from the
  * IOSana2Req they opened with -- and ios2_BufferManagement is at offset 84,
  * past its end.  Reading it there invented an opener or lost the real one;
- * Open() and Close() WROTE it there.  mn_Length 0 means the caller did not
- * say, which is how requests were always taken: a full IOSana2Req.
+ * Open() and Close() WROTE it there.  Only a length the caller STATED counts:
+ * mn_Length 0 is not short (see NETDEV_IO_IS_FULL).
  */
 #define NETDEV_IO_IS_SHORT(io) \
     ((io)->ios2_Req.io_Message.mn_Length != 0 && \
      (io)->ios2_Req.io_Message.mn_Length < sizeof(struct IOSana2Req))
 
-/* And one that says it is at least an IOSana2Req, which mn_Length 0 does not:
-   only such a request may have its SANA-II data fields read on a guess. */
-#define NETDEV_IO_IS_FULL(io) \
-    ((io)->ios2_Req.io_Message.mn_Length >= sizeof(struct IOSana2Req))
+/* Everything else is a full IOSana2Req -- mn_Length 0 included, in every
+   entry point alike: Open, Close, BeginIO and the NewStyle query.  A request
+   built by hand has always been taken as full here, and SANA-II callers that
+   leave mn_Length unset depend on it.  A real 48-byte IOStdReq must say so
+   in mn_Length, as CreateIORequest() does. */
+#define NETDEV_IO_IS_FULL(io) (!NETDEV_IO_IS_SHORT(io))
 
 #ifndef NSCMD_DEVICEQUERY
 #define NSCMD_DEVICEQUERY           0x4000

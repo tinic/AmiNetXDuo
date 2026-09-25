@@ -742,6 +742,7 @@ static void i_nsquery_replies_by_hand(void)
 
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     memset(&answer, 0x5a, sizeof(answer));
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = &answer;
@@ -762,6 +763,7 @@ static void i_nsquery_replies_by_hand(void)
        reads that field as one. */
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = &answer;
     std.io_Length  = 15;
@@ -773,6 +775,7 @@ static void i_nsquery_replies_by_hand(void)
     /* A NULL buffer is the same answer. */
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = NULL;
     std.io_Length  = 64;
@@ -783,6 +786,7 @@ static void i_nsquery_replies_by_hand(void)
     /* IOF_QUICK set means the caller is not waiting on a reply port. */
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = &answer;
     std.io_Length  = sizeof(answer);
@@ -925,16 +929,30 @@ static void i2_nsquery_both_forms(void)
     expect(nsd_answer_untouched(&b), "  and not written");
     expect(replies == 1, "  and the refusal is replied to");
 
-    /* 5. mn_Length 0: not proven full-size, so the SANA-II fields are not read. */
+    /* 5. mn_Length 0 is a full request, here as in Open/Close/BeginIO: the
+          SANA-II form answers, and io_Data is never read. */
     reset();
     nsd_sana(&io, 0);
+    nsd_answer_init(&a);
     nsd_answer_init(&b);
     io.ios2_Data       = &b;
     io.ios2_DataLength = NSD_SIZE;
+    std->io_Data       = &a;
+    std->io_Length     = NSD_SIZE;
     netdev_nsd_query(&io);
-    expect_u32("a length-less request with no IOStdReq buffer is refused",
+    expect_u32("a length-less request is answered in the SANA-II form",
+               (unsigned long)b.SizeAvailable, NSD_SIZE);
+    expect(nsd_answer_untouched(&a), "  and its io_Data is not written");
+
+    reset();
+    nsd_sana(&io, 0);
+    nsd_answer_init(&a);
+    std->io_Data   = &a;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a length-less request with only io_Data is refused",
                (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
-    expect(nsd_answer_untouched(&b), "  and its SANA-II buffer is not guessed at");
+    expect(nsd_answer_untouched(&a), "  and io_Data is not written");
 
     /* 6. A short request (a 48-byte IOStdReq): same, and it says so itself. */
     reset();
@@ -1082,6 +1100,7 @@ static void j_the_advertised_list_is_the_real_one(void)
 
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     {
         struct
         {
@@ -1716,6 +1735,7 @@ static void t_rx_poll(void)
 
         reset();
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;
@@ -1765,6 +1785,7 @@ static void v_rx_capacity(void)
 
         reset();
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;
@@ -1866,6 +1887,7 @@ static void y_tx_flush(void)
         } answer;
 
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;
@@ -2127,6 +2149,7 @@ static void x_rx_batch(void)
         reset();
     unit.nu_Nic.rx_batches = 1;
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;

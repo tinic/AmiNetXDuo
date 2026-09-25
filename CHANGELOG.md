@@ -21,7 +21,9 @@ version at the top when it merges.
   `ios2_DataLength`, so mcastfilter no longer reports these drivers as
   "not a NewStyle device". A full-size request is answered in that form
   only, and its `io_Data` is ignored. For the `IOStdReq` form from an 88-byte
-  allocation, set `mn_Length` to that of an `IOStdReq`.
+  allocation, set `mn_Length` to that of an `IOStdReq`. A request with
+  `mn_Length` 0 is a full `IOSana2Req`, as before; a shorter request must state
+  its length.
 - `httpd` now has two independent, reconnectable Shell slots. `/shell` remains
   slot 0; `/shell?session=1` gives automation its own Shell. A disconnected
   slot keeps its working state for five minutes, and a live socket still has
