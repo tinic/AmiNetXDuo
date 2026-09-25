@@ -344,7 +344,9 @@ host_test_targets() { # builddir
 #      or after a detach or address delete records nothing (#50)
 #      457 with mcast_slot_epoch: BSD rows expire when a NetX slot is detached
 #      458 with mcast_sender_loop: sender-side multicast loopback is per socket
-HOST_TESTS_EXPECTED=458
+#      459 with libfit_decision: a bsdsocket.library that cannot load is named
+#      as memory from the free figure before the open (#55)
+HOST_TESTS_EXPECTED=459
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

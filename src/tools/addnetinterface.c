@@ -6,6 +6,7 @@
  */
 
 #include "tools.h"
+#include "libfit.h"
 
 const char *const tool_name = "AddNetInterface";
 
@@ -25,6 +26,7 @@ enum
 /* Seconds. Both the default and the floor, see the note at the top. */
 #define ADDIF_TIMEOUT       10UL
 
+/* What the stack needs beyond its own load file. */
 #define ADDNETIF_MIN_FREE   (200UL * 1024UL)
 #define ADDIF_MATCH_PATH    512UL
 
@@ -77,25 +79,49 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
     }
 }
 
-/* bsdsocket.library did not open. That has exactly two causes. */
-static VOID explain_library_failure(const AmiIfConfig *ifc)
+/* What LoadSeg of LIBS:bsdsocket.library allocates; zero when unreadable. */
+static VOID library_need(LibFitNeed *need)
 {
+    UBYTE head[LIBFIT_HEAD_MAX];
+    BPTR  fh;
+    LONG  got = 0;
+
+    fh = Open((CONST_STRPTR)"LIBS:bsdsocket.library", MODE_OLDFILE);
+    if (fh != 0)
+    {
+        got = Read(fh, head, (LONG)sizeof(head));
+        Close(fh);
+    }
+
+    (VOID)libfit_need(head, (got > 0) ? (ULONG)got : 0UL, need);
+}
+
+/*
+ * bsdsocket.library did not open. That has exactly two causes. The free
+ * figures are the ones taken before the open: a LoadSeg that fails gives
+ * everything back, so what is free afterwards says nothing.
+ */
+static VOID explain_library_failure(const AmiIfConfig *ifc, ULONG freemem,
+                                    ULONG largest, BOOL was_resident)
+{
+    LibFitNeed need = { 0, 0 };
+
     if (!tool_stack_installed())
     {
         tool_printf("  LIBS:bsdsocket.library is not installed.\n");
         return;
     }
 
+    /* In LibList before the open: nothing had to be loaded. Asked after it,
+       a library that loaded and then refused would count as resident. */
+    if (!was_resident)
+        library_need(&need);
+
+    if (libfit_short(freemem, largest, &need, ADDNETIF_MIN_FREE))
     {
-        ULONG freemem = AvailMem(MEMF_PUBLIC);
-
-        if (freemem < ADDNETIF_MIN_FREE)
-        {
-            advise_out_of_memory(freemem);
-            return;
-        }
+        advise_out_of_memory(freemem);
+        return;
     }
-
 
     /* Probe the hardware rather than guess at it. */
     tool_explain_device(ifc->device, ifc->unit, ifc->card);
@@ -752,17 +778,24 @@ int main(int argc, char **argv)
     {
         struct Library *base;
         BOOL            was_running = tool_stack_library_running();
+        ULONG           freemem;
+        ULONG           largest;
+        BOOL            resident;
+        char            idstr[8];
 
         if (!quiet && !was_running)
             tool_printf("%s: starting the network...\n", (LONG)name);
 
-        base = tool_stack_start();
+        resident = tool_stack_version(idstr, sizeof(idstr));
+        freemem  = AvailMem(MEMF_PUBLIC);
+        largest  = AvailMem(MEMF_PUBLIC | MEMF_LARGEST);
+        base     = tool_stack_start();
 
         if (base == NULL)
         {
             tool_error("bsdsocket.library did not open, so the network did "
                        "not start");
-            explain_library_failure(&ifc);
+            explain_library_failure(&ifc, freemem, largest, resident);
             FreeArgs(rda);
             return RETURN_FAIL;
         }

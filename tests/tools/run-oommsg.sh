@@ -117,8 +117,9 @@ expect "and names memory as the reason"    "bytes are free. The stack needs abou
 FREE=$(sed -n 's/^ *\([0-9][0-9]*\) bytes are free.*/\1/p' "$REPORT" | head -1)
 if [ -z "$FREE" ]; then
     fail "no free-byte figure was printed"
-elif [ "$FREE" -gt 0 ] && [ "$FREE" -lt 204800 ]; then
-    pass "it quotes $FREE bytes free, under the 200K the branch tested"
+elif [ "$FREE" -gt 0 ] && [ "$FREE" -lt 524288 ]; then
+    # Taken before the open (#55): a LoadSeg that fails gives it all back.
+    pass "it quotes $FREE bytes free, under the 512K the machine has"
 else
     fail "the free figure '$FREE' is not a plausible reading on this machine"
 fi
@@ -153,9 +154,16 @@ if [ "$LOGSTATE" != on ]; then
 elif ! serial_log_have "$SERIAL" "$BUILD" "the stack's own refusal"; then
     fail "the stack's own refusal was NOT CHECKED: the serial log is empty"
 elif grep -qi "netstack_startup failed" "$SERIAL"; then
-    pass "the stack refused for the reason the text describes"
+    pass "the stack loaded and refused for the reason the text describes"
+elif ! grep -qE "^\[(ERR |WARN|INFO|DBG |TRC )" "$SERIAL"; then
+    # #55: LoadSeg of the library itself fails on 512K, so nothing of the
+    # stack ever runs and there is no refusal to log.  The memory wording
+    # above is what names it; here only "the stack said nothing" is checked:
+    # no ami_log line at all (ami_diag.c, "[ERR ]".."[TRC ]").
+    pass "the library never loaded: the stack wrote nothing"
 else
-    fail "the serial log has no netstack_startup failure, the run failed elsewhere"
+    fail "the stack wrote to the serial log but not netstack_startup failed,\
+ so it started and failed elsewhere"
     tail -20 "$SERIAL" | sed 's/^/       /' >&2
 fi
 
