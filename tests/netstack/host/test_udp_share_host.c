@@ -186,6 +186,12 @@ static int            h_primary_callback_rebound;
    proving the deferred walk skips the deleted socket.  */
 static int            h_sibling_callback_deleted_other;
 
+/* Test 10: the sibling's receive callback unbinds a *different* pending sibling
+   and then rebinds it, proving an old notification is not dispatched into the
+   new binding (the unbind drains the clone and clears the pending flag, so the
+   rebound socket's callback must stay silent).  */
+static int            h_sibling_callback_rebound_other;
+
 /* The port-table bucket a 5353 bind lands in. */
 static UINT h_index(void)
 {
@@ -332,6 +338,19 @@ static void h_sibling_callback_delete_other(NX_UDP_SOCKET *socket_ptr)
     h_sibling_callback_deleted_other = 1;
     (VOID)_nx_udp_socket_unbind(h_sibling_to_close);
     h_sibling_to_close -> nx_udp_socket_id = 0;
+}
+
+/* Test 10: the sibling's receive callback unbinds a *different* pending sibling
+   and then rebinds it, standing in for a concurrent unbind-then-rebind of a
+   sibling between its clone delivery and its deferred callback.  The unbind
+   drains the clone and clears the pending flag, so the rebound socket must not
+   fire its callback for the old binding's datagram.  */
+static void h_sibling_callback_unbind_rebind_other(NX_UDP_SOCKET *socket_ptr)
+{
+    (void)socket_ptr;
+    h_sibling_callback_rebound_other = 1;
+    (VOID)_nx_udp_socket_unbind(h_sibling_to_close);
+    (VOID)_nx_udp_socket_bind(h_sibling_to_close, H_PORT, NX_NO_WAIT);
 }
 
 
@@ -732,6 +751,48 @@ int main(void)
             "regression 9: the primary kept its datagram");
     h_check(h_socket_b.nx_udp_socket_receive_count == 1,
             "regression 9: B got its clone before deleting C");
+
+    /* ---- regression 10: the sibling callback rebinds a pending sibling ---- */
+
+    /* Three sharers.  B's receive callback unbinds C (draining C's clone and
+       clearing its pending flag) and then rebinds C, the observable a
+       concurrent unbind-then-rebind leaves behind.  The rebound C is a new
+       binding: its receive callback must not fire for the old binding's
+       datagram.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_arm(&h_socket_c);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_c.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_receive_callback = h_sibling_callback_unbind_rebind_other;
+    h_socket_c.nx_udp_receive_callback = h_sibling_callback_mark;
+    h_sibling_to_close = &h_socket_c;
+    h_sibling_callback_rebound_other = 0;
+    h_sibling_callback_invoked = 0;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 10: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 10: B co-binds");
+    h_check(_nx_udp_socket_bind(&h_socket_c, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 10: C co-binds");
+
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_sibling_callback_rebound_other == 1,
+            "regression 10: the sibling callback ran and rebound C");
+    h_check(h_socket_c.nx_udp_socket_bound_next != NX_NULL,
+            "regression 10: C is back on the bound list");
+    h_check(h_socket_c.nx_udp_socket_receive_count == 0,
+            "regression 10: C's clone was drained by the unbind");
+    h_check(h_sibling_callback_invoked == 0,
+            "regression 10: the rebound sibling's callback did not fire");
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "regression 10: the primary kept its datagram");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 1,
+            "regression 10: B got its clone before rebinding C");
 
     if (h_failures == 0)
     {
