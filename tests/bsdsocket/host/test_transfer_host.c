@@ -1126,6 +1126,7 @@ static void t_mss_peek_guard(void)
         { TRUE,  2, FALSE, "adopted, another thread running: the locked call" },
         { TRUE,  1, TRUE,  "adopted and running: the fields, no mutex" },
     };
+    static TX_THREAD mine;              /* the port's slot, in production */
     static TX_THREAD other;
     char             buf[24];
     unsigned         i;
@@ -1146,8 +1147,9 @@ static void t_mss_peek_guard(void)
         s->as_Nx.tcp.nx_tcp_socket_connect_mss = 6;
 
         h_base.sb_NxCaller.nc_Adopted = cases[i].adopted;
+        h_base.sb_NxCaller.nc_Thread  = &mine;
         _tx_thread_current_ptr =
-            (cases[i].current == 1) ? &h_base.sb_NxCaller.nc_Thread :
+            (cases[i].current == 1) ? &mine :
             (cases[i].current == 2) ? &other : NULL;
 
         CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24, cases[i].what);
@@ -1165,7 +1167,8 @@ static void t_mss_peek_guard(void)
     h_sock[0].as_Nx.tcp.nx_tcp_socket_state = NX_TCP_SYN_SENT;
     h_sock[0].as_Nx.tcp.nx_tcp_socket_mss   = 5;
     h_base.sb_NxCaller.nc_Adopted = TRUE;
-    _tx_thread_current_ptr = &h_base.sb_NxCaller.nc_Thread;
+    h_base.sb_NxCaller.nc_Thread  = &mine;
+    _tx_thread_current_ptr = &mine;
     CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24 && h.sends == 5 &&
           h.mss_gets == 0, "before ESTABLISHED the configured MSS sizes it");
 

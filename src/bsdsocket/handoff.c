@@ -184,8 +184,9 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     return id;
 }
 
-/* Is anything parked?  bsd_lib_close() reads this without sb_Lock, to decide
-   whether a bracket is worth taking before it obtains the semaphore. */
+/* Is anything parked?  Read under sb_Lock, by bsd_handoff_flush() only:
+   bsd_lib_close() takes its bracket unconditionally, outside the lock, and does
+   not read this first. */
 BOOL bsd_handoff_pending(struct AmiSocketBase *master)
 {
     return master->sb_Handoffs.mlh_Head != NULL &&

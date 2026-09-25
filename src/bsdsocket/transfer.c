@@ -311,7 +311,8 @@ static VOID bsd_send_mss_get(struct AmiSocketBase *base, AmiSocket *sock,
                              ULONG *mss)
 {
     if (base->sb_NxCaller.nc_Adopted &&
-        _tx_thread_current_ptr == &base->sb_NxCaller.nc_Thread)
+        base->sb_NxCaller.nc_Thread != TX_NULL &&
+        _tx_thread_current_ptr == base->sb_NxCaller.nc_Thread)
     {
         *mss = _nx_tcp_socket_mss_compute(&sock->as_Nx.tcp);
 #ifdef AMINETXDUO_SCHEDCOUNT

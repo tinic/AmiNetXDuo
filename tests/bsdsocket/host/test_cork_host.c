@@ -1103,6 +1103,7 @@ static void t_mss_fill(void)
  */
 static void t_mss_peek(void)
 {
+    static TX_THREAD mine;              /* the port's slot, in production */
     AmiSocket *s;
 
     printf("cork: the baton holder reads the MSS without the mutex\n");
@@ -1113,7 +1114,8 @@ static void t_mss_peek(void)
     s->as_Nx.tcp.nx_tcp_socket_state       = NX_TCP_ESTABLISHED;
     s->as_Nx.tcp.nx_tcp_socket_connect_mss = 100;
     h_base.sb_NxCaller.nc_Adopted = TRUE;
-    _tx_thread_current_ptr = &h_base.sb_NxCaller.nc_Thread;
+    h_base.sb_NxCaller.nc_Thread  = &mine;
+    _tx_thread_current_ptr = &mine;
 
     CHECK(h_send(0, 0, 60, 0) == 60 && h_send(0, 60, 40, 0) == 40, "sixty, forty");
     CHECK(h.sends == 1 && h_wire_is(0, 100),
@@ -1127,6 +1129,7 @@ static void t_mss_peek(void)
     s->as_Nx.tcp.nx_tcp_socket_state       = NX_TCP_ESTABLISHED;
     s->as_Nx.tcp.nx_tcp_socket_connect_mss = 100;
     h_base.sb_NxCaller.nc_Adopted = TRUE;
+    h_base.sb_NxCaller.nc_Thread  = &mine;
     _tx_thread_current_ptr = NULL;
 
     CHECK(h_send(0, 0, 60, 0) == 60, "sixty");
