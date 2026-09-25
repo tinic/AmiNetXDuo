@@ -113,6 +113,28 @@ VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd)
     seen_io_error   = io->ios2_Req.io_Error;
 }
 
+/* NSCMD_DEVICEQUERY's handler.  Records what it was handed; the answer itself
+   is test_netdev_cmds.c's to check. */
+static int              seen_query;
+static struct IOStdReq *seen_query_req;
+static BYTE             seen_query_error;
+
+VOID netdev_nsd_query(struct IOStdReq *std)
+{
+    seen_query++;
+    seen_query_req   = std;
+    seen_query_error = std->io_Error;
+}
+
+/* A short request with any other command is answered in BeginIO itself. */
+static int seen_reply;
+
+VOID ReplyMsg(struct Message *msg)
+{
+    (VOID)msg;
+    seen_reply++;
+}
+
 BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
 {
     (VOID)io;
@@ -424,6 +446,137 @@ static void h_the_two_bulk_commands_skip_the_jump_table(void)
            "an unattached CMD_WRITE falls back to the generic path");
 }
 
+/*
+ * ISSUE #39.  NSCMD_DEVICEQUERY arrives in a plain IOStdReq, usually a copy of
+ * the IOStdReq-sized head of the request the caller opened with.  BeginIO
+ * derived the opener from ios2_BufferManagement -- offset 84 of a 48-byte
+ * request -- found none, and the query came back IOERR_BADADDRESS.
+ *
+ * The request is built at the head of a larger buffer whose tail is a canary,
+ * so a write anywhere past the IOStdReq shows up.  The tail also plants a
+ * plausible opener pointer at ios2_BufferManagement's offset: a BeginIO that
+ * still read it would dispatch to the recorder with that opener.
+ */
+typedef struct
+{
+    struct IOStdReq std;
+    UBYTE           tail[sizeof(struct IOSana2Req) + 32 - sizeof(struct IOStdReq)];
+} StdFrame;
+
+static void std_frame(StdFrame *f, UWORD command, UWORD length)
+{
+    struct IOSana2Req *wide = (struct IOSana2Req *)f;
+
+    memset(f, 0xa5, sizeof(*f));
+    wide->ios2_BufferManagement = &opener;       /* in the tail: a decoy */
+    f->std.io_Message.mn_Length = length;
+    f->std.io_Command           = command;
+    f->std.io_Flags             = 0;
+    f->std.io_Error             = (BYTE)0x5a;
+    f->std.io_Unit              = &unit.nu_ExecUnit;
+}
+
+static int tail_intact(const StdFrame *f)
+{
+    StdFrame ref;
+    struct IOSana2Req *wide = (struct IOSana2Req *)&ref;
+
+    memset(&ref, 0xa5, sizeof(ref));
+    wide->ios2_BufferManagement = &opener;
+    return memcmp(f->tail, ref.tail, sizeof(ref.tail)) == 0;
+}
+
+static void i_a_plain_iostdreq_reaches_the_query(void)
+{
+    static const UWORD lengths[] = {
+        (UWORD)sizeof(struct IOStdReq),     /* CreateIORequest(p, sizeof IOStdReq) */
+        0,                                  /* built by hand, length unset */
+        (UWORD)sizeof(struct IOSana2Req)    /* the full request, same answer */
+    };
+    int i;
+
+    for (i = 0; i < (int)(sizeof(lengths) / sizeof(lengths[0])); i++)
+    {
+        StdFrame f;
+
+        std_frame(&f, (UWORD)NSCMD_DEVICEQUERY, lengths[i]);
+        seen_query = 0;
+        seen_perform = 0;
+        seen_took = TOOK_NONE;
+        netdev_begin_io(&fake_device, (struct IOSana2Req *)&f);
+
+        expect(seen_query == 1, "NSCMD_DEVICEQUERY reached the query handler");
+        expect(seen_query_req == &f.std, "with the caller's own request");
+        expect_u32("and io_Error cleared before it",
+                   (unsigned long)(UBYTE)seen_query_error, 0);
+        expect(seen_perform == 0,
+               "and never the opener-bound dispatcher (no BADADDRESS)");
+        if (lengths[i] == (UWORD)sizeof(struct IOStdReq))
+            expect(tail_intact(&f),
+                   "and not one byte past a 48-byte IOStdReq was written");
+    }
+}
+
+static void j_a_short_request_is_answered_inside_it(void)
+{
+    static const UWORD commands[] = {
+        CMD_READ, CMD_WRITE, S2_DEVICEQUERY, S2_ONEVENT, S2_GETSTATIONADDRESS
+    };
+    int i;
+
+    for (i = 0; i < (int)(sizeof(commands) / sizeof(commands[0])); i++)
+    {
+        StdFrame f;
+
+        std_frame(&f, commands[i], (UWORD)sizeof(struct IOStdReq));
+        seen_perform = 0;
+        seen_query = 0;
+        seen_reply = 0;
+        seen_took = TOOK_NONE;
+        netdev_begin_io(&fake_device, (struct IOSana2Req *)&f);
+
+        expect(seen_perform == 0 && seen_query == 0,
+               "a short SANA-II command reaches no handler");
+        expect_u32("it is refused as no such command",
+                   (unsigned long)(UBYTE)f.std.io_Error,
+                   (unsigned long)(UBYTE)IOERR_NOCMD);
+        expect_u32("with io_Actual zero", (unsigned long)f.std.io_Actual, 0);
+        expect(seen_reply == 1, "and replied to");
+        expect(tail_intact(&f), "without writing past the request");
+    }
+
+    /* IOF_QUICK: answered in place, no reply. */
+    {
+        StdFrame f;
+
+        std_frame(&f, CMD_READ, (UWORD)sizeof(struct IOStdReq));
+        f.std.io_Flags = IOF_QUICK;
+        seen_reply = 0;
+        netdev_begin_io(&fake_device, (struct IOSana2Req *)&f);
+        expect(seen_reply == 0, "a quick short request is not replied to");
+        expect_u32("but is still refused", (unsigned long)(UBYTE)f.std.io_Error,
+                   (unsigned long)(UBYTE)IOERR_NOCMD);
+    }
+}
+
+static void k_abortio_reads_no_opener_it_cannot_have(void)
+{
+    StdFrame f;
+
+    std_frame(&f, (UWORD)NSCMD_DEVICEQUERY, (UWORD)sizeof(struct IOStdReq));
+    seen_abort = 0;
+    expect(netdev_abort_io(&fake_device, (struct IOSana2Req *)&f) == -1,
+           "AbortIO of a query reports nothing in progress");
+    expect(seen_abort == 0, "without consulting the opener");
+
+    std_frame(&f, CMD_READ, (UWORD)sizeof(struct IOStdReq));
+    seen_abort = 0;
+    expect(netdev_abort_io(&fake_device, (struct IOSana2Req *)&f) == -1,
+           "AbortIO of a short request reports nothing in progress");
+    expect(seen_abort == 0, "without reading past the request");
+    expect(tail_intact(&f), "and without writing past it");
+}
+
 int main(void)
 {
     memset(&opener, 0, sizeof(opener));
@@ -439,6 +592,9 @@ int main(void)
     f_the_opener_round_trips();
     g_abort_io();
     h_the_two_bulk_commands_skip_the_jump_table();
+    i_a_plain_iostdreq_reaches_the_query();
+    j_a_short_request_is_answered_inside_it();
+    k_abortio_reads_no_opener_it_cannot_have();
 
     printf("%d checks, %d failures, %s\n", checks, failures,
            (failures == 0) ? "PASS" : "FAIL");

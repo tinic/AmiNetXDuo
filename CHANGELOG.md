@@ -9,6 +9,14 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxnet.device`, `anxgenet.device` and `anxzz9000.device` now answer
+  `NSCMD_DEVICEQUERY` sent in a plain 48-byte `IOStdReq`, as capability tools
+  such as mcastfilter send it, instead of refusing it with
+  `IOERR_BADADDRESS`. The query no longer looks for a SANA-II opener it does not
+  need. A request shorter than an `IOSana2Req` can also open the device for
+  that query, and Open, Close, BeginIO and AbortIO no longer read or write past
+  the end of such a request; any other command in one is refused with
+  `IOERR_NOCMD`.
 - `httpd` now has two independent, reconnectable Shell slots. `/shell` remains
   slot 0; `/shell?session=1` gives automation its own Shell. A disconnected
   slot keeps its working state for five minutes, and a live socket still has

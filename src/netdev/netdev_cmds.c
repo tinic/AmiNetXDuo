@@ -743,10 +743,9 @@ static VOID cmd_global_stats(NetdevUnit *unit, struct IOSana2Req *io)
     netdev_reply(io, 0, 0);
 }
 
-static VOID cmd_nsd_query(struct IOSana2Req *io)
+VOID netdev_nsd_query(struct IOStdReq *std)
 {
-    struct IOStdReq      *std = (struct IOStdReq *)io;
-    struct NetdevNSQuery *q   = (struct NetdevNSQuery *)std->io_Data;
+    struct NetdevNSQuery *q = (struct NetdevNSQuery *)std->io_Data;
 
     /* io_Actual aliases ios2_WireError on m68k, so the SANA-II reply helper
        cannot answer this IOStdReq without destroying the byte count. */
@@ -1006,7 +1005,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     }
 
     case NSCMD_DEVICEQUERY:
-        cmd_nsd_query(io);
+        netdev_nsd_query((struct IOStdReq *)io);
         return;
 
     default:

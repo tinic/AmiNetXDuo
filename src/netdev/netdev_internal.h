@@ -327,6 +327,22 @@ typedef struct NetdevDevice
 #define NETDEV_IO_OPENER(io) ((NetdevOpener *)(io)->ios2_BufferManagement)
 
 /*
+ * A request that says it is shorter than an IOSana2Req.  NSCMD_DEVICEQUERY
+ * callers send a plain IOStdReq, 48 bytes, often one copied from the
+ * IOSana2Req they opened with -- and ios2_BufferManagement is at offset 84,
+ * past its end.  Reading it there invented an opener or lost the real one;
+ * Open() and Close() WROTE it there.  mn_Length 0 means the caller did not
+ * say, which is how requests were always taken: a full IOSana2Req.
+ */
+#define NETDEV_IO_IS_SHORT(io) \
+    ((io)->ios2_Req.io_Message.mn_Length != 0 && \
+     (io)->ios2_Req.io_Message.mn_Length < sizeof(struct IOSana2Req))
+
+#ifndef NSCMD_DEVICEQUERY
+#define NSCMD_DEVICEQUERY           0x4000
+#endif
+
+/*
  * What one opener did with one received frame.  REJECTED is not a failure and
  * not a delivery: the opener's S2_PacketFilter hook said no, its CMD_READ is
  * still queued and untouched, and the frame goes on to whoever else wants it.
@@ -560,6 +576,10 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event);
 
 /* netdev_cmds.c */
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
+
+/* NSCMD_DEVICEQUERY.  Reads and writes IOStdReq fields only, needs no opener,
+   and is what BeginIO calls before it looks at anything SANA-II. */
+VOID netdev_nsd_query(struct IOStdReq *std);
 /* The two bulk commands, reachable without the generic dispatch. */
 VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 /* The CMD_READ / S2_READORPHAN half of it, reachable without the dispatch. */
