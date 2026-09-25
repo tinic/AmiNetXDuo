@@ -61,7 +61,9 @@ add_test(NAME syncache_cache  COMMAND test_syncache cache)
 # The arms assert the correct behaviour: detach and a lone IPv6 address
 # delete drop the entries that point at what they zero, send nothing for
 # them, leave the cache's lists and counters consistent, and keep entries on
-# every other interface (keep).
+# every other interface (keep).  gap and driver feed a SYN in while the detach
+# runs (ARP/ND gap, driver detach handler); late and v6late present a
+# deferred SYN with the old interface or address pointer, zeroed and reused.
 set(_nxs "${AMINETXDUO_NETXDUO}/common/src")
 add_executable(test_syncache_detach
     host/test_syncache_detach_host.c
@@ -98,8 +100,12 @@ set_target_properties(test_syncache_detach PROPERTIES C_STANDARD 11)
 add_test(NAME syncache_detach_v4      COMMAND test_syncache_detach v4)
 add_test(NAME syncache_detach_v4reuse COMMAND test_syncache_detach v4reuse)
 add_test(NAME syncache_detach_keep    COMMAND test_syncache_detach keep)
+add_test(NAME syncache_detach_gap     COMMAND test_syncache_detach gap)
+add_test(NAME syncache_detach_driver  COMMAND test_syncache_detach driver)
+add_test(NAME syncache_detach_late    COMMAND test_syncache_detach late)
 if(AMINETXDUO_IPV6)
     add_test(NAME syncache_detach_v6       COMMAND test_syncache_detach v6)
     add_test(NAME syncache_detach_v6accept COMMAND test_syncache_detach v6accept)
     add_test(NAME syncache_detach_v6delete COMMAND test_syncache_detach v6delete)
+    add_test(NAME syncache_detach_v6late   COMMAND test_syncache_detach v6late)
 endif()

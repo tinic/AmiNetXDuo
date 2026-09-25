@@ -340,7 +340,9 @@ host_test_targets() { # builddir
 #      on a detached interface (#50)
 #      452 with syncache_detach_keep/_v6delete: detach keeps other interfaces'
 #      entries, a lone IPv6 address delete drops its own (#50)
-HOST_TESTS_EXPECTED=452
+#      456 with syncache_detach_gap/_driver/_late/_v6late: a SYN taken during
+#      or after a detach or address delete records nothing (#50)
+HOST_TESTS_EXPECTED=456
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

@@ -131,8 +131,24 @@ UINT _nx_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
 UINT _nx_packet_release(NX_PACKET *packet_ptr)          { (void) packet_ptr; return NX_SUCCESS; }
 UINT _nx_packet_transmit_release(NX_PACKET *packet_ptr) { (void) packet_ptr; return NX_SUCCESS; }
 
+/* A SYN fed into the cache from inside the detach: in the unlocked ARP/ND
+   gap between its two mutex holds, or from the driver's
+   NX_LINK_INTERFACE_DETACH handler.  Models a SYN the IP thread processes
+   while the detach is under way.  */
+enum { HOOK_NONE, HOOK_GAP, HOOK_DRIVER };
+static int  hook_at;
+static int  hook_fired;
+static void rig_hook(void);
+
 /* The link-layer tables detach clears: nothing here fills them.  */
-VOID _nx_arp_interface_entries_delete(NX_IP *ip_ptr, UINT index)       { (void) ip_ptr; (void) index; }
+VOID _nx_arp_interface_entries_delete(NX_IP *ip_ptr, UINT index)
+{
+    (void) ip_ptr; (void) index;
+    if (hook_at == HOOK_GAP)
+    {
+        rig_hook();
+    }
+}
 UINT _nx_igmp_multicast_interface_leave_internal(NX_IP *ip_ptr, ULONG group, UINT index)
 {
     (void) ip_ptr; (void) group; (void) index;
@@ -140,7 +156,14 @@ UINT _nx_igmp_multicast_interface_leave_internal(NX_IP *ip_ptr, ULONG group, UIN
 }
 VOID _nx_tcp_socket_connection_reset(NX_TCP_SOCKET *socket_ptr)        { (void) socket_ptr; }
 #ifdef FEATURE_NX_IPV6
-VOID _nx_nd_cache_interface_entries_delete(NX_IP *ip_ptr, UINT index)  { (void) ip_ptr; (void) index; }
+VOID _nx_nd_cache_interface_entries_delete(NX_IP *ip_ptr, UINT index)
+{
+    (void) ip_ptr; (void) index;
+    if (hook_at == HOOK_GAP)
+    {
+        rig_hook();
+    }
+}
 UINT _nx_ipv6_multicast_leave(NX_IP *ip_ptr, ULONG *group, NX_INTERFACE *if_ptr)
 {
     (void) ip_ptr; (void) group; (void) if_ptr;
@@ -175,6 +198,10 @@ UNREACHED(ULONG IPv6_Address_Type(ULONG *a))
 static void rig_driver(NX_IP_DRIVER *req)
 {
     req -> nx_ip_driver_status = NX_SUCCESS;
+    if ((hook_at == HOOK_DRIVER) && (req -> nx_ip_driver_command == NX_LINK_INTERFACE_DETACH))
+    {
+        rig_hook();
+    }
 }
 
 
@@ -260,6 +287,8 @@ static void rig_reset(void)
 
     host_now = 100000;
     rig_if = K;
+    hook_at = HOOK_NONE;
+    hook_fired = 0;
     sends_v4 = handed_v4 = sends_v6 = asserts = 0;
     last_v4_if = last_v6_if = NX_NULL;
 
@@ -518,6 +547,182 @@ static void case_keep_other(void)
        sends_v4 == 1 && last_v4_if == &rig_ip.nx_ip_interface[0] && asserts == 0);
 }
 
+/* A deferred SYN, with the assert unwinding here rather than aborting.  */
+static void rig_syn_armed(ULONG version, ULONG irs)
+{
+    assert_armed = 1;
+    if (setjmp(assert_jump) == 0)
+    {
+        rig_syn(version, irs);
+    }
+    assert_armed = 0;
+}
+
+/* No live entry points at interface K or its IPv6 address.  */
+static int rig_k_referenced(void)
+{
+    NX_TCP_SYNCACHE       *c = &rig_ip.nx_ip_tcp_syncache;
+    NX_TCP_SYNCACHE_ENTRY *e;
+    int                    n = 0;
+
+    for (e = c -> nx_tcp_syncache_age_head; e; e = e -> nx_tcp_syncache_age_next)
+    {
+        n += (e -> nx_tcp_syncache_interface == &rig_ip.nx_ip_interface[K]);
+    }
+    for (e = c -> nx_tcp_syncache_accept_head; e; e = e -> nx_tcp_syncache_age_next)
+    {
+        n += (e -> nx_tcp_syncache_interface == &rig_ip.nx_ip_interface[K]);
+    }
+    return n;
+}
+
+/* The hook: one SYN of each family on K, from inside the detach.  */
+static void rig_hook(void)
+{
+    hook_at = HOOK_NONE;                /* ARP and ND both call in: once */
+    hook_fired++;
+    rig_if = K;
+    rig_syn(NX_IP_VERSION_V4, 0x7000);
+#ifdef FEATURE_NX_IPV6
+    rig_syn(NX_IP_VERSION_V6, 0x7100);
+#endif
+}
+
+/* (a) gap, (b) driver: a SYN taken while K is being detached is gone once
+   the detach returns, and nothing is sent for it afterwards.  */
+static void case_during(int where)
+{
+    int sent_during;
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    hook_at = where;
+
+    ok("the interface detaches", _nx_ip_interface_detach(&rig_ip, K) == NX_SUCCESS);
+    sent_during = sends_v4 + sends_v6;
+    printf("     SYNs injected %s: %d; SYN-ACKs sent during the detach: %d\n",
+           (where == HOOK_GAP) ? "in the ARP/ND gap" : "from the driver's detach",
+           hook_fired, sent_during);
+    ok("the hook fired", hook_fired == 1);
+    ok("no entry references the detached interface", rig_k_referenced() == 0);
+    rig_cache_check(0, 0);
+
+    sends_v4 = handed_v4 = sends_v6 = 0;
+    rig_run_out();
+    ok("no NX_ASSERT", asserts == 0);
+    ok("nothing is sent after the detach", sends_v4 == 0 && handed_v4 == 0 && sends_v6 == 0);
+}
+
+/* (c) a deferred SYN presented with K's old interface pointer after the
+   detach has returned: the slot zeroed, then refilled by another card under
+   another address.  */
+static void case_late(void)
+{
+    NX_INTERFACE *ifp = &rig_ip.nx_ip_interface[K];
+    int           reuse;
+    ULONG         cookie;
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;  /* a completed one queues */
+
+    /* A SYN answered before the detach: its ISS is a valid cookie, so an ACK
+       with no entry behind it can still rebuild the connection.  */
+    rig_syn(NX_IP_VERSION_V4, 0x8800);
+    cookie = rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_age_head -> nx_tcp_syncache_iss;
+    rig_detach();
+
+    rig_ack(NX_IP_VERSION_V4, 0x8800, cookie);
+    printf("     cookie ACK after the detach: cookies valid %lu, queued %lu\n",
+           (unsigned long) rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_cookies_valid,
+           (unsigned long) rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_accept_count);
+    ok("a cookie ACK on the detached interface builds no connection",
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_accept_count == 0 &&
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_cookies_valid == 0);
+
+    for (reuse = 0; reuse < 2; reuse++)
+    {
+        if (reuse)
+        {
+            ifp -> nx_interface_valid = NX_TRUE;
+            ifp -> nx_interface_link_up = NX_TRUE;
+            ifp -> nx_interface_ip_address = 0xc0a80163UL;      /* 192.168.1.99/24 */
+            ifp -> nx_interface_ip_network_mask = 0xffffff00UL;
+            ifp -> nx_interface_ip_network = 0xc0a80100UL;
+            ifp -> nx_interface_ip_mtu_size = 1500;
+            ifp -> nx_interface_link_driver_entry = rig_driver;
+#ifdef FEATURE_NX_IPV6
+            {
+                /* The address slot refilled too, under another address.  */
+                NXD_IPV6_ADDRESS *a = &rig_ip.nx_ipv6_address[0];
+                ULONG             other6[4] = { 0x20010db8UL, 0, 0, 0x99UL };
+
+                a -> nxd_ipv6_address_valid = NX_TRUE;
+                a -> nxd_ipv6_address_state = NX_IPV6_ADDR_STATE_VALID;
+                a -> nxd_ipv6_address_attached = ifp;
+                a -> nxd_ipv6_address_prefix_length = 64;
+                memcpy(a -> nxd_ipv6_address, other6, sizeof(other6));
+                ifp -> nxd_interface_ipv6_address_list_head = a;
+            }
+#endif
+        }
+
+        rig_if = K;
+        rig_syn_armed(NX_IP_VERSION_V4, 0x8000 + (ULONG) reuse);
+#ifdef FEATURE_NX_IPV6
+        rig_syn_armed(NX_IP_VERSION_V6, 0x8100 + (ULONG) reuse);
+#endif
+        printf("     %s: count %lu, SYN-ACKs v4 %d (handed %d) v6 %d\n",
+               reuse ? "slot reused as 192.168.1.99" : "slot zeroed",
+               (unsigned long) rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_count,
+               sends_v4, handed_v4, sends_v6);
+        ok(reuse ? "reused slot: no entry for a SYN sent to the old address"
+                 : "zeroed slot: no entry for a deferred SYN",
+           rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_count == 0);
+        ok("and nothing is sent", sends_v4 == 0 && handed_v4 == 0 && sends_v6 == 0);
+        ok("and no NX_ASSERT", asserts == 0);
+    }
+
+    rig_run_out();
+    ok("no NX_ASSERT", asserts == 0);
+    ok("nothing is sent later", sends_v4 == 0 && handed_v4 == 0 && sends_v6 == 0);
+    rig_cache_check(0, 0);
+}
+
+#ifdef FEATURE_NX_IPV6
+/* (d) a deferred IPv6 SYN presented with a deleted address's pointer, then
+   again after the slot is refilled under another address.  */
+static void case_v6_late_delete(void)
+{
+    NXD_IPV6_ADDRESS *a = &rig_ip.nx_ipv6_address[0];
+    ULONG             other6[4] = { 0x20010db8UL, 0, 0, 0x99UL };
+
+    rig_reset();
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    ok("the IPv6 address is deleted", _nxd_ipv6_address_delete(&rig_ip, 0) == NX_SUCCESS);
+
+    rig_syn_armed(NX_IP_VERSION_V6, 0x9000);
+    ok("deleted address: no entry", rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_count == 0);
+    ok("and no NX_ASSERT", asserts == 0);
+    ok("and no SYN-ACK", sends_v6 == 0);
+
+    a -> nxd_ipv6_address_valid = NX_TRUE;
+    a -> nxd_ipv6_address_state = NX_IPV6_ADDR_STATE_VALID;
+    a -> nxd_ipv6_address_attached = &rig_ip.nx_ip_interface[K];
+    a -> nxd_ipv6_address_prefix_length = 64;
+    memcpy(a -> nxd_ipv6_address, other6, sizeof(other6));
+    rig_ip.nx_ip_interface[K].nxd_interface_ipv6_address_list_head = a;
+
+    rig_syn_armed(NX_IP_VERSION_V6, 0x9001);
+    ok("slot refilled as ::99: no entry for a SYN sent to ::88",
+       rig_ip.nx_ip_tcp_syncache.nx_tcp_syncache_count == 0);
+    ok("and no SYN-ACK", sends_v6 == 0);
+
+    rig_run_out();
+    ok("no NX_ASSERT", asserts == 0);
+    rig_cache_check(0, 0);
+}
+#endif
+
 /* SYN on K, SYN-ACK lost, K detached.  Detached and left empty, the retry's
    route lookup fails and the shipped IPv4 send drops it for want of a next
    hop, so that arm passes today.  With `reuse' the slot is then taken by
@@ -592,14 +797,30 @@ int main(int argc, char **argv)
     {
         case_v6_delete();
     }
+    else if (strcmp(which, "v6late") == 0)
+    {
+        case_v6_late_delete();
+    }
 #endif
     else if (strcmp(which, "keep") == 0)
     {
         case_keep_other();
     }
+    else if (strcmp(which, "gap") == 0)
+    {
+        case_during(HOOK_GAP);
+    }
+    else if (strcmp(which, "driver") == 0)
+    {
+        case_during(HOOK_DRIVER);
+    }
+    else if (strcmp(which, "late") == 0)
+    {
+        case_late();
+    }
     else
     {
-        printf("usage: test_syncache_detach v4|v4reuse|v6|v6accept|v6delete|keep\n");
+        printf("usage: test_syncache_detach v4|v4reuse|v6|v6accept|v6delete|v6late|keep|gap|driver|late\n");
         return 2;
     }
 
