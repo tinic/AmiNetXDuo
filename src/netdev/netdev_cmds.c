@@ -743,10 +743,14 @@ static VOID cmd_global_stats(NetdevUnit *unit, struct IOSana2Req *io)
     netdev_reply(io, 0, 0);
 }
 
+/* The largest io_Length believed as a NewStyle buffer in a full request:
+   far above any real one, far below the smallest EtherType (0x600). */
+#define NETDEV_NSQ_PLAUSIBLE    256UL
+
 VOID netdev_nsd_query(struct IOSana2Req *io)
 {
     struct IOStdReq      *std  = (struct IOStdReq *)io;
-    struct NetdevNSQuery *q    = (struct NetdevNSQuery *)std->io_Data;
+    struct NetdevNSQuery *q    = NULL;
     BOOL                  sana = FALSE;
 
     /* io_Actual aliases ios2_WireError on m68k, so the SANA-II reply helper
@@ -755,6 +759,19 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
     _Static_assert(offsetof(struct IOStdReq, io_Actual) ==
                    offsetof(struct IOSana2Req, ios2_WireError),
                    "NSCMD_DEVICEQUERY io_Actual alias changed");
+    /* THE ALIASES THE PRECEDENCE BELOW EXISTS FOR, pinned where they are
+       true: in a full request io_Length is ios2_PacketType and io_Data is
+       the first four bytes of ios2_SrcAddr.  mcastfilter writes +72/+76. */
+    _Static_assert(offsetof(struct IOStdReq, io_Length) ==
+                   offsetof(struct IOSana2Req, ios2_PacketType) &&
+                   offsetof(struct IOStdReq, io_Data) ==
+                   offsetof(struct IOSana2Req, ios2_SrcAddr),
+                   "NSCMD_DEVICEQUERY io_Data/io_Length alias changed");
+    _Static_assert(offsetof(struct IOSana2Req, ios2_DataLength) == 72 &&
+                   offsetof(struct IOSana2Req, ios2_Data) == 76 &&
+                   sizeof(struct IOStdReq) == 48 &&
+                   sizeof(struct IOSana2Req) == 88,
+                   "SANA-II request layout changed");
     /* The NewStyle answer is 16 bytes on the target; the host's 24 is only
        the host's.  mcastfilter asks for exactly 16. */
     _Static_assert(sizeof(struct NetdevNSQuery) == 16,
@@ -762,33 +779,53 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
 #endif
 
     /*
-     * TWO FORMS.  The NewStyle one: io_Data/io_Length of an IOStdReq.  And
-     * the one mcastfilter 1.20 sends: its opened IOSana2Req, buffer in
-     * ios2_Data and size in ios2_DataLength -- where io_Data/io_Length are
-     * ios2_SrcAddr/ios2_PacketType, zero, and the query came back
-     * IOERR_BADLENGTH, "not a NewStyle device".  The IOStdReq form wins when
-     * it names a buffer.  The SANA-II fields are read only from a request that
-     * SAYS it is full-size: mn_Length 0 could be a hand-built 48-byte
-     * IOStdReq, and offsets 72 and 76 are past its end.
+     * TWO FORMS, AND WHICH ONE A REQUEST IS DECIDES BY ITS SIZE.
+     *
+     * A request that SAYS it is a full IOSana2Req (mn_Length) is asked in the
+     * SANA-II form first -- ios2_Data/ios2_DataLength, which is what
+     * mcastfilter 1.20 sends.  In such a request io_Data/io_Length are not
+     * fields at all: they are ios2_SrcAddr[0..3] and ios2_PacketType, and a
+     * reused request carries a stale source address and a packet type of
+     * 0x800 there.  Taking those first wrote the answer to an address made of
+     * MAC bytes.  The worst the SANA-II form can do is write the caller's own
+     * data buffer.  Only when it names no usable buffer is io_Data consulted,
+     * which is how a fresh request cast to an IOStdReq still works.
+     *
+     * Anything else -- a short request, or mn_Length 0 which could be a
+     * hand-built 48-byte IOStdReq -- is an IOStdReq, and offsets 72 and 76
+     * are past its end: the IOStdReq form only.
+     *
+     * AND IN A FULL REQUEST THE IOStdReq FORM MUST LOOK LIKE ONE.  With
+     * ios2_Data NULL a stale source address would still reach it.  What
+     * gives a stale request away is io_Length: there it is the packet type,
+     * an EtherType of 0x600 or more (0x0800, 0x0806, 0x86DD), where a real
+     * NewStyle buffer is tens of bytes.  So it must be at most
+     * NETDEV_NSQ_PLAUSIBLE, and word-aligned for the ULONG fields.
+     *
+     * The minimum is the size written, not a literal 16: that is the m68k
+     * layout, and the host's is wider.
      */
-    /* The size written, not a literal 16: that is the m68k layout, and the
-       host's is wider, so a 16-byte check there let a 24-byte answer out. */
-    if (q == NULL || std->io_Length < sizeof(struct NetdevNSQuery))
+    if (NETDEV_IO_IS_FULL(io) && io->ios2_Data != NULL &&
+        io->ios2_DataLength >= sizeof(struct NetdevNSQuery))
     {
-        if (NETDEV_IO_IS_FULL(io) && io->ios2_Data != NULL &&
-            io->ios2_DataLength >= sizeof(struct NetdevNSQuery))
-        {
-            q    = (struct NetdevNSQuery *)io->ios2_Data;
-            sana = TRUE;
-        }
-        else
-        {
-            std->io_Actual = 0;
-            std->io_Error  = IOERR_BADLENGTH;
-            if ((std->io_Flags & IOF_QUICK) == 0)
-                ReplyMsg(&std->io_Message);
-            return;
-        }
+        q    = (struct NetdevNSQuery *)io->ios2_Data;
+        sana = TRUE;
+    }
+    else if (std->io_Data != NULL &&
+             std->io_Length >= sizeof(struct NetdevNSQuery) &&
+             (!NETDEV_IO_IS_FULL(io) ||
+              (std->io_Length <= NETDEV_NSQ_PLAUSIBLE &&
+               ((size_t)std->io_Data & 1U) == 0)))
+    {
+        q = (struct NetdevNSQuery *)std->io_Data;
+    }
+    else
+    {
+        std->io_Actual = 0;
+        std->io_Error  = IOERR_BADLENGTH;
+        if ((std->io_Flags & IOF_QUICK) == 0)
+            ReplyMsg(&std->io_Message);
+        return;
     }
 
     q->DevQueryFormat    = 0;

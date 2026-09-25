@@ -884,7 +884,8 @@ static void i2_nsquery_both_forms(void)
     expect(nsd_canary_intact(&a), "  and nothing past the 16 bytes was written");
     expect(replies == 1, "  and it was replied to");
 
-    /* 2. Both forms name a buffer: the IOStdReq form wins, the other is untouched. */
+    /* 2. A full request naming both: the SANA-II form wins, because in a
+          full request io_Data/io_Length are ios2_SrcAddr/ios2_PacketType. */
     reset();
     nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
     nsd_answer_init(&a);
@@ -894,12 +895,12 @@ static void i2_nsquery_both_forms(void)
     io.ios2_Data       = &b;
     io.ios2_DataLength = NSD_SIZE;
     netdev_nsd_query(&io);
-    expect_u32("with both forms present the IOStdReq one is used",
-               (unsigned long)a.SizeAvailable, NSD_SIZE);
-    expect(nsd_answer_untouched(&b), "  and the SANA-II buffer is not written");
-    expect(nsd_canary_intact(&a), "  within its 16 bytes");
+    expect_u32("in a full request naming both, the SANA-II form is used",
+               (unsigned long)b.SizeAvailable, NSD_SIZE);
+    expect(nsd_answer_untouched(&a), "  and the IOStdReq-shaped buffer is not written");
+    expect(nsd_canary_intact(&b), "  within its 16 bytes");
 
-    /* 3. The IOStdReq form is too short: a full request falls back to SANA-II. */
+    /* 3. With a one-short IOStdReq buffer as well, still the SANA-II form. */
     reset();
     nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
     nsd_answer_init(&a);
@@ -909,7 +910,7 @@ static void i2_nsquery_both_forms(void)
     io.ios2_Data       = &b;
     io.ios2_DataLength = NSD_SIZE;
     netdev_nsd_query(&io);
-    expect(nsd_answer_untouched(&a), "a one-short IOStdReq buffer is never written");
+    expect(nsd_answer_untouched(&a), "a one-short IOStdReq-shaped buffer is never written");
     expect_u32("  the valid SANA-II buffer answers instead", (unsigned long)b.SizeAvailable, NSD_SIZE);
 
     /* 4. An undersized SANA-II buffer is refused, and not written. */
@@ -957,6 +958,61 @@ static void i2_nsquery_both_forms(void)
                (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
     expect_u32("  io_Actual is the byte count", (unsigned long)std->io_Actual, NSD_SIZE);
     expect(nsd_canary_intact(&a), "  within its 16 bytes");
+
+    /*
+     * 8. THE REUSED REQUEST (codex review of #41).  A full request after a
+     *    CMD_READ: ios2_Data names the caller's buffer, and io_Data/io_Length
+     *    are a stale source MAC and EtherType 0x0800.  The answer must go to
+     *    ios2_Data; the MAC-derived "buffer" (a decoy here) must not be
+     *    written.  On m68k the aliasing is exact (the driver asserts it);
+     *    the host lays the fields out differently, so this pins the rule.
+     */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    nsd_answer_init(&b);
+    std->io_Data       = &a;                 /* the stale "source address" */
+    std->io_Length     = 0x0800;             /* the stale packet type */
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = 1514;
+    netdev_nsd_query(&io);
+    expect_u32("a reused request answers into ios2_Data",
+               (unsigned long)b.SizeAvailable, NSD_SIZE);
+    expect(nsd_answer_untouched(&a), "  and never the MAC-derived address");
+
+    /* 9. The same stale request with ios2_Data cleared: nothing believable is
+          left, so it is refused -- EtherType 0x0800 is no NewStyle length. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    std->io_Data       = &a;
+    std->io_Length     = 0x0800;
+    netdev_nsd_query(&io);
+    expect_u32("a stale EtherType is not a NewStyle length in a full request",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and the MAC-derived address is not written");
+
+    /* 10. A fresh full request cast to an IOStdReq still works. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    std->io_Data   = &a;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a fresh full request cast to an IOStdReq is answered",
+               (unsigned long)a.SizeAvailable, NSD_SIZE);
+    expect_u32("  io_Actual is the byte count", (unsigned long)std->io_Actual, NSD_SIZE);
+
+    /* 11. An odd io_Data in a full request is not believed either. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    std->io_Data   = (UBYTE *)&a + 1;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("an odd io_Data in a full request is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and not written");
 }
 
 static void j_the_advertised_list_is_the_real_one(void)
