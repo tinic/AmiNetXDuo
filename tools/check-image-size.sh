@@ -54,7 +54,10 @@ BUDGETS=(
     # slot pool, handle validation and the unpublished-slot sweep
     # (fcfb0b62, +1,724 over main's 358,696) and the stamp checks in the
     # shutdown wake and the sweep (+44), 2026-09-25.
-    "default:src/bsdsocket/bsdsocket.library:362000"
+    # 362,856 with the SYN-cache detach flush (#54), stale multicast rows
+    # and per-send loopback (#48, #47) and UDP port sharing in NetX (#38),
+    # 2026-09-25.
+    "default:src/bsdsocket/bsdsocket.library:365000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
