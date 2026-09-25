@@ -3068,7 +3068,7 @@ stage_rate() {
         0) ;;
         1) fail "rate: a direction is below its recorded rate"
            return 1 ;;
-        *) fail "rate: NOTHING MEASURED, not a regression --\
+        *) fail "rate: evaluation incomplete, not a regression --\
  $(printf '%s' "$out" | sed -n 's/^rate=error //p' | head -1)"
            return 1 ;;
     esac

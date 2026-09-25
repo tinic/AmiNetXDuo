@@ -24,8 +24,8 @@
 # whole point, so this needs a bridged interface and a peer that can call in.
 #
 # EXIT CODES: 0 pass, skipped or updated; 1 a direction is below its floor
-# (rate=SLOWER); 2 nothing was measured -- usage, or a rate=error line naming
-# the rig or artefact problem.
+# (rate=SLOWER); 2 the rate was not evaluated -- usage, or a rate=error line
+# naming the rig, artefact or baseline problem.
 #
 # SPDX-License-Identifier: MIT
 
