@@ -224,11 +224,13 @@ UINT tx_amiga_adopt_handle_valid(TX_THREAD *thread_ptr, ULONG generation)
 
    `final` is the shutdown pass, and it is the answer to what a retained
    mismatch costs.  After tx_amiga_kernel_stop() there are no more releases, so
-   "retries on the next release" would be a Task parked for ever.  The stamp
-   test is therefore dropped for that pass and every entry is cleared: at
-   shutdown the choice is between one spurious Signal to a recycled address --
-   on a bit that Task allocated, so at worst one early Wait() return -- and a
-   Task that never wakes.  */
+   "retries on the next release" would keep the entry for ever.  But a waiter
+   that is really parked is inside this port, in Wait(), and cannot change its
+   stack bounds, its name pointer or its UniqueID, so on this pass a mismatch
+   means the waiter has gone and its address now holds a different Task.  That
+   entry is cleared WITHOUT a Signal: the Task at the address never asked for
+   one.  A match is signalled as on any other pass, and every entry is cleared
+   either way.  */
 VOID _tx_amiga_adopt_wake_scan(UINT final)
 {
 
@@ -258,9 +260,18 @@ struct Task     *task;
             continue;
         }
 
-        if ((final == ((UINT) TX_FALSE)) &&
-            (_tx_amiga_task_stamp(task) != _tx_amiga_adopt_waiters[i].aw_stamp))
+        if (_tx_amiga_task_stamp(task) != _tx_amiga_adopt_waiters[i].aw_stamp)
         {
+            /* Ordinary pass: retain, silently.  Final pass: the waiter is
+               gone, so the entry goes and nobody is signalled.  */
+            if (final != ((UINT) TX_FALSE))
+            {
+                _tx_amiga_adopt_waiters[i].aw_task =  (struct Task *) 0;
+                if (_tx_amiga_adopt_waiting > 0UL)
+                {
+                    _tx_amiga_adopt_waiting--;
+                }
+            }
             continue;
         }
 

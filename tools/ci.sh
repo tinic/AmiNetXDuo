@@ -329,7 +329,9 @@ host_test_targets() { # builddir
 #      440 with statusreport_allowlist and statusreport_passive: the status
 #      report prints no secret, no address without ADDRESSES, and opens nothing
 #      441 with perf_rsgap: the Roadshow RX-gap verdict and its peer sender
-HOST_TESTS_EXPECTED=441
+#      442 with adopt_pool_wake: the pool's shutdown wake signals a parked
+#      waiter and clears a recycled address without a Signal
+HOST_TESTS_EXPECTED=442
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

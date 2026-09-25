@@ -1768,34 +1768,63 @@ static VOID bt_test_unpublished_slot_sweep(VOID)
     bt_reap(&bt_rc_orphan_slot);
 }
 
-/* THE SHUTDOWN WAKE, and the one case that needs it.
+/* THE SHUTDOWN WAKE.
 
    A waiter parked on a full pool is signalled from every slot release -- but
-   only if it still carries the stamp it registered with.  On a mismatch the
-   ordinary pass RETAINS the entry and stays silent, because dropping it is the
-   one thing that could lose a live waiter's only wakeup.  "Retries on the next
-   release" is a fine answer while releases keep coming.  After
-   tx_amiga_kernel_stop() none ever will, so the shutdown pass drops the stamp
-   test: it signals the entry anyway and empties the table.
+   only while it still carries the stamp it registered with.  On a mismatch the
+   ordinary pass RETAINS the entry and stays silent.  After
+   tx_amiga_kernel_stop() no release will come again, so the shutdown pass
+   settles every entry:
 
-   THE TRADE THAT MAKES: at shutdown a stamp mismatch is far more likely to mean
-   "this waiter is long gone and its address was recycled" than "this waiter
-   moved", so the Signal may land on a different Task.  It lands on a bit that
-   Task itself allocated, so the worst it can do is return one Wait() early,
-   which any correct Exec program tolerates.  The alternative is a Task parked
-   for ever in a library that has shut down.  One spurious wakeup beats one
-   permanent hang.
+     - a stamp that still matches is the waiter itself, parked in Wait().  It
+       is signalled, so it re-reads the kernel flags and unwinds.
+     - a stamp that does not match cannot be the waiter: a Task parked inside
+       the port cannot change its stack bounds, name or UniqueID.  The waiter
+       has gone and another Task holds its address.  That entry is cleared
+       WITHOUT a Signal.
 
-   The mismatch is forced here the way nothing in production does it, by
-   changing the parked Task's name pointer: _tx_amiga_task_stamp() is built from
-   the stack bounds and ln_Name, and ln_Name is the only one of those main can
-   move without disturbing the Task. */
+   The pool is held full by UNPUBLISHED claims from one live filler Task, not by
+   adopted holders: the stop refuses while application threads exist, and the
+   waiters have to still be parked when it commits.  The filler keeps the stamp
+   it claimed with, so no sweep takes its slots before the stop.
 
-static BtTask bt_final[BT_POOL_MAX];
-static BtTask bt_final_waiter;
+   The recycled address is stood in for by renaming the second waiter:
+   _tx_amiga_task_stamp() is built from the stack bounds and ln_Name, and
+   ln_Name is the only one of those main can move without disturbing the Task.
+   The shutdown pass must leave it parked.  Main then puts the name back and
+   signals it by hand, on the bit it is waiting for, so it can unwind. */
+
+static BtTask bt_final_filler;
+static BtTask bt_final_parked;
+static BtTask bt_final_moved;
+static ULONG  bt_final_want;
+static ULONG  bt_final_filled;
 
 static char bt_final_name_a[] = "final-waiter";
 static char bt_final_name_b[] = "final-waiter-renamed-to-break-its-stamp";
+
+/* Claims bt_final_want slots and publishes none, then holds them until told. */
+static VOID bt_final_filler_entry(VOID)
+{
+    struct Task *me = FindTask(NULL);
+    BtTask      *bt = (BtTask *)me->tc_UserData;
+    ULONG        n;
+
+    Wait(BT_SIG_GO);
+
+    for (n = 0UL; n < bt_final_want; n++)
+    {
+        if (tx_amiga_adopt_claim_orphan() == (UINT)TX_FALSE)
+            break;
+    }
+    bt_final_filled = n;
+    if (n != bt_final_want)
+        bt->bt_Failures++;
+
+    bt->bt_Ready = 1U;
+    Wait(BT_SIG_ACQUIRE);               /* until after the stop */
+    bt_finish(bt);
+}
 
 /* Parks on a full pool and never gets a slot.  Records its own signal
    allocation across the whole episode: a bit leaked or a bit freed twice both
@@ -1832,126 +1861,157 @@ static VOID bt_final_waiter_entry(VOID)
     bt_finish(bt);
 }
 
-static VOID bt_test_shutdown_wakes_mismatched_waiter(VOID)
+static ULONG bt_final_waiting(VOID)
+{
+    ULONG waiting;
+
+    Forbid();
+    waiting = _tx_amiga_adopt_waiting;
+    Permit();
+    return waiting;
+}
+
+static VOID bt_test_shutdown_wake(VOID)
 {
     struct Task *me = FindTask(NULL);
     ULONG        slots   = tx_amiga_adopt_slots();
     ULONG        reserve = tx_amiga_adopt_reserve();
-    ULONG        ordinary;
-    ULONG        i;
-    ULONG        waiting;
+    ULONG        swept_before;
     ULONG        waited;
+    ULONG        sigwait;
     UINT         status;
 
-    t_log("bracket: the shutdown wake, and a waiter whose stamp moved\n", 0, 0);
+    t_log("bracket: the shutdown wake, a parked waiter and a moved stamp\n",
+          0, 0);
 
-    ordinary = tx_amiga_adopt_slots_free();
-    if (ordinary <= reserve || ordinary > (ULONG)BT_POOL_MAX)
+    if (tx_amiga_adopt_slots_free() != slots || slots <= reserve)
     {
-        t_check(0, "the pool is a size this test can cover", (LONG)ordinary);
+        t_check(0, "the pool is whole before the shutdown case",
+                (LONG)tx_amiga_adopt_slots_free());
         return;
     }
-    ordinary -= reserve;
 
-    /* ---- fill everything an ordinary caller may have -------------------- */
+    /* ---- fill everything an ordinary caller may have, unpublished -------- */
 
+    bt_final_want = slots - reserve;
     SetSignal(0, BT_SIG_GO);
-    for (i = 0UL; i < ordinary; i++)
-    {
-        bt_final[i].bt_Parent = me;
-        if (bt_spawn(&bt_final[i], bt_rc_hold_entry, "final-hold", BT_PRI)
-            == NULL)
-        {
-            t_check(0, "spawned every filler", (LONG)i);
-            ordinary = i;
-            break;
-        }
-    }
-    for (i = 0UL; i < ordinary; i++)
-        Signal(bt_final[i].bt_Task, BT_SIG_GO);
-    Delay(25);
-
+    bt_final_filler.bt_Parent = me;
+    t_check(bt_spawn(&bt_final_filler, bt_final_filler_entry, "final-filler",
+                     BT_PRI) != NULL,
+            "spawned the Task that holds the pool full", 0);
+    if (bt_final_filler.bt_Task == NULL)
+        return;
+    Signal(bt_final_filler.bt_Task, BT_SIG_GO);
+    bt_wait_for(&bt_final_filler.bt_Ready, "the filler to claim its slots");
+    t_check(bt_final_filler.bt_Failures == 0,
+            "it claimed every ordinary slot", (LONG)bt_final_filled);
     t_check(tx_amiga_adopt_slots_free() == reserve,
             "the pool is full for an ordinary caller",
             (LONG)tx_amiga_adopt_slots_free());
 
-    /* ---- one more, which parks ------------------------------------------ */
+    /* ---- two more, which park ------------------------------------------- */
 
-    bt_final_waiter.bt_Parent = me;
-    t_check(bt_spawn(&bt_final_waiter, bt_final_waiter_entry,
-                     bt_final_name_a, BT_PRI) != NULL,
-            "spawned the waiter that will be left behind", 0);
-    if (bt_final_waiter.bt_Task == NULL)
+    bt_final_parked.bt_Parent = me;
+    bt_final_moved.bt_Parent  = me;
+    t_check(bt_spawn(&bt_final_parked, bt_final_waiter_entry, "final-parked",
+                     BT_PRI) != NULL,
+            "spawned the waiter whose stamp holds", 0);
+    t_check(bt_spawn(&bt_final_moved, bt_final_waiter_entry, bt_final_name_a,
+                     BT_PRI) != NULL,
+            "spawned the waiter whose stamp will move", 0);
+    if (bt_final_parked.bt_Task == NULL || bt_final_moved.bt_Task == NULL)
         return;
 
-    Signal(bt_final_waiter.bt_Task, BT_SIG_GO);
+    Signal(bt_final_parked.bt_Task, BT_SIG_GO);
+    Signal(bt_final_moved.bt_Task, BT_SIG_GO);
     waited = 0UL;
-    while (_tx_amiga_adopt_waiting == 0UL && waited < 250UL)
+    while (bt_final_waiting() < 2UL && waited < 250UL)
     {
         Delay(1);
         waited++;
     }
-    Forbid();
-    waiting = _tx_amiga_adopt_waiting;
-    Permit();
-    t_check(waiting == 1UL, "it parked waiting for a slot", (LONG)waiting);
-    if (waiting != 1UL)
+    t_check(bt_final_waiting() == 2UL, "both parked waiting for a slot",
+            (LONG)bt_final_waiting());
+    if (bt_final_waiting() != 2UL)
         return;
 
-    /* ---- break its stamp, then give every slot back --------------------- */
+    /* ---- break one stamp; the ordinary pass keeps it and stays silent ---- */
 
     Forbid();
-    bt_final_waiter.bt_Task->tc_Node.ln_Name = bt_final_name_b;
+    bt_final_moved.bt_Task->tc_Node.ln_Name = bt_final_name_b;
     Permit();
-    t_check(_tx_amiga_task_stamp(bt_final_waiter.bt_Task) != 0UL,
+    t_check(_tx_amiga_task_stamp(bt_final_moved.bt_Task) != 0UL,
             "the renamed Task still has a stamp", 0);
 
-    for (i = 0UL; i < ordinary; i++)
-        Signal(bt_final[i].bt_Task, BT_SIG_ACQUIRE);
-    for (i = 0UL; i < ordinary; i++)
-        bt_wait_for(&bt_final[i].bt_Done, "every filler to orphan and exit");
+    /* What every release runs.  The matching waiter wakes, finds the pool
+       still full and parks again; the moved one is not touched. */
+    _tx_amiga_adopt_wake_waiters();
+    Delay(5);
+    t_check(bt_final_waiting() == 2UL,
+            "the ordinary pass retained both entries", (LONG)bt_final_waiting());
+    t_check(bt_final_parked.bt_Done == 0U && bt_final_moved.bt_Done == 0U,
+            "and neither waiter left", 0);
 
-    /* Every one of those orphans ran the ORDINARY wake.  None of them may have
-       signalled the waiter, and none of them may have dropped its entry. */
-    Forbid();
-    waiting = _tx_amiga_adopt_waiting;
-    Permit();
-    t_check(tx_amiga_adopt_slots_free() == slots,
-            "every slot came back", (LONG)tx_amiga_adopt_slots_free());
-    t_check(waiting == 1UL,
-            "the mismatched waiter was retained, not dropped", (LONG)waiting);
-    t_check(bt_final_waiter.bt_Done == 0U,
-            "and never woken, with the pool standing empty in front of it",
-            (LONG)bt_final_waiter.bt_Done);
+    /* ---- the stop ------------------------------------------------------- */
 
-    for (i = 0UL; i < ordinary; i++)
-        bt_reap(&bt_final[i]);
-
-    /* ---- the shutdown pass is the only thing that can free it ----------- */
+    swept_before = _tx_amiga_adopt_unpublished_freed;
 
     status = tx_amiga_kernel_stop();
     t_check(status == TX_SUCCESS, "ThreadX kernel stopped", (LONG)status);
 
-    bt_wait_for(&bt_final_waiter.bt_Done,
-                "the shutdown wake released the mismatched waiter");
-    t_check(bt_final_waiter.bt_Done != 0U,
-            "the waiter woke and unwound", (LONG)bt_final_waiter.bt_Done);
-    t_check(bt_final_waiter.bt_Rounds == (LONG)TX_NOT_DONE,
+    /* (a) The waiter whose stamp held is signalled and unwinds. */
+    bt_wait_for(&bt_final_parked.bt_Done,
+                "the shutdown wake released the parked waiter");
+    t_check(bt_final_parked.bt_Rounds == (LONG)TX_NOT_DONE,
             "it came back TX_NOT_DONE, not holding a thread",
-            bt_final_waiter.bt_Rounds);
-    t_check(bt_final_waiter.bt_Failures == 0,
+            bt_final_parked.bt_Rounds);
+    t_check(bt_final_parked.bt_Failures == 0,
             "with its signal freed exactly once and no handle",
-            bt_final_waiter.bt_Failures);
+            bt_final_parked.bt_Failures);
     t_log("  final_sigalloc_delta=%ld final_status=%ld\n",
-          bt_final_waiter.bt_Saw, bt_final_waiter.bt_Rounds);
+          bt_final_parked.bt_Saw, bt_final_parked.bt_Rounds);
 
+    /* (b) The mismatched entry is cleared, and nothing was signalled. */
+    t_check(bt_final_waiting() == 0UL, "the shutdown pass emptied the table",
+            (LONG)bt_final_waiting());
+    Delay(25);
+    t_check(bt_final_moved.bt_Done == 0U,
+            "the Task at the mismatched entry was not signalled",
+            (LONG)bt_final_moved.bt_Done);
+
+    /* Let it go, on the bit it is waiting for.  With the kernel down it
+       unwinds exactly like the other one. */
     Forbid();
-    waiting = _tx_amiga_adopt_waiting;
+    bt_final_moved.bt_Task->tc_Node.ln_Name = bt_final_name_a;
+    sigwait = bt_final_moved.bt_Task->tc_SigWait;
+    if (bt_final_moved.bt_Done == 0U && sigwait != 0UL)
+        Signal(bt_final_moved.bt_Task, sigwait);
     Permit();
-    t_check(waiting == 0UL, "and the shutdown pass emptied the table",
-            (LONG)waiting);
+    t_check(sigwait != 0UL, "it was still in Wait()", (LONG)sigwait);
+    bt_wait_for(&bt_final_moved.bt_Done, "the moved waiter unwound by hand");
+    t_check(bt_final_moved.bt_Rounds == (LONG)TX_NOT_DONE,
+            "it came back TX_NOT_DONE", bt_final_moved.bt_Rounds);
+    t_check(bt_final_moved.bt_Failures == 0,
+            "with its signal freed exactly once and no handle",
+            bt_final_moved.bt_Failures);
+    t_check(bt_final_waiting() == 0UL,
+            "and its own cleanup did not count it twice",
+            (LONG)bt_final_waiting());
 
-    bt_reap(&bt_final_waiter);
+    /* ---- the filler goes, and its unpublished slots come back ----------- */
+
+    Signal(bt_final_filler.bt_Task, BT_SIG_ACQUIRE);
+    bt_wait_for(&bt_final_filler.bt_Done, "the filler to exit");
+    tx_amiga_adopt_sweep_unpublished();
+    t_check(_tx_amiga_adopt_unpublished_freed - swept_before == bt_final_filled,
+            "the sweep gave back every slot the dead filler claimed",
+            (LONG)(_tx_amiga_adopt_unpublished_freed - swept_before));
+    t_check(tx_amiga_adopt_slots_free() == slots, "the pool is whole again",
+            (LONG)tx_amiga_adopt_slots_free());
+
+    bt_reap(&bt_final_filler);
+    bt_reap(&bt_final_parked);
+    bt_reap(&bt_final_moved);
 }
 
 /* ThreadX calls this from tx_kernel_enter(); the link fails without it. */
@@ -2608,7 +2668,7 @@ int main(int argc, char **argv)
     /* This case OWNS tx_amiga_kernel_stop(), which has to happen before main()
        returns: the kernel's VERTB interrupt server lives in this program's
        hunk, which AmigaDOS frees on exit. */
-    bt_test_shutdown_wakes_mismatched_waiter();
+    bt_test_shutdown_wake();
 
     /* P0-2.  A claim reads the kernel flags under the same Forbid() the stop
        commits under, so an adoption that arrives after the commit is refused

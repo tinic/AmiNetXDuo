@@ -507,9 +507,9 @@ VOID    _tx_amiga_slot_release_locked(struct _tx_amiga_adopt_slot *slot);
 VOID    _tx_amiga_slot_publish_locked(struct _tx_amiga_adopt_slot *slot);
 
 /* Signal every Task waiting for a slot.  Forbid() held.  `final` is the
-   shutdown pass: it drops the stamp test and empties the table, so an entry the
-   ordinary pass retained on a mismatch is still woken when no release will ever
-   come again.  tx_amiga_pool.c says why each of those is what it is.  */
+   shutdown pass: it signals a stamp match, clears a mismatch WITHOUT a signal
+   (a parked waiter cannot change its stamp, so a mismatch is a recycled
+   address), and empties the table.  tx_amiga_pool.c says why each of those is what it is.  */
 VOID    _tx_amiga_adopt_wake_scan(UINT final);
 VOID    _tx_amiga_adopt_wake_waiters_locked(VOID);
 VOID    _tx_amiga_adopt_wake_waiters(VOID);

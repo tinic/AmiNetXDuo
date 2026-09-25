@@ -1518,8 +1518,8 @@ UINT         status;
     /* A Task parked waiting for a pool slot is waiting for a kernel that is no
        longer going to give it one.  Wake it so it re-reads the flag above and
        unwinds; nothing frees a slot from here on, so nothing else would.  The
-       FINAL pass, which also wakes an entry the ordinary pass retained on a
-       stamp mismatch and then empties the table.  */
+       FINAL pass: it also clears, without a Signal, an entry the ordinary pass
+       retained on a stamp mismatch, and it empties the table.  */
     if (status == TX_SUCCESS)
     {
         _tx_amiga_adopt_wake_waiters_final();
