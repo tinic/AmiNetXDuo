@@ -193,6 +193,9 @@ LONG    netstack_interface_remove(UWORD index, BOOL force);
 LONG    netstack_interface_remove_named(const char *name, BOOL force);
 LONG    netstack_interface_claim(const char *name, UWORD *index_out);
 VOID    netstack_interface_release(UWORD index);
+/* Changes when a live NetX slot is detached. Call only inside an existing
+   ami_netstack_enter() bracket; it does not take the add/remove lock. */
+ULONG   netstack_interface_epoch(UWORD index);
 
 /* Record a successful external default-route change.  Callers have already
    applied the route to NX_IP; these keep automatic DHCP reconciliation from

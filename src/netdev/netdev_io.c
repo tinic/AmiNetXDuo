@@ -13,15 +13,48 @@
 
 #include "netdev_internal.h"
 
+#include <proto/exec.h>     /* ReplyMsg(): a short request is answered here */
+
 VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
                      register struct IOSana2Req *io  NETDEV_REG_A1)
 {
-    NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
-                        io->ios2_Req.io_Unit != (struct Unit *)-1 &&
-                        io->ios2_BufferManagement != NULL)
-                       ? NETDEV_IO_OPENER(io) : NULL;
+    NetdevOpener *op;
 
     (VOID)dev;
+
+    /*
+     * NSCMD_DEVICEQUERY BEFORE ANYTHING SANA-II.  Its caller sends a plain
+     * IOStdReq, and every field this function reads or writes below the
+     * command number is either past that request's end (ios2_BufferManagement
+     * at 84 of 48) or its io_Actual (ios2_WireError).  Deriving the opener
+     * first found none in a copied request, and the query came back
+     * IOERR_BADADDRESS: mcastfilter called this device "not NewStyle" while
+     * the command list said otherwise.  The query needs no opener.
+     */
+    if (io->ios2_Req.io_Command == NSCMD_DEVICEQUERY)
+    {
+        io->ios2_Req.io_Error = 0;
+        netdev_nsd_query(io);
+        return;
+    }
+
+    /* Any other command in a request that short has no SANA-II fields to act
+       on.  Answered within the IOStdReq it is, never past it. */
+    if (NETDEV_IO_IS_SHORT(io))
+    {
+        struct IOStdReq *std = (struct IOStdReq *)io;
+
+        std->io_Actual = 0;
+        std->io_Error  = IOERR_NOCMD;
+        if ((std->io_Flags & IOF_QUICK) == 0)
+            ReplyMsg(&std->io_Message);
+        return;
+    }
+
+    op = (io->ios2_Req.io_Unit != NULL &&
+          io->ios2_Req.io_Unit != (struct Unit *)-1 &&
+          io->ios2_BufferManagement != NULL)
+         ? NETDEV_IO_OPENER(io) : NULL;
 
     io->ios2_Req.io_Error = 0;
     /*
@@ -93,12 +126,19 @@ VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
 LONG netdev_abort_io(register struct Device     *dev NETDEV_REG_A6,
                      register struct IOSana2Req *io  NETDEV_REG_A1)
 {
-    NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
-                        io->ios2_Req.io_Unit != (struct Unit *)-1 &&
-                        io->ios2_BufferManagement != NULL)
-                       ? NETDEV_IO_OPENER(io) : NULL;
+    NetdevOpener *op;
 
     (VOID)dev;
+
+    /* A query is answered inside BeginIO and never queued; a short request
+       has no opener field to read.  Neither can be in progress. */
+    if (io->ios2_Req.io_Command == NSCMD_DEVICEQUERY || NETDEV_IO_IS_SHORT(io))
+        return -1;
+
+    op = (io->ios2_Req.io_Unit != NULL &&
+          io->ios2_Req.io_Unit != (struct Unit *)-1 &&
+          io->ios2_BufferManagement != NULL)
+         ? NETDEV_IO_OPENER(io) : NULL;
 
     return netdev_abort(op, io) ? 0 : -1;
 }

@@ -86,9 +86,21 @@ if printf '%s\n' "$body" |
     claims_guarded=1
 fi
 
+# The epoch is deliberately retained across slot reuse: removal advances it
+# so old multicast memberships cannot be mistaken for the new occupant's.
+# Exempt it only while this removal path visibly advances the counter.
+epoch_advanced=0
+if printf '%s\n' "$body" |
+       grep -qE 'ns_IfaceEpoch\[[A-Za-z_0-9]*\]\+\+'; then
+    epoch_advanced=1
+fi
+
 missing=""
 for f in $FIELDS; do
     if [ "$f" = ns_IfaceClaims ] && [ "$claims_guarded" = 1 ]; then
+        continue
+    fi
+    if [ "$f" = ns_IfaceEpoch ] && [ "$epoch_advanced" = 1 ]; then
         continue
     fi
     if ! printf '%s\n' "$body" | grep -qE "\\b$f\\[[A-Za-z_0-9]*\\][[:space:]]*="; then
@@ -103,4 +115,4 @@ if [ -n "$missing" ]; then
     exit 1
 fi
 
-echo "slot_clear=PASS fields=$nfields cleared in $FN (ns_IfaceClaims exempt: guarded=$claims_guarded)"
+echo "slot_clear=PASS fields=$nfields cleared in $FN (claims guarded=$claims_guarded, epoch advanced=$epoch_advanced)"

@@ -327,6 +327,29 @@ typedef struct NetdevDevice
 #define NETDEV_IO_OPENER(io) ((NetdevOpener *)(io)->ios2_BufferManagement)
 
 /*
+ * A request that says it is shorter than an IOSana2Req.  NSCMD_DEVICEQUERY
+ * callers send a plain IOStdReq, 48 bytes, often one copied from the
+ * IOSana2Req they opened with -- and ios2_BufferManagement is at offset 84,
+ * past its end.  Reading it there invented an opener or lost the real one;
+ * Open() and Close() WROTE it there.  Only a length the caller STATED counts:
+ * mn_Length 0 is not short (see NETDEV_IO_IS_FULL).
+ */
+#define NETDEV_IO_IS_SHORT(io) \
+    ((io)->ios2_Req.io_Message.mn_Length != 0 && \
+     (io)->ios2_Req.io_Message.mn_Length < sizeof(struct IOSana2Req))
+
+/* Everything else is a full IOSana2Req -- mn_Length 0 included, in every
+   entry point alike: Open, Close, BeginIO and the NewStyle query.  A request
+   built by hand has always been taken as full here, and SANA-II callers that
+   leave mn_Length unset depend on it.  A real 48-byte IOStdReq must say so
+   in mn_Length, as CreateIORequest() does. */
+#define NETDEV_IO_IS_FULL(io) (!NETDEV_IO_IS_SHORT(io))
+
+#ifndef NSCMD_DEVICEQUERY
+#define NSCMD_DEVICEQUERY           0x4000
+#endif
+
+/*
  * What one opener did with one received frame.  REJECTED is not a failure and
  * not a delivery: the opener's S2_PacketFilter hook said no, its CMD_READ is
  * still queued and untouched, and the frame goes on to whoever else wants it.
@@ -560,6 +583,12 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event);
 
 /* netdev_cmds.c */
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
+
+/* NSCMD_DEVICEQUERY.  Needs no opener, and is what BeginIO calls before it
+   looks at anything SANA-II.  Answers the IOStdReq form (io_Data/io_Length)
+   and, in a request that says it is full-size, the SANA-II form mcastfilter
+   sends (ios2_Data/ios2_DataLength). */
+VOID netdev_nsd_query(struct IOSana2Req *io);
 /* The two bulk commands, reachable without the generic dispatch. */
 VOID netdev_write_cmd(NetdevOpener *op, struct IOSana2Req *io, UWORD cmd);
 /* The CMD_READ / S2_READORPHAN half of it, reachable without the dispatch. */

@@ -612,6 +612,7 @@ typedef struct AmiSocket
     LONG                    as_McastTtl;
     LONG                    as_McastLoop;
     LONG                    as_McastIf;
+    ULONG                   as_McastIfEpoch;
 
 #ifdef AMINETXDUO_IPV6
     /*
@@ -620,6 +621,7 @@ typedef struct AmiSocket
      */
     LONG                    as_Mcast6Hops;
     LONG                    as_Mcast6If;
+    ULONG                   as_Mcast6IfEpoch;
 #endif
 #endif
 
@@ -955,6 +957,18 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                       LONG optname, APTR optval, socklen_t *optlen);
 VOID bsd_mcast_close(AmiSocket *sock);
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
+/* NetX stores IPv4 loopback on the joined group, while BSD defines it on
+ * the sending socket. Override it for one synchronous UDP send under the
+ * caller's NetX bracket, then restore before leaving that bracket. */
+typedef struct BsdMcastLoopGuard
+{
+    NX_IP *ip;
+    UINT *flag;
+    UINT saved;
+} BsdMcastLoopGuard;
+VOID bsd_mcast_loop_begin(NX_IP *ip, const AmiSocket *sock,
+                          const NXD_ADDRESS *addr, BsdMcastLoopGuard *guard);
+VOID bsd_mcast_loop_end(BsdMcastLoopGuard *guard);
 
 #ifdef AMINETXDUO_IPV6
 /* The RFC 3493 section 5.2 half, same file and same shape. in6.c dispatches

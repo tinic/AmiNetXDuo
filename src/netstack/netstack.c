@@ -57,6 +57,16 @@ AmiNetStack *ami_netstack_raw(VOID)
     return ami_ns;
 }
 
+ULONG netstack_interface_epoch(UWORD index)
+{
+    AmiNetStack *ns = ami_ns;
+
+    if (ns == NULL || index >= (UWORD)AMI_CFG_MAX_ATTACHED)
+        return 0;
+
+    return ns->ns_IfaceEpoch[index];
+}
+
 /*
  * TX_TIMER_PROCESS_IN_ISR is defined for this port, so this runs on the tick
  * task inside a Forbid() and counts as interrupt level to both ThreadX and
@@ -2339,6 +2349,12 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     if (status == NX_SUCCESS)
     {
         UWORD route;
+
+        /* NetX has dropped every IGMP/MLD join for this slot.  BSD sockets
+           keep a separate membership registry, so mark its rows stale before
+           leaving the same scheduler bracket.  A reused slot must never
+           inherit their joins or have a later Close() leave a new join. */
+        ns->ns_IfaceEpoch[index]++;
 
         /* NetX removes every static route owned by the detached interface.
            Forget all installation marks; the reconcile immediately below

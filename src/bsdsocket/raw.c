@@ -600,6 +600,9 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     ULONG         protocol = (ULONG)(sock->as_Protocol & 0xFF);
     UINT          ttl      = (UINT)(sock->as_Ttl & 0xFF);
     ULONG         tos      = (ULONG)(sock->as_Tos & 0xFF);
+#ifdef AMINETXDUO_MULTICAST
+    BsdMcastLoopGuard mcast_loop;
+#endif
 
     /* RFC 3542 6.3, over IPV6_UNICAST_HOPS. IPv6 only, which is where
        bsd_cmsg_parse() already refuses it for an AF_INET socket. */
@@ -719,11 +722,21 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         }
     }
 
+#ifdef AMINETXDUO_MULTICAST
+    /* A raw socket accepts IP_MULTICAST_LOOP too. IP_HDRINCL may have
+       replaced the destination, so use the final header address here. */
+    bsd_mcast_loop_begin(ip, sock, &dest, &mcast_loop);
+#endif
+
     if (source == BSD_SOURCE_INDEX)
         status = nxd_ip_raw_packet_source_send(ip, handed, &dest, src_index,
                                                protocol, ttl, tos);
     else
         status = nxd_ip_raw_packet_send(ip, handed, &dest, protocol, ttl, tos);
+
+#ifdef AMINETXDUO_MULTICAST
+    bsd_mcast_loop_end(&mcast_loop);
+#endif
 
     if (status != NX_SUCCESS)
     {
