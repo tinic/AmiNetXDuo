@@ -51,3 +51,54 @@ set_target_properties(test_syncache PROPERTIES C_STANDARD 11)
 include(CTest)
 add_test(NAME syncache_cookie COMMAND test_syncache cookie)
 add_test(NAME syncache_cache  COMMAND test_syncache cache)
+
+# Issue #50: a SYN-cache entry outlives the interface its SYN arrived on.
+# The cache, _nx_ip_interface_detach, the TCP control senders, the IPv4 route
+# lookup and _nx_ipv6_packet_send are all the shipped files; host_nx_assert.h
+# is force-included so NX_ASSERT_FAIL unwinds to the test instead of sleeping
+# forever as nx_api.h has it on the target.
+#
+# The arms assert the correct behaviour.  v4 (slot left empty) passes today:
+# the retry has no route and the IPv4 send drops it.  The other three are red
+# against the shipped code and carry WILL_FAIL until #50 is fixed; the fix
+# removes it here.
+set(_nxs "${AMINETXDUO_NETXDUO}/common/src")
+add_executable(test_syncache_detach
+    host/test_syncache_detach_host.c
+    "${_nxs}/nx_tcp_syncache.c"
+    "${_nxs}/nx_ip_interface_detach.c"
+    "${_nxs}/nx_ip_route_find.c"
+    "${_nxs}/nx_tcp_packet_send_syn.c"
+    "${_nxs}/nx_tcp_packet_send_rst.c"
+    "${_nxs}/nx_tcp_packet_send_control.c"
+    "${_nxs}/nx_tcp_timestamp_option_get.c")
+if(AMINETXDUO_IPV6)
+    target_sources(test_syncache_detach PRIVATE "${_nxs}/nx_ipv6_packet_send.c")
+endif()
+
+target_include_directories(test_syncache_detach PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"          # tx_port.h, first
+    "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"         # nx_port.h
+    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"        # nx_user.h, ours
+    "${AMINETXDUO_NETXDUO}/common/inc"
+    "${AMINETXDUO_THREADX}/common/inc")
+
+target_compile_definitions(test_syncache_detach PRIVATE
+    NX_PACKET_ALIGNMENT=8
+    NX_INCLUDE_USER_DEFINE_FILE
+    NX_IPV6_UTIL_INLINE
+    AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+target_compile_options(test_syncache_detach PRIVATE -Wall -Wextra
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/host/host_nx_assert.h")
+set_target_properties(test_syncache_detach PROPERTIES C_STANDARD 11)
+
+set(_detach_cases syncache_detach_v4reuse)
+add_test(NAME syncache_detach_v4      COMMAND test_syncache_detach v4)
+add_test(NAME syncache_detach_v4reuse COMMAND test_syncache_detach v4reuse)
+if(AMINETXDUO_IPV6)
+    add_test(NAME syncache_detach_v6       COMMAND test_syncache_detach v6)
+    add_test(NAME syncache_detach_v6accept COMMAND test_syncache_detach v6accept)
+    list(APPEND _detach_cases syncache_detach_v6 syncache_detach_v6accept)
+endif()
+set_tests_properties(${_detach_cases} PROPERTIES WILL_FAIL TRUE)
