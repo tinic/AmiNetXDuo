@@ -21,8 +21,8 @@ version at the top when it merges.
   built-in mDNS responder opts its 5353 socket in, so a second
   program can now share 5353 with it. `SO_REUSEADDR` keeps its TIME-WAIT meaning
   for TCP, and `SO_REUSEPORT` on a TCP socket still sets that same reuse;
-  setting either option on an already-bound UDP socket is refused instead of
-  silently doing nothing.
+  setting either option on an already-bound UDP socket is accepted and does not
+  alter the socket's share, fixed at bind time.
 - `anxnet.device`, `anxgenet.device` and `anxzz9000.device` now answer
   `NSCMD_DEVICEQUERY` sent in a plain 48-byte `IOStdReq`, as capability tools
   such as mcastfilter send it, instead of refusing it with

@@ -641,27 +641,34 @@ static void t_reuse(void)
           "UDP SO_REUSEADDR sets sharing, not SO_REUSEPORT");
 
     /* On a bound UDP socket the flag was already read into nx_udp_socket_share
-       at bind, so a change would answer 0 while doing nothing; it is refused. */
+       at bind, so setting it now records the flag and returns 0 while the live
+       share is left untouched; the flag only affects the next bind. */
     h_reset();
     s = h_udp(0);
     s->as_Flags |= ASF_BOUND;
+    s->as_Nx.udp.nx_udp_socket_share = NX_TRUE;
     value = 1;
     rc = bsd_setsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value),
                         &h_base);
-    CHECK(rc == -1 && h_base.sb_Errno == AMI_EINVAL,
-          "post-bind UDP SO_REUSEPORT is EINVAL");
+    CHECK(rc == 0 && (s->as_Flags & ASF_REUSEPORT) != 0,
+          "post-bind UDP SO_REUSEPORT records the flag, rc 0");
+    CHECK(s->as_Nx.udp.nx_udp_socket_share == NX_TRUE,
+          "and leaves the live share untouched");
 
     h_reset();
     s = h_udp(0);
     s->as_Flags |= ASF_BOUND;
+    s->as_Nx.udp.nx_udp_socket_share = NX_TRUE;
     value = 1;
     rc = bsd_setsockopt(0, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value),
                         &h_base);
-    CHECK(rc == -1 && h_base.sb_Errno == AMI_EINVAL,
-          "post-bind UDP SO_REUSEADDR is EINVAL");
+    CHECK(rc == 0 && (s->as_Flags & ASF_REUSEADDR) != 0,
+          "post-bind UDP SO_REUSEADDR records the flag, rc 0");
+    CHECK(s->as_Nx.udp.nx_udp_socket_share == NX_TRUE,
+          "and leaves the live share untouched");
 
-    /* The refusal is scoped to UDP: a TCP socket's reuse flag is live, not a
-       one-shot bind promise. */
+    /* The live-share exemption is UDP-only: a TCP socket's reuse flag is live,
+       not a one-shot bind promise. */
     h_reset();
     s = h_tcp(0);
     s->as_Flags |= ASF_BOUND;

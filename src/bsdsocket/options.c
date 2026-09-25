@@ -232,12 +232,9 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     return -1;
 
                 /* On a bound UDP socket the flag was already read into
-                   nx_udp_socket_share at bind, so a change now would answer 0
-                   while doing nothing -- the silence #38 rejects.  */
-                if (((sock->as_Flags & (ASF_UDP | ASF_BOUND)) ==
-                     (ASF_UDP | ASF_BOUND)))
-                    return bsd_fail(SocketBase, AMI_EINVAL);
-
+                   nx_udp_socket_share at bind; recording it now leaves the
+                   live share untouched and only affects the next bind.  BSD
+                   and main both accept this, so return 0, not EINVAL.  */
                 if (value != 0)
                     sock->as_Flags |= ASF_REUSEADDR;
                 else
@@ -276,12 +273,9 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     return -1;
 
                 /* On a bound UDP socket the flag was already read into
-                   nx_udp_socket_share at bind, so a change now would answer 0
-                   while doing nothing -- the silence #38 rejects.  */
-                if (((sock->as_Flags & (ASF_UDP | ASF_BOUND)) ==
-                     (ASF_UDP | ASF_BOUND)))
-                    return bsd_fail(SocketBase, AMI_EINVAL);
-
+                   nx_udp_socket_share at bind; recording it now leaves the
+                   live share untouched and only affects the next bind.  BSD
+                   and main both accept this, so return 0, not EINVAL.  */
                 if (value != 0)
                     sock->as_Flags |= ASF_REUSEPORT;
                 else
