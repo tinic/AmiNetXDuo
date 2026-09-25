@@ -592,6 +592,7 @@ static LONG p_epoch(struct Library *sb, const char *address)
 {
     ProbeMreq req;
     LONG s;
+    LONG s2 = -1;
     LONG rc;
     LONG checks = 0;
     LONG failures = 0;
@@ -654,13 +655,47 @@ static LONG p_epoch(struct Library *sb, const char *address)
         goto done;
     }
 
-    rc = p_setsockopt(sb, s, P_IPPROTO_IP, P_IP_DROP_MEMBERSHIP,
+    /* A second socket now joins the new occupant's group.  Closing the first
+     * socket must not consume the second socket's membership through an old
+     * row left behind by the detached interface. */
+    s2 = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
+    if (s2 < 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: second socket FAILED errno %ld\n",
+               p_errno(sb));
+        goto done;
+    }
+
+    rc = p_setsockopt(sb, s2, P_IPPROTO_IP, P_IP_ADD_MEMBERSHIP,
                       &req, (LONG)sizeof req);
     checks++;
     if (rc != 0)
     {
         failures++;
-        Printf((CONST_STRPTR)"epoch: leave FAILED errno %ld\n",
+        Printf((CONST_STRPTR)"epoch: second join FAILED errno %ld\n",
+               p_errno(sb));
+        goto done;
+    }
+
+    rc = p_close(sb, s);
+    s = -1;
+    checks++;
+    if (rc != 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: first close FAILED errno %ld\n",
+               p_errno(sb));
+        goto done;
+    }
+
+    rc = p_setsockopt(sb, s2, P_IPPROTO_IP, P_IP_DROP_MEMBERSHIP,
+                      &req, (LONG)sizeof req);
+    checks++;
+    if (rc != 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: second leave FAILED errno %ld\n",
                p_errno(sb));
     }
 
@@ -668,10 +703,13 @@ done:
     if (removed)
         (VOID)SystemTags((CONST_STRPTR)"SYS:AddNetInterface zeth1",
                          NP_StackSize, (Tag)65536, TAG_DONE);
-    (VOID)p_close(sb, s);
+    if (s >= 0)
+        (VOID)p_close(sb, s);
+    if (s2 >= 0)
+        (VOID)p_close(sb, s2);
     Printf((CONST_STRPTR)"epoch: %ld checks, %ld failures\n",
            checks, failures);
-    return (failures == 0 && checks == 5) ? RETURN_OK : RETURN_FAIL;
+    return (failures == 0 && checks == 7) ? RETURN_OK : RETURN_FAIL;
 }
 
 int main(int argc, char **argv)

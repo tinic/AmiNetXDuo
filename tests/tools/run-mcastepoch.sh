@@ -88,7 +88,7 @@ if [ ! -s "$REPORT" ] || ! tr -d '\r' < "$REPORT" | grep -q '^===== done'; then
     echo "mcastepoch: no complete guest transcript (run rc=$RUN_RC)" >&2
     exit 2
 fi
-if ! tr -d '\r' < "$REPORT" | grep -q '^epoch: 5 checks, 0 failures$'; then
+if ! tr -d '\r' < "$REPORT" | grep -q '^epoch: 7 checks, 0 failures$'; then
     echo "mcastepoch: rejoin/cleanup failed; see $REPORT" >&2
     exit 1
 fi
