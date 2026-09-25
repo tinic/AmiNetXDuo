@@ -9,8 +9,9 @@ answer one question before any mechanism is named or any change is made:
 
 ## Evidence so far
 
-One post, EAB thread 123359 post 1810965 (26 Aug 2026). The method is from posts
-1806771, 1807384 and 1807759: Fitz 1.21 (Aminet), a 10^7-byte file, a Linux
+One post, EAB thread 123359, [post 1810965](https://eab.abime.net/showpost.php?p=1810965)
+(26 Aug 2026). The method is from [post 1806771](https://eab.abime.net/showpost.php?p=1806771)
+(an earlier build, cited for the method only) and posts 1807384 and 1807759: Fitz 1.21 (Aminet), a 10^7-byte file, a Linux
 file server, kb = 1000 bytes, A3000 with a CyberStorm MkII 68060 and an X-Surf
 100. The row in [BACKLOG.md](../BACKLOG.md) records the read figures.
 
