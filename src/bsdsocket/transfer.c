@@ -1091,6 +1091,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     UINT            status;
 #ifdef AMINETXDUO_MULTICAST
     LONG            mcast_if;
+    BsdMcastLoopGuard mcast_loop;
 #ifdef AMINETXDUO_IPV6
     LONG            mcast6_src;
     ULONG           mcast6_hops = 0UL;
@@ -1192,6 +1193,12 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
+    /* All branches below synchronously consume the packet. Keep the sender's
+     * loopback choice in the NetX group only while that one send runs. */
+#ifdef AMINETXDUO_MULTICAST
+    bsd_mcast_loop_begin(ip, sock, addr, &mcast_loop);
+#endif
+
     if (src != NULL && src->cs_Have && source == BSD_SOURCE_INDEX)
     {
         status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
@@ -1228,6 +1235,10 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
                                      (NXD_ADDRESS *)addr, port);
     }
+
+#ifdef AMINETXDUO_MULTICAST
+    bsd_mcast_loop_end(&mcast_loop);
+#endif
 
 #if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
     bsd_mcast6_finish_send(base, mcast6_hops);

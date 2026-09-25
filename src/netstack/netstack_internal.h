@@ -223,6 +223,7 @@ struct AmiNetStack
        NetX slot.  A claimed slot cannot be removed and reused underneath the
        operation; ami_ns_lock serialises updates to this table. */
     UWORD               ns_IfaceClaims[AMI_CFG_MAX_ATTACHED];
+    ULONG               ns_IfaceEpoch[AMI_CFG_MAX_ATTACHED];
 
     /* MDNS= for each interface, by NX interface index rather than by
        configuration index: ns_Iface[] is filled in open order and an interface
