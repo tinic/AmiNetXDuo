@@ -127,7 +127,9 @@ UBYTE       *d = (UBYTE *)dst;
 #define T_EFAULT                14
 #define T_EINVAL                22
 #define T_ENOTTY                25
+#define T_EWOULDBLOCK           35
 #define T_ENOPROTOOPT           42
+#define T_EADDRINUSE            48
 
 /* NX_IP_TIME_TO_LIVE, which socket.c gives every socket. */
 #define T_DEFAULT_TTL           128
@@ -289,6 +291,51 @@ BSD_SCRATCH;
     return(res);
 }
 
+static LONG bsd_sendto(LONG fd, APTR buf, LONG len, LONG flags,
+                       APTR to, LONG tolen)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register LONG            d0  __asm("d0") = fd;
+register APTR            a0  __asm("a0") = buf;
+register LONG            d1  __asm("d1") = len;
+register LONG            d2  __asm("d2") = flags;
+register APTR            a1  __asm("a1") = to;
+register LONG            d3  __asm("d3") = tolen;
+register LONG            res __asm("d0");
+register LONG _s_d1 __asm("d1");
+register LONG _s_a0 __asm("a0");
+register LONG _s_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-60:W)"
+                      : "=r" (_s_d1), "=r" (_s_a0), "=r" (_s_a1), "=r" (res)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
+                        "r" (a1), "r" (d3)
+                      : "cc", "memory");
+    return(res);
+}
+
+static LONG bsd_recvfrom(LONG fd, APTR buf, LONG len, LONG flags,
+                         APTR from, APTR fromlen)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register LONG            d0  __asm("d0") = fd;
+register APTR            a0  __asm("a0") = buf;
+register LONG            d1  __asm("d1") = len;
+register LONG            d2  __asm("d2") = flags;
+register APTR            a1  __asm("a1") = from;
+register APTR            a2  __asm("a2") = fromlen;
+register LONG            res __asm("d0");
+register LONG _s_d1 __asm("d1");
+register LONG _s_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-72:W)"
+                      : "=r" (_s_d1), "=r" (_s_a0), "=r" (res)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
+                        "r" (a1), "r" (a2)
+                      : "cc", "memory");
+    return(res);
+}
+
 
 /* --------------------------------------------------------------- helpers -- */
 
@@ -366,11 +413,16 @@ socklen_t odd_len;
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEADDR, &value);
     (VOID)t_check((BOOL)(value == 0), "and clears again", value);
 
-    /* SO_REUSEPORT is the same option word here. */
+    /* SO_REUSEPORT is now distinct from SO_REUSEADDR: it is the opt-in UDP
+       port-sharing flag, and moving one leaves the other alone. */
     (VOID)t_set_int(fd, SOL_SOCKET, SO_REUSEPORT, 1);
+    (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEPORT, &value);
+    (VOID)t_check((BOOL)(value == 1), "SO_REUSEPORT reads back 1", value);
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEADDR, &value);
-    (VOID)t_check((BOOL)(value == 1),
-                  "SO_REUSEPORT is SO_REUSEADDR under another name", value);
+    (VOID)t_check((BOOL)(value == 0), "SO_REUSEADDR unaffected by SO_REUSEPORT", value);
+    (VOID)t_set_int(fd, SOL_SOCKET, SO_REUSEPORT, 0);
+    (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEPORT, &value);
+    (VOID)t_check((BOOL)(value == 0), "SO_REUSEPORT clears again", value);
 
     /* SO_BROADCAST: this stack never asks permission to broadcast. */
     (VOID)t_check((BOOL)(t_set_int(fd, SOL_SOCKET, SO_BROADCAST, 1) == 0),
@@ -925,6 +977,101 @@ socklen_t   len;
 
     (VOID)bsd_CloseSocket(fd);
 }
+
+/* SO_REUSEPORT is the opt-in UDP port-sharing flag (#38): two sockets that
+   both set it before bind may hold 5353 together, and a multicast datagram is
+   then cloned to every sharer while a unicast datagram is delivered to exactly
+   one.  This is the mDNS port, which is why the built-in responder sets the
+   same flag on its own socket. */
+static VOID t_test_udp_reuseport(VOID)
+{
+LONG              fd_a, fd_b, fd_c;
+LONG              one = 1;
+LONG              rc, n_a, n_b;
+struct sockaddr_in local, peer;
+struct ip_mreq    mreq;
+UBYTE             buf[64];
+
+    t_log("SO_REUSEPORT shares UDP 5353 (mDNS)");
+
+    fd_a = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    fd_b = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    fd_c = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd_a >= 0 && fd_b >= 0 && fd_c >= 0),
+                 "three udp sockets", bsd_Errno()))
+        return;
+
+    /* The opt-in flag must be set before bind. */
+    (VOID)t_set_int(fd_a, SOL_SOCKET, SO_REUSEPORT, 1);
+    (VOID)t_set_int(fd_b, SOL_SOCKET, SO_REUSEPORT, 1);
+
+    t_bzero(&local, sizeof(local));
+    local.sin_len    = (UBYTE)sizeof(local);
+    local.sin_family = AF_INET;
+    local.sin_port   = 5353;                    /* INADDR_ANY = 0 */
+
+    rc = bsd_bind(fd_a, &local, (LONG)sizeof(local));
+    (VOID)t_check((BOOL)(rc == 0),
+                  "first SO_REUSEPORT bind(0.0.0.0:5353)", bsd_Errno());
+
+    rc = bsd_bind(fd_b, &local, (LONG)sizeof(local));
+    (VOID)t_check((BOOL)(rc == 0),
+                  "second SO_REUSEPORT co-bind(0.0.0.0:5353)", bsd_Errno());
+
+    rc = bsd_bind(fd_c, &local, (LONG)sizeof(local));
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EADDRINUSE),
+                  "a non-SO_REUSEPORT bind is EADDRINUSE", bsd_Errno());
+
+    (VOID)bsd_IoctlSocket(fd_a, FIONBIO, &one);
+    (VOID)bsd_IoctlSocket(fd_b, FIONBIO, &one);
+
+    /* A unicast datagram is delivered to exactly one co-bound socket. */
+    t_bzero(&peer, sizeof(peer));
+    peer.sin_len         = (UBYTE)sizeof(peer);
+    peer.sin_family      = AF_INET;
+    peer.sin_port        = 5353;
+    peer.sin_addr.s_addr = 0x7F000001UL;        /* 127.0.0.1 */
+
+    rc = bsd_sendto(fd_a, (APTR)"u", 1, 0, &peer, (LONG)sizeof(peer));
+    (VOID)t_check((BOOL)(rc == 1), "sendto 127.0.0.1:5353", bsd_Errno());
+
+    Delay(5);                                   /* loopback is deferred */
+
+    n_a = bsd_recvfrom(fd_a, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    n_b = bsd_recvfrom(fd_b, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    t_log("  unicast: socket A %ld bytes, socket B %ld bytes", n_a, n_b);
+    (VOID)t_check((BOOL)((n_a > 0) != (n_b > 0)),
+                  "unicast went to exactly one co-bound socket",
+                  (n_a > 0) ? (n_b > 0 ? 3 : 1) : (n_b > 0 ? 2 : 0));
+
+    /* A multicast datagram is cloned to every sharer. */
+    mreq.imr_multiaddr.s_addr = 0xE00000FBUL;   /* 224.0.0.251 */
+    mreq.imr_interface.s_addr = 0;
+
+    (VOID)t_check((BOOL)(bsd_setsockopt(fd_a, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                                        &mreq, (LONG)sizeof(mreq)) == 0),
+                  "fd_a joins 224.0.0.251", bsd_Errno());
+    (VOID)t_check((BOOL)(bsd_setsockopt(fd_b, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                                        &mreq, (LONG)sizeof(mreq)) == 0),
+                  "fd_b joins 224.0.0.251", bsd_Errno());
+
+    peer.sin_addr.s_addr = 0xE00000FBUL;        /* 224.0.0.251 */
+    rc = bsd_sendto(fd_a, (APTR)"m", 1, 0, &peer, (LONG)sizeof(peer));
+    (VOID)t_check((BOOL)(rc == 1), "sendto 224.0.0.251:5353", bsd_Errno());
+
+    Delay(5);
+
+    n_a = bsd_recvfrom(fd_a, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    n_b = bsd_recvfrom(fd_b, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    t_log("  multicast: socket A %ld bytes, socket B %ld bytes", n_a, n_b);
+    (VOID)t_check((BOOL)(n_a > 0 && n_b > 0),
+                  "multicast delivered to both co-bound sockets",
+                  (n_a > 0) ? (n_b > 0 ? 0 : 1) : (n_b > 0 ? 2 : 3));
+
+    (VOID)bsd_CloseSocket(fd_a);
+    (VOID)bsd_CloseSocket(fd_b);
+    (VOID)bsd_CloseSocket(fd_c);
+}
 #endif /* AMINETXDUO_MULTICAST */
 
 
@@ -1066,6 +1213,7 @@ int main(void)
     t_test_ip_options(SOCK_DGRAM, "udp");
 #ifdef AMINETXDUO_MULTICAST
     t_test_multicast_widths();
+    t_test_udp_reuseport();
 #endif
     t_test_ioctls();
 

@@ -1455,6 +1455,11 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
         if (bsd_nx_enter(SocketBase) != 0)
             return bsd_fail(SocketBase, AMI_ENETDOWN);
 
+        /* Opt into SO_REUSEPORT sharing only for a specific port; an
+           ephemeral bind (port 0) is never shared.  */
+        sock->as_Nx.udp.nx_udp_socket_share =
+            ((sock->as_Flags & ASF_REUSEPORT) && (port != 0)) ? NX_TRUE : NX_FALSE;
+
         status = nx_udp_socket_bind(&sock->as_Nx.udp,
                                     (port != 0) ? port : NX_ANY_PORT,
                                     NX_NO_WAIT);
@@ -2441,6 +2446,9 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
     {
         if ((sock->as_Flags & ASF_NXBOUND) == 0)
         {
+            /* An implicit ephemeral bind is never shared.  */
+            sock->as_Nx.udp.nx_udp_socket_share = NX_FALSE;
+
             status = nx_udp_socket_bind(&sock->as_Nx.udp, NX_ANY_PORT,
                                         NX_NO_WAIT);
             if (status != NX_SUCCESS)

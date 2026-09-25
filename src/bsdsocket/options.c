@@ -225,7 +225,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * to 2MSL and the program looks broken.
              */
             case SO_REUSEADDR:
-            case SO_REUSEPORT:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
                 if (value != 0)
@@ -253,6 +252,21 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                             return bsd_fail(SocketBase, AMI_EINVAL);
                     }
                 }
+                return 0;
+
+            /*
+             * SO_REUSEPORT is the UDP port-sharing promise.  It used to be
+             * folded into SO_REUSEADDR and then ignored at bind; now it sets
+             * its own flag that bsd_bind() turns into the NetX opt-in share
+             * flag (see the netxduo fork's nx_udp_socket_share).
+             */
+            case SO_REUSEPORT:
+                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
+                    return -1;
+                if (value != 0)
+                    sock->as_Flags |= ASF_REUSEPORT;
+                else
+                    sock->as_Flags &= ~ASF_REUSEPORT;
                 return 0;
 
             case SO_BROADCAST:
@@ -661,9 +675,12 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                     ((sock->as_Flags & ASF_LISTENING) != 0) ? 1 : 0);
 
             case SO_REUSEADDR:
-            case SO_REUSEPORT:
                 return bsd_opt_get_long(SocketBase, optval, optlen,
                     ((sock->as_Flags & ASF_REUSEADDR) != 0) ? 1 : 0);
+
+            case SO_REUSEPORT:
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                    ((sock->as_Flags & ASF_REUSEPORT) != 0) ? 1 : 0);
 
             case SO_BROADCAST:
                 return bsd_opt_get_long(SocketBase, optval, optlen,

@@ -203,6 +203,39 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_source_connect COMMAND test_tcp_source_connect)
 
+    # SO_REUSEPORT in the NetX Duo core (issue #38): nx_udp_socket_share's
+    # opt-in bind gate and the dispatch fan-out of a multicast datagram to
+    # every same-port sharer, with unicast still delivered to one.  ICMPv4
+    # error messages are compiled out so the no-port/no-match arms of
+    # nx_udp_packet_receive.c need no stubs; the test drives the shared and
+    # unicast paths, which are the ones under change.
+    add_executable(test_udp_share
+        host/test_udp_share_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_packet_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_bind.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_copy.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_append.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c")
+
+    target_compile_options(test_udp_share PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_udp_share PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_udp_share PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        NX_DISABLE_ICMPV4_ERROR_MESSAGE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME udp_share COMMAND test_udp_share)
+
     # The interface file's PRIORITY at the route lookup: the same two-cards-
     # one-subnet machine against the real _nx_ip_route_find() and
     # _nx_ip_gateway_address_set(), which take the highest priority and fall

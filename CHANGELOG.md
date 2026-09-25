@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `SO_REUSEPORT` on a UDP socket now shares the port instead of being ignored.
+  Two sockets that both set it before `bind()` may hold one port, a multicast
+  datagram arriving on it is delivered to every sharer, and a unicast datagram
+  still reaches exactly one. The built-in mDNS responder opts its 5353 socket
+  in, so a second program can now share 5353 with it. `SO_REUSEADDR` keeps its
+  TIME-WAIT meaning.
 - `anxwifipi.device` opened with a plain `IOStdReq` for `NSCMD_DEVICEQUERY` now
   gets a valid unit; before, the query and the close wrote into low memory.
   The query is answered in the `IOStdReq` form for a short request and in the
