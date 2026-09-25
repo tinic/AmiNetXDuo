@@ -164,6 +164,18 @@ endif()
 target_compile_options(test_mcastjoin PRIVATE -Wall -Wextra)
 set_target_properties(test_mcastjoin PROPERTIES OUTPUT_NAME "McastJoin")
 
+# McastRecv is the co-bound BSD listener for the #38 foreign-multicast run:
+# SO_REUSEPORT + bind 5353 alongside the built-in mDNS responder, join
+# 224.0.0.251, and print every datagram received with its source, so a host
+# harness can show the fan-out cloned a foreign multicast to a BSD sharer.
+add_executable(test_mcastrecv mcastrecv.c)
+target_include_directories(test_mcastrecv PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_mcastrecv PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_mcastrecv PRIVATE -Wall -Wextra)
+set_target_properties(test_mcastrecv PROPERTIES OUTPUT_NAME "McastRecv")
+
 # MonProbe drives AddNetMonitorHookTagList/RemoveNetMonitorHook and the two
 # call-site hook types.  The hook register convention (Hook in A0, NULL in A2,
 # message in A1) is not the pair a reader would guess, and a wrong guess hands

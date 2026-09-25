@@ -432,6 +432,7 @@ static inline NX_PACKET_POOL *bsd_stack_pool(const struct AmiSocketBase *base)
 #define ASF_REUSEADDR   (1UL << 12)
 #define ASF_BROADCAST   (1UL << 13)
 #define ASF_KEEPALIVE   (1UL << 14)
+#define ASF_REUSEPORT   (1UL << 15)   /* UDP port sharing, see netxduo fork */
 #define ASF_DELETED     (1UL << 16)   /* NX socket already torn down        */
 #define ASF_NXBOUND     (1UL << 17)   /* NetX Duo holds the port            */
 #define ASF_SERVER      (1UL << 18)   /* came off a listen port: unaccept   */

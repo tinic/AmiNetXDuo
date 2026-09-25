@@ -580,6 +580,104 @@ static void t_flags(void)
     CHECK(value == 1, "SO_ACCEPTCONN answers for a listening socket");
 }
 
+static void t_reuse(void)
+{
+    AmiSocket *s;
+    LONG       value;
+    socklen_t  len;
+    LONG       rc;
+
+    printf("SO_REUSEPORT / SO_REUSEADDR: sharing vs TIME-WAIT, and post-bind\n");
+
+    /* A TCP socket that sets SO_REUSEPORT keeps the option's pre-split
+       meaning: it was an alias for SO_REUSEADDR, so it still opts into
+       TIME-WAIT reuse.  Both flags go on and the NetX reuse call runs inside
+       the bracket. */
+    h_reset();
+    s = h_tcp(0);
+    value = 1;
+    rc = bsd_setsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0, "TCP SO_REUSEPORT=1 is accepted");
+    CHECK((s->as_Flags & ASF_REUSEPORT) != 0, "and sets ASF_REUSEPORT");
+    CHECK((s->as_Flags & ASF_REUSEADDR) != 0, "and still sets ASF_REUSEADDR");
+    CHECK(h.nx_enters == 1 && h.nx_leaves == 1,
+          "and the TIME-WAIT reuse call ran inside the bracket");
+
+    value = 0; len = (socklen_t)sizeof(value);
+    (VOID)bsd_getsockopt(0, SOL_SOCKET, SO_REUSEADDR, &value, &len, &h_base);
+    CHECK(value == 1, "SO_REUSEADDR reads back 1 after SO_REUSEPORT");
+
+    /* Clearing SO_REUSEPORT clears the TIME-WAIT alias too. */
+    h_reset();
+    s = h_tcp(0);
+    value = 1;
+    (VOID)bsd_setsockopt(0, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value),
+                         &h_base);
+    value = 0;
+    rc = bsd_setsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0 && (s->as_Flags & ASF_REUSEADDR) == 0,
+          "SO_REUSEPORT=0 clears the TIME-WAIT alias");
+
+    /* On a UDP socket SO_REUSEPORT is the sharing flag alone, and SO_REUSEADDR
+       opts into the same sharing; neither sets the other. */
+    h_reset();
+    s = h_udp(0);
+    value = 1;
+    (VOID)bsd_setsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value),
+                         &h_base);
+    CHECK((s->as_Flags & ASF_REUSEPORT) != 0 &&
+          (s->as_Flags & ASF_REUSEADDR) == 0,
+          "UDP SO_REUSEPORT sets sharing, not SO_REUSEADDR");
+
+    h_reset();
+    s = h_udp(0);
+    value = 1;
+    (VOID)bsd_setsockopt(0, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value),
+                         &h_base);
+    CHECK((s->as_Flags & ASF_REUSEADDR) != 0 &&
+          (s->as_Flags & ASF_REUSEPORT) == 0,
+          "UDP SO_REUSEADDR sets sharing, not SO_REUSEPORT");
+
+    /* On a bound UDP socket the flag was already read into nx_udp_socket_share
+       at bind, so setting it now records the flag and returns 0 while the live
+       share is left untouched; the flag only affects the next bind. */
+    h_reset();
+    s = h_udp(0);
+    s->as_Flags |= ASF_BOUND;
+    s->as_Nx.udp.nx_udp_socket_share = NX_TRUE;
+    value = 1;
+    rc = bsd_setsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0 && (s->as_Flags & ASF_REUSEPORT) != 0,
+          "post-bind UDP SO_REUSEPORT records the flag, rc 0");
+    CHECK(s->as_Nx.udp.nx_udp_socket_share == NX_TRUE,
+          "and leaves the live share untouched");
+
+    h_reset();
+    s = h_udp(0);
+    s->as_Flags |= ASF_BOUND;
+    s->as_Nx.udp.nx_udp_socket_share = NX_TRUE;
+    value = 1;
+    rc = bsd_setsockopt(0, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0 && (s->as_Flags & ASF_REUSEADDR) != 0,
+          "post-bind UDP SO_REUSEADDR records the flag, rc 0");
+    CHECK(s->as_Nx.udp.nx_udp_socket_share == NX_TRUE,
+          "and leaves the live share untouched");
+
+    /* The live-share exemption is UDP-only: a TCP socket's reuse flag is live,
+       not a one-shot bind promise. */
+    h_reset();
+    s = h_tcp(0);
+    s->as_Flags |= ASF_BOUND;
+    value = 1;
+    rc = bsd_setsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0, "post-bind TCP SO_REUSEPORT is still accepted");
+}
+
 static void t_refusals(void)
 {
     AmiSocket *s;
@@ -783,6 +881,7 @@ int main(void)
     t_so_error();
     t_linger();
     t_flags();
+    t_reuse();
     t_refusals();
     t_user_timeout();
     t_nodelay();

@@ -46,11 +46,12 @@
 #define FD_CLOSE                0x40    /* connection closed                 */
 
 /*
- * The monitoring hook types and the one message shape transfer.c builds.  NDK
- * 3.2 netinclude/libraries/bsdsocket.h:688-757; the meanings are in
- * doc/bsdsocket.doc under AddNetMonitorHook.  MHT_Send is the hook that can
- * refuse a send before any of it happens, and netmonitor.c asserts its number
- * is the list index, so both the numbers and the member order are ABI.
+ * The monitoring hook types and the three message shapes socket.c and
+ * transfer.c build.  NDK 3.2 netinclude/libraries/bsdsocket.h:688-757; the
+ * meanings are in doc/bsdsocket.doc under AddNetMonitorHook.  MHT_Send is the
+ * hook that can refuse a send before any of it happens, and netmonitor.c
+ * asserts its number is the list index, so both the numbers and the member
+ * order are ABI.
  */
 #define MHT_ICMP                0
 #define MHT_UDP                 1
@@ -59,6 +60,24 @@
 #define MHT_Send                4
 #define MHT_Packet              5
 #define MHT_Bind                6
+
+struct ConnectMonitorMsg
+{
+    LONG             cmm_Size;
+    STRPTR           cmm_Caller;
+    LONG             cmm_Socket;
+    struct sockaddr *cmm_Name;
+    LONG             cmm_NameLen;
+};
+
+struct BindMonitorMsg
+{
+    LONG             bmm_Size;
+    STRPTR           bmm_Caller;
+    LONG             bmm_Socket;
+    struct sockaddr *bmm_Name;
+    LONG             bmm_NameLen;
+};
 
 struct SendMonitorMessage
 {
@@ -121,6 +140,16 @@ struct LogHookMessage
 #define SBTC_HERRNO                         7
 #define SBTC_DTABLESIZE                     8
 #define SBTC_FDCALLBACK                     9
+/*
+ * The fd-callback actions.  NDK 3.2 netinclude/libraries/bsdsocket.h:126-128
+ * ("don't use these in new code"); socket.c sends them through sb_FDCallback.
+ * FDCB_ALLOC may refuse and a refusal fails the allocation; FDCB_FREE is sent
+ * after the slot is cleared and its return is not read; FDCB_CHECK is
+ * deliberately never sent (socket.c says why).
+ */
+#define FDCB_FREE                           0
+#define FDCB_ALLOC                          1
+#define FDCB_CHECK                          2
 #define SBTC_LOGSTAT                        10
 #define SBTC_LOGTAGPTR                      11
 #define SBTC_LOGFACILITY                    12

@@ -1455,6 +1455,22 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
         if (bsd_nx_enter(SocketBase) != 0)
             return bsd_fail(SocketBase, AMI_ENETDOWN);
 
+        /* Opt into SO_REUSEPORT (and SO_REUSEADDR, which #38 makes the same
+           promise for legacy callers) sharing only for an unspecified
+           (INADDR_ANY, or :: for IPv6) bind with an explicit port.  A socket
+           bound to a specific local address -- loopback, a multicast group,
+           or one of the host's own addresses -- never opts in: NetX UDP binds
+           by port alone and has no per-socket address or group filter, so
+           fanning a multicast datagram out to such a co-bound sharer would
+           over-deliver to a socket that never joined the group.  The bind
+           itself still succeeds (legacy SO_REUSEADDR callers must not
+           regress); only the share flag is withheld.  Full BSD address/group
+           filtering is tracked separately.  */
+        sock->as_Nx.udp.nx_udp_socket_share =
+            (((sock->as_Flags & (ASF_REUSEPORT | ASF_REUSEADDR)) != 0) &&
+             (port != 0) &&
+             bsd_addr_is_unspecified(&addr)) ? NX_TRUE : NX_FALSE;
+
         status = nx_udp_socket_bind(&sock->as_Nx.udp,
                                     (port != 0) ? port : NX_ANY_PORT,
                                     NX_NO_WAIT);
@@ -2441,6 +2457,9 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
     {
         if ((sock->as_Flags & ASF_NXBOUND) == 0)
         {
+            /* An implicit ephemeral bind is never shared.  */
+            sock->as_Nx.udp.nx_udp_socket_share = NX_FALSE;
+
             status = nx_udp_socket_bind(&sock->as_Nx.udp, NX_ANY_PORT,
                                         NX_NO_WAIT);
             if (status != NX_SUCCESS)

@@ -303,6 +303,37 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME socket_options_cork COMMAND test_sockopt_cork)
 
+    # socket.c:bsd_bind(), the #38 UDP port-sharing opt-in.  socket.c is
+    # #included rather than linked: its LVO vectors number in the hundreds, and
+    # -ffunction-sections plus the linker's --gc-sections keep only bsd_bind
+    # and its callees, so the dozen externs the test defines are the whole stub
+    # set.  The test's header says which stub reproduces what and why the
+    # fan-out itself is left to tests/netstack/host/test_udp_share_host.c.
+    # AMINETXDUO_MULTICAST because the shipping library is built with it and
+    # the multicast-group bind case depends on bsd_addr_is_multicast existing.
+    add_executable(test_bind_share host/test_bind_share_host.c)
+
+    target_include_directories(test_bind_share PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_bind_share PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections)
+
+    target_link_options(test_bind_share PRIVATE -Wl,--gc-sections)
+
+    target_compile_definitions(test_bind_share PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_MULTICAST)
+
+    add_test(NAME bind_share_optin COMMAND test_bind_share)
+
     # netstatus.c, for NETSTATUS_NEIGHBOURS, the one flag `arp` prints from
     # it, and the interface-statistics wait. The router flag came from a NetX
     # Duo back pointer that is only
