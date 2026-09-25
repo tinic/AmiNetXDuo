@@ -50,7 +50,11 @@ BUDGETS=(
     # 357,160 with SBTC_ERROR_HOOK called from the outer
     # bsd_nx_leave() and the hook re-read off the base before each
     # deferred call (b1706f18, f5576e57), 2026-09-22.
-    "default:src/bsdsocket/bsdsocket.library:359000"
+    # 360,464 with the dead-holder baton reclaim: the port-owned adoption
+    # slot pool, handle validation and the unpublished-slot sweep
+    # (fcfb0b62, +1,724 over main's 358,696) and the stamp checks in the
+    # shutdown wake and the sweep (+44), 2026-09-25.
+    "default:src/bsdsocket/bsdsocket.library:362000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -106,7 +110,9 @@ BUDGETS=(
     # 231,324 with the SBTC_ERROR_HOOK move, 2026-09-22.
     # 233,024 with the retained SANA-II interface (a device that keeps
     # requests after close is held, not dropped), 2026-09-24.
-    "minimal:src/bsdsocket/bsdsocket.library:234000"
+    # 235,416 with the dead-holder baton reclaim (see the default row),
+    # 2026-09-25.
+    "minimal:src/bsdsocket/bsdsocket.library:236000"
     "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
     "minimal:src/wifipi/anxwifipi.device:56000"
@@ -121,7 +127,9 @@ BUDGETS=(
     # 198,048 measured with the X-Surf-only name check, which leaves AMITCP
     # visible to every other SANA-II driver (2026-09-23).
     # 199,224 with the retained SANA-II interface, 2026-09-24.
-    "micro:src/bsdsocket/bsdsocket.library:200000"
+    # 201,560 with the dead-holder baton reclaim (see the default row),
+    # 2026-09-25.
+    "micro:src/bsdsocket/bsdsocket.library:202000"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"
     "micro:src/wifipi/anxwifipi.device:56000"
