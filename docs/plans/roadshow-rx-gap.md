@@ -77,7 +77,8 @@ A3000 may be larger than the reported one.
 
 Run only after a gap is reproduced. Each is passive or uses the same binary in
 both arms. The driver (1.16, disassembly in the evidence lane) looks up only
-`S2_CopyToBuff`, `S2_CopyFromBuff` and `S2_PacketFilter`. It reads each whole
+`S2_CopyToBuff`, `S2_CopyFromBuff` and `S2_PacketFilter`, so our CopyToBuff16
+and extension tags go unused and every stack gets plain CopyToBuff. It reads each whole
 frame into a static buffer and copies from frame + 14, always 2 mod 4. That is
 two copies a packet, the same path for any stack.
 
