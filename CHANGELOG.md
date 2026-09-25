@@ -9,6 +9,21 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxnet.device`, `anxgenet.device` and `anxzz9000.device` now answer
+  `NSCMD_DEVICEQUERY` sent in a plain 48-byte `IOStdReq`, as capability tools
+  such as mcastfilter send it, instead of refusing it with
+  `IOERR_BADADDRESS`. The query no longer looks for a SANA-II opener it does not
+  need. A request shorter than an `IOSana2Req` can also open the device for
+  that query, and Open, Close, BeginIO and AbortIO no longer read or write past
+  the end of such a request; any other command in one is refused with
+  `IOERR_NOCMD`. The query is also answered in the form mcastfilter sends:
+  the opened `IOSana2Req` with the buffer in `ios2_Data` and its size in
+  `ios2_DataLength`, so mcastfilter no longer reports these drivers as
+  "not a NewStyle device". A full-size request is answered in that form
+  only, and its `io_Data` is ignored. For the `IOStdReq` form from an 88-byte
+  allocation, set `mn_Length` to that of an `IOStdReq`. A request with
+  `mn_Length` 0 is a full `IOSana2Req`, as before; a shorter request must state
+  its length.
 - `anxnet.device` 1.0.0-beta5 no longer reboots a 68030 machine the moment it
   loads when its Zorro III card gets the transparent-translation cache guard
   (an A3000 with an X-Surf 100 took a Line-F dead-end alert in `ramlib`). The

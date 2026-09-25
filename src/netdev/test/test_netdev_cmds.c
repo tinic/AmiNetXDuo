@@ -742,6 +742,7 @@ static void i_nsquery_replies_by_hand(void)
 
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     memset(&answer, 0x5a, sizeof(answer));
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = &answer;
@@ -762,6 +763,7 @@ static void i_nsquery_replies_by_hand(void)
        reads that field as one. */
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = &answer;
     std.io_Length  = 15;
@@ -773,6 +775,7 @@ static void i_nsquery_replies_by_hand(void)
     /* A NULL buffer is the same answer. */
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = NULL;
     std.io_Length  = 64;
@@ -783,6 +786,7 @@ static void i_nsquery_replies_by_hand(void)
     /* IOF_QUICK set means the caller is not waiting on a reply port. */
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     std.io_Command = NSCMD_DEVICEQUERY;
     std.io_Data    = &answer;
     std.io_Length  = sizeof(answer);
@@ -803,6 +807,291 @@ static void i_nsquery_replies_by_hand(void)
  * not work, and a working command left out of the list is one a careful
  * caller will never try.
  */
+/*
+ * ISSUE #39, THE FORM mcastfilter 1.20 USES.  It sends NSCMD_DEVICEQUERY in
+ * the IOSana2Req it opened (CreateIORequest(port, 88)), buffer in ios2_Data,
+ * size in ios2_DataLength -- and io_Data/io_Length, which that request's
+ * ios2_SrcAddr/ios2_PacketType occupy, stay zero.  The handler read only the
+ * IOStdReq form and answered IOERR_BADLENGTH: "not a NewStyle device".
+ *
+ * The rules pinned here: the IOStdReq form wins whenever it names a buffer of
+ * at least 16 bytes; otherwise, and only in a request whose mn_Length says it
+ * is a full IOSana2Req, the SANA-II form is used; a short or length-less
+ * request never has its SANA-II fields read.  Every buffer carries a canary so
+ * a write outside the 16 answered bytes, or into the losing form, shows up.
+ */
+typedef struct
+{
+    ULONG  DevQueryFormat;
+    ULONG  SizeAvailable;
+    UWORD  DeviceType;
+    UWORD  DeviceSubType;
+    UWORD *SupportedCommands;
+    UBYTE  canary[16];
+} NsdAnswer;
+
+/* What the handler writes: 16 bytes on m68k, wider on a 64-bit host. */
+#define NSD_SIZE ((ULONG)offsetof(NsdAnswer, canary))
+
+static void nsd_answer_init(NsdAnswer *a)
+{
+    memset(a, 0x5a, sizeof(*a));
+}
+
+static int nsd_answer_untouched(const NsdAnswer *a)
+{
+    NsdAnswer ref;
+
+    nsd_answer_init(&ref);
+    return memcmp(a, &ref, sizeof(ref)) == 0;
+}
+
+static int nsd_canary_intact(const NsdAnswer *a)
+{
+    int i;
+
+    for (i = 0; i < (int)sizeof(a->canary); i++)
+        if (a->canary[i] != 0x5a)
+            return 0;
+    return 1;
+}
+
+/* A full request as mcastfilter builds it, before any form is chosen. */
+static void nsd_sana(struct IOSana2Req *io, UWORD mn_length)
+{
+    memset(io, 0, sizeof(*io));
+    io->ios2_Req.io_Message.mn_Length = mn_length;
+    io->ios2_Req.io_Command           = NSCMD_DEVICEQUERY;
+}
+
+static void i2_nsquery_both_forms(void)
+{
+    struct IOSana2Req io;
+    NsdAnswer         a;
+    NsdAnswer         b;
+    struct IOStdReq  *std = (struct IOStdReq *)&io;
+
+    /* 1. The SANA-II form, full request: answered into ios2_Data. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    io.ios2_Data       = &a;
+    io.ios2_DataLength = NSD_SIZE;
+    io.ios2_WireError  = 0xdeadbeefUL;
+    netdev_perform(&opener, &io);
+    expect_u32("the SANA-II form is answered", (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+    expect_u32("  with SizeAvailable 16", (unsigned long)a.SizeAvailable, NSD_SIZE);
+    expect_u32("  and DeviceType SANA-II", a.DeviceType, 7);
+    expect(a.SupportedCommands != NULL, "  and the command list mcastfilter looks for");
+    expect_u32("  ios2_DataLength carries the byte count", (unsigned long)io.ios2_DataLength, NSD_SIZE);
+    expect_u32("  and a success has no wire error", (unsigned long)io.ios2_WireError, 0);
+    expect(nsd_canary_intact(&a), "  and nothing past the 16 bytes was written");
+    expect(replies == 1, "  and it was replied to");
+
+    /* 2. A full request naming both: the SANA-II form wins, because in a
+          full request io_Data/io_Length are ios2_SrcAddr/ios2_PacketType. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    nsd_answer_init(&b);
+    std->io_Data       = &a;
+    std->io_Length     = NSD_SIZE;
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("in a full request naming both, the SANA-II form is used",
+               (unsigned long)b.SizeAvailable, NSD_SIZE);
+    expect(nsd_answer_untouched(&a), "  and the IOStdReq-shaped buffer is not written");
+    expect(nsd_canary_intact(&b), "  within its 16 bytes");
+
+    /* 3. With a one-short IOStdReq buffer as well, still the SANA-II form. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    nsd_answer_init(&b);
+    std->io_Data       = &a;
+    std->io_Length     = NSD_SIZE - 1;
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect(nsd_answer_untouched(&a), "a one-short IOStdReq-shaped buffer is never written");
+    expect_u32("  the valid SANA-II buffer answers instead", (unsigned long)b.SizeAvailable, NSD_SIZE);
+
+    /* 4. An undersized SANA-II buffer is refused, and not written. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&b);
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = NSD_SIZE - 1;
+    netdev_nsd_query(&io);
+    expect_u32("a one-short SANA-II buffer is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&b), "  and not written");
+    expect(replies == 1, "  and the refusal is replied to");
+
+    /* 5. mn_Length 0 is a full request, here as in Open/Close/BeginIO: the
+          SANA-II form answers, and io_Data is never read. */
+    reset();
+    nsd_sana(&io, 0);
+    nsd_answer_init(&a);
+    nsd_answer_init(&b);
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = NSD_SIZE;
+    std->io_Data       = &a;
+    std->io_Length     = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a length-less request is answered in the SANA-II form",
+               (unsigned long)b.SizeAvailable, NSD_SIZE);
+    expect(nsd_answer_untouched(&a), "  and its io_Data is not written");
+
+    reset();
+    nsd_sana(&io, 0);
+    nsd_answer_init(&a);
+    std->io_Data   = &a;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a length-less request with only io_Data is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and io_Data is not written");
+
+    /* 6. A short request (a 48-byte IOStdReq): same, and it says so itself. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOStdReq));
+    nsd_answer_init(&b);
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a short request with no IOStdReq buffer is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&b), "  and the bytes past its end are not read as a buffer");
+
+    /* 7. The IOStdReq form in a short request still works. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOStdReq));
+    nsd_answer_init(&a);
+    std->io_Data   = &a;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a short request's IOStdReq form is answered",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, 0);
+    expect_u32("  io_Actual is the byte count", (unsigned long)std->io_Actual, NSD_SIZE);
+    expect(nsd_canary_intact(&a), "  within its 16 bytes");
+
+    /*
+     * 8. THE REUSED REQUEST (codex review of #41).  A full request after a
+     *    CMD_READ: ios2_Data names the caller's buffer, and io_Data/io_Length
+     *    are a stale source MAC and EtherType 0x0800.  The answer must go to
+     *    ios2_Data; the MAC-derived "buffer" (a decoy here) must not be
+     *    written.  On m68k the aliasing is exact (the driver asserts it);
+     *    the host lays the fields out differently, so this pins the rule.
+     */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    nsd_answer_init(&b);
+    std->io_Data       = &a;                 /* the stale "source address" */
+    std->io_Length     = 0x0800;             /* the stale packet type */
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = 1514;
+    netdev_nsd_query(&io);
+    expect_u32("a reused request answers into ios2_Data",
+               (unsigned long)b.SizeAvailable, NSD_SIZE);
+    expect(nsd_answer_untouched(&a), "  and never the MAC-derived address");
+
+    /* 9. The same stale request with ios2_Data cleared: nothing believable is
+          left, so it is refused -- EtherType 0x0800 is no NewStyle length. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    std->io_Data       = &a;
+    std->io_Length     = 0x0800;
+    netdev_nsd_query(&io);
+    expect_u32("a stale EtherType is not a NewStyle length in a full request",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and the MAC-derived address is not written");
+
+    /* 10. A full request's io_Data is never read, even a fresh cast one: its
+           size says SANA-II, and a caller wanting the NewStyle form from an
+           88-byte allocation sets mn_Length to an IOStdReq's. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    std->io_Data   = &a;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a full request's io_Data is never used",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and not written");
+
+    /* ...and the same 88-byte allocation saying it is an IOStdReq works. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOStdReq));
+    nsd_answer_init(&a);
+    std->io_Data   = &a;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("the same allocation with mn_Length of an IOStdReq is answered",
+               (unsigned long)a.SizeAvailable, NSD_SIZE);
+
+    /* 11. An odd io_Data in a full request is not believed either. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    std->io_Data   = (UBYTE *)&a + 1;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("an odd io_Data in a full request is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and not written");
+
+    /*
+     * 12. THE HEURISTIC'S HOLE (codex review of 55545211).  A reused request
+     *     with no ios2_Data, an 802.3-length packet type of 64 and an even
+     *     "MAC" decoy passed the old length/alignment heuristic.  A full
+     *     request's io_Data is now never read at all: refused, nothing
+     *     written.
+     */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    io.ios2_DstAddr[0] = 0x02; io.ios2_DstAddr[1] = 0x41;
+    io.ios2_DstAddr[5] = 0x07;
+    std->io_Data   = &a;                     /* even, and plausible */
+    std->io_Length = 64;
+    netdev_nsd_query(&io);
+    expect_u32("a reused request with PacketType 64 and an even MAC decoy is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and the MAC-derived address is not written");
+
+    /* 13. Both destinations unusable: a too-short ios2_Data and a reused
+           io_Data.  Refused, and neither is written. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    nsd_answer_init(&b);
+    io.ios2_Data       = &b;
+    io.ios2_DataLength = NSD_SIZE - 1;
+    std->io_Data       = &a;
+    std->io_Length     = 64;
+    netdev_nsd_query(&io);
+    expect_u32("with both destinations unusable the query is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a) && nsd_answer_untouched(&b),
+           "  and neither buffer is written");
+
+    /* 14. Any SANA-II history counts: statistics, then a cast query. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IOSana2Req));
+    nsd_answer_init(&a);
+    io.ios2_StatData = &b;
+    std->io_Data     = &a;
+    std->io_Length   = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a request that carried S2 statistics is not believed either",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and not written");
+}
+
 static void j_the_advertised_list_is_the_real_one(void)
 {
     struct IOStdReq   std;
@@ -811,6 +1100,7 @@ static void j_the_advertised_list_is_the_real_one(void)
 
     reset();
     memset(&std, 0, sizeof(std));
+    std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
     {
         struct
         {
@@ -1445,6 +1735,7 @@ static void t_rx_poll(void)
 
         reset();
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;
@@ -1494,6 +1785,7 @@ static void v_rx_capacity(void)
 
         reset();
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;
@@ -1595,6 +1887,7 @@ static void y_tx_flush(void)
         } answer;
 
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;
@@ -1856,6 +2149,7 @@ static void x_rx_batch(void)
         reset();
     unit.nu_Nic.rx_batches = 1;
         memset(&std, 0, sizeof(std));
+        std.io_Message.mn_Length = sizeof(std);   /* as CreateIORequest() sets it */
         memset(&answer, 0, sizeof(answer));
         std.io_Command = NSCMD_DEVICEQUERY;
         std.io_Data    = &answer;
@@ -1879,6 +2173,7 @@ int main(void)
     g_write_paths();
     h_devicequery_honours_sizeavailable();
     i_nsquery_replies_by_hand();
+    i2_nsquery_both_forms();
     j_the_advertised_list_is_the_real_one();
     k_unknown_commands();
     l_onevent_masks();

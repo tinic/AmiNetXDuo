@@ -2184,6 +2184,31 @@ static struct Device *netdev_open(
 
     io->ios2_Req.io_Error = 0;
 
+    /*
+     * A plain IOStdReq, opened to ask NSCMD_DEVICEQUERY.  It has no tag list
+     * to read and no room for the opener cookie this function stores at
+     * ios2_BufferManagement -- offset 84 of a 48-byte request, which is
+     * somebody else's memory.  It gets the unit and nothing else: no opener,
+     * no bring-up, so Close() has only the open count to give back.
+     */
+    if (NETDEV_IO_IS_SHORT(io))
+    {
+        hw = netdev_find_unit(d, unit, NULL, &why);
+        (VOID)why;
+        if (hw == NULL)
+        {
+            io->ios2_Req.io_Device = (struct Device *)-1;
+            io->ios2_Req.io_Unit   = (struct Unit *)-1;
+            io->ios2_Req.io_Error  = IOERR_OPENFAIL;
+            dev->dd_Library.lib_OpenCnt--;
+            ReleaseSemaphore(&d->nd_LifecycleLock);
+            return NULL;
+        }
+        io->ios2_Req.io_Unit = &hw->nu_ExecUnit;
+        ReleaseSemaphore(&d->nd_LifecycleLock);
+        return dev;
+    }
+
     op = AllocMem(sizeof(NetdevOpener), MEMF_PUBLIC | MEMF_CLEAR);
     if (op == NULL)
     {
@@ -2331,7 +2356,9 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
                          register struct IOSana2Req *io  __asm("a1"))
 {
     NetdevDevice *d = (NetdevDevice *)dev;
-    NetdevOpener *op = (io->ios2_Req.io_Unit != NULL &&
+    BOOL          is_short = (BOOL)NETDEV_IO_IS_SHORT(io);
+    NetdevOpener *op = (!is_short &&
+                        io->ios2_Req.io_Unit != NULL &&
                         io->ios2_Req.io_Unit != (struct Unit *)-1 &&
                         io->ios2_BufferManagement != NULL)
                        ? NETDEV_IO_OPENER(io) : NULL;
@@ -2346,7 +2373,9 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
 
     io->ios2_Req.io_Device = (struct Device *)-1;
     io->ios2_Req.io_Unit   = (struct Unit *)-1;
-    io->ios2_BufferManagement = NULL;
+    /* A short Open() stored no cookie and the field is not in the request. */
+    if (!is_short)
+        io->ios2_BufferManagement = NULL;
 
     if (op != NULL)
     {
