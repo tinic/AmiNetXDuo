@@ -62,6 +62,45 @@ int http_request_query_take(const char *target)
     return 0;
 }
 
+int http_request_query_session(const char *target)
+{
+    unsigned long i = 0;
+    int seen = 0;
+    int slot = 0;
+
+    if (target == 0)
+        return 0;
+    while (target[i] != '\0' && target[i] != '?')
+        i++;
+    if (target[i] != '?')
+        return 0;
+
+    i++;
+    while (target[i] != '\0')
+    {
+        unsigned long start = i;
+        unsigned long n;
+
+        while (target[i] != '\0' && target[i] != '&')
+            i++;
+        n = i - start;
+        if (n >= 8UL && hr_nicmp(&target[start], "session=", 8UL) == 0)
+        {
+            if (seen || n != 9UL ||
+                (target[start + 8UL] != '0' && target[start + 8UL] != '1'))
+                return -1;
+            seen = 1;
+            slot = target[start + 8UL] - '0';
+        }
+        else if (n == 7UL && hr_nicmp(&target[start], "session", 7UL) == 0)
+            return -1;
+
+        if (target[i] == '&')
+            i++;
+    }
+    return slot;
+}
+
 unsigned long http_request_timeout(const char *value, unsigned long cap)
 {
     unsigned long secs = 0;

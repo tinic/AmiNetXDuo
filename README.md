@@ -244,6 +244,10 @@ the output about 23 ms later.
 **There is no password.** Anyone who can reach the port gets the Shell, the
 display and every mounted volume.
 
+For automation, the [host-side remote-control tool](docs/user/remote-control.md)
+turns a Shell command into JSON output with an exit code and timeout, transfers
+files through WebDAV, and captures or controls the display with PNG feedback.
+
 ## Finding the machine by name
 
 The Amiga answers to **`<hostname>.local`** on the local network, so another

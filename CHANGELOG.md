@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd` now has two independent, reconnectable Shell slots. `/shell` remains
+  slot 0; `/shell?session=1` gives automation its own Shell. A disconnected
+  slot keeps its working state for five minutes, and a live socket still has
+  one owner unless explicitly taken over.
 - New command `CreateAmiNetXDuoStatusReport` writes a support report to `T:AmiNetXDuoStatusReport.txt`.
 - `anxnet.device` on the X-Surf 100 no longer exits its receive-overrun
   recovery the instant the overflow sets ISR.RST (the DP8390D raises RST on

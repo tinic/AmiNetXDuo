@@ -1,6 +1,6 @@
 /*
- * httpterm, an AmigaDOS Shell on the other end of a CONSOLE. One session at a
- * time. A spawned Process needs 64 KB of stack: a bsdsocket LVO call runs NetX
+ * httpterm, AmigaDOS Shells on the other end of a CONSOLE. A spawned Process
+ * needs 64 KB of stack: a bsdsocket LVO call runs NetX
  * Duo on the caller's stack, so any Process that might touch a socket carries
  * the whole TCP/IP call depth.
  *
@@ -11,6 +11,17 @@
 #define AMINETXDUO_HTTPTERM_H
 
 #include "tools.h"
+
+/* A small, fixed number: slot 0 is the historical /shell, slot 1 permits a
+   separate automation Shell. Only a started slot allocates rings and a port. */
+#define HTTP_TERM_SLOTS 2
+
+/* Select the slot for subsequent calls from httpd's single event-loop task.
+   The runner tasks use their own records and never read this selection. */
+BOOL  http_term_select(UWORD slot);
+
+/* Service every initialized slot; preserve the caller's selected slot. */
+VOID  http_term_service_all(VOID);
 
 /* Take the rings and the port. Called once at startup, and only when a
    terminal was asked for. FALSE having said why. */
@@ -35,6 +46,10 @@ BOOL  http_term_available(VOID);
 /* Start a Shell. It reads its commands from this side and writes everything,
    its own prompt included, back. FALSE having said why. */
 BOOL  http_term_start(VOID);
+
+/* A new socket attached to an existing Shell needs the current raw/cooked
+   mode even if the previous viewer already received it. */
+VOID  http_term_reattach(VOID);
 
 /* TRUE while the Shell is running or its output is still being drained. */
 BOOL  http_term_running(VOID);

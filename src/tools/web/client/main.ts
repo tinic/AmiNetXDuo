@@ -243,11 +243,10 @@ const WORDS: Record<WireState, string> = {
   refused: "refused",
 };
 
-/* What the server will not say over a WebSocket, said here.  Its only
-   refusal of a correct client is that the Shell is taken: one session at a
-   time, and the second upgrade gets a 503 the browser does not pass on. */
+/* What the server will not say over a WebSocket, said here. Each numbered
+   Shell slot has one owner; a second upgrade to that slot gets a 503. */
 const REFUSED =
-  "no session -- the terminal takes one at a time, and something else has it";
+  "session busy -- somebody else holds this Shell slot";
 
 const REFUSED_AGAIN =
   REFUSED + ".  Take it: the button, or add ?take=1";
@@ -255,12 +254,9 @@ const REFUSED_AGAIN =
 /*
  * ONE AUTOMATIC RETRY AFTER A REFUSAL, AND WHY EXACTLY ONE.
  *
- * A session whose browser vanished with the network -- no close frame, no
- * FIN -- used to hold the terminal for ever, and the only cure was restarting
- * the machine.  The server now lets go of a session that has stopped
- * answering its pings, but it lets go DURING the refusal: the Shell is on its
- * way out when the 503 is written, so the answer to the next ask is the one
- * that works.  Retrying once turns that into "the page just connects".
+ * A vanished browser can hold a socket until the ping rule declares it stale.
+ * The server releases that socket during the refusal; the Shell remains in its
+ * slot for a bounded reconnect window. One retry attaches to it.
  *
  * Once, and not a loop: a terminal genuinely held by somebody else refuses
  * every time, and a page that kept asking would be a page hammering a 14 MHz
