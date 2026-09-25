@@ -56,8 +56,8 @@ say where.
 |---|---|
 | Arms | **R**: Roadshow 1.15. **A**: AmiNetXDuo at a pinned release. Both use one `x-surf-100.device` file (hash recorded). No third arm until R vs A is settled |
 | Arm selection | one stack per **boot**, chosen by a **one-shot** selector file that `S:Startup-Sequence` reads and deletes before any network start; with no selector, the machine boots AmiNetXDuo. The controller writes the selector over the door, then `C:Reboot`. A disk-loaded driver does not survive the reset, so Init runs fresh every boot. Stacks never share a boot, and no ENV toggle or teardown is involved. No power cycle: the shop switch also cuts the A1200 |
-| Rollback | needs no network: the selector is gone after one boot, and a **local watchdog**, started before the stack, runs `C:Reboot` after a fixed bound unless the boot's script completes. A Roadshow boot that loses its door therefore returns to AmiNetXDuo on its own. Then verify the image hashes |
-| Before any hardware GO | the emulator proves recovery: one deliberately failed Roadshow boot, the watchdog firing within its bound, the next boot coming up as AmiNetXDuo with its door working |
+| Rollback | needs no network: the selector is gone after one boot, and a **local watchdog**, started before the stack, runs `C:Reboot` after a fixed bound. Only the host cancels it, and only after it has independently reached the machine's network door; a finished startup script does not count. Otherwise the bound expires and the machine returns to the default. A Roadshow boot that loses its door therefore returns to AmiNetXDuo on its own. Then verify the image hashes |
+| Before any hardware GO | the emulator proves recovery: one deliberately failed Roadshow boot, the watchdog firing within its bound, the next boot coming up as AmiNetXDuo, and the host confirming that door |
 | Unit | the **boot**. 4 receive transfers per boot, averaged into one value. Position within a boot is worth about 1% (`tests/perf/run-rate-ab.sh`) |
 | Order | alternate R/A/A/R across boots, so neither arm always runs first after power-on |
 | Direction | server to Amiga only (receive), written to `RAM:` so no disk is involved. A fixed-length TCP stream from a peer server that sends from memory, 12 s or 16 MB |
@@ -87,7 +87,8 @@ both arms. The driver (1.16, disassembly in the evidence lane) looks up only
 and extension tags go unused and every stack gets plain CopyToBuff. It reads each whole
 frame into a static buffer and, on the cooked path, copies from frame + 14,
 always 2 mod 4. That is two copies a packet, the same path for any stack. The
-raw path's source phase is not established.
+raw path is unavailable for this experiment: an emulator probe found it
+functionally broken in 1.16.
 
 | Hypothesis | Discriminating measurement | Reads as |
 |---|---|---|
