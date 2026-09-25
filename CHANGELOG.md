@@ -15,7 +15,9 @@ version at the top when it merges.
   first TT0/TT1 write entered Supervisor() in a way that overwrote the calling
   function's frame pointer, and its return jumped into the card window. The
   call now saves and restores that register itself, and the build fails if any
-  linked image clobbers its frame pointer this way again.
+  linked image clobbers its frame pointer this way again. `anxgenet.device`
+  had the same call pattern around its 68040 cache flush and gets the same
+  fix; its current build was not affected.
 - `anxwifipi.device` opened with a plain `IOStdReq` for `NSCMD_DEVICEQUERY` now
   gets a valid unit; before, the query and the close wrote into low memory.
   The query is answered in the `IOStdReq` form for a short request and in the

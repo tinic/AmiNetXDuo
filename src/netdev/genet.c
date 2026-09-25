@@ -549,21 +549,30 @@ __asm__(
 "    subq.l #1,%d0\n"
 "    bne 1b\n"
 "    rte\n"
+/*
+ * VOID ge_sup_pages_call(first, pages, sysbase): Supervisor(ge_sup_cpushp)
+ * with a0 = first, d0 = pages.  Out of line, saving a5 and a6 itself, for the
+ * reason nd_super_call() in netdev_cache.c gives: a register variable pinned
+ * to a5 is the frame pointer of any caller LTO chooses to frame.
+ */
+"    .globl _ge_sup_pages_call\n"
+"_ge_sup_pages_call:\n"
+"    movem.l %a5-%a6,-(%sp)\n"
+"    move.l 12(%sp),%a0\n"          /* first   */
+"    move.l 16(%sp),%d0\n"          /* pages   */
+"    move.l 20(%sp),%a6\n"          /* sysbase */
+"    lea _ge_sup_cpushp(%pc),%a5\n"
+"    jsr -30(%a6)\n"                /* Supervisor() */
+"    movem.l (%sp)+,%a5-%a6\n"
+"    rts\n"
 );
 extern VOID ge_sup_cpushp(VOID);
+extern VOID ge_sup_pages_call(ULONG first, ULONG pages,
+                              struct ExecBase *sysbase);
 
-/* Supervisor(): the routine runs in supervisor mode and ends in RTE. */
 static VOID ge_sup_pages(ULONG first, ULONG pages)
 {
-    register ULONG            _d0 __asm("d0") = pages;
-    register ULONG            _a0 __asm("a0") = first;
-    register VOID           (*_a5)(VOID) __asm("a5") = ge_sup_cpushp;
-    register struct ExecBase *_a6 __asm("a6") = SysBase;
-
-    __asm__ __volatile__ ("jsr a6@(-30:W)"
-                          : "+r" (_d0), "+r" (_a0)
-                          : "r" (_a5), "r" (_a6)
-                          : "cc", "memory", "d1", "a1");
+    ge_sup_pages_call(first, pages, SysBase);
 }
 
 static VOID ge_cache(NetdevNic *nic, APTR addr, ULONG len)
