@@ -50,10 +50,10 @@ BOOL libfit_need(const UBYTE *head, ULONG len, LibFitNeed *need)
         pos += 4;
         if ((word & 0xC0000000UL) == 0xC0000000UL)
             pos += 4;                   /* explicit memory attributes */
-        if ((word & 0x3FFFFFFFUL) > 0x00FFFFFFUL)
+        if (pos > len || (word & 0x3FFFFFFFUL) > 0x00FFFFFFUL)
         {
-            need->total   = 0;          /* over 64 MB: not a real hunk, and */
-            need->largest = 0;          /* sixteen of them cannot wrap      */
+            need->total   = 0;          /* its attribute long cut off, or   */
+            need->largest = 0;          /* over 64 MB: sixteen cannot wrap  */
             return FALSE;
         }
 

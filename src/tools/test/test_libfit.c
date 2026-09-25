@@ -85,6 +85,16 @@ static void test_need(void)
     check("an attribute long is skipped", libfit_need(b, (ULONG)len, &need), 1);
     check("and both hunks still count", need.total == 1000UL + 64UL + 16UL, 1);
 
+    {
+        const unsigned long one[1]   = { 1000 };
+        const unsigned long onefl[1] = { 0xC0000000UL };
+
+        len = header(b, one, onefl, 1);
+        check("an attribute long cut off is not a size",
+              libfit_need(b, (ULONG)len - 4, &need), 0);
+        len = header(b, ext, extfl, 2);
+    }
+
     put_long(b, 20, 0x3FFFFFFFUL);
     check("a hunk too large to be real is refused",
           libfit_need(b, (ULONG)len, &need), 0);
