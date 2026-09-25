@@ -170,9 +170,28 @@ if [ "$FRAGMENT_ONLY" = 1 ]; then
 fi
 
 # ------------------------------------------------------------------- stage --
+# The run directory is created fresh and never deleted: -o and -T are
+# user-controlled, and a typo must not reach a recursive delete.  It has to be
+# a new rsgap-* leaf directly under build/; anything else is refused.
+case "$TAG" in
+    ''|*[!A-Za-z0-9._-]*) refuse bad_tag "$TAG" ;;
+esac
 OUT="${OUT:-$ROOT/build/rsgap-$TAG}"
+out_parent=$(cd "$(dirname -- "$OUT")" 2>/dev/null && pwd -P) ||
+    refuse bad_outdir "$OUT"
+out_leaf=$(basename -- "$OUT")
+[ "$out_parent" = "$(cd "$ROOT/build" 2>/dev/null && pwd -P)" ] ||
+    refuse outdir_not_in_build "$OUT"
+case "$out_leaf" in
+    rsgap-*) ;;
+    *) refuse outdir_not_rsgap "$OUT" ;;
+esac
+case "$out_leaf" in
+    *[!A-Za-z0-9._-]*) refuse bad_outdir "$OUT" ;;
+esac
+OUT="$out_parent/$out_leaf"
+mkdir -- "$OUT" 2>/dev/null || refuse outdir_exists "$OUT"
 STAGE="$OUT/stage"
-rm -rf "$OUT"
 mkdir -p "$STAGE/c" "$STAGE/libs" "$STAGE/s" "$STAGE/devs/NetInterfaces" \
          "$STAGE/rsgap/arm/R/C" "$STAGE/rsgap/arm/R/libs" \
          "$STAGE/rsgap/arm/A/C" "$STAGE/rsgap/arm/A/libs" "$OUT/results"
