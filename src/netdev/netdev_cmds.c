@@ -755,6 +755,10 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
     _Static_assert(offsetof(struct IOStdReq, io_Actual) ==
                    offsetof(struct IOSana2Req, ios2_WireError),
                    "NSCMD_DEVICEQUERY io_Actual alias changed");
+    /* The NewStyle answer is 16 bytes on the target; the host's 24 is only
+       the host's.  mcastfilter asks for exactly 16. */
+    _Static_assert(sizeof(struct NetdevNSQuery) == 16,
+                   "NSCMD_DEVICEQUERY answer is not 16 bytes on m68k");
 #endif
 
     /*
