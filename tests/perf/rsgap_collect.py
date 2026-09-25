@@ -28,7 +28,8 @@ Emits, in boot order:
              one_stack=1 hash_match=1 hashes_expected=8 ... pos=1 pair=1
              xfers=4 ok=4 peer_match=1 wd_fired=0 next_arm=A kbps=...
              mean_kbps=... valid=1
-  rsgap_recovery boot=N wd_fired=1 elapsed_s=E bound_s=S within_bound=1
+  rsgap_recovery boot=N arm=R fault_boot_ok=1 wd_fired=1 elapsed_s=E
+             bound_s=S within_bound=1
              next_boot=N+1 next_arm=A next_selector=absent door=up
   rsgap_door boot=N arm=A ... door=up cancel_confirmed=1 valid=1
   rsgap_run boots=N measure=M door=D scheduled=S pairs_scheduled=P
@@ -282,14 +283,24 @@ def main():
                 nsel = nb.get("select", {})
                 el = int(fired[0]["elapsed_s"]) if fired else -1
                 within = int(bool(fired) and el <= a.wd_secs + 5)
-                rec_ok = (fired and within and nsel.get("arm") == "A" and
+                # The fault boot itself must be a real Roadshow boot that got
+                # as far as a stack: scheduled R, one stack, selector
+                # consumed, nothing preloaded, full inventory.  Otherwise a
+                # failure before any stack starts would pass as a Roadshow
+                # recovery without Roadshow ever running.
+                fault_ok = int(want_arm == "R" and arm == "R" and one == 1 and
+                               consumed == "1" and pre_ok and hm == 1)
+                rec_ok = (fault_ok and fired and within and
+                          nsel.get("arm") == "A" and
                           nsel.get("selector") == "absent" and
                           nsel.get("mode") == "door" and
                           door.get("door") == "up")
-                print("rsgap_recovery boot=%s arm=%s wd_fired=%d elapsed_s=%d "
+                print("rsgap_recovery boot=%s arm=%s fault_boot_ok=%d "
+                      "wd_fired=%d elapsed_s=%d "
                       "bound_s=%d within_bound=%d next_boot=%s next_arm=%s "
                       "next_selector=%s next_mode=%s next_stack=%s door=%s"
-                      % (n, arm, 1 if fired else 0, el, a.wd_secs, within,
+                      % (n, arm, fault_ok, 1 if fired else 0, el, a.wd_secs,
+                         within,
                          nsel.get("boot", "-"), nsel.get("arm", "-"),
                          nsel.get("selector", "-"), nsel.get("mode", "-"),
                          stack_seen(nb) if nb else "-",

@@ -236,6 +236,9 @@ class Session:
         self.dir = tempfile.mkdtemp(prefix="rsgap-test-")
         self.boot = {1: self.measure(1, "R"), 2: self.measure(2, "A"),
                      3: self.door(3)}
+        self.wd = {}            # boot -> extra .wd lines
+        self.schedule = "R,A"
+        self.fault = 0
 
     @staticmethod
     def select(n, arm, mode):
@@ -261,10 +264,14 @@ class Session:
                 "local=10.0.0.%d:1025" % n]
 
     def collect(self):
+        last = max(self.boot)
         for n, lines in self.boot.items():
-            name = "cur" if n == 3 else "boot-%d" % n
+            name = "cur" if n == last else "boot-%d" % n
             with open(os.path.join(self.dir, name + ".kv"), "w") as fh:
                 fh.write("\n".join(lines) + "\n")
+            if n in self.wd:
+                with open(os.path.join(self.dir, name + ".wd"), "w") as fh:
+                    fh.write("\n".join(self.wd[n]) + "\n")
         with open(os.path.join(self.dir, "cur.wd"), "w") as fh:
             fh.write("rec=wd state=cancelled via=file elapsed_s=7\n")
         with open(os.path.join(self.dir, "images.kv"), "w") as fh:
@@ -272,10 +279,13 @@ class Session:
                 fh.write("rsgap_image arm=%s mode=%s guest=%s md5=%s\n"
                          % (a, mo, g, m))
         with open(os.path.join(self.dir, "peer.log"), "w") as fh:
-            for n in (1, 2):
-                fh.write("event=conn kind=data client=10.0.0.%d:1024 "
-                         "bytes=100\n" % n)
-            fh.write("event=conn kind=door client=10.0.0.3:1025 bytes=4096\n")
+            for n in sorted(self.boot):
+                if n == last:
+                    fh.write("event=conn kind=door client=10.0.0.%d:1025 "
+                             "bytes=4096\n" % n)
+                elif n != self.fault:
+                    fh.write("event=conn kind=data client=10.0.0.%d:1024 "
+                             "bytes=100\n" % n)
         with open(os.path.join(self.dir, "door.kv"), "w") as fh:
             fh.write("door=up cancel_confirmed=1\n")
         j = lambda f: os.path.join(self.dir, f)  # noqa: E731
@@ -283,13 +293,17 @@ class Session:
             [sys.executable, os.path.join(HERE, "rsgap_collect.py"),
              "--results", self.dir, "--images", j("images.kv"),
              "--peer-log", j("peer.log"), "--door", j("door.kv"),
-             "--schedule", "R,A", "--transfers", "1", "--bytes", "100",
-             "--wd-secs", "150"], capture_output=True, text=True, timeout=60)
+             "--schedule", self.schedule, "--transfers", "1", "--bytes", "100",
+             "--wd-secs", "150", "--fault-boot", str(self.fault)],
+            capture_output=True, text=True, timeout=60)
         shutil.rmtree(self.dir)
         recs = {}
         for line in p.stdout.splitlines():
             kv = dict(t.split("=", 1) for t in line.split()[1:] if "=" in t)
-            recs[kv.get("boot", line.split()[0])] = kv
+            key = kv.get("boot", line.split()[0])
+            if line.startswith("rsgap_recovery"):
+                key = "recovery"
+            recs[key] = kv
         return p.returncode, recs
 
 
@@ -363,6 +377,66 @@ class CollectTests(unittest.TestCase):
     def test_door_missing_httpd(self):
         self.check(lambda s: self.drop_md5(s, 3, "RSGAPARM:C/httpd"),
                    boot="3", valid="0", hash_match="0", hash_missing="1")
+
+
+class FaultBootTests(unittest.TestCase):
+    """A,R with the R boot hung: only a real Roadshow boot that reached its
+    stack counts as a Roadshow-fault recovery proof."""
+
+    def session(self):
+        s = Session()
+        s.schedule, s.fault = "A,R", 2
+        s.boot = {1: s.measure(1, "A"),
+                  2: [l for l in s.measure(2, "R") if "rec=xfer" not in l],
+                  3: s.door(3)}
+        s.wd = {2: ["rec=wd state=fired elapsed_s=150"]}
+        return s
+
+    def run_fault(self, edit):
+        s = self.session()
+        edit(s)
+        rc, recs = s.collect()
+        return rc, recs["recovery"], recs["rsgap_run"]
+
+    def test_real_roadshow_fault_recovers(self):
+        rc, rec, run = self.run_fault(lambda s: None)
+        self.assertEqual(rec["fault_boot_ok"], "1", rec)
+        self.assertEqual(run["expected_ok"], "1", run)
+        self.assertEqual(rc, 0)
+
+    def neg(self, edit):
+        rc, rec, run = self.run_fault(edit)
+        self.assertEqual(rec["fault_boot_ok"], "0", rec)
+        self.assertEqual(run["expected_ok"], "0", run)
+        self.assertEqual(rc, 1)
+
+    def test_pre_stack_failure_is_not_proof(self):
+        # Died before any stack: no stack tasks, no stacklib, no hashes.
+        def edit(s):
+            s.boot[2] = [s.boot[2][0]]
+        self.neg(edit)
+
+    def test_fault_boot_ran_the_wrong_stack(self):
+        def edit(s):
+            s.boot[2] = [l.replace("names=Workbench", "names=AmiNetXDuo_stack")
+                         for l in s.boot[2]]
+        self.neg(edit)
+
+    def test_fault_boot_selector_not_consumed(self):
+        def edit(s):
+            s.boot[2][0] = s.boot[2][0].replace("consumed=1", "consumed=0")
+        self.neg(edit)
+
+    def test_fault_boot_preloaded(self):
+        def edit(s):
+            s.boot[2][0] = s.boot[2][0].replace("bsdsocket_preloaded=0",
+                                                "bsdsocket_preloaded=1")
+        self.neg(edit)
+
+    def test_fault_boot_missing_hash(self):
+        def edit(s):
+            s.boot[2] = [l for l in s.boot[2] if "file=C:RsGapBoot " not in l]
+        self.neg(edit)
 
 
 class PeerTests(unittest.TestCase):
