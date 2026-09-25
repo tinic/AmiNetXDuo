@@ -117,8 +117,9 @@ expect "and names memory as the reason"    "bytes are free. The stack needs abou
 FREE=$(sed -n 's/^ *\([0-9][0-9]*\) bytes are free.*/\1/p' "$REPORT" | head -1)
 if [ -z "$FREE" ]; then
     fail "no free-byte figure was printed"
-elif [ "$FREE" -gt 0 ] && [ "$FREE" -lt 204800 ]; then
-    pass "it quotes $FREE bytes free, under the 200K the branch tested"
+elif [ "$FREE" -gt 0 ] && [ "$FREE" -lt 524288 ]; then
+    # Taken before the open (#55): a LoadSeg that fails gives it all back.
+    pass "it quotes $FREE bytes free, under the 512K the machine has"
 else
     fail "the free figure '$FREE' is not a plausible reading on this machine"
 fi
