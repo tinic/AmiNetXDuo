@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxwifipi.device` opened with a plain `IOStdReq` for `NSCMD_DEVICEQUERY` now
+  gets a valid unit; before, the query and the close wrote into low memory.
+  The query is answered in the `IOStdReq` form for a short request and in the
+  `ios2_Data` form for a full `IOSana2Req`, checks the buffer size first, and
+  reports 16 bytes, not 20.
 - `httpd` now has two independent, reconnectable Shell slots. `/shell` remains
   slot 0; `/shell?session=1` gives automation its own Shell. A disconnected
   slot keeps its working state for five minutes, and a live socket still has
