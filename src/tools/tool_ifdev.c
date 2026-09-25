@@ -25,6 +25,9 @@ VOID tool_netstatus_devices(struct Library *base)
     n = tool_netstatus_query(base, NETSTATUS_IFDEVICES, &ifdev,
                              sizeof(ifdev), sizeof(NetStatusIfDevice));
 
+    /* The query bounds n by the buffer; the cap says so where it is used. */
+    if (n > (LONG)NX_MAX_PHYSICAL_INTERFACES)
+        n = (LONG)NX_MAX_PHYSICAL_INTERFACES;
     ifdev_count = (n > 0) ? n : 0;
 
     for (i = 0; i < ifdev_count; i++)
