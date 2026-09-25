@@ -28,6 +28,18 @@ typedef struct BsdMcastEntry
  */
 static BsdMcastEntry bsd_mcast_table[BSD_MCAST_MEMBERSHIPS];
 
+/* A saved IP_MULTICAST_IF is an interface identity, not a permanent numeric
+   slot preference.  If that slot was detached, use routing until the caller
+   explicitly selects an interface again.  Call within a NetX bracket. */
+static LONG bsd_mcast_preference(LONG *iface, ULONG epoch)
+{
+    if (*iface >= 0 &&
+        netstack_interface_epoch((UWORD)*iface) != epoch)
+        *iface = -1;
+
+    return *iface;
+}
+
 /* NetX drops the actual join on interface detach.  Do not let a BSD row
    outlive that join: after slot reuse, Close() could otherwise leave another
    socket's group, and re-join on this socket would appear duplicated.  All
@@ -264,7 +276,8 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 
     sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)sock->as_McastTtl;
 
-    return sock->as_McastIf;
+    return bsd_mcast_preference(&sock->as_McastIf,
+                                sock->as_McastIfEpoch);
 }
 
 /*
@@ -368,6 +381,7 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             if (in.s_addr == 0UL)
             {
                 sock->as_McastIf = -1;
+                sock->as_McastIfEpoch = 0;
                 return 0;
             }
 
@@ -375,7 +389,10 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, AMI_ENETDOWN);
             iface = bsd_mcast_iface_of(ip, BSD_NTOHL(in.s_addr));
             if (iface >= 0)
+            {
                 sock->as_McastIf = iface;
+                sock->as_McastIfEpoch = netstack_interface_epoch((UWORD)iface);
+            }
             bsd_nx_leave(base);
             if (iface < 0)
                 return bsd_fail(base, AMI_EADDRNOTAVAIL);
@@ -420,7 +437,9 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
             in.s_addr = 0UL;
             if (bsd_nx_enter(base) != 0)
                 return bsd_fail(base, AMI_ENETDOWN);
-            if (sock->as_McastIf >= 0 && ip != NULL &&
+            if (bsd_mcast_preference(&sock->as_McastIf,
+                                      sock->as_McastIfEpoch) >= 0 &&
+                ip != NULL &&
                 ip->nx_ip_interface[sock->as_McastIf].nx_interface_valid != 0)
             {
                 in.s_addr = BSD_HTONL(
@@ -755,7 +774,8 @@ LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
     *saved = ip->nx_ipv6_hop_limit;
     ip->nx_ipv6_hop_limit = (ULONG)sock->as_Mcast6Hops;
 
-    iface = sock->as_Mcast6If;
+    iface = bsd_mcast_preference(&sock->as_Mcast6If,
+                                  sock->as_Mcast6IfEpoch);
     if (iface < 0)
         return -1;
 
@@ -900,6 +920,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             if (value == 0)
             {
                 sock->as_Mcast6If = -1;
+                sock->as_Mcast6IfEpoch = 0;
                 return 0;
             }
             if (value < 0)
@@ -909,7 +930,11 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, AMI_ENETDOWN);
             iface = bsd_mcast6_iface_of(ip, (ULONG)value);
             if (iface >= 0)
+            {
                 sock->as_Mcast6If = iface;
+                sock->as_Mcast6IfEpoch =
+                    netstack_interface_epoch((UWORD)iface);
+            }
             bsd_nx_leave(base);
             if (iface < 0)
                 return bsd_fail(base, AMI_ENXIO);
@@ -950,12 +975,21 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
     {
         case AMI_IPV6_MULTICAST_IF_BSD:
         case AMI_IPV6_MULTICAST_IF_LINUX:
+        {
+            LONG iface;
+
             /* Back in the caller's numbering, one higher, and 0 for "the
                route decides". */
+            if (bsd_nx_enter(base) != 0)
+                return bsd_fail(base, AMI_ENETDOWN);
+            iface = bsd_mcast_preference(&sock->as_Mcast6If,
+                                          sock->as_Mcast6IfEpoch);
+            bsd_nx_leave(base);
             return bsd_mcast6_put_int(base, optval, optlen,
-                                      (sock->as_Mcast6If < 0)
+                                      (iface < 0)
                                           ? 0
-                                          : sock->as_Mcast6If + 1);
+                                          : iface + 1);
+        }
 
         case AMI_IPV6_MULTICAST_HOPS_BSD:
         case AMI_IPV6_MULTICAST_HOPS_LINUX:

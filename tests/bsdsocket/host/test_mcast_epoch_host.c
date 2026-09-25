@@ -75,6 +75,22 @@ int main(void)
     check(bsd_mcast6_free_row() == &bsd_mcast6_table[0],
           "IPv6 stale row reusable");
 
+    a.as_McastIf = 1;
+    a.as_McastIfEpoch = h_epoch[1];
+    check(bsd_mcast_preference(&a.as_McastIf, a.as_McastIfEpoch) == 1,
+          "live IPv4 send preference retained");
+    h_epoch[1]++;
+    check(bsd_mcast_preference(&a.as_McastIf, a.as_McastIfEpoch) == -1,
+          "stale IPv4 send preference reverts to routing");
+
+    a.as_Mcast6If = 2;
+    a.as_Mcast6IfEpoch = h_epoch[2];
+    check(bsd_mcast_preference(&a.as_Mcast6If, a.as_Mcast6IfEpoch) == 2,
+          "live IPv6 send preference retained");
+    h_epoch[2]++;
+    check(bsd_mcast_preference(&a.as_Mcast6If, a.as_Mcast6IfEpoch) == -1,
+          "stale IPv6 send preference reverts to routing");
+
     printf("mcast epoch: %u checks, %u failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
