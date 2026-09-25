@@ -369,6 +369,15 @@ LONG tool_netstatus_query(struct Library *base, ULONG what,
                           APTR buffer, ULONG size, ULONG entry_size);
 
 /*
+ * tool_ifdev.c.  tool_netstatus_devices() asks NETSTATUS_IFDEVICES once, for
+ * every interface; tool_if_device() then copies interface `e`'s device path
+ * into dst: whole when the library answered for that slot, else nsi_Device
+ * (a library that predates the selector, or a slot with no path).
+ */
+VOID tool_netstatus_devices(struct Library *base);
+VOID tool_if_device(char *dst, ULONG dstlen, const NetStatusInterface *e);
+
+/*
  * The DHCP state of one live interface, from NETSTATUS_DHCP.  The return is
  * NETSTATUS_DHCP_OFF/WORKING/BOUND, or -1 when the stack did not answer or
  * supplied no row for `index`.  A BOUND answer may also return the lease's

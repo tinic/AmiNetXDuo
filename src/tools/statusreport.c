@@ -418,16 +418,17 @@ static VOID sr_live(struct Library *base)
     else
     {
         sr_ulong(&sr_out, "live.interfaces", (ULONG)n);
+        tool_netstatus_devices(base);
 
         for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
         {
             const NetStatusInterface *e = &sr_q.ifs.e[i];
             char   name[NETSTATUS_NAME_LEN + 1];
-            char   device[NETSTATUS_DEVICE_LEN + 1];
+            static char device[NETSTATUS_FILE_LEN];  /* 4 KB Shell stack */
             char   prefix[NETSTATUS_NAME_LEN + 8];
 
             tool_copy_string(name, sizeof(name), e->nsi_Name);
-            tool_copy_string(device, sizeof(device), e->nsi_Device);
+            tool_if_device(device, sizeof(device), e);
 
             if (name[0] != '\0')
                 sr_key_part(part, sizeof(part), name);

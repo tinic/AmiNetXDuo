@@ -49,7 +49,7 @@ typedef struct ToolIfInfo
      * config file names. Empty when the interface has no SANA-II device, so an
      * empty string is a fact, not a failure.
      */
-    char            nx_device[NETSTATUS_DEVICE_LEN];
+    char            nx_device[NETSTATUS_FILE_LEN];
     ULONG           nx_unit;
     /* From the SANA-II shim, when the interface has one attached. */
     BOOL            have_sana2;

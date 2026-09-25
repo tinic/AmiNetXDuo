@@ -334,16 +334,19 @@ host_test_targets() { # builddir
 #      443 with adopt_pool_sweep: an unpublished slot whose claimer's address
 #      now holds another Task is freed; a live claimer's is kept
 #      444 with test_romtag: rt_Name read from a driver file without loading it
-HOST_TESTS_EXPECTED=444
+#      446 with netstatus_ifdevices and tool_ifdev: the device path whole
+#      through NETSTATUS_IFDEVICES, nsi_Device from a library without it
+HOST_TESTS_EXPECTED=446
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
     # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
-    # test_usergroup_hold and test_handoff (8ff3cc92), all x86_64-only for the
+    # test_ifdevices, test_usergroup_hold and test_handoff (8ff3cc92), all
+    # x86_64-only for the
     # reason in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is
     # eight bytes and no structure in them has the target's shape.
     # darwin-arm64 registers 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 12)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 13)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against

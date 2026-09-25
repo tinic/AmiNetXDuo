@@ -395,7 +395,9 @@ static const ToolDhcpInfo *lease_for(const ToolDhcp *dhcp,
  * Compared whole against the tool's full parse of the same file, that printed
  * the "changed after the network started" NOTE on every ShowNetStatus of a
  * drawer installation (the A3000, 2026-09-19).  A copy that fills the field
- * and is the file's prefix is the same name.
+ * and is the file's prefix is the same name.  A library with
+ * NETSTATUS_IFDEVICES sends the name whole (tool_if_device()); the prefix
+ * rule is for one without it.
  */
 static BOOL device_matches(const char *file, const char *live)
 {
