@@ -63,8 +63,32 @@ listing(clobber_mit
     "     10a:${T}4e5d           ${T}unlk %a5"
     "     10c:${T}4e75           ${T}rts")
 
+# Swapped out, restored from the stack, then swapped out again with the same
+# register: the second exg is a new write, not the pair's restore.
+listing(exg_after_restore
+    "     100:${T}4e55 ff88      ${T}link.w a5,#-120"
+    "     104:${T}2f0d           ${T}move.l a5,-(sp)"
+    "     106:${T}cf8d           ${T}exg d7,a5"
+    "     108:${T}2a5f           ${T}movea.l (sp)+,a5"
+    "     10a:${T}cf8d           ${T}exg d7,a5"
+    "     10c:${T}4eae ffe2      ${T}jsr -30(a6)"
+    "     110:${T}4e5d           ${T}unlk a5"
+    "     112:${T}4e75           ${T}rts")
+# One frame leaves a5 swapped out at its unlk; the next frame's single exg
+# with the same register must not be read as that swap's restore.
+listing(exg_across_frames
+    "     100:${T}4e55 ff88      ${T}link.w a5,#-120"
+    "     104:${T}cf8d           ${T}exg d7,a5"
+    "     106:${T}4e5d           ${T}unlk a5"
+    "     108:${T}4e75           ${T}rts"
+    "     10a:${T}4e55 ff88      ${T}link.w a5,#-120"
+    "     10e:${T}cf8d           ${T}exg d7,a5"
+    "     110:${T}4e5d           ${T}unlk a5"
+    "     112:${T}4e75           ${T}rts")
+
 set(cases "clobber:FAIL" "stack_restore:PASS" "exg_pair:PASS"
-          "exg_unmatched:FAIL" "exg_mismatch:FAIL" "clobber_mit:FAIL")
+          "exg_unmatched:FAIL" "exg_mismatch:FAIL" "clobber_mit:FAIL"
+          "exg_after_restore:FAIL" "exg_across_frames:FAIL")
 set(wrong "")
 foreach(c IN LISTS cases)
     string(REPLACE ":" ";" c "${c}")
