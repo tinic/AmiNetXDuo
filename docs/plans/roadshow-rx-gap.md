@@ -9,12 +9,13 @@ answer one question before any mechanism is named or any change is made:
 
 ## Evidence so far
 
-One post, EAB thread 123359, [post 1810965](https://eab.abime.net/showpost.php?p=1810965)
-(26 Aug 2026). The method is from [post 1806771](https://eab.abime.net/showpost.php?p=1806771)
-(an earlier build, cited for the method only) and posts 1807384 and 1807759: Fitz 1.21 (Aminet), a 10^7-byte file, a Linux
-file server, kb = 1000 bytes. The machine, an A3000 with a CyberStorm MkII
-68060 and an X-Surf 100, is inferred from the poster's earlier posts; post
-1810965 itself names none. The row in [BACKLOG.md](../BACKLOG.md) records the read figures.
+One post: EAB thread 123359, [post 1810965](https://eab.abime.net/showpost.php?p=1810965)
+(26 Aug 2026). Method, from [post 1806771](https://eab.abime.net/showpost.php?p=1806771),
+an earlier build cited for the method only: Fitz 1.21 (Aminet), a 10^7-byte
+file, a Linux file server, kb = 1000 bytes. Machine, inferred from the
+poster's standing rig (posts 1807384 and 1807759), since post 1810965 names
+none: an A3000 with a CyberStorm MkII 68060 and an X-Surf 100. The row in
+[BACKLOG.md](../BACKLOG.md) records the read figures.
 
 | Stack and driver | Read, server to `RAM:` (kb/s) | Write, `RAM:` to server (kb/s) |
 |---|---|---|
@@ -25,7 +26,7 @@ file server, kb = 1000 bytes. The machine, an A3000 with a CyberStorm MkII
 
 | Limit | Detail |
 |---|---|
-| Sample count | one figure per row: n = 1 as far as the thread shows |
+| Sample count | unstated; one reported figure per row |
 | Not recorded | run order, reboots between stacks, driver version (1.16 assumed), `ENV:` SANA-II settings, Roadshow's request counts, CPU clock, OS, the server's NIC and duplex, which 0.25.5 build |
 | Spread in the same table | two builds of one stack on one driver differ by 3.1%, the size of the gap |
 | Historical | 0.25.5. Later x-surf reads were 252 (0.26.1, post 1811396) and about a third of expected (0.26.3, post 1812902), then the receive path, ACKs and queues changed through 0.28.x (CHANGELOG) |
