@@ -61,12 +61,13 @@ say where.
 | Order | alternate R/A/A/R across boots, so neither arm always runs first after power-on |
 | Direction | server to Amiga only (receive), written to `RAM:` so no disk is involved. A fixed-length TCP stream from a peer server that sends from memory, 12 s or 16 MB |
 | Client | **one** binary for both arms (hash recorded): plain `bsdsocket.library` socket/connect/recv into a `RAM:` file, fixed read size, timed by `timer.device`. No stack-specific tags. Peer-side byte count and timing kept as a cross-check |
-| Workload cross-check | Fitz 1.21 copying the "10e7 bytes" file (100,000,000 bytes) from the server to `RAM:`, the original method, one transfer per boot beside the client's four. Without it, "not reproduced" could mean only a different workload |
+| Workload cross-check | Fitz 1.21 copying the "10e7 bytes" file (100,000,000 bytes) from the server to `RAM:`, the original method, one transfer per boot beside the client's four. Without it, a "no material gap" verdict could reflect only a different workload |
 | Recorded per boot | md5 of the stack library, the driver, the client and the Startup files; `AttnFlags`; `CacheControl` read-back; Z2/Z3 mode; FAST RAM map; link speed and duplex; the peer's kernel and NIC offloads; wall clock |
 | Null control first | 3 A/A boots and 3 R/R boots measure this machine's between-boot spread before any R/A claim |
 | Sample size | 20 boots per arm, 4 transfers per boot, paired R/A boot by boot: the design that resolved +1.34% on the emulator (CHANGELOG). The null boots check that 20 is enough on this machine and raise it if not |
 | Report | per-boot means for each arm, their spread, and the paired R-A difference with a bootstrap 95% interval |
-| Verdict | a gap is claimed only if that interval excludes zero and exceeds the null spread. Otherwise the 31 KB/s is recorded as not reproduced on this machine |
+| Margin | declared before any run: **±1.5%** of AmiNetXDuo's median is "no material gap". It is under half the historical 3.4% and above the null controls' +0.22% and -0.29%, but not their +2.75% |
+| Verdict | **gap**: the interval excludes zero and lies entirely beyond the margin. **No material gap**: the interval lies entirely within ±1.5%. **Inconclusive**: anything else, including an interval that contains zero but reaches past the margin. Neither the null spread nor an interval merely containing zero establishes equivalence |
 
 **Machine.** The lab A3000 is a 68030/25, and the report came from a 68060.
 A result there answers whether a same-driver gap exists on this A3000, not
@@ -88,7 +89,7 @@ two copies a packet, the same path for any stack.
 
 | Hypothesis | Discriminating measurement | Reads as |
 |---|---|---|
-| H1: no current gap | the A/B above | interval includes zero or sits inside the null spread |
+| H1: no current gap | the A/B above | a "no material gap" verdict; an inconclusive one leaves H1 open |
 | H2: receive policy (ACKs, window) | server-side pcap per arm: ACKs per data segment, advertised window, gaps, retransmits | Roadshow over the vendor driver beat our own direct driver, which skips a copy, and it writes 18% slower: both point here rather than at the copy |
 | H3: copy phase | a `(from & 3, to & 3)` histogram and sampled EClock time in our CopyToBuff | our destination is 0 mod 4 against a 2 mod 4 source (`sana2_rx.c:719`; +30-37% of the copy on a 68020, `sana2_copy.c:60-110`). Roadshow's destination phase and the 68060 cost are unknown |
 | H4: read starvation | outstanding-read low-water mark and zero-read count, plus the driver's own drop count (unit + 302) through its statistics | frames lost with no read posted show up only as TCP retransmits |
