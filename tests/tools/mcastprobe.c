@@ -7,8 +7,10 @@
 #include <exec/types.h>
 #include <devices/timer.h>      /* struct timeval, for WaitSelect */
 #include <dos/dos.h>
+#include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <string.h>
 
 typedef struct ProbeAddr
 {
@@ -549,9 +551,133 @@ static VOID p_probe_v6(struct Library *sb)
     (VOID)p_close(sb, s);
 }
 
-int main(void)
+/* The EPOCH mode is for the isolated emulator stage only.  It keeps a BSD
+ * socket open across RemoveNetInterface/AddNetInterface of zeth1, then asks
+ * for the same membership again.  Before #42 the stale row says EADDRINUSE;
+ * NetX itself has already dropped the group during detach. */
+static BOOL p_parse_v4(const char *text, ULONG *out)
+{
+    ULONG value = 0;
+    ULONG part = 0;
+    ULONG fields = 0;
+
+    if (text == NULL || *text == '\0')
+        return FALSE;
+
+    while (*text != '\0')
+    {
+        if (*text >= '0' && *text <= '9')
+        {
+            part = part * 10UL + (ULONG)(*text - '0');
+            if (part > 255UL)
+                return FALSE;
+        }
+        else if (*text == '.' && fields < 3)
+        {
+            value = (value << 8) | part;
+            part = 0;
+            fields++;
+        }
+        else
+            return FALSE;
+        text++;
+    }
+    if (fields != 3)
+        return FALSE;
+    *out = (value << 8) | part;
+    return TRUE;
+}
+
+static LONG p_epoch(struct Library *sb, const char *address)
+{
+    ProbeMreq req;
+    LONG s;
+    LONG rc;
+    LONG checks = 0;
+    LONG failures = 0;
+    BOOL removed = FALSE;
+
+    if (!p_parse_v4(address, &req.imr_interface))
+    {
+        Printf((CONST_STRPTR)"epoch: invalid interface address\n");
+        return RETURN_FAIL;
+    }
+    req.imr_multiaddr = 0xefff2a63UL;
+    s = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
+    if (s < 0)
+    {
+        Printf((CONST_STRPTR)"epoch: socket failed errno %ld\n", p_errno(sb));
+        return RETURN_FAIL;
+    }
+
+    rc = p_setsockopt(sb, s, P_IPPROTO_IP, P_IP_ADD_MEMBERSHIP,
+                      &req, (LONG)sizeof req);
+    checks++;
+    if (rc != 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: initial join FAILED errno %ld\n",
+               p_errno(sb));
+        goto done;
+    }
+
+    rc = SystemTags((CONST_STRPTR)"SYS:RemoveNetInterface zeth1",
+                    NP_StackSize, (Tag)65536, TAG_DONE);
+    checks++;
+    if (rc != 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: remove FAILED rc %ld\n", rc);
+        goto done;
+    }
+    removed = TRUE;
+
+    rc = SystemTags((CONST_STRPTR)"SYS:AddNetInterface zeth1",
+                    NP_StackSize, (Tag)65536, TAG_DONE);
+    checks++;
+    if (rc != 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: re-add FAILED rc %ld\n", rc);
+        goto done;
+    }
+    removed = FALSE;
+
+    rc = p_setsockopt(sb, s, P_IPPROTO_IP, P_IP_ADD_MEMBERSHIP,
+                      &req, (LONG)sizeof req);
+    checks++;
+    if (rc != 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: rejoin FAILED errno %ld\n",
+               p_errno(sb));
+        goto done;
+    }
+
+    rc = p_setsockopt(sb, s, P_IPPROTO_IP, P_IP_DROP_MEMBERSHIP,
+                      &req, (LONG)sizeof req);
+    checks++;
+    if (rc != 0)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"epoch: leave FAILED errno %ld\n",
+               p_errno(sb));
+    }
+
+done:
+    if (removed)
+        (VOID)SystemTags((CONST_STRPTR)"SYS:AddNetInterface zeth1",
+                         NP_StackSize, (Tag)65536, TAG_DONE);
+    (VOID)p_close(sb, s);
+    Printf((CONST_STRPTR)"epoch: %ld checks, %ld failures\n",
+           checks, failures);
+    return (failures == 0 && checks == 5) ? RETURN_OK : RETURN_FAIL;
+}
+
+int main(int argc, char **argv)
 {
     struct Library *sb;
+    LONG result = RETURN_OK;
 
     sb = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
     if (sb == NULL)
@@ -560,10 +686,20 @@ int main(void)
         return RETURN_FAIL;
     }
 
-    p_probe_v4(sb);
-    p_probe_v6(sb);
+    if (argc == 3 && strcmp(argv[1], "EPOCH") == 0)
+        result = p_epoch(sb, argv[2]);
+    else if (argc == 1)
+    {
+        p_probe_v4(sb);
+        p_probe_v6(sb);
+    }
+    else
+    {
+        Printf((CONST_STRPTR)"usage: McastProbe [EPOCH interface-ip]\n");
+        result = RETURN_FAIL;
+    }
 
     CloseLibrary(sb);
 
-    return RETURN_OK;
+    return (int)result;
 }
