@@ -49,6 +49,11 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 
 . "$ROOT/tests/tools/bringup-verdict.sh"
 
+# ONE MAC FOR EVERY CASE.  The cases boot one after another, each under its
+# own run tag for the logs; the address comes from this tag instead, so a run
+# takes one DHCP lease rather than one per case (tools/amiberry-run.sh).
+export AMINETXDUO_MAC_TAG="${AMINETXDUO_MAC_TAG:-matrix-mem}"
+
 RESULTS="$ROOT/build/bigmem-results.txt"
 : > "$RESULTS"
 

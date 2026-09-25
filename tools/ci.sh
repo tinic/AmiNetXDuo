@@ -3048,9 +3048,13 @@ stage_rate() {
     # green.  Five-round medians for one tree reproduce to about half a per
     # cent across sittings (tests/perf/rate-baseline.txt), so 12% is many
     # times the noise and still catches anything worth catching.
-    out=$(AMINETXDUO_BUILD="$BUILD/cm" AMINETXDUO_RATE_ROUNDS=5 \
-          AMINETXDUO_RATE_TOLERANCE=12 tools/check-rate.sh 2>&1)
-    rc=$?
+    #
+    # $BUILD/default: the configuration the Emulator tier builds, and the one
+    # the baseline was measured on (Release, default options -- see
+    # tests/perf/run-rate-ab.sh).  There is no `cm` configuration here.
+    rc=0
+    out=$(AMINETXDUO_BUILD="$BUILD/default" AMINETXDUO_RATE_ROUNDS=5 \
+          AMINETXDUO_RATE_TOLERANCE=12 tools/check-rate.sh 2>&1) || rc=$?
 
     if printf '%s' "$out" | grep -q '^rate=skipped'; then
         skip "rate: $(printf '%s' "$out" | sed -n 's/^rate=skipped reason=//p')." \
@@ -3060,10 +3064,14 @@ stage_rate() {
     fi
 
     printf '%s\n' "$out"
-    if [ "$rc" != 0 ]; then
-        fail "a direction is below its recorded rate"
-        return 1
-    fi
+    case "$rc" in
+        0) ;;
+        1) fail "rate: a direction is below its recorded rate"
+           return 1 ;;
+        *) fail "rate: NOTHING MEASURED, not a regression --\
+ $(printf '%s' "$out" | sed -n 's/^rate=error //p' | head -1)"
+           return 1 ;;
+    esac
     note "$(printf '%s' "$out" | sed -n 's/^rate=PASS /throughput: /p')"
     return 0
 }
