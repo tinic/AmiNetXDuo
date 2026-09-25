@@ -169,16 +169,6 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
     row->bm_Iface = (UINT)iface;
     row->bm_Epoch = netstack_interface_epoch((UWORD)iface);
 
-    /* Read once, by the join, into the group's own entry. See the top. */
-    /* ONLY SUCCESS: the one other return either of these has is
-       NX_NOT_SUPPORTED under NX_DISABLE_IPV4, and nothing in this tree
-       defines it -- this file is IPv4 multicast and would not compile
-       usefully without IPv4 at all. */
-    if (sock->as_McastLoop != 0)
-        AMI_NX_ONLY_SUCCESS(nx_igmp_loopback_enable(ip));
-    else
-        AMI_NX_ONLY_SUCCESS(nx_igmp_loopback_disable(ip));
-
     status = nx_igmp_multicast_interface_join(ip, group, (UINT)iface);
 
     if (status != NX_SUCCESS)
@@ -278,6 +268,54 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 
     return bsd_mcast_preference(&sock->as_McastIf,
                                 sock->as_McastIfEpoch);
+}
+
+/* NetX snapshots a *global* loopback setting when a group is first joined,
+ * then its send path consults that group's entry. IP_MULTICAST_LOOP is instead
+ * a property of the sender, which need not have joined the group at all.
+ * nxd_udp_socket_send() reaches nx_ip_driver_packet_send() synchronously.
+ * Hold the IP mutex across the override and that call: a NetX bracket can
+ * yield while taking a mutex, and a second sender must not observe our
+ * temporary flag. ThreadX mutexes are recursive for the owning thread, so
+ * the send's own tx_mutex_get() is safe. NetX chooses the first entry matching
+ * the group, independent of interface; mirror that lookup. No entry means no
+ * local receiver to loop to. */
+VOID bsd_mcast_loop_begin(NX_IP *ip, const AmiSocket *sock,
+                          const NXD_ADDRESS *addr, BsdMcastLoopGuard *guard)
+{
+    UINT i;
+
+    guard->ip = NULL;
+    guard->flag = NULL;
+    guard->saved = 0;
+    if (ip == NULL || addr->nxd_ip_version != NX_IP_VERSION_V4 ||
+        !bsd_mcast_is_group(addr->nxd_ip_address.v4))
+        return;
+
+    AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER));
+    for (i = 0; i < (UINT)NX_MAX_MULTICAST_GROUPS; i++)
+    {
+        NX_IPV4_MULTICAST_ENTRY *entry = &ip->nx_ipv4_multicast_entry[i];
+
+        if (entry->nx_ipv4_multicast_join_list != addr->nxd_ip_address.v4)
+            continue;
+
+        guard->flag = &entry->nx_ipv4_multicast_loopback_enable;
+        guard->ip = ip;
+        guard->saved = *guard->flag;
+        *guard->flag = (sock->as_McastLoop != 0) ? NX_TRUE : NX_FALSE;
+        return;
+    }
+    AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
+}
+
+VOID bsd_mcast_loop_end(BsdMcastLoopGuard *guard)
+{
+    if (guard->flag != NULL)
+    {
+        *guard->flag = guard->saved;
+        AMI_NX_ONLY_SUCCESS(tx_mutex_put(&guard->ip->nx_ip_protection));
+    }
 }
 
 /*

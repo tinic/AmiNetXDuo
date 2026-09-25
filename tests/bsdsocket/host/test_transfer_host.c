@@ -849,6 +849,22 @@ LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
     return 0;
 }
 
+/* This fixture sends only unicast packets; the multicast loop guard itself is
+   exercised by test_mcast_loop. */
+VOID bsd_mcast_loop_begin(NX_IP *ip, const AmiSocket *sock,
+                          const NXD_ADDRESS *addr, BsdMcastLoopGuard *guard)
+{
+    (VOID)ip;
+    (VOID)sock;
+    (VOID)addr;
+    guard->flag = NULL;
+}
+
+VOID bsd_mcast_loop_end(BsdMcastLoopGuard *guard)
+{
+    (VOID)guard;
+}
+
 LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
                              const NXD_ADDRESS *addr, ULONG *saved)
 {

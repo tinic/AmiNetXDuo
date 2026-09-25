@@ -551,6 +551,155 @@ static VOID p_probe_v6(struct Library *sb)
     (VOID)p_close(sb, s);
 }
 
+/* A sender need not join the group.  The receiver deliberately joins with
+ * LOOP=0, then the sender changes its own option from 0 to 1: the old NetX
+ * first-join snapshot loses the second packet; the BSD sender override must
+ * deliver exactly that one.  This is a guest data-plane regression, not just
+ * a test of the option's stored value. */
+static LONG p_probe_loop(struct Library *sb)
+{
+    ProbeAddr group;
+    ProbeAddr group2;
+    ProbeMreq mreq;
+    LONG rx = -1;
+    LONG rx2 = -1;
+    LONG tx = -1;
+    LONG zero = 0;
+    LONG one = 1;
+    LONG checks = 0;
+    LONG failures = 0;
+    LONG rc;
+    ULONG i;
+
+    for (i = 0; i < (ULONG)sizeof group.sin_zero; i++)
+        group.sin_zero[i] = 0;
+    group.sin_len = (UBYTE)sizeof group;
+    group.sin_family = P_AF_INET;
+    group.sin_port = 29999;
+    group.sin_addr = 0xefff2a64UL;
+    mreq.imr_multiaddr = group.sin_addr;
+    mreq.imr_interface = 0;
+
+    rx = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
+    tx = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
+    if (rx < 0 || tx < 0 || rx >= 32)
+    {
+        Printf((CONST_STRPTR)"loop: sockets unavailable\n");
+        failures++;
+        goto done;
+    }
+
+    rc = p_bind(sb, rx, &group, (LONG)sizeof group);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: bind FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_setsockopt(sb, rx, P_IPPROTO_IP, P_IP_MULTICAST_LOOP,
+                      &zero, (LONG)sizeof zero);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: receiver option FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_setsockopt(sb, rx, P_IPPROTO_IP, P_IP_ADD_MEMBERSHIP,
+                      &mreq, (LONG)sizeof mreq);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: join FAILED errno %ld\n", p_errno(sb)); goto done; }
+
+    rc = p_setsockopt(sb, tx, P_IPPROTO_IP, P_IP_MULTICAST_LOOP,
+                      &zero, (LONG)sizeof zero);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: sender LOOP=0 FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_sendto(sb, tx, "off", 3, &group, (LONG)sizeof group);
+    checks++;
+    if (rc != 3) { failures++; Printf((CONST_STRPTR)"loop: send off FAILED errno %ld\n", p_errno(sb)); goto done; }
+    {
+        struct timeval tv;
+        ULONG readfds = 1UL << rx;
+
+        tv.tv_secs = 1;
+        tv.tv_micro = 0;
+        rc = p_waitselect(sb, rx + 1, &readfds, &tv);
+        checks++;
+        if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: LOOP=0 delivered unexpectedly rc %ld\n", rc); goto done; }
+    }
+
+    rc = p_setsockopt(sb, tx, P_IPPROTO_IP, P_IP_MULTICAST_LOOP,
+                      &one, (LONG)sizeof one);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: sender LOOP=1 FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_sendto(sb, tx, "on", 2, &group, (LONG)sizeof group);
+    checks++;
+    if (rc != 2) { failures++; Printf((CONST_STRPTR)"loop: send on FAILED errno %ld\n", p_errno(sb)); goto done; }
+    {
+        struct timeval tv;
+        ULONG readfds = 1UL << rx;
+        ProbeAddr from;
+        LONG fromlen = (LONG)sizeof from;
+
+        tv.tv_secs = 3;
+        tv.tv_micro = 0;
+        rc = p_waitselect(sb, rx + 1, &readfds, &tv);
+        checks++;
+        if (rc != 1 || (readfds & (1UL << rx)) == 0)
+        {
+            failures++;
+            Printf((CONST_STRPTR)"loop: LOOP=1 did not deliver rc %ld\n", rc);
+            goto done;
+        }
+        rc = p_recvfrom(sb, rx, p_rxbuf, (LONG)sizeof p_rxbuf,
+                        &from, &fromlen);
+        checks++;
+        if (rc != 2 || p_rxbuf[0] != 'o' || p_rxbuf[1] != 'n')
+        {
+            failures++;
+            Printf((CONST_STRPTR)"loop: wrong received payload len %ld\n", rc);
+        }
+    }
+
+    /* The converse matters too: a receiver that joins with the BSD default
+     * LOOP=1 must not hear an unrelated sender that has LOOP=0.  Use a new
+     * group so NetX snapshots that default on its first join. */
+    group2 = group;
+    group2.sin_port = 30000;
+    group2.sin_addr = 0xefff2a65UL;
+    mreq.imr_multiaddr = group2.sin_addr;
+    rx2 = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
+    checks++;
+    if (rx2 < 0 || rx2 >= 32)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"loop: second receiver unavailable\n");
+        goto done;
+    }
+    rc = p_bind(sb, rx2, &group2, (LONG)sizeof group2);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: second bind FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_setsockopt(sb, rx2, P_IPPROTO_IP, P_IP_ADD_MEMBERSHIP,
+                      &mreq, (LONG)sizeof mreq);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: second join FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_setsockopt(sb, tx, P_IPPROTO_IP, P_IP_MULTICAST_LOOP,
+                      &zero, (LONG)sizeof zero);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: sender LOOP=0 reset FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_sendto(sb, tx, "off2", 4, &group2, (LONG)sizeof group2);
+    checks++;
+    if (rc != 4) { failures++; Printf((CONST_STRPTR)"loop: send off2 FAILED errno %ld\n", p_errno(sb)); goto done; }
+    {
+        struct timeval tv;
+        ULONG readfds = 1UL << rx2;
+
+        tv.tv_secs = 1;
+        tv.tv_micro = 0;
+        rc = p_waitselect(sb, rx2 + 1, &readfds, &tv);
+        checks++;
+        if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: default-join LOOP=0 delivered unexpectedly rc %ld\n", rc); goto done; }
+    }
+
+done:
+    if (rx2 >= 0) (VOID)p_close(sb, rx2);
+    if (tx >= 0) (VOID)p_close(sb, tx);
+    if (rx >= 0) (VOID)p_close(sb, rx);
+    Printf((CONST_STRPTR)"loop: %ld checks, %ld failures\n", checks, failures);
+    return (failures == 0 && checks == 16) ? RETURN_OK : RETURN_FAIL;
+}
+
 /* The EPOCH mode is for the isolated emulator stage only.  It keeps a BSD
  * socket open across RemoveNetInterface/AddNetInterface of zeth1, then asks
  * for the same membership again.  Before #42 the stale row says EADDRINUSE;
@@ -724,7 +873,9 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (argc == 3 && strcmp(argv[1], "EPOCH") == 0)
+    if (argc == 2 && strcmp(argv[1], "LOOP") == 0)
+        result = p_probe_loop(sb);
+    else if (argc == 3 && strcmp(argv[1], "EPOCH") == 0)
         result = p_epoch(sb, argv[2]);
     else if (argc == 1)
     {
@@ -733,7 +884,7 @@ int main(int argc, char **argv)
     }
     else
     {
-        Printf((CONST_STRPTR)"usage: McastProbe [EPOCH interface-ip]\n");
+        Printf((CONST_STRPTR)"usage: McastProbe [LOOP | EPOCH interface-ip]\n");
         result = RETURN_FAIL;
     }
 
