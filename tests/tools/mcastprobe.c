@@ -558,8 +558,10 @@ static VOID p_probe_v6(struct Library *sb)
 static LONG p_probe_loop(struct Library *sb)
 {
     ProbeAddr group;
+    ProbeAddr group2;
     ProbeMreq mreq;
     LONG rx = -1;
+    LONG rx2 = -1;
     LONG tx = -1;
     LONG zero = 0;
     LONG one = 1;
@@ -649,11 +651,52 @@ static LONG p_probe_loop(struct Library *sb)
         }
     }
 
+    /* The converse matters too: a receiver that joins with the BSD default
+     * LOOP=1 must not hear an unrelated sender that has LOOP=0.  Use a new
+     * group so NetX snapshots that default on its first join. */
+    group2 = group;
+    group2.sin_port = 30000;
+    group2.sin_addr = 0xefff2a65UL;
+    mreq.imr_multiaddr = group2.sin_addr;
+    rx2 = p_socket(sb, P_AF_INET, P_SOCK_DGRAM, 0);
+    checks++;
+    if (rx2 < 0 || rx2 >= 32)
+    {
+        failures++;
+        Printf((CONST_STRPTR)"loop: second receiver unavailable\n");
+        goto done;
+    }
+    rc = p_bind(sb, rx2, &group2, (LONG)sizeof group2);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: second bind FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_setsockopt(sb, rx2, P_IPPROTO_IP, P_IP_ADD_MEMBERSHIP,
+                      &mreq, (LONG)sizeof mreq);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: second join FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_setsockopt(sb, tx, P_IPPROTO_IP, P_IP_MULTICAST_LOOP,
+                      &zero, (LONG)sizeof zero);
+    checks++;
+    if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: sender LOOP=0 reset FAILED errno %ld\n", p_errno(sb)); goto done; }
+    rc = p_sendto(sb, tx, "off2", 4, &group2, (LONG)sizeof group2);
+    checks++;
+    if (rc != 4) { failures++; Printf((CONST_STRPTR)"loop: send off2 FAILED errno %ld\n", p_errno(sb)); goto done; }
+    {
+        struct timeval tv;
+        ULONG readfds = 1UL << rx2;
+
+        tv.tv_secs = 1;
+        tv.tv_micro = 0;
+        rc = p_waitselect(sb, rx2 + 1, &readfds, &tv);
+        checks++;
+        if (rc != 0) { failures++; Printf((CONST_STRPTR)"loop: default-join LOOP=0 delivered unexpectedly rc %ld\n", rc); goto done; }
+    }
+
 done:
+    if (rx2 >= 0) (VOID)p_close(sb, rx2);
     if (tx >= 0) (VOID)p_close(sb, tx);
     if (rx >= 0) (VOID)p_close(sb, rx);
     Printf((CONST_STRPTR)"loop: %ld checks, %ld failures\n", checks, failures);
-    return (failures == 0 && checks == 10) ? RETURN_OK : RETURN_FAIL;
+    return (failures == 0 && checks == 16) ? RETURN_OK : RETURN_FAIL;
 }
 
 int main(int argc, char **argv)

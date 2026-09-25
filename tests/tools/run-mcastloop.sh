@@ -75,7 +75,7 @@ if [ ! -s "$REPORT" ] || ! tr -d '\r' < "$REPORT" | grep -q '^===== done'; then
     echo "mcastloop: no complete guest transcript (run rc=$RUN_RC)" >&2
     exit 2
 fi
-if ! tr -d '\r' < "$REPORT" | grep -q '^loop: 10 checks, 0 failures$'; then
+if ! tr -d '\r' < "$REPORT" | grep -q '^loop: 16 checks, 0 failures$'; then
     echo "mcastloop: sender loopback failed; see $REPORT" >&2
     exit 1
 fi
