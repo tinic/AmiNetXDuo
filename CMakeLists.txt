@@ -1756,6 +1756,15 @@ function(aminetxduo_check_pcrel target)
                 "-DNM=${CMAKE_NM}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-pcrel-branches.cmake"
         VERBATIM)
+    # And for a write to a5 inside a function framed with `link a5`: the
+    # A3000 Line-F reboot of beta5's anxnet.device.  See cmake/check-a5-frame.cmake.
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DBINARY=$<TARGET_FILE:${target}>"
+                "-DMAPFILE=$<TARGET_FILE:${target}>.map"
+                "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-a5-frame.cmake"
+        VERBATIM)
 endfunction()
 
 # Applied to every image rather than to the ones that remembered to ask.  Four

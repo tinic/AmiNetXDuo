@@ -98,22 +98,34 @@ __asm__(
 "_nd_sup_tt1_write:\n"
 "    .short 0xf010,0x0c00\n"     /* pmove (a0),tt1 */
 "    rte\n"
+/*
+ * VOID nd_super_call(fn, operand, sysbase): Supervisor(fn) with a0 = operand.
+ * Out of line because Supervisor() takes the routine in a5, and a5 is the
+ * frame pointer of any caller LTO chooses to frame: a register-asm variable
+ * pinned to a5 let the inlined call overwrite the caller's frame pointer and
+ * its unlk/rts returned into the stub's opcode words (A3000 Line-F reboot).
+ * Here a5 and a6 are saved and restored around the call, whatever the caller.
+ */
+"    .globl _nd_super_call\n"
+"_nd_super_call:\n"
+"    movem.l %a5-%a6,-(%sp)\n"
+"    move.l 12(%sp),%a5\n"          /* fn      */
+"    move.l 16(%sp),%a0\n"          /* operand */
+"    move.l 20(%sp),%a6\n"          /* sysbase */
+"    jsr -30(%a6)\n"                /* Supervisor() */
+"    movem.l (%sp)+,%a5-%a6\n"
+"    rts\n"
 );
 extern VOID nd_sup_tt_read(VOID);
 extern VOID nd_sup_tt0_write(VOID);
 extern VOID nd_sup_tt1_write(VOID);
 
+extern VOID nd_super_call(VOID (*fn)(VOID), APTR operand,
+                          struct ExecBase *sysbase);
+
 static VOID nd_super(VOID (*fn)(VOID), APTR operand)
 {
-    register APTR             _a0 __asm("a0") = operand;
-    register VOID           (*_a5)(VOID) __asm("a5") = fn;
-    register struct ExecBase *_a6 __asm("a6") = SysBase;
-
-    /* Supervisor(): the routine runs in supervisor mode and ends in RTE. */
-    __asm__ __volatile__ ("jsr a6@(-30:W)"
-                          : "+r" (_a0)
-                          : "r" (_a5), "r" (_a6)
-                          : "cc", "memory", "d0", "d1", "a1");
+    nd_super_call(fn, operand, SysBase);
 }
 
 static BOOL nd_cache_is_030(VOID)
