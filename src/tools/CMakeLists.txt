@@ -15,6 +15,7 @@
 set(TOOLS_COMMON_SOURCES
     tool_util.c
     tool_diag.c
+    tool_ifdev.c
     tool_wait.c
     netstack_weak.c)
 

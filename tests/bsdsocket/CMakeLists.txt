@@ -353,6 +353,30 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME dhcp6_status_health COMMAND test_dhcp6)
 
+    # netstatus.c once more, for NETSTATUS_IFDEVICES: the device path whole,
+    # beside a NetStatusInterface that keeps its 192 bytes.
+    add_executable(test_ifdevices host/test_ifdevices_host.c
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c")
+
+    target_include_directories(test_ifdevices PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim-netstatus"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_ifdevices PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_ifdevices PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
+
+    add_test(NAME netstatus_ifdevices COMMAND test_ifdevices)
+
     # library_runtime.c, for the usergroup.library hold.
     #
     # WHY THIS ONE EXISTS.  bsd_usergroup_open() opens usergroup.library and

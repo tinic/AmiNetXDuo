@@ -93,6 +93,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         info->mtu          = 0;
         info->nx_name[0]   = '\0';
         info->nx_device[0] = '\0';
+        info->nx_device_whole = FALSE;
         info->nx_unit      = 0;
         info->have_sana2   = FALSE;
         info->sana2_online = FALSE;
@@ -124,6 +125,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         return -1;
     }
 
+    tool_netstatus_devices(base);
+
     for (i = 0; i < n && i < (LONG)TOOL_MAX_IF; i++)
     {
         const NetStatusInterface *src  = &nx_answer.iface.e[i];
@@ -142,8 +145,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             info->mac[j] = src->nsi_HwAddress[j];
 
         tool_copy_string(info->nx_name, sizeof(info->nx_name), src->nsi_Name);
-        tool_copy_string(info->nx_device, sizeof(info->nx_device),
-                         src->nsi_Device);
+        info->nx_device_whole = tool_if_device(info->nx_device,
+                                               sizeof(info->nx_device), src);
         info->nx_unit = src->nsi_Unit;
 
         if (src->nsi_Flags & NETSTATUS_IF_SANA2)
