@@ -382,6 +382,11 @@ VOID bsd_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_close_
 VOID bsd_handoff_flush(struct AmiSocketBase *b, BOOL bracketed)
 { (VOID)b; (VOID)bracketed; h_unreachable("bsd_handoff_flush"); }
 BOOL bsd_handoff_pending(struct AmiSocketBase *m) { (VOID)m; return FALSE; }
+/* Only a child base's close brackets; this test closes the master. */
+LONG bsd_nx_enter(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_enter"); return -1; }
+VOID bsd_nx_leave(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_leave"); }
+/* Published at init and withdrawn at expunge, for the tick's lock-free reclaim. */
+VOID ami_netstack_health_set_sblock(APTR sem) { (VOID)sem; }
 VOID bsd_handoff_init(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_handoff_init"); }
 VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_release"); }
 BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }
