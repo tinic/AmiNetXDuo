@@ -334,17 +334,26 @@ host_test_targets() { # builddir
 #      443 with adopt_pool_sweep: an unpublished slot whose claimer's address
 #      now holds another Task is freed; a live claimer's is kept
 #      444 with test_romtag: rt_Name read from a driver file without loading it
-HOST_TESTS_EXPECTED=445
+#      446 with netstatus_ifdevices and tool_ifdev: the device path whole
+#      through NETSTATUS_IFDEVICES, nsi_Device from a library without it
+#      450 with syncache_detach_v4/_v4reuse/_v6/_v6accept: a SYN-cache entry
+#      on a detached interface (#50)
+#      452 with syncache_detach_keep/_v6delete: detach keeps other interfaces'
+#      entries, a lone IPv6 address delete drops its own (#50)
+#      456 with syncache_detach_gap/_driver/_late/_v6late: a SYN taken during
+#      or after a detach or address delete records nothing (#50)
+#      457 with mcast_sender_loop: sender-side multicast loopback is per socket
+HOST_TESTS_EXPECTED=457
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
     # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
-    # test_usergroup_hold, test_handoff (8ff3cc92), and test_mcast_loop,
-    # all x86_64-only for the
+    # test_ifdevices, test_usergroup_hold, test_handoff (8ff3cc92), and
+    # test_mcast_loop, all x86_64-only for the
     # reason in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is
     # eight bytes and no structure in them has the target's shape.
     # darwin-arm64 registers 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 13)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 14)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
@@ -3049,9 +3058,13 @@ stage_rate() {
     # green.  Five-round medians for one tree reproduce to about half a per
     # cent across sittings (tests/perf/rate-baseline.txt), so 12% is many
     # times the noise and still catches anything worth catching.
-    out=$(AMINETXDUO_BUILD="$BUILD/cm" AMINETXDUO_RATE_ROUNDS=5 \
-          AMINETXDUO_RATE_TOLERANCE=12 tools/check-rate.sh 2>&1)
-    rc=$?
+    #
+    # $BUILD/default: the configuration the Emulator tier builds, and the one
+    # the baseline was measured on (Release, default options -- see
+    # tests/perf/run-rate-ab.sh).  There is no `cm` configuration here.
+    rc=0
+    out=$(AMINETXDUO_BUILD="$BUILD/default" AMINETXDUO_RATE_ROUNDS=5 \
+          AMINETXDUO_RATE_TOLERANCE=12 tools/check-rate.sh 2>&1) || rc=$?
 
     if printf '%s' "$out" | grep -q '^rate=skipped'; then
         skip "rate: $(printf '%s' "$out" | sed -n 's/^rate=skipped reason=//p')." \
@@ -3061,10 +3074,14 @@ stage_rate() {
     fi
 
     printf '%s\n' "$out"
-    if [ "$rc" != 0 ]; then
-        fail "a direction is below its recorded rate"
-        return 1
-    fi
+    case "$rc" in
+        0) ;;
+        1) fail "rate: a direction is below its recorded rate"
+           return 1 ;;
+        *) fail "rate: evaluation incomplete, not a regression --\
+ $(printf '%s' "$out" | sed -n 's/^rate=error //p' | head -1)"
+           return 1 ;;
+    esac
     note "$(printf '%s' "$out" | sed -n 's/^rate=PASS /throughput: /p')"
     return 0
 }

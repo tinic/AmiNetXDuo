@@ -19,6 +19,21 @@ if(NOT CMAKE_CROSSCOMPILING)
         -include "${CMAKE_CURRENT_SOURCE_DIR}/host/tool_wait_host.h"
         -Wall -Wextra -Werror)
     add_test(NAME tool_dhcp_wait COMMAND test_tool_wait_host)
+
+    # The whole device path from NETSTATUS_IFDEVICES, and nsi_Device from a
+    # library that predates it, with the query mocked.
+    add_executable(test_tool_ifdev_host
+        host/test_tool_ifdev_host.c
+        "${CMAKE_SOURCE_DIR}/src/tools/tool_ifdev.c")
+    target_compile_definitions(test_tool_ifdev_host PRIVATE
+        AMINETXDUO_TOOLS_H)
+    target_include_directories(test_tool_ifdev_host PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_options(test_tool_ifdev_host PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/tool_ifdev_host.h"
+        -Wall -Wextra -Werror)
+    add_test(NAME tool_ifdev COMMAND test_tool_ifdev_host)
 endif()
 
 # CardGrab is the second owner of the PCMCIA socket that the lab has never
