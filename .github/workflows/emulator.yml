@@ -128,10 +128,41 @@ jobs:
       # install/test/run-smbmount.sh: smb2-handler and filesysbox, neither ours.
       AMINETXDUO_SMB2FS: ${{ vars.AMINETXDUO_SMB2FS }}
       AMINETXDUO_FILESYSBOX: ${{ vars.AMINETXDUO_FILESYSBOX }}
+      # The lab rig, where tools/ci.sh fails (not skips) a gate whose input
+      # ~/amiga-assets/env.sh supplies.  Keyed on the runner label (#56).
+      AMINETXDUO_LAB_RIG: ${{ vars.AMINETXDUO_KICKSTART_RUNNER == 'amiga-lab' && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # THE LAB ENV, WHICHEVER WAY THE LISTENER STARTED (#56).  @reboot sourced
+      # env.sh and keepalive.sh did not, so oommsg ran or skipped by accident.
+      # Only names that are empty here are filled: a repository variable, or
+      # the listener's own value, wins.  A step-level `env:` still beats this.
+      - name: Lab environment
+        run: |
+          f="$HOME/amiga-assets/env.sh"
+          if [ ! -f "$f" ]; then
+            if [ "${AMINETXDUO_LAB_RIG:-}" = 1 ]; then
+              echo "::error::$f is missing on the lab rig"; exit 1
+            fi
+            echo "no $f, nothing to load"; exit 0
+          fi
+          # Only what env.sh itself defines: clear the inherited names first.
+          bash -c 'for v in $(compgen -v AMINETXDUO_); do unset "$v"; done
+                   . "$1" >/dev/null
+                   for v in $(compgen -v AMINETXDUO_); do
+                     printf "%s\t%s\n" "$v" "${!v}"
+                   done' _ "$f" |
+          while IFS=$'\t' read -r name value; do
+            if [ -n "${!name:-}" ]; then
+              echo "$name: kept the job's value"
+            else
+              echo "$name: from env.sh"
+              printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+            fi
+          done
 
       # THE PINNED TOOLCHAIN, WHICH THIS JOB NEVER ASKED FOR.
       #

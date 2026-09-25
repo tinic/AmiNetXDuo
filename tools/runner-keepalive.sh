@@ -48,5 +48,23 @@ date -Is > "$HOME/actions-runner/keepalive.stamp"
 pgrep -u "$(id -u)" -f "bin/Runner\.Listener run" > /dev/null 2>&1 && exit 0
 
 cd "$HOME/actions-runner" || exit 1
-echo "[$(date -Is)] listener not running, starting it" >> "$HOME/actions-runner/keepalive.log"
-setsid nohup ./run.sh >> "$HOME/actions-runner/run.log" 2>&1 < /dev/null &
+log="$HOME/actions-runner/keepalive.log"
+
+# Start it exactly as the crontab's @reboot line does (#56):
+#
+#   @reboot cd $HOME/actions-runner && setsid bash -lc ". $HOME/amiga-assets/env.sh; exec ./run.sh"
+#
+# A bare ./run.sh gets only .env, so every listener this started ran without
+# AMINETXDUO_KICKSTART_A2000 and oommsg skipped.  No env.sh: start anyway and
+# say so.  emulator.yml fails its lab-environment step on that, which is red;
+# a runner left down just queues runs until they expire, which is silent.
+envsh="$HOME/amiga-assets/env.sh"
+if [ -f "$envsh" ]; then
+    echo "[$(date -Is)] listener not running, starting it with $envsh" >> "$log"
+    # shellcheck disable=SC2016  # the login shell expands $HOME
+    setsid nohup bash -lc '. "$HOME/amiga-assets/env.sh"; exec ./run.sh' \
+        >> "$HOME/actions-runner/run.log" 2>&1 < /dev/null &
+else
+    echo "[$(date -Is)] listener not running, starting it WITHOUT the lab env: $envsh is missing" >> "$log"
+    setsid nohup ./run.sh >> "$HOME/actions-runner/run.log" 2>&1 < /dev/null &
+fi
