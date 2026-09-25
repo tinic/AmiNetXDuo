@@ -413,6 +413,17 @@ note() { printf '  %s\n' "$*"; }
 fail() { FAILED+=("$1"); printf '\033[31m!! FAILED: %s\033[0m\n' "$1" >&2; }
 skip() { SKIPPED+=("$1"); printf '\033[33m-- SKIPPED: %s\033[0m\n' "$1" >&2; }
 
+# A skip for an input the lab supplies (~/amiga-assets/env.sh).  On the lab
+# rig (AMINETXDUO_LAB_RIG=1, set by emulator.yml) a missing one is a broken
+# rig, not an absent ingredient, so it fails; returns 1 when it did (#56).
+lab_skip() {
+    if [ "${AMINETXDUO_LAB_RIG:-}" = 1 ]; then
+        fail "$* [AMINETXDUO_LAB_RIG=1: the lab supplies this, so it is required]"
+        return 1
+    fi
+    skip "$*"
+}
+
 # ------------------------------------------------------------ submodules ----
 
 stage_submodules() {
@@ -1782,8 +1793,8 @@ stage_ltoprobe() {
     local dir="$BUILD/ltoprobe" rc=0
 
     if [ -z "${AMINETXDUO_KICKSTART:-}" ]; then
-        skip "lto probe: no AMINETXDUO_KICKSTART, so the P-256 paths in a real\
- tls.library link are unproven on this runner"
+        lab_skip "lto probe: no AMINETXDUO_KICKSTART, so the P-256 paths in a real\
+ tls.library link are unproven on this runner" || return 1
         return "$NOTHING"
     fi
     export AMINETXDUO_KICKSTART
@@ -2367,9 +2378,9 @@ stage_matrix() {
     local rc=0 bad=0
 
     if [ -z "${AMINETXDUO_KICKSTART:-}" ]; then
-        skip "machine matrix: no AMINETXDUO_KICKSTART, so no arm can boot." \
+        lab_skip "machine matrix: no AMINETXDUO_KICKSTART, so no arm can boot." \
              "CPU speed, interface count, refusal wording and memory size are" \
-             "all unproven on this runner."
+             "all unproven on this runner." || return 1
         return "$NOTHING"
     fi
 
@@ -2549,9 +2560,9 @@ the PCMCIA card claimed at every rate and the measurement rose with it" ;;
     # boot an A2000 and a mismatch is a black screen, not a test result.
     rc=0
     if [ -z "${AMINETXDUO_KICKSTART_A2000:-}" ]; then
-        skip "oommsg: AMINETXDUO_KICKSTART_A2000 is not set, so nothing here\
+        lab_skip "oommsg: AMINETXDUO_KICKSTART_A2000 is not set, so nothing here\
  boots Kickstart 2.04 and what a 512 KB machine is told when bring-up runs out\
- of memory is unproven"
+ of memory is unproven" || bad=$((bad + 1))
     else
         "$ROOT/tests/tools/run-oommsg.sh" -b "$BUILD/default" || rc=$?
         case "$rc" in
@@ -2662,8 +2673,8 @@ stage_bridged() {
     printf '\n-- the bring-up on Kickstart 2.04 and 2.05\n'
     rc=0
     if [ -z "${AMINETXDUO_KICKSTART_A2000:-}${AMINETXDUO_KICKSTART_V204:-}" ]; then
-        skip "kick2x: no Kickstart 2.04 configured, so the romtag under a V37\
- exec and card.resource V37 stay unproven"
+        lab_skip "kick2x: no Kickstart 2.04 configured, so the romtag under a V37\
+ exec and card.resource V37 stay unproven" || bad=1
     else
         AMINETXDUO_RUN_TAG=ci-kick2x "$ROOT/tests/tools/run-kick2x.sh" \
             -b "$BUILD/default" \
