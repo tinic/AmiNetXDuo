@@ -168,6 +168,14 @@ static int            h_sibling_callback_closed;
 static NX_UDP_SOCKET *h_sibling_to_close;
 static int            h_sibling_callback_closed_other;
 
+/* Test 6: the sibling's receive callback closes the *primary* socket (the one
+   _nx_udp_packet_receive is delivering to), reusing h_sibling_to_close.  */
+/* Test 7: the primary's receive callback unbinds a sibling, standing in for a
+   concurrent unbind from another thread, plus a flag proving the unbound
+   sibling's deferred callback was skipped.  */
+static int            h_primary_callback_unbound;
+static int            h_sibling_callback_invoked;
+
 /* The port-table bucket a 5353 bind lands in. */
 static UINT h_index(void)
 {
@@ -275,6 +283,23 @@ static void h_sibling_callback_close_other(NX_UDP_SOCKET *socket_ptr)
     (void)socket_ptr;
     h_sibling_callback_closed_other = 1;
     (VOID)_nx_udp_socket_unbind(h_sibling_to_close);
+}
+
+/* Test 7: the primary's receive callback unbinds the socket it points at,
+   standing in for a concurrent unbind from another thread.  */
+static void h_primary_callback_unbind_sibling(NX_UDP_SOCKET *socket_ptr)
+{
+    (void)socket_ptr;
+    h_primary_callback_unbound = 1;
+    (VOID)_nx_udp_socket_unbind(h_sibling_to_close);
+}
+
+/* Test 7: a sibling receive callback that only records its invocation, so the
+   test can assert the deferred phase skipped a socket unbound in the meantime.  */
+static void h_sibling_callback_mark(NX_UDP_SOCKET *socket_ptr)
+{
+    (void)socket_ptr;
+    h_sibling_callback_invoked = 1;
 }
 
 
@@ -531,6 +556,74 @@ int main(void)
             "regression 5: B got its clone before closing C");
     h_check(h_socket_c.nx_udp_socket_receive_count == 0,
             "regression 5: C (closed) got no clone");
+
+    /* ---- regression 6: the sibling callback closes the primary ------------ */
+
+    /* Two sharers.  B's receive callback unbinds A, the primary socket.  The
+       fixed dispatch delivers B's clone first, then the primary, then B's
+       deferred callback unbinds A; nothing may touch the primary after that
+       unbind.  The buggy order ran B's callback during the fan-out, so the
+       primary delivery below it queued the datagram onto an already-unbound
+       socket.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_receive_callback = h_sibling_callback_close_other;
+    h_sibling_to_close = &h_socket_a;
+    h_sibling_callback_closed_other = 0;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 6: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 6: B co-binds");
+
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_sibling_callback_closed_other == 1,
+            "regression 6: the sibling callback ran and unbound the primary");
+    h_check(h_socket_a.nx_udp_socket_bound_next == NX_NULL,
+            "regression 6: the primary was unbound");
+    h_check(h_socket_a.nx_udp_socket_receive_count == 0,
+            "regression 6: the primary's datagram was drained by the unbind");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 1,
+            "regression 6: the sibling still got its clone");
+
+    /* ---- regression 7: a concurrent unbind of a sibling ------------------- */
+
+    /* The primary's receive callback unbinds B, standing in for another thread
+       unbinding B between the fan-out (which already cloned to B) and the
+       deferred sibling callback.  B is off the bound list by then, so its
+       pending notify flag is never reached and its callback must not run.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_a.nx_udp_receive_callback = h_primary_callback_unbind_sibling;
+    h_socket_b.nx_udp_receive_callback = h_sibling_callback_mark;
+    h_sibling_to_close = &h_socket_b;
+    h_primary_callback_unbound = 0;
+    h_sibling_callback_invoked = 0;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 7: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "regression 7: B co-binds");
+
+    h_packet_arm(0xE0000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_primary_callback_unbound == 1,
+            "regression 7: the primary callback unbound B");
+    h_check(h_socket_b.nx_udp_socket_bound_next == NX_NULL,
+            "regression 7: B was unbound");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 0,
+            "regression 7: B's clone was drained by the unbind");
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "regression 7: the primary kept its datagram");
+    h_check(h_sibling_callback_invoked == 0,
+            "regression 7: the unbound sibling's callback was not invoked");
 
     if (h_failures == 0)
     {
