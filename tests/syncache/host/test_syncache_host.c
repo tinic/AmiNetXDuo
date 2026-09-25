@@ -390,6 +390,7 @@ static void rig_reset(void)
 
     rig_interface.nx_interface_ip_mtu_size = 1500;
     rig_interface.nx_interface_valid = NX_TRUE;
+    rig_interface.nx_interface_ip_address = 0xc0a80158UL;    /* rig_syn's dest_ip */
 
     rig_packet.nx_packet_ip_version = NX_IP_VERSION_V4;
     rig_packet.nx_packet_address.nx_packet_interface_ptr = &rig_interface;
