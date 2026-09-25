@@ -258,8 +258,8 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
      * another name loads, and then is not found, so the open fails.
      */
     {
-        char        path[TOOL_NAME_LEN * 2];
-        char        inner[TOOL_NAME_LEN];
+        static char path[TOOL_NAME_LEN * 2];   /* static: Online's stack budget */
+        static char inner[TOOL_NAME_LEN];
         const char *file = tool_basename(device);
 
         path[0] = '\0';
