@@ -40,6 +40,7 @@ static struct
     LONG   nx_enter_result;
     ULONG  nx_enters;
     ULONG  nx_leaves;
+    ULONG  tcp_reuse;           /* last reuse_address_set value, +1; 0 = none */
     ULONG  delegated;           /* calls that left options.c for another file */
     LONG   delegate_result;
     ULONG  raw_available;
@@ -302,7 +303,8 @@ UINT _nxe_tcp_socket_receive_queue_max_set(NX_TCP_SOCKET *socket_ptr,
 
 UINT _nxe_tcp_socket_reuse_address_set(NX_TCP_SOCKET *socket_ptr, UINT reuse)
 {
-    (VOID)socket_ptr; (VOID)reuse;
+    (VOID)socket_ptr;
+    h.tcp_reuse = (ULONG)reuse + 1UL;
     return NX_SUCCESS;
 }
 
@@ -619,6 +621,35 @@ static void t_reuse(void)
                         &h_base);
     CHECK(rc == 0 && (s->as_Flags & ASF_REUSEADDR) == 0,
           "SO_REUSEPORT=0 clears the TIME-WAIT alias");
+
+    /* The two are one flag on TCP, whichever is set: SO_REUSEADDR=1 reads
+       back through SO_REUSEPORT too. */
+    h_reset();
+    s = h_tcp(0);
+    value = 1;
+    (VOID)bsd_setsockopt(0, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value),
+                         &h_base);
+    value = 0; len = (socklen_t)sizeof(value);
+    (VOID)bsd_getsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, &len, &h_base);
+    CHECK(value == 1 && (s->as_Flags & ASF_REUSEPORT) != 0,
+          "TCP SO_REUSEADDR=1 reads back through SO_REUSEPORT");
+    CHECK(h.tcp_reuse == (ULONG)NX_TRUE + 1UL, "and NetX reuse is on");
+
+    /* And the other order: SO_REUSEPORT=1 then SO_REUSEADDR=0 leaves neither
+       reading 1 while NetX's TIME-WAIT reuse is off. */
+    h_reset();
+    s = h_tcp(0);
+    value = 1;
+    (VOID)bsd_setsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value),
+                         &h_base);
+    value = 0;
+    (VOID)bsd_setsockopt(0, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value),
+                         &h_base);
+    value = 1; len = (socklen_t)sizeof(value);
+    (VOID)bsd_getsockopt(0, SOL_SOCKET, SO_REUSEPORT, &value, &len, &h_base);
+    CHECK(value == 0 && (s->as_Flags & (ASF_REUSEPORT | ASF_REUSEADDR)) == 0,
+          "TCP SO_REUSEPORT=1 then SO_REUSEADDR=0 reads 0 through both");
+    CHECK(h.tcp_reuse == (ULONG)NX_FALSE + 1UL, "and NetX reuse is off");
 
     /* On a UDP socket SO_REUSEPORT is the sharing flag alone, and SO_REUSEADDR
        opts into the same sharing; neither sets the other. */

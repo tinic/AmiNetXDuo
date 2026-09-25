@@ -222,91 +222,49 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * SO_REUSEADDR lets a bind take a port whose only holders are in
              * TIME-WAIT, which is what a server restarting after its last
              * client disconnected runs into: the port is unavailable for up
-             * to 2MSL and the program looks broken.  On UDP it also opts into
-             * the same port sharing as SO_REUSEPORT, because legacy callers
-             * know only this option and #38 will not silently accept an
-             * option that bind() then ignores.
+             * to 2MSL and the program looks broken.  On TCP the two options
+             * are one flag, as they were before #38 split them: either sets
+             * or clears both, and both read back alike.  On UDP each is its own opt-in to the port
+             * sharing bsd_bind() hands NetX (nx_udp_socket_share); on a bound
+             * UDP socket it is recorded for the next bind and answered 0, as
+             * BSD and the previous release do.
              */
             case SO_REUSEADDR:
-                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
-                    return -1;
-
-                /* On a bound UDP socket the flag was already read into
-                   nx_udp_socket_share at bind; recording it now leaves the
-                   live share untouched and only affects the next bind.  BSD
-                   and main both accept this, so return 0, not EINVAL.  */
-                if (value != 0)
-                    sock->as_Flags |= ASF_REUSEADDR;
-                else
-                    sock->as_Flags &= ~ASF_REUSEADDR;
-
-                if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
-                {
-                    if (bsd_nx_enter(SocketBase) != 0)
-                        return bsd_fail(SocketBase, AMI_ENETDOWN);
-                    /*
-                      * REQUIRED.  setsockopt() answering 0 is a promise the
-                      * option is in force; discarding this made that promise
-                      * whether or not it was kept.
-                      */
-                    {
-                        UINT st = nx_tcp_socket_reuse_address_set(
-                                      &sock->as_Nx.tcp,
-                                      (value != 0) ? NX_TRUE : NX_FALSE);
-
-                        bsd_nx_leave(SocketBase);
-
-                        if (st != NX_SUCCESS)
-                            return bsd_fail(SocketBase, AMI_EINVAL);
-                    }
-                }
-                return 0;
-
-            /*
-             * SO_REUSEPORT is the UDP port-sharing promise.  It used to be
-             * folded into SO_REUSEADDR and then ignored at bind; now it sets
-             * its own flag that bsd_bind() turns into the NetX opt-in share
-             * flag (see the netxduo fork's nx_udp_socket_share).
-             */
             case SO_REUSEPORT:
+            {
+                ULONG flag;
+
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
 
-                /* On a bound UDP socket the flag was already read into
-                   nx_udp_socket_share at bind; recording it now leaves the
-                   live share untouched and only affects the next bind.  BSD
-                   and main both accept this, so return 0, not EINVAL.  */
-                if (value != 0)
-                    sock->as_Flags |= ASF_REUSEPORT;
+                if ((sock->as_Flags & ASF_TCP) != 0)
+                    flag = ASF_REUSEADDR | ASF_REUSEPORT;
                 else
-                    sock->as_Flags &= ~ASF_REUSEPORT;
+                    flag = (optname == SO_REUSEPORT) ? ASF_REUSEPORT
+                                                     : ASF_REUSEADDR;
 
-                /* A TCP socket keeps the option's historical meaning: before
-                   the split it shared SO_REUSEADDR's case, so setting it still
-                   opts the socket into TIME-WAIT reuse.  A UDP socket never
-                   reaches this arm (its ASF_REUSEADDR is not consulted at
-                   bind; port sharing is the ASF_REUSEPORT flag above).  */
+                if (value != 0)
+                    sock->as_Flags |= flag;
+                else
+                    sock->as_Flags &= ~flag;
+
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
                 {
-                    if (value != 0)
-                        sock->as_Flags |= ASF_REUSEADDR;
-                    else
-                        sock->as_Flags &= ~ASF_REUSEADDR;
+                    UINT st;
 
                     if (bsd_nx_enter(SocketBase) != 0)
                         return bsd_fail(SocketBase, AMI_ENETDOWN);
-                    {
-                        UINT st = nx_tcp_socket_reuse_address_set(
-                                      &sock->as_Nx.tcp,
-                                      (value != 0) ? NX_TRUE : NX_FALSE);
+                    /* REQUIRED: answering 0 promises the option is in force. */
+                    st = nx_tcp_socket_reuse_address_set(
+                             &sock->as_Nx.tcp,
+                             (value != 0) ? NX_TRUE : NX_FALSE);
+                    bsd_nx_leave(SocketBase);
 
-                        bsd_nx_leave(SocketBase);
-
-                        if (st != NX_SUCCESS)
-                            return bsd_fail(SocketBase, AMI_EINVAL);
-                    }
+                    if (st != NX_SUCCESS)
+                        return bsd_fail(SocketBase, AMI_EINVAL);
                 }
                 return 0;
+            }
 
             case SO_BROADCAST:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
