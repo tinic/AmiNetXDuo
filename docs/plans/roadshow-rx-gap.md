@@ -9,13 +9,26 @@ answer one question before any mechanism is named or any change is made:
 
 ## Evidence so far
 
-| Item | Value | Missing controls |
+One post, EAB thread 123359 post 1810965 (26 Aug 2026). The method is from posts
+1806771, 1807384 and 1807759: Fitz 1.21 (Aminet), a 10^7-byte file, a Linux
+file server, kb = 1000 bytes, A3000 with a CyberStorm MkII 68060 and an X-Surf
+100. The row in [BACKLOG.md](../BACKLOG.md) records the read figures.
+
+| Stack and driver | Read, server to `RAM:` (kb/s) | Write, `RAM:` to server (kb/s) |
 |---|---|---|
-| Roadshow 1.15 + `x-surf-100.device` | 949 KB/s | driver version and hash, tool, direction as measured, sample count, run order, CPU cache and Z2/Z3 mode |
-| AmiNetXDuo 0.25.5 + `x-surf-100.device` | 918 KB/s (Roadshow +3.4%) | the same. **Historical**: 0.26.x-0.28.x changed the receive path, ACKs and queues (CHANGELOG), so this is not a current figure |
-| AmiNetXDuo + `anxnet.device` | 938 KB/s | the same |
-| Source | a user's A3000 with a 68060, EAB thread 123359, row in [BACKLOG.md](../BACKLOG.md) | the exact method is being extracted from the thread |
-| Noise floor | null controls on identical binaries read +0.22%, +2.75% and -0.29% (CHANGELOG, the Receive section of the cycle that added them); one A/B does not settle 1-3% | 3.4% is at that floor |
+| Roadshow 1.15 + `x-surf-100.device` | 949 | 855 |
+| AmiNetXDuo 0.25.5 + `x-surf-100.device` | 918 | 1047 |
+| AmiNetXDuo 0.25.5 + `anxnet.device` | 938 | 1089 |
+| AmiTCP_NG 4.1.5, 68000 and 68040 builds, `x-surf-100.device` | 918 and 890 | 1033 and 1014 |
+
+| Limit | Detail |
+|---|---|
+| Sample count | one figure per row: n = 1 as far as the thread shows |
+| Not recorded | run order, reboots between stacks, driver version (1.16 assumed), `ENV:` SANA-II settings, Roadshow's request counts, CPU clock, OS, the server's NIC and duplex, which 0.25.5 build |
+| Spread in the same table | two builds of one stack on one driver differ by 3.1%, the size of the gap |
+| Historical | 0.25.5. Later x-surf reads were 252 (0.26.1, post 1811396) and about a third of expected (0.26.3, post 1812902), then the receive path, ACKs and queues changed through 0.28.x (CHANGELOG) |
+| Noise floor | null controls on identical binaries read +0.22%, +2.75% and -0.29% (CHANGELOG, Receive); one A/B does not settle 1-3% |
+| Write | Roadshow writes 18% slower in the same post, so "Roadshow is faster" does not hold in general |
 
 **The AmiTCP bypass is ruled out as the gate, not as the origin.** The driver
 reads the `AMITCP` port once, at Init. Roadshow 1.15 never creates that port.
@@ -42,31 +55,40 @@ say where.
 | Rollback | selector back to AmiNetXDuo, then one boot, then verify the image hashes |
 | Unit | the **boot**. 4 receive transfers per boot, averaged into one value. Position within a boot is worth about 1% (`tests/perf/run-rate-ab.sh`) |
 | Order | alternate R/A/A/R across boots, so neither arm always runs first after power-on |
-| Direction | peer to Amiga only (receive). A fixed-length TCP stream from a peer server that sends from memory, 12 s or 16 MB |
-| Client | **one** binary for both arms: plain `bsdsocket.library` socket/connect/recv, fixed read size, timed by `timer.device`. No stack-specific tags. Peer-side byte count and timing kept as a cross-check |
+| Direction | server to Amiga only (receive), written to `RAM:` so no disk is involved. A fixed-length TCP stream from a peer server that sends from memory, 12 s or 16 MB |
+| Client | **one** binary for both arms (hash recorded): plain `bsdsocket.library` socket/connect/recv into a `RAM:` file, fixed read size, timed by `timer.device`. No stack-specific tags. Peer-side byte count and timing kept as a cross-check |
+| Workload cross-check | Fitz 1.21 copying the 10^7-byte file server to `RAM:`, the original method, one transfer per boot beside the client's four. Without it, "not reproduced" could mean only a different workload |
 | Recorded per boot | md5 of the stack library, the driver, the client and the Startup files; `AttnFlags`; `CacheControl` read-back; Z2/Z3 mode; FAST RAM map; link speed and duplex; the peer's kernel and NIC offloads; wall clock |
 | Null control first | 3 A/A boots and 3 R/R boots measure this machine's between-boot spread before any R/A claim |
-| Sample size | from that spread: enough boots per arm that the 95% interval of the median difference is narrower than 3.4%. The emulator's table (3% needs 2-4 rounds at 12 s) is not a hardware figure |
-| Verdict | a gap is claimed only if the bootstrap 95% interval of the R-A median difference excludes zero and exceeds the null spread. Otherwise the 31 KB/s is recorded as not reproduced on this machine |
+| Sample size | 20 boots per arm, 4 transfers per boot, paired R/A boot by boot: the design that resolved +1.34% on the emulator (CHANGELOG). The null boots check that 20 is enough on this machine and raise it if not |
+| Report | per-boot means for each arm, their spread, and the paired R-A difference with a bootstrap 95% interval |
+| Verdict | a gap is claimed only if that interval excludes zero and exceeds the null spread. Otherwise the 31 KB/s is recorded as not reproduced on this machine |
 
 **Machine.** The lab A3000 is a 68030/25, and the report came from a 68060.
 A result there answers whether a same-driver gap exists on this A3000, not
 what the 68060 number is. A 68060 reproduction waits for a 68060 card or for
 the reporter's own runs. The emulator cannot price this: Amiberry services
 a longword read as two `ne2000_wget` calls, which reverses the order. It is
-for dry-running the selector, logging and client only.
+for dry-running the selector, logging and client only. A 68030
+also pays more than a 68060 for the misaligned copy (H3), so a gap on the lab
+A3000 may be larger than the reported one.
 
 ## Measurements that separate mechanisms
 
 Run only after a gap is reproduced. Each is passive or uses the same binary in
-both arms.
+both arms. The driver (1.16, disassembly in the evidence lane) looks up only
+`S2_CopyToBuff`, `S2_CopyFromBuff` and `S2_PacketFilter`. It reads each whole
+frame into a static buffer and copies from frame + 14, always 2 mod 4. That is
+two copies a packet, the same path for any stack.
 
 | Hypothesis | Discriminating measurement | Reads as |
 |---|---|---|
-| Receive window or ACK policy | peer pcap of one transfer per arm: advertised window, ACKs per data segment, data-to-ACK delay | fewer ACKs or a larger window in R with the same guest CPU points at TCP policy |
-| Per-packet stack cost | guest idle share during the transfer, from a lowest-priority counter task (same binary in both arms) | both arms at 0% idle: per-packet cost decides. Idle left: latency or window decides |
-| SANA-II read depth and copy path | driver-boundary counters (the evidence and driver lane): outstanding `CMD_READ`s, buffer-management hooks passed at `OpenDevice` | a shallower read queue or a slower copy hook in A shows at the driver boundary |
-| Application read size | fixed by the shared client, and varied only as a second pass | a gap that moves with read size is on the socket side, not the driver side |
+| H1: no current gap | the A/B above | interval includes zero or sits inside the null spread |
+| H2: receive policy (ACKs, window) | server-side pcap per arm: ACKs per data segment, advertised window, gaps, retransmits | Roadshow over the vendor driver beat our own direct driver, which skips a copy, and it writes 18% slower: both point here rather than at the copy |
+| H3: copy phase | a `(from & 3, to & 3)` histogram and sampled EClock time in our CopyToBuff | our destination is 0 mod 4 against a 2 mod 4 source (`sana2_rx.c:719`; +30-37% of the copy on a 68020, `sana2_copy.c:60-110`). Roadshow's destination phase and the 68060 cost are unknown |
+| H4: read starvation | outstanding-read low-water mark and zero-read count, plus the driver's own drop count (unit + 302) through its statistics | frames lost with no read posted show up only as TCP retransmits |
+| H5: task priority | stack and driver task priorities per arm, from the status report and `Status` | a difference in who preempts whom during a burst |
+| Guest CPU | idle share during the transfer, from a lowest-priority counter task | 0% idle in both arms: per-packet cost decides. Idle left: H2 or H4 |
 
 ## Ownership
 
