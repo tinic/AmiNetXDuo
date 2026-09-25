@@ -995,6 +995,14 @@ UINT anx6_scope(const ULONG *addr) { (VOID)addr; return 0; }
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 { (VOID)sock; (VOID)addr; return 0; }
 
+/* Cork's send fixtures are unicast; test_mcast_loop covers the real guard. */
+VOID bsd_mcast_loop_begin(NX_IP *ip, const AmiSocket *sock,
+                          const NXD_ADDRESS *addr, BsdMcastLoopGuard *guard)
+{ (VOID)ip; (VOID)sock; (VOID)addr; guard->flag = NULL; }
+
+VOID bsd_mcast_loop_end(BsdMcastLoopGuard *guard)
+{ (VOID)guard; }
+
 LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
                              const NXD_ADDRESS *addr, ULONG *saved)
 { (VOID)base; (VOID)sock; (VOID)addr; *saved = 0UL; return 0; }
