@@ -13,11 +13,16 @@ version at the top when it merges.
   and `SO_REUSEADDR` opts into the same sharing for callers that know only that
   one. Two sockets that both set either before `bind()` may hold one port, a
   multicast datagram arriving on it is delivered to every sharer, and a unicast
-  datagram still reaches exactly one. The built-in mDNS responder opts its 5353
-  socket in, so a second program can now share 5353 with it. `SO_REUSEADDR`
-  keeps its TIME-WAIT meaning for TCP, and `SO_REUSEPORT` on a TCP socket still
-  sets that same reuse; setting either option on an already-bound UDP socket is
-  refused instead of silently doing nothing.
+  datagram still reaches exactly one. Sharing is offered only to a socket
+  bound to the wildcard (`INADDR_ANY`, or `::` for IPv6) with an explicit port;
+  a socket bound to a specific local address -- loopback, a multicast group, or
+  one of the host's own addresses -- still binds successfully but never opts
+  in, so it cannot over-receive multicast for a group it never joined. The
+  built-in mDNS responder opts its 5353 socket in, so a second
+  program can now share 5353 with it. `SO_REUSEADDR` keeps its TIME-WAIT meaning
+  for TCP, and `SO_REUSEPORT` on a TCP socket still sets that same reuse;
+  setting either option on an already-bound UDP socket is refused instead of
+  silently doing nothing.
 - `anxwifipi.device` opened with a plain `IOStdReq` for `NSCMD_DEVICEQUERY` now
   gets a valid unit; before, the query and the close wrote into low memory.
   The query is answered in the `IOStdReq` form for a short request and in the
