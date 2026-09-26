@@ -49,7 +49,8 @@ struct Library       *CardResource;
 
 /* card.resource's proto headers are not portable across the two supported
    Amiga GCC layouts.  These three LVOs are the same small stubs the driver
-   uses: OwnCard -6, ReleaseCard -12, CopyTuple -72. */
+   uses: OwnCard -6, ReleaseCard -12, CopyTuple -72.  Each may destroy
+   d0/d1/a0/a1, so an argument register is a "+r" operand (#70). */
 static struct CardHandle *probe_own_card(struct CardHandle *handle)
 {
     register struct Library    *_a6 __asm("a6") = CardResource;
@@ -57,8 +58,8 @@ static struct CardHandle *probe_own_card(struct CardHandle *handle)
     register struct CardHandle *result __asm("d0");
 
     __asm __volatile ("jsr a6@(-0x6)"
-                      : "=r" (result)
-                      : "r" (_a6), "r" (_a1)
+                      : "=r" (result), "+r" (_a1)
+                      : "r" (_a6)
                       : "d1", "a0", "cc", "memory");
     return result;
 }
@@ -70,8 +71,8 @@ static VOID probe_release_card(struct CardHandle *handle, ULONG flags)
     register ULONG              _d0 __asm("d0") = flags;
 
     __asm __volatile ("jsr a6@(-0xc)"
-                      : "+r" (_d0)
-                      : "r" (_a6), "r" (_a1)
+                      : "+r" (_d0), "+r" (_a1)
+                      : "r" (_a6)
                       : "d1", "a0", "cc", "memory");
 }
 
@@ -86,9 +87,8 @@ static BOOL probe_copy_tuple(struct CardHandle *handle, UBYTE *buffer,
     register LONG               result __asm("d0");
 
     __asm __volatile ("jsr a6@(-0x48)"
-                      : "=r" (result)
-                      : "r" (_a6), "r" (_a1), "r" (_a0), "r" (_d1),
-                        "0" (_d0)
+                      : "=r" (result), "+r" (_a1), "+r" (_a0), "+r" (_d1)
+                      : "r" (_a6), "0" (_d0)
                       : "cc", "memory");
     return (BOOL)(result != 0);
 }
