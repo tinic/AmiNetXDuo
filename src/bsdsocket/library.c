@@ -326,6 +326,7 @@ static struct AmiSocketBase *bsd_lib_init(
     bsd_new_list(&base->sb_Children);
     base->sb_StackRefs          = 0;
     base->sb_TransientStackRefs = 0;
+    base->sb_StackClosing       = 0;
     base->sb_StackIp            = NULL;
     base->sb_StackPool          = NULL;
     base->sb_StackHeld          = FALSE;
@@ -525,6 +526,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     bsd_bzero(&child->sb_Handoffs, sizeof(child->sb_Handoffs));
     child->sb_StackRefs          = 0;
     child->sb_TransientStackRefs = 0;
+    child->sb_StackClosing       = 0;
     child->sb_StackIp            = NULL;
     child->sb_StackPool          = NULL;
     child->sb_StackHeld          = FALSE;
@@ -592,6 +594,33 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     return child;
 }
 
+/*
+ * Every closing child passes the drain gate, whatever bsd_close_all() did: a
+ * base that never had a table, or found the kernel down, may still be the last
+ * opener with other closers' sockets parked.  The gate takes sb_Lock with the
+ * bracket NOT held, because sb_Lock holders Wait() for a process that needs the
+ * baton (bsd_netstack_run()); the last opener brackets only after it.
+ */
+static VOID bsd_child_close_gate(struct AmiSocketBase *child)
+{
+    struct MinList handoffs;
+    BOOL           bracketed;
+
+    if (!bsd_stack_close_gate(child, &handoffs))
+        return;
+
+    bracketed = (bsd_nx_enter(child) == 0);
+    bsd_handoff_flush(child, &handoffs, bracketed);
+    if (!bracketed)
+    {
+        AMI_WARN("bsdsocket: last close with the kernel down. "
+                 "Closing sockets are left to the stack teardown");
+        return;
+    }
+    bsd_closing_drain();
+    bsd_nx_leave(child);
+}
+
 static VOID bsd_child_destroy(struct AmiSocketBase *child)
 {
     struct AmiSocketBase *master = child->sb_Master;
@@ -599,6 +628,8 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     ULONG                 pos    = child->sb_Lib.lib_PosSize;
 
     bsd_close_all(child);
+
+    bsd_child_close_gate(child);
 
     bsd_bpf_close_all(child);
 
@@ -1034,51 +1065,11 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
 
     if (base->sb_Master != NULL)
     {
-        BOOL bracketed = FALSE;
-
         master = base->sb_Master;
-
-        /*
-         * The bracket is taken OUTSIDE sb_Lock, and UNCONDITIONALLY.
-         *
-         * Outside, because adopting can wait for a free adoption slot
-         * (include/aminetxduo/netstack.h) and every close that would free one
-         * needs this same semaphore, so parking here holding it is a cycle.
-         *
-         * Unconditionally, because the alternative was a peek: decide from the
-         * handoff list whether a bracket is worth taking, then take it, then
-         * lock and flush. The list is mutable storage another base's
-         * ReleaseSocket() adds to, so reading it outside the lock is a
-         * use-after-free against a concurrent flush; and reading it inside the
-         * lock still leaves a window in which a handoff published after the
-         * peek is drained UNBRACKETED, which abandons the socket instead of
-         * releasing it. There is no window if there is no peek. This is the
-         * last opener's close; one adoption on that path costs nothing, and
-         * bsd_handoff_flush() is a no-op when the list is empty.
-         */
-        bracketed = (bsd_nx_enter(base) == 0);
-
-        ObtainSemaphore(&master->sb_Lock);
-        if (bsd_stack_last_opener(master))
-            bsd_handoff_flush(base, bracketed);
-        ReleaseSemaphore(&master->sb_Lock);
-
-        if (bracketed)
-            bsd_nx_leave(base);
 
         bsd_child_destroy(base);
 
-        /*
-         * The teardown runs with the lock held, and has to: the decrement that
-         * reaches zero and the shutdown it triggers are one step. If the lock
-         */
-        ObtainSemaphore(&master->sb_Lock);
-        if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
-        {
-            bsd_netstack_shutdown_owned(master);
-            unload_is_safe = netstack_can_unload();
-        }
-        ReleaseSemaphore(&master->sb_Lock);
+        unload_is_safe = bsd_stack_close_release(master);
 
         if (unload_is_safe)
             AMI_CENSUS_REPORT("bsd-stack-down");
@@ -1092,6 +1083,53 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         return bsd_lib_expunge(master);
 
     return NULL;
+}
+
+/*
+ * A closing opener's drain gate, from bsd_child_close_gate() once the base's
+ * own sockets are parked and its bracket is left.  Deciding and counting itself
+ * past the gate are one step under sb_Lock, so of two closers whose close paths
+ * interleave -- the bracket and the lock both Wait(), which breaks Exec's
+ * Forbid -- exactly the later one sees itself last, and nothing is parked
+ * after it: a closer parks before its gate and is counted until its release.
+ * The last one takes the handoff registry here and flushes it, and drains,
+ * under the bracket after the lock is gone.
+ */
+BOOL bsd_stack_close_gate(struct AmiSocketBase *base, struct MinList *handoffs)
+{
+    struct AmiSocketBase *master = base->sb_Master;
+    BOOL                  last;
+
+    ObtainSemaphore(&master->sb_Lock);
+    last = bsd_stack_last_opener(master);
+    if (last)
+        bsd_handoff_take(master, handoffs);
+    master->sb_StackClosing++;
+    ReleaseSemaphore(&master->sb_Lock);
+
+    return last;
+}
+
+/*
+ * The teardown runs with the lock held, and has to: the decrement that reaches
+ * zero and the shutdown it triggers are one step.  TRUE when the segment may
+ * now unload.
+ */
+BOOL bsd_stack_close_release(struct AmiSocketBase *master)
+{
+    BOOL unload_is_safe = FALSE;
+
+    ObtainSemaphore(&master->sb_Lock);
+    if (master->sb_StackClosing > 0)
+        master->sb_StackClosing--;
+    if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
+    {
+        bsd_netstack_shutdown_owned(master);
+        unload_is_safe = netstack_can_unload();
+    }
+    ReleaseSemaphore(&master->sb_Lock);
+
+    return unload_is_safe;
 }
 
 /*

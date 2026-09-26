@@ -219,10 +219,15 @@ LONG bsd_errno_from_nx(UINT status) { (VOID)status; return AMI_EIO; }
    which bsd_listen_rearm() already takes in its stride. */
 APTR ami_alloc(ULONG size) { (VOID)size; return NULL; }
 
+/* socket.c's stored-zone checks (#51); no slot is ever reused here. */
+ULONG netstack_interface_epoch(UWORD index) { (VOID)index; return 0; }
+
 /* Linked in by the slot rebuild, the destroy path and bsd_accept_once's
    suspending arm, none of which a case reaches: the parked socket is never
    short, never destroyed, and the script completes it before the arm.  Each
    traps, so a case that strays onto one of them cannot pass. */
+/* A trap never reads its arguments. */
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #define H_TRAP(decl) decl { printf("  TRAP %s\n", __func__); abort(); }
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"

@@ -270,6 +270,7 @@ struct AmiSocketBase
     struct MinList          sb_Children;
     ULONG                   sb_StackRefs;   /* openers and explicit holds    */
     ULONG                   sb_TransientStackRefs; /* async workers, no base */
+    ULONG                   sb_StackClosing; /* closers past the drain gate  */
     NX_IP                  *sb_StackIp;     /* valid while master refs != 0 */
     NX_PACKET_POOL         *sb_StackPool;   /* same lifetime as sb_StackIp   */
 
@@ -417,13 +418,16 @@ static inline NX_PACKET_POOL *bsd_stack_pool(const struct AmiSocketBase *base)
     return master->sb_StackPool;
 }
 
-/* The closing opener is the last one that is not an async worker's transient
-   hold: parked closing sockets are drained now, since nothing else will
-   before the worker's release tears the stack down (#53). */
+/* The closing opener is the last one that is neither an async worker's
+   transient hold nor a closer already past its drain gate: parked closing
+   sockets are drained now, since nothing else will before the stack goes
+   (#53).  Read under sb_Lock. */
 static inline BOOL bsd_stack_last_opener(const struct AmiSocketBase *master)
 {
-    return master->sb_StackRefs >= master->sb_TransientStackRefs &&
-           master->sb_StackRefs - master->sb_TransientStackRefs <= 1;
+    ULONG others = master->sb_TransientStackRefs + master->sb_StackClosing;
+
+    return master->sb_StackRefs >= others &&
+           master->sb_StackRefs - others <= 1;
 }
 
 #define ASF_TCP         (1UL <<  0)
@@ -790,6 +794,14 @@ LONG  bsd_stack_interface_remove_named(struct AmiSocketBase *base,
 LONG  bsd_stack_transient_hold(struct AmiSocketBase *base);
 VOID  bsd_stack_transient_release(struct AmiSocketBase *base);
 
+/* library.c, a closing opener's drain gate and its reference release.  The
+   gate runs OUTSIDE the bracket once the base's own sockets are parked, and
+   answers TRUE, with the handoff registry moved to *handoffs, when this is the
+   last opener; the release is the one that decrements sb_StackRefs. */
+BOOL  bsd_stack_close_gate(struct AmiSocketBase *base,
+                           struct MinList *handoffs);
+BOOL  bsd_stack_close_release(struct AmiSocketBase *master);
+
 /* library.c, the shutdown pair.  bsd_stack_unhold() gives that reference back.
    It returns 0 on success, -1 when the caller is the only one left holding the
    stack up.  bsd_stack_notify() signals every other opener and reports how
@@ -868,11 +880,14 @@ ULONG      ami_bsd_tcp_window(struct AmiSocketBase *base);
 VOID       bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms);
 
 /* handoff.c, cross-base descriptor transfer. The registry lives in the master
- * base. bsd_handoff_flush() runs from bsd_lib_close() when the last opener
- * goes, because nothing can obtain a parked socket after that. */
+ * base. When the last opener goes, bsd_stack_close_gate() takes the registry
+ * under sb_Lock and bsd_child_destroy() flushes it under the bracket, because
+ * nothing can obtain a parked socket after that. */
 VOID  bsd_handoff_init(struct AmiSocketBase *master);
 BOOL  bsd_handoff_pending(struct AmiSocketBase *master);
-VOID  bsd_handoff_flush(struct AmiSocketBase *base, BOOL bracketed);
+VOID  bsd_handoff_take(struct AmiSocketBase *master, struct MinList *out);
+VOID  bsd_handoff_flush(struct AmiSocketBase *base, struct MinList *list,
+                        BOOL bracketed);
 
 /* socket.c, sockaddr helpers.
  */
