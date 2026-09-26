@@ -34,6 +34,7 @@
  */
 
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 
 #include <proto/exec.h>
@@ -862,6 +863,107 @@ static void nsd_sana(struct IOSana2Req *io, UWORD mn_length)
     memset(io, 0, sizeof(*io));
     io->ios2_Req.io_Message.mn_Length = mn_length;
     io->ios2_Req.io_Command           = NSCMD_DEVICEQUERY;
+}
+
+/* A request built by hand at its real size, with the bytes after it
+   belonging to someone else: a canaried tail holding what an IOSana2Req's
+   ios2_Data/ios2_DataLength would read, pointed at a decoy. */
+typedef struct
+{
+    struct IOStdReq std;
+    UBYTE           tail[sizeof(struct IOSana2Req) + 32 - sizeof(struct IOStdReq)];
+} NsdFrame;
+
+typedef struct
+{
+    struct IORequest req;
+    UBYTE            tail[sizeof(struct IOSana2Req) + 32 - sizeof(struct IORequest)];
+} NsdBaseFrame;
+
+static NsdAnswer nsd_decoy;
+
+static void nsd_frame(NsdFrame *f)
+{
+    struct IOSana2Req *wide = (struct IOSana2Req *)f;
+
+    memset(f, 0xa5, sizeof(*f));
+    wide->ios2_Data             = &nsd_decoy;    /* in the tail */
+    wide->ios2_DataLength       = NSD_SIZE + 8;
+    wide->ios2_WireError        = 0xa5a5a5a5UL;
+    memset(&f->std.io_Message.mn_Node, 0, sizeof(f->std.io_Message.mn_Node));
+    f->std.io_Message.mn_Length = 0;             /* built by hand, unset */
+    f->std.io_Command           = NSCMD_DEVICEQUERY;
+    f->std.io_Flags             = 0;
+    f->std.io_Error             = 0;
+    f->std.io_Actual            = 0;
+    f->std.io_Data              = NULL;
+    f->std.io_Length            = 0;
+}
+
+static int nsd_frame_tail_intact(const NsdFrame *f)
+{
+    NsdFrame ref;
+
+    nsd_frame(&ref);
+    return memcmp(f->tail, ref.tail, sizeof(ref.tail)) == 0;
+}
+
+static void nsd_base_frame(NsdBaseFrame *f)
+{
+    memset(f, 0xa5, sizeof(*f));
+    memset(&f->req.io_Message.mn_Node, 0, sizeof(f->req.io_Message.mn_Node));
+    f->req.io_Message.mn_Length = (UWORD)sizeof(struct IORequest);
+    f->req.io_Command           = NSCMD_DEVICEQUERY;
+    f->req.io_Flags             = 0;
+    f->req.io_Error             = 0;
+}
+
+/* From where an IOStdReq's io_Actual would be: on m68k that is the first
+   byte past the IORequest, on a 64-bit host it is inside its padding. */
+static int nsd_base_frame_tail_intact(const NsdBaseFrame *f)
+{
+    NsdBaseFrame ref;
+    size_t       from = offsetof(struct IOStdReq, io_Actual);
+
+    nsd_base_frame(&ref);
+    return memcmp((const UBYTE *)f + from, (const UBYTE *)&ref + from,
+                  sizeof(ref) - from) == 0;
+}
+
+static void i3_nsquery_short_frames(void)
+{
+    NsdFrame     f;
+    NsdBaseFrame b;
+    NsdAnswer    a;
+
+    /* A real 48-byte IOStdReq with mn_Length 0 (#64): refused, neither form
+       read, and not one byte past its end written. */
+    reset();
+    nsd_frame(&f);
+    nsd_answer_init(&nsd_decoy);
+    nsd_answer_init(&a);
+    f.std.io_Data   = &a;
+    f.std.io_Length = NSD_SIZE;
+    netdev_nsd_query((struct IOSana2Req *)&f);
+    expect_u32("a zero-length 48-byte IOStdReq query is refused",
+               (unsigned long)(UBYTE)f.std.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and io_Data is not written");
+    expect(nsd_answer_untouched(&nsd_decoy),
+           "  and ios2_Data past the IOStdReq is not read as a buffer");
+    expect(nsd_frame_tail_intact(&f),
+           "  and not one byte past the 48-byte IOStdReq was written");
+    expect(replies == 1, "  and it was replied to");
+
+    /* A real 32-byte IORequest stating its size: refused through the base
+       fields only; io_Actual, at offset 32, is the tail's. */
+    reset();
+    nsd_base_frame(&b);
+    netdev_nsd_query((struct IOSana2Req *)&b);
+    expect_u32("a bare IORequest query is refused",
+               (unsigned long)(UBYTE)b.req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_base_frame_tail_intact(&b),
+           "  and not one byte from io_Actual on was written");
+    expect(replies == 1, "  and it was replied to");
 }
 
 static void i2_nsquery_both_forms(void)
@@ -2205,6 +2307,7 @@ int main(void)
     h_devicequery_honours_sizeavailable();
     i_nsquery_replies_by_hand();
     i2_nsquery_both_forms();
+    i3_nsquery_short_frames();
     j_the_advertised_list_is_the_real_one();
     k_unknown_commands();
     l_onevent_masks();
