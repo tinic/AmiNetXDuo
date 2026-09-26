@@ -1922,6 +1922,7 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
 {
     BsdIovCursor cur;
     LONG         result;
+    NXD_ADDRESS  peer;
 
     if ((sock->as_Flags & (ASF_TCP | ASF_WRSHUT)) == ASF_WRSHUT)
         return bsd_fail(base, AMI_EPIPE);
@@ -1937,10 +1938,18 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
 
-    /* The connected peer's zone is read here, inside the bracket the
-       interface epoch moves under (#51), never by the caller before it. */
+    /* The connected peer is taken here, inside the bracket the interface
+       epoch moves under (#51): address, port and zone together, as one
+       snapshot.  A send can wait for a packet and pass the baton, and a
+       connect() from another task must not change the destination under
+       a source and zone chosen for the old one. */
     if (addr == &sock->as_PeerAddr)
+    {
+        peer  = sock->as_PeerAddr;
+        port  = sock->as_PeerPort;
         scope = bsd_peer_scope(sock);
+        addr  = &peer;
+    }
 
     if ((sock->as_Flags & ASF_RAW) != 0)
         result = bsd_send_raw(base, sock, &cur, len, flags, addr, scope, src);
