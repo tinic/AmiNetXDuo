@@ -613,6 +613,9 @@ static VOID bsd_child_close_gate(struct AmiSocketBase *child)
     bsd_handoff_flush(child, &handoffs, bracketed);
     if (!bracketed)
     {
+        /* Nothing will drain them now, and a sweep after the teardown would
+           reach a freed NX_IP (#53): forgotten, not freed. */
+        bsd_closing_head = NULL;
         AMI_WARN("bsdsocket: last close with the kernel down. "
                  "Closing sockets are left to the stack teardown");
         return;
@@ -1030,18 +1033,23 @@ struct AmiSocketBase *bsd_lib_open(
         bsd_cork_start(master->sb_StackIp);
 #endif
     }
-    master->sb_StackRefs++;
+
+    /*
+     * The reference is counted only once the base exists, under the same
+     * sb_Lock.  Counted before and given back on a failure, it was up while
+     * a closer gated: that closer was not last, did not drain, and its
+     * release took the stack down with its parked sockets (#53).
+     */
+    child = bsd_child_create(master);
+    if (child != NULL)
+        master->sb_StackRefs++;
+    else if (master->sb_StackRefs == 0)
+        bsd_netstack_shutdown_owned(master);
 
     ReleaseSemaphore(&master->sb_Lock);
 
-    child = bsd_child_create(master);
     if (child == NULL)
     {
-        ObtainSemaphore(&master->sb_Lock);
-        if (--master->sb_StackRefs == 0)
-            bsd_netstack_shutdown_owned(master);
-        ReleaseSemaphore(&master->sb_Lock);
-
         Forbid();
         master->sb_Lib.lib_OpenCnt--;
         return NULL;

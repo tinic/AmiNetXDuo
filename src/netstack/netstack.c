@@ -86,6 +86,34 @@ static VOID ami_ns_second_expired(ULONG id)
     ami_second_notify();
 }
 
+/*
+ * Every TCP socket still created on `ip`, to NX_TCP_CLOSED and off its port so
+ * that its delete is accepted (nx_tcp_socket_delete.c:94).  A connection is
+ * reset; the disconnect is NX_NOT_CONNECTED and nothing else for one that is
+ * not.  Unaccept then takes any state past CLOSE_WAIT, a LISTEN, or a bound
+ * CLOSED client off its port and to CLOSED (nx_tcp_server_socket_unaccept.c).
+ * What still refuses -- a UDP orphan, a bind in progress -- is leaked,
+ * uncounted, rather than the IP thread (#53).
+ */
+static VOID ami_ns_sockets_delete(NX_IP *ip)
+{
+    NX_TCP_SOCKET *t = ip->nx_ip_tcp_created_sockets_ptr;
+    ULONG          n;
+
+    for (n = ip->nx_ip_tcp_created_sockets_count; n > 0; n--)
+    {
+        NX_TCP_SOCKET *next = t->nx_tcp_socket_created_next;
+
+        AMI_NX_CLEANUP(nx_tcp_socket_disconnect(t, NX_NO_WAIT));
+        AMI_NX_CLEANUP(nx_tcp_server_socket_unaccept(t));
+        AMI_NX_CLEANUP(nx_tcp_socket_delete(t));
+        t = next;
+    }
+
+    ip->nx_ip_tcp_created_sockets_count = 0;
+    ip->nx_ip_udp_created_sockets_count = 0;
+}
+
 static VOID ami_ns_destroy(AmiNetStack *ns)
 {
     UWORD i;
@@ -219,13 +247,18 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 #endif
 
     /*
-     * A socket still created refuses the delete and leaves the IP thread and
-     * its timers running on ns_Ip, so nothing they can reach is closed or
-     * freed: a bounded leak, as below (#53).
+     * A socket still created refuses the delete, and the IP thread it leaves
+     * keeps the kernel from stopping, so every later open fails (#53).  What
+     * is left -- a close the last opener did not drain, an orphan -- is torn
+     * down here.  Only a delete outside a thread still fails: the IP thread
+     * and its timers run on ns_Ip, so nothing they reach is closed or freed.
      */
     if (ns->ns_IpCreated)
     {
-        UINT status = nx_ip_delete(&ns->ns_Ip);
+        UINT status;
+
+        ami_ns_sockets_delete(&ns->ns_Ip);
+        status = nx_ip_delete(&ns->ns_Ip);
 
         if (status != NX_SUCCESS)
         {

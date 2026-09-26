@@ -175,10 +175,51 @@ static VOID test_release_copy_listener(VOID)
           "and remains a listener after the copy handoff");
 }
 
+/* The last opener's close: bsd_handoff_take() moves the registry off the
+   master under sb_Lock, bsd_handoff_flush() releases it afterwards. */
+static VOID test_take_and_flush(VOID)
+{
+    AmiSocket      sock;
+    struct MinList moved;
+    struct MinNode *first;
+    struct MinNode *second;
+
+    reset_fixture(&sock);
+    CHECK(bsd_ReleaseCopyOfSocket(0, UNIQUE_ID, &source_base) > 65535 &&
+              bsd_ReleaseCopyOfSocket(0, UNIQUE_ID, &source_base) > 65535,
+          "two entries are parked");
+    CHECK(sock.as_RefCount == 3, "each holding a reference");
+
+    bsd_handoff_take(&master_base, &moved);
+    CHECK(!bsd_handoff_pending(&master_base), "the master registry is empty");
+    CHECK(master_base.sb_Handoffs.mlh_Head ==
+                  (struct MinNode *)&master_base.sb_Handoffs.mlh_Tail &&
+              master_base.sb_Handoffs.mlh_TailPred ==
+                  (struct MinNode *)&master_base.sb_Handoffs.mlh_Head,
+          "and a well-formed empty list");
+
+    first  = moved.mlh_Head;
+    second = first->mln_Succ;
+    CHECK(first->mln_Pred == (struct MinNode *)&moved.mlh_Head,
+          "the first moved entry points back at the new list head");
+    CHECK(second->mln_Pred == first && moved.mlh_TailPred == second,
+          "the second is the tail");
+    CHECK(second->mln_Succ == (struct MinNode *)&moved.mlh_Tail &&
+              moved.mlh_Tail == NULL,
+          "and ends at the new list's tail");
+
+    bsd_handoff_flush(&master_base, &moved, TRUE);
+    CHECK(sock.as_RefCount == 1, "the flush released both references");
+    CHECK(moved.mlh_Head == (struct MinNode *)&moved.mlh_Tail,
+          "and emptied the moved list");
+    CHECK(source_base.sb_Table[0] == &sock, "the original stays installed");
+}
+
 int main(void)
 {
     test_release_listener();
     test_release_copy_listener();
+    test_take_and_flush();
     printf("handoff: %lu checks, %lu failures\n", checks, failures);
     return failures ? 1 : 0;
 }

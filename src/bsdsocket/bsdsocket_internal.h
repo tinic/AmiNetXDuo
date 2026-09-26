@@ -856,6 +856,10 @@ VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
    inside a bsd_nx_enter() bracket. A no-op when the list is empty. */
 VOID       bsd_closing_sweep(VOID);
 VOID       bsd_closing_drain(VOID);
+/* The parked closes.  Emptied, not drained, by a last close that cannot
+   drain (bsd_child_close_gate()): the stack's teardown takes their NX
+   sockets and NX_IP, and a sweep after it would reach freed memory (#53). */
+extern AmiSocket *bsd_closing_head;
 
 /* socket.c, TRUE when the socket parked on a listener holds a connection
    accept() can return, including one whose peer has already closed. Shared
