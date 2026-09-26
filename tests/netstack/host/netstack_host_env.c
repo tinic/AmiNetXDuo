@@ -1460,6 +1460,63 @@ UINT _nxe_udp_enable(NX_IP *ip_ptr)
     return TX_SUCCESS;
 }
 
+/* ami_ns_destroy()'s socket teardown, to NetX's rules: a disconnect with no
+   wait resets a connection (nx_tcp_socket_disconnect.c:211), a client to
+   CLOSED and a server to LISTEN, and refuses anything else; unaccept takes a
+   state past CLOSE_WAIT, a LISTEN or a bound CLOSED socket off its port to
+   CLOSED; a delete refuses anything bound or not CLOSED, else leaves the
+   created list.  nsh.sock_stuck refuses every delete. */
+UINT _nxe_tcp_socket_disconnect(NX_TCP_SOCKET *s, ULONG wait_option)
+{
+    UINT state = s->nx_tcp_socket_state;
+
+    (VOID)wait_option;
+    if (state != NX_TCP_ESTABLISHED && state != NX_TCP_SYN_SENT &&
+        state != NX_TCP_SYN_RECEIVED && state != NX_TCP_CLOSE_WAIT)
+        return NX_NOT_CONNECTED;
+    nsh.sock_resets++;
+    s->nx_tcp_socket_state = s->nx_tcp_socket_client_type
+                                 ? NX_TCP_CLOSED : NX_TCP_LISTEN_STATE;
+    return NX_SUCCESS;
+}
+
+UINT _nxe_tcp_server_socket_unaccept(NX_TCP_SOCKET *s)
+{
+    if (s->nx_tcp_socket_state >= NX_TCP_CLOSE_WAIT ||
+        (s->nx_tcp_socket_state == NX_TCP_CLOSED &&
+         s->nx_tcp_socket_bound_next != NX_NULL))
+        s->nx_tcp_socket_state = NX_TCP_LISTEN_STATE;
+    if (s->nx_tcp_socket_state != NX_TCP_LISTEN_STATE)
+        return NX_NOT_LISTEN_STATE;
+    s->nx_tcp_socket_state       = NX_TCP_CLOSED;
+    s->nx_tcp_socket_bound_next  = NX_NULL;
+    s->nx_tcp_socket_client_type = NX_TRUE;
+    return NX_SUCCESS;
+}
+
+UINT _nxe_tcp_socket_delete(NX_TCP_SOCKET *s)
+{
+    NX_IP *ip = s->nx_tcp_socket_ip_ptr;
+
+    if (nsh.sock_stuck || s->nx_tcp_socket_bound_next != NX_NULL ||
+        s->nx_tcp_socket_state != NX_TCP_CLOSED)
+        return NX_STILL_BOUND;
+    if (--ip->nx_ip_tcp_created_sockets_count == 0)
+        ip->nx_ip_tcp_created_sockets_ptr = NX_NULL;
+    else
+    {
+        s->nx_tcp_socket_created_previous->nx_tcp_socket_created_next =
+            s->nx_tcp_socket_created_next;
+        s->nx_tcp_socket_created_next->nx_tcp_socket_created_previous =
+            s->nx_tcp_socket_created_previous;
+        if (ip->nx_ip_tcp_created_sockets_ptr == s)
+            ip->nx_ip_tcp_created_sockets_ptr = s->nx_tcp_socket_created_next;
+    }
+    s->nx_tcp_socket_id = 0;
+    nsh.sock_deletes++;
+    return NX_SUCCESS;
+}
+
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
     (VOID)timer_ticks;

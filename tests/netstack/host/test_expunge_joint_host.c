@@ -262,50 +262,103 @@ static void t_refcount(void)
 }
 
 /*
- * Issue #53, link 3.  A TCP socket still created on the IP instance at
- * teardown: nx_ip_delete() answers NX_SOCKETS_BOUND and leaves the IP thread
- * and its timers running on ns_Ip.  The stack block holding them must not be
- * freed under that thread.
+ * Issue #53, link 3.  Sockets still created on the IP instance at teardown
+ * made nx_ip_delete() answer NX_SOCKETS_BOUND and leave the IP thread
+ * running: the SANA-II units were never closed, the kernel could not stop,
+ * and every later open failed until reboot.  They are torn down first -- a
+ * TCP socket in each kind of state, and what refuses (here a UDP orphan, or
+ * every socket) leaked uncounted -- so the delete succeeds, SANA-II is closed,
+ * the kernel stops, nothing is retained, and the stack comes up again.
  */
-static void t_bound_socket_keeps_ip(void)
+#define H_TCP 3
+static NX_TCP_SOCKET h_tcp[H_TCP];
+static NX_UDP_SOCKET h_udp;
+
+static void h_sockets_create(NX_IP *ip)
+{
+    static const UINT state[H_TCP] =
+        { NX_TCP_ESTABLISHED, NX_TCP_LISTEN_STATE, NX_TCP_FIN_WAIT_1 };
+    UINT i;
+
+    memset(h_tcp, 0, sizeof(h_tcp));
+    memset(&h_udp, 0, sizeof(h_udp));
+
+    /* A client connected, a server listening, a client closing; the two
+       clients bound. */
+    for (i = 0; i < H_TCP; i++)
+    {
+        h_tcp[i].nx_tcp_socket_state       = state[i];
+        h_tcp[i].nx_tcp_socket_client_type = (i != 1) ? NX_TRUE : NX_FALSE;
+        h_tcp[i].nx_tcp_socket_bound_next  = (i != 1) ? &h_tcp[i] : NX_NULL;
+        h_tcp[i].nx_tcp_socket_ip_ptr      = ip;
+        h_tcp[i].nx_tcp_socket_created_next     = &h_tcp[(i + 1) % H_TCP];
+        h_tcp[i].nx_tcp_socket_created_previous =
+            &h_tcp[(i + H_TCP - 1) % H_TCP];
+    }
+    ip->nx_ip_tcp_created_sockets_ptr   = &h_tcp[0];
+    ip->nx_ip_tcp_created_sockets_count = H_TCP;
+
+    /* A bound UDP socket. */
+    h_udp.nx_udp_socket_bound_next       = &h_udp;
+    h_udp.nx_udp_socket_ip_ptr           = ip;
+    h_udp.nx_udp_socket_created_next     = &h_udp;
+    h_udp.nx_udp_socket_created_previous = &h_udp;
+    ip->nx_ip_udp_created_sockets_ptr    = &h_udp;
+    ip->nx_ip_udp_created_sockets_count  = 1;
+}
+
+static void t_bound_socket_torn_down(void)
 {
     AmiNetStack *ns;
     NX_IP       *ip;
+    int          pass;
 
-    printf("expunge joint: a socket still bound at teardown\n");
+    for (pass = 0; pass < 2; pass++)
+    {
+        printf("expunge joint: sockets still created at teardown%s\n",
+               pass ? ", each refusing its delete" : "");
 
-    nsh_reset();
+        nsh_reset();
+        nsh.sock_stuck = (pass != 0);
 
-    CHECK(netstack_startup() == AMI_NET_OK, "up");
-    ns = netstack_get();
-    ip = netstack_ip();
-    CHECK(ns != NULL && ip != NULL, "a stack and its IP instance");
-    if (ns == NULL || ip == NULL)
-        return;
+        CHECK(netstack_startup() == AMI_NET_OK, "up");
+        ns = netstack_get();
+        ip = netstack_ip();
+        CHECK(ns != NULL && ip != NULL, "a stack and its IP instance");
+        if (ns == NULL || ip == NULL)
+            return;
 
-    ip->nx_ip_tcp_created_sockets_count = 1;    /* a parked closing socket */
-    nsh.watch_block = ns;
+        h_sockets_create(ip);
+        nsh.watch_block = ns;
 
-    netstack_shutdown();
+        netstack_shutdown();
 
-    printf("teardown ip_delete_status=%lu ns_freed=%ld\n",
-           (unsigned long)nsh.ip_delete_status, (long)nsh.watch_freed);
-    CHECK(nsh.ip_deletes == 1, "nx_ip_delete() was called");
-    CHECK(nsh.ip_delete_status == NX_SOCKETS_BOUND,
-          "and refused: the IP thread is still running");
-    CHECK(!nsh.watch_freed,
-          "the stack block holding that IP thread is not freed");
-    CHECK(netstack_get() == NULL, "the singleton is gone all the same");
+        printf("teardown stuck=%d ip_delete_status=%lu resets=%lu deletes=%lu "
+               "sana2_closes=%lu retained=%u tx_stops=%lu ns_freed=%ld\n",
+               pass, (unsigned long)nsh.ip_delete_status,
+               (unsigned long)nsh.sock_resets, (unsigned long)nsh.sock_deletes,
+               (unsigned long)nsh.sana2_closes, (unsigned)nsh_retained(),
+               (unsigned long)nsh.tx_stops, (long)nsh.watch_freed);
+        if (pass == 0)
+        {
+            CHECK(nsh.sock_resets == 1, "the connection was reset");
+            CHECK(nsh.sock_deletes == H_TCP, "and every TCP socket deleted");
+        }
+        CHECK(nsh.ip_deletes == 1 && nsh.ip_delete_status == NX_SUCCESS,
+              "nx_ip_delete() succeeds");
+        CHECK(nsh.sana2_opens > 0 &&
+                  nsh.sana2_device_closes == nsh.sana2_device_opens,
+              "every SANA-II device was closed");
+        CHECK(nsh_retained() == 0, "and none retained");
+        CHECK(nsh.tx_stops == 1, "the kernel stopped");
+        CHECK(nsh.watch_freed, "the stack block is freed");
+        CHECK(netstack_get() == NULL && netstack_can_unload() == TRUE,
+              "and the library may unload");
 
-    h_teardown();
-
-    /* A clean teardown still frees it. */
-    nsh_reset();
-    CHECK(netstack_startup() == AMI_NET_OK, "up again");
-    nsh.watch_block = netstack_get();
-    netstack_shutdown();
-    CHECK(nsh.ip_delete_status == NX_SUCCESS, "no socket: the delete succeeds");
-    CHECK(nsh.watch_freed, "and the stack block is freed");
+        nsh.sock_stuck = FALSE;
+        CHECK(netstack_startup() == AMI_NET_OK, "a later open brings it up");
+        h_teardown();
+    }
 }
 
 int main(void)
@@ -320,7 +373,7 @@ int main(void)
     t_startup_refuses_over_a_failed_stop();
     t_contended_lock_refuses();
     t_refcount();
-    t_bound_socket_keeps_ip();
+    t_bound_socket_torn_down();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

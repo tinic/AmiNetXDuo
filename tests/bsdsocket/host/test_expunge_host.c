@@ -345,7 +345,26 @@ static VOID h_unreachable(const char *what)
     exit(1);
 }
 
-APTR AllocMem(ULONG s, ULONG r)  { (VOID)s; (VOID)r; h_unreachable("AllocMem");  return NULL; }
+/* t_failed_open_drains(): the child base of an open cannot be made.  A
+   closer's gate runs at once if C does not hold sb_Lock there, which is the
+   window; otherwise it waits for C to let go, as ObtainSemaphore() would. */
+static BOOL                  h_alloc_fails;
+static struct AmiSocketBase *h_alloc_gate;
+static BOOL                  h_alloc_gate_waited;
+static VOID h_gate(struct AmiSocketBase *child);
+APTR AllocMem(ULONG s, ULONG r)
+{
+    (VOID)s; (VOID)r;
+    if (!h_alloc_fails)
+        h_unreachable("AllocMem");
+    if (h_alloc_gate != NULL && h_lock_depth == 0)
+    {
+        h_gate(h_alloc_gate);
+        h_alloc_gate = NULL;
+    }
+    h_alloc_gate_waited = (h_alloc_gate != NULL);
+    return NULL;
+}
 VOID CopyMem(const APTR s, APTR d, ULONG n) { (VOID)s; (VOID)d; (VOID)n; h_unreachable("CopyMem"); }
 VOID AddTail(struct List *l, struct Node *n) { (VOID)l; (VOID)n; h_unreachable("AddTail"); }
 struct Task *FindTask(const char *n) { (VOID)n; return &h_task; }
@@ -417,6 +436,9 @@ VOID bsd_handoff_flush(struct AmiSocketBase *b, struct MinList *list,
         h_flushes_bracketed++;
 }
 VOID bsd_closing_drain(VOID) { h_drains++; }
+/* socket.c's parked closes, emptied by a last close that cannot drain. */
+AmiSocket *bsd_closing_head;
+static AmiSocket h_parked;
 BOOL bsd_handoff_pending(struct AmiSocketBase *m) { (VOID)m; return FALSE; }
 LONG bsd_nx_enter(struct AmiSocketBase *b)
 {
@@ -706,49 +728,6 @@ static VOID t_transient_stack_reference(VOID)
 }
 
 /*
- * Issue #53: tool T launches an async DHCP job (a transient hold) and closes;
- * app A parks a closing socket and closes; T's job then releases the last
- * reference.  A's bsd_close_all() is the last chance to drain the parked
- * socket before netstack_shutdown(), so its gate must say so.
- */
-static VOID t_transient_last_opener_drains(VOID)
-{
-    BOOL t_drains;
-    BOOL a_drains;
-
-    printf("the last opener's close with a transient worker outstanding\n");
-
-    h_machine_reset(TRUE);
-    h.stack_running      = TRUE;
-    h_base->sb_StackRefs = 1;                       /* T opens            */
-
-    CHECK(bsd_stack_transient_hold(h_base) == 0, "T's DHCP job holds the stack");
-    h_base->sb_StackRefs++;                         /* A opens            */
-
-    t_drains = bsd_stack_last_opener(h_base);       /* T's close_all gate */
-    h_base->sb_StackRefs--;                         /* T closes           */
-
-    a_drains = bsd_stack_last_opener(h_base);       /* A's close_all gate */
-    h_base->sb_StackRefs--;                         /* A closes           */
-
-    CHECK(h.shutdown_calls == 0, "the worker still holds the stack");
-    bsd_stack_transient_release(h_base);            /* the job completes  */
-
-    printf("transient_last_opener t_drains=%ld a_drains=%ld shutdowns=%ld\n",
-           (long)t_drains, (long)a_drains, (long)h.shutdown_calls);
-    CHECK(!t_drains, "T's close leaves A's sockets alone");
-    CHECK(a_drains, "A's close drains the parked sockets");
-    CHECK(h.shutdown_calls == 1, "the worker's release tears the stack down");
-
-    /* A hold is an opener, not a worker: the network stays up. */
-    h_machine_reset(TRUE);
-    h_base->sb_StackRefs = 2;
-    CHECK(!bsd_stack_last_opener(h_base), "a held stack is not drained");
-    h_base->sb_StackRefs = 1;
-    CHECK(bsd_stack_last_opener(h_base), "the last plain opener drains");
-}
-
-/*
  * #53's leftover: two openers close at once.  bsd_lib_close() Wait()s in the
  * bracket and on sb_Lock between A's drain gate (bsd_close_all()) and A's
  * release, so B's gate can run in that window.  Both used to see two
@@ -792,6 +771,50 @@ static VOID h_gate(struct AmiSocketBase *child)
 
     if (bsd_stack_close_gate(child, &handoffs))
         h_gate_last++;
+}
+
+/*
+ * Issue #53: tool T launches an async DHCP job (a transient hold) and closes;
+ * app A parks a closing socket and closes; T's job then releases the last
+ * reference.  A's gate is the last one, so A drains before the worker's
+ * release tears the stack down.
+ */
+static VOID t_transient_last_opener_drains(VOID)
+{
+    LONG t_drains;
+    LONG a_drains;
+
+    printf("the last opener's close with a transient worker outstanding\n");
+
+    h_closers_reset(2, TRUE);                       /* T, A and T's job   */
+
+    h_gate(&h_child_a);                             /* T's gate           */
+    t_drains = h_gate_last;
+    (VOID)bsd_stack_close_release(h_base);          /* T's release        */
+
+    h_gate(&h_child_b);                             /* A's gate           */
+    a_drains = h_gate_last - t_drains;
+    (VOID)bsd_stack_close_release(h_base);          /* A's release        */
+
+    CHECK(h.shutdown_calls == 0, "the worker still holds the stack");
+    bsd_stack_transient_release(h_base);            /* the job completes  */
+
+    printf("transient_last_opener t_drains=%ld a_drains=%ld shutdowns=%ld\n",
+           (long)t_drains, (long)a_drains, (long)h.shutdown_calls);
+    CHECK(t_drains == 0, "T's close leaves A's sockets alone");
+    CHECK(a_drains == 1, "A's close drains the parked sockets");
+    CHECK(h.shutdown_calls == 1, "the worker's release tears the stack down");
+    CHECK(h_base->sb_StackClosing == 0 && h_base->sb_StackRefs == 0,
+          "every gate and reference is given back");
+
+    /* A second opener still open: the closer is not last. */
+    h_closers_reset(2, FALSE);
+    h_gate(&h_child_a);
+    CHECK(h_gate_last == 0, "a held stack is not drained");
+    (VOID)bsd_stack_close_release(h_base);
+    h_gate(&h_child_b);
+    CHECK(h_gate_last == 1, "the last plain opener drains");
+    (VOID)bsd_stack_close_release(h_base);
 }
 
 static VOID t_concurrent_closers_drain(VOID)
@@ -927,10 +950,14 @@ static VOID t_tableless_last_closer(VOID)
     b = h_tableless_child();
     h_nx_enter_result = -1;
     h_gate(&h_child_a);
+    bsd_closing_head = &h_parked;            /* A's parked socket             */
     (VOID)bsd_lib_close(b);
     CHECK(h_takes == 1 && h_flushes == 1 && h_flushes_bracketed == 0,
           "kernel down: the registry is emptied unbracketed");
     CHECK(h_drains == 0 && h_nx_leaves == 0, "and no NetX call is made");
+    CHECK(bsd_closing_head == NULL,
+          "the parked sockets nobody can drain are forgotten, so no sweep "
+          "after the teardown reaches them");
     (VOID)bsd_stack_close_release(h_base);
     CHECK(h_base->sb_StackClosing == 0, "the count still comes back");
 }
@@ -1011,6 +1038,62 @@ static VOID t_cork_pass_keeps_stack(VOID)
 }
 #endif
 
+/*
+ * A failed open between two closes.  A, the sole opener, has sockets parked
+ * and starts CloseLibrary() while C starts OpenLibrary(), and C's child base
+ * cannot be made.  C's open used to count its stack reference, drop sb_Lock,
+ * fail to make the base and give the reference back with no drain gate: A,
+ * gating in that window, was not last, and A's release then took the stack
+ * down with A's sockets still created.  The reference is now counted with the
+ * base made, under one hold of sb_Lock, so A's gate waits it out and finds
+ * itself last.
+ */
+static VOID t_failed_open_drains(VOID)
+{
+    struct AmiSocketBase *opened;
+
+    printf("an open that fails while the last opener closes\n");
+
+    h_closers_reset(1, FALSE);                     /* A                   */
+    h_base->sb_Lib.lib_OpenCnt = 1;
+    h.forbid_depth = 1;                            /* Exec's Forbid       */
+    h_alloc_fails  = TRUE;
+    h_alloc_gate   = &h_child_a;                   /* A's close           */
+
+    opened = bsd_lib_open(4UL, h_base);            /* C                   */
+
+    if (h_alloc_gate != NULL)                      /* A waited on sb_Lock */
+        h_gate(h_alloc_gate);
+    h_alloc_fails = FALSE;
+    h_alloc_gate  = NULL;
+    printf("failed_open a_waited=%ld a_last=%ld refs=%lu closing=%lu\n",
+           (long)h_alloc_gate_waited, (long)h_gate_last,
+           (unsigned long)h_base->sb_StackRefs,
+           (unsigned long)h_base->sb_StackClosing);
+    CHECK(opened == NULL, "C's open failed");
+    CHECK(h_alloc_gate_waited, "C held sb_Lock while making its base");
+    CHECK(h_gate_last == 1, "A's gate is last, so A drains its sockets");
+    CHECK(h_base->sb_StackRefs == 1 && h_base->sb_StackClosing == 1,
+          "C left no reference behind; A's is still counted");
+    CHECK(h_base->sb_Lib.lib_OpenCnt == 1 && h.forbid_depth == 1,
+          "C gave its open count back under Exec's Forbid");
+
+    (VOID)bsd_stack_close_release(h_base);         /* A's release         */
+    CHECK(h.shutdown_calls == 1 && h_base->sb_StackRefs == 0 &&
+              h_base->sb_StackClosing == 0,
+          "A's release tears down with nothing owed");
+
+    /* A stays open: C's failed open changes nothing. */
+    h_closers_reset(1, FALSE);
+    h.forbid_depth = 1;
+    h_alloc_fails  = TRUE;
+    opened = bsd_lib_open(4UL, h_base);
+    h_alloc_fails = FALSE;
+    CHECK(opened == NULL && h.shutdown_calls == 0 &&
+              h_base->sb_StackRefs == 1 && h_base->sb_StackClosing == 0,
+          "with an opener left, a failed open takes no reference");
+}
+
 static VOID t_loopback_startup_failure_ownership(VOID)
 {
     struct AmiSocketBase *opened;
@@ -1079,6 +1162,7 @@ int main(void)
     t_transient_last_opener_drains();
     t_concurrent_closers_drain();
     t_tableless_last_closer();
+    t_failed_open_drains();
     t_loopback_startup_failure_ownership();
 #ifdef AMINETXDUO_TCP_CORK
     t_cork_pass_keeps_stack();

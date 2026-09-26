@@ -401,6 +401,20 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME accept_refused_waits COMMAND test_accept_refused)
 
+    # socket.c's closing list across a stack teardown (#53): a parked socket
+    # nobody could drain is forgotten, and no sweep after the teardown
+    # reaches its freed NX_IP.  #included like test_bind_share.
+    add_executable(test_closing_forget host/test_closing_forget_host.c)
+    get_target_property(_forget_inc test_accept_refused INCLUDE_DIRECTORIES)
+    target_include_directories(test_closing_forget PRIVATE ${_forget_inc})
+    target_compile_options(test_closing_forget PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections)
+    target_link_options(test_closing_forget PRIVATE -Wl,--gc-sections)
+    target_compile_definitions(test_closing_forget PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_TCP_CORK)
+    add_test(NAME closing_forget COMMAND test_closing_forget)
+
     # netstatus.c, for NETSTATUS_NEIGHBOURS, the one flag `arp` prints from
     # it, and the interface-statistics wait. The router flag came from a NetX
     # Duo back pointer that is only

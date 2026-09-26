@@ -130,6 +130,9 @@ typedef struct NetStackHostEnv
     UINT    ip_create_status;
     ULONG   ip_deletes;
     UINT    ip_delete_status;       /* what the last nx_ip_delete() answered */
+    ULONG   sock_resets;            /* nx_tcp_socket_disconnect(), no wait   */
+    ULONG   sock_deletes;           /* TCP and UDP socket deletes accepted   */
+    BOOL    sock_stuck;             /* every socket delete refuses           */
     ULONG   iface_attaches;
     ULONG   iface_detaches;
     ULONG   iface_address;          /* what nx_ip_interface_address_get() has */

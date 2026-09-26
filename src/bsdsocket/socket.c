@@ -589,7 +589,7 @@ static VOID bsd_socket_dispose(AmiSocket *sock)
 
 #define BSD_CLOSING_DEADLINE    (60UL * NX_IP_PERIODIC_RATE)
 
-static AmiSocket *bsd_closing_head;
+AmiSocket *bsd_closing_head;
 
 static BOOL bsd_socket_destroy(AmiSocket *sock);
 
