@@ -104,9 +104,9 @@ static VOID ami_ns_sockets_delete(NX_IP *ip)
     {
         NX_TCP_SOCKET *next = t->nx_tcp_socket_created_next;
 
-        (VOID)nx_tcp_socket_disconnect(t, NX_NO_WAIT);
-        (VOID)nx_tcp_server_socket_unaccept(t);
-        (VOID)nx_tcp_socket_delete(t);
+        AMI_NX_CLEANUP(nx_tcp_socket_disconnect(t, NX_NO_WAIT));
+        AMI_NX_CLEANUP(nx_tcp_server_socket_unaccept(t));
+        AMI_NX_CLEANUP(nx_tcp_socket_delete(t));
         t = next;
     }
 
