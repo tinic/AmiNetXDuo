@@ -138,6 +138,22 @@ static struct
     LONG        sockaddr_get_result;
     ULONG       sockaddr_puts;
     ULONG       wait_option;
+
+    /* Interface epochs (#51): one counter for every slot, moved by the next
+       bsd_nx_enter() when bump_on_enter is set, as a RemoveNetInterface and
+       AddNetInterface into the same slot would between a caller's check and
+       its bracket. */
+    ULONG       live_epoch;
+    BOOL        bump_on_enter;
+    ULONG       seen_scope;         /* what bsd_source_select() was handed   */
+
+    /* Another task's connect() while the send waits for a packet: the next
+       nx_packet_allocate() moves this socket to a different peer. */
+    AmiSocket  *reconnect;
+    NXD_ADDRESS sent_addr;          /* where the last datagram went          */
+    UINT        sent_port;
+    ULONG       raw_sends;          /* bsd_raw_send_packet() calls           */
+    ULONG       sent_scope;         /* and the zone it was handed            */
 } h;
 
 static void h_reset(void)
@@ -214,6 +230,9 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
     (VOID)base;
 
     h.nx_enters++;
+
+    if (h.bump_on_enter)
+        h.live_epoch++;
 
     return h.nx_enter_result;
 }
@@ -438,9 +457,11 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     (VOID)base;
     (VOID)sock;
     (VOID)packet;
-    (VOID)addr;
-    (VOID)scope;
     (VOID)src;
+
+    h.raw_sends++;
+    h.sent_addr  = *addr;
+    h.sent_scope = scope;
 
     return 0;
 }
@@ -456,13 +477,24 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
 {
     (VOID)sock;
     (VOID)dest;
-    (VOID)scope;
+
+    h.seen_scope = scope;
 
     if (index != NULL)
         *index = 0;
 
-    return BSD_SOURCE_ROUTE;
+    /* The real one's bounds check, which BSD_SCOPE_GONE never passes. */
+    return (scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES) ? BSD_SOURCE_REFUSE
+                                                       : BSD_SOURCE_ROUTE;
 }
+
+#ifdef AMINETXDUO_IPV6
+/* socket.c's: a zone stored under another epoch is gone. */
+ULONG bsd_scope_live(ULONG scope, ULONG epoch)
+{
+    return (scope == 0UL || epoch == h.live_epoch) ? scope : BSD_SCOPE_GONE;
+}
+#endif
 
 UINT bsd_udp_queue_info(const NX_PACKET *packet, UINT *source_port,
                         ULONG *payload_length)
@@ -565,6 +597,14 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
 
     status = h_plan(h.alloc_plan, h.alloc_planned, h.allocs);
     h.allocs++;
+
+    if (h.reconnect != NULL)
+    {
+        h.reconnect->as_PeerAddr.nxd_ip_address.v6[3] = 2UL;
+        h.reconnect->as_PeerPort    = 54;
+        h.reconnect->as_PeerScopeId = 3UL;
+        h.reconnect                 = NULL;
+    }
 
     if (status != NX_SUCCESS)
         return status;
@@ -746,10 +786,10 @@ UINT _nxde_udp_socket_send(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
     HPacket *p = h_from_nx(*packet_ptr);
 
     (VOID)socket_ptr;
-    (VOID)ip_address;
-    (VOID)port;
 
     h.sends++;
+    h.sent_addr = *ip_address;
+    h.sent_port = port;
 
     if (p != NULL)
     {
@@ -840,13 +880,15 @@ UINT _nxe_udp_socket_source_send(NX_UDP_SOCKET *socket_ptr,
 
 /* mcast.c.  Every send here is unicast, so the prepare/finish pair is a
    no-op; what a multicast send does with the interface hop limit is mcast.c's
-   claim and is not made here. */
+   claim and is not made here.  -1 is mcast.c's "not multicast": 0 would
+   route every send down the IPv4 multicast source path, which reads only
+   addr->nxd_ip_address.v4. */
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 {
     (VOID)sock;
     (VOID)addr;
 
-    return 0;
+    return -1;
 }
 
 /* This fixture sends only unicast packets; the multicast loop guard itself is
@@ -874,7 +916,7 @@ LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
 
     *saved = 0UL;
 
-    return 0;
+    return -1;
 }
 
 VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved)
@@ -1432,6 +1474,110 @@ static void t_datagram_size(void)
           "65508 is EMSGSIZE, and nothing was allocated for it");
 }
 
+#ifdef AMINETXDUO_IPV6
+/*
+ * A connected zone is resolved inside the bracket (#51).  The slot is
+ * reused between the call starting and bsd_nx_enter(): send(), sendto() with
+ * no address and sendmsg() with no name must all refuse, as the sticky
+ * IPV6_PKTINFO and bound-zone paths do.
+ */
+static AmiSocket *h_udp6_connected(LONG fd)
+{
+    static const ULONG ll_peer[4] = { 0xFE800000UL, 0, 0, 1 };
+    AmiSocket         *s          = h_udp(fd);
+
+    s->as_Flags |= ASF_INET6 | ASF_CONNECTED | ASF_NXBOUND | ASF_BOUND;
+    s->as_PeerAddr.nxd_ip_version = NX_IP_VERSION_V6;
+    memcpy(s->as_PeerAddr.nxd_ip_address.v6, ll_peer, sizeof(ll_peer));
+    s->as_PeerPort       = 53;
+    s->as_PeerScopeId    = 2UL;
+    s->as_PeerScopeEpoch = 0UL;
+
+    return s;
+}
+
+static LONG h_send_shape(int shape, char *buf)
+{
+    struct iovec  iov;
+    struct msghdr m;
+
+    switch (shape)
+    {
+    case 0:
+        return bsd_send(1, buf, 4, 0, &h_base);
+    case 1:
+        return bsd_sendto(1, buf, 4, 0, NULL, 0, &h_base);
+    default:
+        iov.iov_base = buf;
+        iov.iov_len  = 4;
+        memset(&m, 0, sizeof(m));
+        m.msg_iov    = &iov;
+        m.msg_iovlen = 1;
+        return bsd_sendmsg(1, &m, 0, &h_base);
+    }
+}
+
+static void t_peer_scope_in_bracket(void)
+{
+    static const char *const shape[3] = { "send", "sendto(NULL)",
+                                          "sendmsg(no name)" };
+    char buf[4] = { 1, 2, 3, 4 };
+    char what[96];
+    int  i;
+
+    printf("transfer: a connected zone is resolved inside the bracket\n");
+
+    for (i = 0; i < 3; i++)
+    {
+        h_reset();
+        (VOID)h_udp6_connected(1);
+        snprintf(what, sizeof(what), "%s: live zone sends on slot 1",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == 4 && h.sends == 1 &&
+                  h.seen_scope == 2UL, what);
+
+        h_reset();
+        (VOID)h_udp6_connected(1);
+        h.bump_on_enter = TRUE;
+        snprintf(what, sizeof(what),
+                 "%s: slot reused before the bracket is EADDRNOTAVAIL",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == -1 &&
+                  h.errno_value == AMI_EADDRNOTAVAIL && h.sends == 0 &&
+                  h.allocs == 0 && h.nx_enters == h.nx_leaves, what);
+
+        /* connect() to fe80::2%3 port 54 while this send waits. */
+        h_reset();
+        h.reconnect = h_udp6_connected(1);
+        snprintf(what, sizeof(what),
+                 "%s: a connect() during the wait does not redirect it",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == 4 && h.sends == 1 &&
+                  h.sent_addr.nxd_ip_version == NX_IP_VERSION_V6 &&
+                  h.sent_addr.nxd_ip_address.v6[0] == 0xFE800000UL &&
+                  h.sent_addr.nxd_ip_address.v6[3] == 1UL &&
+                  h.sent_port == 53 && h.seen_scope == 2UL, what);
+
+        /* The same on a connected raw socket: bsd_send_raw() allocates, and
+           so waits, before raw.c is handed the address and zone. */
+        h_reset();
+        h.reconnect = h_udp6_connected(1);
+        h.reconnect->as_Flags = (h.reconnect->as_Flags & ~ASF_UDP) | ASF_RAW;
+        snprintf(what, sizeof(what),
+                 "raw %s: a connect() during the wait does not redirect it",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == 4 && h.raw_sends == 1 &&
+                  h.sent_addr.nxd_ip_version == NX_IP_VERSION_V6 &&
+                  h.sent_addr.nxd_ip_address.v6[0] == 0xFE800000UL &&
+                  h.sent_addr.nxd_ip_address.v6[3] == 1UL &&
+                  h.sent_scope == 2UL, what);
+        snprintf(what, sizeof(what),
+                 "raw %s: the bracket is entered and left once", shape[i]);
+        CHECK(h.nx_enters == 1 && h.nx_leaves == 1, what);
+    }
+}
+#endif
+
 /*
  * recvmsg()'s out parameters.  msg_flags is not an input and whatever the
  * caller left there must not survive; msg_controllen is value-result and a
@@ -1530,6 +1676,9 @@ int main(void)
     t_dontwait();
     t_shutdown();
     t_datagram_size();
+#ifdef AMINETXDUO_IPV6
+    t_peer_scope_in_bracket();
+#endif
     t_recvmsg_outputs();
     t_send_monitor();
 

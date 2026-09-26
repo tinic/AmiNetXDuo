@@ -1922,6 +1922,7 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
 {
     BsdIovCursor cur;
     LONG         result;
+    NXD_ADDRESS  peer;
 
     if ((sock->as_Flags & (ASF_TCP | ASF_WRSHUT)) == ASF_WRSHUT)
         return bsd_fail(base, AMI_EPIPE);
@@ -1936,6 +1937,19 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
 
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);
+
+    /* The connected peer is taken here, inside the bracket the interface
+       epoch moves under (#51): address, port and zone together, as one
+       snapshot.  A send can wait for a packet and pass the baton, and a
+       connect() from another task must not change the destination under
+       a source and zone chosen for the old one. */
+    if (addr == &sock->as_PeerAddr)
+    {
+        peer  = sock->as_PeerAddr;
+        port  = sock->as_PeerPort;
+        scope = bsd_peer_scope(sock);
+        addr  = &peer;
+    }
 
     if ((sock->as_Flags & ASF_RAW) != 0)
         result = bsd_send_raw(base, sock, &cur, len, flags, addr, scope, src);
@@ -2196,7 +2210,7 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
 
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
                         &sock->as_PeerAddr, sock->as_PeerPort,
-                        bsd_peer_scope(sock), &sock->as_CmsgSticky);
+                        0UL, &sock->as_CmsgSticky);
 }
 
 LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
@@ -2210,6 +2224,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
     struct iovec  iov;
     NXD_ADDRESS   addr;
+    const NXD_ADDRESS *dest = &addr;
     UINT          port  = 0;
     ULONG         scope = 0;
 
@@ -2241,9 +2256,8 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
             if ((sock->as_Flags & ASF_CONNECTED) == 0)
                 return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
 
-            addr  = sock->as_PeerAddr;
-            port  = sock->as_PeerPort;
-            scope = bsd_peer_scope(sock);
+            dest = &sock->as_PeerAddr;
+            port = sock->as_PeerPort;
         }
         else if (bsd_sockaddr_get(SocketBase, to, tolen, &addr, &port,
                                   &scope) != 0)
@@ -2259,7 +2273,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
 
-    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, &addr, port,
+    return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags, dest, port,
                         scope, &sock->as_CmsgSticky);
 }
 
@@ -2329,6 +2343,7 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
 {
     AmiSocket    *sock = bsd_lookup(SocketBase, sock_fd);
     NXD_ADDRESS   addr;
+    const NXD_ADDRESS *dest = &addr;
     BsdCmsgSource src;
     UINT          port  = 0;
     ULONG         scope = 0;
@@ -2368,9 +2383,8 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
             if ((sock->as_Flags & ASF_CONNECTED) == 0)
                 return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
 
-            addr  = sock->as_PeerAddr;
-            port  = sock->as_PeerPort;
-            scope = bsd_peer_scope(sock);
+            dest = &sock->as_PeerAddr;
+            port = sock->as_PeerPort;
         }
         else if (bsd_sockaddr_get(SocketBase,
                                   (const struct sockaddr *)msg->msg_name,
@@ -2386,7 +2400,7 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
     }
 
     return bsd_send_iov(SocketBase, sock, msg->msg_iov,
-                        (LONG)msg->msg_iovlen, total, flags, &addr, port,
+                        (LONG)msg->msg_iovlen, total, flags, dest, port,
                         scope, &src);
 }
 
