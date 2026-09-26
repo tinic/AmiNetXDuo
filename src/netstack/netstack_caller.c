@@ -91,16 +91,7 @@ VOID ami_netstack_leave_free(AmiNetCaller *caller)
    was foreign, so the run signal it allocated here is still ours to free. */
 static VOID nc_free_evicted_signal(AmiNetCaller *caller)
 {
-    ULONG m = caller->nc_Signal;
-    BYTE  bit = 0;
-
-    if (m == 0UL)
-        return;
-
-    SetSignal(0UL, m);
-    while ((m >>= 1) != 0UL)
-        bit++;
-    FreeSignal(bit);
+    tx_amiga_adopt_signal_free(caller->nc_Signal);
     caller->nc_Signal = 0UL;
 }
 
@@ -168,7 +159,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
         return AMI_NET_ERR_KERNEL;
     }
 
-    caller->nc_Signal  = caller->nc_Thread->tx_thread_amiga_run_signal;
+    caller->nc_Signal  = tx_amiga_adopt_signal(caller->nc_Thread);
     caller->nc_Adopted = TRUE;
     return AMI_NET_OK;
 }

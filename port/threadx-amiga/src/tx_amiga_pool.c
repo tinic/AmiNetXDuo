@@ -535,18 +535,30 @@ struct _tx_amiga_adopt_slot *slot;
    next tx_amiga_adopt_resume() fails the generation test and
    ami_netstack_enter_cached() adopts afresh, freeing the run signal it kept
    in nc_Signal.  Round-robin, so one opener is not the victim every time.  */
-static UINT _tx_amiga_slot_evict_locked(VOID)
+static UINT _tx_amiga_slot_evict_locked(UINT reserved)
 {
 
 static ULONG                 next;
 struct _tx_amiga_adopt_slot *slot;
 TX_THREAD                   *thread_ptr;
 ULONG                        n;
+ULONG                        limit;
 
 
-    for (n = 0UL; n < ((ULONG) TX_AMIGA_ADOPT_SLOTS); n++)
+    /* Never while tx_amiga_kernel_stop() owns the pool; and only slots this
+       caller may claim, or the victim is one it cannot then take.  */
+    if ((_tx_amiga_kernel_up == TX_FALSE) || (_tx_amiga_kernel_stopping != TX_FALSE))
     {
-        next       =  (next + 1UL) % ((ULONG) TX_AMIGA_ADOPT_SLOTS);
+        return((UINT) TX_FALSE);
+    }
+
+    limit =  (reserved != ((UINT) TX_FALSE))
+             ? ((ULONG) TX_AMIGA_ADOPT_SLOTS)
+             : ((ULONG) (TX_AMIGA_ADOPT_SLOTS - TX_AMIGA_ADOPT_RESERVE));
+
+    for (n = 0UL; n < limit; n++)
+    {
+        next       =  (next + 1UL) % limit;
         slot       =  &_tx_amiga_adopt_pool[next];
         thread_ptr =  &slot -> as_thread;
 
@@ -578,7 +590,7 @@ struct _tx_amiga_adopt_slot *slot;
 
     slot =  _tx_amiga_slot_claim_locked(reserved);
     if ((slot == (struct _tx_amiga_adopt_slot *) 0) &&
-        (_tx_amiga_slot_evict_locked() != ((UINT) TX_FALSE)))
+        (_tx_amiga_slot_evict_locked(reserved) != ((UINT) TX_FALSE)))
     {
         slot =  _tx_amiga_slot_claim_locked(reserved);
     }

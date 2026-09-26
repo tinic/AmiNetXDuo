@@ -434,6 +434,29 @@ struct Task *me;
 
 
 
+ULONG tx_amiga_adopt_signal(TX_THREAD *thread_ptr)
+{
+
+    return(thread_ptr -> tx_thread_amiga_run_signal);
+}
+
+
+/* Free a run signal whose adoption a foreign teardown took; 0 is a no-op.  */
+VOID tx_amiga_adopt_signal_free(ULONG sigmask)
+{
+
+BYTE    sig;
+
+
+    sig =  _tx_amiga_sigbit(sigmask);
+    if (sig >= 0)
+    {
+        SetSignal(0UL, sigmask);
+        FreeSignal(sig);
+    }
+}
+
+
 /* Times a discarded holder left _tx_thread_preempt_disable raised.  */
 ULONG _tx_amiga_discard_preempt_resets;
 

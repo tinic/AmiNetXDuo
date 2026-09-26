@@ -310,6 +310,17 @@ UINT tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation)
     return TX_SUCCESS;
 }
 
+ULONG tx_amiga_adopt_signal(TX_THREAD *thread_ptr)
+{
+    (VOID)thread_ptr;
+    return 0UL;
+}
+
+VOID tx_amiga_adopt_signal_free(ULONG sigmask)
+{
+    (VOID)sigmask;
+}
+
 UINT tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation)
 {
     if (tx_amiga_adopt_handle_valid(thread_ptr, generation) == (UINT)TX_FALSE)

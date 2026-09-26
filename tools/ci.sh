@@ -360,7 +360,9 @@ host_test_targets() { # builddir
 #      IP_MULTICAST_TTL and IP_MULTICAST_IF (#49)
 #      467 with accept_refused_waits: a blocking accept waits past a peer its
 #      bind refuses (#52)
-HOST_TESTS_EXPECTED=467
+#      468 with adopt_pool_evict: a full pool takes back a dormant cached
+#      adoption (#67)
+HOST_TESTS_EXPECTED=468
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

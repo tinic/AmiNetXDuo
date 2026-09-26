@@ -166,6 +166,11 @@ UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation);
 
+/* The run signal an adoption Wait()s on.  Only its Task may FreeSignal() it,
+   so a cached caller keeps it in case a full pool evicts the adoption.  */
+ULONG   tx_amiga_adopt_signal(TX_THREAD *thread_ptr);
+VOID    tx_amiga_adopt_signal_free(ULONG sigmask);
+
 
 /* Deregister a thread adopted by some other Task and give its slot back.  The
    Exec signal is NOT recovered -- only its owner may FreeSignal() it -- so
