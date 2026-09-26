@@ -358,18 +358,20 @@ host_test_targets() { # builddir
 #      is detached (#51)
 #      466 with raw_mcast_send: a raw IPv4 group send honours
 #      IP_MULTICAST_TTL and IP_MULTICAST_IF (#49)
-HOST_TESTS_EXPECTED=466
+#      467 with accept_refused_waits: a blocking accept waits past a peer its
+#      bind refuses (#52)
+HOST_TESTS_EXPECTED=467
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
     # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
-    # test_ifdevices, test_usergroup_hold, test_bind_share and test_handoff
-    # (8ff3cc92), test_mcast_loop, test_mcast_epoch, test_scope_epoch and
-    # test_raw_mcast_send, all x86_64-only for the reason in
-    # tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is eight bytes
-    # and no structure in them has the target's shape.
+    # test_ifdevices, test_usergroup_hold, test_bind_share, test_accept_refused
+    # and test_handoff (8ff3cc92), test_mcast_loop, test_mcast_epoch,
+    # test_scope_epoch and test_raw_mcast_send, all x86_64-only for the reason
+    # in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is eight
+    # bytes and no structure in them has the target's shape.
     # darwin-arm64 registers 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 18)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 19)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
