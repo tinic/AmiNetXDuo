@@ -115,7 +115,7 @@ static BOOL bsd_raw_from_peer(const AmiSocket *sock, const NX_PACKET *packet,
 
             if (nxif == NX_NULL ||
                 (ULONG)nxif->nx_interface_index + 1UL !=
-                    sock->as_PeerScopeId)
+                    bsd_peer_scope(sock))
                 return FALSE;
         }
 
@@ -602,6 +602,8 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     ULONG         tos      = (ULONG)(sock->as_Tos & 0xFF);
 #ifdef AMINETXDUO_MULTICAST
     BsdMcastLoopGuard mcast_loop;
+    LONG              mcast_if;
+    UINT              mcast_ttl;
 #endif
 
     /* RFC 3542 6.3, over IPV6_UNICAST_HOPS. IPv6 only, which is where
@@ -667,6 +669,15 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         handed->nx_packet_length      -= ihl;
     }
 
+#ifdef AMINETXDUO_MULTICAST
+    /* IP_MULTICAST_TTL and IP_MULTICAST_IF, as UDP applies them. With
+       IP_HDRINCL the header's TTL stands. */
+    mcast_ttl = ttl;
+    mcast_if  = bsd_mcast_send_choice(sock, &dest, &mcast_ttl);
+    if (!sock->as_HdrIncl)
+        ttl = mcast_ttl;
+#endif
+
     if (src != NULL && src->cs_Have)
     {
         LONG index = bsd_cmsg_source_index(ip, src, FALSE);
@@ -692,6 +703,14 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                                   ? AMI_ENETUNREACH
                                   : AMI_EADDRNOTAVAIL);
     }
+
+#ifdef AMINETXDUO_MULTICAST
+    if (mcast_if >= 0)
+    {
+        source    = BSD_SOURCE_INDEX;
+        src_index = (UINT)mcast_if;
+    }
+#endif
 
     if (source != BSD_SOURCE_INDEX && dest.nxd_ip_version == NX_IP_VERSION_V4)
     {

@@ -155,7 +155,7 @@ static LONG s_accept(LONG s)
 
     __asm __volatile ("jsr a6@(-48:W)" : "=r"(r), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r"(a6), "r"(d0), "r"(a0), "r"(a1)
-                      : "cc", "memory");
+                      : "d1", "cc", "memory");
     return r;
 }
 
@@ -265,7 +265,7 @@ static LONG s_close(LONG s)
 
     __asm __volatile ("jsr a6@(-120:W)" : "=r"(r)
                       : "r"(a6), "r"(d0)
-                      : "a0", "a1", "cc", "memory");
+                      : "d1", "a0", "a1", "cc", "memory");
     return r;
 }
 

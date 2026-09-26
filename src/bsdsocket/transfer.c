@@ -996,7 +996,7 @@ BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
               src->nxd_ip_address.v6[1] == 0UL &&
               src->nxd_ip_address.v6[2] == 0UL &&
               src->nxd_ip_address.v6[3] == 1UL))
-            return (src_scope == sock->as_PeerScopeId) ? TRUE : FALSE;
+            return (src_scope == bsd_peer_scope(sock)) ? TRUE : FALSE;
 
         return TRUE;
     }
@@ -2196,7 +2196,7 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
 
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
                         &sock->as_PeerAddr, sock->as_PeerPort,
-                        sock->as_PeerScopeId, &sock->as_CmsgSticky);
+                        bsd_peer_scope(sock), &sock->as_CmsgSticky);
 }
 
 LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
@@ -2243,7 +2243,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
 
             addr  = sock->as_PeerAddr;
             port  = sock->as_PeerPort;
-            scope = sock->as_PeerScopeId;
+            scope = bsd_peer_scope(sock);
         }
         else if (bsd_sockaddr_get(SocketBase, to, tolen, &addr, &port,
                                   &scope) != 0)
@@ -2370,7 +2370,7 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
 
             addr  = sock->as_PeerAddr;
             port  = sock->as_PeerPort;
-            scope = sock->as_PeerScopeId;
+            scope = bsd_peer_scope(sock);
         }
         else if (bsd_sockaddr_get(SocketBase,
                                   (const struct sockaddr *)msg->msg_name,

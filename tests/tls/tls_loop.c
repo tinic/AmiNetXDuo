@@ -266,9 +266,11 @@ static LONG bsd_wait_select(struct Library *base, LONG nfds, APTR readfds,
     register LONG            res __asm("d0");
     register LONG _clob_a0 __asm("a0");
     register LONG _clob_a1 __asm("a1");
+    register LONG _clob_d1 __asm("d1");
 
     __asm __volatile ("jsr a6@(-126:W)"
-                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
+                      : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1),
+                        "=r" (_clob_d1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
                         "r" (a3), "r" (d1)
                       : "cc", "memory");

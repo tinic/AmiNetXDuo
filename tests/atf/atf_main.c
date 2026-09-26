@@ -60,9 +60,11 @@ static VOID atfc_set_errno_ptr(APTR ptr, LONG size)
     register LONG            d0 __asm("d0") = size;
     register LONG            _d1 __asm("d1");
     register LONG            _a1 __asm("a1");
+    register LONG            _a0 __asm("a0");
+    register LONG            _d0 __asm("d0");
 
     __asm __volatile ("jsr a6@(-168:W)"
-                      : "=r" (_d1), "=r" (_a1)
+                      : "=r" (_d1), "=r" (_a1), "=r" (_a0), "=r" (_d0)
                       : "r" (a6), "r" (a0), "r" (d0)
                       : "cc", "memory");
 }

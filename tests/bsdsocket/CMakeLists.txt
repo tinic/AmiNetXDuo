@@ -65,6 +65,46 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_link_options(test_mcast_epoch PRIVATE -Wl,--gc-sections)
     add_test(NAME mcast_slot_epoch COMMAND test_mcast_epoch)
 
+    # socket.c and cmsg.c: a stored IPv6 zone or IPV6_PKTINFO ifindex must not
+    # name the next occupant of a detached slot (#51).
+    add_executable(test_scope_epoch host/test_scope_epoch_host.c)
+    target_include_directories(test_scope_epoch PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+    target_compile_options(test_scope_epoch PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections -fdata-sections -Wno-pointer-to-int-cast)
+    target_compile_definitions(test_scope_epoch PRIVATE
+        AMINETXDUO_MULTICAST AMINETXDUO_IPV6 AMINETXDUO_CMSG
+        NX_INCLUDE_USER_DEFINE_FILE)
+    target_link_options(test_scope_epoch PRIVATE -Wl,--gc-sections)
+    add_test(NAME scope_slot_epoch COMMAND test_scope_epoch)
+
+    # raw.c's IPv4 send to a group: IP_MULTICAST_TTL and IP_MULTICAST_IF (#49).
+    add_executable(test_raw_mcast_send host/test_raw_mcast_send_host.c)
+    target_include_directories(test_raw_mcast_send PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+    target_compile_options(test_raw_mcast_send PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections -fdata-sections)
+    target_compile_definitions(test_raw_mcast_send PRIVATE
+        AMINETXDUO_MULTICAST NX_INCLUDE_USER_DEFINE_FILE)
+    target_link_options(test_raw_mcast_send PRIVATE -Wl,--gc-sections)
+    add_test(NAME raw_mcast_send COMMAND test_raw_mcast_send)
+
     add_executable(test_inet host/test_inet_host.c
                              "${CMAKE_SOURCE_DIR}/src/bsdsocket/inet.c")
 
