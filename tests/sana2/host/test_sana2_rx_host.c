@@ -17,6 +17,14 @@
 static unsigned long h_checks;
 static unsigned long h_failures;
 
+/* The device-name policy is exercised by test_sana2_device; this target
+ * links only sana2_rx.c and supplies the no-override case. */
+UWORD ami_sana2_default_ip_reads(const char *device)
+{
+    (VOID)device;
+    return 0;
+}
+
 static void h_check(int ok, const char *what)
 {
     h_checks++;
