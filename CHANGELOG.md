@@ -9,6 +9,24 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A blocking `accept()` keeps waiting after rejecting a connection delivered
+  to the wrong bound address or to an IPv6-only listener; it no longer returns
+  `EWOULDBLOCK` until the socket is nonblocking or its receive timeout expires.
+- Raw IPv4 multicast sends honor `IP_MULTICAST_TTL` and `IP_MULTICAST_IF`.
+  A per-packet `IP_PKTINFO` interface takes precedence over the socket-wide
+  multicast interface, matching UDP sends.
+- The built-in mDNS responder remains the first unicast recipient on a shared
+  UDP port 5353 regardless of bind order. A failed multicast copy increments
+  the affected sibling socket's drop counter.
+- Stored IPv6 scope IDs and `IPV6_PKTINFO` interface choices expire when an
+  interface slot is removed and reused; they cannot silently name the new
+  interface.
+- `NSCMD_DEVICEQUERY` also accepts a plain `IOStdReq` whose `mn_Length` is
+  zero, without reading SANA-II-only fields beyond that request.
+- The last socket-library opener drains parked closing sockets even when an
+  asynchronous worker still holds the stack. If NetX refuses IP deletion,
+  its live stack memory is retained instead of being freed under the IP thread.
+
 ## 1.0.0-beta6
 
 - `InstallNetProbe` reads a PC Card's manufacturer ID with the card handle it just claimed.
