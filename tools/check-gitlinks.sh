@@ -5,9 +5,10 @@
 #   tools/check-gitlinks.sh [commit]
 #   AMINETXDUO_GITLINKS_REQUIRE_FULL=1 tools/check-gitlinks.sh [commit]
 #
-# Nothing validates a gitlink at the moment it is written, so five things can be
-# wrong and all five are checked: the working tree is stale (`git submodule
-# status` prints `+`); no such object; the object is reachable from no ref, so a
+# Nothing validates a gitlink at the moment it is written, so six things can be
+# wrong and all six are checked: the working tree is stale (`git submodule
+# status` prints `+`) or has modified tracked files; no such object; the object
+# is reachable from no ref, so a
 # fresh clone cannot fetch it; the pin is not on the first-parent chain of the
 # branch .gitmodules names nor on a tag (asked only of a submodule with history
 # to answer with); and the bump went backwards, so that pin silently reverts
@@ -232,12 +233,33 @@ fi
 
 if [ "$COMMIT" = HEAD ]; then
     git submodule status --recursive > "$WORK/status" || true
+    worktree_bad=0
     if grep -q '^[+U]' "$WORK/status"; then
         while read -r sha path _; do
             echo "worktree_$path=STALE checked_out=${sha#?}"
         done < <(grep '^[+U]' "$WORK/status")
+        worktree_bad=1
+    fi
+
+    # A matching gitlink does not mean the checked-out source is clean. A
+    # release build uses the worktree, so inspect tracked edits in each
+    # initialized submodule (including nested ones). Recursion checks nested
+    # gitlinks separately; untracked build artefacts are intentionally allowed.
+    if ! git submodule foreach --quiet --recursive '
+        if ! git diff --quiet --ignore-submodules=all HEAD --; then
+            echo "worktree_$displaypath=DIRTY_TRACKED"
+        fi
+    ' > "$WORK/dirty"; then
+        echo "gitlinks_worktree=FAILED reason=submodule_inspection_error" >&2
+        worktree_bad=1
+    fi
+    if [ -s "$WORK/dirty" ]; then
+        cat "$WORK/dirty"
+        worktree_bad=1
+    fi
+
+    if [ "$worktree_bad" = 1 ]; then
         echo "gitlinks_worktree=FAILED"
-        echo "  run: git submodule update --init --recursive" >&2
         rc=1
     else
         echo "gitlinks_worktree=clean entries=$(wc -l < "$WORK/status" | tr -d ' ')"
