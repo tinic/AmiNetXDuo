@@ -205,8 +205,10 @@ def test_mode_is_announced():
         check(False, "cannot upgrade (got %s)" % s.status)
         return
 
+    # A reattached Shell already printed its prompt to the last viewer.
+    s.keys("\n")
     s.pump(WS_WAIT, want=">")
-    check(b">" in s.out, "the Shell still prints a prompt (got %r)"
+    check(b">" in s.out, "the Shell prints a prompt on Enter (got %r)"
           % s.out[-80:])
     check(s.said("mode cooked"),
           "the server says `mode cooked` when the session opens (heard %r)"
@@ -698,6 +700,7 @@ def test_takeover():
         time.sleep(1.0)
         s = Session()
         if s.status == 101:
+            s.keys("\n")
             got = s.pump(WS_WAIT, want=">")
             s.close()
             break
