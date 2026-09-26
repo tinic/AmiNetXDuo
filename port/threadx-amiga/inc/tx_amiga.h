@@ -166,6 +166,13 @@ UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation);
 
+/* Hand the run signal to the caller and make the adoption evictable while
+   dormant.  The caller then frees it, exactly once, when a resume finds the
+   adoption evicted: tx_amiga_adopt_signal_free().  An adoption never handed
+   its signal is never evicted, so no other suspend user can leak one.  */
+ULONG   tx_amiga_adopt_signal(TX_THREAD *thread_ptr);
+VOID    tx_amiga_adopt_signal_free(ULONG sigmask);
+
 
 /* Deregister a thread adopted by some other Task and give its slot back.  The
    Exec signal is NOT recovered -- only its owner may FreeSignal() it -- so

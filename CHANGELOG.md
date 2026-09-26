@@ -28,6 +28,9 @@ version at the top when it merges.
   its live stack memory is retained instead of being freed under the IP thread.
 - Two programs closing the socket library at the same time no longer both
   skip draining parked closing sockets; the last one to close drains them.
+- A sixteenth program with `bsdsocket.library` open no longer waits forever
+  for another to close it: an idle opener's stack context is reclaimed and
+  rebuilt on its next call.
 
 ## 1.0.0-beta6
 

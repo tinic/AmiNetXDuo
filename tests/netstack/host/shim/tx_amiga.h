@@ -29,6 +29,8 @@ UINT    tx_amiga_kernel_stop(VOID);
 UINT    tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
                               CHAR *name, UINT priority, UINT reserved);
 UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation);
+ULONG   tx_amiga_adopt_signal(TX_THREAD *thread_ptr);
+VOID    tx_amiga_adopt_signal_free(ULONG sigmask);
 UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_try_resume(TX_THREAD *thread_ptr);
