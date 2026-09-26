@@ -7,6 +7,9 @@
  * and delivers a unicast datagram to exactly one.  The BSD layer sets the flag
  * from ASF_REUSEPORT (options.c -> socket.c), and the built-in mDNS responder
  * sets it on its own 5353 socket, so this test drives the core directly.
+ * The #63 follow-ups close it: a failed sibling clone is the sibling's drop
+ * (N3), clones are bounded by each sharer's queue maximum (N4), and a
+ * SHARE_FIRST socket stays first match for unicast (N2).
  *
  * The topology is built by hand out of an NX_IP; ThreadX primitives and the
  * one packet-pool cleanup path are stubbed exactly as test_tcp_source_connect
@@ -197,6 +200,16 @@ static int            h_sibling_callback_deleted_other;
    rebound socket's callback must stay silent).  */
 static int            h_sibling_callback_rebound_other;
 
+/* #63 N3/N4: a private pool, the packets drained out of it, and the
+   pool-sized figures the N4 accounting compares against.  */
+#define H_HELD_MAX      64
+static NX_PACKET_POOL h_pool2;
+static ULONG          h_pool2_memory[(24 * 384) / sizeof(ULONG)];
+static NX_PACKET     *h_held[H_HELD_MAX];
+static UINT           h_held_count;
+static ULONG          h_pool_total;
+static UINT           h_i;
+
 /* The port-table bucket a 5353 bind lands in. */
 static UINT h_index(void)
 {
@@ -252,6 +265,46 @@ static void h_packet_arm_to(NX_PACKET *packet_ptr, UCHAR *bytes, ULONG dest_ip)
     packet_ptr -> nx_packet_length        = sizeof(NX_UDP_HEADER) + sizeof(payload);
     packet_ptr -> nx_packet_pool_owner    = &h_pool;
     packet_ptr -> nx_packet_ip_version    = NX_IP_VERSION_V4;
+}
+
+/* #63 N4: receive one datagram whose buffer comes from h_pool2, as the
+   driver's would from the stack's RX pool, so the queue overflow and the
+   read below return it to a real pool.  */
+static UINT h_pool_datagram(ULONG dest_ip)
+{
+    NX_PACKET *p;
+    UCHAR      bytes[64];
+    ULONG      length;
+
+    if (_nx_packet_allocate(&h_pool2, &p, 0, NX_NO_WAIT) != NX_SUCCESS)
+        return NX_NO_PACKET;
+
+    h_packet_arm_to(&h_fill_packet, bytes, dest_ip);
+    length = (ULONG)(h_fill_packet.nx_packet_append_ptr - bytes);
+    memcpy(p -> nx_packet_prepend_ptr, bytes, length);
+
+    p -> nx_packet_ip_header   = p -> nx_packet_prepend_ptr;
+    p -> nx_packet_append_ptr  = p -> nx_packet_prepend_ptr + length;
+    p -> nx_packet_prepend_ptr = p -> nx_packet_prepend_ptr + sizeof(NX_IPV4_HEADER);
+    p -> nx_packet_length      = h_fill_packet.nx_packet_length;
+    p -> nx_packet_ip_version  = NX_IP_VERSION_V4;
+
+    _nx_udp_packet_receive(&h_ip, p);
+    return NX_SUCCESS;
+}
+
+/* #63 N4: read every queued datagram off a socket, as a reader would. */
+static void h_queue_drain(NX_UDP_SOCKET *socket_ptr)
+{
+    NX_PACKET *p;
+
+    while ((p = socket_ptr -> nx_udp_socket_receive_head) != NX_NULL)
+    {
+        socket_ptr -> nx_udp_socket_receive_head = p -> nx_packet_queue_next;
+        socket_ptr -> nx_udp_socket_receive_count--;
+        (VOID)_nx_packet_release(p);
+    }
+    socket_ptr -> nx_udp_socket_receive_tail = NX_NULL;
 }
 
 /* Build one IPv4/UDP datagram into the shared h_packet. */
@@ -837,6 +890,180 @@ int main(void)
             "regression 11: the sibling callback ran");
 
     _tx_thread_current_ptr = NX_NULL;
+
+    /* ---- #63 N3: a failed sibling clone is the sibling's drop ----------- */
+
+    /* The clone pool is empty, so the fan-out cannot copy the datagram for B.
+       The loss is B's: its own packets_dropped counts it, as every other drop
+       on the shared path already does, alongside the IP-wide counter.  A
+       private pool keeps the packets the earlier cases leaked out of this.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N3: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N3: B co-binds");
+
+    if (_nx_packet_pool_create(&h_pool2, "host2", 256, h_pool2_memory,
+                               sizeof(h_pool2_memory)) != NX_SUCCESS)
+    {
+        printf("UdpShare: no second packet pool\n");
+        return 1;
+    }
+
+    h_held_count = 0;
+    while ((h_held_count < H_HELD_MAX) &&
+           (_nx_packet_allocate(&h_pool2, &h_held[h_held_count], 0,
+                                NX_NO_WAIT) == NX_SUCCESS))
+    {
+        h_held_count++;
+    }
+    h_check(h_pool2.nx_packet_pool_available == 0, "N3: the clone pool is empty");
+
+    h_ip.nx_ip_udp_receive_packets_dropped = 0;
+    h_packet_arm(0xE0000001UL);
+    h_packet.nx_packet_pool_owner = &h_pool2;
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "N3: the primary still got the datagram");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 0,
+            "N3: the sibling got no clone");
+    h_check(h_ip.nx_ip_udp_receive_packets_dropped == 1,
+            "N3: the IP-wide drop counter counts it once");
+    h_check(h_socket_b.nx_udp_socket_packets_dropped == 1,
+            "N3: the sibling's own drop counter counts it");
+    h_check(h_socket_a.nx_udp_socket_packets_dropped == 0,
+            "N3: the primary's drop counter does not");
+
+    while (h_held_count)
+        (VOID)_nx_packet_release(h_held[--h_held_count]);
+
+    /* ---- #63 N4: clones from the RX pool are bounded per sharer --------- */
+
+    /* A clone is allocated from the original datagram's pool, which is the
+       one pool the stack receives into (netstack.c ns_Pool; there is no other
+       RX pool to draw from).  A sharer holds a clone exactly as a lone socket
+       holds a datagram, so the cost is bounded by that sharer's own queue
+       maximum: its overflow releases the oldest clone back to the pool.
+       Three sharers, queue maximum 2 on the siblings; after 6 multicasts
+       from the pool, the siblings hold 2 each, the primary (queue maximum 8)
+       holds its 6 originals, and a read of every queue returns the pool to
+       full.  No clone leaks and no sibling holds more than its maximum.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_arm(&h_socket_c);
+    h_socket_a.nx_udp_socket_share = NX_TRUE;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_c.nx_udp_socket_share = NX_TRUE;
+    h_socket_a.nx_udp_socket_queue_maximum = 8;
+    h_socket_b.nx_udp_socket_queue_maximum = 2;
+    h_socket_c.nx_udp_socket_queue_maximum = 2;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N4: A binds");
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N4: B co-binds");
+    h_check(_nx_udp_socket_bind(&h_socket_c, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N4: C co-binds");
+
+    h_pool_total = h_pool2.nx_packet_pool_total;
+    h_check(h_pool2.nx_packet_pool_available == h_pool_total,
+            "N4: the pool starts full");
+    h_check(h_pool_total >= 10, "N4: the pool holds 6 originals + 4 clones");
+
+    for (h_i = 0; h_i < 6; h_i++)
+    {
+        if (h_pool_datagram(0xE0000001UL) != NX_SUCCESS)
+            break;
+    }
+    h_check(h_i == 6, "N4: six multicasts were received from the pool");
+    h_check(h_socket_a.nx_udp_socket_receive_count == 6,
+            "N4: the primary holds its six originals");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 2 &&
+            h_socket_c.nx_udp_socket_receive_count == 2,
+            "N4: each sibling holds no more than its queue maximum");
+    h_check(h_socket_b.nx_udp_socket_packets_dropped == 4 &&
+            h_socket_c.nx_udp_socket_packets_dropped == 4,
+            "N4: each sibling's overflow is its own drop");
+    h_check(h_pool2.nx_packet_pool_available == h_pool_total - 10,
+            "N4: the pool lends exactly originals + held clones");
+
+    h_queue_drain(&h_socket_a);
+    h_queue_drain(&h_socket_b);
+    h_queue_drain(&h_socket_c);
+    h_check(h_pool2.nx_packet_pool_available == h_pool_total,
+            "N4: reading every queue returns the pool to full");
+
+    /* ---- #63 N2: the responder stays first-match on 5353 ---------------- */
+
+    /* A BSD SO_REUSEPORT socket (B) binds 5353 before the built-in responder
+       (A) exists; the responder is created lazily, when an interface first
+       asks for mDNS (netstack_mdns.c ami_ns_mdns_create), so this is an
+       ordinary order.  A unicast datagram goes to the first same-port socket
+       in the bound list, and must reach the responder: QU answers and
+       one-shot queries are its traffic.  The responder binds with
+       NX_UDP_SOCKET_SHARE_FIRST, which puts it at the head of the list.  A
+       later sharer (C) must not displace it, and a multicast still reaches
+       all three.  */
+    h_ip.nx_ip_udp_port_table[h_index()] = NX_NULL;
+    h_socket_arm(&h_socket_a);
+    h_socket_arm(&h_socket_b);
+    h_socket_arm(&h_socket_c);
+    h_socket_a.nx_udp_socket_share = NX_UDP_SOCKET_SHARE_FIRST;
+    h_socket_b.nx_udp_socket_share = NX_TRUE;
+    h_socket_c.nx_udp_socket_share = NX_TRUE;
+    h_check(_nx_udp_socket_bind(&h_socket_b, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N2: the BSD sharer B binds first");
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N2: the responder A co-binds after it");
+    h_check(_nx_udp_socket_bind(&h_socket_c, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N2: a later BSD sharer C co-binds");
+
+    h_packet_arm(0x0A000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "N2: unicast to 5353 reaches the responder");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 0 &&
+            h_socket_c.nx_udp_socket_receive_count == 0,
+            "N2: unicast to 5353 reaches no BSD sharer");
+
+    h_packet_arm_to(&h_fill_packet, h_fill_bytes, 0xE00000FBUL);
+    _nx_udp_packet_receive(&h_ip, &h_fill_packet);
+    h_check(h_socket_a.nx_udp_socket_receive_count == 2 &&
+            h_socket_b.nx_udp_socket_receive_count == 1 &&
+            h_socket_c.nx_udp_socket_receive_count == 1,
+            "N2: multicast to 5353 still reaches all three");
+
+    /* The responder leaves (mDNS off) and comes back (mDNS on): nx_mdns_delete
+       then nx_mdns_create, an unbind and a fresh bind behind both sharers.  */
+    h_socket_a.nx_udp_socket_receive_count = 0;
+    h_socket_a.nx_udp_socket_receive_head = NX_NULL;
+    h_socket_a.nx_udp_socket_receive_tail = NX_NULL;
+    h_check(_nx_udp_socket_unbind(&h_socket_a) == NX_SUCCESS,
+            "N2: the responder unbinds");
+    h_socket_arm(&h_socket_a);
+    h_socket_a.nx_udp_socket_share = NX_UDP_SOCKET_SHARE_FIRST;
+    h_check(_nx_udp_socket_bind(&h_socket_a, H_PORT, NX_NO_WAIT) == NX_SUCCESS,
+            "N2: the responder rebinds behind both sharers");
+
+    h_socket_b.nx_udp_socket_receive_count = 0;
+    h_socket_b.nx_udp_socket_receive_head = NX_NULL;
+    h_socket_b.nx_udp_socket_receive_tail = NX_NULL;
+    h_socket_c.nx_udp_socket_receive_count = 0;
+    h_socket_c.nx_udp_socket_receive_head = NX_NULL;
+    h_socket_c.nx_udp_socket_receive_tail = NX_NULL;
+
+    h_packet_arm(0x0A000001UL);
+    _nx_udp_packet_receive(&h_ip, &h_packet);
+    h_check(h_socket_a.nx_udp_socket_receive_count == 1,
+            "N2: after the rebind, unicast reaches the responder");
+    h_check(h_socket_b.nx_udp_socket_receive_count == 0 &&
+            h_socket_c.nx_udp_socket_receive_count == 0,
+            "N2: after the rebind, unicast reaches no BSD sharer");
 
     if (h_failures == 0)
     {
