@@ -350,7 +350,11 @@ host_test_targets() { # builddir
 #      verdicts on the beta5 clobber and on an exg pair (#58)
 #      461 with udp_share: the NetX Duo shared-socket multicast fan-out (#38)
 #      462 with bind_share: bsd_bind's wildcard-only port-share opt-in (#38)
-HOST_TESTS_EXPECTED=462
+#      463 with mcast_share_loopback: the multicast clone reaches the co-bound
+#      sibling, responder-primary topology, on the host (#38)
+#      464 with mcast_share_2sock: the sender-is-primary topology the guest
+#      t_test_udp_reuseport drives, the shape the fan-out must serve (#38)
+HOST_TESTS_EXPECTED=464
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

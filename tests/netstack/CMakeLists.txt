@@ -166,6 +166,95 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME bcast_loopback COMMAND test_bcast_loopback)
 
+    # A multicast datagram this host sends to a group two SO_REUSEPORT sockets
+    # share must loop back and fan out to both (#38 x #47).  Same real send and
+    # loopback path as test_bcast_loopback, plus _nx_ip_packet_receive so the
+    # deferred receive stamps nx_packet_ip_version/header exactly as the guest's
+    # IP thread does -- the metadata the fan-out's is_multicast test reads.
+    set(mcast_share_sources
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_driver_packet_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_header_add.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_checksum_compute.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_checksum_compute.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_packet_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_option_process.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_dispatch_process.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_igmp_multicast_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_enable.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_bind.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_bind_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_free_port_find.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_socket_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_packet_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_receive.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_udp_receive_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_allocate.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_copy.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_append.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_length_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_transmit_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_pool_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_allocate.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_data_append.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_length_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_release.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_enable.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_create.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_bind.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_source_extract.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_send.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_udp_socket_receive.c")
+
+    add_executable(test_mcast_share_loopback
+        host/test_mcast_share_loopback_host.c
+        ${mcast_share_sources})
+
+    # The guest's exact #38 topology: the sender is itself the port-list
+    # primary (binds first), the co-bound second socket is the sibling.
+    add_executable(test_mcast_share_2sock
+        host/test_mcast_share_2sock_host.c
+        ${mcast_share_sources})
+
+    target_compile_options(test_mcast_share_loopback PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_mcast_share_loopback PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_mcast_share_loopback PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME mcast_share_loopback COMMAND test_mcast_share_loopback)
+
+    target_compile_options(test_mcast_share_2sock PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_mcast_share_2sock PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_mcast_share_2sock PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME mcast_share_2sock COMMAND test_mcast_share_2sock)
+
     # Whether a TCP connect leaves from the source it was named, on a machine
     # with two interfaces on one subnet, the topology the lab guest cannot
     # boot, built here out of two filled-in nx_ip_interface[] entries.  Links
