@@ -415,16 +415,18 @@ socklen_t odd_len;
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEADDR, &value);
     (VOID)t_check((BOOL)(value == 0), "and clears again", value);
 
-    /* SO_REUSEPORT is now distinct from SO_REUSEADDR: it is the opt-in UDP
-       port-sharing flag, and moving one leaves the other alone. */
+    /* On this TCP socket SO_REUSEPORT and SO_REUSEADDR are one flag (#62):
+       setting either reads back through both, and clearing either clears
+       both.  On UDP they stay distinct opt-ins to port sharing; the #38
+       sharing arm below covers that. */
     (VOID)t_set_int(fd, SOL_SOCKET, SO_REUSEPORT, 1);
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEPORT, &value);
     (VOID)t_check((BOOL)(value == 1), "SO_REUSEPORT reads back 1", value);
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEADDR, &value);
-    (VOID)t_check((BOOL)(value == 0), "SO_REUSEADDR unaffected by SO_REUSEPORT", value);
-    (VOID)t_set_int(fd, SOL_SOCKET, SO_REUSEPORT, 0);
+    (VOID)t_check((BOOL)(value == 1), "on TCP, SO_REUSEADDR follows SO_REUSEPORT", value);
+    (VOID)t_set_int(fd, SOL_SOCKET, SO_REUSEADDR, 0);
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEPORT, &value);
-    (VOID)t_check((BOOL)(value == 0), "SO_REUSEPORT clears again", value);
+    (VOID)t_check((BOOL)(value == 0), "and clearing SO_REUSEADDR clears SO_REUSEPORT", value);
 
     /* SO_BROADCAST: this stack never asks permission to broadcast. */
     (VOID)t_check((BOOL)(t_set_int(fd, SOL_SOCKET, SO_BROADCAST, 1) == 0),
