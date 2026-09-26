@@ -205,8 +205,10 @@ def test_mode_is_announced():
         check(False, "cannot upgrade (got %s)" % s.status)
         return
 
+    # A reattached Shell already printed its prompt to the last viewer.
+    s.keys("\n")
     s.pump(WS_WAIT, want=">")
-    check(b">" in s.out, "the Shell still prints a prompt (got %r)"
+    check(b">" in s.out, "the Shell prints a prompt on Enter (got %r)"
           % s.out[-80:])
     check(s.said("mode cooked"),
           "the server says `mode cooked` when the session opens (heard %r)"
@@ -693,17 +695,22 @@ def test_takeover():
 
     # And the retry the page makes gets a Shell.
     got = None
+    last = None
     began = time.time()
     while time.time() - began < 20.0:
         time.sleep(1.0)
         s = Session()
+        last = s.status
         if s.status == 101:
+            s.keys("\n")
             got = s.pump(WS_WAIT, want=">")
             s.close()
             break
+    check(last == 101,
+          "the asker's retry upgrades (last status %s)" % last)
     check(got is not None and b">" in got,
           "the asker gets a working Shell on its retry (got %r)"
-          % (got[-80:] if got else None))
+          % (got[-80:] if got is not None else None))
 
     first.close()
     free()
