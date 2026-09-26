@@ -332,18 +332,13 @@ typedef struct NetdevDevice
  * IOSana2Req they opened with -- and ios2_BufferManagement is at offset 84,
  * past its end.  Reading it there invented an opener or lost the real one;
  * Open() and Close() WROTE it there.  Only a length the caller STATED counts:
- * mn_Length 0 is not short (see NETDEV_IO_IS_FULL).
+ * mn_Length 0 is not short: Open, Close and BeginIO take it as a full
+ * IOSana2Req, and SANA-II callers that leave mn_Length unset depend on it.
+ * The NewStyle query refuses it instead (#64); see netdev_nsd_query().
  */
 #define NETDEV_IO_IS_SHORT(io) \
     ((io)->ios2_Req.io_Message.mn_Length != 0 && \
      (io)->ios2_Req.io_Message.mn_Length < sizeof(struct IOSana2Req))
-
-/* Everything else is a full IOSana2Req -- mn_Length 0 included, in every
-   entry point alike: Open, Close, BeginIO and the NewStyle query.  A request
-   built by hand has always been taken as full here, and SANA-II callers that
-   leave mn_Length unset depend on it.  A real 48-byte IOStdReq must say so
-   in mn_Length, as CreateIORequest() does. */
-#define NETDEV_IO_IS_FULL(io) (!NETDEV_IO_IS_SHORT(io))
 
 #ifndef NSCMD_DEVICEQUERY
 #define NSCMD_DEVICEQUERY           0x4000

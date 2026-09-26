@@ -929,30 +929,51 @@ static void i2_nsquery_both_forms(void)
     expect(nsd_answer_untouched(&b), "  and not written");
     expect(replies == 1, "  and the refusal is replied to");
 
-    /* 5. mn_Length 0 is a full request, here as in Open/Close/BeginIO: the
-          SANA-II form answers, and io_Data is never read. */
+    /* 5. mn_Length 0 is refused by the query (#64), neither form read.
+          (a) An unsized FULL request, reused: ios2_Data names a real buffer,
+          and io_Data/io_Length are the stale ios2_SrcAddr/ios2_PacketType. */
     reset();
     nsd_sana(&io, 0);
     nsd_answer_init(&a);
     nsd_answer_init(&b);
     io.ios2_Data       = &b;
     io.ios2_DataLength = NSD_SIZE;
-    std->io_Data       = &a;
-    std->io_Length     = NSD_SIZE;
+    std->io_Data       = &a;              /* the stale ios2_SrcAddr[0..3] */
+    std->io_Length     = 0x0800;          /* the stale ios2_PacketType */
     netdev_nsd_query(&io);
-    expect_u32("a length-less request is answered in the SANA-II form",
-               (unsigned long)b.SizeAvailable, NSD_SIZE);
-    expect(nsd_answer_untouched(&a), "  and its io_Data is not written");
+    expect_u32("a zero-length full request is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and nothing is written at the MAC-derived address");
+    expect(nsd_answer_untouched(&b), "  nor through ios2_Data");
 
+    /* (b) A hand-built 48-byte IOStdReq with no length: io_Data is real and
+          what lies past offset 48 (ios2_DataLength/ios2_Data) is someone
+          else's memory, here a decoy buffer. */
     reset();
     nsd_sana(&io, 0);
+    nsd_answer_init(&a);
+    nsd_answer_init(&b);
+    std->io_Data       = &a;
+    std->io_Length     = NSD_SIZE;
+    io.ios2_Data       = &b;              /* past the 48 bytes */
+    io.ios2_DataLength = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a zero-length 48-byte IOStdReq is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and io_Data is not written");
+    expect(nsd_answer_untouched(&b), "  and nothing past its end is read as a buffer");
+
+    /* (c) A stated length below an IOStdReq: io_Data/io_Length are past it. */
+    reset();
+    nsd_sana(&io, (UWORD)(sizeof(struct IOStdReq) - 2));
     nsd_answer_init(&a);
     std->io_Data   = &a;
     std->io_Length = NSD_SIZE;
     netdev_nsd_query(&io);
-    expect_u32("a length-less request with only io_Data is refused",
+    expect_u32("a request shorter than an IOStdReq is refused",
                (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
     expect(nsd_answer_untouched(&a), "  and io_Data is not written");
+    expect(replies == 1, "  and the refusal is replied to");
 
     /* 6. A short request (a 48-byte IOStdReq): same, and it says so itself. */
     reset();

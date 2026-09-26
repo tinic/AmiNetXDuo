@@ -788,15 +788,21 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
      * wants the NewStyle form from an 88-byte allocation sets mn_Length to
      * sizeof(struct IOStdReq).
      *
-     * A request that STATES a shorter length is an IOStdReq, and offsets 72
-     * and 76 may be past its end: the IOStdReq form only.  mn_Length 0 is a
-     * full request here exactly as in Open, Close and BeginIO; a real 48-byte
-     * IOStdReq must say so in mn_Length.
+     * A request that STATES at least an IOStdReq and less than a full one is
+     * an IOStdReq, and offsets 72 and 76 may be past its end: the IOStdReq
+     * form only.
+     *
+     * Anything else is refused and neither form is read (#64).  mn_Length 0
+     * is a full IOSana2Req left unsized OR a hand-built 48-byte IOStdReq, and
+     * each form's fields are garbage in the other: the first puts a stale MAC
+     * where io_Data is, the second ends before ios2_Data.  Open, Close and
+     * BeginIO keep taking 0 as full; the query alone must not guess.  Below
+     * an IOStdReq, io_Data/io_Length are themselves past the end.
      *
      * The minimum is the size written, not a literal 16: that is the m68k
      * layout, and the host's is wider.
      */
-    if (NETDEV_IO_IS_FULL(io))
+    if (io->ios2_Req.io_Message.mn_Length >= sizeof(struct IOSana2Req))
     {
         if (io->ios2_Data != NULL &&
             io->ios2_DataLength >= sizeof(struct NetdevNSQuery))
@@ -805,7 +811,8 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
             sana = TRUE;
         }
     }
-    else if (std->io_Data != NULL &&
+    else if (io->ios2_Req.io_Message.mn_Length >= sizeof(struct IOStdReq) &&
+             std->io_Data != NULL &&
              std->io_Length >= sizeof(struct NetdevNSQuery))
     {
         q = (struct NetdevNSQuery *)std->io_Data;
