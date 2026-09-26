@@ -472,6 +472,7 @@ typedef struct BsdCmsgSource
 {
     NXD_ADDRESS cs_Source;
     ULONG       cs_Ifindex;     /* 1-based, as if_nametoindex() counts       */
+    ULONG       cs_Epoch;       /* of cs_Ifindex's slot, when it was named   */
     LONG        cs_Hops;        /* 0..255, only when cs_HaveHops             */
     BOOL        cs_Have;
     BOOL        cs_HaveHops;
@@ -514,6 +515,9 @@ typedef struct AmiSocket
      */
     ULONG                   as_LocalScopeId;
     ULONG                   as_PeerScopeId;
+    /* netstack_interface_epoch() of each zone's slot when it was stored. */
+    ULONG                   as_LocalScopeEpoch;
+    ULONG                   as_PeerScopeEpoch;
 
     /* Partially consumed receive packet (a stream read need not drain one). */
     NX_PACKET              *as_RxPending;
@@ -1140,6 +1144,22 @@ typedef enum
 
 BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
                                 ULONG scope, UINT *index);
+
+/* A stored zone is slot+1.  Once that slot is detached (a changed epoch) the
+   number names whatever was attached next, so it reads as BSD_SCOPE_GONE,
+   which no link and no bounds check accepts. */
+#ifdef AMINETXDUO_IPV6
+#define BSD_SCOPE_GONE 0xFFFFFFFFUL
+ULONG bsd_scope_epoch(ULONG scope);
+ULONG bsd_scope_live(ULONG scope, ULONG epoch);
+#else
+#define bsd_scope_epoch(scope)        0UL
+#define bsd_scope_live(scope, epoch)  (scope)
+#endif
+#define bsd_peer_scope(s)  bsd_scope_live((s)->as_PeerScopeId, \
+                                          (s)->as_PeerScopeEpoch)
+#define bsd_local_scope(s) bsd_scope_live((s)->as_LocalScopeId, \
+                                          (s)->as_LocalScopeEpoch)
 
 
 /* The receive step tests/bsdsocket/host/test_transfer_host.c drives directly.
