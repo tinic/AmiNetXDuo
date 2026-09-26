@@ -146,6 +146,12 @@ static struct
     ULONG       live_epoch;
     BOOL        bump_on_enter;
     ULONG       seen_scope;         /* what bsd_source_select() was handed   */
+
+    /* Another task's connect() while the send waits for a packet: the next
+       nx_packet_allocate() moves this socket to a different peer. */
+    AmiSocket  *reconnect;
+    NXD_ADDRESS sent_addr;          /* where the last UDP datagram went      */
+    UINT        sent_port;
 } h;
 
 static void h_reset(void)
@@ -588,6 +594,14 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
     status = h_plan(h.alloc_plan, h.alloc_planned, h.allocs);
     h.allocs++;
 
+    if (h.reconnect != NULL)
+    {
+        h.reconnect->as_PeerAddr.nxd_ip_address.v6[3] = 2UL;
+        h.reconnect->as_PeerPort    = 54;
+        h.reconnect->as_PeerScopeId = 3UL;
+        h.reconnect                 = NULL;
+    }
+
     if (status != NX_SUCCESS)
         return status;
 
@@ -768,10 +782,10 @@ UINT _nxde_udp_socket_send(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
     HPacket *p = h_from_nx(*packet_ptr);
 
     (VOID)socket_ptr;
-    (VOID)ip_address;
-    (VOID)port;
 
     h.sends++;
+    h.sent_addr = *ip_address;
+    h.sent_port = port;
 
     if (p != NULL)
     {
@@ -862,13 +876,15 @@ UINT _nxe_udp_socket_source_send(NX_UDP_SOCKET *socket_ptr,
 
 /* mcast.c.  Every send here is unicast, so the prepare/finish pair is a
    no-op; what a multicast send does with the interface hop limit is mcast.c's
-   claim and is not made here. */
+   claim and is not made here.  -1 is mcast.c's "not multicast": 0 would
+   route every send down the IPv4 multicast source path, which reads only
+   addr->nxd_ip_address.v4. */
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 {
     (VOID)sock;
     (VOID)addr;
 
-    return 0;
+    return -1;
 }
 
 /* This fixture sends only unicast packets; the multicast loop guard itself is
@@ -896,7 +912,7 @@ LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
 
     *saved = 0UL;
 
-    return 0;
+    return -1;
 }
 
 VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved)
@@ -1525,6 +1541,18 @@ static void t_peer_scope_in_bracket(void)
         CHECK(h_send_shape(i, buf) == -1 &&
                   h.errno_value == AMI_EADDRNOTAVAIL && h.sends == 0 &&
                   h.allocs == 0 && h.nx_enters == h.nx_leaves, what);
+
+        /* connect() to fe80::2%3 port 54 while this send waits. */
+        h_reset();
+        h.reconnect = h_udp6_connected(1);
+        snprintf(what, sizeof(what),
+                 "%s: a connect() during the wait does not redirect it",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == 4 && h.sends == 1 &&
+                  h.sent_addr.nxd_ip_version == NX_IP_VERSION_V6 &&
+                  h.sent_addr.nxd_ip_address.v6[0] == 0xFE800000UL &&
+                  h.sent_addr.nxd_ip_address.v6[3] == 1UL &&
+                  h.sent_port == 53 && h.seen_scope == 2UL, what);
     }
 }
 #endif
