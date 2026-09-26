@@ -788,14 +788,24 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
      * wants the NewStyle form from an 88-byte allocation sets mn_Length to
      * sizeof(struct IOStdReq).
      *
-     * Any other request is an IOStdReq, and offsets 72 and 76 may be past
-     * its end: the IOStdReq form only.  That includes mn_Length 0 (#64),
-     * unlike Open, Close and BeginIO: a hand-built 48-byte IOStdReq with no
-     * length is the NewStyle spec's form, and the only SANA-II-form sender,
-     * mcastfilter, sets mn_Length.
+     * A request that STATES at least an IOStdReq and less than a full one is
+     * an IOStdReq, and offsets 72 and 76 may be past its end: the IOStdReq
+     * form only.
+     *
+     * Anything else is refused and neither form is read (#64).  mn_Length 0
+     * is a full IOSana2Req left unsized OR a hand-built 48-byte IOStdReq, and
+     * each form's fields are garbage in the other: the first puts a stale MAC
+     * where io_Data is, the second ends before ios2_Data.  Open, Close and
+     * BeginIO keep taking 0 as full; the query alone must not guess.  Below
+     * an IOStdReq, io_Data/io_Length are themselves past the end.
      *
      * The minimum is the size written, not a literal 16: that is the m68k
      * layout, and the host's is wider.
+     *
+     * No reading here makes an unsized 48-byte request safe to send at all:
+     * it has to be opened first, and OpenDevice and CloseDevice take it as a
+     * full IOSana2Req and read and write ios2_BufferManagement at offset 84,
+     * past its end (netdev_device.c).  That is inherent in an unsized request.
      */
     if (io->ios2_Req.io_Message.mn_Length >= sizeof(struct IOSana2Req))
     {
