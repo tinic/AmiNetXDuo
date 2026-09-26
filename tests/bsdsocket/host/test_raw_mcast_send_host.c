@@ -42,9 +42,8 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
 LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
 {
     (VOID)ip;
-    (VOID)src;
     (VOID)v6;
-    return -1;
+    return (src->cs_Ifindex == 1) ? 0 : -1;
 }
 
 LONG bsd_fail(struct AmiSocketBase *base, LONG code)
@@ -154,7 +153,8 @@ static NX_IP                h_ip;
 static NX_PACKET            h_packet;
 static UCHAR                h_data[64];
 
-static LONG send_to(AmiSocket *sock, ULONG dest, ULONG len)
+static LONG send_to_with_source(AmiSocket *sock, ULONG dest, ULONG len,
+                                const BsdCmsgSource *src)
 {
     NXD_ADDRESS addr;
 
@@ -168,7 +168,12 @@ static LONG send_to(AmiSocket *sock, ULONG dest, ULONG len)
     h_sent = 0;
     h_index = 99;
     h_ttl = 0;
-    return bsd_raw_send_packet(&h_base, sock, &h_packet, &addr, 0UL, NULL);
+    return bsd_raw_send_packet(&h_base, sock, &h_packet, &addr, 0UL, src);
+}
+
+static LONG send_to(AmiSocket *sock, ULONG dest, ULONG len)
+{
+    return send_to_with_source(sock, dest, len, NULL);
 }
 
 int main(void)
@@ -205,6 +210,19 @@ int main(void)
     check(send_to(&sock, group, 8) == 0 && h_sent == 1, "optioned send");
     check(h_ttl == 7, "group send uses IP_MULTICAST_TTL");
     check(h_index == 1, "group send leaves by IP_MULTICAST_IF");
+
+    /* A packet's IP_PKTINFO interface overrides the socket-wide choice. */
+    {
+        BsdCmsgSource src;
+
+        memset(&src, 0, sizeof src);
+        src.cs_Have = TRUE;
+        src.cs_Ifindex = 1; /* one-based index for interface 0 */
+        check(send_to_with_source(&sock, group, 8, &src) == 0 && h_sent == 1,
+              "packet-selected multicast send");
+        check(h_index == 0, "IP_PKTINFO overrides IP_MULTICAST_IF");
+        check(h_ttl == 7, "IP_PKTINFO leaves multicast TTL unchanged");
+    }
 
     /* Unicast ignores both multicast options. */
     check(send_to(&sock, 0xc0a80105UL, 8) == 0 && h_ttl == 64 && h_index == 0,
