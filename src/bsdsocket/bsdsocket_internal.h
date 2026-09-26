@@ -417,6 +417,15 @@ static inline NX_PACKET_POOL *bsd_stack_pool(const struct AmiSocketBase *base)
     return master->sb_StackPool;
 }
 
+/* The closing opener is the last one that is not an async worker's transient
+   hold: parked closing sockets are drained now, since nothing else will
+   before the worker's release tears the stack down (#53). */
+static inline BOOL bsd_stack_last_opener(const struct AmiSocketBase *master)
+{
+    return master->sb_StackRefs >= master->sb_TransientStackRefs &&
+           master->sb_StackRefs - master->sb_TransientStackRefs <= 1;
+}
+
 #define ASF_TCP         (1UL <<  0)
 #define ASF_UDP         (1UL <<  1)
 #define ASF_NONBLOCK    (1UL <<  2)

@@ -128,6 +128,8 @@ typedef struct NetStackHostEnv
     /* ---- NetX Duo ------------------------------------------------------ */
 
     UINT    ip_create_status;
+    ULONG   ip_deletes;
+    UINT    ip_delete_status;       /* what the last nx_ip_delete() answered */
     ULONG   iface_attaches;
     ULONG   iface_detaches;
     ULONG   iface_address;          /* what nx_ip_interface_address_get() has */
@@ -145,6 +147,8 @@ typedef struct NetStackHostEnv
     ULONG   forbids;                /* Forbid() minus Permit(), must end at 0 */
     LONG    forbid_depth;
     BOOL    attempt_semaphore_fails; /* the contended-lock arm of can_unload  */
+    APTR    watch_block;            /* FreeMem() of this block is recorded   */
+    BOOL    watch_freed;
 } NetStackHostEnv;
 
 extern NetStackHostEnv nsh;
