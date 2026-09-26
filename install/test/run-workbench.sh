@@ -12,6 +12,7 @@
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
+#                                 [-s yes|invalid]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -29,6 +30,9 @@
 # Options which answer an Installer page need -l AVERAGE or EXPERT.  -H also
 # needs AMINETXDUO_PEER, a THIRD machine (this host's frames do not come back
 # round to its own pcap), or it exits 3.
+# -s answers the SNTP-at-boot question yes and types 0.pool.ntp.org as the
+# server; `-s invalid' types a refused name first.  Without -s the question
+# takes its default, no, and S:Network-Startup must carry no sntp line.
 # -a takes an archive as given; without it a release-only defect cannot show.
 # Exit: 0 pass, 1 a failure under test, 2 an ingredient is missing (Workbench
 # 3.1 ADFs, Kickstart, Commodore's Installer, the card's driver, xdftool, lha
@@ -69,8 +73,9 @@ INVALID_NAMES=0
 INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
+SNTP_MODE=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzW" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -101,13 +106,15 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzW" opt; do
         I) INVALID_NAMES=1; EXPERT_CUSTOM=1; CONFIG_ONLY=1 ;;
         z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
         W) SPACES=1 ;;
+        s) SNTP_MODE="$OPTARG" ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both]" \
-                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z]" >&2
+                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z]" \
+                "[-s yes|invalid]" >&2
            exit 2 ;;
     esac
 done
@@ -156,6 +163,20 @@ if [ "$EXPERT_CUSTOM" = "1" ] && [ "$LEVEL" != "EXPERT" ]; then
 fi
 if [ "$NO_BOOT" = "1" ] && [ "$TERMINAL" = "1" ]; then
     echo "-B and -H conflict: httpd-at-boot is not asked when boot networking" >&2
+    echo "is disabled." >&2
+    exit 2
+fi
+case "$SNTP_MODE" in
+    ""|yes) ;;
+    invalid) CONFIG_ONLY=1 ;;
+    *) echo "unknown SNTP mode: $SNTP_MODE" >&2; exit 2 ;;
+esac
+if [ -n "$SNTP_MODE" ] && [ "$LEVEL" = "NOVICE" ]; then
+    echo "-s needs -l AVERAGE or -l EXPERT: Novice draws no questions" >&2
+    exit 2
+fi
+if [ -n "$SNTP_MODE" ] && [ "$NO_BOOT" = "1" ]; then
+    echo "-B and -s conflict: SNTP at boot is not asked when boot networking" >&2
     echo "is disabled." >&2
     exit 2
 fi
@@ -266,7 +287,8 @@ if { [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; } &&
    { [ "$DRAWER" != 0 ] || [ -n "$TRANSITION" ] || [ -n "$FOREIGN_MODE" ] ||
      [ -n "$EMU68_FIXTURE" ] || [ "$RERUN" != 0 ] || [ "$RECONFIGURE" != 0 ] ||
      [ "$STATIC" != 0 ] || [ "$NO_DRIVERS" != 0 ] || [ "$NO_BOOT" != 0 ] ||
-     [ "$TERMINAL" != 0 ] || [ "$EXPERT_CUSTOM" != 0 ]; }; then
+     [ "$TERMINAL" != 0 ] || [ "$EXPERT_CUSTOM" != 0 ] ||
+     [ -n "$SNTP_MODE" ]; }; then
     echo "cancellation/corrupt-archive scenarios cannot be combined with another fixture" >&2
     exit 2
 fi
@@ -871,6 +893,25 @@ if [ "$TERMINAL" = "1" ]; then
         ANSWER_LINES+=("$answer_run|BOOL|Yes, serve them")
     done
 fi
+# SNTP is asked only on a run that writes S:Network-Startup.  Run 1 always
+# does (with the boot start on); a later run does only on -U.  Every other
+# later run keeps the file, so there the page must not be drawn at all, and
+# ABSENT fails the driver if it is -- whether or not -s was given.
+EXPECTED_NTP=""
+[ -z "$SNTP_MODE" ] || EXPECTED_NTP=0.pool.ntp.org
+for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
+    if [ "$answer_run" -gt 1 ] && [ "$RECONFIGURE" = "0" ]; then
+        ANSWER_LINES+=("$answer_run|ABSENT|Yes, set the clock")
+    elif [ -n "$SNTP_MODE" ]; then
+        ANSWER_LINES+=("$answer_run|BOOL|Yes, set the clock")
+        if [ "$SNTP_MODE" = "invalid" ] && [ "$answer_run" = "1" ]; then
+            # P_ask_host redraws with the original default after refusing,
+            # so the second action is reachable only through the refusal.
+            ANSWER_LINES+=("1|STRING|pool.ntp.org|bad;name")
+        fi
+        ANSWER_LINES+=("$answer_run|STRING|pool.ntp.org|$EXPECTED_NTP")
+    fi
+done
 case "$TRANSITION" in
     full-minimal) ANSWER_LINES+=("2|CHOICE|3|3|1") ;;
     minimal-full) ANSWER_LINES+=("1|CHOICE|3|3|1") ;;
@@ -2060,6 +2101,36 @@ if [ -n "$EXPECTED_SECOND_IF" ] && [ -n "$NS_FILE" ]; then
     else
         echo "  ok      Emu68 secondary interface installed but not auto-started"
     fi
+fi
+
+# SNTP at boot.  With -s, exactly one sntp line, the exact command, and it is
+# the line straight after the AddNetInterface line.  Without -s, none.  On a
+# kept reinstall the file is run 1's, verbatim, so the same holds there; that
+# run 2 did not ask is the driver's ABSENT action, i.e. INSTALL_STATUS.
+SNTP_PREFIX=C:
+[ "$DRAWER" = "1" ] && SNTP_PREFIX=AmiNetXDuo:C/
+SNTP_LINES=0
+SNTP_AFTER=no
+if [ -n "$NS_FILE" ] && [ -f "$NS_FILE" ]; then
+    SNTP_LINES=$(grep -c 'sntp' "$NS_FILE" 2>/dev/null) || SNTP_LINES=0
+    SNTP_NEXT=$(awk -v p="${SNTP_PREFIX}AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET" \
+                    'found { print; exit } $0 == p { found = 1 }' "$NS_FILE" | tr -d '\r')
+    [ "$SNTP_NEXT" = "Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET" ] &&
+        SNTP_AFTER=yes
+fi
+echo "startup_sntp_lines=$SNTP_LINES"
+echo "startup_sntp_after_addnetinterface=$SNTP_AFTER"
+if [ -n "$SNTP_MODE" ]; then
+    if [ "$SNTP_LINES" != "1" ] || [ "$SNTP_AFTER" != "yes" ]; then
+        echo "!! want one 'Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET'" \
+             "straight after AddNetInterface; lines=$SNTP_LINES after=$SNTP_AFTER"
+        fail=1
+    else
+        echo "  ok      S:Network-Startup sets the clock from $EXPECTED_NTP"
+    fi
+elif [ "$SNTP_LINES" != "0" ]; then
+    echo "!! nobody asked for SNTP and S:Network-Startup has $SNTP_LINES sntp line(s)"
+    fail=1
 fi
 
 # The self-contained contract, in one comparison: none of the system stack's
