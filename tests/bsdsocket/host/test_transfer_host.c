@@ -150,8 +150,10 @@ static struct
     /* Another task's connect() while the send waits for a packet: the next
        nx_packet_allocate() moves this socket to a different peer. */
     AmiSocket  *reconnect;
-    NXD_ADDRESS sent_addr;          /* where the last UDP datagram went      */
+    NXD_ADDRESS sent_addr;          /* where the last datagram went          */
     UINT        sent_port;
+    ULONG       raw_sends;          /* bsd_raw_send_packet() calls           */
+    ULONG       sent_scope;         /* and the zone it was handed            */
 } h;
 
 static void h_reset(void)
@@ -455,9 +457,11 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     (VOID)base;
     (VOID)sock;
     (VOID)packet;
-    (VOID)addr;
-    (VOID)scope;
     (VOID)src;
+
+    h.raw_sends++;
+    h.sent_addr  = *addr;
+    h.sent_scope = scope;
 
     return 0;
 }
@@ -1553,6 +1557,23 @@ static void t_peer_scope_in_bracket(void)
                   h.sent_addr.nxd_ip_address.v6[0] == 0xFE800000UL &&
                   h.sent_addr.nxd_ip_address.v6[3] == 1UL &&
                   h.sent_port == 53 && h.seen_scope == 2UL, what);
+
+        /* The same on a connected raw socket: bsd_send_raw() allocates, and
+           so waits, before raw.c is handed the address and zone. */
+        h_reset();
+        h.reconnect = h_udp6_connected(1);
+        h.reconnect->as_Flags = (h.reconnect->as_Flags & ~ASF_UDP) | ASF_RAW;
+        snprintf(what, sizeof(what),
+                 "raw %s: a connect() during the wait does not redirect it",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == 4 && h.raw_sends == 1 &&
+                  h.sent_addr.nxd_ip_version == NX_IP_VERSION_V6 &&
+                  h.sent_addr.nxd_ip_address.v6[0] == 0xFE800000UL &&
+                  h.sent_addr.nxd_ip_address.v6[3] == 1UL &&
+                  h.sent_scope == 2UL, what);
+        snprintf(what, sizeof(what),
+                 "raw %s: the bracket is entered and left once", shape[i]);
+        CHECK(h.nx_enters == 1 && h.nx_leaves == 1, what);
     }
 }
 #endif
