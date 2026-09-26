@@ -301,13 +301,19 @@ UINT tx_amiga_exec_task_signal(VOID *task, ULONG mask)
 }
 
 /* Harmless, and reached by bsd_lib_close() on the way past. */
+static LONG h_lock_depth;
+static LONG h_in_bracket;
+static LONG h_lock_under_bracket;
 VOID ObtainSemaphore(struct SignalSemaphore *s)
 {
     (VOID)s;
     if (h.forbid_depth > 0)
         h.blocking_under_forbid++;
+    if (h_in_bracket > 0)
+        h_lock_under_bracket++;
+    h_lock_depth++;
 }
-VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; }
+VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; h_lock_depth--; }
 ULONG AttemptSemaphore(struct SignalSemaphore *s) { (VOID)s; return 1UL; }
 VOID InitSemaphore(struct SignalSemaphore *s)    { (VOID)s; }
 VOID Forbid(VOID)                                { h.forbid_depth++; }
@@ -368,7 +374,8 @@ struct Process *CreateNewProc(const struct TagItem *t)
    compiled into every build now rather than out of the default one. */
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 VOID ami_free(APTR p) { (VOID)p; h_unreachable("ami_free"); }
-VOID ami_mem_open_delta(LONG d) { (VOID)d; h_unreachable("ami_mem_open_delta"); }
+/* The rest of a child base's close, reached by t_tableless_last_closer(). */
+VOID ami_mem_open_delta(LONG d) { (VOID)d; }
 LONG ami_netdb_load(VOID)
 {
     if (h.forbid_depth > 0)
@@ -376,23 +383,56 @@ LONG ami_netdb_load(VOID)
     return 0;
 }
 BYTE ami_signal_alloc(VOID) { h_unreachable("ami_signal_alloc"); return -1; }
-VOID ami_signal_free(BYTE s) { (VOID)s; h_unreachable("ami_signal_free"); }
-VOID bsd_bpf_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_bpf_close_all"); }
-BOOL bsd_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_close_all"); return FALSE; }
-/* The two things the drain gate does for the last opener, counted. */
+VOID ami_signal_free(BYTE s) { (VOID)s; }
+VOID bsd_bpf_close_all(struct AmiSocketBase *b) { (VOID)b; }
+/* A base with no table, or the kernel down: bsd_close_all() does nothing. */
+static LONG h_close_alls;
+VOID bsd_close_all(struct AmiSocketBase *b) { (VOID)b; h_close_alls++; }
+/* What the drain gate and the last opener's close do, counted. */
+static LONG h_takes;
 static LONG h_flushes;
+static LONG h_flushes_bracketed;
 static LONG h_drains;
-VOID bsd_handoff_flush(struct AmiSocketBase *b, BOOL bracketed)
-{ (VOID)b; (VOID)bracketed; h_flushes++; }
+static LONG h_nx_enters;
+static LONG h_nx_leaves;
+static LONG h_nx_enter_result;
+static LONG h_lock_depth;          /* sb_Lock, modelled                      */
+static LONG h_enter_under_lock;    /* a bracket taken holding sb_Lock        */
+static LONG h_lock_under_bracket;  /* sb_Lock taken holding the bracket      */
+static LONG h_in_bracket;
+VOID bsd_handoff_take(struct AmiSocketBase *m, struct MinList *out)
+{
+    (VOID)m;
+    h_takes++;
+    out->mlh_Head     = (struct MinNode *)&out->mlh_Tail;
+    out->mlh_Tail     = NULL;
+    out->mlh_TailPred = (struct MinNode *)&out->mlh_Head;
+}
+VOID bsd_handoff_flush(struct AmiSocketBase *b, struct MinList *list,
+                       BOOL bracketed)
+{
+    (VOID)b; (VOID)list;
+    h_flushes++;
+    if (bracketed)
+        h_flushes_bracketed++;
+}
 VOID bsd_closing_drain(VOID) { h_drains++; }
 BOOL bsd_handoff_pending(struct AmiSocketBase *m) { (VOID)m; return FALSE; }
-/* Only a child base's close brackets; this test closes the master. */
-LONG bsd_nx_enter(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_enter"); return -1; }
-VOID bsd_nx_leave(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_leave"); }
+LONG bsd_nx_enter(struct AmiSocketBase *b)
+{
+    (VOID)b;
+    h_nx_enters++;
+    if (h_lock_depth > 0)
+        h_enter_under_lock++;
+    if (h_nx_enter_result == 0)
+        h_in_bracket++;
+    return h_nx_enter_result;
+}
+VOID bsd_nx_leave(struct AmiSocketBase *b) { (VOID)b; h_nx_leaves++; h_in_bracket--; }
 /* Published at init and withdrawn at expunge, for the tick's lock-free reclaim. */
 VOID ami_netstack_health_set_sblock(APTR sem) { (VOID)sem; }
 VOID bsd_handoff_init(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_handoff_init"); }
-VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_release"); }
+VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; }
 BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }
 VOID bsd_tcp_handler_start(struct AmiSocketBase *m) { (VOID)m; h_unreachable("bsd_tcp_handler_start"); }
 LONG netstack_startup(VOID) { h.startup_calls++; return h.startup_result; }
@@ -718,6 +758,7 @@ static VOID t_transient_last_opener_drains(VOID)
 static struct AmiSocketBase h_child_a;
 static struct AmiSocketBase h_child_b;
 static struct AmiSocketBase h_child_c;
+static LONG                 h_gate_last;
 
 static VOID h_closers_reset(ULONG openers, BOOL worker)
 {
@@ -729,8 +770,28 @@ static VOID h_closers_reset(ULONG openers, BOOL worker)
     h_child_a.sb_Master = h_base;
     h_child_b.sb_Master = h_base;
     h_child_c.sb_Master = h_base;
-    h_flushes = 0;
-    h_drains  = 0;
+    h_gate_last         = 0;
+    h_takes             = 0;
+    h_flushes           = 0;
+    h_flushes_bracketed = 0;
+    h_drains            = 0;
+    h_nx_enters         = 0;
+    h_nx_leaves         = 0;
+    h_nx_enter_result   = 0;
+    h_close_alls        = 0;
+    h_lock_depth        = 0;
+    h_in_bracket        = 0;
+    h_enter_under_lock  = 0;
+    h_lock_under_bracket = 0;
+}
+
+/* One closer's gate, as bsd_child_close_gate() calls it. */
+static VOID h_gate(struct AmiSocketBase *child)
+{
+    struct MinList handoffs;
+
+    if (bsd_stack_close_gate(child, &handoffs))
+        h_gate_last++;
 }
 
 static VOID t_concurrent_closers_drain(VOID)
@@ -739,63 +800,139 @@ static VOID t_concurrent_closers_drain(VOID)
 
     /* A and B: gate, gate, release, release. */
     h_closers_reset(2, FALSE);
-    bsd_stack_close_gate(&h_child_a);
-    bsd_stack_close_gate(&h_child_b);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    printf("concurrent_close openers=2 worker=0 drains=%ld flushes=%ld "
-           "shutdowns=%ld closing=%lu\n", (long)h_drains, (long)h_flushes,
+    h_gate(&h_child_a);
+    h_gate(&h_child_b);
+    (VOID)bsd_stack_close_release(h_base);
+    (VOID)bsd_stack_close_release(h_base);
+    printf("concurrent_close openers=2 worker=0 last=%ld takes=%ld "
+           "shutdowns=%ld closing=%lu\n", (long)h_gate_last, (long)h_takes,
            (long)h.shutdown_calls, (unsigned long)h_base->sb_StackClosing);
-    CHECK(h_drains == 1, "exactly one of two interleaved closers drains");
-    CHECK(h_flushes == 1, "and flushes the handoff list");
+    CHECK(h_gate_last == 1, "exactly one of two interleaved closers is last");
+    CHECK(h_takes == 1, "and takes the handoff registry");
     CHECK(h.shutdown_calls == 1, "the second release tears the stack down");
     CHECK(h_base->sb_StackClosing == 0, "every gate is given back");
 
     /* The same with a worker's transient hold outstanding: the worker's
        release is the one that tears down, after the drain. */
     h_closers_reset(2, TRUE);
-    bsd_stack_close_gate(&h_child_a);
-    bsd_stack_close_gate(&h_child_b);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
+    h_gate(&h_child_a);
+    h_gate(&h_child_b);
+    (VOID)bsd_stack_close_release(h_base);
+    (VOID)bsd_stack_close_release(h_base);
     CHECK(h.shutdown_calls == 0, "the worker still holds the stack");
     bsd_stack_transient_release(h_base);
-    printf("concurrent_close openers=2 worker=1 drains=%ld shutdowns=%ld\n",
-           (long)h_drains, (long)h.shutdown_calls);
-    CHECK(h_drains == 1, "one drain before the worker's teardown");
+    printf("concurrent_close openers=2 worker=1 last=%ld shutdowns=%ld\n",
+           (long)h_gate_last, (long)h.shutdown_calls);
+    CHECK(h_gate_last == 1, "one drain before the worker's teardown");
     CHECK(h.shutdown_calls == 1, "the worker's release tears the stack down");
 
     /* Three closers: A gates, B gates, A releases, C gates, C and B release.
        C is the last to gate and the only one to drain. */
     h_closers_reset(3, FALSE);
-    bsd_stack_close_gate(&h_child_a);
-    bsd_stack_close_gate(&h_child_b);
-    CHECK(h_drains == 0, "no drain while C is still open");
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    bsd_stack_close_gate(&h_child_c);
-    CHECK(h_drains == 1, "C's gate drains");
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    CHECK(h_drains == 1 && h.shutdown_calls == 1,
+    h_gate(&h_child_a);
+    h_gate(&h_child_b);
+    CHECK(h_gate_last == 0, "no drain while C is still open");
+    (VOID)bsd_stack_close_release(h_base);
+    h_gate(&h_child_c);
+    CHECK(h_gate_last == 1, "C's gate drains");
+    (VOID)bsd_stack_close_release(h_base);
+    (VOID)bsd_stack_close_release(h_base);
+    CHECK(h_gate_last == 1 && h.shutdown_calls == 1,
           "one drain, one teardown, with three interleaved closers");
 
     /* Serialised, as before: gate, release, gate, release. */
     h_closers_reset(2, FALSE);
-    bsd_stack_close_gate(&h_child_a);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    CHECK(h_drains == 0, "the first of two serial closers leaves the sockets");
-    bsd_stack_close_gate(&h_child_b);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    CHECK(h_drains == 1 && h.shutdown_calls == 1,
+    h_gate(&h_child_a);
+    (VOID)bsd_stack_close_release(h_base);
+    CHECK(h_gate_last == 0, "the first of two serial closers leaves the sockets");
+    h_gate(&h_child_b);
+    (VOID)bsd_stack_close_release(h_base);
+    CHECK(h_gate_last == 1 && h.shutdown_calls == 1,
           "the second serial closer drains");
+    CHECK(h_lock_under_bracket == 0 && h_enter_under_lock == 0,
+          "the gate takes sb_Lock with no bracket held");
+}
 
-    /* A closer that never reached the gate (kernel down) owes nothing. */
+/*
+ * The worst early exit: A has parked sockets and passed its gate but not yet
+ * released; B, the last opener, never made a descriptor, so bsd_close_all()
+ * returns at once (socket.c, sb_Table == NULL).  B's CloseLibrary() through the
+ * real bsd_lib_close() must still drain and flush, under a bracket it takes
+ * after sb_Lock is released.
+ */
+static UBYTE *h_child_block;
+
+static struct AmiSocketBase *h_tableless_child(VOID)
+{
+    struct AmiSocketBase *c;
+
+    free(h_child_block);
+    h_child_block = (UBYTE *)calloc(1, (size_t)(H_NEG + H_POS));
+    if (h_child_block == NULL)
+    {
+        printf("  FAIL out of memory building the child\n");
+        exit(1);
+    }
+    c = (struct AmiSocketBase *)(h_child_block + H_NEG);
+    c->sb_Lib.lib_NegSize = (UWORD)H_NEG;
+    c->sb_Lib.lib_PosSize = H_POS;
+    c->sb_Master          = h_base;
+    c->sb_Task            = NULL;
+    c->sb_Table           = NULL;
+
+    /* On the master's child list, so bsd_child_destroy()'s Remove() works. */
+    c->sb_Node.mln_Succ = (struct MinNode *)&h_base->sb_Children.mlh_Tail;
+    c->sb_Node.mln_Pred = h_base->sb_Children.mlh_TailPred;
+    h_base->sb_Children.mlh_TailPred->mln_Succ = &c->sb_Node;
+    h_base->sb_Children.mlh_TailPred = &c->sb_Node;
+    return c;
+}
+
+static VOID t_tableless_last_closer(VOID)
+{
+    struct AmiSocketBase *b;
+
+    printf("the last closer never made a descriptor\n");
+
     h_closers_reset(2, FALSE);
-    (VOID)bsd_stack_close_release(h_base, FALSE);
-    bsd_stack_close_gate(&h_child_b);
-    (VOID)bsd_stack_close_release(h_base, TRUE);
-    CHECK(h_drains == 1 && h_base->sb_StackClosing == 0,
-          "an ungated release leaves the count alone");
+    h_base->sb_Lib.lib_OpenCnt = 3;
+    b = h_tableless_child();
+
+    h_gate(&h_child_a);                      /* A parked, gated, not released */
+    CHECK(h_gate_last == 0, "A is not the last opener");
+
+    (VOID)bsd_lib_close(b);                  /* B: no table                   */
+    printf("tableless_last close_all=%ld takes=%ld flushes=%ld drains=%ld "
+           "enters=%ld leaves=%ld lock_under_bracket=%ld\n",
+           (long)h_close_alls, (long)h_takes, (long)h_flushes_bracketed,
+           (long)h_drains, (long)h_nx_enters, (long)h_nx_leaves,
+           (long)h_lock_under_bracket);
+    CHECK(h_close_alls == 1, "B's close went through bsd_close_all()");
+    CHECK(h_takes == 1, "B, last, took the handoff registry");
+    CHECK(h_flushes_bracketed == 1, "and flushed it under a bracket");
+    CHECK(h_drains == 1, "and drained A's parked sockets");
+    CHECK(h_nx_enters == 1 && h_nx_leaves == 1, "one bracket, given back");
+    CHECK(h_lock_under_bracket == 0 && h_enter_under_lock == 0,
+          "sb_Lock and the bracket were never held together");
+    CHECK(h.shutdown_calls == 0, "A still holds the stack");
+
+    (VOID)bsd_stack_close_release(h_base);   /* A's release                   */
+    CHECK(h.shutdown_calls == 1 && h_base->sb_StackClosing == 0,
+          "A's release tears down with nothing owed");
+
+    /* The kernel down for B's bracket: the registry is still taken off the
+       master and its entries abandoned with a warning; nothing is drained. */
+    h_closers_reset(2, FALSE);
+    h_base->sb_Lib.lib_OpenCnt = 3;
+    b = h_tableless_child();
+    h_nx_enter_result = -1;
+    h_gate(&h_child_a);
+    (VOID)bsd_lib_close(b);
+    CHECK(h_takes == 1 && h_flushes == 1 && h_flushes_bracketed == 0,
+          "kernel down: the registry is emptied unbracketed");
+    CHECK(h_drains == 0 && h_nx_leaves == 0, "and no NetX call is made");
+    (VOID)bsd_stack_close_release(h_base);
+    CHECK(h_base->sb_StackClosing == 0, "the count still comes back");
 }
 
 #ifdef AMINETXDUO_TCP_CORK
@@ -941,6 +1078,7 @@ int main(void)
     t_transient_stack_reference();
     t_transient_last_opener_drains();
     t_concurrent_closers_drain();
+    t_tableless_last_closer();
     t_loopback_startup_failure_ownership();
 #ifdef AMINETXDUO_TCP_CORK
     t_cork_pass_keeps_stack();
