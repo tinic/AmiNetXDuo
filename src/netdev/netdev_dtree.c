@@ -34,7 +34,9 @@ extern struct ExecBase *SysBase;
 static APTR dt_base;
 
 /*
- * The eleven entry points, called by offset.  Behind a seam: the host test
+ * The eleven entry points, called by offset.  Each may destroy d0/d1/a0/a1,
+ * so an argument register is a "+r" operand, never an input alone (#70).
+ * Behind a seam: the host test
  * (src/netdev/test/test_netdev_dtree.c) supplies the same eleven over a tree
  * it builds in memory, which is how the ranges arithmetic and the cell counts
  * are checked without an Emu68.
@@ -48,7 +50,7 @@ static APTR dt_openkey(const char *name)
     register APTR d0 __asm("d0");
 
     __asm volatile ("jsr a6@(-6:W)"
-                    : "=r" (d0) : "r" (a6), "r" (a0)
+                    : "=r" (d0), "+r" (a0) : "r" (a6)
                     : "cc", "memory", "d1", "a1");
     return d0;
 }
@@ -59,7 +61,7 @@ static VOID dt_closekey(APTR key)
     register APTR a6 __asm("a6") = dt_base;
 
     __asm volatile ("jsr a6@(-12:W)"
-                    : : "r" (a6), "r" (a0)
+                    : "+r" (a0) : "r" (a6)
                     : "cc", "memory", "d0", "d1", "a1");
 }
 
@@ -71,7 +73,7 @@ static APTR dt_getchild(APTR key, APTR prev)
     register APTR d0 __asm("d0");
 
     __asm volatile ("jsr a6@(-18:W)"
-                    : "=r" (d0) : "r" (a6), "r" (a0), "r" (a1)
+                    : "=r" (d0), "+r" (a0), "+r" (a1) : "r" (a6)
                     : "cc", "memory", "d1");
     return d0;
 }
@@ -84,7 +86,7 @@ static APTR dt_findprop(APTR key, const char *name)
     register APTR d0 __asm("d0");
 
     __asm volatile ("jsr a6@(-24:W)"
-                    : "=r" (d0) : "r" (a6), "r" (a0), "r" (a1)
+                    : "=r" (d0), "+r" (a0), "+r" (a1) : "r" (a6)
                     : "cc", "memory", "d1");
     return d0;
 }
@@ -96,7 +98,7 @@ static ULONG dt_proplen(APTR prop)
     register ULONG d0 __asm("d0");
 
     __asm volatile ("jsr a6@(-36:W)"
-                    : "=r" (d0) : "r" (a6), "r" (a0)
+                    : "=r" (d0), "+r" (a0) : "r" (a6)
                     : "cc", "memory", "d1", "a1");
     return d0;
 }
@@ -108,7 +110,7 @@ static const UBYTE *dt_propvalue(APTR prop)
     register const UBYTE *d0 __asm("d0");
 
     __asm volatile ("jsr a6@(-48:W)"
-                    : "=r" (d0) : "r" (a6), "r" (a0)
+                    : "=r" (d0), "+r" (a0) : "r" (a6)
                     : "cc", "memory", "d1", "a1");
     return d0;
 }
@@ -120,7 +122,7 @@ static APTR dt_getparent(APTR key)
     register APTR d0 __asm("d0");
 
     __asm volatile ("jsr a6@(-54:W)"
-                    : "=r" (d0) : "r" (a6), "r" (a0)
+                    : "=r" (d0), "+r" (a0) : "r" (a6)
                     : "cc", "memory", "d1", "a1");
     return d0;
 }
@@ -132,7 +134,7 @@ static const char *dt_keyname(APTR key)
     register const char *d0 __asm("d0");
 
     __asm volatile ("jsr a6@(-60:W)"
-                    : "=r" (d0) : "r" (a6), "r" (a0)
+                    : "=r" (d0), "+r" (a0) : "r" (a6)
                     : "cc", "memory", "d1", "a1");
     return d0;
 }
