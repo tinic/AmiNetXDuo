@@ -316,6 +316,7 @@ static LONG bsd_cmsg_pktinfo6(struct AmiSocketBase *base, const UBYTE *data,
 
     out->cs_Have    = TRUE;
     out->cs_Ifindex = info->ipi6_ifindex;
+    out->cs_Epoch   = bsd_scope_epoch(info->ipi6_ifindex);
 
     if ((words[0] | words[1] | words[2] | words[3]) != 0UL)
     {
@@ -476,7 +477,11 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
            the last slot and bsd_cmsg_ifindex() hands its number out. */
         if (src->cs_Ifindex > 0UL)
         {
-            if (src->cs_Ifindex > (ULONG)NX_MAX_IP_INTERFACES)
+            /* A slot detached since the index was named is gone, whatever
+               was attached there next. */
+            if (src->cs_Ifindex > (ULONG)NX_MAX_IP_INTERFACES ||
+                bsd_scope_live(src->cs_Ifindex, src->cs_Epoch) ==
+                    BSD_SCOPE_GONE)
                 return -1;
             want = &ip->nx_ip_interface[src->cs_Ifindex - 1UL];
         }
@@ -516,7 +521,8 @@ LONG bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6)
 
     if (src->cs_Ifindex > 0UL)
     {
-        if (src->cs_Ifindex > (ULONG)NX_MAX_IP_INTERFACES)
+        if (src->cs_Ifindex > (ULONG)NX_MAX_IP_INTERFACES ||
+            ip->nx_ip_interface[src->cs_Ifindex - 1UL].nx_interface_valid == 0)
             return -1;
 
         return (LONG)(src->cs_Ifindex - 1UL);
