@@ -14,6 +14,8 @@
 # Declarations are read through object-like macros (BSD_SCRATCH,
 # NETDEV_REG_A1) from the file and the headers it includes by "name".
 # Top-level asm has no operand lists and is not an inline call; it is skipped.
+# An operand-less asm inside a function body that makes the call is flagged
+# with all four missing: GCC assumes basic asm clobbers nothing.
 #
 # Output: one `lvo_clobbers=fail` line per site, then a summary line.
 # Exit 0 when nothing is flagged, 1 when something is, 2 on a usage error.
@@ -26,7 +28,10 @@ import sys
 
 SCRATCH = ("a0", "a1", "d0", "d1")
 
-LVO_RE = re.compile(r'\bjsr\s+(?:%*a6@|-?\w+\(%*a6\))')
+# jsr a6@(-30), jsr -30(a6), jsr %c1(a6), jsr (-30,a6), with any %% escaping.
+LVO_RE = re.compile(r'\bjsr\s+(?:%*a6@'
+                    r'|-?%*\w+\(\s*%*a6\s*\)'
+                    r'|\(\s*-?%*\w+\s*,\s*%*a6\s*\))')
 ASM_RE = re.compile(r'\b(?:__asm__|__asm|asm)\s*(?:(?:__volatile__|__volatile|volatile)\s*)?\(')
 DECL_RE = re.compile(r'\bregister\b[^;{}()]*?\b([A-Za-z_]\w*)\s*__asm(?:__)?\s*\(\s*"%*([ad][0-7])"\s*\)')
 DEFINE_RE = re.compile(r'^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)(?![\w(])[ \t]*(.*)$', re.M)
@@ -82,6 +87,24 @@ def balanced(text, i):
                 return i
         i += 1
     return -1
+
+
+def brace_depth(text, end):
+    """Brace depth at text[end], ignoring strings and character constants."""
+    depth, i = 0, 0
+    while i < end:
+        c = text[i]
+        if c in '"\'':
+            j = i + 1
+            while j < end and text[j] != c and text[j] != '\n':
+                j += 2 if text[j] == '\\' else 1
+            i = j
+        elif c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        i += 1
+    return depth
 
 
 def split_colons(body):
@@ -179,7 +202,13 @@ class Scanner:
             if macros is None:
                 macros = self.macros(path)
             parts = split_colons(self.expand(body, macros))
-            if len(parts) < 2 or not LVO_RE.search(parts[0]):
+            if not LVO_RE.search(parts[0]):
+                continue
+            if len(parts) < 2:
+                if brace_depth(text, m.start()) > 0:
+                    stmts += 1
+                    line = text.count("\n", 0, m.start()) + 1
+                    flagged.append((rel, line, list(SCRATCH)))
                 continue
             stmts += 1
             # Declarations visible here: from the last column-0 brace.
@@ -215,7 +244,7 @@ def main(argv):
         else:
             files.append(os.path.abspath(a))
     if not files:
-        for d in ("src", "tests"):
+        for d in ("include", "src", "tests"):
             for dp, dns, fs in os.walk(os.path.join(root, d)):
                 dns[:] = sorted(x for x in dns if x != "third_party")
                 files += [os.path.join(dp, f) for f in fs if f.endswith((".c", ".h"))]

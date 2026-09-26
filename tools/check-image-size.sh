@@ -57,9 +57,11 @@ BUDGETS=(
     # 362,856 with the SYN-cache detach flush (#54), stale multicast rows
     # and per-send loopback (#48, #47) and UDP port sharing in NetX (#38),
     # 2026-09-25 (micro 202,932, minimal 236,892).
-    # 363,364 after the #49/#51/#52/#53/#63/#64 fixes on main 6f7cc559;
-    # 363,772 with the dormant-slot eviction that stops the sixteenth
-    # bsdsocket opener waiting forever for a slot (#67), 2026-09-26.
+    # 363,364 after the #49/#51/#52/#53/#63/#64 fixes on main 6f7cc559,
+    # over the 363,000 budget then in force; cancelled CI runs hid it until
+    # #67 raised the budget to 364,000 at f2649e22.  363,772 with that
+    # dormant-slot eviction, which stops the sixteenth bsdsocket opener
+    # waiting forever for a slot (#67), 2026-09-26.
     "default:src/bsdsocket/bsdsocket.library:364000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
