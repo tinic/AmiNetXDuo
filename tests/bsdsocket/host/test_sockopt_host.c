@@ -16,6 +16,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* socket.c's, which options.c now reads the stored zone through (#51); no
+   case here stores a scope id. */
+ULONG bsd_scope_live(ULONG scope, ULONG epoch)
+{
+    (VOID)epoch;
+    return scope;
+}
+
 static unsigned long h_checks;
 static unsigned long h_failures;
 

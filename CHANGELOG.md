@@ -26,6 +26,9 @@ version at the top when it merges.
 - The last socket-library opener drains parked closing sockets even when an
   asynchronous worker still holds the stack. If NetX refuses IP deletion,
   its live stack memory is retained instead of being freed under the IP thread.
+- A sixteenth program with `bsdsocket.library` open no longer waits forever
+  for another to close it: an idle opener's stack context is reclaimed and
+  rebuilt on its next call.
 
 ## 1.0.0-beta6
 

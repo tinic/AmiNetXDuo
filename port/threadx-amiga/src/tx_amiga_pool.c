@@ -26,7 +26,8 @@
    (AmiNetSocketBase.sb_NxCaller), not just for one call.  The cap is therefore
    "concurrent networking programs", not "concurrent socket calls".  Sixteen is
    far past what the 4 MB machines this targets run at once, and costs sixteen
-   TX_THREADs of BSS in the library.  Seventeen does not fail: it waits.
+   TX_THREADs of BSS in the library.  Seventeen does not fail: it takes back
+   a dormant cached slot (_tx_amiga_slot_evict_locked), or waits.
 
    WHY ONE OF THEM IS RESERVED
 
@@ -524,6 +525,80 @@ struct _tx_amiga_adopt_slot *slot;
 }
 
 
+/* Take a slot back from a DORMANT cached adoption.  Caller holds Forbid().
+
+   A cached bracket keeps its slot for the life of its bsdsocket base, so the
+   slots were a cap on OPENERS, and the sixteenth waited for a CloseLibrary()
+   the others had no reason to make (#67).  tx_amiga_adopt_suspend() marks an
+   adoption dormant between calls: its Task is outside the stack and holds
+   neither the baton nor any NetX object, so the TX_THREAD can go.  The owner's
+   next tx_amiga_adopt_resume() fails the generation test and
+   ami_netstack_enter_cached() adopts afresh, freeing the run signal it kept
+   in nc_Signal.  Round-robin, so one opener is not the victim every time.  */
+static UINT _tx_amiga_slot_evict_locked(UINT reserved)
+{
+
+static ULONG                 next;
+struct _tx_amiga_adopt_slot *slot;
+TX_THREAD                   *thread_ptr;
+ULONG                        n;
+ULONG                        limit;
+
+
+    /* Never while tx_amiga_kernel_stop() owns the pool; and only slots this
+       caller may claim, or the victim is one it cannot then take.  */
+    if ((_tx_amiga_kernel_up == TX_FALSE) || (_tx_amiga_kernel_stopping != TX_FALSE))
+    {
+        return((UINT) TX_FALSE);
+    }
+
+    limit =  (reserved != ((UINT) TX_FALSE))
+             ? ((ULONG) TX_AMIGA_ADOPT_SLOTS)
+             : ((ULONG) (TX_AMIGA_ADOPT_SLOTS - TX_AMIGA_ADOPT_RESERVE));
+
+    for (n = 0UL; n < limit; n++)
+    {
+        next       =  (next + 1UL) % limit;
+        slot       =  &_tx_amiga_adopt_pool[next];
+        thread_ptr =  &slot -> as_thread;
+
+        if ((slot -> as_busy != ((UINT) 0)) &&
+            (slot -> as_published != ((UINT) TX_FALSE)) &&
+            (thread_ptr -> tx_thread_id == TX_THREAD_ID) &&
+            (thread_ptr != _tx_thread_current_ptr) &&
+            (thread_ptr -> tx_thread_state == TX_SUSPENDED) &&
+            ((thread_ptr -> tx_thread_amiga_flags &
+              (TX_AMIGA_THREAD_DORMANT | TX_AMIGA_THREAD_DIE |
+               TX_AMIGA_THREAD_ORPHANED)) == TX_AMIGA_THREAD_DORMANT))
+        {
+            return((tx_amiga_discard_thread(thread_ptr, slot -> as_generation)
+                    == TX_SUCCESS) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE));
+        }
+    }
+
+    return((UINT) TX_FALSE);
+}
+
+
+/* A slot, taking one back from a dormant cached caller when none is free.
+   Caller holds Forbid().  */
+static struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_evict_locked(UINT reserved)
+{
+
+struct _tx_amiga_adopt_slot *slot;
+
+
+    slot =  _tx_amiga_slot_claim_locked(reserved);
+    if ((slot == (struct _tx_amiga_adopt_slot *) 0) &&
+        (_tx_amiga_slot_evict_locked(reserved) != ((UINT) TX_FALSE)))
+    {
+        slot =  _tx_amiga_slot_claim_locked(reserved);
+    }
+
+    return(slot);
+}
+
+
 /* The slot behind a validated handle, for the release sites.  Caller holds
    Forbid().  */
 struct _tx_amiga_adopt_slot *_tx_amiga_slot_held(TX_THREAD *thread_ptr, ULONG generation)
@@ -569,7 +644,7 @@ ULONG                        i;
 
 
     Forbid();
-    slot =  _tx_amiga_slot_claim_locked(reserved);
+    slot =  _tx_amiga_slot_claim_evict_locked(reserved);
     Permit();
 
     if (slot != (struct _tx_amiga_adopt_slot *) 0)
@@ -605,7 +680,7 @@ ULONG                        i;
        a signal rather than being missed.  */
     if (index >= 0)
     {
-        slot =  _tx_amiga_slot_claim_locked(reserved);
+        slot =  _tx_amiga_slot_claim_evict_locked(reserved);
     }
 
     Permit();
@@ -628,7 +703,7 @@ ULONG                        i;
         (VOID) Wait(sigmask);
 
         Forbid();
-        slot =  _tx_amiga_slot_claim_locked(reserved);
+        slot =  _tx_amiga_slot_claim_evict_locked(reserved);
         Permit();
     }
 

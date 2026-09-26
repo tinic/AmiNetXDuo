@@ -13,6 +13,9 @@
  *   sweep  tx_amiga_adopt_sweep_unpublished(): an unpublished slot is kept
  *          while its claimer is alive with the stamp it claimed with, and freed
  *          when that address is dead or holds a different Task
+ *   evict  _tx_amiga_slot_evict_locked(): a full pool takes back only a
+ *          DORMANT, suspended, non-current adoption, only from the indices the
+ *          claimer may use, and never while the kernel is stopping (#67)
  */
 
 #include "tx_amiga_pool.c"
@@ -47,6 +50,23 @@ static int fake_index(struct Task *task)
             return i;
     }
     return -1;
+}
+
+TX_THREAD *_tx_thread_current_ptr;
+
+/* The evictor's teardown.  The real one terminates and deletes the TX_THREAD
+   and releases the slot; the slot release is the part the pool can see. */
+static unsigned discard_calls;
+
+UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation)
+{
+    struct _tx_amiga_adopt_slot *slot = _tx_amiga_slot_held(thread_ptr, generation);
+
+    discard_calls++;
+    if (slot == (struct _tx_amiga_adopt_slot *) 0)
+        return TX_THREAD_ERROR;
+    _tx_amiga_slot_release_locked(slot);
+    return TX_SUCCESS;
 }
 
 VOID  Forbid(VOID)  { }
@@ -337,6 +357,71 @@ static void test_sweep(void)
 }
 
 
+
+/* --------------------------------------------------------------- evict --- */
+
+static void make_dormant(struct _tx_amiga_adopt_slot *slot)
+{
+    _tx_amiga_slot_publish_locked(slot);
+    slot->as_thread.tx_thread_id          = TX_THREAD_ID;
+    slot->as_thread.tx_thread_state       = TX_SUSPENDED;
+    slot->as_thread.tx_thread_amiga_flags = TX_AMIGA_THREAD_ADOPTED |
+                                            TX_AMIGA_THREAD_DORMANT;
+}
+
+static void test_evict(void)
+{
+    struct _tx_amiga_adopt_slot *slot[TX_AMIGA_ADOPT_SLOTS];
+    struct _tx_amiga_adopt_slot *got;
+    ULONG                        i;
+    ULONG                        ordinary = TX_AMIGA_ADOPT_SLOTS - TX_AMIGA_ADOPT_RESERVE;
+
+    /* Every slot busy and in the stack: nothing to take back. */
+    reset();
+    discard_calls = 0U;
+    (void) fake_spawn(0, 0, fake_name_a);
+    fake_current = &fake_task[0];
+    for (i = 0; i < TX_AMIGA_ADOPT_SLOTS; i++)
+    {
+        slot[i] = _tx_amiga_slot_claim_locked((UINT) TX_TRUE);
+        _tx_amiga_slot_publish_locked(slot[i]);
+        slot[i]->as_thread.tx_thread_id          = TX_THREAD_ID;
+        slot[i]->as_thread.tx_thread_state       = TX_TCP_IP;
+        slot[i]->as_thread.tx_thread_amiga_flags = TX_AMIGA_THREAD_ADOPTED;
+    }
+    got = _tx_amiga_slot_claim_evict_locked((UINT) TX_FALSE);
+    expect("all in the stack: no slot", (unsigned long) (got != 0), 0UL);
+    expect("all in the stack: nothing discarded", discard_calls, 0UL);
+
+    /* Only the reserved tail is dormant: an ordinary claim may not take it. */
+    make_dormant(slot[TX_AMIGA_ADOPT_SLOTS - 1]);
+    got = _tx_amiga_slot_claim_evict_locked((UINT) TX_FALSE);
+    expect("dormant reserved tail: no ordinary slot", (unsigned long) (got != 0), 0UL);
+    expect("dormant reserved tail: kept", slot[TX_AMIGA_ADOPT_SLOTS - 1]->as_busy, 1UL);
+
+    /* A dormant ordinary slot, but the kernel is stopping. */
+    make_dormant(slot[3]);
+    _tx_amiga_kernel_stopping = TX_TRUE;
+    got = _tx_amiga_slot_claim_evict_locked((UINT) TX_FALSE);
+    expect("stopping: no slot", (unsigned long) (got != 0), 0UL);
+    expect("stopping: dormant kept", slot[3]->as_busy, 1UL);
+    _tx_amiga_kernel_stopping = TX_FALSE;
+
+    /* The current thread is never a victim, dormant flag or not. */
+    _tx_thread_current_ptr = &slot[3]->as_thread;
+    got = _tx_amiga_slot_claim_evict_locked((UINT) TX_FALSE);
+    expect("current: no slot", (unsigned long) (got != 0), 0UL);
+    _tx_thread_current_ptr = TX_NULL;
+
+    /* Now it is taken back, and the claim lands in the slot it freed. */
+    got = _tx_amiga_slot_claim_evict_locked((UINT) TX_FALSE);
+    expect("dormant: slot claimed", (unsigned long) (got == slot[3]), 1UL);
+    expect("dormant: one discard", discard_calls, 1UL);
+    expect("dormant: ordinary index", (unsigned long) ((ULONG) (got - _tx_amiga_adopt_pool) < ordinary), 1UL);
+    fake_current = (struct Task *) 0;
+}
+
+
 int main(int argc, char **argv)
 {
     const char *which = (argc > 1) ? argv[1] : "";
@@ -345,9 +430,11 @@ int main(int argc, char **argv)
         test_wake();
     else if (strcmp(which, "sweep") == 0)
         test_sweep();
+    else if (strcmp(which, "evict") == 0)
+        test_evict();
     else
     {
-        printf("usage: %s wake|sweep\n", argv[0]);
+        printf("usage: %s wake|sweep|evict\n", argv[0]);
         return 2;
     }
 
