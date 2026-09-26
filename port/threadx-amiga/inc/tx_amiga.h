@@ -166,8 +166,10 @@ UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr, ULONG generation);
 
-/* The run signal an adoption Wait()s on.  Only its Task may FreeSignal() it,
-   so a cached caller keeps it in case a full pool evicts the adoption.  */
+/* Hand the run signal to the caller and make the adoption evictable while
+   dormant.  The caller then frees it, exactly once, when a resume finds the
+   adoption evicted: tx_amiga_adopt_signal_free().  An adoption never handed
+   its signal is never evicted, so no other suspend user can leak one.  */
 ULONG   tx_amiga_adopt_signal(TX_THREAD *thread_ptr);
 VOID    tx_amiga_adopt_signal_free(ULONG sigmask);
 

@@ -54,8 +54,8 @@ static int fake_index(struct Task *task)
 
 TX_THREAD *_tx_thread_current_ptr;
 
-/* The evictor's teardown.  The real one terminates and deletes the TX_THREAD
-   and releases the slot; the slot release is the part the pool can see. */
+/* The evictor's teardown.  The real one terminates and deletes the TX_THREAD,
+   frees the run signal if the caller owns it, and releases the slot. */
 static unsigned discard_calls;
 
 UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation)
@@ -65,6 +65,9 @@ UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation)
     discard_calls++;
     if (slot == (struct _tx_amiga_adopt_slot *) 0)
         return TX_THREAD_ERROR;
+    /* The real one frees the run signal when the caller owns it. */
+    if (thread_ptr->tx_thread_amiga_signal_owner == (VOID *) FindTask((STRPTR) 0))
+        FreeSignal(0);
     _tx_amiga_slot_release_locked(slot);
     return TX_SUCCESS;
 }
@@ -91,7 +94,8 @@ VOID Signal(struct Task *task, ULONG signalSet)
 ULONG Wait(ULONG signalSet)             { return signalSet; }
 ULONG SetSignal(ULONG n, ULONG s)       { (void) n; (void) s; return 0; }
 BYTE  AllocSignal(LONG n)               { (void) n; return -1; }
-VOID  FreeSignal(LONG n)                { (void) n; }
+static unsigned free_signal_calls;
+VOID  FreeSignal(LONG n)                { (void) n; free_signal_calls++; }
 
 UINT tx_amiga_task_alive_locked(struct Task *task)
 {
@@ -366,7 +370,8 @@ static void make_dormant(struct _tx_amiga_adopt_slot *slot)
     slot->as_thread.tx_thread_id          = TX_THREAD_ID;
     slot->as_thread.tx_thread_state       = TX_SUSPENDED;
     slot->as_thread.tx_thread_amiga_flags = TX_AMIGA_THREAD_ADOPTED |
-                                            TX_AMIGA_THREAD_DORMANT;
+                                            TX_AMIGA_THREAD_DORMANT |
+                                            TX_AMIGA_THREAD_CACHED;
 }
 
 static void test_evict(void)
@@ -418,6 +423,30 @@ static void test_evict(void)
     expect("dormant: slot claimed", (unsigned long) (got == slot[3]), 1UL);
     expect("dormant: one discard", discard_calls, 1UL);
     expect("dormant: ordinary index", (unsigned long) ((ULONG) (got - _tx_amiga_adopt_pool) < ordinary), 1UL);
+    _tx_amiga_slot_publish_locked(got);
+    got->as_thread.tx_thread_id          = TX_THREAD_ID;
+    got->as_thread.tx_thread_state       = TX_TCP_IP;
+    got->as_thread.tx_thread_amiga_flags = TX_AMIGA_THREAD_ADOPTED;
+
+    /* Dormant but never handed its signal (a direct port user): kept, or its
+       signal would leak with nobody to free it. */
+    make_dormant(slot[5]);
+    slot[5]->as_thread.tx_thread_amiga_flags &= ~TX_AMIGA_THREAD_CACHED;
+    got = _tx_amiga_slot_claim_evict_locked((UINT) TX_FALSE);
+    expect("not cached: no slot", (unsigned long) (got != 0), 0UL);
+    expect("not cached: kept", slot[5]->as_busy, 1UL);
+
+    /* The same Task evicts its own adoption on another base: the signal is
+       freed once, by the owner's stale resume, not also by the teardown. */
+    make_dormant(slot[7]);
+    slot[7]->as_thread.tx_thread_amiga_signal_owner = (VOID *) fake_current;
+    slot[7]->as_thread.tx_thread_amiga_run_signal   = 0x100UL;
+    free_signal_calls = 0U;
+    got = _tx_amiga_slot_claim_evict_locked((UINT) TX_FALSE);
+    expect("same Task: slot claimed", (unsigned long) (got == slot[7]), 1UL);
+    expect("same Task: teardown frees nothing", free_signal_calls, 0U);
+    tx_amiga_adopt_signal_free(0x100UL);        /* nc_free_evicted_signal */
+    expect("same Task: owner frees it once", free_signal_calls, 1U);
     fake_current = (struct Task *) 0;
 }
 

@@ -287,6 +287,7 @@ char   *execbase;
 #define TX_AMIGA_THREAD_ORPHANED                0x0004U   /* woken but no longer ours */
 #define TX_AMIGA_THREAD_GREEN                   0x0008U   /* green: no Exec Task     */
 #define TX_AMIGA_THREAD_DORMANT                 0x0010U   /* cached, outside the stack */
+#define TX_AMIGA_THREAD_CACHED                  0x0020U   /* owner keeps the run signal */
 
 
 #define TX_BLOCK_POOL_EXTENSION

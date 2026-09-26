@@ -437,23 +437,8 @@ struct Task *me;
 ULONG tx_amiga_adopt_signal(TX_THREAD *thread_ptr)
 {
 
+    thread_ptr -> tx_thread_amiga_flags |=  TX_AMIGA_THREAD_CACHED;
     return(thread_ptr -> tx_thread_amiga_run_signal);
-}
-
-
-/* Free a run signal whose adoption a foreign teardown took; 0 is a no-op.  */
-VOID tx_amiga_adopt_signal_free(ULONG sigmask)
-{
-
-BYTE    sig;
-
-
-    sig =  _tx_amiga_sigbit(sigmask);
-    if (sig >= 0)
-    {
-        SetSignal(0UL, sigmask);
-        FreeSignal(sig);
-    }
 }
 
 

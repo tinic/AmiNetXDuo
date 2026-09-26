@@ -525,13 +525,36 @@ struct _tx_amiga_adopt_slot *slot;
 }
 
 
+/* Free the run signal of an adoption the evictor took; 0 is a no-op.  Called
+   by the owner, which is the only Task that may.  */
+VOID tx_amiga_adopt_signal_free(ULONG sigmask)
+{
+
+LONG    sig;
+
+
+    if (sigmask == 0UL)
+    {
+        return;
+    }
+
+    SetSignal(0UL, sigmask);
+    for (sig = 0; (sigmask >>= 1) != 0UL; sig++)
+    {
+    }
+    FreeSignal(sig);
+}
+
+
 /* Take a slot back from a DORMANT cached adoption.  Caller holds Forbid().
 
    A cached bracket keeps its slot for the life of its bsdsocket base, so the
    slots were a cap on OPENERS, and the sixteenth waited for a CloseLibrary()
    the others had no reason to make (#67).  tx_amiga_adopt_suspend() marks an
    adoption dormant between calls: its Task is outside the stack and holds
-   neither the baton nor any NetX object, so the TX_THREAD can go.  The owner's
+   neither the baton nor any NetX object, so the TX_THREAD can go -- if its
+   owner took the run signal (tx_amiga_adopt_signal), which only the
+   AmiNetCaller cache does.  The owner's
    next tx_amiga_adopt_resume() fails the generation test and
    ami_netstack_enter_cached() adopts afresh, freeing the run signal it kept
    in nc_Signal.  Round-robin, so one opener is not the victim every time.  */
@@ -568,9 +591,15 @@ ULONG                        limit;
             (thread_ptr != _tx_thread_current_ptr) &&
             (thread_ptr -> tx_thread_state == TX_SUSPENDED) &&
             ((thread_ptr -> tx_thread_amiga_flags &
-              (TX_AMIGA_THREAD_DORMANT | TX_AMIGA_THREAD_DIE |
-               TX_AMIGA_THREAD_ORPHANED)) == TX_AMIGA_THREAD_DORMANT))
+              (TX_AMIGA_THREAD_DORMANT | TX_AMIGA_THREAD_CACHED |
+               TX_AMIGA_THREAD_DIE | TX_AMIGA_THREAD_ORPHANED)) ==
+             (TX_AMIGA_THREAD_DORMANT | TX_AMIGA_THREAD_CACHED)))
         {
+            /* The run signal is the cached owner's to free, once: without
+               this a Task evicting its own adoption on another base would
+               free it here and again on its stale resume.  */
+            thread_ptr -> tx_thread_amiga_signal_owner =  (VOID *) 0;
+
             return((tx_amiga_discard_thread(thread_ptr, slot -> as_generation)
                     == TX_SUCCESS) ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE));
         }
