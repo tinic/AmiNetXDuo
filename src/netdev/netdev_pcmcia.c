@@ -26,7 +26,9 @@ struct Library *CardResource;
 /*
  * card.resource stubs: no proto header works on both toolchains.  LVOs:
  * OwnCard -0x06(a1), ReleaseCard -0x0c(a1,d0), CardMiscControl -0x30(a1,d1),
- * CopyTuple -0x48(a1,a0,d1,d0).
+ * CopyTuple -0x48(a1,a0,d1,d0).  Every one may destroy d0/d1/a0/a1, so each
+ * of those is an output ("+r" when it also carries an argument) or a clobber;
+ * an argument register listed only as an input was reused stale (#70).
  */
 
 static struct CardHandle *pc_own_card(struct CardHandle *h)
@@ -36,8 +38,8 @@ static struct CardHandle *pc_own_card(struct CardHandle *h)
     register struct CardHandle *res __asm("d0");
 
     __asm __volatile ("jsr a6@(-0x6)"
-                      : "=r" (res)
-                      : "r" (_a6), "r" (_a1)
+                      : "=r" (res), "+r" (_a1)
+                      : "r" (_a6)
                       : "d1", "a0", "cc", "memory");
 
     return res;
@@ -50,8 +52,8 @@ static VOID pc_release_card(struct CardHandle *h, ULONG flags)
     register ULONG              _d0 __asm("d0") = flags;
 
     __asm __volatile ("jsr a6@(-0xc)"
-                      : "+r" (_d0)
-                      : "r" (_a6), "r" (_a1)
+                      : "+r" (_d0), "+r" (_a1)
+                      : "r" (_a6)
                       : "d1", "a0", "cc", "memory");
 }
 
@@ -62,8 +64,8 @@ static BOOL pc_reset_card(struct CardHandle *h)
     register LONG               res __asm("d0");
 
     __asm __volatile ("jsr a6@(-0x42)"
-                      : "=r" (res)
-                      : "r" (_a6), "r" (_a1)
+                      : "=r" (res), "+r" (_a1)
+                      : "r" (_a6)
                       : "d1", "a0", "cc", "memory");
 
     return (BOOL)(res != 0);
@@ -77,8 +79,8 @@ static UBYTE pc_misc_control(struct CardHandle *h, UBYTE bits)
     register LONG               res __asm("d0");
 
     __asm __volatile ("jsr a6@(-0x30)"
-                      : "=r" (res)
-                      : "r" (_a6), "r" (_a1), "r" (_d1)
+                      : "=r" (res), "+r" (_a1), "+r" (_d1)
+                      : "r" (_a6)
                       : "a0", "cc", "memory");
 
     return (UBYTE)res;
@@ -95,8 +97,8 @@ static BOOL pc_copy_tuple(struct CardHandle *h, UBYTE *buf, ULONG code,
     register LONG               res __asm("d0");
 
     __asm __volatile ("jsr a6@(-0x48)"
-                      : "=r" (res)
-                      : "r" (_a6), "r" (_a1), "r" (_a0), "r" (_d1), "0" (_d0)
+                      : "=r" (res), "+r" (_a1), "+r" (_a0), "+r" (_d1)
+                      : "r" (_a6), "0" (_d0)
                       : "cc", "memory");
 
     return (BOOL)(res != 0);
