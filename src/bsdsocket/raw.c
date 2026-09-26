@@ -705,7 +705,9 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
 #ifdef AMINETXDUO_MULTICAST
-    if (mcast_if >= 0)
+    /* Per-packet IP_PKTINFO takes precedence over the socket's multicast
+       interface, as it does for UDP sends. */
+    if (mcast_if >= 0 && (src == NULL || !src->cs_Have))
     {
         source    = BSD_SOURCE_INDEX;
         src_index = (UINT)mcast_if;
