@@ -9,9 +9,28 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 1.0.0-beta6
+
 - `InstallNetProbe` reads a PC Card's manufacturer ID with the card handle it just claimed.
 - `anxnet.device` on a PC Card slot records the correct I/O mode in its diagnostic record.
-- The installer can set the clock from an Internet time server at boot; the answer defaults to no.
+- The installer can optionally run `sntp` at boot after `AddNetInterface`,
+  using a chosen time server. The answer defaults to no and the server prompt
+  defaults to `pool.ntp.org`.
+- Multicast loopback follows the sending socket's option, including raw
+  sockets. Memberships and send preferences from a removed interface expire
+  before its slot is reused by another card.
+- `NetPrefs` has a SANA-II device picker. Status tools report complete driver
+  paths, and `AddNetInterface` accepts a full-path `DEVICE=` setting and
+  explains when a renamed file contains a driver with a different internal
+  name.
+- Removing an interface no longer releases its memory or unloads the stack
+  while its device still holds I/O requests. A held device and unit cannot be
+  reopened until those requests are returned.
+- TCP half-open connections tied to a removed interface or deleted IPv6
+  address are discarded instead of retrying through a stale or reused slot.
+- Known test limitation: the emulator's four-connection loopback socket-churn
+  stress test times out under packet-pool pressure. This predates beta6; no
+  ordinary-workload failure has been confirmed, and the cause is unknown.
 - `SO_REUSEPORT` on a UDP socket now shares the port instead of being ignored,
   and `SO_REUSEADDR` opts into the same sharing for callers that know only that
   one. Two sockets that both set either before `bind()` may hold one port, a
