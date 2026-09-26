@@ -328,9 +328,10 @@ register APTR            a2  __asm("a2") = fromlen;
 register LONG            res __asm("d0");
 register LONG _s_d1 __asm("d1");
 register LONG _s_a0 __asm("a0");
+register LONG _s_a1 __asm("a1");       /* the library trashes a1 too */
 
     __asm __volatile ("jsr a6@(-72:W)"
-                      : "=r" (_s_d1), "=r" (_s_a0), "=r" (res)
+                      : "=r" (_s_d1), "=r" (_s_a0), "=r" (_s_a1), "=r" (res)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
                         "r" (a1), "r" (a2)
                       : "cc", "memory");
