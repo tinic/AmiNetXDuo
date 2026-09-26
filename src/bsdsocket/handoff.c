@@ -184,9 +184,15 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     return id;
 }
 
-/* Is anything parked?  Read under sb_Lock, by bsd_handoff_flush() only:
-   bsd_lib_close() takes its bracket unconditionally, outside the lock, and does
-   not read this first. */
+/* Open-coded NewList() for a MinList of entries. */
+static VOID bsd_handoff_list_init(struct MinList *list)
+{
+    list->mlh_Head     = (struct MinNode *)&list->mlh_Tail;
+    list->mlh_Tail     = NULL;
+    list->mlh_TailPred = (struct MinNode *)&list->mlh_Head;
+}
+
+/* Is anything parked?  Read under sb_Lock. */
 BOOL bsd_handoff_pending(struct AmiSocketBase *master)
 {
     return master->sb_Handoffs.mlh_Head != NULL &&
@@ -194,21 +200,35 @@ BOOL bsd_handoff_pending(struct AmiSocketBase *master)
 }
 
 /*
- * Release everything still parked. Called from bsd_lib_close() when the last
- * opener goes away. At that point no base exists that can obtain them, and the
- * caller owns sb_Lock and, when `bracketed`, the ThreadX bracket as well.
+ * Move everything parked onto `out`, emptying the registry.  The caller holds
+ * sb_Lock and NOT the bracket: bsd_stack_close_gate() for the last opener.
  */
-VOID bsd_handoff_flush(struct AmiSocketBase *base, BOOL bracketed)
+VOID bsd_handoff_take(struct AmiSocketBase *master, struct MinList *out)
 {
-    struct AmiSocketBase *master = bsd_master_of(base);
+    bsd_handoff_list_init(out);
 
     if (!bsd_handoff_pending(master))
-        return;                                 /* empty, nothing to do */
+        return;
 
+    out->mlh_Head               = master->sb_Handoffs.mlh_Head;
+    out->mlh_TailPred           = master->sb_Handoffs.mlh_TailPred;
+    out->mlh_Head->mln_Pred     = (struct MinNode *)&out->mlh_Head;
+    out->mlh_TailPred->mln_Succ = (struct MinNode *)&out->mlh_Tail;
+
+    bsd_handoff_list_init(&master->sb_Handoffs);
+}
+
+/*
+ * Release what bsd_handoff_take() detached.  No base exists that can obtain
+ * them any more and the list is the caller's, so no lock: the caller holds the
+ * bracket when `bracketed`, and nothing else.
+ */
+VOID bsd_handoff_flush(struct AmiSocketBase *base, struct MinList *list,
+                       BOOL bracketed)
+{
     for (;;)
     {
-        BsdHandoff *entry =
-            (BsdHandoff *)RemHead((struct List *)&master->sb_Handoffs);
+        BsdHandoff *entry = (BsdHandoff *)RemHead((struct List *)list);
 
         if (entry == NULL)
             break;
