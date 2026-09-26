@@ -1206,6 +1206,19 @@ static void case_filter_everything(void)
         (VOID)ami_sana2_close(iface);
 }
 
+static void case_bursty_wifi_reads(void)
+{
+    printf("  WiFiPi has a burst-aware read default without changing wired cards\n");
+    h_check(ami_sana2_default_ip_reads("DEVS:Networks/anxwifipi.device") == 64,
+            "the shipped WiFiPi driver gets 64 reads by default");
+    h_check(ami_sana2_default_ip_reads("WIFIPI.DEVICE") == 64,
+            "the upstream driver name is recognized case-insensitively");
+    h_check(ami_sana2_default_ip_reads("genet.device") == 0,
+            "a wired driver keeps the ordinary BPS ladder");
+    h_check(ami_sana2_default_ip_reads(NULL) == 0,
+            "an unnamed driver keeps the ordinary BPS ladder");
+}
+
 int main(void)
 {
     printf("sana2 device: open, online, offline, close\n");
@@ -1230,6 +1243,7 @@ int main(void)
     case_keeps_online();
     case_request_counts();
     case_filter_everything();
+    case_bursty_wifi_reads();
 
     h_check(ami_sana2_retained_count() == 0, "nothing is left retained");
     h_check(h_ports_made > 0, "reply ports were created");

@@ -1462,6 +1462,28 @@ ULONG ami_sana2_known_rx_bytes(const char *device)
     return 0;
 }
 
+/* WiFiPi delivers several Ethernet packets from one SDIO glom before the
+ * reader task can re-post completed CMD_READs.  Its fixed 100 Mbit/s device
+ * query lands on the ordinary 32-read LAN rung, while the receive counters
+ * show missing reads during inbound transfers.  Give only this driver a
+ * 64-read default; an explicit IPREQUESTS still wins, and rx_plan() still
+ * enforces the shared packet-pool budget.  The transfer benefit needs a
+ * focused hardware A/B measurement. */
+UWORD ami_sana2_default_ip_reads(const char *device)
+{
+    const char *base;
+
+    if (device == NULL)
+        return 0;
+
+    base = ami_sana2_basename(device);
+    if (ami_str_iequal(base, "anxwifipi.device") ||
+        ami_str_iequal(base, "wifipi.device"))
+        return 64;
+
+    return 0;
+}
+
 BOOL ami_sana2_is_online(const AmiSana2If *iface)
 {
     return (iface != NULL) ? iface->online : FALSE;

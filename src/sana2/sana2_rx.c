@@ -2771,6 +2771,7 @@ VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
 LONG ami_sana2_rx_start(AmiSana2If *iface)
 {
     UWORD       i;
+    UWORD       ask_ip;
     AmiRxDepths depths;
     UINT        txstatus;
 
@@ -2788,9 +2789,13 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
     if (iface->pool == NULL || iface->ip == NULL)
         return -1;
 
+    ask_ip = iface->rx_want_ip;
+    if (ask_ip == 0)
+        ask_ip = ami_sana2_default_ip_reads(iface->device);
+
     ami_sana2_rx_plan(iface->bps, iface->pool->nx_packet_pool_total,
                       (BOOL)(AMI_SANA2_RX_READERS == 3),
-                      ami_sana2_bound_count(), iface->rx_want_ip,
+                      ami_sana2_bound_count(), ask_ip,
                       iface->rx_want_arp, &depths);
 
     AMI_INFO("sana2: read queues ip %ld arp %ld ip6 %ld "
