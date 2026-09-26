@@ -788,16 +788,15 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
      * wants the NewStyle form from an 88-byte allocation sets mn_Length to
      * sizeof(struct IOStdReq).
      *
-     * Any other request is an IOStdReq, and offsets 72 and 76 may be past
-     * its end: the IOStdReq form only.  That includes mn_Length 0 (#64),
-     * unlike Open, Close and BeginIO: a hand-built 48-byte IOStdReq with no
-     * length is the NewStyle spec's form, and the only SANA-II-form sender,
-     * mcastfilter, sets mn_Length.
+     * A request that STATES a shorter length is an IOStdReq, and offsets 72
+     * and 76 may be past its end: the IOStdReq form only.  mn_Length 0 is a
+     * full request here exactly as in Open, Close and BeginIO; a real 48-byte
+     * IOStdReq must say so in mn_Length.
      *
      * The minimum is the size written, not a literal 16: that is the m68k
      * layout, and the host's is wider.
      */
-    if (io->ios2_Req.io_Message.mn_Length >= sizeof(struct IOSana2Req))
+    if (NETDEV_IO_IS_FULL(io))
     {
         if (io->ios2_Data != NULL &&
             io->ios2_DataLength >= sizeof(struct NetdevNSQuery))

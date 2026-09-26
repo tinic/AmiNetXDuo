@@ -864,83 +864,6 @@ static void nsd_sana(struct IOSana2Req *io, UWORD mn_length)
     io->ios2_Req.io_Command           = NSCMD_DEVICEQUERY;
 }
 
-/*
- * ISSUE #64.  A hand-built 48-byte IOStdReq with mn_Length 0 sending
- * NSCMD_DEVICEQUERY.  The request sits at the head of a canaried frame whose
- * tail plants a plausible SANA-II form: ios2_Data naming a decoy answer and
- * ios2_DataLength big enough.  A query that read the SANA-II fields past the
- * IOStdReq would answer into the decoy and write ios2_DataLength and
- * ios2_WireError in the tail.
- */
-typedef struct
-{
-    struct IOStdReq std;
-    UBYTE           tail[sizeof(struct IOSana2Req) + 32 - sizeof(struct IOStdReq)];
-} NsdFrame;
-
-static NsdAnswer nsd_decoy;
-
-static void nsd_frame(NsdFrame *f)
-{
-    struct IOSana2Req *wide = (struct IOSana2Req *)f;
-
-    memset(f, 0xa5, sizeof(*f));
-    wide->ios2_Data             = &nsd_decoy;    /* in the tail */
-    wide->ios2_DataLength       = NSD_SIZE + 8; /* the old code wrote NSD_SIZE */
-    wide->ios2_WireError        = 0xa5a5a5a5UL;
-    memset(&f->std.io_Message.mn_Node, 0, sizeof(f->std.io_Message.mn_Node));
-    f->std.io_Message.mn_Length = 0;             /* built by hand, unset */
-    f->std.io_Command           = NSCMD_DEVICEQUERY;
-    f->std.io_Flags             = 0;
-    f->std.io_Error             = 0;
-    f->std.io_Actual            = 0;
-    f->std.io_Data              = NULL;
-    f->std.io_Length            = 0;
-}
-
-static int nsd_frame_tail_intact(const NsdFrame *f)
-{
-    NsdFrame ref;
-
-    nsd_frame(&ref);
-    return memcmp(f->tail, ref.tail, sizeof(ref.tail)) == 0;
-}
-
-static void i3_nsquery_zero_length_iostdreq(void)
-{
-    NsdFrame  f;
-    NsdAnswer a;
-
-    /* The NewStyle form: answered into io_Data, byte count in io_Actual. */
-    reset();
-    nsd_frame(&f);
-    nsd_answer_init(&nsd_decoy);
-    nsd_answer_init(&a);
-    f.std.io_Data   = &a;
-    f.std.io_Length = NSD_SIZE;
-    netdev_nsd_query((struct IOSana2Req *)&f);
-    expect_u32("a zero-length 48-byte IOStdReq query is answered",
-               (unsigned long)(UBYTE)f.std.io_Error, 0);
-    expect_u32("  into io_Data", (unsigned long)a.SizeAvailable, NSD_SIZE);
-    expect_u32("  io_Actual is the byte count", (unsigned long)f.std.io_Actual, NSD_SIZE);
-    expect(nsd_canary_intact(&a), "  within its 16 bytes");
-    expect(nsd_answer_untouched(&nsd_decoy),
-           "  and ios2_Data past the IOStdReq is not read as a buffer");
-    expect(nsd_frame_tail_intact(&f),
-           "  and not one byte past the 48-byte IOStdReq was written");
-    expect(replies == 1, "  and it was replied to");
-
-    /* No io_Data: refused, and the SANA-II form past the end is not tried. */
-    reset();
-    nsd_frame(&f);
-    nsd_answer_init(&nsd_decoy);
-    netdev_nsd_query((struct IOSana2Req *)&f);
-    expect_u32("a zero-length IOStdReq with no io_Data is refused",
-               (unsigned long)(UBYTE)f.std.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
-    expect(nsd_answer_untouched(&nsd_decoy), "  and the decoy past its end is not written");
-    expect(nsd_frame_tail_intact(&f), "  nor any byte past the IOStdReq");
-}
-
 static void i2_nsquery_both_forms(void)
 {
     struct IOSana2Req io;
@@ -1006,9 +929,8 @@ static void i2_nsquery_both_forms(void)
     expect(nsd_answer_untouched(&b), "  and not written");
     expect(replies == 1, "  and the refusal is replied to");
 
-    /* 5. mn_Length 0 is the NewStyle spec's IOStdReq form here (#64): only
-          mcastfilter sends the SANA-II form, and it sets mn_Length.  Pinned
-          on a real 48-byte frame in i3_nsquery_zero_length_iostdreq. */
+    /* 5. mn_Length 0 is a full request, here as in Open/Close/BeginIO: the
+          SANA-II form answers, and io_Data is never read. */
     reset();
     nsd_sana(&io, 0);
     nsd_answer_init(&a);
@@ -1018,9 +940,19 @@ static void i2_nsquery_both_forms(void)
     std->io_Data       = &a;
     std->io_Length     = NSD_SIZE;
     netdev_nsd_query(&io);
-    expect_u32("a length-less request is answered in the IOStdReq form",
-               (unsigned long)a.SizeAvailable, NSD_SIZE);
-    expect(nsd_answer_untouched(&b), "  and its ios2_Data is not written");
+    expect_u32("a length-less request is answered in the SANA-II form",
+               (unsigned long)b.SizeAvailable, NSD_SIZE);
+    expect(nsd_answer_untouched(&a), "  and its io_Data is not written");
+
+    reset();
+    nsd_sana(&io, 0);
+    nsd_answer_init(&a);
+    std->io_Data   = &a;
+    std->io_Length = NSD_SIZE;
+    netdev_nsd_query(&io);
+    expect_u32("a length-less request with only io_Data is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect(nsd_answer_untouched(&a), "  and io_Data is not written");
 
     /* 6. A short request (a 48-byte IOStdReq): same, and it says so itself. */
     reset();
@@ -2242,7 +2174,6 @@ int main(void)
     h_devicequery_honours_sizeavailable();
     i_nsquery_replies_by_hand();
     i2_nsquery_both_forms();
-    i3_nsquery_zero_length_iostdreq();
     j_the_advertised_list_is_the_real_one();
     k_unknown_commands();
     l_onevent_masks();

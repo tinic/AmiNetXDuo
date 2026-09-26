@@ -21,8 +21,6 @@ version at the top when it merges.
 - Stored IPv6 scope IDs and `IPV6_PKTINFO` interface choices expire when an
   interface slot is removed and reused; they cannot silently name the new
   interface.
-- `NSCMD_DEVICEQUERY` also accepts a plain `IOStdReq` whose `mn_Length` is
-  zero, without reading SANA-II-only fields beyond that request.
 - The last socket-library opener drains parked closing sockets even when an
   asynchronous worker still holds the stack. If NetX refuses IP deletion,
   its live stack memory is retained instead of being freed under the IP thread.
