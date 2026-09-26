@@ -541,6 +541,18 @@ stage_host() {
         return 1
     fi
 
+    # Which CI run a release is cut from: a docs-only push builds no
+    # candidate, so the selector must find the run that uploaded one.
+    if tools/check-ci-success-selftest.sh > "$BUILD/ci-success-selftest.log" 2>&1; then
+        note "release run selector: $(sed -n \
+              's/^check_ci_success_selftest=PASS //p' \
+              "$BUILD/ci-success-selftest.log")"
+    else
+        cat "$BUILD/ci-success-selftest.log"
+        fail "tools/check-ci-success.sh selftest"
+        return 1
+    fi
+
     # The installer must not move a live library aside before it has the new
     # one on the disk.  Text order, so it costs nothing and runs everywhere.
     if tools/check-installer-transaction.sh > "$BUILD/installer-txn.log" 2>&1; then

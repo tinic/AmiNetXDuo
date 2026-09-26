@@ -303,6 +303,7 @@ jobs:
             tools/ci.sh \
             tools/ci-plan.sh \
             tools/check-ci-success.sh \
+            tools/check-ci-success-selftest.sh \
             tools/check-release-candidate.sh \
             tools/build-release.sh \
             tools/stage-developer.sh \
