@@ -328,11 +328,3 @@ int main(void)
 ULONG netstack_interface_epoch(UWORD index) { (VOID)index; return 0; }
 
 #include "socket.c"
-
-/* The scope checks in socket.c (#51) ask for a slot's epoch; no case here
-   binds a scoped address. */
-ULONG netstack_interface_epoch(UWORD index)
-{
-    (VOID)index;
-    return 0UL;
-}

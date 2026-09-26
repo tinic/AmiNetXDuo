@@ -229,8 +229,6 @@ ULONG netstack_interface_epoch(UWORD index) { (VOID)index; return 0; }
 /* A trap never reads its arguments. */
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #define H_TRAP(decl) decl { printf("  TRAP %s\n", __func__); abort(); }
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
 H_TRAP(UINT _nxe_tcp_socket_create(NX_IP *ip, NX_TCP_SOCKET *s, CHAR *n,
        ULONG tos, ULONG frag, UINT ttl, ULONG win,
        VOID (*urg)(NX_TCP_SOCKET *), VOID (*disc)(NX_TCP_SOCKET *), UINT size))
@@ -263,8 +261,6 @@ H_TRAP(VOID bsd_tcp_urgent_notify(NX_TCP_SOCKET *s))
    back a v4-mapped peer. */
 H_TRAP(UINT anx6_scope(const ULONG *addr))
 H_TRAP(VOID bsd_addr_to_v4mapped(NXD_ADDRESS *addr, ULONG v4))
-H_TRAP(ULONG netstack_interface_epoch(UWORD index))
-#pragma GCC diagnostic pop
 
 /* ---- the test ------------------------------------------------------------ */
 
