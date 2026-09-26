@@ -344,7 +344,9 @@ BOOL bsd_cork_stop(VOID)
         sock->as_CorkNext = NULL;
 
         /* Only an IDLE segment is the stop's.  One a pass or a task holds
-           stays with its holder, which hands it back IDLE, unlinked. */
+           stays with its holder, which hands it back IDLE and relinks it
+           on the armed list (bsd_cork_unclaim) -- the list a refused stop
+           takes again as bsd_cork_unproven. */
         Forbid();
         pkt = (sock->as_CorkState == BSD_CORK_IDLE) ? sock->as_CorkPkt : NULL;
         if (pkt != NULL)
