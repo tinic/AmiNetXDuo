@@ -256,6 +256,10 @@ NX_IP *netstack_ip(VOID)
     return &h_ip;
 }
 
+/* socket.c's, which transfer.c reads the stored zone through (#51); no case
+   here stores a scope id. */
+ULONG bsd_scope_live(ULONG scope, ULONG epoch) { (VOID)epoch; return scope; }
+
 NX_PACKET_POOL *netstack_pool(VOID)
 {
     return h.no_pool ? NULL : &h_pool;
