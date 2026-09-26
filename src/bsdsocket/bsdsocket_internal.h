@@ -270,6 +270,7 @@ struct AmiSocketBase
     struct MinList          sb_Children;
     ULONG                   sb_StackRefs;   /* openers and explicit holds    */
     ULONG                   sb_TransientStackRefs; /* async workers, no base */
+    ULONG                   sb_StackClosing; /* closers past the drain gate  */
     NX_IP                  *sb_StackIp;     /* valid while master refs != 0 */
     NX_PACKET_POOL         *sb_StackPool;   /* same lifetime as sb_StackIp   */
 
@@ -417,13 +418,16 @@ static inline NX_PACKET_POOL *bsd_stack_pool(const struct AmiSocketBase *base)
     return master->sb_StackPool;
 }
 
-/* The closing opener is the last one that is not an async worker's transient
-   hold: parked closing sockets are drained now, since nothing else will
-   before the worker's release tears the stack down (#53). */
+/* The closing opener is the last one that is neither an async worker's
+   transient hold nor a closer already past its drain gate: parked closing
+   sockets are drained now, since nothing else will before the stack goes
+   (#53).  Read under sb_Lock. */
 static inline BOOL bsd_stack_last_opener(const struct AmiSocketBase *master)
 {
-    return master->sb_StackRefs >= master->sb_TransientStackRefs &&
-           master->sb_StackRefs - master->sb_TransientStackRefs <= 1;
+    ULONG others = master->sb_TransientStackRefs + master->sb_StackClosing;
+
+    return master->sb_StackRefs >= others &&
+           master->sb_StackRefs - others <= 1;
 }
 
 #define ASF_TCP         (1UL <<  0)
@@ -790,6 +794,12 @@ LONG  bsd_stack_interface_remove_named(struct AmiSocketBase *base,
 LONG  bsd_stack_transient_hold(struct AmiSocketBase *base);
 VOID  bsd_stack_transient_release(struct AmiSocketBase *base);
 
+/* library.c, a closing opener's drain gate and its reference release.  The
+   gate runs inside the base's bracket once its own sockets are parked; the
+   release is the one that decrements sb_StackRefs. */
+VOID  bsd_stack_close_gate(struct AmiSocketBase *base);
+BOOL  bsd_stack_close_release(struct AmiSocketBase *master, BOOL gated);
+
 /* library.c, the shutdown pair.  bsd_stack_unhold() gives that reference back.
    It returns 0 on success, -1 when the caller is the only one left holding the
    stack up.  bsd_stack_notify() signals every other opener and reports how
@@ -857,7 +867,9 @@ LONG       bsd_table_resize(struct AmiSocketBase *base, LONG size);
    allocated as well as after. */
 LONG       bsd_table_size(struct AmiSocketBase *base);
 
-VOID       bsd_close_all(struct AmiSocketBase *base);
+/* TRUE when the base passed bsd_stack_close_gate(), so its release owes
+   sb_StackClosing back. */
+BOOL       bsd_close_all(struct AmiSocketBase *base);
 
 /* bpf.c, release the capture channels this base opened. A no-op in a build
    without AMINETXDUO_BPF. Never blocks; bsd_child_destroy() calls it. */

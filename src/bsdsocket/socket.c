@@ -937,13 +937,13 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
         bsd_socket_dispose(sock);
 }
 
-VOID bsd_close_all(struct AmiSocketBase *base)
+BOOL bsd_close_all(struct AmiSocketBase *base)
 {
     LONG fd;
     BOOL bracketed;
 
     if (base->sb_Table == NULL)
-        return;
+        return FALSE;
 
     bracketed = (bsd_nx_enter(base) == 0);
     if (!bracketed)
@@ -967,14 +967,16 @@ VOID bsd_close_all(struct AmiSocketBase *base)
     }
 
     if (!bracketed)
-        return;
+        return FALSE;
 
     bsd_closing_sweep();
 
-    if (base->sb_Master != NULL && bsd_stack_last_opener(base->sb_Master))
-        bsd_closing_drain();
+    if (base->sb_Master != NULL)
+        bsd_stack_close_gate(base);
 
     bsd_nx_leave(base);
+
+    return base->sb_Master != NULL;
 }
 
 VOID bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4)

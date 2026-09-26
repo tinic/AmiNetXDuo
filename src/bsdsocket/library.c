@@ -326,6 +326,7 @@ static struct AmiSocketBase *bsd_lib_init(
     bsd_new_list(&base->sb_Children);
     base->sb_StackRefs          = 0;
     base->sb_TransientStackRefs = 0;
+    base->sb_StackClosing       = 0;
     base->sb_StackIp            = NULL;
     base->sb_StackPool          = NULL;
     base->sb_StackHeld          = FALSE;
@@ -525,6 +526,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     bsd_bzero(&child->sb_Handoffs, sizeof(child->sb_Handoffs));
     child->sb_StackRefs          = 0;
     child->sb_TransientStackRefs = 0;
+    child->sb_StackClosing       = 0;
     child->sb_StackIp            = NULL;
     child->sb_StackPool          = NULL;
     child->sb_StackHeld          = FALSE;
@@ -592,13 +594,14 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     return child;
 }
 
-static VOID bsd_child_destroy(struct AmiSocketBase *child)
+static BOOL bsd_child_destroy(struct AmiSocketBase *child)
 {
     struct AmiSocketBase *master = child->sb_Master;
     ULONG                 neg    = child->sb_Lib.lib_NegSize;
     ULONG                 pos    = child->sb_Lib.lib_PosSize;
+    BOOL                  gated;
 
-    bsd_close_all(child);
+    gated = bsd_close_all(child);
 
     bsd_bpf_close_all(child);
 
@@ -638,6 +641,8 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     ami_mem_open_delta(-1);
 
     bsd_retain_dead((UBYTE *)child - neg, neg, neg + pos, child->sb_Task);
+
+    return gated;
 }
 
 /* NetX Duo initialisation needs more stack than a Shell command promises. */
@@ -1066,19 +1071,8 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         if (bracketed)
             bsd_nx_leave(base);
 
-        bsd_child_destroy(base);
-
-        /*
-         * The teardown runs with the lock held, and has to: the decrement that
-         * reaches zero and the shutdown it triggers are one step. If the lock
-         */
-        ObtainSemaphore(&master->sb_Lock);
-        if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
-        {
-            bsd_netstack_shutdown_owned(master);
-            unload_is_safe = netstack_can_unload();
-        }
-        ReleaseSemaphore(&master->sb_Lock);
+        unload_is_safe = bsd_stack_close_release(master,
+                                                 bsd_child_destroy(base));
 
         if (unload_is_safe)
             AMI_CENSUS_REPORT("bsd-stack-down");
@@ -1092,6 +1086,50 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         return bsd_lib_expunge(master);
 
     return NULL;
+}
+
+/*
+ * A closing opener's drain gate, from bsd_close_all() inside the base's
+ * bracket once its own sockets are parked.  Deciding and counting itself past
+ * the gate are one step under sb_Lock, so of two closers whose close paths
+ * interleave -- the bracket and the lock both Wait(), which breaks Exec's
+ * Forbid -- exactly the later one sees itself last, and nothing is parked
+ * after it: a closer parks before its gate and is counted until its release.
+ */
+VOID bsd_stack_close_gate(struct AmiSocketBase *base)
+{
+    struct AmiSocketBase *master = base->sb_Master;
+
+    ObtainSemaphore(&master->sb_Lock);
+    if (bsd_stack_last_opener(master))
+    {
+        bsd_handoff_flush(base, TRUE);
+        bsd_closing_drain();
+    }
+    master->sb_StackClosing++;
+    ReleaseSemaphore(&master->sb_Lock);
+}
+
+/*
+ * The teardown runs with the lock held, and has to: the decrement that reaches
+ * zero and the shutdown it triggers are one step.  TRUE when the segment may
+ * now unload.
+ */
+BOOL bsd_stack_close_release(struct AmiSocketBase *master, BOOL gated)
+{
+    BOOL unload_is_safe = FALSE;
+
+    ObtainSemaphore(&master->sb_Lock);
+    if (gated && master->sb_StackClosing > 0)
+        master->sb_StackClosing--;
+    if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
+    {
+        bsd_netstack_shutdown_owned(master);
+        unload_is_safe = netstack_can_unload();
+    }
+    ReleaseSemaphore(&master->sb_Lock);
+
+    return unload_is_safe;
 }
 
 /*

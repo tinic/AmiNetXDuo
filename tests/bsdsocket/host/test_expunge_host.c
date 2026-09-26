@@ -378,9 +378,13 @@ LONG ami_netdb_load(VOID)
 BYTE ami_signal_alloc(VOID) { h_unreachable("ami_signal_alloc"); return -1; }
 VOID ami_signal_free(BYTE s) { (VOID)s; h_unreachable("ami_signal_free"); }
 VOID bsd_bpf_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_bpf_close_all"); }
-VOID bsd_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_close_all"); }
+BOOL bsd_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_close_all"); return FALSE; }
+/* The two things the drain gate does for the last opener, counted. */
+static LONG h_flushes;
+static LONG h_drains;
 VOID bsd_handoff_flush(struct AmiSocketBase *b, BOOL bracketed)
-{ (VOID)b; (VOID)bracketed; h_unreachable("bsd_handoff_flush"); }
+{ (VOID)b; (VOID)bracketed; h_flushes++; }
+VOID bsd_closing_drain(VOID) { h_drains++; }
 BOOL bsd_handoff_pending(struct AmiSocketBase *m) { (VOID)m; return FALSE; }
 /* Only a child base's close brackets; this test closes the master. */
 LONG bsd_nx_enter(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_enter"); return -1; }
@@ -704,6 +708,96 @@ static VOID t_transient_last_opener_drains(VOID)
     CHECK(bsd_stack_last_opener(h_base), "the last plain opener drains");
 }
 
+/*
+ * #53's leftover: two openers close at once.  bsd_lib_close() Wait()s in the
+ * bracket and on sb_Lock between A's drain gate (bsd_close_all()) and A's
+ * release, so B's gate can run in that window.  Both used to see two
+ * references and skip the drain, and the stack went down with parked sockets.
+ * The real gate and release, driven in that interleaved order.
+ */
+static struct AmiSocketBase h_child_a;
+static struct AmiSocketBase h_child_b;
+static struct AmiSocketBase h_child_c;
+
+static VOID h_closers_reset(ULONG openers, BOOL worker)
+{
+    h_machine_reset(TRUE);
+    h.stack_running      = TRUE;
+    h_base->sb_StackRefs = openers;
+    if (worker)
+        CHECK(bsd_stack_transient_hold(h_base) == 0, "a worker holds the stack");
+    h_child_a.sb_Master = h_base;
+    h_child_b.sb_Master = h_base;
+    h_child_c.sb_Master = h_base;
+    h_flushes = 0;
+    h_drains  = 0;
+}
+
+static VOID t_concurrent_closers_drain(VOID)
+{
+    printf("two openers closing at the same time\n");
+
+    /* A and B: gate, gate, release, release. */
+    h_closers_reset(2, FALSE);
+    bsd_stack_close_gate(&h_child_a);
+    bsd_stack_close_gate(&h_child_b);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    printf("concurrent_close openers=2 worker=0 drains=%ld flushes=%ld "
+           "shutdowns=%ld closing=%lu\n", (long)h_drains, (long)h_flushes,
+           (long)h.shutdown_calls, (unsigned long)h_base->sb_StackClosing);
+    CHECK(h_drains == 1, "exactly one of two interleaved closers drains");
+    CHECK(h_flushes == 1, "and flushes the handoff list");
+    CHECK(h.shutdown_calls == 1, "the second release tears the stack down");
+    CHECK(h_base->sb_StackClosing == 0, "every gate is given back");
+
+    /* The same with a worker's transient hold outstanding: the worker's
+       release is the one that tears down, after the drain. */
+    h_closers_reset(2, TRUE);
+    bsd_stack_close_gate(&h_child_a);
+    bsd_stack_close_gate(&h_child_b);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    CHECK(h.shutdown_calls == 0, "the worker still holds the stack");
+    bsd_stack_transient_release(h_base);
+    printf("concurrent_close openers=2 worker=1 drains=%ld shutdowns=%ld\n",
+           (long)h_drains, (long)h.shutdown_calls);
+    CHECK(h_drains == 1, "one drain before the worker's teardown");
+    CHECK(h.shutdown_calls == 1, "the worker's release tears the stack down");
+
+    /* Three closers: A gates, B gates, A releases, C gates, C and B release.
+       C is the last to gate and the only one to drain. */
+    h_closers_reset(3, FALSE);
+    bsd_stack_close_gate(&h_child_a);
+    bsd_stack_close_gate(&h_child_b);
+    CHECK(h_drains == 0, "no drain while C is still open");
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    bsd_stack_close_gate(&h_child_c);
+    CHECK(h_drains == 1, "C's gate drains");
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    CHECK(h_drains == 1 && h.shutdown_calls == 1,
+          "one drain, one teardown, with three interleaved closers");
+
+    /* Serialised, as before: gate, release, gate, release. */
+    h_closers_reset(2, FALSE);
+    bsd_stack_close_gate(&h_child_a);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    CHECK(h_drains == 0, "the first of two serial closers leaves the sockets");
+    bsd_stack_close_gate(&h_child_b);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    CHECK(h_drains == 1 && h.shutdown_calls == 1,
+          "the second serial closer drains");
+
+    /* A closer that never reached the gate (kernel down) owes nothing. */
+    h_closers_reset(2, FALSE);
+    (VOID)bsd_stack_close_release(h_base, FALSE);
+    bsd_stack_close_gate(&h_child_b);
+    (VOID)bsd_stack_close_release(h_base, TRUE);
+    CHECK(h_drains == 1 && h_base->sb_StackClosing == 0,
+          "an ungated release leaves the count alone");
+}
+
 #ifdef AMINETXDUO_TCP_CORK
 /* One open/close cycle of the stack: a bring-up takes a netstack reference
    (bsd_lib_open(), netstack.c:1864), and the last library reference going
@@ -846,6 +940,7 @@ int main(void)
     t_last_close_retries();
     t_transient_stack_reference();
     t_transient_last_opener_drains();
+    t_concurrent_closers_drain();
     t_loopback_startup_failure_ownership();
 #ifdef AMINETXDUO_TCP_CORK
     t_cork_pass_keeps_stack();
