@@ -801,6 +801,11 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
      *
      * The minimum is the size written, not a literal 16: that is the m68k
      * layout, and the host's is wider.
+     *
+     * No reading here makes an unsized 48-byte request safe to send at all:
+     * it has to be opened first, and OpenDevice and CloseDevice take it as a
+     * full IOSana2Req and read and write ios2_BufferManagement at offset 84,
+     * past its end (netdev_device.c).  That is inherent in an unsized request.
      */
     if (io->ios2_Req.io_Message.mn_Length >= sizeof(struct IOSana2Req))
     {

@@ -39,6 +39,8 @@ VOID  InitSemaphore(struct SignalSemaphore *sigSem);
    bsd_lib_expunge(). */
 VOID  AddSemaphore(struct SignalSemaphore *sigSem);
 VOID  RemSemaphore(struct SignalSemaphore *sigSem);
+/* netstack_baton.c's health mark, for tests/adopt_pool. */
+struct SignalSemaphore *FindSemaphore(const UBYTE *name);
 VOID  ObtainSemaphore(struct SignalSemaphore *sigSem);
 VOID  ReleaseSemaphore(struct SignalSemaphore *sigSem);
 ULONG AttemptSemaphore(struct SignalSemaphore *sigSem);

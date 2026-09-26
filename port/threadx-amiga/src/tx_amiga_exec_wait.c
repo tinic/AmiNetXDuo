@@ -22,20 +22,26 @@ TX_THREAD *tx_amiga_exec_wait_current_locked(VOID)
     return _tx_thread_current_ptr;
 }
 
-/* The TX_THREAD owned by the calling Exec Task, whether it currently holds
-   the baton or has been suspended by an Exec-wait bracket.  The created list
-   is the lifetime registry already owned by ThreadX; keeping a second table
-   keyed by struct Task duplicated that registry, imposed a fixed capacity and
-   left stale identities when an Exec Task died.  The caller holds Forbid(). */
+/* The TX_THREAD of the calling Exec Task that a bracket is about: the one
+   holding the baton (release), else the one suspended inside a bracket
+   (nested release, acquire).  A Task has one adoption per library base, so
+   the created list can also hold its dormant cached threads, and the first
+   match by Task alone was one of those.  At most one thread per Task is
+   current or nested.  The caller holds Forbid(). */
 TX_THREAD *tx_amiga_exec_wait_owner_locked(VOID)
 {
-    TX_THREAD   *thread_ptr = _tx_thread_created_ptr;
+    TX_THREAD   *thread_ptr = _tx_thread_current_ptr;
     struct Task *me         = FindTask((STRPTR)0);
     ULONG        remaining  = _tx_thread_created_count;
 
+    if (thread_ptr != TX_NULL && thread_ptr->tx_thread_amiga_task == (VOID *)me)
+        return thread_ptr;
+
+    thread_ptr = _tx_thread_created_ptr;
     while (thread_ptr != TX_NULL && remaining-- != 0UL)
     {
-        if (thread_ptr->tx_thread_amiga_task == (VOID *)me)
+        if (thread_ptr->tx_thread_amiga_task == (VOID *)me &&
+            thread_ptr->tx_thread_amiga_exec_wait_nesting != 0U)
             return thread_ptr;
 
         thread_ptr = thread_ptr->tx_thread_created_next;

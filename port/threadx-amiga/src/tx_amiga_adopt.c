@@ -318,7 +318,7 @@ UINT         wake;
     _tx_thread_system_state--;
 
     /* Outside the stack now, holding nothing: a full pool may take this slot
-       (_tx_amiga_adopt_evict_dormant_locked) and the next resume re-adopts.  */
+       (_tx_amiga_slot_evict_locked) and the next resume re-adopts.  */
     thread_ptr -> tx_thread_amiga_flags |=  TX_AMIGA_THREAD_DORMANT;
 
     /* A Task parked on a full pool is woken only by a release, and this is
