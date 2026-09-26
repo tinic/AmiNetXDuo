@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 1.0.0-beta6
+
 - A blocking `accept()` keeps waiting after rejecting a connection delivered
   to the wrong bound address or to an IPv6-only listener; it no longer returns
   `EWOULDBLOCK` until the socket is nonblocking or its receive timeout expires.
@@ -25,16 +27,16 @@ version at the top when it merges.
   `IOStdReq`, including zero, instead of guessing which of its fields hold
   the answer buffer.
 - The last socket-library opener drains parked closing sockets even when an
-  asynchronous worker still holds the stack. If NetX refuses IP deletion,
-  its live stack memory is retained instead of being freed under the IP thread.
+  asynchronous worker still holds the stack or another program's open fails
+  meanwhile. A stack stopped with sockets still open can be started again by
+  the next program instead of failing until a reboot.
 - Two programs closing the socket library at the same time no longer both
   skip draining parked closing sockets; the last one to close drains them.
 - A sixteenth program with `bsdsocket.library` open no longer waits forever
   for another to close it: an idle opener's stack context is reclaimed and
   rebuilt on its next call.
-
-## 1.0.0-beta6
-
+- A program with two `bsdsocket.library` bases open no longer stalls every
+  network program when one base waits in an Exec call while the other is idle.
 - `InstallNetProbe` reads a PC Card's manufacturer ID with the card handle it just claimed.
 - `anxnet.device` on a PC Card slot records the correct I/O mode in its diagnostic record.
 - The installer can optionally run `sntp` at boot after `AddNetInterface`,
