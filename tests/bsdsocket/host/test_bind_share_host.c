@@ -324,4 +324,7 @@ int main(void)
     return (h_failures == 0) ? 0 : 1;
 }
 
+/* socket.c's stored-zone checks (#51); no slot is ever reused here. */
+ULONG netstack_interface_epoch(UWORD index) { (VOID)index; return 0; }
+
 #include "socket.c"
