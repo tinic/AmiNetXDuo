@@ -334,6 +334,33 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME bind_share_optin COMMAND test_bind_share)
 
+    # socket.c:bsd_accept(), a connection the listener's bind refuses (#52):
+    # reset, and a blocking accept waits on rather than answering
+    # EWOULDBLOCK.  #included like test_bind_share; bsd_wait_sliced is a
+    # script, and the test's header says what each stub stands for.
+    add_executable(test_accept_refused host/test_accept_refused_host.c)
+
+    target_include_directories(test_accept_refused PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_accept_refused PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections)
+
+    target_link_options(test_accept_refused PRIVATE -Wl,--gc-sections)
+
+    target_compile_definitions(test_accept_refused PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_MULTICAST AMINETXDUO_IPV6)
+
+    add_test(NAME accept_refused_waits COMMAND test_accept_refused)
+
     # netstatus.c, for NETSTATUS_NEIGHBOURS, the one flag `arp` prints from
     # it, and the interface-statistics wait. The router flag came from a NetX
     # Duo back pointer that is only

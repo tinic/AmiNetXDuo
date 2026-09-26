@@ -354,17 +354,20 @@ host_test_targets() { # builddir
 #      sibling, responder-primary topology, on the host (#38)
 #      464 with mcast_share_2sock: the sender-is-primary topology the guest
 #      t_test_udp_reuseport drives, the shape the fan-out must serve (#38)
-HOST_TESTS_EXPECTED=464
+#      465 with accept_refused_waits: a blocking accept waits past a peer its
+#      bind refuses (#52)
+HOST_TESTS_EXPECTED=465
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
     # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
-    # test_ifdevices, test_usergroup_hold, test_bind_share and test_handoff
+    # test_ifdevices, test_usergroup_hold, test_bind_share, test_accept_refused
+    # and test_handoff
     # (8ff3cc92), and test_mcast_loop and test_mcast_epoch, all x86_64-only for
     # the reason in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is
     # eight bytes and no structure in them has the target's shape.
     # darwin-arm64 registers 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 16)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 17)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against

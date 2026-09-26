@@ -2182,6 +2182,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     NX_IP      *ip = bsd_stack_ip(SocketBase);
     NXD_ADDRESS peer;
     ULONG       peer_port = 0;
+    ULONG       wait;
     UINT        status;
     LONG        fd;
 
@@ -2203,22 +2204,32 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     if (bsd_nx_enter(SocketBase) != 0)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    if (!bsd_listen_rearm(SocketBase, sock))
-    {
-        bsd_nx_leave(SocketBase);
-        return bsd_fail(SocketBase, AMI_ENOBUFS);
-    }
+    wait = bsd_wait_option(sock, sock->as_RcvTimeout, 0);
 
+    /*
+     * A connection the bind refuses is reset and its slot goes back on the
+     * port.  NetX's listen table is keyed by port alone, so one can arrive on
+     * an address the listener is not bound to (#52).  Only a non-blocking
+     * accept, or an SO_RCVTIMEO with nothing left, reports it as EWOULDBLOCK;
+     * a blocking one waits on for the next.
+     */
+    for (;;)
     {
         BsdAcceptArgs args;
         BOOL          aborted;
+        ULONG         started = tx_time_get();
+
+        if (!bsd_listen_rearm(SocketBase, sock))
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_ENOBUFS);
+        }
 
         args.listener = sock;
         args.ready    = NULL;
 
-        status = bsd_wait_sliced(SocketBase,
-                                 bsd_wait_option(sock, sock->as_RcvTimeout, 0),
-                                 bsd_accept_once, &args, &aborted);
+        status = bsd_wait_sliced(SocketBase, wait, bsd_accept_once, &args,
+                                 &aborted);
         if (aborted)
         {
             bsd_nx_leave(SocketBase);
@@ -2226,62 +2237,65 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         }
 
         incoming = args.ready;
-    }
 
-    if (status == NX_SUCCESS && incoming == NULL)
-        status = NX_NO_PACKET;
+        if (status == NX_SUCCESS && incoming == NULL)
+            status = NX_NO_PACKET;
 
-    if (status == NX_NOT_CONNECTED || status == NX_IN_PROGRESS ||
-        status == NX_NO_PACKET)
-    {
-        bsd_nx_leave(SocketBase);
-        return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
-    }
+        if (status == NX_NOT_CONNECTED || status == NX_IN_PROGRESS ||
+            status == NX_NO_PACKET)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+        }
 
-    if (status == NX_WAIT_ABORTED)
-    {
-        bsd_nx_leave(SocketBase);
-        return bsd_fail(SocketBase, AMI_EINTR);
-    }
+        if (status == NX_WAIT_ABORTED)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_EINTR);
+        }
 
-    if (status != NX_SUCCESS)
-    {
-        bsd_nx_leave(SocketBase);
-        return bsd_fail(SocketBase, bsd_errno_from_nx(status));
-    }
+        if (status != NX_SUCCESS)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, bsd_errno_from_nx(status));
+        }
 
-    nxd_tcp_socket_peer_info_get(&incoming->as_Nx.tcp, &peer, &peer_port);
+        nxd_tcp_socket_peer_info_get(&incoming->as_Nx.tcp, &peer, &peer_port);
 
-    if (!bsd_bind_accepts(sock, &incoming->as_Nx.tcp))
-    {
-        AMI_DEBUG("bsdsocket: listener bound elsewhere refused a peer on port %ld",
-                  (long)sock->as_ListenPort);
-
-        nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
-        nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
-        bsd_listen_return(SocketBase, sock, incoming);
-
-        bsd_nx_leave(SocketBase);
-
-        return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
-    }
-
+        if (!bsd_bind_accepts(sock, &incoming->as_Nx.tcp))
+        {
+            AMI_DEBUG("bsdsocket: listener bound elsewhere refused a peer on port %ld",
+                      (long)sock->as_ListenPort);
+        }
 #ifdef AMINETXDUO_IPV6
-    if ((sock->as_Flags & ASF_V6ONLY) != 0 &&
-        peer.nxd_ip_version == NX_IP_VERSION_V4)
-    {
-        AMI_DEBUG("bsdsocket: V6ONLY listener on port %ld refused an IPv4 peer",
-                  (long)sock->as_ListenPort);
+        else if ((sock->as_Flags & ASF_V6ONLY) != 0 &&
+                 peer.nxd_ip_version == NX_IP_VERSION_V4)
+        {
+            AMI_DEBUG("bsdsocket: V6ONLY listener on port %ld refused an IPv4 peer",
+                      (long)sock->as_ListenPort);
+        }
+#endif
+        else
+            break;
 
+        /* NX_NO_WAIT on an established socket is NetX's reset. */
         nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
         nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
         bsd_listen_return(SocketBase, sock, incoming);
 
-        bsd_nx_leave(SocketBase);
+        if (wait == NX_NO_WAIT)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+        }
 
-        return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+        if (wait != NX_WAIT_FOREVER)
+        {
+            ULONG elapsed = tx_time_get() - started;
+
+            wait = (elapsed >= wait) ? NX_NO_WAIT : wait - elapsed;
+        }
     }
-#endif
 
     incoming->as_Flags &= ~(ASF_INCOMING | ASF_ACCEPTPEND);
     incoming->as_Flags |= ASF_CONNECTED | ASF_BOUND;
