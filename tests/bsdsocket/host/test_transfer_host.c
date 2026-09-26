@@ -138,6 +138,14 @@ static struct
     LONG        sockaddr_get_result;
     ULONG       sockaddr_puts;
     ULONG       wait_option;
+
+    /* Interface epochs (#51): one counter for every slot, moved by the next
+       bsd_nx_enter() when bump_on_enter is set, as a RemoveNetInterface and
+       AddNetInterface into the same slot would between a caller's check and
+       its bracket. */
+    ULONG       live_epoch;
+    BOOL        bump_on_enter;
+    ULONG       seen_scope;         /* what bsd_source_select() was handed   */
 } h;
 
 static void h_reset(void)
@@ -214,6 +222,9 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
     (VOID)base;
 
     h.nx_enters++;
+
+    if (h.bump_on_enter)
+        h.live_epoch++;
 
     return h.nx_enter_result;
 }
@@ -456,13 +467,24 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
 {
     (VOID)sock;
     (VOID)dest;
-    (VOID)scope;
+
+    h.seen_scope = scope;
 
     if (index != NULL)
         *index = 0;
 
-    return BSD_SOURCE_ROUTE;
+    /* The real one's bounds check, which BSD_SCOPE_GONE never passes. */
+    return (scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES) ? BSD_SOURCE_REFUSE
+                                                       : BSD_SOURCE_ROUTE;
 }
+
+#ifdef AMINETXDUO_IPV6
+/* socket.c's: a zone stored under another epoch is gone. */
+ULONG bsd_scope_live(ULONG scope, ULONG epoch)
+{
+    return (scope == 0UL || epoch == h.live_epoch) ? scope : BSD_SCOPE_GONE;
+}
+#endif
 
 UINT bsd_udp_queue_info(const NX_PACKET *packet, UINT *source_port,
                         ULONG *payload_length)
@@ -1432,6 +1454,81 @@ static void t_datagram_size(void)
           "65508 is EMSGSIZE, and nothing was allocated for it");
 }
 
+#ifdef AMINETXDUO_IPV6
+/*
+ * A connected zone is resolved inside the bracket (#51).  The slot is
+ * reused between the call starting and bsd_nx_enter(): send(), sendto() with
+ * no address and sendmsg() with no name must all refuse, as the sticky
+ * IPV6_PKTINFO and bound-zone paths do.
+ */
+static AmiSocket *h_udp6_connected(LONG fd)
+{
+    static const ULONG ll_peer[4] = { 0xFE800000UL, 0, 0, 1 };
+    AmiSocket         *s          = h_udp(fd);
+
+    s->as_Flags |= ASF_INET6 | ASF_CONNECTED | ASF_NXBOUND | ASF_BOUND;
+    s->as_PeerAddr.nxd_ip_version = NX_IP_VERSION_V6;
+    memcpy(s->as_PeerAddr.nxd_ip_address.v6, ll_peer, sizeof(ll_peer));
+    s->as_PeerPort       = 53;
+    s->as_PeerScopeId    = 2UL;
+    s->as_PeerScopeEpoch = 0UL;
+
+    return s;
+}
+
+static LONG h_send_shape(int shape, char *buf)
+{
+    struct iovec  iov;
+    struct msghdr m;
+
+    switch (shape)
+    {
+    case 0:
+        return bsd_send(1, buf, 4, 0, &h_base);
+    case 1:
+        return bsd_sendto(1, buf, 4, 0, NULL, 0, &h_base);
+    default:
+        iov.iov_base = buf;
+        iov.iov_len  = 4;
+        memset(&m, 0, sizeof(m));
+        m.msg_iov    = &iov;
+        m.msg_iovlen = 1;
+        return bsd_sendmsg(1, &m, 0, &h_base);
+    }
+}
+
+static void t_peer_scope_in_bracket(void)
+{
+    static const char *const shape[3] = { "send", "sendto(NULL)",
+                                          "sendmsg(no name)" };
+    char buf[4] = { 1, 2, 3, 4 };
+    char what[96];
+    int  i;
+
+    printf("transfer: a connected zone is resolved inside the bracket\n");
+
+    for (i = 0; i < 3; i++)
+    {
+        h_reset();
+        (VOID)h_udp6_connected(1);
+        snprintf(what, sizeof(what), "%s: live zone sends on slot 1",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == 4 && h.sends == 1 &&
+                  h.seen_scope == 2UL, what);
+
+        h_reset();
+        (VOID)h_udp6_connected(1);
+        h.bump_on_enter = TRUE;
+        snprintf(what, sizeof(what),
+                 "%s: slot reused before the bracket is EADDRNOTAVAIL",
+                 shape[i]);
+        CHECK(h_send_shape(i, buf) == -1 &&
+                  h.errno_value == AMI_EADDRNOTAVAIL && h.sends == 0 &&
+                  h.allocs == 0 && h.nx_enters == h.nx_leaves, what);
+    }
+}
+#endif
+
 /*
  * recvmsg()'s out parameters.  msg_flags is not an input and whatever the
  * caller left there must not survive; msg_controllen is value-result and a
@@ -1530,6 +1627,9 @@ int main(void)
     t_dontwait();
     t_shutdown();
     t_datagram_size();
+#ifdef AMINETXDUO_IPV6
+    t_peer_scope_in_bracket();
+#endif
     t_recvmsg_outputs();
     t_send_monitor();
 

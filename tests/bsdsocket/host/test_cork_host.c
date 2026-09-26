@@ -992,6 +992,12 @@ UINT bsd_udp_queue_info(const NX_PACKET *packet, UINT *source_port,
 
 UINT anx6_scope(const ULONG *addr) { (VOID)addr; return 0; }
 
+#ifdef AMINETXDUO_IPV6
+/* socket.c's (#51); no socket here stores a zone. */
+ULONG bsd_scope_live(ULONG scope, ULONG epoch)
+{ (VOID)epoch; return scope; }
+#endif
+
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
 { (VOID)sock; (VOID)addr; return 0; }
 
