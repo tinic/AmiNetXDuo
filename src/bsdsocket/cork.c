@@ -262,8 +262,9 @@ VOID bsd_cork_start(NX_IP *ip)
  *
  * A LATER STOP MUST PROVE IT, not assume it.  The refused NX_IP is kept in
  * bsd_cork_unproven, and a stop with nothing started (bsd_cork_ip NULL) that
- * finds one takes the bracket and nx_ip_protection on it before answering
- * TRUE; refused again, FALSE again.  A start on the same NX_IP -- the stack
+ * finds one runs this whole stop on it -- the bracket, nx_ip_protection, and
+ * the armed list the refused pass relinked onto -- before answering TRUE;
+ * refused again, FALSE again.  A start on the same NX_IP -- the stack
  * kept, a reopen -- hands the proof to that start's own stop.
  *
  * WORST CASE: no stop ever gets the bracket, or a pass never comes back --
@@ -284,30 +285,13 @@ BOOL bsd_cork_stop(VOID)
     AmiSocket *list, *sock, *next;
     LONG       entered;
 
-    if (ip == NULL)
-    {
-        NX_IP *unproven = bsd_cork_unproven;
-
-        if (unproven == NULL)
-            return TRUE;
-
-        entered = ami_netstack_enter(&bsd_cork_caller);
-        if (entered == AMI_NET_ERR_STATE)
-        {
-            bsd_cork_unproven = NULL;       /* no kernel, no pass */
-            return TRUE;
-        }
-        if (entered != AMI_NET_OK)
-            return FALSE;
-
-        /* The pass that was maybe running: over once this is held. */
-        AMI_NX_ONLY_SUCCESS(tx_mutex_get(&unproven->nx_ip_protection,
-                                         TX_WAIT_FOREVER));
-        AMI_NX_ONLY_SUCCESS(tx_mutex_put(&unproven->nx_ip_protection));
-        ami_netstack_leave(&bsd_cork_caller);
-        bsd_cork_unproven = NULL;
+    /* A refused stop's NX_IP goes through the whole stop again, not just the
+       proof: the pass it could not wait for hands its segment back IDLE and
+       relinked (bsd_cork_unclaim()), onto the armed list that stop had
+       already taken.  Proven without taking it again, that segment outlived
+       the pool into the next stack's pass (#53). */
+    if (ip == NULL && (ip = bsd_cork_unproven) == NULL)
         return TRUE;
-    }
 
     entered = ami_netstack_enter(&bsd_cork_caller);
 

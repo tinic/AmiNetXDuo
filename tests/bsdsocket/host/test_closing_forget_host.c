@@ -9,11 +9,15 @@
  * NetX on the freed NX_IP (with NX_DISABLE_ERROR_CHECKING, a mutex get on
  * freed memory).  That last close now empties the list (library.c
  * bsd_child_close_gate()); test_expunge t_tableless_last_closer checks that
- * it does, this that an emptied list is never reached again.  The cork
- * segment such a socket holds is given back while the pool is up by
- * bsd_cork_stop() (cork.c), which runs first; a parked socket never holds
- * as_RxPending (bsd_tcp_close_start() aborts instead of parking one that
- * does).
+ * it does, this that an emptied list is never reached again.
+ *
+ * NOT TESTED HERE: the cork segment such a socket holds.  cork.c is not
+ * compiled in; h_stack_down() stands in for bsd_cork_stop() with a plain
+ * drop, so this says nothing about the stop.  That the stop leaves no
+ * segment past the pool, bracketed or not, and across a refused stop, is
+ * test_cork's (t_stop_during_pass, t_refused_pass_segment).  A parked socket
+ * never holds as_RxPending: bsd_tcp_close_start() aborts instead of parking
+ * one that does.
  *
  * socket.c is #included rather than linked, and -ffunction-sections plus the
  * linker's --gc-sections keep only the closing list and its callees.
@@ -139,9 +143,9 @@ static VOID h_park(VOID)
 }
 
 /* The last close could not drain and, when `forget`, empties the list
-   (library.c); at the teardown bsd_cork_stop() gives the segment back while
-   the pool is up (cork.c), ami_ns_destroy() tears the NX socket down, and the
-   NX_IP and the pool are freed. */
+   (library.c); the segment is dropped by hand, a stand-in for the stop and
+   not a test of it; ami_ns_destroy() tears the NX socket down, and the NX_IP
+   and the pool are freed. */
 static VOID h_stack_down(BOOL forget)
 {
     bsd_cork_drop(&h_sock);

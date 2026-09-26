@@ -1881,6 +1881,58 @@ static void t_stop_during_pass(void)
     CHECK(bsd_cork_stop() == TRUE, "and with the bracket held, TRUE");
 }
 
+/* The stop refused while the pass is in its send (#53). */
+static void h_refuse_mid_pass(void)
+{
+    h.enter_result = AMI_NET_ERR_KERNEL;
+    CHECK(bsd_cork_stop() == FALSE, "refused inside the pass's send");
+}
+
+/*
+ * A segment the pass holds across a refused stop comes back IDLE and relinked
+ * onto the armed list the stop had already taken.  The kept stack's last
+ * reference then goes with no reopen in between, so the next stop is the
+ * proving one, and the pool is freed after it: that stop must give the
+ * segment back (bracketed) or forget it (kernel down), never leave it for the
+ * next stack's pass.
+ */
+static void t_refused_pass_segment(void)
+{
+    static const LONG proof[2] = { AMI_NET_OK, AMI_NET_ERR_STATE };
+    AmiSocket *s;
+    ULONG      releases;
+    int        i;
+
+    printf("cork: a segment the pass holds across a refused stop\n");
+
+    for (i = 0; i < 2; i++)
+    {
+        h_reset();
+        s = h_tcp(0);
+        (VOID)h_send(0, 0, 30, 0);
+        h.send_plan[0] = NX_WINDOW_OVERFLOW;
+        h.send_take[0] = 10;
+        h.send_planned = 1;
+        h.send_hook    = h_refuse_mid_pass;
+        h_pass();
+        CHECK(h_pending(s) == 20 && h_linked(s) &&
+                  s->as_CorkState == BSD_CORK_IDLE,
+              "the pass hands the rest back IDLE, relinked after the stop");
+
+        h.enter_result = proof[i];
+        releases = h.releases;
+        CHECK(bsd_cork_stop() == TRUE, "the proving stop lets the stack go");
+        printf("refused_pass proof=%ld pkt=%s linked=%d released=%lu\n",
+               (long)proof[i], s->as_CorkPkt != NULL ? "held" : "none",
+               (int)h_linked(s), (unsigned long)(h.releases - releases));
+        CHECK(s->as_CorkPkt == NULL && !h_linked(s),
+              "and leaves no segment on the socket or the armed list");
+        CHECK(h.releases == releases + (i == 0 ? 1UL : 0UL),
+              i == 0 ? "released into the pool while it is up"
+                     : "forgotten with no kernel, never released");
+    }
+}
+
 static void t_abort_while_owned(void)
 {
     AmiSocket *s;
@@ -2123,6 +2175,7 @@ int main(void)
     t_stop_refused();
     t_stop_timer_refusals();
     t_stop_during_pass();
+    t_refused_pass_segment();
     t_abort_while_owned();
     t_claim_vs_pass();
 #ifdef AMINETXDUO_TCP_CORK_FASTPATH
