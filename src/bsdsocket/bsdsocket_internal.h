@@ -957,6 +957,8 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                       LONG optname, APTR optval, socklen_t *optlen);
 VOID bsd_mcast_close(AmiSocket *sock);
 LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr);
+BOOL bsd_mcast_is_group(ULONG addr);
+LONG bsd_mcast_preference(LONG *iface, ULONG epoch);
 /* NetX stores IPv4 loopback on the joined group, while BSD defines it on
  * the sending socket. Override it for one synchronous UDP send under the
  * caller's NetX bracket, then restore before leaving that bracket. */

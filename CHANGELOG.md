@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Raw sockets honour `IP_MULTICAST_TTL` and `IP_MULTICAST_IF` on multicast
+  datagrams, as UDP does: a raw send to a group now leaves with the multicast
+  TTL (default 1) and the chosen interface, not the unicast TTL and the
+  route's interface.
+
 ## 1.0.0-beta6
 
 - `InstallNetProbe` reads a PC Card's manufacturer ID with the card handle it just claimed.

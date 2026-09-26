@@ -31,7 +31,7 @@ static BsdMcastEntry bsd_mcast_table[BSD_MCAST_MEMBERSHIPS];
 /* A saved IP_MULTICAST_IF is an interface identity, not a permanent numeric
    slot preference.  If that slot was detached, use routing until the caller
    explicitly selects an interface again.  Call within a NetX bracket. */
-static LONG bsd_mcast_preference(LONG *iface, ULONG epoch)
+LONG bsd_mcast_preference(LONG *iface, ULONG epoch)
 {
     if (*iface >= 0 &&
         netstack_interface_epoch((UWORD)*iface) != epoch)
@@ -53,7 +53,7 @@ static BOOL bsd_mcast_row_live(BsdMcastEntry *e)
     return e->bm_Sock != NULL;
 }
 
-static BOOL bsd_mcast_is_group(ULONG addr)
+BOOL bsd_mcast_is_group(ULONG addr)
 {
     return ((addr & 0xF0000000UL) == 0xE0000000UL) ? TRUE : FALSE;
 }

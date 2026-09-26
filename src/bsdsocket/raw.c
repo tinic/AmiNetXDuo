@@ -667,6 +667,17 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
         handed->nx_packet_length      -= ihl;
     }
 
+#ifdef AMINETXDUO_MULTICAST
+    /*
+     * A raw socket honours IP_MULTICAST_TTL, as UDP does through
+     * bsd_mcast_prepare_send().  IP_HDRINCL keeps the header's TTL, so the
+     * multicast value is applied only when the header is not supplied.
+     */
+    if (!sock->as_HdrIncl && dest.nxd_ip_version == NX_IP_VERSION_V4 &&
+        bsd_mcast_is_group(dest.nxd_ip_address.v4))
+        ttl = (UINT)sock->as_McastTtl;
+#endif
+
     if (src != NULL && src->cs_Have)
     {
         LONG index = bsd_cmsg_source_index(ip, src, FALSE);
@@ -692,6 +703,23 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
                                   ? AMI_ENETUNREACH
                                   : AMI_EADDRNOTAVAIL);
     }
+
+#ifdef AMINETXDUO_MULTICAST
+    /* IP_MULTICAST_IF chooses the egress interface for a group destination,
+       before the route fallback below picks one. */
+    if (source != BSD_SOURCE_INDEX && dest.nxd_ip_version == NX_IP_VERSION_V4 &&
+        bsd_mcast_is_group(dest.nxd_ip_address.v4))
+    {
+        LONG chosen = bsd_mcast_preference(&sock->as_McastIf,
+                                           sock->as_McastIfEpoch);
+
+        if (chosen >= 0)
+        {
+            source    = BSD_SOURCE_INDEX;
+            src_index = (UINT)chosen;
+        }
+    }
+#endif
 
     if (source != BSD_SOURCE_INDEX && dest.nxd_ip_version == NX_IP_VERSION_V4)
     {
