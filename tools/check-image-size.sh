@@ -62,7 +62,11 @@ BUDGETS=(
     # #67 raised the budget to 364,000 at f2649e22.  363,772 with that
     # dormant-slot eviction, which stops the sixteenth bsdsocket opener
     # waiting forever for a slot (#67), 2026-09-26.
-    "default:src/bsdsocket/bsdsocket.library:364000"
+    # 364,016 with the post-beta6 review fixes: the connected-peer snapshot
+    # inside the send bracket (#51), the Exec-wait owner lookup, and the
+    # teardown socket sweep, failed-open ordering and refused cork stop
+    # (#53), 2026-09-26 (micro 203,512, minimal 237,596).
+    "default:src/bsdsocket/bsdsocket.library:365000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
