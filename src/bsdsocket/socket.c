@@ -971,7 +971,7 @@ VOID bsd_close_all(struct AmiSocketBase *base)
 
     bsd_closing_sweep();
 
-    if (base->sb_Master != NULL && base->sb_Master->sb_StackRefs <= 1)
+    if (base->sb_Master != NULL && bsd_stack_last_opener(base->sb_Master))
         bsd_closing_drain();
 
     bsd_nx_leave(base);
@@ -1438,6 +1438,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
         sock->as_LocalAddr    = addr;
         sock->as_LocalPort    = port;
         sock->as_LocalScopeId = scope;
+        sock->as_LocalScopeEpoch = bsd_scope_epoch(scope);
         sock->as_Flags |= ASF_BOUND;
         bsd_raw_revalidate_endpoint(sock);
 
@@ -1449,6 +1450,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     sock->as_LocalAddr    = addr;
     sock->as_LocalPort    = port;
     sock->as_LocalScopeId = scope;
+    sock->as_LocalScopeEpoch = bsd_scope_epoch(scope);
 
     if ((sock->as_Flags & ASF_UDP) != 0)
     {
@@ -1924,14 +1926,16 @@ BOOL bsd_bind_wants_interface(const AmiSocket *listener,
     NX_IP *ip = bsd_stack_ip(listener->as_Owner);
 
 #ifdef AMINETXDUO_IPV6
+    ULONG scope = bsd_local_scope(listener);
+
     if (listener->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V6 &&
-        listener->as_LocalScopeId != 0UL &&
+        scope != 0UL &&
         !bsd_addr_is_loopback(&listener->as_LocalAddr) &&
         anx6_scope(listener->as_LocalAddr.nxd_ip_address.v6) < 0xEU)
     {
         if (ip == NX_NULL ||
-            listener->as_LocalScopeId > (ULONG)NX_MAX_PHYSICAL_INTERFACES ||
-            nxif != &ip->nx_ip_interface[listener->as_LocalScopeId - 1UL])
+            scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES ||
+            nxif != &ip->nx_ip_interface[scope - 1UL])
             return FALSE;
     }
 #endif
@@ -2022,6 +2026,20 @@ static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
     return FALSE;
 }
 
+#ifdef AMINETXDUO_IPV6
+ULONG bsd_scope_epoch(ULONG scope)
+{
+    return (scope != 0UL) ? netstack_interface_epoch((UWORD)(scope - 1UL))
+                          : 0UL;
+}
+
+ULONG bsd_scope_live(ULONG scope, ULONG epoch)
+{
+    return (scope == 0UL || bsd_scope_epoch(scope) == epoch)
+               ? scope : BSD_SCOPE_GONE;
+}
+#endif
+
 /*
  * Which source a send from this socket has to use.
  *
@@ -2052,16 +2070,15 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
     {
         NX_INTERFACE *zoned       = NX_NULL;
         NX_INTERFACE *local_zoned = NX_NULL;
+        ULONG         local_scope = bsd_local_scope(sock);
 
-        if (bound && sock->as_LocalScopeId != 0UL &&
+        if (bound && local_scope != 0UL &&
             anx6_scope(local->nxd_ip_address.v6) < 0xEU)
         {
-            if (sock->as_LocalScopeId >
-                (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+            if (local_scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
                 return BSD_SOURCE_REFUSE;
 
-            local_zoned =
-                &ip->nx_ip_interface[sock->as_LocalScopeId - 1UL];
+            local_zoned = &ip->nx_ip_interface[local_scope - 1UL];
 
             if (local_zoned->nx_interface_valid == 0)
                 return BSD_SOURCE_REFUSE;
@@ -2290,6 +2307,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     incoming->as_LocalAddr    = sock->as_LocalAddr;
     incoming->as_LocalScopeId = sock->as_LocalScopeId;
+    incoming->as_LocalScopeEpoch = sock->as_LocalScopeEpoch;
 
     if (bsd_addr_is_unspecified(&sock->as_LocalAddr))
     {
@@ -2322,9 +2340,13 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
             if (!bsd_addr_is_loopback(&incoming->as_LocalAddr) &&
                 anx6_scope(incoming->as_LocalAddr.nxd_ip_address.v6) < 0xEU &&
                 incoming->as_Nx.tcp.nx_tcp_socket_connect_interface != NX_NULL)
+            {
                 incoming->as_LocalScopeId =
                     (ULONG)incoming->as_Nx.tcp.nx_tcp_socket_connect_interface
                         ->nx_interface_index + 1UL;
+                incoming->as_LocalScopeEpoch =
+                    bsd_scope_epoch(incoming->as_LocalScopeId);
+            }
             else
                 incoming->as_LocalScopeId = 0UL;
         }
@@ -2344,6 +2366,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         incoming->as_PeerScopeId =
             (ULONG)incoming->as_Nx.tcp.nx_tcp_socket_connect_interface
                 ->nx_interface_index + 1UL;
+        incoming->as_PeerScopeEpoch =
+            bsd_scope_epoch(incoming->as_PeerScopeId);
     }
 #endif
 
@@ -2446,6 +2470,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         sock->as_PeerAddr = *addr;
         sock->as_PeerPort = port;
         sock->as_PeerScopeId = scope;
+        sock->as_PeerScopeEpoch = bsd_scope_epoch(scope);
         sock->as_Flags   |= ASF_CONNECTED;
 
         bsd_raw_revalidate_endpoint(sock);
@@ -2472,6 +2497,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         sock->as_PeerAddr = *addr;
         sock->as_PeerPort = port;
         sock->as_PeerScopeId = scope;
+        sock->as_PeerScopeEpoch = bsd_scope_epoch(scope);
         sock->as_Flags   |= ASF_CONNECTED;
 
         if (sock->as_RxPending != NX_NULL &&
@@ -2523,6 +2549,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
     sock->as_PeerAddr = *addr;
     sock->as_PeerPort = port;
     sock->as_PeerScopeId = scope;
+    sock->as_PeerScopeEpoch = bsd_scope_epoch(scope);
     sock->as_Flags   |= ASF_CONNECTING;
 
     /* When the SYN leaves; the establish notify reads the clock again and

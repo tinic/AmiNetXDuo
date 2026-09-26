@@ -64,8 +64,8 @@ static struct CardHandle *cg_own_card(struct CardHandle *h)
     register struct CardHandle *res __asm("d0");
 
     __asm __volatile ("jsr a6@(-0x6)"
-                      : "=r" (res)
-                      : "r" (_a6), "r" (_a1)
+                      : "=r" (res), "+r" (_a1)
+                      : "r" (_a6)
                       : "d1", "a0", "cc", "memory");
 
     return res;
@@ -78,8 +78,8 @@ static VOID cg_release_card(struct CardHandle *h, ULONG flags)
     register ULONG              _d0 __asm("d0") = flags;
 
     __asm __volatile ("jsr a6@(-0xc)"
-                      : "+r" (_d0)
-                      : "r" (_a6), "r" (_a1)
+                      : "+r" (_d0), "+r" (_a1)
+                      : "r" (_a6)
                       : "d1", "a0", "cc", "memory");
 }
 

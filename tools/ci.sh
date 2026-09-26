@@ -354,20 +354,22 @@ host_test_targets() { # builddir
 #      sibling, responder-primary topology, on the host (#38)
 #      464 with mcast_share_2sock: the sender-is-primary topology the guest
 #      t_test_udp_reuseport drives, the shape the fan-out must serve (#38)
-#      465 with raw_mcast_send: a raw IPv4 group send honours
+#      465 with scope_slot_epoch: stored IPv6 zones expire when a NetX slot
+#      is detached (#51)
+#      466 with raw_mcast_send: a raw IPv4 group send honours
 #      IP_MULTICAST_TTL and IP_MULTICAST_IF (#49)
-HOST_TESTS_EXPECTED=465
+HOST_TESTS_EXPECTED=466
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
     # test_rxdirect, test_sockopt, test_sockopt_cork, test_neighbour, test_dhcp6,
     # test_ifdevices, test_usergroup_hold, test_bind_share and test_handoff
-    # (8ff3cc92), and test_mcast_loop, test_mcast_epoch and
-    # test_raw_mcast_send, all x86_64-only for
-    # the reason in tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is
-    # eight bytes and no structure in them has the target's shape.
+    # (8ff3cc92), test_mcast_loop, test_mcast_epoch, test_scope_epoch and
+    # test_raw_mcast_send, all x86_64-only for the reason in
+    # tests/bsdsocket/CMakeLists.txt: elsewhere the host's LONG is eight bytes
+    # and no structure in them has the target's shape.
     # darwin-arm64 registers 402 of the 412 (2026-09-20).
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 17)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 18)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
@@ -931,6 +933,20 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         cat "$BUILD/lvo-matrix.log"
         fail "tests/profiles/lvo-matrix.tsv is stale\
  (tools/check-lvo-matrix.sh --write)"
+        return 1
+    fi
+
+    # An LVO may destroy d0, d1, a0 and a1, and an inline-asm call that lists
+    # one only as an input lets GCC reuse what the call overwrote: #68 passed
+    # a stale recvfrom address and got EFAULT.  Every such call, src/ and
+    # tests/ alike, names all four as outputs or clobbers (#70).
+    if tools/check-lvo-clobbers.sh > "$BUILD/lvo-clobbers.log" 2>&1; then
+        note "lvo clobbers: $(sed -n 's/^lvo_clobbers=ok statements=\([0-9]*\).*/\1 asm calls/p' \
+              "$BUILD/lvo-clobbers.log")"
+    else
+        cat "$BUILD/lvo-clobbers.log"
+        fail "an inline-asm LVO call leaves a scratch register off its\
+ outputs and clobbers (tools/check-lvo-clobbers.sh)"
         return 1
     fi
 

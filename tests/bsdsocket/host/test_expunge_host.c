@@ -661,6 +661,49 @@ static VOID t_transient_stack_reference(VOID)
     h_report("transient", 0, 0, 0, h_teardown_ran());
 }
 
+/*
+ * Issue #53: tool T launches an async DHCP job (a transient hold) and closes;
+ * app A parks a closing socket and closes; T's job then releases the last
+ * reference.  A's bsd_close_all() is the last chance to drain the parked
+ * socket before netstack_shutdown(), so its gate must say so.
+ */
+static VOID t_transient_last_opener_drains(VOID)
+{
+    BOOL t_drains;
+    BOOL a_drains;
+
+    printf("the last opener's close with a transient worker outstanding\n");
+
+    h_machine_reset(TRUE);
+    h.stack_running      = TRUE;
+    h_base->sb_StackRefs = 1;                       /* T opens            */
+
+    CHECK(bsd_stack_transient_hold(h_base) == 0, "T's DHCP job holds the stack");
+    h_base->sb_StackRefs++;                         /* A opens            */
+
+    t_drains = bsd_stack_last_opener(h_base);       /* T's close_all gate */
+    h_base->sb_StackRefs--;                         /* T closes           */
+
+    a_drains = bsd_stack_last_opener(h_base);       /* A's close_all gate */
+    h_base->sb_StackRefs--;                         /* A closes           */
+
+    CHECK(h.shutdown_calls == 0, "the worker still holds the stack");
+    bsd_stack_transient_release(h_base);            /* the job completes  */
+
+    printf("transient_last_opener t_drains=%ld a_drains=%ld shutdowns=%ld\n",
+           (long)t_drains, (long)a_drains, (long)h.shutdown_calls);
+    CHECK(!t_drains, "T's close leaves A's sockets alone");
+    CHECK(a_drains, "A's close drains the parked sockets");
+    CHECK(h.shutdown_calls == 1, "the worker's release tears the stack down");
+
+    /* A hold is an opener, not a worker: the network stays up. */
+    h_machine_reset(TRUE);
+    h_base->sb_StackRefs = 2;
+    CHECK(!bsd_stack_last_opener(h_base), "a held stack is not drained");
+    h_base->sb_StackRefs = 1;
+    CHECK(bsd_stack_last_opener(h_base), "the last plain opener drains");
+}
+
 #ifdef AMINETXDUO_TCP_CORK
 /* One open/close cycle of the stack: a bring-up takes a netstack reference
    (bsd_lib_open(), netstack.c:1864), and the last library reference going
@@ -802,6 +845,7 @@ int main(void)
     t_other_refusals();
     t_last_close_retries();
     t_transient_stack_reference();
+    t_transient_last_opener_drains();
     t_loopback_startup_failure_ownership();
 #ifdef AMINETXDUO_TCP_CORK
     t_cork_pass_keeps_stack();

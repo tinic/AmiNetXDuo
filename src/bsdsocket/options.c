@@ -1097,9 +1097,8 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
                                         .nx_tcp_socket_connect_interface
                                         ->nx_interface_index;
         }
-        else if (sock->as_PeerScopeId > 0UL &&
-                 sock->as_PeerScopeId <=
-                     (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        else if (bsd_peer_scope(sock) - 1UL <
+                 (ULONG)NX_MAX_PHYSICAL_INTERFACES)
         {
             interface_index = (LONG)(sock->as_PeerScopeId - 1UL);
         }

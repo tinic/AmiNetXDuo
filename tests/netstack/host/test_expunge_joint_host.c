@@ -261,6 +261,53 @@ static void t_refcount(void)
     CHECK(netstack_can_unload() == TRUE, "and the expunge is allowed");
 }
 
+/*
+ * Issue #53, link 3.  A TCP socket still created on the IP instance at
+ * teardown: nx_ip_delete() answers NX_SOCKETS_BOUND and leaves the IP thread
+ * and its timers running on ns_Ip.  The stack block holding them must not be
+ * freed under that thread.
+ */
+static void t_bound_socket_keeps_ip(void)
+{
+    AmiNetStack *ns;
+    NX_IP       *ip;
+
+    printf("expunge joint: a socket still bound at teardown\n");
+
+    nsh_reset();
+
+    CHECK(netstack_startup() == AMI_NET_OK, "up");
+    ns = netstack_get();
+    ip = netstack_ip();
+    CHECK(ns != NULL && ip != NULL, "a stack and its IP instance");
+    if (ns == NULL || ip == NULL)
+        return;
+
+    ip->nx_ip_tcp_created_sockets_count = 1;    /* a parked closing socket */
+    nsh.watch_block = ns;
+
+    netstack_shutdown();
+
+    printf("teardown ip_delete_status=%lu ns_freed=%ld\n",
+           (unsigned long)nsh.ip_delete_status, (long)nsh.watch_freed);
+    CHECK(nsh.ip_deletes == 1, "nx_ip_delete() was called");
+    CHECK(nsh.ip_delete_status == NX_SOCKETS_BOUND,
+          "and refused: the IP thread is still running");
+    CHECK(!nsh.watch_freed,
+          "the stack block holding that IP thread is not freed");
+    CHECK(netstack_get() == NULL, "the singleton is gone all the same");
+
+    h_teardown();
+
+    /* A clean teardown still frees it. */
+    nsh_reset();
+    CHECK(netstack_startup() == AMI_NET_OK, "up again");
+    nsh.watch_block = netstack_get();
+    netstack_shutdown();
+    CHECK(nsh.ip_delete_status == NX_SUCCESS, "no socket: the delete succeeds");
+    CHECK(nsh.watch_freed, "and the stack block is freed");
+}
+
 int main(void)
 {
     printf("netstack expunge joint host checks\n\n");
@@ -273,6 +320,7 @@ int main(void)
     t_startup_refuses_over_a_failed_stop();
     t_contended_lock_refuses();
     t_refcount();
+    t_bound_socket_keeps_ip();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

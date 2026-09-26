@@ -825,9 +825,10 @@ static ULONG p_if_nametoindex(struct Library *base, const char *name)
     register const char     *a0  __asm("a0") = name;
     register ULONG           res __asm("d0");
     register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-882:W)"     /* if_nametoindex -0x372 */
-                      : "=r" (res), "=r" (_clob_d1)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (a0)
                       : "d2", "d3", "a1", "cc", "memory");
     return res;
@@ -840,9 +841,10 @@ static char *p_if_indextoname(struct Library *base, ULONG index, char *out)
     register char           *a0  __asm("a0") = out;
     register char           *res __asm("d0");
     register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
 
     __asm __volatile ("jsr a6@(-888:W)"     /* if_indextoname -0x378 */
-                      : "=r" (res), "=r" (_clob_d1)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
                       : "r" (a6), "r" (d0), "r" (a0)
                       : "d2", "d3", "a1", "cc", "memory");
     return res;

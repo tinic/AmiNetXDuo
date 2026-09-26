@@ -115,7 +115,7 @@ static BOOL bsd_raw_from_peer(const AmiSocket *sock, const NX_PACKET *packet,
 
             if (nxif == NX_NULL ||
                 (ULONG)nxif->nx_interface_index + 1UL !=
-                    sock->as_PeerScopeId)
+                    bsd_peer_scope(sock))
                 return FALSE;
         }
 
