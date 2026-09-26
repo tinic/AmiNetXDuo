@@ -119,7 +119,7 @@ static LONG s_close(LONG s)
 
     __asm __volatile ("jsr a6@(-120:W)" : "=r"(r)
                       : "r"(a6), "r"(d0)
-                      : "a0", "a1", "cc", "memory");
+                      : "d1", "a0", "a1", "cc", "memory");
     return r;
 }
 

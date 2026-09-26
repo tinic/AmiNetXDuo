@@ -667,7 +667,7 @@ BSD_SCRATCH;
     __asm __volatile ("jsr a6@(-804:W)"
                       : BSD_SCRATCH_OUT
                       : "r" (a6), "r" (a0)
-                      : "cc", "memory");
+                      : "d0", "cc", "memory");
 }
 
 /* gai_strerror takes its argument in a0, not d0, pragmas line 141. */

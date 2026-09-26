@@ -354,6 +354,7 @@ jobs:
             tools/aminet-batch.sh \
             tools/check-generated.sh \
             tools/check-lvo-matrix.sh \
+            tools/check-lvo-clobbers.sh \
             tools/check-option-stubs.sh \
             tools/check-gitlinks.sh \
             tools/check-test-duration.sh \

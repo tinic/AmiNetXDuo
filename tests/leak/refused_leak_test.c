@@ -98,7 +98,7 @@ static LONG l_accept(struct Library *base, LONG s)
     __asm __volatile ("jsr a6@(-48:W)"
                       : "=r" (res), "=r" (_clob_a0), "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (a1)
-                      : "cc", "memory");
+                      : "d1", "cc", "memory");
     return res;
 }
 
