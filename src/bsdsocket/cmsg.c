@@ -20,6 +20,7 @@
  *
  * Every one of these is a number compiled into an application.
  */
+#ifndef AMINETXDUO_BSD_TEST_HOST_PRELUDE_H   /* the host's cmsghdr is glibc's */
 _Static_assert(sizeof(struct cmsghdr) == 12, "cmsghdr is not 12 bytes");
 _Static_assert(offsetof(struct cmsghdr, cmsg_len)   == 0, "cmsg_len moved");
 _Static_assert(offsetof(struct cmsghdr, cmsg_level) == 4, "cmsg_level moved");
@@ -35,6 +36,7 @@ _Static_assert(CMSG_LEN(0) == 12 && CMSG_LEN(4) == 16,
 _Static_assert(CMSG_SPACE(0) == 12 && CMSG_SPACE(1) == 16 &&
                CMSG_SPACE(4) == 16 && CMSG_SPACE(5) == 20,
                "CMSG_SPACE does not round the payload up");
+#endif
 
 /* No padding in front of the data: CMSG_DATA is the twelfth byte. */
 _Static_assert(CMSG_ALIGN(sizeof(struct cmsghdr)) == sizeof(struct cmsghdr),

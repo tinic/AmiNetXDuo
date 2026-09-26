@@ -110,8 +110,8 @@ UINT anx6_scope(const ULONG *addr)
 }
 
 /* ipv6_srcsel.c: any valid address attached to the required interface. */
-BOOL netstack_ipv6_source_find(const ULONG *dest, LONG required,
-                               ULONG *chosen, UINT *index)
+BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG required,
+                               ULONG chosen[4], UINT *index)
 {
     UINT i;
 
