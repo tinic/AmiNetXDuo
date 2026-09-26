@@ -298,6 +298,28 @@
        "by accident.  8080 is the usual second choice, and the address is "
        "then http://<this machine>:8080/shell."))
 
+(set H_SNTP
+  (cat "sntp asks a time server for the current time and sets the system "
+       "clock and the battery-backed clock from the answer, adjusted for the "
+       "time zone in the Locale preferences.\n\n"
+       "If the answer is yes, one line goes into S:Network-Startup, after the "
+       "line that starts the network:\n\n"
+       "\tRun >NIL: <NIL: C:sntp pool.ntp.org QUIET\n\n"
+       "Run starts it in the background, so a boot without a network "
+       "connection is not delayed.  When no server answers, the clock is "
+       "left as it is.\n\n"
+       "This question appears only when S:Network-Startup is written.  To "
+       "stop setting the clock at boot, comment the line out with a leading "
+       "semicolon.\n\n"
+       "The installer asks for the server next."))
+
+(set H_SNTPSERVER
+  (cat "The name or address of an SNTP server.  pool.ntp.org selects a "
+       "public server near this machine.  A router or another machine on the "
+       "local network that serves the time also works.\n\n"
+       "The name can contain only letters, digits, hyphens and full stops, "
+       "and cannot begin with a hyphen."))
+
 (set H_ANXNET
   (cat "anxnet.device is the SANA-II driver AmiNetXDuo builds itself.  It "
        "drives the A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, "
@@ -411,6 +433,15 @@
 (set F_HTTPD
   (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
        "manager and text editor at /files and a Shell at /shell.  Neither asks for a password.\n"))
+
+(set F_SNTP
+  "\nFrom the next reboot, sntp sets the clock from %s.\n")
+
+(set F_BADHOST
+  (cat "\"%s\" is not a server name.\n\n"
+       "A name contains only letters, digits, hyphens and full stops, and "
+       "does not begin with a hyphen -- for example pool.ntp.org.  Type it "
+       "again."))
 
 (set H_DOCDIR
   (cat "A drawer called AmiNetXDuo holds the documentation, example "
@@ -548,6 +579,41 @@
     (set ask_ok (if (= @user-level 0) 1 ip_ok))
     (if (= ask_ok 0)
         (message (F_BADIP ask_result)
+                 (help ask_help))))
+)
+
+; --- P_ask_host -----------------------------------------------------------
+;
+;   in  : ask_prompt ask_help ask_default
+;   out : ask_result            non-empty, every character in [A-Za-z0-9.-],
+;                               not beginning with a hyphen
+;
+; The answer goes unquoted onto a command line in S:Network-Startup, so the
+; set is what keeps ; " * ? space < > | out of that file.  P_NAMECHAR is
+; case-insensitive, and patmatch reads the second argument literally.  An
+; IPv6 literal is refused along with everything else.  The level-0 term is
+; P_ask_ip's, for the same reason.
+
+(procedure P_ask_host
+  (set ask_ok 0)
+  (until ask_ok
+    (set ask_result (askstring (prompt ask_prompt)
+                               (help   ask_help)
+                               (default ask_default)))
+    (set host_len (strlen ask_result))
+    (set host_ok (if (> host_len 0) 1 0))
+    (set host_i 0)
+    (while (< host_i host_len)
+      (set host_c (substr ask_result host_i 1))
+      (if (NOT (OR (patmatch P_NAMECHAR host_c) (patmatch "." host_c)))
+          (set host_ok 0))
+      (set host_i (+ host_i 1)))
+    ; A leading hyphen would reach sntp's ReadArgs as -4 or -6, not a name.
+    (if (> host_len 0)
+        (if (patmatch "-" (substr ask_result 0 1)) (set host_ok 0)))
+    (set ask_ok (if (= @user-level 0) 1 host_ok))
+    (if (= ask_ok 0)
+        (message (F_BADHOST ask_result)
                  (help ask_help))))
 )
 
@@ -1587,6 +1653,20 @@
     (choices "Yes, at boot" "No, I will do it")
     (default 1)))
 
+; KEEP CONFIGURATION MEANS KEEP ITS BOOT POLICY TOO.  S:Network-Startup is a
+; user-editable configuration file in both Roadshow and AmiTCP_NG.  Replacing
+; it during an ordinary software update changes which of several interfaces
+; comes online, even when the user explicitly asked us to keep the setup.  It
+; is generated only for a new/reconfigured setup, or when no file existed.
+;
+; Decided HERE, with the questions, because the SNTP question below is asked
+; only when the file is going to be written.  Nothing between here and section
+; 8 creates or removes S:Network-Startup, so the answer is the same there.
+(set KEEP_NETSTART 0)
+(if (AND DO_STARTUP KEEP_OLD
+         (exists "S:Network-Startup" (noreq)))
+    (set KEEP_NETSTART 1))
+
 ; --- serve the volumes, and a Shell in a browser, at boot? ---------------
 ;
 ; DEFAULTS TO NO, and that is not timidity.  Every other question here has an
@@ -1633,6 +1713,39 @@
             (help    H_HTTPDPORT)
             (range   1 65535)
             (default 80)))
+      ))
+  ))
+
+; --- set the clock at boot? ----------------------------------------------
+;
+; DEFAULTS TO NO, so a run that takes every default -- NOVICE included --
+; writes the same S:Network-Startup as before this question existed.  Inverted
+; the way DO_HTTPD is: "No" first, (default 1), 0 for the first button.
+;
+; Asked only when S:Network-Startup is generated on this run.  A kept file is
+; not touched, so a setting asked for there would never be applied.
+
+(set DO_SNTP    0)
+(set NTP_SERVER "pool.ntp.org")
+
+(if (AND DO_STARTUP (= KEEP_NETSTART 0))
+  (
+    (set DO_SNTP
+      (if (askbool
+            (prompt "Set the clock from an Internet time server when this "
+                    "Amiga boots?")
+            (help    H_SNTP)
+            (choices "No" "Yes, set the clock")
+            (default 1))
+          0 1))
+
+    (if DO_SNTP
+      (
+        (set ask_prompt "Type the name of the time server.")
+        (set ask_help   H_SNTPSERVER)
+        (set ask_default NTP_SERVER)
+        (P_ask_host)
+        (set NTP_SERVER ask_result)
       ))
   ))
 
@@ -2394,15 +2507,7 @@
 
 (set START_IF (if KEEP_OLD OLD_IF IFNAME))
 
-; KEEP CONFIGURATION MEANS KEEP ITS BOOT POLICY TOO.  S:Network-Startup is a
-; user-editable configuration file in both Roadshow and AmiTCP_NG.  Replacing
-; it during an ordinary software update changes which of several interfaces
-; comes online, even when the user explicitly asked us to keep the setup.  It
-; is generated only for a new/reconfigured setup, or when no file existed.
-(set KEEP_NETSTART 0)
-(if (AND DO_STARTUP KEEP_OLD
-         (exists "S:Network-Startup" (noreq)))
-    (set KEEP_NETSTART 1))
+; KEEP_NETSTART is decided in section 4, beside DO_STARTUP.
 
 ; One string, however many lines are in it.  (startup) replaces everything
 ; between its two markers, so the block is always written whole and there is
@@ -2512,6 +2617,15 @@
            "; assign so that this drawer's is the one that runs; to\n"
            "; AmiNetXDuo, DEVS: here means AmiNetXDuo:Devs.\n")))
 
+; After AddNetInterface, so the stack is up when sntp opens it.  Run >NIL:
+; <NIL: for httpd's reason and one more: sntp blocks for its whole timeout,
+; plus the name lookup, when no server answers, and a boot must not wait on
+; that.  Empty unless asked for, so the file is otherwise unchanged.
+(set NS_SNTP "")
+(if DO_SNTP
+    (set NS_SNTP
+      ("Run >NIL: <NIL: %ssntp %s QUIET\n" C_PREFIX NTP_SERVER)))
+
 (if (AND DO_STARTUP (= KEEP_NETSTART 0))
   (
     (if (exists "S:Network-Startup" (noreq))
@@ -2564,7 +2678,8 @@
       (append "; what came up.  A boot that FAILS prints why either way.\n")
       (append NS_DRAWER_NOTE)
       (append "\n")
-      (append C_PREFIX "AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n"))
+      (append C_PREFIX "AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n")
+      (append NS_SNTP))
   ))
 
 (if DO_STARTUP
@@ -2602,6 +2717,10 @@
 (if DO_HTTPD
     (set FINAL_HTTPD (F_HTTPD HTTPD_PORT)))
 
+(set FINAL_SNTP "")
+(if DO_SNTP
+    (set FINAL_SNTP (F_SNTP NTP_SERVER)))
+
 ; The 68000 https:// notice used to be here, and it is not any more.  A user
 ; who never types an https: URL was being warned about something that would
 ; never affect them, on the one page they read once; and the user who DOES
@@ -2615,6 +2734,7 @@
   "AmiNetXDuo " VERSION_STR " is installed.\n\n"
   FINAL_START
   FINAL_HTTPD
+  FINAL_SNTP
   "\nShowNetStatus reports whether it came up.  The ReadMe in the "
   "AmiNetXDuo drawer covers the rest.  Version, on any of the installed "
   "files, reports " VERSION_STR " as well.\n")

@@ -86,6 +86,7 @@ SCENARIOS=(
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
     NO_CARD STALE_PI_DRIVERS HARDWARE_XSURF100 HARDWARE_PCMCIA
     TERMINAL STATIC_NO_DRIVERS
+    SNTP SNTP_INVALID SNTP_RERUN
     SPACES SPACES_DRAWER
 )
 declare -a RESULTS
@@ -187,6 +188,9 @@ for scenario in "${SCENARIOS[@]}"; do
         HARDWARE_PCMCIA)       opts=(-l AVERAGE -M -N ne2000_pcmcia) ;;
         TERMINAL)              opts=(-l AVERAGE -H) ;;
         STATIC_NO_DRIVERS)     opts=(-l AVERAGE -S -J) ;;
+        SNTP)                  opts=(-l AVERAGE -s yes) ;;
+        SNTP_INVALID)          opts=(-l AVERAGE -s invalid) ;;
+        SNTP_RERUN)            opts=(-l AVERAGE -s yes -R) ;;
 SPACES)                opts=(-l AVERAGE -W) ;;
 SPACES_DRAWER)         opts=(-l AVERAGE -D -W) ;;
     esac

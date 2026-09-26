@@ -136,6 +136,7 @@
  *   <run>|CHOICE|<number of options>|<gadget id>|<matching-page ordinal>
  *   <run>|STRING|<current value>|<replacement value>
  *   <run>|ABORT|<button-label substring identifying the page>
+ *   <run>|ABSENT|<button-label substring of a page that must not appear>
  *
  * Unlike the historical DRIVE_YES_LABEL/DRIVE_PICK_* switches, this can
  * answer more than one non-default question in one installation and can give
@@ -143,6 +144,10 @@
  * optional so old callers remain useful.  Every loaded action must be used;
  * a renamed, skipped or unreachable page therefore fails instead of silently
  * taking a default and producing a vacuous green test.
+ *
+ * ABSENT is the other direction: it starts out satisfied, and the run fails
+ * the moment a page carrying that label is drawn.  It is how a harness proves
+ * a question was NOT asked, which a page that takes its default cannot show.
  */
 #ifndef DRIVE_SCENARIO
 #define DRIVE_SCENARIO "DH0:install-scenario.txt"
@@ -156,7 +161,8 @@ enum ActionType
     ACTION_BOOL = 1,
     ACTION_CHOICE,
     ACTION_STRING,
-    ACTION_ABORT
+    ACTION_ABORT,
+    ACTION_ABSENT
 };
 
 struct DriveAction
@@ -176,6 +182,7 @@ static LONG               action_count;
 static LONG               active_run;
 static LONG               pending_action = -1;
 static struct Gadget     *pending_string;
+static LONG               absent_seen = -1;
 
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 
@@ -420,6 +427,12 @@ static BOOL load_actions(VOID)
             action->type = ACTION_ABORT;
             copy_text(action->match, at, sizeof(action->match));
         }
+        else if (strcmp(kind, "ABSENT") == 0)
+        {
+            action->type = ACTION_ABSENT;
+            action->used = TRUE;
+            copy_text(action->match, at, sizeof(action->match));
+        }
         else
         {
             say("installdrive: unknown action at line %ld\n", number);
@@ -461,6 +474,23 @@ static LONG matching_abort_action(struct Gadget *head)
 
         if (actions[i].used || actions[i].run != active_run ||
             actions[i].type != ACTION_ABORT)
+            continue;
+        for (gad = head; gad != NULL; gad = gad->NextGadget)
+            if (label_matches(gad, actions[i].match))
+                return i;
+    }
+    return -1;
+}
+
+static LONG matching_absent_action(struct Gadget *head)
+{
+    LONG i;
+
+    for (i = 0; i < action_count; i++)
+    {
+        struct Gadget *gad;
+
+        if (actions[i].run != active_run || actions[i].type != ACTION_ABSENT)
             continue;
         for (gad = head; gad != NULL; gad = gad->NextGadget)
             if (label_matches(gad, actions[i].match))
@@ -551,6 +581,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
     current_options = 0;
     pending_action = -1;
     pending_string = NULL;
+    absent_seen    = -1;
 
     ilock = LockIBase(0);
 
@@ -609,6 +640,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
 
             found  = window;
             current_options = options;
+            absent_seen = matching_absent_action(window->FirstGadget);
             choice = proceed;
             if (choice == NULL && yes != NULL)
             {
@@ -1011,6 +1043,14 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
         Delay(POLL_TICKS);
 
         window = find_installer_window(&target);
+
+        if (window != NULL && absent_seen >= 0)
+        {
+            say("installdrive: ABSENT action %ld: its page was drawn\n",
+                absent_seen + 1);
+            describe(window);
+            return FALSE;
+        }
 
         /*
          * Let the first page settle before touching it.  A window exists,
