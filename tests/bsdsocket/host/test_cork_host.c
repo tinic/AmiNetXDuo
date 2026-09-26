@@ -886,6 +886,9 @@ AmiSocket *bsd_incoming_first_ready(const AmiSocket *listener)
 VOID  bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
 { (VOID)tcp; (VOID)rtt_ms; }
 ULONG ami_millis(VOID) { return 0UL; }
+/* socket.c's, which transfer.c reads the stored zone through (#51); no case
+   here stores a scope id. */
+ULONG bsd_scope_live(ULONG scope, ULONG epoch) { (VOID)epoch; return scope; }
 
 NX_IP *netstack_ip(VOID) { return NX_NULL; }
 NX_PACKET_POOL *netstack_pool(VOID) { return &h_pool; }
