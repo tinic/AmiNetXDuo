@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A sixteenth program with `bsdsocket.library` open no longer waits forever
+  for another to close it: an idle opener's stack context is reclaimed and
+  rebuilt on its next call.
+
 ## 1.0.0-beta6
 
 - `InstallNetProbe` reads a PC Card's manufacturer ID with the card handle it just claimed.

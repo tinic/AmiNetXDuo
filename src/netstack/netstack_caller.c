@@ -87,6 +87,23 @@ VOID ami_netstack_leave_free(AmiNetCaller *caller)
     FreeMem(caller, sizeof(AmiNetCaller));
 }
 
+/* A full pool took the cached thread back (tx_amiga_pool.c): the teardown
+   was foreign, so the run signal it allocated here is still ours to free. */
+static VOID nc_free_evicted_signal(AmiNetCaller *caller)
+{
+    ULONG m = caller->nc_Signal;
+    BYTE  bit = 0;
+
+    if (m == 0UL)
+        return;
+
+    SetSignal(0UL, m);
+    while ((m >>= 1) != 0UL)
+        bit++;
+    FreeSignal(bit);
+    caller->nc_Signal = 0UL;
+}
+
 LONG ami_netstack_enter_cached(AmiNetCaller *caller)
 {
     struct Task *me;
@@ -104,11 +121,15 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
 
     if (caller->nc_Live && caller->nc_Task == me)
     {
-        if (tx_amiga_adopt_resume(caller->nc_Thread, caller->nc_Gen) == TX_SUCCESS)
+        status = tx_amiga_adopt_resume(caller->nc_Thread, caller->nc_Gen);
+        if (status == TX_SUCCESS)
         {
             caller->nc_Adopted = TRUE;
             return AMI_NET_OK;
         }
+
+        if (status == TX_THREAD_ERROR)
+            nc_free_evicted_signal(caller);
 
         /* Either way the handle is finished with. Both calls check the
            generation themselves, so a slot recycled under us is refused rather
@@ -147,6 +168,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
         return AMI_NET_ERR_KERNEL;
     }
 
+    caller->nc_Signal  = caller->nc_Thread->tx_thread_amiga_run_signal;
     caller->nc_Adopted = TRUE;
     return AMI_NET_OK;
 }
@@ -199,8 +221,11 @@ VOID ami_netstack_release(AmiNetCaller *caller)
 
     if (caller->nc_Task == me)
     {
-        if (tx_amiga_adopt_resume(caller->nc_Thread, caller->nc_Gen) == TX_SUCCESS)
+        status = tx_amiga_adopt_resume(caller->nc_Thread, caller->nc_Gen);
+        if (status == TX_SUCCESS)
             AMI_NX_CLEANUP(tx_amiga_orphan_thread(caller->nc_Thread, caller->nc_Gen));
+        else if (status == TX_THREAD_ERROR)
+            nc_free_evicted_signal(caller);
         else
             AMI_NX_CLEANUP(tx_amiga_discard_thread(caller->nc_Thread, caller->nc_Gen));
     }
@@ -239,4 +264,5 @@ VOID ami_netstack_release(AmiNetCaller *caller)
     caller->nc_Task    = NULL;
     caller->nc_Thread  = TX_NULL;
     caller->nc_Gen     = 0UL;
+    caller->nc_Signal  = 0UL;
 }

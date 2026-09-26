@@ -317,6 +317,17 @@ UINT         wake;
 
     _tx_thread_system_state--;
 
+    /* Outside the stack now, holding nothing: a full pool may take this slot
+       (_tx_amiga_adopt_evict_dormant_locked) and the next resume re-adopts.  */
+    thread_ptr -> tx_thread_amiga_flags |=  TX_AMIGA_THREAD_DORMANT;
+
+    /* A Task parked on a full pool is woken only by a release, and this is
+       not one: tell it there is now something to take back.  */
+    if (_tx_amiga_adopt_waiting != 0UL)
+    {
+        _tx_amiga_adopt_wake_waiters_locked();
+    }
+
     /* Wake the scheduler only if there is something to dispatch: an empty execute
        pointer means the poke would wake it to find nothing, and no dispatch is lost
        -- whatever makes a thread ready next wakes it.  Read under the core lock. */
@@ -381,6 +392,8 @@ struct Task *me;
        the last entry (StackSwap between calls), and the dead-holder check
        compares against this.  */
     thread_ptr -> tx_thread_amiga_task_stamp =  _tx_amiga_task_stamp(me);
+
+    thread_ptr -> tx_thread_amiga_flags &=  ~TX_AMIGA_THREAD_DORMANT;
 
     _tx_thread_system_state++;
 
