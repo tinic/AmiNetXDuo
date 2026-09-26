@@ -931,6 +931,20 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # An LVO may destroy d0, d1, a0 and a1, and an inline-asm call that lists
+    # one only as an input lets GCC reuse what the call overwrote: #68 passed
+    # a stale recvfrom address and got EFAULT.  Every such call, src/ and
+    # tests/ alike, names all four as outputs or clobbers (#70).
+    if tools/check-lvo-clobbers.sh > "$BUILD/lvo-clobbers.log" 2>&1; then
+        note "lvo clobbers: $(sed -n 's/^lvo_clobbers=ok statements=\([0-9]*\).*/\1 asm calls/p' \
+              "$BUILD/lvo-clobbers.log")"
+    else
+        cat "$BUILD/lvo-clobbers.log"
+        fail "an inline-asm LVO call leaves a scratch register off its\
+ outputs and clobbers (tools/check-lvo-clobbers.sh)"
+        return 1
+    fi
+
     # An option's OFF side must define every function its ON side does.  The
     # link only notices on the arm that turns the option off, which is the arm
     # nobody builds locally; raw.c cost three of them in one sitting.

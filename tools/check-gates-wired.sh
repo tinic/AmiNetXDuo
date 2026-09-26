@@ -74,6 +74,7 @@ want stage-coverage tools/ci.sh                      'check-stage-coverage\.sh'
 want rx-posted      tools/ci.sh                      'check-rx-posted\.sh'
 want option-stubs   tools/ci.sh                      'check-option-stubs\.sh'
 want lvo-matrix     tools/ci.sh                      'check-lvo-matrix\.sh'
+want lvo-clobbers   tools/ci.sh                      'check-lvo-clobbers\.sh'
 want generated      .githooks/pre-commit             'check-generated\.sh'
 
 # Gate 5: the push itself.  .githooks/pre-push refuses a tree the host stage
@@ -198,7 +199,7 @@ done
 # ------------------------------------------ and the gate scripts still run ---
 for g in check-changelog-prose check-image-size check-ram-size check-rate \
          check-stage-coverage check-rx-posted check-option-stubs \
-         check-lvo-matrix check-generated \
+         check-lvo-matrix check-lvo-clobbers check-generated \
          check-hot-calls check-rearm-invariants check-hotpath-budget \
          check-gates-wired; do
     if [ ! -x "tools/$g.sh" ]; then
