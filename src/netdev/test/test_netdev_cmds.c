@@ -975,6 +975,16 @@ static void i2_nsquery_both_forms(void)
     expect(nsd_answer_untouched(&a), "  and io_Data is not written");
     expect(replies == 1, "  and the refusal is replied to");
 
+    /* (d) A bare IORequest (32 bytes): io_Actual would be past its end. */
+    reset();
+    nsd_sana(&io, (UWORD)sizeof(struct IORequest));
+    std->io_Actual = 0xdeadbeefUL;
+    netdev_nsd_query(&io);
+    expect_u32("a bare IORequest is refused",
+               (unsigned long)(UBYTE)io.ios2_Req.io_Error, (unsigned long)(UBYTE)IOERR_BADLENGTH);
+    expect_u32("  and io_Actual, past its end, is not written",
+               (unsigned long)std->io_Actual, 0xdeadbeefUL);
+
     /* 6. A short request (a 48-byte IOStdReq): same, and it says so itself. */
     reset();
     nsd_sana(&io, (UWORD)sizeof(struct IOStdReq));

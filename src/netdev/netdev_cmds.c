@@ -820,7 +820,11 @@ VOID netdev_nsd_query(struct IOSana2Req *io)
 
     if (q == NULL)
     {
-        std->io_Actual = 0;
+        /* io_Actual is at offset 32, past a request stated shorter than an
+           IOStdReq; an unsized one is at least that, in either form. */
+        if (io->ios2_Req.io_Message.mn_Length == 0 ||
+            io->ios2_Req.io_Message.mn_Length >= sizeof(struct IOStdReq))
+            std->io_Actual = 0;
         std->io_Error  = IOERR_BADLENGTH;
         if ((std->io_Flags & IOF_QUICK) == 0)
             ReplyMsg(&std->io_Message);
