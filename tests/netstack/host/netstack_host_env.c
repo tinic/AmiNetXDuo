@@ -105,6 +105,8 @@ VOID FreeMem(APTR memoryBlock, ULONG byteSize)
 
     if (memoryBlock != NULL)
     {
+        if (memoryBlock == nsh.watch_block)
+            nsh.watch_freed = TRUE;
         nsh.frees++;
         free(memoryBlock);
     }
@@ -1298,11 +1300,17 @@ UINT _nxe_ip_address_get(NX_IP *ip_ptr, ULONG *ip_address, ULONG *network_mask)
     return TX_SUCCESS;
 }
 
+/* nx_ip_delete.c's refusal: a created socket leaves the IP thread and its
+   timers running and answers NX_SOCKETS_BOUND. */
 UINT _nxe_ip_delete(NX_IP *ip_ptr)
 {
-    (VOID)ip_ptr;
+    nsh.ip_deletes++;
+    nsh.ip_delete_status = NX_SUCCESS;
+    if (ip_ptr->nx_ip_udp_created_sockets_count != 0 ||
+        ip_ptr->nx_ip_tcp_created_sockets_count != 0)
+        nsh.ip_delete_status = NX_SOCKETS_BOUND;
 
-    return TX_SUCCESS;
+    return nsh.ip_delete_status;
 }
 
 UINT _nxe_ip_driver_interface_direct_command(NX_IP *ip_ptr, UINT command, UINT interface_index, ULONG *return_value_ptr)

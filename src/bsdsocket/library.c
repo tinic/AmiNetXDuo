@@ -1059,8 +1059,7 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         bracketed = (bsd_nx_enter(base) == 0);
 
         ObtainSemaphore(&master->sb_Lock);
-        if (master->sb_StackRefs >= master->sb_TransientStackRefs &&
-            master->sb_StackRefs - master->sb_TransientStackRefs <= 1)
+        if (bsd_stack_last_opener(master))
             bsd_handoff_flush(base, bracketed);
         ReleaseSemaphore(&master->sb_Lock);
 

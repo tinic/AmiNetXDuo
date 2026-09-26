@@ -971,7 +971,7 @@ VOID bsd_close_all(struct AmiSocketBase *base)
 
     bsd_closing_sweep();
 
-    if (base->sb_Master != NULL && base->sb_Master->sb_StackRefs <= 1)
+    if (base->sb_Master != NULL && bsd_stack_last_opener(base->sb_Master))
         bsd_closing_drain();
 
     bsd_nx_leave(base);

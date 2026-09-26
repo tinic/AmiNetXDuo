@@ -218,9 +218,21 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     ami_netstack_dhcpv6_destroy(ns);
 #endif
 
+    /*
+     * A socket still created refuses the delete and leaves the IP thread and
+     * its timers running on ns_Ip, so nothing they can reach is closed or
+     * freed: a bounded leak, as below (#53).
+     */
     if (ns->ns_IpCreated)
     {
-        AMI_NX_CLEANUP(nx_ip_delete(&ns->ns_Ip));
+        UINT status = nx_ip_delete(&ns->ns_Ip);
+
+        if (status != NX_SUCCESS)
+        {
+            AMI_ERROR("netstack: IP instance not deleted (0x%lx); retaining "
+                      "stack memory", (unsigned long)status);
+            return;
+        }
         ns->ns_IpCreated = FALSE;
     }
 
