@@ -9,6 +9,7 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxnet.device` on a PC Card slot records the correct I/O mode in its diagnostic record.
 - The installer can set the clock from an Internet time server at boot; the answer defaults to no.
 - `SO_REUSEPORT` on a UDP socket now shares the port instead of being ignored,
   and `SO_REUSEADDR` opts into the same sharing for callers that know only that
