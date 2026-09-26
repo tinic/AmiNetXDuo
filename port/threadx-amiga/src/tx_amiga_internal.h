@@ -117,6 +117,7 @@ struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT 
    held.  _tx_amiga_slot_release_locked() and the waiter wakes are declared in
    tx_port.h, with the port's other VOID helpers.  */
 struct _tx_amiga_adopt_slot *_tx_amiga_slot_held(TX_THREAD *thread_ptr, ULONG generation);
+BYTE _tx_amiga_sigbit(ULONG sigmask);
 
 
 /* Create an Exec Task on a caller-supplied stack.  The MemList is a SEPARATE

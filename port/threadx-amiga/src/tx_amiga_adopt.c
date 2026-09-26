@@ -24,24 +24,6 @@ static VOID _tx_amiga_adopted_entry(ULONG id)
 }
 
 
-/* Signal bit number for a single-bit mask, or -1.  */
-static BYTE _tx_amiga_sigbit(ULONG sigmask)
-{
-
-BYTE    bit;
-
-
-    for (bit = 0; bit < 32; bit++)
-    {
-        if (sigmask == (1UL << ((ULONG) bit)))
-        {
-            return(bit);
-        }
-    }
-    return((BYTE) -1);
-}
-
-
 /* TX_TRUE if the calling Task is the ThreadX baton holder.  The generic answer,
    _tx_thread_system_state == 0, is wrong here: interrupt context is a Task
    holding the core lock, so that counter is whatever some other Task is doing.  */

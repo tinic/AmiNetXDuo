@@ -525,24 +525,36 @@ struct _tx_amiga_adopt_slot *slot;
 }
 
 
+/* Signal bit number for a single-bit mask, or -1 for none.  Every caller
+   passes a run signal: one bit, or 0.  */
+BYTE _tx_amiga_sigbit(ULONG sigmask)
+{
+
+BYTE    bit;
+
+
+    for (bit = -1; sigmask != 0UL; sigmask >>= 1)
+    {
+        bit++;
+    }
+    return(bit);
+}
+
+
 /* Free the run signal of an adoption the evictor took; 0 is a no-op.  Called
    by the owner, which is the only Task that may.  */
 VOID tx_amiga_adopt_signal_free(ULONG sigmask)
 {
 
-LONG    sig;
+BYTE    sig;
 
 
-    if (sigmask == 0UL)
+    sig =  _tx_amiga_sigbit(sigmask);
+    if (sig >= 0)
     {
-        return;
+        SetSignal(0UL, sigmask);
+        FreeSignal(sig);
     }
-
-    SetSignal(0UL, sigmask);
-    for (sig = 0; (sigmask >>= 1) != 0UL; sig++)
-    {
-    }
-    FreeSignal(sig);
 }
 
 

@@ -65,8 +65,10 @@ BUDGETS=(
     # 364,016 with the post-beta6 review fixes: the connected-peer snapshot
     # inside the send bracket (#51), the Exec-wait owner lookup, and the
     # teardown socket sweep, failed-open ordering and refused cork stop
-    # (#53), 2026-09-26 (micro 203,512, minimal 237,596).
-    "default:src/bsdsocket/bsdsocket.library:365000"
+    # (#53), 2026-09-26 (micro 203,512, minimal 237,596): 16 over.  363,988
+    # after one shared _tx_amiga_sigbit and a dead nc_Signal store removed
+    # (#67 code), so the 364,000 budget stands.
+    "default:src/bsdsocket/bsdsocket.library:364000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the

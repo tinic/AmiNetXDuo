@@ -92,7 +92,6 @@ VOID ami_netstack_leave_free(AmiNetCaller *caller)
 static VOID nc_free_evicted_signal(AmiNetCaller *caller)
 {
     tx_amiga_adopt_signal_free(caller->nc_Signal);
-    caller->nc_Signal = 0UL;
 }
 
 LONG ami_netstack_enter_cached(AmiNetCaller *caller)
