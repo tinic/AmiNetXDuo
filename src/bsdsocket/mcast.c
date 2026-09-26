@@ -255,19 +255,28 @@ VOID bsd_mcast_close(AmiSocket *sock)
 #endif
 }
 
-LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
+/* IPv4 group destination: *ttl becomes IP_MULTICAST_TTL and the result is
+   the IP_MULTICAST_IF index, -1 for the route.  Otherwise -1, *ttl kept. */
+LONG bsd_mcast_send_choice(AmiSocket *sock, const NXD_ADDRESS *addr, UINT *ttl)
 {
     if (addr->nxd_ip_version != NX_IP_VERSION_V4 ||
         !bsd_mcast_is_group(addr->nxd_ip_address.v4))
-    {
-        sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)(sock->as_Ttl & 0xFF);
         return -1;
-    }
 
-    sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)sock->as_McastTtl;
+    *ttl = (UINT)sock->as_McastTtl;
 
     return bsd_mcast_preference(&sock->as_McastIf,
                                 sock->as_McastIfEpoch);
+}
+
+LONG bsd_mcast_prepare_send(AmiSocket *sock, const NXD_ADDRESS *addr)
+{
+    UINT ttl   = (UINT)(sock->as_Ttl & 0xFF);
+    LONG iface = bsd_mcast_send_choice(sock, addr, &ttl);
+
+    sock->as_Nx.udp.nx_udp_socket_time_to_live = ttl;
+
+    return iface;
 }
 
 /* NetX snapshots a *global* loopback setting when a group is first joined,
