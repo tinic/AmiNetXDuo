@@ -238,6 +238,7 @@ if [ "$COMMIT" = HEAD ]; then
         while read -r sha path _; do
             echo "worktree_$path=STALE checked_out=${sha#?}"
         done < <(grep '^[+U]' "$WORK/status")
+        echo "  run: git submodule update --init --recursive" >&2
         worktree_bad=1
     fi
 
@@ -255,6 +256,7 @@ if [ "$COMMIT" = HEAD ]; then
     fi
     if [ -s "$WORK/dirty" ]; then
         cat "$WORK/dirty"
+        echo "  discard or commit the edits in that submodule" >&2
         worktree_bad=1
     fi
 

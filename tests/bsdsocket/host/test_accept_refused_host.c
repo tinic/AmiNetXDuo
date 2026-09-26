@@ -227,6 +227,7 @@ ULONG netstack_interface_epoch(UWORD index) { (VOID)index; return 0; }
    short, never destroyed, and the script completes it before the arm.  Each
    traps, so a case that strays onto one of them cannot pass. */
 /* A trap never reads its arguments. */
+#pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #define H_TRAP(decl) decl { printf("  TRAP %s\n", __func__); abort(); }
 H_TRAP(UINT _nxe_tcp_socket_create(NX_IP *ip, NX_TCP_SOCKET *s, CHAR *n,
@@ -261,6 +262,7 @@ H_TRAP(VOID bsd_tcp_urgent_notify(NX_TCP_SOCKET *s))
    back a v4-mapped peer. */
 H_TRAP(UINT anx6_scope(const ULONG *addr))
 H_TRAP(VOID bsd_addr_to_v4mapped(NXD_ADDRESS *addr, ULONG v4))
+#pragma GCC diagnostic pop
 
 /* ---- the test ------------------------------------------------------------ */
 
