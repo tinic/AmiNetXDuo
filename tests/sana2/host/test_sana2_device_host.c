@@ -1799,9 +1799,9 @@ static void case_offline_no_timer(void)
 static void case_bursty_wifi_reads(void)
 {
     printf("  WiFiPi has a burst-aware read default without changing wired cards\n");
-    h_check(ami_sana2_default_ip_reads("DEVS:Networks/anxwifipi.device") == 64,
-            "the shipped WiFiPi driver gets 64 reads by default");
-    h_check(ami_sana2_default_ip_reads("WIFIPI.DEVICE") == 64,
+    h_check(ami_sana2_default_ip_reads("DEVS:Networks/anxwifipi.device") == 128,
+            "the shipped WiFiPi driver gets 128 reads by default");
+    h_check(ami_sana2_default_ip_reads("WIFIPI.DEVICE") == 128,
             "the upstream driver name is recognized case-insensitively");
     h_check(ami_sana2_default_ip_reads("genet.device") == 0,
             "a wired driver keeps the ordinary BPS ladder");

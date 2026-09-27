@@ -1693,13 +1693,15 @@ ULONG ami_sana2_known_rx_bytes(const char *device)
     return 0;
 }
 
-/* WiFiPi delivers several Ethernet packets from one SDIO glom before the
- * reader task can re-post completed CMD_READs.  Its fixed 100 Mbit/s device
- * query lands on the ordinary 32-read LAN rung, while the receive counters
- * show missing reads during inbound transfers.  Give only this driver a
- * 64-read default; an explicit IPREQUESTS still wins, and rx_plan() still
- * enforces the shared packet-pool budget.  The transfer benefit needs a
- * focused hardware A/B measurement. */
+/* WiFiPi's receiver runs at Exec priority 5, above every ThreadX task, and
+ * delivers a whole wake's SDPCM frames (up to 64, each possibly a glom)
+ * before the reader can re-post one CMD_READ; a frame with no read queued is
+ * dropped into UnknownTypesReceived.  Its fixed 100 Mbit/s device query lands
+ * on the 32-read LAN rung.  Measured on the CM4 A1200 (#89): 128 reads, 59.0
+ * Mbit/s inbound, UnknownTypes 82 of 53,483 packets; 128 is also
+ * AMI_SANA2_RX_MAX_DEPTH.  Over 64 it pins 64 more pool packets (+104,448 B
+ * at the 1,632 B stride) and 7,936 B more slot RAM; an explicit IPREQUESTS
+ * still wins, and rx_plan() still caps it at the pool budget. */
 UWORD ami_sana2_default_ip_reads(const char *device)
 {
     const char *base;
@@ -1710,7 +1712,7 @@ UWORD ami_sana2_default_ip_reads(const char *device)
     base = ami_sana2_basename(device);
     if (ami_str_iequal(base, "anxwifipi.device") ||
         ami_str_iequal(base, "wifipi.device"))
-        return 64;
+        return 128;
 
     return 0;
 }
