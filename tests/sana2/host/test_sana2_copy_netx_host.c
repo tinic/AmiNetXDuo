@@ -1,0 +1,233 @@
+/*
+ * AmiNetXDuo, S2_CopyFromBuff with NetX Duo's own deferred checksum, on the
+ * host.
+ *
+ * test_sana2_copy_host.c counts _nx_ip_packet_checksum_compute() calls; this
+ * one links the real routine, so a device that reads part of a frame before
+ * copying all of it is checked against the checksum the peer will verify.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "sana2_internal.h"
+
+#include <stdio.h>
+#include <string.h>
+
+
+static unsigned long h_checks;
+static unsigned long h_failures;
+
+static void h_check(int ok, const char *what)
+{
+    h_checks++;
+    if (!ok)
+    {
+        h_failures++;
+        printf("  FAIL %s\n", what);
+    }
+}
+
+
+/* src/net68k/n68k_copy.S and n68k_checksum.c on the target; the same
+   contracts here, as in test_sana2_copy_host.c. */
+VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
+{
+    if (len != 0)
+        memcpy(to, from, (size_t)len);
+}
+
+ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+{
+    ULONG acc = 0;
+
+    /* Summed as the 68k loads them, big-endian: the fold in sana2_copy.c
+       takes the sum as a network-order value. */
+    while (count != 0UL)
+    {
+        const UCHAR *b = (const UCHAR *)from;
+        ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
+                  ((ULONG)b[2] << 8) | (ULONG)b[3];
+
+        *to++ = *from++;
+        acc += w;
+        if (acc < w)
+            acc++;
+        count--;
+    }
+
+    return acc;
+}
+
+
+/* nx_ip_checksum_compute.c references it on a path these packets do not
+   take. */
+UINT _tx_thread_sleep(ULONG timer_ticks)
+{
+    (VOID)timer_ticks;
+    return 0;
+}
+
+
+/* RFC 1071 over the pseudo-header and segment, independent of both paths. */
+static unsigned tcp_checksum(const UCHAR *ip, ULONG total)
+{
+    ULONG ihl = (ULONG)(ip[0] & 0x0F) * 4UL;
+    ULONG tcp_len = total - ihl;
+    ULONG sum = 0;
+    ULONG i;
+
+    for (i = 12; i < 20; i += 2)
+        sum += ((ULONG)ip[i] << 8) | ip[i + 1];
+    sum += 6UL + tcp_len;
+
+    for (i = 0; i + 1 < tcp_len; i += 2)
+    {
+        if (i == 16)
+            continue;                       /* the checksum field itself    */
+        sum += ((ULONG)ip[ihl + i] << 8) | ip[ihl + i + 1];
+    }
+    if (tcp_len & 1UL)
+        sum += (ULONG)ip[ihl + tcp_len - 1] << 8;
+
+    while (sum >> 16)
+        sum = (sum & 0xFFFFUL) + (sum >> 16);
+    sum = (~sum) & 0xFFFFUL;
+    return (unsigned)(sum == 0 ? 0xFFFFUL : sum);
+}
+
+
+#define DGRAM_LEN   60
+
+static UCHAR     dgram[DGRAM_LEN];
+static NX_PACKET pkt;
+
+/* A cooked IPv4 TCP segment as NetX Duo hands it to the interface: checksum
+   field zero, the TCP checksum owed by the interface. */
+static void packet_init(void)
+{
+    ULONG i;
+
+    memset(dgram, 0, sizeof(dgram));
+    dgram[0]  = 0x45;
+    dgram[3]  = DGRAM_LEN;
+    dgram[8]  = 64;
+    dgram[9]  = 6;
+    dgram[12] = 10;  dgram[15] = 1;
+    dgram[16] = 10;  dgram[19] = 2;
+    dgram[20] = 0x30; dgram[21] = 0x39;
+    dgram[22] = 0x00; dgram[23] = 0x50;
+    dgram[32] = 0x50;
+    dgram[33] = 0x10;                       /* ACK                          */
+    for (i = 40; i < DGRAM_LEN; i++)
+        dgram[i] = (UCHAR)((i * 11 + 3) & 0xFF);
+
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.nx_packet_prepend_ptr = dgram;
+    pkt.nx_packet_append_ptr  = dgram + DGRAM_LEN;
+    pkt.nx_packet_length      = DGRAM_LEN;
+    pkt.nx_packet_ip_version  = NX_IP_VERSION_V4;
+    pkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+}
+
+static void slot_init(AmiTxSlot *slot, AmiSana2If *iface)
+{
+    memset(iface, 0, sizeof(*iface));
+    iface->raw_mode = FALSE;
+    memset(slot, 0, sizeof(*slot));
+    slot->packet = &pkt;
+    slot->total  = DGRAM_LEN;
+    slot->iface  = iface;
+}
+
+static unsigned field(const UCHAR *ip)
+{
+    return ((unsigned)ip[36] << 8) | ip[37];
+}
+
+
+/* 1. The whole frame in one call: the fused path. */
+static void test_whole(void)
+{
+    static AmiSana2If iface;
+    AmiTxSlot         slot;
+    UCHAR             out[DGRAM_LEN];
+    unsigned          want;
+
+    printf("sana2: whole-frame copy, fused checksum\n");
+    packet_init();
+    want = tcp_checksum(dgram, DGRAM_LEN);
+    slot_init(&slot, &iface);
+
+    h_check(ami_sana2_copy_from_buff(out, &slot, DGRAM_LEN) == TRUE,
+            "whole: copied");
+    h_check(field(out) == want, "whole: the wire checksum is correct");
+}
+
+/* 2. A device reads the first 34 bytes (an Ethernet-less header peek: IPv4
+   header and the TCP ports), then copies the whole frame. */
+static void test_peek_then_whole(ULONG peek)
+{
+    static AmiSana2If iface;
+    AmiTxSlot         slot;
+    UCHAR             head[DGRAM_LEN];
+    UCHAR             out[DGRAM_LEN];
+    unsigned          want;
+    char              what[96];
+
+    printf("sana2: %lu-byte peek, then the whole frame\n", (unsigned long)peek);
+    packet_init();
+    want = tcp_checksum(dgram, DGRAM_LEN);
+    slot_init(&slot, &iface);
+
+    h_check(ami_sana2_copy_from_buff(head, &slot, peek) == TRUE,
+            "peek: copied");
+    h_check(memcmp(head, dgram, 20) == 0 || peek < 20,
+            "peek: the IPv4 header is as sent");
+    h_check(ami_sana2_copy_from_buff(out, &slot, DGRAM_LEN) == TRUE,
+            "then whole: copied");
+    snprintf(what, sizeof(what),
+             "then whole: the wire checksum is correct (got %04x, want %04x)",
+             field(out), want);
+    h_check(field(out) == want, what);
+    h_check((pkt.nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
+            "then whole: the checksum is no longer owed");
+}
+
+/* 3. The same frame copied twice whole (a device that rebuilds a write). */
+static void test_whole_twice(void)
+{
+    static AmiSana2If iface;
+    AmiTxSlot         slot;
+    UCHAR             out[DGRAM_LEN];
+    UCHAR             again[DGRAM_LEN];
+    unsigned          want;
+
+    printf("sana2: whole-frame copy twice\n");
+    packet_init();
+    want = tcp_checksum(dgram, DGRAM_LEN);
+    slot_init(&slot, &iface);
+
+    h_check(ami_sana2_copy_from_buff(out, &slot, DGRAM_LEN) == TRUE &&
+            ami_sana2_copy_from_buff(again, &slot, DGRAM_LEN) == TRUE,
+            "twice: copied");
+    h_check(field(out) == want && field(again) == want,
+            "twice: both copies carry the correct checksum");
+}
+
+
+int main(void)
+{
+    test_whole();
+    test_peek_then_whole(34);
+    test_peek_then_whole(20);
+    test_peek_then_whole(4);
+    test_whole_twice();
+
+    printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
+           (h_failures == 0) ? "PASS" : "FAIL");
+
+    return (h_failures == 0) ? 0 : 1;
+}

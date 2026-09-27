@@ -47,6 +47,33 @@ target_compile_definitions(test_sana2_copy PRIVATE
     NX_INCLUDE_USER_DEFINE_FILE
     AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
+# The same hook with NetX Duo's real deferred checksum linked in, not counted:
+# a device that reads part of a frame before copying all of it must still put
+# the checksum the peer verifies on the wire.
+add_executable(test_sana2_copy_netx
+    host/test_sana2_copy_netx_host.c
+    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_copy.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_checksum_compute.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_checksum_compute.c")
+target_compile_options(test_sana2_copy_netx PRIVATE
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_regargs.h"
+    -UAMINETXDUO_IPV6)
+target_include_directories(test_sana2_copy_netx PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+    "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+    "${CMAKE_SOURCE_DIR}/src/config/test/shim"
+    "${CMAKE_SOURCE_DIR}/src/sana2"
+    "${CMAKE_SOURCE_DIR}/src/net68k"
+    "${CMAKE_SOURCE_DIR}/include"
+    "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"
+    "${AMINETXDUO_NETXDUO}/common/inc"
+    "${AMINETXDUO_THREADX}/common/inc")
+target_compile_definitions(test_sana2_copy_netx PRIVATE
+    NX_INCLUDE_USER_DEFINE_FILE
+    AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+add_test(NAME sana2_copy_netx COMMAND test_sana2_copy_netx)
+
 # Without this the copy hook's ENTIRE checksum path -- the fused branch and
 # the odd-address fallback both -- is preprocessed out of the one test that
 # calls it, and S2_CopyToBuff is how every third-party SANA-II device hands
