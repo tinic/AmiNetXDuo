@@ -18,11 +18,12 @@ static unsigned long h_checks;
 static unsigned long h_failures;
 
 /* The device-name policy is exercised by test_sana2_device; this target
- * links only sana2_rx.c and supplies the no-override case. */
+ * links only sana2_rx.c, so the driver default is whatever a test sets. */
+static UWORD h_default_ip_reads;
 UWORD ami_sana2_default_ip_reads(const char *device)
 {
     (VOID)device;
-    return 0;
+    return h_default_ip_reads;
 }
 
 static void h_check(int ok, const char *what)
@@ -1561,6 +1562,24 @@ static void test_plan_asked(void)
     h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_LAN, "100 Mbit/s unasked is the LAN rung");
     plan_asked(100000000UL, 4096UL, AMI_SANA2_RX_MAX_DEPTH, 0, &d);
     h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH, "100 Mbit/s asked 128 is 128");
+
+    /* What rx_start() asks for: the file's IPREQUESTS wins, and with none
+       the driver default (anxwifipi.device: 128) goes to rx_plan(). */
+    {
+        static AmiSana2If a;
+
+        memset(&a, 0, sizeof(a));
+        h_default_ip_reads = 128;
+        a.rx_want_ip = 0;
+        h_check(ami_sana2_rx_ask_ip(&a) == 128, "no IPREQUESTS: the driver default is asked");
+        plan_asked(100000000UL, 4096UL, ami_sana2_rx_ask_ip(&a), 0, &d);
+        h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH, "and rx_plan grants the 128");
+        a.rx_want_ip = 16;
+        h_check(ami_sana2_rx_ask_ip(&a) == 16, "IPREQUESTS=16 wins over the default");
+        h_default_ip_reads = 0;
+        a.rx_want_ip = 0;
+        h_check(ami_sana2_rx_ask_ip(&a) == 0, "no default and no file: the ladder");
+    }
 
     /* The pool budget still holds: seventeen packets buy the floors. */
     plan_asked(100000000UL, 17UL, 32, 32, &d);
