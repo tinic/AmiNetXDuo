@@ -1796,6 +1796,8 @@ static void case_offline_no_timer(void)
     h_offline_reply();
     h_check(h_tear_down(iface), "no timer: the close reclaims and frees");
     h_check(h_dev.closes == 1, "no timer: and closes the device once");
+}
+
 static void case_bursty_wifi_reads(void)
 {
     printf("  WiFiPi has a burst-aware read default without changing wired cards\n");
@@ -1807,6 +1809,32 @@ static void case_bursty_wifi_reads(void)
             "a wired driver keeps the ordinary BPS ladder");
     h_check(ami_sana2_default_ip_reads(NULL) == 0,
             "an unnamed driver keeps the ordinary BPS ladder");
+
+    /* The DEVICE= lines Install-AmiNetXDuo writes for Wi-Fi, system layout
+       and self-contained drawer: neither carries IPREQUESTS. */
+    h_check(ami_sana2_default_ip_reads("DEVS:Networks/anxwifipi.device") == 128 &&
+            ami_sana2_default_ip_reads("SYS:AmiNetXDuo/Devs/Networks/anxwifipi.device") == 128,
+            "both installer-written Wi-Fi DEVICE= forms get 128");
+
+    /* Every DEVICE= in the archive's Examples/NetInterfaces, and our own
+       wired drivers, keep the ladder. */
+    {
+        static const char *const wired[] =
+        {
+            "a2065.device", "ariadne.device", "ariadne_ii.device",
+            "cnet.device", "hydra.device", "uaenet.device",
+            "x-surf.device", "x-surf-100.device",
+            "DEVS:Networks/anxnet.device", "anxgenet.device",
+            "anxzz9000.device", "anxwifipi.device.old"
+        };
+        unsigned i;
+        BOOL     all = TRUE;
+
+        for (i = 0; i < sizeof(wired) / sizeof(wired[0]); i++)
+            if (ami_sana2_default_ip_reads(wired[i]) != 0)
+                all = FALSE;
+        h_check(all, "every shipped wired profile keeps the ordinary ladder");
+    }
 }
 
 int main(void)

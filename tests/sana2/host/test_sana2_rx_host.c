@@ -1554,6 +1554,14 @@ static void test_plan_asked(void)
     h_check(d.ipv4 == plain.ipv4, "and IPv4 is planned as without it");
     h_check(d.ipv6 == plain.ipv6, "and so is IPv6, on a pool this size");
 
+    /* WiFiPi's shape: a fixed 100 Mbit/s device query on a 4096-packet pool.
+       The ladder alone gives the LAN rung; 128, what rx_start() now asks
+       for anxwifipi.device when the file says nothing, is met in full. */
+    plan_asked(100000000UL, 4096UL, 0, 0, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_LAN, "100 Mbit/s unasked is the LAN rung");
+    plan_asked(100000000UL, 4096UL, AMI_SANA2_RX_MAX_DEPTH, 0, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH, "100 Mbit/s asked 128 is 128");
+
     /* The pool budget still holds: seventeen packets buy the floors. */
     plan_asked(100000000UL, 17UL, 32, 32, &d);
     h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_IPV4 &&
