@@ -366,7 +366,9 @@ host_test_targets() { # builddir
 #      taken for the thread holding the baton (release, acquire, nested)
 #      472 with closing_forget: a parked socket outlived by its stack is
 #      forgotten, not swept into the next one (#53)
-HOST_TESTS_EXPECTED=472
+#      473 with sana2_copy_netx: a padded short TCP frame copied in more than
+#      one S2_CopyFromBuff call keeps a correct checksum (#89)
+HOST_TESTS_EXPECTED=473
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
