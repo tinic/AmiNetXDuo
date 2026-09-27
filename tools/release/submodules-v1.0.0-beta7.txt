@@ -4,19 +4,19 @@
 # maint/beta4 head.  Both descend from 97ea7faa (the beta4 gitlink).  The two
 # gcc16 commits are dropped and superseded on maint/beta4, as noted below.
 third_party/wifipi 175073257e8ca4b719dbcd3175c2b57836bc863f..c0782c248c96aa600aa1ac94043c6ee4acc9cfc0
--175073257e8ca4b719dbcd3175c2b57836bc863f reviewer=codex-amiga,deepseek-v4 superseded by 93985bf: Do_NSCMD_DEVICEQUERY takes SysBase from io_Device (unit.c:1186)
--96269bd372911c78800ded9e8443b8f7562e8ffe reviewer=codex-amiga,deepseek-v4 superseded: its five open/close/BeginIO hunks are 53c6415 (#100); its NSCMD_DEVICEQUERY write through io_Data, which broke WirelessManager 1.3/1.5, is replaced by 93985bf
-+e799fbc76f51a81c7f276da8a27c36c1abd2f16a reviewer=codex-amiga,deepseek-v4 #93 bounded control waits; no interface change
-+04bbf38a21919b116ac3b5b19452fc0046de2066 reviewer=codex-amiga,deepseek-v4 #96 control frame numbering; no interface change
-+86dead385f7e5313f3ed227eeded884340cd87ed reviewer=codex-amiga,deepseek-v4 #99 credit window check; no interface change
-+f0871540d1ade3848afdbc1f4b6f7e3784cd48db reviewer=codex-amiga,deepseek-v4 #97 control frame allocation size; no interface change
-+c832125893153946536b3597ce0bfe8c56170335 reviewer=codex-amiga,deepseek-v4 #94 receiver off w_MemPool; no interface change
-+fc60f4d834da7716bbb8986ed555229f48186639 reviewer=codex-amiga,deepseek-v4 #91 CMD_FLUSH and S2_OFFLINE return queued reads, as SANA-II specifies
-+53c64157fb8c9f24f03a317224a22f488f79abdb reviewer=codex-amiga,deepseek-v4 #100 limited IOStdReq opens; nothing past a short request is touched
-+20c61ef7afff09da29d3252d901296547874697b reviewer=codex-amiga,deepseek-v4 #89 control frames capped at 1518 bytes; an oversized multicast list falls back to allmulti
-+84a6c87cd5681523b8b8ce44986303c22eb17e03 reviewer=codex-amiga,deepseek-v4 #89 multi-frame TX glom padded to whole F2 blocks; wire format as Linux brcmfmac
-+7601c8fdc7b3e3860212fb65d6444c210612e145 reviewer=codex-amiga,deepseek-v4 tests only: WirelessManager 1.3/1.5 request corpus
-+147fe6700ae517c447c66fddc2da79c47c961f53 reviewer=codex-amiga,deepseek-v4 tests only: WirelessManager 1.3/1.5 replay
-+2dcc2969c49ed5ae5a9962660442e7b126513b5a reviewer=codex-amiga,deepseek-v4 merge of 7601c8f and 147fe67; no source change
-+93985bf25294b29584c2276cfaae77f9a24274d3 reviewer=codex-amiga,deepseek-v4 NSCMD_DEVICEQUERY answers WirelessManager 1.3 and 1.5 without a blind write
-+c0782c248c96aa600aa1ac94043c6ee4acc9cfc0 reviewer=codex-amiga,deepseek-v4 #95 a full open fails with IOERR_OPENFAIL, nothing changed, when the unit cannot start
+-175073257e8ca4b719dbcd3175c2b57836bc863f reviewer=deepseek-v4 superseded by 93985bf: Do_NSCMD_DEVICEQUERY takes SysBase from io_Device (unit.c:1186)
+-96269bd372911c78800ded9e8443b8f7562e8ffe reviewer=deepseek-v4 superseded: its five open/close/BeginIO hunks are 53c6415 (#100); its NSCMD_DEVICEQUERY write through io_Data, which broke WirelessManager 1.3/1.5, is replaced by 93985bf
++e799fbc76f51a81c7f276da8a27c36c1abd2f16a reviewer=codex-amiga #93 bounded control waits; no interface change
++04bbf38a21919b116ac3b5b19452fc0046de2066 reviewer=codex-amiga #96 control frame numbering; no interface change
++86dead385f7e5313f3ed227eeded884340cd87ed reviewer=codex-amiga #99 credit window check; no interface change
++f0871540d1ade3848afdbc1f4b6f7e3784cd48db reviewer=codex-amiga #97 control frame allocation size; no interface change
++c832125893153946536b3597ce0bfe8c56170335 reviewer=codex-amiga #94 receiver off w_MemPool; no interface change
++fc60f4d834da7716bbb8986ed555229f48186639 reviewer=codex-amiga #91 CMD_FLUSH and S2_OFFLINE return queued reads, as SANA-II specifies
++53c64157fb8c9f24f03a317224a22f488f79abdb reviewer=codex-amiga #100 limited IOStdReq opens; nothing past a short request is touched
++20c61ef7afff09da29d3252d901296547874697b reviewer=codex-amiga #89 control frames capped at 1518 bytes; an oversized multicast list falls back to allmulti
++84a6c87cd5681523b8b8ce44986303c22eb17e03 reviewer=codex-amiga #89 multi-frame TX glom padded to whole F2 blocks; wire format as Linux brcmfmac
++7601c8fdc7b3e3860212fb65d6444c210612e145 reviewer=codex-amiga tests only: WirelessManager 1.3/1.5 request corpus
++147fe6700ae517c447c66fddc2da79c47c961f53 reviewer=codex-amiga tests only: WirelessManager 1.3/1.5 replay
++2dcc2969c49ed5ae5a9962660442e7b126513b5a reviewer=codex-amiga merge of 7601c8f and 147fe67; no source change
++93985bf25294b29584c2276cfaae77f9a24274d3 reviewer=codex-amiga NSCMD_DEVICEQUERY answers WirelessManager 1.3 and 1.5 without a blind write
++c0782c248c96aa600aa1ac94043c6ee4acc9cfc0 reviewer=codex-amiga #95 a full open fails with IOERR_OPENFAIL, nothing changed, when the unit cannot start
