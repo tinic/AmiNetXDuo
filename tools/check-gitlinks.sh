@@ -88,6 +88,35 @@ reachable_file() {
     printf '%s\n' "$f"
 }
 
+# A backward move the release manifest reviews commit by commit: some
+# tools/release/submodules-*.txt at $COMMIT has the header "<path> <was>..<oid>"
+# and, in that header's section, "-<sha> reviewer=<nick>" for every commit in
+# <oid>..<was>.  Prints the manifest's path.  Read from $COMMIT only, so the
+# exception is part of the reviewed tree and nothing outside it can grant one.
+reviewed_move() {  # path was oid gitdir
+    git --git-dir="$4" rev-list "$3..$2" > "$WORK/dropped" || return 1
+    [ -s "$WORK/dropped" ] || return 1
+    git ls-tree -r --name-only "$COMMIT" -- tools/release 2>/dev/null |
+        grep -E '^tools/release/submodules-[^/]+\.txt$' > "$WORK/manifests" || return 1
+    while read -r m; do
+        git show "$COMMIT:$m" 2>/dev/null |
+            awk -v h="$1 $2..$3" '
+                { sub(/[ \t\r]+$/, "") }
+                /^[ \t]*(#|$)/ { next }
+                $0 == h   { in_s = 1; seen = 1; next }
+                /^[^+-]/  { in_s = 0; next }
+                in_s && /^-/ && $2 ~ /^reviewer=[^ ]+$/ { print substr($1, 2) }
+                END { exit !seen }
+            ' > "$WORK/reviewed" || continue
+        sort -u "$WORK/reviewed" -o "$WORK/reviewed"
+        if [ -z "$(sort -u "$WORK/dropped" | comm -23 - "$WORK/reviewed")" ]; then
+            printf '%s\n' "$m"
+            return 0
+        fi
+    done < "$WORK/manifests"
+    return 1
+}
+
 rc=0
 checked=0
 uninitialised=0
@@ -208,14 +237,22 @@ for name in $names; do
     #    every fork fix merged in between, and nothing said so: both ids are
     #    real objects and both check out.  The only thing that distinguishes a
     #    bump from a revert is ancestry.
+    #    The one way past: a release manifest at $COMMIT that names this exact
+    #    move and gives every commit it drops a reviewer (reviewed_move).
     was="$(git ls-tree "$COMMIT^" "$path" 2>/dev/null | awk '$2 == "commit" { print $3 }')"
     if [ -n "$was" ] && [ "$was" != "$oid" ] &&
        git --git-dir="$gitdir" cat-file -e "$was^{commit}" 2>/dev/null &&
        ! git --git-dir="$gitdir" merge-base --is-ancestor "$was" "$oid"; then
-        echo "gitlink_$path=MOVED_BACK from=$was to=$oid"
-        echo "  the new pin is not a descendant of the old one: this reverts\
- whatever landed in between" >&2
-        rc=1
+        if manifest="$(reviewed_move "$path" "$was" "$oid" "$gitdir")"; then
+            echo "gitlink_$path=ok_reviewed_move from=$was to=$oid manifest=$manifest"
+        else
+            echo "gitlink_$path=MOVED_BACK from=$was to=$oid"
+            echo "  the new pin is not a descendant of the old one: this reverts\
+ whatever landed in between.  A reviewed replacement needs a\
+ tools/release/submodules-<tag>.txt with the line \"$path $was..$oid\" and a\
+ \"-<sha> reviewer=<nick> ...\" line for each commit it drops" >&2
+            rc=1
+        fi
     fi
 done
 

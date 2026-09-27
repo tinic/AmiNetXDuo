@@ -53,6 +53,13 @@ jobs:
           [ -n "$run_id" ] || { echo "::error::CI verdict carried no run id"; exit 1; }
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
+      # Every submodule commit added or dropped since the previous v* tag is
+      # listed with a reviewer in tools/release/submodules-<tag>.txt.  The
+      # script fetches any submodule objects the checkout lacks.
+      - name: Submodule delta since the previous release is reviewed
+        if: startsWith(github.ref, 'refs/tags/')
+        run: tools/check-submodule-delta.sh --tag "$(tools/version.sh --tag)" "$GITHUB_SHA"
+
       - name: CHANGELOG.md carries facts, not prose
         run: tools/check-changelog-prose.sh
 
