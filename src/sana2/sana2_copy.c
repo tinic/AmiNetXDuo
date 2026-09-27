@@ -489,8 +489,15 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
         }
         else
         {
-            /* NetX Duo fills it into the packet and clears the flag. */
+            /* NetX Duo fills it into the packet and clears the flag.  It
+               takes the segment length from nx_packet_length, which by now
+               counts the zeroes ami_sana2_tx_pad() appended: without them
+               off, a padded bare ACK goes out 6 short in its checksum. */
+            ULONG length = slot->packet->nx_packet_length;
+
+            slot->packet->nx_packet_length = length - slot->pad_len;
             _nx_ip_packet_checksum_compute(slot->packet);
+            slot->packet->nx_packet_length = length;
         }
     }
 

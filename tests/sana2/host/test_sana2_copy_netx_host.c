@@ -218,6 +218,74 @@ static void test_whole_twice(void)
 }
 
 
+/* 4. A bare ACK: a 40-byte datagram, which ami_sana2_tx_pad() lengthens by
+   6 zero bytes to the 60-byte Ethernet minimum (46 cooked).  nx_packet_length
+   and the slot's total then count the pad; the TCP length does not. */
+#define ACK_LEN     40
+#define ACK_PAD     6
+
+static UCHAR     ack[ACK_LEN + ACK_PAD];
+static NX_PACKET ackpkt;
+
+static void ack_init(void)
+{
+    memset(ack, 0, sizeof(ack));
+    ack[0]  = 0x45;
+    ack[3]  = ACK_LEN;
+    ack[8]  = 64;
+    ack[9]  = 6;
+    ack[12] = 10;  ack[15] = 1;
+    ack[16] = 10;  ack[19] = 2;
+    ack[20] = 0x30; ack[21] = 0x39;
+    ack[22] = 0x00; ack[23] = 0x50;
+    ack[24] = 0x12; ack[27] = 0x34;         /* sequence                     */
+    ack[28] = 0x56; ack[31] = 0x78;         /* acknowledgement              */
+    ack[32] = 0x50;
+    ack[33] = 0x10;                         /* ACK                          */
+    ack[34] = 0xFA; ack[35] = 0xF0;         /* window                       */
+
+    memset(&ackpkt, 0, sizeof(ackpkt));
+    ackpkt.nx_packet_prepend_ptr = ack;
+    ackpkt.nx_packet_append_ptr  = ack + ACK_LEN + ACK_PAD;
+    ackpkt.nx_packet_length      = ACK_LEN + ACK_PAD;
+    ackpkt.nx_packet_ip_version  = NX_IP_VERSION_V4;
+    ackpkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+}
+
+static void test_padded_ack(ULONG peek)
+{
+    static AmiSana2If iface;
+    AmiTxSlot         slot;
+    UCHAR             head[ACK_LEN + ACK_PAD];
+    UCHAR             out[ACK_LEN + ACK_PAD];
+    unsigned          want;
+    char              what[112];
+
+    printf("sana2: padded 40-byte ACK, %lu-byte peek first\n",
+           (unsigned long)peek);
+    ack_init();
+    want = tcp_checksum(ack, ACK_LEN);
+
+    memset(&iface, 0, sizeof(iface));
+    iface.raw_mode = FALSE;
+    memset(&slot, 0, sizeof(slot));
+    slot.packet  = &ackpkt;
+    slot.total   = ACK_LEN + ACK_PAD;
+    slot.pad_len = ACK_PAD;
+    slot.iface   = &iface;
+
+    if (peek != 0)
+        h_check(ami_sana2_copy_from_buff(head, &slot, peek) == TRUE,
+                "padded ACK: peek copied");
+    h_check(ami_sana2_copy_from_buff(out, &slot, ACK_LEN + ACK_PAD) == TRUE,
+            "padded ACK: whole frame copied");
+    snprintf(what, sizeof(what),
+             "padded ACK: the wire checksum is correct (got %04x, want %04x)",
+             field(out), want);
+    h_check(field(out) == want, what);
+}
+
 int main(void)
 {
     test_whole();
@@ -225,6 +293,8 @@ int main(void)
     test_peek_then_whole(20);
     test_peek_then_whole(4);
     test_whole_twice();
+    test_padded_ack(0);
+    test_padded_ack(34);
 
     printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
            (h_failures == 0) ? "PASS" : "FAIL");
