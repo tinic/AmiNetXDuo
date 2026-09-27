@@ -286,6 +286,102 @@ static void test_padded_ack(ULONG peek)
     h_check(field(out) == want, what);
 }
 
+/* 5. The padded ACK taken in 8-byte chunks, as a device feeding a FIFO. */
+static void test_padded_ack_chunked(void)
+{
+    static AmiSana2If iface;
+    AmiTxSlot         slot;
+    UCHAR             out[ACK_LEN + ACK_PAD];
+    ULONG             at;
+    BOOL              ok = TRUE;
+    unsigned          want;
+    char              what[112];
+
+    printf("sana2: padded 40-byte ACK in 8-byte chunks\n");
+    ack_init();
+    want = tcp_checksum(ack, ACK_LEN);
+
+    memset(&iface, 0, sizeof(iface));
+    iface.raw_mode = FALSE;
+    memset(&slot, 0, sizeof(slot));
+    slot.packet  = &ackpkt;
+    slot.total   = ACK_LEN + ACK_PAD;
+    slot.pad_len = ACK_PAD;
+    slot.iface   = &iface;
+
+    for (at = 0; at < ACK_LEN + ACK_PAD; at += 8)
+    {
+        ULONG n = (ACK_LEN + ACK_PAD - at < 8) ? ACK_LEN + ACK_PAD - at : 8;
+
+        if (ami_sana2_copy_from_buff(out + at, &slot, n) != TRUE)
+            ok = FALSE;
+    }
+    h_check(ok, "chunked ACK: every chunk copied");
+    snprintf(what, sizeof(what),
+             "chunked ACK: the wire checksum is correct (got %04x, want %04x)",
+             field(out), want);
+    h_check(field(out) == want, what);
+}
+
+/* 6. A 52-byte ACK with 12 bytes of TCP options: long enough to need no pad,
+   the shape that stayed correct on the A1200. */
+#define OPT_LEN     52
+
+static UCHAR     opt[OPT_LEN];
+static NX_PACKET optpkt;
+
+static void test_unpadded_option_ack(void)
+{
+    static AmiSana2If iface;
+    AmiTxSlot         slot;
+    UCHAR             head[OPT_LEN];
+    UCHAR             out[OPT_LEN];
+    unsigned          want;
+    char              what[112];
+
+    printf("sana2: 52-byte ACK with options, 34-byte peek first\n");
+    memset(opt, 0, sizeof(opt));
+    opt[0]  = 0x45;
+    opt[3]  = OPT_LEN;
+    opt[8]  = 64;
+    opt[9]  = 6;
+    opt[12] = 10;  opt[15] = 1;
+    opt[16] = 10;  opt[19] = 2;
+    opt[20] = 0x30; opt[21] = 0x39;
+    opt[22] = 0x00; opt[23] = 0x50;
+    opt[27] = 0x34; opt[31] = 0x78;
+    opt[32] = 0x80;                         /* data offset 8: 12 of options */
+    opt[33] = 0x10;
+    opt[34] = 0xFA; opt[35] = 0xF0;
+    opt[40] = 1; opt[41] = 1;               /* NOP NOP                      */
+    opt[42] = 8; opt[43] = 10;              /* timestamps                   */
+    opt[44] = 0x11; opt[47] = 0x22; opt[48] = 0x33; opt[51] = 0x44;
+    want = tcp_checksum(opt, OPT_LEN);
+
+    memset(&optpkt, 0, sizeof(optpkt));
+    optpkt.nx_packet_prepend_ptr = opt;
+    optpkt.nx_packet_append_ptr  = opt + OPT_LEN;
+    optpkt.nx_packet_length      = OPT_LEN;
+    optpkt.nx_packet_ip_version  = NX_IP_VERSION_V4;
+    optpkt.nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+
+    memset(&iface, 0, sizeof(iface));
+    iface.raw_mode = FALSE;
+    memset(&slot, 0, sizeof(slot));
+    slot.packet = &optpkt;
+    slot.total  = OPT_LEN;
+    slot.iface  = &iface;
+
+    h_check(ami_sana2_copy_from_buff(head, &slot, 34) == TRUE &&
+            ami_sana2_copy_from_buff(out, &slot, OPT_LEN) == TRUE,
+            "option ACK: copied");
+    snprintf(what, sizeof(what),
+             "option ACK: the wire checksum is correct (got %04x, want %04x)",
+             field(out), want);
+    h_check(field(out) == want, what);
+}
+
 int main(void)
 {
     test_whole();
@@ -295,6 +391,8 @@ int main(void)
     test_whole_twice();
     test_padded_ack(0);
     test_padded_ack(34);
+    test_padded_ack_chunked();
+    test_unpadded_option_ack();
 
     printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
            (h_failures == 0) ? "PASS" : "FAIL");
