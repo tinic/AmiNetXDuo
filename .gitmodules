@@ -17,7 +17,7 @@
 [submodule "third_party/wifipi"]
 	path = third_party/wifipi
 	url = https://github.com/tinic/WiFiPi.device.git
-	branch = gcc16
+	branch = maint/beta4
 [submodule "third_party/zz9000-sdk"]
 	path = third_party/zz9000-sdk
 	url = https://github.com/tinic/zz9000-sdk

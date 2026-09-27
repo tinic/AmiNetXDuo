@@ -9,6 +9,15 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `anxwifipi.device`: answers the `NSCMD_DEVICEQUERY` of WirelessManager 1.3
+  and 1.5 (1.0.0-beta6 refused it: "Failed to initialize driver interface").
+- `anxwifipi.device`: inbound Wi-Fi 58.5 -> 62.9 Mbit/s on the CM4; a TX
+  batch of several frames is padded to whole 512-byte SDIO blocks.
+- `anxwifipi.device`: an unanswered control request returns after 2.5 s;
+  control frames are at most 1518 bytes.
+- `anxwifipi.device`: offline and flush return queued reads; an offline unit
+  refuses reads and writes; an open fails when the Wi-Fi chip cannot start.
+
 ## 1.0.0-beta6
 
 - A blocking `accept()` keeps waiting after rejecting a connection delivered
