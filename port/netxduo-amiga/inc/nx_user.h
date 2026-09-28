@@ -118,9 +118,14 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    BSD_TCP_WINDOW_MAX at 262,144 the buffer's half would be 128 KB, one
    acknowledgment per ninety segments, and every one of them releases a
    burst that size at the sender's line rate into the card's receive ring.
-   Pinned at what the largest pre-scaling buffer produced, so a machine that
-   was already at the old ceiling acknowledges exactly as it did. */
-#define NX_TCP_ACK_THRESHOLD_MAX                50176
+   At 50,176 an acknowledgment carried 35-48 segments, fewer than two per
+   sender burst, so two lost acknowledgments (the Wi-Fi drop of #89) left the
+   sender nothing until a probe and the 100-200 ms delayed-ACK hold.  At
+   eight segments the crossing falls inside the first GRO run (sana2_rx.c,
+   16 frames), so one acknowledgment leaves per run: on the A1200 WiFiPi,
+   main 95e3983a, 60,932 -> 23,360 bytes per acknowledgment (median), 89 ->
+   218 per second, 42.3-44.0 -> 50.3 Mbit/s inbound. */
+#define NX_TCP_ACK_THRESHOLD_MAX                11680
 
 /* The clock the SYN cache times a handshake with (nx_tcp_syncache.c): the
    E-Clock in milliseconds, src/common/compat.c.  An accepted socket then
