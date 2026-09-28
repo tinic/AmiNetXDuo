@@ -985,7 +985,6 @@ VOID   ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed);
 ULONG  ami_sana2_known_rx_bytes(const char *device);
 /* Extra default IPv4 reads for a known burst-delivering driver, or 0 to use
    the ordinary BPS ladder; explicit IPREQUESTS always takes precedence. */
-UWORD  ami_sana2_default_ip_reads(const char *device);
 /* The IPv4 read depth an interface asks for: IPREQUESTS, else the above
    (sana2_rx.c). */
 UWORD  ami_sana2_rx_ask_ip(const AmiSana2If *iface);

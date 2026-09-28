@@ -83,24 +83,6 @@ static VOID ami_str_copy(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
-/* The same, ignoring case: a device name is a file name. */
-static BOOL ami_str_iequal(const char *a, const char *b)
-{
-    while (*a != '\0' && *b != '\0')
-    {
-        char x = *a++;
-        char y = *b++;
-
-        if (x >= 'A' && x <= 'Z')
-            x = (char)(x + ('a' - 'A'));
-        if (y >= 'A' && y <= 'Z')
-            y = (char)(y + ('a' - 'A'));
-        if (x != y)
-            return FALSE;
-    }
-    return (BOOL)(*a == *b);
-}
-
 static BOOL ami_str_equal(const char *a, const char *b)
 {
     ULONG i = 0;
@@ -1542,22 +1524,6 @@ UWORD ami_sana2_retained_count(VOID)
     return ami_sana2_retained_n;
 }
 
-/* The file name without its path: DEVS:Networks/x.device and x.device are
-   one driver. */
-static const char *ami_sana2_basename(const char *device)
-{
-    const char *base = device;
-    const char *p;
-
-    for (p = device; *p != '\0'; p++)
-    {
-        if (*p == '/' || *p == ':')
-            base = p + 1;
-    }
-
-    return base;
-}
-
 ULONG ami_sana2_retained_holds(const char *device, ULONG unit)
 {
     const AmiSana2If *iface;
@@ -1689,31 +1655,6 @@ ULONG ami_sana2_known_rx_bytes(const char *device)
         if (ami_str_iequal(base, known[i].name))
             return known[i].bytes;
     }
-
-    return 0;
-}
-
-/* WiFiPi's receiver runs at Exec priority 5, above every ThreadX task, and
- * delivers a whole wake's SDPCM frames (up to 64, each possibly a glom)
- * before the reader can re-post one CMD_READ; a frame with no read queued is
- * dropped into UnknownTypesReceived.  Its fixed 100 Mbit/s device query lands
- * on the 32-read LAN rung.  Measured on the CM4 A1200 (#89): 128 reads, 59.0
- * Mbit/s inbound, UnknownTypes 82 of 53,483 packets; 128 is also
- * AMI_SANA2_RX_MAX_DEPTH.  Over the 32 it replaces it holds 96 more pool
- * packets (156,672 B of the pool at the 1,632 B stride, none allocated) and
- * 11,904 B more slot RAM; an explicit IPREQUESTS still wins, and rx_plan()
- * still caps it at the pool budget. */
-UWORD ami_sana2_default_ip_reads(const char *device)
-{
-    const char *base;
-
-    if (device == NULL)
-        return 0;
-
-    base = ami_sana2_basename(device);
-    if (ami_str_iequal(base, "anxwifipi.device") ||
-        ami_str_iequal(base, "wifipi.device"))
-        return 128;
 
     return 0;
 }

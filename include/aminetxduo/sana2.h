@@ -77,6 +77,11 @@ ULONG       ami_sana2_retained_holds(const char *device, ULONG unit);
    use that port default.  Names are compared by basename, ignoring case. */
 ULONG       ami_sana2_default_tcp_ack_max(const char *device);
 
+/* The pure device-name helpers behind those defaults (sana2_policy.c). */
+BOOL        ami_str_iequal(const char *a, const char *b);
+const char *ami_sana2_basename(const char *device);
+UWORD       ami_sana2_default_ip_reads(const char *device);
+
 /*
  * Collect whatever the devices have given back since, without waiting, and
  * CloseDevice() and free every interface nothing holds any more.  Under
