@@ -786,7 +786,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 if (ami_cfg_parse_ulong(value, &n) &&
                     n != 0 && n <= AMI_CFG_TCP_GROW_RTT_MAX)
                 {
-                    out->tcp_grow_rtt = n;
+                    out->tcp_grow_rtt = (UWORD)n;
                 }
                 else
                 {

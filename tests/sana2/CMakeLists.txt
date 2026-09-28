@@ -250,7 +250,8 @@ add_executable(test_sana2_device
     host/test_sana2_device_host.c
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_device.c"
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_policy.c"
-    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_txmeta.c")
+    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_txmeta.c"
+    "${CMAKE_SOURCE_DIR}/src/bsdsocket/bsdsocket_window.c")
 
 target_compile_options(test_sana2_device PRIVATE
     -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_regargs.h")
@@ -264,6 +265,7 @@ target_include_directories(test_sana2_device PRIVATE
     "${CMAKE_SOURCE_DIR}/src/config/test/shim"
     "${CMAKE_SOURCE_DIR}/src/sana2"
     "${CMAKE_SOURCE_DIR}/src/net68k"
+    "${CMAKE_SOURCE_DIR}/src/bsdsocket"
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc"
     "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"

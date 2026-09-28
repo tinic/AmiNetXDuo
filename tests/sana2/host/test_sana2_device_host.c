@@ -2,6 +2,7 @@
    SPDX-License-Identifier: MIT */
 
 #include "sana2_internal.h"
+#include "bsdsocket_window.h"
 
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/netstatus.h"
@@ -1461,6 +1462,8 @@ static void case_request_counts(void)
    is 0, which bsdsocket reads as the built-in 10 ms. */
 static void case_tcp_grow_rtt(void)
 {
+    const ULONG lan = (ULONG)BSD_TCP_WINDOW_LAN;
+    const ULONG max = (ULONG)BSD_TCP_WINDOW_MAX;
     AmiSana2If *iface;
     LONG        err = 0;
 
@@ -1471,6 +1474,13 @@ static void case_tcp_grow_rtt(void)
     iface = ami_sana2_open(&h_cfg, &err);
     h_check(iface != NULL && ami_sana2_get_tcp_grow_rtt(iface) == 2UL,
             "TCPGROWRTT=2 is carried to the interface");
+    /* What socket.c:bsd_tcp_window_settle does with it. */
+    h_check(iface != NULL &&
+            ami_bsd_tcp_window_settle(lan, max, 0UL, 2UL,
+                ami_sana2_get_tcp_grow_rtt(iface)) == max &&
+            ami_bsd_tcp_window_settle(lan, max, 0UL, 1UL,
+                ami_sana2_get_tcp_grow_rtt(iface)) == lan,
+            "TCPGROWRTT=2 grows a 2 ms connect and not a 1 ms one");
     if (iface != NULL)
         (VOID)ami_sana2_close(iface);
 
@@ -1483,6 +1493,16 @@ static void case_tcp_grow_rtt(void)
 
     h_check(ami_sana2_get_tcp_grow_rtt(NULL) == 0,
             "no interface is 0");
+    /* A NULL interface takes the built-in rtt >= 10 line, as socket.c. */
+    h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 9UL,
+                ami_sana2_get_tcp_grow_rtt(NULL)) == lan &&
+            ami_bsd_tcp_window_settle(lan, max, 0UL, 10UL,
+                ami_sana2_get_tcp_grow_rtt(NULL)) == max &&
+            ami_bsd_tcp_window_burst_bound(1000000000UL, 9UL,
+                ami_sana2_get_tcp_grow_rtt(NULL)) == TRUE &&
+            ami_bsd_tcp_window_burst_bound(1000000000UL, 10UL,
+                ami_sana2_get_tcp_grow_rtt(NULL)) == FALSE,
+            "a NULL interface keeps the 10 ms line");
 }
 
 /* FILTER=EVERYTHING is SANA2OPF_PROM at OpenDevice(), and nothing else in

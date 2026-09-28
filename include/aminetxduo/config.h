@@ -206,7 +206,7 @@ typedef struct AmiIfConfig {
     ULONG       tcp_ack_max;
     /* TCPGROWRTT: handshake round trip in ms at or above which a socket on
        this interface grows its receive window.  0 = BSD_TCP_WINDOW_GROW_RTT_MS. */
-    ULONG       tcp_grow_rtt;
+    UWORD       tcp_grow_rtt;
     BYTE        priority;                    /* PRIORITY=, -128..127, 0 unset: the
                                                 highest wins a route two
                                                 interfaces could carry        */

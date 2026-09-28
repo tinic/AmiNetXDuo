@@ -861,7 +861,7 @@ struct AmiSana2If
        interface settles at stays inside it (bsdsocket_window.h). */
     ULONG               hw_rx_bytes;
     /* TCPGROWRTT in ms, 0 = BSD_TCP_WINDOW_GROW_RTT_MS (bsdsocket_window.h). */
-    ULONG               tcp_grow_rtt;
+    UWORD               tcp_grow_rtt;
 
     /* The interface file's IPREQUESTS, ARPREQUESTS (0 = the plan decides)
        and WRITEREQUESTS (1..AMI_SANA2_TX_SLOTS: how many of tx[] are
