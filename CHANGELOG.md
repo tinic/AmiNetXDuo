@@ -12,13 +12,13 @@ version at the top when it merges.
 - `TCPGROWRTT=<ms>` in an interface file sets the handshake round trip
   (1 to 65,535 ms) at or above which a TCP receive window on that interface
   grows to its maximum. Unset, every device keeps 10 ms. The key adds 100
-  bytes, bringing the resident `bsdsocket.library` image to 365,416 bytes;
+  bytes, bringing the resident `bsdsocket.library` image to 365,408 bytes;
   its budget is 366,000 bytes.
 - TCP ACK batching can be set per interface with `TCPACKMAX`. WiFiPi defaults
   to an 11,680-byte ceiling when the setting is absent; other devices retain
   the 50,176-byte port default. This changes ACK cadence, not the unresolved
   cause of missing outbound frames (#89). The per-interface policy brings the
-  resident `bsdsocket.library` image to 365,316 bytes; its budget is
+  resident `bsdsocket.library` image to 365,308 bytes; its budget is
   366,000 bytes.
 
 ## 1.0.0-beta7
