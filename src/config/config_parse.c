@@ -44,6 +44,7 @@ typedef enum
     IF_KEY_WRITEREQUESTS,
     IF_KEY_RXBUFFER,
     IF_KEY_TCPACKMAX,
+    IF_KEY_TCPGROWRTT,
     IF_KEY_PRIORITY
 } IfKey;
 
@@ -78,6 +79,7 @@ ami_if_keywords[] =
     { "writerequests",      IF_KEY_WRITEREQUESTS     },
     { "rxbuffer",           IF_KEY_RXBUFFER          },
     { "tcpackmax",          IF_KEY_TCPACKMAX         },
+    { "tcpgrowrtt",         IF_KEY_TCPGROWRTT        },
     { "priority",           IF_KEY_PRIORITY          },   /* Roadshow's, and PRI */
     { "pri",                IF_KEY_PRIORITY          },
 
@@ -777,6 +779,21 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
                                      "TCPACKMAX", value,
                                      AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES);
+                }
+                break;
+
+            case IF_KEY_TCPGROWRTT:
+                if (ami_cfg_parse_ulong(value, &n) &&
+                    n != 0 && n <= AMI_CFG_TCP_GROW_RTT_MAX)
+                {
+                    out->tcp_grow_rtt = n;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad TCPGROWRTT '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "TCPGROWRTT", value,
+                                     AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS);
                 }
                 break;
 

@@ -460,61 +460,85 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
     const ULONG rtt   = (ULONG)BSD_TCP_WINDOW_GROW_RTT_MS;
 
     /* A long path grows to the maximum on any link, even a gigabit one. */
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt) == max,
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt, 0UL) == max,
             "a long path on a gigabit link does not grow");
-    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 22UL) == max,
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 22UL, 0UL) == max,
             "a 22 ms path on 100 Mbit does not grow");
-    h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 95UL) == max,
+    h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 95UL, 0UL) == max,
             "a long path on an unknown link does not grow");
     /* ... but never past what it was created with when there is no maximum
        (a peer with no scaling, a small machine). */
-    h_check(ami_bsd_tcp_window_settle(lan, lan, gbit, rtt) == lan,
+    h_check(ami_bsd_tcp_window_settle(lan, lan, gbit, rtt, 0UL) == lan,
             "a long path grew past a maximum equal to the created window");
-    h_check(ami_bsd_tcp_window_settle(8192UL, 8192UL, 0UL, 300UL) == 8192UL,
+    h_check(ami_bsd_tcp_window_settle(8192UL, 8192UL, 0UL, 300UL, 0UL) == 8192UL,
             "a small machine's floor window moved on a long path");
 
     /* A LAN round trip on a gigabit link: the size the burst was measured
        at -- the driver's ring and 128 posted reads back it (202 Mbit/s at
        262,144 against 186 at 65,535, no frame lost, bsdsocket_window.h) --
        and no further, whatever the maximum: there the window is one burst. */
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt - 1UL) == lmax,
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt - 1UL, 0UL) == lmax,
             "a gigabit LAN socket did not settle at the LAN maximum");
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 0UL) == lmax,
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 0UL, 0UL) == lmax,
             "a passive gigabit socket did not settle at the LAN maximum");
-    h_check(ami_bsd_tcp_window_settle(50176UL, max, gbit, 0UL) == lmax,
+    h_check(ami_bsd_tcp_window_settle(50176UL, max, gbit, 0UL, 0UL) == lmax,
             "a small created window on a gigabit LAN did not grow");
-    h_check(ami_bsd_tcp_window_settle(lan, 200000UL, gbit, 0UL) == 200000UL,
+    h_check(ami_bsd_tcp_window_settle(lan, 200000UL, gbit, 0UL, 0UL) == 200000UL,
             "a gigabit LAN socket grew past a maximum under the LAN maximum");
     /* ... while the same socket on a long path takes the whole maximum. */
-    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt) == max &&
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, rtt, 0UL) == max &&
             max > lmax,
             "a long path over a gigabit link stopped at the LAN maximum");
 
     /* Whether the card must hold the window: a LAN round trip always, a
        slower card on any path; a gigabit card on a long path is drained at
        wire speed into posted reads while the far link paces the data. */
-    h_check(ami_bsd_tcp_window_burst_bound(gbit, rtt - 1UL) == TRUE,
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, rtt - 1UL, 0UL) == TRUE,
             "a gigabit LAN socket is not burst-bound");
-    h_check(ami_bsd_tcp_window_burst_bound(gbit, 0UL) == TRUE,
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, 0UL, 0UL) == TRUE,
             "a passive gigabit socket is not burst-bound");
-    h_check(ami_bsd_tcp_window_burst_bound(gbit, rtt) == FALSE,
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, rtt, 0UL) == FALSE,
             "a gigabit card on a long path is burst-bound");
-    h_check(ami_bsd_tcp_window_burst_bound(hundm, 26UL) == TRUE,
+    h_check(ami_bsd_tcp_window_burst_bound(hundm, 26UL, 0UL) == TRUE,
             "a 100 Mbit card on a long path is not burst-bound");
-    h_check(ami_bsd_tcp_window_burst_bound(tenm, 300UL) == TRUE,
+    h_check(ami_bsd_tcp_window_burst_bound(tenm, 300UL, 0UL) == TRUE,
             "a 10 Mbit card on a long path is not burst-bound");
-    h_check(ami_bsd_tcp_window_burst_bound(0UL, 95UL) == TRUE,
+    h_check(ami_bsd_tcp_window_burst_bound(0UL, 95UL, 0UL) == TRUE,
             "an unknown link on a long path is not burst-bound");
-    h_check(ami_bsd_tcp_window_settle(lan, lan, gbit, 0UL) == lan,
+    h_check(ami_bsd_tcp_window_settle(lan, lan, gbit, 0UL, 0UL) == lan,
             "a gigabit LAN socket grew past a maximum equal to its window");
 
     /* A LAN round trip on 10 or 100 Mbit: exactly what it opened with. */
-    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 1UL) == lan,
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 1UL, 0UL) == lan,
             "a 100 Mbit LAN socket did not keep the LAN window");
-    h_check(ami_bsd_tcp_window_settle(lan, max, tenm, 5UL) == lan,
+    h_check(ami_bsd_tcp_window_settle(lan, max, tenm, 5UL, 0UL) == lan,
             "a 10 Mbit LAN socket did not keep the LAN window");
-    h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 0UL) == lan,
+    h_check(ami_bsd_tcp_window_settle(lan, max, 0UL, 0UL, 0UL) == lan,
             "an unknown link on a LAN did not keep the LAN window");
+
+    /* TCPGROWRTT moves the line for its interface alone; 0 is the built-in
+       10 ms, which is also what a socket with no interface gets. */
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 2UL, 2UL) == max,
+            "TCPGROWRTT=2 did not grow a 2 ms path");
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 1UL, 2UL) == lan,
+            "TCPGROWRTT=2 grew a 1 ms path");
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 2UL, 0UL) == lan,
+            "the default line grew a 2 ms path");
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, rtt - 1UL, 0UL) == lan &&
+            ami_bsd_tcp_window_settle(lan, max, hundm, rtt, 0UL) == max,
+            "an unset TCPGROWRTT is not the 10 ms line");
+    h_check(ami_bsd_tcp_window_settle(lan, max, hundm, 22UL, 50UL) == lan,
+            "TCPGROWRTT=50 grew a 22 ms path");
+    h_check(ami_bsd_tcp_window_settle(lan, max, gbit, 2UL, 2UL) == max &&
+            ami_bsd_tcp_window_settle(lan, max, gbit, 2UL, 0UL) == lmax,
+            "TCPGROWRTT did not lift a gigabit LAN past the LAN maximum");
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, 2UL, 2UL) == FALSE &&
+            ami_bsd_tcp_window_burst_bound(gbit, 2UL, 0UL) == TRUE,
+            "TCPGROWRTT did not move the burst-bound line with it");
+    h_check(ami_bsd_tcp_window_burst_bound(gbit, rtt, 50UL) == TRUE,
+            "a raised TCPGROWRTT left a 10 ms gigabit path unbounded");
+    h_check(ami_bsd_tcp_window_burst_bound(hundm, 2UL, 2UL) == TRUE,
+            "TCPGROWRTT unbounded a 100 Mbit card");
 
     /* The card's own memory caps whatever settled: an X-Surf 100's 13 KB
        ring (52 pages) holds eight 1536-byte frames of 1460 payload each;

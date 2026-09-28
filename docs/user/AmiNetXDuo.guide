@@ -478,6 +478,15 @@
              interface is next attached. This is a TCP stack setting,
              not a SANA-II driver command.
 
+  @{b}TCPGROWRTT@{ub}
+             Connect round trip in milliseconds, 1 to 65535, at or
+             above which a TCP receive window on this interface grows
+             from 100352 bytes to its maximum. Leave it out for 10 on
+             every device. A smaller value grows the window on shorter
+             paths, including a local network. The value applies to
+             this interface only; editing the file takes effect when
+             the interface is next attached.
+
   Interface files written for Roadshow usually carry other keywords:
   COPYMODE, ALIAS, METRIC, LEASE, DHCPUNICAST, LINKSTATUSCOMMAND,
   MULTICAST, POINTTOPOINT, DESTINATION and BROADCASTADDRESS among

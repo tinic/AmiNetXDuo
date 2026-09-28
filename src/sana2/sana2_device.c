@@ -1320,6 +1320,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
      * ask for); then a vendor driver whose hardware is known gets its number
      * by name.  0 is no cap.
      */
+    iface->tcp_grow_rtt = cfg->tcp_grow_rtt;
     if (cfg->rx_buffer != 0)
         iface->hw_rx_bytes = cfg->rx_buffer;
     else if ((iface->extension.Accepted & ANXD_S2F_RX_CAPACITY) != 0)
@@ -1605,6 +1606,11 @@ ULONG ami_sana2_get_bps(const AmiSana2If *iface)
 ULONG ami_sana2_get_hw_rx_bytes(const AmiSana2If *iface)
 {
     return (iface != NULL) ? iface->hw_rx_bytes : 0;
+}
+
+ULONG ami_sana2_get_tcp_grow_rtt(const AmiSana2If *iface)
+{
+    return (iface != NULL) ? iface->tcp_grow_rtt : 0;
 }
 
 /*

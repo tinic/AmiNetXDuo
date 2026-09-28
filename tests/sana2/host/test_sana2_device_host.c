@@ -1457,6 +1457,34 @@ static void case_request_counts(void)
         (VOID)ami_sana2_close(iface);
 }
 
+/* TCPGROWRTT reaches the interface at open; unsaid, or no interface at all,
+   is 0, which bsdsocket reads as the built-in 10 ms. */
+static void case_tcp_grow_rtt(void)
+{
+    AmiSana2If *iface;
+    LONG        err = 0;
+
+    printf("  the interface file's TCPGROWRTT reaches the interface\n");
+
+    h_config();
+    h_cfg.tcp_grow_rtt = 2;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && ami_sana2_get_tcp_grow_rtt(iface) == 2UL,
+            "TCPGROWRTT=2 is carried to the interface");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_config();
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && ami_sana2_get_tcp_grow_rtt(iface) == 0,
+            "an unsaid TCPGROWRTT is 0");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_check(ami_sana2_get_tcp_grow_rtt(NULL) == 0,
+            "no interface is 0");
+}
+
 /* FILTER=EVERYTHING is SANA2OPF_PROM at OpenDevice(), and nothing else in
    the file touches the flags. */
 static void case_filter_everything(void)
@@ -1868,6 +1896,7 @@ int main(void)
     case_stats_request();
     case_keeps_online();
     case_request_counts();
+    case_tcp_grow_rtt();
     case_filter_everything();
     case_offline_bounded_sync();
     case_offline_bounded_late_reply();

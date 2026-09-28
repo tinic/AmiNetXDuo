@@ -75,11 +75,18 @@ ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss)
     return (fit < window) ? fit : window;
 }
 
+/* TCPGROWRTT, or the built-in line where the interface sets none. */
+static ULONG bsd_grow_rtt(ULONG grow_rtt_ms)
+{
+    return (grow_rtt_ms != 0UL) ? grow_rtt_ms
+                                : (ULONG)BSD_TCP_WINDOW_GROW_RTT_MS;
+}
+
 ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
-                                ULONG rtt_ms)
+                                ULONG rtt_ms, ULONG grow_rtt_ms)
 {
     /* A long path: the window is the rate, bursts are paced far away. */
-    if (rtt_ms >= (ULONG)BSD_TCP_WINDOW_GROW_RTT_MS)
+    if (rtt_ms >= bsd_grow_rtt(grow_rtt_ms))
         return (maximum > created) ? maximum : created;
 
     /* A short path on a link that can put the whole window on the wire at
@@ -97,9 +104,10 @@ ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
     return created;
 }
 
-BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms)
+BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms,
+                                    ULONG grow_rtt_ms)
 {
-    if (rtt_ms >= (ULONG)BSD_TCP_WINDOW_GROW_RTT_MS &&
+    if (rtt_ms >= bsd_grow_rtt(grow_rtt_ms) &&
         bps >= (ULONG)BSD_TCP_WINDOW_FAST_BPS)
         return FALSE;
 

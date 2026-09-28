@@ -55,7 +55,8 @@
  * pool: 262,144 on a gigabit LAN is the burst the GENET's ring was measured
  * to take, 1 MB on a long path is 300 Mbit/s at 26 ms (below).  The 10 ms
  * threshold is a coarse but safe line: the real A1200's LAN round trip is
- * 1-5 ms, the emulator's under 1, the Internet's 20 and up.
+ * 1-5 ms, the emulator's under 1, the Internet's 20 and up.  An interface
+ * file's TCPGROWRTT replaces it on that interface alone (#89).
  */
 #ifndef BSD_TCP_WINDOW_LAN
 #define BSD_TCP_WINDOW_LAN      100352UL    /* (512 / 8) * 1568, the old ceiling */
@@ -143,10 +144,11 @@
  * The window a socket settles at once its handshake is done.  `created` is
  * what it opened with, `maximum` what it may grow to, `bps` the link it came
  * up on (0 = unknown), `rtt_ms` the handshake's round trip (0 = not
- * measured, which a passive socket cannot).  Pure arithmetic, host-tested.
+ * measured, which a passive socket cannot), `grow_rtt_ms` the interface's
+ * TCPGROWRTT (0 = BSD_TCP_WINDOW_GROW_RTT_MS).  Pure arithmetic, host-tested.
  */
 ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
-                                ULONG rtt_ms);
+                                ULONG rtt_ms, ULONG grow_rtt_ms);
 
 /*
  * The window a card can absorb: `hw_bytes` is what the driver holds from
@@ -174,9 +176,11 @@ ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss);
  * path is still burst-bound -- the Internet is faster than a 100 Mbit card,
  * so its bursts arrive at the card's own line rate and a 25 MHz 68030
  * behind a 13 KB ring cannot take them (anxs2ext.h, ANXD_CMD_RX_CAPACITY).
- * Pure arithmetic, host-tested.
+ * `grow_rtt_ms` as for ami_bsd_tcp_window_settle().  Pure arithmetic,
+ * host-tested.
  */
-BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms);
+BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms,
+                                    ULONG grow_rtt_ms);
 
 #ifndef BSD_TCP_WINDOW_CEILING
 #ifdef AMINETXDUO_TCP_WINDOW_SCALING

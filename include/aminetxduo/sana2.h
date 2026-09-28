@@ -102,6 +102,9 @@ ULONG       ami_sana2_get_bps(const AmiSana2If *iface);
 /* Bytes the card holds from the wire with nobody draining it, 0 = not
    stated (aminetxduo/anxs2ext.h, ANXD_CMD_RX_CAPACITY). */
 ULONG       ami_sana2_get_hw_rx_bytes(const AmiSana2If *iface);
+/* The interface file's TCPGROWRTT in ms, 0 = not set (bsdsocket_window.h,
+   BSD_TCP_WINDOW_GROW_RTT_MS). */
+ULONG       ami_sana2_get_tcp_grow_rtt(const AmiSana2If *iface);
 BOOL        ami_sana2_is_online(const AmiSana2If *iface);
 
 /*

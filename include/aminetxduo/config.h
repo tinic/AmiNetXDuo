@@ -55,6 +55,7 @@ extern "C" {
 #endif
 #define AMI_CFG_WRITEREQUESTS_MAX   AMINETXDUO_TX_SLOTS
 #define AMI_CFG_TCP_ACK_MAX         65535UL
+#define AMI_CFG_TCP_GROW_RTT_MAX    65535UL
 #define AMI_CFG_PATH_LEN            128
 
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says
@@ -203,6 +204,9 @@ typedef struct AmiIfConfig {
     /* TCPACKMAX: maximum unacknowledged receive bytes before an ACK is
        requested on connections using this interface.  0 = device default. */
     ULONG       tcp_ack_max;
+    /* TCPGROWRTT: handshake round trip in ms at or above which a socket on
+       this interface grows its receive window.  0 = BSD_TCP_WINDOW_GROW_RTT_MS. */
+    ULONG       tcp_grow_rtt;
     BYTE        priority;                    /* PRIORITY=, -128..127, 0 unset: the
                                                 highest wins a route two
                                                 interfaces could carry        */

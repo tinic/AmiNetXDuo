@@ -1150,6 +1150,58 @@ static void test_interface_tcp_ack_max(void)
     ami_config_set_reporter(NULL, NULL);
 }
 
+static void test_interface_tcp_grow_rtt(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: TCPGROWRTT is optional and bounded per interface\n");
+
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_grow_rtt == 0);
+    free(buf);
+
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpgrowrtt = 2\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_grow_rtt == 2UL);
+    free(buf);
+
+    buf = dup_text("device = genet.device\nconfigure = dhcp\n"
+                   "TCPGROWRTT=65535\n");
+    CHECK(ami_cfg_parse_interface("eth", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_grow_rtt == 65535UL);
+    free(buf);
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/wifipi");
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpgrowrtt = 0\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_grow_rtt == 0);
+    CHECK(seen_count == 1 && seen[0].line == 3);
+    free(buf);
+
+    seen_count = 0;
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpgrowrtt = 65536\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_grow_rtt == 0);
+    CHECK(seen_count == 1 && seen[0].line == 3);
+    free(buf);
+
+    seen_count = 0;
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpgrowrtt = fast\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_grow_rtt == 0);
+    CHECK(seen_count == 1 && seen[0].line == 3);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+}
+
 static void test_interface_priority(void)
 {
     AmiIfConfig iface;
@@ -2968,6 +3020,7 @@ int main(int argc, char **argv)
     test_inert_keywords_are_notes();
     test_request_counts_have_ceilings();
     test_interface_tcp_ack_max();
+    test_interface_tcp_grow_rtt();
     test_interface_priority();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6
