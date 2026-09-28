@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- TCP ACK batching can be set per interface with `TCPACKMAX`. WiFiPi defaults
+  to an 11,680-byte ceiling when the setting is absent; other devices retain
+  the 50,176-byte port default. This changes ACK cadence, not the unresolved
+  cause of missing outbound frames (#89). The per-interface policy brings the
+  resident `bsdsocket.library` image to 365,468 bytes in CI; its budget is
+  366,000 bytes.
+
 ## 1.0.0-beta7
 
 - `anxwifipi.device`: WirelessManager 1.3 and 1.5 connect.
