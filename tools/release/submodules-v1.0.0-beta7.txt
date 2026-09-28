@@ -1,4 +1,4 @@
-# Submodule delta v1.0.0-beta6 -> v1.0.0-beta7.  Only third_party/wifipi moves.
+# Submodule delta v1.0.0-beta6 -> v1.0.0-beta7.  third_party/netxduo and third_party/wifipi move.
 #
 # Non-fast-forward: beta6 pinned 17507325 on the gcc16 line; beta7 pins the
 # maint/beta4 head.  Both descend from 97ea7faa (the beta4 gitlink).  The two
@@ -20,3 +20,8 @@ third_party/wifipi 175073257e8ca4b719dbcd3175c2b57836bc863f..c0782c248c96aa600aa
 +2dcc2969c49ed5ae5a9962660442e7b126513b5a reviewer=codex-amiga merge of 7601c8f and 147fe67; no source change
 +93985bf25294b29584c2276cfaae77f9a24274d3 reviewer=codex-amiga NSCMD_DEVICEQUERY answers WirelessManager 1.3 and 1.5 without a blind write
 +c0782c248c96aa600aa1ac94043c6ee4acc9cfc0 reviewer=codex-amiga #95 a full open fails with IOERR_OPENFAIL, nothing changed, when the unit cannot start
+
+# Fast-forward by one commit: NetX #4, merged as 02a6f37e (tree identical to
+# the reviewed PR head 663e926e).  Pinned by AmiNetXDuo #109 (06613ea5).
+third_party/netxduo c4d40bdf964ed12be4d3b6907dbf9314aa20818e..02a6f37e3d52ab957aea4ccda2bb5fbcf875203d
++02a6f37e3d52ab957aea4ccda2bb5fbcf875203d reviewer=zz9k-fpga #109 at 8d76cf1e: per-interface ACK ceiling; 0 or no interface keeps NX_TCP_ACK_THRESHOLD_MAX; no API removed
