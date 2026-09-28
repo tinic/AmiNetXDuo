@@ -300,7 +300,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # mcast.c and cmsg.c -- are stubbed; the test's header says what that does
     # and does not prove.
     add_executable(test_sockopt host/test_sockopt_host.c
-                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c")
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c"
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/bsdsocket_window.c")
 
     target_include_directories(test_sockopt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
@@ -323,7 +324,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # half -- 0 turns the small-write cork on, getsockopt reads it back -- is
     # compiled and checked whatever the option says, rxdirect's reason below.
     add_executable(test_sockopt_cork host/test_sockopt_host.c
-                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c")
+                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c"
+                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/bsdsocket_window.c")
 
     target_include_directories(test_sockopt_cork PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"

@@ -56,6 +56,10 @@ extern "C" {
 #define AMI_CFG_WRITEREQUESTS_MAX   AMINETXDUO_TX_SLOTS
 #define AMI_CFG_TCP_ACK_MAX         65535UL
 #define AMI_CFG_TCP_GROW_RTT_MAX    65535UL
+/* TCPWINDOWMAX bounds: BSD_TCP_WINDOW, the smallest window a socket opens
+   with, to BSD_TCP_WINDOW_MAX, the largest it grows to (bsdsocket_window.h). */
+#define AMI_CFG_TCP_WINDOW_MAX_MIN  8192UL
+#define AMI_CFG_TCP_WINDOW_MAX_MAX  1048576UL
 #define AMI_CFG_PATH_LEN            128
 
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says
@@ -207,6 +211,9 @@ typedef struct AmiIfConfig {
     /* TCPGROWRTT: handshake round trip in ms at or above which a socket on
        this interface grows its receive window.  0 = BSD_TCP_WINDOW_GROW_RTT_MS. */
     UWORD       tcp_grow_rtt;
+    /* TCPWINDOWMAX: bytes a socket on this interface settles its receive
+       window at, at most.  0 = no cap. */
+    ULONG       tcp_window_max;
     BYTE        priority;                    /* PRIORITY=, -128..127, 0 unset: the
                                                 highest wins a route two
                                                 interfaces could carry        */

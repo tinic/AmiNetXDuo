@@ -6,7 +6,9 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "bsdsocket_window.h"
 #include "interfaces.h"
+#include "nx_tcp.h"            /* NX_TCP_MAXIMUM_RX_QUEUE */
 
 /* TCP_USER_TIMEOUT.  host_prelude.h undefines glibc's, which is 18 where the
    Amiga's is 0x1001; this is the header options.c takes it from too. */
@@ -54,6 +56,7 @@ static struct
     ULONG  raw_available;
     ULONG  udp_available;
     ULONG  packet_length;
+    ULONG  rx_queue_max;        /* last receive_queue_max_set value, +1 */
 } h;
 
 static void h_reset(void)
@@ -305,7 +308,8 @@ UINT _nxe_tcp_socket_mss_set(NX_TCP_SOCKET *socket_ptr, ULONG mss)
 UINT _nxe_tcp_socket_receive_queue_max_set(NX_TCP_SOCKET *socket_ptr,
                                            UINT receive_queue_maximum)
 {
-    (VOID)socket_ptr; (VOID)receive_queue_maximum;
+    (VOID)socket_ptr;
+    h.rx_queue_max = (ULONG)receive_queue_maximum + 1UL;
     return NX_SUCCESS;
 }
 
@@ -827,6 +831,70 @@ static void t_nodelay(void)
 #endif
 }
 
+/*
+ * SO_RCVBUF against TCPWINDOWMAX (#89).  The cap sets the advertised window
+ * at settle; SO_RCVBUF bounds the receive queue in packets and never touches
+ * the window, before or after settle.  getsockopt reads SO_RCVBUF back when
+ * set, else the settled window.
+ */
+static void t_rcvbuf_window(void)
+{
+    const ULONG capped = ami_bsd_tcp_window_chosen(
+        (ULONG)BSD_TCP_WINDOW_LAN, 802816UL, 100000000UL, 2UL, 2UL, 0UL,
+        1460UL, 262144UL);
+    AmiSocket *s;
+    LONG       value;
+    socklen_t  len;
+    LONG       rc;
+
+    printf("options.c: SO_RCVBUF beside TCPWINDOWMAX\n");
+
+    h_reset();
+    s = h_tcp(0);
+    CHECK(capped == 262144UL, "TCPWINDOWMAX=262144 settles at 262144");
+    s->as_Nx.tcp.nx_tcp_socket_rx_window_default = capped;
+    s->as_Nx.tcp.nx_tcp_socket_rx_window_current = capped;
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    s->as_Nx.tcp.nx_tcp_socket_rx_window_maximum = 802816UL;
+#endif
+
+    value = 0; len = (socklen_t)sizeof(value);
+    rc = bsd_getsockopt(0, SOL_SOCKET, SO_RCVBUF, &value, &len, &h_base);
+    CHECK(rc == 0 && value == 262144L, "unset SO_RCVBUF reads the capped window");
+
+    value = 65536;
+    rc = bsd_setsockopt(0, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0, "SO_RCVBUF 65536 is accepted");
+#ifdef NX_ENABLE_LOW_WATERMARK
+    CHECK(h.rx_queue_max == (ULONG)((65536UL + 1459UL) / 1460UL <
+                                    (ULONG)NX_TCP_MAXIMUM_RX_QUEUE
+                                    ? (65536UL + 1459UL) / 1460UL
+                                    : (ULONG)NX_TCP_MAXIMUM_RX_QUEUE) + 1UL,
+          "SO_RCVBUF bounds the receive queue in packets");
+#endif
+    CHECK(s->as_Nx.tcp.nx_tcp_socket_rx_window_default == capped &&
+          s->as_Nx.tcp.nx_tcp_socket_rx_window_current == capped,
+          "SO_RCVBUF moved the window");
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    CHECK(s->as_Nx.tcp.nx_tcp_socket_rx_window_maximum == 802816UL,
+          "SO_RCVBUF moved the window maximum");
+#endif
+
+    value = 0; len = (socklen_t)sizeof(value);
+    rc = bsd_getsockopt(0, SOL_SOCKET, SO_RCVBUF, &value, &len, &h_base);
+    CHECK(rc == 0 && value == 65536L, "a set SO_RCVBUF reads back as set");
+
+    /* Larger than the cap: still only the queue; the window stays capped. */
+    value = 1048576;
+    rc = bsd_setsockopt(0, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value),
+                        &h_base);
+    CHECK(rc == 0 &&
+          s->as_Nx.tcp.nx_tcp_socket_rx_window_default == capped &&
+          s->as_Nx.tcp.nx_tcp_socket_rx_window_current == capped,
+          "a large SO_RCVBUF lifted the capped window");
+}
+
 static void t_user_timeout(void)
 {
     AmiSocket *s;
@@ -924,6 +992,7 @@ int main(void)
     t_refusals();
     t_user_timeout();
     t_nodelay();
+    t_rcvbuf_window();
     t_ioctls();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);

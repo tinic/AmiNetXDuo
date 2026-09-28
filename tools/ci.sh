@@ -368,7 +368,9 @@ host_test_targets() { # builddir
 #      forgotten, not swept into the next one (#53)
 #      473 with sana2_copy_netx: a padded short TCP frame copied in more than
 #      one S2_CopyFromBuff call keeps a correct checksum (#89)
-HOST_TESTS_EXPECTED=473
+#      474 with predict_window: the settled window per TCPGROWRTT and
+#      TCPWINDOWMAX arm, offline (#89)
+HOST_TESTS_EXPECTED=474
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

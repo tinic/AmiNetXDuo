@@ -45,6 +45,7 @@ typedef enum
     IF_KEY_RXBUFFER,
     IF_KEY_TCPACKMAX,
     IF_KEY_TCPGROWRTT,
+    IF_KEY_TCPWINDOWMAX,
     IF_KEY_PRIORITY
 } IfKey;
 
@@ -80,6 +81,7 @@ ami_if_keywords[] =
     { "rxbuffer",           IF_KEY_RXBUFFER          },
     { "tcpackmax",          IF_KEY_TCPACKMAX         },
     { "tcpgrowrtt",         IF_KEY_TCPGROWRTT        },
+    { "tcpwindowmax",       IF_KEY_TCPWINDOWMAX      },
     { "priority",           IF_KEY_PRIORITY          },   /* Roadshow's, and PRI */
     { "pri",                IF_KEY_PRIORITY          },
 
@@ -794,6 +796,22 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
                                      "TCPGROWRTT", value,
                                      AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS);
+                }
+                break;
+
+            case IF_KEY_TCPWINDOWMAX:
+                if (ami_cfg_parse_ulong(value, &n) &&
+                    n >= AMI_CFG_TCP_WINDOW_MAX_MIN &&
+                    n <= AMI_CFG_TCP_WINDOW_MAX_MAX)
+                {
+                    out->tcp_window_max = n;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad TCPWINDOWMAX '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "TCPWINDOWMAX", value,
+                                     AMI_CFG_ADVICE_TCPWINDOWMAX_IS_BYTES);
                 }
                 break;
 

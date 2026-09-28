@@ -488,6 +488,17 @@
              this interface only; editing the file takes effect when
              the interface is next attached.
 
+  @{b}TCPWINDOWMAX@{ub}
+             The largest TCP receive window, in bytes, 8192 to
+             1048576, that a socket on this interface settles at once
+             its handshake is done. It lowers the window chosen from
+             the packet pool, TCPGROWRTT and RXBUFFER, and never
+             raises it. Leave it out for no limit. The value applies
+             to this interface only; editing the file takes effect
+             when the interface is next attached. SO_RCVBUF does not
+             change the window: it bounds the socket's receive queue
+             in packets.
+
   Interface files written for Roadshow usually carry other keywords:
   COPYMODE, ALIAS, METRIC, LEASE, DHCPUNICAST, LINKSTATUSCOMMAND,
   MULTICAST, POINTTOPOINT, DESTINATION and BROADCASTADDRESS among

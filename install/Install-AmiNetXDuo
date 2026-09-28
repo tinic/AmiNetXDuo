@@ -2242,6 +2242,8 @@
     (append ";             Leave it out for this device's default.\n")
     (append "; TCPGROWRTT= is the handshake round trip in ms at which a\n")
     (append ";             TCP receive window grows.  Leave it out for 10.\n")
+    (append "; TCPWINDOWMAX= caps a TCP receive window in bytes, 8192 to\n")
+    (append ";             1048576.  Leave it out for no cap.\n")
     (append ";\n")
     (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")
     (append "; AUTO, DHCP or STATIC), ADDRESS6 and GATEWAY6.  A build\n")

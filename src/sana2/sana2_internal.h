@@ -862,6 +862,8 @@ struct AmiSana2If
     ULONG               hw_rx_bytes;
     /* TCPGROWRTT in ms, 0 = BSD_TCP_WINDOW_GROW_RTT_MS (bsdsocket_window.h). */
     UWORD               tcp_grow_rtt;
+    /* TCPWINDOWMAX in bytes, 0 = no cap (bsdsocket_window.h). */
+    ULONG               tcp_window_max;
 
     /* The interface file's IPREQUESTS, ARPREQUESTS (0 = the plan decides)
        and WRITEREQUESTS (1..AMI_SANA2_TX_SLOTS: how many of tx[] are

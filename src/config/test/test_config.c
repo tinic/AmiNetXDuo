@@ -1202,6 +1202,60 @@ static void test_interface_tcp_grow_rtt(void)
     ami_config_set_reporter(NULL, NULL);
 }
 
+static void test_interface_tcp_window_max(void)
+{
+    static const char *const bad[] = {
+        "0", "8191", "1048577", "4294967296", "big", "256k"
+    };
+    AmiIfConfig iface;
+    char       *buf;
+    char        text[96];
+    ULONG       i;
+
+    printf("interface: TCPWINDOWMAX is optional and bounded per interface\n");
+
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_window_max == 0);
+    free(buf);
+
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpwindowmax = 262144\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_window_max == 262144UL);
+    free(buf);
+
+    buf = dup_text("device = genet.device\nconfigure = dhcp\n"
+                   "TCPWINDOWMAX=8192\n");
+    CHECK(ami_cfg_parse_interface("eth", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_window_max == 8192UL);
+    free(buf);
+
+    buf = dup_text("device = genet.device\nconfigure = dhcp\n"
+                   "TCPWINDOWMAX=1048576\n");
+    CHECK(ami_cfg_parse_interface("eth", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_window_max == 1048576UL);
+    free(buf);
+
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/wifipi");
+    for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+    {
+        seen_count = 0;
+        snprintf(text, sizeof(text), "device = anxwifipi.device\n"
+                 "configure = dhcp\ntcpwindowmax = %s\n", bad[i]);
+        buf = dup_text(text);
+        CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+        CHECK(iface.tcp_window_max == 0);
+        CHECK(seen_count == 1 && seen[0].line == 3);
+        CHECK(seen_count == 1 &&
+              strstr(seen[0].hint,
+                     "TCPWINDOWMAX is bytes, 8192 to 1048576") != NULL);
+        free(buf);
+    }
+    ami_config_set_reporter(NULL, NULL);
+}
+
 static void test_interface_priority(void)
 {
     AmiIfConfig iface;
@@ -3021,6 +3075,7 @@ int main(int argc, char **argv)
     test_request_counts_have_ceilings();
     test_interface_tcp_ack_max();
     test_interface_tcp_grow_rtt();
+    test_interface_tcp_window_max();
     test_interface_priority();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6

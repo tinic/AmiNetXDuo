@@ -678,6 +678,21 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME pool_window COMMAND test_pool_window)
 
+    # The window a socket settles at for an NI's TCPGROWRTT/TCPWINDOWMAX and
+    # a pool, offline (#89): build/.../predict_window [key=value ...].
+    add_executable(predict_window
+        host/predict_window_host.c
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/bsdsocket_window.c")
+
+    target_include_directories(predict_window PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(predict_window PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME predict_window COMMAND predict_window)
+
     # The pool NetX actually carves is the pool that was planned.  Links the
     # real nx_packet_pool_create(), because the count that failed run-bigmem.sh
     # (4106 on a 4096 clamp) is NetX's own, not the planning arithmetic's.

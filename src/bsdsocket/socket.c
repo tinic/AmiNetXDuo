@@ -204,21 +204,20 @@ VOID bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
     AmiSana2If   *sana = (nxif != NX_NULL)
                        ? (AmiSana2If *)nxif->nx_interface_additional_link_info
                        : NULL;
-    ULONG bps  = (sana != NULL) ? ami_sana2_get_bps(sana) : 0UL;
-    ULONG grow = ami_sana2_get_tcp_grow_rtt(sana);  /* 0 = built-in line */
     ULONG cur  = tcp->nx_tcp_socket_rx_window_default;
-    ULONG want = ami_bsd_tcp_window_settle(cur, bsd_tcp_window_top(tcp), bps,
-                                           rtt_ms, grow);
 
-    /* ... and never more than the card behind this interface can hold from
-       the wire at once (bsdsocket_window.h, ami_bsd_tcp_window_fit), where
-       the whole window can arrive at once -- a LAN, or a card slower than
-       the path (ami_bsd_tcp_window_burst_bound).  The segment size is the
+    /* Grown for the path, never more than the card behind this interface
+       can hold from the wire where the whole window can arrive at once, and
+       never more than its TCPWINDOWMAX (ami_bsd_tcp_window_chosen).  A NULL
+       interface reads as all zeros: no fit, no cap.  The segment size is the
        one the handshake settled: nx_tcp_socket_mss is what the application
        asked for and stays 0 on an accepted socket. */
-    if (sana != NULL && ami_bsd_tcp_window_burst_bound(bps, rtt_ms, grow))
-        want = ami_bsd_tcp_window_fit(want, ami_sana2_get_hw_rx_bytes(sana),
-                                      tcp->nx_tcp_socket_connect_mss);
+    ULONG want = ami_bsd_tcp_window_chosen(cur, bsd_tcp_window_top(tcp),
+                                           ami_sana2_get_bps(sana), rtt_ms,
+                                           ami_sana2_get_tcp_grow_rtt(sana),
+                                           ami_sana2_get_hw_rx_bytes(sana),
+                                           tcp->nx_tcp_socket_connect_mss,
+                                           ami_sana2_get_tcp_window_max(sana));
 
     if (want == cur)
         return;

@@ -182,6 +182,18 @@ ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss);
 BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms,
                                     ULONG grow_rtt_ms);
 
+/*
+ * The whole settle decision for one interface: _settle(), then _fit() where
+ * _burst_bound(), then the interface's TCPWINDOWMAX (`window_max`, 0 = no
+ * cap, #89).  No interface is bps, hw_bytes, grow_rtt_ms and window_max all
+ * 0.  The cap only lowers: the scale negotiated at SYN from `maximum` still
+ * expresses the result, rounded down to its 1 << scale granularity on the
+ * wire.  Pure arithmetic, host-tested.
+ */
+ULONG ami_bsd_tcp_window_chosen(ULONG created, ULONG maximum, ULONG bps,
+                                ULONG rtt_ms, ULONG grow_rtt_ms,
+                                ULONG hw_bytes, ULONG mss, ULONG window_max);
+
 #ifndef BSD_TCP_WINDOW_CEILING
 #ifdef AMINETXDUO_TCP_WINDOW_SCALING
 #define BSD_TCP_WINDOW_CEILING  BSD_TCP_WINDOW_MAX

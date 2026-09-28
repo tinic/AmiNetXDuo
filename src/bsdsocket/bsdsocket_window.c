@@ -104,6 +104,20 @@ ULONG ami_bsd_tcp_window_settle(ULONG created, ULONG maximum, ULONG bps,
     return created;
 }
 
+ULONG ami_bsd_tcp_window_chosen(ULONG created, ULONG maximum, ULONG bps,
+                                ULONG rtt_ms, ULONG grow_rtt_ms,
+                                ULONG hw_bytes, ULONG mss, ULONG window_max)
+{
+    ULONG want = ami_bsd_tcp_window_settle(created, maximum, bps, rtt_ms,
+                                           grow_rtt_ms);
+
+    if (ami_bsd_tcp_window_burst_bound(bps, rtt_ms, grow_rtt_ms))
+        want = ami_bsd_tcp_window_fit(want, hw_bytes, mss);
+    if (window_max != 0UL && want > window_max)
+        want = window_max;
+    return want;
+}
+
 BOOL ami_bsd_tcp_window_burst_bound(ULONG bps, ULONG rtt_ms,
                                     ULONG grow_rtt_ms)
 {

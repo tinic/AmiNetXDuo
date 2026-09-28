@@ -558,6 +558,113 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
 
 
 /*
+ * TCPWINDOWMAX (#89): the interface's cap on the settled window, applied
+ * after the grow decision and the card's fit.  0 is no cap, which is also
+ * what a socket with no interface gets.  802,816 is the WiFiPi A1200's
+ * grown window (a 4,096-packet pool, three sockets live).
+ */
+static void k_tcpwindowmax_caps_the_settled_window(void)
+{
+    const ULONG lan   = (ULONG)BSD_TCP_WINDOW_LAN;
+    const ULONG max   = (ULONG)BSD_TCP_WINDOW_MAX;
+    const ULONG lmax  = (ULONG)BSD_TCP_WINDOW_MAX_LAN;
+    const ULONG gbit  = (ULONG)BSD_TCP_WINDOW_FAST_BPS;
+    const ULONG hundm = 100000000UL;
+    const ULONG a1200 = ami_bsd_tcp_window_max_for(4096UL,
+                                                   (ULONG)AMI_POOL_PAYLOAD, 3UL);
+    const ULONG xsurf = 52UL * 256UL;
+    ULONG       k;
+
+    h_check(a1200 == 802816UL, "the A1200 pool share is not 802,816");
+
+    /* Absent: exactly the uncapped decision, every path and link. */
+    for (k = 0; k < 40UL; k++)
+    {
+        ULONG bps = (k % 4UL == 0UL) ? 0UL : (k % 4UL == 1UL) ? 10000000UL
+                  : (k % 4UL == 2UL) ? hundm : gbit;
+        ULONG rtt = k / 4UL * 3UL;
+        ULONG hw  = (k & 1UL) ? xsurf : 0UL;
+        ULONG want = ami_bsd_tcp_window_settle(lan, a1200, bps, rtt, 2UL);
+
+        if (ami_bsd_tcp_window_burst_bound(bps, rtt, 2UL))
+            want = ami_bsd_tcp_window_fit(want, hw, 1460UL);
+        h_check(ami_bsd_tcp_window_chosen(lan, a1200, bps, rtt, 2UL, hw,
+                                          1460UL, 0UL) == want,
+                "TCPWINDOWMAX unset changed the settled window");
+    }
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, 0UL, 2UL, 0UL, 0UL,
+                                      1460UL, 0UL) == lan,
+            "no interface is not the uncapped default line");
+
+    /* Below the chosen window it clamps; at or above it does nothing. */
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 0UL) == a1200,
+            "TCPGROWRTT=2 no longer grows the A1200 to 802,816");
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 262144UL) == 262144UL,
+            "TCPWINDOWMAX=262144 did not cap a grown window");
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, a1200) == a1200 &&
+            ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, max) == a1200,
+            "a cap at or above the chosen window moved it");
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, a1200 - 1UL) == a1200 - 1UL,
+            "a cap one below the chosen window did not clamp");
+    /* A window that did not grow can still be lowered, never raised. */
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 1UL, 2UL, 0UL,
+                                      1460UL, 262144UL) == lan,
+            "a cap raised an ungrown window");
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 1UL, 2UL, 0UL,
+                                      1460UL, 65536UL) == 65536UL,
+            "a cap did not lower an ungrown window");
+    /* The gigabit LAN maximum and the card's fit are both mins with it. */
+    h_check(ami_bsd_tcp_window_chosen(lan, max, gbit, 1UL, 0UL, 0UL,
+                                      1460UL, 524288UL) == lmax &&
+            ami_bsd_tcp_window_chosen(lan, max, gbit, 1UL, 0UL, 0UL,
+                                      1460UL, 131072UL) == 131072UL,
+            "the cap and the gigabit LAN maximum are not a min");
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, xsurf,
+                                      1460UL, 262144UL) == 8UL * 1460UL &&
+            ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, xsurf,
+                                      1460UL, 8192UL) == 8192UL,
+            "the cap and the card's fit are not a min");
+
+    /* Scale boundaries.  The A1200's 802,816 negotiates scale 4 (50,176
+       units); a cap just either side of 65,535 lands under it, and 65,535
+       << 4 is above the maximum, so it is inert.  A peer that offered no
+       scaling has both fields pinned at 65,535: a cap above that is inert,
+       one below shrinks, which needs no scale. */
+    h_check((a1200 >> 3) > 65535UL && (a1200 >> 4) <= 65535UL,
+            "the A1200 maximum is not scale 4");
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 65535UL) == 65535UL &&
+            ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 65536UL) == 65536UL,
+            "a cap either side of 65,535 did not clamp");
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 65535UL << 4) == a1200,
+            "65,535 << scale is above the maximum and clamped");
+    h_check(ami_bsd_tcp_window_chosen(65535UL, 65535UL, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 65536UL) == 65535UL &&
+            ami_bsd_tcp_window_chosen(65535UL, 65535UL, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 65534UL) == 65534UL,
+            "an unscaled peer's pinned 65,535 is not a plain min");
+    for (k = 8192UL; k <= max; k += 4093UL)
+        h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                          1460UL, k) <= a1200,
+                "a cap raised the window past the negotiated maximum");
+
+    /* Below two segments the cap is taken literally: the arithmetic has
+       no floor, the parser does (8,192, five 1,460-byte segments). */
+    h_check(ami_bsd_tcp_window_chosen(lan, a1200, hundm, 2UL, 2UL, 0UL,
+                                      1460UL, 2000UL) == 2000UL,
+            "a sub-two-segment cap was not taken literally");
+    h_check(8192UL >= 5UL * 1460UL, "the parser floor is under five segments");
+}
+
+
+/*
  * The bytes the pool is sized from are the fastest memory class's, not
  * everything Exec has: the A3000 with 12 MB of motherboard RAM ahead of a
  * 256 MB Zorro III card, and the machines that must stay exactly as they
@@ -613,6 +720,7 @@ int main(void)
     h_a_big_machine_is_bounded_by_the_link();
     i_the_window_settles_for_the_path_and_the_link();
     j_the_pool_is_sized_from_the_fastest_class();
+    k_tcpwindowmax_caps_the_settled_window();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

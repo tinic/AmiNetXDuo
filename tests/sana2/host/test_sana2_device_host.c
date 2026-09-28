@@ -1505,6 +1505,60 @@ static void case_tcp_grow_rtt(void)
             "a NULL interface keeps the 10 ms line");
 }
 
+/* TCPWINDOWMAX reaches the interface at open; unsaid, or no interface at
+   all, is 0, which bsdsocket reads as no cap. */
+static void case_tcp_window_max(void)
+{
+    const ULONG lan = (ULONG)BSD_TCP_WINDOW_LAN;
+    const ULONG max = 802816UL;
+    AmiSana2If *iface;
+    LONG        err = 0;
+
+    printf("  the interface file's TCPWINDOWMAX reaches the interface\n");
+
+    h_config();
+    h_cfg.tcp_grow_rtt   = 2;
+    h_cfg.tcp_window_max = 262144UL;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && ami_sana2_get_tcp_window_max(iface) == 262144UL,
+            "TCPWINDOWMAX=262144 is carried to the interface");
+    /* What socket.c:bsd_tcp_window_settle does with it. */
+    h_check(iface != NULL &&
+            ami_bsd_tcp_window_chosen(lan, max, ami_sana2_get_bps(iface), 2UL,
+                ami_sana2_get_tcp_grow_rtt(iface),
+                ami_sana2_get_hw_rx_bytes(iface), 1460UL,
+                ami_sana2_get_tcp_window_max(iface)) == 262144UL,
+            "TCPWINDOWMAX=262144 caps a grown 802,816");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_config();
+    h_cfg.tcp_grow_rtt = 2;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && ami_sana2_get_tcp_window_max(iface) == 0,
+            "an unsaid TCPWINDOWMAX is 0");
+    h_check(iface != NULL &&
+            ami_bsd_tcp_window_chosen(lan, max, ami_sana2_get_bps(iface), 2UL,
+                ami_sana2_get_tcp_grow_rtt(iface),
+                ami_sana2_get_hw_rx_bytes(iface), 1460UL,
+                ami_sana2_get_tcp_window_max(iface)) == max,
+            "an unsaid TCPWINDOWMAX capped the grown window");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_check(ami_sana2_get_tcp_window_max(NULL) == 0, "no interface is 0");
+    /* A NULL interface: every getter 0, the built-in line, no fit, no cap. */
+    h_check(ami_bsd_tcp_window_chosen(lan, max, ami_sana2_get_bps(NULL), 10UL,
+                ami_sana2_get_tcp_grow_rtt(NULL),
+                ami_sana2_get_hw_rx_bytes(NULL), 1460UL,
+                ami_sana2_get_tcp_window_max(NULL)) == max &&
+            ami_bsd_tcp_window_chosen(lan, max, ami_sana2_get_bps(NULL), 9UL,
+                ami_sana2_get_tcp_grow_rtt(NULL),
+                ami_sana2_get_hw_rx_bytes(NULL), 1460UL,
+                ami_sana2_get_tcp_window_max(NULL)) == lan,
+            "a NULL interface is capped or fitted");
+}
+
 /* FILTER=EVERYTHING is SANA2OPF_PROM at OpenDevice(), and nothing else in
    the file touches the flags. */
 static void case_filter_everything(void)
@@ -1917,6 +1971,7 @@ int main(void)
     case_keeps_online();
     case_request_counts();
     case_tcp_grow_rtt();
+    case_tcp_window_max();
     case_filter_everything();
     case_offline_bounded_sync();
     case_offline_bounded_late_reply();
