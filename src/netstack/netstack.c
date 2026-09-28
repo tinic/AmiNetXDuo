@@ -532,10 +532,20 @@ static VOID ami_ns_park_unaddressed(AmiNetStack *ns, UWORD index)
  * keep attach order, which without this line is the whole rule -- a 3c589 in
  * slot 0 carried a subnet an anxgenet.device in slot 1 shares.
  */
-static VOID ami_ns_apply_priority(AmiNetStack *ns, UWORD index)
+static VOID ami_ns_apply_interface_policy(AmiNetStack *ns, UWORD index)
 {
     ns->ns_Ip.nx_ip_interface[index].nx_interface_priority =
         (INT)ns->ns_Config.interfaces[index].priority;
+
+    /* A TCP connection keeps its NX_INTERFACE for its lifetime.  Publish the
+       ACK policy before bringing this interface online; zero leaves NetX at
+       the port default (50176), while WiFiPi defaults to the measured 11680.
+       An explicit TCPACKMAX always wins for this interface alone. */
+    ns->ns_Ip.nx_ip_interface[index].nx_interface_tcp_ack_threshold_max =
+        (ns->ns_Config.interfaces[index].tcp_ack_max != 0)
+            ? ns->ns_Config.interfaces[index].tcp_ack_max
+            : ami_sana2_default_tcp_ack_max(
+                  ns->ns_Config.interfaces[index].device);
 }
 
 /*
@@ -809,7 +819,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
         ami_ns_park_unaddressed(ns, i);
-        ami_ns_apply_priority(ns, i);
+        ami_ns_apply_interface_policy(ns, i);
 
         if (ns->ns_Ip.nx_ip_interface[i].nx_interface_link_up == NX_FALSE)
             ami_event(NETEVENT_LINK_DOWN, i, 0UL);
@@ -3270,7 +3280,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         ns->ns_IfaceCount = (UWORD)(slot + 1);
 
     ami_ns_park_unaddressed(ns, (UWORD)slot);
-    ami_ns_apply_priority(ns, (UWORD)slot);
+    ami_ns_apply_interface_policy(ns, (UWORD)slot);
     ns->ns_Ip.nx_ip_interface[slot].nx_interface_ip_conflict_notify_handler =
         ami_ns_ip_conflict;
 

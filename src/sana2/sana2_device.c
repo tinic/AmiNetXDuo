@@ -1718,6 +1718,21 @@ UWORD ami_sana2_default_ip_reads(const char *device)
     return 0;
 }
 
+ULONG ami_sana2_default_tcp_ack_max(const char *device)
+{
+    const char *base;
+
+    if (device == NULL)
+        return 0;
+
+    base = ami_sana2_basename(device);
+    if (ami_str_iequal(base, "anxwifipi.device") ||
+        ami_str_iequal(base, "wifipi.device"))
+        return 11680UL;
+
+    return 0;
+}
+
 BOOL ami_sana2_is_online(const AmiSana2If *iface)
 {
     return (iface != NULL) ? iface->online : FALSE;

@@ -126,6 +126,9 @@ static const char *const ami_cfg_advice_text[] =
     "FILTER is LOCAL, IPANDARP or EVERYTHING.  The first two are wha"
     "t happens anyway.  EVERYTHING opens the driver promiscuous, for"
     " a card whose multicast filter lets nothing through.",
+    "TCPACKMAX is the maximum number of received TCP bytes to wait "
+    "before requesting an ACK, 1 to 65535. Leave it out for the "
+    "device default; smaller values send more ACKs.",
 };
 
 const char *ami_cfg_advice(UWORD code)

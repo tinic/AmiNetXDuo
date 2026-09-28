@@ -2238,6 +2238,8 @@
     (append ";               keyword is absent.  The responder costs\n")
     (append ";               real time on a slow machine, even when\n")
     (append ";               nothing asks it anything.\n")
+    (append "; TCPACKMAX= caps received TCP bytes between requested ACKs.\n")
+    (append ";             Leave it out for this device's default.\n")
     (append ";\n")
     (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")
     (append "; AUTO, DHCP or STATIC), ADDRESS6 and GATEWAY6.  A build\n")

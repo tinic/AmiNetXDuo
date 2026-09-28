@@ -1810,6 +1810,14 @@ static void case_bursty_wifi_reads(void)
     h_check(ami_sana2_default_ip_reads(NULL) == 0,
             "an unnamed driver keeps the ordinary BPS ladder");
 
+    h_check(ami_sana2_default_tcp_ack_max("DEVS:Networks/anxwifipi.device") == 11680UL,
+            "the shipped WiFiPi driver gets the measured ACK ceiling");
+    h_check(ami_sana2_default_tcp_ack_max("WIFIPI.DEVICE") == 11680UL,
+            "the upstream WiFiPi name gets the same ceiling");
+    h_check(ami_sana2_default_tcp_ack_max("genet.device") == 0 &&
+            ami_sana2_default_tcp_ack_max(NULL) == 0,
+            "wired and unnamed drivers keep the port ACK ceiling");
+
     /* The DEVICE= lines Install-AmiNetXDuo writes for Wi-Fi, system layout
        and self-contained drawer: neither carries IPREQUESTS. */
     h_check(ami_sana2_default_ip_reads("DEVS:Networks/anxwifipi.device") == 128 &&

@@ -1117,6 +1117,39 @@ static void test_request_counts_have_ceilings(void)
     CHECK(seen[1].line == 4);
     CHECK(seen[1].severity == AMI_CFG_PROBLEM_WARN);
 }
+static void test_interface_tcp_ack_max(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: TCPACKMAX is optional and bounded per interface\n");
+
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpackmax = 11680\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_ack_max == 11680UL);
+    free(buf);
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/wifipi");
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpackmax = 0\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_ack_max == 0);
+    CHECK(seen_count == 1 && seen[0].line == 3);
+    free(buf);
+
+    seen_count = 0;
+    buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n"
+                   "tcpackmax = 65536\n");
+    CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.tcp_ack_max == 0);
+    CHECK(seen_count == 1 && seen[0].line == 3);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+}
+
 static void test_interface_priority(void)
 {
     AmiIfConfig iface;
@@ -2934,6 +2967,7 @@ int main(int argc, char **argv)
     test_problem_reporter();
     test_inert_keywords_are_notes();
     test_request_counts_have_ceilings();
+    test_interface_tcp_ack_max();
     test_interface_priority();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6

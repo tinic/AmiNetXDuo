@@ -467,6 +467,17 @@
              ring overflowed 42 times in ten seconds and the card
              received 2.8 Mbit/s.
 
+  @{b}TCPACKMAX@{ub}
+             Maximum received TCP bytes between requested ACKs on
+             connections using this interface, 1 to 65535. Smaller
+             values send more ACKs and may improve Wi-Fi receive speed
+             at a cost in transmit work. Leave it out for the device
+             default: 11680 for anxwifipi.device and wifipi.device,
+             50176 for other devices. An explicit value wins on this
+             interface only; editing the file takes effect when the
+             interface is next attached. This is a TCP stack setting,
+             not a SANA-II driver command.
+
   Interface files written for Roadshow usually carry other keywords:
   COPYMODE, ALIAS, METRIC, LEASE, DHCPUNICAST, LINKSTATUSCOMMAND,
   MULTICAST, POINTTOPOINT, DESTINATION and BROADCASTADDRESS among

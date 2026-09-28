@@ -43,6 +43,7 @@ typedef enum
     IF_KEY_ARPREQUESTS,
     IF_KEY_WRITEREQUESTS,
     IF_KEY_RXBUFFER,
+    IF_KEY_TCPACKMAX,
     IF_KEY_PRIORITY
 } IfKey;
 
@@ -76,6 +77,7 @@ ami_if_keywords[] =
     { "arprequests",        IF_KEY_ARPREQUESTS       },
     { "writerequests",      IF_KEY_WRITEREQUESTS     },
     { "rxbuffer",           IF_KEY_RXBUFFER          },
+    { "tcpackmax",          IF_KEY_TCPACKMAX         },
     { "priority",           IF_KEY_PRIORITY          },   /* Roadshow's, and PRI */
     { "pri",                IF_KEY_PRIORITY          },
 
@@ -760,6 +762,21 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad RXBUFFER '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "RXBUFFER",
                                      value, AMI_CFG_ADVICE_RXBUFFER_IS_THE);
+                }
+                break;
+
+            case IF_KEY_TCPACKMAX:
+                if (ami_cfg_parse_ulong(value, &n) &&
+                    n != 0 && n <= AMI_CFG_TCP_ACK_MAX)
+                {
+                    out->tcp_ack_max = n;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad TCPACKMAX '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "TCPACKMAX", value,
+                                     AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES);
                 }
                 break;
 

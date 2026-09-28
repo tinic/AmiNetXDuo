@@ -54,6 +54,7 @@ extern "C" {
 #define AMINETXDUO_TX_SLOTS         32
 #endif
 #define AMI_CFG_WRITEREQUESTS_MAX   AMINETXDUO_TX_SLOTS
+#define AMI_CFG_TCP_ACK_MAX         65535UL
 #define AMI_CFG_PATH_LEN            128
 
 /* The default domain gets its own cap: SetDefaultDomainName()'s autodoc says
@@ -199,6 +200,9 @@ typedef struct AmiIfConfig {
      * hardware is known gets a default by name.  A number here wins.
      */
     ULONG       rx_buffer;
+    /* TCPACKMAX: maximum unacknowledged receive bytes before an ACK is
+       requested on connections using this interface.  0 = device default. */
+    ULONG       tcp_ack_max;
     BYTE        priority;                    /* PRIORITY=, -128..127, 0 unset: the
                                                 highest wins a route two
                                                 interfaces could carry        */

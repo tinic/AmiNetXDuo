@@ -72,6 +72,11 @@ UWORD       ami_sana2_retained_count(VOID);
    refuses such a pair with AMI_NET_ERR_RETAINED before OpenDevice(). */
 ULONG       ami_sana2_retained_holds(const char *device, ULONG unit);
 
+/* TCP ACK ceiling when TCPACKMAX is absent: WiFiPi needs the measured
+   one-GRO-run cadence, other devices use the NetX port default.  Zero means
+   use that port default.  Names are compared by basename, ignoring case. */
+ULONG       ami_sana2_default_tcp_ack_max(const char *device);
+
 /*
  * Collect whatever the devices have given back since, without waiting, and
  * CloseDevice() and free every interface nothing holds any more.  Under
