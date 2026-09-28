@@ -71,7 +71,10 @@ BUDGETS=(
     # 364,664 with the bounded S2_OFFLINE: timer-bounded reply wait, abort,
     # and an abandoned request kept with its interface until the device
     # replies (#90, 5473e26e), 2026-09-26 (micro 204,052, minimal 238,240).
-    "default:src/bsdsocket/bsdsocket.library:365000"
+    # 365,468 with per-interface TCP ACK policy (#109): config parsing and
+    # publishing the WiFi/default-or-explicit ceiling into each NX_INTERFACE.
+    # This adds 468 bytes over the previous resident-image budget.
+    "default:src/bsdsocket/bsdsocket.library:366000"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
