@@ -1,5 +1,6 @@
 add_library(aminetxduo_sana2 STATIC
     sana2_device.c
+    sana2_policy.c
     sana2_copy.c
     sana2_rx.c
     sana2_tx.c

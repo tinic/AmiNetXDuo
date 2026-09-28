@@ -249,6 +249,7 @@ add_test(NAME sana2_driver COMMAND test_sana2_driver)
 add_executable(test_sana2_device
     host/test_sana2_device_host.c
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_device.c"
+    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_policy.c"
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_txmeta.c")
 
 target_compile_options(test_sana2_device PRIVATE

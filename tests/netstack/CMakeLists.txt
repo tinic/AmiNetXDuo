@@ -963,6 +963,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # because that is the shipping default and its handful of entry points are
     # already answered.
     set(NETSTACK_HOST_TU
+        "${CMAKE_SOURCE_DIR}/src/sana2/sana2_policy.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_caller.c"
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_claim.c"
