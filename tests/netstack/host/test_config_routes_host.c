@@ -118,11 +118,58 @@ static void t_loopback_then_specific_route(void)
     h_down();
 }
 
+static void t_interface_tcp_ack_policy(void)
+{
+    static const struct {
+        const char *device;
+        ULONG requested;
+        ULONG expected;
+    } cases[] = {
+        { "RAM:anxwifipi.device", 0, 11680UL },
+        { "genet.device", 0, 0 },
+        { "genet.device", 8192UL, 8192UL },
+        { "RAM:anxwifipi.device", 4096UL, 4096UL }
+    };
+    AmiIfConfig cfg;
+    UWORD index;
+    unsigned int i;
+
+    printf("interface: TCP ACK policy follows the attached device and override\n");
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        nsh_reset();
+        CHECK(netstack_startup_loopback() == AMI_NET_OK,
+              "the loopback stack starts for the ACK policy case");
+
+        memset(&cfg, 0, sizeof(cfg));
+        strcpy(cfg.name, "testif");
+        strcpy(cfg.device, cases[i].device);
+        cfg.iptype = AMI_IPTYPE_STATIC;
+        cfg.address = 0xC0A80132UL;
+        cfg.netmask = 0xFFFFFF00UL;
+        cfg.up = TRUE;
+        cfg.configured = TRUE;
+        cfg.tcp_ack_max = cases[i].requested;
+        index = 99;
+
+        CHECK(netstack_interface_start(&cfg, &index) == AMI_NET_OK && index == 0,
+              "the selected interface attaches in slot zero");
+        if (index == 0)
+            CHECK(netstack_get()->ns_Ip.nx_ip_interface[index]
+                      .nx_interface_tcp_ack_threshold_max == cases[i].expected,
+                  "the attached interface carries its own ACK ceiling");
+
+        h_down();
+    }
+}
+
 int main(void)
 {
     t_startup_installs();
     t_late_address_and_operator_delete();
     t_loopback_then_specific_route();
+    t_interface_tcp_ack_policy();
 
     printf("\n%lu checks, %lu failure(s)\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
