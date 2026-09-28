@@ -116,6 +116,9 @@ jobs:
           # CHANGELOG.md without the version's section.
           notes=$(mktemp)
           trap 'rm -f "$notes"' EXIT
+          # checkout leaves the pushed tag pointing at the commit; fetch the
+          # annotated tag object so its paragraph reaches the notes
+          git fetch --force origin "+refs/tags/$tag:refs/tags/$tag"
           tools/release-notes.sh "$tag" > "$notes"
 
           gh release create "$tag" \

@@ -38,9 +38,15 @@ section=$(awk -v v="## $ver" -v pfx="## ${ver%.*}." '
 entries=$(printf '%s\n' "$section" | grep -c '^- ' || true)
 
 # The annotated tag's body, the paragraph written when the release was cut.
-# A lightweight tag has none, and the notes do without.
-summary=$(git tag -l --format='%(contents:body)' "$tag" 2>/dev/null |
-          sed '/^-----BEGIN PGP/,$d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
+# A lightweight tag has none, and the notes do without.  Read it only from a
+# tag object: on a ref to a commit, %(contents:body) is the commit's message,
+# and actions/checkout leaves the pushed tag as exactly such a ref, so beta7's
+# first notes carried the squash commit's body.
+summary=""
+if [ "$(git for-each-ref --format='%(objecttype)' "refs/tags/$tag")" = tag ]; then
+    summary=$(git tag -l --format='%(contents:body)' "$tag" 2>/dev/null |
+              sed '/^-----BEGIN PGP/,$d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
+fi
 
 # name<TAB>url<TAB>why; a malformed line fails the render rather than
 # publishing a broken bullet.
