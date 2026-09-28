@@ -2240,7 +2240,7 @@
     (append ";               nothing asks it anything.\n")
     (append "; TCPACKMAX= caps received TCP bytes between requested ACKs.\n")
     (append ";             Leave it out for this device's default.\n")
-    (append "; TCPGROWRTT= is the connect round trip in ms at which a\n")
+    (append "; TCPGROWRTT= is the handshake round trip in ms at which a\n")
     (append ";             TCP receive window grows.  Leave it out for 10.\n")
     (append ";\n")
     (append "; An IPv6 build also understands CONFIGURE6 (OFF, LINKLOCAL,\n")

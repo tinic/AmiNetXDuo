@@ -479,10 +479,11 @@
              not a SANA-II driver command.
 
   @{b}TCPGROWRTT@{ub}
-             Connect round trip in milliseconds, 1 to 65535, at or
+             Handshake round trip in milliseconds, 1 to 65535, at or
              above which a TCP receive window on this interface grows
-             from 100352 bytes to its maximum. Leave it out for 10 on
-             every device. A smaller value grows the window on shorter
+             from its starting size to the largest the socket may
+             use. Both sizes depend on the packet pool and on window
+             scaling. Leave it out for 10 on every device. A smaller value grows the window on shorter
              paths, including a local network. The value applies to
              this interface only; editing the file takes effect when
              the interface is next attached.
