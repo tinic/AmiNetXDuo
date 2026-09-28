@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `TCPWINDOWMAX=<bytes>` in an interface file caps the TCP receive window a
+  socket on that interface settles at, 65,536 to 1,048,576 bytes; unset
+  leaves the window as it was. The cap never goes below the window the
+  handshake offered. The key brings the resident `bsdsocket.library` image
+  to 365,536 bytes; its budget is 366,000 bytes.
 - `TCPGROWRTT=<ms>` in an interface file sets the handshake round trip
   (1 to 65,535 ms) at or above which a TCP receive window on that interface
   grows to its maximum. Unset, every device keeps 10 ms. The key adds 100
