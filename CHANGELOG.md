@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 1.0.0-beta7
+
 - `TCPGROWRTT=<ms>` in an interface file sets the handshake round trip
   (1 to 65,535 ms) at or above which a TCP receive window on that interface
   grows to its maximum. Unset, every device keeps 10 ms. The key adds 100
@@ -20,9 +22,6 @@ version at the top when it merges.
   cause of missing outbound frames (#89). The per-interface policy brings the
   resident `bsdsocket.library` image to 365,308 bytes; its budget is
   366,000 bytes.
-
-## 1.0.0-beta7
-
 - `anxwifipi.device`: WirelessManager 1.3 and 1.5 connect.
 - `anxwifipi.device`: inbound Wi-Fi 58.5 -> 62.9 Mbit/s on the CM4.
 - `anxwifipi.device`: an unanswered control request returns after 2.5 s.
