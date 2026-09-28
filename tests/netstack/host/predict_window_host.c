@@ -74,9 +74,9 @@ int main(int argc, char **argv)
         { "growrtt2_cap512k", 2UL,   524288UL },
         { "growrtt2_cap256k", 2UL,   262144UL },
         { "growrtt2_cap128k", 2UL,   131072UL },
-        { "growrtt2_cap64k",  2UL,    65535UL },
+        { "growrtt2_cap64k",  2UL,    65536UL },
         { "cap256k",          0UL,   262144UL },
-        { "cap64k",           0UL,    65535UL },
+        { "cap64k",           0UL,    65536UL },
     };
     Arm a = { 4096UL, (ULONG)AMI_POOL_PAYLOAD, 3UL, 0UL, 2UL, 0UL, 0UL,
               1460UL, 0UL, 1UL };

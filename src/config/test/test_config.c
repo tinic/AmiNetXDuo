@@ -1204,15 +1204,10 @@ static void test_interface_tcp_grow_rtt(void)
 
 static void test_interface_tcp_window_max(void)
 {
-    static const char *const bad[] = {
-        "0", "8191", "1048577", "4294967296", "big", "256k"
-    };
     AmiIfConfig iface;
     char       *buf;
-    char        text[96];
-    ULONG       i;
 
-    printf("interface: TCPWINDOWMAX is optional and bounded per interface\n");
+    printf("interface: TCPWINDOWMAX is optional, 65536..1048576\n");
 
     buf = dup_text("device = anxwifipi.device\nconfigure = dhcp\n");
     CHECK(ami_cfg_parse_interface("wifipi", buf, &iface) == AMI_CFG_OK);
@@ -1226,9 +1221,9 @@ static void test_interface_tcp_window_max(void)
     free(buf);
 
     buf = dup_text("device = genet.device\nconfigure = dhcp\n"
-                   "TCPWINDOWMAX=8192\n");
+                   "TCPWINDOWMAX=65536\n");
     CHECK(ami_cfg_parse_interface("eth", buf, &iface) == AMI_CFG_OK);
-    CHECK(iface.tcp_window_max == 8192UL);
+    CHECK(iface.tcp_window_max == 65536UL);
     free(buf);
 
     buf = dup_text("device = genet.device\nconfigure = dhcp\n"
@@ -1236,6 +1231,21 @@ static void test_interface_tcp_window_max(void)
     CHECK(ami_cfg_parse_interface("eth", buf, &iface) == AMI_CFG_OK);
     CHECK(iface.tcp_window_max == 1048576UL);
     free(buf);
+}
+
+/* Under the 65536 floor (a retraction of the handshake window), over the
+   maximum, 0, or not a number: warned with the advice, left unset. */
+static void test_interface_tcp_window_max_rejects_bad_values(void)
+{
+    static const char *const bad[] = {
+        "0", "8192", "65535", "1048577", "4294967296", "big", "256k"
+    };
+    AmiIfConfig iface;
+    char       *buf;
+    char        text[96];
+    ULONG       i;
+
+    printf("interface: a bad TCPWINDOWMAX is warned and ignored\n");
 
     ami_config_set_reporter(collect, NULL);
     ami_cfg_problem_file("DEVS:NetInterfaces/wifipi");
@@ -1250,7 +1260,7 @@ static void test_interface_tcp_window_max(void)
         CHECK(seen_count == 1 && seen[0].line == 3);
         CHECK(seen_count == 1 &&
               strstr(seen[0].hint,
-                     "TCPWINDOWMAX is bytes, 8192 to 1048576") != NULL);
+                     "TCPWINDOWMAX is bytes, 65536 to 1048576") != NULL);
         free(buf);
     }
     ami_config_set_reporter(NULL, NULL);
@@ -3076,6 +3086,7 @@ int main(int argc, char **argv)
     test_interface_tcp_ack_max();
     test_interface_tcp_grow_rtt();
     test_interface_tcp_window_max();
+    test_interface_tcp_window_max_rejects_bad_values();
     test_interface_priority();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6

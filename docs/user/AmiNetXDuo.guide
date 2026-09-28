@@ -489,7 +489,7 @@
              the interface is next attached.
 
   @{b}TCPWINDOWMAX@{ub}
-             The largest TCP receive window, in bytes, 8192 to
+             The largest TCP receive window, in bytes, 65536 to
              1048576, that a socket on this interface settles at once
              its handshake is done. It lowers the window chosen from
              the packet pool, TCPGROWRTT and RXBUFFER, and never

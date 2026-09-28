@@ -56,9 +56,10 @@ extern "C" {
 #define AMI_CFG_WRITEREQUESTS_MAX   AMINETXDUO_TX_SLOTS
 #define AMI_CFG_TCP_ACK_MAX         65535UL
 #define AMI_CFG_TCP_GROW_RTT_MAX    65535UL
-/* TCPWINDOWMAX bounds: BSD_TCP_WINDOW, the smallest window a socket opens
-   with, to BSD_TCP_WINDOW_MAX, the largest it grows to (bsdsocket_window.h). */
-#define AMI_CFG_TCP_WINDOW_MAX_MIN  8192UL
+/* TCPWINDOWMAX bounds.  The SYN advertised min(window, 65535) unscaled; a
+   cap under it would retract that edge.  65536 >> s << s >= 65535 for every
+   scale up to 5, and 5 is what 1 MiB (BSD_TCP_WINDOW_MAX) negotiates. */
+#define AMI_CFG_TCP_WINDOW_MAX_MIN  65536UL
 #define AMI_CFG_TCP_WINDOW_MAX_MAX  1048576UL
 #define AMI_CFG_PATH_LEN            128
 
