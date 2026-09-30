@@ -8,6 +8,7 @@
 
 #include "c68k_aes.h"
 #include "c68k_variant.h"
+#include "aminetxduo/asm_abi.h"
 
 
 /* ------------------------------------------------------------- variant --- */
@@ -726,10 +727,10 @@ UINT    r;
  * switch and not two code paths.
  */
 #ifdef C68K_ASM_AES
-extern VOID c68k_aes_core_enc_t4_asm(const ULONG *rk, UINT nr, ULONG *st);
-extern VOID c68k_aes_core_dec_t4_asm(const ULONG *rk, UINT nr, ULONG *st);
-extern VOID c68k_aes_core_enc_t1_asm(const ULONG *rk, UINT nr, ULONG *st);
-extern VOID c68k_aes_core_dec_t1_asm(const ULONG *rk, UINT nr, ULONG *st);
+extern AMIGA_ASM_ARGS VOID c68k_aes_core_enc_t4_asm(const ULONG *rk, UINT nr, ULONG *st);
+extern AMIGA_ASM_ARGS VOID c68k_aes_core_dec_t4_asm(const ULONG *rk, UINT nr, ULONG *st);
+extern AMIGA_ASM_ARGS VOID c68k_aes_core_enc_t1_asm(const ULONG *rk, UINT nr, ULONG *st);
+extern AMIGA_ASM_ARGS VOID c68k_aes_core_dec_t1_asm(const ULONG *rk, UINT nr, ULONG *st);
 #endif
 
 static VOID c68k_aes_enc_dispatch(const ULONG *rk, UINT nr, ULONG *st)

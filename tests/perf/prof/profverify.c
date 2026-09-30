@@ -12,9 +12,13 @@
 
 #include <string.h>
 
-extern VOID pv_spin_a(ULONG reps);
-extern VOID pv_spin_b(ULONG reps);
-extern VOID pv_spin_c(ULONG reps);
+/* profverify.S, and it reads its argument at 4(sp).  See
+   aminetxduo/asm_abi.h. */
+#include "aminetxduo/asm_abi.h"
+
+extern AMIGA_ASM_ARGS VOID pv_spin_a(ULONG reps);
+extern AMIGA_ASM_ARGS VOID pv_spin_b(ULONG reps);
+extern AMIGA_ASM_ARGS VOID pv_spin_c(ULONG reps);
 extern UBYTE pv_spin_a_end, pv_spin_b_end, pv_spin_c_end;
 
 #define PV_RATE         1000UL

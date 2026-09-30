@@ -550,8 +550,15 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 
     # src/config/test/shim carries the minimal <exec/types.h> that src/tls/tls.h
     # needs; tests/tls carries the sample certificate and its private key.
+    #
+    # include/ is here for src/crypto68k/crypto68k.h, which includes
+    # <aminetxduo/asm_abi.h> for the AMIGA_ASM_ARGS pin on the c68k_* names.
+    # That pin is what makes an assembly routine read its arguments where the
+    # callers leave them, so the header carries it in every build, this one
+    # included, whether or not that build has the assembly.
     set(_fuzz_tls_crypto_inc
         ${_fuzz_tls_inc}
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim"
         "${CMAKE_SOURCE_DIR}/src/tls"
         "${CMAKE_SOURCE_DIR}/src/crypto68k"

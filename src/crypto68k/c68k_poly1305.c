@@ -16,6 +16,7 @@
 #include "c68k_variant.h"
 
 #include "c68k_poly1305.h"
+#include "aminetxduo/asm_abi.h"
 
 
 /* A little-endian longword at an arbitrary address.
@@ -101,7 +102,7 @@ ULONG   t0, t1, t2, t3;
  * terms that fall off the top of the 130-bit accumulator, folded into the
  * multiplier instead of into a separate pass.
  */
-VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m,
+AMIGA_ASM_ARGS VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m,
                             ULONG blocks, ULONG hibit)
 {
 
@@ -187,7 +188,7 @@ ULONG64 d0, d1, d2, d3, d4;
  * so do the 68000 and the 68060.
  */
 #ifdef C68K_ASM_POLY1305
-extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
+extern AMIGA_ASM_ARGS VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
                                      ULONG blocks, ULONG hibit);
 /*
  * One binary for every CPU takes the vector instead: the inner loop is a

@@ -16,17 +16,17 @@
 
 #include <exec/execbase.h>
 
-extern c68k_limb c68k_addmul_1_mulu(c68k_limb *r, const c68k_limb *b, UINT n,
+extern AMIGA_ASM_ARGS c68k_limb c68k_addmul_1_mulu(c68k_limb *r, const c68k_limb *b, UINT n,
                                     c68k_limb a);
-extern c68k_limb c68k_addmul_1_mulw(c68k_limb *r, const c68k_limb *b, UINT n,
+extern AMIGA_ASM_ARGS c68k_limb c68k_addmul_1_mulw(c68k_limb *r, const c68k_limb *b, UINT n,
                                     c68k_limb a);
 
-extern c68k_limb c68k_div_2by1_mulu(c68k_limb hi, c68k_limb lo, c68k_limb d,
+extern AMIGA_ASM_ARGS c68k_limb c68k_div_2by1_mulu(c68k_limb hi, c68k_limb lo, c68k_limb d,
                                     c68k_limb *rem);
-extern c68k_limb c68k_div_2by1_c(c68k_limb hi, c68k_limb lo, c68k_limb d,
+extern AMIGA_ASM_ARGS c68k_limb c68k_div_2by1_c(c68k_limb hi, c68k_limb lo, c68k_limb d,
                                  c68k_limb *rem);
 
-extern VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
+extern AMIGA_ASM_ARGS VOID c68k_poly1305_blocks_asm(C68K_POLY1305 *ctx, const UCHAR *m,
                                      ULONG blocks, ULONG hibit);
 
 /* The four X25519 field routines are set where their portable twins are,
@@ -42,11 +42,11 @@ extern VOID c68k_p256_cpu_select(UINT wide);
  * linked by programs that never select -- a bench, a test, a Shell command --
  * and the answer they get has to be correct.
  */
-c68k_limb (*c68k_vec_addmul_1)(c68k_limb *, const c68k_limb *, UINT,
+AMIGA_ASM_ARGS c68k_limb (*c68k_vec_addmul_1)(c68k_limb *, const c68k_limb *, UINT,
                                c68k_limb) = c68k_addmul_1_c;
-c68k_limb (*c68k_vec_div_2by1)(c68k_limb, c68k_limb, c68k_limb,
+AMIGA_ASM_ARGS c68k_limb (*c68k_vec_div_2by1)(c68k_limb, c68k_limb, c68k_limb,
                                c68k_limb *) = c68k_div_2by1_c;
-VOID (*c68k_vec_poly1305_blocks)(C68K_POLY1305 *, const UCHAR *, ULONG,
+AMIGA_ASM_ARGS VOID (*c68k_vec_poly1305_blocks)(C68K_POLY1305 *, const UCHAR *, ULONG,
                                  ULONG) = c68k_poly1305_blocks_c;
 
 static UINT c68k_selected = C68K_ASM_NONE;

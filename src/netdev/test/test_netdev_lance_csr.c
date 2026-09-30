@@ -29,10 +29,11 @@
 
 /* No LANCE_CSR_GET/PUT here: that is the entire point of this file. */
 #include "lance.c"
+#include "aminetxduo/asm_abi.h"
 
 /* lance_tx() links against it; nothing here calls it.  Same stub as
    test_netdev_lance.c keeps, and honest for a later transmit fixture. */
-VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
+AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
 {
     volatile ULONG       *dst = (volatile ULONG *)to;
     const volatile ULONG *src = (const volatile ULONG *)from;

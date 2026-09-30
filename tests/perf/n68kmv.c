@@ -22,31 +22,32 @@
 #include <stdarg.h>
 
 #include "aminetxduo/compat.h"
+#include "aminetxduo/asm_abi.h"
 
 /* Declared here rather than from net68k.h, which reaches nx_api.h and its own
    typedef of VOID. */
-extern ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
-extern VOID  n68k_copy_bytes(UBYTE *to, const UBYTE *from, ULONG len);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS VOID  n68k_copy_bytes(UBYTE *to, const UBYTE *from, ULONG len);
 extern VOID  n68k_cpu_select(ULONG attnflags);
 
-extern ULONG n68k_sum_longwords_mv0(const ULONG *p, ULONG count);
-extern ULONG n68k_sum_longwords_mv20(const ULONG *p, ULONG count);
-extern ULONG n68k_sum_longwords_mv40(const ULONG *p, ULONG count);
-extern ULONG n68k_sum_longwords_mv60(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv0(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv20(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv40(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv60(const ULONG *p, ULONG count);
 
-extern ULONG n68k_copy_sum_longwords_mv0(ULONG *to, const ULONG *from,
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv0(ULONG *to, const ULONG *from,
                                          ULONG count);
-extern ULONG n68k_copy_sum_longwords_mv20(ULONG *to, const ULONG *from,
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv20(ULONG *to, const ULONG *from,
                                           ULONG count);
-extern ULONG n68k_copy_sum_longwords_mv40(ULONG *to, const ULONG *from,
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv40(ULONG *to, const ULONG *from,
                                           ULONG count);
-extern ULONG n68k_copy_sum_longwords_mv60(ULONG *to, const ULONG *from,
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv60(ULONG *to, const ULONG *from,
                                           ULONG count);
 
-extern VOID n68k_copy_bytes_mv0(UBYTE *to, const UBYTE *from, ULONG len);
-extern VOID n68k_copy_bytes_mv20(UBYTE *to, const UBYTE *from, ULONG len);
-extern VOID n68k_copy_bytes_mv40(UBYTE *to, const UBYTE *from, ULONG len);
-extern VOID n68k_copy_bytes_mv60(UBYTE *to, const UBYTE *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv0(UBYTE *to, const UBYTE *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv20(UBYTE *to, const UBYTE *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv40(UBYTE *to, const UBYTE *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv60(UBYTE *to, const UBYTE *from, ULONG len);
 
 extern VOID (*n68k_vec_copy)(UBYTE *, const UBYTE *, ULONG);
 
@@ -179,7 +180,7 @@ static ULONG copy_sum_reference(ULONG *to, const ULONG *from, ULONG count)
 
 /* ---------------------------------------------------------- the checks --- */
 
-static VOID check_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG))
+static VOID check_sum(const char *name, AMIGA_ASM_ARGS ULONG (*fn)(const ULONG *, ULONG))
 {
     ULONG n;
 
@@ -200,7 +201,7 @@ static VOID check_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG))
 }
 
 static VOID check_copy_sum(const char *name,
-                           ULONG (*fn)(ULONG *, const ULONG *, ULONG))
+                           AMIGA_ASM_ARGS ULONG (*fn)(ULONG *, const ULONG *, ULONG))
 {
     ULONG n;
 
@@ -242,7 +243,7 @@ static VOID check_copy_sum(const char *name,
 /* `all_offsets` must be false on a 68000: the unguarded forms read a longword
    from an odd address, which is an address error there. */
 static VOID check_copy(const char *name,
-                       VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
+                       AMIGA_ASM_ARGS VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        int all_offsets)
 {
     static const ULONG extra[] = { 96, 127, 128, 129, 160, 255, 256, 300 };
@@ -295,7 +296,12 @@ static VOID check_copy(const char *name,
 
 #define ROUNDS  3
 
-static VOID bench_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG),
+/* The pointer TYPE carries the pin as well as the declarations above: an
+   indirect call is compiled from the type it is made through, and every one
+   of these targets is n68k_checksum.S or n68k_copy.S, which read the stack.
+   Without it the bench would call them with the arguments in d0/d1/d2 and
+   time whatever they made of the registers -- see aminetxduo/asm_abi.h. */
+static VOID bench_sum(const char *name, AMIGA_ASM_ARGS ULONG (*fn)(const ULONG *, ULONG),
                       ULONG words, ULONG reps)
 {
     ULONG best = 0xFFFFFFFFUL;
@@ -319,7 +325,7 @@ static VOID bench_sum(const char *name, ULONG (*fn)(const ULONG *, ULONG),
 }
 
 static VOID bench_copy(const char *name,
-                       VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
+                       AMIGA_ASM_ARGS VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        ULONG len, ULONG reps)
 {
     ULONG best = 0xFFFFFFFFUL;

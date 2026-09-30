@@ -347,6 +347,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc" # nx_port.h
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/net68k")
 
     target_compile_definitions(test_net68k_checksum PRIVATE
@@ -374,6 +375,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/include"
         "${CMAKE_SOURCE_DIR}/src/net68k")
 
     # FEATURE_NX_IPV6 is what selects the 128-bit pseudo header in the checksum

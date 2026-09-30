@@ -13,7 +13,8 @@
       "toolchainFile": "${sourceDir}/cmake/toolchain-m68k-amigaos.cmake",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PROJECT_INCLUDE": "${sourceDir}/cmake/ci-warnings.cmake"
       }
     },
     {

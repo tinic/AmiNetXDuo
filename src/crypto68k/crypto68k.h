@@ -13,9 +13,25 @@
 
 #include "nx_crypto_huge_number.h"
 
+#include "aminetxduo/asm_abi.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*
+ * AMIGA_ASM_ARGS on a declaration below means the definition is in
+ * the c68k_*.S files in src/crypto68k -- c68k_prim.S, c68k_dispatch.S,
+ * c68k_25519.S, c68k_p256.S, c68k_prim_mulw.S -- and reads its arguments
+ * from the stack.  See aminetxduo/asm_abi.h for what the pin is.
+ *
+ * A few of these names are assembly in one build and portable C in another
+ * (c68k_addmul_1, c68k_add, c68k_add_carry, c68k_sub, c68k_cmp,
+ * c68k_div_2by1 all have a C body under the per-file gates in
+ * c68k_variant.h).  The pin is on the name rather than on the definition, so
+ * those C bodies take the stack convention too -- they are the fallback for a
+ * configuration that has no assembly, so it costs nothing that ships.
+ */
 
 /*
  * Limb type.  The assembly is written for EXACTLY this: 32-bit limbs,
@@ -35,7 +51,8 @@ typedef HN_UBASE    c68k_limb;
  * the top limb (a FULL LIMB, not a single bit).  The 64-bit intermediate
  * cannot overflow: (2^32-1)^2 + 2*(2^32-1) = 2^64-1 exactly.
  */
-c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
+AMIGA_ASM_ARGS c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n,
+                                   c68k_limb a);
 
 /* The portable C version, always present under its own name whichever build
    option is in force, so the benchmark can time both in one run. */
@@ -45,16 +62,16 @@ c68k_limb c68k_addmul_1_c(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a)
  * dst[j] = src[j] + carry, for j in 0..n-1.  Returns the final carry (0 or 1
  * after the first limb).  dst can alias src.
  */
-c68k_limb c68k_add_carry(c68k_limb *dst, const c68k_limb *src, UINT n,
-                         c68k_limb carry);
+AMIGA_ASM_ARGS c68k_limb c68k_add_carry(c68k_limb *dst, const c68k_limb *src, UINT n,
+                                        c68k_limb carry);
 
 /* r[0..n-1] += b[0..n-1].  Returns the carry out (0 or 1). */
-c68k_limb c68k_add(c68k_limb *r, const c68k_limb *b, UINT n);
+AMIGA_ASM_ARGS c68k_limb c68k_add(c68k_limb *r, const c68k_limb *b, UINT n);
 
 /*
  * r[0..n-1] -= b[0..n-1].  Returns the borrow out (0 or 1).
  */
-c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n);
+AMIGA_ASM_ARGS c68k_limb c68k_sub(c68k_limb *r, const c68k_limb *b, UINT n);
 
 /* r[0..n-1] -= a * b[0..n-1].  Returns the borrow out (a full limb). */
 c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
@@ -65,8 +82,8 @@ c68k_limb c68k_submul_1(c68k_limb *r, const c68k_limb *b, UINT n, c68k_limb a);
  * DIVU.L 64/32 is unimplemented on a 68060, so AMINETXDUO_CRYPTO68K_ASM must
  * never be enabled for a 68060 build.
  */
-c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
-                        c68k_limb *rem);
+AMIGA_ASM_ARGS c68k_limb c68k_div_2by1(c68k_limb hi, c68k_limb lo, c68k_limb d,
+                                       c68k_limb *rem);
 
 /*
  * rem = u mod m by Knuth's algorithm D over 32-bit limbs.  m[m_len-1] must be
@@ -91,7 +108,7 @@ VOID c68k_mont_setup_rr(c68k_limb *rr, const c68k_limb *m, UINT m_len,
                         c68k_limb *setup);
 
 /* Unsigned compare of two n-limb values.  -1, 0 or 1. */
-INT c68k_cmp(const c68k_limb *a, const c68k_limb *b, UINT n);
+AMIGA_ASM_ARGS INT c68k_cmp(const c68k_limb *a, const c68k_limb *b, UINT n);
 
 /*
  * Which limb primitives were compiled in: 0 portable C, 1 c68k_prim.S (68020),
@@ -118,10 +135,14 @@ UINT c68k_cpu_class(VOID);
    c68k_prim.S is 68000 code called by name everywhere. */
 #ifdef C68K_MV
 
-extern c68k_limb (*c68k_vec_addmul_1)(c68k_limb *, const c68k_limb *, UINT,
-                                      c68k_limb);
-extern c68k_limb (*c68k_vec_div_2by1)(c68k_limb, c68k_limb, c68k_limb,
-                                      c68k_limb *);
+/* c68k_dispatch.S jumps through these two, so the pointer TYPE carries the
+   pin as well: an indirect call is compiled from the type it is made
+   through.  The targets are c68k_prim.S / c68k_prim_mulw.S bodies. */
+extern AMIGA_ASM_ARGS c68k_limb (*c68k_vec_addmul_1)(c68k_limb *,
+                                                     const c68k_limb *, UINT,
+                                                     c68k_limb);
+extern AMIGA_ASM_ARGS c68k_limb (*c68k_vec_div_2by1)(c68k_limb, c68k_limb,
+                                                     c68k_limb, c68k_limb *);
 
 #define C68K_ADDMUL_1   (*c68k_vec_addmul_1)
 #define C68K_DIV_2BY1   (*c68k_vec_div_2by1)

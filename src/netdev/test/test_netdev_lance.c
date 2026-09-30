@@ -37,6 +37,7 @@ static VOID  mock_csr_put(NetdevNic *nic, UWORD csr, UWORD value);
 #define LANCE_RDP_PUT(nic, val)       mock_csr_put((nic), LE_CSR0, (val))
 
 #include "lance.c"
+#include "aminetxduo/asm_abi.h"
 
 static union
 {
@@ -62,7 +63,7 @@ static VOID expect_u32(const char *what, ULONG got, ULONG want)
 
 /* The transmit copy is linked into lance.c but these interrupt tests never
    call it.  Keep the definition honest for any later transmit fixture. */
-VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
+AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
 {
     volatile ULONG       *dst = (volatile ULONG *)to;
     const volatile ULONG *src = (const volatile ULONG *)from;

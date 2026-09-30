@@ -29,9 +29,26 @@
 #include <stdio.h>
 #include <string.h>
 
-extern VOID spin_a(ULONG reps);
-extern VOID spin_b(ULONG reps);
-extern VOID spin_c(ULONG reps);
+/*
+ * The three kernels are tools/profiler/profspin.S and read their argument at
+ * 4(sp).  This is built with the stack's own flags, -mregparm=3 among them, so
+ * without a pin here `reps` would go to d0 and the kernel would count whatever
+ * the stack happened to hold.
+ *
+ * The attribute is spelled out rather than taken from
+ * <aminetxduo/asm_abi.h>: this directory is self-contained on purpose (see
+ * CMakeLists.txt) and is meant to be lifted out into its own repository, so it
+ * does not grow an include path into the stack for five lines.
+ */
+#if defined(__m68k__) && (defined(__GNUC__) || defined(__clang__))
+#  define SPIN_ASM_ARGS __attribute__((__stkparm__))
+#else
+#  define SPIN_ASM_ARGS
+#endif
+
+extern SPIN_ASM_ARGS VOID spin_a(ULONG reps);
+extern SPIN_ASM_ARGS VOID spin_b(ULONG reps);
+extern SPIN_ASM_ARGS VOID spin_c(ULONG reps);
 extern UBYTE spin_a_end, spin_b_end, spin_c_end;
 
 #define TEMPLATE "RANGES/K,SCALE/K/N,AUDIO/K/N"

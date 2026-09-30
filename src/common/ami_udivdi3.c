@@ -64,6 +64,14 @@ typedef long                s32;
 static int ami_rt_020;
 static int ami_rt_mulul;
 
+/*
+ * The one thing called here from assembly.  src/tools/tool_startup.S .Lrtgo
+ * loads the two flags into d0/d1 and pushes them, and this follows the build's
+ * convention rather than being pinned to one -- so it needs no header, which
+ * is what keeps this file as free of them as it looks.  The comment at that
+ * call site and the argument-passing note in cmake/toolchain-m68k-amigaos.cmake
+ * are the other two thirds of it.
+ */
 void ami_rt_cpu_select(int have_68020, int have_mulul);
 void ami_rt_cpu_select(int have_68020, int have_mulul)
 {

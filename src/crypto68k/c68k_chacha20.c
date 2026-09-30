@@ -14,6 +14,7 @@
 
 #include "c68k_chacha20.h"
 #include "c68k_variant.h"
+#include "aminetxduo/asm_abi.h"
 
 
 /* "expand 32-byte k", the four constant words, little-endian. */
@@ -108,7 +109,7 @@ UINT    i;
  * AMINETXDUO_CRYPTO68K_ASM=OFF takes the C, and so do the 68000 and the 68060.
  */
 #ifdef C68K_ASM_CHACHA20
-extern VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out);
+extern AMIGA_ASM_ARGS VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out);
 #define C68K_CHACHA20_CORE  c68k_chacha20_core_asm
 #else
 #define C68K_CHACHA20_CORE  c68k_chacha20_core_c
@@ -177,7 +178,7 @@ ULONG   k;
 /* The same seven instructions a word, hand-written: see c68k_chacha20.S for
    what -Os made of the loop above.  Same #ifndef/#ifdef structure as the limb
    primitives in c68k_prim.c. */
-extern VOID c68k_chacha20_xor_block_asm(const ULONG *ks, const UCHAR *in,
+extern AMIGA_ASM_ARGS VOID c68k_chacha20_xor_block_asm(const ULONG *ks, const UCHAR *in,
                                         UCHAR *out);
 #define c68k_chacha20_xor_block  c68k_chacha20_xor_block_asm
 #endif /* C68K_ASM */

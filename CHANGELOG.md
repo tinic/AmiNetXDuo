@@ -9,6 +9,48 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Every figure below is from a tree with nothing uncommitted, and that matters
+  here more than usual: the build stamps `-dirty` into the version hash inside
+  every image whenever `git status` is not empty, and it lands unevenly -- 8
+  bytes on the rp0 arm against 4 on the rp3 arm in the default drawer, so a
+  dirty tree moves the delta. Commit or stash before measuring a size here.
+- `-mregparm=3` is what every drawer builds with, so our own calls pass their
+  arguments in registers. `bsdsocket.library` 353,404 -> 329,464 loaded bytes,
+  370,880 -> 346,608 file, 343,420 -> 319,480 of code; `anxnet.device` 43,584 ->
+  40,144 loaded, 45,704 -> 42,228 file; the resident pair -27,380.
+- Default drawer, 137 images: 7,917,004 -> 7,707,384 loaded (-209,620, -2.65%),
+  6,772,936 -> 6,560,528 file (-212,408, -3.14%). Minimal -93,460 loaded, micro
+  -87,364. Loaded is CODE + DATA + BSS, what `LoadSeg` needs room for. Measured
+  against the same tree built with `-DAMINETXDUO_REGPARM=0`.
+- Five test images grew 4-20 bytes: `tests/perf/chipscreen` +20,
+  `tests/perf/n68kmv` +16, `tests/tools/AamProbe`, `ResolveBreak` and `PtrProbe`
+  +4 each. No shipping image grew, and no image is in one arm only.
+- No LVO changed: every one is entered through a register the NDK headers pin.
+  207 foreign direct calls in `bsdsocket.library` at regparm 0, 201 at regparm 3,
+  and the only sites pushing in neither arm are libgcc's internal `jsr`.
+- The boundaries the compiler does not build keep the stack convention, pinned
+  where declared: `main()` (`crt0.o` and `src/tools/tool_startup.S` push `argv`
+  then `argc`; `include/aminetxduo/asm_main.h`), the assembly in `src/net68k` and
+  `src/crypto68k` reading `4(sp)`, `8(sp)`, `12(sp)` (`asm_abi.h`), `libc.a`,
+  `amiga.lib`, and the OS entry points whose registers the headers pin by name.
+- Gate: `-Wmissing-prototypes` with `-Werror=implicit-function-declaration`, and
+  an `#error` in `include/aminetxduo/asm_main.h` unless the m68k build is C23 or
+  later -- where `()` means `(void)` and an unprototyped `f(a, b)` is a hard
+  error. `-Wstrict-prototypes` was removed: it cannot fire on the m68k arm, and
+  the three host sites it does fire on are the NDK's and the vendored tree's.
+- `src/net68k/n68k_memcpy_hook.c` includes `<string.h>`, so its stack convention
+  is stated by a declaration and not left to GCC's recognition of the name
+  `memcpy`. Two clean trees differing only in that include leave both shipping
+  images byte-identical but for the 7 hash bytes the version string carries.
+- `tests/fuzz/CMakeLists.txt` puts `include/` on `fuzz_tls_crypto`'s path for
+  `src/crypto68k/crypto68k.h`'s `<aminetxduo/asm_abi.h>`. That target exists
+  only where `sizeof(void*) == 4`, so CI was the first to build it: it found the
+  gap in host32 and sanitize32, not on any host or cross arm.
+- Host tier: 434 targets, 0 warnings, ctest 493/493. 32-bit host tier: 24/24 and
+  within its duration budget. Emulator tier: green on both arms.
+- Build consequence: an image must come from one configuration. A `build/`
+  directory made before this change needs its objects rebuilt, not relinked.
+
 - `CheckNetConfig` names the file a default-gateway finding was read from even
   when that file is an interface file. `load_gateway()` falls back to a
   `GATEWAY=` in the first interface file when neither

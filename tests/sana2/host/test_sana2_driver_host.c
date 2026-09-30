@@ -10,6 +10,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "aminetxduo/asm_abi.h"
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -215,13 +216,13 @@ VOID ami_log(int level, const char *fmt, ...)
     (VOID)fmt;
 }
 
-VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
+AMIGA_ASM_ARGS VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
     if (len != 0)
         memcpy(to, from, (size_t)len);
 }
 
-ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
 {
     ULONG acc = 0;
 

@@ -19,6 +19,10 @@
 
 #include <exec/types.h>
 
+/* The stubs below carry AMIGA_ASM_ARGS, so the pin has to be visible
+   before them, not after the driver it is included from. */
+#include "aminetxduo/asm_abi.h"
+
 #include "netdev_nic.h"
 #include "netdev_clock.h"
 
@@ -44,7 +48,7 @@ static ULONG bulk_calls;
 static ULONG bulk_misaligned;       /* sources not 0 mod 4 */
 static ULONG bulk_longs;
 
-VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
+AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
 {
     bulk_calls++;
     bulk_longs += longs;
@@ -53,7 +57,7 @@ VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
     memcpy((void *)to, (const void *)from, longs << 2);
 }
 
-ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs)
+AMIGA_ASM_ARGS ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs)
 {
     const UBYTE *s = (const UBYTE *)from;
     ULONG sum = 0;

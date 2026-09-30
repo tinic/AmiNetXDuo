@@ -274,6 +274,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_crypto68k PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"     # nx_crypto_port.h, first
         "${CMAKE_CURRENT_SOURCE_DIR}"               # c68k_vectors.h
+        "${CMAKE_SOURCE_DIR}/include"               # aminetxduo/asm_abi.h
         "${CMAKE_SOURCE_DIR}/src/crypto68k"
         "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
 
@@ -297,6 +298,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_include_directories(test_crypto68k_25519 PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"     # nx_crypto_port.h, first
+        "${CMAKE_SOURCE_DIR}/include"               # aminetxduo/asm_abi.h
         "${CMAKE_SOURCE_DIR}/src/crypto68k"
         "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
 

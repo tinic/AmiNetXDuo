@@ -20,38 +20,43 @@
 
 #include <exec/types.h>
 
+#include "aminetxduo/asm_abi.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/* Every one of these is n68k_iocopy.S, so every one takes AMIGA_ASM_ARGS --
+   see aminetxduo/asm_abi.h for what that is. */
+
 /* Memory to memory, or memory to a mapped card buffer.  Both sides advance. */
-VOID n68k_copy_longs(volatile void *to, const volatile void *from,
-                     ULONG longs);
+AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from,
+                                    ULONG longs);
 
 /* A data port that does not advance a host address: `port` is one address. */
-VOID n68k_port_in(void *to, const volatile void *port, ULONG blocks);
-VOID n68k_port_out(volatile void *port, const void *from, ULONG blocks);
+AMIGA_ASM_ARGS VOID n68k_port_in(void *to, const volatile void *port, ULONG blocks);
+AMIGA_ASM_ARGS VOID n68k_port_out(volatile void *port, const void *from, ULONG blocks);
 
 /* The same, for a 16-bit port that is one address and not mirrored: the reads
    stay word-wide, the host side moves a block at a time. */
-VOID n68k_port_in_w(void *to, const volatile void *port, ULONG blocks);
+AMIGA_ASM_ARGS VOID n68k_port_in_w(void *to, const volatile void *port, ULONG blocks);
 
 /* Drain + longword ones-complement sum in one pass; the sum has exactly
    n68k_copy_sum_longwords() semantics so the verifier cannot tell who
    produced it.  Destination must be even. */
-ULONG n68k_port_in_w_sum(void *to, const volatile void *port, ULONG bytes);
-VOID n68k_port_out_w(volatile void *port, const void *from, ULONG blocks);
+AMIGA_ASM_ARGS ULONG n68k_port_in_w_sum(void *to, const volatile void *port, ULONG bytes);
+AMIGA_ASM_ARGS VOID n68k_port_out_w(volatile void *port, const void *from, ULONG blocks);
 
 /* The same fusion for a 32-bit mirrored data window.  `longs` is a count of
    longwords and there is no tail: the caller takes the 1..3 bytes that do not
    fill one off the 16-bit port, which is what the plain long drain does too.
    Destination must be longword aligned. */
-ULONG n68k_port_in_l_sum(void *to, const volatile void *port, ULONG longs);
+AMIGA_ASM_ARGS ULONG n68k_port_in_l_sum(void *to, const volatile void *port, ULONG longs);
 
 /* Memory to memory with the sum, for a mapped buffer that advances (the
    ZZ9000's receive window).  The SOURCE must be longword aligned: that is
    the side on the slow bus.  The destination may be 2 mod 4. */
-ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs);
+AMIGA_ASM_ARGS ULONG n68k_copy_longs_sum(void *to, const volatile void *from, ULONG longs);
 
 #ifdef __cplusplus
 }

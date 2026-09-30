@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "aminetxduo/asm_abi.h"
 
 
 static unsigned long h_checks;
@@ -27,7 +28,7 @@ static void h_check(int ok, const char *what)
 
 /* The real one is src/net68k/n68k_copy.S. Everything below is about which
    bytes are asked for, not how they are moved. */
-VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
+AMIGA_ASM_ARGS VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
     h_copy_bytes_calls++;
     if (len != 0)
@@ -37,7 +38,7 @@ VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 /* The contract from src/net68k/n68k_checksum.c, not a memcpy: the transmit
    checksum is only correct if this is, and a stub that copied without summing
    would make every checksum assertion in this file pass for free. */
-ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
 {
     ULONG acc = 0;
 

@@ -345,7 +345,103 @@ endif()
 
 string(REPLACE ";" " " AMIGA_ARCH_FLAGS_STR "${AMIGA_ARCH_FLAGS}")
 
-set(CMAKE_C_FLAGS_INIT "${AMIGA_ARCH_FLAGS_STR} -fomit-frame-pointer -fno-strict-aliasing")
+# ------------------------------------------------------- argument passing --
+#
+# Arguments used to travel on the stack: a push per argument at every call site
+# and a read at the callee, six to twelve bytes each, thousands of times.
+#
+# -mregparm=N is PER CLASS, not one list: the first N integer arguments go to
+# d0..d(N-1) and the first N pointer arguments to a0..a(N-1), so N=3 is six
+# slots, and a class that runs out spills into what the other class left.
+# Measured with a probe calling ext(a,b,c,d,e,f): six ints give d0,d1,d2,a0,a1,a2,
+# six pointers give a0,a1,a2,d0,d1,d2, (int,char*,int,char*) gives d0,a0,d1,a1.
+# "d0/d1/d2" is the wrong shorthand -- a pointer can arrive in d0 and an int in
+# a0, and a callee that assumes otherwise returns a wrong number, not a crash.
+# That is why every such callee is pinned rather than taught the register set.
+#
+# Measured against the same tree built with AMINETXDUO_REGPARM=0, the flag the
+# only difference (m68k-amigaos-gcc 16.2.0b, -flto), in LOADED bytes -- CODE +
+# DATA + BSS, what LoadSeg has to find room for -- and in file bytes.  The two
+# images a machine keeps resident, default drawer:
+#
+#   bsdsocket.library    353,412 -> 329,468 loaded    370,888 -> 346,612 file
+#   anxnet.device         43,592 ->  40,148 loaded     45,712 ->  42,232 file
+#
+# so the pair costs 27,388 bytes less loaded (23,944 + 3,444).  bsdsocket.library
+# loses 23,944 loaded bytes in default (343,428 -> 319,484 of code, DATA and BSS
+# unchanged), 15,888 in minimal (231,140 -> 215,252) and 13,356 in micro
+# (198,248 -> 184,892).  Over every image BOTH arms link: 137 images 7,906,460
+# -> 7,696,820 loaded (-209,640, -2.65%), 123 minimal -93,460 (-2.12%), 122
+# micro -87,356 (-2.06%).  Four test images grew, by 4 to 16 bytes
+# (tests/perf/n68kmv +16, tests/perf/chipscreen +16, tests/tools/PtrProbe +4,
+# ResolveBreak +4); nothing that ships did, and no image is present in one arm
+# only.
+#
+# SAFE ONLY WHERE THE CONVENTION IS PINNED at both ends, which it is at every
+# boundary this project has but one:
+#
+#   - library and device entry points (bsdsocket_vectors.h, library.c, the
+#     netdev entries) pin with `__asm("d0")` / `__asm("a6")`, which GCC honours
+#     whatever -mregparm says;
+#   - user-supplied hooks (loghook.c, errno.c, netmonitor.c) pin a0/a1/a2, so a
+#     caller compiled the ordinary way is still called correctly;
+#   - the hand-written routines in src/net68k and src/crypto68k read the stack,
+#     and every C declaration of one carries AMIGA_ASM_ARGS
+#     (__attribute__((__stkparm__))); see include/aminetxduo/asm_abi.h.
+#
+# The one exception is ami_rt_cpu_select(), deliberately: it follows whatever
+# convention the build uses so that src/common/ami_udivdi3.c and its callers
+# stay header-free.  Safe because its one non-C caller covers both at once --
+# tool_startup.S .Lrtgo loads the flags into d0/d1 AND pushes the same
+# registers.  It is the only such boundary.
+#
+# main() IS THE ONE THAT GOT AWAY, and -include asm_main.h below is its pin.
+# Nothing in this tree calls it: crt0.o and tool_startup.S both push argv then
+# argc and `jsr _main`, neither is ours to edit or compiled with these flags, so
+# a C main() under -mregparm=3 reads argc out of d0 instead.  Measured on the
+# first build that carried the option: iperf's _main at 0x207e was `tst.l d0`;
+# it is `tst.l 8(a5)` now, same address.  A command that reads argc == 0 thinks
+# Workbench launched it.  The pin is a force-included header rather than
+# -Dmain=... because the -D reaches /bin/sh with unquoted parentheses and the
+# configure dies before gcc runs; see the header for the rest.  It is gated on
+# the same option, so AMINETXDUO_REGPARM=0 reproduces the old convention
+# exactly, and 0 is a supported build.
+set(AMINETXDUO_REGPARM "3" CACHE STRING
+    "Integer arguments passed in registers d0-d2 (0 disables, as before)")
+set_property(CACHE AMINETXDUO_REGPARM PROPERTY STRINGS 0 1 2 3)
+
+if(AMINETXDUO_REGPARM GREATER 0)
+    get_filename_component(_amiga_top "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+    set(_amiga_regparm_flags
+        "-mregparm=${AMINETXDUO_REGPARM} -include ${_amiga_top}/include/aminetxduo/asm_main.h")
+else()
+    set(_amiga_regparm_flags "")
+endif()
+
+set(CMAKE_C_FLAGS_INIT
+    "${AMIGA_ARCH_FLAGS_STR} -fomit-frame-pointer -fno-strict-aliasing ${_amiga_regparm_flags}")
+
+# -mregparm and the pin travel in CMAKE_C_FLAGS, and CMAKE_C_FLAGS_INIT is
+# consulted only when the cache is created: -DAMINETXDUO_REGPARM=0 on an
+# existing directory would leave -mregparm=3 on the command line while the
+# cache said 0, so the tree would report one convention and build the other.
+# Unlike the CPU guard above, this one repairs rather than refuses.  Both flags
+# reach the preprocessor and the C compiler and nothing else -- the assembler
+# never sees them -- so rewriting CMAKE_C_FLAGS is the whole change.  The first
+# configure has no cache entry and is left to CMAKE_C_FLAGS_INIT, which is
+# already right.  Stripping the pin matters as much as stripping -mregparm:
+# removing one and leaving the other is the same lie with the halves swapped.
+if(DEFINED CACHE{CMAKE_C_FLAGS})
+    set(_amiga_cf "${CMAKE_C_FLAGS}")
+    string(REGEX REPLACE " ?-mregparm=[0-9]+" "" _amiga_cf "${_amiga_cf}")
+    string(REGEX REPLACE " ?-include +[^ ]+asm_main\\.h" "" _amiga_cf "${_amiga_cf}")
+    string(STRIP "${_amiga_cf} ${_amiga_regparm_flags}" _amiga_cf)
+    if(NOT _amiga_cf STREQUAL CMAKE_C_FLAGS)
+        message(STATUS "regparm ${AMINETXDUO_REGPARM}: CMAKE_C_FLAGS is now '${_amiga_cf}'")
+        set(CMAKE_C_FLAGS "${_amiga_cf}" CACHE STRING "C compiler flags" FORCE)
+    endif()
+endif()
+
 # -Os, everywhere, and stated rather than inherited.  CMake's Compiler/GNU
 # module APPENDS its own "-O3 -DNDEBUG" after CMAKE_C_FLAGS_RELEASE_INIT and
 # the last -O on the command line wins, so this line has to name the level it

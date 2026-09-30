@@ -11,6 +11,7 @@
 #define AMINETXDUO_C68K_POLY1305_H
 
 #include "nx_crypto.h"
+#include "aminetxduo/asm_abi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,7 +69,7 @@ VOID c68k_poly1305_finish(C68K_POLY1305 *ctx, UCHAR *tag);
 VOID c68k_poly1305_blocks(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
                           ULONG hibit);
 
-VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
+AMIGA_ASM_ARGS VOID c68k_poly1305_blocks_c(C68K_POLY1305 *ctx, const UCHAR *m, ULONG blocks,
                             ULONG hibit);
 
 /* NX_CRYPTO_TRUE when the block function of this build is the assembly.  In an

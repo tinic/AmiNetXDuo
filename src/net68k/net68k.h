@@ -15,6 +15,8 @@
 
 #include "nx_api.h"
 
+#include "aminetxduo/asm_abi.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,7 +42,7 @@ extern "C" {
  * below.  NetX Duo enters the loop only on a packet's prepend pointer, which
  * the pool keeps longword aligned.
  */
-ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
+AMIGA_ASM_ARGS ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 
 /*
  * The replacement for _nx_ip_checksum_compute().  Same signature, semantics
@@ -59,7 +61,7 @@ USHORT n68k_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
  * the measurements and the reason C cannot reach it.  Off that path it is a
  * plain loop, present so that a host build links.
  */
-VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
+AMIGA_ASM_ARGS VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 
 /*
  * Point the three routines above at the forms this machine wants.  The
@@ -86,9 +88,12 @@ VOID n68k_cpu_select(ULONG attnflags);
  */
 #ifdef N68K_MV_MULTI
 
-extern ULONG (*n68k_vec_sum)(const ULONG *, ULONG);
-extern ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG);
-extern VOID  (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG);
+/* The vectors point at assembly, so the pointer TYPE carries the pin as well:
+   an indirect call is compiled from the type it is made through, and a plain
+   prototype here would put the arguments in d0/d1/d2 at every one of them. */
+extern AMIGA_ASM_ARGS ULONG (*n68k_vec_sum)(const ULONG *, ULONG);
+extern AMIGA_ASM_ARGS ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG);
+extern AMIGA_ASM_ARGS VOID (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG);
 
 #define N68K_SUM_LONGWORDS      (*n68k_vec_sum)
 #define N68K_COPY_SUM_LONGWORDS (*n68k_vec_copy_sum)
@@ -113,7 +118,7 @@ extern VOID  (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG);
  * longword aligned.  The caller decides that, because it is a fact about the
  * frame in front of it.
  */
-ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count);
+AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count);
 
 #ifdef AMINETXDUO_RX_VERIFY
 

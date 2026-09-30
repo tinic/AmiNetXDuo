@@ -120,6 +120,13 @@ _____start:
 | Which form of src/common/ami_udivdi3.c's helpers this machine wants, and the
 | reference that pulls that archive ahead of libgcc's.  The 68060 traps the
 | 64-bit MULU.L/DIVU.L forms, so it gets the 68020 arm without them.
+|
+| The two flags are loaded into d0/d1 AND then pushed, and both are wanted.
+| ami_rt_cpu_select() is the one call into C in this tree that follows the
+| build's convention instead of pinning it (see the argument-passing note in
+| cmake/toolchain-m68k-amigaos.cmake), so under -mregparm=0 the callee reads
+| the stack and under -mregparm=3 it reads d0/d1.  Doing both is what makes
+| one file serve either build.  Do not "simplify" the push away.
         moveq   #0,d0
         moveq   #0,d1
         btst    #AFFB_68020,a6@(AttnFlags+1)

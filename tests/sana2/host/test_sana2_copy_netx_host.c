@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "aminetxduo/asm_abi.h"
 
 
 static unsigned long h_checks;
@@ -31,13 +32,13 @@ static void h_check(int ok, const char *what)
 
 /* src/net68k/n68k_copy.S and n68k_checksum.c on the target; the same
    contracts here, as in test_sana2_copy_host.c. */
-VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
+AMIGA_ASM_ARGS VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
     if (len != 0)
         memcpy(to, from, (size_t)len);
 }
 
-ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
+AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
 {
     ULONG acc = 0;
 

@@ -11,6 +11,7 @@
 
 #include "c68k_25519.h"
 #include "c68k_variant.h"
+#include "aminetxduo/asm_abi.h"
 
 /* <stdint.h>, not exec/types.h: this file must compile on the build host. */
 #include <stdint.h>
@@ -69,7 +70,7 @@ static void fe_fold(fe r, uint32_t c)
     }
 }
 
-static void fe_add_c(fe r, const fe a, const fe b)
+static AMIGA_ASM_ARGS void fe_add_c(fe r, const fe a, const fe b)
 {
     uint64_t t = 0;
     int      i;
@@ -82,7 +83,7 @@ static void fe_add_c(fe r, const fe a, const fe b)
     fe_fold(r, (uint32_t)t);
 }
 
-static void fe_sub_c(fe r, const fe a, const fe b)
+static AMIGA_ASM_ARGS void fe_sub_c(fe r, const fe a, const fe b)
 {
     uint64_t t = 0;
     int      i;
@@ -117,20 +118,20 @@ static void fe_sub_c(fe r, const fe a, const fe b)
  */
 #if defined(C68K_MV)
 
-extern void c68k_fe_add_asm_mulu(fe r, const fe a, const fe b);
-extern void c68k_fe_sub_asm_mulu(fe r, const fe a, const fe b);
-extern void c68k_fe_add_asm_mulw(fe r, const fe a, const fe b);
-extern void c68k_fe_sub_asm_mulw(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_add_asm_mulu(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_sub_asm_mulu(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_add_asm_mulw(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_sub_asm_mulw(fe r, const fe a, const fe b);
 
-void (*c68k_vec_fe_add)(fe, const fe, const fe) = fe_add_c;
-void (*c68k_vec_fe_sub)(fe, const fe, const fe) = fe_sub_c;
+AMIGA_ASM_ARGS void (*c68k_vec_fe_add)(fe, const fe, const fe) = fe_add_c;
+AMIGA_ASM_ARGS void (*c68k_vec_fe_sub)(fe, const fe, const fe) = fe_sub_c;
 
 #define fe_add  (*c68k_vec_fe_add)
 #define fe_sub  (*c68k_vec_fe_sub)
 
 #elif defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
-extern void c68k_fe_add_asm(fe r, const fe a, const fe b);
-extern void c68k_fe_sub_asm(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_add_asm(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_sub_asm(fe r, const fe a, const fe b);
 #define fe_add  c68k_fe_add_asm
 #define fe_sub  c68k_fe_sub_asm
 #else
@@ -164,7 +165,7 @@ void c68k_25519_fe_sub_ref(uint32_t r[8], const uint32_t a[8],
  * Operand scanning, 64 MULU.L, then the 2^256 = 38 fold.  The accumulator
  * cannot overflow: (2^32-1)^2 + 2*(2^32-1) is exactly 2^64-1.
  */
-static void fe_mul_c(fe r, const fe a, const fe b)
+static AMIGA_ASM_ARGS void fe_mul_c(fe r, const fe a, const fe b)
 {
     uint32_t t[16];
     uint64_t v;
@@ -202,12 +203,12 @@ static void fe_mul_c(fe r, const fe a, const fe b)
  * src/crypto68k/CMakeLists.txt refuses both at once.
  */
 #if defined(C68K_MV)
-extern void c68k_fe_mul_asm_mulu(fe r, const fe a, const fe b);
-extern void c68k_fe_mul_asm_mulw(fe r, const fe a, const fe b);
-void (*c68k_vec_fe_mul)(fe, const fe, const fe) = fe_mul_c;
+extern AMIGA_ASM_ARGS void c68k_fe_mul_asm_mulu(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_mul_asm_mulw(fe r, const fe a, const fe b);
+AMIGA_ASM_ARGS void (*c68k_vec_fe_mul)(fe, const fe, const fe) = fe_mul_c;
 #define fe_mul  (*c68k_vec_fe_mul)
 #elif defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
-extern void c68k_fe_mul_asm(fe r, const fe a, const fe b);
+extern AMIGA_ASM_ARGS void c68k_fe_mul_asm(fe r, const fe a, const fe b);
 #define fe_mul  c68k_fe_mul_asm
 #else
 #define fe_mul  fe_mul_c
@@ -240,7 +241,7 @@ int c68k_25519_fe_mul_is_asm(void)
  * diagonal squares added.  Checked against fe_mul(r,a,a) on random inputs --
  * published vectors cannot catch a transcription error here.
  */
-static void fe_sqr_c(fe r, const fe a)
+static AMIGA_ASM_ARGS void fe_sqr_c(fe r, const fe a)
 {
     uint32_t t[16];
     uint64_t v;
@@ -292,12 +293,12 @@ static void fe_sqr_c(fe r, const fe a)
 }
 
 #if defined(C68K_MV)
-extern void c68k_fe_sqr_asm_mulu(fe r, const fe a);
-extern void c68k_fe_sqr_asm_mulw(fe r, const fe a);
-void (*c68k_vec_fe_sqr)(fe, const fe) = fe_sqr_c;
+extern AMIGA_ASM_ARGS void c68k_fe_sqr_asm_mulu(fe r, const fe a);
+extern AMIGA_ASM_ARGS void c68k_fe_sqr_asm_mulw(fe r, const fe a);
+AMIGA_ASM_ARGS void (*c68k_vec_fe_sqr)(fe, const fe) = fe_sqr_c;
 #define fe_sqr  (*c68k_vec_fe_sqr)
 #elif defined(C68K_ASM_25519) || defined(C68K_ASM_MULW)
-extern void c68k_fe_sqr_asm(fe r, const fe a);
+extern AMIGA_ASM_ARGS void c68k_fe_sqr_asm(fe r, const fe a);
 #define fe_sqr  c68k_fe_sqr_asm
 #else
 #define fe_sqr  fe_sqr_c

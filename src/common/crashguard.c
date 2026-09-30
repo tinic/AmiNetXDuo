@@ -9,6 +9,7 @@
  */
 
 #include "aminetxduo/crashguard.h"
+#include "aminetxduo/asm_abi.h"
 #include "aminetxduo/compat.h"
 
 #include <exec/execbase.h>
@@ -272,7 +273,9 @@ static volatile ULONG ami_alert_inflight;
    finish first, so the two never overlap (F-080). */
 static volatile BOOL ami_alert_draining;
 
-VOID ami_alert_report(ULONG num);
+/* The trampoline's asm() pushes the alert number on the stack and jsr's
+   this, so it must read 4(sp) -- see aminetxduo/asm_abi.h. */
+AMIGA_ASM_ARGS VOID ami_alert_report(ULONG num);
 VOID ami_alert_trampoline(VOID);
 
 __asm__(
@@ -409,8 +412,8 @@ static VOID ami_alert_flush(VOID)
 /* `used': the only caller is the `jsr _ami_alert_report' in the trampoline's
    asm() above. Not static, which is not protection -- a whole-program view is
    entitled to privatise and then drop it. */
-VOID ami_alert_report(ULONG num) __attribute__((used));
-VOID ami_alert_report(ULONG num)
+AMIGA_ASM_ARGS VOID ami_alert_report(ULONG num) __attribute__((used));
+AMIGA_ASM_ARGS VOID ami_alert_report(ULONG num)
 {
     struct Task *task = SysBase->ThisTask;
     const char  *name = "?";

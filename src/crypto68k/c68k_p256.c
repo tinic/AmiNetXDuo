@@ -14,6 +14,7 @@
 #include "c68k_variant.h"
 
 #include "nx_crypto_huge_number.h"
+#include "aminetxduo/asm_abi.h"
 
 
 /*
@@ -42,24 +43,24 @@ static const c68k_limb c68k_p256_one[C68K_P256_LIMBS] =
  */
 #ifdef C68K_MV
 
-extern c68k_limb c68k_p256_add_raw_mv0(c68k_limb *r, const c68k_limb *a,
+extern AMIGA_ASM_ARGS c68k_limb c68k_p256_add_raw_mv0(c68k_limb *r, const c68k_limb *a,
                                        const c68k_limb *b);
-extern c68k_limb c68k_p256_add_raw_mv20(c68k_limb *r, const c68k_limb *a,
+extern AMIGA_ASM_ARGS c68k_limb c68k_p256_add_raw_mv20(c68k_limb *r, const c68k_limb *a,
                                         const c68k_limb *b);
-extern c68k_limb c68k_p256_sub_raw_mv0(c68k_limb *r, const c68k_limb *a,
+extern AMIGA_ASM_ARGS c68k_limb c68k_p256_sub_raw_mv0(c68k_limb *r, const c68k_limb *a,
                                        const c68k_limb *b);
-extern c68k_limb c68k_p256_sub_raw_mv20(c68k_limb *r, const c68k_limb *a,
+extern AMIGA_ASM_ARGS c68k_limb c68k_p256_sub_raw_mv20(c68k_limb *r, const c68k_limb *a,
                                         const c68k_limb *b);
-extern INT c68k_p256_reduce_core_mv0(c68k_limb *r, const c68k_limb *t);
-extern INT c68k_p256_reduce_core_mv20(c68k_limb *r, const c68k_limb *t);
+extern AMIGA_ASM_ARGS INT c68k_p256_reduce_core_mv0(c68k_limb *r, const c68k_limb *t);
+extern AMIGA_ASM_ARGS INT c68k_p256_reduce_core_mv20(c68k_limb *r, const c68k_limb *t);
 
-static c68k_limb (*c68k_vec_p256_add_raw)(c68k_limb *, const c68k_limb *,
+static AMIGA_ASM_ARGS c68k_limb (*c68k_vec_p256_add_raw)(c68k_limb *, const c68k_limb *,
                                           const c68k_limb *) =
     c68k_p256_add_raw_mv0;
-static c68k_limb (*c68k_vec_p256_sub_raw)(c68k_limb *, const c68k_limb *,
+static AMIGA_ASM_ARGS c68k_limb (*c68k_vec_p256_sub_raw)(c68k_limb *, const c68k_limb *,
                                           const c68k_limb *) =
     c68k_p256_sub_raw_mv0;
-static INT (*c68k_vec_p256_reduce_core)(c68k_limb *, const c68k_limb *) =
+static AMIGA_ASM_ARGS INT (*c68k_vec_p256_reduce_core)(c68k_limb *, const c68k_limb *) =
     c68k_p256_reduce_core_mv0;
 
 #define C68K_P256_ADD_RAW       (*c68k_vec_p256_add_raw)

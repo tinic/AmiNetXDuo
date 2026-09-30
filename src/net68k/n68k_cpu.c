@@ -17,31 +17,34 @@
 
 #include <exec/execbase.h>
 
-extern ULONG n68k_sum_longwords_mv0(const ULONG *p, ULONG count);
-extern ULONG n68k_sum_longwords_mv20(const ULONG *p, ULONG count);
-extern ULONG n68k_sum_longwords_mv40(const ULONG *p, ULONG count);
-extern ULONG n68k_sum_longwords_mv60(const ULONG *p, ULONG count);
+/* Every variant is a body in n68k_checksum.S or n68k_copy.S, so every one of
+   them carries AMIGA_ASM_ARGS, and so does the pointer type each is stored
+   into.  See aminetxduo/asm_abi.h. */
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv0(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv20(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv40(const ULONG *p, ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_sum_longwords_mv60(const ULONG *p, ULONG count);
 
-extern ULONG n68k_copy_sum_longwords_mv0(ULONG *to, const ULONG *from,
-                                         ULONG count);
-extern ULONG n68k_copy_sum_longwords_mv20(ULONG *to, const ULONG *from,
-                                          ULONG count);
-extern ULONG n68k_copy_sum_longwords_mv40(ULONG *to, const ULONG *from,
-                                          ULONG count);
-extern ULONG n68k_copy_sum_longwords_mv60(ULONG *to, const ULONG *from,
-                                          ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv0(ULONG *to, const ULONG *from,
+                                                        ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv20(ULONG *to, const ULONG *from,
+                                                         ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv40(ULONG *to, const ULONG *from,
+                                                         ULONG count);
+extern AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords_mv60(ULONG *to, const ULONG *from,
+                                                         ULONG count);
 
-extern VOID n68k_copy_bytes_mv0(UCHAR *to, const UCHAR *from, ULONG len);
-extern VOID n68k_copy_bytes_mv20(UCHAR *to, const UCHAR *from, ULONG len);
-extern VOID n68k_copy_bytes_mv40(UCHAR *to, const UCHAR *from, ULONG len);
-extern VOID n68k_copy_bytes_mv60(UCHAR *to, const UCHAR *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv0(UCHAR *to, const UCHAR *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv20(UCHAR *to, const UCHAR *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv40(UCHAR *to, const UCHAR *from, ULONG len);
+extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv60(UCHAR *to, const UCHAR *from, ULONG len);
 
 /* n68k_dispatch.S jumps through these three.  They are written once, before
    the first packet, and read on every one after that. */
-ULONG (*n68k_vec_sum)(const ULONG *, ULONG) = n68k_sum_longwords_mv0;
-ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG) =
+AMIGA_ASM_ARGS ULONG (*n68k_vec_sum)(const ULONG *, ULONG) = n68k_sum_longwords_mv0;
+AMIGA_ASM_ARGS ULONG (*n68k_vec_copy_sum)(ULONG *, const ULONG *, ULONG) =
     n68k_copy_sum_longwords_mv0;
-VOID (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG) = n68k_copy_bytes_mv0;
+AMIGA_ASM_ARGS VOID (*n68k_vec_copy)(UCHAR *, const UCHAR *, ULONG) = n68k_copy_bytes_mv0;
 
 VOID n68k_cpu_select(ULONG attnflags)
 {

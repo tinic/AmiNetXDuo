@@ -24,6 +24,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include "aminetxduo/asm_abi.h"
 
 #include "aminetxduo/compat.h"   /* ami_millis(): the probe needs to poke timer.device */
 
@@ -108,10 +109,10 @@ ULONG   prof_chain;         /* the vector we displaced                      */
 ULONG   prof_taskptr;       /* &SysBase->ThisTask                           */
 ULONG   prof_ciaticks;      /* interrupts from OUR CIA timer specifically   */
 
-extern VOID  prof_vector(VOID);
-extern VOID  prof_cia_stub(VOID);
-extern VOID  prof_audio_stub(VOID);
-extern ULONG prof_read_vbr(VOID);
+extern AMIGA_ASM_ARGS VOID  prof_vector(VOID);
+extern AMIGA_ASM_ARGS VOID  prof_cia_stub(VOID);
+extern AMIGA_ASM_ARGS VOID  prof_audio_stub(VOID);
+extern AMIGA_ASM_ARGS ULONG prof_read_vbr(VOID);
 
 #define PROF_MAX_LIBS   192
 #define PROF_MAX_LVOS   8192
