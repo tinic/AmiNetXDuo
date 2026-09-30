@@ -286,8 +286,13 @@ ULONG _nx_amiga_handshake_millis(VOID);
 /* -------------------------------------------------------------- resolver, */
 
 /* Inert until nx_dns_cache_initialize() is called; the cache buffer belongs to
-   the caller (src/netstack/netstack_dns.c). */
+   the caller (src/netstack/netstack_dns.c).  AMINETXDUO_DNS_CACHE=OFF leaves the
+   macro undefined, which drops the table and its lookup code from nx_dns.c;
+   netstack_dns.c guards its call on the same macro, so nothing else moves.  The
+   micro drawer takes that, at a name-server round trip per lookup. */
+#ifndef AMINETXDUO_DNS_CACHE_OFF
 #define NX_DNS_CACHE_ENABLE
+#endif
 
 /* wait_option is a PER-QUERY timeout spent this many times over every
    configured server with the DNS mutex held.  The retransmission ladder lives

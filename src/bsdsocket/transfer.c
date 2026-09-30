@@ -875,8 +875,13 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
  * the last place that kept a datagram from reaching it.  Measured 2026-09-19
  * on the A1200 through a 1,400-byte hop: -s 1472 crossed (the router
  * fragmented it), -s 1473 and up were refused here, never sent.
+ *
+ * A build with no fragmenter (AMINETXDUO_IP_FRAGMENTATION=OFF, the micro
+ * drawer) has nothing to reach, and NetX would take the datagram apart
+ * silently instead of refusing it, so the cap goes back to the link MTU:
+ * bsd_nofrag_maxdgram().
  */
-static LONG bsd_udp_maxdgram(const NXD_ADDRESS *addr)
+static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
 {
     ULONG overhead;
 
@@ -890,8 +895,45 @@ static LONG bsd_udp_maxdgram(const NXD_ADDRESS *addr)
         overhead = (ULONG)NX_IPv4_UDP_PACKET - (ULONG)NX_PHYSICAL_HEADER;
     }
 
+#ifdef NX_DISABLE_FRAGMENTATION
+    return bsd_nofrag_maxdgram(ip, overhead);
+#else
+    (VOID)ip;
     return (LONG)(65535UL - overhead);
+#endif
 }
+
+#ifdef NX_DISABLE_FRAGMENTATION
+/* See the declaration in bsdsocket_internal.h for what this answers and why
+   the smallest MTU is the one it answers with. */
+LONG bsd_nofrag_maxdgram(NX_IP *ip, ULONG overhead)
+{
+    ULONG smallest = 0UL;
+    UINT  i;
+
+    if (ip == NULL)
+        return (LONG)(65535UL - overhead);
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        ULONG mtu = ip->nx_ip_interface[i].nx_interface_ip_mtu_size;
+
+        if (ip->nx_ip_interface[i].nx_interface_valid == 0 || mtu == 0UL)
+            continue;
+
+        if (smallest == 0UL || mtu < smallest)
+            smallest = mtu;
+    }
+
+    if (smallest == 0UL)
+        return (LONG)(65535UL - overhead);
+
+    if (smallest <= overhead)
+        return -1;
+
+    return (LONG)(smallest - overhead);
+}
+#endif
 
 /*
  * The interface a received datagram arrived on.
@@ -1178,7 +1220,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
             return bsd_fail(base, AMI_ENETUNREACH);
     }
 
-    maxdgram = bsd_udp_maxdgram(addr);
+    maxdgram = bsd_udp_maxdgram(ip, addr);
     if (len > maxdgram)
         return bsd_fail(base, AMI_EMSGSIZE);
 

@@ -143,7 +143,13 @@
   micro stack also leaves out getaddrinfo/getnameinfo, ancillary data,
   out-of-band TCP and less-used administration calls, carries one interface
   and no route or address-allocation calls, and holds 243 KB;
-  it is the one for a 1 MB machine. DHCP, the classic resolver and raw sockets
+  it is the one for a 1 MB machine. It also keeps no list of the names it
+  has already resolved, so every lookup asks the name server again, and it
+  neither splits nor joins an IP packet: a datagram larger than the link's
+  MTU is refused with EMSGSIZE instead of being fragmented, and one that
+  arrives fragmented is dropped. TCP is unaffected in both directions,
+  because a segment's size comes from the MTU and never needs splitting.
+  DHCP, the classic resolver and raw sockets
   are in every stack: a minimal or micro machine still leases its address and
   can run ping or traceroute.
 
@@ -2811,6 +2817,14 @@
        classic resolver and raw sockets; route, address-allocation and
        less-used public administration calls are omitted there. Its private
        status/control calls remain for the supplied interface tools.
+    o  @{b}The micro stack caches no name and fragments no packet.@{ub}
+       Every gethostbyname() and gethostbyaddr() goes to the name server, so
+       a name is looked up again on each call. A datagram larger than the
+       link MTU is refused with EMSGSIZE rather than split, both from sendto()
+       and from a raw socket, and an inbound fragment is dropped rather than
+       reassembled -- so a peer's large UDP reply, an 8 KB NFS-over-UDP read
+       among them, does not work there. TCP is unaffected in both directions:
+       its segment size follows the MTU and never needs splitting.
     o  bind() to a particular local address is enforced for TCP listeners and
        UDP delivery. An address this machine does not have is refused with
        EADDRNOTAVAIL.

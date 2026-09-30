@@ -9,6 +9,16 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The micro stack keeps no list of the names it has resolved: every
+  `gethostbyname`/`gethostbyaddr` asks the name server again. It also neither
+  splits nor joins an IPv4 packet, so a datagram larger than the link MTU is
+  refused with `EMSGSIZE` instead of being fragmented -- from `sendto` and
+  from a raw socket -- and a fragment that arrives is dropped. TCP is
+  unaffected in both directions. The two come to 5,184 bytes of
+  `bsdsocket.library` and 2 KB of the stack's resident memory.
+- `bsdsocket.library` is 3,228 bytes smaller in the minimal drawer, whose
+  eight hottest NetX Duo translation units no longer build at `-O2` after the
+  `-Os` the rest of the tree uses.
 - `WaitSelect` re-arms a large timeout as the true remainder instead of a
   wrapped 32-bit value. A wait accepted for more than ~71 minutes, when a kept
   timer request fired early and the call had to re-arm the balance, multiplied

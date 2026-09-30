@@ -36,6 +36,10 @@
           "type": "BOOL",
           "value": "OFF"
         },
+        "AMINETXDUO_HOT_O2": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
         "AMINETXDUO_IPV6": {
           "type": "BOOL",
           "value": "OFF"
@@ -88,7 +92,15 @@
           "value": "OFF"
         },
         "AMINETXDUO_CPU": "68000",
+        "AMINETXDUO_DNS_CACHE": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
         "AMINETXDUO_HOT_O2": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "AMINETXDUO_IP_FRAGMENTATION": {
           "type": "BOOL",
           "value": "OFF"
         },

@@ -191,6 +191,42 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "No CMAKE_BUILD_TYPE given; using Release")
 endif()
 
+# THE REST OF THE FLAG SPACE, swept 2026-09-30 against the micro drawer in its
+# shipped shape (201,672 bytes at 994aa0ed with the preset's DNS-cache and
+# fragmentation options off).  Every number is one flag apart from that build
+# on the pinned toolchain, m68k-amigaos-gcc 16.2.0b, and each flag was read
+# back out of compile_commands.json rather than out of the CMake cache:
+#
+#   -Oz                 201,672, exactly nothing.  Byte-identical output.
+#   -msmall-code        202,472, 800 bytes WORSE.
+#   -fbaserel           does not link.  cmake/check-pcrel-branches.cmake
+#                       refuses anxwifipi.device: a 32-bit PC-relative branch
+#                       lands inside a function (docs/RESEARCH.md 25).
+#                       A library has no a4 on entry either.
+#   -mregparm           189,872, 11,800 bytes smaller, and unusable as a flag:
+#                       it passes arguments in registers for EVERY call,
+#                       including calls out of this code to Exec, DOS and
+#                       SANA-II devices, which take them on the stack.  The
+#                       disassembly of `extern void ext(int,int); ext(1,2);`
+#                       is moveq #2,d1 / moveq #1,d0 / jmp ext under it and
+#                       pea 2 / pea 1 / jsr ext / addq.l #8,sp without.
+#                       __attribute__((regparm(N))) does exist and is selective
+#                       -- an annotated function takes d0/d1 while an
+#                       unannotated one beside it still reads 4(sp) -- so a
+#                       chosen set of functions can take it without moving the
+#                       ABI of anything they call.  That is a code change and a
+#                       measurement, not a flag.
+#   -fomit-frame-pointer already stated in CMAKE_C_FLAGS_INIT, and -Os implies
+#                       it: removing it from the command line gives 201,672,
+#                       the same bytes to the byte.
+#
+# Floating point was checked the same day and there is none: the shipped
+# disassembly contains no FPU instruction (the same scan finds 16,594 integer
+# ones), no libgcc float member is pulled into the link (the map's archive
+# members), and the only float or double in the tree that builds into an Amiga
+# image is none -- the hosts in src/rfb/host are not images, and the rest of
+# the hits are the word in comments.
+
 # ---------------------------------------------------------------- options ---
 
 option(AMINETXDUO_IPV6 "Build the IPv6 dual stack"                    ON)
@@ -430,6 +466,23 @@ set(AMINETXDUO_DNS_PACKETS "4" CACHE STRING
     "Packets in the DNS client's on-demand private pool (4 ships)")
 add_compile_definitions(
     "NX_DNS_PACKET_POOL_SIZE=(${AMINETXDUO_DNS_PACKETS}*(NX_DNS_PACKET_PAYLOAD+sizeof(NX_PACKET)))")
+
+# Keep the answers the resolver has already been given, for their TTL.
+#
+# NX_DNS_CACHE_ENABLE is what compiles the lookup table in, and
+# nx_dns_cache_initialize() is what arms it -- without that call the code is
+# inert, which is why src/netstack/netstack_dns.c guards the call on the same
+# macro.  OFF in the micro drawer: 3,236 bytes of the shipped bsdsocket.library
+# (206,856 -> 203,620, micro's preset shape, one flag apart, 2026-09-30), and
+# 3,224 of minimal's (238,060 -> 234,836, HOT_O2 already off in both).  It
+# also takes the 2 KB cache buffer out of AmiNetStack, which is RAM the machine
+# keeps for as long as the stack is up.  The price is a name-server round trip
+# per lookup instead of per TTL, which a micro machine on a slow link pays on
+# every gethostbyname, so it is a size decision and not a free one.
+option(AMINETXDUO_DNS_CACHE "Keep resolved names for their TTL" ON)
+if(NOT AMINETXDUO_DNS_CACHE)
+    add_compile_definitions(AMINETXDUO_DNS_CACHE_OFF)
+endif()
 
 # Half-open connections held with their options recorded exactly.
 #
@@ -841,6 +894,40 @@ else()
     # NX_DISABLE_IGMP; with no group ever joined the check answered false and the
     # leave loop found nothing, so what is compiled out is what could not run.
     add_compile_definitions(NX_DISABLE_IGMP)
+endif()
+
+# IPv4 fragmentation and reassembly, both directions.
+#
+# NX_DISABLE_FRAGMENTATION removes the transmit splitter and the receive
+# reassembler together, because NetX Duo has no receive-only arm.  That is
+# 1,892 bytes of the shipped bsdsocket.library in micro's shape (206,856 ->
+# 204,964), 2,024 in minimal's (241,288 -> 236,036, which is 3,228 less again
+# for HOT_O2) and 3,560 in the full drawer's (368,828 -> 365,268), each one flag
+# apart in the same tree on 2026-09-30.  The three are net of the shim's
+# refusal below, which the micro figure includes.  What it costs is two
+# different things:
+#
+#   o  a datagram larger than the interface MTU can no longer be SENT; sendto
+#      and the raw send both report EMSGSIZE where they used to split.  That
+#      refusal is the shim's: NetX releases an oversize packet without an
+#      error once there is no fragmenter to take it, so a sender would
+#      otherwise be told the bytes had gone.  bsd_nofrag_maxdgram()
+#      (src/bsdsocket/transfer.c) is that refusal, and it is why the size
+#      below is the option's cost net of a few dozen bytes of shim.
+#   o  one that arrives fragmented is counted and released rather than
+#      reassembled.
+#
+# TCP is unaffected in both directions: the segment size is derived from the
+# MTU, so no segment this stack sends is ever split, and a peer's segments are
+# that peer's MSS.  What breaks is a large UDP payload -- an 8 KB NFS read, a
+# jumbo reply -- which is why this is off in micro and on everywhere else.
+#
+# nx_ip_fragment_enable() answers NX_NOT_ENABLED instead of failing when this
+# is off, so src/netstack/netstack.c skips the call and its warning rather than
+# logging a failure at every stack start.
+option(AMINETXDUO_IP_FRAGMENTATION "Fragment and reassemble IPv4 packets" ON)
+if(NOT AMINETXDUO_IP_FRAGMENTATION)
+    add_compile_definitions(NX_DISABLE_FRAGMENTATION)
 endif()
 
 option(AMINETXDUO_TESTS "Build the on-Amiga test harnesses"           ON)
@@ -1550,7 +1637,20 @@ target_include_directories(threadx PUBLIC
 # and nx_tcp_socket_packet_process does exactly that once per received packet.
 #
 # AMINETXDUO_HOT_O2=OFF puts them back at -Os, which is the comparison to make
-# when deciding whether the size is worth it.
+# when deciding whether the size is worth it.  Measured 2026-09-30, one flag
+# apart in the same tree: 3,228 bytes of bsdsocket.library in minimal's shipped
+# shape (241,288 -> 238,060) and 3,456 in the full drawer's (368,828 ->
+# 365,372).
+#
+# MICRO AND MINIMAL BOTH TAKE IT OFF; the full drawer keeps it.  Off in micro
+# since micro existed.  Off in minimal since 2026-09-30, where it pays that
+# drawer's whole overshoot by itself -- a size decision taken without a
+# throughput A/B, which this tree does not have for the option: what the hot
+# list buys is the inlining above, and nothing here measures it.  A minimal
+# build that wants the old behaviour back gets it with
+# -DAMINETXDUO_HOT_O2=ON, and one `tools/ci.sh rate` run on an A600 or a 68020
+# would turn the trade into a measurement.  The full drawer, which is where the
+# option was aimed, keeps it either way.
 # ---------------------------------------------------------------------------
 option(AMINETXDUO_HOT_O2 "Build the profiled hot paths at -O2" ON)
 

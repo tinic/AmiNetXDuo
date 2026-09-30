@@ -67,6 +67,18 @@ CROSS_CONFIGS=(
     # and the held-run code alone compiles out.  (RX_VERIFY=OFF above turns
     # both optional layers off with it.)
     "nogro:-DAMINETXDUO_GRO=OFF"
+    # A build with no fragmenter.  AMINETXDUO_IP_FRAGMENTATION=OFF takes the
+    # transmit splitter and the receive reassembler out of the vendored tree
+    # (2,024 bytes of bsdsocket.library in minimal's shape, 1,892 in micro's,
+    # and 3,560 in this arm's own), and micro is where it ships.  It gets an
+    # arm of its own because the shim
+    # has to compensate for it: with no fragmenter to hand an oversize packet
+    # to, NetX releases it without an error and the sender is told the bytes
+    # went, so bsd_nofrag_maxdgram() (src/bsdsocket/transfer.c) refuses them
+    # first.  That is code no other arm compiles: micro builds it for one
+    # interface with IPv6 off, this arm for four with IPv6 on, which is the
+    # only place its smallest-MTU loop and its IPv6 header arithmetic build.
+    "nofrag:-DAMINETXDUO_IP_FRAGMENTATION=OFF"
     # The three TCP option flags that change the layout of NX_TCP_SOCKET and
     # are in no arm above.  SACK=OFF did not compile at all until it was built
     # here, and with all three on by default these arms are also the only place

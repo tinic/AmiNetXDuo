@@ -1231,6 +1231,33 @@ BOOL bsd_udp_accepts_received_packet(const AmiSocket *sock,
                                      const NX_PACKET *packet);
 ULONG bsd_udp_available(const AmiSocket *sock);
 
+#ifdef NX_DISABLE_FRAGMENTATION
+/* The largest payload this stack can put on the wire with `overhead' bytes of
+ * headers above it, for a build with no fragmenter: the smallest attached link
+ * MTU, less those headers. transfer.c owns it; raw.c asks it too, because both
+ * senders used to hand NetX a datagram it would have split.
+ *
+ * Above that size NetX releases the packet without an error --
+ * nx_ip_driver_packet_send.c takes the else branch of the fragmenter's NULL
+ * pointer test and returns -- so nx_udp_socket_send() reports success and the
+ * bytes never leave. A sender has to be refused here or it is lied to.
+ *
+ * The egress interface is not this layer's to know: NetX picks it from the
+ * route for the destination, and asking costs a route lookup and the IP mutex
+ * on every send. The smallest MTU is a read over at most NX_MAX_PHYSICAL_
+ * INTERFACES words instead, and it is exact for a stack with one interface --
+ * the micro drawer, AMINETXDUO_MAX_INTERFACES=1, the only shipping build that
+ * compiles the fragmenter out. With more than one interface, a machine whose
+ * links differ in MTU is refused a datagram that would have fit the egress
+ * one: wrong in the safe direction, and never silent.
+ *
+ * -1 means not even the headers fit. A link that has no MTU yet is skipped
+ * rather than counted, and a stack where none has one keeps the 65,535 cap:
+ * no link has an address then either, so the send is about to answer
+ * unreachable and EMSGSIZE would be the wrong answer to give it. */
+LONG bsd_nofrag_maxdgram(NX_IP *ip, ULONG overhead);
+#endif
+
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
 /* as_RxDState.  IDLE is zero so a MEMF_CLEAR socket starts unarmed. */
 #define BSD_RXD_IDLE    0

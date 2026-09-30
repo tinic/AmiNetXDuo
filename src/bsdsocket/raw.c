@@ -789,12 +789,20 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
     /* 65,535 less the IP header is what BSD lets a raw sender hand over;
        the rest is fragmented, here as there (nxd_ip_raw_packet_source_send()
        passes NX_FRAGMENT_OKAY).  The cap used to be the link MTU, and
-       `ping -s 1473' was refused, never sent -- see bsd_udp_maxdgram(). */
+       `ping -s 1473' was refused, never sent -- see bsd_udp_maxdgram().
+       It is the link MTU again where there is no fragmenter to hand the
+       datagram to; NetX would drop it without saying so, and `ping -s 2000'
+       would be told it had been sent. */
     {
         ULONG overhead = (dest.nxd_ip_version == NX_IP_VERSION_V6)
                              ? 40UL : 20UL;
+#ifdef NX_DISABLE_FRAGMENTATION
+        LONG maxraw = bsd_nofrag_maxdgram(ip, overhead);
 
+        if (maxraw < 0 || (LONG)handed->nx_packet_length > maxraw)
+#else
         if (handed->nx_packet_length + overhead > 65535UL)
+#endif
         {
             nx_packet_release(handed);
             return bsd_fail(base, AMI_EMSGSIZE);

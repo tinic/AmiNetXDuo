@@ -135,6 +135,11 @@ BUDGETS=(
     # 237,348 with the #67 dormant-slot eviction (see the default row),
     # 2026-09-26.
     # 238,240 with the bounded S2_OFFLINE (#90, see the default row).
+    # 241,288 at the time of the 2026-09-30 size pass (994aa0ed), 2,288 over
+    # this budget, and 238,060 after it: AMINETXDUO_HOT_O2=OFF in this drawer,
+    # worth 3,228 (CMakeLists.txt, the hot translation units).  The full
+    # drawer's overshoot was not addressed: it is shared shim code, not a
+    # profile feature.
     "minimal:src/bsdsocket/bsdsocket.library:239000"
     "minimal:src/netdev/anxnet.device:46000"
     "minimal:src/netdev/anxgenet.device:29000"
@@ -155,6 +160,13 @@ BUDGETS=(
     # 203,264 with the #67 dormant-slot eviction (see the default row),
     # 2026-09-26.
     # 204,052 with the bounded S2_OFFLINE (#90, see the default row).
+    # 206,856 at the time of the 2026-09-30 size pass (994aa0ed), 1,856 over
+    # this budget, and 201,672 after it: the resolver's answer cache compiled
+    # out (-3,236 alone) and the fragmenter with it (-1,892 alone, including
+    # the bsd_nofrag_maxdgram() the shim needs to refuse a datagram NetX can
+    # no longer split; -5,184 with both, 56 bytes better than their sum).  It
+    # also gives back 2,072 bytes of the resident AmiNetStack, which is not in
+    # this number.
     "micro:src/bsdsocket/bsdsocket.library:205000"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29000"

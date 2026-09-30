@@ -733,10 +733,29 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
      * Inbound reassembly, both families; until this call a fragment is counted and
      * released.  It enables transmit fragmentation in the same call because there
      * is no receive-only arm.
+     *
+     * AMINETXDUO_IP_FRAGMENTATION=OFF compiles the whole thing out, and
+     * nx_ip_fragment_enable() then answers NX_NOT_ENABLED rather than failing --
+     * there is nothing to enable and nothing wrong -- so the call and its
+     * warning are skipped rather than taken and reported as a fault at every
+     * stack start.
+     *
+     * What the call would have set is nx_ip_fragment_assembly, the pointer the
+     * receive path tests before it queues an inbound fragment
+     * (nx_ipv4_packet_receive.c:575, :448 on the NAT path), and
+     * nx_ip_fragment_processing for the transmit half, tested the same way on
+     * the way out (nx_ip_driver_packet_send.c:491, :238).  Both stay NULL, so
+     * an inbound fragment takes the drop branch -- the same branch it took
+     * before this call was reached -- and a datagram over the MTU fails to
+     * send instead of being split.
      */
+#ifdef NX_DISABLE_FRAGMENTATION
+    AMI_INFO("netstack: IPv4 fragmentation is compiled out");
+#else
     status = nx_ip_fragment_enable(&ns->ns_Ip);
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_ip_fragment_enable failed (%ld)", (long)status);
+#endif
 
 #if AMI_CFG_MAX_ATTACHED > 1
     /*
