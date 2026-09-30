@@ -328,9 +328,29 @@ done
 # instruction on the A600 before the Installer ever starts -- which presents as
 # a boot that never finishes and leaves an empty drive, and an empty drive
 # passes every "this file is absent" assertion there is.
+
+# THE CARD PAGE HAS TO BE ANSWERED, and nothing else here answers it.
+#
+# The install boot runs with no network board on purpose, and a ClassicWB
+# snapshot carries no DEVS:Networks, so hardware detection and the
+# installed-driver fallback both come back empty.  The page then opens with its
+# ten checkboxes and not one of them ticked, so the run clicks Proceed at every
+# page and the Installer refuses the lot: measured 2026-09-30, 145 clicks, the
+# 150-poll cap, nothing installed, and an empty drive passes every "this file
+# is absent" assertion this harness makes.
+#
+# So installdrive ticks one.  Ten options, gadget 4 is "A2065" -- the board
+# BOARD stages further down, which is what keeps the tick in agreement with the
+# driver_match gate that runs after the install.  The option count and the
+# gadget order are Install-AmiNetXDuo's, not this harness's, so both are knobs.
+PICK_OPTIONS="${AMINETXDUO_CWB_PICK_OPTIONS:-10}"
+PICK_ID="${AMINETXDUO_CWB_PICK_ID:-4}"
+
 DRIVER="$ROOT/build/cwb-installdrive-$TAG"
 "$AMIGA_GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
-    -DDRIVE_RUNS=1 -DDRIVE_YES_LABEL="\"\"" -I"$AMIGA_NDK" \
+    -DDRIVE_RUNS=1 -DDRIVE_YES_LABEL="\"\"" \
+    -DDRIVE_PICK_OPTIONS="$PICK_OPTIONS" -DDRIVE_PICK_ID="$PICK_ID" \
+    -I"$AMIGA_NDK" \
     -o "$DRIVER" "$ROOT/install/test/installdrive.c" || {
     say error "could not build install/test/installdrive.c"; exit 2; }
 cp "$DRIVER" "$HD/C/installdrive"
