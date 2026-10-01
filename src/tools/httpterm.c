@@ -30,6 +30,7 @@
 
 #define TERM_ABANDON_TICKS  250     /* of 1/50 s                            */
 #define TERM_SEQ_MAX        24      /* a runaway parameter list is not a sequence */
+#define TERM_PROMPT_MAX     80      /* a Shell prompt longer than this is not replayed */
 
 typedef struct TermPipe
 {
@@ -138,6 +139,8 @@ typedef struct TermSession
     ULONG wait_from, wait_until;
     char comp_word[1280];
     UBYTE comp_pending;
+    UBYTE prompt[TERM_PROMPT_MAX];
+    UBYTE prompt_n;
 } TermSession;
 
 static TermSession term_sessions[HTTP_TERM_SLOTS];
@@ -191,6 +194,8 @@ BOOL http_term_select(UWORD slot)
 #define term_wait_until   (term_current->wait_until)
 #define term_comp_word    (term_current->comp_word)
 #define term_comp_pending (term_current->comp_pending)
+#define term_prompt       (term_current->prompt)
+#define term_prompt_n     (term_current->prompt_n)
 
 #define TERM_DISK_CON     0x434F4E00L     /* 'CON\0' */
 #define TERM_DISK_RAWCON  0x52415700L     /* 'RAW\0' */
@@ -407,18 +412,45 @@ static VOID term_resize_event(VOID)
     term_inject(b, n);
 }
 
+/* Append Shell output to the ring, and remember the last line of it.  The
+   trailing line is what a fresh attach has to be handed: the prompt the Shell
+   already printed went to whichever socket held the terminal before, and the
+   reattach path does not re-run the Shell, so without this the browser comes
+   up on a blank screen.  Newline and carriage return end the remembered line;
+   a line longer than the buffer keeps its head, which is still the prompt. */
+static VOID term_out_commit(const UBYTE *src, ULONG len)
+{
+    ULONG i;
+
+    (VOID)ring_put(&term_out, src, len);
+
+    for (i = 0; i < len; i++)
+    {
+        UBYTE b = src[i];
+
+        if (b == (UBYTE)'\n' || b == (UBYTE)'\r')
+        {
+            term_prompt_n = 0;
+            continue;
+        }
+
+        if (term_prompt_n < TERM_PROMPT_MAX)
+            term_prompt[term_prompt_n++] = b;
+    }
+}
+
 /* Give up on the held sequence, which is ordinary output after all.  `extra`
    is the byte that ended it, or NULL.  The caller has made room for both. */
 static VOID term_seq_flush(const UBYTE *extra)
 {
     if (term_seq_n > 0)
-        (VOID)ring_put(&term_out, term_seq, (ULONG)term_seq_n);
+        (VOID)term_out_commit(term_seq, (ULONG)term_seq_n);
 
     term_seq_n   = 0;
     term_seq_esc = 0;
 
     if (extra != NULL)
-        (VOID)ring_put(&term_out, extra, 1UL);
+        (VOID)term_out_commit(extra, 1UL);
 }
 
 /* Whether the held sequence's parameters include this number, so that
@@ -498,10 +530,11 @@ static ULONG term_out_put(const UBYTE *src, ULONG len)
             {
                 (VOID)ring_put(&term_out, TERM_FF_CLEAR,
                                sizeof(TERM_FF_CLEAR));
+                term_prompt_n = 0;   /* a cleared screen has no prompt line */
             }
             else
             {
-                (VOID)ring_put(&term_out, &b, 1UL);
+                (VOID)term_out_commit(&b, 1UL);
             }
             continue;
         }
@@ -1467,8 +1500,22 @@ BOOL http_term_start(VOID)
 
 VOID http_term_reattach(VOID)
 {
-    if (term_active)
-        term_mode_pending = 1;
+    if (!term_active)
+        return;
+
+    term_mode_pending = 1;
+
+    /* The Shell's prompt was already printed to the socket that has since
+       gone; the pump forwards only the "mode cooked" frame, so a reattached
+       browser would come up blank.  Replay the remembered prompt line, but
+       only when the Shell is idle at it -- `held` is its parked cooked read
+       -- and not raw (a raw program's own cursor line is not a prompt), and
+       only when the ring has nothing pending, else the bytes would double. */
+    if (term_in.held != NULL && !term_raw && term_prompt_n > 0 &&
+        ring_used(&term_out) == 0UL)
+    {
+        (VOID)ring_put(&term_out, term_prompt, (ULONG)term_prompt_n);
+    }
 }
 
 BOOL http_term_raw(VOID)

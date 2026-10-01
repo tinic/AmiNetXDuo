@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Reattaching to the `/shell` web terminal shows the Shell's prompt again instead of a blank
+  screen, and a scripted `hwshell` run leaves the standard `%N.%S> ` prompt behind instead of
+  its one-off `HWSH-` token.
 - `anxnet.device`, `anxgenet.device` and `anxwifipi.device` from earlier releases work with this
   `bsdsocket.library`. A pairing of a newer library and an older driver brought the interface
   online, passed no frames and wrote received frames into low chip memory.

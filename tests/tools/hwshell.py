@@ -237,6 +237,14 @@ def main():
             sys.stdout.write("\n")
         print("shell_rc=%d" % shell_rc)
 
+    if rc != 5:
+        # Leave the reused Shell with a prompt a human would recognise, not
+        # this run's "HWSH-<uuid>" token, which is what the next session would
+        # otherwise see before it sets its own.  The Shell is provably idle
+        # here (rc != 5 means the prompt came back), so this is read at once.
+        # rc == 5 is no_prompt: the Shell's state after the break is unknown,
+        # so nothing more is typed into it, this restore included.
+        send('Prompt "%N.%S> "\n')
     try:
         ws.close()
     except OSError:
