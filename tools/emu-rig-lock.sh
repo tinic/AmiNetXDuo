@@ -417,6 +417,7 @@ rig_drive_path() { # dir
 
 rig_claim_drive() { # dir who backend [wait]
     [ -n "${1:-}" ] || { echo "rig_claim_drive: no drive named" >&2; return 2; }
+    [ -n "${3:-}" ] || { echo "rig_claim_drive: no backend given" >&2; return 2; }
     [ -z "$RIG_DRIVE_FD" ] || return 0
     if ! rig_have_flock; then
         rig_backend_bridged "${3:-}" && { rig_no_flock; return 2; }
