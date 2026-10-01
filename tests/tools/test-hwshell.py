@@ -219,6 +219,10 @@ def main():
     check(rc == 0 and "shell_state=ready" in out, "next_run_prompt_takes")
     check("shell_rc=5" in out, "failing_command_rc_reported")
     check("rc=5\n" in out, "rc_carries_to_next_command")
+    # The reused Shell must come out of a clean run holding the standard
+    # prompt, not the run's one-off HWSH-<uuid> token.
+    check(shell.prompt == b"%N.%S> ",
+          "clean_run_restores_standard_prompt")
 
     rc, out = run("Hang")
     check(rc == 4, "lone_hang_exit_4")
