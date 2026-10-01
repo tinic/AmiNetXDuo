@@ -31,6 +31,14 @@ static void test_query(void)
     CHECK(!http_request_query_take("/shell?retake=1"));
     CHECK(!http_request_query_take("/shell?take=10"));
     CHECK(!http_request_query_take(NULL));
+    CHECK(http_request_query_fresh("/shell?fresh=1"));
+    CHECK(http_request_query_fresh("/shell?a=0&fresh=1&b=2"));
+    CHECK(http_request_query_fresh("/shell?FRESH=1"));
+    CHECK(!http_request_query_fresh("/shell"));
+    CHECK(!http_request_query_fresh("/shell?fresh=0"));
+    CHECK(!http_request_query_fresh("/shell?refresh=1"));
+    CHECK(!http_request_query_fresh("/shell?fresh=10"));
+    CHECK(!http_request_query_fresh(NULL));
     CHECK(http_request_query_session("/shell") == 0);
     CHECK(http_request_query_session("/shell?session=0") == 0);
     CHECK(http_request_query_session("/shell?take=1&session=1") == 1);

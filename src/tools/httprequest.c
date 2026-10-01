@@ -62,6 +62,38 @@ int http_request_query_take(const char *target)
     return 0;
 }
 
+int http_request_query_fresh(const char *target)
+{
+    unsigned long i = 0;
+
+    if (target == 0)
+        return 0;
+
+    while (target[i] != '\0' && target[i] != '?')
+        i++;
+
+    if (target[i] != '?')
+        return 0;
+
+    i++;
+    while (target[i] != '\0')
+    {
+        unsigned long start = i;
+
+        while (target[i] != '\0' && target[i] != '&')
+            i++;
+
+        if (i - start == 7UL &&
+            hr_nicmp(&target[start], "fresh=1", 7UL) == 0)
+            return 1;
+
+        if (target[i] == '&')
+            i++;
+    }
+
+    return 0;
+}
+
 int http_request_query_session(const char *target)
 {
     unsigned long i = 0;

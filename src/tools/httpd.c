@@ -349,6 +349,7 @@ struct HttpConn
     UBYTE   fb_owner;               /* this connection holds the console   */
     UBYTE   ws_owner;               /* this connection holds the Shell     */
     UBYTE   ws_take;                /* ?take=1: claim it from whoever has  */
+    UBYTE   ws_fresh;               /* ?fresh=1: replay the prompt (first  */
     UBYTE   ws_slot;                /* ?session=0/1, default 0             */
 
     /* Everything after the 101 is httpterm.c's, and this is the whole of what
@@ -853,6 +854,7 @@ static VOID httpd_reset(HttpConn *c)
     c->is_volumes_root = 0;
     c->volume_index    = 0;
     c->ws_take       = 0;
+    c->ws_fresh      = 0;
     c->ws_slot       = 0;
     /* Not ws_owner: a connection that holds the Shell never comes back through
        here, it is in CONN_WS until it closes.  Clearing it would say the Shell
@@ -2990,7 +2992,7 @@ static VOID httpd_do_terminal(HttpConn *c)
     }
 
     if (http_term_running())
-        http_term_reattach();
+        http_term_reattach(c->ws_fresh);
     else if (http_term_available())
     {
         if (!http_term_start())
@@ -4132,6 +4134,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
                 c->ws_slot = (slot < 0) ? HTTP_TERM_SLOTS : (UBYTE)slot;
                 c->ws_take = http_request_query_take(httpd_target) ? 1 : 0;
+                c->ws_fresh = http_request_query_fresh(httpd_target) ? 1 : 0;
             }
 
             return TRUE;

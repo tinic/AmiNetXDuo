@@ -110,6 +110,12 @@ export class Wire {
   private ws: WebSocket | null = null;
   private readonly h: WireHandlers;
 
+  /* A successful open has happened for this page's terminal buffer.  Drives
+     `?fresh=1`: sent only before the FIRST open, so a same-page reconnect
+     (which still shows the prompt) is not handed it a second time, while a
+     failed first upgrade can retry and still get the replay. */
+  private everOpened = false;
+
   constructor(h: WireHandlers) {
     this.h = h;
   }
@@ -138,6 +144,11 @@ export class Wire {
     const session = new URLSearchParams(location.search).get("session");
     if (session !== null) query.set("session", session);
     if (take) query.set("take", "1");
+    /* Replay the prompt only before the first open: a fresh page has an empty
+       terminal and needs it, a reconnect still shows it and must not get it
+       twice.  Decided here, but not consumed until onopen, so a first upgrade
+       that is refused can retry and still replay. */
+    if (!this.everOpened) query.set("fresh", "1");
     const encoded = query.toString();
     const suffix = encoded ? "?" + encoded : "";
     const ws = new WebSocket(scheme + location.host + location.pathname + suffix);
@@ -148,7 +159,11 @@ export class Wire {
 
     let opened = false;
 
-    ws.onopen = () => { opened = true; this.h.onState("open", ""); };
+    ws.onopen = () => {
+      opened = true;
+      this.everOpened = true;
+      this.h.onState("open", "");
+    };
 
     /*
      * WHICH FRAME IS WHICH, AND WHY THE OPCODE IS ENOUGH

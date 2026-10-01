@@ -48,8 +48,10 @@ BOOL  http_term_available(VOID);
 BOOL  http_term_start(VOID);
 
 /* A new socket attached to an existing Shell needs the current raw/cooked
-   mode even if the previous viewer already received it. */
-VOID  http_term_reattach(VOID);
+   mode even if the previous viewer already received it.  `fresh` replays the
+   remembered prompt: only a first load -- an empty terminal -- should see it,
+   so a same-page reconnect does not get the prompt a second time. */
+VOID  http_term_reattach(BOOL fresh);
 
 /* TRUE while the Shell is running or its output is still being drained. */
 BOOL  http_term_running(VOID);

@@ -1510,7 +1510,7 @@ BOOL http_term_start(VOID)
     return TRUE;
 }
 
-VOID http_term_reattach(VOID)
+VOID http_term_reattach(BOOL fresh)
 {
     if (!term_active)
         return;
@@ -1520,12 +1520,14 @@ VOID http_term_reattach(VOID)
     /* The Shell's prompt was already printed to the socket that has since
        gone; the pump forwards only the "mode cooked" frame, so a reattached
        browser would come up blank.  Replay the remembered prompt line, but
-       only when the Shell is idle at it -- `held` is its parked cooked read
-       -- and not raw (a raw program's own cursor line is not a prompt), and
-       not overrun (a line longer than TERM_PROMPT_MAX can be cut mid-sequence,
-       so it is never replayed), and only when the ring has nothing pending,
-       else the bytes would double. */
-    if (term_in.held != NULL && !term_raw && term_prompt_n > 0 &&
+       only on a first open -- `fresh` -- where the client's terminal is
+       empty (a same-page reconnect still shows the old prompt and would get
+       it a second time), and only when the Shell is idle at it -- `held` is
+       its parked cooked read -- and not raw (a raw program's own cursor line
+       is not a prompt), and not overrun (a line longer than TERM_PROMPT_MAX
+       can be cut mid-sequence, so it is never replayed), and only when the
+       ring has nothing pending, else the bytes would double. */
+    if (fresh && term_in.held != NULL && !term_raw && term_prompt_n > 0 &&
         !term_prompt_overflow && ring_used(&term_out) == 0UL)
     {
         (VOID)ring_put(&term_out, term_prompt, (ULONG)term_prompt_n);

@@ -9,6 +9,10 @@
 /* The interactive endpoints' one query switch. */
 int http_request_query_take(const char *target);
 
+/* The terminal's prompt-replay switch: set only on a first load, so a
+   same-page reconnect does not get the prompt a second time. */
+int http_request_query_fresh(const char *target);
+
 /* /shell's bounded slot selector: 0 if absent, 1 for session=1, -1 for a
    malformed, repeated or out-of-range session value. */
 int http_request_query_session(const char *target);
