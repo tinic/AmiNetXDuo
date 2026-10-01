@@ -1503,6 +1503,8 @@ BOOL http_term_start(VOID)
     term_sync_conunit();
     term_seq_n        = 0;
     term_seq_esc      = 0;
+    term_prompt_n     = 0;
+    term_prompt_overflow = 0;
     term_want_resize  = 0;
 
     return TRUE;
