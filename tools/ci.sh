@@ -1843,6 +1843,20 @@ stage_web() {
         return 1
     fi
 
+    # The /shell prompt replay turns on one client-side branch -- whether
+    # `?fresh=1` rides a given upgrade -- which tsc cannot see either: it is a
+    # value in a URL, not a type.  This drives the real Wire class against a
+    # stubbed WebSocket and checks first-load, reconnect and refused-retry.
+    if node tools/web/wire-selftest.mjs \
+            > "$BUILD/web-wire-selftest.log" 2>&1; then
+        note "wire selftest: $(grep -c '^ok' \
+              "$BUILD/web-wire-selftest.log" || true) checks passed"
+    else
+        cat "$BUILD/web-wire-selftest.log"
+        fail "web (the Wire class sends fresh=1 on the wrong upgrade)"
+        return 1
+    fi
+
     # And every vendored drawer is meant to be upstream's, byte for byte.
     # Each carries its own PROVENANCE: a comment block and then a plain
     # sha256sum list, which is why the comments are stripped and the rest is
