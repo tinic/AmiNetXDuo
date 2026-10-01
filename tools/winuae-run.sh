@@ -166,6 +166,17 @@ HD="$ROOT/build/winuae-testhd-$TAG"
 RRUN="$RROOT\\run\\$TAG"
 RRUN_FWD="$RROOT_FWD/run/$TAG"
 
+# THE DRIVE, before the staging below wipes it and before the copy back
+# wipes it again (tools/emu-rig-lock.sh, rig_claim_drive).  Only the local
+# staging directory is arbitrated here: the guest's network, bridged or not,
+# is on $HOST, where this host's locks mean nothing -- hence no bridge claim
+# and backend none, which degrades with a warning rather than refusing on a
+# host with no flock(1).
+# shellcheck source=emu-rig-lock.sh
+. "$ROOT/tools/emu-rig-lock.sh"
+rig_claim_drive "$HD" "winuae $TAG (${AMINETXDUO_WINUAE_A2065:-slirp} on $HOST) in $ROOT" \
+    none || exit $?
+
 # ------------------------------------------------------------------- models --
 #
 # chipmem_size and friends are in 512 KB units despite what WinUAE's own help

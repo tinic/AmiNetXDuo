@@ -654,14 +654,26 @@ else
 fi
 echo "lock_order_took_s=$took"
 
-# EVERY LAUNCHER, statically: any script that starts the emulator claims its
+# EVERY LAUNCHER, statically: any script that starts an emulator claims its
 # drive before its first destructive step (a wipe, an extraction, a mkdir or
 # cp restage, the shared Workbench build, Xvfb, tcpdump, a kill or the
-# emulator), and a bridged one claims the bridge after the drive and before
-# the emulator.  Found by what they do, so a new launcher with no claim fails
-# here rather than waiting for a reviewer to spot it.
-START='(exec|setsid) +(setsid +)?"[$]AMIBERRY"|"[$]AMIBERRY" +(--log +)?-f|start_emulator "'
-DESTRUCTIVE_ALL="$DESTRUCTIVE|lha +x|tar x"
+# emulator) and before the emulator itself, and a bridged one claims the
+# bridge after the drive and before the emulator.  Found by what they do, so
+# a new launcher with no claim fails here rather than waiting for a reviewer
+# to spot it.  A line run through ssh acts on the remote host, not on this
+# host's drive, and is not a destructive step here.
+#
+# Emulator -> the line that starts it.  Discovery is the union of the rows;
+# a launcher's emulator line is its first non-comment match of any row.
+declare -A EMU_START=(
+    [amiberry]='(exec|setsid) +(setsid +)?"[$]AMIBERRY"|"[$]AMIBERRY" +(--log +)?-f|start_emulator "'
+    [winuae]='ssh .*powershell .*run[.]ps1 -Config '
+)
+# Launchers discovery must find; a pattern that drifts from one fails here.
+KNOWN_LAUNCHERS="tools/amiberry-run.sh install/test/run-workbench.sh tools/winuae-run.sh"
+START=""
+for emu in "${!EMU_START[@]}"; do START="${START:+$START|}${EMU_START[$emu]}"; done
+DESTRUCTIVE_ALL="$DESTRUCTIVE|lha +x|tar x|$START"
 lo_bad=""
 launchers=$(cd "$ROOT" && grep -rlE "$START" --include='*.sh' tools tests install |
             grep -v '^tools/bridge-lock-selftest\.sh$' | sort)
@@ -669,24 +681,25 @@ for f in $launchers; do
     from=1
     [ "$f" != tests/tools/console-instance.sh ] ||
         from=$(grep -n '^esac' "$ROOT/$f" | head -1 | cut -d: -f1)
-    first() { awk -v from="$from" -v re="$1" '
-        NR >= from && $0 !~ /^[[:space:]]*#/ && $0 ~ re { print NR; exit }' "$ROOT/$f"; }
+    first() { awk -v from="$from" -v re="$1" -v skip="${2:-^$}" '
+        NR >= from && $0 !~ /^[[:space:]]*#/ && $0 !~ skip && $0 ~ re { print NR; exit }' "$ROOT/$f"; }
     d=$(first '^[[:space:]]*rig_claim_drive ')
     b=$(first '^[[:space:]]*rig_claim_bridge ')
-    x=$(first "$DESTRUCTIVE_ALL")
+    x=$(first "$DESTRUCTIVE_ALL" '^[[:space:]]*ssh ')
     e=$(first "$START")
     echo "launcher_$(basename "$f" .sh)=drive:${d:-none} bridge:${b:-none} first_destructive:${x:-none} emulator:${e:-none}"
+    [ -n "$e" ] || { lo_bad="$lo_bad $f:no-emulator-start"; continue; }
     [ -n "$d" ] || { lo_bad="$lo_bad $f:no-drive-claim"; continue; }
+    [ "$d" -lt "$e" ] || lo_bad="$lo_bad $f:drive($d)>=emulator($e)"
     [ -z "$x" ] || [ "$d" -lt "$x" ] || lo_bad="$lo_bad $f:drive($d)>=destructive($x)"
     if [ -n "$b" ]; then
         [ "$d" -lt "$b" ] || lo_bad="$lo_bad $f:bridge($b)-before-drive($d)"
-        [ -z "$e" ] || [ "$b" -lt "$e" ] || lo_bad="$lo_bad $f:bridge($b)>=emulator($e)"
+        [ "$b" -lt "$e" ] || lo_bad="$lo_bad $f:bridge($b)>=emulator($e)"
     fi
 done
-case "$launchers" in
-    *tools/amiberry-run.sh*install/test/run-workbench.sh*|*install/test/run-workbench.sh*tools/amiberry-run.sh*) ;;
-    *) lo_bad="$lo_bad discovery-missed-known-launchers" ;;
-esac
+for f in $KNOWN_LAUNCHERS; do
+    grep -qxF "$f" <<< "$launchers" || lo_bad="$lo_bad $f:not-discovered"
+done
 if [ -z "$lo_bad" ]; then
     kv launcher_order ok
 else
