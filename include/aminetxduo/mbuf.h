@@ -221,8 +221,9 @@ ULONG ami_mbuf_clusters_outstanding(VOID);
 /* ------------------------------------------------------ the eleven vectors */
 
 /*
- * 1:1 with the bsdsocket.library LVOs; each vector is a one-line forward to
- * the function below, argument order and return type already matching.
+ * Shaped 1:1 after the bsdsocket.library LVOs, argument order and return type
+ * matching. Not wired: all eleven vectors answer ENOSYS (NULL for the pointer
+ * ones) in bsdsocket_vectors.c, and no shipped image links this library.
  */
 
 /* Plain mbuf, MT_DATA, m_len 0, data at m_dat. NULL when the pool is out. */
@@ -231,7 +232,14 @@ struct mbuf *ami_mbuf_get(VOID);
 /* Packet-header mbuf: M_PKTHDR set, data at m_pktdat, pkthdr zeroed. */
 struct mbuf *ami_mbuf_gethdr(VOID);
 
-/* Free one mbuf, return its successor (4.4BSD m_free). NULL in, NULL out. */
+/*
+ * Free one mbuf, return its successor (4.4BSD m_free). NULL in, NULL out.
+ * Foreign M_EXT storage with an ext_free hook is released by calling
+ * hook(ext_buf, ext_size) with stack arguments (4.4BSD). The free acquires
+ * no additional Forbid() around the hook; it runs at the caller's Forbid()
+ * nest. It may call this API on other mbufs; it must not touch m, which is
+ * mid-free.
+ */
 struct mbuf *ami_mbuf_free(struct mbuf *m);
 
 /* Free a whole chain (4.4BSD m_freem). Does not follow m_nextpkt. */
@@ -272,14 +280,18 @@ LONG ami_mbuf_copydata(struct mbuf *m, LONG off, LONG len, APTR cp);
 struct mbuf *ami_mbuf_copym(struct mbuf *m, LONG off, LONG len);
 
 /*
- * 4.4BSD m_prepend. The new bytes are not initialised. Returns the new head,
- * or NULL; on failure the WHOLE CHAIN is freed.
+ * 4.4BSD M_PREPEND: adds len to m_pkthdr.len when the chain has M_PKTHDR,
+ * which 4.4BSD's m_prepend() function leaves to the macro. The pkthdr and
+ * its M_COPYFLAGS marks move to a new head. The new bytes are not
+ * initialised. Returns the new head, or NULL; on failure the WHOLE CHAIN is
+ * freed.
  */
 struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len);
 
 /*
  * Make the first len bytes of the chain contiguous in the head mbuf
- * (4.4BSD m_pullup). len must fit in one mbuf's internal storage.
+ * (4.4BSD m_pullup). len must fit in one mbuf's internal storage. The pkthdr
+ * and its M_COPYFLAGS marks move to a new head.
  * Returns the new head, or NULL; on failure the whole chain is freed.
  */
 struct mbuf *ami_mbuf_pullup(struct mbuf *m, LONG len);

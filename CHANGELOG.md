@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Where keyboard.device runs registered reset handlers, the network card's
+  shutdown in that handler can no longer be interrupted by network or timer
+  interrupts.
 - NetStatus opener counts remain safe while another task resizes or closes
   its socket table.
 - Refusing an incoming connection or exhausting descriptors no longer lets

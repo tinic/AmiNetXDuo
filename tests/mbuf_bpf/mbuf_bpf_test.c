@@ -17,6 +17,7 @@
 #include "aminetxduo/bpf.h"
 #include "aminetxduo/compat.h"
 #include "aminetxduo/crashguard.h"
+#include "aminetxduo/asm_abi.h"
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -1048,6 +1049,77 @@ UINT status;
 }
 
 
+/*
+ * A foreign ext_free hook, built the way another compiler builds one: every
+ * argument on the stack. Under -mregparm a register call would hand it
+ * whatever the stack holds. It also re-enters the API on another mbuf.
+ */
+static APTR         t_hook_buf;
+static ULONG        t_hook_size;
+static ULONG        t_hook_calls;
+static BYTE         t_hook_nest;
+static struct mbuf *t_hook_other;
+static UINT         t_hook_reentered;
+
+static AMIGA_ASM_ARGS VOID t_ext_hook(APTR buf, ULONG size)
+{
+    struct mbuf *n;
+
+    t_hook_calls++;
+    t_hook_buf  = buf;
+    t_hook_size = size;
+    t_hook_nest = SysBase->TDNestCnt;
+
+    n = ami_mbuf_get();
+    t_hook_reentered = (UINT) (n != NULL);
+    if (n != NULL)
+        (VOID) ami_mbuf_free(n);
+    if (t_hook_other != NULL)
+    {
+        (VOID) ami_mbuf_free(t_hook_other);
+        t_hook_other = NULL;
+    }
+}
+
+static VOID t_test_ext_hook(VOID)
+{
+    static ULONG  foreign[64];
+    struct mbuf  *m;
+    BYTE          nest;
+
+    t_log("mbuf: foreign ext_free hook gets (buf, size) on the stack");
+
+    t_hook_calls     = 0;
+    t_hook_buf       = NULL;
+    t_hook_size      = 0;
+    t_hook_reentered = 0;
+    t_hook_other     = ami_mbuf_get();
+    CHECK(t_hook_other != NULL,                       "second mbuf for the hook");
+
+    m = ami_mbuf_get();
+    CHECK(m != NULL,                                  "mbuf for foreign storage");
+    if (m == NULL)
+        return;
+
+    m->m_ext.ext_buf  = (APTR) foreign;
+    m->m_ext.ext_free = (APTR) t_ext_hook;
+    m->m_ext.ext_size = (ULONG) sizeof(foreign);
+    m->m_data         = (APTR) foreign;
+    m->m_len          = 16;
+    m->m_flags        = (WORD) (m->m_flags | M_EXT);
+
+    nest = SysBase->TDNestCnt;
+    (VOID) ami_mbuf_free(m);
+
+    CHECK(t_hook_calls == 1,                          "hook called once");
+    CHECK(t_hook_buf == (APTR) foreign,               "hook got ext_buf");
+    CHECK(t_hook_size == (ULONG) sizeof(foreign),     "hook got ext_size");
+    CHECK(t_hook_nest == nest,                        "hook: no Forbid added by free");
+    CHECK(t_hook_reentered,                           "hook re-entered mbuf_get");
+    CHECK(t_hook_other == NULL,                       "hook freed another mbuf");
+    CHECK(ami_mbuf_outstanding() == 0,                "no mbufs leaked");
+}
+
 int main(void)
 {
 
@@ -1065,6 +1137,7 @@ ULONG   main_thread_gen;
     t_test_layout();
     t_test_alignment();
     t_test_ops();
+    t_test_ext_hook();
     t_test_bpf_abi();
     t_test_bpf_vm();
     t_test_bpf_hostile();

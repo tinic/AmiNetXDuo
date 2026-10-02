@@ -535,7 +535,8 @@ struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len)
 
     if ((m->m_flags & M_PKTHDR) != 0)
     {
-        mn->m_flags       = (WORD)(mn->m_flags | M_PKTHDR);
+        /* M_COPY_PKTHDR: the pkthdr marks travel with the header. */
+        mn->m_flags       = (WORD)(mn->m_flags | (m->m_flags & M_COPYFLAGS));
         mn->m_pkthdr      = m->m_pkthdr;
         mn->m_data        = (APTR)mn->m_pktdat;
         m->m_flags        = (WORD)(m->m_flags & ~M_PKTHDR);
@@ -603,7 +604,8 @@ struct mbuf *ami_mbuf_pullup(struct mbuf *n, LONG len)
 
         if ((n->m_flags & M_PKTHDR) != 0)
         {
-            m->m_flags  = (WORD)(m->m_flags | M_PKTHDR);
+            /* M_COPY_PKTHDR: the pkthdr marks travel with the header. */
+            m->m_flags  = (WORD)(m->m_flags | (n->m_flags & M_COPYFLAGS));
             m->m_pkthdr = n->m_pkthdr;
             m->m_data   = (APTR)m->m_pktdat;
             n->m_flags  = (WORD)(n->m_flags & ~M_PKTHDR);

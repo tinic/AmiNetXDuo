@@ -18,6 +18,8 @@
 
 #include "mbuf_internal.h"
 
+#include <aminetxduo/asm_abi.h>
+
 static AmiMbufPool ami_mbuf_pool;
 
 /* --------------------------------------------------------------- plumbing */
@@ -481,11 +483,11 @@ static VOID ami_mbuf_ext_unref(struct mbuf *m)
     {
         /*
          * Foreign storage with a release hook. The 4.4BSD signature is
-         * void (*)(caddr_t, u_int) with stack arguments, which is what
-         * __stdargs gives here. Inferred from 4.4BSD. No Amiga header
+         * void (*)(caddr_t, u_int) with stack arguments; AMIGA_ASM_ARGS pins
+         * that under -mregparm. Inferred from 4.4BSD. No Amiga header
          * documents the calling convention for ext_free.
          */
-        void (*fn)(APTR, ULONG) = (void (*)(APTR, ULONG))freefn;
+        AMIGA_ASM_ARGS void (*fn)(APTR, ULONG) = (void (*)(APTR, ULONG))freefn;
 
         fn(buf, size);
     }

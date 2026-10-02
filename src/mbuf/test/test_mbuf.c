@@ -924,6 +924,62 @@ static void test_pullup(void)
  * header copy, and its rcvif and M_BCAST/M_MCAST/M_EOR must come from that
  * head, not from the next mbuf, whose m_pkthdr is only packet bytes.
  */
+/* The pkthdr marks (M_COPYFLAGS) travel with the header to a new head. */
+static void test_copyflags(void)
+{
+    static const WORD marks[] = { M_BCAST, M_MCAST, M_EOR };
+    ULONG             i;
+    struct mbuf      *m;
+
+    printf("mbuf: prepend and pullup carry M_COPYFLAGS to the new head\n");
+
+    for (i = 0; i < sizeof(marks) / sizeof(marks[0]); i++)
+    {
+        /* prepend, allocating path: gethdr leaves no leading room. */
+        m = ami_mbuf_gethdr();
+        m->m_len        = 20;
+        m->m_pkthdr.len = 20;
+        m->m_flags      = (WORD)(m->m_flags | marks[i]);
+        m = ami_mbuf_prepend(m, 6);
+        CHECK(m != NULL);
+        if (m != NULL)
+        {
+            CHECK(m->m_next != NULL);
+            CHECK((m->m_flags & (M_PKTHDR | marks[i])) == (M_PKTHDR | marks[i]));
+            ami_mbuf_freem(m);
+        }
+
+        /* pullup, replacing path: the head has no trailing room. */
+        m = ami_mbuf_gethdr();
+        m->m_data       = (APTR)((UBYTE *)m + MSIZE - 2);
+        m->m_len        = 2;
+        m->m_pkthdr.len = 12;
+        m->m_flags      = (WORD)(m->m_flags | marks[i]);
+        m->m_next       = make_chain(1, 10, 2);
+        m = ami_mbuf_pullup(m, 12);
+        CHECK(m != NULL);
+        if (m != NULL)
+        {
+            CHECK((m->m_flags & (M_PKTHDR | marks[i])) == (M_PKTHDR | marks[i]));
+            ami_mbuf_freem(m);
+        }
+    }
+
+    /* Control: an unmarked header gains no mark. */
+    m = ami_mbuf_gethdr();
+    m->m_len        = 20;
+    m->m_pkthdr.len = 20;
+    m = ami_mbuf_prepend(m, 6);
+    CHECK(m != NULL);
+    if (m != NULL)
+    {
+        CHECK((m->m_flags & (M_EOR | M_BCAST | M_MCAST)) == 0);
+        ami_mbuf_freem(m);
+    }
+
+    expect_empty("test_copyflags");
+}
+
 static void test_copym_empty_head(void)
 {
     struct mbuf *m;
@@ -995,6 +1051,7 @@ int main(int argc, char **argv)
     test_foreign_ext();
     test_prepend();
     test_pullup();
+    test_copyflags();
 
     ami_mbuf_cleanup();
     CHECK(ami_alloc_count() == 0);

@@ -90,7 +90,14 @@ static ULONG rg_kbd_handler(register APTR data __asm("a1"))
 {
     (VOID)data;
 
+    /* Under Disable(), as the ColdReboot leg and every other caller of a
+       core's stop hold it: keyboard.device Cause()s this handler, and exec
+       runs a software interrupt at IPL 0, so without it the vertical-blank
+       tick and the card's own INT2 server can run inside the stop (N-090).
+       The answer below stays outside: it is the keyboard's, not a core's. */
+    Disable();
     rg_stop_all();
+    Enable();
 
     if (rg_kbd_io != NULL)
     {
