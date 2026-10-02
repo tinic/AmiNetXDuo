@@ -28,8 +28,9 @@ TOOL_WEAK LONG netstack_startup_loopback(VOID)
     return AMI_NET_ERR_STATE;
 }
 
-TOOL_WEAK VOID netstack_shutdown(VOID)
+TOOL_WEAK LONG netstack_shutdown(VOID)
 {
+    return AMI_NET_OK;
 }
 
 TOOL_WEAK BOOL netstack_can_unload(VOID)

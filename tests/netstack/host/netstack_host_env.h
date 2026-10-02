@@ -130,6 +130,9 @@ typedef struct NetStackHostEnv
     UINT    iface_detach_status;    /* what nx_ip_interface_detach() answers */
     ULONG   adopts;                 /* tx_amiga_adopt_thread() calls         */
     ULONG   adopt_fail_at;          /* that call number fails; 0 none        */
+    ULONG   baton_releases;         /* ami_netstack_baton_release() calls    */
+    ULONG   baton_acquires;
+    ULONG   health_unpublishes;
 
     /* ---- the event ring ------------------------------------------------ */
 

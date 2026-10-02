@@ -2013,10 +2013,11 @@ LONG netstack_startup_loopback(VOID)
     return ami_ns_startup(TRUE);
 }
 
-VOID netstack_shutdown(VOID)
+LONG netstack_shutdown(VOID)
 {
     AmiNetCaller  caller;
     AmiNetStack  *ns;
+    LONG          entered;
 
     ami_ns_lock_obtain();
 
@@ -2028,7 +2029,7 @@ VOID netstack_shutdown(VOID)
         ami_ns_retained_sweep_locked();
         (VOID)ami_ns_kernel_stop_locked();
         ami_ns_lock_release();
-        return;
+        return AMI_NET_OK;
     }
 
     if (ns->ns_Refs > 0)
@@ -2037,34 +2038,46 @@ VOID netstack_shutdown(VOID)
     if (ns->ns_Refs > 0)
     {
         ami_ns_lock_release();
-        return;
+        return AMI_NET_OK;
+    }
+
+    /*
+     * nx_ip_delete() waits for the IP thread, so teardown has to happen as a
+     * ThreadX thread, and the bracket is taken before anything is given up
+     * (E-25).  Without one -- the closing Task has no signal to spare -- the
+     * stack stays published at zero references with everything it owns, and
+     * the expunge keeps refusing on ami_ns.  The next shutdown, or a reopen's
+     * reference and its close, asks again.  AMI_NET_ERR_STATE is a stopped
+     * kernel: no thread runs, so the teardown needs no bracket.
+     */
+    entered = ami_netstack_enter(&caller);
+    if (entered == AMI_NET_ERR_KERNEL)
+    {
+        AMI_ERROR("netstack: cannot take the stack down from this task; it "
+                  "stays up until a later close");
+        ami_ns_lock_release();
+        return AMI_NET_ERR_KERNEL;
     }
 
     ami_ns = NULL;
 
     /* The hooks point at the port that is about to be freed, so they go first. */
     ami_sana2_set_open_hooks(NULL, NULL);
+
+    /* Waits for the ARexx host, which may itself be waiting for the baton. */
+    ami_netstack_baton_release();
     ami_ns_port_delete();
+    ami_netstack_baton_acquire();
+
     ami_netstack_baton_set_sampler(NULL);
     ami_mem_stats()->ms_PoolTotal = 0UL;
     ami_netstack_health_unpublish();
 
-    /*
-     * nx_ip_delete() waits for the IP thread, so teardown has to happen as a
-     * ThreadX thread.
-     */
-    if (ami_netstack_enter(&caller) == AMI_NET_OK)
-    {
-        (VOID)ami_sana2_retained_sweep(TRUE);
-        ami_ns_destroy(ns);
+    (VOID)ami_sana2_retained_sweep(TRUE);
+    ami_ns_destroy(ns);
+
+    if (entered == AMI_NET_OK)
         ami_netstack_leave(&caller);
-    }
-    else
-    {
-        /* No bracket: the sweep waits for a later sweep point, where the
-           kernel is either stopped or can be entered. */
-        ami_ns_destroy(ns);
-    }
 
     ami_sana2_set_block_hooks(NULL, NULL);
 
@@ -2076,6 +2089,8 @@ VOID netstack_shutdown(VOID)
     (VOID)ami_ns_kernel_stop_locked();
 
     ami_ns_lock_release();
+
+    return AMI_NET_OK;
 }
 
 BOOL netstack_can_unload(VOID)

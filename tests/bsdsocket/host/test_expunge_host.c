@@ -169,6 +169,10 @@ static LONG h_teardown_ran(VOID)
    netstack_can_unload() keep (netstack.c). */
 static BOOL  h_model_refs;
 static ULONG h_ns_refs;
+/* E-25: the next last-reference shutdowns that cannot adopt their caller.
+   Such a shutdown keeps the stack published at zero references. */
+static ULONG h_adopt_fails;
+static BOOL  h_ns_kept;
 
 /*
  * Reached, and expected.
@@ -177,7 +181,7 @@ BOOL netstack_can_unload(VOID)
 {
     h.can_unload_calls++;
     if (h_model_refs)
-        return (h_ns_refs == 0) ? TRUE : FALSE;
+        return (h_ns_refs == 0 && !h_ns_kept) ? TRUE : FALSE;
     return h.can_unload_answer;
 }
 
@@ -270,15 +274,24 @@ VOID Remove(struct Node *node)
 }
 
 
-VOID netstack_shutdown(VOID)
+LONG netstack_shutdown(VOID)
 {
     h.shutdown_calls++;
     if (h_model_refs && h_ns_refs > 0)
         h_ns_refs--;
+    if (h_model_refs && h_ns_refs > 0)
+        return AMI_NET_OK;
+    if (h_adopt_fails > 0)
+    {
+        h_adopt_fails--;
+        h_ns_kept = TRUE;
+        return AMI_NET_ERR_KERNEL;
+    }
     /* The last reference gone, ami_ns is NULL (netstack.c), which is what
        netstack_get() answers after it. */
-    if (!h_model_refs || h_ns_refs == 0)
-        h.stack_running = FALSE;
+    h_ns_kept = FALSE;
+    h.stack_running = FALSE;
+    return AMI_NET_OK;
 }
 NX_IP *netstack_ip(VOID)            { return &h_stack_ip; }
 NX_PACKET_POOL *netstack_pool(VOID) { return &h_stack_pool; }
@@ -1135,6 +1148,52 @@ static VOID t_cork_pass_keeps_stack(VOID)
     h_model_refs = FALSE;
     h_cork_busy  = FALSE;
 }
+
+/*
+ * E-25 at the library: the last shutdown cannot adopt its caller, after a
+ * cork refusal kept one reference.  The kept reference is given back exactly
+ * once, the stack stays up at zero, the orphans of its live IP instance are
+ * not reclaimed, and the next cycle's one close takes it down.
+ */
+static VOID t_cork_adopt_failure(VOID)
+{
+    LONG reclaims;
+
+    printf("the stack's last shutdown cannot adopt, after a cork refusal\n");
+
+    h_machine_reset(FALSE);
+    h_reclaim_reset();
+    h_model_refs  = TRUE;
+    h_ns_refs     = 0;
+    h_ns_kept     = FALSE;
+    h_adopt_fails = 0;
+
+    h_cork_cycle(TRUE);
+    CHECK(h.shutdown_calls == 0 && h_ns_refs == 1, "one reference kept");
+
+    h.stack_running = TRUE;
+    h_adopt_fails   = 1;
+    reclaims        = h_reclaims;
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 2 && h_ns_refs == 0,
+          "the kept reference and its own, once each");
+    CHECK(h_ns_kept && h.stack_running,
+          "the last one could not adopt: the stack is still up");
+    CHECK(h_reclaims == reclaims,
+          "and the orphans of its live IP instance are left alone");
+    CHECK(netstack_can_unload() == FALSE, "the library stays resident");
+
+    h_cork_cycle(FALSE);
+    CHECK(h.shutdown_calls == 3,
+          "the next close calls netstack_shutdown() once: nothing was owed");
+    CHECK(!h_ns_kept && !h.stack_running && h_ns_refs == 0,
+          "and takes the stack down");
+    CHECK(h_reclaims == reclaims + 1, "the orphans are reclaimed then");
+    CHECK(netstack_can_unload() == TRUE, "and the library can unload");
+
+    h_model_refs = FALSE;
+    h_cork_busy  = FALSE;
+}
 #endif
 
 /*
@@ -1266,6 +1325,7 @@ int main(void)
     t_loopback_startup_failure_ownership();
 #ifdef AMINETXDUO_TCP_CORK
     t_cork_pass_keeps_stack();
+    t_cork_adopt_failure();
 #endif
     printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

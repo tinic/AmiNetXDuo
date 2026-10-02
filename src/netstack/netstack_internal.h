@@ -307,7 +307,7 @@ struct AmiNetStack
     BOOL                ns_AddrArrivedReady;
 
     /* The one-second heartbeat that carries ami_second_notify().  The flag is
-       needed because four of ami_ns_destroy()'s seven call sites run before
+       needed because three of ami_ns_destroy()'s six call sites run before
        ThreadX exists, so the delete cannot be inferred from position. */
     TX_TIMER            ns_Second;
     BOOL                ns_SecondCreated;
