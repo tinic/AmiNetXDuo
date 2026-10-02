@@ -23,6 +23,7 @@
 #include "nx_api.h"
 #include "nx_arp.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -115,12 +116,32 @@ static int pool_ok(void)
     return n == POOL;
 }
 
+/* Append to a fixed buffer; stops at the end instead of overrunning.  */
+static void append(char *buf, size_t size, size_t *off, const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
+static void append(char *buf, size_t size, size_t *off, const char *fmt, ...)
+{
+    va_list ap;
+    int     n;
+
+    if (*off >= size - 1)
+        return;
+    va_start(ap, fmt);
+    n = vsnprintf(buf + *off, size - *off, fmt, ap);
+    va_end(ap);
+    if (n < 0)
+        n = 0;
+    if ((size_t) n >= size - *off)
+        n = (int) (size - *off - 1);
+    *off += (size_t) n;
+}
+
 /* Expire the entries whose positions are set in `mask`, run one pass.  */
 static int expire_case(UINT n, ULONG mask)
 {
     static NX_PACKET queued[POOL];
-    char line[512];
-    int  len = 0;
+    char line[512] = "";
+    size_t len = 0;
     UINT i, expiring = 0;
     int  fail = 0;
 
@@ -148,7 +169,7 @@ static int expire_case(UINT n, ULONG mask)
             if (entry[i] -> nx_arp_active_list_head != NX_NULL)
             {
                 fail = 1;
-                len += snprintf(line + len, sizeof(line) - (size_t) len,
+                append(line, sizeof(line), &len,
                                 " pos%u:still-active", i);
             }
             continue;
@@ -157,7 +178,7 @@ static int expire_case(UINT n, ULONG mask)
         if (ticks != 1)
         {
             fail = 1;
-            len += snprintf(line + len, sizeof(line) - (size_t) len,
+            append(line, sizeof(line), &len,
                             " pos%u:%lux", i, (unsigned long) ticks);
         }
     }
@@ -165,7 +186,7 @@ static int expire_case(UINT n, ULONG mask)
         || released != expiring || sent_count != 0 || !pool_ok())
     {
         fail = 1;
-        len += snprintf(line + len, sizeof(line) - (size_t) len,
+        append(line, sizeof(line), &len,
                         " count=%lu released=%u sent=%u pool=%d",
                         (unsigned long) ip.nx_ip_arp_dynamic_active_count,
                         released, sent_count, pool_ok());
