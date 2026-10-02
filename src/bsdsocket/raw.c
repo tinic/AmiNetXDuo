@@ -491,10 +491,11 @@ static VOID bsd_raw_icmpv6_checksum(NX_PACKET *packet, ULONG *source,
  * left to nxd_ip_raw_packet_send() to pick again: the checksum below is
  * computed over it, and a second independent choice can differ.
  */
-static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
-                            NX_IP *ip, NX_PACKET *packet, NXD_ADDRESS *dest,
-                            ULONG protocol, UINT hops, ULONG tos, ULONG scope,
-                            const BsdCmsgSource *src)
+static LONG bsd_raw_send_v6_locked(struct AmiSocketBase *base, AmiSocket *sock,
+                                   NX_IP *ip, NX_PACKET *packet,
+                                   NXD_ADDRESS *dest, ULONG protocol,
+                                   UINT hops, ULONG tos, ULONG scope,
+                                   const BsdCmsgSource *src)
 {
     NXD_IPV6_ADDRESS *source = NX_NULL;
     UINT              src_index = 0;
@@ -566,6 +567,29 @@ static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
     return 0;
+}
+
+/*
+ * nx_ip_protection from the source choice to the send (audit N-036): the
+ * address table is the mutex's, and the DHCPv6 client deletes an address
+ * under it.  Without it the index chosen could name a zeroed or reused slot
+ * by the time the send took the mutex, and the checksum above would cover an
+ * address the packet no longer carries.  The send takes the mutex again,
+ * which ThreadX allows its owner.
+ */
+static LONG bsd_raw_send_v6(struct AmiSocketBase *base, AmiSocket *sock,
+                            NX_IP *ip, NX_PACKET *packet, NXD_ADDRESS *dest,
+                            ULONG protocol, UINT hops, ULONG tos, ULONG scope,
+                            const BsdCmsgSource *src)
+{
+    LONG rc;
+
+    AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER));
+    rc = bsd_raw_send_v6_locked(base, sock, ip, packet, dest, protocol, hops,
+                                tos, scope, src);
+    AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
+
+    return rc;
 }
 
 /*

@@ -573,6 +573,41 @@ static void second_loss_at_the_tail(void)
     h_check(h_resent(9) == 1, "the tail does not wait for the RTO");
 }
 
+/*
+ * Audit N-031: two holes, the second far into the flight.  The
+ * retransmission of the first lands and the cumulative acknowledgment jumps
+ * to the second: a partial acknowledgment of more data than the recovery
+ * window holds.  The window is deflated by what was acknowledged and must
+ * stop at zero, not wrap; RFC 6582 then adds one segment back.
+ */
+static void two_holes_partial_ack(UINT dups)
+{
+    UINT  i;
+    ULONG before, after;
+
+    printf("two holes, segments 1 and 16 of 20, %u duplicate acknowledgment(s)\n", dups);
+
+    h_fixture();
+    for (i = 0; i < 20; i++)
+    {
+        (VOID)h_send();
+    }
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    for (i = 0; i < dups; i++)
+    {
+        (VOID)h_ack(1, 2, 3 + i, 0, 0);
+    }
+    h_check(h_sock.nx_tcp_socket_fast_recovery == NX_TRUE, "fast recovery entered");
+
+    before = h_sock.nx_tcp_socket_tx_window_congestion;
+    (VOID)h_ack(16, 17, 20, 0, 0);
+    after = h_sock.nx_tcp_socket_tx_window_congestion;
+    printf("  window %lu before the partial acknowledgment of %lu, %lu after\n",
+           (unsigned long)before, (unsigned long)(15 * H_MSS), (unsigned long)after);
+    h_check(h_sock.nx_tcp_socket_fast_recovery == NX_TRUE, "still in recovery: 16 is below the recovery point");
+    h_check(after <= before + H_MSS, "a partial acknowledgment does not grow the window past one segment");
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -584,6 +619,8 @@ int main(void)
     single_loss();
     second_loss_at_the_tail();
     burst_hole();
+    two_holes_partial_ack(3);
+    two_holes_partial_ack(14);
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
