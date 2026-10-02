@@ -451,7 +451,11 @@ host_test_targets() { # builddir
 #      parser against the same guard page (all hosts).
 #      544 with tls_clienthello_lists (N-115): the server's ClientHello
 #      group and signature-algorithm lists against a guard page (all hosts).
-HOST_TESTS_EXPECTED=544
+#      545 with tls13_handshake_fault (N-107/N-109): the TLS 1.3 handshake
+#      send-builders' benign-fault contract -- the failed builder's status is
+#      returned unchanged, the packet is released exactly once by the caller,
+#      no record is sent, and a record-send failure is not double-freed.
+HOST_TESTS_EXPECTED=545
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
