@@ -74,10 +74,17 @@ VOID AddTail(struct List *list, struct Node *node)
 
 /* N-087: another task running at the next Forbid(), once. */
 static void (*h_forbid_hook)(void);
+static int    h_forbid_skip;           /* Forbid()s to let pass first */
 
 VOID Forbid(VOID)
 {
     void (*hook)(void) = h_forbid_hook;
+
+    if (hook != NULL && h_forbid_skip > 0)
+    {
+        h_forbid_skip--;
+        return;
+    }
 
     if (hook != NULL)
     {
@@ -113,11 +120,23 @@ UINT _txe_mutex_put(TX_MUTEX *m) { (VOID)m; abort(); }
    store past a shrunk table inside the block, so the check reports it. */
 static int h_alloc_ok;
 
+/* The slack past a new table names h_poison, so a read past its end is a
+   socket the test can see touched. */
+static AmiSocket h_poison;
+
 APTR ami_alloc(ULONG n)
 {
+    AmiSocket **block;
+    ULONG       i;
+
     if (!h_alloc_ok)
         abort();
-    return calloc(1, n + 64);
+    block = (AmiSocket **)calloc(1, n + 64);
+    if (block == NULL)
+        abort();
+    for (i = n / sizeof(AmiSocket *); i < (n + 64) / sizeof(AmiSocket *); i++)
+        block[i] = &h_poison;
+    return block;
 }
 
 VOID ami_free(APTR p)
@@ -419,6 +438,52 @@ static void t_close_race(void)
     bsd_defer_head = NULL;
 }
 
+/* The other task closes fd 3 and shrinks the table to two, between this
+   task's lookup and the bound in its take. */
+static void h_other_close_shrink(void)
+{
+    CHECK(bsd_CloseSocket(3, &h_base) == 0, "N-087: the other task closes fd 3");
+    CHECK(bsd_table_resize(&h_base, 2) == 0, "N-087: and shrinks the table to 2");
+}
+
+/* At each of the close's first Forbid()s in turn, so the take's bound is
+   reached whichever lookups come before it. */
+static void t_close_shrink_race(void)
+{
+    int skip;
+
+    for (skip = 0; skip < 3; skip++)
+    {
+        LONG rc;
+        char what[96];
+
+        h_reset();
+        h_alloc_ok = 1;
+        bsd_defer_head = NULL;
+        memset(&h_poison, 0, sizeof(h_poison));
+        h_sock[0].as_RefCount = 3;
+        h_sock[0].as_Owner = &h_base;
+        h_table[3] = &h_sock[0];
+        h_other_table[1] = &h_sock[0];
+        h_forbid_skip = skip;
+        h_forbid_hook = h_other_close_shrink;
+        h_base.sb_Errno = 0;
+        rc = bsd_CloseSocket(3, &h_base);
+        h_forbid_hook = NULL;
+        h_forbid_skip = 0;
+        snprintf(what, sizeof(what),
+                 "N-087: shrink at Forbid %d: the overtaken close is EBADF", skip);
+        CHECK(rc == -1 && h_base.sb_Errno == AMI_EBADF, what);
+        snprintf(what, sizeof(what),
+                 "N-087: shrink at Forbid %d: nothing past the table is read", skip);
+        CHECK(h_poison.as_DeferRefs == 0 && h_sock[0].as_DeferRefs == 1, what);
+        if (h_base.sb_Table != h_table)
+            free(h_base.sb_Table);
+        h_base.sb_Table = h_table;
+        bsd_defer_head = NULL;
+    }
+}
+
 int main(void)
 {
     t_fd_claim();
@@ -427,6 +492,7 @@ int main(void)
     t_fd_alloc_resize();
     t_fd_alloc_cleanup();
     t_close_race();
+    t_close_shrink_race();
     h_alloc_ok = 0;
 
     /* CloseSocket() with the bracket refused: the socket leaks, and its

@@ -432,23 +432,31 @@ LONG bsd_table_resize(struct AmiSocketBase *base, LONG size)
     return 0;
 }
 
+/* One slot, bound and read under one Forbid(): another task on the base can
+   shrink the table with SBTC_DTABLESIZE between a bound test and the read
+   (N-087).  NULL for a descriptor the table does not have. */
+static AmiSocket *bsd_fd_peek(struct AmiSocketBase *base, LONG fd)
+{
+    AmiSocket *entry = NULL;
+
+    Forbid();
+    if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
+        entry = base->sb_Table[fd];
+    Permit();
+
+    return entry;
+}
+
 AmiSocket *bsd_lookup(struct AmiSocketBase *base, LONG fd)
 {
-    AmiSocket *sock;
-
-    if (base->sb_Table == NULL || fd < 0 || fd >= base->sb_TableSize)
-        return NULL;
-
-    sock = base->sb_Table[fd];
+    AmiSocket *sock = bsd_fd_peek(base, fd);
 
     return (sock == BSD_FD_RESERVED || sock == BSD_FD_BUSY) ? NULL : sock;
 }
 
 BOOL bsd_fd_reserved(struct AmiSocketBase *base, LONG fd)
 {
-    return (BOOL)(base->sb_Table != NULL && fd >= 0 &&
-                  fd < base->sb_TableSize &&
-                  base->sb_Table[fd] == BSD_FD_RESERVED);
+    return (BOOL)(bsd_fd_peek(base, fd) == BSD_FD_RESERVED);
 }
 
 /*
@@ -568,10 +576,12 @@ LONG bsd_fd_claim(struct AmiSocketBase *base, LONG fd, AmiSocket **prev)
     if (bsd_table_ensure(base) != 0)
         return bsd_fail(base, AMI_EMFILE);
 
-    if (fd < 0 || fd >= base->sb_TableSize)
-        return bsd_fail(base, AMI_EBADF);
-
     Forbid();
+    if (fd < 0 || fd >= base->sb_TableSize)
+    {
+        Permit();
+        return bsd_fail(base, AMI_EBADF);
+    }
     entry = base->sb_Table[fd];
     if (entry == BSD_FD_BUSY)
     {
@@ -636,12 +646,17 @@ static LONG bsd_fd_take(struct AmiSocketBase *base, LONG fd, AmiSocket **taken)
 {
     *taken = NULL;
 
-    if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
     {
         AmiSocket *entry;
         LONG error;
 
+        /* The bound inside the Forbid(), with the read (bsd_fd_peek()). */
         Forbid();
+        if (base->sb_Table == NULL || fd < 0 || fd >= base->sb_TableSize)
+        {
+            Permit();
+            return 0;
+        }
         entry = base->sb_Table[fd];
         if (entry == NULL)
         {
@@ -1245,7 +1260,7 @@ VOID bsd_close_all(struct AmiSocketBase *base)
 
     for (fd = 0; fd < base->sb_TableSize; fd++)
     {
-        AmiSocket *sock = base->sb_Table[fd];
+        AmiSocket *sock = bsd_fd_peek(base, fd);
 
         if (sock == NULL)
             continue;
