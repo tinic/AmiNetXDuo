@@ -10,6 +10,8 @@
  *   fuzz_dns -t ptr_owner        the PTR record's owner name (N-058)
  *   fuzz_dns -t cache_aaaa       a cached AAAA with zero octets, freed (N-057),
  *                                and AAAA identity in the string table
+ *   fuzz_dns -t cache_aaaa_holes AAAA slots with zero holes, and binary
+ *                                entries kept apart from name entries
  *
  * SPDX-License-Identifier: MIT
  */
@@ -1001,6 +1003,251 @@ static void fz_cache_aaaa_identity_test(void)
     printf("  %-30s ok\n", "name_case_dedup");
 }
 
+/* ------------------------------------------------- AAAA slot layout ---- */
+
+/* The string table, as _nx_dns_cache_add_string() lays a slot out: the bytes,
+   then CNT and LEN in the slot's last four bytes, LEN = (size & ~3) + 8. */
+static USHORT fz_slot_len(const UCHAR *start, UINT size)
+{
+    return *(const USHORT *)(start + ((size & ~3U) + 8) - 2);
+}
+
+static USHORT fz_slot_cnt(const UCHAR *start, UINT size)
+{
+    return *(const USHORT *)(start + ((size & ~3U) + 8) - 4);
+}
+
+/* The cached record of `type`, the only one there is. */
+static NX_DNS_RR *fz_rr_find(USHORT type)
+{
+    ALIGN_TYPE head_word;
+    NX_DNS_RR *rr   = (NX_DNS_RR *)((ALIGN_TYPE *)fz_cache + 1);
+    NX_DNS_RR *head;
+    NX_DNS_RR *hit  = NX_NULL;
+
+    memcpy(&head_word, fz_cache, sizeof(head_word));
+    head = (NX_DNS_RR *)head_word;
+
+    for (; rr < head; rr++)
+    {
+        if (rr -> nx_dns_rr_type != type)
+            continue;
+        if (hit != NX_NULL)
+            fz_fail("more than one cached record of a type expected once");
+        hit = rr;
+    }
+
+    if (hit == NX_NULL)
+        fz_fail("an expected record is not in the cache");
+
+    return hit;
+}
+
+/* The address as the AAAA path stores it: four host-order ULONGs. */
+static void fz_aaaa_stored(const UCHAR *addr, ULONG out[4])
+{
+    int i;
+
+    for (i = 0; i < 4; i++)
+        out[i] = ((ULONG)addr[4 * i] << 24) | ((ULONG)addr[4 * i + 1] << 16) |
+                 ((ULONG)addr[4 * i + 2] << 8) | (ULONG)addr[4 * i + 3];
+}
+
+/* The cache is back to what _nx_dns_cache_initialize() made it. */
+static void fz_cache_is_empty(const char *when)
+{
+    ALIGN_TYPE *head_word = (ALIGN_TYPE *)fz_cache;
+    ALIGN_TYPE *tail_word = (ALIGN_TYPE *)((UCHAR *)fz_cache +
+                                           sizeof(fz_cache)) - 1;
+
+    if (fz_dns.nx_dns_rr_count != 0 || fz_dns.nx_dns_string_count != 0 ||
+        fz_dns.nx_dns_string_bytes != 0 ||
+        *head_word != (ALIGN_TYPE)(head_word + 1) ||
+        *tail_word != (ALIGN_TYPE)tail_word)
+    {
+        printf("fuzz_dns: after %s\n", when);
+        fz_fail("the cache is not back to its initial head, tail and counts");
+    }
+}
+
+#define FZ_HOLE_NAME    "hole.example.com"
+
+/*
+ * One address: cached, its slot read back field by field, expired, cached
+ * again and dropped by a server removal.  The name is FZ_HOLE_NAME (16
+ * characters, LEN 24, the same slot size as the address).
+ */
+static void fz_aaaa_hole_case(const char *name, const UCHAR *addr)
+{
+    ALIGN_TYPE *head_word = (ALIGN_TYPE *)fz_cache;
+    ALIGN_TYPE *tail_word = (ALIGN_TYPE *)((UCHAR *)fz_cache +
+                                           sizeof(fz_cache)) - 1;
+    NX_DNS_RR  *rr;
+    UCHAR      *a;
+    UCHAR      *n;
+    ULONG       want[4];
+
+    fz_contract_start(name);
+    fz_aaaa_stored(addr, want);
+
+    if (!fz_aaaa_lookup(FZ_HOLE_NAME, addr, 2, 1))
+        fz_fail("the AAAA answer did not resolve");
+
+    rr = fz_rr_find(NX_DNS_RR_TYPE_AAAA);
+    a  = (UCHAR *)rr -> nx_dns_rr_rdata.nx_dns_rr_rdata_aaaa.nx_dns_rr_aaaa_address;
+    n  = rr -> nx_dns_rr_name;
+
+    if (memcmp(a, want, 16) != 0)
+        fz_fail("the stored address is not the address");
+    if (fz_slot_len(a, 16) != 24 || fz_slot_cnt(a, 16) != 1)
+        fz_fail("the address slot's LEN/CNT are not 24/1");
+    if (strcmp((const char *)n, FZ_HOLE_NAME) != 0 ||
+        fz_slot_len(n, 16) != 24 || fz_slot_cnt(n, 16) != 1)
+        fz_fail("the name slot is not the name with LEN/CNT 24/1");
+
+    /* The name went in first, at the top; the address under it, at the tail. */
+    if (n + 24 != (UCHAR *)tail_word || a + 24 != n ||
+        *tail_word != (ALIGN_TYPE)a)
+        fz_fail("the two slots are not where the tail says");
+    if (*head_word != (ALIGN_TYPE)((NX_DNS_RR *)(head_word + 1) + 1))
+        fz_fail("head is not one record past the start");
+    if (fz_dns.nx_dns_string_count != 2 || fz_dns.nx_dns_string_bytes != 48)
+        fz_fail("the string count and bytes are not 2 and 48");
+
+    if (!fz_aaaa_lookup(FZ_HOLE_NAME, addr, 2, 0))
+        fz_fail("the address did not come back from the cache");
+
+    fz_ticks += FZ_AAAA_EXPIRE;
+    if (fz_aaaa_lookup(FZ_HOLE_NAME, addr, 2, 0))
+        fz_fail("the record did not expire");
+    fz_cache_is_empty("expiry");
+
+    if (!fz_aaaa_lookup(FZ_HOLE_NAME, addr, 300, 1) ||
+        !fz_aaaa_lookup(FZ_HOLE_NAME, addr, 300, 0))
+        fz_fail("the address could not be cached again");
+
+    if (nx_dns_server_remove(&fz_dns, FZ_SERVER) != NX_SUCCESS)
+        fz_fail("nx_dns_server_remove failed");
+    fz_cache_is_empty("a server removal");
+
+    fz_pool_check();
+    (VOID)nx_dns_delete(&fz_dns);
+    printf("  %-30s ok\n", name);
+}
+
+/*
+ * An address whose sixteen bytes spell a sixteen-character name, cached with
+ * that name.  The two are different kinds of entry and must not share a slot
+ * in either order, nor when the name is spelt in another case.
+ */
+static void fz_aaaa_name_kind_case(const char *name, const char *qname,
+                                   int address_first)
+{
+    static const char  spelt[] = "abcdefgh.ijklmno";
+    UCHAR       text[16];
+    FzwBuf      w;
+    ULONG       address = 0;
+    NX_DNS_RR  *rr_a;
+    NX_DNS_RR  *rr_aaaa;
+    UCHAR      *bin;
+
+    int         i;
+
+    /* The AAAA path stores the address as four host-order ULONGs, so the wire
+       bytes are chosen to make the STORED bytes spell the name on either
+       byte order. */
+    for (i = 0; i < 4; i++)
+    {
+        ULONG v;
+
+        memcpy(&v, spelt + 4 * i, 4);
+        text[4 * i]     = (UCHAR)(v >> 24);
+        text[4 * i + 1] = (UCHAR)(v >> 16);
+        text[4 * i + 2] = (UCHAR)(v >> 8);
+        text[4 * i + 3] = (UCHAR)v;
+    }
+
+    fz_contract_start(name);
+
+    if (address_first && !fz_aaaa_lookup("other.example.com", text, 300, 1))
+        fz_fail("the AAAA answer did not resolve");
+
+    fzw_reset(&w);
+    fzs_a_answer(&w, qname);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len  = w.len;
+    fz_delivered = 0;
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)qname, &address, 4) !=
+        NX_SUCCESS)
+        fz_fail("the A answer did not resolve");
+
+    if (!address_first && !fz_aaaa_lookup("other.example.com", text, 300, 1))
+        fz_fail("the AAAA answer did not resolve");
+
+    rr_a    = fz_rr_find(NX_DNS_RR_TYPE_A);
+    rr_aaaa = fz_rr_find(NX_DNS_RR_TYPE_AAAA);
+    bin     = (UCHAR *)rr_aaaa -> nx_dns_rr_rdata.nx_dns_rr_rdata_aaaa.nx_dns_rr_aaaa_address;
+
+    if (memcmp(bin, spelt, 16) != 0)
+        fz_fail("the stored address does not spell the name, so this proves "
+                "nothing");
+    if (bin == rr_a -> nx_dns_rr_name)
+        fz_fail("a binary address and a name share one slot");
+    if (strcmp((const char *)rr_a -> nx_dns_rr_name, qname) != 0)
+        fz_fail("the A record's name is not the name asked");
+    if (fz_slot_cnt(bin, 16) != 1 || fz_slot_cnt(rr_a -> nx_dns_rr_name, 16) != 1)
+        fz_fail("the address or the name slot is counted twice");
+    if (fz_dns.nx_dns_string_count != 3)
+        fz_fail("the name, the other name and the address are not 3 strings");
+
+    /* Both still answer from the cache, each with its own bytes. */
+    fz_delivered = 1;
+    address      = 0;
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)qname, &address, 4) !=
+        NX_SUCCESS || address != IP_ADDRESS(10, 0, 0, 9))
+        fz_fail("the A record did not come back from the cache");
+    if (!fz_aaaa_lookup("other.example.com", text, 300, 0))
+        fz_fail("the address did not come back from the cache");
+
+    if (nx_dns_server_remove(&fz_dns, FZ_SERVER) != NX_SUCCESS)
+        fz_fail("nx_dns_server_remove failed");
+    fz_cache_is_empty("a server removal");
+
+    fz_pool_check();
+    (VOID)nx_dns_delete(&fz_dns);
+    printf("  %-30s ok\n", name);
+}
+
+static void fz_cache_aaaa_holes_test(void)
+{
+    static const struct
+    {
+        const char *name;
+        UCHAR       addr[16];
+    } cases[] =
+    {
+        { "hole_all_zero",     { 0 } },
+        { "hole_2001_db8__1",  { 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0,
+                                 0, 0, 0, 0, 0, 0, 0, 1 } },
+        { "hole___1",          { 0, 0, 0, 0, 0, 0, 0, 0,
+                                 0, 0, 0, 0, 0, 0, 0, 1 } },
+        { "hole_fe80__",       { 0xfe, 0x80, 0, 0, 0, 0, 0, 0,
+                                 0, 0, 0, 0, 0, 0, 0, 0 } },
+        { "hole_middle",       { 0x20, 0x01, 0x0d, 0xb8, 0x11, 0x22, 0, 0,
+                                 0, 0, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 } },
+        { "hole_printable",    { 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h',
+                                 '.', 'i', 'j', 'k', 'l', 'm', 'n', 'o' } }
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        fz_aaaa_hole_case(cases[i].name, cases[i].addr);
+
+    fz_aaaa_name_kind_case("kind_name_then_address", "abcdefgh.ijklmno", 0);
+    fz_aaaa_name_kind_case("kind_address_then_name", "abcdefgh.ijklmno", 1);
+    fz_aaaa_name_kind_case("kind_address_then_upper", "ABCDEFGH.IJKLMNO", 1);
+}
+
 static void fz_cache_aaaa_test(void)
 {
     static const struct
@@ -1029,6 +1276,9 @@ static void fz_cache_aaaa_test(void)
         fz_cache_aaaa_case(cases[i].name, cases[i].addr);
 
     fz_cache_aaaa_identity_test();
+
+    /* In the same ctest: the count of registered tests stays put. */
+    fz_cache_aaaa_holes_test();
 }
 
 static void fz_run_seed(int which, int patch_id)
@@ -1106,6 +1356,8 @@ int main(int argc, char **argv)
                 fz_ptr_owner_test();
             else if (strcmp(want, "cache_aaaa") == 0)
                 fz_cache_aaaa_test();
+            else if (strcmp(want, "cache_aaaa_holes") == 0)
+                fz_cache_aaaa_holes_test();
             else
             {
                 printf("fuzz_dns: no contract test named '%s'\n", want);
