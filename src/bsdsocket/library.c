@@ -741,7 +741,7 @@ static VOID bsd_netstack_boot_main(VOID)
             bsd_bpf_zone_read();
             b->nb_Result = netstack_startup_loopback();
             if (b->nb_Result != AMI_NET_OK)
-                netstack_shutdown();
+                (VOID)netstack_shutdown();
             break;
     }
 
@@ -868,8 +868,9 @@ static LONG bsd_netstack_bringup(VOID)
 static ULONG bsd_stack_retained;
 #endif
 
-static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
+static LONG bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
 {
+    LONG status;
 #ifdef AMINETXDUO_TCP_CORK
     /* The cork's timer and IP handler go before the IP instance does: a tick
        or a queued event must never reach a deleted timer or a freed NX_IP.
@@ -886,17 +887,22 @@ static VOID bsd_netstack_shutdown_owned(struct AmiSocketBase *master)
             bsd_stack_retained++;
         AMI_WARN("bsdsocket: the IP thread is still inside a send; the stack "
                  "is kept up rather than freed under it");
-        return;
+        return AMI_NET_OK;
     }
     /* The references earlier stops kept, each given back once. */
     while (bsd_stack_retained != 0)
     {
         bsd_stack_retained--;
-        netstack_shutdown();
+        (VOID)netstack_shutdown();
     }
 #endif
-    netstack_shutdown();
-    bsd_orphans_reclaim();
+    /* AMI_NET_ERR_KERNEL: the stack is still up at zero references (E-25),
+       so its orphans still belong to a live IP instance and are not touched.
+       Nothing is owed here: the reopen's own reference and its close retry. */
+    status = netstack_shutdown();
+    if (status == AMI_NET_OK)
+        bsd_orphans_reclaim();
+    return status;
 }
 
 /*
@@ -1044,7 +1050,7 @@ struct AmiSocketBase *bsd_lib_open(
         master->sb_StackPool = netstack_pool();
         if (master->sb_StackIp == NULL || master->sb_StackPool == NULL)
         {
-            bsd_netstack_shutdown_owned(master);
+            (VOID)bsd_netstack_shutdown_owned(master);
             ReleaseSemaphore(&master->sb_Lock);
             AMI_ERROR("bsdsocket: startup returned incomplete NetX state");
             Forbid();
@@ -1069,7 +1075,7 @@ struct AmiSocketBase *bsd_lib_open(
     if (child != NULL)
         master->sb_StackRefs++;
     else if (master->sb_StackRefs == 0)
-        bsd_netstack_shutdown_owned(master);
+        (VOID)bsd_netstack_shutdown_owned(master);
 
     ReleaseSemaphore(&master->sb_Lock);
 
@@ -1157,8 +1163,8 @@ BOOL bsd_stack_close_release(struct AmiSocketBase *master)
         master->sb_StackClosing--;
     if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
     {
-        bsd_netstack_shutdown_owned(master);
-        unload_is_safe = netstack_can_unload();
+        if (bsd_netstack_shutdown_owned(master) == AMI_NET_OK)
+            unload_is_safe = netstack_can_unload();
     }
     ReleaseSemaphore(&master->sb_Lock);
 
@@ -1215,8 +1221,8 @@ VOID bsd_stack_transient_release(struct AmiSocketBase *base)
         master->sb_TransientStackRefs--;
         if (--master->sb_StackRefs == 0)
         {
-            bsd_netstack_shutdown_owned(master);
-            unload_is_safe = netstack_can_unload();
+            if (bsd_netstack_shutdown_owned(master) == AMI_NET_OK)
+                unload_is_safe = netstack_can_unload();
         }
     }
 

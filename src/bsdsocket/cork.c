@@ -255,10 +255,9 @@ VOID bsd_cork_start(NX_IP *ip)
  * thread holds for its whole event pass -- and only then terminates the IP
  * thread (:242) and deletes the mutex (:245).  But the bracket is what this
  * stop was refused, and netstack_shutdown() asks the same task for the same
- * one (netstack.c:1939); refused, it calls ami_ns_destroy() regardless
- * (netstack.c:1946), where that mutex get has no thread to suspend and its
- * result is not looked at.  The sockets are not the teardown's: they go only
- * through bsd_cork_drop(), which waits for the pass.
+ * one; refused, it keeps the stack up at zero references and destroys
+ * nothing (E-25).  The sockets are not the teardown's: they go only through
+ * bsd_cork_drop(), which waits for the pass.
  *
  * A LATER STOP MUST PROVE IT, not assume it.  The refused NX_IP is kept in
  * bsd_cork_unproven, and a stop with nothing started (bsd_cork_ip NULL) that

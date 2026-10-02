@@ -407,6 +407,97 @@ static void t_pool_creation_unwind(void)
     }
 }
 
+/*
+ * E-25.  The last shutdown cannot adopt its caller (in the field: a closing
+ * Task with no signal left for the run signal).  Teardown from a plain Task
+ * would take nx_ip_protection with no thread to suspend, so nothing is torn
+ * down: the stack stays published at zero references, and the expunge keeps
+ * refusing on it.
+ */
+static void h_fail_next_adopt(void)
+{
+    nsh.adopt_fail_at = nsh.adopts + 1UL;
+}
+
+static void t_adopt_failure_keeps_everything(void)
+{
+    printf("expunge joint: the last shutdown cannot adopt its caller\n");
+
+    nsh_reset();
+
+    CHECK(netstack_startup() == AMI_NET_OK, "up");
+    CHECK(nsh.sana2_device_opens > 0, "with a device open");
+
+    h_fail_next_adopt();
+    CHECK(netstack_shutdown() == AMI_NET_ERR_KERNEL,
+          "the shutdown answers AMI_NET_ERR_KERNEL");
+
+    CHECK(nsh.ip_deletes == 0, "nx_ip_delete() is not called");
+    CHECK(nsh.sana2_device_closes == 0, "no device is closed");
+    CHECK(nsh.packet_pool_deletes == 0, "the packet pool is not deleted");
+    CHECK(nsh.tx_stops == 0, "the kernel is not stopped");
+    CHECK(nsh.health_unpublishes == 0 && nsh.baton_releases == 0,
+          "nothing before the teardown ran either");
+    CHECK(netstack_get() != NULL && netstack_ip() != NULL,
+          "the stack is still published, IP instance and all");
+    CHECK(netstack_can_unload() == FALSE, "and the expunge is refused");
+
+    h_teardown();
+}
+
+/* The next shutdown that can adopt takes it down, once. */
+static void t_adopt_failure_retry(void)
+{
+    printf("expunge joint: a later shutdown retries\n");
+
+    nsh_reset();
+
+    CHECK(netstack_startup() == AMI_NET_OK, "up");
+
+    h_fail_next_adopt();
+    CHECK(netstack_shutdown() == AMI_NET_ERR_KERNEL, "the first one fails");
+
+    CHECK(netstack_shutdown() == AMI_NET_OK, "the retry succeeds");
+    CHECK(nsh.ip_deletes == 1, "nx_ip_delete() ran exactly once");
+    CHECK(nsh.sana2_device_closes == nsh.sana2_device_opens,
+          "every device closed");
+    CHECK(nsh.packet_pool_deletes == nsh.packet_pool_creates &&
+              nsh.packet_pool_invalid_deletes == 0,
+          "every packet pool deleted once");
+    CHECK(nsh.tx_stops_ok == 1, "the kernel stopped");
+    CHECK(nsh.baton_releases == 1 && nsh.baton_acquires == 1,
+          "the port went with the baton given up and taken back");
+    CHECK(netstack_get() == NULL && netstack_can_unload() == TRUE,
+          "and the library may unload");
+
+    CHECK(netstack_shutdown() == AMI_NET_OK, "one more is harmless");
+    CHECK(nsh.ip_deletes == 1, "and deletes nothing twice");
+}
+
+/* A reopen in between takes the kept stack, and its one close ends it. */
+static void t_adopt_failure_reopen(void)
+{
+    ULONG starts;
+
+    printf("expunge joint: failed shutdown, reopen, one close\n");
+
+    nsh_reset();
+
+    CHECK(netstack_startup() == AMI_NET_OK, "up");
+    starts = nsh.tx_starts;
+
+    h_fail_next_adopt();
+    CHECK(netstack_shutdown() == AMI_NET_ERR_KERNEL, "the shutdown fails");
+
+    CHECK(netstack_startup() == AMI_NET_OK, "a reopen succeeds");
+    CHECK(nsh.tx_starts == starts, "on the kept stack, not a second kernel");
+
+    CHECK(netstack_shutdown() == AMI_NET_OK, "its one close");
+    CHECK(nsh.ip_deletes == 1, "takes the stack down");
+    CHECK(netstack_get() == NULL && netstack_can_unload() == TRUE,
+          "no reference was left behind");
+}
+
 int main(void)
 {
     printf("netstack expunge joint host checks\n\n");
@@ -421,6 +512,9 @@ int main(void)
     t_refcount();
     t_bound_socket_torn_down();
     t_pool_creation_unwind();
+    t_adopt_failure_keeps_everything();
+    t_adopt_failure_retry();
+    t_adopt_failure_reopen();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

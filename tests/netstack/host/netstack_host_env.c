@@ -1010,7 +1010,7 @@ BOOL ami_netstack_baton_abandon(TX_THREAD *thread)
 
 VOID ami_netstack_baton_acquire(VOID)
 {
-
+    nsh.baton_acquires++;
 }
 
 BOOL ami_netstack_baton_reclaim_dead(VOID)
@@ -1020,7 +1020,7 @@ BOOL ami_netstack_baton_reclaim_dead(VOID)
 
 VOID ami_netstack_baton_release(VOID)
 {
-
+    nsh.baton_releases++;
 }
 
 VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID))
@@ -1079,7 +1079,7 @@ VOID ami_netstack_health_publish(VOID)
 
 VOID ami_netstack_health_unpublish(VOID)
 {
-
+    nsh.health_unpublishes++;
 }
 
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns)

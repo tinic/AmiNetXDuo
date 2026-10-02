@@ -62,8 +62,11 @@ LONG netstack_startup(VOID);
    device.  Physical interfaces are attached with netstack_interface_start(). */
 LONG netstack_startup_loopback(VOID);
 
-/* Drop a reference. The stack goes down when the count reaches zero. */
-VOID netstack_shutdown(VOID);
+/* Drop a reference. The stack goes down when the count reaches zero.
+   AMI_NET_ERR_KERNEL: the last reference was dropped but the caller could not
+   be adopted, so the stack is still up at zero references and a later
+   shutdown takes it down. */
+LONG netstack_shutdown(VOID);
 
 /* TRUE only when no stack or ThreadX Task can still execute this hunk, and no
    device holds a request that can call back into it. */
