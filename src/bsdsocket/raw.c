@@ -981,20 +981,25 @@ ULONG bsd_raw_available(AmiSocket *sock)
 
 /* A raw bind or connect changes the receive PCB. The IP hook filtered queued
    copies against the endpoint that was current when they arrived, so discard
-   any that the new endpoint no longer admits. Called inside a ThreadX bracket,
-   while the IP thread cannot change this queue. */
+   any that the new endpoint no longer admits.  Called inside a ThreadX
+   bracket.  No ThreadX call may sit between reading the queue and publishing
+   it: a release can hand its packet to a pool waiter and yield the baton, and
+   the IP thread's bsd_raw_filter() then appends behind as_RawTail.  So the
+   rejects are only unlinked here and released once the queue is published. */
 VOID bsd_raw_revalidate_endpoint(AmiSocket *sock)
 {
     NX_PACKET *packet;
     NX_PACKET *next;
-    NX_PACKET *head = NX_NULL;
-    NX_PACKET *tail = NX_NULL;
-    ULONG      count = 0;
+    NX_PACKET *head    = NX_NULL;
+    NX_PACKET *tail    = NX_NULL;
+    NX_PACKET *rejects = NX_NULL;
+    NX_PACKET *pending = NX_NULL;
+    ULONG      count   = 0;
 
     if (sock->as_RxPending != NX_NULL &&
         !bsd_raw_accepts_packet(sock, sock->as_RxPending))
     {
-        nx_packet_release(sock->as_RxPending);
+        pending            = sock->as_RxPending;
         sock->as_RxPending = NX_NULL;
         sock->as_RxOffset  = 0;
     }
@@ -1016,19 +1021,30 @@ VOID bsd_raw_revalidate_endpoint(AmiSocket *sock)
         }
         else
         {
-            nx_packet_release(packet);
-
-            /* EITHER WAY: TX_SUCCESS, or TX_NO_INSTANCE when the count is
-               already zero.  The semaphore only wakes a blocked reader; the
-               queue this packet came off is the truth, and it has already
-               been taken. */
-            if (sock->as_RawSemOk)
-                AMI_NX_EITHER_WAY(tx_semaphore_get(&sock->as_RawSem,
-                                                   TX_NO_WAIT));
+            packet->nx_packet_queue_next = rejects;
+            rejects = packet;
         }
     }
 
     sock->as_RawHead  = head;
     sock->as_RawTail  = tail;
     sock->as_RawCount = count;
+
+    if (pending != NX_NULL)
+        nx_packet_release(pending);
+
+    while (rejects != NX_NULL)
+    {
+        packet  = rejects;
+        rejects = packet->nx_packet_queue_next;
+        packet->nx_packet_queue_next = NX_NULL;
+
+        nx_packet_release(packet);
+
+        /* EITHER WAY: TX_SUCCESS, or TX_NO_INSTANCE when the count is already
+           zero.  The semaphore only wakes a blocked reader; the queue this
+           packet came off is the truth, and it has already been taken. */
+        if (sock->as_RawSemOk)
+            AMI_NX_EITHER_WAY(tx_semaphore_get(&sock->as_RawSem, TX_NO_WAIT));
+    }
 }

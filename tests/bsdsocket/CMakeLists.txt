@@ -250,7 +250,9 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     add_test(NAME raw_hdrincl6 COMMAND test_raw_hdrincl6)
 
     # raw.c's IPv6 send holds nx_ip_protection from the source choice to the
-    # send, and a refused raw send is an error with one release (N-036/N-037).
+    # send, and a refused raw send is an error with one release (N-036/N-037);
+    # a raw bind or connect releases rejected copies only after publishing
+    # the queue (N-080).
     add_executable(test_raw_v6_lock host/test_raw_v6_lock_host.c)
     target_include_directories(test_raw_v6_lock PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
