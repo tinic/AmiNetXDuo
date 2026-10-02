@@ -20,6 +20,13 @@
  * the yield; the relisten stub answers NX_NOT_CLOSED, as NetX does, for a
  * socket that is not CLOSED.
  *
+ * The listener pin: accept() holds a reference on its listener from the
+ * lookup to its exit, so a close of the descriptor during a wait (by another
+ * task of the base, which is deferred, then paid by another opener's
+ * bracketed close) cannot destroy it under accept(); accept() answers EBADF
+ * and its own release is the one that destroys it.  The stubs record the
+ * teardown instead of freeing, so nothing freed is ever read.
+ *
  * socket.c is #included rather than linked, and -ffunction-sections plus the
  * linker's --gc-sections keep only bsd_accept and its callees.
  *
@@ -50,9 +57,10 @@ static unsigned long h_failures;
 #define ADDR_A   0x0A000005UL   /* the listener's bound address */
 #define ADDR_B   0x0A010005UL   /* another local address, same port */
 
-enum { STEP_REFUSED, STEP_MATCH, STEP_BREAK, STEP_TIMEOUT };
+enum { STEP_REFUSED, STEP_MATCH, STEP_BREAK, STEP_TIMEOUT, STEP_CLOSE_SWEEP };
 
 static struct AmiSocketBase h_base;
+static struct AmiSocketBase h_other;    /* another opener, for the sweep */
 static AmiSocket            h_listener;
 static AmiSocket            h_incoming;
 static AmiSocket           *h_table[H_FDS];
@@ -69,6 +77,11 @@ static int        h_refill_at_yield;   /* N-088: refill runs inside unaccept */
 static unsigned   h_refilled;
 static unsigned   h_refill_skipped;
 static unsigned   h_not_closed;
+static int        h_enter_fail;        /* bsd_nx_enter() refuses */
+static int        h_enter_hook;        /* close + sweep at the enter */
+static unsigned   h_listener_freed;    /* the listener's dispose */
+static unsigned   h_freed_in_accept;   /* ... by the sweep, inside accept() */
+static int        h_teardown_ok;       /* the teardown stubs record */
 
 static void h_reset(ULONG flags, ULONG rcvtimeo, const int *script,
                     unsigned len)
@@ -117,6 +130,30 @@ static void h_reset(ULONG flags, ULONG rcvtimeo, const int *script,
     h_refilled        = 0;
     h_refill_skipped  = 0;
     h_not_closed      = 0;
+    h_enter_fail      = 0;
+    h_enter_hook      = 0;
+    h_listener_freed  = 0;
+    h_freed_in_accept = 0;
+    h_teardown_ok     = 0;
+    memset(&h_other, 0, sizeof(h_other));
+    bsd_defer_head    = NULL;
+    h_listener.as_RefCount = 1;         /* the descriptor's reference */
+}
+
+/* Another task of this base closes the listener's descriptor: its bracket is
+   refused (accept() holds the base's), so the release is owed.  Then another
+   opener's bracketed close pays every owed release (bsd_defer_sweep()). */
+static VOID h_close_and_sweep(VOID)
+{
+    int saved = h_enter_fail;
+
+    h_teardown_ok = 1;
+    h_enter_fail  = 1;
+    CHECK(bsd_CloseSocket(0, &h_base) == 0, "the other task's close succeeds");
+    h_enter_fail  = saved;
+    bsd_defer_sweep(&h_other);
+    /* Still inside accept(): the sweep must not have destroyed it. */
+    h_freed_in_accept += h_listener_freed;
 }
 
 /* ---- the scripted wait --------------------------------------------------- */
@@ -155,6 +192,9 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
         tcp->nx_tcp_socket_connect_ip.nxd_ip_address.v4 = 0x0A010063UL;
         tcp->nx_tcp_socket_connect_port = 40000;
         return call(arg, NX_NO_WAIT);
+    case STEP_CLOSE_SWEEP:
+        h_close_and_sweep();
+        return NX_NO_PACKET;
     case STEP_BREAK:
         *aborted = TRUE;
         return NX_SUCCESS;
@@ -266,11 +306,22 @@ LONG bsd_fail(struct AmiSocketBase *base, LONG code)
     return -1;
 }
 
-LONG bsd_nx_enter(struct AmiSocketBase *base) { (VOID)base; return 0; }
+LONG bsd_nx_enter(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    if (h_enter_hook)
+    {
+        h_enter_hook = 0;
+        h_close_and_sweep();
+    }
+    return h_enter_fail ? -1 : 0;
+}
 
 VOID bsd_nx_leave(struct AmiSocketBase *base) { (VOID)base; }
 VOID Forbid(VOID) { }
 VOID Permit(VOID) { }
+/* bsd_owner_drop() signals an heir; no case here has one. */
+VOID Signal(struct Task *task, ULONG mask) { (VOID)task; (VOID)mask; }
 
 LONG bsd_errno_from_nx(UINT status) { (VOID)status; return AMI_EIO; }
 
@@ -292,7 +343,6 @@ ULONG netstack_interface_epoch(UWORD index) { (VOID)index; return 0; }
 H_TRAP(UINT _nxe_tcp_socket_create(NX_IP *ip, NX_TCP_SOCKET *s, CHAR *n,
        ULONG tos, ULONG frag, UINT ttl, ULONG win,
        VOID (*urg)(NX_TCP_SOCKET *), VOID (*disc)(NX_TCP_SOCKET *), UINT size))
-H_TRAP(UINT _nxe_tcp_socket_delete(NX_TCP_SOCKET *s))
 H_TRAP(UINT _nxe_tcp_client_socket_unbind(NX_TCP_SOCKET *s))
 H_TRAP(UINT _nxe_tcp_socket_receive_notify(NX_TCP_SOCKET *s,
        VOID (*cb)(NX_TCP_SOCKET *)))
@@ -304,13 +354,10 @@ H_TRAP(VOID _nx_tcp_packet_send_fin(NX_TCP_SOCKET *s, ULONG seq))
 H_TRAP(VOID _nx_tcp_packet_send_rst(NX_TCP_SOCKET *s, NX_TCP_HEADER *h))
 H_TRAP(UINT _txe_mutex_get(TX_MUTEX *m, ULONG w))
 H_TRAP(UINT _txe_mutex_put(TX_MUTEX *m))
-H_TRAP(VOID ami_free(APTR p))
-H_TRAP(VOID ami_mem_socket_delta(LONG d))
 H_TRAP(ULONG ami_random_ulong(VOID))
 H_TRAP(ULONG ami_bsd_tcp_budget(ULONG pool, ULONG payload))
 H_TRAP(ULONG ami_bsd_tcp_window_for(ULONG pool, ULONG payload, ULONG users))
 H_TRAP(ULONG ami_bsd_tcp_window_max_for(ULONG pool, ULONG payload, ULONG users))
-H_TRAP(UINT _nxe_tcp_server_socket_unlisten(NX_IP *ip, UINT port))
 H_TRAP(UINT _nxe_tcp_server_socket_listen(NX_IP *ip, UINT port,
        NX_TCP_SOCKET *s, UINT queue, VOID (*cb)(NX_TCP_SOCKET *, UINT)))
 H_TRAP(VOID bsd_listen_callback(NX_TCP_SOCKET *s, UINT port))
@@ -318,7 +365,6 @@ H_TRAP(VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size))
 H_TRAP(VOID bsd_bzero(APTR p, ULONG size))
 H_TRAP(VOID bsd_cmsg_reset(AmiSocket *s))
 H_TRAP(VOID bsd_events_attach(AmiSocket *s))
-H_TRAP(VOID bsd_mcast_close(AmiSocket *s))
 H_TRAP(VOID bsd_raw_close(AmiSocket *s))
 H_TRAP(VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *s))
 H_TRAP(VOID bsd_tcp_urgent_notify(NX_TCP_SOCKET *s))
@@ -329,12 +375,54 @@ H_TRAP(VOID bsd_addr_to_v4mapped(NXD_ADDRESS *addr, ULONG v4))
 H_TRAP(VOID bsd_words_to_in6(const ULONG words[4], UBYTE bytes[16]))
 #pragma GCC diagnostic pop
 
+/* The listener's teardown, recorded and never freed: legal only once a case
+   has let it (h_teardown_ok), a trap otherwise, as before. */
+static VOID h_teardown_gate(const char *what)
+{
+    if (!h_teardown_ok)
+    {
+        printf("  TRAP %s\n", what);
+        abort();
+    }
+}
+
+UINT _nxe_tcp_socket_delete(NX_TCP_SOCKET *s)
+{
+    (VOID)s;
+    h_teardown_gate(__func__);
+    return NX_SUCCESS;
+}
+
+UINT _nxe_tcp_server_socket_unlisten(NX_IP *ip, UINT port)
+{
+    (VOID)ip; (VOID)port;
+    h_teardown_gate(__func__);
+    return NX_SUCCESS;
+}
+
+VOID bsd_mcast_close(AmiSocket *s) { (VOID)s; h_teardown_gate(__func__); }
+VOID ami_mem_socket_delta(LONG d)  { (VOID)d; h_teardown_gate(__func__); }
+
+VOID ami_free(APTR p)
+{
+    h_teardown_gate(__func__);
+    if (p == (APTR)&h_listener)
+        h_listener_freed++;
+}
+
 /* ---- the test ------------------------------------------------------------ */
 
 static LONG h_accept(void)
 {
     h_base.sb_Errno = 0;
     return bsd_accept(0, NULL, NULL, &h_base);
+}
+
+/* Back to what the descriptor holds, nothing owed. */
+static int h_balanced(void)
+{
+    return h_listener.as_RefCount == 1 && h_listener.as_DeferRefs == 0 &&
+           bsd_defer_head == NULL && h_listener_freed == 0;
 }
 
 int main(void)
@@ -479,6 +567,88 @@ int main(void)
               "N-088: the slot goes back to the listener, relistened by the hand-back");
         CHECK((h_listener.as_Flags & ASF_RELISTENING) == 0,
               "N-088: and the refill is let back in");
+    }
+
+    /* The pin: a close of the listener's descriptor at the wait, deferred and
+       then swept by another opener, does not destroy it under accept(). */
+    {
+        static const int s[] = { STEP_CLOSE_SWEEP };
+
+        h_reset(0, 0, s, 1);
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EBADF,
+              "pin: a listener closed during the wait is EBADF, not a wait on");
+        CHECK(h_freed_in_accept == 0,
+              "pin: the listener is not destroyed while accept() runs");
+        CHECK(h_listener_freed == 1 && h_listener.as_DeferRefs == 0 &&
+              bsd_defer_head == NULL,
+              "pin: it is destroyed once, by accept()'s own release");
+    }
+
+    /* Controls: every exit gives the pin back. */
+    {
+        static const int s[] = { STEP_MATCH };
+
+        h_reset(0, 0, s, 1);
+        CHECK(h_accept() == 1 && h_balanced(), "pin: success is balanced");
+    }
+    {
+        static const int s[] = { STEP_TIMEOUT };
+
+        h_reset(ASF_NONBLOCK, 0, s, 1);
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EWOULDBLOCK &&
+              h_balanced(), "pin: EWOULDBLOCK is balanced");
+    }
+    {
+        static const int s[] = { STEP_BREAK };
+
+        h_reset(0, 0, s, 1);
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EINTR && h_balanced(),
+              "pin: EINTR is balanced");
+    }
+    {
+        static const int s[] = { STEP_MATCH };
+
+        h_reset(0, 0, s, 1);
+        h_table[1] = BSD_FD_RESERVED;
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EMFILE && h_balanced(),
+              "pin: EMFILE (no-descriptor hand-back) is balanced");
+    }
+    {
+        static const int s[] = { STEP_REFUSED, STEP_BREAK };
+
+        h_reset(0, 0, s, 2);
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EINTR && h_balanced(),
+              "pin: a refused-peer hand-back is balanced");
+    }
+    {
+        h_reset(0, 0, NULL, 0);
+        h_enter_fail = 1;
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_ENETDOWN &&
+              h_balanced(), "pin: a refused bracket gives the pin back");
+
+        /* The descriptor closed and swept before the refused bracket: the pin
+           is the last reference, so it is owed, not released unbracketed. */
+        h_reset(0, 0, NULL, 0);
+        h_enter_fail = 1;
+        h_enter_hook = 1;
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_ENETDOWN,
+              "pin: refused bracket after a close is ENETDOWN");
+        CHECK(h_freed_in_accept == 0 && h_listener_freed == 0 &&
+              h_listener.as_RefCount == 1 &&
+              h_listener.as_DeferRefs == 1 && bsd_defer_head == &h_listener,
+              "pin: and the last reference is owed, not released outside a bracket");
+        bsd_defer_head = NULL;
+    }
+    {
+        h_reset(0, 0, NULL, 0);
+        h_listener.as_Flags &= ~ASF_LISTENING;
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EINVAL && h_balanced(),
+              "pin: EINVAL before the bracket is balanced");
+        h_reset(0, 0, NULL, 0);
+        h_base.sb_Errno = 0;
+        CHECK(bsd_accept(1, NULL, NULL, &h_base) == -1 &&
+              h_base.sb_Errno == AMI_EBADF && h_balanced(),
+              "pin: EBADF pins nothing");
     }
 
     printf("accept_refused: %lu checks, %lu failures\n", h_checks, h_failures);

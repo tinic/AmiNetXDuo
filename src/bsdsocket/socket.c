@@ -465,6 +465,26 @@ BOOL bsd_fd_reserved(struct AmiSocketBase *base, LONG fd)
     return (BOOL)(bsd_fd_peek(base, fd) == BSD_FD_RESERVED);
 }
 
+/* bsd_lookup() and a reference on what it found, under one Forbid(): a
+   caller that yields while it uses the socket keeps it alive across a close
+   of the descriptor meanwhile.  NULL for no socket; else the caller owes one
+   bsd_socket_release(). */
+static AmiSocket *bsd_lookup_pin(struct AmiSocketBase *base, LONG fd)
+{
+    AmiSocket *sock = NULL;
+
+    Forbid();
+    if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
+        sock = base->sb_Table[fd];
+    if (sock == BSD_FD_RESERVED || sock == BSD_FD_BUSY)
+        sock = NULL;
+    if (sock != NULL)
+        sock->as_RefCount++;
+    Permit();
+
+    return sock;
+}
+
 /*
  * SBTC_FDCALLBACK: tell the opener that a descriptor came or went.
  */
@@ -2560,37 +2580,69 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
     return BSD_SOURCE_INDEX;
 }
 
+/*
+ * accept()'s pin on its listener, given back with no bracket held: a release
+ * that would be the last is owed to the next bracketed close, as an
+ * unbracketed CloseSocket() owes its own.
+ */
+static LONG bsd_accept_unpin_fail(struct AmiSocketBase *base, AmiSocket *sock,
+                                  LONG error)
+{
+    Forbid();
+    if (sock->as_RefCount > 1)
+        sock->as_RefCount--;
+    else
+        bsd_socket_defer(sock);
+    bsd_owner_drop(base, sock);
+    Permit();
+
+    return bsd_fail(base, error);
+}
+
+/* After a yield: still this descriptor's socket, and still owned?  A close
+   of the descriptor meanwhile leaves only accept()'s pin, and nothing would
+   wake a wait on it (bsd_owner_drop() has cleared the owner). */
+static BOOL bsd_accept_still_open(struct AmiSocketBase *base, LONG fd,
+                                  AmiSocket *sock)
+{
+    return (bsd_lookup(base, fd) == sock && sock->as_Owner != NULL)
+               ? TRUE : FALSE;
+}
+
 LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                 register struct sockaddr *addr __asm("a0"),
                 register socklen_t *addrlen    __asm("a1"),
                 register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
-    AmiSocket  *incoming;
+    /* Pinned: every wait below yields, and the listener must outlive a close
+       of its descriptor and a deferred release swept by another opener. */
+    AmiSocket  *sock = bsd_lookup_pin(SocketBase, sock_fd);
+    AmiSocket  *incoming = NULL;
     NX_IP      *ip = bsd_stack_ip(SocketBase);
     NXD_ADDRESS peer;
     ULONG       peer_port = 0;
     ULONG       wait;
     UINT        status;
     LONG        fd;
+    LONG        rc;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
     if (addr != NULL && addrlen == NULL)
-        return bsd_fail(SocketBase, AMI_EFAULT);
+        return bsd_accept_unpin_fail(SocketBase, sock, AMI_EFAULT);
 
     if (ip == NULL)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_accept_unpin_fail(SocketBase, sock, AMI_ENETDOWN);
 
     if ((sock->as_Flags & ASF_TCP) == 0)
-        return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+        return bsd_accept_unpin_fail(SocketBase, sock, AMI_EOPNOTSUPP);
 
     if ((sock->as_Flags & ASF_LISTENING) == 0)
-        return bsd_fail(SocketBase, AMI_EINVAL);
+        return bsd_accept_unpin_fail(SocketBase, sock, AMI_EINVAL);
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_accept_unpin_fail(SocketBase, sock, AMI_ENETDOWN);
 
     wait = bsd_wait_option(sock, sock->as_RcvTimeout, 0);
 
@@ -2609,8 +2661,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
         if (!bsd_listen_rearm(SocketBase, sock))
         {
-            bsd_nx_leave(SocketBase);
-            return bsd_fail(SocketBase, AMI_ENOBUFS);
+            rc = bsd_fail(SocketBase, AMI_ENOBUFS);
+            goto out;
         }
 
         args.listener = sock;
@@ -2620,8 +2672,14 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
                                  &aborted);
         if (aborted)
         {
-            bsd_nx_leave(SocketBase);
-            return bsd_fail(SocketBase, AMI_EINTR);
+            rc = bsd_fail(SocketBase, AMI_EINTR);
+            goto out;
+        }
+
+        if (!bsd_accept_still_open(SocketBase, sock_fd, sock))
+        {
+            rc = bsd_fail(SocketBase, AMI_EBADF);
+            goto out;
         }
 
         incoming = args.ready;
@@ -2632,20 +2690,20 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         if (status == NX_NOT_CONNECTED || status == NX_IN_PROGRESS ||
             status == NX_NO_PACKET)
         {
-            bsd_nx_leave(SocketBase);
-            return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+            rc = bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+            goto out;
         }
 
         if (status == NX_WAIT_ABORTED)
         {
-            bsd_nx_leave(SocketBase);
-            return bsd_fail(SocketBase, AMI_EINTR);
+            rc = bsd_fail(SocketBase, AMI_EINTR);
+            goto out;
         }
 
         if (status != NX_SUCCESS)
         {
-            bsd_nx_leave(SocketBase);
-            return bsd_fail(SocketBase, bsd_errno_from_nx(status));
+            rc = bsd_fail(SocketBase, bsd_errno_from_nx(status));
+            goto out;
         }
 
         nxd_tcp_socket_peer_info_get(&incoming->as_Nx.tcp, &peer, &peer_port);
@@ -2667,11 +2725,18 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
             break;
 
         bsd_listen_hand_back(SocketBase, sock, incoming);
+        incoming = NULL;
+
+        if (!bsd_accept_still_open(SocketBase, sock_fd, sock))
+        {
+            rc = bsd_fail(SocketBase, AMI_EBADF);
+            goto out;
+        }
 
         if (wait == NX_NO_WAIT)
         {
-            bsd_nx_leave(SocketBase);
-            return bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+            rc = bsd_fail(SocketBase, AMI_EWOULDBLOCK);
+            goto out;
         }
 
         if (wait != NX_WAIT_FOREVER)
@@ -2759,10 +2824,9 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     if (fd < 0)
     {
         bsd_listen_hand_back(SocketBase, sock, incoming);
-
-        bsd_nx_leave(SocketBase);
-
-        return -1;
+        incoming = NULL;
+        rc = -1;
+        goto out;
     }
 
     bsd_listen_unlink(sock, incoming);
@@ -2771,13 +2835,20 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     (VOID)bsd_listen_rearm(SocketBase, sock);
 
+    rc = fd;
+
+out:
+    /* The pin, inside the bracket: if it is the last reference, the listener
+       is torn down here, where that is allowed. */
+    bsd_socket_release(SocketBase, sock);
+
     bsd_nx_leave(SocketBase);
 
-    if (addr != NULL && addrlen != NULL)
+    if (rc >= 0 && addr != NULL && addrlen != NULL)
         bsd_sockaddr_put(incoming, addr, addrlen, &incoming->as_PeerAddr,
                          incoming->as_PeerPort, incoming->as_PeerScopeId);
 
-    return fd;
+    return rc;
 }
 
 /*
