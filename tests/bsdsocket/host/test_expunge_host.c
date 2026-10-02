@@ -8,9 +8,13 @@
 #include "bsdsocket_internal.h"
 #include "aminetxduo/events.h"
 
+#include <setjmp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -333,8 +337,22 @@ VOID ObtainSemaphore(struct SignalSemaphore *s)
 VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; h_lock_depth--; }
 ULONG AttemptSemaphore(struct SignalSemaphore *s) { (VOID)s; return 1UL; }
 VOID InitSemaphore(struct SignalSemaphore *s)    { (VOID)s; }
-VOID Forbid(VOID)                                { h.forbid_depth++; }
-VOID Permit(VOID)                                { h.forbid_depth--; }
+/* A page that is readable only while Forbid() is held, for the openers
+   count (t_openers_count_under_forbid).  NULL: Forbid() only counts. */
+static VOID  *h_forbid_page;
+static size_t h_forbid_page_size;
+
+VOID Forbid(VOID)
+{
+    if (h.forbid_depth++ == 0 && h_forbid_page != NULL)
+        (VOID)mprotect(h_forbid_page, h_forbid_page_size,
+                       PROT_READ | PROT_WRITE);
+}
+VOID Permit(VOID)
+{
+    if (--h.forbid_depth == 0 && h_forbid_page != NULL)
+        (VOID)mprotect(h_forbid_page, h_forbid_page_size, PROT_NONE);
+}
 VOID Disable(VOID)                               { }
 VOID Enable(VOID)                                { }
 
@@ -1306,6 +1324,108 @@ static VOID t_loopback_startup_failure_ownership(VOID)
           "the process failure restored Exec's Forbid nesting");
 }
 
+/*
+ * NETSTATUS_OPENERS counts another opener's sockets.  That opener's own task
+ * can resize its table, or retire it on close, under Forbid() alone and free
+ * the old one after Permit(); the master's sb_Lock, which the walk holds,
+ * excludes neither.  So the count reads the table only under Forbid(): here
+ * the table is on a page that is PROT_NONE whenever Forbid() is not held,
+ * and a read outside it faults instead of racing (N-087 residue).
+ */
+static sigjmp_buf h_fault_jmp;
+
+static void h_fault(int sig)
+{
+    (void)sig;
+    siglongjmp(h_fault_jmp, 1);
+}
+
+static VOID t_openers_count_under_forbid(VOID)
+{
+    struct AmiSocketBase *child;
+    NetStatusOpener       out[2];
+    AmiSocket           **table;
+    AmiSocket             sock_a, sock_b;
+    struct sigaction      sa, old_segv, old_bus;
+    volatile LONG         n = -1;
+    LONG                  avail = -1;
+    volatile BOOL         faulted = FALSE;
+
+    printf("NETSTATUS_OPENERS counts another opener's table under Forbid()\n");
+
+    h_machine_reset(TRUE);
+
+    child = (struct AmiSocketBase *)calloc(1, sizeof(*child));
+    h_forbid_page_size = (size_t)sysconf(_SC_PAGESIZE);
+    table = (AmiSocket **)mmap(NULL, h_forbid_page_size,
+                               PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (child == NULL || table == (AmiSocket **)MAP_FAILED)
+    {
+        printf("  FAIL out of memory building the fixture\n");
+        exit(1);
+    }
+
+    /* Two sockets, a reserved slot, one in flight, the rest empty. */
+    table[0] = &sock_a;
+    table[1] = BSD_FD_RESERVED;
+    table[2] = BSD_FD_BUSY;
+    table[5] = &sock_b;
+
+    child->sb_Master    = h_base;
+    child->sb_Task      = NULL;             /* reported gone; no name read */
+    child->sb_Table     = table;
+    child->sb_TableSize = BSD_DEFAULT_DTABLESIZE;
+    /* By hand: the AddTail() and Remove() stubs here belong to other cases. */
+    child->sb_Node.mln_Succ = h_base->sb_Children.mlh_Head;
+    child->sb_Node.mln_Pred = (struct MinNode *)&h_base->sb_Children.mlh_Head;
+    h_base->sb_Children.mlh_Head->mln_Pred = &child->sb_Node;
+    h_base->sb_Children.mlh_Head = &child->sb_Node;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = h_fault;
+    sigemptyset(&sa.sa_mask);
+    (void)sigaction(SIGSEGV, &sa, &old_segv);
+    (void)sigaction(SIGBUS, &sa, &old_bus);
+
+    h_forbid_page = table;
+    (void)mprotect(table, h_forbid_page_size, PROT_NONE);
+
+    if (sigsetjmp(h_fault_jmp, 1) == 0)
+        n = bsd_openers_list(h_base, out, 2, &avail);
+    else
+    {
+        faulted = TRUE;
+        h.forbid_depth = 0;
+        h_lock_depth = 0;
+    }
+
+    h_forbid_page = NULL;
+    (void)mprotect(table, h_forbid_page_size, PROT_READ | PROT_WRITE);
+    (void)sigaction(SIGSEGV, &old_segv, NULL);
+    (void)sigaction(SIGBUS, &old_bus, NULL);
+
+    CHECK(!faulted, "the count read the other opener's table only under Forbid()");
+    CHECK(n == 1 && avail == 1, "one opener listed");
+    CHECK(faulted || out[0].nso_Sockets == 3,
+          "two sockets and the slot in flight count; the reserved one does not");
+    CHECK(h.forbid_depth == 0, "Forbid() and Permit() balanced");
+    CHECK(h_lock_depth == 0, "sb_Lock released");
+    CHECK(h.blocking_under_forbid == 0, "nothing blocked inside the Forbid()");
+
+    /* Its close retired the table: the NULL test, under the same Forbid(). */
+    child->sb_Table     = NULL;
+    child->sb_TableSize = 0;
+    n = bsd_openers_list(h_base, out, 2, &avail);
+    CHECK(n == 1 && out[0].nso_Sockets == 0, "a retired table counts none");
+    CHECK(h.forbid_depth == 0, "and the NULL path balances its Forbid()");
+
+    child->sb_Node.mln_Pred->mln_Succ = child->sb_Node.mln_Succ;
+    child->sb_Node.mln_Succ->mln_Pred = child->sb_Node.mln_Pred;
+    (void)munmap(table, h_forbid_page_size);
+    free(child);
+}
+
 int main(void)
 {
     printf("bsd_lib_expunge() host tests\n");
@@ -1323,6 +1443,7 @@ int main(void)
     t_failed_open_drains();
     t_orphans_at_expunge();
     t_loopback_startup_failure_ownership();
+    t_openers_count_under_forbid();
 #ifdef AMINETXDUO_TCP_CORK
     t_cork_pass_keeps_stack();
     t_cork_adopt_failure();

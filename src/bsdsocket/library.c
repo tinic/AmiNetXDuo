@@ -1361,20 +1361,28 @@ LONG bsd_stack_notify(struct AmiSocketBase *base, ULONG *signalled)
     return 0;
 }
 
+/* Another opener's table, so under Forbid() and not just sb_Lock: its
+   resize (socket.c) and its close (bsd_child_close()) swap or retire the
+   table under Forbid() alone and free the old one after Permit(), while the
+   child is still on sb_Children.  The whole count, not a snapshot of the
+   pointer: the free follows the Permit().  At most BSD_MAX_DTABLESIZE reads,
+   no Wait().  BSD_FD_BUSY counts, as a socket mid-allocation or mid-close. */
 static UWORD bsd_base_sockets(const struct AmiSocketBase *child)
 {
     ULONG i;
     UWORD n = 0;
 
-    if (child->sb_Table == NULL)
-        return 0;
-
-    for (i = 0; i < (ULONG)child->sb_TableSize; i++)
+    Forbid();
+    if (child->sb_Table != NULL)
     {
-        if (child->sb_Table[i] != NULL &&
-            child->sb_Table[i] != BSD_FD_RESERVED)
-            n++;
+        for (i = 0; i < (ULONG)child->sb_TableSize; i++)
+        {
+            if (child->sb_Table[i] != NULL &&
+                child->sb_Table[i] != BSD_FD_RESERVED)
+                n++;
+        }
     }
+    Permit();
 
     return n;
 }
