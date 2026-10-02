@@ -12,7 +12,7 @@
 # clients/compat/amiga_compat.h.  A signature that drifts from the declaration
 # its callers see is a silently wrong call, not a build failure.
 #
-# SIX OF THE SEVEN, and the seventh is not an oversight.  amiga_scp.c includes
+# SEVEN OF THE EIGHT, and the eighth is not an oversight.  amiga_scp.c includes
 # "scpmisc.h", which lives in the Dropbear checkout, so it cannot be compiled
 # without third_party/dropbear and the generated options.h that go with it.
 # That one stays covered by CI's candidate build.  amiga_dropbear.c, which carries
@@ -44,6 +44,7 @@ fi
 
 SHIMS=(
     clients/dropbear/amiga_dropbear.c
+    clients/dropbear/amiga_iprintf.c
     clients/compat/amiga_posix.c
     clients/compat/amiga_argv.c
     clients/compat/amiga_exit.c

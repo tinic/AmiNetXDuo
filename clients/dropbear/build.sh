@@ -120,6 +120,19 @@ echo "  CC amiga_dropbear.c"
 "$AMIGA_GCC" $DB_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -Wextra -c -o "$SHIM_O" \
              "$ROOT/clients/dropbear/amiga_dropbear.c"
 
+# Integer-only printf.  amiga_iprintf.c sends the float printf engine to
+# newlib's iprintf one; toolchain 16.2.3's -O2 newlib made the float engine
+# 16 KB bigger in each client, and nothing either client prints is a float.
+# -T keeps it for the DEBUG_TRACE timestamp's %f.
+IPRINTF_O="$CLIENT_OBJ/db-amiga_iprintf.o"
+IPRINTF_WRAPS=""
+if [ "$TRACE" = "0" ]; then
+    echo "  CC amiga_iprintf.c"
+    "$AMIGA_GCC" $DB_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -Wextra -c -o "$IPRINTF_O" \
+                 "$ROOT/clients/dropbear/amiga_iprintf.c"
+    IPRINTF_WRAPS=",--wrap=vfprintf,--wrap=_vfprintf_r,--wrap=_svfprintf_r"
+fi
+
 # The machine's one entropy pool, and the timer base it reads the E-Clock
 # through.  clients/amiga-client.sh already compiles src/common/ami_udivdi3.c
 # into every client, so reaching into src/common for a shared piece is the
@@ -140,6 +153,7 @@ echo "  CC amiga_dropbear.c"
 # take the diagnostic without taking compat.c's timer and memory halves twice.
 AMI_CFLAGS="$REPRO_CFLAGS $AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -I$ROOT/include -I$AMIGA_NDK"
 SHIM_OBJS=("$SHIM_O")
+[ -n "$IPRINTF_WRAPS" ] && SHIM_OBJS+=("$IPRINTF_O")
 for c in "$ROOT/src/common/ami_random.c" "$ROOT/src/common/compat.c" \
          "$ROOT/src/common/ami_diag.c"; do
     o="$CLIENT_OBJ/db-$(basename "${c%.c}").o"
@@ -441,7 +455,7 @@ done
 if [ -n "$MAKE_PROGRAMS" ]; then
     make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
          PROGRAMS="$MAKE_PROGRAMS" \
-         LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=_open_r,--wrap=read,--wrap=_read_r,--wrap=write,--wrap=_write_r,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS$MAP_FLAG" \
+         LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=_open_r,--wrap=read,--wrap=_read_r,--wrap=write,--wrap=_write_r,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$IPRINTF_WRAPS$PROF_WRAPS$MAP_FLAG" \
          LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
 fi
 
@@ -488,9 +502,10 @@ if [ "$WANT_SCP" = "1" ]; then
 
     for p in "${SCP_OBJECTS[@]}"; do SCP_PATHS+=("$OUT/$p"); done
     "$AMIGA_GCC" $AMIGA_CLIENT_LDFLAGS \
-        -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=fstat,--wrap=ftruncate \
+        -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=fstat,--wrap=ftruncate$IPRINTF_WRAPS \
         $MAP_FLAG \
         -o "$OUT/scp" "${SCP_PATHS[@]}" "$SCP_SHIM_O" \
+        ${IPRINTF_WRAPS:+"$IPRINTF_O"} \
         -Wl,--start-group -L"$AMIGA_CLIENT_LIBDIR" -lamigaclient -lc -Wl,--end-group
 
     # This BFD backend has historically emitted DWARF output sections as HUNK
