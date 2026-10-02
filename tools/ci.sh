@@ -413,7 +413,9 @@ host_test_targets() { # builddir
 #      501-503 with ip_detach_routes, ip_detach_routes_full and
 #      ip_detach_ndlock (N-015, N-014; all hosts, ndlock with IPv6).
 #      504 with tcp_transmit_cleanup (N-032, all hosts).
-HOST_TESTS_EXPECTED=504
+#      505 with raw_v6_lock (N-036/N-037, x86_64 only); 506-510 with the
+#      five raw_source_send arms (N-036/N-037, all hosts, with IPv6).
+HOST_TESTS_EXPECTED=510
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -424,14 +426,15 @@ case "$(uname -m)" in
     # (#53), test_netmon (F-050), test_icmp6_filter_nocmsg (F-036),
     # test_nx_nest (F-042), test_aam_delete (F-029),
     # test_unbracketed_close (F-059), test_raw_hdrincl6 (F-061),
-    # test_deferred_release (F-059) and test_hostsource (F-088), all
+    # test_deferred_release (F-059), test_hostsource (F-088) and
+    # test_raw_v6_lock (N-036), all
     # x86_64-only for
     # the reason in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 476 of 504 on the current tree.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 28)) ;;
+    # darwin-arm64 registers 481 of 510 on the current tree.
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 29)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against
