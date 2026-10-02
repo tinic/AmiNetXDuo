@@ -45,6 +45,11 @@
 #define AMI_IP_STACK_SIZE           4096
 #define AMI_ARP_CACHE_SIZE          1024
 
+/* _nx_arp_enable() divides this by sizeof(NX_ARP) and runs away on zero
+   entries (audit N-005).  */
+_Static_assert(AMI_ARP_CACHE_SIZE / sizeof(NX_ARP) >= 1,
+               "AMI_ARP_CACHE_SIZE holds no NX_ARP entry");
+
 /*
  * 4096 and not the 2048 the NetX Duo samples use: this thread reaches a
  * SANA-II device through ami_sana2_driver_entry and makes Exec DoIO/SendIO
