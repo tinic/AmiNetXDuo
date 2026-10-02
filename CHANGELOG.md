@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- TLS rejects certificates with empty version, public-key or signature fields,
+  and correctly parses certificates containing unique identifiers.
 - TLS rejects HelloRetryRequest cookies and ClientHello messages that do not
   fit their buffers, and reports failed key-share construction.
 - TLS 1.3 handshake builder failures preserve the original error and release
