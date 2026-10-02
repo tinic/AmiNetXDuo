@@ -5,8 +5,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
-- `NETSTATUS_OPENERS` counts another opener's sockets under `Forbid()`, so a
-  concurrent table resize or close cannot leave it reading a freed table.
+- NetStatus opener counts remain safe while another task resizes or closes
+  its socket table.
+- Refusing an incoming connection or exhausting descriptors no longer lets
+  listener refilling race the connection's return to the listening port.
 - DHCP clients retain conflicts reported while declining another address and
   reject truncated options without reading past the reply.
 - Raw socket endpoint changes preserve newly arriving packets while discarding
