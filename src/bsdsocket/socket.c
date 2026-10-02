@@ -2625,6 +2625,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     UINT        status;
     LONG        fd;
     LONG        rc;
+    BOOL        accepted = FALSE;   /* set with rc = fd, and only there */
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -2835,7 +2836,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     (VOID)bsd_listen_rearm(SocketBase, sock);
 
-    rc = fd;
+    rc       = fd;
+    accepted = TRUE;
 
 out:
     /* The pin, inside the bracket: if it is the last reference, the listener
@@ -2844,7 +2846,9 @@ out:
 
     bsd_nx_leave(SocketBase);
 
-    if (rc >= 0 && addr != NULL && addrlen != NULL)
+    /* Only the accepted socket's address: every failure leaves the caller's
+       addr and addrlen as they were. */
+    if (accepted && incoming != NULL && addr != NULL && addrlen != NULL)
         bsd_sockaddr_put(incoming, addr, addrlen, &incoming->as_PeerAddr,
                          incoming->as_PeerPort, incoming->as_PeerScopeId);
 

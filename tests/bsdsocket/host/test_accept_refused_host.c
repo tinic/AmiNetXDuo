@@ -361,8 +361,6 @@ H_TRAP(ULONG ami_bsd_tcp_window_max_for(ULONG pool, ULONG payload, ULONG users))
 H_TRAP(UINT _nxe_tcp_server_socket_listen(NX_IP *ip, UINT port,
        NX_TCP_SOCKET *s, UINT queue, VOID (*cb)(NX_TCP_SOCKET *, UINT)))
 H_TRAP(VOID bsd_listen_callback(NX_TCP_SOCKET *s, UINT port))
-H_TRAP(VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size))
-H_TRAP(VOID bsd_bzero(APTR p, ULONG size))
 H_TRAP(VOID bsd_cmsg_reset(AmiSocket *s))
 H_TRAP(VOID bsd_events_attach(AmiSocket *s))
 H_TRAP(VOID bsd_raw_close(AmiSocket *s))
@@ -401,6 +399,10 @@ UINT _nxe_tcp_server_socket_unlisten(NX_IP *ip, UINT port)
 }
 
 VOID bsd_mcast_close(AmiSocket *s) { (VOID)s; h_teardown_gate(__func__); }
+
+/* bsd_sockaddr_put()'s, for the address an accepted connection reports. */
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size) { memcpy(dst, src, size); }
+VOID bsd_bzero(APTR p, ULONG size) { memset(p, 0, size); }
 VOID ami_mem_socket_delta(LONG d)  { (VOID)d; h_teardown_gate(__func__); }
 
 VOID ami_free(APTR p)
@@ -416,6 +418,30 @@ static LONG h_accept(void)
 {
     h_base.sb_Errno = 0;
     return bsd_accept(0, NULL, NULL, &h_base);
+}
+
+/* With a caller's address buffer, filled with a sentinel first. */
+static UBYTE     h_addrbuf[32];
+static socklen_t h_addrlen;
+
+static LONG h_accept_addr(void)
+{
+    memset(h_addrbuf, 0xA5, sizeof(h_addrbuf));
+    h_addrlen = (socklen_t)sizeof(h_addrbuf);
+    h_base.sb_Errno = 0;
+    return bsd_accept(0, (struct sockaddr *)h_addrbuf, &h_addrlen, &h_base);
+}
+
+static int h_addr_untouched(void)
+{
+    UWORD i;
+
+    if (h_addrlen != (socklen_t)sizeof(h_addrbuf))
+        return 0;
+    for (i = 0; i < sizeof(h_addrbuf); i++)
+        if (h_addrbuf[i] != 0xA5)
+            return 0;
+    return 1;
 }
 
 /* Back to what the descriptor holds, nothing owed. */
@@ -649,6 +675,38 @@ int main(void)
         CHECK(bsd_accept(1, NULL, NULL, &h_base) == -1 &&
               h_base.sb_Errno == AMI_EBADF && h_balanced(),
               "pin: EBADF pins nothing");
+    }
+
+    /* addr/addrlen: written on success only, untouched on every failure. */
+    {
+        static const int closed[]  = { STEP_CLOSE_SWEEP };
+        static const int timeout[] = { STEP_TIMEOUT };
+        static const int brk[]     = { STEP_BREAK };
+        static const int match[]   = { STEP_MATCH };
+
+        h_reset(0, 0, closed, 1);
+        CHECK(h_accept_addr() == -1 && h_base.sb_Errno == AMI_EBADF &&
+              h_addr_untouched(), "addr: EBADF after a close leaves it alone");
+
+        h_reset(ASF_NONBLOCK, 0, timeout, 1);
+        CHECK(h_accept_addr() == -1 && h_base.sb_Errno == AMI_EWOULDBLOCK &&
+              h_addr_untouched(), "addr: EWOULDBLOCK leaves it alone");
+
+        h_reset(0, 0, brk, 1);
+        CHECK(h_accept_addr() == -1 && h_base.sb_Errno == AMI_EINTR &&
+              h_addr_untouched(), "addr: EINTR leaves it alone");
+
+        h_reset(0, 0, match, 1);
+        h_table[1] = BSD_FD_RESERVED;
+        CHECK(h_accept_addr() == -1 && h_base.sb_Errno == AMI_EMFILE &&
+              h_addr_untouched(), "addr: the EMFILE hand-back leaves it alone");
+
+        h_reset(0, 0, match, 1);
+        CHECK(h_accept_addr() == 1 && !h_addr_untouched() &&
+              h_addrlen == (socklen_t)sizeof(struct sockaddr_in) &&
+              ((struct sockaddr_in *)h_addrbuf)->sin_port == (in_port_t)BSD_HTONS((UWORD)40000) &&
+              h_balanced(),
+              "addr: success writes the peer's address");
     }
 
     printf("accept_refused: %lu checks, %lu failures\n", h_checks, h_failures);
