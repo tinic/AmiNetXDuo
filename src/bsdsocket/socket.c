@@ -1971,10 +1971,6 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
     return (sock->as_Incoming != NULL) ? TRUE : FALSE;
 }
 
-/*
- * Put a socket accept() has decided not to hand over back on the port. The
- * caller has already disconnected and unaccepted it.
- */
 static VOID bsd_listen_return(struct AmiSocketBase *base, AmiSocket *sock,
                               AmiSocket *incoming);
 
@@ -2017,6 +2013,10 @@ static VOID bsd_listen_hand_back(struct AmiSocketBase *base, AmiSocket *sock,
         sock->as_Flags &= ~ASF_RELISTENING;
 }
 
+/*
+ * Put a socket accept() has decided not to hand over back on the port. The
+ * caller has already disconnected and unaccepted it.
+ */
 static VOID bsd_listen_return(struct AmiSocketBase *base, AmiSocket *sock,
                               AmiSocket *incoming)
 {
