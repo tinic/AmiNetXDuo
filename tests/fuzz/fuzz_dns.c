@@ -12,6 +12,7 @@
  *                                and AAAA identity in the string table
  *   fuzz_dns -t cache_aaaa_holes AAAA slots with zero holes, and binary
  *                                entries kept apart from name entries
+ *   fuzz_dns -t cache_aaaa_interior  a freed interior :: slot, alone
  *
  * SPDX-License-Identifier: MIT
  */
@@ -1218,6 +1219,201 @@ static void fz_aaaa_name_kind_case(const char *name, const char *qname,
     printf("  %-30s ok\n", name);
 }
 
+/* Live slots walked down from the top by LEN, as add_string walks them: their
+   number and total LEN have to be what the counters say. */
+static void fz_cache_conserved(const char *when)
+{
+    UCHAR *top  = (UCHAR *)((ALIGN_TYPE *)((UCHAR *)fz_cache +
+                                           sizeof(fz_cache)) - 1);
+    UCHAR *tail = (UCHAR *)*(ALIGN_TYPE *)top;
+    UCHAR *p;
+    UINT   live = 0, bytes = 0;
+    USHORT len;
+
+    for (p = top; p > tail; p -= len)
+    {
+        len = *(USHORT *)(p - 2);
+        if (len < 8 || len > (UINT)(p - tail))
+            fz_fail("a slot's LEN does not fit the string table");
+        if (*(USHORT *)(p - 4) != 0)
+        {
+            live++;
+            bytes += len;
+        }
+    }
+
+    if (p != tail || live != fz_dns.nx_dns_string_count ||
+        bytes != fz_dns.nx_dns_string_bytes)
+    {
+        printf("fuzz_dns: after %s: %u live slots, %u bytes; counters %u, "
+               "%u\n", when, live, bytes, (unsigned)fz_dns.nx_dns_string_count,
+               (unsigned)fz_dns.nx_dns_string_bytes);
+        fz_fail("the live slots do not add up to string_count/string_bytes");
+    }
+}
+
+#define FZ_INNER_X      "xxxx.example.com"      /* 16: LEN 24 */
+#define FZ_INNER_Y      "yyyy.example.com"
+#define FZ_INNER_Z      "zzzz.example.com"
+
+static void fz_a_wire_lookup(const char *qname, int wire)
+{
+    FzwBuf w;
+    ULONG  address = 0;
+
+    if (wire)
+    {
+        fzw_reset(&w);
+        fzs_a_answer(&w, qname);
+        memcpy(fz_case.b, w.b, w.len);
+        fz_case.len  = w.len;
+        fz_delivered = 0;
+    }
+    else
+        fz_delivered = 1;
+
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)qname, &address, 4) !=
+        NX_SUCCESS || address != IP_ADDRESS(10, 0, 0, 9))
+        fz_fail("an A lookup did not resolve to its address");
+}
+
+/*
+ * A FREED INTERIOR slot.  X's name at the top (shared by its A and AAAA
+ * records), the AAAA :: below it, Y's name at the tail.  Only the :: record
+ * expires, so its slot is freed with live slots on both sides.  Then either
+ * a name of the same LEN or :: again goes in first.
+ */
+static void fz_aaaa_interior_case(const char *name, int name_first)
+{
+    static const UCHAR zero[16] = { 0 };
+    static UCHAR       before[sizeof(fz_cache)];
+    ALIGN_TYPE        *head_word = (ALIGN_TYPE *)fz_cache;
+    ALIGN_TYPE        *tail_word = (ALIGN_TYPE *)((UCHAR *)fz_cache +
+                                                  sizeof(fz_cache)) - 1;
+    ALIGN_TYPE         head0, tail0;
+    NX_DNS_RR         *rr;
+    UCHAR             *xs, *ys, *zs, *slot, *again;
+    UINT               count0, bytes0;
+    int                i;
+
+    fz_contract_start(name);
+
+    fz_a_wire_lookup(FZ_INNER_X, 1);
+    if (!fz_aaaa_lookup(FZ_INNER_X, zero, 2, 1))
+        fz_fail("the AAAA :: answer did not resolve");
+    fz_a_wire_lookup(FZ_INNER_Y, 1);
+
+    rr   = fz_rr_find(NX_DNS_RR_TYPE_AAAA);
+    slot = (UCHAR *)rr -> nx_dns_rr_rdata.nx_dns_rr_rdata_aaaa.nx_dns_rr_aaaa_address;
+    xs   = rr -> nx_dns_rr_name;
+    ys   = (UCHAR *)*tail_word;
+
+    if (strcmp((const char *)xs, FZ_INNER_X) != 0 ||
+        strcmp((const char *)ys, FZ_INNER_Y) != 0 ||
+        xs + 24 != (UCHAR *)tail_word || slot + 24 != xs || ys + 24 != slot)
+        fz_fail("the slots are not X, ::, Y from the top down");
+    if (fz_slot_cnt(xs, 16) != 2 || fz_slot_cnt(slot, 16) != 1 ||
+        fz_slot_cnt(ys, 16) != 1)
+        fz_fail("CNT is not 2/1/1 for X, ::, Y");
+    fz_cache_conserved("caching X, ::, Y");
+
+    head0  = *head_word;
+    tail0  = *tail_word;
+    count0 = fz_dns.nx_dns_string_count;
+    bytes0 = fz_dns.nx_dns_string_bytes;
+    memcpy(before, fz_cache, sizeof(fz_cache));
+
+    /* Only :: expires: its record is the middle one of three, too. */
+    fz_ticks += FZ_AAAA_EXPIRE;
+    if (fz_aaaa_lookup(FZ_INNER_X, zero, 2, 0))
+        fz_fail("the AAAA :: record did not expire");
+
+    for (i = 0; i < 22; i++)
+        if (slot[i] != 0)
+            fz_fail("the freed interior slot's bytes or CNT are not zero");
+    if (fz_slot_len(slot, 16) != 24)
+        fz_fail("the freed interior slot lost its LEN");
+    if (*head_word != head0 || *tail_word != tail0)
+        fz_fail("freeing an interior slot moved head or tail");
+    if (fz_dns.nx_dns_string_count != count0 - 1 ||
+        fz_dns.nx_dns_string_bytes != bytes0 - 24)
+        fz_fail("string_count/bytes did not drop by exactly one slot");
+    if (fz_slot_cnt(xs, 16) != 1)
+        fz_fail("X's name did not give back the AAAA record's reference");
+    if (memcmp(xs, before + (xs - (UCHAR *)fz_cache), 20) != 0 ||
+        memcmp(ys, before + (ys - (UCHAR *)fz_cache), 24) != 0)
+        fz_fail("a retained slot's bytes changed");
+    fz_cache_conserved("freeing ::");
+
+    fz_a_wire_lookup(FZ_INNER_X, 0);
+    fz_a_wire_lookup(FZ_INNER_Y, 0);
+
+    if (name_first)
+    {
+        /* A name of the same LEN takes the freed slot exactly; :: then goes
+           on at the tail, and is not shared with it. */
+        fz_a_wire_lookup(FZ_INNER_Z, 1);
+        zs = NX_NULL;
+        for (rr = (NX_DNS_RR *)(head_word + 1);
+             rr < (NX_DNS_RR *)*head_word; rr++)
+            if (rr -> nx_dns_rr_type == NX_DNS_RR_TYPE_A &&
+                strcmp((const char *)rr -> nx_dns_rr_name, FZ_INNER_Z) == 0)
+                zs = rr -> nx_dns_rr_name;
+        if (zs != slot || zs == NX_NULL ||
+            fz_slot_len(zs, 16) != 24 || fz_slot_cnt(zs, 16) != 1)
+            fz_fail("the same-LEN name did not take the freed slot exactly");
+
+        if (!fz_aaaa_lookup(FZ_INNER_X, zero, 300, 1))
+            fz_fail("the AAAA :: did not resolve again");
+        again = (UCHAR *)fz_rr_find(NX_DNS_RR_TYPE_AAAA) ->
+                    nx_dns_rr_rdata.nx_dns_rr_rdata_aaaa.nx_dns_rr_aaaa_address;
+        if (again == zs || again != ys - 24 || *tail_word != (ALIGN_TYPE)again)
+            fz_fail(":: did not go on at the tail, apart from the name");
+    }
+    else
+    {
+        /* :: takes its own freed slot back; the name then goes on at the
+           tail, and is not shared with it. */
+        if (!fz_aaaa_lookup(FZ_INNER_X, zero, 300, 1))
+            fz_fail("the AAAA :: did not resolve again");
+        again = (UCHAR *)fz_rr_find(NX_DNS_RR_TYPE_AAAA) ->
+                    nx_dns_rr_rdata.nx_dns_rr_rdata_aaaa.nx_dns_rr_aaaa_address;
+        if (again != slot || fz_slot_cnt(again, 16) != 1 ||
+            *tail_word != tail0)
+            fz_fail(":: did not take its freed slot back exactly");
+
+        fz_a_wire_lookup(FZ_INNER_Z, 1);
+        zs = NX_NULL;
+        for (rr = (NX_DNS_RR *)(head_word + 1);
+             rr < (NX_DNS_RR *)*head_word; rr++)
+            if (rr -> nx_dns_rr_type == NX_DNS_RR_TYPE_A &&
+                strcmp((const char *)rr -> nx_dns_rr_name, FZ_INNER_Z) == 0)
+                zs = rr -> nx_dns_rr_name;
+        if (zs == NX_NULL || zs == again || zs != ys - 24 ||
+            *tail_word != (ALIGN_TYPE)zs)
+            fz_fail("the same-LEN name did not go on at the tail, apart");
+    }
+
+    if (memcmp(again, zero, 16) != 0)
+        fz_fail("the re-added :: is not all zero");
+    fz_cache_conserved("re-adding");
+
+    /* Everything still answers byte-exactly, from the cache alone. */
+    fz_a_wire_lookup(FZ_INNER_X, 0);
+    fz_a_wire_lookup(FZ_INNER_Y, 0);
+    fz_a_wire_lookup(FZ_INNER_Z, 0);
+    if (!fz_aaaa_lookup(FZ_INNER_X, zero, 300, 0))
+        fz_fail("the re-added :: did not come back from the cache");
+
+    if (nx_dns_server_remove(&fz_dns, FZ_SERVER) != NX_SUCCESS)
+        fz_fail("nx_dns_server_remove failed");
+    fz_cache_is_empty("a server removal");
+
+    fz_pool_check();
+    (VOID)nx_dns_delete(&fz_dns);
+    printf("  %-30s ok\n", name);
+}
+
 static void fz_cache_aaaa_holes_test(void)
 {
     static const struct
@@ -1246,6 +1442,9 @@ static void fz_cache_aaaa_holes_test(void)
     fz_aaaa_name_kind_case("kind_name_then_address", "abcdefgh.ijklmno", 0);
     fz_aaaa_name_kind_case("kind_address_then_name", "abcdefgh.ijklmno", 1);
     fz_aaaa_name_kind_case("kind_address_then_upper", "ABCDEFGH.IJKLMNO", 1);
+
+    fz_aaaa_interior_case("interior_free_then_aaaa", 0);
+    fz_aaaa_interior_case("interior_free_then_name", 1);
 }
 
 static void fz_cache_aaaa_test(void)
@@ -1358,6 +1557,11 @@ int main(int argc, char **argv)
                 fz_cache_aaaa_test();
             else if (strcmp(want, "cache_aaaa_holes") == 0)
                 fz_cache_aaaa_holes_test();
+            else if (strcmp(want, "cache_aaaa_interior") == 0)
+            {
+                fz_aaaa_interior_case("interior_free_then_aaaa", 0);
+                fz_aaaa_interior_case("interior_free_then_name", 1);
+            }
             else
             {
                 printf("fuzz_dns: no contract test named '%s'\n", want);
