@@ -31,6 +31,11 @@ int main(void)
 {
     AmiSocket a;
     AmiSocket b;
+    struct AmiSocketBase base;
+    NX_IP ip;
+    NXD_ADDRESS dest;
+    ULONG saved;
+    LONG chosen;
     const ULONG group6[4] = { 0xff020000UL, 0, 0, 1 };
 
     memset(&a, 0, sizeof(a));
@@ -90,6 +95,71 @@ int main(void)
     h_epoch[2]++;
     check(bsd_mcast_preference(&a.as_Mcast6If, a.as_Mcast6IfEpoch) == -1,
           "stale IPv6 send preference reverts to routing");
+
+    /* N-035: NetX's IPv6 UDP header builder reads the socket TTL, not the
+       instance hop limit. Exercise the actual producer on route-selected and
+       explicitly selected sends; unrelated TCP/ping instance state must stay
+       untouched throughout allocation/send, not merely be restored later. */
+    memset(&base, 0, sizeof(base));
+    memset(&ip, 0, sizeof(ip));
+    memset(&dest, 0, sizeof(dest));
+    base.sb_StackRefs = 1;
+    base.sb_StackIp = &ip;
+    ip.nx_ipv6_hop_limit = 64;
+    a.as_Ttl = 128;
+    a.as_McastTtl = 7;
+    a.as_Mcast6Hops = 1;
+    a.as_Mcast6If = -1;
+    dest.nxd_ip_version = NX_IP_VERSION_V6;
+    memcpy(dest.nxd_ip_address.v6, group6, sizeof(group6));
+    bsd_mcast_prepare_send(&a, &dest);
+    chosen = bsd_mcast6_prepare_send(&base, &a, &dest, &saved);
+    check(chosen == -1, "IPv6 group without interface uses route");
+    check(a.as_Nx.udp.nx_udp_socket_time_to_live == 1,
+          "default multicast hop limit reaches socket header producer");
+    check(ip.nx_ipv6_hop_limit == 64,
+          "multicast prepare cannot alter concurrent TCP/ping hop limit");
+    bsd_mcast6_finish_send(&base, saved);
+
+    a.as_Mcast6If = 2;
+    a.as_Mcast6IfEpoch = h_epoch[2];
+    ip.nx_ipv6_address[3].nxd_ipv6_address_valid = 1;
+    ip.nx_ipv6_address[3].nxd_ipv6_address_state = NX_IPV6_ADDR_STATE_VALID;
+    ip.nx_ipv6_address[3].nxd_ipv6_address_attached = &ip.nx_ip_interface[2];
+    ip.nx_ipv6_address[3].nxd_ipv6_address_index = 3;
+    ip.nx_ipv6_address[3].nxd_ipv6_address[0] = 0xfe800000UL;
+    a.as_Mcast6Hops = 255;
+    bsd_mcast_prepare_send(&a, &dest);
+    chosen = bsd_mcast6_prepare_send(&base, &a, &dest, &saved);
+    check(chosen == 3, "IPv6 selected interface retains address-index choice");
+    check(a.as_Nx.udp.nx_udp_socket_time_to_live == 255,
+          "explicit multicast hop limit reaches socket header producer");
+    check(ip.nx_ipv6_hop_limit == 64, "explicit hops leave instance unchanged");
+    bsd_mcast6_finish_send(&base, saved);
+
+    a.as_Mcast6Hops = 0;
+    bsd_mcast_prepare_send(&a, &dest);
+    check(bsd_mcast6_prepare_send(&base, &a, &dest, &saved) == BSD_MCAST6_NO_LINK,
+          "zero hops remains host-only no-send");
+    check(ip.nx_ipv6_hop_limit == 64, "zero hops leave instance unchanged");
+    bsd_mcast6_finish_send(&base, saved);
+
+    dest.nxd_ip_address.v6[0] = 0x20010db8UL;
+    bsd_mcast_prepare_send(&a, &dest);
+    check(bsd_mcast6_prepare_send(&base, &a, &dest, &saved) == -1,
+          "IPv6 unicast keeps normal route path");
+    check(a.as_Nx.udp.nx_udp_socket_time_to_live == 128,
+          "next unicast resets socket hop limit");
+    bsd_mcast6_finish_send(&base, saved);
+
+    dest.nxd_ip_version = NX_IP_VERSION_V4;
+    dest.nxd_ip_address.v4 = 0xe0000001UL;
+    bsd_mcast_prepare_send(&a, &dest);
+    check(bsd_mcast6_prepare_send(&base, &a, &dest, &saved) == -1,
+          "IPv4 group is not treated as IPv6");
+    check(a.as_Nx.udp.nx_udp_socket_time_to_live == 7,
+          "IPv4 multicast TTL preserved");
+    bsd_mcast6_finish_send(&base, saved);
 
     printf("mcast epoch: %u checks, %u failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
