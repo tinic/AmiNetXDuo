@@ -62,7 +62,12 @@ EXPECT_GCC_VERSION="16.2.0b"
 
 # amiga-gcc target list.  NOT `all`: that drags in gdb, which wants a host
 # GMP/MPFR it does not need here, and libSDL12, which this project never uses.
-MAKE_TARGETS="binutils gcc gprof fd2sfd fd2pragma sfdc vasm libnix libgcc libpthread ndk ndk13"
+# GCC/libnix can install an older bootstrap libc before the pinned newlib
+# tree is built. Build newlib after libnix so its libc.a wins in every
+# multilib, but before libgcc's C++ runtime, which needs newlib math headers.
+# Separate invocations prevent -j from racing those installs.
+MAKE_TARGETS="binutils gcc gprof fd2sfd fd2pragma sfdc vasm libnix ndk ndk13"
+POST_NEWLIB_TARGETS="libgcc libpthread"
 
 # --------------------------------------------------------------- options ----
 
@@ -478,6 +483,15 @@ fi
 mkdir -p "$PREFIX"
 echo "==> make $MAKE_TARGETS"
 ( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" $MAKE_TARGETS )
+echo "==> make newlib (after libnix, before the C++ runtime)"
+( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" newlib )
+echo "==> make $POST_NEWLIB_TARGETS"
+( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" $POST_NEWLIB_TARGETS )
+
+# Catch the precise stale allocator that escaped the 16.2.2 packages even
+# though their source checkout carried the fix.  This checks the *installed*
+# libraries, not merely the pinned source or build logs.
+python3 "$HERE/check-toolchain-malloc.py" "$PREFIX"
 
 # ------------------------------------------------------------- post-build ----
 

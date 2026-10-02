@@ -31,13 +31,14 @@ set -euo pipefail
 # below.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types and the
 # sources are written to the spellings both accept.
 TC_GCC_VERSION="16.2.0b"
-# 16.2.2 is an immutable asset series built from the pinned GCC fork commit
-# 243a0096 (the m68k sibcall/a0 wrong-code fix). The GCC version string remains
-# 16.2.0b. Older assets and their hashes remain available at their original tags.
-TC_ASSET_VERSION="16.2.2"
+# 16.2.3 rebuilds the pinned newlib allocator in every multilib after the
+# compiler libraries. The GCC fork remains at 243a0096, and its reported
+# version remains 16.2.0b. Older asset hashes remain at their original tags.
+TC_ASSET_VERSION="16.2.3"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
-TC_MIRROR_REPO="tinic/AmiNetXDuo"
+# Compiler assets live with the fork rather than topping the product releases.
+TC_MIRROR_REPO="tinic/gcc"
 TC_MIRROR_TAG="toolchain-m68k-amigaos-gcc-${TC_ASSET_VERSION}"
 
 # --------------------------------------------------------------- platform ---
@@ -50,11 +51,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="3e57867837642ddf4b3586ceffd9aa83f52f42f2ca865961022bcbda32c77212"
+        TC_SHA256="b24ce5d006514b2f471daac564838ac0aa2adff8f21aa54d2afc6d6b256cd1f3"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="2ebc324ca0aa51b982cb1eb86fe31886e3034e97089f352c3ce5bcf429e589c1"
+        TC_SHA256="09d61276d2e1684d1040f9e06f8d927758fc8d554f255e843822e9e6ce233a4f"
         ;;
     *)
         TC_PLATFORM=""
@@ -212,6 +213,7 @@ if [ "$FORCE" = "0" ] && [ -x "$ROOT/bin/m68k-amigaos-gcc" ]; then
     # new repair even though CI's separate cache key cannot.  Repair and check
     # it before returning rather than trusting how it first arrived.
     repair_and_verify_crt0 "$ROOT" || exit 1
+    python3 "$(dirname "$0")/check-toolchain-malloc.py" "$ROOT" >&2 || exit 1
     # A cache that already holds the pinned tree took this exit without looking
     # at `current`, so a symlink the swap above failed to move stayed wrong for
     # every later run as well.  Repointing is this script's own bookkeeping.
@@ -299,6 +301,8 @@ fi
     echo "!! extracted tree has no NDK headers" >&2
     exit 1
 }
+python3 "$(dirname "$0")/check-toolchain-malloc.py" \
+    "$TMP/x/$TC_PREFIX_IN_TAR" >&2 || exit 1
 
 # Newlib crt0 defects have appeared in the entry/exit frame, the value passed
 # as argv, and the storage written during argv initialization.  Repair them

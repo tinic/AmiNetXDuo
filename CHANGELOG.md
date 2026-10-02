@@ -1,241 +1,226 @@
 # Changelog
 
 User-visible changes, newest first. Internal work is in the git log.
-
-New entries go under `Unreleased` and nowhere else. A version heading below it
-has shipped and is history; three entries landed in one during 2026-08-01 and
-had to be moved out, because a branch started before a release still shows that
-version at the top when it merges.
+Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
-- Reattaching to the `/shell` web terminal shows the Shell's prompt again instead of a blank
-  screen, and a scripted `hwshell` run leaves the standard `%N.%S> ` prompt behind instead of
-  its one-off `HWSH-` token.
-- `anxnet.device`, `anxgenet.device` and `anxwifipi.device` from earlier releases work with this
-  `bsdsocket.library`. A pairing of a newer library and an older driver brought the interface
-  online, passed no frames and wrote received frames into low chip memory.
-- A drawer install writes `DEVICE=AmiNetXDuo:Devs/Networks/<driver>` for its own drivers. Moving the
-  `AmiNetXDuo:` assign to another drawer moves the drivers with the library.
-- A drawer reinstall that keeps the existing interface files rewrites a `DEVICE=` line naming one of
-  these drivers by an absolute path into the drawer to the same `AmiNetXDuo:` form. Other lines,
-  third-party drivers, comments and protection bits stay as they were.
-- `anxwifipi.device` uses the library's single-copy receive path.
-- `RemoveNetInterface` no longer stalls the other interfaces while it takes one down. `FORCE` completes
-  when the device still holds requests and keeps that device until it returns them. A connection in
-  `TIME_WAIT` no longer counts as open.
-- A `tls.library` server with an RSA key completes a TLS 1.2 ChaCha20-Poly1305 handshake. With this
-  build's register-argument change it stopped after accepting the connection.
-- Every figure below is from a tree with nothing uncommitted, and that matters
-  here more than usual: the build stamps `-dirty` into the version hash inside
-  every image whenever `git status` is not empty, and it lands unevenly -- 8
-  bytes on the rp0 arm against 4 on the rp3 arm in the default drawer, so a
-  dirty tree moves the delta. Commit or stash before measuring a size here.
-- `-mregparm=3` is what every drawer builds with, so our own calls pass their
-  arguments in registers. `bsdsocket.library` 353,404 -> 329,464 loaded bytes,
-  370,880 -> 346,608 file, 343,420 -> 319,480 of code; `anxnet.device` 43,584 ->
-  40,144 loaded, 45,704 -> 42,228 file; the resident pair -27,380.
-- Default drawer, 137 images: 7,917,004 -> 7,707,384 loaded (-209,620, -2.65%),
-  6,772,936 -> 6,560,528 file (-212,408, -3.14%). Minimal -93,460 loaded, micro
-  -87,364. Loaded is CODE + DATA + BSS, what `LoadSeg` needs room for. Measured
-  against the same tree built with `-DAMINETXDUO_REGPARM=0`.
-- Five test images grew 4-20 bytes: `tests/perf/chipscreen` +20,
-  `tests/perf/n68kmv` +16, `tests/tools/AamProbe`, `ResolveBreak` and `PtrProbe`
-  +4 each. No shipping image grew, and no image is in one arm only.
-- No LVO changed: every one is entered through a register the NDK headers pin.
-  207 foreign direct calls in `bsdsocket.library` at regparm 0, 201 at regparm 3,
-  and the only sites pushing in neither arm are libgcc's internal `jsr`.
-- The boundaries the compiler does not build keep the stack convention, pinned
-  where declared: `main()` (`crt0.o` and `src/tools/tool_startup.S` push `argv`
-  then `argc`; `include/aminetxduo/asm_main.h`), the assembly in `src/net68k` and
-  `src/crypto68k` reading `4(sp)`, `8(sp)`, `12(sp)` (`asm_abi.h`), `libc.a`,
-  `amiga.lib`, and the OS entry points whose registers the headers pin by name.
-- Gate: `-Wmissing-prototypes` with `-Werror=implicit-function-declaration`, and
-  an `#error` in `include/aminetxduo/asm_main.h` unless the m68k build is C23 or
-  later -- where `()` means `(void)` and an unprototyped `f(a, b)` is a hard
-  error. `-Wstrict-prototypes` was removed: it cannot fire on the m68k arm, and
-  the three host sites it does fire on are the NDK's and the vendored tree's.
-- `src/net68k/n68k_memcpy_hook.c` includes `<string.h>`, so its stack convention
-  is stated by a declaration and not left to GCC's recognition of the name
-  `memcpy`. Two clean trees differing only in that include leave both shipping
-  images byte-identical but for the 7 hash bytes the version string carries.
-- `tests/fuzz/CMakeLists.txt` puts `include/` on `fuzz_tls_crypto`'s path for
-  `src/crypto68k/crypto68k.h`'s `<aminetxduo/asm_abi.h>`. That target exists
-  only where `sizeof(void*) == 4`, so CI was the first to build it: it found the
-  gap in host32 and sanitize32, not on any host or cross arm.
-- Host tier: 434 targets, 0 warnings, ctest 493/493. 32-bit host tier: 24/24 and
-  within its duration budget. Emulator tier: green on both arms.
-- Build consequence: an image must come from one configuration. A `build/`
-  directory made before this change needs its objects rebuilt, not relinked.
+### Installation and compatibility
 
-- `CheckNetConfig` names the file a default-gateway finding was read from even
-  when that file is an interface file. `load_gateway()` falls back to a
-  `GATEWAY=` in the first interface file when neither
-  `DEVS:Internet/default_gateway` nor `DEVS:Internet/routes` sets a default, and
-  the check reported that as a finding in `routes` at line 0, naming a file that
-  had nothing to do with it. The check now replays the loader's own acceptance
-  for the default -- a bare `GATEWAY=`, `DEFAULT=` or `DEFAULTGATEWAY=`, first
-  wins, and a `GATEWAY` beside a `DESTINATION` is a specific route, not the
-  default -- so the named file and line are the ones the loader took.
-- `CheckNetConfig` names the file a default-gateway finding was read from, not
-  the one the loader read last. `load_gateway()` reads
-  `DEVS:Internet/default_gateway` first and that value wins, then
-  `DEVS:Internet/routes`; the gateway check searched `routes` first, so with a
-  `GATEWAY` in both files a finding about the router named `routes` and a real
-  line number beside a router the machine does not use. The check now asks the
-  compatibility file first, matching the loader's order.
-- `traceroute` measures a per-probe wait from the whole EClock and caps `WAIT`
-  at 214748 seconds instead of reading the timer's low word alone. The wait is
-  multiplied by 10000 to tenths of a millisecond and compared with a signed
-  32-bit difference, but the clock was the low word, which wraps every ~100
-  minutes: a wait straddling that wrap, however short, never reached its
-  deadline and over-waited, and a `WAIT` whose span reached 2^31 read the probe
-  as already timed out and ended it immediately. The clock now divides a full
-  64-bit EClock delta by the full measured rate to an exact tenth of a
-  millisecond (a truncated divisor ran the wait ~1.3% short), its 32-bit result
-  wraps only every ~4.97 days, and `WAIT` is capped below the signed half-range.
-- `arp` no longer reports an IPv6 address as off-link when the routing table
-  could not be read. `tool_routes6()` returned success for both a genuine empty
-  table and a `NETSTATUS_ROUTES6` selector the library does not know, so `arp`
-  read "no on-link prefix" as fact and asserted the address goes to a router
-  with no route data behind it; a failed query now returns failure, and `arp`
-  says it cannot tell.
-- `CheckNetConfig` names the line each `ADDRESS6` finding was read from, not
-  always the first `ADDRESS6` line. An interface may carry two addresses, and
-  a fault in the second was reported against the first address's line, which
-  was fine; the check now re-derives the line by replaying the loader's own
-  acceptance (the address's value, its `%zone`, the `IPADDRESS6` alias),
-  leaving the public `AmiIp6Address` layout unchanged.
-- A configuration read that runs out of memory resolving its `DEVS:` path no
-  longer falls back to the system drawer. On a machine that also runs
-  Roadshow, the unredirected `DEVS:` path is that stack's file, so an
-  allocation failure could silently load another stack's routes, name servers
-  or interfaces; the read and the interface scan now report the failure.
-- `netdb` answers `AMI_CFG_ERR_NOMEM` when a database file is read but its
-  buffer cannot be allocated, instead of substituting the built-in defaults
-  and answering success. A hosts, networks, protocols or services file that
-  runs out of memory now leaves its table unloaded and names it in the result;
-  the load had previously reported that fallback read as a successful load.
-- `iperf` decodes a datagram id without negating the most negative value. A
-  wire id of 0x80000000 is -2147483648, whose negation does not fit a 32-bit
-  long and an optimizing build could fold it into anything; the id is now
-  reached by subtraction, which stays in range.
-- `httpd` refuses a WebDAV date whose day does not exist in its month. The
-  parser accepted any day up to 31 and the civil roll moved an invalid day
-  silently into the next month: a 29th in a non-leap February, any 30th or
-  31st February, and 31 April, so a PROPPATCH could write the rolled date; a
-  day past the month now fails the parse.
-- `ShowNetStatus` EVENTS labels the value of a device-open failure as the
-  library's status code, not an OpenDevice error. The number is an
-  AMI_NET_ERR_* value, so the label named a quantity no emitter supplies.
-- A command that cannot find an interface by name no longer lists the
-  interfaces whose card never opened. The lookup skips a cleared slot, so the
-  list under "no such interface" no longer offers a name the search refused.
-- `httpd` uses the proper reason phrases for 304, 426 and 502 responses
-  instead of printing `Unknown` in those status lines.
-- `telnet` reads from the socket between chunks of scripted input, not only
-  after the input ends. A large script against an echoing peer could fill the
-  receive buffer, stop the peer reading, and stall the blocking send before
-  input EOF; the socket is now polled after each chunk without slowing a
-  silent peer by 50 ms per chunk.
-- `telnet` flushes a carriage return held from the previous byte before it
-  starts to read an IAC command. A CR followed by an escaped 0xFF (IAC IAC)
-  put the 0xFF out first and then dropped the CR when the segment ended; the
-  bare CR now comes out ahead of the byte.
-- `sntp` writes its request's transmit fraction in NTP's binary fraction,
-  2^32 units to the second, not raw microseconds. A request sent half a second
-  past the second read as a fraction of a millisecond into it, so a capture or
-  a server log of the request did not name the time it left; the exchange never
-  depended on the value, only echoing it back.
-- `arp` refuses `UNIT` on an IPv4 `SET`. The IPv4 ARP cache is one table for
-  the whole machine, not one per interface, so a `UNIT` named no interface
-  and the entry was added without it. The command answers an error instead of
-  silently dropping the request, and an IPv6 `SET` still honors `UNIT` for its
-  per-interface neighbour cache.
-- `sntp` watches for its reply with the same 256-descriptor `ToolFdSet` the
-  other commands use, not a single `ULONG` shifted by the descriptor number.
-  A socket the library may number at 32 or above is now seen in the set
-  instead of silently omitted.
-- `httpd` refuses a `PROPFIND` that names more than eight properties, as
-  `PROPPATCH` already does. A 207 answering only about the first eight would
-  read as one about all of them, so the request is answered 400 instead of an
-  incomplete multistatus.
-- `CreateAmiNetXDuoStatusReport` reports `stack.status=too_old` only for a
-  library below the version or revision the netstatus query needs. A resident,
-  current library whose query open failed reports `unavailable`, and one whose
-  `AMITCP` port went away during the report reports `not_running`.
-- `httpd` falls back to its host console encoder if the ZZ9000 replies to a
-  band request with an unrelated opcode or a truncated payload, instead of
-  treating those bytes as a completed frame.
-- `NetTrace` and `NetCapture` bound each capture record's header and payload
-  separately instead of by their sum. A record whose claimed length wrapped a
-  32-bit total could pass the old check and make the command read past the
-  capture buffer; the two fields are now each held within the bytes actually
-  read.
-- `iperf` no longer reports 0 bit/s for a transfer that finished inside one
-  clock tick. A run that moved bytes but whose duration rounded to zero uses a
-  one-millisecond lower bound for the rate instead of a rate that looks like
-  nothing was measured.
-- `iperf` refuses a UDP receive buffer smaller than 128 bytes. Its server
-  answers the end-of-test datagram with a 128-byte report written into the
-  buffer it read datagrams into, and a smaller buffer had no room for it.
-- `WaitSelect` re-arms a large timeout as the true remainder instead of a
-  wrapped 32-bit value. A wait accepted for more than ~71 minutes, when a kept
-  timer request fired early and the call had to re-arm the balance, multiplied
-  the remaining ticks through a 32-bit microsecond constant and wrapped, cutting
-  the wait short to a fraction of the requested time.
-- `WaitSelect` keeps the documented 100,000,000 s maximum but no longer drives
-  the deadline as 32-bit *signed* ticks once the tick total reaches them. A
-  timeout that large arms its full timer.device timeval and treats the reply as
-  the terminal timeout (no signed re-arm or keep/cancel), so it waits the full
-  duration instead of returning early, and it takes its request back on data, a
-  break, or a failed poll so the next wait is not handed a due time it cannot
-  judge.
-- `WaitSelect` saturates the timeout's tick total before adding its rounded
-  microseconds, so a valid timeout whose whole-second ticks plus the sub-second
-  carry would wrap past `ULONG_MAX` can no longer collapse to a near-zero
-  deadline and fire at once; it keeps the terminal path and waits the full
-  duration.
-- `ShowNetStatus` no longer reprints the previous pass's socket list once the
-  stack has stopped. Its `TCP SOCKETS` / `UDP SOCKETS` sections now say the
-  stack is not readable when there is no live snapshot, instead of showing stale
-  sockets or a misleading `(none)`.
-- The tools check the running `bsdsocket.library` identity before calling
-  DNS-list extension vectors that an older foreign stack may not provide.
-- `NetSetup` rejects `GATEWAY=0.0.0.0` and drops an interactively entered
-  zero router instead of writing an invalid default route.
-- `NetSetup` no longer reports a write that fails only at its final `Close()`
-  as success, and restores the `.old` backup on every write failure instead of
-  leaving it stranded or deleted.
-- `NetSetup` refuses to write a `CONFIGURE6` line against a
-  `bsdsocket.library` built without IPv6 (the minimal or micro drawer), instead
-  of leaving a configuration that library cannot use.
-- `NetSetup` no longer rejects a non-contiguous netmask entered interactively,
-  matching the command line and the config loader, which accept any dotted
-  mask the stack itself will use.
-- `AMINETXDUO_MAX_INTERFACES` above 32 is now a compile error; the DHCP
-  resolver's pending-interface set is one 32-bit word and cannot name an
-  index past bit 31.
-- `AddNetInterface` gives a static interface with no `NETMASK` line the same
-  /24 default the start-up pass does, instead of a zero mask that made the
-  interface treat the whole address space as directly reachable.
-- The remote-framebuffer encoder refuses a screen whose tile grid does not fit
-  the 16-bit index the frames carry on the wire; a grid that large had its
-  indices truncated, and the browser drew a corrupted picture with no error on
-  either end.
-- `CheckNetDevice` reports the mapped packet-buffer read-back failure when a
-  Hydra or LAN Rover fails that probe, instead of "the chip core
-  refused it and did not say why".
-- The dead-task sweep clears a log hook (`SBTC_LOG_HOOK`) installed by a
-  program that exited without closing the library. Deliveries after the sweep
-  cannot use that hook; an already in-flight callback is not affected.
-- `El3Diag` reads the 3c589 statistics counters under one `Disable()` and
-  restores window 1 before printing them, so the diagnostic cannot leave the
-  live driver addressing the wrong register window.
-- `anxnet.device`: in promiscuous mode, frames the DP8390 received with a CRC,
-  alignment, or FIFO-overrun error are no longer handed up to the stack as
-  good; the chip saves those frames under `ED_RCR_SEP`, and the receive walk
-  was delivering them anyway.
+- Smaller libraries and commands use register arguments internally; public
+  library vectors and external calling conventions remain compatible.
+- Older `anxnet.device`, `anxgenet.device` and `anxwifipi.device` drivers work
+  with the new `bsdsocket.library`, without stalled traffic or stray writes.
+- Drawer installs use `DEVICE=AmiNetXDuo:Devs/Networks/<driver>`. Moving the
+  assign moves the supplied drivers with the library.
+- Drawer reinstalls update kept absolute paths to the supplied drivers.
+  Third-party drivers, other settings, comments and protection bits are kept.
+- `WaitSelect` now returns `EINVAL` when called by a task other than the
+  library-base opener, including polling and untimed waits.
+
+### Network configuration and interfaces
+
+- DHCPv6 AUTO ignores router-advertisement flags from other interfaces and
+  retries after a transient client start or request failure.
+- Address-allocation requests send the requested DHCP lease time.
+- Deleting an in-flight address-allocation message defers its disposal until
+  the worker finishes.
+- Explicit default-gateway changes remain effective across a racing DHCP
+  update.
+- IPv6 source selection rejects an unspecified destination and honors
+  interface priority after choosing the longest matching on-link prefix.
+- `IFA_HardwareAddress` correctly reads the NDK's length-and-address structure.
+- IPv6 neighbor-cache updates reject inactive or out-of-range interface indices.
+- Failed interface removal preserves the interface's capture registration.
+- `RemoveNetInterface` no longer stalls other interfaces during driver shutdown.
+  `FORCE` retains a device still holding requests; `TIME_WAIT` is not treated
+  as an open connection.
+- The `genet.device` keep-online workaround accepts driver paths and case
+  variations.
+- A refused repeat `S2_ONLINE` preserves a shared device's existing user count
+  and live link state. Failed activation clears stale online flags.
+- `AddNetInterface` keeps an attached `STATE=DOWN` interface down, avoids
+  indefinite static-address readiness waits and defaults an omitted static
+  netmask to /24.
+- `Online` and `Offline` accept a unique driver at a nonzero unit without an
+  explicit `UNIT`; ambiguous drivers require a unit.
+- `Online` and `Offline` distinguish a vanished interface or failed status
+  query from a timeout.
+- `DeleteNetRoute 0.0.0.0` finds a static /0 route. Explicit masks require an
+  exact match; missing IPv4 or IPv6 routes report an error.
+- `ConfigureNetInterface` distinguishes failed IPv6 route queries from empty
+  tables and checks IPv6 support before applying a mixed-family request.
+- `ConfigureNetInterface` distinguishes DHCP timeout from Ctrl-C, labels
+  `forcerenew` correctly and reports an unreadable MTU as unconfirmed.
+- `NetSetup` bounds driver names, rejects an unspecified default gateway and
+  refuses IPv6 configuration against an installed IPv6-off library.
+- `NetSetup` accepts the same dotted netmasks interactively and on the command
+  line, and restores the original file after ordinary open, write or close
+  failures.
+- Resolver `PREFER=static` and `PREFER=dynamic` settings order live DNS servers.
+  An unset preference retains file-first ordering.
+- A configured `name_resolution` hostname is not overwritten by hosts-file
+  fallback data; new status tools identify the hostname's source.
+- Configuration allocation failures are reported instead of loading another
+  stack's `DEVS:` files or silently substituting built-in network databases.
+- Interface-drawer allocation failures and rejected `NAMESERVER` values are
+  reported; inert numeric `IPTYPE` settings are identified as ignored.
+- `CheckNetConfig` uses the loader's parsing rules for all four network
+  databases, including `networks`, quoted fields, numeric ranges and CR lines.
+- `CheckNetConfig` reports dropped aliases, embedded NULs, unreadable or
+  oversized files, incomplete reads and allocation failure.
+- `CheckNetConfig` names the accepted setting's source and line, including
+  repeated IPv4/IPv6 addresses, gateways, name servers and device settings.
+  Long lines no longer distort line numbers or truncate reported paths.
+- `CheckNetConfig` gives static-network gateway and name-server advice for
+  AutoIP interfaces instead of treating them as DHCP.
+
+### Sockets, packet capture and shutdown
+
+- Nested stack calls require the task that owns the library base's bracket.
+- Library expunge unlinks the library before teardown can wait, preventing a
+  racing open from acquiring a base about to be freed.
+- Closing a shared socket transfers ownership and wakeups to a surviving
+  holder; closing a `Dup2Socket` alias preserves the remaining alias's owner.
+- `Dup2Socket` retains its source and claims its target across callbacks.
+  Refused replacements restore the old descriptor unless the restoration
+  callback also refuses.
+- Parked socket wrappers are reclaimed after an unbracketed close once stack
+  shutdown is confirmed.
+- TCP sends and `MSG_WAITALL` receives share one finite socket-timeout budget
+  across their internal waits.
+- `WaitSelect` handles long timeouts without tick-conversion or re-arm overflow.
+- Raw IPv6 `IP_HDRINCL` sends translate the header instead of sending it as
+  payload, and reject invalid, mapped or unspecified header destinations.
+- Raw ICMPv6 defaults to pass-all when ancillary messages are disabled.
+  Socket options at the wrong protocol level are rejected.
+- `gethostid()` prefers an online, addressed interface, with the previous
+  primary-interface fallback when no interface is online.
+- TCP-handler and ARexx startup handshakes use private signals.
+  `TCP:` reports bytes already sent when a later write fails.
+- Dead-task cleanup removes registered log and monitor hooks; callbacks
+  already in flight remain outside this change.
+- BPF has room for every configured physical interface plus loopback.
+- BPF rejects zero-length reads and unaligned filter programs, rounds positive
+  short read timeouts up and prevents large timeouts from wrapping.
+- A waiting BPF read refuses a channel replaced during the wait. Capture-hook
+  registration is serialized with bind-state changes.
+- Contended transmit capture skips observational frames instead of blocking
+  network sends.
+- Capture timestamps account for the configured Locale GMT offset. Daylight
+  saving or manual clock shifts without a matching offset remain unsupported.
+- `NetTrace` and `NetCapture` reject malformed records whose lengths would
+  wrap the capture-buffer bounds.
+- Concurrent health-status publication no longer reinitializes a registered
+  semaphore.
+
+### Drivers and statistics
+
+- `anxwifipi.device` uses the library's single-copy receive path.
+- ZZ9000 receive checksum copies fold carry from the final bytes correctly.
+- DP8390 promiscuous receive drops CRC, alignment and FIFO-overrun frames.
+- AX88796B flow-control configuration survives the post-attach reset.
+- Blank NE2000 and EtherLink III MAC PROMs use the fallback address path.
+- EtherLink III board activation uses the correct register bit in both bus
+  byte orders.
+- PCMCIA opens reject an impossible named card instance before claiming the
+  single slot.
+- Device-tree translation rejects parent addresses above the 32-bit range.
+- Driver `BeginIO` rejects short requests without writing past their end;
+  IPv6 receive verification checks short headers and payload-length overflow.
+- Concurrent packet-type tracking updates cannot lose or duplicate a slot.
+- Batch receive is advertised only when the opener supplies its copy callback.
+  Beam-clock calibration runs at task level, not during interrupt service.
+- Batch receive statistics count each frame once; multicast counts exclude
+  only the complete Ethernet broadcast address.
+- GENET clears stale link-speed reports on restart, uses the correct overflow
+  counter register and bounds receive lengths to the descriptor's slot.
+- Receive-verifier error and skip counters are present in normal builds;
+  successful-packet counters remain optional.
+- Failed mbuf slab allocation counts one drop, not two.
+- `El3Diag` restores the live driver's register window before printing
+  statistics.
+- `CheckNetDevice` reports mapped packet-buffer probe failures, examined CIS
+  entries and applicable transfer modes without inventing a failure cause.
+  A refused pinned-card probe is not reported as proof that the card is absent.
+- `NetDevStats CARD ""` is treated as an unpinned card request.
+
+### TLS and account databases
+
+- RSA key caches belong to their server certificate and are discarded before
+  its buffers are freed.
+- Verified TLS connections fail early when the certificate registry is full.
+- Trust-store reads use a coherent index and root snapshot; verified session
+  resumption checks current root certificates against saved bindings.
+- TLS certificate-time checks reject malformed or overflowing Amiga dates.
+- ALPN rejects oversized local protocol names and sends
+  `no_application_protocol` when a configured server has no matching protocol.
+- With timer.device, finite `TLSA_Timeout` values up to 4,294,967 ms share one
+  network-wait budget per call. CPU time and lock contention are not included;
+  larger values or a missing timer retain per-wait limits.
+- Colon-format passwd and group files accept leading blanks and reject
+  malformed numeric user or group IDs.
+- Password input honors Ctrl-C where the console supports timed character
+  waits; supplementary-group reads stay within the credential array.
+- Concurrent receive threads cannot over-credit frame-arrival entropy.
+
+### Commands, HTTP and remote consoles
+
+- `fetch` rejects missing or oversized redirect targets, unsolicited protocol
+  switching and downloads shorter than their declared `Content-Length`.
+  Empty successful downloads truncate an existing `TO` file.
+- `host TIMEOUT` bounds resolver waits at the resolver's retry granularity.
+  `nslookup TIMEOUT` distributes the requested wait across all three attempts.
+- Timed tool connections fail instead of blocking indefinitely when the stack
+  cannot enable nonblocking mode; a working monotonic timer drives the budget.
+- `nslookup` labels truncated multi-string TXT answers.
+- `ShowNetServices` preserves UTF-8 service names and text.
+- `ping` handles large intervals without overflow and respects the remaining
+  timeout during probe waits and pauses.
+- `traceroute` uses the full EClock for probe waits and bounds `WAIT` below
+  the clock's signed comparison range.
+- `nc -k` closes each accepted socket, retries short TCP sends and honors
+  Ctrl-C during an empty receive pause.
+- UDP `nc -z` probes distinguish replies, port refusals and inconclusive
+  silence instead of calling every port open.
+- `iperf` reports the client's actual peer and port, bounds an idle TCP
+  server's receive wait and sends a UDP report after reaching a byte target.
+- `iperf` uses compatible UDP end-marker numbering, counts a missing tail and
+  corrects loss for late unique packets within its 32-ID tracking window.
+- `iperf` handles the minimum signed datagram ID, reports nonzero-byte
+  sub-millisecond transfers with a 1-ms rate floor and requires room for
+  a UDP receive report.
+- Scripted `telnet` drains socket output between input chunks and preserves a
+  carriage return before an escaped IAC byte.
+- `sntp` encodes NTP transmit fractions correctly and watches reply sockets
+  above descriptor 31.
+- IPv4 `arp SET` rejects the unsupported `UNIT` option. IPv6 route-query
+  failure is not reported as proof that an address is off-link.
+- `ShowNetStatus` does not replay stale socket rows after the stack stops.
+  Status reports distinguish an old, stopped or unavailable library; device-open
+  events label the library status code correctly.
+- Tools check the running stack's identity before calling DNS-list extensions.
+  Interface-name suggestions omit unconfigured slots.
+- Long diagnostic words are wrapped without dropping their tail.
+- Configuration loading and command scratch buffers use less Shell stack space.
+- Fresh `/shell` connections show the existing Shell prompt without requiring Return;
+  reconnecting the same page avoids duplicating it. Scripted `hwshell` sessions
+  restore the standard prompt instead of leaving a temporary `HWSH-` token.
+- `httpd` enforces case-insensitive WebDAV path locks, rejects invalid calendar
+  dates and refuses property lists longer than eight entries.
+- Synthetic WebDAV roots do not inherit a previous request's file timestamp;
+  lock-owner text is trimmed at whole UTF-8 characters.
+- Freshly modified files use weak ETags during the timestamp ambiguity window,
+  reducing same-tick `If-Match` lost-update risk. Arbitrary same-size rewrites
+  preserving older timestamps remain outside this protection.
+- HTTP dates beyond the 32-bit epoch range saturate instead of wrapping;
+  304, 426 and 502 replies use the proper reason phrases.
+- Remote console geometry rejects tile-index overflow and validates ZZ9000
+  encoder replies before accepting a frame.
+- WebSocket console allocation failure closes the session safely;
+  terminal statistics retain all ten digits of 32-bit counters.
+- Optional crash diagnostics handle out-of-order hook removal, defer DOS/log
+  work out of alert context and restore the previous trap before reporting.
 
 ## 1.0.0-beta7
 

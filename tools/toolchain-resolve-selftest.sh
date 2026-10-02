@@ -25,7 +25,7 @@ fail() { printf 'FAIL %s\n' "$*" >&2; bad=$((bad + 1)); }
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/anxd-tcsel.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
-# The fixtures below borrow crt0 objects and an objdump from a resolved
+# The fixtures below borrow crt0 objects, newlib archives and binutils from a resolved
 # toolchain.  Without one there is nothing to build them from, and a fixture
 # the resolver refuses tests nothing about selection.
 if [ -z "${AMIGA_TOOLCHAIN_ROOT:-}" ] || [ ! -d "${AMIGA_TOOLCHAIN_ROOT:-}" ]; then
@@ -40,8 +40,8 @@ make_root() {
     local dir="$1" ver="$2"
     mkdir -p "$dir/bin" "$dir/m68k-amigaos/ndk-include/exec" \
              "$dir/m68k-amigaos/ndk-include/inline"
-    printf '#!/bin/sh\n[ "$1" = -dumpversion ] && echo %s\nexit 0\n' \
-        "$ver" > "$dir/bin/m68k-amigaos-gcc"
+    printf '#!/bin/sh\nif [ "$1" = -dumpversion ]; then echo %s; exit 0; fi\nif [ "$1" = -print-multi-lib ]; then exec "%s/bin/m68k-amigaos-gcc" "$@"; fi\nexit 0\n' \
+        "$ver" "$AMIGA_TOOLCHAIN_ROOT" > "$dir/bin/m68k-amigaos-gcc"
     chmod +x "$dir/bin/m68k-amigaos-gcc"
     : > "$dir/m68k-amigaos/ndk-include/exec/types.h"
     : > "$dir/m68k-amigaos/ndk-include/inline/dos.h"
@@ -61,10 +61,16 @@ make_root() {
     # check, so the fixture cannot be safer or less safe than the real thing.
     ln -sf "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-objdump" \
            "$dir/bin/m68k-amigaos-objdump"
-    ( cd "$AMIGA_TOOLCHAIN_ROOT" && find m68k-amigaos -name '*crt0.o' ) |
-    while IFS= read -r crt; do
-        mkdir -p "$dir/$(dirname "$crt")"
-        ln -sf "$AMIGA_TOOLCHAIN_ROOT/$crt" "$dir/$crt"
+    ln -sf "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-ar" \
+           "$dir/bin/m68k-amigaos-ar"
+    # fetch-toolchain.sh also checks the pinned allocator on a warm cache.
+    # Borrow the complete verified multilib companions so this selection test
+    # still exercises its already-installed path, without weakening that gate.
+    ( cd "$AMIGA_TOOLCHAIN_ROOT" && find m68k-amigaos/lib -type f \
+        \( -name 'crt0.o' -o -name 'libc.a' -o -name 'libg.a' -o -name 'libm.a' \) ) |
+    while IFS= read -r file; do
+        mkdir -p "$dir/$(dirname "$file")"
+        ln -sf "$AMIGA_TOOLCHAIN_ROOT/$file" "$dir/$file"
     done
 }
 

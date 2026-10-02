@@ -19,7 +19,7 @@ set -euo pipefail
 
 
 # Immutable asset series.  The compiler itself still reports 16.2.0b.
-GCC_VERSION="16.2.2"
+GCC_VERSION="16.2.3"
 PREFIX="opt/m68k-amigaos"
 
 # The platform is part of the asset name because there is now more than one,
@@ -74,6 +74,10 @@ sha256_of() {
     echo "!! $FROM has no bin/m68k-amigaos-gcc" >&2; exit 1; }
 [ -f "$FROM/m68k-amigaos/ndk-include/exec/types.h" ] || {
     echo "!! $FROM has no NDK headers" >&2; exit 1; }
+
+# A compiler version match did not catch the stale 16.2.2 libc allocator.
+# Refuse to publish an archive containing any of those installed objects.
+python3 "$(dirname "$0")/check-toolchain-malloc.py" "$FROM"
 
 echo "==> packaging $FROM"
 echo "    -> $OUT"
@@ -179,7 +183,7 @@ echo
 echo "  1. in tools/fetch-toolchain.sh, set the sha256 for $PLATFORM to"
 echo "     $SHA"
 echo
-echo "  2. gh release upload toolchain-m68k-amigaos-gcc-$GCC_VERSION '$OUT'"
+echo "  2. gh release upload --repo tinic/gcc toolchain-m68k-amigaos-gcc-$GCC_VERSION '$OUT'"
 echo
 echo "     (or gh release create, with a body naming every asset, its"
 echo "      platform and its sha256.  tools/toolchain-mirror-release-notes.md"
