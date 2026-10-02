@@ -12,9 +12,12 @@
  * udp_live:      control: sent once, from the snapshot address.
  * udp_stamped_window / udp_stamped_reused: a named source, stamped on the
  *                packet by _nxd_udp_socket_source_send with a valid index,
- *                zeroed or reassigned while the checksum runs.  The stamp is
- *                the named-source caller's: the refusal must leave it as it
- *                was handed to the send.
+ *                zeroed or reassigned while the checksum runs.  The stamp
+ *                is the one _nxd_udp_socket_source_send sets before it
+ *                delegates: the refusal leaves it as it was at
+ *                _nxd_udp_socket_send entry.  It does not restore the API
+ *                caller's NULL; both transfer.c callers release the packet
+ *                on any refusal.
  * udp_index:     a named-source index past the table is refused (the target
  *                is built with -fsanitize=bounds trapping, so indexing past
  *                nx_ipv6_address[] stops the test).
@@ -24,8 +27,10 @@
  * tcp_live:      control: the SYN goes out, SYN_SENT, NX_IN_PROGRESS.
  *
  * On every refusal: NX_NO_INTERFACE_ADDRESS, nothing sent, no packet release,
- * the packet's prepend pointer, length and address stamp as they came in, the
- * UDP counters unchanged, and no mutex hold left.  The connect leaves the
+ * the packet's prepend pointer, length and address stamp as they were at
+ * _nxd_udp_socket_send entry (for the stamped arms, the stamp
+ * _nxd_udp_socket_source_send set), the UDP counters unchanged, and no mutex
+ * hold left.  The connect leaves the
  * socket CLOSED with no source pointer and does not suspend.  The deletion is
  * done by a stub at a fixed point that asserts the mutex is not held there:
  * the window is real, and the test does not race.
@@ -237,9 +242,10 @@ static void udp_refused(UINT status, NXD_IPV6_ADDRESS *stamp_in)
 {
     check("refused with NX_NO_INTERFACE_ADDRESS", status == NX_NO_INTERFACE_ADDRESS);
     check("nothing sent, no packet released", sends == 0 && released == 0);
-    check("prepend pointer and length as they came in",
+    check("prepend pointer and length as at _nxd_udp_socket_send entry",
           pkt.nx_packet_prepend_ptr == buf + 128 && pkt.nx_packet_length == 20);
-    check("the address stamp as it came in", pkt.nx_packet_address.nx_packet_ipv6_address_ptr == stamp_in);
+    check("the address stamp as at _nxd_udp_socket_send entry",
+          pkt.nx_packet_address.nx_packet_ipv6_address_ptr == stamp_in);
     check("UDP counters unchanged",
           ip.nx_ip_udp_packets_sent == 0 && ip.nx_ip_udp_bytes_sent == 0 &&
           udp.nx_udp_socket_packets_sent == 0 && udp.nx_udp_socket_bytes_sent == 0);
