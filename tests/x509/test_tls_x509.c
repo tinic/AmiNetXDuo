@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "nx_secure_tls.h"
@@ -1341,6 +1342,290 @@ static void test_n108_transcript_hash_save(void)
     n108_session.nx_secure_tls_session_ciphersuite = sha256_suite;
 }
 
+/* N-112, N-120, N-121: the ClientHello extension builder and the handshake
+   cache, called directly on a zeroed session.  No record leaves: the record
+   layer is replaced below, which keeps nx_secure_tls_send_record.o (and the
+   TCP socket it reaches) out of the link. */
+#define HRR_SENTINEL 0xA5
+#define HRR_BUF      1024u
+#define HRR_COOKIE   200u
+#define HRR_KEYLEN   65u
+
+static NX_SECURE_TLS_SESSION hrr_session;
+static UCHAR                 hrr_buf[HRR_BUF];
+static UCHAR                 hrr_ref[HRR_BUF];
+static UCHAR                 hrr_cookie[HRR_COOKIE];
+static unsigned              hrr_records_sent;
+
+UINT _nx_secure_tls_send_record(NX_SECURE_TLS_SESSION *tls_session, NX_PACKET *send_packet,
+                                UCHAR record_type, ULONG wait_option)
+{
+    (void)tls_session;
+    (void)send_packet;
+    (void)record_type;
+    (void)wait_option;
+    hrr_records_sent++;
+    return(NX_SUCCESS);
+}
+
+/* The packet stays the caller's on every error: nothing here releases it. */
+static unsigned hrr_packets_released;
+
+UINT _nx_packet_release(NX_PACKET *packet_ptr)
+{
+    (void)packet_ptr;
+    hrr_packets_released++;
+    return(NX_SUCCESS);
+}
+
+static int all_byte(const UCHAR *p, unsigned n, UCHAR v)
+{
+    unsigned i;
+
+    for (i = 0; i < n; i++)
+    {
+        if (p[i] != v)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* A TLS 1.3 session whose public key is HRR_KEYLEN bytes, in the first or
+   the second (HelloRetryRequest) ClientHello state. */
+static void hrr_session_reset(int retry, UINT cookie_length)
+{
+    NX_SECURE_TLS_ECDHE_HANDSHAKE_DATA *ecdhe;
+    unsigned                            i;
+
+    memset(&hrr_session, 0, sizeof(hrr_session));
+    hrr_session.nx_secure_tls_1_3 = NX_TRUE;
+    hrr_session.nx_secure_tls_protocol_version = NX_SECURE_TLS_VERSION_TLS_1_3;
+    hrr_session.nx_secure_tls_client_state = retry ? NX_SECURE_TLS_CLIENT_STATE_HELLO_RETRY
+                                                   : NX_SECURE_TLS_CLIENT_STATE_IDLE;
+    ecdhe = &hrr_session.nx_secure_tls_key_material.nx_secure_tls_ecc_key_data[0];
+    ecdhe->nx_secure_tls_ecdhe_named_curve = 0x0017;
+    ecdhe->nx_secure_tls_ecdhe_public_key_length = HRR_KEYLEN;
+    for (i = 0; i < HRR_KEYLEN; i++)
+    {
+        ecdhe->nx_secure_tls_ecdhe_public_key[i] = (UCHAR)(0x40 + i);
+    }
+    for (i = 0; i < HRR_COOKIE; i++)
+    {
+        hrr_cookie[i] = (UCHAR)(i * 7u + 1u);
+    }
+    hrr_session.nx_secure_tls_cookie = hrr_cookie;
+    hrr_session.nx_secure_tls_cookie_length = cookie_length;
+}
+
+static UINT hrr_build(ULONG available, ULONG *out_length)
+{
+    ULONG offset = 0;
+    ULONG ext_length = 0;
+    UINT  status;
+
+    memset(hrr_buf, HRR_SENTINEL, sizeof(hrr_buf));
+    status = _nx_secure_tls_send_clienthello_extensions(&hrr_session, hrr_buf, &offset,
+                                                        &ext_length, available);
+    if (out_length)
+    {
+        *out_length = offset;
+    }
+    return(status);
+}
+
+/* Offset of the first extension of the given type in hrr_buf[0..len). */
+static ULONG hrr_find(ULONG len, USHORT type)
+{
+    ULONG at = 0;
+
+    while (at + 4u <= len)
+    {
+        USHORT t = (USHORT)((hrr_buf[at] << 8) | hrr_buf[at + 1]);
+        USHORT l = (USHORT)((hrr_buf[at + 2] << 8) | hrr_buf[at + 3]);
+
+        if (t == type)
+        {
+            return at;
+        }
+        at += 4u + l;
+    }
+    return HRR_BUF;
+}
+
+static void test_hrr_cookie_builder(void)
+{
+    ULONG full = 0, with_cookie = 0, cookie_at, key_share_at, len = 0, need;
+    UINT  status;
+
+    printf("clienthello extensions: hrr cookie and key_share (N-120, N-121)\n");
+
+    /* Control: first ClientHello, no cookie. */
+    hrr_session_reset(0, 0);
+    status = hrr_build(HRR_BUF, &full);
+    check(status == NX_SUCCESS && full > 0 && full < HRR_BUF, "first ClientHello builds");
+    memcpy(hrr_ref, hrr_buf, sizeof(hrr_ref));
+    key_share_at = hrr_find(full, NX_SECURE_TLS_EXTENSION_KEY_SHARE);
+    check(key_share_at < full, "key_share present");
+    check(hrr_find(full, NX_SECURE_TLS_EXTENSION_COOKIE) == HRR_BUF, "no cookie without HRR");
+
+    status = hrr_build(full, &len);
+    check(status == NX_SUCCESS && len == full && memcmp(hrr_buf, hrr_ref, full) == 0,
+          "first ClientHello fits exactly, same bytes");
+
+    /* Retry state, cookie 0: the same extensions. */
+    hrr_session_reset(1, 0);
+    status = hrr_build(HRR_BUF, &len);
+    check(status == NX_SUCCESS && len == full && memcmp(hrr_buf, hrr_ref, full) == 0,
+          "retry ClientHello, cookie 0, unchanged");
+
+    /* Retry with a cookie: the whole thing fits exactly. */
+    hrr_session_reset(1, HRR_COOKIE);
+    status = hrr_build(HRR_BUF, &with_cookie);
+    check(status == NX_SUCCESS && with_cookie == full + 6u + HRR_COOKIE, "cookie echoed, 6 + cookie bytes");
+    cookie_at = hrr_find(with_cookie, NX_SECURE_TLS_EXTENSION_COOKIE);
+    check(cookie_at < with_cookie && memcmp(&hrr_buf[cookie_at + 6u], hrr_cookie, HRR_COOKIE) == 0,
+          "cookie bytes match");
+    if (cookie_at >= with_cookie)
+    {
+        return;
+    }
+    memcpy(hrr_ref, hrr_buf, sizeof(hrr_ref));
+
+    hrr_session_reset(1, HRR_COOKIE);
+    status = hrr_build(with_cookie, &len);
+    check(status == NX_SUCCESS && len == with_cookie && memcmp(hrr_buf, hrr_ref, with_cookie) == 0 &&
+          all_byte(&hrr_buf[with_cookie], HRR_BUF - with_cookie, HRR_SENTINEL),
+          "cookie ClientHello fits exactly");
+
+    /* The cookie extension itself ends exactly at available_size. */
+    need = cookie_at + 6u + HRR_COOKIE;
+    hrr_session_reset(1, HRR_COOKIE);
+    status = hrr_build(need, NX_NULL);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL &&
+          memcmp(&hrr_buf[cookie_at], &hrr_ref[cookie_at], 6u + HRR_COOKIE) == 0 &&
+          all_byte(&hrr_buf[need], HRR_BUF - need, HRR_SENTINEL),
+          "cookie fits to the byte, nothing past it");
+
+    /* One byte short of the cookie: nothing of it is written. */
+    hrr_session_reset(1, HRR_COOKIE);
+    status = hrr_build(need - 1u, NX_NULL);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL, "cookie one byte short rejected");
+    check(all_byte(&hrr_buf[cookie_at], HRR_BUF - cookie_at, HRR_SENTINEL),
+          "cookie one byte short writes nothing");
+
+    /* Six bytes of header only. */
+    hrr_session_reset(1, HRR_COOKIE);
+    status = hrr_build(cookie_at + 6u, NX_NULL);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL &&
+          all_byte(&hrr_buf[cookie_at], HRR_BUF - cookie_at, HRR_SENTINEL),
+          "cookie header only rejected");
+
+    /* N-120: key_share one byte short.  The 8 bytes of the two empty
+       extensions after it still fit, so only its own status can fail. */
+    hrr_session_reset(0, 0);
+    status = hrr_build(key_share_at + 10u + HRR_KEYLEN - 1u, NX_NULL);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL, "key_share failure propagates");
+    check(all_byte(&hrr_buf[key_share_at], HRR_BUF - key_share_at, HRR_SENTINEL),
+          "key_share failure writes nothing");
+
+    /* Last: unbounded, this one writes 64 KB past the buffer. */
+    hrr_session_reset(1, 0xFFFFu);
+    status = hrr_build(cookie_at, NX_NULL);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL &&
+          all_byte(&hrr_buf[cookie_at], HRR_BUF - cookie_at, HRR_SENTINEL),
+          "64 KB cookie rejected");
+}
+
+/* An NX_PACKET with room for the 4-byte handshake header in front. */
+static NX_PACKET hrr_packet;
+static UCHAR     hrr_packet_data[1024];
+
+static UINT hrr_send(ULONG body_length)
+{
+    ULONG i;
+
+    memset(&hrr_packet, 0, sizeof(hrr_packet));
+    for (i = 0; i < body_length; i++)
+    {
+        hrr_packet_data[16 + i] = (UCHAR)(i * 13u + 5u);
+    }
+    hrr_packet.nx_packet_data_start = hrr_packet_data;
+    hrr_packet.nx_packet_data_end = hrr_packet_data + sizeof(hrr_packet_data);
+    hrr_packet.nx_packet_prepend_ptr = hrr_packet_data + 16;
+    hrr_packet.nx_packet_append_ptr = hrr_packet_data + 16 + body_length;
+    hrr_packet.nx_packet_length = body_length;
+    return(_nx_secure_tls_send_handshake_record(&hrr_session, &hrr_packet,
+                                                NX_SECURE_TLS_CLIENT_HELLO, NX_NO_WAIT));
+}
+
+#define HRR_CACHE_SIZE \
+    (sizeof(hrr_session.nx_secure_tls_key_material.nx_secure_tls_handshake_cache))
+
+/* Everything from the cache length to the end of the key material. */
+#define HRR_TAIL_OFFSET \
+    (offsetof(NX_SECURE_TLS_KEY_MATERIAL, nx_secure_tls_handshake_cache_length))
+#define HRR_TAIL_SIZE (sizeof(NX_SECURE_TLS_KEY_MATERIAL) - HRR_TAIL_OFFSET)
+
+static UCHAR hrr_tail[sizeof(NX_SECURE_TLS_KEY_MATERIAL)];
+
+static void hrr_cache_prefill(UINT cached)
+{
+    NX_SECURE_TLS_KEY_MATERIAL *km = &hrr_session.nx_secure_tls_key_material;
+
+    hrr_session_reset(0, 0);
+    memset((UCHAR *)km + HRR_TAIL_OFFSET, HRR_SENTINEL, HRR_TAIL_SIZE);
+    km->nx_secure_tls_handshake_cache_length = cached;
+    memcpy(hrr_tail, (UCHAR *)km + HRR_TAIL_OFFSET, HRR_TAIL_SIZE);
+    hrr_records_sent = 0;
+    hrr_packets_released = 0;
+}
+
+static int hrr_tail_intact(void)
+{
+    return memcmp(hrr_tail, (UCHAR *)&hrr_session.nx_secure_tls_key_material + HRR_TAIL_OFFSET,
+                  HRR_TAIL_SIZE) == 0;
+}
+
+static void test_hrr_handshake_cache(void)
+{
+    NX_SECURE_TLS_KEY_MATERIAL *km = &hrr_session.nx_secure_tls_key_material;
+    const ULONG                 body = 196u;    /* 200 with the header */
+    UINT                        status;
+
+    printf("clienthello handshake cache (N-112)\n");
+
+    /* Control: an empty cache takes the ClientHello as sent. */
+    hrr_cache_prefill(0);
+    status = hrr_send(body);
+    check(status == NX_SUCCESS && hrr_records_sent == 1 &&
+          km->nx_secure_tls_handshake_cache_length == body + 4u &&
+          memcmp(km->nx_secure_tls_handshake_cache, hrr_packet_data + 12, body + 4u) == 0,
+          "first ClientHello cached as sent");
+
+    hrr_cache_prefill((UINT)(HRR_CACHE_SIZE - (body + 4u)));
+    status = hrr_send(body);
+    check(status == NX_SUCCESS && hrr_records_sent == 1 &&
+          km->nx_secure_tls_handshake_cache_length == HRR_CACHE_SIZE,
+          "cache filled exactly");
+
+    hrr_cache_prefill((UINT)(HRR_CACHE_SIZE - (body + 4u) + 1u));
+    status = hrr_send(body);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL && hrr_records_sent == 0 && hrr_packets_released == 0 && hrr_tail_intact(),
+          "one byte over rejected, length intact");
+
+    hrr_cache_prefill(0);
+    status = hrr_send(HRR_CACHE_SIZE - 4u + 1u);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL && hrr_records_sent == 0 && hrr_packets_released == 0 && hrr_tail_intact(),
+          "501-byte ClientHello rejected, tail intact");
+
+    hrr_cache_prefill((UINT)HRR_CACHE_SIZE + 1u);
+    status = hrr_send(16);
+    check(status == NX_SECURE_TLS_PACKET_BUFFER_TOO_SMALL && hrr_records_sent == 0 && hrr_packets_released == 0 && hrr_tail_intact(),
+          "corrupt cache length rejected");
+}
+
 int main(void)
 {
     _nx_crypto_initialize();
@@ -1357,6 +1642,8 @@ int main(void)
     test_aes128_block();
     test_tls13_key_schedule();
     test_n108_transcript_hash_save();
+    test_hrr_handshake_cache();
+    test_hrr_cookie_builder();
 
     if (failures != 0)
     {
