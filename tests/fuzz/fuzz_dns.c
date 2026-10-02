@@ -8,7 +8,8 @@
  *   fuzz_dns -r SEED COUNT       seeds plus mutations, no corpus needed
  *   fuzz_dns -t cache_drop       a server removal, then an insert (N-056)
  *   fuzz_dns -t ptr_owner        the PTR record's owner name (N-058)
- *   fuzz_dns -t cache_aaaa       a cached AAAA with zero octets, freed (N-057)
+ *   fuzz_dns -t cache_aaaa       a cached AAAA with zero octets, freed (N-057),
+ *                                and AAAA identity in the string table
  *
  * SPDX-License-Identifier: MIT
  */
@@ -923,6 +924,83 @@ static void fz_cache_aaaa_case(const char *name, const UCHAR *addr)
     printf("  %-30s ok\n", name);
 }
 
+/*
+ * The AAAA address is shared with a stored entry only when every byte is the
+ * same.  _nx_dns_cache_add_string() compared with _nx_dns_name_match(), which
+ * folds case and stops at a zero byte, so an address differing from a cached
+ * one only in the 0x20 bit of a letter-range byte was answered with the
+ * cached one.  Domain names still share a slot whatever their case.
+ */
+static void fz_aaaa_pair(const char *name, const UCHAR *a, const UCHAR *b)
+{
+    fz_contract_start(name);
+
+    if (!fz_aaaa_lookup("one.example.com", a, 300, 1) ||
+        !fz_aaaa_lookup("two.example.com", b, 300, 1))
+        fz_fail("the two AAAA answers did not resolve");
+
+    /* Two names, two addresses. */
+    if (fz_dns.nx_dns_string_count != 4)
+        fz_fail("two distinct AAAA addresses were stored as one entry");
+
+    if (!fz_aaaa_lookup("one.example.com", a, 300, 0))
+        fz_fail("the first address did not come back from the cache");
+    if (!fz_aaaa_lookup("two.example.com", b, 300, 0))
+        fz_fail("the second address came back from the cache as the first");
+
+    fz_pool_check();
+    (VOID)nx_dns_delete(&fz_dns);
+    printf("  %-30s ok\n", name);
+}
+
+static void fz_cache_aaaa_identity_test(void)
+{
+    static const UCHAR upper[16] = { 0x20, 0x01, 0x0d, 0xb8, 0x41, 0x42, 0x43,
+                                     0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a,
+                                     0x4b, 0x4c };
+    static const UCHAR lower[16] = { 0x20, 0x01, 0x0d, 0xb8, 0x61, 0x42, 0x43,
+                                     0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a,
+                                     0x4b, 0x4c };
+    static const UCHAR zero_a[16] = { 0x20, 0x01, 0x0d, 0xb8, 0x00, 0x11, 0x22,
+                                      0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+                                      0xaa, 0x01 };
+    static const UCHAR zero_b[16] = { 0x20, 0x01, 0x0d, 0xb8, 0x00, 0x11, 0x22,
+                                      0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+                                      0xaa, 0x02 };
+    FzwBuf w;
+    ULONG  address = 0;
+    UINT   count;
+
+    fz_aaaa_pair("aaaa_case_bit", upper, lower);
+    fz_aaaa_pair("aaaa_after_zero", zero_a, zero_b);
+
+    /* The same name in two cases, an A record and an AAAA record: one name
+       entry between them, as before. */
+    fz_contract_start("name_case_dedup");
+
+    fzw_reset(&w);
+    fzs_a_answer(&w, FZ_QNAME);
+    memcpy(fz_case.b, w.b, w.len);
+    fz_case.len  = w.len;
+    fz_delivered = 0;
+    if (nx_dns_host_by_name_get(&fz_dns, (UCHAR *)FZ_QNAME, &address, 4) !=
+        NX_SUCCESS)
+        fz_fail("the A answer did not resolve");
+    count = fz_dns.nx_dns_string_count;
+
+    if (!fz_aaaa_lookup("TEST.EXAMPLE.COM", upper, 300, 1))
+        fz_fail("the AAAA answer in capitals did not resolve");
+    if (fz_dns.nx_dns_string_count != count + 1)
+        fz_fail("a name differing only in case was not shared");
+
+    if (!fz_aaaa_lookup(FZ_QNAME, upper, 300, 0))
+        fz_fail("the AAAA record was not found under the lower-case name");
+
+    fz_pool_check();
+    (VOID)nx_dns_delete(&fz_dns);
+    printf("  %-30s ok\n", "name_case_dedup");
+}
+
 static void fz_cache_aaaa_test(void)
 {
     static const struct
@@ -949,6 +1027,8 @@ static void fz_cache_aaaa_test(void)
 
     for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
         fz_cache_aaaa_case(cases[i].name, cases[i].addr);
+
+    fz_cache_aaaa_identity_test();
 }
 
 static void fz_run_seed(int which, int patch_id)
