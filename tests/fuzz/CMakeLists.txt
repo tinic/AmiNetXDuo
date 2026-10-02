@@ -617,6 +617,20 @@ add_test(NAME fuzz_dnssd_sweep
 add_test(NAME fuzz_dns_sweep
          COMMAND fuzz_dns -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+# Contract tests for DNS client defects, each a fixed set of crafted answers
+# rather than a sweep: a server removal followed by an insert (N-056), a
+# cached AAAA with zero octets freed on expiry (N-057), and the owner name of
+# a reverse answer's PTR record (N-058).
+add_test(NAME dns_cache_drop_regression
+         COMMAND fuzz_dns -t cache_drop)
+add_test(NAME dns_cache_aaaa_regression
+         COMMAND fuzz_dns -t cache_aaaa)
+add_test(NAME dns_ptr_owner_regression
+         COMMAND fuzz_dns -t ptr_owner)
+set_tests_properties(dns_cache_drop_regression dns_cache_aaaa_regression
+                     dns_ptr_owner_regression
+                     PROPERTIES TIMEOUT 60)
+
 add_test(NAME fuzz_bpf_sweep
          COMMAND fuzz_bpf -r 1 ${AMINETXDUO_FUZZ_CASES})
 

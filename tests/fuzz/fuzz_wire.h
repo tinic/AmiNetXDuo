@@ -750,6 +750,94 @@ static void fzs_ptr_wrong_question(FzwBuf *w, const char *qname)
     fzw_patch16(w, rdlen_at, (unsigned)(w->len - rdata_at));
 }
 
+/* One PTR record: `owner` spelled out, or a pointer to `owner_at` when
+   owner is NULL. */
+static void fzw_ptr_rr(FzwBuf *w, const char *owner, unsigned owner_at,
+                       const char *target)
+{
+    size_t rdlen_at;
+    size_t rdata_at;
+
+    if (owner != NULL)
+        fzw_name(w, owner);
+    else
+        fzw_ptr(w, owner_at);
+    fzw_u16(w, FZW_TYPE_PTR);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    rdlen_at = w->len;
+    fzw_u16(w, 0);
+    rdata_at = w->len;
+    fzw_name(w, target);
+    fzw_patch16(w, rdlen_at, (unsigned)(w->len - rdata_at));
+}
+
+/* The right question, a PTR record about another address in the answer. */
+static void fzs_ptr_owner_mismatch(FzwBuf *w, const char *qname)
+{
+    (void)qname;
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 1, 0, 0);
+    fzw_question(w, FZW_INADDR_QNAME, FZW_TYPE_PTR, FZW_CLASS_IN);
+    fzw_ptr_rr(w, "4.3.2.1.in-addr.arpa", 0, "evil.example.net");
+}
+
+/* The same stray record, followed by the real answer. */
+static void fzs_ptr_owner_mismatch_then_match(FzwBuf *w, const char *qname)
+{
+    (void)qname;
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 2, 0, 0);
+    fzw_question(w, FZW_INADDR_QNAME, FZW_TYPE_PTR, FZW_CLASS_IN);
+    fzw_ptr_rr(w, "4.3.2.1.in-addr.arpa", 0, "evil.example.net");
+    fzw_ptr_rr(w, NULL, 12, "amiga.example.com");
+}
+
+/* The owner spelled out in full rather than compressed, and in lower case. */
+static void fzs_ptr_owner_plain(FzwBuf *w, const char *qname)
+{
+    (void)qname;
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 1, 0, 0);
+    fzw_question(w, FZW_INADDR_QNAME, FZW_TYPE_PTR, FZW_CLASS_IN);
+    fzw_ptr_rr(w, "9.0.0.10.in-addr.arpa", 0, "amiga.example.com");
+}
+
+/* RFC 2317 classless delegation: a CNAME at the name asked about, and the PTR
+   at its target, the target's owner compressed back into the CNAME's RDATA.
+   `alias_owner` NULL is the question; otherwise the CNAME is about that name. */
+static void fzw_ptr_cname(FzwBuf *w, const char *alias_owner)
+{
+    size_t rdlen_at;
+    size_t rdata_at;
+
+    fzw_hdr(w, 0, FZW_QR | FZW_AA, 1, 2, 0, 0);
+    fzw_question(w, FZW_INADDR_QNAME, FZW_TYPE_PTR, FZW_CLASS_IN);
+    if (alias_owner != NULL)
+        fzw_name(w, alias_owner);
+    else
+        fzw_ptr(w, 12);
+    fzw_u16(w, FZW_TYPE_CNAME);
+    fzw_u16(w, FZW_CLASS_IN);
+    fzw_u32(w, 300);
+    rdlen_at = w->len;
+    fzw_u16(w, 0);
+    rdata_at = w->len;
+    fzw_name(w, "9.0-25.0.0.10.in-addr.arpa");
+    fzw_patch16(w, rdlen_at, (unsigned)(w->len - rdata_at));
+    fzw_ptr_rr(w, NULL, (unsigned)rdata_at, "amiga.example.com");
+}
+
+static void fzs_ptr_cname_2317(FzwBuf *w, const char *qname)
+{
+    (void)qname;
+    fzw_ptr_cname(w, NULL);
+}
+
+/* The same chain, but the CNAME is about a name nobody asked about. */
+static void fzs_ptr_cname_wrong_owner(FzwBuf *w, const char *qname)
+{
+    (void)qname;
+    fzw_ptr_cname(w, "4.3.2.1.in-addr.arpa");
+}
+
 typedef struct
 {
     const char *name;
@@ -794,7 +882,12 @@ static const FzwSeed fzw_seeds[] =
     { "a_answer_plus_authority", fzs_a_answer_plus_authority },
     { "question_upper",          fzs_question_upper          },
     { "ptr_answer_inaddr",       fzs_ptr_answer_inaddr       },
-    { "ptr_wrong_question",      fzs_ptr_wrong_question      }
+    { "ptr_wrong_question",      fzs_ptr_wrong_question      },
+    { "ptr_owner_mismatch",      fzs_ptr_owner_mismatch      },
+    { "ptr_owner_mismatch_then_match", fzs_ptr_owner_mismatch_then_match },
+    { "ptr_owner_plain",         fzs_ptr_owner_plain         },
+    { "ptr_cname_2317",          fzs_ptr_cname_2317          },
+    { "ptr_cname_wrong_owner",   fzs_ptr_cname_wrong_owner   }
 };
 
 #define FZW_SEED_COUNT  (int)(sizeof(fzw_seeds) / sizeof(fzw_seeds[0]))
