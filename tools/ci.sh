@@ -403,8 +403,9 @@ host_test_targets() { # builddir
 #      490 with netstatus_selector, 491 with traceroute_wait (all hosts);
 #      492 with deferred_release, 493 with netstatus_hostsource (x86_64 only);
 #      494 with devicehome_rewrites_only_ours, 495 with iface_remove (all
-#      hosts).
-HOST_TESTS_EXPECTED=495
+#      hosts); 497 with arp_periodic_expiry and arp_periodic_deleted (N-007,
+#      all hosts).
+HOST_TESTS_EXPECTED=497
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -421,7 +422,7 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 467 of 495 on the current tree.
+    # darwin-arm64 registers 469 of 497 on the current tree.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 28)) ;;
 esac
 
