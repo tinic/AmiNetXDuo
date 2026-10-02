@@ -433,7 +433,9 @@ host_test_targets() { # builddir
 #      with IPv6).
 #      534-536 with dns_cache_drop_regression, dns_cache_aaaa_regression and
 #      dns_ptr_owner_regression (N-056, N-057, N-058; all hosts).
-HOST_TESTS_EXPECTED=536
+#      537 with dns_search (N069): the search-list walk spends one budget,
+#      hosts-only once it is gone.
+HOST_TESTS_EXPECTED=537
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -451,7 +453,7 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 507 of 536 on the current tree.
+    # darwin-arm64 registers 508 of 537 on the current tree.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 29)) ;;
 esac
 

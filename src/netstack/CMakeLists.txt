@@ -30,13 +30,15 @@ set(NETSTACK_SOURCES
     netstack_retry.c
     netstack_slot.c)
 
-# The resolver.  netstack_dns_status.c and the lease/domain/handoff helpers
-# have no caller but netstack_dns.c, so they come with it.
+# The resolver.  netstack_dns_status.c, netstack_dns_search.c and the
+# lease/domain/handoff helpers have no caller but netstack_dns.c, so they come
+# with it.
 list(APPEND NETSTACK_SOURCES
     netstack_dns.c
     netstack_dns_domain.c
     netstack_dns_handoff.c
     netstack_dns_lease.c
+    netstack_dns_search.c
     netstack_dns_status.c)
 
 list(APPEND NETSTACK_SOURCES netstack_dhcp_hostname.c)

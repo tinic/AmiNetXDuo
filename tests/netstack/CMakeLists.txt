@@ -765,6 +765,31 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_retry COMMAND test_dns_retry)
 
+    # The search-list walk around it: one budget for the bare name and every
+    # suffix, hosts-only once it is spent, and Ctrl-C between suffixes.  The
+    # lookup and the clock are scripted; no NetX Duo source is linked.
+    add_executable(test_dns_search
+        host/test_dns_search_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_search.c")
+
+    target_compile_options(test_dns_search PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_dns_search PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"      # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dns_search PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME dns_search COMMAND test_dns_search)
+
     # What a failed lookup is reported as.  TX_NOT_AVAILABLE is the case worth
     # having: it is the DNS client's mutex, not a DNS status, and it used to
     # fall through to "no such host".

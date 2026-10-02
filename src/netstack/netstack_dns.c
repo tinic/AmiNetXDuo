@@ -8,14 +8,12 @@
 #include "netstack_internal.h"
 #include "aminetxduo/nxstatus.h"
 #include "netstack_dns_domain.h"
+#include "netstack_dns_search.h"
 #include "netstack_dns_status.h"
 #include "netstack_retry.h"
 
 #include <proto/exec.h>
 #include <stddef.h>
-
-/* RFC 1035 2.3.4: 255 octets of domain name, plus the NUL. */
-#define AMI_DNS_NAME_MAX    256
 
 /*
  * The absorb runs on the caller's stack -- a bsdsocket.library vector runs on
@@ -1576,6 +1574,11 @@ static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
     AmiNsNameAsk *ask = (AmiNsNameAsk *)arg;
     AmiNetCaller *caller;
 
+    /* NX_NO_WAIT returns NX_IN_PROGRESS with the client's mutex held and
+       its socket bound, for a _nx_dns_response_get() nobody here makes. */
+    if (wait == 0UL)
+        return AMI_NET_ASK_SILENT;
+
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
     {
@@ -1602,6 +1605,10 @@ static AmiNetAskResult ami_ns_ask_addr(VOID *arg, ULONG wait)
 {
     AmiNsAddrAsk *ask = (AmiNsAddrAsk *)arg;
     AmiNetCaller *caller;
+
+    /* Never NX_NO_WAIT, see ami_ns_ask_name(). */
+    if (wait == 0UL)
+        return AMI_NET_ASK_SILENT;
 
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
@@ -1670,6 +1677,10 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
+    /* No time is no query, see netstack.h. */
+    if (timeout_ticks == 0UL)
+        return AMI_NET_ERR_TIMEOUT;
+
     ask.ns       = ns;
     ask.name     = name;
     ask.address  = 0;
@@ -1737,18 +1748,6 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
     return ami_ns_dns_error(ask.status);
 }
 
-/* A name with no dot in it carries no domain, so the default domain applies. */
-static BOOL ami_ns_unqualified(const char *name)
-{
-    ULONG i;
-
-    for (i = 0; name[i] != '\0'; i++)
-        if (name[i] == '.')
-            return FALSE;
-
-    return TRUE;
-}
-
 /* "name" "." "domain", or FALSE if that does not fit. */
 static BOOL ami_ns_join_domain(char *dst, ULONG size, const char *name,
                                const char *domain)
@@ -1787,21 +1786,25 @@ static BOOL ami_ns_join_domain(char *dst, ULONG size, const char *name,
  * pointer into the live list escapes the lock.  `count_out` is the number of
  * suffixes in this snapshot, even when `at` is out of range.
  */
-static BOOL ami_ns_join_search_at(AmiNetStack *ns, const char *name, UWORD at,
+static BOOL ami_ns_join_search_at(const char *name, UWORD at,
                                   char *qualified, ULONG qualified_size,
                                   UWORD *count_out)
 {
-    const char *suffix[AMI_CFG_SEARCH_LIST_MAX];
-    UWORD       count;
-    BOOL        joined = FALSE;
+    AmiNetStack *ns = ami_netstack_raw();
+    const char  *suffix[AMI_CFG_SEARCH_LIST_MAX];
+    UWORD        count  = 0;
+    BOOL         joined = FALSE;
 
-    ami_ns_resolver_forbid();
-    count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
-                                   (UWORD)AMI_CFG_SEARCH_LIST_MAX);
-    if (at < count)
-        joined = ami_ns_join_domain(qualified, qualified_size, name,
-                                    suffix[at]);
-    ami_ns_resolver_permit();
+    if (ns != NULL)
+    {
+        ami_ns_resolver_forbid();
+        count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
+                                       (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+        if (at < count)
+            joined = ami_ns_join_domain(qualified, qualified_size, name,
+                                        suffix[at]);
+        ami_ns_resolver_permit();
+    }
 
     if (count_out != NULL)
         *count_out = count;
@@ -1809,58 +1812,35 @@ static BOOL ami_ns_join_search_at(AmiNetStack *ns, const char *name, UWORD at,
     return joined;
 }
 
+static LONG ami_ns_search_once(const char *name, VOID *out, ULONG ticks,
+                               AmiNetGiveUpFn give_up, VOID *give_up_arg)
+{
+    return ami_ns_resolve_once(name, (ULONG *)out, ticks, give_up,
+                               give_up_arg);
+}
+
+static LONG ami_ns_search_local(const char *name, VOID *out)
+{
+    const AmiNetdbEntry *entry = ami_netdb_host_by_name(name);
+
+    if (entry == NULL)
+        return AMI_NET_ERR_NONAME;
+
+    *(ULONG *)out = entry->value;
+
+    return AMI_NET_OK;
+}
+
+static const AmiNsSearchOps ami_ns_search_v4 = {
+    ami_ns_search_once, ami_ns_search_local, ami_ns_join_search_at
+};
+
 LONG netstack_resolve_until(const char *name, ULONG *addr_out,
                             ULONG timeout_ticks, AmiNetGiveUpFn give_up,
                             VOID *give_up_arg)
 {
-    AmiNetStack *ns = ami_netstack_raw();
-    char         qualified[AMI_DNS_NAME_MAX];
-    LONG         err;
-    UWORD        count;
-    UWORD        i;
-
-    if (name == NULL || *name == '\0' || addr_out == NULL)
-        return AMI_NET_ERR_CONFIG;
-
-    err = ami_ns_resolve_once(name, addr_out, timeout_ticks, give_up,
-                              give_up_arg);
-    if (err == AMI_NET_OK)
-        return err;
-
-    /*
-     * Qualify with the default domain only after a definite no: TIMEOUT and
-     * NOSERVER say nothing about the name, and ABORTED is the caller leaving and
-     * must not start another lookup.
-     */
-    if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
-        return err;
-
-    if (ns == NULL || !ami_ns_unqualified(name))
-        return err;
-
-    count = 0;
-    (VOID)ami_ns_join_search_at(ns, name, 0, qualified,
-                                (ULONG)sizeof(qualified), &count);
-
-    for (i = 0; i < count; i++)
-    {
-        LONG next;
-
-        if (!ami_ns_join_search_at(ns, name, i, qualified,
-                                   (ULONG)sizeof(qualified), NULL))
-            continue;
-
-        next = ami_ns_resolve_once(qualified, addr_out, timeout_ticks, give_up,
-                                   give_up_arg);
-        if (next == AMI_NET_OK)
-            return AMI_NET_OK;
-
-        if (next != AMI_NET_ERR_NONAME && next != AMI_NET_ERR_STATE)
-            break;
-    }
-
-    /* The caller asked about the bare name, so report the first failure. */
-    return err;
+    return ami_ns_search(&ami_ns_search_v4, name, addr_out, timeout_ticks,
+                         give_up, give_up_arg);
 }
 
 LONG netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks)
@@ -1897,6 +1877,9 @@ LONG netstack_resolve_reverse_until(ULONG addr, char *name_out, ULONG name_len,
 
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
+
+    if (timeout_ticks == 0UL)
+        return AMI_NET_ERR_TIMEOUT;
 
     ask.ns       = ns;
     ask.address  = addr;
@@ -1953,6 +1936,10 @@ static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
     AmiNsName6Ask *ask = (AmiNsName6Ask *)arg;
     AmiNetCaller  *caller;
 
+    /* Never NX_NO_WAIT, see ami_ns_ask_name(). */
+    if (wait == 0UL)
+        return AMI_NET_ASK_SILENT;
+
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
     {
@@ -2001,6 +1988,9 @@ static LONG ami_ns_resolve6_once(const char *name, ULONG addr_out[4],
     if (ami_netstack_mdns_is_local(name))
         return AMI_NET_ERR_NONAME;
 
+    if (timeout_ticks == 0UL)
+        return AMI_NET_ERR_TIMEOUT;
+
     ask.ns       = ns;
     ask.name     = name;
     ask.count    = 0;
@@ -2028,52 +2018,32 @@ static LONG ami_ns_resolve6_once(const char *name, ULONG addr_out[4],
     return AMI_NET_OK;
 }
 
+static LONG ami_ns_search6_once(const char *name, VOID *out, ULONG ticks,
+                                AmiNetGiveUpFn give_up, VOID *give_up_arg)
+{
+    return ami_ns_resolve6_once(name, (ULONG *)out, ticks, give_up,
+                                give_up_arg);
+}
+
+/* DEVS:Internet/hosts holds no IPv6, see ami_ns_resolve6_once(). */
+static LONG ami_ns_search6_local(const char *name, VOID *out)
+{
+    (VOID)name;
+    (VOID)out;
+
+    return AMI_NET_ERR_NONAME;
+}
+
+static const AmiNsSearchOps ami_ns_search_v6 = {
+    ami_ns_search6_once, ami_ns_search6_local, ami_ns_join_search_at
+};
+
 LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
                              ULONG timeout_ticks, AmiNetGiveUpFn give_up,
                              VOID *give_up_arg)
 {
-    AmiNetStack *ns = ami_netstack_raw();
-    char         qualified[AMI_DNS_NAME_MAX];
-    LONG         err;
-    UWORD        count;
-    UWORD        i;
-
-    if (name == NULL || *name == '\0' || addr_out == NULL)
-        return AMI_NET_ERR_CONFIG;
-
-    err = ami_ns_resolve6_once(name, addr_out, timeout_ticks, give_up,
-                               give_up_arg);
-    if (err == AMI_NET_OK)
-        return err;
-
-    if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
-        return err;
-
-    if (ns == NULL || !ami_ns_unqualified(name))
-        return err;
-
-    count = 0;
-    (VOID)ami_ns_join_search_at(ns, name, 0, qualified,
-                                (ULONG)sizeof(qualified), &count);
-
-    for (i = 0; i < count; i++)
-    {
-        LONG next;
-
-        if (!ami_ns_join_search_at(ns, name, i, qualified,
-                                   (ULONG)sizeof(qualified), NULL))
-            continue;
-
-        next = ami_ns_resolve6_once(qualified, addr_out, timeout_ticks, give_up,
-                                    give_up_arg);
-        if (next == AMI_NET_OK)
-            return AMI_NET_OK;
-
-        if (next != AMI_NET_ERR_NONAME && next != AMI_NET_ERR_STATE)
-            break;
-    }
-
-    return err;
+    return ami_ns_search(&ami_ns_search_v6, name, addr_out, timeout_ticks,
+                         give_up, give_up_arg);
 }
 
 LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)

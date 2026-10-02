@@ -379,7 +379,11 @@ LONG netstack_domain_name_get(char *out, ULONG out_size);
    dot is tried as given and then under each search domain -- name_resolution
    SEARCH, else its DOMAIN, then the lease's option 119 and 15 -- and a name
    with a dot is never suffixed.  In an AMINETXDUO_MDNS build a ".local" name
-   goes to the responder and never to the unicast servers. */
+   goes to the responder and never to the unicast servers.  Search domains
+   reached after the budget is spent are looked up in DEVS:Internet/hosts
+   only.  timeout_ticks 0 sends no query: DEVS:Internet/hosts is consulted,
+   for the name and its search domains, and a miss is AMI_NET_ERR_TIMEOUT
+   (AMI_NET_ERR_STATE while the resolver is not up). */
 LONG    netstack_resolve(const char *name, ULONG *addr_out, ULONG timeout_ticks);
 LONG    netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
                                  ULONG timeout_ticks);

@@ -66,6 +66,10 @@ typedef enum
  * rather than what it was allowed, because one attempt walks every configured
  * server and so can cost several times its own wait.
  *
+ * A budget of 0 asks nothing and ends SILENT, and no attempt is ever given a
+ * wait of 0: the DNS client takes 0 as NX_NO_WAIT and returns NX_IN_PROGRESS
+ * with its mutex held and its socket bound.
+ *
  * An attempt that comes back before its wait expired means every server it
  * asked answered something. A server that answers does not answer differently
  * a second later, so the ladder stops there rather than spend the rest of the

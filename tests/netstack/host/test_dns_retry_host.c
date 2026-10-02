@@ -208,7 +208,7 @@ static void h_case_contention(void)
             "losing the DNS mutex is silence, not no-such-host");
 }
 
-/* A caller that asked not to wait still gets its one look at the cache. */
+/* No time is no query: a wait of 0 is NX_NO_WAIT to the DNS client. */
 static void h_case_no_wait(void)
 {
     HostServer         s;
@@ -223,8 +223,8 @@ static void h_case_no_wait(void)
 
     done = ami_net_ask_until(h_ask, &s, 0UL, h_break, NULL);
 
-    h_check(s.attempts == 1, "a zero budget is one query, not none");
-    h_check(done != AMI_NET_LADDER_ANSWERED, "and it did not find anything");
+    h_check(s.attempts == 0, "a zero budget asks nothing");
+    h_check(done == AMI_NET_LADDER_SILENT, "and ends silent");
 }
 
 

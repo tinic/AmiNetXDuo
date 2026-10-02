@@ -14,11 +14,10 @@ AmiNetLadderResult ami_net_ask_until(AmiNetAskFn ask, VOID *arg, ULONG budget,
     if (ask == NULL)
         return AMI_NET_LADDER_REFUSED;
 
-    /* A caller that asked not to wait still gets one query, so a cached or
-       hosts-file answer is reachable without blocking. */
+    /* No time is no query: an ask is never handed a wait of 0, see the
+       header. */
     if (budget == 0UL)
-        return (ask(arg, 0UL) == AMI_NET_ASK_ANSWERED) ? AMI_NET_LADDER_ANSWERED
-                                                       : AMI_NET_LADDER_REFUSED;
+        return AMI_NET_LADDER_SILENT;
 
     for (;;)
     {
