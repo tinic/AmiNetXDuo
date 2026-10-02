@@ -1141,7 +1141,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     BsdMcastLoopGuard mcast_loop;
 #ifdef AMINETXDUO_IPV6
     LONG            mcast6_src;
-    ULONG           mcast6_hops = 0UL;
 #endif
 #endif
 
@@ -1195,7 +1194,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 #ifdef AMINETXDUO_MULTICAST
     mcast_if = bsd_mcast_prepare_send(sock, addr);
 #ifdef AMINETXDUO_IPV6
-    mcast6_src = bsd_mcast6_prepare_send(base, sock, addr, &mcast6_hops);
+    mcast6_src = bsd_mcast6_prepare_send(base, sock, addr);
 
     /*
      * IPV6_MULTICAST_HOPS is 0 for this group: RFC 3493 5.2 makes that "this
@@ -1203,7 +1202,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      */
     if (mcast6_src == BSD_MCAST6_NO_LINK)
     {
-        bsd_mcast6_finish_send(base, mcast6_hops);
         return len;
     }
 #endif
@@ -1220,9 +1218,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     status = nx_packet_allocate(pool, &packet, NX_UDP_PACKET, wait);
     if (status != NX_SUCCESS)
     {
-#if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
-        bsd_mcast6_finish_send(base, mcast6_hops);
-#endif
         return bsd_fail(base, bsd_wait_errno(wait, status));
     }
 
@@ -1234,9 +1229,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     if (filled < len)
     {
         nx_packet_release(packet);
-#if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
-        bsd_mcast6_finish_send(base, mcast6_hops);
-#endif
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
@@ -1285,10 +1277,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 
 #ifdef AMINETXDUO_MULTICAST
     bsd_mcast_loop_end(&mcast_loop);
-#endif
-
-#if defined(AMINETXDUO_MULTICAST) && defined(AMINETXDUO_IPV6)
-    bsd_mcast6_finish_send(base, mcast6_hops);
 #endif
 
     if (status != NX_SUCCESS)

@@ -939,8 +939,8 @@ UINT _nxe_udp_socket_source_send(NX_UDP_SOCKET *socket_ptr,
     return _nxde_udp_socket_send(socket_ptr, packet_ptr, &a, port);
 }
 
-/* mcast.c.  Every send here is unicast, so the prepare/finish pair is a
-   no-op; what a multicast send does with the interface hop limit is mcast.c's
+/* mcast.c.  Every send here is unicast, so multicast preparation is a
+   no-op; what a multicast send does with the socket hop limit is mcast.c's
    claim and is not made here.  -1 is mcast.c's "not multicast": 0 would
    route every send down the IPv4 multicast source path, which reads only
    addr->nxd_ip_address.v4. */
@@ -969,21 +969,13 @@ VOID bsd_mcast_loop_end(BsdMcastLoopGuard *guard)
 }
 
 LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
-                             const NXD_ADDRESS *addr, ULONG *saved)
+                             const NXD_ADDRESS *addr)
 {
     (VOID)base;
     (VOID)sock;
     (VOID)addr;
 
-    *saved = 0UL;
-
     return -1;
-}
-
-VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved)
-{
-    (VOID)base;
-    (VOID)saved;
 }
 
 UINT _txe_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)

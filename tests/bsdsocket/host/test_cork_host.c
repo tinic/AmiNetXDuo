@@ -1009,11 +1009,8 @@ VOID bsd_mcast_loop_end(BsdMcastLoopGuard *guard)
 { (VOID)guard; }
 
 LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
-                             const NXD_ADDRESS *addr, ULONG *saved)
-{ (VOID)base; (VOID)sock; (VOID)addr; *saved = 0UL; return 0; }
-
-VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved)
-{ (VOID)base; (VOID)saved; }
+                             const NXD_ADDRESS *addr)
+{ (VOID)base; (VOID)sock; (VOID)addr; return 0; }
 
 /* ---------------------------------------------------------------- tests -- */
 
