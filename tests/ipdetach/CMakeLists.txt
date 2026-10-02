@@ -1,4 +1,4 @@
-# _nx_ip_interface_detach on the host (audit N-014, N-015).  The detach and
+# _nx_ip_interface_detach on the host (audit N-014, N-015, N-024).  The detach and
 # the ND interface sweep are the shipped files; everything they call that
 # needs a stack is stubbed in the test.  Same include order and definitions
 # as tests/syncache.
@@ -20,7 +20,9 @@ add_executable(test_ip_detach
     "${_nxs}/nx_ip_interface_detach.c")
 if(AMINETXDUO_IPV6)
     target_sources(test_ip_detach PRIVATE
-        "${_nxs}/nx_nd_cache_interface_entries_delete.c")
+        "${_nxs}/nx_nd_cache_interface_entries_delete.c"
+        "${_nxs}/nx_mld_group_join.c"
+        "${_nxs}/nx_mld_utility.c")
 endif()
 
 target_include_directories(test_ip_detach PRIVATE
@@ -45,4 +47,5 @@ add_test(NAME ip_detach_routes      COMMAND test_ip_detach routes)
 add_test(NAME ip_detach_routes_full COMMAND test_ip_detach routes_full)
 if(AMINETXDUO_IPV6)
     add_test(NAME ip_detach_ndlock  COMMAND test_ip_detach ndlock)
+    add_test(NAME ip_detach_mld     COMMAND test_ip_detach mld)
 endif()

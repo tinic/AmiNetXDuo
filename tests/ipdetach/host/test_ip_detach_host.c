@@ -11,9 +11,13 @@
  *              table -> detach K leaves [C, D, E].  The target is built with
  *              -fsanitize=bounds trapping, so the shift's read of
  *              nx_ip_routing_table[4] stops the test (N-015).
+ * mld:         groups joined on K and on 0, detach K: no MLD listener entry
+ *              names K, the one on 0 is untouched, and a re-join on the
+ *              re-attached K is a new entry and sends a report (N-024).
  *
- * Linked for real: _nx_ip_interface_detach and
- * _nx_nd_cache_interface_entries_delete.  Stubbed: ThreadX (the mutex counts
+ * Linked for real: _nx_ip_interface_detach,
+ * _nx_nd_cache_interface_entries_delete, _nx_mld_group_join and the MLD
+ * utilities.  Stubbed: _nx_mld_message_send (counts reports), ThreadX (the mutex counts
  * its holder), _nx_nd_cache_delete_internal (records whether the mutex is
  * held), the ARP sweep, the SYN-cache flush and the driver.
  *
@@ -24,6 +28,9 @@
 #include "nx_ip.h"
 #ifdef FEATURE_NX_IPV6
 #include "nx_nd_cache.h"
+#endif
+#ifdef NX_ENABLE_MLD
+#include "nx_mld.h"
 #endif
 
 #include <stdio.h>
@@ -88,6 +95,18 @@ UINT _nx_nd_cache_delete_internal(NX_IP *ip_ptr, ND_CACHE_ENTRY *entry)
         nd_unlocked++;
     entry -> nx_nd_cache_nd_status     = ND_CACHE_STATE_INVALID;
     return NX_SUCCESS;
+}
+#endif
+
+#ifdef NX_ENABLE_MLD
+static int mld_reports_k;
+
+VOID _nx_mld_message_send(NX_IP *ip_ptr, NX_MLD_GROUP *group_ptr, UINT message_type,
+                          UCHAR record_type)
+{
+    (void) ip_ptr; (void) message_type; (void) record_type;
+    if (group_ptr -> nx_mld_group_interface == &rig_ip.nx_ip_interface[K])
+        mld_reports_k++;
 }
 #endif
 
@@ -238,13 +257,73 @@ static int arm_routes(int full)
 #endif
 }
 
+static int arm_mld(void)
+{
+#ifdef NX_ENABLE_MLD
+    static ULONG g1[4] = { 0xff020000UL, 0, 1, 0xff000005UL };
+    static ULONG g2[4] = { 0xff020000UL, 0, 1, 0xff000006UL };
+    NX_INTERFACE *k, *zero;
+    NX_MLD_GROUP *other;
+    UINT i, on_k = 0;
+    int  bad = 0;
+
+    rig_reset();
+    rig_ip.nx_ip_mld_enabled = NX_TRUE;
+    k    = &rig_ip.nx_ip_interface[K];
+    zero = &rig_ip.nx_ip_interface[0];
+    _nx_mld_group_join(&rig_ip, g1, k);
+    _nx_mld_group_join(&rig_ip, g2, k);
+    _nx_mld_group_join(&rig_ip, g1, zero);
+    if (mld_reports_k != 2)
+    {
+        printf("FAIL setup: %d reports on K (want 2)\n", mld_reports_k);
+        return 1;
+    }
+
+    if (_nx_ip_interface_detach(&rig_ip, K) != NX_SUCCESS)
+    {
+        printf("FAIL detach\n");
+        return 1;
+    }
+    for (i = 0; i < NX_MLD_MAX_GROUPS; i++)
+        on_k += rig_ip.nx_ip_mld_groups[i].nx_mld_group_interface == k;
+    printf("%s MLD entries naming the detached interface: %u (want 0)\n",
+           on_k == 0 ? "ok  " : "FAIL", on_k);
+    bad |= on_k != 0;
+    printf("%s reports sent on the detached link: %d (want 0)\n",
+           mld_reports_k == 2 ? "ok  " : "FAIL", mld_reports_k - 2);
+    bad |= mld_reports_k != 2;
+    other = _nx_mld_group_find(&rig_ip, g1, zero);
+    printf("%s interface 0 entry kept, join count %lu (want 1)\n",
+           (other && other -> nx_mld_group_join_count == 1) ? "ok  " : "FAIL",
+           other ? (unsigned long) other -> nx_mld_group_join_count : 0UL);
+    bad |= !(other && other -> nx_mld_group_join_count == 1);
+
+    /* Re-attach into the same slot, then the join address_set would make.  */
+    k -> nx_interface_valid             = NX_TRUE;
+    k -> nx_interface_link_up           = NX_TRUE;
+    k -> nx_interface_link_driver_entry = rig_driver;
+    mld_reports_k = 0;
+    _nx_mld_group_join(&rig_ip, g1, k);
+    other = _nx_mld_group_find(&rig_ip, g1, k);
+    printf("%s re-join on the re-attached interface: %d report(s), join count %lu (want 1, 1)\n",
+           (mld_reports_k == 1 && other && other -> nx_mld_group_join_count == 1) ? "ok  " : "FAIL",
+           mld_reports_k, other ? (unsigned long) other -> nx_mld_group_join_count : 0UL);
+    bad |= !(mld_reports_k == 1 && other && other -> nx_mld_group_join_count == 1);
+    return bad;
+#else
+    printf("ok   MLD not built\n");
+    return 0;
+#endif
+}
+
 int main(int argc, char **argv)
 {
     int bad;
 
     if (argc != 2)
     {
-        fprintf(stderr, "usage: %s ndlock|routes|routes_full\n", argv[0]);
+        fprintf(stderr, "usage: %s ndlock|routes|routes_full|mld\n", argv[0]);
         return 2;
     }
     if (strcmp(argv[1], "ndlock") == 0)
@@ -253,6 +332,8 @@ int main(int argc, char **argv)
         bad = arm_routes(0);
     else if (strcmp(argv[1], "routes_full") == 0)
         bad = arm_routes(1);
+    else if (strcmp(argv[1], "mld") == 0)
+        bad = arm_mld();
     else
         return 2;
     printf("%s\n", bad ? "FAIL" : "PASS");
