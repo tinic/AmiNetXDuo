@@ -445,7 +445,9 @@ host_test_targets() { # builddir
 #      541 with dhcp_conflict_drain (N-059): the DHCP conflict-flag drain
 #      claims each pending bit before declining it, so a conflict after the
 #      claim survives (Linux x86_64 only: MAP_32BIT).
-HOST_TESTS_EXPECTED=541
+#      542 with tls_cert_request_bounds (N-113): the CertificateRequest
+#      parser against messages flush with a PROT_NONE page (all hosts).
+HOST_TESTS_EXPECTED=542
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -467,7 +469,7 @@ case "$(uname -m)" in
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 510; Darwin x86_64 registers 540 on this tree.
+# Darwin arm64 registers 511; Darwin x86_64 registers 541 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;
