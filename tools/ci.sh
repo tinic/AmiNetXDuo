@@ -439,7 +439,13 @@ host_test_targets() { # builddir
 #      openers before bsd_nx_enter(); x86_64 only).
 #      539 with errno_hook_reduced_probes (N-072): the SBTC_HAVE_* probes with
 #      the four optional API families compiled out (all hosts).
-HOST_TESTS_EXPECTED=539
+#      540 with dhcp_bounds (N-060): the DHCP option walker's truncated-option
+#      off-by-ones and zero-length underflow, at the zero/one/exact-fit
+#      boundaries and the truncated/empty rejections.
+#      541 with dhcp_conflict_drain (N-059): the DHCP conflict-flag drain
+#      claims each pending bit before declining it, so a conflict after the
+#      claim survives (Linux x86_64 only: MAP_32BIT).
+HOST_TESTS_EXPECTED=541
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -457,8 +463,14 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 509 of 539 on the current tree.
+    # Subtract the x86_64-only bsdsocket fixtures here.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
+esac
+# The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
+# Darwin arm64 registers 510; Darwin x86_64 registers 540 on this tree.
+case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against

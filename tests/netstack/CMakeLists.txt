@@ -1117,6 +1117,77 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME ipv4_noaddr_account COMMAND test_ipv4_noaddr_account)
 
+    # The DHCP option walker's exact boundaries (N-060): the truncated-option
+    # off-by-ones (match guard and skip branch) and the zero-length underflow.
+    # Drives the real static _nx_dhcp_search_buffer and _nx_dhcp_get_option_value
+    # (compiled -Dstatic= and --gc-sections) at the zero-, one-, and exact-fit
+    # boundaries plus the truncated and empty-area rejections; the over-read is
+    # a real heap-buffer-overflow under ASan.
+    add_executable(test_dhcp_bounds
+        host/test_dhcp_bounds_host.c
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c")
+
+    set_source_files_properties(
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c"
+        PROPERTIES COMPILE_OPTIONS "-Dstatic=")
+
+    target_compile_options(test_dhcp_bounds PRIVATE
+        -ffunction-sections -fdata-sections)
+
+    target_include_directories(test_dhcp_bounds PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/addons/dhcp"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dhcp_bounds PRIVATE
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    target_link_options(test_dhcp_bounds PRIVATE -Wl,--gc-sections)
+
+    add_test(NAME dhcp_bounds COMMAND test_dhcp_bounds)
+
+    # N-059: _nx_dhcp_thread_entry's conflict-flag drain claims every pending
+    # bit under TX_DISABLE before declining each outside the critical section,
+    # so a conflict arriving after the claim survives.  Drives the real thread
+    # entry through two bounded interleavings (writer deferred while the claim
+    # holds Forbid, and writer during the decline); fails on the unguarded
+    # `flag &= ~bit` source.  x86_64 only: MAP_32BIT places the DHCP instance
+    # below 4 GiB so its ULONG entry argument round-trips.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    add_executable(test_dhcp_conflict_drain
+        host/test_dhcp_conflict_drain_host.c
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c")
+
+    set_source_files_properties(
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c"
+        PROPERTIES COMPILE_OPTIONS "-Dstatic=")
+
+    target_compile_options(test_dhcp_conflict_drain PRIVATE
+        -ffunction-sections -fdata-sections)
+
+    target_include_directories(test_dhcp_conflict_drain PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/addons/dhcp"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dhcp_conflict_drain PRIVATE
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    target_link_options(test_dhcp_conflict_drain PRIVATE -Wl,--gc-sections)
+
+    add_test(NAME dhcp_conflict_drain COMMAND test_dhcp_conflict_drain)
+    endif()
+
     # ---------------------------------------------------------------------
     # netstack.c itself, whole, on the host.
     #
