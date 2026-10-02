@@ -1040,6 +1040,33 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME icmpv4_error_quote COMMAND test_icmpv4_error_quote)
 
+    # Every packet the front door counts must be un-counted exactly once when
+    # the dispatcher drops it.  Two drop paths skipped that: next-header 50
+    # (ESP) with IPsec off did `return(1)` past the accounting, and an IPv6
+    # extension header ending exactly at append_ptr sets drop_packet inside the
+    # `if (!drop_packet)` advance block so its accounting `else` never runs.
+    # Drives the real _nx_ip_dispatch_process (and the real hop-by-hop option
+    # handler) with the counters pre-set as the front door left them; fails on
+    # the old source, passes when each drop is counted exactly once.
+    add_executable(test_ip_dispatch_drop_account
+        host/test_ip_dispatch_drop_account_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ip_dispatch_process.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv6_process_hop_by_hop_option.c")
+
+    target_include_directories(test_ip_dispatch_drop_account PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_ip_dispatch_drop_account PRIVATE
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME ip_dispatch_drop_account COMMAND test_ip_dispatch_drop_account)
+
     # ---------------------------------------------------------------------
     # netstack.c itself, whole, on the host.
     #

@@ -424,7 +424,10 @@ host_test_targets() { # builddir
 #      IPv6).
 #      520 with icmpv4_error_quote (N-009): the ICMPv4 error-message quote
 #      length is bounded to the offending datagram's contiguous extent.
-HOST_TESTS_EXPECTED=520
+#      521 with ip_dispatch_drop_account (N-023): the dispatcher un-counts a
+#      dropped packet exactly once (ESP-with-IPsec-off and exact-length
+#      extension-header drops).
+HOST_TESTS_EXPECTED=521
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -442,7 +445,7 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 491 of 520 on the current tree.
+    # darwin-arm64 registers 492 of 521 on the current tree.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 29)) ;;
 esac
 
