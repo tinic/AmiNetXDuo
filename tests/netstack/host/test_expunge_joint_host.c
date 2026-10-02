@@ -421,8 +421,7 @@ static void h_fail_next_adopt(void)
 
 static void t_adopt_failure_keeps_everything(void)
 {
-    printf("expunge joint: the last shutdown cannot adopt its caller
-");
+    printf("expunge joint: the last shutdown cannot adopt its caller\n");
 
     nsh_reset();
 
@@ -449,8 +448,7 @@ static void t_adopt_failure_keeps_everything(void)
 /* The next shutdown that can adopt takes it down, once. */
 static void t_adopt_failure_retry(void)
 {
-    printf("expunge joint: a later shutdown retries
-");
+    printf("expunge joint: a later shutdown retries\n");
 
     nsh_reset();
 
@@ -480,8 +478,7 @@ static void t_adopt_failure_reopen(void)
 {
     ULONG starts;
 
-    printf("expunge joint: failed shutdown, reopen, one close
-");
+    printf("expunge joint: failed shutdown, reopen, one close\n");
 
     nsh_reset();
 
