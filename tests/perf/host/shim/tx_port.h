@@ -8,7 +8,7 @@
 #define AMINETXDUO_HOST_TX_PORT_SHIM
 
 #ifndef AMINETXDUO_HOST_VENDORED_TX_PORT
-#error "AMINETXDUO_HOST_VENDORED_TX_PORT must name ThreadX's linux tx_port.h"
+#error "AMINETXDUO_HOST_VENDORED_TX_PORT must name the tx_port.h to wrap: ThreadX's linux port or port/threadx-amiga/inc/tx_port.h"
 #endif
 
 #define LONG    aminetxduo_host_shim_LONG
