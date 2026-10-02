@@ -332,9 +332,19 @@ static UINT h_route_delete_calls;
 UINT _nxe_ip_static_route_delete(NX_IP *ip, ULONG n, ULONG m)
 { (VOID)ip; (VOID)n; (VOID)m;
   h_route_delete_calls++; return h_route_delete_status; }
+/* The product disables NetX's checked wrappers.  This host call-out must
+   not supply their validation: the control entry itself owns the contract. */
+static UINT h_arp_add_calls;
+static ULONG h_arp_add_address, h_arp_add_msw, h_arp_add_lsw;
 UINT _nxe_arp_static_entry_create(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
-{ (VOID)ip; (VOID)a; (VOID)msw; (VOID)lsw;
-  h_unreachable("nx_arp_static_entry_create"); return 1; }
+{
+    (VOID)ip;
+    h_arp_add_calls++;
+    h_arp_add_address = a;
+    h_arp_add_msw = msw;
+    h_arp_add_lsw = lsw;
+    return NX_SUCCESS;
+}
 UINT _nxe_arp_entry_delete(NX_IP *ip, ULONG a)
 { (VOID)ip; (VOID)a; h_unreachable("nx_arp_entry_delete"); return 1; }
 UINT _nxe_arp_dynamic_entries_invalidate(NX_IP *ip)
@@ -569,6 +579,50 @@ static void t_route_delete_errno(void)
           "an IPv6 prefix that is not there is ENOENT, as before");
 }
 
+static LONG h_arp_add(ULONG destination, BOOL zero_mac)
+{
+    NetStatusControl ctl;
+    static const UBYTE mac[6] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 };
+
+    memset(&ctl, 0, sizeof ctl);
+    ctl.nsc_Magic = AMI_NETSTATUS_MAGIC;
+    ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+    ctl.nsc_Destination = destination;
+    if (!zero_mac)
+        memcpy(ctl.nsc_HwAddress, mac, sizeof mac);
+    h_arp_add_calls = 0;
+    h_base.sb_Errno = 0;
+    return bsd_NetStackControl(AMI_NETSTATUS_MAGIC, NETCTRL_ARP_ADD,
+                               &ctl, sizeof ctl, &h_base);
+}
+
+static void t_arp_add_validation(void)
+{
+    static const ULONG refused[] = {
+        0UL, 0xE0000000UL, 0xE0000001UL, 0xEFFFFFFFUL, 0xFFFFFFFFUL
+    };
+    UINT i;
+
+    h_reset();
+    for (i = 0; i < sizeof refused / sizeof refused[0]; i++)
+    {
+        CHECK(h_arp_add(refused[i], FALSE) == -1 &&
+              h_base.sb_Errno == AMI_EINVAL,
+              "invalid static ARP destination is EINVAL");
+        CHECK(h_arp_add_calls == 0,
+              "invalid destination does not reach unchecked NetX");
+    }
+    CHECK(h_arp_add(0xC0000207UL, TRUE) == -1 &&
+          h_base.sb_Errno == AMI_EINVAL,
+          "zero hardware address is EINVAL");
+    CHECK(h_arp_add_calls == 0, "zero MAC does not reach unchecked NetX");
+    CHECK(h_arp_add(0xC0000207UL, FALSE) == 0 && h_arp_add_calls == 1,
+          "valid static ARP add reaches NetX exactly once");
+    CHECK(h_arp_add_address == 0xC0000207UL &&
+          h_arp_add_msw == 0x0011UL && h_arp_add_lsw == 0x22334455UL,
+          "valid address and six hardware bytes are passed unchanged");
+}
+
 int main(void)
 {
     printf("NETSTATUS host tests\n");
@@ -581,6 +635,7 @@ int main(void)
     t_invalid_slots_are_skipped();
     t_stats_wait_revalidates_interface();
     t_route_delete_errno();
+    t_arp_add_validation();
 
     printf("netstatus checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
