@@ -81,6 +81,23 @@ if(NOT CMAKE_CROSSCOMPILING)
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
     add_test(NAME ipv6_packet_copy COMMAND test_ipv6_packet_copy)
 
+    # SO_REUSEADDR must preserve the hash bucket's existing socket ring.
+    add_executable(test_tcp_reuse_ring
+        host/test_tcp_reuse_ring_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_client_socket_bind.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_client_socket_unbind.c")
+    target_include_directories(test_tcp_reuse_ring PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc")
+    target_compile_definitions(test_tcp_reuse_ring PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE NX_DISABLE_ERROR_CHECKING TX_DISABLE_ERROR_CHECKING
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+    add_test(NAME tcp_reuse_ring COMMAND test_tcp_reuse_ring)
+
     add_executable(test_tcp_retries
         host/test_tcp_retries_host.c
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"

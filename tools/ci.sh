@@ -416,7 +416,8 @@ host_test_targets() { # builddir
 #      505-506 with ipv6_prefix_canonical and ipv6_prefix_range (N-021,
 #      N-022; all hosts, with IPv6).
 #      507 with ipv6_packet_copy (N-020, actual target-width copy contract).
-HOST_TESTS_EXPECTED=507
+#      508 with tcp_reuse_ring (N-028): reuse must preserve the bound bucket.
+HOST_TESTS_EXPECTED=508
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -433,7 +434,7 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 479 of 507 on the current tree.
+    # darwin-arm64 registers 480 of 508 on the current tree.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 28)) ;;
 esac
 
