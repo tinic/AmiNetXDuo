@@ -5,6 +5,11 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- TLS rejects truncated or inconsistent Certificate and CertificateRequest
+  messages before reading beyond their declared contents.
+- TLS 1.3 Finished-key derivation stays within its destination buffers.
+- AES byte packing uses unsigned shifts, avoiding undefined behavior for
+  bytes with the high bit set.
 - A task that asks for random bytes while another task is still collecting the
   pool's first entropy waits for it, instead of drawing output from an unseeded
   key.
