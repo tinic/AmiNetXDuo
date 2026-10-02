@@ -1147,7 +1147,13 @@ if(NOT CMAKE_CROSSCOMPILING)
         NX_INCLUDE_USER_DEFINE_FILE
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
-    target_link_options(test_dhcp_bounds PRIVATE -Wl,--gc-sections)
+    if(APPLE)
+        # Darwin's ld has no --gc-sections; -dead_strip discards the same
+        # unreferenced sections this all-host test relies on being dropped.
+        target_link_options(test_dhcp_bounds PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_dhcp_bounds PRIVATE -Wl,--gc-sections)
+    endif()
 
     add_test(NAME dhcp_bounds COMMAND test_dhcp_bounds)
 
@@ -1156,9 +1162,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     # so a conflict arriving after the claim survives.  Drives the real thread
     # entry through two bounded interleavings (writer deferred while the claim
     # holds Forbid, and writer during the decline); fails on the unguarded
-    # `flag &= ~bit` source.  x86_64 only: MAP_32BIT places the DHCP instance
-    # below 4 GiB so its ULONG entry argument round-trips.
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    # `flag &= ~bit` source.  Linux x86_64 only: MAP_32BIT places the DHCP
+    # instance below 4 GiB so its ULONG entry argument round-trips, and that
+    # mmap flag is Linux-specific (an Intel Mac is x86_64 too and must not pick
+    # this up).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+       CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     add_executable(test_dhcp_conflict_drain
         host/test_dhcp_conflict_drain_host.c
         "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c")
