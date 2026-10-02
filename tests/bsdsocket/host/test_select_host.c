@@ -28,6 +28,7 @@ static unsigned long h_failures;
 #define H_EVENT_SIG     (1UL << 12)     /* sb_EventSigMask                   */
 #define H_BREAK_SIG     (1UL << 13)     /* sb_BreakMask, Ctrl-C's stand-in   */
 #define H_USER_SIG      (1UL << 14)     /* the caller's own, in `signals`    */
+#define H_USER2_SIG     (1UL << 15)     /* a second one the caller asks for  */
 #define H_SIGEVENT_SIG  (1UL << 16)     /* sb_SigEventMask, SO_EVENTMASK     */
 #define H_SIGIO_SIG     (1UL << 17)     /* sb_SigIOMask                      */
 #define H_SIGURG_SIG    (1UL << 18)     /* sb_SigUrgMask                     */
@@ -85,6 +86,7 @@ static struct
     ULONG        tick_jump;     /* ticks a planned timer wake advances     */
     ULONG        signal_calls;
     ULONG        last_signalled;
+    struct Task *last_signal_task;  /* which Task Signal() was handed        */
 
     ULONG        notifies;          /* nx_*_notify() setters that were armed */
 
@@ -184,7 +186,7 @@ struct Task *FindTask(const char *name)
 
 VOID Signal(struct Task *task, ULONG signalSet)
 {
-    (VOID)task;
+    h.last_signal_task = task;
     h.signals       |= signalSet;
     h.signal_calls++;
     h.last_signalled = signalSet;
@@ -928,6 +930,47 @@ static void t_waitselect_signals(void)
     n = bsd_WaitSelect(1, s.read, NULL, NULL, NULL, &signals, &h_base);
     CHECK(n == 0 && signals == H_USER_SIG,
           "a caller's signal arriving during the wait ends it the same way");
+
+    /* N-084: a caller signal that Wait() returned on its own does not end the
+       loop there; the loop top does.  A break that lands in between makes
+       that top return EINTR, and the signal Wait() consumed must still be
+       reported.  The caller asks for two bits so an untouched mask is told
+       apart from the one bit that arrived. */
+    h_reset();
+    (void)h_tcp(0, NX_TCP_SYN_SENT);
+    h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
+    h.wait_plan[0]     = H_USER_SIG;
+    h.wait_planned     = 1;
+    h.wait_post_signal = H_BREAK_SIG;      /* after the wake, before the top */
+    signals = H_USER_SIG | H_USER2_SIG;
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, NULL, &signals, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_EINTR,
+          "a break pending at the loop top after a caller wake is EINTR");
+    CHECK(signals == H_USER_SIG,
+          "and the caller signal Wait() consumed comes back in the mask");
+    CHECK((h.signals & H_USER_SIG) == 0,
+          "which is not left standing in the task as well");
+
+    /* N-085: a base whose opener is gone (sb_Task NULL) is not refused, and a
+       break Wait() took is put back on the caller, not on sb_Task. */
+    h_reset();
+    (void)h_tcp(0, NX_TCP_SYN_SENT);
+    h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
+    h_base.sb_Task = NULL;
+    h_me           = &h_other_task;
+    h.wait_plan[0] = H_BREAK_SIG;
+    h.wait_planned = 1;
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, NULL, NULL, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_EINTR,
+          "a break during the wait on an orphaned base is EINTR");
+    CHECK(h.signal_calls == 1 && h.last_signal_task == &h_other_task,
+          "and the break goes back to the calling task, not to a NULL sb_Task");
 }
 
 static void t_waitselect_timeout(void)

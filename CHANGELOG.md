@@ -17,6 +17,9 @@ Add new entries under `Unreleased`; published release sections are history.
   refusing the free still restores its original socket.
 - `SocketBaseTagList()` reports the routing, interface-management, monitoring
   and status APIs as absent in builds that leave those families out.
+- `WaitSelect()` reports a caller signal it consumed when a Ctrl-C ends the
+  wait, clears the output signal mask on an immediate interruption, and puts
+  a consumed Ctrl-C back on the calling task.
 
 ## 1.0.0-beta7
 

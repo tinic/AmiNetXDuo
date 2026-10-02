@@ -931,7 +931,11 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
             if (terminal_wait && SocketBase->sb_TimerArmed)
                 bsd_timer_cancel(SocketBase);
 
-            return bsd_fail(SocketBase, AMI_EINTR);
+            /* Not the first pass only: a caller signal that Wait() took and
+               that did not end the loop is in got_signals, and nothing else
+               will report it (N-084). */
+            return bsd_waitselect_fail(SocketBase, signals, got_signals,
+                                       AMI_EINTR);
         }
 
         if ((pending & user_mask) != 0)
@@ -1053,7 +1057,10 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
         if ((received & break_mask) != 0)
         {
-            Signal(SocketBase->sb_Task, received & break_mask);
+            /* Back to the task Wait() took them from, which is the caller.
+               sb_Task can be NULL here: a base whose opener is gone passes
+               the F-065 check above (N-085). */
+            Signal(FindTask(NULL), received & break_mask);
 
             /* The terminal request (tick total past LONG_MAX) has no signed
                due time; leave it out here and the next wait's keep/cancel
