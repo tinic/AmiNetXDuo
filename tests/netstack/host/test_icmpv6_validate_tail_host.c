@@ -17,7 +17,6 @@
 #include "nx_icmpv6.h"
 
 #include <stdio.h>
-#include <string.h>
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -43,13 +42,12 @@ static UINT h_validate(UCHAR *buf, INT length)
 int main(void)
 {
     NX_ICMPV6_OPTION *opt;
-    UCHAR buf[32];
+    UCHAR buf[32] = {0};
     UINT rc;
 
     printf("ICMPv6 ND option-tail validation, direct validator contract\n");
 
     /* A single whole 8-octet prefix option is valid. */
-    memset(buf, 0, sizeof(buf));
     opt = (NX_ICMPV6_OPTION *)buf;
     opt->nx_icmpv6_option_type   = ICMPV6_OPTION_TYPE_PREFIX_INFO;
     opt->nx_icmpv6_option_length = 1;
@@ -57,7 +55,6 @@ int main(void)
     h_check(rc == NX_SUCCESS, "a whole prefix option must validate");
 
     /* Two whole options. */
-    memset(buf, 0, sizeof(buf));
     opt = (NX_ICMPV6_OPTION *)buf;
     opt->nx_icmpv6_option_type   = ICMPV6_OPTION_TYPE_PREFIX_INFO;
     opt->nx_icmpv6_option_length = 1;
@@ -70,6 +67,22 @@ int main(void)
     /* An empty option area (no options) is valid. */
     rc = h_validate(buf, 0);
     h_check(rc == NX_SUCCESS, "an empty option area must validate");
+
+    /* Two whole options followed by a 2-octet tail: the validator must
+       reject the tail even when valid options precede it, because the
+       walkers re-walk this same count and stride past the whole options
+       before meeting the fragment. */
+    opt = (NX_ICMPV6_OPTION *)buf;
+    opt->nx_icmpv6_option_type   = ICMPV6_OPTION_TYPE_PREFIX_INFO;
+    opt->nx_icmpv6_option_length = 1;
+    opt = (NX_ICMPV6_OPTION *)(buf + 8);
+    opt->nx_icmpv6_option_type   = ICMPV6_OPTION_TYPE_SRC_LINK_ADDR;
+    opt->nx_icmpv6_option_length = 1;
+    buf[16] = ICMPV6_OPTION_TYPE_PREFIX_INFO;
+    buf[17] = 0;
+    rc = h_validate(buf, 18);
+    h_check(rc == NX_NOT_SUCCESSFUL,
+            "two whole options plus a 2-octet tail must be rejected");
 
     /* The NA repro tail: type=prefix, length byte zero.  The old validator
        returned SUCCESS, and the NA walker then strides by 0 and never ends. */
@@ -93,7 +106,6 @@ int main(void)
 
     /* An option whose length byte claims more than remains (overrun).  Both
        old and new reject; a regression guard. */
-    memset(buf, 0, sizeof(buf));
     opt = (NX_ICMPV6_OPTION *)buf;
     opt->nx_icmpv6_option_type   = ICMPV6_OPTION_TYPE_PREFIX_INFO;
     opt->nx_icmpv6_option_length = 2;   /* claims 16 octets, 8 present */
@@ -102,7 +114,6 @@ int main(void)
 
     /* A zero length byte inside a whole option (the GHSA-rf32-h832-hg8r
        guard).  Both old and new reject; a regression guard. */
-    memset(buf, 0, sizeof(buf));
     opt = (NX_ICMPV6_OPTION *)buf;
     opt->nx_icmpv6_option_type   = ICMPV6_OPTION_TYPE_PREFIX_INFO;
     opt->nx_icmpv6_option_length = 0;
