@@ -365,10 +365,7 @@ void    _tx_amiga_thread_completed(void);
 #define TX_THREAD_COMPLETED_EXTENSION(thread_ptr)     _tx_amiga_thread_completed();
 
 
-/* In a green build wakeups are delivered at the realm's scheduling points, so a
-   relinquishing green thread must deliver latched signals and owed ticks BEFORE
-   the generic code inspects the ready lists.  Baton builds keep the stock hook. */
-
+/* TX_THREAD_RELINQUISH_PORT_PREPARE: not defined; the core default (empty) is used. */
 
 
 /* Start the periodic tick task once the kernel is initialised but before the
