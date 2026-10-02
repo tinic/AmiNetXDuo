@@ -404,13 +404,25 @@ LONG bsd_table_resize(struct AmiSocketBase *base, LONG size)
     if (table == NULL)
         return -1;
 
+    /* Checked, copied and published whole under Forbid() and the old one
+       freed after: another opener's bsd_owner_elect() reads this table
+       (F-043), and a slot an allocation holds BSD_FD_BUSY is stored back
+       under Forbid() too, so it lands in whichever table is current (N-087). */
+    Forbid();
+    for (i = base->sb_TableSize - 1; i >= size; i--)
+    {
+        if (base->sb_Table[i] != NULL)
+        {
+            Permit();
+            ami_free(table);
+            return -1;
+        }
+    }
+
     copy = (size < base->sb_TableSize) ? size : base->sb_TableSize;
     for (i = 0; i < copy; i++)
         table[i] = base->sb_Table[i];
 
-    /* Published whole under Forbid() and the old one freed after: another
-       opener's bsd_owner_elect() reads this table (F-043). */
-    Forbid();
     old = base->sb_Table;
     base->sb_Table     = table;
     base->sb_TableSize = size;
@@ -450,6 +462,36 @@ static LONG bsd_fd_callback(struct AmiSocketBase *base, LONG fd, LONG action)
     return base->sb_FDCallback(fd, action);
 }
 
+/* The store that ends one: under Forbid(), so it reaches the current table
+   even if a callback grew it meanwhile. */
+static VOID bsd_fd_store(struct AmiSocketBase *base, LONG fd, AmiSocket *entry)
+{
+    Forbid();
+    base->sb_Table[fd] = entry;
+    Permit();
+}
+
+/*
+ * Take an empty slot for the callbacks: BSD_FD_BUSY under Forbid(), as
+ * bsd_fd_claim() and bsd_fd_free() do, so a callback that re-enters cannot
+ * allocate it and SBTC_DTABLESIZE cannot shrink the table past it (N-087).
+ * Forbid() covers the test-and-set only, never a callback.
+ */
+static BOOL bsd_fd_take_empty(struct AmiSocketBase *base, LONG fd)
+{
+    BOOL taken = FALSE;
+
+    Forbid();
+    if (fd < base->sb_TableSize && base->sb_Table[fd] == NULL)
+    {
+        base->sb_Table[fd] = BSD_FD_BUSY;
+        taken = TRUE;
+    }
+    Permit();
+
+    return taken;
+}
+
 LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
 {
     LONG fd;
@@ -460,21 +502,24 @@ LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
 
     for (fd = 0; fd < base->sb_TableSize; fd++)
     {
-        if (base->sb_Table[fd] == NULL)
+        if (!bsd_fd_take_empty(base, fd))
+            continue;
+
+        if (bsd_fd_callback(base, fd, FDCB_CHECK) != 0)
         {
-            if (bsd_fd_callback(base, fd, FDCB_CHECK) != 0)
-            {
-                base->sb_Table[fd] = BSD_FD_RESERVED;
-                continue;
-            }
-
-            error = bsd_fd_callback(base, fd, FDCB_ALLOC);
-            if (error != 0)
-                return bsd_fail(base, error);
-
-            base->sb_Table[fd] = sock;
-            return fd;
+            bsd_fd_store(base, fd, BSD_FD_RESERVED);
+            continue;
         }
+
+        error = bsd_fd_callback(base, fd, FDCB_ALLOC);
+        if (error != 0)
+        {
+            bsd_fd_store(base, fd, NULL);
+            return bsd_fail(base, error);
+        }
+
+        bsd_fd_store(base, fd, sock);
+        return fd;
     }
 
     return bsd_fail(base, AMI_EMFILE);
@@ -490,18 +535,19 @@ LONG bsd_fd_reserve(struct AmiSocketBase *base, LONG fd)
     if (fd < 0)
         return bsd_fd_alloc(base, BSD_FD_RESERVED);
 
-    if (fd >= base->sb_TableSize || base->sb_Table[fd] != NULL)
+    if (!bsd_fd_take_empty(base, fd))
         return bsd_fail(base, AMI_EMFILE);
 
     error = bsd_fd_callback(base, fd, FDCB_CHECK);
+    if (error == 0)
+        error = bsd_fd_callback(base, fd, FDCB_ALLOC);
     if (error != 0)
+    {
+        bsd_fd_store(base, fd, NULL);
         return bsd_fail(base, error);
+    }
 
-    error = bsd_fd_callback(base, fd, FDCB_ALLOC);
-    if (error != 0)
-        return bsd_fail(base, error);
-
-    base->sb_Table[fd] = BSD_FD_RESERVED;
+    bsd_fd_store(base, fd, BSD_FD_RESERVED);
     return fd;
 }
 
@@ -584,8 +630,12 @@ LONG bsd_fd_unclaim(struct AmiSocketBase *base, LONG fd, AmiSocket *prev)
     return 0;
 }
 
-LONG bsd_fd_free(struct AmiSocketBase *base, LONG fd)
+/* bsd_fd_free(), and what it took out of the slot: NULL when there was
+   nothing to free.  CloseSocket() releases that, not what it looked up. */
+static LONG bsd_fd_take(struct AmiSocketBase *base, LONG fd, AmiSocket **taken)
 {
+    *taken = NULL;
+
     if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
     {
         AmiSocket *entry;
@@ -611,14 +661,22 @@ LONG bsd_fd_free(struct AmiSocketBase *base, LONG fd)
         error = bsd_fd_callback(base, fd, FDCB_FREE);
         if (error != 0)
         {
-            base->sb_Table[fd] = entry;
+            bsd_fd_store(base, fd, entry);
             return bsd_fail(base, error);
         }
 
-        base->sb_Table[fd] = NULL;
+        bsd_fd_store(base, fd, NULL);
+        *taken = entry;
     }
 
     return 0;
+}
+
+LONG bsd_fd_free(struct AmiSocketBase *base, LONG fd)
+{
+    AmiSocket *taken;
+
+    return bsd_fd_take(base, fd, &taken);
 }
 
 static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
@@ -3033,7 +3091,7 @@ LONG bsd_shutdown(register LONG sock_fd __asm("d0"),
 LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+    AmiSocket *sock;
 
     if (bsd_fd_reserved(SocketBase, sock_fd))
     {
@@ -3042,11 +3100,19 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
         return 0;
     }
 
+    if (bsd_lookup(SocketBase, sock_fd) == NULL)
+        return bsd_fail(SocketBase, AMI_EBADF);
+
+    /* What the free took, not what the lookup saw: another task on this base
+       may have closed the descriptor in between (N-087). */
+    if (bsd_fd_take(SocketBase, sock_fd, &sock) != 0)
+        return -1;
+
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
-    if (bsd_fd_free(SocketBase, sock_fd) != 0)
-        return -1;
+    if (sock == BSD_FD_RESERVED)
+        return 0;
 
     if (bsd_nx_enter(SocketBase) == 0)
     {
