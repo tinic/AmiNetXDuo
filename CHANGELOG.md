@@ -9,6 +9,12 @@ Add new entries under `Unreleased`; published release sections are history.
   reject truncated options without reading past the reply.
 - Raw socket endpoint changes preserve newly arriving packets while discarding
   queued packets that no longer match the endpoint.
+- Sending out-of-band data on an IPv6 TCP connection is refused with
+  `EOPNOTSUPP` before any bytes are sent, instead of silently delivering the
+  urgent byte as ordinary data.  Receiving urgent data stays IP-version
+  independent.
+- The out-of-band filter only marks the segment that carries the urgent byte,
+  not a pure acknowledgement that shares its sequence number.
 - Transferring or sharing a listening socket also transfers pending
   connections' event ownership, keeping callbacks clear of a closed opener.
 - Final library close preserves socket-release debts when ThreadX entry fails,
@@ -20,6 +26,8 @@ Add new entries under `Unreleased`; published release sections are history.
 - `WaitSelect()` reports a caller signal it consumed when a Ctrl-C ends the
   wait, clears the output signal mask on an immediate interruption, and puts
   a consumed Ctrl-C back on the calling task.
+- Descriptor allocation, resizing and close preserve the current socket
+  table across callbacks and concurrent changes by another task.
 
 ## 1.0.0-beta7
 

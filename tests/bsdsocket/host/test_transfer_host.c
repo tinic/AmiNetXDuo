@@ -455,10 +455,15 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte,
 
 BOOL bsd_oob_take(AmiSocket *sock, UBYTE *out)
 {
-    (VOID)sock;
-    (VOID)out;
+    /* Faithful to oob.c minus the Forbid()/Permit() bracket (those are
+       harness traps): the byte is taken once, then the flag is cleared. */
+    if ((sock->as_Flags & ASF_OOBHAVE) == 0)
+        return FALSE;
 
-    return FALSE;
+    *out = sock->as_OobData;
+    sock->as_Flags &= ~ASF_OOBHAVE;
+
+    return TRUE;
 }
 
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why)
@@ -1083,6 +1088,50 @@ static void t_refusals(void)
     CHECK(bsd_sendto(1, buf, 4, 0, NULL, 0, &h_base) == -1 &&
           h.errno_value == AMI_EDESTADDRREQ,
           "and so is sendto() with no address");
+}
+
+/*
+ * N-076: MSG_OOB must be refused on an IPv6 peer before the len-1 prefix
+ * bytes are sent.  The OOB filter (oob.c) only ever marks an IPv4 segment,
+ * so on IPv6 the "urgent" byte would go out as ordinary data and the caller
+ * would still see success.  The refusal is send-side only: recv(MSG_OOB) is
+ * IP-version independent and must keep working for an IPv6 peer.
+ */
+static void t_oob_v6_refusal(void)
+{
+    char      buf[2] = { 'x', 'y' };
+    AmiSocket *v6;
+    AmiSocket *v4;
+
+    printf("transfer: MSG_OOB is refused on an IPv6 send, kept on recv\n");
+
+    h_reset();
+    v6 = h_tcp(0);
+    v4 = h_tcp(1);
+
+    v6->as_PeerAddr.nxd_ip_version = NX_IP_VERSION_V6;
+    v4->as_PeerAddr.nxd_ip_version = NX_IP_VERSION_V4;
+
+    /* len > 1: the refusal happens before the len-1 prefix, so nothing at
+       all may reach the wire. */
+    CHECK(bsd_send(0, buf, 2, MSG_OOB, &h_base) == -1 &&
+          h.errno_value == AMI_EOPNOTSUPP && h.sends == 0 && h.sent_bytes == 0,
+          "MSG_OOB on an IPv6 TCP peer is EOPNOTSUPP before the len-1 prefix");
+
+    CHECK(bsd_send(1, buf, 1, MSG_OOB, &h_base) == 1,
+          "and on an IPv4 peer it still reaches the OOB send path");
+
+    /* recv(MSG_OOB) is IP-version independent: the receive-side urgent-data
+       callback reads the TCP header off the receive queue, so an IPv6 peer
+       must still be able to take an urgent byte. */
+    h_reset();
+    v6 = h_tcp(0);
+    v6->as_PeerAddr.nxd_ip_version = NX_IP_VERSION_V6;
+    v6->as_OobData = 'u';
+    v6->as_Flags  |= ASF_OOBHAVE;
+
+    CHECK(bsd_recv(0, buf, 1, MSG_OOB, &h_base) == 1 && buf[0] == 'u',
+          "recv(MSG_OOB) on an IPv6 peer still returns the urgent byte");
 }
 
 /*
@@ -1783,6 +1832,9 @@ int main(void)
     t_call_budget();
     t_abi();
     t_refusals();
+#ifdef AMINETXDUO_IPV6
+    t_oob_v6_refusal();
+#endif
     t_iov_total();
     t_iov_coalesce();
     t_mss_segmentation();

@@ -2102,7 +2102,10 @@ static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EINVAL);
 
     /* MSG_OOB is TCP-only: there is no urgent data on a datagram or raw
-       socket. oob.c has the rest. */
+       socket. oob.c has the rest.  The IPv6 refusal lives on the send side
+       only (bsd_send_oob): recv(MSG_OOB) is IP-version independent, since
+       bsd_tcp_urgent_notify() reads the TCP header straight off the receive
+       queue. */
     if ((flags & MSG_OOB) != 0 && (sock->as_Flags & ASF_TCP) == 0)
         return bsd_fail(base, AMI_EOPNOTSUPP);
 
@@ -2120,6 +2123,16 @@ static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
 
     if (len < 1)
         return bsd_fail(base, AMI_EINVAL);
+
+#ifdef AMINETXDUO_IPV6
+    /* N-076: the OOB filter (oob.c) only ever marks an IPv4 segment, so an
+       IPv6 peer would carry the "urgent" byte as ordinary data and still
+       report success.  Refuse on the send side only, before the len-1 prefix
+       goes out.  Receiving urgent data is IP-version independent, so the
+       shared bsd_transfer_check() must keep letting recv(MSG_OOB) through. */
+    if (sock->as_PeerAddr.nxd_ip_version == NX_IP_VERSION_V6)
+        return bsd_fail(base, AMI_EOPNOTSUPP);
+#endif
 
     if (bsd_nx_enter(base) != 0)
         return bsd_fail(base, AMI_ENETDOWN);

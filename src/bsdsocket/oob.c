@@ -18,6 +18,7 @@
 #define BSD_TCP_OFF_DPORT        2
 #define BSD_TCP_OFF_SEQ          4
 #define BSD_TCP_OFF_FLAGS       12      /* data offset + reserved + flags   */
+#define BSD_TCP_OFF_DATA        12      /* data offset, the high nibble      */
 #define BSD_TCP_OFF_CHECKSUM    16
 #define BSD_TCP_OFF_URGENT      18
 
@@ -51,7 +52,7 @@ static UWORD bsd_oob_csum_update(UWORD hc, UWORD old_word, UWORD new_word)
  * Which segment the filter looks for.  One record rather than a list: it is
  * armed and disarmed inside a single bsd_nx_enter() bracket around one
  */
-static struct
+static struct BsdOobMark
 {
     BOOL  om_Active;
     UINT  om_LocalPort;
@@ -100,6 +101,24 @@ static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
         (UINT)dport != bsd_oob_mark.om_PeerPort  ||
         seq         != bsd_oob_mark.om_Sequence)
         return NX_SUCCESS;
+
+    /*
+     * N-074: the (sport, dport, seq) match is not enough on its own.  The
+     * mark is armed with tx_sequence, and a pure ACK sent by the IP thread's
+     * receive half while the urgent send is parked on the transmit list
+     * carries that same sequence but no data: nx_tcp_socket_send_internal()
+     * advances tx_sequence only after it has built the data header, i.e.
+     * after this filter has already run for the urgent segment.  Marking the
+     * ACK would set URG and urgent pointer 1 over a zero-length payload.
+     * Require at least one payload byte.
+     */
+    {
+        ULONG total_len = (ULONG)(((UWORD)ip[2] << 8) | ip[3]);
+        ULONG data_off  = (ULONG)(tcp[BSD_TCP_OFF_DATA] >> 4) * 4;
+
+        if (total_len < ihl + data_off + 1)
+            return NX_SUCCESS;
+    }
 
     flags = (UWORD)(((UWORD)tcp[BSD_TCP_OFF_FLAGS] << 8) |
                     tcp[BSD_TCP_OFF_FLAGS + 1]);

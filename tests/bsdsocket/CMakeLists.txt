@@ -1093,6 +1093,34 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SIZEOF_VOID_P EQUAL 4)
 
     add_test(NAME transfer_scatter_gather COMMAND test_transfer)
 
+    # oob.c, the urgent-data packet filter (N-074).  The whole translation
+    # unit with -Dstatic= so the filter and its mark record are reachable from
+    # the host file, and -ffunction-sections + gc-sections so bsd_oob_send()
+    # (whose NetX packet externs are not scripted here) is dropped.  Same
+    # 32-bit-only story as transfer.c.
+    add_executable(test_oob_filter host/test_oob_filter_host.c
+                                   "${CMAKE_SOURCE_DIR}/src/bsdsocket/oob.c")
+
+    target_include_directories(test_oob_filter PRIVATE ${BSD_HOST32_INCLUDES})
+
+    target_compile_options(test_oob_filter PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_oob_filter PRIVATE ${BSD_HOST32_DEFINES}
+        AMINETXDUO_OOB)
+
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/oob.c"
+        PROPERTIES COMPILE_OPTIONS "-Dstatic=;-ffunction-sections")
+
+    if(APPLE)
+        target_link_options(test_oob_filter PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_oob_filter PRIVATE -Wl,--gc-sections)
+    endif()
+
+    add_test(NAME oob_filter_payload_guard COMMAND test_oob_filter)
+
     # cork.c, the small-write cork behind setsockopt(TCP_NODELAY, 0), with
     # transfer.c and select.c around it: the send and receive paths that feed
     # it and the notify and WaitSelect() that wake it.  Built whatever
