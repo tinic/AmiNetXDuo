@@ -12,6 +12,7 @@
 
 #include <exec/execbase.h>
 #include <exec/lists.h>
+#include <exec/semaphores.h>
 #include <exec/tasks.h>
 #include <devices/timer.h>
 #include <proto/exec.h>
@@ -208,8 +209,14 @@ static ULONG  pool_out_used = AMI_RANDOM_KEY_BYTES;   /* forces a first block */
 static ULONG  pool_counter;
 static ULONG  pool_bits;
 static ULONG  pool_internal_bits;
-static BOOL   pool_started;
-static volatile BOOL pool_gathering;   /* one random_gather() at a time */
+/* TRUE only once the first collection has been MIXED: nothing is generated
+   from the key before that, and a reader outside the lock sees it set last. */
+static volatile BOOL pool_started;
+
+/* One random_gather() at a time, and a first caller that finds another task
+   gathering waits for it instead of reading the unmixed key (N-094). */
+static struct SignalSemaphore pool_sem;
+static volatile BOOL          pool_sem_ready;
 
 /*
  * key <- SHA-256(DOMAIN_RESEED || key || counter || material).  The old key
@@ -501,7 +508,7 @@ static ULONG gather_clock(EntropySample *s)
 /*
  * The sample MUST stay static, not a local: 460 bytes on a bsdsocket.library
  * vector runs on the caller's 4 KB Shell stack with no guard page.
- * One writer only -- ami_random_init() runs from InitResident().
+ * One writer at a time: random_gather() runs only under pool_sem.
  */
 static EntropySample random_sample;
 
@@ -555,38 +562,62 @@ static VOID random_gather(VOID)
         p[i] = 0;
 }
 
+static VOID pool_lock(VOID)
+{
+    /* InitSemaphore() cannot wait, so the first caller sets it up under
+       Forbid() and every later one finds it ready. */
+    Forbid();
+    if (!pool_sem_ready)
+    {
+        InitSemaphore(&pool_sem);
+        pool_sem_ready = TRUE;
+    }
+    Permit();
+
+    ObtainSemaphore(&pool_sem);
+}
+
 /*
- * Repeat calls add; two collections AT ONCE are excluded, because
- * random_gather() writes the shared file-scope random_sample top to bottom.
- * A second caller returns immediately rather than waiting.
+ * Repeat calls add, one collection at a time: random_gather() writes the
+ * shared file-scope random_sample top to bottom.  A caller that arrives while
+ * another task gathers WAITS for it (task context only, as before: never from
+ * an interrupt or under Forbid()).  It used to return at once, and the pool
+ * was marked started before the gather, so a concurrent first caller of
+ * ami_random_bytes() generated from the all-zero key (N-094).
  */
 VOID ami_random_init(VOID)
 {
-    Forbid();
-    if (pool_gathering)
-    {
-        Permit();
-        return;
-    }
-    pool_gathering = TRUE;
-    pool_started   = TRUE;
-    Permit();
-
+    pool_lock();
     random_gather();
-
-    pool_gathering = FALSE;
+    pool_started = TRUE;
+    ReleaseSemaphore(&pool_sem);
 
     AMI_DEBUG("random: entropy credit %lu bits, is_seeded=%s",
               (LONG)pool_bits,
               (LONG)(ami_random_is_seeded() ? "TRUE" : "FALSE"));
 }
 
+/* The first collection, once: a caller that waited for another task's
+   finds it done and does not gather again. */
+static VOID random_ensure(VOID)
+{
+    if (pool_started)
+        return;
+
+    pool_lock();
+    if (!pool_started)
+    {
+        random_gather();
+        pool_started = TRUE;
+    }
+    ReleaseSemaphore(&pool_sem);
+}
+
 VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits)
 {
     /* Collect first if nothing has: setting pool_started here instead lets an
        early ami_random_srand() suppress the machine collection entirely. */
-    if (!pool_started)
-        ami_random_init();
+    random_ensure();
 
     pool_mix(data, length, credit_bits);
 }
@@ -808,8 +839,7 @@ VOID ami_random_bytes(APTR buffer, ULONG length)
     if (out == NULL || length == 0)
         return;
 
-    if (!pool_started)
-        ami_random_init();
+    random_ensure();
 
     /* Forbid() per BLOCK, not around the whole request: a large request must
        not hold the scheduler off.  Interleaving is safe -- pool_out_used

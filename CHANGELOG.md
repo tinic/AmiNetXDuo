@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- A task that asks for random bytes while another task is still collecting the
+  pool's first entropy waits for it, instead of drawing output from an unseeded
+  key.
 - Where keyboard.device runs registered reset handlers, the network card's
   shutdown in that handler can no longer be interrupted by network or timer
   interrupts.

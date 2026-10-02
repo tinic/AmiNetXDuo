@@ -44,6 +44,10 @@
 extern void *calloc(size_t nmemb, size_t size);
 extern void  free(void *ptr);
 
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
 #include <exec/types.h>
 #include <exec/execbase.h>
 #include <exec/lists.h>
@@ -114,10 +118,53 @@ void Permit(void)
     }
 }
 
+/* The task each host thread is.  NULL: the main thread, which is `me'. */
+static __thread struct Task *h_self;
+
 struct Task *FindTask(STRPTR name)
 {
     (void)name;
-    return &me;
+    return h_self != NULL ? h_self : &me;
+}
+
+/*
+ * A SignalSemaphore that blocks a DIFFERENT task for real and nests for the
+ * owner, as Exec's does.  h_sem_waits counts the times a caller found it held
+ * by someone else and had to wait.
+ */
+static pthread_mutex_t h_sem_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  h_sem_cv = PTHREAD_COND_INITIALIZER;
+static int             h_sem_waits;
+
+void InitSemaphore(struct SignalSemaphore *sem)
+{
+    memset(sem, 0, sizeof(*sem));
+}
+
+void ObtainSemaphore(struct SignalSemaphore *sem)
+{
+    struct Task *self = FindTask(NULL);
+
+    pthread_mutex_lock(&h_sem_mx);
+    if (sem->ss_Owner != NULL && sem->ss_Owner != self)
+    {
+        h_sem_waits++;
+        pthread_cond_broadcast(&h_sem_cv);
+        while (sem->ss_Owner != NULL && sem->ss_Owner != self)
+            pthread_cond_wait(&h_sem_cv, &h_sem_mx);
+    }
+    sem->ss_Owner = self;
+    sem->ss_NestCount++;
+    pthread_mutex_unlock(&h_sem_mx);
+}
+
+void ReleaseSemaphore(struct SignalSemaphore *sem)
+{
+    pthread_mutex_lock(&h_sem_mx);
+    if (--sem->ss_NestCount == 0)
+        sem->ss_Owner = NULL;
+    pthread_cond_broadcast(&h_sem_cv);
+    pthread_mutex_unlock(&h_sem_mx);
 }
 
 ULONG AvailMem(ULONG requirements)
@@ -184,8 +231,15 @@ VOID GetSysTime(struct timeval *dest)
  * it last gathered, so it has to advance with the same clock the gatherers
  * see or the pool would think no time had passed.
  */
+static void h_race_start(void);
+
 ULONG ami_millis(VOID)
 {
+    /* random_gather() calls this first, outside any Forbid(): the point at
+       which another task's first call arrives in the race cases. */
+    if (h_self == NULL)
+        h_race_start();
+
     return clock_ticks / 50UL;
 }
 
@@ -680,8 +734,164 @@ static void g_a_frozen_clock_does_not_freeze_the_output(void)
     TimerBase = timer_base_value;
 }
 
+
+/* ===================================================== first-use race == */
+
+/*
+ * N-094.  Task A runs the first collection; task B makes its own first call
+ * while A is inside it.  B is a real second thread with its own task, so the
+ * pool's lock blocks it rather than nesting.  Each case runs in a child
+ * process so it starts from a pool nothing has touched.
+ */
+enum { RACE_NONE, RACE_BYTES, RACE_INIT, RACE_ADD };
+
+static int          h_race;
+static struct Task  h_task_b;
+static pthread_t    h_thread_b;
+static int          h_b_started;
+static volatile int h_b_done;
+static UBYTE        h_b_out[32];
+static ULONG        h_b_bits;
+
+static void *h_task_b_main(void *arg)
+{
+    static const UBYTE extra[4] = { 1, 2, 3, 4 };
+
+    (void)arg;
+    h_self = &h_task_b;
+
+    if (h_race == RACE_BYTES)
+        ami_random_bytes(h_b_out, sizeof(h_b_out));
+    else if (h_race == RACE_INIT)
+        ami_random_init();
+    else
+        ami_random_add_entropy(extra, sizeof(extra), 0);
+
+    h_b_bits = pool_bits;
+
+    pthread_mutex_lock(&h_sem_mx);
+    h_b_done = 1;
+    pthread_cond_broadcast(&h_sem_cv);
+    pthread_mutex_unlock(&h_sem_mx);
+
+    return NULL;
+}
+
+/* In A's collection: start B, and go on only once B has finished (the old
+   behaviour) or is waiting for the pool (the new one). */
+static void h_race_start(void)
+{
+    struct timespec until;
+    int             waits;
+
+    if (h_race == RACE_NONE || h_b_started)
+        return;
+    h_b_started = 1;
+
+    pthread_mutex_lock(&h_sem_mx);
+    waits = h_sem_waits;
+    pthread_mutex_unlock(&h_sem_mx);
+
+    pthread_create(&h_thread_b, NULL, h_task_b_main, NULL);
+
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += 5;
+
+    pthread_mutex_lock(&h_sem_mx);
+    while (!h_b_done && h_sem_waits == waits)
+        if (pthread_cond_timedwait(&h_sem_cv, &h_sem_mx, &until) != 0)
+            break;
+    pthread_mutex_unlock(&h_sem_mx);
+}
+
+/* SHA-256('G' || 32 zero bytes || counter): what the unmixed key yields. */
+static int h_is_zero_key_output(const UBYTE *out)
+{
+    ULONG ctr;
+
+    for (ctr = 0; ctr < 4; ctr++)
+    {
+        UBYTE  zero[32];
+        UBYTE  tag = DOMAIN_GENERATE;
+        UBYTE  d[32];
+        Sha256 ctx;
+
+        memset(zero, 0, sizeof(zero));
+        sha256_init(&ctx);
+        sha256_update(&ctx, &tag, 1);
+        sha256_update(&ctx, zero, sizeof(zero));
+        sha256_update(&ctx, &ctr, sizeof(ctr));
+        sha256_final(&ctx, d);
+        if (memcmp(d, out, 32) == 0)
+            return 1;
+    }
+
+    return 0;
+}
+
+static int h_race_child(int which)
+{
+    world_init();
+    h_race = which;
+
+    ami_random_init();                      /* task A, the first collection */
+    pthread_join(h_thread_b, NULL);
+
+    expect(h_b_started, "N-094: the other task's call arrived mid-collection");
+    expect(h_sem_waits >= 1,
+           "N-094: it WAITED for the collection in progress");
+
+    if (which == RACE_BYTES)
+        expect(!h_is_zero_key_output(h_b_out),
+               "N-094: its first bytes are not SHA-256('G'||0^32||n)");
+    else if (which == RACE_INIT)
+        expect(h_b_bits > 0,
+               "N-094: a concurrent ami_random_init() returns with entropy in");
+    else
+        expect(h_b_bits > 0,
+               "N-094: a concurrent ami_random_add_entropy() lands after the "
+               "first collection");
+
+    expect(forbid_depth == 0, "N-094: Forbid balanced across the race");
+
+    return failures == 0 ? 0 : 1;
+}
+
+static void h_first_use_race(void)
+{
+    static const struct { int which; const char *name; } cases[] = {
+        { RACE_BYTES, "N-094: concurrent first ami_random_bytes()" },
+        { RACE_INIT,  "N-094: concurrent first ami_random_init()" },
+        { RACE_ADD,   "N-094: concurrent first ami_random_add_entropy()" },
+    };
+    unsigned i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        int   status = 0;
+        pid_t pid;
+
+        fflush(stdout);
+        pid = fork();
+        if (pid == 0)
+        {
+            int rc = h_race_child(cases[i].which);
+
+            fflush(stdout);
+            _exit(rc);
+        }
+
+        waitpid(pid, &status, 0);
+        expect(pid > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+               cases[i].name);
+    }
+}
+
 int main(void)
 {
+    /* First, while nothing has touched the pool: each case forks from here. */
+    h_first_use_race();
+
     a_fips_vectors();
     b_update_is_split_independent();
     c_the_generator();

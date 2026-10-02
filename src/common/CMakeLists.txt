@@ -77,6 +77,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_ami_random PRIVATE
         -Wall -Wextra -Wno-pointer-to-int-cast)
 
+    # Two real threads for the first-collection race (N-094): a concurrent
+    # first caller has to be a different task that genuinely blocks, not a
+    # same-task call that a recursive semaphore would let straight through.
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_ami_random PRIVATE Threads::Threads)
+
     add_test(NAME ami_random COMMAND test_ami_random)
 endif()
 

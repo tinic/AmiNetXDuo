@@ -43,6 +43,8 @@ void         FreeVec(APTR memory);
 #define MEMF_TOTAL      (1UL << 19)
 
 void InitSemaphore(struct SignalSemaphore *sem);
+void ObtainSemaphore(struct SignalSemaphore *sem);
+void ReleaseSemaphore(struct SignalSemaphore *sem);
 void AddSemaphore(struct SignalSemaphore *sem);
 void RemSemaphore(struct SignalSemaphore *sem);
 struct SignalSemaphore *FindSemaphore(STRPTR name);

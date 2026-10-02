@@ -92,7 +92,10 @@ static inline int ami_random_arrival_stop(unsigned long bits,
 /*
  * Safe to call repeatedly; each call only ever adds.  Called lazily by the
  * generation functions, so there is no ordering requirement, but it blocks for
- * tens of milliseconds -- call it early, not on the first packet.
+ * tens of milliseconds -- call it early, not on the first packet.  Collections
+ * are serialized: a caller that finds another task gathering waits for it, and
+ * nothing is generated before the first collection is mixed.  Task context
+ * only, never under Forbid() or Disable().
  */
 VOID ami_random_init(VOID);
 
@@ -109,7 +112,8 @@ VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits);
  */
 VOID ami_random_arrival(VOID);
 
-/* Fill a buffer.  Seeds on first use if ami_random_init() was never called. */
+/* Fill a buffer.  Seeds on first use if ami_random_init() was never called,
+   waiting for a first collection another task has in progress. */
 VOID ami_random_bytes(APTR buffer, ULONG length);
 
 /* One 32-bit value.  Same generator, same caveats. */
