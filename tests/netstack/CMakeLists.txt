@@ -972,6 +972,31 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME ra_handoff COMMAND test_ra_handoff)
 
+    # The ICMPv6 ND option validator must reject a 1-2 octet option tail so the
+    # NA/NS/RA/redirect walkers never re-walk a fragment: each walks on its own
+    # `> 0` bound and strides by the option length byte, so a zero length byte
+    # never advances the pointer and spins the receive thread under
+    # nx_ip_protection.  Drives the real _nx_icmpv6_validate_options leaf
+    # directly -- fails on the validator that returned SUCCESS on a 2-octet
+    # tail, passes with the tail rejected.  IPv6 stays ON (no -UAMINETXDUO_IPV6).
+    add_executable(test_icmpv6_validate_tail
+        host/test_icmpv6_validate_tail_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_validate_options.c")
+
+    target_include_directories(test_icmpv6_validate_tail PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_icmpv6_validate_tail PRIVATE
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME icmpv6_validate_tail COMMAND test_icmpv6_validate_tail)
+
     # ---------------------------------------------------------------------
     # netstack.c itself, whole, on the host.
     #
