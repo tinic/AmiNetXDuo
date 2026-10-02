@@ -437,7 +437,9 @@ host_test_targets() { # builddir
 #      hosts-only once it is gone.
 #      538 with netstatus_system_order (N-077: NETSTATUS_SYSTEM counts the
 #      openers before bsd_nx_enter(); x86_64 only).
-HOST_TESTS_EXPECTED=538
+#      539 with errno_hook_reduced_probes (N-072): the SBTC_HAVE_* probes with
+#      the four optional API families compiled out (all hosts).
+HOST_TESTS_EXPECTED=539
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -455,7 +457,7 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 508 of 538 on the current tree.
+    # darwin-arm64 registers 509 of 539 on the current tree.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
 esac
 

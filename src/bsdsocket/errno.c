@@ -462,6 +462,38 @@ typedef struct
 #  define BSD_PACKET_FILTER_CHANNELS    0
 #endif
 
+/*
+ * The SBTC_HAVE_* families a build can leave out, answered from the option
+ * that leaves them out (N-072).  Each option's OFF arm keeps the vectors but
+ * makes them answer ENOSYS or EINVAL, so a constant TRUE told a probing client
+ * a family was there when every call to it would fail.
+ *
+ * SBTC_HAVE_INTERFACE_API is "the interface management API": AddInterface-,
+ * ConfigureInterfaceTagList() and RemoveInterface(), which AMINETXDUO_NETADMIN
+ * gates.  QueryInterfaceTagList() and Obtain/ReleaseInterfaceList() stay in
+ * every build, but they read interfaces rather than manage them.
+ */
+#ifdef AMINETXDUO_ROUTING
+#  define BSD_HAVE_ROUTING_API      TRUE
+#else
+#  define BSD_HAVE_ROUTING_API      FALSE
+#endif
+#ifdef AMINETXDUO_NETADMIN
+#  define BSD_HAVE_INTERFACE_API    TRUE
+#else
+#  define BSD_HAVE_INTERFACE_API    FALSE
+#endif
+#ifdef AMINETXDUO_NETMONITOR
+#  define BSD_HAVE_MONITORING_API   TRUE
+#else
+#  define BSD_HAVE_MONITORING_API   FALSE
+#endif
+#ifdef AMINETXDUO_NETSTATUS
+#  define BSD_HAVE_STATUS_API       TRUE
+#else
+#  define BSD_HAVE_STATUS_API       FALSE
+#endif
+
 static const BsdConstTag bsd_const_tags[] =
 {
     { SBTC_NUM_PACKET_FILTER_CHANNELS, SBT_RO, BSD_PACKET_FILTER_CHANNELS },
@@ -486,10 +518,10 @@ static const BsdConstTag bsd_const_tags[] =
     { SBTC_ICMP_PROCESS_TSTAMP, SBT_RW, 1 },
     /* IDNCS_ASCII. No IDN support here. Host names go on the wire as ASCII. */
     { SBTC_IDN_DEFAULT_CHARACTER_SET, SBT_RW, 0 },
-    { SBTC_HAVE_ROUTING_API,            SBT_RO, TRUE  },
-    { SBTC_HAVE_INTERFACE_API,          SBT_RO, TRUE  },
-    { SBTC_HAVE_MONITORING_API,         SBT_RO, TRUE  },
-    { SBTC_HAVE_STATUS_API,             SBT_RO, TRUE  },
+    { SBTC_HAVE_ROUTING_API,            SBT_RO, BSD_HAVE_ROUTING_API    },
+    { SBTC_HAVE_INTERFACE_API,          SBT_RO, BSD_HAVE_INTERFACE_API  },
+    { SBTC_HAVE_MONITORING_API,         SBT_RO, BSD_HAVE_MONITORING_API },
+    { SBTC_HAVE_STATUS_API,             SBT_RO, BSD_HAVE_STATUS_API     },
     { SBTC_HAVE_DNS_API,                SBT_RO, TRUE  },
     { SBTC_IPF_API_VERSION,             SBT_RO, 0     },
     { SBTC_HAVE_LOCAL_DATABASE_API,     SBT_RO, TRUE  },

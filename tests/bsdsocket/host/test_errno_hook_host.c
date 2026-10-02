@@ -716,6 +716,71 @@ static VOID t_replace_during_flush(VOID)
           "a later change reaches the new hook only");
 }
 
+/*
+ * (12) The SBTC_HAVE_* probes for the families a build can leave out answer
+ * what this build compiled (N-072).  test_errno_hook runs with the options as
+ * configured; test_errno_hook_reduced undefines the four, which is the shape
+ * of the micro preset plus a status-off build.
+ */
+static ULONG t_probe(UWORD code)
+{
+    struct TagItem tags[2];
+
+    tags[0].ti_Tag  = SBTM_GETVAL(code);
+    tags[0].ti_Data = 0xDEADBEEFUL;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    CHECK(bsd_SocketBaseTagList(tags, &h_base) == 0, "the probe is serviced");
+
+    return (ULONG)tags[0].ti_Data;
+}
+
+static VOID t_capability_probes(VOID)
+{
+#ifdef AMINETXDUO_ROUTING
+    const ULONG routing = TRUE;
+#else
+    const ULONG routing = FALSE;
+#endif
+#ifdef AMINETXDUO_NETADMIN
+    const ULONG iface = TRUE;
+#else
+    const ULONG iface = FALSE;
+#endif
+#ifdef AMINETXDUO_NETMONITOR
+    const ULONG monitor = TRUE;
+#else
+    const ULONG monitor = FALSE;
+#endif
+#ifdef AMINETXDUO_NETSTATUS
+    const ULONG status = TRUE;
+#else
+    const ULONG status = FALSE;
+#endif
+
+    printf("capability probes: routing %lu, interface %lu, monitoring %lu, "
+           "status %lu expected\n", (unsigned long)routing,
+           (unsigned long)iface, (unsigned long)monitor,
+           (unsigned long)status);
+
+    h_reset();
+
+    CHECK(t_probe(SBTC_HAVE_ROUTING_API) == routing,
+          "SBTC_HAVE_ROUTING_API follows AMINETXDUO_ROUTING");
+    CHECK(t_probe(SBTC_HAVE_INTERFACE_API) == iface,
+          "SBTC_HAVE_INTERFACE_API follows AMINETXDUO_NETADMIN");
+    CHECK(t_probe(SBTC_HAVE_MONITORING_API) == monitor,
+          "SBTC_HAVE_MONITORING_API follows AMINETXDUO_NETMONITOR");
+    CHECK(t_probe(SBTC_HAVE_STATUS_API) == status,
+          "SBTC_HAVE_STATUS_API follows AMINETXDUO_NETSTATUS");
+
+    /* The families no option gates keep their fixed answers. */
+    CHECK(t_probe(SBTC_HAVE_DNS_API) == TRUE, "SBTC_HAVE_DNS_API stays TRUE");
+    CHECK(t_probe(SBTC_HAVE_SERVER_API) == FALSE,
+          "SBTC_HAVE_SERVER_API stays FALSE");
+}
+
 int main(void)
 {
 #if AMINETXDUO_NXCACHE
@@ -735,6 +800,7 @@ int main(void)
     t_task_not_named();
     t_uninstall_during_flush();
     t_replace_during_flush();
+    t_capability_probes();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

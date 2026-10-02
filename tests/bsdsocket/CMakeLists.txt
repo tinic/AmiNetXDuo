@@ -903,8 +903,19 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_definitions(test_errno_hook_nocache PRIVATE ${BSD_ERRNO_HOOK_DEFINES}
         AMINETXDUO_NXCACHE=0)
 
+    # The same checks with the four optional API families compiled out, so the
+    # SBTC_HAVE_* probes are seen answering FALSE (N-072).  Global
+    # add_compile_definitions() puts -D on the line first; these -U come after.
+    add_executable(test_errno_hook_reduced ${BSD_ERRNO_HOOK_SOURCES})
+    target_include_directories(test_errno_hook_reduced PRIVATE ${BSD_ERRNO_HOOK_INCLUDES})
+    target_compile_options(test_errno_hook_reduced PRIVATE ${BSD_ERRNO_HOOK_OPTIONS}
+        -UAMINETXDUO_ROUTING -UAMINETXDUO_NETADMIN
+        -UAMINETXDUO_NETMONITOR -UAMINETXDUO_NETSTATUS)
+    target_compile_definitions(test_errno_hook_reduced PRIVATE ${BSD_ERRNO_HOOK_DEFINES})
+
     add_test(NAME errno_hook_deferral         COMMAND test_errno_hook)
     add_test(NAME errno_hook_deferral_nocache COMMAND test_errno_hook_nocache)
+    add_test(NAME errno_hook_reduced_probes   COMMAND test_errno_hook_reduced)
 
     # transfer.c's connected-UDP readiness and FIONREAD paths inspect packets
     # before nx_udp_socket_receive() removes the UDP header.  netstats.c also

@@ -11,6 +11,8 @@ Add new entries under `Unreleased`; published release sections are history.
   so later cleanup can reclaim sockets parked for handoff.
 - Descriptor-free callbacks cannot close or reuse the descriptor being freed;
   refusing the free still restores its original socket.
+- `SocketBaseTagList()` reports the routing, interface-management, monitoring
+  and status APIs as absent in builds that leave those families out.
 
 ## 1.0.0-beta7
 
