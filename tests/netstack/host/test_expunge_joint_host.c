@@ -461,8 +461,9 @@ static void t_adopt_failure_retry(void)
     CHECK(nsh.ip_deletes == 1, "nx_ip_delete() ran exactly once");
     CHECK(nsh.sana2_device_closes == nsh.sana2_device_opens,
           "every device closed");
-    CHECK(nsh.packet_pool_deletes == 1 && nsh.packet_pool_invalid_deletes == 0,
-          "the pool deleted once");
+    CHECK(nsh.packet_pool_deletes == nsh.packet_pool_creates &&
+              nsh.packet_pool_invalid_deletes == 0,
+          "every packet pool deleted once");
     CHECK(nsh.tx_stops_ok == 1, "the kernel stopped");
     CHECK(nsh.baton_releases == 1 && nsh.baton_acquires == 1,
           "the port went with the baton given up and taken back");
