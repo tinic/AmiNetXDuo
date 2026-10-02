@@ -213,6 +213,7 @@ struct AmiNetStack
     AmiConfig           ns_Config;
 
     NX_PACKET_POOL      ns_Pool;
+    BOOL                ns_PoolCreated;
     APTR                ns_PoolMemory;
     ULONG               ns_PoolBytes;
     ULONG               ns_PoolPackets;

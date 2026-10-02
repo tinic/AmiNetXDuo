@@ -302,7 +302,14 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 
     if (ns->ns_PoolMemory != NULL)
     {
-        AMI_NX_CLEANUP(nx_packet_pool_delete(&ns->ns_Pool));
+        /* Backing memory is allocated before ThreadX starts and before the
+         * pool's created-list links exist.  An early bring-up failure must
+         * free the memory without passing that uncreated block to NetX. */
+        if (ns->ns_PoolCreated)
+        {
+            AMI_NX_CLEANUP(nx_packet_pool_delete(&ns->ns_Pool));
+            ns->ns_PoolCreated = FALSE;
+        }
         ami_free(ns->ns_PoolMemory);
         ns->ns_PoolMemory = NULL;
     }
@@ -654,6 +661,8 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         AMI_ERROR("netstack: packet pool create failed (%ld)", (long)status);
         return AMI_NET_ERR_NOMEM;
     }
+
+    ns->ns_PoolCreated = TRUE;
 
     if (ns->ns_IfaceCount != 0)
     {
