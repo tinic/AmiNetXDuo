@@ -13,6 +13,7 @@
 #include "nx_crypto_sha2.h"
 #include "nx_crypto_sha5.h"
 #include "nx_crypto_ecdsa.h"
+#include "nx_crypto_aes.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -1001,6 +1002,45 @@ static void test_tls_key_usage(void)
           "a client certificate refuses encryption-only key");
 }
 
+/* FIPS-197 appendix C.1, AES-128.  Its key schedule feeds S-box outputs of
+   0x80 and above into the top byte of a 32-bit word (SubWord, and the final
+   round's byte packing), which the vendored code once shifted as a promoted
+   signed int: undefined behaviour that -fsanitize=undefined stops on. */
+static const UCHAR fips197_c1_key[16] = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
+static const UCHAR fips197_c1_plain[16] = {
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+    0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
+static const UCHAR fips197_c1_cipher[16] = {
+    0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30,
+    0xd8, 0xcd, 0xb7, 0x80, 0x70, 0xb4, 0xc5, 0x5a};
+
+static NX_CRYPTO_AES aes_ctx;
+
+static void test_aes128_block(void)
+{
+    UCHAR key[16];
+    UCHAR in[16];
+    UCHAR out[16];
+    UCHAR back[16];
+
+    printf("aes-128 (FIPS-197 C.1)\n");
+
+    memcpy(key, fips197_c1_key, sizeof(key));
+    memcpy(in, fips197_c1_plain, sizeof(in));
+    memset(&aes_ctx, 0, sizeof(aes_ctx));
+
+    check(_nx_crypto_aes_key_set(&aes_ctx, key, NX_CRYPTO_AES_KEY_SIZE_128_BITS) == NX_CRYPTO_SUCCESS,
+          "key expansion");
+    check(_nx_crypto_aes_encrypt(&aes_ctx, in, out, sizeof(out)) == NX_CRYPTO_SUCCESS
+          && memcmp(out, fips197_c1_cipher, sizeof(out)) == 0,
+          "encrypt one block");
+    check(_nx_crypto_aes_decrypt(&aes_ctx, out, back, sizeof(back)) == NX_CRYPTO_SUCCESS
+          && memcmp(back, fips197_c1_plain, sizeof(back)) == 0,
+          "decrypt one block");
+}
+
 /* RFC 8448 section 3, "Simple 1-RTT Handshake", TLS_AES_128_GCM_SHA256: the
    ECDHE shared secret, the ClientHello..ServerHello transcript hash, and what
    RFC 8446 7.1/7.3 derive from them.  The Finished keys are HKDF-Expand-Label
@@ -1180,6 +1220,7 @@ int main(void)
     test_pss();
     test_pss_schemes();
     test_tls_key_usage();
+    test_aes128_block();
     test_tls13_key_schedule();
 
     if (failures != 0)
