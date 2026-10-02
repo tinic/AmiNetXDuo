@@ -455,7 +455,9 @@ host_test_targets() { # builddir
 #      send-builders' benign-fault contract -- the failed builder's status is
 #      returned unchanged, the packet is released exactly once by the caller,
 #      no record is sent, and a record-send failure is not double-freed.
-HOST_TESTS_EXPECTED=545
+#      546 with tls13_handshake_fault_shipping: the same contract without
+#      the optional server client-certificate feature, as in shipped images.
+HOST_TESTS_EXPECTED=546
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

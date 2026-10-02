@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- TLS 1.3 handshake builder failures preserve the original error and release
+  the unsent packet, instead of leaking it or trying to send it.
 - TLS servers reject malformed curve and signature-algorithm lists without
   reading past them. Curve selection no longer mistakes a list's length for
   an offered curve.

@@ -131,10 +131,12 @@ int main(void)
 
     /* --- Server builder failures (N-107) --- */
 
+#ifdef NX_SECURE_ENABLE_CLIENT_CERTIFICATE_VERIFY
     test_reset();
     g_inject = INJECT_SERVER_SEND_CERTIFICATE_REQUEST;
     ret = run_server(1);                        /* verify_client_certificate -> cert_request runs */
     expect_builder_failure("server send_certificate_request fails", ret, 2);
+#endif
 
     test_reset();
     g_inject = INJECT_SERVER_SEND_CERTIFICATE;

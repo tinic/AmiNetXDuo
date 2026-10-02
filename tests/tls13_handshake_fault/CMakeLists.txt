@@ -28,7 +28,7 @@
 # the DoS the fix removes. Run the unfixed pin under a timeout, or with
 # -DNX_DISABLE_ASSERT for the deterministic 15-failure count.
 #
-# HOST ONLY: the stubs are x86-host C; nothing here runs on m68k.
+# HOST ONLY: the stubs are native host C; nothing here runs on m68k.
 
 if(CMAKE_CROSSCOMPILING)
     return()
@@ -38,12 +38,14 @@ set(_hs_src "${AMINETXDUO_NETXDUO}/nx_secure/src")
 
 add_library(test_tls13_hs_stubs STATIC
     nx_secure_tls_1_3_handshake_fault_stubs.c)
+add_library(test_tls13_hs_stubs_shipping STATIC
+    nx_secure_tls_1_3_handshake_fault_stubs.c)
 
 # Identical define/port surface to src/tls/CMakeLists.txt + tests/x509, so the
-# two drivers are compiled against the same NX_SECURE_TLS_SESSION layout that
-# ships. NX_SECURE_ENABLE_CLIENT_CERTIFICATE_VERIFY is additionally required to
-# reach the server send_certificate_request builder, which is #ifdef'd behind it.
-foreach(lib test_tls13_hs_stubs)
+# shipping arm omits the optional server client-certificate feature. The
+# separate optional arm enables it to reach send_certificate_request; compile
+# its stubs and drivers together so the session layouts cannot be mixed.
+foreach(lib test_tls13_hs_stubs test_tls13_hs_stubs_shipping)
     target_include_directories(${lib} PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
@@ -64,9 +66,10 @@ foreach(lib test_tls13_hs_stubs)
         NX_SECURE_KEY_CLEAR
         NX_SECURE_ENABLE_ECC_CIPHERSUITE
         NX_SECURE_ENABLE_AEAD_CIPHER
-        NX_SECURE_TLS_ENABLE_TLS_1_3
-        NX_SECURE_ENABLE_CLIENT_CERTIFICATE_VERIFY)
+        NX_SECURE_TLS_ENABLE_TLS_1_3)
 endforeach()
+target_compile_definitions(test_tls13_hs_stubs PUBLIC
+    NX_SECURE_ENABLE_CLIENT_CERTIFICATE_VERIFY)
 
 # The two drivers under test are compiled as PART of the executable so their
 # failure paths are exercised with the exact same flags as the stubs.
@@ -81,3 +84,14 @@ target_compile_options(test_tls13_handshake_fault PRIVATE -Wall -Wextra -UAMINET
 
 include(CTest)
 add_test(NAME tls13_handshake_fault COMMAND test_tls13_handshake_fault)
+
+add_executable(test_tls13_handshake_fault_shipping
+    nx_secure_tls_1_3_handshake_fault_test.c
+    "${_hs_src}/nx_secure_tls_1_3_client_handshake.c"
+    "${_hs_src}/nx_secure_tls_1_3_server_handshake.c")
+target_link_libraries(test_tls13_handshake_fault_shipping PRIVATE
+    test_tls13_hs_stubs_shipping)
+target_compile_options(test_tls13_handshake_fault_shipping PRIVATE
+    -Wall -Wextra -UAMINETXDUO_IPV6)
+add_test(NAME tls13_handshake_fault_shipping
+    COMMAND test_tls13_handshake_fault_shipping)
