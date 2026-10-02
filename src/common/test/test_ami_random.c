@@ -44,9 +44,19 @@
 extern void *calloc(size_t nmemb, size_t size);
 extern void  free(void *ptr);
 
+/*
+ * The threads and processes of the first-use race (N-094).  Host headers
+ * FIRST, then the Amiga's timeval renamed, as tests/bsdsocket/host/shim/
+ * host_prelude.h does: macOS's <pthread.h> brings POSIX struct timeval in,
+ * and src/common/test/shim/devices/timer.h then defines the Amiga's under
+ * the same tag.  Unix hosts only, which are the hosts this tier runs on.
+ */
 #include <pthread.h>
+#include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#define timeval ami_timeval
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -102,20 +112,42 @@ static ULONG clock_ticks;
 void Disable(void) { }
 void Enable(void)  { }
 
+/*
+ * Forbid() excludes every other task, so here it is a recursive lock: a
+ * second thread's Forbid() waits for the first's Permit(), as the scheduler
+ * would make it.  forbid_depth is only touched by the holder.
+ */
+static pthread_mutex_t h_forbid_mx;
+static pthread_once_t  h_forbid_once = PTHREAD_ONCE_INIT;
+
+static void h_forbid_init(void)
+{
+    pthread_mutexattr_t a;
+
+    pthread_mutexattr_init(&a);
+    pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&h_forbid_mx, &a);
+    pthread_mutexattr_destroy(&a);
+}
+
 void Forbid(void)
 {
+    pthread_once(&h_forbid_once, h_forbid_init);
+    pthread_mutex_lock(&h_forbid_mx);
     forbid_depth++;
 }
 
 void Permit(void)
 {
-    forbid_depth--;
-    if (forbid_depth < 0)
+    if (forbid_depth <= 0)
     {
         printf("FAIL Permit() without a matching Forbid()\n");
         failures++;
         forbid_depth = 0;
+        return;
     }
+    forbid_depth--;
+    pthread_mutex_unlock(&h_forbid_mx);
 }
 
 /* The task each host thread is.  NULL: the main thread, which is `me'. */
@@ -749,6 +781,7 @@ static int          h_race;
 static struct Task  h_task_b;
 static pthread_t    h_thread_b;
 static int          h_b_started;
+static int          h_b_create_failed;
 static volatile int h_b_done;
 static UBYTE        h_b_out[32];
 static ULONG        h_b_bits;
@@ -792,7 +825,11 @@ static void h_race_start(void)
     waits = h_sem_waits;
     pthread_mutex_unlock(&h_sem_mx);
 
-    pthread_create(&h_thread_b, NULL, h_task_b_main, NULL);
+    if (pthread_create(&h_thread_b, NULL, h_task_b_main, NULL) != 0)
+    {
+        h_b_create_failed = 1;
+        return;
+    }
 
     clock_gettime(CLOCK_REALTIME, &until);
     until.tv_sec += 5;
@@ -834,10 +871,31 @@ static int h_race_child(int which)
     world_init();
     h_race = which;
 
-    ami_random_init();                      /* task A, the first collection */
-    pthread_join(h_thread_b, NULL);
+    struct timespec until;
 
-    expect(h_b_started, "N-094: the other task's call arrived mid-collection");
+    /* Bounded twice: the whole child dies on SIGALRM, which the parent
+       counts as a failure, and B's finish is awaited with a timeout. */
+    alarm(30);
+
+    ami_random_init();                      /* task A, the first collection */
+
+    expect(h_b_started && !h_b_create_failed,
+           "N-094: the other task's call arrived mid-collection");
+    if (!h_b_started || h_b_create_failed)
+        return 1;
+
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += 10;
+    pthread_mutex_lock(&h_sem_mx);
+    while (!h_b_done)
+        if (pthread_cond_timedwait(&h_sem_cv, &h_sem_mx, &until) != 0)
+            break;
+    pthread_mutex_unlock(&h_sem_mx);
+
+    expect(h_b_done, "N-094: the other task finished once the collection did");
+    if (!h_b_done)
+        return 1;
+    expect(pthread_join(h_thread_b, NULL) == 0, "N-094: and was joined");
     expect(h_sem_waits >= 1,
            "N-094: it WAITED for the collection in progress");
 
@@ -881,7 +939,8 @@ static void h_first_use_race(void)
             _exit(rc);
         }
 
-        waitpid(pid, &status, 0);
+        if (pid > 0 && waitpid(pid, &status, 0) != pid)
+            pid = -1;
         expect(pid > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0,
                cases[i].name);
     }
