@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- TLS rejects HelloRetryRequest cookies and ClientHello messages that do not
+  fit their buffers, and reports failed key-share construction.
 - TLS 1.3 handshake builder failures preserve the original error and release
   the unsent packet, instead of leaking it or trying to send it.
 - TLS servers reject malformed curve and signature-algorithm lists without
