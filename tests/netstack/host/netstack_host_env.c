@@ -18,6 +18,7 @@
  */
 
 #include "netstack_host_env.h"
+#include "nx_packet.h"
 
 #include "aminetxduo/compat.h"
 #include "aminetxduo/netstatus.h"
@@ -84,7 +85,8 @@ APTR AllocMem(ULONG byteSize, ULONG requirements)
 {
     APTR p;
 
-    if (nsh.alloc_fails)
+    if (nsh.alloc_fails || (nsh.alloc_fail_at != 0 &&
+                           nsh.allocs + 1 == nsh.alloc_fail_at))
         return NULL;
 
     p = malloc(byteSize ? byteSize : 1);
@@ -537,6 +539,7 @@ UINT _nxe_packet_pool_create(NX_PACKET_POOL *pool_ptr, CHAR *name,
     (VOID)pool_control_block_size;
 
     memset(pool_ptr, 0, sizeof(*pool_ptr));
+    pool_ptr->nx_packet_pool_id = NX_PACKET_POOL_ID;
     nsh.packet_pool_creates++;
 
     return NX_SUCCESS;
@@ -1505,7 +1508,11 @@ UINT _nxe_ip_status_check(NX_IP *ip_ptr, ULONG needed_status, ULONG *actual_stat
 
 UINT _nxe_packet_pool_delete(NX_PACKET_POOL *pool_ptr)
 {
-    (VOID)pool_ptr;
+    /* Observe the caller contract without executing the unchecked core's
+       invalid created-list writes.  This stub must not hide an invalid call. */
+    if (pool_ptr->nx_packet_pool_id != NX_PACKET_POOL_ID)
+        nsh.packet_pool_invalid_deletes++;
+    pool_ptr->nx_packet_pool_id = 0;
     nsh.packet_pool_deletes++;
 
     return TX_SUCCESS;

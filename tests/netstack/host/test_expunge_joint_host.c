@@ -361,6 +361,52 @@ static void t_bound_socket_torn_down(void)
     }
 }
 
+/* N-046: backing memory exists before the NetX pool is created.  Drive the
+ * shipping startup/unwind, not the invalid vendor delete: the environment
+ * records that call rather than writing through an uncreated list node. */
+static void t_pool_creation_unwind(void)
+{
+    unsigned arm;
+
+    printf("netstack startup: packet-pool creation/unwind contract\n");
+    for (arm = 0; arm < 4; arm++)
+    {
+        LONG rc;
+
+        nsh_reset();
+        if (arm == 0)
+            nsh.alloc_fail_at = 3; /* ns and pool allocated, IP stack fails */
+        else if (arm == 1)
+            nsh.tx_start_status = TX_NOT_DONE;
+        else if (arm == 2)
+            nsh.tx_adopt_status = TX_NO_MEMORY;
+        else
+            nsh.ip_create_status = NX_NOT_SUCCESSFUL; /* pool already exists */
+
+        rc = netstack_startup_loopback();
+        CHECK(rc != AMI_NET_OK, "the scripted startup failure is reported");
+        CHECK(netstack_get() == NULL, "no failed singleton remains published");
+        CHECK(nsh.packet_pool_creates == (arm == 3 ? 1UL : 0UL),
+              "only the post-create failure created a pool");
+        CHECK(nsh.packet_pool_deletes == nsh.packet_pool_creates,
+              "delete exactly the pools that were created");
+        CHECK(nsh.packet_pool_invalid_deletes == 0,
+              "never pass an uncreated pool to the unchecked delete");
+        CHECK(nsh.allocs == nsh.frees, "all failed-start allocations freed");
+
+        nsh.tx_start_status = TX_SUCCESS;
+        nsh.tx_adopt_status = TX_SUCCESS;
+        nsh.alloc_fail_at = 0;
+        nsh.ip_create_status = NX_SUCCESS;
+        CHECK(netstack_startup_loopback() == AMI_NET_OK,
+              "a fresh startup succeeds after the failure");
+        h_teardown();
+        CHECK(nsh.packet_pool_deletes == nsh.packet_pool_creates &&
+                  nsh.packet_pool_invalid_deletes == 0,
+              "the succeeding generation also deletes its pool exactly once");
+    }
+}
+
 int main(void)
 {
     printf("netstack expunge joint host checks\n\n");
@@ -374,6 +420,7 @@ int main(void)
     t_contended_lock_refuses();
     t_refcount();
     t_bound_socket_torn_down();
+    t_pool_creation_unwind();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 
