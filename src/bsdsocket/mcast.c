@@ -799,12 +799,10 @@ static VOID bsd_mcast6_close(NX_IP *ip, AmiSocket *sock)
 }
 
 LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
-                             const NXD_ADDRESS *addr, ULONG *saved)
+                             const NXD_ADDRESS *addr)
 {
     NX_IP *ip = bsd_stack_ip(base);
     LONG   iface;
-
-    *saved = 0UL;
 
     if (addr->nxd_ip_version != NX_IP_VERSION_V6 || ip == NULL ||
         !bsd_mcast6_is_group(addr->nxd_ip_address.v6))
@@ -818,8 +816,11 @@ LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
     if (sock->as_Mcast6Hops == 0)
         return BSD_MCAST6_NO_LINK;
 
-    *saved = ip->nx_ipv6_hop_limit;
-    ip->nx_ipv6_hop_limit = (ULONG)sock->as_Mcast6Hops;
+    /* NetX's IPv6 UDP header builder consumes the socket TTL. Never change
+       the shared IP hop limit: concurrent TCP/ping sends also read it.
+       The next send resets this socket field in bsd_mcast_prepare_send;
+       per-datagram ancillary hops are applied afterwards by transfer.c. */
+    sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)sock->as_Mcast6Hops;
 
     iface = bsd_mcast_preference(&sock->as_Mcast6If,
                                   sock->as_Mcast6IfEpoch);
@@ -827,14 +828,6 @@ LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
         return -1;
 
     return bsd_mcast6_source_index(ip, (UINT)iface);
-}
-
-VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved)
-{
-    NX_IP *ip = bsd_stack_ip(base);
-
-    if (saved != 0UL && ip != NULL)
-        ip->nx_ipv6_hop_limit = saved;
 }
 
 BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname)

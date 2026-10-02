@@ -1148,8 +1148,7 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                        LONG optname, APTR optval, socklen_t *optlen);
 BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname);
 LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
-                             const NXD_ADDRESS *addr, ULONG *saved);
-VOID bsd_mcast6_finish_send(struct AmiSocketBase *base, ULONG saved);
+                             const NXD_ADDRESS *addr);
 #endif
 #endif
 
