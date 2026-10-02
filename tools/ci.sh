@@ -406,7 +406,9 @@ host_test_targets() { # builddir
 #      hosts).
 #      496-497 with thread_create_status: the ThreadX core returns the port's
 #      TX_THREAD_STACK_BUILD_STATUS, so a create with no Exec Task fails (N-001)
-HOST_TESTS_EXPECTED=497
+#      498-500 with ip_detach_routes, ip_detach_routes_full and
+#      ip_detach_ndlock (N-015, N-014; all hosts, ndlock with IPv6).
+HOST_TESTS_EXPECTED=500
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
