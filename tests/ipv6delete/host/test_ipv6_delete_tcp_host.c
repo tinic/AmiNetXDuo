@@ -16,7 +16,9 @@
  *             real cleanups assign, the sender's packet still the sender's.
  *             An ESTABLISHED socket on another address is untouched.
  * exclusions: a LISTEN socket and a CLOSED socket still pointing at the
- *             deleted entry are untouched.
+ *             deleted entry are untouched, and so is a socket now connected
+ *             over IPv4 that still holds the pointer from an earlier IPv6
+ *             connection (the pointer is never cleared).
  * selfdelete: a disconnect callback that deletes its own socket does not
  *             derail the walk: the next socket on the address is still reset.
  *
@@ -159,6 +161,14 @@ static void setup(void)
     ip.nx_ip_tcp_created_sockets_count = NSOCK;
 }
 
+static void v6conn(NX_TCP_SOCKET *s, int slot)
+{
+    s -> nx_tcp_socket_connect_ip.nxd_ip_version        = NX_IP_VERSION_V6;
+    s -> nx_tcp_socket_connect_ip.nxd_ip_address.v6[0]  = 0x20010db8UL;
+    s -> nx_tcp_socket_connect_ip.nxd_ip_address.v6[3]  = 0x99UL;
+    s -> nx_tcp_socket_ipv6_addr = &ip.nx_ipv6_address[slot];
+}
+
 static void suspend(TX_THREAD *t, TX_THREAD **list, ULONG *count, VOID (*cleanup)(TX_THREAD * NX_CLEANUP_PARAMETER),
                     NX_TCP_SOCKET *s)
 {
@@ -189,7 +199,7 @@ static void arm_resets(void)
     setup();
     /* 0 ESTABLISHED client on slot 1, a sender and a receiver blocked.  */
     sock[0].nx_tcp_socket_state    = NX_TCP_ESTABLISHED;
-    sock[0].nx_tcp_socket_ipv6_addr = &ip.nx_ipv6_address[1];
+    v6conn(&sock[0], 1);
     suspend(&t_tx, &sock[0].nx_tcp_socket_transmit_suspension_list,
             &sock[0].nx_tcp_socket_transmit_suspended_count, _nx_tcp_transmit_cleanup, &sock[0]);
     t_tx.tx_thread_additional_suspend_info = &tx_pkt;
@@ -197,7 +207,7 @@ static void arm_resets(void)
             &sock[0].nx_tcp_socket_receive_suspended_count, _nx_tcp_receive_cleanup, &sock[0]);
     /* 1 SYN_SENT client on slot 1, its connect blocked.  */
     sock[1].nx_tcp_socket_state    = NX_TCP_SYN_SENT;
-    sock[1].nx_tcp_socket_ipv6_addr = &ip.nx_ipv6_address[1];
+    v6conn(&sock[1], 1);
     memset(&t_conn, 0, sizeof(t_conn));
     t_conn.tx_thread_state                 = TX_TCP_IP;
     t_conn.tx_thread_suspend_cleanup       = _nx_tcp_connect_cleanup;
@@ -206,10 +216,10 @@ static void arm_resets(void)
     /* 2 TIME_WAIT server-side socket on slot 1.  */
     sock[2].nx_tcp_socket_state       = NX_TCP_TIMED_WAIT;
     sock[2].nx_tcp_socket_client_type = NX_FALSE;
-    sock[2].nx_tcp_socket_ipv6_addr   = &ip.nx_ipv6_address[1];
+    v6conn(&sock[2], 1);
     /* 3 ESTABLISHED on slot 2.  */
     sock[3].nx_tcp_socket_state    = NX_TCP_ESTABLISHED;
-    sock[3].nx_tcp_socket_ipv6_addr = &ip.nx_ipv6_address[2];
+    v6conn(&sock[3], 2);
 
     delete_slot1();
 
@@ -250,6 +260,12 @@ static void arm_exclusions(void)
     sock[0].nx_tcp_socket_ipv6_addr   = &ip.nx_ipv6_address[1];    /* stale, from its last connection */
     sock[1].nx_tcp_socket_state       = NX_TCP_CLOSED;
     sock[1].nx_tcp_socket_ipv6_addr   = &ip.nx_ipv6_address[1];
+    /* An ESTABLISHED IPv4 connection on a socket whose last IPv6
+       connection left the pointer at slot 1.  */
+    sock[2].nx_tcp_socket_state       = NX_TCP_ESTABLISHED;
+    sock[2].nx_tcp_socket_connect_ip.nxd_ip_version   = NX_IP_VERSION_V4;
+    sock[2].nx_tcp_socket_connect_ip.nxd_ip_address.v4 = 0xc0000207UL;
+    sock[2].nx_tcp_socket_ipv6_addr   = &ip.nx_ipv6_address[1];
 
     delete_slot1();
 
@@ -259,6 +275,9 @@ static void arm_exclusions(void)
     check("the CLOSED socket is untouched",
           sock[1].nx_tcp_socket_state == NX_TCP_CLOSED && sock[1].nx_tcp_socket_connect_port == 1001 &&
           cb_calls[1] == 0);
+    check("the IPv4 connection holding a stale pointer to the slot is untouched",
+          sock[2].nx_tcp_socket_state == NX_TCP_ESTABLISHED && sock[2].nx_tcp_socket_connect_port == 1002 &&
+          sock[2].nx_tcp_socket_connect_ip.nxd_ip_version == NX_IP_VERSION_V4 && cb_calls[2] == 0);
     check("nothing woken", resumed == 0);
 }
 
@@ -266,11 +285,11 @@ static void arm_selfdelete(void)
 {
     setup();
     sock[0].nx_tcp_socket_state    = NX_TCP_ESTABLISHED;
-    sock[0].nx_tcp_socket_ipv6_addr = &ip.nx_ipv6_address[1];
+    v6conn(&sock[0], 1);
     sock[1].nx_tcp_socket_state    = NX_TCP_ESTABLISHED;
-    sock[1].nx_tcp_socket_ipv6_addr = &ip.nx_ipv6_address[1];
+    v6conn(&sock[1], 1);
     sock[2].nx_tcp_socket_state    = NX_TCP_ESTABLISHED;
-    sock[2].nx_tcp_socket_ipv6_addr = &ip.nx_ipv6_address[2];
+    v6conn(&sock[2], 2);
     cb_selfdelete = 0;
 
     delete_slot1();
