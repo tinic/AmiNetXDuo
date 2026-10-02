@@ -25,9 +25,9 @@
 #include "x509_ext_vectors.h"
 #include "x509_pss_vectors.h"
 
-/* The vendored code takes this around anything that can suspend. Nothing
-   suspends here, so the object only has to exist. */
-TX_MUTEX _nx_secure_tls_protection;
+/* _nx_secure_tls_protection is defined by nx_secure_tls_initialize.c, which
+   the key-schedule case pulls in through _nx_secure_tls_session_create; a
+   second definition here is a duplicate symbol on GNU ld (N106). */
 
 extern NX_SECURE_X509_CRYPTO _nx_crypto_x509_cipher_lookup_table[];
 extern const UINT            _nx_crypto_x509_cipher_lookup_table_size;
