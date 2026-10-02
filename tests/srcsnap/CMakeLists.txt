@@ -39,7 +39,8 @@ target_compile_options(test_ipv6_source_snapshot PRIVATE -Wall -Wextra
 set_target_properties(test_ipv6_source_snapshot PROPERTIES C_STANDARD 11)
 
 include(CTest)
-foreach(arm IN ITEMS udp_capture udp_window udp_reused udp_live udp_index
-                    tcp_window tcp_reused tcp_live tcp_index)
+foreach(arm IN ITEMS udp_capture udp_window udp_reused udp_stamped_window
+                    udp_stamped_reused udp_live udp_index tcp_window tcp_reused
+                    tcp_live tcp_index)
     add_test(NAME ipv6_source_snapshot_${arm} COMMAND test_ipv6_source_snapshot ${arm})
 endforeach()

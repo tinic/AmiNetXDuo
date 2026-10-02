@@ -10,6 +10,11 @@
  * udp_window:    zeroed while the checksum runs (the unlocked stretch).
  * udp_reused:    given another address on the same interface in that stretch.
  * udp_live:      control: sent once, from the snapshot address.
+ * udp_stamped_window / udp_stamped_reused: a named source, stamped on the
+ *                packet by _nxd_udp_socket_source_send with a valid index,
+ *                zeroed or reassigned while the checksum runs.  The stamp is
+ *                the named-source caller's: the refusal must leave it as it
+ *                was handed to the send.
  * udp_index:     a named-source index past the table is refused (the target
  *                is built with -fsanitize=bounds trapping, so indexing past
  *                nx_ipv6_address[] stops the test).
@@ -284,6 +289,14 @@ int main(int argc, char **argv)
         printf("     window ran with mutex depth %d\n", window_held);
         check("the deletion stub ran in an unlocked stretch", window_held == 0);
         udp_refused(status, NX_NULL);
+    }
+    else if (strcmp(a, "udp_stamped_window") == 0 || strcmp(a, "udp_stamped_reused") == 0)
+    {
+        window_action = (a[12] == 'w') ? ZERO : REUSE;
+        status = _nxd_udp_socket_source_send(&udp, &pkt, &dest, 53, 1);
+        printf("     window ran with mutex depth %d\n", window_held);
+        check("the deletion stub ran in an unlocked stretch", window_held == 0);
+        udp_refused(status, &ip.nx_ipv6_address[1]);
     }
     else if (strcmp(a, "udp_live") == 0)
     {
