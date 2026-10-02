@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- TLS servers reject malformed curve and signature-algorithm lists without
+  reading past them. Curve selection no longer mistakes a list's length for
+  an offered curve.
 - TLS rejects truncated or inconsistent Certificate and CertificateRequest
   messages before reading beyond their declared contents.
 - TLS 1.3 Finished-key derivation stays within its destination buffers.
