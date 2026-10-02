@@ -1014,6 +1014,32 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME icmpv6_validate_tail COMMAND test_icmpv6_validate_tail)
 
+    # An ICMPv4 error message must quote at most the contiguous bytes the
+    # offending datagram holds, not a fixed (IHL + 2) * 4 window past its end.
+    # A legal 20-27 byte datagram (IHL = 5, a minimum header or a header plus a
+    # few payload bytes) was over-read 8 bytes back to the sender.  Drives the real
+    # _nx_icmpv4_send_error_message leaf with the four calls it makes stubbed
+    # (packet allocate, route find, checksum, packet send) and asserts the
+    # quoted length.  IPv4 only, so -UAMINETXDUO_IPV6.
+    add_executable(test_icmpv4_error_quote
+        host/test_icmpv4_error_quote_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c")
+
+    target_compile_options(test_icmpv4_error_quote PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_icmpv4_error_quote PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_icmpv4_error_quote PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME icmpv4_error_quote COMMAND test_icmpv4_error_quote)
+
     # ---------------------------------------------------------------------
     # netstack.c itself, whole, on the host.
     #
