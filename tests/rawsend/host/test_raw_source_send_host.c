@@ -17,6 +17,9 @@
  *              caller's (the IP send would have dropped and released it while
  *              the raw send said success).
  * v4_route:    a routable destination is still sent.
+ * v4_noroute_delegated: the same through nxd_ip_raw_packet_send, which hands
+ *              an IPv4 send to source_send with index 0 (raw.c's
+ *              nxd_ip_raw_packet_send arm).
  *
  * Linked for real: nxd_ip_raw_packet_source_send.c, nxd_ip_raw_packet_send.c
  * and nxd_ipv6_raw_packet_send_internal.c.  Stubbed: ThreadX's mutex (counts
@@ -167,7 +170,7 @@ int main(int argc, char **argv)
 
     if (argc != 2)
     {
-        fprintf(stderr, "usage: %s v6_deleted|v6_live|v6_find|v4_noroute|v4_route\n", argv[0]);
+        fprintf(stderr, "usage: %s v6_deleted|v6_live|v6_find|v4_noroute|v4_noroute_delegated|v4_route\n", argv[0]);
         return 2;
     }
     memset(&dest6, 0, sizeof(dest6));
@@ -216,6 +219,17 @@ int main(int argc, char **argv)
         printf("     status 0x%x, IPv4 sends %d, released by the stack %d, held %d\n",
                status, v4_sends, released, held);
         check("an unroutable destination is NX_IP_ADDRESS_ERROR", status == NX_IP_ADDRESS_ERROR);
+        check("nothing is sent and the stack did not release the packet", v4_sends == 0 && released == 0);
+        check("the mutex is released", held == 0);
+    }
+    else if (strcmp(argv[1], "v4_noroute_delegated") == 0)
+    {
+        route_status = NX_IP_ADDRESS_ERROR;
+        status = _nxd_ip_raw_packet_send(&ip, &pkt, &dest4, 253, 64, 0);
+        printf("     status 0x%x, IPv4 sends %d, released by the stack %d, held %d\n",
+               status, v4_sends, released, held);
+        check("an unroutable destination through nxd_ip_raw_packet_send is NX_IP_ADDRESS_ERROR",
+              status == NX_IP_ADDRESS_ERROR);
         check("nothing is sent and the stack did not release the packet", v4_sends == 0 && released == 0);
         check("the mutex is released", held == 0);
     }

@@ -33,6 +33,7 @@ target_compile_options(test_raw_source_send PRIVATE -Wall -Wextra)
 set_target_properties(test_raw_source_send PROPERTIES C_STANDARD 11)
 
 include(CTest)
-foreach(arm IN ITEMS v6_deleted v6_live v6_find v4_noroute v4_route)
+foreach(arm IN ITEMS v6_deleted v6_live v6_find v4_noroute v4_noroute_delegated
+                    v4_route)
     add_test(NAME raw_source_send_${arm} COMMAND test_raw_source_send ${arm})
 endforeach()
