@@ -143,3 +143,18 @@ target_link_libraries(test_remote_cert_bounds PRIVATE
 target_compile_options(test_remote_cert_bounds PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
 
 add_test(NAME tls_remote_cert_bounds COMMAND test_remote_cert_bounds)
+
+# N-115: the server's ClientHello list walkers (supported_groups and the 1.2
+# and 1.3 signature_algorithms), the same guard-page contract, plus the curve
+# and algorithm a well-formed list must still negotiate.
+add_executable(test_clienthello_lists
+    test_clienthello_lists.c
+    "${CMAKE_SOURCE_DIR}/tests/fuzz/fuzz_nxstub.c"
+    "${CMAKE_SOURCE_DIR}/tests/fuzz/fuzz_txstub.c")
+
+target_link_libraries(test_clienthello_lists PRIVATE
+    test_x509_nx_secure test_x509_nx_crypto)
+
+target_compile_options(test_clienthello_lists PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
+
+add_test(NAME tls_clienthello_lists COMMAND test_clienthello_lists)

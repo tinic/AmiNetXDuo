@@ -449,7 +449,9 @@ host_test_targets() { # builddir
 #      parser against messages flush with a PROT_NONE page (all hosts).
 #      543 with tls_remote_cert_bounds (N-116): the Certificate message
 #      parser against the same guard page (all hosts).
-HOST_TESTS_EXPECTED=543
+#      544 with tls_clienthello_lists (N-115): the server's ClientHello
+#      group and signature-algorithm lists against a guard page (all hosts).
+HOST_TESTS_EXPECTED=544
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -471,7 +473,7 @@ case "$(uname -m)" in
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 512; Darwin x86_64 registers 542 on this tree.
+# Darwin arm64 registers 513; Darwin x86_64 registers 543 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;
