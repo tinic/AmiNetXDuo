@@ -1067,6 +1067,31 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME ip_dispatch_drop_account COMMAND test_ip_dispatch_drop_account)
 
+    # A packet that is not "for us" but lands on an interface with no IP address
+    # must not decrement counters it was never credited.  The no-address arm
+    # decremented delivered/bytes unconditionally while only UDP got the matching
+    # increment, so non-UDP wrapped both to ULONG_MAX.  Drives the real
+    # _nx_ipv4_packet_receive with a zero-IP interface and a unicast destination
+    # the interface does not own; fails on the old source, passes when the
+    # decrement is moved into the UDP block.
+    add_executable(test_ipv4_noaddr_account
+        host/test_ipv4_noaddr_account_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_packet_receive.c")
+
+    target_include_directories(test_ipv4_noaddr_account PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_ipv4_noaddr_account PRIVATE
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME ipv4_noaddr_account COMMAND test_ipv4_noaddr_account)
+
     # ---------------------------------------------------------------------
     # netstack.c itself, whole, on the host.
     #
