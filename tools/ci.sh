@@ -404,7 +404,9 @@ host_test_targets() { # builddir
 #      492 with deferred_release, 493 with netstatus_hostsource (x86_64 only);
 #      494 with devicehome_rewrites_only_ours, 495 with iface_remove (all
 #      hosts).
-HOST_TESTS_EXPECTED=495
+#      496-497 with thread_create_status: the ThreadX core returns the port's
+#      TX_THREAD_STACK_BUILD_STATUS, so a create with no Exec Task fails (N-001)
+HOST_TESTS_EXPECTED=497
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

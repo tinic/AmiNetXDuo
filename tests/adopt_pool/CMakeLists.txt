@@ -62,3 +62,27 @@ target_compile_options(test_exec_wait_owner PRIVATE -Wno-pointer-sign)
 add_test(NAME exec_wait_owner_release COMMAND test_exec_wait_owner release)
 add_test(NAME exec_wait_owner_acquire COMMAND test_exec_wait_owner acquire)
 add_test(NAME exec_wait_owner_nested COMMAND test_exec_wait_owner nested)
+
+# _tx_thread_create() against the port's TX_THREAD_STACK_BUILD_STATUS: a builder
+# that leaves no Exec Task must fail the create.  Only our ThreadX fork has the
+# hook; plain upstream returns TX_SUCCESS.  tx_thread_create.c is #included whole.
+add_executable(test_thread_create_status host/test_thread_create_status_host.c)
+
+target_include_directories(test_thread_create_status PRIVATE
+    "${AMINETXDUO_THREADX}/common/src"                  # tx_thread_create.c
+    "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"          # tx_port.h, first
+    "${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc"
+    "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim"
+    "${CMAKE_SOURCE_DIR}/include"
+    "${AMINETXDUO_THREADX}/common/inc")
+
+target_compile_definitions(test_thread_create_status PRIVATE
+    AMINETXDUO_HOST_VENDORED_TX_PORT="${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc/tx_port.h")
+
+# The m68k ULONG is 32 bits; the core's pointer-to-ULONG casts warn on a
+# 64-bit host and are never dereferenced here.
+target_compile_options(test_thread_create_status PRIVATE
+    -Wno-pointer-sign -Wno-pointer-to-int-cast)
+
+add_test(NAME thread_create_status_fail COMMAND test_thread_create_status fail)
+add_test(NAME thread_create_status_ok COMMAND test_thread_create_status ok)
