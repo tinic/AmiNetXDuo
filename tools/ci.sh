@@ -420,7 +420,9 @@ host_test_targets() { # builddir
 #      509 with tcp_transmit_cleanup (N-032, all hosts).
 #      510 with raw_v6_lock (N-036/N-037, x86_64 only); 511-516 with the
 #      six raw_source_send arms (N-036/N-037, all hosts, with IPv6).
-HOST_TESTS_EXPECTED=516
+#      517-519 with the three ipv6_delete_tcp arms (N-038, all hosts, with
+#      IPv6).
+HOST_TESTS_EXPECTED=519
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -438,7 +440,7 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 487 of 516 on the current tree.
+    # darwin-arm64 registers 490 of 519 on the current tree.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 29)) ;;
 esac
 
