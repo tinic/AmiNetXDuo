@@ -1976,6 +1976,48 @@ static BOOL bsd_listen_rearm(struct AmiSocketBase *base, AmiSocket *sock)
  * caller has already disconnected and unaccepted it.
  */
 static VOID bsd_listen_return(struct AmiSocketBase *base, AmiSocket *sock,
+                              AmiSocket *incoming);
+
+/*
+ * Reset `incoming`, take it off the port and put it back, with the listener's
+ * refill held off throughout (N-088).  The unaccept releases data the peer
+ * had queued, and a release can hand the baton on: the IP thread's listen
+ * callback then finds this socket CLOSED and unbound, relistens it and gives
+ * it a new connection, and the relisten here answers NX_NOT_CLOSED and
+ * destroys that live connection.  ASF_RELISTENING makes bsd_listen_refill()
+ * return at once; a handshake that finishes meanwhile waits in the SYN cache
+ * for the relisten below, which delivers it.
+ */
+static VOID bsd_listen_hand_back(struct AmiSocketBase *base, AmiSocket *sock,
+                                 AmiSocket *incoming)
+{
+    ULONG held = sock->as_Flags & ASF_RELISTENING;
+
+    sock->as_Flags |= ASF_RELISTENING;
+
+    /* NX_NO_WAIT on an established socket is NetX's reset. */
+    nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
+    nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
+
+    if (incoming->as_Parent == NULL)
+    {
+        /* accept() had already detached it: it belongs to the listener again
+           before it goes back on the port. */
+        Forbid();
+        incoming->as_Flags &= ~ASF_CONNECTED;
+        incoming->as_Flags |= ASF_INCOMING;
+        incoming->as_Parent = sock;
+        incoming->as_Owner  = sock->as_Owner;
+        Permit();
+    }
+
+    bsd_listen_return(base, sock, incoming);
+
+    if (held == 0)
+        sock->as_Flags &= ~ASF_RELISTENING;
+}
+
+static VOID bsd_listen_return(struct AmiSocketBase *base, AmiSocket *sock,
                               AmiSocket *incoming)
 {
     NX_IP *ip = bsd_stack_ip(base);
@@ -2624,10 +2666,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         else
             break;
 
-        /* NX_NO_WAIT on an established socket is NetX's reset. */
-        nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
-        nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
-        bsd_listen_return(SocketBase, sock, incoming);
+        bsd_listen_hand_back(SocketBase, sock, incoming);
 
         if (wait == NX_NO_WAIT)
         {
@@ -2719,17 +2758,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     fd = bsd_fd_alloc(SocketBase, incoming);
     if (fd < 0)
     {
-        nx_tcp_socket_disconnect(&incoming->as_Nx.tcp, NX_NO_WAIT);
-        nx_tcp_server_socket_unaccept(&incoming->as_Nx.tcp);
-
-        Forbid();
-        incoming->as_Flags &= ~ASF_CONNECTED;
-        incoming->as_Flags |= ASF_INCOMING;
-        incoming->as_Parent = sock;
-        incoming->as_Owner = sock->as_Owner;
-        Permit();
-
-        bsd_listen_return(SocketBase, sock, incoming);
+        bsd_listen_hand_back(SocketBase, sock, incoming);
 
         bsd_nx_leave(SocketBase);
 

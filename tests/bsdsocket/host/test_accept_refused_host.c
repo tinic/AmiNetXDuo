@@ -14,6 +14,12 @@
  * and runs the real bsd_accept_once(), or raises the break, or times out.
  * The NetX calls bsd_accept reaches are stubs that record what was done.
  *
+ * N-088: the unaccept that hands a refused slot back can yield (it releases
+ * what the peer had queued), and the IP thread's listen callback then runs
+ * bsd_listen_refill().  The unaccept stub can run that refill's effect at
+ * the yield; the relisten stub answers NX_NOT_CLOSED, as NetX does, for a
+ * socket that is not CLOSED.
+ *
  * socket.c is #included rather than linked, and -ffunction-sections plus the
  * linker's --gc-sections keep only bsd_accept and its callees.
  *
@@ -59,6 +65,10 @@ static ULONG      h_wait_arg[8];
 static ULONG      h_now;
 static unsigned   h_resets;
 static unsigned   h_relistens;
+static int        h_refill_at_yield;   /* N-088: refill runs inside unaccept */
+static unsigned   h_refilled;
+static unsigned   h_refill_skipped;
+static unsigned   h_not_closed;
 
 static void h_reset(ULONG flags, ULONG rcvtimeo, const int *script,
                     unsigned len)
@@ -103,6 +113,10 @@ static void h_reset(ULONG flags, ULONG rcvtimeo, const int *script,
     h_now        = 1000;
     h_resets     = 0;
     h_relistens  = 0;
+    h_refill_at_yield = 0;
+    h_refilled        = 0;
+    h_refill_skipped  = 0;
+    h_not_closed      = 0;
 }
 
 /* ---- the scripted wait --------------------------------------------------- */
@@ -170,9 +184,41 @@ UINT _nxe_tcp_socket_disconnect(NX_TCP_SOCKET *socket_ptr, ULONG wait_option)
     return NX_SUCCESS;
 }
 
+/* bsd_listen_refill() (select.c) as the IP thread runs it from the listen
+   callback when a handshake completes: held off by ASF_RELISTENING, else the
+   first CLOSED socket on the list is relistened and the SYN cache hands it
+   the finished connection. */
+static VOID h_refill(AmiSocket *listener)
+{
+    AmiSocket *p;
+
+    if ((listener->as_Flags & ASF_RELISTENING) != 0)
+    {
+        h_refill_skipped++;
+        return;
+    }
+
+    for (p = listener->as_Incoming; p != NULL; p = p->as_IncomingNext)
+    {
+        if (p->as_Nx.tcp.nx_tcp_socket_state != NX_TCP_CLOSED)
+            continue;
+        p->as_Nx.tcp.nx_tcp_socket_state = NX_TCP_ESTABLISHED;
+        h_refilled++;
+        break;
+    }
+}
+
 UINT _nxe_tcp_server_socket_unaccept(NX_TCP_SOCKET *socket_ptr)
 {
     socket_ptr->nx_tcp_socket_state = NX_TCP_CLOSED;
+
+    /* The receive-queue flush releases a packet to a pool waiter: the baton
+       goes to the IP thread, which runs the listen callback (N-088). */
+    if (h_refill_at_yield)
+    {
+        h_refill_at_yield = 0;
+        h_refill(&h_listener);
+    }
     return NX_SUCCESS;
 }
 
@@ -181,6 +227,17 @@ UINT _nxe_tcp_server_socket_relisten(NX_IP *ip_ptr, UINT port,
 {
     (VOID)ip_ptr; (VOID)port;
     h_relistens++;
+    if (socket_ptr->nx_tcp_socket_state != NX_TCP_CLOSED)
+    {
+        /* What bsd_listen_return() does with this is destroy the socket,
+           which resets the connection the refill just gave it. */
+        h_not_closed++;
+        printf("  FAIL N-088: the hand-back's relisten met a socket the refill "
+               "already relistened; a live connection would be reset\n");
+        printf("accept_refused: %lu checks, %lu failures\n", h_checks,
+               h_failures + 1);
+        exit(1);
+    }
     socket_ptr->nx_tcp_socket_state = NX_TCP_LISTEN_STATE;
     return NX_SUCCESS;
 }
@@ -384,6 +441,44 @@ int main(void)
               "V6ONLY refusal is not EWOULDBLOCK on a blocking accept");
         CHECK(h_waits == 2, "V6ONLY accept waited again after the refusal");
         CHECK(h_resets == 1, "the refused IPv4 peer was reset");
+    }
+
+    /* N-088, the refused-peer hand-back: the refill at the unaccept's yield
+       is held off, the slot is relistened by the hand-back, and the only
+       reset is the refused peer's. */
+    {
+        static const int s[] = { STEP_REFUSED, STEP_BREAK };
+
+        h_reset(0, 0, s, 2);
+        h_refill_at_yield = 1;
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EINTR,
+              "N-088: refusal then break, as without the refill");
+        CHECK(h_refill_skipped == 1 && h_refilled == 0 && h_not_closed == 0,
+              "N-088: the refill does not take a slot being handed back");
+        CHECK(h_resets == 1 && h_relistens == 1 &&
+              h_incoming.as_Nx.tcp.nx_tcp_socket_state == NX_TCP_LISTEN_STATE &&
+              h_listener.as_Incoming == &h_incoming,
+              "N-088: the hand-back relistens it, and only the refused peer is reset");
+        CHECK((h_listener.as_Flags & ASF_RELISTENING) == 0,
+              "N-088: the refill is let back in afterwards");
+    }
+
+    /* N-088, the out-of-descriptors hand-back. */
+    {
+        static const int s[] = { STEP_MATCH };
+
+        h_reset(0, 0, s, 1);
+        h_table[1] = BSD_FD_RESERVED;
+        h_refill_at_yield = 1;
+        CHECK(h_accept() == -1 && h_base.sb_Errno == AMI_EMFILE,
+              "N-088: a full table is EMFILE");
+        CHECK(h_refill_skipped == 1 && h_refilled == 0 && h_not_closed == 0 &&
+              h_incoming.as_Nx.tcp.nx_tcp_socket_state == NX_TCP_LISTEN_STATE &&
+              h_incoming.as_Parent == &h_listener &&
+              h_listener.as_Incoming == &h_incoming,
+              "N-088: the slot goes back to the listener, relistened by the hand-back");
+        CHECK((h_listener.as_Flags & ASF_RELISTENING) == 0,
+              "N-088: and the refill is let back in");
     }
 
     printf("accept_refused: %lu checks, %lu failures\n", h_checks, h_failures);
