@@ -1207,6 +1207,140 @@ static void test_tls13_key_schedule(void)
           "guard: later transcript hashes intact");
 }
 
+/* N-108: _nx_secure_tls_1_3_transcript_hash_save writes a hash_size digest
+   into nx_secure_tls_transcript_hashes[hash_index].  An index equal to
+   NX_SECURE_TLS_1_3_MAX_TRANSCRIPT_HASHES, or a ciphersuite hash longer than
+   NX_SECURE_TLS_MAX_HASH_SIZE, has to be refused before anything is written.
+   The rows and the start of nx_secure_tls_handshake_cache, which follows
+   them, are guard-filled. */
+#define N108_ROW_GUARD   0xA5
+#define N108_CACHE_GUARD 0x5A
+#define N108_CACHE_BYTES 64u
+
+/* FIPS 180-2 B.1: SHA-256("abc"). */
+static const UCHAR n108_sha256_abc[32] = {
+    0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde,
+    0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+    0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad};
+
+static void n108_fill(NX_SECURE_TLS_KEY_MATERIAL *km)
+{
+    memset(km->nx_secure_tls_transcript_hashes, N108_ROW_GUARD, sizeof(km->nx_secure_tls_transcript_hashes));
+    memset(km->nx_secure_tls_handshake_cache, N108_CACHE_GUARD, N108_CACHE_BYTES);
+}
+
+static int n108_rows_intact(NX_SECURE_TLS_KEY_MATERIAL *km, int skip_row)
+{
+    int row;
+
+    for (row = 0; row < NX_SECURE_TLS_1_3_MAX_TRANSCRIPT_HASHES; row++)
+    {
+        if (row != skip_row && !all_guard(km->nx_secure_tls_transcript_hashes[row], NX_SECURE_TLS_MAX_HASH_SIZE))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int n108_cache_intact(NX_SECURE_TLS_KEY_MATERIAL *km)
+{
+    unsigned i;
+
+    for (i = 0; i < N108_CACHE_BYTES; i++)
+    {
+        if (km->nx_secure_tls_handshake_cache[i] != N108_CACHE_GUARD)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Its own session: _nx_secure_tls_session_create links the control block into
+   the created list, so creating tls13_session a second time would corrupt it. */
+static NX_SECURE_TLS_SESSION n108_session;
+static UCHAR                 n108_metadata[32768];
+
+static void test_n108_transcript_hash_save(void)
+{
+    NX_SECURE_TLS_KEY_MATERIAL     *km = &n108_session.nx_secure_tls_key_material;
+    NX_SECURE_TLS_CRYPTO           *table;
+    NX_SECURE_TLS_CIPHERSUITE_INFO *sha256_suite = NX_NULL;
+    NX_SECURE_TLS_CIPHERSUITE_INFO  long_hash_suite;
+    UCHAR                           message[3] = {'a', 'b', 'c'};
+    UINT                            status;
+    USHORT                          i;
+
+    printf("n108: tls 1.3 transcript hash save\n");
+
+    status = _nx_secure_tls_session_create(&n108_session, &nx_crypto_tls_ciphers_ecc,
+                                           n108_metadata, sizeof(n108_metadata));
+    check(status == NX_SUCCESS, "n108: session create");
+    if (status != NX_SUCCESS)
+    {
+        return;
+    }
+
+    table = n108_session.nx_secure_tls_crypto_table;
+    for (i = 0; i < table->nx_secure_tls_ciphersuite_lookup_table_size; i++)
+    {
+        if (table->nx_secure_tls_ciphersuite_lookup_table[i].nx_secure_tls_ciphersuite == TLS_AES_128_GCM_SHA256)
+        {
+            sha256_suite = &table->nx_secure_tls_ciphersuite_lookup_table[i];
+            break;
+        }
+    }
+    check(sha256_suite != NX_NULL, "n108: TLS_AES_128_GCM_SHA256 in table");
+    if (sha256_suite == NX_NULL)
+    {
+        return;
+    }
+
+    n108_session.nx_secure_tls_1_3 = 1;
+    n108_session.nx_secure_tls_session_ciphersuite = sha256_suite;
+    status = _nx_secure_tls_handshake_hash_init(&n108_session);
+    if (status == NX_SUCCESS)
+    {
+        status = _nx_secure_tls_handshake_hash_update(&n108_session, message, sizeof(message));
+    }
+    check(status == NX_SUCCESS, "n108: handshake hash over \"abc\"");
+    if (status != NX_SUCCESS)
+    {
+        return;
+    }
+
+    /* Control: the last row, SHA-256, exactly 32 bytes. */
+    n108_fill(km);
+    status = _nx_secure_tls_1_3_transcript_hash_save(&n108_session, NX_SECURE_TLS_TRANSCRIPT_IDX_SERVER_FINISHED, NX_TRUE);
+    check(status == NX_SUCCESS, "n108: index 4 SHA-256 saves");
+    check(memcmp(km->nx_secure_tls_transcript_hashes[NX_SECURE_TLS_TRANSCRIPT_IDX_SERVER_FINISHED],
+                 n108_sha256_abc, sizeof(n108_sha256_abc)) == 0,
+          "n108: index 4 holds SHA-256(\"abc\")");
+    check(n108_rows_intact(km, NX_SECURE_TLS_TRANSCRIPT_IDX_SERVER_FINISHED),
+          "n108: index 4 leaves rows 0-3 intact");
+    check(n108_cache_intact(km), "n108: index 4 leaves the cache intact");
+
+    /* One past the last row. */
+    n108_fill(km);
+    status = _nx_secure_tls_1_3_transcript_hash_save(&n108_session, NX_SECURE_TLS_1_3_MAX_TRANSCRIPT_HASHES, NX_TRUE);
+    check(status == NX_INVALID_PARAMETERS, "n108: index 5 refused");
+    check(n108_rows_intact(km, -1), "n108: index 5 leaves all rows intact");
+    check(n108_cache_intact(km), "n108: index 5 leaves the cache intact");
+
+    /* A 48-byte digest into a 32-byte row. */
+    long_hash_suite = *sha256_suite;
+    long_hash_suite.nx_secure_tls_hash = &crypto_method_sha384;
+    n108_session.nx_secure_tls_session_ciphersuite = &long_hash_suite;
+    n108_fill(km);
+    status = _nx_secure_tls_1_3_transcript_hash_save(&n108_session, NX_SECURE_TLS_TRANSCRIPT_IDX_SERVER_FINISHED, NX_TRUE);
+    check(status == NX_INVALID_PARAMETERS, "n108: SHA-384 refused");
+    check(n108_rows_intact(km, -1), "n108: SHA-384 leaves all rows intact");
+    check(n108_cache_intact(km), "n108: SHA-384 leaves the cache intact");
+
+    n108_session.nx_secure_tls_session_ciphersuite = sha256_suite;
+}
+
 int main(void)
 {
     _nx_crypto_initialize();
@@ -1222,6 +1356,7 @@ int main(void)
     test_tls_key_usage();
     test_aes128_block();
     test_tls13_key_schedule();
+    test_n108_transcript_hash_save();
 
     if (failures != 0)
     {
