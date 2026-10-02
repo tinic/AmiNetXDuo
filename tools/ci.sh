@@ -435,7 +435,9 @@ host_test_targets() { # builddir
 #      dns_ptr_owner_regression (N-056, N-057, N-058; all hosts).
 #      537 with dns_search (N069): the search-list walk spends one budget,
 #      hosts-only once it is gone.
-HOST_TESTS_EXPECTED=537
+#      538 with netstatus_system_order (N-077: NETSTATUS_SYSTEM counts the
+#      openers before bsd_nx_enter(); x86_64 only).
+HOST_TESTS_EXPECTED=538
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -446,15 +448,15 @@ case "$(uname -m)" in
     # (#53), test_netmon (F-050), test_icmp6_filter_nocmsg (F-036),
     # test_nx_nest (F-042), test_aam_delete (F-029),
     # test_unbracketed_close (F-059), test_raw_hdrincl6 (F-061),
-    # test_deferred_release (F-059), test_hostsource (F-088) and
-    # test_raw_v6_lock (N-036), all
+    # test_deferred_release (F-059), test_hostsource (F-088),
+    # test_raw_v6_lock (N-036) and test_netstatus_order (N-077), all
     # x86_64-only for
     # the reason in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 508 of 537 on the current tree.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 29)) ;;
+    # darwin-arm64 registers 508 of 538 on the current tree.
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
 esac
 
 # The on-Amiga harnesses this stage runs.  Verified 2026-07-25 against

@@ -1564,6 +1564,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     NX_IP           *ip;
     NsWriter         w;
     ULONG            need;
+    LONG             openers = 0;
+    ULONG            open_cnt = 0;
 
     if (magic != AMI_NETSTATUS_MAGIC)
         return bsd_fail(SocketBase, AMI_EINVAL);
@@ -1819,25 +1821,33 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     if (what == NETSTATUS_INTERFACES)
         ns_refresh_sana2_stats(SocketBase, ip);
 
+    /* Before the bracket too: bsd_openers_list() takes sb_Lock.  Inside, it
+       made baton -> sb_Lock here against sb_Lock -> job task Wait() -> baton
+       in bsd_stack_interface_link() and bsd_stack_interface_start(). */
+    if (what == NETSTATUS_SYSTEM)
+    {
+        (VOID)bsd_openers_list(SocketBase, NULL, 0, &openers);
+        open_cnt = bsd_open_count(SocketBase);
+    }
+
     if (bsd_nx_enter(SocketBase) != 0)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    /* Adopted from here to bsd_nx_leave(): memory reads and nx_*_info_get(). */
+    /* Adopted from here to bsd_nx_leave(): memory reads and nx_*_info_get().
+       Nothing in here may take sb_Lock. */
     switch (what)
     {
         case NETSTATUS_SYSTEM:
         {
             NetStatusSystem *sys;
-            LONG             openers = 0;
 
             ns_writer_init(&w, hdr, size, NETSTATUS_SYSTEM,
                            sizeof(NetStatusSystem));
             sys = (NetStatusSystem *)ns_writer_next(&w);
             ns_fill_system(ip, sys);
 
-            (VOID)bsd_openers_list(SocketBase, NULL, 0, &openers);
             sys->nss_Openers = (openers > 0) ? (ULONG)openers : 0;
-            sys->nss_OpenCnt = bsd_open_count(SocketBase);
+            sys->nss_OpenCnt = open_cnt;
 
             ns_writer_finish(&w);
             break;

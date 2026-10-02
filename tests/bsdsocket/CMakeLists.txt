@@ -733,6 +733,33 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME netstatus_hostsource COMMAND test_hostsource)
 
+    # netstatus.c once more, for where NETSTATUS_SYSTEM counts the openers:
+    # bsd_openers_list() takes sb_Lock and must run before bsd_nx_enter().
+    add_executable(test_netstatus_order host/test_netstatus_order_host.c
+                                        "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c"
+                                        "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
+                                        "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
+
+    target_include_directories(test_netstatus_order PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim-netstatus"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/src/config"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_netstatus_order PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_netstatus_order PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
+
+    add_test(NAME netstatus_system_order COMMAND test_netstatus_order)
+
     # library_runtime.c, for the usergroup.library hold.
     #
     # WHY THIS ONE EXISTS.  bsd_usergroup_open() opens usergroup.library and
