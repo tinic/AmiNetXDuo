@@ -372,5 +372,10 @@ int main(void)
     return (h_failures == 0) ? 0 : 1;
 }
 
+/* socket.c's descriptor table takes Forbid() around each slot (N-087); one
+   task here, so nothing to keep out. */
+VOID Forbid(VOID) { }
+VOID Permit(VOID) { }
+
 #include "socket.c"
 #include "cmsg.c"

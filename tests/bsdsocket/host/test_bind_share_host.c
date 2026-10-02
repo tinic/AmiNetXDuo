@@ -327,4 +327,9 @@ int main(void)
 /* socket.c's stored-zone checks (#51); no slot is ever reused here. */
 ULONG netstack_interface_epoch(UWORD index) { (VOID)index; return 0; }
 
+/* socket.c's descriptor table takes Forbid() around each slot (N-087); one
+   task here, so nothing to keep out. */
+VOID Forbid(VOID) { }
+VOID Permit(VOID) { }
+
 #include "socket.c"
