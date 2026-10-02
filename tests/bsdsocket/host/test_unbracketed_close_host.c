@@ -139,10 +139,24 @@ APTR ami_alloc(ULONG n)
     return block;
 }
 
+/* A table the test watches: freed means poisoned and kept, so a store that
+   lands in it after the swap is seen rather than undefined. */
+static AmiSocket **h_watch;
+static int         h_watch_freed;
+
 VOID ami_free(APTR p)
 {
     if (p == (APTR)h_table || p == (APTR)h_other_table)
         return;
+    if (p != NULL && p == (APTR)h_watch)
+    {
+        int i;
+
+        for (i = 0; i < H_FDS; i++)
+            h_watch[i] = &h_poison;
+        h_watch_freed = 1;
+        return;
+    }
     if (!h_alloc_ok)
         abort();
     free(p);
@@ -484,6 +498,119 @@ static void t_close_shrink_race(void)
     }
 }
 
+/* --------------------------------------- N-087: grow at a slot store --- */
+
+static LONG h_grow_on;
+static LONG h_grow_answer;
+
+static void h_grow(void)
+{
+    CHECK(bsd_table_resize(&h_base, 8) == 0,
+          "N-087: the other task grows the table at the store");
+}
+
+static LONG h_fdcb_grow(LONG fd, LONG action)
+{
+    (VOID)fd;
+    if (action == h_grow_on)
+    {
+        h_forbid_skip = 0;
+        h_forbid_hook = h_grow;
+    }
+    return h_grow_answer;
+}
+
+/* The base on a table of its own (h_watch), as h_table holds it now. */
+static void h_grow_reset(void)
+{
+    h_reset();
+    h_alloc_ok    = 1;
+    bsd_defer_head = NULL;
+    h_watch_freed = 0;
+    h_watch = (AmiSocket **)ami_alloc(H_FDS * sizeof(AmiSocket *));
+    h_base.sb_Table = h_watch;
+    h_base.sb_FDCallback = h_fdcb_grow;
+    h_grow_on     = -1;
+    h_grow_answer = 0;
+}
+
+static int h_watch_untouched(void)
+{
+    int i;
+
+    if (!h_watch_freed)
+        return 0;
+    for (i = 0; i < H_FDS; i++)
+        if (h_watch[i] != &h_poison)
+            return 0;
+    return 1;
+}
+
+static void h_grow_done(void)
+{
+    h_forbid_hook = NULL;
+    h_base.sb_FDCallback = NULL;
+    if (h_base.sb_Table != h_watch)
+        free(h_base.sb_Table);
+    free(h_watch);
+    h_watch = NULL;
+    h_base.sb_Table = h_table;
+    bsd_defer_head = NULL;
+}
+
+static void t_store_grow(void)
+{
+    AmiSocket *prev = NULL;
+
+    /* settle */
+    h_grow_reset();
+    CHECK(bsd_fd_claim(&h_base, 1, &prev) == 0 && prev == NULL, "N-087: claimed");
+    h_grow_on = FDCB_ALLOC;
+    CHECK(bsd_fd_settle(&h_base, 1, &h_sock[1]) == 0, "N-087: settled");
+    CHECK(h_base.sb_TableSize == 8 && h_base.sb_Table != h_watch &&
+          h_base.sb_Table[1] == &h_sock[1] && h_watch_untouched(),
+          "N-087: settle's store reaches the grown table, not the freed one");
+    h_grow_done();
+
+    /* unclaim, putting a socket back */
+    h_grow_reset();
+    h_watch[2] = &h_sock[0];
+    CHECK(bsd_fd_claim(&h_base, 2, &prev) == 0 && prev == &h_sock[0],
+          "N-087: claimed a held slot");
+    h_grow_on = FDCB_ALLOC;
+    CHECK(bsd_fd_unclaim(&h_base, 2, prev) == 0, "N-087: unclaimed");
+    CHECK(h_base.sb_TableSize == 8 && h_base.sb_Table != h_watch &&
+          h_base.sb_Table[2] == &h_sock[0] && h_watch_untouched(),
+          "N-087: unclaim's store reaches the grown table");
+    h_grow_done();
+
+    /* the claim's veto */
+    h_grow_reset();
+    h_watch[3] = &h_sock[0];
+    h_grow_on = FDCB_FREE;
+    h_grow_answer = 7;
+    CHECK(bsd_fd_claim(&h_base, 3, &prev) == -1 && h_base.sb_Errno == 7,
+          "N-087: a vetoed claim");
+    CHECK(h_base.sb_TableSize == 8 && h_base.sb_Table != h_watch &&
+          h_base.sb_Table[3] == &h_sock[0] && h_watch_untouched(),
+          "N-087: the veto's restore reaches the grown table");
+    h_grow_done();
+
+    /* bsd_close_all() emptying a slot whose free was vetoed */
+    h_grow_reset();
+    h_sock[0].as_RefCount = 1;
+    h_sock[0].as_Owner = &h_base;
+    h_watch[0] = &h_sock[0];
+    h_grow_on = FDCB_FREE;
+    h_grow_answer = 7;
+    bsd_close_all(&h_base);
+    CHECK(h_base.sb_TableSize == 8 && h_base.sb_Table != h_watch &&
+          h_base.sb_Table[0] == NULL && h_watch_untouched(),
+          "N-087: close_all's store reaches the grown table");
+    h_grow_done();
+    h_alloc_ok = 0;
+}
+
 int main(void)
 {
     t_fd_claim();
@@ -493,6 +620,7 @@ int main(void)
     t_fd_alloc_cleanup();
     t_close_race();
     t_close_shrink_race();
+    t_store_grow();
     h_alloc_ok = 0;
 
     /* CloseSocket() with the bracket refused: the socket leaks, and its

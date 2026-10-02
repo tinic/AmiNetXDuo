@@ -321,19 +321,37 @@ static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
     tcp->nx_tcp_socket_tx_sequence = seed;
 }
 
+/* The first table, published under Forbid() like every later one; a task
+   that published first keeps its table and this one is given back. */
+static LONG bsd_table_first(struct AmiSocketBase *base, LONG size)
+{
+    AmiSocket **table;
+
+    table = (AmiSocket **)ami_alloc((ULONG)size * sizeof(AmiSocket *));
+    if (table == NULL)
+        return -1;
+
+    Forbid();
+    if (base->sb_Table == NULL)
+    {
+        base->sb_Table     = table;
+        base->sb_TableSize = size;
+        table = NULL;
+    }
+    Permit();
+
+    if (table != NULL)
+        ami_free(table);
+
+    return 0;
+}
+
 static LONG bsd_table_ensure(struct AmiSocketBase *base)
 {
     if (base->sb_Table != NULL)
         return 0;
 
-    base->sb_Table = (AmiSocket **)ami_alloc(
-        (ULONG)BSD_DEFAULT_DTABLESIZE * sizeof(AmiSocket *));
-    if (base->sb_Table == NULL)
-        return -1;
-
-    base->sb_TableSize = BSD_DEFAULT_DTABLESIZE;
-
-    return 0;
+    return bsd_table_first(base, BSD_DEFAULT_DTABLESIZE);
 }
 
 /*
@@ -379,27 +397,15 @@ LONG bsd_table_resize(struct AmiSocketBase *base, LONG size)
     if (size < 1 || size > BSD_MAX_DTABLESIZE)
         return -1;
 
-    if (base->sb_Table == NULL)
-    {
-        base->sb_Table = (AmiSocket **)ami_alloc(
-            (ULONG)size * sizeof(AmiSocket *));
-        if (base->sb_Table == NULL)
-            return -1;
-
-        base->sb_TableSize = size;
-
-        return 0;
-    }
+    /* A task that published a first table meanwhile is resized below. */
+    if (base->sb_Table == NULL && bsd_table_first(base, size) != 0)
+        return -1;
 
     if (size == base->sb_TableSize)
         return 0;
 
-    for (i = base->sb_TableSize - 1; i >= size; i--)
-    {
-        if (base->sb_Table[i] != NULL)
-            return -1;
-    }
-
+    /* No unlocked look at the slots past `size` first: another task can
+       shrink the table under it.  The check below is the one that counts. */
     table = (AmiSocket **)ami_alloc((ULONG)size * sizeof(AmiSocket *));
     if (table == NULL)
         return -1;
@@ -598,7 +604,7 @@ LONG bsd_fd_claim(struct AmiSocketBase *base, LONG fd, AmiSocket **prev)
         error = bsd_fd_callback(base, fd, FDCB_FREE);
         if (error != 0)
         {
-            base->sb_Table[fd] = entry;
+            bsd_fd_store(base, fd, entry);
             return bsd_fail(base, error);
         }
     }
@@ -618,7 +624,7 @@ LONG bsd_fd_settle(struct AmiSocketBase *base, LONG fd, AmiSocket *entry)
     if (error != 0)
         return bsd_fail(base, error);
 
-    base->sb_Table[fd] = entry;
+    bsd_fd_store(base, fd, entry);
     return 0;
 }
 
@@ -632,11 +638,11 @@ LONG bsd_fd_unclaim(struct AmiSocketBase *base, LONG fd, AmiSocket *prev)
 {
     if (prev != NULL && bsd_fd_callback(base, fd, FDCB_ALLOC) != 0)
     {
-        base->sb_Table[fd] = NULL;
+        bsd_fd_store(base, fd, NULL);
         return -1;
     }
 
-    base->sb_Table[fd] = prev;
+    bsd_fd_store(base, fd, prev);
     return 0;
 }
 
@@ -1266,7 +1272,7 @@ VOID bsd_close_all(struct AmiSocketBase *base)
             continue;
 
         if (bsd_fd_free(base, fd) != 0)
-            base->sb_Table[fd] = NULL;
+            bsd_fd_store(base, fd, NULL);
 
         if (sock == BSD_FD_RESERVED || sock == BSD_FD_BUSY)
             continue;
