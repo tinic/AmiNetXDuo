@@ -2355,6 +2355,20 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             break;
 
         case NETCTRL_ARP_ADD:
+            /* The cross build uses NetX's unchecked API.  Replace the
+               static-add wrapper's address/MAC refusals here: a zero MAC
+               makes a static unresolved entry, and multicast/broadcast
+               destinations never use ARP at all. */
+            if (ctl->nsc_Destination == 0UL ||
+                (ctl->nsc_Destination & NX_IP_CLASS_D_MASK) == NX_IP_CLASS_D_TYPE ||
+                ctl->nsc_Destination == NX_IP_LIMITED_BROADCAST ||
+                (ctl->nsc_HwAddress[0] | ctl->nsc_HwAddress[1] |
+                 ctl->nsc_HwAddress[2] | ctl->nsc_HwAddress[3] |
+                 ctl->nsc_HwAddress[4] | ctl->nsc_HwAddress[5]) == 0)
+            {
+                rc = bsd_fail(SocketBase, AMI_EINVAL);
+                break;
+            }
             status = nx_arp_static_entry_create(ip, ctl->nsc_Destination,
                         ((ULONG)ctl->nsc_HwAddress[0] << 8) |
                          (ULONG)ctl->nsc_HwAddress[1],
