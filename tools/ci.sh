@@ -429,7 +429,9 @@ host_test_targets() { # builddir
 #      extension-header drops).
 #      522 with ipv4_noaddr_account (N-019): the no-address IPv4 receive arm
 #      does not decrement delivered/bytes it never credited (non-UDP wrap).
-HOST_TESTS_EXPECTED=522
+#      523-531 with the nine ipv6_source_snapshot arms (N-039, all hosts,
+#      with IPv6).
+HOST_TESTS_EXPECTED=531
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -447,7 +449,7 @@ case "$(uname -m)" in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
-    # darwin-arm64 registers 493 of 522 on the current tree.
+    # darwin-arm64 registers 502 of 531 on the current tree.
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 29)) ;;
 esac
 
