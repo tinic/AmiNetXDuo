@@ -457,7 +457,9 @@ host_test_targets() { # builddir
 #      no record is sent, and a record-send failure is not double-freed.
 #      546 with tls13_handshake_fault_shipping: the same contract without
 #      the optional server client-certificate feature, as in shipped images.
-HOST_TESTS_EXPECTED=546
+#      547 with tls_x509_field_bounds (N-128/N-129/N-130/E-234): the X.509
+#      certificate parser on re-encoded certificates (all hosts).
+HOST_TESTS_EXPECTED=547
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

@@ -158,3 +158,18 @@ target_link_libraries(test_clienthello_lists PRIVATE
 target_compile_options(test_clienthello_lists PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
 
 add_test(NAME tls_clienthello_lists COMMAND test_clienthello_lists)
+
+# N-128, N-129, N-130, E-234: the X.509 certificate parser on re-encoded
+# certificates (unique IDs inserted, an empty EC key, signature or version),
+# the same guard-region contract, plus the exact consumed count.
+add_executable(test_x509_field_bounds
+    test_x509_field_bounds.c
+    "${CMAKE_SOURCE_DIR}/tests/fuzz/fuzz_nxstub.c"
+    "${CMAKE_SOURCE_DIR}/tests/fuzz/fuzz_txstub.c")
+
+target_link_libraries(test_x509_field_bounds PRIVATE
+    test_x509_nx_secure test_x509_nx_crypto)
+
+target_compile_options(test_x509_field_bounds PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
+
+add_test(NAME tls_x509_field_bounds COMMAND test_x509_field_bounds)
