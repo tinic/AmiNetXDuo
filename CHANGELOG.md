@@ -5,6 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- RSA keys over 4096 bits are refused (N-146).
 - TLS rejects HelloRetryRequest cookies and ClientHello messages that do not
   fit their buffers, and reports failed key-share construction.
 - TLS 1.3 handshake builder failures preserve the original error and release

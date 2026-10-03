@@ -593,6 +593,19 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_link_libraries(tls_rsa_key_regression PRIVATE
         fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
         fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx)
+    # N-146: both RSA methods refuse a modulus over NX_CRYPTO_MAX_RSA_MODULUS_SIZE,
+    # check the output against the modulus, and honour the scratch length.
+    add_executable(tls_rsa_bounds
+        tls_rsa_bounds.c
+        fuzz_nxstub.c
+        fuzz_txstub.c)
+    target_include_directories(tls_rsa_bounds PRIVATE ${_fuzz_tls_crypto_inc})
+    target_compile_definitions(tls_rsa_bounds PRIVATE ${_fuzz_tls_def})
+    target_compile_options(tls_rsa_bounds PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san} -Wall -Wextra)
+    target_link_options(tls_rsa_bounds PRIVATE ${_fuzz_san})
+    target_link_libraries(tls_rsa_bounds PRIVATE
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx)
 
 endif()
 
@@ -716,6 +729,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
              COMMAND fuzz_tls_crypto -s)
 
     add_test(NAME tls_rsa_key_regression COMMAND tls_rsa_key_regression)
+    add_test(NAME tls_rsa_bounds COMMAND tls_rsa_bounds)
 
     # EIGHT STREAMS, NOT ONE, and the same number of mutations between them.
     # Four was the first attempt and left this at 8.14 s of the ten-second

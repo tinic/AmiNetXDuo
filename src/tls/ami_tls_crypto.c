@@ -470,13 +470,31 @@ static UINT ami_rsa_exponentiate(const UCHAR *exponent, UINT exponent_length,
                                  const UCHAR *q, UINT q_length,
                                  const UCHAR *input, UINT input_length,
                                  UCHAR *output,
-                                 USHORT *scratch_buf_ptr,
+                                 USHORT *scratch_buf_ptr, UINT scratch_buf_length,
                                  HN_UBASE *powm_scratch, UINT powm_scratch_limbs)
 {
 
 HN_UBASE               *scratch;
 UINT                    mod_length;
+UINT                    status;
+ULONG                   scratch_needed;
 NX_CRYPTO_HUGE_NUMBER   modulus_hn, exponent_hn, input_hn, output_hn, p_hn, q_hn;
+
+    /* As the vendored operation now does (N-146): the carve's need against
+       the scratch, in bytes, before any of it is touched; scratch_buf_length
+       counts USHORTs.  The numbers' own bounds are setup()'s, whose status
+       is returned. */
+    if (modulus_length == 0)
+    {
+        return(NX_CRYPTO_SIZE_ERROR);
+    }
+    scratch_needed = ((p != NX_CRYPTO_NULL) && (q != NX_CRYPTO_NULL))
+                     ? ((10UL * modulus_length) + 24UL)
+                     : ((7UL * modulus_length) + 8UL);
+    if (((ULONG)scratch_buf_length * sizeof(USHORT)) < scratch_needed)
+    {
+        return(NX_CRYPTO_SIZE_ERROR);
+    }
 
 
     scratch =  (HN_UBASE *)scratch_buf_ptr;
@@ -486,17 +504,28 @@ NX_CRYPTO_HUGE_NUMBER   modulus_hn, exponent_hn, input_hn, output_hn, p_hn, q_hn
     NX_CRYPTO_HUGE_NUMBER_INITIALIZE(&exponent_hn, scratch, modulus_length);
     NX_CRYPTO_HUGE_NUMBER_INITIALIZE(&output_hn,   scratch, modulus_length << 1);
 
-    _nx_crypto_huge_number_setup(&exponent_hn, exponent, exponent_length);
-    _nx_crypto_huge_number_setup(&input_hn,    input,    input_length);
-    _nx_crypto_huge_number_setup(&modulus_hn,  modulus,  modulus_length);
+    status = _nx_crypto_huge_number_setup(&exponent_hn, exponent, exponent_length);
+    if (status == NX_CRYPTO_SUCCESS)
+        status = _nx_crypto_huge_number_setup(&input_hn, input, input_length);
+    if (status == NX_CRYPTO_SUCCESS)
+        status = _nx_crypto_huge_number_setup(&modulus_hn, modulus, modulus_length);
+    if (status != NX_CRYPTO_SUCCESS)
+    {
+        return(status);
+    }
 
     if ((p != NX_CRYPTO_NULL) && (q != NX_CRYPTO_NULL))
     {
         NX_CRYPTO_HUGE_NUMBER_INITIALIZE(&p_hn, scratch, modulus_length >> 1);
         NX_CRYPTO_HUGE_NUMBER_INITIALIZE(&q_hn, scratch, modulus_length >> 1);
 
-        _nx_crypto_huge_number_setup(&p_hn, p, p_length);
-        _nx_crypto_huge_number_setup(&q_hn, q, q_length);
+        status = _nx_crypto_huge_number_setup(&p_hn, p, p_length);
+        if (status == NX_CRYPTO_SUCCESS)
+            status = _nx_crypto_huge_number_setup(&q_hn, q, q_length);
+        if (status != NX_CRYPTO_SUCCESS)
+        {
+            return(status);
+        }
 
         if (ami_arithmetic == AMI_TLS_ARITH_REFERENCE)
         {
@@ -527,9 +556,7 @@ NX_CRYPTO_HUGE_NUMBER   modulus_hn, exponent_hn, input_hn, output_hn, p_hn, q_hn
         }
     }
 
-    _nx_crypto_huge_number_extract(&output_hn, output, modulus_length, &mod_length);
-
-    return(NX_CRYPTO_SUCCESS);
+    return(_nx_crypto_huge_number_extract(&output_hn, output, modulus_length, &mod_length));
 }
 
 static UINT ami_crypto_method_rsa_init(struct NX_CRYPTO_METHOD_STRUCT *method,
@@ -640,7 +667,10 @@ ULONG                       elapsed;
         return(NX_CRYPTO_PTR_ERROR);
     }
 
-    if (output_length_in_byte < (ULONG)(key_size_in_bits >> 3))
+    /* The result is the modulus's length; key_size_in_bits is the
+       exponent's, 24 bits for 65537, so it bounded nothing (N-146). */
+    if ((base -> nx_crypto_rsa_modulus_length == 0) ||
+        (output_length_in_byte < (ULONG)(base -> nx_crypto_rsa_modulus_length)))
     {
         return(NX_CRYPTO_INVALID_BUFFER_SIZE);
     }
@@ -692,6 +722,7 @@ ULONG                       elapsed;
                                    input, (UINT)input_length_in_byte,
                                    output,
                                    base -> nx_crypto_rsa_scratch_buffer,
+                                   NX_CRYPTO_RSA_SCRATCH_BUFFER_SIZE,
                                    ctx -> ami_rsa_powm_scratch,
                                    AMI_TLS_POWM_SCRATCH_LIMBS);
 
