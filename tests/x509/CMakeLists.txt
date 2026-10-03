@@ -207,3 +207,23 @@ target_link_libraries(test_hkdf_extract_ptr PRIVATE test_x509_nx_crypto)
 target_compile_options(test_hkdf_extract_ptr PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
 
 add_test(NAME tls_hkdf_extract_ptr COMMAND test_hkdf_extract_ptr)
+
+# GHSA-8w5x-ff58-2fr2 (upstream 5128818d): a record's packet chain is not
+# touched once nx_tcp_socket_send() has accepted it; the NX_SECURE_KEY_CLEAR
+# wipe is for a failed send only.  The send path is compiled in directly
+# against the test file's stubs, so nothing is sent and nothing is released.
+# The wipe measures each packet through ULONG casts of its pointers, narrowing
+# on an LP64 host and harmless for the test's small buffers; hence
+# -Wno-pointer-to-int-cast.
+add_executable(test_send_record_ownership
+    test_send_record_ownership.c
+    "${AMINETXDUO_NETXDUO}/nx_secure/src/nx_secure_tls_send_record.c")
+
+target_include_directories(test_send_record_ownership PRIVATE
+    $<TARGET_PROPERTY:test_x509_nx_secure,INTERFACE_INCLUDE_DIRECTORIES>)
+target_compile_definitions(test_send_record_ownership PRIVATE
+    $<TARGET_PROPERTY:test_x509_nx_secure,INTERFACE_COMPILE_DEFINITIONS>)
+target_compile_options(test_send_record_ownership PRIVATE
+    -Wall -Wextra -Wno-pointer-to-int-cast -UAMINETXDUO_IPV6)
+
+add_test(NAME tls_send_record_ownership COMMAND test_send_record_ownership)
