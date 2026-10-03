@@ -7,10 +7,20 @@
  * the low counter octet), 16384 the TLS record cap.  AAD 5 and 13 are the TLS
  * 1.3 and 1.2 headers; 0, 65279, 65280 and 70000 are RFC 3610 2.2's empty,
  * 2-octet and 6-octet l(a) forms.  Tags 16 and 8 are the two CCM methods.
+ * Nonces are 12 bytes (TLS, L = 3) plus the RFC 3610 ends, 7 (L = 8) and
+ * 13 (L = 2).
  *
  * Each case runs the record layer's three-step path (INITIALIZE, one UPDATE
  * for the whole record, CALCULATE) both ways, the one-shot ENCRYPT/DECRYPT,
  * and a decrypt with one tag bit flipped, which must be refused.
+ *
+ * The whole-record UPDATE is one shape only: it is what our record layer
+ * does today, but a caller may split a message across UPDATEs.  The split
+ * control below covers the one split that matters to the counter, block
+ * aligned at 255 blocks so the second UPDATE starts on counter 256.  The
+ * mode itself is not a streaming API for splits that are not block aligned
+ * (each UPDATE pads its own MAC input and restarts its keystream block), and
+ * nothing here claims otherwise.
  *
  * Output is key=value; the exit status is the verdict.
  *
@@ -28,13 +38,14 @@ extern NX_CRYPTO_METHOD crypto_method_aes_ccm_8;
 extern NX_CRYPTO_METHOD crypto_method_aes_ccm_16;
 
 #define CCM_VEC_MAXAAD 70000
+#define CCM_SPLIT      (255 * 16)
 
 static NX_CRYPTO_AES ctx __attribute__((aligned(8)));
 static UCHAR plain[CCM_VEC_MAXLEN];
 static UCHAR aad[CCM_VEC_MAXAAD];
 static UCHAR out[CCM_VEC_MAXLEN + 16];
 static UCHAR back[CCM_VEC_MAXLEN + 16];
-static UCHAR iv[13];
+static UCHAR iv[14];
 
 static int failures;
 static int checks;
@@ -60,13 +71,13 @@ static UINT op(NX_CRYPTO_METHOD *m, UINT o, UCHAR *in, ULONG in_len, UCHAR *o_pt
 }
 
 /* First 16-byte block where got differs from the reference ciphertext, or -1. */
-static long first_bad_block(const UCHAR *got, unsigned len)
+static long first_bad_block(const UCHAR *got, const UCHAR *ref, unsigned len)
 {
 unsigned i;
 
     for (i = 0; i < len; i++)
     {
-        if (got[i] != ccm_vec_ciphertext[i])
+        if (got[i] != ref[i])
         {
             return (long)(i / 16);
         }
@@ -80,10 +91,58 @@ static void expect(int ok, unsigned idx, const char *path, const char *what, lon
     if (!ok)
     {
         failures++;
-        printf("fail case=%u payload=%u aad=%u tag=%u path=%s what=%s block=%ld\n",
-               idx, ccm_vec_cases[idx].payload, ccm_vec_cases[idx].aad,
-               ccm_vec_cases[idx].tag_len, path, what, block);
+        printf("fail case=%u nonce=%u payload=%u aad=%u tag=%u path=%s what=%s block=%ld\n",
+               idx, ccm_vec_cases[idx].nonce_len, ccm_vec_cases[idx].payload,
+               ccm_vec_cases[idx].aad, ccm_vec_cases[idx].tag_len, path, what, block);
     }
+}
+
+/* Record path, both ways, with the payload given to UPDATE in pieces of at
+   most `split` bytes (block aligned).  split == p is the whole record.  */
+static void record_path(unsigned idx, unsigned split, const char *path)
+{
+unsigned          p = ccm_vec_cases[idx].payload;
+unsigned          a = ccm_vec_cases[idx].aad;
+unsigned          t = ccm_vec_cases[idx].tag_len;
+const UCHAR      *tag = ccm_vec_cases[idx].tag;
+const UCHAR      *ct = ccm_vec_ciphertext(ccm_vec_cases[idx].nonce_len);
+NX_CRYPTO_METHOD *m = method_for(t);
+UCHAR            *a_ptr = a ? aad : NX_CRYPTO_NULL;
+UCHAR             icv[16];
+UINT              st;
+unsigned          off, n;
+
+    /* Encrypt: as nx_secure_tls_record_payload_encrypt.c when split == p.  */
+    memset(out, 0xA5, sizeof(out));
+    st = keyed(m);
+    st |= op(m, NX_CRYPTO_ENCRYPT_INITIALIZE, a_ptr, a, NX_CRYPTO_NULL, p);
+    off = 0;
+    do
+    {
+        n = ((p - off) > split) ? split : (p - off);
+        st |= op(m, NX_CRYPTO_ENCRYPT_UPDATE, plain + off, n, out + off, n);
+        off += n;
+    } while (off < p);
+    st |= op(m, NX_CRYPTO_ENCRYPT_CALCULATE, NX_CRYPTO_NULL, 0, icv, t);
+    expect(st == NX_CRYPTO_SUCCESS, idx, path, "encrypt_status", -1);
+    expect(memcmp(out, ct, p) == 0, idx, path, "ciphertext", first_bad_block(out, ct, p));
+    expect(memcmp(icv, tag, t) == 0, idx, path, "tag", -1);
+
+    /* Decrypt.  */
+    memset(back, 0xA5, sizeof(back));
+    memcpy(icv, tag, t);
+    st = keyed(m);
+    st |= op(m, NX_CRYPTO_DECRYPT_INITIALIZE, a_ptr, a, NX_CRYPTO_NULL, p);
+    off = 0;
+    do
+    {
+        n = ((p - off) > split) ? split : (p - off);
+        st |= op(m, NX_CRYPTO_DECRYPT_UPDATE, (UCHAR *)ct + off, n, back + off, n);
+        off += n;
+    } while (off < p);
+    st |= op(m, NX_CRYPTO_DECRYPT_CALCULATE, icv, t, NX_CRYPTO_NULL, 0);
+    expect(st == NX_CRYPTO_SUCCESS, idx, path, "decrypt_status", -1);
+    expect(memcmp(back, plain, p) == 0, idx, path, "plaintext", -1);
 }
 
 static void run_case(unsigned idx)
@@ -92,31 +151,21 @@ unsigned          p = ccm_vec_cases[idx].payload;
 unsigned          a = ccm_vec_cases[idx].aad;
 unsigned          t = ccm_vec_cases[idx].tag_len;
 const UCHAR      *tag = ccm_vec_cases[idx].tag;
+const UCHAR      *ct = ccm_vec_ciphertext(ccm_vec_cases[idx].nonce_len);
 NX_CRYPTO_METHOD *m = method_for(t);
 UCHAR            *a_ptr = a ? aad : NX_CRYPTO_NULL;
-UCHAR             icv[16];
 UINT              st;
 
-    /* Record path, encrypt: as nx_secure_tls_record_payload_encrypt.c.  */
-    memset(out, 0xA5, sizeof(out));
-    st = keyed(m);
-    st |= op(m, NX_CRYPTO_ENCRYPT_INITIALIZE, a_ptr, a, NX_CRYPTO_NULL, p);
-    st |= op(m, NX_CRYPTO_ENCRYPT_UPDATE, plain, p, out, p);
-    st |= op(m, NX_CRYPTO_ENCRYPT_CALCULATE, NX_CRYPTO_NULL, 0, icv, t);
-    expect(st == NX_CRYPTO_SUCCESS, idx, "record", "encrypt_status", -1);
-    expect(memcmp(out, ccm_vec_ciphertext, p) == 0, idx, "record", "ciphertext",
-           first_bad_block(out, p));
-    expect(memcmp(icv, tag, t) == 0, idx, "record", "tag", -1);
+    iv[0] = (UCHAR)ccm_vec_cases[idx].nonce_len;
+    memcpy(iv + 1, ccm_vec_nonce, ccm_vec_cases[idx].nonce_len);
 
-    /* Record path, decrypt.  */
-    memset(back, 0xA5, sizeof(back));
-    memcpy(icv, tag, t);
-    st = keyed(m);
-    st |= op(m, NX_CRYPTO_DECRYPT_INITIALIZE, a_ptr, a, NX_CRYPTO_NULL, p);
-    st |= op(m, NX_CRYPTO_DECRYPT_UPDATE, (UCHAR *)ccm_vec_ciphertext, p, back, p);
-    st |= op(m, NX_CRYPTO_DECRYPT_CALCULATE, icv, t, NX_CRYPTO_NULL, 0);
-    expect(st == NX_CRYPTO_SUCCESS, idx, "record", "decrypt_status", -1);
-    expect(memcmp(back, plain, p) == 0, idx, "record", "plaintext", -1);
+    record_path(idx, p, "record");
+
+    /* Split control: 255 blocks, then the rest from counter 256.  */
+    if (p > CCM_SPLIT)
+    {
+        record_path(idx, CCM_SPLIT, "split255");
+    }
 
     /* One shot, encrypt: tag appended to the ciphertext.  */
     memset(out, 0xA5, sizeof(out));
@@ -124,12 +173,11 @@ UINT              st;
     st |= op(m, NX_CRYPTO_SET_ADDITIONAL_DATA, a_ptr, a, NX_CRYPTO_NULL, 0);
     st |= op(m, NX_CRYPTO_ENCRYPT, plain, p, out, p + t);
     expect(st == NX_CRYPTO_SUCCESS, idx, "oneshot", "encrypt_status", -1);
-    expect(memcmp(out, ccm_vec_ciphertext, p) == 0, idx, "oneshot", "ciphertext",
-           first_bad_block(out, p));
+    expect(memcmp(out, ct, p) == 0, idx, "oneshot", "ciphertext", first_bad_block(out, ct, p));
     expect(memcmp(out + p, tag, t) == 0, idx, "oneshot", "tag", -1);
 
     /* One shot, decrypt the reference.  */
-    memcpy(out, ccm_vec_ciphertext, p);
+    memcpy(out, ct, p);
     memcpy(out + p, tag, t);
     memset(back, 0xA5, sizeof(back));
     st = keyed(m);
@@ -160,16 +208,14 @@ int      before;
     {
         aad[i] = (UCHAR)((i * 13) + 101);
     }
-    iv[0] = 12;
-    memcpy(iv + 1, ccm_vec_nonce, 12);
 
     for (i = 0; i < n; i++)
     {
         before = failures;
         run_case(i);
-        printf("case=%u payload=%u aad=%u tag=%u result=%s\n", i, ccm_vec_cases[i].payload,
-               ccm_vec_cases[i].aad, ccm_vec_cases[i].tag_len,
-               (failures == before) ? "pass" : "FAIL");
+        printf("case=%u nonce=%u payload=%u aad=%u tag=%u result=%s\n", i,
+               ccm_vec_cases[i].nonce_len, ccm_vec_cases[i].payload, ccm_vec_cases[i].aad,
+               ccm_vec_cases[i].tag_len, (failures == before) ? "pass" : "FAIL");
     }
 
     printf("ccm_contract cases=%u checks=%d failures=%d\n", n, checks, failures);

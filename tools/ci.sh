@@ -459,7 +459,9 @@ host_test_targets() { # builddir
 #      the optional server client-certificate feature, as in shipped images.
 #      547 with tls_x509_field_bounds (N-128/N-129/N-130/E-234): the X.509
 #      certificate parser on re-encoded certificates (all hosts).
-HOST_TESTS_EXPECTED=547
+#      548 with ccm_contract (N-147/N-148): AES-CCM against independent
+#      known answers across the 255/256 counter carry (all hosts).
+HOST_TESTS_EXPECTED=548
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -481,7 +483,7 @@ case "$(uname -m)" in
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 513; Darwin x86_64 registers 543 on this tree.
+# Darwin arm64 registers 517; Darwin x86_64 registers 547 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;
