@@ -107,6 +107,41 @@ static void init_ceiling(const NX_CRYPTO_METHOD *m)
     status = m->nx_crypto_init((NX_CRYPTO_METHOD *)m, modulus, 0, &handler,
                                METADATA, METADATA_SIZE);
     CHECK(status == NX_CRYPTO_UNSUPPORTED_KEY_SIZE, "a zero-length modulus is refused");
+
+    status = m->nx_crypto_init((NX_CRYPTO_METHOD *)m, modulus, 2047, &handler,
+                               METADATA, METADATA_SIZE);
+    CHECK(status == NX_CRYPTO_UNSUPPORTED_KEY_SIZE, "a modulus that is not whole bytes is refused");
+}
+
+/* A valid key whose DER integer carries leading zero bytes, so its length is
+   past the modulus's: setup() strips them, and the operation must still work
+   (no explicit exponent <= modulus check may reject it). */
+static void exponent_leading_zeros(const NX_CRYPTO_METHOD *m)
+{
+    const NX_SECURE_RSA_PUBLIC_KEY *pub = &ca.nx_secure_x509_public_key.rsa_public_key;
+    const UINT mod = pub->nx_secure_rsa_public_modulus_length;
+    static UCHAR exponent[600];
+    static UCHAR out[1024];
+    UINT  pad = mod + 2 - pub->nx_secure_rsa_public_exponent_length;
+    VOID *handler = NX_NULL;
+    UINT  status;
+
+    memset(exponent, 0x00, sizeof(exponent));
+    memcpy(&exponent[pad], pub->nx_secure_rsa_public_exponent, pub->nx_secure_rsa_public_exponent_length);
+
+    status = m->nx_crypto_init((NX_CRYPTO_METHOD *)m,
+                               (UCHAR *)pub->nx_secure_rsa_public_modulus, (NX_CRYPTO_KEY_SIZE)(mod << 3),
+                               &handler, METADATA, METADATA_SIZE);
+    CHECK(status == NX_CRYPTO_SUCCESS, "init for the zero-padded exponent");
+
+    memset(out, 0, sizeof(out));
+    status = m->nx_crypto_operation(NX_CRYPTO_DECRYPT, handler, (NX_CRYPTO_METHOD *)m,
+                                    exponent, (NX_CRYPTO_KEY_SIZE)((mod + 2) << 3),
+                                    (UCHAR *)leaf.nx_secure_x509_signature_data,
+                                    leaf.nx_secure_x509_signature_data_length,
+                                    NX_NULL, out, mod, METADATA, METADATA_SIZE, NX_NULL, NX_NULL);
+    CHECK(status == NX_CRYPTO_SUCCESS && out[0] == 0x00 && out[1] == 0x01 && out[2] == 0xFF,
+          "an exponent with leading zero bytes past the modulus length still verifies");
 }
 
 /* The leaf's signature, decrypted with the CA's public key: PKCS#1 type 1. */
@@ -212,6 +247,23 @@ static void scratch_units(void)
                                       leaf.nx_secure_x509_signature_data_length,
                                       out, scratch, (7u * mod + 8u) / sizeof(USHORT));
     CHECK(status == NX_CRYPTO_SUCCESS, "and exactly enough is used");
+
+    /* A modulus that is not a whole number of limbs: every carve rounds up,
+       so the requirement is 7 * round4(m) + 8, not 7 * m + 8.  257 bytes
+       needs 7 * 260 + 8 = 1828 bytes = 914 USHORTs. */
+    {
+        static UCHAR odd_modulus[257];
+        static UCHAR one[1] = { 0x03 };
+
+        memset(odd_modulus, 0xC3, sizeof(odd_modulus));
+        status = _nx_crypto_rsa_operation(one, 1, odd_modulus, 257, NX_NULL, 0, NX_NULL, 0,
+                                          one, 1, out, scratch, 913u);
+        CHECK(status == NX_CRYPTO_SIZE_ERROR,
+              "an odd 257-byte modulus wants its rounded size: 913 USHORTs refused");
+        status = _nx_crypto_rsa_operation(one, 1, odd_modulus, 257, NX_NULL, 0, NX_NULL, 0,
+                                          one, 1, out, scratch, 914u);
+        CHECK(status == NX_CRYPTO_SUCCESS, "and 914 accepted");
+    }
 }
 
 int main(void)
@@ -230,11 +282,13 @@ int main(void)
     init_ceiling(&crypto_method_rsa);
     output_capacity(&crypto_method_rsa);
     exponent_overlong(&crypto_method_rsa);
+    exponent_leading_zeros(&crypto_method_rsa);
 
     method_name = "ami_crypto_method_rsa";
     init_ceiling(ours);
     output_capacity(ours);
     exponent_overlong(ours);
+    exponent_leading_zeros(ours);
 
     scratch_units();
 

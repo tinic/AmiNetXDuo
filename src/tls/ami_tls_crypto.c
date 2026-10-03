@@ -446,6 +446,20 @@ UINT    i;
  */
 #define AMI_TLS_POWM_SCRATCH_LIMBS  2704u
 
+/*
+ * The modulus that scratch is sized for, in bits.  The vendored init's ceiling
+ * is NX_CRYPTO_MAX_RSA_MODULUS_SIZE, which a build may raise; ours may not
+ * follow it, because the area above is fixed (N-146).
+ */
+#define AMI_TLS_RSA_MAX_MODULUS_BITS  4096u
+
+/* m_len counts HN_UBASE limbs, 32 bits each here; window 1 is the least the
+   powm accepts.  The cap and the area are one decision. */
+_Static_assert(AMI_TLS_POWM_SCRATCH_LIMBS >=
+               C68K_POWM_SCRATCH_LIMBS(AMI_TLS_RSA_MAX_MODULUS_BITS / 32u, 1u),
+               "AMI_TLS_RSA_MAX_MODULUS_BITS needs more powm scratch than "
+               "AMI_TLS_POWM_SCRATCH_LIMBS provides");
+
 typedef struct AMI_CRYPTO_RSA_STRUCT
 {
     NX_CRYPTO_RSA   ami_rsa_base;
@@ -488,9 +502,18 @@ NX_CRYPTO_HUGE_NUMBER   modulus_hn, exponent_hn, input_hn, output_hn, p_hn, q_hn
     {
         return(NX_CRYPTO_SIZE_ERROR);
     }
-    scratch_needed = ((p != NX_CRYPTO_NULL) && (q != NX_CRYPTO_NULL))
-                     ? ((10UL * modulus_length) + 24UL)
-                     : ((7UL * modulus_length) + 8UL);
+    /* Rounded to whole limbs as the carve is; the vendored operation's
+       comment has the arithmetic. */
+    {
+        ULONG rounded = ((ULONG)modulus_length + HN_SIZE_ROUND) & ~(ULONG)HN_SIZE_ROUND;
+
+        if ((p != NX_CRYPTO_NULL) && (q != NX_CRYPTO_NULL))
+            scratch_needed = ((modulus_length % (2u * (HN_SIZE_ROUND + 1u))) == 0)
+                             ? ((10UL * modulus_length) + 24UL)
+                             : ((10UL * rounded) + 40UL);
+        else
+            scratch_needed = (7UL * rounded) + 8UL;
+    }
     if (((ULONG)scratch_buf_length * sizeof(USHORT)) < scratch_needed)
     {
         return(NX_CRYPTO_SIZE_ERROR);
@@ -575,6 +598,14 @@ static UINT ami_crypto_method_rsa_init(struct NX_CRYPTO_METHOD_STRUCT *method,
     if (crypto_metadata_size < sizeof(AMI_CRYPTO_RSA))
     {
         return(NX_CRYPTO_PTR_ERROR);
+    }
+
+    /* The accelerated path's own capacity, whatever the vendored ceiling is
+       set to; refused before the context is touched (N-146). */
+    if ((key_size_in_bits == 0) || ((key_size_in_bits & 7u) != 0) ||
+        (key_size_in_bits > AMI_TLS_RSA_MAX_MODULUS_BITS))
+    {
+        return(NX_CRYPTO_UNSUPPORTED_KEY_SIZE);
     }
 
     return(_nx_crypto_method_rsa_init(method, key, key_size_in_bits, handle,
