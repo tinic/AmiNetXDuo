@@ -193,3 +193,17 @@ target_compile_options(test_ec_keygen_status PRIVATE
     -Wall -Wextra -Wno-pointer-to-int-cast -UAMINETXDUO_IPV6)
 
 add_test(NAME tls_ec_keygen_status COMMAND test_ec_keygen_status)
+
+# N-160: HKDF EXTRACT refuses a NULL output, and a NULL IKM with a length,
+# before it stores anything in its context; RFC 5869 and empty-IKM controls
+# through the vendor HKDF, HMAC and SHA-256.
+add_executable(test_hkdf_extract_ptr
+    test_hkdf_extract_ptr.c
+    "${CMAKE_SOURCE_DIR}/tests/fuzz/fuzz_nxstub.c"
+    "${CMAKE_SOURCE_DIR}/tests/fuzz/fuzz_txstub.c")
+
+target_link_libraries(test_hkdf_extract_ptr PRIVATE test_x509_nx_crypto)
+
+target_compile_options(test_hkdf_extract_ptr PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
+
+add_test(NAME tls_hkdf_extract_ptr COMMAND test_hkdf_extract_ptr)

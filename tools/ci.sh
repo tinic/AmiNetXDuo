@@ -464,7 +464,10 @@ host_test_targets() { # builddir
 #      549 with tls_ec_keygen_status (N-156): ECDH setup and ECDSA sign
 #      return a failed key-pair generation's status and call nothing after
 #      it (all hosts).
-HOST_TESTS_EXPECTED=549
+#      550 with tls_hkdf_extract_ptr (N-160): HKDF EXTRACT refuses a NULL
+#      output or a NULL IKM with a length before touching its context
+#      (all hosts).
+HOST_TESTS_EXPECTED=550
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
