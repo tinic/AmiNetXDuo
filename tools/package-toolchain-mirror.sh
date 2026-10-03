@@ -19,7 +19,7 @@ set -euo pipefail
 
 
 # Immutable asset series.  The compiler itself still reports 16.2.0b.
-GCC_VERSION="16.2.3"
+GCC_VERSION="16.2.4"
 PREFIX="opt/m68k-amigaos"
 
 # The platform is part of the asset name because there is now more than one,
@@ -77,7 +77,9 @@ sha256_of() {
 
 # A compiler version match did not catch the stale 16.2.2 libc allocator.
 # Refuse to publish an archive containing any of those installed objects.
-python3 "$(dirname "$0")/check-toolchain-malloc.py" "$FROM"
+python3 "$(dirname "$0")/check-toolchain-malloc.py" --series "$GCC_VERSION" "$FROM"
+# Nor one whose runtime archives would link images without relocations.
+python3 "$(dirname "$0")/fix-toolchain-dwarf.py" "$FROM" --check
 
 echo "==> packaging $FROM"
 echo "    -> $OUT"

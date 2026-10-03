@@ -69,6 +69,13 @@ EXPECT_GCC_VERSION="16.2.0b"
 MAKE_TARGETS="binutils gcc gprof fd2sfd fd2pragma sfdc vasm libnix ndk ndk13"
 POST_NEWLIB_TARGETS="libgcc libpthread"
 
+# newlib alone is compiled for size.  amiga-gcc's CFLAGS_FOR_TARGET (-O2
+# -fomit-frame-pointer) also builds libnix, libdebug and libgcc; those keep it.
+# -Os takes 37 KB off C:ssh and C:scp each; malloc.o goes from 3,624 to 2,800
+# bytes.  The asset series this produces is checked by name below.
+NEWLIB_CFLAGS="-Os -fomit-frame-pointer"
+NEWLIB_SERIES="16.2.4"
+
 # --------------------------------------------------------------- options ----
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -483,15 +490,33 @@ fi
 mkdir -p "$PREFIX"
 echo "==> make $MAKE_TARGETS"
 ( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" $MAKE_TARGETS )
-echo "==> make newlib (after libnix, before the C++ runtime)"
-( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" newlib )
+# amiga-gcc configures newlib once and keeps that Makefile, flags included, so
+# a work directory configured with other flags is reconfigured from scratch.
+NEWLIB_BUILD="$SRC/build-$OS-m68k-amigaos/newlib"
+NEWLIB_STAMP="$NEWLIB_BUILD/.aminetxduo-cflags"
+if [ -d "$NEWLIB_BUILD" ] && [ "$(cat "$NEWLIB_STAMP" 2>/dev/null)" != "$NEWLIB_CFLAGS" ]; then
+    echo "==> newlib was configured with other flags; reconfiguring"
+    rm -rf "$NEWLIB_BUILD"
+fi
+echo "==> make newlib at $NEWLIB_CFLAGS (after libnix, before the C++ runtime)"
+( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" \
+      CFLAGS_FOR_TARGET="$NEWLIB_CFLAGS" newlib )
+printf '%s\n' "$NEWLIB_CFLAGS" > "$NEWLIB_STAMP"
 echo "==> make $POST_NEWLIB_TARGETS"
 ( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" $POST_NEWLIB_TARGETS )
+
+# libgcc.a and libgcov.a are built with -g, and binutils 2.39 links a member's
+# DWARF as loadable hunks with NO relocation table: a plain newlib printf at
+# -Os pulls _udivdi3.o and loads unrelocated.  Strip it, then prove no target
+# archive or object carries .debug_* sections.
+echo "==> DWARF strip (runtime archives)"
+python3 "$HERE/fix-toolchain-dwarf.py" "$PREFIX"
+python3 "$HERE/fix-toolchain-dwarf.py" "$PREFIX" --check
 
 # Catch the precise stale allocator that escaped the 16.2.2 packages even
 # though their source checkout carried the fix.  This checks the *installed*
 # libraries, not merely the pinned source or build logs.
-python3 "$HERE/check-toolchain-malloc.py" "$PREFIX"
+python3 "$HERE/check-toolchain-malloc.py" --series "$NEWLIB_SERIES" "$PREFIX"
 
 # ------------------------------------------------------------- post-build ----
 

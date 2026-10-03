@@ -59,6 +59,14 @@
 # It refuses to start while an emulator is live, because a stale one writes the
 # same serial log and the arms would read each other's boots.
 #
+# Optional environment:
+#   AMINETXDUO_AB_BASE_TOOLCHAIN / _HEAD_TOOLCHAIN  per-arm toolchain root, so
+#       one ref can be measured against itself on two toolchains
+#   AMINETXDUO_AB_GATE   command run before every boot; a non-zero exit stops
+#       the run (a shared rig waits there for other emulators to finish)
+#   AMINETXDUO_AB_FRESH_MAC=1   a new guest MAC for every boot
+#   AMINETXDUO_AB_TMP    directory for logs and samples (default /tmp)
+#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -104,6 +112,7 @@ IFACE="${AMINETXDUO_RATE_IFACE:-}"
 PEER="${AMINETXDUO_RATE_PEER:-}"
 BASE_DIR="${AMINETXDUO_AB_BASE_DIR:-$HOME/anxd-base}"
 HEAD_DIR="${AMINETXDUO_AB_HEAD_DIR:-$HOME/anxd-head}"
+AB_TMP="${AMINETXDUO_AB_TMP:-/tmp}"
 
 usage() {
     sed -n '3,10p' "$0" >&2
@@ -173,7 +182,7 @@ fi
 # it is invoked from the caller's own tree, not the arm's.
 HARNESS_FILES="tests/tools/run-iperf.sh"
 
-build_arm() {                           # $1 dir  $2 ref  $3 label
+build_arm() {                           # $1 dir  $2 ref  $3 label  $4 toolchain
     cd "$1" || return 9
     git fetch -q origin || return 1
     git reset --hard -q HEAD
@@ -198,10 +207,11 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
     rm -rf build/ab
     cmake -S . -B build/ab \
           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-          -DCMAKE_BUILD_TYPE=Release > "/tmp/rate-ab-$3-cfg.log" 2>&1 ||
-        { echo "rate_ab=fail reason=configure arm=$3"; tail -8 "/tmp/rate-ab-$3-cfg.log"; return 1; }
-    cmake --build build/ab --parallel 8 > "/tmp/rate-ab-$3-build.log" 2>&1 ||
-        { echo "rate_ab=fail reason=build arm=$3"; tail -8 "/tmp/rate-ab-$3-build.log"; return 1; }
+          ${4:+-DAMIGA_TOOLCHAIN_ROOT="$4"} \
+          -DCMAKE_BUILD_TYPE=Release > "$AB_TMP/rate-ab-$3-cfg.log" 2>&1 ||
+        { echo "rate_ab=fail reason=configure arm=$3"; tail -8 "$AB_TMP/rate-ab-$3-cfg.log"; return 1; }
+    cmake --build build/ab --parallel 8 > "$AB_TMP/rate-ab-$3-build.log" 2>&1 ||
+        { echo "rate_ab=fail reason=build arm=$3"; tail -8 "$AB_TMP/rate-ab-$3-build.log"; return 1; }
     # THE OVERLAY GOES HERE, AFTER THE BUILD, AND THE ORDER IS THE POINT.
     # cmake/AmiNetXDuoGitStamp.cmake:89 appends "-dirty" to the version stamp
     # when `git status --porcelain` sees a modified tracked file, so overlaying
@@ -220,11 +230,12 @@ build_arm() {                           # $1 dir  $2 ref  $3 label
          "dev=$(md5sum build/ab/src/netdev/anxnet.device | cut -c1-12)" \
          "netx=$(git rev-parse --short HEAD:third_party/netxduo 2>/dev/null)" \
          "tx=$(git rev-parse --short HEAD:third_party/threadx 2>/dev/null)" \
-         "harness=$(md5sum $HARNESS_FILES | cut -c1-8)"
+         "harness=$(md5sum $HARNESS_FILES | cut -c1-8)" \
+         "toolchain=${4:-default}"
 }
 
-build_arm "$BASE_DIR" "$BASE_REF" BASE || exit 1
-build_arm "$HEAD_DIR" "$HEAD_REF" HEAD || exit 1
+build_arm "$BASE_DIR" "$BASE_REF" BASE "${AMINETXDUO_AB_BASE_TOOLCHAIN:-}" || exit 1
+build_arm "$HEAD_DIR" "$HEAD_REF" HEAD "${AMINETXDUO_AB_HEAD_TOOLCHAIN:-}" || exit 1
 
 # PROVEN, NOT ASSUMED.  A refused run costs minutes; a run measured with two
 # different instruments costs a wrong answer that looks like a result.
@@ -275,13 +286,21 @@ median_of() {                           # numbers on stdin
 
 run_arm() {                             # $1 dir  $2 label  $3 pass  $4 position
     cd "$1" || return 9
-    local out base r rc bad=0 got=0
-    base="/tmp/rate-ab-$2-p$3"
+    local out base r rc rxv txv bad=0 got=0
+    base="$AB_TMP/rate-ab-$2-p$3"
     : > "$base.rx"; : > "$base.tx"
 
     r=1
     while [ "$r" -le "$ROUNDS" ]; do
         out="$base-r$r.log"
+        if [ -n "${AMINETXDUO_AB_GATE:-}" ]; then
+            bash -c "$AMINETXDUO_AB_GATE" ||
+                { echo "rate_ab=fail reason=gate arm=$2 pass=$3 round=$r"; exit 1; }
+        fi
+        if [ "${AMINETXDUO_AB_FRESH_MAC:-0}" = 1 ]; then
+            export AMINETXDUO_MAC_PER_RUN=1
+            export AMINETXDUO_RUN_ID="rate-ab:$$:$2:p$3:r$r"
+        fi
         AMINETXDUO_IPERF_SECS="$SECS" \
         AMINETXDUO_IPERF_RX_REPEAT="$REPEAT" \
         tests/tools/run-iperf.sh -b build/ab -B "$IFACE" -P "$PEER" \
@@ -301,15 +320,18 @@ run_arm() {                             # $1 dir  $2 label  $3 pass  $4 position
                  "want=$REPEAT -- the arms are not being measured the same way"
             bad=$((bad + 1))
         fi
-        sed -n 's/^dir=tcp-rx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
-            sort -u |
-            awk '{ s += $1; c++ } END { if (c) printf "%d\n", s / c }' \
-            >> "$base.rx"
+        rxv=$(sed -n 's/^dir=tcp-rx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
+              sort -u |
+              awk '{ s += $1; c++ } END { if (c) printf "%d\n", s / c }')
+        [ -z "$rxv" ] || echo "$rxv" >> "$base.rx"
 
         # Transmit is NOT repeated -- RX_REPEAT only multiplies the receive
         # arm -- so this stays one line a boot.
-        sed -n 's/^dir=tcp-tx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
-            head -1 >> "$base.tx"
+        txv=$(sed -n 's/^dir=tcp-tx .*bits_per_sec=\([0-9]*\) .*/\1/p' "$out" |
+              head -1)
+        [ -z "$txv" ] || echo "$txv" >> "$base.tx"
+        echo "boot arm=$2 pass=$3 round=$r rc=$rc rx=${rxv:-none} tx=${txv:-none}" \
+             "mac=$(grep -o -m1 'mac=[0-9a-fA-F:]*' "$out" | cut -d= -f2)"
         r=$((r + 1))
     done
 
