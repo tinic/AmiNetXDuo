@@ -461,7 +461,10 @@ host_test_targets() { # builddir
 #      certificate parser on re-encoded certificates (all hosts).
 #      548 with ccm_contract (N-147/N-148): AES-CCM against independent
 #      known answers across the 255/256 counter carry (all hosts).
-HOST_TESTS_EXPECTED=548
+#      549 with tls_ec_keygen_status (N-156): ECDH setup and ECDSA sign
+#      return a failed key-pair generation's status and call nothing after
+#      it (all hosts).
+HOST_TESTS_EXPECTED=549
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

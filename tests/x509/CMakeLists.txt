@@ -173,3 +173,23 @@ target_link_libraries(test_x509_field_bounds PRIVATE
 target_compile_options(test_x509_field_bounds PRIVATE -Wall -Wextra -UAMINETXDUO_IPV6)
 
 add_test(NAME tls_x509_field_bounds COMMAND test_x509_field_bounds)
+
+# N-156: ECDH setup and ECDSA sign return a failed key-pair generation's status
+# and call nothing after it.  The two vendor files are compiled in directly,
+# not through test_x509_nx_crypto, so the test file's stubs stand in for the EC
+# and huge-number layer below them.  Their method entry points test pointer
+# alignment through ULONG, a narrowing cast on an LP64 host that this test
+# never calls; hence -Wno-pointer-to-int-cast.
+add_executable(test_ec_keygen_status
+    test_ec_keygen_status.c
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_ecdh.c"
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_ecdsa.c")
+
+target_include_directories(test_ec_keygen_status PRIVATE
+    $<TARGET_PROPERTY:test_x509_nx_crypto,INTERFACE_INCLUDE_DIRECTORIES>)
+target_compile_definitions(test_ec_keygen_status PRIVATE
+    $<TARGET_PROPERTY:test_x509_nx_crypto,INTERFACE_COMPILE_DEFINITIONS>)
+target_compile_options(test_ec_keygen_status PRIVATE
+    -Wall -Wextra -Wno-pointer-to-int-cast -UAMINETXDUO_IPV6)
+
+add_test(NAME tls_ec_keygen_status COMMAND test_ec_keygen_status)

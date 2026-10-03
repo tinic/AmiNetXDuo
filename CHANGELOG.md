@@ -5,6 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- ECDHE key exchange and ECDSA signing fail when key generation fails (N-156).
 - RSA keys over 4096 bits are refused (N-146).
 - TLS rejects certificates with empty version, public-key or signature fields,
   and correctly parses certificates containing unique identifiers.
