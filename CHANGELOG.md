@@ -5,6 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- RSA keys over 4096 bits are refused (N-146).
 - TLS rejects certificates with empty version, public-key or signature fields,
   and correctly parses certificates containing unique identifiers.
 - TLS rejects HelloRetryRequest cookies and ClientHello messages that do not
