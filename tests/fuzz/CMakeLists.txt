@@ -606,6 +606,24 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_link_libraries(tls_rsa_bounds PRIVATE
         fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
         fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx)
+    # N-171: ours refuses an even (above all a zero) modulus before any
+    # exponentiation.  The four exponentiation entry points are wrapped so that
+    # an even modulus never reaches real arithmetic, with or without the check.
+    add_executable(tls_rsa_modulus_parity
+        tls_rsa_modulus_parity.c
+        fuzz_nxstub.c
+        fuzz_txstub.c)
+    target_include_directories(tls_rsa_modulus_parity PRIVATE ${_fuzz_tls_crypto_inc})
+    target_compile_definitions(tls_rsa_modulus_parity PRIVATE ${_fuzz_tls_def})
+    target_compile_options(tls_rsa_modulus_parity PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san} -Wall -Wextra)
+    target_link_options(tls_rsa_modulus_parity PRIVATE ${_fuzz_san}
+        -Wl,--wrap=c68k_huge_number_mont_power_modulus
+        -Wl,--wrap=c68k_crt_power_modulus
+        -Wl,--wrap=_nx_crypto_huge_number_mont_power_modulus
+        -Wl,--wrap=_nx_crypto_huge_number_crt_power_modulus)
+    target_link_libraries(tls_rsa_modulus_parity PRIVATE
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx
+        fuzz_tls_ami fuzz_tls_nx_secure fuzz_tls_nx_crypto fuzz_tls_netx)
 
 endif()
 
@@ -730,6 +748,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 
     add_test(NAME tls_rsa_key_regression COMMAND tls_rsa_key_regression)
     add_test(NAME tls_rsa_bounds COMMAND tls_rsa_bounds)
+    add_test(NAME tls_rsa_modulus_parity COMMAND tls_rsa_modulus_parity)
 
     # EIGHT STREAMS, NOT ONE, and the same number of mutations between them.
     # Four was the first attempt and left this at 8.14 s of the ten-second

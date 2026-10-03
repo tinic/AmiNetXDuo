@@ -502,6 +502,15 @@ NX_CRYPTO_HUGE_NUMBER   modulus_hn, exponent_hn, input_hn, output_hn, p_hn, q_hn
     {
         return(NX_CRYPTO_SIZE_ERROR);
     }
+    /* An RSA modulus is odd.  The certificate parser takes any bytes, and an
+       even one -- zero above all -- is refused by crypto68k and handed to the
+       vendored arithmetic, whose modulus scan walks below its buffer for zero
+       (N-171).  Refused here, before any number is set up or computed, on
+       every path: public and CRT, accelerated and reference. */
+    if ((modulus[modulus_length - 1u] & 1u) == 0u)
+    {
+        return(NX_CRYPTO_INVALID_KEY);
+    }
     /* Rounded to whole limbs as the carve is; the vendored operation's
        comment has the arithmetic. */
     {

@@ -5,6 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- TLS refuses RSA keys with an even modulus (N-171).
 - TLS no longer clears a record's packets after TCP has taken them (GHSA-8w5x-ff58-2fr2).
 - HKDF-Extract rejects invalid buffer arguments (N-160).
 - ECDHE key exchange and ECDSA signing fail when key generation fails (N-156).
