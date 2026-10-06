@@ -206,8 +206,8 @@ else
 fi
 expect "and it lists the conditions there are" "DEFAULTROUTE"
 
-expect "NetShutdown says there is nothing to stop" "nothing to stop"
-expect "AddNetRoute says routes need a running stack" "the network is not running"
+expect "NetShutdown says the network is not running" "Network not running"
+expect "AddNetRoute says routes need a running stack" "network not running"
 
 # None of them may claim to have done anything.
 reject "no route was reported as added"   "via 192.168.1.1"
