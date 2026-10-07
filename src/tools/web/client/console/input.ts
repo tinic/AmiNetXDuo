@@ -34,7 +34,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { qualifiers, rawkeyOf } from "./rawkey";
+import { qualifiers, rawkeyOf, SIDED } from "./rawkey";
 import type { View } from "./view";
 
 export interface InputSink {
@@ -172,7 +172,17 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
      stays up, so the browser's context menu cannot have it. */
   const onContext = (e: Event) => { e.preventDefault(); };
 
+  /* Which Shift, Alt and Amiga keys are down, by side: what lets Right-Amiga
+     C reach the Amiga as Right-Amiga C (rawkey.ts, qualifiers()).  Kept
+     whatever has the focus, so a modifier pressed before the click into the
+     screen still counts. */
+  const held = new Set<string>();
+
   const key = (e: KeyboardEvent, down: boolean) => {
+    if (SIDED.has(e.code)) {
+      if (down) held.add(e.code);
+      else held.delete(e.code);
+    }
     if (document.activeElement !== stage) return;
     if ((e.metaKey || e.ctrlKey) && BROWSER_KEEPS.has(e.code)) return;
 
@@ -180,7 +190,7 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
     if (raw === null) return;
 
     e.preventDefault();
-    const w = (down ? "kd " : "ku ") + raw + " " + qualifiers(e);
+    const w = (down ? "kd " : "ku ") + raw + " " + qualifiers(e, held);
     sink.send(w);
     sink.log(w);
   };
@@ -207,6 +217,10 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   stage.addEventListener("lostpointercapture", onCancel);
   stage.addEventListener("pointerleave", onLeave);
   addEventListener("blur", releaseAll);
+  /* Keys released while another window had the keyboard are never seen
+     going up. */
+  const forgetHeld = () => { held.clear(); };
+  addEventListener("blur", forgetHeld);
   stage.addEventListener("wheel", onWheel, { passive: false });
   stage.addEventListener("contextmenu", onContext);
   addEventListener("keydown", onDown);
@@ -227,6 +241,7 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
       stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("contextmenu", onContext);
       removeEventListener("keydown", onDown);
+      removeEventListener("blur", forgetHeld);
       document.removeEventListener("paste", onPaste);
       removeEventListener("keyup", onUp);
     },

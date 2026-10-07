@@ -73,15 +73,31 @@ export const QUAL_RALT = 0x0020;
 export const QUAL_LCOMMAND = 0x0040;
 export const QUAL_RCOMMAND = 0x0080;
 
-export function qualifiers(e: KeyboardEvent): number {
+/* The keys whose side the Amiga tells apart.  input.ts keeps which of them
+   are down, because the browser says which side only on the event that
+   pressed one: on the C of a Right-Amiga C, `code` is KeyC and metaKey is a
+   single bit. */
+export const SIDED = new Set([
+  "ShiftLeft", "ShiftRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight",
+]);
+
+function side(held: ReadonlySet<string>, left: string, right: string,
+              lbit: number, rbit: number): number {
+  const l = held.has(left);
+  const r = held.has(right);
+  /* Nothing known -- a modifier pressed while another window had the
+     keyboard -- reads as the left one, the honest default. */
+  if (!l && !r) return lbit;
+  return (l ? lbit : 0) | (r ? rbit : 0);
+}
+
+export function qualifiers(e: KeyboardEvent,
+                           held: ReadonlySet<string> = new Set()): number {
   let q = 0;
-  /* The browser reports Shift as one bit, not two, except on the event that
-     pressed one of them -- where `code` says which.  Left is the honest
-     default for everything else. */
-  if (e.shiftKey) q |= e.code === "ShiftRight" ? QUAL_RSHIFT : QUAL_LSHIFT;
+  if (e.shiftKey) q |= side(held, "ShiftLeft", "ShiftRight", QUAL_LSHIFT, QUAL_RSHIFT);
   if (e.ctrlKey) q |= QUAL_CONTROL;
-  if (e.altKey) q |= e.code === "AltRight" ? QUAL_RALT : QUAL_LALT;
-  if (e.metaKey) q |= e.code === "MetaRight" ? QUAL_RCOMMAND : QUAL_LCOMMAND;
+  if (e.altKey) q |= side(held, "AltLeft", "AltRight", QUAL_LALT, QUAL_RALT);
+  if (e.metaKey) q |= side(held, "MetaLeft", "MetaRight", QUAL_LCOMMAND, QUAL_RCOMMAND);
   return q;
 }
 

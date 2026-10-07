@@ -9,6 +9,8 @@ Add new entries under `Unreleased`; published release sections are history.
   onto the Amiga's clipboard and is pasted into the active window
   (Right-Amiga V); text copied on the Amiga is offered in the console's top
   bar with a Copy button.
+- The browser console sends a held right Shift, Alt or Amiga key as the
+  right-side qualifier on every key.  Right-Amiga C arrived as Left-Amiga C.
 
 - NetMeter remembers where it was: Project > Snapshot writes the window's
   position and size into its icon as the LEFT, TOP, WIDTH and HEIGHT
