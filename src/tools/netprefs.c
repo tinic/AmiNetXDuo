@@ -1802,7 +1802,10 @@ static BOOL make_window(VOID)
     TAG1(TAG_DONE, 0);
     ITEM(g,BUTTON_KIND,GID_SAVE,NP_L_SAVE);
     ITEM(g,BUTTON_KIND,GID_APPLY,NP_L_APPLY);
-    TEXTBOX(np_live_labels[NP_LIVE_UNAVAILABLE], GTJ_CENTER);
+    /* The state is text, not a control: with a border it read as a second
+       button beside the action. */
+    TEXTBOX(np_live_labels[NP_LIVE_UNAVAILABLE], GTJ_RIGHT);
+    tags[1].ti_Data = FALSE;
     ITEM(np.g_live_status,TEXT_KIND,0,NP_L_LIVE_STATUS);
     TAG1(TAG_DONE, 0);
     ITEM(g,BUTTON_KIND,GID_CLOSE,NP_L_CLOSE);

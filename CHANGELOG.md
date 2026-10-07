@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- NetPrefs: the interface's state is plain text beside one action button,
+  Go online or Go offline, instead of a framed box that read as a button.
+
 - NetPrefs: the interface list keeps the chosen definition highlighted, and
   loading a definition no longer flashes through every settings page (OS 3).
 

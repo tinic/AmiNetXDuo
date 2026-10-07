@@ -71,7 +71,7 @@ const char *const np_ipv6_labels[] =
 /* Indexed by NetPrefs' live state; the last is also the initial text. */
 const char *const np_live_labels[] =
     { "New", "Stack off", "Not added", "Offline", "Online", "Unknown", 0 };
-const char *const np_action_labels[] = { "Online", "Offline", 0 };
+const char *const np_action_labels[] = { "Go online", "Go offline", 0 };
 
 enum { K_FILL, K_INT, K_CYCLE_IPV4, K_CYCLE_IPV6, K_CHECK, K_TEXT, K_ICON };
 enum { AT_FIELD, AT_PANEL, AT_NEXT, AT_RIGHT };
