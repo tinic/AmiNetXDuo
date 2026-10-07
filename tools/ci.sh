@@ -2166,12 +2166,11 @@ stage_emulator() {
         return 1
     fi
 
-    # THREE PASSES, NOT TWO.  The first two are one build on two machines; the
-    # third is one machine and a different thread model.  The realm arm is
-    # skipped by name when the cross stage did not build it, because a pass
-    # that silently did not happen is what this pass exists to end.
+    # The green realm prototype was retired in 5f7fd3f22, including its cross
+    # configuration.  Run the shipping build on both supported machines; do
+    # not report that removed prototype as a skipped emulator arm.
     local entry exe timeout dir arm pair cpuopt tag budget
-    for pair in default:a1200 default:a600 green:a1200; do
+    for pair in default:a1200 default:a600; do
         dir="${pair%%:*}"
         arm="${pair##*:}"
 
@@ -2210,25 +2209,6 @@ stage_emulator() {
             # A 68000 is roughly a quarter of the 68020 here, so the same work
             # needs a longer rope before a timeout means anything.
             timeout=$(( timeout * budget ))
-            # NOT RUN IN THE REALM, and that is a defect recorded, not a
-            # harness quirk.  lifecycle phase (e) deletes a thread blocked in
-            # an Exec Wait(), which is the SANA-II reader stuck in WaitIO().
-            # A green thread that blocks in Exec blocks the realm's one host
-            # task, so nothing in the realm can run and tx_thread_terminate()
-            # from another task never returns: rc 124 after 240 s here on
-            # 2026-08-27, last line "phase e: it is blocked inside Exec".
-            #
-            # The realm's net for this is `#define Wait` in three of the
-            # library's own internal headers and it is compiled only under
-            # AMINETXDUO_RXPROBE, so a shipping realm build has no net at all
-            # and no translation unit outside those three has one in any
-            # build.  The other eight harnesses gate the arm meanwhile.
-            if [ "$dir:$exe" = "green:tools/smoke/lifecycle" ]; then
-                skip "emulator/green: lifecycle phase (e) deadlocks the realm;\
- a green thread inside an Exec Wait() cannot be terminated from outside it"
-                continue
-            fi
-
             printf '\n-- %s (%s, %s)\n' "$exe" "$tag" "$dir"
             if [ ! -f "$BUILD/$dir/$exe" ]; then
                 fail "emulator/$dir/$tag: $exe was not built"
