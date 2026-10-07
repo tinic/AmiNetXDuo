@@ -5,6 +5,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- NetMeter survives a Workbench screen mode change when
+  screennotify.library is installed: it closes its window for the change
+  and reopens in the same place.
+
 - The browser console shares the clipboard: a paste in the browser goes
   onto the Amiga's clipboard and is pasted into the active window
   (Right-Amiga V); text copied on the Amiga is offered in the console's top

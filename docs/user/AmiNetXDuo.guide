@@ -3175,6 +3175,13 @@
 
       NetMeter LEFT=400 TOP=30 WIDTH=380 HEIGHT=100
 
+  A screen mode change closes the Workbench screen, which cannot close
+  while a window is open on it. With screennotify.library installed
+  (Aminet util/libs/ScreenNotify10.lha, not part of AmigaOS and not
+  included here), NetMeter closes its window when asked and opens it
+  again in the same place once Workbench is back. Without it, close
+  NetMeter before changing the screen mode.
+
   @{b}Drivers@{ub}
 
       DEVS:<something>.device         the card's SANA-II driver, which

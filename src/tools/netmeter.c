@@ -15,6 +15,11 @@
  * Project menu's Snapshot and read at start.  From a Shell the same four are
  * arguments, and they win over the icon.
  *
+ * A screen mode change closes Workbench's screen and opens it again, and it
+ * cannot close while this window is on it.  With screennotify.library
+ * installed, NetMeter is told first: it closes its window and lets the screen
+ * go, and opens again where it was once Workbench is back.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -48,6 +53,7 @@
 #include <proto/intuition.h>
 #include <proto/layers.h>
 #include <utility/tagitem.h>
+#include <inline/macros.h>
 
 const char *const tool_name = "NetMeter";
 
@@ -59,6 +65,31 @@ struct GfxBase       *GfxBase;
 struct Library       *LayersBase;
 struct Library       *GadToolsBase;
 struct Library       *IconBase;
+
+/*
+ * screennotify.library, Stefan Becker 1995, Aminet util/libs/ScreenNotify10.lha.
+ * Its licence lets no part of the package be included in other software, so
+ * neither the library nor its headers ship with AmiNetXDuo: this declares the
+ * documented interface only, and NetMeter uses the library where the user has
+ * installed it.  AmigaOS 3.2 has no equivalent of its own (IntuitionControlA()
+ * defines no public tags), and TinyMeter used the same library for this.
+ */
+struct Library       *ScreenNotifyBase;
+
+#define NM_SN_TYPE_WORKBENCH    3       /* snm_Value FALSE: closing, TRUE: open */
+
+typedef struct
+{
+    struct Message snm_Message;
+    ULONG          snm_Type;
+    APTR           snm_Value;
+} NmScreenNotifyMessage;
+
+#define AddWorkbenchClient(port, pri) \
+    LP2(0x36, APTR, AddWorkbenchClient, struct MsgPort *, port, a0, \
+        BYTE, pri, d0, , ScreenNotifyBase)
+#define RemWorkbenchClient(handle) \
+    LP1(0x3c, BOOL, RemWorkbenchClient, APTR, handle, a0, , ScreenNotifyBase)
 
 #define NM_PAD          4       /* window edge to content                  */
 #define NM_TICK_US      100000UL
@@ -146,6 +177,9 @@ static struct
     APTR              vi;
     struct Menu      *menu;
     LONG              want[NM_GEOMETRY];    /* -1: not given             */
+
+    struct MsgPort   *sn_port;          /* screennotify.library, if any    */
+    APTR              sn_handle;
 } nm = { .pen_rx = -1, .pen_tx = -1, .pen_tipback = -1, .zone_if = -1,
          .want = { -1, -1, -1, -1 } };
 
@@ -1233,19 +1267,164 @@ static VOID nm_fit(VOID)
         SizeWindow(w, gw, gh);      /* IDCMP_NEWSIZE redraws */
 }
 
+/*
+ * Everything that holds the screen: the window and its menus, the pens, the
+ * DrawInfo and the public-screen lock itself, which would keep Workbench from
+ * closing as surely as the window would.  The window's place is kept, so the
+ * next attach opens it there.
+ */
+static VOID nm_screen_detach(VOID)
+{
+    nm_tip_close();
+    if (nm.win != NULL)
+    {
+        nm.want[0] = nm.win->LeftEdge;
+        nm.want[1] = nm.win->TopEdge;
+        nm.want[2] = nm.win->Width;
+        nm.want[3] = nm.win->Height;
+        if (nm.menu != NULL)
+            ClearMenuStrip(nm.win);
+        CloseWindow(nm.win);
+        nm.win = NULL;
+    }
+    if (nm.menu != NULL)
+        FreeMenus(nm.menu);
+    nm.menu = NULL;
+    if (nm.vi != NULL)
+        FreeVisualInfo(nm.vi);
+    nm.vi = NULL;
+    if (nm.screen != NULL)
+    {
+        nm_release_pens();
+        if (nm.dri != NULL)
+            FreeScreenDrawInfo(nm.screen, nm.dri);
+        UnlockPubScreen(NULL, nm.screen);
+    }
+    nm.dri    = NULL;
+    nm.screen = NULL;
+}
+
+static BOOL nm_screen_attach(VOID)
+{
+    nm.screen = LockPubScreen(NULL);
+    if (nm.screen == NULL)
+        return FALSE;
+    nm.dri = GetScreenDrawInfo(nm.screen);
+    if (nm.dri == NULL)
+        return FALSE;
+    nm_pens();
+    InitRastPort(&nm_mrp);
+    SetFont(&nm_mrp, nm.dri->dri_Font);
+    if (!nm_open_window())
+        return FALSE;
+    nm.zone         = NM_ZONE_NONE;
+    nm.zone_if      = -1;
+    nm.hover_ticks  = 0;
+    nm.copied_ticks = 0;
+    nm_draw_all();
+    return TRUE;
+}
+
+/* Told when Workbench closes and reopens, if the window is on Workbench. */
+static VOID nm_sn_start(VOID)
+{
+    struct Screen *wb;
+
+    ScreenNotifyBase = OpenLibrary((CONST_STRPTR)"screennotify.library", 1);
+    if (ScreenNotifyBase == NULL)
+        return;
+    wb = LockPubScreen((CONST_STRPTR)"Workbench");
+    if (wb != NULL)
+        UnlockPubScreen(NULL, wb);
+    if (wb == NULL || wb != nm.screen)
+        return;
+    nm.sn_port = CreateMsgPort();
+    if (nm.sn_port != NULL)
+        nm.sn_handle = AddWorkbenchClient(nm.sn_port, 0);
+}
+
+static VOID nm_sn_stop(VOID)
+{
+    struct Message *m;
+
+    if (nm.sn_handle != NULL)
+    {
+        /* Busy while a notification is out: answer it and try again. */
+        for (;;)
+        {
+            while ((m = GetMsg(nm.sn_port)) != NULL)
+                ReplyMsg(m);
+            if (RemWorkbenchClient(nm.sn_handle))
+                break;
+            Delay(10);
+        }
+        nm.sn_handle = NULL;
+    }
+    if (nm.sn_port != NULL)
+    {
+        while ((m = GetMsg(nm.sn_port)) != NULL)
+            ReplyMsg(m);
+        DeleteMsgPort(nm.sn_port);
+        nm.sn_port = NULL;
+    }
+    if (ScreenNotifyBase != NULL)
+        CloseLibrary(ScreenNotifyBase);
+    ScreenNotifyBase = NULL;
+}
+
+/* A Workbench notification.  FALSE from attach is the end: Workbench came
+   back and the window could not open on it. */
+static BOOL nm_sn_take(VOID)
+{
+    NmScreenNotifyMessage *m;
+    BOOL                   reopen = FALSE;
+
+    while ((m = (NmScreenNotifyMessage *)GetMsg(nm.sn_port)) != NULL)
+    {
+        if (m->snm_Type == NM_SN_TYPE_WORKBENCH)
+        {
+            if (m->snm_Value == NULL)
+            {
+                /* Closed before the reply: the reply is what lets
+                   Workbench go on and close its screen. */
+                nm_screen_detach();
+                reopen = FALSE;
+            }
+            else if (nm.win == NULL)
+                reopen = TRUE;
+        }
+        ReplyMsg((struct Message *)m);
+    }
+    if (!reopen)
+        return TRUE;
+    /* TinyMeter's second: Workbench's own windows go up first. */
+    Delay(50);
+    if (nm_screen_attach())
+        return TRUE;
+    nm_screen_detach();
+    return FALSE;
+}
+
 static VOID nm_loop(VOID)
 {
-    ULONG wsig = 1UL << nm.win->UserPort->mp_SigBit;
     ULONG tsig = 1UL << nm.tport->mp_SigBit;
+    ULONG ssig = (nm.sn_port != NULL) ? 1UL << nm.sn_port->mp_SigBit : 0UL;
     BOOL  done = FALSE;
 
     nm_timer_arm();
     while (!done)
     {
-        ULONG got = Wait(wsig | tsig | SIGBREAKF_CTRL_C);
+        /* No window while Workbench is closed: the counts are still taken,
+           so the rates are right the moment it opens again. */
+        ULONG wsig = (nm.win != NULL) ? 1UL << nm.win->UserPort->mp_SigBit
+                                      : 0UL;
+        ULONG got = Wait(wsig | tsig | ssig | SIGBREAKF_CTRL_C);
         struct IntuiMessage *msg;
 
         if (got & SIGBREAKF_CTRL_C)
+            done = TRUE;
+
+        if ((got & ssig) && !nm_sn_take())
             done = TRUE;
 
         if ((got & tsig) && GetMsg(nm.tport) != NULL)
@@ -1253,22 +1432,27 @@ static VOID nm_loop(VOID)
             nm.timer_armed = FALSE;
             if (++nm.ticks >= NM_TICKS_SEC)
             {
+                BOOL reshaped;
+
                 nm.ticks = 0;
-                if (nm_sample())
+                reshaped = nm_sample();
+                if (nm.win != NULL && reshaped)
                 {
                     nm_tip_close();
                     nm_draw_all();
                     nm_fit();
                 }
-                else
+                else if (nm.win != NULL)
                     nm_draw_rates_all();
             }
-            nm_hover();
+            if (nm.win != NULL)
+                nm_hover();
             if (!done)
                 nm_timer_arm();
         }
 
-        while ((msg = (struct IntuiMessage *)GetMsg(nm.win->UserPort)) != NULL)
+        while (nm.win != NULL &&
+               (msg = (struct IntuiMessage *)GetMsg(nm.win->UserPort)) != NULL)
         {
             ULONG cls  = msg->Class;
             UWORD code = msg->Code;
@@ -1336,45 +1520,21 @@ static int netmeter_run(VOID)
         goto out;
     }
 
-    nm.screen = LockPubScreen(NULL);
-    if (nm.screen == NULL)
-        goto out;
-    nm.dri = GetScreenDrawInfo(nm.screen);
-    if (nm.dri == NULL)
-        goto out;
-    nm_pens();
-    InitRastPort(&nm_mrp);
-    SetFont(&nm_mrp, nm.dri->dri_Font);
-
     if (!nm_timer_open())
         goto out;
     DateStamp(&nm.last);
     (VOID)nm_sample();
 
-    if (!nm_open_window())
+    if (!nm_screen_attach())
         goto out;
-    nm_draw_all();
+    nm_sn_start();
     nm_loop();
     rc = RETURN_OK;
 
 out:
-    nm_tip_close();
-    if (nm.win != NULL)
-    {
-        if (nm.menu != NULL)
-            ClearMenuStrip(nm.win);
-        CloseWindow(nm.win);
-    }
-    if (nm.menu != NULL) FreeMenus(nm.menu);
-    if (nm.vi != NULL)   FreeVisualInfo(nm.vi);
+    nm_sn_stop();
+    nm_screen_detach();
     nm_timer_close();
-    if (nm.screen != NULL)
-    {
-        nm_release_pens();
-        if (nm.dri != NULL)
-            FreeScreenDrawInfo(nm.screen, nm.dri);
-        UnlockPubScreen(NULL, nm.screen);
-    }
     if (IconBase != NULL) CloseLibrary(IconBase);
     if (GadToolsBase != NULL) CloseLibrary(GadToolsBase);
     if (LayersBase != NULL) CloseLibrary(LayersBase);
