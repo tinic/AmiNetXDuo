@@ -5,6 +5,11 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- The browser console shares the clipboard: a paste in the browser goes
+  onto the Amiga's clipboard and is pasted into the active window
+  (Right-Amiga V); text copied on the Amiga is offered in the console's top
+  bar with a Copy button.
+
 - NetMeter remembers where it was: Project > Snapshot writes the window's
   position and size into its icon as the LEFT, TOP, WIDTH and HEIGHT
   ToolTypes, read at start; from a Shell they are also arguments.

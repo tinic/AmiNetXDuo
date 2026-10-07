@@ -479,7 +479,9 @@ host_test_targets() { # builddir
 #      it releases them (all hosts).
 #      556 with netmeter_arithmetic: NetMeter's rate and total text and the
 #      byte-count delta across its carry (all hosts).
-HOST_TESTS_EXPECTED=556
+#      557 with console_clipboard_text: the console clipboard's UTF-8 and
+#      ISO-8859-1 conversion and FORM FTXT (all hosts).
+HOST_TESTS_EXPECTED=557
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

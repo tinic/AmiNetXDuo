@@ -2106,6 +2106,19 @@
 
       https://github.com/tinic/zz9000-firmware
 
+  @{b}The clipboard@{ub}
+
+  A paste in the browser (Ctrl-V, or Cmd-V on a Mac) while the screen
+  has the focus puts the text on this machine's clipboard and presses
+  Right-Amiga V, so it lands where a paste here would: a Shell, an
+  editor, a string gadget. Text copied on this machine appears in the
+  browser's top bar with a Copy button; the button puts it on the
+  computer's clipboard. A browser lets a page do that only inside a
+  click, because the console is plain http://; served over https or from
+  localhost, it is copied without the click. Text only, up to 32 KB at a
+  time. This machine's clipboard is ISO-8859-1, so a character it has no
+  code for, such as the euro sign, arrives as a question mark.
+
   @{b}One viewer at a time@{ub}
 
   There is one display, one keyboard and one mouse, so there is one

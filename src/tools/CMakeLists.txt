@@ -451,7 +451,7 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c ht
                                           httpframe.c httplock.c httphead.c httpstatus.c
                                           httpiperf.c
                                           httpxml.c httpws.c
-                                          httpsha1.c httpterm.c httpfb.c
+                                          httpsha1.c httpterm.c httpfb.c clipftxt.c
                                           httprtg.c httpzz.c
                                           toolsock.c toolbudget.c
                                           iperfcore.c iperfwire.c
@@ -911,6 +911,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netprefs_text PRIVATE -Wall -Wextra)
     set_target_properties(test_netprefs_text PROPERTIES C_STANDARD 11)
 
+    # The console's clipboard: UTF-8 and ISO-8859-1 both ways, line endings,
+    # and the FORM FTXT it writes and reads.
+    add_executable(test_clipftxt
+        test/test_clipftxt.c
+        clipftxt.c)
+    target_include_directories(test_clipftxt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_clipftxt PRIVATE -Wall -Wextra)
+    set_target_properties(test_clipftxt PROPERTIES C_STANDARD 11)
+
     # NetMeter's rate and total text, the delta of a byte count kept in two
     # 32-bit halves across its carry, and the bar scale.
     add_executable(test_netmeter_fmt
@@ -1173,6 +1183,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)
     add_test(NAME netprefs_font_layout COMMAND test_netprefs_layout)
     add_test(NAME netmeter_arithmetic COMMAND test_netmeter_fmt)
+    add_test(NAME console_clipboard_text COMMAND test_clipftxt)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME httphead_request_heads COMMAND test_httphead)

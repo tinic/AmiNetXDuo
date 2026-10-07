@@ -8,10 +8,12 @@
 #include "httpfb.h"
 #include "httprtg.h"
 #include "httpzz.h"
+#include "clipftxt.h"
 
 #include "aminetxduo/rfb_encode.h"
 #include "aminetxduo/rfb_words.h"
 
+#include <devices/clipboard.h>
 #include <devices/input.h>
 #include <devices/inputevent.h>
 #include <dos/dosextens.h>
@@ -28,6 +30,7 @@
 #include <intuition/preferences.h>
 #include <intuition/screens.h>
 #include <prefs/pointer.h>
+#include <utility/hooks.h>
 
 #include <proto/graphics.h>
 #include <proto/intuition.h>
@@ -2140,6 +2143,233 @@ static VOID fb_ask_resync(VOID)
     fb_resync_at   = now;
 }
 
+/* --------------------------------------------------------------- clipboard -- */
+
+/*
+ * The Amiga's clipboard, unit 0, both ways.  A paste in the browser arrives
+ * as `cp TEXT` (UTF-8, any length the buffer holds); it goes onto the
+ * clipboard as a FORM FTXT and Right-Amiga V is pressed, so it lands where a
+ * local paste would.  A change to the clipboard made on the Amiga -- a copy
+ * in an editor, a Shell, a string gadget -- is told to the browser as
+ * `cb TEXT`.  CBD_CHANGEHOOK says when: the hook runs on whatever task did
+ * the CMD_UPDATE, so all it does is note the clip and signal this one, whose
+ * WaitSelect() has the bit (http_fb_sigmask()).  This end's own writes are
+ * recognised by their clip ID and not sent back.
+ *
+ * Text only, ISO-8859-1 on the Amiga and UTF-8 in the browser (clipftxt.c).
+ * A session without clipboard.device keeps working without it.
+ */
+#define FB_CLIP_MAX         (32UL * 1024UL)
+#define FB_RAW_V            0x34
+#define FB_QUAL_RCOMMAND    0x0080
+
+static UBYTE            *fb_clip;           /* FB_CLIP_MAX while live    */
+static ULONG             fb_clip_n;
+static UBYTE             fb_clip_mode;      /* this message is a `cp`    */
+static struct MsgPort   *fb_clip_port;
+static struct IOClipReq *fb_clip_req;
+static BOOL              fb_clip_open;
+static BOOL              fb_clip_hooked;
+static struct Hook       fb_clip_hook;
+static struct Task      *fb_clip_task;
+static BYTE              fb_clip_sig = -1;
+static LONG              fb_clip_own_id = -1;
+static volatile UBYTE    fb_clip_changed;
+static volatile LONG     fb_clip_change_id;
+
+/* On the task that changed the clipboard: note it, wake the server. */
+static ULONG fb_clip_hook_entry(register struct Hook *hook __asm("a0"),
+                                register APTR object __asm("a2"),
+                                register struct ClipHookMsg *msg __asm("a1"))
+{
+    (VOID)hook;
+    (VOID)object;
+    fb_clip_change_id = msg->chm_ClipID;
+    fb_clip_changed   = 1;
+    Signal(fb_clip_task, 1UL << fb_clip_sig);
+    return 0;
+}
+
+static VOID fb_clip_stop(VOID)
+{
+    if (fb_clip_hooked)
+    {
+        fb_clip_req->io_Command = CBD_CHANGEHOOK;
+        fb_clip_req->io_Data    = (STRPTR)&fb_clip_hook;
+        fb_clip_req->io_Length  = 0;            /* 0 removes it */
+        (VOID)DoIO((struct IORequest *)fb_clip_req);
+        fb_clip_hooked = FALSE;
+    }
+    if (fb_clip_sig >= 0)
+    {
+        FreeSignal(fb_clip_sig);
+        fb_clip_sig = -1;
+    }
+    if (fb_clip_open)
+        CloseDevice((struct IORequest *)fb_clip_req);
+    fb_clip_open = FALSE;
+    if (fb_clip_req != NULL)
+        DeleteIORequest((struct IORequest *)fb_clip_req);
+    fb_clip_req = NULL;
+    if (fb_clip_port != NULL)
+        DeleteMsgPort(fb_clip_port);
+    fb_clip_port = NULL;
+    if (fb_clip != NULL)
+        FreeMem(fb_clip, FB_CLIP_MAX);
+    fb_clip         = NULL;
+    fb_clip_mode    = 0;
+    fb_clip_changed = 0;
+}
+
+static VOID fb_clip_start(VOID)
+{
+    fb_clip_n       = 0;
+    fb_clip_mode    = 0;
+    fb_clip_changed = 0;
+    fb_clip_own_id  = -1;
+
+    fb_clip      = (UBYTE *)AllocMem(FB_CLIP_MAX, MEMF_ANY);
+    fb_clip_port = CreateMsgPort();
+    if (fb_clip_port != NULL)
+        fb_clip_req = (struct IOClipReq *)CreateIORequest(fb_clip_port,
+                                                  sizeof(struct IOClipReq));
+    if (fb_clip == NULL || fb_clip_req == NULL ||
+        OpenDevice((CONST_STRPTR)"clipboard.device", PRIMARY_CLIP,
+                   (struct IORequest *)fb_clip_req, 0) != 0)
+    {
+        fb_clip_stop();
+        return;
+    }
+    fb_clip_open = TRUE;
+
+    /* Without a signal the paste still works; only the watching does not. */
+    fb_clip_sig = AllocSignal(-1);
+    if (fb_clip_sig < 0)
+        return;
+    fb_clip_task = FindTask(NULL);
+    /* Through void (*)(void), which -Wcast-function-type takes as generic:
+       the hook is called with its own registers, not this prototype. */
+    fb_clip_hook.h_Entry    = (HOOKFUNC)(void (*)(void))fb_clip_hook_entry;
+    fb_clip_hook.h_SubEntry = NULL;
+    fb_clip_hook.h_Data     = NULL;
+    fb_clip_req->io_Command = CBD_CHANGEHOOK;
+    fb_clip_req->io_Data    = (STRPTR)&fb_clip_hook;
+    fb_clip_req->io_Length  = 1;
+    if (DoIO((struct IORequest *)fb_clip_req) == 0)
+        fb_clip_hooked = TRUE;
+}
+
+/* `n` bytes of ISO-8859-1 onto the clipboard as one FTXT. */
+static BOOL fb_clip_write(const UBYTE *text, ULONG n)
+{
+    struct IOClipReq *r = fb_clip_req;
+    UBYTE             hdr[CLIP_FTXT_HEADER];
+    UBYTE             pad = 0;
+    BOOL              ok;
+
+    clip_ftxt_header(n, hdr);
+    r->io_Offset  = 0;
+    r->io_ClipID  = 0;
+    r->io_Error   = 0;
+    r->io_Command = CMD_WRITE;
+    r->io_Data    = (STRPTR)hdr;
+    r->io_Length  = sizeof(hdr);
+    ok = (BOOL)(DoIO((struct IORequest *)r) == 0);
+    /* Known before the update, which is what calls the hook. */
+    fb_clip_own_id = r->io_ClipID;
+    if (ok && n != 0)
+    {
+        r->io_Command = CMD_WRITE;
+        r->io_Data    = (STRPTR)text;
+        r->io_Length  = n;
+        ok = (BOOL)(DoIO((struct IORequest *)r) == 0);
+    }
+    if (ok && (n & 1UL) != 0)
+    {
+        r->io_Command = CMD_WRITE;
+        r->io_Data    = (STRPTR)&pad;
+        r->io_Length  = 1;
+        ok = (BOOL)(DoIO((struct IORequest *)r) == 0);
+    }
+    /* Always: the update ends the write the device is holding open. */
+    r->io_Command = CMD_UPDATE;
+    if (DoIO((struct IORequest *)r) != 0)
+        ok = FALSE;
+    return ok;
+}
+
+/* The clip into fb_clip, at most FB_CLIP_MAX of it; the rest is read and
+   dropped, because a read ends only when it has been read to the end. */
+static ULONG fb_clip_read(VOID)
+{
+    struct IOClipReq *r = fb_clip_req;
+    UBYTE             junk[64];
+    ULONG             n = 0;
+
+    r->io_Offset = 0;
+    r->io_ClipID = 0;
+    r->io_Error  = 0;
+    for (;;)
+    {
+        r->io_Command = CMD_READ;
+        if (n < FB_CLIP_MAX)
+        {
+            r->io_Data   = (STRPTR)(fb_clip + n);
+            r->io_Length = FB_CLIP_MAX - n;
+        }
+        else
+        {
+            r->io_Data   = (STRPTR)junk;
+            r->io_Length = sizeof(junk);
+        }
+        if (DoIO((struct IORequest *)r) != 0 || r->io_Actual == 0)
+            break;
+        if (n < FB_CLIP_MAX)
+            n += r->io_Actual;
+    }
+    return n;
+}
+
+/* A `cp`: onto the clipboard, then Right-Amiga V into the active window. */
+static VOID fb_take_paste(VOID)
+{
+    ULONG n = clip_utf8_to_latin1(fb_clip, (uint32_t)fb_clip_n, fb_clip,
+                                  (uint32_t)FB_CLIP_MAX);
+
+    if (n == 0 || !fb_clip_write(fb_clip, n))
+        return;
+    fb_inject_key(FB_RAW_V, FB_QUAL_RCOMMAND, TRUE);
+    fb_inject_key(FB_RAW_V, FB_QUAL_RCOMMAND, FALSE);
+}
+
+/* A clip the Amiga changed, as a `cb` word.  FALSE when there is nothing to
+   send: not text, empty, or this end's own paste coming back. */
+static BOOL fb_clip_word(VOID)
+{
+    ULONG n;
+    ULONG len;
+
+    fb_clip_changed = 0;
+    if (!fb_clip_open || fb_clip_change_id == fb_clip_own_id)
+        return FALSE;
+
+    n = fb_clip_read();
+    n = clip_ftxt_text(fb_clip, (uint32_t)n, fb_clip, (uint32_t)FB_CLIP_MAX);
+    if (n == 0 || fb_tx_cap < 14UL)
+        return FALSE;
+
+    fb_tx[10] = 'c'; fb_tx[11] = 'b'; fb_tx[12] = ' ';
+    len = clip_latin1_to_utf8(fb_clip, (uint32_t)n, &fb_tx[13],
+                              (uint32_t)(fb_tx_cap - 13UL));
+    fb_frame_payload(HTTP_WS_EV_TEXT, 3UL + len);
+    return TRUE;
+}
+
+ULONG http_fb_sigmask(VOID)
+{
+    return (fb_live && fb_clip_hooked) ? (1UL << fb_clip_sig) : 0UL;
+}
+
 /* ------------------------------------------------------------- input words -- */
 
 static VOID fb_take_word(const char *w, ULONG len)
@@ -2200,18 +2430,35 @@ static VOID fb_sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
 
         for (i = 0; i < len; i++)
         {
+            /* A `cp` is text of any length, and goes to its own buffer once
+               its three bytes have said what it is. */
+            if (fb_clip_mode)
+            {
+                if (fb_clip_n < FB_CLIP_MAX)
+                    fb_clip[fb_clip_n++] = data[i];
+                continue;
+            }
             if (fb_word_n < (UWORD)FB_WORD_MAX)
                 fb_word[fb_word_n++] = (char)data[i];
             else
                 fb_word_over = 1;
+            if (fb_word_n == 3 && fb_clip_open && fb_word[0] == 'c' &&
+                fb_word[1] == 'p' && fb_word[2] == ' ')
+            {
+                fb_clip_mode = 1;
+                fb_clip_n    = 0;
+            }
         }
 
         if (final)
         {
-            if (!fb_word_over)
+            if (fb_clip_mode)
+                fb_take_paste();
+            else if (!fb_word_over)
                 fb_take_word(fb_word, (ULONG)fb_word_n);
-            fb_word_n = 0;
+            fb_word_n    = 0;
             fb_word_over = 0;
+            fb_clip_mode = 0;
         }
         break;
     }
@@ -2480,6 +2727,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
 
     http_ws_reset(&fb_in);
 
+    fb_clip_start();
     fb_live = TRUE;
 
     if (first_len > 0UL)
@@ -2561,6 +2809,7 @@ VOID http_fb_stop(VOID)
     fb_live = FALSE;
     fb_sb   = NULL;
     fb_sock = -1;
+    fb_clip_stop();
 
     /* A viewer that goes away mid-drag leaves a button down, and the machine
        then behaves as if somebody held the mouse.  Released here, the only
@@ -2626,7 +2875,8 @@ ULONG http_fb_wait_micros(VOID)
     if (fb_tx_sent < fb_tx_len || fb_ctl_at < fb_ctl_n)
         return 0;
     if (fb_want_geom || fb_want_pal || fb_want_stat || fb_want_rtg ||
-        fb_want_ptr || fb_resync || fb_resync_due || fb_input_left != 0)
+        fb_want_ptr || fb_resync || fb_resync_due || fb_input_left != 0 ||
+        fb_clip_changed)
         return 0;
     if (fb_pass_t0 != 0UL || fb_next_tick == 0UL)
         return 0;
@@ -2796,6 +3046,9 @@ BOOL http_fb_slice(ULONG now)
             return TRUE;
         }
     }
+
+    if (fb_clip_changed && !fb_clip_mode && fb_clip_word())
+        return TRUE;
 
     if (fb_want_stat)
     {

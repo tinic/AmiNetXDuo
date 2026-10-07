@@ -367,6 +367,11 @@ function heard(w: string): void {
   log("< " + (w.length > 96 ? w.slice(0, 93) + "..." : w));
 
   try {
+    if (w.startsWith("cb ")) {
+      clipOffer(w.slice(3));
+      return;
+    }
+
     if (w.startsWith("geom ")) {
       const g = geometryFromWord(w);
       geom = g;
@@ -991,6 +996,57 @@ document.addEventListener("visibilitychange", () => {
 });
 
 urlEl.value = defaultEndpoint();
+
+/* --------------------------------------------------------- the clipboard -- */
+
+/*
+ * `cb TEXT`: the Amiga's clipboard changed.  A secure page (https, or
+ * localhost) may write this computer's clipboard straight away; the console
+ * is plain http:// from the Amiga, so it is offered instead, and the Copy
+ * button's click is the gesture the browser wants before it lets a page copy.
+ */
+const clipEl = $("clip");
+const clipTextEl = $("cliptext");
+const clipBtn = $("clipcopy") as HTMLButtonElement;
+let clipText = "";
+let clipTimer = 0;
+
+function clipDone(): void {
+  clipBtn.textContent = "Copied";
+  clipBtn.disabled = true;
+  clearTimeout(clipTimer);
+  clipTimer = window.setTimeout(() => { clipEl.hidden = true; }, 2500);
+}
+
+function clipOffer(text: string): void {
+  clipText = text;
+  const line = text.replace(/\r?\n/g, " \u23ce ");
+  clipTextEl.textContent = line.length > 60 ? line.slice(0, 60) + "\u2026" : line;
+  clipEl.title = text.length > 400 ? text.slice(0, 400) + "\u2026" : text;
+  clipBtn.textContent = "Copy";
+  clipBtn.disabled = false;
+  clearTimeout(clipTimer);
+  clipEl.hidden = false;
+  if (window.isSecureContext && navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(clipDone, () => { /* offered */ });
+  }
+}
+
+clipBtn.addEventListener("click", () => {
+  const ta = document.createElement("textarea");
+  ta.value = clipText;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch { ok = false; }
+  ta.remove();
+  $("box").focus();
+  if (ok) clipDone();
+  else clipBtn.textContent = "Copy failed";
+});
 
 /* ------------------------------------------------------------- the input -- */
 

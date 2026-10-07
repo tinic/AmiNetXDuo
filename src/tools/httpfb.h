@@ -58,6 +58,8 @@ BOOL http_fb_wants_write(VOID);
 /* Microseconds the server may sleep before the console has work of its own;
    0 = now.  The socket wakes it earlier. */
 ULONG http_fb_wait_micros(VOID);
+/* The signal a clipboard change wakes the server with; 0 when none. */
+ULONG http_fb_sigmask(VOID);
 
 /* One pass each.  Each returns FALSE when the session is finished with. */
 BOOL http_fb_read(ULONG now);

@@ -17,6 +17,9 @@
  *   w  DX DY           wheel, in notches
  *   kd RAW QUAL        key down, Amiga rawkey and qualifier bits
  *   ku RAW QUAL        key up
+ *   cp TEXT            a paste: the text goes onto the Amiga's clipboard and
+ *                      Right-Amiga V is pressed there, so it lands where a
+ *                      paste on the Amiga would
  *
  * Moves are coalesced to one animation frame.  A trackpad produces well over
  * 100 events a second and an Amiga cannot act on more than it can redraw, so
@@ -46,8 +49,12 @@ export interface InputSink {
  * not having them: Cmd-W closes the tab whatever anybody prefers, and a page
  * that swallows Cmd-R and then fails to reload is a page that has to be
  * killed.  Ctrl and Amiga-key combinations that are NOT these do go through.
+ *
+ * V is kept so that the browser pastes: its paste event carries the text,
+ * which goes to the Amiga as a `cp` word (onPaste below) rather than as a
+ * keypress that would paste whatever the Amiga's own clipboard held.
  */
-const BROWSER_KEEPS = new Set(["KeyW", "KeyR", "KeyT", "KeyN", "KeyQ"]);
+const BROWSER_KEEPS = new Set(["KeyW", "KeyR", "KeyT", "KeyN", "KeyQ", "KeyV"]);
 
 export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   detach: () => void;
@@ -181,6 +188,18 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   const onDown = (e: KeyboardEvent) => key(e, true);
   const onUp = (e: KeyboardEvent) => key(e, false);
 
+  /* A paste while the screen has focus.  The text is the browser's to give,
+     and a paste event is the one place it gives it to a plain http:// page. */
+  const onPaste = (e: ClipboardEvent) => {
+    if (document.activeElement !== stage) return;
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    e.preventDefault();
+    if (text === "") return;
+    sink.send("cp " + text);
+    const shown = text.replace(/\r?\n/g, "\u23ce");
+    sink.log("cp " + (shown.length > 40 ? shown.slice(0, 40) + "..." : shown));
+  };
+
   stage.addEventListener("pointermove", onMove);
   stage.addEventListener("pointerdown", onDownButton);
   stage.addEventListener("pointerup", onUpButton);
@@ -192,6 +211,7 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   stage.addEventListener("contextmenu", onContext);
   addEventListener("keydown", onDown);
   addEventListener("keyup", onUp);
+  document.addEventListener("paste", onPaste);
 
   return {
     detach: () => {
@@ -207,6 +227,7 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
       stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("contextmenu", onContext);
       removeEventListener("keydown", onDown);
+      document.removeEventListener("paste", onPaste);
       removeEventListener("keyup", onUp);
     },
   };

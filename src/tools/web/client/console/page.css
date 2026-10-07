@@ -84,6 +84,20 @@ body {
 
 #state { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
 
+/* What the Amiga last copied, offered: a plain http:// page may put text on
+   this computer's clipboard only inside a click, so the click is the button. */
+#clip { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+#clip[hidden] { display: none; }
+#cliplabel { opacity: 0.7; }
+#cliptext {
+  max-width: 18em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 0.3rem;
+  background: var(--pen2);
+  border: 1px solid var(--pen1);
+}
+
 #dot {
   width: 8px;
   height: 8px;

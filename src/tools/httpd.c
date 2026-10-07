@@ -5492,7 +5492,7 @@ static VOID httpd_serve(LONG lsock)
         /* The terminal's pipe is a MsgPort and WaitSelect() knows nothing
            about DOS handles, so its signal goes into the same wait.
            CTRL_C is not here: WaitSelect() would consume tool_break()'s. */
-        sigs = http_term_sigmask() | SIGBREAKF_CTRL_E;
+        sigs = http_term_sigmask() | http_fb_sigmask() | SIGBREAKF_CTRL_E;
 
         ready = tool_sock_select_sigs(httpd_sb, nfds, &readfds, &writefds, &tv,
                                       &sigs);
