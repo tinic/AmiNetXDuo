@@ -145,7 +145,14 @@ jobs:
     steps:
       - name: No optional builds selected
         if: matrix.config == '__skipped__'
-        run: echo 'option_matrix=skipped' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          OPTION_PLAN: ${{ needs.plan.outputs.options }}
+        run: |
+          [ "$OPTION_PLAN" != build ] || {
+            echo 'option_matrix=FAIL planned builds produced no matrix' >&2
+            exit 1
+          }
+          echo 'option_matrix=skipped' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
         if: matrix.config != '__skipped__'
         with:

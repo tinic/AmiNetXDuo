@@ -111,6 +111,24 @@ for answer in '{"artifacts":[]}' 'not-json' \
 done
 FAKE_ARTIFACTS=$saved_artifacts
 
+# The sentinel must fail closed if a future planner requests builds but
+# accidentally returns an empty matrix.
+no_build=$(awk '
+    /- name: No optional builds selected$/ { found=1 }
+    found && /^        run: \|$/ { body=1; next }
+    body && /^      - uses: actions\/checkout@v4$/ { exit }
+    body { sub(/^          /, ""); print }
+' "$root/.github/workflows/ci.yml")
+[ -n "$no_build" ]
+export GITHUB_STEP_SUMMARY="$work/option-summary"
+OPTION_PLAN=skipped bash -euo pipefail -c "$no_build"
+cases=$((cases + 1))
+if OPTION_PLAN=build bash -euo pipefail -c "$no_build" > "$work/no-build.log" 2>&1; then
+    echo "FAIL empty-build-matrix accepted"
+    failures=$((failures + 1))
+fi
+cases=$((cases + 1))
+
 # Execute the workflow's actual stable gate, not a separate imitation.
 report=$(awk '
     /- name: Report$/ { found=1 }
