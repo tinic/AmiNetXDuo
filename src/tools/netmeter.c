@@ -113,6 +113,11 @@ static struct
 
 static ToolSnapshot nm_snap;
 
+/* The screen's font -- Font prefs' "Screen text", proportional or not --
+   set on every RastPort NetMeter draws in and on this one, which measures
+   before the window exists. */
+static struct RastPort nm_mrp;
+
 /* ----------------------------------------------------------- text, */
 
 static ULONG nm_len(const char *s)
@@ -369,9 +374,19 @@ static VOID nm_measure(struct RastPort *rp)
 
     nm.fh   = rp->TxHeight;
     nm.base = rp->TxBaseline;
-    nm.rate_w = nm_text_w(rp, "999 KB/s");
-    w = nm_text_w(rp, "9.99 MB/s");
-    if (w > nm.rate_w) nm.rate_w = w;
+    /* The widest a rate can print, in a font whose digits and letters need
+       not be the same width. */
+    {
+        static const char *const widest[] =
+            { "1023 B/s", "999 KB/s", "99.9 KB/s", "9.99 MB/s", "99.9 MB/s" };
+
+        nm.rate_w = 0;
+        for (i = 0; i < sizeof(widest) / sizeof(widest[0]); i++)
+        {
+            w = nm_text_w(rp, widest[i]);
+            if (w > nm.rate_w) nm.rate_w = w;
+        }
+    }
 
     nm.name_w = nm_text_w(rp, "eth0");
     for (i = 0; i < nm.count; i++)
@@ -601,7 +616,7 @@ static VOID nm_tip_close(VOID)
 
 static VOID nm_tip_open(char lines[][NM_TIP_LEN], UWORD n)
 {
-    struct RastPort *srp = &nm.screen->RastPort;
+    struct RastPort *srp = &nm_mrp;
     struct TagItem   tags[10];
     UWORD            i, w = 0, h;
     WORD             x, y;
@@ -636,6 +651,7 @@ static VOID nm_tip_open(char lines[][NM_TIP_LEN], UWORD n)
     nm.tip = OpenWindowTagList(NULL, tags);
     if (nm.tip == NULL)
         return;
+    SetFont(nm.tip->RPort, nm.dri->dri_Font);
 
     back = (UWORD)(nm.pen_tipback >= 0 ? nm.pen_tipback : nm.pen_shine);
     SetAPen(nm.tip->RPort, back);
@@ -911,8 +927,8 @@ static BOOL nm_open_window(VOID)
     UWORD          w, h;
     int            t = 0;
 
-    nm_measure(&nm.screen->RastPort);
-    w = nm_content_w(&nm.screen->RastPort);
+    nm_measure(&nm_mrp);
+    w = nm_content_w(&nm_mrp);
     h = nm_content_h();
 
 #define NM_TAG(k, v) do { tags[t].ti_Tag = (k); tags[t].ti_Data = (ULONG)(v); t++; } while (0)
@@ -939,7 +955,10 @@ static BOOL nm_open_window(VOID)
 #undef NM_TAG
 
     nm.win = OpenWindowTagList(NULL, tags);
-    return (BOOL)(nm.win != NULL);
+    if (nm.win == NULL)
+        return FALSE;
+    SetFont(nm.win->RPort, nm.dri->dri_Font);
+    return TRUE;
 }
 
 /* The window grows to fit what arrived -- another interface, a longer name or
@@ -1061,6 +1080,8 @@ static int netmeter_run(VOID)
     if (nm.dri == NULL)
         goto out;
     nm_pens();
+    InitRastPort(&nm_mrp);
+    SetFont(&nm_mrp, nm.dri->dri_Font);
 
     if (!nm_timer_open())
         goto out;

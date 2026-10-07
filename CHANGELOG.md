@@ -8,7 +8,8 @@ Add new entries under `Unreleased`; published release sections are history.
 - NetMeter: a small, resizable Workbench window with each interface's
   addresses and its receive and send rates as bars.  Hover a name for its
   definition file and device, a bar for the totals; click an address to
-  copy it.  Installed in SYS:Utilities by a system installation.
+  copy it.  Drawn in the screen's font, proportional or not.  Installed in
+  SYS:Utilities by a system installation.
 - The stack counts the bytes each interface receives and sends (64-bit),
   read through the new NETSTATUS_IFBYTES selector.
 
