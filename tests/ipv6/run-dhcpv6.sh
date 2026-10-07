@@ -228,6 +228,7 @@ AMINETXDUO_RUN_TAG="$TAG" AMINETXDUO_AMIBERRY_MAC="$MAC" \
     -N "$CARD" -B "$BACKEND" -m "$MODEL" -t "$TIMEOUT" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
     "$STAGE/RemoveNetInterface" "$STAGE/ShowNetStatus" "$STAGE/ping" \
+    "$STAGE/Online" "$STAGE/Offline" \
     "$STAGE/commands.txt" \
     > "$OUT" 2>&1
 run_rc=$?
