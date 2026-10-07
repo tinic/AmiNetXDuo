@@ -158,11 +158,11 @@ else
     nope "boot_serving_banner (httpd never announced a port)"
 fi
 
-_said=$(grep -c "no screen is open yet" "$BANNER" 2>/dev/null) || _said=0
+_said=$(grep -c 'Console: .* (frontmost screen, NO PASSWORD)' "$BANNER" 2>/dev/null) || _said=0
 if [ "${_said:-0}" = "1" ]; then
-    ok "boot_said_once"
+    ok "boot_said_screenless_once"
 else
-    nope "boot_said_${_said:-0}_times (it owes exactly one line)"
+    nope "boot_said_screenless_${_said:-0}_times (it owes exactly one line)"
 fi
 
 if have fetched.txt && cmp -s "$STAGE/greeting.txt" "$HD/fetched.txt"; then
@@ -198,7 +198,7 @@ fi
 # THE ASSERTION THIS FILE EXISTS FOR.  The line is httpd_log_console_start()'s,
 # it is written when a session starts and not before, and the numbers in it are
 # the ones http_fb_start() read for THIS session.  The startup banner above
-# said there was no screen, so a size here can only have come from the re-read.
+# named no geometry, so a size here can only have come from the re-read.
 WANT="console started: frontmost screen ${SCREEN_W}x${SCREEN_H}x${SCREEN_D}"
 
 if grep -q "console did not start" "$BANNER" 2>/dev/null; then

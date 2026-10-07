@@ -111,7 +111,7 @@ reject() {
 
 expect "the INTERFACE argument reached the guest" "eth0: a2065.device unit 0"
 
-expect "it reports the start as failed"    "the network did not start"
+expect "it reports the library did not open" "bsdsocket.library did not open"
 expect "and names memory as the reason"    "bytes free; about 450K needed"
 
 FREE=$(sed -n 's/^ *\([0-9][0-9]*\) bytes free.*/\1/p' "$REPORT" | head -1)

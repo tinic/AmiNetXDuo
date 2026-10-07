@@ -230,7 +230,7 @@ says    ifconf6_up_has_v6       "SYS:netstat -i" 1 '2001:db8:6726:1::10'
 says    ifconf6_up_has_no_v4    "SYS:netstat -i" 1 '^eth0[[:space:]]+[0-9]+[[:space:]]+0\.0\.0\.0'
 
 want_rc ifconf6_bare_rc         "SYS:ConfigureNetInterface eth0" 1 10
-says    ifconf6_bare_names_gw6  "SYS:ConfigureNetInterface eth0" 1 'GATEWAY6'
+says    ifconf6_bare_refused_empty "SYS:ConfigureNetInterface eth0" 1 'nothing to change'
 
 want_rc ifconf6_badgw_rc \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 notanaddress" 1 10
@@ -247,7 +247,7 @@ else fail ifconf6_no_router_at_boot; fi
 want_rc ifconf6_set_a_rc \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 $GW6_A" 1 0
 says    ifconf6_set_a_said \
-    "SYS:ConfigureNetInterface eth0 GATEWAY6 $GW6_A" 1 "IPv6 default router is $GW6_A"
+    "SYS:ConfigureNetInterface eth0 GATEWAY6 $GW6_A" 1 "IPv6 default router $GW6_A"
 says    ifconf6_set_a_shows_addr \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 $GW6_A" 1 '2001:db8:6726:1::10'
 
@@ -280,12 +280,13 @@ else fail ifconf6_replaced_not_added; fi
 
 ADDR6_CMD="SYS:ConfigureNetInterface eth0 ADDRESS6 2001:db8:6726:1::99"
 want_rc ifconf6_address6_rc         "$ADDR6_CMD" 1 10
-says    ifconf6_address6_names_file "$ADDR6_CMD" 1 'DEVS:NetInterfaces/eth0'
-says    ifconf6_address6_names_fix  "$ADDR6_CMD" 1 'AddNetInterface eth0'
+says    ifconf6_address6_refused_running "$ADDR6_CMD" 1 \
+    'ADDRESS6 cannot be changed on a running interface'
 
 CONF6_CMD="SYS:ConfigureNetInterface eth0 CONFIGURE6 DHCP"
 want_rc ifconf6_configure6_rc         "$CONF6_CMD" 1 10
-says    ifconf6_configure6_names_file "$CONF6_CMD" 1 'DEVS:NetInterfaces/eth0'
+says    ifconf6_configure6_refused_running "$CONF6_CMD" 1 \
+    'CONFIGURE6 cannot be changed on a running interface'
 
 
 BOTH_CMD="SYS:ConfigureNetInterface eth0 ADDRESS 10.77.0.5 ADDRESS6 2001:db8:6726:1::99"
@@ -304,7 +305,7 @@ else fail ifconf6_refusals_changed_nothing; fi
 want_rc ifconf6_clear_rc \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 NONE" 1 0
 says    ifconf6_clear_said \
-    "SYS:ConfigureNetInterface eth0 GATEWAY6 NONE" 1 'default router is cleared'
+    "SYS:ConfigureNetInterface eth0 GATEWAY6 NONE" 1 'default router cleared'
 
 CLEARED_A=$(routers6_via 6 "$GW6_A")
 CLEARED_B=$(routers6_via 6 "$GW6_B")

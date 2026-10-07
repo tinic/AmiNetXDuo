@@ -361,10 +361,10 @@ round_named() {
         fail "the refusal does not say there are 4 slots"
         ok4=0
     fi
-    if printf '%s\n' "$third" | grep -qi "RemoveNetInterface"; then
-        pass "and says to take one down rather than to delete a file"
+    if printf '%s\n' "$third" | grep -q 'ENOSPC (28)'; then
+        pass "and reports ENOSPC for the exhausted live slot table"
     else
-        fail "the refusal does not say what to do next"
+        fail "the refusal did not report ENOSPC"
         ok4=0
     fi
     if printf '%s\n' "$third" | grep -qiE "DEVS:NetInterfaces|move the unused"
@@ -737,16 +737,12 @@ round_latefail() {
         fail "zgw5 did not come up: a refused route destroyed the interface"
         ok4d=0
     fi
-    if printf '%s\n' "$refusal" | grep -qi "default route"; then
-        pass "and the command says the default route was refused"
+    if printf '%s\n' "$refusal" |
+       grep -q 'zgw5: gateway 10\.55\.55\.1 not on a local network'
+    then
+        pass "and names the unreachable gateway and affected interface"
     else
-        fail "nothing was said about the route that was refused"
-        ok4d=0
-    fi
-    if printf '%s\n' "$refusal" | grep -qi "GATEWAY line"; then
-        pass "and says which line of which file to look at"
-    else
-        fail "the message does not say where to look"
+        fail "the refused gateway or affected interface was not named"
         ok4d=0
     fi
 

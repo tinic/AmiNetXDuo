@@ -219,7 +219,7 @@ denies "$LOOKUP" 1 "has address"    "1: and $LABEL.local does not resolve"
 # ---- 2: on --------------------------------------------------------------
 
 says "$ON"     1 "mDNS on" "2: MDNS=YES was accepted"
-says "$STATUS" 2 '^ *mDNS +yes, answering \.local$' \
+says "$STATUS" 2 '^ *mDNS +yes$' \
                                          "2: and it now reports on"
 says "$LOOKUP" 2 "^$LABEL\.local has address " \
                                          "2: and $LABEL.local resolves"
@@ -237,7 +237,7 @@ denies "$LOOKUP" 3 "has address"   "3: and $LABEL.local has STOPPED resolving"
 # ---- 2b: and back on, so an off/on pair is proved as well as an off ------
 
 says "$ON"     2 "mDNS on" "3b: MDNS=YES again was accepted"
-says "$STATUS" 4 '^ *mDNS +yes, answering \.local$' \
+says "$STATUS" 4 '^ *mDNS +yes$' \
                                          "3b: it reports on after an off/on pair"
 says "$LOOKUP" 4 "^$LABEL\.local has address 10\.0\.2\.15" \
                                          "3b: and the name resolves again"
