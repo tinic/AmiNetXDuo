@@ -5,6 +5,11 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+## 1.0.0-beta8
+
+- Bundled NetX Duo and ThreadX include the full 6.5.2.202603 upstream
+  releases.
+
 - NetMeter survives a Workbench screen mode change when
   screennotify.library is installed: it closes its window for the change
   and reopens in the same place.
