@@ -5,6 +5,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- IPv6 to off-link hosts works again after an interface is removed and
+  added back: the new address could be sent from another interface's
+  link-local address, which routers drop (`ping www.google.com` timed out).
+
 - D-Link DL10019/DL10022 PC Cards (DFE-670TXD and others): the station
   address from the chip, its 32 KB of buffer memory (18 receive frames
   instead of 8), full duplex set from the PHY's link, the real link speed,
