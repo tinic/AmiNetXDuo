@@ -84,6 +84,11 @@ typedef struct NetStackHostEnv
     ULONG   dhcp_option_retrieves;
 
     UINT    dhcp_create_status;
+    ULONG   dhcpv6_configures;
+    UWORD   dhcpv6_iface_count;      /* physical slots visible to configure */
+    ULONG   dhcpv6_without_caller;
+    UWORD   dhcpv6_slot;
+    ULONG   dhcpv6_destroys;
     ULONG   packet_pool_creates;
     ULONG   packet_pool_deletes;
     ULONG   packet_pool_invalid_deletes; /* delete before successful create */

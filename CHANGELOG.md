@@ -7,6 +7,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## 1.0.0-beta8
 
+- An IPv6-only interface added with AddNetInterface starts DHCPv6: an explicit
+  request, or a router advertisement asking for an address. It previously
+  stayed at its link-local address without sending a request.
+
 - Bundled NetX Duo and ThreadX include the full 6.5.2.202603 upstream
   releases.
 

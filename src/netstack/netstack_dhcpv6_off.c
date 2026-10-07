@@ -32,6 +32,12 @@ VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns)
     (VOID)ns;
 }
 
+VOID ami_netstack_dhcpv6_configure_one(AmiNetStack *ns, UWORD index)
+{
+    (VOID)ns;
+    (VOID)index;
+}
+
 VOID ami_netstack_dhcpv6_release(AmiNetStack *ns)
 {
     (VOID)ns;

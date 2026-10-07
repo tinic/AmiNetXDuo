@@ -436,6 +436,7 @@ VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index);
  * while the interface can still transmit.
  */
 VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_configure_one(AmiNetStack *ns, UWORD index);
 VOID ami_netstack_dhcpv6_release(AmiNetStack *ns);
 VOID ami_netstack_dhcpv6_pause(AmiNetStack *ns);
 VOID ami_netstack_dhcpv6_resume(AmiNetStack *ns, UWORD interface_index);

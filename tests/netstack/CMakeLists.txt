@@ -1369,6 +1369,15 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME iface_remove COMMAND test_iface_remove)
 
+    # A library-first stack has only loopback. Attaching a physical interface
+    # must make its DHCPv6 policy reachable from the adopted ThreadX caller.
+    add_executable(test_dhcpv6_attach
+        host/test_dhcpv6_attach_host.c ${NETSTACK_HOST_TU})
+    target_include_directories(test_dhcpv6_attach PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_dhcpv6_attach PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_dhcpv6_attach PRIVATE ${NETSTACK_HOST_OPTIONS})
+    add_test(NAME dhcpv6_attach COMMAND test_dhcpv6_attach)
+
     # netstack_interface_dhcp_start()'s re-arm.  NX_DHCP_ALREADY_STARTED never
     # arises in the arm the lab can run, so stop-and-start-again was never
     # exercised; here the DHCP client answers it on demand.

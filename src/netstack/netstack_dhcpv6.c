@@ -444,13 +444,26 @@ static UWORD ami_ns6_dhcp_interface(const AmiNetStack *ns, BOOL *outright)
 VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns)
 {
     BOOL  outright = FALSE;
-    UWORD iface;
+    UWORD iface = ami_ns6_dhcp_interface(ns, &outright);
 
-    if (!ns->ns_Ipv6Enabled || ns->ns_Dhcpv6WorkReady)
+    if (iface < ns->ns_IfaceCount)
+        ami_netstack_dhcpv6_configure_one(ns, iface);
+}
+
+/* Caller holds the stack lock and an adopted ThreadX bracket. The numeric
+   slot is reserved before worker creation and cannot change while it lives. */
+VOID ami_netstack_dhcpv6_configure_one(AmiNetStack *ns, UWORD iface)
+{
+    BOOL outright;
+
+    if (!ns->ns_Ipv6Enabled || ns->ns_Dhcpv6WorkReady ||
+        iface >= ns->ns_IfaceCount ||
+        !ns->ns_Ip.nx_ip_interface[iface].nx_interface_valid)
         return;
 
-    iface = ami_ns6_dhcp_interface(ns, &outright);
-    if (iface >= ns->ns_IfaceCount)
+    outright = (ns->ns_Config.interfaces[iface].ip6type == AMI_IP6TYPE_DHCP);
+    if (!outright &&
+        ns->ns_Config.interfaces[iface].ip6type != AMI_IP6TYPE_AUTO)
         return;
 
     ns->ns_Dhcpv6Iface = (UBYTE)iface;
@@ -786,4 +799,10 @@ VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
         ami_free(ns->ns_Dhcpv6Stack);
         ns->ns_Dhcpv6Stack = NULL;
     }
+
+    ns->ns_Dhcpv6Asked = FALSE;
+    ns->ns_Dhcpv6Stateful = FALSE;
+    ns->ns_Dhcpv6State = NX_DHCPV6_STATE_INIT;
+    ns->ns_Dhcpv6OptionsValid = FALSE;
+    ns->ns_Dhcpv6DnsPending = TRUE;
 }

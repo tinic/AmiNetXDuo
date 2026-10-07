@@ -859,7 +859,7 @@ AmiMemStats *ami_mem_stats(VOID)
 
 /* AMI_ERROR/WARN/INFO are unconditional in every build, so netstack.c names
    ami_log() whatever the options are; src/common/compat.c is not in this
-   tier.  Discarded: no test here reads a diagnostic. */
+   tier. Discarded: diagnostics use the event ring in shipping builds. */
 VOID ami_log(int level, const char *fmt, ...)
 {
     (VOID)level;
@@ -1033,9 +1033,23 @@ VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns)
     (VOID)ns;
 }
 
+/* The lifecycle joint test observes the slot and caller. Wire tests exercise
+   the real worker/client; this boundary models only a live reservation. */
+VOID ami_netstack_dhcpv6_configure_one(AmiNetStack *ns, UWORD index)
+{
+    nsh.dhcpv6_configures++;
+    nsh.dhcpv6_iface_count = ns->ns_IfaceCount;
+    nsh.dhcpv6_slot = index;
+    if (nsh_pool_busy == 0UL)
+        nsh.dhcpv6_without_caller++;
+    ns->ns_Dhcpv6Iface = (UBYTE)index;
+    ns->ns_Dhcpv6WorkReady = TRUE;
+}
+
 VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
 {
-    (VOID)ns;
+    nsh.dhcpv6_destroys++;
+    ns->ns_Dhcpv6WorkReady = FALSE;
 }
 
 VOID ami_netstack_dhcpv6_pause(AmiNetStack *ns)

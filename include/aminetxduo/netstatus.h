@@ -827,6 +827,9 @@ typedef struct NetStatusOpener
                                        2 networks, 4 protocols, 8 services
                                        (F-095)                               */
 
+#define NETEVENT_DHCP6_LIMIT    53  /* another slot owns the single DHCPv6
+                                       client; value = that slot index      */
+
 typedef struct NetStatusEvent
 {
     UWORD   nse_Code;                   /* NETEVENT_*                        */

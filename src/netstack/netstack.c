@@ -2475,6 +2475,13 @@ static LONG ami_ns_interface_remove_finish(UWORD index)
         autoip_removed = TRUE;
     }
 
+#if defined(AMINETXDUO_IPV6) && defined(AMINETXDUO_DHCP)
+    /* A reused slot must not inherit the previous card's DUID and client.
+       Quiesce already released and paused it while the link could transmit. */
+    if (ns->ns_Dhcpv6WorkReady && (UWORD)ns->ns_Dhcpv6Iface == index)
+        ami_netstack_dhcpv6_destroy(ns);
+#endif
+
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
 
     if (status == NX_SUCCESS)
@@ -3602,7 +3609,12 @@ static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
 
     if (gateway != 0UL ||
         ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_AUTO ||
-        ns->ns_Config.static_route_count != 0)
+        ns->ns_Config.static_route_count != 0
+#if defined(AMINETXDUO_IPV6) && defined(AMINETXDUO_DHCP)
+        || ns->ns_Config.interfaces[index].ip6type == AMI_IP6TYPE_DHCP
+        || ns->ns_Config.interfaces[index].ip6type == AMI_IP6TYPE_AUTO
+#endif
+        )
     {
         caller = ami_netstack_enter_alloc();
         if (caller == NULL)
@@ -3613,6 +3625,25 @@ static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
 
         ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE,
                                  "interface start");
+#if defined(AMINETXDUO_IPV6) && defined(AMINETXDUO_DHCP)
+        /* Library-open starts loopback only. All fallible setup is complete
+           and the slot's policy is published before the worker can run. */
+        if (ns->ns_Config.interfaces[index].ip6type == AMI_IP6TYPE_DHCP ||
+            ns->ns_Config.interfaces[index].ip6type == AMI_IP6TYPE_AUTO)
+        {
+            if (ns->ns_Dhcpv6WorkReady &&
+                (UWORD)ns->ns_Dhcpv6Iface != index)
+            {
+                ami_event(NETEVENT_DHCP6_LIMIT, index,
+                          (ULONG)ns->ns_Dhcpv6Iface);
+                AMI_WARN("netstack: interface '%s' asked for DHCPv6; "
+                         "the single client already serves interface %ld",
+                         cfg->name, (long)ns->ns_Dhcpv6Iface);
+            }
+            else
+                ami_netstack_dhcpv6_configure_one(ns, index);
+        }
+#endif
         ami_netstack_leave_free(caller);
     }
 
