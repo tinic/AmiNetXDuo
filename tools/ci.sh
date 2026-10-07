@@ -481,7 +481,9 @@ host_test_targets() { # builddir
 #      byte-count delta across its carry (all hosts).
 #      557 with console_clipboard_text: the console clipboard's UTF-8 and
 #      ISO-8859-1 conversion and FORM FTXT (all hosts).
-HOST_TESTS_EXPECTED=557
+#      558 with dhcpv6_attach: dynamically added DHCPv6 interfaces start
+#      their worker, preserve one binding, and release it on removal.
+HOST_TESTS_EXPECTED=558
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -503,7 +505,7 @@ case "$(uname -m)" in
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 517; Darwin x86_64 registers 547 on this tree.
+# Darwin arm64 registers 527; Darwin x86_64 registers 557 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;
