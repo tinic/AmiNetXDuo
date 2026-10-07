@@ -34,7 +34,7 @@ arms=$(sed -n '/^CROSS_CONFIGS=(/,/^)/p' "$CI" \
        | grep -oE '^[[:space:]]*"[a-z0-9_]+' | tr -d ' "' | sort -u)
 matrix=$("$CI" --list-cross | sort -u)
 
-if ! grep -q 'config:.*fromJSON(needs\.plan\.outputs\.matrix)' "$WF" ||
+if ! grep -Eq 'config:.*fromJSON\(.*needs\.plan\.outputs\.matrix.*__skipped__' "$WF" ||
    ! grep -q 'tools/ci\.sh --list-cross' "$WF"; then
     echo "ci_arm_matrix_wiring=MISSING dynamic matrix is not connected"
     exit 1
