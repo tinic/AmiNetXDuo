@@ -184,6 +184,7 @@ static char np_hwaddress[18];
 static char np_status[128];
 
 static VOID show_panel(ULONG which);
+static VOID detach_panel(ULONG which);
 static VOID select_panel(ULONG which);
 static LONG live_state_of(const char *name);
 
@@ -290,12 +291,65 @@ static BOOL checked(struct Gadget *g)
     return (BOOL)((g->Flags & GFLG_SELECTED) != 0);
 }
 
+/*
+ * Set while load_form() or clear_form() fills the pages with none of them in
+ * the window: each page's gadgets are then set with no window, which GadTools
+ * accepts from V39, and nothing is drawn until the page shown is attached.
+ */
+static BOOL np_filling_detached;
+
+static BOOL in_panel(const struct Gadget *g)
+{
+    const struct Gadget *p;
+    ULONG i;
+    LONG n;
+
+    for (i = 0; i < NP_PANEL_COUNT; i++)
+        for (p = np.panel_gadgets[i], n = 0;
+             p != NULL && n < np.panel_gadget_count[i];
+             p = p->NextGadget, n++)
+            if (p == g) return TRUE;
+    return FALSE;
+}
+
 static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
 {
     struct TagItem tags[2];
     tags[0].ti_Tag = tag; tags[0].ti_Data = value;
     tags[1].ti_Tag = TAG_DONE; tags[1].ti_Data = 0;
-    GT_SetGadgetAttrsA(g, np.window, NULL, tags);
+    GT_SetGadgetAttrsA(g,
+                       (np_filling_detached && in_panel(g)) ? NULL : np.window,
+                       NULL, tags);
+}
+
+/*
+ * Filling the form used to show every page in turn, so loading a definition
+ * flashed five pages past.  From GadTools V39 the pages are filled detached
+ * and the one shown is drawn once; V37 needs the window, and keeps the walk.
+ */
+static ULONG begin_fill(VOID)
+{
+    ULONG shown = np.active_panel;
+
+    if (np.window != NULL && shown < NP_PANEL_COUNT &&
+        GadToolsBase->lib_Version >= 39)
+    {
+        detach_panel(shown);
+        np.active_panel = NP_PANEL_COUNT;
+        np_filling_detached = TRUE;
+    }
+    return shown;
+}
+
+static VOID fill_panel(ULONG which)
+{
+    if (!np_filling_detached) show_panel(which);
+}
+
+static VOID end_fill(ULONG shown)
+{
+    np_filling_detached = FALSE;
+    show_panel(shown < NP_PANEL_COUNT ? shown : NP_PANEL_GENERAL);
 }
 
 /* Keep the editable DEVICE field.  The requester only supplies another way
@@ -783,9 +837,9 @@ static VOID scan_interfaces(VOID)
 static VOID clear_form(VOID)
 {
     ULONG i;
-    ULONG restore = np.active_panel;
+    ULONG restore = begin_fill();
 
-    show_panel(NP_PANEL_GENERAL);
+    fill_panel(NP_PANEL_GENERAL);
     set_name_locked(FALSE);
     set_attr(np.g_name, GTST_String, (ULONG)"");
     set_attr(np.g_id, GTST_String, (ULONG)"");
@@ -793,7 +847,7 @@ static VOID clear_form(VOID)
     set_attr(np.g_state, GTCB_Checked, TRUE);
     set_attr(np.g_boot, GTCB_Checked, FALSE);
     set_attr(np.g_priority, GTIN_Number, 0);
-    show_panel(NP_PANEL_DEVICE);
+    fill_panel(NP_PANEL_DEVICE);
     set_attr(np.g_device, GTST_String, (ULONG)"");
     set_attr(np.g_unit, GTIN_Number, 0);
     set_attr(np.g_card, GTST_String, (ULONG)"");
@@ -801,13 +855,13 @@ static VOID clear_form(VOID)
     set_attr(np.g_down_offline, GTCB_Checked, FALSE);
     set_attr(np.g_init_delay, GTCB_Checked, FALSE);
     set_attr(np.g_promiscuous, GTCB_Checked, FALSE);
-    show_panel(NP_PANEL_IPV4);
+    fill_panel(NP_PANEL_IPV4);
     set_attr(np.g_ipv4, GTCY_Active, AMI_IPTYPE_DHCP);
     set_attr(np.g_address, GTST_String, (ULONG)"");
     set_attr(np.g_netmask, GTST_String, (ULONG)"");
     set_attr(np.g_gateway, GTST_String, (ULONG)"");
     set_static_fields(FALSE);
-    show_panel(NP_PANEL_IPV6);
+    fill_panel(NP_PANEL_IPV6);
     set_attr(np.g_ipv6, GTCY_Active, AMI_IP6TYPE_AUTO);
 #ifndef AMINETXDUO_IPV6
     set_attr(np.g_ipv6, GA_Disabled, TRUE);
@@ -816,7 +870,7 @@ static VOID clear_form(VOID)
         set_attr(np.g_address6[i], GTST_String, (ULONG)"");
     set_attr(np.g_gateway6, GTST_String, (ULONG)"");
     set_static6_fields(FALSE);
-    show_panel(NP_PANEL_TUNING);
+    fill_panel(NP_PANEL_TUNING);
     set_attr(np.g_mtu, GTIN_Number, 0);
     set_attr(np.g_rxbuffer, GTIN_Number, 0);
     set_attr(np.g_iprequests, GTIN_Number, 0);
@@ -824,7 +878,7 @@ static VOID clear_form(VOID)
     set_attr(np.g_writerequests, GTIN_Number, 0);
     np.selected = -1;
     set_status("New interface.");
-    show_panel(restore < NP_PANEL_COUNT ? restore : NP_PANEL_GENERAL);
+    end_fill(restore);
 }
 
 static VOID format_ip6_prefix(const AmiIp6Address *address, char *out,
@@ -877,9 +931,9 @@ static VOID load_form(LONG index)
         tool_format_mac(cfg.hw_address, np_hwaddress, sizeof(np_hwaddress));
     else
         np_hwaddress[0] = '\0';
-    restore = np.active_panel;
+    restore = begin_fill();
 
-    show_panel(NP_PANEL_GENERAL);
+    fill_panel(NP_PANEL_GENERAL);
     set_attr(np.g_name, GTST_String, (ULONG)cfg.name);
     set_name_locked(TRUE);
     set_attr(np.g_id, GTST_String, (ULONG)cfg.id);
@@ -888,7 +942,7 @@ static VOID load_form(LONG index)
     set_attr(np.g_boot, GTCB_Checked,
              (ULONG)boot_state(cfg.name, &wildcard, NULL));
     set_attr(np.g_priority, GTIN_Number, (ULONG)(LONG)cfg.priority);
-    show_panel(NP_PANEL_DEVICE);
+    fill_panel(NP_PANEL_DEVICE);
     set_attr(np.g_device, GTST_String, (ULONG)cfg.device);
     set_attr(np.g_unit, GTIN_Number, cfg.unit);
     set_attr(np.g_card, GTST_String, (ULONG)cfg.card);
@@ -896,7 +950,7 @@ static VOID load_form(LONG index)
     set_attr(np.g_down_offline, GTCB_Checked, (ULONG)cfg.down_goes_offline);
     set_attr(np.g_init_delay, GTCB_Checked, (ULONG)cfg.requires_init_delay);
     set_attr(np.g_promiscuous, GTCB_Checked, (ULONG)cfg.promiscuous);
-    show_panel(NP_PANEL_IPV4);
+    fill_panel(NP_PANEL_IPV4);
     set_attr(np.g_ipv4, GTCY_Active, (ULONG)cfg.iptype);
     set_attr(np.g_address, GTST_String,
              (ULONG)(cfg.address != 0 ? np_address : ""));
@@ -905,7 +959,7 @@ static VOID load_form(LONG index)
     set_attr(np.g_gateway, GTST_String,
              (ULONG)(cfg.gateway != 0 ? np_gateway : ""));
     set_static_fields((BOOL)(cfg.iptype == AMI_IPTYPE_STATIC));
-    show_panel(NP_PANEL_IPV6);
+    fill_panel(NP_PANEL_IPV6);
     set_attr(np.g_ipv6, GTCY_Active, (ULONG)cfg.ip6type);
 #ifndef AMINETXDUO_IPV6
     set_attr(np.g_ipv6, GA_Disabled, TRUE);
@@ -918,14 +972,14 @@ static VOID load_form(LONG index)
 #else
     set_static6_fields(FALSE);
 #endif
-    show_panel(NP_PANEL_TUNING);
+    fill_panel(NP_PANEL_TUNING);
     set_attr(np.g_mtu, GTIN_Number, cfg.mtu);
     set_attr(np.g_rxbuffer, GTIN_Number, cfg.rx_buffer);
     set_attr(np.g_iprequests, GTIN_Number, cfg.ip_requests);
     set_attr(np.g_arprequests, GTIN_Number, cfg.arp_requests);
     set_attr(np.g_writerequests, GTIN_Number, cfg.write_requests);
     set_status(wildcard ? "Starts at boot (wildcard)." : "Loaded.");
-    show_panel(restore < NP_PANEL_COUNT ? restore : NP_PANEL_GENERAL);
+    end_fill(restore);
 }
 
 static BOOL get_cycle(struct Gadget *g, ULONG *value)
@@ -1733,7 +1787,10 @@ static BOOL make_window(VOID)
     tags[1].ti_Tag=GTLV_Selected;
     tags[1].ti_Data=np.count != 0 ? 0 : (ULONG)~0UL;
     tags[2].ti_Tag=GTLV_ScrollWidth; tags[2].ti_Data=16;
-    tags[3].ti_Tag=TAG_DONE; tags[3].ti_Data=0;
+    /* Without it GadTools highlights a clicked item only while the button is
+       down, and the list never shows which definition the form holds. */
+    tags[3].ti_Tag=GTLV_ShowSelected; tags[3].ti_Data=0;
+    tags[4].ti_Tag=TAG_DONE; tags[4].ti_Data=0;
     ITEM(np.g_interface,LISTVIEW_KIND,GID_INTERFACE,NP_L_INTERFACE);
     TAG1(TAG_DONE, 0);
     ITEM(g,BUTTON_KIND,GID_NEW,NP_L_NEW);

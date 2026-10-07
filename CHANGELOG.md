@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- NetPrefs: the interface list keeps the chosen definition highlighted, and
+  loading a definition no longer flashes through every settings page (OS 3).
+
 - IPv6 to off-link hosts works again after an interface is removed and
   added back: the new address could be sent from another interface's
   link-local address, which routers drop (`ping www.google.com` timed out).
