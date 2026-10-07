@@ -1020,6 +1020,8 @@ function clipDone(): void {
 
 function clipOffer(text: string): void {
   clipText = text;
+  /* So that Cmd-V now pastes this, not the browser's older clipboard. */
+  input.amigaCopied(text);
   const line = text.replace(/\r?\n/g, " \u23ce ");
   clipTextEl.textContent = line.length > 60 ? line.slice(0, 60) + "\u2026" : line;
   clipEl.title = text.length > 400 ? text.slice(0, 400) + "\u2026" : text;
@@ -1050,7 +1052,7 @@ clipBtn.addEventListener("click", () => {
 
 /* ------------------------------------------------------------- the input -- */
 
-attachInput(view, $("box"), {
+const input = attachInput(view, $("box"), {
   send: (w) => live.word(w),
   log: (w) => log((live.open ? "> " : "· ") + w),
 });

@@ -34,7 +34,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { qualifiers, rawkeyOf, SIDED } from "./rawkey";
+import { QUAL_RCOMMAND, qualifiers, RAWKEY, rawkeyOf, SIDED } from "./rawkey";
 import type { View } from "./view";
 
 export interface InputSink {
@@ -58,6 +58,7 @@ const BROWSER_KEEPS = new Set(["KeyW", "KeyR", "KeyT", "KeyN", "KeyQ", "KeyV"]);
 
 export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   detach: () => void;
+  amigaCopied: (text: string) => void;
 } {
   let pending: { x: number; y: number; b: number } | null = null;
   let scheduled = 0;
@@ -200,12 +201,36 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
 
   /* A paste while the screen has focus.  The text is the browser's to give,
      and a paste event is the one place it gives it to a plain http:// page. */
+  /*
+   * WHOSE CLIPBOARD A PASTE IS.  The one copied to last: a copy on the Amiga
+   * followed by Cmd-V means the Amiga's text, and sending the browser's would
+   * overwrite it.  The page sees the browser's clipboard only in a paste, so
+   * "copied to last" is: the Amiga has copied since the last `cp`, and the
+   * browser still holds what that `cp` sent, or the Amiga's own text (its
+   * Copy button).  Then only Right-Amiga V goes, and the Amiga pastes its own.
+   */
+  let lastSent = "";
+  let amigaText: string | null = null;
+
+  const amigaPaste = () => {
+    const v = RAWKEY["KeyV"];
+    sink.send("kd " + v + " " + QUAL_RCOMMAND);
+    sink.send("ku " + v + " " + QUAL_RCOMMAND);
+    sink.log("paste of the Amiga's own clipboard");
+  };
+
   const onPaste = (e: ClipboardEvent) => {
     if (document.activeElement !== stage) return;
     const text = e.clipboardData?.getData("text/plain") ?? "";
     e.preventDefault();
+    if (amigaText !== null && (text === "" || text === lastSent || text === amigaText)) {
+      amigaPaste();
+      return;
+    }
     if (text === "") return;
     sink.send("cp " + text);
+    lastSent = text;
+    amigaText = null;
     const shown = text.replace(/\r?\n/g, "\u23ce");
     sink.log("cp " + (shown.length > 40 ? shown.slice(0, 40) + "..." : shown));
   };
@@ -228,6 +253,7 @@ export function attachInput(view: View, stage: HTMLElement, sink: InputSink): {
   document.addEventListener("paste", onPaste);
 
   return {
+    amigaCopied: (text: string) => { amigaText = text; },
     detach: () => {
       if (scheduled !== 0) cancelAnimationFrame(scheduled);
       releaseAll();
