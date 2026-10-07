@@ -5,6 +5,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- NetMeter remembers where it was: Project > Snapshot writes the window's
+  position and size into its icon as the LEFT, TOP, WIDTH and HEIGHT
+  ToolTypes, read at start; from a Shell they are also arguments.
+
 - NetMeter: a small, resizable Workbench window with each interface's
   addresses and its receive and send rates as bars.  Hover a name for its
   definition file and device, a bar for the totals; click an address to

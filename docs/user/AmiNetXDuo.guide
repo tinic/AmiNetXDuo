@@ -3154,6 +3154,14 @@
   window can be resized, and grows when an interface or a longer address
   arrives. The rates need this release's bsdsocket.library.
 
+  Project > Snapshot (Right-Amiga S) keeps the window where it is: the
+  position and size go into NetMeter's own icon as the ToolTypes LEFT, TOP,
+  WIDTH and HEIGHT, which are read the next time it starts, and every other
+  ToolType is left alone. From a Shell the same four are arguments, and
+  they win over the icon:
+
+      NetMeter LEFT=400 TOP=30 WIDTH=380 HEIGHT=100
+
   @{b}Drivers@{ub}
 
       DEVS:<something>.device         the card's SANA-II driver, which

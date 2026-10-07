@@ -10,6 +10,11 @@
  * once a second; the hover is polled ten times a second from the screen's
  * pointer position, so a tooltip appears over an inactive window too.
  *
+ * Its place on the screen is kept the way a Workbench tool keeps it: the
+ * LEFT, TOP, WIDTH and HEIGHT ToolTypes of its own icon, written by the
+ * Project menu's Snapshot and read at start.  From a Shell the same four are
+ * arguments, and they win over the icon.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -31,7 +36,13 @@
 #include <intuition/intuition.h>
 #include <intuition/intuitionbase.h>
 #include <intuition/screens.h>
+#include <libraries/gadtools.h>
+#include <workbench/icon.h>
+#include <workbench/startup.h>
+#include <workbench/workbench.h>
 #include <proto/dos.h>
+#include <proto/gadtools.h>
+#include <proto/icon.h>
 #include <proto/exec.h>
 #include <proto/graphics.h>
 #include <proto/intuition.h>
@@ -46,6 +57,8 @@ static const char version_tag[] __attribute__((used)) =
 struct IntuitionBase *IntuitionBase;
 struct GfxBase       *GfxBase;
 struct Library       *LayersBase;
+struct Library       *GadToolsBase;
+struct Library       *IconBase;
 
 #define NM_PAD          4       /* window edge to content                  */
 #define NM_TICK_US      100000UL
@@ -57,6 +70,25 @@ struct Library       *LayersBase;
 #define NM_ARROW_W      7
 
 enum { NM_ZONE_NONE, NM_ZONE_NAME, NM_ZONE_IP4, NM_ZONE_IP6, NM_ZONE_BARS };
+
+enum { NM_MENU_SNAPSHOT = 1, NM_MENU_QUIT };
+
+/* The four geometry ToolTypes, in the order nm.want keeps them. */
+#define NM_GEOMETRY     4
+#define NM_TT_MAX       32      /* the icon's other ToolTypes kept on a save */
+#define NM_NAME_LEN     108
+
+static const char *const nm_geometry_keys[NM_GEOMETRY] =
+    { "LEFT", "TOP", "WIDTH", "HEIGHT" };
+
+static struct NewMenu nm_menu[] =
+{
+    { NM_TITLE, (STRPTR)"Project",  NULL,       0, 0, NULL },
+    { NM_ITEM,  (STRPTR)"Snapshot", (STRPTR)"S", 0, 0, (APTR)NM_MENU_SNAPSHOT },
+    { NM_ITEM,  NM_BARLABEL,        NULL,       0, 0, NULL },
+    { NM_ITEM,  (STRPTR)"Quit",     (STRPTR)"Q", 0, 0, (APTR)NM_MENU_QUIT },
+    { NM_END,   NULL,               NULL,       0, 0, NULL }
+};
 
 typedef struct
 {
@@ -109,7 +141,13 @@ static struct
     UWORD             hover_ticks;
     UWORD             copied_ticks;
     UWORD             ticks;
-} nm = { .pen_rx = -1, .pen_tx = -1, .pen_tipback = -1, .zone_if = -1 };
+
+    struct WBStartup *wbs;          /* NULL from a Shell                   */
+    APTR              vi;
+    struct Menu      *menu;
+    LONG              want[NM_GEOMETRY];    /* -1: not given             */
+} nm = { .pen_rx = -1, .pen_tx = -1, .pen_tipback = -1, .zone_if = -1,
+         .want = { -1, -1, -1, -1 } };
 
 static ToolSnapshot nm_snap;
 
@@ -919,6 +957,164 @@ static VOID nm_timer_close(VOID)
         DeleteMsgPort(nm.tport);
 }
 
+/* ---------------------------------------------------- icon geometry, */
+
+/*
+ * The program's icon: the directory and name Workbench started it from, or
+ * from a Shell PROGDIR: and the command's own name.  The lock is borrowed.
+ */
+static BPTR nm_icon_dir(char *name, ULONG len)
+{
+    char prog[NM_NAME_LEN];
+
+    if (nm.wbs != NULL && nm.wbs->sm_NumArgs > 0)
+    {
+        tool_copy_string(name, len, (const char *)nm.wbs->sm_ArgList[0].wa_Name);
+        return nm.wbs->sm_ArgList[0].wa_Lock;
+    }
+    if (!GetProgramName((STRPTR)prog, (LONG)sizeof(prog)))
+        return (BPTR)0;
+    tool_copy_string(name, len, (const char *)FilePart((STRPTR)prog));
+    return GetProgramDir();
+}
+
+static BOOL nm_is_geometry(const char *tt)
+{
+    UWORD k;
+
+    for (k = 0; k < NM_GEOMETRY; k++)
+    {
+        const char *key = nm_geometry_keys[k];
+        ULONG       i = 0;
+
+        while (key[i] != '\0' &&
+               (tt[i] == key[i] || tt[i] == key[i] + ('a' - 'A')))
+            i++;
+        if (key[i] == '\0' && (tt[i] == '=' || tt[i] == '\0'))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+/* LEFT, TOP, WIDTH and HEIGHT from the icon, where it has them. */
+static VOID nm_read_icon(VOID)
+{
+    char               name[NM_NAME_LEN];
+    BPTR               dir, old;
+    struct DiskObject *dob;
+    UWORD              k;
+
+    if (IconBase == NULL)
+        return;
+    dir = nm_icon_dir(name, sizeof(name));
+    if (dir == (BPTR)0)
+        return;
+    old = CurrentDir(dir);
+    dob = GetDiskObject((STRPTR)name);
+    (VOID)CurrentDir(old);
+    if (dob == NULL)
+        return;
+
+    for (k = 0; k < NM_GEOMETRY && dob->do_ToolTypes != NULL; k++)
+    {
+        STRPTR v = (STRPTR)FindToolType((CONST_STRPTR *)dob->do_ToolTypes,
+                                        (CONST_STRPTR)nm_geometry_keys[k]);
+        LONG   n;
+
+        if (v != NULL && StrToLong(v, &n) > 0 && n >= 0)
+            nm.want[k] = n;
+    }
+    FreeDiskObject(dob);
+}
+
+/*
+ * Snapshot: the window's place into the icon's ToolTypes, every other
+ * ToolType and the image kept.  An icon that is not there is made from the
+ * default tool icon.  The DiskObject's own array is put back before it is
+ * freed: FreeDiskObject() frees what GetDiskObject() allocated, not ours.
+ */
+static BOOL nm_snapshot(VOID)
+{
+    static char        val[NM_GEOMETRY][24];
+    static STRPTR      tt[NM_TT_MAX + NM_GEOMETRY + 1];
+    char               name[NM_NAME_LEN];
+    LONG               v[NM_GEOMETRY];
+    BPTR               dir, old;
+    struct DiskObject *dob;
+    STRPTR            *was;
+    UWORD              i, k, n = 0;
+    BOOL               ok = FALSE;
+
+    if (IconBase == NULL)
+        return FALSE;
+    dir = nm_icon_dir(name, sizeof(name));
+    if (dir == (BPTR)0)
+        return FALSE;
+
+    v[0] = nm.win->LeftEdge; v[1] = nm.win->TopEdge;
+    v[2] = nm.win->Width;    v[3] = nm.win->Height;
+
+    old = CurrentDir(dir);
+    dob = GetDiskObject((STRPTR)name);
+    if (dob == NULL)
+        dob = GetDefDiskObject(WBTOOL);
+    if (dob != NULL)
+    {
+        was = dob->do_ToolTypes;
+        for (i = 0; was != NULL && was[i] != NULL && n < NM_TT_MAX; i++)
+            if (!nm_is_geometry((const char *)was[i]))
+                tt[n++] = was[i];
+        for (k = 0; k < NM_GEOMETRY; k++)
+        {
+            tool_copy_string(val[k], sizeof(val[k]), nm_geometry_keys[k]);
+            nm_cat(val[k], sizeof(val[k]), "=");
+            nm_cat_ulong(val[k], sizeof(val[k]), (ULONG)(v[k] < 0 ? 0 : v[k]));
+            tt[n++] = (STRPTR)val[k];
+        }
+        tt[n] = NULL;
+
+        dob->do_ToolTypes = tt;
+        ok = PutDiskObject((STRPTR)name, dob) ? TRUE : FALSE;
+        dob->do_ToolTypes = was;
+        FreeDiskObject(dob);
+    }
+    (VOID)CurrentDir(old);
+    return ok;
+}
+
+/* From a Shell the four are arguments too, and they win over the icon. */
+static BOOL nm_read_args(VOID)
+{
+    LONG           args[NM_GEOMETRY] = { 0, 0, 0, 0 };
+    struct RDArgs *rda;
+    UWORD          k;
+
+    if (nm.wbs != NULL)
+        return TRUE;
+    rda = ReadArgs((CONST_STRPTR)"LEFT/N,TOP/N,WIDTH/N,HEIGHT/N", args, NULL);
+    if (rda == NULL)
+    {
+        PrintFault(IoErr(), (CONST_STRPTR)tool_name);
+        return FALSE;
+    }
+    for (k = 0; k < NM_GEOMETRY; k++)
+        if (args[k] != 0 && *(LONG *)args[k] >= 0)
+            nm.want[k] = *(LONG *)args[k];
+    FreeArgs(rda);
+    return TRUE;
+}
+
+static VOID nm_snapshot_feedback(VOID)
+{
+    static char lines[1][NM_TIP_LEN];
+
+    tool_copy_string(lines[0], NM_TIP_LEN,
+                     nm_snapshot() ? "Position and size saved in the icon"
+                                   : "Could not save to the icon");
+    nm_tip_open(lines, 1);
+    nm.copied_ticks = NM_COPIED_TICKS;
+}
+
 /* ----------------------------------------------------------- window, */
 
 static BOOL nm_open_window(VOID)
@@ -927,17 +1123,40 @@ static BOOL nm_open_window(VOID)
     UWORD          w, h;
     int            t = 0;
 
+    WORD           left, top, sw = nm.screen->Width, sh = nm.screen->Height;
+    BOOL           outer = FALSE;
+
     nm_measure(&nm_mrp);
     w = nm_content_w(&nm_mrp);
     h = nm_content_h();
+    left = (WORD)(sw - w - 40);
+    top  = (WORD)(nm.screen->BarHeight + 20);
+
+    /* A snapshot: outer size, kept on a screen that may have shrunk since. */
+    if (nm.want[2] > 0 && nm.want[3] > 0)
+    {
+        w = (UWORD)(nm.want[2] < sw ? nm.want[2] : sw);
+        h = (UWORD)(nm.want[3] < sh ? nm.want[3] : sh);
+        outer = TRUE;
+    }
+    if (nm.want[0] >= 0) left = (WORD)nm.want[0];
+    if (nm.want[1] >= 0) top  = (WORD)nm.want[1];
+    if (outer)
+    {
+        if (left + (WORD)w > sw) left = (WORD)(sw - w);
+        if (top + (WORD)h > sh)  top  = (WORD)(sh - h);
+    }
+    if (left < 0) left = 0;
+    if (top < 0)  top = 0;
 
 #define NM_TAG(k, v) do { tags[t].ti_Tag = (k); tags[t].ti_Data = (ULONG)(v); t++; } while (0)
     NM_TAG(WA_Title,        "Network");
     NM_TAG(WA_PubScreen,    nm.screen);
-    NM_TAG(WA_InnerWidth,   w);
-    NM_TAG(WA_InnerHeight,  h);
-    NM_TAG(WA_Left,         nm.screen->Width - w - 40);
-    NM_TAG(WA_Top,          nm.screen->BarHeight + 20);
+    NM_TAG(outer ? WA_Width : WA_InnerWidth,   w);
+    NM_TAG(outer ? WA_Height : WA_InnerHeight, h);
+    NM_TAG(WA_Left,         left);
+    NM_TAG(WA_Top,          top);
+    NM_TAG(WA_NewLookMenus, TRUE);
     NM_TAG(WA_DragBar,      TRUE);
     NM_TAG(WA_DepthGadget,  TRUE);
     NM_TAG(WA_CloseGadget,  TRUE);
@@ -950,7 +1169,8 @@ static BOOL nm_open_window(VOID)
     NM_TAG(WA_MaxWidth,     ~0UL);
     NM_TAG(WA_MaxHeight,    ~0UL);
     NM_TAG(WA_IDCMP,        IDCMP_CLOSEWINDOW | IDCMP_NEWSIZE |
-                            IDCMP_REFRESHWINDOW | IDCMP_MOUSEBUTTONS);
+                            IDCMP_REFRESHWINDOW | IDCMP_MOUSEBUTTONS |
+                            IDCMP_MENUPICK);
     NM_TAG(TAG_DONE,        0);
 #undef NM_TAG
 
@@ -958,6 +1178,23 @@ static BOOL nm_open_window(VOID)
     if (nm.win == NULL)
         return FALSE;
     SetFont(nm.win->RPort, nm.dri->dri_Font);
+
+    /* The menu is a convenience: a window without one still works. */
+    nm.vi = GetVisualInfoA(nm.screen, NULL);
+    if (nm.vi != NULL)
+        nm.menu = CreateMenusA(nm_menu, NULL);
+    if (nm.menu != NULL)
+    {
+        struct TagItem lt[2];
+
+        lt[0].ti_Tag = GTMN_NewLookMenus; lt[0].ti_Data = TRUE;
+        lt[1].ti_Tag = TAG_DONE;          lt[1].ti_Data = 0;
+        if (!LayoutMenusA(nm.menu, nm.vi, lt) || !SetMenuStrip(nm.win, nm.menu))
+        {
+            FreeMenus(nm.menu);
+            nm.menu = NULL;
+        }
+    }
     return TRUE;
 }
 
@@ -1056,6 +1293,22 @@ static VOID nm_loop(VOID)
                 if (code == SELECTUP)
                     nm_click(x, y);
                 break;
+            case IDCMP_MENUPICK:
+                while (code != MENUNULL && nm.menu != NULL)
+                {
+                    struct MenuItem *it = ItemAddress(nm.menu, code);
+
+                    if (it == NULL)
+                        break;
+                    switch ((ULONG)GTMENUITEM_USERDATA(it))
+                    {
+                    case NM_MENU_SNAPSHOT: nm_snapshot_feedback(); break;
+                    case NM_MENU_QUIT:     done = TRUE;            break;
+                    default:                                       break;
+                    }
+                    code = it->NextSelect;
+                }
+                break;
             default:
                 break;
             }
@@ -1070,8 +1323,18 @@ static int netmeter_run(VOID)
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37);
     GfxBase       = (struct GfxBase *)OpenLibrary("graphics.library", 37);
     LayersBase    = OpenLibrary("layers.library", 37);
-    if (IntuitionBase == NULL || GfxBase == NULL || LayersBase == NULL)
+    GadToolsBase  = OpenLibrary("gadtools.library", 37);
+    IconBase      = OpenLibrary("icon.library", 37);
+    if (IntuitionBase == NULL || GfxBase == NULL || LayersBase == NULL ||
+        GadToolsBase == NULL)
         goto out;
+
+    nm_read_icon();
+    if (!nm_read_args())
+    {
+        rc = RETURN_ERROR;
+        goto out;
+    }
 
     nm.screen = LockPubScreen(NULL);
     if (nm.screen == NULL)
@@ -1097,7 +1360,13 @@ static int netmeter_run(VOID)
 out:
     nm_tip_close();
     if (nm.win != NULL)
+    {
+        if (nm.menu != NULL)
+            ClearMenuStrip(nm.win);
         CloseWindow(nm.win);
+    }
+    if (nm.menu != NULL) FreeMenus(nm.menu);
+    if (nm.vi != NULL)   FreeVisualInfo(nm.vi);
     nm_timer_close();
     if (nm.screen != NULL)
     {
@@ -1106,6 +1375,8 @@ out:
             FreeScreenDrawInfo(nm.screen, nm.dri);
         UnlockPubScreen(NULL, nm.screen);
     }
+    if (IconBase != NULL) CloseLibrary(IconBase);
+    if (GadToolsBase != NULL) CloseLibrary(GadToolsBase);
     if (LayersBase != NULL) CloseLibrary(LayersBase);
     if (GfxBase != NULL) CloseLibrary((struct Library *)GfxBase);
     if (IntuitionBase != NULL) CloseLibrary((struct Library *)IntuitionBase);
@@ -1135,8 +1406,8 @@ int main(int argc, char **argv)
     ULONG        have = (ULONG)me->tc_SPUpper - (ULONG)me->tc_SPLower;
     APTR         stack;
 
-    (VOID)argc;
-    (VOID)argv;
+    /* Workbench hands the WBStartup over as argv (tool_startup.S). */
+    nm.wbs = (argc == 0) ? (struct WBStartup *)argv : NULL;
 
     if (have >= NETMETER_SAFE_STACK)
         return netmeter_run();
