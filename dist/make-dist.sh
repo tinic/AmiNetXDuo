@@ -76,7 +76,7 @@ DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
 if grep -q '^AMINETXDUO_ZZ9000:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
     DEVICES+=(netdev/anxzz9000)
 fi
-CMDS=(AddNetInterface NetSetup NetPrefs Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs NetMeter Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
@@ -404,6 +404,7 @@ for cmd in "${CMDS[@]}"; do
     cp "$CMD_BUILD/src/tools/$cmd" "$TREE/C/"
 done
 cp "$INSTALL/NetPrefs.info" "$TREE/C/NetPrefs.info"
+cp "$INSTALL/NetMeter.info" "$TREE/C/NetMeter.info"
 chmod 755 "$TREE"/C/*
 
 # The ssh and scp clients, when they have been built.  Optional, because they

@@ -639,6 +639,8 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         }
 #endif
         iface->stats.packets_received++;
+        AMI_SANA2_COUNT_BYTES(iface->stats.rx_bytes_hi, iface->stats.rx_bytes,
+                              packet->nx_packet_length);
         ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV4);
         return;
     }
@@ -681,17 +683,23 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         }
 #endif
         iface->stats.packets_received++;
+        AMI_SANA2_COUNT_BYTES(iface->stats.rx_bytes_hi, iface->stats.rx_bytes,
+                              packet->nx_packet_length);
         ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV6);
         break;
 
 #ifndef NX_DISABLE_IPV4
     case AMI_ETHERTYPE_ARP:
         iface->stats.packets_received++;
+        AMI_SANA2_COUNT_BYTES(iface->stats.rx_bytes_hi, iface->stats.rx_bytes,
+                              packet->nx_packet_length);
         ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_ARP);
         break;
 
     case AMI_ETHERTYPE_RARP:
         iface->stats.packets_received++;
+        AMI_SANA2_COUNT_BYTES(iface->stats.rx_bytes_hi, iface->stats.rx_bytes,
+                              packet->nx_packet_length);
         ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_RARP);
         break;
 #endif /* !NX_DISABLE_IPV4 */

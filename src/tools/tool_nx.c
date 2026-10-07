@@ -71,6 +71,47 @@ static struct Library *nx_open(VOID)
 
 /* ------------------------------------------------------------ snapshots, */
 
+/*
+ * The byte counts, from NETSTATUS_IFBYTES, joined on the slot index.  A library
+ * without the selector answers -1 and every interface keeps have_bytes FALSE.
+ */
+static struct
+{
+    NetStatusHeader  hdr;
+    NetStatusIfBytes e[TOOL_MAX_IF];
+} nx_bytes;
+
+static VOID tool_netstatus_bytes(struct Library *base, ToolSnapshot *out)
+{
+    LONG n;
+    LONG i;
+    UWORD j;
+
+    n = tool_netstatus_query(base, NETSTATUS_IFBYTES, &nx_bytes,
+                             sizeof(nx_bytes), sizeof(NetStatusIfBytes));
+    if (n > (LONG)TOOL_MAX_IF)
+        n = (LONG)TOOL_MAX_IF;
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusIfBytes *src = &nx_bytes.e[i];
+
+        for (j = 0; j < out->iface_count; j++)
+        {
+            ToolIfInfo *info = &out->iface[j];
+
+            if (info->nx_index != src->nsb_Index || !info->have_sana2)
+                continue;
+            info->stats.rx_bytes_hi = src->nsb_RxBytesHi;
+            info->stats.rx_bytes    = src->nsb_RxBytes;
+            info->stats.tx_bytes_hi = src->nsb_TxBytesHi;
+            info->stats.tx_bytes    = src->nsb_TxBytes;
+            info->have_bytes        = TRUE;
+            break;
+        }
+    }
+}
+
 LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
 {
     struct Library *base;
@@ -98,6 +139,11 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         info->have_sana2   = FALSE;
         info->sana2_online = FALSE;
         info->bps          = 0;
+        info->have_bytes   = FALSE;
+        info->stats.rx_bytes_hi = 0;
+        info->stats.rx_bytes    = 0;
+        info->stats.tx_bytes_hi = 0;
+        info->stats.tx_bytes    = 0;
         for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
             info->mac[j] = 0;
     }
@@ -183,6 +229,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         }
     }
     out->iface_count = (UWORD)n;
+
+    tool_netstatus_bytes(base, out);
 
     if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &nx_answer,
                              sizeof(nx_answer.system),

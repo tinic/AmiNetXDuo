@@ -5,6 +5,9 @@
  * own, which an older library refuses with EINVAL.  The tool half is
  * tests/tools/host/test_tool_ifdev_host.c.
  *
+ * NETSTATUS_IFBYTES rides the same slots: each interface's byte counts, 64
+ * bits in two halves, from the shim's AmiSana2Stats.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -41,6 +44,11 @@ static AmiIfConfig          h_cfg[NX_MAX_PHYSICAL_INTERFACES];
 static LONG                 h_error;
 static BOOL                 h_ipv6_on = TRUE;
 
+/* A SANA-II interface per slot, by address only: ami_sana2_get_stats() below
+   answers from h_stats for the slot the pointer names. */
+static UBYTE                h_sana[NX_MAX_PHYSICAL_INTERFACES];
+static AmiSana2Stats        h_stats[NX_MAX_PHYSICAL_INTERFACES];
+
 /* 40 characters: the ShowNetStatus report that found this. */
 static const char h_long[] = "Workbench:Devs/Networks/x-surf-100.device";
 
@@ -49,6 +57,7 @@ static VOID h_reset(VOID)
     memset(&h_base, 0, sizeof(h_base));
     memset(&h_ip, 0, sizeof(h_ip));
     memset(h_cfg, 0, sizeof(h_cfg));
+    memset(h_stats, 0, sizeof(h_stats));
     h_base.sb_StackRefs = 1;
     h_base.sb_StackIp   = &h_ip;
     h_error             = 0;
@@ -60,6 +69,12 @@ static VOID h_attach(UWORD i, const char *device)
 
     h_ip.nx_ip_interface[i].nx_interface_valid = NX_TRUE;
     memcpy(h_cfg[i].device, device, n + 1);
+}
+
+static VOID h_attach_sana(UWORD i, const char *device)
+{
+    h_attach(i, device);
+    h_ip.nx_ip_interface[i].nx_interface_additional_link_info = &h_sana[i];
 }
 
 static UBYTE h_buffer[sizeof(NetStatusHeader) +
@@ -209,7 +224,16 @@ LONG ami_config_load_interface(const char *n, AmiIfConfig *out)
 ULONG ami_sana2_get_bps(const AmiSana2If *i)
 { (VOID)i; h_unreachable("ami_sana2_get_bps"); return 0; }
 VOID ami_sana2_get_stats(const AmiSana2If *i, AmiSana2Stats *o)
-{ (VOID)i; (VOID)o; h_unreachable("ami_sana2_get_stats"); }
+{
+    const UBYTE *p = (const UBYTE *)i;
+
+    if (p < h_sana || p >= h_sana + NX_MAX_PHYSICAL_INTERFACES)
+    {
+        h_unreachable("ami_sana2_get_stats");
+        return;
+    }
+    *o = h_stats[p - h_sana];
+}
 BOOL ami_sana2_is_online(const AmiSana2If *i)
 { (VOID)i; h_unreachable("ami_sana2_is_online"); return FALSE; }
 
@@ -383,15 +407,60 @@ static VOID t_version_mismatch_is_refused(VOID)
     CHECK(rc == -1 && h_error == AMI_EINVAL, "an older header is EINVAL");
 }
 
+/* ------------------------------------------------- NETSTATUS_IFBYTES --- */
+
+static const NetStatusIfBytes *h_bytes(UWORD i)
+{
+    return (const NetStatusIfBytes *)NETSTATUS_ENTRIES(h_hdr) + i;
+}
+
+static VOID t_bytes_arrive_per_slot(VOID)
+{
+    LONG rc;
+
+    h_reset();
+    h_attach_sana(0, "a2065.device");
+    h_attach(1, "nodevice");
+    h_stats[0].rx_bytes_hi = 2;
+    h_stats[0].rx_bytes    = 0x89ABCDEFUL;
+    h_stats[0].tx_bytes_hi = 0;
+    h_stats[0].tx_bytes    = 1234567UL;
+
+    rc = h_query(NETSTATUS_IFBYTES, (ULONG)sizeof(h_buffer),
+                 (UWORD)AMI_NETSTATUS_VERSION);
+
+    CHECK(rc == (LONG)H_SLOTS, "IFBYTES: one row per slot");
+    CHECK(h_hdr->nsh_Type == NETSTATUS_IFBYTES, "IFBYTES: the header names it");
+    CHECK(h_hdr->nsh_EntrySize == (UWORD)sizeof(NetStatusIfBytes),
+          "IFBYTES: the header states the entry size");
+    CHECK(h_bytes(0)->nsb_Index == 0 &&
+          h_bytes(0)->nsb_RxBytesHi == 2 &&
+          h_bytes(0)->nsb_RxBytes == 0x89ABCDEFUL,
+          "the receive count arrives with its high half");
+    CHECK(h_bytes(0)->nsb_TxBytesHi == 0 && h_bytes(0)->nsb_TxBytes == 1234567UL,
+          "and the send count");
+    CHECK(h_bytes(1)->nsb_Index == 1 && h_bytes(1)->nsb_RxBytes == 0 &&
+          h_bytes(1)->nsb_TxBytes == 0,
+          "a slot with no SANA-II device reads zero");
+    CHECK(h_bytes(2)->nsb_Index == 2 && h_bytes(2)->nsb_RxBytesHi == 0,
+          "an unused slot is present and zero, not stale buffer");
+}
+
+static VOID t_bytes_record_shape(VOID)
+{
+    CHECK(sizeof(NetStatusIfBytes) == 20, "NetStatusIfBytes is 20 bytes");
+    CHECK(NETSTATUS_IFBYTES == 24, "the selector number is 24");
+}
+
 /* The number above the last selector is still EINVAL: what an older library
-   says to IFDEVICES, and what the tools fall back on.  24: 23 is
-   NETSTATUS_HOSTSOURCE. */
+   says to IFDEVICES and IFBYTES, and what the tools fall back on.  25: 23 is
+   NETSTATUS_HOSTSOURCE and 24 NETSTATUS_IFBYTES. */
 static VOID t_unknown_selector_is_einval(VOID)
 {
     LONG rc;
 
     h_reset();
-    rc = h_query(24, (ULONG)sizeof(h_buffer), (UWORD)AMI_NETSTATUS_VERSION);
+    rc = h_query(25, (ULONG)sizeof(h_buffer), (UWORD)AMI_NETSTATUS_VERSION);
     CHECK(rc == -1 && h_error == AMI_EINVAL, "an unknown selector is EINVAL");
 }
 
@@ -403,6 +472,8 @@ int main(void)
     t_interface_record_is_unchanged();
     t_small_buffer_counts();
     t_version_mismatch_is_refused();
+    t_bytes_arrive_per_slot();
+    t_bytes_record_shape();
     t_unknown_selector_is_einval();
 
     printf("ifdevices checks=%lu failures=%lu\n", h_checks, h_failures);

@@ -57,6 +57,9 @@ typedef struct ToolIfInfo
     BOOL            sana2_online;
     ULONG           bps;
     AmiSana2Stats   stats;
+    /* stats.rx_bytes and stats.tx_bytes came from NETSTATUS_IFBYTES; FALSE
+       on a library without it, and the counts are then zero. */
+    BOOL            have_bytes;
 } ToolIfInfo;
 
 /*

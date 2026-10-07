@@ -2134,7 +2134,9 @@
   (help   "AddNetInterface, Online and Offline bring an interface up and "
           "take it down.  NetSetup writes an interface file from a Shell; "
           "NetPrefs is its Workbench editor for interface, address, device and "
-          "tuning settings, and preserves unknown fields.  ConfigureNetInterface "
+          "tuning settings, and preserves unknown fields.  NetMeter is a "
+          "small Workbench window with each interface's addresses and how "
+          "fast it is receiving and sending.  ConfigureNetInterface "
           "changes the address, netmask and "
           "gateway of an interface that is already running, and releases or "
           "renews its DHCP lease.  hostname reports the name of this "
@@ -2168,9 +2170,9 @@
   ; used to be (pattern "~(ssh.#?)"), keeping the per-CPU ssh.000/.020/.060 out
   ; of the wholesale copy; there is one ssh now and it comes with the rest.
   (all)
-  ; NetPrefs is the one command with a Workbench tool icon.  Without (infos)
-  ; the self-contained layout would copy the program but leave that icon in
-  ; the download, making the advertised Workbench editor invisible there.
+  ; NetPrefs and NetMeter are the commands with a Workbench tool icon.
+  ; Without (infos) the self-contained layout would copy the programs but
+  ; leave those icons in the download, making them invisible there.
   (infos)
   (optional "force"))
 
@@ -2186,6 +2188,17 @@
               "saved definition through the normal network commands.")
       (source (tackon S_C "NetPrefs"))
       (dest   "SYS:Prefs")
+      (infos)
+      (optional "force")))
+
+; NetMeter the same way, where a Workbench user looks for a small tool.
+(if (NOT DRAWER_LAYOUT)
+    (copyfiles
+      (prompt "Installing NetMeter into SYS:Utilities")
+      (help   "NetMeter shows each interface's addresses and how fast it is "
+              "receiving and sending.  Click an address to copy it.")
+      (source (tackon S_C "NetMeter"))
+      (dest   "SYS:Utilities")
       (infos)
       (optional "force")))
 

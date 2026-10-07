@@ -1166,6 +1166,7 @@
     @{"Offline         " link OFFLINE}  take an interface off the network
     NetSetup          write the configuration files from a Shell
     NetPrefs          edit interfaces and boot policy from Workbench
+    NetMeter          addresses and live rates in a small Workbench window
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
@@ -3141,6 +3142,17 @@
   screen of at least 640 by 200 pixels; a larger screen font crowds its
   labels. Save & Start and Online/Offline run the command to completion
   with the busy pointer up, up to a minute with DHCP.
+
+  NetMeter is installed in SYS:Utilities by a system installation. Its
+  window lists each running interface: a dot that is green while the link
+  is up, the name, the IPv4 address and one IPv6 address (the global one
+  when there is one), and a receive and a send bar with the rate in bytes a
+  second. The bars scale to the recent peak. Rest the pointer on a name for
+  its definition file, device and link speed; on a bar for the bytes
+  received and sent since the interface was added; on an address to see
+  that a click copies it, as text a Shell or a string gadget pastes. The
+  window can be resized, and grows when an interface or a longer address
+  arrives. The rates need this release's bsdsocket.library.
 
   @{b}Drivers@{ub}
 

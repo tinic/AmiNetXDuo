@@ -30,6 +30,15 @@
  * one NX_PACKET.  These are floors; ami_sana2_rx_plan() decides the rest.
  */
 #ifndef AMI_SANA2_RX_DEPTH_IPV4
+/* Adds n to a 64-bit byte count kept as two ULONG halves (AmiSana2Stats). */
+#define AMI_SANA2_COUNT_BYTES(hi, lo, n)                                    \
+    do {                                                                    \
+        ULONG count_n_ = (ULONG)(n);                                        \
+        (lo) += count_n_;                                                   \
+        if ((lo) < count_n_)                                                \
+            (hi)++;                                                         \
+    } while (0)
+
 #define AMI_SANA2_RX_DEPTH_IPV4     4
 #endif
 #ifndef AMI_SANA2_RX_DEPTH_ARP

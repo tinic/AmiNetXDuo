@@ -283,6 +283,7 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 # for live changes rather than growing a second stack-control path.
 aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
     netprefs_layout.c)
+aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c)
 
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
@@ -681,7 +682,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
-    tool_netsetup tool_netprefs tool_online tool_offline tool_host tool_hostname
+    tool_netsetup tool_netprefs tool_netmeter tool_online tool_offline tool_host tool_hostname
     tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
     tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
@@ -909,6 +910,16 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(test_netprefs_text PRIVATE -Wall -Wextra)
     set_target_properties(test_netprefs_text PROPERTIES C_STANDARD 11)
+
+    # NetMeter's rate and total text, the delta of a byte count kept in two
+    # 32-bit halves across its carry, and the bar scale.
+    add_executable(test_netmeter_fmt
+        test/test_netmeter_fmt.c
+        netmeter_fmt.c)
+    target_include_directories(test_netmeter_fmt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netmeter_fmt PRIVATE -Wall -Wextra)
+    set_target_properties(test_netmeter_fmt PROPERTIES C_STANDARD 11)
 
     # A kept interface file's DEVICE line follows the AmiNetXDuo: assign
     # (InstallSameFile DEVICES): only our drivers in this drawer move.
@@ -1161,6 +1172,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)
     add_test(NAME netprefs_font_layout COMMAND test_netprefs_layout)
+    add_test(NAME netmeter_arithmetic COMMAND test_netmeter_fmt)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME httphead_request_heads COMMAND test_httphead)

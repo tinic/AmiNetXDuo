@@ -327,7 +327,12 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
                              slot->req.ios2_DstAddr[5]));
         }
         else
+        {
             iface->stats.packets_sent++;
+            AMI_SANA2_COUNT_BYTES(iface->stats.tx_bytes_hi,
+                                  iface->stats.tx_bytes,
+                                  slot->total - slot->hdr_len);
+        }
 
         if (slot->packet != NULL)
         {

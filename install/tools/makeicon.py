@@ -335,6 +335,25 @@ def prefs_icon():
     return c
 
 
+def meter_icon():
+    """A network meter: a panel with a receive and a send bar, each with its
+    arrow, the receive bar fuller, as NetMeter's window usually is."""
+    c = Canvas(48, 26, GREY)
+    c.fill(2, 2, 45, 23, WHITE)
+    c.bevel(1, 1, 46, 24)
+    # Down arrow and the receive bar.
+    for i in range(4):
+        c.hline(5 + i, 11 - i, 6 + i, BLUE)
+    c.box(14, 5, 42, 10, BLACK)
+    c.fill(15, 6, 35, 9, BLUE)
+    # Up arrow and the send bar.
+    for i in range(4):
+        c.hline(5 + i, 11 - i, 18 - i, BLACK)
+    c.box(14, 15, 42, 20, BLACK)
+    c.fill(15, 16, 24, 19, BLACK)
+    return c
+
+
 # The stock Workbench 3.1 drawer, a bevelled front with a handle, for Docs
 # and Examples: a drawer that holds files should look like every other one.
 STOCK_DRAWER_ART = [
@@ -400,6 +419,10 @@ def main(argv):
             stack=8192),
         "NetPrefs.info": diskobject(
             prefs_icon(), WBTOOL,
+            tooltypes=[],
+            stack=8192),
+        "NetMeter.info": diskobject(
+            meter_icon(), WBTOOL,
             tooltypes=[],
             stack=8192),
     }

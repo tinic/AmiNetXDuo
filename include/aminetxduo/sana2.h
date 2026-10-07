@@ -232,6 +232,14 @@ typedef struct AmiSana2Stats {
        and ones that found the hold queue full and went out of turn. */
     ULONG   ack_paced;
     ULONG   ack_unpaced;
+    /* Appended.  IP bytes through the interface, each a 64-bit count in two
+       halves (AMI_SANA2_COUNT_BYTES): 32 bits wrap in under half an hour at
+       the 2.7 MB/s a Zorro III card sustains.  Frames the shim counts in
+       packets_received and packets_sent, less the link header. */
+    ULONG   rx_bytes_hi;
+    ULONG   rx_bytes;
+    ULONG   tx_bytes_hi;
+    ULONG   tx_bytes;
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);

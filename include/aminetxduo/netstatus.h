@@ -228,6 +228,24 @@ typedef struct NetStatusIfDevice
     char    nsd_Device[NETSTATUS_FILE_LEN];     /* empty when unconfigured   */
 } NetStatusIfDevice;
 
+/*
+ * NetStatusIfBytes[], one per NETSTATUS_INTERFACES slot: the IP bytes the
+ * interface has received and sent since it was added, each a 64-bit count in
+ * two halves.  Zero for a slot with no SANA-II device.  A library without
+ * this selector answers EINVAL.
+ */
+#define NETSTATUS_IFBYTES       24
+
+typedef struct NetStatusIfBytes
+{
+    UWORD   nsb_Index;                  /* nsi_Index                         */
+    UWORD   nsb_Pad;
+    ULONG   nsb_RxBytesHi;
+    ULONG   nsb_RxBytes;
+    ULONG   nsb_TxBytesHi;
+    ULONG   nsb_TxBytes;
+} NetStatusIfBytes;
+
 /* ---------------------------------------------- NETSTATUS_HOSTSOURCE --- */
 
 /*

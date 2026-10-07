@@ -178,6 +178,7 @@ the NDK does not declare and the CPU profiler.
 |---|---|
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
 | `NetPrefs` | Workbench editor for interface, address, device and tuning settings; preserves comments and unknown keywords |
+| `NetMeter` | small Workbench window: each interface's addresses (click one to copy it) and its receive and send rates |
 | `AddNetInterface`, `RemoveNetInterface` | start an interface from its file, and take one out of the running network |
 | `Online`, `Offline` | put a started interface on the wire and take it off |
 | `ConfigureNetInterface` | change the address or MTU of a running interface, renew or release its DHCP lease, turn `.local` answering on |
@@ -204,7 +205,7 @@ the NDK does not declare and the CPU profiler.
 | `hostname` | the name of this machine, and where the name came from |
 
 The installer copies all of them into `C:`; a system installation also places
-the `NetPrefs` program and icon in `SYS:Prefs`. Every command that resolves a name
+the `NetPrefs` program and icon in `SYS:Prefs`, and `NetMeter` in `SYS:Utilities`. Every command that resolves a name
 takes `-4` and `-6`.
 
 ## Files, a Shell and the display in a web browser
