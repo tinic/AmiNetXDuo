@@ -822,14 +822,22 @@ jobs:
       # Scoped to this job's workspace through the config path amiberry was
       # started with, so it cannot reach the demo guest or any other checkout
       # on the same machine.
+      # A cancelled harness can start its last guest after the first sweep:
+      # run 37611441501 left matrix-STATIC_NO_DRIVERS-install.uae running with
+      # PPID 1 three seconds after this step began and reported zero guests.
+      # Sweep for ten seconds to catch that late child as well.
       - name: Leave no guests behind
         if: always()
         run: |
           pat="amiberry .*$GITHUB_WORKSPACE/build/"
-          pkill -f "$pat" || true
-          sleep 2
-          pkill -KILL -f "$pat" || true
-          echo "leftover_guests=$(pgrep -cf "$pat" || true)"
+          for pass in 1 2 3 4 5; do
+            pkill -TERM -f "$pat" || true
+            sleep 2
+            pkill -KILL -f "$pat" || true
+          done
+          leftover_guests=$(pgrep -cf "$pat" || true)
+          echo "leftover_guests=$leftover_guests"
+          test "$leftover_guests" = 0
 
       - name: Upload emulator logs
         if: always()
