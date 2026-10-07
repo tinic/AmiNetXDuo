@@ -135,6 +135,7 @@ gate() {
 gate full 0
 OPTIONS=skipped
 gate missing-matrix 1
+OPTIONS=success
 OPTION_PLAN=reused REUSE_RUN=42
 gate reused 0
 REUSE_RUN=
@@ -143,6 +144,9 @@ REUSE_RUN=abc
 gate invalid-reuse-id 1
 MODE=shipping OPTION_PLAN=skipped REUSE_RUN=
 gate shipping 0
+OPTIONS=skipped
+gate missing-shipping-verdict 1
+OPTIONS=success
 for field in PLAN GITLINKS ANALYZE STACKFRAMES TIER1 HOST_CLANG SHELLCHECK PACKAGE; do
     for status in skipped failure cancelled; do
         export "$field=$status"
@@ -150,11 +154,12 @@ for field in PLAN GITLINKS ANALYZE STACKFRAMES TIER1 HOST_CLANG SHELLCHECK PACKA
     done
     export "$field=success"
 done
-OPTIONS=success
+OPTION_PLAN=build
 gate unexpected-matrix 1
+OPTION_PLAN=skipped
 MODE=unknown
 gate unknown-mode 1
-MODE=docs PLAN=success GITLINKS=skipped ANALYZE=skipped OPTIONS=skipped
+MODE=docs PLAN=success GITLINKS=skipped ANALYZE=skipped OPTIONS=success
 STACKFRAMES=skipped TIER1=skipped HOST_CLANG=skipped SHELLCHECK=skipped PACKAGE=skipped DOCS=success
 gate docs 0
 DOCS=failure

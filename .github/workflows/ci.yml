@@ -130,28 +130,35 @@ jobs:
       - name: tools/ci.sh analyze
         run: AMINETXDUO_ANALYZE=1 tools/ci.sh analyze
 
-  # Every option arm, one runner each.  All depend only on the cheap planner,
-  # so they still fan out together and remain off the tier1 critical path.
+  # Every option arm, one runner each.  Keep one explicit no-build verdict
+  # when the matrix is omitted: a skipped matrix job can prevent GitHub from
+  # scheduling the dependent tier 1 report at all.
   options:
     name: "cross: ${{ matrix.config }}"
     needs: plan
-    if: needs.plan.outputs.mode == 'full' && needs.plan.outputs.options == 'build'
+    if: always()
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        config: ${{ fromJSON(needs.plan.outputs.matrix) }}
+        config: ${{ fromJSON(needs.plan.outputs.mode == 'full' && needs.plan.outputs.options == 'build' && needs.plan.outputs.matrix || '["__skipped__"]') }}
     steps:
+      - name: No optional builds selected
+        if: matrix.config == '__skipped__'
+        run: echo 'option_matrix=skipped' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
+        if: matrix.config != '__skipped__'
         with:
           submodules: recursive
 
       - name: Set up the toolchain and compiler cache
+        if: matrix.config != '__skipped__'
         uses: ./.github/actions/setup-amiga
         with:
           cache-profile: cross-${{ matrix.config }}
 
       - name: Build it
+        if: matrix.config != '__skipped__'
         run: AMINETXDUO_CI_CROSS="${{ matrix.config }}" tools/ci.sh cross
 
   # stage_cross used to build this once per matrix arm.  It is invariant with
@@ -478,8 +485,8 @@ jobs:
           case "$MODE" in
             full|shipping)
               case "$MODE:$OPTION_PLAN:$OPTIONS" in
-                full:build:success|shipping:skipped:skipped) ;;
-                full:reused:skipped)
+                full:build:success|shipping:skipped:success) ;;
+                full:reused:success)
                   case "$REUSE_RUN" in ''|*[!0-9]*) exit 1 ;; esac
                   echo "option_matrix=reused source_run=$REUSE_RUN" ;;
                 *) echo "unexpected option coverage: $MODE:$OPTION_PLAN:$OPTIONS" >&2; exit 1 ;;
@@ -492,7 +499,7 @@ jobs:
               ;;
             docs)
               [ "$OPTION_PLAN" = skipped ] && [ "$DOCS" = success ] && [ "$GITLINKS" = skipped ] && [ "$ANALYZE" = skipped ] &&
-              [ "$OPTIONS" = skipped ] && [ "$STACKFRAMES" = skipped ] &&
+              [ "$OPTIONS" = success ] && [ "$STACKFRAMES" = skipped ] &&
               [ "$TIER1" = skipped ] && [ "$HOST_CLANG" = skipped ] &&
               [ "$SHELLCHECK" = skipped ] && [ "$PACKAGE" = skipped ]
               ;;
@@ -502,23 +509,23 @@ jobs:
       # Only a genuinely executed full matrix earns these markers. Shipping
       # and reused runs remain useful candidates, but cannot authorize release.
       - uses: actions/checkout@v4
-        if: needs.plan.outputs.mode == 'full' && needs.options.result == 'success'
+        if: needs.plan.outputs.mode == 'full' && needs.plan.outputs.options == 'build' && needs.options.result == 'success'
       - name: Record full coverage identity
-        if: needs.plan.outputs.mode == 'full' && needs.options.result == 'success'
+        if: needs.plan.outputs.mode == 'full' && needs.plan.outputs.options == 'build' && needs.options.result == 'success'
         id: proof
         run: |
           tree=$(git rev-parse 'HEAD^{tree}')
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
           printf 'sha=%s\ntree=%s\nrun=%s\n' "$GITHUB_SHA" "$tree" "$GITHUB_RUN_ID" > ci-full-coverage.txt
       - uses: actions/upload-artifact@v4
-        if: needs.plan.outputs.mode == 'full' && needs.options.result == 'success'
+        if: needs.plan.outputs.mode == 'full' && needs.plan.outputs.options == 'build' && needs.options.result == 'success'
         with:
           name: ci-options-tree-${{ steps.proof.outputs.tree }}
           path: ci-full-coverage.txt
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@v4
-        if: needs.plan.outputs.mode == 'full' && needs.options.result == 'success'
+        if: needs.plan.outputs.mode == 'full' && needs.plan.outputs.options == 'build' && needs.options.result == 'success'
         with:
           name: ci-full-${{ github.sha }}
           path: ci-full-coverage.txt
