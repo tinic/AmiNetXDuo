@@ -14,6 +14,7 @@
 #include "aminetxduo/nx_queue.h"
 
 #include <dos/dos.h>
+#include <stddef.h>
 
 #include <proto/dos.h>
 #include <proto/exec.h>
@@ -131,7 +132,7 @@ typedef struct AmiRxVarDef
 {
     const char *rvd_Index;
     UWORD       rvd_Count;
-    BOOL        rvd_Read;
+    UBYTE       rvd_Read;
 } AmiRxVarDef;
 
 static const AmiRxVarDef ami_rx_vardefs[RXV_COUNT] =
@@ -583,6 +584,21 @@ static UWORD ami_rx_collect_sockets(NX_IP *ip, AmiRxSocket *out, UWORD room)
 
 static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
 {
+    /* Wire order and widths are AmiTCP's getsockets() record. Keep offsets
+       rather than field pointers, so the table needs no pointer relocations. */
+    static const struct
+    {
+        UWORD offset;
+        UWORD width;
+    } fields[] = {
+        { offsetof(AmiRxSocket, rs_RecvQ),       4 },
+        { offsetof(AmiRxSocket, rs_SendQ),       4 },
+        { offsetof(AmiRxSocket, rs_Local),       8 },
+        { offsetof(AmiRxSocket, rs_LocalPort),   4 },
+        { offsetof(AmiRxSocket, rs_Foreign),     8 },
+        { offsetof(AmiRxSocket, rs_ForeignPort), 4 },
+        { offsetof(AmiRxSocket, rs_State),       1 }
+    };
     AmiNetCaller *caller;
     AmiRxSocket *mem;
     UWORD        count;
@@ -620,23 +636,19 @@ static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
     {
         const AmiRxSocket *e = &mem[i];
         BOOL               ok;
+        UWORD              j;
 
         ok = (i == 0 || ami_rx_put(r, " ", 1))
-             && ami_rx_put(r, &e->rs_Proto, 1)
-             && ami_rx_put(r, " ", 1)
-             && ami_rx_put_hex(r, e->rs_RecvQ, 4)
-             && ami_rx_put(r, " ", 1)
-             && ami_rx_put_hex(r, e->rs_SendQ, 4)
-             && ami_rx_put(r, " ", 1)
-             && ami_rx_put_hex(r, e->rs_Local, 8)
-             && ami_rx_put(r, " ", 1)
-             && ami_rx_put_hex(r, e->rs_LocalPort, 4)
-             && ami_rx_put(r, " ", 1)
-             && ami_rx_put_hex(r, e->rs_Foreign, 8)
-             && ami_rx_put(r, " ", 1)
-             && ami_rx_put_hex(r, e->rs_ForeignPort, 4)
-             && ami_rx_put(r, " ", 1)
-             && ami_rx_put_hex(r, (ULONG)e->rs_State, 1);
+             && ami_rx_put(r, &e->rs_Proto, 1);
+        for (j = 0; ok && j < sizeof(fields) / sizeof(fields[0]); j++)
+        {
+            /* rs_State is LONG: the corresponding unsigned type reads the
+               same representation as the original (ULONG) cast. */
+            const ULONG *value = (const ULONG *)((const char *)e + fields[j].offset);
+
+            ok = ami_rx_put(r, " ", 1)
+                 && ami_rx_put_hex(r, *value, fields[j].width);
+        }
 
         if (!ok)
         {
