@@ -17,13 +17,16 @@ typedef struct BsdHandoff
 } BsdHandoff;
 
 /* Open-coded NewList(). amiga.lib is not available to a shared library. */
+static VOID bsd_handoff_list_init(struct MinList *list)
+{
+    list->mlh_Head     = (struct MinNode *)&list->mlh_Tail;
+    list->mlh_Tail     = NULL;
+    list->mlh_TailPred = (struct MinNode *)&list->mlh_Head;
+}
+
 VOID bsd_handoff_init(struct AmiSocketBase *master)
 {
-    master->sb_Handoffs.mlh_Head =
-        (struct MinNode *)&master->sb_Handoffs.mlh_Tail;
-    master->sb_Handoffs.mlh_Tail     = NULL;
-    master->sb_Handoffs.mlh_TailPred =
-        (struct MinNode *)&master->sb_Handoffs.mlh_Head;
+    bsd_handoff_list_init(&master->sb_Handoffs);
 
     /*
      * UNIQUE_ID (-1) asks us to invent an id, so generated ones start clear of
@@ -182,14 +185,6 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
      * as_Owner left at the releasing base lets a receive callback Signal() a
      */
     return id;
-}
-
-/* Open-coded NewList() for a MinList of entries. */
-static VOID bsd_handoff_list_init(struct MinList *list)
-{
-    list->mlh_Head     = (struct MinNode *)&list->mlh_Tail;
-    list->mlh_Tail     = NULL;
-    list->mlh_TailPred = (struct MinNode *)&list->mlh_Head;
 }
 
 /* Is anything parked?  Read under sb_Lock. */
