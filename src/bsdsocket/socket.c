@@ -936,6 +936,7 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
                                    UWORD domain, UWORD type, LONG protocol)
 {
     AmiSocket *sock = (AmiSocket *)ami_alloc(sizeof(AmiSocket));
+    ULONG      version = NX_IP_VERSION_V4;
 
     if (sock == NULL)
         return NULL;
@@ -969,24 +970,22 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
         default:          sock->as_Flags = ASF_UDP; break;
     }
 
-    /* A zeroed NXD_ADDRESS has version 0, not NX_IP_VERSION_V4; every
-       "is this address unset" test checks the version tag first. */
-    bsd_addr_from_v4(&sock->as_LocalAddr, 0UL);
-    bsd_addr_from_v4(&sock->as_PeerAddr, 0UL);
-
 #ifdef AMINETXDUO_IPV6
     if (domain == AF_INET6)
     {
         sock->as_Flags |= ASF_INET6;
-
-        sock->as_LocalAddr.nxd_ip_version = NX_IP_VERSION_V6;
-        sock->as_PeerAddr.nxd_ip_version  = NX_IP_VERSION_V6;
+        version = NX_IP_VERSION_V6;
 
         /*
          * IPV6_V6ONLY defaults to off, so an AF_INET6 socket is dual-stack.
          */
     }
 #endif
+
+    /* ami_alloc clears both address payloads. Only their version tags need
+       initialization: an unspecified address still has its family's tag. */
+    sock->as_LocalAddr.nxd_ip_version = version;
+    sock->as_PeerAddr.nxd_ip_version  = version;
 
     ami_mem_socket_delta(1);
 
