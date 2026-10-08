@@ -6,6 +6,7 @@
 #include "tx_timer.h"
 #include "tx_mutex.h"
 #include "tx_event_flags.h"
+#include "tx_semaphore.h"
 #include <string.h>
 
 TX_THREAD *_tx_thread_current_ptr;
@@ -28,6 +29,8 @@ TX_MUTEX *_tx_mutex_created_ptr;
 ULONG _tx_mutex_created_count;
 TX_EVENT_FLAGS_GROUP *_tx_event_flags_created_ptr;
 ULONG _tx_event_flags_created_count;
+TX_SEMAPHORE *_tx_semaphore_created_ptr;
+ULONG _tx_semaphore_created_count;
 
 static void need(int condition, const char *message)
 {
@@ -66,7 +69,8 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
         need(!threads && !timers && !contexts && !current_frame &&
              !_tx_thread_preempt_disable && !resume_hook_depth && !_tx_timer_created_count &&
              !timer_dispatch && !runtime_holds && !_tx_mutex_created_count && !_tx_mutex_created_ptr &&
-             !_tx_event_flags_created_count && !_tx_event_flags_created_ptr, "reinitialize active domain");
+             !_tx_event_flags_created_count && !_tx_event_flags_created_ptr &&
+             !_tx_semaphore_created_count && !_tx_semaphore_created_ptr, "reinitialize active domain");
     platform = p;
     threads = 0;
     timers = 0;
@@ -82,6 +86,7 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     runtime_holds=0;
     _tx_mutex_created_ptr=TX_NULL; _tx_mutex_created_count=0;
     _tx_event_flags_created_ptr=TX_NULL; _tx_event_flags_created_count=0;
+    _tx_semaphore_created_ptr=TX_NULL; _tx_semaphore_created_count=0;
 }
 
 void anx_tx_runtime_hold(void)
@@ -627,6 +632,23 @@ static int event_member(TX_EVENT_FLAGS_GROUP *g)
     need(node==_tx_event_flags_created_ptr,"event created ring/count mismatch");
     return member;
 }
+static int semaphore_member(TX_SEMAPHORE *s)
+{
+    TX_SEMAPHORE *node=_tx_semaphore_created_ptr;
+    int member=0;
+    need((node!=TX_NULL)==(_tx_semaphore_created_count!=0),"semaphore created head/count mismatch");
+    for (ULONG i=0;i<_tx_semaphore_created_count;i++) {
+        need(node && node->tx_semaphore_id==TX_SEMAPHORE_ID && node->tx_semaphore_created_next &&
+             node->tx_semaphore_created_previous &&
+             node->tx_semaphore_created_next->tx_semaphore_created_previous==node &&
+             node->tx_semaphore_created_previous->tx_semaphore_created_next==node &&
+             (!i || node!=_tx_semaphore_created_ptr),"invalid semaphore created ring");
+        if (node==s) member=1;
+        node=node->tx_semaphore_created_next;
+    }
+    need(node==_tx_semaphore_created_ptr,"semaphore created ring/count mismatch");
+    return member;
+}
 static void object_lifecycle(void)
 {
     need_context();
@@ -821,6 +843,53 @@ UINT _tx_event_flags_set(TX_EVENT_FLAGS_GROUP *g, ULONG flags, UINT option)
     need(!g->tx_event_flags_group_set_notify,"event notification callback not implemented");
 #endif
     return anx_tx_original_event_flags_set(g,flags,option);
+}
+
+/* Actual pinned semaphore count/FIFO/cleanup services, used by library RAW
+ * sockets and SANA-II reader handshakes. Quiescent deletion only; pending
+ * resume/abort references retain the object even after its raw waiter unlinks.
+ * No count wrap, notification callbacks or forced deletion are implemented. */
+UINT anx_tx_original_semaphore_create(TX_SEMAPHORE *,CHAR *,ULONG);
+UINT anx_tx_original_semaphore_delete(TX_SEMAPHORE *);
+UINT anx_tx_original_semaphore_get(TX_SEMAPHORE *,ULONG);
+UINT anx_tx_original_semaphore_put(TX_SEMAPHORE *);
+UINT _tx_semaphore_create(TX_SEMAPHORE *s,CHAR *name,ULONG initial)
+{
+    object_lifecycle();
+    if (!s || semaphore_member(s)) return TX_SEMAPHORE_ERROR;
+    need(_tx_semaphore_created_count!=(ULONG)-1,"semaphore created count overflow");
+    return anx_tx_original_semaphore_create(s,name,initial);
+}
+UINT _tx_semaphore_delete(TX_SEMAPHORE *s)
+{
+    object_lifecycle();
+    if (!s || !semaphore_member(s)) return TX_SEMAPHORE_ERROR;
+    if (s->tx_semaphore_suspended_count || s->tx_semaphore_suspension_list || object_referenced(s))
+        return TX_FEATURE_NOT_ENABLED;
+    return anx_tx_original_semaphore_delete(s);
+}
+UINT _tx_semaphore_get(TX_SEMAPHORE *s,ULONG wait)
+{
+    need_context();
+    if (!s || !semaphore_member(s)) return TX_SEMAPHORE_ERROR;
+    if (wait!=TX_NO_WAIT) {
+        TX_THREAD *thread=_tx_thread_identify();
+        need(thread && contexts==1 && !resume_hook_depth,"unsupported semaphore blocking context");
+        need(thread->tx_thread_suspension_sequence!=(ULONG)-1,"semaphore suspension sequence exhausted");
+        need(s->tx_semaphore_suspended_count!=(UINT)-1,"semaphore waiter count overflow");
+    }
+    return anx_tx_original_semaphore_get(s,wait);
+}
+UINT _tx_semaphore_put(TX_SEMAPHORE *s)
+{
+    need_context();
+    if (!s || !semaphore_member(s)) return TX_SEMAPHORE_ERROR;
+#ifndef TX_DISABLE_NOTIFY_CALLBACKS
+    need(!s->tx_semaphore_put_notify,"semaphore notification callback not implemented");
+#endif
+    if (!s->tx_semaphore_suspended_count && s->tx_semaphore_count==(ULONG)-1)
+        return TX_CEILING_EXCEEDED;
+    return anx_tx_original_semaphore_put(s);
 }
 
 static void timer_lifecycle(void)

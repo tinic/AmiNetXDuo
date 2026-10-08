@@ -6,6 +6,7 @@
 #include "tx_timer.h"
 #include "tx_mutex.h"
 #include "tx_event_flags.h"
+#include "tx_semaphore.h"
 #include "nx_ip.h"
 #include "nx_packet.h"
 #include "nx_udp.h"
@@ -24,6 +25,7 @@ static AnxExecWait pw;
 static AnxExecThread workers[3];
 static AnxExecTask attached_probe;
 static TX_EVENT_FLAGS_GROUP commands;
+static TX_SEMAPHORE semaphore,forged;
 static struct {ULONG before,bytes[2048],after;} stacks[5];
 static union {ULONG align;UBYTE bytes[32768];} arena;
 static NX_PACKET *held[64];
@@ -138,7 +140,11 @@ static VOID consumer(ULONG input)
     NX_PACKET *packet=0;
     UBYTE data[193];ULONG copied=0;
     if (input>1 || tx_thread_identify()!=&threads[input+1]) {errors++;return;}
-    if (mode[input]==2) {
+    if (mode[input]>=3) {
+        result[input]=tx_semaphore_get(&semaphore,mode[input]==4?2:TX_WAIT_FOREVER);
+        UINT expected=mode[input]==3?TX_SUCCESS:mode[input]==4?TX_NO_INSTANCE:TX_WAIT_ABORTED;
+        if (result[input]!=expected) errors++;
+    } else if (mode[input]==2) {
         result[input]=nx_packet_allocate(&pool,&packet,NX_UDP_PACKET,TX_WAIT_FOREVER);
         if (result[input]!=NX_SUCCESS || !packet || nx_packet_release(packet)!=NX_SUCCESS) errors++;
     } else {
@@ -194,6 +200,7 @@ static int await(unsigned kind,unsigned count)
         if (kind==1) ready=sockets[1].nx_udp_socket_receive_suspended_count==count;
         if (kind==2) ready=pool.nx_packet_pool_suspended_count==count;
         if (kind==3) ready=done[count]!=0;
+        if (kind==4) ready=semaphore.tx_semaphore_suspended_count==count;
         if (!ready && tx_thread_sleep(1)!=TX_SUCCESS) errors++;
         anx_tx_context_end(&f);
     }
@@ -304,6 +311,65 @@ int main(void)
         CHECK(pool.nx_packet_pool_available==pool.nx_packet_pool_total);
         anx_tx_context_end(&f);
         if (!cycle) CASE("actual-pool-release-hands-ownership-to-waiter-and-all-packets-recover");
+        /* Actual library semaphore services: RAW receive and SANA-II ready/
+         * exit handshakes require the same pinned count/FIFO/cleanup contract. */
+        anx_tx_context_begin(&f,&parent,0);
+        CHECK(tx_semaphore_create(&semaphore,(CHAR *)"library handoff",0)==TX_SUCCESS &&
+              _tx_semaphore_created_count==1 && _tx_semaphore_created_ptr==&semaphore);
+        CHECK(tx_semaphore_create(&semaphore,(CHAR *)"duplicate",1)==TX_SEMAPHORE_ERROR &&
+              !semaphore.tx_semaphore_count && _tx_semaphore_created_count==1);
+        forged.tx_semaphore_id=TX_SEMAPHORE_ID;
+        CHECK(tx_semaphore_get(&forged,TX_NO_WAIT)==TX_SEMAPHORE_ERROR &&
+              tx_semaphore_put(&forged)==TX_SEMAPHORE_ERROR && tx_semaphore_delete(&forged)==TX_SEMAPHORE_ERROR);
+        CHECK(tx_semaphore_get(&semaphore,TX_NO_WAIT)==TX_NO_INSTANCE);
+        anx_tx_context_end(&f);
+        if (!cycle) CASE("library-semaphore-created-ring-duplicate-forged-and-no-instance-guards");
+        done[0]=done[1]=0;mode[0]=mode[1]=3;
+        CHECK(start(1) && await(4,1) && start(2) && await(4,2));
+        anx_tx_context_begin(&f,&parent,0);
+        CHECK(semaphore.tx_semaphore_suspension_list==&threads[1] &&
+              threads[1].tx_thread_suspended_next==&threads[2] &&
+              tx_semaphore_delete(&semaphore)==TX_FEATURE_NOT_ENABLED && _tx_semaphore_created_count==1);
+        anx_tx_context_end(&f);
+        if (!cycle) CASE("two-real-library-semaphore-consumers-FIFO-and-busy-delete-refusal");
+        anx_tx_context_begin(&f,&parent,0);
+        CHECK(tx_semaphore_put(&semaphore)==TX_SUCCESS && !semaphore.tx_semaphore_count &&
+              semaphore.tx_semaphore_suspended_count==1 && semaphore.tx_semaphore_suspension_list==&threads[2] &&
+              !done[0] && !done[1]);
+        anx_tx_context_end(&f);
+        CHECK(reap(1) && done[0]==1 && !done[1] && result[0]==TX_SUCCESS);
+        if (!cycle) CASE("actual-semaphore-put-directly-hands-first-token-without-count-inflation");
+        anx_tx_context_begin(&f,&parent,0);
+        CHECK(tx_semaphore_put(&semaphore)==TX_SUCCESS && !semaphore.tx_semaphore_count &&
+              !semaphore.tx_semaphore_suspended_count && !semaphore.tx_semaphore_suspension_list &&
+              tx_semaphore_delete(&semaphore)==TX_FEATURE_NOT_ENABLED && !done[1]);
+        anx_tx_context_end(&f);
+        CHECK(reap(2) && done[1]==1 && result[1]==TX_SUCCESS);
+        if (!cycle) CASE("second-FIFO-token-pins-object-through-pending-native-resume");
+        done[0]=0;mode[0]=4;
+        CHECK(start(1) && reap(1) && done[0]==1 && result[0]==TX_NO_INSTANCE &&
+              !semaphore.tx_semaphore_suspended_count && !semaphore.tx_semaphore_suspension_list);
+        if (!cycle) CASE("finite-library-semaphore-timeout-runs-real-cleanup-and-reaps-private-IO");
+        done[0]=0;mode[0]=5;
+        CHECK(start(1) && await(4,1));
+        anx_tx_context_begin(&f,&parent,0);
+        CHECK(tx_thread_wait_abort(&threads[1])==TX_SUCCESS && !semaphore.tx_semaphore_suspended_count &&
+              !semaphore.tx_semaphore_suspension_list && !threads[1].tx_thread_suspend_cleanup &&
+              tx_thread_wait_abort(&threads[1])==TX_WAIT_ABORT_ERROR &&
+              tx_semaphore_delete(&semaphore)==TX_FEATURE_NOT_ENABLED && !done[0]);
+        anx_tx_context_end(&f);
+        CHECK(reap(1) && done[0]==1 && result[0]==TX_WAIT_ABORTED);
+        if (!cycle) CASE("real-semaphore-abort-cleanup-preserves-pending-resume-object-lifetime");
+        anx_tx_context_begin(&f,&parent,0);
+        CHECK(tx_semaphore_delete(&semaphore)==TX_SUCCESS && !_tx_semaphore_created_count && !_tx_semaphore_created_ptr);
+        memset(&semaphore,0x5a,sizeof(semaphore));
+        CHECK(tx_semaphore_create(&semaphore,(CHAR *)"ceiling",(ULONG)-1)==TX_SUCCESS &&
+              tx_semaphore_put(&semaphore)==TX_CEILING_EXCEEDED && semaphore.tx_semaphore_count==(ULONG)-1 &&
+              tx_semaphore_get(&semaphore,TX_NO_WAIT)==TX_SUCCESS && tx_semaphore_put(&semaphore)==TX_SUCCESS &&
+              tx_semaphore_delete(&semaphore)==TX_SUCCESS && !_tx_semaphore_created_count && !_tx_semaphore_created_ptr &&
+              tx_semaphore_get(&semaphore,TX_NO_WAIT)==TX_SEMAPHORE_ERROR);
+        anx_tx_context_end(&f);
+        if (!cycle) CASE("semaphore-count-never-wraps-quiescent-delete-and-poisoned-storage-reuse");
         CHECK(command(CLOSE) && !io.open && !record.io && !io.pending);
         if (!cycle) CASE("owner-closes-idle-driver-lease-and-rejects-late-operations");
         CHECK(reap(0) && _tx_thread_created_count==1 && completions==2*(cycle+1));
@@ -338,6 +404,6 @@ int main(void)
     anx_tx_context_begin(&f,&parent,0);CHECK(nx_packet_pool_delete(&pool)==NX_SUCCESS);anx_tx_context_end(&f);
     CHECK(anx_tx_detach(&pb) && anx_exec_wait_close(&pw));anx_tx_runtime_init(anx_tx_exec_platform());
     CASE("all-native-workers-signals-stacks-pool-and-runtime-recovered");
-    CHECK(passed==18 && reaped==10 && !errors);
-    say("research_exec_io=PASS 18/18 workers_reaped=10 helpers_reaped=2 clocks_reaped=2 restarts=1\n");return 0;
+    CHECK(passed==25 && reaped==18 && !errors);
+    say("research_exec_io=PASS 25/25 workers_reaped=18 helpers_reaped=2 clocks_reaped=2 restarts=1\n");return 0;
 }

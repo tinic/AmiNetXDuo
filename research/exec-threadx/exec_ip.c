@@ -6,6 +6,7 @@
 #include "tx_timer.h"
 #include "tx_mutex.h"
 #include "tx_event_flags.h"
+#include "tx_semaphore.h"
 #include "nx_ip.h"
 #include "nx_packet.h"
 #include "nx_system.h"
@@ -56,6 +57,7 @@ static int create_ready(TX_THREAD *caller,NX_PACKET_POOL *pool)
         caller->tx_thread_preempt_threshold!=caller->tx_thread_user_priority ||
         caller->tx_thread_owned_mutex_count || caller->tx_thread_owned_mutex_list ||
         _nx_ip_created_count || _nx_ip_created_ptr || _tx_thread_created_count || _tx_thread_created_ptr ||
+        _tx_semaphore_created_count || _tx_semaphore_created_ptr ||
         _tx_mutex_created_count || _tx_mutex_created_ptr ||
         _tx_event_flags_created_count || _tx_event_flags_created_ptr ||
         _tx_timer_created_count || _tx_timer_created_ptr || _tx_thread_preempt_disable ||
@@ -255,6 +257,7 @@ static int delete_ready(NX_IP *ip)
         if (ip->nx_ip_interface[i].nx_interface_valid) return 0;
     return !(ip->nx_ip_udp_created_sockets_count || ip->nx_ip_tcp_created_sockets_count ||
         ip->nx_ip_id!=NX_IP_ID || _nx_ip_created_count!=1 || _nx_ip_created_ptr!=ip ||
+        _tx_semaphore_created_count || _tx_semaphore_created_ptr ||
         _tx_mutex_created_count!=1 || _tx_mutex_created_ptr!=&ip->nx_ip_protection ||
         _tx_event_flags_created_count!=1 || _tx_event_flags_created_ptr!=&ip->nx_ip_events ||
         _tx_timer_created_count!=timer_count || (timer_count==1 && _tx_timer_created_ptr!=&ip->nx_ip_periodic_timer) ||
@@ -315,6 +318,7 @@ UINT anx_exec_ip_delete(AnxExecIp *r)
         anx_tx_unsupported("IP delete after acknowledgement lost quiescence");
     r->capability=2;status=_nx_ip_delete(ip);r->capability=0;
     if (status!=NX_SUCCESS || ip->nx_ip_id || _nx_ip_created_count || _tx_thread_created_count ||
+        _tx_semaphore_created_count || _tx_semaphore_created_ptr ||
         _tx_mutex_created_count || _tx_event_flags_created_count || _tx_timer_created_count ||
         r->helper.state!=ANX_THREAD_REAPED)
         anx_tx_unsupported("real IP delete failed supported contract");

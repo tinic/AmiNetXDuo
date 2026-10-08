@@ -3,6 +3,7 @@
 #include "tx_bridge.h"
 #include "tx_mutex.h"
 #include "tx_event_flags.h"
+#include "tx_semaphore.h"
 #include "object_probe.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,7 @@ static unsigned depth;
 static const char *reject;
 static TX_MUTEX m;
 static TX_EVENT_FLAGS_GROUP g;
+static TX_SEMAPHORE sem;
 static void enter(void *p) {(void)p;depth++;}
 static void leave(void *p) {(void)p;CHECK(depth);depth--;}
 static uintptr_t caller(void *p) {(void)p;return 1;}
@@ -20,7 +22,8 @@ static void panic(void *p,const char *s)
     (void)p;
     if (reject && !strcmp(s,reject)) {
         CHECK((m.tx_mutex_id==TX_MUTEX_ID && _tx_mutex_created_count==1) ||
-              (g.tx_event_flags_group_id==TX_EVENT_FLAGS_ID && _tx_event_flags_created_count==1));
+              (g.tx_event_flags_group_id==TX_EVENT_FLAGS_ID && _tx_event_flags_created_count==1) ||
+              (sem.tx_semaphore_id==TX_SEMAPHORE_ID && _tx_semaphore_created_count==1));
         puts("research_object_guard=PASS live object preserved at fatal guard");exit(0);
     }
     fprintf(stderr,"panic %s\n",s);exit(1);
@@ -37,7 +40,8 @@ int main(int argc,char **argv)
     CHECK(anx_tx_attach(&bridge,&thread,&wait,1));anx_tx_context_begin(&f,&thread,0);
     if (argc>1) {
         CHECK(argc==2);
-        if (!strcmp(argv[1],"--reject-reset-event")) CHECK(tx_event_flags_create(&g,(CHAR *)"live")==TX_SUCCESS);
+        if (!strcmp(argv[1],"--reject-reset-semaphore")) CHECK(tx_semaphore_create(&sem,(CHAR *)"live",0)==TX_SUCCESS);
+        else if (!strcmp(argv[1],"--reject-reset-event")) CHECK(tx_event_flags_create(&g,(CHAR *)"live")==TX_SUCCESS);
         else CHECK(tx_mutex_create(&m,(CHAR *)"live",TX_NO_INHERIT)==TX_SUCCESS);
         anx_tx_context_end(&f);
         if (!strcmp(argv[1],"--reject-outside")) {
@@ -46,7 +50,8 @@ int main(int argc,char **argv)
             reject="object lifecycle in callback or marked context not implemented";
             anx_tx_context_begin(&f,TX_NULL,1);(void)tx_mutex_delete(&m);
         } else {
-            CHECK(!strcmp(argv[1],"--reject-reset-mutex") || !strcmp(argv[1],"--reject-reset-event"));
+            CHECK(!strcmp(argv[1],"--reject-reset-mutex") || !strcmp(argv[1],"--reject-reset-event") ||
+                  !strcmp(argv[1],"--reject-reset-semaphore"));
             CHECK(anx_tx_detach(&bridge));reject="reinitialize active domain";anx_tx_runtime_init(&p);
         }
         CHECK(0);
