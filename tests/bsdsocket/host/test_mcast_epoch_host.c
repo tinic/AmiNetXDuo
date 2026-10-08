@@ -229,6 +229,113 @@ static void t_membership_paths(BOOL v6)
     check(h_depth == 0 && h_enters == h_leaves, "all acquired membership brackets balanced");
 }
 
+static LONG h_scalar_option(struct AmiSocketBase *base, AmiSocket *sock,
+                             BOOL v6, BOOL loop, BOOL get, APTR out, socklen_t *len)
+{
+    if (v6)
+    {
+        LONG option = loop ? AMI_IPV6_MULTICAST_LOOP_BSD : AMI_IPV6_MULTICAST_HOPS_BSD;
+        return get ? bsd_mcast6_getopt(base, sock, option, out, len)
+                   : bsd_mcast6_setopt(base, sock, option, out, *len);
+    }
+    else
+    {
+        LONG option = loop ? IP_MULTICAST_LOOP : IP_MULTICAST_TTL;
+        return get ? bsd_mcast_getopt(base, sock, option, out, len)
+                   : bsd_mcast_setopt(base, sock, option, out, *len);
+    }
+}
+
+static void t_scalar_widths(BOOL v6, BOOL loop)
+{
+    struct AmiSocketBase base;
+    AmiSocket sock;
+    socklen_t offered;
+    unsigned before = h_attempts;
+
+    memset(&base, 0, sizeof(base));
+    memset(&sock, 0, sizeof(sock));
+    for (offered = 0; offered <= 6; offered++)
+    {
+        UBYTE data[8], expect[8];
+        LONG value = 127;
+        WORD word = 127;
+        socklen_t len = offered;
+        socklen_t used = offered >= sizeof(LONG) ? sizeof(LONG) :
+                         offered >= sizeof(WORD) ? sizeof(WORD) : sizeof(UBYTE);
+        BOOL valid = offered >= (v6 ? sizeof(WORD) : sizeof(UBYTE));
+        LONG *field = v6 ? &sock.as_Mcast6Hops :
+                           loop ? &sock.as_McastLoop : &sock.as_McastTtl;
+        LONG expected = v6 && loop ? 23 : loop ? 1 : 127;
+        LONG rc;
+
+        *field = 23;
+        memset(data, 0xA5, sizeof(data));
+        if (used == sizeof(LONG))
+            memcpy(data + 1, &value, sizeof(value));
+        else if (used == sizeof(WORD))
+            memcpy(data + 1, &word, sizeof(word));
+        else
+            data[1] = 127;
+        rc = h_scalar_option(&base, &sock, v6, loop, FALSE, data + 1, &len);
+        check(valid ? rc == 0 && *field == expected :
+                      rc == -1 && h_error == AMI_EINVAL && *field == 23,
+              "multicast setter retains family width rules and selected field");
+        value = v6 && loop ? 0 : *field;
+        word = (WORD)value;
+        memset(data, 0xA5, sizeof(data));
+        memset(expect, 0xA5, sizeof(expect));
+        if (valid)
+        {
+            if (used == sizeof(LONG))
+                memcpy(expect + 1, &value, sizeof(value));
+            else if (used == sizeof(WORD))
+                memcpy(expect + 1, &word, sizeof(word));
+            else
+                expect[1] = (UBYTE)value;
+        }
+        len = offered;
+        rc = h_scalar_option(&base, &sock, v6, loop, TRUE, data + 1, &len);
+        check(valid ? rc == 0 && len == used :
+                      rc == -1 && h_error == AMI_EINVAL && len == offered,
+              "multicast getter returns supported width or preserves rejected length");
+        check(memcmp(data, expect, sizeof(data)) == 0,
+              "multicast getter writes exact bytes with both canaries intact");
+        len = offered;
+        check(h_scalar_option(&base, &sock, v6, loop, FALSE, NULL, &len) == -1 &&
+              h_error == AMI_EFAULT, "null setter wins over bad length");
+        check(h_scalar_option(&base, &sock, v6, loop, TRUE, NULL, &len) == -1 &&
+              h_error == AMI_EFAULT, "null getter wins over bad length");
+    }
+    for (offered = sizeof(WORD); offered <= sizeof(LONG); offered += sizeof(WORD))
+    {
+        UBYTE data[sizeof(LONG) + 1];
+        LONG value = -1;
+        WORD word = -1;
+        socklen_t len = offered;
+        LONG *field = v6 ? &sock.as_Mcast6Hops :
+                           loop ? &sock.as_McastLoop : &sock.as_McastTtl;
+
+        *field = 23;
+        if (offered == sizeof(WORD))
+            memcpy(data + 1, &word, sizeof(word));
+        else
+            memcpy(data + 1, &value, sizeof(value));
+        value = h_scalar_option(&base, &sock, v6, loop, FALSE, data + 1, &len);
+        check(v6 || loop ? value == 0 && *field == (v6 && loop ? 23 : 1) :
+                          value == -1 && h_error == AMI_EINVAL && *field == 23,
+              "signed word/long -1 keeps TTL/default-hop/loop distinctions");
+    }
+    {
+        UBYTE data[8];
+        memset(data, 0xA5, sizeof(data));
+        check(h_scalar_option(&base, &sock, v6, loop, TRUE, data + 1, NULL) == -1 &&
+              h_error == AMI_EFAULT && data[1] == 0xA5,
+              "null getter length is EFAULT without writing output");
+    }
+    check(h_attempts == before, "scalar copy/validation does not enter NetX");
+}
+
 int main(void)
 {
     AmiSocket a;
@@ -359,6 +466,10 @@ int main(void)
 
     t_membership_paths(FALSE);
     t_membership_paths(TRUE);
+    t_scalar_widths(FALSE, FALSE);
+    t_scalar_widths(FALSE, TRUE);
+    t_scalar_widths(TRUE, FALSE);
+    t_scalar_widths(TRUE, TRUE);
 
     printf("mcast epoch: %u checks, %u failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

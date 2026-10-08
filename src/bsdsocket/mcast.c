@@ -304,13 +304,17 @@ VOID bsd_mcast_loop_end(BsdMcastLoopGuard *guard)
 /*
  * 4.4BSD types IP_MULTICAST_TTL and IP_MULTICAST_LOOP as u_char and everything
  * written since passes an int, so every width is taken here.  getsockopt
- * answers in whichever width the caller offered room for.  A program that
+ * answers in whichever width the caller offered room for. IPv6 shares the
+ * word/long paths, with a higher minimum that excludes byte values.
  */
-static LONG bsd_mcast_get_byte_or_long(struct AmiSocketBase *base, APTR optval,
-                                       socklen_t optlen, LONG *value)
+static LONG bsd_mcast_get_number(struct AmiSocketBase *base, APTR optval,
+                                  socklen_t optlen, LONG *value,
+                                  socklen_t minimum)
 {
     if (optval == NULL)
         return bsd_fail(base, AMI_EFAULT);
+    if (optlen < minimum)
+        return bsd_fail(base, AMI_EINVAL);
 
     if (optlen >= (socklen_t)sizeof(LONG))
         bsd_bcopy(optval, value, sizeof(*value));
@@ -321,19 +325,20 @@ static LONG bsd_mcast_get_byte_or_long(struct AmiSocketBase *base, APTR optval,
         bsd_bcopy(optval, &short_value, sizeof(short_value));
         *value = (LONG)short_value;
     }
-    else if (optlen >= (socklen_t)sizeof(UBYTE))
+    else /* The minimum check permits this byte only for IPv4. */
         *value = (LONG)*(UBYTE *)optval;
-    else
-        return bsd_fail(base, AMI_EINVAL);
 
     return 0;
 }
 
-static LONG bsd_mcast_put_byte_or_long(struct AmiSocketBase *base, APTR optval,
-                                       socklen_t *optlen, LONG value)
+static LONG bsd_mcast_put_number(struct AmiSocketBase *base, APTR optval,
+                                  socklen_t *optlen, LONG value,
+                                  socklen_t minimum)
 {
     if (optval == NULL || optlen == NULL)
         return bsd_fail(base, AMI_EFAULT);
+    if (*optlen < minimum)
+        return bsd_fail(base, AMI_EINVAL);
 
     if (*optlen >= (socklen_t)sizeof(LONG))
     {
@@ -347,14 +352,10 @@ static LONG bsd_mcast_put_byte_or_long(struct AmiSocketBase *base, APTR optval,
         bsd_bcopy(&short_value, optval, sizeof(short_value));
         *optlen = (socklen_t)sizeof(WORD);
     }
-    else if (*optlen >= (socklen_t)sizeof(UBYTE))
+    else /* The minimum check permits this byte only for IPv4. */
     {
         *(UBYTE *)optval = (UBYTE)value;
         *optlen = (socklen_t)sizeof(UBYTE);
-    }
-    else
-    {
-        return bsd_fail(base, AMI_EINVAL);
     }
 
     return 0;
@@ -420,7 +421,7 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
         }
 
         case IP_MULTICAST_TTL:
-            if (bsd_mcast_get_byte_or_long(base, optval, optlen, &value) != 0)
+            if (bsd_mcast_get_number(base, optval, optlen, &value, sizeof(UBYTE)) != 0)
                 return -1;
             if (value < 0 || value > 255)
                 return bsd_fail(base, AMI_EINVAL);
@@ -429,7 +430,7 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             return 0;
 
         case IP_MULTICAST_LOOP:
-            if (bsd_mcast_get_byte_or_long(base, optval, optlen, &value) != 0)
+            if (bsd_mcast_get_number(base, optval, optlen, &value, sizeof(UBYTE)) != 0)
                 return -1;
             sock->as_McastLoop = (value != 0) ? 1 : 0;
             return 0;
@@ -473,12 +474,12 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
         }
 
         case IP_MULTICAST_TTL:
-            return bsd_mcast_put_byte_or_long(base, optval, optlen,
-                                              sock->as_McastTtl);
+            return bsd_mcast_put_number(base, optval, optlen,
+                                         sock->as_McastTtl, sizeof(UBYTE));
 
         case IP_MULTICAST_LOOP:
-            return bsd_mcast_put_byte_or_long(base, optval, optlen,
-                                              sock->as_McastLoop);
+            return bsd_mcast_put_number(base, optval, optlen,
+                                         sock->as_McastLoop, sizeof(UBYTE));
 
         case IP_ADD_MEMBERSHIP:
         case IP_DROP_MEMBERSHIP:
@@ -812,58 +813,8 @@ BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname)
     }
 }
 
-/*
- * IPV6_MULTICAST_HOPS and _LOOP are ints in RFC 3493, unlike their u_char IPv4
- * counterparts, so there is no byte-or-long dance here.  A short is taken as
- * well for the same reason in6.c does.
- */
-static LONG bsd_mcast6_get_int(struct AmiSocketBase *base, APTR optval,
-                               socklen_t optlen, LONG *value)
-{
-    if (optval == NULL)
-        return bsd_fail(base, AMI_EFAULT);
-
-    if (optlen >= (socklen_t)sizeof(LONG))
-        bsd_bcopy(optval, value, sizeof(*value));
-    else if (optlen >= (socklen_t)sizeof(WORD))
-    {
-        WORD short_value;
-
-        bsd_bcopy(optval, &short_value, sizeof(short_value));
-        *value = (LONG)short_value;
-    }
-    else
-        return bsd_fail(base, AMI_EINVAL);
-
-    return 0;
-}
-
-static LONG bsd_mcast6_put_int(struct AmiSocketBase *base, APTR optval,
-                               socklen_t *optlen, LONG value)
-{
-    if (optval == NULL || optlen == NULL)
-        return bsd_fail(base, AMI_EFAULT);
-
-    if (*optlen >= (socklen_t)sizeof(LONG))
-    {
-        bsd_bcopy(&value, optval, sizeof(value));
-        *optlen = (socklen_t)sizeof(LONG);
-    }
-    else if (*optlen >= (socklen_t)sizeof(WORD))
-    {
-        WORD short_value = (WORD)value;
-
-        bsd_bcopy(&short_value, optval, sizeof(short_value));
-        *optlen = (socklen_t)sizeof(WORD);
-    }
-    else
-    {
-        return bsd_fail(base, AMI_EINVAL);
-    }
-
-    return 0;
-}
-
+/* RFC 3493 types IPv6 HOPS/LOOP as ints; retain the accepted WORD
+   extension, but never accept the IPv4-only byte representation. */
 LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                        LONG optname, APTR optval, socklen_t optlen)
 {
@@ -898,7 +849,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             NX_IP *ip = bsd_stack_ip(base);
             LONG   iface;
 
-            if (bsd_mcast6_get_int(base, optval, optlen, &value) != 0)
+            if (bsd_mcast_get_number(base, optval, optlen, &value, sizeof(WORD)) != 0)
                 return -1;
 
             if (value == 0)
@@ -927,7 +878,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
 
         case AMI_IPV6_MULTICAST_HOPS_BSD:
         case AMI_IPV6_MULTICAST_HOPS_LINUX:
-            if (bsd_mcast6_get_int(base, optval, optlen, &value) != 0)
+            if (bsd_mcast_get_number(base, optval, optlen, &value, sizeof(WORD)) != 0)
                 return -1;
             if (value < -1 || value > 255)
                 return bsd_fail(base, AMI_EINVAL);
@@ -943,7 +894,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
         case AMI_IPV6_MULTICAST_LOOP_LINUX:
             /* Accepted, stored nowhere, always reads back 0. See the note at
                the top of this half. */
-            if (bsd_mcast6_get_int(base, optval, optlen, &value) != 0)
+            if (bsd_mcast_get_number(base, optval, optlen, &value, sizeof(WORD)) != 0)
                 return -1;
             return 0;
 
@@ -969,20 +920,18 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
             iface = bsd_mcast_preference(&sock->as_Mcast6If,
                                           sock->as_Mcast6IfEpoch);
             bsd_nx_leave(base);
-            return bsd_mcast6_put_int(base, optval, optlen,
-                                      (iface < 0)
-                                          ? 0
-                                          : iface + 1);
+            return bsd_mcast_put_number(base, optval, optlen,
+                                         (iface < 0) ? 0 : iface + 1, sizeof(WORD));
         }
 
         case AMI_IPV6_MULTICAST_HOPS_BSD:
         case AMI_IPV6_MULTICAST_HOPS_LINUX:
-            return bsd_mcast6_put_int(base, optval, optlen,
-                                      sock->as_Mcast6Hops);
+            return bsd_mcast_put_number(base, optval, optlen,
+                                         sock->as_Mcast6Hops, sizeof(WORD));
 
         case AMI_IPV6_MULTICAST_LOOP_BSD:
         case AMI_IPV6_MULTICAST_LOOP_LINUX:
-            return bsd_mcast6_put_int(base, optval, optlen, 0);
+            return bsd_mcast_put_number(base, optval, optlen, 0, sizeof(WORD));
 
         /* Set-only, as the IPv4 pair are. */
         case AMI_IPV6_JOIN_GROUP_BSD:
