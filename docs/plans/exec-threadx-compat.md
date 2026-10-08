@@ -642,6 +642,82 @@ outside the raw delete boundary, a restricted already-finished terminate adapter
 and complete preflight before ignored raw service results can mutate state. Full
 NetX helper/driver/common-clock integration and the performance A/B remain open.
 
+## Spike 13: real IPv4 IP helper lifecycle
+
+Research code 123b95af60961e318fb63a38d142dfee00a58d7e links unchanged pinned
+NetX system initialization, IP constructor/helper/delete and their selected IPv4
+dependencies. Final code de148d5fd813ad6f80cefda54a3a78c0270eee65 adds a
+whole-wrapper-record stack-disjointness guard and regression: the native prepare
+already protects its embedded helper record, but the enclosing IP metadata also
+needs protection before any reservation or constructor mutation. The IP target uses a separate bridge variant with packet-slice
+ICMP traps excluded; its ICMPv4 error generator is the actual vendor body.
+This is a selected helper dependency link, not the full replacement library.
+
+The lifecycle wrapper requires an attached creator outside every boundary,
+a prepared native worker, an otherwise empty ThreadX object domain, one IP and
+primary interface, a retained idle packet pool, and a synchronous driver. The
+experiment uses 192.0.2.1/24 and excludes external raw API/packet/driver/clock
+producers. It is not a production lifetime gate over all exported NetX APIs.
+Enabled protocols, queued packets, raw/ping/pool waiters, fast timers and extra
+interfaces are outside the delete contract. The wrapper revalidates after worker
+preparation before raw constructor memset, and checks actual constructor outputs
+and restored creator threshold rather than trusting NX_SUCCESS alone.
+
+Direct raw create/delete bypasses are refused before mutation. Internal permits
+are consumed before vendor calls, so a driver callback cannot recursively delete.
+Deletion checks actual socket counts and the quiescence contract before stopping
+the helper at its exact event wait. It closes the experiment's event producer
+gate and deactivates the actual IP timer under the same boundary, waits for native
+FINISHED outside all boundaries, then revalidates before admitting unchanged raw
+IP deletion. Public tx_thread_terminate acknowledges only an already native-
+FINISHED, privately stopped TERMINATED owner; it cannot terminate a live worker.
+Public thread deletion still requires native retirement first.
+
+The new native fixture exercises actual IP startup/driver callbacks, a real UDP
+socket blocking deletion, IP mutex ownership refusal, a real READY helper refusal
+and retry, driver-deferred processing and helper self-delete refusal, the actual
+periodic timer callback/helper event using explicit manual ticks, and three real
+create/delete cycles with poisoned IP/stack reuse. Closing callbacks try raw
+recursive deletion and the event producer gate; both must refuse. Packet-pool,
+created-list, signal and stack recovery are checked. These are lifecycle proofs,
+not wire, automatic clock or general production-driver coverage.
+
+Root retained host CTest passes 38/38; the new native integration is not modeled
+on the host. m68k -Werror/startup-first link gates pass. Deepseek-v4 completed
+independent source review, all 24 parts, with no blocker in the bounded initial
+implementation plus final overlap delta. The review ran no tests and gives no
+production approval. Claudecode ran each exact artifact once on boardless A1200/
+KS3.1 r40.68 with parent/child stacks 8192 and harness 300b22e8. Actual IP passes
+13/13, helpers_reaped=3, restarts=2, exit 0 after 15s; retained stop passes 13/13,
+tasks_reaped=4, timed_io_reaped=2, restarts=3, object_restarts=3, exit 0 after 14s.
+Root read actual stdout/startup/runner and verified all binary/map/evidence hashes
+under /Users/turo/ai/evidence/exec-threadx-spike13-ip-native and stop-native.
+Initial IP artifact 1b77d435 is 74,336 bytes; stop cdbc211d is 59,884 bytes
+including fixtures/runtime. Final IP artifact 789844ed is 74,800 bytes and passes
+14/14, helpers_reaped=3, restarts=2, exit 0 after 14s at exact de148d5fd.
+Claudecode ran it once on the same boardless A1200/KS3.1/8192-stack setup;
+root independently verified actual stdout/startup/runner and all receipt hashes
+under /Users/turo/ai/evidence/exec-threadx-spike13b-ip-native. Retained stop is
+byte-identical on the final source, but its executed coverage stays attributed
+to 123b95af. Host, source review and native execution are separate evidence.
+
+The review notes caller-owned pool/caller disjointness as an experimental
+precondition and the manual vendor source closure as a link-time dependency
+check; neither blocks this checkpoint. Full review is retained under
+/Users/turo/ai/evidence/exec-threadx-spike13-review.log. The owned local research
+build and all three native staging areas are removed; small evidence remains.
+
+The final partial non-LTO IP fixture map attributes 17,316 backend .text bytes
+and 3,112 retained ThreadX bytes (20,428 subtotal), 10,260 selected NetX bytes,
+and 3,300 clock helpers separately. Fixtures/startup/libc/other helpers/data/BSS/
+relocations/native resources and missing full integration are excluded. Evidence:
+/Users/turo/ai/evidence/exec-threadx-spike13b-code-cost.json. No finished-library
+size saving or performance benefit follows from these partial non-LTO totals.
+
+Next gates: protocol packet/wire coverage, a real common clock with producer
+shutdown/drain, broader API and driver lifetimes, full replacement-library link
+and equal-feature A/B size/performance. No hardware or shipping integration.
+
 ## Required performance comparison after functional integration
 
 The user explicitly requests a general performance comparison as well as size,
