@@ -1,0 +1,5501 @@
+{
+  "profile": "micro",
+  "production_files_preprocessed": 755,
+  "files_with_references": {
+    "port/threadx-amiga/src/tx_amiga_adopt.c": {
+      "calls": [
+        "_tx_amiga_adopt_wake_waiters_locked",
+        "_tx_amiga_adopted_entry",
+        "_tx_amiga_dispatch_inline",
+        "_tx_amiga_sigbit",
+        "_tx_amiga_slot_claim_or_park",
+        "_tx_amiga_slot_held",
+        "_tx_amiga_slot_publish_locked",
+        "_tx_amiga_slot_release_locked",
+        "_tx_amiga_task_stamp",
+        "_tx_amiga_thread_park",
+        "_tx_amiga_thread_terminated",
+        "_tx_amiga_wake_scheduler",
+        "_tx_thread_create",
+        "_tx_thread_delete",
+        "_tx_thread_resume",
+        "_tx_thread_suspend",
+        "_tx_thread_terminate",
+        "tx_amiga_adopt_resume",
+        "tx_amiga_adopt_signal",
+        "tx_amiga_adopt_suspend",
+        "tx_amiga_adopt_thread",
+        "tx_amiga_adopted_thread",
+        "tx_amiga_caller_is_thread",
+        "tx_amiga_discard_thread",
+        "tx_amiga_orphan_thread",
+        "tx_amiga_stack_in_use"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_adopt_signal",
+        "_tx_amiga_adopt_slot",
+        "_tx_amiga_adopt_task",
+        "_tx_amiga_adopt_waiting",
+        "_tx_amiga_discard_preempt_resets",
+        "_tx_amiga_kernel_stopping",
+        "_tx_amiga_kernel_up",
+        "_tx_thread_created_count",
+        "_tx_thread_created_ptr",
+        "_tx_thread_current_ptr",
+        "_tx_thread_execute_ptr",
+        "_tx_thread_preempt_disable",
+        "_tx_thread_system_state",
+        "_tx_timer_time_slice"
+      ],
+      "fields": [
+        "tx_thread_amiga_flags",
+        "tx_thread_amiga_run_signal",
+        "tx_thread_amiga_signal_owner",
+        "tx_thread_amiga_task",
+        "tx_thread_amiga_task_stamp",
+        "tx_thread_created_next",
+        "tx_thread_id",
+        "tx_thread_run_count",
+        "tx_thread_stack_end",
+        "tx_thread_stack_start",
+        "tx_thread_state",
+        "tx_thread_time_slice"
+      ],
+      "source_macros_and_types": [
+        "TX_AMIGA_THREAD_ADOPTED",
+        "TX_AMIGA_THREAD_CACHED",
+        "TX_AMIGA_THREAD_DIE",
+        "TX_AMIGA_THREAD_DORMANT",
+        "TX_AMIGA_THREAD_ORPHANED",
+        "TX_AUTO_START",
+        "TX_CALLER_ERROR",
+        "TX_FALSE",
+        "TX_MAX_PRIORITIES",
+        "TX_NOT_DONE",
+        "TX_NO_MEMORY",
+        "TX_NO_TIME_SLICE",
+        "TX_NULL",
+        "TX_PRIORITY_ERROR",
+        "TX_PTR_ERROR",
+        "TX_SOURCE_CODE",
+        "TX_SUCCESS",
+        "TX_SUSPENDED",
+        "TX_THREAD",
+        "TX_THREAD_ERROR",
+        "TX_THREAD_ID",
+        "TX_TRUE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_amiga_exec_wait.c": {
+      "calls": [
+        "_tx_amiga_dispatch_or_wake",
+        "_tx_amiga_thread_park",
+        "_tx_amiga_wake_scheduler",
+        "_tx_thread_resume",
+        "_tx_thread_suspend",
+        "tx_amiga_exec_wait_current_locked",
+        "tx_amiga_exec_wait_owner_locked",
+        "tx_amiga_exec_wait_park",
+        "tx_amiga_exec_wait_release_locked",
+        "tx_amiga_exec_wait_resume_locked",
+        "tx_amiga_exec_wait_system_state_locked",
+        "tx_amiga_exec_wait_wake"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_created_count",
+        "_tx_thread_created_ptr",
+        "_tx_thread_current_ptr",
+        "_tx_thread_system_state",
+        "_tx_timer_time_slice"
+      ],
+      "fields": [
+        "tx_thread_amiga_exec_wait_nesting",
+        "tx_thread_amiga_task",
+        "tx_thread_created_next"
+      ],
+      "source_macros_and_types": [
+        "TX_FALSE",
+        "TX_NULL",
+        "TX_PTR_ERROR",
+        "TX_SOURCE_CODE",
+        "TX_SUCCESS",
+        "TX_THREAD",
+        "TX_TRUE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_amiga_pool.c": {
+      "calls": [
+        "_tx_amiga_adopt_wake_scan",
+        "_tx_amiga_adopt_wake_waiters",
+        "_tx_amiga_adopt_wake_waiters_final",
+        "_tx_amiga_adopt_wake_waiters_locked",
+        "_tx_amiga_sigbit",
+        "_tx_amiga_slot_claim_evict_locked",
+        "_tx_amiga_slot_claim_locked",
+        "_tx_amiga_slot_claim_or_park",
+        "_tx_amiga_slot_evict_locked",
+        "_tx_amiga_slot_held",
+        "_tx_amiga_slot_of",
+        "_tx_amiga_slot_publish_locked",
+        "_tx_amiga_slot_release_locked",
+        "_tx_amiga_task_stamp",
+        "tx_amiga_adopt_claim_orphan",
+        "tx_amiga_adopt_generation",
+        "tx_amiga_adopt_handle_valid",
+        "tx_amiga_adopt_reserve",
+        "tx_amiga_adopt_signal_free",
+        "tx_amiga_adopt_slots",
+        "tx_amiga_adopt_slots_free",
+        "tx_amiga_adopt_sweep_unpublished",
+        "tx_amiga_discard_thread",
+        "tx_amiga_task_alive_locked"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_adopt_generation",
+        "_tx_amiga_adopt_parks",
+        "_tx_amiga_adopt_peak",
+        "_tx_amiga_adopt_pool",
+        "_tx_amiga_adopt_slot",
+        "_tx_amiga_adopt_unpublished_freed",
+        "_tx_amiga_adopt_waiter",
+        "_tx_amiga_adopt_waiter_full",
+        "_tx_amiga_adopt_waiters",
+        "_tx_amiga_adopt_waiting",
+        "_tx_amiga_kernel_stopping",
+        "_tx_amiga_kernel_up",
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [
+        "tx_thread_amiga_flags",
+        "tx_thread_amiga_signal_owner",
+        "tx_thread_id",
+        "tx_thread_state"
+      ],
+      "source_macros_and_types": [
+        "TX_AMIGA_ADOPT_RESERVE",
+        "TX_AMIGA_ADOPT_SLOTS",
+        "TX_AMIGA_ADOPT_WAITERS",
+        "TX_AMIGA_THREAD_CACHED",
+        "TX_AMIGA_THREAD_DIE",
+        "TX_AMIGA_THREAD_DORMANT",
+        "TX_AMIGA_THREAD_ORPHANED",
+        "TX_FALSE",
+        "TX_NULL",
+        "TX_SOURCE_CODE",
+        "TX_SUCCESS",
+        "TX_SUSPENDED",
+        "TX_THREAD",
+        "TX_THREAD_ID",
+        "TX_TRUE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_initialize_low_level.c": {
+      "calls": [
+        "_tx_amiga_adopt_wake_waiters_final",
+        "_tx_amiga_alloc",
+        "_tx_amiga_application_threads",
+        "_tx_amiga_ctrl_of",
+        "_tx_amiga_kernel_task_entry",
+        "_tx_amiga_newlist",
+        "_tx_amiga_signal",
+        "_tx_amiga_signal_task",
+        "_tx_amiga_start_interrupts",
+        "_tx_amiga_stop_notify",
+        "_tx_amiga_stop_wait",
+        "_tx_amiga_task_create",
+        "_tx_amiga_tick_deliver",
+        "_tx_amiga_timer_arm",
+        "_tx_amiga_timer_clock_advance",
+        "_tx_amiga_timer_discard",
+        "_tx_amiga_timer_exit",
+        "_tx_amiga_timer_park",
+        "_tx_amiga_timer_probe",
+        "_tx_amiga_timer_task_entry",
+        "_tx_amiga_vblank_entry",
+        "_tx_amiga_vblank_server",
+        "_tx_amiga_wake_scheduler",
+        "_tx_initialize_kernel_enter",
+        "_tx_initialize_low_level",
+        "_tx_thread_context_restore",
+        "_tx_thread_context_save",
+        "_tx_timer_interrupt",
+        "tx_amiga_adopt_generation",
+        "tx_amiga_adopted_thread",
+        "tx_amiga_eclock_ms",
+        "tx_amiga_eclock_us",
+        "tx_amiga_kernel_running",
+        "tx_amiga_kernel_start",
+        "tx_amiga_kernel_stop",
+        "tx_amiga_orphan_thread",
+        "tx_amiga_set_kernel_memory",
+        "tx_amiga_tick_stats",
+        "tx_amiga_tick_stats_live",
+        "tx_amiga_zombie_tasks",
+        "tx_amiga_zombie_tasks_live"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_adopt_signal",
+        "_tx_amiga_adopt_task",
+        "_tx_amiga_baton_holder_task",
+        "_tx_amiga_ctrl",
+        "_tx_amiga_kernel_memory",
+        "_tx_amiga_kernel_memory_size",
+        "_tx_amiga_kernel_stopping",
+        "_tx_amiga_kernel_up",
+        "_tx_amiga_master_gone",
+        "_tx_amiga_master_stack",
+        "_tx_amiga_master_stack_size",
+        "_tx_amiga_memory_owned",
+        "_tx_amiga_scheduler_signal",
+        "_tx_amiga_scheduler_task",
+        "_tx_amiga_start_status",
+        "_tx_amiga_starter_signal",
+        "_tx_amiga_starter_task",
+        "_tx_amiga_stop_signal",
+        "_tx_amiga_stop_task",
+        "_tx_amiga_tick",
+        "_tx_amiga_tick_run",
+        "_tx_amiga_timer_base",
+        "_tx_amiga_timer_gone",
+        "_tx_amiga_timer_stack",
+        "_tx_amiga_timer_stack_size",
+        "_tx_amiga_timer_stop",
+        "_tx_amiga_timer_task",
+        "_tx_amiga_vblank_frames",
+        "_tx_amiga_vblank_int",
+        "_tx_amiga_vblank_sigmask",
+        "_tx_amiga_vblank_task",
+        "_tx_amiga_zombies",
+        "_tx_amiga_zombies_live",
+        "_tx_initialize_unused_memory",
+        "_tx_thread_created_count",
+        "_tx_thread_created_ptr",
+        "_tx_thread_current_ptr",
+        "_tx_thread_execute_ptr"
+      ],
+      "fields": [
+        "tx_thread_created_next"
+      ],
+      "source_macros_and_types": [
+        "TX_AMIGA_COUNT",
+        "TX_AMIGA_CTRL_MAGIC",
+        "TX_AMIGA_MEMORY_SIZE",
+        "TX_AMIGA_SCHED_STATS",
+        "TX_AMIGA_SC_DIRECT",
+        "TX_AMIGA_SC_DISABLE",
+        "TX_AMIGA_SC_MAX",
+        "TX_AMIGA_SC_MUTEX_GET",
+        "TX_AMIGA_SC_MUTEX_PUT",
+        "TX_AMIGA_SC_PARK_SPURIOUS",
+        "TX_AMIGA_SC_PARK_WAIT",
+        "TX_AMIGA_SC_PERMIT_SLOW",
+        "TX_AMIGA_SC_RESTORE",
+        "TX_AMIGA_SC_SCHED_DISPATCH",
+        "TX_AMIGA_SC_SCHED_WAIT",
+        "TX_AMIGA_SC_SYS_RETURN",
+        "TX_AMIGA_SC_WAKE",
+        "TX_AMIGA_STOP_TIMEOUT_SECS",
+        "TX_AMIGA_TASK_PRIORITY",
+        "TX_AMIGA_TICK_NO_VBLANK_SERVER",
+        "TX_AMIGA_TICK_STATS",
+        "TX_AMIGA_TICK_TEST_DEAD_VERTB",
+        "TX_AMIGA_TIMER_BUDGET_MS",
+        "TX_AMIGA_TIMER_MAX_CATCHUP",
+        "TX_AMIGA_TIMER_PRIORITY",
+        "TX_AMIGA_TIMER_PROBE_MAX_HZ",
+        "TX_AMIGA_TIMER_PROBE_MIN_HZ",
+        "TX_AMIGA_TIMER_PROBE_MS",
+        "TX_AMIGA_TIMER_UNIT",
+        "TX_AMIGA_VBLANK_DIVIDER",
+        "TX_CALLER_ERROR",
+        "TX_FALSE",
+        "TX_NOT_DONE",
+        "TX_NO_MEMORY",
+        "TX_NO_TIMER",
+        "TX_NULL",
+        "TX_SOURCE_CODE",
+        "TX_SUCCESS",
+        "TX_THREAD",
+        "TX_THREAD_ERROR",
+        "TX_TIMER_PROCESS_IN_ISR",
+        "TX_TIMER_TICKS_PER_SECOND",
+        "TX_TRUE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_thread_context_restore.c": {
+      "calls": [
+        "_tx_amiga_dispatch_inline",
+        "_tx_amiga_wake_scheduler",
+        "_tx_thread_context_restore"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_execute_ptr",
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_FALSE",
+        "TX_NULL",
+        "TX_SOURCE_CODE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_thread_context_save.c": {
+      "calls": [
+        "_tx_thread_context_save"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_SOURCE_CODE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_thread_interrupt_control.c": {
+      "calls": [
+        "_tx_amiga_forbidden",
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_amiga_permit_finish",
+        "_tx_amiga_task_stamp",
+        "_tx_thread_interrupt_control",
+        "_tx_thread_interrupt_disable",
+        "_tx_thread_interrupt_restore",
+        "tx_amiga_adopted_task_dead",
+        "tx_amiga_exec_task_alive",
+        "tx_amiga_exec_task_context",
+        "tx_amiga_exec_task_signal",
+        "tx_amiga_task_alive_locked",
+        "tx_amiga_task_on_list"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_timer_task"
+      ],
+      "fields": [
+        "tx_thread_amiga_flags",
+        "tx_thread_amiga_run_signal",
+        "tx_thread_amiga_task",
+        "tx_thread_amiga_task_stamp",
+        "tx_thread_id"
+      ],
+      "source_macros_and_types": [
+        "TX_AMIGA_COUNT",
+        "TX_AMIGA_OFF_ATTNRESCHED",
+        "TX_AMIGA_OFF_ETASK",
+        "TX_AMIGA_OFF_ET_UNIQUEID",
+        "TX_AMIGA_OFF_TDNESTCNT",
+        "TX_AMIGA_SC_PERMIT_SLOW",
+        "TX_AMIGA_THREAD_ADOPTED",
+        "TX_AMIGA_THREAD_DIE",
+        "TX_AMIGA_THREAD_GREEN",
+        "TX_AMIGA_THREAD_ORPHANED",
+        "TX_FALSE",
+        "TX_INT_DISABLE",
+        "TX_INT_ENABLE",
+        "TX_NULL",
+        "TX_SOURCE_CODE",
+        "TX_THREAD",
+        "TX_THREAD_ID",
+        "TX_TRUE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_thread_schedule.c": {
+      "calls": [
+        "_tx_amiga_ctrl_of",
+        "_tx_amiga_dispatch_inline",
+        "_tx_amiga_dispatch_or_wake",
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_amiga_reap",
+        "_tx_amiga_reap_cleanup",
+        "_tx_amiga_signal",
+        "_tx_amiga_wake_needed",
+        "_tx_amiga_wake_scheduler",
+        "_tx_thread_delete_port_completion",
+        "_tx_thread_reset_port_completion",
+        "_tx_thread_schedule"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_ctrl",
+        "_tx_amiga_kernel_stopping",
+        "_tx_amiga_scheduler_signal",
+        "_tx_amiga_zombies",
+        "_tx_amiga_zombies_live",
+        "_tx_thread_current_ptr",
+        "_tx_thread_execute_ptr",
+        "_tx_thread_system_state",
+        "_tx_timer_time_slice"
+      ],
+      "fields": [
+        "tx_thread_amiga_flags",
+        "tx_thread_amiga_run_signal",
+        "tx_thread_amiga_suspension_type",
+        "tx_thread_amiga_task",
+        "tx_thread_run_count",
+        "tx_thread_time_slice"
+      ],
+      "source_macros_and_types": [
+        "TX_AMIGA_COUNT",
+        "TX_AMIGA_REAP_TIMEOUT_SECS",
+        "TX_AMIGA_SC_SCHED_DISPATCH",
+        "TX_AMIGA_SC_SCHED_WAIT",
+        "TX_AMIGA_THREAD_ADOPTED",
+        "TX_AMIGA_THREAD_DIE",
+        "TX_AMIGA_THREAD_GREEN",
+        "TX_DISABLE",
+        "TX_FALSE",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_SOURCE_CODE",
+        "TX_THREAD",
+        "TX_TRUE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_thread_stack_build.c": {
+      "calls": [
+        "_tx_amiga_ctrl_of",
+        "_tx_amiga_task_create",
+        "_tx_amiga_task_destroy",
+        "_tx_amiga_task_stamp",
+        "_tx_amiga_thread_entry",
+        "_tx_amiga_thread_park",
+        "_tx_thread_shell_entry",
+        "_tx_thread_stack_build"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_adopt_signal",
+        "_tx_amiga_adopt_task",
+        "_tx_amiga_ctrl"
+      ],
+      "fields": [
+        "tx_thread_amiga_exec_wait_nesting",
+        "tx_thread_amiga_flags",
+        "tx_thread_amiga_run_signal",
+        "tx_thread_amiga_signal_owner",
+        "tx_thread_amiga_suspension_type",
+        "tx_thread_amiga_task",
+        "tx_thread_amiga_task_stamp",
+        "tx_thread_name",
+        "tx_thread_stack_end",
+        "tx_thread_stack_ptr",
+        "tx_thread_stack_size",
+        "tx_thread_stack_start"
+      ],
+      "source_macros_and_types": [
+        "TX_AMIGA_TASK_PRIORITY",
+        "TX_AMIGA_THREAD_ADOPTED",
+        "TX_SOURCE_CODE",
+        "TX_THREAD"
+      ]
+    },
+    "port/threadx-amiga/src/tx_thread_system_return.c": {
+      "calls": [
+        "_tx_amiga_ctrl_of",
+        "_tx_amiga_dispatch_inline",
+        "_tx_amiga_task_destroy",
+        "_tx_amiga_thread_completed",
+        "_tx_amiga_thread_park",
+        "_tx_amiga_wake_needed",
+        "_tx_amiga_wake_scheduler",
+        "_tx_thread_system_return"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_ctrl",
+        "_tx_amiga_zombies_live",
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable",
+        "_tx_timer_time_slice"
+      ],
+      "fields": [
+        "tx_thread_amiga_flags",
+        "tx_thread_amiga_run_signal",
+        "tx_thread_amiga_suspension_type",
+        "tx_thread_amiga_task",
+        "tx_thread_state",
+        "tx_thread_time_slice"
+      ],
+      "source_macros_and_types": [
+        "TX_AMIGA_COUNT",
+        "TX_AMIGA_HANDOFF_PRIORITY",
+        "TX_AMIGA_SC_PARK_SPURIOUS",
+        "TX_AMIGA_SC_PARK_WAIT",
+        "TX_AMIGA_SC_SYS_RETURN",
+        "TX_AMIGA_THREAD_ADOPTED",
+        "TX_AMIGA_THREAD_DIE",
+        "TX_AMIGA_THREAD_ORPHANED",
+        "TX_FALSE",
+        "TX_NULL",
+        "TX_SOURCE_CODE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRUE"
+      ]
+    },
+    "port/threadx-amiga/src/tx_timer_interrupt.c": {
+      "calls": [
+        "_tx_amiga_timer_clock_advance",
+        "_tx_thread_time_slice",
+        "_tx_timer_expiration_process",
+        "_tx_timer_interrupt"
+      ],
+      "internal_identifiers": [
+        "_tx_timer_current_ptr",
+        "_tx_timer_expired",
+        "_tx_timer_expired_time_slice",
+        "_tx_timer_list_end",
+        "_tx_timer_list_start",
+        "_tx_timer_system_clock",
+        "_tx_timer_time_slice"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NULL",
+        "TX_SOURCE_CODE",
+        "TX_TRUE"
+      ]
+    },
+    "src/bsdsocket/library.c": {
+      "calls": [
+        "tx_amiga_exec_task_alive",
+        "tx_amiga_exec_task_signal"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_FALSE"
+      ]
+    },
+    "src/bsdsocket/loghook.c": {
+      "calls": [
+        "tx_amiga_exec_task_context"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_FALSE"
+      ]
+    },
+    "src/bsdsocket/netstatus.c": {
+      "calls": [
+        "tx_amiga_tick_stats",
+        "tx_amiga_uptime_ms"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_AMIGA_TICK_STATS"
+      ]
+    },
+    "src/bsdsocket/netx_call.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_AMIGA_SC_MUTEX_GET",
+        "TX_AMIGA_SC_MUTEX_PUT"
+      ]
+    },
+    "src/bsdsocket/raw.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_semaphore_create",
+        "_tx_semaphore_delete",
+        "_tx_semaphore_get",
+        "_tx_semaphore_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NO_WAIT",
+        "TX_SUCCESS",
+        "TX_WAIT_ABORTED",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "src/bsdsocket/select.c": {
+      "calls": [
+        "_tx_time_get"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_TIMER_TICKS_PER_SECOND"
+      ]
+    },
+    "src/bsdsocket/socket.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_time_get"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "src/bsdsocket/transfer.c": {
+      "calls": [
+        "_tx_time_get"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NULL"
+      ]
+    },
+    "src/net68k/n68k_checksum.c": {
+      "calls": [
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "src/netdev/netdev_cmds.c": {
+      "calls": [
+        "tx_flush"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "src/netdev/netdev_device.c": {
+      "calls": [
+        "tx_at",
+        "tx_reclaim"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "src/netstack/netstack.c": {
+      "calls": [
+        "_tx_semaphore_create",
+        "_tx_semaphore_delete",
+        "_tx_semaphore_get",
+        "_tx_semaphore_put",
+        "_tx_thread_identify",
+        "_tx_thread_sleep",
+        "_tx_time_get",
+        "_tx_timer_activate",
+        "_tx_timer_change",
+        "_tx_timer_create",
+        "_tx_timer_deactivate",
+        "_tx_timer_delete",
+        "tx_amiga_adopt_sweep_unpublished",
+        "tx_amiga_kernel_start",
+        "tx_amiga_kernel_stop",
+        "tx_application_define"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_AUTO_ACTIVATE",
+        "TX_NO_INSTANCE",
+        "TX_SUCCESS"
+      ]
+    },
+    "src/netstack/netstack_baton.c": {
+      "calls": [
+        "tx_amiga_adopt_generation",
+        "tx_amiga_adopted_task_dead",
+        "tx_amiga_discard_thread",
+        "tx_amiga_exec_wait_current_locked",
+        "tx_amiga_exec_wait_owner_locked",
+        "tx_amiga_exec_wait_park",
+        "tx_amiga_exec_wait_release_locked",
+        "tx_amiga_exec_wait_resume_locked",
+        "tx_amiga_exec_wait_system_state_locked",
+        "tx_amiga_exec_wait_wake",
+        "tx_amiga_tick_stats_live"
+      ],
+      "internal_identifiers": [
+        "_tx_amiga_baton_holder_task"
+      ],
+      "fields": [
+        "tx_thread_amiga_exec_wait_nesting",
+        "tx_thread_amiga_task"
+      ],
+      "source_macros_and_types": [
+        "TX_FALSE",
+        "TX_NULL",
+        "TX_SUCCESS",
+        "TX_THREAD",
+        "TX_TRUE"
+      ]
+    },
+    "src/netstack/netstack_caller.c": {
+      "calls": [
+        "tx_amiga_adopt_handle_valid",
+        "tx_amiga_adopt_resume",
+        "tx_amiga_adopt_signal",
+        "tx_amiga_adopt_signal_free",
+        "tx_amiga_adopt_suspend",
+        "tx_amiga_adopt_thread",
+        "tx_amiga_caller_is_thread",
+        "tx_amiga_discard_thread",
+        "tx_amiga_kernel_running",
+        "tx_amiga_orphan_thread"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_FALSE",
+        "TX_NULL",
+        "TX_SUCCESS",
+        "TX_THREAD_ERROR",
+        "TX_TRUE"
+      ]
+    },
+    "src/netstack/netstack_dns.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_SUCCESS",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "src/netstack/netstack_dns_search.c": {
+      "calls": [
+        "_tx_time_get"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "src/netstack/netstack_dns_status.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NOT_AVAILABLE"
+      ]
+    },
+    "src/netstack/netstack_retry.c": {
+      "calls": [
+        "_tx_time_get"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "src/netstack/netstack_routes.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "src/sana2/sana2_device.c": {
+      "calls": [
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "src/sana2/sana2_rx.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_semaphore_create",
+        "_tx_semaphore_delete",
+        "_tx_semaphore_get",
+        "_tx_semaphore_put",
+        "_tx_thread_create",
+        "_tx_thread_delete",
+        "_tx_thread_identify",
+        "_tx_thread_sleep",
+        "_tx_thread_terminate",
+        "_tx_time_get",
+        "tx_amiga_kernel_running",
+        "tx_amiga_stack_in_use",
+        "tx_amiga_zombie_tasks"
+      ],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_thread_state"
+      ],
+      "source_macros_and_types": [
+        "TX_AUTO_START",
+        "TX_COMPLETED",
+        "TX_NO_TIME_SLICE",
+        "TX_NO_WAIT",
+        "TX_SUCCESS",
+        "TX_TERMINATED",
+        "TX_THREAD",
+        "TX_TIMER_TICKS_PER_SECOND",
+        "TX_TRUE"
+      ]
+    },
+    "src/sana2/sana2_tx.c": {
+      "calls": [
+        "_tx_thread_sleep",
+        "_tx_time_get",
+        "_tx_timer_create",
+        "_tx_timer_deactivate",
+        "_tx_timer_delete"
+      ],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_queue_full"
+      ],
+      "source_macros_and_types": [
+        "TX_AUTO_ACTIVATE",
+        "TX_SUCCESS",
+        "TX_THREAD"
+      ]
+    },
+    "src/tools/netstack_weak.c": {
+      "calls": [
+        "tx_application_define"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "src/tools/shownetstatus.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_queue_full"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/tools/tool_nx.c": {
+      "calls": [
+        "tx_amiga_uptime_ms"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_AMIGA_TICK_STATS"
+      ]
+    },
+    "third_party/netxduo/addons/auto_ip/nx_auto_ip.c": {
+      "calls": [
+        "_tx_event_flags_create",
+        "_tx_event_flags_delete",
+        "_tx_event_flags_get",
+        "_tx_event_flags_set",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_create",
+        "_tx_thread_delete",
+        "_tx_thread_resume",
+        "_tx_thread_sleep",
+        "_tx_thread_suspend",
+        "_tx_thread_terminate",
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE_ERROR_CHECKING",
+        "TX_DONT_START",
+        "TX_NO_WAIT",
+        "TX_OR",
+        "TX_OR_CLEAR",
+        "TX_SAFETY_CRITICAL",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/addons/dhcp/nxd_dhcp_client.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_create",
+        "_tx_event_flags_delete",
+        "_tx_event_flags_get",
+        "_tx_event_flags_set",
+        "_tx_mutex_create",
+        "_tx_mutex_delete",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_create",
+        "_tx_thread_delete",
+        "_tx_thread_resume",
+        "_tx_thread_sleep",
+        "_tx_thread_suspend",
+        "_tx_thread_terminate",
+        "_tx_timer_activate",
+        "_tx_timer_create",
+        "_tx_timer_deactivate",
+        "_tx_timer_delete",
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_DONT_START",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NO_ACTIVATE",
+        "TX_NO_INHERIT",
+        "TX_OR",
+        "TX_OR_CLEAR",
+        "TX_RESTORE",
+        "TX_SUCCESS",
+        "TX_SUSPEND_LIFTED",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/addons/dns/nxd_dns.c": {
+      "calls": [
+        "_tx_mutex_create",
+        "_tx_mutex_delete",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_time_get",
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NO_INHERIT",
+        "TX_SUCCESS",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_announce_send.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_dynamic_entries_invalidate.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_dynamic_entry_delete.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_dynamic_entry_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_entry_allocate.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_entry_delete.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_gratuitous_send.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_hardware_address_find.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_info_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_interface_entries_delete.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_ip_address_find.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_packet_deferred_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_packet_send.c": {
+      "calls": [
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_arp_periodic_update.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_probe_send.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_queue_process.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_queue_send.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_static_entries_delete.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_static_entry_create.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_static_entry_delete.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_arp_static_entry_delete_internal.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmp_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmp_info_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmp_interface_ping.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_system_preempt_check",
+        "_tx_thread_system_suspend"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_info",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous",
+        "tx_thread_suspending",
+        "tx_thread_timer",
+        "tx_timer_internal_remaining_ticks"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRUE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmp_interface_ping6.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRUE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmp_packet_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_THREAD_GET_SYSTEM_STATE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmp_queue_process.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmpv4_packet_process.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_icmpv4_process_echo_reply.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_preempt_check",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_info",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_enable.c": {
+      "calls": [
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_OR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_info_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_interface_report_send.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NO_WAIT",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_loopback_disable.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_loopback_enable.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_multicast_interface_join_internal.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_multicast_interface_leave_internal.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_packet_process.c": {
+      "calls": [
+        "_tx_time_get"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_igmp_packet_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_THREAD_GET_SYSTEM_STATE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_igmp_queue_process.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_address_change_notify.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_address_get.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_auxiliary_packet_pool_set.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_checksum_compute.c": {
+      "calls": [
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_ip_create.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_create",
+        "_tx_mutex_create",
+        "_tx_thread_create",
+        "_tx_thread_identify",
+        "_tx_thread_preemption_change",
+        "_tx_timer_create"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_AUTO_ACTIVATE",
+        "TX_AUTO_START",
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NO_INHERIT",
+        "TX_RESTORE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_delete.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_delete",
+        "_tx_mutex_delete",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_delete",
+        "_tx_thread_system_preempt_check",
+        "_tx_thread_terminate",
+        "_tx_timer_deactivate",
+        "_tx_timer_delete"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_driver_deferred_enable.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_driver_deferred_processing.c": {
+      "calls": [
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_OR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_driver_deferred_receive.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_driver_interface_direct_command.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_driver_link_status_event.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_driver_packet_send.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_fast_periodic_timer_entry.c": {
+      "calls": [
+        "_tx_event_flags_set",
+        "_tx_timer_create"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_AUTO_ACTIVATE",
+        "TX_OR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_forwarding_disable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_forwarding_enable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_fragment_assembly.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_fragment_disable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_fragment_enable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_fragment_forward_packet.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NO_WAIT"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_fragment_packet.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_NO_WAIT"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_gateway_address_clear.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_gateway_address_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_gateway_address_set.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_gateway_interface_address_set.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_header_add.c": {
+      "calls": [
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_ip_info_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_address_get.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_address_mapping_configure.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_address_set.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_attach.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_capability_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_capability_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_detach.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_mtu_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_physical_address_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_physical_address_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_interface_status_check.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_link_status_change_notify_set.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_max_payload_size_find.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_packet_deferred_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_periodic_timer_entry.c": {
+      "calls": [
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_OR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_packet_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_packet_disable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_system_preempt_check"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_packet_filter_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_packet_processing.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_packet_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_suspend"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous",
+        "tx_thread_suspending",
+        "tx_thread_timer",
+        "tx_timer_internal_remaining_ticks"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_TRUE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_packet_send.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_packet_source_send.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_raw_receive_queue_max_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_static_route_add.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_static_route_delete.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ip_thread_entry.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_get",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR_CLEAR",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ipv4_packet_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_link.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_allocate.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_suspend"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_info",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous",
+        "tx_thread_suspending",
+        "tx_thread_timer",
+        "tx_timer_internal_remaining_ticks"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_TRUE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_copy.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_pool_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_pool_create.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_pool_delete.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_preempt_check",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_pool_info_get.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_pool_low_watermark_set.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_release.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_info",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_packet_transmit_release.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_ram_network_driver.c": {
+      "calls": [
+        "_tx_thread_identify",
+        "_tx_thread_preemption_change"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_rarp_disable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_rarp_enable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_rarp_info_get.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_rarp_packet_deferred_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_OR",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_rarp_packet_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_rarp_queue_process.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_cleanup_deferred.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_client_bind_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable",
+        "_tx_thread_system_state"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_THREAD_GET_SYSTEM_STATE",
+        "TX_TIMER_PROCESS_IN_ISR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_client_socket_bind.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_client_socket_port_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_client_socket_unbind.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_thread_suspend_control_block"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_connect_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable",
+        "_tx_thread_system_state"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_THREAD_GET_SYSTEM_STATE",
+        "TX_TIMER_PROCESS_IN_ISR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_deferred_cleanup_check.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspended_next"
+      ],
+      "source_macros_and_types": [
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_disconnect_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable",
+        "_tx_thread_system_state"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_THREAD_GET_SYSTEM_STATE",
+        "TX_TIMER_PROCESS_IN_ISR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_free_port_find.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_info_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_packet_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_THREAD",
+        "TX_THREAD_GET_SYSTEM_STATE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_queue_process.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_receive_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable",
+        "_tx_thread_system_state"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_THREAD_GET_SYSTEM_STATE",
+        "TX_TIMER_PROCESS_IN_ISR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_server_socket_accept.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_server_socket_listen.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_server_socket_relisten.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_server_socket_unaccept.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_server_socket_unlisten.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_bytes_available.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_create.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_delete.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_disconnect.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_disconnect_complete_notify.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_driver_establish.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_driver_packet_receive.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_establish_notify.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_info_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_mss_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_mss_peer_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_mss_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_queue_depth_notify_set.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_receive.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_receive_notify.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_receive_queue_max_set.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_reuse_address_set.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_send_internal.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_info_get",
+        "_tx_thread_preemption_change",
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_state_ack_check.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_state_data_check.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_thread_additional_suspend_info"
+      ],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_state_established.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_state_syn_sent.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_state_transmit_check.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_thread_additional_suspend_info"
+      ],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_state_wait.c": {
+      "calls": [
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_thread_resume.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_thread_suspend.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_put",
+        "_tx_thread_system_suspend"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous",
+        "tx_thread_suspending",
+        "tx_thread_timer",
+        "tx_timer_internal_remaining_ticks"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_MUTEX",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRUE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_timed_wait_callback.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_transmit_configure.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_transmit_queue_flush.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_socket_window_update_notify_set.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_tcp_syncache.c": {
+      "calls": [
+        "_tx_time_get"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nx_tcp_transmit_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_event_flags_set",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable",
+        "_tx_thread_system_state"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_OR",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_THREAD_GET_SYSTEM_STATE",
+        "TX_TIMER_PROCESS_IN_ISR"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_trace_event_insert.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_TRACE_IN_LINE_INSERT"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_trace_event_update.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TRACE_BUFFER_ENTRY"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_trace_object_register.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_trace_object_unregister.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_bind_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_free_port_find.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_info_get.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_packet_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable",
+        "_tx_thread_system_state"
+      ],
+      "fields": [
+        "tx_mutex_ownership_count",
+        "tx_thread_additional_suspend_info",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD",
+        "TX_THREAD_GET_SYSTEM_STATE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_receive_cleanup.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_bind.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_system_suspend"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous",
+        "tx_thread_suspending",
+        "tx_thread_timer",
+        "tx_timer_internal_remaining_ticks"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRUE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_bytes_available.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_checksum_disable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_checksum_enable.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_create.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_delete.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_system_preempt_check"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_icmp_error_notify.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_icmp_error_process.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_info_get.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_port_get.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_receive.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_thread_system_suspend"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr",
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_additional_suspend_info",
+        "tx_thread_state",
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous",
+        "tx_thread_suspending",
+        "tx_thread_timer",
+        "tx_timer_internal_remaining_ticks"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_TCP_IP",
+        "TX_THREAD",
+        "TX_TRACE_BUFFER_ENTRY",
+        "TX_TRUE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_receive_notify.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE"
+      ]
+    },
+    "third_party/netxduo/common/src/nx_udp_socket_unbind.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_system_preempt_check",
+        "_tx_thread_system_resume"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_preempt_disable"
+      ],
+      "fields": [
+        "tx_thread_suspend_cleanup",
+        "tx_thread_suspend_control_block",
+        "tx_thread_suspend_status",
+        "tx_thread_suspended_next",
+        "tx_thread_suspended_previous"
+      ],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_NULL",
+        "TX_RESTORE",
+        "TX_THREAD",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_icmp_enable.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_icmpv6_ra_flag_callback_set.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_icmpv6_ra_flag_interface_callback_set.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ip_raw_packet_send.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ip_raw_packet_source_send.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_address_change_notify.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_address_delete.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_address_get.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_address_set.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_default_router_add.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_default_router_delete.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_default_router_entry_get.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_default_router_number_of_entries_get.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_disable.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_enable.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_find_default_router_from_address.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_multicast_interface_join.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_multicast_interface_leave.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_raw_packet_send_internal.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_stateless_address_autoconfig_disable.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_ipv6_stateless_address_autoconfig_enable.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_nd_cache_entry_delete.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_nd_cache_hardware_address_find.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_nd_cache_invalidate.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_nd_cache_ip_address_find.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_tcp_client_socket_connect.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put",
+        "_tx_thread_sleep"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_current_ptr"
+      ],
+      "fields": [
+        "tx_thread_suspend_status"
+      ],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_tcp_socket_peer_info_get.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_udp_packet_info_extract.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_udp_socket_send.c": {
+      "calls": [
+        "_tx_amiga_int_disable",
+        "_tx_amiga_int_restore",
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_DISABLE",
+        "TX_ENABLE_EVENT_TRACE",
+        "TX_INTERRUPT_SAVE_AREA",
+        "TX_RESTORE",
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxd_udp_source_extract.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_ENABLE_EVENT_TRACE"
+      ]
+    },
+    "third_party/netxduo/common/src/nxde_icmp_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_icmp_ping.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_icmp_source_ping.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_ip_raw_packet_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_ip_raw_packet_source_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_tcp_client_socket_connect.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_tcp_client_socket_source_connect.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_tcp_socket_peer_info_get.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_udp_packet_info_extract.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_udp_socket_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_udp_socket_source_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxde_udp_source_extract.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_dynamic_entries_invalidate.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_dynamic_entry_set.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_entry_delete.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_gratuitous_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_hardware_address_find.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_info_get.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_ip_address_find.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_static_entries_delete.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_static_entry_create.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_arp_static_entry_delete.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_icmp_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_icmp_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_icmp_ping.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_loopback_disable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_loopback_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_multicast_interface_join.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_multicast_interface_leave.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_multicast_join.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_igmp_multicast_leave.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_address_change_notify.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_address_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_address_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_create.c": {
+      "calls": [
+        "_tx_thread_identify",
+        "_tx_thread_preemption_change"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [
+        "tx_thread_stack_end",
+        "tx_thread_stack_start"
+      ],
+      "source_macros_and_types": [
+        "TX_MAX_PRIORITIES",
+        "TX_MINIMUM_STACK",
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nxe_ip_delete.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_driver_direct_command.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_driver_interface_direct_command.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_forwarding_disable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_forwarding_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_fragment_disable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_fragment_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_gateway_address_clear.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_gateway_address_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_gateway_address_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_gateway_interface_address_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_address_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_address_mapping_configure.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_address_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_attach.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_capability_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_capability_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_detach.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_mtu_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_physical_address_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_physical_address_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_interface_status_check.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_link_status_change_notify_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_max_payload_size_find.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_raw_packet_disable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_raw_packet_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_raw_packet_filter_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_raw_packet_receive.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_raw_packet_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_raw_packet_source_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_raw_receive_queue_max_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_static_route_add.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_static_route_delete.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ip_status_check.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ipv4_multicast_interface_join.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_ipv4_multicast_interface_leave.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_packet_allocate.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_packet_copy.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_packet_data_append.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_packet_pool_create.c": {
+      "calls": [
+        "_tx_thread_identify",
+        "_tx_thread_preemption_change"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_THREAD"
+      ]
+    },
+    "third_party/netxduo/common/src/nxe_packet_pool_delete.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_packet_pool_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_packet_pool_low_watermark_set.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_rarp_disable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_rarp_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_rarp_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_client_socket_bind.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_client_socket_connect.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_client_socket_port_get.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_client_socket_unbind.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_free_port_find.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_server_socket_accept.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_server_socket_listen.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_server_socket_relisten.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_server_socket_unaccept.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_server_socket_unlisten.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_bytes_available.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_create.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_delete.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_disconnect.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_disconnect_complete_notify.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_establish_notify.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_mss_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_mss_peer_get.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_mss_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_peer_info_get.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_receive.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_receive_notify.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_receive_queue_max_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_state_wait.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_timed_wait_callback.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_transmit_configure.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_tcp_socket_window_update_notify_set.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_free_port_find.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_packet_info_extract.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_bind.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_bytes_available.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_checksum_disable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_checksum_enable.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_create.c": {
+      "calls": [
+        "_tx_mutex_get",
+        "_tx_mutex_put"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": [
+        "TX_WAIT_FOREVER"
+      ]
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_delete.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_info_get.c": {
+      "calls": [],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_port_get.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_receive.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_source_send.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    },
+    "third_party/netxduo/common/src/nxe_udp_socket_unbind.c": {
+      "calls": [
+        "tx_amiga_caller_is_thread"
+      ],
+      "internal_identifiers": [
+        "_tx_thread_system_state"
+      ],
+      "fields": [],
+      "source_macros_and_types": []
+    }
+  },
+  "aggregate": {
+    "calls": [
+      "_tx_amiga_adopt_wake_scan",
+      "_tx_amiga_adopt_wake_waiters",
+      "_tx_amiga_adopt_wake_waiters_final",
+      "_tx_amiga_adopt_wake_waiters_locked",
+      "_tx_amiga_adopted_entry",
+      "_tx_amiga_alloc",
+      "_tx_amiga_application_threads",
+      "_tx_amiga_ctrl_of",
+      "_tx_amiga_dispatch_inline",
+      "_tx_amiga_dispatch_or_wake",
+      "_tx_amiga_forbidden",
+      "_tx_amiga_int_disable",
+      "_tx_amiga_int_restore",
+      "_tx_amiga_kernel_task_entry",
+      "_tx_amiga_newlist",
+      "_tx_amiga_permit_finish",
+      "_tx_amiga_reap",
+      "_tx_amiga_reap_cleanup",
+      "_tx_amiga_sigbit",
+      "_tx_amiga_signal",
+      "_tx_amiga_signal_task",
+      "_tx_amiga_slot_claim_evict_locked",
+      "_tx_amiga_slot_claim_locked",
+      "_tx_amiga_slot_claim_or_park",
+      "_tx_amiga_slot_evict_locked",
+      "_tx_amiga_slot_held",
+      "_tx_amiga_slot_of",
+      "_tx_amiga_slot_publish_locked",
+      "_tx_amiga_slot_release_locked",
+      "_tx_amiga_start_interrupts",
+      "_tx_amiga_stop_notify",
+      "_tx_amiga_stop_wait",
+      "_tx_amiga_task_create",
+      "_tx_amiga_task_destroy",
+      "_tx_amiga_task_stamp",
+      "_tx_amiga_thread_completed",
+      "_tx_amiga_thread_entry",
+      "_tx_amiga_thread_park",
+      "_tx_amiga_thread_terminated",
+      "_tx_amiga_tick_deliver",
+      "_tx_amiga_timer_arm",
+      "_tx_amiga_timer_clock_advance",
+      "_tx_amiga_timer_discard",
+      "_tx_amiga_timer_exit",
+      "_tx_amiga_timer_park",
+      "_tx_amiga_timer_probe",
+      "_tx_amiga_timer_task_entry",
+      "_tx_amiga_vblank_entry",
+      "_tx_amiga_vblank_server",
+      "_tx_amiga_wake_needed",
+      "_tx_amiga_wake_scheduler",
+      "_tx_event_flags_create",
+      "_tx_event_flags_delete",
+      "_tx_event_flags_get",
+      "_tx_event_flags_set",
+      "_tx_initialize_kernel_enter",
+      "_tx_initialize_low_level",
+      "_tx_mutex_create",
+      "_tx_mutex_delete",
+      "_tx_mutex_get",
+      "_tx_mutex_put",
+      "_tx_semaphore_create",
+      "_tx_semaphore_delete",
+      "_tx_semaphore_get",
+      "_tx_semaphore_put",
+      "_tx_thread_context_restore",
+      "_tx_thread_context_save",
+      "_tx_thread_create",
+      "_tx_thread_delete",
+      "_tx_thread_delete_port_completion",
+      "_tx_thread_identify",
+      "_tx_thread_info_get",
+      "_tx_thread_interrupt_control",
+      "_tx_thread_interrupt_disable",
+      "_tx_thread_interrupt_restore",
+      "_tx_thread_preemption_change",
+      "_tx_thread_reset_port_completion",
+      "_tx_thread_resume",
+      "_tx_thread_schedule",
+      "_tx_thread_shell_entry",
+      "_tx_thread_sleep",
+      "_tx_thread_stack_build",
+      "_tx_thread_suspend",
+      "_tx_thread_system_preempt_check",
+      "_tx_thread_system_resume",
+      "_tx_thread_system_return",
+      "_tx_thread_system_suspend",
+      "_tx_thread_terminate",
+      "_tx_thread_time_slice",
+      "_tx_time_get",
+      "_tx_timer_activate",
+      "_tx_timer_change",
+      "_tx_timer_create",
+      "_tx_timer_deactivate",
+      "_tx_timer_delete",
+      "_tx_timer_expiration_process",
+      "_tx_timer_interrupt",
+      "tx_amiga_adopt_claim_orphan",
+      "tx_amiga_adopt_generation",
+      "tx_amiga_adopt_handle_valid",
+      "tx_amiga_adopt_reserve",
+      "tx_amiga_adopt_resume",
+      "tx_amiga_adopt_signal",
+      "tx_amiga_adopt_signal_free",
+      "tx_amiga_adopt_slots",
+      "tx_amiga_adopt_slots_free",
+      "tx_amiga_adopt_suspend",
+      "tx_amiga_adopt_sweep_unpublished",
+      "tx_amiga_adopt_thread",
+      "tx_amiga_adopted_task_dead",
+      "tx_amiga_adopted_thread",
+      "tx_amiga_caller_is_thread",
+      "tx_amiga_discard_thread",
+      "tx_amiga_eclock_ms",
+      "tx_amiga_eclock_us",
+      "tx_amiga_exec_task_alive",
+      "tx_amiga_exec_task_context",
+      "tx_amiga_exec_task_signal",
+      "tx_amiga_exec_wait_current_locked",
+      "tx_amiga_exec_wait_owner_locked",
+      "tx_amiga_exec_wait_park",
+      "tx_amiga_exec_wait_release_locked",
+      "tx_amiga_exec_wait_resume_locked",
+      "tx_amiga_exec_wait_system_state_locked",
+      "tx_amiga_exec_wait_wake",
+      "tx_amiga_kernel_running",
+      "tx_amiga_kernel_start",
+      "tx_amiga_kernel_stop",
+      "tx_amiga_orphan_thread",
+      "tx_amiga_set_kernel_memory",
+      "tx_amiga_stack_in_use",
+      "tx_amiga_task_alive_locked",
+      "tx_amiga_task_on_list",
+      "tx_amiga_tick_stats",
+      "tx_amiga_tick_stats_live",
+      "tx_amiga_uptime_ms",
+      "tx_amiga_zombie_tasks",
+      "tx_amiga_zombie_tasks_live",
+      "tx_application_define",
+      "tx_at",
+      "tx_flush",
+      "tx_reclaim"
+    ],
+    "internal_identifiers": [
+      "_tx_amiga_adopt_generation",
+      "_tx_amiga_adopt_parks",
+      "_tx_amiga_adopt_peak",
+      "_tx_amiga_adopt_pool",
+      "_tx_amiga_adopt_signal",
+      "_tx_amiga_adopt_slot",
+      "_tx_amiga_adopt_task",
+      "_tx_amiga_adopt_unpublished_freed",
+      "_tx_amiga_adopt_waiter",
+      "_tx_amiga_adopt_waiter_full",
+      "_tx_amiga_adopt_waiters",
+      "_tx_amiga_adopt_waiting",
+      "_tx_amiga_baton_holder_task",
+      "_tx_amiga_ctrl",
+      "_tx_amiga_discard_preempt_resets",
+      "_tx_amiga_kernel_memory",
+      "_tx_amiga_kernel_memory_size",
+      "_tx_amiga_kernel_stopping",
+      "_tx_amiga_kernel_up",
+      "_tx_amiga_master_gone",
+      "_tx_amiga_master_stack",
+      "_tx_amiga_master_stack_size",
+      "_tx_amiga_memory_owned",
+      "_tx_amiga_scheduler_signal",
+      "_tx_amiga_scheduler_task",
+      "_tx_amiga_start_status",
+      "_tx_amiga_starter_signal",
+      "_tx_amiga_starter_task",
+      "_tx_amiga_stop_signal",
+      "_tx_amiga_stop_task",
+      "_tx_amiga_tick",
+      "_tx_amiga_tick_run",
+      "_tx_amiga_timer_base",
+      "_tx_amiga_timer_gone",
+      "_tx_amiga_timer_stack",
+      "_tx_amiga_timer_stack_size",
+      "_tx_amiga_timer_stop",
+      "_tx_amiga_timer_task",
+      "_tx_amiga_vblank_frames",
+      "_tx_amiga_vblank_int",
+      "_tx_amiga_vblank_sigmask",
+      "_tx_amiga_vblank_task",
+      "_tx_amiga_zombies",
+      "_tx_amiga_zombies_live",
+      "_tx_initialize_unused_memory",
+      "_tx_thread_created_count",
+      "_tx_thread_created_ptr",
+      "_tx_thread_current_ptr",
+      "_tx_thread_execute_ptr",
+      "_tx_thread_preempt_disable",
+      "_tx_thread_system_state",
+      "_tx_timer_current_ptr",
+      "_tx_timer_expired",
+      "_tx_timer_expired_time_slice",
+      "_tx_timer_list_end",
+      "_tx_timer_list_start",
+      "_tx_timer_system_clock",
+      "_tx_timer_time_slice"
+    ],
+    "fields": [
+      "tx_mutex_ownership_count",
+      "tx_queue_full",
+      "tx_thread_additional_suspend_info",
+      "tx_thread_amiga_exec_wait_nesting",
+      "tx_thread_amiga_flags",
+      "tx_thread_amiga_run_signal",
+      "tx_thread_amiga_signal_owner",
+      "tx_thread_amiga_suspension_type",
+      "tx_thread_amiga_task",
+      "tx_thread_amiga_task_stamp",
+      "tx_thread_created_next",
+      "tx_thread_id",
+      "tx_thread_name",
+      "tx_thread_run_count",
+      "tx_thread_stack_end",
+      "tx_thread_stack_ptr",
+      "tx_thread_stack_size",
+      "tx_thread_stack_start",
+      "tx_thread_state",
+      "tx_thread_suspend_cleanup",
+      "tx_thread_suspend_control_block",
+      "tx_thread_suspend_info",
+      "tx_thread_suspend_status",
+      "tx_thread_suspended_next",
+      "tx_thread_suspended_previous",
+      "tx_thread_suspending",
+      "tx_thread_time_slice",
+      "tx_thread_timer",
+      "tx_timer_internal_remaining_ticks"
+    ],
+    "source_macros_and_types": [
+      "TX_AMIGA_ADOPT_RESERVE",
+      "TX_AMIGA_ADOPT_SLOTS",
+      "TX_AMIGA_ADOPT_WAITERS",
+      "TX_AMIGA_COUNT",
+      "TX_AMIGA_CTRL_MAGIC",
+      "TX_AMIGA_HANDOFF_PRIORITY",
+      "TX_AMIGA_MEMORY_SIZE",
+      "TX_AMIGA_OFF_ATTNRESCHED",
+      "TX_AMIGA_OFF_ETASK",
+      "TX_AMIGA_OFF_ET_UNIQUEID",
+      "TX_AMIGA_OFF_TDNESTCNT",
+      "TX_AMIGA_REAP_TIMEOUT_SECS",
+      "TX_AMIGA_SCHED_STATS",
+      "TX_AMIGA_SC_DIRECT",
+      "TX_AMIGA_SC_DISABLE",
+      "TX_AMIGA_SC_MAX",
+      "TX_AMIGA_SC_MUTEX_GET",
+      "TX_AMIGA_SC_MUTEX_PUT",
+      "TX_AMIGA_SC_PARK_SPURIOUS",
+      "TX_AMIGA_SC_PARK_WAIT",
+      "TX_AMIGA_SC_PERMIT_SLOW",
+      "TX_AMIGA_SC_RESTORE",
+      "TX_AMIGA_SC_SCHED_DISPATCH",
+      "TX_AMIGA_SC_SCHED_WAIT",
+      "TX_AMIGA_SC_SYS_RETURN",
+      "TX_AMIGA_SC_WAKE",
+      "TX_AMIGA_STOP_TIMEOUT_SECS",
+      "TX_AMIGA_TASK_PRIORITY",
+      "TX_AMIGA_THREAD_ADOPTED",
+      "TX_AMIGA_THREAD_CACHED",
+      "TX_AMIGA_THREAD_DIE",
+      "TX_AMIGA_THREAD_DORMANT",
+      "TX_AMIGA_THREAD_GREEN",
+      "TX_AMIGA_THREAD_ORPHANED",
+      "TX_AMIGA_TICK_NO_VBLANK_SERVER",
+      "TX_AMIGA_TICK_STATS",
+      "TX_AMIGA_TICK_TEST_DEAD_VERTB",
+      "TX_AMIGA_TIMER_BUDGET_MS",
+      "TX_AMIGA_TIMER_MAX_CATCHUP",
+      "TX_AMIGA_TIMER_PRIORITY",
+      "TX_AMIGA_TIMER_PROBE_MAX_HZ",
+      "TX_AMIGA_TIMER_PROBE_MIN_HZ",
+      "TX_AMIGA_TIMER_PROBE_MS",
+      "TX_AMIGA_TIMER_UNIT",
+      "TX_AMIGA_VBLANK_DIVIDER",
+      "TX_AUTO_ACTIVATE",
+      "TX_AUTO_START",
+      "TX_CALLER_ERROR",
+      "TX_COMPLETED",
+      "TX_DISABLE",
+      "TX_DISABLE_ERROR_CHECKING",
+      "TX_DONT_START",
+      "TX_ENABLE_EVENT_TRACE",
+      "TX_FALSE",
+      "TX_INTERRUPT_SAVE_AREA",
+      "TX_INT_DISABLE",
+      "TX_INT_ENABLE",
+      "TX_MAX_PRIORITIES",
+      "TX_MINIMUM_STACK",
+      "TX_MUTEX",
+      "TX_NOT_AVAILABLE",
+      "TX_NOT_DONE",
+      "TX_NO_ACTIVATE",
+      "TX_NO_INHERIT",
+      "TX_NO_INSTANCE",
+      "TX_NO_MEMORY",
+      "TX_NO_TIMER",
+      "TX_NO_TIME_SLICE",
+      "TX_NO_WAIT",
+      "TX_NULL",
+      "TX_OR",
+      "TX_OR_CLEAR",
+      "TX_PRIORITY_ERROR",
+      "TX_PTR_ERROR",
+      "TX_RESTORE",
+      "TX_SAFETY_CRITICAL",
+      "TX_SOURCE_CODE",
+      "TX_SUCCESS",
+      "TX_SUSPENDED",
+      "TX_SUSPEND_LIFTED",
+      "TX_TCP_IP",
+      "TX_TERMINATED",
+      "TX_THREAD",
+      "TX_THREAD_ERROR",
+      "TX_THREAD_GET_SYSTEM_STATE",
+      "TX_THREAD_ID",
+      "TX_TIMER_PROCESS_IN_ISR",
+      "TX_TIMER_TICKS_PER_SECOND",
+      "TX_TRACE_BUFFER_ENTRY",
+      "TX_TRACE_IN_LINE_INSERT",
+      "TX_TRUE",
+      "TX_WAIT_ABORTED",
+      "TX_WAIT_FOREVER"
+    ]
+  },
+  "netxduo_pin": "2d871dca099603e76487bd14fdabeacdc223b89e",
+  "threadx_pin": "e24aa9c92d247dcea3502b9a77b6dd1af21d0a2f",
+  "method": "configured compiler preprocessing; own source lines only; compiled, not linked coverage",
+  "threadx_header_sha256": {
+    "tx_api.h": "0d5dce7ce5cc80208b31dcd403817f447686c28dfcce7fd049108fb84da61657",
+    "tx_block_pool.h": "f104895488e144b4450a4ead4669c46aaec601d66c4f24ee2bc884dd3a309bf0",
+    "tx_byte_pool.h": "a484d23c38952daaf628970b0f4fa9605f8c4c2961974c2c5a118e8e255d8d67",
+    "tx_event_flags.h": "cc3b935d030b2657dc745c1c60914fd179b64e5d18da195fece7a0871614aa0a",
+    "tx_initialize.h": "f651f319e638e5e6cb5dcb691c9501dd3cda1cb8fac238d9bd15ad2165ccc649",
+    "tx_mutex.h": "d0e0b6c17d30d82f3ecbd5618f51ca9d47f7e574cc98e229dc99070678d7eb7e",
+    "tx_queue.h": "bdec805e25afd18b9eadf4178a9c7d2803c308a9505cfb746a3667db6774163a",
+    "tx_semaphore.h": "f3e35c0758812ff047004ab3fc03d4f5e5560fb6d5d525ef2665318240c6b2fe",
+    "tx_thread.h": "6118107f1b3422b2f9d61e75da8118895c16cf23658a2924e72e5fefe5faf9f5",
+    "tx_timer.h": "4e05bc546647f1db9d02afff265a3b409f15f63ada9c5b28d172c5ae96d32551",
+    "tx_trace.h": "a3e93c41ddd4af05d95c316ba48721539551a7c6d6c6af78203399ab63f8a261",
+    "tx_user_sample.h": "bdac2c5c78c8598ef1f7f6bee11b93392a0de3bbf84029bb3d65f6bc94965b59"
+  }
+}

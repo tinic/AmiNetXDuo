@@ -1,6 +1,7 @@
 # Research: an Exec backend for the NetX Duo ThreadX contract
 
-**Status: research only; no replacement implementation or runtime validation.**
+**Status: research only; first wait primitive implemented, no NetX replacement
+or native runtime validation.**
 The human explicitly placed this work on a research branch on 2026-10-07.
 It is outside near-term shipping work. It must not change shipping defaults,
 release gates or installed machines. The existing ThreadX backend remains the
@@ -129,9 +130,15 @@ affected regression evidence; branch existence is not approval to integrate.
 ## Current evidence and open work
 
 - Size baseline: measured; no source or hardware changes during measurement.
-- Replacement design and dependency manifest: pending.
+- Compiled-source full/micro dependency manifests and initial wait primitive:
+  implemented in [research/exec-threadx](../../research/exec-threadx/README.md).
+  The host model and m68k compilation are initial evidence, not a backend pass.
+- Complete replacement design and minimum-profile manifest: pending.
 - Replacement implementation, runtime correctness and net saving: unmeasured.
-- AgentNet architectural proposals: requested; no independent verdict recorded.
+- AgentNet architectural assessment: received from deepseek-v4; no backend GO.
+  Suspension/preemption, deferred cleanup and current-thread obligations are
+  recorded in the research README. Its NetX pin differs from beta8, so it is
+  architectural input rather than an exact-commit implementation review.
 
 Primary references:
 
