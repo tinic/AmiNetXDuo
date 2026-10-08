@@ -176,6 +176,21 @@ Independent review is complete for this checkpoint: deepseek-v4 found no
 bounded bridge blocker at 38ff2cb0d + 9af3a1965, and claudecode found no blocker
 in the host negative-test/CMake delta 9af3a1965..cd8d6a80a. Host CTest PASS 4/4
 includes eleven bridge schedules and a separate rejection test, not twelve
-successful cleanup schedules. The final rebuilt native binary is identical
+successful cleanup schedules. The cd8d6a80 rebuilt native binary was identical
 to the guarded binary actually run above. Task build/staging outputs were
 removed after retaining small logs, hashes, binary and map evidence.
+
+Review follow-up: claudecode identified that returning unsupported from blocking
+mutex-get can be ignored by NetX. Research commit 8b724ee53 changes blocking
+contention to fail closed, retains NO_WAIT semantics, adds a rejection probe,
+and acquires/releases the real IP mutex in host/native producer fixtures.
+Host CTest PASS 5/5 and native PASS 5/5 (ac40bcee, exit 0) at that commit.
+The subsequent `6d9ff19d8` guard rejects mutex-get without registered thread
+identity, with a third rejection probe. Final host CTest PASS 6/6, eleven bridge
+schedules plus three rejection probes; final native PASS 5/5 at `6d9ff19d8`,
+binary d7e229de (41,720 bytes), exit 0 after 14 seconds, same A1200/KS3.1/stacks.
+Claudecode independently reviewed both follow-up deltas: no bounded blocker.
+Source, binary hashes, stdout/exit and reviews are retained in
+`/Users/turo/ai/evidence/exec-threadx-bridge-spike2.json` and adjacent evidence.
+Research task build/cache and remote staging outputs are removed. Full backend,
+general deferred-abort dispatch, UDP and measured savings remain open.

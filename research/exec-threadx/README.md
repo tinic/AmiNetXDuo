@@ -202,7 +202,7 @@ fail closed. Missing services remain missing link symbols.
 The deterministic post-mutex-release seam is NULL in the native experiment.
 
 Host CTest executes eleven bridge schedules: nested caller/timer identity and mutex
-ownership/unsupported contention, resume before blocking, arrival, timeout with
+ownership/nonblocking contention, resume before blocking, arrival, timeout with
 actual deferred checker, close/repeated cleanup, wait-abort, expiry then arrival,
 two deferred waiters, stale expiry after reuse, pending foreign detach, and
 wait-abort after deferred expiry (IP actor drains cleanup before its Permit).
@@ -240,8 +240,19 @@ producer to unlink and clear cleanup; clearing it inside resume would hide the
 deferred-abort node still attached. The guard rejects that unresolved ordering. Claudecode independently reviewed
 the host-test/CMake delta `9af3a1965..cd8d6a80a` and found no blocker; the negative
 test correctly checks rejection, rather than claiming the unresolved ordering
-works. Host CTest also registers a separate rejection probe for unsupported blocking
-mutex contention. Its result is protection evidence, not mutex-wait conformance.
+works. Claudecode also identified NetX ignoring blocking mutex-get errors;
+`8b724ee53` rejects blocking contention and makes the host/native IP actors hold
+the IP mutex. Claudecode reviewed that fix and its thread-identity guard `6d9ff19d8`: no
+bounded blocker. The final native binary passed the same five cases. Final host CTest PASS 6/6 covers the primitive model, eleven real-source bridge
+schedules, extraction and three separate rejection probes (deferred-abort without
+a drain, blocking mutex contention, and mutex get in marked timer context).
+Rejection results are protection evidence, not successful unsupported operations.
+The final source `6d9ff19d8` passed five native cases, exit 0 after 14 seconds:
+binary SHA256 `d7e229defb15101aa2a170f786200d5005a050ddf81962b06f6d19a07d12316e`,
+41,720 bytes, same boardless A1200/KS3.1 configuration and 8192-byte stacks.
+Actual evidence is `/Users/turo/ai/evidence/exec-threadx-bridge-native-final`.
+The tests still exercise the suspension seam, not a complete stack. No library
+size saving has been established.
 
 ## Still open
 
