@@ -245,6 +245,7 @@ static void init(void)
     owner=1; now=0; stage=0;
     platform=(AnxTxPlatform){enter,leave,caller,panic,0};
     anx_tx_runtime_init(&platform);
+    CHECK(anx_tx_runtime_idle() && !depth);
     for (i=0;i<3;i++) {
         Caller *c=&callers[i]; owner=i+1;
         c->ops=(AnxWaitOps){enter,leave,clock_now,park,notify,c};
@@ -329,15 +330,19 @@ int main(int argc, char **argv)
     {
         AnxTxContext outer,nested;
         anx_tx_context_begin(&outer,&callers[0].thread,0);
+        CHECK(!anx_tx_runtime_idle());
         CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_SUCCESS);
         CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_SUCCESS);
         anx_tx_context_begin(&nested,TX_NULL,1);
+        CHECK(!anx_tx_runtime_idle());
         CHECK(_tx_thread_identify()==TX_NULL && _tx_thread_system_state==1);
         anx_tx_context_end(&nested);
+        CHECK(!anx_tx_runtime_idle());
         CHECK(_tx_thread_identify()==&callers[0].thread && !_tx_thread_system_state);
         CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
         CHECK(ip.nx_ip_protection.tx_mutex_ownership_count==1);
         anx_tx_context_end(&outer);
+        CHECK(anx_tx_runtime_idle() && !depth);
         owner=3;
         anx_tx_context_begin(&outer,&callers[2].thread,0);
         CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_NOT_AVAILABLE);

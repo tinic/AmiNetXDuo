@@ -65,6 +65,17 @@ if(CMAKE_CROSSCOMPILING)
     target_link_libraries(research_exec_adapter PUBLIC research_wait)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_adapter PRIVATE -Wall -Wextra -Werror)
+    add_executable(research_exec_task_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_task.c exec_task_smoke.c)
+    target_link_libraries(research_exec_task_smoke PRIVATE research_tx_bridge research_exec_adapter)
+    target_include_directories(research_exec_task_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_task_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_task_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_task_smoke>.map")
+    add_custom_command(TARGET research_exec_task_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTOOL_MAP=$<TARGET_FILE:research_exec_task_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_tx_bridge_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c tx_bridge_smoke.c)
     target_link_libraries(research_tx_bridge_smoke PRIVATE research_tx_bridge research_exec_adapter amiga)

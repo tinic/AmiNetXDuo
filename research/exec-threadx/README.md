@@ -631,3 +631,36 @@ The reviewer ran no tests; host/native execution is attributed separately. The
 stricter prepublication allocation and quiescent deletion policy is deliberate,
 not full upstream lifecycle conformance. Owned local build and native staging
 are removed; small useful evidence is retained.
+
+## Spike 8: owned Exec task startup and normal reaping
+
+`exec_task.c` provides an explicit research task mechanism, not the public
+ThreadX create/terminate/delete services. Caller-owned control/stack storage is
+published before AddTask; the worker opens its own private wait IO and attaches
+the real pinned TX_THREAD before acknowledging startup. Entry runs in one outer
+bridge context and can park on supported ThreadX services. Normal return requires
+quiescent producers, no pending wait/cleanup/abort pins, no owned mutexes and no
+active private timer. The worker detaches, closes/reaps private IO, then publishes
+FINISHED and calls RemTask without a scheduling gap. Only the creator can reap
+and release its ACK signal; record/stack storage remains retained until then.
+The embedded Task has an empty memory-entry list; Exec cannot free caller storage.
+
+The native fixture tests invalid storage/context rejection, ACK signal allocation
+failure before publication, identity/entry/stack metadata, two independently
+blocked tasks, live/duplicate/double reap rejection, normal return, twelve reuses
+of the same stack/record and completion before startup observation (the fixture
+temporarily lowers its creator's Exec priority). It verifies stack canaries,
+creator signal allocation recovery, detached IDs and closed private IO after
+every successful reap. Host models additionally check the idle-boundary query;
+they do not execute Exec task lifecycle. Native verdict and independent exact
+review are recorded after execution, not inferred from cross-compilation.
+
+All child tasks use Exec priority zero. No ThreadX priority/threshold/timeslice
+contract is claimed, and no full public thread creation, TX_COMPLETED state,
+external forced termination, adoption or NetX IP lifecycle is fabricated.
+Child-side IO-open/registration failure rollback exists but is not fault-injected
+by this fixture; only creator ACK allocation failure is exercised. Producers
+must already be quiescent on entry return; future full NetX shutdown needs an
+explicit drain/stop protocol. Shipping/vendor inputs remain untouched. Next:
+connect this owned task mechanism to the public service contract, implement
+quiescent object retirement and helper stop/drain, then create a real NX_IP.

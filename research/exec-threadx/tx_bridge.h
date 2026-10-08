@@ -43,6 +43,8 @@ typedef struct AnxTxContext {
  * Bind actual pinned control blocks; retain them and quiesce all producers
  * before detach. Blocking is permitted only in the outer thread context. */
 void anx_tx_runtime_init(const AnxTxPlatform *);
+/* Native lifecycle calls must block outside every bridge call boundary. */
+int anx_tx_runtime_idle(void);
 int anx_tx_attach(AnxTxThread *, TX_THREAD *, AnxWait *, uintptr_t);
 int anx_tx_detach(AnxTxThread *);
 /* Owner-only, while READY and quiescent. Optional integration must perform

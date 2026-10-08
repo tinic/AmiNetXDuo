@@ -75,6 +75,16 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     _tx_timer_system_clock=0; timer_dispatch=0;
 }
 
+int anx_tx_runtime_idle(void)
+{
+    int idle;
+    platform->enter(platform->context);
+    idle=!contexts && !current_frame && !_tx_thread_current_ptr &&
+         !_tx_thread_system_state && !_tx_thread_preempt_disable && !resume_hook_depth;
+    platform->leave(platform->context);
+    return idle;
+}
+
 int anx_tx_attach(AnxTxThread *t, TX_THREAD *thread, AnxWait *wait, uintptr_t owner)
 {
     AnxTxThread *other;
