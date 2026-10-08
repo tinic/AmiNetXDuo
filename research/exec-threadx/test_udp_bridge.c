@@ -123,7 +123,7 @@ static void init(void)
 {
     CHECK(!depth);
     memset(callers,0,sizeof(callers)); memset(&ip,0,sizeof(ip)); memset(&socket,0,sizeof(socket));
-    platform=(AnxTxPlatform){enter,leave,caller,panic,0};
+    platform=(AnxTxPlatform){enter,leave,caller,panic,0,0};
     anx_tx_runtime_init(&platform); now=0; stage=0;
     for (unsigned i=0;i<3;i++) {
         Caller *c=&callers[i]; owner=i+1;

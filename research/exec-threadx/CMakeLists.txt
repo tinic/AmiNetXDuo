@@ -115,6 +115,16 @@ if(CMAKE_CROSSCOMPILING)
     target_link_libraries(research_exec_adapter PUBLIC research_wait)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_adapter PRIVATE -Wall -Wextra -Werror)
+    add_executable(research_exec_pause_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_thread.c exec_pause_smoke.c)
+    target_link_libraries(research_exec_pause_smoke PRIVATE research_tx_bridge research_exec_adapter)
+    target_include_directories(research_exec_pause_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_pause_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_pause_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_pause_smoke>.map")
+    add_custom_command(TARGET research_exec_pause_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_pause_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_ip_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c exec_thread.c exec_clock.c exec_ip.c exec_ip_smoke.c)
     target_link_libraries(research_exec_ip_smoke PRIVATE
@@ -228,6 +238,14 @@ else()
     enable_testing()
     find_package(Threads REQUIRED)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_executable(research_context_pause_model test_context_pause.c)
+    target_link_libraries(research_context_pause_model PRIVATE research_tx_bridge)
+    target_compile_options(research_context_pause_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_context_pause_model COMMAND research_context_pause_model)
+    foreach(guard begin end reset service)
+        add_test(NAME research_context_pause_reject_${guard}
+            COMMAND research_context_pause_model --reject-${guard})
+    endforeach()
     add_executable(research_clock_schedule_model test_clock_schedule.c)
     target_link_libraries(research_clock_schedule_model PRIVATE research_clock_schedule)
     target_compile_options(research_clock_schedule_model PRIVATE -Wall -Wextra -Werror)

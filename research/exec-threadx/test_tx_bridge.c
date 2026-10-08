@@ -243,7 +243,7 @@ static void init(void)
     CHECK(!depth);
     memset(callers,0,sizeof(callers)); memset(&ip,0,sizeof(ip)); memset(&socket,0,sizeof(socket));
     owner=1; now=0; stage=0;
-    platform=(AnxTxPlatform){enter,leave,caller,panic,0};
+    platform=(AnxTxPlatform){enter,leave,caller,panic,0,0};
     anx_tx_runtime_init(&platform);
     CHECK(anx_tx_runtime_idle() && !depth);
     for (i=0;i<3;i++) {

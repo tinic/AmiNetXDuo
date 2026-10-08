@@ -30,7 +30,9 @@ typedef struct {
  * Startup waits for owner-side private IO + bridge registration. Entry runs in
  * one outer bridge context, may use supported blocking services, must return
  * with all producers quiescent and no owned mutexes. It must not perform foreign
- * blocking Exec IO inside the boundary. An invalid return is fatal, not a reap.
+ * blocking Exec IO inside the boundary: use matched anx_tx_context_pause/resume
+ * around real IO and refuse to block if pause rejects. An invalid return is
+ * fatal, not a reap.
  * Calls below require normal creator task context outside Forbid/Disable and
  * outside all bridge contexts. No interrupt/foreign-owner lifecycle calls.
  * Failed startup rolls back task/signal/private IO and returns zero. */

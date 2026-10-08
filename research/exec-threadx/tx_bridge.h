@@ -11,6 +11,9 @@ typedef struct {
     uintptr_t (*caller)(void *);
     void (*panic)(void *, const char *); /* must not return */
     void *context;
+    /* Called with a temporary enter held. Verify these are precisely all
+     * task protection levels and interrupts are enabled before an Exec wait. */
+    int (*can_pause)(void *, unsigned levels);
 } AnxTxPlatform;
 
 typedef struct AnxTxThread {
@@ -31,6 +34,8 @@ typedef struct AnxTxThread {
     void (*terminal_owner)(void *); /* private terminal path, must not return */
     void *terminal_context;
     unsigned terminal_pending;
+    struct AnxTxContext *paused_frame;
+    unsigned paused_depth, exec_wait_nesting;
 } AnxTxThread;
 
 typedef struct AnxTxContext {
@@ -90,6 +95,18 @@ int anx_tx_set_abort_policy(AnxTxThread *, int (*)(AnxTxThread *, UINT *));
 UINT anx_tx_original_wait_abort(TX_THREAD *);
 void anx_tx_context_begin(AnxTxContext *, TX_THREAD *, ULONG system_state);
 void anx_tx_context_end(AnxTxContext *);
+/* Owner-only Exec wait bracket, including nested release/acquire pairs.
+ * Pause drops the entire NORMAL same-thread context chain and all its task
+ * protection levels. Resume restores the exact chain after real Exec IO.
+ * Storage/owner must remain live throughout; detach/reset while paused is
+ * prohibited. No ThreadX queue, timer, baton or scheduler transition occurs.
+ * Outside an admitted context or unmatched resume returns zero unchanged;
+ * callers must not perform blocking IO when pause rejects. Platform preflight
+ * refuses external Forbid/Disable levels. Paused owners cannot begin/end a
+ * bridge context or invoke ThreadX services until the final resume. This is
+ * not dead-task reclamation: retained frames may still live on the owner stack. */
+int anx_tx_context_pause(void);
+int anx_tx_context_resume(void);
 /* Research scheduling policy: running owner only threshold changes, restore
  * before outer context_end. Real blocking may drop/reenter a raised-threshold
  * boundary. Slices are stored/advisory, not a ThreadX tick/dispatch guarantee.

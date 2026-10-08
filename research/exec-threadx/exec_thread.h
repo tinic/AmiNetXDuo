@@ -28,7 +28,10 @@ typedef struct AnxExecThread {
  * port's Exec priority 1; 16..31 map to 0. Logical priorities remain in public
  * fields; ties are deliberate. Initial threshold must equal priority. Slices
  * are stored/advisory only; no tick accounting or global Exec quantum changes.
- * This is creation/publication evidence, not strict scheduler conformance. */
+ * Entry runs in an automatic outer bridge context. Use matched
+ * anx_tx_context_pause/resume for blocking Exec IO, retaining the record,
+ * public control and all context frames through return. This is
+ * creation/publication evidence, not strict scheduler conformance. */
 int anx_exec_thread_prepare(AnxExecThread *, TX_THREAD *, CHAR *, APTR, ULONG);
 /* Only unbound PREPARED reservation can be cancelled, outside the boundary.
  * Never touches public control storage; closes private IO and truly reaps Task. */

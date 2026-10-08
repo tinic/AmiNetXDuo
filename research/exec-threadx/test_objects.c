@@ -33,7 +33,7 @@ static int park(void *p,uint64_t t) {(void)p;(void)t;CHECK(0);return -1;}
 static void notify(void *p) {(void)p;}
 int main(int argc,char **argv)
 {
-    AnxTxPlatform p={enter,leave,caller,panic,0};
+    AnxTxPlatform p={enter,leave,caller,panic,0,0};
     AnxWaitOps ops={enter,leave,now,park,notify,0};
     AnxWait wait;AnxTxThread bridge;TX_THREAD thread;AnxTxContext f;
     anx_tx_runtime_init(&p);anx_wait_init(&wait,&ops);

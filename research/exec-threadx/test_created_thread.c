@@ -25,7 +25,7 @@ static void notify(void *p) {(void)p;}
 static void entry(ULONG input) {(void)input;}
 int main(int argc,char **argv)
 {
-    AnxTxPlatform p={enter,leave,caller,panic,0};
+    AnxTxPlatform p={enter,leave,caller,panic,0,0};
     AnxWaitOps ops={enter,leave,clock_now,park,notify,0};
     AnxWait waits[2]; AnxTxThread parent,created,duplicate;
     TX_THREAD pt,t,before;

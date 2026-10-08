@@ -30,7 +30,7 @@ static int park(void *a,uint64_t deadline)
 }
 int main(void)
 {
-    static const AnxTxPlatform p={enter,leave,caller,panic,0};
+    static const AnxTxPlatform p={enter,leave,caller,panic,0,0};
     AnxTxContext frame;
     anx_tx_runtime_init(&p);
     for (unsigned i=0;i<2;i++) {

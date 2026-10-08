@@ -42,7 +42,7 @@ static int park(void *p,uint64_t deadline)
 }
 int main(int argc,char **argv)
 {
-    AnxTxPlatform p={enter,leave,caller,panic,0};
+    AnxTxPlatform p={enter,leave,caller,panic,0,0};
     AnxWaitOps ops={enter,leave,now,park,notify,0};
     AnxTxContext f,nested;
     UINT old=99,invalid_old=99;

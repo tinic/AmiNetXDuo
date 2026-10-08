@@ -10,6 +10,12 @@ _Static_assert(__builtin_offsetof(struct ExecBase,AttnResched)==TX_AMIGA_OFF_ATT
 static void enter(void *arg) { (void)arg; Forbid(); }
 static void leave(void *arg) { (void)arg; Permit(); }
 static uintptr_t caller(void *arg) { (void)arg; return (uintptr_t)FindTask(0); }
+static int can_pause(void *arg,unsigned levels)
+{
+    (void)arg;
+    return levels<=127 && SysBase->IDNestCnt<0 && SysBase->TDNestCnt>=0 &&
+        (unsigned)SysBase->TDNestCnt+1==levels;
+}
 static void panic(void *arg,const char *text)
 {
     (void)arg; (void)text;
@@ -20,7 +26,7 @@ static void panic(void *arg,const char *text)
 
 const AnxTxPlatform *anx_tx_exec_platform(void)
 {
-    static const AnxTxPlatform p={enter,leave,caller,panic,0};
+    static const AnxTxPlatform p={enter,leave,caller,panic,0,can_pause};
     return &p;
 }
 

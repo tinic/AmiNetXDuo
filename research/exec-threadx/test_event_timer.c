@@ -83,7 +83,7 @@ static int park(void *a,uint64_t deadline)
     result=c->wait.result!=ANX_WAIT_PENDING;
     leave(0); return result;
 }
-static const AnxTxPlatform platform={enter,leave,caller,panic,0};
+static const AnxTxPlatform platform={enter,leave,caller,panic,0,0};
 static void attach(Caller *c,uintptr_t id)
 {
     identity=id; c->id=id;

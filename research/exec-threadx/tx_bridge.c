@@ -162,6 +162,7 @@ static int detach(AnxTxThread *t, int completed)
     if (platform->caller(platform->context) != t->owner ||
         t->wait->result == ANX_WAIT_PENDING || t->thread->tx_thread_state != TX_READY ||
         t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token || t->abort_pins || t->semaphore_call ||
+        t->exec_wait_nesting || t->paused_frame || t->paused_depth ||
         t->thread->tx_thread_owned_mutex_count || t->thread->tx_thread_owned_mutex_list ||
         t->thread->tx_thread_timer.tx_timer_internal_list_head ||
         _tx_thread_current_ptr == t->thread) {
@@ -189,7 +190,7 @@ int anx_tx_set_terminal_owner(AnxTxThread *t, void (*callback)(void *), void *ar
     platform->enter(platform->context);
     valid=callback && find(t->thread)==t && platform->caller(platform->context)==t->owner &&
         t->thread->tx_thread_state==TX_READY && !t->thread->tx_thread_suspend_cleanup &&
-        !t->pending_resume && !t->pending_token && !t->abort_pins &&
+        !t->pending_resume && !t->pending_token && !t->abort_pins && !t->exec_wait_nesting &&
         !t->terminal_owner && !t->terminal_pending && t->wait->result!=ANX_WAIT_PENDING;
     if (valid) {t->terminal_owner=callback;t->terminal_context=arg;}
     platform->leave(platform->context);
@@ -247,7 +248,7 @@ int anx_tx_set_resume_cleanup(AnxTxThread *t, int (*hook)(AnxTxThread *))
     platform->enter(platform->context);
     valid=find(t->thread)==t && platform->caller(platform->context)==t->owner &&
         t->thread->tx_thread_state==TX_READY && !t->thread->tx_thread_suspend_cleanup &&
-        !t->pending_resume && !t->pending_token && !t->abort_pins && t->wait->result!=ANX_WAIT_PENDING;
+        !t->pending_resume && !t->pending_token && !t->abort_pins && !t->exec_wait_nesting && t->wait->result!=ANX_WAIT_PENDING;
     if (valid) t->resume_cleanup=hook;
     platform->leave(platform->context);
     return valid;
@@ -259,7 +260,7 @@ int anx_tx_set_abort_policy(AnxTxThread *t, int (*policy)(AnxTxThread *, UINT *)
     platform->enter(platform->context);
     valid=find(t->thread)==t && platform->caller(platform->context)==t->owner &&
         t->thread->tx_thread_state==TX_READY && !t->thread->tx_thread_suspend_cleanup &&
-        !t->pending_resume && !t->pending_token && !t->abort_pins && t->wait->result!=ANX_WAIT_PENDING;
+        !t->pending_resume && !t->pending_token && !t->abort_pins && !t->exec_wait_nesting && t->wait->result!=ANX_WAIT_PENDING;
     if (valid) t->abort_policy=policy;
     platform->leave(platform->context);
     return valid;
@@ -267,8 +268,12 @@ int anx_tx_set_abort_policy(AnxTxThread *t, int (*policy)(AnxTxThread *, UINT *)
 
 void anx_tx_context_begin(AnxTxContext *frame, TX_THREAD *thread, ULONG state)
 {
+    AnxTxThread *owner;
     platform->enter(platform->context);
     frame->owner = platform->caller(platform->context);
+    for (owner=threads;owner;owner=owner->next)
+        if (owner->owner==frame->owner)
+            need(!owner->exec_wait_nesting,"context begin while Exec wait paused");
     if (thread)
         need(find(thread)->owner == frame->owner, "foreign caller identity");
     if (!contexts)
@@ -283,6 +288,25 @@ void anx_tx_context_begin(AnxTxContext *frame, TX_THREAD *thread, ULONG state)
     _tx_thread_system_state=state;
 }
 
+static void flush_pending_resumes(void)
+{
+    AnxTxThread *t;
+    /* A ThreadX abort can mark READY while NetX's deferred sentinel still
+     * owns a node. Only actual cleanup, under a later producer boundary,
+     * makes the owner runnable. No cleanup callback is forged here. */
+    for (t=threads;t;t=t->next) {
+        if (t->pending_resume && !t->thread->tx_thread_suspend_cleanup) {
+            need(t->thread->tx_thread_state==TX_READY,"pending resume state changed");
+            need(t->pending_token==t->token && t->token==t->wait->generation,
+                 "pending resume generation changed");
+            t->pending_resume=0;
+            t->pending_token=0;
+            if (t->token)
+                (void)anx_wait_complete(t->wait,t->token,ANX_WAIT_READY);
+        }
+    }
+}
+
 void anx_tx_context_end(AnxTxContext *frame)
 {
     need(contexts && current_frame == frame &&
@@ -292,28 +316,91 @@ void anx_tx_context_end(AnxTxContext *frame)
         need(_tx_thread_current_ptr->tx_thread_preempt_threshold==
              _tx_thread_current_ptr->tx_thread_priority,
              "boundary exit with raised threshold");
-    if (contexts==1) {
-        AnxTxThread *t;
-        /* A ThreadX abort can mark READY while NetX's deferred sentinel still
-         * owns a node. Only actual cleanup, under a later producer boundary,
-         * makes the owner runnable. No cleanup callback is forged here. */
-        for (t=threads;t;t=t->next) {
-            if (t->pending_resume && !t->thread->tx_thread_suspend_cleanup) {
-                need(t->thread->tx_thread_state==TX_READY,"pending resume state changed");
-                need(t->pending_token==t->token && t->token==t->wait->generation,
-                     "pending resume generation changed");
-                t->pending_resume=0;
-                t->pending_token=0;
-                if (t->token)
-                    (void)anx_wait_complete(t->wait,t->token,ANX_WAIT_READY);
-            }
-        }
-    }
+    if (contexts==1) flush_pending_resumes();
     _tx_thread_current_ptr=frame->saved_thread;
     _tx_thread_system_state=frame->saved_state;
     contexts--;
     current_frame = frame->previous;
     platform->leave(platform->context);
+}
+
+static AnxTxThread *caller_record(void)
+{
+    AnxTxThread *t;
+    uintptr_t owner=platform->caller(platform->context);
+    for (t=threads;t;t=t->next) if (t->owner==owner) return t;
+    return 0;
+}
+
+int anx_tx_context_pause(void)
+{
+    AnxTxThread *t;
+    AnxTxContext *frame;
+    unsigned depth,seen=0;
+    platform->enter(platform->context);
+    t=caller_record();
+    if (!t || !platform->can_pause || _tx_thread_preempt_disable ||
+        _tx_thread_system_state || resume_hook_depth || timer_dispatch)
+        goto reject;
+    if (t->exec_wait_nesting) {
+        if (contexts || current_frame || _tx_thread_current_ptr ||
+            !t->paused_frame || !t->paused_depth ||
+            t->exec_wait_nesting==(unsigned)-1 || !platform->can_pause(platform->context,1))
+            goto reject;
+        t->exec_wait_nesting++;
+        platform->leave(platform->context);
+        return 1;
+    }
+    depth=contexts;
+    if (!depth || depth==(unsigned)-1 || !current_frame || _tx_thread_current_ptr!=t->thread ||
+        t->thread->tx_thread_state!=TX_READY || t->thread->tx_thread_suspend_cleanup ||
+        t->thread->tx_thread_suspending || t->thread->tx_thread_timer.tx_timer_internal_list_head ||
+        t->wait->result==ANX_WAIT_PENDING || t->pending_resume || t->pending_token ||
+        t->abort_pins || t->semaphore_call || t->paused_frame || t->paused_depth ||
+        !platform->can_pause(platform->context,depth+1)) goto reject;
+    /* A callback/system frame or changed identity anywhere in the chain is
+     * not an ordinary nested caller bracket and must never cross an Exec wait. */
+    for (frame=current_frame;frame;frame=frame->previous) {
+        if (++seen>depth || frame->owner!=t->owner || frame->saved_state ||
+            frame->saved_thread!=(frame->previous ? t->thread : TX_NULL)) goto reject;
+    }
+    if (seen!=depth) goto reject;
+    flush_pending_resumes();
+    t->paused_frame=current_frame; t->paused_depth=depth; t->exec_wait_nesting=1;
+    contexts=0; current_frame=0; _tx_thread_current_ptr=TX_NULL;
+    /* Include the temporary guard. The final leave may dispatch another task;
+     * no global identity/context survives that dispatch. */
+    for (seen=0;seen<=depth;seen++) platform->leave(platform->context);
+    return 1;
+reject:
+    platform->leave(platform->context);
+    return 0;
+}
+
+int anx_tx_context_resume(void)
+{
+    AnxTxThread *t;
+    unsigned i;
+    platform->enter(platform->context);
+    t=caller_record();
+    if (!t || !t->exec_wait_nesting || !t->paused_frame || !t->paused_depth ||
+        contexts || current_frame || _tx_thread_current_ptr || _tx_thread_system_state ||
+        _tx_thread_preempt_disable || resume_hook_depth || timer_dispatch ||
+        t->thread->tx_thread_state!=TX_READY || t->thread->tx_thread_suspend_cleanup ||
+        !platform->can_pause || !platform->can_pause(platform->context,1)) {
+        platform->leave(platform->context);
+        return 0;
+    }
+    if (--t->exec_wait_nesting) {
+        platform->leave(platform->context);
+        return 1;
+    }
+    /* Consume the temporary guard as the first restored boundary level. */
+    for (i=1;i<t->paused_depth;i++) platform->enter(platform->context);
+    contexts=t->paused_depth; current_frame=t->paused_frame;
+    _tx_thread_current_ptr=t->thread;
+    t->paused_frame=0; t->paused_depth=0;
+    return 1;
 }
 
 UINT tx_amiga_caller_is_thread(void)

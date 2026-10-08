@@ -49,7 +49,7 @@ static void panic(void *a,const char *message)
     }
     fprintf(stderr,"panic: %s\n",message); exit(1);
 }
-static const AnxTxPlatform platform={enter,leave,caller,panic,0};
+static const AnxTxPlatform platform={enter,leave,caller,panic,0,0};
 
 /* The packet is an already decoded payload. Header/checksum/state processing
  * and packet pool release are outside this fixture's coverage. */
