@@ -1,7 +1,10 @@
 # Research: an Exec backend for the NetX Duo ThreadX contract
 
-**Status: research only; wait primitive and bounded real-NetX TCP/UDP suspension bridge
-implemented and native smokes verified. Full backend/conformance remains open.**
+**Status: PARKED by the human on 2026-10-08.** The completed full LTO
+comparison found a 5.67% larger library and 48.5% lower TCP throughput; the
+size or performance continuation criterion was not met. Preserve the research
+branch and evidence. Further spikes, profiling, optimization and integration
+require an explicit request to resume. Full backend/conformance remains open.
 The human explicitly placed this work on a research branch on 2026-10-07.
 It is outside near-term shipping work. It must not change shipping defaults,
 release gates or installed machines. The existing ThreadX backend remains the

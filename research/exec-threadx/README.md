@@ -1,5 +1,13 @@
 # Exec / ThreadX compatibility research
 
+**Status: PARKED by the human on 2026-10-08.** Preserve
+`research/exec-threadx-compat` and the measurement evidence. Further spikes,
+profiling, optimization and integration require an explicit request to resume.
+The matched full LTO prototype is 5.67% larger and its measured TCP throughput
+is 48.5% lower; it did not meet the size or performance continuation criterion.
+The completed comparison is recorded below and in
+`/Users/turo/ai/evidence/exec-threadx-perf-comparison.json`.
+
 This directory is an isolated, standalone CMake project. The parent build,
 shipping presets and vendor sources do not select it. It is not a complete
 ThreadX backend and must not be installed on a machine as one.
