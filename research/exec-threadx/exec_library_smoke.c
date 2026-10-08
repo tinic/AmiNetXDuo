@@ -81,7 +81,12 @@ static int protected_close(void)
     CHECK(!master && FindTask(NULL)->tc_SigAlloc==signals);CASE("actual-unload-and-signal-recovery-after-probe");
     CHECK(passed==5);say("research_exec_library=PASS 5/5 exclusion_probe_only=1\n");return 0;
 }
-int main(int argc,char **argv)
+static const char *skip_space(const char *s)
+{
+    while (s && (*s==' ' || *s=='\t' || *s=='\r' || *s=='\n')) s++;
+    return s;
+}
+int main(void)
 {
     struct Library *a,*b,*master;
     char payload[]="real library loopback",received[64];
@@ -89,8 +94,14 @@ int main(int argc,char **argv)
     struct address6 v6={AF_INET6,0,45124,0,{0},0};
     LONG fd,listener,client,accepted;
     ULONG signals=FindTask(NULL)->tc_SigAlloc;
-    if (argc==2 && !strcmp(argv[1],"EXCLUSION")) return protected_close();
-    CHECK(argc==1);
+    /* tool_startup.S supplies a raw Shell line, not a C argv array. */
+    const char *args=skip_space(GetArgStr());
+    if (args && !strncmp(args,"EXCLUSION",9)) {
+        const char *tail=skip_space(args+9);
+        CHECK(!*tail);
+        return protected_close();
+    }
+    CHECK(!args || !*args);
     v6.address[15]=1;
     say("research_exec_library=START\n");
     for (unsigned cycle=0;cycle<2;cycle++)
