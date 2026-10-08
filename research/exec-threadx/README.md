@@ -254,6 +254,53 @@ Actual evidence is `/Users/turo/ai/evidence/exec-threadx-bridge-native-final`.
 The tests still exercise the suspension seam, not a complete stack. No library
 size saving has been established.
 
+## Spike 3: cleanup gating and UDP receive
+
+The bridge now keeps a resumed owner parked while its cleanup pointer is live.
+The unchanged ThreadX abort returns TX_SUCCESS to the abort caller and leaves
+TX_READY in the control block; physical Exec dispatch waits for actual cleanup.
+This changes wake timing and is research policy, not complete ThreadX scheduling
+compatibility. Registered callers must use the serialized boundary; general
+ThreadX thread-state queries, priority semantics and adoption are still absent.
+
+An outer context-end checks each pending wake independently before Permit.
+It signals only a READY thread whose cleanup was actually cleared. Pending wakes
+carry the private wait generation; the owner reties that token atomically when
+it arms the bounded cleanup wait. Detach rejects a pending wake/token. Owners,
+waits, sockets and all producer references must remain alive until quiesced.
+A one-second research grace bounds missing/stalled cleanup; expiry is a fatal
+failure, never a fabricated API return or forced removal of an invalid node.
+A host negative case retains socket storage but invalidates its ID, runs the real
+checker and verifies that the stalled gate fails closed. This is not safe socket
+freeing or deletion conformance.
+
+Host TCP coverage adds a distinct non-IP abort caller, a later IP cleanup boundary
+and two gated owners released one at a time. The former deferred-abort rejection
+case is now a successful delayed-cleanup schedule; cleanup/list/status assertions
+remain. Normal and delayed expiry, generation reuse and ownership checks remain.
+Actual NetX UDP receive and cleanup are linked with real checksum/packet-release
+helpers and real ThreadX sleep. No vendor edits or success stubs are introduced.
+
+UDP host fixtures cover queued receive, empty/no-wait, arrival, direct timeout,
+abort, unbind/repeated cleanup, two timeout waiters and stale expiry after reuse.
+Delivery list manipulation is a fixture, not `_nx_udp_packet_receive` or wire
+routing. IPv4 fixtures use the existing per-socket checksum-disable option;
+checksum and packet-release branches are linked but not exercised. Host ULONG
+and header sizes differ from m68k; these are semantic schedules, not wire/ABI
+conformance. Sleep host coverage executes actual zero wait, timeout, abort and
+illegal timer-caller paths. Host CTest PASS 8/8: TCP 13 schedules, UDP 8, sleep 4,
+primitive/extraction and three rejection probes (stalled cleanup, blocking mutex,
+timer-context mutex).
+
+The expanded m68k smoke compiles with three real Exec tasks: owner, IP producer
+and independent abort caller. Ten planned cases are the original five TCP cases,
+delayed TCP cleanup after the independent abort, UDP arrival/timeout/abort and
+real ThreadX sleep. Both workers own and reap their resources and remove their
+tasks before the parent releases the program. Native verdict and independent
+exact-commit review are pending; prior native evidence covers only prior binaries.
+Other races, including packet delivery while a deferred abort is pending, remain
+unverified. This spike does not establish a full NetX stack or net size savings.
+
 ## Still open
 
 Full current-thread/adoption semantics, blocking mutexes, event waiters, thread

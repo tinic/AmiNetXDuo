@@ -13,6 +13,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 endif()
 add_library(research_tx_bridge STATIC tx_bridge.c
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_timeout.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_sleep.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_socket_thread_suspend.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_socket_thread_resume.c"
@@ -22,7 +23,11 @@ add_library(research_tx_bridge STATIC tx_bridge.c
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_client_bind_cleanup.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_connect_cleanup.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_disconnect_cleanup.c"
-    "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_transmit_cleanup.c")
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_transmit_cleanup.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_udp_socket_receive.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_udp_receive_cleanup.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_ip_checksum_compute.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_release.c")
 target_link_libraries(research_tx_bridge PUBLIC research_wait)
 target_include_directories(research_tx_bridge PUBLIC ${ANX_BRIDGE_INCLUDES})
 target_compile_definitions(research_tx_bridge PUBLIC TX_DISABLE_ERROR_CHECKING)
@@ -74,8 +79,16 @@ else()
     target_link_libraries(research_tx_bridge_model PRIVATE research_tx_bridge)
     target_compile_options(research_tx_bridge_model PRIVATE -Wall -Wextra -Werror)
     add_test(NAME research_tx_bridge_model COMMAND research_tx_bridge_model)
-    add_test(NAME research_tx_bridge_reject_deferred_abort
-        COMMAND research_tx_bridge_model --reject-deferred-abort)
+    add_executable(research_udp_bridge_model test_udp_bridge.c)
+    target_link_libraries(research_udp_bridge_model PRIVATE research_tx_bridge)
+    target_compile_options(research_udp_bridge_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_udp_bridge_model COMMAND research_udp_bridge_model)
+    add_executable(research_thread_sleep_model test_thread_sleep.c)
+    target_link_libraries(research_thread_sleep_model PRIVATE research_tx_bridge)
+    target_compile_options(research_thread_sleep_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_thread_sleep_model COMMAND research_thread_sleep_model)
+    add_test(NAME research_tx_bridge_reject_stuck_cleanup
+        COMMAND research_tx_bridge_model --reject-stuck-cleanup)
     add_test(NAME research_tx_bridge_reject_blocking_mutex
         COMMAND research_tx_bridge_model --reject-blocking-mutex)
     add_test(NAME research_tx_bridge_reject_timer_mutex

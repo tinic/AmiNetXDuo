@@ -96,7 +96,7 @@ int anx_tx_detach(AnxTxThread *t)
     platform->enter(platform->context);
     if (platform->caller(platform->context) != t->owner ||
         t->wait->result == ANX_WAIT_PENDING || t->thread->tx_thread_state != TX_READY ||
-        t->thread->tx_thread_suspend_cleanup ||
+        t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token ||
         t->thread->tx_thread_timer.tx_timer_internal_list_head ||
         _tx_thread_current_ptr == t->thread) {
         platform->leave(platform->context);
@@ -136,6 +136,23 @@ void anx_tx_context_end(AnxTxContext *frame)
     need(contexts && current_frame == frame &&
          frame->owner == platform->caller(platform->context), "context owner/order");
     need(!_tx_thread_preempt_disable, "unbalanced preemption counter");
+    if (contexts==1) {
+        AnxTxThread *t;
+        /* A ThreadX abort can mark READY while NetX's deferred sentinel still
+         * owns a node. Only actual cleanup, under a later producer boundary,
+         * makes the owner runnable. No cleanup callback is forged here. */
+        for (t=threads;t;t=t->next) {
+            if (t->pending_resume && !t->thread->tx_thread_suspend_cleanup) {
+                need(t->thread->tx_thread_state==TX_READY,"pending resume state changed");
+                need(t->pending_token==t->token && t->token==t->wait->generation,
+                     "pending resume generation changed");
+                t->pending_resume=0;
+                t->pending_token=0;
+                if (t->token)
+                    (void)anx_wait_complete(t->wait,t->token,ANX_WAIT_READY);
+            }
+        }
+    }
     _tx_thread_current_ptr=frame->saved_thread;
     _tx_thread_system_state=frame->saved_state;
     contexts--;
@@ -211,6 +228,7 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
     AnxTxThread *t=find(thread);
     ULONG ticks=thread->tx_thread_timer.tx_timer_internal_remaining_ticks;
     AnxTxContext *outer_frame=current_frame;
+    unsigned awaiting_cleanup=0;
     need(contexts==1 && !_tx_thread_system_state && _tx_thread_current_ptr==thread &&
          t->owner==platform->caller(platform->context), "unsupported blocking context");
     need(_tx_thread_preempt_disable>0, "suspend missing preemption increment");
@@ -228,7 +246,7 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
                           (uint64_t)ticks*1000000/TX_TIMER_TICKS_PER_SECOND,0,0,0,0);
     need(t->token!=0,"wait setup failed");
     if (ticks!=TX_WAIT_FOREVER) _tx_timer_system_activate(&thread->tx_thread_timer);
-    while (thread->tx_thread_state!=TX_READY) {
+    while (thread->tx_thread_state!=TX_READY || thread->tx_thread_suspend_cleanup) {
         AnxWaitResult result;
         /* Drop precisely the outer call boundary. Every TX_DISABLE inside
          * NetX has been restored; no foreign current pointer remains live. */
@@ -244,8 +262,9 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
         contexts=1;
         current_frame=outer_frame;
         _tx_thread_current_ptr=thread;
-        if (thread->tx_thread_state==TX_READY) break;
+        if (thread->tx_thread_state==TX_READY && !thread->tx_thread_suspend_cleanup) break;
         need(result==ANX_WAIT_TIMEOUT,"wait ended without ThreadX resume");
+        need(!awaiting_cleanup,"cleanup did not complete within research grace");
         if (!t->expiry_dispatched) {
             AnxTxContext timer_context;
             anx_tx_context_begin(&timer_context,TX_NULL,1);
@@ -254,14 +273,15 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
         }
         /* Deferred cleanup must really resume the thread before returning.
          * Do not manufacture NX_NO_PACKET or leave a live suspension node. */
-        if (thread->tx_thread_state!=TX_READY) {
-            t->token=anx_wait_begin(t->wait,ANX_WAIT_FOREVER,0,0,0,0);
+        if (thread->tx_thread_state!=TX_READY || thread->tx_thread_suspend_cleanup) {
+            t->token=anx_wait_begin(t->wait,ANX_TX_CLEANUP_GRACE_US,0,0,0,0);
             need(t->token!=0,"deferred cleanup wait setup failed");
+            if (t->pending_resume) t->pending_token=t->token;
+            awaiting_cleanup=1;
         }
     }
-    /* An abort after TCP timeout can encounter the no-op deferred sentinel.
-     * The producer must drain IP cleanup before releasing the boundary. The
-     * eventual full backend needs a general dispatch policy for that ordering. */
+    /* READY alone is not sufficient: the original NetX node must be removed.
+     * An outer producer boundary releases gated wakes after real cleanup. */
     need(!thread->tx_thread_suspend_cleanup,"resume left cleanup pending");
 }
 
@@ -275,7 +295,11 @@ VOID _tx_thread_system_resume(TX_THREAD *thread)
     thread->tx_thread_suspending=TX_FALSE;
     thread->tx_thread_state=TX_READY;
     t->resumes++;
-    if (t->token)
+    if (thread->tx_thread_suspend_cleanup) {
+        t->pending_resume=1;
+        t->pending_token=t->token;
+    }
+    else if (t->token)
         (void)anx_wait_complete(t->wait,t->token,ANX_WAIT_READY);
 }
 

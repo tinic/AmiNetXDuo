@@ -194,3 +194,18 @@ Source, binary hashes, stdout/exit and reviews are retained in
 `/Users/turo/ai/evidence/exec-threadx-bridge-spike2.json` and adjacent evidence.
 Research task build/cache and remote staging outputs are removed. Full backend,
 general deferred-abort dispatch, UDP and measured savings remain open.
+
+## Spike 3 checkpoint (in progress)
+
+Generic cleanup-gated wakeups are implemented without NetX edits. A non-IP abort
+returns success, while physical dispatch of the ready target waits for actual IP
+cleanup under a later boundary. Each wake carries a generation, detach rejects
+pending gates, and a one-second research grace fails closed if cleanup stalls.
+This is a scheduling adaptation; general ThreadX state/priority compatibility,
+object deletion and packet-arrival races require further work.
+
+Actual UDP receive/cleanup, checksum/packet-release helpers and ThreadX sleep are
+linked. Host CTest PASS 8/8 includes 13 TCP schedules, 8 UDP schedules, 4 sleep
+schedules and rejection probes; packet delivery is a fixture and checksum paths
+are not exercised. The three-task native smoke compiles, with 10 planned cases.
+Exact-commit independent review and actual native verdict are pending.

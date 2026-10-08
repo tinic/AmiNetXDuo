@@ -18,8 +18,8 @@ typedef struct AnxTxThread {
     AnxWait *wait;
     uintptr_t owner;
     struct AnxTxThread *next;
-    uint32_t token;
-    unsigned expiry_dispatched, resumes, parks;
+    uint32_t token, pending_token;
+    unsigned expiry_dispatched, pending_resume, resumes, parks;
 } AnxTxThread;
 
 typedef struct AnxTxContext {
@@ -28,6 +28,9 @@ typedef struct AnxTxContext {
     ULONG saved_state;
     uintptr_t owner;
 } AnxTxContext;
+
+/* Research-only cleanup grace: failure is fatal, never a fabricated status. */
+#define ANX_TX_CLEANUP_GRACE_US UINT64_C(1000000)
 
 /* One domain, serialized task-level call boundaries. No real interrupt calls.
  * Bind actual pinned control blocks; retain them and quiesce all producers

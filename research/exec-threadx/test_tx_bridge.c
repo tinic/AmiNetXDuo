@@ -11,7 +11,7 @@
 #include <string.h>
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c); exit(1); } } while (0)
-enum { ARRIVAL, TIMEOUT, CLOSE, ABORT_WAIT, EXPIRE_ARRIVAL, TWO_WAITERS, STALE_TIMER, DETACH_PENDING, EXPIRE_ABORT };
+enum { ARRIVAL, TIMEOUT, CLOSE, ABORT_WAIT, EXPIRE_ARRIVAL, TWO_WAITERS, STALE_TIMER, DETACH_PENDING, EXPIRE_ABORT, LATE_ABORT, TWO_GATED };
 typedef struct {
     TX_THREAD thread;
     AnxTxThread bridge;
@@ -27,7 +27,7 @@ static unsigned depth, mode, stage;
 static uintptr_t owner;
 static uint64_t now;
 static uint32_t stale_token;
-static unsigned aborted, reject_deferred_abort, reject_blocking_mutex, reject_timer_mutex;
+static unsigned aborted, reject_blocking_mutex, reject_timer_mutex, reject_stuck_cleanup;
 
 static void enter(void *arg) { (void)arg; depth++; }
 static void leave(void *arg) { (void)arg; CHECK(depth); depth--; }
@@ -35,12 +35,12 @@ static uintptr_t caller(void *arg) { (void)arg; return owner; }
 static void panic(void *arg,const char *text)
 {
     (void)arg;
-    if (reject_deferred_abort && !strcmp(text,"resume left cleanup pending")) {
-        CHECK(callers[0].thread.tx_thread_state==TX_READY);
+    if (reject_stuck_cleanup && !strcmp(text,"cleanup did not complete within research grace")) {
+        CHECK(callers[0].bridge.pending_resume && callers[0].thread.tx_thread_state==TX_READY);
         CHECK(callers[0].thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
         CHECK(socket.nx_tcp_socket_receive_suspended_count==1);
-        CHECK(aborted==TX_SUCCESS && callers[0].bridge.resumes==1);
-        puts("research_tx_bridge_guard=PASS rejected READY return with deferred cleanup");
+        CHECK(now==ANX_TX_CLEANUP_GRACE_US && aborted==TX_SUCCESS);
+        puts("research_tx_bridge_guard=PASS rejected stalled cleanup after bounded grace");
         exit(0);
     }
     if (reject_timer_mutex && !strcmp(text,"mutex get without registered thread context")) {
@@ -103,6 +103,73 @@ static int park(void *arg,uint64_t deadline)
         owner=saved;
         return 0;
     }
+    if (mode==TWO_GATED && stage==0) {
+        stage=1; owner=2;
+        CHECK(suspend_caller(1,2)==TX_WAIT_ABORTED);
+        CHECK(callers[0].bridge.pending_resume && !callers[1].bridge.pending_resume);
+        owner=saved; return 1;
+    }
+    if (mode==TWO_GATED && stage==1) {
+        owner=3; anx_tx_context_begin(&frame,TX_NULL,1);
+        CHECK(anx_tx_expire(&callers[0].thread,callers[0].bridge.token));
+        CHECK(anx_tx_expire(&callers[1].thread,callers[1].bridge.token));
+        anx_tx_context_end(&frame);
+        anx_tx_context_begin(&frame,&callers[2].thread,0);
+        CHECK(_tx_thread_wait_abort(&callers[0].thread)==TX_SUCCESS);
+        CHECK(_tx_thread_wait_abort(&callers[1].thread)==TX_SUCCESS);
+        anx_tx_context_end(&frame);
+        CHECK(callers[0].bridge.pending_resume && callers[1].bridge.pending_resume);
+        stage=2; owner=saved; return 1;
+    }
+    if (mode==TWO_GATED) {
+        CHECK(deadline==ANX_TX_CLEANUP_GRACE_US && c->bridge.pending_resume);
+        owner=3; anx_tx_context_begin(&frame,&callers[2].thread,0);
+        CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
+        if (stage==2) {
+            CHECK(c==&callers[1]);
+            _nx_tcp_receive_cleanup(&c->thread NX_CLEANUP_ARGUMENT);
+            CHECK(callers[0].thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
+        } else { CHECK(stage==3 && c==&callers[0]); _nx_tcp_deferred_cleanup_check(&ip); }
+        CHECK(c->bridge.pending_resume && !c->thread.tx_thread_suspend_cleanup);
+        CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+        anx_tx_context_end(&frame);
+        CHECK(!c->bridge.pending_resume && c->wait.result==ANX_WAIT_READY);
+        if (stage==2) CHECK(callers[0].bridge.pending_resume && callers[0].wait.result==ANX_WAIT_TIMEOUT);
+        stage++; owner=saved; return 1;
+    }
+    if (mode==LATE_ABORT && !stage++) {
+        owner=3;
+        anx_tx_context_begin(&frame,TX_NULL,1);
+        CHECK(anx_tx_expire(&c->thread,c->bridge.token));
+        anx_tx_context_end(&frame);
+        owner=2;
+        anx_tx_context_begin(&frame,&callers[1].thread,0);
+        CHECK(!ip.nx_ip_protection.tx_mutex_ownership_count);
+        aborted=_tx_thread_wait_abort(&c->thread);
+        CHECK(aborted==TX_SUCCESS && c->thread.tx_thread_state==TX_READY);
+        CHECK(c->thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
+        CHECK(c->bridge.pending_resume && c->wait.result==ANX_WAIT_TIMEOUT);
+        CHECK(!anx_tx_detach(&c->bridge));
+        anx_tx_context_end(&frame);
+        CHECK(c->bridge.pending_resume && socket.nx_tcp_socket_receive_suspended_count==1);
+        owner=saved;
+        return 1;
+    }
+    if (mode==LATE_ABORT) {
+        CHECK(deadline==ANX_TX_CLEANUP_GRACE_US && c->bridge.pending_resume);
+        CHECK(c->bridge.pending_token==c->bridge.token);
+        if (reject_stuck_cleanup) {
+            owner=3;
+            anx_tx_context_begin(&frame,&callers[2].thread,0);
+            CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
+            socket.nx_tcp_socket_id=0; /* storage retained, simulated invalidation */
+            _nx_tcp_deferred_cleanup_check(&ip);
+            CHECK(c->thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
+            CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+            anx_tx_context_end(&frame); owner=saved; now=deadline; return 0;
+        }
+        CHECK(c->wait.result==ANX_WAIT_PENDING && c->thread.tx_thread_state==TX_READY);
+    }
     owner=3;
     if (mode==EXPIRE_ARRIVAL || mode==STALE_TIMER || mode==TWO_WAITERS || mode==EXPIRE_ABORT) {
         anx_tx_context_begin(&frame,TX_NULL,1);
@@ -118,15 +185,19 @@ static int park(void *arg,uint64_t deadline)
     anx_tx_context_begin(&frame,&callers[2].thread,0);
     CHECK(_tx_thread_identify()==&callers[2].thread);
     CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
-    if (mode==TIMEOUT || mode==TWO_WAITERS) {
+    if (mode==TIMEOUT || mode==TWO_WAITERS || mode==LATE_ABORT) {
         CHECK(ip.nx_ip_events.tx_event_flags_group_current & NX_IP_TCP_CLEANUP_DEFERRED);
         CHECK(callers[0].thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
         _nx_tcp_deferred_cleanup_check(&ip);
+        if (mode==LATE_ABORT) {
+            CHECK(!c->thread.tx_thread_suspend_cleanup && c->bridge.pending_resume);
+            CHECK(c->wait.result==ANX_WAIT_PENDING);
+        }
     } else if (mode==CLOSE) {
         socket.nx_tcp_socket_state=NX_TCP_CLOSED;
         _nx_tcp_receive_cleanup(&c->thread NX_CLEANUP_ARGUMENT);
         _nx_tcp_receive_cleanup(&c->thread NX_CLEANUP_ARGUMENT);
-    } else if (mode==ABORT_WAIT || mode==EXPIRE_ABORT) {
+    } else if (mode==ABORT_WAIT || mode==EXPIRE_ABORT || mode==LATE_ABORT || mode==TWO_GATED) {
         aborted=_tx_thread_wait_abort(&c->thread);
         if (mode==EXPIRE_ABORT) {
             CHECK(c->thread.tx_thread_state==TX_READY);
@@ -134,10 +205,8 @@ static int park(void *arg,uint64_t deadline)
             CHECK(socket.nx_tcp_socket_receive_suspended_count==1);
             /* This producer is the IP actor: drain before its boundary Permit,
              * otherwise the ready owner can return with an attached node. */
-            if (!reject_deferred_abort) {
-                _nx_tcp_deferred_cleanup_check(&ip);
-                CHECK(!c->thread.tx_thread_suspend_cleanup);
-            }
+            _nx_tcp_deferred_cleanup_check(&ip);
+            CHECK(!c->thread.tx_thread_suspend_cleanup);
         }
     } else {
         if (mode==DETACH_PENDING) {
@@ -148,6 +217,7 @@ static int park(void *arg,uint64_t deadline)
     }
     CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
     anx_tx_context_end(&frame);
+    if (mode==LATE_ABORT) CHECK(!c->bridge.pending_resume && c->wait.result==ANX_WAIT_READY);
     owner=saved;
     return 1;
 }
@@ -205,6 +275,10 @@ int main(int argc, char **argv)
     unsigned scenario;
     if (argc!=1) {
         CHECK(argc==2);
+        if (!strcmp(argv[1],"--reject-stuck-cleanup")) {
+            init(); mode=LATE_ABORT; reject_stuck_cleanup=1;
+            (void)suspend_caller(0,2); CHECK(0);
+        }
         if (!strcmp(argv[1],"--reject-timer-mutex")) {
             AnxTxContext frame;
             init(); reject_timer_mutex=1;
@@ -223,10 +297,7 @@ int main(int argc, char **argv)
             (void)_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER);
             CHECK(0);
         }
-        CHECK(!strcmp(argv[1],"--reject-deferred-abort"));
-        init(); mode=EXPIRE_ABORT; reject_deferred_abort=1;
-        (void)suspend_caller(0,2);
-        CHECK(0); /* the unsupported ordering must terminate in panic */
+        CHECK(0);
     }
     init();
     {
@@ -257,7 +328,7 @@ int main(int argc, char **argv)
     CHECK(suspend_caller(0,2)==NX_SUCCESS);
     CHECK(!callers[0].parks && callers[0].bridge.resumes==1);
     finish();
-    for (scenario=ARRIVAL;scenario<=EXPIRE_ABORT;scenario++) {
+    for (scenario=ARRIVAL;scenario<=TWO_GATED;scenario++) {
         init(); mode=scenario;
         if (mode==STALE_TIMER) {
             mode=ARRIVAL; CHECK(suspend_caller(0,2)==NX_SUCCESS);
@@ -265,13 +336,14 @@ int main(int argc, char **argv)
         }
         UINT result=suspend_caller(0,2);
         CHECK(result==(mode==TIMEOUT || mode==TWO_WAITERS ? NX_NO_PACKET :
-                       mode==CLOSE ? NX_NOT_CONNECTED : (mode==ABORT_WAIT || mode==EXPIRE_ABORT) ? TX_WAIT_ABORTED : NX_SUCCESS));
-        if (mode==ABORT_WAIT || mode==EXPIRE_ABORT) CHECK(aborted==TX_SUCCESS);
+                       mode==CLOSE ? NX_NOT_CONNECTED : (mode==ABORT_WAIT || mode==EXPIRE_ABORT || mode==LATE_ABORT || mode==TWO_GATED) ? TX_WAIT_ABORTED : NX_SUCCESS));
+        if (mode==ABORT_WAIT || mode==EXPIRE_ABORT || mode==LATE_ABORT) CHECK(aborted==TX_SUCCESS);
         CHECK(callers[0].bridge.resumes==(mode==STALE_TIMER ? 2U : 1U));
         if (mode==TIMEOUT) CHECK(callers[0].parks==2 && now==40000);
+        if (mode==LATE_ABORT) CHECK(callers[0].parks==2 && !callers[0].bridge.pending_resume);
         if (mode==TWO_WAITERS) CHECK(callers[0].thread.tx_thread_suspended_next==&callers[1].thread);
         finish();
     }
-    puts("research_tx_bridge_model=PASS checks=11/11 real NetX publish/resume/cleanup/deferred + ThreadX timeout/wait_abort");
+    puts("research_tx_bridge_model=PASS checks=13/13 real NetX publish/resume/cleanup/deferred + ThreadX timeout/wait_abort");
     return 0;
 }
