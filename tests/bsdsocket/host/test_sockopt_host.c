@@ -576,6 +576,109 @@ static void t_timeouts(void)
           "a short buffer is EINVAL on the way out too");
 }
 
+static void t_paired_setters(void)
+{
+    static const LONG time_options[] = { SO_RCVTIMEO, SO_SNDTIMEO };
+    static const LONG ip_options[] = { IP_TTL, IP_TOS };
+    static const LONG ip_values[] = { -2, -1, 0, 1, 255, 256 };
+    unsigned i, j, protocol;
+
+    printf("paired option setters: field selection and refusal ordering\n");
+    for (i = 0; i < 2; i++)
+    {
+        AmiSocket *s;
+        struct timeval tv;
+        UBYTE bytes[sizeof(tv) + 1];
+        LONG rc;
+
+        h_reset();
+        s = h_tcp(0);
+        s->as_RcvTimeout = 11;
+        s->as_SndTimeout = 17;
+        tv.tv_secs = 2; tv.tv_micro = 0;
+        memcpy(bytes + 1, &tv, sizeof(tv));
+        rc = bsd_setsockopt(0, SOL_SOCKET, time_options[i], bytes + 1,
+                            sizeof(tv), &h_base);
+        CHECK(rc == 0 && s->as_RcvTimeout == (i == 0 ? 2 * H_RATE : 11) &&
+              s->as_SndTimeout == (i == 1 ? 2 * H_RATE : 17),
+              "unaligned timeval updates only the selected timeout");
+        tv.tv_micro = 1000000;
+        rc = bsd_setsockopt(0, SOL_SOCKET, time_options[i], &tv,
+                            sizeof(tv), &h_base);
+        CHECK(rc == -1 && h_base.sb_Errno == AMI_EINVAL &&
+              s->as_RcvTimeout == (i == 0 ? 2 * H_RATE : 11) &&
+              s->as_SndTimeout == (i == 1 ? 2 * H_RATE : 17),
+              "invalid timeval preserves both timeout fields");
+        rc = bsd_setsockopt(0, SOL_SOCKET, time_options[i], NULL,
+                            sizeof(tv), &h_base);
+        CHECK(rc == -1 && h_base.sb_Errno == AMI_EINVAL,
+              "both timeout setters reject NULL with EINVAL");
+        CHECK(h.nx_enters == 0 && h.nx_leaves == 0,
+              "timeout setters do not enter NetX");
+    }
+
+    for (protocol = 0; protocol < 2; protocol++)
+    {
+        for (i = 0; i < 2; i++)
+        {
+            for (j = 0; j < sizeof(ip_values) / sizeof(ip_values[0]); j++)
+            {
+                AmiSocket *s;
+                LONG value = ip_values[j];
+                BOOL valid = value >= -1 && value <= 255;
+                LONG ttl = i == 0 && valid ? (value < 0 ? (LONG)NX_IP_TIME_TO_LIVE : value) : 77;
+                LONG tos = i == 1 && valid ? (value < 0 ? 0 : value) : 88;
+                LONG rc;
+
+                h_reset();
+                s = protocol == 0 ? h_tcp(0) : h_udp(0);
+                s->as_Ttl = 77;
+                s->as_Tos = 88;
+                rc = bsd_setsockopt(0, IPPROTO_IP, ip_options[i], &value,
+                                    sizeof(value), &h_base);
+                CHECK(rc == (valid ? 0 : -1), "TTL/TOS boundary verdict");
+                CHECK(valid || h_base.sb_Errno == AMI_EINVAL,
+                      "TTL/TOS invalid value is EINVAL");
+                CHECK(s->as_Ttl == ttl && s->as_Tos == tos,
+                      "TTL/TOS selects the right field and preserves rejected values");
+                CHECK(h.nx_enters == (valid ? 1UL : 0UL) && h.nx_leaves == h.nx_enters,
+                      "TTL/TOS brackets only accepted values");
+                if (valid)
+                {
+                    CHECK(protocol == 0
+                              ? s->as_Nx.tcp.nx_tcp_socket_time_to_live == (UINT)ttl &&
+                                s->as_Nx.tcp.nx_tcp_socket_type_of_service == ((ULONG)tos << 16)
+                              : s->as_Nx.udp.nx_udp_socket_time_to_live == (UINT)ttl &&
+                                s->as_Nx.udp.nx_udp_socket_type_of_service == ((ULONG)tos << 16),
+                          "TTL/TOS updates the selected live protocol");
+                }
+            }
+        }
+    }
+    for (i = 0; i < 2; i++)
+    {
+        AmiSocket *s;
+        LONG value = 3;
+        LONG rc;
+
+        h_reset();
+        s = h_tcp(0);
+        s->as_Ttl = 77;
+        s->as_Tos = 88;
+        s->as_Nx.tcp.nx_tcp_socket_time_to_live = 99;
+        h.nx_enter_result = -1;
+        rc = bsd_setsockopt(0, IPPROTO_IP, ip_options[i], &value,
+                            sizeof(value), &h_base);
+        CHECK(rc == -1 && h_base.sb_Errno == AMI_ENETDOWN,
+              "TTL/TOS bracket refusal is ENETDOWN");
+        CHECK(s->as_Ttl == (i == 0 ? 3 : 77) && s->as_Tos == (i == 1 ? 3 : 88),
+              "TTL/TOS keeps original local assignment before bracket refusal");
+        CHECK(s->as_Nx.tcp.nx_tcp_socket_time_to_live == 99 &&
+              h.nx_enters == 1 && h.nx_leaves == 0,
+              "TTL/TOS does not mutate live state or leave a refused bracket");
+    }
+}
+
 static void t_so_error(void)
 {
     AmiSocket *s;
@@ -1288,6 +1391,7 @@ int main(void)
     printf("options.c host tests\n");
 
     t_timeouts();
+    t_paired_setters();
     t_so_error();
     t_linger();
     t_flags();

@@ -66,24 +66,6 @@ static VOID ami_ns_resolver_permit(VOID)
     Permit();
 }
 
-static BOOL ami_ns_domain_same(const char *a, const char *b)
-{
-    char ca;
-    char cb;
-
-    do
-    {
-        ca = *a++;
-        cb = *b++;
-        if (ca >= 'A' && ca <= 'Z')
-            ca = (char)(ca + ('a' - 'A'));
-        if (cb >= 'A' && cb <= 'Z')
-            cb = (char)(cb + ('a' - 'A'));
-    } while (ca == cb && ca != '\0');
-
-    return (BOOL)(ca == cb);
-}
-
 /*
  * Only NX_DHCP_NOT_BOUND / NX_DHCP_INTERFACE_NOT_ENABLED can read differently
  * on a later pass; the buffer and the option size do not change within a

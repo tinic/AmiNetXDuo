@@ -157,12 +157,22 @@ BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
     return TRUE;
 }
 
+/* Fail one named read without depending on unrelated allocation counts. */
+static const char *stub_fail_read_path;
+
 APTR ami_cfg_read_file(const char *path, ULONG *size_out)
 {
     unsigned i;
 
     if (size_out != NULL)
         *size_out = 0;
+
+    if (stub_fail_read_path != NULL && strcmp(path, stub_fail_read_path) == 0)
+    {
+        if (size_out != NULL)
+            *size_out = AMI_CFG_READ_NOMEM;
+        return NULL;
+    }
 
     for (i = 0; i < sizeof(fixtures) / sizeof(fixtures[0]); i++)
     {
@@ -316,6 +326,63 @@ static void test_text_helpers(void)
         CHECK_STR(key, "id");
         CHECK_STR(value, "my \"quoted\" host");
         free(buf);
+    }
+
+    {
+        static const struct { const char *input; const char *expected; } quoted[] =
+        {
+            { "\"\"", "" },
+            { "\"plain\"", "plain" },
+            { "\"*N*e*E*n**\"", "\n\033\033\n*" },
+            { "\"a*\"b\"", "a\"b" },
+            { "\"unknown*z\"", "unknownz" },
+            { "\"unterminated", "unterminated" },
+            { "\"tail*", "tail*" }
+        };
+        unsigned i;
+        for (i = 0; i < sizeof(quoted) / sizeof(quoted[0]); i++)
+        {
+            char *tokens[2];
+            ULONG count;
+
+            buf = dup_text(quoted[i].input);
+            ami_cfg_unquote(buf);
+            CHECK_STR(buf, quoted[i].expected);
+            free(buf);
+            buf = dup_text(quoted[i].input);
+            count = ami_cfg_tokenize(buf, tokens, 2);
+            CHECK(count == 1);
+            if (count)
+                CHECK_STR(tokens[0], quoted[i].expected);
+            free(buf);
+        }
+        buf = dup_text("\"plain\"suffix next");
+        {
+            char *tokens[3];
+            CHECK(ami_cfg_tokenize(buf, tokens, 3) == 3);
+            CHECK_STR(tokens[0], "plain");
+            CHECK_STR(tokens[1], "suffix");
+            CHECK_STR(tokens[2], "next");
+        }
+        free(buf);
+        buf = dup_text("first=\"a*N*\"b\" second=\"\" third=last");
+        cursor = buf;
+        {
+            char *key, *value;
+            CHECK(ami_cfg_next_pair(&cursor, &key, &value));
+            CHECK_STR(key, "first"); CHECK_STR(value, "a\n\"b");
+            CHECK(ami_cfg_next_pair(&cursor, &key, &value));
+            CHECK_STR(key, "second"); CHECK_STR(value, "");
+            CHECK(ami_cfg_next_pair(&cursor, &key, &value));
+            CHECK_STR(key, "third"); CHECK_STR(value, "last");
+            CHECK(!ami_cfg_next_pair(&cursor, &key, &value));
+        }
+        free(buf);
+        buf = dup_text("not quoted");
+        ami_cfg_unquote(buf);
+        CHECK_STR(buf, "not quoted");
+        free(buf);
+        ami_cfg_unquote(NULL);
     }
 
     {
@@ -514,6 +581,9 @@ static void test_ip6(void)
             /* 4.1 + 4.3 together: every group needs trimming, and every
                letter must come out lowercase. */
             IP6(0x000a, 0x00bc, 0x0def, 0xfeed, 0x0001, 0x0020, 0x0300, 0x4000),
+            IP6(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+            IP6(0, 0, 0, 0, 0, 0, 0x0102, 0x0304),
+            IP6(0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff),
         };
         static const char *want[] = {
             "::",
@@ -528,6 +598,9 @@ static void test_ip6(void)
             "::1:0:0:1:2:3",
             "2001:db8:0:1:1:1:1:1",
             "a:bc:def:feed:1:20:300:4000",
+            "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "::1.2.3.4",
+            "::ffff:255.255.255.255",
         };
         size_t i;
 
@@ -535,6 +608,36 @@ static void test_ip6(void)
         {
             ami_config_format_ip6(cases[i], text, sizeof(text));
             CHECK_STR(text, want[i]);
+
+            /* Refusals write only the empty string; success touches only
+               the actual address and its NUL, even with full capacity. */
+            {
+                ULONG cap;
+
+                for (cap = 0; cap <= AMI_CFG_IP6_STRLEN; cap++)
+                {
+                    unsigned char guarded[AMI_CFG_IP6_STRLEN + 2];
+                    ULONG touched;
+                    ULONG j;
+
+                    memset(guarded, 0xa5, sizeof(guarded));
+                    ami_config_format_ip6(cases[i], (char *)guarded + 1, cap);
+                    CHECK(guarded[0] == 0xa5);
+                    if (cap == AMI_CFG_IP6_STRLEN)
+                    {
+                        CHECK_STR((char *)guarded + 1, want[i]);
+                        touched = (ULONG)strlen(want[i]) + 1;
+                    }
+                    else
+                    {
+                        touched = (cap != 0) ? 1 : 0;
+                        if (cap != 0)
+                            CHECK(guarded[1] == '\0');
+                    }
+                    for (j = touched + 1; j < (ULONG)sizeof(guarded); j++)
+                        CHECK(guarded[j] == 0xa5);
+                }
+            }
         }
     }
 
@@ -1017,6 +1120,149 @@ static int seen_mentions(const char *needle)
     return 0;
 }
 
+static void test_interface_keyword_aliases(void)
+{
+    static const struct { const char *typo; const char *nearest; } suggestions[] = {
+        { "devic", "DEVICE" }, { "ipaddres", "IPADDRESS" },
+        { "subnetmas", "SUBNETMASK" }, { "addresss", "ADDRESS" },
+        { "gatewayy", "GATEWAY" }, { "iptypes", "IPTYPE" },
+        { "destinationadd", "DESTINATIONADDR" }, { "domainn", "DOMAIN" }
+    };
+    AmiIfConfig iface;
+    char *buf;
+    unsigned i;
+
+    printf("interface: keyword aliases, prefix distinctions and suggestion ties\n");
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
+    buf = dup_text("DEVICE=a2065.device\nIPADDRESS=192.168.3.4\n"
+                   "SUBNETMASK=255.255.255.0\nPRI=-23\n"
+                   "NAMESERVER=192.168.3.1\nDOMAIN=example.org\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK_IP(iface.address, 192, 168, 3, 4);
+    CHECK_IP(iface.netmask, 255, 255, 255, 0);
+    CHECK(iface.priority == -23);
+    CHECK(seen_count == 0);
+    free(buf);
+
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure=dhcp\n"
+                   "destination=x\ndestinationaddr=x\ndestinationaddress=x\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 3);
+    CHECK_STR(seen[0].text, "destination ignored: point-to-point links are not supported");
+    CHECK_STR(seen[1].text, "destinationaddr ignored: point-to-point links are not supported");
+    CHECK_STR(seen[2].text, "destinationaddress ignored: point-to-point links are not supported");
+    for (i = 0; i < 3; i++)
+        CHECK(seen[i].severity == AMI_CFG_PROBLEM_NOTE && seen[i].line == i + 3);
+    free(buf);
+
+    for (i = 0; i < sizeof(suggestions) / sizeof(suggestions[0]); i++)
+    {
+        char text[128], hint[96], problem[96];
+
+        snprintf(text, sizeof(text), "device=a2065.device\nconfigure=dhcp\n%s=x\n",
+                 suggestions[i].typo);
+        snprintf(hint, sizeof(hint), "nearest: %s; line ignored", suggestions[i].nearest);
+        snprintf(problem, sizeof(problem), "unknown keyword '%s'", suggestions[i].typo);
+        seen_count = 0;
+        buf = dup_text(text);
+        CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+        CHECK(seen_count == 1);
+        CHECK(seen[0].severity == AMI_CFG_PROBLEM_WARN && seen[0].line == 3);
+        CHECK_STR(seen[0].text, problem);
+        CHECK_STR(seen[0].hint, hint);
+        free(buf);
+    }
+    ami_config_set_reporter(NULL, NULL);
+}
+
+static void test_interface_mode_aliases(void)
+{
+    static const struct { const char *name; AmiIpType mode; } v4[] = {
+        { "dhcp", AMI_IPTYPE_DHCP }, { "bootp", AMI_IPTYPE_DHCP },
+        { "auto", AMI_IPTYPE_LINKLOCAL }, { "fastauto", AMI_IPTYPE_LINKLOCAL },
+        { "zeroconf", AMI_IPTYPE_LINKLOCAL }, { "linklocal", AMI_IPTYPE_LINKLOCAL },
+        { "static", AMI_IPTYPE_STATIC }, { "manual", AMI_IPTYPE_STATIC },
+        { "none", AMI_IPTYPE_NONE }, { "off", AMI_IPTYPE_NONE },
+        { "no", AMI_IPTYPE_NONE }, { "disabled", AMI_IPTYPE_NONE }
+    };
+#ifdef AMINETXDUO_IPV6
+    static const struct { const char *name; AmiIp6Type mode; } v6[] = {
+        { "off", AMI_IP6TYPE_OFF }, { "no", AMI_IP6TYPE_OFF },
+        { "none", AMI_IP6TYPE_OFF }, { "disabled", AMI_IP6TYPE_OFF },
+        { "linklocal", AMI_IP6TYPE_LINKLOCAL }, { "link-local", AMI_IP6TYPE_LINKLOCAL },
+        { "local", AMI_IP6TYPE_LINKLOCAL }, { "auto", AMI_IP6TYPE_AUTO },
+        { "slaac", AMI_IP6TYPE_AUTO }, { "stateless", AMI_IP6TYPE_AUTO },
+        { "ra", AMI_IP6TYPE_AUTO }, { "static", AMI_IP6TYPE_STATIC },
+        { "manual", AMI_IP6TYPE_STATIC }, { "dhcp", AMI_IP6TYPE_DHCP },
+        { "dhcpv6", AMI_IP6TYPE_DHCP }, { "stateful", AMI_IP6TYPE_DHCP }
+    };
+#endif
+    unsigned family, i, spelling;
+
+    printf("interface: every IPv4/IPv6 mode alias through both keyword spellings\n");
+    for (family = 0; family < 2; family++)
+    {
+        unsigned count = sizeof(v4) / sizeof(v4[0]);
+#ifdef AMINETXDUO_IPV6
+        if (family != 0)
+            count = sizeof(v6) / sizeof(v6[0]);
+#else
+        if (family != 0)
+            break;
+#endif
+        for (i = 0; i < count; i++)
+            for (spelling = 0; spelling < 2; spelling++)
+            {
+                AmiIfConfig iface;
+                char text[256], mixed[24];
+#ifdef AMINETXDUO_IPV6
+                const char *name = family ? v6[i].name : v4[i].name;
+#else
+                const char *name = v4[i].name;
+#endif
+                unsigned j;
+                for (j = 0; name[j] != '\0'; j++)
+                    mixed[j] = (j % 2 == 0 && name[j] >= 'a' && name[j] <= 'z')
+                                   ? (char)(name[j] - ('a' - 'A')) : name[j];
+                mixed[j] = '\0';
+                snprintf(text, sizeof(text),
+                         "device=a2065.device\naddress=10.0.2.15\n"
+                         "address6=2001:db8::5\n%s%s=%s\n",
+                         spelling ? "IPTYPE" : "CONFIGURE", family ? "6" : "", mixed);
+                CHECK(ami_cfg_parse_interface("eth0", text, &iface) == AMI_CFG_OK);
+                if (family == 0)
+                    CHECK(iface.iptype == v4[i].mode);
+#ifdef AMINETXDUO_IPV6
+                else
+                    CHECK(iface.ip6type == v6[i].mode);
+#endif
+            }
+        {
+            AmiIfConfig iface;
+            char text[256];
+
+            snprintf(text, sizeof(text),
+                     "device=a2065.device\naddress=10.0.2.15\n%s",
+                     family ? "CONFIGURE6=linklocal\nCONFIGURE6=bootp\n"
+                            : "CONFIGURE=dhcp\nCONFIGURE=stateful\n");
+            seen_count = 0;
+            ami_config_set_reporter(collect, NULL);
+            CHECK(ami_cfg_parse_interface("eth0", text, &iface) == AMI_CFG_OK);
+            CHECK(seen_count == 1 && seen[0].severity == AMI_CFG_PROBLEM_ERROR);
+            if (family == 0)
+                CHECK(iface.iptype == AMI_IPTYPE_DHCP);
+#ifdef AMINETXDUO_IPV6
+            else
+                CHECK(iface.ip6type == AMI_IP6TYPE_LINKLOCAL);
+#endif
+            ami_config_set_reporter(NULL, NULL);
+        }
+    }
+}
+
 static void test_problem_reporter(void)
 {
     AmiIfConfig iface;
@@ -1439,6 +1685,105 @@ static void test_interface_tcp_wan_window(void)
     ami_config_set_reporter(NULL, NULL);
 }
 
+/* Mixed field widths share one parser path. Check boundaries, diagnostics
+   and rejected reassignment against the public configuration, including
+   adjacent fields which must never be overwritten by a wide store. */
+static void test_interface_numeric_reassignment(void)
+{
+    static const struct
+    {
+        const char *key;
+        const char *canonical;
+        ULONG max;
+        BOOL nonzero;
+        UWORD hint;
+    } settings[] = {
+        { "Unit", "UNIT", 0xFFFFFFFFUL, FALSE, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN },
+        { "mTu", "MTU", 0xFFFFFFFFUL, FALSE, AMI_CFG_ADVICE_MTU_IS_A_PLAIN },
+        { "RxBuffer", "RXBUFFER", 0xFFFFFFFFUL, FALSE, AMI_CFG_ADVICE_RXBUFFER_IS_THE },
+        { "TcpAckMax", "TCPACKMAX", AMI_CFG_TCP_ACK_MAX, TRUE,
+          AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES },
+        { "TcpGrowRtt", "TCPGROWRTT", AMI_CFG_TCP_GROW_RTT_MAX, TRUE,
+          AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS },
+        { "TcpWanWindow", "TCPWANWINDOW", AMI_CFG_TCP_WAN_WINDOW_MAX, TRUE,
+          AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES },
+        { "GroFrames", "GROFRAMES", AMI_CFG_GRO_FRAMES_MAX, TRUE,
+          AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES },
+        { "AckPace", "ACKPACE", AMI_CFG_ACK_PACE_MAX, TRUE,
+          AMI_CFG_ADVICE_ACKPACE_IS_KBPS }
+    };
+    static const ULONG initial[] = { 101, 1500, 4096, 2222, 123, 65536, 4, 20000 };
+    static const char *const fixture =
+        "device=a2065.device unit=101 mtu=1500 rxbuffer=4096 "
+        "tcpackmax=2222 tcpgrowrtt=123 tcpwanwindow=65536 groframes=4 "
+        "ackpace=20000 iprequests=7 arprequests=9 writerequests=3 "
+        "priority=-17 mdns=yes configure=dhcp\n";
+    unsigned i;
+
+    printf("interface: numeric boundaries and rejected reassignment preserve fields\n");
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
+    for (i = 0; i < sizeof(settings) / sizeof(settings[0]); i++)
+    {
+        char maximum[32], hexadecimal[32], above[32];
+        const char *samples[9];
+        unsigned j;
+
+        snprintf(maximum, sizeof(maximum), "%lu", (unsigned long)settings[i].max);
+        snprintf(hexadecimal, sizeof(hexadecimal), "0x%lX", (unsigned long)settings[i].max);
+        snprintf(above, sizeof(above), "%llu", (unsigned long long)settings[i].max + 1);
+        samples[0] = "0";
+        samples[1] = "1";
+        samples[2] = maximum;
+        samples[3] = hexadecimal;
+        samples[4] = above;
+        samples[5] = "-1";
+        samples[6] = "4294967296";
+        samples[7] = "0x100000000";
+        samples[8] = "not-a-number";
+
+        for (j = 0; j < sizeof(samples) / sizeof(samples[0]); j++)
+        {
+            char text[512], problem[160];
+            AmiIfConfig iface;
+            ULONG expected[8];
+            BOOL valid = j < 4 && (j != 0 || !settings[i].nonzero);
+            char *buf;
+
+            memcpy(expected, initial, sizeof(expected));
+            if (valid)
+                expected[i] = (j == 0) ? 0 : ((j == 1) ? 1 : settings[i].max);
+            snprintf(text, sizeof(text), "%s%s=%s\n", fixture, settings[i].key, samples[j]);
+            seen_count = 0;
+            buf = dup_text(text);
+            CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+            free(buf);
+            CHECK(iface.unit == expected[0]);
+            CHECK(iface.mtu == expected[1]);
+            CHECK(iface.rx_buffer == expected[2]);
+            CHECK(iface.tcp_ack_max == expected[3]);
+            CHECK(iface.tcp_grow_rtt == expected[4]);
+            CHECK(iface.tcp_wan_window == expected[5]);
+            CHECK(iface.gro_frames == expected[6]);
+            CHECK(iface.ack_pace_kbps == expected[7]);
+            CHECK(iface.ip_requests == 7 && iface.arp_requests == 9 && iface.write_requests == 3);
+            CHECK(iface.priority == -17 && iface.mdns);
+            CHECK_STR(iface.device, "a2065.device");
+            CHECK(seen_count == (valid ? 0 : 1));
+            if (!valid)
+            {
+                snprintf(problem, sizeof(problem), "%s cannot be '%s'",
+                         settings[i].canonical, samples[j]);
+                CHECK(seen[0].line == 2);
+                CHECK(seen[0].severity == AMI_CFG_PROBLEM_WARN);
+                CHECK_STR(seen[0].text, problem);
+                CHECK_STR(seen[0].hint, ami_cfg_advice(settings[i].hint));
+            }
+        }
+    }
+    ami_config_set_reporter(NULL, NULL);
+}
+
 static void test_interface_priority(void)
 {
     AmiIfConfig iface;
@@ -1607,10 +1952,38 @@ static void test_ipv6_only_no_error(void)
 
 static void test_interface_card(void)
 {
+    /* Fixed expected roster/order, independent of the production macro. */
+    static const char *const names[] = {
+        "xsurf100", "xsurf", "ariadne2", "hydra", "lanrover", "a2065",
+        "ariadne", "pcmcia", "xsurf500", "3c589", "3ccfem556", "3cxem556",
+        "genet", "zz9000", "zz9000z2"
+    };
     AmiIfConfig iface;
     char       *buf;
+    ULONG       i;
 
     printf("interface: CARD\n");
+
+    for (i = 0; i < (ULONG)(sizeof(names) / sizeof(names[0])); i++)
+    {
+        char text[128];
+        char mixed[16];
+        ULONG j;
+
+        for (j = 0; names[i][j] != '\0'; j++)
+        {
+            char c = names[i][j];
+            mixed[j] = (j & 1) == 0 && c >= 'a' && c <= 'z'
+                           ? (char)(c - ('a' - 'A')) : c;
+        }
+        mixed[j] = '\0';
+        snprintf(text, sizeof(text),
+                 "device=anxnet.device\ncard=%s\naddress=10.0.0.1\n", mixed);
+        buf = dup_text(text);
+        CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+        CHECK_STR(iface.card, mixed);
+        free(buf);
+    }
 
     buf = dup_text("device=anxnet.device\nunit=0\ncard=xsurf100\n"
                    "address=192.168.1.10\n");
@@ -1656,6 +2029,11 @@ static void test_interface_card(void)
     CHECK(seen_mentions("xsurf1000"));
     CHECK(seen_mentions("XSURF100"));
     CHECK(seen_mentions("ARIADNE2"));
+    /* The 128-byte list holds only complete choices, in driver order. */
+    CHECK_STR(seen[0].hint,
+              "CARD is one of XSURF100, XSURF, ARIADNE2, HYDRA, LANROVER, "
+              "A2065, ARIADNE, PCMCIA, XSURF500, 3C589, 3CCFEM556, "
+              "3CXEM556, GENET, ZZ9000");
 }
 
 /* Host-name precedence, strongest first: name_resolution, DHCP option 12,
@@ -1955,6 +2333,17 @@ static void test_hostname_offer(void)
               "interface ID");
     CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_ENV),
               "ENV:HOSTNAME");
+    CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_HOSTS), "hosts");
+    {
+        static const UWORD unknown[] = { 6, 255, 256, 260, 65535 };
+        const char *saved = ami_config_hostname_source_text(AMI_HOSTNAME_NAMERES);
+        unsigned i;
+
+        for (i = 0; i < sizeof(unknown) / sizeof(unknown[0]); i++)
+            CHECK(ami_config_hostname_source_text(unknown[i]) == NULL);
+        CHECK(saved == ami_config_hostname_source_text(AMI_HOSTNAME_NAMERES));
+        CHECK_STR(saved, "name_resolution");
+    }
     CHECK(ami_config_hostname_source_text(AMI_HOSTNAME_NONE) == NULL);
     ami_config_free(&cfg);
 }
@@ -3874,36 +4263,57 @@ static void test_netdb(void)
  */
 static void test_netdb_read_nomem(void)
 {
-    LONG rc;
+    static const char *const paths[] = {
+        AMI_CFG_FILE_HOSTS, AMI_CFG_FILE_NETWORKS,
+        AMI_CFG_FILE_PROTOCOLS, AMI_CFG_FILE_SERVICES
+    };
+    ULONG i;
 
     printf("netdb: read out of memory\n");
 
-    ami_netdb_free();
-    clear_fixtures();
-    set_fixture(AMI_CFG_FILE_HOSTS, "10.0.0.1 hn\n");
-    set_fixture(AMI_CFG_FILE_NETWORKS, "hn 10\n");
-    set_fixture(AMI_CFG_FILE_PROTOCOLS, "hn 6\n");
-    set_fixture(AMI_CFG_FILE_SERVICES, "hn 80/tcp\n");
+    for (i = 0; i <= (ULONG)(sizeof(paths) / sizeof(paths[0])); i++)
+    {
+        const AmiNetdbEntry *entry;
+        ULONG kind = (i == 4) ? AMI_NETDB_HOSTS : i;
 
-    /* Fail only the hosts read's allocation: the other three load. */
-    stub_fail_once = 1;
-    rc = ami_netdb_load();
-    stub_fail_once = 0;
+        ami_netdb_free();
+        clear_fixtures();
+        set_fixture(AMI_CFG_FILE_HOSTS, "10.0.0.1 hn\n");
+        set_fixture(AMI_CFG_FILE_NETWORKS, "hn 10\n");
+        set_fixture(AMI_CFG_FILE_PROTOCOLS, "hn 6\n");
+        set_fixture(AMI_CFG_FILE_SERVICES, "hn 80/tcp\n");
 
-    CHECK(rc == AMI_CFG_ERR_NOMEM);
-    CHECK((ami_netdb_unloaded() & (1UL << AMI_NETDB_HOSTS)) != 0);
-    CHECK(ami_netdb_host_by_name("hn") == NULL);
-    CHECK(ami_netdb_host_by_name("localhost") == NULL);
+        /* Each read can fail while all other families still load. */
+        if (i == 4)
+            stub_fail_once = 1;       /* retain the real allocator-failure case */
+        else
+            stub_fail_read_path = paths[kind];
+        CHECK(ami_netdb_load() == AMI_CFG_ERR_NOMEM);
+        stub_fail_read_path = NULL;
+        stub_fail_once = 0;
+        CHECK(ami_netdb_unloaded() == (1UL << kind));
 
-    CHECK(ami_netdb_net_entry(0) != NULL);
-    CHECK(ami_netdb_proto_entry(0) != NULL);
-    CHECK(ami_netdb_serv_entry(0) != NULL);
+        entry = ami_netdb_host_by_name("hn");
+        CHECK((entry == NULL) == (kind == AMI_NETDB_HOSTS));
+        if (entry) CHECK_IP(entry->value, 10, 0, 0, 1);
+        CHECK(ami_netdb_host_by_name("localhost") == NULL);
 
-    /* Loaded is loaded: a later call does not re-run the failing read. */
-    CHECK(ami_netdb_load() == AMI_CFG_OK);
+        entry = ami_netdb_net_entry(0);
+        CHECK((entry == NULL) == (kind == AMI_NETDB_NETWORKS));
+        if (entry) CHECK(entry->value == 10);
+        entry = ami_netdb_proto_entry(0);
+        CHECK((entry == NULL) == (kind == AMI_NETDB_PROTOCOLS));
+        if (entry) CHECK(entry->value == 6);
+        entry = ami_netdb_serv_entry(0);
+        CHECK((entry == NULL) == (kind == AMI_NETDB_SERVICES));
+        if (entry) { CHECK(entry->value == 80); CHECK_STR(entry->proto, "tcp"); }
 
-    ami_netdb_free();
-    CHECK(ami_alloc_count() == 0);
+        /* Loaded is loaded: a later call does not re-run the failing read. */
+        CHECK(ami_netdb_load() == AMI_CFG_OK);
+        CHECK(ami_netdb_unloaded() == (1UL << kind));
+        ami_netdb_free();
+        CHECK(ami_alloc_count() == 0);
+    }
 }
 
 static void test_netdb_missing_files(void)
@@ -3919,9 +4329,17 @@ static void test_netdb_missing_files(void)
     CHECK(e != NULL);
     if (e) CHECK_IP(e->value, 127, 0, 0, 1);
 
+    e = ami_netdb_net_by_name("loopback");
+    CHECK(e != NULL);
+    if (e) CHECK(e->value == 127);
+
     e = ami_netdb_proto_by_name("tcp");
     CHECK(e != NULL);
     if (e) CHECK(e->value == 6);
+
+    e = ami_netdb_proto_by_number(58);
+    CHECK(e != NULL);
+    if (e) CHECK_STR(e->name, "icmpv6");
 
     e = ami_netdb_serv_by_name("http", "tcp");
     CHECK(e != NULL);
@@ -4372,6 +4790,7 @@ static void test_resolver_from_interfaces(void)
 /* The growth itself: what it keeps, what it costs, and what it refuses. */
 static void test_interface_reserve(void)
 {
+    static const UBYTE zero[sizeof(AmiIfConfig)] = { 0 };
     AmiConfig cfg;
     ULONG     base = ami_alloc_count();
     UWORD     i;
@@ -4384,6 +4803,9 @@ static void test_interface_reserve(void)
     CHECK(ami_config_reserve(&cfg, (UWORD)AMI_CFG_IFACE_FLOOR));
     CHECK(cfg.interfaces != NULL);
     CHECK(cfg.interface_capacity >= (UWORD)AMI_CFG_IFACE_FLOOR);
+
+    for (i = 0; i < cfg.interface_capacity; i++)
+        CHECK(memcmp(&cfg.interfaces[i], zero, sizeof(zero)) == 0);
 
     for (i = 0; i < (UWORD)AMI_CFG_IFACE_FLOOR; i++)
     {
@@ -4405,7 +4827,22 @@ static void test_interface_reserve(void)
         (void)snprintf(want, sizeof(want), "if%u", (unsigned)i);
         CHECK_STR(cfg.interfaces[i].name, want);
     }
-    CHECK(cfg.interfaces[299].name[0] == '\0');
+    for (i = (UWORD)AMI_CFG_IFACE_FLOOR; i < cfg.interface_capacity; i++)
+        CHECK(memcmp(&cfg.interfaces[i], zero, sizeof(zero)) == 0);
+
+    {
+        AmiIfConfig *held = cfg.interfaces;
+        UWORD capacity = cfg.interface_capacity;
+        ULONG allocations = ami_alloc_count();
+
+        stub_fail_once = 1;
+        CHECK(!ami_config_reserve(&cfg, (UWORD)(capacity + 1)));
+        stub_fail_once = 0;
+        CHECK(cfg.interfaces == held && cfg.interface_capacity == capacity);
+        CHECK(cfg.interface_count == (UWORD)AMI_CFG_IFACE_FLOOR);
+        CHECK_STR(cfg.interfaces[0].name, "if0");
+        CHECK(ami_alloc_count() == allocations);
+    }
 
     {
         ULONG held = ami_alloc_count();
@@ -4463,7 +4900,9 @@ int main(int argc, char **argv)
     test_interface_static();
     test_interface_amitcp_flavour();
     test_interface_errors();
+    test_interface_keyword_aliases();
     test_problem_reporter();
+    test_interface_mode_aliases();
     test_numeric_iptype_is_reported_inert();
     test_inert_keywords_are_notes();
     test_request_counts_have_ceilings();
@@ -4472,6 +4911,7 @@ int main(int argc, char **argv)
     test_interface_ack_pace();
     test_interface_tcp_grow_rtt();
     test_interface_tcp_wan_window();
+    test_interface_numeric_reassignment();
     test_interface_priority();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6

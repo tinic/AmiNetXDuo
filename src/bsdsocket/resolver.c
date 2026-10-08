@@ -160,7 +160,6 @@ static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
         return -1;
     }
 
-    literal.s_addr = 0;
     if (bsd_inet_aton((STRPTR)name, &literal, base) != 0)
     {
         *addr   = BSD_NTOHL((ULONG)literal.s_addr);

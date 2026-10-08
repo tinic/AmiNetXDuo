@@ -27,6 +27,315 @@ static void check(int condition, const char *name)
     }
 }
 
+/* Exercise public option dispatch on both parent and compacted source.
+   NetX hooks check row ownership before they are called, while the scheduler
+   bracket is held; failed joins must roll back before it is released. */
+static LONG h_error;
+static BOOL h_enter_fail;
+static unsigned h_attempts, h_enters, h_leaves, h_depth, h_joins, h_drops;
+static UINT h_join_status = NX_SUCCESS;
+static AmiSocket *h_member;
+
+LONG bsd_fail(struct AmiSocketBase *base, LONG error)
+{ (VOID)base; h_error = error; return -1; }
+LONG bsd_errno_from_nx(UINT status)
+{ (VOID)status; return AMI_EIO; }
+LONG bsd_nx_enter(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    h_attempts++;
+    if (h_enter_fail)
+        return -1;
+    h_enters++;
+    h_depth++;
+    return 0;
+}
+VOID bsd_nx_leave(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    check(h_depth == 1, "membership releases exactly one held bracket");
+    h_depth--;
+    h_leaves++;
+}
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
+{ memmove(dst, src, size); }
+VOID bsd_in6_to_words(const UBYTE bytes[16], ULONG words[4])
+{
+    unsigned i;
+    for (i = 0; i < 4; i++)
+        words[i] = ((ULONG)bytes[i * 4] << 24) |
+                   ((ULONG)bytes[i * 4 + 1] << 16) |
+                   ((ULONG)bytes[i * 4 + 2] << 8) | bytes[i * 4 + 3];
+}
+
+UINT nx_igmp_multicast_interface_join(NX_IP *ip, ULONG group, UINT iface)
+{
+    (VOID)ip;
+    h_joins++;
+    check(h_depth == 1 && iface == 1 && group == 0xefff2a63UL,
+          "IPv4 join reaches NetX with exact group/interface inside bracket");
+    check(bsd_mcast_find(h_member, group, iface) != NULL,
+          "IPv4 row claimed before NetX join");
+    return h_join_status;
+}
+UINT nx_igmp_multicast_interface_leave(NX_IP *ip, ULONG group, UINT iface)
+{
+    (VOID)ip;
+    h_drops++;
+    check(h_depth == 1 && bsd_mcast_find(h_member, group, iface) != NULL,
+          "IPv4 leave reaches NetX before row is cleared, inside bracket");
+    return NX_NOT_ENABLED; /* teardown intentionally ignores this status */
+}
+UINT nxd_ipv6_multicast_interface_join(NX_IP *ip, NXD_ADDRESS *group, UINT iface)
+{
+    (VOID)ip;
+    h_joins++;
+    check(h_depth == 1 && iface == 1 && group->nxd_ip_version == NX_IP_VERSION_V6 &&
+          group->nxd_ip_address.v6[0] == 0xff020000UL &&
+          group->nxd_ip_address.v6[1] == 0 && group->nxd_ip_address.v6[2] == 0 &&
+          group->nxd_ip_address.v6[3] == 1,
+          "IPv6 join reaches NetX with exact group/interface inside bracket");
+    check(bsd_mcast6_find(h_member, group->nxd_ip_address.v6, iface) != NULL,
+          "IPv6 row claimed before NetX join");
+    return h_join_status;
+}
+UINT nxd_ipv6_multicast_interface_leave(NX_IP *ip, NXD_ADDRESS *group, UINT iface)
+{
+    (VOID)ip;
+    h_drops++;
+    check(h_depth == 1 && group->nxd_ip_version == NX_IP_VERSION_V6 &&
+          bsd_mcast6_find(h_member, group->nxd_ip_address.v6, iface) != NULL,
+          "IPv6 leave reaches NetX before row is cleared, inside bracket");
+    return NX_NOT_ENABLED;
+}
+
+static LONG h_membership(struct AmiSocketBase *base, AmiSocket *sock,
+                          BOOL v6, BOOL join, BOOL valid_group)
+{
+    /* Public setters must continue accepting unaligned application buffers. */
+    UBYTE unaligned[sizeof(struct ipv6_mreq) + 1];
+
+    h_member = sock;
+    if (v6)
+    {
+        struct ipv6_mreq req;
+        memset(&req, 0, sizeof(req));
+        req.ipv6mr_multiaddr.s6_addr[0] = valid_group ? 0xff : 0x20;
+        req.ipv6mr_multiaddr.s6_addr[1] = 2;
+        req.ipv6mr_multiaddr.s6_addr[15] = 1;
+        req.ipv6mr_interface = 2; /* POSIX number -> NetX slot 1 */
+        memcpy(unaligned + 1, &req, sizeof(req));
+        return bsd_mcast6_setopt(base, sock,
+                                join ? AMI_IPV6_JOIN_GROUP_BSD : AMI_IPV6_LEAVE_GROUP_BSD,
+                                unaligned + 1, sizeof(req));
+    }
+    else
+    {
+        struct ip_mreq req;
+        req.imr_multiaddr.s_addr = BSD_HTONL(valid_group ? 0xefff2a63UL : 0x0a000001UL);
+        req.imr_interface.s_addr = 0; /* first live interface */
+        memcpy(unaligned + 1, &req, sizeof(req));
+        return bsd_mcast_setopt(base, sock,
+                               join ? IP_ADD_MEMBERSHIP : IP_DROP_MEMBERSHIP,
+                               unaligned + 1, sizeof(req));
+    }
+}
+
+static void t_membership_paths(BOOL v6)
+{
+    static NX_IP ip;
+    struct AmiSocketBase base;
+    AmiSocket sock, other;
+    unsigned join, i;
+    static const UINT refused[] = { NX_NO_MORE_ENTRIES, NX_OVERFLOW, NX_NOT_ENABLED };
+
+    memset(&ip, 0, sizeof(ip));
+    memset(&base, 0, sizeof(base));
+    memset(&sock, 0, sizeof(sock));
+    memset(&other, 0, sizeof(other));
+    memset(bsd_mcast_table, 0, sizeof(bsd_mcast_table));
+    memset(bsd_mcast6_table, 0, sizeof(bsd_mcast6_table));
+    base.sb_StackIp = &ip;
+    ip.nx_ip_interface[1].nx_interface_valid = NX_TRUE;
+    ip.nx_ip_interface[1].nx_interface_link_up = NX_TRUE;
+    h_join_status = NX_SUCCESS;
+    h_enter_fail = FALSE;
+    h_attempts = h_enters = h_leaves = h_depth = h_joins = h_drops = 0;
+
+    for (join = 0; join < 2; join++)
+    {
+        unsigned before = h_attempts;
+
+        base.sb_StackRefs = 0;
+        check(h_membership(&base, &sock, v6, join != 0, FALSE) == -1 &&
+              h_error == AMI_ENETDOWN && h_attempts == before,
+              "missing stack wins over invalid group, before bracket");
+        base.sb_StackRefs = 1;
+        check(h_membership(&base, &sock, v6, join != 0, FALSE) == -1 &&
+              h_error == AMI_EINVAL && h_attempts == before,
+              "invalid group is refused before bracket");
+        h_enter_fail = TRUE;
+        check(h_membership(&base, &sock, v6, join != 0, TRUE) == -1 &&
+              h_error == AMI_ENETDOWN && h_depth == 0 && h_attempts == before + 1,
+              "failed bracket does not reach NetX");
+        h_enter_fail = FALSE;
+        ip.nx_ip_interface[1].nx_interface_valid = NX_FALSE;
+        check(h_membership(&base, &sock, v6, join != 0, TRUE) == -1 &&
+              h_error == AMI_EADDRNOTAVAIL && h_enters == h_leaves,
+              "missing interface balances bracket for join and leave");
+        ip.nx_ip_interface[1].nx_interface_valid = NX_TRUE;
+    }
+    check(h_joins == 0 && h_drops == 0, "validation never calls NetX membership API");
+    check(h_membership(&base, &sock, v6, FALSE, TRUE) == -1 &&
+          h_error == AMI_EADDRNOTAVAIL, "missing membership cannot leave");
+    check(h_membership(&base, &sock, v6, TRUE, TRUE) == 0 && h_joins == 1,
+          "first join succeeds");
+    check(h_membership(&base, &sock, v6, TRUE, TRUE) == -1 &&
+          h_error == AMI_EADDRINUSE && h_joins == 1, "duplicate join makes no NetX call");
+    check(h_membership(&base, &sock, v6, FALSE, TRUE) == 0 && h_drops == 1,
+          "leave clears row despite teardown status");
+    check(h_membership(&base, &sock, v6, FALSE, TRUE) == -1 &&
+          h_error == AMI_EADDRNOTAVAIL && h_drops == 1, "second leave finds no row");
+
+    for (i = 0; i < sizeof(refused) / sizeof(refused[0]); i++)
+    {
+        h_join_status = refused[i];
+        check(h_membership(&base, &sock, v6, TRUE, TRUE) == -1 &&
+              h_error == (refused[i] == NX_NO_MORE_ENTRIES ||
+                          (v6 && refused[i] == NX_OVERFLOW) ? AMI_ENOBUFS : AMI_EIO),
+              "join refusal retains family-specific resource/error mapping");
+        check(h_membership(&base, &sock, v6, FALSE, TRUE) == -1 &&
+              h_error == AMI_EADDRNOTAVAIL, "failed join returns row before leaving bracket");
+    }
+    h_join_status = NX_SUCCESS;
+    for (i = 0; i < (v6 ? BSD_MCAST6_MEMBERSHIPS : BSD_MCAST_MEMBERSHIPS); i++)
+    {
+        if (v6)
+        {
+            bsd_mcast6_table[i].bm_Sock = &other;
+            bsd_mcast6_table[i].bm_Iface = 1;
+            bsd_mcast6_table[i].bm_Epoch = h_epoch[1];
+        }
+        else
+        {
+            bsd_mcast_table[i].bm_Sock = &other;
+            bsd_mcast_table[i].bm_Iface = 1;
+            bsd_mcast_table[i].bm_Epoch = h_epoch[1];
+        }
+    }
+    i = h_joins;
+    check(h_membership(&base, &sock, v6, TRUE, TRUE) == -1 &&
+          h_error == AMI_ENOBUFS && h_joins == i, "full table refuses before NetX join");
+    check(h_depth == 0 && h_enters == h_leaves, "all acquired membership brackets balanced");
+}
+
+static LONG h_scalar_option(struct AmiSocketBase *base, AmiSocket *sock,
+                             BOOL v6, BOOL loop, BOOL get, APTR out, socklen_t *len)
+{
+    if (v6)
+    {
+        LONG option = loop ? AMI_IPV6_MULTICAST_LOOP_BSD : AMI_IPV6_MULTICAST_HOPS_BSD;
+        return get ? bsd_mcast6_getopt(base, sock, option, out, len)
+                   : bsd_mcast6_setopt(base, sock, option, out, *len);
+    }
+    else
+    {
+        LONG option = loop ? IP_MULTICAST_LOOP : IP_MULTICAST_TTL;
+        return get ? bsd_mcast_getopt(base, sock, option, out, len)
+                   : bsd_mcast_setopt(base, sock, option, out, *len);
+    }
+}
+
+static void t_scalar_widths(BOOL v6, BOOL loop)
+{
+    struct AmiSocketBase base;
+    AmiSocket sock;
+    socklen_t offered;
+    unsigned before = h_attempts;
+
+    memset(&base, 0, sizeof(base));
+    memset(&sock, 0, sizeof(sock));
+    for (offered = 0; offered <= 6; offered++)
+    {
+        UBYTE data[8], expect[8];
+        LONG value = 127;
+        WORD word = 127;
+        socklen_t len = offered;
+        socklen_t used = offered >= sizeof(LONG) ? sizeof(LONG) :
+                         offered >= sizeof(WORD) ? sizeof(WORD) : sizeof(UBYTE);
+        BOOL valid = offered >= (v6 ? sizeof(WORD) : sizeof(UBYTE));
+        LONG *field = v6 ? &sock.as_Mcast6Hops :
+                           loop ? &sock.as_McastLoop : &sock.as_McastTtl;
+        LONG expected = v6 && loop ? 23 : loop ? 1 : 127;
+        LONG rc;
+
+        *field = 23;
+        memset(data, 0xA5, sizeof(data));
+        if (used == sizeof(LONG))
+            memcpy(data + 1, &value, sizeof(value));
+        else if (used == sizeof(WORD))
+            memcpy(data + 1, &word, sizeof(word));
+        else
+            data[1] = 127;
+        rc = h_scalar_option(&base, &sock, v6, loop, FALSE, data + 1, &len);
+        check(valid ? rc == 0 && *field == expected :
+                      rc == -1 && h_error == AMI_EINVAL && *field == 23,
+              "multicast setter retains family width rules and selected field");
+        value = v6 && loop ? 0 : *field;
+        word = (WORD)value;
+        memset(data, 0xA5, sizeof(data));
+        memset(expect, 0xA5, sizeof(expect));
+        if (valid)
+        {
+            if (used == sizeof(LONG))
+                memcpy(expect + 1, &value, sizeof(value));
+            else if (used == sizeof(WORD))
+                memcpy(expect + 1, &word, sizeof(word));
+            else
+                expect[1] = (UBYTE)value;
+        }
+        len = offered;
+        rc = h_scalar_option(&base, &sock, v6, loop, TRUE, data + 1, &len);
+        check(valid ? rc == 0 && len == used :
+                      rc == -1 && h_error == AMI_EINVAL && len == offered,
+              "multicast getter returns supported width or preserves rejected length");
+        check(memcmp(data, expect, sizeof(data)) == 0,
+              "multicast getter writes exact bytes with both canaries intact");
+        len = offered;
+        check(h_scalar_option(&base, &sock, v6, loop, FALSE, NULL, &len) == -1 &&
+              h_error == AMI_EFAULT, "null setter wins over bad length");
+        check(h_scalar_option(&base, &sock, v6, loop, TRUE, NULL, &len) == -1 &&
+              h_error == AMI_EFAULT, "null getter wins over bad length");
+    }
+    for (offered = sizeof(WORD); offered <= sizeof(LONG); offered += sizeof(WORD))
+    {
+        UBYTE data[sizeof(LONG) + 1];
+        LONG value = -1;
+        WORD word = -1;
+        socklen_t len = offered;
+        LONG *field = v6 ? &sock.as_Mcast6Hops :
+                           loop ? &sock.as_McastLoop : &sock.as_McastTtl;
+
+        *field = 23;
+        if (offered == sizeof(WORD))
+            memcpy(data + 1, &word, sizeof(word));
+        else
+            memcpy(data + 1, &value, sizeof(value));
+        value = h_scalar_option(&base, &sock, v6, loop, FALSE, data + 1, &len);
+        check(v6 || loop ? value == 0 && *field == (v6 && loop ? 23 : 1) :
+                          value == -1 && h_error == AMI_EINVAL && *field == 23,
+              "signed word/long -1 keeps TTL/default-hop/loop distinctions");
+    }
+    {
+        UBYTE data[8];
+        memset(data, 0xA5, sizeof(data));
+        check(h_scalar_option(&base, &sock, v6, loop, TRUE, data + 1, NULL) == -1 &&
+              h_error == AMI_EFAULT && data[1] == 0xA5,
+              "null getter length is EFAULT without writing output");
+    }
+    check(h_attempts == before, "scalar copy/validation does not enter NetX");
+}
+
 int main(void)
 {
     AmiSocket a;
@@ -154,6 +463,13 @@ int main(void)
           "IPv4 group is not treated as IPv6");
     check(a.as_Nx.udp.nx_udp_socket_time_to_live == 7,
           "IPv4 multicast TTL preserved");
+
+    t_membership_paths(FALSE);
+    t_membership_paths(TRUE);
+    t_scalar_widths(FALSE, FALSE);
+    t_scalar_widths(FALSE, TRUE);
+    t_scalar_widths(TRUE, FALSE);
+    t_scalar_widths(TRUE, TRUE);
 
     printf("mcast epoch: %u checks, %u failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

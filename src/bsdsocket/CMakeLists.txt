@@ -20,6 +20,7 @@ set(BSDSOCKET_SOURCES
     cmsg.c                  # RFC 3542 ancillary data: PKTINFO, HOPLIMIT,
                             # ICMP6_FILTER, and the IPv4 half of the same
     options.c
+    opt_value.c             # shared LONG/WORD option reply serialization
     select.c
     errno.c
     syslog.c                # AmiTCP vsyslog/syslog LVO, per-opener policy

@@ -9,6 +9,7 @@
 #include "interfaces.h"
 
 #include <proto/exec.h>
+#include <stddef.h>
 
 #ifdef AMINETXDUO_ADDRINFO
 
@@ -573,31 +574,69 @@ VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
     }
 }
 
+/* Internal offsets avoid one pointer relocation per message. Returned
+   strings still live in read-only library storage for the library lifetime. */
+#define BSD_GAI_MESSAGES(X) \
+    X(0, "no error") \
+    X(EAI_BADFLAGS, "invalid value for ai_flags") \
+    X(EAI_NONAME, "name or service is not known") \
+    X(EAI_AGAIN, "temporary failure in name resolution") \
+    X(EAI_FAIL, "non-recoverable failure in name resolution") \
+    X(EAI_NODATA, "no address associated with name") \
+    X(EAI_FAMILY, "ai_family not supported") \
+    X(EAI_SOCKTYPE, "ai_socktype not supported") \
+    X(EAI_SERVICE, "service not supported for ai_socktype") \
+    X(EAI_ADDRFAMILY, "address family for name not supported") \
+    X(EAI_MEMORY, "memory allocation failure") \
+    X(EAI_SYSTEM, "system error") \
+    X(EAI_BADHINTS, "invalid value for hints") \
+    X(EAI_PROTOCOL, "resolved protocol is unknown")
+
+typedef struct BsdGaiTextPool
+{
+#define BSD_GAI_FIELD(code, text) char message_##code[sizeof(text)];
+    BSD_GAI_MESSAGES(BSD_GAI_FIELD)
+#undef BSD_GAI_FIELD
+} BsdGaiTextPool;
+
+static const BsdGaiTextPool bsd_gai_text_pool = {
+#define BSD_GAI_TEXT(code, text) text,
+    BSD_GAI_MESSAGES(BSD_GAI_TEXT)
+#undef BSD_GAI_TEXT
+};
+
+static const struct
+{
+    WORD code;
+    UWORD offset;
+} bsd_gai_messages[] = {
+#define BSD_GAI_ENTRY(code, text) \
+    { code, (UWORD)offsetof(BsdGaiTextPool, message_##code) },
+    BSD_GAI_MESSAGES(BSD_GAI_ENTRY)
+#undef BSD_GAI_ENTRY
+};
+
+#define BSD_GAI_CODE_BOUND(code, text) \
+    _Static_assert((code) >= -32768L && (code) <= 32767L, \
+                   "gai error codes must fit in WORD");
+BSD_GAI_MESSAGES(BSD_GAI_CODE_BOUND)
+#undef BSD_GAI_CODE_BOUND
+#undef BSD_GAI_MESSAGES
+_Static_assert(sizeof(BsdGaiTextPool) <= 65535UL,
+               "gai error string offsets must fit in UWORD");
+
 STRPTR bsd_gai_strerror(register LONG errnum __asm("a0"),
                         register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    LONG code = errnum;
+    UWORD i;
 
     (VOID)SocketBase;
-
-    switch (code)
+    for (i = 0; i < sizeof(bsd_gai_messages) / sizeof(bsd_gai_messages[0]); i++)
     {
-        case 0:                return (STRPTR)"no error";
-        case EAI_BADFLAGS:     return (STRPTR)"invalid value for ai_flags";
-        case EAI_NONAME:       return (STRPTR)"name or service is not known";
-        case EAI_AGAIN:        return (STRPTR)"temporary failure in name resolution";
-        case EAI_FAIL:         return (STRPTR)"non-recoverable failure in name resolution";
-        case EAI_NODATA:       return (STRPTR)"no address associated with name";
-        case EAI_FAMILY:       return (STRPTR)"ai_family not supported";
-        case EAI_SOCKTYPE:     return (STRPTR)"ai_socktype not supported";
-        case EAI_SERVICE:      return (STRPTR)"service not supported for ai_socktype";
-        case EAI_ADDRFAMILY:   return (STRPTR)"address family for name not supported";
-        case EAI_MEMORY:       return (STRPTR)"memory allocation failure";
-        case EAI_SYSTEM:       return (STRPTR)"system error";
-        case EAI_BADHINTS:     return (STRPTR)"invalid value for hints";
-        case EAI_PROTOCOL:     return (STRPTR)"resolved protocol is unknown";
-        default:               return (STRPTR)"unknown error";
+        if (errnum == (LONG)bsd_gai_messages[i].code)
+            return (STRPTR)((const char *)&bsd_gai_text_pool + bsd_gai_messages[i].offset);
     }
+    return (STRPTR)"unknown error";
 }
 
 LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),

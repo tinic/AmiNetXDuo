@@ -47,8 +47,8 @@ static struct AmiSocketBase h_base;
 
 /*
  * What inet.c reaches outside itself.  Stubbed rather than linked: bringing in
- * errno.c drags the whole vector table behind it, and the IPv6 text parser
- * lives in src/config, which has a host test of its own.  The last errno set
+ * errno.c drags the whole vector table behind it. The IP text formatters and
+ * parsers in src/config are linked for real. The last errno set
  * is kept because a refusal that does not say why is half a refusal.
  */
 static LONG h_last_errno;
@@ -64,29 +64,24 @@ VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
     memmove(dst, src, (size_t)size);
 }
 
-BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
-                          ULONG *prefix_out)
-{
-    (VOID)text; (VOID)out; (VOID)prefix_out;
-    return FALSE;                   /* the v6 cases are not exercised here */
-}
-
 VOID bsd_words_to_in6(const ULONG words[4], UBYTE bytes[16])
 {
-    (VOID)words; (VOID)bytes;
+    ULONG i;
+
+    for (i = 0; i < 16; i++)
+        bytes[i] = (UBYTE)(words[i / 4] >> (24 - (i % 4) * 8));
 }
 
 VOID bsd_in6_to_words(const UBYTE bytes[16], ULONG words[4])
 {
-    (VOID)bytes; (VOID)words;
-}
+    ULONG i;
 
-VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS], char *out,
-                           ULONG outlen)
-{
-    (VOID)addr;
-    if (outlen > 0UL)
-        out[0] = '\0';
+    for (i = 0; i < 16; i++)
+    {
+        if (i % 4 == 0)
+            words[i / 4] = 0;
+        words[i / 4] = (words[i / 4] << 8) | bytes[i];
+    }
 }
 
 static ULONG addr_of(const char *text)
@@ -158,6 +153,44 @@ static void test_radix(void)
     /* 8 and 9 are not octal digits. */
     CHECK(addr_of("08.0.0.1") == INADDR_NONE, "08 is not a number");
     CHECK(addr_of("0x.0.0.1") == INADDR_NONE, "0x with no digits");
+}
+
+static void test_component_boundaries(void)
+{
+    static const struct { const char *text; BOOL valid; ULONG value; } cases[] = {
+        { "4294967295", TRUE, 0xFFFFFFFFUL },
+        { "255.16777215", TRUE, 0xFFFFFFFFUL },
+        { "255.255.65535", TRUE, 0xFFFFFFFFUL },
+        { "255.255.255.255", TRUE, 0xFFFFFFFFUL },
+        { "1.16777215", TRUE, 0x01FFFFFFUL },
+        { "1.2.65535", TRUE, 0x0102FFFFUL },
+        { "1.2.3.255", TRUE, 0x010203FFUL },
+        { "0.0", TRUE, 0 }, { "0.0.0", TRUE, 0 },
+        { "0377.0xffffff", TRUE, 0xFFFFFFFFUL },
+        { "0xff.0377.0xffff", TRUE, 0xFFFFFFFFUL },
+        { "256.1", FALSE, 0 }, { "256.1.1", FALSE, 0 },
+        { "1.256.1", FALSE, 0 }, { "256.1.1.1", FALSE, 0 },
+        { "1.256.1.1", FALSE, 0 }, { "1.1.256.1", FALSE, 0 },
+        { "1.1.1.256", FALSE, 0 }, { "1.16777216", FALSE, 0 },
+        { "1.1.65536", FALSE, 0 }, { "4294967296", FALSE, 0 },
+        { "1.2.3.4.5", FALSE, 0 }, { "1.2.3.", FALSE, 0 }
+    };
+    unsigned i;
+
+    printf("classic component widths and refused output preservation\n");
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        struct in_addr out;
+        LONG rc;
+
+        out.s_addr = 0x12345678UL;
+        rc = bsd_inet_aton((STRPTR)cases[i].text, &out, BASE);
+        CHECK((rc != 0) == cases[i].valid, cases[i].text);
+        CHECK(out.s_addr == (cases[i].valid ? cases[i].value : 0x12345678UL),
+              "aton returns the specified classic value or keeps output untouched");
+        CHECK(addr_of(cases[i].text) == (cases[i].valid ? cases[i].value : INADDR_NONE),
+              "inet_addr agrees with classic component widths");
+    }
 }
 
 /* ------------------------------------------------------------ inet_aton -- */
@@ -296,12 +329,131 @@ static void test_ntop_v4(void)
     CHECK(h_last_errno != 0, "and says why in errno");
 }
 
+#ifdef AMINETXDUO_IPV6
+static void test_ntop_v6_bounds(void)
+{
+    static const struct
+    {
+        UBYTE bytes[16];
+        const char *text;
+    } cases[] = {
+        { { 0 }, "::" },
+        { { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }, "::1" },
+        { { 0,0,0,0,0,0,0,0,0,0,0xff,0xff,192,168,1,1 },
+          "::ffff:192.168.1.1" },
+        { { 0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4 }, "::1.2.3.4" },
+        { { 0x20,1,0xd,0xb8,0,0,0,0,0,1,0,0,0,0,0,1 },
+          "2001:db8::1:0:0:1" },
+        { { 0x20,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0 }, "2001:0:0:1::" },
+        { { 0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+            0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff },
+          "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff" }
+    };
+    ULONG i;
+
+    printf("inet_ntop IPv6 output and refusal boundaries\n");
+    for (i = 0; i < (ULONG)(sizeof(cases) / sizeof(cases[0])); i++)
+    {
+        ULONG length = (ULONG)strlen(cases[i].text);
+        LONG size;
+
+        for (size = -1; size <= AMI_CFG_IP6_STRLEN; size++)
+        {
+            UBYTE guarded[AMI_CFG_IP6_STRLEN + 2];
+            STRPTR result;
+            ULONG untouched;
+            ULONG j;
+
+            memset(guarded, 0xa5, sizeof(guarded));
+            h_last_errno = 0;
+            result = bsd_inet_ntop(AF_INET6, (APTR)cases[i].bytes,
+                                   (STRPTR)(guarded + 1), size, BASE);
+            CHECK(guarded[0] == 0xa5, "IPv6 output preserves leading canary");
+            if (size > (LONG)length)
+            {
+                CHECK(result == (STRPTR)(guarded + 1), "IPv6 returns caller buffer");
+                CHECK(strcmp((const char *)guarded + 1, cases[i].text) == 0,
+                      "IPv6 matches fixed RFC output");
+                CHECK(h_last_errno == 0, "IPv6 success leaves errno alone");
+                untouched = length + 2;
+            }
+            else
+            {
+                CHECK(result == NULL && h_last_errno == AMI_ENOSPC,
+                      "IPv6 insufficient size reports ENOSPC");
+                untouched = 1;
+            }
+            for (j = untouched; j < (ULONG)sizeof(guarded); j++)
+                CHECK(guarded[j] == 0xa5, "IPv6 touches only successful text and NUL");
+        }
+    }
+}
+#endif
+
+static void test_format_octets_and_bounds(void)
+{
+    static const struct { ULONG address; const char *text; } cases[] = {
+        { 0, "0.0.0.0" }, { 0x090A6364UL, "9.10.99.100" },
+        { 0xFFFFFFFFUL, "255.255.255.255" }
+    };
+    unsigned v, i;
+
+    for (v = 0; v <= 255; v++)
+    {
+        unsigned b = (v + 1) & 255, c = (v + 99) & 255, d = (v + 100) & 255;
+        ULONG address = ((ULONG)v << 24) | ((ULONG)b << 16) |
+                        ((ULONG)c << 8) | (ULONG)d;
+        char expected[16], output[16];
+
+        snprintf(expected, sizeof(expected), "%u.%u.%u.%u", v, b, c, d);
+        CHECK(bsd_Inet_NtoA(address, BASE) == (STRPTR)BASE->sb_NtoABuf &&
+              strcmp(BASE->sb_NtoABuf, expected) == 0,
+              "every octet value formats through the caller's private buffer");
+        CHECK(bsd_inet_ntop(AF_INET, &address, (STRPTR)output, (LONG)sizeof(output), BASE) == (STRPTR)output &&
+              strcmp(output, expected) == 0,
+              "inet_ntop formats every octet value without leading zeroes");
+    }
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        LONG size;
+        for (size = -1; size <= 16; size++)
+        {
+            char guarded[18], original[sizeof(guarded)];
+            STRPTR result;
+            size_t length = strlen(cases[i].text), j;
+            ULONG address = cases[i].address;
+
+            memset(guarded, 0x5A, sizeof(guarded));
+            memcpy(original, guarded, sizeof(guarded));
+            h_last_errno = 0;
+            result = bsd_inet_ntop(AF_INET, &address, (STRPTR)(guarded + 1), size, BASE);
+            if (size <= (LONG)length)
+            {
+                CHECK(result == NULL && h_last_errno == AMI_ENOSPC,
+                      "a short or negative buffer size is refused with ENOSPC");
+                CHECK(memcmp(guarded, original, sizeof(guarded)) == 0,
+                      "a refused conversion does not write any output byte");
+            }
+            else
+            {
+                CHECK(result == (STRPTR)(guarded + 1) && strcmp((const char *)result, cases[i].text) == 0,
+                      "exact room including NUL succeeds with the original spelling");
+                CHECK(guarded[0] == 0x5A, "conversion leaves its leading guard intact");
+                for (j = length + 2; j < sizeof(guarded); j++)
+                    CHECK(guarded[j] == 0x5A,
+                          "conversion writes no bytes beyond its terminating NUL");
+            }
+        }
+    }
+}
+
 int main(void)
 {
     printf("AmiNetXDuo, src/bsdsocket/inet.c on the host\n\n");
 
     test_dotted_quad();
     test_short_forms();
+    test_component_boundaries();
     test_radix();
     test_aton_reports_broadcast();
     test_network_parts();
@@ -309,6 +461,10 @@ int main(void)
     test_classful();
     test_pton_v4();
     test_ntop_v4();
+    test_format_octets_and_bounds();
+#ifdef AMINETXDUO_IPV6
+    test_ntop_v6_bounds();
+#endif
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

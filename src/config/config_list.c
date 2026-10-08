@@ -201,8 +201,7 @@ BOOL ami_config_reserve(AmiConfig *cfg, UWORD want)
     if (grown == NULL)
         return FALSE;
 
-    ami_cfg_zero(grown, (ULONG)(capacity * sizeof(AmiIfConfig)));
-
+    /* ami_alloc clears the entire new capacity, including unused slots. */
     if (cfg->interfaces != NULL)
     {
         UWORD i;

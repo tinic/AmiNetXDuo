@@ -9,6 +9,8 @@
 
 #include "interfaces.h"
 
+#include <stddef.h>
+
 #include <proto/dos.h>
 #include <proto/exec.h>
 
@@ -36,17 +38,51 @@ typedef struct BsdAamWanted
     ULONG   baw_LeaseTime;
     ULONG   baw_RequestedAddress;
     STRPTR  baw_ClientId;
-    LONG    baw_NAKMessage;
-    LONG    baw_RouterTable;
-    LONG    baw_DNSTable;
-    LONG    baw_StaticRouteTable;
-    LONG    baw_HostName;
-    LONG    baw_DomainName;
-    LONG    baw_BOOTPMessage;
+    LONG    baw_BufferSize[7];
     BOOL    baw_LeaseExpires;
     BOOL    baw_Unicast;
     struct MsgPort *baw_ReplyPort;
 } BsdAamWanted;
+
+/* Seven consecutive size tags, in the original allocation/carving order.
+   Byte buffers use UBYTE/STRPTR pointers; address tables use ULONG pointers.
+   Both stores below use the public field's actual pointer type. */
+#define BSD_AAM_BUFFER_FIELDS(X) \
+    X(NAKMessage,       1,             0) \
+    X(RouterTable,      sizeof(ULONG), 1) \
+    X(DNSTable,         sizeof(ULONG), 2) \
+    X(StaticRouteTable, sizeof(ULONG), 3) \
+    X(HostName,         1,             4) \
+    X(DomainName,       1,             5) \
+    X(BOOTPMessage,     1,             6)
+
+static const struct BsdAamBuffer
+{
+    UWORD pointer;
+    UWORD size;
+    UBYTE unit;
+}
+bsd_aam_buffers[] =
+{
+#define AAM_BUFFER(field, unit, index) \
+    [index] = { (UWORD)offsetof(struct AddressAllocationMessage, aam_##field), \
+                (UWORD)offsetof(struct AddressAllocationMessage, aam_##field##Size), unit },
+    BSD_AAM_BUFFER_FIELDS(AAM_BUFFER)
+#undef AAM_BUFFER
+};
+
+#define BSD_AAM_BUFFER_COUNT (sizeof(bsd_aam_buffers) / sizeof(bsd_aam_buffers[0]))
+
+_Static_assert(sizeof(struct AddressAllocationMessage) <= 65535UL,
+               "allocation message field offsets must fit in UWORD");
+_Static_assert(BSD_AAM_BUFFER_COUNT == 7,
+               "allocation buffer descriptors must match wanted sizes");
+#define AAM_BUFFER_TAG(field, unit, index) \
+    _Static_assert(CAAMTA_##field##Size == CAAMTA_NAKMessageSize + index, \
+                   "allocation buffer size tags must stay consecutive");
+BSD_AAM_BUFFER_FIELDS(AAM_BUFFER_TAG)
+#undef AAM_BUFFER_TAG
+#undef BSD_AAM_BUFFER_FIELDS
 
 /* Sizes are byte counts and table sizes are entry counts. A negative value is
    a bad argument, not a small request. */
@@ -103,6 +139,7 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     NX_IP           *ip;
     ULONG            cid_len = 0;
     ULONG            total;
+    ULONG            buffer_index;
     UBYTE           *carve;
 
     (VOID)SocketBase;
@@ -133,6 +170,13 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     cursor = tags;
     while ((item = bsd_next_tag(&cursor)) != NULL)
     {
+        buffer_index = item->ti_Tag - (ULONG)CAAMTA_NAKMessageSize;
+        if (buffer_index < BSD_AAM_BUFFER_COUNT)
+        {
+            want.baw_BufferSize[buffer_index] = bsd_aam_size(item);
+            continue;
+        }
+
         switch (item->ti_Tag)
         {
             case CAAMTA_Timeout:
@@ -149,34 +193,6 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
 
             case CAAMTA_ClientIdentifier:
                 want.baw_ClientId = (STRPTR)item->ti_Data;
-                break;
-
-            case CAAMTA_NAKMessageSize:
-                want.baw_NAKMessage = bsd_aam_size(item);
-                break;
-
-            case CAAMTA_RouterTableSize:
-                want.baw_RouterTable = bsd_aam_size(item);
-                break;
-
-            case CAAMTA_DNSTableSize:
-                want.baw_DNSTable = bsd_aam_size(item);
-                break;
-
-            case CAAMTA_StaticRouteTableSize:
-                want.baw_StaticRouteTable = bsd_aam_size(item);
-                break;
-
-            case CAAMTA_HostNameSize:
-                want.baw_HostName = bsd_aam_size(item);
-                break;
-
-            case CAAMTA_DomainNameSize:
-                want.baw_DomainName = bsd_aam_size(item);
-                break;
-
-            case CAAMTA_BOOTPMessageSize:
-                want.baw_BOOTPMessage = bsd_aam_size(item);
                 break;
 
             case CAAMTA_RecordLeaseExpiration:
@@ -216,14 +232,14 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
 
     total = bsd_aam_round(sizeof(*aam));
 
-    if (!bsd_aam_add(&total, (ULONG)want.baw_NAKMessage,       1UL) ||
-        !bsd_aam_add(&total, (ULONG)want.baw_RouterTable,      sizeof(ULONG)) ||
-        !bsd_aam_add(&total, (ULONG)want.baw_DNSTable,         sizeof(ULONG)) ||
-        !bsd_aam_add(&total, (ULONG)want.baw_StaticRouteTable, sizeof(ULONG)) ||
-        !bsd_aam_add(&total, (ULONG)want.baw_HostName,         1UL) ||
-        !bsd_aam_add(&total, (ULONG)want.baw_DomainName,       1UL) ||
-        !bsd_aam_add(&total, (ULONG)want.baw_BOOTPMessage,     1UL) ||
-        !bsd_aam_add(&total, want.baw_LeaseExpires
+    for (buffer_index = 0; buffer_index < BSD_AAM_BUFFER_COUNT; buffer_index++)
+    {
+        if (!bsd_aam_add(&total, (ULONG)want.baw_BufferSize[buffer_index],
+                         bsd_aam_buffers[buffer_index].unit))
+            return CAAME_Not_enough_memory;
+    }
+
+    if (!bsd_aam_add(&total, want.baw_LeaseExpires
                                  ? (ULONG)sizeof(struct DateStamp) : 0UL, 1UL) ||
         !bsd_aam_add(&total, (cid_len != 0) ? cid_len + 1 : 0UL, 1UL))
     {
@@ -234,8 +250,7 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     if (aam == NULL)
         return CAAME_Not_enough_memory;
 
-    bsd_bzero(aam, total);
-
+    /* ami_alloc clears the header, padding and every carved buffer. */
     carve = (UBYTE *)aam + bsd_aam_round(sizeof(*aam));
 
     aam->aam_Message.mn_Node.ln_Type = NT_MESSAGE;
@@ -258,53 +273,22 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     if (version >= AAM_VERSION)
         aam->aam_Unicast = want.baw_Unicast;
 
-    if (want.baw_NAKMessage > 0)
+    for (buffer_index = 0; buffer_index < BSD_AAM_BUFFER_COUNT; buffer_index++)
     {
-        aam->aam_NAKMessage     = (STRPTR)carve;
-        aam->aam_NAKMessageSize = want.baw_NAKMessage;
-        carve += bsd_aam_round((ULONG)want.baw_NAKMessage);
-    }
+        const struct BsdAamBuffer *buffer = &bsd_aam_buffers[buffer_index];
+        LONG count = want.baw_BufferSize[buffer_index];
 
-    if (want.baw_RouterTable > 0)
-    {
-        aam->aam_RouterTable     = (ULONG *)carve;
-        aam->aam_RouterTableSize = want.baw_RouterTable;
-        carve += bsd_aam_round((ULONG)want.baw_RouterTable * sizeof(ULONG));
-    }
+        if (count > 0)
+        {
+            char *pointer = (char *)aam + buffer->pointer;
 
-    if (want.baw_DNSTable > 0)
-    {
-        aam->aam_DNSTable     = (ULONG *)carve;
-        aam->aam_DNSTableSize = want.baw_DNSTable;
-        carve += bsd_aam_round((ULONG)want.baw_DNSTable * sizeof(ULONG));
-    }
-
-    if (want.baw_StaticRouteTable > 0)
-    {
-        aam->aam_StaticRouteTable     = (ULONG *)carve;
-        aam->aam_StaticRouteTableSize = want.baw_StaticRouteTable;
-        carve += bsd_aam_round((ULONG)want.baw_StaticRouteTable * sizeof(ULONG));
-    }
-
-    if (want.baw_HostName > 0)
-    {
-        aam->aam_HostName     = (STRPTR)carve;
-        aam->aam_HostNameSize = want.baw_HostName;
-        carve += bsd_aam_round((ULONG)want.baw_HostName);
-    }
-
-    if (want.baw_DomainName > 0)
-    {
-        aam->aam_DomainName     = (STRPTR)carve;
-        aam->aam_DomainNameSize = want.baw_DomainName;
-        carve += bsd_aam_round((ULONG)want.baw_DomainName);
-    }
-
-    if (want.baw_BOOTPMessage > 0)
-    {
-        aam->aam_BOOTPMessage     = (UBYTE *)carve;
-        aam->aam_BOOTPMessageSize = want.baw_BOOTPMessage;
-        carve += bsd_aam_round((ULONG)want.baw_BOOTPMessage);
+            if (buffer->unit == sizeof(ULONG))
+                *(ULONG **)pointer = (ULONG *)carve;
+            else
+                *(UBYTE **)pointer = carve;
+            *(LONG *)((char *)aam + buffer->size) = count;
+            carve += bsd_aam_round((ULONG)count * buffer->unit);
+        }
     }
 
     if (want.baw_LeaseExpires)

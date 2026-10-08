@@ -21,7 +21,13 @@
  * still lands on EINVAL. An out-of-range status indexes past the table, so the
  * range is checked rather than assumed.
  */
-static const LONG bsd_bpf_errno[] = {
+_Static_assert((ULONG)AMI_EINVAL <= 255 && (ULONG)AMI_ENXIO <= 255 &&
+               (ULONG)AMI_EPERM <= 255 && (ULONG)AMI_EBUSY <= 255 &&
+               (ULONG)AMI_EINTR <= 255 && (ULONG)AMI_EIO <= 255 &&
+               (ULONG)AMI_ENOBUFS <= 255 && (ULONG)AMI_EMSGSIZE <= 255,
+               "BPF errno values must fit a byte");
+
+static const UBYTE bsd_bpf_errno[] = {
     0,                  /* unused: 0 is success  */
     AMI_EINVAL,         /* AMI_BPF_EINVAL    */
     AMI_ENXIO,          /* AMI_BPF_ENXIO     */

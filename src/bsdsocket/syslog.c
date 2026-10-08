@@ -46,15 +46,17 @@ static VOID bsd_log_data(BsdSyslogBuilder *b, const char *text)
     if (text == NULL)
         return;
 
-    while (*text != '\0')
+    while (*text != '\0' && b->at < b->end)
     {
-        if (*text == '%')
+        char c = *text++;
+
+        if (c == '%')
         {
             if (b->end - b->at < 2)
                 break;
-            bsd_log_char(b, '%');
+            *b->at++ = '%';
         }
-        bsd_log_char(b, *text++);
+        *b->at++ = c;
     }
 }
 

@@ -887,7 +887,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     # per-interface set used by the resolver reconciliation path.
     add_executable(test_dns_lease
         host/test_dns_lease_host.c
-        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_lease.c")
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_lease.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_domain.c")
 
     target_include_directories(test_dns_lease PRIVATE
         "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
@@ -1038,7 +1039,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     # it remains pending and cannot overwrite the snapshot being consumed.
     add_executable(test_ra_handoff
         host/test_ra_handoff_host.c
-        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ra.c")
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ra.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_domain.c")
 
     target_include_directories(test_ra_handoff PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first

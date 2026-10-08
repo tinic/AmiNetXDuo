@@ -194,6 +194,7 @@ static void h_case_text(void)
 
 static void h_case_state_name(void)
 {
+    unsigned i;
     h_check(strcmp(ami_ns_dhcp_state_name(NETSTATUS_DHCPRAW_NOT_STARTED),
                    "dhcp-notstarted") == 0, "0 is dhcp-notstarted");
     h_check(strcmp(ami_ns_dhcp_state_name(NETSTATUS_DHCPRAW_BOOT),
@@ -218,6 +219,15 @@ static void h_case_state_name(void)
             "10 is past the table");
     h_check(strcmp(ami_ns_dhcp_state_name(255), "dhcp-other") == 0,
             "255 is past the table");
+    for (i = 0; i <= 255; i++)
+    {
+        const char *name = ami_ns_dhcp_state_name((UCHAR)i);
+        h_check(name == ami_ns_dhcp_state_name((UCHAR)i),
+                "a state name has stable storage across calls");
+        if (i >= 10)
+            h_check(strcmp(name, "dhcp-other") == 0,
+                    "every unknown byte state returns the same fallback text");
+    }
 }
 
 

@@ -8,7 +8,10 @@
 #include "bsdsocket_vectors.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <net/if_dl.h>
+#include <net/if_types.h>
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -242,15 +245,28 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
     (VOID)base;
 }
 
+static UBYTE *h_allocation;
+static ULONG h_allocation_size;
+
 APTR ami_alloc(ULONG size)
 {
-    (VOID)size;
-    return NULL;
+    h_allocation = malloc((size_t)size + 8);
+    h_allocation_size = size;
+    if (h_allocation != NULL)
+        memset(h_allocation, 0xA5, (size_t)size + 8);
+    return h_allocation;
 }
 
 VOID ami_free(APTR ptr)
 {
-    (VOID)ptr;
+    unsigned i;
+
+    CHECK(ptr == h_allocation, "route snapshot frees its own allocation");
+    for (i = 0; i < 8; i++)
+        CHECK(h_allocation[h_allocation_size + i] == 0xA5,
+              "route snapshot leaves allocation guard intact");
+    free(ptr);
+    h_allocation = NULL;
 }
 
 BOOL ami_config_parse_ip(const char *text, ULONG *out)
@@ -700,6 +716,96 @@ static VOID t_tag_walk(VOID)
     CHECK(found && hop == 0x0A00024DUL, "and both halves were read");
 }
 
+static VOID h_check_sockaddr(const struct sockaddr_in *actual, ULONG address)
+{
+    struct sockaddr_in expected;
+
+    memset(&expected, 0, sizeof(expected));
+    expected.sin_len = (UBYTE)sizeof(expected);
+    expected.sin_family = AF_INET;
+    expected.sin_addr.s_addr = (in_addr_t)BSD_HTONL(address);
+    CHECK(memcmp(actual, &expected, sizeof(expected)) == 0,
+          "route sockaddr has exact address, zero port and zero spare bytes");
+}
+
+static VOID t_snapshots(VOID)
+{
+    static const ULONG addresses[4][3] = {
+        { 0x0A000200UL, 0, 0xFFFFFF00UL },
+        { 0xC0A80900UL, 0, 0xFFFFFF00UL },
+        { 0xC0A84200UL, 0x0A000262UL, 0xFFFFFF00UL },
+        { 0, 0x0A000202UL, 0 }
+    };
+    struct rt_msghdr *table, *entry;
+    NX_ARP arp;
+    unsigned i;
+
+    printf("GetRouteInfo: poisoned allocation, IPv4 and ARP address padding\n");
+    h_machine_reset();
+    h_add_fixture_route();
+    h_ip.nx_ip_gateway_address = 0x0A000202UL;
+    memset(&arp, 0, sizeof(arp));
+    arp.nx_arp_active_next = &arp;
+    arp.nx_arp_ip_interface = &h_ip.nx_ip_interface[0];
+    arp.nx_arp_ip_address = 0x0A00022AUL;
+    arp.nx_arp_physical_address_msw = 0x0200UL;
+    arp.nx_arp_physical_address_lsw = 0x12345678UL;
+    h_ip.nx_ip_arp_table[0] = &arp;
+
+    table = bsd_GetRouteInfo(AF_INET, 0, BASE);
+    CHECK(table != NULL, "a route snapshot is returned");
+    if (table == NULL)
+        return;
+    entry = table;
+    for (i = 0; i < 4; i++)
+    {
+        const struct sockaddr_in *sa = (const struct sockaddr_in *)(entry + 1);
+
+        CHECK(entry->rtm_msglen == sizeof(*entry) + 3 * sizeof(*sa),
+              "IPv4 route record contains header and three sockaddrs");
+        CHECK(entry->rtm_addrs == (RTA_DST | RTA_GATEWAY | RTA_NETMASK),
+              "IPv4 route address order is destination, gateway, mask");
+        h_check_sockaddr(&sa[0], addresses[i][0]);
+        h_check_sockaddr(&sa[1], addresses[i][1]);
+        h_check_sockaddr(&sa[2], addresses[i][2]);
+        entry = (struct rt_msghdr *)((UBYTE *)entry + entry->rtm_msglen);
+    }
+    {
+        const struct sockaddr_in *dest = (const struct sockaddr_in *)(entry + 1);
+        const struct sockaddr_dl *link = (const struct sockaddr_dl *)(dest + 1);
+        struct sockaddr_dl expected;
+        static const UBYTE mac[] = { 0x02, 0, 0x12, 0x34, 0x56, 0x78 };
+
+        CHECK(entry->rtm_addrs == (RTA_DST | RTA_GATEWAY) &&
+              (entry->rtm_flags & RTF_LLINFO) != 0,
+              "ARP record follows IPv4 routes");
+        h_check_sockaddr(dest, 0x0A00022AUL);
+        memset(&expected, 0, sizeof(expected));
+        expected.sdl_len = (UBYTE)sizeof(expected);
+        expected.sdl_family = AF_LINK;
+        expected.sdl_index = 1;
+        expected.sdl_type = IFT_ETHER;
+        expected.sdl_alen = sizeof(mac);
+        memcpy(expected.sdl_data, mac, sizeof(mac));
+        CHECK(memcmp(link, &expected, sizeof(expected)) == 0,
+              "ARP link address and all unused link bytes are exact");
+        entry = (struct rt_msghdr *)((UBYTE *)entry + entry->rtm_msglen);
+    }
+    {
+        struct rt_msghdr zero;
+        memset(&zero, 0, sizeof(zero));
+        CHECK(memcmp(entry, &zero, sizeof(zero)) == 0,
+              "route table ends with a fully zeroed header");
+    }
+    bsd_FreeRouteInfo(table, BASE);
+
+    table = bsd_GetRouteInfo(AF_UNSPEC, RTF_REJECT, BASE);
+    CHECK(table != NULL && table->rtm_msglen == 0,
+          "an unmatched flag filter returns an empty snapshot");
+    if (table != NULL)
+        bsd_FreeRouteInfo(table, BASE);
+}
+
 int main(void)
 {
     printf("routing.c host tests\n");
@@ -710,6 +816,7 @@ int main(void)
     t_symbolic_networks();
     t_changes();
     t_tag_walk();
+    t_snapshots();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

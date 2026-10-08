@@ -14,6 +14,8 @@
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/compat.h"
 
+#include <stddef.h>
+
 /* ------------------------------------------------------- interface files */
 
 typedef enum
@@ -23,11 +25,9 @@ typedef enum
     IF_KEY_DEVICE,
     IF_KEY_CARD,
     IF_KEY_ID,
-    IF_KEY_UNIT,
     IF_KEY_ADDRESS,
     IF_KEY_NETMASK,
     IF_KEY_GATEWAY,
-    IF_KEY_MTU,
     IF_KEY_CONFIGURE,
     IF_KEY_IPTYPE,
     IF_KEY_STATE,
@@ -42,97 +42,182 @@ typedef enum
     IF_KEY_IPREQUESTS,
     IF_KEY_ARPREQUESTS,
     IF_KEY_WRITEREQUESTS,
+    IF_KEY_PRIORITY,
+    /* Contiguous keys index ami_if_numbers below; these are private IDs. */
+    IF_KEY_UNIT,
+    IF_KEY_MTU,
     IF_KEY_RXBUFFER,
     IF_KEY_TCPACKMAX,
     IF_KEY_TCPGROWRTT,
     IF_KEY_TCPWANWINDOW,
     IF_KEY_GROFRAMES,
-    IF_KEY_ACKPACE,
-    IF_KEY_PRIORITY
+    IF_KEY_ACKPACE
 } IfKey;
+
+/* These settings reject bad values and keep the previous assignment.
+   Request counts have a different (clamping) policy and stay separate. */
+#define IF_NUMBERS(X) \
+    X(UNIT, unit, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN) \
+    X(MTU, mtu, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_MTU_IS_A_PLAIN) \
+    X(RXBUFFER, rx_buffer, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_RXBUFFER_IS_THE) \
+    X(TCPACKMAX, tcp_ack_max, AMI_CFG_TCP_ACK_MAX, 1, \
+      AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES) \
+    X(TCPGROWRTT, tcp_grow_rtt, AMI_CFG_TCP_GROW_RTT_MAX, 1, \
+      AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS) \
+    X(TCPWANWINDOW, tcp_wan_window, AMI_CFG_TCP_WAN_WINDOW_MAX, 1, \
+      AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES) \
+    X(GROFRAMES, gro_frames, AMI_CFG_GRO_FRAMES_MAX, 1, \
+      AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES) \
+    X(ACKPACE, ack_pace_kbps, AMI_CFG_ACK_PACE_MAX, 1, \
+      AMI_CFG_ADVICE_ACKPACE_IS_KBPS)
+
+struct IfNumberNames
+{
+#define IF_NUMBER_NAME(key, field, max, nonzero, hint) char name_##key[sizeof(#key)];
+    IF_NUMBERS(IF_NUMBER_NAME)
+#undef IF_NUMBER_NAME
+};
+
+static const struct IfNumberNames ami_if_number_names =
+{
+#define IF_NUMBER_TEXT(key, field, max, nonzero, hint) #key,
+    IF_NUMBERS(IF_NUMBER_TEXT)
+#undef IF_NUMBER_TEXT
+};
+
+static const struct IfNumber
+{
+    ULONG       max;
+    UWORD       offset;
+    UBYTE       keyword;
+    UBYTE       hint;
+    UBYTE       width;
+    UBYTE       nonzero;
+}
+ami_if_numbers[] =
+{
+#define IF_NUMBER(key, field, max, nonzero, hint) \
+    [IF_KEY_##key - IF_KEY_UNIT] = \
+        { max, (UWORD)offsetof(AmiIfConfig, field), \
+          (UBYTE)offsetof(struct IfNumberNames, name_##key), hint, \
+          sizeof(((AmiIfConfig *)0)->field), nonzero },
+    IF_NUMBERS(IF_NUMBER)
+#undef IF_NUMBER
+};
+
+_Static_assert(sizeof(AmiIfConfig) <= 65535UL,
+               "numeric interface field offsets must fit in UWORD");
+_Static_assert(sizeof(struct IfNumberNames) <= 256UL,
+               "numeric keyword offsets must fit in UBYTE");
+#define IF_NUMBER_HINT(key, field, max, nonzero, hint) \
+    _Static_assert(hint >= 0 && hint <= 255, "numeric advice must fit in UBYTE");
+IF_NUMBERS(IF_NUMBER_HINT)
+#undef IF_NUMBER_HINT
+#undef IF_NUMBERS
+
+/* Preserve keyword order: typo suggestions keep the first equally close
+   match. ADDRESS/IPADDRESS and NETMASK/SUBNETMASK are spelling aliases;
+   PRIORITY/PRI and CONFIGURE6/IPTYPE6 are aliases too. IPv6 names remain
+   recognised in IPv4-only builds. Roadshow's unsupported keywords remain
+   recognised, while NAMESERVER/DOMAIN are consumed by the resolver loader. */
+#define IF_KEYWORDS(X) \
+    X(device, DEVICE) \
+    X(card, CARD) \
+    X(id, ID) \
+    X(unit, UNIT) \
+    X(mdns, MDNS) \
+    X(address, ADDRESS) \
+    X(ipaddress, ADDRESS) \
+    X(netmask, NETMASK) \
+    X(subnetmask, NETMASK) \
+    X(gateway, GATEWAY) \
+    X(mtu, MTU) \
+    X(configure, CONFIGURE) \
+    X(iptype, IPTYPE) \
+    X(state, STATE) \
+    X(downgoesoffline, DOWNGOESOFFLINE) \
+    X(filter, FILTER) \
+    X(requiresinitdelay, REQUIRESINITDELAY) \
+    X(hardwareaddress, HARDWAREADDRESS) \
+    X(iprequests, IPREQUESTS) \
+    X(arprequests, ARPREQUESTS) \
+    X(writerequests, WRITEREQUESTS) \
+    X(rxbuffer, RXBUFFER) \
+    X(tcpackmax, TCPACKMAX) \
+    X(tcpgrowrtt, TCPGROWRTT) \
+    X(tcpwanwindow, TCPWANWINDOW) \
+    X(groframes, GROFRAMES) \
+    X(ackpace, ACKPACE) \
+    X(priority, PRIORITY) \
+    X(pri, PRIORITY) \
+    X(address6, ADDRESS6) \
+    X(ipaddress6, ADDRESS6) \
+    X(gateway6, GATEWAY6) \
+    X(configure6, CONFIGURE6) \
+    X(iptype6, CONFIGURE6) \
+    X(arptype, IGNORED) \
+    X(debug, IGNORED) \
+    X(pointtopoint, IGNORED) \
+    X(multicast, IGNORED) \
+    X(reportoffline, IGNORED) \
+    X(copymode, IGNORED) \
+    X(alias, IGNORED) \
+    X(destination, IGNORED) \
+    X(destinationaddr, IGNORED) \
+    X(destinationaddress, IGNORED) \
+    X(hardwaretype, IGNORED) \
+    X(broadcastaddress, IGNORED) \
+    X(metric, IGNORED) \
+    X(lease, IGNORED) \
+    X(dhcpunicast, IGNORED) \
+    X(linkstatuscommand, IGNORED) \
+    X(nameserver, IGNORED) \
+    X(domain, IGNORED)
+
+typedef struct IfKeywordNames
+{
+#define IF_KEYWORD_FIELD(name, key) char name[sizeof(#name)];
+    IF_KEYWORDS(IF_KEYWORD_FIELD)
+#undef IF_KEYWORD_FIELD
+} IfKeywordNames;
+
+static const IfKeywordNames ami_if_keyword_names = {
+#define IF_KEYWORD_NAME(name, key) #name,
+    IF_KEYWORDS(IF_KEYWORD_NAME)
+#undef IF_KEYWORD_NAME
+};
 
 static const struct IfKeyword
 {
-    const char *name;
-    IfKey       key;
+    UWORD offset;
+    UBYTE key;
 }
-ami_if_keywords[] =
-{
-    /* Keywords that map onto AmiIfConfig. */
-    { "device",             IF_KEY_DEVICE    },
-    { "card",               IF_KEY_CARD      },
-    { "id",                 IF_KEY_ID        },
-    { "unit",               IF_KEY_UNIT      },
-    { "mdns",               IF_KEY_MDNS      },
-    { "address",            IF_KEY_ADDRESS   },
-    { "ipaddress",          IF_KEY_ADDRESS   },   /* AmiTCP spelling */
-    { "netmask",            IF_KEY_NETMASK   },
-    { "subnetmask",         IF_KEY_NETMASK   },   /* AmiTCP spelling */
-    { "gateway",            IF_KEY_GATEWAY   },
-    { "mtu",                IF_KEY_MTU       },
-    { "configure",          IF_KEY_CONFIGURE },
-    { "iptype",             IF_KEY_IPTYPE    },
-    { "state",              IF_KEY_STATE     },
-    { "downgoesoffline",    IF_KEY_DOWNGOESOFFLINE   },
-    { "filter",             IF_KEY_FILTER            },
-    { "requiresinitdelay",  IF_KEY_REQUIRESINITDELAY },
-    { "hardwareaddress",    IF_KEY_HARDWAREADDRESS   },
-    { "iprequests",         IF_KEY_IPREQUESTS        },
-    { "arprequests",        IF_KEY_ARPREQUESTS       },
-    { "writerequests",      IF_KEY_WRITEREQUESTS     },
-    { "rxbuffer",           IF_KEY_RXBUFFER          },
-    { "tcpackmax",          IF_KEY_TCPACKMAX         },
-    { "tcpgrowrtt",         IF_KEY_TCPGROWRTT        },
-    { "tcpwanwindow",       IF_KEY_TCPWANWINDOW      },
-    { "groframes",          IF_KEY_GROFRAMES         },
-    { "ackpace",            IF_KEY_ACKPACE           },
-    { "priority",           IF_KEY_PRIORITY          },   /* Roadshow's, and PRI */
-    { "pri",                IF_KEY_PRIORITY          },
-
-    /* IPv6 keywords: the IPv4 keyword plus a "6".  In the floor build (no
-       AMINETXDUO_IPV6) they must stay RECOGNISED and be ignored, so the same
-       file loads in both builds without an "unknown keyword" warning. */
-    { "address6",           IF_KEY_ADDRESS6  },
-    { "ipaddress6",         IF_KEY_ADDRESS6  },
-    { "gateway6",           IF_KEY_GATEWAY6  },
-    { "configure6",         IF_KEY_CONFIGURE6},
-    { "iptype6",            IF_KEY_CONFIGURE6},
-
-    /* Roadshow keywords with nowhere to put them; listed so a stock
-       configuration file produces no warnings. */
-    { "arptype",            IF_KEY_IGNORED   },
-    { "debug",              IF_KEY_IGNORED   },
-    { "pointtopoint",       IF_KEY_IGNORED   },
-    { "multicast",          IF_KEY_IGNORED   },
-    { "reportoffline",      IF_KEY_IGNORED   },
-    { "copymode",           IF_KEY_IGNORED   },
-    { "alias",              IF_KEY_IGNORED   },
-    { "destination",        IF_KEY_IGNORED   },
-    { "destinationaddr",    IF_KEY_IGNORED   },
-    { "destinationaddress", IF_KEY_IGNORED   },
-    { "hardwaretype",       IF_KEY_IGNORED   },
-    { "broadcastaddress",   IF_KEY_IGNORED   },
-    { "metric",             IF_KEY_IGNORED   },
-    { "lease",              IF_KEY_IGNORED   },
-    { "dhcpunicast",        IF_KEY_IGNORED   },
-    { "linkstatuscommand",  IF_KEY_IGNORED   },
-
-    /* Written by AmiTCP_NG's installer.  ami_config_resolver_from_interfaces()
-       reads them when DEVS:Internet/name_resolution supplies none, and says so
-       when it does; they are not part of an interface's own configuration. */
-    { "nameserver",         IF_KEY_IGNORED   },
-    { "domain",             IF_KEY_IGNORED   },
-
-    { NULL,                 IF_KEY_UNKNOWN   }
+ami_if_keywords[] = {
+#define IF_KEYWORD_ENTRY(name, key) \
+    { (UWORD)offsetof(IfKeywordNames, name), IF_KEY_##key },
+    IF_KEYWORDS(IF_KEYWORD_ENTRY)
+#undef IF_KEYWORD_ENTRY
 };
+#undef IF_KEYWORDS
+
+_Static_assert(sizeof(IfKeywordNames) <= 65535UL,
+               "interface keyword offsets must fit in UWORD");
+_Static_assert(IF_KEY_ACKPACE <= 255, "interface keyword IDs must fit in UBYTE");
+
+#define IF_KEYWORD_COUNT (sizeof(ami_if_keywords) / sizeof(ami_if_keywords[0]))
+
+static const char *if_keyword_name(const struct IfKeyword *keyword)
+{
+    return (const char *)&ami_if_keyword_names + keyword->offset;
+}
 
 static IfKey lookup_if_keyword(const char *name)
 {
     const struct IfKeyword *k;
 
-    for (k = ami_if_keywords; k->name != NULL; k++)
+    for (k = ami_if_keywords; k < ami_if_keywords + IF_KEYWORD_COUNT; k++)
     {
-        if (ami_cfg_stricmp(name, k->name) == 0)
+        if (ami_cfg_stricmp(name, if_keyword_name(k)) == 0)
             return k->key;
     }
 
@@ -213,14 +298,15 @@ static const char *suggest_if_keyword(const char *name)
     const char             *best  = NULL;
     ULONG                   bestd = 3;
 
-    for (k = ami_if_keywords; k->name != NULL; k++)
+    for (k = ami_if_keywords; k < ami_if_keywords + IF_KEYWORD_COUNT; k++)
     {
-        ULONG d = edit_distance(name, k->name);
+        const char *keyword = if_keyword_name(k);
+        ULONG d = edit_distance(name, keyword);
 
         if (d < bestd)
         {
             bestd = d;
-            best  = k->name;
+            best  = keyword;
         }
     }
 
@@ -261,25 +347,27 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
  * AMI_CFG_PROBLEM_NOTE, not _WARN: nothing is wrong with the file, and only
  * CheckNetConfig prints notes (see aminetxduo/config.h).
  */
-static const struct { const char *key; const char *why; } cfg_inert_keys[] =
+static const struct { UWORD offset; const char *why; } cfg_inert_keys[] =
 {
-    { "alias",             "not supported" },
-    { "arptype",           "Ethernet only" },
-    { "hardwaretype",      "Ethernet only" },
-    { "broadcastaddress",  "the broadcast address is derived from ADDRESS and NETMASK" },
-    { "destinationaddress","point-to-point links are not supported" },
-    { "copymode",          "set by the driver" },
-    { "debug",             "not supported" },
-    { "destination",       "point-to-point links are not supported" },
-    { "destinationaddr",   "point-to-point links are not supported" },
-    { "dhcpunicast",       "DHCP renewal is always broadcast here" },
-    { "lease",             "set by the DHCP server" },
-    { "linkstatuscommand", "not supported" },
-    { "metric",            "no route metrics; PRIORITY orders interfaces" },
-    { "multicast",         "automatic" },
-    { "pointtopoint",      "point-to-point links are not supported" },
-    { "reportoffline",     "always reported" },
-    { NULL, NULL }
+#define IF_INERT(name, why) { (UWORD)offsetof(IfKeywordNames, name), why }
+    IF_INERT(alias, "not supported"),
+    IF_INERT(arptype, "Ethernet only"),
+    IF_INERT(hardwaretype, "Ethernet only"),
+    IF_INERT(broadcastaddress, "the broadcast address is derived from ADDRESS and NETMASK"),
+    IF_INERT(destinationaddress, "point-to-point links are not supported"),
+    IF_INERT(copymode, "set by the driver"),
+    IF_INERT(debug, "not supported"),
+    IF_INERT(destination, "point-to-point links are not supported"),
+    IF_INERT(destinationaddr, "point-to-point links are not supported"),
+    IF_INERT(dhcpunicast, "DHCP renewal is always broadcast here"),
+    IF_INERT(lease, "set by the DHCP server"),
+    IF_INERT(linkstatuscommand, "not supported"),
+    IF_INERT(metric, "no route metrics; PRIORITY orders interfaces"),
+    IF_INERT(multicast, "automatic"),
+    IF_INERT(pointtopoint, "point-to-point links are not supported"),
+    IF_INERT(reportoffline, "always reported"),
+#undef IF_INERT
+    { 0, NULL }
 };
 
 static VOID report_inert_keyword(ULONG line, const char *key)
@@ -290,9 +378,10 @@ static VOID report_inert_keyword(ULONG line, const char *key)
     if (!ami_cfg_problems_wanted())
         return;
 
-    for (i = 0; cfg_inert_keys[i].key != NULL; i++)
+    for (i = 0; cfg_inert_keys[i].why != NULL; i++)
     {
-        if (ami_cfg_stricmp(key, cfg_inert_keys[i].key) == 0)
+        if (ami_cfg_stricmp(key, (const char *)&ami_if_keyword_names +
+                                  cfg_inert_keys[i].offset) == 0)
         {
             ami_cfg_join3(text, sizeof(text), key,
                           " ignored: ",
@@ -394,10 +483,26 @@ static VOID report_clamped(ULONG line, const char *keyword, const char *value,
 
 /* CARD names one board by name where UNIT only says "Nth in probe order".
    The names are the driver's, include/aminetxduo/anxnet.h. */
-static const char *const cfg_card_names[] = ANXNET_CARD_NAMES;
+typedef struct CfgCardNames
+{
+#define CFG_CARD_FIELD(name) char card_##name[sizeof(#name)];
+    ANXNET_CARD_NAME_LIST(CFG_CARD_FIELD)
+#undef CFG_CARD_FIELD
+} CfgCardNames;
+
+static const CfgCardNames cfg_card_names = ANXNET_CARD_NAMES;
+
+static const UBYTE cfg_card_offsets[] = {
+#define CFG_CARD_OFFSET(name) offsetof(CfgCardNames, card_##name),
+    ANXNET_CARD_NAME_LIST(CFG_CARD_OFFSET)
+#undef CFG_CARD_OFFSET
+};
+
+_Static_assert(sizeof(CfgCardNames) <= 256,
+               "CARD names must fit byte offsets");
 
 #define CFG_CARD_COUNT \
-    ((ULONG)(sizeof(cfg_card_names) / sizeof(cfg_card_names[0])))
+    ((ULONG)(sizeof(cfg_card_offsets) / sizeof(cfg_card_offsets[0])))
 
 static BOOL cfg_card_known(const char *name)
 {
@@ -405,7 +510,8 @@ static BOOL cfg_card_known(const char *name)
 
     for (i = 0; i < CFG_CARD_COUNT; i++)
     {
-        if (ami_cfg_stricmp(name, cfg_card_names[i]) == 0)
+        if (ami_cfg_stricmp(name, (const char *)&cfg_card_names +
+                           cfg_card_offsets[i]) == 0)
             return TRUE;
     }
 
@@ -425,7 +531,7 @@ static VOID cfg_card_list(char *dst, ULONG dstlen)
 
     for (i = 0; i < CFG_CARD_COUNT; i++)
     {
-        const char *name = cfg_card_names[i];
+        const char *name = (const char *)&cfg_card_names + cfg_card_offsets[i];
         ULONG       need = ami_cfg_strlen(name) + (at != 0 ? 2UL : 0UL);
         ULONG       j;
 
@@ -466,76 +572,117 @@ static VOID report_bad_card(ULONG line, const char *value)
 
 #define CFG_HINT_IPV4     "expected a.b.c.d"
 
-/* CONFIGURE=/IPTYPE= address-configuration modes. */
-static const struct IpTypeName
-{
-    const char *name;
-    AmiIpType   type;
-}
-ami_iptype_names[] =
-{
-    { "dhcp",     AMI_IPTYPE_DHCP      },
-    { "bootp",    AMI_IPTYPE_DHCP      },   /* AmiTCP spelling, DHCP supersedes it */
-    { "auto",     AMI_IPTYPE_LINKLOCAL },
-    { "fastauto", AMI_IPTYPE_LINKLOCAL },
-    { "zeroconf", AMI_IPTYPE_LINKLOCAL },
-    { "linklocal",AMI_IPTYPE_LINKLOCAL },
-    { "static",   AMI_IPTYPE_STATIC    },
-    { "manual",   AMI_IPTYPE_STATIC    },
-    { "none",     AMI_IPTYPE_NONE      },
-    { "off",      AMI_IPTYPE_NONE      },
-    { "no",       AMI_IPTYPE_NONE      },
-    { "disabled", AMI_IPTYPE_NONE      },
-    { NULL,       AMI_IPTYPE_STATIC    }
-};
+/* The two mode tables share strings, and carry byte-sized private metadata.
+   Public AmiIpType/AmiIp6Type fields remain their original enum types. */
+#define CFG_IP4_MODES(X) \
+    X(dhcp,      "dhcp",      AMI_IPTYPE_DHCP) \
+    X(bootp,     "bootp",     AMI_IPTYPE_DHCP) \
+    X(auto_mode, "auto",      AMI_IPTYPE_LINKLOCAL) \
+    X(fastauto,  "fastauto",  AMI_IPTYPE_LINKLOCAL) \
+    X(zeroconf,  "zeroconf",  AMI_IPTYPE_LINKLOCAL) \
+    X(linklocal, "linklocal", AMI_IPTYPE_LINKLOCAL) \
+    X(static_mode,"static",  AMI_IPTYPE_STATIC) \
+    X(manual,    "manual",    AMI_IPTYPE_STATIC) \
+    X(none,      "none",      AMI_IPTYPE_NONE) \
+    X(off,       "off",       AMI_IPTYPE_NONE) \
+    X(no,        "no",        AMI_IPTYPE_NONE) \
+    X(disabled,  "disabled",  AMI_IPTYPE_NONE)
 
 #ifdef AMINETXDUO_IPV6
+#define CFG_IP6_EXTRA_NAMES(X) \
+    X(link_local,"link-local",AMI_IP6TYPE_LINKLOCAL) \
+    X(local,     "local",     AMI_IP6TYPE_LINKLOCAL) \
+    X(slaac,     "slaac",     AMI_IP6TYPE_AUTO) \
+    X(stateless, "stateless", AMI_IP6TYPE_AUTO) \
+    X(ra,        "ra",        AMI_IP6TYPE_AUTO) \
+    X(dhcpv6,    "dhcpv6",    AMI_IP6TYPE_DHCP) \
+    X(stateful,  "stateful",  AMI_IP6TYPE_DHCP)
+#define CFG_IP6_MODES(X) \
+    X(off,        "off",        AMI_IP6TYPE_OFF) \
+    X(no,         "no",         AMI_IP6TYPE_OFF) \
+    X(none,       "none",       AMI_IP6TYPE_OFF) \
+    X(disabled,   "disabled",   AMI_IP6TYPE_OFF) \
+    X(linklocal,  "linklocal",  AMI_IP6TYPE_LINKLOCAL) \
+    X(link_local, "link-local", AMI_IP6TYPE_LINKLOCAL) \
+    X(local,      "local",      AMI_IP6TYPE_LINKLOCAL) \
+    X(auto_mode,  "auto",       AMI_IP6TYPE_AUTO) \
+    X(slaac,      "slaac",      AMI_IP6TYPE_AUTO) \
+    X(stateless,  "stateless",  AMI_IP6TYPE_AUTO) \
+    X(ra,         "ra",         AMI_IP6TYPE_AUTO) \
+    X(static_mode,"static",     AMI_IP6TYPE_STATIC) \
+    X(manual,     "manual",     AMI_IP6TYPE_STATIC) \
+    X(dhcp,       "dhcp",       AMI_IP6TYPE_DHCP) \
+    X(dhcpv6,     "dhcpv6",     AMI_IP6TYPE_DHCP) \
+    X(stateful,   "stateful",   AMI_IP6TYPE_DHCP)
+#else
+#define CFG_IP6_EXTRA_NAMES(X)
+#endif
 
-/* CONFIGURE6=/IPTYPE6= address-configuration modes. */
-static const struct Ip6TypeName
+static const struct IfModeNames
 {
-    const char *name;
-    AmiIp6Type  type;
-}
-ami_ip6type_names[] =
-{
-    { "off",        AMI_IP6TYPE_OFF       },
-    { "no",         AMI_IP6TYPE_OFF       },
-    { "none",       AMI_IP6TYPE_OFF       },
-    { "disabled",   AMI_IP6TYPE_OFF       },
-    { "linklocal",  AMI_IP6TYPE_LINKLOCAL },
-    { "link-local", AMI_IP6TYPE_LINKLOCAL },
-    { "local",      AMI_IP6TYPE_LINKLOCAL },
-    { "auto",       AMI_IP6TYPE_AUTO      },
-    { "slaac",      AMI_IP6TYPE_AUTO      },
-    { "stateless",  AMI_IP6TYPE_AUTO      },
-    { "ra",         AMI_IP6TYPE_AUTO      },
-    { "static",     AMI_IP6TYPE_STATIC    },
-    { "manual",     AMI_IP6TYPE_STATIC    },
-    { "dhcp",       AMI_IP6TYPE_DHCP      },
-    { "dhcpv6",     AMI_IP6TYPE_DHCP      },
-    { "stateful",   AMI_IP6TYPE_DHCP      },
-    { NULL,         AMI_IP6TYPE_OFF       }
+#define MODE_NAME_FIELD(id, text, type) char id[sizeof(text)];
+    CFG_IP4_MODES(MODE_NAME_FIELD)
+    CFG_IP6_EXTRA_NAMES(MODE_NAME_FIELD)
+#undef MODE_NAME_FIELD
+} ami_if_mode_names = {
+#define MODE_NAME_TEXT(id, text, type) text,
+    CFG_IP4_MODES(MODE_NAME_TEXT)
+    CFG_IP6_EXTRA_NAMES(MODE_NAME_TEXT)
+#undef MODE_NAME_TEXT
 };
+_Static_assert(sizeof(ami_if_mode_names) <= 256, "mode name offsets must fit in UBYTE");
 
+struct IfMode { UBYTE offset; UBYTE type; };
+#define MODE_ENTRY(id, text, type) { offsetof(struct IfModeNames, id), type },
+static const struct IfMode ami_iptype_names[] = { CFG_IP4_MODES(MODE_ENTRY) };
+#ifdef AMINETXDUO_IPV6
+static const struct IfMode ami_ip6type_names[] = { CFG_IP6_MODES(MODE_ENTRY) };
+#endif
+#undef MODE_ENTRY
+#define MODE_WIDTH(id, text, type) \
+    _Static_assert(type >= 0 && type <= 255, "mode value must fit in UBYTE");
+CFG_IP4_MODES(MODE_WIDTH)
+#ifdef AMINETXDUO_IPV6
+CFG_IP6_MODES(MODE_WIDTH)
+#endif
+#undef MODE_WIDTH
+#undef CFG_IP4_MODES
+#undef CFG_IP6_MODES
+#undef CFG_IP6_EXTRA_NAMES
+
+static int lookup_ipmode(const char *value, const struct IfMode *modes,
+                          ULONG count)
+{
+    ULONG i;
+
+    for (i = 0; i < count; i++)
+        if (ami_cfg_stricmp(value, (const char *)&ami_if_mode_names +
+                                   modes[i].offset) == 0)
+            return modes[i].type;
+    return -1;
+}
+
+static BOOL lookup_iptype(const char *value, AmiIpType *out)
+{
+    int type = lookup_ipmode(value, ami_iptype_names,
+                            sizeof(ami_iptype_names) / sizeof(ami_iptype_names[0]));
+    if (type < 0)
+        return FALSE;
+    *out = (AmiIpType)type;
+    return TRUE;
+}
+
+#ifdef AMINETXDUO_IPV6
 static BOOL lookup_ip6type(const char *value, AmiIp6Type *out)
 {
-    const struct Ip6TypeName *n;
-
-    for (n = ami_ip6type_names; n->name != NULL; n++)
-    {
-        if (ami_cfg_stricmp(value, n->name) == 0)
-        {
-            *out = n->type;
-            return TRUE;
-        }
-    }
-
-    return FALSE;
+    int type = lookup_ipmode(value, ami_ip6type_names,
+                            sizeof(ami_ip6type_names) / sizeof(ami_ip6type_names[0]));
+    if (type < 0)
+        return FALSE;
+    *out = (AmiIp6Type)type;
+    return TRUE;
 }
-
 #endif /* AMINETXDUO_IPV6 */
-
 
 #ifdef AMINETXDUO_IPV6
 /*
@@ -558,22 +705,6 @@ static BOOL cfg_zone_ok(const AmiIfConfig *out, const char *key,
 }
 #endif
 
-
-static BOOL lookup_iptype(const char *value, AmiIpType *out)
-{
-    const struct IpTypeName *n;
-
-    for (n = ami_iptype_names; n->name != NULL; n++)
-    {
-        if (ami_cfg_stricmp(value, n->name) == 0)
-        {
-            *out = n->type;
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
 
 LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 {
@@ -638,8 +769,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         {
             AmiIpType type;
             ULONG     n;
+            IfKey     which = lookup_if_keyword(key);
 
-            switch (lookup_if_keyword(key))
+            switch (which)
             {
             case IF_KEY_DEVICE:
                 if (*value == '\0')
@@ -667,19 +799,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                it is usable as a host name. */
             case IF_KEY_ID:
                 ami_cfg_copy_string(out->id, sizeof(out->id), value);
-                break;
-
-            case IF_KEY_UNIT:
-                if (ami_cfg_parse_ulong(value, &n))
-                {
-                    out->unit = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad UNIT '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "UNIT",
-                                     value, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN);
-                }
                 break;
 
             /*
@@ -741,111 +860,55 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 break;
 
+            case IF_KEY_UNIT:
             case IF_KEY_MTU:
-                if (ami_cfg_parse_ulong(value, &n))
-                {
-                    out->mtu = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad MTU '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MTU", value, AMI_CFG_ADVICE_MTU_IS_A_PLAIN);
-                }
-                break;
-
             case IF_KEY_RXBUFFER:
-                if (ami_cfg_parse_ulong(value, &n))
-                {
-                    out->rx_buffer = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad RXBUFFER '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "RXBUFFER",
-                                     value, AMI_CFG_ADVICE_RXBUFFER_IS_THE);
-                }
-                break;
-
             case IF_KEY_TCPACKMAX:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_TCP_ACK_MAX)
-                {
-                    out->tcp_ack_max = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad TCPACKMAX '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "TCPACKMAX", value,
-                                     AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES);
-                }
-                break;
-
             case IF_KEY_TCPGROWRTT:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_TCP_GROW_RTT_MAX)
-                {
-                    out->tcp_grow_rtt = (UWORD)n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad TCPGROWRTT '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "TCPGROWRTT", value,
-                                     AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS);
-                }
-                break;
-
             case IF_KEY_TCPWANWINDOW:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_TCP_WAN_WINDOW_MAX)
-                {
-                    out->tcp_wan_window = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad TCPWANWINDOW '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "TCPWANWINDOW", value,
-                                     AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES);
-                }
-                break;
-
             case IF_KEY_GROFRAMES:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_GRO_FRAMES_MAX)
-                {
-                    out->gro_frames = (UBYTE)n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad GROFRAMES '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "GROFRAMES", value,
-                                     AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES);
-                }
-                break;
-
             case IF_KEY_ACKPACE:
+            {
+                const struct IfNumber *setting =
+                    &ami_if_numbers[which - IF_KEY_UNIT];
+
                 if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_ACK_PACE_MAX)
+                    n >= setting->nonzero && n <= setting->max)
                 {
-                    out->ack_pace_kbps = n;
+                    /* offsetof preserves each field's alignment; store through
+                       its original type, including the byte/word settings. */
+                    char *field = (char *)out + setting->offset;
+
+                    switch (setting->width)
+                    {
+                    case sizeof(UBYTE):
+                        *(UBYTE *)field = (UBYTE)n;
+                        break;
+                    case sizeof(UWORD):
+                        *(UWORD *)field = (UWORD)n;
+                        break;
+                    default: /* ULONG */
+                        *(ULONG *)field = n;
+                        break;
+                    }
                 }
                 else
                 {
-                    AMI_WARN("config: %s: bad ACKPACE '%s'", out->name, value);
+                    const char *keyword =
+                        (const char *)&ami_if_number_names + setting->keyword;
+
+                    AMI_WARN("config: %s: bad %s '%s'", out->name,
+                             keyword, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "ACKPACE", value,
-                                     AMI_CFG_ADVICE_ACKPACE_IS_KBPS);
+                                     keyword, value, setting->hint);
                 }
                 break;
+            }
 
             case IF_KEY_IPREQUESTS:
             case IF_KEY_ARPREQUESTS:
             case IF_KEY_WRITEREQUESTS:
             {
-                IfKey       which = lookup_if_keyword(key);
                 const char *keyword;
                 ULONG      *field;
                 ULONG       max  = (ULONG)AMI_CFG_READREQUESTS_MAX;

@@ -14,6 +14,7 @@
 
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/netstatus.h"
+#include <stddef.h>
 
 UINT ami_ns_dhcp_client_id_build(ULONG msw, ULONG lsw, UCHAR *option,
                                  UINT room)
@@ -82,17 +83,38 @@ VOID ami_ns_dhcp_text_decode(const UCHAR *buffer, UINT size,
 
 const char *ami_ns_dhcp_state_name(UCHAR state)
 {
-    static const char *const names[] = {
-        "dhcp-notstarted", "dhcp-boot",       "dhcp-init",
-        "dhcp-selecting",  "dhcp-requesting", "dhcp-bound",
-        "dhcp-renewing",   "dhcp-rebinding",  "dhcp-forcerenew",
-        "dhcp-probing"
+#define DHCP_STATE_NAMES(X) \
+    X(notstarted, 0, "dhcp-notstarted") \
+    X(boot,       1, "dhcp-boot") \
+    X(init,       2, "dhcp-init") \
+    X(selecting,  3, "dhcp-selecting") \
+    X(requesting, 4, "dhcp-requesting") \
+    X(bound,      5, "dhcp-bound") \
+    X(renewing,   6, "dhcp-renewing") \
+    X(rebinding,  7, "dhcp-rebinding") \
+    X(forcerenew, 8, "dhcp-forcerenew") \
+    X(probing,    9, "dhcp-probing")
+    static const struct DhcpStateNames {
+#define DHCP_STATE_FIELD(id, index, text) char id[sizeof(text)];
+        DHCP_STATE_NAMES(DHCP_STATE_FIELD)
+#undef DHCP_STATE_FIELD
+    } names = {
+#define DHCP_STATE_TEXT(id, index, text) text,
+        DHCP_STATE_NAMES(DHCP_STATE_TEXT)
+#undef DHCP_STATE_TEXT
     };
+    static const UCHAR offsets[] = {
+#define DHCP_STATE_OFFSET(id, index, text) [index] = offsetof(struct DhcpStateNames, id),
+        DHCP_STATE_NAMES(DHCP_STATE_OFFSET)
+#undef DHCP_STATE_OFFSET
+    };
+    _Static_assert(sizeof(names) <= 256, "DHCP state name offsets must fit in UCHAR");
+#undef DHCP_STATE_NAMES
 
-    if ((UINT)state >= (UINT)(sizeof(names) / sizeof(names[0])))
+    if ((UINT)state >= (UINT)(sizeof(offsets) / sizeof(offsets[0])))
         return "dhcp-other";
 
-    return names[state];
+    return (const char *)&names + offsets[state];
 }
 
 LONG ami_ns_dhcp_state_class(UCHAR state)

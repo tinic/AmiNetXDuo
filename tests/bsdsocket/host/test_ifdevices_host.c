@@ -17,6 +17,7 @@
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
+#include "interfaces_query.h"
 
 #include "nx_nd_cache.h"
 #include "tx_amiga.h"
@@ -464,6 +465,114 @@ static VOID t_unknown_selector_is_einval(VOID)
     CHECK(rc == -1 && h_error == AMI_EINVAL, "an unknown selector is EINVAL");
 }
 
+/* Fixed API expectations, independent of the shipping descriptor table.
+   Give every source field distinct bits, then vary all four availability
+   conditions: an absent answer must preserve the caller's prior contents. */
+static VOID t_interface_scalars(VOID)
+{
+    static const struct
+    {
+        ULONG tag;
+        ULONG value;
+        UBYTE need; /* 0=always, 1=device, 2=SANA-II, 4=IP, 8=ARP */
+    } cases[] =
+    {
+        { IFQ_DeviceUnit,              0x80000001UL, 1 },
+        { IFQ_HardwareAddressSize,     0x80000002UL, 2 },
+        { IFQ_HardwareType,            0x80000003UL, 2 },
+        { IFQ_BPS,                     0x80000004UL, 2 },
+        { IFQ_MTU,                     0x80000005UL, 0 },
+        { IFQ_HardwareMTU,             0x80000006UL, 2 },
+        { IFQ_PacketsReceived,         0x80000007UL, 2 },
+        { IFQ_PacketsSent,             0x80000008UL, 2 },
+        { IFQ_BadData,                 0x80000009UL, 2 },
+        { IFQ_Overruns,                0x8000000AUL, 2 },
+        { IFQ_UnknownTypes,            0x8000000BUL, 2 },
+        { IFQ_InputErrors,             0x8000000CUL, 2 },
+        { IFQ_OutputErrors,            0x8000000DUL, 2 },
+        { IFQ_InputDrops,              0x8000000EUL, 2 },
+        { IFQ_IPDrops,                 0x8000000FUL, 4 },
+        { IFQ_ARPDrops,                0x80000010UL, 8 },
+        { IFQ_NumReadRequests,         0x80000011UL, 2 },
+        { IFQ_NumReadRequestsPending,  0x80000012UL, 2 },
+        { IFQ_NumWriteRequests,        0x80000013UL, 2 },
+        { IFQ_NumWriteRequestsPending, 0x80000014UL, 2 },
+        { IFQ_AddressBindType,         0xFFFFFFFEUL, 0 }
+    };
+    /* Every non-scalar offset in the NDK's IFQ range, including computed
+       answers handled by the caller, then neighbouring and wide aliases. */
+    static const ULONG other[] =
+    {
+        0, 1, 4, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 27, 28, 29,
+        30, 31, 35, 39, 40, 43, 0x10002UL, 0xFFFFFFFEUL
+    };
+    BsdIfInfo info;
+    ULONG mask, i;
+
+    memset(&info, 0, sizeof(info));
+    info.bii_Unit = 0x80000001UL;
+    info.bii_Info.address_bits = 0x80000002UL;
+    info.bii_Info.hardware_type = 0x80000003UL;
+    info.bii_BPS = 0x80000004UL;
+    info.bii_MTU = 0x80000005UL;
+    info.bii_HardwareMTU = 0x80000006UL;
+    info.bii_Stats.packets_received = 0x80000007UL;
+    info.bii_Stats.packets_sent = 0x80000008UL;
+    info.bii_Stats.bad_data = 0x80000009UL;
+    info.bii_Stats.overruns = 0x8000000AUL;
+    info.bii_Stats.unknown_types = 0x8000000BUL;
+    info.bii_Stats.rx_errors = 0x8000000CUL;
+    info.bii_Stats.tx_errors = 0x8000000DUL;
+    info.bii_Stats.alloc_failures = 0x8000000EUL;
+    info.bii_IpDrops = 0x8000000FUL;
+    info.bii_ArpDrops = 0x80000010UL;
+    info.bii_Info.read_requests = 0x80000011UL;
+    info.bii_Info.read_pending = 0x80000012UL;
+    info.bii_Info.write_requests = 0x80000013UL;
+    info.bii_Info.write_pending = 0x80000014UL;
+    info.bii_BindType = -2;
+
+    for (mask = 0; mask < 16; mask++)
+    {
+        ULONG available;
+
+        info.bii_Device = (mask & 1) != 0 ? "test.device" : NULL;
+        info.bii_HaveSana = (mask & 2) != 0;
+        info.bii_HaveIpDrops = (mask & 4) != 0;
+        info.bii_HaveArpDrops = (mask & 8) != 0;
+        available = bsd_if_query_available(&info);
+
+        for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        {
+            ULONG out[3] = { 0x5A5A5A5AUL, 0xA5A5A5A5UL, 0x5A5A5A5AUL };
+            struct TagItem item = { cases[i].tag, (uintptr_t)&out[1] };
+            ULONG expected = cases[i].need == 0 ||
+                             (mask & cases[i].need) != 0
+                                 ? cases[i].value : 0xA5A5A5A5UL;
+
+            CHECK(bsd_if_query_scalar(&info, &item, available),
+                  "IFQ: recognised scalar, including absent values");
+            CHECK(out[1] == expected,
+                  "IFQ: exact field bits or untouched absent answer");
+            CHECK(out[0] == 0x5A5A5A5AUL && out[2] == 0x5A5A5A5AUL,
+                  "IFQ: writes exactly one LONG/ULONG");
+            item.ti_Data = 0;
+            CHECK(bsd_if_query_scalar(&info, &item, available),
+                  "IFQ: null scalar destination is accepted");
+        }
+        for (i = 0; i < sizeof(other) / sizeof(other[0]); i++)
+        {
+            ULONG out = 0xA5A5A5A5UL;
+            struct TagItem item = { (ULONG)IFQ_BASE + other[i],
+                                    (uintptr_t)&out };
+
+            CHECK(!bsd_if_query_scalar(&info, &item, available),
+                  "IFQ: non-scalar and full-width unknown tags do not match");
+            CHECK(out == 0xA5A5A5A5UL, "IFQ: other tag storage untouched");
+        }
+    }
+}
+
 int main(void)
 {
     printf("NETSTATUS_IFDEVICES host tests\n");
@@ -475,6 +584,7 @@ int main(void)
     t_bytes_arrive_per_slot();
     t_bytes_record_shape();
     t_unknown_selector_is_einval();
+    t_interface_scalars();
 
     printf("ifdevices checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

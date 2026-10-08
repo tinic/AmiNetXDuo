@@ -119,9 +119,26 @@ VOID ami_bpf_time_init(VOID) { }
 
 int main(void)
 {
+    static const struct
+    {
+        LONG status;
+        LONG error;
+    } failures[] = {
+        { AMI_BPF_EINVAL, AMI_EINVAL },
+        { AMI_BPF_ENXIO, AMI_ENXIO },
+        { AMI_BPF_EPERM, AMI_EPERM },
+        { AMI_BPF_EBUSY, AMI_EBUSY },
+        { AMI_BPF_EINTR, AMI_EINTR },
+        { AMI_BPF_EIO, AMI_EIO },
+        { AMI_BPF_ENOBUFS, AMI_ENOBUFS },
+        { AMI_BPF_EMSGSIZE, AMI_EMSGSIZE },
+        { -9, AMI_EINVAL },
+        { -12345, AMI_EINVAL }
+    };
     struct AmiSocketBase base;
     UBYTE                frame[60];
     LONG                 rc;
+    unsigned             i;
 
     memset(&base, 0, sizeof(base));
     memset(frame, 0x5a, sizeof(frame));
@@ -153,6 +170,22 @@ int main(void)
             "injector error is mapped after leaving");
     h_check(!h_order_bad && h_stage == 3 && h_leave_calls == 1,
             "injector failure still leaves the bracket");
+
+    for (i = 0; i < sizeof(failures) / sizeof(failures[0]); i++)
+    {
+        h_reset();
+        h_write_result = failures[i].status;
+        rc = bsd_bpf_write(1, frame, (LONG)sizeof(frame), &base);
+        h_check(rc == -1 && h_error_code == failures[i].error,
+                "every BPF status and unknown status preserves errno mapping");
+        h_check(!h_order_bad && h_stage == 3 && h_leave_calls == 1,
+                "each mapped failure leaves the bracket before returning");
+    }
+
+    h_reset();
+    rc = bsd_bpf_write(1, frame, 0, &base);
+    h_check(rc == 0 && h_error_code == 0 && h_stage == 3,
+            "zero-byte success is not translated to an error");
 
     printf("bpf write serialization: %lu checks, %lu failures\n",
            h_checks, h_failures);

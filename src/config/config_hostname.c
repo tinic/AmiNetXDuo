@@ -9,6 +9,8 @@
  */
 
 #include "config_internal.h"
+
+#include <stddef.h>
 #include "aminetxduo/compat.h"
 
 /* RFC 1123 2.1 relaxes RFC 952 to allow a leading digit. The rest stands. */
@@ -132,26 +134,50 @@ BOOL ami_config_hostname_from_hwaddr(const UBYTE *hw, ULONG hwlen,
 
 const char *ami_config_hostname_source_text(UWORD source)
 {
+#define HOSTNAME_SOURCES(X) \
+    X(NAMERES,   "name_resolution") \
+    X(HOSTS,     "hosts") \
+    X(DHCP,      "DHCP") \
+    X(INTERFACE, "interface ID") \
+    X(ENV,       "ENV:HOSTNAME")
+    struct HostnameSourceNames
+    {
+#define SOURCE_NAME(code, text) char name_##code[sizeof(text)];
+        HOSTNAME_SOURCES(SOURCE_NAME)
+#undef SOURCE_NAME
+    };
+    static const struct HostnameSourceNames pool =
+    {
+#define SOURCE_TEXT(code, text) text,
+        HOSTNAME_SOURCES(SOURCE_TEXT)
+#undef SOURCE_TEXT
+    };
     static const struct
     {
-        UWORD       source;
-        const char *text;
-    }
-    names[] =
+        UBYTE source;
+        UBYTE offset;
+    } names[] =
     {
-        { (UWORD)AMI_HOSTNAME_NAMERES,   "name_resolution" },
-        { (UWORD)AMI_HOSTNAME_HOSTS,     "hosts"           },
-        { (UWORD)AMI_HOSTNAME_DHCP,      "DHCP"            },
-        { (UWORD)AMI_HOSTNAME_INTERFACE, "interface ID"    },
-        { (UWORD)AMI_HOSTNAME_ENV,       "ENV:HOSTNAME"    },
-        { (UWORD)AMI_HOSTNAME_NONE,      NULL              }
+#define SOURCE_ENTRY(code, text) \
+        { AMI_HOSTNAME_##code, (UBYTE)offsetof(struct HostnameSourceNames, name_##code) },
+        HOSTNAME_SOURCES(SOURCE_ENTRY)
+#undef SOURCE_ENTRY
     };
     UWORD i;
 
-    for (i = 0; names[i].text != NULL; i++)
+    _Static_assert(sizeof(pool) <= 256UL, "hostname source offsets must fit in UBYTE");
+#define SOURCE_ID(code, text) \
+    _Static_assert(AMI_HOSTNAME_##code >= 0 && AMI_HOSTNAME_##code <= 255, \
+                   "hostname source IDs must fit in UBYTE");
+    HOSTNAME_SOURCES(SOURCE_ID)
+#undef SOURCE_ID
+#undef HOSTNAME_SOURCES
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
     {
+        /* Keep the full UWORD comparison for unknown source IDs. */
         if (names[i].source == source)
-            return names[i].text;
+            return (const char *)&pool + names[i].offset;
     }
 
     return NULL;

@@ -14,18 +14,18 @@
  * is legal; refusing either cost the machine its default domain AND its
  * search suffix, since both are taken from this one option.
  */
-BOOL ami_ns_domain_valid(const char *name)
+static ULONG ami_ns_domain_length(const char *name)
 {
     ULONG start = 0;
     ULONG len;
     ULONG i;
 
     if (name == NULL || name[0] == '\0')
-        return FALSE;
+        return 0UL;
 
     for (len = 0; name[len] != '\0'; len++)
         if (len >= (ULONG)AMI_CFG_DOMAIN_LEN)
-            return FALSE;
+            return 0UL;
 
     /* One trailing dot names the root and is not an empty label. */
     if (len > 1UL && name[len - 1UL] == '.')
@@ -39,21 +39,26 @@ BOOL ami_ns_domain_valid(const char *name)
             continue;
         if (i == start || i - start > 63UL || name[start] == '-' ||
             name[i - 1UL] == '-')
-            return FALSE;
+            return 0UL;
 
         for (j = start; j < i; j++)
             if (!((name[j] >= 'a' && name[j] <= 'z') ||
                   (name[j] >= 'A' && name[j] <= 'Z') ||
                   (name[j] >= '0' && name[j] <= '9') || name[j] == '-' ||
                   name[j] == '_'))
-                return FALSE;
+                return 0UL;
 
         start = i + 1UL;
     }
 
-    return TRUE;
+    return len;
 }
 
+
+BOOL ami_ns_domain_valid(const char *name)
+{
+    return (BOOL)(ami_ns_domain_length(name) != 0UL);
+}
 
 /*
  * Store the presentation form used by the resolver.  DHCP option 15 may
@@ -67,16 +72,14 @@ BOOL ami_ns_domain_valid(const char *name)
  */
 BOOL ami_ns_domain_canonicalize(char *name)
 {
-    ULONG len;
+    ULONG len = ami_ns_domain_length(name);
 
-    if (!ami_ns_domain_valid(name))
+    if (len == 0UL)
         return FALSE;
 
-    for (len = 0; name[len] != '\0'; len++)
-        ;
-
-    if (len > 1UL && name[len - 1UL] == '.')
-        name[len - 1UL] = '\0';
+    /* Validation already found the end before the optional root marker. */
+    if (name[len] == '.')
+        name[len] = '\0';
 
     return TRUE;
 }
@@ -90,7 +93,7 @@ static char ami_ns_domain_fold(char c)
 }
 
 
-static BOOL ami_ns_domain_same(const char *a, const char *b)
+BOOL ami_ns_domain_same(const char *a, const char *b)
 {
     while (*a != '\0' && *b != '\0')
     {
