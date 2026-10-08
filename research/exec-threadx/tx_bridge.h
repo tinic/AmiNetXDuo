@@ -67,6 +67,10 @@ int anx_tx_set_abort_policy(AnxTxThread *, int (*)(AnxTxThread *, UINT *));
 UINT anx_tx_original_wait_abort(TX_THREAD *);
 void anx_tx_context_begin(AnxTxContext *, TX_THREAD *, ULONG system_state);
 void anx_tx_context_end(AnxTxContext *);
+/* Research scheduling policy: running owner only threshold changes, restore
+ * before outer context_end. Real blocking may drop/reenter a raised-threshold
+ * boundary. Slices are stored/advisory, not a ThreadX tick/dispatch guarantee.
+ * No foreign threshold changes, priority inheritance or yield implementation. */
 int anx_tx_expire(TX_THREAD *, uint32_t token); /* marked timer context required */
 /* One explicit application-clock tick from an outer marked task timer context.
  * Native driver must wait outside the boundary. Does not tick private waits.

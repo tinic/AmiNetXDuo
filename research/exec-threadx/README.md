@@ -672,6 +672,8 @@ separate execution evidence. Local build/native staging is removed.
 
 ## Spike 9: reserved-worker public thread creation boundary
 
+This section records the spike 9 checkpoint; spike 10 below extends its policy.
+
 The native-only `exec_thread.c` implements the pinned public create/resume/delete
 signatures over caller-retained reservations. Prepare opens IO in the real owner
 before the constructor enters its boundary and parks on Exec's reserved SINGLE
@@ -732,3 +734,50 @@ The plan's required performance comparison includes baton handoffs, task switche
 CPU, throughput, latency and resource costs under equivalent protocol workloads.
 These correctness fixtures provide no measured performance improvement or
 finished-library size verdict.
+
+## Spike 10: bounded Exec scheduling policy for NetX creation arguments
+
+The public constructor now stores nonzero time_slice/new_time_slice values.
+They are advisory metadata: Exec round robin outside serialized boundaries
+governs dispatch; there is no ThreadX slice countdown, Quantum/Elapsed change,
+priority inheritance, ready-list scheduler or strict scheduling conformance.
+Initial creation threshold must still equal priority; unequal creation thresholds
+remain rejected before mutation. Logical priorities and capped native bands are
+unchanged. This accepts the shape of NetX's one-tick helper creation argument;
+it does not yet run the real IP constructor/helper.
+
+The public preemption-change service requires a registered current owner in an
+unmarked serialized call. It validates the new threshold against user priority,
+returns the old user threshold, and changes both logical threshold fields.
+Foreign-thread changes return TX_FEATURE_NOT_ENABLED without mutation. Unsupported
+inheritance is fatal before mutation. Invalid ID/output/threshold and marked
+timer calls fail without changing fields or output. Attached model owners now
+explicitly initialize their inheritance sentinel to TX_MAX_PRIORITIES.
+The slice-change service validates live registration/output/normal thread caller,
+returns the old new_time_slice and stores both fields; it may change another
+registered thread's advisory metadata under the same boundary.
+
+An outer context_end with a raised current threshold is fatal before Permit.
+Nested contexts can return while the outer boundary remains held. Real ThreadX
+event suspension may release that boundary while retaining its logical threshold;
+the bridge reacquires serialization and identity before returning to caller code.
+The owner must restore its threshold before its outer call returns. No yield or
+relinquish path is supplied. No claim is made that a woken sender wins native
+dispatch against its producer; each running caller's boundary is protected.
+
+The host model tests normal/error/foreign/timer metadata operations, nested
+boundaries, and actual pinned event wait/set suspension with the raised threshold
+preserved until restoration. Three separate fatal guards cover outside-context
+mutation, raised-threshold outer exit and unsupported inheritance. Together with
+retained models, host CTest passes 31/31; the m68k cross/startup gates pass.
+
+The native fixture retains the bounded creation/lifetime cases and adds actual
+priority-2/slice-1 helper-shaped creation under a temporarily raised creator
+threshold. It checks restoration and marker publication before entry, actual
+slice changes in the worker, raised-threshold event blocking, producer marker
+publication before the woken worker can resume, protected identity on return and
+threshold restoration before retirement. Expected 14/14, tasks_reaped=10,
+restarts=6. Native execution and independent exact source review remain pending
+until their separate receipts are recorded. Scope remains research only, with
+no production/vendor/header changes, real NX_IP helper, forced stop/drain, full
+replacement link, automatic clock, performance improvement or net size verdict.

@@ -119,6 +119,7 @@ int anx_tx_attach(AnxTxThread *t, TX_THREAD *thread, AnxWait *wait, uintptr_t ow
     memset(thread, 0, sizeof(*thread));
     thread->tx_thread_id = TX_THREAD_ID;
     thread->tx_thread_state = TX_READY;
+    thread->tx_thread_inherit_priority = TX_MAX_PRIORITIES;
     thread->tx_thread_amiga_task = (VOID *)owner;
     *t = (AnxTxThread){.thread=thread, .wait=wait, .owner=owner, .next=threads};
     threads = t;
@@ -217,6 +218,10 @@ void anx_tx_context_end(AnxTxContext *frame)
     need(contexts && current_frame == frame &&
          frame->owner == platform->caller(platform->context), "context owner/order");
     need(!_tx_thread_preempt_disable, "unbalanced preemption counter");
+    if (contexts==1 && _tx_thread_current_ptr)
+        need(_tx_thread_current_ptr->tx_thread_preempt_threshold==
+             _tx_thread_current_ptr->tx_thread_priority,
+             "boundary exit with raised threshold");
     if (contexts==1) {
         AnxTxThread *t;
         /* A ThreadX abort can mark READY while NetX's deferred sentinel still
@@ -421,6 +426,46 @@ void anx_tx_require_context(UINT blocking)
 void anx_tx_unsupported(const char *reason)
 {
     need(0,reason);
+}
+
+/* Research Exec policy: only the running owner may change its threshold.
+ * Forbid protects running code; a real suspension can release that boundary
+ * and reacquires it before returning. No ready-list or dispatch preference is
+ * synthesized. The owner must restore before its outer boundary returns.
+ * Inheritance is unsupported (the bridge creates only NO_INHERIT mutexes). */
+UINT _tx_thread_preemption_change(TX_THREAD *thread, UINT threshold, UINT *old)
+{
+    AnxTxThread *t;
+    need_context();
+    for (t=threads;t && t->thread!=thread;t=t->next) {}
+    if (!t || thread->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
+    if (!old) return TX_PTR_ERROR;
+    if (_tx_thread_system_state || !_tx_thread_identify()) return TX_CALLER_ERROR;
+    if (thread!=_tx_thread_current_ptr) return TX_FEATURE_NOT_ENABLED;
+    if (threshold>thread->tx_thread_user_priority) return TX_THRESH_ERROR;
+    need(thread->tx_thread_priority==thread->tx_thread_user_priority &&
+         thread->tx_thread_inherit_priority==TX_MAX_PRIORITIES,
+         "threshold inheritance not implemented");
+    *old=thread->tx_thread_user_preempt_threshold;
+    thread->tx_thread_user_preempt_threshold=threshold;
+    thread->tx_thread_preempt_threshold=threshold;
+    return TX_SUCCESS;
+}
+
+/* Logical metadata only: Exec's round robin governs equal native priorities
+ * outside the call boundary. No global Quantum/Elapsed or tick countdown. */
+UINT _tx_thread_time_slice_change(TX_THREAD *thread, ULONG slice, ULONG *old)
+{
+    AnxTxThread *t;
+    need_context();
+    for (t=threads;t && t->thread!=thread;t=t->next) {}
+    if (!t || thread->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
+    if (!old) return TX_PTR_ERROR;
+    if (_tx_thread_system_state || !_tx_thread_identify()) return TX_CALLER_ERROR;
+    *old=thread->tx_thread_new_time_slice;
+    thread->tx_thread_time_slice=slice;
+    thread->tx_thread_new_time_slice=slice;
+    return TX_SUCCESS;
 }
 
 UINT _tx_thread_wait_abort(TX_THREAD *thread)

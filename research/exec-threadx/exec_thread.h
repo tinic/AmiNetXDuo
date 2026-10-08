@@ -25,7 +25,8 @@ typedef struct AnxExecThread {
  * Public create requires this exact creator/target/stack reservation. Same public
  * pinned tx_api signatures, no vendor edits. Priorities 0..15 map to the pinned
  * port's Exec priority 1; 16..31 map to 0. Logical priorities remain in public
- * fields; ties are deliberate. Threshold must equal priority and slice be zero.
+ * fields; ties are deliberate. Initial threshold must equal priority. Slices
+ * are stored/advisory only; no tick accounting or global Exec quantum changes.
  * This is creation/publication evidence, not strict scheduler conformance. */
 int anx_exec_thread_prepare(AnxExecThread *, TX_THREAD *, CHAR *, APTR, ULONG);
 /* Only unbound PREPARED reservation can be cancelled, outside the boundary.
@@ -36,6 +37,7 @@ int anx_exec_thread_cancel(AnxExecThread *);
 int anx_exec_thread_wait(AnxExecThread *);
 /* Public services are defined by exec_thread.c, linked only by native research
  * target. Resume supports only initial DONT_START; general delayed suspend,
- * priorities/threshold changes, nonzero slices and forced terminate remain open.
+ * priority changes and forced terminate remain open. Current-owner threshold
+ * changes require restore before outer boundary exit; no foreign changes.
  * Public delete only after normal completion + native removal, by creator. */
 #endif

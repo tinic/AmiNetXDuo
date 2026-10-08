@@ -17,6 +17,9 @@ static volatile unsigned entries[2],cookie[2],entry_error;
 static UINT foreign_delete;
 static unsigned passed,reaped;
 static UINT expected_priority[2]={16,17};
+static ULONG expected_slice[2];
+static unsigned policy_probe;
+static volatile unsigned policy_phase;
 
 static void say(const char *s)
 {
@@ -29,20 +32,36 @@ static VOID child(ULONG input)
 {
     ULONG actual=0;
     TX_THREAD *t;
+    UINT old_threshold=99,restored=99;
+    ULONG old_slice=99;
     if (input>1) {entry_error=1;return;}
     t=&children[input];
     if (tx_thread_identify()!=t || !cookie[input] || t->tx_thread_id!=TX_THREAD_ID ||
         t->tx_thread_entry!=child || t->tx_thread_entry_parameter!=input ||
         t->tx_thread_stack_start!=stacks[input].bytes || t->tx_thread_stack_size!=8192 ||
         t->tx_thread_priority!=expected_priority[input] || t->tx_thread_preempt_threshold!=expected_priority[input] ||
+        t->tx_thread_time_slice!=expected_slice[input] || t->tx_thread_new_time_slice!=expected_slice[input] ||
         records[input].task.tc_Node.ln_Pri!=ANX_THREAD_EXEC_PRIORITY(expected_priority[input]) ||
         records[input].task.tc_Node.ln_Pri>TX_AMIGA_TASK_PRIORITY ||
         (uintptr_t)&actual<(uintptr_t)t->tx_thread_stack_start ||
         (uintptr_t)&actual>(uintptr_t)t->tx_thread_stack_end) entry_error=1;
     entries[input]++;
+    if (policy_probe) {
+        if (tx_thread_preemption_change(t,0,&old_threshold)!=TX_SUCCESS || old_threshold!=2 ||
+            tx_thread_time_slice_change(t,3,&old_slice)!=TX_SUCCESS || old_slice!=1 ||
+            tx_thread_time_slice_change(t,1,&old_slice)!=TX_SUCCESS || old_slice!=3)
+            entry_error=1;
+        policy_phase=1;
+    }
     if (tx_event_flags_set(&events,1UL<<input,TX_OR)!=TX_SUCCESS ||
         tx_event_flags_get(&events,256UL<<input,TX_OR_CLEAR,&actual,TX_WAIT_FOREVER)!=TX_SUCCESS ||
         !(actual&(256UL<<input))) entry_error=1;
+    if (policy_probe) {
+        if (policy_phase!=2 || tx_thread_identify()!=t || t->tx_thread_preempt_threshold!=0 ||
+            tx_thread_preemption_change(t,old_threshold,&restored)!=TX_SUCCESS || restored!=0)
+            entry_error=1;
+        policy_phase=3;
+    }
     if (!input) foreign_delete=tx_thread_delete(&children[1]);
 }
 static int ready(unsigned mask)
@@ -58,13 +77,17 @@ static int release(unsigned mask)
     AnxTxContext f; UINT s;
     anx_tx_context_begin(&f,&parent_thread,0);
     s=tx_event_flags_set(&events,mask<<8,TX_OR);
+    if (policy_probe) {
+        if (policy_phase!=1 || children[0].tx_thread_preempt_threshold!=0) entry_error=1;
+        policy_phase=2; /* actual wake cannot enter before producer Permit */
+    }
     anx_tx_context_end(&f);
     return s==TX_SUCCESS;
 }
 static UINT create(unsigned i,UINT start)
 {
     return tx_thread_create(&children[i],(CHAR *)"public child",child,i,stacks[i].bytes,
-                             8192,expected_priority[i],expected_priority[i],0,start);
+                             8192,expected_priority[i],expected_priority[i],expected_slice[i],start);
 }
 static int completed(unsigned i)
 {
@@ -87,11 +110,14 @@ int main(void)
     ULONG signals;
     unsigned i;
     BYTE held[32],bit; unsigned count=0;
+    UINT old_threshold=99,restored=99;
     say("research_exec_thread=START\n");
     anx_tx_runtime_init(anx_tx_exec_platform());
     CHECK(anx_exec_wait_open(&parent_wait));
     CHECK(anx_tx_attach(&parent_bridge,&parent_thread,&parent_wait.wait,(uintptr_t)FindTask(0)));
     anx_tx_context_begin(&f,&parent_thread,0);
+    parent_thread.tx_thread_priority=parent_thread.tx_thread_user_priority=16;
+    parent_thread.tx_thread_preempt_threshold=parent_thread.tx_thread_user_preempt_threshold=16;
     CHECK(tx_event_flags_create(&events,(CHAR *)"public lifetime")==TX_SUCCESS);
     memset(&absent,0xa5,sizeof(absent)); snapshot=absent;
     CHECK(tx_thread_create(&absent,(CHAR *)"no reservation",child,0,stacks[0].bytes,8192,16,16,0,TX_AUTO_START)==TX_NO_MEMORY);
@@ -119,7 +145,7 @@ int main(void)
     anx_tx_context_begin(&f,&parent_thread,0);
     CHECK(!anx_exec_thread_prepare(&records[1],&children[1],(CHAR *)"nested prepare",stacks[1].bytes,8192));
     CHECK(!anx_exec_thread_cancel(&records[0]));
-    CHECK(tx_thread_create(&children[0],(CHAR *)"unsupported slice",child,0,stacks[0].bytes,8192,16,16,1,TX_AUTO_START)==TX_FEATURE_NOT_ENABLED);
+    CHECK(tx_thread_create(&children[0],(CHAR *)"invalid threshold",child,0,stacks[0].bytes,8192,16,17,1,TX_AUTO_START)==TX_THRESH_ERROR);
     CHECK(tx_thread_create(&children[0],(CHAR *)"unsupported threshold",child,0,stacks[0].bytes,8192,16,15,0,TX_AUTO_START)==TX_FEATURE_NOT_ENABLED);
     CHECK(tx_thread_create(&children[0],(CHAR *)"wrong stack",child,0,stacks[1].bytes,8192,16,16,0,TX_AUTO_START)==TX_SIZE_ERROR);
     CHECK(!memcmp(&snapshot,&children[0],sizeof(snapshot)) && records[0].state==ANX_THREAD_PREPARED);
@@ -182,18 +208,30 @@ int main(void)
     }
     CHECK(entries[0]==7 && entries[1]==1);
     CASE("six-public-create-complete-delete-restarts");
-    expected_priority[0]=2; cookie[0]=0;
+    expected_priority[0]=2; expected_slice[0]=1; cookie[0]=0; policy_probe=1;
     CHECK(anx_exec_thread_prepare(&records[0],&children[0],(CHAR *)"IP priority band",stacks[0].bytes,8192));
     anx_tx_context_begin(&f,&parent_thread,0);
+    CHECK(tx_thread_preemption_change(&parent_thread,2,&old_threshold)==TX_SUCCESS && old_threshold==16);
+    CHECK(tx_thread_preemption_change(&parent_thread,17,&restored)==TX_THRESH_ERROR && restored==99 &&
+          parent_thread.tx_thread_preempt_threshold==2);
+    anx_tx_context_begin(&nested,&parent_thread,0);
     CHECK(create(0,TX_AUTO_START)==TX_SUCCESS);cookie[0]=0x1234;
-    CHECK(records[0].task.tc_Node.ln_Pri==TX_AMIGA_TASK_PRIORITY && !records[0].entered);
+    CHECK(records[0].task.tc_Node.ln_Pri==TX_AMIGA_TASK_PRIORITY && !records[0].entered &&
+          children[0].tx_thread_time_slice==1 && children[0].tx_thread_new_time_slice==1);
+    anx_tx_context_end(&nested);
+    CHECK(!records[0].entered && tx_thread_preemption_change(&children[0],0,&restored)==TX_FEATURE_NOT_ENABLED);
+    CHECK(tx_thread_preemption_change(&parent_thread,old_threshold,&restored)==TX_SUCCESS && restored==2);
+    CHECK(!records[0].entered && parent_thread.tx_thread_preempt_threshold==16);
     anx_tx_context_end(&f);
     CHECK(ready(1) && release(1) && anx_exec_thread_wait(&records[0]) && completed(0));
     anx_tx_context_begin(&f,&parent_thread,0);
     CHECK(tx_thread_delete(&children[0])==TX_SUCCESS);reaped++;
     anx_tx_context_end(&f);
-    CHECK(recovered(0) && entries[0]==8 && !entry_error && FindTask(0)->tc_SigAlloc==signals);
+    CHECK(recovered(0) && entries[0]==8 && !entry_error && policy_phase==3 && FindTask(0)->tc_SigAlloc==signals);
     CASE("IP-helper-logical-priority-stays-in-safe-Exec-band");
+    CASE("creator-threshold-restored-before-advisory-slice-helper-entry");
+    CASE("raised-threshold-event-suspend-resume-restores-boundary-and-threshold");
+    policy_probe=0;
     snapshot=children[0];
     CHECK(anx_exec_thread_prepare(&records[0],&children[0],(CHAR *)"cancel unbound",stacks[0].bytes,8192));
     CHECK(anx_exec_thread_cancel(&records[0]));reaped++;
@@ -203,7 +241,7 @@ int main(void)
     CASE("unbound-cancel-reaps-without-public-mutation");
     CHECK(anx_tx_detach(&parent_bridge) && anx_exec_wait_close(&parent_wait));
     anx_tx_runtime_init(anx_tx_exec_platform()); /* all reservations really released */
-    CHECK(passed==12 && reaped==10 && !events.tx_event_flags_group_suspended_count);
-    say("research_exec_thread=PASS 12/12 tasks_reaped=10 restarts=6\n");
+    CHECK(passed==14 && reaped==10 && !events.tx_event_flags_group_suspended_count);
+    say("research_exec_thread=PASS 14/14 tasks_reaped=10 restarts=6\n");
     return 0;
 }

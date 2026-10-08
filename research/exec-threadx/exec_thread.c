@@ -150,7 +150,7 @@ UINT _tx_thread_create(TX_THREAD *t, CHAR *name, VOID (*entry)(ULONG), ULONG inp
     if (stack!=r->stack || size!=r->stack_size) return TX_SIZE_ERROR;
     if (priority>=TX_MAX_PRIORITIES) return TX_PRIORITY_ERROR;
     if (threshold>priority) return TX_THRESH_ERROR;
-    if (threshold!=priority || slice) return TX_FEATURE_NOT_ENABLED;
+    if (threshold!=priority) return TX_FEATURE_NOT_ENABLED;
     if (auto_start!=TX_AUTO_START && auto_start!=TX_DONT_START) return TX_START_ERROR;
     if (t->tx_thread_id==TX_THREAD_ID) return TX_THREAD_ERROR;
     if (_tx_thread_created_count==(ULONG)-1) anx_tx_unsupported("created count overflow");
@@ -164,6 +164,7 @@ UINT _tx_thread_create(TX_THREAD *t, CHAR *name, VOID (*entry)(ULONG), ULONG inp
     t->tx_thread_priority=priority; t->tx_thread_user_priority=priority;
     t->tx_thread_preempt_threshold=threshold; t->tx_thread_user_preempt_threshold=threshold;
     t->tx_thread_inherit_priority=TX_MAX_PRIORITIES;
+    t->tx_thread_time_slice=slice; t->tx_thread_new_time_slice=slice;
     t->tx_thread_state=TX_SUSPENDED;
     TX_THREAD_CREATE_TIMEOUT_SETUP(t)
     t->tx_thread_amiga_task=&r->task; t->tx_thread_amiga_signal_owner=&r->task;
