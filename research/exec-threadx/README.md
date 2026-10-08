@@ -55,7 +55,27 @@ The first A1200/Kickstart 3.1 boardless attempt, using the toolchain's startup
 and newlib printing, crashed with no guest output on the harness's 8192-byte
 stack. It provides no adapter runtime verdict. The smoke now uses the existing
 command startup plus DOS `Write`/`Flush`, with the usual startup-first map check.
-The stack ceiling is unchanged; native verification of this revision is pending.
+The stack ceiling was unchanged on the successful rerun below.
+
+## Verified first-spike results
+
+- Host model: PASS for the deterministic schedules listed above.
+- Full/micro dependency baselines: UNCHANGED against beta8; a negative check
+  with the suspension service removed was rejected. A compiler fixture captured
+  an expanded service and field and excluded inactive code/header declarations.
+- m68k: real-header probe, adapter and smoke compilation/link PASS; the command
+  startup-first map gate PASS.
+- Native smoke: PASS, `research_exec_wait=PASS checks=4/4`, guest exit 0 after
+  14 seconds on one boardless A1200 run. Kickstart 3.1 r40.68, stack 8192 bytes,
+  `tools/amiberry-run.sh -m A1200 -t 90`, harness commit `300b22e8`. AgentNet
+  owner claudecode reported the actual guest result on 2026-10-07.
+
+Native smoke source: `80e28dfd2e5b27fbb693abbce45398231c74adbf`.
+Binary SHA256: `62fc279e1b5c98047aa90a2ec358c117f57319c005d23538f50ce0f27f2e011c`.
+The four checks cover timeout/pending-close rejection, pre-notification,
+cancellation and final close. They do not exercise a second task, NetX or a
+replacement ThreadX backend. The 29,960-byte standalone executable includes
+startup/runtime code and is not a replacement library size measurement.
 
 ## Check the dependency boundary after an upstream change
 
@@ -127,7 +147,7 @@ adapter compiled in isolation cannot establish the net replacement cost.
 
 The current-thread model, ThreadX wait-list/cleanup binding, mutexes, event flags,
 thread lifecycle, common timer integration and replacement backend selection are
-unimplemented. Minimum-profile coverage, actual native wakeup/resource races,
+unimplemented. Minimum-profile coverage, native cross-task wakeup/resource races,
 NetX/socket conformance, independent review and net size/runtime comparison remain
 pending. Passing the model does not validate those parts. The compile probe
 checks that referenced fields exist; target/profile-specific layout expectations

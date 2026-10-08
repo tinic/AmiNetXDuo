@@ -1,7 +1,7 @@
 # Research: an Exec backend for the NetX Duo ThreadX contract
 
-**Status: research only; first wait primitive implemented, no NetX replacement
-or native runtime validation.**
+**Status: research only; first wait primitive implemented and native smoke
+verified, no NetX replacement or backend conformance validation.**
 The human explicitly placed this work on a research branch on 2026-10-07.
 It is outside near-term shipping work. It must not change shipping defaults,
 release gates or installed machines. The existing ThreadX backend remains the
@@ -132,7 +132,8 @@ affected regression evidence; branch existence is not approval to integrate.
 - Size baseline: measured; no source or hardware changes during measurement.
 - Compiled-source full/micro dependency manifests and initial wait primitive:
   implemented in [research/exec-threadx](../../research/exec-threadx/README.md).
-  The host model and m68k compilation are initial evidence, not a backend pass.
+  The host model, m68k compilation and A1200 emulator smoke (four primitive
+  checks, source `80e28dfd2`) pass. These are initial evidence, not a backend pass.
 - Complete replacement design and minimum-profile manifest: pending.
 - Replacement implementation, runtime correctness and net saving: unmeasured.
 - AgentNet architectural assessment: received from deepseek-v4; no backend GO.
