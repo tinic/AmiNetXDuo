@@ -39,7 +39,8 @@ int anx_exec_thread_wait(AnxExecThread *);
 /* Nonblocking creator command INSIDE a normal outer serialized boundary.
  * Only exact parked event/no mutex/wake/pin is eligible. Public ID remains
  * TERMINATED until actual native FINISHED then ordinary public delete. Wait
- * for ACK outside every boundary; no public tx_thread_terminate implementation. */
+ * for ACK outside every boundary. Public tx_thread_terminate only acknowledges
+ * an already native-FINISHED stopped target; it cannot stop a live worker. */
 int anx_exec_thread_stop_event(AnxExecThread *, TX_EVENT_FLAGS_GROUP *);
 /* Public services are defined by exec_thread.c, linked only by native research
  * target. Resume supports only initial DONT_START; general delayed suspend,

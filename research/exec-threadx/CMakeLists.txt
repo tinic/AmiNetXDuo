@@ -63,10 +63,51 @@ foreach(service packet_allocate packet_pool_delete)
 endforeach()
 if(CMAKE_CROSSCOMPILING)
     enable_language(ASM)
+    # Real helper target must resolve ICMP dependencies to vendor bodies,
+    # rather than the older packet-slice terminal sentinels.
+    get_target_property(ANX_IP_BRIDGE_SOURCES research_tx_bridge SOURCES)
+    add_library(research_ip_bridge STATIC ${ANX_IP_BRIDGE_SOURCES})
+    target_link_libraries(research_ip_bridge PUBLIC research_wait)
+    target_include_directories(research_ip_bridge PUBLIC ${ANX_BRIDGE_INCLUDES})
+    target_compile_definitions(research_ip_bridge PUBLIC TX_DISABLE_ERROR_CHECKING NX_DISABLE_ERROR_CHECKING
+        PRIVATE ANX_REAL_IP_LINK)
+    target_compile_options(research_ip_bridge PRIVATE -Wall -Wextra -Werror)
+    set(ANX_IP_VENDOR_SOURCES
+        nx_system_initialize nx_ip_initialize nx_tcp_initialize nx_ip_create nx_ip_delete
+        nx_ip_thread_entry nx_ipv4_packet_receive nx_ip_packet_receive nx_ip_delete_queue_clear
+        nx_arp_dynamic_entries_invalidate nx_icmp_cleanup nx_igmp_multicast_check nx_ip_deferred_link_status_process nx_ip_dispatch_process nx_ip_fragment_disable nx_ip_raw_packet_cleanup nx_ipv4_option_process
+        nx_arp_dynamic_entry_delete nx_icmpv4_send_error_message
+        nx_ip_packet_send nx_ip_route_find nx_packet_transmit_release
+        nx_ip_driver_packet_send nx_ip_header_add
+        nx_ip_packet_checksum_compute nx_ip_packet_deferred_receive
+        nx_udp_socket_create nx_udp_socket_delete)
+    set(ANX_IP_VENDOR_PATHS)
+    foreach(service IN LISTS ANX_IP_VENDOR_SOURCES)
+        list(APPEND ANX_IP_VENDOR_PATHS "${ANX_ROOT}/third_party/netxduo/common/src/${service}.c")
+    endforeach()
+    add_library(research_ip_vendor STATIC ${ANX_IP_VENDOR_PATHS})
+    target_include_directories(research_ip_vendor PUBLIC ${ANX_BRIDGE_INCLUDES})
+    target_compile_definitions(research_ip_vendor PUBLIC TX_DISABLE_ERROR_CHECKING NX_DISABLE_ERROR_CHECKING)
+    target_compile_options(research_ip_vendor PRIVATE -Wall -Wextra -Werror)
+    foreach(service ip_create ip_delete)
+        set_source_files_properties("${ANX_ROOT}/third_party/netxduo/common/src/nx_${service}.c"
+            PROPERTIES COMPILE_DEFINITIONS "_nx_${service}=anx_nx_original_${service}")
+    endforeach()
     add_library(research_exec_adapter STATIC exec_wait.c)
     target_link_libraries(research_exec_adapter PUBLIC research_wait)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_adapter PRIVATE -Wall -Wextra -Werror)
+    add_executable(research_exec_ip_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_thread.c exec_ip.c exec_ip_smoke.c)
+    target_link_libraries(research_exec_ip_smoke PRIVATE
+        "-Wl,--start-group" research_ip_bridge research_ip_vendor research_exec_adapter "-Wl,--end-group")
+    target_include_directories(research_exec_ip_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_ip_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_ip_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_ip_smoke>.map")
+    add_custom_command(TARGET research_exec_ip_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_ip_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_task_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c exec_task.c exec_task_smoke.c)
     target_link_libraries(research_exec_task_smoke PRIVATE research_tx_bridge research_exec_adapter)

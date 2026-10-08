@@ -27,6 +27,7 @@ UINT _nx_packet_pool_delete(NX_PACKET_POOL *pool)
 /* The UDP producer links optional ICMP generators. This slice has no IP route
  * or transmit implementation. Trap these paths; never fabricate a send result.
  * A future replacement-only link gate must exclude these research sentinels. */
+#ifndef ANX_REAL_IP_LINK
 VOID _nx_icmpv4_send_error_message(NX_IP *ip, NX_PACKET *packet, ULONG kind, ULONG pointer)
 {
     (void)ip; (void)packet; (void)kind; (void)pointer;
@@ -37,3 +38,4 @@ VOID _nx_icmpv6_send_error_message(NX_IP *ip, NX_PACKET *packet, ULONG kind, ULO
     (void)ip; (void)packet; (void)kind; (void)pointer;
     anx_tx_unsupported("ICMPv6 transmission outside packet ownership slice");
 }
+#endif

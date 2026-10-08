@@ -216,6 +216,21 @@ UINT _tx_thread_resume(TX_THREAD *t)
     t->tx_thread_state=TX_READY; Signal(&r->task,SIGF_SINGLE);
     return TX_SUCCESS;
 }
+UINT _tx_thread_terminate(TX_THREAD *t)
+{
+    AnxExecThread *r;
+    anx_tx_require_context(0);
+    if (_tx_thread_system_state) return TX_CALLER_ERROR;
+    r=lookup(t);
+    if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
+    if (r->creator!=FindTask(0)) return TX_CALLER_ERROR;
+    /* Only acknowledge an already stopped, actually removed owner. This is
+     * the nonblocking service the unchanged IP delete can safely call. */
+    if (r->state!=ANX_THREAD_FINISHED || t->tx_thread_state!=TX_TERMINATED ||
+        r->wait.opened || r->bridge.thread || !r->bridge.terminal_pending)
+        return TX_FEATURE_NOT_ENABLED;
+    return TX_SUCCESS;
+}
 UINT _tx_thread_delete(TX_THREAD *t)
 {
     AnxExecThread *r;
