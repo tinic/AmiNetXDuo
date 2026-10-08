@@ -2,5 +2,4 @@
 # Regenerate with tools/analyze.sh --update.  See the script header.
 # count<TAB>file<TAB>warning<TAB>message
 1	port/threadx-amiga/src/tx_thread_stack_build.c	-Wanalyzer-null-dereference	dereference of NULL 'ctrl'
-1	src/bsdsocket/netstatus.c	-Wanalyzer-null-dereference	dereference of NULL 'out'
 1	src/sana2/sana2_copy.c	-Wanalyzer-out-of-bounds	stack-based buffer overflow

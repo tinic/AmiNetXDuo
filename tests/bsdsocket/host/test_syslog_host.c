@@ -229,6 +229,42 @@ static VOID test_low_memory_fallback(VOID)
           "the fallback retains the caller identity");
 }
 
+static VOID test_tag_percent_boundary(VOID)
+{
+    static const char *tails[] = { "%%:", "%%", ":", "" };
+    char tag[1025];
+    char expected[1025];
+    unsigned int mode, edge;
+
+    printf("tag percent quoting stays whole at both buffer ceilings\n");
+    for (mode = 0; mode < 2; mode++)
+    {
+        size_t capacity = mode == 0 ? 1024 : 128;
+
+        for (edge = 0; edge < sizeof(tails) / sizeof(tails[0]); edge++)
+        {
+            size_t count = capacity - 4 + edge;
+
+            reset_base();
+            memset(tag, 'x', count);
+            tag[count] = '%';
+            tag[count + 1] = '\0';
+            memset(expected, 'x', count);
+            strcpy(expected + count, tails[edge]);
+            h_base.sb_LogTag = (STRPTR)tag;
+            h_fail_alloc = mode != 0;
+
+            call_log(LOG_INFO, "");
+
+            CHECK(h_emits == 1, "tag boundary emits once");
+            CHECK(strcmp(h_format, expected) == 0,
+                  "tag boundary keeps complete percent pair and bounded prefix");
+            CHECK(h_seen_args == (const void *)h_args,
+                  "tag boundary preserves the argument stream");
+        }
+    }
+}
+
 static VOID test_null_format(VOID)
 {
     unsigned long before;
@@ -286,6 +322,7 @@ int main(void)
     test_pid();
     test_mask_and_priority();
     test_low_memory_fallback();
+    test_tag_percent_boundary();
     test_null_format();
     test_log_hook();
 

@@ -5,6 +5,7 @@
  */
 
 #include "netstack_ra.h"
+#include "netstack_dns_domain.h"
 
 #include <proto/exec.h>
 
@@ -13,26 +14,6 @@ static BOOL ami_ns_ra_same(const ULONG a[4], const ULONG b[4])
 {
     return (BOOL)(a[0] == b[0] && a[1] == b[1] &&
                   a[2] == b[2] && a[3] == b[3]);
-}
-
-
-static char ami_ns_ra_fold(char c)
-{
-    if (c >= 'A' && c <= 'Z')
-        return (char)(c + ('a' - 'A'));
-    return c;
-}
-
-
-static BOOL ami_ns_ra_domain_same(const char *a, const char *b)
-{
-    while (*a != '\0' && *b != '\0')
-    {
-        if (ami_ns_ra_fold(*a++) != ami_ns_ra_fold(*b++))
-            return FALSE;
-    }
-
-    return (BOOL)(*a == *b);
 }
 
 
@@ -195,7 +176,7 @@ VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, UWORD interface_index,
             break;              /* root padding, truncation, or bad encoding */
 
         for (i = 0; i < pending->dnssl_count[interface_index]; i++)
-            if (ami_ns_ra_domain_same(
+            if (ami_ns_domain_same(
                     pending->dnssl[interface_index][i].domain, name))
                 break;
 
@@ -333,7 +314,7 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
                 UWORD c;
 
                 for (known = 0; known < snapshot->dnssl_count; known++)
-                    if (ami_ns_ra_domain_same(snapshot->dnssl[known],
+                    if (ami_ns_domain_same(snapshot->dnssl[known],
                             pending->dnssl[iface][i].domain))
                         break;
 

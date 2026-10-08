@@ -295,7 +295,45 @@ static const struct bpf_insn prog_tcp80[] = {
 
 static void test_validator(void)
 {
+    static const UWORD loads[] = {
+        BPF_LD | BPF_W | BPF_IMM, BPF_LD | BPF_W | BPF_LEN,
+        BPF_LD | BPF_W | BPF_MEM,
+        BPF_LD | BPF_W | BPF_ABS, BPF_LD | BPF_H | BPF_ABS,
+        BPF_LD | BPF_B | BPF_ABS,
+        BPF_LD | BPF_W | BPF_IND, BPF_LD | BPF_H | BPF_IND,
+        BPF_LD | BPF_B | BPF_IND,
+        BPF_LDX | BPF_W | BPF_IMM, BPF_LDX | BPF_W | BPF_LEN,
+        BPF_LDX | BPF_W | BPF_MEM, BPF_LDX | BPF_B | BPF_MSH
+    };
+    static const UWORD invalid_loads[] = {
+        BPF_LDX | BPF_W | BPF_ABS, BPF_LDX | BPF_H | BPF_ABS,
+        BPF_LDX | BPF_B | BPF_ABS,
+        BPF_LDX | BPF_W | BPF_IND, BPF_LDX | BPF_H | BPF_IND,
+        BPF_LDX | BPF_B | BPF_IND,
+        BPF_LD | BPF_B | BPF_MSH, BPF_LD | BPF_W | BPF_MSH,
+        BPF_LDX | BPF_H | BPF_MSH, BPF_LDX | BPF_W | BPF_MSH,
+        BPF_LD | BPF_B | BPF_IMM, BPF_LDX | BPF_B | BPF_IMM,
+        BPF_LD | BPF_H | BPF_LEN, BPF_LDX | BPF_H | BPF_LEN,
+        BPF_LD | BPF_H | BPF_MEM, BPF_LDX | BPF_B | BPF_MEM
+    };
+    struct bpf_insn load_program[] = {
+        BPF_STMT(BPF_LD | BPF_W | BPF_IMM, 0),
+        BPF_STMT(BPF_RET | BPF_K, 0)
+    };
+    ULONG load_index;
+
     printf("bpf: validator\n");
+
+    for (load_index = 0; load_index < NELEM(loads); load_index++)
+    {
+        load_program[0].code = loads[load_index];
+        CHECK(ami_bpf_validate(load_program, NELEM(load_program)) == 0);
+    }
+    for (load_index = 0; load_index < NELEM(invalid_loads); load_index++)
+    {
+        load_program[0].code = invalid_loads[load_index];
+        CHECK(ami_bpf_validate(load_program, NELEM(load_program)) == -1);
+    }
 
     CHECK(ami_bpf_validate(prog_ip,     NELEM(prog_ip))     == 0);
     CHECK(ami_bpf_validate(prog_arp,    NELEM(prog_arp))    == 0);

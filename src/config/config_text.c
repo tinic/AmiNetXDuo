@@ -12,6 +12,7 @@
 
 #include "aminetxduo/config_advice.h"
 #include "aminetxduo/compat.h"
+#include "aminetxduo/ip_text.h"
 
 static char ami_cfg_empty[] = "";
 
@@ -249,17 +250,11 @@ VOID ami_cfg_strip_comment(char *s, const char *chars)
     }
 }
 
-VOID ami_cfg_unquote(char *s)
+/* Both quoted readers use the same escape rules. Advance past the closing
+   quote before terminating output: without escapes, scan_item's output
+   cursor is the closing quote itself. */
+static char *unquote_content(char *p, char *out)
 {
-    char *out;
-    char *p;
-
-    if (s == NULL || *s != '"')
-        return;
-
-    p   = s + 1;
-    out = s;
-
     while (*p != '\0' && *p != '"')
     {
         if (*p == '*' && p[1] != '\0')
@@ -279,7 +274,16 @@ VOID ami_cfg_unquote(char *s)
         }
     }
 
+    if (*p == '"')
+        p++;
     *out = '\0';
+    return p;
+}
+
+VOID ami_cfg_unquote(char *s)
+{
+    if (s != NULL && *s == '"')
+        (VOID)unquote_content(s + 1, s);
 }
 
 /*
@@ -290,7 +294,6 @@ static char *scan_item(char **cursor)
 {
     char *p = *cursor;
     char *start;
-    char *out;
 
     while (*p == ' ' || *p == '\t')
         p++;
@@ -303,36 +306,8 @@ static char *scan_item(char **cursor)
 
     if (*p == '"')
     {
-        p++;
-        start = p;
-        out   = p;
-
-        while (*p != '\0' && *p != '"')
-        {
-            if (*p == '*' && p[1] != '\0')
-            {
-                p++;
-                switch (*p)
-                {
-                case 'n': case 'N': *out++ = '\n';   break;
-                case 'e': case 'E': *out++ = '\033'; break;
-                default:            *out++ = *p;     break;
-                }
-                p++;
-            }
-            else
-            {
-                *out++ = *p++;
-            }
-        }
-
-        if (*p == '"')
-            p++;
-
-        /* out never runs past p, so this only clobbers consumed input. */
-        *out    = '\0';
-        *cursor = p;
-
+        start = p + 1;
+        *cursor = unquote_content(start, start);
         return start;
     }
 
@@ -681,14 +656,10 @@ BOOL ami_cfg_parse_net_number(const char *s, ULONG *out)
     return TRUE;
 }
 
-VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
+ULONG ami_format_ip4(char *buf, ULONG addr)
 {
-    char  tmp[16];
     ULONG pos = 0;
     int   octet;
-
-    if (buf == NULL || buflen == 0)
-        return;
 
     for (octet = 3; octet >= 0; octet--)
     {
@@ -704,14 +675,24 @@ VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
         while (v != 0);
 
         while (n > 0)
-            tmp[pos++] = digits[--n];
+            buf[pos++] = digits[--n];
 
         if (octet > 0)
-            tmp[pos++] = '.';
+            buf[pos++] = '.';
     }
 
-    tmp[pos] = '\0';
+    buf[pos] = '\0';
+    return pos;
+}
 
+VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
+{
+    char tmp[16];
+
+    if (buf == NULL || buflen == 0)
+        return;
+
+    (VOID)ami_format_ip4(tmp, addr);
     ami_cfg_copy_string(buf, buflen, tmp);
 }
 

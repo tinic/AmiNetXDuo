@@ -125,6 +125,7 @@ SAY 'case abbrev:  Q HOSTNAME         rc=' RC ' result=' RESULT
 RESULT = 'NONE'
 'QUERY CONNECTIONS'
 SAY 'case conns:   QUERY CONNECTIONS  rc=' RC ' bytes=' LENGTH(RESULT)
+SAY 'case connfmt: connection records result=' RESULT
 
 RESULT = 'NONE'
 'QUERY ROUTES ALL'
@@ -133,6 +134,31 @@ SAY 'case routes:  QUERY ROUTES ALL   rc=' RC ' bytes=' LENGTH(RESULT)
 RESULT = 'NONE'
 'QUERY ICMP CHKSUM IP TOTAL TCP CONNECT UDP ITOTAL'
 SAY 'case stats:   QUERY live stats   rc=' RC ' result=' RESULT
+
+'QUERY MBUF_STAT MBUFS'
+SAY 'case unread:  unreadable variable rc=' RC
+
+/* Refusal precedes index parsing for both canonical names and aliases. */
+blocked = 'MBUF_STAT MBUF_CONF LOG MBS MBC'
+DO i = 1 TO WORDS(blocked)
+    name = WORD(blocked, i)
+    'QUERY' name
+    SAY 'case unreadbare-' || i || ': rc=' RC
+    'QUERY' name 'NOSUCHINDEX'
+    SAY 'case unreadindex-' || i || ': rc=' RC
+    'SET' name '0'
+    SAY 'case readonly-' || i || ': rc=' RC
+END
+
+/* All four indexed protocols preserve missing/bad-index refusal and aliases. */
+indexed = 'ICMP IP TCP UDP IC T U'
+DO i = 1 TO WORDS(indexed)
+    name = WORD(indexed, i)
+    'QUERY' name
+    SAY 'case missingindex-' || i || ': rc=' RC
+    'QUERY' name 'NOSUCHINDEX'
+    SAY 'case invalidindex-' || i || ': rc=' RC
+END
 
 /* SERVICES blocks for its collection window, which is the one command here
    that can wedge the host rather than answer it. One second, because what is
@@ -286,6 +312,61 @@ for case_name in conns routes stats; do
         note "FAIL: $case_name did not return rc=0"
         fails=$((fails + 1))
     fi
+done
+
+# Every connection is eight words in the fixed getsockets() wire order.
+# nc is live above, so an empty result would not exercise the serializer.
+if awk '
+    /case connfmt:/ {
+        sub(/^.*result= */, "")
+        n = split($0, field, / +/)
+        if (n == 0 || n % 8 != 0) exit 1
+        for (i = 1; i <= n; i += 8) {
+            if (field[i] !~ /^[tu]$/) exit 1
+            for (j = 1; j <= 7; j++) {
+                width = (j == 3 || j == 5) ? 8 : ((j == 7) ? 1 : 4)
+                if (length(field[i+j]) != width || field[i+j] !~ /^[0-9a-f]+$/) exit 1
+            }
+            # The nc listener above owns TCP port 7099 (hex 1bbb).
+            if (field[i] == "t" && field[i+4] == "1bbb") listener = 1
+        }
+        found = 1
+    }
+    END { if (!found || !listener) exit 1 }
+' "$SCRIPTOUT"; then
+    note "PASS: CONNECTIONS preserves field widths, hex spelling and listener port"
+else
+    note "FAIL: CONNECTIONS is empty or has a malformed fixed-width record"
+    fails=$((fails + 1))
+fi
+
+if grep -qE "case unread:.*rc= *[1-9]" "$SCRIPTOUT"; then
+    note "PASS: recognised but unreadable variables remain refused"
+else
+    note "FAIL: an unreadable variable was accepted"
+    fails=$((fails + 1))
+fi
+
+for index in 1 2 3 4 5; do
+    for case_name in unreadbare unreadindex readonly; do
+        if grep -qE "case $case_name-$index:.*rc= *5( |$)" "$SCRIPTOUT"; then
+            note "PASS: $case_name-$index preserves RETURN_WARN"
+        else
+            note "FAIL: $case_name-$index changed the refusal status"
+            fails=$((fails + 1))
+        fi
+    done
+done
+
+for index in 1 2 3 4 5 6 7; do
+    for case_name in missingindex invalidindex; do
+        if grep -qE "case $case_name-$index:.*rc= *5( |$)" "$SCRIPTOUT"; then
+            note "PASS: $case_name-$index preserves RETURN_WARN"
+        else
+            note "FAIL: $case_name-$index changed the index refusal status"
+            fails=$((fails + 1))
+        fi
+    done
 done
 
 for case_name in browse browse1; do

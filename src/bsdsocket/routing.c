@@ -485,7 +485,7 @@ typedef struct BsdRouteTable
 
 static VOID bsd_route_sockaddr(struct sockaddr_in *sa, ULONG host_addr)
 {
-    bsd_bzero(sa, sizeof(*sa));
+    /* Both emitters zero the complete entry before filling its addresses. */
     sa->sin_len         = (UBYTE)sizeof(struct sockaddr_in);
     sa->sin_family      = AF_INET;
     sa->sin_addr.s_addr = (in_addr_t)BSD_HTONL(host_addr);

@@ -19,6 +19,7 @@
 
 #include "config_internal.h"
 #include "aminetxduo/compat.h"
+#include "aminetxduo/ip_text.h"
 
 /*
  * RFC 4291 §2.2 text form.  Written from the grammar rather than adapted from
@@ -316,15 +317,6 @@ VOID ami_config_format_ip6_zone(const ULONG addr[AMI_CFG_IP6_WORDS],
 VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
                            char *buf, ULONG buflen)
 {
-    char  tmp[AMI_CFG_IP6_STRLEN];
-    UWORD group[8];
-    ULONG pos       = 0;
-    LONG  best_at   = -1;
-    ULONG best_len  = 0;
-    LONG  run_at    = -1;
-    ULONG run_len   = 0;
-    ULONG i;
-
     if (buf == NULL || buflen == 0)
         return;
 
@@ -333,6 +325,20 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
     if (addr == NULL || buflen < AMI_CFG_IP6_STRLEN)
         return;
 
+    (VOID)ami_format_ip6(buf, addr);
+}
+
+ULONG ami_format_ip6(char *buf, const ULONG addr[AMI_CFG_IP6_WORDS])
+{
+    UWORD group[8];
+    ULONG pos       = 0;
+    LONG  best_at   = -1;
+    ULONG best_len  = 0;
+    LONG  run_at    = -1;
+    ULONG run_len   = 0;
+    ULONG i;
+
+    /* Read every input word before writing the address. */
     for (i = 0; i < AMI_CFG_IP6_WORDS; i++)
     {
         group[i * 2]     = (UWORD)(addr[i] >> 16);
@@ -381,12 +387,12 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
             (LONG)i < best_at + (LONG)best_len)
         {
             if ((LONG)i == best_at)
-                tmp[pos++] = ':';
+                buf[pos++] = ':';
             continue;
         }
 
         if (i != 0)
-            tmp[pos++] = ':';
+            buf[pos++] = ':';
 
         /*
          * v4-mapped (::ffff:a.b.c.d) and the deprecated v4-compatible form are
@@ -396,13 +402,9 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
         if (i == 6 && best_at == 0 &&
             (best_len == 6 || (best_len == 5 && group[5] == 0xFFFF)))
         {
-            char  quad[16];
             ULONG addr4 = ((ULONG)group[6] << 16) | (ULONG)group[7];
-            ULONG n;
 
-            ami_config_format_ip(addr4, quad, sizeof(quad));
-            for (n = 0; quad[n] != '\0'; n++)
-                tmp[pos++] = quad[n];
+            pos += ami_format_ip4(buf + pos, addr4);
             break;
         }
 
@@ -422,15 +424,14 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
             while (v != 0);
 
             while (n > 0)
-                tmp[pos++] = digits[--n];
+                buf[pos++] = digits[--n];
         }
     }
 
     /* A run that reached the end of the address still needs its second colon. */
     if (best_at >= 0 && (ULONG)best_at + best_len == 8)
-        tmp[pos++] = ':';
+        buf[pos++] = ':';
 
-    tmp[pos] = '\0';
-
-    ami_cfg_copy_string(buf, buflen, tmp);
+    buf[pos] = '\0';
+    return pos;
 }

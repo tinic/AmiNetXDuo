@@ -5,6 +5,7 @@
  */
 
 #include "netstack_dns_lease.h"
+#include "netstack_dns_domain.h"
 
 
 BOOL ami_ns_dhcp_dns_lease_has(const AmiNsDhcpDnsLease *lease,
@@ -93,25 +94,6 @@ ULONG ami_ns_dhcp_dns_lease_at(const AmiNsDhcpDnsLease *lease,
 }
 
 
-static char ami_ns_search_fold(char c)
-{
-    if (c >= 'A' && c <= 'Z')
-        return (char)(c + ('a' - 'A'));
-    return c;
-}
-
-
-static BOOL ami_ns_search_same(const char *a, const char *b)
-{
-    while (*a != '\0' && *b != '\0')
-    {
-        if (ami_ns_search_fold(*a++) != ami_ns_search_fold(*b++))
-            return FALSE;
-    }
-    return (BOOL)(*a == *b);
-}
-
-
 BOOL ami_ns_dhcp_search_lease_has(const AmiNsDhcpSearchLease *lease,
                                   UWORD interface_index, const char *domain)
 {
@@ -122,7 +104,7 @@ BOOL ami_ns_dhcp_search_lease_has(const AmiNsDhcpSearchLease *lease,
         return FALSE;
 
     for (i = 0; i < lease->count[interface_index]; i++)
-        if (ami_ns_search_same(lease->domain[interface_index][i], domain))
+        if (ami_ns_domain_same(lease->domain[interface_index][i], domain))
             return TRUE;
     return FALSE;
 }
@@ -133,6 +115,7 @@ BOOL ami_ns_dhcp_search_lease_add(AmiNsDhcpSearchLease *lease,
 {
     UWORD count;
     UWORD i;
+    UWORD length;
 
     if (lease == NULL || domain == NULL || domain[0] == '\0' ||
         interface_index >= AMI_CFG_MAX_ATTACHED ||
@@ -142,14 +125,14 @@ BOOL ami_ns_dhcp_search_lease_add(AmiNsDhcpSearchLease *lease,
     for (i = 0; domain[i] != '\0'; i++)
         if ((UWORD)(i + 1U) >= (UWORD)AMI_CFG_NAME_LEN)
             return FALSE;
+    length = i;
 
     count = lease->count[interface_index];
     if (count >= (UWORD)AMI_CFG_MAX_SEARCH)
         return FALSE;
 
-    for (i = 0; domain[i] != '\0'; i++)
+    for (i = 0; i <= length; i++)
         lease->domain[interface_index][count][i] = domain[i];
-    lease->domain[interface_index][count][i] = '\0';
     lease->count[interface_index] = (UWORD)(count + 1U);
     return TRUE;
 }
@@ -169,7 +152,7 @@ BOOL ami_ns_dhcp_search_lease_remove(AmiNsDhcpSearchLease *lease,
 
     count = lease->count[interface_index];
     for (i = 0; i < count; i++)
-        if (ami_ns_search_same(lease->domain[interface_index][i], domain))
+        if (ami_ns_domain_same(lease->domain[interface_index][i], domain))
             break;
     if (i == count)
         return FALSE;

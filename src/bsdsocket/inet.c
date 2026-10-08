@@ -9,8 +9,13 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/ip_text.h"
+
+_Static_assert(BSD_NTOA_BUFLEN >= 16, "IPv4 output needs 16 bytes");
 
 #ifdef AMINETXDUO_IPV6
+_Static_assert(AMI_INET6_ADDRSTRLEN >= AMI_CFG_IP6_STRLEN,
+               "IPv6 output needs the full formatter capacity");
 /*
  * The IPv6 text conversions are src/config/config_text.c's, the same
  * routines the DEVS:NetInterfaces parser uses for ADDRESS6. One parser means
@@ -40,6 +45,7 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
                            ULONG parts_out[4])
 {
     ULONG parts[4];
+    ULONG packed;
     LONG  n = 0;
     LONG  i;
 
@@ -114,37 +120,20 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
     if (*cp != '\0')
         return FALSE;
 
-    /* The trailing part absorbs the remaining bytes. The leading parts are
-       one byte each. */
-    switch (n)
+    /* The trailing part absorbs the bytes left by the leading byte-sized
+       parts: 32, 24, 16 or 8 bits for one through four components. n is in
+       1..4 here, so both shifts below are bounded by 24. */
+    if (parts[n - 1] > (0xFFFFFFFFUL >> ((n - 1) * 8)))
+        return FALSE;
+
+    packed = parts[n - 1];
+    for (i = 0; i < n - 1; i++)
     {
-        case 1:
-            *result = parts[0];
-            break;
-
-        case 2:
-            if (parts[0] > 0xff || parts[1] > 0xffffff)
-                return FALSE;
-            *result = (parts[0] << 24) | parts[1];
-            break;
-
-        case 3:
-            if (parts[0] > 0xff || parts[1] > 0xff || parts[2] > 0xffff)
-                return FALSE;
-            *result = (parts[0] << 24) | (parts[1] << 16) | parts[2];
-            break;
-
-        case 4:
-            if (parts[0] > 0xff || parts[1] > 0xff ||
-                parts[2] > 0xff || parts[3] > 0xff)
-                return FALSE;
-            *result = (parts[0] << 24) | (parts[1] << 16) |
-                      (parts[2] << 8)  |  parts[3];
-            break;
-
-        default:
+        if (parts[i] > 0xFFUL)
             return FALSE;
+        packed |= parts[i] << (24 - i * 8);
     }
+    *result = packed;
 
     if (nparts != NULL)
         *nparts = n;
@@ -219,41 +208,6 @@ static BOOL bsd_inet_pton4(const char *cp, ULONG *result)
     return TRUE;
 }
 
-/* Unsigned decimal, no libc. Returns the number of characters written. */
-static ULONG bsd_format_u8(char *dst, ULONG value)
-{
-    char  tmp[3];
-    ULONG n = 0, i;
-
-    do
-    {
-        tmp[n++] = (char)('0' + (value % 10));
-        value /= 10;
-    } while (value != 0 && n < sizeof(tmp));
-
-    for (i = 0; i < n; i++)
-        dst[i] = tmp[n - 1 - i];
-
-    return n;
-}
-
-static ULONG bsd_format_ip(char *dst, ULONG addr)
-{
-    ULONG len = 0;
-    LONG  i;
-
-    for (i = 3; i >= 0; i--)
-    {
-        len += bsd_format_u8(dst + len, (addr >> (i * 8)) & 0xff);
-        if (i > 0)
-            dst[len++] = '.';
-    }
-
-    dst[len] = '\0';
-
-    return len;
-}
-
 /* ---------------------------------------------------------------- vectors, */
 
 in_addr_t bsd_inet_addr(register STRPTR cp __asm("a0"),
@@ -323,7 +277,7 @@ in_addr_t bsd_inet_network(register STRPTR cp __asm("a0"),
 STRPTR bsd_Inet_NtoA(register in_addr_t ip __asm("d0"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    bsd_format_ip(SocketBase->sb_NtoABuf, BSD_NTOHL(ip));
+    (VOID)ami_format_ip4(SocketBase->sb_NtoABuf, BSD_NTOHL(ip));
 
     return (STRPTR)SocketBase->sb_NtoABuf;
 }
@@ -403,10 +357,7 @@ STRPTR bsd_inet_ntop(register LONG af      __asm("d0"),
         ULONG n;
 
         bsd_in6_to_words((const UBYTE *)src, words);
-        ami_config_format_ip6(words, text, sizeof(text));
-
-        for (n = 0; text[n] != '\0'; n++)
-            ;
+        n = ami_format_ip6(text, words);
 
         if (size <= (LONG)n)
         {
@@ -426,7 +377,7 @@ STRPTR bsd_inet_ntop(register LONG af      __asm("d0"),
         return NULL;
     }
 
-    len = bsd_format_ip(scratch, BSD_NTOHL(((struct in_addr *)src)->s_addr));
+    len = ami_format_ip4(scratch, BSD_NTOHL(((struct in_addr *)src)->s_addr));
 
     if (size <= (LONG)len)
     {

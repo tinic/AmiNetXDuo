@@ -410,6 +410,40 @@ static void h_case_rdnss_interfaces_own_independently(void)
 }
 
 
+static void h_case_dnssl_casefold_ownership(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    static const UCHAR lower[] = { 3, 'o', 'n', 'e', 4, 't', 'e', 's', 't', 0 };
+    static const UCHAR upper[] = { 3, 'O', 'N', 'E', 4, 'T', 'E', 'S', 'T', 0 };
+    static const UCHAR prefix[] = { 3, 'o', 'n', 'e', 0 };
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+    ami_ns_ra_dnssl(&pending, 0U, lower, sizeof(lower), 300UL, 1UL);
+    ami_ns_ra_dnssl(&pending, 0U, upper, sizeof(upper), 600UL, 2UL);
+    h_check(pending.dnssl_count[0] == 1U &&
+            pending.dnssl[0][0].lifetime == 600UL,
+            "a case-equivalent advertisement refreshes its existing owner");
+    ami_ns_ra_dnssl(&pending, 0U, prefix, sizeof(prefix), 300UL, 3UL);
+    ami_ns_ra_dnssl(&pending, 1U, upper, sizeof(upper), 600UL, 4UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 4UL) &&
+            snapshot.dnssl_count == 2U &&
+            strcmp(snapshot.dnssl[0], "one.test") == 0 &&
+            strcmp(snapshot.dnssl[1], "one") == 0,
+            "the union folds ASCII case but keeps a distinct prefix");
+    ami_ns_ra_dnssl(&pending, 0U, upper, sizeof(upper), 0UL, 5UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 5UL) &&
+            snapshot.dnssl_count == 2U &&
+            strcmp(snapshot.dnssl[0], "one") == 0 &&
+            strcmp(snapshot.dnssl[1], "ONE.TEST") == 0,
+            "case-equivalent withdrawal preserves the other interface owner");
+    ami_ns_ra_dnssl(&pending, 1U, lower, sizeof(lower), 0UL, 6UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 6UL) &&
+            snapshot.dnssl_count == 1U && strcmp(snapshot.dnssl[0], "one") == 0,
+            "last owner withdrawal preserves the distinct prefix");
+}
+
 int main(void)
 {
     h_case_rdnss_arrives_after_snapshot();
@@ -422,6 +456,7 @@ int main(void)
     h_case_dnssl_interfaces_own_independently();
     h_case_dnssl_lifetime_expires_and_refreshes();
     h_case_dnssl_expiry_preserves_other_interface();
+    h_case_dnssl_casefold_ownership();
 
     h_check(h_forbid_depth == 0, "all handoff critical sections are balanced");
     h_check(h_forbid_max == 1, "the handoff never nests its critical section");

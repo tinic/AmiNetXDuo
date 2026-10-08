@@ -3039,13 +3039,39 @@ APTR                p;
     (VOID)t_check((BOOL)(rc == -9),
                   "an IPv6 literal with AF_INET is EAI_ADDRFAMILY", rc);
 
-    /* gai_strerror takes its argument in a0. If that were wrong this would
-       return the wrong string, or garbage. */
-    p = bsd_gai_strerror(-2);
-    (VOID)t_check((BOOL)(p != NULL &&
-                         t_streq((const char *)p,
-                                 "name or service is not known")),
-                  "gai_strerror(EAI_NONAME), argument really is in a0", 0);
+    /* gai_strerror takes its argument in a0. Check all NDK codes plus
+       full-width unknown values which must not alias a narrowed index. */
+    {
+        static const char *const messages[] = {
+            "no error", "invalid value for ai_flags", "name or service is not known",
+            "temporary failure in name resolution", "non-recoverable failure in name resolution",
+            "no address associated with name", "ai_family not supported", "ai_socktype not supported",
+            "service not supported for ai_socktype", "address family for name not supported",
+            "memory allocation failure", "system error", "invalid value for hints",
+            "resolved protocol is unknown"
+        };
+        static const LONG unknown[] = { 1, -14, -32768L, 65534L, -65538L, 0x7FFFFFFFL };
+        APTR saved = bsd_gai_strerror(-2);
+        UWORD i;
+
+        for (i = 0; i < sizeof(messages) / sizeof(messages[0]); i++)
+        {
+            p = bsd_gai_strerror(-(LONG)i);
+            (VOID)t_check((BOOL)(p != NULL && t_streq((const char *)p, messages[i])),
+                          "gai_strerror exact NDK message, argument in a0", -(LONG)i);
+            (VOID)t_check((BOOL)(p == bsd_gai_strerror(-(LONG)i)),
+                          "gai_strerror pointer is stable across repeated calls", -(LONG)i);
+        }
+        for (i = 0; i < sizeof(unknown) / sizeof(unknown[0]); i++)
+        {
+            p = bsd_gai_strerror(unknown[i]);
+            (VOID)t_check((BOOL)(p != NULL && t_streq((const char *)p, "unknown error")),
+                          "gai_strerror unknown full-width code", unknown[i]);
+        }
+        (VOID)t_check((BOOL)(saved == bsd_gai_strerror(-2) &&
+                             t_streq((const char *)saved, "name or service is not known")),
+                      "gai_strerror saved pointer survives other lookups", 0);
+    }
 
     {
         struct t_sockaddr_in6 sa;

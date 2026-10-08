@@ -14,6 +14,31 @@
 #include <exec/libraries.h>
 #include <utility/tagitem.h>
 
+/* Scalar query tags, NDK 3.2 netinclude/libraries/bsdsocket.h:507-623.
+   QueryInterfaceTagList leaves unavailable and unsupported values untouched. */
+#define IFQ_BASE (TAG_USER + 1900)
+#define IFQ_DeviceUnit                 (IFQ_BASE + 2)
+#define IFQ_HardwareAddressSize        (IFQ_BASE + 3)
+#define IFQ_HardwareType               (IFQ_BASE + 7)
+#define IFQ_BPS                        (IFQ_BASE + 6)
+#define IFQ_MTU                        (IFQ_BASE + 5)
+#define IFQ_HardwareMTU                (IFQ_BASE + 34)
+#define IFQ_PacketsReceived            (IFQ_BASE + 8)
+#define IFQ_PacketsSent                (IFQ_BASE + 9)
+#define IFQ_BadData                    (IFQ_BASE + 10)
+#define IFQ_Overruns                   (IFQ_BASE + 11)
+#define IFQ_UnknownTypes               (IFQ_BASE + 12)
+#define IFQ_InputErrors                (IFQ_BASE + 38)
+#define IFQ_OutputErrors               (IFQ_BASE + 37)
+#define IFQ_InputDrops                 (IFQ_BASE + 36)
+#define IFQ_IPDrops                    (IFQ_BASE + 41)
+#define IFQ_ARPDrops                   (IFQ_BASE + 42)
+#define IFQ_NumReadRequests            (IFQ_BASE + 24)
+#define IFQ_NumReadRequestsPending     (IFQ_BASE + 32)
+#define IFQ_NumWriteRequests           (IFQ_BASE + 26)
+#define IFQ_NumWriteRequestsPending    (IFQ_BASE + 33)
+#define IFQ_AddressBindType            (IFQ_BASE + 20)
+
 /*
  * The routing API's five tags, the whole of its vocabulary.  NDK 3.2
  * SANA+RoadshowTCP-IP/netinclude/libraries/bsdsocket.h:358-371; the meanings

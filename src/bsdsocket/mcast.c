@@ -122,8 +122,8 @@ static BsdMcastEntry *bsd_mcast_free_row(VOID)
     return NULL;
 }
 
-static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
-                           const struct ip_mreq *mreq)
+static LONG bsd_mcast_update(struct AmiSocketBase *base, AmiSocket *sock,
+                           const struct ip_mreq *mreq, BOOL join)
 {
     NX_IP         *ip = bsd_stack_ip(base);
     BsdMcastEntry *row;
@@ -148,7 +148,21 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EADDRNOTAVAIL);
     }
 
-    if (bsd_mcast_find(sock, group, (UINT)iface) != NULL)
+    row = bsd_mcast_find(sock, group, (UINT)iface);
+    if (!join)
+    {
+        if (row == NULL)
+        {
+            bsd_nx_leave(base);
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
+        }
+        AMI_NX_CLEANUP(nx_igmp_multicast_interface_leave(ip, group, (UINT)iface));
+        row->bm_Sock = NULL;
+        bsd_nx_leave(base);
+        return 0;
+    }
+
+    if (row != NULL)
     {
         bsd_nx_leave(base);
         return bsd_fail(base, AMI_EADDRINUSE);
@@ -184,46 +198,6 @@ static LONG bsd_mcast_join(struct AmiSocketBase *base, AmiSocket *sock,
                                   ? AMI_ENOBUFS
                                   : bsd_errno_from_nx(status));
     }
-
-    return 0;
-}
-
-static LONG bsd_mcast_leave(struct AmiSocketBase *base, AmiSocket *sock,
-                            const struct ip_mreq *mreq)
-{
-    NX_IP         *ip = bsd_stack_ip(base);
-    BsdMcastEntry *row;
-    ULONG          group;
-    LONG           iface;
-
-    if (ip == NULL)
-        return bsd_fail(base, AMI_ENETDOWN);
-
-    group = BSD_NTOHL(mreq->imr_multiaddr.s_addr);
-    if (!bsd_mcast_is_group(group))
-        return bsd_fail(base, AMI_EINVAL);
-
-    if (bsd_nx_enter(base) != 0)
-        return bsd_fail(base, AMI_ENETDOWN);
-
-    iface = bsd_mcast_iface_of(ip, BSD_NTOHL(mreq->imr_interface.s_addr));
-    if (iface < 0)
-    {
-        bsd_nx_leave(base);
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-    }
-
-    row = bsd_mcast_find(sock, group, (UINT)iface);
-    if (row == NULL)
-    {
-        bsd_nx_leave(base);
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-    }
-
-    AMI_NX_CLEANUP(nx_igmp_multicast_interface_leave(ip, group, (UINT)iface));
-    row->bm_Sock = NULL;
-
-    bsd_nx_leave(base);
 
     return 0;
 }
@@ -407,9 +381,8 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                ULONG loads the rest of this file does on it. */
             bsd_bcopy(optval, &mreq, sizeof mreq);
 
-            return (optname == IP_ADD_MEMBERSHIP)
-                       ? bsd_mcast_join(base, sock, &mreq)
-                       : bsd_mcast_leave(base, sock, &mreq);
+            return bsd_mcast_update(base, sock, &mreq,
+                                    optname == IP_ADD_MEMBERSHIP);
         }
 
         case IP_MULTICAST_IF:
@@ -658,8 +631,8 @@ static BsdMcast6Entry *bsd_mcast6_free_row(VOID)
     return NULL;
 }
 
-static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
-                            const struct ipv6_mreq *mreq)
+static LONG bsd_mcast6_update(struct AmiSocketBase *base, AmiSocket *sock,
+                            const struct ipv6_mreq *mreq, BOOL join)
 {
     NX_IP          *ip = bsd_stack_ip(base);
     BsdMcast6Entry *row;
@@ -686,7 +659,21 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EADDRNOTAVAIL);
     }
 
-    if (bsd_mcast6_find(sock, group.nxd_ip_address.v6, (UINT)iface) != NULL)
+    row = bsd_mcast6_find(sock, group.nxd_ip_address.v6, (UINT)iface);
+    if (!join)
+    {
+        if (row == NULL)
+        {
+            bsd_nx_leave(base);
+            return bsd_fail(base, AMI_EADDRNOTAVAIL);
+        }
+        AMI_NX_CLEANUP(nxd_ipv6_multicast_interface_leave(ip, &group, (UINT)iface));
+        row->bm_Sock = NULL;
+        bsd_nx_leave(base);
+        return 0;
+    }
+
+    if (row != NULL)
     {
         bsd_nx_leave(base);
         return bsd_fail(base, AMI_EADDRINUSE);
@@ -699,7 +686,7 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
-    /* Claim the row inside the bracket, see bsd_mcast_join(). */
+    /* Claim the row inside the bracket, see bsd_mcast_update(). */
     row->bm_Sock = sock;
     row->bm_Group[0] = group.nxd_ip_address.v6[0];
     row->bm_Group[1] = group.nxd_ip_address.v6[1];
@@ -725,48 +712,6 @@ static LONG bsd_mcast6_join(struct AmiSocketBase *base, AmiSocket *sock,
                                   ? AMI_ENOBUFS
                                   : bsd_errno_from_nx(status));
     }
-
-    return 0;
-}
-
-static LONG bsd_mcast6_leave(struct AmiSocketBase *base, AmiSocket *sock,
-                             const struct ipv6_mreq *mreq)
-{
-    NX_IP          *ip = bsd_stack_ip(base);
-    BsdMcast6Entry *row;
-    NXD_ADDRESS     group;
-    LONG            iface;
-
-    if (ip == NULL)
-        return bsd_fail(base, AMI_ENETDOWN);
-
-    group.nxd_ip_version = NX_IP_VERSION_V6;
-    bsd_in6_to_words(mreq->ipv6mr_multiaddr.s6_addr, group.nxd_ip_address.v6);
-
-    if (!bsd_mcast6_is_group(group.nxd_ip_address.v6))
-        return bsd_fail(base, AMI_EINVAL);
-
-    if (bsd_nx_enter(base) != 0)
-        return bsd_fail(base, AMI_ENETDOWN);
-
-    iface = bsd_mcast6_iface_of(ip, mreq->ipv6mr_interface);
-    if (iface < 0)
-    {
-        bsd_nx_leave(base);
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-    }
-
-    row = bsd_mcast6_find(sock, group.nxd_ip_address.v6, (UINT)iface);
-    if (row == NULL)
-    {
-        bsd_nx_leave(base);
-        return bsd_fail(base, AMI_EADDRNOTAVAIL);
-    }
-
-    AMI_NX_CLEANUP(nxd_ipv6_multicast_interface_leave(ip, &group, (UINT)iface));
-    row->bm_Sock = NULL;
-
-    bsd_nx_leave(base);
 
     return 0;
 }
@@ -893,32 +838,6 @@ static LONG bsd_mcast6_get_int(struct AmiSocketBase *base, APTR optval,
     return 0;
 }
 
-static LONG bsd_mcast6_put_int(struct AmiSocketBase *base, APTR optval,
-                               socklen_t *optlen, LONG value)
-{
-    if (optval == NULL || optlen == NULL)
-        return bsd_fail(base, AMI_EFAULT);
-
-    if (*optlen >= (socklen_t)sizeof(LONG))
-    {
-        bsd_bcopy(&value, optval, sizeof(value));
-        *optlen = (socklen_t)sizeof(LONG);
-    }
-    else if (*optlen >= (socklen_t)sizeof(WORD))
-    {
-        WORD short_value = (WORD)value;
-
-        bsd_bcopy(&short_value, optval, sizeof(short_value));
-        *optlen = (socklen_t)sizeof(WORD);
-    }
-    else
-    {
-        return bsd_fail(base, AMI_EINVAL);
-    }
-
-    return 0;
-}
-
 LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                        LONG optname, APTR optval, socklen_t optlen)
 {
@@ -944,8 +863,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                ULONG load of ipv6mr_interface. */
             bsd_bcopy(optval, &mreq, sizeof mreq);
 
-            return join ? bsd_mcast6_join(base, sock, &mreq)
-                        : bsd_mcast6_leave(base, sock, &mreq);
+            return bsd_mcast6_update(base, sock, &mreq, join);
         }
 
         case AMI_IPV6_MULTICAST_IF_BSD:
@@ -1025,7 +943,7 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
             iface = bsd_mcast_preference(&sock->as_Mcast6If,
                                           sock->as_Mcast6IfEpoch);
             bsd_nx_leave(base);
-            return bsd_mcast6_put_int(base, optval, optlen,
+            return bsd_opt_get_long(base, optval, optlen,
                                       (iface < 0)
                                           ? 0
                                           : iface + 1);
@@ -1033,12 +951,12 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
 
         case AMI_IPV6_MULTICAST_HOPS_BSD:
         case AMI_IPV6_MULTICAST_HOPS_LINUX:
-            return bsd_mcast6_put_int(base, optval, optlen,
+            return bsd_opt_get_long(base, optval, optlen,
                                       sock->as_Mcast6Hops);
 
         case AMI_IPV6_MULTICAST_LOOP_BSD:
         case AMI_IPV6_MULTICAST_LOOP_LINUX:
-            return bsd_mcast6_put_int(base, optval, optlen, 0);
+            return bsd_opt_get_long(base, optval, optlen, 0);
 
         /* Set-only, as the IPv4 pair are. */
         case AMI_IPV6_JOIN_GROUP_BSD:

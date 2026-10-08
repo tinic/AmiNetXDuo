@@ -33,11 +33,12 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count)
         switch (BPF_CLASS(code))
         {
         case BPF_LD:
+        case BPF_LDX:
             switch (BPF_MODE(code))
             {
             case BPF_ABS:
             case BPF_IND:
-                if (ami_bpf_size_bytes(code) == 0)
+                if (BPF_CLASS(code) != BPF_LD || ami_bpf_size_bytes(code) == 0)
                     return -1;
                 break;
 
@@ -48,36 +49,13 @@ LONG ami_bpf_validate(const struct bpf_insn *insns, ULONG count)
                 break;
 
             case BPF_MEM:
-                if (BPF_SIZE(code) != BPF_W)
-                    return -1;
-                if (k >= (ULONG)BPF_MEMWORDS)
-                    return -1;
-                break;
-
-            default:
-                return -1;
-            }
-            break;
-
-        case BPF_LDX:
-            switch (BPF_MODE(code))
-            {
-            case BPF_IMM:
-            case BPF_LEN:
-                if (BPF_SIZE(code) != BPF_W)
-                    return -1;
-                break;
-
-            case BPF_MEM:
-                if (BPF_SIZE(code) != BPF_W)
-                    return -1;
-                if (k >= (ULONG)BPF_MEMWORDS)
+                if (BPF_SIZE(code) != BPF_W || k >= (ULONG)BPF_MEMWORDS)
                     return -1;
                 break;
 
             case BPF_MSH:
-                /* Only ever the byte form: X = (p[k] & 0xf) << 2. */
-                if (BPF_SIZE(code) != BPF_B)
+                /* Only ever LDX byte form: X = (p[k] & 0xf) << 2. */
+                if (BPF_CLASS(code) != BPF_LDX || BPF_SIZE(code) != BPF_B)
                     return -1;
                 break;
 

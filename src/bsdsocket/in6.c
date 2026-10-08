@@ -165,6 +165,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
 {
     LONG value = 0;
     LONG owned;
+    BOOL hops;
 
     if ((sock->as_Flags & ASF_INET6) == 0)
         return bsd_fail(base, AMI_ENOPROTOOPT);
@@ -218,36 +219,18 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         return 0;
     }
 
-    if (bsd_hops_option(sock, optname))
+    hops = bsd_hops_option(sock, optname);
+    if (hops || bsd_tclass_option(sock, optname))
     {
-        /*
-         * The IPv6 hop limit is the IPv4 TTL under another name, and NetX Duo
-         * stores one per socket.  IP_TTL and IPV6_UNICAST_HOPS are therefore
-         */
+        /* IPv6 hops and traffic class share the IPv4 TTL/TOS fields. Both
+           accept -1..255, then apply through the same NetX bracket. */
         if (value < -1 || value > 255)
             return bsd_fail(base, AMI_EINVAL);
 
-        sock->as_Ttl = (value < 0) ? (LONG)NX_IP_TIME_TO_LIVE : value;
-
-        if (bsd_nx_enter(base) != 0)
-            return bsd_fail(base, AMI_ENETDOWN);
-        bsd_opt_apply_ip(sock);
-        bsd_nx_leave(base);
-
-        return 0;
-    }
-
-    if (bsd_tclass_option(sock, optname))
-    {
-        /*
-         * RFC 2474 renamed the IPv4 TOS octet and the IPv6 traffic class
-         * octet to the same DS field, and NetX Duo's raw send takes one tos
-         * argument for both.  IP_TOS and IPV6_TCLASS are therefore the same
-         */
-        if (value < -1 || value > 255)
-            return bsd_fail(base, AMI_EINVAL);
-
-        sock->as_Tos = (value < 0) ? 0 : value;
+        if (hops)
+            sock->as_Ttl = (value < 0) ? (LONG)NX_IP_TIME_TO_LIVE : value;
+        else
+            sock->as_Tos = (value < 0) ? 0 : value;
 
         if (bsd_nx_enter(base) != 0)
             return bsd_fail(base, AMI_ENETDOWN);
@@ -294,22 +277,5 @@ LONG bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     else
         return bsd_fail(base, AMI_ENOPROTOOPT);
 
-    if (*optlen >= (socklen_t)sizeof(LONG))
-    {
-        bsd_bcopy(&value, optval, sizeof(value));
-        *optlen = (socklen_t)sizeof(LONG);
-    }
-    else if (*optlen >= (socklen_t)sizeof(WORD))
-    {
-        WORD short_value = (WORD)value;
-
-        bsd_bcopy(&short_value, optval, sizeof(short_value));
-        *optlen = (socklen_t)sizeof(WORD);
-    }
-    else
-    {
-        return bsd_fail(base, AMI_EINVAL);
-    }
-
-    return 0;
+    return bsd_opt_get_long(base, optval, optlen, value);
 }

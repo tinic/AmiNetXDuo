@@ -165,10 +165,19 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
     h_note("tx_reap");
 }
 
+static BOOL h_refresh_updates;
+
 VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 {
-    (VOID)iface;
     h_note("refresh");
+    if (h_refresh_updates)
+    {
+        iface->stats.packets_received = 149;
+        iface->stats.bad_data = 7;
+        iface->stats.overruns = 11;
+        iface->stats.tx_errors = 13;
+        iface->stats.rx_errors = 17;
+    }
 }
 
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD type,
@@ -280,6 +289,7 @@ static void fixture_init(UWORD addr_bytes)
     h_sends            = 0;
     h_releases         = 0;
     h_mapping_calls    = 0;
+    h_refresh_updates  = FALSE;
 #ifdef AMINETXDUO_RX_VERIFY
     h_caps_calls       = 0;
     h_caps_set         = 0;
@@ -443,6 +453,65 @@ static void test_reattach_updates_existing_binding(void)
 
     ami_sana2_unbind(&iface);
     ami_sana2_unbind(&blocker);
+}
+
+static void test_binding_capacity(void)
+{
+    static AmiSana2If holders[AMI_CFG_MAX_ATTACHED];
+    NX_IP new_ip;
+    UWORD i;
+    ULONG ret;
+
+    printf("sana2: a full table permits replacement, refuses new bindings\n");
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    memset(holders, 0, sizeof(holders));
+    memset(&new_ip, 0, sizeof(new_ip));
+    h_check(ami_sana2_bound_count() == 0, "binding table starts empty");
+    h_check(ami_sana2_attach(NULL, &ip, 0) == AMI_NET_ERR_STATE,
+            "NULL interface is refused");
+    h_check(ami_sana2_attach(&iface, NULL, 0) == AMI_NET_ERR_STATE,
+            "NULL IP is refused");
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+        h_check(ami_sana2_attach(&holders[i], &ip, (UINT)i) == AMI_NET_OK,
+                "each available slot accepts a binding");
+    h_check(ami_sana2_bound_count() == AMI_CFG_MAX_ATTACHED,
+            "table count reaches capacity");
+
+    iface.ip = &ip;
+    iface.index = 77;
+    h_check(ami_sana2_attach(&iface, &new_ip, 78) == AMI_NET_ERR_STATE,
+            "a new binding is refused at capacity");
+    h_check(iface.ip == &ip && iface.index == 77,
+            "refusal leaves the interface's IP and index intact");
+    h_check(h_forbid_nest == 0, "capacity refusal balances Forbid");
+
+    holders[AMI_CFG_MAX_ATTACHED - 1].bps = 54321;
+    h_check(ami_sana2_attach(&holders[AMI_CFG_MAX_ATTACHED - 1], &new_ip, 0)
+                == AMI_NET_OK,
+            "last existing binding can be replaced in a full table");
+    h_check(ami_sana2_bound_count() == AMI_CFG_MAX_ATTACHED,
+            "replacement creates no duplicate binding");
+    ret = 0xDEADBEEFUL;
+    memset(&req, 0, sizeof(req));
+    req.nx_ip_driver_command = NX_LINK_GET_SPEED;
+    req.nx_ip_driver_ptr = &new_ip;
+    req.nx_ip_driver_interface = &interface_obj;
+    req.nx_ip_driver_return_ptr = &ret;
+    ami_sana2_driver_entry(&req);
+    h_check(ret == 54321 && req.nx_ip_driver_status == NX_SUCCESS,
+            "replacement is published under the new IP and index");
+
+    ami_sana2_unbind(&holders[0]);
+    h_check(ami_sana2_attach(&iface, &ip, 77) == AMI_NET_OK,
+            "a freed slot accepts the previously refused binding");
+    h_check(ami_sana2_bound_count() == AMI_CFG_MAX_ATTACHED,
+            "refilling restores the exact count");
+    ami_sana2_unbind(&iface);
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+        ami_sana2_unbind(&holders[i]);
+    memset(holders, 0, sizeof(holders));
+    h_check(ami_sana2_bound_count() == 0 && h_forbid_nest == 0,
+            "cleanup removes every binding and balances Forbid");
 }
 
 static void test_unbound_send_releases_the_packet(void)
@@ -934,6 +1003,21 @@ static void test_counters(void)
             "the error count is every kind of error");
     h_check(strcmp(h_log, "refresh ") == 0, "after a refresh");
 
+    h_refresh_updates = TRUE;
+    h_log[0] = '\0';
+    h_check(drive(NX_LINK_GET_RX_COUNT) == 149,
+            "receive count reflects the completed refresh");
+    h_check(strcmp(h_log, "refresh ") == 0, "receive query refreshes once");
+    iface.stats.bad_data = 1;
+    iface.stats.overruns = 2;
+    iface.stats.tx_errors = 4;
+    iface.stats.rx_errors = 8;
+    h_log[0] = '\0';
+    h_check(drive(NX_LINK_GET_ERROR_COUNT) == 7 + 11 + 13 + 17,
+            "error sum reflects the completed refresh");
+    h_check(strcmp(h_log, "refresh ") == 0, "error query refreshes once");
+    h_refresh_updates = FALSE;
+
     h_log[0] = '\0';
     h_check(drive(NX_LINK_GET_ALLOC_ERRORS) == 3,
             "allocation failures are ours, so no refresh");
@@ -1028,6 +1112,7 @@ int main(void)
     test_lookup_and_memoise();
     test_lookup_discriminates();
     test_reattach_updates_existing_binding();
+    test_binding_capacity();
     test_unbound_send_releases_the_packet();
     test_unbound_without_a_packet();
     test_unbound_control_ignores_stale_packet();

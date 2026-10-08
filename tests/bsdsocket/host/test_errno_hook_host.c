@@ -781,6 +781,85 @@ static VOID t_capability_probes(VOID)
           "SBTC_HAVE_SERVER_API stays FALSE");
 }
 
+/* Error text is static caller-visible storage. Test every existing mapping,
+ * sparse/negative/wide unknown codes and pointer lifetime, independently of
+ * the pointer-carrying tags that need a 32-bit host or the native ABI. */
+static VOID t_error_strings(VOID)
+{
+    static const struct {
+        LONG code;
+        const char *text;
+    } expected[] = {
+        { 0, "No error" },
+        { AMI_EPERM, "Operation not permitted" },
+        { AMI_ENOENT, "No such file or directory" },
+        { AMI_EINTR, "Interrupted system call" },
+        { AMI_EIO, "Input/output error" },
+        { AMI_ENXIO, "Device not configured" },
+        { AMI_EBADF, "Bad file descriptor" },
+        { AMI_ENOMEM, "Cannot allocate memory" },
+        { AMI_EACCES, "Permission denied" },
+        { AMI_EFAULT, "Bad address" },
+        { AMI_EBUSY, "Device busy" },
+        { AMI_EEXIST, "File exists" },
+        { AMI_EINVAL, "Invalid argument" },
+        { AMI_ENFILE, "Too many open files in system" },
+        { AMI_EMFILE, "Too many open files" },
+        { AMI_EPIPE, "Broken pipe" },
+        { AMI_EWOULDBLOCK, "Operation would block" },
+        { AMI_EINPROGRESS, "Operation now in progress" },
+        { AMI_EALREADY, "Operation already in progress" },
+        { AMI_ENOTSOCK, "Socket operation on non-socket" },
+        { AMI_EDESTADDRREQ, "Destination address required" },
+        { AMI_EMSGSIZE, "Message too long" },
+        { AMI_EPROTOTYPE, "Protocol wrong type for socket" },
+        { AMI_ENOPROTOOPT, "Protocol not available" },
+        { AMI_EPROTONOSUPPORT, "Protocol not supported" },
+        { AMI_ESOCKTNOSUPPORT, "Socket type not supported" },
+        { AMI_EOPNOTSUPP, "Operation not supported" },
+        { AMI_EPFNOSUPPORT, "Protocol family not supported" },
+        { AMI_EAFNOSUPPORT, "Address family not supported" },
+        { AMI_EADDRINUSE, "Address already in use" },
+        { AMI_EADDRNOTAVAIL, "Can't assign requested address" },
+        { AMI_ENETDOWN, "Network is down" },
+        { AMI_ENETUNREACH, "Network is unreachable" },
+        { AMI_ENETRESET, "Network dropped connection" },
+        { AMI_ECONNABORTED, "Software caused connection abort" },
+        { AMI_ECONNRESET, "Connection reset by peer" },
+        { AMI_ENOBUFS, "No buffer space available" },
+        { AMI_EISCONN, "Socket is already connected" },
+        { AMI_ENOTCONN, "Socket is not connected" },
+        { AMI_ESHUTDOWN, "Can't send after socket shutdown" },
+        { AMI_ETOOMANYREFS, "Too many references" },
+        { AMI_ETIMEDOUT, "Operation timed out" },
+        { AMI_ECONNREFUSED, "Connection refused" },
+        { AMI_ENAMETOOLONG, "File name too long" },
+        { AMI_EHOSTDOWN, "Host is down" },
+        { AMI_EHOSTUNREACH, "No route to host" },
+        { AMI_ENOSYS, "Function not implemented" },
+    };
+    static const LONG unknown[] = { -1, -32768, 3, 65536, 65536 + AMI_EINVAL,
+                                   0x7FFFFFFFL };
+    ULONG i;
+    const char *saved = bsd_errno_string(AMI_EINVAL);
+
+    for (i = 0; i < sizeof(expected) / sizeof(expected[0]); i++)
+    {
+        const char *text = bsd_errno_string(expected[i].code);
+
+        CHECK(text != NULL && strcmp(text, expected[i].text) == 0,
+              "published errno text is unchanged and terminated");
+        CHECK(text == bsd_errno_string(expected[i].code),
+              "repeated lookup returns stable caller-visible storage");
+    }
+    for (i = 0; i < sizeof(unknown) / sizeof(unknown[0]); i++)
+        CHECK(strcmp(bsd_errno_string(unknown[i]), "Unknown error") == 0,
+              "unknown codes do not alias through UWORD truncation");
+    CHECK(strcmp(saved, "Invalid argument") == 0 &&
+          saved == bsd_errno_string(AMI_EINVAL),
+          "later lookups do not overwrite an earlier error string");
+}
+
 int main(void)
 {
 #if AMINETXDUO_NXCACHE
@@ -801,6 +880,7 @@ int main(void)
     t_uninstall_during_flush();
     t_replace_during_flush();
     t_capability_probes();
+    t_error_strings();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 
