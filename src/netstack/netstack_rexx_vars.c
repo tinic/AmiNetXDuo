@@ -268,11 +268,11 @@ static BOOL ami_rx_put_hex(AmiRxReply *r, ULONG value, UWORD width)
     if (r->rr_Used + (LONG)width > r->rr_Length)
         return FALSE;
 
-    for (i = 0; i < width; i++)
+    i = width;
+    while (i != 0)
     {
-        UWORD shift = (UWORD)((width - 1 - i) * 4);
-
-        r->rr_Buffer[r->rr_Used + i] = hex[(value >> shift) & 0xF];
+        r->rr_Buffer[r->rr_Used + --i] = hex[value & 0xF];
+        value >>= 4;
     }
 
     r->rr_Used += (LONG)width;

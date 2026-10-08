@@ -317,12 +317,14 @@ if awk '
                 width = (j == 3 || j == 5) ? 8 : ((j == 7) ? 1 : 4)
                 if (length(field[i+j]) != width || field[i+j] !~ /^[0-9a-f]+$/) exit 1
             }
+            # The nc listener above owns TCP port 7099 (hex 1bbb).
+            if (field[i] == "t" && field[i+4] == "1bbb") listener = 1
         }
         found = 1
     }
-    END { if (!found) exit 1 }
+    END { if (!found || !listener) exit 1 }
 ' "$SCRIPTOUT"; then
-    note "PASS: CONNECTIONS preserves all field widths, order and hex spelling"
+    note "PASS: CONNECTIONS preserves field widths, hex spelling and listener port"
 else
     note "FAIL: CONNECTIONS is empty or has a malformed fixed-width record"
     fails=$((fails + 1))
