@@ -9,23 +9,23 @@ Which asset is pinned, and its expected hash, is recorded in
 
 | | |
 |---|---|
-| GCC | 16.2.0b (C/C++/ObjC), bebbo `amiga16.2` |
-| binutils | 2.39.0, bebbo `amiga-2.39.0` |
+| GCC | 16.2.0b (C/C++/ObjC), tinic/gcc `399a27ad` (bebbo `amiga16.2` `134541b3` + sibcall and visibility fixes) |
+| binutils | 2.46, bebbo `amiga-2.46` + `tools/patches/binutils-2.46/` |
 | NDK | 3.9 (`INCLUDE_VERSION` 45) + Roadshow bsdsocket/SANA-II headers |
 | Also | libnix, libgcc, libpthread, vasm, sfdc, fd2sfd, fd2pragma, gprof |
 | Prefix | `opt/m68k-amigaos/` |
 
 | Asset | Host | Size | SHA-256 |
 |---|---|---|---|
-| `m68k-amigaos-gcc-16.2.0-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 37,638,120 | `eabb6789378f954f487a3db3dd2648b52b3932cc6fc69a858f105bb3b6761462` |
-| `m68k-amigaos-gcc-16.2.0-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,489,512 | `0549bac96463155a8f46fff3e4f7d54a1f6a473652317fd11fcc99f6652b24d1` |
+| `m68k-amigaos-gcc-16.2.5-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 38,153,828 | `d135e713133934aa0eb278c833de5b817fad0a272ec609a4083249eb7433bc45` |
+| `m68k-amigaos-gcc-16.2.5-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 33,057,872 | `f671ab36a56a530176a88f7d91cca188373ba24622aa98d92ccba5113823cc4e` |
 
 **Not covered:** macOS x86-64 and Linux aarch64. There is no asset for either;
 `tools/build-toolchain.sh` builds on both.
 
 ```sh
-sha256sum m68k-amigaos-gcc-16.2.0-ndk3.9-linux-x86_64.tar.xz
-tar xJf   m68k-amigaos-gcc-16.2.0-ndk3.9-linux-x86_64.tar.xz
+sha256sum m68k-amigaos-gcc-16.2.5-ndk3.9-linux-x86_64.tar.xz
+tar xJf   m68k-amigaos-gcc-16.2.5-ndk3.9-linux-x86_64.tar.xz
 # -> opt/m68k-amigaos/bin/m68k-amigaos-gcc
 ```
 
@@ -36,13 +36,15 @@ The earlier `toolchain-m68k-amigaos-gcc-15.2.0` release remains published. It is
 Linux-only and was repackaged from an AmigaPorts image layer rather than built
 here; its own notes describe it.
 
-## Why binutils 2.39 and not 2.46
+## binutils 2.46
 
-2.46 cannot assemble GCC 16.2's own output: it forces the MIT-syntax
-pseudo-branches (`jne`, `jeq`, ...) to a byte displacement and then rejects
-thousands of them as operand mismatches. It fails a second way too — its `size`
-does not recognise the format of some objects, which costs three targets their
-strip step. Under 2.39 the whole tree builds with no fallbacks.
+From asset series 16.2.4 binutils is bebbo's `amiga-2.46` at the commit below,
+with the three diffs in `tools/patches/binutils-2.46/`: one keeps
+`HUNK_RELOC32` through `strip`, one restores the archive symbol index for slim
+LTO members, and one (a backport of bebbo `6fa839d0`) stops `ar` dividing by
+zero when it indexes a C++ COMDAT object. With them, the tree builds at `-DAMINETXDUO_LTO=ON` and
+the four shipped images are byte-identical to the 2.39 build. Series up to
+16.2.3 used 2.39.0 (`ab4e5183f56fd83165356a03c890bf0b681d7535`).
 
 ## How these were built
 
@@ -51,8 +53,9 @@ commit rather than a branch, because bebbo's branches move.
 
 ```
 build driver   https://codeberg.org/bebbo/amiga-gcc            86f8ba62f7a5035e309600c86962681e1cbacccb
-binutils/GDB   https://franke.ms/git/bebbo/binutils-gdb        ab4e5183f56fd83165356a03c890bf0b681d7535   (amiga-2.39.0)
-GCC            https://franke.ms/git/bebbo/gcc                 6f4ca1b48cd0edef7d2ee8da1bf161124f685182   (amiga16.2)
+binutils/GDB   https://franke.ms/git/bebbo/binutils-gdb        a50544a917284847c99e97d41c69ece9d5cb2fef   (amiga-2.46)
+GCC            https://github.com/tinic/gcc                    399a27ad06e3e978774af5c556bcf66d81ba799f   (backport/sibcall-a0-134541b)
+newlib         https://franke.ms/git/bebbo/newlib-cygwin       0909ae9abc18b38595425143e7a63d9e2fc31174
 libnix         https://franke.ms/git/bebbo/libnix              b7268e35510b8b7b4ccdad67fbcbb25e73189aef
 sfdc           https://franke.ms/git/bebbo/sfdc                5d4efca359e949547553463f5873778bd85e5506
 fd2sfd         https://franke.ms/git/bebbo/fd2sfd              7f14d7f15aac2b8426f577f838069e53bf6008ea
@@ -64,14 +67,15 @@ NDK 3.9        http://hp.alinea-computer.de/AmigaOS/NDK39.lha  sha256 ca5d8f9231
 ```
 
 bebbo's GitHub repositories are gone. Codeberg and his own franke.ms Gitea are
-what survive, and they are not interchangeable:
-`codeberg.org/bebbo/binutils-gdb` does not carry the `amiga-2.39.0` branch, so
-franke.ms is the only remote serving that commit. Each line above is the remote
+what survive, and they are not interchangeable. Each line above is the remote
 verified to serve its pin.
 
-No compiler or binutils source was edited. The build script's only edit to any
-of those trees is one line in amiga-gcc's own Makefile, adding
-`--with-system-zlib` to the binutils configure line. The rest is carried as
+GCC carries two commits on top of bebbo's tree on tinic/gcc: the sibcall/a0
+fix and the LTO visibility-warning fix. binutils carries the three diffs in
+`tools/patches/binutils-2.46/`; newlib and aros-stuff carry the diffs under
+`tools/patches/newlib/` and `tools/patches/aros-stuff/`. amiga-gcc's own
+Makefile gets `--with-system-zlib`, `--disable-gdb --disable-sim` and
+`--enable-plugins` on the binutils configure line. The rest is carried as
 configure and compiler flags:
 
 * binutils 2.39's `objdump.c:4196` assigns `dummy_fprintf` to

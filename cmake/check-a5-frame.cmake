@@ -170,12 +170,18 @@ foreach(line IN LISTS dis_lines)
     endif()
     # Destination = the operand after the last comma outside parentheses.
     string(REGEX REPLACE "\\([^)]*\\)" "" flat "${ops_n}")
-    string(REGEX REPLACE "@[^,]*" "" flat "${flat}")
     if(NOT flat MATCHES ",")
         continue()
     endif()
     string(REGEX REPLACE "^.*,[ \t]*" "" dest "${flat}")
     string(STRIP "${dest}" dest)
+    # MIT `a5@`, `a5@(d)` and `a5@(d,ix)` are stores through a5, not writes
+    # to it; with the parentheses gone they all end in `@`.  Only the
+    # auto-modify forms `a5@-` and `a5@+` change the register.
+    if(dest MATCHES "@$")
+        continue()
+    endif()
+    string(REGEX REPLACE "@.*$" "" dest "${dest}")
     _a5_in("${dest}" hit)
     if(hit)
         # A restore from the stack (movem/move (sp)+) puts the frame back.

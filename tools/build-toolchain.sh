@@ -8,15 +8,15 @@
 #   tools/build-toolchain.sh --fetch-only        # just clone the sources
 #   tools/build-toolchain.sh --print-pins        # what this would build
 #
-# GCC 16.2.0b + binutils 2.39.0 + NDK 3.9, PINNED BY COMMIT, not by branch.
-# The binutils pairing is deliberate.  2.46 works: with the two diffs in
-# tools/patches/binutils-2.46/ it builds this tree at -DAMINETXDUO_LTO=ON and
-# emits the four shipped images BYTE FOR BYTE as 2.39 does.  That is the whole
-# reason the pin stays where it is -- identical output is no reason to
-# republish a prebuilt toolchain tools/fetch-toolchain.sh pins by sha256 on two
-# platforms.  Moving it is the one PINS line below; the patch set it selects is
-# already written.  Each entry records the remote verified to serve its pin:
-# bebbo's GitHub repos are gone and Codeberg does not carry every branch.
+# GCC 16.2.0b + binutils 2.46 + NDK 3.9, PINNED BY COMMIT, not by branch.
+# binutils is bebbo's amiga-2.46 at the commit the three diffs in
+# tools/patches/binutils-2.46/ are written against; the branch tip has moved
+# on and those diffs no longer apply to it.  With them this tree builds at
+# -DAMINETXDUO_LTO=ON and emits the four shipped images byte for byte as the
+# earlier 2.39 pin did.  Moving the pin back is the one PINS line below:
+# tools/patches/binutils/ still holds the 2.39 set.  Each entry records the
+# remote verified to serve its pin: bebbo's GitHub repos are gone and Codeberg
+# does not carry every branch.
 #
 # On macOS GNU rsync is REQUIRED: openrsync mishandles libnix's --exclude
 # patterns and silently installs the wrong set of objects.
@@ -34,10 +34,11 @@ PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
 # projects/<name>|<remote that serves this commit>|<commit>|<branch it was on>
 #
 # The branch is recorded only so a human can find the commit again; nothing
-# reads it as a pin.  `binutils` has no mirror: only franke.ms carries 2.39.0.
+# reads it as a pin.  `binutils` has no mirror: franke.ms is the remote
+# verified to serve the amiga-2.46 commit.
 PINS="
-binutils|https://franke.ms/git/bebbo/binutils-gdb|ab4e5183f56fd83165356a03c890bf0b681d7535|amiga-2.39.0
-gcc|https://github.com/tinic/gcc|243a0096237cc382c075142c80acadad4e07b9e5|backport/sibcall-a0-60f2
+binutils|https://franke.ms/git/bebbo/binutils-gdb|a50544a917284847c99e97d41c69ece9d5cb2fef|amiga-2.46
+gcc|https://github.com/tinic/gcc|399a27ad06e3e978774af5c556bcf66d81ba799f|backport/sibcall-a0-134541b
 newlib-cygwin|https://franke.ms/git/bebbo/newlib-cygwin|0909ae9abc18b38595425143e7a63d9e2fc31174|amiga
 libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
 sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
@@ -160,28 +161,6 @@ else
     exit 2
 fi
 
-# GCC needs GMP, MPFR and MPC HEADERS, and a host that has one does not
-# necessarily have the other two: Debian 13 keeps gmp.h under
-# /usr/include/<triple> and carries libmpfr.so.6 with no mpfr.h at all.  The
-# diagnostic without this probe is `configure: error: Building GCC requires GMP
-# 4.2+` an hour in, AFTER binutils has built and installed.  Ask the compiler
-# rather than looking for files: gmp.h sits on a search path no `ls` guesses.
-MPX_MISSING=""
-# shellcheck disable=SC2086  # CPPFLAGS is a flag list and must split
-for h in gmp mpfr mpc; do
-    printf '#include <%s.h>\nint main(void){return 0;}\n' "$h" |
-        "$CC_PROBE" ${CPPFLAGS:-} -fsyntax-only -x c - >/dev/null 2>&1 ||
-        MPX_MISSING="$MPX_MISSING $h.h"
-done
-if [ -n "$MPX_MISSING" ]; then
-    echo "!! GCC cannot be configured without$MPX_MISSING" >&2
-    echo "   Debian/Ubuntu: libgmp-dev libmpfr-dev libmpc-dev" >&2
-    echo "   macOS:         brew install gmp mpfr libmpc" >&2
-    echo "   No packages: build them into a prefix, then export" >&2
-    echo "   CPPFLAGS=-I<prefix>/include and LDFLAGS=-L<prefix>/lib." >&2
-    exit 2
-fi
-
 case "$OS" in
 Darwin)
     BREW=$(command -v brew >/dev/null 2>&1 && brew --prefix || echo /opt/homebrew)
@@ -229,6 +208,37 @@ Linux)
     echo "!! unsupported build host: $OS.  Linux and macOS only." >&2
     exit 2 ;;
 esac
+
+# GCC needs GMP, MPFR and MPC HEADERS, and a host that has one does not
+# necessarily have the other two: Debian 13 keeps gmp.h under
+# /usr/include/<triple> and carries libmpfr.so.6 with no mpfr.h at all.  The
+# diagnostic without this probe is `configure: error: Building GCC requires GMP
+# 4.2+` an hour in, AFTER binutils has built and installed.  Ask the compiler
+# rather than looking for files: gmp.h sits on a search path no `ls` guesses.
+# After the host block, which puts Homebrew on CPPFLAGS on macOS.
+MPX_MISSING=""
+# shellcheck disable=SC2086  # CPPFLAGS is a flag list and must split
+for h in gmp mpfr mpc; do
+    printf '#include <%s.h>\nint main(void){return 0;}\n' "$h" |
+        "$CC_PROBE" ${CPPFLAGS:-} -fsyntax-only -x c - >/dev/null 2>&1 ||
+        MPX_MISSING="$MPX_MISSING $h.h"
+done
+if [ -n "$MPX_MISSING" ]; then
+    echo "!! GCC cannot be configured without$MPX_MISSING" >&2
+    echo "   Debian/Ubuntu: libgmp-dev libmpfr-dev libmpc-dev" >&2
+    echo "   macOS:         brew install gmp mpfr libmpc" >&2
+    echo "   No packages: build them into a prefix, then export" >&2
+    echo "   CPPFLAGS=-I<prefix>/include and LDFLAGS=-L<prefix>/lib." >&2
+    exit 2
+fi
+
+# newlib archives its objects in shell-glob order, and glob order follows the
+# collation of the locale.  Under en_US.UTF-8 on Linux `memcpy` sorts before
+# `__udivsi3`; under C, and on macOS in any locale, it sorts after.  ld pulls
+# members in archive order, so the same source linked against the two libc.a
+# files places them differently and every shipped image changes bytes.  C
+# everywhere gives one order, the one every earlier asset has.
+export LC_ALL=C
 
 export CFLAGS="-Os $NO_PTR_WARN ${CFLAGS:-}"
 export CXXFLAGS="$CFLAGS"
@@ -364,8 +374,10 @@ PY
 fi
 
 # -flto.  Two changes to binutils; GCC needs no patch for it, only the pin
-# above.  That pin is bebbo's 60f21496 (then the tip of amiga16.2) plus one
-# commit on our fork: 243a0096, the sibcall fix.  An indirect sibcall, and on
+# above.  That pin is bebbo's 134541b3 (then the tip of amiga16.2) plus two
+# commits on our fork: a5166db4, the sibcall fix (243a0096 on 60f21496 before
+# it; upstream's later sibcall rework did not fix this), and 399a27ad, which
+# stops LTO-promoted statics drawing a visibility warning each.  An indirect sibcall, and on
 # 68000 a direct one under -fbaserel/-resident/-mpcrel, loads its target into
 # a0, and m68k_is_ok_for_sibcall allowed an argument there; under -mregparm or
 # an __asm ("a0") parameter the target replaced it (bsd_wait_sliced() entered
@@ -403,9 +415,10 @@ fi
 # WHICH set applies is decided by the branch recorded in PINS above, not by a
 # fixed directory name.  The two diffs above are written against 2.39's bfd and
 # do not apply to 2.46, which carries LTO support for the HUNK target of its
-# own and needs two different repairs instead: `strip` there drops every
-# HUNK_RELOC32, and `ar` there writes a native Amiga library, which has no
-# symbol index a slim LTO member can appear in.  A pin that moves without its
+# own and needs three different repairs instead: `strip` there drops every
+# HUNK_RELOC32, `ar` there writes a native Amiga library, which has no
+# symbol index a slim LTO member can appear in, and writing that index for a
+# C++ COMDAT object then divides by zero in amiga_slurp_symbol_table.  A pin that moves without its
 # patch set is exactly the failure this table exists to make impossible, so an
 # unrecorded branch stops the build rather than quietly producing an unpatched
 # binutils.

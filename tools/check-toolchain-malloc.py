@@ -17,18 +17,20 @@ import sys
 # Paths are relative to <prefix>/m68k-amigaos/lib. The paired libc/libg
 # archive members must match for each variant. Eight distinct hashes cover
 # eleven multilibs produced by the pinned newlib source's final make step.
+# Asset series 16.2.4 and 16.2.5 (GCC a5166db4, 399a27ad): each installed malloc.o is the object
+# newlib's final build left in newlib/libc/sys/amigaos/, on Linux and macOS.
 EXPECTED_MALLOC_SHA256 = {
-    "": "0f2522d271d7094be4c9dd974e24634d13b6af150fd48fc8de89caf1ab4f2c22",
-    "libm020": "1531c3f1489f4d1a19b53d69e3fcb3a17abbce21c49216151c323dbdb7e00144",
-    "libm020/libm881": "1531c3f1489f4d1a19b53d69e3fcb3a17abbce21c49216151c323dbdb7e00144",
-    "libm060": "a60a7c7e936c87f661d7b23430d7f908d5b902c1131dbf5eae792a54a94c4e91",
-    "libb": "0085a784fa1bbe184f322df4ae1b48413a0c421ca1daf570d491c4fcc8798316",
-    "libb/libm020": "af379f9fbe7da3bab6a5476c094147415e55ea7e9c491d4d94676f17b145e1b1",
-    "libb/libm020/libm881": "af379f9fbe7da3bab6a5476c094147415e55ea7e9c491d4d94676f17b145e1b1",
-    "libb/libm060": "c486aa7719ae6bedd46d82a37609951019df6d29ad135558c10a5c2285347a3b",
-    "libb32/libm020": "07c5767e7ec8e7dd31c3649cab559b9cb5a498743cb3976ff9b5adda352352a2",
-    "libb32/libm020/libm881": "07c5767e7ec8e7dd31c3649cab559b9cb5a498743cb3976ff9b5adda352352a2",
-    "libb32/libm060": "f7f63dad7cb7ff955678a50a2f778ce46a8988ee2c9ed683e17cf6dd98b5f188",
+    "": "699875ab532e97d004d48b6988b132373e1ecbe085ad7c887013cbb907017550",
+    "libm020": "1d39cab4bdfc999c390af941a57b8df2375ca0276e5c8fc0d98d1f41625c4dfb",
+    "libm020/libm881": "1d39cab4bdfc999c390af941a57b8df2375ca0276e5c8fc0d98d1f41625c4dfb",
+    "libm060": "74bf940fd4378b8fcbae052827e5218c100c00390a8fa22561d467a94637dddc",
+    "libb": "e6b12ab7ce9cd66806962e58ab3050e2993c1a6411e2451bf42c145ea84efd12",
+    "libb/libm020": "b34cc3e917f80344b5a7271a05e06acfc2f470b203b0abb139c2962f3a198936",
+    "libb/libm020/libm881": "b34cc3e917f80344b5a7271a05e06acfc2f470b203b0abb139c2962f3a198936",
+    "libb/libm060": "5c7409df3d56d11df7029f66a6acc01e713f900c4e46713d8f853e53f5c66a79",
+    "libb32/libm020": "2061efe4d7dd893d288273d0554e94d8ff3bd291fcc0785ef214204614a1b786",
+    "libb32/libm020/libm881": "2061efe4d7dd893d288273d0554e94d8ff3bd291fcc0785ef214204614a1b786",
+    "libb32/libm060": "89353ba2f35a8e4eace32a4a5d3e2db7643d94341f44d9428bb73171ca8e919b",
 }
 
 
