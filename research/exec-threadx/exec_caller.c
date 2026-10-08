@@ -41,35 +41,6 @@ ULONG anx_exec_caller_generation;
 static void enter(void *arg) {(void)arg;Forbid();}
 static void leave(void *arg) {(void)arg;Permit();}
 
-/* Same list discipline as the shipping port: interrupts can move a Task
- * between the lists during Forbid. Do not dereference a candidate first. */
-static int on_list(struct List *list,struct Task *task)
-{
-    struct Node *node;
-    for (node=list->lh_Head;node->ln_Succ;node=node->ln_Succ)
-        if ((struct Task *)node==task) return 1;
-    return 0;
-}
-UINT tx_amiga_exec_task_alive(VOID *arg)
-{
-    struct Task *task=arg;
-    int alive;
-    if (!SysBase || !task) return TX_FALSE;
-    Disable();alive=FindTask(0)==task || on_list(&SysBase->TaskReady,task) || on_list(&SysBase->TaskWait,task);Enable();
-    return alive ? TX_TRUE : TX_FALSE;
-}
-UINT tx_amiga_exec_task_signal(VOID *arg,ULONG mask)
-{
-    UINT alive;
-    if (!SysBase) return TX_FALSE;
-    Forbid();alive=tx_amiga_exec_task_alive(arg);
-    if (alive && mask) Signal(arg,mask);
-    Permit();return alive;
-}
-UINT tx_amiga_exec_task_context(VOID)
-{
-    return SysBase && SysBase->TDNestCnt<0 && SysBase->IDNestCnt<0 && !_tx_thread_system_state ? TX_TRUE : TX_FALSE;
-}
 static ULONG stamp(struct Task *task)
 {
     ULONG value=(ULONG)task->tc_SPLower ^ ((ULONG)task->tc_SPUpper<<1) ^ ((ULONG)task->tc_Node.ln_Name<<2);
@@ -326,3 +297,20 @@ VOID tx_amiga_adopt_signal_free(ULONG mask)
     Permit();
 }
 VOID tx_amiga_adopt_sweep_unpublished(VOID) {Forbid();if (clock_owner) sweep();Permit();}
+
+int anx_exec_callers_recover_creator(struct Task *dead)
+{
+    if (!clock_owner || creator!=dead || !tx_amiga_exec_task_context() || !anx_tx_runtime_idle()) return 0;
+    Forbid();
+    if (tx_amiga_exec_task_alive(dead) || clock_owner->creator!=FindTask(0) ||
+        stats.live || stats.leases || stats.waiting || !anx_tx_runtime_retains_only(2)) {Permit();return 0;}
+    creator=FindTask(0);Permit();return 1;
+}
+
+int anx_exec_callers_claim_recovery(struct Task *dead,int claim)
+{
+    Forbid();
+    if (!clock_owner || creator!=dead || tx_amiga_exec_task_alive(dead) ||
+        stats.live || stats.leases || stats.waiting || !anx_tx_runtime_retains_only(2)) {Permit();return 0;}
+    detaching=claim!=0;Permit();return 1;
+}

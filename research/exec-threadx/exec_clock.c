@@ -6,6 +6,7 @@
 #include <exec/execbase.h>
 #include <proto/exec.h>
 #include <string.h>
+#include <inline/timer.h>
 _Static_assert(TX_TIMER_TICKS_PER_SECOND>0 &&
                1000000%TX_TIMER_TICKS_PER_SECOND==0,"clock requires integral microsecond ticks");
 #define PERIOD (1000000UL/TX_TIMER_TICKS_PER_SECOND)
@@ -17,7 +18,7 @@ static int idle(void)
 static void finish(AnxExecClock *r)
 {
     /* No scheduling gap between FINISHED and actual native removal. */
-    Forbid();r->state=ANX_CLOCK_FINISHED;Signal(r->creator,r->ack);RemTask(0);
+    Forbid();r->state=ANX_CLOCK_FINISHED;if (tx_amiga_exec_task_alive(r->creator) && (r->creator->tc_SigAlloc&r->ack)) Signal(r->creator,r->ack);RemTask(0);
     for (;;) {}
 }
 static void release(AnxExecClock *r)
@@ -34,26 +35,40 @@ static VOID worker(VOID)
     Forbid();
     uint64_t now=r->wait.ops.clock(r->wait.ops.context);
     if (now>UINT64_MAX-PERIOD) anx_tx_unsupported("clock phase overflow");
+    r->start_us=now;r->stats.tx_amiga_tick_unit=UNIT_MICROHZ;
+    struct EClockVal ec;r->stats.tx_amiga_tick_eclock_hz=__ReadEClock_base(r->wait.timer->tr_node.io_Device,&ec);
     r->next=now+PERIOD;r->started=1;r->state=ANX_CLOCK_RUNNING;
-    Signal(r->creator,r->ack);Permit();
+    if (tx_amiga_exec_task_alive(r->creator) && (r->creator->tc_SigAlloc&r->ack)) Signal(r->creator,r->ack);
+    Permit();
     for (;;) {
         unsigned due;
         anx_tx_context_begin(&f,TX_NULL,1);
         if (r->state!=ANX_CLOCK_RUNNING) {anx_tx_context_end(&f);break;}
         now=r->wait.ops.clock(r->wait.ops.context);
+        r->stats.tx_amiga_tick_wakeups++;
+        uint64_t elapsed=now-r->start_us;
+        r->stats.tx_amiga_tick_uptime_ms=(ULONG)(elapsed/1000000)*1000;
+        r->stats.tx_amiga_tick_uptime_rem=(ULONG)((elapsed%1000000)*r->stats.tx_amiga_tick_eclock_hz/1000000);
+        if (elapsed) r->stats.tx_amiga_tick_source_chz=(ULONG)((uint64_t)r->stats.tx_amiga_tick_wakeups*100000000/elapsed);
         if (r->service) r->service(r->service_context,now);
         due=anx_clock_batch(now,r->next,PERIOD);
         if (due) {
-            r->batches++;if (due>1) r->catchup_batches++;
+            r->batches++;if (due>1) {r->catchup_batches++;r->stats.tx_amiga_tick_catchups++;}
             for (unsigned i=0;i<due;i++) {
                 if (r->next>UINT64_MAX-PERIOD) anx_tx_unsupported("clock phase overflow");
-                anx_tx_timer_tick();r->ticks++;r->next+=PERIOD;
+                anx_tx_timer_tick();r->ticks++;r->stats.tx_amiga_tick_delivered++;r->next+=PERIOD;
             }
+            uint64_t end=r->wait.ops.clock(r->wait.ops.context);
+            r->stats.tx_amiga_tick_service_us+=(ULONG)(end-now);
+            ULONG skew=now>=r->next ? (ULONG)((now-r->next)/PERIOD+1) : 0;
+            r->stats.tx_amiga_tick_skew=skew;
+            if (skew>r->stats.tx_amiga_tick_skew_peak) r->stats.tx_amiga_tick_skew_peak=skew;
             anx_tx_context_end(&f); /* dispatch helper/creator between batches */
             continue;
         }
         /* Publish the pending wait while still under the same producer lock.
          * Stop either completes it or is seen before any later publication. */
+        r->stats.tx_amiga_tick_empty++;
         r->token=anx_wait_begin(&r->wait.wait,r->next-now,0,0,0,0);
         if (!r->token) anx_tx_unsupported("clock wait publication failed");
         anx_tx_context_end(&f);
@@ -136,4 +151,15 @@ int anx_exec_clock_start(AnxExecClock *r,CHAR *name,APTR stack,ULONG size)
         if (r->state==ANX_CLOCK_FINISHED) {release(r);Permit();return 0;}
         Permit();(void)Wait(r->ack);
     }
+}
+
+int anx_exec_clock_recover_creator(AnxExecClock *r,struct Task *dead)
+{
+    if (!r || !idle()) return 0;
+    Forbid();
+    if (active!=r || r->creator!=dead || tx_amiga_exec_task_alive(dead) ||
+        (r->state!=ANX_CLOCK_RUNNING && r->state!=ANX_CLOCK_FINISHED)) {Permit();return 0;}
+    BYTE bit=AllocSignal(-1);if (bit<0) {Permit();return 0;}
+    r->creator=FindTask(0);r->signal=bit;r->ack=1UL<<bit;(void)SetSignal(0,r->ack);
+    Permit();return 1;
 }

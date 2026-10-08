@@ -54,4 +54,5 @@ const AnxExecThread *anx_exec_thread_owner_record(void);
  * priority changes and forced terminate remain open. Current-owner threshold
  * changes require restore before outer boundary exit; no foreign changes.
  * Public delete only after normal completion + native removal, by creator. */
+UINT anx_exec_thread_stack_in_use(const VOID *,ULONG);
 #endif

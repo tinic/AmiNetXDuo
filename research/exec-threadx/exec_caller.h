@@ -28,4 +28,7 @@ void anx_exec_callers_stats(AnxCallerStats *);
 /* Research-only observable exhaustion counter. Monotonic; never reset by
  * start/stop. Fixture may inject ULONG_MAX only at final empty-registry test. */
 extern ULONG anx_exec_caller_generation;
+/* Quiescent manager-removal recovery only; clock creator transferred first. */
+int anx_exec_callers_recover_creator(struct Task *dead);
+int anx_exec_callers_claim_recovery(struct Task *dead,int claim);
 #endif

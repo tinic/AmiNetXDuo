@@ -264,3 +264,15 @@ const AnxExecThread *anx_exec_thread_owner_record(void)
         FindTask(0)!=&r->task) return 0;
     return r;
 }
+
+UINT anx_exec_thread_stack_in_use(const VOID *start,ULONG size)
+{
+    uintptr_t lo=(uintptr_t)start,hi=lo+size;
+    if (!lo || hi<lo) return TX_TRUE;
+    Forbid();
+    for (AnxExecThread *r=records;r;r=r->next) {
+        uintptr_t b=(uintptr_t)r->stack,e=b+r->stack_size;
+        if (lo<=e && b<=hi) {Permit();return TX_TRUE;}
+    }
+    Permit();return TX_FALSE;
+}

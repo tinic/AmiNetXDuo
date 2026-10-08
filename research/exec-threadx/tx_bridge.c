@@ -10,6 +10,7 @@
 #include <string.h>
 
 TX_THREAD *_tx_thread_current_ptr;
+VOID *anx_tx_holder;
 volatile ULONG _tx_thread_system_state;
 volatile UINT _tx_thread_preempt_disable;
 void (*anx_tx_after_mutex_put)(TX_MUTEX *);
@@ -78,6 +79,7 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     contexts = 0;
     current_frame = 0;
     _tx_thread_current_ptr = 0;
+    anx_tx_holder=0;
     _tx_thread_system_state = 0;
     _tx_thread_preempt_disable = 0;
     anx_tx_after_mutex_put = 0;
@@ -359,6 +361,7 @@ void anx_tx_context_begin(AnxTxContext *frame, TX_THREAD *thread, ULONG state)
     frame->saved_state = _tx_thread_system_state;
     contexts++;
     _tx_thread_current_ptr=thread;
+    anx_tx_holder=thread ? (VOID *)frame->owner : TX_NULL;
     _tx_thread_system_state=state;
 }
 
@@ -392,6 +395,7 @@ void anx_tx_context_end(AnxTxContext *frame)
              "boundary exit with raised threshold");
     if (contexts==1) flush_pending_resumes();
     _tx_thread_current_ptr=frame->saved_thread;
+    anx_tx_holder=frame->saved_thread ? (VOID *)frame->owner : TX_NULL;
     _tx_thread_system_state=frame->saved_state;
     contexts--;
     current_frame = frame->previous;
@@ -441,7 +445,7 @@ int anx_tx_context_pause(void)
     if (seen!=depth) goto reject;
     flush_pending_resumes();
     t->paused_frame=current_frame; t->paused_depth=depth; t->exec_wait_nesting=1;
-    contexts=0; current_frame=0; _tx_thread_current_ptr=TX_NULL;
+    contexts=0; current_frame=0; _tx_thread_current_ptr=TX_NULL;anx_tx_holder=0;
     /* Include the temporary guard. The final leave may dispatch another task;
      * no global identity/context survives that dispatch. */
     for (seen=0;seen<=depth;seen++) platform->leave(platform->context);
@@ -472,7 +476,7 @@ int anx_tx_context_resume(void)
     /* Consume the temporary guard as the first restored boundary level. */
     for (i=1;i<t->paused_depth;i++) platform->enter(platform->context);
     contexts=t->paused_depth; current_frame=t->paused_frame;
-    _tx_thread_current_ptr=t->thread;
+    _tx_thread_current_ptr=t->thread;anx_tx_holder=(VOID *)t->owner;
     t->paused_frame=0; t->paused_depth=0;
     return 1;
 }
@@ -574,7 +578,7 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
         AnxWaitResult result;
         /* Drop precisely the outer call boundary. Every TX_DISABLE inside
          * NetX has been restored; no foreign current pointer remains live. */
-        _tx_thread_current_ptr=0;
+        _tx_thread_current_ptr=0;anx_tx_holder=0;
         contexts=0;
         current_frame=0;
         platform->leave(platform->context);
@@ -595,7 +599,7 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
         }
         contexts=1;
         current_frame=outer_frame;
-        _tx_thread_current_ptr=thread;
+        _tx_thread_current_ptr=thread;anx_tx_holder=(VOID *)t->owner;
         if (thread->tx_thread_state==TX_READY && !thread->tx_thread_suspend_cleanup) break;
         need(result==ANX_WAIT_TIMEOUT,"wait ended without ThreadX resume");
         need(!awaiting_cleanup,"cleanup did not complete within research grace");
@@ -1154,4 +1158,56 @@ void anx_tx_timer_tick(void)
         }
     }
     timer_dispatch=0;
+}
+
+/* Lifecycle preflight counts retained bindings/objects AND reservations; an
+ * idle global context alone says nothing about parked or prepared workers. */
+int anx_tx_runtime_retains_only(unsigned holds)
+{
+    int empty;
+    if (!platform) return !holds;
+    platform->enter(platform->context);
+    empty=!threads && !timers && !timer_dispatch && !resume_hook_depth &&
+        !_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable &&
+        !_tx_timer_created_count && !_tx_timer_created_ptr &&
+        !_tx_mutex_created_count && !_tx_mutex_created_ptr &&
+        !_tx_event_flags_created_count && !_tx_event_flags_created_ptr &&
+        !_tx_semaphore_created_count && !_tx_semaphore_created_ptr && runtime_holds==holds;
+    platform->leave(platform->context);return empty;
+}
+int anx_tx_runtime_resettable(void)
+{
+    return !platform || (anx_tx_runtime_idle() && anx_tx_runtime_retains_only(0) && !anx_tx_admission_check);
+}
+int anx_tx_exec_wait_state(unsigned *nesting)
+{
+    AnxTxThread *t;int owned;
+    if (!platform) {if (nesting) *nesting=0;return 0;}
+    platform->enter(platform->context);t=caller_record();
+    owned=t && (t->exec_wait_nesting || (contexts && _tx_thread_current_ptr==t->thread));
+    if (nesting) *nesting=owned ? t->exec_wait_nesting : 0;
+    platform->leave(platform->context);return owned;
+}
+int anx_tx_thread_paused(TX_THREAD *thread)
+{
+    int paused=0;if (!platform) return 0;platform->enter(platform->context);
+    for (AnxTxThread *t=threads;t;t=t->next) if (t->thread==thread) paused=t->exec_wait_nesting!=0;
+    platform->leave(platform->context);return paused;
+}
+
+/* Actual flat-list timer state, without the upstream wheel-position arithmetic. */
+UINT _tx_timer_info_get(TX_TIMER *timer,CHAR **name,UINT *active,ULONG *remaining,
+                       ULONG *reload,TX_TIMER **next)
+{
+    TX_TIMER *node;int found=0;need_context();
+    node=_tx_timer_created_ptr;
+    for (ULONG i=0;i<_tx_timer_created_count;i++,node=node->tx_timer_created_next)
+        if (node==timer) {found=1;break;}
+    if (!found) return TX_TIMER_ERROR;
+    if (name) *name=timer->tx_timer_name;
+    if (active) *active=timer->tx_timer_internal.tx_timer_internal_list_head ? TX_TRUE : TX_FALSE;
+    if (remaining) *remaining=timer->tx_timer_internal.tx_timer_internal_remaining_ticks;
+    if (reload) *reload=timer->tx_timer_internal.tx_timer_internal_re_initialize_ticks;
+    if (next) *next=timer->tx_timer_created_next;
+    return TX_SUCCESS;
 }

@@ -285,7 +285,12 @@ int main(int argc,char **argv)
     CHECK(_tx_timer_change(&timer,8,9)==TX_SUCCESS && timer.tx_timer_internal.tx_timer_internal_remaining_ticks==3);
     anx_tx_context_end(&frame); tick();
     anx_tx_context_begin(&frame,&callers[0].thread,0);
+    UINT active;ULONG remaining,reload;CHAR *timer_name;TX_TIMER *successor;
+    CHECK(_tx_timer_info_get(&timer,&timer_name,&active,&remaining,&reload,&successor)==TX_SUCCESS &&
+          active==TX_TRUE && remaining==2 && reload==4 && successor==&timer && !strcmp((const char *)timer_name,"counter"));
+    CHECK(_tx_timer_info_get((TX_TIMER *)1,0,0,0,0,0)==TX_TIMER_ERROR);
     CHECK(_tx_timer_deactivate(&timer)==TX_SUCCESS && timer.tx_timer_internal.tx_timer_internal_remaining_ticks==2);
+    CHECK(_tx_timer_info_get(&timer,0,&active,&remaining,0,0)==TX_SUCCESS && active==TX_FALSE && remaining==2);
     anx_tx_context_end(&frame); tick(); tick(); CHECK(!calls);
     anx_tx_context_begin(&frame,&callers[0].thread,0); CHECK(_tx_timer_activate(&timer)==TX_SUCCESS); anx_tx_context_end(&frame);
     tick(); CHECK(!calls); tick(); CHECK(calls==1);
@@ -293,7 +298,7 @@ int main(int argc,char **argv)
     anx_tx_context_begin(&frame,&callers[0].thread,0);
     CHECK(_tx_timer_deactivate(&timer)==TX_SUCCESS && _tx_timer_change(&timer,1,0)==TX_SUCCESS && _tx_timer_activate(&timer)==TX_SUCCESS);
     anx_tx_context_end(&frame); tick(); tick(); CHECK(calls==3);
-    anx_tx_context_begin(&frame,&callers[0].thread,0); CHECK(_tx_timer_delete(&timer)==TX_SUCCESS); anx_tx_context_end(&frame); finish();
+    anx_tx_context_begin(&frame,&callers[0].thread,0); CHECK(_tx_timer_delete(&timer)==TX_SUCCESS && _tx_timer_info_get(&timer,0,0,0,0,0)==TX_TIMER_ERROR); anx_tx_context_end(&frame); finish();
     /* Self cancel, other expired cancel, delete active, empty and wrapping clock. */
     init(); calls=0; cancel_self=cancel_other=1;
     anx_tx_context_begin(&frame,&callers[0].thread,0);

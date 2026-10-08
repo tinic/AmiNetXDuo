@@ -143,4 +143,10 @@ void anx_tx_host_restore(UINT);
 /* Deterministic host schedule seam, invoked after a real mutex release.
  * NULL in the native experiment. It must not block. */
 extern void (*anx_tx_after_mutex_put)(TX_MUTEX *);
+/* Private integration state; holder word is observational, not a scheduler baton. */
+extern VOID *anx_tx_holder;
+int anx_tx_runtime_retains_only(unsigned holds);
+int anx_tx_runtime_resettable(void);
+int anx_tx_exec_wait_state(unsigned *nesting);
+int anx_tx_thread_paused(TX_THREAD *);
 #endif

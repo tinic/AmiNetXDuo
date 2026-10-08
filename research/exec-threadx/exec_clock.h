@@ -3,6 +3,7 @@
 #define ANX_EXEC_CLOCK_H
 #include "tx_bridge.h"
 #include "exec_wait.h"
+#include "tx_amiga.h"
 #include <exec/tasks.h>
 enum { ANX_CLOCK_EMPTY, ANX_CLOCK_STARTING, ANX_CLOCK_RUNNING,
        ANX_CLOCK_STOPPING, ANX_CLOCK_FINISHED, ANX_CLOCK_REAPED };
@@ -17,6 +18,8 @@ typedef struct {
     uint64_t next;
     uint32_t token;
     ULONG ticks,batches,catchup_batches;
+    TX_AMIGA_TICK_STATS stats;
+    uint64_t start_us;
     void (*service)(void *,uint64_t);
     int (*service_can_detach)(void *);
     void *service_context;
@@ -39,4 +42,6 @@ int anx_exec_clock_join(AnxExecClock *);
  * Not an extra task, timer request or ThreadX timer-wheel clock. */
 int anx_exec_clock_service(AnxExecClock *,void (*)(void *,uint64_t),int (*)(void *),void *);
 int anx_exec_clock_now(AnxExecClock *,uint64_t *);
+/* Positive old-creator removal required; new creator allocates own ACK bit. */
+int anx_exec_clock_recover_creator(AnxExecClock *,struct Task *dead);
 #endif
