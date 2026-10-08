@@ -102,9 +102,11 @@ int main(void)
         Forbid();master=(struct Library *)FindName(&SysBase->LibList,(STRPTR)"bsdsocket.library");Permit();
         CHECK(master);
         say("research_exec_library=LAST_CLOSE\n");CloseLibrary(b);
-        CHECK(master->lib_OpenCnt==0 && !FindSemaphore((STRPTR)AMI_HEALTH_NAME) &&
-              !FindTask((STRPTR)"Exec NetX management") && !FindTask((STRPTR)"Exec NetX clock") &&
-              !FindTask((STRPTR)"AmiNetXDuo ip"));
+        CHECK(master->lib_OpenCnt==0);
+        CHECK(!FindSemaphore((STRPTR)AMI_HEALTH_NAME));
+        CHECK(!FindTask((STRPTR)"Exec NetX management"));
+        CHECK(!FindTask((STRPTR)"Exec NetX clock"));
+        CHECK(!FindTask((STRPTR)"AmiNetXDuo ip"));
         CASE("last-close-retires-actual-helper-kernel-and-published-health");
         /* Expunge returns the seglist; the test explicitly unloads it. */
         Forbid();APTR segment=LP0(0x12,APTR,expunge,,master);Permit();

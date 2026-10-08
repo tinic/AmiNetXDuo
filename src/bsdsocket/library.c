@@ -1106,6 +1106,18 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
     struct AmiSocketBase *master = base;
     BOOL                  unload_is_safe = FALSE;
 
+#ifdef AMINETXDUO_EXEC_RESEARCH
+    /* Exec's Close-owned outer Forbid is not a caller's critical section.
+     * As in Open, lib_OpenCnt pins the segment throughout blocking cleanup.
+     * Extra caller exclusion is unsupported: retain the complete base and
+     * reference for a later ordinary close, rather than partly dismantle it. */
+    if (SysBase->TDNestCnt != 0 || SysBase->IDNestCnt >= 0)
+    {
+        ami_log(AMI_LOG_ERROR, "research CloseLibrary refused caller exclusion");
+        return NULL;
+    }
+    Permit();
+#endif
     if (base->sb_Master != NULL)
     {
         master = base->sb_Master;
@@ -1118,6 +1130,10 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
             AMI_CENSUS_REPORT("bsd-stack-down");
     }
 
+#ifdef AMINETXDUO_EXEC_RESEARCH
+    /* Restore Exec's exclusion before the final reference/expunge decision. */
+    Forbid();
+#endif
     if (master->sb_Lib.lib_OpenCnt > 0)
         master->sb_Lib.lib_OpenCnt--;
 

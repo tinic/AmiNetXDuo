@@ -21,6 +21,7 @@
 #ifdef AMINETXDUO_EXEC_RESEARCH
 #include "exec_thread.h"
 #include "tx_thread.h"
+#include <exec/execbase.h>
 #endif
 
 #ifdef AMINETXDUO_RX_VERIFY
@@ -55,6 +56,11 @@ static AmiNetStack             *ami_ns;
 static BOOL                     ami_ns_system_initialised;
 static BOOL                     ami_ns_kernel_started;
 #ifdef AMINETXDUO_EXEC_RESEARCH
+static BOOL ami_ns_research_stop_refused(const char *reason)
+{
+    ami_log(AMI_LOG_ERROR, "research loopback stop refused: %s", reason);
+    return FALSE;
+}
 /* Irreversible helper stop closes admission; ami_ns remains only for reap. */
 static AmiNetStack              *ami_ns_research_terminal;
 #endif
@@ -143,25 +149,25 @@ static BOOL ami_ns_research_loopback_stop(AmiNetStack *ns)
     if (!ns->ns_IpCreated)
         return TRUE;
     if (ns->ns_IfaceCount || ns->ns_AutoIpCreated || ami_sana2_retained_count())
-        return FALSE;
+        return ami_ns_research_stop_refused("physical/AutoIP/retained producer");
     for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
         if (ns->ns_Iface[i] != NULL)
-            return FALSE;
+            return ami_ns_research_stop_refused("interface allocation");
 #ifdef AMINETXDUO_DHCP
     if (ns->ns_DhcpCreated)
-        return FALSE;
+        return ami_ns_research_stop_refused("DHCP producer");
 #endif
 #ifdef AMINETXDUO_MDNS
     if (ns->ns_MdnsCreated)
-        return FALSE;
+        return ami_ns_research_stop_refused("mDNS producer");
 #endif
 #if defined(AMINETXDUO_IPV6) && defined(AMINETXDUO_DHCP)
     if (ns->ns_Dhcpv6Created || ns->ns_Dhcpv6WorkReady)
-        return FALSE;
+        return ami_ns_research_stop_refused("DHCPv6 producer");
 #endif
     if (!_tx_thread_identify() || _tx_thread_system_state ||
         _tx_thread_preempt_disable)
-        return FALSE;
+        return ami_ns_research_stop_refused("invalid caller context");
     timers[count++] = &ns->ns_Ip.nx_ip_periodic_timer;
     if (ns->ns_Ip.nx_ip_fast_periodic_timer_created)
         timers[count++] = &ns->ns_Ip.nx_ip_fast_periodic_timer;
@@ -170,7 +176,7 @@ static BOOL ami_ns_research_loopback_stop(AmiNetStack *ns)
     for (i = 0; i < count; i++)
         if (tx_timer_info_get(timers[i], NULL, &active[i], &left, &reload,
                               NULL) != TX_SUCCESS)
-            return FALSE;
+            return ami_ns_research_stop_refused("unregistered producer timer");
     for (i = 0; i < count; i++)
         if (tx_timer_deactivate(timers[i]) != TX_SUCCESS)
             anx_tx_unsupported("research IP producer timer deactivation failed");
@@ -202,7 +208,7 @@ static BOOL ami_ns_research_loopback_stop(AmiNetStack *ns)
         for (i = 0; i < count; i++)
             if (active[i] && tx_timer_activate(timers[i]) != TX_SUCCESS)
                 anx_tx_unsupported("research IP producer timer restore failed");
-    return FALSE;
+    return ami_ns_research_stop_refused(stopping ? "terminal owner pending" : "helper not parked");
 }
 #endif
 
@@ -2185,6 +2191,10 @@ LONG netstack_shutdown(VOID)
     entered = ami_netstack_enter(&caller);
     if (entered == AMI_NET_ERR_KERNEL)
     {
+#ifdef AMINETXDUO_EXEC_RESEARCH
+        ami_log(AMI_LOG_ERROR, "research shutdown caller refused: TD=%ld ID=%ld",
+                (LONG)SysBase->TDNestCnt, (LONG)SysBase->IDNestCnt);
+#endif
         AMI_ERROR("netstack: cannot take the stack down from this task; it "
                   "stays up until a later close");
         ami_ns_lock_release();

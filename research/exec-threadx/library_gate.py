@@ -122,6 +122,26 @@ def main():
         raise SystemExit("parent reservation object replacement failed")
     link_dir = full / "src/bsdsocket"
     original_link = shlex.split((link_dir / "CMakeFiles/bsdsocket_library.dir/link.txt").read_text())
+    # The real library vectors must release only Exec's Open/Close-owned outer
+    # exclusion around blocking work, preserving any additional caller nesting.
+    library_entry = next(e for e in entries if Path(e["file"]) == ROOT / "src/bsdsocket/library.c")
+    library_words = shlex.split(library_entry["command"])
+    library_flags = []
+    i = 1
+    while i < len(library_words):
+        if library_words[i] in ("-o", "-c"):
+            i += 2
+        else:
+            library_flags.append(library_words[i])
+            i += 1
+    library_object = work / "library.c.obj"
+    result = run([library_words[0], *library_flags, "-Werror", "-DAMINETXDUO_EXEC_RESEARCH",
+                  "-c", str(ROOT / "src/bsdsocket/library.c"), "-o", str(library_object)],
+                 Path(library_entry["directory"]), log)
+    if result.returncode:
+        raise SystemExit("research library lifecycle compile failed")
+    if sum(Path(word).name == "library.c.obj" for word in original_link) != 1:
+        raise SystemExit("expected exactly one original library lifecycle object")
     output = work / "bsdsocket-research-unverified.library"
     map_file = output.with_suffix(".map")
     command = [original_link[0]]
@@ -135,6 +155,8 @@ def main():
             removed.append(word)
         elif word.endswith(".a") and Path(word).name == original.name:
             command += [str(netstack)]
+        elif Path(word).name == "library.c.obj":
+            command += [str(library_object)]
         else:
             command.append(word)
     if {Path(w).name for w in removed} != FORBIDDEN_ARCHIVES:
@@ -165,7 +187,9 @@ def main():
         "baseline_binary": {"bytes": baseline.stat().st_size, "sha256": digest(baseline)},
         "removed_scheduler_archives": removed,
         "removed_netstack_members": ["netstack_baton.c.obj"],
-        "research_parent_objects": ["netstack.c.obj: actual production source/full flags + AMINETXDUO_EXEC_RESEARCH one-shot IP preflight"],
+        "research_parent_objects": ["netstack.c.obj: actual production source/full flags + AMINETXDUO_EXEC_RESEARCH IP reservation and quiescent loopback lifecycle",
+                                    "library.c.obj: actual production source/own full flags + AMINETXDUO_EXEC_RESEARCH Close-owned outer Forbid release"],
+        "library_full_profile_flags": library_flags,
         "backend_sources": [str(p.relative_to(ROOT)) for p, _ in sources],
         "link_returncode": result.returncode,
         "unresolved_symbols": unresolved,
