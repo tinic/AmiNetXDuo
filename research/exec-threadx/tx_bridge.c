@@ -656,12 +656,14 @@ VOID _tx_thread_system_preempt_check(void)
     need(contexts!=0,"preemption check outside call boundary");
 }
 
-static void need_context(void)
+static void need_context_at(const char *service)
 {
     need(contexts && current_frame &&
          current_frame->owner==platform->caller(platform->context),
-         "service outside serialized call boundary");
+         service);
 }
+/* Preserve the same guard; terminal diagnostics identify its calling service. */
+#define need_context() need_context_at(__func__)
 
 void anx_tx_require_context(UINT blocking)
 {
