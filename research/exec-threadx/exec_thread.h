@@ -2,6 +2,7 @@
 #ifndef ANX_RESEARCH_EXEC_THREAD_H
 #define ANX_RESEARCH_EXEC_THREAD_H
 #include "exec_task.h"
+#define ANX_THREAD_EXEC_PRIORITY(p) ((BYTE)(TX_AMIGA_TASK_PRIORITY-((p)/16)))
 enum { ANX_THREAD_EMPTY, ANX_THREAD_PREPARING, ANX_THREAD_PREPARED,
        ANX_THREAD_BOUND, ANX_THREAD_CANCEL, ANX_THREAD_FINISHED, ANX_THREAD_REAPED };
 typedef struct AnxExecThread {
@@ -22,8 +23,9 @@ typedef struct AnxExecThread {
  * Opens worker-owned IO before public creation;
  * does not read/modify target control block. No implicit unreserved allocation.
  * Public create requires this exact creator/target/stack reservation. Same public
- * pinned tx_api signatures, no vendor edits. All priorities map 31-priority to
- * Exec task priorities; threshold must equal priority and slice must be zero.
+ * pinned tx_api signatures, no vendor edits. Priorities 0..15 map to the pinned
+ * port's Exec priority 1; 16..31 map to 0. Logical priorities remain in public
+ * fields; ties are deliberate. Threshold must equal priority and slice be zero.
  * This is creation/publication evidence, not strict scheduler conformance. */
 int anx_exec_thread_prepare(AnxExecThread *, TX_THREAD *, CHAR *, APTR, ULONG);
 /* Only unbound PREPARED reservation can be cancelled, outside the boundary.

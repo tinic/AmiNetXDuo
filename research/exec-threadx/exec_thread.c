@@ -10,6 +10,7 @@
 #error "prepared workers require the pinned port's disabled stack filling"
 #endif
 _Static_assert(TX_MAX_PRIORITIES==32,"review Exec priority mapping after a profile change");
+_Static_assert(TX_AMIGA_TASK_PRIORITY==1,"review safe Exec priority band after a port change");
 
 TX_THREAD *_tx_thread_created_ptr;
 ULONG _tx_thread_created_count;
@@ -177,7 +178,7 @@ UINT _tx_thread_create(TX_THREAD *t, CHAR *name, VOID (*entry)(ULONG), ULONG inp
     } else {_tx_thread_created_ptr=t;t->tx_thread_created_next=t;t->tx_thread_created_previous=t;}
     _tx_thread_created_count++;
     r->task.tc_Node.ln_Name=name;
-    (void)SetTaskPri(&r->task,(BYTE)(TX_MAX_PRIORITIES-1-priority));
+    (void)SetTaskPri(&r->task,ANX_THREAD_EXEC_PRIORITY(priority));
     r->state=ANX_THREAD_BOUND;
     if (auto_start==TX_AUTO_START) {t->tx_thread_state=TX_READY;Signal(&r->task,SIGF_SINGLE);}
     return TX_SUCCESS;

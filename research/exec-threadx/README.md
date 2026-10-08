@@ -683,7 +683,9 @@ public fields and cannot enter until the creator's outer boundary releases.
 DONT_START stays suspended until the explicit initial public resume. No public
 thread-create call blocks or opens IO while inside the constructor boundary.
 
-Exec priorities map 31 minus the supplied priority. Strict ThreadX scheduler
+Exec priorities are capped to the production port's priority band: logical
+0..15 map to Exec 1, 16..31 map to Exec 0; logical fields remain unchanged.
+Ties are deliberate. Strict ThreadX scheduler
 conformance is not established. Unequal thresholds and nonzero time slices return
 TX_FEATURE_NOT_ENABLED before control mutation. NetX IP create's hardcoded slice
 of one is therefore still unsupported: a real NX_IP create/helper verdict remains

@@ -16,6 +16,7 @@ static TX_EVENT_FLAGS_GROUP events;
 static volatile unsigned entries[2],cookie[2],entry_error;
 static UINT foreign_delete;
 static unsigned passed,reaped;
+static UINT expected_priority[2]={16,17};
 
 static void say(const char *s)
 {
@@ -33,8 +34,9 @@ static VOID child(ULONG input)
     if (tx_thread_identify()!=t || !cookie[input] || t->tx_thread_id!=TX_THREAD_ID ||
         t->tx_thread_entry!=child || t->tx_thread_entry_parameter!=input ||
         t->tx_thread_stack_start!=stacks[input].bytes || t->tx_thread_stack_size!=8192 ||
-        t->tx_thread_priority!=16+input || t->tx_thread_preempt_threshold!=16+input ||
-        records[input].task.tc_Node.ln_Pri!=15-(BYTE)input ||
+        t->tx_thread_priority!=expected_priority[input] || t->tx_thread_preempt_threshold!=expected_priority[input] ||
+        records[input].task.tc_Node.ln_Pri!=ANX_THREAD_EXEC_PRIORITY(expected_priority[input]) ||
+        records[input].task.tc_Node.ln_Pri>TX_AMIGA_TASK_PRIORITY ||
         (uintptr_t)&actual<(uintptr_t)t->tx_thread_stack_start ||
         (uintptr_t)&actual>(uintptr_t)t->tx_thread_stack_end) entry_error=1;
     entries[input]++;
@@ -62,7 +64,7 @@ static int release(unsigned mask)
 static UINT create(unsigned i,UINT start)
 {
     return tx_thread_create(&children[i],(CHAR *)"public child",child,i,stacks[i].bytes,
-                             8192,16+i,16+i,0,start);
+                             8192,expected_priority[i],expected_priority[i],0,start);
 }
 static int completed(unsigned i)
 {
@@ -180,6 +182,18 @@ int main(void)
     }
     CHECK(entries[0]==7 && entries[1]==1);
     CASE("six-public-create-complete-delete-restarts");
+    expected_priority[0]=2; cookie[0]=0;
+    CHECK(anx_exec_thread_prepare(&records[0],&children[0],(CHAR *)"IP priority band",stacks[0].bytes,8192));
+    anx_tx_context_begin(&f,&parent_thread,0);
+    CHECK(create(0,TX_AUTO_START)==TX_SUCCESS);cookie[0]=0x1234;
+    CHECK(records[0].task.tc_Node.ln_Pri==TX_AMIGA_TASK_PRIORITY && !records[0].entered);
+    anx_tx_context_end(&f);
+    CHECK(ready(1) && release(1) && anx_exec_thread_wait(&records[0]) && completed(0));
+    anx_tx_context_begin(&f,&parent_thread,0);
+    CHECK(tx_thread_delete(&children[0])==TX_SUCCESS);reaped++;
+    anx_tx_context_end(&f);
+    CHECK(recovered(0) && entries[0]==8 && !entry_error && FindTask(0)->tc_SigAlloc==signals);
+    CASE("IP-helper-logical-priority-stays-in-safe-Exec-band");
     snapshot=children[0];
     CHECK(anx_exec_thread_prepare(&records[0],&children[0],(CHAR *)"cancel unbound",stacks[0].bytes,8192));
     CHECK(anx_exec_thread_cancel(&records[0]));reaped++;
@@ -189,7 +203,7 @@ int main(void)
     CASE("unbound-cancel-reaps-without-public-mutation");
     CHECK(anx_tx_detach(&parent_bridge) && anx_exec_wait_close(&parent_wait));
     anx_tx_runtime_init(anx_tx_exec_platform()); /* all reservations really released */
-    CHECK(passed==11 && reaped==9 && !events.tx_event_flags_group_suspended_count);
-    say("research_exec_thread=PASS 11/11 tasks_reaped=9 restarts=6\n");
+    CHECK(passed==12 && reaped==10 && !events.tx_event_flags_group_suspended_count);
+    say("research_exec_thread=PASS 12/12 tasks_reaped=10 restarts=6\n");
     return 0;
 }
