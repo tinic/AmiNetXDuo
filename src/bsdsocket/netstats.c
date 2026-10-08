@@ -117,24 +117,36 @@ static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
  */
 typedef struct BsdTcpStateMap
 {
-    UWORD   btm_Nx;
-    WORD    btm_Bsd;
+    UBYTE   btm_Nx;
+    BYTE    btm_Bsd;
 } BsdTcpStateMap;
+
+#define BSD_TCP_STATES(X) \
+    X(NX_TCP_CLOSED,        TCPS_CLOSED) \
+    X(NX_TCP_LISTEN_STATE,  TCPS_LISTEN) \
+    X(NX_TCP_SYN_SENT,      TCPS_SYN_SENT) \
+    X(NX_TCP_SYN_RECEIVED,  TCPS_SYN_RECEIVED) \
+    X(NX_TCP_ESTABLISHED,   TCPS_ESTABLISHED) \
+    X(NX_TCP_CLOSE_WAIT,    TCPS_CLOSE_WAIT) \
+    X(NX_TCP_FIN_WAIT_1,    TCPS_FIN_WAIT_1) \
+    X(NX_TCP_FIN_WAIT_2,    TCPS_FIN_WAIT_2) \
+    X(NX_TCP_CLOSING,       TCPS_CLOSING) \
+    X(NX_TCP_TIMED_WAIT,    TCPS_TIME_WAIT) \
+    X(NX_TCP_LAST_ACK,      TCPS_LAST_ACK)
 
 static const BsdTcpStateMap bsd_tcp_states[] =
 {
-    { NX_TCP_CLOSED,        TCPS_CLOSED       },
-    { NX_TCP_LISTEN_STATE,  TCPS_LISTEN       },
-    { NX_TCP_SYN_SENT,      TCPS_SYN_SENT     },
-    { NX_TCP_SYN_RECEIVED,  TCPS_SYN_RECEIVED },
-    { NX_TCP_ESTABLISHED,   TCPS_ESTABLISHED  },
-    { NX_TCP_CLOSE_WAIT,    TCPS_CLOSE_WAIT   },
-    { NX_TCP_FIN_WAIT_1,    TCPS_FIN_WAIT_1   },
-    { NX_TCP_FIN_WAIT_2,    TCPS_FIN_WAIT_2   },
-    { NX_TCP_CLOSING,       TCPS_CLOSING      },
-    { NX_TCP_TIMED_WAIT,    TCPS_TIME_WAIT    },
-    { NX_TCP_LAST_ACK,      TCPS_LAST_ACK     }
+#define TCP_STATE_ENTRY(nx, bsd) { nx, bsd },
+    BSD_TCP_STATES(TCP_STATE_ENTRY)
+#undef TCP_STATE_ENTRY
 };
+
+#define TCP_STATE_WIDTH(nx, bsd) \
+    _Static_assert(nx >= 0 && nx <= 255, "NetX TCP state must fit in UBYTE"); \
+    _Static_assert(bsd >= -128 && bsd <= 127, "BSD TCP state must fit in BYTE");
+BSD_TCP_STATES(TCP_STATE_WIDTH)
+#undef TCP_STATE_WIDTH
+#undef BSD_TCP_STATES
 
 /* "Note that this can be -1 if the case cannot be safely determined." */
 static LONG bsd_tcp_state(ULONG nx_state)
