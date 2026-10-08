@@ -255,3 +255,12 @@ UINT _tx_thread_delete(TX_THREAD *t)
     release_record(r);
     return TX_SUCCESS;
 }
+const AnxExecThread *anx_exec_thread_owner_record(void)
+{
+    anx_tx_require_context(0);
+    if (_tx_thread_system_state || !_tx_thread_current_ptr) return 0;
+    AnxExecThread *r=lookup(_tx_thread_current_ptr);
+    if (!r || r->state!=ANX_THREAD_BOUND || r->bridge.thread!=_tx_thread_current_ptr ||
+        FindTask(0)!=&r->task) return 0;
+    return r;
+}

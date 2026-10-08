@@ -25,7 +25,8 @@ typedef struct AnxExecIp {
  * Caller-owned storage/packets must be valid and disjoint from live IP storage.
  * Output-token storage must be disjoint from control records and packets.
  * Calls require a normal serialized task boundary. Open/complete/receive/close
- * are producer-owner-only; accept may run in any admitted driver call context.
+ * are producer-owner-only and require a registered public native worker;
+ * accept may run in any admitted driver call context.
  * Save generation at open and pass that token with every later operation;
  * it never wraps. Rejected old tokens do not touch IP or packet storage. */
 typedef struct AnxExecIpIo {

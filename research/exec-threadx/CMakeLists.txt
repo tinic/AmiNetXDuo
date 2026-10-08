@@ -145,7 +145,7 @@ if(CMAKE_CROSSCOMPILING)
         COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_protocol_smoke>.map"
             -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_io_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
-        tx_bridge_exec.c exec_thread.c exec_clock.c exec_ip.c exec_io_smoke.c)
+        tx_bridge_exec.c exec_task.c exec_thread.c exec_clock.c exec_ip.c exec_io_smoke.c)
     target_compile_definitions(research_exec_io_smoke PRIVATE ANX_REAL_PROTOCOL_LINK)
     target_link_libraries(research_exec_io_smoke PRIVATE
         "-Wl,--start-group" research_ip_bridge research_protocol_vendor research_exec_adapter research_clock_schedule "-Wl,--end-group")

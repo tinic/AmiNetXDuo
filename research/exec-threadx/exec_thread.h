@@ -42,6 +42,10 @@ int anx_exec_thread_wait(AnxExecThread *);
  * for ACK outside every boundary. Public tx_thread_terminate only acknowledges
  * an already native-FINISHED stopped target; it cannot stop a live worker. */
 int anx_exec_thread_stop_event(AnxExecThread *, TX_EVENT_FLAGS_GROUP *);
+/* Read-only current registered BOUND worker, normal serialized task context.
+ * NULL for attached callers, marked callbacks or a mismatched native task.
+ * Does not transfer record ownership; caller retains the backend reservation. */
+const AnxExecThread *anx_exec_thread_owner_record(void);
 /* Public services are defined by exec_thread.c, linked only by native research
  * target. Resume supports only initial DONT_START; general delayed suspend,
  * priority changes and forced terminate remain open. Current-owner threshold

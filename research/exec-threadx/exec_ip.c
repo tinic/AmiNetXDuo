@@ -152,19 +152,22 @@ UINT anx_exec_ip_io_open(AnxExecIpIo *io,AnxExecIp *r)
 {
     anx_tx_require_context(0);
     if (_tx_thread_system_state || !_tx_thread_current_ptr) return NX_CALLER_ERROR;
-    if (!io || !r || active!=r || r->state!=ANX_IP_LIVE || r->io || io->open ||
-        !r->clock || r->clock->state!=ANX_CLOCK_RUNNING ||
-        io->generation==(ULONG)-1) return NX_NOT_ENABLED;
+    if (!io || !r || active!=r || r->state!=ANX_IP_LIVE || r->io ||
+        !r->clock || r->clock->state!=ANX_CLOCK_RUNNING) return NX_NOT_ENABLED;
     TX_THREAD *owner=_tx_thread_current_ptr;
     if (owner==r->caller || owner==&r->ip->nx_ip_thread) return NX_CALLER_ERROR;
+    const AnxExecThread *producer=anx_exec_thread_owner_record();
+    if (!producer) return NX_CALLER_ERROR;
     const VOID *regions[]={r,r->ip,r->pool,r->caller,r->helper.stack,r->pool->nx_packet_pool_start,
-                          owner,owner->tx_thread_stack_start};
+                          owner,owner->tx_thread_stack_start,producer};
     const ULONG sizes[]={sizeof(*r),sizeof(*r->ip),sizeof(*r->pool),sizeof(*r->caller),
-                        r->helper.stack_size,r->pool->nx_packet_pool_size,sizeof(*owner),owner->tx_thread_stack_size};
+                        r->helper.stack_size,r->pool->nx_packet_pool_size,sizeof(*owner),owner->tx_thread_stack_size,
+                        sizeof(*producer)};
     for (unsigned i=0;i<sizeof(regions)/sizeof(*regions);i++)
         if (!disjoint(io,sizeof(*io),regions[i],sizes[i])) return NX_PTR_ERROR;
     if (r->clock && (!disjoint(io,sizeof(*io),r->clock,sizeof(*r->clock)) ||
         !disjoint(io,sizeof(*io),r->clock->stack,r->clock->stack_size))) return NX_PTR_ERROR;
+    if (io->open || io->generation==(ULONG)-1) return NX_NOT_ENABLED;
     io->domain=r;io->owner=owner;io->task=FindTask(0);io->pending=0;io->generation++;
     io->open=1;r->io=io;anx_tx_runtime_hold();return NX_SUCCESS;
 }

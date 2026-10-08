@@ -22,6 +22,7 @@ static TX_THREAD parent,threads[3];
 static AnxTxThread pb;
 static AnxExecWait pw;
 static AnxExecThread workers[3];
+static AnxExecTask attached_probe;
 static TX_EVENT_FLAGS_GROUP commands;
 static struct {ULONG before,bytes[2048],after;} stacks[5];
 static union {ULONG align;UBYTE bytes[32768];} arena;
@@ -84,7 +85,9 @@ static VOID driver_owner(ULONG input)
 {
     ULONG flags;
     NX_PACKET *rx,*tx;
-    if (input || anx_exec_ip_io_open(&io,&record)!=NX_SUCCESS) {errors++;return;}
+    if (input || anx_exec_thread_owner_record()!=&workers[0] ||
+        anx_exec_ip_io_open((AnxExecIpIo *)&workers[0].wait,&record)!=NX_PTR_ERROR ||
+        anx_exec_ip_io_open(&io,&record)!=NX_SUCCESS) {errors++;return;}
     generation=io.generation;
     if (previous_generation && anx_exec_ip_io_receive(&io,previous_generation,(NX_PACKET *)1)!=NX_NOT_ENABLED)
         errors++;
@@ -124,6 +127,11 @@ static VOID driver_owner(ULONG input)
         } else {errors++;return;}
         if (tx_event_flags_set(&commands,DONE,TX_OR)!=TX_SUCCESS) {errors++;return;}
     }
+}
+static VOID unregistered_owner(ULONG input)
+{
+    if (input || anx_exec_thread_owner_record() || anx_exec_ip_io_open(&io,&record)!=NX_CALLER_ERROR ||
+        io.open || record.io) errors++;
 }
 static VOID consumer(ULONG input)
 {
@@ -236,11 +244,13 @@ int main(void)
                                        nx_udp_socket_bind(&sockets[i],9000+i,NX_NO_WAIT)==NX_SUCCESS);
         anx_tx_context_end(&f);
         if (!cycle) CASE("actual-IP-helper-clock-and-UDP-sockets-started");
+        CHECK(anx_exec_task_start(&attached_probe,(CHAR *)"unregistered IO owner",unregistered_owner,0,
+                                 stacks[3].bytes,8192) && anx_exec_task_join(&attached_probe) && !errors);
         CHECK(start(0) && event(READY) && io.open && io.domain==&record && io.owner==&threads[0] && record.io==&io);
         CHECK(generation==cycle+1);
         CHECK(!io.pending && pool.nx_packet_pool_available==pool.nx_packet_pool_total &&
               anx_exec_ip_delete(&record)==NX_NOT_ENABLED && record.state==ANX_IP_LIVE);
-        if (!cycle) CASE("native-driver-owner-registered-and-generation-published");
+        if (!cycle) CASE("registered-driver-owner-unregistered-and-private-record-overlap-refusal");
         CHECK(start(1) && await(1,1) && start(2) && await(1,2));
         anx_tx_context_begin(&f,&parent,0);
         CHECK(sockets[1].nx_udp_socket_receive_suspension_list==&threads[1] && threads[1].tx_thread_suspended_next==&threads[2]);
