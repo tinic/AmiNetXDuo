@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Relink the actual full bsdsocket library with only the research TX backend.
 
-Diagnostic integration gate, NOT a deployable library or a size comparison.
+Diagnostic integration gate, NOT a deployable library. The default non-LTO
+relink retains symbols; --lto matches the full build's stripping policy for
+an equal-feature file-size comparison. Neither mode proves runtime/performance.
 Uses the full build's flags/vendor archives; removes the scheduler/Exec port
 archives and the baton object. Missing contracts fail the link; no success
 stubs, ignored unresolved symbols, protocol fixtures or PRNG replacements.
@@ -50,6 +52,8 @@ def main():
     ap.add_argument("--full-build", type=Path, required=True)
     ap.add_argument("--work", type=Path, required=True)
     ap.add_argument("--report", type=Path, required=True)
+    ap.add_argument("--lto", action="store_true",
+                    help="require a full LTO build and match its symbol stripping policy")
     args = ap.parse_args()
     full = args.full_build.resolve()
     work = args.work.resolve()
@@ -73,8 +77,8 @@ def main():
         else:
             flags.append(words[i])
             i += 1
-    if any(f.startswith("-flto") for f in flags):
-        ap.error("use a non-LTO diagnostic full build; this is not an A/B size measurement")
+    if any(f.startswith("-flto") for f in flags) != args.lto:
+        ap.error("--lto must match the full build's actual compile flags")
     # Retain every shipping feature/layout definition and calling convention.
     # Function sections only let the real full link choose its actual closure.
     flags += ["-I" + str(HERE), "-Werror", "-ffunction-sections"]
@@ -93,7 +97,8 @@ def main():
         if result.returncode:
             raise SystemExit("full-profile research compile failed; see " + str(log))
         objects.append(obj)
-    ar = compiler.with_name("m68k-amigaos-ar")
+    # The archive index must see slim LTO IR symbols through the GCC plugin.
+    ar = compiler.with_name("m68k-amigaos-gcc-ar")
     backend = work / "libresearch_library_backend.a"
     result = run([str(ar), "rcs", str(backend), *map(str, objects)], work, log)
     if result.returncode:
@@ -122,6 +127,8 @@ def main():
         raise SystemExit("parent reservation object replacement failed")
     link_dir = full / "src/bsdsocket"
     original_link = shlex.split((link_dir / "CMakeFiles/bsdsocket_library.dir/link.txt").read_text())
+    if args.lto and not any(f.startswith("-flto") for f in original_link):
+        raise SystemExit("LTO compile flags require an actual LTO link")
     # The real library vectors must release only Exec's Open/Close-owned outer
     # exclusion around blocking work, preserving any additional caller nesting.
     library_entry = next(e for e in entries if Path(e["file"]) == ROOT / "src/bsdsocket/library.c")
@@ -174,6 +181,19 @@ def main():
     # runnable test/candidate. A successful link is still explicitly unverified.
     if result.returncode:
         output.unlink(missing_ok=True)
+    unstripped = {"bytes": output.stat().st_size, "sha256": digest(output)} if output.exists() else None
+    symbol_policy = "diagnostic relink retains symbols; baseline policy may differ"
+    if args.lto:
+        cache = (full / "CMakeCache.txt").read_text()
+        keep = re.search(r"^AMINETXDUO_KEEP_SYMBOLS:BOOL=(ON|OFF)$", cache, re.M)
+        if not keep:
+            raise SystemExit("cannot establish baseline symbol policy")
+        symbol_policy = "retain symbols" if keep[1] == "ON" else "strip symbols"
+        if output.exists() and keep[1] == "OFF":
+            strip = re.search(r"^CMAKE_STRIP:FILEPATH=(.+)$", cache, re.M)
+            if not strip or run([strip[1], str(output)], work, log).returncode:
+                output.unlink(missing_ok=True)
+                raise SystemExit("matched baseline stripping failed")
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
     baseline = link_dir / "bsdsocket.library"
@@ -183,7 +203,11 @@ def main():
         "netx_pin": git("-C", "third_party/netxduo", "rev-parse", "HEAD"),
         "threadx_pin": git("-C", "third_party/threadx", "rev-parse", "HEAD"),
         "full_profile_flags": flags,
-        "method": "Actual full library objects/vendor archives, full-profile compiled research backend and retained pinned TX bodies; old ThreadX scheduler/port archives removed, netstack baton object removed. No fixtures/stubs/unresolved-symbol bypass. Diagnostic non-LTO closure, not runtime/ABI/size/performance evidence.",
+        "method": "Actual full library objects/vendor archives, full-profile compiled research backend and retained pinned TX bodies; old ThreadX scheduler/port archives removed, netstack baton object removed. No fixtures/stubs/unresolved-symbol bypass. " + ("Matched full-feature LTO compile/link and symbol policy; file size only, runtime/performance unverified." if args.lto else "Diagnostic non-LTO closure with unstripped research output; not a matched size comparison or runtime/performance evidence."),
+        "lto": args.lto,
+        "research_symbol_policy": symbol_policy,
+        "research_unstripped_binary": unstripped,
+        "research_binary": {"bytes": output.stat().st_size, "sha256": digest(output)} if output.exists() else None,
         "baseline_binary": {"bytes": baseline.stat().st_size, "sha256": digest(baseline)},
         "removed_scheduler_archives": removed,
         "removed_netstack_members": ["netstack_baton.c.obj"],
