@@ -1110,7 +1110,8 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
     /* Exec's Close-owned outer Forbid is not a caller's critical section.
      * As in Open, lib_OpenCnt pins the segment throughout blocking cleanup.
      * Extra caller exclusion is unsupported: retain the complete base and
-     * reference for a later ordinary close, rather than partly dismantle it. */
+     * reference. CloseLibrary has no error result; this pins permanently unless
+     * a research caller explicitly retries. Deferred foreign cleanup is OPEN. */
     if (SysBase->TDNestCnt != 0 || SysBase->IDNestCnt >= 0)
     {
         ami_log(AMI_LOG_ERROR, "research CloseLibrary refused caller exclusion");

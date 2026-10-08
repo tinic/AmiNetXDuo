@@ -55,7 +55,33 @@ static LONG acceptfd(struct Library *b,LONG fd)
 /* IPv4 uses the historical BSD sockaddr; IPv6 follows the published ANXD ABI. */
 struct address4 {UBYTE len,family;UWORD port;ULONG address;UBYTE padding[8];};
 struct address6 {UBYTE family,pad;UWORD port;ULONG flow;UBYTE address[16];ULONG scope;};
-int main(void)
+/* Explicit research refusal probe. Real clients cannot learn refusal from the
+ * void CloseLibrary API, so this is not a supported recovery policy. */
+static int protected_close(void)
+{
+    ULONG signals=FindTask(NULL)->tc_SigAlloc;
+    struct Library *base=OpenLibrary((STRPTR)"bsdsocket.library",4),*master;
+    CHECK(base);
+    Forbid();master=(struct Library *)FindName(&SysBase->LibList,(STRPTR)"bsdsocket.library");Permit();
+    CHECK(master && master->lib_OpenCnt==1);CASE("real-open-pins-library-before-exclusion-probe");
+    Forbid();CloseLibrary(base);BOOL preserved=SysBase->TDNestCnt==0 && SysBase->IDNestCnt<0;Permit();
+    CHECK(preserved && master->lib_OpenCnt==1 && FindSemaphore((STRPTR)AMI_HEALTH_NAME));
+    CASE("extra-caller-Forbid-refuses-before-base-or-count-mutation");
+    Disable();CloseLibrary(base);preserved=SysBase->TDNestCnt<0 && SysBase->IDNestCnt==0;Enable();
+    CHECK(preserved && master->lib_OpenCnt==1 && FindSemaphore((STRPTR)AMI_HEALTH_NAME));
+    CASE("caller-Disable-refuses-with-interrupt-and-reference-state-preserved");
+    CloseLibrary(base);
+    CHECK(master->lib_OpenCnt==0 && !FindSemaphore((STRPTR)AMI_HEALTH_NAME) &&
+          !FindTask((STRPTR)"Exec NetX management") && !FindTask((STRPTR)"Exec NetX clock") &&
+          !FindTask((STRPTR)"AmiNetXDuo ip"));
+    CASE("explicit-research-retry-in-normal-context-truly-retires-owners");
+    Forbid();APTR segment=LP0(0x12,APTR,expunge,,master);Permit();
+    CHECK(segment);UnLoadSeg((BPTR)segment);
+    Forbid();master=(struct Library *)FindName(&SysBase->LibList,(STRPTR)"bsdsocket.library");Permit();
+    CHECK(!master && FindTask(NULL)->tc_SigAlloc==signals);CASE("actual-unload-and-signal-recovery-after-probe");
+    CHECK(passed==5);say("research_exec_library=PASS 5/5 exclusion_probe_only=1\n");return 0;
+}
+int main(int argc,char **argv)
 {
     struct Library *a,*b,*master;
     char payload[]="real library loopback",received[64];
@@ -63,6 +89,8 @@ int main(void)
     struct address6 v6={AF_INET6,0,45124,0,{0},0};
     LONG fd,listener,client,accepted;
     ULONG signals=FindTask(NULL)->tc_SigAlloc;
+    if (argc==2 && !strcmp(argv[1],"EXCLUSION")) return protected_close();
+    CHECK(argc==1);
     v6.address[15]=1;
     say("research_exec_library=START\n");
     for (unsigned cycle=0;cycle<2;cycle++)
