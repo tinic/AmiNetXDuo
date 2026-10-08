@@ -1821,3 +1821,61 @@ receipts are indexed in /Users/turo/ai/evidence/exec-threadx-lto-comparison.json
 Task-created full/relink builds, copied ROM, staged helper and all three disposable
 guest drives/configs/logs are removed after verification. User assets, hardware,
 standing guests, unmerged branch, vendor pins and upstream audit are preserved.
+
+## Performance comparison: 2026-10-08
+
+Actual source **363576077bc3271057c8f681c0174bc8c95b8c9c**, clean and
+unmerged. Five fresh pairs execute the same public LVO-only command against
+matched full-feature CPU-any Release/Os/LTO stripped libraries, in AB/BA/AB/BA/AB
+order. A1200 emulator uses 68020, multiplier4, JIT0, no warp; unchanged CPU
+kernels calibrate 13.048–13.077 MHz in each guest boot. EClock rate709379 Hz.
+Both DOS peers have priority0. No embedded backend/NetX or fixture entropy.
+The tester alone uses68020 for the existing assembly calibration kernels.
+
+All **ten actual native boots PASS6/6 (60 case verdicts)** and all **48 host
+models/negative guards PASS**. Every final boot has guest/harness exit0, one
+boot token, no terminal panic/illegal/guru/reset, and identical tester, ROM,
+emulator, harness, normalized configuration and effective TCP windows. Only
+owned disk paths, serial port and descriptions are normalized out. Parent
+RCV/SND25088/8192, peer50176/8192. Every 64B reply and the entire1MiB stream is
+verified after its measured interval. Bulk stops after peer drain, before
+verification, release ACK and teardown. Final entry/version checks and link pass.
+
+| Metric (fastest per arm over five boots) | ThreadX/baton | Exec prototype |
+| --- | ---: | ---: |
+| Full LTO library file bytes | 355,340.00 | 375,492.00 |
+| Cold first socket, us | 1,031.89 | 1,726.86 |
+| Cached FIONREAD, us/call | 362.82 | 820.56 |
+| Alternating private base, us/call | 364.31 | 1,773.78 |
+| TCP 64-byte request/reply p50, ms | 8.11 | 15.58 |
+| TCP 1 MiB drain, KiB/s | 213.67 | 109.93 |
+
+The prototype is **20,152 bytes larger (+5.67%)** including retained terminal
+panic diagnostics. TCP throughput is about **48.5% lower**; the paired median
+latency ratio is **2.03x**, cached call ratio **2.26x**, base-switch ratio **4.87x**.
+Raw values, paired medians/ranges and each receipt are retained in
+/Users/turo/ai/evidence/exec-threadx-perf-comparison.json. Connected guest RAM
+consumption medians are935936B baseline and936480B prototype (+544B); these are
+whole-guest snapshots including client/OS allocations, not backend peak RAM or
+proof of a leak. Post-unload available RAM matches each pair.
+
+The initial prototype benchmark really failed. Terminal diagnostics identified
+`_tx_time_get`: production WaitSelect reads time outside its NetX bracket,
+which the upstream read-only API permits, but the prototype required a caller
+frame. The independently reviewed research correction serializes the read with
+platform enter/leave, preserving caller state and the other strict guards.
+Regression checks cover no frame, an existing outer exclusion, a caller frame
+and a marked frame. Temporary service-name instrumentation is removed so existing
+negative tests retain their exact messages. Compile failures, rebooting pilots
+and their distinct SHAs remain recorded as FAIL/NOT_RUN and excluded from the
+comparison; final results are fresh executions after the fix.
+
+**Continuation benefit criterion UNMET:** this prototype is larger and slower
+in every measured operation. The benchmark is complete; further redesign is a
+separate decision. Measurements cover boardless IPv4 loopback, not physical
+network/hardware or ISR compatibility. The branch remains research-only.
+Useful libraries, command, compressed maps, source review, configuration, hashes
+and reproducible measurement scripts are retained under
+/Users/turo/ai/evidence/exec-threadx-perf-artifacts. Owned builds, copied ROM,
+helper and all15 disposable guest stages are removed after receipt verification;
+user assets, hardware disks, standing guests, audit, pins and other owners remain.
