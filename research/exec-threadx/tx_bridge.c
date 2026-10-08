@@ -558,10 +558,11 @@ UINT _tx_timer_create(TX_TIMER *t, CHAR *name, VOID (*callback)(ULONG),
     TX_TIMER *other;
     timer_lifecycle();
     if (!t) return TX_TIMER_ERROR;
-    if (!initial || (activate!=TX_AUTO_ACTIVATE && activate!=TX_NO_ACTIVATE)) return TX_TICK_ERROR;
+    if (!initial) return TX_TICK_ERROR;
+    if (activate!=TX_AUTO_ACTIVATE && activate!=TX_NO_ACTIVATE) return TX_ACTIVATE_ERROR;
     other=_tx_timer_created_ptr;
     for (ULONG i=0;i<_tx_timer_created_count;i++,other=other->tx_timer_created_next)
-        need(other!=t,"duplicate timer creation");
+        if (other==t) return TX_TIMER_ERROR;
     need(_tx_timer_created_count!=(ULONG)-1,"timer count overflow");
     return anx_tx_original_timer_create(t,name,callback,input,initial,reload,activate);
 }

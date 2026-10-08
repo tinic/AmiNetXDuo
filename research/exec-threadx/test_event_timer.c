@@ -273,6 +273,10 @@ int main(int argc,char **argv)
     /* Partial countdown survives deactivate/reactivate; active change is ignored. */
     init(); calls=0; anx_tx_context_begin(&frame,&callers[0].thread,0);
     CHECK(_tx_timer_create(&timer,(CHAR *)"counter",count_callback,123,3,4,TX_AUTO_ACTIVATE)==TX_SUCCESS);
+    CHECK(_tx_timer_create(&timer,(CHAR *)"duplicate",count_callback,123,1,1,TX_AUTO_ACTIVATE)==TX_TIMER_ERROR);
+    CHECK(_tx_timer_create(&other,(CHAR *)"bad ticks",count_callback,123,0,1,TX_AUTO_ACTIVATE)==TX_TICK_ERROR);
+    CHECK(_tx_timer_create(&other,(CHAR *)"bad activate",count_callback,123,1,1,99)==TX_ACTIVATE_ERROR);
+    CHECK(_tx_timer_created_count==1 && timer.tx_timer_internal.tx_timer_internal_remaining_ticks==3);
     CHECK(_tx_timer_activate(&timer)==TX_ACTIVATE_ERROR);
     CHECK(_tx_timer_change(&timer,8,9)==TX_SUCCESS && timer.tx_timer_internal.tx_timer_internal_remaining_ticks==3);
     anx_tx_context_end(&frame); tick();
