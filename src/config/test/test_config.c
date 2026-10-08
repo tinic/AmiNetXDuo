@@ -1529,7 +1529,7 @@ static void test_interface_numeric_reassignment(void)
         "device=a2065.device unit=101 mtu=1500 rxbuffer=4096 "
         "tcpackmax=2222 tcpgrowrtt=123 tcpwanwindow=65536 groframes=4 "
         "ackpace=20000 iprequests=7 arprequests=9 writerequests=3 "
-        "priority=-17 mdns=yes\n";
+        "priority=-17 mdns=yes configure=dhcp\n";
     unsigned i;
 
     printf("interface: numeric boundaries and rejected reassignment preserve fields\n");
