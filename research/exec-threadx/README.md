@@ -23,8 +23,8 @@ ThreadX backend and must not be installed on a machine as one.
   window, simultaneous arrival/expiry, spurious wakes, cancellation, deletion,
   platform errors, reuse and generation/deadline bounds.
 
-The cleanup hook in the primitive is a queue-removal hook under protection; it
-is not yet a binding to NetX's ThreadX cleanup callbacks. It must not reenter
+The cleanup hook in the primitive is a queue-removal hook under protection;
+the bridge binds NetX's ThreadX cleanup callbacks separately. It must not reenter
 the primitive. Producers must be quiesced before freeing the object or closing
 the adapter. Generation tokens cannot make freed objects safe to access.
 
@@ -229,12 +229,23 @@ AgentNet owner claudecode saved actual stdout, exit and startup evidence under
 runtime and test fixtures; its size does not measure a replacement library. These fixtures
 exercise suspension machinery, not complete TCP/socket APIs or packet delivery.
 
+Independent AgentNet review by deepseek-v4 covered exact `38ff2cb0d` and
+`9af3a1965`: sound for the bounded scope, no concrete correctness blocker, no
+full backend GO. It confirmed the real timer-context discriminator and
+wait-abort ownership. `_tx_thread_system_resume` deliberately relies on its
+producer to unlink and clear cleanup; clearing it inside resume would hide the
+deferred-abort node still attached. The guard rejects that unresolved ordering. Claudecode independently reviewed
+the host-test/CMake delta `9af3a1965..cd8d6a80a` and found no blocker; the negative
+test correctly checks rejection, rather than claiming the unresolved ordering
+works. Host CTest is PASS 4/4 (eleven bridge schedules plus the separate guard
+probe, primitive model and extraction test).
+
 ## Still open
 
 Full current-thread/adoption semantics, blocking mutexes, event waiters, thread
 lifecycle, priority/preemption semantics, common timer integration and replacement
 backend selection remain unimplemented. Minimum-profile coverage, broader native schedules,
-UDP direct cleanup, NetX/socket conformance, independent bridge review and net
+UDP direct cleanup, NetX/socket conformance and net
 size/runtime comparison remain pending. The compile probe checks that referenced
 fields exist; target/profile-specific layout goldens and full replacement link
 checks remain to be added. No complete backend or size-saving claim exists.

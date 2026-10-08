@@ -1,7 +1,7 @@
 # Research: an Exec backend for the NetX Duo ThreadX contract
 
-**Status: research only; first wait primitive implemented and native smoke
-verified, no NetX replacement or backend conformance validation.**
+**Status: research only; wait primitive and bounded real-NetX suspension bridge
+implemented and native smokes verified. Full backend/conformance remains open.**
 The human explicitly placed this work on a research branch on 2026-10-07.
 It is outside near-term shipping work. It must not change shipping defaults,
 release gates or installed machines. The existing ThreadX backend remains the
@@ -142,8 +142,9 @@ affected regression evidence; branch existence is not approval to integrate.
   recorded in the research README. Its NetX pin differs from beta8, so it is
   architectural input. The subsequent implementation review covers `f0187a288`
   and `80e28dfd2`; extraction fixes and compiler regressions address its concrete
-  header/member/marker/delta findings. Backend layout goldens, link validation
-  and cleanup/scheduler binding remain open.
+  header/member/marker/delta findings. Backend layout goldens, full replacement link validation
+  and complete cleanup/scheduler binding remain open. The bounded spike 2
+  implementation and review are recorded below.
 
 Primary references:
 
@@ -157,10 +158,11 @@ The isolated research project now links actual pinned NetX TCP suspension and
 cleanup/deferred-check code with actual ThreadX timeout/wait-abort, using the
 bounded Exec bridge described in `research/exec-threadx/README.md`. Host schedules
 cover publication, early wake, cancellation/timeout ownership, deferred lists,
-stale expiry and identity restoration. The m68k second-task smoke compiles and passed all five native cases on one
-boardless A1200 run (38ff2cb0d, binary 71c27079, exit 0, stacks 8192).
-Independent exact-commit review is pending. This remains
-research only: no shipping backend selection, vendor edits, full scheduler
+stale expiry and identity restoration. The m68k second-task smoke compiles and
+passed all five native cases on one boardless A1200 run (38ff2cb0d, binary
+71c27079, exit 0, stacks 8192). deepseek-v4 independently reviewed exact
+38ff2cb0d + 9af3a1965: sound within bounded scope, no concrete blocker and no
+full backend GO. This remains research only: no shipping backend selection, vendor edits, full scheduler
 conformance or measured net savings.
 
 The cleanup-guard follow-up 9af3a1965 passed the same five native cases (binary
@@ -169,3 +171,11 @@ the IP actor drains before releasing its boundary. The unresolved ordering
 without that drain is rejected by a separate host guard probe. A general
 non-IP deferred-abort dispatch policy remains open; the research backend must
 not be enabled in production.
+
+Independent review is complete for this checkpoint: deepseek-v4 found no
+bounded bridge blocker at 38ff2cb0d + 9af3a1965, and claudecode found no blocker
+in the host negative-test/CMake delta 9af3a1965..cd8d6a80a. Host CTest PASS 4/4
+includes eleven bridge schedules and a separate rejection test, not twelve
+successful cleanup schedules. The final rebuilt native binary is identical
+to the guarded binary actually run above. Task build/staging outputs were
+removed after retaining small logs, hashes, binary and map evidence.
