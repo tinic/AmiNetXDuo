@@ -54,14 +54,8 @@ LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
     {
         if (ami_sana2_bindings[i].iface == iface)
         {
-            ami_sana2_bindings[i].ip    = ip;
-            ami_sana2_bindings[i].index = index;
-            ami_sana2_bindings[i].iface = iface;
-            Permit();
-
-            iface->ip    = ip;
-            iface->index = index;
-            return AMI_NET_OK;
+            free_slot = (LONG)i;
+            break;
         }
 
         if (free_slot < 0 && ami_sana2_bindings[i].iface == NULL)

@@ -445,6 +445,65 @@ static void test_reattach_updates_existing_binding(void)
     ami_sana2_unbind(&blocker);
 }
 
+static void test_binding_capacity(void)
+{
+    static AmiSana2If holders[AMI_CFG_MAX_ATTACHED];
+    NX_IP new_ip;
+    UWORD i;
+    ULONG ret;
+
+    printf("sana2: a full table permits replacement, refuses new bindings\n");
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    memset(holders, 0, sizeof(holders));
+    memset(&new_ip, 0, sizeof(new_ip));
+    h_check(ami_sana2_bound_count() == 0, "binding table starts empty");
+    h_check(ami_sana2_attach(NULL, &ip, 0) == AMI_NET_ERR_STATE,
+            "NULL interface is refused");
+    h_check(ami_sana2_attach(&iface, NULL, 0) == AMI_NET_ERR_STATE,
+            "NULL IP is refused");
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+        h_check(ami_sana2_attach(&holders[i], &ip, (UINT)i) == AMI_NET_OK,
+                "each available slot accepts a binding");
+    h_check(ami_sana2_bound_count() == AMI_CFG_MAX_ATTACHED,
+            "table count reaches capacity");
+
+    iface.ip = &ip;
+    iface.index = 77;
+    h_check(ami_sana2_attach(&iface, &new_ip, 78) == AMI_NET_ERR_STATE,
+            "a new binding is refused at capacity");
+    h_check(iface.ip == &ip && iface.index == 77,
+            "refusal leaves the interface's IP and index intact");
+    h_check(h_forbid_nest == 0, "capacity refusal balances Forbid");
+
+    holders[AMI_CFG_MAX_ATTACHED - 1].bps = 54321;
+    h_check(ami_sana2_attach(&holders[AMI_CFG_MAX_ATTACHED - 1], &new_ip, 0)
+                == AMI_NET_OK,
+            "last existing binding can be replaced in a full table");
+    h_check(ami_sana2_bound_count() == AMI_CFG_MAX_ATTACHED,
+            "replacement creates no duplicate binding");
+    ret = 0xDEADBEEFUL;
+    memset(&req, 0, sizeof(req));
+    req.nx_ip_driver_command = NX_LINK_GET_SPEED;
+    req.nx_ip_driver_ptr = &new_ip;
+    req.nx_ip_driver_interface = &interface_obj;
+    req.nx_ip_driver_return_ptr = &ret;
+    ami_sana2_driver_entry(&req);
+    h_check(ret == 54321 && req.nx_ip_driver_status == NX_SUCCESS,
+            "replacement is published under the new IP and index");
+
+    ami_sana2_unbind(&holders[0]);
+    h_check(ami_sana2_attach(&iface, &ip, 77) == AMI_NET_OK,
+            "a freed slot accepts the previously refused binding");
+    h_check(ami_sana2_bound_count() == AMI_CFG_MAX_ATTACHED,
+            "refilling restores the exact count");
+    ami_sana2_unbind(&iface);
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+        ami_sana2_unbind(&holders[i]);
+    memset(holders, 0, sizeof(holders));
+    h_check(ami_sana2_bound_count() == 0 && h_forbid_nest == 0,
+            "cleanup removes every binding and balances Forbid");
+}
+
 static void test_unbound_send_releases_the_packet(void)
 {
     printf("sana2: an unbound interface does not keep the packet\n");
@@ -1028,6 +1087,7 @@ int main(void)
     test_lookup_and_memoise();
     test_lookup_discriminates();
     test_reattach_updates_existing_binding();
+    test_binding_capacity();
     test_unbound_send_releases_the_packet();
     test_unbound_without_a_packet();
     test_unbound_control_ignores_stale_packet();
