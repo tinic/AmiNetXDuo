@@ -151,6 +151,7 @@ int main(void)
     memory("opened_two_bases");
     start=now();LONG fa=sock(a,SOCK_DGRAM);ULONG cold=now()-start;CHECK(fa>=0);metric("first_socket",cold,1);
     LONG fb=sock(b,SOCK_DGRAM),n;CHECK(fb>=0);
+    memory("two_sockets_adopted");
     for(ULONG i=0;i<256;i++)CHECK(!available(a,fa,&n) && n==0);
     start=now();for(ULONG i=0;i<CALLS;i++)CHECK(!available(a,fa,&n) && n==0);ULONG ticks=now()-start;CHECK(ticks);metric("cached_fionread",ticks,CALLS);CASE("cached-public-bracket-empty-UDP-queue");
     for(ULONG i=0;i<256;i++)CHECK(!available(i&1?b:a,i&1?fb:fa,&n) && n==0);

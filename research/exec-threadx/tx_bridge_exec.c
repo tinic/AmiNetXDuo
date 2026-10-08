@@ -20,7 +20,11 @@ static int can_pause(void *arg,unsigned levels)
 }
 static void panic(void *arg,const char *text)
 {
-    (void)arg; (void)text;
+    (void)arg;
+    const char *prefix="research_exec_panic=";
+    while (*prefix) {LP1NR(0x204,RawPutChar,UBYTE,*prefix++,d0,,SysBase);}
+    if (text) while (*text) {LP1NR(0x204,RawPutChar,UBYTE,*text++,d0,,SysBase);}
+    LP1NR(0x204,RawPutChar,UBYTE,'\n',d0,,SysBase);
     /* A violation is a failed disposable guest, never a successful stub. */
     Alert(0x80000001UL);
     for (;;) {}
