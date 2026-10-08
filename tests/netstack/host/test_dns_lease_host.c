@@ -136,6 +136,12 @@ static void h_case_search_lease_ownership(void)
             "one lease cannot own a case-folded duplicate twice");
     h_check(ami_ns_dhcp_search_lease_add(&lease, 0U, "two.test"),
             "renewal can add another suffix");
+    h_check(!ami_ns_dhcp_search_lease_has(&lease, 0U, "one") &&
+            !ami_ns_dhcp_search_lease_has(&lease, 0U, "one.test."),
+            "suffix prefixes and root dots are distinct lease values");
+    h_check(!ami_ns_dhcp_search_lease_remove(&lease, 0U, "one") &&
+            ami_ns_dhcp_search_lease_count(&lease, 0U) == 2U,
+            "a prefix withdrawal preserves the original suffixes");
     h_check(ami_ns_dhcp_search_lease_remove(&lease, 0U, "ONE.TEST"),
             "one interface can withdraw its shared suffix");
     h_check(ami_ns_dhcp_search_lease_has(&lease, 1U, "one.test"),
@@ -146,6 +152,22 @@ static void h_case_search_lease_ownership(void)
             "search withdrawal compacts the renewed lease set");
 }
 
+static void h_case_search_high_bytes(void)
+{
+    AmiNsDhcpSearchLease lease;
+
+    memset(&lease, 0, sizeof(lease));
+    h_check(ami_ns_dhcp_search_lease_add(&lease, 0U, "\200.test"),
+            "lease comparison accepts opaque bytes without folding them");
+    h_check(ami_ns_dhcp_search_lease_has(&lease, 0U, "\200.TEST") &&
+            !ami_ns_dhcp_search_lease_has(&lease, 0U, "\240.TEST"),
+            "only ASCII letters are case folded");
+    h_check(!ami_ns_dhcp_search_lease_remove(&lease, 0U, "\240.test") &&
+            ami_ns_dhcp_search_lease_remove(&lease, 0U, "\200.TEST") &&
+            ami_ns_dhcp_search_lease_count(&lease, 0U) == 0U,
+            "withdrawal retains distinct high bytes and matches ASCII case");
+}
+
 
 int main(void)
 {
@@ -154,6 +176,7 @@ int main(void)
     h_case_invalid_values();
     h_case_shared_reference_counts();
     h_case_search_lease_ownership();
+    h_case_search_high_bytes();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return (h_failures == 0) ? 0 : 1;

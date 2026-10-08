@@ -5,6 +5,7 @@
  */
 
 #include "netstack_dns_lease.h"
+#include "netstack_dns_domain.h"
 
 
 BOOL ami_ns_dhcp_dns_lease_has(const AmiNsDhcpDnsLease *lease,
@@ -93,25 +94,6 @@ ULONG ami_ns_dhcp_dns_lease_at(const AmiNsDhcpDnsLease *lease,
 }
 
 
-static char ami_ns_search_fold(char c)
-{
-    if (c >= 'A' && c <= 'Z')
-        return (char)(c + ('a' - 'A'));
-    return c;
-}
-
-
-static BOOL ami_ns_search_same(const char *a, const char *b)
-{
-    while (*a != '\0' && *b != '\0')
-    {
-        if (ami_ns_search_fold(*a++) != ami_ns_search_fold(*b++))
-            return FALSE;
-    }
-    return (BOOL)(*a == *b);
-}
-
-
 BOOL ami_ns_dhcp_search_lease_has(const AmiNsDhcpSearchLease *lease,
                                   UWORD interface_index, const char *domain)
 {
@@ -122,7 +104,7 @@ BOOL ami_ns_dhcp_search_lease_has(const AmiNsDhcpSearchLease *lease,
         return FALSE;
 
     for (i = 0; i < lease->count[interface_index]; i++)
-        if (ami_ns_search_same(lease->domain[interface_index][i], domain))
+        if (ami_ns_domain_same(lease->domain[interface_index][i], domain))
             return TRUE;
     return FALSE;
 }
@@ -169,7 +151,7 @@ BOOL ami_ns_dhcp_search_lease_remove(AmiNsDhcpSearchLease *lease,
 
     count = lease->count[interface_index];
     for (i = 0; i < count; i++)
-        if (ami_ns_search_same(lease->domain[interface_index][i], domain))
+        if (ami_ns_domain_same(lease->domain[interface_index][i], domain))
             break;
     if (i == count)
         return FALSE;
