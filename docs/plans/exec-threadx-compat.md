@@ -792,6 +792,105 @@ Equal-feature clock/protocol maintenance is required for the later A/B compariso
 Next gates: real protocol traffic, socket/driver concurrency and lifetimes, full
 replacement-library integration and equal-feature size/performance comparison.
 
+## Spike 15: real IPv4 UDP/TCP loopback traffic
+
+Implementation: 01f214881fc9c2efe67bd72bc9fab1e1d8c017e3, against reviewed
+spike-14 checkpoint 3bf732f7d. Research sources only; pinned vendor/public headers,
+shipping backend selection and hardware are unchanged.
+
+The protocol target compiles unchanged NetX common sources into an archive and
+extracts their actual dependency closure. The existing IP bridge supplies its
+reviewed wait/packet/ThreadX services; TCP additionally links unchanged pinned
+ThreadX tx_thread_info_get, used for the IP helper's logical priority. There are
+no successful terminal protocol stubs. The start-group archive order resolves
+shared receive/packet/cleanup symbols from research_ip_bridge first; these use
+unchanged pinned bodies with the existing guarded compiler aliases. The
+file-scoped ip_create/delete and packet_allocate/pool_delete renames apply to
+both vendor archives. That extraction order and source-file scope are part of
+the fixture link contract, not independent replacement definitions.
+A private compiler-included header gives
+only this disposable vendor fixture a deterministic NX_RAND/NX_SRAND PRNG. It
+provides controlled test input, not production entropy or a security verdict.
+The SYN-cache handshake-millisecond dependency reads the live automatic clock's
+real monotonic EClock through its retained device; it is not a fabricated tick.
+
+The synchronous driver establishes a primary TEST-NET IPv4 interface. Actual
+NetX internal loopback builds/copies/checksums packet headers, queues packets to
+the real IP helper, and transfers ownership through UDP/TCP services. Any physical
+packet-send driver request fails the fixture; no external peer or wire claim.
+The real automatic clock runs periodic and TCP fast timers. It must start
+before TCP SYN-cache services can consult the live handshake clock. For the
+final negative retirement tests the parent temporarily uses Exec priority2,
+above helper1 and clock0, so neither owner dispatches between the negative
+checks and the real stop boundary. The native ACK wait admits their retirement;
+the parent restores its original priority afterward. This is fixture scheduling,
+not a production priority or performance result.
+
+Only the protocol target opts into ANX_REAL_PROTOCOL_LINK. Its deletion
+preflight admits exact pinned UDP and consistent TCP receive/queue/periodic/fast/
+deferred-cleanup handlers, with no sockets, listeners, active/accepted SYN-cache
+entries, queued packets or retained pool ownership. TCP requires the actual
+second timer and exact two-member created ring. Unknown/partial handlers still
+refuse before stopping owners. It does not clear enabled protocol callbacks to
+make the old gate pass. Both real IP timers are deactivated under the same stop
+boundary, clock/helper native retirement is acknowledged outside serialization,
+and unchanged raw IP delete retires both timers and all created objects.
+Ordinary retained IP/clock targets keep their strict protocol-free gate.
+
+The new guest exercises three UDP payload lengths (129, 513, 1300 bytes) with
+actual blocked receives and packet-content checks. Corruption changes one byte
+of the real vendor-generated queued copy without repairing its checksum; actual
+UDP checksum rejection and timeout cleanup must recover ownership. TCP performs
+SYN/SYN-ACK/ACK with blocked server accept, bidirectional 193-byte data, a chained
+2048-byte send with segmentation and complete stream-content checks, receive
+timeout/deferred cleanup, actual automatic fast/one-second maintenance, and an
+orderly FIN exchange. The passive helper callback sends the real FIN without
+blocking itself; active disconnect waits for its actual completion. Unbind,
+unaccept, unlisten and delete must return all ACK/data packets. Unknown protocol
+handler and outstanding-packet retirement are refused. Two whole protocol/IP/
+clock cycles reuse poisoned socket/IP/stacks and recover signals, canaries,
+created rings, pool and runtime.
+
+Root retained host CTest passes 39/39; new native protocol integration is not host
+modeled. m68k -Werror and startup-first gates pass, including the unchanged common
+core archive at 01f214881. The first native protocol run failed after four
+completed cases at the compound corrupt-UDP check; its original artifact
+34eeedb4 (122,544 bytes) and failure receipts are retained. The actual pinned
+receive loop releases a rejected packet, then returns a timed error without
+clearing the caller's output pointer (nx_udp_socket_receive.c:229-233, 394).
+Fixture-only correction 25e94b05e660f958a3476e43973822c41e5829c1 separately asserts
+NX_NO_PACKET, exactly one checksum error, waiter cleanup, full packet-pool
+recovery and a subsequent empty no-wait receive with null output. Error output
+is never dereferenced. No backend/vendor behavior or checksum gate is changed.
+The corrected protocol artifact c7ec2dce (123,080 bytes) passed 19/19,
+helper2/clock2/restarts1, exit0 after17s. Root verified actual stdout/startup/
+runner and every receipt hash. Deepseek independently confirmed the correction
+against pinned receive/cleanup bodies in all9/9 source-review parts; no blocker.
+The original failure remains retained as a fixture false negative, not a pass.
+
+The retained clock artifact 6755c907 (78,940 bytes) passed 16/16 on the original
+01f214881, exit0 after18s, and is byte-identical after the fixture correction.
+Root verified actual stdout/startup/runner and all local receipt hashes. Both
+original runs and the corrected protocol run used a boardless A1200 KS3.1 r40.68, parent/helper/clock stacks8192,
+harness300b22e8 and -t90. Root read the complete deepseek full source review
+25/25 plus correction9/9; no blocker in this bounded scope. Native execution is
+separate from that read-only review. Owned build outputs and native staging were
+removed; exact artifacts, original failure, hashes, cost attribution and useful
+receipts are retained. The unmerged research branch remains preserved.
+Evidence is retained under /Users/turo/ai/evidence/exec-threadx-spike15*;
+queued work is not a pass.
+
+The partial non-LTO protocol map attributes 19,788 backend .text bytes plus
+3,260 retained ThreadX bytes (23,048 subtotal), 42,032 selected NetX bytes and
+3,300 clock division helpers separately. Research guards/diagnostics are
+included; fixture PRNG/handshake/driver/tests, startup/libc/other helpers, data/
+BSS/relocations and native resources are excluded. Not a full replacement-library
+link, net saving or performance result. No subtraction from shipping LTO spans.
+
+Next gates: concurrent socket/API and asynchronous driver lifetimes, external-peer
+wire coverage, full replacement-library integration and equal-feature size/
+performance comparison. IPv6 remains unproved by this IPv4 experiment.
+
 ## Required performance comparison after functional integration
 
 The user explicitly requests a general performance comparison as well as size,
