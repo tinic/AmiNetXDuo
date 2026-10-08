@@ -396,3 +396,124 @@ the helper before deleting its mutex/events/thread; helper event waiting must be
 cleaned and retired without returning into its endless loop or releasing storage
 while a producer still has it. Complete those service/lifetime boundaries before
 claiming real IP create/delete or producing an economic comparison.
+
+## Spike 9 public creation boundary checkpoint
+
+Exact `a87f95f58f4ef1032e899cd43797796f3f2aec53` adds a native-only reserved-worker
+implementation of the pinned public thread create/resume/delete signatures.
+Preparation opens private IO in the real owner and parks it on SIGF_SINGLE while
+leaving the public control block untouched. Creation consumes that reservation,
+initializes/preserves the actual TX_THREAD fields, binds its runtime owner, updates
+the circular created list and signals AUTO_START inside the caller's boundary.
+The owner cannot enter until the outer boundary releases. DONT_START remains
+suspended until explicit initial resume. No constructor call waits for startup.
+
+Normal completion removes the runtime binding and retains the public ID with
+TX_COMPLETED. Private IO close and native no-gap FINISHED/RemTask follow; only
+then may creator-side public delete remove the ID/list/native pointers, free ACK
+and allow caller-owned storage reuse. Unbound reservation cancellation reaps
+without public control mutation. Domain holds reject runtime reset with retained
+reservations, including completed but undeleted records.
+
+Host 27/27 passes: retained models plus field-preserving binding, duplicate/
+foreign/active/owned-mutex/pinned retirement guards, completed ID and reserved
+reset rejection. Native 11/11 passes, 9 tasks reaped including six public restarts
+and one unbound cancellation, exit 0 after 14s, one boardless A1200/KS3.1 r40.68
+run, parent/child stacks 8192 bytes. Actual output/startup/runner/hashes were read
+and verified under `/Users/turo/ai/evidence/exec-threadx-spike9-native`.
+Binary `4bbcf5a4`, 57,132 bytes including fixtures/runtime; native staging is
+removed and local owned build is cleaned. Independent deepseek-v4 read-only
+source review is complete (all 19 parts): no blocker in this bounded scope.
+The reviewer ran no tests; host execution is root's, native execution claudecode's.
+
+Final code `d3720c81826960b046e44c4aecfa6ad4ff49ceb3` corrects the initial
+31-minus-priority mapping, which would place logical IP priority 2 at Exec 29.
+Logical 0..15 now map to Exec 1, 16..31 to Exec 0, capped at the production
+port's priority; ties are deliberate and logical control fields are preserved.
+Static profile guards require review if the pinned priority configuration changes.
+Host 27/27 and the m68k cross/startup gate pass on this final code. Its separate
+native run passes 12/12, 10 tasks reaped, six restarts, exit 0 after 14s, including
+actual logical-priority-2 creation/entry/completion/deletion at Exec priority 1.
+Machine, stacks and harness match the baseline. Root verified actual stdout,
+startup, runner and all evidence hashes in
+`/Users/turo/ai/evidence/exec-threadx-spike9b-native`; binary `62efc96f`, 58,048
+bytes including fixtures/runtime. Independent source review of the small delta
+is complete (all eight parts): no blocker in the bounded scope. Both source
+verdicts and both exact native receipts are retained separately. Final owned
+local build and native staging are removed.
+
+The partial non-LTO standalone map attributes 11,520 bytes of backend .text,
+2,528 bytes of retained pinned ThreadX bodies, plus 3,300 bytes of clock division
+helpers. `/Users/turo/ai/evidence/exec-threadx-spike9-code-cost.json` retains exact
+per-object attribution and limitations. This excludes fixtures/startup, other
+runtime sections/allocations and missing backend/NetX components. It cannot be
+subtracted from shipping LTO spans or treated as finished net library savings.
+
+Strict ThreadX scheduling conformance is not established by the capped Exec
+priority bands. Unequal thresholds/nonzero slices are rejected
+with TX_FEATURE_NOT_ENABLED before public mutation. Actual NetX IP creation's
+hardcoded one-tick slice remains unsupported. Unreserved allocation, general
+delayed suspend/resume, threshold changes, forced termination, mutex/event
+retirement, common timer ownership/drain and full IP/helper/link remain open.
+Child IO-open and AddTask failure rollback exist but are not injected here.
+Bound but never resumed DONT_START threads cannot yet be reclaimed; forced
+termination remains open. The research gate uses Exec's reserved SINGLE bit;
+its ownership must be reconciled with future full integration. Defining the
+created-thread globals here also requires excluding conflicting ThreadX core
+initialization from a future complete replacement link.
+Next: resolve the scheduling policy for the actual NetX creation arguments and
+creator threshold window; implement helper stop/drain and object retirement,
+then validate unchanged pinned IP create/helper/delete with a disposable driver
+and compare actual library/resource cost with the original backend. Shipping
+and vendor inputs remain unchanged; the research branch stays unmerged.
+
+Before enabling the real IP constructor, guard its entire supported backend
+contract. The pinned `_nx_ip_create` does not check the return of
+`tx_thread_create`; merely returning TX_NO_MEMORY/TX_FEATURE_NOT_ENABLED from
+the backend can leave it publishing an NX_IP ID with no valid helper. A future
+research integration wrapper must reject unsupported/missing reservations
+before calling the unchanged raw constructor, and verify actual helper/task/timer
+creation and entry evidence afterwards. An IP ID or NX_SUCCESS alone is not a
+successful runtime verdict. This source observation is a pending integration
+obligation, not a vendor fix or a shipping change made by spike 9.
+
+## Required performance comparison after functional integration
+
+The user explicitly requests a general performance comparison as well as size,
+including the possible benefit of removing the scheduler baton and associated
+synchronization. The experiment has removed the explicit ThreadX scheduler/run
+baton in its tested paths, but still serializes NetX through Forbid and retains
+wait signals, timer IO, mutex/event operations and wakeup cleanup. Fewer handoff
+mechanisms do not establish faster execution; per-thread timer IO and broad
+critical sections can introduce different costs.
+
+Build both backends against identical pinned NetX sources/configuration, compiler
+and optimization settings. Use the same driver, peer, MTU, packet pools, stack
+sizes, traffic pattern and enabled protocol features. Record both source SHAs,
+images, machine/CPU/emulator settings and actual Exec priority policies. Keep
+functional coverage and required periodic work equal: a prototype missing its
+common timer task must not be compared as an idle-CPU improvement. Run repeated
+A/B trials and retain raw measurements; instrumentation cost should be separated
+from the uninstrumented throughput/latency runs.
+
+| Workload | Measurements |
+|---|---|
+| Idle with the full clock/protocol maintenance running | CPU use, tick/wakeup frequency, resident tasks/ports/signals/timer requests and memory |
+| Sustained UDP send/receive, small and MTU-sized, IPv4/IPv6 | Payload throughput, packets/s, CPU per byte/packet, loss and latency |
+| TCP bulk transfer and small request/response | Throughput, latency distribution/tail, CPU, retransmissions and packet-pool pressure |
+| Contended sockets and producer-to-waiter handoff | Wake/resume latency, fairness, task switches, signals, waits and synchronization operations |
+| Repeated create/close and cancellation | Lifecycle latency, peak resources and full resource recovery |
+| Network load alongside ordinary Exec tasks | Responsiveness/starvation evidence and sensitivity to priority policy |
+
+Compare image/resident code size and per-thread resources separately. Count the
+original baton handoffs and scheduler signals and the replacement's boundary,
+signal, wait and timer operations at equivalent API/workload points. Include
+uncontended and contended cases rather than extrapolating from primitive loops.
+Use a controlled emulator configuration for reproducible functional/instruction
+comparisons; host wall-clock emulator runtime is not an Amiga performance number.
+Real-hardware measurements need a separate coordinated, non-destructive run once
+the prototype is ready; this plan does not start hardware work or deploy it.
+
+Current lifecycle smoke results prove only their bounded correctness contracts.
+No throughput, CPU, latency, synchronization reduction or finished-library size
+improvement has been established yet.

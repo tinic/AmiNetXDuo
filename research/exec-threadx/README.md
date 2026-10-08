@@ -712,4 +712,23 @@ nested AUTO_START publication, DONT_START/initial resume, normal retirement,
 foreign/premature/double deletion, circular-list/signal/stack recovery, six public
 create/complete/delete restarts and one unbound cancellation. Child-side IO-open
 failure is not fault-injected; AddTask failure is reviewed but not exercised.
-Native verdict and independent exact review are recorded after execution.
+Final tested code is `d3720c81826960b046e44c4aecfa6ad4ff49ceb3`: root host
+27/27 and m68k cross/startup gate pass; claudecode's single boardless A1200
+KS3.1 r40.68 native run passes 12/12, tasks_reaped=10, restarts=6, exit 0
+after 14s, with parent/child stacks 8192. The additional case creates logical
+priority 2 and verifies its actual Exec priority 1 through normal retirement.
+Root read actual output/startup/runner and verified binary/map/evidence hashes
+under `/Users/turo/ai/evidence/exec-threadx-spike9b-native`; binary `62efc96f`,
+58,048 bytes including fixtures/runtime. Initial `a87f95f58` native 11/11 is
+retained separately and does not establish the corrected priority policy.
+Deepseek-v4's independent read-only source review covers the initial change
+(19 parts) and final priority delta (eight parts): no blocker in the bounded
+scope; no execution is attributed to the reviewer. Owned build/native staging
+are cleaned. A never-resumed bound DONT_START thread still requires a future
+termination path; the reserved SINGLE gate and created-thread global ownership
+also need care in full integration.
+
+The plan's required performance comparison includes baton handoffs, task switches,
+CPU, throughput, latency and resource costs under equivalent protocol workloads.
+These correctness fixtures provide no measured performance improvement or
+finished-library size verdict.
