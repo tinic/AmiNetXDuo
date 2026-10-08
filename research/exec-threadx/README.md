@@ -984,3 +984,77 @@ size saving or performance benefit follows from these partial non-LTO totals.
 Next gates: protocol packet/wire coverage, a real common clock with producer
 shutdown/drain, broader API and driver lifetimes, full replacement-library link
 and equal-feature A/B size/performance. No hardware or shipping integration.
+
+## Spike 14: automatic common application clock
+
+Source checkpoint: 0e5f99347bfd55454e353d938ecb9d5f68f9e7cc, against reviewed
+spike-13 documentation 4b3e3234a. Research sources only; vendor/public headers,
+shipping backend selection, main and hardware are unchanged.
+
+One raw Exec task at priority zero owns an AnxExecWait timer.device request,
+port and wake signal. It has no public ThreadX thread/control block or scheduler
+baton. The domain reservation remains held from task publication through native
+join. Startup waits outside serialization for owner-side IO readiness; failed
+startup releases its task/ACK/reservation. A native FINISHED ACK is published
+under Forbid immediately before RemTask, with no scheduling gap.
+
+The pinned 50-Hz clock is driven from monotonic EClock absolute phase. Due ticks
+advance the existing application-timer dispatcher in a marked task boundary;
+callbacks retain actual pinned timer and NetX periodic bodies. A boundary emits
+at most eight overdue ticks, then permits dispatch before processing more. No
+tick is skipped and the phase is not reset to the current time. This does not
+advance private suspension timers: those already use absolute elapsed-time
+wait deadlines. Interrupt entry, timeslicing, arbitrary blocking callbacks and
+storage retirement inside callbacks remain unsupported.
+
+IP integration is optional and creator-owned. Both clock record and clock stack
+must be disjoint from the retained IP record/control, pool/control/arena, caller
+and helper stack. Only this associated clock is admitted; external raw API,
+packet and other driver producers remain excluded by the bounded experiment.
+Delete preflights clock authority before changing helper state, then closes the
+helper and clock gates and deactivates the actual IP timer under one boundary.
+The clock completes any pending private wait; its owner aborts/reaps outstanding
+IO, closes its own device/port/signals and retires. Creator joins clock and helper
+outside all boundaries before revalidation and unchanged raw NetX IP deletion.
+Successful deletion owns associated clock retirement; do not independently join
+or reclaim an associated clock while its IP is live.
+
+The new native smoke checks automatic unchanged periodic callback/helper wake,
+marked callback and foreign stop refusal, single-domain clock publication,
+startup ACK allocation failure, overlapping IP/clock storage refusal and native
+metadata. A deliberate 250ms Forbid fixture stall exercises elapsed-time catch-up
+and retained phase. IP deletion starts from an actual pending private timer IO,
+checks clock/helper ACK before raw delete callbacks, and poisons freed IP/stacks
+before observing no late ticks/callbacks. Three whole IP/clock cycles must recover
+created counts, packet pool, signals, canaries and the held runtime. The retained
+manual-clock IP smoke covers its existing supported lifecycle separately.
+
+Root host CTest passes 39/39: retained bridge models plus absolute-phase,
+bounded-backlog and extreme-arithmetic tests. Native clock/IP integration is not
+host modeled. m68k -Werror and startup-first link gates pass. Claudecode ran
+both exact 0e5f99347 artifacts once on boardless A1200/KS3.1 r40.68 with
+parent/child stacks 8192 and harness 300b22e8. Automatic clock passes 16/16,
+clocks_reaped=3, helpers_reaped=3, restarts=2, exit 0 after 19s; retained IP
+passes 14/14, helpers_reaped=3, restarts=2, exit 0 after 14s. Root independently
+read actual stdout/startup/runner and verified all receipt hashes under
+/Users/turo/ai/evidence/exec-threadx-spike14-clock-native and ip-native.
+Automatic-clock artifact 12be0e54 is 78,936 bytes; retained IP artifact 4c2abb05
+is 77,312 bytes, including fixtures/runtime. Deepseek-v4 completed all 20
+independent source-review parts plus closing receipt on the exact implementation,
+with no actual blocker in the bounded single-clock scope and no production GO.
+The reviewer ran no tests. Full review is retained in
+/Users/turo/ai/evidence/exec-threadx-spike14-review.log. Representable microsecond
+uptime, two-layer disjointness and the retained ACK idiom are noted limitations.
+Native execution, host models and source review are separate evidence.
+Owned local research build and both native staging areas are removed; small
+useful evidence remains under /Users/turo/ai/evidence/exec-threadx-spike14*.
+
+The retained IP partial non-LTO map attributes 19,392 backend .text bytes plus
+3,112 retained ThreadX bytes (22,504 subtotal), 10,260 selected NetX bytes and
+3,300 clock division helpers separately. Includes research lifetime guards and
+diagnostics; excludes fixture/startup/libc/other helpers/data/BSS/relocations and
+native resources. No finished-library size saving or performance claim follows.
+Equal-feature clock/protocol maintenance is required for the later A/B comparison.
+
+Next gates: real protocol traffic, socket/driver concurrency and lifetimes, full
+replacement-library integration and equal-feature size/performance comparison.
