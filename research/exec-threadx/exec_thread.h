@@ -50,7 +50,8 @@ int anx_exec_thread_stop_event(AnxExecThread *, TX_EVENT_FLAGS_GROUP *);
  * Does not transfer record ownership; caller retains the backend reservation. */
 const AnxExecThread *anx_exec_thread_owner_record(void);
 /* Public services are defined by exec_thread.c, linked only by native research
- * target. Resume supports only initial DONT_START; general delayed suspend,
+ * target. Resume supports initial DONT_START and retained explicit self-suspend;
+ * foreign READY/blocked suspension and general delayed suspend,
  * priority changes and forced terminate remain open. Current-owner threshold
  * changes require restore before outer boundary exit; no foreign changes.
  * Public delete only after normal completion + native removal, by creator. */

@@ -208,13 +208,27 @@ UINT _tx_thread_resume(TX_THREAD *t)
 {
     AnxExecThread *r;
     anx_tx_require_context(0);
+    if (_tx_thread_system_state) return TX_CALLER_ERROR;
     r=lookup(t);
-    if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
+    if (!r) return anx_tx_explicit_resume(t);
+    if (!t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
     if (r->state!=ANX_THREAD_BOUND || t->tx_thread_state==TX_READY ||
         t->tx_thread_state==TX_COMPLETED) return TX_RESUME_ERROR;
-    if (r->entered || t->tx_thread_state!=TX_SUSPENDED) return TX_FEATURE_NOT_ENABLED;
+    if (r->entered) return anx_tx_explicit_resume(t);
+    if (t->tx_thread_state!=TX_SUSPENDED) return TX_FEATURE_NOT_ENABLED;
     t->tx_thread_state=TX_READY; Signal(&r->task,SIGF_SINGLE);
     return TX_SUCCESS;
+}
+static void native_yield(void)
+{
+    struct Task *me=FindTask(0);
+    /* Public Exec scheduling point; never alter logical or native priority. */
+    (void)SetTaskPri(me,me->tc_Node.ln_Pri);
+}
+VOID _tx_thread_relinquish(VOID)
+{
+    if (anx_tx_relinquish(native_yield)!=TX_SUCCESS)
+        anx_tx_unsupported("public relinquish outside supported native context");
 }
 UINT _tx_thread_terminate(TX_THREAD *t)
 {

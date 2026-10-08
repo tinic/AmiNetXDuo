@@ -17,6 +17,7 @@ endif()
 add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c netx_packet.c
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_timeout.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_sleep.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_suspend.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_semaphore_create.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_semaphore_delete.c"
@@ -61,6 +62,8 @@ target_compile_definitions(research_tx_bridge PUBLIC TX_DISABLE_ERROR_CHECKING)
 target_compile_options(research_tx_bridge PRIVATE -Wall -Wextra -Werror)
 set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
     PROPERTIES COMPILE_DEFINITIONS "_tx_thread_wait_abort=anx_tx_original_wait_abort")
+set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_thread_suspend.c"
+    PROPERTIES COMPILE_DEFINITIONS "_tx_thread_suspend=anx_tx_original_thread_suspend")
 foreach(service semaphore_create semaphore_delete semaphore_get semaphore_put mutex_delete event_flags_delete event_flags_get event_flags_set timer_create timer_activate timer_change timer_delete)
     set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_${service}.c"
         PROPERTIES COMPILE_DEFINITIONS "_tx_${service}=anx_tx_original_${service}")
@@ -115,6 +118,16 @@ if(CMAKE_CROSSCOMPILING)
     target_link_libraries(research_exec_adapter PUBLIC research_wait)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_adapter PRIVATE -Wall -Wextra -Werror)
+    add_executable(research_exec_schedule_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_caller.c exec_clock.c exec_thread.c exec_kernel.c exec_schedule_smoke.c)
+    target_link_libraries(research_exec_schedule_smoke PRIVATE research_tx_bridge research_exec_adapter research_clock_schedule)
+    target_include_directories(research_exec_schedule_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_schedule_smoke PRIVATE -Wall -Wextra -Werror -ffunction-sections)
+    target_link_options(research_exec_schedule_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_schedule_smoke>.map")
+    add_custom_command(TARGET research_exec_schedule_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_schedule_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_kernel_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c exec_caller.c exec_clock.c exec_thread.c exec_kernel.c exec_netstack.c
         exec_kernel_smoke.c "${ANX_ROOT}/src/common/compat.c")
@@ -349,6 +362,10 @@ else()
     target_link_libraries(research_udp_bridge_model PRIVATE research_tx_bridge)
     target_compile_options(research_udp_bridge_model PRIVATE -Wall -Wextra -Werror)
     add_test(NAME research_udp_bridge_model COMMAND research_udp_bridge_model)
+    add_executable(research_public_schedule_model test_public_schedule.c)
+    target_link_libraries(research_public_schedule_model PRIVATE research_tx_bridge)
+    target_compile_options(research_public_schedule_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_public_schedule_model COMMAND research_public_schedule_model)
     add_executable(research_thread_sleep_model test_thread_sleep.c)
     target_link_libraries(research_thread_sleep_model PRIVATE research_tx_bridge)
     target_compile_options(research_thread_sleep_model PRIVATE -Wall -Wextra -Werror)

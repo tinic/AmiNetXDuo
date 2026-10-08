@@ -36,6 +36,7 @@ typedef struct AnxTxThread {
     unsigned terminal_pending;
     struct AnxTxContext *paused_frame;
     unsigned paused_depth, exec_wait_nesting;
+    unsigned explicit_suspend; /* public self-suspend retained through actual return */
 } AnxTxThread;
 
 typedef struct AnxTxContext {
@@ -125,6 +126,12 @@ void anx_tx_context_end(AnxTxContext *);
  * not dead-task reclamation: retained frames may still live on the owner stack. */
 int anx_tx_context_pause(void);
 int anx_tx_context_resume(void);
+/* Bounded public scheduling services. Explicit suspend is current-owner only;
+ * no foreign/delayed suspension. Resume uses the existing private wait token.
+ * Yield invokes the supplied native scheduling point outside the exact retained
+ * normal context chain, then restores it. No priority/timeslice conformance. */
+UINT anx_tx_explicit_resume(TX_THREAD *);
+UINT anx_tx_relinquish(void (*native_yield)(void));
 /* Research scheduling policy: running owner only threshold changes, restore
  * before outer context_end. Real blocking may drop/reenter a raised-threshold
  * boundary. Slices are stored/advisory, not a ThreadX tick/dispatch guarantee.

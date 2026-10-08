@@ -21,13 +21,13 @@ HERE = Path(__file__).resolve().parent
 BACKEND = ["wait.c", "clock_schedule.c", "tx_bridge.c", "netx_resume.c",
            "tx_bridge_exec.c", "exec_wait.c", "exec_thread.c", "exec_clock.c", "exec_caller.c", "exec_kernel.c", "exec_netstack.c"]
 # Keep upstream service bodies rather than reproducing their wait/list logic.
-SERVICES = ["thread_timeout", "thread_sleep", "thread_wait_abort", "thread_info_get",
+SERVICES = ["thread_timeout", "thread_sleep", "thread_wait_abort", "thread_info_get", "thread_suspend",
             "mutex_cleanup", "mutex_delete", "event_flags_get", "event_flags_set",
             "event_flags_cleanup", "event_flags_delete", "timer_create",
             "timer_activate", "timer_change", "timer_delete",
             "semaphore_create", "semaphore_delete", "semaphore_get", "semaphore_put",
             "semaphore_cleanup"]
-RENAMED = {"thread_wait_abort", "mutex_delete", "event_flags_get", "event_flags_set",
+RENAMED = {"thread_wait_abort", "thread_suspend", "mutex_delete", "event_flags_get", "event_flags_set",
            "event_flags_delete", "timer_create", "timer_activate", "timer_change",
            "timer_delete", "semaphore_create", "semaphore_delete", "semaphore_get", "semaphore_put"}
 FORBIDDEN_ARCHIVES = {"libthreadx.a", "libthreadx_port.a"}

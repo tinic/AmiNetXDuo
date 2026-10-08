@@ -165,7 +165,7 @@ static int detach(AnxTxThread *t, int completed)
     platform->enter(platform->context);
     if (platform->caller(platform->context) != t->owner ||
         t->wait->result == ANX_WAIT_PENDING || t->thread->tx_thread_state != TX_READY ||
-        t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token || t->abort_pins || t->semaphore_call ||
+        t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token || t->abort_pins || t->semaphore_call || t->explicit_suspend ||
         t->exec_wait_nesting || t->paused_frame || t->paused_depth ||
         t->thread->tx_thread_owned_mutex_count || t->thread->tx_thread_owned_mutex_list ||
         t->thread->tx_thread_timer.tx_timer_internal_list_head ||
@@ -197,7 +197,7 @@ int anx_tx_quiescent(AnxTxThread *t)
     if (node)
         result=t->thread->tx_thread_state==TX_READY && t->wait->result!=ANX_WAIT_PENDING &&
             !t->thread->tx_thread_suspend_cleanup && !t->thread->tx_thread_suspending &&
-            !t->pending_resume && !t->pending_token && !t->abort_pins && !t->semaphore_call &&
+            !t->pending_resume && !t->pending_token && !t->abort_pins && !t->semaphore_call && !t->explicit_suspend &&
             !t->exec_wait_nesting && !t->paused_frame && !t->paused_depth &&
             !t->terminal_pending && !t->thread->tx_thread_owned_mutex_count &&
             !t->thread->tx_thread_owned_mutex_list && !t->thread->tx_thread_timer.tx_timer_internal_list_head;
@@ -562,6 +562,8 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
              "early resume left cleanup pending");
         return;
     }
+    if (ticks==TX_NO_WAIT && t->explicit_suspend && thread->tx_thread_state==TX_SUSPENDED &&
+        !thread->tx_thread_suspend_cleanup) ticks=TX_WAIT_FOREVER;
     need(ticks!=TX_NO_WAIT, "zero timeout suspension");
     need(t->operation!=UINT32_MAX,"suspension operation exhausted");
     t->operation++;
@@ -671,6 +673,62 @@ void anx_tx_require_context(UINT blocking)
 void anx_tx_unsupported(const char *reason)
 {
     need(0,reason);
+}
+
+UINT anx_tx_original_thread_suspend(TX_THREAD *);
+UINT _tx_thread_suspend(TX_THREAD *thread)
+{
+    AnxTxThread *t;
+    need_context();
+    for (t=threads;t && t->thread!=thread;t=t->next) {}
+    if (!t || thread->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
+    if (_tx_thread_system_state) return TX_CALLER_ERROR;
+    if (thread->tx_thread_state==TX_COMPLETED || thread->tx_thread_state==TX_TERMINATED)
+        return TX_SUSPEND_ERROR;
+    if (thread->tx_thread_state==TX_SUSPENDED && t->explicit_suspend) return TX_SUCCESS;
+    if (thread!=_tx_thread_current_ptr || t->owner!=platform->caller(platform->context) ||
+        thread->tx_thread_state!=TX_READY || t->paused_frame || t->explicit_suspend)
+        return TX_FEATURE_NOT_ENABLED;
+    if (_tx_thread_preempt_disable) return TX_SUSPEND_ERROR;
+    if (contexts!=1 || !platform->can_pause || !platform->can_pause(platform->context,1))
+        return TX_CALLER_ERROR;
+    if (thread->tx_thread_suspend_cleanup || thread->tx_thread_timer.tx_timer_internal_list_head ||
+        t->pending_resume || t->pending_token) return TX_FEATURE_NOT_ENABLED;
+    t->explicit_suspend=1;
+    UINT result=anx_tx_original_thread_suspend(thread);
+    t->explicit_suspend=0;
+    return result;
+}
+
+UINT anx_tx_explicit_resume(TX_THREAD *thread)
+{
+    AnxTxThread *t;
+    need_context();
+    for (t=threads;t && t->thread!=thread;t=t->next) {}
+    if (!t || thread->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
+    if (_tx_thread_system_state) return TX_CALLER_ERROR;
+    if (thread->tx_thread_state==TX_READY || thread->tx_thread_state==TX_COMPLETED ||
+        thread->tx_thread_state==TX_TERMINATED) return TX_RESUME_ERROR;
+    if (!t->explicit_suspend || thread->tx_thread_state!=TX_SUSPENDED ||
+        thread->tx_thread_suspend_cleanup || t->paused_frame) return TX_FEATURE_NOT_ENABLED;
+    need(t->token && t->token==t->wait->generation && t->wait->result==ANX_WAIT_PENDING,
+         "explicit resume missing retained pending wait");
+    need(_tx_thread_preempt_disable!=(UINT)-1,"explicit resume preemption overflow");
+    _tx_thread_preempt_disable++;
+    _tx_thread_system_resume(thread);
+    return TX_SUCCESS;
+}
+
+UINT anx_tx_relinquish(void (*native_yield)(void))
+{
+    need_context();
+    if (!native_yield) return TX_PTR_ERROR;
+    if (_tx_thread_system_state || !_tx_thread_identify() || _tx_thread_preempt_disable)
+        return TX_CALLER_ERROR;
+    if (!anx_tx_context_pause()) return TX_CALLER_ERROR;
+    native_yield();
+    need(anx_tx_context_resume(),"relinquish failed to restore retained owner");
+    return TX_SUCCESS;
 }
 
 /* Research Exec policy: only the running owner may change its threshold.
