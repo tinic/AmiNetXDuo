@@ -275,8 +275,7 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
 }
 
 static VOID netdb_load_one(NetdbTable *table, NetdbKind kind,
-                           const char *path, const char *builtin,
-                           ULONG builtin_size)
+                           const char *path, const char *builtin)
 {
     char  *buf;
     ULONG  size = 0;
@@ -294,13 +293,15 @@ static VOID netdb_load_one(NetdbTable *table, NetdbKind kind,
 
     if (buf == NULL || size == 0)
     {
+        ULONG len = ami_cfg_strlen(builtin);
+
         ami_free(buf);
         AMI_DEBUG("netdb: %s missing, using built-in defaults", path);
 
-        buf = (char *)ami_alloc(builtin_size);
+        buf = (char *)ami_alloc(len + 1);
         if (buf == NULL)
             return;
-        ami_cfg_copy_string(buf, builtin_size, builtin);
+        ami_cfg_copy_string(buf, len + 1, builtin);
     }
 
     if (!netdb_parse(table, kind, buf))
@@ -336,17 +337,13 @@ LONG ami_netdb_load(VOID)
     ami_netdb_loaded = TRUE;
 
     netdb_load_one(&ami_netdb[NETDB_HOSTS],     NETDB_HOSTS,
-                   AMI_CFG_FILE_HOSTS,     ami_netdb_builtin_hosts,
-                   sizeof(ami_netdb_builtin_hosts));
+                   AMI_CFG_FILE_HOSTS,     ami_netdb_builtin_hosts);
     netdb_load_one(&ami_netdb[NETDB_NETWORKS],  NETDB_NETWORKS,
-                   AMI_CFG_FILE_NETWORKS,  ami_netdb_builtin_networks,
-                   sizeof(ami_netdb_builtin_networks));
+                   AMI_CFG_FILE_NETWORKS,  ami_netdb_builtin_networks);
     netdb_load_one(&ami_netdb[NETDB_PROTOCOLS], NETDB_PROTOCOLS,
-                   AMI_CFG_FILE_PROTOCOLS, ami_netdb_builtin_protocols,
-                   sizeof(ami_netdb_builtin_protocols));
+                   AMI_CFG_FILE_PROTOCOLS, ami_netdb_builtin_protocols);
     netdb_load_one(&ami_netdb[NETDB_SERVICES],  NETDB_SERVICES,
-                   AMI_CFG_FILE_SERVICES,  ami_netdb_builtin_services,
-                   sizeof(ami_netdb_builtin_services));
+                   AMI_CFG_FILE_SERVICES,  ami_netdb_builtin_services);
 
     return (ami_netdb_unloaded() != 0) ? AMI_CFG_ERR_NOMEM : AMI_CFG_OK;
 }
