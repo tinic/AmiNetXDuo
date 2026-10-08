@@ -29,14 +29,19 @@ static jmp_buf      ami_crash_jmp;
 static APTR         ami_crash_ref;
 static const char  *ami_crash_ref_label = "code";
 
-/* Filled in by the assembly stub before it returns to user mode. */
-ULONG ami_crash_saved_regs[15];     /* d0-d7, a0-a6 */
-ULONG ami_crash_saved_number;
-ULONG ami_crash_saved_pc;
-UWORD ami_crash_saved_sr;
-UWORD ami_crash_saved_format;
+/* Filled in by the assembly stub before it returns to user mode.
+   `externally_visible' because the asm() below names them and the compiler
+   does not parse asm text: under -flto it would otherwise make them local,
+   and the stub's relocations would point at nothing. binutils 2.46 refuses
+   that link; 2.39 accepted it and relocated the stores to hunk 0. */
+#define AMI_CRASH_ASM_VISIBLE __attribute__((externally_visible))
+ULONG ami_crash_saved_regs[15] AMI_CRASH_ASM_VISIBLE;     /* d0-d7, a0-a6 */
+ULONG ami_crash_saved_number AMI_CRASH_ASM_VISIBLE;
+ULONG ami_crash_saved_pc AMI_CRASH_ASM_VISIBLE;
+UWORD ami_crash_saved_sr AMI_CRASH_ASM_VISIBLE;
+UWORD ami_crash_saved_format AMI_CRASH_ASM_VISIBLE;
 
-VOID ami_crash_bailout(VOID);
+VOID ami_crash_bailout(VOID) AMI_CRASH_ASM_VISIBLE;
 VOID ami_crash_trap(VOID);
 
 /*
