@@ -1452,3 +1452,107 @@ implemented or verified solution. Dead-owner cleanup, library close/cancellation
 event-flags returning-call retention and the4096/1536-versus8192 worker stack
 policy remain OPEN. Full-library size/resources/performance comparisons remain
 unmeasured until functional integration and equal-feature verification.
+
+## Full library integration: cached callers and retained clock deadlines
+
+Source **448bd099a58c440b7bdfdb1275b27641ffc570fe** implements the public
+adoption/cache seam with backend-owned control blocks, bridge frames and wait
+records. Existing Exec Tasks retain their original stacks; adoption allocates
+one owner signal and no timer request, reply port, Task or stack. There are 16
+caller records (one reserved from normal admission), 64 signal leases and 32
+pending-adopter records. Cache suspend/resume retains the control, generation
+and signal. Full normal admission parks outside Forbid and rechecks after a
+clock-driven wake. Reserved overflow refuses immediately.
+
+An explicit handle validates pointer membership before dereference and checks
+its exact nonwrapping generation. Generation exhaustion refuses admission and
+survives registry/clock restart. Private wait generations also survive record
+reuse. Upstream ThreadX APIs retain their bare-pointer ABI: using a deleted and
+recycled raw object pointer remains caller use-after-free, as in ThreadX itself.
+AgentNet corrected its initial stronger generation requirement; no vendor ABI
+or public control layout was changed.
+
+Dormant eviction requires a quiescent bridge and an owner-handed signal. A
+separate lease keeps the evicted owner's signal debt until that owner returns
+it; repeating the free cannot release an unrelated signal subsequently allocated
+at the same bit. Wake checks Task membership, allocated bit and retained identity
+stamp with Signal under the same Forbid. Classic Exec lacks a universally unique
+Task ID: exact address/shape/bit recycling cannot establish a general identity
+proof. No general ABA or ISR-safety claim follows from this checkpoint.
+
+Finite waits use the already retained backend clock's EClock and polling service.
+No caller-owned timer reply can arrive after the caller's stack is freed. Polling
+evaluates absolute deadlines but wake timing is tick-granular, coarser than the
+previous per-caller timer adapter. Actual pinned ThreadX timeout/cleanup bodies
+still run when the admitted owner returns from its private wait.
+
+Foreign reclamation has two narrow proved paths: dormant quiescent callers and
+object-free actual TX_SLEEP callers. The latter removes the private timer and
+binding, marks the control terminated and suppresses the private DELETED wake
+only after positive owner-removal evidence. It refuses cleanup/object/mutex,
+abort, paused-context and active-frame references. Other removed active or queued
+owners remain fatal/unreclaimed; they are an unfinished integration requirement.
+Admission preflight checks removal before a new producer context can write into
+a removed caller's stack. Pending-adopter/dead-debt cleanup exists in source but
+has no direct native fixture verdict yet.
+
+Host tests pass **47/47**; five m68k targets compile with Werror and startup-first
+validation. AgentNet claudecode ran each exact binary once, serially, boardless
+playhouse3 A1200 KS3.1 r40.68, stack 8192, timeout 90, harness 300b22e8. Root verified
+binary/map hashes, every receipt hash, actual stdout/startup/runner/serial and
+fault logs. Each run has one boot, exit 0 and no illegal/guru/alert/ROM reset:
+
+| Native fixture at 448bd099a | Actual verdict | Exit / host elapsed |
+| --- | --- | --- |
+| Cached callers | 25/25; 33 raw Tasks reaped, 1 removed dormant, 1 removed sleeping, 2 clocks | 0 / 15s |
+| Context pause | 14/14 | 0 / 15s |
+| Concurrent driver IO | 25/25; 18 workers, 2 helpers, 2 clocks, 1 restart | 0 / 15s |
+| IPv4 protocols | 19/19 | 0 / 17s |
+| Clock lifecycle | 16/16 | 0 / 18s |
+
+The caller fixture covers real sleep and semaphore deadlines, twelve cache
+brackets, exhausted signals, full normal/reserved pools, parked admission,
+foreign-owner rejection, eviction/debt/double-free, same-address new-generation
+reuse, generation exhaustion and clock restart. It externally removes and
+poisons actual dormant and sleeping Task/stack storage, then waits past the old
+sleep deadline and checks no late notification. All fixture resources recover.
+Failed-guest fixture teardown remains deferred; these passing runs do not prove
+it. Host elapsed times are harness wall clock, not Amiga performance measurements.
+
+Independent exact-source AgentNet deepseek review is complete: root read all
+five logical parts (16 physical chunks), retained in
+/Users/turo/ai/evidence/exec-threadx-caller-cache-review.txt. No blocker in this
+bounded caller-cache/dead-dormant/object-free dead-TX_SLEEP scope. Review confirms
+the actual pinned sleep body and replacement timer list (there is no assumed
+vanilla sleep list), notification ordering, handle/token boundary, signal debt,
+protected parked-adopter wakes, guards and honest link gate. Tick processing is
+Task-driven under Forbid; this is not an ISR-driven timer proof. Repeated sweep
+and the two idempotent deadline paths remain performance considerations, not
+measured improvements. Execution above is separate from this source-only verdict.
+Evidence is indexed in /Users/turo/ai/evidence/exec-threadx-caller-cache.json,
+with plan/ABI clarification and native receipts retained separately. Native
+staging is zero; the owned build was removed after retaining useful evidence.
+The unmerged research branch and upstream vendor pins are preserved.
+
+The actual full-feature replacement link at this SHA is **FAIL with 19 unresolved symbols**, down from
+31 unresolved symbols: nine caller services and three Exec Task helpers now resolve. The gate
+uses actual library objects/vendor archives, full-profile Werror backend objects,
+removes the original scheduler/port archives and baton object, and uses no
+fixture sentinels, success stubs or ignored unresolved symbols. The full original
+backend diagnostic build passes; its 441460-byte non-LTO artifact is retained as
+an unexecuted baseline, not a size comparison. Replacement runtime is NOT_RUN.
+
+| Remaining full-link contracts | Count |
+| --- | --- |
+| Thread relinquish/suspend and timer query | 3 |
+| Production Exec-wait hooks, sampler/statistics and health | 10 |
+| Kernel start/stop/running, stack/tick/zombie accounting | 6 |
+
+The previous checkpoint's unimplemented caller-registry obligation is now
+partially resolved with the exact scope above. Next connect kernel lifecycle and
+production Exec-wait/health hooks, then complete general dead-owner and library
+close/cancellation behavior. Event-flags returning-call lifetime, worker stack
+policy (shipping 4096/1536 versus new-worker research minimum 8192), enabled IPv6,
+actual public sockets/device/ISR integration and full create/close remain OPEN.
+Equal-feature full-library image/resident resources and performance comparison,
+including synchronization removed with the original baton, remain unmeasured.
