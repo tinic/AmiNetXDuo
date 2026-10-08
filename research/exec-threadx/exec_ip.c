@@ -9,6 +9,10 @@
 #include "nx_ip.h"
 #include "nx_packet.h"
 #include "nx_system.h"
+#ifdef ANX_REAL_PROTOCOL_LINK
+#include "nx_tcp.h"
+#include "nx_udp.h"
+#endif
 #include <exec/execbase.h>
 #include <proto/exec.h>
 static AnxExecIp *active;
@@ -134,6 +138,40 @@ UINT anx_exec_ip_event(AnxExecIp *r,ULONG flags)
 }
 static int delete_ready(NX_IP *ip)
 {
+    unsigned timer_count=1;
+#ifdef ANX_REAL_PROTOCOL_LINK
+    /* The protocol fixture admits only unchanged pinned TCP/UDP handlers,
+     * after all sockets/listeners/cache/queues are truly gone. No callbacks
+     * are cleared or forged to satisfy this lifetime preflight. */
+    if (ip->nx_ip_udp_packet_receive && ip->nx_ip_udp_packet_receive!=_nx_udp_packet_receive) return 0;
+    if (ip->nx_ip_tcp_packet_receive) {
+        NX_TCP_SYNCACHE *cache=&ip->nx_ip_tcp_syncache;
+        if (ip->nx_ip_tcp_packet_receive!=_nx_tcp_packet_receive ||
+            ip->nx_ip_tcp_queue_process!=_nx_tcp_queue_process ||
+            ip->nx_ip_tcp_periodic_processing!=_nx_tcp_periodic_processing ||
+            ip->nx_ip_tcp_fast_periodic_processing!=_nx_tcp_fast_periodic_processing ||
+            ip->nx_tcp_deferred_cleanup_check!=_nx_tcp_deferred_cleanup_check ||
+            !ip->nx_ip_fast_periodic_timer_created ||
+            ip->nx_ip_fast_periodic_timer.tx_timer_id!=TX_TIMER_ID ||
+            ip->nx_ip_tcp_active_listen_requests || cache->nx_tcp_syncache_count ||
+            cache->nx_tcp_syncache_accept_count || cache->nx_tcp_syncache_age_head ||
+            cache->nx_tcp_syncache_age_tail || cache->nx_tcp_syncache_accept_head ||
+            cache->nx_tcp_syncache_accept_tail) return 0;
+        timer_count=2;
+        if (_tx_timer_created_count!=2 ||
+            (_tx_timer_created_ptr!=&ip->nx_ip_periodic_timer && _tx_timer_created_ptr!=&ip->nx_ip_fast_periodic_timer) ||
+            ip->nx_ip_periodic_timer.tx_timer_created_next!=&ip->nx_ip_fast_periodic_timer ||
+            ip->nx_ip_periodic_timer.tx_timer_created_previous!=&ip->nx_ip_fast_periodic_timer ||
+            ip->nx_ip_fast_periodic_timer.tx_timer_created_next!=&ip->nx_ip_periodic_timer ||
+            ip->nx_ip_fast_periodic_timer.tx_timer_created_previous!=&ip->nx_ip_periodic_timer) return 0;
+    } else if (ip->nx_ip_tcp_queue_process || ip->nx_ip_tcp_periodic_processing ||
+               ip->nx_ip_tcp_fast_periodic_processing || ip->nx_tcp_deferred_cleanup_check ||
+               ip->nx_ip_fast_periodic_timer_created) return 0;
+#else
+    if (ip->nx_ip_tcp_packet_receive || ip->nx_ip_tcp_periodic_processing ||
+        ip->nx_ip_tcp_fast_periodic_processing || ip->nx_ip_tcp_queue_process ||
+        ip->nx_ip_udp_packet_receive || ip->nx_ip_fast_periodic_timer_created) return 0;
+#endif
     if (ip->nx_ip_default_packet_pool!=active->pool ||
         ip->nx_ip_interface[0].nx_interface_link_driver_entry!=active->driver ||
         !ip->nx_ip_interface[0].nx_interface_valid) return 0;
@@ -143,24 +181,24 @@ static int delete_ready(NX_IP *ip)
         ip->nx_ip_id!=NX_IP_ID || _nx_ip_created_count!=1 || _nx_ip_created_ptr!=ip ||
         _tx_mutex_created_count!=1 || _tx_mutex_created_ptr!=&ip->nx_ip_protection ||
         _tx_event_flags_created_count!=1 || _tx_event_flags_created_ptr!=&ip->nx_ip_events ||
-        _tx_timer_created_count!=1 || _tx_timer_created_ptr!=&ip->nx_ip_periodic_timer ||
+        _tx_timer_created_count!=timer_count || (timer_count==1 && _tx_timer_created_ptr!=&ip->nx_ip_periodic_timer) ||
         _tx_thread_created_count!=1 || _tx_thread_created_ptr!=&ip->nx_ip_thread ||
         ip->nx_ip_protection.tx_mutex_id!=TX_MUTEX_ID || ip->nx_ip_events.tx_event_flags_group_id!=TX_EVENT_FLAGS_ID ||
         ip->nx_ip_periodic_timer.tx_timer_id!=TX_TIMER_ID ||
         ip->nx_ip_protection.tx_mutex_owned_next || ip->nx_ip_protection.tx_mutex_owned_previous ||
         ip->nx_ip_events.tx_event_flags_group_reset_search || ip->nx_ip_events.tx_event_flags_group_delayed_clear ||
-        ip->nx_ip_fragment_processing || ip->nx_ip_tcp_packet_receive || ip->nx_ip_tcp_periodic_processing ||
-        ip->nx_ip_tcp_fast_periodic_processing || ip->nx_ip_tcp_queue_process || ip->nx_ip_udp_packet_receive ||
+        ip->nx_ip_fragment_processing ||
         ip->nx_ip_icmp_queue_process || ip->nx_ip_igmp_queue_process || ip->nx_ip_igmp_periodic_processing ||
         ip->nx_ip_arp_allocate || ip->nx_ip_arp_queue_process ||
         ip->nx_ip_arp_periodic_update || ip->nx_ip_rarp_queue_process || ip->nx_ip_rarp_periodic_update ||
         ip->nx_ip_protection.tx_mutex_owner || ip->nx_ip_protection.tx_mutex_ownership_count ||
         ip->nx_ip_protection.tx_mutex_suspended_count || ip->nx_ip_protection.tx_mutex_suspension_list ||
-        ip->nx_ip_fast_periodic_timer_created || ip->nx_ip_raw_packet_suspension_list ||
+        ip->nx_ip_raw_packet_suspension_list ||
         ip->nx_ip_icmp_ping_suspension_list || ip->nx_ip_raw_received_packet_head ||
-        ip->nx_ip_deferred_received_packet_head || ip->nx_ip_icmp_queue_head || ip->nx_ip_igmp_queue_head ||
+        ip->nx_ip_deferred_received_packet_head || ip->nx_ip_deferred_received_packet_tail ||
+        ip->nx_ip_icmp_queue_head || ip->nx_ip_igmp_queue_head ||
         ip->nx_ip_arp_deferred_received_packet_head || ip->nx_ip_rarp_deferred_received_packet_head ||
-        ip->nx_ip_tcp_queue_head || ip->nx_ip_default_packet_pool->nx_packet_pool_suspended_count ||
+        ip->nx_ip_tcp_queue_head || ip->nx_ip_tcp_queue_tail || ip->nx_ip_default_packet_pool->nx_packet_pool_suspended_count ||
         ip->nx_ip_default_packet_pool->nx_packet_pool_suspension_list ||
         ip->nx_ip_default_packet_pool->nx_packet_pool_available!=ip->nx_ip_default_packet_pool->nx_packet_pool_total);
 }
@@ -186,6 +224,10 @@ UINT anx_exec_ip_delete(AnxExecIp *r)
         anx_tx_unsupported("IP clock pre-stop failed");
     if (tx_timer_deactivate(&ip->nx_ip_periodic_timer)!=TX_SUCCESS)
         anx_tx_unsupported("IP periodic timer pre-stop deactivate failed");
+#ifdef ANX_REAL_PROTOCOL_LINK
+    if (ip->nx_ip_fast_periodic_timer_created && tx_timer_deactivate(&ip->nx_ip_fast_periodic_timer)!=TX_SUCCESS)
+        anx_tx_unsupported("IP fast timer pre-stop deactivate failed");
+#endif
     anx_tx_context_end(&f);
     if (r->clock && !anx_exec_clock_join(r->clock))
         anx_tx_unsupported("IP clock native retirement failed");

@@ -96,6 +96,16 @@ if(CMAKE_CROSSCOMPILING)
         set_source_files_properties("${ANX_ROOT}/third_party/netxduo/common/src/nx_${service}.c"
             PROPERTIES COMPILE_DEFINITIONS "_nx_${service}=anx_nx_original_${service}")
     endforeach()
+    # Compile unchanged common core for the protocol fixture. Archive extraction
+    # resolves the real dependency closure; no vendor edits or terminal stubs.
+    file(GLOB ANX_PROTOCOL_VENDOR_PATHS CONFIGURE_DEPENDS
+        "${ANX_ROOT}/third_party/netxduo/common/src/*.c")
+    add_library(research_protocol_vendor STATIC ${ANX_PROTOCOL_VENDOR_PATHS}
+        "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_info_get.c")
+    target_include_directories(research_protocol_vendor PUBLIC ${ANX_BRIDGE_INCLUDES})
+    target_compile_definitions(research_protocol_vendor PUBLIC TX_DISABLE_ERROR_CHECKING NX_DISABLE_ERROR_CHECKING)
+    target_compile_options(research_protocol_vendor PRIVATE -Wall -Wextra -Werror
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/protocol_fixture.h")
     add_library(research_exec_adapter STATIC exec_wait.c)
     target_link_libraries(research_exec_adapter PUBLIC research_wait)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
@@ -121,6 +131,18 @@ if(CMAKE_CROSSCOMPILING)
         "-Wl,-Map=$<TARGET_FILE:research_exec_clock_smoke>.map")
     add_custom_command(TARGET research_exec_clock_smoke POST_BUILD
         COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_clock_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
+    add_executable(research_exec_protocol_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_thread.c exec_clock.c exec_ip.c exec_protocol_smoke.c)
+    target_compile_definitions(research_exec_protocol_smoke PRIVATE ANX_REAL_PROTOCOL_LINK)
+    target_link_libraries(research_exec_protocol_smoke PRIVATE
+        "-Wl,--start-group" research_ip_bridge research_protocol_vendor research_exec_adapter research_clock_schedule "-Wl,--end-group")
+    target_include_directories(research_exec_protocol_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_protocol_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_protocol_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_protocol_smoke>.map")
+    add_custom_command(TARGET research_exec_protocol_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_protocol_smoke>.map"
             -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_task_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c exec_task.c exec_task_smoke.c)
