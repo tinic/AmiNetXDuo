@@ -626,7 +626,7 @@ static void t_paired_setters(void)
                 AmiSocket *s;
                 LONG value = ip_values[j];
                 BOOL valid = value >= -1 && value <= 255;
-                LONG ttl = i == 0 && valid ? (value < 0 ? NX_IP_TIME_TO_LIVE : value) : 77;
+                LONG ttl = i == 0 && valid ? (value < 0 ? (LONG)NX_IP_TIME_TO_LIVE : value) : 77;
                 LONG tos = i == 1 && valid ? (value < 0 ? 0 : value) : 88;
                 LONG rc;
 
