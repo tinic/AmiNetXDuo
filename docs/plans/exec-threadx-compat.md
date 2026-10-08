@@ -195,7 +195,7 @@ Source, binary hashes, stdout/exit and reviews are retained in
 Research task build/cache and remote staging outputs are removed. Full backend,
 general deferred-abort dispatch, UDP and measured savings remain open.
 
-## Spike 3 checkpoint (in progress)
+## Spike 3 checkpoint
 
 Generic cleanup-gated wakeups are implemented without NetX edits. A non-IP abort
 returns success, while physical dispatch of the ready target waits for actual IP
@@ -210,4 +210,16 @@ schedules and rejection probes; packet delivery is a fixture and checksum paths
 are not exercised. The three-task native smoke passed 10/10 cases, exit 0 after 14 seconds on one
 boardless A1200/KS3.1 run at `2ba6f0d6e`, binary a524f38b (47,160 bytes), stacks
 8192. Both workers removed themselves before the parent returned. Exact-commit
-independent implementation review is pending.
+independent implementation review of 2ba6f0d6e + f366e2361 is complete: bounded
+sound/no blocker, with no full lifetime/scheduler GO. The small suspend-entry
+invariant follow-up 96325636c was independently reviewed as correct/minimal,
+with no bounded blocker, and passed the same ten native cases, exit 0 after
+15 seconds, binary 4beada45 (47,228 bytes). All task build/cache and emulator
+staging outputs were cleaned; small useful evidence is retained under
+`/Users/turo/ai/evidence/exec-threadx-spike3.json` and adjacent logs/hashes.
+
+Review confirmed the OPEN packet-arrival interaction: if an aborted-but-linked
+thread is selected before deferred cleanup, NetX resume overwrites its status
+with NX_SUCCESS. A full backend requires a policy for both status and packet
+ownership; the cleanup gate alone does not solve it. One-second grace is a
+fatal research diagnostic, never a safe total-drain/lifetime implementation.

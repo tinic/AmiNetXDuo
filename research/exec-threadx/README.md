@@ -302,9 +302,26 @@ run; parent and both workers use 8192-byte stacks. Source `2ba6f0d6e`, binary SH
 `a524f38bcd7f31ad10c92b1f1b122a8441c431ac393e7e076eb933a8276c790c`, 47,160 bytes.
 Harness `tools/amiberry-run.sh -m A1200 -t 90` at `300b22e8`; actual stdout,
 startup and exit evidence are `/Users/turo/ai/evidence/exec-threadx-spike3-native`.
-Independent exact-commit implementation review is pending.
-Other races, including packet delivery while a deferred abort is pending, remain
-unverified. This spike does not establish a full NetX stack or net size savings.
+Implementation review and follow-up status are recorded below.
+Independent review of exact `2ba6f0d6e` + host follow-up `f366e2361` found no
+blocker in the bounded schedules. It confirmed per-wake/generation arbitration,
+detach protection and completion before Permit. The recommended suspend-entry
+assertion rejecting a stale pending flag/token is added at `96325636c`; the
+independent follow-up review found it correct/minimal, with no bounded blocker.
+The guarded binary passed the same ten native cases, workers_reaped=2, exit 0
+after 15 seconds, same A1200/KS3.1/stacks. Binary SHA256
+`4beada458c1f1663a708b361b5f7ea0ea4b2ae08bcb3e4e081862dace79fe0c9`, 47,228 bytes;
+actual evidence is `/Users/turo/ai/evidence/exec-threadx-spike3-native-guard`.
+Task build/cache and emulator staging files were cleaned after retaining evidence.
+
+Source review confirms the remaining arrival race: the gated thread is still
+linked, and `_nx_tcp_socket_thread_resume` can overwrite TX_WAIT_ABORTED with
+NX_SUCCESS if it selects that node. The already-READY bridge resume preserves
+the pending flag and later releases that changed status. This is OPEN and is not
+covered by the ten native cases. The full backend needs an ownership/dispatch
+policy for it; restoring only status would not resolve packet ownership.
+Production also needs safe total cleanup/lifetime and producer-boundary exits;
+the research grace is not a recovery or production latency guarantee. This spike does not establish a full NetX stack or net size savings.
 
 ## Still open
 
