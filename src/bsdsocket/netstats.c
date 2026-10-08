@@ -33,11 +33,13 @@ typedef union BsdNetStat
 
 static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
 {
-    ULONG sent = 0, received = 0, checksum = 0, send_dropped = 0;
-    ULONG frags_sent = 0, frags_received = 0;
+    ULONG sent, received, checksum, send_dropped;
+    ULONG frags_sent, frags_received;
 
     /* NetX info outputs are optional: do not stage counters absent from
-       the BSD report. Error-checked entry points also permit NULL outputs. */
+       the BSD report. Error-checked entry points also permit NULL outputs.
+       Every requested counter is written on NX_SUCCESS, including zero
+       fragments with fragmentation disabled. No local is read on failure. */
     if (nx_ip_info_get(ip, &sent, NULL, &received, NULL,
                        NULL, NULL, &checksum, &send_dropped,
                        &frags_sent, &frags_received) != NX_SUCCESS)
@@ -53,7 +55,7 @@ static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
 
 static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
 {
-    ULONG sent = 0, responses = 0, checksum = 0;
+    ULONG sent, responses, checksum;
 
     if (nx_icmp_info_get(ip, &sent, NULL, NULL, &responses,
                          &checksum, NULL) != NX_SUCCESS)
@@ -69,10 +71,10 @@ static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
 
 static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
 {
-    ULONG sent = 0, sent_bytes = 0, received = 0, received_bytes = 0;
-    ULONG checksum = 0;
-    ULONG connections = 0, disconnections = 0, connections_dropped = 0;
-    ULONG retransmits = 0;
+    ULONG sent, sent_bytes, received, received_bytes;
+    ULONG checksum;
+    ULONG connections, disconnections, connections_dropped;
+    ULONG retransmits;
 
     if (nx_tcp_info_get(ip, &sent, &sent_bytes, &received, &received_bytes,
                         NULL, NULL, &checksum, &connections,
@@ -93,8 +95,8 @@ static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
 
 static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
 {
-    ULONG sent = 0, received = 0;
-    ULONG invalid = 0, dropped = 0, checksum = 0;
+    ULONG sent, received;
+    ULONG invalid, dropped, checksum;
 
     if (nx_udp_info_get(ip, &sent, NULL, &received, NULL,
                         &invalid, &dropped, &checksum) != NX_SUCCESS)
