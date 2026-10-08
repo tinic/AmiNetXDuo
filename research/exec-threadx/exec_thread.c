@@ -222,8 +222,14 @@ UINT _tx_thread_resume(TX_THREAD *t)
 static void native_yield(void)
 {
     struct Task *me=FindTask(0);
-    /* Public Exec scheduling point; never alter logical or native priority. */
-    (void)SetTaskPri(me,me->tc_Node.ln_Pri);
+    /* KS3.1 does not schedule on a same-value SetTaskPri. Request a scheduling
+     * decision using public calls, but restore priority before permitting any
+     * dispatch. No runnable Task can observe the temporary priority. */
+    Forbid();
+    BYTE priority=me->tc_Node.ln_Pri;
+    (void)SetTaskPri(me,priority==-128 ? -127 : priority-1);
+    (void)SetTaskPri(me,priority);
+    Permit();
 }
 VOID _tx_thread_relinquish(VOID)
 {
