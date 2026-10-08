@@ -1157,3 +1157,119 @@ link, net saving or performance result. No subtraction from shipping LTO spans.
 Next gates: concurrent socket/API and asynchronous driver lifetimes, external-peer
 wire coverage, full replacement-library integration and equal-feature size/
 performance comparison. IPv6 remains unproved by this IPv4 experiment.
+
+## Spike 16: concurrent consumers and task-context driver ownership
+
+Implementation c46af5bddba02a663435c7952ccea1a3952e18d6, against reviewed
+spike15 checkpoint 02f9edbfb. Research sources/private records only; shipping
+selection, pinned vendor bodies and public NetX/ThreadX headers remain unchanged.
+
+The real-protocol link admits one registered public native task producer after its IP
+clock starts. AnxExecIpIo retains a domain hold and blocks IP deletion even when
+its single TX slot is empty. Open/receive/complete/close require its exact native
+owner; driver accept may run in any normal serialized driver call. Marked
+callbacks/ISRs are excluded. Record storage is checked against IP/pool/creator/
+helper/producer/clock records and stacks plus the pool arena. Final tightening
+114d9027d uses the backend registry accessor to require the current public BOUND
+worker, its bridge identity and native Task. The full private producer record
+(Task/bridge/wait) is checked before reading or writing io state. An attached
+non-public ExecTask is refused; its native lifetime is absent from the created-
+thread preflight. Both this refusal and a private-wait-record alias are tested
+before normal driver enrollment. The producer must
+drain its actual device IO before closing; this is an explicit caller contract,
+not automatic SANA-II IO cancellation. Successful close clears the association
+and drops the domain hold. Public worker IDs remain until native ACK and actual
+ThreadX delete, so the old created-object preflight still prevents premature IP
+retirement. Pool/storage reclamation remains quiescent only.
+
+Two non-wrapping token counters distinguish the producer lease generation and
+each accepted transmission. A wrong/closed generation refuses before accessing
+IP or packet storage. A completion additionally matches its operation token
+and exact outstanding packet; the test releases and reallocates the same actual
+pool address, accepts the new ownership, then proves that the old completion
+cannot free it. A failed accept/receive retains caller ownership. Accepted TX
+completes via unchanged nx_packet_transmit_release; received packets enter the
+unchanged deferred IP receive queue. This is one outstanding packet and one
+task producer, not arbitrary interrupt drivers or a complete device IO layer.
+The retained IO record must outlive rejected late calls and retain its counters.
+
+The guest drives two distinct public native UDP consumers into the actual FIFO
+receive suspension list. A simulated driver retains actual vendor-generated
+broadcast IPv4 datagrams, then a separately scheduled native owner copies a
+packet, completes TX and injects RX. The packets keep real NetX headers/checksums;
+no fabricated receive result or external peer is used. Each consumer checks all
+193 payload bytes and returns actual ownership. The test also aborts a real
+blocked UDP receive through unchanged ThreadX/UDP cleanup, refuses a second
+abort, and waits for native completion before public deletion/storage reuse.
+Exhausting the actual pool parks a third operation, then actual release hands
+ownership directly to its allocation waiter. All packets must return.
+
+Foreign-owner, busy-slot, busy-close and live-producer IP shutdown attempts
+refuse. The producer closes before native ACK/delete, sockets and its control
+event group retire, then real IP/helper/clock shutdown proceeds. Late TX/RX/event
+operations refuse after IP/worker/socket storage poison. Two whole cycles test
+old lease generation refusal after reopening and recover signals/canaries,
+created lists, all pool ownership and runtime holds. All three application
+worker records use the existing reservation/normal completion/public delete
+path; no forced worker termination or raw object-count patching.
+
+Retained host models pass 39/39; this new integration is native-only. All m68k
+research targets, unchanged vendor core, -Werror and startup-first gates pass.
+At c46af5bdd the retained protocol passed 19/19 and clock 16/16, each one
+boardless A1200 KS3.1 r40.68 run with harness 300b22e8, -t90 and all stacks8192.
+Root verified actual stdout and receipt hashes. The first IO guest failed after
+six completed cases at reap: its helper-stop assumption required bridge.thread
+NULL, whereas unchanged normal complete removes the runtime-list binding but
+retains the thread pointer and public ID. The original failure and illegal-
+instruction log are preserved; the illegal PC could not be mapped without a
+load base. Returning from a failed CHECK with live owners can unload their code,
+so no crash-root-cause inference is treated as execution proof.
+
+Fixture-only 22404ec6c0757675c877a949637e7d5292d445f6 corrects reap to require the
+retained pointer, TX_COMPLETED/public ID, native ACK, closed private wait and
+no timer/cleanup/owned-mutex/pending-wake/abort-pin state, then actual public
+delete. The aggregate reap assertion is split; no backend/vendor body changes.
+Protocol and clock are byte-identical after correction. Corrected IO 18/18
+passed at 22404ec6c, workers_reaped10/helper2/clock2/restarts1, exit0 after15s;
+no illegal/guru/alert line was reported in the retained emulator log. Root
+verified actual stdout/startup/runner and all receipt hashes. This proves the
+corrected bounded lifetime run; it does not prove the specific old illegal PC
+cause. At final 114d9027d the owner IO guest passed 18/18, workers10/helper2/clock2/
+restarts1, exit0 after15s, including the unregistered-task and private-record
+alias refusals. Retained protocol passed 19/19, exit0 after17s; clock 16/16,
+exit0 after19s. Each was one boardless A1200 KS3.1 r40.68 run, harness 300b22e8,
+-t90, all stacks 8192. Root verified actual stdout/startup/runner/all receipt hashes;
+no illegal/guru/alert line was reported. Original and intermediate SHA results
+remain distinct from these final artifacts. Independent full source/correction/
+owner-supplement review is complete: root read all 6/6 core sections (23 wrapped
+chunks), owner 2/2 (6 chunks) and receipt 3/3. Deepseek confirms the corrected
+normal-completion predicate and final enrollment/private-record protections;
+no blocker in tightened114d9027d. Source review is distinct from execution.
+The reviewer used NetX 0260419617; root and deepseek independently confirmed
+all 10 reviewed bodies/header byte-identical to the actual built/pinned 2d871dca.
+The complete 3/3 pin addendum also confirms ThreadX review at pinned e24aa9c9;
+the vendor-drift observation is closed. The local NetX/ThreadX working files and
+gitlinks match these research pins. Spike16 is complete within this bounded scope.
+Final owned build and all native staging were removed, retaining useful exact
+evidence. Original source gaps/failures are not relabeled as original passes.
+
+Caller contracts remain explicit: output-token storage must be disjoint from
+control/packet storage, and an accepted packet must actually be caller-owned.
+The accept gate checks its pool but does not verify its allocated-vs-free marker;
+the actual tested driver TX handoff supplies allocated ownership. Tokens fail
+closed at their 32-bit limits. Single producer/one outstanding TX and single-CPU
+serialized FIFO are bounded assumptions, not arbitrary driver concurrency.
+Artifact/source hashes, original failures and coverage stay distinct in
+/Users/turo/ai/evidence/exec-threadx-spike16.json; pending is not a pass.
+
+The final owner-gate protocol partial non-LTO map attributes 20,876 backend .text bytes
+plus 3,260 retained pinned ThreadX bytes (24,136 subtotal), 42,032 selected pinned
+NetX bytes and 3,300 clock division helpers separately. Includes research guards
+and diagnostics; excludes fixture/test/driver/PRNG/handshake/startup/libc/other
+helpers, data/BSS/relocations and native resources. No finished-library size
+saving or performance claim; no subtraction from shipping LTO spans.
+
+Remaining integration includes real device/peer/ISR boundaries, concurrent TCP
+and public socket APIs, IPv6/other enabled protocol lifetimes, and the full
+replacement-library link. These belong in the library integration checkpoint;
+the later equal-feature size/performance comparison remains required.
