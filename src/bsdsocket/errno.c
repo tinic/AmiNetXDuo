@@ -260,71 +260,108 @@ LONG bsd_wait_errno(ULONG wait, UINT status)
     }
 }
 
+/* Keep each message once, with its code, and emit both the packed character
+ * storage and its index from that list. A UWORD offset replaces every stored
+ * pointer, avoiding per-message relocations while retaining stable pointers
+ * for callers. char-only fields need no packing pragma or runtime unpacking.
+ */
+#define BSD_ERRNO_MESSAGES(X) \
+    X(0, "No error") \
+    X(AMI_EPERM, "Operation not permitted") \
+    X(AMI_ENOENT, "No such file or directory") \
+    X(AMI_EINTR, "Interrupted system call") \
+    X(AMI_EIO, "Input/output error") \
+    X(AMI_ENXIO, "Device not configured") \
+    X(AMI_EBADF, "Bad file descriptor") \
+    X(AMI_ENOMEM, "Cannot allocate memory") \
+    X(AMI_EACCES, "Permission denied") \
+    X(AMI_EFAULT, "Bad address") \
+    X(AMI_EBUSY, "Device busy") \
+    X(AMI_EEXIST, "File exists") \
+    X(AMI_EINVAL, "Invalid argument") \
+    X(AMI_ENFILE, "Too many open files in system") \
+    X(AMI_EMFILE, "Too many open files") \
+    X(AMI_EPIPE, "Broken pipe") \
+    X(AMI_EWOULDBLOCK, "Operation would block") \
+    X(AMI_EINPROGRESS, "Operation now in progress") \
+    X(AMI_EALREADY, "Operation already in progress") \
+    X(AMI_ENOTSOCK, "Socket operation on non-socket") \
+    X(AMI_EDESTADDRREQ, "Destination address required") \
+    X(AMI_EMSGSIZE, "Message too long") \
+    X(AMI_EPROTOTYPE, "Protocol wrong type for socket") \
+    X(AMI_ENOPROTOOPT, "Protocol not available") \
+    X(AMI_EPROTONOSUPPORT, "Protocol not supported") \
+    X(AMI_ESOCKTNOSUPPORT, "Socket type not supported") \
+    X(AMI_EOPNOTSUPP, "Operation not supported") \
+    X(AMI_EPFNOSUPPORT, "Protocol family not supported") \
+    X(AMI_EAFNOSUPPORT, "Address family not supported") \
+    X(AMI_EADDRINUSE, "Address already in use") \
+    X(AMI_EADDRNOTAVAIL, "Can't assign requested address") \
+    X(AMI_ENETDOWN, "Network is down") \
+    X(AMI_ENETUNREACH, "Network is unreachable") \
+    X(AMI_ENETRESET, "Network dropped connection") \
+    X(AMI_ECONNABORTED, "Software caused connection abort") \
+    X(AMI_ECONNRESET, "Connection reset by peer") \
+    X(AMI_ENOBUFS, "No buffer space available") \
+    X(AMI_EISCONN, "Socket is already connected") \
+    X(AMI_ENOTCONN, "Socket is not connected") \
+    X(AMI_ESHUTDOWN, "Can't send after socket shutdown") \
+    X(AMI_ETOOMANYREFS, "Too many references") \
+    X(AMI_ETIMEDOUT, "Operation timed out") \
+    X(AMI_ECONNREFUSED, "Connection refused") \
+    X(AMI_ENAMETOOLONG, "File name too long") \
+    X(AMI_EHOSTDOWN, "Host is down") \
+    X(AMI_EHOSTUNREACH, "No route to host") \
+    X(AMI_ENOSYS, "Function not implemented")
+
+#define BSD_HERRNO_MESSAGES(X) \
+    X(NETDB_SUCCESS, "Resolver error 0 (no error)") \
+    X(HOST_NOT_FOUND, "Unknown host") \
+    X(TRY_AGAIN, "Host name lookup failure") \
+    X(NO_RECOVERY, "Unknown server error") \
+    X(NO_DATA, "No address associated with name")
+
+typedef struct BsdErrorTextPool
+{
+#define BSD_TEXT_FIELD(code, text) char message_##code[sizeof(text)];
+    BSD_ERRNO_MESSAGES(BSD_TEXT_FIELD)
+    BSD_HERRNO_MESSAGES(BSD_TEXT_FIELD)
+#undef BSD_TEXT_FIELD
+} BsdErrorTextPool;
+
+_Static_assert(sizeof(BsdErrorTextPool) <= 65535UL,
+               "error message offsets must fit in UWORD");
+
+static const BsdErrorTextPool bsd_error_strings =
+{
+#define BSD_TEXT_VALUE(code, text) text,
+    BSD_ERRNO_MESSAGES(BSD_TEXT_VALUE)
+    BSD_HERRNO_MESSAGES(BSD_TEXT_VALUE)
+#undef BSD_TEXT_VALUE
+};
+
 typedef struct
 {
-    UWORD       code;
-    const char *text;
+    UWORD code;
+    UWORD offset;
 } BsdErrText;
+
+#define BSD_TEXT_INDEX(code, text) \
+    { code, (UWORD)offsetof(BsdErrorTextPool, message_##code) },
 
 static const BsdErrText bsd_errno_text[] =
 {
-    {  0,                    "No error"                          },
-    { AMI_EPERM,             "Operation not permitted"           },
-    { AMI_ENOENT,            "No such file or directory"         },
-    { AMI_EINTR,             "Interrupted system call"           },
-    { AMI_EIO,               "Input/output error"                },
-    { AMI_ENXIO,             "Device not configured"             },
-    { AMI_EBADF,             "Bad file descriptor"               },
-    { AMI_ENOMEM,            "Cannot allocate memory"            },
-    { AMI_EACCES,            "Permission denied"                 },
-    { AMI_EFAULT,            "Bad address"                       },
-    { AMI_EBUSY,             "Device busy"                       },
-    { AMI_EEXIST,            "File exists"                       },
-    { AMI_EINVAL,            "Invalid argument"                  },
-    { AMI_ENFILE,            "Too many open files in system"     },
-    { AMI_EMFILE,            "Too many open files"               },
-    { AMI_EPIPE,             "Broken pipe"                       },
-    { AMI_EWOULDBLOCK,       "Operation would block"             },
-    { AMI_EINPROGRESS,       "Operation now in progress"         },
-    { AMI_EALREADY,          "Operation already in progress"     },
-    { AMI_ENOTSOCK,          "Socket operation on non-socket"    },
-    { AMI_EDESTADDRREQ,      "Destination address required"      },
-    { AMI_EMSGSIZE,          "Message too long"                  },
-    { AMI_EPROTOTYPE,        "Protocol wrong type for socket"    },
-    { AMI_ENOPROTOOPT,       "Protocol not available"            },
-    { AMI_EPROTONOSUPPORT,   "Protocol not supported"            },
-    { AMI_ESOCKTNOSUPPORT,   "Socket type not supported"         },
-    { AMI_EOPNOTSUPP,        "Operation not supported"           },
-    { AMI_EPFNOSUPPORT,      "Protocol family not supported"     },
-    { AMI_EAFNOSUPPORT,      "Address family not supported"      },
-    { AMI_EADDRINUSE,        "Address already in use"            },
-    { AMI_EADDRNOTAVAIL,     "Can't assign requested address"    },
-    { AMI_ENETDOWN,          "Network is down"                   },
-    { AMI_ENETUNREACH,       "Network is unreachable"            },
-    { AMI_ENETRESET,         "Network dropped connection"        },
-    { AMI_ECONNABORTED,      "Software caused connection abort"  },
-    { AMI_ECONNRESET,        "Connection reset by peer"          },
-    { AMI_ENOBUFS,           "No buffer space available"         },
-    { AMI_EISCONN,           "Socket is already connected"       },
-    { AMI_ENOTCONN,          "Socket is not connected"           },
-    { AMI_ESHUTDOWN,         "Can't send after socket shutdown"  },
-    { AMI_ETOOMANYREFS,      "Too many references"               },
-    { AMI_ETIMEDOUT,         "Operation timed out"               },
-    { AMI_ECONNREFUSED,      "Connection refused"                },
-    { AMI_ENAMETOOLONG,      "File name too long"                },
-    { AMI_EHOSTDOWN,         "Host is down"                      },
-    { AMI_EHOSTUNREACH,      "No route to host"                  },
-    { AMI_ENOSYS,            "Function not implemented"          }
+    BSD_ERRNO_MESSAGES(BSD_TEXT_INDEX)
 };
 
 static const BsdErrText bsd_herrno_text[] =
 {
-    { NETDB_SUCCESS,  "Resolver error 0 (no error)"        },
-    { HOST_NOT_FOUND, "Unknown host"                       },
-    { TRY_AGAIN,      "Host name lookup failure"           },
-    { NO_RECOVERY,    "Unknown server error"               },
-    { NO_DATA,        "No address associated with name"    }
+    BSD_HERRNO_MESSAGES(BSD_TEXT_INDEX)
 };
+
+#undef BSD_TEXT_INDEX
+#undef BSD_ERRNO_MESSAGES
+#undef BSD_HERRNO_MESSAGES
 
 static const char *bsd_text_lookup(const BsdErrText *table, ULONG count,
                                    LONG code, const char *fallback)
@@ -334,7 +371,7 @@ static const char *bsd_text_lookup(const BsdErrText *table, ULONG count,
     for (i = 0; i < count; i++)
     {
         if ((LONG)table[i].code == code)
-            return table[i].text;
+            return (const char *)&bsd_error_strings + table[i].offset;
     }
 
     return fallback;
