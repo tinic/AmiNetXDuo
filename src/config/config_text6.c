@@ -403,13 +403,9 @@ ULONG ami_format_ip6(char *buf, const ULONG addr[AMI_CFG_IP6_WORDS])
         if (i == 6 && best_at == 0 &&
             (best_len == 6 || (best_len == 5 && group[5] == 0xFFFF)))
         {
-            char  quad[16];
             ULONG addr4 = ((ULONG)group[6] << 16) | (ULONG)group[7];
-            ULONG n;
 
-            ami_config_format_ip(addr4, quad, sizeof(quad));
-            for (n = 0; quad[n] != '\0'; n++)
-                tmp[pos++] = quad[n];
+            pos += ami_format_ip4(tmp + pos, addr4);
             break;
         }
 
