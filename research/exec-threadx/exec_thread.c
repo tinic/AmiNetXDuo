@@ -27,6 +27,14 @@ static int authorized(AnxExecThread *r)
 {
     return r->managed ? r->client==FindTask(0) && r->client_stamp==client_stamp(FindTask(0)) : r->creator==FindTask(0);
 }
+/* Public ThreadX handles carry no creator identity after binding. Managed
+ * storage belongs to the library/application, not its temporary startup Task.
+ * Legacy records still require the Task which owns their ACK signal. */
+static int lifecycle_caller(AnxExecThread *r)
+{
+    return r->managed ? !_tx_thread_system_state && _tx_thread_identify() &&
+        _tx_thread_current_ptr!=r->thread && FindTask(0)!=&r->task : authorized(r);
+}
 
 static int idle(void)
 {
@@ -280,6 +288,7 @@ UINT _tx_thread_create(TX_THREAD *t, CHAR *name, VOID (*entry)(ULONG), ULONG inp
     r->task.tc_Node.ln_Name=name;
     (void)SetTaskPri(&r->task,ANX_THREAD_EXEC_PRIORITY(priority));
     r->state=ANX_THREAD_BOUND;
+    if (r->managed) {r->client=0;r->client_stamp=0;}
     if (auto_start==TX_AUTO_START) {t->tx_thread_state=TX_READY;Signal(&r->task,SIGF_SINGLE);}
     return TX_SUCCESS;
 }
@@ -330,7 +339,7 @@ UINT _tx_thread_terminate(TX_THREAD *t)
     if (_tx_thread_system_state) return TX_CALLER_ERROR;
     r=lookup(t);
     if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
-    if (!authorized(r)) return TX_CALLER_ERROR;
+    if (!lifecycle_caller(r)) return TX_CALLER_ERROR;
     if (r->managed && _tx_thread_preempt_disable &&
         (r->state!=ANX_THREAD_FINISHED || t->tx_thread_state!=TX_TERMINATED ||
          r->wait.opened || r->bridge.thread || !r->bridge.terminal_pending || tx_amiga_exec_task_alive(&r->task)))
@@ -367,7 +376,7 @@ UINT _tx_thread_delete(TX_THREAD *t)
     if (_tx_thread_system_state) return TX_CALLER_ERROR;
     AnxExecThread *r=lookup(t);
     if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
-    if (!authorized(r)) return TX_CALLER_ERROR;
+    if (!lifecycle_caller(r)) return TX_CALLER_ERROR;
     if (r->managed && _tx_thread_preempt_disable &&
         (r->state!=ANX_THREAD_FINISHED || r->wait.opened || tx_amiga_exec_task_alive(&r->task) ||
          (t->tx_thread_state!=TX_COMPLETED && t->tx_thread_state!=TX_TERMINATED) || t->tx_thread_suspending))
@@ -393,18 +402,14 @@ UINT anx_exec_thread_manage_retire(struct Task *client,TX_THREAD *t,unsigned can
     Forbid();AnxExecThread *r=lookup(t);
     int owned=r && r->managed && r->creator==FindTask(0);Permit();
     if (!owned) return TX_THREAD_ERROR;
+    /* Synchronous retirement is only for unused reservations. Bound workers
+     * retire through public delete and the manager's private drain. */
+    if (!cancel) return TX_FEATURE_NOT_ENABLED;
     if (!client || !tx_amiga_exec_task_alive(client) || r->client!=client ||
         r->client_stamp!=client_stamp(client)) return TX_CALLER_ERROR;
     APTR allocation=r->native_allocation;ULONG bytes=r->native_allocation_size;
-    if (cancel) {
-        if (r->state!=ANX_THREAD_PREPARED) return TX_NOT_DONE;
-        if (!anx_exec_thread_cancel(r)) anx_tx_unsupported("managed reservation cancellation failed");
-    } else {
-        if (r->state!=ANX_THREAD_FINISHED || r->wait.opened || tx_amiga_exec_task_alive(&r->task)) return TX_DELETE_ERROR;
-        AnxTxContext f;anx_tx_context_begin(&f,TX_NULL,0);
-        UINT status=delete_fields(r,1);anx_tx_context_end(&f);
-        if (status!=TX_SUCCESS) return status;
-    }
+    if (r->state!=ANX_THREAD_PREPARED) return TX_NOT_DONE;
+    if (!anx_exec_thread_cancel(r)) anx_tx_unsupported("managed reservation cancellation failed");
     if (allocation && (*(ULONG *)allocation!=0x13572468 ||
         *(ULONG *)((UBYTE *)allocation+8192+4)!=0x89abcdef)) anx_tx_unsupported("managed native stack canary corrupted");
     Forbid();managed_records--;managed_bytes-=sizeof(*r)+bytes;
@@ -433,7 +438,7 @@ void anx_exec_thread_manage_drain(void)
 int anx_exec_thread_managed_stop_event(TX_THREAD *t,TX_EVENT_FLAGS_GROUP *group)
 {
     anx_tx_require_context(0);AnxExecThread *r=lookup(t);
-    if (!r || !r->managed || !authorized(r) || r->state!=ANX_THREAD_BOUND || !r->entered) return 0;
+    if (!r || !r->managed || !lifecycle_caller(r) || r->state!=ANX_THREAD_BOUND || !r->entered) return 0;
     if (!anx_tx_stop_event(&r->bridge,group)) return 0;
     r->state=ANX_THREAD_STOPPING;return 1;
 }

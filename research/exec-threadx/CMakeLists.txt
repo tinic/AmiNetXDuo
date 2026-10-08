@@ -74,6 +74,16 @@ foreach(service packet_allocate packet_pool_delete)
 endforeach()
 if(CMAKE_CROSSCOMPILING)
     enable_language(ASM)
+    add_executable(research_exec_library_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        exec_library_smoke.c)
+    target_include_directories(research_exec_library_smoke PRIVATE
+        "${AMIGA_NDK_INCLUDE}" "${ANX_ROOT}/include")
+    target_compile_options(research_exec_library_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_library_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_library_smoke>.map")
+    add_custom_command(TARGET research_exec_library_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_library_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     # Real helper target must resolve ICMP dependencies to vendor bodies,
     # rather than the older packet-slice terminal sentinels.
     get_target_property(ANX_IP_BRIDGE_SOURCES research_tx_bridge SOURCES)

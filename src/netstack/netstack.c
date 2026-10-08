@@ -119,6 +119,79 @@ static VOID ami_ns_sockets_delete(NX_IP *ip)
     ip->nx_ip_udp_created_sockets_count = 0;
 }
 
+#ifdef AMINETXDUO_EXEC_RESEARCH
+/* First whole-library lifecycle slice: no physical/add-on producers. The
+ * singleton lock and last stack reference exclude new users. Other shutdown
+ * contracts remain unsupported and retain the published domain for retry. */
+static BOOL ami_ns_research_loopback_stop(AmiNetStack *ns)
+{
+    AnxManagedSnapshot worker;
+    TX_TIMER *timers[3];
+    UINT active[3];
+    ULONG left, reload;
+    UWORD i, count = 0;
+    BOOL stopping = FALSE;
+
+    if (!ns->ns_IpCreated)
+        return TRUE;
+    if (ns->ns_IfaceCount || ns->ns_AutoIpCreated || ami_sana2_retained_count())
+        return FALSE;
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+        if (ns->ns_Iface[i] != NULL)
+            return FALSE;
+#ifdef AMINETXDUO_DHCP
+    if (ns->ns_DhcpCreated)
+        return FALSE;
+#endif
+#ifdef AMINETXDUO_MDNS
+    if (ns->ns_MdnsCreated)
+        return FALSE;
+#endif
+#if defined(AMINETXDUO_IPV6) && defined(AMINETXDUO_DHCP)
+    if (ns->ns_Dhcpv6Created || ns->ns_Dhcpv6WorkReady)
+        return FALSE;
+#endif
+    if (!_tx_thread_identify() || _tx_thread_system_state ||
+        _tx_thread_preempt_disable)
+        return FALSE;
+    timers[count++] = &ns->ns_Ip.nx_ip_periodic_timer;
+    if (ns->ns_Ip.nx_ip_fast_periodic_timer_created)
+        timers[count++] = &ns->ns_Ip.nx_ip_fast_periodic_timer;
+    if (ns->ns_SecondCreated)
+        timers[count++] = &ns->ns_Second;
+    for (i = 0; i < count; i++)
+        if (tx_timer_info_get(timers[i], NULL, &active[i], &left, &reload,
+                              NULL) != TX_SUCCESS)
+            return FALSE;
+    for (i = 0; i < count; i++)
+        if (tx_timer_deactivate(timers[i]) != TX_SUCCESS)
+            anx_tx_unsupported("research IP producer timer deactivation failed");
+
+    for (i = 0; i < 100; i++)
+    {
+        if (!anx_exec_thread_managed_snapshot(&ns->ns_Ip.nx_ip_thread, &worker))
+            anx_tx_unsupported("research IP shutdown lost managed owner");
+        if (worker.state == ANX_THREAD_FINISHED)
+            return !worker.io_opened && !tx_amiga_exec_task_alive(worker.task) &&
+                   ns->ns_Ip.nx_ip_thread.tx_thread_state == TX_TERMINATED;
+        if (worker.state == ANX_THREAD_STOPPING)
+            stopping = TRUE;
+        else if (anx_exec_thread_managed_stop_event(&ns->ns_Ip.nx_ip_thread,
+                                                   &ns->ns_Ip.nx_ip_events))
+            stopping = TRUE;
+        /* The wait releases the exact bracket, letting the helper drain work
+         * and its terminal owner close IO. No spin or foreign Task removal. */
+        if (tx_thread_sleep(1) != TX_SUCCESS)
+            break;
+    }
+    if (!stopping)
+        for (i = 0; i < count; i++)
+            if (active[i] && tx_timer_activate(timers[i]) != TX_SUCCESS)
+                anx_tx_unsupported("research IP producer timer restore failed");
+    return FALSE;
+}
+#endif
+
 static VOID ami_ns_destroy(AmiNetStack *ns)
 {
     UWORD i;
@@ -262,6 +335,13 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     {
         UINT status;
 
+#ifdef AMINETXDUO_EXEC_RESEARCH
+        if (!ami_ns_research_loopback_stop(ns))
+        {
+            AMI_ERROR("research netstack: unsupported IP shutdown; retaining memory");
+            return;
+        }
+#endif
         ami_ns_sockets_delete(&ns->ns_Ip);
         status = nx_ip_delete(&ns->ns_Ip);
 
@@ -2087,6 +2167,16 @@ LONG netstack_shutdown(VOID)
         return AMI_NET_ERR_KERNEL;
     }
 
+#ifdef AMINETXDUO_EXEC_RESEARCH
+    if (entered != AMI_NET_OK || !ami_ns_research_loopback_stop(ns))
+    {
+        if (entered == AMI_NET_OK)
+            ami_netstack_leave(&caller);
+        AMI_ERROR("research netstack: shutdown refused; retaining published domain");
+        ami_ns_lock_release();
+        return AMI_NET_ERR_KERNEL;
+    }
+#endif
     ami_ns = NULL;
 
     /* The hooks point at the port that is about to be freed, so they go first. */

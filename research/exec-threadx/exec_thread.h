@@ -60,7 +60,10 @@ const AnxExecThread *anx_exec_thread_owner_record(void);
  * foreign READY/blocked suspension and general delayed suspend,
  * priority changes and forced terminate remain open. Current-owner threshold
  * changes require restore before outer boundary exit; no foreign changes.
- * Public delete only after completion + native removal, by the retained client.
+ * Public delete only after completion + native removal. Managed bound handles
+ * belong to the application/library storage lifetime; any registered normal
+ * ThreadX caller except the target can stop/delete them. PREPARED reservations
+ * and legacy records retain their original client/ACK authority.
  * Managed finished deletion is nonblocking; the manager later frees only private
  * storage, while the public control and supplied stack are immediately reusable. */
 UINT anx_exec_thread_stack_in_use(const VOID *,ULONG);

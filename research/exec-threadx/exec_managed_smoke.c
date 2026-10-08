@@ -41,7 +41,7 @@ static VOID child(ULONG input)
 {
     ULONG local=0;AnxManagedSnapshot s;
     if (input!=77 || tx_thread_identify()!=&control || !anx_exec_thread_managed_snapshot(&control,&s) ||
-        s.manager==parent || s.client!=parent || s.native_size!=8192 || s.public_stack!=expected_stack ||
+        s.manager==parent || s.client || s.native_size!=8192 || s.public_stack!=expected_stack ||
         s.public_size!=expected_size || control.tx_thread_stack_start!=expected_stack ||
         control.tx_thread_stack_size!=expected_size || control.tx_thread_priority!=expected_priority ||
         (uintptr_t)&local<(uintptr_t)s.native_stack || (uintptr_t)&local>=(uintptr_t)s.native_stack+s.native_size ||
@@ -129,7 +129,7 @@ int main(void)
         if (round==2) CASE("8192-public-stack-reused-without-second-native-allocation");
         CHECK(tx_thread_delete(&control)==TX_DELETE_ERROR);
         CHECK(tx_event_flags_get(&events,1,TX_OR_CLEAR,&actual,50)==TX_SUCCESS && actual==1 && entries==round+1 && !errors);
-        if (!round) CASE("actual-entry-on-native-stack-with-public-layout-and-client-authority");
+        if (!round) CASE("actual-entry-on-native-stack-with-public-layout-and-self-delete-refusal");
         CHECK(tx_event_flags_set(&events,2,TX_OR)==TX_SUCCESS && tx_thread_sleep(2)==TX_SUCCESS);
         CHECK(anx_exec_thread_managed_snapshot(&control,&s) && s.state==ANX_THREAD_FINISHED && !s.io_opened &&
             !tx_amiga_exec_task_alive(s.task) && control.tx_thread_state==TX_COMPLETED);
