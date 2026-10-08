@@ -14,7 +14,8 @@ static uint64_t ew_clock(void *arg)
     struct EClockVal clock;
     ULONG hz = __ReadEClock_base(e->timer->tr_node.io_Device, &clock);
     uint64_t ticks = ((uint64_t)clock.ev_hi << 32) | clock.ev_lo;
-    /* Divide before scaling so the long-lived EClock cannot overflow. */
+    /* Avoid overflow in the intermediate ticks * 1000000 calculation.
+     * Microseconds themselves must remain representable (2^64 us). */
     return (ticks / hz) * 1000000 + ((ticks % hz) * 1000000) / hz;
 }
 

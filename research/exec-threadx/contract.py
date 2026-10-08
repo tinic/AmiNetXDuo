@@ -23,6 +23,8 @@ TX = ROOT / 'third_party/threadx'
 def scan(entry):
     path = Path(entry['file']).resolve()
     args = list(entry.get('arguments') or shlex.split(entry['command']))
+    if any(arg in ('-P', '-fpreprocessed', '-fdirectives-only') for arg in args):
+        raise RuntimeError(str(path) + ': flags disable required markers or macro expansion')
     command = []
     skip = False
     for arg in args:
@@ -39,20 +41,26 @@ def scan(entry):
         raise RuntimeError(str(path) + ': ' + run.stderr[-2000:])
     body = []
     own = False
+    seen_source_marker = False
     for line in run.stdout.splitlines():
         marker = re.match(r'#\s+\d+\s+"([^"]+)"', line)
         if marker:
             named = marker.group(1)
             own = (Path(entry['directory']) / named).resolve() == path
+            seen_source_marker |= own
         elif own:
             body.append(line)
+    if not seen_source_marker:
+        raise RuntimeError(str(path) + ': no matching source marker; extraction failed')
     text = '\n'.join(body)
     # Strip comments and literals from the unexpanded source for macro inventory.
     raw = re.sub(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
                  '', path.read_text(), flags=re.S)
     calls = set(re.findall(r'\b(_tx_\w+|_txe_\w+|_txr_\w+|tx_\w+)\s*\(', text))
     identifiers = set(re.findall(r'\b_tx_\w+\b', text)) - calls
-    fields = set(re.findall(r'(?:->|\.)\s*(tx_(?:thread|timer|mutex|event_flags|semaphore|queue|block_pool|byte_pool)_\w+)', text))
+    # Do not whitelist known object types: an upstream-added tx_* field must
+    # appear in the delta too. This intentionally over-approximates membership.
+    fields = set(re.findall(r'(?:->|\.)\s*(tx_\w+)', text))
     macros = set(re.findall(r'\bTX_[A-Z0-9_]+\b', raw))
     return path.relative_to(ROOT).as_posix(), {
         'calls': sorted(calls), 'internal_identifiers': sorted(identifiers),
@@ -99,16 +107,35 @@ def main():
     result['netxduo_pin'] = subprocess.check_output(['git', '-C', str(NX), 'rev-parse', 'HEAD'], text=True).strip()
     result['threadx_pin'] = subprocess.check_output(['git', '-C', str(TX), 'rev-parse', 'HEAD'], text=True).strip()
     result['method'] = 'configured compiler preprocessing; own source lines only; compiled, not linked coverage'
-    result['threadx_header_sha256'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in sorted((TX / 'common/inc').glob('tx_*.h'))}
+    headers = set((TX / 'common/inc').glob('tx_*.h'))
+    for directory in ('port/threadx-amiga', 'port/netxduo-amiga'):
+        headers.update((ROOT / directory).rglob('*.h'))
+    headers.update(p for p in (ROOT / 'include').glob('*_user.h'))
+    headers.add(NX / 'common/inc/nx_api.h')
+    result['contract_header_sha256'] = {
+        p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(headers)}
     if args.check:
         old = json.loads(args.check.read_text())
         if result != old:
+            for key in ('profile', 'netxduo_pin', 'threadx_pin', 'production_files_preprocessed', 'method'):
+                if old.get(key) != result[key]:
+                    print(key, 'old=', old.get(key), 'new=', result[key])
+            old_headers = old.get('contract_header_sha256', {})
+            new_headers = result['contract_header_sha256']
+            for path in sorted(set(old_headers) | set(new_headers)):
+                if old_headers.get(path) != new_headers.get(path):
+                    print('header_changed=', path)
             for kind in result['aggregate']:
                 added = sorted(set(result['aggregate'][kind]) - set(old['aggregate'][kind]))
                 removed = sorted(set(old['aggregate'][kind]) - set(result['aggregate'][kind]))
                 if added or removed:
                     print(kind, 'added=', added, 'removed=', removed)
+            old_files = old.get('files_with_references', {})
+            new_files = result['files_with_references']
+            for path in sorted(set(old_files) | set(new_files)):
+                if old_files.get(path) != new_files.get(path):
+                    print('consumer_changed=', path)
             raise SystemExit('research_contract=CHANGED review pins, headers and per-file contract before updating baseline')
         print('research_contract=UNCHANGED profile=' + args.profile)
     else:

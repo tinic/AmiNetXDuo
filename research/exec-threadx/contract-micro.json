@@ -274,6 +274,25 @@
         "_tx_thread_execute_ptr"
       ],
       "fields": [
+        "tx_amiga_tick_catchups",
+        "tx_amiga_tick_clipped",
+        "tx_amiga_tick_deferred",
+        "tx_amiga_tick_delivered",
+        "tx_amiga_tick_eclock_hz",
+        "tx_amiga_tick_empty",
+        "tx_amiga_tick_fallback",
+        "tx_amiga_tick_lost",
+        "tx_amiga_tick_over_budget",
+        "tx_amiga_tick_service_us",
+        "tx_amiga_tick_skew",
+        "tx_amiga_tick_skew_peak",
+        "tx_amiga_tick_source_chz",
+        "tx_amiga_tick_unit",
+        "tx_amiga_tick_uptime_ms",
+        "tx_amiga_tick_uptime_rem",
+        "tx_amiga_tick_wakeups",
+        "tx_amiga_tick_worst_service_us",
+        "tx_amiga_tick_worst_stall_ms",
         "tx_thread_created_next"
       ],
       "source_macros_and_types": [
@@ -555,6 +574,14 @@
         "TX_TRUE"
       ]
     },
+    "src/bsdsocket/interfaces.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_errors"
+      ],
+      "source_macros_and_types": []
+    },
     "src/bsdsocket/library.c": {
       "calls": [
         "tx_amiga_exec_task_alive",
@@ -582,7 +609,24 @@
         "tx_amiga_uptime_ms"
       ],
       "internal_identifiers": [],
-      "fields": [],
+      "fields": [
+        "tx_amiga_tick_catchups",
+        "tx_amiga_tick_clipped",
+        "tx_amiga_tick_deferred",
+        "tx_amiga_tick_delivered",
+        "tx_amiga_tick_lost",
+        "tx_amiga_tick_over_budget",
+        "tx_amiga_tick_service_us",
+        "tx_amiga_tick_skew",
+        "tx_amiga_tick_skew_peak",
+        "tx_amiga_tick_worst_service_us",
+        "tx_amiga_tick_worst_stall_ms",
+        "tx_bytes",
+        "tx_bytes_hi",
+        "tx_errors",
+        "tx_underruns",
+        "tx_wedges"
+      ],
       "source_macros_and_types": [
         "TX_AMIGA_TICK_STATS"
       ]
@@ -656,12 +700,82 @@
       "fields": [],
       "source_macros_and_types": []
     },
+    "src/netdev/dp8390.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_completed",
+        "tx_errors",
+        "tx_packets",
+        "tx_page_start"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/netdev/el3.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_at",
+        "tx_completed",
+        "tx_errors",
+        "tx_packets",
+        "tx_underruns"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/netdev/genet.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_at",
+        "tx_buf",
+        "tx_busy",
+        "tx_cidx",
+        "tx_completed",
+        "tx_csum",
+        "tx_csum_supported",
+        "tx_flush",
+        "tx_kicked",
+        "tx_more",
+        "tx_packets",
+        "tx_pidx",
+        "tx_reclaim",
+        "tx_short_build",
+        "tx_task_lock"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/netdev/lance.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_at",
+        "tx_completed",
+        "tx_done",
+        "tx_errors",
+        "tx_next",
+        "tx_packets"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/netdev/ne2000.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_errors"
+      ],
+      "source_macros_and_types": []
+    },
     "src/netdev/netdev_cmds.c": {
       "calls": [
         "tx_flush"
       ],
       "internal_identifiers": [],
-      "fields": [],
+      "fields": [
+        "tx_errors",
+        "tx_flush",
+        "tx_underruns"
+      ],
       "source_macros_and_types": []
     },
     "src/netdev/netdev_device.c": {
@@ -670,7 +784,45 @@
         "tx_reclaim"
       ],
       "internal_identifiers": [],
-      "fields": [],
+      "fields": [
+        "tx_at",
+        "tx_busy",
+        "tx_completed",
+        "tx_csum",
+        "tx_errors",
+        "tx_flush",
+        "tx_more",
+        "tx_packets",
+        "tx_reclaim",
+        "tx_short_build"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/netdev/netdev_extension.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_csum_supported",
+        "tx_flush"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/netdev/zz9000.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_at",
+        "tx_busy",
+        "tx_completed",
+        "tx_csum",
+        "tx_csum_supported",
+        "tx_done",
+        "tx_errors",
+        "tx_next",
+        "tx_packets",
+        "tx_reclaim",
+        "tx_task_lock"
+      ],
       "source_macros_and_types": []
     },
     "src/netstack/netstack.c": {
@@ -804,7 +956,22 @@
         "_tx_thread_sleep"
       ],
       "internal_identifiers": [],
-      "fields": [],
+      "fields": [
+        "tx_csum_ok",
+        "tx_orphaned",
+        "tx_quick_ok",
+        "tx_slots",
+        "tx_underruns",
+        "tx_wedges"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/sana2/sana2_driver.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_errors"
+      ],
       "source_macros_and_types": []
     },
     "src/sana2/sana2_rx.c": {
@@ -851,13 +1018,51 @@
       ],
       "internal_identifiers": [],
       "fields": [
-        "tx_queue_full"
+        "tx_bytes",
+        "tx_bytes_hi",
+        "tx_csum_ok",
+        "tx_errors",
+        "tx_flags",
+        "tx_kicking",
+        "tx_lazy_last_send",
+        "tx_lazy_parked",
+        "tx_lazy_timer",
+        "tx_lazy_timer_up",
+        "tx_orphaned",
+        "tx_pend",
+        "tx_pend_count",
+        "tx_pend_head",
+        "tx_port",
+        "tx_queue_full",
+        "tx_queued",
+        "tx_quick_ok",
+        "tx_slots"
       ],
       "source_macros_and_types": [
         "TX_AUTO_ACTIVATE",
         "TX_SUCCESS",
         "TX_THREAD"
       ]
+    },
+    "src/sana2/sana2_txmeta.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_flags"
+      ],
+      "source_macros_and_types": []
+    },
+    "src/tools/netmeter.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_bytes",
+        "tx_bytes_hi",
+        "tx_hi",
+        "tx_lo",
+        "tx_rate"
+      ],
+      "source_macros_and_types": []
     },
     "src/tools/netstack_weak.c": {
       "calls": [
@@ -867,11 +1072,25 @@
       "fields": [],
       "source_macros_and_types": []
     },
+    "src/tools/netstat.c": {
+      "calls": [],
+      "internal_identifiers": [],
+      "fields": [
+        "tx_errors",
+        "tx_underruns",
+        "tx_wedges"
+      ],
+      "source_macros_and_types": []
+    },
     "src/tools/shownetstatus.c": {
       "calls": [],
       "internal_identifiers": [],
       "fields": [
-        "tx_queue_full"
+        "tx_errors",
+        "tx_queue_full",
+        "tx_queued",
+        "tx_underruns",
+        "tx_wedges"
       ],
       "source_macros_and_types": []
     },
@@ -880,7 +1099,24 @@
         "tx_amiga_uptime_ms"
       ],
       "internal_identifiers": [],
-      "fields": [],
+      "fields": [
+        "tx_amiga_tick_catchups",
+        "tx_amiga_tick_clipped",
+        "tx_amiga_tick_deferred",
+        "tx_amiga_tick_delivered",
+        "tx_amiga_tick_lost",
+        "tx_amiga_tick_over_budget",
+        "tx_amiga_tick_service_us",
+        "tx_amiga_tick_skew",
+        "tx_amiga_tick_skew_peak",
+        "tx_amiga_tick_worst_service_us",
+        "tx_amiga_tick_worst_stall_ms",
+        "tx_bytes",
+        "tx_bytes_hi",
+        "tx_errors",
+        "tx_underruns",
+        "tx_wedges"
+      ],
       "source_macros_and_types": [
         "TX_AMIGA_TICK_STATS"
       ]
@@ -5355,8 +5591,66 @@
       "_tx_timer_time_slice"
     ],
     "fields": [
+      "tx_amiga_tick_catchups",
+      "tx_amiga_tick_clipped",
+      "tx_amiga_tick_deferred",
+      "tx_amiga_tick_delivered",
+      "tx_amiga_tick_eclock_hz",
+      "tx_amiga_tick_empty",
+      "tx_amiga_tick_fallback",
+      "tx_amiga_tick_lost",
+      "tx_amiga_tick_over_budget",
+      "tx_amiga_tick_service_us",
+      "tx_amiga_tick_skew",
+      "tx_amiga_tick_skew_peak",
+      "tx_amiga_tick_source_chz",
+      "tx_amiga_tick_unit",
+      "tx_amiga_tick_uptime_ms",
+      "tx_amiga_tick_uptime_rem",
+      "tx_amiga_tick_wakeups",
+      "tx_amiga_tick_worst_service_us",
+      "tx_amiga_tick_worst_stall_ms",
+      "tx_at",
+      "tx_buf",
+      "tx_busy",
+      "tx_bytes",
+      "tx_bytes_hi",
+      "tx_cidx",
+      "tx_completed",
+      "tx_csum",
+      "tx_csum_ok",
+      "tx_csum_supported",
+      "tx_done",
+      "tx_errors",
+      "tx_flags",
+      "tx_flush",
+      "tx_hi",
+      "tx_kicked",
+      "tx_kicking",
+      "tx_lazy_last_send",
+      "tx_lazy_parked",
+      "tx_lazy_timer",
+      "tx_lazy_timer_up",
+      "tx_lo",
+      "tx_more",
       "tx_mutex_ownership_count",
+      "tx_next",
+      "tx_orphaned",
+      "tx_packets",
+      "tx_page_start",
+      "tx_pend",
+      "tx_pend_count",
+      "tx_pend_head",
+      "tx_pidx",
+      "tx_port",
       "tx_queue_full",
+      "tx_queued",
+      "tx_quick_ok",
+      "tx_rate",
+      "tx_reclaim",
+      "tx_short_build",
+      "tx_slots",
+      "tx_task_lock",
       "tx_thread_additional_suspend_info",
       "tx_thread_amiga_exec_wait_nesting",
       "tx_thread_amiga_flags",
@@ -5383,7 +5677,9 @@
       "tx_thread_suspending",
       "tx_thread_time_slice",
       "tx_thread_timer",
-      "tx_timer_internal_remaining_ticks"
+      "tx_timer_internal_remaining_ticks",
+      "tx_underruns",
+      "tx_wedges"
     ],
     "source_macros_and_types": [
       "TX_AMIGA_ADOPT_RESERVE",
@@ -5484,18 +5780,24 @@
   "netxduo_pin": "2d871dca099603e76487bd14fdabeacdc223b89e",
   "threadx_pin": "e24aa9c92d247dcea3502b9a77b6dd1af21d0a2f",
   "method": "configured compiler preprocessing; own source lines only; compiled, not linked coverage",
-  "threadx_header_sha256": {
-    "tx_api.h": "0d5dce7ce5cc80208b31dcd403817f447686c28dfcce7fd049108fb84da61657",
-    "tx_block_pool.h": "f104895488e144b4450a4ead4669c46aaec601d66c4f24ee2bc884dd3a309bf0",
-    "tx_byte_pool.h": "a484d23c38952daaf628970b0f4fa9605f8c4c2961974c2c5a118e8e255d8d67",
-    "tx_event_flags.h": "cc3b935d030b2657dc745c1c60914fd179b64e5d18da195fece7a0871614aa0a",
-    "tx_initialize.h": "f651f319e638e5e6cb5dcb691c9501dd3cda1cb8fac238d9bd15ad2165ccc649",
-    "tx_mutex.h": "d0e0b6c17d30d82f3ecbd5618f51ca9d47f7e574cc98e229dc99070678d7eb7e",
-    "tx_queue.h": "bdec805e25afd18b9eadf4178a9c7d2803c308a9505cfb746a3667db6774163a",
-    "tx_semaphore.h": "f3e35c0758812ff047004ab3fc03d4f5e5560fb6d5d525ef2665318240c6b2fe",
-    "tx_thread.h": "6118107f1b3422b2f9d61e75da8118895c16cf23658a2924e72e5fefe5faf9f5",
-    "tx_timer.h": "4e05bc546647f1db9d02afff265a3b409f15f63ada9c5b28d172c5ae96d32551",
-    "tx_trace.h": "a3e93c41ddd4af05d95c316ba48721539551a7c6d6c6af78203399ab63f8a261",
-    "tx_user_sample.h": "bdac2c5c78c8598ef1f7f6bee11b93392a0de3bbf84029bb3d65f6bc94965b59"
+  "contract_header_sha256": {
+    "port/netxduo-amiga/inc/nx_port.h": "9d5f4e3aebcb4619595c4e834a27e6d52f8f2dbad7e6b8334baa163c5fce8633",
+    "port/netxduo-amiga/inc/nx_user.h": "75c0ab53f319dce8cf33ae16c1d0a076ff2d1819b868463303b5e323c79fdd31",
+    "port/threadx-amiga/inc/tx_amiga.h": "26ec9ee2713ffa59cb8d63c73ecd2e903a63e8cccd9b959a9dc3bcd9cca63474",
+    "port/threadx-amiga/inc/tx_port.h": "399d6e6610d90491f737d7cf5b3e7f114d4b445825c72d6700c7b5fc738fb484",
+    "port/threadx-amiga/src/tx_amiga_internal.h": "88d24555be6964ba9b8dbd8aa25dcdda81515b1db7857c2ac9ea3d9acc3e418a",
+    "third_party/netxduo/common/inc/nx_api.h": "a519c5ceca913fcb7e18a8b764290295f22af4288594bba44787cfa7f9903554",
+    "third_party/threadx/common/inc/tx_api.h": "0d5dce7ce5cc80208b31dcd403817f447686c28dfcce7fd049108fb84da61657",
+    "third_party/threadx/common/inc/tx_block_pool.h": "f104895488e144b4450a4ead4669c46aaec601d66c4f24ee2bc884dd3a309bf0",
+    "third_party/threadx/common/inc/tx_byte_pool.h": "a484d23c38952daaf628970b0f4fa9605f8c4c2961974c2c5a118e8e255d8d67",
+    "third_party/threadx/common/inc/tx_event_flags.h": "cc3b935d030b2657dc745c1c60914fd179b64e5d18da195fece7a0871614aa0a",
+    "third_party/threadx/common/inc/tx_initialize.h": "f651f319e638e5e6cb5dcb691c9501dd3cda1cb8fac238d9bd15ad2165ccc649",
+    "third_party/threadx/common/inc/tx_mutex.h": "d0e0b6c17d30d82f3ecbd5618f51ca9d47f7e574cc98e229dc99070678d7eb7e",
+    "third_party/threadx/common/inc/tx_queue.h": "bdec805e25afd18b9eadf4178a9c7d2803c308a9505cfb746a3667db6774163a",
+    "third_party/threadx/common/inc/tx_semaphore.h": "f3e35c0758812ff047004ab3fc03d4f5e5560fb6d5d525ef2665318240c6b2fe",
+    "third_party/threadx/common/inc/tx_thread.h": "6118107f1b3422b2f9d61e75da8118895c16cf23658a2924e72e5fefe5faf9f5",
+    "third_party/threadx/common/inc/tx_timer.h": "4e05bc546647f1db9d02afff265a3b409f15f63ada9c5b28d172c5ae96d32551",
+    "third_party/threadx/common/inc/tx_trace.h": "a3e93c41ddd4af05d95c316ba48721539551a7c6d6c6af78203399ab63f8a261",
+    "third_party/threadx/common/inc/tx_user_sample.h": "bdac2c5c78c8598ef1f7f6bee11b93392a0de3bbf84029bb3d65f6bc94965b59"
   }
 }

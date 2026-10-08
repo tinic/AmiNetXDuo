@@ -8,7 +8,8 @@ ThreadX backend and must not be installed on a machine as one.
 
 - A dependency capture/check tool using each production build's compiler and
   preprocessor flags. It inventories calls, internal identifiers, structure
-  fields and source macros/types. Pinned ThreadX headers are fingerprinted.
+  fields and source macros/types. ThreadX headers, both Amiga ports' headers and
+  `nx_api.h` are fingerprinted, including critical-section/context macros.
 - Full and micro compiled-source contract baselines, including enabled NetX
   modules, AmiNetXDuo consumers and the existing Amiga port. These are an
   over-approximation of the linked dependencies, not an implementation checklist
@@ -59,10 +60,14 @@ The stack ceiling was unchanged on the successful rerun below.
 
 ## Verified first-spike results
 
-- Host model: PASS for the deterministic schedules listed above.
+- Host model and real-compiler extraction regressions: PASS for the deterministic
+  schedules, new member names and marker failures listed above.
 - Full/micro dependency baselines: UNCHANGED against beta8; a negative check
-  with the suspension service removed was rejected. A compiler fixture captured
-  an expanded service and field and excluded inactive code/header declarations.
+  with the suspension reference removed from the expected usage was rejected.
+  This does not test removal of its backend implementation. A changed expected
+  port-header fingerprint was also rejected with its filename in the delta.
+  A compiler fixture captured an expanded service and new member name and
+  excluded inactive code/header declarations.
 - m68k: real-header probe, adapter and smoke compilation/link PASS; the command
   startup-first map gate PASS.
 - Native smoke: PASS, `research_exec_wait=PASS checks=4/4`, guest exit 0 after
@@ -94,6 +99,12 @@ Use `--output PATH` instead of `--check PATH` to capture a reviewed new baseline
 An update that changes a pin, header, per-file reference or aggregate reference
 fails the check. Review the actual changes and their semantics before updating.
 This tool reads sources and preprocesses them; it does not compile or run NetX.
+It checks consumer usage and header contents, not the existence of backend
+function bodies. A separate full link against the replacement is required to
+detect missing implementations. It rejects flags that suppress macro expansion
+or source markers, and fails if a source's own marker is never found. Field
+extraction includes any `tx_*` member so a newly named object type is visible.
+Changed pins, headers and consumer filenames are printed for review.
 
 ## Suspension semantics to implement next
 
@@ -126,6 +137,13 @@ The assessment used NetX `02604196` and ThreadX `e24aa9c9`; this experiment uses
 beta8 NetX `2d871dca` and the same ThreadX pin. That assessment is architectural
 input, not an exact-commit review of this implementation. No backend GO exists.
 
+deepseek-v4 subsequently reviewed implementation commits `f0187a288` and
+`80e28dfd2`: the primitive and adapter were judged sound for their task-level
+scope, with no replacement-backend GO. The review's extraction gaps are addressed
+by broader header/member capture, mandatory source markers and detailed deltas.
+Binding real NetX cleanup remains open: it may schedule or defer work and must
+not be invoked as this primitive's protected queue-removal hook unchanged.
+
 ## Existing port code to evaluate for reuse
 
 The current port already maps ThreadX threads to Exec tasks. Reusing its
@@ -148,7 +166,7 @@ adapter compiled in isolation cannot establish the net replacement cost.
 The current-thread model, ThreadX wait-list/cleanup binding, mutexes, event flags,
 thread lifecycle, common timer integration and replacement backend selection are
 unimplemented. Minimum-profile coverage, native cross-task wakeup/resource races,
-NetX/socket conformance, independent review and net size/runtime comparison remain
+NetX/socket conformance, backend independent review and net size/runtime comparison remain
 pending. Passing the model does not validate those parts. The compile probe
 checks that referenced fields exist; target/profile-specific layout expectations
 and link checks against a replacement remain to be added.

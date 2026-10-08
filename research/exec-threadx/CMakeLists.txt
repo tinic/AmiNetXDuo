@@ -32,8 +32,12 @@ if(CMAKE_CROSSCOMPILING)
         "${AMIGA_NDK_INCLUDE}")
 else()
     enable_testing()
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_executable(research_wait_model test_wait.c)
     target_link_libraries(research_wait_model PRIVATE research_wait)
     target_compile_options(research_wait_model PRIVATE -Wall -Wextra -Werror)
     add_test(NAME research_wait_model COMMAND research_wait_model)
+    add_test(NAME research_contract_extraction
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_contract.py"
+            "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_C_COMPILER}")
 endif()

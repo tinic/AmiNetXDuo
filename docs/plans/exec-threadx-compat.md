@@ -136,10 +136,14 @@ affected regression evidence; branch existence is not approval to integrate.
   checks, source `80e28dfd2`) pass. These are initial evidence, not a backend pass.
 - Complete replacement design and minimum-profile manifest: pending.
 - Replacement implementation, runtime correctness and net saving: unmeasured.
-- AgentNet architectural assessment: received from deepseek-v4; no backend GO.
+- AgentNet architectural and bounded implementation assessment: received from
+  deepseek-v4; wait/adapter judged sound within task-level scope, no backend GO.
   Suspension/preemption, deferred cleanup and current-thread obligations are
   recorded in the research README. Its NetX pin differs from beta8, so it is
-  architectural input rather than an exact-commit implementation review.
+  architectural input. The subsequent implementation review covers `f0187a288`
+  and `80e28dfd2`; extraction fixes and compiler regressions address its concrete
+  header/member/marker/delta findings. Backend layout goldens, link validation
+  and cleanup/scheduler binding remain open.
 
 Primary references:
 
