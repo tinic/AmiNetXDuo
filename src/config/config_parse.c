@@ -483,10 +483,26 @@ static VOID report_clamped(ULONG line, const char *keyword, const char *value,
 
 /* CARD names one board by name where UNIT only says "Nth in probe order".
    The names are the driver's, include/aminetxduo/anxnet.h. */
-static const char *const cfg_card_names[] = ANXNET_CARD_NAMES;
+typedef struct CfgCardNames
+{
+#define CFG_CARD_FIELD(name) char card_##name[sizeof(#name)];
+    ANXNET_CARD_NAME_LIST(CFG_CARD_FIELD)
+#undef CFG_CARD_FIELD
+} CfgCardNames;
+
+static const CfgCardNames cfg_card_names = ANXNET_CARD_NAMES;
+
+static const UBYTE cfg_card_offsets[] = {
+#define CFG_CARD_OFFSET(name) offsetof(CfgCardNames, card_##name),
+    ANXNET_CARD_NAME_LIST(CFG_CARD_OFFSET)
+#undef CFG_CARD_OFFSET
+};
+
+_Static_assert(sizeof(CfgCardNames) <= 256,
+               "CARD names must fit byte offsets");
 
 #define CFG_CARD_COUNT \
-    ((ULONG)(sizeof(cfg_card_names) / sizeof(cfg_card_names[0])))
+    ((ULONG)(sizeof(cfg_card_offsets) / sizeof(cfg_card_offsets[0])))
 
 static BOOL cfg_card_known(const char *name)
 {
@@ -494,7 +510,8 @@ static BOOL cfg_card_known(const char *name)
 
     for (i = 0; i < CFG_CARD_COUNT; i++)
     {
-        if (ami_cfg_stricmp(name, cfg_card_names[i]) == 0)
+        if (ami_cfg_stricmp(name, (const char *)&cfg_card_names +
+                           cfg_card_offsets[i]) == 0)
             return TRUE;
     }
 
@@ -514,7 +531,7 @@ static VOID cfg_card_list(char *dst, ULONG dstlen)
 
     for (i = 0; i < CFG_CARD_COUNT; i++)
     {
-        const char *name = cfg_card_names[i];
+        const char *name = (const char *)&cfg_card_names + cfg_card_offsets[i];
         ULONG       need = ami_cfg_strlen(name) + (at != 0 ? 2UL : 0UL);
         ULONG       j;
 

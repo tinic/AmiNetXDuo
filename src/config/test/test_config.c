@@ -1906,10 +1906,38 @@ static void test_ipv6_only_no_error(void)
 
 static void test_interface_card(void)
 {
+    /* Fixed expected roster/order, independent of the production macro. */
+    static const char *const names[] = {
+        "xsurf100", "xsurf", "ariadne2", "hydra", "lanrover", "a2065",
+        "ariadne", "pcmcia", "xsurf500", "3c589", "3ccfem556", "3cxem556",
+        "genet", "zz9000", "zz9000z2"
+    };
     AmiIfConfig iface;
     char       *buf;
+    ULONG       i;
 
     printf("interface: CARD\n");
+
+    for (i = 0; i < (ULONG)(sizeof(names) / sizeof(names[0])); i++)
+    {
+        char text[128];
+        char mixed[16];
+        ULONG j;
+
+        for (j = 0; names[i][j] != '\0'; j++)
+        {
+            char c = names[i][j];
+            mixed[j] = (j & 1) == 0 && c >= 'a' && c <= 'z'
+                           ? (char)(c - ('a' - 'A')) : c;
+        }
+        mixed[j] = '\0';
+        snprintf(text, sizeof(text),
+                 "device=anxnet.device\ncard=%s\naddress=10.0.0.1\n", mixed);
+        buf = dup_text(text);
+        CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+        CHECK_STR(iface.card, mixed);
+        free(buf);
+    }
 
     buf = dup_text("device=anxnet.device\nunit=0\ncard=xsurf100\n"
                    "address=192.168.1.10\n");
@@ -1955,6 +1983,11 @@ static void test_interface_card(void)
     CHECK(seen_mentions("xsurf1000"));
     CHECK(seen_mentions("XSURF100"));
     CHECK(seen_mentions("ARIADNE2"));
+    /* The 128-byte list holds only complete choices, in driver order. */
+    CHECK_STR(seen[0].hint,
+              "CARD is one of XSURF100, XSURF, ARIADNE2, HYDRA, LANROVER, "
+              "A2065, ARIADNE, PCMCIA, XSURF500, 3C589, 3CCFEM556, "
+              "3CXEM556, GENET, ZZ9000");
 }
 
 /* Host-name precedence, strongest first: name_resolution, DHCP option 12,
