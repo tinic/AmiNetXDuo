@@ -342,7 +342,7 @@ replacement link gate. Shipping/vendor inputs remain unchanged.
 | Dependency boundary | Saved full/micro pinned compiler inventories and real-header m68k probe | Full replacement link gate and ABI/layout goldens |
 | Waiting mechanisms | Bounded host/native TCP, UDP, sleep, mutex, event and periodic callback cases | Delayed suspend, priority/threshold and foreign Exec IO compatibility |
 | Packet ownership | Real pool allocation/release and UDP transfer; native IPv4 checksum handling | Complete IP/helper path, TCP ownership, IPv6/chained checksum and socket lifecycle |
-| Runtime lifecycle | Research tasks attach, close private IO and reap themselves in fixtures | Thread create/terminate/delete, mutex/event deletion, independent common timer task and drain |
+| Runtime lifecycle | Owned Exec startup/normal-return/reap with retained stacks; native 11/11, 15 tasks reaped | Public ThreadX create/terminate/delete, mutex/event deletion, independent common timer task and drain |
 | Economic result | Shipping component spans and standalone fixture sizes recorded separately | Comparable finished library link, resident resources and throughput |
 
 Next executable milestone: provide owned Exec task creation and teardown, plus
@@ -356,3 +356,41 @@ existing port's task publication/stack-retirement guarantees without accidentall
 retaining its ThreadX scheduler. Then boot a real NX_IP helper with a disposable
 fake link driver, compare traces with the original backend, exercise repeated
 shutdown/restart, and measure complete replacement/library/resource cost.
+
+## Spike 8 owned task checkpoint
+
+Exact `101d52195ac467d1b6c5f0e8c35ae57b2cb7c33a` adds a research Exec launcher,
+separate from public ThreadX services. It publishes caller-owned Task/stack and
+entry descriptors before AddTask, then waits outside every bridge boundary for
+owner-side IO/registration startup ACK. Entry runs inside one outer bridge
+context. Normal return checks bridge quiescence, detaches and closes private IO;
+FINISHED publication and RemTask occur under one uninterrupted Forbid interval.
+Creator-only reap releases the ACK signal and permits storage reuse.
+
+The retained host models pass 25/25, including idle-query assertions across
+nested boundaries. They do not execute native lifecycle. The new m68k smoke
+passes 11/11 on one boardless A1200/KS3.1 r40.68 run: 15 tasks reaped, 12 restarts,
+exit 0 after 14s, all stacks 8192 bytes. Actual guest output, startup, exit and
+hashes were read/verified under `/Users/turo/ai/evidence/exec-threadx-spike8-native`;
+claudecode confirms zero staging left. Binary `b2930fd6`, 50,344 bytes including
+fixtures/runtime, is not a library size result. Independent exact source review
+is pending; no review completion is inferred from execution.
+
+This proves the owned task mechanism only: fixed Exec priority zero, no public
+thread create/terminate/delete contract, no TX_COMPLETED state, no forced
+termination, no full NX_IP. Private IO startup failure rollback is implemented
+but not injected in this run; ACK allocation failure is exercised. Producers
+must already be quiescent when entry returns, and storage is retained until reap.
+
+The public integration needs a different publication contract: actual
+`nx_ip_create` calls AUTO_START thread creation from inside its existing boundary,
+then publishes extensions/timer/IP ID and created-list membership. This launcher
+deliberately rejects blocking startup there. Do not route that call straight to
+the synchronous research start or silently return success on deferred IO failure.
+Preserve already initialized public TX_THREAD fields when binding the new owner,
+provide a real publication/start gate and explicit allocation rollback, and handle
+the creator's threshold contract. On shutdown, actual `nx_ip_delete` terminates
+the helper before deleting its mutex/events/thread; helper event waiting must be
+cleaned and retired without returning into its endless loop or releasing storage
+while a producer still has it. Complete those service/lifetime boundaries before
+claiming real IP create/delete or producing an economic comparison.
