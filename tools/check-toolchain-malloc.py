@@ -17,7 +17,7 @@ import sys
 # Paths are relative to <prefix>/m68k-amigaos/lib. The paired libc/libg
 # archive members must match for each variant. Eight distinct hashes cover
 # eleven multilibs produced by the pinned newlib source's final make step.
-# Asset series 16.2.4 (GCC a5166db4): each installed malloc.o is the object
+# Asset series 16.2.4 and 16.2.5 (GCC a5166db4, 399a27ad): each installed malloc.o is the object
 # newlib's final build left in newlib/libc/sys/amigaos/, on Linux and macOS.
 EXPECTED_MALLOC_SHA256 = {
     "": "699875ab532e97d004d48b6988b132373e1ecbe085ad7c887013cbb907017550",

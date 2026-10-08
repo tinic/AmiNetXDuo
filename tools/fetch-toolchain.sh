@@ -29,10 +29,11 @@ set -euo pipefail
 # the earlier 2.39 assets do.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types and the
 # sources are written to the spellings both accept.
 TC_GCC_VERSION="16.2.0b"
-# 16.2.4 moves binutils from 2.39 to 2.46 and GCC to bebbo amiga16.2 134541b3
-# plus the sibcall fix (tinic/gcc a5166db4). The reported version remains
-# 16.2.0b. Older asset hashes remain at their original tags.
-TC_ASSET_VERSION="16.2.4"
+# 16.2.4 moved binutils from 2.39 to 2.46 and GCC to bebbo amiga16.2 134541b3
+# plus the sibcall fix. 16.2.5 adds tinic/gcc 399a27ad: LTO-promoted statics
+# no longer warn "visibility attribute not supported". The reported version
+# remains 16.2.0b. Older asset hashes remain at their original tags.
+TC_ASSET_VERSION="16.2.5"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
 # Compiler assets live with the fork rather than topping the product releases.
@@ -49,11 +50,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="9690e9ee36f68cec26e3ec2330550fd527204b61df367aa62fa74d1f254e28b2"
+        TC_SHA256="d135e713133934aa0eb278c833de5b817fad0a272ec609a4083249eb7433bc45"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="01c8cc2ab3458a68c2c1eff623f2807efed1c63f21502a739582a49b0dd88f4f"
+        TC_SHA256="f671ab36a56a530176a88f7d91cca188373ba24622aa98d92ccba5113823cc4e"
         ;;
     *)
         TC_PLATFORM=""

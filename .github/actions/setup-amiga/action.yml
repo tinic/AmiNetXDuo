@@ -19,7 +19,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/aminetxduo/toolchain
-        key: m68k-amigaos-gcc-16.2.4-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py', 'tools/check-toolchain-malloc.py') }}
+        key: m68k-amigaos-gcc-16.2.5-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py', 'tools/check-toolchain-malloc.py') }}
 
     - name: Fetch the toolchain
       if: steps.toolchain-cache.outputs.cache-hit != 'true'
