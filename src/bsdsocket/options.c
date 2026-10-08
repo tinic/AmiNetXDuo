@@ -408,27 +408,18 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
 
             case SO_RCVTIMEO:
-            {
-                struct timeval tv;
-
-                if (optval == NULL ||
-                    optlen < (socklen_t)sizeof(struct timeval))
-                    return bsd_fail(SocketBase, AMI_EINVAL);
-                bsd_bcopy(optval, &tv, sizeof(tv));
-                if (!bsd_timeval_ticks(&tv, &sock->as_RcvTimeout))
-                    return bsd_fail(SocketBase, AMI_EINVAL);
-                return 0;
-            }
-
             case SO_SNDTIMEO:
             {
                 struct timeval tv;
+                ULONG *timeout = (optname == SO_RCVTIMEO)
+                                     ? &sock->as_RcvTimeout
+                                     : &sock->as_SndTimeout;
 
                 if (optval == NULL ||
                     optlen < (socklen_t)sizeof(struct timeval))
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 bsd_bcopy(optval, &tv, sizeof(tv));
-                if (!bsd_timeval_ticks(&tv, &sock->as_SndTimeout))
+                if (!bsd_timeval_ticks(&tv, timeout))
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 return 0;
             }
@@ -556,14 +547,20 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * -1 is "the default", as it is for IPV6_UNICAST_HOPS. The range
              * is checked rather than masked: 256 read back as 256 and went on
              * the wire as 0, so every packet was dropped by the first router,
-             * and the IPv6 sibling in in6.c has always refused it.
+             * and the IPv6 sibling in in6.c has always refused it. TOS
+             * accepts the same range, with -1 selecting zero instead of the
+             * default TTL, as IPV6_TCLASS does.
              */
             case IP_TTL:
+            case IP_TOS:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
                 if (value < -1 || value > 255)
                     return bsd_fail(SocketBase, AMI_EINVAL);
-                sock->as_Ttl = (value < 0) ? (LONG)NX_IP_TIME_TO_LIVE : value;
+                if (optname == IP_TTL)
+                    sock->as_Ttl = (value < 0) ? (LONG)NX_IP_TIME_TO_LIVE : value;
+                else
+                    sock->as_Tos = (value < 0) ? 0 : value;
                 if (bsd_nx_enter(SocketBase) != 0)
                     return bsd_fail(SocketBase, AMI_ENETDOWN);
                 bsd_opt_apply_ip(sock);
@@ -580,19 +577,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
                 sock->as_HdrIncl = (value != 0);
-                return 0;
-
-            /* Same range and same -1, matching IPV6_TCLASS in in6.c. */
-            case IP_TOS:
-                if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
-                    return -1;
-                if (value < -1 || value > 255)
-                    return bsd_fail(SocketBase, AMI_EINVAL);
-                sock->as_Tos = (value < 0) ? 0 : value;
-                if (bsd_nx_enter(SocketBase) != 0)
-                    return bsd_fail(SocketBase, AMI_ENETDOWN);
-                bsd_opt_apply_ip(sock);
-                bsd_nx_leave(SocketBase);
                 return 0;
 
 #ifdef AMINETXDUO_MULTICAST
