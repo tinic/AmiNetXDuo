@@ -46,6 +46,8 @@ static int park(void *p,uint64_t deadline)
     (void)p;CHECK(!depth && !_tx_thread_current_ptr && deadline!=ANX_WAIT_FOREVER);
     owner=2;anx_tx_context_begin(&f,&parent,0);
     before=target;
+    TX_EVENT_FLAGS_GROUP saved=events;
+    CHECK(_tx_event_flags_delete(&events)==TX_FEATURE_NOT_ENABLED && !memcmp(&events,&saved,sizeof(events)));
     CHECK(!anx_tx_stop_event(&bridge,&wrong) && !memcmp(&target,&before,sizeof(target)));
     bridge.abort_pins=1;CHECK(!anx_tx_stop_event(&bridge,&events));bridge.abort_pins=0;
     bridge.pending_resume=1;CHECK(!anx_tx_stop_event(&bridge,&events));bridge.pending_resume=0;
@@ -88,7 +90,9 @@ int main(int argc,char **argv)
         CHECK(0); /* terminal event wait must never return to caller body */
     }
     CHECK(terminals==1 && !depth && !bridge.thread && anx_tx_runtime_idle());
-    owner=2;CHECK(anx_tx_detach(&pb));anx_tx_runtime_init(&p);
+    owner=2;anx_tx_context_begin(&f,&parent,0);
+    CHECK(_tx_event_flags_delete(&events)==TX_SUCCESS && _tx_event_flags_delete(&wrong)==TX_SUCCESS);
+    anx_tx_context_end(&f);CHECK(anx_tx_detach(&pb));anx_tx_runtime_init(&p);
     puts("research_stop_model=PASS real event cleanup, timer unlink, private terminal before public reentry");
     return 0;
 }

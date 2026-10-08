@@ -271,6 +271,9 @@ static void finish(void)
     CHECK(!depth && !_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable);
     CHECK(!socket.nx_tcp_socket_receive_suspension_list && !socket.nx_tcp_socket_receive_suspended_count);
     CHECK(!ip.nx_ip_protection.tx_mutex_ownership_count);
+    AnxTxContext frame;owner=1;anx_tx_context_begin(&frame,&callers[0].thread,0);
+    CHECK(_tx_mutex_delete(&ip.nx_ip_protection)==TX_SUCCESS && _tx_event_flags_delete(&ip.nx_ip_events)==TX_SUCCESS);
+    anx_tx_context_end(&frame);
     for (i=0;i<3;i++) {
         owner=i+1;
         CHECK(anx_tx_detach(&callers[i].bridge));

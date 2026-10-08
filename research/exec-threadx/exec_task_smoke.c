@@ -164,6 +164,9 @@ int main(void)
     CHECK(anx_exec_task_join(&children[0])); reaped++;
     CHECK(recovered(0) && !entry_error && FindTask(0)->tc_SigAlloc==initial_signals);
     CASE("completion-before-startup-observation");
+    anx_tx_context_begin(&f,&parent_thread,0);
+    CHECK(tx_event_flags_delete(&events)==TX_SUCCESS);
+    anx_tx_context_end(&f);
     CHECK(anx_tx_detach(&parent_bridge) && anx_exec_wait_close(&parent_wait));
     CHECK(anx_tx_runtime_idle() && passed==11 && reaped==15);
     say("research_exec_task=PASS 11/11 tasks_reaped=15 restarts=12\n");

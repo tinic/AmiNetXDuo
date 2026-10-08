@@ -3,6 +3,9 @@
 #include "exec_thread.h"
 #include "tx_bridge_exec.h"
 #include "tx_thread.h"
+#include "tx_mutex.h"
+#include "tx_event_flags.h"
+#include "object_probe.h"
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <string.h>
@@ -56,10 +59,12 @@ int main(void)
     signals=FindTask(0)->tc_SigAlloc;
     stack.before=0x13572468;stack.after=0x89abcdef;
     anx_tx_context_begin(&f,&parent,0);
+    CHECK(anx_object_probe()==0);
     CHECK(tx_event_flags_create(&events,(CHAR *)"stop")==TX_SUCCESS &&
           tx_event_flags_create(&wrong,(CHAR *)"wrong")==TX_SUCCESS &&
           tx_mutex_create(&mutex,(CHAR *)"owned",TX_NO_INHERIT)==TX_SUCCESS);
     anx_tx_context_end(&f);
+    CASE("created-rings-guards-pinned-deletes-and-poisoned-reuse");
     for (cycle=0;cycle<4;cycle++) {
         wait_ticks=(cycle&1)?500:TX_WAIT_FOREVER;
         memset(&target,0xa5,sizeof(target));memset(stack.bytes,0xa5,sizeof(stack.bytes));
@@ -71,6 +76,8 @@ int main(void)
         CHECK(ready(1));
         anx_tx_context_begin(&f,&parent,0);
         snapshot=target;
+        TX_MUTEX saved_mutex=mutex;
+        CHECK(tx_mutex_delete(&mutex)==TX_FEATURE_NOT_ENABLED && !memcmp(&mutex,&saved_mutex,sizeof(mutex)));
         CHECK(target.tx_thread_owned_mutex_count==1 && !anx_exec_thread_stop_event(&record,&events) &&
               !memcmp(&target,&snapshot,sizeof(target)));
         CHECK(tx_event_flags_set(&events,256,TX_OR)==TX_SUCCESS);
@@ -89,6 +96,8 @@ int main(void)
                   !CheckIO((struct IORequest *)record.wait.timer));timed++;
         }
         snapshot=target;
+        TX_EVENT_FLAGS_GROUP saved_events=events;
+        CHECK(tx_event_flags_delete(&events)==TX_FEATURE_NOT_ENABLED && !memcmp(&events,&saved_events,sizeof(events)));
         CHECK(!anx_exec_thread_stop_event(&record,&wrong) && !memcmp(&target,&snapshot,sizeof(target)));
         record.bridge.abort_pins=1;CHECK(!anx_exec_thread_stop_event(&record,&events));record.bridge.abort_pins=0;
         record.bridge.pending_resume=1;CHECK(!anx_exec_thread_stop_event(&record,&events));record.bridge.pending_resume=0;
@@ -109,6 +118,16 @@ int main(void)
               record.wait.timer_sends==record.wait.timer_reaps && !returned && !error);
         anx_tx_context_begin(&f,&parent,0);
         CHECK(tx_thread_delete(&target)==TX_SUCCESS);reaped++;
+        _tx_thread_preempt_disable++;
+        CHECK(tx_event_flags_delete(&wrong)==TX_SUCCESS && tx_event_flags_delete(&events)==TX_SUCCESS &&
+              tx_mutex_delete(&mutex)==TX_SUCCESS && _tx_thread_preempt_disable==1 &&
+              !_tx_mutex_created_count && !_tx_mutex_created_ptr && !_tx_event_flags_created_count &&
+              !_tx_event_flags_created_ptr);
+        _tx_thread_preempt_disable--;
+        memset(&events,0x5a,sizeof(events));memset(&wrong,0x5a,sizeof(wrong));memset(&mutex,0x5a,sizeof(mutex));
+        if (cycle<3) CHECK(tx_event_flags_create(&events,(CHAR *)"reuse")==TX_SUCCESS &&
+                          tx_event_flags_create(&wrong,(CHAR *)"reuse")==TX_SUCCESS &&
+                          tx_mutex_create(&mutex,(CHAR *)"reuse",TX_NO_INHERIT)==TX_SUCCESS);
         anx_tx_context_end(&f);
         CHECK(record.state==ANX_THREAD_REAPED && !target.tx_thread_id && !_tx_thread_created_count &&
               !record.creator && !record.ack && record.signal==-1 && FindTask(0)->tc_SigAlloc==signals &&
@@ -121,15 +140,18 @@ int main(void)
             CASE("real-event-cleanup-and-unlink-under-preemption-disable");
             CASE("public-delete-refused-before-native-finished");
             CASE("private-owner-close-and-no-return-into-entry");
+            CASE("foreign-owned-mutex-delete-refused-unchanged");
+            CASE("live-event-waiter-delete-refused-unchanged");
         }
     }
     CHECK(entries==4 && reaped==4 && timed==2 && !returned);
     CASE("two-inflight-timer-stops-reap-device-io-before-close");
     CASE("four-stop-delete-cycles-poisoned-storage-reused");
+    CASE("objects-retired-after-native-ack-and-recreated-three-times");
     CHECK(anx_tx_detach(&pb) && anx_exec_wait_close(&pw));
     anx_tx_runtime_init(anx_tx_exec_platform());
     CASE("all-domain-reservations-signals-and-task-storage-recovered");
-    CHECK(passed==9);
-    say("research_exec_stop=PASS 9/9 tasks_reaped=4 timed_io_reaped=2 restarts=3\n");
+    CHECK(passed==13);
+    say("research_exec_stop=PASS 13/13 tasks_reaped=4 timed_io_reaped=2 restarts=3 object_restarts=3\n");
     return 0;
 }

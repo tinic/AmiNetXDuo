@@ -133,7 +133,12 @@ static void init(void)
 }
 static void finish(void)
 {
-    CHECK(!depth); CHECK(anx_tx_detach(&callers[0].bridge)); CHECK(!pthread_cond_destroy(&callers[0].wake));
+    AnxTxContext frame;
+    CHECK(!depth);anx_tx_context_begin(&frame,&callers[0].thread,0);
+    CHECK(_tx_mutex_delete(&mutex)==TX_SUCCESS && _tx_mutex_delete(&other)==TX_SUCCESS &&
+          _tx_mutex_delete(&ip.nx_ip_protection)==TX_SUCCESS && _tx_event_flags_delete(&ip.nx_ip_events)==TX_SUCCESS);
+    anx_tx_context_end(&frame);
+    CHECK(anx_tx_detach(&callers[0].bridge)); CHECK(!pthread_cond_destroy(&callers[0].wake));
     CHECK(!mutex.tx_mutex_owner && !mutex.tx_mutex_suspended_count && !mutex.tx_mutex_suspension_list);
     CHECK(!ip.nx_ip_protection.tx_mutex_owner && !ip.nx_ip_protection.tx_mutex_suspended_count);
     CHECK(!socket.nx_tcp_socket_receive_suspended_count && !socket.nx_tcp_socket_receive_suspension_list);
@@ -213,6 +218,8 @@ int main(void)
         spawn(1,getter); wait_for(&callers[1].parks,1);
         if (mode==FIFO) { spawn(2,getter); wait_for(&callers[2].parks,1); }
         anx_tx_context_begin(&frame,&callers[0].thread,0);
+        TX_MUTEX snapshot=mutex;
+        CHECK(_tx_mutex_delete(&mutex)==TX_FEATURE_NOT_ENABLED && !memcmp(&mutex,&snapshot,sizeof(mutex)));
         if (mode==STALE) {
             _tx_mutex_cleanup(&callers[1].thread,callers[1].thread.tx_thread_suspension_sequence-1);
             CHECK(mutex.tx_mutex_suspended_count==1 && callers[1].thread.tx_thread_suspend_cleanup==_tx_mutex_cleanup);

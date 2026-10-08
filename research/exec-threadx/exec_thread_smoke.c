@@ -239,6 +239,9 @@ int main(void)
     CHECK(!memcmp(&snapshot,&children[0],sizeof(snapshot)) && FindTask(0)->tc_SigAlloc==signals);
     CHECK(stacks[0].before==0x13572468 && stacks[0].after==0x89abcdef);
     CASE("unbound-cancel-reaps-without-public-mutation");
+    anx_tx_context_begin(&f,&parent_thread,0);
+    CHECK(tx_event_flags_delete(&events)==TX_SUCCESS);
+    anx_tx_context_end(&f);
     CHECK(anx_tx_detach(&parent_bridge) && anx_exec_wait_close(&parent_wait));
     anx_tx_runtime_init(anx_tx_exec_platform()); /* all reservations really released */
     CHECK(passed==14 && reaped==10 && !events.tx_event_flags_group_suspended_count);

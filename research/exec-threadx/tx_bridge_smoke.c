@@ -596,6 +596,8 @@ int main(void)
     while (!worker_done || !abort_done) Wait(ack);
     anx_tx_context_begin(&frame,&owner_thread,0);
     pool_recovered(); CHECK(_nx_packet_pool_delete(&pool)==NX_SUCCESS && !_nx_packet_pool_created_count);
+    CHECK(tx_mutex_delete(&ip.nx_ip_protection)==TX_SUCCESS && tx_mutex_delete(&mutex)==TX_SUCCESS &&
+          tx_event_flags_delete(&ip.nx_ip_events)==TX_SUCCESS);
     anx_tx_context_end(&frame);
     CHECK(anx_tx_detach(&owner_bridge));
     CHECK(anx_exec_wait_close(&owner_wait));

@@ -24,6 +24,10 @@ ULONG _tx_timer_created_count;
 volatile ULONG _tx_timer_system_clock;
 static unsigned timer_dispatch;
 static unsigned runtime_holds;
+TX_MUTEX *_tx_mutex_created_ptr;
+ULONG _tx_mutex_created_count;
+TX_EVENT_FLAGS_GROUP *_tx_event_flags_created_ptr;
+ULONG _tx_event_flags_created_count;
 
 static void need(int condition, const char *message)
 {
@@ -61,7 +65,8 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     if (platform)
         need(!threads && !timers && !contexts && !current_frame &&
              !_tx_thread_preempt_disable && !resume_hook_depth && !_tx_timer_created_count &&
-             !timer_dispatch && !runtime_holds, "reinitialize active domain");
+             !timer_dispatch && !runtime_holds && !_tx_mutex_created_count && !_tx_mutex_created_ptr &&
+             !_tx_event_flags_created_count && !_tx_event_flags_created_ptr, "reinitialize active domain");
     platform = p;
     threads = 0;
     timers = 0;
@@ -75,6 +80,8 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     _tx_timer_created_ptr=TX_NULL; _tx_timer_created_count=0;
     _tx_timer_system_clock=0; timer_dispatch=0;
     runtime_holds=0;
+    _tx_mutex_created_ptr=TX_NULL; _tx_mutex_created_count=0;
+    _tx_event_flags_created_ptr=TX_NULL; _tx_event_flags_created_count=0;
 }
 
 void anx_tx_runtime_hold(void)
@@ -585,14 +592,87 @@ static void mutex_disown(TX_MUTEX *m)
     m->tx_mutex_owned_next=TX_NULL; m->tx_mutex_owned_previous=TX_NULL;
 }
 
-/* NO_INHERIT only. FIFO handoff uses actual upstream cleanup for timeout/abort.
- * No priority scheduling, forced owner release or mutex deletion. */
-UINT _tx_mutex_create(TX_MUTEX *m, CHAR *name, UINT inherit)
+/* Created rings use the unchanged public layout. Never inspect an uncreated
+ * caller control block (it may be uninitialized); membership comes from rings. */
+static int mutex_member(TX_MUTEX *m)
+{
+    TX_MUTEX *node=_tx_mutex_created_ptr;
+    int member=0;
+    need((node!=TX_NULL)==(_tx_mutex_created_count!=0),"mutex created head/count mismatch");
+    for (ULONG i=0;i<_tx_mutex_created_count;i++) {
+        need(node && node->tx_mutex_id==TX_MUTEX_ID && node->tx_mutex_created_next &&
+             node->tx_mutex_created_previous && node->tx_mutex_created_next->tx_mutex_created_previous==node &&
+             node->tx_mutex_created_previous->tx_mutex_created_next==node &&
+             (!i || node!=_tx_mutex_created_ptr),"invalid mutex created ring");
+        if (node==m) member=1;
+        node=node->tx_mutex_created_next;
+    }
+    need(node==_tx_mutex_created_ptr,"mutex created ring/count mismatch");
+    return member;
+}
+static int event_member(TX_EVENT_FLAGS_GROUP *g)
+{
+    TX_EVENT_FLAGS_GROUP *node=_tx_event_flags_created_ptr;
+    int member=0;
+    need((node!=TX_NULL)==(_tx_event_flags_created_count!=0),"event created head/count mismatch");
+    for (ULONG i=0;i<_tx_event_flags_created_count;i++) {
+        need(node && node->tx_event_flags_group_id==TX_EVENT_FLAGS_ID && node->tx_event_flags_group_created_next &&
+             node->tx_event_flags_group_created_previous &&
+             node->tx_event_flags_group_created_next->tx_event_flags_group_created_previous==node &&
+             node->tx_event_flags_group_created_previous->tx_event_flags_group_created_next==node &&
+             (!i || node!=_tx_event_flags_created_ptr),"invalid event created ring");
+        if (node==g) member=1;
+        node=node->tx_event_flags_group_created_next;
+    }
+    need(node==_tx_event_flags_created_ptr,"event created ring/count mismatch");
+    return member;
+}
+static void object_lifecycle(void)
 {
     need_context();
+    need(!_tx_thread_system_state && !timer_dispatch && !resume_hook_depth,
+         "object lifecycle in callback or marked context not implemented");
+}
+static int object_referenced(VOID *object)
+{
+    AnxTxThread *t;
+    for (t=threads;t;t=t->next)
+        if (t->control_at_suspend==object &&
+            (t->wait->result==ANX_WAIT_PENDING || t->pending_resume || t->pending_token ||
+             t->abort_pins || t->thread->tx_thread_suspend_cleanup)) return 1;
+    return 0;
+}
+UINT anx_tx_original_mutex_delete(TX_MUTEX *);
+UINT anx_tx_original_event_flags_delete(TX_EVENT_FLAGS_GROUP *);
+
+/* NO_INHERIT only. FIFO handoff uses actual upstream cleanup for timeout/abort.
+ * Deletion is quiescent only; no priority scheduling or forced owner release. */
+UINT _tx_mutex_create(TX_MUTEX *m, CHAR *name, UINT inherit)
+{
+    TX_MUTEX *head;
+    object_lifecycle();
+    if (!m || mutex_member(m)) return TX_MUTEX_ERROR;
     if (inherit!=TX_NO_INHERIT) return TX_FEATURE_NOT_ENABLED;
+    need(_tx_mutex_created_count!=(ULONG)-1,"mutex created count overflow");
     memset(m,0,sizeof(*m)); m->tx_mutex_name=name; m->tx_mutex_id=TX_MUTEX_ID;
+    head=_tx_mutex_created_ptr;
+    m->tx_mutex_created_next=head ? head : m;
+    m->tx_mutex_created_previous=head ? head->tx_mutex_created_previous : m;
+    if (head) {
+        head->tx_mutex_created_previous->tx_mutex_created_next=m;
+        head->tx_mutex_created_previous=m;
+    } else _tx_mutex_created_ptr=m;
+    _tx_mutex_created_count++;
     return TX_SUCCESS;
+}
+UINT _tx_mutex_delete(TX_MUTEX *m)
+{
+    object_lifecycle();
+    if (!m || !mutex_member(m)) return TX_MUTEX_ERROR;
+    if (m->tx_mutex_ownership_count || m->tx_mutex_owner || m->tx_mutex_owned_next ||
+        m->tx_mutex_owned_previous || m->tx_mutex_suspended_count || m->tx_mutex_suspension_list ||
+        object_referenced(m)) return TX_FEATURE_NOT_ENABLED;
+    return anx_tx_original_mutex_delete(m);
 }
 
 UINT _tx_mutex_get(TX_MUTEX *m, ULONG wait)
@@ -676,9 +756,32 @@ UINT _tx_mutex_put(TX_MUTEX *m)
 
 UINT _tx_event_flags_create(TX_EVENT_FLAGS_GROUP *g, CHAR *name)
 {
-    need_context();
+    TX_EVENT_FLAGS_GROUP *head;
+    object_lifecycle();
+    if (!g || event_member(g)) return TX_GROUP_ERROR;
+    need(_tx_event_flags_created_count!=(ULONG)-1,"event created count overflow");
     memset(g,0,sizeof(*g)); g->tx_event_flags_group_name=name; g->tx_event_flags_group_id=TX_EVENT_FLAGS_ID;
+    head=_tx_event_flags_created_ptr;
+    g->tx_event_flags_group_created_next=head ? head : g;
+    g->tx_event_flags_group_created_previous=head ? head->tx_event_flags_group_created_previous : g;
+    if (head) {
+        head->tx_event_flags_group_created_previous->tx_event_flags_group_created_next=g;
+        head->tx_event_flags_group_created_previous=g;
+    } else _tx_event_flags_created_ptr=g;
+    _tx_event_flags_created_count++;
     return TX_SUCCESS;
+}
+UINT _tx_event_flags_delete(TX_EVENT_FLAGS_GROUP *g)
+{
+    object_lifecycle();
+    if (!g || !event_member(g)) return TX_GROUP_ERROR;
+    if (g->tx_event_flags_group_suspended_count || g->tx_event_flags_group_suspension_list ||
+        g->tx_event_flags_group_reset_search || g->tx_event_flags_group_delayed_clear ||
+        object_referenced(g)) return TX_FEATURE_NOT_ENABLED;
+#ifndef TX_DISABLE_NOTIFY_CALLBACKS
+    if (g->tx_event_flags_group_set_notify) return TX_FEATURE_NOT_ENABLED;
+#endif
+    return anx_tx_original_event_flags_delete(g);
 }
 
 /* Compile unchanged vendor bodies under research-only names. Wrappers reject

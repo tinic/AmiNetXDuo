@@ -46,6 +46,12 @@ typedef struct AnxTxContext {
  * Bind actual pinned control blocks; retain them and quiesce all producers
  * before detach. Blocking is permitted only in the outer thread context. */
 void anx_tx_runtime_init(const AnxTxPlatform *);
+/* Mutex/event lifetimes are tracked in real created rings. Creation/deletion
+ * requires a normal serialized context, never a timer/resume callback. Delete
+ * is quiescent only: busy objects return TX_FEATURE_NOT_ENABLED unchanged.
+ * Reset with live objects is fatal. Caller must quiesce external producers and
+ * retain control-block storage through native owner ACK before reclaiming it.
+ * This is not general ThreadX delete-with-waiters or full NetX IP deletion. */
 /* Native lifecycle calls must block outside every bridge call boundary. */
 int anx_tx_runtime_idle(void);
 /* Trusted native backend reservations pin the domain even before a binding.

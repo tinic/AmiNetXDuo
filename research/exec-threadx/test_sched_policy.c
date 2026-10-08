@@ -95,6 +95,7 @@ int main(int argc,char **argv)
     CHECK(_tx_event_flags_get(&events,1,TX_OR_CLEAR,&actual,TX_WAIT_FOREVER)==TX_SUCCESS && actual==1);
     CHECK(phase==2 && depth==1 && _tx_thread_current_ptr==&thread[0] &&
           thread[0].tx_thread_preempt_threshold==2 && !thread[0].tx_thread_suspend_cleanup);
+    CHECK(_tx_event_flags_delete(&events)==TX_SUCCESS);
     phase=3;
     CHECK(_tx_thread_preemption_change(&thread[0],old,&invalid_old)==TX_SUCCESS && invalid_old==2);
     CHECK(thread[0].tx_thread_preempt_threshold==16 && thread[0].tx_thread_user_preempt_threshold==16);

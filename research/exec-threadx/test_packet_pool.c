@@ -160,6 +160,7 @@ static void finish(void)
     }
     CHECK(count==3 && !socket.nx_udp_socket_receive_head && !socket.nx_udp_socket_receive_suspension_list);
     CHECK(_nx_packet_pool_delete(&pool)==NX_SUCCESS && !_nx_packet_pool_created_count && !_nx_packet_pool_created_ptr);
+    CHECK(_tx_mutex_delete(&ip.nx_ip_protection)==TX_SUCCESS);
     anx_tx_context_end(&frame);
     CHECK(anx_tx_detach(&callers[0].bridge)); CHECK(!pthread_cond_destroy(&callers[0].wake));
     CHECK(!depth && !_tx_thread_preempt_disable && !_tx_thread_current_ptr && !_tx_thread_system_state);

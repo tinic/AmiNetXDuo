@@ -16,9 +16,11 @@ add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c netx_packet.c
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_sleep.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_mutex_cleanup.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_mutex_delete.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_event_flags_get.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_event_flags_set.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_event_flags_cleanup.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_event_flags_delete.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_timer_create.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_timer_activate.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_timer_change.c"
@@ -51,7 +53,7 @@ target_compile_definitions(research_tx_bridge PUBLIC TX_DISABLE_ERROR_CHECKING)
 target_compile_options(research_tx_bridge PRIVATE -Wall -Wextra -Werror)
 set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
     PROPERTIES COMPILE_DEFINITIONS "_tx_thread_wait_abort=anx_tx_original_wait_abort")
-foreach(service event_flags_get event_flags_set timer_create timer_activate timer_change timer_delete)
+foreach(service mutex_delete event_flags_delete event_flags_get event_flags_set timer_create timer_activate timer_change timer_delete)
     set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_${service}.c"
         PROPERTIES COMPILE_DEFINITIONS "_tx_${service}=anx_tx_original_${service}")
 endforeach()
@@ -88,7 +90,7 @@ if(CMAKE_CROSSCOMPILING)
             "-DTOOL_MAP=$<TARGET_FILE:research_exec_thread_smoke>.map"
             -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_stop_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
-        tx_bridge_exec.c exec_thread.c exec_stop_smoke.c)
+        tx_bridge_exec.c exec_thread.c exec_stop_smoke.c object_probe.c)
     target_link_libraries(research_exec_stop_smoke PRIVATE research_tx_bridge research_exec_adapter)
     target_include_directories(research_exec_stop_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_stop_smoke PRIVATE -Wall -Wextra -Werror)
@@ -132,6 +134,13 @@ else()
     enable_testing()
     find_package(Threads REQUIRED)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_executable(research_object_model test_objects.c object_probe.c)
+    target_link_libraries(research_object_model PRIVATE research_tx_bridge)
+    target_compile_options(research_object_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_object_model COMMAND research_object_model)
+    foreach(guard reset-mutex reset-event outside marked)
+        add_test(NAME research_object_reject_${guard} COMMAND research_object_model --reject-${guard})
+    endforeach()
     add_executable(research_stop_event_model test_stop_event.c)
     target_link_libraries(research_stop_event_model PRIVATE research_tx_bridge)
     target_compile_options(research_stop_event_model PRIVATE -Wall -Wextra -Werror)

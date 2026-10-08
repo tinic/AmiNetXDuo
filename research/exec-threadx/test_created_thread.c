@@ -66,7 +66,9 @@ int main(int argc,char **argv)
     CHECK(t.tx_thread_id==TX_THREAD_ID && t.tx_thread_state==TX_COMPLETED &&
           t.tx_thread_entry==entry && t.tx_thread_entry_parameter==before.tx_thread_entry_parameter);
     CHECK(!anx_tx_complete(&created));
-    owner=1;CHECK(anx_tx_detach(&parent));
+    owner=1;anx_tx_context_begin(&f,&pt,0);
+    CHECK(_tx_mutex_delete(&m)==TX_SUCCESS);anx_tx_context_end(&f);
+    CHECK(anx_tx_detach(&parent));
     anx_tx_runtime_hold();anx_tx_runtime_drop();anx_tx_runtime_init(&p);
     CHECK(!depth && anx_tx_runtime_idle());
     puts("research_created_model=PASS preserved fields, duplicate/foreign/active/owned/pinned retirement guards, retained completed ID");

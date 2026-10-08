@@ -137,6 +137,10 @@ static void finish(void)
 {
     CHECK(!ip.nx_ip_events.tx_event_flags_group_suspension_list && !ip.nx_ip_events.tx_event_flags_group_suspended_count);
     CHECK(!_tx_timer_created_count && !_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable && !depth);
+    AnxTxContext frame;
+    anx_tx_context_begin(&frame,&callers[0].thread,0);
+    CHECK(_tx_event_flags_delete(&ip.nx_ip_events)==TX_SUCCESS && _tx_mutex_delete(&ip.nx_ip_protection)==TX_SUCCESS);
+    anx_tx_context_end(&frame);
     CHECK(anx_tx_detach(&callers[0].bridge)); CHECK(!pthread_cond_destroy(&callers[0].wake));
 }
 static void getter(Caller *c)
