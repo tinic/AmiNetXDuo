@@ -3,6 +3,7 @@
 #include "tx_bridge_exec.h"
 #include <exec/execbase.h>
 #include <proto/exec.h>
+#include <inline/macros.h>
 #include "tx_thread.h"
 #include "tx_amiga.h"
 
