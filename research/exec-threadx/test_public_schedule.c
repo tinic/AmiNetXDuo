@@ -50,9 +50,12 @@ static void yield_point(void)
 int main(void)
 {
     AnxTxPlatform p={enter,leave,caller,panic,0,can_pause};AnxWaitOps ops={enter,leave,now,park,notify,0};
-    AnxTxContext f,nested,marked;
+    AnxTxContext f,nested,marked;UINT old_threshold;
     anx_tx_runtime_init(&p);
     for (unsigned i=0;i<2;i++) {owner=i+1;anx_wait_init(&waits[i],&ops);CHECK(anx_tx_attach(&bridge[i],&thread[i],&waits[i],owner));}
+    /* Initial logical caller policy, as assigned by the native caller adapter. */
+    thread[0].tx_thread_priority=thread[0].tx_thread_user_priority=16;
+    thread[0].tx_thread_preempt_threshold=thread[0].tx_thread_user_preempt_threshold=16;
     owner=1;anx_tx_context_begin(&f,&thread[0],0);
     CHECK(anx_tx_yield_wait()==TX_CALLER_ERROR && !waits[0].generation);
     CHECK(tx_thread_suspend((TX_THREAD *)1)==TX_THREAD_ERROR && anx_tx_explicit_resume((TX_THREAD *)1)==TX_THREAD_ERROR);
@@ -70,6 +73,11 @@ int main(void)
     _tx_thread_preempt_disable=1;CHECK(tx_thread_suspend(&thread[0])==TX_SUSPEND_ERROR &&
         anx_tx_relinquish(yield_point)==TX_CALLER_ERROR);_tx_thread_preempt_disable=0;
     anx_tx_context_begin(&nested,&thread[0],0);CHECK(tx_thread_suspend(&thread[0])==TX_CALLER_ERROR);
+    CHECK(tx_thread_preemption_change(&thread[0],8,&old_threshold)==TX_SUCCESS && old_threshold==16);
+    CHECK(!anx_tx_context_pause() && anx_tx_relinquish(yield_point)==TX_CALLER_ERROR &&
+        depth==2 && tx_thread_identify()==&thread[0] && !bridge[0].paused_frame &&
+        !bridge[0].exec_wait_nesting && !waits[0].generation && !yields);
+    CHECK(tx_thread_preemption_change(&thread[0],16,&old_threshold)==TX_SUCCESS && old_threshold==8);
     CHECK(anx_tx_relinquish(0)==TX_PTR_ERROR && !parks && !yields && depth==2 && thread[0].tx_thread_state==TX_READY);
     CHECK(tx_mutex_create(&mutex,(CHAR *)"yield retention",TX_NO_INHERIT)==TX_SUCCESS && tx_mutex_get(&mutex,0)==TX_SUCCESS);
     CHECK(anx_tx_relinquish(yield_point)==TX_SUCCESS && yields==1 && depth==2 &&

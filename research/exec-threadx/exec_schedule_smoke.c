@@ -15,7 +15,7 @@ static struct Task *parent;
 static ULONG parent_gen;
 static volatile unsigned phase,peer_progress,pin_checks,worker_resumes;
 static unsigned passed,printed;
-static const char *cases[28];
+static const char *cases[29];
 static void say(const char *s) {const char *e=s;while (*e)e++;(void)Write(Output(),(APTR)s,(LONG)(e-s));(void)Flush(Output());}
 #define CHECK(x) do {if (!(x)) {say("research_exec_schedule=FAIL " #x "\n");return 20;}} while (0)
 #define REQUIRE(x) do {if (!(x)) anx_tx_unsupported("schedule child: " #x);} while (0)
@@ -44,7 +44,7 @@ static VOID entry(ULONG value)
 }
 int main(void)
 {
-    ULONG signals;BYTE original_priority;AnxTxContext nested,marked;
+    ULONG signals;BYTE original_priority;AnxTxContext nested,marked;UINT old_threshold;
     say("research_exec_schedule=START\n");parent=FindTask(0);signals=parent->tc_SigAlloc;original_priority=parent->tc_Node.ln_Pri;
     CHECK(original_priority==0 && tx_amiga_kernel_start()==TX_SUCCESS);CASE("real-kernel-clock-and-registry-started");
     worker_stack.before=0x13572468;worker_stack.after=0x89abcdef;
@@ -71,6 +71,12 @@ int main(void)
     CASE("nested-self-suspension-refused-with-context-retained");
     tx_thread_relinquish();CHECK(SysBase->TDNestCnt==1 && tx_thread_identify()==parent_thread && parent->tc_Node.ln_Pri==original_priority);
     anx_tx_context_end(&nested);CASE("public-nested-relinquish-restores-exact-owner-and-native-priority");
+    CHECK(tx_thread_preemption_change(parent_thread,8,&old_threshold)==TX_SUCCESS && old_threshold==16);
+    CHECK(!anx_tx_context_pause() && anx_exec_thread_relinquish()==TX_CALLER_ERROR &&
+        SysBase->TDNestCnt==0 && tx_thread_identify()==parent_thread && !worker.entered &&
+        parent->tc_Node.ln_Pri==original_priority);
+    CHECK(tx_thread_preemption_change(parent_thread,16,&old_threshold)==TX_SUCCESS && old_threshold==8);
+    CASE("raised-threshold-refuses-pause-and-yield-with-protection-retained");
     CHECK(anx_tx_relinquish(0)==TX_PTR_ERROR);CASE("missing-yield-operation-refused");
     (void)SetTaskPri(parent,-128);
     CHECK(anx_exec_thread_relinquish()==TX_FEATURE_NOT_ENABLED && parent->tc_Node.ln_Pri==-128 &&
@@ -118,5 +124,5 @@ int main(void)
     CHECK(tx_amiga_orphan_thread(parent_thread,parent_gen)==TX_SUCCESS && tx_amiga_kernel_stop()==TX_SUCCESS &&
         anx_tx_runtime_resettable() && parent->tc_SigAlloc==signals && parent->tc_Node.ln_Pri==original_priority);
     CASE("kernel-close-recovers-all-native-signals-and-original-priority");flush();
-    CHECK(passed==28);say("research_exec_schedule=PASS 28/28 caller_suspends=2 worker_suspends=4 equal_peer_progress=2\n");return 0;
+    CHECK(passed==29);say("research_exec_schedule=PASS 29/29 caller_suspends=2 worker_suspends=4 equal_peer_progress=2\n");return 0;
 }

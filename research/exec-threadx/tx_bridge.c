@@ -431,6 +431,7 @@ int anx_tx_context_pause(void)
     }
     depth=contexts;
     if (!depth || depth==(unsigned)-1 || !current_frame || _tx_thread_current_ptr!=t->thread ||
+        t->thread->tx_thread_preempt_threshold!=t->thread->tx_thread_priority ||
         t->thread->tx_thread_state!=TX_READY || t->thread->tx_thread_suspend_cleanup ||
         t->thread->tx_thread_suspending || t->thread->tx_thread_timer.tx_timer_internal_list_head ||
         t->wait->result==ANX_WAIT_PENDING || t->pending_resume || t->pending_token ||
