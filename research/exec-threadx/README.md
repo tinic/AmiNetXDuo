@@ -1,4 +1,4 @@
-# Exec / ThreadX compatibility research, spike 1
+# Exec / ThreadX compatibility research
 
 This directory is an isolated, standalone CMake project. The parent build,
 shipping presets and vendor sources do not select it. It is not a complete
@@ -106,7 +106,7 @@ or source markers, and fails if a source's own marker is never found. Field
 extraction includes any `tx_*` member so a newly named object type is visible.
 Changed pins, headers and consumer filenames are printed for review.
 
-## Suspension semantics to implement next
+## Suspension obligations identified after spike 1
 
 AgentNet's architectural assessment identified the following obligations. They
 have been checked against the beta8 sources, but are not satisfied by the
@@ -141,8 +141,8 @@ deepseek-v4 subsequently reviewed implementation commits `f0187a288` and
 `80e28dfd2`: the primitive and adapter were judged sound for their task-level
 scope, with no replacement-backend GO. The review's extraction gaps are addressed
 by broader header/member capture, mandatory source markers and detailed deltas.
-Binding real NetX cleanup remains open: it may schedule or defer work and must
-not be invoked as this primitive's protected queue-removal hook unchanged.
+Spike 2 binds real NetX cleanup separately from the primitive's protected
+queue-removal hook, as described below.
 
 ## Existing port code to evaluate for reuse
 
@@ -161,14 +161,65 @@ The next design should state which of these responsibilities it retains and
 measure the resulting code, signals, timer requests, tasks and stacks. A wait
 adapter compiled in isolation cannot establish the net replacement cost.
 
+## Spike 2: bounded suspension bridge
+
+`tx_bridge.c` implements a deliberately small set of internal ThreadX services
+behind the actual pinned headers and control blocks. It links unchanged NetX
+TCP suspend/resume, receive cleanup, deferred cleanup and the other cleanup
+routines reached by the deferred checker, plus unchanged ThreadX timeout and
+wait-abort. Vendor sources and production builds are untouched.
+
+An explicit task call boundary holds `Forbid` while NetX executes. Each frame
+publishes its caller identity and system state. Blocking drops exactly the
+outer boundary, clears the global caller/frame and balances the preemption
+counter; returning reacquires it and restores the original frame. Every test
+producer (arrival, timeout, close and abort) enters the same boundary. The marked
+timer context uses the actual port's `TX_TIMER_PROCESS_IN_ISR` system-state
+convention, but executes in task context; real interrupt callers are unsupported.
+Nested frame teardown checks owner and LIFO order.
+
+The bridge owns the internal active-timer list and generation-tagged private
+wait. Resume deactivates that timer and completes the wait; native parking reaps
+its IO before returning. Timeout invokes actual ThreadX cleanup outside the
+primitive's queue-removal hook. TCP cleanup really defers to the IP producer;
+a timed-out caller waits indefinitely for that cleanup to resume it. It cannot
+return with a live NetX suspension node. Expiry rejects stale/repeated tokens.
+
+Wait-abort preserves upstream ownership: ThreadX changes the state to
+`TX_SUSPENDED` and records `TX_WAIT_ABORTED`; NetX unlinks without resuming in
+that state. ThreadX then performs the resume and returns `TX_SUCCESS`. This is
+linked-source evidence, rather than an emulated cleanup callback.
+
+Implemented services are limited to the suspension/timer seam, identity,
+non-inheriting uncontended/recursive mutexes, and event creation/set without
+waiters. Blocking mutex contention returns `TX_FEATURE_NOT_ENABLED`; unsupported
+event waiters fail closed. Missing services remain missing link symbols.
+`_tx_thread_system_preempt_check` only defers Exec dispatch to the boundary's
+`Permit`; it does not implement ThreadX ready queues, priorities or thresholds.
+The deterministic post-mutex-release seam is NULL in the native experiment.
+
+Host CTest executes ten bridge schedules: nested caller/timer identity and mutex
+ownership/unsupported contention, resume before blocking, arrival, timeout with
+actual deferred checker, close/repeated cleanup, wait-abort, expiry then arrival,
+two deferred waiters, stale expiry after reuse, and pending foreign detach.
+Host ULONG/layouts differ from m68k and are not ABI evidence.
+
+`research_tx_bridge_smoke` compiles for m68k using the existing DOS command
+startup and a second 8192-byte Exec task. Its five planned native cases are
+arrival, real timeout/deferred cleanup, close, wait-abort and injected expiry
+then arrival. Worker resources are closed by their owner and the worker removes
+itself before the parent can release the executable. Compilation is verified;
+actual native verdict and exact binary evidence are pending. These fixtures
+exercise suspension machinery, not complete TCP/socket APIs or packet delivery.
+
 ## Still open
 
-The current-thread model, ThreadX wait-list/cleanup binding, mutexes, event flags,
-thread lifecycle, common timer integration and replacement backend selection are
-unimplemented. Minimum-profile coverage, native cross-task wakeup/resource races,
-NetX/socket conformance, backend independent review and net size/runtime comparison remain
-pending. Passing the model does not validate those parts. The compile probe
-checks that referenced fields exist; target/profile-specific layout expectations
-and link checks against a replacement remain to be added.
+Full current-thread/adoption semantics, blocking mutexes, event waiters, thread
+lifecycle, priority/preemption semantics, common timer integration and replacement
+backend selection remain unimplemented. Minimum-profile coverage, native verdict,
+UDP direct cleanup, NetX/socket conformance, independent bridge review and net
+size/runtime comparison remain pending. The compile probe checks that referenced
+fields exist; target/profile-specific layout goldens and full replacement link
+checks remain to be added. No complete backend or size-saving claim exists.
 
 See [the research plan](../../docs/plans/exec-threadx-compat.md).

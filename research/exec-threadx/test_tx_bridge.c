@@ -1,0 +1,214 @@
+/* Deterministic schedules executing unchanged pinned NetX/ThreadX sources.
+ * Host layouts are not m68k ABI evidence. SPDX-License-Identifier: MIT */
+#define NX_SOURCE_CODE
+#include "tx_bridge.h"
+#include "nx_api.h"
+#include "nx_tcp.h"
+#include "nx_ip.h"
+#include "tx_thread.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c); exit(1); } } while (0)
+enum { ARRIVAL, TIMEOUT, CLOSE, ABORT_WAIT, EXPIRE_ARRIVAL, TWO_WAITERS, STALE_TIMER, DETACH_PENDING };
+typedef struct {
+    TX_THREAD thread;
+    AnxTxThread bridge;
+    AnxWait wait;
+    AnxWaitOps ops;
+    unsigned parks, signals;
+} Caller;
+static Caller callers[3];
+static AnxTxPlatform platform;
+static NX_IP ip;
+static NX_TCP_SOCKET socket;
+static unsigned depth, mode, stage;
+static uintptr_t owner;
+static uint64_t now;
+static uint32_t stale_token;
+static unsigned aborted;
+
+static void enter(void *arg) { (void)arg; depth++; }
+static void leave(void *arg) { (void)arg; CHECK(depth); depth--; }
+static uintptr_t caller(void *arg) { (void)arg; return owner; }
+static void panic(void *arg,const char *text) { (void)arg; fprintf(stderr,"bridge panic: %s\n",text); exit(1); }
+static uint64_t clock_now(void *arg) { (void)arg; CHECK(depth); return now; }
+static void notify(void *arg) { Caller *c=arg; CHECK(depth); c->signals++; }
+
+static void resume_arrival(void)
+{
+    CHECK(socket.nx_tcp_socket_receive_suspended_count);
+    socket.nx_tcp_socket_receive_suspended_count--;
+    _nx_tcp_socket_thread_resume(&socket.nx_tcp_socket_receive_suspension_list,NX_SUCCESS);
+}
+
+static UINT suspend_caller(unsigned index,ULONG timeout)
+{
+    Caller *c=&callers[index];
+    AnxTxContext frame;
+    anx_tx_context_begin(&frame,&c->thread,0);
+    CHECK(_tx_thread_identify()==&c->thread);
+    CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
+    socket.nx_tcp_socket_receive_suspended_count++;
+    _nx_tcp_socket_thread_suspend(&socket.nx_tcp_socket_receive_suspension_list,
+                                 _nx_tcp_receive_cleanup,&socket,&ip.nx_ip_protection,timeout);
+    CHECK(_tx_thread_identify()==&c->thread);
+    CHECK(c->thread.tx_thread_state==TX_READY && !c->thread.tx_thread_suspend_cleanup);
+    CHECK(!c->thread.tx_thread_timer.tx_timer_internal_list_head);
+    CHECK(!_tx_thread_preempt_disable);
+    anx_tx_context_end(&frame);
+    return c->thread.tx_thread_suspend_status;
+}
+
+static int park(void *arg,uint64_t deadline)
+{
+    Caller *c=arg;
+    AnxTxContext frame;
+    uintptr_t saved=owner;
+    CHECK(!depth && !_tx_thread_current_ptr && !_tx_thread_preempt_disable);
+    c->parks++;
+    if (mode==TIMEOUT && !stage++) {
+        CHECK(deadline!=ANX_WAIT_FOREVER); now=deadline; return 0;
+    }
+    if (mode==TWO_WAITERS && !stage) {
+        stage=1; owner=2;
+        CHECK(suspend_caller(1,2)==NX_NO_PACKET);
+        owner=saved;
+        return 0;
+    }
+    owner=3;
+    if (mode==EXPIRE_ARRIVAL || mode==STALE_TIMER || mode==TWO_WAITERS) {
+        anx_tx_context_begin(&frame,TX_NULL,1);
+        if (mode==STALE_TIMER) CHECK(!anx_tx_expire(&callers[0].thread,stale_token));
+        else if (mode==TWO_WAITERS) {
+            CHECK(anx_tx_expire(&callers[0].thread,callers[0].bridge.token));
+            CHECK(anx_tx_expire(&callers[1].thread,callers[1].bridge.token));
+            CHECK(!anx_tx_expire(&callers[0].thread,callers[0].bridge.token));
+            CHECK(socket.nx_tcp_socket_receive_suspended_count==2);
+        } else CHECK(anx_tx_expire(&c->thread,c->bridge.token));
+        anx_tx_context_end(&frame);
+    }
+    anx_tx_context_begin(&frame,&callers[2].thread,0);
+    CHECK(_tx_thread_identify()==&callers[2].thread);
+    if (mode==TIMEOUT || mode==TWO_WAITERS) {
+        CHECK(ip.nx_ip_events.tx_event_flags_group_current & NX_IP_TCP_CLEANUP_DEFERRED);
+        CHECK(callers[0].thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
+        _nx_tcp_deferred_cleanup_check(&ip);
+    } else if (mode==CLOSE) {
+        socket.nx_tcp_socket_state=NX_TCP_CLOSED;
+        _nx_tcp_receive_cleanup(&c->thread NX_CLEANUP_ARGUMENT);
+        _nx_tcp_receive_cleanup(&c->thread NX_CLEANUP_ARGUMENT);
+    } else if (mode==ABORT_WAIT) {
+        aborted=_tx_thread_wait_abort(&c->thread);
+    } else {
+        if (mode==DETACH_PENDING) {
+            CHECK(!anx_tx_detach(&c->bridge));
+        }
+        resume_arrival();
+        if (mode==EXPIRE_ARRIVAL) _nx_tcp_deferred_cleanup_check(&ip);
+    }
+    anx_tx_context_end(&frame);
+    owner=saved;
+    return 1;
+}
+
+static void init(void)
+{
+    AnxTxContext frame;
+    unsigned i;
+    CHECK(!depth);
+    memset(callers,0,sizeof(callers)); memset(&ip,0,sizeof(ip)); memset(&socket,0,sizeof(socket));
+    owner=1; now=0; stage=0;
+    platform=(AnxTxPlatform){enter,leave,caller,panic,0};
+    anx_tx_runtime_init(&platform);
+    for (i=0;i<3;i++) {
+        Caller *c=&callers[i]; owner=i+1;
+        c->ops=(AnxWaitOps){enter,leave,clock_now,park,notify,c};
+        anx_wait_init(&c->wait,&c->ops);
+        CHECK(anx_tx_attach(&c->bridge,&c->thread,&c->wait,owner));
+    }
+    owner=1;
+    anx_tx_context_begin(&frame,&callers[0].thread,0);
+    CHECK(_tx_mutex_create(&ip.nx_ip_protection,(CHAR *)"IP",TX_NO_INHERIT)==TX_SUCCESS);
+    CHECK(_tx_event_flags_create(&ip.nx_ip_events,(CHAR *)"IP events")==TX_SUCCESS);
+    anx_tx_context_end(&frame);
+    socket.nx_tcp_socket_id=NX_TCP_ID;
+    socket.nx_tcp_socket_state=NX_TCP_ESTABLISHED;
+    socket.nx_tcp_socket_ip_ptr=&ip;
+    socket.nx_tcp_socket_created_next=&socket;
+    ip.nx_ip_tcp_created_sockets_count=1;
+    ip.nx_ip_tcp_created_sockets_ptr=&socket;
+}
+
+static void finish(void)
+{
+    unsigned i;
+    CHECK(!depth && !_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable);
+    CHECK(!socket.nx_tcp_socket_receive_suspension_list && !socket.nx_tcp_socket_receive_suspended_count);
+    CHECK(!ip.nx_ip_protection.tx_mutex_ownership_count);
+    for (i=0;i<3;i++) {
+        owner=i+1;
+        CHECK(anx_tx_detach(&callers[i].bridge));
+    }
+}
+
+static void early(TX_MUTEX *mutex)
+{
+    CHECK(mutex==&ip.nx_ip_protection && _tx_thread_preempt_disable==1);
+    CHECK(callers[0].thread.tx_thread_suspending);
+    resume_arrival();
+    CHECK(_tx_thread_preempt_disable==1);
+}
+
+int main(void)
+{
+    unsigned scenario;
+    init();
+    {
+        AnxTxContext outer,nested;
+        anx_tx_context_begin(&outer,&callers[0].thread,0);
+        CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_SUCCESS);
+        CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_SUCCESS);
+        anx_tx_context_begin(&nested,TX_NULL,1);
+        CHECK(_tx_thread_identify()==TX_NULL && _tx_thread_system_state==1);
+        anx_tx_context_end(&nested);
+        CHECK(_tx_thread_identify()==&callers[0].thread && !_tx_thread_system_state);
+        CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+        CHECK(ip.nx_ip_protection.tx_mutex_ownership_count==1);
+        anx_tx_context_end(&outer);
+        owner=3;
+        anx_tx_context_begin(&outer,&callers[2].thread,0);
+        CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_NOT_AVAILABLE);
+        CHECK(_tx_mutex_get(&ip.nx_ip_protection,1)==TX_FEATURE_NOT_ENABLED);
+        CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_NOT_OWNED);
+        anx_tx_context_end(&outer);
+        owner=1;
+        anx_tx_context_begin(&outer,&callers[0].thread,0);
+        CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+        anx_tx_context_end(&outer);
+        CHECK(_tx_thread_identify()==TX_NULL);
+    }
+    finish();
+    init(); anx_tx_after_mutex_put=early;
+    CHECK(suspend_caller(0,2)==NX_SUCCESS);
+    CHECK(!callers[0].parks && callers[0].bridge.resumes==1);
+    finish();
+    for (scenario=ARRIVAL;scenario<=DETACH_PENDING;scenario++) {
+        init(); mode=scenario;
+        if (mode==STALE_TIMER) {
+            mode=ARRIVAL; CHECK(suspend_caller(0,2)==NX_SUCCESS);
+            stale_token=callers[0].bridge.token; mode=STALE_TIMER;
+        }
+        UINT result=suspend_caller(0,2);
+        CHECK(result==(mode==TIMEOUT || mode==TWO_WAITERS ? NX_NO_PACKET :
+                       mode==CLOSE ? NX_NOT_CONNECTED : mode==ABORT_WAIT ? TX_WAIT_ABORTED : NX_SUCCESS));
+        if (mode==ABORT_WAIT) CHECK(aborted==TX_SUCCESS);
+        CHECK(callers[0].bridge.resumes==(mode==STALE_TIMER ? 2U : 1U));
+        if (mode==TIMEOUT) CHECK(callers[0].parks==2 && now==40000);
+        if (mode==TWO_WAITERS) CHECK(callers[0].thread.tx_thread_suspended_next==&callers[1].thread);
+        finish();
+    }
+    puts("research_tx_bridge_model=PASS checks=10/10 real NetX publish/resume/cleanup/deferred + ThreadX timeout/wait_abort");
+    return 0;
+}
