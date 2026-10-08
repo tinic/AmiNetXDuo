@@ -33,12 +33,13 @@ typedef union BsdNetStat
 
 static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
 {
-    ULONG sent = 0, sent_bytes = 0, received = 0, received_bytes = 0;
-    ULONG invalid = 0, dropped = 0, checksum = 0, send_dropped = 0;
+    ULONG sent = 0, received = 0, checksum = 0, send_dropped = 0;
     ULONG frags_sent = 0, frags_received = 0;
 
-    if (nx_ip_info_get(ip, &sent, &sent_bytes, &received, &received_bytes,
-                       &invalid, &dropped, &checksum, &send_dropped,
+    /* NetX info outputs are optional: do not stage counters absent from
+       the BSD report. Error-checked entry points also permit NULL outputs. */
+    if (nx_ip_info_get(ip, &sent, NULL, &received, NULL,
+                       NULL, NULL, &checksum, &send_dropped,
                        &frags_sent, &frags_received) != NX_SUCCESS)
         return;
 
@@ -52,11 +53,10 @@ static VOID bsd_stat_ip(NX_IP *ip, struct ipstat *out)
 
 static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
 {
-    ULONG sent = 0, timeouts = 0, suspended = 0, responses = 0;
-    ULONG checksum = 0, unhandled = 0;
+    ULONG sent = 0, responses = 0, checksum = 0;
 
-    if (nx_icmp_info_get(ip, &sent, &timeouts, &suspended, &responses,
-                         &checksum, &unhandled) != NX_SUCCESS)
+    if (nx_icmp_info_get(ip, &sent, NULL, NULL, &responses,
+                         &checksum, NULL) != NX_SUCCESS)
         return;
 
     out->icps_checksum = checksum;
@@ -70,12 +70,12 @@ static VOID bsd_stat_icmp(NX_IP *ip, struct icmpstat *out)
 static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
 {
     ULONG sent = 0, sent_bytes = 0, received = 0, received_bytes = 0;
-    ULONG invalid = 0, dropped = 0, checksum = 0;
+    ULONG checksum = 0;
     ULONG connections = 0, disconnections = 0, connections_dropped = 0;
     ULONG retransmits = 0;
 
     if (nx_tcp_info_get(ip, &sent, &sent_bytes, &received, &received_bytes,
-                        &invalid, &dropped, &checksum, &connections,
+                        NULL, NULL, &checksum, &connections,
                         &disconnections, &connections_dropped,
                         &retransmits) != NX_SUCCESS)
         return;
@@ -93,10 +93,10 @@ static VOID bsd_stat_tcp(NX_IP *ip, struct tcpstat *out)
 
 static VOID bsd_stat_udp(NX_IP *ip, struct udpstat *out)
 {
-    ULONG sent = 0, sent_bytes = 0, received = 0, received_bytes = 0;
+    ULONG sent = 0, received = 0;
     ULONG invalid = 0, dropped = 0, checksum = 0;
 
-    if (nx_udp_info_get(ip, &sent, &sent_bytes, &received, &received_bytes,
+    if (nx_udp_info_get(ip, &sent, NULL, &received, NULL,
                         &invalid, &dropped, &checksum) != NX_SUCCESS)
         return;
 
