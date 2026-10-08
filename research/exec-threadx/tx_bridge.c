@@ -226,6 +226,7 @@ int anx_tx_expire(TX_THREAD *thread, uint32_t token)
 VOID _tx_thread_system_suspend(TX_THREAD *thread)
 {
     AnxTxThread *t=find(thread);
+    need(!t->pending_resume && !t->pending_token,"new suspension retained pending wake");
     ULONG ticks=thread->tx_thread_timer.tx_timer_internal_remaining_ticks;
     AnxTxContext *outer_frame=current_frame;
     unsigned awaiting_cleanup=0;
