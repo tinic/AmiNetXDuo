@@ -373,8 +373,10 @@ passes 11/11 on one boardless A1200/KS3.1 r40.68 run: 15 tasks reaped, 12 restar
 exit 0 after 14s, all stacks 8192 bytes. Actual guest output, startup, exit and
 hashes were read/verified under `/Users/turo/ai/evidence/exec-threadx-spike8-native`;
 claudecode confirms zero staging left. Binary `b2930fd6`, 50,344 bytes including
-fixtures/runtime, is not a library size result. Independent exact source review
-is pending; no review completion is inferred from execution.
+fixtures/runtime, is not a library size result. deepseek-v4's independent exact
+source review is complete: all 19/19 parts read, no blocker in bounded scope,
+no tests run and no full backend GO. Host and native execution remain separately
+attributed to root and claudecode. Owned local/native build staging is removed.
 
 This proves the owned task mechanism only: fixed Exec priority zero, no public
 thread create/terminate/delete contract, no TX_COMPLETED state, no forced

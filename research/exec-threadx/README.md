@@ -664,3 +664,50 @@ must already be quiescent on entry return; future full NetX shutdown needs an
 explicit drain/stop protocol. Shipping/vendor inputs remain untouched. Next:
 connect this owned task mechanism to the public service contract, implement
 quiescent object retirement and helper stop/drain, then create a real NX_IP.
+
+Spike 8 exact `101d52195` independent source review is complete: deepseek-v4,
+all 19/19 parts read, no blocker in bounded scope, no tests run or full backend GO.
+Host 25/25 and native 11/11 (15 tasks reaped, 12 restarts, exit 0 after 14s) are
+separate execution evidence. Local build/native staging is removed.
+
+## Spike 9: reserved-worker public thread creation boundary
+
+The native-only `exec_thread.c` implements the pinned public create/resume/delete
+signatures over caller-retained reservations. Prepare opens IO in the real owner
+before the constructor enters its boundary and parks on Exec's reserved SINGLE
+signal. Preparation leaves the target control block untouched. Public create
+consumes a matching creator/control/stack reservation, initializes the real
+TX_THREAD and timeout metadata, publishes the runtime binding and circular
+created list, then marks READY/signals for AUTO_START. The worker preserves these
+public fields and cannot enter until the creator's outer boundary releases.
+DONT_START stays suspended until the explicit initial public resume. No public
+thread-create call blocks or opens IO while inside the constructor boundary.
+
+Exec priorities map 31 minus the supplied priority. Strict ThreadX scheduler
+conformance is not established. Unequal thresholds and nonzero time slices return
+TX_FEATURE_NOT_ENABLED before control mutation. NetX IP create's hardcoded slice
+of one is therefore still unsupported: a real NX_IP create/helper verdict remains
+open. There is no unreserved allocation path (TX_NO_MEMORY), general suspended
+thread resume, public threshold change, forced termination or helper drain.
+No vendor/header/production build changes select this experiment.
+
+Normal owner return checks quiescence, removes its runtime binding and retains ID
+with TX_COMPLETED. Private IO is closed before FINISHED plus RemTask under one
+uninterrupted Forbid. Creator-side wait only observes native retirement; public
+delete then clears ID/created links/native owner pointers, releases its ACK and
+reservation, and permits stack/control/record reuse. A completed ID alone never
+authorizes delete. Unbound cancellation closes IO and reaps without touching
+public control storage. Domain reservation holds prevent runtime reset even while
+workers are unbound or completed but not deleted. No producer quiescence is
+invented: caller must stop all producers before owner return.
+
+Host models cover preserved metadata, duplicate binding, foreign/active/owned-
+mutex/pinned retirement rejection, completed ID retention and reserved-domain
+reset rejection. They do not execute Exec/public native lifecycle or target ABI.
+The native fixture covers missing reservation and ACK failure without mutation,
+prepared IO with untouched target, unsupported slice/threshold/stack rejection,
+nested AUTO_START publication, DONT_START/initial resume, normal retirement,
+foreign/premature/double deletion, circular-list/signal/stack recovery, six public
+create/complete/delete restarts and one unbound cancellation. Child-side IO-open
+failure is not fault-injected; AddTask failure is reviewed but not exercised.
+Native verdict and independent exact review are recorded after execution.

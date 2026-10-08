@@ -23,6 +23,7 @@ TX_TIMER *_tx_timer_created_ptr;
 ULONG _tx_timer_created_count;
 volatile ULONG _tx_timer_system_clock;
 static unsigned timer_dispatch;
+static unsigned runtime_holds;
 
 static void need(int condition, const char *message)
 {
@@ -60,7 +61,7 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     if (platform)
         need(!threads && !timers && !contexts && !current_frame &&
              !_tx_thread_preempt_disable && !resume_hook_depth && !_tx_timer_created_count &&
-             !timer_dispatch, "reinitialize active domain");
+             !timer_dispatch && !runtime_holds, "reinitialize active domain");
     platform = p;
     threads = 0;
     timers = 0;
@@ -73,6 +74,22 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     resume_hook_depth=0;
     _tx_timer_created_ptr=TX_NULL; _tx_timer_created_count=0;
     _tx_timer_system_clock=0; timer_dispatch=0;
+    runtime_holds=0;
+}
+
+void anx_tx_runtime_hold(void)
+{
+    platform->enter(platform->context);
+    need(runtime_holds!=(unsigned)-1,"runtime hold overflow");
+    runtime_holds++;
+    platform->leave(platform->context);
+}
+void anx_tx_runtime_drop(void)
+{
+    platform->enter(platform->context);
+    need(runtime_holds>0,"runtime hold underflow");
+    runtime_holds--;
+    platform->leave(platform->context);
 }
 
 int anx_tx_runtime_idle(void)
@@ -109,7 +126,23 @@ int anx_tx_attach(AnxTxThread *t, TX_THREAD *thread, AnxWait *wait, uintptr_t ow
     return 1;
 }
 
-int anx_tx_detach(AnxTxThread *t)
+int anx_tx_bind_created(AnxTxThread *t, TX_THREAD *thread, AnxWait *wait, uintptr_t owner)
+{
+    AnxTxThread *other;
+    anx_tx_require_context(0);
+    for (other=threads;other;other=other->next)
+        if (other==t || other->thread==thread || other->owner==owner) return 0;
+    if (!owner || wait->result==ANX_WAIT_PENDING || thread->tx_thread_id!=TX_THREAD_ID ||
+        thread->tx_thread_state!=TX_SUSPENDED || thread->tx_thread_amiga_task!=(VOID *)owner ||
+        thread->tx_thread_suspend_cleanup || thread->tx_thread_owned_mutex_count ||
+        thread->tx_thread_owned_mutex_list || thread->tx_thread_timer.tx_timer_internal_list_head)
+        return 0;
+    *t=(AnxTxThread){.thread=thread,.wait=wait,.owner=owner,.next=threads};
+    threads=t;
+    return 1;
+}
+
+static int detach(AnxTxThread *t, int completed)
 {
     AnxTxThread **link;
     platform->enter(platform->context);
@@ -128,10 +161,14 @@ int anx_tx_detach(AnxTxThread *t)
         return 0;
     }
     *link=t->next;
-    t->thread->tx_thread_id=0;
+    if (completed) t->thread->tx_thread_state=TX_COMPLETED;
+    else t->thread->tx_thread_id=0;
     platform->leave(platform->context);
     return 1;
 }
+
+int anx_tx_detach(AnxTxThread *t) { return detach(t,0); }
+int anx_tx_complete(AnxTxThread *t) { return detach(t,1); }
 
 int anx_tx_set_resume_cleanup(AnxTxThread *t, int (*hook)(AnxTxThread *))
 {

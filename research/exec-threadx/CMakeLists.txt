@@ -76,6 +76,17 @@ if(CMAKE_CROSSCOMPILING)
         COMMAND "${CMAKE_COMMAND}"
             "-DTOOL_MAP=$<TARGET_FILE:research_exec_task_smoke>.map"
             -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
+    add_executable(research_exec_thread_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_thread.c exec_thread_smoke.c)
+    target_link_libraries(research_exec_thread_smoke PRIVATE research_tx_bridge research_exec_adapter)
+    target_include_directories(research_exec_thread_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_thread_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_thread_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_thread_smoke>.map")
+    add_custom_command(TARGET research_exec_thread_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTOOL_MAP=$<TARGET_FILE:research_exec_thread_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_tx_bridge_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c tx_bridge_smoke.c)
     target_link_libraries(research_tx_bridge_smoke PRIVATE research_tx_bridge research_exec_adapter amiga)
@@ -110,6 +121,12 @@ else()
     enable_testing()
     find_package(Threads REQUIRED)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_executable(research_created_thread_model test_created_thread.c)
+    target_link_libraries(research_created_thread_model PRIVATE research_tx_bridge)
+    target_compile_options(research_created_thread_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_created_thread_model COMMAND research_created_thread_model)
+    add_test(NAME research_created_thread_reject_reserved_reset
+        COMMAND research_created_thread_model --reject-reserved-reset)
     add_executable(research_wait_model test_wait.c)
     target_link_libraries(research_wait_model PRIVATE research_wait)
     target_compile_options(research_wait_model PRIVATE -Wall -Wextra -Werror)

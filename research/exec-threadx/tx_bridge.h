@@ -45,8 +45,20 @@ typedef struct AnxTxContext {
 void anx_tx_runtime_init(const AnxTxPlatform *);
 /* Native lifecycle calls must block outside every bridge call boundary. */
 int anx_tx_runtime_idle(void);
+/* Trusted native backend reservations pin the domain even before a binding.
+ * Balance each hold/drop; reinitialization with any reservation is fatal. */
+void anx_tx_runtime_hold(void);
+void anx_tx_runtime_drop(void);
 int anx_tx_attach(AnxTxThread *, TX_THREAD *, AnxWait *, uintptr_t);
+/* Trusted creator publication: fully prepared owner/wait retained, public
+ * control block initialized and SUSPENDED. Requires a serialized boundary;
+ * preserves public fields. Owner must remain parked until publication ends. */
+int anx_tx_bind_created(AnxTxThread *, TX_THREAD *, AnxWait *, uintptr_t);
 int anx_tx_detach(AnxTxThread *);
+/* Owner-only normal completion; same quiescence checks as detach. Removes the
+ * runtime binding but retains public ID and publishes TX_COMPLETED for delete.
+ * Caller retains storage and closes IO before its native finished publication. */
+int anx_tx_complete(AnxTxThread *);
 /* Owner-only, while READY and quiescent. Optional integration must perform
  * real cleanup before resume, or return zero to fail closed. */
 int anx_tx_set_resume_cleanup(AnxTxThread *, int (*)(AnxTxThread *));
