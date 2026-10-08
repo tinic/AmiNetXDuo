@@ -205,7 +205,9 @@ two deferred waiters, stale expiry after reuse, pending foreign detach, and
 wait-abort after deferred expiry (IP actor drains cleanup before its Permit).
 The last ordering demonstrates that the upstream deferred sentinel is a no-op
 when wait-abort invokes it. The bridge rejects returning with a live cleanup
-pointer; a general deferred-abort dispatch policy remains open.
+pointer; a general deferred-abort dispatch policy remains open. A separate negative
+CTest executes that unresolved ordering without IP draining and verifies the
+guard rejects it. That rejection is not a successful abort/cleanup verdict.
 Host ULONG/layouts differ from m68k and are not ABI evidence.
 
 `research_tx_bridge_smoke` compiles for m68k using the existing DOS command
@@ -216,7 +218,12 @@ itself before the parent can release the executable. Compilation and one boardle
 guest exit 0 after 14 seconds, Kickstart 3.1 r40.68, parent/worker stacks 8192.
 Tested source `38ff2cb0d62a2d4f0cb205052a1f36e0e83d9346`; binary SHA256
 `71c27079f84438ca88c7f3f6fd7d1c2cd4c1377d73569e7df1920ddc81386581`,
-41,424 bytes. Harness `tools/amiberry-run.sh -m A1200 -t 90` at `300b22e8`;
+41,424 bytes. The cleanup-guard follow-up at `9af3a1965` also passed the same
+five native cases, exit 0 after 14 seconds, with binary SHA256
+`e0404172a3b188c720abee24cc0ab28320a46e31b365bebefe87575d1c836c9f`,
+41,488 bytes; its separate evidence is `exec-threadx-bridge-native-guard`.
+The eleventh deferred-abort schedule and rejection probe are host-only; they
+were not additional native cases. Harness `tools/amiberry-run.sh -m A1200 -t 90` at `300b22e8`;
 AgentNet owner claudecode saved actual stdout, exit and startup evidence under
 `/Users/turo/ai/evidence/exec-threadx-bridge-native`. This executable includes
 runtime and test fixtures; its size does not measure a replacement library. These fixtures

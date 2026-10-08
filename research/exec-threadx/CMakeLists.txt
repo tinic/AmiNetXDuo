@@ -74,6 +74,8 @@ else()
     target_link_libraries(research_tx_bridge_model PRIVATE research_tx_bridge)
     target_compile_options(research_tx_bridge_model PRIVATE -Wall -Wextra -Werror)
     add_test(NAME research_tx_bridge_model COMMAND research_tx_bridge_model)
+    add_test(NAME research_tx_bridge_reject_deferred_abort
+        COMMAND research_tx_bridge_model --reject-deferred-abort)
     add_test(NAME research_contract_extraction
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_contract.py"
             "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_C_COMPILER}")

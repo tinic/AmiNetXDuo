@@ -27,12 +27,25 @@ static unsigned depth, mode, stage;
 static uintptr_t owner;
 static uint64_t now;
 static uint32_t stale_token;
-static unsigned aborted;
+static unsigned aborted, reject_deferred_abort;
 
 static void enter(void *arg) { (void)arg; depth++; }
 static void leave(void *arg) { (void)arg; CHECK(depth); depth--; }
 static uintptr_t caller(void *arg) { (void)arg; return owner; }
-static void panic(void *arg,const char *text) { (void)arg; fprintf(stderr,"bridge panic: %s\n",text); exit(1); }
+static void panic(void *arg,const char *text)
+{
+    (void)arg;
+    if (reject_deferred_abort && !strcmp(text,"resume left cleanup pending")) {
+        CHECK(callers[0].thread.tx_thread_state==TX_READY);
+        CHECK(callers[0].thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
+        CHECK(socket.nx_tcp_socket_receive_suspended_count==1);
+        CHECK(aborted==TX_SUCCESS && callers[0].bridge.resumes==1);
+        puts("research_tx_bridge_guard=PASS rejected READY return with deferred cleanup");
+        exit(0);
+    }
+    fprintf(stderr,"bridge panic: %s\n",text);
+    exit(1);
+}
 static uint64_t clock_now(void *arg) { (void)arg; CHECK(depth); return now; }
 static void notify(void *arg) { Caller *c=arg; CHECK(depth); c->signals++; }
 
@@ -107,8 +120,10 @@ static int park(void *arg,uint64_t deadline)
             CHECK(socket.nx_tcp_socket_receive_suspended_count==1);
             /* This producer is the IP actor: drain before its boundary Permit,
              * otherwise the ready owner can return with an attached node. */
-            _nx_tcp_deferred_cleanup_check(&ip);
-            CHECK(!c->thread.tx_thread_suspend_cleanup);
+            if (!reject_deferred_abort) {
+                _nx_tcp_deferred_cleanup_check(&ip);
+                CHECK(!c->thread.tx_thread_suspend_cleanup);
+            }
         }
     } else {
         if (mode==DETACH_PENDING) {
@@ -170,9 +185,15 @@ static void early(TX_MUTEX *mutex)
     CHECK(_tx_thread_preempt_disable==1);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     unsigned scenario;
+    if (argc!=1) {
+        CHECK(argc==2 && !strcmp(argv[1],"--reject-deferred-abort"));
+        init(); mode=EXPIRE_ABORT; reject_deferred_abort=1;
+        (void)suspend_caller(0,2);
+        CHECK(0); /* the unsupported ordering must terminate in panic */
+    }
     init();
     {
         AnxTxContext outer,nested;

@@ -162,3 +162,10 @@ boardless A1200 run (38ff2cb0d, binary 71c27079, exit 0, stacks 8192).
 Independent exact-commit review is pending. This remains
 research only: no shipping backend selection, vendor edits, full scheduler
 conformance or measured net savings.
+
+The cleanup-guard follow-up 9af3a1965 passed the same five native cases (binary
+e0404172, exit 0). Host additionally covers deferred-expiry then wait-abort:
+the IP actor drains before releasing its boundary. The unresolved ordering
+without that drain is rejected by a separate host guard probe. A general
+non-IP deferred-abort dispatch policy remains open; the research backend must
+not be enabled in production.
