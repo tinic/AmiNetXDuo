@@ -116,53 +116,73 @@ static const char ami_rx_kw_routes[] =
 #define RX_ICMP_ECHO        8
 #define RX_ICMP_ECHOREPLY   0
 
-/* rvd_Index is the level-2 template, NULL both for a variable that takes no
-   index and for one whose answer is a formatted list that parses its own
-   argument.  Unreadable variables are refused before index parsing, so their
-   templates are not retained.  The writeable set is empty; see ami_rx_setvalue(). */
-typedef struct AmiRxVarDef
+/* One byte classifies each recognised variable. Only four readable variables
+   have index templates; scalar and self-formatted answers share RXK_SCALAR.
+   Unreadable variables are refused before any index parsing. */
+enum
 {
-    const char *rvd_Index;
-    UBYTE       rvd_Count;
-    UBYTE       rvd_Read;
-} AmiRxVarDef;
+    RXK_UNREADABLE = 0,
+    RXK_SCALAR,
+    RXK_ICMP,
+    RXK_IP,
+    RXK_TCP,
+    RXK_UDP
+};
+
+typedef struct AmiRxIndexDef
+{
+    const char *rxi_Index;
+    UBYTE       rxi_Count;
+} AmiRxIndexDef;
 
 _Static_assert(RX_ICMP_COUNT <= 255 && RX_IP_COUNT <= 255 &&
-               RX_TCP_COUNT <= 255 && RX_UDP_COUNT <= 255,
-               "ARexx index counts must fit a byte");
+               RX_TCP_COUNT <= 255 && RX_UDP_COUNT <= 255 && RXK_UDP <= 255,
+               "ARexx index counts and kinds must fit a byte");
 
-static const AmiRxVarDef ami_rx_vardefs[RXV_COUNT] =
+static const AmiRxIndexDef ami_rx_indexdefs[] =
 {
-    /* WITH                */ { NULL,                  0,              FALSE },
-    /* ICMP                */ { ami_rx_kw_icmp,        RX_ICMP_COUNT,  TRUE  },
-    /* ICMPHIST            */ { NULL,                  0,              TRUE  },
-    /* IP                  */ { ami_rx_kw_ip,          RX_IP_COUNT,    TRUE  },
-    /* TCP                 */ { ami_rx_kw_tcp,         RX_TCP_COUNT,   TRUE  },
-    /* UDP                 */ { ami_rx_kw_udp,         RX_UDP_COUNT,   TRUE  },
-    /* CONNECTIONS         */ { NULL,                  0,              TRUE  },
-    /* HOSTNAME            */ { NULL,                  0,              TRUE  },
-    /* ROUTES              */ { NULL,                  0,              TRUE  },
-    /* MBUF_STAT           */ { NULL,                  0,              FALSE },
-    /* MBUF_TYPE_STATS     */ { NULL,                  0,              FALSE },
-    /* MBUF_CONF           */ { NULL,                  0,              FALSE },
-    /* LOG                 */ { NULL,                  0,              FALSE },
-    /* TASKNAME            */ { NULL,                  0,              TRUE  },
-    /* NTHBASE             */ { NULL,                  0,              TRUE  },
-    /* DEBUGSANA           */ { NULL,                  0,              TRUE  },
-    /* DEBUGICMP           */ { NULL,                  0,              TRUE  },
-    /* DEBUGIP             */ { NULL,                  0,              TRUE  },
-    /* GATEWAY             */ { NULL,                  0,              TRUE  },
-    /* IPSENDREDIRECTS     */ { NULL,                  0,              TRUE  },
-    /* USENAMESERVER       */ { NULL,                  0,              TRUE  },
-    /* USELOOPBACK         */ { NULL,                  0,              TRUE  },
-    /* TCP_SENDSPACE       */ { NULL,                  0,              FALSE },
-    /* TCP_RECVSPACE       */ { NULL,                  0,              FALSE },
-    /* CONSOLENAME         */ { NULL,                  0,              FALSE },
-    /* LOGFILENAME         */ { NULL,                  0,              FALSE },
+    { ami_rx_kw_icmp, RX_ICMP_COUNT },
+    { ami_rx_kw_ip,   RX_IP_COUNT },
+    { ami_rx_kw_tcp,  RX_TCP_COUNT },
+    { ami_rx_kw_udp,  RX_UDP_COUNT }
+};
+
+_Static_assert(sizeof(ami_rx_indexdefs) / sizeof(ami_rx_indexdefs[0]) ==
+                   RXK_UDP - RXK_ICMP + 1,
+               "ARexx indexed kinds must match the index table");
+
+static const UBYTE ami_rx_varkinds[RXV_COUNT] =
+{
+    /* WITH                */ RXK_UNREADABLE,
+    /* ICMP                */ RXK_ICMP,
+    /* ICMPHIST            */ RXK_SCALAR,
+    /* IP                  */ RXK_IP,
+    /* TCP                 */ RXK_TCP,
+    /* UDP                 */ RXK_UDP,
+    /* CONNECTIONS         */ RXK_SCALAR,
+    /* HOSTNAME            */ RXK_SCALAR,
+    /* ROUTES              */ RXK_SCALAR,
+    /* MBUF_STAT           */ RXK_UNREADABLE,
+    /* MBUF_TYPE_STATS     */ RXK_UNREADABLE,
+    /* MBUF_CONF           */ RXK_UNREADABLE,
+    /* LOG                 */ RXK_UNREADABLE,
+    /* TASKNAME            */ RXK_SCALAR,
+    /* NTHBASE             */ RXK_SCALAR,
+    /* DEBUGSANA           */ RXK_SCALAR,
+    /* DEBUGICMP           */ RXK_SCALAR,
+    /* DEBUGIP             */ RXK_SCALAR,
+    /* GATEWAY             */ RXK_SCALAR,
+    /* IPSENDREDIRECTS     */ RXK_SCALAR,
+    /* USENAMESERVER       */ RXK_SCALAR,
+    /* USELOOPBACK         */ RXK_SCALAR,
+    /* TCP_SENDSPACE       */ RXK_UNREADABLE,
+    /* TCP_RECVSPACE       */ RXK_UNREADABLE,
+    /* CONSOLENAME         */ RXK_UNREADABLE,
+    /* LOGFILENAME         */ RXK_UNREADABLE,
 #ifdef AMINETXDUO_MDNS
-    /* SERVICES            */ { NULL,                  0,              TRUE  }
+    /* SERVICES            */ RXK_SCALAR
 #else
-    /* SERVICES            */ { NULL,                  0,              FALSE }
+    /* SERVICES            */ RXK_UNREADABLE
 #endif
 };
 
@@ -1129,7 +1149,8 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
         LONG  var;
         LONG  index = 0;
         ULONG counters[RX_TCP_COUNT];
-        const AmiRxVarDef *def;
+        const AmiRxIndexDef *def;
+        UBYTE               kind;
         const char        *text;
         char               scratch[AMI_CFG_NAME_LEN];
 
@@ -1140,21 +1161,22 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
             break;
 
         var = FindArg((CONST_STRPTR)ami_rx_vars, (CONST_STRPTR)buf);
-        if (var < 0 || var >= RXV_COUNT || !ami_rx_vardefs[var].rvd_Read)
+        if (var < 0 || var >= RXV_COUNT ||
+            (kind = ami_rx_varkinds[var]) == RXK_UNREADABLE)
         {
             ami_rx_error_named(r, errstr, ami_rx_err_illegal_var, "getvalue",
                                buf);
             return RETURN_WARN;
         }
 
-        def = &ami_rx_vardefs[var];
+        def = kind >= RXK_ICMP ? &ami_rx_indexdefs[kind - RXK_ICMP] : NULL;
 
-        if (def->rvd_Index != NULL)
+        if (def != NULL)
         {
             if (ReadItem((STRPTR)buf, (LONG)sizeof(buf), args) <= 0
-                || (index = FindArg((CONST_STRPTR)def->rvd_Index,
+                || (index = FindArg((CONST_STRPTR)def->rxi_Index,
                                     (CONST_STRPTR)buf)) < 0
-                || index >= (LONG)def->rvd_Count)
+                || index >= (LONG)def->rxi_Count)
             {
                 ami_rx_error_named(r, errstr, ami_rx_err_illegal_ind,
                                    "getvalue", buf);
@@ -1218,7 +1240,7 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
             return RETURN_ERROR;
         }
 
-        if (def->rvd_Index != NULL)
+        if (def != NULL)
         {
             /* The four info getters are NetX APIs.  The ARexx Process must
                be adopted for the call, but not for decimal formatting. */
@@ -1237,8 +1259,7 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
                 case RXV_TCP:  ami_rx_tcp(ip, counters);  break;
                 case RXV_UDP:  ami_rx_udp(ip, counters);  break;
 
-                /* Unreachable: only those four have both an index template and
-                   rvd_Read. */
+                /* Unreachable: only those four have an indexed readable kind. */
                 default:       ami_rx_zero(counters, RX_TCP_COUNT); break;
             }
 

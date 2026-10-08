@@ -150,6 +150,16 @@ DO i = 1 TO WORDS(blocked)
     SAY 'case readonly-' || i || ': rc=' RC
 END
 
+/* All four indexed protocols preserve missing/bad-index refusal and aliases. */
+indexed = 'ICMP IP TCP UDP IC T U'
+DO i = 1 TO WORDS(indexed)
+    name = WORD(indexed, i)
+    'QUERY' name
+    SAY 'case missingindex-' || i || ': rc=' RC
+    'QUERY' name 'NOSUCHINDEX'
+    SAY 'case invalidindex-' || i || ': rc=' RC
+END
+
 /* SERVICES blocks for its collection window, which is the one command here
    that can wedge the host rather than answer it. One second, because what is
    being asserted is that it comes back and the script continues, nothing on
@@ -343,6 +353,17 @@ for index in 1 2 3 4 5; do
             note "PASS: $case_name-$index preserves RETURN_WARN"
         else
             note "FAIL: $case_name-$index changed the refusal status"
+            fails=$((fails + 1))
+        fi
+    done
+done
+
+for index in 1 2 3 4 5 6 7; do
+    for case_name in missingindex invalidindex; do
+        if grep -qE "case $case_name-$index:.*rc= *5( |$)" "$SCRIPTOUT"; then
+            note "PASS: $case_name-$index preserves RETURN_WARN"
+        else
+            note "FAIL: $case_name-$index changed the index refusal status"
             fails=$((fails + 1))
         fi
     done
