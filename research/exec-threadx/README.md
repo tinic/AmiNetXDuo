@@ -512,11 +512,12 @@ These follow-ups are not bounded-spike failures or production approval:
 
 ## Still open
 
-Full current-thread/adoption semantics, general mutex scheduling/lifecycle, event
-waiters, thread lifecycle, priority/preemption semantics, common timer integration and replacement
-backend selection remain unimplemented. Minimum-profile coverage, broader native schedules,
-UDP wire/checksum coverage, NetX/socket conformance and net
-size/runtime comparison remain pending. The compile probe checks that referenced
+Full current-thread/adoption semantics, general mutex/event deletion and scheduling,
+thread lifecycle, priority/preemption semantics, automatic common timer integration
+and replacement backend selection remain unimplemented. Event waiters and explicit
+application timer callbacks are implemented in spike 6. Minimum-profile coverage,
+broader native schedules, full UDP wire/IPv6 checksum coverage, NetX/socket
+conformance and net size/runtime comparison remain pending. The compile probe checks that referenced
 fields exist; target/profile-specific layout goldens and full replacement link
 checks remain to be added. No complete backend or size-saving claim exists.
 
@@ -583,3 +584,40 @@ Packet pool/public receive ownership, the full IP helper and original-backend
 comparison remain the next integration slice. Thread creation, delayed suspend,
 foreign Exec IO, common timer lifetime/drain and replacement-library linking and
 size measurement remain open. Vendor and shipping build inputs are unchanged.
+
+## Spike 7: real packet-pool and UDP ownership
+
+This slice links unchanged pinned packet-pool initialize/create/delete,
+allocate/cleanup/release, data append/copy and UDP packet delivery bodies. The
+allocation wrapper rejects unsupported blocking contexts before publishing;
+quiescent pool deletion requires zero waiters and every packet returned. It does
+not implement pool deletion with outstanding packets or sleeping allocators.
+The actual pool initializer owns its globals; the bridge does not duplicate them.
+
+Host concurrent schedules cover empty-pool NO_WAIT, FIFO handoff, saved prepend
+offset and output slot, timeout/abort against release, cancelling the head with
+a live tail, copy, chain release across two pools and double-release rejection.
+Actual UDP delivery queues or resumes a receiver; actual receive strips the UDP
+header and the application returns the owned packet to its pool. Each scenario
+walks the recovered free list and checks owner, sentinel, count and no waiters.
+Four rejection probes cover timer/nested/preemption-disabled allocation and
+pool deletion with an outstanding packet. Host checksum is disabled deliberately:
+the existing LP64 model has 64-bit ULONG and is not the target wire ABI.
+
+The m68k smoke adds seven cases: exhausted-pool handoff, finite timeout, abort,
+real pooled UDP delivery with valid checksum, bad checksum then valid queued
+packet, bad checksum with empty continuation, and bad checksum release waking a
+pool allocator while UDP receive continues to a valid packet. An independent
+byte-wise IPv4/UDP checksum fixture supplies target data; the receive path runs
+actual NetX checksum/release code. Input is injected at UDP dispatch after
+synthetic IP decoding, with a manually initialized bound socket. There is no
+link driver, actual bind lifecycle or full wire/IP-stack verdict. IPv6 checksum,
+fragment chains, shared-port/multicast fan-out and notify callbacks remain open.
+
+UDP delivery references optional ICMP generators. This isolated build has two
+explicit terminal ICMP transmit sentinels because routing/transmit are absent.
+They never return a fabricated success and are excluded from all claimed paths;
+a future replacement-only link gate must reject these sentinels. No vendor or
+shipping build changes select this experiment. Common task/timer lifecycle,
+foreign Exec IO, socket retirement, original-backend comparison and net library
+size savings remain open. Results/review will be recorded against exact commits.

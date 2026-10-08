@@ -59,6 +59,9 @@ int anx_tx_expire(TX_THREAD *, uint32_t token); /* marked timer context required
  * Callback storage retained throughout dispatch; only event set/deactivation
  * supported inside callbacks. No automatic timer task or catch-up policy. */
 void anx_tx_timer_tick(void);
+/* Research integration guards: fail closed before a raw consumer publishes. */
+void anx_tx_require_context(UINT blocking);
+void anx_tx_unsupported(const char *reason); /* terminal, never returns */
 UINT anx_tx_host_disable(void);
 void anx_tx_host_restore(UINT);
 /* Deterministic host schedule seam, invoked after a real mutex release.

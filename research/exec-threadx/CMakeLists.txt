@@ -11,7 +11,7 @@ set(ANX_BRIDGE_INCLUDES "${ANX_ROOT}/port/threadx-amiga/inc"
 if(NOT CMAKE_CROSSCOMPILING)
     list(PREPEND ANX_BRIDGE_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/host")
 endif()
-add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c
+add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c netx_packet.c
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_timeout.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_sleep.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
@@ -36,7 +36,15 @@ add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_udp_socket_receive.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_udp_receive_cleanup.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_ip_checksum_compute.c"
-    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_release.c")
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_release.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_pool_initialize.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_pool_create.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_pool_delete.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_allocate.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_pool_cleanup.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_data_append.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_packet_copy.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_udp_packet_receive.c")
 target_link_libraries(research_tx_bridge PUBLIC research_wait)
 target_include_directories(research_tx_bridge PUBLIC ${ANX_BRIDGE_INCLUDES})
 target_compile_definitions(research_tx_bridge PUBLIC TX_DISABLE_ERROR_CHECKING)
@@ -46,6 +54,10 @@ set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_threa
 foreach(service event_flags_get event_flags_set timer_create timer_activate timer_change timer_delete)
     set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_${service}.c"
         PROPERTIES COMPILE_DEFINITIONS "_tx_${service}=anx_tx_original_${service}")
+endforeach()
+foreach(service packet_allocate packet_pool_delete)
+    set_source_files_properties("${ANX_ROOT}/third_party/netxduo/common/src/nx_${service}.c"
+        PROPERTIES COMPILE_DEFINITIONS "_nx_${service}=anx_nx_original_${service}")
 endforeach()
 if(CMAKE_CROSSCOMPILING)
     enable_language(ASM)
@@ -108,6 +120,15 @@ else()
     foreach(guard nested-get timer-get tick-context callback-delete)
         add_test(NAME research_event_timer_reject_${guard}
             COMMAND research_event_timer_model --reject-${guard})
+    endforeach()
+    add_executable(research_packet_pool_model test_packet_pool.c)
+    target_link_libraries(research_packet_pool_model PRIVATE research_tx_bridge Threads::Threads)
+    target_compile_options(research_packet_pool_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_packet_pool_model COMMAND research_packet_pool_model)
+    set_tests_properties(research_packet_pool_model PROPERTIES TIMEOUT 15)
+    foreach(guard timer-allocate nested-allocate preempt-allocate outstanding-delete)
+        add_test(NAME research_packet_pool_reject_${guard}
+            COMMAND research_packet_pool_model --reject-${guard})
     endforeach()
     add_executable(research_netx_resume_model test_netx_resume.c)
     target_link_libraries(research_netx_resume_model PRIVATE research_tx_bridge)

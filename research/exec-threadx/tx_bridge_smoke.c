@@ -8,6 +8,7 @@
 #include "nx_tcp.h"
 #include "nx_udp.h"
 #include "nx_ip.h"
+#include "nx_packet.h"
 #include "tx_thread.h"
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -18,7 +19,9 @@ enum { JOB_NONE, JOB_ARRIVAL, JOB_TIMEOUT, JOB_CLOSE, JOB_ABORT, JOB_EXPIRE_ARRI
        JOB_RX_ABORT_PACKET, JOB_RX_ABORT_PACKET_LOCKED,
        JOB_MUTEX_HANDOFF, JOB_MUTEX_TIMEOUT, JOB_MUTEX_ABORT,
        JOB_IP_DEFERRED_ABORT, JOB_IP_ARRIVAL_WINS,
-       JOB_EVENT_ARRIVAL, JOB_EVENT_TIMEOUT, JOB_EVENT_ABORT, JOB_EVENT_PERIODIC };
+       JOB_EVENT_ARRIVAL, JOB_EVENT_TIMEOUT, JOB_EVENT_ABORT, JOB_EVENT_PERIODIC,
+       JOB_POOL_HANDOFF, JOB_POOL_TIMEOUT, JOB_POOL_ABORT,
+       JOB_POOLED_UDP, JOB_UDP_BAD_GOOD, JOB_UDP_BAD_ONLY, JOB_UDP_BAD_ALLOCATOR };
 static TX_THREAD owner_thread,worker_thread,abort_thread;
 static AnxTxThread owner_bridge,worker_bridge,abort_bridge;
 static AnxExecWait owner_wait,worker_wait,abort_wait;
@@ -35,6 +38,12 @@ static ULONG ack;
 static volatile unsigned job,phase,stop,worker_ready,worker_done,abort_ready,abort_done;
 static UINT abort_result;
 static uint32_t mutex_operation;
+#define POOL_PAYLOAD 256
+#define POOL_STRIDE (((sizeof(NX_PACKET)+POOL_PAYLOAD+NX_PACKET_ALIGNMENT-1)/NX_PACKET_ALIGNMENT)*NX_PACKET_ALIGNMENT)
+static NX_PACKET_POOL pool;
+static union { ULONG align; UCHAR bytes[3*POOL_STRIDE]; } pool_arena;
+static NX_PACKET *pool_held[3],*bad_packet,*allocated;
+static uint32_t pool_operation;
 
 static void say(const char *s)
 {
@@ -45,6 +54,54 @@ static void say(const char *s)
 }
 
 #define CHECK(c) do { if (!(c)) { anx_tx_exec_platform()->panic(0,#c); } } while (0)
+
+/* Independent byte-wise IPv4/UDP checksum fixture, on the real big-endian
+ * 32-bit target. Packets enter at UDP dispatch, after synthetic IP decoding. */
+static USHORT fixture_checksum(const UCHAR *data,unsigned size)
+{
+    ULONG sum=0xC000+0x0201+0xC000+0x0202+NX_PROTOCOL_UDP+size;
+    for (unsigned i=0;i<size;i+=2) sum+=((ULONG)data[i]<<8)+(i+1<size ? data[i+1] : 0);
+    while (sum>>16) sum=(sum&0xffff)+(sum>>16);
+    return (USHORT)(~sum&0xffff);
+}
+static NX_PACKET *pooled_udp(unsigned invalid)
+{
+    NX_PACKET *p;
+    NX_UDP_HEADER h={((ULONG)5678<<16)|1234,((ULONG)(sizeof(NX_UDP_HEADER)+3)<<16)};
+    CHECK(_nx_packet_allocate(&pool,&p,sizeof(NX_IPV4_HEADER),NX_NO_WAIT)==NX_SUCCESS);
+    CHECK(_nx_packet_data_append(p,&h,sizeof(h),&pool,NX_NO_WAIT)==NX_SUCCESS);
+    CHECK(_nx_packet_data_append(p,(VOID *)"abc",3,&pool,NX_NO_WAIT)==NX_SUCCESS);
+    p->nx_packet_ip_header=p->nx_packet_data_start;
+    NX_IPV4_HEADER *ipv4=(NX_IPV4_HEADER *)p->nx_packet_ip_header;
+    ipv4->nx_ip_header_source_ip=0xC0000201; ipv4->nx_ip_header_destination_ip=0xC0000202;
+    p->nx_packet_ip_version=NX_IP_VERSION_V4;
+    p->nx_packet_address.nx_packet_interface_ptr=&ip.nx_ip_interface[0];
+    USHORT checksum=fixture_checksum(p->nx_packet_prepend_ptr,(unsigned)p->nx_packet_length);
+    ((NX_UDP_HEADER *)p->nx_packet_prepend_ptr)->nx_udp_header_word_1|=(checksum ? checksum : 0xffff)^(invalid ? 1 : 0);
+    return p;
+}
+static void bind_pooled_udp(void)
+{
+    udp.nx_udp_socket_id=NX_UDP_ID; udp.nx_udp_socket_ip_ptr=&ip;
+    udp.nx_udp_socket_bound_next=udp.nx_udp_socket_bound_previous=&udp;
+    udp.nx_udp_socket_port=1234; udp.nx_udp_socket_queue_maximum=3;
+    udp.nx_udp_socket_disable_checksum=NX_FALSE;
+    ip.nx_ip_udp_port_table[(1234+(1234>>8))&NX_UDP_PORT_TABLE_MASK]=&udp;
+}
+static void pool_recovered(void)
+{
+    CHECK(pool.nx_packet_pool_available==pool.nx_packet_pool_total &&
+          !pool.nx_packet_pool_suspended_count && !pool.nx_packet_pool_suspension_list);
+    NX_PACKET *p=pool.nx_packet_pool_available_list;
+    unsigned count=0;
+    for (;p;p=p->nx_packet_queue_next) {
+        CHECK(p->nx_packet_pool_owner==&pool &&
+              p->nx_packet_union_next.nx_packet_tcp_queue_next==(NX_PACKET *)NX_PACKET_FREE);
+        CHECK(++count<=3);
+    }
+    CHECK(count==3);
+}
+
 
 static void arrival(void)
 {
@@ -108,6 +165,23 @@ static void abort_entry(void)
         CHECK(token && anx_exec_wait_run(&abort_wait,token)==ANX_WAIT_TIMEOUT);
         Forbid(); next=job; step=phase; stopping=stop; Permit();
         if (stopping) break;
+        if (next==JOB_POOL_ABORT || next==JOB_UDP_BAD_ALLOCATOR) {
+            if ((next==JOB_POOL_ABORT && step!=1) || (next==JOB_UDP_BAD_ALLOCATOR && step)) continue;
+            AnxTxContext frame;
+            anx_tx_context_begin(&frame,&abort_thread,0);
+            if (next==JOB_POOL_ABORT) {
+                if (owner_thread.tx_thread_suspend_cleanup==_nx_packet_pool_cleanup) {
+                    CHECK(_tx_thread_wait_abort(&owner_thread)==TX_SUCCESS); phase=2;
+                }
+            } else {
+                phase=1;
+                CHECK(_nx_packet_allocate(&pool,&allocated,sizeof(ULONG),TX_WAIT_FOREVER)==NX_SUCCESS);
+                CHECK(allocated==bad_packet && !allocated->nx_packet_length &&
+                      allocated->nx_packet_prepend_ptr==allocated->nx_packet_data_start+sizeof(ULONG));
+                CHECK(_nx_packet_release(allocated)==NX_SUCCESS); phase=3; job=JOB_NONE;
+            }
+            anx_tx_context_end(&frame); continue;
+        }
         if (next>=JOB_MUTEX_HANDOFF && next<=JOB_IP_ARRIVAL_WINS) {
             if (step!=1 || (next!=JOB_MUTEX_ABORT && next<JOB_IP_DEFERRED_ABORT)) continue;
             AnxTxContext frame;
@@ -165,6 +239,30 @@ static void worker_entry(void)
         Forbid(); next=job; step=phase; stopping=stop; Permit();
         if (stopping) break;
         if (!next || next==JOB_UDP_TIMEOUT) continue;
+        if (next>=JOB_POOL_HANDOFF) {
+            if (next<=JOB_POOL_ABORT) {
+                AnxTxContext frame;
+                anx_tx_context_begin(&frame,&worker_thread,0);
+                if (!step) {
+                    for (unsigned i=0;i<3;i++) CHECK(_nx_packet_allocate(&pool,&pool_held[i],0,NX_NO_WAIT)==NX_SUCCESS);
+                    pool_operation=owner_bridge.operation; phase=1;
+                } else if ((next==JOB_POOL_HANDOFF && pool.nx_packet_pool_suspended_count==1) ||
+                           (next==JOB_POOL_TIMEOUT && owner_bridge.operation!=pool_operation && owner_thread.tx_thread_state==TX_READY) ||
+                           (next==JOB_POOL_ABORT && step==2)) {
+                    for (unsigned i=0;i<3;i++) CHECK(_nx_packet_release(pool_held[i])==NX_SUCCESS);
+                    phase=3; job=JOB_NONE;
+                }
+                anx_tx_context_end(&frame);
+            } else if (next==JOB_POOLED_UDP) {
+                AnxTxContext frame;
+                anx_tx_context_begin(&frame,&worker_thread,0);
+                if (owner_thread.tx_thread_suspend_cleanup==_nx_udp_receive_cleanup) {
+                    _nx_udp_packet_receive(&ip,pooled_udp(0)); job=JOB_NONE;
+                }
+                anx_tx_context_end(&frame);
+            }
+            continue;
+        }
         if (next>=JOB_MUTEX_HANDOFF && next<=JOB_MUTEX_ABORT) {
             AnxTxContext frame;
             anx_tx_context_begin(&frame,&worker_thread,0);
@@ -303,6 +401,9 @@ int main(void)
     CHECK(_tx_mutex_create(&ip.nx_ip_protection,(CHAR *)"IP",TX_NO_INHERIT)==TX_SUCCESS);
     CHECK(_tx_mutex_create(&mutex,(CHAR *)"mutex",TX_NO_INHERIT)==TX_SUCCESS);
     CHECK(_tx_event_flags_create(&ip.nx_ip_events,(CHAR *)"events")==TX_SUCCESS);
+    _nx_packet_pool_initialize();
+    CHECK(_nx_packet_pool_create(&pool,(CHAR *)"owned",POOL_PAYLOAD,pool_arena.bytes,sizeof(pool_arena.bytes))==NX_SUCCESS);
+    CHECK(pool.nx_packet_pool_total==3);
     anx_tx_context_end(&frame);
     socket.nx_tcp_socket_id=NX_TCP_ID;
     socket.nx_tcp_socket_ip_ptr=&ip;
@@ -315,9 +416,60 @@ int main(void)
     CHECK(abort_task!=0);
     while (!worker_ready || !abort_ready) Wait(ack);
     say("research_tx_bridge=WORKER_READY\n");
-    for (scenario=JOB_ARRIVAL;scenario<=JOB_EVENT_PERIODIC;scenario++) {
+    for (scenario=JOB_ARRIVAL;scenario<=JOB_UDP_BAD_ALLOCATOR;scenario++) {
         unsigned before=owner_bridge.resumes;
         anx_tx_context_begin(&frame,&owner_thread,0);
+        if (scenario>=JOB_POOL_HANDOFF) {
+            if (scenario<=JOB_POOL_ABORT) {
+                CHECK(anx_tx_set_abort_policy(&owner_bridge,anx_netx_receive_abort_policy));
+                phase=0; job=scenario; anx_tx_context_end(&frame); await_phase(1);
+                anx_tx_context_begin(&frame,&owner_thread,0);
+                NX_PACKET *p;
+                UINT status=_nx_packet_allocate(&pool,&p,sizeof(ULONG),scenario==JOB_POOL_TIMEOUT ? 2 : TX_WAIT_FOREVER);
+                CHECK(status==(scenario==JOB_POOL_TIMEOUT ? NX_NO_PACKET : scenario==JOB_POOL_ABORT ? TX_WAIT_ABORTED : NX_SUCCESS));
+                if (status==NX_SUCCESS) {
+                    CHECK(p==pool_held[0] && !p->nx_packet_length && p->nx_packet_prepend_ptr==p->nx_packet_data_start+sizeof(ULONG));
+                    CHECK(_nx_packet_release(p)==NX_SUCCESS);
+                } else CHECK(!p);
+                CHECK(anx_tx_set_abort_policy(&owner_bridge,0));
+                anx_tx_context_end(&frame); await_phase(3); anx_tx_context_begin(&frame,&owner_thread,0);
+            } else {
+                bind_pooled_udp();
+                NX_PACKET *p=NX_NULL;
+                ULONG errors=udp.nx_udp_socket_checksum_errors;
+                if (scenario==JOB_POOLED_UDP) {
+                    job=scenario;
+                    CHECK(_nx_udp_socket_receive(&udp,&p,TX_WAIT_FOREVER)==NX_SUCCESS);
+                    CHECK(!job && p->nx_packet_length==3 && p->nx_packet_prepend_ptr[0]=='a' && p->nx_packet_prepend_ptr[2]=='c');
+                    CHECK(udp.nx_udp_socket_checksum_errors==errors && _nx_packet_release(p)==NX_SUCCESS);
+                } else {
+                    bad_packet=pooled_udp(1); _nx_udp_packet_receive(&ip,bad_packet);
+                    if (scenario!=JOB_UDP_BAD_ONLY) _nx_udp_packet_receive(&ip,pooled_udp(0));
+                    if (scenario==JOB_UDP_BAD_ALLOCATOR) {
+                        CHECK(_nx_packet_allocate(&pool,&pool_held[0],0,NX_NO_WAIT)==NX_SUCCESS);
+                        phase=0; job=scenario; anx_tx_context_end(&frame); await_phase(1);
+                        anx_tx_context_begin(&frame,&owner_thread,0);
+                        CHECK(pool.nx_packet_pool_suspended_count==1 && abort_thread.tx_thread_suspend_cleanup==_nx_packet_pool_cleanup);
+                    }
+                    UINT status=_nx_udp_socket_receive(&udp,&p,NX_NO_WAIT);
+                    CHECK(status==(scenario==JOB_UDP_BAD_ONLY ? NX_NO_PACKET : NX_SUCCESS));
+                    CHECK(udp.nx_udp_socket_checksum_errors==errors+1);
+                    if (status==NX_SUCCESS) {
+                        CHECK(p && p!=bad_packet && p->nx_packet_length==3 && p->nx_packet_prepend_ptr[1]=='b');
+                        CHECK(_nx_packet_release(p)==NX_SUCCESS);
+                    } else CHECK(!p);
+                    if (scenario==JOB_UDP_BAD_ALLOCATOR) {
+                        CHECK(_nx_packet_release(pool_held[0])==NX_SUCCESS);
+                        anx_tx_context_end(&frame); await_phase(3); anx_tx_context_begin(&frame,&owner_thread,0);
+                        CHECK(allocated==bad_packet);
+                    }
+                }
+                CHECK(!udp.nx_udp_socket_receive_head && !udp.nx_udp_socket_receive_tail && !udp.nx_udp_socket_receive_count);
+                CHECK(!udp.nx_udp_socket_receive_suspension_list && !udp.nx_udp_socket_receive_suspended_count);
+            }
+            pool_recovered(); anx_tx_context_end(&frame);
+            passed++; say("research_tx_bridge=CASE_PASS\n"); continue;
+        }
         if (scenario>=JOB_EVENT_ARRIVAL) {
             ULONG events;
             ip.nx_ip_events.tx_event_flags_group_current=0;
@@ -442,10 +594,13 @@ int main(void)
     }
     Forbid(); stop=1; Permit();
     while (!worker_done || !abort_done) Wait(ack);
+    anx_tx_context_begin(&frame,&owner_thread,0);
+    pool_recovered(); CHECK(_nx_packet_pool_delete(&pool)==NX_SUCCESS && !_nx_packet_pool_created_count);
+    anx_tx_context_end(&frame);
     CHECK(anx_tx_detach(&owner_bridge));
     CHECK(anx_exec_wait_close(&owner_wait));
     FreeSignal(bit);
     CHECK(!_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable);
-    say(passed==21 ? "research_tx_bridge=PASS checks=21/21 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
-    return passed==21 ? 0 : 20;
+    say(passed==28 ? "research_tx_bridge=PASS checks=28/28 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
+    return passed==28 ? 0 : 20;
 }

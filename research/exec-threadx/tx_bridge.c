@@ -363,6 +363,19 @@ static void need_context(void)
          "service outside serialized call boundary");
 }
 
+void anx_tx_require_context(UINT blocking)
+{
+    need_context();
+    if (blocking)
+        need(contexts==1 && !_tx_thread_system_state && _tx_thread_identify() &&
+             !_tx_thread_preempt_disable && !resume_hook_depth,
+             "unsupported NetX blocking context");
+}
+void anx_tx_unsupported(const char *reason)
+{
+    need(0,reason);
+}
+
 UINT _tx_thread_wait_abort(TX_THREAD *thread)
 {
     AnxTxThread *t;
