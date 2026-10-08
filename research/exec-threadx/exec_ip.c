@@ -96,7 +96,7 @@ UINT anx_exec_ip_create(AnxExecIp *r,TX_THREAD *caller,NX_IP *ip,CHAR *name,NX_P
         if (!anx_exec_thread_cancel(&r->helper)) anx_tx_unsupported("IP reservation rollback failed");
         return NX_NOT_ENABLED;
     }
-    r->ip=ip;r->pool=pool;r->driver=driver;r->caller=caller;r->creator=FindTask(0);r->clock=0;
+    r->ip=ip;r->pool=pool;r->driver=driver;r->caller=caller;r->creator=FindTask(0);r->clock=0;r->io=0;
     r->state=ANX_IP_PREPARED;active=r;
     r->capability=1;
     status=_nx_ip_create(ip,name,IP_ADDRESS(192,0,2,1),0xffffff00UL,pool,driver,stack,size,priority);
@@ -115,7 +115,7 @@ UINT anx_exec_ip_create(AnxExecIp *r,TX_THREAD *caller,NX_IP *ip,CHAR *name,NX_P
 UINT anx_exec_ip_clock_start(AnxExecIp *r,AnxExecClock *clock,CHAR *name,VOID *stack,ULONG size)
 {
     if (!idle() || !r || r->creator!=FindTask(0)) return NX_CALLER_ERROR;
-    if (active!=r || r->state!=ANX_IP_LIVE || r->clock) return NX_NOT_ENABLED;
+    if (active!=r || r->state!=ANX_IP_LIVE || r->clock || r->io) return NX_NOT_ENABLED;
     if (!clock || !name || !stack) return NX_PTR_ERROR;
     const VOID *regions[]={r,r->ip,r->pool,r->caller,r->helper.stack,r->pool->nx_packet_pool_start};
     const ULONG sizes[]={sizeof(*r),sizeof(*r->ip),sizeof(*r->pool),sizeof(*r->caller),
@@ -136,9 +136,82 @@ UINT anx_exec_ip_event(AnxExecIp *r,ULONG flags)
     if (!r || active!=r || r->state!=ANX_IP_LIVE) return NX_NOT_ENABLED;
     return tx_event_flags_set(&r->ip->nx_ip_events,flags,TX_OR);
 }
+#ifdef ANX_REAL_PROTOCOL_LINK
+static int io_live(AnxExecIpIo *io,ULONG token)
+{
+    /* Retain io itself through late calls; reject generation/closed state
+     * before touching the domain or the caller's possibly retired packet. */
+    return io && io->open && io->generation==token && active==io->domain &&
+        active && active->state==ANX_IP_LIVE && active->io==io;
+}
+static int io_owner(AnxExecIpIo *io)
+{
+    return !_tx_thread_system_state && _tx_thread_current_ptr==io->owner && FindTask(0)==io->task;
+}
+UINT anx_exec_ip_io_open(AnxExecIpIo *io,AnxExecIp *r)
+{
+    anx_tx_require_context(0);
+    if (_tx_thread_system_state || !_tx_thread_current_ptr) return NX_CALLER_ERROR;
+    if (!io || !r || active!=r || r->state!=ANX_IP_LIVE || r->io || io->open ||
+        !r->clock || r->clock->state!=ANX_CLOCK_RUNNING ||
+        io->generation==(ULONG)-1) return NX_NOT_ENABLED;
+    TX_THREAD *owner=_tx_thread_current_ptr;
+    if (owner==r->caller || owner==&r->ip->nx_ip_thread) return NX_CALLER_ERROR;
+    const VOID *regions[]={r,r->ip,r->pool,r->caller,r->helper.stack,r->pool->nx_packet_pool_start,
+                          owner,owner->tx_thread_stack_start};
+    const ULONG sizes[]={sizeof(*r),sizeof(*r->ip),sizeof(*r->pool),sizeof(*r->caller),
+                        r->helper.stack_size,r->pool->nx_packet_pool_size,sizeof(*owner),owner->tx_thread_stack_size};
+    for (unsigned i=0;i<sizeof(regions)/sizeof(*regions);i++)
+        if (!disjoint(io,sizeof(*io),regions[i],sizes[i])) return NX_PTR_ERROR;
+    if (r->clock && (!disjoint(io,sizeof(*io),r->clock,sizeof(*r->clock)) ||
+        !disjoint(io,sizeof(*io),r->clock->stack,r->clock->stack_size))) return NX_PTR_ERROR;
+    io->domain=r;io->owner=owner;io->task=FindTask(0);io->pending=0;io->generation++;
+    io->open=1;r->io=io;anx_tx_runtime_hold();return NX_SUCCESS;
+}
+UINT anx_exec_ip_io_accept(AnxExecIpIo *io,ULONG token,NX_PACKET *packet,ULONG *operation)
+{
+    anx_tx_require_context(0);
+    if (!io_live(io,token)) return NX_NOT_ENABLED;
+    if (_tx_thread_system_state) return NX_CALLER_ERROR;
+    if (!packet || !operation) return NX_PTR_ERROR;
+    if (io->pending || io->submission==(ULONG)-1) return NX_NOT_ENABLED;
+    if (packet->nx_packet_pool_owner!=active->pool) return NX_PTR_ERROR;
+    io->submission++;io->pending=packet;*operation=io->submission;return NX_SUCCESS;
+}
+UINT anx_exec_ip_io_complete(AnxExecIpIo *io,ULONG token,ULONG operation,NX_PACKET *packet)
+{
+    anx_tx_require_context(0);
+    if (!io_live(io,token)) return NX_NOT_ENABLED;
+    if (!io_owner(io)) return NX_CALLER_ERROR;
+    if (operation!=io->submission) return NX_NOT_ENABLED;
+    if (!packet || io->pending!=packet) return NX_PTR_ERROR;
+    UINT status=_nx_packet_transmit_release(packet);
+    if (status==NX_SUCCESS) io->pending=0;
+    return status;
+}
+UINT anx_exec_ip_io_receive(AnxExecIpIo *io,ULONG token,NX_PACKET *packet)
+{
+    anx_tx_require_context(0);
+    if (!io_live(io,token)) return NX_NOT_ENABLED;
+    if (!io_owner(io)) return NX_CALLER_ERROR;
+    if (!packet || packet==io->pending || packet->nx_packet_pool_owner!=active->pool) return NX_PTR_ERROR;
+    packet->nx_packet_address.nx_packet_interface_ptr=&active->ip->nx_ip_interface[0];
+    _nx_ip_packet_deferred_receive(active->ip,packet);return NX_SUCCESS;
+}
+UINT anx_exec_ip_io_close(AnxExecIpIo *io,ULONG token)
+{
+    anx_tx_require_context(0);
+    if (!io_live(io,token)) return NX_NOT_ENABLED;
+    if (!io_owner(io)) return NX_CALLER_ERROR;
+    if (io->pending) return NX_NOT_ENABLED;
+    active->io=0;io->open=0;io->domain=0;io->owner=0;io->task=0;
+    anx_tx_runtime_drop();return NX_SUCCESS;
+}
+#endif
 static int delete_ready(NX_IP *ip)
 {
     unsigned timer_count=1;
+    if (active->io) return 0;
 #ifdef ANX_REAL_PROTOCOL_LINK
     /* The protocol fixture admits only unchanged pinned TCP/UDP handlers,
      * after all sockets/listeners/cache/queues are truly gone. No callbacks
@@ -210,6 +283,7 @@ UINT anx_exec_ip_delete(AnxExecIp *r)
     if (!idle() || !r || r->creator!=FindTask(0)) return NX_CALLER_ERROR;
     if (active!=r || r->state!=ANX_IP_LIVE) return NX_NOT_ENABLED;
     ip=r->ip;anx_tx_context_begin(&f,r->caller,0);
+    if (r->io) {anx_tx_context_end(&f);return NX_NOT_ENABLED;}
     if (ip->nx_ip_udp_created_sockets_count || ip->nx_ip_tcp_created_sockets_count) {
         anx_tx_context_end(&f);return NX_SOCKETS_BOUND;
     }
