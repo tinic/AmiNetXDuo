@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT */
 #include "tx_bridge.h"
 #include "tx_thread.h"
+#include "tx_timer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
