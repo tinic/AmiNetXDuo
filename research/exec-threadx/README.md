@@ -828,8 +828,19 @@ return into entry, premature-delete refusal and signal/domain recovery.
 Host CTest passes 33/33, including real event cleanup/timer unlink/private terminal
 dispatch and a fatal returning-callback guard, alongside retained models. The
 host callback escape uses setjmp/longjmp only in the fixture; no native mechanism
-uses it. m68k cross/startup gates pass. Pending native proof: stop 9/9,
-tasks_reaped=4, timed_io_reaped=2, restarts=3, plus retained public thread 14/14
-on the same code because normal worker startup shares the new terminal hook.
-Independent exact source review and actual native receipts are recorded separately
-after completion. Research-only; vendor/public headers/shipping selection unchanged.
+uses it. m68k cross/startup gates pass. Exact code
+`972c5f418254d0f64b80c907b10e349a2def1797` passes native stop 9/9,
+tasks_reaped=4, timed_io_reaped=2, restarts=3, plus retained public thread 14/14,
+tasks_reaped=10, restarts=6 on the same code because normal worker startup shares
+the new terminal hook. Claudecode ran each once on boardless A1200/KS3.1 r40.68,
+exit 0 after 14s, parent/child stacks 8192, harness `300b22e8`. Root read actual
+stdout/startup/runner and verified all binary/map/evidence hashes under the
+separate `/Users/turo/ai/evidence/exec-threadx-spike11-stop-native` and
+`exec-threadx-spike11-thread-native` directories. Stop binary `c008e803`, 54,128
+bytes; thread binary `bb61fc1f`, 61,644 bytes including fixtures/runtime.
+Independent deepseek-v4 read-only exact source review is complete (all 22 parts):
+no blocker in the bounded pre-stop scope. The reviewer ran no tests; root host
+and claudecode native execution are separate evidence. This remains exact-event
+stop, not general termination or a full IP helper verdict.
+Owned build and both native staging paths are removed. Research-only;
+vendor/public headers/shipping selection unchanged.

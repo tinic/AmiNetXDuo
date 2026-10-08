@@ -544,6 +544,62 @@ integration path. Refuse raw deletion bypass before mutation, retain IP/control/
 stack/private storage through ACK, and prove no late touch by repeated poisoned
 storage reuse. No real driver IO or hardware testing is included in this proposal.
 
+## Spike 11 event-worker pre-stop checkpoint
+
+Exact `972c5f418254d0f64b80c907b10e349a2def1797` implements a bounded
+creator stop command for an entered worker genuinely parked on the exact event
+object. Preflight requires actual cleanup/sequence/list membership and pending
+generation, no owned mutex, abort pin or pending wake, and one normal outer
+serialized context. It can remove the real event waiter and timer while a
+preemption-disable increment is held. READY, wrong-object, self/foreign creator,
+owned, pinned, pending-wake and nested requests refuse before mutation.
+
+The accepted stop marks TX_TERMINATED, invokes unchanged event cleanup, removes
+the runtime binding and clears its private public-control pointer before
+completing the private wait DELETED. After wait returns, the suspend loop checks
+only private terminal state under protection; it releases that protection and
+enters the no-return owner callback before restoring any ThreadX frame/identity
+or reading the public control. The callback closes IO as its real owner and
+publishes FINISHED/ACK/RemTask without a gap. Public ID and caller-owned storage
+remain retained until native ACK plus ordinary creator delete. There is no native
+longjmp and no deferred logical deletion or arbitrary forced task removal.
+
+Root host 33/33 and m68k cross/startup gates pass. The host terminal escape uses
+setjmp/longjmp only as a fixture, not Exec lifecycle/ABI proof. Native stop 9/9
+passes, four tasks reaped, two genuinely submitted timer IO requests reaped and
+three restarts, with poisoned control/stack reuse only after ACK/delete. The
+retained public-thread 14/14 fixture also passes on this code (10 tasks reaped,
+six restarts) because all workers now install the terminal hook. Each was one
+boardless A1200/KS3.1 r40.68 run by claudecode, exit 0 after 14s, parent/child
+stacks 8192, harness `300b22e8`. Root read actual stdout/startup/runner and verified
+all binary/map/evidence hashes in the separate spike11 stop/thread native evidence
+directories. Stop binary `c008e803`, 54,128 bytes; thread binary `bb61fc1f`, 61,644
+bytes, both including fixtures/runtime. Independent deepseek-v4 read-only source
+review is complete (all 22 parts): no blocker in this bounded pre-stop scope.
+The reviewer ran no tests; root host execution and claudecode native execution
+are separate evidence. General termination and actual full IP remain open.
+Owner-written timer sends/reaps counters establish lifecycle
+balance and block close with an unreaped request; they are not performance data.
+
+The partial non-LTO stop-fixture map attributes 13,140 backend .text bytes,
+2,528 retained ThreadX bytes (15,668 subtotal) plus 3,300 clock helper bytes;
+per-object evidence is `/Users/turo/ai/evidence/exec-threadx-spike11-code-cost.json`.
+These costs exclude missing integration, fixtures/runtime sections/resources and
+other helpers, and cannot establish finished library savings against shipping
+LTO spans. The owned local build and both native staging paths are removed after
+retaining exact artifacts/logs.
+
+This pre-stop mechanism keeps the already tested FINISHED-before-public-delete
+contract and can support a future IP wrapper that stops/drains its helper before
+entering raw deletion. That wrapper still needs a lifetime gate across its wait
+and all external packet/driver/API/timer producers quiesced. Object retirement
+remains missing: existing research mutex/event creation does not maintain their
+upstream created lists, so raw deletion cannot simply be linked. Preserve real
+object IDs, list/count and owned/suspended invariants when adding it. Raw mutex
+creation also installs `_tx_mutex_thread_release`; linking that body needs care
+to avoid accidentally pulling a full ThreadX scheduler/forced-release path.
+The unchanged real IP constructor/helper/delete and driver remain untested.
+
 ## Required performance comparison after functional integration
 
 The user explicitly requests a general performance comparison as well as size,
