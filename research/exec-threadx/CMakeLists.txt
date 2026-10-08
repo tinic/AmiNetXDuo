@@ -74,6 +74,19 @@ foreach(service packet_allocate packet_pool_delete)
 endforeach()
 if(CMAKE_CROSSCOMPILING)
     enable_language(ASM)
+    add_executable(research_exec_library_bench "${ANX_ROOT}/src/tools/tool_startup.S"
+        exec_library_bench.c "${ANX_ROOT}/tests/perf/cpucal.S")
+    target_include_directories(research_exec_library_bench PRIVATE
+        "${AMIGA_NDK_INCLUDE}" "${ANX_ROOT}/include")
+    target_compile_options(research_exec_library_bench PRIVATE -Wall -Wextra -Werror)
+    # This emulator benchmark includes 68020-only calibration kernels.
+    # Pin both languages; CMAKE_C_FLAGS do not reach ASM.
+    target_compile_options(research_exec_library_bench PRIVATE -m68020)
+    target_link_options(research_exec_library_bench PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_library_bench>.map")
+    add_custom_command(TARGET research_exec_library_bench POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_library_bench>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_library_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         exec_library_smoke.c)
     target_include_directories(research_exec_library_smoke PRIVATE
