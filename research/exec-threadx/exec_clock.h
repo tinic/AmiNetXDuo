@@ -20,6 +20,7 @@ typedef struct {
     ULONG ticks,batches,catchup_batches;
     TX_AMIGA_TICK_STATS stats;
     uint64_t start_us;
+    void (*observer)(void); /* retained creator-owned nonblocking task observer */
     void (*service)(void *,uint64_t);
     int (*service_can_detach)(void *);
     void *service_context;

@@ -22,7 +22,7 @@ static unsigned raw_mode;
 static volatile unsigned raw_ready,raw_done,worker_ran;
 static UINT raw_result;
 static unsigned callbacks,marked_refused,query_ok,samples,passed,printed;
-static const char *cases[22];
+static const char *cases[23];
 static struct SignalSemaphore lock,collision;
 static void say(const char *s) {const char *e=s;while (*e)e++;(void)Write(Output(),(APTR)s,(LONG)(e-s));(void)Flush(Output());}
 #define CHECK(x) do {if (!(x)) {say("research_exec_kernel=FAIL " #x "\n");return 20;}} while (0)
@@ -74,6 +74,11 @@ int main(void)
     Forbid();CHECK(tx_amiga_kernel_start()==TX_CALLER_ERROR && tx_amiga_kernel_stop()==TX_CALLER_ERROR);Permit();
     Disable();CHECK(tx_amiga_kernel_start()==TX_CALLER_ERROR);Enable();CASE("external-protection-refuses-kernel-blocking");
     parent_bit=AllocSignal(-1);CHECK(parent_bit>=0);parent_ack=1UL<<parent_bit;
+    BYTE held[32],bit;unsigned nheld=0;while ((bit=AllocSignal(-1))>=0) held[nheld++]=bit;
+    CHECK(tx_amiga_kernel_start()==TX_NO_MEMORY && tx_amiga_kernel_stop()==TX_SUCCESS);
+    anx_exec_kernel_snapshot(&snapshot);CHECK(!snapshot.manager_stack && !snapshot.clock_stack);
+    while (nheld) FreeSignal(held[--nheld]);
+    CHECK(parent->tc_SigAlloc==(signals|parent_ack));CASE("requester-ACK-exhaustion-rolls-back-before-Task-publication");
     CHECK(tx_amiga_kernel_start()==TX_SUCCESS && tx_amiga_kernel_running());
     anx_exec_kernel_snapshot(&snapshot);
     CHECK(snapshot.manager!=parent && snapshot.clock!=parent && snapshot.manager!=snapshot.clock &&
@@ -156,5 +161,5 @@ int main(void)
     ami_netstack_baton_reset();ami_netstack_health_set_sblock(0);FreeSignal(parent_bit);
     CHECK(parent->tc_SigAlloc==signals && !tx_amiga_zombie_tasks() && !tx_amiga_zombie_tasks_live());
     CASE("restart-after-recovery-recovers-all-native-signals-and-resources");flush();
-    CHECK(passed==22);say("research_exec_kernel=PASS 22/22 cycles=3 manager_removed=1\n");return 0;
+    CHECK(passed==23);say("research_exec_kernel=PASS 23/23 cycles=3 manager_removed=1\n");return 0;
 }

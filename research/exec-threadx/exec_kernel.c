@@ -1,13 +1,12 @@
 /* Stable IO creator plus serialized backend-owned commands. No old scheduler.
- * Commands poll via DOS Delay outside protection: no borrowed output pointer
- * or ACK Signal into requester storage. Research lifecycle, not worker policy.
+ * Commands wait on an owner signal outside protection: no caller-owned timer
+ * request/reply port or borrowed output pointer. Research lifecycle, not worker policy.
  * SPDX-License-Identifier: MIT */
 #include "exec_kernel.h"
 #include "tx_bridge_exec.h"
 #include <exec/execbase.h>
 #include <exec/memory.h>
 #include <proto/exec.h>
-#include <proto/dos.h>
 #include <string.h>
 enum {DOWN,STARTING,UP,STOPPING,RECOVERING};
 enum {START,STOP};
@@ -19,7 +18,8 @@ static volatile unsigned phase;
 static ULONG manager_stamp;
 static struct {
     struct Task *volatile owner;
-    ULONG stamp;
+    ULONG stamp,mask;
+    BYTE signal;
     unsigned operation;
     volatile unsigned done;
     UINT result;
@@ -30,12 +30,31 @@ static ULONG task_stamp(struct Task *t)
 }
 static int command_live(void)
 {
-    return command.owner && tx_amiga_exec_task_alive(command.owner) && task_stamp(command.owner)==command.stamp;
+    return command.owner && tx_amiga_exec_task_alive(command.owner) && task_stamp(command.owner)==command.stamp && (!command.mask || (command.owner->tc_SigAlloc&command.mask));
+}
+static void wake_command(void)
+{
+    /* Caller holds Forbid across membership, allocated-bit, stamp and Signal. */
+    if (command_live() && command.mask) Signal(command.owner,command.mask);
+}
+static void watch_manager(void)
+{
+    if (command.owner && !command_live() && (command.done || !tx_amiga_exec_task_alive(&manager))) {
+        memset(&command,0,sizeof(command));return;
+    }
+    if (command.owner && !command.done && !tx_amiga_exec_task_alive(&manager)) wake_command();
+}
+static void consume_command(void)
+{
+    BYTE bit=command.signal;ULONG mask=command.mask;
+    memset(&command,0,sizeof(command));
+    if (mask) {(void)SetSignal(0,mask);FreeSignal(bit);}
 }
 static void reply(UINT result)
 {
     Forbid();command.result=result;command.done=1;
     if (!command_live()) memset(&command,0,sizeof(command));
+    else wake_command();
     Permit();
 }
 static void release_stacks(void)
@@ -60,6 +79,7 @@ static VOID finish(VOID)
 {
     Forbid();phase=DOWN;command.result=TX_SUCCESS;command.done=1;
     if (!command_live()) memset(&command,0,sizeof(command));
+    else wake_command();
     RemTask(0);for (;;) {}
 }
 static VOID entry(VOID)
@@ -72,7 +92,7 @@ static VOID entry(VOID)
         if (!close_clock()) anx_tx_unsupported("kernel startup clock rollback failed");
         Forbid();phase=DOWN;reply(TX_NOT_DONE);RemTask(0);for (;;) {}
     }
-    Forbid();phase=UP;reply(TX_SUCCESS);Permit();
+    Forbid();clock_record.observer=watch_manager;phase=UP;reply(TX_SUCCESS);Permit();
     for (;;) {
         Forbid();int stop=command.owner && !command.done && command.operation==STOP;Permit();
         if (!stop) {(void)Wait(SIGF_SINGLE);continue;}
@@ -135,10 +155,13 @@ static UINT request(unsigned operation)
         manager.tc_MemEntry.lh_TailPred=(struct Node *)&manager.tc_MemEntry.lh_Head;
         manager_stamp=task_stamp(&manager);phase=STARTING;
     } else phase=STOPPING;
+    BYTE bit=AllocSignal(-1);
+    if (bit<0) {phase=operation==START ? DOWN : UP;if (operation==START) release_stacks();Permit();return TX_NO_MEMORY;}
+    command.mask=1UL<<bit;command.signal=bit;(void)SetSignal(0,command.mask);
     command.owner=FindTask(0);command.stamp=task_stamp(command.owner);command.operation=operation;command.done=0;
     if (operation==START) {
         if (!AddTask(&manager,(APTR)entry,0)) {
-            phase=DOWN;memset(&command,0,sizeof(command));release_stacks();Permit();return TX_NO_MEMORY;
+            phase=DOWN;consume_command();release_stacks();Permit();return TX_NO_MEMORY;
         }
     } else Signal(&manager,SIGF_SINGLE);
     Permit();
@@ -146,15 +169,15 @@ static UINT request(unsigned operation)
         Forbid();
         if (command.owner!=FindTask(0)) anx_tx_unsupported("kernel command ownership changed");
         if (command.done) {
-            UINT result=command.result;memset(&command,0,sizeof(command));
+            UINT result=command.result;consume_command();
             if (phase==DOWN) release_stacks();
             Permit();return result;
         }
         if (!tx_amiga_exec_task_alive(&manager)) {
             phase=RECOVERING;Permit();UINT result=recover_manager();
-            Forbid();memset(&command,0,sizeof(command));Permit();return result==TX_SUCCESS ? TX_NOT_DONE : result;
+            Forbid();consume_command();Permit();return result==TX_SUCCESS ? TX_NOT_DONE : result;
         }
-        Permit();Delay(1);
+        ULONG mask=command.mask;Permit();(void)Wait(mask);
     }
 }
 UINT tx_amiga_kernel_start(VOID) {return request(START);}

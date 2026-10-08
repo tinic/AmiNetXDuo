@@ -50,6 +50,7 @@ static VOID worker(VOID)
         r->stats.tx_amiga_tick_uptime_ms=(ULONG)(elapsed/1000000)*1000;
         r->stats.tx_amiga_tick_uptime_rem=(ULONG)((elapsed%1000000)*r->stats.tx_amiga_tick_eclock_hz/1000000);
         if (elapsed) r->stats.tx_amiga_tick_source_chz=(ULONG)((uint64_t)r->stats.tx_amiga_tick_wakeups*100000000/elapsed);
+        if (r->observer) r->observer();
         if (r->service) r->service(r->service_context,now);
         due=anx_clock_batch(now,r->next,PERIOD);
         if (due) {
