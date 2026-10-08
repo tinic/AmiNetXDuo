@@ -17,6 +17,9 @@ typedef struct {
     uint64_t next;
     uint32_t token;
     ULONG ticks,batches,catchup_batches;
+    void (*service)(void *,uint64_t);
+    int (*service_can_detach)(void *);
+    void *service_context;
 } AnxExecClock;
 /* Zero-init once. One clock per domain. Creator owns disjoint record, name,
  * aligned >=8192 stack until join. Start/join outside all boundaries; stop
@@ -30,4 +33,10 @@ int anx_exec_clock_start(AnxExecClock *, CHAR *, APTR, ULONG);
 int anx_exec_clock_can_stop(AnxExecClock *);
 int anx_exec_clock_stop(AnxExecClock *);
 int anx_exec_clock_join(AnxExecClock *);
+/* Optional retained deadline service, polled under the marked task boundary
+ * before application timers. Install/remove in creator outside all boundaries.
+ * Callback must not block; guard must refuse detach/stop while clients live.
+ * Not an extra task, timer request or ThreadX timer-wheel clock. */
+int anx_exec_clock_service(AnxExecClock *,void (*)(void *,uint64_t),int (*)(void *),void *);
+int anx_exec_clock_now(AnxExecClock *,uint64_t *);
 #endif

@@ -67,12 +67,30 @@ int anx_tx_runtime_idle(void);
  * Balance each hold/drop; reinitialization with any reservation is fatal. */
 void anx_tx_runtime_hold(void);
 void anx_tx_runtime_drop(void);
+/* Trusted admission preflight runs under protection BEFORE a new context.
+ * NULL by default. Installed service must not block or enter a context.
+ * Retain its storage until uninstalled; reset while installed is forbidden. */
+extern void (*anx_tx_admission_check)(void);
 int anx_tx_attach(AnxTxThread *, TX_THREAD *, AnxWait *, uintptr_t);
 /* Trusted creator publication: fully prepared owner/wait retained, public
  * control block initialized and SUSPENDED. Requires a serialized boundary;
  * preserves public fields. Owner must remain parked until publication ends. */
 int anx_tx_bind_created(AnxTxThread *, TX_THREAD *, AnxWait *, uintptr_t);
 int anx_tx_detach(AnxTxThread *);
+/* Trusted registry retirement, with external producers already quiesced.
+ * Checks membership and concrete wait/object references; permits foreign
+ * retirement of a dormant READY binding. Does not dereference owner Task or
+ * context frames, free signals, or reclaim an active/paused/blocked binding. */
+int anx_tx_forget_dormant(AnxTxThread *);
+int anx_tx_quiescent(AnxTxThread *);
+int anx_tx_context_is_outer(AnxTxContext *);
+/* Trusted registry has positively proved native owner removal. Only actual
+ * TX_SLEEP with no queue/object/mutex/abort/Exec-pause references is eligible.
+ * Remove its timer and binding, publish TERMINATED/ID0 and complete a pending
+ * private wait DELETED. Adapter must suppress notification to the dead owner.
+ * No owner stack/frame dereference; no fabricated returned ThreadX status.
+ * General removed-owner cleanup remains unsupported. */
+int anx_tx_forget_dead_sleep(AnxTxThread *);
 /* Owner-only normal completion; same quiescence checks as detach. Removes the
  * runtime binding but retains public ID and publishes TX_COMPLETED for delete.
  * Caller retains storage and closes IO before its native finished publication. */

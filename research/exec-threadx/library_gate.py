@@ -19,7 +19,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 BACKEND = ["wait.c", "clock_schedule.c", "tx_bridge.c", "netx_resume.c",
-           "tx_bridge_exec.c", "exec_wait.c", "exec_thread.c", "exec_clock.c"]
+           "tx_bridge_exec.c", "exec_wait.c", "exec_thread.c", "exec_clock.c", "exec_caller.c"]
 # Keep upstream service bodies rather than reproducing their wait/list logic.
 SERVICES = ["thread_timeout", "thread_sleep", "thread_wait_abort", "thread_info_get",
             "mutex_cleanup", "mutex_delete", "event_flags_get", "event_flags_set",

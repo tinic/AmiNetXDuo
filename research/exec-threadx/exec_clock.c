@@ -41,6 +41,7 @@ static VOID worker(VOID)
         anx_tx_context_begin(&f,TX_NULL,1);
         if (r->state!=ANX_CLOCK_RUNNING) {anx_tx_context_end(&f);break;}
         now=r->wait.ops.clock(r->wait.ops.context);
+        if (r->service) r->service(r->service_context,now);
         due=anx_clock_batch(now,r->next,PERIOD);
         if (due) {
             r->batches++;if (due>1) r->catchup_batches++;
@@ -67,7 +68,25 @@ int anx_exec_clock_can_stop(AnxExecClock *r)
 {
     anx_tx_require_context(0);
     return !_tx_thread_system_state && r && active==r && r->creator==FindTask(0) &&
-           r->state==ANX_CLOCK_RUNNING && r->wait.opened;
+           r->state==ANX_CLOCK_RUNNING && r->wait.opened &&
+           (!r->service || r->service_can_detach(r->service_context));
+}
+int anx_exec_clock_service(AnxExecClock *r,void (*service)(void *,uint64_t),int (*guard)(void *),void *arg)
+{
+    if (!r || !idle() || active!=r || r->creator!=FindTask(0)) return 0;
+    Forbid();
+    if (r->state!=ANX_CLOCK_RUNNING || (service ? (!guard || r->service) :
+        (!r->service || !r->service_can_detach(r->service_context)))) {Permit();return 0;}
+    r->service=service;r->service_can_detach=guard;r->service_context=arg;
+    Permit();return 1;
+}
+int anx_exec_clock_now(AnxExecClock *r,uint64_t *now)
+{
+    int valid;
+    if (!r || !now) return 0;
+    Forbid();valid=active==r && r->state==ANX_CLOCK_RUNNING && r->wait.opened;
+    if (valid) *now=r->wait.ops.clock(r->wait.ops.context);
+    Permit();return valid;
 }
 int anx_exec_clock_stop(AnxExecClock *r)
 {

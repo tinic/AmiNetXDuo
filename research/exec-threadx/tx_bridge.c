@@ -13,6 +13,7 @@ TX_THREAD *_tx_thread_current_ptr;
 volatile ULONG _tx_thread_system_state;
 volatile UINT _tx_thread_preempt_disable;
 void (*anx_tx_after_mutex_put)(TX_MUTEX *);
+void (*anx_tx_admission_check)(void);
 
 static const AnxTxPlatform *platform;
 static AnxTxThread *threads;
@@ -68,7 +69,7 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     if (platform)
         need(!threads && !timers && !contexts && !current_frame &&
              !_tx_thread_preempt_disable && !resume_hook_depth && !_tx_timer_created_count &&
-             !timer_dispatch && !runtime_holds && !_tx_mutex_created_count && !_tx_mutex_created_ptr &&
+             !timer_dispatch && !runtime_holds && !anx_tx_admission_check && !_tx_mutex_created_count && !_tx_mutex_created_ptr &&
              !_tx_event_flags_created_count && !_tx_event_flags_created_ptr &&
              !_tx_semaphore_created_count && !_tx_semaphore_created_ptr, "reinitialize active domain");
     platform = p;
@@ -80,6 +81,7 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     _tx_thread_system_state = 0;
     _tx_thread_preempt_disable = 0;
     anx_tx_after_mutex_put = 0;
+    anx_tx_admission_check=0;
     resume_hook_depth=0;
     _tx_timer_created_ptr=TX_NULL; _tx_timer_created_count=0;
     _tx_timer_system_clock=0; timer_dispatch=0;
@@ -184,6 +186,77 @@ static int detach(AnxTxThread *t, int completed)
 int anx_tx_detach(AnxTxThread *t) { return detach(t,0); }
 int anx_tx_complete(AnxTxThread *t) { return detach(t,1); }
 
+int anx_tx_quiescent(AnxTxThread *t)
+{
+    AnxTxThread *node;
+    int result=0;
+    platform->enter(platform->context);
+    for (node=threads;node && node!=t;node=node->next) {}
+    if (node)
+        result=t->thread->tx_thread_state==TX_READY && t->wait->result!=ANX_WAIT_PENDING &&
+            !t->thread->tx_thread_suspend_cleanup && !t->thread->tx_thread_suspending &&
+            !t->pending_resume && !t->pending_token && !t->abort_pins && !t->semaphore_call &&
+            !t->exec_wait_nesting && !t->paused_frame && !t->paused_depth &&
+            !t->terminal_pending && !t->thread->tx_thread_owned_mutex_count &&
+            !t->thread->tx_thread_owned_mutex_list && !t->thread->tx_thread_timer.tx_timer_internal_list_head;
+    platform->leave(platform->context);
+    return result;
+}
+
+int anx_tx_forget_dormant(AnxTxThread *t)
+{
+    AnxTxThread **link;
+    AnxTxContext *frame;
+    platform->enter(platform->context);
+    for (link=&threads;*link && *link!=t;link=&(*link)->next) {}
+    if (!*link || _tx_thread_current_ptr==t->thread || !anx_tx_quiescent(t)) {
+        platform->leave(platform->context);return 0;
+    }
+    for (frame=current_frame;frame;frame=frame->previous)
+        if (frame->saved_thread==t->thread || frame->owner==t->owner) {
+            platform->leave(platform->context);return 0;
+        }
+    *link=t->next;t->next=0;t->thread->tx_thread_id=0;
+    platform->leave(platform->context);return 1;
+}
+
+int anx_tx_context_is_outer(AnxTxContext *frame)
+{
+    int result;
+    platform->enter(platform->context);
+    result=contexts==1 && current_frame==frame && frame->owner==platform->caller(platform->context) &&
+        !_tx_thread_system_state && !_tx_thread_preempt_disable && !resume_hook_depth && !timer_dispatch;
+    platform->leave(platform->context);return result;
+}
+
+int anx_tx_forget_dead_sleep(AnxTxThread *t)
+{
+    AnxTxThread **link;
+    AnxTxContext *frame;
+    platform->enter(platform->context);
+    for (link=&threads;*link && *link!=t;link=&(*link)->next) {}
+    if (!*link || platform->caller(platform->context)==t->owner || _tx_thread_current_ptr==t->thread ||
+        _tx_thread_preempt_disable || t->thread->tx_thread_state!=TX_SLEEP ||
+        t->thread->tx_thread_suspend_cleanup || t->thread->tx_thread_suspending ||
+        t->thread->tx_thread_owned_mutex_count || t->thread->tx_thread_owned_mutex_list ||
+        t->cleanup_at_suspend || t->pending_resume || t->pending_token || t->abort_pins || t->semaphore_call ||
+        t->exec_wait_nesting || t->paused_frame || t->paused_depth || t->terminal_pending ||
+        t->expiry_dispatched || !t->token || t->token!=t->wait->generation ||
+        (t->wait->result!=ANX_WAIT_PENDING && t->wait->result!=ANX_WAIT_TIMEOUT)) {
+        platform->leave(platform->context);return 0;
+    }
+    for (frame=current_frame;frame;frame=frame->previous)
+        if (frame->saved_thread==t->thread || frame->owner==t->owner) {
+            platform->leave(platform->context);return 0;
+        }
+    _tx_timer_system_deactivate(&t->thread->tx_thread_timer);
+    t->thread->tx_thread_state=TX_TERMINATED;t->thread->tx_thread_id=0;
+    *link=t->next;t->next=0;
+    if (t->wait->result==ANX_WAIT_PENDING)
+        need(anx_wait_complete(t->wait,t->token,ANX_WAIT_DELETED),"removed sleep generation changed");
+    platform->leave(platform->context);return 1;
+}
+
 int anx_tx_set_terminal_owner(AnxTxThread *t, void (*callback)(void *), void *arg)
 {
     int valid;
@@ -270,6 +343,7 @@ void anx_tx_context_begin(AnxTxContext *frame, TX_THREAD *thread, ULONG state)
 {
     AnxTxThread *owner;
     platform->enter(platform->context);
+    if (anx_tx_admission_check) anx_tx_admission_check();
     frame->owner = platform->caller(platform->context);
     for (owner=threads;owner;owner=owner->next)
         if (owner->owner==frame->owner)
