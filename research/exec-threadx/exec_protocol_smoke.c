@@ -162,8 +162,17 @@ int main(void)
         CHECK(packet && !packet->nx_packet_next && packet->nx_packet_length>28);
         packet->nx_packet_append_ptr[-1]^=1;
         out=0;
-        CHECK(nx_udp_socket_receive(&udp[1],&out,4)==NX_NO_PACKET && !out &&
-              ip.nx_ip_udp_checksum_errors==bad_before+1 && !parent.tx_thread_suspend_cleanup);
+        /* The actual receive loop releases a bad-checksum packet, then
+         * suspends again. Its timed-error return does not clear *packet_ptr;
+         * that value has no ownership and must not be inspected on error.
+         * Only the no-wait empty-queue branch promises to clear it. */
+        CHECK(nx_udp_socket_receive(&udp[1],&out,4)==NX_NO_PACKET);
+        CHECK(ip.nx_ip_udp_checksum_errors==bad_before+1);
+        CHECK(!parent.tx_thread_suspend_cleanup && !udp[1].nx_udp_socket_receive_suspended_count &&
+              !udp[1].nx_udp_socket_receive_suspension_list);
+        CHECK(pool.nx_packet_pool_available==pool.nx_packet_pool_total);
+        CHECK(nx_udp_socket_receive(&udp[1],&out,NX_NO_WAIT)==NX_NO_PACKET && !out &&
+              !udp[1].nx_udp_socket_receive_count && ip.nx_ip_udp_checksum_errors==bad_before+1);
         for (unsigned i=0;i<2;i++) CHECK(nx_udp_socket_unbind(&udp[i])==NX_SUCCESS && nx_udp_socket_delete(&udp[i])==NX_SUCCESS);
         anx_tx_context_end(&f);
         CHECK(parked() && !ip.nx_ip_udp_created_sockets_count);
