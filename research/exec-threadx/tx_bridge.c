@@ -308,7 +308,8 @@ UINT _tx_mutex_get(TX_MUTEX *m, ULONG wait)
     TX_THREAD *current;
     need_context();
     current=_tx_thread_identify();
-    if (!current || m->tx_mutex_id!=TX_MUTEX_ID) return TX_MUTEX_ERROR;
+    need(current!=TX_NULL,"mutex get without registered thread context");
+    if (m->tx_mutex_id!=TX_MUTEX_ID) return TX_MUTEX_ERROR;
     if (m->tx_mutex_ownership_count && m->tx_mutex_owner!=current) {
         if (wait==TX_NO_WAIT) return TX_NOT_AVAILABLE;
         /* NetX often ignores blocking mutex-get status. Returning unsupported

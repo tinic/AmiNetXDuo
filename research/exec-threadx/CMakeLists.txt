@@ -78,6 +78,8 @@ else()
         COMMAND research_tx_bridge_model --reject-deferred-abort)
     add_test(NAME research_tx_bridge_reject_blocking_mutex
         COMMAND research_tx_bridge_model --reject-blocking-mutex)
+    add_test(NAME research_tx_bridge_reject_timer_mutex
+        COMMAND research_tx_bridge_model --reject-timer-mutex)
     add_test(NAME research_contract_extraction
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_contract.py"
             "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_C_COMPILER}")

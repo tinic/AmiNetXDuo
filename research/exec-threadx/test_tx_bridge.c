@@ -27,7 +27,7 @@ static unsigned depth, mode, stage;
 static uintptr_t owner;
 static uint64_t now;
 static uint32_t stale_token;
-static unsigned aborted, reject_deferred_abort, reject_blocking_mutex;
+static unsigned aborted, reject_deferred_abort, reject_blocking_mutex, reject_timer_mutex;
 
 static void enter(void *arg) { (void)arg; depth++; }
 static void leave(void *arg) { (void)arg; CHECK(depth); depth--; }
@@ -41,6 +41,12 @@ static void panic(void *arg,const char *text)
         CHECK(socket.nx_tcp_socket_receive_suspended_count==1);
         CHECK(aborted==TX_SUCCESS && callers[0].bridge.resumes==1);
         puts("research_tx_bridge_guard=PASS rejected READY return with deferred cleanup");
+        exit(0);
+    }
+    if (reject_timer_mutex && !strcmp(text,"mutex get without registered thread context")) {
+        CHECK(!_tx_thread_current_ptr && _tx_thread_system_state==1);
+        CHECK(!ip.nx_ip_protection.tx_mutex_owner && !ip.nx_ip_protection.tx_mutex_ownership_count);
+        puts("research_tx_bridge_guard=PASS rejected mutex get in marked timer context");
         exit(0);
     }
     if (reject_blocking_mutex && !strcmp(text,"blocking mutex contention not implemented")) {
@@ -199,6 +205,13 @@ int main(int argc, char **argv)
     unsigned scenario;
     if (argc!=1) {
         CHECK(argc==2);
+        if (!strcmp(argv[1],"--reject-timer-mutex")) {
+            AnxTxContext frame;
+            init(); reject_timer_mutex=1;
+            anx_tx_context_begin(&frame,TX_NULL,1);
+            (void)_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER);
+            CHECK(0);
+        }
         if (!strcmp(argv[1],"--reject-blocking-mutex")) {
             AnxTxContext frame;
             init();
