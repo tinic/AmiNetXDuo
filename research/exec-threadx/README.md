@@ -1273,3 +1273,106 @@ Remaining integration includes real device/peer/ISR boundaries, concurrent TCP
 and public socket APIs, IPv6/other enabled protocol lifetimes, and the full
 replacement-library link. These belong in the library integration checkpoint;
 the later equal-feature size/performance comparison remains required.
+
+## Full library integration: replacement link and semaphore services
+
+This stage is in progress. Source b0b35f3b6e9fb11894db583004694bf2e6711ddb
+adds a reproducible diagnostic gate in research/exec-threadx/library_gate.py.
+The baseline builds the actual default full-feature bsdsocket.library with the
+pinned compiler, unchanged vendor bodies, Werror, entry/romtag/version gates,
+Release and LTO off. The replacement attempt preserves its public-vector objects,
+feature/layout definitions (including IPv6, DHCP, DNS and mDNS) and NetX archives.
+It compiles the research backend and retained upstream ThreadX service bodies
+with those same full-profile flags, excludes both original ThreadX archives and
+removes netstack_baton.c.obj from a disposable copy of the netstack archive.
+No tracked shipping archive/source is rewritten. No protocol fixture, test PRNG,
+success stub or ignored unresolved symbol satisfies the full link.
+
+The actual replacement link remains **FAIL**, with 31 unresolved symbols. These
+are contracts to implement and execute, not 31 independent fixes:
+
+| Remaining boundary | Unresolved symbols | Required behavior |
+| --- | ---: | --- |
+| Caller registry | 9 | Cached/uncached pointer+generation handles, owner identity, signals, eviction, release and dead-owner cleanup |
+| Exec wait hooks and health | 10 | Drop/reenter serialized context around actual device waits, nesting, retained owner lifetime and accurate diagnostics |
+| Kernel and worker lifecycle | 6 | Runtime/clock startup and shutdown, dynamic worker preparation, retained stacks and native removal |
+| Exec task checks | 3 | Safe task-context/liveness checks and signaling |
+| Upstream addon scheduling and timer query | 3 | Explicit suspend/resume and relinquish behavior, timer metadata for DHCP/AutoIP/mDNS |
+
+Resolving these names is only a compile/link prerequisite. Existing services also
+have bounded behavior: initial reserved-worker resume differs from arbitrary
+addon resume; stopped-event termination differs from general worker stop; the
+experimental IP constructor admits a fixed IPv4 profile. The full library still
+needs actual creation/publication, all enabled protocol lifetimes, concurrent
+TCP/public socket calls, device IO drain and close/cancellation verification.
+There is also a concrete stack-policy mismatch: shipping IP/AutoIP/DHCPv6 stacks
+are 4096 bytes and the DHCPv6 work stack is1536, while the research native-worker
+reservation requires at least8192. Integration must establish safe native stack
+budgets/ownership and account for them in resident resources; resolving the link
+alone would not make these constructors succeed. No guard is lowered here.
+A link without execution cannot establish these contracts or a size benefit.
+
+The first implemented service group is semaphore create/get/put/delete and
+cleanup, needed by RAW socket receive and SANA-II reader ready/exited handshakes.
+The real pinned ThreadX bodies retain count, FIFO suspension, direct token handoff,
+timeout and abort cleanup. Research wrappers require a serialized context and
+real created-ring membership; duplicate or forged controls refuse. Busy or
+pending-resume/abort-referenced deletion refuses without mutation. Runtime reset
+and the existing bounded IP preflights now include live semaphores. Count limits
+fail closed: put at ULONG_MAX returns TX_CEILING_EXCEEDED rather than wrapping.
+Notify callbacks and delete-with-waiters remain unsupported; full-library close
+paths must drain users before reclamation. These restrictions are not full
+ThreadX semaphore/API compatibility claims.
+
+Host models pass 40/40, including the added live-semaphore reset rejection.
+The native IO fixture adds seven substantive cases to its prior 18: real FIFO
+waiters, direct handoff without count inflation, busy/pending-resume deletion
+refusal, finite timeout, public abort cleanup, duplicate/forged controls, count
+limits, actual deletion and poisoned storage reuse. Two full cycles now retire
+18 application workers.
+
+The first b0b35f3b IO run failed after 14 completed cases at the second token
+handoff/deletion assertion; the harness timed out after90s with no exit marker.
+Original stdout/startup/runner and emulator logs are retained. Source showed
+that direct _tx_thread_system_resume completes the private AnxWait immediately
+when raw cleanup is already clear. The old object reference predicate therefore
+missed a signaled caller whose real semaphore get had not returned. The fixture
+also returned from a failed CHECK with its call boundary/native owners live;
+the specific reset/timeout PC cause is unproven and failure-path cleanup remains
+a deferred guest-harness obligation.
+
+Backend-only f8dd41d0b9a5ec0dd1e5bea887e76daf691c3ae9 adds a private semaphore_call
+reference before the actual potentially blocking upstream get, cleared only
+when that function really returns. Deletion and detach consult it, retaining
+the object through producer signaling and native owner dispatch. Public vendor
+layouts/bodies and all 25 native assertions remain unchanged. Host40/40 and
+m68k Werror/startup-first gates pass after the fix.
+
+At exact f8dd41d0b the IO guest passed25/25, application workers18/helpers2/clocks2/
+restarts1, exit0 after15s. Refreshed protocol19/19 exited0 after17s and clock16/16
+exited0 after18s. Each was one boardless A1200KS3.1r40.68 run with harness300b22e8,
+-t90 and all stacks8192; root verified actual stdout/startup/runner/all receipt
+hashes. No illegal/guru/alert/reset line was reported, native staging is0 and the
+owned build was removed. Independent source-only implementation review is complete:
+root read initial5/5 and correctness6/6, focused fix5/5, receipt4/4 and rename
+erratum4/4. Deepseek confirms the real original lifetime gap, minimal final fix
+and honest replacement-only link diagnostic; no remaining blocker in this bounded
+service scope. The public wait-abort macro reaches the guarded backend wrapper;
+the contrary initial bypass note was independently withdrawn against pinned e24.
+Source review and execution remain separate. A matching event-flags returning-
+call lifetime audit is OPEN for full-library close integration. This verified
+service/link-gate checkpoint does not complete full-library replacement.
+The original b0b35f3 failure and SHA evidence remain distinct. Native service
+coverage uses the earlier IPv4 guest profile; the full-profile IPv6 replacement
+link is separate and still fails with31 unresolved symbols at the fixed source.
+
+AgentNet's complete 12/12 caller advice and 5/5 erratum are retained separately.
+The corrected advice confirms that attaching an existing Exec task needs retained
+control/bridge/wait storage, with no new task stack. AmiNetCaller can remain an
+on-stack pointer+generation handle into a backend-owned registry. The >=8192-byte
+stack rule applies to newly launched research workers. Cached caller lifecycle,
+dead-owner reclamation and nested blocking still require implementation.
+
+Evidence is indexed in /Users/turo/ai/evidence/exec-threadx-library-integration.json
+and exec-threadx-library-gate-final.json. Equal-feature finished-library size,
+resident resources, synchronization cost and throughput remain unmeasured.
