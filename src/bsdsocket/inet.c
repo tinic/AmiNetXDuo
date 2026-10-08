@@ -40,6 +40,7 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
                            ULONG parts_out[4])
 {
     ULONG parts[4];
+    ULONG packed;
     LONG  n = 0;
     LONG  i;
 
@@ -114,37 +115,20 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
     if (*cp != '\0')
         return FALSE;
 
-    /* The trailing part absorbs the remaining bytes. The leading parts are
-       one byte each. */
-    switch (n)
+    /* The trailing part absorbs the bytes left by the leading byte-sized
+       parts: 32, 24, 16 or 8 bits for one through four components. n is in
+       1..4 here, so both shifts below are bounded by 24. */
+    if (parts[n - 1] > (0xFFFFFFFFUL >> ((n - 1) * 8)))
+        return FALSE;
+
+    packed = parts[n - 1];
+    for (i = 0; i < n - 1; i++)
     {
-        case 1:
-            *result = parts[0];
-            break;
-
-        case 2:
-            if (parts[0] > 0xff || parts[1] > 0xffffff)
-                return FALSE;
-            *result = (parts[0] << 24) | parts[1];
-            break;
-
-        case 3:
-            if (parts[0] > 0xff || parts[1] > 0xff || parts[2] > 0xffff)
-                return FALSE;
-            *result = (parts[0] << 24) | (parts[1] << 16) | parts[2];
-            break;
-
-        case 4:
-            if (parts[0] > 0xff || parts[1] > 0xff ||
-                parts[2] > 0xff || parts[3] > 0xff)
-                return FALSE;
-            *result = (parts[0] << 24) | (parts[1] << 16) |
-                      (parts[2] << 8)  |  parts[3];
-            break;
-
-        default:
+        if (parts[i] > 0xFFUL)
             return FALSE;
+        packed |= parts[i] << (24 - i * 8);
     }
+    *result = packed;
 
     if (nparts != NULL)
         *nparts = n;

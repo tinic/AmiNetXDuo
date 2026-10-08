@@ -160,6 +160,44 @@ static void test_radix(void)
     CHECK(addr_of("0x.0.0.1") == INADDR_NONE, "0x with no digits");
 }
 
+static void test_component_boundaries(void)
+{
+    static const struct { const char *text; BOOL valid; ULONG value; } cases[] = {
+        { "4294967295", TRUE, 0xFFFFFFFFUL },
+        { "255.16777215", TRUE, 0xFFFFFFFFUL },
+        { "255.255.65535", TRUE, 0xFFFFFFFFUL },
+        { "255.255.255.255", TRUE, 0xFFFFFFFFUL },
+        { "1.16777215", TRUE, 0x01FFFFFFUL },
+        { "1.2.65535", TRUE, 0x0102FFFFUL },
+        { "1.2.3.255", TRUE, 0x010203FFUL },
+        { "0.0", TRUE, 0 }, { "0.0.0", TRUE, 0 },
+        { "0377.0xffffff", TRUE, 0xFFFFFFFFUL },
+        { "0xff.0377.0xffff", TRUE, 0xFFFFFFFFUL },
+        { "256.1", FALSE, 0 }, { "256.1.1", FALSE, 0 },
+        { "1.256.1", FALSE, 0 }, { "256.1.1.1", FALSE, 0 },
+        { "1.256.1.1", FALSE, 0 }, { "1.1.256.1", FALSE, 0 },
+        { "1.1.1.256", FALSE, 0 }, { "1.16777216", FALSE, 0 },
+        { "1.1.65536", FALSE, 0 }, { "4294967296", FALSE, 0 },
+        { "1.2.3.4.5", FALSE, 0 }, { "1.2.3.", FALSE, 0 }
+    };
+    unsigned i;
+
+    printf("classic component widths and refused output preservation\n");
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        struct in_addr out;
+        LONG rc;
+
+        out.s_addr = 0x12345678UL;
+        rc = bsd_inet_aton((STRPTR)cases[i].text, &out, BASE);
+        CHECK((rc != 0) == cases[i].valid, cases[i].text);
+        CHECK(out.s_addr == (cases[i].valid ? cases[i].value : 0x12345678UL),
+              "aton returns the specified classic value or keeps output untouched");
+        CHECK(addr_of(cases[i].text) == (cases[i].valid ? cases[i].value : INADDR_NONE),
+              "inet_addr agrees with classic component widths");
+    }
+}
+
 /* ------------------------------------------------------------ inet_aton -- */
 
 static void test_aton_reports_broadcast(void)
@@ -302,6 +340,7 @@ int main(void)
 
     test_dotted_quad();
     test_short_forms();
+    test_component_boundaries();
     test_radix();
     test_aton_reports_broadcast();
     test_network_parts();
