@@ -330,6 +330,7 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
 
 ULONG ami_format_ip6(char *buf, const ULONG addr[AMI_CFG_IP6_WORDS])
 {
+    char  tmp[AMI_CFG_IP6_STRLEN];
     UWORD group[8];
     ULONG pos       = 0;
     LONG  best_at   = -1;
@@ -387,12 +388,12 @@ ULONG ami_format_ip6(char *buf, const ULONG addr[AMI_CFG_IP6_WORDS])
             (LONG)i < best_at + (LONG)best_len)
         {
             if ((LONG)i == best_at)
-                buf[pos++] = ':';
+                tmp[pos++] = ':';
             continue;
         }
 
         if (i != 0)
-            buf[pos++] = ':';
+            tmp[pos++] = ':';
 
         /*
          * v4-mapped (::ffff:a.b.c.d) and the deprecated v4-compatible form are
@@ -402,9 +403,13 @@ ULONG ami_format_ip6(char *buf, const ULONG addr[AMI_CFG_IP6_WORDS])
         if (i == 6 && best_at == 0 &&
             (best_len == 6 || (best_len == 5 && group[5] == 0xFFFF)))
         {
+            char  quad[16];
             ULONG addr4 = ((ULONG)group[6] << 16) | (ULONG)group[7];
+            ULONG n;
 
-            pos += ami_format_ip4(buf + pos, addr4);
+            ami_config_format_ip(addr4, quad, sizeof(quad));
+            for (n = 0; quad[n] != '\0'; n++)
+                tmp[pos++] = quad[n];
             break;
         }
 
@@ -424,14 +429,15 @@ ULONG ami_format_ip6(char *buf, const ULONG addr[AMI_CFG_IP6_WORDS])
             while (v != 0);
 
             while (n > 0)
-                buf[pos++] = digits[--n];
+                tmp[pos++] = digits[--n];
         }
     }
 
     /* A run that reached the end of the address still needs its second colon. */
     if (best_at >= 0 && (ULONG)best_at + best_len == 8)
-        buf[pos++] = ':';
+        tmp[pos++] = ':';
 
-    buf[pos] = '\0';
+    tmp[pos] = '\0';
+    ami_cfg_copy_string(buf, AMI_CFG_IP6_STRLEN, tmp);
     return pos;
 }
