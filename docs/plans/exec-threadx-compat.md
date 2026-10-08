@@ -1330,3 +1330,114 @@ policy (shipping 4096/1536 versus new-worker research minimum 8192), enabled IPv
 actual public sockets/device/ISR integration and full create/close remain OPEN.
 Equal-feature full-library image/resident resources and performance comparison,
 including synchronization removed with the original baton, remain unmeasured.
+
+## Full library integration: kernel ownership and production Exec wait hooks
+
+Source **65f963b902fc8b3d434005906810fbf51720e9bd** adds a retained management
+Exec Task that owns the central clock and caller registry. Start/stop use a
+single backend-owned command record; different requester Tasks can operate the
+same kernel. Shutdown refuses live cached/paused callers, registered objects and
+prepared or completed-but-not-deleted workers. Actual manager removal and stack
+retirement precede release of owned storage.
+
+This implementation replaces the production baton entry points with the
+verified context pause/resume mechanism. Nested Exec waits retain mutex ownership
+and the bridge frame while other Tasks make progress; the original ready-list
+baton object is excluded from the replacement link. The existing health ABI
+publishes actual clock, bracket, memory and current-holder counters and preserves
+the master socket lock. A foreign semaphore at the health name is preserved.
+Stack probes cover actual owned management/clock stacks and prepared worker
+records, including conservative endpoints. The timer query uses the actual
+replacement flat timer list with registered-pointer validation; host assertions
+cover active/inactive, countdown/reload, invalid and deleted controls.
+
+The original native kernel at 65f963b90 **hung after 9/22 cases** on playhouse3,
+with no exit and a 90-second timeout. Its DOS Delay completion polling was not
+safe for the raw Exec Task requester. The failure and original binary/map/logs
+are retained separately; the other five fixtures were not run at that SHA.
+Corrected source **b6dc71ad63a4aee80eec1c0320df542a25c94c3e** uses one requester
+ACK signal and Exec Wait. Reply and manager-death notifications validate Task
+membership, retained identity stamp and allocated signal bit under the same
+Forbid. A retained clock observer wakes pending commands if their manager is
+removed. Existing assertions remain, with an added real signal-exhaustion
+rollback case before Task publication.
+
+Removed-manager recovery is bounded to an empty UP domain. It closes admission,
+transfers the clock creator and a fresh ACK signal to the recovery caller,
+transfers the empty registry creator, detaches its service/admission hold, and
+stops/joins the clock. Retained ownership holds unwind 2 -> 2 -> 2 -> 1 -> 0.
+Live clients refuse cleanup. Half-start manager death, recovery-caller death,
+worker preparation during recovery and general busy removed owners remain OPEN;
+post-claim invariant failures stop rather than fabricate cleanup.
+
+Host tests pass **47/47** and six m68k artifacts compile with Werror and
+startup-first validation. The independent AgentNet source review is complete:
+all 3 logical parts / 13 physical chunks are retained in
+/Users/turo/ai/evidence/exec-threadx-kernel-source-review.txt. It confirms the
+original polling blocker and the correction, with no post-fix blocker in the
+bounded quiescent lifecycle scope. Source approval does not establish execution.
+
+AgentNet's lab run was queued behind independent CI without a boot or verdict.
+Root cancelled only that queued research execution and ran all six exact fixed
+artifacts once serially on the existing local Mac Amiberry **8.3.0 (2026.08.05)**,
+using the same supplied A1200 Kickstart 3.1 r40.68 ROM (SHA256
+6d43840d4099a74170ea0f0425b6257c3891ebcaa39c4d1840075a9ab22b5707), boardless,
+8 MB Fast RAM, guest stack 8192, timeout 90 seconds. Each used a unique disposable
+directory drive and locked serial port, with emulator configuration under the
+owned build. No hardware disks, standing guests, lab CI or audit were changed.
+
+| Native fixture at b6dc71ad6 | Actual verdict | Exit / host elapsed |
+| --- | --- | --- |
+| Kernel and production hooks | 23/23 | 0 / 15s |
+| Cached callers | 25/25 | 0 / 16s |
+| Context pause | 14/14 | 0 / 15s |
+| Concurrent driver IO | 25/25 | 0 / 14s |
+| IPv4 protocols | 19/19 | 0 / 16s |
+| Clock lifecycle | 16/16 | 0 / 18s |
+
+All **122/122 native cases** pass. Root verified exact binary/map hashes, every
+receipt manifest, actual stdout, startup, guest exit, run-token identity, serial
+and emulator logs: one boot per run, exit 0, no illegal/guru/alert or unexpected
+ROM resets. Initial startup resets are excluded from the fault count. The local
+emulator logs host Denise queue warnings, without a corresponding guest fault.
+The local emulator/version differs from the prior lab run and is recorded,
+not hidden. Host elapsed times are harness wall clock, not performance evidence.
+
+The fixed kernel's original 22 assertions remain; its added 23rd case checks
+real requester ACK-signal exhaustion and allocation rollback. Coverage includes
+nested production hooks with retained mutex ownership and independent peer
+progress, actual timer query and marked callback guards, prepared/finished worker
+shutdown refusal, different-requester stop/start, generation restart, removed
+manager refusal while a cache is live, then actual empty-domain ownership
+transfer, clock join and resource recovery. Failed-guest fixture teardown remains
+deferred; the original failure is not relabeled as a pass.
+
+Evidence is indexed in
+/Users/turo/ai/evidence/exec-threadx-kernel-lifecycle-final.json. New
+`exec-threadx-kernel-final-*-local-native` receipts preserve the Mac runs;
+original 65 failure receipts remain separate. Useful binary/map/build/link/review
+and run evidence is retained. All task-created native staging, local emulator
+home/locks, copied ROM and owned build outputs were removed after verification.
+The existing emulator installation, user files, unmerged research branch and
+vendor pins are preserved.
+
+The actual full-feature replacement link at b6dc71ad6 is **FAIL with two
+unresolved symbols**, down from 19: only `_tx_thread_relinquish` and
+`_tx_thread_suspend` remain. This gate compiles the actual full-profile shipping
+objects and research backend, including IPv6, with Werror. It removes the old
+ThreadX scheduler/port archives and original baton object and uses no fixtures,
+success stubs or unresolved-symbol bypass. The original backend diagnostic build
+passes; its retained 395540-byte non-LTO image is unexecuted and is **not** an
+A/B size measurement. Replacement full-library runtime remains NOT_RUN.
+
+The new clock statistics describe the real retained clock but are preliminary:
+service time currently counts nonempty application tick batches, and unsupported
+stall/budget fields remain zero. They do not yet provide a complete equal-feature
+performance comparison. Zero zombie counters follow the bounded public-delete
+contract (finished/removed workers before control release), not proof of safe
+arbitrary external removal. Suspend/relinquish, default shipping worker creation
+and its stack policy, general dead-owner/close/cancellation behavior, enabled IPv6,
+actual public sockets/device/ISR integration and full create/close remain OPEN.
+Equal-feature image size, resident resources and performance, including the
+removed original baton's synchronization, remain unmeasured. This checkpoint is
+research-only and the branch remains unmerged.
