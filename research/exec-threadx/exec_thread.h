@@ -5,7 +5,7 @@
 #define ANX_THREAD_EXEC_PRIORITY(p) ((BYTE)(TX_AMIGA_TASK_PRIORITY-((p)/16)))
 enum { ANX_THREAD_EMPTY, ANX_THREAD_PREPARING, ANX_THREAD_PREPARED,
        ANX_THREAD_BOUND, ANX_THREAD_CANCEL, ANX_THREAD_FINISHED, ANX_THREAD_REAPED,
-       ANX_THREAD_STOPPING };
+       ANX_THREAD_STOPPING, ANX_THREAD_RETIRE_PENDING };
 typedef struct AnxExecThread {
     struct Task task;
     AnxTxThread bridge;
@@ -15,6 +15,10 @@ typedef struct AnxExecThread {
     struct AnxExecThread *next;
     APTR stack;
     ULONG stack_size,ack;
+    APTR native_stack,native_allocation;
+    ULONG native_size,native_allocation_size,client_stamp;
+    struct Task *client;
+    unsigned managed;
     BYTE signal;
     volatile unsigned state,prepared,entered;
 } AnxExecThread;
@@ -59,4 +63,26 @@ UINT anx_exec_thread_stack_in_use(const VOID *,ULONG);
 /* Native yield preflight; minimum Exec priority refuses before frame release.
  * Public void relinquish treats a refused preflight as a fatal unsupported call. */
 UINT anx_exec_thread_relinquish(VOID);
+/* Research manager-owned reservations. Normal context, exact caller/target/
+ * name/public stack. Reserve BEFORE an upstream constructor raises threshold;
+ * create consumes it without waiting. Unreserve cancels only an unused record.
+ * Inputs remain caller-owned through public deletion/cancellation. */
+UINT anx_exec_thread_reserve(TX_THREAD *,CHAR *,APTR,ULONG);
+UINT anx_exec_thread_unreserve(TX_THREAD *);
+typedef struct {
+    struct Task *task,*manager,*client;
+    APTR public_stack,native_stack;
+    ULONG public_size,native_size,owned_bytes;
+    unsigned state,entered,io_opened;
+} AnxManagedSnapshot;
+int anx_exec_thread_managed_snapshot(TX_THREAD *,AnxManagedSnapshot *);
+void anx_exec_thread_managed_resources(ULONG *records,ULONG *bytes);
+/* Private stable-manager hooks; NULL without a running kernel. */
+extern UINT (*anx_exec_managed_prepare)(TX_THREAD *,CHAR *,APTR,ULONG);
+extern UINT (*anx_exec_managed_retire)(TX_THREAD *,unsigned cancel);
+extern void (*anx_exec_managed_notify)(void);
+UINT anx_exec_thread_manage_prepare(struct Task *,TX_THREAD *,CHAR *,APTR,ULONG);
+UINT anx_exec_thread_manage_retire(struct Task *,TX_THREAD *,unsigned);
+void anx_exec_thread_manage_drain(void);
+int anx_exec_thread_managed_stop_event(TX_THREAD *,TX_EVENT_FLAGS_GROUP *);
 #endif

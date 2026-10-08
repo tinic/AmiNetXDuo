@@ -18,6 +18,9 @@
 #include "aminetxduo/budget.h"
 
 #include "tx_amiga.h"
+#ifdef AMINETXDUO_EXEC_RESEARCH
+#include "exec_thread.h"
+#endif
 
 #ifdef AMINETXDUO_RX_VERIFY
 #include "net68k.h"
@@ -680,11 +683,35 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         }
     }
 
+    CHAR *ip_name = (CHAR *)"AmiNetXDuo ip";
+#ifdef AMINETXDUO_EXEC_RESEARCH
+    /* The unchanged upstream constructor raises the caller's threshold before
+     * creating its helper. Reserve real owner IO while waiting is still legal. */
+    status = anx_exec_thread_reserve(&ns->ns_Ip.nx_ip_thread, ip_name,
+                                     ns->ns_IpStack, (ULONG)AMI_IP_STACK_SIZE);
+    if (status != TX_SUCCESS)
+        return AMI_NET_ERR_NOMEM;
+#endif
     AMI_INFO("netstack: nx_ip_create");
-    status = nx_ip_create(&ns->ns_Ip, (CHAR *)"AmiNetXDuo ip", addr0, mask0,
+    status = nx_ip_create(&ns->ns_Ip, ip_name, addr0, mask0,
                           &ns->ns_Pool, driver,
                           ns->ns_IpStack, (ULONG)AMI_IP_STACK_SIZE,
                           AMI_IP_THREAD_PRIORITY);
+#ifdef AMINETXDUO_EXEC_RESEARCH
+    if (status != NX_SUCCESS)
+    {
+        if (anx_exec_thread_unreserve(&ns->ns_Ip.nx_ip_thread) != TX_SUCCESS)
+            anx_tx_unsupported("failed IP constructor consumed worker reservation");
+    }
+    else
+    {
+        AnxManagedSnapshot worker;
+        if (!anx_exec_thread_managed_snapshot(&ns->ns_Ip.nx_ip_thread, &worker) ||
+            worker.state != ANX_THREAD_BOUND ||
+            ns->ns_Ip.nx_ip_thread.tx_thread_id != TX_THREAD_ID)
+            anx_tx_unsupported("unchecked IP helper creation did not bind reservation");
+    }
+#endif
     if (status != NX_SUCCESS)
     {
         AMI_ERROR("netstack: nx_ip_create failed (%ld)", (long)status);

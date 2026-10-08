@@ -118,6 +118,18 @@ if(CMAKE_CROSSCOMPILING)
     target_link_libraries(research_exec_adapter PUBLIC research_wait)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_adapter PRIVATE -Wall -Wextra -Werror)
+    add_executable(research_exec_managed_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_caller.c exec_clock.c exec_thread.c exec_kernel.c exec_ip.c exec_managed_smoke.c)
+    target_compile_definitions(research_exec_managed_smoke PRIVATE ANX_REAL_PROTOCOL_LINK)
+    target_link_libraries(research_exec_managed_smoke PRIVATE
+        "-Wl,--start-group" research_ip_bridge research_protocol_vendor research_exec_adapter research_clock_schedule "-Wl,--end-group")
+    target_include_directories(research_exec_managed_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_managed_smoke PRIVATE -Wall -Wextra -Werror -ffunction-sections)
+    target_link_options(research_exec_managed_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_managed_smoke>.map")
+    add_custom_command(TARGET research_exec_managed_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_managed_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_schedule_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c exec_caller.c exec_clock.c exec_thread.c exec_kernel.c exec_schedule_smoke.c)
     target_link_libraries(research_exec_schedule_smoke PRIVATE research_tx_bridge research_exec_adapter research_clock_schedule)

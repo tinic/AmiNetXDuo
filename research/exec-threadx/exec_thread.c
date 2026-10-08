@@ -3,7 +3,9 @@
 #define TX_SOURCE_CODE
 #include "exec_thread.h"
 #include "tx_thread.h"
+#include "tx_amiga.h"
 #include <exec/execbase.h>
+#include <exec/memory.h>
 #include <proto/exec.h>
 #include <string.h>
 #ifndef TX_DISABLE_STACK_FILLING
@@ -15,6 +17,16 @@ _Static_assert(TX_AMIGA_TASK_PRIORITY==1,"review safe Exec priority band after a
 TX_THREAD *_tx_thread_created_ptr;
 ULONG _tx_thread_created_count;
 static AnxExecThread *records;
+UINT (*anx_exec_managed_prepare)(TX_THREAD *,CHAR *,APTR,ULONG);
+UINT (*anx_exec_managed_retire)(TX_THREAD *,unsigned);
+void (*anx_exec_managed_notify)(void);
+static ULONG managed_records,managed_bytes;
+static ULONG client_stamp(struct Task *t)
+{ return (ULONG)t->tc_SPLower ^ (ULONG)t->tc_SPUpper ^ (ULONG)t->tc_Node.ln_Name; }
+static int authorized(AnxExecThread *r)
+{
+    return r->managed ? r->client==FindTask(0) && r->client_stamp==client_stamp(FindTask(0)) : r->creator==FindTask(0);
+}
 
 static int idle(void)
 {
@@ -23,6 +35,7 @@ static int idle(void)
 static AnxExecThread *lookup(TX_THREAD *t)
 {
     AnxExecThread *r;
+    if (!t) return 0;
     for (r=records;r;r=r->next) if (r->thread==t) return r;
     return 0;
 }
@@ -80,22 +93,29 @@ static void release_record(AnxExecThread *r)
     r->signal=-1; r->ack=0; r->creator=0; r->next=0; r->state=ANX_THREAD_REAPED;
     anx_tx_runtime_drop();
 }
-int anx_exec_thread_prepare(AnxExecThread *r, TX_THREAD *thread, CHAR *name, APTR stack, ULONG size)
+static int prepare_record(AnxExecThread *r, TX_THREAD *thread, CHAR *name, APTR stack, ULONG size,
+                          APTR native,ULONG native_size,APTR allocation,ULONG allocation_size,struct Task *client)
 {
     uintptr_t b=(uintptr_t)stack,e=b+size, rb=(uintptr_t)r,tb=(uintptr_t)thread;
     AnxExecThread *other;
     BYTE signal;
-    if (!r || !thread || !name || !b || (b&3) || (size&3) || size<8192 || e<=b ||
+    uintptr_t nb=(uintptr_t)native,ne=nb+native_size;
+    if (!r || !thread || !name || !b || (b&3) || (size&3) || size<TX_MINIMUM_STACK || e<=b ||
+        !nb || (nb&3) || (native_size&3) || native_size<8192 || ne<=nb ||
         rb>UINTPTR_MAX-sizeof(*r) || tb>UINTPTR_MAX-sizeof(*thread) ||
         (b<rb+sizeof(*r) && e>rb) || (b<tb+sizeof(*thread) && e>tb) ||
-        (rb<tb+sizeof(*thread) && rb+sizeof(*r)>tb) || !idle()) return 0;
+        (rb<tb+sizeof(*thread) && rb+sizeof(*r)>tb) ||
+        (nb<rb+sizeof(*r) && ne>rb) || (nb<tb+sizeof(*thread) && ne>tb) ||
+        (native!=stack && nb<e && ne>b) || !idle()) return 0;
     Forbid();
+    if (client && !tx_amiga_exec_task_alive(client)) {Permit();return 0;}
     for (other=records;other;other=other->next) {
-        uintptr_t lo[3]={rb,tb,b}, hi[3]={rb+sizeof(*r),tb+sizeof(*thread),e};
-        uintptr_t olo[3]={(uintptr_t)other,(uintptr_t)other->thread,(uintptr_t)other->stack};
-        uintptr_t ohi[3]={olo[0]+sizeof(*other),olo[1]+sizeof(*thread),olo[2]+other->stack_size};
+        if (other->state==ANX_THREAD_RETIRE_PENDING) continue;
+        uintptr_t lo[4]={rb,tb,b,nb}, hi[4]={rb+sizeof(*r),tb+sizeof(*thread),e,ne};
+        uintptr_t olo[4]={(uintptr_t)other,(uintptr_t)other->thread,(uintptr_t)other->stack,(uintptr_t)other->native_stack};
+        uintptr_t ohi[4]={olo[0]+sizeof(*other),olo[1]+sizeof(*thread),olo[2]+other->stack_size,olo[3]+other->native_size};
         unsigned i,j;
-        for (i=0;i<3;i++) for (j=0;j<3;j++)
+        for (i=0;i<4;i++) for (j=0;j<4;j++)
             if (lo[i]<ohi[j] && hi[i]>olo[j]) {Permit();return 0;}
     }
     if (r->state!=ANX_THREAD_EMPTY && r->state!=ANX_THREAD_REAPED) {Permit(); return 0;}
@@ -103,11 +123,14 @@ int anx_exec_thread_prepare(AnxExecThread *r, TX_THREAD *thread, CHAR *name, APT
     if (signal<0) {Permit(); return 0;}
     memset(r,0,sizeof(*r));
     r->creator=FindTask(0); r->thread=thread; r->stack=stack; r->stack_size=size;
+    r->native_stack=native;r->native_size=native_size;
+    r->native_allocation=allocation;r->native_allocation_size=allocation_size;
+    r->managed=client!=0;r->client=client;r->client_stamp=client ? client_stamp(client) : 0;
     r->signal=signal; r->ack=1UL<<signal; r->state=ANX_THREAD_PREPARING;
     r->next=records; records=r;
     anx_tx_runtime_hold();
     r->task.tc_Node.ln_Type=NT_TASK; r->task.tc_Node.ln_Name=name;
-    r->task.tc_SPLower=stack; r->task.tc_SPUpper=(APTR)e; r->task.tc_SPReg=(APTR)e;
+    r->task.tc_SPLower=native; r->task.tc_SPUpper=(APTR)ne; r->task.tc_SPReg=(APTR)ne;
     r->task.tc_UserData=r;
     r->task.tc_MemEntry.lh_Head=(struct Node *)&r->task.tc_MemEntry.lh_Tail;
     r->task.tc_MemEntry.lh_TailPred=(struct Node *)&r->task.tc_MemEntry.lh_Head;
@@ -121,6 +144,55 @@ int anx_exec_thread_prepare(AnxExecThread *r, TX_THREAD *thread, CHAR *name, APT
         if (state==ANX_THREAD_FINISHED) {Forbid();release_record(r);Permit();return 0;}
         (void)Wait(r->ack);
     }
+}
+int anx_exec_thread_prepare(AnxExecThread *r,TX_THREAD *t,CHAR *name,APTR stack,ULONG size)
+{ return prepare_record(r,t,name,stack,size,stack,size,0,0,0); }
+
+static UINT managed_command(TX_THREAD *t,CHAR *name,APTR stack,ULONG size,unsigned operation)
+{
+    UINT result;
+    if (!(operation ? anx_exec_managed_retire!=0 : anx_exec_managed_prepare!=0)) return TX_NO_MEMORY;
+    if (!anx_tx_context_pause()) return TX_CALLER_ERROR;
+    result=operation ? anx_exec_managed_retire(t,operation==2) : anx_exec_managed_prepare(t,name,stack,size);
+    if (!anx_tx_context_resume()) anx_tx_unsupported("managed command context restore failed");
+    return result;
+}
+UINT anx_exec_thread_reserve(TX_THREAD *t,CHAR *name,APTR stack,ULONG size)
+{
+    anx_tx_require_context(0);
+    if (!t || !name || !stack) return TX_PTR_ERROR;
+    if (lookup(t) || t->tx_thread_id==TX_THREAD_ID) return TX_THREAD_ERROR;
+    return managed_command(t,name,stack,size,0);
+}
+UINT anx_exec_thread_unreserve(TX_THREAD *t)
+{
+    anx_tx_require_context(0);AnxExecThread *r=lookup(t);
+    if (!r) return TX_SUCCESS;
+    if (!r->managed || !authorized(r)) return TX_CALLER_ERROR;
+    if (r->state!=ANX_THREAD_PREPARED) return TX_NOT_DONE;
+    return managed_command(t,0,0,0,2);
+}
+UINT anx_exec_thread_manage_prepare(struct Task *client,TX_THREAD *t,CHAR *name,APTR stack,ULONG size)
+{
+    uintptr_t b=(uintptr_t)stack,e=b+size,tb=(uintptr_t)t;
+    if (!idle() || !client || !tx_amiga_exec_task_alive(client)) return TX_CALLER_ERROR;
+    if (!t || !name || !b || (b&3) || (size&3) || size<TX_MINIMUM_STACK || e<=b ||
+        tb>UINTPTR_MAX-sizeof(*t) || (b<tb+sizeof(*t) && e>tb)) return TX_SIZE_ERROR;
+    if (lookup(t)) return TX_THREAD_ERROR;
+    AnxExecThread *r=AllocMem(sizeof(*r),MEMF_PUBLIC|MEMF_CLEAR);
+    if (!r) return TX_NO_MEMORY;
+    APTR allocation=0,native=stack;ULONG allocation_size=0,native_size=size;
+    if (size<8192) {
+        allocation_size=8192+8;allocation=AllocMem(allocation_size,MEMF_PUBLIC|MEMF_CLEAR);
+        if (!allocation) {FreeMem(r,sizeof(*r));return TX_NO_MEMORY;}
+        *(ULONG *)allocation=0x13572468;*(ULONG *)((UBYTE *)allocation+8192+4)=0x89abcdef;
+        native=(UBYTE *)allocation+4;native_size=8192;
+    }
+    if (!prepare_record(r,t,name,stack,size,native,native_size,allocation,allocation_size,client)) {
+        if (allocation) FreeMem(allocation,allocation_size);
+        FreeMem(r,sizeof(*r));return TX_NO_MEMORY;
+    }
+    Forbid();managed_records++;managed_bytes+=sizeof(*r)+allocation_size;Permit();return TX_SUCCESS;
 }
 int anx_exec_thread_cancel(AnxExecThread *r)
 {
@@ -164,15 +236,21 @@ UINT _tx_thread_create(TX_THREAD *t, CHAR *name, VOID (*entry)(ULONG), ULONG inp
     anx_tx_require_context(0);
     if (_tx_thread_system_state) return TX_CALLER_ERROR;
     if (!t || !entry || !name) return TX_PTR_ERROR;
-    r=lookup(t);
-    if (!r || r->state!=ANX_THREAD_PREPARED) return TX_NO_MEMORY;
-    if (r->creator!=FindTask(0)) return TX_CALLER_ERROR;
-    if (stack!=r->stack || size!=r->stack_size) return TX_SIZE_ERROR;
     if (priority>=TX_MAX_PRIORITIES) return TX_PRIORITY_ERROR;
     if (threshold>priority) return TX_THRESH_ERROR;
     if (threshold!=priority) return TX_FEATURE_NOT_ENABLED;
     if (auto_start!=TX_AUTO_START && auto_start!=TX_DONT_START) return TX_START_ERROR;
     if (t->tx_thread_id==TX_THREAD_ID) return TX_THREAD_ERROR;
+    r=lookup(t);
+    if (!r) {
+        UINT status=anx_exec_thread_reserve(t,name,stack,size);
+        if (status!=TX_SUCCESS) return status;
+        r=lookup(t);
+        if (!r) anx_tx_unsupported("managed reservation missing after ACK");
+    }
+    if (r->state!=ANX_THREAD_PREPARED) return TX_NO_MEMORY;
+    if (!authorized(r)) return TX_CALLER_ERROR;
+    if (stack!=r->stack || size!=r->stack_size || (r->managed && name!=r->task.tc_Node.ln_Name)) return TX_SIZE_ERROR;
     if (_tx_thread_created_count==(ULONG)-1) anx_tx_unsupported("created count overflow");
     /* Pinned Amiga port disables stack filling/checking: the prepared task
      * already owns this stack. Never link an initializer that fills it here. */
@@ -235,7 +313,7 @@ static void native_yield(void)
 UINT anx_exec_thread_relinquish(VOID)
 {
     anx_tx_require_context(0);
-    /* No lower priority exists at -128. Refuse before releasing any frame. */
+    /* Retained conservative research policy; no priority dip is used now. */
     if (FindTask(0)->tc_Node.ln_Pri==-128) return TX_FEATURE_NOT_ENABLED;
     return anx_tx_relinquish(native_yield);
 }
@@ -251,7 +329,7 @@ UINT _tx_thread_terminate(TX_THREAD *t)
     if (_tx_thread_system_state) return TX_CALLER_ERROR;
     r=lookup(t);
     if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
-    if (r->creator!=FindTask(0)) return TX_CALLER_ERROR;
+    if (!authorized(r)) return TX_CALLER_ERROR;
     /* Only acknowledge an already stopped, actually removed owner. This is
      * the nonblocking service the unchanged IP delete can safely call. */
     if (r->state!=ANX_THREAD_FINISHED || t->tx_thread_state!=TX_TERMINATED ||
@@ -259,14 +337,9 @@ UINT _tx_thread_terminate(TX_THREAD *t)
         return TX_FEATURE_NOT_ENABLED;
     return TX_SUCCESS;
 }
-UINT _tx_thread_delete(TX_THREAD *t)
+static UINT delete_fields(AnxExecThread *r,unsigned release)
 {
-    AnxExecThread *r;
-    anx_tx_require_context(0);
-    if (_tx_thread_system_state) return TX_CALLER_ERROR;
-    r=lookup(t);
-    if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
-    if (r->creator!=FindTask(0)) return TX_CALLER_ERROR;
+    TX_THREAD *t=r->thread;
     if (r->state!=ANX_THREAD_FINISHED ||
         (t->tx_thread_state!=TX_COMPLETED && t->tx_thread_state!=TX_TERMINATED) ||
         t->tx_thread_suspending) return TX_DELETE_ERROR;
@@ -280,9 +353,90 @@ UINT _tx_thread_delete(TX_THREAD *t)
     _tx_thread_created_count--; t->tx_thread_id=0;
     t->tx_thread_amiga_task=0; t->tx_thread_amiga_signal_owner=0; t->tx_thread_amiga_run_signal=0;
     t->tx_thread_created_next=0; t->tx_thread_created_previous=0;
-    release_record(r);
+    if (release) release_record(r);
     return TX_SUCCESS;
 }
+UINT _tx_thread_delete(TX_THREAD *t)
+{
+    anx_tx_require_context(0);
+    if (_tx_thread_system_state) return TX_CALLER_ERROR;
+    AnxExecThread *r=lookup(t);
+    if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
+    if (!authorized(r)) return TX_CALLER_ERROR;
+    if (r->state!=ANX_THREAD_FINISHED ||
+        (t->tx_thread_state!=TX_COMPLETED && t->tx_thread_state!=TX_TERMINATED) ||
+        t->tx_thread_suspending) return TX_DELETE_ERROR;
+    if (r->managed) {
+        if (!anx_exec_managed_notify || r->wait.opened || tx_amiga_exec_task_alive(&r->task)) return TX_DELETE_ERROR;
+        UINT result=delete_fields(r,0);
+        if (result!=TX_SUCCESS) return result;
+        /* From here through the manager's drain, only private storage is live.
+         * The caller may immediately reclaim/reuse its control and public stack. */
+        r->thread=0;r->client=0;r->client_stamp=0;r->state=ANX_THREAD_RETIRE_PENDING;
+        anx_exec_managed_notify();return TX_SUCCESS;
+    }
+    return delete_fields(r,1);
+}
+UINT anx_exec_thread_manage_retire(struct Task *client,TX_THREAD *t,unsigned cancel)
+{
+    if (!idle()) return TX_CALLER_ERROR;
+    AnxExecThread *r=lookup(t);
+    if (!r || !r->managed || r->creator!=FindTask(0)) return TX_THREAD_ERROR;
+    if (!client || !tx_amiga_exec_task_alive(client) || r->client!=client ||
+        r->client_stamp!=client_stamp(client)) return TX_CALLER_ERROR;
+    APTR allocation=r->native_allocation;ULONG bytes=r->native_allocation_size;
+    if (cancel) {
+        if (r->state!=ANX_THREAD_PREPARED) return TX_NOT_DONE;
+        if (!anx_exec_thread_cancel(r)) anx_tx_unsupported("managed reservation cancellation failed");
+    } else {
+        if (r->state!=ANX_THREAD_FINISHED || r->wait.opened || tx_amiga_exec_task_alive(&r->task)) return TX_DELETE_ERROR;
+        AnxTxContext f;anx_tx_context_begin(&f,TX_NULL,0);
+        UINT status=delete_fields(r,1);anx_tx_context_end(&f);
+        if (status!=TX_SUCCESS) return status;
+    }
+    if (allocation && (*(ULONG *)allocation!=0x13572468 ||
+        *(ULONG *)((UBYTE *)allocation+8192+4)!=0x89abcdef)) anx_tx_unsupported("managed native stack canary corrupted");
+    Forbid();managed_records--;managed_bytes-=sizeof(*r)+bytes;
+    if (allocation) FreeMem(allocation,bytes);
+    FreeMem(r,sizeof(*r));Permit();return TX_SUCCESS;
+}
+void anx_exec_thread_manage_drain(void)
+{
+    if (!idle()) anx_tx_unsupported("managed drain inside call boundary");
+    Forbid();
+    for (;;) {
+        AnxExecThread *r;
+        for (r=records;r;r=r->next) if (r->managed && r->state==ANX_THREAD_RETIRE_PENDING) break;
+        if (!r) break;
+        if (r->creator!=FindTask(0) || r->thread || r->client || r->wait.opened ||
+            tx_amiga_exec_task_alive(&r->task)) anx_tx_unsupported("managed drain retained owner/public reference");
+        APTR allocation=r->native_allocation;ULONG bytes=r->native_allocation_size;
+        if (allocation && (*(ULONG *)allocation!=0x13572468 ||
+            *(ULONG *)((UBYTE *)allocation+8192+4)!=0x89abcdef)) anx_tx_unsupported("managed native stack canary corrupted");
+        release_record(r);managed_records--;managed_bytes-=sizeof(*r)+bytes;
+        if (allocation) FreeMem(allocation,bytes);
+        FreeMem(r,sizeof(*r));
+    }
+    Permit();
+}
+int anx_exec_thread_managed_stop_event(TX_THREAD *t,TX_EVENT_FLAGS_GROUP *group)
+{
+    anx_tx_require_context(0);AnxExecThread *r=lookup(t);
+    if (!r || !r->managed || !authorized(r) || r->state!=ANX_THREAD_BOUND || !r->entered) return 0;
+    if (!anx_tx_stop_event(&r->bridge,group)) return 0;
+    r->state=ANX_THREAD_STOPPING;return 1;
+}
+int anx_exec_thread_managed_snapshot(TX_THREAD *t,AnxManagedSnapshot *out)
+{
+    if (!out) return 0;
+    Forbid();AnxExecThread *r=lookup(t);
+    if (!r || !r->managed) {Permit();return 0;}
+    *out=(AnxManagedSnapshot){&r->task,r->creator,r->client,r->stack,r->native_stack,
+        r->stack_size,r->native_size,sizeof(*r)+r->native_allocation_size,r->state,r->entered,r->wait.opened};
+    Permit();return 1;
+}
+void anx_exec_thread_managed_resources(ULONG *count,ULONG *bytes)
+{ Forbid();if (count) *count=managed_records;if (bytes) *bytes=managed_bytes;Permit(); }
 const AnxExecThread *anx_exec_thread_owner_record(void)
 {
     anx_tx_require_context(0);
@@ -299,7 +453,11 @@ UINT anx_exec_thread_stack_in_use(const VOID *start,ULONG size)
     if (!lo || hi<lo) return TX_TRUE;
     Forbid();
     for (AnxExecThread *r=records;r;r=r->next) {
+        if (r->state==ANX_THREAD_RETIRE_PENDING) continue;
         uintptr_t b=(uintptr_t)r->stack,e=b+r->stack_size;
+        if (lo<=e && b<=hi) {Permit();return TX_TRUE;}
+        b=(uintptr_t)(r->native_allocation ? r->native_allocation : r->native_stack);
+        e=b+(r->native_allocation ? r->native_allocation_size : r->native_size);
         if (lo<=e && b<=hi) {Permit();return TX_TRUE;}
     }
     Permit();return TX_FALSE;

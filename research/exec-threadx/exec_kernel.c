@@ -9,7 +9,7 @@
 #include <proto/exec.h>
 #include <string.h>
 enum {DOWN,STARTING,UP,STOPPING,RECOVERING};
-enum {START,STOP};
+enum {START,STOP,PREPARE,RETIRE,CANCEL};
 #define STACK_BYTES 8192
 static struct Task manager;
 static AnxExecClock clock_record;
@@ -23,6 +23,10 @@ static struct {
     unsigned operation;
     volatile unsigned done;
     UINT result;
+    TX_THREAD *thread;
+    CHAR *name;
+    APTR stack;
+    ULONG size;
 } command;
 static ULONG task_stamp(struct Task *t)
 {
@@ -77,10 +81,21 @@ static int close_clock(void)
 }
 static VOID finish(VOID)
 {
-    Forbid();phase=DOWN;command.result=TX_SUCCESS;command.done=1;
+    Forbid();anx_exec_managed_prepare=0;anx_exec_managed_retire=0;anx_exec_managed_notify=0;
+    phase=DOWN;command.result=TX_SUCCESS;command.done=1;
     if (!command_live()) memset(&command,0,sizeof(command));
     else wake_command();
     RemTask(0);for (;;) {}
+}
+static UINT prepare_request(TX_THREAD *,CHAR *,APTR,ULONG);
+static UINT retire_request(TX_THREAD *,unsigned);
+static void notify_reap(void)
+{
+    /* Public delete holds the normal boundary; manager remains retained by the
+     * private record even though the public control is already reusable. */
+    if (!tx_amiga_exec_task_alive(&manager) || task_stamp(&manager)!=manager_stamp)
+        anx_tx_unsupported("managed retirement lost manager identity");
+    Signal(&manager,SIGF_SINGLE);
 }
 static VOID entry(VOID)
 {
@@ -92,10 +107,24 @@ static VOID entry(VOID)
         if (!close_clock()) anx_tx_unsupported("kernel startup clock rollback failed");
         Forbid();phase=DOWN;reply(TX_NOT_DONE);RemTask(0);for (;;) {}
     }
-    Forbid();clock_record.observer=watch_manager;phase=UP;reply(TX_SUCCESS);Permit();
+    Forbid();clock_record.observer=watch_manager;phase=UP;
+    anx_exec_managed_prepare=prepare_request;anx_exec_managed_retire=retire_request;
+    anx_exec_managed_notify=notify_reap;
+    reply(TX_SUCCESS);Permit();
     for (;;) {
-        Forbid();int stop=command.owner && !command.done && command.operation==STOP;Permit();
-        if (!stop) {(void)Wait(SIGF_SINGLE);continue;}
+        anx_exec_thread_manage_drain();
+        Forbid();int pending=command.owner && !command.done;
+        unsigned operation=command.operation;
+        struct Task *client=command.owner;TX_THREAD *thread=command.thread;
+        CHAR *name=command.name;APTR stack=command.stack;ULONG size=command.size;
+        int live=command_live();Permit();
+        if (!pending) {(void)Wait(SIGF_SINGLE);continue;}
+        if (!live) anx_tx_unsupported("removed active managed-command client");
+        if (operation!=STOP) {
+            UINT result=operation==PREPARE ? anx_exec_thread_manage_prepare(client,thread,name,stack,size) :
+                anx_exec_thread_manage_retire(client,thread,operation==CANCEL);
+            reply(result);continue;
+        }
         /* Prepared workers have runtime holds even before their public IDs.
          * Dormant/paused/sleeping callers have retained bindings. Neither may
          * be confused with an idle global current pointer. */
@@ -124,9 +153,10 @@ static UINT recover_manager(void)
             anx_tx_unsupported("kernel dead-manager registry transfer failed");
         if (!close_clock()) anx_tx_unsupported("kernel dead-manager clock retirement failed");
     }
-    Forbid();release_stacks();phase=DOWN;Permit();return TX_SUCCESS;
+    Forbid();anx_exec_managed_prepare=0;anx_exec_managed_retire=0;anx_exec_managed_notify=0;
+    release_stacks();phase=DOWN;Permit();return TX_SUCCESS;
 }
-static UINT request(unsigned operation)
+static UINT request(unsigned operation,TX_THREAD *thread,CHAR *name,APTR stack,ULONG size)
 {
     if (!tx_amiga_exec_task_context()) return TX_CALLER_ERROR;
     Forbid();
@@ -140,7 +170,8 @@ static UINT request(unsigned operation)
     }
     if (operation==START && phase==UP) {Permit();return TX_SUCCESS;}
     if (operation==STOP && phase==DOWN) {release_stacks();Permit();return TX_SUCCESS;}
-    if ((operation==START && phase!=DOWN) || (operation==STOP && phase!=UP)) {Permit();return TX_NOT_DONE;}
+    if ((operation==START && phase!=DOWN) || (operation!=START && phase!=UP)) {Permit();return TX_NOT_DONE;}
+    if (operation==PREPARE && tx_amiga_stack_in_use(stack,size)) {Permit();return TX_SIZE_ERROR;}
     if (operation==START) {
         if (!anx_tx_runtime_resettable()) {Permit();return TX_NOT_DONE;}
         release_stacks();
@@ -154,11 +185,12 @@ static UINT request(unsigned operation)
         manager.tc_MemEntry.lh_Head=(struct Node *)&manager.tc_MemEntry.lh_Tail;
         manager.tc_MemEntry.lh_TailPred=(struct Node *)&manager.tc_MemEntry.lh_Head;
         manager_stamp=task_stamp(&manager);phase=STARTING;
-    } else phase=STOPPING;
+    } else if (operation==STOP) phase=STOPPING;
     BYTE bit=AllocSignal(-1);
-    if (bit<0) {phase=operation==START ? DOWN : UP;if (operation==START) release_stacks();Permit();return TX_NO_MEMORY;}
+    if (bit<0) {if (operation==START) {phase=DOWN;release_stacks();}else if (operation==STOP) phase=UP;Permit();return TX_NO_MEMORY;}
     command.mask=1UL<<bit;command.signal=bit;(void)SetSignal(0,command.mask);
     command.owner=FindTask(0);command.stamp=task_stamp(command.owner);command.operation=operation;command.done=0;
+    command.thread=thread;command.name=name;command.stack=stack;command.size=size;
     if (operation==START) {
         if (!AddTask(&manager,(APTR)entry,0)) {
             phase=DOWN;consume_command();release_stacks();Permit();return TX_NO_MEMORY;
@@ -180,8 +212,12 @@ static UINT request(unsigned operation)
         ULONG mask=command.mask;Permit();(void)Wait(mask);
     }
 }
-UINT tx_amiga_kernel_start(VOID) {return request(START);}
-UINT tx_amiga_kernel_stop(VOID) {return request(STOP);}
+static UINT prepare_request(TX_THREAD *t,CHAR *name,APTR stack,ULONG size)
+{ return request(PREPARE,t,name,stack,size); }
+static UINT retire_request(TX_THREAD *t,unsigned cancel)
+{ return request(cancel ? CANCEL : RETIRE,t,0,0,0); }
+UINT tx_amiga_kernel_start(VOID) {return request(START,0,0,0,0);}
+UINT tx_amiga_kernel_stop(VOID) {return request(STOP,0,0,0,0);}
 UINT tx_amiga_kernel_running(VOID)
 {
     UINT running;Forbid();running=phase==UP && tx_amiga_exec_task_alive(&manager);Permit();return running;

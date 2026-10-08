@@ -107,6 +107,19 @@ def main():
     result = run([str(ar), "d", str(netstack), "netstack_baton.c.obj"], work, log)
     if result.returncode or "netstack_baton.c.obj" in run([str(ar), "t", str(netstack)], work, log).stdout:
         raise SystemExit("baton removal failed")
+    # Actual parent integration with the one-shot reservation before the
+    # unchanged upstream IP constructor. All shipping feature flags stay on.
+    if members.count("netstack.c.obj") != 1:
+        raise SystemExit("expected exactly one parent netstack object")
+    parent_object = work / "netstack.c.obj"
+    result = run([str(compiler), *flags, "-DAMINETXDUO_EXEC_RESEARCH",
+                  "-c", str(ROOT / "src/netstack/netstack.c"), "-o", str(parent_object)],
+                 Path(exemplar["directory"]), log)
+    if result.returncode:
+        raise SystemExit("research parent reservation compile failed")
+    if run([str(ar), "d", str(netstack), "netstack.c.obj"], work, log).returncode or \
+       run([str(ar), "r", str(netstack), str(parent_object)], work, log).returncode:
+        raise SystemExit("parent reservation object replacement failed")
     link_dir = full / "src/bsdsocket"
     original_link = shlex.split((link_dir / "CMakeFiles/bsdsocket_library.dir/link.txt").read_text())
     output = work / "bsdsocket-research-unverified.library"
@@ -152,6 +165,7 @@ def main():
         "baseline_binary": {"bytes": baseline.stat().st_size, "sha256": digest(baseline)},
         "removed_scheduler_archives": removed,
         "removed_netstack_members": ["netstack_baton.c.obj"],
+        "research_parent_objects": ["netstack.c.obj: actual production source/full flags + AMINETXDUO_EXEC_RESEARCH one-shot IP preflight"],
         "backend_sources": [str(p.relative_to(ROOT)) for p, _ in sources],
         "link_returncode": result.returncode,
         "unresolved_symbols": unresolved,
