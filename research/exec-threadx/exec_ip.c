@@ -71,7 +71,8 @@ UINT anx_exec_ip_create(AnxExecIp *r,TX_THREAD *caller,NX_IP *ip,CHAR *name,NX_P
     if (caller->tx_thread_amiga_task!=(VOID *)FindTask(0)) return NX_CALLER_ERROR;
     if (active || (r->state!=ANX_IP_EMPTY && r->state!=ANX_IP_REAPED)) return NX_NOT_ENABLED;
     if (priority>=TX_MAX_PRIORITIES || priority>caller->tx_thread_user_priority) return NX_NOT_ENABLED;
-    if (!disjoint(r,sizeof(*r),ip,sizeof(*ip)) || !disjoint(stack,size,ip,sizeof(*ip)) ||
+    if (!disjoint(stack,size,r,sizeof(*r)) || !disjoint(r,sizeof(*r),ip,sizeof(*ip)) ||
+        !disjoint(stack,size,ip,sizeof(*ip)) ||
         !disjoint(r,sizeof(*r),pool,sizeof(*pool)) || !disjoint(stack,size,pool,sizeof(*pool)) ||
         !disjoint(ip,sizeof(*ip),pool,sizeof(*pool)) || !disjoint(ip,sizeof(*ip),caller,sizeof(*caller)) ||
         !disjoint(r,sizeof(*r),caller,sizeof(*caller)) || !disjoint(stack,size,caller,sizeof(*caller))) return NX_PTR_ERROR;

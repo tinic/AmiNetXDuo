@@ -87,6 +87,11 @@ int main(void)
     CHECK(anx_exec_ip_create(&record,&parent,&ip,(CHAR *)"unsupported",&pool,driver,stack.bytes,8192,17)==NX_NOT_ENABLED &&
           !memcmp(&ip,&snapshot,sizeof(ip)) && !record.helper.creator);
     CASE("unsupported-creator-threshold-refused-before-reservation");
+    /* Native prepare protects its embedded helper; the enclosing IP record's
+     * trailing metadata must also be excluded from the worker stack. */
+    CHECK(anx_exec_ip_create(&record,&parent,&ip,(CHAR *)"overlap",&pool,driver,&record.ip,8192,2)==NX_PTR_ERROR &&
+          !memcmp(&ip,&snapshot,sizeof(ip)) && !record.helper.creator);
+    CASE("enclosing-record-stack-overlap-refused-before-reservation");
     for (unsigned cycle=0;cycle<3;cycle++) {
         unsigned old_deferred=deferred;
         CHECK(anx_exec_ip_create(&record,&parent,&ip,(CHAR *)"real IP",&pool,driver,stack.bytes,8192,2)==NX_SUCCESS);
@@ -150,6 +155,6 @@ int main(void)
     anx_tx_context_begin(&f,&parent,0);CHECK(_nx_packet_pool_delete(&pool)==NX_SUCCESS);anx_tx_context_end(&f);
     CHECK(anx_tx_detach(&pb) && anx_exec_wait_close(&pw));anx_tx_runtime_init(anx_tx_exec_platform());
     CASE("packet-pool-signals-stack-and-runtime-recovered");
-    CHECK(passed==13);say("research_exec_ip=PASS 13/13 helpers_reaped=3 restarts=2\n");
+    CHECK(passed==14);say("research_exec_ip=PASS 14/14 helpers_reaped=3 restarts=2\n");
     return 0;
 }
