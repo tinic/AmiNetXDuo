@@ -26,8 +26,10 @@ typedef struct AnxExecThread {
  * Retain record, name, control block and aligned >=8192 stack through cancellation
  * or successful public delete. Live record/control/stack regions cannot overlap.
  * Opens worker-owned IO before public creation;
- * does not read/modify target control block. No implicit unreserved allocation.
- * Public create requires this exact creator/target/stack reservation. Same public
+ * does not read/modify target control block. This legacy prepare API performs no
+ * allocation of a record or stack. Public create consumes the exact client/
+ * target/stack reservation; with a running kernel an ordinary unreserved create
+ * obtains a manager-owned reservation first. Same public
  * pinned tx_api signatures, no vendor edits. Priorities 0..15 map to the pinned
  * port's Exec priority 1; 16..31 map to 0. Logical priorities remain in public
  * fields; ties are deliberate. Initial threshold must equal priority. Slices
@@ -58,7 +60,9 @@ const AnxExecThread *anx_exec_thread_owner_record(void);
  * foreign READY/blocked suspension and general delayed suspend,
  * priority changes and forced terminate remain open. Current-owner threshold
  * changes require restore before outer boundary exit; no foreign changes.
- * Public delete only after normal completion + native removal, by creator. */
+ * Public delete only after completion + native removal, by the retained client.
+ * Managed finished deletion is nonblocking; the manager later frees only private
+ * storage, while the public control and supplied stack are immediately reusable. */
 UINT anx_exec_thread_stack_in_use(const VOID *,ULONG);
 /* Native yield preflight; minimum Exec priority refuses before frame release.
  * Public void relinquish treats a refused preflight as a fatal unsupported call. */

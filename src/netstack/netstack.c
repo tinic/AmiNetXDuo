@@ -20,6 +20,7 @@
 #include "tx_amiga.h"
 #ifdef AMINETXDUO_EXEC_RESEARCH
 #include "exec_thread.h"
+#include "tx_thread.h"
 #endif
 
 #ifdef AMINETXDUO_RX_VERIFY

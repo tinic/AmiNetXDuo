@@ -1,4 +1,4 @@
-/* Public creation boundary backed by already prepared Exec workers.
+/* Public creation backed by retained prepared and manager-owned Exec workers.
  * SPDX-License-Identifier: MIT */
 #define TX_SOURCE_CODE
 #include "exec_thread.h"
@@ -178,7 +178,8 @@ UINT anx_exec_thread_manage_prepare(struct Task *client,TX_THREAD *t,CHAR *name,
     if (!idle() || !client || !tx_amiga_exec_task_alive(client)) return TX_CALLER_ERROR;
     if (!t || !name || !b || (b&3) || (size&3) || size<TX_MINIMUM_STACK || e<=b ||
         tb>UINTPTR_MAX-sizeof(*t) || (b<tb+sizeof(*t) && e>tb)) return TX_SIZE_ERROR;
-    if (lookup(t)) return TX_THREAD_ERROR;
+    Forbid();int exists=lookup(t)!=0;Permit();
+    if (exists) return TX_THREAD_ERROR;
     AnxExecThread *r=AllocMem(sizeof(*r),MEMF_PUBLIC|MEMF_CLEAR);
     if (!r) return TX_NO_MEMORY;
     APTR allocation=0,native=stack;ULONG allocation_size=0,native_size=size;
@@ -330,6 +331,10 @@ UINT _tx_thread_terminate(TX_THREAD *t)
     r=lookup(t);
     if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
     if (!authorized(r)) return TX_CALLER_ERROR;
+    if (r->managed && _tx_thread_preempt_disable &&
+        (r->state!=ANX_THREAD_FINISHED || t->tx_thread_state!=TX_TERMINATED ||
+         r->wait.opened || r->bridge.thread || !r->bridge.terminal_pending || tx_amiga_exec_task_alive(&r->task)))
+        anx_tx_unsupported("unchecked managed terminate before real owner removal");
     /* Only acknowledge an already stopped, actually removed owner. This is
      * the nonblocking service the unchanged IP delete can safely call. */
     if (r->state!=ANX_THREAD_FINISHED || t->tx_thread_state!=TX_TERMINATED ||
@@ -363,11 +368,16 @@ UINT _tx_thread_delete(TX_THREAD *t)
     AnxExecThread *r=lookup(t);
     if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
     if (!authorized(r)) return TX_CALLER_ERROR;
+    if (r->managed && _tx_thread_preempt_disable &&
+        (r->state!=ANX_THREAD_FINISHED || r->wait.opened || tx_amiga_exec_task_alive(&r->task) ||
+         (t->tx_thread_state!=TX_COMPLETED && t->tx_thread_state!=TX_TERMINATED) || t->tx_thread_suspending))
+        anx_tx_unsupported("unchecked managed delete before real owner removal");
     if (r->state!=ANX_THREAD_FINISHED ||
         (t->tx_thread_state!=TX_COMPLETED && t->tx_thread_state!=TX_TERMINATED) ||
         t->tx_thread_suspending) return TX_DELETE_ERROR;
     if (r->managed) {
-        if (!anx_exec_managed_notify || r->wait.opened || tx_amiga_exec_task_alive(&r->task)) return TX_DELETE_ERROR;
+        if (!anx_exec_managed_notify) anx_tx_unsupported("managed delete lost retirement hook");
+        if (r->wait.opened || tx_amiga_exec_task_alive(&r->task)) return TX_DELETE_ERROR;
         UINT result=delete_fields(r,0);
         if (result!=TX_SUCCESS) return result;
         /* From here through the manager's drain, only private storage is live.
@@ -380,8 +390,9 @@ UINT _tx_thread_delete(TX_THREAD *t)
 UINT anx_exec_thread_manage_retire(struct Task *client,TX_THREAD *t,unsigned cancel)
 {
     if (!idle()) return TX_CALLER_ERROR;
-    AnxExecThread *r=lookup(t);
-    if (!r || !r->managed || r->creator!=FindTask(0)) return TX_THREAD_ERROR;
+    Forbid();AnxExecThread *r=lookup(t);
+    int owned=r && r->managed && r->creator==FindTask(0);Permit();
+    if (!owned) return TX_THREAD_ERROR;
     if (!client || !tx_amiga_exec_task_alive(client) || r->client!=client ||
         r->client_stamp!=client_stamp(client)) return TX_CALLER_ERROR;
     APTR allocation=r->native_allocation;ULONG bytes=r->native_allocation_size;

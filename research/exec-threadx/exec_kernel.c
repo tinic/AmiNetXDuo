@@ -1,6 +1,7 @@
 /* Stable IO creator plus serialized backend-owned commands. No old scheduler.
  * Commands wait on an owner signal outside protection: no caller-owned timer
- * request/reply port or borrowed output pointer. Research lifecycle, not worker policy.
+ * request/reply port or borrowed output pointer. Also owns prepared-worker
+ * records/ACKs and drains private retirement storage before processing commands.
  * SPDX-License-Identifier: MIT */
 #include "exec_kernel.h"
 #include "tx_bridge_exec.h"
