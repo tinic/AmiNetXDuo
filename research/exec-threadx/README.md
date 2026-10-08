@@ -789,3 +789,47 @@ The proposal for real IP retirement is retained separately and is unimplemented.
 Scope remains research only, with
 no production/vendor/header changes, real NX_IP helper, forced stop/drain, full
 replacement link, automatic clock, performance improvement or net size verdict.
+
+## Spike 11: exact-event pre-stop and private owner retirement
+
+The native research creator can request anx_exec_thread_stop_event inside one
+normal outer serialized boundary, even while preempt_disable is incremented.
+This is a narrow integration command, not a public tx_thread_terminate service.
+Only an entered worker with a live pending generation on the exact event object,
+actual event cleanup/sequence/list membership, no owned mutex, pending wake or
+abort pin is eligible. READY, self/foreign creator, wrong object and nested
+requests are refused before mutation. Producers outside this domain must already
+be quiesced; ID validity alone does not make arbitrary accesses safe.
+
+The bridge deactivates the real internal timer, marks TX_TERMINATED, invokes
+unchanged pinned event cleanup to unlink the waiter without normal resumption,
+and removes the runtime binding. It clears its private public-control pointer
+before completing the private wait generation DELETED under protection. The
+owner's suspend loop recognizes its private terminal flag immediately after wait
+returns: it checks private state under protection, releases that protection,
+and calls its no-return terminal callback before restoring the ThreadX context
+or dereferencing the public control block. A returning terminal callback is fatal.
+The worker closes its private IO in its real owner outside all call boundaries,
+then publishes FINISHED/ACK/RemTask without a scheduling gap. A stopped ID remains
+valid with TX_TERMINATED until creator wait observes native retirement and ordinary
+public delete succeeds; the FINISHED-before-clear/reuse contract is preserved.
+There is no deferred logical delete, forced removal of a running task, event/
+mutex deletion, full IP helper or real driver IO integration in this checkpoint.
+
+Native wait adapters now count timer sends/reaps for lifecycle proof and reject
+close with an unreaped submitted request. These are correctness counters, not
+performance measurements. The stop fixture checks two genuinely in-flight
+timer.device requests before stopping; owner wake aborts/reaps them through the
+normal park path before close. Its four stop/delete cycles poison and reuse
+control/stack storage only after native ACK plus public delete. It also exercises
+a real owned mutex refusal, exact event cleanup under preemption-disable, no
+return into entry, premature-delete refusal and signal/domain recovery.
+
+Host CTest passes 33/33, including real event cleanup/timer unlink/private terminal
+dispatch and a fatal returning-callback guard, alongside retained models. The
+host callback escape uses setjmp/longjmp only in the fixture; no native mechanism
+uses it. m68k cross/startup gates pass. Pending native proof: stop 9/9,
+tasks_reaped=4, timed_io_reaped=2, restarts=3, plus retained public thread 14/14
+on the same code because normal worker startup shares the new terminal hook.
+Independent exact source review and actual native receipts are recorded separately
+after completion. Research-only; vendor/public headers/shipping selection unchanged.

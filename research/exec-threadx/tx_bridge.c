@@ -171,6 +171,64 @@ static int detach(AnxTxThread *t, int completed)
 int anx_tx_detach(AnxTxThread *t) { return detach(t,0); }
 int anx_tx_complete(AnxTxThread *t) { return detach(t,1); }
 
+int anx_tx_set_terminal_owner(AnxTxThread *t, void (*callback)(void *), void *arg)
+{
+    int valid;
+    platform->enter(platform->context);
+    valid=callback && find(t->thread)==t && platform->caller(platform->context)==t->owner &&
+        t->thread->tx_thread_state==TX_READY && !t->thread->tx_thread_suspend_cleanup &&
+        !t->pending_resume && !t->pending_token && !t->abort_pins &&
+        !t->terminal_owner && !t->terminal_pending && t->wait->result!=ANX_WAIT_PENDING;
+    if (valid) {t->terminal_owner=callback;t->terminal_context=arg;}
+    platform->leave(platform->context);
+    return valid;
+}
+
+int anx_tx_stop_event(AnxTxThread *t, TX_EVENT_FLAGS_GROUP *group)
+{
+    AnxTxThread **link;
+    TX_THREAD *thread,*node;
+    unsigned i,member=0;
+    anx_tx_require_context(0);
+    if (!t || !group || contexts!=1 || _tx_thread_system_state || !_tx_thread_identify()) return 0;
+    for (link=&threads;*link && *link!=t;link=&(*link)->next) {}
+    if (!*link) return 0;
+    thread=t->thread;
+    if (thread==_tx_thread_current_ptr || thread->tx_thread_id!=TX_THREAD_ID ||
+        !t->terminal_owner || t->terminal_pending || thread->tx_thread_state!=TX_EVENT_FLAG ||
+        thread->tx_thread_suspending || thread->tx_thread_suspend_cleanup!=_tx_event_flags_cleanup ||
+        thread->tx_thread_suspend_control_block!=group || group->tx_event_flags_group_id!=TX_EVENT_FLAGS_ID ||
+        !group->tx_event_flags_group_suspended_count || !group->tx_event_flags_group_suspension_list ||
+        thread->tx_thread_owned_mutex_count || thread->tx_thread_owned_mutex_list ||
+        t->abort_pins || t->pending_resume || t->pending_token || t->expiry_dispatched ||
+        !t->token || t->token!=t->wait->generation || t->wait->result!=ANX_WAIT_PENDING ||
+        t->cleanup_at_suspend!=thread->tx_thread_suspend_cleanup ||
+        t->control_at_suspend!=group || t->sequence_at_suspend!=thread->tx_thread_suspension_sequence)
+        return 0;
+    node=group->tx_event_flags_group_suspension_list;
+    for (i=0;i<group->tx_event_flags_group_suspended_count;i++) {
+        if (!node) return 0;
+        if (node==thread) member=1;
+        node=node->tx_thread_suspended_next;
+    }
+    if (!member || node!=group->tx_event_flags_group_suspension_list) return 0;
+    /* From here all supported producer references must really be removed.
+     * Cleanup sees TERMINATED and cannot turn this into a normal resume. */
+    _tx_timer_system_deactivate(&thread->tx_thread_timer);
+    thread->tx_thread_state=TX_TERMINATED; thread->tx_thread_suspending=TX_TRUE;
+    _tx_event_flags_cleanup(thread,thread->tx_thread_suspension_sequence);
+    need(!thread->tx_thread_suspend_cleanup,"terminal event cleanup did not remove node");
+    thread->tx_thread_suspending=TX_FALSE;
+    thread->tx_thread_suspend_control_block=TX_NULL;
+    thread->tx_thread_suspended_next=TX_NULL;thread->tx_thread_suspended_previous=TX_NULL;
+    thread->tx_thread_additional_suspend_info=TX_NULL;
+    *link=t->next;t->next=0;
+    t->thread=TX_NULL;t->cleanup_at_suspend=0;t->control_at_suspend=0;
+    t->terminal_pending=1;
+    need(anx_wait_complete(t->wait,t->token,ANX_WAIT_DELETED),"terminal generation completion failed");
+    return 1;
+}
+
 int anx_tx_set_resume_cleanup(AnxTxThread *t, int (*hook)(AnxTxThread *))
 {
     int valid;
@@ -352,6 +410,16 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
         platform->enter(platform->context);
         need(!contexts && !current_frame && !_tx_thread_current_ptr && !_tx_thread_system_state &&
              !_tx_thread_preempt_disable,"foreign context retained across yield");
+        if (t->terminal_pending) {
+            void (*callback)(void *)=t->terminal_owner;
+            void *arg=t->terminal_context;
+            need(callback && !t->thread && result==ANX_WAIT_DELETED &&
+                 t->token==t->wait->generation && t->owner==platform->caller(platform->context),
+                 "invalid private terminal return");
+            platform->leave(platform->context);
+            callback(arg); /* discarded NetX stack; no public-control access */
+            need(0,"private terminal owner returned");
+        }
         contexts=1;
         current_frame=outer_frame;
         _tx_thread_current_ptr=thread;

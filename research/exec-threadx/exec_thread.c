@@ -32,6 +32,15 @@ static void finish(AnxExecThread *r)
     Signal(r->creator,r->ack); RemTask(0);
     for (;;) {}
 }
+static void terminal_owner(void *arg)
+{
+    AnxExecThread *r=arg;
+    if (!idle() || FindTask(0)!=&r->task || r->state!=ANX_THREAD_STOPPING ||
+        r->bridge.thread || !r->bridge.terminal_pending)
+        anx_tx_unsupported("invalid native terminal owner");
+    if (!anx_exec_wait_close(&r->wait)) anx_tx_unsupported("terminal owner IO close failed");
+    finish(r);
+}
 static VOID worker(VOID)
 {
     AnxExecThread *r=FindTask(0)->tc_UserData;
@@ -52,6 +61,8 @@ static VOID worker(VOID)
         (void)Wait(SIGF_SINGLE);
     }
     anx_tx_context_begin(&frame,r->thread,0);
+    if (!anx_tx_set_terminal_owner(&r->bridge,terminal_owner,r))
+        anx_tx_unsupported("created terminal owner registration failed");
     r->entered=1;
     r->thread->tx_thread_entry(r->thread->tx_thread_entry_parameter);
     anx_tx_context_end(&frame);
@@ -127,13 +138,22 @@ int anx_exec_thread_cancel(AnxExecThread *r)
 int anx_exec_thread_wait(AnxExecThread *r)
 {
     if (!r || !idle() || r->creator!=FindTask(0) ||
-        (r->state!=ANX_THREAD_BOUND && r->state!=ANX_THREAD_FINISHED)) return 0;
+        (r->state!=ANX_THREAD_BOUND && r->state!=ANX_THREAD_STOPPING &&
+         r->state!=ANX_THREAD_FINISHED)) return 0;
     for (;;) {
         unsigned done;
         Forbid(); done=r->state==ANX_THREAD_FINISHED; Permit();
         if (done) return 1;
         (void)Wait(r->ack);
     }
+}
+int anx_exec_thread_stop_event(AnxExecThread *r, TX_EVENT_FLAGS_GROUP *group)
+{
+    anx_tx_require_context(0);
+    if (!r || r->creator!=FindTask(0) || r->state!=ANX_THREAD_BOUND || !r->entered) return 0;
+    if (!anx_tx_stop_event(&r->bridge,group)) return 0;
+    r->state=ANX_THREAD_STOPPING;
+    return 1;
 }
 UINT _tx_thread_create(TX_THREAD *t, CHAR *name, VOID (*entry)(ULONG), ULONG input,
                        VOID *stack, ULONG size, UINT priority, UINT threshold,
@@ -204,7 +224,8 @@ UINT _tx_thread_delete(TX_THREAD *t)
     r=lookup(t);
     if (!r || !t || t->tx_thread_id!=TX_THREAD_ID) return TX_THREAD_ERROR;
     if (r->creator!=FindTask(0)) return TX_CALLER_ERROR;
-    if (r->state!=ANX_THREAD_FINISHED || t->tx_thread_state!=TX_COMPLETED ||
+    if (r->state!=ANX_THREAD_FINISHED ||
+        (t->tx_thread_state!=TX_COMPLETED && t->tx_thread_state!=TX_TERMINATED) ||
         t->tx_thread_suspending) return TX_DELETE_ERROR;
     if (!_tx_thread_created_count) anx_tx_unsupported("created count lost");
     if (t->tx_thread_created_next==t) _tx_thread_created_ptr=0;

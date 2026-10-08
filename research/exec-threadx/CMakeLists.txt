@@ -87,6 +87,17 @@ if(CMAKE_CROSSCOMPILING)
         COMMAND "${CMAKE_COMMAND}"
             "-DTOOL_MAP=$<TARGET_FILE:research_exec_thread_smoke>.map"
             -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
+    add_executable(research_exec_stop_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_thread.c exec_stop_smoke.c)
+    target_link_libraries(research_exec_stop_smoke PRIVATE research_tx_bridge research_exec_adapter)
+    target_include_directories(research_exec_stop_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_stop_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_stop_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_stop_smoke>.map")
+    add_custom_command(TARGET research_exec_stop_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTOOL_MAP=$<TARGET_FILE:research_exec_stop_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_tx_bridge_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c tx_bridge_smoke.c)
     target_link_libraries(research_tx_bridge_smoke PRIVATE research_tx_bridge research_exec_adapter amiga)
@@ -121,6 +132,11 @@ else()
     enable_testing()
     find_package(Threads REQUIRED)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_executable(research_stop_event_model test_stop_event.c)
+    target_link_libraries(research_stop_event_model PRIVATE research_tx_bridge)
+    target_compile_options(research_stop_event_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_stop_event_model COMMAND research_stop_event_model)
+    add_test(NAME research_stop_event_reject_return COMMAND research_stop_event_model --reject-return)
     add_executable(research_sched_policy_model test_sched_policy.c)
     target_link_libraries(research_sched_policy_model PRIVATE research_tx_bridge)
     target_compile_options(research_sched_policy_model PRIVATE -Wall -Wextra -Werror)

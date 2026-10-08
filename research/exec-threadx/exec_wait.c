@@ -53,10 +53,12 @@ static int ew_park(void *arg, uint64_t deadline)
     e->timer->tr_node.io_Error = 0;
     (void)SetSignal(0, timer_signal);
     SendIO((struct IORequest *)e->timer);
+    e->timer_sends++;
     received = Wait(wake | timer_signal);
     if (!CheckIO((struct IORequest *)e->timer))
         AbortIO((struct IORequest *)e->timer);
     (void)WaitIO((struct IORequest *)e->timer);
+    e->timer_reaps++;
     (void)SetSignal(0, timer_signal);
     if (e->timer->tr_node.io_Error && !(received & wake))
         return -1;
@@ -71,6 +73,7 @@ int anx_exec_wait_open(AnxExecWait *e)
     e->port = 0;
     e->timer = 0;
     e->opened = 0;
+    e->timer_sends = e->timer_reaps = 0;
     e->signal = AllocSignal(-1);
     if (e->signal < 0)
         return 0;
@@ -110,7 +113,7 @@ int anx_exec_wait_close(AnxExecWait *e)
     if (!e->opened || FindTask(0) != e->owner)
         return 0;
     Forbid();
-    if (e->wait.result == ANX_WAIT_PENDING) {
+    if (e->wait.result == ANX_WAIT_PENDING || e->timer_sends!=e->timer_reaps) {
         Permit();
         return 0;
     }

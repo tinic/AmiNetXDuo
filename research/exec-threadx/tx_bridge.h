@@ -27,6 +27,9 @@ typedef struct AnxTxThread {
     uint32_t operation;
     unsigned abort_pins;
     int (*abort_policy)(struct AnxTxThread *, UINT *);
+    void (*terminal_owner)(void *); /* private terminal path, must not return */
+    void *terminal_context;
+    unsigned terminal_pending;
 } AnxTxThread;
 
 typedef struct AnxTxContext {
@@ -59,6 +62,16 @@ int anx_tx_detach(AnxTxThread *);
  * runtime binding but retains public ID and publishes TX_COMPLETED for delete.
  * Caller retains storage and closes IO before its native finished publication. */
 int anx_tx_complete(AnxTxThread *);
+/* Trusted owner installs a private terminal path while READY/quiescent.
+ * stop_event requires a normal outer producer boundary and exact blocked event
+ * object; no owned mutex, pending wake, abort pin or stale wait generation.
+ * It removes real event cleanup/timer/runtime references, retains public ID as
+ * TERMINATED, completes the private wait DELETED. Terminal callback is reached
+ * outside the boundary before any further public-control dereference. Caller
+ * must retain all storage and quiesce all external producers through native ACK.
+ * Native integration separately enforces creator authority. Not tx_terminate. */
+int anx_tx_set_terminal_owner(AnxTxThread *, void (*)(void *), void *);
+int anx_tx_stop_event(AnxTxThread *, TX_EVENT_FLAGS_GROUP *);
 /* Owner-only, while READY and quiescent. Optional integration must perform
  * real cleanup before resume, or return zero to fail closed. */
 int anx_tx_set_resume_cleanup(AnxTxThread *, int (*)(AnxTxThread *));

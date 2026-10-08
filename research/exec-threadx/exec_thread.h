@@ -4,7 +4,8 @@
 #include "exec_task.h"
 #define ANX_THREAD_EXEC_PRIORITY(p) ((BYTE)(TX_AMIGA_TASK_PRIORITY-((p)/16)))
 enum { ANX_THREAD_EMPTY, ANX_THREAD_PREPARING, ANX_THREAD_PREPARED,
-       ANX_THREAD_BOUND, ANX_THREAD_CANCEL, ANX_THREAD_FINISHED, ANX_THREAD_REAPED };
+       ANX_THREAD_BOUND, ANX_THREAD_CANCEL, ANX_THREAD_FINISHED, ANX_THREAD_REAPED,
+       ANX_THREAD_STOPPING };
 typedef struct AnxExecThread {
     struct Task task;
     AnxTxThread bridge;
@@ -35,6 +36,11 @@ int anx_exec_thread_cancel(AnxExecThread *);
 /* Creator-only outside boundary: wait for normal completion + native removal.
  * Does not release storage/ACK: public tx_thread_delete must then succeed. */
 int anx_exec_thread_wait(AnxExecThread *);
+/* Nonblocking creator command INSIDE a normal outer serialized boundary.
+ * Only exact parked event/no mutex/wake/pin is eligible. Public ID remains
+ * TERMINATED until actual native FINISHED then ordinary public delete. Wait
+ * for ACK outside every boundary; no public tx_thread_terminate implementation. */
+int anx_exec_thread_stop_event(AnxExecThread *, TX_EVENT_FLAGS_GROUP *);
 /* Public services are defined by exec_thread.c, linked only by native research
  * target. Resume supports only initial DONT_START; general delayed suspend,
  * priority changes and forced terminate remain open. Current-owner threshold

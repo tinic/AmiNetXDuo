@@ -12,6 +12,9 @@ typedef struct {
     struct timerequest *timer;
     BYTE signal;
     UBYTE opened;
+    /* Research lifecycle proof counters: submitted requests must be reaped
+     * before close. Owner writes; observers inspect under Forbid. Not timing. */
+    volatile ULONG timer_sends,timer_reaps;
 } AnxExecWait;
 /* Open, begin/run and close belong to the same task. complete may be called
  * by another task while this object is retained, never from an interrupt.
