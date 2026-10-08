@@ -2112,6 +2112,17 @@ static void test_hostname_offer(void)
               "interface ID");
     CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_ENV),
               "ENV:HOSTNAME");
+    CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_HOSTS), "hosts");
+    {
+        static const UWORD unknown[] = { 6, 255, 256, 260, 65535 };
+        const char *saved = ami_config_hostname_source_text(AMI_HOSTNAME_NAMERES);
+        unsigned i;
+
+        for (i = 0; i < sizeof(unknown) / sizeof(unknown[0]); i++)
+            CHECK(ami_config_hostname_source_text(unknown[i]) == NULL);
+        CHECK(saved == ami_config_hostname_source_text(AMI_HOSTNAME_NAMERES));
+        CHECK_STR(saved, "name_resolution");
+    }
     CHECK(ami_config_hostname_source_text(AMI_HOSTNAME_NONE) == NULL);
     ami_config_free(&cfg);
 }
