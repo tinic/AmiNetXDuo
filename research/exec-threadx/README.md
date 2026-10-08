@@ -198,25 +198,35 @@ event waiters fail closed. Missing services remain missing link symbols.
 `Permit`; it does not implement ThreadX ready queues, priorities or thresholds.
 The deterministic post-mutex-release seam is NULL in the native experiment.
 
-Host CTest executes ten bridge schedules: nested caller/timer identity and mutex
+Host CTest executes eleven bridge schedules: nested caller/timer identity and mutex
 ownership/unsupported contention, resume before blocking, arrival, timeout with
 actual deferred checker, close/repeated cleanup, wait-abort, expiry then arrival,
-two deferred waiters, stale expiry after reuse, and pending foreign detach.
+two deferred waiters, stale expiry after reuse, pending foreign detach, and
+wait-abort after deferred expiry (IP actor drains cleanup before its Permit).
+The last ordering demonstrates that the upstream deferred sentinel is a no-op
+when wait-abort invokes it. The bridge rejects returning with a live cleanup
+pointer; a general deferred-abort dispatch policy remains open.
 Host ULONG/layouts differ from m68k and are not ABI evidence.
 
 `research_tx_bridge_smoke` compiles for m68k using the existing DOS command
 startup and a second 8192-byte Exec task. Its five planned native cases are
 arrival, real timeout/deferred cleanup, close, wait-abort and injected expiry
 then arrival. Worker resources are closed by their owner and the worker removes
-itself before the parent can release the executable. Compilation is verified;
-actual native verdict and exact binary evidence are pending. These fixtures
+itself before the parent can release the executable. Compilation and one boardless A1200 native run are verified: PASS 5/5,
+guest exit 0 after 14 seconds, Kickstart 3.1 r40.68, parent/worker stacks 8192.
+Tested source `38ff2cb0d62a2d4f0cb205052a1f36e0e83d9346`; binary SHA256
+`71c27079f84438ca88c7f3f6fd7d1c2cd4c1377d73569e7df1920ddc81386581`,
+41,424 bytes. Harness `tools/amiberry-run.sh -m A1200 -t 90` at `300b22e8`;
+AgentNet owner claudecode saved actual stdout, exit and startup evidence under
+`/Users/turo/ai/evidence/exec-threadx-bridge-native`. This executable includes
+runtime and test fixtures; its size does not measure a replacement library. These fixtures
 exercise suspension machinery, not complete TCP/socket APIs or packet delivery.
 
 ## Still open
 
 Full current-thread/adoption semantics, blocking mutexes, event waiters, thread
 lifecycle, priority/preemption semantics, common timer integration and replacement
-backend selection remain unimplemented. Minimum-profile coverage, native verdict,
+backend selection remain unimplemented. Minimum-profile coverage, broader native schedules,
 UDP direct cleanup, NetX/socket conformance, independent bridge review and net
 size/runtime comparison remain pending. The compile probe checks that referenced
 fields exist; target/profile-specific layout goldens and full replacement link

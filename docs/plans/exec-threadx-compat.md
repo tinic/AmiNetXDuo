@@ -157,7 +157,8 @@ The isolated research project now links actual pinned NetX TCP suspension and
 cleanup/deferred-check code with actual ThreadX timeout/wait-abort, using the
 bounded Exec bridge described in `research/exec-threadx/README.md`. Host schedules
 cover publication, early wake, cancellation/timeout ownership, deferred lists,
-stale expiry and identity restoration. The m68k second-task smoke compiles; its
-native verdict and independent exact-commit review are pending. This remains
+stale expiry and identity restoration. The m68k second-task smoke compiles and passed all five native cases on one
+boardless A1200 run (38ff2cb0d, binary 71c27079, exit 0, stacks 8192).
+Independent exact-commit review is pending. This remains
 research only: no shipping backend selection, vendor edits, full scheduler
 conformance or measured net savings.

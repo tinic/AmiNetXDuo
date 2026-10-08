@@ -217,7 +217,8 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
     _tx_thread_preempt_disable--;
     need(!_tx_thread_preempt_disable, "nested preemption blocking");
     if (!thread->tx_thread_suspending) {
-        need(thread->tx_thread_state==TX_READY, "early resume state");
+        need(thread->tx_thread_state==TX_READY && !thread->tx_thread_suspend_cleanup,
+             "early resume left cleanup pending");
         return;
     }
     need(ticks!=TX_NO_WAIT, "zero timeout suspension");
@@ -258,6 +259,10 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
             need(t->token!=0,"deferred cleanup wait setup failed");
         }
     }
+    /* An abort after TCP timeout can encounter the no-op deferred sentinel.
+     * The producer must drain IP cleanup before releasing the boundary. The
+     * eventual full backend needs a general dispatch policy for that ordering. */
+    need(!thread->tx_thread_suspend_cleanup,"resume left cleanup pending");
 }
 
 VOID _tx_thread_system_resume(TX_THREAD *thread)

@@ -11,7 +11,7 @@
 #include <string.h>
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c); exit(1); } } while (0)
-enum { ARRIVAL, TIMEOUT, CLOSE, ABORT_WAIT, EXPIRE_ARRIVAL, TWO_WAITERS, STALE_TIMER, DETACH_PENDING };
+enum { ARRIVAL, TIMEOUT, CLOSE, ABORT_WAIT, EXPIRE_ARRIVAL, TWO_WAITERS, STALE_TIMER, DETACH_PENDING, EXPIRE_ABORT };
 typedef struct {
     TX_THREAD thread;
     AnxTxThread bridge;
@@ -78,7 +78,7 @@ static int park(void *arg,uint64_t deadline)
         return 0;
     }
     owner=3;
-    if (mode==EXPIRE_ARRIVAL || mode==STALE_TIMER || mode==TWO_WAITERS) {
+    if (mode==EXPIRE_ARRIVAL || mode==STALE_TIMER || mode==TWO_WAITERS || mode==EXPIRE_ABORT) {
         anx_tx_context_begin(&frame,TX_NULL,1);
         if (mode==STALE_TIMER) CHECK(!anx_tx_expire(&callers[0].thread,stale_token));
         else if (mode==TWO_WAITERS) {
@@ -99,8 +99,17 @@ static int park(void *arg,uint64_t deadline)
         socket.nx_tcp_socket_state=NX_TCP_CLOSED;
         _nx_tcp_receive_cleanup(&c->thread NX_CLEANUP_ARGUMENT);
         _nx_tcp_receive_cleanup(&c->thread NX_CLEANUP_ARGUMENT);
-    } else if (mode==ABORT_WAIT) {
+    } else if (mode==ABORT_WAIT || mode==EXPIRE_ABORT) {
         aborted=_tx_thread_wait_abort(&c->thread);
+        if (mode==EXPIRE_ABORT) {
+            CHECK(c->thread.tx_thread_state==TX_READY);
+            CHECK(c->thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
+            CHECK(socket.nx_tcp_socket_receive_suspended_count==1);
+            /* This producer is the IP actor: drain before its boundary Permit,
+             * otherwise the ready owner can return with an attached node. */
+            _nx_tcp_deferred_cleanup_check(&ip);
+            CHECK(!c->thread.tx_thread_suspend_cleanup);
+        }
     } else {
         if (mode==DETACH_PENDING) {
             CHECK(!anx_tx_detach(&c->bridge));
@@ -194,7 +203,7 @@ int main(void)
     CHECK(suspend_caller(0,2)==NX_SUCCESS);
     CHECK(!callers[0].parks && callers[0].bridge.resumes==1);
     finish();
-    for (scenario=ARRIVAL;scenario<=DETACH_PENDING;scenario++) {
+    for (scenario=ARRIVAL;scenario<=EXPIRE_ABORT;scenario++) {
         init(); mode=scenario;
         if (mode==STALE_TIMER) {
             mode=ARRIVAL; CHECK(suspend_caller(0,2)==NX_SUCCESS);
@@ -202,13 +211,13 @@ int main(void)
         }
         UINT result=suspend_caller(0,2);
         CHECK(result==(mode==TIMEOUT || mode==TWO_WAITERS ? NX_NO_PACKET :
-                       mode==CLOSE ? NX_NOT_CONNECTED : mode==ABORT_WAIT ? TX_WAIT_ABORTED : NX_SUCCESS));
-        if (mode==ABORT_WAIT) CHECK(aborted==TX_SUCCESS);
+                       mode==CLOSE ? NX_NOT_CONNECTED : (mode==ABORT_WAIT || mode==EXPIRE_ABORT) ? TX_WAIT_ABORTED : NX_SUCCESS));
+        if (mode==ABORT_WAIT || mode==EXPIRE_ABORT) CHECK(aborted==TX_SUCCESS);
         CHECK(callers[0].bridge.resumes==(mode==STALE_TIMER ? 2U : 1U));
         if (mode==TIMEOUT) CHECK(callers[0].parks==2 && now==40000);
         if (mode==TWO_WAITERS) CHECK(callers[0].thread.tx_thread_suspended_next==&callers[1].thread);
         finish();
     }
-    puts("research_tx_bridge_model=PASS checks=10/10 real NetX publish/resume/cleanup/deferred + ThreadX timeout/wait_abort");
+    puts("research_tx_bridge_model=PASS checks=11/11 real NetX publish/resume/cleanup/deferred + ThreadX timeout/wait_abort");
     return 0;
 }
