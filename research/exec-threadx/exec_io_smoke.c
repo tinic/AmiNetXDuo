@@ -161,8 +161,15 @@ static int start(unsigned index)
 static int reap(unsigned index)
 {
     AnxTxContext f;UINT status;
+    /* Normal completion removes the binding from the runtime list but keeps
+     * its thread pointer and public ID until delete. The stopped-helper
+     * terminal path clears that pointer; normal completion does not. */
     if (!anx_exec_thread_wait(&workers[index]) || workers[index].wait.opened ||
-        threads[index].tx_thread_state!=TX_COMPLETED || workers[index].bridge.thread) return 0;
+        threads[index].tx_thread_state!=TX_COMPLETED || threads[index].tx_thread_id!=TX_THREAD_ID ||
+        workers[index].bridge.thread!=&threads[index] || workers[index].bridge.abort_pins ||
+        workers[index].bridge.pending_resume || workers[index].bridge.pending_token ||
+        threads[index].tx_thread_suspend_cleanup || threads[index].tx_thread_owned_mutex_count ||
+        threads[index].tx_thread_owned_mutex_list || threads[index].tx_thread_timer.tx_timer_internal_list_head) return 0;
     anx_tx_context_begin(&f,&parent,0);status=tx_thread_delete(&threads[index]);anx_tx_context_end(&f);
     if (status==TX_SUCCESS) reaped++;
     return status==TX_SUCCESS && workers[index].state==ANX_THREAD_REAPED;
@@ -255,7 +262,8 @@ int main(void)
         if (!cycle) CASE("async-TX-completion-address-reuse-token-and-RX-handoff-wake-first-consumer");
         CHECK(send(tag[1]) && command(GO) && await(3,1) && !io.pending);
         if (!cycle) CASE("second-driver-completion-wakes-second-FIFO-consumer-with-exact-payload");
-        CHECK(reap(1) && reap(2) && result[0]==NX_SUCCESS && result[1]==NX_SUCCESS && await(0,0));
+        CHECK(reap(1));CHECK(reap(2));
+        CHECK(result[0]==NX_SUCCESS && result[1]==NX_SUCCESS);CHECK(await(0,0));
         if (!cycle) CASE("both-consumers-native-ACK-and-public-delete-before-storage-reuse");
         done[0]=0;mode[0]=1;
         CHECK(start(1) && await(1,1));
