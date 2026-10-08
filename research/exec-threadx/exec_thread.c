@@ -222,15 +222,15 @@ UINT _tx_thread_resume(TX_THREAD *t)
 static void native_yield(void)
 {
     struct Task *me=FindTask(0);
-    /* KS3.1 does not schedule on a same-value SetTaskPri. Request a scheduling
-     * decision using public calls, but restore priority before permitting any
-     * dispatch. No runnable Task can observe the temporary priority. */
-    Forbid();
-    BYTE priority=me->tc_Node.ln_Pri;
-    if (priority==-128) anx_tx_unsupported("native priority changed to minimum during relinquish");
-    (void)SetTaskPri(me,priority-1);
-    (void)SetTaskPri(me,priority);
-    Permit();
+    int ready=0;
+    /* Read membership/priority under the same interrupt protection as the
+     * existing Task liveness check. Never modify Exec's scheduler globals. */
+    Disable();
+    for (struct Node *n=SysBase->TaskReady.lh_Head;n->ln_Succ;n=n->ln_Succ)
+        if (n->ln_Pri>=me->tc_Node.ln_Pri) {ready=1;break;}
+    Enable();
+    if (ready && anx_tx_yield_wait()!=TX_SUCCESS)
+        anx_tx_unsupported("retained native yield wait refused");
 }
 UINT anx_exec_thread_relinquish(VOID)
 {

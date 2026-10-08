@@ -132,10 +132,14 @@ int anx_tx_context_resume(void);
  * normal context chain, then restores it. No priority/timeslice conformance. */
 UINT anx_tx_explicit_resume(TX_THREAD *);
 UINT anx_tx_relinquish(void (*native_yield)(void));
+/* Correctness baseline when Exec has no verified immediate equal-priority
+ * yield: reuse the retained owner's wait for 1000us while its frame is paused.
+ * Caller registry completion is central-clock granular. No allocation/new IO objects. */
+UINT anx_tx_yield_wait(void);
 /* Research scheduling policy: running owner only threshold changes, restore
  * before outer context_end. Real blocking may drop/reenter a raised-threshold
  * boundary. Slices are stored/advisory, not a ThreadX tick/dispatch guarantee.
- * No foreign threshold changes, priority inheritance or yield implementation. */
+ * No foreign threshold changes or priority inheritance; yield remains advisory. */
 int anx_tx_expire(TX_THREAD *, uint32_t token); /* marked timer context required */
 /* One explicit application-clock tick from an outer marked task timer context.
  * Native driver must wait outside the boundary. Does not tick private waits.

@@ -731,6 +731,25 @@ UINT anx_tx_relinquish(void (*native_yield)(void))
     return TX_SUCCESS;
 }
 
+UINT anx_tx_yield_wait(void)
+{
+    AnxTxThread *t;
+    uint32_t token;
+    platform->enter(platform->context);
+    t=caller_record();
+    if (!t || t->exec_wait_nesting!=1 || !t->paused_frame || !t->paused_depth ||
+        contexts || current_frame || _tx_thread_current_ptr || _tx_thread_system_state ||
+        _tx_thread_preempt_disable || t->explicit_suspend || t->wait->result==ANX_WAIT_PENDING ||
+        !platform->can_pause || !platform->can_pause(platform->context,1)) {
+        platform->leave(platform->context);return TX_CALLER_ERROR;
+    }
+    token=anx_wait_begin(t->wait,1000,0,0,0,0);
+    need(token!=0,"yield wait generation exhausted");
+    platform->leave(platform->context);
+    need(anx_wait_run(t->wait,token)==ANX_WAIT_TIMEOUT,"yield wait failed before owner restore");
+    return TX_SUCCESS;
+}
+
 /* Research Exec policy: only the running owner may change its threshold.
  * Forbid protects running code; a real suspension can release that boundary
  * and reacquires it before returning. No ready-list or dispatch preference is
