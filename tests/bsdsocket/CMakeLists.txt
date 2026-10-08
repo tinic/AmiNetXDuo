@@ -272,7 +272,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     add_test(NAME raw_v6_lock COMMAND test_raw_v6_lock)
 
     add_executable(test_inet host/test_inet_host.c
-                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/inet.c")
+                             "${CMAKE_SOURCE_DIR}/src/bsdsocket/inet.c"
+                             "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
 
     target_include_directories(test_inet PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"

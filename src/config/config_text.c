@@ -12,6 +12,7 @@
 
 #include "aminetxduo/config_advice.h"
 #include "aminetxduo/compat.h"
+#include "aminetxduo/ip_text.h"
 
 static char ami_cfg_empty[] = "";
 
@@ -655,14 +656,10 @@ BOOL ami_cfg_parse_net_number(const char *s, ULONG *out)
     return TRUE;
 }
 
-VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
+ULONG ami_format_ip4(char *buf, ULONG addr)
 {
-    char  tmp[16];
     ULONG pos = 0;
     int   octet;
-
-    if (buf == NULL || buflen == 0)
-        return;
 
     for (octet = 3; octet >= 0; octet--)
     {
@@ -678,14 +675,24 @@ VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
         while (v != 0);
 
         while (n > 0)
-            tmp[pos++] = digits[--n];
+            buf[pos++] = digits[--n];
 
         if (octet > 0)
-            tmp[pos++] = '.';
+            buf[pos++] = '.';
     }
 
-    tmp[pos] = '\0';
+    buf[pos] = '\0';
+    return pos;
+}
 
+VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
+{
+    char tmp[16];
+
+    if (buf == NULL || buflen == 0)
+        return;
+
+    (VOID)ami_format_ip4(tmp, addr);
     ami_cfg_copy_string(buf, buflen, tmp);
 }
 

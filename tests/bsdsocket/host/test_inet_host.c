@@ -334,6 +334,63 @@ static void test_ntop_v4(void)
     CHECK(h_last_errno != 0, "and says why in errno");
 }
 
+static void test_format_octets_and_bounds(void)
+{
+    static const struct { ULONG address; const char *text; } cases[] = {
+        { 0, "0.0.0.0" }, { 0x090A6364UL, "9.10.99.100" },
+        { 0xFFFFFFFFUL, "255.255.255.255" }
+    };
+    unsigned v, i;
+
+    for (v = 0; v <= 255; v++)
+    {
+        unsigned b = (v + 1) & 255, c = (v + 99) & 255, d = (v + 100) & 255;
+        ULONG address = ((ULONG)v << 24) | ((ULONG)b << 16) |
+                        ((ULONG)c << 8) | (ULONG)d;
+        char expected[16], output[16];
+
+        snprintf(expected, sizeof(expected), "%u.%u.%u.%u", v, b, c, d);
+        CHECK(bsd_Inet_NtoA(address, BASE) == (STRPTR)BASE->sb_NtoABuf &&
+              strcmp(BASE->sb_NtoABuf, expected) == 0,
+              "every octet value formats through the caller's private buffer");
+        CHECK(bsd_inet_ntop(AF_INET, &address, (STRPTR)output, (LONG)sizeof(output), BASE) == (STRPTR)output &&
+              strcmp(output, expected) == 0,
+              "inet_ntop formats every octet value without leading zeroes");
+    }
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        LONG size;
+        for (size = -1; size <= 16; size++)
+        {
+            char guarded[18], original[sizeof(guarded)];
+            STRPTR result;
+            size_t length = strlen(cases[i].text), j;
+            ULONG address = cases[i].address;
+
+            memset(guarded, 0x5A, sizeof(guarded));
+            memcpy(original, guarded, sizeof(guarded));
+            h_last_errno = 0;
+            result = bsd_inet_ntop(AF_INET, &address, (STRPTR)(guarded + 1), size, BASE);
+            if (size <= (LONG)length)
+            {
+                CHECK(result == NULL && h_last_errno == AMI_ENOSPC,
+                      "a short or negative buffer size is refused with ENOSPC");
+                CHECK(memcmp(guarded, original, sizeof(guarded)) == 0,
+                      "a refused conversion does not write any output byte");
+            }
+            else
+            {
+                CHECK(result == (STRPTR)(guarded + 1) && strcmp((const char *)result, cases[i].text) == 0,
+                      "exact room including NUL succeeds with the original spelling");
+                CHECK(guarded[0] == 0x5A, "conversion leaves its leading guard intact");
+                for (j = length + 2; j < sizeof(guarded); j++)
+                    CHECK(guarded[j] == 0x5A,
+                          "conversion writes no bytes beyond its terminating NUL");
+            }
+        }
+    }
+}
+
 int main(void)
 {
     printf("AmiNetXDuo, src/bsdsocket/inet.c on the host\n\n");
@@ -348,6 +405,7 @@ int main(void)
     test_classful();
     test_pton_v4();
     test_ntop_v4();
+    test_format_octets_and_bounds();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

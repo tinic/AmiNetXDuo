@@ -9,6 +9,9 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/ip_text.h"
+
+_Static_assert(BSD_NTOA_BUFLEN >= 16, "IPv4 output needs 16 bytes");
 
 #ifdef AMINETXDUO_IPV6
 /*
@@ -203,41 +206,6 @@ static BOOL bsd_inet_pton4(const char *cp, ULONG *result)
     return TRUE;
 }
 
-/* Unsigned decimal, no libc. Returns the number of characters written. */
-static ULONG bsd_format_u8(char *dst, ULONG value)
-{
-    char  tmp[3];
-    ULONG n = 0, i;
-
-    do
-    {
-        tmp[n++] = (char)('0' + (value % 10));
-        value /= 10;
-    } while (value != 0 && n < sizeof(tmp));
-
-    for (i = 0; i < n; i++)
-        dst[i] = tmp[n - 1 - i];
-
-    return n;
-}
-
-static ULONG bsd_format_ip(char *dst, ULONG addr)
-{
-    ULONG len = 0;
-    LONG  i;
-
-    for (i = 3; i >= 0; i--)
-    {
-        len += bsd_format_u8(dst + len, (addr >> (i * 8)) & 0xff);
-        if (i > 0)
-            dst[len++] = '.';
-    }
-
-    dst[len] = '\0';
-
-    return len;
-}
-
 /* ---------------------------------------------------------------- vectors, */
 
 in_addr_t bsd_inet_addr(register STRPTR cp __asm("a0"),
@@ -307,7 +275,7 @@ in_addr_t bsd_inet_network(register STRPTR cp __asm("a0"),
 STRPTR bsd_Inet_NtoA(register in_addr_t ip __asm("d0"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    bsd_format_ip(SocketBase->sb_NtoABuf, BSD_NTOHL(ip));
+    (VOID)ami_format_ip4(SocketBase->sb_NtoABuf, BSD_NTOHL(ip));
 
     return (STRPTR)SocketBase->sb_NtoABuf;
 }
@@ -410,7 +378,7 @@ STRPTR bsd_inet_ntop(register LONG af      __asm("d0"),
         return NULL;
     }
 
-    len = bsd_format_ip(scratch, BSD_NTOHL(((struct in_addr *)src)->s_addr));
+    len = ami_format_ip4(scratch, BSD_NTOHL(((struct in_addr *)src)->s_addr));
 
     if (size <= (LONG)len)
     {
