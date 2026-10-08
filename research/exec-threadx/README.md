@@ -1667,3 +1667,107 @@ actual public sockets/device/ISR integration and full create/close remain OPEN.
 Equal-feature image size, resident resources and performance, including the
 removed original baton's synchronization, remain unmeasured. This checkpoint is
 research-only and the branch remains unmerged.
+
+### Public suspend/resume/relinquish and full-link closure (2026-10-08)
+
+The research replacement now links the actual full-feature library with **zero
+unresolved symbols**, including IPv6 and the existing NetX add-ons. The gate
+compiles actual shipping objects and the research backend with Werror, removes
+both the old ThreadX scheduler/port archives and the original baton object, and
+uses no fixture, success stub or unresolved-symbol bypass. Static library entry
+and version-tag checks also pass. **Full-library runtime remains NOT_RUN**;
+link closure is a prerequisite for execution, not a functional completion or a
+size/performance comparison. This branch remains unmerged and research-only.
+
+Public explicit self-suspend executes the pinned upstream ThreadX body, retaining
+the upstream API and control layouts. Its actual zero-tick explicit suspension
+maps to an indefinite private owner wait without entering the application timer
+list. Public resume completes the real retained generation. A new private
+return-lifetime pin persists through READY until the suspended owner actually
+returns; detach/quiescent checks include that pin. Both cached callers and
+prepared native workers execute repeated suspend/resume cycles. Foreign READY
+or blocked/delayed suspension remains unsupported and is refused before mutation.
+Initial DONT_START worker resume retains its existing behavior.
+
+Two native yield attempts actually **FAILED**: source 8317ac6c5 used same-value
+SetTaskPri; source b80c05575 used a protected priority dip and restoration. Both
+failed the unchanged strict equal-priority peer-progress assertion, printed no
+buffered CASE_PASS lines, then timed out without a guest exit and reset during
+failed-fixture teardown. Other six fixtures at those sources were NOT_RUN.
+Original binaries/maps/stdout/serial/emulator receipts remain separate; later
+passes do not relabel these failures. AgentNet's explanation of classic Exec's
+scheduling decision is an inference, not a ROM-disassembly result.
+
+Source 35e80a3e461d62cdcfeefbabd2cb32404d6bc410 instead yields through an actual
+retained owner wait and passed all seven native fixtures, **150/150**. No extra
+Task, control allocation or IO object is created per yield. Outside the released
+context, an interrupt-protected ready-list scan checks for an equal/higher native
+Task; when one is ready, the owner waits for a real TIMEOUT using a fresh private
+generation, then restores its exact nested bracket. With no such ready Task it
+skips the wait. ThreadX state, mutex ownership and native priority are retained.
+This is a correctness baseline: workers request **1000 microseconds**, cached
+callers use the central clock's deadline granularity, and scheduler load adds
+latency. It is not proof of strict ThreadX round robin or a performance gain.
+
+AgentNet claudecode independently reviewed the actual implementation, pinned
+suspend body, lifetime/context/wait checks, CMake and full-gate wiring. All review
+parts are retained in /Users/turo/ai/evidence/exec-threadx-schedule-source-review.txt.
+The bounded source verdict is NO BLOCKER, with one recommended policy fix:
+context_pause could release the boundary with a raised preemption threshold.
+Final executable source **6eaf6d226afe1ce63cee331957fc6945d01e5a32** rejects that
+pause before changing frames or releasing protection. Host and native assertions
+use actual public preemption_change 16 -> 8, verify refusal with identity and
+protection retained, then restore 16. The independent delta rereview confirms
+F1 resolved and no bounded blocker. It does not approve full-library runtime.
+
+Final host tests pass **48/48**. Seven artifacts compile with Werror and
+startup-first validation. Actual native results at 6eaf6d226 are:
+
+| Native fixture | Actual cases | Guest/harness exit |
+| --- | --- | --- |
+| Public scheduling | 29/29 | 0/0 |
+| Kernel and production hooks | 23/23 | 0/0 |
+| Cached callers | 25/25 | 0/0 |
+| Context pause | 14/14 | 0/0 |
+| Concurrent driver IO | 25/25 | 0/0 |
+| IPv4 protocols | 19/19 | 0/0 |
+| Clock lifecycle | 16/16 | 0/0 |
+
+All **151/151** execute once serially on the existing local Mac Amiberry 8.3.0
+(2026.08.05), supplied A1200 Kickstart 3.1 r40.68 ROM, boardless Fast 8 MB, guest
+stack 8192 and timeout 90. Root verifies actual stdout/counts/exit, one matching
+boot token per run, binary/map hashes and receipt manifests, and no guest
+illegal/guru/alert or unexpected ROM reset. Host Denise queue warnings are
+recorded without a corresponding guest fault. Run times are harness wall clock,
+not benchmark results. The old strict peer-progress assertions are unchanged;
+the added 29th scheduling case covers the review's threshold guard.
+
+Evidence is indexed in
+/Users/turo/ai/evidence/exec-threadx-public-schedule-checked.json. Earlier failed
+and 150-case indexes/receipts remain separate. The exact clean 6eaf full-profile
+gate is /Users/turo/ai/evidence/exec-threadx-schedule-library-gate-checked.json:
+PASS_LINK_ONLY_UNVERIFIED, zero unresolved symbols, runtime NOT_RUN. Useful final
+binaries/maps, failed scheduling artifacts, build/link/review and native receipts
+are retained. Owned build outputs, disposable native drives/configs/serial files,
+local emulator home/locks, staged helper and copied ROM are removed after proof
+verification. User assets, emulator installation, hardware disks, upstream audit
+and unchanged vendor pins are preserved.
+
+Remaining limitations include public relinquish with a raised threshold or
+native priority -128 (fatal through the public VOID unsupported path), foreign or
+delayed suspension, default shipping worker creation/stack policy, general busy
+removed-owner/cancellation/close behavior, actual public sockets/device/ISR and
+enabled IPv6 execution. The priority -128 refusal is now conservative rather than
+required by a priority dip; removing it needs its own reviewed contract. The
+ready scan includes all qualifying Exec Tasks, not just ThreadX peers, so yield
+cost can occur more broadly. Host-model internals/docs were not independently
+reviewed as part of claudecode's implementation review.
+
+The next integration step is **worker creation through the real library path**:
+_tx_thread_create currently requires an idle-prepared record, otherwise returns
+TX_NO_MEMORY, and preparation currently needs an 8192-byte stack while production
+mDNS allocates 4096. Implement a retained manager-mediated creation/stack contract
+before attempting real library open/create/close and public socket execution.
+Then compare equal-feature image size, resident resources and performance,
+including the synchronization formerly imposed by the original baton. No
+shipping integration or improvement in those measurements is established yet.
