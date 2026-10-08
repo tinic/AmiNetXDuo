@@ -323,6 +323,58 @@ policy for it; restoring only status would not resolve packet ownership.
 Production also needs safe total cleanup/lifetime and producer-boundary exits;
 the research grace is not a recovery or production latency guarantee. This spike does not establish a full NetX stack or net size savings.
 
+## Spike 4: synchronous deferred receive-abort cleanup
+
+`netx_resume.c` adds an explicit, owner-configured integration hook on registered
+research callers. The backend saves the actual cleanup callback, control pointer
+and suspension sequence when arming each wait. Before making a resumed target
+READY, it calls the hook after balancing the preemption counter. The hook accepts
+only normal registered caller context, TX_SUSPENDED/TX_WAIT_ABORTED, the NetX
+deferred sentinel, a matching saved receive cleanup/control/sequence and a valid
+retained socket. It acquires the real IP mutex, calls the original
+`_nx_tcp_receive_cleanup`, verifies that cleanup cleared with abort status/state
+preserved, and releases the mutex. The actual ThreadX abort and all NetX vendor
+sources remain unchanged. No callback pointer, list removal or status is forged.
+
+The actual cleanup sees TX_SUSPENDED, so it removes the node/count without its
+TX_TCP_IP timeout-status/resume branch. Backend resume can then wake the owner
+normally. A later packet cannot select that aborted node. This fixes the bounded
+receive-abort interaction by removing ownership before READY, rather than
+repairing status after packet delivery. Without this explicit hook the spike-3
+gate still has the documented race; the host baseline deliberately reproduces
+NX_SUCCESS plus packet delivery following an abort that returned TX_SUCCESS.
+That baseline reproduction is not a successful compatibility verdict.
+
+Host coverage adds eight integration schedules: single aborted waiter/packet
+remaining queued, aborted head or tail with another live waiter, both waiters
+aborted, recursive mutex ownership, arrival winning before abort, ordinary abort,
+and TCP/sleep/TCP reuse refreshing the saved callback. Four separate rejection
+probes cover stale sequence, missing saved callback, invalid socket ID with
+retained storage, and foreign mutex contention. Total host CTest PASS 13/13 also
+retains previous primitive/TCP/UDP/sleep/extraction and guard coverage. Packet
+queue/delivery is a fixture matching the transfer in
+`nx_tcp_socket_state_data_check.c`; it does not execute TCP wire/header/checksum
+processing, full public receive, packet-pool release or socket lifetime deletion.
+The decoded payload is delivered once to a live waiter or retained on the queue.
+
+The m68k smoke adds two native cases to the prior ten: independent non-IP abort
+followed by packet arrival, with and without the abort caller already owning the
+IP mutex. The receiver may wake before the later producer; the parent waits
+outside the serialized boundary with a bounded poll before checking queue
+ownership. Compilation passes; actual emulator verdict and exact implementation
+review are pending at this checkpoint.
+
+This is not the production blocking-mutex design. Boundaries already serialize
+these research operations. Mutex acquisition inside resume supports only
+uncontended/recursive ownership; foreign contention fails closed. A full backend
+must move a potentially blocking acquisition outside resume/Forbid and implement
+its scheduling/lifetime policy. Only TCP receive cleanup is supported by the hook;
+other TCP wait classes and real ISR callers are rejected when cleanup remains.
+The deferral event flag can remain set after synchronous removal: the later real
+deferred checker finds no such node, harmlessly. Socket/control/producer storage
+must stay alive; ID checking is not use-after-free protection. One-second gate
+grace and rejection paths are fatal research diagnostics, never recovery.
+
 ## Still open
 
 Full current-thread/adoption semantics, blocking mutexes, event waiters, thread

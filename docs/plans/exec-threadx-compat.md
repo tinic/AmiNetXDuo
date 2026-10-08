@@ -223,3 +223,22 @@ thread is selected before deferred cleanup, NetX resume overwrites its status
 with NX_SUCCESS. A full backend requires a policy for both status and packet
 ownership; the cleanup gate alone does not solve it. One-second grace is a
 fatal research diagnostic, never a safe total-drain/lifetime implementation.
+
+## Spike 4 implementation checkpoint
+
+The G4 receive-abort race is now reproduced by a fixture: the generic gated
+baseline can return NX_SUCCESS and a packet after the abort caller returned
+TX_SUCCESS. An explicit research NetX integration hook finishes actual receive
+cleanup under the real IP mutex before backend READY/resume. It uses the saved
+callback/control/sequence from the current suspension, leaves actual ThreadX
+abort and vendor protocol sources unchanged, and preserves abort result and
+fixture packet ownership in eight host schedules. Four rejection probes reject
+stale/missing cleanup captures, invalid retained sockets and foreign mutex
+contention. Host CTest PASS 13/13; expanded 12-case m68k smoke compiles. Exact
+independent implementation review and actual native verdict are pending.
+
+This establishes a possible bounded integration boundary, not production
+blocking/scheduler compatibility. Potentially blocking mutex acquisition cannot
+remain inside resume/Forbid in a complete backend. Non-receive TCP waits, wire
+processing, object lifetime, full replacement linking and size savings remain
+open. Existing non-opted-in generic gating retains its known packet-arrival race.

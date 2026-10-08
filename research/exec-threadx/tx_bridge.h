@@ -20,6 +20,10 @@ typedef struct AnxTxThread {
     struct AnxTxThread *next;
     uint32_t token, pending_token;
     unsigned expiry_dispatched, pending_resume, resumes, parks;
+    VOID (*cleanup_at_suspend)(TX_THREAD *, ULONG);
+    VOID *control_at_suspend;
+    ULONG sequence_at_suspend;
+    int (*resume_cleanup)(struct AnxTxThread *);
 } AnxTxThread;
 
 typedef struct AnxTxContext {
@@ -38,6 +42,9 @@ typedef struct AnxTxContext {
 void anx_tx_runtime_init(const AnxTxPlatform *);
 int anx_tx_attach(AnxTxThread *, TX_THREAD *, AnxWait *, uintptr_t);
 int anx_tx_detach(AnxTxThread *);
+/* Owner-only, while READY and quiescent. Optional integration must perform
+ * real cleanup before resume, or return zero to fail closed. */
+int anx_tx_set_resume_cleanup(AnxTxThread *, int (*)(AnxTxThread *));
 void anx_tx_context_begin(AnxTxContext *, TX_THREAD *, ULONG system_state);
 void anx_tx_context_end(AnxTxContext *);
 int anx_tx_expire(TX_THREAD *, uint32_t token); /* marked timer context required */

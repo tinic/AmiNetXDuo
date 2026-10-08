@@ -11,7 +11,7 @@ set(ANX_BRIDGE_INCLUDES "${ANX_ROOT}/port/threadx-amiga/inc"
 if(NOT CMAKE_CROSSCOMPILING)
     list(PREPEND ANX_BRIDGE_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/host")
 endif()
-add_library(research_tx_bridge STATIC tx_bridge.c
+add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_timeout.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_sleep.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
@@ -79,6 +79,18 @@ else()
     target_link_libraries(research_tx_bridge_model PRIVATE research_tx_bridge)
     target_compile_options(research_tx_bridge_model PRIVATE -Wall -Wextra -Werror)
     add_test(NAME research_tx_bridge_model COMMAND research_tx_bridge_model)
+    add_executable(research_netx_resume_model test_netx_resume.c)
+    target_link_libraries(research_netx_resume_model PRIVATE research_tx_bridge)
+    target_compile_options(research_netx_resume_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_netx_resume_model COMMAND research_netx_resume_model)
+    add_test(NAME research_netx_resume_reject_sequence
+        COMMAND research_netx_resume_model --reject-sequence)
+    add_test(NAME research_netx_resume_reject_callback
+        COMMAND research_netx_resume_model --reject-callback)
+    add_test(NAME research_netx_resume_reject_invalid_socket
+        COMMAND research_netx_resume_model --reject-invalid-socket)
+    add_test(NAME research_netx_resume_reject_contention
+        COMMAND research_netx_resume_model --reject-contention)
     add_executable(research_udp_bridge_model test_udp_bridge.c)
     target_link_libraries(research_udp_bridge_model PRIVATE research_tx_bridge)
     target_compile_options(research_udp_bridge_model PRIVATE -Wall -Wextra -Werror)

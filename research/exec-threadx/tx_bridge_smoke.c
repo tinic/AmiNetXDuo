@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT */
 #define NX_SOURCE_CODE
 #include "tx_bridge_exec.h"
+#include "netx_resume.h"
 #include "exec_wait.h"
 #include "nx_api.h"
 #include "nx_tcp.h"
@@ -13,7 +14,8 @@
 #include <clib/alib_protos.h>
 
 enum { JOB_NONE, JOB_ARRIVAL, JOB_TIMEOUT, JOB_CLOSE, JOB_ABORT, JOB_EXPIRE_ARRIVAL, JOB_LATE_ABORT,
-       JOB_UDP_ARRIVAL, JOB_UDP_TIMEOUT, JOB_UDP_ABORT, JOB_SLEEP };
+       JOB_UDP_ARRIVAL, JOB_UDP_TIMEOUT, JOB_UDP_ABORT, JOB_SLEEP,
+       JOB_RX_ABORT_PACKET, JOB_RX_ABORT_PACKET_LOCKED };
 static TX_THREAD owner_thread,worker_thread,abort_thread;
 static AnxTxThread owner_bridge,worker_bridge,abort_bridge;
 static AnxExecWait owner_wait,worker_wait,abort_wait;
@@ -58,6 +60,24 @@ static void udp_arrival(void)
     _tx_thread_system_resume(t);
 }
 
+/* Already decoded TCP payload fixture. State/header/wire processing is outside
+ * this smoke. An aborted receiver must not be selected for its ownership. */
+static void tcp_packet_arrival(void)
+{
+    CHECK(!socket.nx_tcp_socket_receive_queue_head);
+    socket.nx_tcp_socket_receive_queue_head=&packet;
+    socket.nx_tcp_socket_receive_queue_tail=&packet;
+    socket.nx_tcp_socket_receive_queue_count=1;
+    if (socket.nx_tcp_socket_receive_suspension_list) {
+        TX_THREAD *t=socket.nx_tcp_socket_receive_suspension_list;
+        socket.nx_tcp_socket_receive_queue_head=NX_NULL;
+        socket.nx_tcp_socket_receive_queue_tail=NX_NULL;
+        socket.nx_tcp_socket_receive_queue_count--;
+        *((NX_PACKET **)t->tx_thread_additional_suspend_info)=&packet;
+        arrival();
+    }
+}
+
 static void abort_entry(void)
 {
     CHECK(anx_exec_wait_open(&abort_wait));
@@ -69,15 +89,28 @@ static void abort_entry(void)
         CHECK(token && anx_exec_wait_run(&abort_wait,token)==ANX_WAIT_TIMEOUT);
         Forbid(); next=job; step=phase; stopping=stop; Permit();
         if (stopping) break;
-        if (next!=JOB_LATE_ABORT || step!=1) continue;
+        if ((next!=JOB_LATE_ABORT && next<JOB_RX_ABORT_PACKET) || step!=1) continue;
         AnxTxContext frame;
         anx_tx_context_begin(&frame,&abort_thread,0);
         CHECK(_tx_thread_identify()==&abort_thread);
         CHECK(!ip.nx_ip_protection.tx_mutex_ownership_count);
+        if (next==JOB_RX_ABORT_PACKET_LOCKED)
+            CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
         abort_result=_tx_thread_wait_abort(&owner_thread);
         CHECK(abort_result==TX_SUCCESS && owner_thread.tx_thread_state==TX_READY);
-        CHECK(owner_thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
-        CHECK(owner_bridge.pending_resume && socket.nx_tcp_socket_receive_suspended_count==1);
+        if (next==JOB_LATE_ABORT) {
+            CHECK(owner_thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
+            CHECK(owner_bridge.pending_resume && socket.nx_tcp_socket_receive_suspended_count==1);
+        } else {
+            CHECK(!owner_thread.tx_thread_suspend_cleanup && !owner_bridge.pending_resume);
+            CHECK(!socket.nx_tcp_socket_receive_suspended_count && !received);
+            CHECK(owner_thread.tx_thread_suspend_status==TX_WAIT_ABORTED);
+        }
+        if (next==JOB_RX_ABORT_PACKET_LOCKED) {
+            CHECK(ip.nx_ip_protection.tx_mutex_ownership_count==1);
+            CHECK(ip.nx_ip_protection.tx_mutex_owner==&abort_thread);
+            CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+        }
         phase=2;
         anx_tx_context_end(&frame);
     }
@@ -99,7 +132,7 @@ static void worker_entry(void)
         Forbid(); next=job; step=phase; stopping=stop; Permit();
         if (stopping) break;
         if (!next || next==JOB_UDP_TIMEOUT) continue;
-        if (next==JOB_LATE_ABORT && step!=2) {
+        if ((next==JOB_LATE_ABORT || next>=JOB_RX_ABORT_PACKET) && step!=2) {
             if (!step) {
                 AnxTxContext timer;
                 anx_tx_context_begin(&timer,TX_NULL,1);
@@ -131,6 +164,13 @@ static void worker_entry(void)
                 CHECK(!owner_thread.tx_thread_suspend_cleanup && owner_bridge.pending_resume);
                 phase=3;
             }
+        } else if (next>=JOB_RX_ABORT_PACKET) {
+            CHECK(owner_thread.tx_thread_suspend_status==TX_WAIT_ABORTED && !received);
+            CHECK(!owner_thread.tx_thread_suspend_cleanup && !owner_bridge.pending_resume);
+            tcp_packet_arrival();
+            _nx_tcp_deferred_cleanup_check(&ip);
+            CHECK(socket.nx_tcp_socket_receive_queue_head==&packet && !received);
+            phase=3;
         }
         else if (next==JOB_CLOSE) {
             socket.nx_tcp_socket_state=NX_TCP_CLOSED;
@@ -182,7 +222,7 @@ int main(void)
     CHECK(abort_task!=0);
     while (!worker_ready || !abort_ready) Wait(ack);
     say("research_tx_bridge=WORKER_READY\n");
-    for (scenario=JOB_ARRIVAL;scenario<=JOB_SLEEP;scenario++) {
+    for (scenario=JOB_ARRIVAL;scenario<=JOB_RX_ABORT_PACKET_LOCKED;scenario++) {
         unsigned before=owner_bridge.resumes;
         anx_tx_context_begin(&frame,&owner_thread,0);
         if (scenario==JOB_SLEEP) {
@@ -194,7 +234,7 @@ int main(void)
         socket.nx_tcp_socket_state=NX_TCP_ESTABLISHED;
         ip.nx_ip_events.tx_event_flags_group_current=0;
         phase=0; job=scenario;
-        if (scenario>=JOB_UDP_ARRIVAL) {
+        if (scenario>=JOB_UDP_ARRIVAL && scenario<=JOB_UDP_ABORT) {
             udp.nx_udp_socket_id=NX_UDP_ID;
             udp.nx_udp_socket_bound_next=&udp;
             udp.nx_udp_socket_ip_ptr=&ip;
@@ -212,20 +252,50 @@ int main(void)
             CHECK(!ip.nx_ip_events.tx_event_flags_group_current);
             if (scenario==JOB_UDP_TIMEOUT) job=JOB_NONE; /* no IP callback for direct cleanup */
         } else {
+            if (scenario>=JOB_RX_ABORT_PACKET) {
+                CHECK(anx_tx_set_resume_cleanup(&owner_bridge,anx_netx_receive_abort_cleanup));
+                received=NX_NULL;
+                owner_thread.tx_thread_additional_suspend_info=&received;
+                packet.nx_packet_prepend_ptr=(UCHAR *)packet_data;
+                packet.nx_packet_length=3;
+            }
             CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
             socket.nx_tcp_socket_receive_suspended_count++;
             _nx_tcp_socket_thread_suspend(&socket.nx_tcp_socket_receive_suspension_list,
                 _nx_tcp_receive_cleanup,&socket,&ip.nx_ip_protection,
-                scenario==JOB_TIMEOUT ? 2 : (scenario==JOB_EXPIRE_ARRIVAL || scenario==JOB_LATE_ABORT) ? 50 : TX_WAIT_FOREVER);
+                scenario==JOB_TIMEOUT ? 2 : (scenario==JOB_EXPIRE_ARRIVAL || scenario==JOB_LATE_ABORT || scenario>=JOB_RX_ABORT_PACKET) ? 50 : TX_WAIT_FOREVER);
             CHECK(!socket.nx_tcp_socket_receive_suspension_list && !socket.nx_tcp_socket_receive_suspended_count);
             CHECK(owner_thread.tx_thread_suspend_status==(scenario==JOB_TIMEOUT ? NX_NO_PACKET :
-                  scenario==JOB_CLOSE ? NX_NOT_CONNECTED : (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT) ? TX_WAIT_ABORTED : NX_SUCCESS));
+                  scenario==JOB_CLOSE ? NX_NOT_CONNECTED : (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT || scenario>=JOB_RX_ABORT_PACKET) ? TX_WAIT_ABORTED : NX_SUCCESS));
             if (scenario==JOB_LATE_ABORT) CHECK(phase==3 && !owner_bridge.pending_resume);
+            if (scenario>=JOB_RX_ABORT_PACKET) {
+                /* Synchronous abort can wake this task before the later packet
+                 * producer. Wait outside the serialized boundary for it. */
+                CHECK(!received);
+                anx_tx_context_end(&frame);
+                for (unsigned attempt=0;attempt<50;attempt++) {
+                    unsigned done;
+                    Forbid(); done=phase==3 && job==JOB_NONE; Permit();
+                    if (done) break;
+                    uint32_t token=anx_wait_begin(&owner_wait.wait,20000,0,0,0,0);
+                    CHECK(token && anx_exec_wait_run(&owner_wait,token)==ANX_WAIT_TIMEOUT);
+                }
+                anx_tx_context_begin(&frame,&owner_thread,0);
+                CHECK(phase==3 && job==JOB_NONE && !received);
+                CHECK(socket.nx_tcp_socket_receive_queue_head==&packet && socket.nx_tcp_socket_receive_queue_tail==&packet);
+                CHECK(socket.nx_tcp_socket_receive_queue_count==1 && packet.nx_packet_length==3);
+                CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
+                socket.nx_tcp_socket_receive_queue_head=NX_NULL;
+                socket.nx_tcp_socket_receive_queue_tail=NX_NULL;
+                socket.nx_tcp_socket_receive_queue_count--;
+                CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+                CHECK(anx_tx_set_resume_cleanup(&owner_bridge,0));
+            }
         }
         CHECK(_tx_thread_identify()==&owner_thread);
         CHECK(!owner_thread.tx_thread_suspend_cleanup && !owner_thread.tx_thread_timer.tx_timer_internal_list_head);
         CHECK(owner_thread.tx_thread_state==TX_READY && owner_bridge.resumes==before+1);
-        if (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT || scenario==JOB_UDP_ABORT) CHECK(abort_result==TX_SUCCESS);
+        if (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT || scenario==JOB_UDP_ABORT || scenario>=JOB_RX_ABORT_PACKET) CHECK(abort_result==TX_SUCCESS);
         CHECK(!job && !_tx_thread_preempt_disable);
         anx_tx_context_end(&frame);
         passed++;
@@ -237,6 +307,6 @@ int main(void)
     CHECK(anx_exec_wait_close(&owner_wait));
     FreeSignal(bit);
     CHECK(!_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable);
-    say(passed==10 ? "research_tx_bridge=PASS checks=10/10 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
-    return passed==10 ? 0 : 20;
+    say(passed==12 ? "research_tx_bridge=PASS checks=12/12 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
+    return passed==12 ? 0 : 20;
 }

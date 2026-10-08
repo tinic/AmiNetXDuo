@@ -113,6 +113,18 @@ int anx_tx_detach(AnxTxThread *t)
     return 1;
 }
 
+int anx_tx_set_resume_cleanup(AnxTxThread *t, int (*hook)(AnxTxThread *))
+{
+    int valid;
+    platform->enter(platform->context);
+    valid=find(t->thread)==t && platform->caller(platform->context)==t->owner &&
+        t->thread->tx_thread_state==TX_READY && !t->thread->tx_thread_suspend_cleanup &&
+        !t->pending_resume && !t->pending_token && t->wait->result!=ANX_WAIT_PENDING;
+    if (valid) t->resume_cleanup=hook;
+    platform->leave(platform->context);
+    return valid;
+}
+
 void anx_tx_context_begin(AnxTxContext *frame, TX_THREAD *thread, ULONG state)
 {
     platform->enter(platform->context);
@@ -241,6 +253,9 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
         return;
     }
     need(ticks!=TX_NO_WAIT, "zero timeout suspension");
+    t->cleanup_at_suspend=thread->tx_thread_suspend_cleanup;
+    t->control_at_suspend=thread->tx_thread_suspend_control_block;
+    t->sequence_at_suspend=thread->tx_thread_suspension_sequence;
     thread->tx_thread_suspending=TX_FALSE;
     t->expiry_dispatched=0;
     t->token=anx_wait_begin(t->wait,ticks==TX_WAIT_FOREVER ? ANX_WAIT_FOREVER :
@@ -291,6 +306,8 @@ VOID _tx_thread_system_resume(TX_THREAD *thread)
     AnxTxThread *t=find(thread);
     need(contexts && _tx_thread_preempt_disable>0,"resume missing protected preemption increment");
     _tx_thread_preempt_disable--;
+    if (thread->tx_thread_suspend_cleanup && t->resume_cleanup)
+        need(t->resume_cleanup(t),"resume cleanup integration rejected");
     _tx_timer_system_deactivate(&thread->tx_thread_timer);
     if (thread->tx_thread_state==TX_READY) return;
     thread->tx_thread_suspending=TX_FALSE;
