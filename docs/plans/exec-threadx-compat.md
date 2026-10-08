@@ -1,6 +1,6 @@
 # Research: an Exec backend for the NetX Duo ThreadX contract
 
-**Status: research only; wait primitive and bounded real-NetX suspension bridge
+**Status: research only; wait primitive and bounded real-NetX TCP/UDP suspension bridge
 implemented and native smokes verified. Full backend/conformance remains open.**
 The human explicitly placed this work on a research branch on 2026-10-07.
 It is outside near-term shipping work. It must not change shipping defaults,
@@ -207,5 +207,7 @@ object deletion and packet-arrival races require further work.
 Actual UDP receive/cleanup, checksum/packet-release helpers and ThreadX sleep are
 linked. Host CTest PASS 8/8 includes 13 TCP schedules, 8 UDP schedules, 4 sleep
 schedules and rejection probes; packet delivery is a fixture and checksum paths
-are not exercised. The three-task native smoke compiles, with 10 planned cases.
-Exact-commit independent review and actual native verdict are pending.
+are not exercised. The three-task native smoke passed 10/10 cases, exit 0 after 14 seconds on one
+boardless A1200/KS3.1 run at `2ba6f0d6e`, binary a524f38b (47,160 bytes), stacks
+8192. Both workers removed themselves before the parent returned. Exact-commit
+independent implementation review is pending.

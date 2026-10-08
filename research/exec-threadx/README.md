@@ -293,11 +293,16 @@ primitive/extraction and three rejection probes (stalled cleanup, blocking mutex
 timer-context mutex).
 
 The expanded m68k smoke compiles with three real Exec tasks: owner, IP producer
-and independent abort caller. Ten planned cases are the original five TCP cases,
+and independent abort caller. Ten executed cases are the original five TCP cases,
 delayed TCP cleanup after the independent abort, UDP arrival/timeout/abort and
 real ThreadX sleep. Both workers own and reap their resources and remove their
-tasks before the parent releases the program. Native verdict and independent
-exact-commit review are pending; prior native evidence covers only prior binaries.
+tasks before the parent releases the program. Actual native PASS 10/10,
+workers_reaped=2, guest exit 0 after 14 seconds on one boardless A1200/KS3.1 r40.68
+run; parent and both workers use 8192-byte stacks. Source `2ba6f0d6e`, binary SHA256
+`a524f38bcd7f31ad10c92b1f1b122a8441c431ac393e7e076eb933a8276c790c`, 47,160 bytes.
+Harness `tools/amiberry-run.sh -m A1200 -t 90` at `300b22e8`; actual stdout,
+startup and exit evidence are `/Users/turo/ai/evidence/exec-threadx-spike3-native`.
+Independent exact-commit implementation review is pending.
 Other races, including packet delivery while a deferred abort is pending, remain
 unverified. This spike does not establish a full NetX stack or net size savings.
 
@@ -306,7 +311,7 @@ unverified. This spike does not establish a full NetX stack or net size savings.
 Full current-thread/adoption semantics, blocking mutexes, event waiters, thread
 lifecycle, priority/preemption semantics, common timer integration and replacement
 backend selection remain unimplemented. Minimum-profile coverage, broader native schedules,
-UDP direct cleanup, NetX/socket conformance and net
+UDP wire/checksum coverage, NetX/socket conformance and net
 size/runtime comparison remain pending. The compile probe checks that referenced
 fields exist; target/profile-specific layout goldens and full replacement link
 checks remain to be added. No complete backend or size-saving claim exists.

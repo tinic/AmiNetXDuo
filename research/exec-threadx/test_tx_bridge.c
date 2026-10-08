@@ -149,6 +149,7 @@ static int park(void *arg,uint64_t deadline)
         CHECK(aborted==TX_SUCCESS && c->thread.tx_thread_state==TX_READY);
         CHECK(c->thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
         CHECK(c->bridge.pending_resume && c->wait.result==ANX_WAIT_TIMEOUT);
+        stale_token=c->bridge.token;
         CHECK(!anx_tx_detach(&c->bridge));
         anx_tx_context_end(&frame);
         CHECK(c->bridge.pending_resume && socket.nx_tcp_socket_receive_suspended_count==1);
@@ -158,6 +159,9 @@ static int park(void *arg,uint64_t deadline)
     if (mode==LATE_ABORT) {
         CHECK(deadline==ANX_TX_CLEANUP_GRACE_US && c->bridge.pending_resume);
         CHECK(c->bridge.pending_token==c->bridge.token);
+        CHECK(stale_token!=c->bridge.token);
+        CHECK(!anx_wait_complete(&c->wait,stale_token,ANX_WAIT_READY));
+        CHECK(c->wait.result==ANX_WAIT_PENDING && c->bridge.pending_resume);
         if (reject_stuck_cleanup) {
             owner=3;
             anx_tx_context_begin(&frame,&callers[2].thread,0);
