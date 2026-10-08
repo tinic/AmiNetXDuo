@@ -777,7 +777,15 @@ threshold. It checks restoration and marker publication before entry, actual
 slice changes in the worker, raised-threshold event blocking, producer marker
 publication before the woken worker can resume, protected identity on return and
 threshold restoration before retirement. Expected 14/14, tasks_reaped=10,
-restarts=6. Native execution and independent exact source review remain pending
-until their separate receipts are recorded. Scope remains research only, with
+restarts=6. Claudecode's single boardless A1200/KS3.1 r40.68 run at exact
+`37776d2651c6c85f3e414c759de70e2c8436c72e` passes all 14 named cases,
+tasks_reaped=10, restarts=6, exit 0 after 14s, parent/child stacks 8192, harness
+`300b22e8`. Root verified actual stdout/startup/runner and all binary/map/evidence
+hashes under `/Users/turo/ai/evidence/exec-threadx-spike10-native`; binary
+`4cba8af3`, 60,168 bytes including fixtures/runtime. Independent deepseek-v4
+read-only source review is complete (all 19 parts): no blocker in this bounded
+scope, no tests run by the reviewer. Owned build/native staging are removed.
+The proposal for real IP retirement is retained separately and is unimplemented.
+Scope remains research only, with
 no production/vendor/header changes, real NX_IP helper, forced stop/drain, full
 replacement link, automatic clock, performance improvement or net size verdict.

@@ -477,6 +477,73 @@ creation and entry evidence afterwards. An IP ID or NX_SUCCESS alone is not a
 successful runtime verdict. This source observation is a pending integration
 obligation, not a vendor fix or a shipping change made by spike 9.
 
+## Spike 10 scheduling policy checkpoint
+
+Exact `37776d2651c6c85f3e414c759de70e2c8436c72e` accepts NetX's nonzero
+helper slice as logical metadata, with no ThreadX tick countdown or global Exec
+quantum change. Initial threshold still must equal priority. Public
+preemption_change supports only the current registered owner under an unmarked
+serialized call, returns the old user threshold before successful mutation,
+validates against user priority and rejects inheritance. Foreign threshold changes
+remain unsupported. time_slice_change stores both logical slice fields and
+returns the prior configured slice under the same serialized boundary.
+
+The outer context_end rejects a raised threshold before releasing Forbid.
+Nested contexts retain the outer lock. Actual event suspension may release it
+with the threshold retained, then reenters before the waiting caller continues;
+that owner must restore before returning from its outer call. This bounded policy
+provides serialization, not a ready-list scheduler or dispatch-race preference.
+No claim is made that a woken sender outruns the producer or other Exec tasks.
+
+Root host 31/31 passes, including actual pinned event suspension and three
+separate fatal guards (outside-context service, raised-threshold outer exit,
+unsupported inheritance), with retained earlier models. m68k cross/startup
+gates pass. Claudecode's single boardless A1200/KS3.1 r40.68 run passes 14/14,
+10 tasks reaped, six restarts, exit 0 after 14s; parent/child stacks 8192,
+harness `300b22e8`. Root read actual stdout/startup/runner and verified all hashes
+under `/Users/turo/ai/evidence/exec-threadx-spike10-native`; binary `4cba8af3`,
+60,168 bytes including fixtures/runtime. Native cases check priority-2/slice-1
+creation, creator publication and threshold restoration before entry, worker slice
+changes, raised-threshold event blocking and protected restoration after resume.
+Independent deepseek-v4 read-only source review is complete (all 19 parts):
+no blocker in this bounded scope. The reviewer ran no tests; execution is
+attributed separately to root and claudecode. Review confirms all pinned NetX
+threshold callers target their current thread, matching this restriction.
+Owned local build and native staging are removed.
+
+The exact standalone non-LTO map now attributes 11,880 backend .text bytes,
+2,528 retained ThreadX bytes (14,408 subtotal) plus 3,300 clock division helper
+bytes; per-object evidence is `exec-threadx-spike10-code-cost.json` in the evidence
+directory. This is still a partial fixture link, excluding missing integration,
+runtime sections/resources and unrelated helpers. It establishes no finished
+library savings or performance improvement.
+
+Next integration obligations remain: validate all unchecked raw constructor
+service contracts before publication; run actual pinned IP helper/driver code;
+implement safe owner stop/drain and mutex/event retirement; supply common clock
+ownership and a complete replacement link. Pinned `_nx_ip_delete` calls terminate,
+object delete and thread delete while its outer serialized boundary and a
+preemption-disable increment are retained. Waiting there for another Exec owner
+to close private IO/remove itself is unsafe. A separately reviewed integration
+protocol must establish owner retirement before that unchanged raw deletion path
+and preserve real cleanup/created-list/packet/resource semantics. Source inspection
+identifies this obligation; no full IP create/delete verdict is claimed here.
+
+AgentNet's read-only proposal is retained as
+`/Users/turo/ai/evidence/exec-threadx-ip-delete-proposal.txt` (including the
+accepted root corrections). An alternative is a wrapper with preflight checks,
+real logical upstream deletion under one boundary, then private owner retirement
+and ACK outside it; the wrapper returns only after actual native removal.
+That alternative is unimplemented and unreviewed. Before adopting it, complete
+the private wait generation and reap IO (a raw signal cannot end a pending
+anx_wait_run), unlink all producer/runtime references before logical control
+deletion, and provide an owner terminal path before any post-wait dereference
+of the deleted control block. Keep ordinary public thread-delete's proven
+FINISHED-before-clear contract; any deferred retirement needs a narrowly gated
+integration path. Refuse raw deletion bypass before mutation, retain IP/control/
+stack/private storage through ACK, and prove no late touch by repeated poisoned
+storage reuse. No real driver IO or hardware testing is included in this proposal.
+
 ## Required performance comparison after functional integration
 
 The user explicitly requests a general performance comparison as well as size,
