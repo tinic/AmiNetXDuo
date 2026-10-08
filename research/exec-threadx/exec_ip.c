@@ -92,7 +92,7 @@ UINT anx_exec_ip_create(AnxExecIp *r,TX_THREAD *caller,NX_IP *ip,CHAR *name,NX_P
         if (!anx_exec_thread_cancel(&r->helper)) anx_tx_unsupported("IP reservation rollback failed");
         return NX_NOT_ENABLED;
     }
-    r->ip=ip;r->pool=pool;r->driver=driver;r->caller=caller;r->creator=FindTask(0);
+    r->ip=ip;r->pool=pool;r->driver=driver;r->caller=caller;r->creator=FindTask(0);r->clock=0;
     r->state=ANX_IP_PREPARED;active=r;
     r->capability=1;
     status=_nx_ip_create(ip,name,IP_ADDRESS(192,0,2,1),0xffffff00UL,pool,driver,stack,size,priority);
@@ -107,6 +107,24 @@ UINT anx_exec_ip_create(AnxExecIp *r,TX_THREAD *caller,NX_IP *ip,CHAR *name,NX_P
         anx_tx_unsupported("real IP create failed supported contract");
     r->state=ANX_IP_LIVE;anx_tx_context_end(&f);
     return status;
+}
+UINT anx_exec_ip_clock_start(AnxExecIp *r,AnxExecClock *clock,CHAR *name,VOID *stack,ULONG size)
+{
+    if (!idle() || !r || r->creator!=FindTask(0)) return NX_CALLER_ERROR;
+    if (active!=r || r->state!=ANX_IP_LIVE || r->clock) return NX_NOT_ENABLED;
+    if (!clock || !name || !stack) return NX_PTR_ERROR;
+    const VOID *regions[]={r,r->ip,r->pool,r->caller,r->helper.stack,r->pool->nx_packet_pool_start};
+    const ULONG sizes[]={sizeof(*r),sizeof(*r->ip),sizeof(*r->pool),sizeof(*r->caller),
+                        r->helper.stack_size,r->pool->nx_packet_pool_size};
+    for (unsigned i=0;i<sizeof(regions)/sizeof(*regions);i++)
+        if (!disjoint(clock,sizeof(*clock),regions[i],sizes[i]) ||
+            !disjoint(stack,size,regions[i],sizes[i])) return NX_PTR_ERROR;
+    /* Only this creator can alter the experimental IP lifetime. Native start
+     * may advance timers, but waits outside serialization and retains all IP
+     * storage. No other API/packet producers are admitted by this contract. */
+    if (!anx_exec_clock_start(clock,name,stack,size)) return NX_NOT_ENABLED;
+    AnxTxContext f;anx_tx_context_begin(&f,r->caller,0);r->clock=clock;anx_tx_context_end(&f);
+    return NX_SUCCESS;
 }
 UINT anx_exec_ip_event(AnxExecIp *r,ULONG flags)
 {
@@ -157,16 +175,20 @@ UINT anx_exec_ip_delete(AnxExecIp *r)
     if (ip->nx_ip_udp_created_sockets_count || ip->nx_ip_tcp_created_sockets_count) {
         anx_tx_context_end(&f);return NX_SOCKETS_BOUND;
     }
-    /* Strict one-IP proof: no other clock or packet/API producers admitted.
+    /* Strict one-IP proof: only the explicitly associated clock is admitted.
      * No queue-clear callbacks or pool waiter resumes in this first contract. */
-    if (!delete_ready(ip) ||
+    if (!delete_ready(ip) || (r->clock && !anx_exec_clock_can_stop(r->clock)) ||
         !anx_exec_thread_stop_event(&r->helper,&ip->nx_ip_events)) {
         anx_tx_context_end(&f);return NX_NOT_ENABLED;
     }
     r->state=ANX_IP_CLOSING;
+    if (r->clock && !anx_exec_clock_stop(r->clock))
+        anx_tx_unsupported("IP clock pre-stop failed");
     if (tx_timer_deactivate(&ip->nx_ip_periodic_timer)!=TX_SUCCESS)
         anx_tx_unsupported("IP periodic timer pre-stop deactivate failed");
     anx_tx_context_end(&f);
+    if (r->clock && !anx_exec_clock_join(r->clock))
+        anx_tx_unsupported("IP clock native retirement failed");
     if (!anx_exec_thread_wait(&r->helper)) anx_tx_unsupported("IP helper native retirement failed");
     anx_tx_context_begin(&f,r->caller,0);
     if (!delete_ready(ip) || r->helper.state!=ANX_THREAD_FINISHED || r->helper.wait.opened ||

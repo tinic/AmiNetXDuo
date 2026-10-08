@@ -5,6 +5,9 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG" CACHE STRING "Research flags" FORCE)
 add_library(research_wait STATIC wait.c)
 target_include_directories(research_wait PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_options(research_wait PRIVATE -Wall -Wextra -Werror)
+add_library(research_clock_schedule STATIC clock_schedule.c)
+target_include_directories(research_clock_schedule PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(research_clock_schedule PRIVATE -Wall -Wextra -Werror)
 set(ANX_BRIDGE_INCLUDES "${ANX_ROOT}/port/threadx-amiga/inc"
     "${ANX_ROOT}/port/netxduo-amiga/inc" "${ANX_ROOT}/third_party/threadx/common/inc"
     "${ANX_ROOT}/third_party/netxduo/common/inc" "${ANX_ROOT}/include")
@@ -98,15 +101,26 @@ if(CMAKE_CROSSCOMPILING)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_adapter PRIVATE -Wall -Wextra -Werror)
     add_executable(research_exec_ip_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
-        tx_bridge_exec.c exec_thread.c exec_ip.c exec_ip_smoke.c)
+        tx_bridge_exec.c exec_thread.c exec_clock.c exec_ip.c exec_ip_smoke.c)
     target_link_libraries(research_exec_ip_smoke PRIVATE
-        "-Wl,--start-group" research_ip_bridge research_ip_vendor research_exec_adapter "-Wl,--end-group")
+        "-Wl,--start-group" research_ip_bridge research_ip_vendor research_exec_adapter research_clock_schedule "-Wl,--end-group")
     target_include_directories(research_exec_ip_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_ip_smoke PRIVATE -Wall -Wextra -Werror)
     target_link_options(research_exec_ip_smoke PRIVATE -nostartfiles
         "-Wl,-Map=$<TARGET_FILE:research_exec_ip_smoke>.map")
     add_custom_command(TARGET research_exec_ip_smoke POST_BUILD
         COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_ip_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
+    add_executable(research_exec_clock_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
+        tx_bridge_exec.c exec_thread.c exec_clock.c exec_ip.c exec_clock_smoke.c)
+    target_link_libraries(research_exec_clock_smoke PRIVATE
+        "-Wl,--start-group" research_ip_bridge research_ip_vendor research_exec_adapter research_clock_schedule "-Wl,--end-group")
+    target_include_directories(research_exec_clock_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_compile_options(research_exec_clock_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_clock_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_clock_smoke>.map")
+    add_custom_command(TARGET research_exec_clock_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DTOOL_MAP=$<TARGET_FILE:research_exec_clock_smoke>.map"
             -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_executable(research_exec_task_smoke "${ANX_ROOT}/src/tools/tool_startup.S"
         tx_bridge_exec.c exec_task.c exec_task_smoke.c)
@@ -175,6 +189,10 @@ else()
     enable_testing()
     find_package(Threads REQUIRED)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_executable(research_clock_schedule_model test_clock_schedule.c)
+    target_link_libraries(research_clock_schedule_model PRIVATE research_clock_schedule)
+    target_compile_options(research_clock_schedule_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_clock_schedule_model COMMAND research_clock_schedule_model)
     add_executable(research_object_model test_objects.c object_probe.c)
     target_link_libraries(research_object_model PRIVATE research_tx_bridge)
     target_compile_options(research_object_model PRIVATE -Wall -Wextra -Werror)
