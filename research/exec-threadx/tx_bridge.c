@@ -161,7 +161,7 @@ static int detach(AnxTxThread *t, int completed)
     platform->enter(platform->context);
     if (platform->caller(platform->context) != t->owner ||
         t->wait->result == ANX_WAIT_PENDING || t->thread->tx_thread_state != TX_READY ||
-        t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token || t->abort_pins ||
+        t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token || t->abort_pins || t->semaphore_call ||
         t->thread->tx_thread_owned_mutex_count || t->thread->tx_thread_owned_mutex_list ||
         t->thread->tx_thread_timer.tx_timer_internal_list_head ||
         _tx_thread_current_ptr == t->thread) {
@@ -659,9 +659,9 @@ static int object_referenced(VOID *object)
 {
     AnxTxThread *t;
     for (t=threads;t;t=t->next)
-        if (t->control_at_suspend==object &&
+        if (t->semaphore_call==object || (t->control_at_suspend==object &&
             (t->wait->result==ANX_WAIT_PENDING || t->pending_resume || t->pending_token ||
-             t->abort_pins || t->thread->tx_thread_suspend_cleanup)) return 1;
+             t->abort_pins || t->thread->tx_thread_suspend_cleanup))) return 1;
     return 0;
 }
 UINT anx_tx_original_mutex_delete(TX_MUTEX *);
@@ -872,13 +872,26 @@ UINT _tx_semaphore_get(TX_SEMAPHORE *s,ULONG wait)
 {
     need_context();
     if (!s || !semaphore_member(s)) return TX_SEMAPHORE_ERROR;
+    AnxTxThread *call=0;
     if (wait!=TX_NO_WAIT) {
         TX_THREAD *thread=_tx_thread_identify();
         need(thread && contexts==1 && !resume_hook_depth,"unsupported semaphore blocking context");
         need(thread->tx_thread_suspension_sequence!=(ULONG)-1,"semaphore suspension sequence exhausted");
         need(s->tx_semaphore_suspended_count!=(UINT)-1,"semaphore waiter count overflow");
+        call=find(thread);
+        need(!call->semaphore_call,"nested semaphore operation");
+        call->semaphore_call=s;
     }
-    return anx_tx_original_semaphore_get(s,wait);
+    /* A direct raw resume completes AnxWait immediately, so PENDING alone
+     * cannot pin the semaphore through owner dispatch. Retain this call until
+     * the real upstream get returns after its cleanup/resume, not just until
+     * put/abort unlinks the public waiter. Private storage stays registered. */
+    UINT result=anx_tx_original_semaphore_get(s,wait);
+    if (call) {
+        need(call->semaphore_call==s,"semaphore call lifetime changed");
+        call->semaphore_call=0;
+    }
+    return result;
 }
 UINT _tx_semaphore_put(TX_SEMAPHORE *s)
 {
