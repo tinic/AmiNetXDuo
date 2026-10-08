@@ -317,14 +317,6 @@ VOID ami_config_format_ip6_zone(const ULONG addr[AMI_CFG_IP6_WORDS],
 VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
                            char *buf, ULONG buflen)
 {
-    UWORD group[8];
-    ULONG pos       = 0;
-    LONG  best_at   = -1;
-    ULONG best_len  = 0;
-    LONG  run_at    = -1;
-    ULONG run_len   = 0;
-    ULONG i;
-
     if (buf == NULL || buflen == 0)
         return;
 
@@ -333,8 +325,20 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
     if (addr == NULL || buflen < AMI_CFG_IP6_STRLEN)
         return;
 
-    /* The API requires the full output capacity. Read every input word
-       before writing the address, then format directly into that buffer. */
+    (VOID)ami_format_ip6(buf, addr);
+}
+
+ULONG ami_format_ip6(char *buf, const ULONG addr[AMI_CFG_IP6_WORDS])
+{
+    UWORD group[8];
+    ULONG pos       = 0;
+    LONG  best_at   = -1;
+    ULONG best_len  = 0;
+    LONG  run_at    = -1;
+    ULONG run_len   = 0;
+    ULONG i;
+
+    /* Read every input word before writing the address. */
     for (i = 0; i < AMI_CFG_IP6_WORDS; i++)
     {
         group[i * 2]     = (UWORD)(addr[i] >> 16);
@@ -429,4 +433,5 @@ VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS],
         buf[pos++] = ':';
 
     buf[pos] = '\0';
+    return pos;
 }

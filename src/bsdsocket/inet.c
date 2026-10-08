@@ -14,6 +14,8 @@
 _Static_assert(BSD_NTOA_BUFLEN >= 16, "IPv4 output needs 16 bytes");
 
 #ifdef AMINETXDUO_IPV6
+_Static_assert(AMI_INET6_ADDRSTRLEN >= AMI_CFG_IP6_STRLEN,
+               "IPv6 output needs the full formatter capacity");
 /*
  * The IPv6 text conversions are src/config/config_text.c's, the same
  * routines the DEVS:NetInterfaces parser uses for ADDRESS6. One parser means
@@ -355,10 +357,7 @@ STRPTR bsd_inet_ntop(register LONG af      __asm("d0"),
         ULONG n;
 
         bsd_in6_to_words((const UBYTE *)src, words);
-        ami_config_format_ip6(words, text, sizeof(text));
-
-        for (n = 0; text[n] != '\0'; n++)
-            ;
+        n = ami_format_ip6(text, words);
 
         if (size <= (LONG)n)
         {

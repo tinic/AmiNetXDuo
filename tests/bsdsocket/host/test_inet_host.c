@@ -47,8 +47,8 @@ static struct AmiSocketBase h_base;
 
 /*
  * What inet.c reaches outside itself.  Stubbed rather than linked: bringing in
- * errno.c drags the whole vector table behind it, and the IPv6 text parser
- * lives in src/config, which has a host test of its own.  The last errno set
+ * errno.c drags the whole vector table behind it. The IP text formatters and
+ * parsers in src/config are linked for real. The last errno set
  * is kept because a refusal that does not say why is half a refusal.
  */
 static LONG h_last_errno;
@@ -64,29 +64,24 @@ VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
     memmove(dst, src, (size_t)size);
 }
 
-BOOL ami_config_parse_ip6(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
-                          ULONG *prefix_out)
-{
-    (VOID)text; (VOID)out; (VOID)prefix_out;
-    return FALSE;                   /* the v6 cases are not exercised here */
-}
-
 VOID bsd_words_to_in6(const ULONG words[4], UBYTE bytes[16])
 {
-    (VOID)words; (VOID)bytes;
+    ULONG i;
+
+    for (i = 0; i < 16; i++)
+        bytes[i] = (UBYTE)(words[i / 4] >> (24 - (i % 4) * 8));
 }
 
 VOID bsd_in6_to_words(const UBYTE bytes[16], ULONG words[4])
 {
-    (VOID)bytes; (VOID)words;
-}
+    ULONG i;
 
-VOID ami_config_format_ip6(const ULONG addr[AMI_CFG_IP6_WORDS], char *out,
-                           ULONG outlen)
-{
-    (VOID)addr;
-    if (outlen > 0UL)
-        out[0] = '\0';
+    for (i = 0; i < 16; i++)
+    {
+        if (i % 4 == 0)
+            words[i / 4] = 0;
+        words[i / 4] = (words[i / 4] << 8) | bytes[i];
+    }
 }
 
 static ULONG addr_of(const char *text)
@@ -334,6 +329,67 @@ static void test_ntop_v4(void)
     CHECK(h_last_errno != 0, "and says why in errno");
 }
 
+#ifdef AMINETXDUO_IPV6
+static void test_ntop_v6_bounds(void)
+{
+    static const struct
+    {
+        UBYTE bytes[16];
+        const char *text;
+    } cases[] = {
+        { { 0 }, "::" },
+        { { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }, "::1" },
+        { { 0,0,0,0,0,0,0,0,0,0,0xff,0xff,192,168,1,1 },
+          "::ffff:192.168.1.1" },
+        { { 0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4 }, "::1.2.3.4" },
+        { { 0x20,1,0xd,0xb8,0,0,0,0,0,1,0,0,0,0,0,1 },
+          "2001:db8::1:0:0:1" },
+        { { 0x20,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0 }, "2001:0:0:1::" },
+        { { 0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+            0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff },
+          "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff" }
+    };
+    ULONG i;
+
+    printf("inet_ntop IPv6 output and refusal boundaries\n");
+    for (i = 0; i < (ULONG)(sizeof(cases) / sizeof(cases[0])); i++)
+    {
+        ULONG length = (ULONG)strlen(cases[i].text);
+        LONG size;
+
+        for (size = -1; size <= AMI_CFG_IP6_STRLEN; size++)
+        {
+            UBYTE guarded[AMI_CFG_IP6_STRLEN + 2];
+            STRPTR result;
+            ULONG untouched;
+            ULONG j;
+
+            memset(guarded, 0xa5, sizeof(guarded));
+            h_last_errno = 0;
+            result = bsd_inet_ntop(AF_INET6, (APTR)cases[i].bytes,
+                                   (STRPTR)(guarded + 1), size, BASE);
+            CHECK(guarded[0] == 0xa5, "IPv6 output preserves leading canary");
+            if (size > (LONG)length)
+            {
+                CHECK(result == (STRPTR)(guarded + 1), "IPv6 returns caller buffer");
+                CHECK(strcmp((const char *)guarded + 1, cases[i].text) == 0,
+                      "IPv6 matches fixed RFC output");
+                CHECK(h_last_errno == 0, "IPv6 success leaves errno alone");
+                untouched = length + 2;
+            }
+            else
+            {
+                CHECK(result == NULL && h_last_errno == AMI_ENOSPC,
+                      "IPv6 insufficient size reports ENOSPC");
+                untouched = 1;
+            }
+            for (j = untouched; j < (ULONG)sizeof(guarded); j++)
+                CHECK(guarded[j] == 0xa5, "IPv6 touches only successful text and NUL");
+        }
+    }
+}
+#endif
+
 static void test_format_octets_and_bounds(void)
 {
     static const struct { ULONG address; const char *text; } cases[] = {
@@ -406,6 +462,9 @@ int main(void)
     test_pton_v4();
     test_ntop_v4();
     test_format_octets_and_bounds();
+#ifdef AMINETXDUO_IPV6
+    test_ntop_v6_bounds();
+#endif
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 
