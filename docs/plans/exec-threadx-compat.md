@@ -1545,3 +1545,129 @@ before attempting real library open/create/close and public socket execution.
 Then compare equal-feature image size, resident resources and performance,
 including the synchronization formerly imposed by the original baton. No
 shipping integration or improvement in those measurements is established yet.
+
+### Manager-owned public creation and pinned IP lifecycle (2026-10-08)
+
+Final executable source **d7c2e234ee22818899ab35833ec9d7e77b639bc4** adds automatic
+worker creation in a normal caller context through the existing stable management
+Task. It copies the command's scalar arguments into retained backend storage;
+public control, name and stack remain caller-owned and must stay valid through
+reservation cancellation or public deletion. The caller's exact normal context
+chain is paused while the manager prepares the real worker and worker-owned IO,
+using an allocated ACK signal. After restoration, ordinary tx_thread_create
+publishes the unchanged pinned public control fields and created ring. No extra
+management Task or standing pool of spare workers is added.
+
+NetX's unchanged IP constructor raises the creator threshold before calling
+thread_create and ignores its return status. A research-only parent netstack
+preflight therefore reserves the exact helper/control/name/public-stack tuple
+before invoking that body. The reserved bind does not wait or drop protection,
+including under a raised threshold/nested bracket. Early constructor errors
+cancel any unconsumed reservation; an apparently successful constructor without
+a bound helper is fatal. This is compiled only with AMINETXDUO_EXEC_RESEARCH.
+The diagnostic gate recompiles the actual parent netstack.c with all shipping
+feature/layout flags plus this definition and replaces exactly that object in a
+private archive. Vendor bodies, APIs/layouts and pins remain unchanged.
+
+The manager owns the private record and ACK signal; the originating client Task
+and retained identity stamp authorize binding, unused cancellation and deletion.
+Public deletion first proves actual worker completion/removal and closed owner
+IO. It clears public ID/created links under the current boundary, clears the
+private public-control/client pointers, publishes RETIRE_PENDING and signals the
+verified live management Task. This is nonblocking, including under the pinned
+IP delete body's preemption-disable counter. The public control and supplied
+stack can be immediately overwritten/reused. The manager drains pending records
+at every loop entry, before every command/STOP, and touches only private storage:
+its own ACK, guarded owned native stack and record. Retained resource counts and
+runtime holds persist until that actual drain; a signal alone is not reclamation.
+
+Aligned public stacks must meet the pinned TX_MINIMUM_STACK of 1024. A supplied
+stack of at least 8192 is also used as the native stack. Smaller public stacks
+retain their original public fields and range but currently receive an owned
+8192-byte native stack with two guard words (8200-byte allocation), plus the
+private record and worker IO. Both public/native ranges are probed; both guards
+are checked before native storage release. This is a conservative research floor,
+not a measured stack requirement. The resource getter counts private record and
+owned native allocation bytes, not all resident RAM/IO allocations or high-water.
+Small-stack fields do not describe the actual native running stack; native
+snapshots expose it separately. The extra memory cost must be included in the
+future equal-feature comparison and sized from actual high-water measurements.
+
+Initial implementation **06f85486b** actually passed all nine native fixtures,
+190/190, and host 48/48. Its full-profile parent preflight compile FAILED because
+TX_THREAD_ID's internal header was missing; the replacement link was NOT_RUN.
+The first native harness attempt also refused before boot because its owned lock
+directory was missing: that attempt is NOT_RUN, with no serial/token/guest verdict.
+Both are retained distinctly from successful execution. Earlier incremental
+compile failures remain in build logs and are not counted as passes.
+
+Independent AgentNet claudecode reviewed the actual implementation/parent/gate
+and found R1: a missing retirement hook could return a status dropped by an
+unchecked upstream delete. The final source makes that invariant fatal and
+refuses unsupported managed terminate/delete under preempt_disable fatally
+before an unchecked caller can discard the failure. Checked ordinary live
+public deletion still returns DELETE_ERROR. Manager-side record traversals are
+also protected with Forbid against concurrent legacy record removal. All design,
+source review/resend and final delta parts (64 physical messages) are retained in
+/Users/turo/ai/evidence/exec-threadx-managed-source-review.txt. Final bounded source
+rereview: NO BLOCKER, R1 resolved. Fatal guard paths are not exercised natively;
+smoke internals/host models were not independently reviewed. preempt_disable is a
+bounded fail-closed heuristic, not a universal unchecked-caller detector.
+
+Final host tests actually pass **48/48**, and all nine native artifacts compile
+with Werror/startup-first checks and execute once serially:
+
+| Native fixture at d7c2e234e | Actual cases | Guest/harness exit |
+| --- | --- | --- |
+| Managed workers and pinned IP lifecycle | 25/25 | 0/0 |
+| Public scheduling | 29/29 | 0/0 |
+| Kernel/production hooks | 23/23 | 0/0 |
+| Cached callers | 25/25 | 0/0 |
+| Context pause | 14/14 | 0/0 |
+| Concurrent driver IO | 25/25 | 0/0 |
+| IPv4 protocols | 19/19 | 0/0 |
+| Clock lifecycle | 16/16 | 0/0 |
+| Legacy prepared public workers | 14/14 | 0/0 |
+
+All **190/190** native checks pass on the existing Mac Amiberry 8.3.0
+(2026.08.05), supplied boardless A1200 Kickstart 3.1 r40.68, Fast 8 MB,
+guest stack 8192, timeout 90. Root verifies all 18 original/final receipt manifests,
+binary/map hashes, stdout counts/exits, one matching boot token per run and no
+illegal/guru/alert or unexpected ROM reset. Host Denise warnings are recorded
+without a guest fault. Harness wall-clock times are not performance results.
+The managed fixture covers actual ACK exhaustion/rollback, refusal before
+publication, client-stamp mismatch, unused cancellation, four worker lifecycles,
+4096 public versus 8192 native and supplied 8192 reuse, delayed DONT_START resume,
+nonblocking deletion under preemption-disable, immediate public storage reuse,
+private drain, guards and final kernel cleanup. It also executes the actual
+pinned IP constructor/helper, controlled boardless driver initialization, private
+stop only after timer/event quiescence and real IO/Task removal, then the unchanged
+pinned IP delete body. Its fixture PRNG/controlled driver are explicit: this is
+not production entropy, real-device/ISR or whole-library socket evidence.
+
+Evidence is indexed in /Users/turo/ai/evidence/exec-threadx-managed-final-workers.json.
+The exact clean final full-feature gate, including IPv6 and the parent preflight,
+is /Users/turo/ai/evidence/exec-threadx-managed-library-gate-matched.json:
+**PASS_LINK_ONLY_UNVERIFIED, zero unresolved symbols**. Actual static entry and
+version checks pass. A preceding diagnostic used cached shipping objects; a
+final original rebuild changed generated commit tags, so its different hash was
+caught and the matched gate rerun against the fresh final objects. The two
+reports remain separate. Full-library runtime is still **NOT_RUN**; diagnostic
+non-LTO image bytes are not an A/B size or performance result.
+
+Useful final binaries/maps, original managed artifact, all 18 native receipts,
+preboot refusal and compile/link/review evidence are retained. Owned build,
+all native directory drives/configuration/serial files, copied ROM and staged
+helper are removed after verification; redundant intermediate adjacent artifacts
+are retired explicitly without changing their actual verdicts. User assets,
+installed emulator, unmerged branch, hardware disks and upstream audit are
+preserved. This remains research-only and is not a shipping integration.
+
+Next: execute the actual full library open/create/close/public socket path,
+including parent integration of quiescent helper stop, remaining add-on/reader
+shutdown, and library creation/close from different caller Tasks. Private helper
+stop is not arbitrary ThreadX termination. Other unchecked callers outside the
+matched reserving client, removed/busy-client ownership, general forced
+termination/cancellation, actual device/ISR and IPv6 execution remain OPEN.
+Then measure equal-feature image size, complete resident resources/high-water,
+yield latency and performance against the original ThreadX/baton backend.
