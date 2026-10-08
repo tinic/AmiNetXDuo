@@ -24,6 +24,9 @@ typedef struct AnxTxThread {
     VOID *control_at_suspend;
     ULONG sequence_at_suspend;
     int (*resume_cleanup)(struct AnxTxThread *);
+    uint32_t operation;
+    unsigned abort_pins;
+    int (*abort_policy)(struct AnxTxThread *, UINT *);
 } AnxTxThread;
 
 typedef struct AnxTxContext {
@@ -45,6 +48,9 @@ int anx_tx_detach(AnxTxThread *);
 /* Owner-only, while READY and quiescent. Optional integration must perform
  * real cleanup before resume, or return zero to fail closed. */
 int anx_tx_set_resume_cleanup(AnxTxThread *, int (*)(AnxTxThread *));
+int anx_tx_set_abort_policy(AnxTxThread *, int (*)(AnxTxThread *, UINT *));
+/* Actual pinned body, renamed by this research project's compiler only. */
+UINT anx_tx_original_wait_abort(TX_THREAD *);
 void anx_tx_context_begin(AnxTxContext *, TX_THREAD *, ULONG system_state);
 void anx_tx_context_end(AnxTxContext *);
 int anx_tx_expire(TX_THREAD *, uint32_t token); /* marked timer context required */

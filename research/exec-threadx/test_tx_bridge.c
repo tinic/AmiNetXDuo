@@ -49,11 +49,12 @@ static void panic(void *arg,const char *text)
         puts("research_tx_bridge_guard=PASS rejected mutex get in marked timer context");
         exit(0);
     }
-    if (reject_blocking_mutex && !strcmp(text,"blocking mutex contention not implemented")) {
+    if (reject_blocking_mutex && !strcmp(text,"mutex blocking while preemption disabled")) {
         CHECK(ip.nx_ip_protection.tx_mutex_owner==&callers[0].thread);
         CHECK(ip.nx_ip_protection.tx_mutex_ownership_count==1);
         CHECK(_tx_thread_current_ptr==&callers[2].thread);
-        puts("research_tx_bridge_guard=PASS rejected unsupported blocking mutex contention");
+        CHECK(_tx_thread_preempt_disable==1 && !ip.nx_ip_protection.tx_mutex_suspended_count);
+        puts("research_tx_bridge_guard=PASS rejected mutex blocking with preemption disabled");
         exit(0);
     }
     fprintf(stderr,"bridge panic: %s\n",text);
@@ -298,6 +299,7 @@ int main(int argc, char **argv)
             anx_tx_context_end(&frame);
             owner=3; reject_blocking_mutex=1;
             anx_tx_context_begin(&frame,&callers[2].thread,0);
+            _tx_thread_preempt_disable=1;
             (void)_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER);
             CHECK(0);
         }

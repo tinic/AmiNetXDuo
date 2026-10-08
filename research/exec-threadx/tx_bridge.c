@@ -18,6 +18,7 @@ static AnxTxThread *threads;
 static TX_TIMER_INTERNAL *timers;
 static unsigned contexts;
 static AnxTxContext *current_frame;
+static unsigned resume_hook_depth;
 
 static void need(int condition, const char *message)
 {
@@ -54,7 +55,7 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     /* Reinitialization is allowed only after every owner has detached. */
     if (platform)
         need(!threads && !timers && !contexts && !current_frame &&
-             !_tx_thread_preempt_disable, "reinitialize active domain");
+             !_tx_thread_preempt_disable && !resume_hook_depth, "reinitialize active domain");
     platform = p;
     threads = 0;
     timers = 0;
@@ -64,6 +65,7 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     _tx_thread_system_state = 0;
     _tx_thread_preempt_disable = 0;
     anx_tx_after_mutex_put = 0;
+    resume_hook_depth=0;
 }
 
 int anx_tx_attach(AnxTxThread *t, TX_THREAD *thread, AnxWait *wait, uintptr_t owner)
@@ -96,7 +98,8 @@ int anx_tx_detach(AnxTxThread *t)
     platform->enter(platform->context);
     if (platform->caller(platform->context) != t->owner ||
         t->wait->result == ANX_WAIT_PENDING || t->thread->tx_thread_state != TX_READY ||
-        t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token ||
+        t->thread->tx_thread_suspend_cleanup || t->pending_resume || t->pending_token || t->abort_pins ||
+        t->thread->tx_thread_owned_mutex_count || t->thread->tx_thread_owned_mutex_list ||
         t->thread->tx_thread_timer.tx_timer_internal_list_head ||
         _tx_thread_current_ptr == t->thread) {
         platform->leave(platform->context);
@@ -119,8 +122,20 @@ int anx_tx_set_resume_cleanup(AnxTxThread *t, int (*hook)(AnxTxThread *))
     platform->enter(platform->context);
     valid=find(t->thread)==t && platform->caller(platform->context)==t->owner &&
         t->thread->tx_thread_state==TX_READY && !t->thread->tx_thread_suspend_cleanup &&
-        !t->pending_resume && !t->pending_token && t->wait->result!=ANX_WAIT_PENDING;
+        !t->pending_resume && !t->pending_token && !t->abort_pins && t->wait->result!=ANX_WAIT_PENDING;
     if (valid) t->resume_cleanup=hook;
+    platform->leave(platform->context);
+    return valid;
+}
+
+int anx_tx_set_abort_policy(AnxTxThread *t, int (*policy)(AnxTxThread *, UINT *))
+{
+    int valid;
+    platform->enter(platform->context);
+    valid=find(t->thread)==t && platform->caller(platform->context)==t->owner &&
+        t->thread->tx_thread_state==TX_READY && !t->thread->tx_thread_suspend_cleanup &&
+        !t->pending_resume && !t->pending_token && !t->abort_pins && t->wait->result!=ANX_WAIT_PENDING;
+    if (valid) t->abort_policy=policy;
     platform->leave(platform->context);
     return valid;
 }
@@ -253,6 +268,8 @@ VOID _tx_thread_system_suspend(TX_THREAD *thread)
         return;
     }
     need(ticks!=TX_NO_WAIT, "zero timeout suspension");
+    need(t->operation!=UINT32_MAX,"suspension operation exhausted");
+    t->operation++;
     t->cleanup_at_suspend=thread->tx_thread_suspend_cleanup;
     t->control_at_suspend=thread->tx_thread_suspend_control_block;
     t->sequence_at_suspend=thread->tx_thread_suspension_sequence;
@@ -306,8 +323,11 @@ VOID _tx_thread_system_resume(TX_THREAD *thread)
     AnxTxThread *t=find(thread);
     need(contexts && _tx_thread_preempt_disable>0,"resume missing protected preemption increment");
     _tx_thread_preempt_disable--;
-    if (thread->tx_thread_suspend_cleanup && t->resume_cleanup)
+    if (thread->tx_thread_suspend_cleanup && t->resume_cleanup) {
+        resume_hook_depth++;
         need(t->resume_cleanup(t),"resume cleanup integration rejected");
+        resume_hook_depth--;
+    }
     _tx_timer_system_deactivate(&thread->tx_thread_timer);
     if (thread->tx_thread_state==TX_READY) return;
     thread->tx_thread_suspending=TX_FALSE;
@@ -335,8 +355,57 @@ static void need_context(void)
          "service outside serialized call boundary");
 }
 
-/* Only non-inheriting, uncontended/recursive mutex operations are implemented.
- * Missing blocking/get/event services remain absent from the link contract. */
+UINT _tx_thread_wait_abort(TX_THREAD *thread)
+{
+    AnxTxThread *t;
+    UINT status;
+    need_context();
+    t=find(thread);
+    if (!t->abort_policy) return anx_tx_original_wait_abort(thread);
+    need(t->abort_pins!=(unsigned)-1,"abort pin overflow");
+    t->abort_pins++;
+    need(t->abort_policy(t,&status),"abort policy integration rejected");
+    need(t->abort_pins>0,"abort pin lost");
+    t->abort_pins--;
+    return status;
+}
+
+/* Real control-block owned lists, independent of recursion count. */
+static void mutex_own(TX_MUTEX *m, TX_THREAD *thread)
+{
+    TX_MUTEX *head=thread->tx_thread_owned_mutex_list;
+    need(thread->tx_thread_owned_mutex_count!=(UINT)-1,"owned mutex count overflow");
+    if (head) {
+        m->tx_mutex_owned_next=head;
+        m->tx_mutex_owned_previous=head->tx_mutex_owned_previous;
+        head->tx_mutex_owned_previous->tx_mutex_owned_next=m;
+        head->tx_mutex_owned_previous=m;
+    } else {
+        thread->tx_thread_owned_mutex_list=m;
+        m->tx_mutex_owned_next=m; m->tx_mutex_owned_previous=m;
+    }
+    thread->tx_thread_owned_mutex_count++;
+    m->tx_mutex_owner=thread; m->tx_mutex_ownership_count=1;
+}
+
+static void mutex_disown(TX_MUTEX *m)
+{
+    TX_THREAD *thread=m->tx_mutex_owner;
+    need(thread && thread->tx_thread_owned_mutex_count,"missing owned mutex");
+    if (m->tx_mutex_owned_next==m) thread->tx_thread_owned_mutex_list=TX_NULL;
+    else {
+        m->tx_mutex_owned_previous->tx_mutex_owned_next=m->tx_mutex_owned_next;
+        m->tx_mutex_owned_next->tx_mutex_owned_previous=m->tx_mutex_owned_previous;
+        if (thread->tx_thread_owned_mutex_list==m)
+            thread->tx_thread_owned_mutex_list=m->tx_mutex_owned_next;
+    }
+    thread->tx_thread_owned_mutex_count--;
+    m->tx_mutex_owner=TX_NULL;
+    m->tx_mutex_owned_next=TX_NULL; m->tx_mutex_owned_previous=TX_NULL;
+}
+
+/* NO_INHERIT only. FIFO handoff uses actual upstream cleanup for timeout/abort.
+ * No priority scheduling, forced owner release or mutex deletion. */
 UINT _tx_mutex_create(TX_MUTEX *m, CHAR *name, UINT inherit)
 {
     need_context();
@@ -352,11 +421,38 @@ UINT _tx_mutex_get(TX_MUTEX *m, ULONG wait)
     current=_tx_thread_identify();
     need(current!=TX_NULL,"mutex get without registered thread context");
     if (m->tx_mutex_id!=TX_MUTEX_ID) return TX_MUTEX_ERROR;
+    need(m->tx_mutex_inherit==TX_NO_INHERIT,"mutex inheritance not implemented");
+    if (!m->tx_mutex_ownership_count) {
+        need(!m->tx_mutex_suspended_count && !m->tx_mutex_suspension_list,"unowned mutex retained waiters");
+        mutex_own(m,current);
+        return TX_SUCCESS;
+    }
     if (m->tx_mutex_ownership_count && m->tx_mutex_owner!=current) {
         if (wait==TX_NO_WAIT) return TX_NOT_AVAILABLE;
-        /* NetX often ignores blocking mutex-get status. Returning unsupported
-         * would let it proceed without protection, so fail closed here. */
-        need(0,"blocking mutex contention not implemented");
+        /* NetX ignores many blocking-get return values: unsupported contexts
+         * must fail closed before publishing a waiter. */
+        need(!resume_hook_depth,"mutex blocking inside resume hook");
+        need(!_tx_thread_preempt_disable,"mutex blocking while preemption disabled");
+        need(contexts==1 && !_tx_thread_system_state,"unsupported mutex blocking context");
+        need(current->tx_thread_suspension_sequence!=(ULONG)-1,"mutex suspension sequence exhausted");
+        need(m->tx_mutex_suspended_count!=(UINT)-1,"mutex waiter count overflow");
+        current->tx_thread_suspend_cleanup=_tx_mutex_cleanup;
+        current->tx_thread_suspend_control_block=m;
+        current->tx_thread_suspension_sequence++;
+        TX_THREAD *head=m->tx_mutex_suspension_list;
+        current->tx_thread_suspended_next=head ? head : current;
+        current->tx_thread_suspended_previous=head ? head->tx_thread_suspended_previous : current;
+        if (head) {
+            head->tx_thread_suspended_previous->tx_thread_suspended_next=current;
+            head->tx_thread_suspended_previous=current;
+        } else m->tx_mutex_suspension_list=current;
+        m->tx_mutex_suspended_count++;
+        current->tx_thread_state=TX_MUTEX_SUSP;
+        current->tx_thread_suspending=TX_TRUE;
+        current->tx_thread_timer.tx_timer_internal_remaining_ticks=wait;
+        _tx_thread_preempt_disable++;
+        _tx_thread_system_suspend(current);
+        return current->tx_thread_suspend_status;
     }
     need(m->tx_mutex_ownership_count!=(UINT)-1,"mutex recursion overflow");
     m->tx_mutex_owner=current; m->tx_mutex_ownership_count++;
@@ -368,8 +464,26 @@ UINT _tx_mutex_put(TX_MUTEX *m)
     need_context();
     if (m->tx_mutex_id!=TX_MUTEX_ID) return TX_MUTEX_ERROR;
     if (!m->tx_mutex_ownership_count || m->tx_mutex_owner!=_tx_thread_identify()) return TX_NOT_OWNED;
-    need(!m->tx_mutex_suspended_count,"mutex contention not implemented");
-    if (!--m->tx_mutex_ownership_count) m->tx_mutex_owner=TX_NULL;
+    if (!--m->tx_mutex_ownership_count) {
+        mutex_disown(m);
+        TX_THREAD *thread=m->tx_mutex_suspension_list;
+        if (thread) {
+            need(m->tx_mutex_suspended_count && thread->tx_thread_state==TX_MUTEX_SUSP &&
+                 thread->tx_thread_suspend_cleanup==_tx_mutex_cleanup &&
+                 thread->tx_thread_suspend_control_block==m,"invalid mutex handoff waiter");
+            if (!--m->tx_mutex_suspended_count) m->tx_mutex_suspension_list=TX_NULL;
+            else {
+                m->tx_mutex_suspension_list=thread->tx_thread_suspended_next;
+                thread->tx_thread_suspended_next->tx_thread_suspended_previous=thread->tx_thread_suspended_previous;
+                thread->tx_thread_suspended_previous->tx_thread_suspended_next=thread->tx_thread_suspended_next;
+            }
+            thread->tx_thread_suspend_cleanup=TX_NULL;
+            thread->tx_thread_suspend_status=TX_SUCCESS;
+            mutex_own(m,thread);
+            _tx_thread_preempt_disable++;
+            _tx_thread_system_resume(thread);
+        }
+    }
     if (anx_tx_after_mutex_put) anx_tx_after_mutex_put(m);
     return TX_SUCCESS;
 }

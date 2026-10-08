@@ -248,3 +248,21 @@ blocking/scheduler compatibility. Potentially blocking mutex acquisition cannot
 remain inside resume/Forbid in a complete backend. Non-receive TCP waits, wire
 processing, object lifetime, full replacement linking and size savings remain
 open. Existing non-opted-in generic gating retains its known packet-arrival race.
+
+## Spike 5 implementation checkpoint
+
+Blocking NO_INHERIT mutexes now publish real ThreadX wait fields and use pinned
+mutex cleanup for timeout/abort. FIFO handoff, recursion and owned-mutex lists
+are implemented. An opt-in receive-abort wrapper acquires IP protection before
+raw ThreadX abort mutates the target; the resume cleanup hook never parks.
+Counted target pins prevent detach while an abort caller waits, and a separate
+operation epoch detects a new suspension without treating cleanup-grace rearm
+as a different NetX operation. Vendor and production sources remain unchanged;
+only the standalone research compiler renames the raw abort body symbol.
+
+Host CTest PASS 14/14 includes eight genuinely concurrent mutex schedules and
+five contended NetX abort schedules plus retained models/guards. The expanded
+17-case native smoke compiles. Exact independent review and actual emulator
+verdict are pending. Priorities/inheritance, mutex deletion/owner termination,
+safe socket storage lifetime, full wire/event/backend linking and size savings
+remain open.

@@ -390,10 +390,72 @@ deferred checker finds no such node, harmlessly. Socket/control/producer storage
 must stay alive; ID checking is not use-after-free protection. One-second gate
 grace and rejection paths are fatal research diagnostics, never recovery.
 
+## Spike 5: blocking mutexes and abort acquisition ordering
+
+The NO_INHERIT mutex backend now supports FIFO blocking acquisition, recursion,
+atomic ownership handoff and actual `tx_thread_owned_mutex_list/count` bookkeeping.
+It publishes real mutex wait fields and uses the unchanged pinned
+`_tx_mutex_cleanup` for timeout/cancellation. Final put assigns ownership before
+resuming the head waiter; NO_WAIT contention still returns TX_NOT_AVAILABLE.
+Detach rejects owned mutexes. Priority inheritance/priority queues, mutex deletion
+and forced owner termination remain unsupported. The cleanup TU also defines
+`_tx_mutex_thread_release`, but link presence is not lifecycle conformance; it is
+not exercised or supported as a foreign-owner release path by this backend.
+
+Blocking get is allowed only in an outer registered normal-task boundary with
+preemption enabled. The existing suspend bridge drops that boundary before
+parking and restores it on wake. Calls from a resume hook, a nested blocking
+context or with preemption disabled fail closed before publishing a waiter,
+since NetX ignores many blocking-get errors. The old blanket contention rejection
+probe now tests the still-unsupported preemption-disabled context explicitly.
+
+The actual ThreadX wait-abort TU is compiled unchanged under the private symbol
+`anx_tx_original_wait_abort` via a source-specific research compile definition.
+The ABI-name wrapper invokes an optional per-target abort policy. The NetX receive
+policy acquires the IP mutex BEFORE the raw abort changes target state. Its resume
+cleanup hook is strictly nonblocking (TX_NO_WAIT), normally recursive under the
+already-owned IP mutex. Other wait kinds fall through to the unchanged raw body.
+No production target, source pin, protocol source or vendor header is modified.
+
+The wrapper holds a counted target pin while the abort caller can park; detach
+and policy/cleanup-hook reconfiguration reject pins. Socket/IP storage must still
+be retained externally. After acquiring the mutex the policy rechecks state,
+cleanup kind, control pointer, ThreadX sequence and a backend operation epoch.
+The epoch advances only for a NEW armed suspension; a private cleanup-grace wait
+keeps the same epoch. This distinguishes real re-suspension from grace rearming,
+which changes the primitive wait token. ThreadX's NetX TCP suspension sequence
+alone cannot detect a new receive. Counter exhaustion fails closed.
+
+If arrival/cleanup finishes the target or it starts another wait while the caller
+parks, the abort returns TX_WAIT_ABORT_ERROR without affecting the newer wait.
+If the abort caller's own mutex wait is cancelled, it similarly releases the pin
+and returns TX_WAIT_ABORT_ERROR with the target untouched. This is an explicit
+research policy for the added acquisition wait. IDs/generations do not make freed
+socket pointers safe. Event/wire/socket-lifetime and full scheduler validation
+remain open.
+
+A concurrent pthread host fixture models serialized boundaries and real parked
+callers rather than nesting a second logical get before the first returns.
+Eight mutex schedules cover handoff, recursive release, real finite timeout,
+actual wait-abort, stale cleanup sequence, two FIFO waiters and both timeout/
+release orders. It checks ownership/list/count/status and detach protection.
+Five NetX schedules cover contended abort winning, arrival winning, the receiver
+starting another receive (first waiting for the mutex), stable grace rearm and
+cancellation of the abort caller. Packet transfer is a decoded-payload fixture,
+not TCP wire/header/public receive coverage. Previous checks remain: host CTest
+PASS 14/14 includes those 13 concurrent schedules and the earlier guard/model
+coverage; rejection probes are not successful unsupported operations.
+
+The native smoke adds five cases to the prior twelve: mutex handoff, finite
+mutex timeout, mutex wait-abort, deferred receive abort after contended IP mutex
+acquisition and packet arrival while the abort caller waits. Three real Exec
+tasks retain/reap their resources. m68k compilation passes; actual emulator
+verdict and exact implementation review are pending at this checkpoint.
+
 ## Still open
 
-Full current-thread/adoption semantics, blocking mutexes, event waiters, thread
-lifecycle, priority/preemption semantics, common timer integration and replacement
+Full current-thread/adoption semantics, general mutex scheduling/lifecycle, event
+waiters, thread lifecycle, priority/preemption semantics, common timer integration and replacement
 backend selection remain unimplemented. Minimum-profile coverage, broader native schedules,
 UDP wire/checksum coverage, NetX/socket conformance and net
 size/runtime comparison remain pending. The compile probe checks that referenced

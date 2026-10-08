@@ -4,4 +4,5 @@
 #define ANX_RESEARCH_NETX_RESUME_H
 #include "tx_bridge.h"
 int anx_netx_receive_abort_cleanup(AnxTxThread *);
+int anx_netx_receive_abort_policy(AnxTxThread *, UINT *);
 #endif

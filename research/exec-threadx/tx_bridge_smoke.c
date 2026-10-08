@@ -15,19 +15,23 @@
 
 enum { JOB_NONE, JOB_ARRIVAL, JOB_TIMEOUT, JOB_CLOSE, JOB_ABORT, JOB_EXPIRE_ARRIVAL, JOB_LATE_ABORT,
        JOB_UDP_ARRIVAL, JOB_UDP_TIMEOUT, JOB_UDP_ABORT, JOB_SLEEP,
-       JOB_RX_ABORT_PACKET, JOB_RX_ABORT_PACKET_LOCKED };
+       JOB_RX_ABORT_PACKET, JOB_RX_ABORT_PACKET_LOCKED,
+       JOB_MUTEX_HANDOFF, JOB_MUTEX_TIMEOUT, JOB_MUTEX_ABORT,
+       JOB_IP_DEFERRED_ABORT, JOB_IP_ARRIVAL_WINS };
 static TX_THREAD owner_thread,worker_thread,abort_thread;
 static AnxTxThread owner_bridge,worker_bridge,abort_bridge;
 static AnxExecWait owner_wait,worker_wait,abort_wait;
 static NX_IP ip;
 static NX_TCP_SOCKET socket;
 static NX_UDP_SOCKET udp;
+static TX_MUTEX mutex;
 static NX_PACKET packet,*received;
 static ULONG packet_data[8];
 static struct Task *parent,*worker,*abort_task;
 static ULONG ack;
 static volatile unsigned job,phase,stop,worker_ready,worker_done,abort_ready,abort_done;
 static UINT abort_result;
+static uint32_t mutex_operation;
 
 static void say(const char *s)
 {
@@ -78,6 +82,18 @@ static void tcp_packet_arrival(void)
     }
 }
 
+static void await_phase(unsigned target)
+{
+    for (unsigned attempt=0;attempt<50;attempt++) {
+        unsigned done;
+        Forbid(); done=phase>=target && (target!=3 || job==JOB_NONE); Permit();
+        if (done) return;
+        uint32_t token=anx_wait_begin(&owner_wait.wait,20000,0,0,0,0);
+        CHECK(token && anx_exec_wait_run(&owner_wait,token)==ANX_WAIT_TIMEOUT);
+    }
+    CHECK(0);
+}
+
 static void abort_entry(void)
 {
     CHECK(anx_exec_wait_open(&abort_wait));
@@ -89,6 +105,20 @@ static void abort_entry(void)
         CHECK(token && anx_exec_wait_run(&abort_wait,token)==ANX_WAIT_TIMEOUT);
         Forbid(); next=job; step=phase; stopping=stop; Permit();
         if (stopping) break;
+        if (next>=JOB_MUTEX_HANDOFF) {
+            if (step!=1 || (next!=JOB_MUTEX_ABORT && next<JOB_IP_DEFERRED_ABORT)) continue;
+            AnxTxContext frame;
+            anx_tx_context_begin(&frame,&abort_thread,0);
+            if (next==JOB_MUTEX_ABORT && owner_thread.tx_thread_state!=TX_MUTEX_SUSP) {
+                anx_tx_context_end(&frame); continue;
+            }
+            abort_result=_tx_thread_wait_abort(&owner_thread);
+            CHECK(abort_result==(next==JOB_IP_ARRIVAL_WINS ? TX_WAIT_ABORT_ERROR : TX_SUCCESS));
+            phase=next==JOB_MUTEX_ABORT ? 2 : 3;
+            if (next>=JOB_IP_DEFERRED_ABORT) job=JOB_NONE;
+            anx_tx_context_end(&frame);
+            continue;
+        }
         if ((next!=JOB_LATE_ABORT && next<JOB_RX_ABORT_PACKET) || step!=1) continue;
         AnxTxContext frame;
         anx_tx_context_begin(&frame,&abort_thread,0);
@@ -132,6 +162,40 @@ static void worker_entry(void)
         Forbid(); next=job; step=phase; stopping=stop; Permit();
         if (stopping) break;
         if (!next || next==JOB_UDP_TIMEOUT) continue;
+        if (next>=JOB_MUTEX_HANDOFF && next<=JOB_MUTEX_ABORT) {
+            AnxTxContext frame;
+            anx_tx_context_begin(&frame,&worker_thread,0);
+            if (!step) {
+                CHECK(_tx_mutex_get(&mutex,TX_WAIT_FOREVER)==TX_SUCCESS);
+                mutex_operation=owner_bridge.operation; phase=1;
+            } else if ((next==JOB_MUTEX_HANDOFF && mutex.tx_mutex_suspended_count==1) ||
+                       (next==JOB_MUTEX_TIMEOUT && owner_bridge.operation!=mutex_operation && owner_thread.tx_thread_state==TX_READY) ||
+                       (next==JOB_MUTEX_ABORT && step==2)) {
+                CHECK(_tx_mutex_put(&mutex)==TX_SUCCESS); phase=3; job=JOB_NONE;
+            }
+            anx_tx_context_end(&frame); continue;
+        }
+        if (next>=JOB_IP_DEFERRED_ABORT) {
+            AnxTxContext frame;
+            anx_tx_context_begin(&frame,&worker_thread,0);
+            if (!step) {
+                CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
+                if (next==JOB_IP_DEFERRED_ABORT) {
+                    AnxTxContext timer;
+                    anx_tx_context_begin(&timer,TX_NULL,1);
+                    CHECK(anx_tx_expire(&owner_thread,owner_bridge.token));
+                    anx_tx_context_end(&timer);
+                }
+                phase=1;
+            } else if (step==1 && abort_thread.tx_thread_state==TX_MUTEX_SUSP) {
+                CHECK(owner_bridge.abort_pins==1 && owner_thread.tx_thread_state==TX_TCP_IP);
+                CHECK(ip.nx_ip_protection.tx_mutex_suspension_list==&abort_thread);
+                if (next==JOB_IP_ARRIVAL_WINS) tcp_packet_arrival();
+                phase=2;
+                CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+            }
+            anx_tx_context_end(&frame); continue;
+        }
         if ((next==JOB_LATE_ABORT || next>=JOB_RX_ABORT_PACKET) && step!=2) {
             if (!step) {
                 AnxTxContext timer;
@@ -209,6 +273,7 @@ int main(void)
     CHECK(anx_tx_attach(&owner_bridge,&owner_thread,&owner_wait.wait,(uintptr_t)parent));
     anx_tx_context_begin(&frame,&owner_thread,0);
     CHECK(_tx_mutex_create(&ip.nx_ip_protection,(CHAR *)"IP",TX_NO_INHERIT)==TX_SUCCESS);
+    CHECK(_tx_mutex_create(&mutex,(CHAR *)"mutex",TX_NO_INHERIT)==TX_SUCCESS);
     CHECK(_tx_event_flags_create(&ip.nx_ip_events,(CHAR *)"events")==TX_SUCCESS);
     anx_tx_context_end(&frame);
     socket.nx_tcp_socket_id=NX_TCP_ID;
@@ -222,9 +287,25 @@ int main(void)
     CHECK(abort_task!=0);
     while (!worker_ready || !abort_ready) Wait(ack);
     say("research_tx_bridge=WORKER_READY\n");
-    for (scenario=JOB_ARRIVAL;scenario<=JOB_RX_ABORT_PACKET_LOCKED;scenario++) {
+    for (scenario=JOB_ARRIVAL;scenario<=JOB_IP_ARRIVAL_WINS;scenario++) {
         unsigned before=owner_bridge.resumes;
         anx_tx_context_begin(&frame,&owner_thread,0);
+        if (scenario>=JOB_MUTEX_HANDOFF && scenario<=JOB_MUTEX_ABORT) {
+            phase=0; job=scenario;
+            anx_tx_context_end(&frame); await_phase(1);
+            anx_tx_context_begin(&frame,&owner_thread,0);
+            UINT result=_tx_mutex_get(&mutex,scenario==JOB_MUTEX_TIMEOUT ? 2 : TX_WAIT_FOREVER);
+            CHECK(result==(scenario==JOB_MUTEX_TIMEOUT ? TX_NOT_AVAILABLE : scenario==JOB_MUTEX_ABORT ? TX_WAIT_ABORTED : TX_SUCCESS));
+            if (result==TX_SUCCESS) {
+                CHECK(mutex.tx_mutex_owner==&owner_thread && owner_thread.tx_thread_owned_mutex_count==1);
+                CHECK(_tx_mutex_put(&mutex)==TX_SUCCESS);
+            }
+            CHECK(!owner_thread.tx_thread_suspend_cleanup && !owner_thread.tx_thread_timer.tx_timer_internal_list_head);
+            CHECK(owner_bridge.resumes==before+1);
+            anx_tx_context_end(&frame); await_phase(3);
+            CHECK(!mutex.tx_mutex_owner && !mutex.tx_mutex_suspension_list && !mutex.tx_mutex_suspended_count);
+            passed++; say("research_tx_bridge=CASE_PASS\n"); continue;
+        }
         if (scenario==JOB_SLEEP) {
             CHECK(_tx_thread_sleep(2)==TX_SUCCESS && owner_bridge.resumes==before+1);
             CHECK(owner_thread.tx_thread_state==TX_READY && !owner_thread.tx_thread_timer.tx_timer_internal_list_head);
@@ -254,6 +335,8 @@ int main(void)
         } else {
             if (scenario>=JOB_RX_ABORT_PACKET) {
                 CHECK(anx_tx_set_resume_cleanup(&owner_bridge,anx_netx_receive_abort_cleanup));
+                if (scenario>=JOB_IP_DEFERRED_ABORT)
+                    CHECK(anx_tx_set_abort_policy(&owner_bridge,anx_netx_receive_abort_policy));
                 received=NX_NULL;
                 owner_thread.tx_thread_additional_suspend_info=&received;
                 packet.nx_packet_prepend_ptr=(UCHAR *)packet_data;
@@ -266,22 +349,17 @@ int main(void)
                 scenario==JOB_TIMEOUT ? 2 : (scenario==JOB_EXPIRE_ARRIVAL || scenario==JOB_LATE_ABORT || scenario>=JOB_RX_ABORT_PACKET) ? 50 : TX_WAIT_FOREVER);
             CHECK(!socket.nx_tcp_socket_receive_suspension_list && !socket.nx_tcp_socket_receive_suspended_count);
             CHECK(owner_thread.tx_thread_suspend_status==(scenario==JOB_TIMEOUT ? NX_NO_PACKET :
-                  scenario==JOB_CLOSE ? NX_NOT_CONNECTED : (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT || scenario>=JOB_RX_ABORT_PACKET) ? TX_WAIT_ABORTED : NX_SUCCESS));
+                  scenario==JOB_CLOSE ? NX_NOT_CONNECTED : scenario==JOB_IP_ARRIVAL_WINS ? NX_SUCCESS : (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT || scenario>=JOB_RX_ABORT_PACKET) ? TX_WAIT_ABORTED : NX_SUCCESS));
             if (scenario==JOB_LATE_ABORT) CHECK(phase==3 && !owner_bridge.pending_resume);
             if (scenario>=JOB_RX_ABORT_PACKET) {
                 /* Synchronous abort can wake this task before the later packet
                  * producer. Wait outside the serialized boundary for it. */
-                CHECK(!received);
+                CHECK(received==(scenario==JOB_IP_ARRIVAL_WINS ? &packet : NX_NULL));
                 anx_tx_context_end(&frame);
-                for (unsigned attempt=0;attempt<50;attempt++) {
-                    unsigned done;
-                    Forbid(); done=phase==3 && job==JOB_NONE; Permit();
-                    if (done) break;
-                    uint32_t token=anx_wait_begin(&owner_wait.wait,20000,0,0,0,0);
-                    CHECK(token && anx_exec_wait_run(&owner_wait,token)==ANX_WAIT_TIMEOUT);
-                }
+                await_phase(3);
                 anx_tx_context_begin(&frame,&owner_thread,0);
-                CHECK(phase==3 && job==JOB_NONE && !received);
+                CHECK(phase==3 && job==JOB_NONE && !owner_bridge.abort_pins);
+                if (scenario<JOB_IP_DEFERRED_ABORT) {
                 CHECK(socket.nx_tcp_socket_receive_queue_head==&packet && socket.nx_tcp_socket_receive_queue_tail==&packet);
                 CHECK(socket.nx_tcp_socket_receive_queue_count==1 && packet.nx_packet_length==3);
                 CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
@@ -289,13 +367,18 @@ int main(void)
                 socket.nx_tcp_socket_receive_queue_tail=NX_NULL;
                 socket.nx_tcp_socket_receive_queue_count--;
                 CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
+                } else {
+                    CHECK(!socket.nx_tcp_socket_receive_queue_count && !socket.nx_tcp_socket_receive_queue_head);
+                    CHECK(anx_tx_set_abort_policy(&owner_bridge,0));
+                }
                 CHECK(anx_tx_set_resume_cleanup(&owner_bridge,0));
             }
         }
         CHECK(_tx_thread_identify()==&owner_thread);
         CHECK(!owner_thread.tx_thread_suspend_cleanup && !owner_thread.tx_thread_timer.tx_timer_internal_list_head);
         CHECK(owner_thread.tx_thread_state==TX_READY && owner_bridge.resumes==before+1);
-        if (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT || scenario==JOB_UDP_ABORT || scenario>=JOB_RX_ABORT_PACKET) CHECK(abort_result==TX_SUCCESS);
+        if (scenario==JOB_ABORT || scenario==JOB_LATE_ABORT || scenario==JOB_UDP_ABORT || scenario>=JOB_RX_ABORT_PACKET)
+            CHECK(abort_result==(scenario==JOB_IP_ARRIVAL_WINS ? TX_WAIT_ABORT_ERROR : TX_SUCCESS));
         CHECK(!job && !_tx_thread_preempt_disable);
         anx_tx_context_end(&frame);
         passed++;
@@ -307,6 +390,6 @@ int main(void)
     CHECK(anx_exec_wait_close(&owner_wait));
     FreeSignal(bit);
     CHECK(!_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable);
-    say(passed==12 ? "research_tx_bridge=PASS checks=12/12 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
-    return passed==12 ? 0 : 20;
+    say(passed==17 ? "research_tx_bridge=PASS checks=17/17 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
+    return passed==17 ? 0 : 20;
 }

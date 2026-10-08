@@ -15,6 +15,7 @@ add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_timeout.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_sleep.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_mutex_cleanup.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_socket_thread_suspend.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_socket_thread_resume.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_receive_cleanup.c"
@@ -32,6 +33,8 @@ target_link_libraries(research_tx_bridge PUBLIC research_wait)
 target_include_directories(research_tx_bridge PUBLIC ${ANX_BRIDGE_INCLUDES})
 target_compile_definitions(research_tx_bridge PUBLIC TX_DISABLE_ERROR_CHECKING)
 target_compile_options(research_tx_bridge PRIVATE -Wall -Wextra -Werror)
+set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
+    PROPERTIES COMPILE_DEFINITIONS "_tx_thread_wait_abort=anx_tx_original_wait_abort")
 if(CMAKE_CROSSCOMPILING)
     enable_language(ASM)
     add_library(research_exec_adapter STATIC exec_wait.c)
@@ -70,6 +73,7 @@ if(CMAKE_CROSSCOMPILING)
         "${AMIGA_NDK_INCLUDE}")
 else()
     enable_testing()
+    find_package(Threads REQUIRED)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_executable(research_wait_model test_wait.c)
     target_link_libraries(research_wait_model PRIVATE research_wait)
@@ -79,6 +83,11 @@ else()
     target_link_libraries(research_tx_bridge_model PRIVATE research_tx_bridge)
     target_compile_options(research_tx_bridge_model PRIVATE -Wall -Wextra -Werror)
     add_test(NAME research_tx_bridge_model COMMAND research_tx_bridge_model)
+    add_executable(research_mutex_bridge_model test_mutex_bridge.c)
+    target_link_libraries(research_mutex_bridge_model PRIVATE research_tx_bridge Threads::Threads)
+    target_compile_options(research_mutex_bridge_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_mutex_bridge_model COMMAND research_mutex_bridge_model)
+    set_tests_properties(research_mutex_bridge_model PROPERTIES TIMEOUT 15)
     add_executable(research_netx_resume_model test_netx_resume.c)
     target_link_libraries(research_netx_resume_model PRIVATE research_tx_bridge)
     target_compile_options(research_netx_resume_model PRIVATE -Wall -Wextra -Werror)
