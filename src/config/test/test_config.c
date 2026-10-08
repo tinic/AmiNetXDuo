@@ -319,6 +319,63 @@ static void test_text_helpers(void)
     }
 
     {
+        static const struct { const char *input; const char *expected; } quoted[] =
+        {
+            { "\"\"", "" },
+            { "\"plain\"", "plain" },
+            { "\"*N*e*E*n**\"", "\n\033\033\n*" },
+            { "\"a*\"b\"", "a\"b" },
+            { "\"unknown*z\"", "unknownz" },
+            { "\"unterminated", "unterminated" },
+            { "\"tail*", "tail*" }
+        };
+        unsigned i;
+        for (i = 0; i < sizeof(quoted) / sizeof(quoted[0]); i++)
+        {
+            char *tokens[2];
+            ULONG count;
+
+            buf = dup_text(quoted[i].input);
+            ami_cfg_unquote(buf);
+            CHECK_STR(buf, quoted[i].expected);
+            free(buf);
+            buf = dup_text(quoted[i].input);
+            count = ami_cfg_tokenize(buf, tokens, 2);
+            CHECK(count == 1);
+            if (count)
+                CHECK_STR(tokens[0], quoted[i].expected);
+            free(buf);
+        }
+        buf = dup_text("\"plain\"suffix next");
+        {
+            char *tokens[3];
+            CHECK(ami_cfg_tokenize(buf, tokens, 3) == 3);
+            CHECK_STR(tokens[0], "plain");
+            CHECK_STR(tokens[1], "suffix");
+            CHECK_STR(tokens[2], "next");
+        }
+        free(buf);
+        buf = dup_text("first=\"a*N*\"b\" second=\"\" third=last");
+        cursor = buf;
+        {
+            char *key, *value;
+            CHECK(ami_cfg_next_pair(&cursor, &key, &value));
+            CHECK_STR(key, "first"); CHECK_STR(value, "a\n\"b");
+            CHECK(ami_cfg_next_pair(&cursor, &key, &value));
+            CHECK_STR(key, "second"); CHECK_STR(value, "");
+            CHECK(ami_cfg_next_pair(&cursor, &key, &value));
+            CHECK_STR(key, "third"); CHECK_STR(value, "last");
+            CHECK(!ami_cfg_next_pair(&cursor, &key, &value));
+        }
+        free(buf);
+        buf = dup_text("not quoted");
+        ami_cfg_unquote(buf);
+        CHECK_STR(buf, "not quoted");
+        free(buf);
+        ami_cfg_unquote(NULL);
+    }
+
+    {
         ULONG n = 0;
 
         CHECK(ami_cfg_parse_ulong("1500", &n) && n == 1500);
