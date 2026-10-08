@@ -63,6 +63,21 @@ listing(clobber_mit
     "     10a:${T}4e5d           ${T}unlk %a5"
     "     10c:${T}4e75           ${T}rts")
 
+# A store through the frame pointer in MIT syntax, as binutils 2.46's objdump
+# prints `move.l d0,-316(a5)': memory at a5-316 changes, a5 does not.
+listing(store_mit
+    "     100:${T}4e55 fe00      ${T}linkw %a5,#-512"
+    "     104:${T}2b40 fec4      ${T}movel %d0,%a5@(-316)"
+    "     108:${T}2b40 fec4      ${T}movel %d0,%a5@(-316,%d1:l)"
+    "     10c:${T}4e5d           ${T}unlk %a5"
+    "     10e:${T}4e75           ${T}rts")
+# The auto-modify form does change a5.
+listing(predec_mit
+    "     100:${T}4e55 fe00      ${T}linkw %a5,#-512"
+    "     104:${T}2b00           ${T}movel %d0,%a5@-"
+    "     106:${T}4e5d           ${T}unlk %a5"
+    "     108:${T}4e75           ${T}rts")
+
 # Swapped out, restored from the stack, then swapped out again with the same
 # register: the second exg is a new write, not the pair's restore.
 listing(exg_after_restore
@@ -88,6 +103,7 @@ listing(exg_across_frames
 
 set(cases "clobber:FAIL" "stack_restore:PASS" "exg_pair:PASS"
           "exg_unmatched:FAIL" "exg_mismatch:FAIL" "clobber_mit:FAIL"
+          "store_mit:PASS" "predec_mit:FAIL"
           "exg_after_restore:FAIL" "exg_across_frames:FAIL")
 set(wrong "")
 foreach(c IN LISTS cases)
