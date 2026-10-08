@@ -2083,7 +2083,8 @@ Raw values, paired medians/ranges and each receipt are retained in
 /Users/turo/ai/evidence/exec-threadx-perf-comparison.json. Connected guest RAM
 consumption medians are935936B baseline and936480B prototype (+544B); these are
 whole-guest snapshots including client/OS allocations, not backend peak RAM or
-proof of a leak. Post-unload RAM consumption matches across arms (12,584B from each pre-open snapshot).
+proof of a leak. Post-unload consumption is12,560–12,584B in both arms relative to pre-open;
+these snapshots cannot isolate OS caching from library allocations.
 
 The initial prototype benchmark really failed. Terminal diagnostics identified
 `_tx_time_get`: production WaitSelect reads time outside its NetX bracket,
