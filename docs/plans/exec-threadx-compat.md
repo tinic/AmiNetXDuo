@@ -1671,3 +1671,105 @@ matched reserving client, removed/busy-client ownership, general forced
 termination/cancellation, actual device/ISR and IPv6 execution remain OPEN.
 Then measure equal-feature image size, complete resident resources/high-water,
 yield latency and performance against the original ThreadX/baton backend.
+
+### Actual loaded full-library loopback lifecycle (2026-10-08)
+
+Final executable source **3021975e7face41b5bcb6ff7e00617e547605f4e** now runs
+through the actual full-profile bsdsocket.library, loaded with OpenLibrary and
+called through its public LVOs. The standalone public test links only command
+startup and DOS/Exec support: no embedded backend/NetX stack, fixture entropy or
+replacement library callbacks. The original ThreadX/baton library is the control.
+Both use the same complete feature profile and original vendor pins; these are
+diagnostic non-LTO builds. TCP handler is configured OFF in the disposable,
+boardless A1200 guest, so physical drivers and add-on workers are not exercised.
+
+Three runtime integration changes were necessary:
+
+- Managed workers bind to library-owned public storage. Once BOUND, the temporary
+  startup Process no longer authorizes their lifecycle: its client pointer/stamp
+  are cleared. Registered normal, non-target application contexts may perform
+  the exact quiescent private stop and FINISHED public deletion. The management
+  creator, marked/unregistered clock and target remain excluded. PREPARED
+  reservations/cancellation and legacy ACK owners retain their original strict
+  authority. Bound retirement is public nonblocking delete plus private drain.
+- A Task can open two private library bases. A new adoption may evict its other
+  handed, identity-matched, quiescent DORMANT cache after successfully allocating
+  the new signal; ACTIVE/unhanded records still refuse. Existing generation and
+  signal-debt recovery reclaims the evicted base's signal on its next entry or
+  close. Switching bases pays allocation/free/generation overhead, unmeasured.
+- Exec enters the actual Close vector under its own Forbid. The research Close
+  path releases exactly that one level only at TD==0 and ID<0, keeping the open
+  count as a segment pin through teardown, then restores Forbid before count
+  decrement and deferred expunge. Additional caller Forbid/Disable refuses before
+  mutation. The gate recompiles actual library.c with its own full command flags
+  plus the research definition and swaps exactly that explicit link object.
+
+The research parent shutdown refuses physical interfaces, retained readers and
+AutoIP/DHCP/mDNS/DHCPv6 producers. It deactivates the actual IP timers and waits
+at most 100 ticks outside protection for the exact parked event safe point,
+actual terminal IO closure and Task removal, before unchanged pinned nx_ip_delete.
+After STOPPING, a terminal marker closes admission immediately: retained storage
+is for reap retry, never resumed service. Before STOPPING, refusal can restore
+previous timer states. Successful kernel retirement clears the marker; startup
+requires that success before allocating a replacement domain.
+
+Independent AgentNet claudecode reviewed the implementation and bounded repairs:
+L1 terminal admission, L3 explicit segment unload and L4 manager exclusion were
+resolved. M1 allocator-ABA concern was withdrawn after startup gating was proved.
+The final test-only dispatch repair and DOS string cast have NO BLOCKER. Full
+review parts are retained in
+/Users/turo/ai/evidence/exec-threadx-library-lifecycle-source-review.txt. Initial
+smoke flow and host-model internals were not fully independently reviewed;
+source approval is not a whole-platform runtime verdict.
+
+Actual final receipts at the clean executable source prove:
+
+| Check | Actual result |
+| --- | --- |
+| Original full library, two load/use/close/unload cycles | 16/16 PASS |
+| Exec replacement, same public cycles | 16/16 PASS |
+| Extra caller Forbid/Disable and explicit research retry | 5/5 PASS |
+| Nine adjacent native fixtures | 190/190 PASS |
+| Host models/contracts | 48/48 PASS |
+| Full-profile replacement link | Zero unresolved; link-only gate PASS |
+| Actual static library entry/version checks | PASS |
+
+The public cycles execute IPv4 UDP, IPv6 UDP and IPv4 TCP data between private
+bases, close an evicted base while the second survives, then verify actual helper,
+kernel and health removal. The real Expunge LVO returns a segment that is actually
+UnLoadSeg-ed before reload; final Task signal allocation exactly matches entry.
+The separate five-case probe preserves extra exclusion/count/base/health and
+then explicitly retries in normal context. CloseLibrary returns void: real
+clients cannot learn this refusal and will generally never retry, leaving a
+permanent library pin. Deferred cleanup is OPEN; the probe is not a supported
+application recovery policy. Terminal timeout/fatal/busy-removed-owner paths
+remain unexercised, as do physical/add-on startup rollback and shutdown.
+
+All native receipts use the existing Amiberry 8.3.0, Kickstart 3.1 r40.68, boardless
+A1200 Fast 8 MB, guest stack 8192 and timeout 90. Exact case counts, guest/harness
+exits, one actual boot token, binary/library hashes and no illegal/guru/alert or
+unexpected ROM reset are checked. Harness elapsed time is not performance data.
+Earlier real failures are preserved: second-base socket errno50 (3/16), final
+close refused by TD=0/ID=-1 (6/16), and incorrect EXCLUSION argument dispatch
+(actual16 versus expected5, FAIL). The final parser uses GetArgStr's raw DOS line,
+requires an exact token and rejects unknown non-empty input; Werror caught and
+required an explicit signedness conversion. No failed receipt was relabeled.
+
+Current equal-feature diagnostic FILE sizes are **395,532 bytes (386.26 KiB)**
+for original ThreadX/baton and **463,680 bytes (452.81 KiB)** for the Exec
+replacement: **+68,148 bytes / +17.23%**, a size regression. This is not a
+comparison with the LTO shipping image and not resident RAM. There is no size,
+RAM/high-water, latency or throughput improvement established. Conservative
+owned native stacks for small public stacks still add 8200 allocation bytes plus
+record/IO overhead; include these in the later complete resource comparison.
+
+Evidence and retained binaries/compressed maps are indexed in
+/Users/turo/ai/evidence/exec-threadx-library-lifecycle.json. Task-owned builds,
+disposable guest directory drives/configs/logs, staged helper and copied ROM are
+removed after manifest verification. Vendor pins, user assets, hardware disks,
+standing guests, upstream audit and the unmerged research branch are preserved.
+
+Next: complete physical/add-on lifecycle and deferred close ownership, then
+measure equal-feature LTO image size, complete resident resources/high-water and
+performance against ThreadX/baton. This checkpoint proves public loopback use
+and normal unload, not a shipping-ready replacement.
