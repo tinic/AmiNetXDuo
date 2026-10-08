@@ -95,7 +95,7 @@ int main(void)
     LONG fd,listener,client,accepted;
     ULONG signals=FindTask(NULL)->tc_SigAlloc;
     /* tool_startup.S supplies a raw Shell line, not a C argv array. */
-    const char *args=skip_space(GetArgStr());
+    const char *args=skip_space((const char *)GetArgStr());
     if (args && !strncmp(args,"EXCLUSION",9)) {
         const char *tail=skip_space(args+9);
         CHECK(!*tail);
