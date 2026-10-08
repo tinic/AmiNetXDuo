@@ -1981,11 +1981,14 @@ close refused by TD=0/ID=-1 (6/16), and incorrect EXCLUSION argument dispatch
 requires an exact token and rejects unknown non-empty input; Werror caught and
 required an explicit signedness conversion. No failed receipt was relabeled.
 
-Current equal-feature diagnostic FILE sizes are **395,532 bytes (386.26 KiB)**
-for original ThreadX/baton and **463,680 bytes (452.81 KiB)** for the Exec
-replacement: **+68,148 bytes / +17.23%**, a size regression. This is not a
-comparison with the LTO shipping image and not resident RAM. There is no size,
-RAM/high-water, latency or throughput improvement established. Conservative
+The earlier FILE-size comparison reported 395,532 baseline bytes versus
+463,680 research bytes, or +17.23%. **That comparison was invalid:** CMake
+stripped the baseline, while the diagnostic relink retained research symbols.
+Applying the same strip tool to that exact research artifact yields **418,860
+bytes (409.04 KiB)** versus **395,532 bytes (386.26 KiB)**: **+23,328 bytes /
++5.90%**. The original unstripped artifacts and verdicts are retained; they are
+not a matched size comparison. The matched LTO results follow below. No resident
+RAM/high-water, latency or throughput improvement is established. Conservative
 owned native stacks for small public stacks still add 8200 allocation bytes plus
 record/IO overhead; include these in the later complete resource comparison.
 
@@ -1999,3 +2002,48 @@ Next: complete physical/add-on lifecycle and deferred close ownership, then
 measure equal-feature LTO image size, complete resident resources/high-water and
 performance against ThreadX/baton. This checkpoint proves public loopback use
 and normal unload, not a shipping-ready replacement.
+
+### Matched full-feature LTO size comparison (2026-10-08)
+
+Executable/gate source **5dbe7c53b454695f936735fdd06e9c88dfab93fd** rebuilds
+both libraries with the same shipping Release profile, CPU any (-m68000),
+-Os -flto -fno-ident, Werror, identical feature/layout definitions and unchanged
+vendor pins. No feature pruning or protocol fixtures are used. The gate requires
+--lto to agree with actual compile and link flags, uses GCC plugin-aware ar for
+slim IR, and applies the full build's exact KEEP_SYMBOLS/CMAKE_STRIP policy in
+both LTO and non-LTO modes. All original library vector/romtag roots and calling
+conventions remain; only the reviewed research scheduler/parent integration
+objects differ. AgentNet claudecode reviewed both gate deltas: NO BLOCKER,
+LOW unmatched diagnostic stripping resolved. Runtime backend sources unchanged.
+
+| Same full feature set, symbols stripped | File bytes | KiB |
+| --- | --- | --- |
+| Original ThreadX/baton, LTO | 355,340 | 347.01 |
+| Exec research replacement, LTO | 375,240 | 366.45 |
+| Difference | +19,900 | +19.43 (+5.60%) |
+
+The research LTO relink before stripping is 442,136 bytes, illustrating why that
+post-processing must match before comparing. The corrected earlier non-LTO
+comparison is +5.90%; the prior +17.23% mixed-symbol-policy claim is withdrawn.
+LTO does not establish a size saving for this prototype. RAM/high-water,
+synchronization overhead, latency and throughput are still unmeasured. The
+user's continuation criterion is a size saving or significant performance gain;
+neither benefit has been established. Do not infer performance from run duration.
+
+Both newly built LTO libraries actually execute the retained public LVO-only
+fixture: original **16/16 PASS**, research **16/16 PASS**, each two real loaded
+IPv4 UDP/IPv6 UDP/IPv4 TCP and close/Expunge/UnLoadSeg/reload cycles. Research
+extra Forbid/Disable probe **5/5 PASS** with explicit test-only retry. Every
+receipt has clean source, exact loaded-library hashes, guest/harness exit0,
+one real boot token and no illegal/guru/alert or unexpected ROM reset. The test
+command binary is the unchanged non-LTO public ABI fixture compiled at3021975e;
+it embeds no backend. Loaded libraries/vendor/backend use the new full LTO
+build. Baseline post-build and research explicit entry/version checks pass;
+replacement link has zero unresolved symbols. These are actual new executions,
+not reused native results. Physical/add-on/deferred-close limitations remain.
+
+Small useful libraries/compressed maps, configuration/commands, review and native
+receipts are indexed in /Users/turo/ai/evidence/exec-threadx-lto-comparison.json.
+Task-created full/relink builds, copied ROM, staged helper and all three disposable
+guest drives/configs/logs are removed after verification. User assets, hardware,
+standing guests, unmerged branch, vendor pins and upstream audit are preserved.
