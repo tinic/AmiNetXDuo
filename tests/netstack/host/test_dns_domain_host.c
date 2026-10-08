@@ -99,6 +99,45 @@ static void t_owner_comparison(void)
     }
 }
 
+static void t_domain_boundaries(void)
+{
+    char name[AMI_CFG_DOMAIN_LEN + 2];
+    char original[sizeof(name)];
+
+    h_check(!ami_ns_domain_valid(NULL) && !ami_ns_domain_canonicalize(NULL),
+            "NULL domain is refused without access");
+    memset(name, 'a', sizeof(name));
+    name[63] = '\0';
+    h_check(ami_ns_domain_valid(name) && ami_ns_domain_canonicalize(name) &&
+            strlen(name) == 63U, "a 63-byte label remains unchanged");
+    name[63] = 'a';
+    name[64] = '\0';
+    memcpy(original, name, sizeof(name));
+    h_check(!ami_ns_domain_valid(name) && !ami_ns_domain_canonicalize(name) &&
+            memcmp(name, original, sizeof(name)) == 0,
+            "a 64-byte label is refused without any mutation");
+
+    memset(name, 'a', sizeof(name));
+    name[63] = name[127] = name[191] = '.';
+    name[255] = '\0';
+    memcpy(original, name, sizeof(name));
+    h_check(ami_ns_domain_valid(name) && ami_ns_domain_canonicalize(name) &&
+            memcmp(name, original, sizeof(name)) == 0,
+            "four 63-byte labels retain the original unrooted spelling");
+    name[255] = '.';
+    name[256] = '\0';
+    h_check(ami_ns_domain_valid(name) && ami_ns_domain_canonicalize(name) &&
+            name[255] == '\0' && name[256] == '\0' && name[257] == 'a',
+            "the existing rooted boundary removes only its root marker");
+    name[255] = '.';
+    name[256] = 'a';
+    name[257] = '\0';
+    memcpy(original, name, sizeof(name));
+    h_check(!ami_ns_domain_valid(name) && !ami_ns_domain_canonicalize(name) &&
+            memcmp(name, original, sizeof(name)) == 0,
+            "an overlong name is refused before any mutation");
+}
+
 int main(void)
 {
     AmiResolverConfig resolver;
@@ -113,6 +152,7 @@ int main(void)
 
     t_prefer_order();
     t_owner_comparison();
+    t_domain_boundaries();
 
     memset(&resolver, 0, sizeof(resolver));
     memset(&dhcp, 0, sizeof(dhcp));
