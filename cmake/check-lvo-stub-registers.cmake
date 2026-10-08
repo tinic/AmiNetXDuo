@@ -26,9 +26,8 @@
 #
 # BOTH DISASSEMBLY SYNTAXES ARE ACCEPTED.  binutils prints the vector call as
 # `jsr -552(a6)` in Motorola syntax and `jsr a6@(-552)` in MIT, and which one
-# comes out depends on the binutils build, not on anything we control: 2.39 in
-# the pinned toolchain gives Motorola, 2.46 on a locally built macOS toolchain
-# gives MIT.  Matching only one of them meant the check found no vector call at
+# comes out depends on the binutils build, not on anything we control: 2.39
+# gives Motorola, 2.46 (the pinned toolchain) gives MIT.  Matching only one of them meant the check found no vector call at
 # all and stopped the build with "the disassembly was not read as expected",
 # which is a true statement about the wrong thing.
 #

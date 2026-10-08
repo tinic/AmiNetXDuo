@@ -217,8 +217,8 @@ def functions(objdump, path):
     # Two symbol-line formats, because binutils versions disagree and the
     # toolchains in play are different versions:
     #     00000000 <_____start>:              (newer)
-    #     00000000 00000000 _____start:       (the pinned 2.39 build)
-    # Only the second appears on the pinned toolchain, so matching just the
+    #     00000000 00000000 _____start:       (2.39)
+    # Only the second appeared on the 2.39 toolchain, so matching just the
     # first parsed nothing, reported every file as "skipped", and passed.
     SYMBOL = (re.compile(r"^([0-9a-f]+) <([^>]+)>:"),
               re.compile(r"^[0-9a-f]+ [0-9a-f]+ (\S+):\s*$"))
@@ -313,7 +313,7 @@ def instruction_details(objdump, path):
     function = None
     for line in out.stdout.splitlines():
         # Both symbol-line formats, as in functions(): matching only the
-        # pinned 2.39 one left every instruction without a function on a
+        # 2.39 one left every instruction without a function on a
         # 2.46 objdump, so no call to main was ever counted.
         m = re.match(r"^\s*[0-9a-f]+\s+[0-9a-f]+\s+(\S+):\s*$", line) or \
             re.match(r"^\s*[0-9a-f]+ <([^>]+)>:\s*$", line)
@@ -405,16 +405,16 @@ def _addend(text, word=None):
     THE ONLY RELIABLE WAY TO TELL __argv FROM ITS NEIGHBOURS. Both objdumps
     print the addend, and neither reliably distinguishes the symbol otherwise:
 
-        this machine's 2.4x   lea 0 <_____start>,a6      RELOC32 .bss
+        2.46                  lea 0 <_____start>,a6      RELOC32 .bss
                               move.l 14 <..+0x14>,-(sp)  RELOC32 .bss
-        the pinned 2.39       lea 0 0 ___argv,a6         RELOC32 .bss
+        2.39                  lea 0 0 ___argv,a6         RELOC32 .bss
                               move.l 14 14 ___argc,-(sp) RELOC32 .bss
 
     The relocation reads `.bss` for EVERY symbol in that section, __argv,
     __argc, __savedSp, __commandline alike. An earlier version of this file
     assumed a bare `.bss` meant offset zero because that happened to hold on
     the development machine, where __argc is a common symbol and gets its own
-    relocation. It does not hold on the toolchain that builds releases.
+    relocation. It did not hold on the 2.39 toolchain that built releases.
     __argv is at .bss+0, so the addend is the discriminator.
 
     THE DISPLACEMENT COMES FIRST, and it is not always leading. `pea a4@(0)`
@@ -427,6 +427,8 @@ def _addend(text, word=None):
     the full-format libb32 forms in hex without a prefix (`a4@(10)` for
     __argv at .bss+0x10, `a4@(c)` for __argc).  "10" guessed as decimal
     disqualified every libb32 file, so callers that know the opcode pass it.
+    Only the MIT form: 2.39's Motorola `(16,a4)` for the same forms is
+    decimal, and reading it as hex refused three 2.39 libb32 crt0s.
     """
     hex32 = word in (PEA_A4_32, PUSH_A4_32)
     m = re.search(r"a[0-7]@\((-?[0-9a-fx]+)\)", text)       # pea a4@(20)
@@ -434,7 +436,7 @@ def _addend(text, word=None):
         return int(m.group(1), 16) if hex32 else _displacement(m.group(1))
     m = re.search(r"\((-?[0-9a-fx]+),%?a[0-7]\)", text)     # pea (20,a4)
     if m:
-        return int(m.group(1), 16) if hex32 else _displacement(m.group(1))
+        return _displacement(m.group(1))
     m = re.search(r"\b([0-9a-f]+)\(%?a[0-7]\)", text)        # 20(a4), MIT
     if m:
         return _displacement(m.group(1))
@@ -521,7 +523,7 @@ def argv_sites(objdump, path):
         if (word & 0xF1FF) == ADDA_IMM \
                 and _refers_to_symbol(reloc, text, argv_location, word):
             n = (word >> 9) & 7
-            # `moveal a4,a6` here, `movea.l a4,a6` under the pinned binutils.
+            # `moveal a4,a6` under 2.46, `movea.l a4,a6` under 2.39.
             if i and re.match(rf"^move[a.l]*\s+%?a4,%?a{n}$", insns[i - 1][3]):
                 holds_argv[n] = True
                 continue

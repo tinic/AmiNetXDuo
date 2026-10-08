@@ -1,6 +1,7 @@
 Applied by tools/build-toolchain.sh when the binutils pin is on branch
-amiga-2.46.  The pin is still amiga-2.39.0, which selects
-tools/patches/binutils/ instead; this set is what a pin that moves gets.
+amiga-2.46, as it is from asset series 16.2.4, together with the two diffs
+beside it.  A pin on amiga-2.39.0 selects
+tools/patches/binutils/ instead.
 
 Against bebbo's binutils-gdb, branch amiga-2.46, commit
 a50544a917284847c99e97d41c69ece9d5cb2fef (https://franke.ms/git/bebbo/binutils-gdb).
@@ -68,16 +69,14 @@ objcopy-keep-hunk-relocs.diff applied over the pinned GCC 16.2.0b:
     rt_helpers=clean images=41                                      rc=0
 
   the four shipped images, byte-compared against the same tree built with
-  -DAMINETXDUO_LTO=ON on the pinned 2.39 toolchain
+  -DAMINETXDUO_LTO=ON on the 2.39 toolchain
 
     bsdsocket.library    388496 bytes   identical
     tls.library          195708 bytes   identical
     anxnet.device         36108 bytes   identical
     usergroup.library      7840 bytes   identical
 
-The pin did not move on the strength of that: byte-identical output is no
-reason to republish a prebuilt toolchain that tools/fetch-toolchain.sh pins by
-sha256 on two platforms.
+The pin moved to this commit, with this set, in asset series 16.2.4.
 
 diff --git a/bfd/format.c b/bfd/format.c
 index f35230eb..6391dd8e 100644

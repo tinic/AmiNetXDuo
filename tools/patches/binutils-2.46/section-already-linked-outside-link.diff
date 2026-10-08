@@ -1,0 +1,36 @@
+Applied by tools/build-toolchain.sh when the binutils pin is on branch
+amiga-2.46, together with the two diffs beside it.
+
+Against bebbo's binutils-gdb, branch amiga-2.46, commit
+a50544a917284847c99e97d41c69ece9d5cb2fef (https://franke.ms/git/bebbo/binutils-gdb).
+Backport of 6fa839d070065be84b48fb48112b42c408f4fc6b from the same branch;
+drop this file when the pin reaches it.
+
+WHAT IT FIXES
+
+`ar` dies with SIGFPE writing the archive index of any object that has a
+weak one-only section (every C++ COMDAT):
+
+  bfd_hash_lookup <- _bfd_generic_section_already_linked
+    <- amiga_slurp_symbol_table <- _bfd_compute_and_write_armap
+
+amiga_slurp_symbol_table calls bfd_section_already_linked() to keep the
+first copy of such a section.  That table is initialised only by ld; under
+ar and objcopy its size is 0 and the hash modulus divides by zero.  The
+toolchain build stops at libsupc++.  lto-archive-symbol-index.diff is what
+makes `ar` write an index at all on this target, so it is what exposes the
+crash.  The dedup now runs only when ld has set the link info.
+
+diff --git a/bfd/amigaos.c b/bfd/amigaos.c
+index 32285d5f..1ae240e3 100644
+--- a/bfd/amigaos.c
++++ b/bfd/amigaos.c
+@@ -3648,7 +3648,7 @@ amiga_slurp_symbol_table (bfd *abfd)
+ 	  section->symbol->name = section->name;
+ 	/* Early LTO debug sections contain a weak compilation-unit marker,
+ 	   but each section still has distinct contents that must be kept.  */
+-	if (i && all_weak && (section->flags & SEC_DEBUGGING) == 0)
++	if (plink_info && i && all_weak && (section->flags & SEC_DEBUGGING) == 0)
+ 	  {
+ 	    /* SBF: mark the section optional */
+ 	    section->flags |= SEC_LINK_ONCE | SEC_LINK_DUPLICATES_DISCARD | SEC_LINK_DUPLICATES_SAME_CONTENTS;

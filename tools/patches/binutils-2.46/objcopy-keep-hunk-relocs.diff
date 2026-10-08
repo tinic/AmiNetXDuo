@@ -1,7 +1,7 @@
 Applied by tools/build-toolchain.sh when the binutils pin is on branch
-amiga-2.46, together with lto-archive-symbol-index.diff beside it.  The pin is
-still amiga-2.39.0 (tools/build-toolchain.sh:39), which selects
-tools/patches/binutils/ instead; this set is what a pin that moves gets.
+amiga-2.46, together with the two diffs beside it.  The pin is
+there from asset series 16.2.4; a pin on amiga-2.39.0 selects
+tools/patches/binutils/ instead.
 
 Against bebbo's binutils-gdb, branch amiga-2.46, commit
 a50544a917284847c99e97d41c69ece9d5cb2fef (https://franke.ms/git/bebbo/binutils-gdb).
@@ -44,7 +44,7 @@ GCC 16.2.0b:
 
 The LTO arms need lto-archive-symbol-index.diff beside this one.  With both
 applied the whole tree builds at -DAMINETXDUO_LTO=ON, both gates come back
-clean, and the four shipped images are byte for byte what the pinned 2.39
+clean, and the four shipped images are byte for byte what the 2.39
 toolchain emits.
 
 diff --git a/binutils/objcopy.c b/binutils/objcopy.c

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Acquire the pinned m68k-amigaos cross toolchain: GCC 16.2.0b, binutils
-# 2.39.0, NDK 3.9, built by tools/build-toolchain.sh from pinned commits.
+# 2.46, NDK 3.9, built by tools/build-toolchain.sh from pinned commits.
 #
 #   tools/fetch-toolchain.sh              # fetch (or reuse), report the root
 #   eval "$(tools/fetch-toolchain.sh --export)"   # ... and export it
@@ -24,17 +24,15 @@ set -euo pipefail
 
 # ------------------------------------------------------------------- pin ----
 
-# binutils 2.39, not 2.46: a 2.46 toolchain patched by
-# tools/patches/binutils-2.46/ builds this tree at -DAMINETXDUO_LTO=ON and
-# emits the four shipped images byte for byte as this one does, and identical
-# output does not pay for a new asset on two platforms whose sha256 is pinned
-# below.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types and the
+# binutils 2.46, patched by tools/patches/binutils-2.46/: it builds this tree
+# at -DAMINETXDUO_LTO=ON and emits the four shipped images byte for byte as
+# the earlier 2.39 assets do.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types and the
 # sources are written to the spellings both accept.
 TC_GCC_VERSION="16.2.0b"
-# 16.2.3 rebuilds the pinned newlib allocator in every multilib after the
-# compiler libraries. The GCC fork remains at 243a0096, and its reported
-# version remains 16.2.0b. Older asset hashes remain at their original tags.
-TC_ASSET_VERSION="16.2.3"
+# 16.2.4 moves binutils from 2.39 to 2.46 and GCC to bebbo amiga16.2 134541b3
+# plus the sibcall fix (tinic/gcc a5166db4). The reported version remains
+# 16.2.0b. Older asset hashes remain at their original tags.
+TC_ASSET_VERSION="16.2.4"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
 # Compiler assets live with the fork rather than topping the product releases.
@@ -51,11 +49,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="b24ce5d006514b2f471daac564838ac0aa2adff8f21aa54d2afc6d6b256cd1f3"
+        TC_SHA256="9690e9ee36f68cec26e3ec2330550fd527204b61df367aa62fa74d1f254e28b2"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="09d61276d2e1684d1040f9e06f8d927758fc8d554f255e843822e9e6ce233a4f"
+        TC_SHA256="01c8cc2ab3458a68c2c1eff623f2807efed1c63f21502a739582a49b0dd88f4f"
         ;;
     *)
         TC_PLATFORM=""
