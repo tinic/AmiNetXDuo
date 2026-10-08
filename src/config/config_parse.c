@@ -56,12 +56,41 @@ typedef enum
 
 /* These settings reject bad values and keep the previous assignment.
    Request counts have a different (clamping) policy and stay separate. */
+#define IF_NUMBERS(X) \
+    X(UNIT, unit, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN) \
+    X(MTU, mtu, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_MTU_IS_A_PLAIN) \
+    X(RXBUFFER, rx_buffer, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_RXBUFFER_IS_THE) \
+    X(TCPACKMAX, tcp_ack_max, AMI_CFG_TCP_ACK_MAX, 1, \
+      AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES) \
+    X(TCPGROWRTT, tcp_grow_rtt, AMI_CFG_TCP_GROW_RTT_MAX, 1, \
+      AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS) \
+    X(TCPWANWINDOW, tcp_wan_window, AMI_CFG_TCP_WAN_WINDOW_MAX, 1, \
+      AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES) \
+    X(GROFRAMES, gro_frames, AMI_CFG_GRO_FRAMES_MAX, 1, \
+      AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES) \
+    X(ACKPACE, ack_pace_kbps, AMI_CFG_ACK_PACE_MAX, 1, \
+      AMI_CFG_ADVICE_ACKPACE_IS_KBPS)
+
+struct IfNumberNames
+{
+#define IF_NUMBER_NAME(key, field, max, nonzero, hint) char name_##key[sizeof(#key)];
+    IF_NUMBERS(IF_NUMBER_NAME)
+#undef IF_NUMBER_NAME
+};
+
+static const struct IfNumberNames ami_if_number_names =
+{
+#define IF_NUMBER_TEXT(key, field, max, nonzero, hint) #key,
+    IF_NUMBERS(IF_NUMBER_TEXT)
+#undef IF_NUMBER_TEXT
+};
+
 static const struct IfNumber
 {
-    const char *keyword;
     ULONG       max;
     UWORD       offset;
-    UWORD       hint;
+    UBYTE       keyword;
+    UBYTE       hint;
     UBYTE       width;
     UBYTE       nonzero;
 }
@@ -69,26 +98,22 @@ ami_if_numbers[] =
 {
 #define IF_NUMBER(key, field, max, nonzero, hint) \
     [IF_KEY_##key - IF_KEY_UNIT] = \
-        { #key, max, (UWORD)offsetof(AmiIfConfig, field), hint, \
-          sizeof(((AmiIfConfig *)0)->field), nonzero }
-    IF_NUMBER(UNIT, unit, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN),
-    IF_NUMBER(MTU, mtu, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_MTU_IS_A_PLAIN),
-    IF_NUMBER(RXBUFFER, rx_buffer, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_RXBUFFER_IS_THE),
-    IF_NUMBER(TCPACKMAX, tcp_ack_max, AMI_CFG_TCP_ACK_MAX, 1,
-              AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES),
-    IF_NUMBER(TCPGROWRTT, tcp_grow_rtt, AMI_CFG_TCP_GROW_RTT_MAX, 1,
-              AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS),
-    IF_NUMBER(TCPWANWINDOW, tcp_wan_window, AMI_CFG_TCP_WAN_WINDOW_MAX, 1,
-              AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES),
-    IF_NUMBER(GROFRAMES, gro_frames, AMI_CFG_GRO_FRAMES_MAX, 1,
-              AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES),
-    IF_NUMBER(ACKPACE, ack_pace_kbps, AMI_CFG_ACK_PACE_MAX, 1,
-              AMI_CFG_ADVICE_ACKPACE_IS_KBPS)
+        { max, (UWORD)offsetof(AmiIfConfig, field), \
+          (UBYTE)offsetof(struct IfNumberNames, name_##key), hint, \
+          sizeof(((AmiIfConfig *)0)->field), nonzero },
+    IF_NUMBERS(IF_NUMBER)
 #undef IF_NUMBER
 };
 
 _Static_assert(sizeof(AmiIfConfig) <= 65535UL,
                "numeric interface field offsets must fit in UWORD");
+_Static_assert(sizeof(struct IfNumberNames) <= 256UL,
+               "numeric keyword offsets must fit in UBYTE");
+#define IF_NUMBER_HINT(key, field, max, nonzero, hint) \
+    _Static_assert(hint >= 0 && hint <= 255, "numeric advice must fit in UBYTE");
+IF_NUMBERS(IF_NUMBER_HINT)
+#undef IF_NUMBER_HINT
+#undef IF_NUMBERS
 
 /* Preserve keyword order: typo suggestions keep the first equally close
    match. ADDRESS/IPADDRESS and NETMASK/SUBNETMASK are spelling aliases;
@@ -827,10 +852,13 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 else
                 {
+                    const char *keyword =
+                        (const char *)&ami_if_number_names + setting->keyword;
+
                     AMI_WARN("config: %s: bad %s '%s'", out->name,
-                             setting->keyword, value);
+                             keyword, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     setting->keyword, value, setting->hint);
+                                     keyword, value, setting->hint);
                 }
                 break;
             }
