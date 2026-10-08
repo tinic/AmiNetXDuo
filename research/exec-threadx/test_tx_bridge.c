@@ -6,6 +6,7 @@
 #include "nx_tcp.h"
 #include "nx_ip.h"
 #include "tx_thread.h"
+#include "tx_mutex.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,7 @@ static uintptr_t owner;
 static uint64_t now;
 static uint32_t stale_token;
 static unsigned aborted, reject_blocking_mutex, reject_timer_mutex, reject_stuck_cleanup;
+static unsigned reject_foreign_release;
 
 static void enter(void *arg) { (void)arg; depth++; }
 static void leave(void *arg) { (void)arg; CHECK(depth); depth--; }
@@ -35,6 +37,13 @@ static uintptr_t caller(void *arg) { (void)arg; return owner; }
 static void panic(void *arg,const char *text)
 {
     (void)arg;
+    if (reject_foreign_release && !strcmp(text,"foreign mutex release not implemented")) {
+        CHECK(ip.nx_ip_protection.tx_mutex_owner==&callers[0].thread);
+        CHECK(ip.nx_ip_protection.tx_mutex_ownership_count==1 && callers[0].thread.tx_thread_owned_mutex_count==1);
+        CHECK(_tx_thread_preempt_disable==1 && _tx_thread_current_ptr==&callers[2].thread);
+        puts("research_tx_bridge_guard=PASS rejected unsupported foreign thread_release without mutation");
+        exit(0);
+    }
     if (reject_stuck_cleanup && !strcmp(text,"cleanup did not complete within research grace")) {
         CHECK(callers[0].bridge.pending_resume && callers[0].thread.tx_thread_state==TX_READY);
         CHECK(callers[0].thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
@@ -301,6 +310,17 @@ int main(int argc, char **argv)
             anx_tx_context_begin(&frame,&callers[2].thread,0);
             _tx_thread_preempt_disable=1;
             (void)_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER);
+            CHECK(0);
+        }
+        if (!strcmp(argv[1],"--reject-foreign-release")) {
+            AnxTxContext frame;
+            init();
+            anx_tx_context_begin(&frame,&callers[0].thread,0);
+            CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_SUCCESS);
+            anx_tx_context_end(&frame);
+            owner=3; reject_foreign_release=1;
+            anx_tx_context_begin(&frame,&callers[2].thread,0);
+            _tx_mutex_thread_release(&callers[0].thread);
             CHECK(0);
         }
         CHECK(0);

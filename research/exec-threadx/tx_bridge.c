@@ -463,6 +463,11 @@ UINT _tx_mutex_put(TX_MUTEX *m)
 {
     need_context();
     if (m->tx_mutex_id!=TX_MUTEX_ID) return TX_MUTEX_ERROR;
+    /* The linked upstream cleanup TU also contains thread_release. Its forced
+     * foreign-owner loop would retry forever if put silently returned an error.
+     * Thread termination/forced release is outside this research backend. */
+    need(!_tx_thread_preempt_disable || !m->tx_mutex_ownership_count ||
+         m->tx_mutex_owner==_tx_thread_identify(),"foreign mutex release not implemented");
     if (!m->tx_mutex_ownership_count || m->tx_mutex_owner!=_tx_thread_identify()) return TX_NOT_OWNED;
     if (!--m->tx_mutex_ownership_count) {
         mutex_disown(m);
