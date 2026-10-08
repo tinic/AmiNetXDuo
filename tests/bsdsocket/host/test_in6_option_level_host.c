@@ -120,6 +120,60 @@ static void test_hops_and_class(void)
     }
 }
 
+static void test_getter_widths(void)
+{
+    static const LONG options[] = {
+        AMI_IPV6_UNICAST_HOPS_BSD, AMI_IPV6_TCLASS_BSD, AMI_IPV6_V6ONLY_BSD
+    };
+    static const LONG values[] = { 42, 255, 1 };
+    unsigned kind;
+    socklen_t offered;
+
+    for (kind = 0; kind < sizeof(options) / sizeof(options[0]); kind++)
+    for (offered = 0; offered <= sizeof(LONG) + 2; offered++)
+    {
+        UBYTE data[sizeof(LONG) + 4], expected[sizeof(LONG) + 4];
+        LONG value = values[kind];
+        WORD short_value = (WORD)value;
+        socklen_t len = offered;
+        socklen_t used = offered >= sizeof(LONG) ? sizeof(LONG) : sizeof(WORD);
+        BOOL valid = offered >= sizeof(WORD);
+        LONG rc;
+
+        h_sock.as_Flags = ASF_INET6 | ASF_V6ONLY;
+        h_sock.as_Ttl = values[0];
+        h_sock.as_Tos = values[1];
+        memset(data, 0xA5, sizeof(data));
+        memset(expected, 0xA5, sizeof(expected));
+        if (valid)
+        {
+            if (used == sizeof(LONG))
+                memcpy(expected + 1, &value, sizeof(value));
+            else
+                memcpy(expected + 1, &short_value, sizeof(short_value));
+        }
+        rc = bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
+                                 options[kind], data + 1, &len);
+        CHECK(valid ? rc == 0 && len == used :
+                      rc == -1 && h_base.sb_Errno == AMI_EINVAL && len == offered);
+        CHECK(memcmp(data, expected, sizeof(data)) == 0);
+        len = offered;
+        CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
+                                  options[kind], NULL, &len) == -1);
+        CHECK(h_base.sb_Errno == AMI_EFAULT && len == offered);
+        CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
+                                  options[kind], data + 1, NULL) == -1);
+        CHECK(h_base.sb_Errno == AMI_EFAULT);
+        CHECK(memcmp(data, expected, sizeof(data)) == 0);
+    }
+
+    /* IPv6 dispatch refuses a NULL buffer before classifying an unknown name. */
+    offered = 0;
+    CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
+                              -999, NULL, &offered) == -1);
+    CHECK(h_base.sb_Errno == AMI_EFAULT && offered == 0);
+}
+
 int main(void)
 {
     LONG value = 42;
@@ -142,6 +196,7 @@ int main(void)
     CHECK(value == 42);
 
     test_hops_and_class();
+    test_getter_widths();
 
     CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
                               AMI_IPV6_UNICAST_HOPS_BSD, &value,

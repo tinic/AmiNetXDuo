@@ -838,32 +838,6 @@ static LONG bsd_mcast6_get_int(struct AmiSocketBase *base, APTR optval,
     return 0;
 }
 
-static LONG bsd_mcast6_put_int(struct AmiSocketBase *base, APTR optval,
-                               socklen_t *optlen, LONG value)
-{
-    if (optval == NULL || optlen == NULL)
-        return bsd_fail(base, AMI_EFAULT);
-
-    if (*optlen >= (socklen_t)sizeof(LONG))
-    {
-        bsd_bcopy(&value, optval, sizeof(value));
-        *optlen = (socklen_t)sizeof(LONG);
-    }
-    else if (*optlen >= (socklen_t)sizeof(WORD))
-    {
-        WORD short_value = (WORD)value;
-
-        bsd_bcopy(&short_value, optval, sizeof(short_value));
-        *optlen = (socklen_t)sizeof(WORD);
-    }
-    else
-    {
-        return bsd_fail(base, AMI_EINVAL);
-    }
-
-    return 0;
-}
-
 LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                        LONG optname, APTR optval, socklen_t optlen)
 {
@@ -969,7 +943,7 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
             iface = bsd_mcast_preference(&sock->as_Mcast6If,
                                           sock->as_Mcast6IfEpoch);
             bsd_nx_leave(base);
-            return bsd_mcast6_put_int(base, optval, optlen,
+            return bsd_opt_get_long(base, optval, optlen,
                                       (iface < 0)
                                           ? 0
                                           : iface + 1);
@@ -977,12 +951,12 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
 
         case AMI_IPV6_MULTICAST_HOPS_BSD:
         case AMI_IPV6_MULTICAST_HOPS_LINUX:
-            return bsd_mcast6_put_int(base, optval, optlen,
+            return bsd_opt_get_long(base, optval, optlen,
                                       sock->as_Mcast6Hops);
 
         case AMI_IPV6_MULTICAST_LOOP_BSD:
         case AMI_IPV6_MULTICAST_LOOP_LINUX:
-            return bsd_mcast6_put_int(base, optval, optlen, 0);
+            return bsd_opt_get_long(base, optval, optlen, 0);
 
         /* Set-only, as the IPv4 pair are. */
         case AMI_IPV6_JOIN_GROUP_BSD:

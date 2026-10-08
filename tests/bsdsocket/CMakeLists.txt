@@ -47,7 +47,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # mcast.c itself: stale BSD rows must not survive NetX detaching and
     # reusing a physical interface slot.  Unused entry points are discarded,
     # leaving only the actual row helpers and a stubbed epoch source.
-    add_executable(test_mcast_epoch host/test_mcast_epoch_host.c)
+    add_executable(test_mcast_epoch host/test_mcast_epoch_host.c
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/opt_value.c")
     target_include_directories(test_mcast_epoch PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
         "${CMAKE_SOURCE_DIR}/src/bsdsocket"
@@ -130,7 +131,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     if(AMINETXDUO_IPV6 AND NOT AMINETXDUO_CMSG)
         add_executable(test_in6_option_level
-            host/test_in6_option_level_host.c)
+            host/test_in6_option_level_host.c
+            "${CMAKE_SOURCE_DIR}/src/bsdsocket/opt_value.c")
         target_include_directories(test_in6_option_level PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
             "${CMAKE_SOURCE_DIR}/src/bsdsocket"
@@ -491,7 +493,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # mcast.c and cmsg.c -- are stubbed; the test's header says what that does
     # and does not prove.
     add_executable(test_sockopt host/test_sockopt_host.c
-                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c")
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/opt_value.c")
 
     target_include_directories(test_sockopt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
@@ -514,7 +517,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # half -- 0 turns the small-write cork on, getsockopt reads it back -- is
     # compiled and checked whatever the option says, rxdirect's reason below.
     add_executable(test_sockopt_cork host/test_sockopt_host.c
-                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c")
+                                     "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/opt_value.c")
 
     target_include_directories(test_sockopt_cork PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"

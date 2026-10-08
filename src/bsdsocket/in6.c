@@ -277,22 +277,5 @@ LONG bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     else
         return bsd_fail(base, AMI_ENOPROTOOPT);
 
-    if (*optlen >= (socklen_t)sizeof(LONG))
-    {
-        bsd_bcopy(&value, optval, sizeof(value));
-        *optlen = (socklen_t)sizeof(LONG);
-    }
-    else if (*optlen >= (socklen_t)sizeof(WORD))
-    {
-        WORD short_value = (WORD)value;
-
-        bsd_bcopy(&short_value, optval, sizeof(short_value));
-        *optlen = (socklen_t)sizeof(WORD);
-    }
-    else
-    {
-        return bsd_fail(base, AMI_EINVAL);
-    }
-
-    return 0;
+    return bsd_opt_get_long(base, optval, optlen, value);
 }

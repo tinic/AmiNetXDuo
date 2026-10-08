@@ -1060,6 +1060,10 @@ VOID  bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4);
    IP_TTL and IP_TOS on the wire. Caller holds the bsd_nx_enter() bracket. */
 VOID  bsd_opt_apply_ip(AmiSocket *sock);
 
+/* Integer replies accept LONG or WORD buffers, including unaligned storage. */
+LONG  bsd_opt_get_long(struct AmiSocketBase *base, APTR optval,
+                       socklen_t *optlen, LONG value);
+
 #ifdef AMINETXDUO_IPV6
 
 /* TRUE when `addr` is ::ffff:a.b.c.d. *v4 receives a.b.c.d. */
