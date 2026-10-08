@@ -272,6 +272,7 @@ int main(void)
     test_multicast_dispatch();
     test_getter_widths();
 
+    h_enter_result = 0;
     CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
                               AMI_IPV6_UNICAST_HOPS_BSD, &value,
                               (socklen_t)sizeof(value)) == 0);
