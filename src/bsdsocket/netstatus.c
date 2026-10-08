@@ -1791,7 +1791,11 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
        the tick task and the bracket's own counters, not NetX Duo. */
     if (what == NETSTATUS_HEALTH)
     {
-        ns_fill_health((NetStatusHealth *)ns_writer_next(&w));
+        NetStatusHealth *health = (NetStatusHealth *)ns_writer_next(&w);
+
+        if (health == NULL)
+            return bsd_fail(SocketBase, AMI_EINVAL);
+        ns_fill_health(health);
         goto query_done;
     }
 
@@ -1877,6 +1881,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             NetStatusSystem *sys;
 
             sys = (NetStatusSystem *)ns_writer_next(&w);
+            if (sys == NULL)
+                goto query_no_entry;
             ns_fill_system(ip, sys);
 
             sys->nss_Openers = (openers > 0) ? (ULONG)openers : 0;
@@ -1916,8 +1922,14 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         }
 
         case NETSTATUS_STATS:
-            ns_fill_stats(ip, (NetStatusStats *)ns_writer_next(&w));
+        {
+            NetStatusStats *stats = (NetStatusStats *)ns_writer_next(&w);
+
+            if (stats == NULL)
+                goto query_no_entry;
+            ns_fill_stats(ip, stats);
             break;
+        }
 
         case NETSTATUS_ARP:
             ns_fill_arp(ip, &w);
@@ -1971,6 +1983,10 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
 query_done:
     ns_writer_finish(&w);
     return (LONG)hdr->nsh_Count;
+
+query_no_entry:
+    bsd_nx_leave(SocketBase);
+    return bsd_fail(SocketBase, AMI_EINVAL);
 }
 
 static LONG ns_map_status(struct AmiSocketBase *SocketBase, UINT status)
