@@ -56,4 +56,7 @@ const AnxExecThread *anx_exec_thread_owner_record(void);
  * changes require restore before outer boundary exit; no foreign changes.
  * Public delete only after normal completion + native removal, by creator. */
 UINT anx_exec_thread_stack_in_use(const VOID *,ULONG);
+/* Native yield preflight; minimum Exec priority refuses before frame release.
+ * Public void relinquish treats a refused preflight as a fatal unsupported call. */
+UINT anx_exec_thread_relinquish(VOID);
 #endif

@@ -15,7 +15,7 @@ static struct Task *parent;
 static ULONG parent_gen;
 static volatile unsigned phase,peer_progress,pin_checks,worker_resumes;
 static unsigned passed,printed;
-static const char *cases[27];
+static const char *cases[28];
 static void say(const char *s) {const char *e=s;while (*e)e++;(void)Write(Output(),(APTR)s,(LONG)(e-s));(void)Flush(Output());}
 #define CHECK(x) do {if (!(x)) {say("research_exec_schedule=FAIL " #x "\n");return 20;}} while (0)
 #define REQUIRE(x) do {if (!(x)) anx_tx_unsupported("schedule child: " #x);} while (0)
@@ -72,6 +72,11 @@ int main(void)
     tx_thread_relinquish();CHECK(SysBase->TDNestCnt==1 && tx_thread_identify()==parent_thread && parent->tc_Node.ln_Pri==original_priority);
     anx_tx_context_end(&nested);CASE("public-nested-relinquish-restores-exact-owner-and-native-priority");
     CHECK(anx_tx_relinquish(0)==TX_PTR_ERROR);CASE("missing-yield-operation-refused");
+    (void)SetTaskPri(parent,-128);
+    CHECK(anx_exec_thread_relinquish()==TX_FEATURE_NOT_ENABLED && parent->tc_Node.ln_Pri==-128 &&
+        SysBase->TDNestCnt==0 && tx_thread_identify()==parent_thread);
+    (void)SetTaskPri(parent,original_priority);
+    CASE("minimum-native-priority-refuses-yield-before-frame-release");
     CHECK(tx_thread_resume(&worker_thread)==TX_SUCCESS && tx_thread_resume(&worker_thread)==TX_RESUME_ERROR && !worker.entered);
     CASE("initial-public-resume-preserved-without-starting-under-Forbid");
     CHECK(tx_thread_suspend(&worker_thread)==TX_FEATURE_NOT_ENABLED && worker_thread.tx_thread_state==TX_READY && !worker_thread.tx_thread_delayed_suspend);
@@ -113,5 +118,5 @@ int main(void)
     CHECK(tx_amiga_orphan_thread(parent_thread,parent_gen)==TX_SUCCESS && tx_amiga_kernel_stop()==TX_SUCCESS &&
         anx_tx_runtime_resettable() && parent->tc_SigAlloc==signals && parent->tc_Node.ln_Pri==original_priority);
     CASE("kernel-close-recovers-all-native-signals-and-original-priority");flush();
-    CHECK(passed==27);say("research_exec_schedule=PASS 27/27 caller_suspends=2 worker_suspends=4 equal_peer_progress=2\n");return 0;
+    CHECK(passed==28);say("research_exec_schedule=PASS 28/28 caller_suspends=2 worker_suspends=4 equal_peer_progress=2\n");return 0;
 }

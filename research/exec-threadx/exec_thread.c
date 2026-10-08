@@ -227,13 +227,21 @@ static void native_yield(void)
      * dispatch. No runnable Task can observe the temporary priority. */
     Forbid();
     BYTE priority=me->tc_Node.ln_Pri;
-    (void)SetTaskPri(me,priority==-128 ? -127 : priority-1);
+    if (priority==-128) anx_tx_unsupported("native priority changed to minimum during relinquish");
+    (void)SetTaskPri(me,priority-1);
     (void)SetTaskPri(me,priority);
     Permit();
 }
+UINT anx_exec_thread_relinquish(VOID)
+{
+    anx_tx_require_context(0);
+    /* No lower priority exists at -128. Refuse before releasing any frame. */
+    if (FindTask(0)->tc_Node.ln_Pri==-128) return TX_FEATURE_NOT_ENABLED;
+    return anx_tx_relinquish(native_yield);
+}
 VOID _tx_thread_relinquish(VOID)
 {
-    if (anx_tx_relinquish(native_yield)!=TX_SUCCESS)
+    if (anx_exec_thread_relinquish()!=TX_SUCCESS)
         anx_tx_unsupported("public relinquish outside supported native context");
 }
 UINT _tx_thread_terminate(TX_THREAD *t)
