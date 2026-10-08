@@ -400,7 +400,6 @@ static __attribute__((noinline)) VOID load_resolver(AmiConfig *cfg)
                       AMI_CFG_FILE_HOSTS);
         if (buf != NULL && extra != NULL)
         {
-            ami_cfg_zero(extra, sizeof(*extra));
             /* The hosts fallback may fill a missing name, but its HOSTNAME=
                line must not overwrite one from name_resolution. */
             ami_cfg_parse_resolver(buf, extra,

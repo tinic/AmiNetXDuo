@@ -250,8 +250,7 @@ LONG bsd_CreateAddrAllocMessageA(register LONG version __asm("d0"),
     if (aam == NULL)
         return CAAME_Not_enough_memory;
 
-    bsd_bzero(aam, total);
-
+    /* ami_alloc clears the header, padding and every carved buffer. */
     carve = (UBYTE *)aam + bsd_aam_round(sizeof(*aam));
 
     aam->aam_Message.mn_Node.ln_Type = NT_MESSAGE;

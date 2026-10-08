@@ -4790,6 +4790,7 @@ static void test_resolver_from_interfaces(void)
 /* The growth itself: what it keeps, what it costs, and what it refuses. */
 static void test_interface_reserve(void)
 {
+    static const UBYTE zero[sizeof(AmiIfConfig)] = { 0 };
     AmiConfig cfg;
     ULONG     base = ami_alloc_count();
     UWORD     i;
@@ -4802,6 +4803,9 @@ static void test_interface_reserve(void)
     CHECK(ami_config_reserve(&cfg, (UWORD)AMI_CFG_IFACE_FLOOR));
     CHECK(cfg.interfaces != NULL);
     CHECK(cfg.interface_capacity >= (UWORD)AMI_CFG_IFACE_FLOOR);
+
+    for (i = 0; i < cfg.interface_capacity; i++)
+        CHECK(memcmp(&cfg.interfaces[i], zero, sizeof(zero)) == 0);
 
     for (i = 0; i < (UWORD)AMI_CFG_IFACE_FLOOR; i++)
     {
@@ -4823,7 +4827,22 @@ static void test_interface_reserve(void)
         (void)snprintf(want, sizeof(want), "if%u", (unsigned)i);
         CHECK_STR(cfg.interfaces[i].name, want);
     }
-    CHECK(cfg.interfaces[299].name[0] == '\0');
+    for (i = (UWORD)AMI_CFG_IFACE_FLOOR; i < cfg.interface_capacity; i++)
+        CHECK(memcmp(&cfg.interfaces[i], zero, sizeof(zero)) == 0);
+
+    {
+        AmiIfConfig *held = cfg.interfaces;
+        UWORD capacity = cfg.interface_capacity;
+        ULONG allocations = ami_alloc_count();
+
+        stub_fail_once = 1;
+        CHECK(!ami_config_reserve(&cfg, (UWORD)(capacity + 1)));
+        stub_fail_once = 0;
+        CHECK(cfg.interfaces == held && cfg.interface_capacity == capacity);
+        CHECK(cfg.interface_count == (UWORD)AMI_CFG_IFACE_FLOOR);
+        CHECK_STR(cfg.interfaces[0].name, "if0");
+        CHECK(ami_alloc_count() == allocations);
+    }
 
     {
         ULONG held = ami_alloc_count();
