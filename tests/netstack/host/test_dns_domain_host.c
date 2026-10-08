@@ -64,6 +64,41 @@ static void t_prefer_order(void)
     h_check(order[0] == 99, "an empty list writes nothing");
 }
 
+static void t_owner_comparison(void)
+{
+    static const struct {
+        const char *domain;
+        const char *owner;
+        int equal;
+    } pairs[] = {
+        { "ExAmPlE.Test", "example.test", 1 },
+        { "example", "example.test", 0 },
+        { "example.test", "example", 0 },
+        { "example.test.", "example.test", 0 },
+        { "", "example.test", 0 },
+        { "a-b_1", "A-B_1", 1 },
+        { "\200.test", "\200.TEST", 1 },
+        { "\200.test", "\240.test", 0 }
+    };
+    unsigned i;
+
+    for (i = 0; i < sizeof(pairs) / sizeof(pairs[0]); i++)
+    {
+        AmiResolverConfig resolver;
+        char owner[AMI_CFG_NAME_LEN];
+        char applied[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];
+
+        memset(&resolver, 0, sizeof(resolver));
+        memset(applied, 0, sizeof(applied));
+        h_set(resolver.domain, pairs[i].domain, sizeof(resolver.domain));
+        h_set(owner, pairs[i].owner, sizeof(owner));
+        ami_ns_dns_ra_default_reconcile(&resolver, owner, applied, 0U);
+        h_check(owner[0] == '\0', "expired or displaced owner is cleared");
+        h_check(strcmp(resolver.domain, pairs[i].equal ? "" : pairs[i].domain) == 0,
+                "expiry clears only an ASCII-case-equivalent owned domain");
+    }
+}
+
 int main(void)
 {
     AmiResolverConfig resolver;
@@ -77,6 +112,7 @@ int main(void)
     size_t i;
 
     t_prefer_order();
+    t_owner_comparison();
 
     memset(&resolver, 0, sizeof(resolver));
     memset(&dhcp, 0, sizeof(dhcp));

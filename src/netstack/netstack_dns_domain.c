@@ -90,7 +90,7 @@ static char ami_ns_domain_fold(char c)
 }
 
 
-static BOOL ami_ns_domain_same(const char *a, const char *b)
+BOOL ami_ns_domain_same(const char *a, const char *b)
 {
     while (*a != '\0' && *b != '\0')
     {
