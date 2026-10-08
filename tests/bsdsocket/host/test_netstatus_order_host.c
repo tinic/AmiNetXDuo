@@ -1,5 +1,6 @@
 /*
- * NETSTATUS_SYSTEM's opener count, through the shipping netstatus.c:
+ * Query buffer/selector contracts and NETSTATUS_SYSTEM opener order, through
+ * the shipping netstatus.c:
  * bsd_openers_list() takes sb_Lock, so it must run before bsd_nx_enter().
  * Inside the bracket it made baton -> sb_Lock against the sb_Lock -> job task
  * Wait() -> baton that bsd_stack_interface_link() and _start() hold, and the
@@ -20,6 +21,7 @@
 #include "tx_amiga.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static unsigned long h_checks;
@@ -41,6 +43,11 @@ static struct AmiSocketBase h_base;
 static AmiIfConfig          h_cfg[NX_MAX_PHYSICAL_INTERFACES];
 static LONG                 h_error;
 static BOOL                 h_ipv6_on = TRUE;
+static LONG                 h_enter_error;
+static ULONG                h_dns_absorbs;
+static UWORD                h_events;
+static UWORD                h_services;
+static char                 h_service_type[NETSTATUS_SVC_TYPE_LEN];
 
 static VOID h_reset(VOID)
 {
@@ -50,9 +57,13 @@ static VOID h_reset(VOID)
     h_base.sb_StackRefs = 1;
     h_base.sb_StackIp   = &h_ip;
     h_error             = 0;
+    h_enter_error       = 0;
+    h_dns_absorbs       = 0;
+    h_events            = 0;
+    h_services          = 0;
 }
 
-static UBYTE h_buffer[sizeof(NetStatusHeader) + sizeof(NetStatusSystem) +
+static UBYTE h_buffer[sizeof(NetStatusHeader) + sizeof(NetStatusRxBudget) +
                       NX_MAX_PHYSICAL_INTERFACES * sizeof(NetStatusIfDevice)];
 
 static NetStatusHeader *h_hdr = (NetStatusHeader *)h_buffer;
@@ -76,18 +87,21 @@ LONG netstack_interface_dhcp6_release(UWORD i)
 { (VOID)i; return AMI_NET_OK; }
 NX_IP *netstack_ip(VOID)                    { return &h_ip; }
 BOOL   netstack_ipv6_enabled(VOID)          { return h_ipv6_on; }
-VOID   netstack_dns_absorb_pending(VOID)    { }
+VOID   netstack_dns_absorb_pending(VOID)    { h_dns_absorbs++; }
 
-/* The event ring. Stubbed empty and not linked: NETSTATUS_EVENTS is answered
-   from src/common/events.c, this harness asks for NETSTATUS_NEIGHBOURS, and
-   src/common/test/test_events.c is where the ring is tested. */
+/* A bounded snapshot with more records than a caller may fit. */
 ULONG ami_event_snapshot(NetStatusEvent *out, ULONG room, ULONG *held)
 {
-    (VOID)out;
-    (VOID)room;
-    if (held != NULL)
-        *held = 0UL;
-    return 0UL;
+    ULONG i;
+    ULONG count = room < h_events ? room : h_events;
+
+    *held = h_events;
+    for (i = 0; i < count; i++)
+    {
+        memset(&out[i], 0, sizeof(out[i]));
+        out[i].nse_Seq = i + 1;
+    }
+    return count;
 }
 
 /* The call order, one letter each: E enter, L leave, O bsd_openers_list(),
@@ -107,7 +121,8 @@ static VOID h_note(char c)
 }
 
 LONG bsd_nx_enter(struct AmiSocketBase *b)
-{ (VOID)b; h_note('E'); h_depth++; return 0; }
+{ (VOID)b; h_note('E'); if (h_enter_error != 0) return h_enter_error;
+  h_depth++; return 0; }
 VOID bsd_nx_leave(struct AmiSocketBase *b)
 { (VOID)b; h_note('L'); h_depth--; }
 LONG bsd_fail(struct AmiSocketBase *b, LONG code)
@@ -300,12 +315,28 @@ UINT _nxe_arp_info_get(NX_IP *ip, ULONG *a, ULONG *b, ULONG *c, ULONG *d,
   (VOID)h; h_unreachable("nx_arp_info_get"); return 1; }
 
 
-APTR ami_alloc(ULONG n) { (VOID)n; h_unreachable("ami_alloc"); return NULL; }
-VOID ami_free(APTR p) { (VOID)p; h_unreachable("ami_free"); }
+APTR ami_alloc(ULONG n) { return malloc(n); }
+VOID ami_free(APTR p) { free(p); }
 UWORD netstack_mdns_browse_collect(const char *t, AmiMdnsService *o, UWORD max,
-                                   UWORD *avail)
-{ (VOID)t; (VOID)o; (VOID)max; (VOID)avail;
-  h_unreachable("netstack_mdns_browse_collect"); return 0; }
+                                  UWORD *avail)
+{
+    UWORD i;
+    UWORD count = h_services < max ? h_services : max;
+
+    CHECK(h_depth == 0, "service snapshot is outside the NetX bracket");
+    snprintf(h_service_type, sizeof(h_service_type), "%s", t != NULL ? t : "");
+    *avail = h_services;
+    for (i = 0; i < count; i++)
+    {
+        memset(&o[i], 0, sizeof(o[i]));
+        o[i].ams_Index = i;
+        o[i].ams_Port = 631;
+        strcpy(o[i].ams_Name, "printer");
+        strcpy(o[i].ams_Type, "_ipps._tcp");
+    }
+    return count;
+}
+
 const char *netstack_mdns_hostname(VOID)
 { h_unreachable("netstack_mdns_hostname"); return NULL; }
 LONG netstack_iface_mdns_set(UWORD i, BOOL on)
@@ -353,11 +384,215 @@ static VOID t_openers_before_bracket(VOID)
           "the counts taken outside reach the record");
 }
 
+/* Published query behavior: invalid inputs are untouched, list queries
+ * count through a header-only buffer, single records need a whole entry, and
+ * unbracketed selectors continue to work while the stack is down. */
+static VOID h_order_reset(VOID)
+{
+    h_order_n = 0;
+    h_order[0] = '\0';
+    h_depth = 0;
+    h_locked_inside = 0;
+}
+
+static BOOL h_tail_untouched(ULONG size)
+{
+    ULONG i;
+
+    for (i = size; i < (ULONG)sizeof(h_buffer); i++)
+        if (h_buffer[i] != 0xA5)
+            return FALSE;
+    return TRUE;
+}
+
+static VOID t_query_contract(VOID)
+{
+    static const struct {
+        ULONG selector;
+        UWORD entry_size;
+        BOOL one_required;
+        BOOL unbracketed;
+    } queries[] = {
+        { NETSTATUS_SYSTEM, sizeof(NetStatusSystem), TRUE, FALSE },
+        { NETSTATUS_INTERFACES, sizeof(NetStatusInterface), FALSE, FALSE },
+        { NETSTATUS_STATS, sizeof(NetStatusStats), TRUE, FALSE },
+        { NETSTATUS_ARP, sizeof(NetStatusArp), FALSE, FALSE },
+        { NETSTATUS_ROUTES, sizeof(NetStatusRoute), FALSE, FALSE },
+        { NETSTATUS_SOCKETS, sizeof(NetStatusSocket), FALSE, FALSE },
+        { NETSTATUS_DHCP, sizeof(NetStatusDhcp), FALSE, FALSE },
+        { NETSTATUS_ADDRESSES6, sizeof(NetStatusAddress6), FALSE, FALSE },
+        { NETSTATUS_ROUTES6, sizeof(NetStatusRoute6), FALSE, FALSE },
+        { NETSTATUS_NEIGHBOURS, sizeof(NetStatusNeighbour), FALSE, FALSE },
+        { NETSTATUS_HEALTH, sizeof(NetStatusHealth), TRUE, TRUE },
+        { NETSTATUS_SERVICES, sizeof(NetStatusService), FALSE, TRUE },
+        { NETSTATUS_OPENERS, sizeof(NetStatusOpener), FALSE, TRUE },
+        { NETSTATUS_TCPSTALL, sizeof(NetStatusTcpStall), FALSE, FALSE },
+        { NETSTATUS_DEST6, sizeof(NetStatusDest6), FALSE, FALSE },
+        { NETSTATUS_EVENTS, sizeof(NetStatusEvent), FALSE, TRUE },
+        { NETSTATUS_RXBUDGET, sizeof(NetStatusRxBudget), TRUE, TRUE },
+        { NETSTATUS_DHCP6, sizeof(NetStatusDhcp6), FALSE, FALSE },
+        { NETSTATUS_MULTICAST, sizeof(NetStatusMulticast), FALSE, FALSE },
+        { NETSTATUS_SERVICES_TYPE, sizeof(NetStatusService), TRUE, TRUE },
+        { NETSTATUS_IFDEVICES, sizeof(NetStatusIfDevice), FALSE, FALSE },
+        { NETSTATUS_HOSTSOURCE, sizeof(NetStatusHostSource), TRUE, FALSE },
+        { NETSTATUS_IFBYTES, sizeof(NetStatusIfBytes), FALSE, FALSE }
+    };
+    static const ULONG invalid[] = { 0, 21, 25, 0x10001UL, 0xFFFFFFFFUL };
+    ULONG i;
+
+    for (i = 0; i < sizeof(queries) / sizeof(queries[0]); i++)
+    {
+        ULONG size = sizeof(NetStatusHeader) + queries[i].entry_size;
+        LONG rc;
+
+        h_reset();
+        h_order_reset();
+        rc = h_query(queries[i].selector, size, AMI_NETSTATUS_VERSION);
+        CHECK(rc >= 0 && h_error == 0, "every published selector succeeds");
+        CHECK(h_hdr->nsh_Type == queries[i].selector &&
+              h_hdr->nsh_EntrySize == queries[i].entry_size &&
+              h_hdr->nsh_Count == rc &&
+              h_hdr->nsh_Available >= h_hdr->nsh_Count &&
+              h_hdr->nsh_Reserved == 0, "answer preserves published header shape");
+        CHECK(h_tail_untouched(size), "one-record buffer is not overrun");
+        CHECK(h_depth == 0 && h_locked_inside == 0,
+              "query releases bracket and avoids lock inversion");
+        CHECK((strchr(h_order, 'E') == NULL) == queries[i].unbracketed,
+              "only stack-backed selectors enter the bracket");
+
+        h_order_reset();
+        rc = h_query(queries[i].selector, sizeof(NetStatusHeader),
+                     AMI_NETSTATUS_VERSION);
+        if (queries[i].one_required)
+        {
+            CHECK(rc == -1 && h_error == AMI_EINVAL,
+                  "single-record/input query rejects header-only storage");
+            CHECK(h_hdr->nsh_Type == 0xA5A5 && h_tail_untouched(6),
+                  "undersized query leaves output untouched");
+            rc = h_query(queries[i].selector, size - 1,
+                         AMI_NETSTATUS_VERSION);
+            CHECK(rc == -1 && h_error == AMI_EINVAL && h_tail_untouched(6),
+                  "one byte short still rejects without output mutation");
+        }
+        else
+        {
+            CHECK(rc == 0 && h_hdr->nsh_EntrySize == queries[i].entry_size,
+                  "list query supports header-only sizing");
+            CHECK(h_tail_untouched(sizeof(NetStatusHeader)),
+                  "sizing query leaves entry storage untouched");
+        }
+
+        h_reset();
+        h_base.sb_StackIp = NULL;
+        h_order_reset();
+        rc = h_query(queries[i].selector, size, AMI_NETSTATUS_VERSION);
+        if (queries[i].unbracketed)
+            CHECK(rc >= 0 && strchr(h_order, 'E') == NULL,
+                  "diagnostic/cache query works without a stack");
+        else
+            CHECK(rc == -1 && h_error == AMI_ENETDOWN &&
+                  h_hdr->nsh_Type == queries[i].selector &&
+                  h_hdr->nsh_EntrySize == 0 && h_hdr->nsh_Count == 0 &&
+                  h_hdr->nsh_Available == 0 && h_hdr->nsh_Reserved == 0 &&
+                  h_tail_untouched(sizeof(NetStatusHeader)),
+                  "missing stack preserves failed-call header and payload");
+    }
+
+    h_reset();
+    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+    {
+        LONG rc = h_query(invalid[i], sizeof(h_buffer), AMI_NETSTATUS_VERSION);
+        CHECK(rc == -1 && h_error == AMI_EINVAL && h_tail_untouched(6),
+              "unused or wide selector rejects with no output mutation");
+    }
+    CHECK(h_dns_absorbs == sizeof(invalid) / sizeof(invalid[0]),
+          "valid header still absorbs pending DNS before selector validation");
+    CHECK(h_query(NETSTATUS_SYSTEM, sizeof(h_buffer),
+                  AMI_NETSTATUS_VERSION + 1) == -1 && h_tail_untouched(6),
+          "bad header version rejects before writing output");
+    CHECK(h_dns_absorbs == sizeof(invalid) / sizeof(invalid[0]),
+          "invalid header does not absorb pending DNS");
+
+    CHECK(h_query(NETSTATUS_SYSTEM, sizeof(NetStatusHeader) - 1,
+                  AMI_NETSTATUS_VERSION) == -1 && h_tail_untouched(6),
+          "short header rejects before writing output");
+    CHECK(bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_SYSTEM, NULL,
+                           sizeof(h_buffer), &h_base) == -1,
+          "null buffer rejects before dereferencing");
+    CHECK(bsd_NetStackQuery(0, NETSTATUS_SYSTEM, h_buffer,
+                           sizeof(h_buffer), &h_base) == -1 &&
+          h_tail_untouched(6), "bad register magic rejects without mutation");
+
+    h_order_reset();
+    h_enter_error = -1;
+    CHECK(h_query(NETSTATUS_SYSTEM, sizeof(h_buffer), AMI_NETSTATUS_VERSION) == -1 &&
+          h_error == AMI_ENETDOWN && h_depth == 0 &&
+          h_hdr->nsh_EntrySize == 0 && h_hdr->nsh_Count == 0 &&
+          h_tail_untouched(sizeof(NetStatusHeader)),
+          "failed bracket entry leaves no record shape or payload");
+}
+
+static VOID t_truncation_and_service_input(VOID)
+{
+    NX_UDP_SOCKET sockets[2];
+    NetStatusSocket *out = (NetStatusSocket *)NETSTATUS_ENTRIES(h_hdr);
+    NetStatusService *svc = (NetStatusService *)NETSTATUS_ENTRIES(h_hdr);
+    ULONG size;
+
+    h_reset();
+    h_order_reset();
+    memset(sockets, 0, sizeof(sockets));
+    sockets[0].nx_udp_socket_port = 123;
+    sockets[1].nx_udp_socket_port = 456;
+    sockets[0].nx_udp_socket_created_next = &sockets[1];
+    sockets[1].nx_udp_socket_created_next = &sockets[0];
+    h_ip.nx_ip_udp_created_sockets_ptr = &sockets[0];
+    h_ip.nx_ip_udp_created_sockets_count = 2;
+    size = sizeof(NetStatusHeader) + sizeof(NetStatusSocket);
+    CHECK(h_query(NETSTATUS_SOCKETS, size, AMI_NETSTATUS_VERSION) == 1 &&
+          h_hdr->nsh_Available == 2 && out->nso_LocalPort == 123 &&
+          h_tail_untouched(size), "truncated socket list reports full count");
+    CHECK(h_query(NETSTATUS_SOCKETS, sizeof(NetStatusHeader),
+                  AMI_NETSTATUS_VERSION) == 0 && h_hdr->nsh_Available == 2 &&
+          h_tail_untouched(sizeof(NetStatusHeader)),
+          "header-only socket list counts without writing records");
+
+    h_events = 2;
+    size = sizeof(NetStatusHeader) + sizeof(NetStatusEvent);
+    CHECK(h_query(NETSTATUS_EVENTS, size, AMI_NETSTATUS_VERSION) == 1 &&
+          h_hdr->nsh_Available == 2 &&
+          ((NetStatusEvent *)NETSTATUS_ENTRIES(h_hdr))->nse_Seq == 1 &&
+          h_tail_untouched(size), "event snapshot preserves truncation counts");
+
+    h_services = 2;
+    size = sizeof(NetStatusHeader) + sizeof(NetStatusService);
+    (VOID)h_query(NETSTATUS_SERVICES, size, AMI_NETSTATUS_VERSION);
+    CHECK(h_hdr->nsh_Count == 1 && h_hdr->nsh_Available == 2 &&
+          svc->nsv_Port == 631 && h_tail_untouched(size),
+          "service output preserves truncation counts and payload");
+    strcpy(svc->nsv_Type, "_ipps._tcp");
+    CHECK(bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_SERVICES_TYPE,
+                           h_buffer, size, &h_base) == 1 &&
+          strcmp(h_service_type, "_ipps._tcp") == 0 && svc->nsv_Port == 631,
+          "service type input is copied before its record is overwritten");
+    svc->nsv_Type[0] = '\0';
+    (VOID)bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_SERVICES_TYPE,
+                          h_buffer, size, &h_base);
+    CHECK(h_service_type[0] == '\0', "empty service type requests all types");
+    memset(svc->nsv_Type, 'X', sizeof(svc->nsv_Type));
+    (VOID)bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_SERVICES_TYPE,
+                          h_buffer, size, &h_base);
+    CHECK(strlen(h_service_type) == NETSTATUS_SVC_TYPE_LEN - 1,
+          "unterminated service input is bounded and terminated");
+}
+
 int main(void)
 {
-    printf("NETSTATUS_SYSTEM opener order host tests\n");
+    printf("NetStackQuery buffer contracts and opener order host tests\n");
 
     t_openers_before_bracket();
+    t_query_contract();
+    t_truncation_and_service_input();
 
     printf("system_order checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

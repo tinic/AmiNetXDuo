@@ -175,6 +175,45 @@ static ULONG ns_ticks_ms(ULONG ticks)
     return (fraction > max - whole) ? max : whole + fraction;
 }
 
+/* The selector space is sparse: a zero entry size rejects unused slots.
+ * Keep record sizes here, including feature-disabled selectors, because the
+ * published query ABI still returns their record shape and an empty list.
+ * Single-record queries and SERVICES_TYPE require room for their input/output.
+ * No function pointers: these two-word descriptors need no relocations.
+ */
+typedef struct NsQueryLayout
+{
+    UWORD entry_size;
+    UWORD requires_entry;
+} NsQueryLayout;
+
+static const NsQueryLayout ns_query_layout[] =
+{
+    [NETSTATUS_SYSTEM]        = { sizeof(NetStatusSystem),    1 },
+    [NETSTATUS_INTERFACES]    = { sizeof(NetStatusInterface), 0 },
+    [NETSTATUS_STATS]         = { sizeof(NetStatusStats),     1 },
+    [NETSTATUS_ARP]           = { sizeof(NetStatusArp),       0 },
+    [NETSTATUS_ROUTES]        = { sizeof(NetStatusRoute),     0 },
+    [NETSTATUS_SOCKETS]       = { sizeof(NetStatusSocket),    0 },
+    [NETSTATUS_DHCP]          = { sizeof(NetStatusDhcp),      0 },
+    [NETSTATUS_ADDRESSES6]    = { sizeof(NetStatusAddress6),  0 },
+    [NETSTATUS_ROUTES6]       = { sizeof(NetStatusRoute6),    0 },
+    [NETSTATUS_NEIGHBOURS]    = { sizeof(NetStatusNeighbour), 0 },
+    [NETSTATUS_HEALTH]        = { sizeof(NetStatusHealth),    1 },
+    [NETSTATUS_SERVICES]      = { sizeof(NetStatusService),   0 },
+    [NETSTATUS_OPENERS]       = { sizeof(NetStatusOpener),    0 },
+    [NETSTATUS_TCPSTALL]      = { sizeof(NetStatusTcpStall),  0 },
+    [NETSTATUS_DEST6]         = { sizeof(NetStatusDest6),     0 },
+    [NETSTATUS_EVENTS]        = { sizeof(NetStatusEvent),     0 },
+    [NETSTATUS_RXBUDGET]      = { sizeof(NetStatusRxBudget),  1 },
+    [NETSTATUS_DHCP6]         = { sizeof(NetStatusDhcp6),     0 },
+    [NETSTATUS_MULTICAST]     = { sizeof(NetStatusMulticast), 0 },
+    [NETSTATUS_SERVICES_TYPE] = { sizeof(NetStatusService),   1 },
+    [NETSTATUS_IFDEVICES]     = { sizeof(NetStatusIfDevice),  0 },
+    [NETSTATUS_HOSTSOURCE]    = { sizeof(NetStatusHostSource), 1 },
+    [NETSTATUS_IFBYTES]       = { sizeof(NetStatusIfBytes),   0 }
+};
+
 typedef struct NsWriter
 {
     NetStatusHeader *hdr;
@@ -192,7 +231,7 @@ typedef struct NsWriter
  * in.
  */
 static VOID ns_writer_init(NsWriter *w, NetStatusHeader *hdr, ULONG size,
-                           UWORD type, ULONG entry_size)
+                           ULONG entry_size)
 {
     w->hdr        = hdr;
     w->entries    = (UBYTE *)hdr + sizeof(NetStatusHeader);
@@ -200,9 +239,6 @@ static VOID ns_writer_init(NsWriter *w, NetStatusHeader *hdr, ULONG size,
     w->room       = (size - sizeof(NetStatusHeader)) / entry_size;
     w->written    = 0;
     w->available  = 0;
-
-    hdr->nsh_Type      = type;
-    hdr->nsh_EntrySize = (UWORD)entry_size;
 }
 
 /*
@@ -228,6 +264,8 @@ static APTR ns_writer_next(NsWriter *w)
 
 static VOID ns_writer_finish(NsWriter *w)
 {
+    /* Publish the shape only on success: ENETDOWN leaves EntrySize zero. */
+    w->hdr->nsh_EntrySize = (UWORD)w->entry_size;
     w->hdr->nsh_Count     = (UWORD)w->written;
     w->hdr->nsh_Available = (UWORD)w->available;
 }
@@ -1596,7 +1634,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     NetStatusHeader *hdr = (NetStatusHeader *)buffer;
     NX_IP           *ip;
     NsWriter         w;
-    ULONG            need;
+    const NsQueryLayout *layout;
     LONG             openers = 0;
     ULONG            open_cnt = 0;
 
@@ -1608,36 +1646,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
 
     netstack_dns_absorb_pending();
 
-    switch (what)
-    {
-        case NETSTATUS_SYSTEM:      need = sizeof(NetStatusSystem);  break;
-        case NETSTATUS_STATS:       need = sizeof(NetStatusStats);   break;
-        case NETSTATUS_INTERFACES:  need = 0;                        break;
-        case NETSTATUS_IFDEVICES:   need = 0;                        break;
-        case NETSTATUS_IFBYTES:     need = 0;                        break;
-        case NETSTATUS_HOSTSOURCE:  need = sizeof(NetStatusHostSource); break;
-        case NETSTATUS_ARP:         need = 0;                        break;
-        case NETSTATUS_MULTICAST:   need = 0;                        break;
-        case NETSTATUS_ROUTES:      need = 0;                        break;
-        case NETSTATUS_SOCKETS:     need = 0;                        break;
-        case NETSTATUS_DHCP:        need = 0;                        break;
-        case NETSTATUS_DHCP6:       need = 0;                        break;
-        case NETSTATUS_ADDRESSES6:  need = 0;                        break;
-        case NETSTATUS_ROUTES6:     need = 0;                        break;
-        case NETSTATUS_NEIGHBOURS:  need = 0;                        break;
-        case NETSTATUS_HEALTH:      need = sizeof(NetStatusHealth);  break;
-        case NETSTATUS_SERVICES:    need = 0;                        break;
-        case NETSTATUS_SERVICES_TYPE:
-                                    need = sizeof(NetStatusService); break;
-        case NETSTATUS_OPENERS:     need = 0;                        break;
-        case NETSTATUS_TCPSTALL:    need = 0;                        break;
-        case NETSTATUS_DEST6:       need = 0;                        break;
-        case NETSTATUS_EVENTS:      need = 0;                        break;
-        case NETSTATUS_RXBUDGET:    need = sizeof(NetStatusRxBudget); break;
-        default:                    return bsd_fail(SocketBase, AMI_EINVAL);
-    }
-
-    if (need != 0 && size < sizeof(NetStatusHeader) + need)
+    /* Check the full ULONG before indexing; never truncate a bad selector. */
+    if (what >= sizeof(ns_query_layout) / sizeof(ns_query_layout[0]))
+        return bsd_fail(SocketBase, AMI_EINVAL);
+    layout = &ns_query_layout[what];
+    if (layout->entry_size == 0 ||
+        (layout->requires_entry != 0 &&
+         size < sizeof(NetStatusHeader) + layout->entry_size))
         return bsd_fail(SocketBase, AMI_EINVAL);
 
     hdr->nsh_Type      = (UWORD)what;
@@ -1646,25 +1661,24 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     hdr->nsh_EntrySize = 0;
     hdr->nsh_Reserved  = 0;
 
+    /* This prepares local state only; it does not overwrite SERVICES_TYPE's
+       input record or publish a record size before stack/entry checks pass. */
+    ns_writer_init(&w, hdr, size, layout->entry_size);
+
     if (what == NETSTATUS_EVENTS)
     {
         ULONG held = 0;
 
-        ns_writer_init(&w, hdr, size, NETSTATUS_EVENTS,
-                       sizeof(NetStatusEvent));
         w.written = ami_event_snapshot((NetStatusEvent *)w.entries, w.room,
                                        &held);
         w.available = held;
-        ns_writer_finish(&w);
-        return (LONG)hdr->nsh_Count;
+        goto query_done;
     }
 
     if (what == NETSTATUS_RXBUDGET)
     {
         NetStatusRxBudget *out;
 
-        ns_writer_init(&w, hdr, size, NETSTATUS_RXBUDGET,
-                       sizeof(NetStatusRxBudget));
         out = (NetStatusRxBudget *)ns_writer_next(&w);
         if (out != NULL)
         {
@@ -1770,30 +1784,23 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             /* Retired green-realm fields remain zero from ns_writer_next()
                so the published record keeps its ABI. */
         }
-        ns_writer_finish(&w);
-        return (LONG)hdr->nsh_Count;
+        goto query_done;
     }
 
     /* Answered before the stack is looked for, and without the baton: it reads
        the tick task and the bracket's own counters, not NetX Duo. */
     if (what == NETSTATUS_HEALTH)
     {
-        ns_writer_init(&w, hdr, size, NETSTATUS_HEALTH,
-                       sizeof(NetStatusHealth));
         ns_fill_health((NetStatusHealth *)ns_writer_next(&w));
-        ns_writer_finish(&w);
-        return (LONG)hdr->nsh_Count;
+        goto query_done;
     }
 
     if (what == NETSTATUS_SERVICES)
     {
-        ns_writer_init(&w, hdr, size, NETSTATUS_SERVICES,
-                       sizeof(NetStatusService));
 #ifdef AMINETXDUO_MDNS
         ns_fill_services(&w, NULL);
 #endif
-        ns_writer_finish(&w);
-        return (LONG)hdr->nsh_Count;
+        goto query_done;
     }
 
     if (what == NETSTATUS_SERVICES_TYPE)
@@ -1822,14 +1829,11 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         }
 #endif
 
-        ns_writer_init(&w, hdr, size, NETSTATUS_SERVICES_TYPE,
-                       sizeof(NetStatusService));
 #ifdef AMINETXDUO_MDNS
         /* Empty is every type, which is exactly NETSTATUS_SERVICES. */
         ns_fill_services(&w, (type[0] != '\0') ? type : NULL);
 #endif
-        ns_writer_finish(&w);
-        return (LONG)hdr->nsh_Count;
+        goto query_done;
     }
 
     if (what == NETSTATUS_OPENERS)
@@ -1837,14 +1841,11 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         LONG avail = 0;
         LONG n;
 
-        ns_writer_init(&w, hdr, size, NETSTATUS_OPENERS,
-                       sizeof(NetStatusOpener));
         n = bsd_openers_list(SocketBase, (NetStatusOpener *)w.entries,
                              (LONG)w.room, &avail);
         w.written   = (n > 0) ? (ULONG)n : 0;
         w.available = (avail > 0) ? (ULONG)avail : 0;
-        ns_writer_finish(&w);
-        return (LONG)hdr->nsh_Count;
+        goto query_done;
     }
 
     ip = bsd_stack_ip(SocketBase);
@@ -1875,37 +1876,25 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         {
             NetStatusSystem *sys;
 
-            ns_writer_init(&w, hdr, size, NETSTATUS_SYSTEM,
-                           sizeof(NetStatusSystem));
             sys = (NetStatusSystem *)ns_writer_next(&w);
             ns_fill_system(ip, sys);
 
             sys->nss_Openers = (openers > 0) ? (ULONG)openers : 0;
             sys->nss_OpenCnt = open_cnt;
 
-            ns_writer_finish(&w);
             break;
         }
 
         case NETSTATUS_INTERFACES:
-            ns_writer_init(&w, hdr, size, NETSTATUS_INTERFACES,
-                           sizeof(NetStatusInterface));
             ns_fill_interfaces(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_IFDEVICES:
-            ns_writer_init(&w, hdr, size, NETSTATUS_IFDEVICES,
-                           sizeof(NetStatusIfDevice));
             ns_fill_ifdevices(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_IFBYTES:
-            ns_writer_init(&w, hdr, size, NETSTATUS_IFBYTES,
-                           sizeof(NetStatusIfBytes));
             ns_fill_ifbytes(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_HOSTSOURCE:
@@ -1914,8 +1903,6 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             const AmiConfig     *cfg = netstack_config();
             NetStatusHostSource *hs;
 
-            ns_writer_init(&w, hdr, size, NETSTATUS_HOSTSOURCE,
-                           sizeof(NetStatusHostSource));
             hs = (NetStatusHostSource *)ns_writer_next(&w);
             if (hs != NULL)
             {
@@ -1925,96 +1912,64 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                 hs->nhs_Source = (ULONG)source;
                 hs->nhs_Rank   = (ULONG)ami_config_hostname_rank(source);
             }
-            ns_writer_finish(&w);
             break;
         }
 
         case NETSTATUS_STATS:
-            ns_writer_init(&w, hdr, size, NETSTATUS_STATS,
-                           sizeof(NetStatusStats));
             ns_fill_stats(ip, (NetStatusStats *)ns_writer_next(&w));
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_ARP:
-            ns_writer_init(&w, hdr, size, NETSTATUS_ARP, sizeof(NetStatusArp));
             ns_fill_arp(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_MULTICAST:
-            ns_writer_init(&w, hdr, size, NETSTATUS_MULTICAST,
-                           sizeof(NetStatusMulticast));
             ns_fill_multicast(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_ROUTES:
-            ns_writer_init(&w, hdr, size, NETSTATUS_ROUTES,
-                           sizeof(NetStatusRoute));
             ns_fill_routes(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_DHCP:
-            ns_writer_init(&w, hdr, size, NETSTATUS_DHCP,
-                           sizeof(NetStatusDhcp));
             ns_fill_dhcp(&w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_DHCP6:
-            ns_writer_init(&w, hdr, size, NETSTATUS_DHCP6,
-                           sizeof(NetStatusDhcp6));
             ns_fill_dhcp6(&w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_ADDRESSES6:
-            ns_writer_init(&w, hdr, size, NETSTATUS_ADDRESSES6,
-                           sizeof(NetStatusAddress6));
             ns_fill_addresses6(&w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_ROUTES6:
-            ns_writer_init(&w, hdr, size, NETSTATUS_ROUTES6,
-                           sizeof(NetStatusRoute6));
             ns_fill_routes6(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_NEIGHBOURS:
-            ns_writer_init(&w, hdr, size, NETSTATUS_NEIGHBOURS,
-                           sizeof(NetStatusNeighbour));
             ns_fill_neighbours(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_TCPSTALL:
-            ns_writer_init(&w, hdr, size, NETSTATUS_TCPSTALL,
-                           sizeof(NetStatusTcpStall));
             ns_fill_tcpstall(ip, &w);
-            ns_writer_finish(&w);
             break;
 
         case NETSTATUS_DEST6:
-            ns_writer_init(&w, hdr, size, NETSTATUS_DEST6,
-                           sizeof(NetStatusDest6));
             ns_fill_dest6(ip, &w);
-            ns_writer_finish(&w);
             break;
 
-        default:    /* NETSTATUS_SOCKETS. The switch above rejected the rest */
-            ns_writer_init(&w, hdr, size, NETSTATUS_SOCKETS,
-                           sizeof(NetStatusSocket));
+        default:    /* NETSTATUS_SOCKETS. Validation rejected the rest. */
             ns_fill_sockets(ip, &w);
-            ns_writer_finish(&w);
             break;
     }
 
+    ns_writer_finish(&w);
     bsd_nx_leave(SocketBase);
+    return (LONG)hdr->nsh_Count;
 
+query_done:
+    ns_writer_finish(&w);
     return (LONG)hdr->nsh_Count;
 }
 

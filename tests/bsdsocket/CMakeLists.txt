@@ -758,7 +758,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
 
     target_compile_definitions(test_netstatus_order PRIVATE
-        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6 AMINETXDUO_MDNS)
 
     add_test(NAME netstatus_system_order COMMAND test_netstatus_order)
 
