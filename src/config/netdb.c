@@ -75,6 +75,30 @@ static const char ami_netdb_builtin_services[] =
     "https 443/tcp\n"   "syslog 514/udp\n"
     "printer 515/tcp\n";
 
+#define NETDB_SOURCES(X) \
+    X(NETDB_HOSTS, AMI_CFG_FILE_HOSTS, ami_netdb_builtin_hosts) \
+    X(NETDB_NETWORKS, AMI_CFG_FILE_NETWORKS, ami_netdb_builtin_networks) \
+    X(NETDB_PROTOCOLS, AMI_CFG_FILE_PROTOCOLS, ami_netdb_builtin_protocols) \
+    X(NETDB_SERVICES, AMI_CFG_FILE_SERVICES, ami_netdb_builtin_services)
+
+static const struct NetdbSource
+{
+    const char *path;
+    const char *builtin;
+    UWORD       builtin_size;       /* includes the terminating NUL */
+} ami_netdb_sources[] = {
+#define NETDB_SOURCE(kind, path, builtin) [kind] = { path, builtin, sizeof(builtin) },
+    NETDB_SOURCES(NETDB_SOURCE)
+#undef NETDB_SOURCE
+};
+
+#define NETDB_SIZE_GUARD(kind, path, builtin) \
+    _Static_assert(sizeof(builtin) <= 65535, "netdb default must fit word size");
+NETDB_SOURCES(NETDB_SIZE_GUARD)
+#undef NETDB_SIZE_GUARD
+_Static_assert(sizeof(ami_netdb_sources) / sizeof(ami_netdb_sources[0]) == 4,
+               "netdb sources must cover the four table kinds");
+
 /* ------------------------------------------------------------------ sizing */
 
 /*
@@ -275,8 +299,9 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
 }
 
 static VOID netdb_load_one(NetdbTable *table, NetdbKind kind,
-                           const char *path, const char *builtin)
+                           const struct NetdbSource *source)
 {
+    const char *path = source->path;
     char  *buf;
     ULONG  size = 0;
 
@@ -293,15 +318,13 @@ static VOID netdb_load_one(NetdbTable *table, NetdbKind kind,
 
     if (buf == NULL || size == 0)
     {
-        ULONG len = ami_cfg_strlen(builtin);
-
         ami_free(buf);
         AMI_DEBUG("netdb: %s missing, using built-in defaults", path);
 
-        buf = (char *)ami_alloc(len + 1);
+        buf = (char *)ami_alloc(source->builtin_size);
         if (buf == NULL)
             return;
-        ami_cfg_copy_string(buf, len + 1, builtin);
+        ami_cfg_copy_string(buf, source->builtin_size, source->builtin);
     }
 
     if (!netdb_parse(table, kind, buf))
@@ -331,19 +354,15 @@ static VOID netdb_free_one(NetdbTable *table)
  */
 LONG ami_netdb_load(VOID)
 {
+    ULONG kind;
+
     if (ami_netdb_loaded)
         return AMI_CFG_OK;
 
     ami_netdb_loaded = TRUE;
 
-    netdb_load_one(&ami_netdb[NETDB_HOSTS],     NETDB_HOSTS,
-                   AMI_CFG_FILE_HOSTS,     ami_netdb_builtin_hosts);
-    netdb_load_one(&ami_netdb[NETDB_NETWORKS],  NETDB_NETWORKS,
-                   AMI_CFG_FILE_NETWORKS,  ami_netdb_builtin_networks);
-    netdb_load_one(&ami_netdb[NETDB_PROTOCOLS], NETDB_PROTOCOLS,
-                   AMI_CFG_FILE_PROTOCOLS, ami_netdb_builtin_protocols);
-    netdb_load_one(&ami_netdb[NETDB_SERVICES],  NETDB_SERVICES,
-                   AMI_CFG_FILE_SERVICES,  ami_netdb_builtin_services);
+    for (kind = 0; kind < 4; kind++)
+        netdb_load_one(&ami_netdb[kind], (NetdbKind)kind, &ami_netdb_sources[kind]);
 
     return (ami_netdb_unloaded() != 0) ? AMI_CFG_ERR_NOMEM : AMI_CFG_OK;
 }

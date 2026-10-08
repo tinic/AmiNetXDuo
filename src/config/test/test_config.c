@@ -157,12 +157,22 @@ BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
     return TRUE;
 }
 
+/* Fail one named read without depending on unrelated allocation counts. */
+static const char *stub_fail_read_path;
+
 APTR ami_cfg_read_file(const char *path, ULONG *size_out)
 {
     unsigned i;
 
     if (size_out != NULL)
         *size_out = 0;
+
+    if (stub_fail_read_path != NULL && strcmp(path, stub_fail_read_path) == 0)
+    {
+        if (size_out != NULL)
+            *size_out = AMI_CFG_READ_NOMEM;
+        return NULL;
+    }
 
     for (i = 0; i < sizeof(fixtures) / sizeof(fixtures[0]); i++)
     {
@@ -4253,36 +4263,57 @@ static void test_netdb(void)
  */
 static void test_netdb_read_nomem(void)
 {
-    LONG rc;
+    static const char *const paths[] = {
+        AMI_CFG_FILE_HOSTS, AMI_CFG_FILE_NETWORKS,
+        AMI_CFG_FILE_PROTOCOLS, AMI_CFG_FILE_SERVICES
+    };
+    ULONG i;
 
     printf("netdb: read out of memory\n");
 
-    ami_netdb_free();
-    clear_fixtures();
-    set_fixture(AMI_CFG_FILE_HOSTS, "10.0.0.1 hn\n");
-    set_fixture(AMI_CFG_FILE_NETWORKS, "hn 10\n");
-    set_fixture(AMI_CFG_FILE_PROTOCOLS, "hn 6\n");
-    set_fixture(AMI_CFG_FILE_SERVICES, "hn 80/tcp\n");
+    for (i = 0; i <= (ULONG)(sizeof(paths) / sizeof(paths[0])); i++)
+    {
+        const AmiNetdbEntry *entry;
+        ULONG kind = (i == 4) ? AMI_NETDB_HOSTS : i;
 
-    /* Fail only the hosts read's allocation: the other three load. */
-    stub_fail_once = 1;
-    rc = ami_netdb_load();
-    stub_fail_once = 0;
+        ami_netdb_free();
+        clear_fixtures();
+        set_fixture(AMI_CFG_FILE_HOSTS, "10.0.0.1 hn\n");
+        set_fixture(AMI_CFG_FILE_NETWORKS, "hn 10\n");
+        set_fixture(AMI_CFG_FILE_PROTOCOLS, "hn 6\n");
+        set_fixture(AMI_CFG_FILE_SERVICES, "hn 80/tcp\n");
 
-    CHECK(rc == AMI_CFG_ERR_NOMEM);
-    CHECK((ami_netdb_unloaded() & (1UL << AMI_NETDB_HOSTS)) != 0);
-    CHECK(ami_netdb_host_by_name("hn") == NULL);
-    CHECK(ami_netdb_host_by_name("localhost") == NULL);
+        /* Each read can fail while all other families still load. */
+        if (i == 4)
+            stub_fail_once = 1;       /* retain the real allocator-failure case */
+        else
+            stub_fail_read_path = paths[kind];
+        CHECK(ami_netdb_load() == AMI_CFG_ERR_NOMEM);
+        stub_fail_read_path = NULL;
+        stub_fail_once = 0;
+        CHECK(ami_netdb_unloaded() == (1UL << kind));
 
-    CHECK(ami_netdb_net_entry(0) != NULL);
-    CHECK(ami_netdb_proto_entry(0) != NULL);
-    CHECK(ami_netdb_serv_entry(0) != NULL);
+        entry = ami_netdb_host_by_name("hn");
+        CHECK((entry == NULL) == (kind == AMI_NETDB_HOSTS));
+        if (entry) CHECK_IP(entry->value, 10, 0, 0, 1);
+        CHECK(ami_netdb_host_by_name("localhost") == NULL);
 
-    /* Loaded is loaded: a later call does not re-run the failing read. */
-    CHECK(ami_netdb_load() == AMI_CFG_OK);
+        entry = ami_netdb_net_entry(0);
+        CHECK((entry == NULL) == (kind == AMI_NETDB_NETWORKS));
+        if (entry) CHECK(entry->value == 10);
+        entry = ami_netdb_proto_entry(0);
+        CHECK((entry == NULL) == (kind == AMI_NETDB_PROTOCOLS));
+        if (entry) CHECK(entry->value == 6);
+        entry = ami_netdb_serv_entry(0);
+        CHECK((entry == NULL) == (kind == AMI_NETDB_SERVICES));
+        if (entry) { CHECK(entry->value == 80); CHECK_STR(entry->proto, "tcp"); }
 
-    ami_netdb_free();
-    CHECK(ami_alloc_count() == 0);
+        /* Loaded is loaded: a later call does not re-run the failing read. */
+        CHECK(ami_netdb_load() == AMI_CFG_OK);
+        CHECK(ami_netdb_unloaded() == (1UL << kind));
+        ami_netdb_free();
+        CHECK(ami_alloc_count() == 0);
+    }
 }
 
 static void test_netdb_missing_files(void)
@@ -4298,9 +4329,17 @@ static void test_netdb_missing_files(void)
     CHECK(e != NULL);
     if (e) CHECK_IP(e->value, 127, 0, 0, 1);
 
+    e = ami_netdb_net_by_name("loopback");
+    CHECK(e != NULL);
+    if (e) CHECK(e->value == 127);
+
     e = ami_netdb_proto_by_name("tcp");
     CHECK(e != NULL);
     if (e) CHECK(e->value == 6);
+
+    e = ami_netdb_proto_by_number(58);
+    CHECK(e != NULL);
+    if (e) CHECK_STR(e->name, "icmpv6");
 
     e = ami_netdb_serv_by_name("http", "tcp");
     CHECK(e != NULL);
