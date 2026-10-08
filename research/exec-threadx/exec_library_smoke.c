@@ -93,6 +93,9 @@ int main(void)
         CHECK(recvfd(a,accepted,received,sizeof(received))==sizeof(payload) && !memcmp(payload,received,sizeof(payload)));
         CHECK(closefd(a,accepted)==0 && closefd(b,client)==0 && closefd(a,listener)==0);
         CASE("IPv4-TCP-connect-accept-and-data-between-private-bases");
+        /* Leave B cached and A evicted: closing A must reclaim its signal
+         * debt without requiring a later call through that base. */
+        fd=sock(b,AF_INET,SOCK_DGRAM);CHECK(fd>=0 && closefd(b,fd)==0);
         CloseLibrary(a);
         fd=sock(b,AF_INET,SOCK_DGRAM);CHECK(fd>=0 && closefd(b,fd)==0);
         CASE("first-close-preserves-second-opener");
