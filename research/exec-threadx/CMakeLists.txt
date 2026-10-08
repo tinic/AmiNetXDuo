@@ -6,14 +6,24 @@ add_library(research_wait STATIC wait.c)
 target_include_directories(research_wait PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_options(research_wait PRIVATE -Wall -Wextra -Werror)
 if(CMAKE_CROSSCOMPILING)
+    enable_language(ASM)
     add_library(research_exec_adapter STATIC exec_wait.c)
     target_link_libraries(research_exec_adapter PUBLIC research_wait)
     target_include_directories(research_exec_adapter PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_adapter PRIVATE -Wall -Wextra -Werror)
-    add_executable(research_exec_wait_smoke exec_wait_smoke.c)
+    # Use the project's command startup and DOS IO: the toolchain crt0/newlib
+    # smoke crashed before its first output on the 8192-byte emulator stack.
+    add_executable(research_exec_wait_smoke
+        "${ANX_ROOT}/src/tools/tool_startup.S" exec_wait_smoke.c)
     target_link_libraries(research_exec_wait_smoke PRIVATE research_exec_adapter)
     target_include_directories(research_exec_wait_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
     target_compile_options(research_exec_wait_smoke PRIVATE -Wall -Wextra -Werror)
+    target_link_options(research_exec_wait_smoke PRIVATE -nostartfiles
+        "-Wl,-Map=$<TARGET_FILE:research_exec_wait_smoke>.map")
+    add_custom_command(TARGET research_exec_wait_smoke POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTOOL_MAP=$<TARGET_FILE:research_exec_wait_smoke>.map"
+            -P "${ANX_ROOT}/cmake/check-startup-first.cmake")
     add_library(research_contract_probe OBJECT contract_probe.c)
     target_include_directories(research_contract_probe PRIVATE
         "${ANX_ROOT}/port/threadx-amiga/inc" "${ANX_ROOT}/port/netxduo-amiga/inc"

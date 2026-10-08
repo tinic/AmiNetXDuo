@@ -1,17 +1,28 @@
 /* Standalone emulator smoke; no networking or ThreadX kernel selected.
  * SPDX-License-Identifier: MIT */
 #include "exec_wait.h"
-#include <stdio.h>
+#include <proto/dos.h>
+
+static void say(const char *text)
+{
+    const char *end = text;
+    while (*end)
+        end++;
+    (void)Write(Output(), (APTR)text, (LONG)(end - text));
+    (void)Flush(Output());
+}
 
 int main(void)
 {
     AnxExecWait e;
     uint32_t token;
     unsigned passed = 0;
+    say("research_exec_wait=START\n");
     if (!anx_exec_wait_open(&e)) {
-        puts("research_exec_wait=FAIL resource setup");
+        say("research_exec_wait=FAIL resource setup\n");
         return 20;
     }
+    say("research_exec_wait=OPEN\n");
     token = anx_wait_begin(&e.wait, 20000, 0, 0, 0, 0);
     if (token && !anx_exec_wait_close(&e) &&
         anx_exec_wait_run(&e, token) == ANX_WAIT_TIMEOUT)
@@ -26,6 +37,7 @@ int main(void)
         passed++;
     if (anx_exec_wait_close(&e))
         passed++;
-    printf("research_exec_wait=%s checks=%u/4\n", passed == 4 ? "PASS" : "FAIL", passed);
+    say(passed == 4 ? "research_exec_wait=PASS checks=4/4\n"
+                    : "research_exec_wait=FAIL incomplete checks\n");
     return passed == 4 ? 0 : 20;
 }

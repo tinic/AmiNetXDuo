@@ -51,6 +51,12 @@ into a NetX stack. `research_exec_wait_smoke` is a standalone Amiga executable
 for later emulator testing of the native timer, pre-notification, cancellation
 and resource teardown. It does not test cross-task races or NetX behaviour.
 
+The first A1200/Kickstart 3.1 boardless attempt, using the toolchain's startup
+and newlib printing, crashed with no guest output on the harness's 8192-byte
+stack. It provides no adapter runtime verdict. The smoke now uses the existing
+command startup plus DOS `Write`/`Flush`, with the usual startup-first map check.
+The stack ceiling is unchanged; native verification of this revision is pending.
+
 ## Check the dependency boundary after an upstream change
 
 ```sh
@@ -99,6 +105,23 @@ standalone primitive or independently reviewed as an implemented backend.
 The assessment used NetX `02604196` and ThreadX `e24aa9c9`; this experiment uses
 beta8 NetX `2d871dca` and the same ThreadX pin. That assessment is architectural
 input, not an exact-commit review of this implementation. No backend GO exists.
+
+## Existing port code to evaluate for reuse
+
+The current port already maps ThreadX threads to Exec tasks. Reusing its
+lifecycle guarantees matters more than reusing every implementation line.
+
+| Existing source in `port/threadx-amiga/src` | Candidate reuse and constraint |
+|---|---|
+| `tx_amiga_adopt.c` | Caller registration, adoption generations, owner-allocated signal bits and orphan handling. Its calls into ThreadX creation/termination must be replaced or retained deliberately. |
+| `tx_thread_system_return.c` | Park/teardown handshakes and zombie handling. Its current-thread baton tests are tied to the existing scheduler and cannot be copied into an independent Exec scheduler unchanged. |
+| `tx_thread_context_save.c`, `tx_thread_context_restore.c` | Serialized timer context and `_tx_thread_system_state` accounting. The tick is an Exec task using `Forbid`; nothing in that protected callback region may wait. |
+| `tx_thread_schedule.c` | Baton dispatch and waiter wakeup ordering are the reference behaviour. Removing ThreadX ready lists still requires a reviewed substitute for caller identity and wake ordering. |
+| `tx_initialize_low_level.c`, `tx_timer_interrupt.c` | Timer clock advancement, callback dispatch and shutdown are the common-timer reference. The spike's private timer per wait does not yet replace this machinery or establish its memory/task cost. |
+
+The next design should state which of these responsibilities it retains and
+measure the resulting code, signals, timer requests, tasks and stacks. A wait
+adapter compiled in isolation cannot establish the net replacement cost.
 
 ## Still open
 
