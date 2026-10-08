@@ -361,8 +361,23 @@ The m68k smoke adds two native cases to the prior ten: independent non-IP abort
 followed by packet arrival, with and without the abort caller already owning the
 IP mutex. The receiver may wake before the later producer; the parent waits
 outside the serialized boundary with a bounded poll before checking queue
-ownership. Compilation passes; actual emulator verdict and exact implementation
-review are pending at this checkpoint.
+ownership. At exact `e4a4db11adcacdb9a1a727bf8a8b4e87897229cd`, one boardless
+A1200/KS3.1 r40.68 run passed 12/12 cases, workers_reaped=2, exit 0 after
+14 seconds, all stacks 8192. Binary SHA256
+`190c9f27ebad5c25208ff8b425aac3b946351d8c3d46df755cc2fd44f211ed53`,
+50,068 bytes; harness `tools/amiberry-run.sh -m A1200 -t 90` at `300b22e8`.
+Actual stdout/exit/startup/hash evidence is
+`/Users/turo/ai/evidence/exec-threadx-spike4-native`. Remote staging is removed.
+deepseek-v4 independently reviewed exact `e4a4db11a`: P1-P6 implemented as
+advised, G4 removed for the opted-in receive-abort path, no blocker in bounded
+fixture scope. No full backend/scheduler/wire/lifetime verdict. Owned local
+research builds and remote staging were removed after retaining small evidence.
+
+The new `netx_resume.c` helper has 224 bytes of m68k object text and no static
+data/BSS with the current research compiler/flags. That excludes backend capture
+and hook-dispatch additions, per-thread metadata, relocations and test/runtime
+costs; it is not a net replacement-library saving. The smoke executable also
+includes all fixtures and runtime. No full-library size result exists.
 
 This is not the production blocking-mutex design. Boundaries already serialize
 these research operations. Mutex acquisition inside resume supports only

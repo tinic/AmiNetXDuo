@@ -234,8 +234,14 @@ callback/control/sequence from the current suspension, leaves actual ThreadX
 abort and vendor protocol sources unchanged, and preserves abort result and
 fixture packet ownership in eight host schedules. Four rejection probes reject
 stale/missing cleanup captures, invalid retained sockets and foreign mutex
-contention. Host CTest PASS 13/13; expanded 12-case m68k smoke compiles. Exact
-independent implementation review and actual native verdict are pending.
+contention. Host CTest PASS 13/13. Exact `e4a4db11a` passed the expanded native smoke
+12/12, workers_reaped=2, exit 0 after 14 seconds on one boardless A1200/KS3.1
+run, all stacks 8192, binary `190c9f27` (50,068 bytes). Actual evidence is in
+`/Users/turo/ai/evidence/exec-threadx-spike4-native`; remote staging is removed.
+deepseek-v4's exact `e4a4db11a` review confirms the implementation meets P1-P6,
+removes G4 for opted-in receive aborts, and has no bounded fixture blocker.
+No full backend/scheduler/wire/lifetime verdict. Local research build outputs
+and remote staging are cleaned; useful exact-SHA evidence is retained.
 
 This establishes a possible bounded integration boundary, not production
 blocking/scheduler compatibility. Potentially blocking mutex acquisition cannot
