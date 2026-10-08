@@ -312,7 +312,11 @@ def instruction_details(objdump, path):
     details = []
     function = None
     for line in out.stdout.splitlines():
-        m = re.match(r"^\s*[0-9a-f]+\s+[0-9a-f]+\s+(\S+):\s*$", line)
+        # Both symbol-line formats, as in functions(): matching only the
+        # pinned 2.39 one left every instruction without a function on a
+        # 2.46 objdump, so no call to main was ever counted.
+        m = re.match(r"^\s*[0-9a-f]+\s+[0-9a-f]+\s+(\S+):\s*$", line) or \
+            re.match(r"^\s*[0-9a-f]+ <([^>]+)>:\s*$", line)
         if m:
             function = m.group(1)
             continue
@@ -365,14 +369,14 @@ def section_relocations(objdump, path):
     return result
 
 
-def _refers_to_symbol(reloc, text, location):
+def _refers_to_symbol(reloc, text, location, word=None):
     """Whether one operand is the symbol at `location`."""
     if reloc is None or location is None:
         return False
     section, offset = location
     if reloc.lstrip("_") == "argv":
         return True
-    return reloc == section and _addend(text) == offset
+    return reloc == section and _addend(text, word) == offset
 
 
 def _writes_areg(text):
@@ -395,7 +399,7 @@ def _displacement(value):
     return int(value, base)
 
 
-def _addend(text):
+def _addend(text, word=None):
     """The leading displacement of this instruction's memory operand, or None.
 
     THE ONLY RELIABLE WAY TO TELL __argv FROM ITS NEIGHBOURS. Both objdumps
@@ -417,13 +421,20 @@ def _addend(text):
     has its addend inside the parentheses, and reading the leading token there
     yields "a4", which is valid hex, parses as 0xa4, and quietly disqualified
     seven of the eleven baserel files the first time this check was added.
+
+    THE BASE DEPENDS ON THE INSTRUCTION. binutils 2.46 prints a 16-bit
+    displacement in decimal (`a4@(12)` for __argc) but the 32-bit one of
+    the full-format libb32 forms in hex without a prefix (`a4@(10)` for
+    __argv at .bss+0x10, `a4@(c)` for __argc).  "10" guessed as decimal
+    disqualified every libb32 file, so callers that know the opcode pass it.
     """
+    hex32 = word in (PEA_A4_32, PUSH_A4_32)
     m = re.search(r"a[0-7]@\((-?[0-9a-fx]+)\)", text)       # pea a4@(20)
     if m:
-        return _displacement(m.group(1))
+        return int(m.group(1), 16) if hex32 else _displacement(m.group(1))
     m = re.search(r"\((-?[0-9a-fx]+),%?a[0-7]\)", text)     # pea (20,a4)
     if m:
-        return _displacement(m.group(1))
+        return int(m.group(1), 16) if hex32 else _displacement(m.group(1))
     m = re.search(r"\b([0-9a-f]+)\(%?a[0-7]\)", text)        # 20(a4), MIT
     if m:
         return _displacement(m.group(1))
@@ -496,7 +507,7 @@ def argv_sites(objdump, path):
     for i, (off, word, reloc, text) in enumerate(insns):
         # ---- shape B, first half: lea <__argv>,an
         if (word & LEA_MASK) == LEA_OP \
-                and _refers_to_symbol(reloc, text, argv_location):
+                and _refers_to_symbol(reloc, text, argv_location, word):
             holds_argv[(word >> 9) & 7] = True
             continue
 
@@ -508,7 +519,7 @@ def argv_sites(objdump, path):
         # only &__argv if an started at a4, and without that check any
         # register carrying anything could be adopted.
         if (word & 0xF1FF) == ADDA_IMM \
-                and _refers_to_symbol(reloc, text, argv_location):
+                and _refers_to_symbol(reloc, text, argv_location, word):
             n = (word >> 9) & 7
             # `moveal a4,a6` here, `movea.l a4,a6` under the pinned binutils.
             if i and re.match(rf"^move[a.l]*\s+%?a4,%?a{n}$", insns[i - 1][3]):
@@ -516,7 +527,7 @@ def argv_sites(objdump, path):
                 continue
 
         # ---- shape A: a push whose own operand is __argv
-        if _refers_to_symbol(reloc, text, argv_location) \
+        if _refers_to_symbol(reloc, text, argv_location, word) \
                 and (word in ARGV_FIX or word in PUSH_OPS):
             if pushes_next(i) and calls_main(i):
                 sites.append((off, word, ARGV_FIX.get(word, word)))
@@ -724,12 +735,12 @@ def _parser_owns_argv(objdump, path):
     if details is None:
         return False
     refs = 0
-    for _, _, relocs, text, function in details:
+    for _, word, relocs, text, function in details:
         if function is None or not function.endswith("____start"):
             continue
         named = any(r.lstrip("_") == "argv" for r in relocs)
         section_ref = section in relocs and (
-            _addend(text) == offset or _destination_addend(text) == offset)
+            _addend(text, word) == offset or _destination_addend(text) == offset)
         if named or section_ref:
             refs += 1
     return refs == calls
@@ -761,7 +772,7 @@ def argv_init_sites(objdump, path):
         if not (is_movea or is_lea):
             continue
         reloc = relocs[-1] if relocs else None
-        if not _refers_to_symbol(reloc, text, location):
+        if not _refers_to_symbol(reloc, text, location, word):
             continue
 
         areg = (word >> 9) & 7
@@ -900,7 +911,11 @@ def main():
         sys.stderr.write(f"fix-toolchain-crt0: no such directory: {root}\n")
         return 2
 
-    found = sorted(root.rglob("crt0.o"))
+    # The three bugs are newlib's crt0.c.  A toolchain that also ships ixemul
+    # has ixemul's own crt0.o beside it, a different runtime with no
+    # ____start/exit pair; it is not this script's subject and must not fail
+    # the gate as "not understood".
+    found = sorted(p for p in root.rglob("crt0.o") if "ixemul" not in p.parts)
     if not found:
         sys.stderr.write(f"fix-toolchain-crt0: no crt0.o under {root}\n")
         return 1
