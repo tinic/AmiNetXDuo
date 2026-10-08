@@ -656,14 +656,12 @@ VOID _tx_thread_system_preempt_check(void)
     need(contexts!=0,"preemption check outside call boundary");
 }
 
-static void need_context_at(const char *service)
+static void need_context(void)
 {
     need(contexts && current_frame &&
          current_frame->owner==platform->caller(platform->context),
-         service);
+         "service outside serialized call boundary");
 }
-/* Preserve the same guard; terminal diagnostics identify its calling service. */
-#define need_context() need_context_at(__func__)
 
 void anx_tx_require_context(UINT blocking)
 {
@@ -1204,7 +1202,14 @@ UINT _tx_timer_deactivate(TX_TIMER *t)
 }
 ULONG _tx_time_get(void)
 {
-    need_context(); return _tx_timer_system_clock;
+    /* Upstream permits this read without a ThreadX caller. WaitSelect uses it
+     * while parked outside its NetX bracket. The Exec clock producer uses the
+     * same serialization; reading time neither adopts nor restores a caller. */
+    ULONG time;
+    platform->enter(platform->context);
+    time=_tx_timer_system_clock;
+    platform->leave(platform->context);
+    return time;
 }
 void anx_tx_timer_tick(void)
 {

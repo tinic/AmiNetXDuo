@@ -49,6 +49,12 @@ int main(int argc,char **argv)
     ULONG actual=0,old_slice=99;
     TX_THREAD absent;
     anx_tx_runtime_init(&p);
+    /* The real public WaitSelect reads time without a live NetX bracket. */
+    _tx_timer_system_clock=0xFFFFFFFFUL;
+    CHECK(_tx_time_get()==0xFFFFFFFFUL && !depth && anx_tx_runtime_idle());
+    enter(0);
+    CHECK(_tx_time_get()==0xFFFFFFFFUL && depth==1 && !_tx_thread_current_ptr);
+    leave(0);
     for (unsigned i=0;i<2;i++) {
         owner=i+1;anx_wait_init(&waits[i],&ops);
         CHECK(anx_tx_attach(&bridge[i],&thread[i],&waits[i],owner));
@@ -62,6 +68,7 @@ int main(int argc,char **argv)
         (void)_tx_thread_preemption_change(&thread[0],16,&old);CHECK(0);
     }
     anx_tx_context_begin(&f,&thread[0],0);
+    CHECK(_tx_time_get()==0xFFFFFFFFUL && depth==1 && _tx_thread_current_ptr==&thread[0]);
     CHECK(_tx_event_flags_create(&events,(CHAR *)"raised wait")==TX_SUCCESS);
     CHECK(_tx_thread_preemption_change(&thread[0],2,&old)==TX_SUCCESS && old==16);
     if (argc>1 && !strcmp(argv[1],"--reject-exit")) {
@@ -88,6 +95,7 @@ int main(int argc,char **argv)
     CHECK(_tx_thread_time_slice_change(&thread[0],0,TX_NULL)==TX_PTR_ERROR);
     CHECK(_tx_thread_time_slice_change(TX_NULL,0,&old_slice)==TX_THREAD_ERROR);
     anx_tx_context_begin(&nested,TX_NULL,1);
+    CHECK(_tx_time_get()==0xFFFFFFFFUL && depth==2 && _tx_thread_system_state==1);
     CHECK(_tx_thread_preemption_change(&thread[0],0,&invalid_old)==TX_CALLER_ERROR && invalid_old==99);
     CHECK(_tx_thread_time_slice_change(&thread[0],0,&old_slice)==TX_CALLER_ERROR && old_slice==1);
     anx_tx_context_end(&nested);
