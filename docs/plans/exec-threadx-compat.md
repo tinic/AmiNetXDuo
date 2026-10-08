@@ -310,3 +310,49 @@ elapsed-time catch-up, callback lifecycle/drain, full wire/packet ownership,
 replacement link or net code size savings are established. Production/vendor
 sources remain unchanged. Next: real packet pool/receive ownership and IP helper
 integration compared with the original backend; then lifecycle and economics.
+
+## Spike 7 packet ownership checkpoint
+
+Exact research 586278ae3 links unchanged pinned packet pool lifecycle/allocation/
+cleanup/release, copy/append and UDP delivery/receive sources. Host 25/25 includes
+seven concurrent allocation schedules, copy/chain recovery across two pools,
+actual queued/direct UDP delivery, and four deliberate prepublication/quiescence
+rejections. Quiescent deletion is supported; deletion with waiters or outstanding
+packets is deliberately rejected, not counted as a successful lifecycle case.
+
+Native 28/28 passed at that commit, workers_reaped=2, exit 0 after 15s, one boardless
+A1200/KS3.1 r40.68 run, all stacks 8192 bytes, binary bf8b5e86 (70,284 bytes including
+runtime and fixtures). Seven new native cases include actual IPv4 UDP valid/bad
+checksum handling and bad-checksum packet release waking a pool allocator while
+receive continues. The independent byte-wise fixture creates packet bytes;
+NetX performs checksum validation and ownership transfer. Input starts at UDP
+dispatch after synthetic IP decoding; socket binding is manually initialized.
+There is no link-driver/full IP/wire/socket-lifecycle verdict. LP64 host checksum
+is disabled; target evidence is kept separately. deepseek-v4 independently
+reviewed exact 586278ae3: no blocker in bounded scope, all 20/20 parts read,
+no full backend GO. Owned local build and native staging are removed; useful
+small evidence is retained. Two terminal ICMP transmit sentinels cover absent routing
+and transmit, never return success, and must be rejected by the future full
+replacement link gate. Shipping/vendor inputs remain unchanged.
+
+## Current progress and next runtime milestone
+
+| Area | Current evidence | Remaining work |
+|---|---|---|
+| Dependency boundary | Saved full/micro pinned compiler inventories and real-header m68k probe | Full replacement link gate and ABI/layout goldens |
+| Waiting mechanisms | Bounded host/native TCP, UDP, sleep, mutex, event and periodic callback cases | Delayed suspend, priority/threshold and foreign Exec IO compatibility |
+| Packet ownership | Real pool allocation/release and UDP transfer; native IPv4 checksum handling | Complete IP/helper path, TCP ownership, IPv6/chained checksum and socket lifecycle |
+| Runtime lifecycle | Research tasks attach, close private IO and reap themselves in fixtures | Thread create/terminate/delete, mutex/event deletion, independent common timer task and drain |
+| Economic result | Shipping component spans and standalone fixture sizes recorded separately | Comparable finished library link, resident resources and throughput |
+
+Next executable milestone: provide owned Exec task creation and teardown, plus
+object deletion needed by actual NetX IP create/delete. At the pinned source,
+`nx_ip_create.c` calls thread create with AUTO_START after creating mutex/events,
+creates the periodic timer, and changes a registered creator's threshold.
+`nx_ip_delete.c` stops timers, terminates the helper, deletes mutex/events, then
+deletes the thread. Retain source/control storage until producers and the task
+are truly reaped; no silent priority or forced-termination success. Reuse the
+existing port's task publication/stack-retirement guarantees without accidentally
+retaining its ThreadX scheduler. Then boot a real NX_IP helper with a disposable
+fake link driver, compare traces with the original backend, exercise repeated
+shutdown/restart, and measure complete replacement/library/resource cost.

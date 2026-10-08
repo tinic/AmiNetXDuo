@@ -620,4 +620,14 @@ They never return a fabricated success and are excluded from all claimed paths;
 a future replacement-only link gate must reject these sentinels. No vendor or
 shipping build changes select this experiment. Common task/timer lifecycle,
 foreign Exec IO, socket retirement, original-backend comparison and net library
-size savings remain open. Results/review will be recorded against exact commits.
+size savings remain open. Exact `586278ae3` passes host 25/25 and the expanded
+native 28/28 smoke, workers_reaped=2, exit 0 after 15 seconds on one boardless
+A1200/KS3.1 r40.68 run, parent and both workers 8192 bytes. Binary `bf8b5e86`, 70,284 bytes,
+includes runtime/fixtures and is not a library size result. Actual stdout, exit,
+startup and hashes are retained under `/Users/turo/ai/evidence/exec-threadx-spike7-native`;
+claudecode confirmed zero staging files remain. deepseek-v4 independently
+reviewed exact `586278ae3`: no blocker in the bounded scope, all 20/20 parts read.
+The reviewer ran no tests; host/native execution is attributed separately. The
+stricter prepublication allocation and quiescent deletion policy is deliberate,
+not full upstream lifecycle conformance. Owned local build and native staging
+are removed; small useful evidence is retained.
