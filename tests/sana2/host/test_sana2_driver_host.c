@@ -165,10 +165,19 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
     h_note("tx_reap");
 }
 
+static BOOL h_refresh_updates;
+
 VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 {
-    (VOID)iface;
     h_note("refresh");
+    if (h_refresh_updates)
+    {
+        iface->stats.packets_received = 149;
+        iface->stats.bad_data = 7;
+        iface->stats.overruns = 11;
+        iface->stats.tx_errors = 13;
+        iface->stats.rx_errors = 17;
+    }
 }
 
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD type,
@@ -280,6 +289,7 @@ static void fixture_init(UWORD addr_bytes)
     h_sends            = 0;
     h_releases         = 0;
     h_mapping_calls    = 0;
+    h_refresh_updates  = FALSE;
 #ifdef AMINETXDUO_RX_VERIFY
     h_caps_calls       = 0;
     h_caps_set         = 0;
@@ -992,6 +1002,21 @@ static void test_counters(void)
     h_check(drive(NX_LINK_GET_ERROR_COUNT) == 1 + 2 + 4 + 8,
             "the error count is every kind of error");
     h_check(strcmp(h_log, "refresh ") == 0, "after a refresh");
+
+    h_refresh_updates = TRUE;
+    h_log[0] = '\0';
+    h_check(drive(NX_LINK_GET_RX_COUNT) == 149,
+            "receive count reflects the completed refresh");
+    h_check(strcmp(h_log, "refresh ") == 0, "receive query refreshes once");
+    iface.stats.bad_data = 1;
+    iface.stats.overruns = 2;
+    iface.stats.tx_errors = 4;
+    iface.stats.rx_errors = 8;
+    h_log[0] = '\0';
+    h_check(drive(NX_LINK_GET_ERROR_COUNT) == 7 + 11 + 13 + 17,
+            "error sum reflects the completed refresh");
+    h_check(strcmp(h_log, "refresh ") == 0, "error query refreshes once");
+    h_refresh_updates = FALSE;
 
     h_log[0] = '\0';
     h_check(drive(NX_LINK_GET_ALLOC_ERRORS) == 3,

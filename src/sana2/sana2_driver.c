@@ -521,17 +521,14 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         break;
 
     case NX_LINK_GET_ERROR_COUNT:
-        if (!iface->detaching)
-            ami_sana2_refresh_stats(iface);
-        *(driver_req->nx_ip_driver_return_ptr) =
-            iface->stats.bad_data + iface->stats.overruns +
-            iface->stats.tx_errors + iface->stats.rx_errors;
-        break;
-
     case NX_LINK_GET_RX_COUNT:
         if (!iface->detaching)
             ami_sana2_refresh_stats(iface);
-        *(driver_req->nx_ip_driver_return_ptr) = iface->stats.packets_received;
+        *(driver_req->nx_ip_driver_return_ptr) =
+            (driver_req->nx_ip_driver_command == NX_LINK_GET_RX_COUNT)
+                ? iface->stats.packets_received
+                : iface->stats.bad_data + iface->stats.overruns +
+                  iface->stats.tx_errors + iface->stats.rx_errors;
         break;
 
     case NX_LINK_GET_TX_COUNT:
