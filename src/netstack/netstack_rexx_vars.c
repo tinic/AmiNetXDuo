@@ -131,9 +131,13 @@ static const char ami_rx_kw_routes[] =
 typedef struct AmiRxVarDef
 {
     const char *rvd_Index;
-    UWORD       rvd_Count;
+    UBYTE       rvd_Count;
     UBYTE       rvd_Read;
 } AmiRxVarDef;
+
+_Static_assert(RX_ICMP_COUNT <= 255 && RX_IP_COUNT <= 255 &&
+               RX_TCP_COUNT <= 255 && RX_UDP_COUNT <= 255,
+               "ARexx index counts must fit a byte");
 
 static const AmiRxVarDef ami_rx_vardefs[RXV_COUNT] =
 {
@@ -510,6 +514,9 @@ typedef struct AmiRxSocket
     LONG    rs_State;
 } AmiRxSocket;
 
+_Static_assert(sizeof(AmiRxSocket) <= 256,
+               "ARexx socket field offsets must fit a byte");
+
 /* Copy under nx_ip_protection and format outside it: the formatting can grow
    the reply buffer, and allocating inside the lock risks both an unbounded
    hold and a deadlock against the IP thread. */
@@ -588,8 +595,8 @@ static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
        rather than field pointers, so the table needs no pointer relocations. */
     static const struct
     {
-        UWORD offset;
-        UWORD width;
+        UBYTE offset;
+        UBYTE width;
     } fields[] = {
         { offsetof(AmiRxSocket, rs_RecvQ),       4 },
         { offsetof(AmiRxSocket, rs_SendQ),       4 },
