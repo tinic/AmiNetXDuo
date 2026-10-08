@@ -1132,6 +1132,91 @@ static void test_interface_keyword_aliases(void)
     ami_config_set_reporter(NULL, NULL);
 }
 
+static void test_interface_mode_aliases(void)
+{
+    static const struct { const char *name; AmiIpType mode; } v4[] = {
+        { "dhcp", AMI_IPTYPE_DHCP }, { "bootp", AMI_IPTYPE_DHCP },
+        { "auto", AMI_IPTYPE_LINKLOCAL }, { "fastauto", AMI_IPTYPE_LINKLOCAL },
+        { "zeroconf", AMI_IPTYPE_LINKLOCAL }, { "linklocal", AMI_IPTYPE_LINKLOCAL },
+        { "static", AMI_IPTYPE_STATIC }, { "manual", AMI_IPTYPE_STATIC },
+        { "none", AMI_IPTYPE_NONE }, { "off", AMI_IPTYPE_NONE },
+        { "no", AMI_IPTYPE_NONE }, { "disabled", AMI_IPTYPE_NONE }
+    };
+#ifdef AMINETXDUO_IPV6
+    static const struct { const char *name; AmiIp6Type mode; } v6[] = {
+        { "off", AMI_IP6TYPE_OFF }, { "no", AMI_IP6TYPE_OFF },
+        { "none", AMI_IP6TYPE_OFF }, { "disabled", AMI_IP6TYPE_OFF },
+        { "linklocal", AMI_IP6TYPE_LINKLOCAL }, { "link-local", AMI_IP6TYPE_LINKLOCAL },
+        { "local", AMI_IP6TYPE_LINKLOCAL }, { "auto", AMI_IP6TYPE_AUTO },
+        { "slaac", AMI_IP6TYPE_AUTO }, { "stateless", AMI_IP6TYPE_AUTO },
+        { "ra", AMI_IP6TYPE_AUTO }, { "static", AMI_IP6TYPE_STATIC },
+        { "manual", AMI_IP6TYPE_STATIC }, { "dhcp", AMI_IP6TYPE_DHCP },
+        { "dhcpv6", AMI_IP6TYPE_DHCP }, { "stateful", AMI_IP6TYPE_DHCP }
+    };
+#endif
+    unsigned family, i, spelling;
+
+    printf("interface: every IPv4/IPv6 mode alias through both keyword spellings\n");
+    for (family = 0; family < 2; family++)
+    {
+        unsigned count = sizeof(v4) / sizeof(v4[0]);
+#ifdef AMINETXDUO_IPV6
+        if (family != 0)
+            count = sizeof(v6) / sizeof(v6[0]);
+#else
+        if (family != 0)
+            break;
+#endif
+        for (i = 0; i < count; i++)
+            for (spelling = 0; spelling < 2; spelling++)
+            {
+                AmiIfConfig iface;
+                char text[256], mixed[24];
+#ifdef AMINETXDUO_IPV6
+                const char *name = family ? v6[i].name : v4[i].name;
+#else
+                const char *name = v4[i].name;
+#endif
+                unsigned j;
+                for (j = 0; name[j] != '\0'; j++)
+                    mixed[j] = (j % 2 == 0 && name[j] >= 'a' && name[j] <= 'z')
+                                   ? (char)(name[j] - ('a' - 'A')) : name[j];
+                mixed[j] = '\0';
+                snprintf(text, sizeof(text),
+                         "device=a2065.device\naddress=10.0.2.15\n"
+                         "address6=2001:db8::5\n%s%s=%s\n",
+                         spelling ? "IPTYPE" : "CONFIGURE", family ? "6" : "", mixed);
+                CHECK(ami_cfg_parse_interface("eth0", text, &iface) == AMI_CFG_OK);
+                if (family == 0)
+                    CHECK(iface.iptype == v4[i].mode);
+#ifdef AMINETXDUO_IPV6
+                else
+                    CHECK(iface.ip6type == v6[i].mode);
+#endif
+            }
+        {
+            AmiIfConfig iface;
+            char text[256];
+
+            snprintf(text, sizeof(text),
+                     "device=a2065.device\naddress=10.0.2.15\n%s",
+                     family ? "CONFIGURE6=linklocal\nCONFIGURE6=bootp\n"
+                            : "CONFIGURE=dhcp\nCONFIGURE=stateful\n");
+            seen_count = 0;
+            ami_config_set_reporter(collect, NULL);
+            CHECK(ami_cfg_parse_interface("eth0", text, &iface) == AMI_CFG_OK);
+            CHECK(seen_count == 1 && seen[0].severity == AMI_CFG_PROBLEM_ERROR);
+            if (family == 0)
+                CHECK(iface.iptype == AMI_IPTYPE_DHCP);
+#ifdef AMINETXDUO_IPV6
+            else
+                CHECK(iface.ip6type == AMI_IP6TYPE_LINKLOCAL);
+#endif
+            ami_config_set_reporter(NULL, NULL);
+        }
+    }
+}
+
 static void test_problem_reporter(void)
 {
     AmiIfConfig iface;
@@ -4690,6 +4775,7 @@ int main(int argc, char **argv)
     test_interface_errors();
     test_interface_keyword_aliases();
     test_problem_reporter();
+    test_interface_mode_aliases();
     test_numeric_iptype_is_reported_inert();
     test_inert_keywords_are_notes();
     test_request_counts_have_ceilings();

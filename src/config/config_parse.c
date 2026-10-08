@@ -555,76 +555,117 @@ static VOID report_bad_card(ULONG line, const char *value)
 
 #define CFG_HINT_IPV4     "expected a.b.c.d"
 
-/* CONFIGURE=/IPTYPE= address-configuration modes. */
-static const struct IpTypeName
-{
-    const char *name;
-    AmiIpType   type;
-}
-ami_iptype_names[] =
-{
-    { "dhcp",     AMI_IPTYPE_DHCP      },
-    { "bootp",    AMI_IPTYPE_DHCP      },   /* AmiTCP spelling, DHCP supersedes it */
-    { "auto",     AMI_IPTYPE_LINKLOCAL },
-    { "fastauto", AMI_IPTYPE_LINKLOCAL },
-    { "zeroconf", AMI_IPTYPE_LINKLOCAL },
-    { "linklocal",AMI_IPTYPE_LINKLOCAL },
-    { "static",   AMI_IPTYPE_STATIC    },
-    { "manual",   AMI_IPTYPE_STATIC    },
-    { "none",     AMI_IPTYPE_NONE      },
-    { "off",      AMI_IPTYPE_NONE      },
-    { "no",       AMI_IPTYPE_NONE      },
-    { "disabled", AMI_IPTYPE_NONE      },
-    { NULL,       AMI_IPTYPE_STATIC    }
-};
+/* The two mode tables share strings, and carry byte-sized private metadata.
+   Public AmiIpType/AmiIp6Type fields remain their original enum types. */
+#define CFG_IP4_MODES(X) \
+    X(dhcp,      "dhcp",      AMI_IPTYPE_DHCP) \
+    X(bootp,     "bootp",     AMI_IPTYPE_DHCP) \
+    X(auto_mode, "auto",      AMI_IPTYPE_LINKLOCAL) \
+    X(fastauto,  "fastauto",  AMI_IPTYPE_LINKLOCAL) \
+    X(zeroconf,  "zeroconf",  AMI_IPTYPE_LINKLOCAL) \
+    X(linklocal, "linklocal", AMI_IPTYPE_LINKLOCAL) \
+    X(static_mode,"static",  AMI_IPTYPE_STATIC) \
+    X(manual,    "manual",    AMI_IPTYPE_STATIC) \
+    X(none,      "none",      AMI_IPTYPE_NONE) \
+    X(off,       "off",       AMI_IPTYPE_NONE) \
+    X(no,        "no",        AMI_IPTYPE_NONE) \
+    X(disabled,  "disabled",  AMI_IPTYPE_NONE)
 
 #ifdef AMINETXDUO_IPV6
+#define CFG_IP6_EXTRA_NAMES(X) \
+    X(link_local,"link-local",AMI_IP6TYPE_LINKLOCAL) \
+    X(local,     "local",     AMI_IP6TYPE_LINKLOCAL) \
+    X(slaac,     "slaac",     AMI_IP6TYPE_AUTO) \
+    X(stateless, "stateless", AMI_IP6TYPE_AUTO) \
+    X(ra,        "ra",        AMI_IP6TYPE_AUTO) \
+    X(dhcpv6,    "dhcpv6",    AMI_IP6TYPE_DHCP) \
+    X(stateful,  "stateful",  AMI_IP6TYPE_DHCP)
+#define CFG_IP6_MODES(X) \
+    X(off,        "off",        AMI_IP6TYPE_OFF) \
+    X(no,         "no",         AMI_IP6TYPE_OFF) \
+    X(none,       "none",       AMI_IP6TYPE_OFF) \
+    X(disabled,   "disabled",   AMI_IP6TYPE_OFF) \
+    X(linklocal,  "linklocal",  AMI_IP6TYPE_LINKLOCAL) \
+    X(link_local, "link-local", AMI_IP6TYPE_LINKLOCAL) \
+    X(local,      "local",      AMI_IP6TYPE_LINKLOCAL) \
+    X(auto_mode,  "auto",       AMI_IP6TYPE_AUTO) \
+    X(slaac,      "slaac",      AMI_IP6TYPE_AUTO) \
+    X(stateless,  "stateless",  AMI_IP6TYPE_AUTO) \
+    X(ra,         "ra",         AMI_IP6TYPE_AUTO) \
+    X(static_mode,"static",     AMI_IP6TYPE_STATIC) \
+    X(manual,     "manual",     AMI_IP6TYPE_STATIC) \
+    X(dhcp,       "dhcp",       AMI_IP6TYPE_DHCP) \
+    X(dhcpv6,     "dhcpv6",     AMI_IP6TYPE_DHCP) \
+    X(stateful,   "stateful",   AMI_IP6TYPE_DHCP)
+#else
+#define CFG_IP6_EXTRA_NAMES(X)
+#endif
 
-/* CONFIGURE6=/IPTYPE6= address-configuration modes. */
-static const struct Ip6TypeName
+static const struct IfModeNames
 {
-    const char *name;
-    AmiIp6Type  type;
-}
-ami_ip6type_names[] =
-{
-    { "off",        AMI_IP6TYPE_OFF       },
-    { "no",         AMI_IP6TYPE_OFF       },
-    { "none",       AMI_IP6TYPE_OFF       },
-    { "disabled",   AMI_IP6TYPE_OFF       },
-    { "linklocal",  AMI_IP6TYPE_LINKLOCAL },
-    { "link-local", AMI_IP6TYPE_LINKLOCAL },
-    { "local",      AMI_IP6TYPE_LINKLOCAL },
-    { "auto",       AMI_IP6TYPE_AUTO      },
-    { "slaac",      AMI_IP6TYPE_AUTO      },
-    { "stateless",  AMI_IP6TYPE_AUTO      },
-    { "ra",         AMI_IP6TYPE_AUTO      },
-    { "static",     AMI_IP6TYPE_STATIC    },
-    { "manual",     AMI_IP6TYPE_STATIC    },
-    { "dhcp",       AMI_IP6TYPE_DHCP      },
-    { "dhcpv6",     AMI_IP6TYPE_DHCP      },
-    { "stateful",   AMI_IP6TYPE_DHCP      },
-    { NULL,         AMI_IP6TYPE_OFF       }
+#define MODE_NAME_FIELD(id, text, type) char id[sizeof(text)];
+    CFG_IP4_MODES(MODE_NAME_FIELD)
+    CFG_IP6_EXTRA_NAMES(MODE_NAME_FIELD)
+#undef MODE_NAME_FIELD
+} ami_if_mode_names = {
+#define MODE_NAME_TEXT(id, text, type) text,
+    CFG_IP4_MODES(MODE_NAME_TEXT)
+    CFG_IP6_EXTRA_NAMES(MODE_NAME_TEXT)
+#undef MODE_NAME_TEXT
 };
+_Static_assert(sizeof(ami_if_mode_names) <= 256, "mode name offsets must fit in UBYTE");
 
+struct IfMode { UBYTE offset; UBYTE type; };
+#define MODE_ENTRY(id, text, type) { offsetof(struct IfModeNames, id), type },
+static const struct IfMode ami_iptype_names[] = { CFG_IP4_MODES(MODE_ENTRY) };
+#ifdef AMINETXDUO_IPV6
+static const struct IfMode ami_ip6type_names[] = { CFG_IP6_MODES(MODE_ENTRY) };
+#endif
+#undef MODE_ENTRY
+#define MODE_WIDTH(id, text, type) \
+    _Static_assert(type >= 0 && type <= 255, "mode value must fit in UBYTE");
+CFG_IP4_MODES(MODE_WIDTH)
+#ifdef AMINETXDUO_IPV6
+CFG_IP6_MODES(MODE_WIDTH)
+#endif
+#undef MODE_WIDTH
+#undef CFG_IP4_MODES
+#undef CFG_IP6_MODES
+#undef CFG_IP6_EXTRA_NAMES
+
+static int lookup_ipmode(const char *value, const struct IfMode *modes,
+                          ULONG count)
+{
+    ULONG i;
+
+    for (i = 0; i < count; i++)
+        if (ami_cfg_stricmp(value, (const char *)&ami_if_mode_names +
+                                   modes[i].offset) == 0)
+            return modes[i].type;
+    return -1;
+}
+
+static BOOL lookup_iptype(const char *value, AmiIpType *out)
+{
+    int type = lookup_ipmode(value, ami_iptype_names,
+                            sizeof(ami_iptype_names) / sizeof(ami_iptype_names[0]));
+    if (type < 0)
+        return FALSE;
+    *out = (AmiIpType)type;
+    return TRUE;
+}
+
+#ifdef AMINETXDUO_IPV6
 static BOOL lookup_ip6type(const char *value, AmiIp6Type *out)
 {
-    const struct Ip6TypeName *n;
-
-    for (n = ami_ip6type_names; n->name != NULL; n++)
-    {
-        if (ami_cfg_stricmp(value, n->name) == 0)
-        {
-            *out = n->type;
-            return TRUE;
-        }
-    }
-
-    return FALSE;
+    int type = lookup_ipmode(value, ami_ip6type_names,
+                            sizeof(ami_ip6type_names) / sizeof(ami_ip6type_names[0]));
+    if (type < 0)
+        return FALSE;
+    *out = (AmiIp6Type)type;
+    return TRUE;
 }
-
 #endif /* AMINETXDUO_IPV6 */
-
 
 #ifdef AMINETXDUO_IPV6
 /*
@@ -647,22 +688,6 @@ static BOOL cfg_zone_ok(const AmiIfConfig *out, const char *key,
 }
 #endif
 
-
-static BOOL lookup_iptype(const char *value, AmiIpType *out)
-{
-    const struct IpTypeName *n;
-
-    for (n = ami_iptype_names; n->name != NULL; n++)
-    {
-        if (ami_cfg_stricmp(value, n->name) == 0)
-        {
-            *out = n->type;
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
 
 LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 {
