@@ -521,3 +521,50 @@ fields exist; target/profile-specific layout goldens and full replacement link
 checks remain to be added. No complete backend or size-saving claim exists.
 
 See [the research plan](../../docs/plans/exec-threadx-compat.md).
+
+## Spike 6: IP event wait and explicit application timer clock
+
+The research bridge now links unchanged pinned ThreadX event get/set/cleanup and
+application timer create/activate/change/delete bodies. Compiler-only symbol
+renaming lets wrappers check the supported call boundary before these bodies
+publish state. Event creation remains a bounded bridge service; event deletion,
+notification callbacks and interrupt-driven list search are not implemented.
+Actual event get returns the upstream current-flags snapshot, including bits
+outside the requested mask. Multiple clear waiters see the same set snapshot.
+Timeout and generic wait-abort use actual cleanup; the receive-specific abort
+policy falls through for event waits.
+
+`anx_tx_timer_tick` advances only created application timers, one tick per call
+from an outer marked task timer boundary. It never advances private thread wait
+IO/deadlines. The flat internal active list replaces the timer wheel, so public
+deactivation preserves the actual remaining countdown without wheel arithmetic.
+Expiry installs periodic reload before invoking the callback. Callbacks may set
+events and deactivate timers, including themselves or another due timer. Create,
+activate, change, delete and nested ticks during dispatch fail closed; storage
+must remain retained for the full dispatch boundary. Created-list order is a
+research dispatch policy, not a ThreadX callback-order conformance claim.
+
+The native driver waits through its existing private Exec/timer.device adapter
+outside the boundary, then dispatches one tick. There is no independent common
+timer task, elapsed-time catch-up or scheduling guarantee. This explicit clock
+proves the callback/event seam, not production timekeeping or a complete backend.
+The existing ThreadX time clock wraps as an unsigned ULONG; host ULONG is 64-bit,
+while the m68k build uses its real 32-bit ABI.
+
+The host fixture uses real concurrent callers and the actual NetX
+`_nx_ip_periodic_timer_entry` callback. It exercises the IP helper's mutex
+release/event wait/mutex acquire ordering, without claiming to run the entire
+`_nx_ip_thread_entry` loop. Ten event schedules cover immediate AND/clear,
+preemption-disabled rejection, arrival, real finite timeout, abort, stale cleanup,
+expiry/set order, two clear waiters, a retained unmatched AND waiter, and head
+abort with tail delivery. Three application timer scenarios cover periodic event
+wakeup/coalescing, countdown-preserving deactivate/reactivate, ignored active
+change, inactive change, one-shot/null callback, self/other cancellation, active
+delete and clock wrap. Four negative probes verify unsupported nested/timer
+blocking, tick context and callback deletion fail before waiter/lifecycle mutation.
+Host and native execution/review results will be recorded against exact commits.
+
+Packet pool/public receive ownership, the full IP helper and original-backend
+comparison remain the next integration slice. Thread creation, delayed suspend,
+foreign Exec IO, common timer lifetime/drain and replacement-library linking and
+size measurement remain open. Vendor and shipping build inputs are unchanged.

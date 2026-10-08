@@ -54,6 +54,11 @@ UINT anx_tx_original_wait_abort(TX_THREAD *);
 void anx_tx_context_begin(AnxTxContext *, TX_THREAD *, ULONG system_state);
 void anx_tx_context_end(AnxTxContext *);
 int anx_tx_expire(TX_THREAD *, uint32_t token); /* marked timer context required */
+/* One explicit application-clock tick from an outer marked task timer context.
+ * Native driver must wait outside the boundary. Does not tick private waits.
+ * Callback storage retained throughout dispatch; only event set/deactivation
+ * supported inside callbacks. No automatic timer task or catch-up policy. */
+void anx_tx_timer_tick(void);
 UINT anx_tx_host_disable(void);
 void anx_tx_host_restore(UINT);
 /* Deterministic host schedule seam, invoked after a real mutex release.

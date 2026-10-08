@@ -19,6 +19,10 @@ static TX_TIMER_INTERNAL *timers;
 static unsigned contexts;
 static AnxTxContext *current_frame;
 static unsigned resume_hook_depth;
+TX_TIMER *_tx_timer_created_ptr;
+ULONG _tx_timer_created_count;
+volatile ULONG _tx_timer_system_clock;
+static unsigned timer_dispatch;
 
 static void need(int condition, const char *message)
 {
@@ -55,7 +59,8 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     /* Reinitialization is allowed only after every owner has detached. */
     if (platform)
         need(!threads && !timers && !contexts && !current_frame &&
-             !_tx_thread_preempt_disable && !resume_hook_depth, "reinitialize active domain");
+             !_tx_thread_preempt_disable && !resume_hook_depth && !_tx_timer_created_count &&
+             !timer_dispatch, "reinitialize active domain");
     platform = p;
     threads = 0;
     timers = 0;
@@ -66,6 +71,8 @@ void anx_tx_runtime_init(const AnxTxPlatform *p)
     _tx_thread_preempt_disable = 0;
     anx_tx_after_mutex_put = 0;
     resume_hook_depth=0;
+    _tx_timer_created_ptr=TX_NULL; _tx_timer_created_count=0;
+    _tx_timer_system_clock=0; timer_dispatch=0;
 }
 
 int anx_tx_attach(AnxTxThread *t, TX_THREAD *thread, AnxWait *wait, uintptr_t owner)
@@ -205,7 +212,8 @@ TX_THREAD *_tx_thread_identify(void)
 
 /* A backend-owned active timer list, using the real internal fields. Private
  * wait IO provides the deadline; cancellation wakes it and park reaps the IO.
- * External application TX_TIMER objects are not implemented by this spike. */
+ * Application timers share the protected list but are driven only by explicit
+ * anx_tx_timer_tick calls; it never advances thread private deadlines. */
 VOID _tx_timer_system_activate(TX_TIMER_INTERNAL *timer)
 {
     need(!timer->tx_timer_internal_list_head, "timer already active");
@@ -500,13 +508,130 @@ UINT _tx_event_flags_create(TX_EVENT_FLAGS_GROUP *g, CHAR *name)
     return TX_SUCCESS;
 }
 
+/* Compile unchanged vendor bodies under research-only names. Wrappers reject
+ * unsupported contexts before a vendor body publishes a suspension. */
+UINT anx_tx_original_event_flags_get(TX_EVENT_FLAGS_GROUP *, ULONG, UINT, ULONG *, ULONG);
+UINT anx_tx_original_event_flags_set(TX_EVENT_FLAGS_GROUP *, ULONG, UINT);
+UINT anx_tx_original_timer_create(TX_TIMER *, CHAR *, VOID (*)(ULONG), ULONG, ULONG, ULONG, UINT);
+UINT anx_tx_original_timer_activate(TX_TIMER *);
+UINT anx_tx_original_timer_change(TX_TIMER *, ULONG, ULONG);
+UINT anx_tx_original_timer_delete(TX_TIMER *);
+
+UINT _tx_event_flags_get(TX_EVENT_FLAGS_GROUP *g, ULONG flags, UINT option,
+                        ULONG *actual, ULONG wait)
+{
+    TX_THREAD *thread;
+    need_context();
+    if (!g || g->tx_event_flags_group_id!=TX_EVENT_FLAGS_ID) return TX_GROUP_ERROR;
+    if (!actual) return TX_PTR_ERROR;
+    if (option>TX_AND_CLEAR) return TX_OPTION_ERROR;
+    if (wait!=TX_NO_WAIT) {
+        thread=_tx_thread_identify();
+        need(thread && contexts==1 && !resume_hook_depth,
+             "unsupported event blocking context");
+        need(thread->tx_thread_suspension_sequence!=(ULONG)-1,"event suspension sequence exhausted");
+        need(g->tx_event_flags_group_suspended_count!=(UINT)-1,"event waiter count overflow");
+    }
+    return anx_tx_original_event_flags_get(g,flags,option,actual,wait);
+}
+
 UINT _tx_event_flags_set(TX_EVENT_FLAGS_GROUP *g, ULONG flags, UINT option)
 {
     need_context();
-    if (g->tx_event_flags_group_id!=TX_EVENT_FLAGS_ID) return TX_GROUP_ERROR;
+    if (!g || g->tx_event_flags_group_id!=TX_EVENT_FLAGS_ID) return TX_GROUP_ERROR;
     if (option!=TX_OR && option!=TX_AND) return TX_OPTION_ERROR;
-    need(!g->tx_event_flags_group_suspended_count,"event waiters not implemented");
-    if (option==TX_OR) g->tx_event_flags_group_current|=flags;
-    else g->tx_event_flags_group_current&=flags;
+    /* Notification callbacks may not park while raw set owns its search state. */
+#ifndef TX_DISABLE_NOTIFY_CALLBACKS
+    need(!g->tx_event_flags_group_set_notify,"event notification callback not implemented");
+#endif
+    return anx_tx_original_event_flags_set(g,flags,option);
+}
+
+static void timer_lifecycle(void)
+{
+    need_context();
+    need(!timer_dispatch,"timer lifecycle inside callback not implemented");
+}
+UINT _tx_timer_create(TX_TIMER *t, CHAR *name, VOID (*callback)(ULONG),
+                      ULONG input, ULONG initial, ULONG reload, UINT activate)
+{
+    TX_TIMER *other;
+    timer_lifecycle();
+    if (!t) return TX_TIMER_ERROR;
+    if (!initial || (activate!=TX_AUTO_ACTIVATE && activate!=TX_NO_ACTIVATE)) return TX_TICK_ERROR;
+    other=_tx_timer_created_ptr;
+    for (ULONG i=0;i<_tx_timer_created_count;i++,other=other->tx_timer_created_next)
+        need(other!=t,"duplicate timer creation");
+    need(_tx_timer_created_count!=(ULONG)-1,"timer count overflow");
+    return anx_tx_original_timer_create(t,name,callback,input,initial,reload,activate);
+}
+UINT _tx_timer_activate(TX_TIMER *t)
+{
+    timer_lifecycle();
+    if (!t || t->tx_timer_id!=TX_TIMER_ID) return TX_TIMER_ERROR;
+    return anx_tx_original_timer_activate(t);
+}
+UINT _tx_timer_change(TX_TIMER *t, ULONG initial, ULONG reload)
+{
+    timer_lifecycle();
+    if (!t || t->tx_timer_id!=TX_TIMER_ID) return TX_TIMER_ERROR;
+    if (!initial) return TX_TICK_ERROR;
+    return anx_tx_original_timer_change(t,initial,reload);
+}
+UINT _tx_timer_delete(TX_TIMER *t)
+{
+    timer_lifecycle();
+    if (!t || t->tx_timer_id!=TX_TIMER_ID) return TX_TIMER_ERROR;
+    return anx_tx_original_timer_delete(t);
+}
+UINT _tx_timer_deactivate(TX_TIMER *t)
+{
+    ULONG remaining;
+    need_context();
+    if (!t || t->tx_timer_id!=TX_TIMER_ID) return TX_TIMER_ERROR;
+    /* Our flat active list has no wheel-position correction. Preserve ticks
+     * remaining for later activation, including reload installed before callback. */
+    remaining=t->tx_timer_internal.tx_timer_internal_remaining_ticks;
+    if (t->tx_timer_internal.tx_timer_internal_list_head && !remaining)
+        remaining=t->tx_timer_internal.tx_timer_internal_re_initialize_ticks;
+    _tx_timer_system_deactivate(&t->tx_timer_internal);
+    t->tx_timer_internal.tx_timer_internal_remaining_ticks=remaining;
     return TX_SUCCESS;
+}
+ULONG _tx_time_get(void)
+{
+    need_context(); return _tx_timer_system_clock;
+}
+void anx_tx_timer_tick(void)
+{
+    TX_TIMER *t;
+    need_context();
+    need(_tx_thread_system_state && contexts==1 && !_tx_thread_current_ptr &&
+         !_tx_thread_preempt_disable && !timer_dispatch,"unsupported timer tick context");
+    /* No storage may be freed or created/deleted/reactivated during dispatch.
+     * Callbacks may set events and deactivate timers, including themselves. */
+    timer_dispatch=1;
+    _tx_timer_system_clock++;
+    t=_tx_timer_created_ptr;
+    for (ULONG i=0;i<_tx_timer_created_count;i++,t=t->tx_timer_created_next) {
+        TX_TIMER_INTERNAL *internal=&t->tx_timer_internal;
+        if (internal->tx_timer_internal_list_head) {
+            need(internal->tx_timer_internal_remaining_ticks>0,"zero active application timer");
+            internal->tx_timer_internal_remaining_ticks--;
+        }
+    }
+    t=_tx_timer_created_ptr;
+    for (ULONG i=0;i<_tx_timer_created_count;i++,t=t->tx_timer_created_next) {
+        TX_TIMER_INTERNAL *internal=&t->tx_timer_internal;
+        if (internal->tx_timer_internal_list_head && !internal->tx_timer_internal_remaining_ticks) {
+            VOID (*callback)(ULONG)=internal->tx_timer_internal_timeout_function;
+            ULONG input=internal->tx_timer_internal_timeout_param;
+            _tx_timer_system_deactivate(internal);
+            internal->tx_timer_internal_remaining_ticks=internal->tx_timer_internal_re_initialize_ticks;
+            if (internal->tx_timer_internal_remaining_ticks) _tx_timer_system_activate(internal);
+            if (callback) callback(input);
+            need(!_tx_thread_preempt_disable,"timer callback retained preemption counter");
+        }
+    }
+    timer_dispatch=0;
 }

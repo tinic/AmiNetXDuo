@@ -17,7 +17,8 @@ enum { JOB_NONE, JOB_ARRIVAL, JOB_TIMEOUT, JOB_CLOSE, JOB_ABORT, JOB_EXPIRE_ARRI
        JOB_UDP_ARRIVAL, JOB_UDP_TIMEOUT, JOB_UDP_ABORT, JOB_SLEEP,
        JOB_RX_ABORT_PACKET, JOB_RX_ABORT_PACKET_LOCKED,
        JOB_MUTEX_HANDOFF, JOB_MUTEX_TIMEOUT, JOB_MUTEX_ABORT,
-       JOB_IP_DEFERRED_ABORT, JOB_IP_ARRIVAL_WINS };
+       JOB_IP_DEFERRED_ABORT, JOB_IP_ARRIVAL_WINS,
+       JOB_EVENT_ARRIVAL, JOB_EVENT_TIMEOUT, JOB_EVENT_ABORT, JOB_EVENT_PERIODIC };
 static TX_THREAD owner_thread,worker_thread,abort_thread;
 static AnxTxThread owner_bridge,worker_bridge,abort_bridge;
 static AnxExecWait owner_wait,worker_wait,abort_wait;
@@ -25,6 +26,8 @@ static NX_IP ip;
 static NX_TCP_SOCKET socket;
 static NX_UDP_SOCKET udp;
 static TX_MUTEX mutex;
+static TX_TIMER periodic;
+static unsigned periodic_ticks;
 static NX_PACKET packet,*received;
 static ULONG packet_data[8];
 static struct Task *parent,*worker,*abort_task;
@@ -105,7 +108,7 @@ static void abort_entry(void)
         CHECK(token && anx_exec_wait_run(&abort_wait,token)==ANX_WAIT_TIMEOUT);
         Forbid(); next=job; step=phase; stopping=stop; Permit();
         if (stopping) break;
-        if (next>=JOB_MUTEX_HANDOFF) {
+        if (next>=JOB_MUTEX_HANDOFF && next<=JOB_IP_ARRIVAL_WINS) {
             if (step!=1 || (next!=JOB_MUTEX_ABORT && next<JOB_IP_DEFERRED_ABORT)) continue;
             AnxTxContext frame;
             anx_tx_context_begin(&frame,&abort_thread,0);
@@ -119,7 +122,7 @@ static void abort_entry(void)
             anx_tx_context_end(&frame);
             continue;
         }
-        if ((next!=JOB_LATE_ABORT && next<JOB_RX_ABORT_PACKET) || step!=1) continue;
+        if ((next!=JOB_LATE_ABORT && (next<JOB_RX_ABORT_PACKET || next>JOB_RX_ABORT_PACKET_LOCKED)) || step!=1) continue;
         AnxTxContext frame;
         anx_tx_context_begin(&frame,&abort_thread,0);
         CHECK(_tx_thread_identify()==&abort_thread);
@@ -174,6 +177,31 @@ static void worker_entry(void)
                 CHECK(_tx_mutex_put(&mutex)==TX_SUCCESS); phase=3; job=JOB_NONE;
             }
             anx_tx_context_end(&frame); continue;
+        }
+        if (next>=JOB_EVENT_ARRIVAL) {
+            if (next==JOB_EVENT_TIMEOUT) {
+                AnxTxContext frame;
+                anx_tx_context_begin(&frame,&worker_thread,0);
+                if (owner_thread.tx_thread_state==TX_READY) job=JOB_NONE;
+                anx_tx_context_end(&frame);
+            } else if (next==JOB_EVENT_PERIODIC) {
+                AnxTxContext timer;
+                anx_tx_context_begin(&timer,TX_NULL,1);
+                anx_tx_timer_tick(); periodic_ticks++;
+                if (periodic_ticks==4) job=JOB_NONE;
+                anx_tx_context_end(&timer);
+            } else {
+                AnxTxContext frame;
+                anx_tx_context_begin(&frame,&worker_thread,0);
+                if (owner_thread.tx_thread_state==TX_EVENT_FLAG) {
+                    if (next==JOB_EVENT_ABORT)
+                        CHECK(_tx_thread_wait_abort(&owner_thread)==TX_SUCCESS);
+                    else CHECK(_tx_event_flags_set(&ip.nx_ip_events,5,TX_OR)==TX_SUCCESS);
+                    job=JOB_NONE;
+                }
+                anx_tx_context_end(&frame);
+            }
+            continue;
         }
         if (next>=JOB_IP_DEFERRED_ABORT) {
             AnxTxContext frame;
@@ -287,9 +315,37 @@ int main(void)
     CHECK(abort_task!=0);
     while (!worker_ready || !abort_ready) Wait(ack);
     say("research_tx_bridge=WORKER_READY\n");
-    for (scenario=JOB_ARRIVAL;scenario<=JOB_IP_ARRIVAL_WINS;scenario++) {
+    for (scenario=JOB_ARRIVAL;scenario<=JOB_EVENT_PERIODIC;scenario++) {
         unsigned before=owner_bridge.resumes;
         anx_tx_context_begin(&frame,&owner_thread,0);
+        if (scenario>=JOB_EVENT_ARRIVAL) {
+            ULONG events;
+            ip.nx_ip_events.tx_event_flags_group_current=0;
+            job=scenario; periodic_ticks=0;
+            if (scenario==JOB_EVENT_PERIODIC) {
+                CHECK(_tx_timer_create(&periodic,(CHAR *)"NetX periodic",_nx_ip_periodic_timer_entry,
+                    (ULONG)(uintptr_t)&ip,2,2,TX_AUTO_ACTIVATE)==TX_SUCCESS);
+                for (unsigned i=0;i<2;i++) {
+                    CHECK(_tx_event_flags_get(&ip.nx_ip_events,NX_IP_ALL_EVENTS,TX_OR_CLEAR,&events,TX_WAIT_FOREVER)==TX_SUCCESS);
+                    CHECK(events==NX_IP_PERIODIC_EVENT);
+                }
+                CHECK(periodic_ticks==4 && _tx_time_get()==4);
+                CHECK(_tx_timer_deactivate(&periodic)==TX_SUCCESS && _tx_timer_delete(&periodic)==TX_SUCCESS);
+                CHECK(!periodic.tx_timer_internal.tx_timer_internal_list_head && !periodic.tx_timer_id);
+            } else {
+                UINT result=_tx_event_flags_get(&ip.nx_ip_events,1,TX_OR_CLEAR,&events,
+                    scenario==JOB_EVENT_TIMEOUT ? 2 : TX_WAIT_FOREVER);
+                CHECK(result==(scenario==JOB_EVENT_TIMEOUT ? TX_NO_EVENTS : scenario==JOB_EVENT_ABORT ? TX_WAIT_ABORTED : TX_SUCCESS));
+                if (scenario==JOB_EVENT_ARRIVAL) CHECK(events==5 && ip.nx_ip_events.tx_event_flags_group_current==4);
+            }
+            CHECK(!ip.nx_ip_events.tx_event_flags_group_suspension_list && !ip.nx_ip_events.tx_event_flags_group_suspended_count);
+            CHECK(!owner_thread.tx_thread_suspend_cleanup && owner_thread.tx_thread_state==TX_READY);
+            CHECK(owner_bridge.resumes==before+(scenario==JOB_EVENT_PERIODIC ? 2 : 1));
+            if (scenario==JOB_EVENT_TIMEOUT) job=JOB_NONE;
+            CHECK(!job);
+            anx_tx_context_end(&frame);
+            passed++; say("research_tx_bridge=CASE_PASS\n"); continue;
+        }
         if (scenario>=JOB_MUTEX_HANDOFF && scenario<=JOB_MUTEX_ABORT) {
             phase=0; job=scenario;
             anx_tx_context_end(&frame); await_phase(1);
@@ -390,6 +446,6 @@ int main(void)
     CHECK(anx_exec_wait_close(&owner_wait));
     FreeSignal(bit);
     CHECK(!_tx_thread_current_ptr && !_tx_thread_system_state && !_tx_thread_preempt_disable);
-    say(passed==17 ? "research_tx_bridge=PASS checks=17/17 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
-    return passed==17 ? 0 : 20;
+    say(passed==21 ? "research_tx_bridge=PASS checks=21/21 workers_reaped=2\n" : "research_tx_bridge=FAIL\n");
+    return passed==21 ? 0 : 20;
 }

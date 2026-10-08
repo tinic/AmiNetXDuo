@@ -16,6 +16,14 @@ add_library(research_tx_bridge STATIC tx_bridge.c netx_resume.c
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_sleep.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
     "${ANX_ROOT}/third_party/threadx/common/src/tx_mutex_cleanup.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_event_flags_get.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_event_flags_set.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_event_flags_cleanup.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_timer_create.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_timer_activate.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_timer_change.c"
+    "${ANX_ROOT}/third_party/threadx/common/src/tx_timer_delete.c"
+    "${ANX_ROOT}/third_party/netxduo/common/src/nx_ip_periodic_timer_entry.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_socket_thread_suspend.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_socket_thread_resume.c"
     "${ANX_ROOT}/third_party/netxduo/common/src/nx_tcp_receive_cleanup.c"
@@ -35,6 +43,10 @@ target_compile_definitions(research_tx_bridge PUBLIC TX_DISABLE_ERROR_CHECKING)
 target_compile_options(research_tx_bridge PRIVATE -Wall -Wextra -Werror)
 set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_thread_wait_abort.c"
     PROPERTIES COMPILE_DEFINITIONS "_tx_thread_wait_abort=anx_tx_original_wait_abort")
+foreach(service event_flags_get event_flags_set timer_create timer_activate timer_change timer_delete)
+    set_source_files_properties("${ANX_ROOT}/third_party/threadx/common/src/tx_${service}.c"
+        PROPERTIES COMPILE_DEFINITIONS "_tx_${service}=anx_tx_original_${service}")
+endforeach()
 if(CMAKE_CROSSCOMPILING)
     enable_language(ASM)
     add_library(research_exec_adapter STATIC exec_wait.c)
@@ -88,6 +100,15 @@ else()
     target_compile_options(research_mutex_bridge_model PRIVATE -Wall -Wextra -Werror)
     add_test(NAME research_mutex_bridge_model COMMAND research_mutex_bridge_model)
     set_tests_properties(research_mutex_bridge_model PROPERTIES TIMEOUT 15)
+    add_executable(research_event_timer_model test_event_timer.c)
+    target_link_libraries(research_event_timer_model PRIVATE research_tx_bridge Threads::Threads)
+    target_compile_options(research_event_timer_model PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME research_event_timer_model COMMAND research_event_timer_model)
+    set_tests_properties(research_event_timer_model PROPERTIES TIMEOUT 15)
+    foreach(guard nested-get timer-get tick-context callback-delete)
+        add_test(NAME research_event_timer_reject_${guard}
+            COMMAND research_event_timer_model --reject-${guard})
+    endforeach()
     add_executable(research_netx_resume_model test_netx_resume.c)
     target_link_libraries(research_netx_resume_model PRIVATE research_tx_bridge)
     target_compile_options(research_netx_resume_model PRIVATE -Wall -Wextra -Werror)
