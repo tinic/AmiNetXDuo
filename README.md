@@ -43,78 +43,26 @@ The archive carries three stacks. The installer asks which one to put on.
 | Minimal | IPv6, `.local` lookups, the packet filter, HTTPS, IPv4 multicast, the ARexx host, `TCP:` | 272 KB |
 | Micro | all of that, plus `getaddrinfo`/`getnameinfo`, ancillary data, out-of-band TCP and less-used administration calls; carries one interface and no route or address-allocation calls. DHCP, the classic resolver and raw sockets work | 243 KB |
 
-The installer offers these cards by name: A2065, Ariadne, Ariadne II,
-AmigaNet, LAN Rover, X-Surf, X-Surf 100, PCMCIA (`cnet.device`,
-`etherlink3.device` for the 3Com 3C589, or `prism2.device`), ZZ9000
-(`ZZ9000Net.device`) and `uaenet.device` for emulators. Any other driver name
-can be typed in.
+### Network cards
 
-`anxnet.device`, the classic-card SANA-II driver AmiNetXDuo builds itself,
-drives the A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, X-Surf 100,
-X-Surf 500, NE2000-compatible PCMCIA cards, 3C589 and the two supported
-Megahertz/3Com LAN+modem cards. `anxgenet.device`, the same driver core with only
-the Raspberry Pi 4/CM4's own Ethernet in it, drives that port behind a
-PiStorm32 running Emu68 (`DEVICE=anxgenet.device`, `UNIT=0`). `anxzz9000.device`
-is the same core for the MNT ZZ9000's Ethernet (`DEVICE=anxzz9000.device`,
-`UNIT=0`): one copy from the card's window into the reader's buffer with the
-checksum summed on the way, INT6 served without a helper task, and on the
-firmware fork at `github.com/tinic/zz9000-firmware` (branch `aminetxduo`) a
-transmit that does not stall the bus; an A3000/030 receives 8.0 Mbit/s against
-3.1 with `ZZ9000Net.device` 2.2 (`docs/plans/zz9000-ethernet.md` has the
-measurements and what the fork changes in the card's firmware). It is not in
-the release archive yet (the A3000 still freezes under a long receive on it;
-build with `-DAMINETXDUO_ZZ9000=ON` to ship it). The installer offers to put
-the supplied drivers in `DEVS:Networks`; on Emu68 it reads the device tree and
-creates definitions for the supported Ethernet and Wi-Fi devices it finds, and
-on a ZZ9000 without MNT's driver it names `anxzz9000.device` when the archive
-carries it.
-An interface file selects one with `DEVICE=`. `anxgenet.device` needs [Emu68](https://github.com/michalsc/Emu68/releases)
-1.1 alpha.1 or newer: that is the
-first release line that maps GENET's `/scb` range into the Amiga address space.
-Emu68 1.0.3 is not supported.
+Any SANA-II driver works. The archive also brings its own:
 
-`anxwifipi.device` is the same machine's Wi-Fi: the Pi 4's own Broadcom 43455
-on SDIO, behind a PiStorm32 running Emu68 (`DEVICE=anxwifipi.device`,
-`UNIT=0`). It is the MPL-2.0 fork of Michal Schulz's WiFiPi.device kept at
-`github.com/tinic/WiFiPi.device` (branch `gcc16`, submodule
-`third_party/wifipi`), built here with the tree's toolchain, with the
-single-copy receive path above and counters behind `S2_GETSPECIALSTATS`. It
-needs the Wi-Fi firmware Emu68 installs in `DEVS:Firmware`, and a supplicant
-to join a network -- WirelessManager from Aminet's [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2) reads
-`ENVARC:Sys/Wireless.prefs` and associates through the SANA-II wireless
-commands; the interface file names the device as any other. On an A1200 +
-PiStorm32 Lite on a 5 GHz network at -69 dBm: 34-36 Mbit/s in, 52-61 out,
-6 ms round trips.
+| Driver | Cards |
+|---|---|
+| `anxnet.device` | A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, X-Surf 100, X-Surf 500; PCMCIA: NE2000-compatible, D-Link DL10019/DL10022 (DFE-670TXD), 3Com 3C589, Megahertz/3Com LAN+modem |
+| `anxgenet.device` | Raspberry Pi 4/CM4 Ethernet, PiStorm32 with [Emu68](https://github.com/michalsc/Emu68/releases) 1.1 alpha.1 or newer |
+| `anxwifipi.device` | Raspberry Pi 4 Wi-Fi, PiStorm32 with Emu68 (experimental) |
 
-**`anxwifipi.device` is experimental.** It needs nothing beyond Emu68: it
-polls. The card's interrupt line is shared with the SD card host, and the
-gic400.library in the Emu68 ROM takes one server per line, so the driver's
-offer of an interrupt server is refused and it runs without one: a task at
-the lowest priority watches the card's status register while frames flow
-(it takes whatever CPU is idle during a transfer, and a CPU meter shows it),
-and a timer tick looks otherwise -- 0.4% of the machine idle, up to 20 ms on
-the first frame of an exchange after a quiet second. An interrupt path would
-need a gic400.library that allows shared lines
-(`github.com/tinic/emu68-gic400-library`, branch `shared-lines`) built into
-the Emu68 ROM; a copy in `LIBS:` changes nothing. `NetDevStats
-anxwifipi.device` shows "card interrupt line (GIC)": 4 means refused and
-polling. WirelessManager 1.3 (the Emu68 image) and 1.5 (`prism2v2`) both
-join. One Wi-Fi driver per boot: `wifipi.device` and `anxwifipi.device`
-drive the same chip, and switching between them without a reboot hangs
-WirelessManager. Association, roaming and power-save behaviour have been
-exercised on one access point.
+The installer finds the card and writes the interface definition; on Emu68 it
+finds the Pi's Ethernet and Wi-Fi itself.
 
-**Receive offload (GRO).** The stack verifies and matches contiguous IPv4 and
-IPv6 TCP segments after an ordinary SANA-II read, then hands TCP one segment
-where the wire carried up to sixteen. A driver's negotiated VERIFIED checksum
-result avoids the verification walk, but is not required: GRO is the same
-stack-side path for every SANA-II driver. A 1 Gbit/s GENET behind a PiStorm32
-Lite receives 900 Mbit/s this way and sends 580 (iperf; 142 and 65 before the
-receive and transmit offloads). Those GENET figures use the negotiated
-AmiNetXDuo extension path. The optional direct-placement, checksum, held-ring
-handoff and ring-capacity extensions are published in
-`Developer/include/aminetxduo/anxs2ext.h`; they are negotiated additions to
-SANA-II, not a replacement network API.
+The Wi-Fi driver needs the firmware Emu68 installs in `DEVS:Firmware`, and
+WirelessManager (Aminet [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2))
+to join a network. Use it or `wifipi.device`, not both in one boot.
+
+Fast cards get faster TCP receive with every driver: the stack merges
+consecutive segments before TCP sees them. Driver authors can opt into a few
+SANA-II extensions for more (`Developer/include/aminetxduo/anxs2ext.h`).
 
 ### Measured on
 
@@ -130,7 +78,7 @@ machine not in this table is not known to fail; it is not known.
 | A3000, 68030/25 | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 3.8 in / 3.3-3.7 out Mbit/s |
 | A3000, 68060/50 (TF4060) | 3.9 | X-Surf 100 (Zorro III), `anxnet.device` | 22.5 in / 11.8 out Mbit/s with flow control on the switch port, 18.9 in / 11.7 out with it off (31fff37c, 2026-10-05) |
 | A3000, 68030/25 | 3.9 | ZZ9000, `ZZ9000Net.device` 2.2 | 3.6 in / 3.5-3.7 out Mbit/s |
-| A3000, 68060/50 (TF4060) | 3.2 | ZZ9000, `anxzz9000.device`, firmware fork | 22.2 in / 13.0 out Mbit/s (iperf, 2026-10-06) |
+| A3000, 68060/50 (TF4060) | 3.2 | ZZ9000, `anxzz9000.device` (not in the archive), firmware fork | 22.2 in / 13.0 out Mbit/s (iperf, 2026-10-06) |
 | Amiberry, A1200 (68020) | 3.1 | A2065, `anxnet.device` | 4.8 in / 4.4 out Mbit/s |
 | Amiberry, A3000 (68030) | 3.1 | X-Surf 100 (Zorro III), `anxnet.device` | 30 in / 31 out Mbit/s |
 | Amiberry, A600 (68000) | 2.05 | NE2000 PCMCIA and `cnet.device` | boots, DHCP, transfers (CI) |
