@@ -260,9 +260,28 @@ operation epoch detects a new suspension without treating cleanup-grace rearm
 as a different NetX operation. Vendor and production sources remain unchanged;
 only the standalone research compiler renames the raw abort body symbol.
 
-Host CTest PASS 14/14 includes eight genuinely concurrent mutex schedules and
+Host CTest PASS 15/15 includes eight genuinely concurrent mutex schedules and
 five contended NetX abort schedules plus retained models/guards. The expanded
-17-case native smoke compiles. Exact independent review and actual emulator
-verdict are pending. Priorities/inheritance, mutex deletion/owner termination,
+17-case native smoke passed at exact `9cec1234d`, exit 0 after 15 seconds,
+workers_reaped=2, one boardless A1200/KS3.1 run, stacks8192, binary `8b1a45f7`
+(55,012 bytes). Host-only `0c48a9bb9` verifies policy fallthrough for actual
+UDP/sleep/mutex waits. Control compilation confirms unchanged raw abort .text
+and relocations after symbol rename. deepseek-v4's exact `9cec1234d` + `0c48a9bb9` + `56878cb89` review is complete:
+correct/no blocker in bounded scope; no full backend/scheduler/lifetime verdict. Priorities/inheritance, mutex deletion/owner termination,
 safe socket storage lifetime, full wire/event/backend linking and size savings
 remain open.
+
+The small foreign-release guard `56878cb89` rejects the unsupported upstream
+thread-release retry path before mutation. A host negative case verifies actual
+helper rejection with retained ownership; this is not successful termination.
+The same 17 native cases pass at that commit, exit 0 after 15 seconds, binary
+`dc73e1c5` (55,080 bytes), separate exact evidence retained and staging removed.
+
+A separate exact-56878cb89 read-only review freshly verified host 15/15 and
+identified integration priorities, now recorded in the research README: real
+DHCPv6 delayed-suspend/abort/threshold stop-start, foreign Exec IO boundaries,
+two simultaneous abort pins, actual NX_IP event/periodic timer/packet pool slice
+with original-backend comparison, and resident/signal/priority-load economics.
+The saved full manifest's wait-abort consumer is DHCPv6, not DTLS; the factual
+README correction is applied. These are future obligations, not claims that the
+unsupported APIs are already exposed. Owned builds and native staging are cleaned.

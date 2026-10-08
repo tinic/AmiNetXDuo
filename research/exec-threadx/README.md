@@ -128,8 +128,9 @@ standalone primitive or independently reviewed as an implemented backend.
   The adapter's task-level `Forbid` is not interrupt protection and cannot stand
   in for ThreadX scheduling/preemption semantics. Inspect the existing port's
   context bridge and adoption logic before replacing it.
-- Full compiled-source coverage includes `_tx_thread_wait_abort` through DTLS
-  receive; micro coverage does not. Compiled coverage includes modules that may
+- The saved full compiled-source manifest records `_tx_thread_wait_abort` in
+  `addons/dhcp/nxd_dhcpv6_client.c`; micro coverage does not. DTLS receive is a
+  source-level example, not the consumer recorded by this manifest. Compiled coverage includes modules that may
   not survive final linking. An absent micro dependency cannot retire a full
   profile obligation.
 
@@ -400,7 +401,10 @@ resuming the head waiter; NO_WAIT contention still returns TX_NOT_AVAILABLE.
 Detach rejects owned mutexes. Priority inheritance/priority queues, mutex deletion
 and forced owner termination remain unsupported. The cleanup TU also defines
 `_tx_mutex_thread_release`, but link presence is not lifecycle conformance; it is
-not exercised or supported as a foreign-owner release path by this backend.
+not exercised or supported as a successful foreign-owner release path by this
+backend. Follow-up `56878cb89` rejects preemption-disabled foreign put before
+mutation, so an accidental thread-release call cannot spin on NOT_OWNED. Its
+host rejection invokes the real upstream helper and verifies retained ownership.
 
 Blocking get is allowed only in an outer registered normal-task boundary with
 preemption enabled. The existing suspend bridge drops that boundary before
@@ -443,14 +447,68 @@ Five NetX schedules cover contended abort winning, arrival winning, the receiver
 starting another receive (first waiting for the mutex), stable grace rearm and
 cancellation of the abort caller. Packet transfer is a decoded-payload fixture,
 not TCP wire/header/public receive coverage. Previous checks remain: host CTest
-PASS 14/14 includes those 13 concurrent schedules and the earlier guard/model
+PASS 15/15 includes those 13 concurrent schedules, the foreign-release rejection
+and the earlier guard/model
 coverage; rejection probes are not successful unsupported operations.
 
 The native smoke adds five cases to the prior twelve: mutex handoff, finite
 mutex timeout, mutex wait-abort, deferred receive abort after contended IP mutex
 acquisition and packet arrival while the abort caller waits. Three real Exec
-tasks retain/reap their resources. m68k compilation passes; actual emulator
-verdict and exact implementation review are pending at this checkpoint.
+tasks retain/reap their resources. Exact `9cec1234db175dab186de65c09c69d8dcf1c55b6`
+passed 17/17 native checks, workers_reaped=2, exit 0 after 15 seconds on one
+boardless A1200/KS3.1 r40.68 run, all stacks 8192. Binary SHA256
+`8b1a45f7094f3ff5ec952cd2f8dec93236294a6ef26667f0489d8f6b4bb32fe0`,
+55,012 bytes; same 90-second harness `300b22e8`. Actual stdout/exit/startup/hash
+is retained in `/Users/turo/ai/evidence/exec-threadx-spike5-native` and native
+staging is removed. Host-only `0c48a9bb9` additionally registers the abort policy
+in UDP/sleep/mutex fixtures to verify raw fallthrough; native inputs unchanged.
+A control compile without the raw abort symbol rename produced identical m68k
+.text (216 bytes) and relocation records; evidence is retained in
+`exec-threadx-spike5-raw-abort-identity.json`. Exact independent implementation
+review by deepseek-v4 covers exact `9cec1234d` + host `0c48a9bb9` + guard
+`56878cb89`: correct within bounded scope, no blocker. It confirms pin release,
+operation stability/re-wait rejection, FIFO handoff, nonblocking hooks, raw
+fallthrough and the targeted foreign-release guard. All callers must remain
+registered; normal blocking requires an outer boundary. Socket lifetime, full
+scheduler/adoption and broader dispatch integration remain open. The foreign-release guard `56878cb89` passed the same
+17 native cases, workers_reaped=2, exit 0 after 15 seconds on one same A1200/
+KS3.1/stacks run. Guard binary SHA256
+`dc73e1c5db8d1fc52fe1726d5ecf030e826844c4927e456cb9b6f461f3b8f689`,
+55,080 bytes; actual evidence is
+`/Users/turo/ai/evidence/exec-threadx-spike5-native-guard`, staging removed.
+Owned research/control-build outputs and both native staging runs are removed;
+small useful evidence remains under `/Users/turo/ai/evidence/exec-threadx-spike5*`.
+No replacement-library size saving is measured.
+
+## Integration priorities from the independent follow-up
+
+A separate read-only review of exact `56878cb89` freshly rebuilt the host suite
+(PASS 15/15), retained `exec-threadx-insights-56878cb89-host.txt`, and removed its
+own build. Its manifest correction above is verified against `contract-full.json`.
+These follow-ups are not bounded-spike failures or production approval:
+
+- Exercise the actual DHCPv6 stop/start consumer before enabling it. It combines
+  preemption thresholds, explicit suspension of an already waiting worker, wait
+  abort, UDP unbind and timer deactivation. Upstream delayed suspension keeps a
+  resumed wait explicitly SUSPENDED; this bridge currently makes it READY and
+  has no `tx_thread_suspend` service. Implement/prove the combination or reject
+  delayed suspension before exposing that consumer. Include abort/timeout/arrival
+  with explicit suspension pending and later explicit resume.
+- Add named identity/lifecycle tests for external Exec Wait/DoIO and callback
+  reentry. Existing SANA-II `ami_sana2_do_io` brackets DoIO with baton enter/leave;
+  dropping globals only in `_tx_thread_system_suspend` is insufficient for those
+  foreign waits. Measure the longest Forbid interval alongside throughput.
+- Document abort-policy contexts and lock order; exercise two abort callers
+  pinning one target, cancel one, and prove detach stays blocked until the last
+  pin is released. Target pins still do not retain socket/IP storage.
+- Build the next executable slice around the actual NX_IP helper event wait,
+  periodic timer and real receive/packet-pool ownership, then shutdown/restart.
+  Compare traces with the original backend and add a replacement-only link gate
+  that rejects accidentally linked ThreadX core implementations.
+- Measure resident memory, caller signal consumption, IO requests, tasks/stacks
+  and lower-priority wait expiry under sustained higher-priority producer load.
+  Each private Exec wait currently uses two signals and a timer IO request;
+  smoke executable growth is not replacement-library cost.
 
 ## Still open
 
