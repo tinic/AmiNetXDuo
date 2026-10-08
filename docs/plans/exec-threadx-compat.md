@@ -285,3 +285,28 @@ with original-backend comparison, and resident/signal/priority-load economics.
 The saved full manifest's wait-abort consumer is DHCPv6, not DTLS; the factual
 README correction is applied. These are future obligations, not claims that the
 unsupported APIs are already exposed. Owned builds and native staging are cleaned.
+
+
+## Spike 6 event/timer checkpoint
+
+The research branch now links unchanged pinned ThreadX event get/set/cleanup,
+with prepublication call-boundary guards, and actual application timer
+create/activate/change/delete bodies. A flat application countdown dispatches
+actual NetX periodic callbacks from an explicit marked task timer context,
+independently of private thread wait deadlines. Deactivation preserves remaining
+ticks. Event snapshots/clear, single/multiple waiters, timeout/abort and callback
+self/other cancellation are covered. Callback create/activate/change/delete and
+nested ticks fail closed; only event set and deactivation are supported.
+
+Exact a7d6196cb passes host 20/20 and expanded native 21/21, workers_reaped=2,
+exit 0 after 15s, one A1200/KS3.1 r40.68 run with 8192-byte parent/worker stacks,
+binary 008689e7 (60,880 bytes including fixtures/runtime). Actual stdout, startup,
+runner exit, binary hashes and native zero staging files remaining are retained separately.
+deepseek-v4's independent exact a7d6196cb review is complete: no blocker in
+bounded scope, all 18/18 parts read, no full backend GO. Owned local build/edit
+scripts and remote native staging are removed; small useful evidence retained. This is a fixture of IP helper boundary ordering plus the actual
+periodic callback, not the full helper loop. No automatic common timer task,
+elapsed-time catch-up, callback lifecycle/drain, full wire/packet ownership,
+replacement link or net code size savings are established. Production/vendor
+sources remain unchanged. Next: real packet pool/receive ownership and IP helper
+integration compared with the original backend; then lifecycle and economics.

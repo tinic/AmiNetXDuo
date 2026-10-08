@@ -562,7 +562,22 @@ wakeup/coalescing, countdown-preserving deactivate/reactivate, ignored active
 change, inactive change, one-shot/null callback, self/other cancellation, active
 delete and clock wrap. Four negative probes verify unsupported nested/timer
 blocking, tick context and callback deletion fail before waiter/lifecycle mutation.
-Host and native execution/review results will be recorded against exact commits.
+Host CTest PASS 20/20 at exact `a7d6196cb` includes the retained tests, the new
+concurrent event/timer model and four explicit rejection probes; those probes
+are successful guard rejections, not supported operations. The expanded native
+smoke passed 21/21 at that commit, workers_reaped=2, exit 0 after 15 seconds, on one
+boardless A1200/KS3.1 r40.68 run. Parent and both workers have 8192-byte stacks;
+harness `tools/amiberry-run.sh -m A1200 -t 90` at 300b22e8. Binary `008689e7`,
+60,880 bytes including all fixtures/runtime, is not replacement-library cost.
+Native evidence is retained in `/Users/turo/ai/evidence/exec-threadx-spike6-native`;
+owner claudecode confirmed zero staging files remain. deepseek-v4's independent exact `a7d6196cb` implementation review is complete:
+no blocker in the bounded scope, with all 18/18 parts read. The reviewer did not
+run tests; host/native execution is separately attributed above. The bridge owns
+application-timer globals; linking full ThreadX initialization would duplicate
+those symbols and must be rejected by the future replacement-only link gate.
+Flat O(N) dispatch cost, common clock catch-up, the real IP helper boundaries and
+object lifetime remain unmeasured or unsupported. Owned local build/edit scripts
+and native staging are removed; useful logs, hashes, binary and map are retained.
 
 Packet pool/public receive ownership, the full IP helper and original-backend
 comparison remain the next integration slice. Thread creation, delayed suspend,
