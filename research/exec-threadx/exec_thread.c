@@ -33,7 +33,8 @@ static int authorized(AnxExecThread *r)
 static int lifecycle_caller(AnxExecThread *r)
 {
     return r->managed ? !_tx_thread_system_state && _tx_thread_identify() &&
-        _tx_thread_current_ptr!=r->thread && FindTask(0)!=&r->task : authorized(r);
+        _tx_thread_current_ptr!=r->thread && FindTask(0)!=&r->task &&
+        FindTask(0)!=r->creator : authorized(r);
 }
 
 static int idle(void)

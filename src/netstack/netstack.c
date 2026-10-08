@@ -54,11 +54,19 @@ __attribute__((weak)) VOID tx_application_define(VOID *first_unused_memory)
 static AmiNetStack             *ami_ns;
 static BOOL                     ami_ns_system_initialised;
 static BOOL                     ami_ns_kernel_started;
+#ifdef AMINETXDUO_EXEC_RESEARCH
+/* Irreversible helper stop closes admission; ami_ns remains only for reap. */
+static AmiNetStack              *ami_ns_research_terminal;
+#endif
 
 static VOID ami_ns_gateway_name_primary(AmiNetStack *ns, UWORD index);
 
 AmiNetStack *ami_netstack_raw(VOID)
 {
+#ifdef AMINETXDUO_EXEC_RESEARCH
+    if (ami_ns == ami_ns_research_terminal)
+        return NULL;
+#endif
     return ami_ns;
 }
 
@@ -175,10 +183,16 @@ static BOOL ami_ns_research_loopback_stop(AmiNetStack *ns)
             return !worker.io_opened && !tx_amiga_exec_task_alive(worker.task) &&
                    ns->ns_Ip.nx_ip_thread.tx_thread_state == TX_TERMINATED;
         if (worker.state == ANX_THREAD_STOPPING)
+        {
             stopping = TRUE;
+            ami_ns_research_terminal = ns;
+        }
         else if (anx_exec_thread_managed_stop_event(&ns->ns_Ip.nx_ip_thread,
                                                    &ns->ns_Ip.nx_ip_events))
+        {
             stopping = TRUE;
+            ami_ns_research_terminal = ns;
+        }
         /* The wait releases the exact bracket, letting the helper drain work
          * and its terminal owner close IO. No spin or foreign Task removal. */
         if (tx_thread_sleep(1) != TX_SUCCESS)
@@ -1888,6 +1902,9 @@ static LONG ami_ns_kernel_stop_locked(VOID)
     }
 
     ami_ns_kernel_started = FALSE;
+#ifdef AMINETXDUO_EXEC_RESEARCH
+    ami_ns_research_terminal = NULL;
+#endif
 
     /* Only on success: on anything else a thread can still be inside a bracket. */
     ami_netstack_baton_reset();
@@ -2082,6 +2099,13 @@ static LONG ami_ns_startup(BOOL loopback_only)
 
     if (ami_ns != NULL)
     {
+#ifdef AMINETXDUO_EXEC_RESEARCH
+        if (ami_ns == ami_ns_research_terminal)
+        {
+            ami_ns_lock_release();
+            return AMI_NET_ERR_KERNEL;
+        }
+#endif
         ami_ns->ns_Refs++;
         ami_ns_lock_release();
         return AMI_NET_OK;
@@ -2239,19 +2263,19 @@ UWORD netstack_retained_count(VOID)
 
 AmiNetStack *netstack_get(VOID)
 {
-    return ami_ns;
+    return ami_netstack_raw();
 }
 
 NX_IP *netstack_ip(VOID)
 {
-    AmiNetStack *ns = ami_ns;
+    AmiNetStack *ns = ami_netstack_raw();
 
     return (ns != NULL && ns->ns_IpCreated) ? &ns->ns_Ip : NULL;
 }
 
 NX_PACKET_POOL *netstack_pool(VOID)
 {
-    AmiNetStack *ns = ami_ns;
+    AmiNetStack *ns = ami_netstack_raw();
 
     return (ns != NULL && ns->ns_PoolMemory != NULL) ? &ns->ns_Pool : NULL;
 }

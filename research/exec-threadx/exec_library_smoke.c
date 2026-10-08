@@ -18,7 +18,18 @@ static void say(const char *s)
 #define CHECK(x) do {if (!(x)) {say("research_exec_library=FAIL " #x "\n");return 20;}} while (0)
 #define CASE(s) do {passed++;say("research_exec_library=CASE_PASS " s "\n");} while (0)
 static LONG sock(struct Library *b,LONG family,LONG type)
-{ return LP3(0x1e,LONG,sock,LONG,family,d0,LONG,type,d1,LONG,0,d2,,b); }
+{
+    LONG result=LP3(0x1e,LONG,sock,LONG,family,d0,LONG,type,d1,LONG,0,d2,,b);
+    if (result<0) {
+        LONG error=LP0(0xa2,LONG,errno,,b);
+        char number[16];unsigned n=0;ULONG value=(ULONG)error;
+        do {number[n++]=(char)('0'+value%10);value/=10;} while(value);
+        say("research_exec_library=SOCKET_ERRNO ");
+        while(n) {(void)Write(Output(),&number[--n],1);}
+        say("\n");
+    }
+    return result;
+}
 static LONG bindfd(struct Library *b,LONG fd,APTR addr,LONG length)
 { return LP3(0x24,LONG,bindfd,LONG,fd,d0,APTR,addr,a0,LONG,length,d1,,b); }
 static LONG closefd(struct Library *b,LONG fd)
@@ -92,7 +103,9 @@ int main(void)
               !FindTask((STRPTR)"Exec NetX management") && !FindTask((STRPTR)"Exec NetX clock") &&
               !FindTask((STRPTR)"AmiNetXDuo ip"));
         CASE("last-close-retires-actual-helper-kernel-and-published-health");
-        RemLibrary(master);
+        /* Expunge returns the seglist; the test explicitly unloads it. */
+        Forbid();APTR segment=LP0(0x12,APTR,expunge,,master);Permit();
+        CHECK(segment);UnLoadSeg((BPTR)segment);
         Forbid();master=(struct Library *)FindName(&SysBase->LibList,(STRPTR)"bsdsocket.library");Permit();
         CHECK(!master);CASE("actual-expunge-removes-loaded-library-before-next-cycle");
     }

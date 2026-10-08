@@ -194,18 +194,30 @@ static Caller *free_slot(UINT reserved)
 }
 UINT tx_amiga_adopt_thread(TX_THREAD **thread,ULONG *generation,CHAR *name,UINT priority,UINT reserved)
 {
-    Lease *lease=0;Caller *r;Pending *waiter=0;
+    Lease *lease=0;Caller *r,*same_owner=0;Pending *waiter=0;
     BYTE signal;ULONG mask;
     if (!thread || !generation || !name || priority>=TX_MAX_PRIORITIES || reserved>TX_TRUE) return TX_PTR_ERROR;
     if (!tx_amiga_exec_task_context() || !anx_tx_runtime_idle()) return TX_CALLER_ERROR;
     Forbid();
     if (!clock_owner || detaching || anx_exec_caller_generation==(ULONG)-1) {Permit();return TX_NOT_DONE;}
     sweep();
-    for (unsigned i=0;i<ANX_CALLER_SLOTS;i++) if (callers[i].state!=EMPTY && callers[i].lease->owner==FindTask(0)) {Permit();return TX_CALLER_ERROR;}
+    for (unsigned i=0;i<ANX_CALLER_SLOTS;i++) {
+        Caller *old=&callers[i];
+        if (old->state==EMPTY || old->lease->owner!=FindTask(0)) continue;
+        /* Two private library bases can cache separate handles in one Task.
+         * Keep one bridge identity per owner: evict only a handed, quiescent
+         * dormant cache, using the existing generation/signal-debt contract. */
+        if (same_owner || old->state!=DORMANT || !old->handed ||
+            !identity(old->lease) || !anx_tx_quiescent(&old->bridge)) {
+            Permit();return TX_CALLER_ERROR;
+        }
+        same_owner=old;
+    }
     for (unsigned i=0;i<ANX_CALLER_LEASES;i++) if (!leases[i].owner) {lease=&leases[i];break;}
     signal=lease ? AllocSignal(-1) : -1;
     if (signal<0) {Permit();return TX_NO_MEMORY;}
     mask=1UL<<signal;(void)SetSignal(0,mask);
+    if (same_owner) {retire(same_owner,1);stats.evicted++;}
     while (!(r=free_slot(reserved))) {
         if (reserved) {FreeSignal(signal);Permit();return TX_NO_MEMORY;}
         if (!waiter) {
