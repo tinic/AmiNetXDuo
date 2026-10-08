@@ -115,6 +115,7 @@ BOOL ami_ns_dhcp_search_lease_add(AmiNsDhcpSearchLease *lease,
 {
     UWORD count;
     UWORD i;
+    UWORD length;
 
     if (lease == NULL || domain == NULL || domain[0] == '\0' ||
         interface_index >= AMI_CFG_MAX_ATTACHED ||
@@ -124,14 +125,14 @@ BOOL ami_ns_dhcp_search_lease_add(AmiNsDhcpSearchLease *lease,
     for (i = 0; domain[i] != '\0'; i++)
         if ((UWORD)(i + 1U) >= (UWORD)AMI_CFG_NAME_LEN)
             return FALSE;
+    length = i;
 
     count = lease->count[interface_index];
     if (count >= (UWORD)AMI_CFG_MAX_SEARCH)
         return FALSE;
 
-    for (i = 0; domain[i] != '\0'; i++)
+    for (i = 0; i <= length; i++)
         lease->domain[interface_index][count][i] = domain[i];
-    lease->domain[interface_index][count][i] = '\0';
     lease->count[interface_index] = (UWORD)(count + 1U);
     return TRUE;
 }
