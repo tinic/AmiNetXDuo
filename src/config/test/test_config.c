@@ -571,6 +571,9 @@ static void test_ip6(void)
             /* 4.1 + 4.3 together: every group needs trimming, and every
                letter must come out lowercase. */
             IP6(0x000a, 0x00bc, 0x0def, 0xfeed, 0x0001, 0x0020, 0x0300, 0x4000),
+            IP6(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+            IP6(0, 0, 0, 0, 0, 0, 0x0102, 0x0304),
+            IP6(0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff),
         };
         static const char *want[] = {
             "::",
@@ -585,6 +588,9 @@ static void test_ip6(void)
             "::1:0:0:1:2:3",
             "2001:db8:0:1:1:1:1:1",
             "a:bc:def:feed:1:20:300:4000",
+            "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "::1.2.3.4",
+            "::ffff:255.255.255.255",
         };
         size_t i;
 
@@ -592,6 +598,36 @@ static void test_ip6(void)
         {
             ami_config_format_ip6(cases[i], text, sizeof(text));
             CHECK_STR(text, want[i]);
+
+            /* Refusals write only the empty string; success touches only
+               the actual address and its NUL, even with full capacity. */
+            {
+                ULONG cap;
+
+                for (cap = 0; cap <= AMI_CFG_IP6_STRLEN; cap++)
+                {
+                    unsigned char guarded[AMI_CFG_IP6_STRLEN + 2];
+                    ULONG touched;
+                    ULONG j;
+
+                    memset(guarded, 0xa5, sizeof(guarded));
+                    ami_config_format_ip6(cases[i], (char *)guarded + 1, cap);
+                    CHECK(guarded[0] == 0xa5);
+                    if (cap == AMI_CFG_IP6_STRLEN)
+                    {
+                        CHECK_STR((char *)guarded + 1, want[i]);
+                        touched = (ULONG)strlen(want[i]) + 1;
+                    }
+                    else
+                    {
+                        touched = (cap != 0) ? 1 : 0;
+                        if (cap != 0)
+                            CHECK(guarded[1] == '\0');
+                    }
+                    for (j = touched + 1; j < (ULONG)sizeof(guarded); j++)
+                        CHECK(guarded[j] == 0xa5);
+                }
+            }
         }
     }
 
