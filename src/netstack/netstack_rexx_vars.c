@@ -95,15 +95,6 @@ static const char ami_rx_kw_udp[] =
     "I=ITOTAL,H=HEADSHORT,C=CHKSUM,L=LENGTH,N=NOPORT,B=BCNOPORT,"
     "F=FULLSOC,M=MISPCB,O=OTOTAL";
 
-static const char ami_rx_kw_mbuf_stat[] =
-    "M=MBUFS,CL=CLUSTERS,CLF=CLFREE,MD=MDROPS,NW=NWAITED,ND=NDRAINED,"
-    "TMU=TOTALMEMORYUSED";
-
-static const char ami_rx_kw_mbuf_conf[] =
-    "I=INITIAL,CH=CHUNK,CL=CLCHUNK,MM=MAXMEM,CS=CLUSTERSIZE";
-
-static const char ami_rx_kw_log[] = "COUNT,LEN";
-
 /* Numeric order as in <sys/socket.h>; do not reorder.  The ROUTES argument is
    an address family number rather than a name, and netstat prints
    afamily.<number> from it. */
@@ -127,7 +118,8 @@ static const char ami_rx_kw_routes[] =
 
 /* rvd_Index is the level-2 template, NULL both for a variable that takes no
    index and for one whose answer is a formatted list that parses its own
-   argument.  The writeable set is empty; see ami_rx_setvalue(). */
+   argument.  Unreadable variables are refused before index parsing, so their
+   templates are not retained.  The writeable set is empty; see ami_rx_setvalue(). */
 typedef struct AmiRxVarDef
 {
     const char *rvd_Index;
@@ -150,10 +142,10 @@ static const AmiRxVarDef ami_rx_vardefs[RXV_COUNT] =
     /* CONNECTIONS         */ { NULL,                  0,              TRUE  },
     /* HOSTNAME            */ { NULL,                  0,              TRUE  },
     /* ROUTES              */ { NULL,                  0,              TRUE  },
-    /* MBUF_STAT           */ { ami_rx_kw_mbuf_stat,   7,              FALSE },
+    /* MBUF_STAT           */ { NULL,                  0,              FALSE },
     /* MBUF_TYPE_STATS     */ { NULL,                  0,              FALSE },
-    /* MBUF_CONF           */ { ami_rx_kw_mbuf_conf,   5,              FALSE },
-    /* LOG                 */ { ami_rx_kw_log,         2,              FALSE },
+    /* MBUF_CONF           */ { NULL,                  0,              FALSE },
+    /* LOG                 */ { NULL,                  0,              FALSE },
     /* TASKNAME            */ { NULL,                  0,              TRUE  },
     /* NTHBASE             */ { NULL,                  0,              TRUE  },
     /* DEBUGSANA           */ { NULL,                  0,              TRUE  },

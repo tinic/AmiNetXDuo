@@ -138,6 +138,18 @@ SAY 'case stats:   QUERY live stats   rc=' RC ' result=' RESULT
 'QUERY MBUF_STAT MBUFS'
 SAY 'case unread:  unreadable variable rc=' RC
 
+/* Refusal precedes index parsing for both canonical names and aliases. */
+blocked = 'MBUF_STAT MBUF_CONF LOG MBS MBC'
+DO i = 1 TO WORDS(blocked)
+    name = WORD(blocked, i)
+    'QUERY' name
+    SAY 'case unreadbare-' || i || ': rc=' RC
+    'QUERY' name 'NOSUCHINDEX'
+    SAY 'case unreadindex-' || i || ': rc=' RC
+    'SET' name '0'
+    SAY 'case readonly-' || i || ': rc=' RC
+END
+
 /* SERVICES blocks for its collection window, which is the one command here
    that can wedge the host rather than answer it. One second, because what is
    being asserted is that it comes back and the script continues, nothing on
@@ -322,6 +334,17 @@ else
     note "FAIL: an unreadable variable was accepted"
     fails=$((fails + 1))
 fi
+
+for index in 1 2 3 4 5; do
+    for case_name in unreadbare unreadindex readonly; do
+        if grep -qE "case $case_name-$index:.*rc= *5( |$)" "$SCRIPTOUT"; then
+            note "PASS: $case_name-$index preserves RETURN_WARN"
+        else
+            note "FAIL: $case_name-$index changed the refusal status"
+            fails=$((fails + 1))
+        fi
+    done
+done
 
 for case_name in browse browse1; do
     if grep -qE "case $case_name:.*rc= *0" "$SCRIPTOUT"; then
