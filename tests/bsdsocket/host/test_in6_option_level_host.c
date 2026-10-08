@@ -12,6 +12,16 @@ static LONG h_enter_result;
 static int h_enters;
 static int h_leaves;
 static int h_applies;
+#ifdef AMINETXDUO_MULTICAST
+static BOOL h_mcast_owned;
+static int h_mcast_classifies;
+static int h_mcast_sets;
+static int h_mcast_gets;
+static LONG h_mcast_option;
+static APTR h_mcast_value;
+static socklen_t h_mcast_length;
+static socklen_t *h_mcast_length_ptr;
+#endif
 
 #define CHECK(expr) do { h_checks++; if (!(expr)) { \
     h_failures++; printf("FAIL line %d: %s\n", __LINE__, #expr); \
@@ -40,6 +50,38 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 { (VOID)base; h_enters++; return h_enter_result; }
 VOID bsd_nx_leave(struct AmiSocketBase *base) { (VOID)base; h_leaves++; }
 VOID bsd_opt_apply_ip(AmiSocket *sock) { (VOID)sock; h_applies++; }
+
+#ifdef AMINETXDUO_MULTICAST
+/* Test only the IPv6 dispatcher here. Real multicast policy and replies are
+   exercised by mcast_slot_epoch; do not mask the globally enabled branch. */
+BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname)
+{
+    CHECK(sock == &h_sock);
+    h_mcast_classifies++;
+    h_mcast_option = optname;
+    return h_mcast_owned;
+}
+
+LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
+                       LONG optname, APTR optval, socklen_t optlen)
+{
+    CHECK(base == &h_base && sock == &h_sock && optname == h_mcast_option);
+    h_mcast_sets++;
+    h_mcast_value = optval;
+    h_mcast_length = optlen;
+    return 73;
+}
+
+LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
+                       LONG optname, APTR optval, socklen_t *optlen)
+{
+    CHECK(base == &h_base && sock == &h_sock && optname == h_mcast_option);
+    h_mcast_gets++;
+    h_mcast_value = optval;
+    h_mcast_length_ptr = optlen;
+    return 73;
+}
+#endif
 
 /* This host shim has Linux socket layouts; the target ABI assertions are
    covered by the m68k build, while this test exercises the option logic. */
@@ -120,6 +162,37 @@ static void test_hops_and_class(void)
     }
 }
 
+static void test_multicast_dispatch(void)
+{
+#ifdef AMINETXDUO_MULTICAST
+    LONG value = 42;
+    socklen_t len = sizeof(value);
+    int before;
+
+    h_sock.as_Flags = ASF_INET6;
+    h_mcast_owned = TRUE;
+    h_mcast_sets = h_mcast_gets = 0;
+    CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
+                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, len) == 73);
+    CHECK(h_mcast_sets == 1 && h_mcast_gets == 0);
+    CHECK(h_mcast_value == &value && h_mcast_length == len);
+    CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
+                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, &len) == 73);
+    CHECK(h_mcast_gets == 1 && h_mcast_sets == 1);
+    CHECK(h_mcast_value == &value && h_mcast_length_ptr == &len);
+
+    before = h_mcast_classifies;
+    CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_ICMPV6,
+                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, len) == -1);
+    CHECK(h_base.sb_Errno == AMI_ENOPROTOOPT);
+    CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_ICMPV6,
+                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, &len) == -1);
+    CHECK(h_base.sb_Errno == AMI_ENOPROTOOPT);
+    CHECK(h_mcast_classifies == before && h_mcast_sets == 1 && h_mcast_gets == 1);
+    h_mcast_owned = FALSE;
+#endif
+}
+
 static void test_getter_widths(void)
 {
     static const LONG options[] = {
@@ -196,6 +269,7 @@ int main(void)
     CHECK(value == 42);
 
     test_hops_and_class();
+    test_multicast_dispatch();
     test_getter_widths();
 
     CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
