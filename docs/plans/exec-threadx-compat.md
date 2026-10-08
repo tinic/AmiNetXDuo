@@ -592,13 +592,55 @@ retaining exact artifacts/logs.
 This pre-stop mechanism keeps the already tested FINISHED-before-public-delete
 contract and can support a future IP wrapper that stops/drains its helper before
 entering raw deletion. That wrapper still needs a lifetime gate across its wait
-and all external packet/driver/API/timer producers quiesced. Object retirement
-remains missing: existing research mutex/event creation does not maintain their
-upstream created lists, so raw deletion cannot simply be linked. Preserve real
+and all external packet/driver/API/timer producers quiesced. At spike 11, object retirement
+was still missing: research mutex/event creation did not maintain upstream
+created lists, so raw deletion could not simply be linked. Preserve real
 object IDs, list/count and owned/suspended invariants when adding it. Raw mutex
 creation also installs `_tx_mutex_thread_release`; linking that body needs care
 to avoid accidentally pulling a full ThreadX scheduler/forced-release path.
 The unchanged real IP constructor/helper/delete and driver remain untested.
+
+## Spike 12: quiescent object retirement
+
+Code 05cd6c7592c29862d3dc63b863c378c8722c3c75 adds real mutex/event created
+rings/counts, duplicate/membership validation and guarded unchanged pinned raw
+deletes. Busy/owned/suspended or active captured wait references refuse deletion
+unchanged; normal serialized context is required. Runtime reset now rejects live
+objects after thread detach. Existing fixtures explicitly delete their objects.
+The shared object probe checks head/non-head/singleton removal, recursive owner
+refusal, invalid/duplicate operations, actual mutex/event behavior, preserving
+preemption-disable, and post-delete poisoned storage recreation. Queued mutex
+and blocked event refusal are also exercised through real wait cleanup paths.
+
+Host CTest 38/38 and m68k -Werror/startup-first gates pass. Claudecode's one
+boardless A1200/KS3.1 r40.68 run per artifact passes native stop 13/13 with four
+workers reaped, two genuine in-flight timer requests reaped, and three object
+recreations after native FINISHED/ACK/public delete. Retained thread passes 14/14,
+tasks_reaped=10, restarts=6. Each exits 0 after 14s; parent/child stacks 8192,
+harness 300b22e8.
+Root read actual stdout/startup/runner and verified all binary/map/evidence hashes
+under /Users/turo/ai/evidence/exec-threadx-spike12-stop-native and thread-native.
+Independent deepseek-v4 read-only exact review is complete (all19 parts), no
+blocker in bounded retirement, no tests run by reviewer. The
+notification-config review statement was corrected against the port and
+conditional safety-critical guard. The current port compiles notification
+callbacks out; no callback runtime support is claimed. Source/native evidence
+is separate.
+
+Partial stop-map non-LTO .text: backend 14,372 plus retained ThreadX 3,112 =
+17,484 bytes; clock division helpers add 3,300. This excludes the shared test
+probe and other fixtures, startup/libc/other helpers/data/BSS/relocations/resources
+and missing full integration. No finished-library savings or speedup is measured.
+
+Owned build and both native staging paths are removed after retaining exact
+evidence. The research branch remains unmerged. Full ring scans are O(N) per
+operation; no performance benefit is assumed.
+
+This closes the bounded primitive retirement gap only. Actual raw IP creation/
+helper/delete still needs its lifetime gate, producer drain, native acknowledgement
+outside the raw delete boundary, a restricted already-finished terminate adapter,
+and complete preflight before ignored raw service results can mutate state. Full
+NetX helper/driver/common-clock integration and the performance A/B remain open.
 
 ## Required performance comparison after functional integration
 

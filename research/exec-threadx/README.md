@@ -844,3 +844,67 @@ and claudecode native execution are separate evidence. This remains exact-event
 stop, not general termination or a full IP helper verdict.
 Owned build and both native staging paths are removed. Research-only;
 vendor/public headers/shipping selection unchanged.
+
+## Spike 12: quiescent mutex and event retirement
+
+Research mutex/event creation now maintains the actual ThreadX circular created
+lists and counts. Membership checks reject duplicate creation and forged IDs
+without reading uncreated control blocks. Mutex creation remains the bounded
+NO_INHERIT bridge implementation; it does not install the raw constructor's
+forced-release callback. Public layouts and vendor sources are unchanged.
+
+Guarded deletes call compiler-renamed, unchanged pinned ThreadX delete bodies
+only after the object is a valid list member and quiescent. Mutex owner/count,
+owned links and suspension list/count must be empty. Event suspension list/count,
+search/delayed-clear state and any configured notification callback must be
+empty. Captured active wait, pending wake and abort-pin references also prevent
+retirement. Busy deletion returns TX_FEATURE_NOT_ENABLED without mutation;
+invalid membership returns TX_MUTEX_ERROR or TX_GROUP_ERROR. Creation/deletion
+outside a normal serialized context or during a timer/resume callback is fatal.
+The upstream bodies preserve an existing preemption-disable increment. Runtime
+reset refuses any retained created object, even after every thread detaches.
+
+This is quiescent deletion only. External API/packet/driver/timer producers must
+be quiesced before reclaiming object storage; an ID or generational wait token
+cannot enforce that lifetime. The future unchanged NX_IP delete path needs an
+integration wrapper that preflights each service whose status raw code ignores before any raw
+mutation. The general ThreadX delete-with-waiters contract is unsupported.
+
+The shared host/native object probe checks head, non-head and singleton list
+removal, duplicate/forged/NULL rejection, recursive-owner refusal, post-delete
+service rejection, real get/set behavior, preemption-counter preservation and
+poisoned storage recreation. The host mutex model also tries deletion with real
+queued waiters, then retains handoff/FIFO/timeout/abort schedules. The stop model
+tries event deletion with a real blocked worker before cleanup. Existing fixtures
+now retire their objects before detach/reset instead of forgetting live objects.
+
+Root host CTest passes 38/38 and m68k -Werror/startup-first builds pass at source
+05cd6c7592c29862d3dc63b863c378c8722c3c75. Notification callbacks are disabled
+in the current port configuration; the conditional callback guard is not a
+runtime-tested callback implementation. Independent deepseek-v4 read-only exact
+source review is complete (all 19 parts): no blocker in the bounded retirement
+scope, no tests run by reviewer. Claudecode ran each artifact
+once on boardless A1200/KS3.1 r40.68 with parent/child stacks 8192 and harness
+300b22e8. Actual native stop passes 13/13, tasks_reaped=4, timed_io_reaped=2,
+restarts=3, object_restarts=3; retained public thread passes 14/14,
+tasks_reaped=10, restarts=6. Each exits 0 after 14s. Root independently read the
+actual guest stdout, startup and runner receipts and verified all binary/map/
+evidence hashes in exec-threadx-spike12-stop-native and thread-native under
+/Users/turo/ai/evidence. Stop binary d7a67d68 is 59,704 bytes; retained thread
+02a6b169 is 64,144 bytes including fixtures/runtime. No queued run is a pass.
+
+Partial non-LTO stop-map input .text totals 14,372 backend bytes and 3,112
+retained ThreadX bytes (17,484 subtotal), plus 3,300 clock division helper bytes.
+Object probe/fixtures/startup/libc/other helpers/data/BSS/relocations/native
+resources and missing full integration are excluded. Evidence is
+/Users/turo/ai/evidence/exec-threadx-spike12-code-cost.json. These totals cannot
+be subtracted from shipping LTO spans or establish a finished-library saving.
+Full NX_IP constructor/helper/delete, driver integration, common clock, general
+termination and the required performance A/B comparison remain open.
+
+Owned build and both native staging paths are removed after retaining exact
+artifacts and receipts. The research branch remains unmerged. Full created-ring
+scans cost O(N) per operation; no size/performance benefit is assumed. A review
+statement that notification callbacks were active was corrected against the
+actual port header and conditional TX_SAFETY_CRITICAL prohibition in tx_api.h;
+those callback fields/tests are compiled out in this configuration.
