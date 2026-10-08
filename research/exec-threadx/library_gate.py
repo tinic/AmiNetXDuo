@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Relink the actual full bsdsocket library with only the research TX backend.
 
-Diagnostic integration gate, NOT a deployable library. The default non-LTO
-relink retains symbols; --lto matches the full build's stripping policy for
-an equal-feature file-size comparison. Neither mode proves runtime/performance.
+Diagnostic integration gate, NOT a deployable library. Both modes match the
+full build's stripping policy for an equal-feature file-size comparison;
+--lto requires actual LTO compile/link flags. Neither proves runtime/performance.
 Uses the full build's flags/vendor archives; removes the scheduler/Exec port
 archives and the baton object. Missing contracts fail the link; no success
 stubs, ignored unresolved symbols, protocol fixtures or PRNG replacements.
@@ -182,18 +182,16 @@ def main():
     if result.returncode:
         output.unlink(missing_ok=True)
     unstripped = {"bytes": output.stat().st_size, "sha256": digest(output)} if output.exists() else None
-    symbol_policy = "diagnostic relink retains symbols; baseline policy may differ"
-    if args.lto:
-        cache = (full / "CMakeCache.txt").read_text()
-        keep = re.search(r"^AMINETXDUO_KEEP_SYMBOLS:BOOL=(ON|OFF)$", cache, re.M)
-        if not keep:
-            raise SystemExit("cannot establish baseline symbol policy")
-        symbol_policy = "retain symbols" if keep[1] == "ON" else "strip symbols"
-        if output.exists() and keep[1] == "OFF":
-            strip = re.search(r"^CMAKE_STRIP:FILEPATH=(.+)$", cache, re.M)
-            if not strip or run([strip[1], str(output)], work, log).returncode:
-                output.unlink(missing_ok=True)
-                raise SystemExit("matched baseline stripping failed")
+    cache = (full / "CMakeCache.txt").read_text()
+    keep = re.search(r"^AMINETXDUO_KEEP_SYMBOLS:BOOL=(ON|OFF)$", cache, re.M)
+    if not keep:
+        raise SystemExit("cannot establish baseline symbol policy")
+    symbol_policy = "retain symbols" if keep[1] == "ON" else "strip symbols"
+    if output.exists() and keep[1] == "OFF":
+        strip = re.search(r"^CMAKE_STRIP:FILEPATH=(.+)$", cache, re.M)
+        if not strip or run([strip[1], str(output)], work, log).returncode:
+            output.unlink(missing_ok=True)
+            raise SystemExit("matched baseline stripping failed")
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
     baseline = link_dir / "bsdsocket.library"
@@ -203,7 +201,7 @@ def main():
         "netx_pin": git("-C", "third_party/netxduo", "rev-parse", "HEAD"),
         "threadx_pin": git("-C", "third_party/threadx", "rev-parse", "HEAD"),
         "full_profile_flags": flags,
-        "method": "Actual full library objects/vendor archives, full-profile compiled research backend and retained pinned TX bodies; old ThreadX scheduler/port archives removed, netstack baton object removed. No fixtures/stubs/unresolved-symbol bypass. " + ("Matched full-feature LTO compile/link and symbol policy; file size only, runtime/performance unverified." if args.lto else "Diagnostic non-LTO closure with unstripped research output; not a matched size comparison or runtime/performance evidence."),
+        "method": "Actual full library objects/vendor archives, full-profile compiled research backend and retained pinned TX bodies; old ThreadX scheduler/port archives removed, netstack baton object removed. No fixtures/stubs/unresolved-symbol bypass. Matched full-feature " + ("LTO" if args.lto else "non-LTO") + " compile/link and symbol policy; file size only, runtime/performance unverified.",
         "lto": args.lto,
         "research_symbol_policy": symbol_policy,
         "research_unstripped_binary": unstripped,
