@@ -1,7 +1,7 @@
 /* Real pinned UDP receive/cleanup, deterministic delivery fixture.
  * This is not wire-input or checksum conformance. SPDX-License-Identifier: MIT */
 #define NX_SOURCE_CODE
-#include "tx_bridge.h"
+#include "netx_resume.h"
 #include "nx_api.h"
 #include "nx_udp.h"
 #include "tx_thread.h"
@@ -130,6 +130,7 @@ static void init(void)
         c->ops=(AnxWaitOps){enter,leave,clock_now,park,notify,c};
         anx_wait_init(&c->wait,&c->ops);
         CHECK(anx_tx_attach(&c->bridge,&c->thread,&c->wait,owner));
+        CHECK(anx_tx_set_abort_policy(&c->bridge,anx_netx_receive_abort_policy));
         packet_init(c);
     }
     owner=1;

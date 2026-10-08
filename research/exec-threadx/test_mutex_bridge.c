@@ -141,6 +141,7 @@ static void finish(void)
 static void getter(Caller *c)
 {
     AnxTxContext frame;
+    CHECK(anx_tx_set_abort_policy(&c->bridge,anx_netx_receive_abort_policy));
     anx_tx_context_begin(&frame,&c->thread,0);
     CHECK(_tx_mutex_get(&mutex,TX_NO_WAIT)==TX_NOT_AVAILABLE && !c->parks);
     c->result=_tx_mutex_get(&mutex,mode==TIMEOUT ? 2 :

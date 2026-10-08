@@ -1,6 +1,6 @@
 /* Real ThreadX sleep/timeout/wait_abort against the research bridge.
  * SPDX-License-Identifier: MIT */
-#include "tx_bridge.h"
+#include "netx_resume.h"
 #include "tx_thread.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +37,7 @@ int main(void)
         owner=i+1; ops[i]=(AnxWaitOps){enter,leave,clock_now,park,notify,0};
         anx_wait_init(&waits[i],&ops[i]);
         CHECK(anx_tx_attach(&bridge[i],&thread[i],&waits[i],owner));
+        CHECK(anx_tx_set_abort_policy(&bridge[i],anx_netx_receive_abort_policy));
     }
     owner=1; anx_tx_context_begin(&frame,&thread[0],0);
     CHECK(_tx_thread_sleep(0)==TX_SUCCESS && !bridge[0].parks);
