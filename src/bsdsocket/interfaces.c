@@ -10,6 +10,7 @@
 #include "aminetxduo/sana2.h"
 
 #include "interfaces.h"
+#include "interfaces_query.h"
 
 #include <net/if.h>
 #include <sys/sockio.h>
@@ -29,14 +30,6 @@ static APTR bsd_tag_storage(const struct TagItem *item)
 static VOID bsd_put_long(const struct TagItem *item, LONG value)
 {
     LONG *out = (LONG *)bsd_tag_storage(item);
-
-    if (out != NULL)
-        *out = value;
-}
-
-static VOID bsd_put_ulong(const struct TagItem *item, ULONG value)
-{
-    ULONG *out = (ULONG *)bsd_tag_storage(item);
 
     if (out != NULL)
         *out = value;
@@ -231,34 +224,6 @@ VOID bsd_ReleaseInterfaceList(register struct List *list __asm("a0"),
         ami_free(list);
 }
 
-typedef struct BsdIfInfo
-{
-    const char     *bii_Device;         /* NULL when the slot is unconfigured */
-    ULONG           bii_Unit;
-
-    ULONG           bii_Address;
-    ULONG           bii_NetMask;
-    ULONG           bii_Broadcast;
-    ULONG           bii_MTU;
-    ULONG           bii_HardwareMTU;
-    ULONG           bii_BPS;
-
-    BOOL            bii_LinkUp;         /* the wire */
-    BOOL            bii_AdminUp;        /* the stack's intent */
-    BOOL            bii_HaveSana;
-    LONG            bii_BindType;
-
-    UBYTE           bii_HwAddress[AMI_ETH_ADDR_SIZE];
-
-    AmiSana2Stats   bii_Stats;
-    AmiSana2Info    bii_Info;
-
-    ULONG           bii_IpDrops;
-    ULONG           bii_ArpDrops;
-    BOOL            bii_HaveIpDrops;
-    BOOL            bii_HaveArpDrops;
-} BsdIfInfo;
-
 static VOID bsd_if_gather(NX_IP *ip, UINT index, BsdIfInfo *info)
 {
     NX_INTERFACE      *nxif = &ip->nx_ip_interface[index];
@@ -334,6 +299,7 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
     struct TagItem *cursor;
     struct TagItem *item;
     BsdIfInfo       info;
+    ULONG           available;
     LONG            index;
 
     if (name == NULL)
@@ -365,9 +331,13 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
 
     /* Out of the bracket before any caller memory is touched: the answers are
        all in `info` now, and writing into an application buffer can fault. */
+    available = bsd_if_query_available(&info);
     cursor = tags;
     while ((item = bsd_next_tag(&cursor)) != NULL)
     {
+        if (bsd_if_query_scalar(&info, item, available))
+            continue;
+
         switch (item->ti_Tag)
         {
 
@@ -383,16 +353,6 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
                 }
                 break;
 
-            case IFQ_DeviceUnit:
-                if (info.bii_Device != NULL)
-                    bsd_put_long(item, (LONG)info.bii_Unit);
-                break;
-
-            case IFQ_HardwareAddressSize:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Info.address_bits);
-                break;
-
             case IFQ_HardwareAddress:
                 if (info.bii_HaveSana)
                 {
@@ -405,95 +365,6 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
                     if (out != NULL && bytes != 0)
                         bsd_bcopy(info.bii_HwAddress, out, bytes);
                 }
-                break;
-
-            case IFQ_HardwareType:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Info.hardware_type);
-                break;
-
-            case IFQ_BPS:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_BPS);
-                break;
-
-            case IFQ_MTU:
-                bsd_put_long(item, (LONG)info.bii_MTU);
-                break;
-
-            case IFQ_HardwareMTU:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_HardwareMTU);
-                break;
-
-            case IFQ_PacketsReceived:
-                if (info.bii_HaveSana)
-                    bsd_put_ulong(item, info.bii_Stats.packets_received);
-                break;
-
-            case IFQ_PacketsSent:
-                if (info.bii_HaveSana)
-                    bsd_put_ulong(item, info.bii_Stats.packets_sent);
-                break;
-
-            case IFQ_BadData:
-                if (info.bii_HaveSana)
-                    bsd_put_ulong(item, info.bii_Stats.bad_data);
-                break;
-
-            case IFQ_Overruns:
-                if (info.bii_HaveSana)
-                    bsd_put_ulong(item, info.bii_Stats.overruns);
-                break;
-
-            case IFQ_UnknownTypes:
-                if (info.bii_HaveSana)
-                    bsd_put_ulong(item, info.bii_Stats.unknown_types);
-                break;
-
-            case IFQ_InputErrors:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Stats.rx_errors);
-                break;
-
-            case IFQ_OutputErrors:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Stats.tx_errors);
-                break;
-
-            case IFQ_InputDrops:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Stats.alloc_failures);
-                break;
-
-            case IFQ_IPDrops:
-                if (info.bii_HaveIpDrops)
-                    bsd_put_long(item, (LONG)info.bii_IpDrops);
-                break;
-
-            case IFQ_ARPDrops:
-                if (info.bii_HaveArpDrops)
-                    bsd_put_long(item, (LONG)info.bii_ArpDrops);
-                break;
-
-            case IFQ_NumReadRequests:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Info.read_requests);
-                break;
-
-            case IFQ_NumReadRequestsPending:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Info.read_pending);
-                break;
-
-            case IFQ_NumWriteRequests:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Info.write_requests);
-                break;
-
-            case IFQ_NumWriteRequestsPending:
-                if (info.bii_HaveSana)
-                    bsd_put_long(item, (LONG)info.bii_Info.write_pending);
                 break;
 
             case IFQ_Address:
@@ -518,10 +389,6 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
                              (info.bii_HaveSana ? info.bii_AdminUp
                                                 : info.bii_LinkUp)
                                  ? SM_Up : SM_Down);
-                break;
-
-            case IFQ_AddressBindType:
-                bsd_put_long(item, info.bii_BindType);
                 break;
 
             case IFQ_Metric:
