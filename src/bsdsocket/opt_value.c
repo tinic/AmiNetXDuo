@@ -6,7 +6,7 @@
 #include "bsdsocket_internal.h"
 
 LONG bsd_opt_get_long(struct AmiSocketBase *base, APTR optval,
-                             socklen_t *optlen, LONG value)
+                       socklen_t *optlen, LONG value)
 {
     socklen_t len;
 
@@ -33,4 +33,3 @@ LONG bsd_opt_get_long(struct AmiSocketBase *base, APTR optval,
 
     return 0;
 }
-
