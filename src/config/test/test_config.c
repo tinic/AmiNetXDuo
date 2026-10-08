@@ -1439,6 +1439,105 @@ static void test_interface_tcp_wan_window(void)
     ami_config_set_reporter(NULL, NULL);
 }
 
+/* Mixed field widths share one parser path. Check boundaries, diagnostics
+   and rejected reassignment against the public configuration, including
+   adjacent fields which must never be overwritten by a wide store. */
+static void test_interface_numeric_reassignment(void)
+{
+    static const struct
+    {
+        const char *key;
+        const char *canonical;
+        ULONG max;
+        BOOL nonzero;
+        UWORD hint;
+    } settings[] = {
+        { "Unit", "UNIT", 0xFFFFFFFFUL, FALSE, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN },
+        { "mTu", "MTU", 0xFFFFFFFFUL, FALSE, AMI_CFG_ADVICE_MTU_IS_A_PLAIN },
+        { "RxBuffer", "RXBUFFER", 0xFFFFFFFFUL, FALSE, AMI_CFG_ADVICE_RXBUFFER_IS_THE },
+        { "TcpAckMax", "TCPACKMAX", AMI_CFG_TCP_ACK_MAX, TRUE,
+          AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES },
+        { "TcpGrowRtt", "TCPGROWRTT", AMI_CFG_TCP_GROW_RTT_MAX, TRUE,
+          AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS },
+        { "TcpWanWindow", "TCPWANWINDOW", AMI_CFG_TCP_WAN_WINDOW_MAX, TRUE,
+          AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES },
+        { "GroFrames", "GROFRAMES", AMI_CFG_GRO_FRAMES_MAX, TRUE,
+          AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES },
+        { "AckPace", "ACKPACE", AMI_CFG_ACK_PACE_MAX, TRUE,
+          AMI_CFG_ADVICE_ACKPACE_IS_KBPS }
+    };
+    static const ULONG initial[] = { 101, 1500, 4096, 2222, 123, 65536, 4, 20000 };
+    static const char *const fixture =
+        "device=a2065.device unit=101 mtu=1500 rxbuffer=4096 "
+        "tcpackmax=2222 tcpgrowrtt=123 tcpwanwindow=65536 groframes=4 "
+        "ackpace=20000 iprequests=7 arprequests=9 writerequests=3 "
+        "priority=-17 mdns=yes\n";
+    unsigned i;
+
+    printf("interface: numeric boundaries and rejected reassignment preserve fields\n");
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
+    for (i = 0; i < sizeof(settings) / sizeof(settings[0]); i++)
+    {
+        char maximum[32], hexadecimal[32], above[32];
+        const char *samples[9];
+        unsigned j;
+
+        snprintf(maximum, sizeof(maximum), "%lu", (unsigned long)settings[i].max);
+        snprintf(hexadecimal, sizeof(hexadecimal), "0x%lX", (unsigned long)settings[i].max);
+        snprintf(above, sizeof(above), "%llu", (unsigned long long)settings[i].max + 1);
+        samples[0] = "0";
+        samples[1] = "1";
+        samples[2] = maximum;
+        samples[3] = hexadecimal;
+        samples[4] = above;
+        samples[5] = "-1";
+        samples[6] = "4294967296";
+        samples[7] = "0x100000000";
+        samples[8] = "not-a-number";
+
+        for (j = 0; j < sizeof(samples) / sizeof(samples[0]); j++)
+        {
+            char text[512], problem[160];
+            AmiIfConfig iface;
+            ULONG expected[8];
+            BOOL valid = j < 4 && (j != 0 || !settings[i].nonzero);
+            char *buf;
+
+            memcpy(expected, initial, sizeof(expected));
+            if (valid)
+                expected[i] = (j == 0) ? 0 : ((j == 1) ? 1 : settings[i].max);
+            snprintf(text, sizeof(text), "%s%s=%s\n", fixture, settings[i].key, samples[j]);
+            seen_count = 0;
+            buf = dup_text(text);
+            CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+            free(buf);
+            CHECK(iface.unit == expected[0]);
+            CHECK(iface.mtu == expected[1]);
+            CHECK(iface.rx_buffer == expected[2]);
+            CHECK(iface.tcp_ack_max == expected[3]);
+            CHECK(iface.tcp_grow_rtt == expected[4]);
+            CHECK(iface.tcp_wan_window == expected[5]);
+            CHECK(iface.gro_frames == expected[6]);
+            CHECK(iface.ack_pace_kbps == expected[7]);
+            CHECK(iface.ip_requests == 7 && iface.arp_requests == 9 && iface.write_requests == 3);
+            CHECK(iface.priority == -17 && iface.mdns);
+            CHECK_STR(iface.device, "a2065.device");
+            CHECK(seen_count == (valid ? 0 : 1));
+            if (!valid)
+            {
+                snprintf(problem, sizeof(problem), "%s cannot be '%s'",
+                         settings[i].canonical, samples[j]);
+                CHECK(seen[0].line == 2);
+                CHECK(seen[0].severity == AMI_CFG_PROBLEM_WARN);
+                CHECK_STR(seen[0].text, problem);
+                CHECK_STR(seen[0].hint, ami_cfg_advice(settings[i].hint));
+            }
+        }
+    }
+    ami_config_set_reporter(NULL, NULL);
+}
+
 static void test_interface_priority(void)
 {
     AmiIfConfig iface;
@@ -4472,6 +4571,7 @@ int main(int argc, char **argv)
     test_interface_ack_pace();
     test_interface_tcp_grow_rtt();
     test_interface_tcp_wan_window();
+    test_interface_numeric_reassignment();
     test_interface_priority();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6

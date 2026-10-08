@@ -14,6 +14,8 @@
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/compat.h"
 
+#include <stddef.h>
+
 /* ------------------------------------------------------- interface files */
 
 typedef enum
@@ -23,11 +25,9 @@ typedef enum
     IF_KEY_DEVICE,
     IF_KEY_CARD,
     IF_KEY_ID,
-    IF_KEY_UNIT,
     IF_KEY_ADDRESS,
     IF_KEY_NETMASK,
     IF_KEY_GATEWAY,
-    IF_KEY_MTU,
     IF_KEY_CONFIGURE,
     IF_KEY_IPTYPE,
     IF_KEY_STATE,
@@ -42,14 +42,53 @@ typedef enum
     IF_KEY_IPREQUESTS,
     IF_KEY_ARPREQUESTS,
     IF_KEY_WRITEREQUESTS,
+    IF_KEY_PRIORITY,
+    /* Contiguous keys index ami_if_numbers below; these are private IDs. */
+    IF_KEY_UNIT,
+    IF_KEY_MTU,
     IF_KEY_RXBUFFER,
     IF_KEY_TCPACKMAX,
     IF_KEY_TCPGROWRTT,
     IF_KEY_TCPWANWINDOW,
     IF_KEY_GROFRAMES,
-    IF_KEY_ACKPACE,
-    IF_KEY_PRIORITY
+    IF_KEY_ACKPACE
 } IfKey;
+
+/* These settings reject bad values and keep the previous assignment.
+   Request counts have a different (clamping) policy and stay separate. */
+static const struct IfNumber
+{
+    const char *keyword;
+    ULONG       max;
+    UWORD       offset;
+    UWORD       hint;
+    UBYTE       width;
+    UBYTE       nonzero;
+}
+ami_if_numbers[] =
+{
+#define IF_NUMBER(key, field, max, nonzero, hint) \
+    [IF_KEY_##key - IF_KEY_UNIT] = \
+        { #key, max, (UWORD)offsetof(AmiIfConfig, field), hint, \
+          sizeof(((AmiIfConfig *)0)->field), nonzero }
+    IF_NUMBER(UNIT, unit, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN),
+    IF_NUMBER(MTU, mtu, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_MTU_IS_A_PLAIN),
+    IF_NUMBER(RXBUFFER, rx_buffer, 0xFFFFFFFFUL, 0, AMI_CFG_ADVICE_RXBUFFER_IS_THE),
+    IF_NUMBER(TCPACKMAX, tcp_ack_max, AMI_CFG_TCP_ACK_MAX, 1,
+              AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES),
+    IF_NUMBER(TCPGROWRTT, tcp_grow_rtt, AMI_CFG_TCP_GROW_RTT_MAX, 1,
+              AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS),
+    IF_NUMBER(TCPWANWINDOW, tcp_wan_window, AMI_CFG_TCP_WAN_WINDOW_MAX, 1,
+              AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES),
+    IF_NUMBER(GROFRAMES, gro_frames, AMI_CFG_GRO_FRAMES_MAX, 1,
+              AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES),
+    IF_NUMBER(ACKPACE, ack_pace_kbps, AMI_CFG_ACK_PACE_MAX, 1,
+              AMI_CFG_ADVICE_ACKPACE_IS_KBPS)
+#undef IF_NUMBER
+};
+
+_Static_assert(sizeof(AmiIfConfig) <= 65535UL,
+               "numeric interface field offsets must fit in UWORD");
 
 static const struct IfKeyword
 {
@@ -638,8 +677,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         {
             AmiIpType type;
             ULONG     n;
+            IfKey     which = lookup_if_keyword(key);
 
-            switch (lookup_if_keyword(key))
+            switch (which)
             {
             case IF_KEY_DEVICE:
                 if (*value == '\0')
@@ -667,19 +707,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                it is usable as a host name. */
             case IF_KEY_ID:
                 ami_cfg_copy_string(out->id, sizeof(out->id), value);
-                break;
-
-            case IF_KEY_UNIT:
-                if (ami_cfg_parse_ulong(value, &n))
-                {
-                    out->unit = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad UNIT '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "UNIT",
-                                     value, AMI_CFG_ADVICE_UNIT_IS_A_PLAIN);
-                }
                 break;
 
             /*
@@ -741,111 +768,52 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 break;
 
+            case IF_KEY_UNIT:
             case IF_KEY_MTU:
-                if (ami_cfg_parse_ulong(value, &n))
-                {
-                    out->mtu = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad MTU '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "MTU", value, AMI_CFG_ADVICE_MTU_IS_A_PLAIN);
-                }
-                break;
-
             case IF_KEY_RXBUFFER:
-                if (ami_cfg_parse_ulong(value, &n))
-                {
-                    out->rx_buffer = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad RXBUFFER '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "RXBUFFER",
-                                     value, AMI_CFG_ADVICE_RXBUFFER_IS_THE);
-                }
-                break;
-
             case IF_KEY_TCPACKMAX:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_TCP_ACK_MAX)
-                {
-                    out->tcp_ack_max = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad TCPACKMAX '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "TCPACKMAX", value,
-                                     AMI_CFG_ADVICE_TCPACKMAX_IS_ACK_BYTES);
-                }
-                break;
-
             case IF_KEY_TCPGROWRTT:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_TCP_GROW_RTT_MAX)
-                {
-                    out->tcp_grow_rtt = (UWORD)n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad TCPGROWRTT '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "TCPGROWRTT", value,
-                                     AMI_CFG_ADVICE_TCPGROWRTT_IS_MILLISECONDS);
-                }
-                break;
-
             case IF_KEY_TCPWANWINDOW:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_TCP_WAN_WINDOW_MAX)
-                {
-                    out->tcp_wan_window = n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad TCPWANWINDOW '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "TCPWANWINDOW", value,
-                                     AMI_CFG_ADVICE_TCPWANWINDOW_IS_BYTES);
-                }
-                break;
-
             case IF_KEY_GROFRAMES:
-                if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_GRO_FRAMES_MAX)
-                {
-                    out->gro_frames = (UBYTE)n;
-                }
-                else
-                {
-                    AMI_WARN("config: %s: bad GROFRAMES '%s'", out->name, value);
-                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "GROFRAMES", value,
-                                     AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES);
-                }
-                break;
-
             case IF_KEY_ACKPACE:
+            {
+                const struct IfNumber *setting =
+                    &ami_if_numbers[which - IF_KEY_UNIT];
+
                 if (ami_cfg_parse_ulong(value, &n) &&
-                    n != 0 && n <= AMI_CFG_ACK_PACE_MAX)
+                    n >= setting->nonzero && n <= setting->max)
                 {
-                    out->ack_pace_kbps = n;
+                    /* offsetof preserves each field's alignment; store through
+                       its original type, including the byte/word settings. */
+                    char *field = (char *)out + setting->offset;
+
+                    switch (setting->width)
+                    {
+                    case sizeof(UBYTE):
+                        *(UBYTE *)field = (UBYTE)n;
+                        break;
+                    case sizeof(UWORD):
+                        *(UWORD *)field = (UWORD)n;
+                        break;
+                    default: /* ULONG */
+                        *(ULONG *)field = n;
+                        break;
+                    }
                 }
                 else
                 {
-                    AMI_WARN("config: %s: bad ACKPACE '%s'", out->name, value);
+                    AMI_WARN("config: %s: bad %s '%s'", out->name,
+                             setting->keyword, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
-                                     "ACKPACE", value,
-                                     AMI_CFG_ADVICE_ACKPACE_IS_KBPS);
+                                     setting->keyword, value, setting->hint);
                 }
                 break;
+            }
 
             case IF_KEY_IPREQUESTS:
             case IF_KEY_ARPREQUESTS:
             case IF_KEY_WRITEREQUESTS:
             {
-                IfKey       which = lookup_if_keyword(key);
                 const char *keyword;
                 ULONG      *field;
                 ULONG       max  = (ULONG)AMI_CFG_READREQUESTS_MAX;
