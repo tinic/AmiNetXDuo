@@ -1150,3 +1150,79 @@ dead-owner reclamation and nested blocking still require implementation.
 Evidence is indexed in /Users/turo/ai/evidence/exec-threadx-library-integration.json
 and exec-threadx-library-gate-final.json. Equal-feature finished-library size,
 resident resources, synchronization cost and throughput remain unmeasured.
+
+## Full library integration: retained contexts around Exec IO
+
+Source c6432596460c576e10c9cf56d6f7c12c08323cc5 adds
+anx_tx_context_pause/resume for an admitted, live owner. The pause retains the
+complete normal same-thread context chain in its private bridge record, clears
+the domain's current-thread/frame state and releases every bridge Forbid level.
+After actual Exec IO, final resume restores that exact chain and level count.
+Nested release/acquire pairs retain the paused state until the final acquire.
+No ThreadX suspension queue, timer or original baton/scheduler transition is used
+for this Exec wait. Existing deferred cleanup wakes are flushed before release.
+
+The platform preflight runs under a temporary guard and checks that the held
+Forbid levels belong precisely to this context chain and interrupts are enabled.
+External Forbid/Disable, marked callbacks, unrestored ThreadX critical sections,
+foreign/unmatched restore and nonquiescent waits are refused unchanged. The owner
+cannot begin/end another context, mutate its private integration hooks, detach
+or reset the runtime while paused. The chain and record must remain retained
+through real IO and re-entry; this contract does not permit foreign task removal.
+
+The host model executes two caller identities, preserving a real owned mutex
+while a second admitted caller makes semaphore progress. It checks three-level
+restore, nested releases, protection/identity/retirement guards and fatal begin,
+end, reset and ThreadX-service misuse while paused. Host tests pass **45/45**.
+All four native targets compile with Werror and the startup-first check.
+
+Exact native binary/map hashes and complete receipts are indexed in
+/Users/turo/ai/evidence/exec-threadx-context-pause.json. AgentNet claudecode ran
+each binary once serially on the boardless playhouse3 A1200 KS3.1 r40.68 with
+stack8192, timeout90 and harness300b22e8. Root checked actual guest stdout,
+startup, runner, fault logs and every receipt hash:
+
+| Native fixture at c64325964 | Actual verdict | Exit / host elapsed |
+| --- | --- | --- |
+| Context pause | 14/14; two created workers reaped, one record/stack reuse | 0 /15s |
+| Concurrent driver IO | 25/25;18 workers,2 helpers,2 clocks reaped | 0 /15s |
+| IPv4 protocols | 19/19;2 helpers,2 clocks reaped | 0 /17s |
+| Clock lifecycle | 16/16 | 0 /18s |
+
+The new fixture executes actual Wait, WaitIO and DoIO outside all protected
+contexts. A created worker pauses both its automatic outer and explicit nested
+context, performs its own real timer DoIO, restores its identity and performs a
+ThreadX semaphore operation while the attached caller's real timer request is
+still pending (checked with CheckIO). The caller subsequently restores its
+three-level context. Two cycles close owner IO, wait for native ACK, perform
+public delete, poison/reuse storage and recover all signals and runtime state.
+All four runs have one boot, zero ROM resets and zero illegal/guru/alert lines;
+claudecode reports staging0. These elapsed times are harness host wall clock,
+not Amiga performance measurements.
+
+Independent AgentNet deepseek source review is complete: all5/5 logical parts
+(17 physical chunks), ack4/4 and closing verdict3/3 were read and retained in
+/Users/turo/ai/evidence/exec-threadx-context-pause-review.txt. No blocker in the
+bounded retained-live-owner scope. Review confirms the exact Forbid accounting,
+platform/chain preflight, mutation guards, deferred wake flush and serialized
+re-entry. Execution results above remain separate from this source-only verdict.
+
+This is the Exec-wait mechanism required by the replacement, not a completed
+production hook or caller registry. Shipping ami_netstack_baton_* entry points,
+health/kernel lifecycle and the public cached/uncached adoption APIs remain
+unimplemented in the replacement. The last actual full-profile replacement
+link at f8dd41d0b remains FAIL31; no new full-library link/runtime verdict is
+inferred from these native fixtures. General nested ThreadX blocking still
+requires an outer boundary; this change supports nested Exec-wait brackets.
+
+Next implement backend-owned cached caller records behind the unchanged
+AmiNetCaller pointer+nonwrapping generation handle. Explicitly resolve native
+request/reply-port/signal ownership for externally removed callers before
+admitting them: the current AnxExecWait adapter signals its retained live owner
+and closes resources only in that owner. Merely storing its record outside the
+caller stack does not prove late timer replies or foreign cleanup safe. A
+backend-owned deadline driver is a possible design to evaluate, not an
+implemented or verified solution. Dead-owner cleanup, library close/cancellation,
+event-flags returning-call retention and the4096/1536-versus8192 worker stack
+policy remain OPEN. Full-library size/resources/performance comparisons remain
+unmeasured until functional integration and equal-feature verification.
