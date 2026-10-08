@@ -27,7 +27,7 @@ static unsigned depth, mode, stage;
 static uintptr_t owner;
 static uint64_t now;
 static uint32_t stale_token;
-static unsigned aborted, reject_deferred_abort;
+static unsigned aborted, reject_deferred_abort, reject_blocking_mutex;
 
 static void enter(void *arg) { (void)arg; depth++; }
 static void leave(void *arg) { (void)arg; CHECK(depth); depth--; }
@@ -41,6 +41,13 @@ static void panic(void *arg,const char *text)
         CHECK(socket.nx_tcp_socket_receive_suspended_count==1);
         CHECK(aborted==TX_SUCCESS && callers[0].bridge.resumes==1);
         puts("research_tx_bridge_guard=PASS rejected READY return with deferred cleanup");
+        exit(0);
+    }
+    if (reject_blocking_mutex && !strcmp(text,"blocking mutex contention not implemented")) {
+        CHECK(ip.nx_ip_protection.tx_mutex_owner==&callers[0].thread);
+        CHECK(ip.nx_ip_protection.tx_mutex_ownership_count==1);
+        CHECK(_tx_thread_current_ptr==&callers[2].thread);
+        puts("research_tx_bridge_guard=PASS rejected unsupported blocking mutex contention");
         exit(0);
     }
     fprintf(stderr,"bridge panic: %s\n",text);
@@ -104,6 +111,7 @@ static int park(void *arg,uint64_t deadline)
     }
     anx_tx_context_begin(&frame,&callers[2].thread,0);
     CHECK(_tx_thread_identify()==&callers[2].thread);
+    CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
     if (mode==TIMEOUT || mode==TWO_WAITERS) {
         CHECK(ip.nx_ip_events.tx_event_flags_group_current & NX_IP_TCP_CLEANUP_DEFERRED);
         CHECK(callers[0].thread.tx_thread_suspend_cleanup==_nx_tcp_cleanup_deferred);
@@ -132,6 +140,7 @@ static int park(void *arg,uint64_t deadline)
         resume_arrival();
         if (mode==EXPIRE_ARRIVAL) _nx_tcp_deferred_cleanup_check(&ip);
     }
+    CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
     anx_tx_context_end(&frame);
     owner=saved;
     return 1;
@@ -189,7 +198,19 @@ int main(int argc, char **argv)
 {
     unsigned scenario;
     if (argc!=1) {
-        CHECK(argc==2 && !strcmp(argv[1],"--reject-deferred-abort"));
+        CHECK(argc==2);
+        if (!strcmp(argv[1],"--reject-blocking-mutex")) {
+            AnxTxContext frame;
+            init();
+            anx_tx_context_begin(&frame,&callers[0].thread,0);
+            CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_SUCCESS);
+            anx_tx_context_end(&frame);
+            owner=3; reject_blocking_mutex=1;
+            anx_tx_context_begin(&frame,&callers[2].thread,0);
+            (void)_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER);
+            CHECK(0);
+        }
+        CHECK(!strcmp(argv[1],"--reject-deferred-abort"));
         init(); mode=EXPIRE_ABORT; reject_deferred_abort=1;
         (void)suspend_caller(0,2);
         CHECK(0); /* the unsupported ordering must terminate in panic */
@@ -210,7 +231,6 @@ int main(int argc, char **argv)
         owner=3;
         anx_tx_context_begin(&outer,&callers[2].thread,0);
         CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_NO_WAIT)==TX_NOT_AVAILABLE);
-        CHECK(_tx_mutex_get(&ip.nx_ip_protection,1)==TX_FEATURE_NOT_ENABLED);
         CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_NOT_OWNED);
         anx_tx_context_end(&outer);
         owner=1;

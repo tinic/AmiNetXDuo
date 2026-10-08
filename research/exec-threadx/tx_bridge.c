@@ -309,8 +309,12 @@ UINT _tx_mutex_get(TX_MUTEX *m, ULONG wait)
     need_context();
     current=_tx_thread_identify();
     if (!current || m->tx_mutex_id!=TX_MUTEX_ID) return TX_MUTEX_ERROR;
-    if (m->tx_mutex_ownership_count && m->tx_mutex_owner!=current)
-        return wait==TX_NO_WAIT ? TX_NOT_AVAILABLE : TX_FEATURE_NOT_ENABLED;
+    if (m->tx_mutex_ownership_count && m->tx_mutex_owner!=current) {
+        if (wait==TX_NO_WAIT) return TX_NOT_AVAILABLE;
+        /* NetX often ignores blocking mutex-get status. Returning unsupported
+         * would let it proceed without protection, so fail closed here. */
+        need(0,"blocking mutex contention not implemented");
+    }
     need(m->tx_mutex_ownership_count!=(UINT)-1,"mutex recursion overflow");
     m->tx_mutex_owner=current; m->tx_mutex_ownership_count++;
     return TX_SUCCESS;

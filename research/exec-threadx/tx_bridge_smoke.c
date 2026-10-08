@@ -66,6 +66,7 @@ static void worker_entry(void)
         AnxTxContext frame;
         anx_tx_context_begin(&frame,&worker_thread,0);
         CHECK(_tx_thread_identify()==&worker_thread);
+        CHECK(_tx_mutex_get(&ip.nx_ip_protection,TX_WAIT_FOREVER)==TX_SUCCESS);
         if (next==JOB_TIMEOUT) _nx_tcp_deferred_cleanup_check(&ip);
         else if (next==JOB_CLOSE) {
             socket.nx_tcp_socket_state=NX_TCP_CLOSED;
@@ -77,6 +78,7 @@ static void worker_entry(void)
             if (next==JOB_EXPIRE_ARRIVAL) _nx_tcp_deferred_cleanup_check(&ip);
         }
         job=JOB_NONE;
+        CHECK(_tx_mutex_put(&ip.nx_ip_protection)==TX_SUCCESS);
         anx_tx_context_end(&frame);
     }
     CHECK(anx_tx_detach(&worker_bridge));

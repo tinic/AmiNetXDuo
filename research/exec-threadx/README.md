@@ -173,7 +173,8 @@ An explicit task call boundary holds `Forbid` while NetX executes. Each frame
 publishes its caller identity and system state. Blocking drops exactly the
 outer boundary, clears the global caller/frame and balances the preemption
 counter; returning reacquires it and restores the original frame. Every test
-producer (arrival, timeout, close and abort) enters the same boundary. The marked
+producer (arrival, timeout, close and abort) enters the same boundary. Host and
+native IP actors acquire/release the actual IP mutex around their operations. The marked
 timer context uses the actual port's `TX_TIMER_PROCESS_IN_ISR` system-state
 convention, but executes in task context; real interrupt callers are unsupported.
 Nested frame teardown checks owner and LIFO order.
@@ -192,8 +193,10 @@ linked-source evidence, rather than an emulated cleanup callback.
 
 Implemented services are limited to the suspension/timer seam, identity,
 non-inheriting uncontended/recursive mutexes, and event creation/set without
-waiters. Blocking mutex contention returns `TX_FEATURE_NOT_ENABLED`; unsupported
-event waiters fail closed. Missing services remain missing link symbols.
+waiters. Blocking mutex contention fails closed because NetX often ignores mutex-get
+status; returning an unsupported error would let it proceed without the lock.
+`TX_NO_WAIT` contention returns `TX_NOT_AVAILABLE`. Unsupported event waiters
+fail closed. Missing services remain missing link symbols.
 `_tx_thread_system_preempt_check` only defers Exec dispatch to the boundary's
 `Permit`; it does not implement ThreadX ready queues, priorities or thresholds.
 The deterministic post-mutex-release seam is NULL in the native experiment.
@@ -237,8 +240,8 @@ producer to unlink and clear cleanup; clearing it inside resume would hide the
 deferred-abort node still attached. The guard rejects that unresolved ordering. Claudecode independently reviewed
 the host-test/CMake delta `9af3a1965..cd8d6a80a` and found no blocker; the negative
 test correctly checks rejection, rather than claiming the unresolved ordering
-works. Host CTest is PASS 4/4 (eleven bridge schedules plus the separate guard
-probe, primitive model and extraction test).
+works. Host CTest also registers a separate rejection probe for unsupported blocking
+mutex contention. Its result is protection evidence, not mutex-wait conformance.
 
 ## Still open
 
