@@ -90,88 +90,109 @@ ami_if_numbers[] =
 _Static_assert(sizeof(AmiIfConfig) <= 65535UL,
                "numeric interface field offsets must fit in UWORD");
 
+/* Preserve keyword order: typo suggestions keep the first equally close
+   match. ADDRESS/IPADDRESS and NETMASK/SUBNETMASK are spelling aliases;
+   PRIORITY/PRI and CONFIGURE6/IPTYPE6 are aliases too. IPv6 names remain
+   recognised in IPv4-only builds. Roadshow's unsupported keywords remain
+   recognised, while NAMESERVER/DOMAIN are consumed by the resolver loader. */
+#define IF_KEYWORDS(X) \
+    X(device, DEVICE) \
+    X(card, CARD) \
+    X(id, ID) \
+    X(unit, UNIT) \
+    X(mdns, MDNS) \
+    X(address, ADDRESS) \
+    X(ipaddress, ADDRESS) \
+    X(netmask, NETMASK) \
+    X(subnetmask, NETMASK) \
+    X(gateway, GATEWAY) \
+    X(mtu, MTU) \
+    X(configure, CONFIGURE) \
+    X(iptype, IPTYPE) \
+    X(state, STATE) \
+    X(downgoesoffline, DOWNGOESOFFLINE) \
+    X(filter, FILTER) \
+    X(requiresinitdelay, REQUIRESINITDELAY) \
+    X(hardwareaddress, HARDWAREADDRESS) \
+    X(iprequests, IPREQUESTS) \
+    X(arprequests, ARPREQUESTS) \
+    X(writerequests, WRITEREQUESTS) \
+    X(rxbuffer, RXBUFFER) \
+    X(tcpackmax, TCPACKMAX) \
+    X(tcpgrowrtt, TCPGROWRTT) \
+    X(tcpwanwindow, TCPWANWINDOW) \
+    X(groframes, GROFRAMES) \
+    X(ackpace, ACKPACE) \
+    X(priority, PRIORITY) \
+    X(pri, PRIORITY) \
+    X(address6, ADDRESS6) \
+    X(ipaddress6, ADDRESS6) \
+    X(gateway6, GATEWAY6) \
+    X(configure6, CONFIGURE6) \
+    X(iptype6, CONFIGURE6) \
+    X(arptype, IGNORED) \
+    X(debug, IGNORED) \
+    X(pointtopoint, IGNORED) \
+    X(multicast, IGNORED) \
+    X(reportoffline, IGNORED) \
+    X(copymode, IGNORED) \
+    X(alias, IGNORED) \
+    X(destination, IGNORED) \
+    X(destinationaddr, IGNORED) \
+    X(destinationaddress, IGNORED) \
+    X(hardwaretype, IGNORED) \
+    X(broadcastaddress, IGNORED) \
+    X(metric, IGNORED) \
+    X(lease, IGNORED) \
+    X(dhcpunicast, IGNORED) \
+    X(linkstatuscommand, IGNORED) \
+    X(nameserver, IGNORED) \
+    X(domain, IGNORED)
+
+typedef struct IfKeywordNames
+{
+#define IF_KEYWORD_FIELD(name, key) char name[sizeof(#name)];
+    IF_KEYWORDS(IF_KEYWORD_FIELD)
+#undef IF_KEYWORD_FIELD
+} IfKeywordNames;
+
+static const IfKeywordNames ami_if_keyword_names = {
+#define IF_KEYWORD_NAME(name, key) #name,
+    IF_KEYWORDS(IF_KEYWORD_NAME)
+#undef IF_KEYWORD_NAME
+};
+
 static const struct IfKeyword
 {
-    const char *name;
-    IfKey       key;
+    UWORD offset;
+    UBYTE key;
 }
-ami_if_keywords[] =
-{
-    /* Keywords that map onto AmiIfConfig. */
-    { "device",             IF_KEY_DEVICE    },
-    { "card",               IF_KEY_CARD      },
-    { "id",                 IF_KEY_ID        },
-    { "unit",               IF_KEY_UNIT      },
-    { "mdns",               IF_KEY_MDNS      },
-    { "address",            IF_KEY_ADDRESS   },
-    { "ipaddress",          IF_KEY_ADDRESS   },   /* AmiTCP spelling */
-    { "netmask",            IF_KEY_NETMASK   },
-    { "subnetmask",         IF_KEY_NETMASK   },   /* AmiTCP spelling */
-    { "gateway",            IF_KEY_GATEWAY   },
-    { "mtu",                IF_KEY_MTU       },
-    { "configure",          IF_KEY_CONFIGURE },
-    { "iptype",             IF_KEY_IPTYPE    },
-    { "state",              IF_KEY_STATE     },
-    { "downgoesoffline",    IF_KEY_DOWNGOESOFFLINE   },
-    { "filter",             IF_KEY_FILTER            },
-    { "requiresinitdelay",  IF_KEY_REQUIRESINITDELAY },
-    { "hardwareaddress",    IF_KEY_HARDWAREADDRESS   },
-    { "iprequests",         IF_KEY_IPREQUESTS        },
-    { "arprequests",        IF_KEY_ARPREQUESTS       },
-    { "writerequests",      IF_KEY_WRITEREQUESTS     },
-    { "rxbuffer",           IF_KEY_RXBUFFER          },
-    { "tcpackmax",          IF_KEY_TCPACKMAX         },
-    { "tcpgrowrtt",         IF_KEY_TCPGROWRTT        },
-    { "tcpwanwindow",       IF_KEY_TCPWANWINDOW      },
-    { "groframes",          IF_KEY_GROFRAMES         },
-    { "ackpace",            IF_KEY_ACKPACE           },
-    { "priority",           IF_KEY_PRIORITY          },   /* Roadshow's, and PRI */
-    { "pri",                IF_KEY_PRIORITY          },
-
-    /* IPv6 keywords: the IPv4 keyword plus a "6".  In the floor build (no
-       AMINETXDUO_IPV6) they must stay RECOGNISED and be ignored, so the same
-       file loads in both builds without an "unknown keyword" warning. */
-    { "address6",           IF_KEY_ADDRESS6  },
-    { "ipaddress6",         IF_KEY_ADDRESS6  },
-    { "gateway6",           IF_KEY_GATEWAY6  },
-    { "configure6",         IF_KEY_CONFIGURE6},
-    { "iptype6",            IF_KEY_CONFIGURE6},
-
-    /* Roadshow keywords with nowhere to put them; listed so a stock
-       configuration file produces no warnings. */
-    { "arptype",            IF_KEY_IGNORED   },
-    { "debug",              IF_KEY_IGNORED   },
-    { "pointtopoint",       IF_KEY_IGNORED   },
-    { "multicast",          IF_KEY_IGNORED   },
-    { "reportoffline",      IF_KEY_IGNORED   },
-    { "copymode",           IF_KEY_IGNORED   },
-    { "alias",              IF_KEY_IGNORED   },
-    { "destination",        IF_KEY_IGNORED   },
-    { "destinationaddr",    IF_KEY_IGNORED   },
-    { "destinationaddress", IF_KEY_IGNORED   },
-    { "hardwaretype",       IF_KEY_IGNORED   },
-    { "broadcastaddress",   IF_KEY_IGNORED   },
-    { "metric",             IF_KEY_IGNORED   },
-    { "lease",              IF_KEY_IGNORED   },
-    { "dhcpunicast",        IF_KEY_IGNORED   },
-    { "linkstatuscommand",  IF_KEY_IGNORED   },
-
-    /* Written by AmiTCP_NG's installer.  ami_config_resolver_from_interfaces()
-       reads them when DEVS:Internet/name_resolution supplies none, and says so
-       when it does; they are not part of an interface's own configuration. */
-    { "nameserver",         IF_KEY_IGNORED   },
-    { "domain",             IF_KEY_IGNORED   },
-
-    { NULL,                 IF_KEY_UNKNOWN   }
+ami_if_keywords[] = {
+#define IF_KEYWORD_ENTRY(name, key) \
+    { (UWORD)offsetof(IfKeywordNames, name), IF_KEY_##key },
+    IF_KEYWORDS(IF_KEYWORD_ENTRY)
+#undef IF_KEYWORD_ENTRY
 };
+#undef IF_KEYWORDS
+
+_Static_assert(sizeof(IfKeywordNames) <= 65535UL,
+               "interface keyword offsets must fit in UWORD");
+_Static_assert(IF_KEY_ACKPACE <= 255, "interface keyword IDs must fit in UBYTE");
+
+#define IF_KEYWORD_COUNT (sizeof(ami_if_keywords) / sizeof(ami_if_keywords[0]))
+
+static const char *if_keyword_name(const struct IfKeyword *keyword)
+{
+    return (const char *)&ami_if_keyword_names + keyword->offset;
+}
 
 static IfKey lookup_if_keyword(const char *name)
 {
     const struct IfKeyword *k;
 
-    for (k = ami_if_keywords; k->name != NULL; k++)
+    for (k = ami_if_keywords; k < ami_if_keywords + IF_KEYWORD_COUNT; k++)
     {
-        if (ami_cfg_stricmp(name, k->name) == 0)
+        if (ami_cfg_stricmp(name, if_keyword_name(k)) == 0)
             return k->key;
     }
 
@@ -252,14 +273,15 @@ static const char *suggest_if_keyword(const char *name)
     const char             *best  = NULL;
     ULONG                   bestd = 3;
 
-    for (k = ami_if_keywords; k->name != NULL; k++)
+    for (k = ami_if_keywords; k < ami_if_keywords + IF_KEYWORD_COUNT; k++)
     {
-        ULONG d = edit_distance(name, k->name);
+        const char *keyword = if_keyword_name(k);
+        ULONG d = edit_distance(name, keyword);
 
         if (d < bestd)
         {
             bestd = d;
-            best  = k->name;
+            best  = keyword;
         }
     }
 
@@ -300,25 +322,27 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
  * AMI_CFG_PROBLEM_NOTE, not _WARN: nothing is wrong with the file, and only
  * CheckNetConfig prints notes (see aminetxduo/config.h).
  */
-static const struct { const char *key; const char *why; } cfg_inert_keys[] =
+static const struct { UWORD offset; const char *why; } cfg_inert_keys[] =
 {
-    { "alias",             "not supported" },
-    { "arptype",           "Ethernet only" },
-    { "hardwaretype",      "Ethernet only" },
-    { "broadcastaddress",  "the broadcast address is derived from ADDRESS and NETMASK" },
-    { "destinationaddress","point-to-point links are not supported" },
-    { "copymode",          "set by the driver" },
-    { "debug",             "not supported" },
-    { "destination",       "point-to-point links are not supported" },
-    { "destinationaddr",   "point-to-point links are not supported" },
-    { "dhcpunicast",       "DHCP renewal is always broadcast here" },
-    { "lease",             "set by the DHCP server" },
-    { "linkstatuscommand", "not supported" },
-    { "metric",            "no route metrics; PRIORITY orders interfaces" },
-    { "multicast",         "automatic" },
-    { "pointtopoint",      "point-to-point links are not supported" },
-    { "reportoffline",     "always reported" },
-    { NULL, NULL }
+#define IF_INERT(name, why) { (UWORD)offsetof(IfKeywordNames, name), why }
+    IF_INERT(alias, "not supported"),
+    IF_INERT(arptype, "Ethernet only"),
+    IF_INERT(hardwaretype, "Ethernet only"),
+    IF_INERT(broadcastaddress, "the broadcast address is derived from ADDRESS and NETMASK"),
+    IF_INERT(destinationaddress, "point-to-point links are not supported"),
+    IF_INERT(copymode, "set by the driver"),
+    IF_INERT(debug, "not supported"),
+    IF_INERT(destination, "point-to-point links are not supported"),
+    IF_INERT(destinationaddr, "point-to-point links are not supported"),
+    IF_INERT(dhcpunicast, "DHCP renewal is always broadcast here"),
+    IF_INERT(lease, "set by the DHCP server"),
+    IF_INERT(linkstatuscommand, "not supported"),
+    IF_INERT(metric, "no route metrics; PRIORITY orders interfaces"),
+    IF_INERT(multicast, "automatic"),
+    IF_INERT(pointtopoint, "point-to-point links are not supported"),
+    IF_INERT(reportoffline, "always reported"),
+#undef IF_INERT
+    { 0, NULL }
 };
 
 static VOID report_inert_keyword(ULONG line, const char *key)
@@ -329,9 +353,10 @@ static VOID report_inert_keyword(ULONG line, const char *key)
     if (!ami_cfg_problems_wanted())
         return;
 
-    for (i = 0; cfg_inert_keys[i].key != NULL; i++)
+    for (i = 0; cfg_inert_keys[i].why != NULL; i++)
     {
-        if (ami_cfg_stricmp(key, cfg_inert_keys[i].key) == 0)
+        if (ami_cfg_stricmp(key, (const char *)&ami_if_keyword_names +
+                                  cfg_inert_keys[i].offset) == 0)
         {
             ami_cfg_join3(text, sizeof(text), key,
                           " ignored: ",

@@ -1017,6 +1017,64 @@ static int seen_mentions(const char *needle)
     return 0;
 }
 
+static void test_interface_keyword_aliases(void)
+{
+    static const struct { const char *typo; const char *nearest; } suggestions[] = {
+        { "devic", "DEVICE" }, { "ipaddres", "IPADDRESS" },
+        { "subnetmas", "SUBNETMASK" }, { "addresss", "ADDRESS" },
+        { "gatewayy", "GATEWAY" }, { "iptypes", "IPTYPE" },
+        { "destinationadd", "DESTINATIONADDR" }, { "domainn", "DOMAIN" }
+    };
+    AmiIfConfig iface;
+    char *buf;
+    unsigned i;
+
+    printf("interface: keyword aliases, prefix distinctions and suggestion ties\n");
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
+    buf = dup_text("DEVICE=a2065.device\nIPADDRESS=192.168.3.4\n"
+                   "SUBNETMASK=255.255.255.0\nPRI=-23\n"
+                   "NAMESERVER=192.168.3.1\nDOMAIN=example.org\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK_IP(iface.address, 192, 168, 3, 4);
+    CHECK_IP(iface.netmask, 255, 255, 255, 0);
+    CHECK(iface.priority == -23);
+    CHECK(seen_count == 0);
+    free(buf);
+
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure=dhcp\n"
+                   "destination=x\ndestinationaddr=x\ndestinationaddress=x\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 3);
+    CHECK_STR(seen[0].text, "destination ignored: point-to-point links are not supported");
+    CHECK_STR(seen[1].text, "destinationaddr ignored: point-to-point links are not supported");
+    CHECK_STR(seen[2].text, "destinationaddress ignored: point-to-point links are not supported");
+    for (i = 0; i < 3; i++)
+        CHECK(seen[i].severity == AMI_CFG_PROBLEM_NOTE && seen[i].line == i + 3);
+    free(buf);
+
+    for (i = 0; i < sizeof(suggestions) / sizeof(suggestions[0]); i++)
+    {
+        char text[128], hint[96], problem[96];
+
+        snprintf(text, sizeof(text), "device=a2065.device\nconfigure=dhcp\n%s=x\n",
+                 suggestions[i].typo);
+        snprintf(hint, sizeof(hint), "nearest: %s; line ignored", suggestions[i].nearest);
+        snprintf(problem, sizeof(problem), "unknown keyword '%s'", suggestions[i].typo);
+        seen_count = 0;
+        buf = dup_text(text);
+        CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+        CHECK(seen_count == 1);
+        CHECK(seen[0].severity == AMI_CFG_PROBLEM_WARN && seen[0].line == 3);
+        CHECK_STR(seen[0].text, problem);
+        CHECK_STR(seen[0].hint, hint);
+        free(buf);
+    }
+    ami_config_set_reporter(NULL, NULL);
+}
+
 static void test_problem_reporter(void)
 {
     AmiIfConfig iface;
@@ -4562,6 +4620,7 @@ int main(int argc, char **argv)
     test_interface_static();
     test_interface_amitcp_flavour();
     test_interface_errors();
+    test_interface_keyword_aliases();
     test_problem_reporter();
     test_numeric_iptype_is_reported_inert();
     test_inert_keywords_are_notes();
