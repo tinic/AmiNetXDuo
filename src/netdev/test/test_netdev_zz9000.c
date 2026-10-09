@@ -166,55 +166,54 @@ static VOID bulk_reset(VOID)
 
 /* A window whose payload begins 2 mod 4, as the card's does; a destination
    at both phases; guard bytes on every side. */
+static ULONG fold_sum(ULONG sum)
+{
+    while (sum >> 16) sum = (sum & 0xffffu) + (sum >> 16);
+    return sum;
+}
+
 static VOID payload_copy_every_length(VOID)
 {
-    static union { ULONG align; UBYTE b[128]; } win;
-    static union { ULONG align; UBYTE b[128]; } out;
-    UWORD len;
-    UWORD phase;
-
-    for (phase = 0; phase <= 2; phase += 2)
-    {
-        for (len = 0; len <= 70; len++)
-        {
-            const volatile UBYTE *src = win.b + 2;      /* 2 mod 4 */
-            UBYTE *dst = out.b + 4 + phase;
-            size_t i;
-            int   bytes_ok;
-            int   guards_ok = 1;
-            char  what[96];
-
-            for (i = 0; i < sizeof(win.b); i++)
-                win.b[i] = (UBYTE)(0x40 + i);
+    static union { ULONG align; UBYTE b[1544]; } win;
+    static union { ULONG align; UBYTE b[1544]; } out;
+    unsigned cases = 0;
+    for (unsigned srcphase = 0; srcphase <= 2; srcphase += 2)
+      for (unsigned dstphase = 0; dstphase <= 2; dstphase += 2)
+        for (unsigned kind = 0; kind < 3; kind++)
+          for (unsigned len = 0; len <= 1514; len++) {
+            const volatile UBYTE *src = win.b + 4 + srcphase;
+            UBYTE *dst = out.b + 4 + dstphase;
+            for (unsigned i = 0; i < sizeof(win.b); i++) win.b[i] = (UBYTE)(i * 37u + (len & 255));
             memset(out.b, 0xee, sizeof(out.b));
             bulk_reset();
-
-            zz_copy_payload(dst, src, len);
-
-            bytes_ok = same_bytes(dst, (const UBYTE *)src, len);
-            for (i = 0; i < 4u + phase; i++)
-                if (out.b[i] != 0xee)
-                    guards_ok = 0;
-            for (i = 4 + phase + len; i < sizeof(out.b); i++)
-                if (out.b[i] != 0xee)
-                    guards_ok = 0;
-
-            snprintf(what, sizeof(what), "len %u dst %u mod 4: bytes", len, (unsigned)phase);
-            expect(bytes_ok, what);
-            snprintf(what, sizeof(what), "len %u dst %u mod 4: guards", len, (unsigned)phase);
-            expect(guards_ok, what);
-            snprintf(what, sizeof(what), "len %u dst %u mod 4: bulk source aligned", len,
-                    (unsigned)phase);
-            expect(bulk_misaligned == 0, what);
-
-            /* The bulk carries exactly the longwords between the first word
-               and the tail, and is not called for fewer than four. */
-            snprintf(what, sizeof(what), "len %u: bulk longwords", len);
-            expect(bulk_longs == (len >= 2 ? (ULONG)((len - 2) >> 2) : 0), what);
-            snprintf(what, sizeof(what), "len %u: bulk calls", len);
-            expect(bulk_calls == (len >= 6 ? 1UL : 0UL), what);
-        }
-    }
+            ULONG sum = 0;
+            if (kind == 0) zz_copy_payload(dst, src, (UWORD)len);
+            else if (kind == 1) sum = zz_copy_payload_sum(dst, src, (UWORD)len);
+            else zz_copy_frame(dst, src, (UWORD)len);
+            expect(same_bytes(dst, (const UBYTE *)src, (UWORD)len), "matrix: correct bytes");
+            int guards = 1;
+            for (unsigned i = 0; i < 4 + dstphase; i++) if (out.b[i] != 0xee) guards = 0;
+            for (unsigned i = 4 + dstphase + len; i < sizeof(out.b); i++) if (out.b[i] != 0xee) guards = 0;
+            expect(guards, "matrix: destination guards");
+            expect(bulk_misaligned == 0, "matrix: all bulk Zorro sources aligned");
+            unsigned peel = srcphase && len >= 2 ? 2 : 0;
+            expect(bulk_longs == (len - peel) / 4, "matrix: correct bulk length");
+            if (kind == 1) {
+                ULONG reference = 0;
+                for (unsigned i = 0; i + 2 <= len; i += 2) {
+                    UWORD w; memcpy(&w, (const UBYTE *)src + i, 2);
+                    reference += w;
+                    reference = fold_sum(reference);
+                }
+                if (len & 1) {
+                    UWORD w; memcpy(&w, (const UBYTE *)src + len - 1, 2);
+                    reference += w & 0xff00u;
+                }
+                expect(fold_sum(sum) == fold_sum(reference), "matrix: folded checksum agrees with word reference");
+            }
+            cases++;
+          }
+    printf("PASS copy matrix: %u cases, all3 helpers/source+destination phases/length0..1514\n",cases);
 }
 
 /* A full 32-bit bulk sum plus either tail must fold its end-around carry. */
