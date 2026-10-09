@@ -47,6 +47,7 @@ static APTR test_alloc_mem(ULONG bytes, ULONG flags)
 static ULONG bulk_calls;
 static ULONG bulk_misaligned;       /* sources not 0 mod 4 */
 static ULONG bulk_longs;
+static int   bulk_last_to_misaligned; /* the latest bulk destination */
 
 AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
 {
@@ -54,6 +55,7 @@ AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from
     bulk_longs += longs;
     if (((uintptr_t)from & 3u) != 0)
         bulk_misaligned++;
+    bulk_last_to_misaligned = (((uintptr_t)to & 3u) != 0);
     memcpy((void *)to, (const void *)from, longs << 2);
 }
 
@@ -67,6 +69,7 @@ AMIGA_ASM_ARGS ULONG n68k_copy_longs_sum(void *to, const volatile void *from, UL
     bulk_longs += longs;
     if (((uintptr_t)s & 3u) != 0)
         bulk_misaligned++;
+    bulk_last_to_misaligned = (((uintptr_t)to & 3u) != 0);
     memcpy(to, s, longs << 2);
     for (i = 0; i < (longs << 2); i += 4)
     {
@@ -106,6 +109,8 @@ BOOL netdev_wait_done(NetdevWait *w)
     return (BOOL)(w->nw_Spins-- == 0);
 }
 
+static UWORD test_rx_header_word(const volatile UBYTE *p);
+#define ZZ_RX_HEADER_WORD(p) test_rx_header_word(p)
 #include "zz9000.c"
 
 static union
@@ -161,55 +166,54 @@ static VOID bulk_reset(VOID)
 
 /* A window whose payload begins 2 mod 4, as the card's does; a destination
    at both phases; guard bytes on every side. */
+static ULONG fold_sum(ULONG sum)
+{
+    while (sum >> 16) sum = (sum & 0xffffu) + (sum >> 16);
+    return sum;
+}
+
 static VOID payload_copy_every_length(VOID)
 {
-    static union { ULONG align; UBYTE b[128]; } win;
-    static union { ULONG align; UBYTE b[128]; } out;
-    UWORD len;
-    UWORD phase;
-
-    for (phase = 0; phase <= 2; phase += 2)
-    {
-        for (len = 0; len <= 70; len++)
-        {
-            const volatile UBYTE *src = win.b + 2;      /* 2 mod 4 */
-            UBYTE *dst = out.b + 4 + phase;
-            size_t i;
-            int   bytes_ok;
-            int   guards_ok = 1;
-            char  what[96];
-
-            for (i = 0; i < sizeof(win.b); i++)
-                win.b[i] = (UBYTE)(0x40 + i);
+    static union { ULONG align; UBYTE b[1544]; } win;
+    static union { ULONG align; UBYTE b[1544]; } out;
+    unsigned cases = 0;
+    for (unsigned srcphase = 0; srcphase <= 2; srcphase += 2)
+      for (unsigned dstphase = 0; dstphase <= 2; dstphase += 2)
+        for (unsigned kind = 0; kind < 3; kind++)
+          for (unsigned len = 0; len <= 1514; len++) {
+            const volatile UBYTE *src = win.b + 4 + srcphase;
+            UBYTE *dst = out.b + 4 + dstphase;
+            for (unsigned i = 0; i < sizeof(win.b); i++) win.b[i] = (UBYTE)(i * 37u + (len & 255));
             memset(out.b, 0xee, sizeof(out.b));
             bulk_reset();
-
-            zz_copy_payload(dst, src, len);
-
-            bytes_ok = same_bytes(dst, (const UBYTE *)src, len);
-            for (i = 0; i < 4u + phase; i++)
-                if (out.b[i] != 0xee)
-                    guards_ok = 0;
-            for (i = 4 + phase + len; i < sizeof(out.b); i++)
-                if (out.b[i] != 0xee)
-                    guards_ok = 0;
-
-            snprintf(what, sizeof(what), "len %u dst %u mod 4: bytes", len, (unsigned)phase);
-            expect(bytes_ok, what);
-            snprintf(what, sizeof(what), "len %u dst %u mod 4: guards", len, (unsigned)phase);
-            expect(guards_ok, what);
-            snprintf(what, sizeof(what), "len %u dst %u mod 4: bulk source aligned", len,
-                    (unsigned)phase);
-            expect(bulk_misaligned == 0, what);
-
-            /* The bulk carries exactly the longwords between the first word
-               and the tail, and is not called for fewer than four. */
-            snprintf(what, sizeof(what), "len %u: bulk longwords", len);
-            expect(bulk_longs == (len >= 2 ? (ULONG)((len - 2) >> 2) : 0), what);
-            snprintf(what, sizeof(what), "len %u: bulk calls", len);
-            expect(bulk_calls == (len >= 6 ? 1UL : 0UL), what);
-        }
-    }
+            ULONG sum = 0;
+            if (kind == 0) zz_copy_payload(dst, src, (UWORD)len);
+            else if (kind == 1) sum = zz_copy_payload_sum(dst, src, (UWORD)len);
+            else zz_copy_frame(dst, src, (UWORD)len);
+            expect(same_bytes(dst, (const UBYTE *)src, (UWORD)len), "matrix: correct bytes");
+            int guards = 1;
+            for (unsigned i = 0; i < 4 + dstphase; i++) if (out.b[i] != 0xee) guards = 0;
+            for (unsigned i = 4 + dstphase + len; i < sizeof(out.b); i++) if (out.b[i] != 0xee) guards = 0;
+            expect(guards, "matrix: destination guards");
+            expect(bulk_misaligned == 0, "matrix: all bulk Zorro sources aligned");
+            unsigned peel = srcphase && len >= 2 ? 2 : 0;
+            expect(bulk_longs == (len - peel) / 4, "matrix: correct bulk length");
+            if (kind == 1) {
+                ULONG reference = 0;
+                for (unsigned i = 0; i + 2 <= len; i += 2) {
+                    UWORD w; memcpy(&w, (const UBYTE *)src + i, 2);
+                    reference += w;
+                    reference = fold_sum(reference);
+                }
+                if (len & 1) {
+                    UWORD w; memcpy(&w, (const UBYTE *)src + len - 1, 2);
+                    reference += w & 0xff00u;
+                }
+                expect(fold_sum(sum) == fold_sum(reference), "matrix: folded checksum agrees with word reference");
+            }
+            cases++;
+          }
+    printf("PASS copy matrix: %u cases, all3 helpers/source+destination phases/length0..1514\n",cases);
 }
 
 /* A full 32-bit bulk sum plus either tail must fold its end-around carry. */
@@ -235,7 +239,13 @@ static VOID summed_tail_carries(VOID)
 
 /* -------------------------------------------------------- through rint --- */
 
-static UBYTE  claimed_buf[NETDEV_RXBUF_MAX + 8];
+/* Longword aligned like an opener's buffer; a bare UBYTE array is not
+   (macOS/clang placed it 2 mod 4). */
+static union
+{
+    ULONG align;
+    UBYTE bytes[NETDEV_RXBUF_MAX + 8];
+} claimed_buf;
 static UBYTE *claim_dst;
 static UBYTE  claim_wanted;
 static ULONG  claim_sum;
@@ -272,12 +282,12 @@ static VOID receive(APTR arg, const UBYTE *frame, UWORD len)
 }
 
 /* A broadcast IPv4/TCP frame of `total` IP bytes the GEM says it verified. */
-static UWORD present_tcp_frame(UWORD total)
+static UWORD present_tcp_frame_at(UWORD total, UWORD shift)
 {
     volatile UWORD *length = (volatile UWORD *)(volatile void *)
                              (board.bytes + ZZ_RX_WINDOW);
     volatile UWORD *serial = length + 1;
-    UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD;
+    UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD + shift;
     UWORD  len = (UWORD)(NETDEV_HDR_LEN + total);
     UWORD  i;
 
@@ -296,11 +306,16 @@ static UWORD present_tcp_frame(UWORD total)
     frame[21] = 0;
     frame[23] = 6;                      /* TCP */
 
-    *length = len;
+    *length = (UWORD)(len | (shift ? ZZ_RX_LEN_OFFSET2 : 0u));
     *serial = 0x0042;
     *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_RX_META) =
         (UWORD)(ZZ_RXM_PRESENT | ZZ_RXM_TCP);
     return len;
+}
+
+static UWORD present_tcp_frame(UWORD total)
+{
+    return present_tcp_frame_at(total, 0);
 }
 
 static VOID fresh_unit(VOID)
@@ -326,7 +341,7 @@ static VOID verified_claim_path_reads_aligned(VOID)
     fresh_unit();
     nic.rx_claim   = claim;
     nic.rx_claimed = claimed;
-    claim_dst      = claimed_buf;       /* longword aligned, as an opener's is */
+    claim_dst      = claimed_buf.bytes;       /* longword aligned, as an opener's is */
     claim_wanted   = ANXD_S2_RXF_VERIFIED;
     len = present_tcp_frame(total);
 
@@ -335,7 +350,7 @@ static VOID verified_claim_path_reads_aligned(VOID)
     expect((claim_flags & ANXD_S2_RXF_VERIFIED) != 0,
            "verified: the GEM's verdict is passed on");
     expect(nic.core_stat[ZZ_ST_HW_VERIFIED] == 1, "verified: counted as such");
-    expect(same_bytes(claimed_buf, frame + NETDEV_HDR_LEN, total),
+    expect(same_bytes(claimed_buf.bytes, frame + NETDEV_HDR_LEN, total),
            "verified: the payload bytes arrive");
     expect(bulk_misaligned == 0, "verified: every bulk read was aligned");
     expect(bulk_calls == 2, "verified: header bulk and payload bulk");
@@ -352,14 +367,14 @@ static VOID summed_claim_path_still_aligned(VOID)
     fresh_unit();
     nic.rx_claim   = claim;
     nic.rx_claimed = claimed;
-    claim_dst      = claimed_buf;
+    claim_dst      = claimed_buf.bytes;
     claim_wanted   = 0;                 /* nobody negotiated VERIFIED */
     present_tcp_frame(total);
 
     expect(zz_rint(&nic), "summed: the frame is consumed");
     expect(claim_done, "summed: the claim completes");
     expect((claim_flags & ANXD_S2_RXF_SUMMED) != 0, "summed: flagged SUMMED");
-    expect(same_bytes(claimed_buf, frame + NETDEV_HDR_LEN, total),
+    expect(same_bytes(claimed_buf.bytes, frame + NETDEV_HDR_LEN, total),
            "summed: the payload bytes arrive");
     expect(bulk_misaligned == 0, "summed: every bulk read was aligned");
 }
@@ -670,8 +685,144 @@ static VOID rx_capacity_from_firmware_register(VOID)
            "RX capacity: a present but zero count is not trusted");
 }
 
+/* The default layout: the payload copy reads aligned and writes 2 mod 4. */
+static VOID default_layout_payload_dst_is_shifted(VOID)
+{
+    fresh_unit();
+    nic.rx_claim   = claim;
+    nic.rx_claimed = claimed;
+    claim_dst      = claimed_buf.bytes;
+    claim_wanted   = ANXD_S2_RXF_VERIFIED;
+    present_tcp_frame(200);
+    expect(zz_rint(&nic), "default layout: the frame is consumed");
+    expect(bulk_last_to_misaligned,
+           "default layout: the payload bulk writes 2 mod 4 (what RX offset2 removes)");
+}
+
+/* A frame the firmware shifted two bytes: payload and destination are both
+   longword aligned, nothing is peeled, the bytes and the length are right. */
+static VOID rx_offset2_payload_aligned_both_sides(VOID)
+{
+    const UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD + 2;
+    UWORD total;
+
+    for (total = 199; total <= 202; total++)
+    {
+        UWORD wanted;
+
+        for (wanted = 0; wanted < 2; wanted++)
+        {
+            fresh_unit();
+            nic.rx_claim   = claim;
+            nic.rx_claimed = claimed;
+            claim_dst      = claimed_buf.bytes;
+            claim_wanted   = wanted ? ANXD_S2_RXF_VERIFIED : 0;
+            present_tcp_frame_at(total, 2);
+            expect(zz_rint(&nic), "RX offset2: the frame is consumed");
+            expect(claim_done, "RX offset2: the claim completes");
+            expect(same_bytes(claimed_buf.bytes, frame + NETDEV_HDR_LEN, total),
+                   "RX offset2: the payload bytes arrive");
+            expect(bulk_misaligned == 0, "RX offset2: every bulk read was aligned");
+            expect(!bulk_last_to_misaligned,
+                   "RX offset2: the payload bulk writes longword aligned");
+            expect(nic.rx_errors == 0, "RX offset2: the flag is not taken for length");
+        }
+    }
+
+    fresh_unit();
+    nic.rx_claim = NULL;
+    present_tcp_frame_at(199, 2);
+    expect(zz_rint(&nic), "RX offset2 staging: the frame is consumed");
+    expect(received_len == NETDEV_HDR_LEN + 199, "RX offset2 staging: the whole frame");
+    expect(same_bytes(received, frame, received_len), "RX offset2 staging: the bytes match");
+    expect(bulk_misaligned == 0, "RX offset2 staging: every bulk read was aligned");
+}
+
+/* zz_init asks for the layout only when the firmware said it can. */
+static VOID rx_offset2_requested_only_when_offered(VOID)
+{
+    fresh_unit();
+    core.rx_off2 = 0;
+    zz_init(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) == 0,
+           "RX offset2: not requested from firmware that does not offer it");
+    fresh_unit();
+    core.rx_off2 = 1;
+    zz_init(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) ==
+           (UWORD)(ZZ_CFG_RX_OFFSET2 | 1u),
+           "RX offset2: requested when offered");
+}
+
+/* Review regression: restore the layout before handing the board back. */
+static VOID rx_offset2_stop_restores_default(VOID)
+{
+    fresh_unit();
+    core.rx_off2 = 1;
+    zz_init(&nic);
+    zz_stop(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) ==
+           (UWORD)ZZ_CFG_RX_OFFSET2,
+           "RX offset2: stop restores default firmware layout");
+    fresh_unit();
+    core.rx_off2 = 0;
+    zz_stop(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) == 0,
+           "RX offset2: stop does not command unsupported firmware");
+}
+
+/* Publish the already-filled slot after the first header read completes. */
+static UWORD publish_len;
+static int publication_pending;
+static UWORD test_rx_header_word(const volatile UBYTE *p)
+{
+    UWORD got = *(const volatile UWORD *)(const volatile void *)p;
+    if (publication_pending)
+    {
+        publication_pending = 0;
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW) = publish_len;
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW + 2) = 0x0042;
+    }
+    return got;
+}
+
+static VOID publication_between_header_reads(VOID)
+{
+    UWORD shift;
+    for (shift = 0; shift <= 2; shift += 2)
+    {
+        UWORD len;
+        fresh_unit();
+        len = present_tcp_frame_at(46, shift);
+        publish_len = (UWORD)(len | (shift ? ZZ_RX_LEN_OFFSET2 : 0));
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW) = 0;
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW + 2) = 0;
+        publication_pending = 1;
+        expect(!zz_rint(&nic), "publication: first empty serial defers frame");
+        expect(nic.core_stat[ZZ_ST_OVERSIZE] == 0 && nic.rx_errors == 0,
+               "publication: no spurious size rejection");
+        expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_RX_ACK) == 0,
+               "publication: no ACK of frame not yet read");
+        expect(zz_rint(&nic), "publication: next poll consumes published frame");
+        expect(received_len == len, "publication: published frame delivered once");
+        expect(nic.core_stat[ZZ_ST_OVERSIZE] == 0 && nic.rx_errors == 0,
+               "publication: second poll has no size rejection");
+    }
+    fresh_unit();
+    *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW) = 1;
+    *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW + 2) = 0x0042;
+    expect(zz_rint(&nic), "publication: actual invalid length still consumed");
+    expect(nic.core_stat[ZZ_ST_OVERSIZE] == 1 && nic.rx_errors == 1,
+           "publication: actual invalid length still counted");
+}
+
 int main(void)
 {
+    publication_between_header_reads();
+    rx_offset2_stop_restores_default();
+    default_layout_payload_dst_is_shifted();
+    rx_offset2_payload_aligned_both_sides();
+    rx_offset2_requested_only_when_offered();
     payload_copy_every_length();
     summed_tail_carries();
     verified_claim_path_reads_aligned();

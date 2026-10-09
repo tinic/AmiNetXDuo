@@ -805,8 +805,9 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netdev_watchdog COMMAND test_netdev_watchdog)
 
     # anxzz9000.device's receive copies.  The payload sits 2 mod 4 in the
-    # card's window and a 2 mod 4 longword read is two Zorro cycles, so every
-    # payload copy must peel one word and read the bulk aligned; the core is
+    # card's window (or on a longword when the firmware shifts the frame for
+    # us) and a 2 mod 4 longword read is two Zorro cycles, so every payload
+    # copy must read the bulk aligned; the core is
     # included whole with the two bulk routines replaced by recording ones,
     # and section GC leaves the attach and transmit paths out of the fixture.
     add_executable(test_netdev_zz9000

@@ -106,12 +106,19 @@ extern struct ExecBase *SysBase;
    GEM takes no multicast frame unless its hash bucket is set. */
 #define ZZ_REG_ETH_CONFIG   0x008aUL
 #define ZZ_CFG_CAP_HASH     0x0001u
+#define ZZ_CFG_RX_OFFSET2   0x1000u    /* | 1: frames 2 bytes into the slot */
 #define ZZ_CFG_HASH_SET     0x8000u
 #define ZZ_CFG_HASH_RESET   0x2000u
 #define ZZ_HASH_BUCKETS     64
 
 #define ZZ_RX_WINDOW        0x2000UL
 #define ZZ_RX_PAD           4           /* UWORD length, UWORD serial */
+#define ZZ_RX_LEN_OFFSET2   0x8000u     /* this frame starts at ZZ_RX_PAD + 2 */
+/* One receive-header word; the host test substitutes a reader that can
+   publish a slot between two reads. */
+#ifndef ZZ_RX_HEADER_WORD
+#define ZZ_RX_HEADER_WORD(p) (*(const volatile UWORD *)(const volatile void *)(p))
+#endif
 #define ZZ_TX_WINDOW        0x8000UL
 #define ZZ_TX_WINDOW_LEN    2048        /* one slot; the window holds four */
 #define ZZ_TX_SLOTS         4
@@ -131,6 +138,7 @@ extern struct ExecBase *SysBase;
 #define ZZ_RXM_PRESENT      0x8000u
 #define ZZ_RXM_TX_CSUM      0x4000u
 #define ZZ_RXM_TX_OFFSET2   0x2000u
+#define ZZ_RXM_RX_OFFSET2   0x1000u    /* fork: ZZ_CFG_RX_OFFSET2 understood */
 #define ZZ_RXM_MASK         0x0003u
 #define ZZ_RXM_TCP          2u
 #define ZZ_RXM_UDP          3u
@@ -220,6 +228,7 @@ typedef struct ZzCore
     UBYTE       after_isr;  /* set by the top half, cleared by the pass that
                                follows it: which context a pass ran in     */
     UBYTE       rx_meta;    /* firmware exposes REG_ZZ_ETH_RX_META          */
+    UBYTE       rx_off2;    /* firmware can shift frames to align payloads  */
     UBYTE       int2;       /* ZZ9000.CFG routes the shared interrupt there */
     UBYTE       hash;       /* firmware filters multicast by the GEM hash   */
 } ZzCore;
@@ -391,6 +400,7 @@ static LONG zz_attach(NetdevNic *nic)
         nic->tx_next = 0;
         nic->rx_capacity = zz_rx_capacity(zz_get(nic, ZZ_REG_RX_FRAMES));
         ZZ(nic)->rx_meta = (UBYTE)((rxm & ZZ_RXM_PRESENT) != 0);
+        ZZ(nic)->rx_off2 = (UBYTE)(fork && (rxm & ZZ_RXM_RX_OFFSET2) != 0);
         ZZ(nic)->hash = (UBYTE)((zz_get(nic, ZZ_REG_ETH_CONFIG)
                                  & ZZ_CFG_CAP_HASH) != 0);
         nic->tx_at = (fork && (rxm & ZZ_RXM_TX_OFFSET2) != 0)
@@ -429,6 +439,13 @@ static LONG zz_init(NetdevNic *nic)
     nic->tx_next   = 0;
     nic->tx_done   = (UWORD)(zz_get(nic, ZZ_REG_TX_STATUS) & ZZ_TXS_COUNT);
     nic->running   = TRUE;
+    /* Ask for frames two bytes into the slot: the payload behind the
+       Ethernet header then starts on a longword in the window, in phase
+       with the opener's longword-aligned IP header, and the bulk copy runs
+       aligned on both sides.  The firmware rebuilds its ring for the
+       switch, dropping what was queued, and flags each shifted frame. */
+    if (ZZ(nic)->rx_off2)
+        zz_put(nic, ZZ_REG_ETH_CONFIG, (UWORD)(ZZ_CFG_RX_OFFSET2 | 1u));
     zz_put(nic, ZZ_REG_INT, ZZ_INT_ETH);
     return 0;
 }
@@ -436,6 +453,10 @@ static LONG zz_init(NetdevNic *nic)
 static VOID zz_stop(NetdevNic *nic)
 {
     zz_put(nic, ZZ_REG_INT, 0);
+    /* Hand the board back in the default layout: a driver loaded after us
+       without an Amiga reset would read the flagged length as oversize. */
+    if (ZZ(nic)->rx_off2)
+        zz_put(nic, ZZ_REG_ETH_CONFIG, ZZ_CFG_RX_OFFSET2);
     nic->running = FALSE;
 }
 
@@ -550,7 +571,7 @@ static ULONG zz_copy_payload_sum(UBYTE *dst, const volatile UBYTE *src,
     ULONG sum = 0;
     UWORD done = 0;
 
-    if (len >= 2)
+    if (len >= 2 && ((ULONG)(size_t)src & 2u) != 0)
     {
         UWORD w = *(const volatile UWORD *)(const volatile void *)src;
         *(UWORD *)(APTR)dst = w;
@@ -598,15 +619,12 @@ static ULONG zz_copy_payload_sum(UBYTE *dst, const volatile UBYTE *src,
    last byte comes out of a word: the far side takes no byte access. */
 static VOID zz_copy_payload(UBYTE *dst, const volatile UBYTE *src, UWORD len)
 {
-    /* The peel below is right only while the payload sits 2 mod 4 in the
-       slot; a wider slot header would put the bulk back out of phase
-       without any test noticing. */
-    _Static_assert((ZZ_RX_PAD + NETDEV_HDR_LEN) % 4 == 2,
-                   "ZZ9000 payload must begin 2 mod 4 in the receive slot");
-
     UWORD done = 0;
 
-    if (len >= 2)
+    /* Peel a word only when the source is 2 mod 4: the default slot layout.
+       A shifted frame (ZZ_RX_LEN_OFFSET2) puts the payload on a longword,
+       and then source and destination are both aligned from the start. */
+    if (len >= 2 && ((ULONG)(size_t)src & 2u) != 0)
     {
         *(UWORD *)(APTR)dst =
             *(const volatile UWORD *)(const volatile void *)src;
@@ -631,16 +649,25 @@ static VOID zz_copy_payload(UBYTE *dst, const volatile UBYTE *src, UWORD len)
                             (src + done) >> 8);
 }
 
-/* A plain copy of the header: the frame itself is longword aligned in the
-   window, so from its first byte both sides are in phase. */
+/* A plain copy of the header.  In the default layout the frame is longword
+   aligned in the window and both sides are in phase from its first byte; a
+   shifted frame (ZZ_RX_LEN_OFFSET2) starts 2 mod 4 and loses one word first. */
 static VOID zz_copy_frame(UBYTE *dst, const volatile UBYTE *src, UWORD len)
 {
-    UWORD bulk = (UWORD)(len & (UWORD)~3u);
-    UWORD i;
+    UWORD i = 0;
+    UWORD bulk;
 
+    /* A shifted frame starts 2 mod 4: one word first keeps the Zorro reads
+       longword aligned. */
+    if (len >= 2 && ((ULONG)(size_t)src & 2u) != 0)
+    {
+        *(UWORD *)(APTR)dst = *(const volatile UWORD *)(const volatile void *)src;
+        i = 2;
+    }
+    bulk = (UWORD)((len - i) & (UWORD)~3u);
     if (bulk != 0)
-        n68k_copy_longs(dst, src, (ULONG)(bulk >> 2));
-    for (i = bulk; i + 2 <= len; i += 2)
+        n68k_copy_longs(dst + i, src + i, (ULONG)(bulk >> 2));
+    for (i = (UWORD)(i + bulk); i + 2 <= len; i += 2)
         *(UWORD *)(APTR)(dst + i) =
             *(const volatile UWORD *)(const volatile void *)(src + i);
     if (i < len)
@@ -654,14 +681,29 @@ static VOID zz_copy_frame(UBYTE *dst, const volatile UBYTE *src, UWORD len)
 static BOOL zz_rint(NetdevNic *nic)
 {
     const volatile UBYTE *win = nic->board + ZZ_RX_WINDOW;
-    UWORD len    = *(const volatile UWORD *)(const volatile void *)(win + 0);
-    UWORD serial = *(const volatile UWORD *)(const volatile void *)(win + 2);
+    UWORD serial = ZZ_RX_HEADER_WORD(win + 2);
+    UWORD len;
     const volatile UBYTE *frame = win + ZZ_RX_PAD;
-    UBYTE *buf = (UBYTE *)nic->rxbuf;
-    UWORD last = (UWORD)nic->core_stat[ZZ_ST_SERIAL];
 
+    /* The serial is the publication marker, so it is read first.  The two
+       header words are two bus cycles, and the ARM can publish an empty
+       slot between them: length first could pair the old length 0 with the
+       new serial, reject the frame for size and acknowledge it unread.  A
+       non-zero serial means the whole header is published, and the slot
+       stays ours until the acknowledgement. */
     if (serial == 0)
         return FALSE;                   /* nothing presented */
+    len = ZZ_RX_HEADER_WORD(win + 0);
+
+    /* Only a firmware we asked sets the flag (zz_init), and it sets it on
+       every frame it shifted. */
+    if ((len & ZZ_RX_LEN_OFFSET2) != 0)
+    {
+        len   = (UWORD)(len & (UWORD)~ZZ_RX_LEN_OFFSET2);
+        frame = frame + 2;
+    }
+    UBYTE *buf = (UBYTE *)nic->rxbuf;
+    UWORD last = (UWORD)nic->core_stat[ZZ_ST_SERIAL];
 
     /*
      * A register write does not return to the 68k until the ARM has handled
