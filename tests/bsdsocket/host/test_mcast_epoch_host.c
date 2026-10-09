@@ -14,6 +14,12 @@ ULONG netstack_interface_epoch(UWORD index)
    entry points are discarded by function-section garbage collection. */
 #include "../../../src/bsdsocket/mcast.c"
 
+/* One bound fills whichever of the two membership tables the family selects,
+   so the two sizes have to agree; the loop below then uses the one number
+   rather than a ternary whose arms are equal. */
+_Static_assert(BSD_MCAST_MEMBERSHIPS == BSD_MCAST6_MEMBERSHIPS,
+               "the IPv4 and IPv6 membership tables must be the same size");
+
 static unsigned checks;
 static unsigned failures;
 
@@ -208,7 +214,7 @@ static void t_membership_paths(BOOL v6)
               h_error == AMI_EADDRNOTAVAIL, "failed join returns row before leaving bracket");
     }
     h_join_status = NX_SUCCESS;
-    for (i = 0; i < (v6 ? BSD_MCAST6_MEMBERSHIPS : BSD_MCAST_MEMBERSHIPS); i++)
+    for (i = 0; i < BSD_MCAST_MEMBERSHIPS; i++)
     {
         if (v6)
         {

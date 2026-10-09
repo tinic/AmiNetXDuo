@@ -255,6 +255,10 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
             break;
         }
 
+        /* Hosts are parsed whole above, before the field grammar differs by
+           kind.  Named rather than left to the default so every NetdbKind is
+           accounted for here. */
+        case NETDB_HOSTS:
         default:
             continue;
         }

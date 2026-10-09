@@ -750,17 +750,17 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
 
                 if (netstack_get() != NULL && cfg != NULL)
                 {
-                    UWORD i;
+                    UWORD iface;
 
-                    for (i = 0; i < cfg->interface_count &&
-                                i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
+                    for (iface = 0; iface < cfg->interface_count &&
+                                iface < (UWORD)AMI_CFG_MAX_ATTACHED; iface++)
                     {
-                        if (!cfg->interfaces[i].configured)
+                        if (!cfg->interfaces[iface].configured)
                             continue;
 
                         status |= SBSYSSTAT_Interfaces;
 
-                        if (netstack_interface_is_up(i))
+                        if (netstack_interface_is_up(iface))
                         {
                             status |= SBSYSSTAT_BCast_Interfaces;
 

@@ -525,9 +525,9 @@ static void d_the_sequence(void)
 
         for (k = 0; k < 32u; k++)
         {
-            int at = key_start + (int)k * 2;
+            int addr = key_start + (int)k * 2;
 
-            if (!is_latch(at, 0x00) || !is_port(at + 1, pnp_init_key[k]))
+            if (!is_latch(addr, 0x00) || !is_port(addr + 1, pnp_init_key[k]))
             {
                 good = 0;
                 break;

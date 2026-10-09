@@ -383,14 +383,14 @@ static VOID dp8390_rint(NetdevNic *nic)
                  * from the ring straight into the stack's packet.  The ring is
                  * random-access, so a declined claim costs one 14-byte read.
                  */
-                UBYTE *hdr = (UBYTE *)nic->rxbuf;
+                UBYTE *hdrbuf = (UBYTE *)nic->rxbuf;
 
-                (VOID)nic->ring_copy(nic, src, hdr, NETDEV_HDR_LEN);
+                (VOID)nic->ring_copy(nic, src, hdrbuf, NETDEV_HDR_LEN);
 
                 {
                     APTR   token = NULL;
                     UBYTE  wanted = 0;
-                    UBYTE *dst   = nic->rx_claim(nic->rx_arg, hdr, flen,
+                    UBYTE *dst   = nic->rx_claim(nic->rx_arg, hdrbuf, flen,
                                                  &token, &wanted);
 
                     if (dst != NULL)

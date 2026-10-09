@@ -709,6 +709,9 @@ static unsigned char ws_opcode_of(HttpWsEvent ev)
         case HTTP_WS_EV_CLOSE:  return 0x8;
         case HTTP_WS_EV_PING:   return 0x9;
         case HTTP_WS_EV_PONG:   return 0xa;
+        /* No message: the caller never has one to frame.  Same opcode as the
+           default so a stray NONE is a binary frame and not a surprise. */
+        case HTTP_WS_EV_NONE:
         default:                return 0x2;
     }
 }

@@ -2071,9 +2071,9 @@ static void w_private_commands_are_in_an_nsd_vendor_block(void)
    run on an offline unit; in the supported-command list. */
 static int  tx_flush_calls;
 static int  tx_flush_forbid_depth;
-static VOID y_tx_flush_core(NetdevNic *nic)
+static VOID y_tx_flush_core(NetdevNic *nic_arg)
 {
-    (void)nic;
+    (void)nic_arg;
     tx_flush_calls++;
     tx_flush_forbid_depth = forbid_depth;
 }

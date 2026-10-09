@@ -1,5 +1,9 @@
 # Turn compiler warnings into build failures, for OUR sources only.
 #
+# A target that compiles any of our sources also gets -Werror on its own LINK,
+# because the diagnostics GCC emits while merging the LTO units are emitted
+# there and not per source file.  See the note beside the LINK_OPTIONS below.
+#
 # Included at the end of the top-level project() call.  Every preset sets
 # CMAKE_PROJECT_INCLUDE to this file (CMakePresets.json, hidden `amiga` base),
 # so there is no way to configure one of this project's own drawers without the
@@ -9,6 +13,12 @@
 #
 # Override with -DAMINETXDUO_WARNING_FLAGS="-Wall;-Wextra", turn the whole
 # thing off with -DAMINETXDUO_WERROR=OFF.
+#
+# Not every compiler knows every flag in the list -- five of them are GCC's and
+# clang rejects them outright -- so each is checked against the compiler that is
+# configuring and the ones it does not accept are dropped by name.  See the
+# note beside the list: the list is the intent, what a given build applies is
+# what that compiler agreed to.
 #
 # Filtering is per SOURCE FILE, not per target: most of what this project
 # compiles is not this project (the ThreadX, NetX Duo, nx_crypto and nx_secure
@@ -59,9 +69,124 @@ option(AMINETXDUO_WERROR "Fail the build on any warning in our own sources" ON)
 # 0 -Wmissing-prototypes from shipping sources, 0 -Wcast-function-type, 0
 # implicit-function-declaration.  Everything -Wmissing-prototypes finds is a
 # test, which is why it is off for them below.
+#
+# The second group was added 2026-10-09.  A full default-preset build at
+# 8bb3dc44 (toolchain d135e7131339) with the candidates on and -Werror OFF
+# reported ZERO from every one of them, and zero was checked rather than
+# assumed: each flag was first shown to fire on this compiler at -Os, the
+# level the libraries ship at, against a synthetic case.  What is locked in is
+# therefore a property of the tree, not an inert option.
+#
+#   -Wformat=2 .......... adds -Wformat-nonliteral and -Wformat-security to
+#                         the -Wformat=1 -Wall already gives.  A log call
+#                         handing printf a non-literal, or a literal with no
+#                         arguments, is how a format string becomes a surface.
+#   -Wundef ............. `#if' on a name nobody defined.  Most of this tree's
+#                         behavior is decided in the preprocessor.
+#   -Wvla ............... an object sized at run time is a stack allocation
+#                         nobody budgeted.  A Shell stack is 4096 and the
+#                         stack-frames gate only measures static frames.
+#   -Walloc-zero ........ malloc(0) is not "no allocation" everywhere.
+#   -Wshift-overflow=2 .. a shift wider than its type is undefined, not
+#                         truncating.
+#   -Wlogical-op ........ `a && a', `a || a': an operand compared with itself.
+#   -Wduplicated-cond ... two arms of an if/else chain testing the same thing.
+#   -Wfloat-equal ....... exact comparison of a float or a double.
+#   -Wdouble-promotion .. a float promoted to double, which on a 68000 is a
+#                         soft-float libcall that was never written down.
+#   -Wpointer-arith ..... arithmetic on void *.
+#   -Wnested-externs .... an extern declared inside a function.
+#
+# The third group went on the same day, last, because unlike the two above it
+# was not free: each had a nonzero count and every hit was a real cleanup, so
+# the flag could not be enabled until the code was fixed.  The sites are gone
+# from the tree, not worked around.
+#
+#   -Wshadow ............ a declaration that hides one already in scope.  19
+#                         hits: a loop counter, or a name like `hdr', reused
+#                         in a nested block.  Every one was renamed, never
+#                         merged -- the outer object is still the one the
+#                         outer scope means, and the inner block still has
+#                         the variable it named.  One site (netstack_dns.c)
+#                         was fixed by renaming the outermost declaration
+#                         instead, which cleared two hits at once.
+#   -Wswitch-enum ....... a switch over an enum that does not name every
+#                         enumerator, even where a `default' is present.  6
+#                         hits; the missing value is added as a case directly
+#                         above the `default', into which it falls through, so
+#                         the behaviour is exactly what the `default' already
+#                         did.  A bare `default' is not enough for this flag
+#                         and should not be: it cannot tell a complete switch
+#                         from one that forgot a value.
+#   -Wduplicated-branches  two arms of an if/else with the same body.  2 hits,
+#                         both genuine copy-paste rather than a false positive.
+#                         src/tools/telnet.c had a `c == TN_IAC' arm and an
+#                         `else' arm that both set TN_SAW_SB, collapsed into
+#                         the single `else'.  src/tools/traceroute.c set the
+#                         hop limit with `v6 ? TOOL_IPV6_UNICAST_HOPS :
+#                         TOOL_IP_TTL', and both macros are 4 (toolsock.h);
+#                         one number is used now, with a _Static_assert that
+#                         the two really do agree.
+#
+# NOT here, and why, so it does not have to be re-measured:
+#   -Wwrite-strings reports 0 directly but retypes string literals to
+#   `const char[]' in C, which is where the 103 -Wdiscarded-qualifiers come
+#   from -- measured on tests/tls/tls_handshake.c with and without it: 9 to 0.
+#   -Wcast-qual (819), -Wredundant-decls (6003), -Wcast-align (779) and
+#   -Wbad-function-cast (212) are overwhelmingly the NDK's own headers and
+#   their APTR habits, which are not ours to change.
+#   -Wswitch-default contradicts the deliberate no-default switches in
+#   src/tools (5 hits, every one a `switch (why)').
+#   -Warray-bounds=2 and -Wstrict-overflow=2 are level 2, documented as
+#   false-positive-prone, and mostly need -O2 this build does not use.
+#   -Wold-style-definition cannot fire under C23, where `()' means `(void)'.
 set(AMINETXDUO_WARNING_FLAGS
-    "-Wall;-Wextra;-Werror=implicit-function-declaration;-Wmissing-prototypes"
+    "-Wall;-Wextra;-Werror=implicit-function-declaration;-Wmissing-prototypes;\
+-Wformat=2;-Wundef;-Wvla;-Walloc-zero;-Wshift-overflow=2;-Wlogical-op;\
+-Wduplicated-cond;-Wfloat-equal;-Wdouble-promotion;-Wpointer-arith;-Wnested-externs;\
+-Wshadow;-Wswitch-enum;-Wduplicated-branches"
     CACHE STRING "Warning flags applied to sources outside third_party/")
+
+# NOT EVERY COMPILER KNOWS EVERY ONE OF THESE, and an unknown warning option is
+# an ERROR under -Werror rather than a shrug: the macOS host arm (clang) did not
+# build at all when this list went on, on five of them --
+#   -Walloc-zero, -Wshift-overflow=2, -Wlogical-op, -Wduplicated-cond,
+#   -Wduplicated-branches
+# are GCC's.  So the list above is the INTENT and what follows is what this
+# compiler actually agreed to: each flag is tried on its own, the ones it
+# rejects are dropped by name, and the configure log says which.  A flag this
+# compiler cannot honour is not a flag this build can be asked for, and
+# dropping it is a smaller lie than a build that cannot start.
+#
+# The list stays the whole intent deliberately -- it is not edited to what
+# clang happens to accept today.  That would hide the difference between "the
+# other arm checks less" and "this arm checks nothing", and the next compiler
+# would inherit a list nobody could account for.
+include(CheckCCompilerFlag)
+check_c_compiler_flag("-Wall" AMINETXDUO_CC_SANITY)
+if(NOT AMINETXDUO_CC_SANITY)
+    # -Wall is the one flag every C compiler has.  If even that does not pass,
+    # the probe machinery is what is broken -- a cross toolchain it cannot link
+    # for, say -- and dropping flags on its say-so would silently disarm the
+    # whole gate.  Fail loud and keep the list.
+    message(WARNING "AmiNetXDuo warnings gate: this compiler does not accept "
+                    "-Wall, so the per-flag check cannot be trusted; using "
+                    "the full list unverified.")
+    set(AMINETXDUO_WARNING_FLAGS_EFFECTIVE "${AMINETXDUO_WARNING_FLAGS}")
+    set(AMINETXDUO_WARNING_FLAGS_DROPPED "")
+else()
+    set(AMINETXDUO_WARNING_FLAGS_EFFECTIVE "")
+    set(AMINETXDUO_WARNING_FLAGS_DROPPED "")
+    foreach(_f IN LISTS AMINETXDUO_WARNING_FLAGS)
+        string(MAKE_C_IDENTIFIER "flag${_f}" _id)
+        check_c_compiler_flag("${_f}" AMINETXDUO_CC_${_id})
+        if(AMINETXDUO_CC_${_id})
+            list(APPEND AMINETXDUO_WARNING_FLAGS_EFFECTIVE "${_f}")
+        else()
+            list(APPEND AMINETXDUO_WARNING_FLAGS_DROPPED "${_f}")
+        endif()
+    endforeach()
+endif()
 
 # NON-SHIPPING -- anything not under src/ or port/, plus the host tests under
 # src/<component>/test/.
@@ -99,7 +224,7 @@ function(_aminetxduo_warnings_apply_dir dir)
     get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
     get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
 
-    set(_flags ${AMINETXDUO_WARNING_FLAGS})
+    set(_flags ${AMINETXDUO_WARNING_FLAGS_EFFECTIVE})
     if(AMINETXDUO_WERROR)
         list(APPEND _flags "-Werror")
     endif()
@@ -165,6 +290,25 @@ function(_aminetxduo_warnings_apply_dir dir)
             set_property(SOURCE ${_ours} TARGET_DIRECTORY ${_t}
                          APPEND PROPERTY COMPILE_OPTIONS ${_flags})
 
+            # -Werror reaches the LINK too, because a few diagnostics are
+            # emitted while the LTO units are merged rather than per source
+            # file.  -Wlto-type-mismatch is on by default there: a declaration
+            # that disagrees with the definition in another translation unit is
+            # reported at the link, and with no -Werror on that line nothing
+            # fails.  That is the class this tree has been bitten by before --
+            # VOID f() against f(void), the regparm and sibcall mismatches --
+            # so the link gets the same verdict the compiles do.
+            #
+            # A property on OUR targets rather than a global add_link_options():
+            # the global form reaches CMake's try_compile probes as well, where
+            # a warning would answer a feature check that asked something else.
+            # Vendored objects are merged into these same links, so a new
+            # warning out of third_party/ fails the build too; that is
+            # deliberate -- it is visible, and escaping it is one line here.
+            if(AMINETXDUO_WERROR)
+                set_property(TARGET ${_t} APPEND PROPERTY LINK_OPTIONS "-Werror")
+            endif()
+
             # Everything that does not ship gets the two flags that only make
             # sense for shipping code turned back off.  Set after the main list
             # so the -Wno- wins.
@@ -208,6 +352,11 @@ endfunction()
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
                CALL _aminetxduo_warnings_apply)
 
-string(REPLACE ";" " " _aminetxduo_wflags "${AMINETXDUO_WARNING_FLAGS}")
+string(REPLACE ";" " " _aminetxduo_wflags "${AMINETXDUO_WARNING_FLAGS_EFFECTIVE}")
 message(STATUS "AmiNetXDuo warnings gate: ${_aminetxduo_wflags}"
                " (-Werror ${AMINETXDUO_WERROR})")
+if(AMINETXDUO_WARNING_FLAGS_DROPPED)
+    string(REPLACE ";" " " _aminetxduo_wdropped "${AMINETXDUO_WARNING_FLAGS_DROPPED}")
+    message(STATUS "AmiNetXDuo warnings gate: not accepted by this compiler,"
+                   " so NOT applied here: ${_aminetxduo_wdropped}")
+endif()

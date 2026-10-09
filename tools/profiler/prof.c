@@ -1444,11 +1444,11 @@ int              pass;
     prof_wins   = (struct ProfWindow *)AllocMem(PROF_MAX_WINS * (ULONG)sizeof(struct ProfWindow), MEMF_ANY | MEMF_CLEAR);
 
     {
-        struct ExecBase *eb = (struct ExecBase *)SysBase;
+        struct ExecBase *exec = (struct ExecBase *)SysBase;
 
         /* 16 bytes of saved registers, then SR and PC, then the format word
            the 68010 and up append. */
-        prof_frameadj = ((eb->AttnFlags & AFF_68010) != 0) ? 24UL : 22UL;
+        prof_frameadj = ((exec->AttnFlags & AFF_68010) != 0) ? 24UL : 22UL;
     }
 
     if (prof_libs == NULL || prof_lvos == NULL || prof_ranges == NULL ||

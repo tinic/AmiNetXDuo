@@ -1706,12 +1706,12 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
      */
     if (!resolved)
     {
-        UWORD i;
+        UWORD idx;
         BOOL  wanted_up = FALSE;
 
-        for (i = 0; i < ns->ns_IfaceCount; i++)
+        for (idx = 0; idx < ns->ns_IfaceCount; idx++)
         {
-            if (ns->ns_Config.interfaces[i].up)
+            if (ns->ns_Config.interfaces[idx].up)
             {
                 wanted_up = TRUE;
                 break;
