@@ -390,12 +390,11 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
                         tool_printf("telnet: subnegotiation ignored\n");
                     st->parse = TN_DATA;
                 }
-                else if (c == TN_IAC)
-                {
-                    st->parse = TN_SAW_SB;      /* escaped 0xFF inside SB */
-                }
                 else
                 {
+                    /* An escaped 0xFF, or any other byte that is not SE:
+                       either way the subnegotiation has not ended, so its
+                       byte count starts over. */
                     st->parse = TN_SAW_SB;
                 }
                 break;

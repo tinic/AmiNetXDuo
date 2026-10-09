@@ -319,11 +319,11 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         for (i = 0; i < n && i < (LONG)TOOL_MAX_SOCK; i++)
         {
             const NetStatusTcpStall *src = &nx_answer.stall.e[i];
-            UWORD                    j;
+            UWORD                    sock_i;
 
-            for (j = 0; j < out->sock_count; j++)
+            for (sock_i = 0; sock_i < out->sock_count; sock_i++)
             {
-                ToolSockInfo *si = &out->sock[j];
+                ToolSockInfo *si = &out->sock[sock_i];
 
                 if (si->is_tcp &&
                     si->local_port == src->nst_LocalPort &&

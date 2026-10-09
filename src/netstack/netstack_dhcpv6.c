@@ -156,6 +156,8 @@ static VOID ami_ns6_ra_flags(NX_IP *ip_ptr, UINT interface_index, UINT ra_flag)
     {
     case AMI_DHCPV6_ACT_STATEFUL:  want = AMI_DHCPV6_EV_STATEFUL;  break;
     case AMI_DHCPV6_ACT_STATELESS: want = AMI_DHCPV6_EV_STATELESS; break;
+    /* Neither flag: SLAAC and nothing else, so nothing is asked for. */
+    case AMI_DHCPV6_ACT_NONE:
     default:                       return;
     }
 

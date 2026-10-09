@@ -1016,7 +1016,7 @@ char  what[128];
                                  7, 'e','x','a','m','p','l','e',
                                  3, 'c','o','m', 0 };
     UINT length;
-    UINT i;
+    UINT b;
     int  same;
 
         /* One domain alongside a prefix and an RDNSS option, which is the
@@ -1035,9 +1035,9 @@ char  what[128];
         h_check(h_dnssl_lifetime == 1800, "with the option's lifetime");
 
         same = (h_dnssl_length >= (UINT)sizeof(one));
-        for (i = 0; same && (i < (UINT)sizeof(one)); i++)
+        for (b = 0; same && (b < (UINT)sizeof(one)); b++)
         {
-            same = (h_dnssl_payload[i] == one[i]);
+            same = (h_dnssl_payload[b] == one[b]);
         }
         h_check(same, "as the bytes the option carried, undecoded");
 

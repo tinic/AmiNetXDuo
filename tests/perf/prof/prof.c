@@ -28,6 +28,17 @@
 
 #include "aminetxduo/compat.h"   /* ami_millis(): the probe needs to poke timer.device */
 
+/*
+ * The START bit is bit 0 of BOTH control registers -- hardware/cia.h defines
+ * CIACRAF_START and CIACRBF_START as the same mask -- so which timer a source
+ * names does not change the bit looked for, and the probe below asks for the
+ * one number instead of a ternary whose arms are equal.  Asserted, because the
+ * two names come from two registers and a change to one would otherwise be
+ * silent here.
+ */
+_Static_assert(CIACRAF_START == CIACRBF_START,
+               "the control-register A and B START masks must agree");
+
 static struct Interrupt *prof_add_icr_vector(struct Library *res, WORD bit,
                                              struct Interrupt *intr)
 {
@@ -728,8 +739,7 @@ ULONG            i;
             }
 
             if ((prof_read_cr(cand) &
-                 (UBYTE)(cand->src_Bit == CIAICRB_TA ? CIACRAF_START
-                                                     : CIACRBF_START)) != 0U)
+                 (UBYTE)CIACRAF_START) != 0U)
             {
                 continue;
             }

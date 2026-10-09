@@ -815,14 +815,14 @@ int main(int argc, char **argv)
 
         if (tool_parse_ip6(name, words))
         {
-            ULONG i;
+            ULONG w;
 
-            for (i = 0; i < 4UL; i++)
+            for (w = 0; w < 4UL; w++)
             {
-                v6[i * 4UL + 0] = (UBYTE)((words[i] >> 24) & 0xffUL);
-                v6[i * 4UL + 1] = (UBYTE)((words[i] >> 16) & 0xffUL);
-                v6[i * 4UL + 2] = (UBYTE)((words[i] >>  8) & 0xffUL);
-                v6[i * 4UL + 3] = (UBYTE)(words[i] & 0xffUL);
+                v6[w * 4UL + 0] = (UBYTE)((words[w] >> 24) & 0xffUL);
+                v6[w * 4UL + 1] = (UBYTE)((words[w] >> 16) & 0xffUL);
+                v6[w * 4UL + 2] = (UBYTE)((words[w] >>  8) & 0xffUL);
+                v6[w * 4UL + 3] = (UBYTE)(words[w] & 0xffUL);
             }
 
             is_v6 = TRUE;

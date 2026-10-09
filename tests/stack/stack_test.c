@@ -706,10 +706,10 @@ static VOID st_worker_entry(VOID)
 
         for (index = 0; index < 4; index++)
         {
-            ULONG i;
+            ULONG b;
 
-            for (i = 0; i < sizeof(ctl); i++)
-                ((UBYTE *)&ctl)[i] = 0;
+            for (b = 0; b < sizeof(ctl); b++)
+                ((UBYTE *)&ctl)[b] = 0;
             ctl.nsc_Magic   = AMI_NETSTATUS_MAGIC;
             ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
             ctl.nsc_Index   = (UWORD)index;

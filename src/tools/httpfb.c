@@ -2490,6 +2490,8 @@ static VOID fb_sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
         break;
     }
 
+    /* No message, which the decoder reports between frames. */
+    case HTTP_WS_EV_NONE:
     default:
         break;
     }
