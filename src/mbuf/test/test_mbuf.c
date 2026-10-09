@@ -80,6 +80,15 @@ ULONG ami_alloc_count(VOID)
     return atomic_load(&stub_outstanding);
 }
 
+/*
+ * The real ami_log() (compat.h) goes to RawDoFmt and is deliberately NOT a
+ * printf -- %ld/%lu/%lx/%s only.  This one is the host stand-in and does end
+ * in vprintf, so on the host it is printf and the attribute says so.  That is
+ * what stops clang's -Wformat-nonliteral at the vprintf below, where GCC's
+ * quieter version never fired, and it makes every ami_log() call in this test
+ * have its arguments checked instead.
+ */
+__attribute__((format(printf, 2, 3)))
 VOID ami_log(int level, const char *fmt, ...)
 {
     va_list args;

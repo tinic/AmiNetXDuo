@@ -14,6 +14,12 @@
 # Override with -DAMINETXDUO_WARNING_FLAGS="-Wall;-Wextra", turn the whole
 # thing off with -DAMINETXDUO_WERROR=OFF.
 #
+# Not every compiler knows every flag in the list -- five of them are GCC's and
+# clang rejects them outright -- so each is checked against the compiler that is
+# configuring and the ones it does not accept are dropped by name.  See the
+# note beside the list: the list is the intent, what a given build applies is
+# what that compiler agreed to.
+#
 # Filtering is per SOURCE FILE, not per target: most of what this project
 # compiles is not this project (the ThreadX, NetX Duo, nx_crypto and nx_secure
 # submodules are vendored verbatim and are not warning-clean under -Wextra),
@@ -141,6 +147,47 @@ set(AMINETXDUO_WARNING_FLAGS
 -Wshadow;-Wswitch-enum;-Wduplicated-branches"
     CACHE STRING "Warning flags applied to sources outside third_party/")
 
+# NOT EVERY COMPILER KNOWS EVERY ONE OF THESE, and an unknown warning option is
+# an ERROR under -Werror rather than a shrug: the macOS host arm (clang) did not
+# build at all when this list went on, on five of them --
+#   -Walloc-zero, -Wshift-overflow=2, -Wlogical-op, -Wduplicated-cond,
+#   -Wduplicated-branches
+# are GCC's.  So the list above is the INTENT and what follows is what this
+# compiler actually agreed to: each flag is tried on its own, the ones it
+# rejects are dropped by name, and the configure log says which.  A flag this
+# compiler cannot honour is not a flag this build can be asked for, and
+# dropping it is a smaller lie than a build that cannot start.
+#
+# The list stays the whole intent deliberately -- it is not edited to what
+# clang happens to accept today.  That would hide the difference between "the
+# other arm checks less" and "this arm checks nothing", and the next compiler
+# would inherit a list nobody could account for.
+include(CheckCCompilerFlag)
+check_c_compiler_flag("-Wall" AMINETXDUO_CC_SANITY)
+if(NOT AMINETXDUO_CC_SANITY)
+    # -Wall is the one flag every C compiler has.  If even that does not pass,
+    # the probe machinery is what is broken -- a cross toolchain it cannot link
+    # for, say -- and dropping flags on its say-so would silently disarm the
+    # whole gate.  Fail loud and keep the list.
+    message(WARNING "AmiNetXDuo warnings gate: this compiler does not accept "
+                    "-Wall, so the per-flag check cannot be trusted; using "
+                    "the full list unverified.")
+    set(AMINETXDUO_WARNING_FLAGS_EFFECTIVE "${AMINETXDUO_WARNING_FLAGS}")
+    set(AMINETXDUO_WARNING_FLAGS_DROPPED "")
+else()
+    set(AMINETXDUO_WARNING_FLAGS_EFFECTIVE "")
+    set(AMINETXDUO_WARNING_FLAGS_DROPPED "")
+    foreach(_f IN LISTS AMINETXDUO_WARNING_FLAGS)
+        string(MAKE_C_IDENTIFIER "flag${_f}" _id)
+        check_c_compiler_flag("${_f}" AMINETXDUO_CC_${_id})
+        if(AMINETXDUO_CC_${_id})
+            list(APPEND AMINETXDUO_WARNING_FLAGS_EFFECTIVE "${_f}")
+        else()
+            list(APPEND AMINETXDUO_WARNING_FLAGS_DROPPED "${_f}")
+        endif()
+    endforeach()
+endif()
+
 # NON-SHIPPING -- anything not under src/ or port/, plus the host tests under
 # src/<component>/test/.
 #
@@ -177,7 +224,7 @@ function(_aminetxduo_warnings_apply_dir dir)
     get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
     get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
 
-    set(_flags ${AMINETXDUO_WARNING_FLAGS})
+    set(_flags ${AMINETXDUO_WARNING_FLAGS_EFFECTIVE})
     if(AMINETXDUO_WERROR)
         list(APPEND _flags "-Werror")
     endif()
@@ -305,6 +352,11 @@ endfunction()
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
                CALL _aminetxduo_warnings_apply)
 
-string(REPLACE ";" " " _aminetxduo_wflags "${AMINETXDUO_WARNING_FLAGS}")
+string(REPLACE ";" " " _aminetxduo_wflags "${AMINETXDUO_WARNING_FLAGS_EFFECTIVE}")
 message(STATUS "AmiNetXDuo warnings gate: ${_aminetxduo_wflags}"
                " (-Werror ${AMINETXDUO_WERROR})")
+if(AMINETXDUO_WARNING_FLAGS_DROPPED)
+    string(REPLACE ";" " " _aminetxduo_wdropped "${AMINETXDUO_WARNING_FLAGS_DROPPED}")
+    message(STATUS "AmiNetXDuo warnings gate: not accepted by this compiler,"
+                   " so NOT applied here: ${_aminetxduo_wdropped}")
+endif()
