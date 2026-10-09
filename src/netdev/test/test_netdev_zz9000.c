@@ -47,6 +47,7 @@ static APTR test_alloc_mem(ULONG bytes, ULONG flags)
 static ULONG bulk_calls;
 static ULONG bulk_misaligned;       /* sources not 0 mod 4 */
 static ULONG bulk_longs;
+static int   bulk_last_to_misaligned; /* the latest bulk destination */
 
 AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from, ULONG longs)
 {
@@ -54,6 +55,7 @@ AMIGA_ASM_ARGS VOID n68k_copy_longs(volatile void *to, const volatile void *from
     bulk_longs += longs;
     if (((uintptr_t)from & 3u) != 0)
         bulk_misaligned++;
+    bulk_last_to_misaligned = (((uintptr_t)to & 3u) != 0);
     memcpy((void *)to, (const void *)from, longs << 2);
 }
 
@@ -67,6 +69,7 @@ AMIGA_ASM_ARGS ULONG n68k_copy_longs_sum(void *to, const volatile void *from, UL
     bulk_longs += longs;
     if (((uintptr_t)s & 3u) != 0)
         bulk_misaligned++;
+    bulk_last_to_misaligned = (((uintptr_t)to & 3u) != 0);
     memcpy(to, s, longs << 2);
     for (i = 0; i < (longs << 2); i += 4)
     {
@@ -272,12 +275,12 @@ static VOID receive(APTR arg, const UBYTE *frame, UWORD len)
 }
 
 /* A broadcast IPv4/TCP frame of `total` IP bytes the GEM says it verified. */
-static UWORD present_tcp_frame(UWORD total)
+static UWORD present_tcp_frame_at(UWORD total, UWORD shift)
 {
     volatile UWORD *length = (volatile UWORD *)(volatile void *)
                              (board.bytes + ZZ_RX_WINDOW);
     volatile UWORD *serial = length + 1;
-    UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD;
+    UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD + shift;
     UWORD  len = (UWORD)(NETDEV_HDR_LEN + total);
     UWORD  i;
 
@@ -296,11 +299,16 @@ static UWORD present_tcp_frame(UWORD total)
     frame[21] = 0;
     frame[23] = 6;                      /* TCP */
 
-    *length = len;
+    *length = (UWORD)(len | (shift ? ZZ_RX_LEN_OFFSET2 : 0u));
     *serial = 0x0042;
     *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_RX_META) =
         (UWORD)(ZZ_RXM_PRESENT | ZZ_RXM_TCP);
     return len;
+}
+
+static UWORD present_tcp_frame(UWORD total)
+{
+    return present_tcp_frame_at(total, 0);
 }
 
 static VOID fresh_unit(VOID)
@@ -670,8 +678,80 @@ static VOID rx_capacity_from_firmware_register(VOID)
            "RX capacity: a present but zero count is not trusted");
 }
 
+/* The default layout: the payload copy reads aligned and writes 2 mod 4. */
+static VOID default_layout_payload_dst_is_shifted(VOID)
+{
+    fresh_unit();
+    nic.rx_claim   = claim;
+    nic.rx_claimed = claimed;
+    claim_dst      = claimed_buf;
+    claim_wanted   = ANXD_S2_RXF_VERIFIED;
+    present_tcp_frame(200);
+    expect(zz_rint(&nic), "default layout: the frame is consumed");
+    expect(bulk_last_to_misaligned,
+           "default layout: the payload bulk writes 2 mod 4 (what RX offset2 removes)");
+}
+
+/* A frame the firmware shifted two bytes: payload and destination are both
+   longword aligned, nothing is peeled, the bytes and the length are right. */
+static VOID rx_offset2_payload_aligned_both_sides(VOID)
+{
+    const UBYTE *frame = board.bytes + ZZ_RX_WINDOW + ZZ_RX_PAD + 2;
+    UWORD total;
+
+    for (total = 199; total <= 202; total++)
+    {
+        UWORD wanted;
+
+        for (wanted = 0; wanted < 2; wanted++)
+        {
+            fresh_unit();
+            nic.rx_claim   = claim;
+            nic.rx_claimed = claimed;
+            claim_dst      = claimed_buf;
+            claim_wanted   = wanted ? ANXD_S2_RXF_VERIFIED : 0;
+            present_tcp_frame_at(total, 2);
+            expect(zz_rint(&nic), "RX offset2: the frame is consumed");
+            expect(claim_done, "RX offset2: the claim completes");
+            expect(same_bytes(claimed_buf, frame + NETDEV_HDR_LEN, total),
+                   "RX offset2: the payload bytes arrive");
+            expect(bulk_misaligned == 0, "RX offset2: every bulk read was aligned");
+            expect(!bulk_last_to_misaligned,
+                   "RX offset2: the payload bulk writes longword aligned");
+            expect(nic.rx_errors == 0, "RX offset2: the flag is not taken for length");
+        }
+    }
+
+    fresh_unit();
+    nic.rx_claim = NULL;
+    present_tcp_frame_at(199, 2);
+    expect(zz_rint(&nic), "RX offset2 staging: the frame is consumed");
+    expect(received_len == NETDEV_HDR_LEN + 199, "RX offset2 staging: the whole frame");
+    expect(same_bytes(received, frame, received_len), "RX offset2 staging: the bytes match");
+    expect(bulk_misaligned == 0, "RX offset2 staging: every bulk read was aligned");
+}
+
+/* zz_init asks for the layout only when the firmware said it can. */
+static VOID rx_offset2_requested_only_when_offered(VOID)
+{
+    fresh_unit();
+    core.rx_off2 = 0;
+    zz_init(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) == 0,
+           "RX offset2: not requested from firmware that does not offer it");
+    fresh_unit();
+    core.rx_off2 = 1;
+    zz_init(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) ==
+           (UWORD)(ZZ_CFG_RX_OFFSET2 | 1u),
+           "RX offset2: requested when offered");
+}
+
 int main(void)
 {
+    default_layout_payload_dst_is_shifted();
+    rx_offset2_payload_aligned_both_sides();
+    rx_offset2_requested_only_when_offered();
     payload_copy_every_length();
     summed_tail_carries();
     verified_claim_path_reads_aligned();
