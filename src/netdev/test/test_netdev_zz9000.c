@@ -747,8 +747,26 @@ static VOID rx_offset2_requested_only_when_offered(VOID)
            "RX offset2: requested when offered");
 }
 
+/* Review regression: restore the layout before handing the board back. */
+static VOID rx_offset2_stop_restores_default(VOID)
+{
+    fresh_unit();
+    core.rx_off2 = 1;
+    zz_init(&nic);
+    zz_stop(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) ==
+           (UWORD)ZZ_CFG_RX_OFFSET2,
+           "RX offset2: stop restores default firmware layout");
+    fresh_unit();
+    core.rx_off2 = 0;
+    zz_stop(&nic);
+    expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_ETH_CONFIG) == 0,
+           "RX offset2: stop does not command unsupported firmware");
+}
+
 int main(void)
 {
+    rx_offset2_stop_restores_default();
     default_layout_payload_dst_is_shifted();
     rx_offset2_payload_aligned_both_sides();
     rx_offset2_requested_only_when_offered();

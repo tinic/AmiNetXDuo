@@ -448,6 +448,10 @@ static LONG zz_init(NetdevNic *nic)
 static VOID zz_stop(NetdevNic *nic)
 {
     zz_put(nic, ZZ_REG_INT, 0);
+    /* Hand the board back in the default layout: a driver loaded after us
+       without an Amiga reset would read the flagged length as oversize. */
+    if (ZZ(nic)->rx_off2)
+        zz_put(nic, ZZ_REG_ETH_CONFIG, ZZ_CFG_RX_OFFSET2);
     nic->running = FALSE;
 }
 
