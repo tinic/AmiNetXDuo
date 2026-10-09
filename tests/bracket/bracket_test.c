@@ -953,12 +953,12 @@ static VOID bt_test_reclaim_dead_holder(VOID)
                a Task without the holder's bit is not the holder. */
             Signal(bt_rc_reuse.bt_Task, BT_SIG_ACQUIRE);
             {
-                ULONG waited = 0UL;
+                ULONG spins = 0UL;
 
-                while (bt_rc_reuse.bt_Rounds == 0 && waited < 250UL)
+                while (bt_rc_reuse.bt_Rounds == 0 && spins < 250UL)
                 {
                     Delay(1);
-                    waited++;
+                    spins++;
                 }
             }
             t_check(bt_rc_reuse.bt_Rounds == 1, "the reuse Task freed the bit",

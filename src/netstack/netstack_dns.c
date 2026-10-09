@@ -462,7 +462,7 @@ typedef struct AmiNsDns6Scratch {
 static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
 {
     AmiResolverConfig *r;
-    NXD_ADDRESS       *offered = sc->offered;
+    NXD_ADDRESS       *servers = sc->offered;
     UWORD              offered_count = 0;
     UCHAR             *names = sc->names;
     char              *text = sc->text;
@@ -525,9 +525,9 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
                     continue;
 
                 if (offered_count < (UWORD)AMI_RDNSS_MAX &&
-                    !ami_ns_dns_v6_list_names(offered, offered_count,
+                    !ami_ns_dns_v6_list_names(servers, offered_count,
                                                server.nxd_ip_address.v6))
-                    offered[offered_count++] = server;
+                    servers[offered_count++] = server;
             }
 
             option_status = nx_dhcpv6_get_other_option_data(
@@ -570,7 +570,7 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
         UINT        status = NX_SUCCESS;
         BOOL        dropped = FALSE;
 
-        if (ami_ns_dns_v6_list_names(offered, offered_count,
+        if (ami_ns_dns_v6_list_names(servers, offered_count,
                                      server.nxd_ip_address.v6) ||
             ami_ns_ra_rdnss_has(&ns->ns_Ra, server.nxd_ip_address.v6, now))
             continue;
@@ -595,13 +595,13 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
 
     memset(ns->ns_Dhcpv6Dns, 0, sizeof(ns->ns_Dhcpv6Dns));
     for (index = 0; index < offered_count; index++)
-        ns->ns_Dhcpv6Dns[index] = offered[index];
+        ns->ns_Dhcpv6Dns[index] = servers[index];
     ns->ns_Dhcpv6DnsCount = offered_count;
 
     /* In: the DNS client first, the configuration only if that worked. */
     for (index = 0; index < offered_count; index++)
     {
-        NXD_ADDRESS server = offered[index];
+        NXD_ADDRESS server = servers[index];
         UINT        status;
 
         status = ami_ns_dns_add6(ns, &server);

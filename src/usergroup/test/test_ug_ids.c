@@ -400,12 +400,12 @@ static void test_initgroups_caps_at_ngroups(void)
        there and only there.  Nothing about the test needs the unbounded one. */
     for (i = 0; i < 40; i++)
     {
-        size_t left = sizeof(file) - (size_t)(p - file);
-        int    n    = snprintf(p, left, "g%d:*:%d:jane\n", i, 500 + i);
+        size_t left  = sizeof(file) - (size_t)(p - file);
+        int    wrote = snprintf(p, left, "g%d:*:%d:jane\n", i, 500 + i);
 
-        if (n <= 0 || (size_t)n >= left)
+        if (wrote <= 0 || (size_t)wrote >= left)
             break;
-        p += n;
+        p += wrote;
     }
 
     shim_dos_add_file("DEVS:Internet/group", file, (long)(p - file));

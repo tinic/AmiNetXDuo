@@ -137,14 +137,14 @@ static void arena_fill(void)
 #define FORM_LONG  3
 
 static unsigned exp_n;
-static struct { unsigned char width; unsigned long value; } exp[WIRE_MAX];
+static struct { unsigned char width; unsigned long value; } exp_wire[WIRE_MAX];
 
 static void exp_put(unsigned char w, unsigned long v)
 {
     if (exp_n < WIRE_MAX)
     {
-        exp[exp_n].width = w;
-        exp[exp_n].value = v;
+        exp_wire[exp_n].width = w;
+        exp_wire[exp_n].value = v;
     }
     exp_n++;
 }
@@ -195,7 +195,7 @@ static int stream_matches(void)
     if (wire_over || exp_n != wire_n || exp_n >= WIRE_MAX)
         return 0;
     for (i = 0; i < wire_n; i++)
-        if (wire[i].width != exp[i].width || wire[i].value != exp[i].value)
+        if (wire[i].width != exp_wire[i].width || wire[i].value != exp_wire[i].value)
             return 0;
     return 1;
 }
@@ -205,7 +205,7 @@ static unsigned exp_bytes(void)
     unsigned i, n = 0;
 
     for (i = 0; i < exp_n; i++)
-        n += exp[i].width;
+        n += exp_wire[i].width;
     return n;
 }
 

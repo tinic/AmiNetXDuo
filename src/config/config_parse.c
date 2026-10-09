@@ -948,6 +948,10 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                         report_clamped(lineno, keyword, value, hint);
                         break;
 
+                    /* The count was taken as it stands: nothing to report.
+                       Named rather than left to the default so the switch
+                       enumerates the whole of parse_request_count(). */
+                    case CFG_COUNT_OK:
                     default:
                         break;
                 }

@@ -875,8 +875,8 @@ static void test_verify_uses_the_carried_sum(void)
 static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
 {
     UCHAR *base = buf + AMI_SANA2_RX_PAD;
-    UCHAR *ip   = base + AMI_ETH_HEADER_SIZE;
-    UCHAR *tcp  = ip + 20;
+    UCHAR *iph  = base + AMI_ETH_HEADER_SIZE;
+    UCHAR *tcp  = iph + 20;
     ULONG  total = 40UL + payload;
     ULONG  i;
 
@@ -885,12 +885,12 @@ static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
 
     base[12] = 0x08;
     base[13] = 0x00;
-    ip[0]    = 0x45;
-    ip[2]    = (UCHAR)(total >> 8);
-    ip[3]    = (UCHAR)total;
-    ip[9]    = proto;
-    ip[12]   = 192; ip[13] = 0; ip[14] = 2; ip[15] = 1;
-    ip[16]   = 198; ip[17] = 51; ip[18] = 100; ip[19] = 2;
+    iph[0]   = 0x45;
+    iph[2]   = (UCHAR)(total >> 8);
+    iph[3]   = (UCHAR)total;
+    iph[9]   = proto;
+    iph[12]  = 192; iph[13] = 0; iph[14] = 2; iph[15] = 1;
+    iph[16]  = 198; iph[17] = 51; iph[18] = 100; iph[19] = 2;
     tcp[0]   = 0x04; tcp[1] = 0xd2;
     tcp[2]   = 0x10; tcp[3] = 0xe1;
     tcp[6]   = 0x03; tcp[7] = 0xe8;       /* sequence 1000 */
@@ -899,12 +899,12 @@ static void tcp_frame_init(NX_PACKET *p, UCHAR *buf, UCHAR proto, ULONG payload)
     tcp[13]  = 0x10;
     tcp[14]  = 0x10;
     for (i = 0; i < payload; i++)
-        ip[40 + i] = (UCHAR)(0x40 + i);
+        iph[40 + i] = (UCHAR)(0x40 + i);
 
     p->nx_packet_data_start  = buf;
     p->nx_packet_data_end    = buf + 256;
     p->nx_packet_prepend_ptr = base;
-    p->nx_packet_append_ptr  = ip + total;
+    p->nx_packet_append_ptr  = iph + total;
     p->nx_packet_length      = AMI_ETH_HEADER_SIZE + total;
 }
 
@@ -921,8 +921,8 @@ static void tcp_frame_seq(UCHAR *buf, ULONG seq)
 static void tcp6_frame_init(NX_PACKET *p, UCHAR *buf, ULONG payload)
 {
     UCHAR *base = buf + AMI_SANA2_RX_PAD;
-    UCHAR *ip   = base + AMI_ETH_HEADER_SIZE;
-    UCHAR *tcp  = ip + 40;
+    UCHAR *iph  = base + AMI_ETH_HEADER_SIZE;
+    UCHAR *tcp  = iph + 40;
     ULONG  plen = 20UL + payload;
     ULONG  i;
 
@@ -930,12 +930,12 @@ static void tcp6_frame_init(NX_PACKET *p, UCHAR *buf, ULONG payload)
     memset(p, 0, sizeof(*p));
     base[12] = 0x86;
     base[13] = 0xdd;
-    ip[0] = 0x60;
-    ip[4] = (UCHAR)(plen >> 8);
-    ip[5] = (UCHAR)plen;
-    ip[6] = 6;
+    iph[0] = 0x60;
+    iph[4] = (UCHAR)(plen >> 8);
+    iph[5] = (UCHAR)plen;
+    iph[6] = 6;
     for (i = 0; i < 32; i++)
-        ip[8 + i] = (UCHAR)(i + 1);
+        iph[8 + i] = (UCHAR)(i + 1);
     tcp[0] = 0x04; tcp[1] = 0xd2;
     tcp[2] = 0x10; tcp[3] = 0xe1;
     tcp[6] = 0x03; tcp[7] = 0xe8;

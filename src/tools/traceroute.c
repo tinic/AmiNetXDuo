@@ -79,6 +79,16 @@ enum
 /* The fixed IPv6 header a router quotes back inside an error message. */
 #define TR_IPV6_HDR         40UL
 
+/*
+ * The hop limit is option 4 in both numberings this library speaks, IPv4's
+ * IP_TTL and IPv6's IPV6_UNICAST_HOPS (toolsock.h).  The probe loop therefore
+ * sets it through the one number instead of a ternary whose arms are equal;
+ * asserted, because the two macros live in different families and a change to
+ * one of them would otherwise be silent here.
+ */
+_Static_assert(TOOL_IP_TTL == TOOL_IPV6_UNICAST_HOPS,
+               "the IPv4 and IPv6 hop-limit option numbers must agree");
+
 /* Static rather than automatic: a Shell command gets whatever stack the Shell
    has, 4 KB on a stock 3.1. */
 static UBYTE tr_probe[TR_MAX_SIZE + 8];
@@ -622,7 +632,7 @@ int main(int argc, char **argv)
 
         if (tool_sock_setsockopt(sb, sock,
                                  v6 ? TOOL_IPPROTO_IPV6 : TOOL_IPPROTO_IP,
-                                 v6 ? TOOL_IPV6_UNICAST_HOPS : TOOL_IP_TTL,
+                                 TOOL_IP_TTL,   /* == TOOL_IPV6_UNICAST_HOPS */
                                  &ttlval, (LONG)sizeof(ttlval)) != 0)
         {
             tool_printf("\n");

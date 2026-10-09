@@ -56,7 +56,7 @@ static const char *const monitors[] = {
 static const struct {
     ULONG       id;
     const char *name;
-} modes[] = {
+} probe_modes[] = {
     { 0x00021000UL, "PAL:LoRes"                },
     { 0x00029000UL, "PAL:HiRes"                },
     { 0x00029004UL, "PAL:HiResLace"            },
@@ -328,7 +328,7 @@ int main(VOID)
                (LONG)SystemTags((CONST_STRPTR)monitors[i], TAG_DONE));
     }
 
-    for (i = 0; modes[i].name != NULL; i++)
+    for (i = 0; probe_modes[i].name != NULL; i++)
     {
         struct DisplayInfo   di;
         struct MonitorInfo   mi;
@@ -341,10 +341,10 @@ int main(VOID)
         ULONG                t;
         LONG                 mtx, mty;
 
-        if (ModeNotAvailable(modes[i].id) != 0)
+        if (ModeNotAvailable(probe_modes[i].id) != 0)
         {
             Printf((CONST_STRPTR)"mode=%s id=%08lx unavailable\n",
-                   (LONG)modes[i].name, (LONG)modes[i].id);
+                   (LONG)probe_modes[i].name, (LONG)probe_modes[i].id);
             continue;
         }
 
@@ -352,13 +352,13 @@ int main(VOID)
         memset(&mi, 0, sizeof(mi));
         memset(&dim, 0, sizeof(dim));
         gotdi  = GetDisplayInfoData(NULL, (UBYTE *)&di, sizeof(di),
-                                    DTAG_DISP, modes[i].id);
+                                    DTAG_DISP, probe_modes[i].id);
         gotmi  = GetDisplayInfoData(NULL, (UBYTE *)&mi, sizeof(mi),
-                                    DTAG_MNTR, modes[i].id);
+                                    DTAG_MNTR, probe_modes[i].id);
         gotdim = GetDisplayInfoData(NULL, (UBYTE *)&dim, sizeof(dim),
-                                    DTAG_DIMS, modes[i].id);
+                                    DTAG_DIMS, probe_modes[i].id);
 
-        tags[0].ti_Tag = SA_DisplayID;  tags[0].ti_Data = modes[i].id;
+        tags[0].ti_Tag = SA_DisplayID;  tags[0].ti_Data = probe_modes[i].id;
         tags[1].ti_Tag = SA_Depth;      tags[1].ti_Data = 2;
         tags[2].ti_Tag = SA_Overscan;   tags[2].ti_Data = OSCAN_TEXT;
         tags[3].ti_Tag = SA_Type;       tags[3].ti_Data = CUSTOMSCREEN;
@@ -371,7 +371,7 @@ int main(VOID)
         if (sc == NULL)
         {
             Printf((CONST_STRPTR)"mode=%s id=%08lx openscreen_failed\n",
-                   (LONG)modes[i].name, (LONG)modes[i].id);
+                   (LONG)probe_modes[i].name, (LONG)probe_modes[i].id);
             continue;
         }
 
@@ -384,7 +384,7 @@ int main(VOID)
 
         Printf((CONST_STRPTR)
                "mode=%s id=%08lx vpmodes=%04lx w=%ld h=%ld left=%ld top=%ld\n",
-               (LONG)modes[i].name, (LONG)modes[i].id,
+               (LONG)probe_modes[i].name, (LONG)probe_modes[i].id,
                (LONG)(UWORD)sc->ViewPort.Modes,
                (LONG)sc->Width, (LONG)sc->Height,
                (LONG)sc->LeftEdge, (LONG)sc->TopEdge);

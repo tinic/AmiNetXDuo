@@ -2177,6 +2177,9 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
             }
             break;
 
+        /* No message, which the decoder reports between frames.  Nothing to
+           do, like anything else this sink does not act on. */
+        case HTTP_WS_EV_NONE:
         default:
             break;
     }

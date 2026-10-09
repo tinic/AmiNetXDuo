@@ -432,15 +432,15 @@ static VOID p_bench_copies(VOID)
 {
 ULONG   t0, ticks, reps, i;
 ULONG   len = 1460UL;
-UINT    da, sa;
+UINT    doff, soff;
 
     reps = 200UL;
 
     /* With AMINETXDUO_NET68K_MEMCPY=ON, the cross-build default, memcpy() IS
        n68k_copy_bytes() and these rows measure it twice under two names. */
-    for (da = 0; da < 4; da++)
+    for (doff = 0; doff < 4; doff++)
     {
-        for (sa = 0; sa < 4; sa++)
+        for (soff = 0; soff < 4; soff++)
         {
         static const char *names[16] =
         {
@@ -453,11 +453,11 @@ UINT    da, sa;
             t0 = p_now();
             for (i = 0UL; i < reps; i++)
             {
-                (VOID)memcpy(p_dst_buf + da, p_src_buf + sa, len);
+                (VOID)memcpy(p_dst_buf + doff, p_src_buf + soff, len);
             }
             ticks = p_elapsed(t0, p_now());
 
-            p_report(names[(da * 4) + sa], ticks, reps, len);
+            p_report(names[(doff * 4) + soff], ticks, reps, len);
         }
     }
 
