@@ -109,6 +109,8 @@ BOOL netdev_wait_done(NetdevWait *w)
     return (BOOL)(w->nw_Spins-- == 0);
 }
 
+static UWORD test_rx_header_word(const volatile UBYTE *p);
+#define ZZ_RX_HEADER_WORD(p) test_rx_header_word(p)
 #include "zz9000.c"
 
 static union
@@ -764,8 +766,54 @@ static VOID rx_offset2_stop_restores_default(VOID)
            "RX offset2: stop does not command unsupported firmware");
 }
 
+/* Publish the already-filled slot after the first header read completes. */
+static UWORD publish_len;
+static int publication_pending;
+static UWORD test_rx_header_word(const volatile UBYTE *p)
+{
+    UWORD got = *(const volatile UWORD *)(const volatile void *)p;
+    if (publication_pending)
+    {
+        publication_pending = 0;
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW) = publish_len;
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW + 2) = 0x0042;
+    }
+    return got;
+}
+
+static VOID publication_between_header_reads(VOID)
+{
+    UWORD shift;
+    for (shift = 0; shift <= 2; shift += 2)
+    {
+        UWORD len;
+        fresh_unit();
+        len = present_tcp_frame_at(46, shift);
+        publish_len = (UWORD)(len | (shift ? ZZ_RX_LEN_OFFSET2 : 0));
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW) = 0;
+        *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW + 2) = 0;
+        publication_pending = 1;
+        expect(!zz_rint(&nic), "publication: first empty serial defers frame");
+        expect(nic.core_stat[ZZ_ST_OVERSIZE] == 0 && nic.rx_errors == 0,
+               "publication: no spurious size rejection");
+        expect(*(volatile UWORD *)(volatile void *)(board.bytes + ZZ_REG_RX_ACK) == 0,
+               "publication: no ACK of frame not yet read");
+        expect(zz_rint(&nic), "publication: next poll consumes published frame");
+        expect(received_len == len, "publication: published frame delivered once");
+        expect(nic.core_stat[ZZ_ST_OVERSIZE] == 0 && nic.rx_errors == 0,
+               "publication: second poll has no size rejection");
+    }
+    fresh_unit();
+    *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW) = 1;
+    *(volatile UWORD *)(volatile void *)(board.bytes + ZZ_RX_WINDOW + 2) = 0x0042;
+    expect(zz_rint(&nic), "publication: actual invalid length still consumed");
+    expect(nic.core_stat[ZZ_ST_OVERSIZE] == 1 && nic.rx_errors == 1,
+           "publication: actual invalid length still counted");
+}
+
 int main(void)
 {
+    publication_between_header_reads();
     rx_offset2_stop_restores_default();
     default_layout_payload_dst_is_shifted();
     rx_offset2_payload_aligned_both_sides();

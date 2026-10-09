@@ -114,6 +114,11 @@ extern struct ExecBase *SysBase;
 #define ZZ_RX_WINDOW        0x2000UL
 #define ZZ_RX_PAD           4           /* UWORD length, UWORD serial */
 #define ZZ_RX_LEN_OFFSET2   0x8000u     /* this frame starts at ZZ_RX_PAD + 2 */
+/* One receive-header word; the host test substitutes a reader that can
+   publish a slot between two reads. */
+#ifndef ZZ_RX_HEADER_WORD
+#define ZZ_RX_HEADER_WORD(p) (*(const volatile UWORD *)(const volatile void *)(p))
+#endif
 #define ZZ_TX_WINDOW        0x8000UL
 #define ZZ_TX_WINDOW_LEN    2048        /* one slot; the window holds four */
 #define ZZ_TX_SLOTS         4
@@ -676,9 +681,19 @@ static VOID zz_copy_frame(UBYTE *dst, const volatile UBYTE *src, UWORD len)
 static BOOL zz_rint(NetdevNic *nic)
 {
     const volatile UBYTE *win = nic->board + ZZ_RX_WINDOW;
-    UWORD len    = *(const volatile UWORD *)(const volatile void *)(win + 0);
-    UWORD serial = *(const volatile UWORD *)(const volatile void *)(win + 2);
+    UWORD serial = ZZ_RX_HEADER_WORD(win + 2);
+    UWORD len;
     const volatile UBYTE *frame = win + ZZ_RX_PAD;
+
+    /* The serial is the publication marker, so it is read first.  The two
+       header words are two bus cycles, and the ARM can publish an empty
+       slot between them: length first could pair the old length 0 with the
+       new serial, reject the frame for size and acknowledge it unread.  A
+       non-zero serial means the whole header is published, and the slot
+       stays ours until the acknowledgement. */
+    if (serial == 0)
+        return FALSE;                   /* nothing presented */
+    len = ZZ_RX_HEADER_WORD(win + 0);
 
     /* Only a firmware we asked sets the flag (zz_init), and it sets it on
        every frame it shifted. */
@@ -689,9 +704,6 @@ static BOOL zz_rint(NetdevNic *nic)
     }
     UBYTE *buf = (UBYTE *)nic->rxbuf;
     UWORD last = (UWORD)nic->core_stat[ZZ_ST_SERIAL];
-
-    if (serial == 0)
-        return FALSE;                   /* nothing presented */
 
     /*
      * A register write does not return to the 68k until the ARM has handled

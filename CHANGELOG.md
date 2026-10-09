@@ -5,6 +5,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- anxzz9000.device no longer drops an occasional received frame as
+  oversize. It read the frame's length before its serial, and a frame
+  published between the two reads looked empty-but-numbered.
+
 - anxzz9000.device asks ZZ9000 firmware that offers it to place received
   frames two bytes further into the card's receive slot, so the payload
   copy into the stack runs longword aligned on both sides. Firmware
