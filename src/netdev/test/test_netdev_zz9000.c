@@ -239,7 +239,13 @@ static VOID summed_tail_carries(VOID)
 
 /* -------------------------------------------------------- through rint --- */
 
-static UBYTE  claimed_buf[NETDEV_RXBUF_MAX + 8];
+/* Longword aligned like an opener's buffer; a bare UBYTE array is not
+   (macOS/clang placed it 2 mod 4). */
+static union
+{
+    ULONG align;
+    UBYTE bytes[NETDEV_RXBUF_MAX + 8];
+} claimed_buf;
 static UBYTE *claim_dst;
 static UBYTE  claim_wanted;
 static ULONG  claim_sum;
@@ -335,7 +341,7 @@ static VOID verified_claim_path_reads_aligned(VOID)
     fresh_unit();
     nic.rx_claim   = claim;
     nic.rx_claimed = claimed;
-    claim_dst      = claimed_buf;       /* longword aligned, as an opener's is */
+    claim_dst      = claimed_buf.bytes;       /* longword aligned, as an opener's is */
     claim_wanted   = ANXD_S2_RXF_VERIFIED;
     len = present_tcp_frame(total);
 
@@ -344,7 +350,7 @@ static VOID verified_claim_path_reads_aligned(VOID)
     expect((claim_flags & ANXD_S2_RXF_VERIFIED) != 0,
            "verified: the GEM's verdict is passed on");
     expect(nic.core_stat[ZZ_ST_HW_VERIFIED] == 1, "verified: counted as such");
-    expect(same_bytes(claimed_buf, frame + NETDEV_HDR_LEN, total),
+    expect(same_bytes(claimed_buf.bytes, frame + NETDEV_HDR_LEN, total),
            "verified: the payload bytes arrive");
     expect(bulk_misaligned == 0, "verified: every bulk read was aligned");
     expect(bulk_calls == 2, "verified: header bulk and payload bulk");
@@ -361,14 +367,14 @@ static VOID summed_claim_path_still_aligned(VOID)
     fresh_unit();
     nic.rx_claim   = claim;
     nic.rx_claimed = claimed;
-    claim_dst      = claimed_buf;
+    claim_dst      = claimed_buf.bytes;
     claim_wanted   = 0;                 /* nobody negotiated VERIFIED */
     present_tcp_frame(total);
 
     expect(zz_rint(&nic), "summed: the frame is consumed");
     expect(claim_done, "summed: the claim completes");
     expect((claim_flags & ANXD_S2_RXF_SUMMED) != 0, "summed: flagged SUMMED");
-    expect(same_bytes(claimed_buf, frame + NETDEV_HDR_LEN, total),
+    expect(same_bytes(claimed_buf.bytes, frame + NETDEV_HDR_LEN, total),
            "summed: the payload bytes arrive");
     expect(bulk_misaligned == 0, "summed: every bulk read was aligned");
 }
@@ -685,7 +691,7 @@ static VOID default_layout_payload_dst_is_shifted(VOID)
     fresh_unit();
     nic.rx_claim   = claim;
     nic.rx_claimed = claimed;
-    claim_dst      = claimed_buf;
+    claim_dst      = claimed_buf.bytes;
     claim_wanted   = ANXD_S2_RXF_VERIFIED;
     present_tcp_frame(200);
     expect(zz_rint(&nic), "default layout: the frame is consumed");
@@ -709,12 +715,12 @@ static VOID rx_offset2_payload_aligned_both_sides(VOID)
             fresh_unit();
             nic.rx_claim   = claim;
             nic.rx_claimed = claimed;
-            claim_dst      = claimed_buf;
+            claim_dst      = claimed_buf.bytes;
             claim_wanted   = wanted ? ANXD_S2_RXF_VERIFIED : 0;
             present_tcp_frame_at(total, 2);
             expect(zz_rint(&nic), "RX offset2: the frame is consumed");
             expect(claim_done, "RX offset2: the claim completes");
-            expect(same_bytes(claimed_buf, frame + NETDEV_HDR_LEN, total),
+            expect(same_bytes(claimed_buf.bytes, frame + NETDEV_HDR_LEN, total),
                    "RX offset2: the payload bytes arrive");
             expect(bulk_misaligned == 0, "RX offset2: every bulk read was aligned");
             expect(!bulk_last_to_misaligned,
