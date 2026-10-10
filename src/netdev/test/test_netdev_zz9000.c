@@ -754,6 +754,21 @@ static VOID rx_offset2_requested_only_when_offered(VOID)
            "RX offset2: requested when offered");
 }
 
+/* Either firmware generation's capability bit turns RX offset2 on. */
+static VOID rx_offset2_capability_sources(VOID)
+{
+    expect(zz_rx_off2_capable(0, FALSE, 0) == 0,
+           "RX offset2: no capability on firmware without either bit");
+    expect(zz_rx_off2_capable(ZZ_CFG_CAP_HASH, TRUE, ZZ_RXM_PRESENT) == 0,
+           "RX offset2: hash and RX_META without the bits are not it");
+    expect(zz_rx_off2_capable(ZZ_CFG_CAP_RX_OFFSET2, FALSE, 0) == 1,
+           "RX offset2: upstream ETH_CONFIG bit 2");
+    expect(zz_rx_off2_capable(0, TRUE, ZZ_RXM_RX_OFFSET2) == 1,
+           "RX offset2: fork RX_META bit 12 with async TX");
+    expect(zz_rx_off2_capable(0, FALSE, ZZ_RXM_RX_OFFSET2) == 0,
+           "RX offset2: RX_META bit 12 alone is not trusted");
+}
+
 /* Review regression: restore the layout before handing the board back. */
 static VOID rx_offset2_stop_restores_default(VOID)
 {
@@ -823,6 +838,7 @@ int main(void)
     default_layout_payload_dst_is_shifted();
     rx_offset2_payload_aligned_both_sides();
     rx_offset2_requested_only_when_offered();
+    rx_offset2_capability_sources();
     payload_copy_every_length();
     summed_tail_carries();
     verified_claim_path_reads_aligned();
