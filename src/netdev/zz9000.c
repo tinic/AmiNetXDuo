@@ -106,6 +106,7 @@ extern struct ExecBase *SysBase;
    GEM takes no multicast frame unless its hash bucket is set. */
 #define ZZ_REG_ETH_CONFIG   0x008aUL
 #define ZZ_CFG_CAP_HASH     0x0001u
+#define ZZ_CFG_CAP_RX_OFFSET2 0x0004u  /* ZZ_CFG_RX_OFFSET2 understood */
 #define ZZ_CFG_RX_OFFSET2   0x1000u    /* | 1: frames 2 bytes into the slot */
 #define ZZ_CFG_HASH_SET     0x8000u
 #define ZZ_CFG_HASH_RESET   0x2000u
@@ -326,6 +327,17 @@ static ULONG zz_rx_capacity(UWORD rx_frames)
 
 /* -------------------------------------------------------------- attach -- */
 
+/*
+ * Whether the firmware can shift received frames by 2: upstream firmware
+ * says so in the ETH_CONFIG read (bit 2); the fork's earlier builds said so
+ * in RX_META bit 12, beside the asynchronous TX path.
+ */
+static UBYTE zz_rx_off2_capable(UWORD cfg, BOOL fork, UWORD rxm)
+{
+    return (UBYTE)((cfg & ZZ_CFG_CAP_RX_OFFSET2) != 0 ||
+                   (fork && (rxm & ZZ_RXM_RX_OFFSET2) != 0));
+}
+
 static LONG zz_attach(NetdevNic *nic)
 {
     ZzCore *core;
@@ -400,9 +412,10 @@ static LONG zz_attach(NetdevNic *nic)
         nic->tx_next = 0;
         nic->rx_capacity = zz_rx_capacity(zz_get(nic, ZZ_REG_RX_FRAMES));
         ZZ(nic)->rx_meta = (UBYTE)((rxm & ZZ_RXM_PRESENT) != 0);
-        ZZ(nic)->rx_off2 = (UBYTE)(fork && (rxm & ZZ_RXM_RX_OFFSET2) != 0);
-        ZZ(nic)->hash = (UBYTE)((zz_get(nic, ZZ_REG_ETH_CONFIG)
-                                 & ZZ_CFG_CAP_HASH) != 0);
+        UWORD cfg  = zz_get(nic, ZZ_REG_ETH_CONFIG);
+
+        ZZ(nic)->rx_off2 = zz_rx_off2_capable(cfg, fork, rxm);
+        ZZ(nic)->hash = (UBYTE)((cfg & ZZ_CFG_CAP_HASH) != 0);
         nic->tx_at = (fork && (rxm & ZZ_RXM_TX_OFFSET2) != 0)
                    ? zz_tx_at : NULL;
         nic->tx_csum_supported = (UBYTE)(((rxm & ZZ_RXM_TX_CSUM) != 0)

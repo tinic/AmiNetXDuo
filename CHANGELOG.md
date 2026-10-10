@@ -14,6 +14,10 @@ Add new entries under `Unreleased`; published release sections are history.
   copy into the stack runs longword aligned on both sides. Firmware
   without the option is unaffected.
 
+- anxzz9000.device also recognises that option on ZZ9000 firmware that
+  reports it the way the upstream firmware does, in the Ethernet config
+  register, not only on the fork's builds.
+
 - httpd's file browser (/files): pressing Return in the New drawer and
   Rename dialogs now creates or renames. It cancelled the dialog instead;
   only clicking the button worked.
