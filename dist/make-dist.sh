@@ -454,9 +454,9 @@ chmod 755 "$TREE"/C/*
 # does not produce them.  They go into C: with the other commands and need
 # mathieeedoubbas.library in LIBS:, which every Workbench installation has.
 #
-# ONE ssh, not one per architecture: the code is -m68000 and both X25519 field
-# multiplies are in it, picked from AttnFlags at the first handshake
-# (clients/dropbear/amiga_25519.c).
+# ONE ssh for C/, not one per architecture: the code is -m68000 and both
+# X25519 field multiplies are in it, picked from AttnFlags at the first
+# handshake (clients/dropbear/amiga_25519.c).  C/fat gets its own, below.
 #
 # The three AMINETXDUO_* variables name the built binaries outright; the
 # release workflow sets them, so the paths it builds into and the paths packed
@@ -502,6 +502,43 @@ if [ "$HAVE_SCP" = "1" ]; then
     chmod 755 "$TREE/C/scp-runner"
     echo "==> including scp ($(wc -c < "$CLIENT_SCP" | tr -d ' ') bytes)"
     echo "==> including scp-runner ($(wc -c < "$CLIENT_SCP_RUNNER" | tr -d ' ') bytes)"
+fi
+
+# The fat drawer's own three, -O2 -m68020-60 like the rest of C/fat, which the
+# Installer copies over C: after C/ when fat is chosen.  Without them a fat
+# install keeps the 68000 ssh.  Still AMINETXDUO_CLIENT_ANY: the X25519 pick
+# is what keeps the 68060, which traps MULU.L's 64-bit form, on four MULU.W.
+# Whatever C/ carries of the three, C/fat carries too, or the archive is
+# refused.
+if [ "$WANT_FAT" = "1" ]; then
+    FAT_SSH="${AMINETXDUO_SSH_FAT:-}"
+    FAT_SCP="${AMINETXDUO_SCP_FAT:-}"
+    FAT_SCP_RUNNER="${AMINETXDUO_SCP_RUNNER_FAT:-}"
+    if { [ -z "$FAT_SSH" ] || [ -z "$FAT_SCP" ] ||
+         [ -z "$FAT_SCP_RUNNER" ]; } &&
+       [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
+        echo "==> building the fat ssh and scp clients (a fat client path was not given)" >&2
+        AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68020-60 \
+            "$ROOT/clients/dropbear/build.sh" -b "$ROOT/build/ssh-fat" >&2 || {
+            echo "fat ssh client build failed" >&2
+            exit 2; }
+        FAT_SSH="${FAT_SSH:-$ROOT/build/ssh-fat/dbclient}"
+        FAT_SCP="${FAT_SCP:-$ROOT/build/ssh-fat/scp}"
+        FAT_SCP_RUNNER="${FAT_SCP_RUNNER:-$ROOT/build/ssh-fat/scp-runner}"
+    fi
+    for pair in "ssh:$FAT_SSH" "scp:$FAT_SCP" "scp-runner:$FAT_SCP_RUNNER"; do
+        name="${pair%%:*}"
+        src="${pair#*:}"
+        if [ -f "$TREE/C/$name" ]; then
+            [ -n "$src" ] && [ -x "$src" ] || {
+                echo "!! C/$name is packed and there is no fat $name for C/fat;" >&2
+                echo "!! a fat install would keep the 68000 one." >&2
+                exit 2; }
+            cp "$src" "$TREE/C/fat/$name"
+            chmod 755 "$TREE/C/fat/$name"
+            echo "==> including fat $name ($(wc -c < "$src" | tr -d ' ') bytes)"
+        fi
+    done
 fi
 
 # The installer prints its version in the about text; stamp it from the same
@@ -713,13 +750,6 @@ write_flavour() {  # $1 name, $2 build dir, $3 libs, $4 devs, $5 C, $6 cpu floor
             rel="${f#"$TREE"/}"
             echo "file=$rel bytes=$(wc -c < "$f" | tr -d " ") sha256=$(sha256_of "$f")"
         done
-        # ssh and scp are one build for every flavour, from clients/.
-        if [ "$cdir" != C ]; then
-            for f in ssh scp scp-runner; do
-                [ -f "$TREE/C/$f" ] || continue
-                echo "file=C/$f bytes=$(wc -c < "$TREE/C/$f" | tr -d " ") sha256=$(sha256_of "$TREE/C/$f")"
-            done
-        fi
     } > "$out"
 }
 

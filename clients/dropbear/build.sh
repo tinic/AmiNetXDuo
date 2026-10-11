@@ -298,8 +298,10 @@ if [ "$STOCK25519" = "0" ]; then
     # key arithmetic (docs/RESEARCH.md 35), so the wrong binary is not a few
     # percent, it is the difference between 12 s and 84 s.
     case "$AMIGA_CLIENT_ARCH" in
+        # -m68020-60 runs on a 68060 too, so it is the 060's arm, first.
+        *68020-60*|*68060*)      C68K_25519_ASM="-DC68K_ASM_MULW=1" ;;
         *68020*|*68030*|*68040*) C68K_25519_ASM="-DC68K_ASM=1" ;;
-        *68000*|*68010*|*68060*) C68K_25519_ASM="-DC68K_ASM_MULW=1" ;;
+        *68000*|*68010*)         C68K_25519_ASM="-DC68K_ASM_MULW=1" ;;
         *)                       C68K_25519_ASM="" ;;
     esac
     if [ -n "${AMINETXDUO_CLIENT_ANY:-}" ]; then
@@ -462,7 +464,7 @@ if [ "$WANT_SCP" = "1" ]; then
     echo "  CC amiga_scp_runner.c"
     "$AMIGA_GCC" $DB_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -Wextra -c -o "$SCP_RUNNER_O" \
                  "$ROOT/clients/dropbear/amiga_scp_runner.c"
-    "$AMIGA_GCC" $AMIGA_CLIENT_ARCH -o "$OUT/scp-runner" "$SCP_RUNNER_O"
+    "$AMIGA_GCC" $AMIGA_CLIENT_LINK_ARCH -o "$OUT/scp-runner" "$SCP_RUNNER_O"
 
     make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
          PROGRAMS=scp "${SCP_MAKE_OBJECTS[@]}"
