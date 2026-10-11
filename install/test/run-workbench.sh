@@ -8,7 +8,8 @@
 #                                 [-N BOARD] [-t SECONDS] [-T SECONDS] [-k]
 #                                 [-H] [-S] [-D] [-g] [-R] [-U] [-E] [-J] [-B]
 #                                 [-q ANSWERS] [-x PROFILE-TRANSITION]
-#                                 [-e genet|wifi|both] [-P fail|broken]
+#                                 [-e genet|wifi|both|genet-old|genet-old-bare]
+#                                 [-P fail|broken]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
@@ -34,6 +35,11 @@
 # server; `-s invalid' types a refused name first.  Without -s the question
 # takes its default, no, and S:Network-Startup must carry no sntp line.
 # -a takes an archive as given; without it a release-only defect cannot show.
+# -e replaces the throw-away archive's InstallNetProbe with a fixture naming
+# the Emu68 devices.  genet-old is a GENET Emu68 1.0.x leaves unmapped, with
+# Emu68's own genet.device in DEVS:Networks: the interface must name it.
+# genet-old-bare is the same tree with no genet.device and no other driver:
+# the Installer must stop before writing anything.
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
 # (broken): the Installer must fall back to the full stack and the driver
@@ -120,7 +126,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full|fat-full|full-fat]" \
-                "[-f existing-stack-mode] [-e genet|wifi|both] [-P fail|broken]" \
+                "[-f existing-stack-mode] [-e genet|wifi|both|genet-old|genet-old-bare] [-P fail|broken]" \
                 "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z]" \
                 "[-s yes|invalid]" >&2
            exit 2 ;;
@@ -331,7 +337,7 @@ if [ "$MANUAL_CARD" = 1 ]; then
 fi
 if [ -n "$EMU68_FIXTURE" ]; then
     case "$EMU68_FIXTURE" in
-        genet|wifi|both) ;;
+        genet|wifi|both|genet-old|genet-old-bare) ;;
         *) echo "unknown Emu68 fixture: $EMU68_FIXTURE" >&2; exit 2 ;;
     esac
     [ "$DRAWER" = "0" ] && [ "$PICK" != "drawer" ] &&
@@ -876,6 +882,7 @@ MANUAL_CARD_KEY=""
 case "$EMU68_FIXTURE" in
     genet) EXPECTED_IF=genet; EXPECTED_AUTO_DEVICE=anxgenet.device ;;
     wifi)  EXPECTED_IF=wifipi; EXPECTED_AUTO_DEVICE=anxwifipi.device ;;
+    genet-old) EXPECTED_IF=genet; EXPECTED_AUTO_DEVICE=genet.device ;;
     both)  EXPECTED_IF=genet; EXPECTED_SECOND_IF=wifipi
            EXPECTED_AUTO_DEVICE=anxgenet.device
            EXPECTED_SECOND_DEVICE=anxwifipi.device ;;
@@ -1033,7 +1040,8 @@ if [ "$MANUAL_CARD" = 0 ]; then
         echo "!! $SANA2_DRIVER was not staged onto the test drive" >&2
         exit 2
     }
-    if [ "$NO_CARD" = 1 ]; then
+    # genet-old-bare: the Pi Ethernet is all there is, no driver file either.
+    if [ "$NO_CARD" = 1 ] || [ "$EMU68_FIXTURE" = genet-old-bare ]; then
         rm -f "$STAGED_AT"
         [ ! -e "$STAGED_AT" ] || {
             echo "!! no-card fixture could not remove $STAGED_AT" >&2
@@ -1041,13 +1049,21 @@ if [ "$MANUAL_CARD" = 0 ]; then
         }
     fi
 fi
+# Emu68's own GENET driver, as the Emu68 Imager installs it.  Only its name
+# is read: the run stops after the configuration audit.
+if [ "$EMU68_FIXTURE" = genet-old ]; then
+    mkdir -p "$HD/Devs/Networks"
+    printf 'genet.device fixture, %s\n' "$TAG" > "$HD/Devs/Networks/genet.device"
+    echo "==> genet-old fixture: DEVS:Networks/genet.device staged"
+fi
 if [ "$NO_CARD" = 1 ]; then
     echo "==> no-card fixture: no known SANA-II driver in DEVS:"
 elif [ "$MANUAL_CARD" = 1 ]; then
     echo "==> hardware-only fixture: no vendor SANA-II driver in DEVS:"
 fi
 cp "$DRIVER" "$HD/C/installdrive"
-if [ "$NO_CARD" = 0 ] && [ "$MANUAL_CARD" = 0 ]; then
+if [ "$NO_CARD" = 0 ] && [ "$MANUAL_CARD" = 0 ] &&
+   [ "$EMU68_FIXTURE" != genet-old-bare ]; then
     chmod 755 "$STAGED_AT"
 fi
 chmod 755 "$HD/C/installdrive"
@@ -1384,14 +1400,17 @@ fi
 if [ -n "$EMU68_FIXTURE" ]; then
     _fixture_genet=0
     _fixture_wifi=0
+    _fixture_genet_old=0
     case "$EMU68_FIXTURE" in
         genet) _fixture_genet=1 ;;
+        genet-old|genet-old-bare) _fixture_genet=1; _fixture_genet_old=1 ;;
         wifi)  _fixture_wifi=1 ;;
         both)  _fixture_genet=1; _fixture_wifi=1 ;;
     esac
     _fixture_bin="$ROOT/build/install-netprobe-fixture-$TAG"
     "$GCC" -O2 -m68000 -Wall -Wextra -I"$NDK" \
         -DFIXTURE_GENET="$_fixture_genet" -DFIXTURE_WIFI="$_fixture_wifi" \
+        -DFIXTURE_GENET_OLD="$_fixture_genet_old" \
         -o "$_fixture_bin" "$ROOT/install/test/netprobe-fixture.c" || exit 2
     cp "$_fixture_bin" "$UNPACK/AmiNetXDuo/InstallNetProbe"
     chmod 755 "$UNPACK/AmiNetXDuo/InstallNetProbe"
@@ -1938,8 +1957,14 @@ Echo >DH0:.done "$RC"'
 if [ -n "$FOREIGN_MODE" ]; then
     FOREIGN_TREE_BEFORE=$(product_manifest)
 fi
+# The refusals that must leave the destination byte-exact.
+REFUSAL=0
+if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ] ||
+   [ "$EMU68_FIXTURE" = genet-old-bare ]; then
+    REFUSAL=1
+fi
 ZERO_DIFF_BEFORE=""
-if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
+if [ "$REFUSAL" = 1 ]; then
     ZERO_DIFF_BEFORE=$(product_manifest)
 fi
 
@@ -1971,7 +1996,7 @@ echo
 echo "---- Installer log ----"
 cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
 
-if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
+if [ "$REFUSAL" = 1 ]; then
     ZERO_DIFF_AFTER=$(product_manifest)
     zero_ok=1
     if [ "$ZERO_DIFF_AFTER" != "$ZERO_DIFF_BEFORE" ]; then
@@ -1982,6 +2007,20 @@ if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
     fi
     if [ "$INSTALL_STATUS" != 0 ]; then
         echo "!! refusal/cancellation driver returned $INSTALL_STATUS, not 0"
+        zero_ok=0
+    fi
+    # The stop page comes straight after the GENETOK query, before the first
+    # question: welcome (plus the Installer's own pretend/log page above
+    # Novice) and stop are the only pages drawn.  Only Novice writes a log.
+    _stop_pages=3
+    [ "$LEVEL" != NOVICE ] || _stop_pages=2
+    if [ "$EMU68_FIXTURE" = genet-old-bare ] &&
+       { ! grep -q "^installdrive: $_stop_pages pages driven in total" \
+             "$HD/installdrive.txt" 2>/dev/null ||
+         { [ -f "$HD/install-log.txt" ] &&
+           { ! grep -q 'InstallNetProbe" GENETOK' "$HD/install-log.txt" ||
+             ! grep -q '^Aborting script' "$HD/install-log.txt"; }; }; }; then
+        echo "!! genet-old-bare did not stop at the Emu68 page"
         zero_ok=0
     fi
     if [ -n "$CANCEL_MODE" ] &&
@@ -1995,6 +2034,7 @@ if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ]; then
         _reason=${_reason:-missing-$MISSING_MODE}
         [ "$NO_CARD" = 0 ] || _reason=no-card-novice-refusal
         [ "$STALE_PI_DRIVERS" = 0 ] || _reason=stale-pi-driver-refusal
+        [ "$EMU68_FIXTURE" != genet-old-bare ] || _reason="old-emu68-refusal"
         echo "  ok      $_reason left the destination byte-exact"
         echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
              "card_config=not-written stack=unchanged boot_status=not-run"
