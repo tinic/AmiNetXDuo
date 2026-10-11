@@ -61,11 +61,13 @@ typedef struct NwDev
     struct IOSana2Req *event;
     APTR               scan_pool;
     BOOL               scan_busy;
+    BOOL               scan_replied;    /* taken off async by nw_dev_reply */
     BOOL               event_busy;
     struct TagItem     scan_tags[2];
     UBYTE              scan_ssid[NW_SSID_MAX + 1];
 } NwDev;
 
+#define NW_IFACE_MAX            8192
 #define NW_DEFAULT_DEVICE       "anxwifipi.device"
 #define NW_DEFAULT_INTERFACE    "wifipi"
 
@@ -79,9 +81,9 @@ BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
 LONG nw_dev_open(NwDev *d, const char *device, ULONG unit);
 VOID nw_dev_close(NwDev *d);
 
-/* What WirelessManager does before it scans: get the address, configure
-   with it, and put a unit that was already configured online.  TRUE when
-   the unit is configured afterwards. */
+/* What WirelessManager does before it scans: get the address and configure
+   with it; a unit configured already is put online only if it is offline.
+   TRUE when the unit is configured afterwards. */
 BOOL nw_dev_bring_up(NwDev *d);
 
 /* One S2_GETSIGNALQUALITY: NW_LINK_UP with *signal and *noise in dBm, or
@@ -98,7 +100,12 @@ BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,
    network by name (a hidden one).  Needs exec V39. */
 BOOL nw_dev_scan_start(NwDev *d, const UBYTE *ssid, LONG ssid_len);
 
-/* After the scan's reply came back on d->async: the networks, merged by
+/* One reply off d->async, and which request it was.  Every message on that
+   port goes through here, so a request is never taken off it twice. */
+enum { NW_REPLY_NONE, NW_REPLY_SCAN, NW_REPLY_EVENT };
+LONG nw_dev_reply(NwDev *d);
+
+/* After nw_dev_reply() said NW_REPLY_SCAN: the networks, merged by
    SSID and strongest first, at most max.  -1 when the scan failed. */
 LONG nw_dev_scan_collect(NwDev *d, NwScan *out, LONG max);
 

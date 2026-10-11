@@ -33,13 +33,28 @@ done
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-netwireless}"
 
+# An interface file the way the installer writes one: DEVICE and UNIT after
+# more than 2 KB of comments.
+STAGE="$BUILD/netwireless-stage"
+rm -rf "$STAGE"
+mkdir -p "$STAGE/devs/NetInterfaces"
+{
+    for i in $(seq 1 40); do
+        echo "; comment line $i of the header the installer writes ahead of the keys"
+    done
+    echo "DEVICE=wifistub.device"
+    echo "UNIT=0"
+    echo "CONFIGURE=DHCP"
+} > "$STAGE/devs/NetInterfaces/wifitest"
+
 . "$ROOT/tools/test-verdict.sh"
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -m "$MODEL" -t "$TIMEOUT" "$EXE" "$PREFS"
+"$ROOT/tools/amiberry-run.sh" -m "$MODEL" -t "$TIMEOUT" "$EXE" "$PREFS" \
+    "$STAGE/devs"
 RUN_RC=$?
 set -e
 
-verdict_guest "netwireless" 13 "$RUN_RC" \
+verdict_guest "netwireless" 18 "$RUN_RC" \
     "$(verdict_hd_amiberry)/stdout.txt" "$(verdict_serial_amiberry)" && exit 0
 exit $?

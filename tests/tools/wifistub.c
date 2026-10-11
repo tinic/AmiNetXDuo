@@ -61,6 +61,7 @@ typedef struct WsDevice
     ULONG         opens;
     ULONG         n_config, n_online, n_scan, n_signal, n_info, n_event;
     ULONG         n_scan_abort;
+    BOOL          break_next;           /* Ctrl-C the next scanner         */
     ULONG         scan_stamp;           /* ticks when the first scan queued */
 } WsDevice;
 
@@ -258,6 +259,13 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             io->ios2_Req.io_Message.mn_Node.ln_Pri = 0;
             io->ios2_Req.io_Message.mn_Node.ln_Name = (char *)ws_ticks;
             ws_queue(&ws->scans, io);
+            if (ws->break_next)
+            {
+                /* As if the user pressed Ctrl-C while the scan runs. */
+                ws->break_next = FALSE;
+                Signal(io->ios2_Req.io_Message.mn_ReplyPort->mp_SigTask,
+                       SIGBREAKF_CTRL_C);
+            }
             break;
         default:
             ws_reply(io, IOERR_NOCMD, S2WERR_GENERIC_ERROR);
@@ -396,6 +404,9 @@ static VOID ws_replier(VOID)
         else
             Permit();
     }
+    /* Under Forbid() to the end: the segment this runs in goes once
+       ws_alive is clear, and the exit drops the Forbid(). */
+    Forbid();
     ws_alive = FALSE;
 }
 
@@ -527,10 +538,30 @@ int main(void)
     check(rc == 0 && has("connected") && has("Network       Home") &&
           has("-61 dBm, 3 of 4 bars"), "status of an associated unit");
 
-    /* Configured already: CONFIGINTERFACE refused, S2_ONLINE as WM does. */
+    /* Configured and online: no second configure, and no S2_ONLINE, which
+       zeroes anxwifipi.device's statistics. */
     rc = run(PREFS " LIST");
-    check(rc == 0 && ws->n_config == 2 && ws->n_online == 1,
-          "a configured unit is put online, not configured again");
+    check(rc == 0 && ws->n_config == 2 && ws->n_online == 0,
+          "a configured online unit is left alone");
+
+    /* Configured and taken offline: put online, as WirelessManager does. */
+    ws->online = FALSE;
+    rc = run(PREFS " LIST");
+    check(rc == 0 && ws->n_online == 1 && ws->online,
+          "a configured offline unit is put online");
+
+    /* Ctrl-C while the scan runs: noted, the scan waited out, not aborted. */
+    ws->break_next = TRUE;
+    rc = run(PREFS " LIST");
+    check(rc == RETURN_WARN && has("Waiting for the scan to finish"),
+          "Ctrl-C during a scan waits it out");
+
+    /* DEVICE and UNIT from an interface file with the installer's 2 KB of
+       comments ahead of them. */
+    rc = run("DH0:NetWirelessPrefs INTERFACE=wifitest STATUS");
+    check(rc == 0 && has("wifistub.device, unit 0"), "the interface file's device");
+    rc = run("DH0:NetWirelessPrefs INTERFACE=nosuch STATUS");
+    check(rc == RETURN_ERROR, "a named interface that is not there");
 
     /* The refusal goes to the error stream, so the code is the check. */
     rc = run("DH0:NetWirelessPrefs DEVICE=" WS_NAME " UNIT=3 STATUS");

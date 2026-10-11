@@ -43,22 +43,27 @@ static NwScan nw_list[NW_LIST_MAX];
 static char   nw_device[NW_DEVICE_LEN];
 static ULONG  nw_unit;
 
-/* DEVICE and UNIT as given, else the Wi-Fi interface file's, else the Pi
-   Wi-Fi's own name. */
-static VOID nw_pick_device(LONG *args)
+/* DEVICE as given; else the interface file's; else, when the interface was
+   not named, the Pi Wi-Fi's own driver.  FALSE for a named interface that
+   names no device. */
+static BOOL nw_pick_device(LONG *args)
 {
-    const char *iface = args[ARG_INTERFACE] != 0
-                        ? (const char *)args[ARG_INTERFACE] : NW_DEFAULT_INTERFACE;
-
     nw_unit = 0;
-    if (args[ARG_DEVICE] == 0 ||
-        !nw_dev_from_interface(iface, nw_device, sizeof(nw_device), &nw_unit))
-        tool_copy_string(nw_device, sizeof(nw_device), NW_DEFAULT_DEVICE);
     if (args[ARG_DEVICE] != 0)
         tool_copy_string(nw_device, sizeof(nw_device),
                          (const char *)args[ARG_DEVICE]);
+    else if (args[ARG_INTERFACE] != 0)
+    {
+        if (!nw_dev_from_interface((const char *)args[ARG_INTERFACE],
+                                   nw_device, sizeof(nw_device), &nw_unit))
+            return FALSE;
+    }
+    else if (!nw_dev_from_interface(NW_DEFAULT_INTERFACE, nw_device,
+                                    sizeof(nw_device), &nw_unit))
+        tool_copy_string(nw_device, sizeof(nw_device), NW_DEFAULT_DEVICE);
     if (args[ARG_UNIT] != 0)
         nw_unit = (ULONG)*(LONG *)args[ARG_UNIT];
+    return TRUE;
 }
 
 static VOID nw_print_ssid(const UBYTE *ssid, LONG len, ULONG width)
@@ -140,9 +145,9 @@ static LONG nw_scan_list(VOID)
         if ((sigs & SIGBREAKF_CTRL_C) && !broke)
         {
             broke = TRUE;
-            tool_printf("Waiting for the scan to finish.\n");
+            tool_say("Waiting for the scan to finish.\n");
         }
-        if (GetMsg(nw_dev.async) != NULL)
+        if (nw_dev_reply(&nw_dev) == NW_REPLY_SCAN)
             n = nw_dev_scan_collect(&nw_dev, nw_list, NW_LIST_MAX);
     }
     if (broke) return RETURN_WARN;
@@ -190,7 +195,13 @@ int main(int argc, char **argv)
                    "List the Wi-Fi networks in range, or the link's state.");
         return RETURN_ERROR;
     }
-    nw_pick_device(args);
+    if (!nw_pick_device(args))
+    {
+        tool_error("DEVS:NetInterfaces/%s names no DEVICE",
+                   (LONG)args[ARG_INTERFACE]);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     err = nw_dev_open(&nw_dev, nw_device, nw_unit);
     if (err != 0)

@@ -38,24 +38,34 @@ BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
                            ULONG *unit)
 {
     static const char dir[] = "DEVS:NetInterfaces/";
-    char          path[96], text[1024];
+    char          path[128], *text;
     BPTR          fh;
     LONG          got;
     ULONG         i = 0, n;
     unsigned long u = *unit;
-    BOOL          found;
+    BOOL          found = FALSE;
 
     for (n = 0; dir[n] != '\0'; n++) path[i++] = dir[n];
-    for (n = 0; name[n] != '\0' && i + 1 < sizeof(path); n++) path[i++] = name[n];
+    for (n = 0; name[n] != '\0'; n++)
+    {
+        if (i + 1 >= sizeof(path)) return FALSE;
+        path[i++] = name[n];
+    }
     path[i] = '\0';
 
+    /* The installer's interface files carry 2 KB of comments ahead of
+       DEVICE; NW_IFACE_MAX holds every one it writes. */
     fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
     if (fh == (BPTR)0) return FALSE;
-    got = Read(fh, text, sizeof(text));
+    text = (char *)AllocVec(NW_IFACE_MAX, MEMF_ANY);
+    got = text != NULL ? Read(fh, text, NW_IFACE_MAX) : -1;
     Close(fh);
-    if (got <= 0) return FALSE;
-    found = nw_iface_device(text, (size_t)got, device, cap, &u) ? TRUE : FALSE;
-    *unit = (ULONG)u;
+    if (got > 0 && nw_iface_device(text, (size_t)got, device, cap, &u))
+    {
+        *unit = (ULONG)u;
+        found = TRUE;
+    }
+    if (text != NULL) FreeVec(text);
     return found;
 }
 
@@ -79,6 +89,7 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
     char  path[128];
     LONG  err;
     ULONG i, n;
+    BOOL  resident;
 
     d->port  = CreateMsgPort();
     d->async = CreateMsgPort();
@@ -96,8 +107,14 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
 
     err = (LONG)(BYTE)OpenDevice((CONST_STRPTR)device, unit,
                                  (struct IORequest *)d->req, 0);
-    if (err != 0)
+    Forbid();
+    resident = FindName(&SysBase->DeviceList, (CONST_STRPTR)device) != NULL;
+    Permit();
+    /* A resident driver that refused was not a file that was missing. */
+    if (err != 0 && !resident)
     {
+        LONG first = err;
+
         /* A bare name is also looked for where the installer puts it. */
         for (n = 0; device[n] != '\0'; n++)
             if (device[n] == ':' || device[n] == '/') break;
@@ -110,6 +127,7 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
             d->req->ios2_Req.io_Unit = NULL;
             err = (LONG)(BYTE)OpenDevice((CONST_STRPTR)path, unit,
                                          (struct IORequest *)d->req, 0);
+            if (err != 0) err = first;
         }
     }
     if (err != 0)
@@ -164,7 +182,14 @@ BOOL nw_dev_bring_up(NwDev *d)
     CopyMem(d->req->ios2_DstAddr, d->req->ios2_SrcAddr, SANA2_MAX_ADDR_BYTES);
     if (nw_do(d, S2_CONFIGINTERFACE) == 0) return TRUE;
     if (d->req->ios2_WireError != S2WERR_IS_CONFIGURED) return FALSE;
-    (VOID)nw_do(d, S2_ONLINE);
+    /* WirelessManager sends S2_ONLINE here unasked; anxwifipi.device then
+       zeroes its statistics, so it goes only to a unit that is offline. */
+    {
+        LONG signal, noise;
+
+        if (nw_dev_signal(d, &signal, &noise) == NW_LINK_OFF)
+            (VOID)nw_do(d, S2_ONLINE);
+    }
     return TRUE;
 }
 
@@ -172,9 +197,13 @@ LONG nw_dev_signal(NwDev *d, LONG *signal, LONG *noise)
 {
     struct { LONG signal, noise; } q;
 
+    LONG rc;
+
     q.signal = q.noise = 0;
     d->req->ios2_StatData = &q;
-    if (nw_do(d, NW_S2_GETSIGNALQUALITY) == 0)
+    rc = nw_do(d, NW_S2_GETSIGNALQUALITY);
+    d->req->ios2_StatData = NULL;
+    if (rc == 0)
     {
         *signal = q.signal;
         *noise  = q.noise;
@@ -290,6 +319,8 @@ static VOID nw_scan_entry(struct TagItem *tags, NwScan *e)
     ULONG           ie_len = 0, caps = 0;
 
     e->ssid_len = 0;
+    for (ie_len = 0; ie_len < 6; ie_len++) e->bssid[ie_len] = 0;
+    ie_len = 0;
     e->signal = -100;
     e->channel = 0;
     e->band5 = 0;
@@ -330,8 +361,9 @@ LONG nw_dev_scan_collect(NwDev *d, NwScan *out, LONG max)
     LONG             n = 0;
     ULONG            i, count;
 
-    if (!d->scan_busy) return -1;
+    if (!d->scan_busy || !d->scan_replied) return -1;
     d->scan_busy = FALSE;
+    d->scan_replied = FALSE;
     if (d->scan->ios2_Req.io_Error != 0)
     {
         n = -1;
@@ -352,11 +384,31 @@ LONG nw_dev_scan_collect(NwDev *d, NwScan *out, LONG max)
     return n;
 }
 
+LONG nw_dev_reply(NwDev *d)
+{
+    struct Message *m = GetMsg(d->async);
+
+    if (m == &d->scan->ios2_Req.io_Message)
+    {
+        d->scan_replied = TRUE;
+        return NW_REPLY_SCAN;
+    }
+    if (m == &d->event->ios2_Req.io_Message)
+    {
+        d->event_busy = FALSE;
+        return NW_REPLY_EVENT;
+    }
+    return NW_REPLY_NONE;
+}
+
 VOID nw_dev_scan_wait(NwDev *d)
 {
     if (!d->scan_busy) return;
-    WaitIO((struct IORequest *)d->scan);
+    /* WaitIO() on a reply already taken off the port would Remove() it a
+       second time. */
+    if (!d->scan_replied) WaitIO((struct IORequest *)d->scan);
     d->scan_busy = FALSE;
+    d->scan_replied = FALSE;
     DeletePool(d->scan_pool);
     d->scan_pool = NULL;
 }
