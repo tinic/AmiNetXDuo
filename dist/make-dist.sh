@@ -119,6 +119,16 @@ case "$MICRO_BUILD" in /*) ;; *) MICRO_BUILD="$ROOT/$MICRO_BUILD" ;; esac
 WANT_MICRO=1
 [ -z "${AMINETXDUO_DIST_NO_MICRO:-}" ] || WANT_MICRO=0
 
+# fat is the full stack at -O2 for 68020 and up (CMakePresets.json `fat`).
+# Unlike minimal and micro it carries its own drivers and commands, because
+# the CPU and level change those too: Libs/fat, Devs/Networks/fat, C/fat.
+FAT_BUILD="${AMINETXDUO_BUILD_FAT:-$BUILD-fat}"
+case "$FAT_BUILD" in /*) ;; *) FAT_BUILD="$ROOT/$FAT_BUILD" ;; esac
+
+# AMINETXDUO_DIST_NO_FAT=1 leaves it out, for a test archive from one tree.
+WANT_FAT=1
+[ -z "${AMINETXDUO_DIST_NO_FAT:-}" ] || WANT_FAT=0
+
 # The nine the release workflow turns off or pins for the floor drawer.  Kept
 # here so a hand-run of this script produces the same minimal library CI does;
 # the workflow's own copy at .github/workflows/release.yml:258 is the other
@@ -140,9 +150,12 @@ MINIMAL_OPTIONS="$("$ROOT/tools/preset-options.sh" minimal)"
 # this copy exists so a hand-run builds the library CI builds.
 MICRO_OPTIONS="$("$ROOT/tools/preset-options.sh" micro)"
 
+FAT_OPTIONS="$("$ROOT/tools/preset-options.sh" fat)"
+
 BUILDS=("$BUILD")
 [ "$WANT_MINIMAL" = "0" ] || BUILDS+=("$MINIMAL_BUILD")
 [ "$WANT_MICRO" = "0" ]   || BUILDS+=("$MICRO_BUILD")
+[ "$WANT_FAT" = "0" ]     || BUILDS+=("$FAT_BUILD")
 
 # WHAT IS IN THE TREE IS WHAT GETS PACKED, so check that it is the build that
 # runs everywhere.  A build directory configured before the default changed --
@@ -187,6 +200,7 @@ for b in "${BUILDS[@]}"; do
         min_flags=
         [ "$b" != "$MINIMAL_BUILD" ] || min_flags="$MINIMAL_OPTIONS"
         [ "$b" != "$MICRO_BUILD" ]   || min_flags="$MICRO_OPTIONS"
+        [ "$b" != "$FAT_BUILD" ]     || min_flags="$FAT_OPTIONS"
 
         echo "==> configuring $b" >&2
         # shellcheck disable=SC2086
@@ -236,8 +250,20 @@ for b in "${BUILDS[@]}"; do
     # (tools/ci.sh, MICRO_OPTIONS above), and refusing it here refused the
     # archive it was added for.
     got=$(cpu_of "$b")
+    if [ "$b" = "$FAT_BUILD" ]; then
+        # The one drawer that does not run everywhere, by design: the
+        # Installer refuses it below a 68020.  It must be exactly 68020-60 -O2.
+        opt=$(sed -n 's/^AMINETXDUO_OPT:STRING=//p' "$b/CMakeCache.txt")
+        [ "$got" = "68020-60" ] && [ "$opt" = "O2" ] || {
+            echo "!! $b is the fat drawer and was configured with" >&2
+            echo "!! AMINETXDUO_CPU=${got:-unset} AMINETXDUO_OPT=${opt:-unset}." >&2
+            echo "!! It must be 68020-60 and O2 (cmake --preset fat), fresh." >&2
+            exit 2
+        }
+        got=fat
+    fi
     case "$got" in
-        any|68000) ;;
+        any|68000|fat) ;;
         *)
             echo "!! $b was configured with AMINETXDUO_CPU=${got:-unset}." >&2
             echo "!! The archive has no CPU drawers, so everything in it has to" >&2
@@ -261,6 +287,9 @@ done
 CMD_BUILD="$BUILD"
 
 for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
+if [ "$WANT_FAT" = "1" ]; then
+    for cmd in "${CMDS[@]}"; do need "$FAT_BUILD/src/tools/$cmd"; done
+fi
 
 # A command that is BUILT and not listed in CMDS ships nowhere and nothing
 # notices, so anything deliberately not shipped goes in NOT_SHIPPED below with
@@ -352,7 +381,10 @@ stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
     # the CPU label inside the $VER: string ("any" against "68000").  Shipping
     # a second copy of one driver is a second thing to keep in step for no
     # difference a machine can observe.
-    if [ -z "$sub" ]; then
+    #
+    # fat is the exception: -O2 -m68020 changes the drivers and the commands
+    # as well, so it stages its own of both, in Devs/Networks/fat and C/fat.
+    if [ -z "$sub" ] || [ "$sub" = "fat" ]; then
         for dev in "${DEVICES[@]}"; do
             cp "$b/src/$dev.device" "$devs/"
         done
@@ -360,11 +392,21 @@ stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
     else
         rmdir "$devs" 2>/dev/null || true
     fi
+    if [ "$sub" = "fat" ]; then
+        mkdir -p "$TREE/C/fat"
+        for cmd in "${CMDS[@]}"; do
+            cp "$b/src/tools/$cmd" "$TREE/C/fat/"
+        done
+        cp "$INSTALL/NetPrefs.info" "$TREE/C/fat/NetPrefs.info"
+        cp "$INSTALL/NetMeter.info" "$TREE/C/fat/NetMeter.info"
+        chmod 755 "$TREE"/C/fat/*
+    fi
 }
 
 stage_build "$BUILD" ""
 [ "$WANT_MINIMAL" = "0" ] || stage_build "$MINIMAL_BUILD" "minimal"
 [ "$WANT_MICRO" = "0" ]   || stage_build "$MICRO_BUILD" "micro"
+[ "$WANT_FAT" = "0" ]     || stage_build "$FAT_BUILD" "fat"
 
 # The trust store comes from the primary build, and is packed whenever any
 # build produced a tls.library.
@@ -412,9 +454,9 @@ chmod 755 "$TREE"/C/*
 # does not produce them.  They go into C: with the other commands and need
 # mathieeedoubbas.library in LIBS:, which every Workbench installation has.
 #
-# ONE ssh, not one per architecture: the code is -m68000 and both X25519 field
-# multiplies are in it, picked from AttnFlags at the first handshake
-# (clients/dropbear/amiga_25519.c).
+# ONE ssh for C/, not one per architecture: the code is -m68000 and both
+# X25519 field multiplies are in it, picked from AttnFlags at the first
+# handshake (clients/dropbear/amiga_25519.c).  C/fat gets its own, below.
 #
 # The three AMINETXDUO_* variables name the built binaries outright; the
 # release workflow sets them, so the paths it builds into and the paths packed
@@ -460,6 +502,43 @@ if [ "$HAVE_SCP" = "1" ]; then
     chmod 755 "$TREE/C/scp-runner"
     echo "==> including scp ($(wc -c < "$CLIENT_SCP" | tr -d ' ') bytes)"
     echo "==> including scp-runner ($(wc -c < "$CLIENT_SCP_RUNNER" | tr -d ' ') bytes)"
+fi
+
+# The fat drawer's own three, -O2 -m68020-60 like the rest of C/fat, which the
+# Installer copies over C: after C/ when fat is chosen.  Without them a fat
+# install keeps the 68000 ssh.  Still AMINETXDUO_CLIENT_ANY: the X25519 pick
+# is what keeps the 68060, which traps MULU.L's 64-bit form, on four MULU.W.
+# Whatever C/ carries of the three, C/fat carries too, or the archive is
+# refused.
+if [ "$WANT_FAT" = "1" ]; then
+    FAT_SSH="${AMINETXDUO_SSH_FAT:-}"
+    FAT_SCP="${AMINETXDUO_SCP_FAT:-}"
+    FAT_SCP_RUNNER="${AMINETXDUO_SCP_RUNNER_FAT:-}"
+    if { [ -z "$FAT_SSH" ] || [ -z "$FAT_SCP" ] ||
+         [ -z "$FAT_SCP_RUNNER" ]; } &&
+       [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
+        echo "==> building the fat ssh and scp clients (a fat client path was not given)" >&2
+        AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68020-60 \
+            "$ROOT/clients/dropbear/build.sh" -b "$ROOT/build/ssh-fat" >&2 || {
+            echo "fat ssh client build failed" >&2
+            exit 2; }
+        FAT_SSH="${FAT_SSH:-$ROOT/build/ssh-fat/dbclient}"
+        FAT_SCP="${FAT_SCP:-$ROOT/build/ssh-fat/scp}"
+        FAT_SCP_RUNNER="${FAT_SCP_RUNNER:-$ROOT/build/ssh-fat/scp-runner}"
+    fi
+    for pair in "ssh:$FAT_SSH" "scp:$FAT_SCP" "scp-runner:$FAT_SCP_RUNNER"; do
+        name="${pair%%:*}"
+        src="${pair#*:}"
+        if [ -f "$TREE/C/$name" ]; then
+            [ -n "$src" ] && [ -x "$src" ] || {
+                echo "!! C/$name is packed and there is no fat $name for C/fat;" >&2
+                echo "!! a fat install would keep the 68000 one." >&2
+                exit 2; }
+            cp "$src" "$TREE/C/fat/$name"
+            chmod 755 "$TREE/C/fat/$name"
+            echo "==> including fat $name ($(wc -c < "$src" | tr -d ' ') bytes)"
+        fi
+    done
 fi
 
 # The installer prints its version in the about text; stamp it from the same
@@ -641,6 +720,45 @@ if [ ${#packed_guides[@]} -eq 0 ]; then
 fi
 
 echo "==> including $(basename "$DOCSRC")/: $(cd "$TREE/Docs" && echo *)"
+
+# ------------------------------------------------- per-flavour manifests --
+#
+# Flavours/<name>: key=value, one per drawer the Installer offers.  What it
+# was built with, what it needs, and every file it installs with its size and
+# sha256.  minimal and micro install the full drawer's drivers and commands.
+
+sha256_of() {
+    (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d" " -f1
+}
+
+write_flavour() {  # $1 name, $2 build dir, $3 libs, $4 devs, $5 C, $6 cpu floor
+    local name="$1" b="$2" libs="$3" devs="$4" cdir="$5" floor="$6"
+    local out="$TREE/Flavours/$name" f rel
+    {
+        echo "flavour=$name"
+        echo "requires_cpu=$floor"
+        echo "requires_kickstart=37"
+        echo "cpu=$(cpu_of "$b")"
+        echo "c_flags=$(sed -n 's/^CMAKE_C_FLAGS:STRING=//p' "$b/CMakeCache.txt") $(sed -n 's/^CMAKE_C_FLAGS_RELEASE:STRING=//p' "$b/CMakeCache.txt")" |
+            sed "s|$ROOT/||g"
+        echo "libs=$libs"
+        echo "devs=$devs"
+        echo "commands=$cdir"
+        for f in "$TREE/$libs"/*.library "$TREE/$devs"/*.device "$TREE/$cdir"/*; do
+            [ -f "$f" ] || continue
+            case "$f" in *.info) continue ;; esac
+            rel="${f#"$TREE"/}"
+            echo "file=$rel bytes=$(wc -c < "$f" | tr -d " ") sha256=$(sha256_of "$f")"
+        done
+    } > "$out"
+}
+
+mkdir -p "$TREE/Flavours"
+write_flavour full "$BUILD" Libs Devs/Networks C 68000
+[ "$WANT_MINIMAL" = "0" ] || write_flavour minimal "$MINIMAL_BUILD" Libs/minimal Devs/Networks C 68000
+[ "$WANT_MICRO" = "0" ]   || write_flavour micro "$MICRO_BUILD" Libs/micro Devs/Networks C 68000
+[ "$WANT_FAT" = "0" ]     || write_flavour fat "$FAT_BUILD" Libs/fat Devs/Networks/fat C/fat 68020
+echo "==> flavours: $(cd "$TREE/Flavours" && echo *)"
 
 # ------------------------------------- everything packed has been decided --
 #

@@ -38,7 +38,7 @@ PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
 # verified to serve the amiga-2.46 commit.
 PINS="
 binutils|https://franke.ms/git/bebbo/binutils-gdb|a50544a917284847c99e97d41c69ece9d5cb2fef|amiga-2.46
-gcc|https://github.com/tinic/gcc|399a27ad06e3e978774af5c556bcf66d81ba799f|backport/sibcall-a0-134541b
+gcc|https://github.com/tinic/gcc|1d4ca5d4b1592b663af2f00589b245934d872eb3|amiga16.2-16.2.7
 newlib-cygwin|https://franke.ms/git/bebbo/newlib-cygwin|0909ae9abc18b38595425143e7a63d9e2fc31174|amiga
 libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
 sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
@@ -374,15 +374,13 @@ PY
 fi
 
 # -flto.  Two changes to binutils; GCC needs no patch for it, only the pin
-# above.  That pin is bebbo's 134541b3 (then the tip of amiga16.2) plus two
-# commits on our fork: a5166db4, the sibcall fix (243a0096 on 60f21496 before
-# it; upstream's later sibcall rework did not fix this), and 399a27ad, which
-# stops LTO-promoted statics drawing a visibility warning each.  An indirect sibcall, and on
-# 68000 a direct one under -fbaserel/-resident/-mpcrel, loads its target into
-# a0, and m68k_is_ok_for_sibcall allowed an argument there; under -mregparm or
-# an __asm ("a0") parameter the target replaced it (bsd_wait_sliced() entered
-# bsd_send_once() with its own address as `arg').  The same fix, on
-# 873ba1cb, is prepared for upstream review as tinic/gcc e0fa21d9.
+# above.  That pin is AmigaPorts amiga16.2 1d4ca5d4 with no local patches; it
+# has the LTO visibility-warning fix (PR #82), the A5/SP argument-register
+# diagnostic (PR #83) and the narrow __asm argument lowering (PR #84).  It carries the
+# sibcall fix that 16.2.4 and 16.2.5 added on bebbo 134541b3: an indirect
+# sibcall, and on 68000 a direct one under -fbaserel/-resident/-mpcrel, no
+# longer loads its target over an a0 argument (bsd_wait_sliced() entered
+# bsd_send_once() with its own address as `arg'); it jumps through a1 instead.
 #
 # First, amiga-gcc configures binutils with --disable-plugins for every target
 # but m68k-elf, so ld accepts -plugin and ignores it.  GCC's liblto_plugin.so

@@ -96,6 +96,7 @@ typedef struct NetdevOpener
     APTR                op_RxFilled;
     APTR                op_TxFlags;     /* per-write ANXD_S2_TXF_* callback */
     ULONG               op_Extensions;  /* ANXD_S2F_* accepted for this open */
+    AnxdLinkSpeed      *op_LinkSpeed;    /* input/output during Open only */
 
     UBYTE               op_Raw;
     UBYTE               op_Promisc;
@@ -563,6 +564,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 /* netdev_unit.c: what the last Close() undoes on a unit. */
 VOID netdev_release_unit(NetdevUnit *unit);
+BOOL netdev_set_link_speed(NetdevUnit *unit, AnxdLinkSpeed *request);
 /*
  * netdev_lookup.c: which unit a unit number and a CARD= pin name, and
  * whether a request that named none could be the PCMCIA slot.  *why is set

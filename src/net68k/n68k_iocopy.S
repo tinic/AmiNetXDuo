@@ -70,7 +70,9 @@
 | in a different block, which under the interleaving rule means only that there
 | is no large difference either way.  So the movem form is correct and not
 | slower on an 060, and the dispatch this note describes stays unbuilt.
-#if defined(__mc68060__)
+| Not under -m68020-60 (fat), which defines __mc68020__ too: that binary runs
+| on 68020s as well, and keeps the movem form measured fine on an 060 above.
+#if defined(__mc68060__) && !defined(__mc68020__)
 #define N68K_NO_MOVEM 1
 #endif
 

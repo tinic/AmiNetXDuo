@@ -2310,7 +2310,8 @@ static struct Device *netdev_open(
      */
     Disable();
     if (hw->nu_Exclusive ||
-        (op->op_Exclusive && hw->nu_Openers != 0))
+        (op->op_Exclusive && hw->nu_Openers != 0) ||
+        !netdev_set_link_speed(hw, op->op_LinkSpeed))
     {
         Enable();
 #if NETDEV_HAS_ZORRO
@@ -2327,6 +2328,7 @@ static struct Device *netdev_open(
     }
     if (op->op_Exclusive)
         hw->nu_Exclusive = 1;
+    op->op_LinkSpeed = NULL;
     AddTail(&hw->nu_OpenerList, (struct Node *)&op->op_Node);
     /* Counted here and not after Enable(): the test above reads it, so an
        increment outside the bracket is the same race one line further down. */
