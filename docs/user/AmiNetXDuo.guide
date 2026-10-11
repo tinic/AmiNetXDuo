@@ -2258,8 +2258,8 @@
 
   @{b}Check a download@{ub}
 
-  Run these before and after a large download, using your interface
-  name and the X-Surf 100's unit number if they differ:
+  Run these before and after a large download, substituting the interface
+  name and the X-Surf 100's unit number where they differ:
 
       1> ShowNetStatus INTERFACE eth0
       1> NetDevStats DEVICE anxnet.device UNIT 0
@@ -2271,7 +2271,7 @@
 
   On one A3000 with a 50 MHz 68060 and an X-Surf 100 in Zorro III,
   local TCP receive measured 22.5 Mbit/s with switch flow control on
-  and 18.9 Mbit/s with it off (2026-10-05). Your CPU, bus, driver and
+  and 18.9 Mbit/s with it off (2026-10-05). CPU, bus, driver and
   network affect the result; a 100 Mbit/s link is not a promise of
   100 Mbit/s file transfers.
 
@@ -2286,7 +2286,7 @@
   See @{"The interface file" link IFACE} for the tuning options.
 
   This automatic negotiation and window guidance applies to
-  anxnet.device. If you use the vendor's x-surf-100.device, consult
+  anxnet.device. For the vendor's x-surf-100.device, consult
   its documentation; enabling a switch checkbox alone does not show
   that the driver agreed to PAUSE.
 
