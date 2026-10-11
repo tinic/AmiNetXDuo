@@ -1,6 +1,6 @@
 /*
  * Deterministic InstallNetProbe substitute for Installer scenario tests.
- * It exercises the installer's four device-tree outcomes without pretending
+ * It exercises the installer's device-tree outcomes without pretending
  * Amiberry exposes an Emu68 device tree.  The real helper is still what ships;
  * this binary exists only on the throw-away Workbench test drive.
  *
@@ -18,6 +18,11 @@
 #ifndef FIXTURE_WIFI
 #define FIXTURE_WIFI 0
 #endif
+/* GENET is in the tree, but at an address anxgenet.device cannot reach
+   (Emu68 1.0.x): GENET answers yes and GENETOK no. */
+#ifndef FIXTURE_GENET_OLD
+#define FIXTURE_GENET_OLD 0
+#endif
 /* Every call fails, the way a probe that cannot work does (run-workbench -P). */
 #ifndef FIXTURE_FAIL
 #define FIXTURE_FAIL 0
@@ -27,6 +32,7 @@ enum
 {
     ARG_EMU68 = 0,
     ARG_GENET,
+    ARG_GENETOK,
     ARG_WIFIPI,
     ARG_CARD,
     ARG_COUNT
@@ -34,7 +40,7 @@ enum
 
 int main(int argc, char **argv)
 {
-    static const char template[] = "EMU68/S,GENET/S,WIFIPI/S,CARD/K";
+    static const char template[] = "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K";
     LONG           args[ARG_COUNT] = { 0 };
     struct RDArgs *rda;
     LONG           result = RETURN_WARN;
@@ -50,7 +56,8 @@ int main(int argc, char **argv)
     if (rda == NULL)
         return RETURN_ERROR;
     if ((args[ARG_EMU68] != 0) + (args[ARG_GENET] != 0) +
-        (args[ARG_WIFIPI] != 0) + (args[ARG_CARD] != 0) != 1)
+        (args[ARG_GENETOK] != 0) + (args[ARG_WIFIPI] != 0) +
+        (args[ARG_CARD] != 0) != 1)
     {
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -60,6 +67,9 @@ int main(int argc, char **argv)
         result = (FIXTURE_GENET || FIXTURE_WIFI) ? RETURN_OK : RETURN_WARN;
     else if (args[ARG_GENET] != 0)
         result = FIXTURE_GENET ? RETURN_OK : RETURN_WARN;
+    else if (args[ARG_GENETOK] != 0)
+        result = (FIXTURE_GENET && !FIXTURE_GENET_OLD) ? RETURN_OK
+                                                       : RETURN_WARN;
     else if (args[ARG_WIFIPI] != 0)
         result = FIXTURE_WIFI ? RETURN_OK : RETURN_WARN;
 

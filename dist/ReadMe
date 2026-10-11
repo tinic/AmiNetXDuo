@@ -251,7 +251,9 @@ SUPPLIED DRIVERS
 
 Devs/Networks holds three AmiNetXDuo SANA-II drivers.  anxnet.device supports
 twelve classic card definitions.  anxgenet.device supports the Raspberry Pi
-4/CM4 Ethernet behind a PiStorm32 running Emu68 1.1 alpha.1 or newer.
+4/CM4 Ethernet behind a PiStorm32 running Emu68 1.1 alpha.1 or newer.  On an
+older Emu68 the installer uses Emu68's own genet.device when one is installed.
+With no other network device found, it stops before it changes anything.
 anxwifipi.device supports the same machine's Wi-Fi and needs the Emu68
 firmware plus a supplicant such as WirelessManager before it can associate.
 
