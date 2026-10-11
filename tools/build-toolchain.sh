@@ -38,7 +38,7 @@ PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
 # verified to serve the amiga-2.46 commit.
 PINS="
 binutils|https://franke.ms/git/bebbo/binutils-gdb|a50544a917284847c99e97d41c69ece9d5cb2fef|amiga-2.46
-gcc|https://github.com/tinic/gcc|fb3ead730d3a3682ab299eb8168f37153497ea19|amiga16.2-rc15-anx
+gcc|https://github.com/tinic/gcc|1d4ca5d4b1592b663af2f00589b245934d872eb3|amiga16.2-16.2.7
 newlib-cygwin|https://franke.ms/git/bebbo/newlib-cygwin|0909ae9abc18b38595425143e7a63d9e2fc31174|amiga
 libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
 sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
@@ -374,9 +374,9 @@ PY
 fi
 
 # -flto.  Two changes to binutils; GCC needs no patch for it, only the pin
-# above.  That pin is AmigaPorts amiga16.2 0edaa619 (release v16.2-rc15) plus
-# AmigaPorts/gcc PR #82 (42ba31a2 and its test follow-up fb3ead73), which stops
-# LTO-promoted statics drawing a visibility warning each.  rc15 carries the
+# above.  That pin is AmigaPorts amiga16.2 1d4ca5d4 with no local patches; it
+# has the LTO visibility-warning fix (PR #82), the A5/SP argument-register
+# diagnostic (PR #83) and the narrow __asm argument lowering (PR #84).  It carries the
 # sibcall fix that 16.2.4 and 16.2.5 added on bebbo 134541b3: an indirect
 # sibcall, and on 68000 a direct one under -fbaserel/-resident/-mpcrel, no
 # longer loads its target over an a0 argument (bsd_wait_sliced() entered
