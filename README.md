@@ -156,6 +156,7 @@ the NDK does not declare and the CPU profiler.
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
 | `NetPrefs` | Workbench editor for interface, address, device and tuning settings; preserves comments and unknown keywords |
 | `NetMeter` | small Workbench window: each interface's addresses (click one to copy it) and its receive and send rates |
+| `NetWirelessPrefs` | Wi-Fi networks in range and joining one; writes WirelessManager's `Wireless.prefs` with the derived key, not the passphrase |
 | `AddNetInterface`, `RemoveNetInterface` | start an interface from its file, and take one out of the running network |
 | `Online`, `Offline` | put a started interface on the wire and take it off |
 | `ConfigureNetInterface` | change the address or MTU of a running interface, renew or release its DHCP lease, turn `.local` answering on |

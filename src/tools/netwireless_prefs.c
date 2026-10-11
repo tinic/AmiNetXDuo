@@ -370,9 +370,19 @@ void nw_prefs_ssid_value(const unsigned char *ssid, int len, char *out)
     *out = '\0';
 }
 
-static int nw_upper(int c)
+/* word, n bytes, is keyword, case aside. */
+static int nw_keyword(const char *word, size_t n, const char *keyword)
 {
-    return (c >= 'a' && c <= 'z') ? c - 'a' + 'A' : c;
+    size_t i;
+
+    for (i = 0; i < n; i++)
+    {
+        char c = word[i];
+
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if (c != keyword[i]) return 0;
+    }
+    return keyword[n] == '\0';
 }
 
 int nw_iface_device(const char *text, size_t len, char *device, size_t cap,
@@ -394,13 +404,8 @@ int nw_iface_device(const char *text, size_t len, char *device, size_t cap,
 
         k = i;
         while (k < e && text[k] != '=' && text[k] != ' ' && text[k] != '\t') k++;
-        is_device = (k - i == 6 && nw_upper(text[i]) == 'D' &&
-                     nw_upper(text[i + 1]) == 'E' && nw_upper(text[i + 2]) == 'V' &&
-                     nw_upper(text[i + 3]) == 'I' && nw_upper(text[i + 4]) == 'C' &&
-                     nw_upper(text[i + 5]) == 'E');
-        is_unit = (k - i == 4 && nw_upper(text[i]) == 'U' &&
-                   nw_upper(text[i + 1]) == 'N' && nw_upper(text[i + 2]) == 'I' &&
-                   nw_upper(text[i + 3]) == 'T');
+        is_device = nw_keyword(text + i, k - i, "DEVICE");
+        is_unit = nw_keyword(text + i, k - i, "UNIT");
         if (!is_device && !is_unit) continue;
 
         v = k;

@@ -488,7 +488,8 @@ host_test_targets() { # builddir
 #      their worker, preserve one binding, and release it on removal.
 #      561 with NetWireless's Wireless.prefs text, WPA key (IEEE 802.11i
 #      Annex H) and signal/security modules.
-HOST_TESTS_EXPECTED=561
+#      562 with NetWirelessPrefs' font layout and hidden passphrase.
+HOST_TESTS_EXPECTED=562
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

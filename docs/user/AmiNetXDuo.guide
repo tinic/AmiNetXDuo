@@ -1187,6 +1187,7 @@
     NetSetup          write the configuration files from a Shell
     NetPrefs          edit interfaces and boot policy from Workbench
     NetMeter          addresses and live rates in a small Workbench window
+    NetWirelessPrefs  Wi-Fi networks in range, joining one, link state
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
@@ -3300,6 +3301,47 @@
   included here), NetMeter closes its window when asked and opens it
   again in the same place once Workbench is back. Without it, close
   NetMeter before changing the screen mode.
+
+  NetWirelessPrefs is the Wi-Fi window. It lists the networks in range,
+  strongest first, with signal bars and a padlock for a network that asks
+  for a key, and shows the network the unit is connected to. Join writes
+  the network to ENVARC:Sys/Wireless.prefs and ENV:Sys/Wireless.prefs,
+  above every other network there, and restarts WirelessManager with the
+  DEVICE and UNIT of DEVS:NetInterfaces/wifipi; the window then waits up
+  to 30 seconds for the connection. Disconnect stops WirelessManager.
+  WirelessManager joins the network and holds the keys; NetWirelessPrefs
+  only writes its file. Comments, other networks and keys not shown in the
+  window are kept byte for byte.
+
+  The passphrase is not stored. Join derives the WPA key from passphrase
+  and network name and stores it as psk=<64 hex digits>, which also
+  removes the derivation from every start of WirelessManager. The
+  derivation takes about 70 seconds on a 7 MHz 68000 and about 11 seconds
+  on a 14 MHz 68020; the window shows its progress and Cancel stops it.
+  A passphrase has 8 to 63 characters; 64 hex digits are taken as the key
+  itself. "Hidden network" adds scan_ssid=1, for a network that does not
+  announce its name. WEP, WPA3-only and Enterprise networks are listed and
+  cannot be joined: WirelessManager 1.5 does not support them.
+
+  The Wi-Fi unit is DEVICE and UNIT of DEVS:NetInterfaces/wifipi, or of
+  the interface named by INTERFACE, or anxwifipi.device unit 0. DEVICE,
+  UNIT, INTERFACE and WM (the WirelessManager command, C:WirelessManager by
+  default) are also ToolTypes, and arguments win over the icon. Project >
+  Snapshot keeps the window's position in the icon as LEFT and TOP.
+  Scanning needs Kickstart 3.0 or later.
+
+  From a Shell:
+
+      NetWirelessPrefs LIST           networks in range
+      NetWirelessPrefs STATUS         connected network and signal
+      NetWirelessPrefs JOIN=<name> PASSPHRASE=<text> [HIDDEN]
+                                      join as the window does; without
+                                      PASSPHRASE, an open network
+
+  STATUS returns 0 when connected and 5 when not. A passphrase given in
+  a Shell is visible in that Shell's history. SETUP opens the window for
+  the installer: it returns 0 after Join has written the file, 5 when the
+  window was closed, and 10 when there is no Wi-Fi unit.
 
   @{b}Drivers@{ub}
 

@@ -1,0 +1,25 @@
+/*
+ * NetWirelessPrefs: stopping and starting WirelessManager.  See
+ * netwireless_wm.c.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef AMINETXDUO_NETWIRELESS_WM_H
+#define AMINETXDUO_NETWIRELESS_WM_H
+
+#include <exec/types.h>
+
+#define NW_WM_COMMAND   "C:WirelessManager"
+
+/* TRUE when it is running; path gets the command as it was started. */
+BOOL nw_wm_running(char *path, ULONG cap);
+
+/* Ctrl-C, again every half second, until it has gone; FALSE after five
+   seconds with it still there. */
+BOOL nw_wm_stop(VOID);
+
+/* In a background Shell with a 32 KB stack, input and output NIL:. */
+BOOL nw_wm_start(const char *command, const char *device, ULONG unit);
+
+#endif
