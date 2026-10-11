@@ -23,6 +23,7 @@ spec.loader.exec_module(reader)
 
 class GlowIcons(unittest.TestCase):
     def test_archive_layout(self):
+        (ROOT / "build").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="icon-layout-", dir=ROOT / "build") as tmp:
             out = Path(tmp)
             tree = out / "AmiNetXDuo"
