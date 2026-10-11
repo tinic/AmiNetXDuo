@@ -6,6 +6,8 @@
 #ifndef AMINETXDUO_ANXNET_H
 #define AMINETXDUO_ANXNET_H
 
+#include <exec/types.h>
+
 #define ANXNET_DEVICE_NAME      "anxnet.device"
 /* The same driver core with only the Pi 4's GENET in it (netdev_roster.h). */
 #define ANXGENET_DEVICE_NAME    "anxgenet.device"
