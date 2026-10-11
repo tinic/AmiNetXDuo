@@ -279,8 +279,9 @@ unset(_amiga_dos_inline)
 # 32-bit multiply and divide helpers, which no data-path object references
 # (src/net68k/n68k_cpu.c).
 # `68020-60` is the fat flavour's (CMakePresets.json `fat`): -m68020-60, 68020
-# codegen that a 68060 runs without trapping -- no 64-bit MULU.L/DIVU.L, the
-# 64-bit products go through __muldi3 -- on the soft-float libm020 multilib.
+# codegen in which the compiler emits no 060-unimplemented instruction -- no
+# 64-bit MULU.L/DIVU.L, the 64-bit products go through __muldi3 -- on the
+# soft-float libm020 multilib.
 # It defines __mc68060__ as well as __mc68020__, so the C takes its 060-safe
 # paths, and like `any` it takes every variant of src/net68k's and
 # src/crypto68k's assembly and chooses from AttnFlags at init.
