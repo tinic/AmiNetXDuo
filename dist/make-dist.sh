@@ -298,7 +298,10 @@ fi
 # InstallSameFile and InstallNetProbe do ship, but beside the Installer rather
 # than in C:; they are installer primitives, not user commands.  The other
 # names do not ship.
-NOT_SHIPPED=(InstallSameFile InstallNetProbe ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
+# NetWirelessPrefs is packed once its window lands; until then it is
+# LIST and STATUS for the emulator harness alone.
+NOT_SHIPPED=(InstallSameFile InstallNetProbe ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum
+             NetWirelessPrefs)
 missing_from_cmds=()
 # What the build system says it builds (src/tools/CMakeLists.txt writes the
 # manifest), not what happens to lie in the directory: a reused build tree
