@@ -66,6 +66,26 @@ Fast cards get faster TCP receive with every driver: the stack merges
 consecutive segments before TCP sees them. Driver authors can opt into a few
 SANA-II extensions for more (`Developer/include/aminetxduo/anxs2ext.h`).
 
+### X-Surf 100: enable flow control on the switch
+
+For an X-Surf 100 using `anxnet.device`, enable **IEEE 802.3x flow control**
+(also called **PAUSE**) on the switch port the Amiga plugs into. Leave its
+speed and duplex on **Auto**; PAUSE needs a negotiated full-duplex link.
+If the switch offers separate receive and transmit PAUSE settings, enable
+both. This is a switch setting; there is no flow-control keyword to add to
+`DEVS:NetInterfaces`.
+
+The 100 Mbit/s link can deliver bursts faster than the Amiga drains the
+card's small receive buffer. PAUSE lets the card briefly stop the switch
+before packets are lost. `anxnet.device` negotiates this automatically and
+the stack allows a larger TCP receive window while it is agreed. Without
+it, networking still works, with a smaller automatic window. Leave
+`RXBUFFER` unset; increasing it manually does not add memory to the card.
+
+See the [manual](docs/user/AmiNetXDuo.guide), "X-Surf 100 and flow control",
+for setup checks, overrun counters and guidance for switches without this
+setting. The measured figures below are examples, not the card's link speed.
+
 ### Measured on
 
 What the numbers in this file come from, and what CI boots. A card or a

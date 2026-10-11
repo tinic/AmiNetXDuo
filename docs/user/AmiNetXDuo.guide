@@ -26,6 +26,7 @@
     @{"Network configuration     " link CONFIG}
     @{"Starting the stack        " link STARTING}
     @{"Checking the network      " link CHECK}
+    @{"X-Surf 100 and flow control" link XSURF100FLOW}
 
   @{b}Reference@{ub}
 
@@ -161,6 +162,9 @@
   for supported PiStorm32 devices; see
   @{"CheckNetDevice" link CHECKNETDEVICE}. Under an emulator,
   uaenet.device or an emulated A2065 is the usual choice.
+
+  For an X-Surf 100, see
+  @{"X-Surf 100 and flow control" link XSURF100FLOW} before tuning TCP.
 
   @{b}A network@{ub}
 
@@ -453,9 +457,9 @@
              interface. CheckNetConfig reports the applicable limit.
 
   @{b}RXBUFFER@{ub}
-             The bytes the card holds from the wire before it has to
-             drop a frame: its receive ring or FIFO. The TCP window a
-             socket on this interface advertises stays inside it, so
+             The receive allowance in bytes used to limit TCP bursts.
+             Usually this is the card's receive ring or FIFO. The TCP
+             window a socket on this interface advertises stays inside it, so
              a peer on the same network cannot put more on the wire
              at once than the card can take. Leave it out and
              anxnet.device and anxgenet.device say their own number,
@@ -466,6 +470,13 @@
              A3000 (25 MHz 68030) with an X-Surf 100: without it the
              ring overflowed 42 times in ten seconds and the card
              received 2.8 Mbit/s.
+
+             On an X-Surf 100 with anxnet.device and negotiated flow
+             control, the driver reports a larger allowance: the switch
+             can hold back a burst while the card drains. Leave RXBUFFER
+             unset to follow that negotiation automatically. A manual
+             value overrides it and does not add receive memory. See
+             @{"X-Surf 100 and flow control" link XSURF100FLOW}.
 
   @{b}TCPACKMAX@{ub}
              Maximum received TCP bytes between requested ACKs on
@@ -1598,8 +1609,10 @@
 
   These counters come from the driver, not from the stack. Consult them
   when the card or the cable is suspect rather than the configuration.
-  Steadily rising "bad data", "overruns" or "receive errors" indicate a
-  hardware or cabling problem.
+  Rising "bad data" or "receive errors" can indicate a hardware or
+  cabling problem. Rising "overruns" can also mean packets arrive faster
+  than the machine drains the card; on an X-Surf 100, check
+  @{"flow control" link XSURF100FLOW}.
 
   The "Name servers" list comes from the running stack, so it includes
   the servers a DHCP lease supplied. DEVS:Internet/name_resolution is
@@ -1915,6 +1928,9 @@
   Mbit/s in and 3.0 out in Zorro III, 3.5 and 2.8 in Zorro II; the CPU
   is the limit on that machine either way.
 
+  For switch setup and receive performance, see
+  @{"X-Surf 100 and flow control" link XSURF100FLOW}.
+
   xsurf carries its chip behind an ISA Plug and Play bridge, and the
   driver configures it at boot. That sequence has been run against an
   emulator and not against a board, so a report from a real X-Surf is
@@ -2183,6 +2199,7 @@
   @{"ping cannot send the request" link T_OFFLINE}
   @{"The machine takes ages to boot, or programs pause" link T_SLOW}
   @{"The machine crashes or hangs" link T_CRASH}
+  @{"X-Surf 100: slow downloads or receive overruns" link XSURF100FLOW}
 
   @{b}The general method@{ub}
 
@@ -2200,6 +2217,78 @@
   See also @{"Reading the debug log" link LOGGING}. ShowNetStatus EVENTS
   names the call that refused, and for driver and configuration
   problems it usually names the cause outright.
+
+@endnode
+
+
+@node XSURF100FLOW "X-Surf 100 and flow control"
+@toc TROUBLE
+
+                 @{b}X-Surf 100 and flow control@{ub}
+
+  With an X-Surf 100 using anxnet.device, enable IEEE 802.3x flow
+  control on the switch port connected to the Amiga. It is also called
+  PAUSE. There is no flow-control setting to add to the interface file:
+  anxnet.device offers it automatically when the link negotiates.
+
+  @{b}Why it matters@{ub}
+
+  The card's 100 Mbit/s link can receive a burst faster than the Amiga
+  empties its small receive buffer. When the buffer fills, packets are
+  lost and TCP has to retransmit them. A PAUSE frame asks the switch to
+  stop sending briefly while the Amiga catches up. This can improve
+  downloads even though the link speed stays the same.
+
+  @{b}Set up the port@{ub}
+
+    1.  Open the switch's management page and find the port the Amiga's
+        cable plugs into. The setting is on that port, even when the
+        sender is elsewhere on the network.
+    2.  Enable Flow Control or IEEE 802.3x PAUSE. If receive and transmit
+        PAUSE have separate settings, enable both.
+    3.  Leave speed and duplex on Auto. PAUSE requires full duplex and
+        agreement at both ends; forcing 100 Mbit/s alone does not do it.
+    4.  Let the link renegotiate. If the switch does not do this when
+        applying the setting, unplug and reconnect the Ethernet cable.
+
+  A working link or a "100 Mbit/s" label alone does not confirm PAUSE.
+  If the switch reports negotiated flow control, check that it is
+  active. Received PAUSE counters on that port may rise during a busy
+  download; zero at idle is normal.
+
+  @{b}Check a download@{ub}
+
+  Run these before and after a large download, using your interface
+  name and the X-Surf 100's unit number if they differ:
+
+      1> ShowNetStatus INTERFACE eth0
+      1> NetDevStats DEVICE anxnet.device UNIT 0
+
+  Look for increases in "overruns" or "Receive ring overruns".
+  Repeated overruns mean the card is losing incoming packets; check
+  flow control before increasing TCP buffers. Zero overruns alone
+  does not prove PAUSE was negotiated.
+
+  On one A3000 with a 50 MHz 68060 and an X-Surf 100 in Zorro III,
+  local TCP receive measured 22.5 Mbit/s with switch flow control on
+  and 18.9 Mbit/s with it off (2026-10-05). Your CPU, bus, driver and
+  network affect the result; a 100 Mbit/s link is not a promise of
+  100 Mbit/s file transfers.
+
+  @{b}If the switch has no flow-control setting@{ub}
+
+  Some switches handle PAUSE automatically; others do not support it
+  or do not expose a setting. Check the switch's manual. Networking
+  still works without it. With RXBUFFER unset, AmiNetXDuo uses a
+  smaller TCP window when anxnet.device cannot confirm negotiated
+  PAUSE, and a larger allowance while it can. Do not increase RXBUFFER
+  to imitate flow control: the card still has the same small buffer.
+  See @{"The interface file" link IFACE} for the tuning options.
+
+  This automatic negotiation and window guidance applies to
+  anxnet.device. If you use the vendor's x-surf-100.device, consult
+  its documentation; enabling a switch checkbox alone does not show
+  that the driver agreed to PAUSE.
 
 @endnode
 
@@ -2494,10 +2583,11 @@
   this machine off and ping the address from another machine. An answer
   means the address is taken.
 
-  @{b}Rising error counters.@{ub} Steadily increasing "bad data", "overruns" or
-  "receive errors" in the counters indicate the hardware or the cable,
-  not the configuration. "buffer failures" rising means the machine is
-  short of memory.
+  @{b}Rising error counters.@{ub} Increasing "bad data" or "receive errors"
+  can indicate hardware or cabling trouble. "Overruns" can also mean
+  incoming bursts exceed what the card and CPU can handle; on an
+  X-Surf 100, check @{"flow control" link XSURF100FLOW}.
+  "Buffer failures" rising means the machine is short of memory.
 
   @{b}The other machine is not answering on purpose.@{ub} Ping the gateway
   before drawing a conclusion. Routers always answer. Most other
