@@ -27,8 +27,8 @@
 ; to advertise only 10 Mbit/s modes, still negotiating duplex and PAUSE.
 ; Leave the switch port on Auto. Omit it or use LINKSPEED=AUTO to return
 ; to normal modes. Reboot or remove/re-add the interface after editing.
-; This is a fallback to try on slower CPUs, not a measured speed boost.
-; Unsupported cards and older drivers refuse the request.
+; The stack refuses the interface if the driver or card does not
+; support the request.
 ;LINKSPEED=10
 ;
 

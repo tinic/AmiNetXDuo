@@ -1149,6 +1149,13 @@ static void test_link_speed_limit(void)
 
     attach_xsurf(&nic, 1, 0xcde1, 0x782d);
     ok("identified AX88796B supports a speed limit", nic.set_link_speed != NULL);
+    tick_n(&nic, 50);
+    expect_u32("Auto retains the card-table speed reporting", nic.link_bps, 0);
+    mock_mii[5] = 0;
+    tick_n(&nic, 50);
+    expect_u32("parallel detection does not change default speed reporting",
+               nic.link_bps, 0);
+    mock_mii[5] = 0xcde1;
     ok("10 Mbit limit accepted", nic.set_link_speed(&nic, 10));
     expect_u32("only 10 half/full plus PAUSE advertised", mock_mii[4], 0x0461);
     ok("autonegotiation retained", (mock_mii[0] & 0x1000) != 0);
@@ -1177,7 +1184,7 @@ static void test_link_speed_limit(void)
     expect_u32("policy cleared", nic.link_speed_limit, 0);
     mock_mii[5] = 0xcde1;
     tick_n(&nic, 50);
-    expect_u32("Auto can negotiate 100 again", nic.link_bps, 100000000);
+    expect_u32("Auto restores card-table speed reporting", nic.link_bps, 0);
     restarts = mock_mii_restarts;
     ok("unsupported speed is refused", !nic.set_link_speed(&nic, 100));
     expect_u32("invalid request does not renegotiate", mock_mii_restarts, restarts);

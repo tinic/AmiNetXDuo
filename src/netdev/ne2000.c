@@ -1179,13 +1179,6 @@ static BOOL ne2000_tick(NetdevNic *nic)
     anlpar = ax_mii_read(nic, MII_ANLPAR);
 
     nic->rx_pause_capacity = ax88796_pause_capacity(bmsr, anar, anlpar);
-    if (bmsr >= 0 && anar >= 0 && anlpar >= 0 &&
-        (bmsr & (MII_BMSR_LINK | MII_BMSR_ANDONE)) ==
-        (MII_BMSR_LINK | MII_BMSR_ANDONE))
-        nic->link_bps = ((anar & anlpar) &
-                         (MII_ANAR_100HD | MII_ANAR_100FD)) != 0
-                       ? 100000000UL : 10000000UL;
-
     if (anar >= 0 && (anar & MII_ANAR_PAUSE) != 0 &&
         (nic->link_speed_limit != 10 ||
          (anar & MII_ANAR_MODES) == MII_ANAR_10_MODES))

@@ -395,8 +395,9 @@
   @{b}LINKSPEED@{ub}
              AUTO (default) or 10, in Mbit/s. For the X-Surf 100 with
              anxnet.device: 10 advertises only 10 Mbit/s modes, keeping
-             duplex and PAUSE negotiation. An unsupported driver or card
-             refuses the request. Reboot, or remove and re-add the
+             duplex and PAUSE negotiation. The stack refuses the interface
+             if the driver or card does not support the request.
+             Reboot, or remove and re-add the
              interface, after changing it. See
              @{"X-Surf 100 and flow control" link XSURF100FLOW}.
 
@@ -2295,9 +2296,8 @@
 
   @{b}Optional 10 Mbit/s limit@{ub}
 
-  A slower machine without working PAUSE may handle incoming bursts
-  better at 10 Mbit/s. To try this with an updated anxnet.device, add
-  this line to its DEVS:NetInterfaces file:
+  With an updated anxnet.device, this line in its DEVS:NetInterfaces
+  file limits the X-Surf 100 to 10 Mbit/s:
 
       LINKSPEED=10
 
@@ -2305,9 +2305,9 @@
   still negotiated. Keep the switch port on Auto. Omit the line or
   set LINKSPEED=AUTO to use the normal advertised modes. To apply the
   edit, reboot or remove and re-add the interface. Online/Offline alone
-  does not reload the file. Unsupported cards and older drivers refuse
-  the request. A 10 Mbit/s limit caps transfers below that rate; it is
-  optional, and a speed improvement on slow CPUs has not been measured.
+  does not reload the file. The stack refuses the interface if the
+  driver or card does not support the request. The 10 Mbit/s limit
+  applies to both directions.
 
   This automatic negotiation and window guidance applies to
   anxnet.device. For the vendor's x-surf-100.device, consult
