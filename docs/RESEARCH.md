@@ -3,8 +3,7 @@
 One row per section number cited from the tree, so every existing
 `docs/RESEARCH.md §N` comment resolves. **The tree is the authority**: *see
 `file:line`* means that comment is the current statement, **superseded** means
-the conclusion is wrong today and the named location replaced it. The full prose
-is in git history, `git show 2b54025b:docs/RESEARCH.md`.
+the conclusion is wrong today and the named location replaced it. The full prose is in git history, `git show 2b54025b:docs/RESEARCH.md`.
 
 | § | Conclusion | Authority | Status |
 |---|---|---|---|
@@ -70,3 +69,4 @@ is in git history, `git show 2b54025b:docs/RESEARCH.md`.
 | 81 | The memory floor is 1 MB on both builds: fixed cost 432 to 439 KB, and a 1 MB A2000 runs the shipped tools with a 17-packet pool. | `include/aminetxduo/netstack.h:272`, `README.md:34` | current; the two source comments that said 4 MB now say the measured floor |
 | 81.5 | The last `CloseLibrary()` on `bsdsocket.library` does not return, blamed on our close wrapper. | `tests/concurrent/concurrent_test.c:46` | superseded in cause, it is `a2065.device` 2.16 ignoring `AbortIO()` on a pending `CMD_READ` |
 | 87 | Chain `addx.l` off `movem.l` so the end-around carry rides the X flag: 201 to 138 ns/B. Register saves cost 24 to 32% on a 20-byte header, so short runs take a computed jump into unrolled pairs. | `src/net68k/n68k_checksum.S:1` | see code, the file header is the same text |
+| 88 | Fat flavour, `-O2 -m68020 -flto` for every shipped image. A1200 PiStorm32/Emu68 genet, `-O2` against `-Os`: read +18.6%, write +16.4%. A3000 68060 X-Surf 100: read +1.5% (noise), write and loopback about +4%. `-mcpu=68060` and `-m68020` equal `-O2` any within noise; `-m68020` about 3% smaller. `bsdsocket.library` 347,724 to 480,036 bytes at `-O2 -m68020`. n=1 per arm per machine. | `CMakePresets.json` `fat`, `CMakeLists.txt` `AMINETXDUO_OPT` | current |

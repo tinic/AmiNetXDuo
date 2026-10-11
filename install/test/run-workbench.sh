@@ -226,9 +226,12 @@ case "$PICK" in
 # waited for a page that never appeared and all reduced-profile tests quietly
 # installed the full stack.  The byte-for-byte profile assertion below caught
 # that vacuous pass as soon as these scenarios became a release gate.
-full)      PICK_SPEC="3:2:1" ;;
-minimal)   PICK_SPEC="3:3:1" ;;
-micro)     PICK_SPEC="3:4:1" ;;
+# FOUR OPTIONS SINCE fat JOINED (gadget 5).  No other page has four, so the
+# stack page is match 0 again.
+full)      PICK_SPEC="4:2:0" ;;
+minimal)   PICK_SPEC="4:3:0" ;;
+micro)     PICK_SPEC="4:4:0" ;;
+fat)       PICK_SPEC="4:5:0" ;;
 # The SECOND two-option askchoice is the drawer layout at
 # Install-AmiNetXDuo:770, "Into the system" / "Into its own drawer", so it is
 # skip 1 and gadget 3.  Reaching it needs FORCE_DRAWER to be 0, which means NOT
@@ -238,7 +241,7 @@ micro)     PICK_SPEC="3:4:1" ;;
 # options now, so the layout page is the only two-option one left.  UNVERIFIED
 # on the rig -- the stack picks were measured, this index was derived.
 drawer)    PICK_SPEC="2:3:0" ;;
-*)         echo "-p takes full, minimal, micro or drawer, not \"$PICK\"" >&2; exit 2 ;;
+*)         echo "-p takes full, minimal, micro, fat or drawer, not \"$PICK\"" >&2; exit 2 ;;
 esac
 
 # It needs a level for the same reason -H does: at NOVICE the page is never
@@ -943,10 +946,10 @@ for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     fi
 done
 case "$TRANSITION" in
-    full-minimal) ANSWER_LINES+=("2|CHOICE|3|3|1") ;;
-    minimal-full) ANSWER_LINES+=("1|CHOICE|3|3|1") ;;
-    full-micro)   ANSWER_LINES+=("2|CHOICE|3|4|1") ;;
-    micro-full)   ANSWER_LINES+=("1|CHOICE|3|4|1") ;;
+    full-minimal) ANSWER_LINES+=("2|CHOICE|4|3|0") ;;
+    minimal-full) ANSWER_LINES+=("1|CHOICE|4|3|0") ;;
+    full-micro)   ANSWER_LINES+=("2|CHOICE|4|4|0") ;;
+    micro-full)   ANSWER_LINES+=("1|CHOICE|4|4|0") ;;
 esac
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
@@ -2042,6 +2045,7 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     _full_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library")
     _min_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/minimal/bsdsocket.library")
     _micro_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/micro/bsdsocket.library")
+    _fat_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/fat/bsdsocket.library")
 
     # AMBIGUITY IS REPORTED, NOT RESOLVED.  Three assignments in a row let the
     # LAST match win, so an archive whose drawers hold the same library named
@@ -2053,6 +2057,7 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     [ -n "$_full_bytes" ]  && [ "$_stack_bytes" = "$_full_bytes" ]  && _matches="$_matches full"
     [ -n "$_min_bytes" ]   && [ "$_stack_bytes" = "$_min_bytes" ]   && _matches="$_matches minimal"
     [ -n "$_micro_bytes" ] && [ "$_stack_bytes" = "$_micro_bytes" ] && _matches="$_matches micro"
+    [ -n "$_fat_bytes" ]   && [ "$_stack_bytes" = "$_fat_bytes" ]   && _matches="$_matches fat"
     set -- $_matches
     case $# in
         0) STACK_INSTALLED=unknown ;;
@@ -2064,6 +2069,7 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     echo "stack_archive_full=${_full_bytes:-absent}"
     echo "stack_archive_minimal=${_min_bytes:-absent}"
     echo "stack_archive_micro=${_micro_bytes:-absent}"
+    echo "stack_archive_fat=${_fat_bytes:-absent}"
 else
     echo "stack_installed=none"
 fi
@@ -2072,6 +2078,7 @@ case "$PICK" in
 ""|full)      WANT_STACK=full ;;
 minimal)      WANT_STACK=minimal ;;
 micro)        WANT_STACK=micro ;;
+fat)          WANT_STACK=fat ;;
 # -p drawer answers the LAYOUT page, not the stack page, so the stack page
 # takes its own default and that default is the full stack.
 drawer)       WANT_STACK=full ;;
@@ -2081,6 +2088,15 @@ case "$TRANSITION" in
     full-micro)   WANT_STACK=micro ;;
     minimal-full|micro-full) WANT_STACK=full ;;
 esac
+# On Emu68 the Installer preselects fat when the archive has it and the CPU is
+# a 68020 or newer (Install-AmiNetXDuo, AUTO_EMU68).
+if [ -z "$PICK" ] && [ -z "$TRANSITION" ] && [ -n "$EMU68_FIXTURE" ] &&
+   [ -f "$UNPACK/AmiNetXDuo/Libs/fat/bsdsocket.library" ]; then
+    case "$MODEL" in
+        A500*|A600*|A1000*|A2000*) ;;
+        *) WANT_STACK=fat ;;
+    esac
+fi
 if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
     fail=1
@@ -2301,7 +2317,10 @@ esac
 # that name is there": the bytes, against the copy in the archive that was just
 # installed from, because a stale driver of the right name in the right drawer
 # is the exact failure being gated against and it passes every weaker check.
-ANXNET_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxnet.device"
+# The fat stack installs its own drivers, from Devs/Networks/fat.
+DEVS_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks"
+[ "$WANT_STACK" != fat ] || DEVS_ARCHIVE="$DEVS_ARCHIVE/fat"
+ANXNET_ARCHIVE="$DEVS_ARCHIVE/anxnet.device"
 ANXNET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxnet.device" 2>/dev/null || true)
 ANXNET_OLD=$(amiga_path "${INST}Devs/Networks/anxnet.device.old" 2>/dev/null || true)
 
@@ -2381,7 +2400,7 @@ fi
 # The second driver image, anxgenet.device, goes through the same procedure
 # in the installer and is asserted the same way: the archive's bytes, in
 # DEVS:Networks, whatever was there before.
-ANXGENET_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxgenet.device"
+ANXGENET_ARCHIVE="$DEVS_ARCHIVE/anxgenet.device"
 ANXGENET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxgenet.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXGENET_ARCHIVE" ]; then
@@ -2413,7 +2432,7 @@ fi
 # The third driver image, anxzz9000.device, likewise -- when the archive
 # carries it.  It ships only from a build configured -DAMINETXDUO_ZZ9000=ON
 # (CMakeLists.txt); an archive without it must leave no such file behind.
-ANXZZ9000_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxzz9000.device"
+ANXZZ9000_ARCHIVE="$DEVS_ARCHIVE/anxzz9000.device"
 ANXZZ9000_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxzz9000.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXZZ9000_ARCHIVE" ]; then
@@ -2445,7 +2464,7 @@ else
 fi
 
 # The fourth driver image, anxwifipi.device, likewise.
-ANXWIFIPI_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxwifipi.device"
+ANXWIFIPI_ARCHIVE="$DEVS_ARCHIVE/anxwifipi.device"
 ANXWIFIPI_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxwifipi.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXWIFIPI_ARCHIVE" ]; then

@@ -12,9 +12,9 @@
 # argument for those bytes had been made and measured; what nobody did was
 # decide to spend them.
 #
-# ONLY THE THREE CONFIGURATIONS THAT SHIP ARE BUDGETED, and they are the three
+# ONLY THE FOUR CONFIGURATIONS THAT SHIP ARE BUDGETED, and they are the four
 # tools/check-shipping-config.sh maps a drawer onto: `default` is the full
-# drawer, with `minimal` and `micro` named directly.  Every other arm is
+# drawer, with `minimal`, `micro` and `fat` named directly.  Every other arm is
 # coverage -- nolto
 # is 44 KB larger because that is what LTO is worth, census carries its side
 # table, log carries the sentences -- and holding coverage to a shipping budget
@@ -172,6 +172,15 @@ BUDGETS=(
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10240"
+    # First budgeted with the fat drawer (-O2 -m68020): bsdsocket 480,040,
+    # tls 228,664, anxnet 71,336, anxgenet 36,476, anxwifipi 68,044,
+    # usergroup 14,224.  Headroom like the default rows'.
+    "fat:src/bsdsocket/bsdsocket.library:504000"
+    "fat:src/netdev/anxnet.device:74000"
+    "fat:src/netdev/anxgenet.device:38000"
+    "fat:src/wifipi/anxwifipi.device:71000"
+    "fat:src/usergroup/usergroup.library:15360"
+    "fat:src/tlslib/tls.library:236000"
 )
 
 budgeted=0

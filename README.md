@@ -33,15 +33,17 @@ configured for one.
 
 Any 68000 or better, AmigaOS 2.04 (Kickstart 37) or newer, 1 MB of RAM, and a
 SANA-II network card. One binary serves every 68k: the library picks the code
-for the processor when it opens, and nothing has to match the machine.
+for the processor when it opens, and nothing has to match the machine. The fat
+stack is the exception and needs a 68020 or better.
 
-The archive carries three stacks. The installer asks which one to put on.
+The archive carries four stacks. The installer asks which one to put on.
 
 | Stack | Leaves out | RAM while up |
 |---|---|---|
 | Full | nothing | 442 KB |
 | Minimal | IPv6, `.local` lookups, the packet filter, HTTPS, IPv4 multicast, the ARexx host, `TCP:` | 272 KB |
 | Micro | all of that, plus `getaddrinfo`/`getnameinfo`, ancillary data, out-of-band TCP and less-used administration calls; carries one interface and no route or address-allocation calls. DHCP, the classic resolver and raw sockets work | 243 KB |
+| Fat | nothing; the full stack, drivers and commands compiled for speed for a 68020 or better | Full + 120 KB |
 
 ### Network cards
 
@@ -98,7 +100,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 
 | Question | Default |
 |---|---|
-| Which stack: Everything, Minimal, Micro | Everything |
+| Which stack: Everything, Minimal, Micro, Fat | Everything; Fat under Emu68 |
 | Install the three supplied network drivers | yes |
 | Where the `AmiNetXDuo` drawer of documentation and examples goes | any drawer; nothing in it is needed for the network |
 | Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer, added last to those assigns; refused if `LIBS:` already has a `bsdsocket.library` (Intermediate and Expert) | into the system |

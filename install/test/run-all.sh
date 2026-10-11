@@ -25,6 +25,7 @@
 #                   replacement plus the S:Network-Startup.old recovery path
 #   SYSTEM_MINIMAL  installs and boots the minimal profile
 #   SYSTEM_MICRO    installs and boots the micro profile
+#   SYSTEM_FAT      installs and boots the fat profile
 #   XSURF100_MINIMAL_* / XSURF100_MICRO_* boot both reduced profiles with
 #                   iComp's vendor x-surf-100.device, DHCP and static. The
 #                   vendor driver changes its copy path if it sees AMITCP
@@ -75,7 +76,7 @@ ARGS=("$@")
 SCENARIOS=(
     NOVICE AVERAGE EXPERT STATIC INVALID_STATIC INVALID_NAMES
     NO_DRIVERS NO_BOOT
-    SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO
+    SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO SYSTEM_FAT
     XSURF100_MINIMAL_DHCP XSURF100_MINIMAL_STATIC
     XSURF100_MICRO_DHCP XSURF100_MICRO_STATIC
     FULL_MINIMAL MINIMAL_FULL FULL_MICRO MICRO_FULL
@@ -156,6 +157,7 @@ for scenario in "${SCENARIOS[@]}"; do
         SYSTEM_RECONFIGURE)    opts=(-l AVERAGE -U) ;;
         SYSTEM_MINIMAL)        opts=(-l AVERAGE -p minimal) ;;
         SYSTEM_MICRO)          opts=(-l AVERAGE -p micro) ;;
+        SYSTEM_FAT)            opts=(-l AVERAGE -p fat) ;;
         XSURF100_MINIMAL_DHCP) opts=(-l AVERAGE -p minimal -N xsurf100z3) ;;
         XSURF100_MINIMAL_STATIC) opts=(-l AVERAGE -p minimal -N xsurf100z3 -S) ;;
         XSURF100_MICRO_DHCP)   opts=(-l AVERAGE -p micro -N xsurf100z3) ;;

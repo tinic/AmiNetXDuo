@@ -57,16 +57,11 @@ set(TOOLS_WARNINGS -Wall -Wextra)
 # libraries are -O3 builds and not the -O2 that file asks for.  See
 # docs/RESEARCH.md §21.6, it is a real finding and deliberately left alone.
 #
-# AMINETXDUO_TOOLS_OPTIMISE makes the level measurable instead of a constant
-# somebody has to edit.  Note it governs a command's OWN objects only: a tool
-# that asks for NX links aminetxduo_sana2, aminetxduo_config, threadx_port and
-# netxduo_port, which are built at the tree's level, so a command is a MIX,
-# and its size moves when the global level moves even with this pinned.  That
-# is measured, not assumed: ping is 34,652 bytes in an -O2 tree and 35,572 in
-# an -O3 one with -Os set here in both.
-set(AMINETXDUO_TOOLS_OPTIMISE "-Os" CACHE STRING
-    "Optimisation level for the commands' own objects")
-set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_TOOLS_OPTIMISE}>)
+# The level is AMINETXDUO_OPT, the tree's own (top-level CMakeLists.txt), so
+# the fat flavour's commands are -O2 like its libraries.  It governs a
+# command's OWN objects; the static libraries a command links take the same
+# variable through CMAKE_C_FLAGS_RELEASE.
+set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_OPT_FLAG}>)
 
 # THE COMMANDS NO LONGER LINK THE TOOLCHAIN crt0 AT ALL: they are linked
 # -nostartfiles against src/tools/tool_startup.S, which is 180 bytes and says

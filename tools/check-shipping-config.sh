@@ -3,7 +3,7 @@
 
     tools/check-shipping-config.sh
 
-The full stack, `minimal` and `micro` are declared in CMakePresets.json and
+The full stack, `minimal`, `micro` and `fat` are declared in CMakePresets.json and
 nowhere else.  tools/ci.sh compiles them with warnings fatal,
 tools/build-release.sh builds the trees the archive is packed from, and
 dist/make-dist.sh packs them.  All three read the preset.
@@ -36,7 +36,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The drawers dist/make-dist.sh packs.  `default` is the top of Libs: and is
 # configured by ci.sh's own cross stage, so build-release.sh names it `default`
 # rather than as build/release-<name>.
-PACKED = ["minimal", "micro"]
+PACKED = ["minimal", "micro", "fat"]
 
 errors = 0
 

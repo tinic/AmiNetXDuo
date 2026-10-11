@@ -66,6 +66,8 @@ BUDGETS=(
     # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
     # headroom to the next KiB boundary.
     "micro:16408"
+    # The full stack's options, so the full stack's budget.
+    "fat:68868"
 )
 
 budget=""

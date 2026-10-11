@@ -85,12 +85,19 @@ if(AMINETXDUO_WIFIPI_LINK AND CMAKE_CROSSCOMPILING)
         "${CMAKE_BINARY_DIR}/include")
     # A Pi is never a 68000: whichever CPU arm the tree is building, this image
     # is 68020 code (divu.l and friends inline; the all-CPU arm would call
-    # libgcc's __udivsi3, which -nostdlib refuses).  -fno-optimize-sibling-calls
+    # libgcc's __udivsi3, which -nostdlib refuses).  A tree already building
+    # 68020+ code (the fat flavour) keeps its own CPU flags; the 68000 and
+    # `any` trees get -m68020 -mtune=68040 here.  -fno-optimize-sibling-calls
     # for the same reason the top level applies it to 68020+ trees: the pinned
     # linker resolves a cross-section 32-bit sibling branch twelve bytes short.
+    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68040|-m68060|-mcpu=68060)( |$)")
+        set(_wifipi_arch ${AMIGA_ARCH_FLAGS})
+    else()
+        set(_wifipi_arch -m68020 -mtune=68040)
+    endif()
     target_compile_options(anxwifipi_device PRIVATE
-        -m68020 -mtune=68040 -fno-optimize-sibling-calls
-        -Os -Wall -Wextra -Werror -fomit-frame-pointer
+        ${_wifipi_arch} -fno-optimize-sibling-calls
+        ${AMINETXDUO_OPT_FLAG} -Wall -Wextra -Werror -fomit-frame-pointer
         # sdio.c deliberately uses Duff's device for the FIFO copy.  GCC 16's
         # strict CI warning level does not accept its trailing annotations.
         -Wno-implicit-fallthrough
@@ -99,7 +106,7 @@ if(AMINETXDUO_WIFIPI_LINK AND CMAKE_CROSSCOMPILING)
     # by scanning), so under -flto it is a link root or it is gone.  The
     # driver's own tools/check-image.sh proves the chain in the bytes below.
     target_link_options(anxwifipi_device PRIVATE
-        -m68020 -mtune=68040 -fno-optimize-sibling-calls
+        ${_wifipi_arch} -fno-optimize-sibling-calls
         -nostartfiles -nostdlib -ffreestanding
         "-Wl,-e,__start" "-Wl,-u,_RomTag"
         "-Wl,-Map=$<TARGET_FILE_DIR:anxwifipi_device>/anxwifipi.device.map")

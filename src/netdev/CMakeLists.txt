@@ -96,7 +96,7 @@ function(anxd_add_netdev target name roster)
         "${CMAKE_SOURCE_DIR}/src/net68k"   # n68k_iocopy.h, and nothing else
         "${CMAKE_SOURCE_DIR}/src/sana2")   # sana2_device.h, the command numbers
     target_link_options(${target} PRIVATE -nostartfiles -Wl,--gc-sections)
-    target_compile_options(${target} PRIVATE -Os)
+    target_compile_options(${target} PRIVATE ${AMINETXDUO_OPT_FLAG})
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:${target}>"
