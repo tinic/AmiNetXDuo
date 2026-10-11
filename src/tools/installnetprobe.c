@@ -27,6 +27,7 @@
 
 #include "aminetxduo/version.h"
 #include "../netdev/netdev_dtree.h"
+#include "netprobe_card.h"
 
 const char *const tool_name = "InstallNetProbe";
 
@@ -177,8 +178,7 @@ static ULONG ignore_card_event(VOID)
 /* Read only the identity tuples.  IFAVAILABLE means an active driver is never
    displaced or queued behind; in that case the Installer's driver-file
    fallback supplies the answer.  No reset, COR write or device open occurs. */
-static BOOL pcmcia_identity(UWORD *manufacturer, UWORD *product,
-                            UBYTE *function, BOOL *have_function)
+static BOOL pcmcia_identity(NetprobeCis *cis)
 {
     static struct Interrupt  removed;
     static struct Interrupt  inserted;
@@ -186,7 +186,6 @@ static BOOL pcmcia_identity(UWORD *manufacturer, UWORD *product,
     static struct CardHandle handle;
     struct CardHandle       *owner;
     UBYTE                    tuple[6] = { 0 };
-    BOOL                     have_manf = FALSE;
 
     CardResource = OpenResource((CONST_STRPTR)CARDRESNAME);
     if (CardResource == NULL)
@@ -222,53 +221,49 @@ static BOOL pcmcia_identity(UWORD *manufacturer, UWORD *product,
     if (probe_copy_tuple(&handle, tuple, 0x20, sizeof(tuple)) &&
         tuple[1] >= 4)
     {
-        *manufacturer = (UWORD)(((UWORD)tuple[3] << 8) | tuple[2]);
-        *product = (UWORD)(((UWORD)tuple[5] << 8) | tuple[4]);
-        have_manf = TRUE;
+        cis->manf = (UWORD)(((UWORD)tuple[3] << 8) | tuple[2]);
+        cis->prod = (UWORD)(((UWORD)tuple[5] << 8) | tuple[4]);
+        cis->have_manf = 1;
     }
     if (probe_copy_tuple(&handle, tuple, 0x21, sizeof(tuple)) &&
         tuple[1] >= 1)
     {
-        *function = tuple[2];
-        *have_function = TRUE;
+        cis->funcid = tuple[2];
+        cis->have_funcid = 1;
+    }
+    /* The first FUNCE: on an 802.11 card, its LAN technology. */
+    if (probe_copy_tuple(&handle, tuple, 0x22, sizeof(tuple)) &&
+        tuple[1] >= 2)
+    {
+        cis->funce[0] = tuple[2];
+        cis->funce[1] = tuple[3];
+        cis->have_funce = 1;
     }
 
     probe_release_card(&handle, CARDF_REMOVEHANDLE);
     handle.cah_CardNode.ln_Name = NULL;
-    return have_manf || *have_function;
+    return (BOOL)(cis->have_manf || cis->have_funcid);
 }
 
 static BOOL pcmcia_card_present(const char *name)
 {
-    UWORD manufacturer = 0;
-    UWORD product = 0;
-    UBYTE function = 0xff;
-    BOOL  have_function = FALSE;
-    BOOL  known_3com;
-    BOOL  cnet_style;
+    NetprobeCis cis = { 0 };
+    int         kind;
 
-    if (!pcmcia_identity(&manufacturer, &product, &function,
-                         &have_function))
+    if (!pcmcia_identity(&cis))
         return FALSE;
 
-    known_3com = (BOOL)(manufacturer == 0x0101 &&
-                         (product == 0x0589 || product == 0x0556 ||
-                          product == 0x0035));
-    /* CNet/CN40BC and compatible NE2000 cards commonly omit MANFID and state
-       only the LAN function.  Do not call every unknown LAN tuple NE2000:
-       Prism2 is also a LAN function and needs a different driver. */
-    cnet_style = (BOOL)(manufacturer == 0 && product == 0 &&
-                        have_function && function == 6);
+    kind = netprobe_pc_kind(&cis);
     if (same(name, "pcmcia"))
-        return (BOOL)(known_3com || cnet_style);
+        return (BOOL)(kind != NETPROBE_PC_NONE);
     if (same(name, "cnet"))
-        return cnet_style;
+        return (BOOL)(kind == NETPROBE_PC_NE2000);
     if (same(name, "3c589"))
-        return (BOOL)(manufacturer == 0x0101 && product == 0x0589);
+        return (BOOL)(kind == NETPROBE_PC_3C589);
     if (same(name, "3ccfem556"))
-        return (BOOL)(manufacturer == 0x0101 && product == 0x0556);
+        return (BOOL)(kind == NETPROBE_PC_3CCFEM556);
     if (same(name, "3cxem556"))
-        return (BOOL)(manufacturer == 0x0101 && product == 0x0035);
+        return (BOOL)(kind == NETPROBE_PC_3CXEM556);
     return FALSE;
 }
 
