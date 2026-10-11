@@ -19,18 +19,69 @@ examples/Internet/          routes, name_resolution, hosts, service_discovery
 
 tools/makeicon.py           writes the .info files
 tools/showicon.py           reads one back and draws it, independently
+tools/compile-glowicons.py  compiles transparent two-state PNG artwork (Pillow)
+icons/glow/                 compiled color images, previews and PNG masters
 tools/checkscript.py        static checks on the Installer script
 
 test/run-workbench.sh       installs the archive on a real Workbench 3.1
 test/installdrive.c         drives the Installer inside the guest
 test/bootcheck.c            boots the installed machine and checks it works
 test/icontest.c             hands the generated .info files to icon.library
+test/test_glowicons.py      checks classic fallback, color data and malformed inputs
 test/smbprobe.c             SMB mount probe, driven by test/run-smbmount.sh
 test/peer-drill.sh          what the second machine does to the Amiga
 ```
 
 The user-facing text in the archive is `dist/ReadMe` and `docs/user/`. This file
 is not shipped.
+
+## Icons
+
+The default `.info` files combine the original classic four-color images and
+metadata with 48x48, 128-color GlowIcons. Color-capable `icon.library` versions
+display the new artwork; stock older libraries load the classic fallback.
+Normal and selected color states have transparent backgrounds. This adds
+23,276 bytes across the seven icon templates and no library code.
+
+Packaging needs only Python's standard library. To build a classic-only
+archive, set `AMINETXDUO_ICON_STYLE=classic` when invoking `dist/make-dist.sh`.
+For separate icon templates:
+
+```sh
+python3 install/tools/makeicon.py build/classic-icons --style classic
+python3 install/tools/makeicon.py build/glow-icons --style glow
+```
+
+Artwork regeneration, including palette reduction and GlowIcon encoding:
+
+```sh
+python3 install/tools/compile-glowicons.py --outdir install/icons/glow \
+    install/icons/glow/masters/*.png
+python3 install/tools/makeicon.py install
+python3 install/tools/showicon.py install/*.info
+python3 install/test/test_glowicons.py
+```
+
+Only artwork regeneration requires Pillow. Each PNG master contains a normal
+state on the left and a selected state on the right. The compiler frames both
+states together, reserves transparent pen zero and encodes IFF FACE/IMAG
+chunks with byte-depth PackBits compression. Both color palettes are stored
+explicitly. The independent validator checks chunk lengths, RLE expansion,
+palette indices and both states, rather than accepting arbitrary trailing data.
+
+`icontest` validates all seven icons and their metadata through the native
+library. On V44+ it also validates both color states and checks the decoded
+pixels/palettes are preserved by `PutDiskObject`. Optional arguments name an
+icon directory and report file, allowing a RAM-only run:
+
+```text
+icontest RAM:GlowIcons RAM:glowicons-report.txt
+```
+
+On an old library a native write can retain only the classic representation;
+the native test checks its metadata and fallback. Installing a newer icon set
+again restores the color extension. MUI application images and MagicWB palette
+icons are separate formats and are not part of this GlowIcon set.
 
 ## The script
 

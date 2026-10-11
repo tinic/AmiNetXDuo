@@ -335,7 +335,9 @@ fi
 # Regenerated every time so that a change to makeicon.py cannot leave a stale
 # icon in an archive.
 
-python3 "$INSTALL/tools/makeicon.py" "$INSTALL" >/dev/null
+python3 "$INSTALL/tools/makeicon.py" "$INSTALL" \
+    --style "${AMINETXDUO_ICON_STYLE:-glow}" >/dev/null
+python3 "$INSTALL/tools/showicon.py" "$INSTALL"/*.info >/dev/null
 
 # -------------------------------------------------------------- the layout --
 
