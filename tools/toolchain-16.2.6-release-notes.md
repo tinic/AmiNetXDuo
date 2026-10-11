@@ -10,7 +10,7 @@ This is a cross-toolchain update, not an AmiNetXDuo release. The compiler still 
 - `-Wall` no longer reports array bounds on the SysBase read at address 4.
 - Constructor and destructor priorities are honoured.
 - `-fpic` and `-fPIC` are errors.
-- A `char` or `short` argument bound to a register with `__asm` is widened to 32 bits by the caller.
+- A `char` or `short` argument bound to a register with `__asm` is now widened by the caller; callees still extend it themselves, so objects from 16.2.5, other compilers or hand-written callers mix without a rebuild.
 - LTO-promoted statics draw no visibility warning; a user-written `visibility` attribute still does.
 
 | Asset | Size | SHA-256 |
