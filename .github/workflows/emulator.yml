@@ -246,6 +246,16 @@ jobs:
           tools/ci-arm.sh -n "IPv6 socket surface (RFC 3542)" --
           tests/ipv6/run-socket.sh -b build/ci/default
 
+      # The same test with no DEVS:NetInterfaces/tap0, as on a real machine.
+      # It used to wait forever there for a raw packet only tap0 loops back;
+      # it has to reach its own verdict, skipping what needs a second local
+      # address it does not have.
+      - name: IPv6 socket surface without tap0
+        if: ${{ !cancelled() && steps.build.outcome == success }}
+        run: >-
+          tools/ci-arm.sh -n "IPv6 socket surface, no tap0" --
+          tests/ipv6/run-socket.sh -n -b build/ci/default
+
       # The same argument as the step above, and the same requirements: the
       # test brings up tests/tcpdrill/tapdev.c itself, so a ROM is the whole
       # of it -- no driver, no card, no peer -- and 113 checks run in 19

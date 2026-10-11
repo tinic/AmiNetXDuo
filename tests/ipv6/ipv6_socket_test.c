@@ -30,10 +30,10 @@
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
 #endif
 
-#define T_LOG_SIZE      8192
+#define T_LINE_SIZE     256
 
-static char     t_log_buffer[T_LOG_SIZE];
-static ULONG    t_log_used;
+static char     t_line[T_LINE_SIZE];
+static ULONG    t_line_used;
 
 static VOID t_put_char(register UBYTE c      __asm("d0"),
                        register APTR  unused __asm("a3"))
@@ -43,9 +43,9 @@ static VOID t_put_char(register UBYTE c      __asm("d0"),
     {
         RawPutChar(c);
 
-        if (t_log_used < (ULONG)(T_LOG_SIZE - 1))
+        if (t_line_used < (ULONG)(T_LINE_SIZE - 1))
         {
-            t_log_buffer[t_log_used++] = (char)c;
+            t_line[t_line_used++] = (char)c;
         }
     }
 }
@@ -54,27 +54,23 @@ static VOID t_log(const char *fmt, ...)
 {
 
 va_list args;
+BPTR    out;
+
+    t_line_used = 0;
 
     va_start(args, fmt);
     RawDoFmt((STRPTR)fmt, args, (void (*)()) t_put_char, NULL);
     va_end(args);
 
     RawPutChar('\n');
-    if (t_log_used < (ULONG)(T_LOG_SIZE - 1))
-    {
-        t_log_buffer[t_log_used++] = '\n';
-    }
-}
+    t_line[t_line_used++] = '\n';
 
-static VOID t_flush(VOID)
-{
-
-BPTR    out;
-
-    out =  Output();
+    /* Written as it happens, not at exit: a run that blocks, or is broken
+       out of, still shows the last line it reached. */
+    out = Output();
     if (out != (BPTR)0)
     {
-        (VOID)Write(out, (APTR)t_log_buffer, (LONG)t_log_used);
+        (VOID)Write(out, (APTR)t_line, (LONG)t_line_used);
     }
 }
 
@@ -178,6 +174,7 @@ struct t_fdset
 
 #define T_PORT              9099
 #define T_TAP_ADDR          0x0A090901UL      /* tap0, 10.9.9.1 */
+#define T_OFFLINK_ADDR      0xC0000201UL      /* 192.0.2.1, RFC 5737 */
 
 
 #define BSD_SCRATCH                                                          \
@@ -188,6 +185,12 @@ struct t_fdset
 #define BSD_SCRATCH_OUT "=r" (_s_d1), "=r" (_s_a0), "=r" (_s_a1)
 
 static struct Library *SocketBase;
+
+/* A local address that is not loopback: NetX originates no ICMP error for a
+   loopback source, and a raw socket bound to it must see its own packets.
+   tap0's under the emulator harness; on a machine without tap0, the address
+   its own interface sends from; 0 when there is neither. */
+static ULONG t_local_addr = T_TAP_ADDR;
 
 static LONG bsd_socket(LONG domain, LONG type, LONG proto)
 {
@@ -754,6 +757,63 @@ struct t_timeval tv;
     tv.tv_micro = 0;
 
     return bsd_WaitSelect(fd + 1, &set, &tv);
+}
+
+static LONG t_wait_readable(LONG fd, ULONG secs)
+{
+struct t_fdset   set;
+struct t_timeval tv;
+
+    t_bzero(&set, sizeof(set));
+    set.bits[(ULONG)fd >> 5] = 1UL << ((ULONG)fd & 31UL);
+    tv.tv_secs  = secs;
+    tv.tv_micro = 0;
+
+    return bsd_WaitSelect(fd + 1, &set, &tv);
+}
+
+/* The source address the stack picks for an off-link destination, which is
+   one of this machine's own interface addresses.  0 without a route. */
+static ULONG t_interface_addr(VOID)
+{
+LONG                 fd;
+ULONG                len;
+ULONG                addr = 0;
+struct t_sockaddr_in sa;
+
+    fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (fd < 0)
+        return 0;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = 9;
+    sa.sin_addr   = T_OFFLINK_ADDR;
+
+    if (bsd_connect(fd, &sa, sizeof(sa)) == 0)
+    {
+        t_bzero(&sa, sizeof(sa));
+        len = sizeof(sa);
+        if (bsd_getsockname(fd, &sa, &len) == 0)
+            addr = sa.sin_addr;
+    }
+
+    (VOID)bsd_CloseSocket(fd);
+
+    if ((addr >> 24) == 127UL)
+        addr = 0;
+
+    return addr;
+}
+
+static BOOL t_have_local_addr(VOID)
+{
+    if (t_local_addr != 0)
+        return TRUE;
+
+    t_log("  skip: no local address besides loopback");
+    return FALSE;
 }
 
 static LONG t_socket_exception(LONG fd)
@@ -1641,6 +1701,8 @@ static const char     probe[] = "closed UDP port";
 char                  buffer[16];
 
     t_log("connected UDP ICMP readiness");
+    if (!t_have_local_addr())
+        return;
 
     fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "UDP ICMP socket", bsd_Errno()))
@@ -1653,7 +1715,7 @@ char                  buffer[16];
     /* NetX, following RFC 1122, does not originate an ICMP error in response
        to a loopback-source datagram. Use the harness's real interface address
        so this actually exercises the asynchronous UDP error path. */
-    sa.sin_addr   = T_TAP_ADDR;
+    sa.sin_addr   = t_local_addr;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect UDP to unused port", bsd_Errno());
@@ -1684,6 +1746,8 @@ static const char     probe[] = "consume UDP error";
 char                  buffer[16];
 
     t_log("UDP SO_ERROR consumes ICMP error");
+    if (!t_have_local_addr())
+        return;
 
     fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "UDP SO_ERROR socket", bsd_Errno()))
@@ -1693,7 +1757,7 @@ char                  buffer[16];
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
     sa.sin_port   = T_PORT + 32;
-    sa.sin_addr   = T_TAP_ADDR;
+    sa.sin_addr   = t_local_addr;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect UDP SO_ERROR probe",
@@ -1728,6 +1792,8 @@ struct t_sockaddr_in  sa;
 static const char     probe[] = "UDP exception probe";
 
     t_log("UDP SO_ERROR clears select exception");
+    if (!t_have_local_addr())
+        return;
 
     fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "UDP exception socket", bsd_Errno()))
@@ -1737,7 +1803,7 @@ static const char     probe[] = "UDP exception probe";
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
     sa.sin_port   = T_PORT + 40;
-    sa.sin_addr   = T_TAP_ADDR;
+    sa.sin_addr   = t_local_addr;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect UDP exception probe",
@@ -1775,6 +1841,8 @@ struct t_sockaddr_in  sa;
 static const char     probe[] = "multi-set UDP error";
 
     t_log("WaitSelect counts ready bits, not descriptors");
+    if (!t_have_local_addr())
+        return;
 
     fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "multi-set UDP socket", bsd_Errno()))
@@ -1784,7 +1852,7 @@ static const char     probe[] = "multi-set UDP error";
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
     sa.sin_port   = T_PORT + 42;
-    sa.sin_addr   = T_TAP_ADDR;
+    sa.sin_addr   = t_local_addr;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect multi-set UDP probe",
@@ -2065,6 +2133,8 @@ static const char     new_data[] = "raw new peer";
 char                  buffer[96];
 
     t_log("raw connect after MSG_PEEK");
+    if (!t_have_local_addr())
+        return;
 
     server   = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
     old_peer = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
@@ -2076,7 +2146,7 @@ char                  buffer[96];
     t_bzero(&sa, sizeof(sa));
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
-    sa.sin_addr   = T_TAP_ADDR;
+    sa.sin_addr   = t_local_addr;
     rc = bsd_bind(old_peer, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "raw old peer bind", bsd_Errno());
 
@@ -2084,29 +2154,32 @@ char                  buffer[96];
     rc = bsd_bind(new_peer, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "raw new peer bind", bsd_Errno());
 
-    sa.sin_addr = T_TAP_ADDR;
+    sa.sin_addr = t_local_addr;
     rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
                     &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data)),
                   "raw old peer first send", rc);
-    rc = bsd_recv(old_peer, buffer, sizeof(buffer), 0);
+    /* Bounded: a packet that never comes back is a failure, not a hang. */
+    rc = (t_wait_readable(old_peer, 5) > 0)
+         ? bsd_recv(old_peer, buffer, sizeof(buffer), 0) : 0;
     (VOID)t_check((BOOL)(rc >= 20), "raw first send synchronization", rc);
 
     rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
                     &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data)),
                   "raw old peer second send", rc);
-    rc = bsd_recv(old_peer, buffer, sizeof(buffer), 0);
+    rc = (t_wait_readable(old_peer, 5) > 0)
+         ? bsd_recv(old_peer, buffer, sizeof(buffer), 0) : 0;
     (VOID)t_check((BOOL)(rc >= 20), "raw second send synchronization", rc);
 
     t_bzero(buffer, sizeof(buffer));
     rc = bsd_recv(server, buffer, sizeof(buffer),
                   T_MSG_DONTWAIT | T_MSG_PEEK);
     (VOID)t_check((BOOL)(rc >= 20 &&
-                         (UBYTE)buffer[12] == 10 &&
-                         (UBYTE)buffer[13] == 9 &&
-                         (UBYTE)buffer[14] == 9 &&
-                         (UBYTE)buffer[15] == 1),
+                         (UBYTE)buffer[12] == (UBYTE)(t_local_addr >> 24) &&
+                         (UBYTE)buffer[13] == (UBYTE)(t_local_addr >> 16) &&
+                         (UBYTE)buffer[14] == (UBYTE)(t_local_addr >> 8) &&
+                         (UBYTE)buffer[15] == (UBYTE)t_local_addr),
                   "peek packet from raw old peer", rc);
 
     sa.sin_addr = 0x7F000001UL;
@@ -3155,9 +3228,26 @@ int main(void)
     }
 
     {
-        LONG addrc = tap_bring_up(SocketBase);
-        (VOID)t_check((BOOL)(addrc == 0), "AddNetInterface(tap0)",
-                      (ULONG)addrc);
+        BPTR conf = Lock((STRPTR)"DEVS:NetInterfaces/tap0", SHARED_LOCK);
+
+        if (conf != (BPTR)0)
+        {
+            LONG addrc;
+
+            UnLock(conf);
+            addrc = tap_bring_up(SocketBase);
+            (VOID)t_check((BOOL)(addrc == 0), "AddNetInterface(tap0)",
+                          (ULONG)addrc);
+        }
+        else
+        {
+            /* A machine with its own interfaces, not the harness. */
+            t_local_addr = t_interface_addr();
+            t_log("  skip AddNetInterface(tap0): no DEVS:NetInterfaces/tap0, "
+                  "local address %ld.%ld.%ld.%ld",
+                  (t_local_addr >> 24) & 0xFFUL, (t_local_addr >> 16) & 0xFFUL,
+                  (t_local_addr >> 8) & 0xFFUL, t_local_addr & 0xFFUL);
+        }
     }
 
     t_test_conversions();
@@ -3193,8 +3283,6 @@ int main(void)
     t_log("");
     t_log("%ld checks, %ld failures, %s", t_checks, t_failures,
           (t_failures == 0UL) ? "PASS" : "FAIL");
-
-    t_flush();
 
     return((t_failures == 0UL) ? 0 : 20);
 }
