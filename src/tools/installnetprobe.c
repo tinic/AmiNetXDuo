@@ -33,12 +33,13 @@ const char *const tool_name = "InstallNetProbe";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallNetProbe");
 
-#define TEMPLATE "EMU68/S,GENET/S,WIFIPI/S,CARD/K"
+#define TEMPLATE "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K"
 
 enum
 {
     ARG_EMU68 = 0,
     ARG_GENET,
+    ARG_GENETOK,
     ARG_WIFIPI,
     ARG_CARD,
     ARG_COUNT
@@ -290,9 +291,24 @@ static BOOL supported_wifi_model(VOID)
     return FALSE;
 }
 
+/* Emu68 1.1 alpha.1 maps /scb's ranges into its 68k peripheral window, from
+   0xF2000000 up and below 0xFC000000, and rewrites the tree to say so.  1.0.x
+   leaves /scb at the BCM2711's own physical addresses, 0xFC000000 and up,
+   which no 68k mapping covers.  anxgenet.device uses the translated base as
+   it stands, so a GENET up there is one it cannot reach. */
+#define BCM2711_PERIPH_PHYS 0xFC000000UL
+
+static BOOL genet_usable(VOID)
+{
+    NetdevDtInfo info;
+
+    return (BOOL)(netdev_dtree_find("brcm,bcm2711-genet-v5", &info) &&
+                  info.base != 0 && info.base < BCM2711_PERIPH_PHYS);
+}
+
 int main(int argc, char **argv)
 {
-    LONG           args[ARG_COUNT] = { 0, 0, 0 };
+    LONG           args[ARG_COUNT] = { 0 };
     struct RDArgs *rda;
     BOOL           present;
     NetdevDtInfo   info;
@@ -305,7 +321,8 @@ int main(int argc, char **argv)
     if (rda == NULL)
         return RETURN_ERROR;
     if ((args[ARG_EMU68] != 0) + (args[ARG_GENET] != 0) +
-        (args[ARG_WIFIPI] != 0) + (args[ARG_CARD] != 0) != 1)
+        (args[ARG_GENETOK] != 0) + (args[ARG_WIFIPI] != 0) +
+        (args[ARG_CARD] != 0) != 1)
     {
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -315,6 +332,8 @@ int main(int argc, char **argv)
         present = netdev_dtree_present();
     else if (args[ARG_GENET] != 0)
         present = netdev_dtree_find("brcm,bcm2711-genet-v5", &info);
+    else if (args[ARG_GENETOK] != 0)
+        present = genet_usable();
     else if (args[ARG_WIFIPI] != 0)
         present = (BOOL)(supported_wifi_model() &&
                          netdev_dtree_alias_present("mmc"));
