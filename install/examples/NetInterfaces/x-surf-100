@@ -11,6 +11,17 @@
 ;
 ; The X-Surf 100 is the faster later card and has its own driver.
 ; xsurf.device does not drive it.
+; AmiNetXDuo's anxnet.device also supports it. To use that driver,
+; change DEVICE below to anxnet.device and add CARD=xsurf100.
+;
+; With anxnet.device, enable IEEE 802.3x flow control (PAUSE) on the
+; switch port connected to the Amiga. Keep speed/duplex on Auto.
+; The driver negotiates PAUSE; no interface flow-control keyword is
+; needed. Leave RXBUFFER unset to follow the negotiated allowance.
+; Without PAUSE the stack uses a smaller TCP window; a larger RXBUFFER
+; cannot prevent the card's small receive ring from overflowing.
+; For x-surf-100.device, consult the vendor's flow-control guidance.
+; See "X-Surf 100 and flow control" in Docs/AmiNetXDuo.guide.
 ;
 
 DEVICE=x-surf-100.device

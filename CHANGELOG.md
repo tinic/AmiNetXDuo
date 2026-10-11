@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- X-Surf 100 documentation: switch PAUSE setup, receive-overrun checks and
+  automatic TCP-window guidance for anxnet.device.
+
 - New fat build (-O2, 68020+), default on PiStorm (Emu68).
 
 - anxzz9000.device no longer drops an occasional received frame as
