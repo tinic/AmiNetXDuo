@@ -487,7 +487,8 @@ static VOID ami_mbuf_ext_unref(struct mbuf *m)
          * that under -mregparm. Inferred from 4.4BSD. No Amiga header
          * documents the calling convention for ext_free.
          */
-        AMIGA_ASM_ARGS void (*fn)(APTR, ULONG) = (void (*)(APTR, ULONG))freefn;
+        typedef AMIGA_ASM_ARGS void (*release_fn)(APTR, ULONG);
+        release_fn fn = (release_fn)freefn;
 
         fn(buf, size);
     }

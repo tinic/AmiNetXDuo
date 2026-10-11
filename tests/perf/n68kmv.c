@@ -49,7 +49,7 @@ extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv20(UBYTE *to, const UBYTE *from, UL
 extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv40(UBYTE *to, const UBYTE *from, ULONG len);
 extern AMIGA_ASM_ARGS VOID n68k_copy_bytes_mv60(UBYTE *to, const UBYTE *from, ULONG len);
 
-extern VOID (*n68k_vec_copy)(UBYTE *, const UBYTE *, ULONG);
+extern AMIGA_ASM_ARGS VOID (*n68k_vec_copy)(UBYTE *, const UBYTE *, ULONG);
 
 extern struct Device *TimerBase;        /* src/common/compat.c owns it */
 
@@ -353,7 +353,7 @@ static VOID bench_copy(const char *name,
    020, 030 and 040. */
 static VOID check_decode(VOID)
 {
-    static const struct { ULONG attn; VOID (*want)(UBYTE *, const UBYTE *,
+    static const struct { ULONG attn; AMIGA_ASM_ARGS VOID (*want)(UBYTE *, const UBYTE *,
                                                    ULONG); const char *name; }
     cases[] =
     {
