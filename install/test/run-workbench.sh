@@ -3381,10 +3381,10 @@ if [ "$WIFI_MODE" = join ] && [ "$WIFI_START" = 1 ]; then
     cp "$_stub" "$(amiga_path "${INST}C/WirelessManager")"
     _sana2_names "$BOARD"
     _wifi_if=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF")
-    sed "s|^DEVICE=.*|DEVICE=$_device|" "$_wifi_if" > "$_wifi_if.new"
+    sed "s|^DEVICE=.*|DEVICE=$SANA2_DEVICE|" "$_wifi_if" > "$_wifi_if.new"
     mv "$_wifi_if.new" "$_wifi_if"
     rm -f "$HD/wm-starts.txt"
-    echo "==> Wi-Fi startup: wm-stub as C:WirelessManager, $EXPECTED_IF on $_device"
+    echo "==> Wi-Fi startup: wm-stub as C:WirelessManager, $EXPECTED_IF on $SANA2_DEVICE"
     WIFI_TAIL=$(cat <<'EOF'
 
 Echo >>DH0:usercheck.txt "*N=== 6. S:Network-Startup again, WirelessManager running"
