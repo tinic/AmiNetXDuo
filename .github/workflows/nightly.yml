@@ -1,0 +1,116 @@
+# Nightly: republish the newest release candidate CI already built and
+# tested on main as the rolling "nightly" pre-release.  Like release.yml,
+# nothing is compiled here: the archive is the exact CI artifact, checked
+# against its commit and digest by tools/check-release-candidate.sh.  A day
+# with no new candidate on main leaves the previous nightly in place.
+#
+# SPDX-License-Identifier: MIT
+
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pick, download and verify only; publish nothing"
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    name: publish the newest main candidate
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Docs- and tool-only pushes do not package a candidate, so walk the
+      # recent successful main runs to the newest one that did.
+      - name: Find the newest candidate on main
+        id: pick
+        run: |
+          gh run list --workflow ci.yml --branch main --event push \
+             --status success --limit 30 --json databaseId,headSha \
+             --jq '.[] | "\(.databaseId) \(.headSha)"' |
+          while read -r run sha; do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts" \
+                --jq "[.artifacts[] | select(.name == \"release-candidate-$sha\" and (.expired | not))] | length")
+            if [ "$n" = 1 ]; then
+              echo "run=$run" >> "$GITHUB_OUTPUT"
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
+          grep -q '^sha=' "$GITHUB_OUTPUT" || {
+            echo "::error::no unexpired release candidate on main in the last 30 successful runs"
+            exit 1
+          }
+
+      - name: Skip if the nightly already has it
+        id: fresh
+        run: |
+          have=$(gh release view nightly --json targetCommitish --jq .targetCommitish 2>/dev/null || true)
+          if [ "$have" = "${{ steps.pick.outputs.sha }}" ]; then
+            echo "::notice::nightly already carries ${{ steps.pick.outputs.sha }}"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the candidate
+        if: steps.fresh.outputs.skip != '1'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-${{ steps.pick.outputs.sha }}
+          path: build/candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.pick.outputs.run }}
+
+      - name: Verify source identity and archive digest
+        if: steps.fresh.outputs.skip != '1'
+        run: tools/check-release-candidate.sh build/candidate "${{ steps.pick.outputs.sha }}"
+
+      - name: Publish the nightly pre-release
+        if: steps.fresh.outputs.skip != '1' && inputs.dry_run != true
+        run: |
+          sha=${{ steps.pick.outputs.sha }}
+          short=$(git rev-parse --short=8 "$sha")
+          day=$(git show -s --format=%cs "$sha")
+          last=$(git describe --tags --abbrev=0 --match 'v*' "$sha" 2>/dev/null || true)
+          lha=$(ls build/candidate/*.lha)
+          name="AmiNetXDuo-nightly-$day-$short.lha"
+          cp "$lha" "build/candidate/$name"
+          sum=$(sha256sum "build/candidate/$name" | cut -d' ' -f1)
+
+          notes=$(mktemp)
+          {
+            echo "Untested development build of \`main\` at $sha ($day)."
+            echo "Built and checked by CI, not by hand: use a numbered release unless you want what is newest."
+            echo "Its programs report the last release's version ($(tools/version.sh --product)); the date and commit above identify the build."
+            echo
+            echo "SHA-256 \`$sum\`"
+            [ -n "$last" ] && echo && echo "Changes since $last: https://github.com/$GITHUB_REPOSITORY/compare/$last...$sha"
+            echo
+            # The Unreleased section of CHANGELOG.md at this commit.
+            git show "$sha:CHANGELOG.md" |
+              awk '/^## Unreleased/{p=1; next} /^## /{if (p) exit} p'
+          } > "$notes"
+
+          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
+          gh release create nightly \
+             --target "$sha" \
+             --prerelease --latest=false \
+             --title "AmiNetXDuo nightly $day ($short)" \
+             --notes-file "$notes" \
+             "build/candidate/$name"
