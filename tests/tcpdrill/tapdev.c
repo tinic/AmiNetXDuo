@@ -10,6 +10,7 @@
 #include <dos/dos.h>
 #include <exec/devices.h>
 #include <exec/errors.h>
+#include <exec/execbase.h>
 #include <exec/io.h>
 #include <exec/lists.h>
 #include <exec/memory.h>
@@ -634,6 +635,18 @@ ULONG tap_reads_for(UWORD ether_type)
     return count;
 }
 
+BOOL tap_device_listed(VOID)
+{
+    BOOL listed;
+
+    Forbid();
+    listed = (FindName(&SysBase->DeviceList, (STRPTR)tap_name) != NULL)
+             ? TRUE : FALSE;
+    Permit();
+
+    return listed;
+}
+
 BOOL tap_is_online(VOID)
 {
     return (tap_dev != NULL && tap_dev->online) ? TRUE : FALSE;
@@ -807,8 +820,12 @@ VOID tap_remove(VOID)
     if (d == NULL)
         return;
 
+    /* Remove(), not RemDevice(): RemDevice() only calls the expunge vector,
+       and tap_expunge() declines, so the node stayed on DeviceList with its
+       vectors in this program's unloaded segment and its base freed below.
+       The next Avail FLUSH called through it. */
     Forbid();
-    RemDevice(&d->dd);
+    Remove(&d->dd.dd_Library.lib_Node);
 
     while ((n = RemHead(&d->reads)) != NULL)
     {

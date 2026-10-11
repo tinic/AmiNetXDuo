@@ -38,6 +38,11 @@ typedef struct TapStats
 LONG tap_install(const UBYTE *mac);
 VOID tap_remove(VOID);
 
+/* TRUE while a device of this name is on Exec's DeviceList.  After
+   tap_remove() it must be FALSE: a node left there outlives the program's
+   segment, and Exec calls into it on the next low-memory flush. */
+BOOL tap_device_listed(VOID);
+
 /* TRUE between S2_ONLINE and S2_OFFLINE. */
 BOOL tap_is_online(VOID);
 
