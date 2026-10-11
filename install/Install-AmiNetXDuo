@@ -2225,8 +2225,10 @@
   (infos)
   (optional "force"))
 
-; The fat stack's commands, over the ones just copied.  ssh and scp are one
-; build for every stack and come from the copy above.
+; The fat stack's commands, over the ones just copied, ssh, scp and
+; scp-runner included: C/fat has its own -m68020-60 build of the three.
+; (all), no (confirm): no level or answer leaves one out.  Going back to full
+; copies C/ over them again with the 68000 ones.
 (if (= MINPICK 3)
     (copyfiles
       (prompt "Installing the fat commands into C:")
@@ -2264,12 +2266,13 @@
       (infos)
       (optional "force")))
 
-; ssh and scp went into C: with the copy above.  ssh used to need its own step and a
+; ssh and scp went into C: with the copies above.  ssh used to need its own step and a
 ; pattern that kept ssh.000, ssh.020 and ssh.060 out of the wholesale copy,
 ; because Dropbear comes from clients/ rather than the CMake tree and was built
 ; once per architecture; the one binary carries both X25519 field multiplies and
 ; picks at the first handshake, so it is just another command now.  A 68000 gets
-; it too: slower is not a reason to leave it out.
+; it too: slower is not a reason to leave it out.  The fat stack's copy in
+; C/fat is the same arrangement at -m68020-60.
 
 (complete 55)
 

@@ -2200,6 +2200,38 @@ if [ "$WANT_STACK" = fat ] || [ "$FAT_REFUSED" = 1 ] ||
         _bin_cmp "Prefs/NetPrefs" "$_src_c/NetPrefs"
         _bin_cmp "Utilities/NetMeter" "$_src_c/NetMeter"
     fi
+    # ssh, scp and scp-runner by name: the loop above only covers what the
+    # drawer carries, so a drawer without them would pass it.  After a
+    # fat-to-full reinstall they must be the 68000 ones, not the fat ones left
+    # behind.
+    _ssh_bad=0
+    for _f in ssh scp scp-runner; do
+        _want="$_src_c/$_f"
+        _fat="$UNPACK/AmiNetXDuo/C/fat/$_f"
+        _real=$(amiga_path "${INST}C/$_f" 2>/dev/null || true)
+        if [ ! -f "$_want" ]; then
+            echo "!! $WANT_STACK: the archive has no ${_want#"$UNPACK"/}"
+            _ssh_bad=1
+        elif [ -z "$_real" ] || [ ! -f "$_real" ]; then
+            echo "!! $WANT_STACK: ${INST}C/$_f is missing"
+            _ssh_bad=1
+        elif [ "$(shasum -a 256 < "$_real" | cut -d' ' -f1)" != \
+               "$(shasum -a 256 < "$_want" | cut -d' ' -f1)" ]; then
+            echo "!! $WANT_STACK: ${INST}C/$_f is not ${_want#"$UNPACK"/}"
+            _ssh_bad=1
+        elif [ "$WANT_STACK" != fat ] && [ -f "$_fat" ] &&
+             ! cmp -s "$_want" "$_fat" && cmp -s "$_real" "$_fat"; then
+            echo "!! $WANT_STACK: ${INST}C/$_f is still the fat build"
+            _ssh_bad=1
+        fi
+    done
+    if [ "$_ssh_bad" = 0 ]; then
+        echo "  ok      C:ssh, C:scp and C:scp-runner are ${_src_c#"$UNPACK"/AmiNetXDuo/}'s (sha256)"
+        echo "ssh_clients=ok stack=$WANT_STACK source=${_src_c#"$UNPACK"/AmiNetXDuo/}"
+    else
+        echo "ssh_clients=FAIL stack=$WANT_STACK"
+        _bin_bad=1
+    fi
     if [ "$_bin_bad" = 0 ]; then
         echo "  ok      $_bin_n installed binaries are the $WANT_STACK drawer's (sha256)"
     else

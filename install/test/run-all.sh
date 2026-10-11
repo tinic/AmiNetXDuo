@@ -46,6 +46,8 @@
 #                   on a 68020+ they also prove fat is the default under Emu68
 #   PROBE_FAIL / PROBE_BROKEN make InstallNetProbe fail or not load and require
 #                   the full stack as the default
+#   FAT_NOVICE      Emu68 fixture at NOVICE on a 68020+: fat with no questions,
+#                   C:ssh, C:scp and C:scp-runner the C/fat ones
 #   FAT_68000       picks fat on an A600 and requires the refusal and re-ask
 #   FAT_FULL / FULL_FAT reinstall across fat and full; every library, driver
 #                   and command must be the selected drawer's, by sha256
@@ -83,7 +85,7 @@ SCENARIOS=(
     NOVICE AVERAGE EXPERT STATIC INVALID_STATIC INVALID_NAMES
     NO_DRIVERS NO_BOOT
     SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO SYSTEM_FAT
-    FAT_68000 FAT_FULL FULL_FAT PROBE_FAIL PROBE_BROKEN
+    FAT_NOVICE FAT_68000 FAT_FULL FULL_FAT PROBE_FAIL PROBE_BROKEN
     XSURF100_MINIMAL_DHCP XSURF100_MINIMAL_STATIC
     XSURF100_MICRO_DHCP XSURF100_MICRO_STATIC
     FULL_MINIMAL MINIMAL_FULL FULL_MICRO MICRO_FULL
@@ -166,6 +168,7 @@ for scenario in "${SCENARIOS[@]}"; do
         SYSTEM_MINIMAL)        opts=(-l AVERAGE -p minimal) ;;
         SYSTEM_MICRO)          opts=(-l AVERAGE -p micro) ;;
         SYSTEM_FAT)            opts=(-l AVERAGE -p fat) ;;
+        FAT_NOVICE)            opts=(-l NOVICE -e genet) ;;
         FAT_68000)             opts=(-l AVERAGE -p fat); scenario_model=A600 ;;
         FAT_FULL)              opts=(-l AVERAGE -x fat-full) ;;
         FULL_FAT)              opts=(-l AVERAGE -x full-fat) ;;

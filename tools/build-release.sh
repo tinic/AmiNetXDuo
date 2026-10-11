@@ -24,9 +24,16 @@ cmake --build build/release-fat --parallel --target release_payload
 AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
     clients/dropbear/build.sh -b build/ssh
 
+# C/fat's ssh, scp and scp-runner, at the fat drawer's CPU.
+AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68020-60 \
+    clients/dropbear/build.sh -b build/ssh-fat
+
 AMINETXDUO_SSH=build/ssh/dbclient \
 AMINETXDUO_SCP=build/ssh/scp \
 AMINETXDUO_SCP_RUNNER=build/ssh/scp-runner \
+AMINETXDUO_SSH_FAT=build/ssh-fat/dbclient \
+AMINETXDUO_SCP_FAT=build/ssh-fat/scp \
+AMINETXDUO_SCP_RUNNER_FAT=build/ssh-fat/scp-runner \
 AMINETXDUO_DIST_NO_BUILD=1 \
     dist/make-dist.sh -b build/release
 
@@ -37,6 +44,7 @@ for path in \
     Libs/minimal/bsdsocket.library Libs/micro/bsdsocket.library \
     Libs/fat/bsdsocket.library Libs/fat/tls.library \
     Devs/Networks/fat/anxnet.device C/fat/AddNetInterface \
+    C/fat/ssh C/fat/scp C/fat/scp-runner \
     Flavours/full Flavours/fat Flavours/minimal Flavours/micro; do
     [ -f "build/dist/AmiNetXDuo/$path" ] || {
         echo "release_candidate=FAIL missing=$path" >&2
