@@ -6,7 +6,7 @@ Add new entries under `Unreleased`; published release sections are history.
 ## Unreleased
 
 - Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and
-  most branded clones) is detected at Novice; 802.11 cards are not.
+  most branded clones) is detected at Novice.
 
 - Installer: on Emu68 older than 1.1 alpha.1 it uses Emu68's genet.device
   for the Pi Ethernet, or stops with one page when no network device works.

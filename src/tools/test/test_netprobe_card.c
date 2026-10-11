@@ -40,6 +40,7 @@ int main(void)
     NetprobeCis prism2 = { 0x0156, 0x0002, 6, { 0, 0 }, 1, 1, 0 };
     NetprobeCis wpc11 = { 0x0274, 0x1613, 6, { 0, 0 }, 1, 1, 0 };
     NetprobeCis airconnect = { 0x0101, 0x0777, 6, { 0, 0 }, 1, 1, 0 };
+    NetprobeCis aironet = { 0x015f, 0x0007, 6, { 0, 0 }, 1, 1, 0 };
     /* An unknown maker whose FUNCE says wireless. */
     NetprobeCis wlan = { 0x1234, 0x0001, 6, { 0x01, 0x07 }, 1, 1, 1 };
     /* Not network cards. */
@@ -56,9 +57,11 @@ int main(void)
     expect_kind(&prism2, NETPROBE_PC_NONE, "Prism2");
     expect_kind(&wpc11, NETPROBE_PC_NONE, "Linksys WPC11");
     expect_kind(&airconnect, NETPROBE_PC_NONE, "3Com AirConnect");
+    expect_kind(&aironet, NETPROBE_PC_NONE, "Cisco Aironet");
     expect_kind(&wlan, NETPROBE_PC_NONE, "FUNCE wireless");
     expect_kind(&modem, NETPROBE_PC_NONE, "modem");
     expect_kind(&disk, NETPROBE_PC_NONE, "CompactFlash disk");
+    /* The driver would try this one; the probe leaves it to the card page. */
     expect_kind(&bare, NETPROBE_PC_NONE, "MANFID, no FUNCID");
 
     printf("netprobe_card: %lu checks, %lu failures\n", checks, failures);

@@ -37,7 +37,9 @@ enum
  * anxnet.device's own rule (netdev_card_by_cis): a known EtherLink III MANFID
  * names its row, and any other LAN card is the NE2000 one.  Less the 802.11
  * cards, whose FUNCID says LAN as an NE2000's does: a FUNCE stating wireless
- * technology, or a Prism2/Hermes MANFID (Linux hostap_cs, orinoco_cs).
+ * technology, or a MANFID from Linux's 802.11 PC Card drivers.  Narrower
+ * than the driver in one way: a card that states no FUNCID, or only the
+ * multifunction one, is not called an NE2000.
  */
 int netprobe_pc_kind(const NetprobeCis *cis);
 
