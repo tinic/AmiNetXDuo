@@ -29,7 +29,7 @@
       "displayName": "fat",
       "description": "Libs/fat, Devs/Networks/fat, C/fat. The full stack at -O2 for 68020 and up.",
       "cacheVariables": {
-        "AMINETXDUO_CPU": "68020",
+        "AMINETXDUO_CPU": "68020-60",
         "AMINETXDUO_OPT": "O2"
       }
     },

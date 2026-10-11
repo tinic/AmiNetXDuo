@@ -172,15 +172,15 @@ BUDGETS=(
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
     "micro:src/usergroup/usergroup.library:10240"
-    # First budgeted with the fat drawer (-O2 -m68020): bsdsocket 480,040,
-    # tls 228,664, anxnet 71,336, anxgenet 36,476, anxwifipi 68,044,
-    # usergroup 14,224.  Headroom like the default rows'.
+    # First budgeted with the fat drawer (-O2 -m68020-60): bsdsocket 475,648,
+    # tls 236,180 (crypto68k takes every variant, as `any` does), anxnet
+    # 70,476, anxgenet 35,996, anxwifipi 68,612, usergroup 14,124.
     "fat:src/bsdsocket/bsdsocket.library:504000"
     "fat:src/netdev/anxnet.device:74000"
     "fat:src/netdev/anxgenet.device:38000"
     "fat:src/wifipi/anxwifipi.device:71000"
     "fat:src/usergroup/usergroup.library:15360"
-    "fat:src/tlslib/tls.library:236000"
+    "fat:src/tlslib/tls.library:244000"
 )
 
 budgeted=0

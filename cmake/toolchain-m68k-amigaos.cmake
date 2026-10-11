@@ -240,9 +240,9 @@ unset(_amiga_dos_inline)
 
 # ------------------------------------------------------------- target CPU ---
 #
-# -DAMINETXDUO_CPU=any|68000|68020|68040|68060.  `any` is the default and is
-# what ships; the four CPU values build for one part and exist to measure
-# against.  docs/RESEARCH.md §45 is where the four entries below come from.
+# -DAMINETXDUO_CPU=any|68000|68020|68040|68060|68020-60.  `any` is the default
+# and ships; 68020-60 is the fat flavour; the four CPU values build for one
+# part and exist to measure against.  docs/RESEARCH.md §45 is where the four entries below come from.
 #
 # THE FLAGS ARE NOT THE OBVIOUS ONES, because this toolchain ships exactly
 # three multilibs, `.` (68000), `libm020` (@mcpu=68020) and `libm060`
@@ -278,25 +278,33 @@ unset(_amiga_dos_inline)
 # The rest is instruction selection spread over the C, and none of it is the
 # 32-bit multiply and divide helpers, which no data-path object references
 # (src/net68k/n68k_cpu.c).
+# `68020-60` is the fat flavour's (CMakePresets.json `fat`): -m68020-60, 68020
+# codegen that a 68060 runs without trapping -- no 64-bit MULU.L/DIVU.L, the
+# 64-bit products go through __muldi3 -- on the soft-float libm020 multilib.
+# It defines __mc68060__ as well as __mc68020__, so the C takes its 060-safe
+# paths, and like `any` it takes every variant of src/net68k's and
+# src/crypto68k's assembly and chooses from AttnFlags at init.
+#
 # THE DEFAULT IS `any`, and the per-CPU values are measurement configurations
 # now rather than shipping ones.  The archive has no CPU in it: one build of
 # every library, device and command, choosing its own inner loops at init.  Keep
 # the specific values -- every figure in this file and in src/net68k was taken
 # by building one of them and comparing back to back, and that is the only way
 # to take the next one.
-set(AMINETXDUO_CPU "any" CACHE STRING "Target CPU: any (every 68k), or 68000, 68020, 68040, 68060 for a measurement build")
-set_property(CACHE AMINETXDUO_CPU PROPERTY STRINGS 68000 68020 68040 68060 any)
+set(AMINETXDUO_CPU "any" CACHE STRING "Target CPU: any (every 68k), 68020-60 (fat), or 68000, 68020, 68040, 68060 for a measurement build")
+set_property(CACHE AMINETXDUO_CPU PROPERTY STRINGS 68000 68020 68040 68060 68020-60 any)
 
 set(_amiga_cpu_flags_68000 "-m68000")
 set(_amiga_cpu_flags_68020 "-m68020")
 set(_amiga_cpu_flags_68040 "-m68020;-mtune=68040")
 set(_amiga_cpu_flags_68060 "-mcpu=68060")
 set(_amiga_cpu_flags_any   "-m68000")
+set(_amiga_cpu_flags_68020-60 "-m68020-60")
 
 if(NOT DEFINED _amiga_cpu_flags_${AMINETXDUO_CPU})
     message(FATAL_ERROR
         "AMINETXDUO_CPU=${AMINETXDUO_CPU} is not one of 68000, 68020, 68040, "
-        "68060, any.  A 68010 runs the 68000 build and a 68030 runs the 68020 "
+        "68060, 68020-60, any.  A 68010 runs the 68000 build and a 68030 runs the 68020 "
         "one; there is no separate configuration for either.")
 endif()
 
@@ -327,7 +335,7 @@ set(AMIGA_ARCH_FLAGS "${_amiga_cpu_flags_${AMINETXDUO_CPU}}"
 # left alone, which is what the comment above promises.
 if(NOT AMIGA_ARCH_FLAGS STREQUAL "${_amiga_cpu_flags_${AMINETXDUO_CPU}}")
     set(_amiga_flags_are_a_cpu FALSE)
-    foreach(_amiga_c 68000 68020 68040 68060 any)
+    foreach(_amiga_c 68000 68020 68040 68060 68020-60 any)
         if(AMIGA_ARCH_FLAGS STREQUAL "${_amiga_cpu_flags_${_amiga_c}}")
             set(_amiga_flags_are_a_cpu TRUE)
         endif()

@@ -252,12 +252,12 @@ for b in "${BUILDS[@]}"; do
     got=$(cpu_of "$b")
     if [ "$b" = "$FAT_BUILD" ]; then
         # The one drawer that does not run everywhere, by design: the
-        # Installer refuses it below a 68020.  It must be exactly 68020 -O2.
+        # Installer refuses it below a 68020.  It must be exactly 68020-60 -O2.
         opt=$(sed -n 's/^AMINETXDUO_OPT:STRING=//p' "$b/CMakeCache.txt")
-        [ "$got" = "68020" ] && [ "$opt" = "O2" ] || {
+        [ "$got" = "68020-60" ] && [ "$opt" = "O2" ] || {
             echo "!! $b is the fat drawer and was configured with" >&2
             echo "!! AMINETXDUO_CPU=${got:-unset} AMINETXDUO_OPT=${opt:-unset}." >&2
-            echo "!! It must be 68020 and O2 (cmake --preset fat), fresh." >&2
+            echo "!! It must be 68020-60 and O2 (cmake --preset fat), fresh." >&2
             exit 2
         }
         got=fat

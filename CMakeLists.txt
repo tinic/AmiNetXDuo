@@ -173,7 +173,7 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     # branch as -ffunction-sections.  The pinned linker resolves that relocation
     # twelve bytes short.  The all-CPU/68000 build cannot encode bra.l and does
     # not pay for disabling otherwise useful tail calls.
-    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68040|-m68060|-mcpu=68060)( |$)")
+    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68020-60|-m68040|-m68060|-mcpu=68060)( |$)")
         string(APPEND CMAKE_C_FLAGS_RELEASE " -fno-optimize-sibling-calls")
     endif()
 

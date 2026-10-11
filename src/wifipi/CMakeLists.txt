@@ -90,7 +90,7 @@ if(AMINETXDUO_WIFIPI_LINK AND CMAKE_CROSSCOMPILING)
     # `any` trees get -m68020 -mtune=68040 here.  -fno-optimize-sibling-calls
     # for the same reason the top level applies it to 68020+ trees: the pinned
     # linker resolves a cross-section 32-bit sibling branch twelve bytes short.
-    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68040|-m68060|-mcpu=68060)( |$)")
+    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68020-60|-m68040|-m68060|-mcpu=68060)( |$)")
         set(_wifipi_arch ${AMIGA_ARCH_FLAGS})
     else()
         set(_wifipi_arch -m68020 -mtune=68040)
