@@ -251,7 +251,7 @@ jobs:
       # it has to reach its own verdict, skipping what needs a second local
       # address it does not have.
       - name: IPv6 socket surface without tap0
-        if: ${{ !cancelled() && steps.build.outcome == success }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
           tools/ci-arm.sh -n "IPv6 socket surface, no tap0" --
           tests/ipv6/run-socket.sh -n -b build/ci/default
