@@ -14,6 +14,19 @@
    than borrowing the S2_Dummy namespace used by SANA-II buffer hooks. */
 #define ANXD_S2_CARD_TYPE       (0x80000000UL | 0x00414e43UL) /* 'ANC' */
 
+/* Optional OpenDevice tag pointing to AnxdLinkSpeed. Zero Accepted before
+ * OpenDevice and require nonzero afterwards: older drivers ignore the tag.
+ * The fixed record is two native ULONGs (8 bytes on m68k), valid through
+ * OpenDevice only. Mbps is 10 or 0 (restore normal advertised modes).
+ * The selected PHY retains autonegotiation, duplex and PAUSE. A conflicting
+ * request on an already-open unit fails; last Close restores the defaults. */
+#define ANXD_S2_LINK_SPEED      (0x80000000UL | 0x00414e4cUL) /* 'ANL' */
+typedef struct AnxdLinkSpeed
+{
+    ULONG Mbps;
+    ULONG Accepted;
+} AnxdLinkSpeed;
+
 /* unit = (card index + 1) * ANXNET_UNIT_PIN + instance */
 #define ANXNET_UNIT_PIN         100
 

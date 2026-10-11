@@ -1230,6 +1230,14 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         iface->buffer_tags[tag].ti_Data = (ULONG)iface->card;
         tag++;
     }
+    if (cfg->link_speed != 0)
+    {
+        iface->link_speed_request.Mbps = cfg->link_speed;
+        iface->link_speed_request.Accepted = 0;
+        iface->buffer_tags[tag].ti_Tag = ANXD_S2_LINK_SPEED;
+        iface->buffer_tags[tag].ti_Data = (ULONG)&iface->link_speed_request;
+        tag++;
+    }
     iface->buffer_tags[tag].ti_Tag  = TAG_DONE;
     iface->buffer_tags[tag].ti_Data = 0;
 
@@ -1311,7 +1319,12 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         /* The card is in the message when one was pinned: "cannot open
            anxnet.device unit 0" alone reads as a missing driver rather than as
            the wrong board. */
-        if (iface->card[0] != '\0')
+        if (cfg->link_speed != 0)
+            AMI_ERROR("sana2: cannot open %s unit %ld LINKSPEED=%ld (%ld): "
+                      "check driver support and existing openers",
+                      iface->device, (long)iface->unit,
+                      (long)cfg->link_speed, (long)status);
+        else if (iface->card[0] != '\0')
             AMI_ERROR("sana2: cannot open %s unit %ld CARD=%s (%ld): no such "
                       "card in this machine", iface->device,
                       (long)iface->unit, iface->card, (long)status);
@@ -1326,6 +1339,16 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     }
 
     iface->device_open = TRUE;
+
+    if (cfg->link_speed != 0 && !iface->link_speed_request.Accepted)
+    {
+        AMI_ERROR("sana2: %s unit %ld does not support LINKSPEED=%ld",
+                  iface->device, (long)iface->unit, (long)cfg->link_speed);
+        ami_sana2_close(iface);
+        if (err != NULL)
+            *err = AMI_NET_ERR_DEVBAD;
+        return NULL;
+    }
 
     /* The open worked, so a failure past here is a driver that answered badly
        and not a missing card. AMI_NET_ERR_DEVBAD keeps the two apart all the

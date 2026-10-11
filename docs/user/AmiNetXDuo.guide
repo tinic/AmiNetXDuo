@@ -392,6 +392,14 @@
              probe for, when it cannot be told from the machine. See
              @{"CheckNetDevice" link CHECKNETDEVICE}.
 
+  @{b}LINKSPEED@{ub}
+             AUTO (default) or 10, in Mbit/s. For the X-Surf 100 with
+             anxnet.device: 10 advertises only 10 Mbit/s modes, keeping
+             duplex and PAUSE negotiation. An unsupported driver or card
+             refuses the request. Reboot, or remove and re-add the
+             interface, after changing it. See
+             @{"X-Surf 100 and flow control" link XSURF100FLOW}.
+
   @{b}ID@{ub}         A name for this machine, the weakest of the four
              sources. See @{"The machine's name" link HOSTNAME}.
 
@@ -2284,6 +2292,22 @@
   PAUSE, and a larger allowance while it can. Do not increase RXBUFFER
   to imitate flow control: the card still has the same small buffer.
   See @{"The interface file" link IFACE} for the tuning options.
+
+  @{b}Optional 10 Mbit/s limit@{ub}
+
+  A slower machine without working PAUSE may handle incoming bursts
+  better at 10 Mbit/s. To try this with an updated anxnet.device, add
+  this line to its DEVS:NetInterfaces file:
+
+      LINKSPEED=10
+
+  The driver advertises only 10 Mbit/s modes; duplex and PAUSE are
+  still negotiated. Keep the switch port on Auto. Omit the line or
+  set LINKSPEED=AUTO to use the normal advertised modes. To apply the
+  edit, reboot or remove and re-add the interface. Online/Offline alone
+  does not reload the file. Unsupported cards and older drivers refuse
+  the request. A 10 Mbit/s limit caps transfers below that rate; it is
+  optional, and a speed improvement on slow CPUs has not been measured.
 
   This automatic negotiation and window guidance applies to
   anxnet.device. For the vendor's x-surf-100.device, consult

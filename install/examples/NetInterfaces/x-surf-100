@@ -23,6 +23,14 @@
 ; For x-surf-100.device, consult the vendor's flow-control guidance.
 ; See "X-Surf 100 and flow control" in Docs/AmiNetXDuo.guide.
 ;
+; Optional, with an updated anxnet.device only: uncomment LINKSPEED=10
+; to advertise only 10 Mbit/s modes, still negotiating duplex and PAUSE.
+; Leave the switch port on Auto. Omit it or use LINKSPEED=AUTO to return
+; to normal modes. Reboot or remove/re-add the interface after editing.
+; This is a fallback to try on slower CPUs, not a measured speed boost.
+; Unsupported cards and older drivers refuse the request.
+;LINKSPEED=10
+;
 
 DEVICE=x-surf-100.device
 UNIT=0

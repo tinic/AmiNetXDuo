@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- X-Surf 100 with anxnet.device: optional LINKSPEED=10 limits advertised
+  modes to 10 Mbit/s; duplex and PAUSE still negotiate. Default AUTO.
+
 - X-Surf 100 documentation: switch PAUSE setup, receive-overrun checks and
   automatic TCP-window guidance for anxnet.device.
 
