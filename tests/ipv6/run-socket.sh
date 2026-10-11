@@ -13,14 +13,16 @@ MODEL=A1200
 TIMEOUT=240
 CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
+NOTAP=0
 
-while getopts "m:t:c:b:" opt; do
+while getopts "m:t:c:b:n" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2
+        n) NOTAP=1 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir] [-n]" >&2
            exit 2 ;;
     esac
 done
@@ -37,10 +39,19 @@ STAGE="$ROOT/build/ipv6-socket-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/tcpdrill/devs" "$STAGE/devs"
+# -n: no tap0 configuration, as on a real machine.  The test has to finish
+# on its own there, not wait for a packet only tap0 would loop back.
+if [ "$NOTAP" = 1 ]; then
+    rm -f "$STAGE/devs/NetInterfaces/tap0"
+fi
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$UG"  "$STAGE/libs/usergroup.library"
 
-export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-v6sock}"
+if [ "$NOTAP" = 1 ]; then
+    export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-v6sock-notap}"
+else
+    export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-v6sock}"
+fi
 
 . "$ROOT/tools/test-verdict.sh"
 
