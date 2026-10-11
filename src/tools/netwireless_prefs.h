@@ -14,7 +14,9 @@
 
 #include <stddef.h>
 
+#ifndef NW_SSID_MAX
 #define NW_SSID_MAX     32
+#endif
 #define NW_PSK_HEX      64
 
 /* One network={ } block as wpa_supplicant 0.7.3 reads it. */
@@ -26,13 +28,15 @@ typedef struct NwNetwork
     int           ssid_len;         /* -1: no usable ssid= line           */
     long          priority;         /* 0 when absent, as wpa_supplicant   */
     int           scan_ssid;
-    int           open;             /* key_mgmt=NONE                      */
+    int           open;             /* key_mgmt=NONE and no WEP key       */
+    int           wep;              /* a wep_key0..3 line                 */
     int           has_psk;
     int           disabled;
 } NwNetwork;
 
-/* The blocks of text, at most max of them, in file order.  Returns the number
-   found, or -1 for a block with no closing "}" line. */
+/* The blocks of text in file order, at most max of them stored.  Returns
+   the number in the file, which is more than max when some were not
+   stored, or -1 for a block with no closing "}" line. */
 int nw_prefs_parse(const char *text, size_t len, NwNetwork *out, int max);
 
 /* One key of a block: value NULL removes every line of that key. */
@@ -55,8 +59,9 @@ typedef struct NwBlockEdit
 
 /* The text with the edits applied.  Within an edited block the first line of
    each key is replaced in place, later lines of that key are dropped, and a
-   key the block lacks is added before its "}" in the block's indentation.
-   Returns 1 and sets *newlen, or 0 when out is too small. */
+   key the block lacks is added before its "}" in the block's indentation
+   and line ending.  Returns 1 and sets *newlen, or 0 when out is too small
+   or an edit names a block past nnets. */
 int nw_prefs_write(const char *old, size_t oldlen,
                    const NwNetwork *nets, int nnets,
                    NwBlockEdit *edits, int nedits,

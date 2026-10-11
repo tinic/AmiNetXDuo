@@ -34,16 +34,23 @@ static unsigned nw_akms(const unsigned char *p, size_t len,
     {
         const unsigned char *s = p + at;
 
-        if (s[0] != oui[0] || s[1] != oui[1] || s[2] != oui[2]) continue;
+        if (s[0] != oui[0] || s[1] != oui[1] || s[2] != oui[2])
+        {
+            sec |= NW_SEC_OTHER;
+            continue;
+        }
+        /* key_mgmt=WPA-PSK is AKM 2 alone: PSK-SHA256 (6) and FT-PSK (4)
+           need key_mgmt values WirelessManager 1.5 was not built with. */
         switch (s[3])
         {
             case 1: case 5: sec |= NW_SEC_EAP; break;
-            case 2: case 6: sec |= rsn ? NW_SEC_WPA2_PSK : NW_SEC_WPA_PSK; break;
-            case 8: if (rsn) sec |= NW_SEC_SAE; break;
-            default: break;
+            case 2: sec |= rsn ? NW_SEC_WPA2_PSK : NW_SEC_WPA_PSK; break;
+            case 8: sec |= rsn ? NW_SEC_SAE : NW_SEC_OTHER; break;
+            default: sec |= NW_SEC_OTHER; break;
         }
     }
-    return sec;
+    /* An element with no AKM at all is not an open network. */
+    return sec != 0 ? sec : NW_SEC_OTHER;
 }
 
 unsigned nw_security(const unsigned char *ie, size_t len, unsigned capabilities)
@@ -85,6 +92,7 @@ const char *nw_security_label(unsigned sec)
     if (sec & NW_SEC_WPA2_PSK) return "WPA2";
     if (sec & NW_SEC_WPA_PSK) return "WPA";
     if (sec & NW_SEC_EAP) return "Enterprise";
+    if (sec & NW_SEC_OTHER) return "Other";
     if (sec & NW_SEC_WEP) return "WEP";
     return "Open";
 }
@@ -100,6 +108,54 @@ int nw_bars(long dbm)
     if (dbm >= -66) return 3;
     if (dbm >= -77) return 2;
     return 1;
+}
+
+int nw_scan_add(NwScan *list, int n, int max, const NwScan *e)
+{
+    int i, k, aps = 1, hidden = 1;
+
+    for (i = 0; i < e->ssid_len; i++)
+        if (e->ssid[i] != 0) hidden = 0;
+    if (hidden || e->ssid_len > NW_SSID_MAX) return n;
+
+    for (i = 0; i < n; i++)
+    {
+        if (list[i].ssid_len != e->ssid_len) continue;
+        for (k = 0; k < e->ssid_len && list[i].ssid[k] == e->ssid[k]; k++)
+            ;
+        if (k == e->ssid_len) break;
+    }
+    if (i < n)
+    {
+        /* The same network again: keep the stronger access point. */
+        aps = list[i].aps + 1;
+        if (e->signal <= list[i].signal)
+        {
+            list[i].aps = aps;
+            return n;
+        }
+        for (; i + 1 < n; i++) list[i] = list[i + 1];
+        n--;
+    }
+    if (n == max && max > 0 && e->signal <= list[n - 1].signal) return n;
+    if (n == max) n--;
+    if (n < 0) return 0;
+
+    for (i = n; i > 0 && list[i - 1].signal < e->signal; i--)
+        list[i] = list[i - 1];
+    list[i] = *e;
+    list[i].aps = aps;
+    return n + 1;
+}
+
+void nw_ssid_text(const unsigned char *ssid, int len, char *out)
+{
+    int i;
+
+    for (i = 0; i < len && i < NW_SSID_MAX; i++)
+        out[i] = (ssid[i] < 0x20 || (ssid[i] >= 0x7f && ssid[i] < 0xa0))
+                 ? '?' : (char)ssid[i];
+    out[i] = '\0';
 }
 
 void nw_bar_rect(int i, int w, int h, int *x0, int *y0, int *x1, int *y1)
@@ -158,6 +214,7 @@ void nw_icon_render(int state, int bars, int w, int h, unsigned char *planes)
     size_t k;
 
     for (k = 0; k < 2 * plane; k++) planes[k] = 0;
+    if (w < 13 || h < 4) return;
     for (y = 0; y < h; y++)
         for (x = 0; x < w; x++)
         {

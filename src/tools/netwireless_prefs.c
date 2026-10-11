@@ -107,7 +107,8 @@ static long nw_number(const char *t, size_t i, size_t end)
     long v = 0;
     int  neg = 0;
 
-    if (i < end && t[i] == '-') { neg = 1; i++; }
+    while (i < end && (t[i] == ' ' || t[i] == '\t')) i++;
+    if (i < end && (t[i] == '-' || t[i] == '+')) { neg = t[i] == '-'; i++; }
     while (i < end && t[i] >= '0' && t[i] <= '9')
         v = v * 10 + (t[i++] - '0');
     return neg ? -v : v;
@@ -163,6 +164,7 @@ int nw_prefs_parse(const char *text, size_t len, NwNetwork *out, int max)
         net.open = 0;
         net.has_psk = 0;
         net.disabled = 0;
+        net.wep = 0;
 
         while (nw_line(text, len, pos, &l))
         {
@@ -182,6 +184,11 @@ int nw_prefs_parse(const char *text, size_t len, NwNetwork *out, int max)
                 net.disabled = nw_number(text, v, l.text_end) != 0;
             else if (nw_key_is(text, &l, "psk"))
                 net.has_psk = 1;
+            else if (nw_key_is(text, &l, "wep_key0") ||
+                     nw_key_is(text, &l, "wep_key1") ||
+                     nw_key_is(text, &l, "wep_key2") ||
+                     nw_key_is(text, &l, "wep_key3"))
+                net.wep = 1;
             else if (nw_key_is(text, &l, "key_mgmt"))
                 net.open = (l.text_end - v == 4 && text[v] == 'N' &&
                             text[v + 1] == 'O' && text[v + 2] == 'N' &&
@@ -189,10 +196,11 @@ int nw_prefs_parse(const char *text, size_t len, NwNetwork *out, int max)
         }
         if (!closed) return -1;
         net.end = pos;
+        if (net.wep) net.open = 0;
         if (count < max) out[count] = net;
         count++;
     }
-    return count < max ? count : max;
+    return count;
 }
 
 typedef struct NwOut
@@ -247,9 +255,21 @@ static void nw_patch_block(const char *t, size_t len, const NwNetwork *n,
         pos = l.next;
         if (nw_is(t, &l, "}"))
         {
+            /* Added lines end the way the "}" line does, LF at the end of
+               the text. */
+            const char *eol = "\n";
+            size_t      eol_len = 1;
+
+            if (l.next - l.start >= 2 && t[l.next - 2] == '\r' &&
+                t[l.next - 1] == '\n')
+            {
+                eol = "\r\n";
+                eol_len = 2;
+            }
             for (k = 0; k < e->nfields; k++)
                 if (!e->fields[k].seen && e->fields[k].value != NULL)
-                    nw_put_field(o, indent, indent_len, &e->fields[k], "\n", 1);
+                    nw_put_field(o, indent, indent_len, &e->fields[k],
+                                 eol, eol_len);
             nw_put(o, t + l.start, l.next - l.start);
             continue;
         }
@@ -289,6 +309,9 @@ int nw_prefs_write(const char *old, size_t oldlen,
     int    i, k;
 
     o.buf = out; o.cap = cap; o.used = 0; o.ok = 1;
+
+    for (k = 0; k < nedits; k++)
+        if (edits[k].index >= nnets) return 0;
 
     for (i = 0; i < nnets; i++)
     {

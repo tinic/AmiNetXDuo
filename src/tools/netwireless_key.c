@@ -53,15 +53,18 @@ static void nw_sha1_final(const NwSha1State *from, const UCHAR *msg, UINT len,
 
 /* The state after the key XOR pad, the first block of HMAC's inner or
    outer hash. */
-static void nw_sha1_pad(const char *key, size_t len, UCHAR pad, NwSha1State *s)
+static int nw_sha1_pad(const char *key, size_t len, UCHAR pad, NwSha1State *s)
 {
     UINT i;
 
-    (void)_nx_crypto_sha1_initialize(&nw_ctx, NX_CRYPTO_HASH_SHA1);
+    if (_nx_crypto_sha1_initialize(&nw_ctx, NX_CRYPTO_HASH_SHA1) !=
+        NX_CRYPTO_SUCCESS)
+        return 0;
     for (i = 0; i < 64; i++)
         nw_block[i] = (UCHAR)((i < len ? (UCHAR)key[i] : 0) ^ pad);
     _nx_crypto_sha1_process_buffer(&nw_ctx, nw_block);
     for (i = 0; i < 5; i++) s->h[i] = nw_ctx.nx_sha1_states[i];
+    return 1;
 }
 
 int nw_key_kind(const char *pass, size_t len)
@@ -98,8 +101,9 @@ int nw_key_derive(const char *pass, size_t pass_len,
 
     if (pass_len < 1 || pass_len > 63 || ssid_len > 32) return 0;
 
-    nw_sha1_pad(pass, pass_len, 0x36, &inner);
-    nw_sha1_pad(pass, pass_len, 0x5c, &outer);
+    if (!nw_sha1_pad(pass, pass_len, 0x36, &inner) ||
+        !nw_sha1_pad(pass, pass_len, 0x5c, &outer))
+        return 0;
 
     for (block = 1; block <= 2; block++)
     {

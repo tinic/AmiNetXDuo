@@ -79,6 +79,17 @@ static void test_parse(void)
               n[0].ssid_len == -1, "unusable ssid lines read as none");
     }
     {
+        static const char wep[] =
+            "network={\nssid=\"w\"\nkey_mgmt=NONE\nwep_key0=\"abcde\"\n}\n";
+        check(nw_prefs_parse(wep, sizeof(wep) - 1, n, 8) == 1 &&
+              !n[0].open && n[0].wep, "key_mgmt=NONE with a WEP key is not open");
+    }
+    {
+        static const char lead[] = "network={\nssid=\"p\"\npriority= +3\n}\n";
+        check(nw_prefs_parse(lead, sizeof(lead) - 1, n, 8) == 1 &&
+              n[0].priority == 3, "priority read as atoi() reads it");
+    }
+    {
         static const char none[] = "# nothing\nctrl_interface=RAM:\n";
         check(nw_prefs_parse(none, sizeof(none) - 1, n, 8) == 0, "no blocks");
         check(nw_prefs_parse("", 0, n, 8) == 0, "empty file");
@@ -109,6 +120,24 @@ static void test_round_trip(void)
     }
     check(!nw_prefs_write(sample, sizeof(sample) - 1, n, c, NULL, 0,
                           out, 10, &len), "short buffer refused");
+
+    {
+        /* More blocks than stored: the count says so, the blocks not stored
+           are copied, and an edit of one is refused rather than dropped. */
+        NwNetwork   two[2];
+        NwField     f[1] = { { "priority", "9", 0 } };
+        NwBlockEdit e[1] = { { 2, 0, f, 1 } };
+        int         k = nw_prefs_parse(sample, sizeof(sample) - 1, two, 2);
+
+        check(k == 3, "the count is the file's");
+        check(nw_prefs_write(sample, sizeof(sample) - 1, two, 2, NULL, 0,
+                             out, sizeof(out), &len) &&
+              len == sizeof(sample) - 1 && memcmp(out, sample, len) == 0,
+              "blocks not stored are copied");
+        check(!nw_prefs_write(sample, sizeof(sample) - 1, two, 2, e, 1,
+                              out, sizeof(out), &len),
+              "an edit of a block not stored is refused");
+    }
 }
 
 static void test_edits(void)
@@ -173,8 +202,8 @@ static void test_edits(void)
         check(contains(out, len,
                        "network={\r\n"
                        "    ssid=\"Caf#e\"   # trailing comment\r\n"
-                       "    psk=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210\n"
-                       "}\r\n"), "crlf block patched in its own indentation");
+                       "    psk=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210\r\n"
+                       "}\r\n"), "crlf block patched in its own indentation and line ending");
         check(!contains(out, len, "scan_ssid") && !contains(out, len, "NONE"),
               "removed keys gone");
     }
@@ -209,7 +238,9 @@ static void test_edits(void)
               "new block into an empty file");
         check(nw_prefs_write(tail, sizeof(tail) - 1, NULL, 0, e, 1,
                              out, sizeof(out), &len) &&
-              memcmp(out, "ctrl_interface=RAM:\nnetwork={\n", 30) == 0,
+              len == sizeof(tail) + sizeof(fresh) - 1 &&
+              memcmp(out, "ctrl_interface=RAM:\n", 20) == 0 &&
+              memcmp(out + 20, fresh, sizeof(fresh) - 1) == 0,
               "a newline goes before a new block when the text lacks one");
     }
     {
