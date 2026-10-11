@@ -304,6 +304,11 @@ struct NetdevNic
     /* The negotiated link speed when the core knows it, else 0 and
        S2_DEVICEQUERY answers the card table's number. */
     ULONG               link_bps;
+    /* Optional PHY policy, called with interrupts masked before first Open
+       is published or on last Close. 0 restores the attach-time modes. */
+    BOOL              (*set_link_speed)(NetdevNic *nic, ULONG mbps);
+    ULONG               link_speed_limit;
+    UWORD               ax_default_anar;
 
     LONG                mem_start;
     LONG                mem_end;

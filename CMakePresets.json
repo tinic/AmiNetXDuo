@@ -24,6 +24,16 @@
       "description": "The full stack. Libs/ at the top of the archive."
     },
     {
+      "name": "fat",
+      "inherits": "amiga",
+      "displayName": "fat",
+      "description": "Libs/fat, Devs/Networks/fat, C/fat. The full stack at -O2 for 68020 and up.",
+      "cacheVariables": {
+        "AMINETXDUO_CPU": "68020-60",
+        "AMINETXDUO_OPT": "O2"
+      }
+    },
+    {
       "name": "minimal",
       "inherits": "amiga",
       "displayName": "minimal",

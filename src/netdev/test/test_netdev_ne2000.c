@@ -232,6 +232,7 @@ static int            mock_phy;
 static unsigned short mock_mii[32];
 static int            mock_mii_restarts;
 static int            mock_mii_anar_ro;  /* writes to ANAR do not stick */
+static int            mock_mii_bmcr_ro;
 static int            mock_memr_writes;
 static int            mock_mdc;
 static int            mock_mii_state;    /* 0 preamble, 1 header, 2 read, 3 write */
@@ -254,6 +255,7 @@ static void mock_phy_begin(int present, unsigned short anlpar,
     mock_mii[5]       = anlpar;
     mock_mii_restarts = 0;
     mock_mii_anar_ro  = 0;
+    mock_mii_bmcr_ro  = 0;
     mock_memr_writes  = 0;
     mock_mdc          = 0;
     mock_mii_state    = 0;
@@ -337,7 +339,8 @@ static void mock_mii_clock(unsigned char memr)
                 mock_mii_restarts++;
                 v &= (unsigned short)~0x0200u;
             }
-            if (!(mock_mii_reg == 4u && mock_mii_anar_ro))
+            if (!(mock_mii_reg == 4u && mock_mii_anar_ro) &&
+                !(mock_mii_reg == 0u && mock_mii_bmcr_ro))
                 mock_mii[mock_mii_reg] = v;
         }
         mock_mii_state = 0;
@@ -1139,6 +1142,72 @@ static void test_pause_phy(void)
     ok("and no PHY is claimed", nic.ax_phy == 0 && nic.rx_pause_capacity == 0);
 }
 
+static void test_link_speed_limit(void)
+{
+    NetdevNic nic;
+    int restarts;
+
+    attach_xsurf(&nic, 1, 0xcde1, 0x782d);
+    ok("identified AX88796B supports a speed limit", nic.set_link_speed != NULL);
+    tick_n(&nic, 50);
+    expect_u32("Auto retains the card-table speed reporting", nic.link_bps, 0);
+    mock_mii[5] = 0;
+    tick_n(&nic, 50);
+    expect_u32("parallel detection does not change default speed reporting",
+               nic.link_bps, 0);
+    mock_mii[5] = 0xcde1;
+    ok("10 Mbit limit accepted", nic.set_link_speed(&nic, 10));
+    expect_u32("only 10 half/full plus PAUSE advertised", mock_mii[4], 0x0461);
+    ok("autonegotiation retained", (mock_mii[0] & 0x1000) != 0);
+    expect_u32("speed query uses the 10 Mbit limit", nic.link_bps, 10000000);
+    tick_n(&nic, 50);
+    expect_u32("PAUSE still resolves at 10 full", nic.rx_pause_capacity, 49152);
+    expect_u32("partner's 100 modes do not override the limit", nic.link_bps, 10000000);
+
+    /* A PHY reset restored all modes, even with PAUSE already advertised. */
+    mock_mii[4] = 0x05e1;
+    tick_n(&nic, 50);
+    expect_u32("10 Mbit policy survives a PHY reset", mock_mii[4], 0x0461);
+    restarts = mock_mii_restarts;
+    tick_n(&nic, 50);
+    expect_u32("stable policy does not repeatedly renegotiate",
+               (unsigned long)mock_mii_restarts, (unsigned long)restarts);
+    mock_mii[5] = 0x4461;
+    tick_n(&nic, 50);
+    expect_u32("10 full with PAUSE remains usable", nic.rx_pause_capacity, 49152);
+    mock_mii[5] = 0x4421;
+    tick_n(&nic, 50);
+    expect_u32("10 half never claims PAUSE", nic.rx_pause_capacity, 0);
+
+    ok("restoring Auto succeeds", nic.set_link_speed(&nic, 0));
+    expect_u32("original modes and PAUSE restored", mock_mii[4], 0x05e1);
+    expect_u32("policy cleared", nic.link_speed_limit, 0);
+    mock_mii[5] = 0xcde1;
+    tick_n(&nic, 50);
+    expect_u32("Auto restores card-table speed reporting", nic.link_bps, 0);
+    restarts = mock_mii_restarts;
+    ok("unsupported speed is refused", !nic.set_link_speed(&nic, 100));
+    expect_u32("invalid request does not renegotiate", mock_mii_restarts, restarts);
+
+    mock_mii_anar_ro = 1;
+    ok("a PHY that refuses the advertisement is not reported successful",
+       !nic.set_link_speed(&nic, 10));
+    expect_u32("failed request leaves policy at Auto", nic.link_speed_limit, 0);
+    expect_u32("failed request does not restart negotiation", mock_mii_restarts, restarts);
+    mock_mii_anar_ro = 0;
+    mock_mii[0] = 0x2100;
+    mock_mii_bmcr_ro = 1;
+    ok("a PHY refusing autonegotiation is not accepted",
+       !nic.set_link_speed(&nic, 10));
+    expect_u32("BMCR refusal restores previous advertisement", mock_mii[4], 0x05e1);
+    expect_u32("BMCR refusal leaves policy at Auto", nic.link_speed_limit, 0);
+    mock_mii_bmcr_ro = 0;
+    ok("explicit limit can re-enable negotiation", nic.set_link_speed(&nic, 10));
+    ok("negotiation really enabled", (mock_mii[0] & 0x1000) != 0);
+    attach_xsurf(&nic, 0, 0, 0);
+    ok("no identified PHY means no speed control", nic.set_link_speed == NULL);
+}
+
 int main(void)
 {
     test_clone_warm();
@@ -1151,6 +1220,7 @@ int main(void)
     test_attach_installs_the_hooks();
     test_attach_flow_control();
     test_pause_phy();
+    test_link_speed_limit();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
 

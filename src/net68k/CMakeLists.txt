@@ -59,7 +59,8 @@ endif()
 # other value keeps the single-variant build, unchanged and byte for byte
 # comparable, which is what the measurement in the toolchain file is against.
 set(NET68K_MV OFF)
-if(AMINETXDUO_NET68K_ASM AND AMINETXDUO_CPU STREQUAL "any")
+# 68020-60 (fat) takes the same run-time choice.
+if(AMINETXDUO_NET68K_ASM AND AMINETXDUO_CPU MATCHES "^(any|68020-60)$")
     set(NET68K_MV ON)
 endif()
 

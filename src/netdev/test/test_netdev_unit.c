@@ -533,8 +533,64 @@ static void h_release_unit_undoes_every_opener_change(void)
            "a release of a released unit is a no-op");
 }
 
+static int speed_calls;
+static int speed_fails;
+static BOOL t_link_speed(NetdevNic *nic, ULONG mbps)
+{
+    speed_calls++;
+    expect(disable_depth > 0, "PHY programming runs with interrupts masked");
+    if (speed_fails)
+        return FALSE;
+    nic->link_speed_limit = mbps;
+    return TRUE;
+}
+
+static void test_link_speed_open_and_close(void)
+{
+    AnxdLinkSpeed request = { 10, 0 };
+    reset();
+    speed_calls = speed_fails = 0;
+    expect(netdev_set_link_speed(&unit, NULL), "ordinary opens need no speed control");
+    expect(!netdev_set_link_speed(&unit, &request) && !request.Accepted,
+           "unsupported cards refuse explicit speed requests");
+    unit.nu_Nic.set_link_speed = t_link_speed;
+    Disable();
+    expect(netdev_set_link_speed(&unit, &request) && request.Accepted,
+           "first opener can select 10 Mbit");
+    Enable();
+    expect_u32("one PHY programming", speed_calls, 1);
+    unit.nu_Openers = 1;
+    expect(netdev_set_link_speed(&unit, &request), "same shared policy accepted");
+    expect_u32("shared opener does not reprogram live PHY", speed_calls, 1);
+    request.Mbps = 0;
+    expect(!netdev_set_link_speed(&unit, &request) && !request.Accepted,
+           "conflicting shared policy refused");
+    request.Mbps = 100;
+    expect(!netdev_set_link_speed(&unit, &request), "invalid speed refused");
+    unit.nu_Openers = 0;
+    netdev_release_unit(&unit);
+    expect_u32("last close restores defaults", unit.nu_Nic.link_speed_limit, 0);
+    expect_u32("restore programmed once", speed_calls, 2);
+    speed_fails = 1;
+    request.Mbps = 10;
+    Disable();
+    expect(!netdev_set_link_speed(&unit, &request) && !request.Accepted,
+           "PHY refusal is not accepted");
+    Enable();
+    unit.nu_Nic.link_speed_limit = 10;
+    Disable();
+    expect(!netdev_set_link_speed(&unit, NULL),
+           "ordinary reopen refuses an unrestorable stale speed policy");
+    speed_fails = 0;
+    expect(netdev_set_link_speed(&unit, NULL),
+           "ordinary reopen can recover default policy");
+    Enable();
+    expect_u32("reopen recovered Auto", unit.nu_Nic.link_speed_limit, 0);
+}
+
 int main(void)
 {
+    test_link_speed_open_and_close();
     a_no_groups_is_an_empty_hash();
     b_a_joined_group_sets_its_own_bit();
     c_a_released_slot_is_not_a_member();

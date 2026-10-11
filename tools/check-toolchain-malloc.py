@@ -17,20 +17,22 @@ import sys
 # Paths are relative to <prefix>/m68k-amigaos/lib. The paired libc/libg
 # archive members must match for each variant. Eight distinct hashes cover
 # eleven multilibs produced by the pinned newlib source's final make step.
-# Asset series 16.2.4 and 16.2.5 (GCC a5166db4, 399a27ad): each installed malloc.o is the object
-# newlib's final build left in newlib/libc/sys/amigaos/, on Linux and macOS.
+# Asset series 16.2.6 and 16.2.7 (GCC AmigaPorts 0edaa619 + PR #82, 1d4ca5d4): each installed
+# malloc.o is the object newlib's final build left in newlib/libc/sys/amigaos/,
+# on Linux and macOS.  The newlib source is unchanged from 16.2.5; the bytes
+# moved with the compiler.
 EXPECTED_MALLOC_SHA256 = {
-    "": "699875ab532e97d004d48b6988b132373e1ecbe085ad7c887013cbb907017550",
-    "libm020": "1d39cab4bdfc999c390af941a57b8df2375ca0276e5c8fc0d98d1f41625c4dfb",
-    "libm020/libm881": "1d39cab4bdfc999c390af941a57b8df2375ca0276e5c8fc0d98d1f41625c4dfb",
-    "libm060": "74bf940fd4378b8fcbae052827e5218c100c00390a8fa22561d467a94637dddc",
-    "libb": "e6b12ab7ce9cd66806962e58ab3050e2993c1a6411e2451bf42c145ea84efd12",
-    "libb/libm020": "b34cc3e917f80344b5a7271a05e06acfc2f470b203b0abb139c2962f3a198936",
-    "libb/libm020/libm881": "b34cc3e917f80344b5a7271a05e06acfc2f470b203b0abb139c2962f3a198936",
-    "libb/libm060": "5c7409df3d56d11df7029f66a6acc01e713f900c4e46713d8f853e53f5c66a79",
-    "libb32/libm020": "2061efe4d7dd893d288273d0554e94d8ff3bd291fcc0785ef214204614a1b786",
-    "libb32/libm020/libm881": "2061efe4d7dd893d288273d0554e94d8ff3bd291fcc0785ef214204614a1b786",
-    "libb32/libm060": "89353ba2f35a8e4eace32a4a5d3e2db7643d94341f44d9428bb73171ca8e919b",
+    "": "8108818fb83a4641aa355979fc53a5f58d784c1139d0067051ba95b50949f23a",
+    "libm020": "65ec1680da2fadb21f2a863c334944903e748e930e0c24ee3a5bdc2768456111",
+    "libm020/libm881": "65ec1680da2fadb21f2a863c334944903e748e930e0c24ee3a5bdc2768456111",
+    "libm060": "7d6109741ec975d7748364c7e288f40553c545dd19db5e6016711845cbf86dab",
+    "libb": "18417b53615ecd5bb072b62a41a60530b11a9f60571ff3f35ed5ab57393df0fe",
+    "libb/libm020": "8acc5ecfa90b9445eec4b8a2545931492cedd9d3d2d49c101fdf2f9ff50e2ecb",
+    "libb/libm020/libm881": "8acc5ecfa90b9445eec4b8a2545931492cedd9d3d2d49c101fdf2f9ff50e2ecb",
+    "libb/libm060": "885869098305a7bdc89bd7b7740f92ce728a577352ab57f63092689329c0fe9f",
+    "libb32/libm020": "1151be0f4f0d47ca1a0c975523605dc92e3cf7981abfe116e56f9647abc7436f",
+    "libb32/libm020/libm881": "1151be0f4f0d47ca1a0c975523605dc92e3cf7981abfe116e56f9647abc7436f",
+    "libb32/libm060": "6e6c9d04fbf03e34a15a9e60adf87f9c22d8c0779dfe5701cee48e1fe917c1cf",
 }
 
 

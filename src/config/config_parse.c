@@ -24,6 +24,7 @@ typedef enum
     IF_KEY_IGNORED,          /* real Roadshow keyword with no AmiIfConfig field */
     IF_KEY_DEVICE,
     IF_KEY_CARD,
+    IF_KEY_LINKSPEED,
     IF_KEY_ID,
     IF_KEY_ADDRESS,
     IF_KEY_NETMASK,
@@ -123,6 +124,7 @@ IF_NUMBERS(IF_NUMBER_HINT)
 #define IF_KEYWORDS(X) \
     X(device, DEVICE) \
     X(card, CARD) \
+    X(linkspeed, LINKSPEED) \
     X(id, ID) \
     X(unit, UNIT) \
     X(mdns, MDNS) \
@@ -713,6 +715,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     ULONG lineno = 0;
     BOOL  have_device = FALSE;
     BOOL  bad_card = FALSE;
+    BOOL  bad_link_speed = FALSE;
 #ifdef AMINETXDUO_IPV6
     BOOL  have_configure6 = FALSE;
 #endif
@@ -793,6 +796,20 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     break;
                 }
                 ami_cfg_copy_string(out->card, sizeof(out->card), value);
+                break;
+
+            case IF_KEY_LINKSPEED:
+                if (ami_cfg_stricmp(value, "auto") == 0)
+                    out->link_speed = 0;
+                else if (ami_cfg_parse_ulong(value, &n) && n == 10UL)
+                    out->link_speed = n;
+                else
+                {
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "LINKSPEED", value,
+                                     AMI_CFG_ADVICE_LINKSPEED_IS_AUTO_OR_10);
+                    bad_link_speed = TRUE;
+                }
                 break;
 
             /* Free text, stored verbatim; ami_config_load() decides whether
@@ -1183,11 +1200,11 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         return AMI_CFG_ERR_SYNTAX;
     }
 
-    /* An unknown CARD must refuse the interface: coming up anyway binds to
-       whatever UNIT points at. */
-    if (bad_card)
+    /* Do not silently bind a different card or ignore a requested speed. */
+    if (bad_card || bad_link_speed)
     {
-        AMI_WARN("config: %s: unknown CARD, ignoring interface", out->name);
+        AMI_WARN("config: %s: invalid CARD or LINKSPEED, ignoring interface",
+                 out->name);
         return AMI_CFG_ERR_SYNTAX;
     }
 

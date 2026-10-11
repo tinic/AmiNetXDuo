@@ -300,6 +300,8 @@ typedef struct AmiIfConfig {
 
     ULONG       gateway6[AMI_CFG_IP6_WORDS]; /* static default router            */
     BOOL        have_gateway6;
+    /* LINKSPEED=10 limits advertised modes; 0 (AUTO) keeps driver defaults. */
+    ULONG       link_speed;
 } AmiIfConfig;
 
 /*

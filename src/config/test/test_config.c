@@ -1959,6 +1959,28 @@ static void test_ipv6_only_no_error(void)
     ami_config_set_reporter(NULL, NULL);
 }
 
+static void test_interface_link_speed(void)
+{
+    static const char *const values[] = { "", "LINKSPEED=10\n",
+        "linkspeed=aUtO\n", "LINKSPEED=10\nLINKSPEED=AUTO\n",
+        "LINKSPEED=100\n", "LINKSPEED=0\n", "LINKSPEED=-10\n",
+        "LINKSPEED=ten\n", "LINKSPEED=10\nLINKSPEED=100\n" };
+    unsigned i;
+    for (i = 0; i < sizeof(values) / sizeof(values[0]); i++)
+    {
+        char text[256];
+        AmiIfConfig iface;
+        char *buf;
+        snprintf(text, sizeof(text), "DEVICE=anxnet.device\nCONFIGURE=DHCP\n%s", values[i]);
+        buf = dup_text(text);
+        CHECK(ami_cfg_parse_interface("eth0", buf, &iface) ==
+              (i < 4 ? AMI_CFG_OK : AMI_CFG_ERR_SYNTAX));
+        if (i < 4)
+            CHECK(iface.link_speed == (i == 1 ? 10UL : 0UL));
+        free(buf);
+    }
+}
+
 static void test_interface_card(void)
 {
     /* Fixed expected roster/order, independent of the production macro. */
@@ -4926,6 +4948,7 @@ int main(int argc, char **argv)
 #ifdef AMINETXDUO_IPV6
     test_ipv6_only_no_error();
 #endif
+    test_interface_link_speed();
     test_interface_card();
     test_interface_drawer();
     test_interface_search_order();

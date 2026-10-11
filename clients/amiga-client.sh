@@ -26,6 +26,15 @@ AMIGA_CLIENT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 AMIGA_CLIENT_ARCH="${AMIGA_CLIENT_ARCH:--m68020}"
 AMIGA_CLIENT_OPT="${AMIGA_CLIENT_OPT:--O2}"
 
+# The CPU flag the LINK takes, which picks the C library multilib.  -m68020-60
+# selects libm020, whose newlib and libgcc are -m68020 and carry the 64-bit
+# MULU.L/DIVU.L a 68060 traps (vfprintf's divide by ten among them).  libm060
+# is soft-float 68020 code without those, so it runs wherever -m68020-60 does.
+case "$AMIGA_CLIENT_ARCH" in
+    *68020-60*) AMIGA_CLIENT_LINK_ARCH="-mcpu=68060" ;;
+    *)          AMIGA_CLIENT_LINK_ARCH="$AMIGA_CLIENT_ARCH" ;;
+esac
+
 # -include amiga_compat.h so the shims in clients/compat that newlib has no
 # header for, nanosleep(), clearenv(), are declared everywhere.  See that
 # file for why it is a forced include and not a patch or a shadowed <time.h>.
@@ -53,7 +62,8 @@ AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -
 # shims still carry two -Wpointer-sign warnings that are not this item's.
 AMIGA_CLIENT_SHIM_WARN="-Werror=missing-prototypes"
 
-export AMIGA_CLIENT_ROOT AMIGA_CLIENT_ARCH AMIGA_CLIENT_OPT AMIGA_CLIENT_CFLAGS
+export AMIGA_CLIENT_ROOT AMIGA_CLIENT_ARCH AMIGA_CLIENT_LINK_ARCH AMIGA_CLIENT_OPT
+export AMIGA_CLIENT_CFLAGS
 export AMIGA_CLIENT_SHIM_WARN
 
 amiga_client_prepare()
@@ -124,7 +134,7 @@ amiga_client_prepare()
     # POSIX argv[] from dos.library and runs the client on its private stack.
     # --wrap=exit,_exit: so that shim can put the task's stack bounds back when a
     # client ends by exit()ing off the swapped stack instead of returning.
-    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main,--wrap=exit,--wrap=_exit"
+    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_LINK_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main,--wrap=exit,--wrap=_exit"
 
     export AMIGA_CLIENT_LIBDIR AMIGA_CLIENT_COMPAT_A AMIGA_CLIENT_LDFLAGS
     export AMIGA_CLIENT_STARTFILE

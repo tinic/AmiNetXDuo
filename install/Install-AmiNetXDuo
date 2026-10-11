@@ -58,6 +58,7 @@
 (set S_LIBS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Libs")     "Libs"))
 (set S_LIBSBASE S_LIBS)
 (set S_C     (if (> (strlen SRCDIR) 0) (tackon SRCDIR "C")        "C"))
+(set S_CFAT  (tackon S_C "fat"))
 (set S_DEVS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Devs")     "Devs"))
 (set S_DOCS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Docs")     "Docs"))
 (set S_EXAM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Examples") "Examples"))
@@ -736,6 +737,10 @@
 ; CPUPICK, and it defaults to the full stack.
 (set MINPICK 0)
 
+; The fat stack (MINPICK 3) is the one exception: 68020 code.
+(set CPU_NAME (database "cpu"))
+(set CPU020 (if (OR (= CPU_NAME "68000") (= CPU_NAME "68010")) 0 1))
+
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
     (abort "This archive has no Libs/bsdsocket.library.\n\n"
            "The download is incomplete, or was unpacked with a tool that "
@@ -937,9 +942,10 @@
 ; to another").  Every binary now runs on every 68k, so that question has no
 ; answer left to get wrong and is gone.
 ;
-; What remains is a real choice between three feature profiles: full, minimal
-; and micro.  The reduced profiles trade features for memory on constrained
-; machines; the question below gives the exact differences.
+; What remains is a real choice between four profiles: full, minimal, micro
+; and fat.  The reduced profiles trade features for memory on constrained
+; machines; fat trades memory and the 68000 for speed.  The question below
+; gives the exact differences.
 ;
 ; THE FIGURES ARE MEASURED, THEY GO STALE, AND THEY ARE RAM AND NOT FILES.
 ; This comment has already said 104 KB, 98 KB, 124 KB and 121 KB, each a build
@@ -952,11 +958,22 @@
 ; quoted twice in the help below.
 ;
 ; Nothing changes for a novice install.  At NOVICE every ask... returns its
-; (default) without showing anything, so the full stack is what goes on.
+; (default) without showing anything, so the full stack is what goes on, or
+; the fat one on Emu68.
+;
+; FAT ON EMU68.  The fat stack is preselected when InstallNetProbe finds
+; Emu68's device tree (AUTO_EMU68, section 3), the CPU is a 68020 or newer and
+; the archive has Libs/fat; it stays a visible choice.  A probe that fails or
+; is missing reads as "not Emu68", so the default is then the full stack.
+(set HAVE_FAT (if (exists (tackon (tackon S_LIBSBASE "fat") "bsdsocket.library") (noreq)) 1 0))
+(if (AND AUTO_EMU68 (AND CPU020 HAVE_FAT)) (set MINPICK 3))
+
+(set STACK_OK 0)
+(until STACK_OK
 (set MINPICK
   (askchoice
     (prompt "Select the stack to install.\n\n")
-    (help "All three stacks run on every Amiga from a 68000 up.  One binary picks "
+    (help "The full, minimal and micro stacks run on every Amiga from a 68000 up.  One binary picks "
           "the code for this processor when the library opens.  Nothing has "
           "to match the machine.  If the disk moves to another machine, "
           "nothing changes.\n\n"
@@ -974,20 +991,50 @@
           "it if you have one network card and have measured your memory.\n\n"
           "With the full stack, encrypted connections work on any processor. "
           "On a 68000 a first handshake takes a minute or two. A repeat "
-          "connection to the same server takes less than a second.")
+          "connection to the same server takes less than a second.\n\n"
+          "The fat stack is the full stack compiled for speed, drivers and "
+          "commands included. It needs a 68020 or newer and uses more "
+          "memory. It is preselected on a PiStorm running Emu68.")
     ; 22 characters is the limit -- install/tools/checkscript.py enforces it,
     ; because a longer gadget is dropped from the page without a word.
     (choices "Everything"
              "Minimal, no IPv6/TLS"
-             "Micro, one interface")
+             "Micro, one interface"
+             "Fat, 68020 and up")
     (default MINPICK)))
+(set STACK_OK (OR (<> MINPICK 3) CPU020))
+; Never reached at NOVICE: the default is fat only when CPU020 is set.
+(if (= STACK_OK 0)
+    (message (cat "The fat stack needs a 68020 or newer.  This Amiga has a "
+                  CPU_NAME ".")
+             (help "Select the full, minimal or micro stack.")))
+)
 
 ; MINPICK 0 is the full stack at the top of Libs:, 1 is the minimal drawer,
-; 2 is the micro drawer.  THE PAGE HAS THREE OPTIONS NOW, which is not only a
+; 2 is the micro drawer, 3 the fat one.  THE PAGE HAS FOUR OPTIONS NOW, which is not only a
 ; user-visible change: install/test/run-workbench.sh identifies this page by
 ; its option COUNT (DRIVE_PICK_OPTIONS), so its -p specs move with it.
 (if (= MINPICK 1) (set S_LIBS (tackon S_LIBSBASE "minimal")))
 (if (= MINPICK 2) (set S_LIBS (tackon S_LIBSBASE "micro")))
+; MINPICK 3, fat: its own drivers and commands as well as its libraries.
+(if (= MINPICK 3)
+  (
+    (set S_LIBS (tackon S_LIBSBASE "fat"))
+    (set S_ANXNET    (tackon (tackon (tackon S_DEVS "Networks") "fat") "anxnet.device"))
+    (set S_ANXGENET  (tackon (tackon (tackon S_DEVS "Networks") "fat") "anxgenet.device"))
+    (set S_ANXWIFIPI (tackon (tackon (tackon S_DEVS "Networks") "fat") "anxwifipi.device"))
+    (set S_ANXZZ9000 (tackon (tackon (tackon S_DEVS "Networks") "fat") "anxzz9000.device"))
+    (set HAVE_ANXZZ9000 (if (exists S_ANXZZ9000 (noreq)) 1 0))
+    (if (NOT (AND (AND (exists S_ANXNET (noreq)) (exists S_ANXGENET (noreq)))
+                  (AND (exists S_ANXWIFIPI (noreq))
+                       (exists (tackon S_CFAT "AddNetInterface") (noreq)))))
+        (abort "This archive has no complete fat stack.\n\n"
+               "The download is incomplete, or was unpacked with a tool that "
+               "dropped the subdrawers.\n\n"
+               "Nothing was changed."))
+  ))
+; The full feature set: the full stack and the fat one.
+(set FULLSET (OR (= MINPICK 0) (= MINPICK 3)))
 
 (if (NOT (exists (tackon S_LIBS "bsdsocket.library") (noreq)))
     (abort "This archive has no " S_LIBS " with a bsdsocket.library in it.\n\n"
@@ -1574,7 +1621,7 @@
     ; draws the page, came out right.
     ; Only the full profile carries mDNS.  Asking this on minimal or micro
     ; offered a setting those stacks could never honor.
-    (if (= MINPICK 0)
+    (if FULLSET
       (set WANTMDNS
         (if (askbool
               (prompt "Answer .local names on the network?")
@@ -1842,8 +1889,10 @@
 
 (copyfiles
   (prompt (cat "Installing bsdsocket.library into LIBS:\n\n"
-               "One build for every processor.  It picks the code for this "
-               "processor when it opens."))
+               (if (= MINPICK 3)
+                   "The fat build, for a 68020 or newer."
+                   (cat "One build for every processor.  It picks the code "
+                        "for this processor when it opens."))))
   (help   @copylib-help)
   (source (tackon S_LIBS "bsdsocket.library"))
   (dest   D_LIBS)
@@ -2165,16 +2214,31 @@
           "in C:.  ssh and scp come with them.")
   (source S_C)
   (dest   D_C)
-  ; (all), because a copyfiles from a DRAWER needs one of (all) or (pattern)
-  ; and answers "Bad parameters for copying from drawer" without either.  It
-  ; used to be (pattern "~(ssh.#?)"), keeping the per-CPU ssh.000/.020/.060 out
-  ; of the wholesale copy; there is one ssh now and it comes with the rest.
-  (all)
+  ; A copyfiles from a DRAWER needs one of (all) or (pattern) and answers
+  ; "Bad parameters for copying from drawer" without either.  The pattern
+  ; keeps C/fat, the fat stack's commands, out; they are copied over these
+  ; below when that stack is selected.
+  (pattern "~(fat)")
   ; NetPrefs and NetMeter are the commands with a Workbench tool icon.
   ; Without (infos) the self-contained layout would copy the programs but
   ; leave those icons in the download, making them invisible there.
   (infos)
   (optional "force"))
+
+; The fat stack's commands, over the ones just copied, ssh, scp and
+; scp-runner included: C/fat has its own -m68020-60 build of the three.
+; (all), no (confirm): no level or answer leaves one out.  Going back to full
+; copies C/ over them again with the 68000 ones.
+(if (= MINPICK 3)
+    (copyfiles
+      (prompt "Installing the fat commands into C:")
+      (help   "The same commands, compiled for a 68020 or newer.")
+      (source S_CFAT)
+      (dest   D_C)
+      (all)
+      (infos)
+      (optional "force")))
+(set S_CSEL (if (= MINPICK 3) S_CFAT S_C))
 
 ; A system installation also exposes the GUI where an Amiga user expects a
 ; preferences editor.  The C: copy remains the canonical executable (and the
@@ -2186,7 +2250,7 @@
       (help   "NetPrefs edits the same DEVS:NetInterfaces files as NetSetup, "
               "preserves comments and advanced keywords, and can apply a "
               "saved definition through the normal network commands.")
-      (source (tackon S_C "NetPrefs"))
+      (source (tackon S_CSEL "NetPrefs"))
       (dest   "SYS:Prefs")
       (infos)
       (optional "force")))
@@ -2197,17 +2261,18 @@
       (prompt "Installing NetMeter into SYS:Utilities")
       (help   "NetMeter shows each interface's addresses and how fast it is "
               "receiving and sending.  Click an address to copy it.")
-      (source (tackon S_C "NetMeter"))
+      (source (tackon S_CSEL "NetMeter"))
       (dest   "SYS:Utilities")
       (infos)
       (optional "force")))
 
-; ssh and scp went into C: with the copy above.  ssh used to need its own step and a
+; ssh and scp went into C: with the copies above.  ssh used to need its own step and a
 ; pattern that kept ssh.000, ssh.020 and ssh.060 out of the wholesale copy,
 ; because Dropbear comes from clients/ rather than the CMake tree and was built
 ; once per architecture; the one binary carries both X25519 field multiplies and
 ; picks at the first handshake, so it is just another command now.  A 68000 gets
-; it too: slower is not a reason to leave it out.
+; it too: slower is not a reason to leave it out.  The fat stack's copy in
+; C/fat is the same arrangement at -m68020-60.
 
 (complete 55)
 

@@ -47,6 +47,8 @@ VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
             op->op_Filter = (APTR)tags->ti_Data;
         else if (tag == ANXD_S2_CARD_TYPE)
             *pin = (const char *)tags->ti_Data;
+        else if (tag == ANXD_S2_LINK_SPEED && op->op_LinkSpeed == NULL)
+            op->op_LinkSpeed = (AnxdLinkSpeed *)tags->ti_Data;
 
         tags++;
     }

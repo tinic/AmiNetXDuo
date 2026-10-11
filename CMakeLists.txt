@@ -64,7 +64,19 @@ endif()
 #     grep C_FLAGS build/<dir>/**/flags.make
 #
 # The rationale for -Os over -O3 is in the toolchain file and RESEARCH 57.
-set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
+#
+# AMINETXDUO_OPT is the one level every shipped image takes: this line, the
+# drivers (src/netdev, src/wifipi) and the commands (src/tools) all read it.
+# Os is the default; O2 is the fat flavour (CMakePresets.json `fat`,
+# docs/RESEARCH.md §88).
+set(AMINETXDUO_OPT "Os" CACHE STRING
+    "Optimisation level of every shipped image: Os (default) or O2 (fat)")
+set_property(CACHE AMINETXDUO_OPT PROPERTY STRINGS Os O2)
+if(NOT AMINETXDUO_OPT MATCHES "^(Os|O2)$")
+    message(FATAL_ERROR "AMINETXDUO_OPT=${AMINETXDUO_OPT} is not Os or O2.")
+endif()
+set(AMINETXDUO_OPT_FLAG "-${AMINETXDUO_OPT}")
+set(CMAKE_C_FLAGS_RELEASE "${AMINETXDUO_OPT_FLAG} -DNDEBUG"
     CACHE STRING "C flags for Release builds" FORCE)
 
 # -flto, for the cross build only.  Measured against the same sources and
@@ -161,7 +173,7 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     # branch as -ffunction-sections.  The pinned linker resolves that relocation
     # twelve bytes short.  The all-CPU/68000 build cannot encode bra.l and does
     # not pay for disabling otherwise useful tail calls.
-    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68040|-m68060|-mcpu=68060)( |$)")
+    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68020-60|-m68040|-m68060|-mcpu=68060)( |$)")
         string(APPEND CMAKE_C_FLAGS_RELEASE " -fno-optimize-sibling-calls")
     endif()
 
@@ -1947,6 +1959,7 @@ message(STATUS "  version ....... ${AMINETXDUO_VERSION_COMPOUND}")
 message(STATUS "  built on ...... NetX Duo ${AMINETXDUO_NETXDUO_VERSION}, ThreadX ${AMINETXDUO_THREADX_VERSION}")
 string(REPLACE ";" " " _amiga_arch_shown "${AMIGA_ARCH_FLAGS}")
 message(STATUS "  CPU ........... ${AMINETXDUO_CPU} (${_amiga_arch_shown})")
+message(STATUS "  optimisation .. ${AMINETXDUO_OPT_FLAG}")
 message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")
 message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")

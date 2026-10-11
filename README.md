@@ -33,15 +33,17 @@ configured for one.
 
 Any 68000 or better, AmigaOS 2.04 (Kickstart 37) or newer, 1 MB of RAM, and a
 SANA-II network card. One binary serves every 68k: the library picks the code
-for the processor when it opens, and nothing has to match the machine.
+for the processor when it opens, and nothing has to match the machine. The fat
+stack is the exception and needs a 68020 or better.
 
-The archive carries three stacks. The installer asks which one to put on.
+The archive carries four stacks. The installer asks which one to put on.
 
 | Stack | Leaves out | RAM while up |
 |---|---|---|
 | Full | nothing | 442 KB |
 | Minimal | IPv6, `.local` lookups, the packet filter, HTTPS, IPv4 multicast, the ARexx host, `TCP:` | 272 KB |
 | Micro | all of that, plus `getaddrinfo`/`getnameinfo`, ancillary data, out-of-band TCP and less-used administration calls; carries one interface and no route or address-allocation calls. DHCP, the classic resolver and raw sockets work | 243 KB |
+| Fat | nothing; the full stack, drivers and commands compiled for speed for a 68020 or better | Full + 120 KB |
 
 ### Network cards
 
@@ -63,6 +65,33 @@ to join a network. Use it or `wifipi.device`, not both in one boot.
 Fast cards get faster TCP receive with every driver: the stack merges
 consecutive segments before TCP sees them. Driver authors can opt into a few
 SANA-II extensions for more (`Developer/include/aminetxduo/anxs2ext.h`).
+
+### X-Surf 100: enable flow control on the switch
+
+For an X-Surf 100 using `anxnet.device`, enable **IEEE 802.3x flow control**
+(also called **PAUSE**) on the switch port the Amiga plugs into. Leave its
+speed and duplex on **Auto**; PAUSE needs a negotiated full-duplex link.
+If the switch offers separate receive and transmit PAUSE settings, enable
+both. This is a switch setting; there is no flow-control keyword to add to
+`DEVS:NetInterfaces`.
+
+The 100 Mbit/s link can deliver bursts faster than the Amiga drains the
+card's small receive buffer. PAUSE lets the card briefly stop the switch
+before packets are lost. `anxnet.device` negotiates this automatically and
+the stack allows a larger TCP receive window while it is agreed. Without
+it, networking still works, with a smaller automatic window. Leave
+`RXBUFFER` unset; increasing it manually does not add memory to the card.
+
+Add `LINKSPEED=10` to the interface file to limit
+the X-Surf 100 to 10 Mbit/s while still negotiating duplex and PAUSE.
+Omit it or use `LINKSPEED=AUTO` for the normal modes. Reboot or remove and
+re-add the interface after editing it. The option requires an updated
+`anxnet.device`; the stack refuses the interface if the driver or card
+does not support the request.
+
+See the [manual](docs/user/AmiNetXDuo.guide), "X-Surf 100 and flow control",
+for setup checks, overrun counters and guidance for switches without this
+setting. The measured figures below are examples, not the card's link speed.
 
 ### Measured on
 
@@ -98,7 +127,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 
 | Question | Default |
 |---|---|
-| Which stack: Everything, Minimal, Micro | Everything |
+| Which stack: Everything, Minimal, Micro, Fat | Everything; Fat under Emu68 |
 | Install the three supplied network drivers | yes |
 | Where the `AmiNetXDuo` drawer of documentation and examples goes | any drawer; nothing in it is needed for the network |
 | Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer, added last to those assigns; refused if `LIBS:` already has a `bsdsocket.library` (Intermediate and Expert) | into the system |
