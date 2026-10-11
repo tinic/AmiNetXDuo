@@ -2,7 +2,10 @@
 
 Six original designs, used by seven icon templates (`Guide` shares the document
 artwork). Each icon has 48x48 normal and selected images with a shared 128-color
-palette and transparent pen zero. The selected state uses a golden outline.
+palette and transparent pen zero. The selected state is derived from the normal image with an inward golden
+outline. Its opaque silhouette and interior pixel positions are identical,
+preventing a jump when Workbench selects it. The original second master cell
+is retained as an artwork reference; it no longer supplies selection pixels.
 
 The transparent PNG masters were generated with Codex's built-in image tool on
 2026-10-11. They are original artwork, not copies of Commodore or third-party

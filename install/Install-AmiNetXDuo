@@ -2222,9 +2222,10 @@
   ; below when that stack is selected.
   (pattern "~(fat)")
   ; NetPrefs and NetMeter are the commands with a Workbench tool icon.
-  ; Without (infos) the self-contained layout would copy the programs but
-  ; leave those icons in the download, making them invisible there.
+  ; Copy their icons without fixed positions into C:. Private installs
+  ; expose positioned parent copies below; system folders choose placement.
   (infos)
+  (noposition)
   (optional "force"))
 
 ; The fat stack's commands, over the ones just copied, ssh, scp and
@@ -2239,6 +2240,7 @@
       (dest   D_C)
       (all)
       (infos)
+      (noposition)
       (optional "force")))
 (set S_CSEL (if (= MINPICK 3) S_CFAT S_C))
 
@@ -2298,6 +2300,7 @@
       (source (tackon S_CSEL "NetPrefs"))
       (dest   "SYS:Prefs")
       (infos)
+      (noposition)
       (optional "force")))
 
 ; NetMeter the same way, where a Workbench user looks for a small tool.
@@ -2309,6 +2312,7 @@
       (source (tackon S_CSEL "NetMeter"))
       (dest   "SYS:Utilities")
       (infos)
+      (noposition)
       (optional "force")))
 
 ; ssh and scp went into C: with the copies above.  ssh used to need its own step and a

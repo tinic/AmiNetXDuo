@@ -74,6 +74,25 @@ def compile_sheet(path, outdir, size):
         frame.paste(image, ((size - dimensions[0]) // 2, (size - dimensions[1]) // 2))
         rendered.append(frame)
 
+    # Derive selection from the normal image instead of the independently
+    # drawn second master. Its silhouette and all interior pixels stay at
+    # precisely the same coordinates; a one-pixel golden rim lies INSIDE
+    # that silhouette, so Workbench never changes its visible bounds.
+    normal = rendered[0]
+    selected = normal.copy()
+    opaque = normal.getchannel("A").point(lambda a: 255 if a >= 128 else 0)
+    for y in range(size):
+        for x in range(size):
+            if not opaque.getpixel((x, y)):
+                continue
+            if any(not (0 <= nx < size and 0 <= ny < size)
+                   or not opaque.getpixel((nx, ny))
+                   for nx, ny in ((x - 1, y), (x + 1, y),
+                                  (x, y - 1), (x, y + 1))):
+                selected.putpixel((x, y), (255, 198, 62,
+                                          normal.getpixel((x, y))[3]))
+    rendered = [normal, selected]
+
     # Quantize only opaque colors; transparent padding must not consume the
     # palette budget. Then map both states to that same fixed palette.
     colors = [pixel[:3] for state in rendered for pixel in values(state) if pixel[3] >= 128]

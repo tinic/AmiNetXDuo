@@ -98,6 +98,16 @@ class GlowIcons(unittest.TestCase):
                         self.assertIn(0, state["pixels"])
                         self.assertTrue(any(state["pixels"]))
                     self.assertNotEqual(states[0]["pixels"], states[1]["pixels"])
+                    # Selecting an icon cannot change its opaque silhouette.
+                    self.assertEqual([bool(v) for v in states[0]["pixels"]],
+                                     [bool(v) for v in states[1]["pixels"]])
+                    normal, selected = (state["pixels"] for state in states)
+                    for y in range(1, 47):
+                        for x in range(1, 47):
+                            i = y * 48 + x
+                            if all(normal[j] for j in
+                                   (i, i - 1, i + 1, i - 48, i + 48)):
+                                self.assertEqual(normal[i], selected[i])
                     self.assertEqual(shipping, (ROOT / "install" / path.name).read_bytes())
 
     def test_reject_malformed_forms(self):

@@ -40,8 +40,9 @@ is not shipped.
 The default `.info` files combine the original classic four-color images and
 launch settings with 48x48, 128-color GlowIcons. Color-capable `icon.library` versions
 display the new artwork; stock older libraries load the classic fallback.
-Normal and selected color states have transparent backgrounds. This adds
-23,276 bytes across the seven icon templates and no library code.
+Normal and selected color states have identical transparent bounds; the selected
+state adds an inward gold rim while keeping interior pixels stationary. This adds
+22,454 bytes across the seven icon templates and no library code.
 
 The main drawer defaults to 620x236 pixels and fits a 640x256 Workbench.
 Packaging places the main icons on a four-column grid. Private installations
@@ -71,7 +72,7 @@ python3 install/test/test_glowicons.py
 ```
 
 Only artwork regeneration requires Pillow. Each PNG master contains a normal
-state on the left and a selected state on the right. The compiler frames both
+state on the left and a selected reference on the right. The compiler frames both
 states together, reserves transparent pen zero and encodes IFF FACE/IMAG
 chunks with byte-depth PackBits compression. Both color palettes are stored
 explicitly. The independent validator checks chunk lengths, RLE expansion,
