@@ -89,7 +89,7 @@ jobs:
           day=$(git show -s --format=%cs "$sha")
           last=$(git describe --tags --abbrev=0 --match 'v*' "$sha" 2>/dev/null || true)
           lha=$(ls build/candidate/*.lha)
-          name="$(basename "$lha" .lha)-nightly-$day-$short.lha"
+          name="AmiNetXDuo-nightly-$day-$short.lha"
           cp "$lha" "build/candidate/$name"
           sum=$(sha256sum "build/candidate/$name" | cut -d' ' -f1)
 
@@ -97,6 +97,7 @@ jobs:
           {
             echo "Untested development build of \`main\` at $sha ($day)."
             echo "Built and checked by CI, not by hand: use a numbered release unless you want what is newest."
+            echo "Its programs report the last release's version ($(tools/version.sh --product)); the date and commit above identify the build."
             echo
             echo "SHA-256 \`$sum\`"
             [ -n "$last" ] && echo && echo "Changes since $last: https://github.com/$GITHUB_REPOSITORY/compare/$last...$sha"
