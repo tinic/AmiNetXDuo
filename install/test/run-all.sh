@@ -44,6 +44,12 @@
 #   EMU68_* inject deterministic device-tree results and prove the Installer
 #                   creates genet/wifipi definitions and starts only Ethernet;
 #                   on a 68020+ they also prove fat is the default under Emu68
+#   EMU68_WIFI_JOIN types a Wi-Fi network, reinstalls with "Set them up again"
+#                   and requires the Wireless.prefs kept, then boots the written
+#                   S:Network-Startup: WirelessManager (a stand-in) starts once,
+#                   ahead of the bounded Wi-Fi AddNetInterface, and is reused
+#   EMU68_WIFI_KEEP plants a Wireless.prefs and a C:WirelessManager and requires
+#                   both untouched, with the Wi-Fi defined but not started
 #   PROBE_FAIL / PROBE_BROKEN make InstallNetProbe fail or not load and require
 #                   the full stack as the default
 #   FAT_NOVICE      Emu68 fixture at NOVICE on a 68020+: fat with no questions,
@@ -93,6 +99,7 @@ SCENARIOS=(
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
+    EMU68_WIFI_JOIN EMU68_WIFI_KEEP
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
     NO_CARD STALE_PI_DRIVERS HARDWARE_XSURF100 HARDWARE_PCMCIA
     TERMINAL STATIC_NO_DRIVERS
@@ -195,6 +202,8 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_WIFI)            opts=(-l AVERAGE -e wifi) ;;
         EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;
         EMU68_BOTH_MICRO)      opts=(-l AVERAGE -e both -p micro) ;;
+        EMU68_WIFI_JOIN)       opts=(-l AVERAGE -e wifi -w join -U) ;;
+        EMU68_WIFI_KEEP)       opts=(-l AVERAGE -e both -w keep) ;;
         CANCEL_DRIVERS)        opts=(-l AVERAGE -c drivers) ;;
         MISSING_CORE)          opts=(-l AVERAGE -m core) ;;
         MISSING_DRIVER)        opts=(-l AVERAGE -m driver) ;;

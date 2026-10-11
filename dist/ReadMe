@@ -137,6 +137,8 @@ It puts
      NetMeter and its icon (system layout)     into SYS:Utilities
      anxnet.device, anxgenet.device,
        anxwifipi.device                        into DEVS:Networks
+     WirelessManager (Pi Wi-Fi, none in C:)    into C:
+     the Wi-Fi network (Pi Wi-Fi, no file yet) into ENVARC:Sys/Wireless.prefs
      the interface definition                  into DEVS:NetInterfaces
      the routing and name server files         into DEVS:Internet
      this file, the manual, the examples       into the selected drawer
@@ -253,7 +255,12 @@ Devs/Networks holds three AmiNetXDuo SANA-II drivers.  anxnet.device supports
 twelve classic card definitions.  anxgenet.device supports the Raspberry Pi
 4/CM4 Ethernet behind a PiStorm32 running Emu68 1.1 alpha.1 or newer.
 anxwifipi.device supports the same machine's Wi-Fi and needs the Emu68
-firmware plus a supplicant such as WirelessManager before it can associate.
+firmware plus a supplicant before it can associate.  With the Pi Wi-Fi
+selected, the installer puts WirelessManager 1.5 into C: unless C: already
+has one, writes the network name and passphrase it asks for to
+ENVARC:Sys/Wireless.prefs unless that file exists, and S:Network-Startup
+starts WirelessManager before the Wi-Fi interface.  The interface then waits
+at most 30 seconds for an address at boot, and DHCP continues after that.
 
 The installer asks whether to put all three in DEVS:Networks and offers yes.
 Copying them changes nothing on its own: an interface file selects one with
@@ -347,6 +354,7 @@ UNINSTALLING
      Delete DEVS:Networks/anxnet.device DEVS:Networks/anxnet.device.old
      Delete DEVS:Networks/anxgenet.device DEVS:Networks/anxgenet.device.old
      Delete DEVS:Networks/anxwifipi.device DEVS:Networks/anxwifipi.device.old
+     Delete C:WirelessManager ENVARC:Sys/Wireless.prefs
      Delete S:Network-Startup S:Network-Startup.old
      Delete <the AmiNetXDuo drawer> ALL
 
@@ -392,6 +400,12 @@ MIT, with these exceptions, each confined to the files it names:
      cacert.pem.  MPL 2.0 is file-scoped, so nothing else here is affected.
   *  anxwifipi.device is MPL 2.0, with ISC Broadcom/OpenBSD headers and an
      Apache-2.0 register header identified in its NOTICE.
+  *  WirelessManager is Neil Cafferkey's, based on wpa_supplicant, under
+     wpa_supplicant's three-clause BSD licence: Copyright (c) 2003-2010
+     Jouni Malinen and contributors, (c) 2011-2025 Neil Cafferkey.  It is
+     the unmodified binary from Aminet's driver/net/prism2v2.  Its notice is
+     Wireless/WirelessManager-LICENSE, installed as WirelessManager-LICENSE
+     in the AmiNetXDuo drawer.
 
 No AmiTCP, AROSTCP, Miami or Roadshow code is used, copied or disassembled.
 Olaf Barthel's freely distributable Roadshow SDK headers and autodocs were

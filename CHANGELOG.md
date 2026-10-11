@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: with the Pi Wi-Fi selected, installs WirelessManager 1.5, asks for the network name and passphrase, and starts WirelessManager before the Wi-Fi interface at boot.
+
 - Nightly builds: the newest tested build of main is published every
   night as the "nightly" pre-release on GitHub, for testing between
   numbered releases.

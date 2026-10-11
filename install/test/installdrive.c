@@ -1261,6 +1261,30 @@ int main(void)
                 break;
             }
             Close(startup);
+
+            /* The same for the Wi-Fi settings, where run 1 wrote any: a
+               second install must keep them, whatever it is told. */
+            {
+                static const char wifi_marker[] =
+                    "# user Wi-Fi settings -- installer must preserve this\n";
+                BPTR prefs = Open((STRPTR)"ENVARC:Sys/Wireless.prefs",
+                                  MODE_OLDFILE);
+
+                if (prefs != 0)
+                {
+                    if (Seek(prefs, 0, OFFSET_END) < 0 ||
+                        Write(prefs, (APTR)wifi_marker,
+                              sizeof(wifi_marker) - 1) !=
+                            (LONG)(sizeof(wifi_marker) - 1))
+                    {
+                        say("installdrive: could not mark Wireless.prefs\n", 0);
+                        rc = RETURN_FAIL;
+                    }
+                    Close(prefs);
+                    if (rc != RETURN_OK)
+                        break;
+                }
+            }
         }
     }
 

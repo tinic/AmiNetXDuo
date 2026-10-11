@@ -617,6 +617,30 @@ need "$ROOT/src/tools/web/vendor/codemirror/LICENSE"
 cp "$ROOT/src/tools/web/vendor/codemirror/LICENSE" \
    "$TREE/Terminal/CodeMirror-LICENSE"
 
+# WirelessManager, the supplicant anxwifipi.device needs to join a network.
+# Vendored unmodified (third_party/wirelessmanager/PROVENANCE); packed only
+# when its bytes and its licence are the pinned ones, the licence beside the
+# binary because the notice requires it with every binary copy.  The
+# Installer copies it to C: when the Pi Wi-Fi is selected.
+WM_SRC="$ROOT/third_party/wirelessmanager"
+need "$WM_SRC/WirelessManager"
+need "$WM_SRC/LICENSE"
+for f in WirelessManager LICENSE; do
+    want=$(awk -v f="$f" '!/^#/ && $2 == f { print $1 }' "$WM_SRC/PROVENANCE")
+    got=$( (sha256sum "$WM_SRC/$f" 2>/dev/null || shasum -a 256 "$WM_SRC/$f") | cut -d" " -f1)
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then
+        echo "!! third_party/wirelessmanager/$f is not the pinned file." >&2
+        echo "!!   expected ${want:-nothing in PROVENANCE}" >&2
+        echo "!!   got      $got" >&2
+        exit 2
+    fi
+done
+mkdir -p "$TREE/Wireless"
+cp "$WM_SRC/WirelessManager" "$TREE/Wireless/WirelessManager"
+cp "$WM_SRC/LICENSE"         "$TREE/Wireless/WirelessManager-LICENSE"
+chmod 755 "$TREE/Wireless/WirelessManager"
+chmod 644 "$TREE/Wireless/WirelessManager-LICENSE"
+
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
 cp "$INSTALL/Drawer.info"   "$TREE/Docs.info"

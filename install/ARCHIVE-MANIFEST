@@ -119,6 +119,15 @@ AmiNetXDuo/Examples.info            | installed     | always    | (source S_EXAM
 AmiNetXDuo/Terminal/*               | installed     | always    | (source S_TERM)
 AmiNetXDuo/Terminal.info            | installed     | always    | (source S_TERMICON)
 
+# ------------------------------------------------------ the Wi-Fi supplicant --
+#
+# A drawer of its own rather than C/, because C/ is copied wholesale and this
+# is copied only when the Pi Wi-Fi is selected, and never over an existing
+# C:WirelessManager.  The licence goes with it into the AmiNetXDuo drawer.
+
+AmiNetXDuo/Wireless/WirelessManager | installed     | always    | (source S_WM)
+AmiNetXDuo/Wireless/WirelessManager-LICENSE | installed | always | (source S_WMLIC)
+
 # --------------------------------------------------------- the Developer --
 #
 # One decision for the drawer and a second for the profiler under it, and both

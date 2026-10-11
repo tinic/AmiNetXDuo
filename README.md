@@ -58,9 +58,13 @@ Any SANA-II driver works. The archive also brings its own:
 The installer finds the card and writes the interface definition; on Emu68 it
 finds the Pi's Ethernet and Wi-Fi itself.
 
-The Wi-Fi driver needs the firmware Emu68 installs in `DEVS:Firmware`, and
-WirelessManager (Aminet [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2))
-to join a network. Use it or `wifipi.device`, not both in one boot.
+The Wi-Fi driver needs the firmware Emu68 installs in `DEVS:Firmware`. With
+the Pi Wi-Fi selected, the installer puts WirelessManager 1.5 in `C:`, writes
+the network name and passphrase it asks for to `ENVARC:Sys/Wireless.prefs`,
+and `S:Network-Startup` starts WirelessManager before the Wi-Fi interface,
+which then waits at most 30 seconds for an address. An existing
+`C:WirelessManager` or `Wireless.prefs` is kept. Use the driver or
+`wifipi.device`, not both in one boot.
 
 Fast cards get faster TCP receive with every driver: the stack merges
 consecutive segments before TCP sees them. Driver authors can opt into a few
@@ -333,4 +337,5 @@ MIT, with these exceptions, each confined to the files it names:
 | `ssh` and `scp` | Dropbear's MIT-style licence | `third_party/dropbear`, `clients/dropbear` |
 | The `/files` text editor | CodeMirror 6 and its support packages, MIT | bundled into `src/tools/web/files.html`; notice in `src/tools/web/vendor/codemirror` |
 | The CA root set | MPL 2.0, Mozilla's, file-scoped | `DEVS:Internet/certificates`, from `third_party/cacert` |
+| `WirelessManager` | wpa_supplicant's three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and contributors, (c) 2011-2025 Neil Cafferkey. The unmodified binary from Aminet [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2); its notice ships beside it and is installed as `WirelessManager-LICENSE` | `third_party/wirelessmanager` |
 | `anxwifipi.device` | MPL 2.0 (Michal Schulz's WiFiPi.device, forked; ISC Broadcom/OpenBSD headers and an Apache-2.0 register header inside it, listed in its NOTICE). File-scoped: its sources are the submodule's and are published there | `third_party/wifipi`, built by `src/wifipi/CMakeLists.txt` |

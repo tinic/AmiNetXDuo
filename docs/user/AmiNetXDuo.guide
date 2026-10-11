@@ -3316,6 +3316,23 @@
   The Installer offers to put all four here. Nothing reads one until an
   interface file names it.
 
+  @{b}Wi-Fi@{ub}
+
+      C:WirelessManager               the supplicant that joins the
+                                      Wi-Fi network for
+                                      anxwifipi.device
+      ENVARC:Sys/Wireless.prefs       the network name and passphrase,
+                                      in wpa_supplicant's format
+      WirelessManager-LICENSE         its licence, in the AmiNetXDuo
+                                      drawer
+
+  The Installer adds these when the Pi Wi-Fi is selected. An existing
+  C:WirelessManager or Wireless.prefs is kept as it is. When the Wi-Fi
+  interface is the one S:Network-Startup starts, that file starts
+  WirelessManager first, once, and only when ENV:Sys/Wireless.prefs
+  exists; the interface then waits at most 30 seconds for an address,
+  and DHCP continues after the boot goes on.
+
 @endnode
 
 
@@ -3346,6 +3363,13 @@
   SANA-II is Commodore's network driver standard. Drivers for a card
   are the work of their own authors and are not part of this
   distribution.
+
+  WirelessManager is Neil Cafferkey's supplicant for SANA-II wireless
+  drivers, from Aminet's driver/net/prism2v2, distributed unmodified. It
+  is based on wpa_supplicant and is under wpa_supplicant's three-clause
+  BSD licence: Copyright (c) 2003-2010 Jouni Malinen and contributors,
+  (c) 2011-2025 Neil Cafferkey. The licence text is installed with it as
+  WirelessManager-LICENSE in the AmiNetXDuo drawer.
 
   Thanks to Rondoval on the English Amiga Board for a detailed external
   review of the SANA-II extension design. His criticism prompted the move

@@ -12,7 +12,7 @@
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
-#                                 [-s yes|invalid]
+#                                 [-s yes|invalid] [-w join|keep]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -33,6 +33,14 @@
 # -s answers the SNTP-at-boot question yes and types 0.pool.ntp.org as the
 # server; `-s invalid' types a refused name first.  Without -s the question
 # takes its default, no, and S:Network-Startup must carry no sntp line.
+# -w needs -e wifi or -e both and answers for the Pi Wi-Fi.  `-w join' types
+# a network name and passphrase, requires the Wireless.prefs they make, and
+# with -e wifi boots the installed S:Network-Startup with a WirelessManager
+# stand-in (install/test/wm-stub.c) and the Wi-Fi interface pointed at the
+# card, so the supplicant's start, its reuse and the bounded wait are run
+# rather than read.  `-w keep' plants a user's Wireless.prefs and
+# C:WirelessManager first and requires both untouched.  Without -w, every
+# install that selects no Wi-Fi must leave neither file behind.
 # -a takes an archive as given; without it a release-only defect cannot show.
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
@@ -81,8 +89,9 @@ PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 SNTP_MODE=""
 PROBE_FAULT=""
+WIFI_MODE=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:w:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -115,6 +124,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
         z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
         W) SPACES=1 ;;
         s) SNTP_MODE="$OPTARG" ;;
+        w) WIFI_MODE="$OPTARG" ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
@@ -122,7 +132,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full|fat-full|full-fat]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both] [-P fail|broken]" \
                 "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z]" \
-                "[-s yes|invalid]" >&2
+                "[-s yes|invalid] [-w join|keep]" >&2
            exit 2 ;;
     esac
 done
@@ -338,6 +348,22 @@ if [ -n "$EMU68_FIXTURE" ]; then
     [ "$NO_DRIVERS" = "0" ] && [ "$EXPERT_CUSTOM" = "0" ] &&
     [ -z "$TRANSITION" ] && [ -z "$FOREIGN_MODE" ] || {
         echo "-e cannot be combined with a drawer, driver-decline, custom-name, transition or foreign-stack scenario" >&2
+        exit 2
+    }
+fi
+
+if [ -n "$WIFI_MODE" ]; then
+    case "$WIFI_MODE" in
+        join|keep) ;;
+        *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
+    esac
+    case "$EMU68_FIXTURE" in
+        wifi|both) ;;
+        *) echo "-w needs -e wifi or -e both: only then is the Pi Wi-Fi selected" >&2
+           exit 2 ;;
+    esac
+    [ "$LEVEL" != "NOVICE" ] || {
+        echo "-w needs -l AVERAGE or -l EXPERT: Novice draws no questions" >&2
         exit 2
     }
 fi
@@ -880,6 +906,26 @@ case "$EMU68_FIXTURE" in
            EXPECTED_AUTO_DEVICE=anxgenet.device
            EXPECTED_SECOND_DEVICE=anxwifipi.device ;;
 esac
+# The Pi Wi-Fi, as the Installer's defaults select it from the probe fixture.
+# WIFI_START: it is the interface S:Network-Startup starts, so WirelessManager
+# goes in front of it and its AddNetInterface carries the bounded wait.
+WIFI_SEL=0
+case "$EMU68_FIXTURE" in wifi|both) WIFI_SEL=1 ;; esac
+WIFI_START=0
+[ "$EMU68_FIXTURE" = wifi ] && WIFI_START=1
+WIFI_TEST_SSID="AmiNetXDuo Test"
+WIFI_TEST_PASS="correct horse 42"
+WIFI_TIMEOUT=30
+EXPECTED_AN_TAIL=""
+[ "$WIFI_START" = 1 ] && EXPECTED_AN_TAIL=" TIMEOUT=$WIFI_TIMEOUT"
+if [ "$WIFI_MODE" = join ]; then
+    # Both pages default to empty, and the SSID page comes first.
+    ANSWER_LINES+=("1|STRING||$WIFI_TEST_SSID")
+    ANSWER_LINES+=("1|STRING||$WIFI_TEST_PASS")
+    # The Wi-Fi interface started at boot is worth booting: the startup
+    # lines are run, with a stand-in supplicant and the card under it.
+    [ "$WIFI_START" = 1 ] && CONFIG_ONLY=0
+fi
 if [ "$MANUAL_CARD" = "1" ]; then
     # No vendor driver is staged.  The real board is still present in
     # Amiberry, so this is the hardware-discovery path and must not click the
@@ -1352,6 +1398,25 @@ if [ "$STALE_PI_DRIVERS" = 1 ]; then
     chmod 755 "$HD/Devs/Networks/anxgenet.device" \
               "$HD/Devs/Networks/anxwifipi.device"
     echo "==> stale-install fixture: shipped Pi drivers, no Pi hardware"
+fi
+
+# -w keep: what a machine that already joins a Wi-Fi network has.  Neither
+# file is the installer's, so both must come out of it byte for byte.
+WIFI_KEEP_PREFS_SUM=""
+WIFI_KEEP_WM_SUM=""
+if [ "$WIFI_MODE" = keep ]; then
+    _envarc=$(amiga_path Prefs/Env-Archive 2>/dev/null || true)
+    [ -n "$_envarc" ] || { echo "!! the Workbench has no Prefs/Env-Archive" >&2; exit 2; }
+    mkdir -p "$_envarc/Sys"
+    printf '# Wi-Fi settings from before -- installer must not touch\nnetwork={\n\tssid="UserNet"\n\tpsk="user passphrase"\n}\n' \
+        > "$_envarc/Sys/Wireless.prefs"
+    printf 'a WirelessManager from before -- installer must not replace\n' \
+        > "$HD/C/WirelessManager"
+    chmod 644 "$_envarc/Sys/Wireless.prefs"
+    chmod 755 "$HD/C/WirelessManager"
+    WIFI_KEEP_PREFS_SUM=$(shasum "$_envarc/Sys/Wireless.prefs" | cut -d' ' -f1)
+    WIFI_KEEP_WM_SUM=$(shasum "$HD/C/WirelessManager" | cut -d' ' -f1)
+    echo "==> Wi-Fi keep fixture: a user's Wireless.prefs and C:WirelessManager"
 fi
 
 # Corrupt only the throw-away unpacked copy.  Each target reaches a distinct
@@ -2314,14 +2379,14 @@ elif [ -z "$NS_FILE" ]; then
     echo "!! the installer did not write S:Network-Startup"
     fail=1
 elif [ "$DRAWER" = "1" ]; then
-    if grep -q "^AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$" \
+    if grep -q "^AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$EXPECTED_AN_TAIL$" \
         "$NS_FILE"; then
         echo "  ok      drawer startup names its exact DEVS: path"
     else
         echo "!! drawer startup does not name the exact $EXPECTED_IF path"
         fail=1
     fi
-elif grep -q "^C:AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$" "$NS_FILE"; then
+elif grep -q "^C:AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$EXPECTED_AN_TAIL$" "$NS_FILE"; then
     echo "  ok      system startup names its exact DEVS: path"
 else
     echo "!! system startup does not name the exact $EXPECTED_IF path"
@@ -2347,7 +2412,7 @@ SNTP_LINES=0
 SNTP_AFTER=no
 if [ -n "$NS_FILE" ] && [ -f "$NS_FILE" ]; then
     SNTP_LINES=$(grep -c 'sntp' "$NS_FILE" 2>/dev/null) || SNTP_LINES=0
-    SNTP_NEXT=$(awk -v p="${SNTP_PREFIX}AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET" \
+    SNTP_NEXT=$(awk -v p="${SNTP_PREFIX}AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$EXPECTED_AN_TAIL" \
                     'found { print; exit } $0 == p { found = 1 }' "$NS_FILE" | tr -d '\r')
     [ "$SNTP_NEXT" = "Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET" ] &&
         SNTP_AFTER=yes
@@ -2366,6 +2431,145 @@ elif [ "$SNTP_LINES" != "0" ]; then
     echo "!! nobody asked for SNTP and S:Network-Startup has $SNTP_LINES sntp line(s)"
     fail=1
 fi
+
+# ------------------------------------------------- the Wi-Fi supplicant --
+#
+# WirelessManager and its licence land only with the Pi Wi-Fi, and never over
+# a C:WirelessManager that was there.  Wireless.prefs comes only from answers
+# and never over one that was there.  S:Network-Startup runs the supplicant
+# ahead of the Wi-Fi interface it starts -- guarded by the prefs, reusing a
+# running copy -- and that interface's wait is bounded.  An install without
+# the Pi Wi-Fi gets none of it, its S:Network-Startup included.
+WM_ARCHIVE="$UNPACK/AmiNetXDuo/Wireless/WirelessManager"
+WMLIC_ARCHIVE="$UNPACK/AmiNetXDuo/Wireless/WirelessManager-LICENSE"
+WM_REAL=$(amiga_path "${INST}C/WirelessManager" 2>/dev/null || true)
+WMLIC_REAL=$(amiga_path "AmiNetXDuo/WirelessManager-LICENSE" 2>/dev/null || true)
+WPREFS_REAL=$(amiga_path "Prefs/Env-Archive/Sys/Wireless.prefs" 2>/dev/null || true)
+WM_WANT_CMD="C:WirelessManager DEVICE=DEVS:Networks/anxwifipi.device UNIT=0"
+_sha256() { shasum -a 256 < "$1" | cut -d' ' -f1; }
+_sha1() { shasum < "$1" | cut -d' ' -f1; }
+WM_NS_ANY=0
+WM_NS_LIVE=0
+if [ -n "$NS_FILE" ] && [ -f "$NS_FILE" ]; then
+    WM_NS_ANY=$(grep -c 'WirelessManager' "$NS_FILE" 2>/dev/null) || WM_NS_ANY=0
+    WM_NS_LIVE=$(grep -c '^[^;]*WirelessManager' "$NS_FILE" 2>/dev/null) || WM_NS_LIVE=0
+fi
+WIFI_OK=1
+if [ "$WIFI_SEL" = 0 ]; then
+    for _f in "$WM_REAL" "$WMLIC_REAL" "$WPREFS_REAL"; do
+        if [ -n "$_f" ]; then
+            echo "!! an install without the Pi Wi-Fi left ${_f#"$HD"/}"
+            WIFI_OK=0
+        fi
+    done
+    if [ "$WM_NS_ANY" != 0 ]; then
+        echo "!! an install without the Pi Wi-Fi names WirelessManager in S:Network-Startup"
+        WIFI_OK=0
+    fi
+    echo "wifi_supplicant=absent wifi_prefs=absent wifi_startup_lines=$WM_NS_ANY"
+else
+    if [ ! -f "$WM_ARCHIVE" ] || [ ! -f "$WMLIC_ARCHIVE" ]; then
+        echo "!! the archive carries no Wireless/WirelessManager and licence"
+        WIFI_OK=0
+    fi
+    if [ "$WIFI_MODE" = keep ]; then
+        if [ -z "$WM_REAL" ] || [ "$(_sha1 "$WM_REAL")" != "$WIFI_KEEP_WM_SUM" ]; then
+            echo "!! the C:WirelessManager that was there was replaced"
+            WIFI_OK=0
+        else
+            echo "  ok      existing C:WirelessManager kept byte for byte"
+        fi
+    elif [ -z "$WM_REAL" ] || [ ! -f "$WM_ARCHIVE" ] ||
+         [ "$(_sha256 "$WM_REAL")" != "$(_sha256 "$WM_ARCHIVE")" ]; then
+        echo "!! C:WirelessManager is missing or not the archive's"
+        WIFI_OK=0
+    else
+        echo "  ok      C:WirelessManager is the archive's ($(_sha256 "$WM_REAL"))"
+    fi
+    if [ -z "$WMLIC_REAL" ] || [ ! -f "$WMLIC_ARCHIVE" ] ||
+       [ "$(_sha256 "$WMLIC_REAL")" != "$(_sha256 "$WMLIC_ARCHIVE")" ]; then
+        echo "!! AmiNetXDuo/WirelessManager-LICENSE is missing or not the archive's"
+        WIFI_OK=0
+    else
+        echo "  ok      WirelessManager's licence is in the AmiNetXDuo drawer"
+    fi
+    case "$WIFI_MODE" in
+        keep)
+            if [ -z "$WPREFS_REAL" ] ||
+               [ "$(_sha1 "$WPREFS_REAL")" != "$WIFI_KEEP_PREFS_SUM" ]; then
+                echo "!! the Wireless.prefs that was there was changed"
+                WIFI_OK=0
+            else
+                echo "  ok      existing ENVARC:Sys/Wireless.prefs kept byte for byte"
+            fi ;;
+        join)
+            _prefs_ok=1
+            if [ -z "$WPREFS_REAL" ]; then
+                _prefs_ok=0
+            else
+                for _l in 'network={' "$(printf '\tssid="%s"' "$WIFI_TEST_SSID")" \
+                          "$(printf '\tpsk="%s"' "$WIFI_TEST_PASS")" '}'; do
+                    grep -Fqx -- "$_l" "$WPREFS_REAL" || _prefs_ok=0
+                done
+                # A second install was told nothing about Wi-Fi and had the
+                # file it wrote on run 1, marked between the runs, to keep.
+                if [ "$DRIVE_RUNS" != 1 ] &&
+                   ! grep -Fqx '# user Wi-Fi settings -- installer must preserve this' \
+                       "$WPREFS_REAL"; then
+                    echo "!! the second install rewrote ENVARC:Sys/Wireless.prefs"
+                    _prefs_ok=0
+                fi
+            fi
+            if [ "$_prefs_ok" = 1 ]; then
+                echo "  ok      ENVARC:Sys/Wireless.prefs names \"$WIFI_TEST_SSID\" with its passphrase"
+            else
+                echo "!! ENVARC:Sys/Wireless.prefs is not what the answers say"
+                cat "$WPREFS_REAL" 2>/dev/null || echo "   (absent)"
+                WIFI_OK=0
+            fi ;;
+        "")
+            if [ -n "$WPREFS_REAL" ]; then
+                echo "!! empty Wi-Fi answers wrote ENVARC:Sys/Wireless.prefs"
+                WIFI_OK=0
+            fi ;;
+    esac
+    if [ -n "$NS_FILE" ] && [ "$WIFI_START" = 1 ]; then
+        # In order: the prefs guard, the reuse test, the Run with its stack,
+        # the command on the continuation line, then the bounded interface.
+        _guard=$(grep -n '^If EXISTS ENV:Sys/Wireless.prefs$' "$NS_FILE" | head -1 | cut -d: -f1)
+        _status=$(grep -n '^  Status >NIL: COMMAND=C:WirelessManager$' "$NS_FILE" | head -1 | cut -d: -f1)
+        _run=$(grep -n '^    Run >NIL: <NIL: Stack 32768 +$' "$NS_FILE" | head -1 | cut -d: -f1)
+        _cmd=$(grep -n "^    $WM_WANT_CMD\$" "$NS_FILE" | head -1 | cut -d: -f1)
+        _an=$(grep -n "^C:AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET$EXPECTED_AN_TAIL\$" \
+                  "$NS_FILE" | head -1 | cut -d: -f1)
+        echo "wifi_startup_lines=guard:${_guard:-none},status:${_status:-none},run:${_run:-none},command:${_cmd:-none},addnetinterface:${_an:-none} live=$WM_NS_LIVE"
+        if [ -n "$_guard" ] && [ -n "$_status" ] && [ -n "$_run" ] &&
+           [ -n "$_cmd" ] && [ -n "$_an" ] && [ "$_guard" -lt "$_status" ] &&
+           [ "$_status" -lt "$_run" ] && [ "$_cmd" = "$((_run + 1))" ] &&
+           [ "$_cmd" -lt "$_an" ] && [ "$WM_NS_LIVE" = 2 ]; then
+            echo "  ok      S:Network-Startup runs WirelessManager before $EXPECTED_IF, wait bounded at ${WIFI_TIMEOUT}s"
+        else
+            echo "!! S:Network-Startup does not start WirelessManager ahead of $EXPECTED_IF as written"
+            WIFI_OK=0
+        fi
+    elif [ -n "$NS_FILE" ]; then
+        # The Wi-Fi is defined, not started: the lines are there to enable,
+        # commented, and nothing starts the supplicant.
+        if [ "$WM_NS_LIVE" = 0 ] &&
+           grep -q "^;    $WM_WANT_CMD\$" "$NS_FILE" &&
+           grep -q "^;C:AddNetInterface DEVS:NetInterfaces/wifipi QUIET TIMEOUT=$WIFI_TIMEOUT\$" "$NS_FILE"; then
+            echo "  ok      Wi-Fi not started; its supplicant lines are there, commented"
+        else
+            echo "!! S:Network-Startup for an unstarted Wi-Fi: live=$WM_NS_LIVE, commented lines missing"
+            WIFI_OK=0
+        fi
+    fi
+    echo "wifi_supplicant=$([ -n "$WM_REAL" ] && echo installed || echo absent)" \
+         "wifi_prefs=$([ -n "$WPREFS_REAL" ] && echo present || echo absent)" \
+         "wifi_startup_live_lines=$WM_NS_LIVE"
+fi
+[ "$WIFI_OK" = 1 ] || fail=1
+echo "wifi_install=$([ "$WIFI_OK" = 1 ] && echo PASS || echo FAIL)"
 
 # The self-contained contract, in one comparison: none of the system stack's
 # libraries, driver, configuration, or AmiTCP:db data moved by even one byte.
@@ -3162,6 +3366,35 @@ if [ "$(shasum "$HD/S/Startup-Sequence" | cut -d' ' -f1)" != "$STARTUP_SUM" ]; t
     echo "      the stock 3.1 one is worth reading before the reboot"
 fi
 
+# -w join on the Wi-Fi interface: the boot runs the S:Network-Startup the
+# installer wrote, unedited.  Amiberry has no Pi Wi-Fi, so two things under
+# it are stood in for, and only those: C:WirelessManager is wm-stub, which
+# records its start and never associates, and the wifipi interface file
+# names this run's card, so the bounded AddNetInterface after it gets a real
+# lease.  The check script then runs S:Network-Startup a second time with the
+# stand-in still running: a second start would be a second line.
+WIFI_TAIL=""
+if [ "$WIFI_MODE" = join ] && [ "$WIFI_START" = 1 ]; then
+    _stub="$ROOT/build/wm-stub-$TAG"
+    "$GCC" -O2 -m68000 -Wall -Wextra -I"$NDK" \
+        -o "$_stub" "$ROOT/install/test/wm-stub.c" || exit 2
+    cp "$_stub" "$(amiga_path "${INST}C/WirelessManager")"
+    _sana2_names "$BOARD"
+    _wifi_if=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF")
+    sed "s|^DEVICE=.*|DEVICE=$_device|" "$_wifi_if" > "$_wifi_if.new"
+    mv "$_wifi_if.new" "$_wifi_if"
+    rm -f "$HD/wm-starts.txt"
+    echo "==> Wi-Fi startup: wm-stub as C:WirelessManager, $EXPECTED_IF on $_device"
+    WIFI_TAIL=$(cat <<'EOF'
+
+Echo >>DH0:usercheck.txt "*N=== 6. S:Network-Startup again, WirelessManager running"
+Execute S:Network-Startup >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "RESULT netstart-again rc=$RC"
+C:Status >>DH0:usercheck.txt
+EOF
+)
+fi
+
 # -H adds a fifth step, and it is the one the machine is for: wait for the
 # other machine to have finished putting files here over WebDAV, unpack the
 # archive it put, and copy what arrived under the DH0 volume root so the host can
@@ -3268,6 +3501,7 @@ Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
 C:arp >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT arp rc=\$RC"
 $CHECK_TAIL
+$WIFI_TAIL
 Echo >>DH0:usercheck.txt "*N=== done"
 EOF
 chmod 755 "$HD/S/AmiNetXDuo-Check"
@@ -3514,6 +3748,34 @@ else
 fi
 
 report "arp"                           arp
+
+# The supplicant, once.  The boot's S:Network-Startup started it -- with the
+# interface it names, unit 0 and the 32 KB stack -- and the second run found
+# it running and started nothing.  The bounded wait is the AddNetInterface
+# TIMEOUT asserted on the file above; that the lease and the user checks above
+# followed is the boot getting past it with a supplicant that never joins.
+if [ -n "$WIFI_TAIL" ]; then
+    WM_STARTS=$(grep -c '^start ' "$HD/wm-starts.txt" 2>/dev/null) || WM_STARTS=0
+    WM_FIRST=$(grep '^start ' "$HD/wm-starts.txt" 2>/dev/null | head -1 | tr -d '\r')
+    WM_STACK=$(printf '%s\n' "$WM_FIRST" | sed -n 's/.* stack=\([0-9]*\)$/\1/p')
+    WM_AGAIN=$(sed -n 's/^RESULT netstart-again rc=//p' "$HD/usercheck.txt" 2>/dev/null | head -1)
+    echo "wifi_supplicant_starts=$WM_STARTS"
+    echo "wifi_supplicant_first=${WM_FIRST:-none}"
+    echo "wifi_netstart_again_rc=${WM_AGAIN:-never-ran}"
+    case "$WM_FIRST" in
+        "start device=DEVS:Networks/anxwifipi.device unit=0 stack="*) _wm_args=1 ;;
+        *) _wm_args=0 ;;
+    esac
+    if [ "$WM_STARTS" = 1 ] && [ "$_wm_args" = 1 ] &&
+       [ "${WM_STACK:-0}" -ge 32768 ] && [ -n "$WM_AGAIN" ]; then
+        printf '  %-34s once, %s byte stack, reused\n' "WirelessManager at boot" "$WM_STACK"
+    else
+        printf '  %-34s starts=%s args=%s stack=%s again=%s\n' \
+               "WirelessManager at boot" "$WM_STARTS" "$_wm_args" \
+               "${WM_STACK:-none}" "${WM_AGAIN:-never-ran}"
+        bad=1
+    fi
+fi
 
 if [ "$TERMINAL" = "1" ]; then
     key() { sed -n "s/^$1=//p" "$TERM_PROBE" 2>/dev/null | head -1; }
