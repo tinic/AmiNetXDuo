@@ -5,6 +5,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Nightly builds: the newest tested build of main is published every
+  night as the "nightly" pre-release on GitHub, for testing between
+  numbered releases.
+
 - X-Surf 100 with anxnet.device: optional LINKSPEED=10 limits advertised
   modes to 10 Mbit/s; duplex and PAUSE still negotiate. Default AUTO.
 
