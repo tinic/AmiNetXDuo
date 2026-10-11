@@ -1198,6 +1198,7 @@ int main(void)
                  "OpenLibrary(bsdsocket.library, 4)", 0))
     {
         Printf((STRPTR)"bsdsocket.library not available\n");
+        tap_remove();
         return(20);
     }
 
@@ -1224,6 +1225,12 @@ int main(void)
 
     CloseLibrary(SocketBase);
     SocketBase = NULL;
+
+    /* The device lives in this program's segment; leaving it installed hands
+       Exec a dangling node the next Avail FLUSH calls into. */
+    tap_remove();
+    (VOID)t_check((BOOL)!tap_device_listed(),
+                  "tcpdrill.device is off the device list", 0);
 
     t_log("");
     t_log("%ld checks, %ld failures, %s", t_checks, t_failures,
