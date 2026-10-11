@@ -30,10 +30,12 @@ set -euo pipefail
 # sources are written to the spellings both accept.
 TC_GCC_VERSION="16.2.0b"
 # 16.2.4 moved binutils from 2.39 to 2.46 and GCC to bebbo amiga16.2 134541b3
-# plus the sibcall fix. 16.2.5 adds tinic/gcc 399a27ad: LTO-promoted statics
-# no longer warn "visibility attribute not supported". The reported version
-# remains 16.2.0b. Older asset hashes remain at their original tags.
-TC_ASSET_VERSION="16.2.5"
+# plus the sibcall fix. 16.2.5 added the LTO visibility-warning fix. 16.2.6
+# rebases GCC onto AmigaPorts v16.2-rc15 (0edaa619), which carries the
+# sibcall fix, plus AmigaPorts/gcc PR #82 for the visibility warning
+# (tinic/gcc amiga16.2-rc15-anx). The reported version remains 16.2.0b.
+# Older asset hashes remain at their original tags.
+TC_ASSET_VERSION="16.2.6"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
 # Compiler assets live with the fork rather than topping the product releases.
@@ -50,11 +52,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="d135e713133934aa0eb278c833de5b817fad0a272ec609a4083249eb7433bc45"
+        TC_SHA256="479316a7737cd883fe95426d507df1b3a6e484592b85413f96909d423b4c5de3"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="f671ab36a56a530176a88f7d91cca188373ba24622aa98d92ccba5113823cc4e"
+        TC_SHA256="e07be49191bb73120fd9db2377fd4d0f4d466387070ad771cdb666d8e1a951ba"
         ;;
     *)
         TC_PLATFORM=""
